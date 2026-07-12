@@ -587,8 +587,7 @@ export const generateCashFlowProjections = (
     
     // Calculate averages
     const averageMonthlyRevenue = totalRevenue / monthlyValues.length;
-    const averageMonthlyRecovered = totalRecovered / monthlyValues.length;
-    
+
     // Historical recovery rate (% of invoiced amount actually collected)
     const historicalRecoveryRate = totalRevenue > 0 ? (totalRecovered / totalRevenue) * 100 : 0;
 

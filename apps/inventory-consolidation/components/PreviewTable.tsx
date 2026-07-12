@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ProcessedItem } from '../types';
+import type { ProcessedItem } from '../types';
 
 interface PreviewTableProps {
   data: ProcessedItem[];

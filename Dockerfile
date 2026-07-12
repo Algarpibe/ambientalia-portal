@@ -20,9 +20,8 @@ RUN npm install
 # Copiar el resto del código fuente
 COPY . .
 
-# Compilar la aplicación Portal bypassendo la revisión estricta de TypeScript 
-# (tsc -b da errores por variables sin uso en otros paquetes del monorepo)
-RUN npx --workspace=apps/portal vite build
+# Compilar la aplicación Portal con verificación estricta de tipos (tsc -b && vite build)
+RUN npm run build --workspace=apps/portal
 
 # Production Stage: Serving with Nginx
 FROM nginx:stable-alpine

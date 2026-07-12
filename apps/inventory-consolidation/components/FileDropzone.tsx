@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef } from 'react';
-import { FileInputConfig } from '../types';
+import type { FileInputConfig } from '../types';
 
 interface FileDropzoneProps {
   config: FileInputConfig;

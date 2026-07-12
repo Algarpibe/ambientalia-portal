@@ -1,4 +1,4 @@
-import { RawRowData, ProcessedItem } from '../types';
+import type { RawRowData, ProcessedItem } from '../types';
 import * as XLSX from 'xlsx';
 
 export const findColumnKey = (columns: string[], aliases: string[]): string | null => {

@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import './index.css';
-import { Upload, FileText, AlertCircle, TrendingUp, DollarSign, Users } from 'lucide-react';
+import { Upload, FileText, AlertCircle, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Dashboard from './components/Dashboard';
 
 function App() {
-  const [salesData, setSalesData] = useState([]);
-  const [productData, setProductData] = useState([]);
-  const [salesFileName, setSalesFileName] = useState(null);
-  const [productFileName, setProductFileName] = useState(null);
-  const [error, setError] = useState(null);
+  const [salesData, setSalesData] = useState<any[]>([]);
+  const [productData, setProductData] = useState<any[]>([]);
+  const [salesFileName, setSalesFileName] = useState<string | null>(null);
+  const [productFileName, setProductFileName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const processFile = async (file, type) => {
+  const processFile = async (file: File, type: 'sales' | 'products') => {
     setIsProcessing(true);
     setError(null);
     try {
@@ -28,7 +28,7 @@ function App() {
       let hasHeaders = false;
 
       for (let i = 0; i < Math.min(10, cleanRows.length); i++) {
-        const row = cleanRows[i].map(c => String(c).toLowerCase().trim());
+        const row = cleanRows[i].map((c: any) => String(c).toLowerCase().trim());
         if (type === 'sales') {
           if (row.includes('sku') || row.includes('código de artículo') || row.includes('codigo de articulo')) {
             headerRowIndex = i;
@@ -44,14 +44,14 @@ function App() {
         }
       }
 
-      let formattedData = [];
+      let formattedData: any[] = [];
 
       if (hasHeaders) {
         const keys = cleanRows[headerRowIndex];
         const dataRows = cleanRows.slice(headerRowIndex + 1);
         formattedData = dataRows.map(row => {
-          const obj = {};
-          keys.forEach((key, k) => {
+          const obj: Record<string, any> = {};
+          keys.forEach((key: any, k: number) => {
             if (key) obj[key] = row[k];
           });
           return obj;
@@ -80,9 +80,7 @@ function App() {
             // This identifies rows with customer names instead of article data
             const col0 = row[0];
             const col1 = row[1]; // Marca
-            const col2 = row[2]; // Name
             const col3 = row[3]; // Qty
-            const col4 = row[4]; // Amount
 
             const isCustomerHeader = col0 && !col1;
 
@@ -125,7 +123,7 @@ function App() {
 
     } catch (err) {
       console.error(err);
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
       if (type === 'sales') {
         setSalesData([]);
         setSalesFileName(null);
@@ -138,12 +136,12 @@ function App() {
     }
   };
 
-  const parseExcel = (file) => {
-    return new Promise((resolve, reject) => {
+  const parseExcel = (file: File): Promise<any[]> => {
+    return new Promise<any[]>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const data = new Uint8Array(e.target.result);
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
@@ -225,7 +223,7 @@ function App() {
                   <input
                     type="file"
                     accept=".xlsx, .xls"
-                    onChange={(e) => processFile(e.target.files[0], 'sales')}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'sales'); }}
                     className="hidden"
                     disabled={salesData.length > 0}
                   />
@@ -276,7 +274,7 @@ function App() {
                   <input
                     type="file"
                     accept=".xlsx, .xls"
-                    onChange={(e) => processFile(e.target.files[0], 'products')}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'products'); }}
                     className="hidden"
                     disabled={productData.length > 0}
                   />

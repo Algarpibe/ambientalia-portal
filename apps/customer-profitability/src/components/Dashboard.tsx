@@ -1,14 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    PieChart, Pie, Cell, LineChart, Line
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
-import { DollarSign, Package, Users, ArrowUpRight, ArrowDownRight, RefreshCcw, Filter, Download, AlertCircle, TrendingUp } from 'lucide-react';
+import { DollarSign, Users, ArrowUpRight, RefreshCcw, Filter, Download, AlertCircle, TrendingUp } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+type SortState = { key: string | null; direction: 'asc' | 'desc' };
 
-const formatMoney = (value) => {
+type Analysis = {
+    error?: string;
+    totalSales: number;
+    totalCost: number;
+    totalMargin: number;
+    marginPercent: number;
+    items: any[];
+    customers: any[];
+    brands: any[];
+    customerKey: string;
+};
+
+const formatMoney = (value: number) => {
     return new Intl.NumberFormat('es-CO', {
         style: 'currency',
         currency: 'COP',
@@ -17,7 +28,7 @@ const formatMoney = (value) => {
     }).format(value);
 };
 
-const formatPercent = (value) => {
+const formatPercent = (value: number) => {
     return new Intl.NumberFormat('en-US', {
         style: 'percent',
         minimumFractionDigits: 1,
@@ -25,19 +36,19 @@ const formatPercent = (value) => {
     }).format(value);
 };
 
-export default function Dashboard({ sales, products, onReset }) {
+export default function Dashboard({ sales, products, onReset }: { sales: any[]; products: any[]; onReset: () => void }) {
     const [activeTab, setActiveTab] = useState('overview'); // overview, customers, items
     const [filterBrand, setFilterBrand] = useState('All');
     const [filterCategory, setFilterCategory] = useState('All');
     const [filterCustomer, setFilterCustomer] = useState('All'); // For filtering customers table
-    const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); // For table sorting
-    const [selectedCustomer, setSelectedCustomer] = useState(null); // For customer detail view
-    const [selectedSku, setSelectedSku] = useState(null); // For SKU detail view
-    const [customerItemsSort, setCustomerItemsSort] = useState({ key: null, direction: 'asc' }); // For customer items sort
+    const [sortConfig, setSortConfig] = useState<SortState>({ key: null, direction: 'asc' }); // For table sorting
+    const [selectedCustomer, setSelectedCustomer] = useState<any>(null); // For customer detail view
+    const [selectedSku, setSelectedSku] = useState<any>(null); // For SKU detail view
+    const [customerItemsSort, setCustomerItemsSort] = useState<SortState>({ key: null, direction: 'asc' }); // For customer items sort
     const [itemsSearchFilter, setItemsSearchFilter] = useState(''); // For items search filter
-    const [itemsTableSort, setItemsTableSort] = useState({ key: null, direction: 'asc' }); // For items table sorting
+    const [itemsTableSort, setItemsTableSort] = useState<SortState>({ key: null, direction: 'asc' }); // For items table sorting
 
-    const analysis = useMemo(() => {
+    const analysis: Analysis = useMemo<any>(() => {
         try {
             // 1. Build Product Map
             const productMap = new Map();
@@ -58,7 +69,7 @@ export default function Dashboard({ sales, products, onReset }) {
             // 2. Process Sales
             let totalSales = 0;
             let totalCost = 0;
-            let processedItems = [];
+            let processedItems: any[] = [];
 
             if (!Array.isArray(sales) || sales.length === 0) {
                 return { error: "No hay datos de ventas disponibles para procesar." };
@@ -84,7 +95,7 @@ export default function Dashboard({ sales, products, onReset }) {
 
                 const sku = String(sale['SKU'] || sale['Código de artículo'] || '').trim();
 
-                const parseCurrency = (val) => {
+                const parseCurrency = (val: any) => {
                     if (typeof val === 'number') return val;
                     if (!val) return 0;
                     const clean = String(val).replace(/[^0-9.-]+/g, '');
@@ -123,8 +134,8 @@ export default function Dashboard({ sales, products, onReset }) {
             });
 
             // 3. Aggregate Data
-            const byCustomer = {};
-            const byBrand = {};
+            const byCustomer: Record<string, any> = {};
+            const byBrand: Record<string, any> = {};
 
             processedItems.forEach(item => {
                 // Customer Agg
@@ -167,12 +178,12 @@ export default function Dashboard({ sales, products, onReset }) {
             };
         } catch (e) {
             console.error("Dashboard Analysis Error:", e);
-            return { error: e.message };
+            return { error: e instanceof Error ? e.message : String(e) };
         }
     }, [sales, products]);
 
     // Handle column sorting
-    const handleSort = (key) => {
+    const handleSort = (key: string) => {
         setSortConfig(prev => ({
             key,
             direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
@@ -181,11 +192,12 @@ export default function Dashboard({ sales, products, onReset }) {
 
     // Sort data based on current sort config
     const getSortedCustomers = () => {
-        if (!sortConfig.key) return analysis.customers;
+        const key = sortConfig.key;
+        if (!key) return analysis.customers;
 
-        const sorted = [...analysis.customers].sort((a, b) => {
-            const aVal = a[sortConfig.key];
-            const bVal = b[sortConfig.key];
+        const sorted = [...analysis.customers].sort((a: any, b: any) => {
+            const aVal = a[key];
+            const bVal = b[key];
 
             if (typeof aVal === 'string') {
                 return sortConfig.direction === 'asc'
@@ -202,13 +214,13 @@ export default function Dashboard({ sales, products, onReset }) {
     };
 
     // Get articles for selected customer
-    const getCustomerItems = (customerName) => {
+    const getCustomerItems = (customerName: string) => {
         if (!analysis || !analysis.items) return [];
         return analysis.items.filter(item => item.customer === customerName);
     };
 
     // Handle customer items sorting
-    const handleCustomerItemSort = (key) => {
+    const handleCustomerItemSort = (key: string) => {
         setCustomerItemsSort(prev => ({
             key,
             direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
@@ -216,13 +228,14 @@ export default function Dashboard({ sales, products, onReset }) {
     };
 
     // Sort customer items based on current sort config
-    const getSortedCustomerItems = (customerName) => {
+    const getSortedCustomerItems = (customerName: string) => {
         const items = getCustomerItems(customerName);
-        if (!customerItemsSort.key) return items;
+        const key = customerItemsSort.key;
+        if (!key) return items;
 
-        const sorted = [...items].sort((a, b) => {
-            let aVal = a[customerItemsSort.key];
-            let bVal = b[customerItemsSort.key];
+        const sorted = [...items].sort((a: any, b: any) => {
+            let aVal = a[key];
+            let bVal = b[key];
 
             // Handle numeric values
             if (typeof aVal === 'number' && typeof bVal === 'number') {
@@ -243,19 +256,19 @@ export default function Dashboard({ sales, products, onReset }) {
     };
 
     // Sort icon indicator
-    const SortIndicator = ({ columnKey }) => {
+    const SortIndicator = ({ columnKey }: { columnKey: string }) => {
         if (sortConfig.key !== columnKey) return <span className="text-slate-300 ml-1">⇅</span>;
         return <span className="ml-1">{sortConfig.direction === 'asc' ? '▲' : '▼'}</span>;
     };
 
     // Sort icon indicator for customer items
-    const CustomerItemsSortIndicator = ({ columnKey }) => {
+    const CustomerItemsSortIndicator = ({ columnKey }: { columnKey: string }) => {
         if (customerItemsSort.key !== columnKey) return <span className="text-slate-300 ml-1">⇅</span>;
         return <span className="ml-1">{customerItemsSort.direction === 'asc' ? '▲' : '▼'}</span>;
     };
 
     // Handle items table sorting
-    const handleItemsTableSort = (key) => {
+    const handleItemsTableSort = (key: string) => {
         setItemsTableSort(prev => ({
             key,
             direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
@@ -263,7 +276,7 @@ export default function Dashboard({ sales, products, onReset }) {
     };
 
     // Sort icon indicator for items table
-    const ItemsTableSortIndicator = ({ columnKey }) => {
+    const ItemsTableSortIndicator = ({ columnKey }: { columnKey: string }) => {
         if (itemsTableSort.key !== columnKey) return <span className="text-slate-300 ml-1">⇅</span>;
         return <span className="ml-1">{itemsTableSort.direction === 'asc' ? '▲' : '▼'}</span>;
     };
@@ -333,11 +346,12 @@ export default function Dashboard({ sales, products, onReset }) {
 
     // Get sorted items table
     const getSortedItemsTable = () => {
-        if (!itemsTableSort.key) return filteredItems;
+        const key = itemsTableSort.key;
+        if (!key) return filteredItems;
 
-        const sorted = [...filteredItems].sort((a, b) => {
-            let aVal = a[itemsTableSort.key];
-            let bVal = b[itemsTableSort.key];
+        const sorted = [...filteredItems].sort((a: any, b: any) => {
+            let aVal = a[key];
+            let bVal = b[key];
 
             // Handle numeric values
             if (typeof aVal === 'number' && typeof bVal === 'number') {
@@ -501,7 +515,7 @@ export default function Dashboard({ sales, products, onReset }) {
                                                 <Tooltip
                                                     cursor={{ fill: '#f8fafc' }}
                                                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                    formatter={(val) => [formatMoney(val), 'Margen']}
+                                                    formatter={(val) => [formatMoney(Number(val)), 'Margen']}
                                                 />
                                                 <Bar dataKey="margin" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={32} />
                                             </BarChart>
@@ -520,7 +534,7 @@ export default function Dashboard({ sales, products, onReset }) {
                                                 <Tooltip
                                                     cursor={{ fill: '#f8fafc' }}
                                                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                    formatter={(val) => [formatPercent(val), '% Rentabilidad']}
+                                                    formatter={(val) => [formatPercent(Number(val)), '% Rentabilidad']}
                                                 />
                                                 <Bar dataKey="marginPercent" fill="#10b981" radius={[0, 6, 6, 0]} barSize={32} />
                                             </BarChart>
@@ -555,7 +569,7 @@ export default function Dashboard({ sales, products, onReset }) {
                                             <Tooltip
                                                 cursor={{ fill: '#f8fafc' }}
                                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                formatter={(val) => [formatMoney(val), 'Margen']}
+                                                formatter={(val) => [formatMoney(Number(val)), 'Margen']}
                                             />
                                             <Bar
                                                 dataKey="margin"
@@ -598,7 +612,7 @@ export default function Dashboard({ sales, products, onReset }) {
                                             <Tooltip
                                                 cursor={{ fill: '#f8fafc' }}
                                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                formatter={(val) => [formatPercent(val), '% Rentabilidad']}
+                                                formatter={(val) => [formatPercent(Number(val)), '% Rentabilidad']}
                                             />
                                             <Bar
                                                 dataKey="marginPercent"
@@ -866,7 +880,7 @@ export default function Dashboard({ sales, products, onReset }) {
     );
 }
 
-const KpiCard = ({ title, value, icon, color, trend = null }) => (
+const KpiCard = ({ title, value, icon, color, trend = null }: { title: string; value: any; icon: any; color: string; trend?: number | null }) => (
     <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group relative overflow-hidden">
         <div className={`absolute top-0 right-0 w-32 h-32 bg-${color}-50/50 rounded-full blur-3xl -mr-10 -mt-10 transition-transform group-hover:scale-125`}></div>
 
@@ -890,7 +904,7 @@ const KpiCard = ({ title, value, icon, color, trend = null }) => (
     </div>
 );
 
-const TabButton = ({ active, onClick, children }) => (
+const TabButton = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: any }) => (
     <button
         onClick={onClick}
         className={`px-6 py-3 text-sm font-semibold transition-all rounded-full ${active
@@ -902,6 +916,6 @@ const TabButton = ({ active, onClick, children }) => (
     </button>
 );
 
-const TrendingUpIcon = ({ percent }) => (
+const TrendingUpIcon = ({ percent }: { percent: number }) => (
     percent > 0.2 ? <TrendingUp size={24} className="text-emerald-600" /> : <TrendingUp size={24} className="text-amber-500" />
 );

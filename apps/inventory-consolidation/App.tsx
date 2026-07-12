@@ -1,11 +1,9 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import FileDropzone from './components/FileDropzone';
 import PreviewTable from './components/PreviewTable';
 import { readFileData, processInventoryData, downloadExcelFile } from './services/fileProcessor';
-import { FileData, ProcessedItem, RawRowData, FileInputConfig } from './types';
-
-type ActiveView = 'consolidation';
+import type { FileData, ProcessedItem, RawRowData, FileInputConfig } from './types';
 
 const initialFileStates: [FileData, FileData, FileData] = [
   { file: null, name: '', error: null },

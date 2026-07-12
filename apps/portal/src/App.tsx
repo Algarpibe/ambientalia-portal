@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import React, { lazy, Suspense, Component, ErrorInfo, ReactNode } from 'react';
+import { lazy, Suspense, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
