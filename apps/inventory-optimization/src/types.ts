@@ -50,6 +50,10 @@ export interface AnalysisResult {
     abcXyz: string;                  // combinado por costo, p. ej. "AX"
     abcClassRevenue: 'A' | 'B' | 'C'; // ABC por precio de venta
     abcXyzRevenue: string;            // combinado por venta
+    demandPattern: 'Suave' | 'Intermitente' | 'Errática' | 'Lumpy'; // Syntetos-Boylan
+    adi: number;                     // Average Demand Interval (períodos por demanda)
+    cv2: number;                     // CV² del tamaño de la demanda
+    crostonForecast: number;         // pronóstico Croston (SBA) por mes
     monthsSinceLastSale: number;     // meses desde la última venta; -1 = nunca
     deadStockClass: 'Activo' | 'Lento' | 'Muerto' | 'Obsoleto';
     deadStockValue: number;          // capital en dead stock (físico × costo si Muerto/Obsoleto)
@@ -59,7 +63,7 @@ export interface AnalysisResult {
     monthlyAverage: number;
     annualSales: number;
     stdDev: number;
-    demandSource: 'Ventas 2026' | 'Ventas 2025' | 'Promedio Trienal';
+    demandSource: 'Ventas 2026' | 'Ventas 2025' | 'Promedio Trienal' | 'Croston (SBA)';
     manualReview: boolean;
     variabilityRatio: number;
     category: string;

@@ -23,7 +23,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import AbcXyzMatrix from './AbcXyzMatrix';
-import { ABC_XYZ_COLORS } from './abcXyz';
+import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
 
 interface SortableItemProps {
     id: string;
@@ -115,6 +115,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'abcXyz', label: 'ABC-XYZ' },
             { key: 'abcClass', label: 'ABC' },
             { key: 'xyzClass', label: 'XYZ' },
+            { key: 'demandPattern', label: 'Patrón' },
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
@@ -134,6 +135,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'abcXyz', label: 'ABC-XYZ' },
             { key: 'abcClass', label: 'ABC' },
             { key: 'xyzClass', label: 'XYZ' },
+            { key: 'demandPattern', label: 'Patrón' },
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
@@ -279,6 +281,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [abcFilter, setAbcFilter] = useState<string>('all');
     const [xyzFilter, setXyzFilter] = useState<string>('all');
     const [abcBasis, setAbcBasis] = useState<'cost' | 'revenue'>('cost');
+    const [patternFilter, setPatternFilter] = useState<string>('all');
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, Set<string>>>(() => {
         const saved = localStorage.getItem('table_columns_visibility');
@@ -414,8 +417,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         const itemAbc = abcBasis === 'cost' ? item.abcClass : item.abcClassRevenue;
         const matchesAbc = abcFilter === 'all' || itemAbc === abcFilter;
         const matchesXyz = xyzFilter === 'all' || item.xyzClass === xyzFilter;
+        const matchesPattern = patternFilter === 'all' || item.demandPattern === patternFilter;
 
-        return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking && matchesAbc && matchesXyz;
+        return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking && matchesAbc && matchesXyz && matchesPattern;
     }).sort((a, b) => {
         const aValue = a[sortField];
         const bValue = b[sortField];
@@ -465,6 +469,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             'Valor consumo anual (USD)': Math.round(item.annualValue),
             'Coef. Variación': item.coefVariation.toFixed(2),
             'Origen de Demanda': item.demandSource,
+            'Patrón Demanda': item.demandPattern,
+            'ADI': item.adi === Infinity ? '∞' : item.adi.toFixed(2),
+            'CV²': item.cv2.toFixed(2),
+            'Pronóstico Croston (mes)': item.crostonForecast.toFixed(2),
             'Revisión Manual': item.manualReview ? 'SÍ' : 'NO',
             'Nombre de categoría': item.category,
             'Ratio Variabilidad': item.variabilityRatio.toFixed(2)
@@ -747,6 +755,17 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                 <option value="Y">Y · variable</option>
                                 <option value="Z">Z · errática</option>
                             </select>
+                            <select
+                                className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
+                                value={patternFilter}
+                                onChange={(e) => setPatternFilter(e.target.value)}
+                            >
+                                <option value="all">Patrón demanda</option>
+                                <option value="Suave">Suave</option>
+                                <option value="Intermitente">Intermitente</option>
+                                <option value="Errática">Errática</option>
+                                <option value="Lumpy">Lumpy</option>
+                            </select>
                         </>
                     )}
                     {activeTab === 'urgent' && (
@@ -994,6 +1013,20 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-center font-semibold text-gray-700">
                                                     {String(value ?? '—')}
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'demandPattern') {
+                                            const code = String(value ?? '');
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm">
+                                                    <span
+                                                        className={cn('text-xs font-semibold px-2 py-0.5 rounded', DEMAND_PATTERN_COLORS[code] || 'bg-gray-100 text-gray-400')}
+                                                        title={`ADI ${row.adi === Infinity ? '∞' : row.adi.toFixed(2)} · CV² ${row.cv2.toFixed(2)}${row.demandSource === 'Croston (SBA)' ? ' · PdP por Croston' : ''}`}
+                                                    >
+                                                        {code || '—'}
+                                                    </span>
                                                 </td>
                                             );
                                         }

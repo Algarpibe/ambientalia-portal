@@ -12,6 +12,14 @@ export const ABC_XYZ_COLORS: Record<string, string> = {
     CZ: 'bg-gray-100 text-gray-400',
 };
 
+// Colores del patrón de demanda (Croston / Syntetos-Boylan).
+export const DEMAND_PATTERN_COLORS: Record<string, string> = {
+    Suave: 'bg-emerald-100 text-emerald-700',
+    Intermitente: 'bg-amber-100 text-amber-700',
+    Errática: 'bg-orange-100 text-orange-700',
+    Lumpy: 'bg-red-100 text-red-700',
+};
+
 export const ABC_CLASSES = ['A', 'B', 'C'] as const;
 export const XYZ_CLASSES = ['X', 'Y', 'Z'] as const;
 

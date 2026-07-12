@@ -5,6 +5,52 @@ import * as XLSX from 'xlsx';
 const ADMIN_DELAY_DAYS = 30;
 const SERVICE_LEVEL_Z = 1.645; // 95%
 const MIN_MONTHS_FOR_TREND = 3;
+const CROSTON_ALPHA = 0.3;      // suavizado de Croston/SBA
+const ADI_THRESHOLD = 1.32;     // Syntetos-Boylan: ADI ≥ 1.32 → intermitente/lumpy
+const CV2_THRESHOLD = 0.49;     // CV² ≥ 0.49 → errática/lumpy
+
+type DemandPattern = 'Suave' | 'Intermitente' | 'Errática' | 'Lumpy';
+
+// Croston / SBA (Syntetos-Boylan Approximation) sobre una serie mensual.
+// Separa tamaño de demanda (z) e intervalo entre demandas (p), ambos suavizados
+// por exponencial. Devuelve el pronóstico por período, ADI, CV² y el patrón.
+function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
+    forecast: number; adi: number; cv2: number; pattern: DemandPattern; demands: number;
+} {
+    let z = 0;      // tamaño suavizado
+    let p = 0;      // intervalo suavizado
+    let q = 0;      // períodos desde la última demanda
+    let init = false;
+    let demands = 0;
+    const sizes: number[] = [];
+    for (let t = 0; t < series.length; t++) {
+        const y = series[t];
+        q += 1;
+        if (y > 0) {
+            demands += 1;
+            sizes.push(y);
+            if (!init) { z = y; p = q; init = true; }
+            else {
+                z = z + alpha * (y - z);
+                p = p + alpha * (q - p);
+            }
+            q = 0;
+        }
+    }
+    if (!init || p <= 0) {
+        return { forecast: 0, adi: series.length || Infinity, cv2: 0, pattern: 'Suave', demands: 0 };
+    }
+    const forecast = (1 - alpha / 2) * (z / p); // SBA
+    const adi = series.length / demands;
+    const meanSize = sizes.reduce((a, b) => a + b, 0) / sizes.length;
+    const variance = sizes.reduce((a, b) => a + (b - meanSize) ** 2, 0) / sizes.length;
+    const cv2 = meanSize > 0 ? variance / (meanSize * meanSize) : 0;
+    const pattern: DemandPattern =
+        adi >= ADI_THRESHOLD
+            ? (cv2 >= CV2_THRESHOLD ? 'Lumpy' : 'Intermitente')
+            : (cv2 >= CV2_THRESHOLD ? 'Errática' : 'Suave');
+    return { forecast, adi, cv2, pattern, demands };
+}
 const months = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -268,6 +314,17 @@ export const processInventoryData = (
         // Is Service Check
         const isService = leadTimeDays === 0 || actualCurrentLevel === -1;
 
+        // Serie mensual cronológica 2023 → mes actual (se trunca el futuro del año en curso).
+        const monthlySeries: number[] = [
+            ...stats2023.values, ...stats2024.values, ...stats2025.values,
+        ];
+        const curYear = now.getFullYear();
+        const upto2026 = curYear > 2026 ? 12 : curYear === 2026 ? now.getMonth() + 1 : 0;
+        monthlySeries.push(...stats2026.values.slice(0, upto2026));
+        const croston = crostonSBA(monthlySeries);
+        const demandPattern = croston.pattern;
+        const isIntermittent = croston.adi >= ADI_THRESHOLD; // Intermitente o Lumpy
+
         // Abnormal Demand Logic (Policy v2.0)
         let demandSource: AnalysisResult['demandSource'] = 'Ventas 2025';
         let selectedMonthlyAverage = stats2025.avg;
@@ -299,6 +356,13 @@ export const processInventoryData = (
                 demandSource = 'Ventas 2025';
                 selectedMonthlyAverage = stats2025.avg;
             }
+        }
+
+        // Demanda intermitente/lumpy (ADI ≥ 1.32) → el promedio simple se sesga con
+        // los ceros; uso el pronóstico Croston (SBA) como tasa mensual de demanda.
+        if (isIntermittent && croston.forecast > 0) {
+            selectedMonthlyAverage = croston.forecast;
+            demandSource = 'Croston (SBA)';
         }
 
         const selectedAnnualSales = selectedMonthlyAverage * 12;
@@ -481,6 +545,10 @@ export const processInventoryData = (
             abcXyz: '',             // idem
             abcClassRevenue: 'C',   // ABC por venta — 2ª pasada
             abcXyzRevenue: '',      // idem
+            demandPattern,
+            adi: croston.adi,
+            cv2: croston.cv2,
+            crostonForecast: croston.forecast,
             monthsSinceLastSale,
             deadStockClass,
             deadStockValue,
