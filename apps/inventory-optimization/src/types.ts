@@ -43,10 +43,19 @@ export interface AnalysisResult {
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
     unitCost: number;       // costo de compra por unidad (USD)
     annualValue: number;    // valor de consumo anual por costo = uds anuales × costo
+    annualValueRevenue: number; // valor de consumo anual por precio de venta
     coefVariation: number;  // coeficiente de variación de la demanda (σ / media)
-    abcClass: 'A' | 'B' | 'C';       // ABC por valor de consumo (Pareto)
+    abcClass: 'A' | 'B' | 'C';       // ABC por costo (Pareto)
     xyzClass: 'X' | 'Y' | 'Z';       // XYZ por variabilidad (CV)
-    abcXyz: string;                  // combinado, p. ej. "AX"
+    abcXyz: string;                  // combinado por costo, p. ej. "AX"
+    abcClassRevenue: 'A' | 'B' | 'C'; // ABC por precio de venta
+    abcXyzRevenue: string;            // combinado por venta
+    monthsSinceLastSale: number;     // meses desde la última venta; -1 = nunca
+    deadStockClass: 'Activo' | 'Lento' | 'Muerto' | 'Obsoleto';
+    deadStockValue: number;          // capital en dead stock (físico × costo si Muerto/Obsoleto)
+    overstockUnits: number;          // unidades por encima del techo sano (PdP + Q)
+    overstockValue: number;          // capital en sobrestock (uds exceso × costo)
+    inventoryValue: number;          // capital total en el ítem (físico × costo)
     monthlyAverage: number;
     annualSales: number;
     stdDev: number;

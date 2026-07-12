@@ -183,6 +183,11 @@ export const processInventoryData = (
 
     const results: AnalysisResult[] = [];
 
+    // Referencia temporal para "meses sin venta" (dead stock). El historial cubre
+    // 2023-2026 en índices año*12 + mes (mes 0-11).
+    const now = new Date();
+    const nowMonthIdx = now.getFullYear() * 12 + now.getMonth();
+
     allSkus.forEach(sku => {
         const item2026 = salesMap2026.get(sku) || {};
         const item2025 = salesMap2025.get(sku) || {};
@@ -396,6 +401,36 @@ export const processInventoryData = (
         const coverageRisk = coverageApplicable
             && (physicalAvailable / dailyDemand) < effectiveLeadTimeDays;
 
+        // --- Dead stock / capital inmovilizado ---
+        // Meses desde la última venta (recorriendo 2023-2026); -1 = nunca vendido.
+        let lastSaleIdx = -1;
+        ([[2023, stats2023.values], [2024, stats2024.values], [2025, stats2025.values], [2026, stats2026.values]] as [number, number[]][])
+            .forEach(([yr, vals]) => vals.forEach((v, m) => {
+                if (v > 0) { const idx = yr * 12 + m; if (idx > lastSaleIdx) lastSaleIdx = idx; }
+            }));
+        const monthsSinceLastSale = lastSaleIdx >= 0 ? Math.max(0, nowMonthIdx - lastSaleIdx) : -1;
+
+        const physicalOnHand = inventoryInfo.physicalHand;
+        const inventoryValue = Math.max(0, physicalOnHand) * unitCost; // capital total en este ítem
+
+        // Escalonado con existencia física: Lento ≥6m, Muerto ≥12m, Obsoleto ≥24m
+        // o nunca vendido. El capital "dead" cuenta Muerto+Obsoleto (físico completo).
+        let deadStockClass: 'Activo' | 'Lento' | 'Muerto' | 'Obsoleto' = 'Activo';
+        if (physicalOnHand > 0) {
+            if (monthsSinceLastSale === -1 || monthsSinceLastSale >= 24) deadStockClass = 'Obsoleto';
+            else if (monthsSinceLastSale >= 12) deadStockClass = 'Muerto';
+            else if (monthsSinceLastSale >= 6) deadStockClass = 'Lento';
+        }
+        const deadStockValue = (deadStockClass === 'Muerto' || deadStockClass === 'Obsoleto') ? inventoryValue : 0;
+
+        // Sobrestock: exceso sobre el techo sano (PdP + Q óptima) SOLO en ítems que
+        // rotan (Activo/Lento); los muertos ya cuentan como dead capital (sin doble conteo).
+        const stockCeiling = Math.max(1, Math.round(pdp + q));
+        const overstockUnits = (deadStockClass === 'Activo' || deadStockClass === 'Lento')
+            ? Math.max(0, Math.round(physicalOnHand) - stockCeiling)
+            : 0;
+        const overstockValue = overstockUnits * unitCost;
+
         if (leadTimeDays === 0 || roundedPdp < 1) {
             // Servicio, o sin demanda relevante → no se analiza stock.
             status = 'Ignored';
@@ -439,10 +474,19 @@ export const processInventoryData = (
             coverageRisk,
             unitCost,
             annualValue,
+            annualValueRevenue: selectedAnnualSales * unitPrice, // valor anual por precio de venta
             coefVariation,
             xyzClass,
-            abcClass: 'C',   // se asigna en la 2ª pasada (Pareto global por valor)
-            abcXyz: '',      // idem
+            abcClass: 'C',          // ABC por costo — se asigna en la 2ª pasada (Pareto)
+            abcXyz: '',             // idem
+            abcClassRevenue: 'C',   // ABC por venta — 2ª pasada
+            abcXyzRevenue: '',      // idem
+            monthsSinceLastSale,
+            deadStockClass,
+            deadStockValue,
+            overstockUnits,
+            overstockValue,
+            inventoryValue,
             monthlyAverage: selectedMonthlyAverage,
             annualSales: selectedAnnualSales,
             stdDev: weightedSigma,
@@ -472,21 +516,29 @@ export const processInventoryData = (
         });
     });
 
-    // 2ª pasada — ABC por valor de consumo anual (costo), Pareto acumulado global:
+    // 2ª pasada — ABC por valor de consumo anual, Pareto acumulado global:
     // A = hasta el 80% del valor, B = 80-95%, C = resto (incluye los de valor 0).
-    const ranked = [...results].sort((a, b) => b.annualValue - a.annualValue);
-    const totalValue = ranked.reduce((sum, r) => sum + r.annualValue, 0);
-    let cumulative = 0;
-    ranked.forEach(r => {
-        if (totalValue <= 0 || r.annualValue <= 0) {
-            r.abcClass = 'C';
-        } else {
-            cumulative += r.annualValue;
-            const pct = cumulative / totalValue;
-            r.abcClass = pct <= 0.8 ? 'A' : pct <= 0.95 ? 'B' : 'C';
-        }
-        r.abcXyz = `${r.abcClass}${r.xyzClass}`;
-    });
+    // Se calcula por COSTO y, en paralelo, por PRECIO DE VENTA (2 matrices).
+    const classifyABC = (
+        valueOf: (r: AnalysisResult) => number,
+        assign: (r: AnalysisResult, cls: 'A' | 'B' | 'C') => void,
+    ) => {
+        const ranked = [...results].sort((a, b) => valueOf(b) - valueOf(a));
+        const total = ranked.reduce((sum, r) => sum + valueOf(r), 0);
+        let cumulative = 0;
+        ranked.forEach(r => {
+            if (total <= 0 || valueOf(r) <= 0) {
+                assign(r, 'C');
+            } else {
+                cumulative += valueOf(r);
+                const pct = cumulative / total;
+                assign(r, pct <= 0.8 ? 'A' : pct <= 0.95 ? 'B' : 'C');
+            }
+        });
+    };
+
+    classifyABC(r => r.annualValue, (r, cls) => { r.abcClass = cls; r.abcXyz = `${cls}${r.xyzClass}`; });
+    classifyABC(r => r.annualValueRevenue, (r, cls) => { r.abcClassRevenue = cls; r.abcXyzRevenue = `${cls}${r.xyzClass}`; });
 
     return results;
 };

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { AnalysisResult } from '../types';
 import { StatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
+import DeadStock from './DeadStock';
 import { ArrowUpDown, Download, Settings2, Eye, EyeOff, GripVertical } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -188,9 +189,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: '11', label: 'Dic' },
             { key: 'total', label: 'Total' },
         ],
-        // OC Sugerida se renderiza con su propio componente (agrupado por proveedor),
-        // no usa columnas de tabla; entrada vacía para no romper la maquinaria de columnas.
-        suggested_po: []
+        // OC Sugerida y Capital Inmovilizado se renderizan con su propio componente;
+        // entradas vacías para no romper la maquinaria de columnas.
+        suggested_po: [],
+        dead_stock: []
     };
 
     const [columns, setColumns] = useState<Record<string, ColumnConfig[]>>(() => {
@@ -267,7 +269,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [manufacturerFilter, setManufacturerFilter] = useState<string>('all');
     const [categoryFilter, setCategoryFilter] = useState<string>('all');
     const [onlyCommitted, setOnlyCommitted] = useState<boolean>(false);
-    const [activeTab, setActiveTab] = useState<'main' | 'service' | 'urgent' | 'current_inventory' | 'suggested_po'>('main');
+    const [activeTab, setActiveTab] = useState<'main' | 'service' | 'urgent' | 'current_inventory' | 'suggested_po' | 'dead_stock'>('main');
     const [sortField, setSortField] = useState<keyof AnalysisResult>('deviation');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
     const [variabilityFilter, setVariabilityFilter] = useState<string>('all');
@@ -276,6 +278,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [trackingFilter, setTrackingFilter] = useState<'all' | 'tracked' | 'untracked'>('all');
     const [abcFilter, setAbcFilter] = useState<string>('all');
     const [xyzFilter, setXyzFilter] = useState<string>('all');
+    const [abcBasis, setAbcBasis] = useState<'cost' | 'revenue'>('cost');
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, Set<string>>>(() => {
         const saved = localStorage.getItem('table_columns_visibility');
@@ -309,6 +312,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             current_inventory: new Set(defaultColumns.current_inventory.map(c => c.key)),
             history: new Set(defaultColumns.history.map(c => c.key)),
             suggested_po: new Set(),
+            dead_stock: new Set(),
         };
     });
 
@@ -407,7 +411,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             (trackingFilter === 'tracked' && item.currentLevel !== -1) ||
             (trackingFilter === 'untracked' && item.currentLevel === -1);
 
-        const matchesAbc = abcFilter === 'all' || item.abcClass === abcFilter;
+        const itemAbc = abcBasis === 'cost' ? item.abcClass : item.abcClassRevenue;
+        const matchesAbc = abcFilter === 'all' || itemAbc === abcFilter;
         const matchesXyz = xyzFilter === 'all' || item.xyzClass === xyzFilter;
 
         return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking && matchesAbc && matchesXyz;
@@ -610,10 +615,27 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                         return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity))) > 0;
                     }).length})
                 </button>
+                <button
+                    onClick={() => {
+                        setActiveTab('dead_stock');
+                        setManufacturerFilter('all');
+                        setCategoryFilter('all');
+                    }}
+                    className={cn(
+                        "px-6 py-3 text-sm font-medium transition-colors",
+                        activeTab === 'dead_stock'
+                            ? "border-b-2 border-red-600 text-red-700 bg-red-50/40"
+                            : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                    )}
+                >
+                    Capital Inmovilizado ({data.filter(item => item.deadStockClass !== 'Activo' || item.overstockUnits > 0).length})
+                </button>
             </div>
 
             {activeTab === 'suggested_po' ? (
                 <SuggestedPO data={data} />
+            ) : activeTab === 'dead_stock' ? (
+                <DeadStock data={data} />
             ) : (
             <>
             <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50">
@@ -822,12 +844,22 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             </div>
 
             {(activeTab === 'main' || activeTab === 'service') && (
-                <div className="p-4 border-b border-gray-200 bg-gray-50">
+                <div className="p-4 border-b border-gray-200 bg-gray-50 grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <AbcXyzMatrix
                         data={data.filter(r => activeTab === 'service' ? r.isService : !r.isService)}
+                        basis="cost"
                         activeAbc={abcFilter}
                         activeXyz={xyzFilter}
-                        onSelect={(abc, xyz) => { setAbcFilter(abc); setXyzFilter(xyz); }}
+                        isActiveBasis={abcBasis === 'cost'}
+                        onSelect={(abc, xyz) => { setAbcBasis('cost'); setAbcFilter(abc); setXyzFilter(xyz); }}
+                    />
+                    <AbcXyzMatrix
+                        data={data.filter(r => activeTab === 'service' ? r.isService : !r.isService)}
+                        basis="revenue"
+                        activeAbc={abcFilter}
+                        activeXyz={xyzFilter}
+                        isActiveBasis={abcBasis === 'revenue'}
+                        onSelect={(abc, xyz) => { setAbcBasis('revenue'); setAbcFilter(abc); setXyzFilter(xyz); }}
                     />
                 </div>
             )}

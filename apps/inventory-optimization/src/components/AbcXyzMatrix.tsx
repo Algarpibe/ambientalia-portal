@@ -12,47 +12,57 @@ interface Cell {
 }
 
 // Panel resumen 3×3 (ABC × XYZ). Cada celda: nº de artículos + valor de consumo
-// anual (costo). Click en una celda filtra la tabla por esa clase; click de nuevo
-// (o en "Todo") la limpia.
+// anual (según base: costo o venta). Click en una celda filtra la tabla por esa
+// clase y base; click de nuevo (o en "Ver todo") la limpia.
 export default function AbcXyzMatrix({
     data,
+    basis,
     activeAbc,
     activeXyz,
+    isActiveBasis,
     onSelect,
 }: {
     data: AnalysisResult[];
+    basis: 'cost' | 'revenue';
     activeAbc: string;
     activeXyz: string;
+    isActiveBasis: boolean;
     onSelect: (abc: string, xyz: string) => void;
 }) {
+    const abcOf = (r: AnalysisResult) => (basis === 'cost' ? r.abcClass : r.abcClassRevenue);
+    const valueOf = (r: AnalysisResult) => (basis === 'cost' ? r.annualValue : r.annualValueRevenue);
+
     const { cells, totals } = useMemo(() => {
         const cells: Record<string, Cell> = {};
         ABC_CLASSES.forEach((a) => XYZ_CLASSES.forEach((x) => (cells[`${a}${x}`] = { count: 0, value: 0 })));
         let totalCount = 0;
         let totalValue = 0;
         data.forEach((r) => {
-            const key = `${r.abcClass}${r.xyzClass}`;
+            const key = `${abcOf(r)}${r.xyzClass}`;
             if (!cells[key]) return;
             cells[key].count += 1;
-            cells[key].value += r.annualValue;
+            cells[key].value += valueOf(r);
             totalCount += 1;
-            totalValue += r.annualValue;
+            totalValue += valueOf(r);
         });
         return { cells, totals: { count: totalCount, value: totalValue } };
-    }, [data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data, basis]);
 
-    const isActive = (a: string, x: string) => activeAbc === a && activeXyz === x;
+    const isActive = (a: string, x: string) => isActiveBasis && activeAbc === a && activeXyz === x;
 
     return (
-        <div className="rounded-lg border border-gray-200 p-4 bg-white">
+        <div className="rounded-lg border border-gray-200 p-4 bg-white h-full">
             <div className="flex items-center justify-between mb-3">
                 <div>
-                    <h3 className="text-sm font-semibold text-gray-900">Matriz ABC-XYZ</h3>
+                    <h3 className="text-sm font-semibold text-gray-900">
+                        Matriz ABC-XYZ · {basis === 'cost' ? 'por costo' : 'por precio de venta'}
+                    </h3>
                     <p className="text-xs text-gray-400">
-                        Valor por costo (vertical) × predictibilidad de demanda (horizontal). Click para filtrar.
+                        Valor {basis === 'cost' ? 'por costo' : 'por venta'} (vertical) × predictibilidad (horizontal). Click para filtrar.
                     </p>
                 </div>
-                {(activeAbc !== 'all' || activeXyz !== 'all') && (
+                {isActiveBasis && (activeAbc !== 'all' || activeXyz !== 'all') && (
                     <button
                         onClick={() => onSelect('all', 'all')}
                         className="text-xs font-medium text-indigo-600 hover:underline"
