@@ -50,13 +50,19 @@ const INVENTORY_SQL = `
          COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
          COALESCE(it.purchase_rate, 0) AS "Costo",
          COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
+         por.proxima_oc_fecha AS "Fecha OC próxima",
          -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,
          -- con fallback al Fabricante y luego a un literal.
          COALESCE(ven.vendor_name, NULLIF(it.raw ->> 'manufacturer', ''), NULLIF(it.raw ->> 'brand', ''), 'Sin proveedor') AS "Proveedor"
     FROM books.items it
     LEFT JOIN (
       SELECT poli.item_id,
-             SUM(GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0)) AS por_recibir
+             SUM(GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0)) AS por_recibir,
+             -- Fecha de la OC abierta más próxima a llegar (la más antigua con saldo
+             -- pendiente): fecha OC + lead time = ETA de la próxima entrada de stock.
+             MIN(po.date) FILTER (
+               WHERE GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0) > 0
+             )::text AS proxima_oc_fecha
         FROM books.purchase_order_line_items poli
         JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
        WHERE po.status NOT IN ('draft', 'cancelled')

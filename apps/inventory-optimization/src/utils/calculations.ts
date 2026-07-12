@@ -146,6 +146,7 @@ export const processInventoryData = (
     const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer'];
     const VENDOR_KEYS = ['Proveedor', 'Provider', 'Vendor'];
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
+    const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
 
     // Create collections and maps
     const allSkus = new Set<string>();
@@ -195,7 +196,8 @@ export const processInventoryData = (
                         available: Number(getValueByKeys(item, AVAILABLE_KEYS) || 0),
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim(),
                         vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim(),
-                        cost: Number(getValueByKeys(item, COST_KEYS) || 0)
+                        cost: Number(getValueByKeys(item, COST_KEYS) || 0),
+                        orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10)
                     });
                 } else if (isLeadTime) {
                     targetMap.set(sku, {
@@ -249,7 +251,8 @@ export const processInventoryData = (
             available: 0,
             manufacturer: 'Sin Fabricante',
             vendor: 'Sin proveedor',
-            cost: 0
+            cost: 0,
+            orderDate: ''
         };
         const actualCurrentLevel = inventoryInfo.level;
 
@@ -310,6 +313,19 @@ export const processInventoryData = (
         const leadTimeTotalMonths = effectiveLeadTimeDays / 30;
         // Lead-time variability in months (only meaningful when computed; 0 for manual).
         const leadTimeStdMonths = isComputedLeadTime ? (leadTimeStdDays / 30) : 0;
+
+        // ETA de lo pedido = fecha de la OC abierta más próxima + lead time efectivo.
+        // Solo si hay algo por recibir y una fecha de OC válida.
+        let etaDate = '';
+        let etaDays = 0;
+        if (inventoryInfo.orderDate && inventoryInfo.ordered > 0 && effectiveLeadTimeDays > 0) {
+            const od = new Date(inventoryInfo.orderDate);
+            if (!isNaN(od.getTime())) {
+                const eta = new Date(od.getTime() + effectiveLeadTimeDays * 86400000);
+                etaDate = eta.toISOString().slice(0, 10);
+                etaDays = Math.round((eta.getTime() - now.getTime()) / 86400000);
+            }
+        }
 
         // Is Service Check
         const isService = leadTimeDays === 0 || actualCurrentLevel === -1;
@@ -536,6 +552,9 @@ export const processInventoryData = (
             status,
             coverageDays,
             coverageRisk,
+            orderDate: inventoryInfo.orderDate,
+            etaDate,
+            etaDays,
             unitCost,
             annualValue,
             annualValueRevenue: selectedAnnualSales * unitPrice, // valor anual por precio de venta

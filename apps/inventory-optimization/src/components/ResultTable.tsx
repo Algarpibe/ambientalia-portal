@@ -133,6 +133,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'leadTimeSource', label: 'Fuente LT' },
             { key: 'leadTimeN', label: '# OC' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
+            { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'deviation', label: 'Desviación' },
         ],
         service: [
@@ -154,6 +155,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'leadTimeSource', label: 'Fuente LT' },
             { key: 'leadTimeN', label: '# OC' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
+            { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'deviation', label: 'Desviación' },
         ],
         urgent: [
@@ -167,6 +169,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
+            { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'reorderPoint', label: 'PdP' },
             { key: 'erpLevel', label: 'Nivel ERP' },
             { key: 'suggestedOrder', label: 'Sugerencia Pedido' },
@@ -182,6 +185,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
+            { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'reorderPoint', label: 'PDP Propuesto' },
             { key: 'erpLevel', label: 'Nivel ERP' },
         ],
@@ -471,6 +475,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             '# OC Recibidas': item.leadTimeN,
             'Cobertura (Días)': item.coverageDays < 0 ? 'N/A' : item.coverageDays,
             'Riesgo Quiebre (Cob<LT)': item.coverageRisk ? 'SÍ' : 'NO',
+            'ETA (llegada)': item.etaDate || '',
+            'ETA (días)': item.etaDate ? item.etaDays : '',
             'Stock Seguridad': item.safetyStock.toFixed(2),
             'Punto de Pedido (PdP)': item.reorderPoint.toFixed(2),
             'Cantidad Óptima (Q)': item.optimalQuantity.toFixed(2),
@@ -1091,6 +1097,23 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                                             {eoq < q ? '↓' : '↑'}{Math.abs(Math.round(diff * 100))}%
                                                         </span>
                                                     )}
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'etaDate') {
+                                            if (!row.etaDate) {
+                                                return <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-400">—</td>;
+                                            }
+                                            const d = row.etaDays;
+                                            const cls = d < 0 ? 'text-red-600' : d <= 15 ? 'text-amber-600' : 'text-emerald-600';
+                                            const label = d < 0 ? `atrasada ${Math.abs(d)}d` : `en ${d}d`;
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm">
+                                                    <span className="text-gray-900">{row.etaDate}</span>
+                                                    <span className={cn('ml-1 text-[10px] font-medium', cls)} title={`OC ${row.orderDate} + lead time`}>
+                                                        {label}
+                                                    </span>
                                                 </td>
                                             );
                                         }

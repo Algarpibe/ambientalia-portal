@@ -41,6 +41,9 @@ export interface AnalysisResult {
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
     coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
+    orderDate: string;      // fecha de la OC abierta más próxima (ISO); '' si ninguna
+    etaDate: string;        // fecha estimada de llegada = fecha OC + lead time; '' si N/A
+    etaDays: number;        // días desde hoy hasta la ETA (negativo = atrasada)
     unitCost: number;       // costo de compra por unidad (USD)
     annualValue: number;    // valor de consumo anual por costo = uds anuales × costo
     annualValueRevenue: number; // valor de consumo anual por precio de venta
