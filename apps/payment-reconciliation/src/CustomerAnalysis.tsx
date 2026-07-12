@@ -78,10 +78,10 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
     const formatCurrency = (num: number): string => {
         return num.toLocaleString('en-US', {
             style: 'currency',
-            currency: 'USD',
+            currency: 'COP',
             currencyDisplay: 'code',
             maximumFractionDigits: 0
-        }).replace('USD', 'USD ');
+        }).replace('COP', 'COP ');
     };
 
     const getTrendIcon = (value: number) => {

@@ -702,7 +702,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
             {/* Amount Range Filter */}
             <div className="flex flex-col gap-2">
               <label htmlFor="min-amount-general" className="text-sm font-semibold text-slate-700">
-                Monto Mínimo (USD)
+                Monto Mínimo (COP)
               </label>
               <input
                 id="min-amount-general"
@@ -716,7 +716,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
 
             <div className="flex flex-col gap-2">
               <label htmlFor="max-amount-general" className="text-sm font-semibold text-slate-700">
-                Monto Máximo (USD)
+                Monto Máximo (COP)
               </label>
               <input
                 id="max-amount-general"

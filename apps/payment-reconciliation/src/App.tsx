@@ -646,7 +646,7 @@ function App() {
                         {/* Amount Range Filter */}
                         <div className="flex flex-col gap-2">
                           <label htmlFor="min-amount" className="text-sm font-semibold text-slate-700">
-                            Monto Mínimo (USD)
+                            Monto Mínimo (COP)
                           </label>
                           <input
                             id="min-amount"
@@ -660,7 +660,7 @@ function App() {
 
                         <div className="flex flex-col gap-2">
                           <label htmlFor="max-amount" className="text-sm font-semibold text-slate-700">
-                            Monto Máximo (USD)
+                            Monto Máximo (COP)
                           </label>
                           <input
                             id="max-amount"
@@ -766,14 +766,14 @@ function App() {
                                 }
                                 if (column === 'total') {
                                   return (
-                                    <td key={column} className="px-6 py-4 text-slate-900 font-semibold">{row.total.toLocaleString('en-US', { style: 'currency', currency: 'USD', currencyDisplay: 'code', maximumFractionDigits: 0 }).replace('USD', 'USD ')}</td>
+                                    <td key={column} className="px-6 py-4 text-slate-900 font-semibold">{row.total.toLocaleString('en-US', { style: 'currency', currency: 'COP', currencyDisplay: 'code', maximumFractionDigits: 0 }).replace('COP', 'COP ')}</td>
                                   );
                                 }
                                 if (column === 'balance') {
                                   return (
                                     <td key={column} className="px-6 py-4">
                                       <span className={`text-sm px-2 py-1 rounded-full font-medium ${row.balance === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                        {row.balance.toLocaleString('en-US', { style: 'currency', currency: 'USD', currencyDisplay: 'code', maximumFractionDigits: 0 }).replace('USD', 'USD ')}
+                                        {row.balance.toLocaleString('en-US', { style: 'currency', currency: 'COP', currencyDisplay: 'code', maximumFractionDigits: 0 }).replace('COP', 'COP ')}
                                       </span>
                                     </td>
                                   );
