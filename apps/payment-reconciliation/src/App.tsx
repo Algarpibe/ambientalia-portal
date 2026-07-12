@@ -62,11 +62,15 @@ function App() {
     setLoading(true);
     setError(null);
     try {
+      if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
       const res = await fetch(`${API_BASE}/api/reconciliation/data`, {
         headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { invoices: InvoiceDetails[]; payments: PaymentRecord[] } = await res.json();
+      if (!Array.isArray(data?.invoices) || !Array.isArray(data?.payments)) {
+        throw new Error('Respuesta del hub con formato inesperado');
+      }
       setInvoices(data.invoices);
       setPayments(data.payments);
     } catch (err) {
@@ -279,8 +283,7 @@ function App() {
 
   React.useEffect(() => {
     if (invoices.length > 0) reconcile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoices, payments]);
+  }, [reconcile]);
 
   const downloadExcel = () => {
     const exportData = reconciledData.map(row => ({
@@ -377,10 +380,13 @@ function App() {
             {!loading && error && (
               <div className="p-6 text-center">
                 <p className="text-red-600 mb-4">{error}</p>
-                <button onClick={loadFromHub} className="px-6 py-2 bg-primary text-white rounded-lg font-semibold">
+                <button onClick={loadFromHub} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold">
                   Reintentar
                 </button>
               </div>
+            )}
+            {!loading && !error && reconciledData.length === 0 && (
+              <div className="p-6 text-center text-slate-500">Sin datos para conciliar.</div>
             )}
 
             {/* Results Table */}
