@@ -29,7 +29,7 @@ Por tanto, conectar la app al hub requiere introducir una **capa backend** (API 
 1. **Capa backend:** un servicio Node **compartido y reutilizable** (`apps/hub-api`), desplegado aparte en EasyPanel. Lo usará el Conciliador ahora y las demás apps después.
 2. **UX de carga:** **carga automática al entrar** — se quitan las tarjetas de subida de Excel; al abrir la app se traen los datos del hub.
 3. **Alcance de datos:** **todo el histórico** por defecto (con parámetro opcional `from/to` para acotar si el volumen crece).
-4. **Seguridad v1:** CORS restringido al dominio del portal + API key por header. Auth real integrada con el login del portal queda como mejora posterior.
+4. **Seguridad v1:** CORS restringido al dominio del portal + API key por header. **Nota honesta:** una API key embebida en el bundle de la SPA es visible para cualquiera que inspeccione el cliente — es un disuasivo ligero, **no** protección real. La protección real (auth integrada con el login del portal, p. ej. verificando un token de sesión en `hub-api`) queda como mejora posterior. Mientras tanto, la barrera efectiva es que el hub solo es alcanzable vía `hub-api` y que `hub-api` restringe CORS.
 
 ## 3. Arquitectura
 
