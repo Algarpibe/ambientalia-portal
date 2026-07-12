@@ -46,17 +46,21 @@ const INVENTORY_SQL = `
     FROM books.items
    WHERE sku IS NOT NULL AND sku <> ''`;
 
+// Lead time: prefer the Zoho item "Lead Time" custom field (cf_lead_time, synced
+// into the item raw as the user fills it in Zoho); fall back to the seeded
+// public.item_lead_times table (from the Importar Excel) for items not yet set
+// in Zoho. Requires public.item_lead_times to exist (see seed_lead_times.sql).
 const LEAD_TIME_SQL = `
-  SELECT sku                                 AS "Código de Producto",
-         COALESCE(raw ->> 'manufacturer', '') AS "Fabricante",
+  SELECT it.sku                                 AS "Código de Producto",
+         COALESCE(it.raw ->> 'manufacturer', '') AS "Fabricante",
          COALESCE(
-           raw -> 'custom_field_hash' ->> 'cf_lead_time',
-           (SELECT cf ->> 'value'
-              FROM jsonb_array_elements(COALESCE(raw -> 'custom_fields', '[]'::jsonb)) cf
-             WHERE lower(cf ->> 'label') = 'lead time' LIMIT 1)
-         )                                    AS "Lead Time"
-    FROM books.items
-   WHERE sku IS NOT NULL AND sku <> ''`;
+           NULLIF(it.raw ->> 'cf_lead_time', ''),
+           NULLIF(it.raw -> 'custom_field_hash' ->> 'cf_lead_time', ''),
+           lt.lead_time_days::text
+         )                                       AS "Lead Time"
+    FROM books.items it
+    LEFT JOIN public.item_lead_times lt ON lt.sku = it.sku
+   WHERE it.sku IS NOT NULL AND it.sku <> ''`;
 
 export async function getInventoryData(db: Pool): Promise<InventoryData> {
   const [s2026, s2025, s2024, s2023, inv, lt] = await Promise.all([
