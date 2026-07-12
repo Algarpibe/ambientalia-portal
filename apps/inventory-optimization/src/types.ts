@@ -39,6 +39,8 @@ export interface AnalysisResult {
     optimalQuantity: number;
     deviation: number;
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
+    coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
+    coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
     monthlyAverage: number;
     annualSales: number;
     stdDev: number;

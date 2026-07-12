@@ -365,6 +365,18 @@ export const processInventoryData = (
         const physicalAvailable = inventoryInfo.physicalHand - inventoryInfo.committed;
         const incoming = inventoryInfo.ordered; // por recibir
 
+        // Cobertura / días de inventario: cuántos días aguanta el stock físico
+        // disponible a la demanda actual. Riesgo (rojo) si la cobertura es menor
+        // que el lead time efectivo → nos quedaríamos sin stock antes de que
+        // llegue una reposición pedida hoy.
+        const dailyDemand = selectedMonthlyAverage / 30;
+        const coverageApplicable = dailyDemand > 0 && leadTimeDays > 0 && roundedPdp >= 1;
+        const coverageDays = coverageApplicable
+            ? Math.max(0, Math.round(physicalAvailable / dailyDemand))
+            : -1; // -1 = N/A (servicio o sin demanda)
+        const coverageRisk = coverageApplicable
+            && (physicalAvailable / dailyDemand) < effectiveLeadTimeDays;
+
         if (leadTimeDays === 0 || roundedPdp < 1) {
             // Servicio, o sin demanda relevante → no se analiza stock.
             status = 'Ignored';
@@ -404,6 +416,8 @@ export const processInventoryData = (
             optimalQuantity: q,
             deviation,
             status,
+            coverageDays,
+            coverageRisk,
             monthlyAverage: selectedMonthlyAverage,
             annualSales: selectedAnnualSales,
             stdDev: weightedSigma,

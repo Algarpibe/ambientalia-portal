@@ -115,6 +115,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
             { key: 'leadTimeN', label: '# OC' },
+            { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'deviation', label: 'Desviación' },
         ],
         service: [
@@ -130,6 +131,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
             { key: 'leadTimeN', label: '# OC' },
+            { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'deviation', label: 'Desviación' },
         ],
         urgent: [
@@ -142,6 +144,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
+            { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'reorderPoint', label: 'PdP' },
             { key: 'erpLevel', label: 'Nivel ERP' },
             { key: 'suggestedOrder', label: 'Sugerencia Pedido' },
@@ -156,6 +159,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
+            { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'reorderPoint', label: 'PDP Propuesto' },
             { key: 'erpLevel', label: 'Nivel ERP' },
         ],
@@ -421,6 +425,11 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             'Ventas Anuales (Base)': item.annualSales.toFixed(2),
             'Tiempo Entrega (Días)': item.leadTimeDays,
             'Tiempo Entrega (Meses)': item.leadTimeMonths.toFixed(2),
+            'σ Lead Time (Días)': item.leadTimeStdDays,
+            'Fuente Lead Time': item.leadTimeSource,
+            '# OC Recibidas': item.leadTimeN,
+            'Cobertura (Días)': item.coverageDays < 0 ? 'N/A' : item.coverageDays,
+            'Riesgo Quiebre (Cob<LT)': item.coverageRisk ? 'SÍ' : 'NO',
             'Stock Seguridad': item.safetyStock.toFixed(2),
             'Punto de Pedido (PdP)': item.reorderPoint.toFixed(2),
             'Cantidad Óptima (Q)': item.optimalQuantity.toFixed(2),
@@ -853,6 +862,25 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
                                                     {value.toFixed(0)}
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'coverageDays') {
+                                            const cov = row.coverageDays;
+                                            if (cov < 0) {
+                                                return (
+                                                    <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                                                );
+                                            }
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm">
+                                                    <span className={cn(
+                                                        "font-semibold",
+                                                        row.coverageRisk ? "text-red-600" : "text-emerald-600"
+                                                    )} title={row.coverageRisk ? `Cobertura (${cov} d) menor que el lead time (${row.leadTimeDays} d): riesgo de quiebre` : `${cov} días de cobertura`}>
+                                                        {cov} d
+                                                    </span>
                                                 </td>
                                             );
                                         }
