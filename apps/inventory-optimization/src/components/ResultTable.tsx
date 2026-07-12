@@ -23,6 +23,14 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import AbcXyzMatrix from './AbcXyzMatrix';
+
+// EOQ = √(2·D·S / H), con H = tasa mantenimiento anual × costo unitario.
+// D = demanda anual (uds), S = costo por pedido. 0 si no hay demanda o costo.
+function computeEoq(annualUnits: number, unitCost: number, orderCost: number, holdingRatePct: number): number {
+    const H = (holdingRatePct / 100) * unitCost;
+    if (annualUnits <= 0 || H <= 0 || orderCost <= 0) return 0;
+    return Math.max(1, Math.round(Math.sqrt((2 * annualUnits * orderCost) / H)));
+}
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
 
 interface SortableItemProps {
@@ -119,6 +127,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
+            { key: 'eoq', label: 'EOQ' },
             { key: 'leadTimeDays', label: 'LT (Días)' },
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
@@ -139,6 +148,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
+            { key: 'eoq', label: 'EOQ' },
             { key: 'leadTimeDays', label: 'LT (Días)' },
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
@@ -282,6 +292,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [xyzFilter, setXyzFilter] = useState<string>('all');
     const [abcBasis, setAbcBasis] = useState<'cost' | 'revenue'>('cost');
     const [patternFilter, setPatternFilter] = useState<string>('all');
+    const [eoqOrderCost, setEoqOrderCost] = useState<number>(() => Number(localStorage.getItem('eoq_order_cost')) || 100);
+    const [eoqHoldingRate, setEoqHoldingRate] = useState<number>(() => Number(localStorage.getItem('eoq_holding_rate')) || 25);
+    useEffect(() => { localStorage.setItem('eoq_order_cost', String(eoqOrderCost)); }, [eoqOrderCost]);
+    useEffect(() => { localStorage.setItem('eoq_holding_rate', String(eoqHoldingRate)); }, [eoqHoldingRate]);
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, Set<string>>>(() => {
         const saved = localStorage.getItem('table_columns_visibility');
@@ -460,6 +474,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             'Stock Seguridad': item.safetyStock.toFixed(2),
             'Punto de Pedido (PdP)': item.reorderPoint.toFixed(2),
             'Cantidad Óptima (Q)': item.optimalQuantity.toFixed(2),
+            'EOQ': computeEoq(item.annualSales, item.unitCost, eoqOrderCost, eoqHoldingRate) || '',
             'Desviación': item.deviation.toFixed(2),
             'Estatus': item.status,
             'ABC': item.abcClass,
@@ -863,6 +878,34 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             </div>
 
             {(activeTab === 'main' || activeTab === 'service') && (
+                <div className="px-4 pt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs bg-gray-50">
+                    <span className="font-semibold text-gray-600">Parámetros EOQ:</span>
+                    <label className="flex items-center gap-1.5 text-gray-500">
+                        Costo por pedido (USD)
+                        <input
+                            type="number"
+                            min={0}
+                            value={eoqOrderCost}
+                            onChange={(e) => setEoqOrderCost(Math.max(0, Number(e.target.value)))}
+                            className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-gray-500">
+                        Mantenimiento anual (%)
+                        <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={eoqHoldingRate}
+                            onChange={(e) => setEoqHoldingRate(Math.min(100, Math.max(0, Number(e.target.value))))}
+                            className="w-16 border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                    </label>
+                    <span className="text-gray-400 italic">EOQ = √(2·D·S / (H%·costo)) · comparación, no cambia los pedidos</span>
+                </div>
+            )}
+
+            {(activeTab === 'main' || activeTab === 'service') && (
                 <div className="p-4 border-b border-gray-200 bg-gray-50 grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <AbcXyzMatrix
                         data={data.filter(r => activeTab === 'service' ? r.isService : !r.isService)}
@@ -1027,6 +1070,27 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                                     >
                                                         {code || '—'}
                                                     </span>
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'eoq') {
+                                            const eoq = computeEoq(row.annualSales, row.unitCost, eoqOrderCost, eoqHoldingRate);
+                                            if (eoq <= 0) {
+                                                return <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-400">—</td>;
+                                            }
+                                            const q = Math.round(row.optimalQuantity);
+                                            const diff = q > 0 ? (eoq - q) / q : 0;
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm">
+                                                    <span className="font-semibold text-gray-900" title={`EOQ ${eoq} vs Q heurística ${q} (S=${eoqOrderCost} USD, H=${eoqHoldingRate}%)`}>
+                                                        {eoq}
+                                                    </span>
+                                                    {q > 0 && Math.abs(diff) >= 0.2 && (
+                                                        <span className={cn('ml-1 text-[10px] font-medium', eoq < q ? 'text-emerald-600' : 'text-amber-600')}>
+                                                            {eoq < q ? '↓' : '↑'}{Math.abs(Math.round(diff * 100))}%
+                                                        </span>
+                                                    )}
                                                 </td>
                                             );
                                         }
