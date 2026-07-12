@@ -51,9 +51,9 @@ function App() {
   const summaryMetrics = results
     ? {
         totalItems: results.length,
-        riskItems: results.filter((r) => r.status === 'Risk').length,
-        overstockItems: results.filter((r) => r.status === 'Overstock').length,
-        optimizedItems: results.filter((r) => r.status === 'Optimized').length,
+        urgentItems: results.filter((r) => r.status === 'Urgente').length,
+        reorderItems: results.filter((r) => r.status === 'Pedir').length,
+        inTransitItems: results.filter((r) => r.status === 'EnCamino').length,
       }
     : null;
 
@@ -113,16 +113,16 @@ function App() {
                 <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.totalItems}</div>
               </div>
               <div className="bg-white p-6 rounded-3xl shadow-soft border-l-4 border-l-red-500 border border-slate-100">
-                <span className="text-sm font-medium text-red-600">En Riesgo (Quiebre)</span>
-                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.riskItems}</div>
+                <span className="text-sm font-medium text-red-600">Urgente (pedir ya)</span>
+                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.urgentItems}</div>
               </div>
-              <div className="bg-white p-6 rounded-3xl shadow-soft border-l-4 border-l-amber-500 border border-slate-100">
-                <span className="text-sm font-medium text-amber-600">Sobrestock</span>
-                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.overstockItems}</div>
+              <div className="bg-white p-6 rounded-3xl shadow-soft border-l-4 border-l-yellow-500 border border-slate-100">
+                <span className="text-sm font-medium text-yellow-700">Por Pedir</span>
+                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.reorderItems}</div>
               </div>
-              <div className="bg-white p-6 rounded-3xl shadow-soft border-l-4 border-l-emerald-500 border border-slate-100">
-                <span className="text-sm font-medium text-emerald-600">Optimizado</span>
-                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.optimizedItems}</div>
+              <div className="bg-white p-6 rounded-3xl shadow-soft border-l-4 border-l-orange-500 border border-slate-100">
+                <span className="text-sm font-medium text-orange-600">En Camino</span>
+                <div className="text-3xl font-extrabold text-slate-900 mt-2 tracking-tight">{summaryMetrics?.inTransitItems}</div>
               </div>
             </div>
 

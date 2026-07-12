@@ -330,16 +330,28 @@ export const processInventoryData = (
         if (unitPrice > 10000) valueClass = 'Ultra Alto';
         else if (unitPrice >= 1500) valueClass = 'Alto';
 
-        let status: 'Risk' | 'Overstock' | 'Optimized' | 'Ignored' = 'Optimized';
+        let status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored' = 'Optimized';
         const roundedPdp = Math.round(pdp);
 
-        if (leadTimeDays === 0) {
+        // Posición de inventario = Disponible contable (= físico − comprometido + por recibir):
+        // lo que efectivamente tienes para cubrir demanda, contando lo que ya viene.
+        const position = inventoryInfo.available;
+        const physicalAvailable = inventoryInfo.physicalHand - inventoryInfo.committed;
+        const incoming = inventoryInfo.ordered; // por recibir
+
+        if (leadTimeDays === 0 || roundedPdp < 1) {
+            // Servicio, o sin demanda relevante → no se analiza stock.
             status = 'Ignored';
-        } else if (actualCurrentLevel === -1) {
-            status = roundedPdp >= 1 ? 'Risk' : 'Ignored';
-        } else if (actualCurrentLevel < roundedPdp) {
-            status = 'Risk';
-        } else if (actualCurrentLevel > (roundedPdp * 1.2)) {
+        } else if (physicalAvailable <= 0 && incoming <= 0) {
+            // Físicamente en cero (o comprometido más de lo que hay) y nada en camino → pedir YA.
+            status = 'Urgente';
+        } else if (position < roundedPdp && incoming > 0) {
+            // Falta stock pero ya hay una orden en tránsito → reposición en camino.
+            status = 'EnCamino';
+        } else if (position < roundedPdp) {
+            // Bajo el punto de pedido, sin urgencia física ni tránsito → colocar orden.
+            status = 'Pedir';
+        } else if (position > (roundedPdp * 1.2)) {
             status = 'Overstock';
         }
 

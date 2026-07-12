@@ -9,19 +9,23 @@ export function cn(...inputs: ClassValue[]) {
 
 // Status Badge Component
 interface StatusBadgeProps {
-    status: 'Risk' | 'Overstock' | 'Optimized' | 'Ignored';
+    status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
     const styles = {
-        Risk: 'bg-red-100 text-red-700 border-red-200',
+        Urgente: 'bg-red-100 text-red-700 border-red-200',
+        EnCamino: 'bg-orange-100 text-orange-700 border-orange-200',
+        Pedir: 'bg-yellow-100 text-yellow-800 border-yellow-200',
         Overstock: 'bg-amber-100 text-amber-700 border-amber-200',
         Optimized: 'bg-emerald-100 text-emerald-700 border-emerald-200',
         Ignored: 'bg-gray-100 text-gray-500 border-gray-200',
     };
 
     const labels = {
-        Risk: 'Riesgo de Quiebre',
+        Urgente: 'Urgente',
+        EnCamino: 'En camino',
+        Pedir: 'Pedir',
         Overstock: 'Sobrestock',
         Optimized: 'Optimizado',
         Ignored: 'Ignorado',

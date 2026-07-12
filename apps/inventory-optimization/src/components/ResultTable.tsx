@@ -593,7 +593,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                             onChange={(e) => setStatusFilter(e.target.value)}
                         >
                             <option value="all">Estatus</option>
-                            <option value="Risk">Riesgo</option>
+                            <option value="Urgente">Urgente</option>
+                            <option value="EnCamino">En camino</option>
+                            <option value="Pedir">Pedir</option>
                             <option value="Overstock">Sobrestock</option>
                             <option value="Optimized">Optimizado</option>
                             <option value="Ignored">Ignorado</option>

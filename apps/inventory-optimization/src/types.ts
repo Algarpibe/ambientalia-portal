@@ -35,7 +35,7 @@ export interface AnalysisResult {
     reorderPoint: number;
     optimalQuantity: number;
     deviation: number;
-    status: 'Risk' | 'Overstock' | 'Optimized' | 'Ignored';
+    status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
     monthlyAverage: number;
     annualSales: number;
     stdDev: number;
