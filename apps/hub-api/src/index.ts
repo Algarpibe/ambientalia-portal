@@ -42,45 +42,4 @@ app.get('/api/reconciliation/data', requireApiKey, async (req, res) => {
   }
 });
 
-// Temporary discovery endpoint (behind the API key). Reports the real books.*
-// schema so the payments query / balance source can be finalized. Remove once
-// the reconciliation SQL is confirmed.
-app.get('/debug/schema', requireApiKey, async (_req, res) => {
-  try {
-    const db = getHubPool();
-    const [tables, invoiceCols, paymentCols, sampleInvoice, samplePayment] = await Promise.all([
-      db.query(
-        `SELECT table_name FROM information_schema.tables
-          WHERE table_schema = 'books' ORDER BY table_name`
-      ),
-      db.query(
-        `SELECT column_name, data_type FROM information_schema.columns
-          WHERE table_schema = 'books' AND table_name = 'invoices' ORDER BY ordinal_position`
-      ),
-      db.query(
-        `SELECT table_name, column_name, data_type FROM information_schema.columns
-          WHERE table_schema = 'books' AND table_name LIKE '%payment%' ORDER BY table_name, ordinal_position`
-      ),
-      db.query(`SELECT raw FROM books.invoices LIMIT 1`),
-      db.query(
-        `SELECT raw, (raw::jsonb) -> 'invoices' -> 0 AS applied FROM books.customer_payments LIMIT 1`
-      ).catch((e: unknown) => ({ rows: [{ error: errMsg(e) }] })),
-    ]);
-    const invRaw = sampleInvoice.rows[0]?.raw;
-    const payRaw = samplePayment.rows[0]?.raw;
-    const applied = samplePayment.rows[0]?.applied;
-    res.json({
-      booksTables: tables.rows.map((r: { table_name: string }) => r.table_name),
-      invoiceColumns: invoiceCols.rows,
-      paymentColumns: paymentCols.rows,
-      sampleInvoiceRawKeys: invRaw ? Object.keys(invRaw) : null,
-      sampleInvoiceBalance: invRaw?.balance ?? null,
-      samplePaymentRawKeys: payRaw ? Object.keys(payRaw) : samplePayment.rows[0] ?? null,
-      samplePaymentAppliedInvoice: applied ?? null,
-    });
-  } catch (e) {
-    res.status(500).json({ error: errMsg(e) });
-  }
-});
-
 app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
