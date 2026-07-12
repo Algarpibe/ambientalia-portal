@@ -63,15 +63,20 @@ app.get('/debug/schema', requireApiKey, async (_req, res) => {
       ),
       db.query(`SELECT raw FROM books.invoices LIMIT 1`),
       db.query(
-        `SELECT raw FROM books.customer_payments LIMIT 1`
+        `SELECT raw, (raw::jsonb) -> 'invoices' -> 0 AS applied FROM books.customer_payments LIMIT 1`
       ).catch((e: unknown) => ({ rows: [{ error: errMsg(e) }] })),
     ]);
+    const invRaw = sampleInvoice.rows[0]?.raw;
+    const payRaw = samplePayment.rows[0]?.raw;
+    const applied = samplePayment.rows[0]?.applied;
     res.json({
       booksTables: tables.rows.map((r: { table_name: string }) => r.table_name),
       invoiceColumns: invoiceCols.rows,
       paymentColumns: paymentCols.rows,
-      sampleInvoiceRawKeys: sampleInvoice.rows[0]?.raw ? Object.keys(sampleInvoice.rows[0].raw) : null,
-      samplePaymentRawKeys: samplePayment.rows[0]?.raw ? Object.keys(samplePayment.rows[0].raw) : samplePayment.rows[0] ?? null,
+      sampleInvoiceRawKeys: invRaw ? Object.keys(invRaw) : null,
+      sampleInvoiceBalance: invRaw?.balance ?? null,
+      samplePaymentRawKeys: payRaw ? Object.keys(payRaw) : samplePayment.rows[0] ?? null,
+      samplePaymentAppliedInvoice: applied ?? null,
     });
   } catch (e) {
     res.status(500).json({ error: errMsg(e) });
