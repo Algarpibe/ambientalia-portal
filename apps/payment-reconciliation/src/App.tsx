@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileDown, Table as TableIcon, CheckCircle2, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
+import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
 import './App.css';
 import type { InvoiceDetails, PaymentRecord, ReconciledRow, DateRangeOption } from './types';
 import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
-import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel } from './SkeletonLoader';
+import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 
 type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis';
 
@@ -54,6 +54,30 @@ function App() {
   ]);
 
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+
+  const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
+  const API_KEY = import.meta.env.VITE_HUB_API_KEY as string | undefined;
+
+  const loadFromHub = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/reconciliation/data`, {
+        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { invoices: InvoiceDetails[]; payments: PaymentRecord[] } = await res.json();
+      setInvoices(data.invoices);
+      setPayments(data.payments);
+    } catch (err) {
+      setError('No se pudieron cargar los datos del hub de Zoho. Reintenta.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [API_BASE, API_KEY]);
+
+  React.useEffect(() => { loadFromHub(); }, [loadFromHub]);
 
   const uniqueClients = useMemo(() => {
     const clients = new Set(invoices.map(inv => inv.clientName).filter(Boolean));
@@ -187,89 +211,8 @@ function App() {
     return `${day}/${month}/${year}`;
   };
 
-  const parseCurrency = (val: any) => {
-    if (val === undefined || val === null) return 0;
-    if (typeof val === 'number') return val;
-    // Remove "COP", "USD", commas, spaces and parse
-    const clean = val.toString().replace(/[A-Z\s,]/g, '').trim();
-    return parseFloat(clean) || 0;
-  };
-
-
-
-  const findHeaderRow = (worksheet: XLSX.WorkSheet, keyColumnName: string) => {
-    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:Z100');
-    // iterate first 20 rows to find headers
-    for (let r = range.s.r; r <= Math.min(range.e.r, 20); r++) {
-      const row: any[] = [];
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const cell = worksheet[XLSX.utils.encode_cell({ r, c })];
-        row.push(cell ? cell.v : null);
-      }
-      if (row.some(val => val?.toString().toLowerCase().includes(keyColumnName.toLowerCase()))) {
-        return r;
-      }
-    }
-    return 0; // fallback
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, type: 'invoices' | 'payments') => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-    setError(null);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        if (type === 'invoices') {
-          const headerRow = findHeaderRow(worksheet, 'n.º de factura');
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRow });
-          const mappedInvoices: InvoiceDetails[] = jsonData.map((row: any) => ({
-            invoiceNumber: row['N.º de factura']?.toString() || row['__EMPTY_1']?.toString() || '',
-            orderNumber: row['Número de orden']?.toString() || '',
-            clientName: row['Nombre del cliente'] || row['__EMPTY'] || '',
-            invoiceDate: parseExcelDate(row['Fecha de la factura'] || row['__EMPTY_2']),
-            dueDate: parseExcelDate(row['Fecha de vencimiento'] || row['__EMPTY_3']),
-            status: row['Estado'] || row['__EMPTY_4'] || '',
-            total: parseCurrency(row['Total'] || row['__EMPTY_5']),
-            balance: parseCurrency(row['Saldo'] || row['__EMPTY_6']),
-          })).filter(inv => inv.invoiceNumber && inv.invoiceNumber !== 'N.º de factura');
-          setInvoices(mappedInvoices);
-        } else {
-          const headerRow = findHeaderRow(worksheet, 'número de pago');
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRow });
-          const mappedPayments: PaymentRecord[] = jsonData.map((row: any) => ({
-            paymentNumber: row['Número de pago']?.toString() || '',
-            clientName: row['Nombre del cliente'] || '',
-            invoiceNumber: row['N.º de factura']?.toString() || '',
-            paymentDate: parseExcelDate(row['Fecha']),
-            amountFCY: parseCurrency(row['Cantidad (FCY)']),
-            unusedFCY: parseCurrency(row['Importe no usado (FCY)']),
-            amountBCY: parseCurrency(row['Importe (BCY)']),
-            unusedBCY: parseCurrency(row['Importe no usado (BCY)']),
-          })).filter(p => p.invoiceNumber && p.invoiceNumber !== 'N.º de factura');
-          setPayments(mappedPayments);
-        }
-      } catch (err) {
-        setError('Error al procesar el archivo Excel. Asegúrate de que el formato sea correcto.');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const reconcile = () => {
+  const reconcile = React.useCallback(() => {
     if (invoices.length === 0) {
-      setError('Por favor, sube el archivo de Detalles de la Factura.');
       return;
     }
 
@@ -332,7 +275,12 @@ function App() {
       });
 
     setReconciledData(reconciled);
-  };
+  }, [invoices, payments]);
+
+  React.useEffect(() => {
+    if (invoices.length > 0) reconcile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, payments]);
 
   const downloadExcel = () => {
     const exportData = reconciledData.map(row => ({
@@ -420,87 +368,18 @@ function App() {
         {/* Reconciliation View */}
         {activeView === 'reconciliation' && (
           <>
-            {/* Upload Section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-              {/* File 1: Invoices */}
-              <div className={`relative group transition-all duration-500 ease-out hover:-translate-y-1
-                ${invoices.length > 0
-                  ? 'bg-indigo-50/50 border-2 border-indigo-400/30'
-                  : 'bg-white border text-center border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)]'} 
-                rounded-[2rem] overflow-hidden h-72`}
-              >
-                <label className="flex flex-col items-center justify-center h-full w-full cursor-pointer p-8 relative z-10">
-                  <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 transition-all duration-300 shadow-xl
-                    ${invoices.length > 0
-                      ? 'bg-indigo-600 text-white shadow-indigo-500/30 rotate-3 scale-110'
-                      : 'bg-indigo-50 text-indigo-600 shadow-indigo-500/10 group-hover:scale-110 group-hover:bg-indigo-600 group-hover:text-white group-hover:shadow-indigo-500/30'}`}>
-                    {invoices.length > 0 ? <CheckCircle2 size={32} /> : <Upload size={32} />}
-                  </div>
-                  <span className="text-xl font-bold text-slate-900 mb-2">Detalles de Factura</span>
-                  <span className="text-sm text-slate-500 text-center mb-4 max-w-[200px]">Sube el archivo Excel con los detalles de facturación</span>
-                  <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => handleFileUpload(e, 'invoices')} />
-                  {invoices.length > 0 ? (
-                    <div className="flex items-center gap-2 text-indigo-700 bg-white shadow-sm border border-indigo-100 px-4 py-2 rounded-full text-sm font-bold">
-                      <CheckCircle2 size={16} />
-                      {invoices.length} facturas
-                    </div>
-                  ) : (
-                    <div className="px-6 py-2.5 bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                      Seleccionar archivo
-                    </div>
-                  )}
-                </label>
+            {/* Data Loading State */}
+            {loading && (
+              <div className="mb-12">
+                <SkeletonAnalytics cards={6} />
               </div>
-
-              {/* File 2: Payments */}
-              <div className={`relative group transition-all duration-500 ease-out hover:-translate-y-1
-                ${payments.length > 0
-                  ? 'bg-emerald-50/50 border-2 border-emerald-400/30'
-                  : 'bg-white border text-center border-slate-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)]'} 
-                rounded-[2rem] overflow-hidden h-72`}
-              >
-                <label className="flex flex-col items-center justify-center h-full w-full cursor-pointer p-8 relative z-10">
-                  <div className={`w-16 h-16 rounded-3xl flex items-center justify-center mb-6 transition-all duration-300 shadow-xl
-                    ${payments.length > 0
-                      ? 'bg-emerald-500 text-white shadow-emerald-500/30 rotate-3 scale-110'
-                      : 'bg-emerald-50 text-emerald-600 shadow-emerald-500/10 group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white group-hover:shadow-emerald-500/30'}`}>
-                    {payments.length > 0 ? <CheckCircle2 size={32} /> : <Upload size={32} />}
-                  </div>
-                  <span className="text-xl font-bold text-slate-900 mb-2">Pagos Recibidos</span>
-                  <span className="text-sm text-slate-500 text-center mb-4 max-w-[200px]">Sube el reporte de pagos del sistema ERP</span>
-                  <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => handleFileUpload(e, 'payments')} />
-                  {payments.length > 0 ? (
-                    <div className="flex items-center gap-2 text-emerald-700 bg-white shadow-sm border border-emerald-100 px-4 py-2 rounded-full text-sm font-bold">
-                      <CheckCircle2 size={16} />
-                      {payments.length} pagos
-                    </div>
-                  ) : (
-                    <div className="px-6 py-2.5 bg-slate-50 text-slate-600 text-sm font-semibold rounded-xl group-hover:bg-emerald-50 group-hover:text-emerald-600 transition-colors">
-                      Seleccionar archivo
-                    </div>
-                  )}
-                </label>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <div className="flex justify-center mb-12">
-              <button
-                onClick={reconcile}
-                disabled={invoices.length === 0 || loading}
-                className={`px-8 py-3 rounded-xl font-bold text-lg shadow-lg transition-all ${invoices.length > 0 && !loading
-                  ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-0.5 active:translate-y-0'
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-              >
-                {loading ? 'Procesando...' : 'Generar Conciliación'}
-              </button>
-            </div>
-
-            {error && (
-              <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
-                <AlertCircle size={20} />
-                <p className="font-medium">{error}</p>
+            )}
+            {!loading && error && (
+              <div className="p-6 text-center">
+                <p className="text-red-600 mb-4">{error}</p>
+                <button onClick={loadFromHub} className="px-6 py-2 bg-primary text-white rounded-lg font-semibold">
+                  Reintentar
+                </button>
               </div>
             )}
 
