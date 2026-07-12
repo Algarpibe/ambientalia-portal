@@ -8,6 +8,9 @@ export function getHubPool(): Pool {
     const url = process.env.HUB_DB_URL;
     if (!url) throw new Error('HUB_DB_URL is not set');
     pool = createPoolFromUrl(url);
+    // Without a listener, an idle-client 'error' (backend restart, network
+    // blip) is an unhandled EventEmitter error and crashes the process.
+    pool.on('error', (err: Error) => console.error('hub pool error', err));
   }
   return pool;
 }

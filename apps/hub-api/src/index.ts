@@ -6,9 +6,12 @@ import { getReconciliationData } from './reconciliation.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN;
+if (!ALLOWED_ORIGIN) {
+  console.warn('WARNING: ALLOWED_ORIGIN is not set — CORS is open to all origins.');
+}
 
-app.use(cors({ origin: ALLOWED_ORIGIN }));
+app.use(cors({ origin: ALLOWED_ORIGIN || '*' }));
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -22,7 +25,9 @@ app.get('/health', async (_req, res) => {
     );
     res.json({ ok: true, ...rows[0] });
   } catch (e) {
-    res.status(500).json({ ok: false, error: errMsg(e) });
+    // /health is unauthenticated — don't leak raw driver errors to callers.
+    console.error('health check failed', e);
+    res.status(500).json({ ok: false, error: 'hub unreachable' });
   }
 });
 

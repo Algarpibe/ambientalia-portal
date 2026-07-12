@@ -37,9 +37,10 @@ export async function getInvoices(db: Pool, from?: string, to?: string): Promise
   return rows.map(mapInvoiceRow);
 }
 
-export async function getPayments(db: Pool): Promise<PaymentRecord[]> {
+export async function getPayments(db: Pool, from?: string, to?: string): Promise<PaymentRecord[]> {
   // Best-effort against books.customer_payments with Zoho's applied-invoices
   // array in `raw`. Adjust after confirming the real schema via /debug/schema.
+  const hasRange = Boolean(from && to);
   const sql = `
     SELECT p.payment_number,
            p.customer_name,
@@ -50,8 +51,9 @@ export async function getPayments(db: Pool): Promise<PaymentRecord[]> {
            (app ->> 'amount_applied')::numeric           AS amount_bcy,
            0                                             AS unused_amount_bcy
       FROM books.customer_payments p
-      CROSS JOIN LATERAL jsonb_array_elements((p.raw::jsonb) -> 'invoices') AS app`;
-  const { rows } = await db.query(sql, []);
+      CROSS JOIN LATERAL jsonb_array_elements((p.raw::jsonb) -> 'invoices') AS app
+      ${hasRange ? 'WHERE p.date BETWEEN $1 AND $2' : ''}`;
+  const { rows } = await db.query(sql, hasRange ? [from, to] : []);
   return rows.map(mapPaymentRow);
 }
 
@@ -60,6 +62,9 @@ export async function getReconciliationData(
   from?: string,
   to?: string
 ): Promise<ReconciliationData> {
-  const [invoices, payments] = await Promise.all([getInvoices(db, from, to), getPayments(db)]);
+  const [invoices, payments] = await Promise.all([
+    getInvoices(db, from, to),
+    getPayments(db, from, to),
+  ]);
   return { invoices, payments };
 }
