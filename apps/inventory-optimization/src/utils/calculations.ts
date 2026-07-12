@@ -99,6 +99,7 @@ export const processInventoryData = (
     const AVAILABLE_KEYS = ['Disponible para la venta', 'Available', 'Disponible'];
     const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer'];
     const VENDOR_KEYS = ['Proveedor', 'Provider', 'Vendor'];
+    const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
 
     // Create collections and maps
     const allSkus = new Set<string>();
@@ -147,7 +148,8 @@ export const processInventoryData = (
                         committed: Number(getValueByKeys(item, COMMITTED_KEYS) || 0),
                         available: Number(getValueByKeys(item, AVAILABLE_KEYS) || 0),
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim(),
-                        vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim()
+                        vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim(),
+                        cost: Number(getValueByKeys(item, COST_KEYS) || 0)
                     });
                 } else if (isLeadTime) {
                     targetMap.set(sku, {
@@ -195,7 +197,8 @@ export const processInventoryData = (
             committed: 0,
             available: 0,
             manufacturer: 'Sin Fabricante',
-            vendor: 'Sin proveedor'
+            vendor: 'Sin proveedor',
+            cost: 0
         };
         const actualCurrentLevel = inventoryInfo.level;
 
@@ -302,6 +305,19 @@ export const processInventoryData = (
         } else {
             weightedSigma = (0.5 * stats2025.stdDev) + (0.3 * stats2024.stdDev) + (0.2 * stats2023.stdDev);
         }
+
+        // XYZ (variabilidad): coeficiente de variación = σ / media mensual.
+        // X estable (CV ≤ 0.5) · Y variable (≤ 1.0) · Z errática (> 1.0).
+        // Sin demanda → Z (impredecible). abcClass se asigna en la 2ª pasada global.
+        const coefVariation = selectedMonthlyAverage > 0 ? (weightedSigma / selectedMonthlyAverage) : 0;
+        const xyzClass: 'X' | 'Y' | 'Z' =
+            selectedMonthlyAverage <= 0 ? 'Z'
+                : coefVariation > 1.0 ? 'Z'
+                    : coefVariation > 0.5 ? 'Y'
+                        : 'X';
+        // Valor de consumo anual por COSTO = uds anuales × costo de compra.
+        const unitCost = inventoryInfo.cost || 0;
+        const annualValue = selectedAnnualSales * unitCost;
 
         // Combined demand + lead-time variability (safety stock).
         // SS = Z × √( LT·σ²_demanda + demanda²·σ²_LT )
@@ -421,6 +437,12 @@ export const processInventoryData = (
             status,
             coverageDays,
             coverageRisk,
+            unitCost,
+            annualValue,
+            coefVariation,
+            xyzClass,
+            abcClass: 'C',   // se asigna en la 2ª pasada (Pareto global por valor)
+            abcXyz: '',      // idem
             monthlyAverage: selectedMonthlyAverage,
             annualSales: selectedAnnualSales,
             stdDev: weightedSigma,
@@ -448,6 +470,22 @@ export const processInventoryData = (
                 '2023': stats2023.values
             }
         });
+    });
+
+    // 2ª pasada — ABC por valor de consumo anual (costo), Pareto acumulado global:
+    // A = hasta el 80% del valor, B = 80-95%, C = resto (incluye los de valor 0).
+    const ranked = [...results].sort((a, b) => b.annualValue - a.annualValue);
+    const totalValue = ranked.reduce((sum, r) => sum + r.annualValue, 0);
+    let cumulative = 0;
+    ranked.forEach(r => {
+        if (totalValue <= 0 || r.annualValue <= 0) {
+            r.abcClass = 'C';
+        } else {
+            cumulative += r.annualValue;
+            const pct = cumulative / totalValue;
+            r.abcClass = pct <= 0.8 ? 'A' : pct <= 0.95 ? 'B' : 'C';
+        }
+        r.abcXyz = `${r.abcClass}${r.xyzClass}`;
     });
 
     return results;

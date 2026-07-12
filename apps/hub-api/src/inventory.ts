@@ -48,6 +48,7 @@ const INVENTORY_SQL = `
          COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)
            - COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
          COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
+         COALESCE(it.purchase_rate, 0) AS "Costo",
          COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
          -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,
          -- con fallback al Fabricante y luego a un literal.

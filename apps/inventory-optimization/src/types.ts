@@ -41,6 +41,12 @@ export interface AnalysisResult {
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
     coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
+    unitCost: number;       // costo de compra por unidad (USD)
+    annualValue: number;    // valor de consumo anual por costo = uds anuales × costo
+    coefVariation: number;  // coeficiente de variación de la demanda (σ / media)
+    abcClass: 'A' | 'B' | 'C';       // ABC por valor de consumo (Pareto)
+    xyzClass: 'X' | 'Y' | 'Z';       // XYZ por variabilidad (CV)
+    abcXyz: string;                  // combinado, p. ej. "AX"
     monthlyAverage: number;
     annualSales: number;
     stdDev: number;

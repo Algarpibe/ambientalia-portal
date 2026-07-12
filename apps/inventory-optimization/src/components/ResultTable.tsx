@@ -21,6 +21,8 @@ import {
     useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import AbcXyzMatrix from './AbcXyzMatrix';
+import { ABC_XYZ_COLORS } from './abcXyz';
 
 interface SortableItemProps {
     id: string;
@@ -109,6 +111,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'unitPrice', label: 'Precio (USD)' },
             { key: 'category', label: 'Categoría' },
             { key: 'status', label: 'Estatus' },
+            { key: 'abcXyz', label: 'ABC-XYZ' },
+            { key: 'abcClass', label: 'ABC' },
+            { key: 'xyzClass', label: 'XYZ' },
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
@@ -125,6 +130,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'unitPrice', label: 'Precio (USD)' },
             { key: 'category', label: 'Categoría' },
             { key: 'status', label: 'Estatus' },
+            { key: 'abcXyz', label: 'ABC-XYZ' },
+            { key: 'abcClass', label: 'ABC' },
+            { key: 'xyzClass', label: 'XYZ' },
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
@@ -266,6 +274,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [demandTypeFilter, setDemandTypeFilter] = useState<string>('all');
     const [valueTypeFilter, setValueTypeFilter] = useState<string>('all');
     const [trackingFilter, setTrackingFilter] = useState<'all' | 'tracked' | 'untracked'>('all');
+    const [abcFilter, setAbcFilter] = useState<string>('all');
+    const [xyzFilter, setXyzFilter] = useState<string>('all');
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, Set<string>>>(() => {
         const saved = localStorage.getItem('table_columns_visibility');
@@ -397,7 +407,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             (trackingFilter === 'tracked' && item.currentLevel !== -1) ||
             (trackingFilter === 'untracked' && item.currentLevel === -1);
 
-        return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking;
+        const matchesAbc = abcFilter === 'all' || item.abcClass === abcFilter;
+        const matchesXyz = xyzFilter === 'all' || item.xyzClass === xyzFilter;
+
+        return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking && matchesAbc && matchesXyz;
     }).sort((a, b) => {
         const aValue = a[sortField];
         const bValue = b[sortField];
@@ -440,6 +453,12 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             'Cantidad Óptima (Q)': item.optimalQuantity.toFixed(2),
             'Desviación': item.deviation.toFixed(2),
             'Estatus': item.status,
+            'ABC': item.abcClass,
+            'XYZ': item.xyzClass,
+            'ABC-XYZ': item.abcXyz,
+            'Costo (USD)': item.unitCost,
+            'Valor consumo anual (USD)': Math.round(item.annualValue),
+            'Coef. Variación': item.coefVariation.toFixed(2),
             'Origen de Demanda': item.demandSource,
             'Revisión Manual': item.manualReview ? 'SÍ' : 'NO',
             'Nombre de categoría': item.category,
@@ -686,6 +705,26 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                 <option value="Alto">Alto</option>
                                 <option value="Estándar">Estándar</option>
                             </select>
+                            <select
+                                className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
+                                value={abcFilter}
+                                onChange={(e) => setAbcFilter(e.target.value)}
+                            >
+                                <option value="all">ABC</option>
+                                <option value="A">A · alto valor</option>
+                                <option value="B">B · medio</option>
+                                <option value="C">C · bajo</option>
+                            </select>
+                            <select
+                                className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
+                                value={xyzFilter}
+                                onChange={(e) => setXyzFilter(e.target.value)}
+                            >
+                                <option value="all">XYZ</option>
+                                <option value="X">X · estable</option>
+                                <option value="Y">Y · variable</option>
+                                <option value="Z">Z · errática</option>
+                            </select>
                         </>
                     )}
                     {activeTab === 'urgent' && (
@@ -781,6 +820,17 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                     </button>
                 </div>
             </div>
+
+            {(activeTab === 'main' || activeTab === 'service') && (
+                <div className="p-4 border-b border-gray-200 bg-gray-50">
+                    <AbcXyzMatrix
+                        data={data.filter(r => activeTab === 'service' ? r.isService : !r.isService)}
+                        activeAbc={abcFilter}
+                        activeXyz={xyzFilter}
+                        onSelect={(abc, xyz) => { setAbcFilter(abc); setXyzFilter(xyz); }}
+                    />
+                </div>
+            )}
 
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -890,6 +940,28 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">
                                                     {value.toFixed(0)}
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'abcXyz') {
+                                            const code = String(value ?? '');
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm">
+                                                    <span className={cn(
+                                                        'text-xs font-bold px-2 py-0.5 rounded',
+                                                        ABC_XYZ_COLORS[code] || 'bg-gray-100 text-gray-400'
+                                                    )}>
+                                                        {code || '—'}
+                                                    </span>
+                                                </td>
+                                            );
+                                        }
+
+                                        if (col.key === 'abcClass' || col.key === 'xyzClass') {
+                                            return (
+                                                <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-center font-semibold text-gray-700">
+                                                    {String(value ?? '—')}
                                                 </td>
                                             );
                                         }
