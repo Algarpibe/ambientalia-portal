@@ -40,11 +40,17 @@ const INVENTORY_SQL = `
   SELECT sku                                                  AS "SKU (Código de artículo)",
          name                                                 AS "Nombre del artículo",
          COALESCE(raw ->> 'manufacturer', raw ->> 'brand', '') AS "Fabricante",
-         COALESCE(NULLIF(raw ->> 'reorder_level', '')::numeric, -1) AS "Nivel de reposición",
-         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)  AS "Existencias a mano",
+         COALESCE(NULLIF(raw ->> 'reorder_level', '')::numeric, -1)         AS "Nivel de reposición",
+         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)          AS "Existencias a mano",
+         COALESCE(NULLIF(raw ->> 'actual_available_stock', '')::numeric, 0) AS "Existencias físicas",
          COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)
            - COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
-         COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta"
+         COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
+         -- Por recibir (facturado pero no recibido físicamente) = contable - física.
+         GREATEST(
+           COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)
+             - COALESCE(NULLIF(raw ->> 'actual_available_stock', '')::numeric, 0), 0
+         ) AS "Cantidad pedida"
     FROM books.items
    WHERE sku IS NOT NULL AND sku <> ''`;
 

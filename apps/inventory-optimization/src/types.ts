@@ -48,6 +48,7 @@ export interface AnalysisResult {
     sales2026?: number;
     orderedQuantity: number;
     handQuantity: number;
+    physicalHandQuantity: number;
     committedQuantity: number;
     availableQuantity: number;
     manufacturer: string;

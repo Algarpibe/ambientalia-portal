@@ -91,6 +91,7 @@ export const processInventoryData = (
     const PRICE_KEYS = ['average_price', 'Precio', 'Unit Price', 'Precio Unitario'];
     const ORDERED_KEYS = ['Cantidad pedida', 'Ordered', 'Pedidos'];
     const HAND_KEYS = ['Existencias a mano', 'On Hand', 'Existencias'];
+    const PHYSICAL_KEYS = ['Existencias físicas', 'Existencias fisicas', 'Physical Stock', 'Física'];
     const COMMITTED_KEYS = ['Existencias comprometidas', 'Committed', 'Comprometido'];
     const AVAILABLE_KEYS = ['Disponible para la venta', 'Available', 'Disponible'];
     const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer', 'Proveedor', 'Provider'];
@@ -138,6 +139,7 @@ export const processInventoryData = (
                         level: Number(getValueByKeys(item, REPOSITION_KEYS) || 0),
                         ordered: Number(getValueByKeys(item, ORDERED_KEYS) || 0),
                         hand: Number(getValueByKeys(item, HAND_KEYS) || 0),
+                        physicalHand: Number(getValueByKeys(item, PHYSICAL_KEYS) || 0),
                         committed: Number(getValueByKeys(item, COMMITTED_KEYS) || 0),
                         available: Number(getValueByKeys(item, AVAILABLE_KEYS) || 0),
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim()
@@ -179,6 +181,7 @@ export const processInventoryData = (
             level: -1,
             ordered: 0,
             hand: 0,
+            physicalHand: 0,
             committed: 0,
             available: 0,
             manufacturer: 'Sin Fabricante'
@@ -371,6 +374,7 @@ export const processInventoryData = (
             sales2026: stats2026.total,
             orderedQuantity: inventoryInfo.ordered,
             handQuantity: inventoryInfo.hand,
+            physicalHandQuantity: inventoryInfo.physicalHand,
             committedQuantity: inventoryInfo.committed,
             availableQuantity: inventoryInfo.available,
             manufacturer: inventoryInfo.manufacturer,
