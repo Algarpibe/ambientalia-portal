@@ -34,15 +34,17 @@ const SALES_BY_YEAR_SQL = `
      AND it.sku IS NOT NULL AND it.sku <> ''
    GROUP BY it.sku`;
 
+// NULLIF(...,'') guards against service/non-inventory items whose Zoho stock
+// fields come as empty strings ("") instead of numbers, which would break ::numeric.
 const INVENTORY_SQL = `
   SELECT sku                                                  AS "SKU (Código de artículo)",
          name                                                 AS "Nombre del artículo",
          COALESCE(raw ->> 'manufacturer', raw ->> 'brand', '') AS "Fabricante",
-         COALESCE((raw ->> 'reorder_level')::numeric, -1)     AS "Nivel de reposición",
-         COALESCE((raw ->> 'stock_on_hand')::numeric, 0)      AS "Existencias a mano",
-         COALESCE((raw ->> 'stock_on_hand')::numeric, 0)
-           - COALESCE((raw ->> 'available_for_sale')::numeric, (raw ->> 'available_stock')::numeric, 0) AS "Existencias comprometidas",
-         COALESCE((raw ->> 'available_for_sale')::numeric, (raw ->> 'available_stock')::numeric, 0) AS "Disponible para la venta"
+         COALESCE(NULLIF(raw ->> 'reorder_level', '')::numeric, -1) AS "Nivel de reposición",
+         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)  AS "Existencias a mano",
+         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)
+           - COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
+         COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta"
     FROM books.items
    WHERE sku IS NOT NULL AND sku <> ''`;
 
