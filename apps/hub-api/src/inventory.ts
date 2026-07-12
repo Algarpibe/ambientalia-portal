@@ -36,23 +36,29 @@ const SALES_BY_YEAR_SQL = `
 
 // NULLIF(...,'') guards against service/non-inventory items whose Zoho stock
 // fields come as empty strings ("") instead of numbers, which would break ::numeric.
+// "Cantidad pedida" (por recibir) is the exact outstanding across open purchase
+// orders per item = SUM(quantity - received - cancelled), from books.purchase_orders.
 const INVENTORY_SQL = `
-  SELECT sku                                                  AS "SKU (Código de artículo)",
-         name                                                 AS "Nombre del artículo",
-         COALESCE(raw ->> 'manufacturer', raw ->> 'brand', '') AS "Fabricante",
-         COALESCE(NULLIF(raw ->> 'reorder_level', '')::numeric, -1)         AS "Nivel de reposición",
-         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)          AS "Existencias a mano",
-         COALESCE(NULLIF(raw ->> 'actual_available_stock', '')::numeric, 0) AS "Existencias físicas",
-         COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)
-           - COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
-         COALESCE(NULLIF(raw ->> 'available_for_sale', '')::numeric, NULLIF(raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
-         -- Por recibir (facturado pero no recibido físicamente) = contable - física.
-         GREATEST(
-           COALESCE(NULLIF(raw ->> 'stock_on_hand', '')::numeric, 0)
-             - COALESCE(NULLIF(raw ->> 'actual_available_stock', '')::numeric, 0), 0
-         ) AS "Cantidad pedida"
-    FROM books.items
-   WHERE sku IS NOT NULL AND sku <> ''`;
+  SELECT it.sku                                                  AS "SKU (Código de artículo)",
+         it.name                                                 AS "Nombre del artículo",
+         COALESCE(it.raw ->> 'manufacturer', it.raw ->> 'brand', '') AS "Fabricante",
+         COALESCE(NULLIF(it.raw ->> 'reorder_level', '')::numeric, -1)         AS "Nivel de reposición",
+         COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)          AS "Existencias a mano",
+         COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) AS "Existencias físicas",
+         COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)
+           - COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
+         COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
+         COALESCE(por.por_recibir, 0) AS "Cantidad pedida"
+    FROM books.items it
+    LEFT JOIN (
+      SELECT poli.item_id,
+             SUM(GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0)) AS por_recibir
+        FROM books.purchase_order_line_items poli
+        JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
+       WHERE po.status NOT IN ('draft', 'cancelled')
+       GROUP BY poli.item_id
+    ) por ON por.item_id = it.item_id
+   WHERE it.sku IS NOT NULL AND it.sku <> ''`;
 
 // Lead time: prefer the Zoho item "Lead Time" custom field (cf_lead_time, synced
 // into the item raw as the user fills it in Zoho); fall back to the seeded
