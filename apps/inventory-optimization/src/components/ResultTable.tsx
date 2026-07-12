@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { AnalysisResult } from '../types';
 import { StatusBadge, cn, Modal } from './ui';
+import SuggestedPO from './SuggestedPO';
 import { ArrowUpDown, Download, Settings2, Eye, EyeOff, GripVertical } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -178,7 +179,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: '10', label: 'Nov' },
             { key: '11', label: 'Dic' },
             { key: 'total', label: 'Total' },
-        ]
+        ],
+        // OC Sugerida se renderiza con su propio componente (agrupado por proveedor),
+        // no usa columnas de tabla; entrada vacía para no romper la maquinaria de columnas.
+        suggested_po: []
     };
 
     const [columns, setColumns] = useState<Record<string, ColumnConfig[]>>(() => {
@@ -255,7 +259,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [manufacturerFilter, setManufacturerFilter] = useState<string>('all');
     const [categoryFilter, setCategoryFilter] = useState<string>('all');
     const [onlyCommitted, setOnlyCommitted] = useState<boolean>(false);
-    const [activeTab, setActiveTab] = useState<'main' | 'service' | 'urgent' | 'current_inventory'>('main');
+    const [activeTab, setActiveTab] = useState<'main' | 'service' | 'urgent' | 'current_inventory' | 'suggested_po'>('main');
     const [sortField, setSortField] = useState<keyof AnalysisResult>('deviation');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
     const [variabilityFilter, setVariabilityFilter] = useState<string>('all');
@@ -294,6 +298,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             urgent: new Set(defaultColumns.urgent.map(c => c.key)),
             current_inventory: new Set(defaultColumns.current_inventory.map(c => c.key)),
             history: new Set(defaultColumns.history.map(c => c.key)),
+            suggested_po: new Set(),
         };
     });
 
@@ -567,8 +572,31 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                 >
                     Inventario Actual ({data.length})
                 </button>
+                <button
+                    onClick={() => {
+                        setActiveTab('suggested_po');
+                        setManufacturerFilter('all');
+                        setCategoryFilter('all');
+                    }}
+                    className={cn(
+                        "px-6 py-3 text-sm font-medium transition-colors",
+                        activeTab === 'suggested_po'
+                            ? "border-b-2 border-emerald-600 text-emerald-700 bg-emerald-50/40"
+                            : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                    )}
+                >
+                    OC Sugerida ({data.filter(item => {
+                        if (item.status !== 'Urgente' && item.status !== 'Pedir') return false;
+                        const threshold = Math.max(item.reorderPoint, item.erpLevel);
+                        return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity))) > 0;
+                    }).length})
+                </button>
             </div>
 
+            {activeTab === 'suggested_po' ? (
+                <SuggestedPO data={data} />
+            ) : (
+            <>
             <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50">
                 <div className="flex flex-wrap gap-3 w-full sm:w-auto">
                     <input
@@ -951,6 +979,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                 <span>Total en Vista: {filteredData.length}</span>
                 <span className="italic">Ambientalia Inventory Optimization v1.2</span>
             </div>
+            </>
+            )}
 
             <Modal
                 isOpen={!!selectedItem}

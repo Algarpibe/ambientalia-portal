@@ -48,7 +48,10 @@ const INVENTORY_SQL = `
          COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)
            - COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
          COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
-         COALESCE(por.por_recibir, 0) AS "Cantidad pedida"
+         COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
+         -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,
+         -- con fallback al Fabricante y luego a un literal.
+         COALESCE(ven.vendor_name, NULLIF(it.raw ->> 'manufacturer', ''), NULLIF(it.raw ->> 'brand', ''), 'Sin proveedor') AS "Proveedor"
     FROM books.items it
     LEFT JOIN (
       SELECT poli.item_id,
@@ -58,6 +61,19 @@ const INVENTORY_SQL = `
        WHERE po.status NOT IN ('draft', 'cancelled')
        GROUP BY poli.item_id
     ) por ON por.item_id = it.item_id
+    LEFT JOIN (
+      SELECT item_id, vendor_name FROM (
+        SELECT poli.item_id, po.vendor_name,
+               ROW_NUMBER() OVER (
+                 PARTITION BY poli.item_id
+                 ORDER BY COUNT(*) DESC, MAX(po.date) DESC
+               ) AS rn
+          FROM books.purchase_order_line_items poli
+          JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
+         WHERE po.vendor_name IS NOT NULL AND po.vendor_name <> ''
+         GROUP BY poli.item_id, po.vendor_name
+      ) ranked WHERE rn = 1
+    ) ven ON ven.item_id = it.item_id
    WHERE it.sku IS NOT NULL AND it.sku <> ''`;
 
 // Lead time: prefer the REAL lead time computed from received purchase orders

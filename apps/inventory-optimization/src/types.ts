@@ -57,6 +57,7 @@ export interface AnalysisResult {
     committedQuantity: number;
     availableQuantity: number;
     manufacturer: string;
+    vendor: string;
     erpLevel: number;
     variabilityClass: 'Alta' | 'Media' | 'Baja';
     demandType: 'Normal' | 'Anormal';

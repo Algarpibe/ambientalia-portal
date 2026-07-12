@@ -97,7 +97,8 @@ export const processInventoryData = (
     const PHYSICAL_KEYS = ['Existencias físicas', 'Existencias fisicas', 'Physical Stock', 'Física'];
     const COMMITTED_KEYS = ['Existencias comprometidas', 'Committed', 'Comprometido'];
     const AVAILABLE_KEYS = ['Disponible para la venta', 'Available', 'Disponible'];
-    const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer', 'Proveedor', 'Provider'];
+    const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer'];
+    const VENDOR_KEYS = ['Proveedor', 'Provider', 'Vendor'];
 
     // Create collections and maps
     const allSkus = new Set<string>();
@@ -145,7 +146,8 @@ export const processInventoryData = (
                         physicalHand: Number(getValueByKeys(item, PHYSICAL_KEYS) || 0),
                         committed: Number(getValueByKeys(item, COMMITTED_KEYS) || 0),
                         available: Number(getValueByKeys(item, AVAILABLE_KEYS) || 0),
-                        manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim()
+                        manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim(),
+                        vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim()
                     });
                 } else if (isLeadTime) {
                     targetMap.set(sku, {
@@ -192,7 +194,8 @@ export const processInventoryData = (
             physicalHand: 0,
             committed: 0,
             available: 0,
-            manufacturer: 'Sin Fabricante'
+            manufacturer: 'Sin Fabricante',
+            vendor: 'Sin proveedor'
         };
         const actualCurrentLevel = inventoryInfo.level;
 
@@ -433,6 +436,7 @@ export const processInventoryData = (
             committedQuantity: inventoryInfo.committed,
             availableQuantity: inventoryInfo.available,
             manufacturer: inventoryInfo.manufacturer,
+            vendor: inventoryInfo.vendor,
             erpLevel: inventoryInfo.level,
             variabilityClass,
             demandType,
