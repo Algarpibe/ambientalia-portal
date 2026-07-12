@@ -3,6 +3,7 @@ import cors from 'cors';
 import { getHubPool } from './db.js';
 import { requireApiKey } from './auth.js';
 import { getReconciliationData } from './reconciliation.js';
+import { getProfitabilityData } from './profitability.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -36,6 +37,15 @@ app.get('/api/reconciliation/data', requireApiKey, async (req, res) => {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
     const data = await getReconciliationData(getHubPool(), from, to);
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: errMsg(e) });
+  }
+});
+
+app.get('/api/profitability/data', requireApiKey, async (_req, res) => {
+  try {
+    const data = await getProfitabilityData(getHubPool());
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: errMsg(e) });
