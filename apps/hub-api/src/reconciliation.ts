@@ -7,16 +7,15 @@ export interface ReconciliationData {
 }
 
 // ---------------------------------------------------------------------------
-// SCHEMA NOTE (verify with /debug/schema against the live hub — see index.ts):
-// - books.invoices real columns (from @algarpibe/zoho-sync BooksInvoice):
-//   invoice_number, reference_number, customer_name, date, due_date, status,
-//   total, bcy_total, raw (full Zoho object), ...  There is NO typed `balance`
-//   column, so we read the outstanding balance from the raw Zoho object
-//   (raw->>'balance'), falling back to total.
-// - Customer payments are NOT typed by the package. The query below assumes a
-//   `books.customer_payments` table whose `raw` holds Zoho's `invoices` array
-//   (one applied invoice per element). CONFIRM table/columns via /debug/schema
-//   and adjust `paymentsSql` if the hub stores them differently.
+// SCHEMA (confirmed via /debug/schema + the zoho-hub-sync worker):
+// - books.invoices: invoice_number, reference_number, customer_name, date,
+//   due_date, status, total, raw (jsonb). No `balance` column → balance comes
+//   from the raw Zoho object (raw->>'balance'), falling back to total.
+// - books.customer_payments (payment_id, payment_number, customer_name, date,
+//   exchange_rate, amount, ...) + books.customer_payment_invoices
+//   (payment_id, invoice_number, amount_applied, ...): one applied-invoice row
+//   per (payment, invoice). amount_applied is in the invoice currency (FCY),
+//   consistent with invoices.total; BCY = amount_applied * exchange_rate.
 // ---------------------------------------------------------------------------
 
 export async function getInvoices(db: Pool, from?: string, to?: string): Promise<InvoiceDetails[]> {
@@ -38,20 +37,22 @@ export async function getInvoices(db: Pool, from?: string, to?: string): Promise
 }
 
 export async function getPayments(db: Pool, from?: string, to?: string): Promise<PaymentRecord[]> {
-  // Best-effort against books.customer_payments with Zoho's applied-invoices
-  // array in `raw`. Adjust after confirming the real schema via /debug/schema.
+  // One PaymentRecord per applied invoice, joining the payment header with its
+  // applied-invoice lines. amount_applied is FCY (invoice currency); BCY is
+  // derived with the payment's exchange_rate. Unused amounts are payment-level,
+  // not attributable to a single applied invoice, so they are 0 here.
   const hasRange = Boolean(from && to);
   const sql = `
     SELECT p.payment_number,
            p.customer_name,
-           app ->> 'invoice_number'                      AS invoice_number,
+           cpi.invoice_number,
            p.date,
-           (app ->> 'amount_applied')::numeric           AS amount_fcy,
-           0                                             AS unused_amount_fcy,
-           (app ->> 'amount_applied')::numeric           AS amount_bcy,
-           0                                             AS unused_amount_bcy
+           cpi.amount_applied                                  AS amount_fcy,
+           0                                                   AS unused_amount_fcy,
+           cpi.amount_applied * COALESCE(p.exchange_rate, 1)   AS amount_bcy,
+           0                                                   AS unused_amount_bcy
       FROM books.customer_payments p
-      CROSS JOIN LATERAL jsonb_array_elements((p.raw::jsonb) -> 'invoices') AS app
+      JOIN books.customer_payment_invoices cpi ON cpi.payment_id = p.payment_id
       ${hasRange ? 'WHERE p.date BETWEEN $1 AND $2' : ''}`;
   const { rows } = await db.query(sql, hasRange ? [from, to] : []);
   return rows.map(mapPaymentRow);
