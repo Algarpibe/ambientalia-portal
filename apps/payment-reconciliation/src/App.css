@@ -1,0 +1,6 @@
+/* Clean up default Vite styles to let Tailwind handle everything */
+#root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}

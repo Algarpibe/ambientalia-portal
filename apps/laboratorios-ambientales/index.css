@@ -1,0 +1,64 @@
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f8fafc;
+}
+.filter-select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.2em 1.2em;
+    padding-right: 2.5rem;
+}
+#loader {
+    border-top-color: #3498db;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.file-input-label {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+/* Estilos para el scroll del dropdown múltiple */
+.custom-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+.custom-scroll::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+/* Estilos para la respuesta de la IA renderizada */
+#ai-response ul {
+    list-style-type: disc;
+    padding-left: 2rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+#ai-response ol {
+    list-style-type: decimal;
+    padding-left: 2rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+#ai-response p {
+    margin-bottom: 1rem;
+}
+#ai-response p:last-child {
+    margin-bottom: 0;
+}
+#ai-response strong {
+    font-weight: 600;
+}

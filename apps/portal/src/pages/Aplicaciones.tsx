@@ -1,0 +1,121 @@
+import { Link } from 'react-router-dom';
+import {
+  BarChart3,
+  Wallet,
+  TrendingUp,
+  ChevronRight,
+  Beaker
+} from 'lucide-react';
+
+interface AppConfig {
+  name: string;
+  description: string;
+  path: string;
+  icon: any;
+  color: string;
+}
+
+const aplicaciones: AppConfig[] = [
+  {
+    name: "Conciliador de Pagos",
+    description: "Sincroniza y valida cobros con facturación pendiente en tiempo real.",
+    path: "/conciliador-pagos",
+    icon: Wallet,
+    color: "from-blue-400 to-blue-600"
+  },
+  {
+    name: "Rentabilidad Clientes",
+    description: "Identifica tus cuentas más valiosas con análisis de margen profundo.",
+    path: "/rentabilidad-clientes",
+    icon: TrendingUp,
+    color: "from-orange-400 to-rose-500"
+  },
+  {
+    name: "Análisis de Inventario",
+    description: "Algoritmos predictivos para evitar quiebres de stock y excesos.",
+    path: "/analisis-inventario",
+    icon: BarChart3,
+    color: "from-cyan-400 to-blue-500"
+  },
+  {
+    name: "Buscador de Laboratorios Ambientales",
+    description: "Búsqueda y análisis de laboratorios acreditados por IDEAM con datos en tiempo real.",
+    path: "/laboratorios-ambientales",
+    icon: Beaker,
+    color: "from-green-400 to-emerald-600"
+  }
+];
+
+export default function Aplicaciones() {
+  return (
+    <main className="flex-grow bg-transparent p-6 overflow-y-auto">
+      {/* Header */}
+      <header className="mb-8">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl flex items-center justify-center shadow-soft">
+            <BarChart3 className="text-white" size={24} />
+          </div>
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight text-gray-900">Aplicaciones</h1>
+            <p className="text-gray-500 mt-1">Soluciones empresariales avanzadas para análisis y gestión de datos</p>
+          </div>
+        </div>
+      </header>
+
+      {/* Grid de Aplicaciones */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+        {aplicaciones.map((app, index) => (
+          <Link
+            key={index}
+            to={app.path}
+            className="app-card p-8 group flex flex-col h-[280px]"
+          >
+            <div className="flex justify-between items-start mb-6">
+              <div className={`w-14 h-14 bg-gradient-to-br ${app.color} rounded-2xl flex items-center justify-center shadow-soft group-hover:scale-110 transition-transform duration-300`}>
+                <app.icon className="text-white" size={28} />
+              </div>
+            </div>
+
+            <h2 className="text-xl font-bold mb-3 text-gray-900 group-hover:text-blue-500 transition-colors">
+              {app.name}
+            </h2>
+            <p className="text-gray-600 leading-relaxed mb-6 flex-grow text-sm">
+              {app.description}
+            </p>
+
+            <div className="flex items-center gap-2 text-blue-500 font-semibold group-hover:gap-3 transition-all text-sm">
+              Abrir Aplicación <ChevronRight size={16} />
+            </div>
+          </Link>
+        ))}
+
+        {/* Add Application Card */}
+        <button className="app-card p-8 flex flex-col items-center justify-center border-dashed border-gray-300 hover:border-blue-500 bg-white group">
+          <div className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center group-hover:bg-blue-50 group-hover:border-blue-500 transition-all mb-4">
+            <span className="text-3xl text-gray-400 group-hover:text-blue-500 transition-colors">+</span>
+          </div>
+          <span className="font-semibold text-gray-700 group-hover:text-gray-900">Expandir Ecosistema</span>
+          <p className="text-xs text-gray-500 mt-2">Añadir nueva aplicación local</p>
+        </button>
+      </div>
+
+      {/* Stats */}
+      <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
+          <h3 className="text-sm font-medium text-gray-600 mb-2">Total Aplicaciones</h3>
+          <p className="text-3xl font-bold text-gray-900">{aplicaciones.length}</p>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
+          <h3 className="text-sm font-medium text-gray-600 mb-2">Sesiones Activas</h3>
+          <p className="text-3xl font-bold text-gray-900">8</p>
+          <p className="text-xs text-blue-600 mt-1">En este momento</p>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
+          <h3 className="text-sm font-medium text-gray-600 mb-2">Datos Procesados</h3>
+          <p className="text-3xl font-bold text-gray-900">2.4 GB</p>
+          <p className="text-xs text-gray-500 mt-1">Esta semana</p>
+        </div>
+      </div>
+    </main>
+  );
+}
