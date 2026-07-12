@@ -20,6 +20,13 @@ RUN npm install
 # Copiar el resto del código fuente
 COPY . .
 
+# Variables de build del cliente: Vite las inyecta en el bundle en tiempo de build.
+# EasyPanel pasa las variables de "Entorno" también como build args.
+ARG VITE_HUB_API_URL
+ARG VITE_HUB_API_KEY
+ENV VITE_HUB_API_URL=$VITE_HUB_API_URL
+ENV VITE_HUB_API_KEY=$VITE_HUB_API_KEY
+
 # Compilar la aplicación Portal con verificación estricta de tipos (tsc -b && vite build)
 RUN npm run build --workspace=apps/portal
 
