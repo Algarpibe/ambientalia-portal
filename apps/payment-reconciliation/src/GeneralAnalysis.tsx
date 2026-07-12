@@ -756,7 +756,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                           />
                         </div>
                         <p className="text-2xl font-bold text-emerald-700 leading-tight">
-                          ${formatNumber(totalReconciledAmount, 0)}
+                          COP {formatNumber(totalReconciledAmount, 0)}
                         </p>
                         <p className="text-emerald-600 text-xs mt-1">{filteredDataByDate.length} facturas</p>
                       </div>
@@ -800,7 +800,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                           />
                         </div>
                         <p className="text-2xl font-bold text-purple-700 leading-tight">
-                          ${formatNumber(totalReconciledAmount / (uniqueCustomers.length || 1), 0)}
+                          COP {formatNumber(totalReconciledAmount / (uniqueCustomers.length || 1), 0)}
                         </p>
                         <p className="text-purple-600 text-xs mt-1">Por cliente</p>
                       </div>
@@ -854,7 +854,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                                 revenueVariation >= 0 ? 'text-green-600' : 'text-red-600'
                               }`}
                             >
-                              ${formatNumber(Math.abs(totalReconciledAmount - previousPeriodAmount), 0)}
+                              COP {formatNumber(Math.abs(totalReconciledAmount - previousPeriodAmount), 0)}
                             </p>
                           </>
                         ) : (
@@ -955,7 +955,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                           {overdueMetrics.invoiceCount} facturas
                         </p>
                         <p className="text-red-600 text-xs text-sm font-medium">
-                          ${formatNumber(overdueMetrics.totalAmount, 0)}
+                          COP {formatNumber(overdueMetrics.totalAmount, 0)}
                         </p>
                       </div>
                       <div className="bg-red-600/10 p-2 rounded-lg flex-shrink-0">
@@ -1010,7 +1010,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                                   </button>
                                 </div>
                                 <span className="text-sm font-bold text-indigo-700">
-                                  ${formatNumber(customer.total, 0)}
+                                  COP {formatNumber(customer.total, 0)}
                                 </span>
                               </div>
                             ))}

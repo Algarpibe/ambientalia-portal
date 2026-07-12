@@ -131,15 +131,15 @@ const CashFlowProjections: React.FC<CashFlowProjectionsProps> = ({
                   }`}>
                     <td className="py-4 px-4 font-semibold text-slate-700 capitalize">{projection.month}</td>
                     <td className="py-4 px-4 text-right font-semibold text-blue-700">
-                      ${formatNumber(projection.projectedRevenue, 0)}
+                      COP {formatNumber(projection.projectedRevenue, 0)}
                     </td>
                     <td className="py-4 px-4 text-right font-semibold text-emerald-700">
-                      ${formatNumber(projection.projectedPayments, 0)}
+                      COP {formatNumber(projection.projectedPayments, 0)}
                     </td>
                     <td className={`py-4 px-4 text-right font-bold ${
                       projection.netFlow > 0 ? 'text-green-700' : 'text-orange-700'
                     }`}>
-                      ${formatNumber(projection.netFlow, 0)}
+                      COP {formatNumber(projection.netFlow, 0)}
                     </td>
                     <td className="py-4 px-4 text-center">
                       {projection.netFlow > 0 ? (
@@ -167,14 +167,14 @@ const CashFlowProjections: React.FC<CashFlowProjectionsProps> = ({
         <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl shadow-md shadow-blue-200/20 border border-blue-200 p-4">
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-2">Total Ingresos Proyectados (6m)</p>
           <p className="text-2xl font-bold text-blue-700 leading-tight">
-            ${formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.projectedRevenue, 0), 0)}
+            COP {formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.projectedRevenue, 0), 0)}
           </p>
         </div>
 
         <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl shadow-md shadow-emerald-200/20 border border-emerald-200 p-4">
           <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-2">Total Pagos Esperados (6m)</p>
           <p className="text-2xl font-bold text-emerald-700 leading-tight">
-            ${formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.projectedPayments, 0), 0)}
+            COP {formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.projectedPayments, 0), 0)}
           </p>
         </div>
 
@@ -193,7 +193,7 @@ const CashFlowProjections: React.FC<CashFlowProjectionsProps> = ({
               ? 'text-green-700'
               : 'text-orange-700'
           }`}>
-            ${formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.netFlow, 0), 0)}
+            COP {formatNumber(cashFlowProjections.reduce((sum, p) => sum + p.netFlow, 0), 0)}
           </p>
         </div>
       </div>
