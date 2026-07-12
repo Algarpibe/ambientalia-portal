@@ -87,6 +87,9 @@ export const processInventoryData = (
     const ITEM_NAME_KEYS = ['item_name', 'Nombre del artículo', 'Artículo', 'Nombre de Producto'];
     const REPOSITION_KEYS = ['Nivel de reposición', 'Nivel actual', 'Stock'];
     const LEAD_TIME_KEYS = ['Lead Time', 'Lead Time (días)', 'LT'];
+    const LEAD_TIME_STD_KEYS = ['Lead Time Desv', 'Lead Time Std', 'LT Desv'];
+    const LEAD_TIME_SOURCE_KEYS = ['Lead Time Fuente', 'LT Fuente'];
+    const LEAD_TIME_N_KEYS = ['Lead Time N', 'LT N'];
     const CATEGORY_KEYS = ['Nombre de categoría', 'category_name', 'Categoría', 'Categoria', 'Grupo'];
     const PRICE_KEYS = ['average_price', 'Precio', 'Unit Price', 'Precio Unitario'];
     const ORDERED_KEYS = ['Cantidad pedida', 'Ordered', 'Pedidos'];
@@ -103,7 +106,7 @@ export const processInventoryData = (
     const priceMap = new Map<string, number>();
 
     const inventoryMap = new Map<string, any>();
-    const leadTimeMap = new Map<string, number>();
+    const leadTimeMap = new Map<string, { days: number; std: number; source: string; n: number }>();
     const salesMap2026 = new Map<string, any>();
     const salesMap2025 = new Map<string, any>();
     const salesMap2024 = new Map<string, any>();
@@ -145,7 +148,12 @@ export const processInventoryData = (
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim()
                     });
                 } else if (isLeadTime) {
-                    targetMap.set(sku, Number(getValueByKeys(item, LEAD_TIME_KEYS) || 0));
+                    targetMap.set(sku, {
+                        days: Number(getValueByKeys(item, LEAD_TIME_KEYS) || 0),
+                        std: Number(getValueByKeys(item, LEAD_TIME_STD_KEYS) || 0),
+                        source: String(getValueByKeys(item, LEAD_TIME_SOURCE_KEYS) || 'Manual').trim(),
+                        n: Number(getValueByKeys(item, LEAD_TIME_N_KEYS) || 0),
+                    });
                 } else {
                     // Consolidate sales data if it already exists for this SKU
                     const existing = targetMap.get(sku) || {};
@@ -224,18 +232,27 @@ export const processInventoryData = (
         const activeMonths2026 = stats2026.activeMonths;
         const has2026Data = stats2026.total > 0;
 
-        const leadTimeDays = leadTimeMap.get(sku) || 0;
+        const leadInfo = leadTimeMap.get(sku) || { days: 0, std: 0, source: 'Manual', n: 0 };
+        const leadTimeDays = leadInfo.days;
+        const leadTimeStdDays = leadInfo.std;
+        const isComputedLeadTime = leadInfo.source === 'Calculado';
 
         // Lead Time Logic Adjustment:
         // 1. If LT is 0, it's a service (no buffer).
-        // 2. If LT is exactly 5, 10, 15, or 20, do NOT add the 30-day buffer.
-        // 3. Otherwise, add the 30-day buffer (ADMIN_DELAY_DAYS).
+        // 2. If the LT was computed from real receptions (source "Calculado"), it
+        //    already reflects real delays -> no admin buffer.
+        // 3. If LT is exactly 5, 10, 15, or 20 (manual convention), do NOT add the buffer.
+        // 4. Otherwise (manual theoretical LT), add the 30-day buffer (ADMIN_DELAY_DAYS).
         const noBufferValues = [5, 10, 15, 20];
-        const effectiveLeadTimeDays = noBufferValues.includes(leadTimeDays)
+        const effectiveLeadTimeDays = isComputedLeadTime
             ? leadTimeDays
-            : (leadTimeDays > 0 ? leadTimeDays + ADMIN_DELAY_DAYS : 0);
+            : (noBufferValues.includes(leadTimeDays)
+                ? leadTimeDays
+                : (leadTimeDays > 0 ? leadTimeDays + ADMIN_DELAY_DAYS : 0));
 
         const leadTimeTotalMonths = effectiveLeadTimeDays / 30;
+        // Lead-time variability in months (only meaningful when computed; 0 for manual).
+        const leadTimeStdMonths = isComputedLeadTime ? (leadTimeStdDays / 30) : 0;
 
         // Is Service Check
         const isService = leadTimeDays === 0 || actualCurrentLevel === -1;
@@ -283,6 +300,15 @@ export const processInventoryData = (
             weightedSigma = (0.5 * stats2025.stdDev) + (0.3 * stats2024.stdDev) + (0.2 * stats2023.stdDev);
         }
 
+        // Combined demand + lead-time variability (safety stock).
+        // SS = Z × √( LT·σ²_demanda + demanda²·σ²_LT )
+        // The 2nd term is 0 when the LT is manual (σ_LT = 0), so this reduces to the
+        // classic Z × σ_demanda × √LT and stays backward-compatible.
+        const combinedSigma = Math.sqrt(
+            (leadTimeTotalMonths * weightedSigma * weightedSigma)
+            + (selectedMonthlyAverage * selectedMonthlyAverage * leadTimeStdMonths * leadTimeStdMonths)
+        );
+
         // Financial Overrides Logic
         const unitPrice = priceMap.get(sku) || 0;
         let ss = 0;
@@ -302,12 +328,12 @@ export const processInventoryData = (
         } else if (unitPrice >= 1500) {
             // Alto Valor: Precio 1,500 - 10,000 USD
             const highValueZ = 1.28; // 80% confidence
-            ss = highValueZ * weightedSigma * Math.sqrt(leadTimeTotalMonths);
+            ss = highValueZ * combinedSigma;
             pdp = (selectedMonthlyAverage * leadTimeTotalMonths) + ss;
             q = selectedMonthlyAverage * 3; // 3 months demand
         } else {
             // Estándar: Precio < 1,500 USD
-            ss = SERVICE_LEVEL_Z * weightedSigma * Math.sqrt(leadTimeTotalMonths);
+            ss = SERVICE_LEVEL_Z * combinedSigma;
             pdp = (selectedMonthlyAverage * leadTimeTotalMonths) + ss;
             q = selectedMonthlyAverage * 6; // 6 months demand (standard logic)
         }
@@ -370,6 +396,9 @@ export const processInventoryData = (
             currentLevel: reportedLevel,
             leadTimeDays,
             leadTimeMonths: leadTimeTotalMonths,
+            leadTimeStdDays,
+            leadTimeSource: leadInfo.source,
+            leadTimeN: leadInfo.n,
             safetyStock: ss,
             reorderPoint: pdp,
             optimalQuantity: q,

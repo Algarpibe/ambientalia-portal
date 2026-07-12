@@ -112,6 +112,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
             { key: 'leadTimeDays', label: 'LT (Días)' },
+            { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
+            { key: 'leadTimeSource', label: 'Fuente LT' },
+            { key: 'leadTimeN', label: '# OC' },
             { key: 'deviation', label: 'Desviación' },
         ],
         service: [
@@ -124,6 +127,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
             { key: 'leadTimeDays', label: 'LT (Días)' },
+            { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
+            { key: 'leadTimeSource', label: 'Fuente LT' },
+            { key: 'leadTimeN', label: '# OC' },
             { key: 'deviation', label: 'Desviación' },
         ],
         urgent: [

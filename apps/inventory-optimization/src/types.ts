@@ -31,6 +31,9 @@ export interface AnalysisResult {
     currentLevel: number;
     leadTimeDays: number;
     leadTimeMonths: number;
+    leadTimeStdDays: number;
+    leadTimeSource: string;
+    leadTimeN: number;
     safetyStock: number;
     reorderPoint: number;
     optimalQuantity: number;
