@@ -9,6 +9,7 @@ COPY package*.json ./
 COPY apps/portal/package*.json ./apps/portal/
 COPY apps/laboratorios-ambientales/package*.json ./apps/laboratorios-ambientales/
 COPY apps/customer-profitability/package*.json ./apps/customer-profitability/
+COPY apps/customer-valuation/package*.json ./apps/customer-valuation/
 COPY apps/inventory-consolidation/package*.json ./apps/inventory-consolidation/
 COPY apps/inventory-optimization/package*.json ./apps/inventory-optimization/
 COPY apps/payment-reconciliation/package*.json ./apps/payment-reconciliation/

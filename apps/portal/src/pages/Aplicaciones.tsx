@@ -4,7 +4,8 @@ import {
   Wallet,
   TrendingUp,
   ChevronRight,
-  Beaker
+  Beaker,
+  Users
 } from 'lucide-react';
 
 interface AppConfig {
@@ -43,6 +44,13 @@ const aplicaciones: AppConfig[] = [
     path: "/laboratorios-ambientales",
     icon: Beaker,
     color: "from-green-400 to-emerald-600"
+  },
+  {
+    name: "Valoración de Clientes",
+    description: "Scoring de Valor y Riesgo por cliente: rentabilidad, pagos y recencia con segmentación automática.",
+    path: "/valoracion-clientes",
+    icon: Users,
+    color: "from-violet-400 to-purple-600"
   }
 ];
 

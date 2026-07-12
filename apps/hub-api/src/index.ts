@@ -5,6 +5,7 @@ import { requireApiKey } from './auth.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
+import { getCustomerValuationData } from './customerValuation.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -56,6 +57,15 @@ app.get('/api/profitability/data', requireApiKey, async (_req, res) => {
 app.get('/api/inventory/data', requireApiKey, async (_req, res) => {
   try {
     const data = await getInventoryData(getHubPool());
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: errMsg(e) });
+  }
+});
+
+app.get('/api/customer-valuation/data', requireApiKey, async (_req, res) => {
+  try {
+    const data = await getCustomerValuationData(getHubPool());
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: errMsg(e) });

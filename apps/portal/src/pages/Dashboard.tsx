@@ -8,7 +8,8 @@ import {
   Search,
   ChevronRight,
   Bell,
-  Wrench
+  Wrench,
+  Star
 } from 'lucide-react';
 
 interface AppConfig {
@@ -60,6 +61,14 @@ const apps: AppConfig[] = [
     icon: BarChart3,
     section: "aplicaciones",
     color: "from-cyan-400 to-blue-500"
+  },
+  {
+    name: "Valoración de Clientes",
+    description: "Scoring de Valor y Riesgo por cliente con segmentación y políticas comerciales.",
+    path: "/valoracion-clientes",
+    icon: Star,
+    section: "aplicaciones",
+    color: "from-violet-400 to-purple-600"
   }
 ];
 
