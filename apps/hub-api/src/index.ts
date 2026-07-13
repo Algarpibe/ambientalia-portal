@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import { getHubPool } from './db.js';
+import { getHubPool, initDb } from './db.js';
 import { requireAuth, verifyCredentials, issueToken } from './auth.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
@@ -122,4 +122,12 @@ app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
 process.on('unhandledRejection', (reason) => { console.error('unhandledRejection', reason); captureError(reason); });
 process.on('uncaughtException', (err) => { console.error('uncaughtException', err); captureError(err); });
 
-app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
+// Inicializa la BD (valida HUB_DB_URL, verifica conectividad, aplica migraciones
+// y seed) antes de aceptar tráfico. Si algo falla, initDb() termina el proceso.
+initDb()
+  .then(() => app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`)))
+  .catch((e) => {
+    console.error('FATAL: fallo en la inicialización de la base de datos.', e);
+    captureError(e, { endpoint: 'initDb' });
+    process.exit(1);
+  });
