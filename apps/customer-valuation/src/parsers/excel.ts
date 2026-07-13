@@ -215,12 +215,7 @@ export async function parseSales(file: File): Promise<SalesRecord[]> {
         .filter((r): r is SalesRecord => !!r);
       
       if (standardParsed.length > 0) {
-        console.log('✓ STANDARD MODE SUCCESS');
-        console.log(`  Total records parsed: ${standardParsed.length}`);
-        console.log('  Unique clients:', [...new Set(standardParsed.map(r => r.cliente))].slice(0, 3));
         return standardParsed;
-      } else {
-        console.log('⚠ Standard mode produced no results');
       }
     } catch (e) {
       console.log('✗ Standard parsing failed:', e instanceof Error ? e.message : 'Unknown error');
@@ -278,9 +273,6 @@ export async function parseSales(file: File): Promise<SalesRecord[]> {
   let currentClient = '';
   const records: SalesRecord[] = [];
   
-  console.log('Header row:', headerRow);
-  console.log('Column indices - SKU:', skuIdx, 'Qty:', qtyIdx, 'Amt:', amtIdx, 'Marca:', marcaIdx, 'Desc:', nombreArticuloIdx);
-  
   raw.slice(headerIndex + 1).forEach((row, idx) => {
     const skuCell = safeString(row[skuIdx]);
     const marcaCell = marcaIdx >= 0 ? safeString(row[marcaIdx]) : '';
@@ -288,15 +280,10 @@ export async function parseSales(file: File): Promise<SalesRecord[]> {
     const qtyCell = qtyIdx >= 0 ? safeString(row[qtyIdx]) : '';
     const amtCell = amtIdx >= 0 ? safeString(row[amtIdx]) : '';
 
-    if (idx < 10) {
-      console.log(`Row ${idx}: SKU=[${skuCell}] Marca=[${marcaCell}] Desc=[${nombreArticuloCell}] - Current client: ${currentClient}`);
-    }
-
     if (!skuCell && !marcaCell && !nombreArticuloCell && !qtyCell && !amtCell) return;
 
     if (skuCell && !marcaCell && !nombreArticuloCell) {
       currentClient = skuCell.trim();
-      console.log(`>>> Setting client: "${currentClient}"`);
       return;
     }
 
@@ -325,9 +312,6 @@ export async function parseSales(file: File): Promise<SalesRecord[]> {
     });
   });
 
-  console.log(`Total records parsed: ${records.length}`);
-  console.log('Unique clients:', [...new Set(records.map(r => r.cliente))]);
-  
   if (records.length === 0) throw new Error('No se extrajeron registros de ventas');
   return records;
 }

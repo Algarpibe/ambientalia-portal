@@ -30,7 +30,8 @@ const SALES_BY_YEAR_SQL = `
     JOIN books.invoices inv ON inv.invoice_id = li.invoice_id
     JOIN books.items it     ON it.item_id     = li.item_id
    WHERE inv.status NOT IN ('void', 'draft')
-     AND extract(year from inv.date) = $1
+     AND inv.date >= make_date($1::int, 1, 1)
+     AND inv.date <  make_date($1::int + 1, 1, 1)
      AND it.sku IS NOT NULL AND it.sku <> ''
    GROUP BY it.sku`;
 
