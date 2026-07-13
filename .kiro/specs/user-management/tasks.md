@@ -101,39 +101,39 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
   - Asegurar que todos los tests de `users.service.test.ts` y `users.properties.test.ts` pasan. Consultar al usuario si hay dudas sobre el comportamiento esperado.
 
 - [ ] 6. Implementar `AuditLogger`
-  - [ ] 6.1 Crear `users/audit.logger.ts` con el método `log(entry: AuditEntry)`
+  - [x] 6.1 Crear `users/audit.logger.ts` con el método `log(entry: AuditEntry)`
     - La entrada debe contener: `timestamp` (ISO 8601 UTC via `new Date().toISOString()`), `admin_email`, `operation`, `affected_email`
     - Escribir al log del servidor (stdout/console) en formato estructurado JSON
     - _Requirements: 5.5_
 
-  - [ ]* 6.2 Escribir test de propiedad: log de auditoría contiene los cuatro campos
+  - [x]* 6.2 Escribir test de propiedad: log de auditoría contiene los cuatro campos
     - **Property 13: Log de auditoría contiene los cuatro campos requeridos**
     - **Validates: Requirements 5.5**
     - Para cualquier operación administrativa, la entrada producida por `AuditLogger.log()` contiene `timestamp` ISO 8601 UTC, `admin_email`, `operation` (no vacío), y `affected_email`
 
 - [ ] 7. Implementar middlewares de autorización
-  - [ ] 7.1 Extender `requireAuth` en `apps/hub-api/src/auth.ts`
+  - [x] 7.1 Extender `requireAuth` en `apps/hub-api/src/auth.ts`
     - Después de verificar la firma del JWT, consultar `UserRepository.findById(user_id)` para verificar `status === 'active'`
     - Si `status` es `'inactive'` o `'pending'`, responder HTTP 401
     - Si el JWT es inválido o está ausente, responder HTTP 401
     - _Requirements: 2.4, 2.8, 6.2_
 
-  - [ ] 7.2 Crear middleware `requireAdmin` en `apps/hub-api/src/users/users.router.ts`
+  - [x] 7.2 Crear middleware `requireAdmin` en `apps/hub-api/src/users/users.router.ts`
     - Reutiliza `requireAuth` (encadenado), luego verifica `req.user.role === 'admin'`
     - Si no es admin, responder HTTP 403
     - _Requirements: 2.9, 2.10, 5.1_
 
-  - [ ] 7.3 Crear middleware `requireOwnerOrAdmin`
+  - [x] 7.3 Crear middleware `requireOwnerOrAdmin`
     - Verificar que `req.user.user_id === req.params.id` OR `req.user.role === 'admin'`
     - Si ninguna condición se cumple, responder HTTP 403
     - _Requirements: 3.5, 3.6_
 
-  - [ ]* 7.4 Escribir test de propiedad: JWT de usuario inactivo es rechazado
+  - [x]* 7.4 Escribir test de propiedad: JWT de usuario inactivo es rechazado
     - **Property 6: JWT de usuario inactivo es rechazado**
     - **Validates: Requirements 2.4, 2.8**
     - Para cualquier usuario con `status !== 'active'`, `requireAuth` devuelve HTTP 401 incluso con JWT criptográficamente válido y no expirado
 
-  - [ ]* 7.5 Escribir test de propiedad: autorización lector respeta límite propio/ajeno
+  - [x]* 7.5 Escribir test de propiedad: autorización lector respeta límite propio/ajeno
     - **Property 11: Autorización lector respeta límite propio/ajeno**
     - **Validates: Requirements 3.5, 3.6**
     - `requireOwnerOrAdmin` retorna 403 si `role='reader'` y `user_id !== :id`; permite el paso si `user_id === :id`
