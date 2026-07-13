@@ -1,9 +1,11 @@
 import { captureError } from './sentry.js'; // debe importarse primero (init de Sentry)
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { getHubPool } from './db.js';
 import { requireAuth, verifyCredentials, issueToken } from './auth.js';
+import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
@@ -11,6 +13,10 @@ import { getCustomerValuationData } from './customerValuation.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+
+// DATA-001 — compresión gzip: los payloads JSON (facturas/pagos/ítems) comprimen
+// ~5-10×, reduciendo mucho el tamaño en la red sin cambiar el dato ni la lógica.
+app.use(compression());
 
 // SEC-006 — CORS fail-closed: solo los orígenes de ALLOWED_ORIGIN (coma-separado).
 // Si no está configurado, NO se emite Access-Control-Allow-Origin (los navegadores
@@ -78,7 +84,7 @@ app.get('/api/reconciliation/data', requireAuth, async (req, res) => {
   try {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    const data = await getReconciliationData(getHubPool(), from, to);
+    const data = await cached(`reconciliation:${from || ''}:${to || ''}`, () => getReconciliationData(getHubPool(), from, to));
     res.json(data);
   } catch (e) {
     sendError(res, e, 'reconciliation');
@@ -87,7 +93,7 @@ app.get('/api/reconciliation/data', requireAuth, async (req, res) => {
 
 app.get('/api/profitability/data', requireAuth, async (_req, res) => {
   try {
-    const data = await getProfitabilityData(getHubPool());
+    const data = await cached('profitability', () => getProfitabilityData(getHubPool()));
     res.json(data);
   } catch (e) {
     sendError(res, e, 'profitability');
@@ -96,7 +102,7 @@ app.get('/api/profitability/data', requireAuth, async (_req, res) => {
 
 app.get('/api/inventory/data', requireAuth, async (_req, res) => {
   try {
-    const data = await getInventoryData(getHubPool());
+    const data = await cached('inventory', () => getInventoryData(getHubPool()));
     res.json(data);
   } catch (e) {
     sendError(res, e, 'inventory');
@@ -105,7 +111,7 @@ app.get('/api/inventory/data', requireAuth, async (_req, res) => {
 
 app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
   try {
-    const data = await getCustomerValuationData(getHubPool());
+    const data = await cached('customer-valuation', () => getCustomerValuationData(getHubPool()));
     res.json(data);
   } catch (e) {
     sendError(res, e, 'customer-valuation');
