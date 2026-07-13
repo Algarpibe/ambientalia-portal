@@ -23,14 +23,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import AbcXyzMatrix from './AbcXyzMatrix';
 
-// EOQ = √(2·D·S / H), con H = tasa mantenimiento anual × costo unitario.
-// D = demanda anual (uds), S = costo por pedido. 0 si no hay demanda o costo.
-function computeEoq(annualUnits: number, unitCost: number, orderCost: number, holdingRatePct: number): number {
-    const H = (holdingRatePct / 100) * unitCost;
-    if (annualUnits <= 0 || H <= 0 || orderCost <= 0) return 0;
-    return Math.max(1, Math.round(Math.sqrt((2 * annualUnits * orderCost) / H)));
-}
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
+import {
+    computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories,
+} from '../utils/resultTableLogic';
 
 interface SortableItemProps {
     id: string;
@@ -400,61 +396,16 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         }
     };
 
-    const displayData = data.filter(item => {
-        if (activeTab === 'current_inventory') return true;
-        if (activeTab === 'main') return !item.isService;
-        if (activeTab === 'service') return item.isService;
-        if (activeTab === 'urgent') {
-            const threshold = Math.max(item.reorderPoint, item.erpLevel);
-            const suggestedOrder = Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)));
-            return suggestedOrder > 0 && (threshold > 0 || item.availableQuantity < 0) &&
-                (item.availableQuantity < 0 || (item.availableQuantity + item.orderedQuantity) <= threshold);
-        }
-        return true;
-    });
+    const displayData = filterByTab(data, activeTab);
 
-    const filteredData = displayData.filter(item => {
-        const matchesSearch =
-            item.sku.toLowerCase().includes(filter.toLowerCase()) ||
-            item.itemName.toLowerCase().includes(filter.toLowerCase()) ||
-            item.category.toLowerCase().includes(filter.toLowerCase());
-        const matchesStatus = (activeTab === 'urgent') || statusFilter === 'all' || item.status === statusFilter;
-        const matchesManufacturer = manufacturerFilter === 'all' || item.manufacturer === manufacturerFilter;
-        const matchesCategory = categoryFilter === 'all' || item.category === categoryFilter;
-        const matchesCommitted = activeTab !== 'urgent' || !onlyCommitted || item.committedQuantity > 0;
-
-        const matchesVariability = variabilityFilter === 'all' || item.variabilityClass === variabilityFilter;
-        const matchesDemandType = demandTypeFilter === 'all' || item.demandType === demandTypeFilter;
-        const matchesValueType = valueTypeFilter === 'all' || item.valueClass === valueTypeFilter;
-
-        const matchesTracking = trackingFilter === 'all' ||
-            (trackingFilter === 'tracked' && item.currentLevel !== -1) ||
-            (trackingFilter === 'untracked' && item.currentLevel === -1);
-
-        const itemAbc = abcBasis === 'cost' ? item.abcClass : item.abcClassRevenue;
-        const matchesAbc = abcFilter === 'all' || itemAbc === abcFilter;
-        const matchesXyz = xyzFilter === 'all' || item.xyzClass === xyzFilter;
-        const matchesPattern = patternFilter === 'all' || item.demandPattern === patternFilter;
-
-        return matchesSearch && matchesStatus && matchesManufacturer && matchesCategory && matchesCommitted && matchesVariability && matchesDemandType && matchesValueType && matchesTracking && matchesAbc && matchesXyz && matchesPattern;
-    }).sort((a, b) => {
-        const aValue = a[sortField];
-        const bValue = b[sortField];
-        if (typeof aValue === 'boolean') {
-            return sortDirection === 'asc'
-                ? (aValue === bValue ? 0 : aValue ? 1 : -1)
-                : (aValue === bValue ? 0 : aValue ? -1 : 1);
-        }
-        if (typeof aValue === 'string' && typeof bValue === 'string') {
-            return sortDirection === 'asc'
-                ? aValue.localeCompare(bValue)
-                : bValue.localeCompare(aValue);
-        }
-        // numeric sort
-        if ((aValue as any) < (bValue as any)) return sortDirection === 'asc' ? -1 : 1;
-        if ((aValue as any) > (bValue as any)) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
-    });
+    const filteredData = sortResults(
+        filterResults(displayData, activeTab, {
+            filter, statusFilter, manufacturerFilter, categoryFilter, onlyCommitted,
+            variabilityFilter, demandTypeFilter, valueTypeFilter, trackingFilter,
+            abcBasis, abcFilter, xyzFilter, patternFilter,
+        }),
+        sortField, sortDirection,
+    );
 
     const exportToExcel = async () => {
         const XLSX = await import('xlsx');
@@ -530,29 +481,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     };
 
 
-    const manufacturers = Array.from(new Set(data.filter(r => {
-        if (activeTab === 'main') return !r.isService;
-        if (activeTab === 'service') return r.isService;
-        if (activeTab === 'urgent') {
-            const threshold = Math.max(r.reorderPoint, r.erpLevel);
-            const suggestedOrder = Math.max(0, Math.round(threshold + r.optimalQuantity - (r.availableQuantity + r.orderedQuantity)));
-            return suggestedOrder > 0 && (threshold > 0 || r.availableQuantity < 0) &&
-                (r.availableQuantity < 0 || (r.availableQuantity + r.orderedQuantity) <= threshold);
-        }
-        return true;
-    }).map(r => r.manufacturer))).sort();
+    const manufacturers = uniqueManufacturers(data, activeTab);
 
-    const categories = Array.from(new Set(data.filter(r => {
-        if (activeTab === 'main') return !r.isService;
-        if (activeTab === 'service') return r.isService;
-        if (activeTab === 'urgent') {
-            const threshold = Math.max(r.reorderPoint, r.erpLevel);
-            const suggestedOrder = Math.max(0, Math.round(threshold + r.optimalQuantity - (r.availableQuantity + r.orderedQuantity)));
-            return suggestedOrder > 0 && (threshold > 0 || r.availableQuantity < 0) &&
-                (r.availableQuantity < 0 || (r.availableQuantity + r.orderedQuantity) <= threshold);
-        }
-        return true;
-    }).map(r => r.category))).sort();
+    const categories = uniqueCategories(data, activeTab);
 
     return (
         <div className="bg-white shadow rounded-lg overflow-hidden border border-gray-200">
