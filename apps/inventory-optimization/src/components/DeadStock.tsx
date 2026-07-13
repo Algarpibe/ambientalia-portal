@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import type { AnalysisResult } from '../types';
 import { cn } from './ui';
 
@@ -53,7 +52,8 @@ export default function DeadStock({ data }: { data: AnalysisResult[] }) {
         return { rows, kpis };
     }, [data]);
 
-    const exportExcel = () => {
+    const exportExcel = async () => {
+        const XLSX = await import('xlsx');
         const out = rows.map((r) => ({
             SKU: r.sku,
             'Artículo': r.itemName,

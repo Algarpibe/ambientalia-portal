@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import * as XLSX from 'xlsx';
 import type { AnalysisResult } from '../types';
 import { cn } from './ui';
 
@@ -114,7 +113,8 @@ export default function SuggestedPO({ data }: { data: AnalysisResult[] }) {
         }
     };
 
-    const exportExcel = () => {
+    const exportExcel = async () => {
+        const XLSX = await import('xlsx');
         const rows = groups.flatMap((g) =>
             g.lines.map((l) => ({
                 Proveedor: g.vendor,

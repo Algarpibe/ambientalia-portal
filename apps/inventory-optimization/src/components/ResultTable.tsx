@@ -4,7 +4,6 @@ import { StatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
 import DeadStock from './DeadStock';
 import { ArrowUpDown, Download, Settings2, Eye, EyeOff, GripVertical } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import {
     DndContext,
     closestCenter,
@@ -457,7 +456,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         return 0;
     });
 
-    const exportToExcel = () => {
+    const exportToExcel = async () => {
+        const XLSX = await import('xlsx');
         const wb = XLSX.utils.book_new();
 
         const formatData = (items: AnalysisResult[]) => items.map(item => ({
@@ -508,7 +508,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         XLSX.writeFile(wb, `Analisis_Ambientalia_${new Date().toISOString().split('T')[0]}.xlsx`);
     };
 
-    const exportToERP = () => {
+    const exportToERP = async () => {
+        const XLSX = await import('xlsx');
         const erpData = data.filter(r => !r.isService).map(item => ({
             sku: item.sku,
             new_reorder_level: Math.round(item.reorderPoint),

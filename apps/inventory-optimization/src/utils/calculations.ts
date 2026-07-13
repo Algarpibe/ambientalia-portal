@@ -1,5 +1,4 @@
 import type { RawInventoryData, RawSalesData, AnalysisResult, RawLeadTimeData } from '../types';
-import * as XLSX from 'xlsx';
 
 // Constants
 const ADMIN_DELAY_DAYS = 30;
@@ -55,50 +54,6 @@ const months = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
-
-export const parseExcel = (file: File): Promise<any[]> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = e.target?.result;
-                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert to array of arrays first to find the header row
-                const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-
-                if (!rawRows || rawRows.length === 0) {
-                    resolve([]);
-                    return;
-                }
-
-                // Find header row: Look for a row containing 'SKU' or 'Artículo'
-                let headerRowIndex = 0;
-                const targetKeys = ['sku', 'articulo', 'artículo', 'código', 'codigo', 'item'];
-                for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
-                    const row = rawRows[i];
-                    if (row && Array.isArray(row) && row.some(cell => {
-                        if (cell === null || cell === undefined) return false;
-                        const s = String(cell).toLowerCase();
-                        return targetKeys.some(key => s.includes(key));
-                    })) {
-                        headerRowIndex = i;
-                        break;
-                    }
-                }
-
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRowIndex });
-                resolve(jsonData);
-            } catch (error) {
-                reject(error);
-            }
-        };
-        reader.onerror = (error) => reject(error);
-        reader.readAsArrayBuffer(file);
-    });
-};
 
 const calculateStdDev = (values: number[], limit?: number): number => {
     const relevantValues = limit ? values.slice(0, limit) : values;
