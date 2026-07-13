@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import { aggregateClients, aggregateClientsExtended, getPopulationStats } from './metrics/clientAggregator';
+import { filterClients, uniqueClientNames } from './metrics/clientListHelpers';
 import { loadFromHub } from './hub/loadFromHub';
 import { ClientProfile, CustomerSalesYearRecord, InvoiceRecord, MasterCostRecord, PaymentRecord, SalesRecord, ScoringConfig, DEFAULT_SCORING_CONFIG, ExtendedClientProfile, ExtendedScoringConfig, DEFAULT_EXTENDED_CONFIG } from './types';
 import { MatrixChart } from './ui/MatrixChart';
@@ -620,24 +621,14 @@ export default function App() {
 
   const stats = useMemo(() => getPopulationStats(clients), [clients]);
 
-  const filtered = clients.filter((c) => {
-    const matchesQuadrant = selectedQuadrant ? c.scores?.quadrant === selectedQuadrant : true;
-    const matchesSegment = selectedSegment ? c.scores?.segment === selectedSegment : true;
-    const matchesSearch = search
-      ? c.displayName.toLowerCase().includes(search.toLowerCase()) || c.clientKey.includes(search.toLowerCase())
-      : true;
-
-    return matchesQuadrant && matchesSegment && matchesSearch;
-  });
+  const filtered = filterClients(clients, { selectedQuadrant, selectedSegment, search });
 
   const handleSelectClient = (client: ClientProfile) => {
     setDetailClient(client);
   };
 
   // Clientes únicos para el dropdown
-  const uniqueClients = useMemo(() => {
-    return Array.from(new Set(clients.map(c => c.displayName))).sort((a, b) => a.localeCompare(b));
-  }, [clients]);
+  const uniqueClients = useMemo(() => uniqueClientNames(clients), [clients]);
 
   // Pantalla de carga mientras el hub responde (auto-carga desde Zoho).
   if (hubLoading) {
