@@ -13,7 +13,7 @@ type DemandPattern = 'Suave' | 'Intermitente' | 'Errática' | 'Lumpy';
 // Croston / SBA (Syntetos-Boylan Approximation) sobre una serie mensual.
 // Separa tamaño de demanda (z) e intervalo entre demandas (p), ambos suavizados
 // por exponencial. Devuelve el pronóstico por período, ADI, CV² y el patrón.
-function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
+export function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
     forecast: number; adi: number; cv2: number; pattern: DemandPattern; demands: number;
 } {
     let z = 0;      // tamaño suavizado
