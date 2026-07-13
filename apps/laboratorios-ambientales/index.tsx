@@ -1,6 +1,7 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- INTERFACE DEFINITION ---
@@ -308,7 +309,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 config: { systemInstruction: summarizationSystemInstruction }
             });
 
-            aiResponseEl.innerHTML = marked.parse(summaryResponse.text || "") as string;
+            // SEC-004 — sanea la salida del modelo antes de inyectarla como HTML.
+            aiResponseEl.innerHTML = DOMPurify.sanitize(marked.parse(summaryResponse.text || "") as string);
 
         } catch (error) {
             console.error("Error en el análisis con IA:", error);

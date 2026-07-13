@@ -2,7 +2,7 @@
 # In EasyPanel: Dockerfile path = apps/hub-api/Dockerfile, build context = repo root.
 # NPM_TOKEN is an ARG used INLINE in the RUN (never an ENV) so it is not baked
 # into any image layer/history; docker history shows "$NPM_TOKEN", not the value.
-FROM node:20-alpine AS build
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
 WORKDIR /app
 ARG NPM_TOKEN
 COPY apps/hub-api/package.json ./package.json
@@ -12,7 +12,7 @@ COPY apps/hub-api/tsconfig.json ./tsconfig.json
 COPY apps/hub-api/src ./src
 RUN npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runtime
 WORKDIR /app
 ARG NPM_TOKEN
 COPY apps/hub-api/package.json ./package.json
