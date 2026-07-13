@@ -225,7 +225,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - _Requirements: 5.1, 5.2, 5.3, 4.5_
 
 - [ ] 14. Extender `Auth.tsx` con el formulario de registro
-  - [ ] 14.1 Añadir tab/sección de registro en `apps/portal/src/pages/Auth.tsx`
+  - [x] 14.1 Añadir tab/sección de registro en `apps/portal/src/pages/Auth.tsx`
     - Campos: nombre completo (máx 100 chars), correo electrónico (máx 254 chars), contraseña
     - Validación inline en el cliente antes de enviar (nombre no vacío, email formato básico, password ≥ 8 chars)
     - Llamar a `POST /api/auth/register`; en éxito (201) mostrar mensaje "Tu solicitud está pendiente de aprobación" y NO emitir JWT
@@ -235,21 +235,21 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - _Requirements: 1.1, 1.8, 1.9_
 
 - [ ] 15. Implementar página `AdminUsers` y componentes del Panel Admin
-  - [ ] 15.1 Crear `apps/portal/src/pages/admin/AdminUsers.tsx`
+  - [x] 15.1 Crear `apps/portal/src/pages/admin/AdminUsers.tsx`
     - Página principal del panel admin, protegida por `RequireAdmin`
     - Llama a `GET /api/users?page=N` para cargar la lista
     - Paginación de 50 usuarios por página con controles prev/next
     - Muestra: nombre, correo, estado (badge), fecha de registro
     - _Requirements: 2.1_
 
-  - [ ] 15.2 Crear componente `UserTable.tsx` con `UserStatusBadge` y `UserActionsMenu`
+  - [x] 15.2 Crear componente `UserTable.tsx` con `UserStatusBadge` y `UserActionsMenu`
     - `UserStatusBadge`: muestra el estado con colores diferenciados (pending, active, inactive)
     - `UserActionsMenu`: menú contextual con acciones según el estado actual del usuario (aprobar, desactivar, reactivar, eliminar, cambiar rol)
     - Las acciones llaman a los endpoints `PATCH /status`, `PATCH /role`, `DELETE` correspondientes
     - Deshabilitar las acciones que apuntarían al propio admin (user_id === JWT user_id)
     - _Requirements: 2.2, 2.3, 2.5, 2.6, 2.7, 3.2_
 
-  - [ ] 15.3 Crear componente `AppAssignModal.tsx`
+  - [x] 15.3 Crear componente `AppAssignModal.tsx`
     - Modal que muestra checkboxes de todas las apps disponibles
     - Precarga el estado actual llamando al estado del usuario
     - Al confirmar, llama a `PUT /api/users/:id/apps`

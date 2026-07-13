@@ -279,6 +279,19 @@ describe('PUT /api/users/:id/apps', () => {
     const res = await request(app).put('/api/users/no-existe/apps').set(bearer(adminToken)).send({ apps: [] });
     expect(res.status).toBe(404);
   });
+
+  it('GET apps devuelve las asignadas', async () => {
+    const u = db.seedUser({ email: 'getapps@x.com', status: 'active' });
+    await request(app).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['inventory', 'customer-profitability'] });
+    const res = await request(app).get(`/api/users/${u.id}/apps`).set(bearer(adminToken));
+    expect(res.status).toBe(200);
+    expect([...res.body.apps].sort()).toEqual(['customer-profitability', 'inventory']);
+  });
+
+  it('GET apps de usuario inexistente → 404', async () => {
+    const res = await request(app).get('/api/users/no-existe/apps').set(bearer(adminToken));
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('DELETE /api/users/:id', () => {

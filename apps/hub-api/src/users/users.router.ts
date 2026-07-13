@@ -127,6 +127,15 @@ export function createUsersRouter(pool: Pool): Router {
     }
   });
 
+  // GET /api/users/:id/apps — apps asignadas (para precargar el modal de asignación).
+  router.get('/users/:id/apps', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json({ apps: await service.getUserApps(req.params.id) });
+    } catch (e) {
+      sendError(res, e, 'get_apps');
+    }
+  });
+
   // PUT /api/users/:id/apps { apps: string[] }
   router.put('/users/:id/apps', requireAdmin, async (req: Request, res: Response) => {
     const admin = getPayload(req);

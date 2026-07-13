@@ -2,6 +2,16 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { API_BASE, setToken } from '../../auth';
+import { notify } from '../../lib/notify';
+
+type FieldErrors = { fullName?: string; email?: string; password?: string };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FIELD_MESSAGES: Record<string, string> = {
+  fullName: 'Ingresa tu nombre (máx. 100 caracteres).',
+  email: 'Correo electrónico inválido.',
+  password: 'La contraseña debe tener al menos 8 caracteres.',
+};
 
 interface AuthRightPanelProps {
   isSignUp: boolean;
@@ -19,6 +29,8 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [registerSuccess, setRegisterSuccess] = useState(false);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -27,17 +39,62 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
       [name]: value
     }));
     setError(''); // Clear error when user starts typing
+    setFieldErrors(prev => ({ ...prev, [name]: undefined }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  /** Validación cliente del registro (Req 1.1): nombre ≤100, email formato, pass ≥8. */
+  const validateRegister = (): FieldErrors => {
+    const errs: FieldErrors = {};
+    const name = formData.fullName.trim();
+    if (name.length < 1 || name.length > 100) errs.fullName = FIELD_MESSAGES.fullName;
+    const email = formData.email.trim();
+    if (email.length === 0 || email.length > 254 || !EMAIL_RE.test(email)) errs.email = FIELD_MESSAGES.email;
+    if (formData.password.length < 8) errs.password = FIELD_MESSAGES.password;
+    return errs;
+  };
 
-    // El registro lo gestiona el administrador (usuarios por configuración).
-    if (isSignUp) {
-      setError('El registro de usuarios lo gestiona el administrador.');
-      return;
+  const handleRegister = async () => {
+    setError('');
+    const errs = validateRegister();
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return; // Req 1.9: no continúa si hay errores
+
+    setIsLoading(true);
+    try {
+      if (!API_BASE) throw new Error('config');
+      const res = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: formData.fullName.trim(),
+          email: formData.email.trim(),
+          password: formData.password,
+        }),
+      });
+      if (res.status === 201) {
+        setRegisterSuccess(true); // Req 1.8: mensaje pendiente, sin emitir JWT
+        return;
+      }
+      if (res.status === 409) {
+        setFieldErrors({ email: 'Este correo ya está registrado.' });
+        return;
+      }
+      if (res.status === 400) {
+        const body = await res.json().catch(() => ({}));
+        const field = (body as { field?: string })?.field;
+        if (field && FIELD_MESSAGES[field]) setFieldErrors({ [field]: FIELD_MESSAGES[field] });
+        else setError('Revisa los datos ingresados.');
+        return;
+      }
+      setError('No se pudo completar el registro. Reintenta.');
+    } catch {
+      notify('No se pudo conectar con el servidor. Reintenta.', 'error');
+    } finally {
+      setIsLoading(false);
     }
+  };
 
+  const handleLogin = async () => {
     setIsLoading(true);
     setError('');
     try {
@@ -63,6 +120,12 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSignUp) void handleRegister();
+    else void handleLogin();
   };
 
   return (
@@ -93,10 +156,35 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
         </button>
       </div>
 
+      {/* Sign Up: mensaje de solicitud pendiente tras un registro exitoso (Req 1.8) */}
+      {isSignUp && registerSuccess && (
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <CheckCircle2 className="w-16 h-16 text-cyan-400 mb-6" />
+          <h3 className="text-2xl font-bold text-white mb-3">Solicitud enviada</h3>
+          <p className="text-gray-300 mb-8 max-w-sm">
+            Tu solicitud de acceso está <strong>pendiente de aprobación</strong> por un administrador.
+            Te avisaremos cuando tu cuenta esté activa.
+          </p>
+          <button
+            type="button"
+            onClick={() => onToggle(false)}
+            className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
+            Volver a iniciar sesión
+          </button>
+        </div>
+      )}
+
       {/* Sign Up Form */}
-      {isSignUp && (
-        <form onSubmit={handleSubmit} className="flex-1">
+      {isSignUp && !registerSuccess && (
+        <form onSubmit={handleSubmit} className="flex-1" noValidate>
           <h3 className="text-2xl font-bold text-white mb-8">Crea tu cuenta</h3>
+
+          {/* Error Message (registro) */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-500 bg-opacity-20 border border-red-500 border-opacity-50 rounded-lg">
+              <p className="text-red-300 text-sm">{error}</p>
+            </div>
+          )}
 
           {/* Full Name Field */}
           <div className="mb-6">
@@ -111,9 +199,11 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 value={formData.fullName}
                 onChange={handleInputChange}
                 placeholder="Juan Pérez"
+                maxLength={100}
                 className="w-full pl-12 pr-4 py-3 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10 text-white placeholder-gray-500 transition-all duration-300 focus:outline-none focus:bg-opacity-10 focus:border-opacity-30 focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-20"
               />
             </div>
+            {fieldErrors.fullName && <p className="mt-2 text-sm text-red-300">{fieldErrors.fullName}</p>}
           </div>
 
           {/* Email Field */}
@@ -129,9 +219,11 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 value={formData.email}
                 onChange={handleInputChange}
                 placeholder="tu@ejemplo.com"
+                maxLength={254}
                 className="w-full pl-12 pr-4 py-3 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10 text-white placeholder-gray-500 transition-all duration-300 focus:outline-none focus:bg-opacity-10 focus:border-opacity-30 focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-20"
               />
             </div>
+            {fieldErrors.email && <p className="mt-2 text-sm text-red-300">{fieldErrors.email}</p>}
           </div>
 
           {/* Password Field */}
@@ -160,6 +252,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 )}
               </button>
             </div>
+            {fieldErrors.password && <p className="mt-2 text-sm text-red-300">{fieldErrors.password}</p>}
           </div>
 
           {/* Terms Checkbox */}

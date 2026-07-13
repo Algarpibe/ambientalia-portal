@@ -132,6 +132,12 @@ export class UserService {
     return this.repo.setApps(id, appIds);
   }
 
+  /** Devuelve las apps asignadas a un usuario. 404 si no existe (Req 4.1). */
+  async getUserApps(id: string): Promise<string[]> {
+    if (!(await this.repo.findById(id))) throw new UserError('user_not_found', 404);
+    return this.repo.getApps(id);
+  }
+
   /** Devuelve la proyección pública de un usuario; 404 si no existe. */
   async getUser(id: string): Promise<UserPublic> {
     const u = await this.repo.findById(id);
