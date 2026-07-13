@@ -1,5 +1,7 @@
 # Desarrollo — antigravity-suite
 
+[![CI](https://github.com/Algarpibe/ambientalia-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/Algarpibe/ambientalia-portal/actions/workflows/ci.yml)
+
 Monorepo npm workspaces (`apps/*`). Node **>= 20** (ver `.nvmrc`).
 
 ## Requisitos de build
