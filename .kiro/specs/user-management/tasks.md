@@ -187,7 +187,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Verificar que el orden de middlewares es correcto (rate limit antes de auth)
     - _Requirements: 1.2, 2.1, 3.2, 4.2_
 
-- [ ] 11. Checkpoint — Verificar endpoints de Hub_API
+- [x] 11. Checkpoint — Verificar endpoints de Hub_API
   - Ejecutar `vitest --run` en `apps/hub-api` para confirmar que todos los tests pasan. Verificar que el servidor arranca y los endpoints responden correctamente con supertest. Consultar al usuario si hay dudas.
 
 - [ ] 12. Implementar `useAuth` hook en el Portal
