@@ -7,11 +7,16 @@ instead of parsing Excel exports.
 
 ## Endpoints
 
+Auth = `Authorization: Bearer <jwt>` (el JWT se obtiene en `/api/login`).
+
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
 | GET | `/health` | none | `{ ok, deals, invoices, tickets }` (hub counts) |
-| GET | `/api/reconciliation/data?from=&to=` | `x-api-key` | `{ invoices: InvoiceDetails[], payments: PaymentRecord[] }` |
-| GET | `/debug/schema` | `x-api-key` | books tables/columns + sample `raw` keys (temporary — for finalizing the payments query; remove after) |
+| POST | `/api/login` | none | `{ token }` — valida credenciales (`AUTH_USERS`) y emite un JWT |
+| GET | `/api/reconciliation/data?from=&to=` | Bearer JWT | `{ invoices, payments }` |
+| GET | `/api/profitability/data` | Bearer JWT | datos de rentabilidad por cliente |
+| GET | `/api/inventory/data` | Bearer JWT | datos de inventario/reposición |
+| GET | `/api/customer-valuation/data` | Bearer JWT | valoración de clientes |
 
 ## EasyPanel service
 
@@ -23,34 +28,44 @@ instead of parsing Excel exports.
 - **Runtime env** (*Entorno*):
   - `HUB_DB_URL=postgres://hub_reader:<PASSWORD>@ambientalia_project_zoho-hub-db:5432/zoho-hub`
   - `ALLOWED_ORIGIN=<portal public domain>` (e.g. `https://portal.tu-dominio.com`)
-  - `API_KEY=<shared secret>`
+  - `JWT_SECRET=<secreto largo aleatorio>` — firma/verifica los JWT.
+  - `AUTH_USERS=email:hashBcrypt,...` — usuarios permitidos (hashes bcrypt).
+  - `JWT_TTL` — opcional, vida del token (por defecto `8h`).
   - `PORT` — injected by EasyPanel; the app listens on it.
 - **Domain:** assign a public domain to the service, pointing to the container
   port EasyPanel maps (the app uses `$PORT`).
 
-## Portal build env (for the Conciliador SPA)
+## Portal build env
 
 Set these where the portal image is built:
 - `VITE_HUB_API_URL=<hub-api public domain>` (e.g. `https://api.tu-dominio.com`)
-- `VITE_HUB_API_KEY=<same shared secret>`  ⚠️ visible in the client bundle — a
-  light deterrent only, not real protection (see the design spec).
+
+El portal autentica con JWT (login → `Authorization: Bearer`), así que **no**
+lleva ninguna clave de API en el bundle.
 
 ## Local development
 
 ```bash
 # install (needs the token once)
 NPM_TOKEN=<pat> npm install --workspace=apps/hub-api
-# run against the hub (needs network reach to the DB, e.g. a tunnel)
-HUB_DB_URL="postgres://hub_reader:***@host:5432/zoho-hub" API_KEY=dev \
+# run against the hub (needs network reach to the DB, e.g. a tunnel).
+# AUTH_USERS: usa un hash bcrypt de una contraseña de prueba.
+HUB_DB_URL="postgres://hub_reader:***@host:5432/zoho-hub" \
+  JWT_SECRET=dev-secret AUTH_USERS="dev@x.com:<hashBcrypt>" \
   npm run dev --workspace=apps/hub-api
 curl http://localhost:3001/health
-curl -H "x-api-key: dev" http://localhost:3001/api/reconciliation/data | head -c 400
+# login → token, luego llamar con Bearer
+TOKEN=$(curl -s -XPOST http://localhost:3001/api/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"dev@x.com","password":"<pass>"}' | jq -r .token)
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3001/api/reconciliation/data | head -c 400
 ```
 
 ## Security note
 
-`API_KEY` is a shared secret embedded in the SPA bundle — it deters casual
-access but is not real auth. The effective boundary is that the hub is only
-reachable through this service and that CORS is restricted to the portal
-origin. Real per-user auth (validating the portal login in `hub-api`) is a
-planned follow-up.
+Auth real por JWT: `/api/login` valida credenciales (bcrypt contra `AUTH_USERS`)
+y emite un token firmado con `JWT_SECRET`; los endpoints de datos exigen
+`Authorization: Bearer`. Defensa en profundidad: el hub solo es alcanzable a
+través de este servicio y CORS está restringido al origen del portal
+(`ALLOWED_ORIGIN`). No hay ninguna clave compartida en el bundle del cliente.

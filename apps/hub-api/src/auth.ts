@@ -45,15 +45,11 @@ export function issueToken(email: string): string {
 }
 
 /**
- * Auth de los endpoints de datos. Transición DUAL:
- *  - Acepta `Authorization: Bearer <jwt>` válido (nuevo, recomendado).
- *  - Acepta la vieja `x-api-key` mientras convive el portal anterior; retirar
- *    (borrar API_KEY del entorno) una vez que portal y hub-api estén al día.
+ * Auth de los endpoints de datos. Solo `Authorization: Bearer <jwt>` válido.
+ * (La `x-api-key` legacy de la transición se retiró: el portal ya autentica
+ * 100% por JWT vía /api/login.)
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const legacyKey = process.env.API_KEY;
-  if (legacyKey && req.header('x-api-key') === legacyKey) return next();
-
   const header = req.header('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (token && JWT_SECRET) {

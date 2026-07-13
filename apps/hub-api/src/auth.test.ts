@@ -7,7 +7,6 @@ const PASSWORD = 'S3cret-pass-123';
 const HASH = bcrypt.hashSync(PASSWORD, 10);
 process.env.JWT_SECRET = 'test-secret-para-firmar';
 process.env.AUTH_USERS = `user@ambientalia.com.co:${HASH}`;
-process.env.API_KEY = 'clave-legacy';
 
 let auth: typeof import('./auth.js');
 beforeAll(async () => { auth = await import('./auth.js'); });
@@ -52,7 +51,7 @@ describe('issueToken', () => {
   });
 });
 
-describe('requireAuth (dual: JWT o x-api-key legacy)', () => {
+describe('requireAuth (solo JWT Bearer)', () => {
   it('deja pasar con un Bearer JWT válido', () => {
     const token = auth.issueToken('user@ambientalia.com.co');
     const req = mockReq({ authorization: `Bearer ${token}` });
@@ -61,14 +60,6 @@ describe('requireAuth (dual: JWT o x-api-key legacy)', () => {
     auth.requireAuth(req, res, () => { passed = true; });
     expect(passed).toBe(true);
     expect(res.statusCode).toBe(200);
-  });
-
-  it('deja pasar con la x-api-key legacy (transición)', () => {
-    const req = mockReq({ 'x-api-key': 'clave-legacy' });
-    const res = mockRes();
-    let passed = false;
-    auth.requireAuth(req, res, () => { passed = true; });
-    expect(passed).toBe(true);
   });
 
   it('rechaza (401) sin credenciales', () => {
@@ -83,15 +74,6 @@ describe('requireAuth (dual: JWT o x-api-key legacy)', () => {
 
   it('rechaza (401) con un JWT inválido', () => {
     const req = mockReq({ authorization: 'Bearer no-es-un-jwt' });
-    const res = mockRes();
-    let passed = false;
-    auth.requireAuth(req, res, () => { passed = true; });
-    expect(passed).toBe(false);
-    expect(res.statusCode).toBe(401);
-  });
-
-  it('rechaza (401) con una x-api-key equivocada', () => {
-    const req = mockReq({ 'x-api-key': 'clave-mala' });
     const res = mockRes();
     let passed = false;
     auth.requireAuth(req, res, () => { passed = true; });
