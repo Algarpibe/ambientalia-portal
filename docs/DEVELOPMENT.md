@@ -31,18 +31,28 @@ Ver los `.env.example` de cada servicio:
 > **CORS fail-closed**: fijar `ALLOWED_ORIGIN` (origen del portal) en el entorno
 > del hub-api **antes de desplegar**, o el navegador bloqueará las peticiones.
 
-## Observabilidad (Sentry) — opcional, hoy APAGADO
+## Observabilidad (Sentry)
 
-El código de Sentry ya está integrado pero **desactivado**: no envía nada hasta
-que se configure un DSN (por eso es seguro desplegar sin él). Para activarlo:
+El código de Sentry está integrado y es **no-op sin DSN** (seguro desplegar sin
+él). Se activa fijando el DSN de cada servicio en EasyPanel:
 
-1. Crear cuenta gratis en https://sentry.io → proyecto **Node.js** (hub-api) y
-   proyecto **React** (portal). Cada uno da un **DSN**.
+1. En https://sentry.io → un proyecto **Node/Express** (hub-api) y uno **React**
+   (portal). Cada uno da su propio **DSN**.
 2. En EasyPanel:
    - Servicio **hub-api** → variable `SENTRY_DSN` = DSN del proyecto Node → Implementar.
-   - Servicio **portal** → variable `VITE_SENTRY_DSN` = DSN del proyecto React → Implementar.
-     (Es build-time; el `Dockerfile` ya declara `ARG VITE_SENTRY_DSN`.)
-3. Verificar: en los logs de hub-api aparece `Sentry habilitado (hub-api)`.
+   - Servicio **portal** → variable `VITE_SENTRY_DSN` = DSN del proyecto React → **Rebuild**.
+
+### ⚠️ hub-api vs portal: runtime vs build-time
+- **hub-api** (`SENTRY_DSN`) es **runtime**: basta redeploy/restart. Verifica en
+  los logs la línea `Sentry habilitado (hub-api)`.
+- **portal** (`VITE_SENTRY_DSN`) es **build-time**: Vite lo hornea en el bundle,
+  así que un *restart no basta* — hay que **reconstruir la imagen**. Si solo se
+  reinicia (o el build reusa caché), el DSN no entra y Sentry queda inactivo.
+  El portal **no** imprime log; verifica en el navegador:
+  - DevTools → Console → `window.__SENTRY__` debe devolver un **objeto** (no `undefined`).
+  - Diagnóstico si sigue `undefined`: DevTools → Sources → Ctrl+Shift+F → buscar
+    `ingest.sentry.io`. Si no aparece, el DSN no se horneó → el build no se rehizo
+    con la variable (fuerza un rebuild con un commit nuevo o sin caché).
 
 Captura: hub-api → errores 500 de los endpoints, fallos de `/health`, y
 `unhandledRejection`/`uncaughtException`. portal → errores JS del `ErrorBoundary`.
