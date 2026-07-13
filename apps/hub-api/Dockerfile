@@ -21,7 +21,9 @@ COPY .npmrc ./.npmrc
 RUN NPM_TOKEN=$NPM_TOKEN npm install
 COPY apps/hub-api/tsconfig.json ./tsconfig.json
 COPY apps/hub-api/src ./src
-RUN npm run build
+# tsc no emite los .sql; se copian a dist para que initDb() (node dist/index.js)
+# encuentre las migraciones en runtime.
+RUN npm run build && mkdir -p dist/users && cp -R src/users/migrations dist/users/
 
 FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runtime
 WORKDIR /app
