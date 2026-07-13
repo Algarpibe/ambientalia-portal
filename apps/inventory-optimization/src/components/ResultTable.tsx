@@ -5,8 +5,6 @@ import SuggestedPO from './SuggestedPO';
 import DeadStock from './DeadStock';
 import { ArrowUpDown, Download, Settings2 } from 'lucide-react';
 import {
-    DndContext,
-    closestCenter,
     KeyboardSensor,
     PointerSensor,
     useSensor,
@@ -15,9 +13,7 @@ import {
 } from '@dnd-kit/core';
 import {
     arrayMove,
-    SortableContext,
     sortableKeyboardCoordinates,
-    verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import AbcXyzMatrix from './AbcXyzMatrix';
 
@@ -26,7 +22,8 @@ import {
     computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories,
 } from '../utils/resultTableLogic';
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
-import { SortableColumnItem, type ColumnConfig } from './SortableColumnItem';
+import { type ColumnConfig } from './SortableColumnItem';
+import { SortableColumnList } from './SortableColumnList';
 
 interface ResultsTableProps {
     data: AnalysisResult[];
@@ -627,26 +624,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                     <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Configurar Columnas</h3>
                                 </div>
                                 <div className="p-2 max-h-80 overflow-y-auto">
-                                    <DndContext
-                                        sensors={sensors}
-                                        collisionDetection={closestCenter}
+                                    <SortableColumnList
+                                        columns={columns[activeTab]}
+                                        visibleKeys={visibleColumns[activeTab]}
+                                        onToggle={(key) => toggleColumnVisibility(activeTab, key)}
                                         onDragEnd={(e) => handleDragEnd(e, activeTab)}
-                                    >
-                                        <SortableContext
-                                            items={columns[activeTab].map(c => c.key)}
-                                            strategy={verticalListSortingStrategy}
-                                        >
-                                            {columns[activeTab].map((col) => (
-                                                <SortableColumnItem
-                                                    key={col.key}
-                                                    id={col.key}
-                                                    col={col}
-                                                    isVisible={visibleColumns[activeTab].has(col.key)}
-                                                    onToggle={(key) => toggleColumnVisibility(activeTab, key)}
-                                                />
-                                            ))}
-                                        </SortableContext>
-                                    </DndContext>
+                                        sensors={sensors}
+                                    />
                                 </div>
                                 <div className="p-2 bg-gray-50 border-t border-gray-100 text-center">
                                     <button
@@ -1072,26 +1056,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                                 <h3 className="text-[10px] font-bold text-gray-900 uppercase tracking-wider">Configurar Historial</h3>
                                             </div>
                                             <div className="p-1 max-h-64 overflow-y-auto">
-                                                <DndContext
-                                                    sensors={sensors}
-                                                    collisionDetection={closestCenter}
+                                                <SortableColumnList
+                                                    columns={columns['history']}
+                                                    visibleKeys={visibleColumns['history']}
+                                                    onToggle={(key) => toggleColumnVisibility('history', key)}
                                                     onDragEnd={(e) => handleDragEnd(e, 'history')}
-                                                >
-                                                    <SortableContext
-                                                        items={columns['history'].map(c => c.key)}
-                                                        strategy={verticalListSortingStrategy}
-                                                    >
-                                                        {columns['history'].map((col) => (
-                                                            <SortableColumnItem
-                                                                key={col.key}
-                                                                id={col.key}
-                                                                col={col}
-                                                                isVisible={visibleColumns['history'].has(col.key)}
-                                                                onToggle={(key) => toggleColumnVisibility('history', key)}
-                                                            />
-                                                        ))}
-                                                    </SortableContext>
-                                                </DndContext>
+                                                    sensors={sensors}
+                                                />
                                             </div>
                                         </div>
                                     )}
