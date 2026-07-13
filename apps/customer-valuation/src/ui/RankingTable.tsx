@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ClientProfile, ExtendedClientProfile } from '../types';
+import { rankClients } from '../metrics/clientListHelpers';
 
 export function RankingTable({
   clients,
@@ -17,63 +18,7 @@ export function RankingTable({
     direction: 'desc'
   });
 
-  const validClients = useMemo(() => {
-    const list = clients.filter(c => c.scores !== null);
-
-    return [...list].sort((a, b) => {
-      let valA: any;
-      let valB: any;
-
-      switch (sortConfig.key) {
-        case 'CLIENTE':
-          valA = a.displayName;
-          valB = b.displayName;
-          break;
-        case 'S':
-          valA = (a.scores as any)?.salesScore ?? -1;
-          valB = (b.scores as any)?.salesScore ?? -1;
-          break;
-        case 'V':
-          valA = a.scores!.valueScore;
-          valB = b.scores!.valueScore;
-          break;
-        case 'P':
-          valA = a.scores!.paymentScore;
-          valB = b.scores!.paymentScore;
-          break;
-        case 'T':
-          valA = a.scores!.totalScore;
-          valB = b.scores!.totalScore;
-          break;
-        case 'SEGMENTO':
-          valA = a.scores!.segment;
-          valB = b.scores!.segment;
-          break;
-        case 'VENTAS':
-          valA = a.quickMetrics?.salesTotal ?? 0;
-          valB = b.quickMetrics?.salesTotal ?? 0;
-          break;
-        case 'MARGEN%':
-          valA = a.quickMetrics?.gmPct ?? 0;
-          valB = b.quickMetrics?.gmPct ?? 0;
-          break;
-        case 'DPD P95':
-          valA = a.payments?.raw6m.maxDpd ?? 0;
-          valB = b.payments?.raw6m.maxDpd ?? 0;
-          break;
-        case '% MORA':
-          valA = a.quickMetrics?.lateValueRate ?? 0;
-          valB = b.quickMetrics?.lateValueRate ?? 0;
-          break;
-        default:
-          return 0;
-      }
-
-      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [clients, sortConfig]);
+  const validClients = useMemo(() => rankClients(clients, sortConfig), [clients, sortConfig]);
 
   const requestSort = (key: string) => {
     let direction: 'asc' | 'desc' = 'desc';
