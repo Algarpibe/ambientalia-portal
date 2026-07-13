@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Token de solo lectura (INFRA-004: evita GITHUB_TOKEN sobre-permisionado).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      # El paquete privado @algarpibe/zoho-sync (hub-api) requiere NPM_TOKEN.
+      # Añadir el secret NPM_TOKEN (PAT read:packages, ROTADO) en Settings →
+      # Secrets and variables → Actions.
+      - name: Install (npm ci)
+        run: npm ci
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Typecheck (tsc -b) + bundle. El portal empaqueta todas las sub-apps,
+      # así que su build las type-checkea; hub-api se compila aparte.
+      - name: Build portal (typecheck + vite build)
+        run: npm run build --workspace=apps/portal
+
+      - name: Build hub-api (tsc)
+        run: npm run build --workspace=apps/hub-api
+
+      # Tests de las apps que los tienen (hub-api, customer-valuation,
+      # inventory-optimization). --if-present salta las que no.
+      - name: Tests
+        run: npm run test --workspaces --if-present
+
+      # Auditoría de dependencias (informativa; no bloquea el pipeline).
+      - name: npm audit (informativo)
+        run: npm audit --omit=dev || true
