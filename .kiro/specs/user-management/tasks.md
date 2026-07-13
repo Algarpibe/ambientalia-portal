@@ -281,7 +281,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Verificar redirección correcta cuando la sesión expira dentro del panel (detectada por `useAuth`)
     - _Requirements: 5.1, 5.2, 5.3, 5.6, 4.5_
 
-- [ ] 18. Checkpoint final — Integración completa
+- [x] 18. Checkpoint final — Integración completa
   - Ejecutar `vitest --run` en `apps/hub-api` y `apps/portal` para confirmar que todos los tests pasan. Verificar que el flujo completo funciona: registro → aprobación → login → JWT con apps → acceso condicional → panel admin. Consultar al usuario si hay dudas o se requieren ajustes.
 
 ---
