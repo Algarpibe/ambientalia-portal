@@ -70,40 +70,40 @@ class FakeDb {
       return { rows: [], rowCount: 0 };
     }
 
-    if (/^INSERT INTO users/i.test(sql)) {
+    if (/^INSERT INTO portal.users/i.test(sql)) {
       const [full_name, email, password_hash] = params as string[];
       const row = this.seedUser({ full_name, email, password_hash, role: 'reader', status: 'pending' });
       return { rows: [this.pub(row)], rowCount: 1 };
     }
-    if (/^INSERT INTO user_apps/i.test(sql)) {
+    if (/^INSERT INTO portal.user_apps/i.test(sql)) {
       const [user_id, app_id] = params as string[];
       if (!this.apps.some((a) => a.user_id === user_id && a.app_id === app_id)) this.apps.push({ user_id, app_id });
       return { rows: [], rowCount: 1 };
     }
-    if (/^DELETE FROM user_apps/i.test(sql)) {
+    if (/^DELETE FROM portal.user_apps/i.test(sql)) {
       const [user_id] = params as string[];
       this.apps = this.apps.filter((a) => a.user_id !== user_id);
       return { rows: [], rowCount: 0 };
     }
-    if (/^DELETE FROM users/i.test(sql)) {
+    if (/^DELETE FROM portal.users/i.test(sql)) {
       const [id] = params as string[];
       const before = this.users.length;
       this.users = this.users.filter((u) => u.id !== id);
       return { rows: [], rowCount: before - this.users.length };
     }
-    if (/^UPDATE users SET status/i.test(sql)) {
+    if (/^UPDATE portal.users SET status/i.test(sql)) {
       const [id, status] = params as string[];
       const u = this.users.find((x) => x.id === id);
       if (u) u.status = status;
       return { rows: u ? [this.pub(u)] : [], rowCount: u ? 1 : 0 };
     }
-    if (/^UPDATE users SET role/i.test(sql)) {
+    if (/^UPDATE portal.users SET role/i.test(sql)) {
       const [id, role] = params as string[];
       const u = this.users.find((x) => x.id === id);
       if (u) u.role = role;
       return { rows: u ? [this.pub(u)] : [], rowCount: u ? 1 : 0 };
     }
-    if (/^UPDATE users SET password_hash/i.test(sql)) {
+    if (/^UPDATE portal.users SET password_hash/i.test(sql)) {
       const [id, hash] = params as string[];
       const u = this.users.find((x) => x.id === id);
       if (u) u.password_hash = hash;
@@ -112,22 +112,22 @@ class FakeDb {
     if (/count\(\*\)/i.test(sql)) {
       return { rows: [{ total: this.users.length }], rowCount: 1 };
     }
-    if (/FROM users WHERE email = \$1/i.test(sql)) {
+    if (/FROM portal.users WHERE email = \$1/i.test(sql)) {
       const [email] = params as string[];
       const u = this.users.find((x) => x.email === String(email).toLowerCase());
       return { rows: u ? [u] : [], rowCount: u ? 1 : 0 };
     }
-    if (/FROM users WHERE id = \$1/i.test(sql)) {
+    if (/FROM portal.users WHERE id = \$1/i.test(sql)) {
       const [id] = params as string[];
       const u = this.users.find((x) => x.id === id);
       return { rows: u ? [u] : [], rowCount: u ? 1 : 0 };
     }
-    if (/FROM users ORDER BY created_at DESC/i.test(sql)) {
+    if (/FROM portal.users ORDER BY created_at DESC/i.test(sql)) {
       const [limit, offset] = params as number[];
       const sorted = [...this.users].sort((a, b) => b._seq - a._seq);
       return { rows: sorted.slice(offset, offset + limit).map((u) => this.pub(u)), rowCount: 0 };
     }
-    if (/FROM user_apps WHERE user_id = \$1/i.test(sql)) {
+    if (/FROM portal.user_apps WHERE user_id = \$1/i.test(sql)) {
       const [user_id] = params as string[];
       const rows = this.apps
         .filter((a) => a.user_id === user_id)

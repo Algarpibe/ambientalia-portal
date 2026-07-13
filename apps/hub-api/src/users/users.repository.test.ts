@@ -59,8 +59,8 @@ class FakeDb {
       throw new Error('forced db failure');
     }
 
-    // --- INSERT INTO users ... RETURNING ---
-    if (/^INSERT INTO users/i.test(sql)) {
+    // --- INSERT INTO portal.users ... RETURNING ---
+    if (/^INSERT INTO portal.users/i.test(sql)) {
       const [full_name, email, password_hash] = params as string[];
       const row: Row = {
         id: `uuid-${++this.seq}`,
@@ -75,8 +75,8 @@ class FakeDb {
       return { rows: [row], rowCount: 1 };
     }
 
-    // --- INSERT INTO user_apps ... ON CONFLICT DO NOTHING ---
-    if (/^INSERT INTO user_apps/i.test(sql)) {
+    // --- INSERT INTO portal.user_apps ... ON CONFLICT DO NOTHING ---
+    if (/^INSERT INTO portal.user_apps/i.test(sql)) {
       const [user_id, app_id] = params as string[];
       if (!this.apps.some((a) => a.user_id === user_id && a.app_id === app_id)) {
         this.apps.push({ user_id, app_id });
@@ -84,31 +84,31 @@ class FakeDb {
       return { rows: [], rowCount: 1 };
     }
 
-    // --- DELETE FROM user_apps WHERE user_id = $1 ---
-    if (/^DELETE FROM user_apps/i.test(sql)) {
+    // --- DELETE FROM portal.user_apps WHERE user_id = $1 ---
+    if (/^DELETE FROM portal.user_apps/i.test(sql)) {
       const [user_id] = params as string[];
       const before = this.apps.length;
       this.apps = this.apps.filter((a) => a.user_id !== user_id);
       return { rows: [], rowCount: before - this.apps.length };
     }
 
-    // --- DELETE FROM users WHERE id = $1 ---
-    if (/^DELETE FROM users/i.test(sql)) {
+    // --- DELETE FROM portal.users WHERE id = $1 ---
+    if (/^DELETE FROM portal.users/i.test(sql)) {
       const [id] = params as string[];
       const before = this.users.length;
       this.users = this.users.filter((u) => u.id !== id);
       return { rows: [], rowCount: before - this.users.length };
     }
 
-    // --- SELECT ... FROM users WHERE id = $1 ---
-    if (/FROM users WHERE id = \$1/i.test(sql)) {
+    // --- SELECT ... FROM portal.users WHERE id = $1 ---
+    if (/FROM portal.users WHERE id = \$1/i.test(sql)) {
       const [id] = params as string[];
       const found = this.users.find((u) => u.id === id);
       return { rows: found ? [found] : [], rowCount: found ? 1 : 0 };
     }
 
-    // --- SELECT app_id FROM user_apps WHERE user_id = $1 ---
-    if (/FROM user_apps WHERE user_id = \$1/i.test(sql)) {
+    // --- SELECT app_id FROM portal.user_apps WHERE user_id = $1 ---
+    if (/FROM portal.user_apps WHERE user_id = \$1/i.test(sql)) {
       const [user_id] = params as string[];
       const rows = this.apps
         .filter((a) => a.user_id === user_id)
@@ -153,7 +153,7 @@ describe('UserRepository — property tests', () => {
 
         // delete() hace: DELETE user_apps (1ª escritura) → DELETE users (2ª).
         // Forzamos el fallo en la 2ª: el borrado de user_apps debe revertirse.
-        db.failOn = (sql) => /DELETE FROM users/i.test(sql);
+        db.failOn = (sql) => /DELETE FROM portal.users/i.test(sql);
         await expect(repo.delete(user.id)).rejects.toThrow();
         db.failOn = undefined;
 

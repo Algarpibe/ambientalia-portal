@@ -55,7 +55,7 @@ export async function seedUsersFromEnv(pool: Pool): Promise<void> {
 
   for (const user of seedUsers) {
     await pool.query(
-      `INSERT INTO users (full_name, email, password_hash, role, status)
+      `INSERT INTO portal.users (full_name, email, password_hash, role, status)
        VALUES ($1, $2, $3, $4, 'active')
        ON CONFLICT (email) DO NOTHING`,
       [fullNameFromEmail(user.email), user.email, user.passwordHash, user.role],

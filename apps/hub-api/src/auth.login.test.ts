@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
 vi.mock('./db.js', () => ({
   getHubPool: () => ({
     query: async (sql: string) => {
-      if (/FROM user_apps/i.test(sql)) {
+      if (/FROM portal.user_apps/i.test(sql)) {
         return { rows: state.apps.map((app_id) => ({ app_id })), rowCount: state.apps.length };
       }
       // findByEmail

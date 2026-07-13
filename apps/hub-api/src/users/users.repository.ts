@@ -38,7 +38,7 @@ export class UserRepository {
   async findByEmail(email: string): Promise<UserRow | null> {
     const { rows } = await this.pool.query(
       `SELECT id, full_name, email, password_hash, role, status, created_at
-         FROM users WHERE email = $1`,
+         FROM portal.users WHERE email = $1`,
       [email.toLowerCase().trim()],
     );
     return rows[0] ?? null;
@@ -48,7 +48,7 @@ export class UserRepository {
   async findById(id: string): Promise<UserRow | null> {
     const { rows } = await this.pool.query(
       `SELECT id, full_name, email, password_hash, role, status, created_at
-         FROM users WHERE id = $1`,
+         FROM portal.users WHERE id = $1`,
       [id],
     );
     return rows[0] ?? null;
@@ -60,7 +60,7 @@ export class UserRepository {
    */
   async create(input: RegisterInput, passwordHash: string): Promise<UserPublic> {
     const { rows } = await this.pool.query(
-      `INSERT INTO users (full_name, email, password_hash)
+      `INSERT INTO portal.users (full_name, email, password_hash)
        VALUES ($1, $2, $3)
        RETURNING ${PUBLIC_COLUMNS}`,
       [input.fullName.trim(), input.email.toLowerCase().trim(), passwordHash],
@@ -71,7 +71,7 @@ export class UserRepository {
   /** Cambia el estado. Devuelve el usuario actualizado o null si no existe. */
   async updateStatus(id: string, status: UserStatus): Promise<UserPublic | null> {
     const { rows } = await this.pool.query(
-      `UPDATE users SET status = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}`,
+      `UPDATE portal.users SET status = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}`,
       [id, status],
     );
     return rows[0] ? toPublic(rows[0]) : null;
@@ -80,7 +80,7 @@ export class UserRepository {
   /** Cambia el rol. Devuelve el usuario actualizado o null si no existe. */
   async updateRole(id: string, role: UserRole): Promise<UserPublic | null> {
     const { rows } = await this.pool.query(
-      `UPDATE users SET role = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}`,
+      `UPDATE portal.users SET role = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}`,
       [id, role],
     );
     return rows[0] ? toPublic(rows[0]) : null;
@@ -89,7 +89,7 @@ export class UserRepository {
   /** Actualiza el hash de contraseña. Devuelve true si el usuario existía. */
   async updatePassword(id: string, passwordHash: string): Promise<boolean> {
     const res = await this.pool.query(
-      'UPDATE users SET password_hash = $2 WHERE id = $1',
+      'UPDATE portal.users SET password_hash = $2 WHERE id = $1',
       [id, passwordHash],
     );
     return (res.rowCount ?? 0) > 0;
@@ -102,8 +102,8 @@ export class UserRepository {
    */
   async delete(id: string): Promise<boolean> {
     return this.withTransaction(async (client) => {
-      await client.query('DELETE FROM user_apps WHERE user_id = $1', [id]);
-      const res = await client.query('DELETE FROM users WHERE id = $1', [id]);
+      await client.query('DELETE FROM portal.user_apps WHERE user_id = $1', [id]);
+      const res = await client.query('DELETE FROM portal.users WHERE id = $1', [id]);
       return (res.rowCount ?? 0) > 0;
     });
   }
@@ -116,10 +116,10 @@ export class UserRepository {
   async setApps(id: string, appIds: string[]): Promise<string[]> {
     const unique = [...new Set(appIds.map((a) => a.trim()).filter(Boolean))];
     await this.withTransaction(async (client) => {
-      await client.query('DELETE FROM user_apps WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM portal.user_apps WHERE user_id = $1', [id]);
       for (const appId of unique) {
         await client.query(
-          `INSERT INTO user_apps (user_id, app_id) VALUES ($1, $2)
+          `INSERT INTO portal.user_apps (user_id, app_id) VALUES ($1, $2)
            ON CONFLICT (user_id, app_id) DO NOTHING`,
           [id, appId],
         );
@@ -131,7 +131,7 @@ export class UserRepository {
   /** Devuelve los app_id asignados al usuario, ordenados. Lista vacía si ninguno. */
   async getApps(userId: string): Promise<string[]> {
     const { rows } = await this.pool.query(
-      'SELECT app_id FROM user_apps WHERE user_id = $1 ORDER BY app_id',
+      'SELECT app_id FROM portal.user_apps WHERE user_id = $1 ORDER BY app_id',
       [userId],
     );
     return rows.map((r: { app_id: string }) => r.app_id);
@@ -143,11 +143,11 @@ export class UserRepository {
     const safePerPage = Math.max(1, Math.floor(perPage));
     const offset = (safePage - 1) * safePerPage;
 
-    const totalRes = await this.pool.query('SELECT count(*)::int AS total FROM users');
+    const totalRes = await this.pool.query('SELECT count(*)::int AS total FROM portal.users');
     const total: number = totalRes.rows[0]?.total ?? 0;
 
     const { rows } = await this.pool.query(
-      `SELECT ${PUBLIC_COLUMNS} FROM users
+      `SELECT ${PUBLIC_COLUMNS} FROM portal.users
         ORDER BY created_at DESC
         LIMIT $1 OFFSET $2`,
       [safePerPage, offset],
