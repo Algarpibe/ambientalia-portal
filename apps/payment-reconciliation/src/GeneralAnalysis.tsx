@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import type { ReconciledRow, DateRangeOption } from './types';
-import { analyzeCustomerPayments, getUniqueCustomers, getFilteredDataByDate, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor, getPreviousPeriodBounds, getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
+import { analyzeCustomerPayments, getUniqueCustomers, getFilteredDataByDate, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
+import {
+  applyExtraFilters, filterAndSortMetrics, computeTotalReconciled, computePreviousPeriodAmount,
+  computeRevenueVariation, computeRecoveryRate, computeAverageDSO, computeOverdueMetrics,
+  computeTopCustomersByVolume, computeCustomerRetention,
+} from './metrics/generalAnalysisMetrics';
 import { ArrowUpDown, FileDown, Filter, DollarSign, TrendingUp, TrendingDown, AlertTriangle, Info, Eye, X, GripVertical } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
 
@@ -117,28 +122,8 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
   };
 
   const filteredDataByDate = useMemo(() => {
-    let data = getFilteredDataByDate(reconciledData, dateRange, customStartDate, customEndDate);
-    
-    // Apply payment status filter
-    if (selectedPaymentStatus.length > 0) {
-      data = data.filter(row => {
-        let status = 'pending';
-        if (row.balance === 0) status = 'paid';
-        else if (row.balance < row.total) status = 'partial';
-        return selectedPaymentStatus.includes(status);
-      });
-    }
-
-    // Apply amount range filter
-    if (minAmount || maxAmount) {
-      data = data.filter(row => {
-        const min = minAmount ? parseFloat(minAmount) : 0;
-        const max = maxAmount ? parseFloat(maxAmount) : Infinity;
-        return row.total >= min && row.total <= max;
-      });
-    }
-
-    return data;
+    const byDate = getFilteredDataByDate(reconciledData, dateRange, customStartDate, customEndDate);
+    return applyExtraFilters(byDate, { selectedPaymentStatus, minAmount, maxAmount });
   }, [reconciledData, dateRange, customStartDate, customEndDate, selectedPaymentStatus, minAmount, maxAmount]);
 
   const uniqueCustomers = useMemo(() => {
@@ -151,218 +136,43 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
       .filter((metrics) => metrics.totalInvoices > 0);
   }, [filteredDataByDate, uniqueCustomers]);
 
-  const sortedAndFilteredMetrics = useMemo(() => {
-    let result = customersMetrics.filter((m) => {
-      return selectedCustomer === 'all' || m.customerName === selectedCustomer;
-    });
+  const sortedAndFilteredMetrics = useMemo(
+    () => filterAndSortMetrics(customersMetrics, {
+      selectedCustomer, searchTerm, dpdMin, dpdMax, onTimeMin, onTimeMax, sortConfig,
+    }),
+    [customersMetrics, selectedCustomer, searchTerm, dpdMin, dpdMax, onTimeMin, onTimeMax, sortConfig],
+  );
 
-    const term = searchTerm.trim().toLowerCase();
-    if (term) {
-      result = result.filter((m) => m.customerName.toLowerCase().includes(term));
-    }
+  const totalReconciledAmount = useMemo(
+    () => computeTotalReconciled(filteredDataByDate),
+    [filteredDataByDate],
+  );
 
-    if (dpdMin) {
-      const minVal = parseFloat(dpdMin);
-      result = result.filter((m) => m.averageDPD !== null && m.averageDPD >= minVal);
-    }
-    if (dpdMax) {
-      const maxVal = parseFloat(dpdMax);
-      result = result.filter((m) => m.averageDPD !== null && m.averageDPD <= maxVal);
-    }
+  const previousPeriodAmount = useMemo(
+    () => computePreviousPeriodAmount(reconciledData, dateRange, customStartDate, customEndDate),
+    [reconciledData, dateRange, customStartDate, customEndDate],
+  );
 
-    if (onTimeMin) {
-      const minVal = parseFloat(onTimeMin);
-      result = result.filter((m) => m.onTimePercentage !== null && m.onTimePercentage >= minVal);
-    }
-    if (onTimeMax) {
-      const maxVal = parseFloat(onTimeMax);
-      result = result.filter((m) => m.onTimePercentage !== null && m.onTimePercentage <= maxVal);
-    }
+  const revenueVariation = useMemo(
+    () => computeRevenueVariation(totalReconciledAmount, previousPeriodAmount),
+    [totalReconciledAmount, previousPeriodAmount],
+  );
 
-    if (sortConfig) {
-      result.sort((a: any, b: any) => {
-        let valA = a[sortConfig.key];
-        let valB = b[sortConfig.key];
+  const recoveryRate = useMemo(() => computeRecoveryRate(filteredDataByDate), [filteredDataByDate]);
 
-        if (valA === null) return 1;
-        if (valB === null) return -1;
+  const averageDSO = useMemo(() => computeAverageDSO(filteredDataByDate), [filteredDataByDate]);
 
-        if (typeof valA === 'string') {
-          valA = valA.toLowerCase();
-          valB = valB.toLowerCase();
-        }
+  const overdueMetrics = useMemo(() => computeOverdueMetrics(filteredDataByDate), [filteredDataByDate]);
 
-        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
+  const topCustomersByVolume = useMemo(
+    () => computeTopCustomersByVolume(filteredDataByDate),
+    [filteredDataByDate],
+  );
 
-    return result;
-  }, [customersMetrics, selectedCustomer, searchTerm, dpdMin, dpdMax, onTimeMin, onTimeMax, sortConfig]);
-
-  const totalReconciledAmount = useMemo(() => {
-    return filteredDataByDate.reduce((sum, invoice) => sum + invoice.total, 0);
-  }, [filteredDataByDate]);
-
-  const previousPeriodAmount = useMemo(() => {
-    if (dateRange === 'all' || dateRange === 'custom') {
-      return 0;
-    }
-    const prevBounds = getPreviousPeriodBounds(dateRange, customStartDate, customEndDate);
-    if (!prevBounds.start || !prevBounds.end) return 0;
-
-    return reconciledData
-      .filter((invoice) => {
-        const invoiceDate = invoice.invoiceDate instanceof Date ? invoice.invoiceDate : parseExcelDate(invoice.invoiceDate);
-        if (!invoiceDate) return false;
-        return invoiceDate >= prevBounds.start! && invoiceDate <= prevBounds.end!;
-      })
-      .reduce((sum, invoice) => sum + invoice.total, 0);
-  }, [reconciledData, dateRange, customStartDate, customEndDate]);
-
-  const revenueVariation = useMemo(() => {
-    if (previousPeriodAmount === 0) return null;
-    return ((totalReconciledAmount - previousPeriodAmount) / previousPeriodAmount) * 100;
-  }, [totalReconciledAmount, previousPeriodAmount]);
-
-  const recoveryRate = useMemo(() => {
-    const totalInvoices = filteredDataByDate.length;
-    if (totalInvoices === 0) return 0;
-    
-    const invoicesWithPayments = filteredDataByDate.filter(
-      invoice => invoice.paymentDetails && invoice.paymentDetails.length > 0
-    ).length;
-    
-    return (invoicesWithPayments / totalInvoices) * 100;
-  }, [filteredDataByDate]);
-
-  const averageDSO = useMemo(() => {
-    const invoicesWithPayments = filteredDataByDate.filter(
-      invoice => invoice.paymentDetails && invoice.paymentDetails.length > 0
-    );
-
-    if (invoicesWithPayments.length === 0) return 0;
-
-    const totalDays = invoicesWithPayments.reduce((sum, invoice) => {
-      // Use DUE DATE (Fecha de Vencimiento), not invoice date
-      const dueDate = invoice.dueDate instanceof Date 
-        ? invoice.dueDate 
-        : parseExcelDate(invoice.dueDate);
-      
-      if (!dueDate || !invoice.paymentDetails || invoice.paymentDetails.length === 0) {
-        return sum;
-      }
-
-      // Take the LAST payment date to measure when collection was completed
-      const lastPaymentDateStr = invoice.paymentDetails[invoice.paymentDetails.length - 1].date;
-      let paymentDate: Date | null = null;
-
-      // Parse the payment date from string format
-      if (lastPaymentDateStr) {
-        const parsed = parseExcelDate(lastPaymentDateStr as any);
-        if (parsed instanceof Date && !isNaN(parsed.getTime())) {
-          paymentDate = parsed;
-        }
-      }
-      
-      if (!paymentDate) {
-        return sum;
-      }
-
-      // Calculate days between DUE DATE and LAST payment (DSO = DPD)
-      const daysToPayment = Math.round((paymentDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      return sum + daysToPayment;
-    }, 0);
-
-    return Math.round(totalDays / invoicesWithPayments.length);
-  }, [filteredDataByDate]);
-
-  const overdueMetrics = useMemo(() => {
-    const overdueInvoices = filteredDataByDate.filter(
-      invoice => invoice.isOverdue && invoice.balance > 0
-    );
-
-    const overdueClientsSet = new Set(
-      overdueInvoices.map(invoice => invoice.clientName)
-    );
-
-    const totalOverdueAmount = overdueInvoices.reduce(
-      (sum, invoice) => sum + invoice.balance, 
-      0
-    );
-
-    return {
-      customerCount: overdueClientsSet.size,
-      invoiceCount: overdueInvoices.length,
-      totalAmount: totalOverdueAmount
-    };
-  }, [filteredDataByDate]);
-
-  const topCustomersByVolume = useMemo(() => {
-    const customerTotals = new Map<string, number>();
-
-    filteredDataByDate.forEach(invoice => {
-      // Skip invoices with empty or null client names
-      if (!invoice.clientName || invoice.clientName.trim() === '') {
-        return;
-      }
-      
-      const current = customerTotals.get(invoice.clientName) || 0;
-      customerTotals.set(invoice.clientName, current + invoice.total);
-    });
-
-    return Array.from(customerTotals.entries())
-      .map(([name, total]) => ({ name, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10);
-  }, [filteredDataByDate]);
-
-  const customerRetention = useMemo(() => {
-    const { start } = getDateRangeBounds(dateRange, customStartDate, customEndDate);
-    
-    // Get unique customers in current period
-    const currentPeriodCustomers = new Set(
-      filteredDataByDate.map(invoice => invoice.clientName)
-    );
-
-    if (!start || currentPeriodCustomers.size === 0) {
-      return { newCustomers: 0, recurringCustomers: 0, retentionRate: 0 };
-    }
-
-    // Check which customers had invoices BEFORE the current period
-    const recurringCustomers = new Set<string>();
-    const newCustomers = new Set<string>();
-
-    currentPeriodCustomers.forEach(customerName => {
-      const hadPreviousInvoices = reconciledData.some(invoice => {
-        if (invoice.clientName !== customerName) return false;
-        
-        const invoiceDate = invoice.invoiceDate instanceof Date 
-          ? invoice.invoiceDate 
-          : parseExcelDate(invoice.invoiceDate);
-        
-        return invoiceDate && invoiceDate < start;
-      });
-
-      if (hadPreviousInvoices) {
-        recurringCustomers.add(customerName);
-      } else {
-        newCustomers.add(customerName);
-      }
-    });
-
-    const retentionRate = currentPeriodCustomers.size > 0
-      ? (recurringCustomers.size / currentPeriodCustomers.size) * 100
-      : 0;
-
-    return {
-      newCustomers: newCustomers.size,
-      recurringCustomers: recurringCustomers.size,
-      retentionRate
-    };
-  }, [filteredDataByDate, reconciledData, dateRange, customStartDate, customEndDate]);
+  const customerRetention = useMemo(
+    () => computeCustomerRetention(reconciledData, filteredDataByDate, dateRange, customStartDate, customEndDate),
+    [filteredDataByDate, reconciledData, dateRange, customStartDate, customEndDate],
+  );
 
   const handleSort = (key: string) => {
     setSortConfig((current) => {
