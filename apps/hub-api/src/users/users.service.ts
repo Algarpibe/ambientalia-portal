@@ -132,6 +132,15 @@ export class UserService {
     return this.repo.setApps(id, appIds);
   }
 
+  /** Devuelve la proyección pública de un usuario; 404 si no existe. */
+  async getUser(id: string): Promise<UserPublic> {
+    const u = await this.repo.findById(id);
+    if (!u) throw new UserError('user_not_found', 404);
+    const { password_hash, ...pub } = u;
+    void password_hash;
+    return pub;
+  }
+
   /** Lista paginada de usuarios (50 por página, Req 2.1). */
   async listUsers(page: number): Promise<PaginatedUsers> {
     const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;

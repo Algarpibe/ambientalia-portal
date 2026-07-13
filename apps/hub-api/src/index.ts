@@ -4,7 +4,8 @@ import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { getHubPool, initDb } from './db.js';
-import { requireAuth, verifyCredentials, issueToken } from './auth.js';
+import { requireAuth, loginUser } from './auth.js';
+import { createUsersRouter } from './users/users.router.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
@@ -54,10 +55,9 @@ app.post('/api/login',
     try {
       const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
       if (!email || !password) return res.status(400).json({ error: 'missing credentials' });
-      if (!(await verifyCredentials(email, password))) {
-        return res.status(401).json({ error: 'invalid credentials' });
-      }
-      res.json({ token: issueToken(email) });
+      const result = await loginUser(email, password);
+      if (!result.ok) return res.status(result.status ?? 401).json({ error: result.error });
+      res.json({ token: result.token });
     } catch (e) {
       sendError(res, e, 'login');
     }
@@ -125,7 +125,14 @@ process.on('uncaughtException', (err) => { console.error('uncaughtException', er
 // Inicializa la BD (valida HUB_DB_URL, verifica conectividad, aplica migraciones
 // y seed) antes de aceptar tráfico. Si algo falla, initDb() termina el proceso.
 initDb()
-  .then(() => app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`)))
+  .then(() => {
+    // Router de gestión de usuarios. Se monta tras initDb (getHubPool ya
+    // validado) para no romper el chequeo de arranque de HUB_DB_URL.
+    // Montado en '/api' → expone /api/users*, /api/auth/register. El rate limit
+    // propio del router corre antes de requireAuth/requireAdmin.
+    app.use('/api', createUsersRouter(getHubPool()));
+    app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
+  })
   .catch((e) => {
     console.error('FATAL: fallo en la inicialización de la base de datos.', e);
     captureError(e, { endpoint: 'initDb' });

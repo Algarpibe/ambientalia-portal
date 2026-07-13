@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { getHubPool } from './db.js';
 import { UserRepository } from './users/users.repository.js';
-import type { JwtPayload } from './users/users.types.js';
+import type { JwtPayload, UserRole } from './users/users.types.js';
 
 // Adjuntamos el payload verificado del JWT a req.user para que los middlewares
 // de autorización (requireAdmin, requireOwnerOrAdmin) lo lean sin re-verificar.
@@ -53,9 +53,72 @@ export async function verifyCredentials(email: string, password: string): Promis
   }
 }
 
-export function issueToken(email: string): string {
+function signToken(payload: Record<string, unknown>): string {
   const options: jwt.SignOptions = { expiresIn: TOKEN_TTL as jwt.SignOptions['expiresIn'] };
-  return jwt.sign({ sub: String(email).toLowerCase().trim() }, JWT_SECRET, options);
+  return jwt.sign(payload, JWT_SECRET, options);
+}
+
+/** Token legacy con solo `sub` (retrocompatibilidad; sigue usándose en tests). */
+export function issueToken(email: string): string {
+  return signToken({ sub: String(email).toLowerCase().trim() });
+}
+
+/** Token extendido para un usuario de BD: `{ sub, user_id, role, apps }` (Req 3.3, 4.3). */
+export function issueTokenForUser(
+  user: { id: string; email: string; role: UserRole },
+  apps: string[],
+): string {
+  return signToken({
+    sub: user.email.toLowerCase().trim(),
+    user_id: user.id,
+    role: user.role,
+    apps,
+  });
+}
+
+export interface LoginResult {
+  ok: boolean;
+  token?: string;
+  status?: number; // HTTP a devolver cuando ok === false
+  error?: string;
+}
+
+/**
+ * Autentica un login (Req 2.8, 3.3, 4.3, 6.2). Intenta primero el modelo de BD;
+ * si el email no existe en `users`, cae al fallback `AUTH_USERS`.
+ *  - Usuario de BD no `active`         → 403 "account not approved".
+ *  - Credenciales incorrectas          → 401 "invalid credentials".
+ *  - OK (BD)   → JWT extendido con user_id/role/apps (apps desde user_apps).
+ *  - OK (fallback) → JWT con role 'reader' y apps [] (sin user_id).
+ *
+ * Un error de BD se propaga (el handler responde 500): el fallback es solo para
+ * usuarios ausentes de la BD, no para suplantar el chequeo de estado si la BD
+ * está caída (evita que un usuario desactivado entre por AUTH_USERS).
+ */
+export async function loginUser(email: string, password: string): Promise<LoginResult> {
+  const em = String(email || '').toLowerCase().trim();
+  const pw = String(password || '');
+
+  const repo = new UserRepository(getHubPool());
+  const dbUser = await repo.findByEmail(em);
+
+  if (dbUser) {
+    if (dbUser.status !== 'active') {
+      return { ok: false, status: 403, error: 'account not approved' };
+    }
+    if (!(await bcrypt.compare(pw, dbUser.password_hash))) {
+      return { ok: false, status: 401, error: 'invalid credentials' };
+    }
+    const apps = await repo.getApps(dbUser.id);
+    return { ok: true, token: issueTokenForUser(dbUser, apps) };
+  }
+
+  // Fallback AUTH_USERS: usuarios aún no migrados a BD → rol reader, sin apps.
+  if (await verifyCredentials(em, pw)) {
+    return { ok: true, token: signToken({ sub: em, role: 'reader', apps: [] }) };
+  }
+
+  return { ok: false, status: 401, error: 'invalid credentials' };
 }
 
 /**

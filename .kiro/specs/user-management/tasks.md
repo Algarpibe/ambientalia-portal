@@ -139,7 +139,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - `requireOwnerOrAdmin` retorna 403 si `role='reader'` y `user_id !== :id`; permite el paso si `user_id === :id`
 
 - [ ] 8. Implementar router de usuarios y endpoints REST
-  - [ ] 8.1 Crear `users/users.router.ts` con el router admin (`/api/users`)
+  - [x] 8.1 Crear `users/users.router.ts` con el router admin (`/api/users`)
     - `GET /api/users?page=N` → `requireAuth` + `requireAdmin` → `UserService.listUsers(page)` → respuesta paginada
     - `PATCH /api/users/:id/status` → aprobar / desactivar / reactivar según body `{ status }`
     - `PATCH /api/users/:id/role` → cambiar rol según body `{ role }`
@@ -148,31 +148,32 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Llamar a `AuditLogger.log()` en cada operación de mutación
     - _Requirements: 2.1, 2.2, 2.3, 2.5, 2.6, 2.7, 3.2, 4.2, 5.5_
 
-  - [ ] 8.2 Añadir endpoint `POST /api/auth/register` al router
+  - [x] 8.2 Añadir endpoint `POST /api/auth/register` al router
     - Sin autenticación requerida
     - Llama a `UserService.register(input)` y responde HTTP 201 con `{ message: "Registration successful. Awaiting admin approval." }`
     - Mapear errores de validación → 400, duplicado → 409
     - _Requirements: 1.1, 1.2, 1.4, 1.5, 1.6, 1.7_
 
   - [ ] 8.3 Añadir endpoint `PATCH /api/users/me/password` al self router
-    - `requireAuth` + `requireOwnerOrAdmin`
-    - Verificar contraseña actual con bcrypt antes de actualizar
+    - Proteger con `requireAuth` únicamente (no `requireOwnerOrAdmin`): la ruta usa `/me` sin `:id`, por lo que el target se extrae del `user_id` del JWT; `requireOwnerOrAdmin` dejaría `req.params.id` como `undefined` e impediría que un `reader` cambie su propia contraseña (403 falso positivo)
+    - Obtener el usuario con `UserRepository.findById(req.user.user_id)`; si no existe (token legacy sin fila en BD), responder HTTP 404
+    - Verificar contraseña actual con `bcrypt.compare` antes de actualizar; si no coincide, responder HTTP 403
     - _Requirements: 3.5, 3.6_
 
-  - [ ] 8.4 Extender `/api/login` en `auth.ts` para soportar el modelo de base de datos
+  - [x] 8.4 Extender `/api/login` en `auth.ts` para soportar el modelo de base de datos
     - Intentar primero `UserRepository.findByEmail(email)`; si no existe, usar fallback `AUTH_USERS`
     - Si `status !== 'active'`, responder HTTP 403 `{ error: "account not approved" }`
     - Si credenciales OK: consultar `user_apps`, construir JWT con `{ sub, user_id, role, apps }` y firma con `JWT_SECRET`
     - El JWT de fallback incluye `role: 'reader'`, `apps: []`
     - _Requirements: 2.8, 3.3, 4.3, 6.2_
 
-  - [ ]* 8.5 Escribir test de propiedad: JWT incluye role y apps correctos tras login
+  - [x]* 8.5 Escribir test de propiedad: JWT incluye role y apps correctos tras login
     - **Property 9: JWT incluye role y apps correctos tras login**
     - **Validates: Requirements 3.3, 4.3, 6.2**
     - Para cualquier usuario activo con apps asignadas, el JWT emitido contiene `sub=email`, `user_id`, `role` y `apps` exactamente igual al conjunto en `user_apps`
 
 - [ ] 9. Configurar rate limiting en Hub_API
-  - [ ] 9.1 Añadir rate limiting a los endpoints de gestión de usuarios
+  - [x] 9.1 Añadir rate limiting a los endpoints de gestión de usuarios
     - Instalar y configurar `express-rate-limit` (si no está instalado) en `apps/hub-api`
     - `POST /api/auth/register` → 5 req/min por IP
     - `POST /api/login` → verificar que ya existe o añadir 10 req/min por IP
@@ -181,7 +182,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - _Requirements: 5.4_
 
 - [ ] 10. Registrar nuevas rutas en el servidor principal
-  - [ ] 10.1 Modificar `apps/hub-api/src/index.ts` para montar los nuevos routers
+  - [x] 10.1 Modificar `apps/hub-api/src/index.ts` para montar los nuevos routers
     - Importar y montar el users router: `app.use('/api', usersRouter)`
     - Verificar que el orden de middlewares es correcto (rate limit antes de auth)
     - _Requirements: 1.2, 2.1, 3.2, 4.2_
