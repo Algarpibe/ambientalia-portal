@@ -3,6 +3,7 @@ import { lazy, Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import RequireAuth from './components/RequireAuth';
+import { captureError } from './sentry';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
@@ -29,6 +30,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught an error", error, errorInfo);
+    captureError(error);
   }
 
   render() {

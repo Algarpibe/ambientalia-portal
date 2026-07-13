@@ -1,3 +1,4 @@
+import { captureError } from './sentry.js'; // debe importarse primero (init de Sentry)
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -35,6 +36,7 @@ app.use('/api/', rateLimit({
 // SEC-007 — loguea el detalle server-side y responde un mensaje genérico.
 const sendError = (res: express.Response, e: unknown, ctx: string) => {
   console.error(`${ctx} error`, e);
+  captureError(e, { endpoint: ctx });
   res.status(500).json({ error: 'internal error' });
 };
 
@@ -67,6 +69,7 @@ app.get('/health', async (_req, res) => {
   } catch (e) {
     // /health is unauthenticated — don't leak raw driver errors to callers.
     console.error('health check failed', e);
+    captureError(e, { endpoint: 'health' });
     res.status(500).json({ ok: false, error: 'hub unreachable' });
   }
 });
@@ -108,5 +111,9 @@ app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
     sendError(res, e, 'customer-valuation');
   }
 });
+
+// Captura fallos no manejados del proceso (además de loguearlos).
+process.on('unhandledRejection', (reason) => { console.error('unhandledRejection', reason); captureError(reason); });
+process.on('uncaughtException', (err) => { console.error('uncaughtException', err); captureError(err); });
 
 app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
