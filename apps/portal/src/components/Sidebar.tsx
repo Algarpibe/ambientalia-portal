@@ -9,10 +9,12 @@ import {
   LogOut
 } from 'lucide-react';
 import { clearToken } from '../auth';
+import { useAuth } from '../hooks/useAuth';
 
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { role } = useAuth();
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -49,9 +51,14 @@ export default function Sidebar() {
         >
           <Box size={20} /> Aplicaciones
         </Link>
-        <button className="nav-item w-full">
-          <Users size={20} /> Usuarios
-        </button>
+        {role === 'admin' && (
+          <Link
+            to="/admin/users"
+            className={`nav-item w-full ${isActive('/admin/users') ? 'active' : ''}`}
+          >
+            <Users size={20} /> Usuarios
+          </Link>
+        )}
         <button className="nav-item w-full">
           <Settings size={20} /> Ajustes
         </button>

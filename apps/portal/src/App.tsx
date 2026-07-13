@@ -3,12 +3,15 @@ import { lazy, Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import RequireAuth from './components/RequireAuth';
+import RequireAdmin from './components/RequireAdmin';
+import AppGuard from './components/AppGuard';
 import NotificationHost from './components/NotificationHost';
 import { captureError } from './sentry';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
 import Auth from './pages/Auth';
+import AdminUsers from './pages/admin/AdminUsers';
 
 // Lazy load apps
 const ConciliadorPagos = lazy(() => import('../../payment-reconciliation/src/App'));
@@ -88,13 +91,16 @@ function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/herramientas" element={<Herramientas />} />
                     <Route path="/aplicaciones" element={<Aplicaciones />} />
-                    <Route path="/conciliador-pagos/*" element={<ConciliadorPagos />} />
-                    <Route path="/analisis-inventario/*" element={<AnalisisInventario />} />
-                    <Route path="/consolidador-inventario/*" element={<ConsolidadorInventario />} />
-                    <Route path="/rentabilidad-clientes/*" element={<RentabilidadClientes />} />
-                    <Route path="/ventas-articulos/*" element={<VentasArticulos />} />
-                    <Route path="/laboratorios-ambientales/*" element={<LaboratoriosAmbientales />} />
-                    <Route path="/valoracion-clientes/*" element={<ValoracionClientes />} />
+                    {/* Panel de administración — solo admin (Req 5.1-5.3) */}
+                    <Route path="/admin/users" element={<RequireAdmin><AdminUsers /></RequireAdmin>} />
+                    {/* Rutas de aplicaciones — protegidas por AppGuard según apps[] del JWT (Req 4.5) */}
+                    <Route path="/conciliador-pagos/*" element={<AppGuard appId="payment-reconciliation"><ConciliadorPagos /></AppGuard>} />
+                    <Route path="/analisis-inventario/*" element={<AppGuard appId="inventory-optimization"><AnalisisInventario /></AppGuard>} />
+                    <Route path="/consolidador-inventario/*" element={<AppGuard appId="inventory-consolidation"><ConsolidadorInventario /></AppGuard>} />
+                    <Route path="/rentabilidad-clientes/*" element={<AppGuard appId="customer-profitability"><RentabilidadClientes /></AppGuard>} />
+                    <Route path="/ventas-articulos/*" element={<AppGuard appId="product-sales"><VentasArticulos /></AppGuard>} />
+                    <Route path="/laboratorios-ambientales/*" element={<AppGuard appId="laboratorios-ambientales"><LaboratoriosAmbientales /></AppGuard>} />
+                    <Route path="/valoracion-clientes/*" element={<AppGuard appId="customer-valuation"><ValoracionClientes /></AppGuard>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>

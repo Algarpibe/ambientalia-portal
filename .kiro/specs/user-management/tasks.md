@@ -255,27 +255,27 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Al confirmar, llama a `PUT /api/users/:id/apps`
     - _Requirements: 4.2_
 
-  - [ ]* 15.4 Escribir tests unitarios para `AdminUsers` y componentes
+  - [x]* 15.4 Escribir tests unitarios para `AdminUsers` y componentes
     - `AdminUsers`: renderiza lista de usuarios con datos mock, verifica paginación
     - `UserActionsMenu`: acciones correctas habilitadas/deshabilitadas según estado y propio admin
     - `AppAssignModal`: selección y deselección de apps, llamada al endpoint al confirmar
     - _Requirements: 2.1, 2.2, 4.2_
 
 - [ ] 16. Actualizar `Sidebar.tsx` con navegación condicional
-  - [ ] 16.1 Modificar `apps/portal/src/components/Sidebar.tsx`
+  - [x] 16.1 Modificar `apps/portal/src/components/Sidebar.tsx`
     - Usar `useAuth` para obtener el rol del usuario actual
     - Si `role === 'admin'`: mostrar enlace al Panel Admin ("Usuarios") en la navegación lateral
     - Si `role !== 'admin'` (incluido `reader` y no autenticado): ocultar el enlace
     - _Requirements: 3.4_
 
-  - [ ]* 16.2 Escribir tests para `Sidebar`
+  - [x]* 16.2 Escribir tests para `Sidebar`
     - Rol admin: enlace "Usuarios" visible
     - Rol reader: enlace "Usuarios" oculto
     - Sin sesión: enlace "Usuarios" oculto
     - _Requirements: 3.4_
 
 - [ ] 17. Registrar rutas del Panel Admin en el router del Portal
-  - [ ] 17.1 Añadir ruta `/admin/users` al router de `apps/portal`
+  - [x] 17.1 Añadir ruta `/admin/users` al router de `apps/portal`
     - Envolver `AdminUsers` con `RequireAdmin`
     - Asegurar que `AppGuard` envuelve las rutas de aplicaciones existentes con sus `appId` correspondientes
     - Verificar redirección correcta cuando la sesión expira dentro del panel (detectada por `useAuth`)

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authFetch } from '../../lib/api';
+import { clearToken } from '../../auth';
 import { notify } from '../../lib/notify';
 import { useAuth } from '../../hooks/useAuth';
 import type { AdminUser, PaginatedUsers } from './types';
@@ -25,6 +27,7 @@ function errorMessage(status: number, code?: string): string {
 
 export default function AdminUsers() {
   const { user_id } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -32,25 +35,40 @@ export default function AdminUsers() {
   const [error, setError] = useState('');
   const [appsUser, setAppsUser] = useState<AdminUser | null>(null);
 
-  const load = useCallback(async (p: number) => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await authFetch(`/api/users?page=${p}&limit=${PAGE_SIZE}`);
-      if (!res.ok) {
-        setError('No se pudo cargar la lista de usuarios.');
-        return;
+  // Req 5.6: sesión expirada dentro del panel → limpiar token y volver a /auth
+  // sin aplicar ninguna mutación pendiente (el backend ya la rechazó con 401).
+  const handleExpiredSession = useCallback(() => {
+    clearToken();
+    notify('Tu sesión expiró. Vuelve a iniciar sesión.', 'error');
+    navigate('/auth', { replace: true });
+  }, [navigate]);
+
+  const load = useCallback(
+    async (p: number) => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await authFetch(`/api/users?page=${p}&limit=${PAGE_SIZE}`);
+        if (res.status === 401) {
+          handleExpiredSession();
+          return;
+        }
+        if (!res.ok) {
+          setError('No se pudo cargar la lista de usuarios.');
+          return;
+        }
+        const data: PaginatedUsers = await res.json();
+        setUsers(Array.isArray(data.users) ? data.users : []);
+        setTotal(typeof data.total === 'number' ? data.total : 0);
+        setPage(typeof data.page === 'number' ? data.page : p);
+      } catch {
+        setError('No se pudo conectar con el servidor.');
+      } finally {
+        setLoading(false);
       }
-      const data: PaginatedUsers = await res.json();
-      setUsers(Array.isArray(data.users) ? data.users : []);
-      setTotal(typeof data.total === 'number' ? data.total : 0);
-      setPage(typeof data.page === 'number' ? data.page : p);
-    } catch {
-      setError('No se pudo conectar con el servidor.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [handleExpiredSession],
+  );
 
   useEffect(() => {
     load(page);
@@ -61,6 +79,10 @@ export default function AdminUsers() {
     async (req: () => Promise<Response>, okMsg: string) => {
       try {
         const res = await req();
+        if (res.status === 401) {
+          handleExpiredSession();
+          return;
+        }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
           notify(errorMessage(res.status, (body as { error?: string })?.error), 'error');
@@ -72,7 +94,7 @@ export default function AdminUsers() {
         notify('No se pudo conectar con el servidor.', 'error');
       }
     },
-    [load, page],
+    [load, page, handleExpiredSession],
   );
 
   const changeStatus = (u: AdminUser, status: 'active' | 'inactive', okMsg: string) =>
