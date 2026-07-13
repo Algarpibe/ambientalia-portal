@@ -86,6 +86,15 @@ export class UserRepository {
     return rows[0] ? toPublic(rows[0]) : null;
   }
 
+  /** Actualiza el hash de contraseña. Devuelve true si el usuario existía. */
+  async updatePassword(id: string, passwordHash: string): Promise<boolean> {
+    const res = await this.pool.query(
+      'UPDATE users SET password_hash = $2 WHERE id = $1',
+      [id, passwordHash],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
   /**
    * Elimina un usuario de forma permanente. Borra `user_apps` y `users` dentro
    * de una transacción (el CASCADE ya limpiaría, pero la transacción garantiza

@@ -55,49 +55,49 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Para cualquier usuario existente, tras `delete(id)`, `findById(id)` retorna `null` y `user_apps` no contiene registros con ese `user_id`
 
 - [ ] 4. Implementar `UserService` (lógica de negocio)
-  - [ ] 4.1 Crear `users/users.service.ts` con métodos de negocio
+  - [x] 4.1 Crear `users/users.service.ts` con métodos de negocio
     - Métodos: `register(input)`, `approve(id)`, `deactivate(id)`, `reactivate(id)`, `changeRole(id, role)`, `delete(id, requesterId)`, `setApps(id, appIds)`, `listUsers(page)`, `changePassword(id, currentPwd, newPwd)`
     - `register`: validar `full_name` (1–100 chars no solo espacios), `email` RFC 5321, `password` (≥ 8 chars), hashear con bcrypt coste ≥ 12, llamar a `UserRepository.create`
     - `approve`: setear `status='active'`, `role='reader'` (rol por defecto)
     - Auto-protección: `delete` y `deactivate` deben lanzar error si `id === requesterId`
     - _Requirements: 1.2, 1.3, 2.2, 2.3, 2.5, 2.6, 2.7, 3.1, 3.2_
 
-  - [ ]* 4.2 Escribir test de propiedad: registro siempre crea usuario pendiente
+  - [x]* 4.2 Escribir test de propiedad: registro siempre crea usuario pendiente
     - **Property 1: Registro crea usuario en estado pendiente**
     - **Validates: Requirements 1.2, 3.1**
     - Para cualquier combinación válida de `full_name` (1–100 chars), `email` RFC 5321 y `password` (≥ 8 chars), `UserService.register()` debe retornar `status='pending'` y `role='reader'`
 
-  - [ ]* 4.3 Escribir test de propiedad: contraseña nunca en texto plano
+  - [x]* 4.3 Escribir test de propiedad: contraseña nunca en texto plano
     - **Property 2: Contraseña nunca almacenada en texto plano**
     - **Validates: Requirements 1.3**
     - Para cualquier contraseña no vacía, el hash resultante no es igual a la contraseña, supera `bcrypt.compare`, y tiene factor de coste ≥ 12
 
-  - [ ]* 4.4 Escribir test de propiedad: correo duplicado retorna 409
+  - [x]* 4.4 Escribir test de propiedad: correo duplicado retorna 409
     - **Property 3: Registro con correo duplicado retorna 409**
     - **Validates: Requirements 1.4**
     - Para cualquier correo ya registrado, un segundo `register` lanza error mapeado a HTTP 409 sin crear un segundo registro
 
-  - [ ]* 4.5 Escribir test de propiedad: validación rechaza inputs inválidos
+  - [x]* 4.5 Escribir test de propiedad: validación rechaza inputs inválidos
     - **Property 4: Validación de entrada rechaza inputs inválidos**
     - **Validates: Requirements 1.5, 1.6, 1.7**
     - Para cualquier combinación con al menos un campo inválido (correo sin RFC 5321, password < 8 chars, nombre vacío o > 100 chars), `register` lanza error de validación sin crear usuario
 
-  - [ ]* 4.6 Escribir test de propiedad: transiciones de estado correctas
+  - [x]* 4.6 Escribir test de propiedad: transiciones de estado correctas
     - **Property 5: Aprobación y desactivación producen transiciones de estado correctas**
     - **Validates: Requirements 2.2, 2.3, 2.5, 3.1**
     - pending → `approve` → active con role='reader'; active → `deactivate` → inactive; inactive → `reactivate` → active
 
-  - [ ]* 4.7 Escribir test de propiedad: auto-protección del administrador
+  - [x]* 4.7 Escribir test de propiedad: auto-protección del administrador
     - **Property 8: Auto-protección del administrador**
     - **Validates: Requirements 2.7**
     - Para cualquier admin, `delete(id, id)` y `deactivate(id)` donde `requesterId === id` lanzan error mapeado a HTTP 403 sin modificar el estado en BD
 
-  - [ ]* 4.8 Escribir test de propiedad: asignación de apps persiste correctamente
+  - [x]* 4.8 Escribir test de propiedad: asignación de apps persiste correctamente
     - **Property 10: Asignación de apps persiste correctamente**
     - **Validates: Requirements 4.1, 4.2**
     - Para cualquier usuario activo y cualquier subconjunto válido de app IDs, tras `setApps(id, appIds)`, `getApps(id)` retorna exactamente ese subconjunto
 
-- [ ] 5. Checkpoint — Verificar lógica de negocio antes de exponer endpoints
+- [x] 5. Checkpoint — Verificar lógica de negocio antes de exponer endpoints
   - Asegurar que todos los tests de `users.service.test.ts` y `users.properties.test.ts` pasan. Consultar al usuario si hay dudas sobre el comportamiento esperado.
 
 - [ ] 6. Implementar `AuditLogger`
