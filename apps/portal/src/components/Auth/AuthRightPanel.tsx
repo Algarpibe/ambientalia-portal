@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { API_BASE, setToken } from '../../auth';
 
 interface AuthRightPanelProps {
   isSignUp: boolean;
@@ -19,10 +20,6 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Valid credentials
-  const VALID_EMAIL = 'comercial@ambientalia.com.co';
-  const VALID_PASSWORD = '1234';
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -32,29 +29,40 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
     setError(''); // Clear error when user starts typing
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Only validate for Sign In
-    if (!isSignUp) {
-      if (formData.email !== VALID_EMAIL || formData.password !== VALID_PASSWORD) {
-        setError('Correo electrónico o contraseña inválidos');
-        return;
-      }
+
+    // El registro lo gestiona el administrador (usuarios por configuración).
+    if (isSignUp) {
+      setError('El registro de usuarios lo gestiona el administrador.');
+      return;
     }
 
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-      if (isSignUp) {
-        console.log('Account created:', { ...formData, agreeTerms });
-      } else {
-        console.log('Signed in successfully');
-        // Navigate to Dashboard page after successful login
-        navigate('/');
+    setError('');
+    try {
+      if (!API_BASE) throw new Error('config');
+      const res = await fetch(`${API_BASE}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email, password: formData.password }),
+      });
+      if (!res.ok) {
+        setError('Correo electrónico o contraseña inválidos');
+        return;
       }
-    }, 1500);
+      const data = await res.json();
+      if (!data?.token) {
+        setError('Respuesta de autenticación inválida');
+        return;
+      }
+      setToken(data.token);
+      navigate('/');
+    } catch {
+      setError('No se pudo conectar con el servidor. Reintenta.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

@@ -8,6 +8,7 @@ import {
   Wrench,
   LogOut
 } from 'lucide-react';
+import { clearToken } from '../auth';
 
 export default function Sidebar() {
   const location = useLocation();
@@ -16,7 +17,7 @@ export default function Sidebar() {
   const isActive = (path: string) => location.pathname === path;
 
   const handleLogOut = () => {
-    // Clear any session data here if needed
+    clearToken();
     navigate('/auth');
   };
 

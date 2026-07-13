@@ -4,7 +4,11 @@ import { AlertCircle, TrendingUp } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
-const API_KEY = import.meta.env.VITE_HUB_API_KEY as string | undefined;
+// Auth: JWT emitido por hub-api /api/login (guardado por el portal en localStorage).
+const authHeaders = (): Record<string, string> => {
+  const t = localStorage.getItem('ambientalia_token');
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
 
 function App() {
   const [salesData, setSalesData] = useState<any[]>([]);
@@ -18,7 +22,7 @@ function App() {
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
       const res = await fetch(`${API_BASE}/api/profitability/data`, {
-        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();

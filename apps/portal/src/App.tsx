@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
+import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
@@ -73,6 +74,7 @@ function App() {
         <Route
           path="/*"
           element={
+            <RequireAuth>
             <div className="flex min-h-screen bg-[#F7F8FA] text-gray-900">
               <Sidebar />
               <ErrorBoundary>
@@ -93,6 +95,7 @@ function App() {
                 </Suspense>
               </ErrorBoundary>
             </div>
+            </RequireAuth>
           }
         />
       </Routes>

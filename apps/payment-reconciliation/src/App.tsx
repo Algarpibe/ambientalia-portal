@@ -56,15 +56,15 @@ function App() {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
   const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
-  const API_KEY = import.meta.env.VITE_HUB_API_KEY as string | undefined;
 
   const loadFromHub = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
+      const token = localStorage.getItem('ambientalia_token');
       const res = await fetch(`${API_BASE}/api/reconciliation/data`, {
-        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { invoices: InvoiceDetails[]; payments: PaymentRecord[] } = await res.json();
@@ -79,7 +79,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [API_BASE, API_KEY]);
+  }, [API_BASE]);
 
   React.useEffect(() => { loadFromHub(); }, [loadFromHub]);
 

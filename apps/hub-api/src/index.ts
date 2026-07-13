@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { getHubPool } from './db.js';
-import { requireApiKey } from './auth.js';
+import { requireAuth, verifyCredentials, issueToken } from './auth.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
@@ -21,6 +21,9 @@ if (ALLOWED_ORIGINS.length === 0) {
 }
 app.use(cors({ origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : false }));
 
+// Body JSON acotado (solo lo usa /api/login; los datos son GET).
+app.use(express.json({ limit: '10kb' }));
+
 // SEC-005 — rate limiting en la API de datos (mitiga scraping/DoS).
 app.use('/api/', rateLimit({
   windowMs: 60_000,
@@ -34,6 +37,23 @@ const sendError = (res: express.Response, e: unknown, ctx: string) => {
   console.error(`${ctx} error`, e);
   res.status(500).json({ error: 'internal error' });
 };
+
+// Login: valida credenciales (usuarios en env) y emite un JWT. Rate-limit
+// estricto para frenar fuerza bruta.
+app.post('/api/login',
+  rateLimit({ windowMs: 60_000, max: 10, standardHeaders: true, legacyHeaders: false }),
+  async (req, res) => {
+    try {
+      const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
+      if (!email || !password) return res.status(400).json({ error: 'missing credentials' });
+      if (!(await verifyCredentials(email, password))) {
+        return res.status(401).json({ error: 'invalid credentials' });
+      }
+      res.json({ token: issueToken(email) });
+    } catch (e) {
+      sendError(res, e, 'login');
+    }
+  });
 
 app.get('/health', async (_req, res) => {
   try {
@@ -51,7 +71,7 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-app.get('/api/reconciliation/data', requireApiKey, async (req, res) => {
+app.get('/api/reconciliation/data', requireAuth, async (req, res) => {
   try {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
@@ -62,7 +82,7 @@ app.get('/api/reconciliation/data', requireApiKey, async (req, res) => {
   }
 });
 
-app.get('/api/profitability/data', requireApiKey, async (_req, res) => {
+app.get('/api/profitability/data', requireAuth, async (_req, res) => {
   try {
     const data = await getProfitabilityData(getHubPool());
     res.json(data);
@@ -71,7 +91,7 @@ app.get('/api/profitability/data', requireApiKey, async (_req, res) => {
   }
 });
 
-app.get('/api/inventory/data', requireApiKey, async (_req, res) => {
+app.get('/api/inventory/data', requireAuth, async (_req, res) => {
   try {
     const data = await getInventoryData(getHubPool());
     res.json(data);
@@ -80,7 +100,7 @@ app.get('/api/inventory/data', requireApiKey, async (_req, res) => {
   }
 });
 
-app.get('/api/customer-valuation/data', requireApiKey, async (_req, res) => {
+app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
   try {
     const data = await getCustomerValuationData(getHubPool());
     res.json(data);
