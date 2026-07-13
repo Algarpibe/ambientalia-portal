@@ -3,7 +3,6 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { DollarSign, Users, ArrowUpRight, RefreshCcw, Filter, Download, AlertCircle, TrendingUp } from 'lucide-react';
-import * as XLSX from 'xlsx';
 
 type SortState = { key: string | null; direction: 'asc' | 'desc' };
 
@@ -401,7 +400,9 @@ export default function Dashboard({ sales, products, onReset }: { sales: any[]; 
         );
     }
 
-    const exportToExcel = () => {
+    const exportToExcel = async () => {
+        // Import dinámico: xlsx (424 KB) solo se carga al exportar, no en el bundle inicial (FE-001).
+        const XLSX = await import('xlsx');
         const wb = XLSX.utils.book_new();
 
         // Summary Sheet

@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import type { ReconciledRow, DateRangeOption } from './types';
 import { analyzeCustomerPayments, getUniqueCustomers, getFilteredDataByDate, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor, getPreviousPeriodBounds, getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
 import { ArrowUpDown, FileDown, Filter, DollarSign, TrendingUp, TrendingDown, AlertTriangle, Info, Eye, X, GripVertical } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { SkeletonAnalytics } from './SkeletonLoader';
 
 interface TooltipProps {
@@ -397,7 +396,8 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
     });
   };
 
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
+    const XLSX = await import('xlsx');
     const exportData = sortedAndFilteredMetrics.map((m) => ({
       'Nombre de Cliente': m.customerName,
       'DPD Promedio': m.averageDPD,

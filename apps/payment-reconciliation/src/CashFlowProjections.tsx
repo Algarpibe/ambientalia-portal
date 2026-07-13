@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import type { ReconciledRow } from './types';
 import { generateCashFlowProjections } from './customerAnalysisUtils';
 import { TrendingUpIcon, Info, Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 
 interface InfoTooltipProps {
   title: string;
@@ -67,7 +66,8 @@ const CashFlowProjections: React.FC<CashFlowProjectionsProps> = ({
     return generateCashFlowProjections(reconciledData, 6);
   }, [reconciledData]);
 
-  const downloadProjectionsExcel = () => {
+  const downloadProjectionsExcel = async () => {
+    const XLSX = await import('xlsx');
     const exportData = cashFlowProjections.map(proj => ({
       'Mes': proj.month.toUpperCase(),
       'Ingresos Proyectados': proj.projectedRevenue,

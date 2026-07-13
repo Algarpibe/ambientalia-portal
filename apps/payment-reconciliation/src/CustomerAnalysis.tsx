@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import type { ReconciledRow, CustomerAnalysisResult, DateRangeOption } from './types';
 import { performCustomerAnalysis, getUniqueCustomers, parseExcelDate, getDateRangeBounds, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
 import { TrendingUp, TrendingDown, Minus, FileDown, BarChart3, AlertTriangle, CheckCircle2, Activity, Info, X, Filter, Table as TableIcon, AlertCircle } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { SkeletonAnalytics } from './SkeletonLoader';
 
 interface CustomerAnalysisProps {
@@ -143,8 +142,9 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
         setShowInfoModal(true);
     };
 
-    const downloadExcel = () => {
+    const downloadExcel = async () => {
         if (!analysisResult) return;
+        const XLSX = await import('xlsx');
 
         const { current, trends } = analysisResult;
 

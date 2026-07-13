@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import * as XLSX from 'xlsx';
 import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
 import './App.css';
 import type { InvoiceDetails, PaymentRecord, ReconciledRow, DateRangeOption } from './types';
@@ -285,7 +284,8 @@ function App() {
     if (invoices.length > 0) reconcile();
   }, [reconcile]);
 
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
+    const XLSX = await import('xlsx');
     const exportData = reconciledData.map(row => ({
       'N.º de factura': row.invoiceNumber,
       'Número de orden': row.orderNumber,
