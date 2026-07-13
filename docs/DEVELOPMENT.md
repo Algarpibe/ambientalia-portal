@@ -31,6 +31,22 @@ Ver los `.env.example` de cada servicio:
 > **CORS fail-closed**: fijar `ALLOWED_ORIGIN` (origen del portal) en el entorno
 > del hub-api **antes de desplegar**, o el navegador bloqueará las peticiones.
 
+## Observabilidad (Sentry) — opcional, hoy APAGADO
+
+El código de Sentry ya está integrado pero **desactivado**: no envía nada hasta
+que se configure un DSN (por eso es seguro desplegar sin él). Para activarlo:
+
+1. Crear cuenta gratis en https://sentry.io → proyecto **Node.js** (hub-api) y
+   proyecto **React** (portal). Cada uno da un **DSN**.
+2. En EasyPanel:
+   - Servicio **hub-api** → variable `SENTRY_DSN` = DSN del proyecto Node → Implementar.
+   - Servicio **portal** → variable `VITE_SENTRY_DSN` = DSN del proyecto React → Implementar.
+     (Es build-time; el `Dockerfile` ya declara `ARG VITE_SENTRY_DSN`.)
+3. Verificar: en los logs de hub-api aparece `Sentry habilitado (hub-api)`.
+
+Captura: hub-api → errores 500 de los endpoints, fallos de `/health`, y
+`unhandledRejection`/`uncaughtException`. portal → errores JS del `ErrorBoundary`.
+
 ## Comandos
 
 ```bash
