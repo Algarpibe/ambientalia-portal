@@ -2,50 +2,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import { aggregateClients, aggregateClientsExtended, getPopulationStats } from './metrics/clientAggregator';
-import { parseInvoices, parseMaster, parsePayments, parseSales } from './parsers/excel';
-import { parseSalesHistory } from './parsers/salesHistory';
 import { loadFromHub } from './hub/loadFromHub';
 import { ClientProfile, CustomerSalesYearRecord, InvoiceRecord, MasterCostRecord, PaymentRecord, SalesRecord, ScoringConfig, DEFAULT_SCORING_CONFIG, ExtendedClientProfile, ExtendedScoringConfig, DEFAULT_EXTENDED_CONFIG } from './types';
 import { MatrixChart } from './ui/MatrixChart';
 import { CustomerDetail } from './ui/CustomerDetail';
 import { Sidebar } from './ui/Sidebar';
 import { Settings } from './ui/Settings';
-import * as XLSX from 'xlsx';
-
-function FileUploadCard({
-  title,
-  description,
-  fileName,
-  onSelect
-}: {
-  title: string;
-  description: string;
-  fileName?: string;
-  onSelect: (files: FileList) => void;
-}) {
-  const handleClick = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.xlsx,.xls';
-    input.onchange = (e) => {
-      const files = (e.target as HTMLInputElement).files;
-      if (files) onSelect(files);
-    };
-    input.click();
-  };
-
-  return (
-    <div className={`upload-card ${fileName ? 'upload-card--success' : ''}`}>
-      <div className="upload-card__icon">📊</div>
-      <h3 className="upload-card__title">{title}</h3>
-      <p className="upload-card__desc">{description}</p>
-      {fileName && <div className="upload-card__file-name">✓ {fileName}</div>}
-      <button className="upload-card__btn" onClick={handleClick}>
-        {fileName ? 'Cambiar archivo' : 'Seleccionar archivo'}
-      </button>
-    </div>
-  );
-}
 
 function StatsCard({ clients, salesHistoryCount }: { clients: ClientProfile[]; salesHistoryCount?: number }) {
   const stats = useMemo(() => getPopulationStats(clients), [clients]);
@@ -91,7 +53,9 @@ function StatsCard({ clients, salesHistoryCount }: { clients: ClientProfile[]; s
 }
 
 function ExportButton({ clients }: { clients: ClientProfile[] }) {
-  const handleExport = () => {
+  const handleExport = async () => {
+    // Import dinámico: xlsx (429 KB) solo se carga al exportar (FE-001).
+    const XLSX = await import('xlsx');
     const validClients = clients.filter(c => c.scores !== null);
 
     // Hoja 1: Ranking con scores principales
@@ -388,9 +352,6 @@ function RankingTable({
 }
 
 export default function App() {
-  // State for high level view (Upload vs App)
-  const [view, setView] = useState<'upload' | 'app'>('upload');
-
   // State for tabs within Main App View
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
   const [detailClient, setDetailClient] = useState<ClientProfile | ExtendedClientProfile | null>(null);
@@ -633,7 +594,6 @@ export default function App() {
         setInvoices(d.invoices);
         setPayments(d.payments);
         updateSalesHistoryAndConfig(d.salesHistory);
-        setView('app');
       } catch (e) {
         if (!cancelled) {
           setErrors([`No se pudieron cargar los datos del hub de Zoho: ${e instanceof Error ? e.message : 'error'}. Puedes subir los archivos manualmente.`]);
@@ -646,180 +606,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleUpload = async <T,>(
-    files: FileList,
-    parser: (file: File) => Promise<T[]>,
-    setter: (value: T[]) => void,
-    label: string
-  ) => {
-    const file = files[0];
-    try {
-      setErrors((prev) => prev.filter((e) => !e.startsWith(label)));
-      const parsed = await parser(file);
-      setter(parsed);
-    } catch (err) {
-      setErrors((prev) => [...prev, `${label}: ${(err as Error).message}`]);
-    }
-  };
-
-  const detectSlot = (fileName: string): WatchSlot | null => {
-    const name = fileName.toLowerCase();
-    if (name.includes('hist')) return 'salesHistory';
-    if (name.includes('factur')) return 'invoices';
-    if (name.includes('pago')) return 'payments';
-    if (name.includes('maestra') || name.includes('master') || name.includes('producto') || name.includes('sku')) return 'master';
-    if (name.includes('venta')) return 'sales';
-    return null;
-  };
-
-  const parseHandle = async <T,>(
-    handle: FileSystemFileHandle,
-    parser: (file: File) => Promise<T[]>,
-    setter: (value: T[]) => void,
-    label: string,
-    slot: WatchSlot
-  ) => {
-    const file = await handle.getFile();
-    try {
-      setErrors((prev) => prev.filter((e) => !e.startsWith(label)));
-      const parsed = await parser(file);
-      setter(parsed);
-      watchLastModifiedRef.current[slot] = file.lastModified;
-    } catch (err) {
-      setErrors((prev) => [...prev, `${label}: ${(err as Error).message}`]);
-    }
-  };
-
-  const linkDirectoryHandle = async (dirHandle: FileSystemDirectoryHandle, statusLabel = 'Carpeta vinculada') => {
-    setSyncDirHandle(dirHandle);
-    await loadSettingsFromDisk(dirHandle);
-
-    const found: WatchHandles = {};
-
-    for await (const [name, handle] of (dirHandle as any).entries()) {
-      if (handle.kind !== 'file') continue;
-      if (!name.toLowerCase().endsWith('.xlsx') && !name.toLowerCase().endsWith('.xls')) continue;
-      const slot = detectSlot(name);
-      if (slot && !found[slot]) {
-        found[slot] = handle as FileSystemFileHandle;
-      }
-    }
-
-    const missing: string[] = [];
-    if (!found.salesHistory) missing.push('Ventas Históricas');
-    if (!found.invoices) missing.push('Facturas');
-    if (!found.payments) missing.push('Pagos');
-    if (!found.sales) missing.push('Ventas');
-    if (!found.master) missing.push('Base Maestra');
-
-    if (missing.length > 0) {
-      setErrors((prev) => [...prev, `Carpeta: faltan archivos para ${missing.join(', ')}`]);
-    }
-
-    setWatchHandles(found);
-    watchHandlesRef.current = found;
-
-    if (found.salesHistory) await parseHandle(found.salesHistory, parseSalesHistory, updateSalesHistoryAndConfig, 'Ventas Históricas', 'salesHistory');
-    if (found.invoices) await parseHandle(found.invoices, parseInvoices, setInvoices, 'Facturas', 'invoices');
-    if (found.payments) await parseHandle(found.payments, parsePayments, setPayments, 'Pagos', 'payments');
-    if (found.sales) await parseHandle(found.sales, parseSales, setSales, 'Ventas', 'sales');
-    if (found.master) await parseHandle(found.master, parseMaster, setMaster, 'Base Maestra', 'master');
-
-    setWatchEnabled(true);
-    setWatchStatus(statusLabel);
-  };
-
-  const handlePickFolder = async () => {
-    if (!('showDirectoryPicker' in window)) {
-      setErrors((prev) => [...prev, 'Carpeta: tu navegador no soporta acceso a carpetas (File System Access API).']);
-      return;
-    }
-
-    try {
-      const dirHandle = await (window as any).showDirectoryPicker();
-      await saveDirectoryHandle(dirHandle);
-      await linkDirectoryHandle(dirHandle, 'Carpeta vinculada');
-    } catch (err) {
-      setErrors((prev) => [...prev, `Carpeta: ${(err as Error).message}`]);
-    }
-  };
-
-  useEffect(() => {
-    const restore = async () => {
-      if (!('showDirectoryPicker' in window)) return;
-
-      const savedHandle = await loadDirectoryHandle();
-      if (!savedHandle) return;
-
-      try {
-        const permission = await (savedHandle as any).queryPermission({ mode: 'read' });
-        if (permission === 'granted') {
-          await linkDirectoryHandle(savedHandle, 'Carpeta vinculada (recordada)');
-          return;
-        }
-
-        const requested = await (savedHandle as any).requestPermission({ mode: 'read' });
-        if (requested === 'granted') {
-          await linkDirectoryHandle(savedHandle, 'Carpeta vinculada (recordada)');
-        } else {
-          setWatchStatus('Carpeta guardada: requiere permiso');
-        }
-      } catch (err) {
-        console.warn('No se pudo restaurar la carpeta sincronizada', err);
-      }
-    };
-
-    restore();
-  }, []);
-
-  useEffect(() => {
-    if (!watchEnabled) return;
-
-    const interval = window.setInterval(async () => {
-      const handles = watchHandlesRef.current;
-      if (!handles) return;
-
-      if (handles.salesHistory) {
-        const file = await handles.salesHistory.getFile();
-        if (file.lastModified !== watchLastModifiedRef.current.salesHistory) {
-          await parseHandle(handles.salesHistory, parseSalesHistory, updateSalesHistoryAndConfig, 'Ventas Históricas', 'salesHistory');
-        }
-      }
-
-      if (handles.invoices) {
-        const file = await handles.invoices.getFile();
-        if (file.lastModified !== watchLastModifiedRef.current.invoices) {
-          await parseHandle(handles.invoices, parseInvoices, setInvoices, 'Facturas', 'invoices');
-        }
-      }
-
-      if (handles.payments) {
-        const file = await handles.payments.getFile();
-        if (file.lastModified !== watchLastModifiedRef.current.payments) {
-          await parseHandle(handles.payments, parsePayments, setPayments, 'Pagos', 'payments');
-        }
-      }
-
-      if (handles.sales) {
-        const file = await handles.sales.getFile();
-        if (file.lastModified !== watchLastModifiedRef.current.sales) {
-          await parseHandle(handles.sales, parseSales, setSales, 'Ventas', 'sales');
-        }
-      }
-
-      if (handles.master) {
-        const file = await handles.master.getFile();
-        if (file.lastModified !== watchLastModifiedRef.current.master) {
-          await parseHandle(handles.master, parseMaster, setMaster, 'Base Maestra', 'master');
-        }
-      }
-    }, 10000);
-
-    return () => window.clearInterval(interval);
-  }, [watchEnabled]);
-
   const clients = useMemo(() => {
-    if (view === 'upload') return [];
     if (!sales.length && !invoices.length && !salesHistory.length) return [];
 
     // Use extended aggregation if sales history is available
@@ -829,7 +616,7 @@ export default function App() {
 
     // Fallback to original aggregation
     return aggregateClients(sales, master, invoices, payments, new Date(), config);
-  }, [view, sales, master, invoices, payments, salesHistory, config, extendedConfig]);
+  }, [sales, master, invoices, payments, salesHistory, config, extendedConfig]);
 
   const stats = useMemo(() => getPopulationStats(clients), [clients]);
 
@@ -852,8 +639,8 @@ export default function App() {
     return Array.from(new Set(clients.map(c => c.displayName))).sort((a, b) => a.localeCompare(b));
   }, [clients]);
 
-  // Mientras el hub responde, pantalla de carga (auto-carga desde Zoho).
-  if (hubLoading && view === 'upload') {
+  // Pantalla de carga mientras el hub responde (auto-carga desde Zoho).
+  if (hubLoading) {
     return (
       <div className="page" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
@@ -865,101 +652,20 @@ export default function App() {
     );
   }
 
-  // Si no hay datos (o falló el hub), mostramos la pantalla de carga con subida manual.
-  if (view === 'upload') {
+  // Si el hub no devolvió datos, pantalla de error con reintentar.
+  if (!hasData) {
     return (
-      <div className="page" style={{ height: '100vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        <header className="hero">
-          <div className="hero__content">
-            <p className="eyebrow">Ambientalia • Valoración Histórica de Clientes</p>
-            <h1>Ventas + Rentabilidad + Pagos → Scores S, V, P, T</h1>
-            <p className="hero__desc">
-              Sistema de valoración integrada con scoring 0-100, segmentación automática,
-              candados de riesgo, matching de clientes y políticas comerciales recomendadas.
-            </p>
-          </div>
-
-          <div className="hero__uploads">
-            <FileUploadCard
-              title="📅 Ventas Históricas"
-              description="Excel con columnas: Cliente, 2021, 2022, 2023, 2024, 2025"
-              fileName={salesHistory.length > 0 ? `${new Set(salesHistory.map(r => r.customerNameNorm)).size} clientes` : undefined}
-              onSelect={(files) => handleUpload(files, parseSalesHistory, updateSalesHistoryAndConfig, 'Ventas Históricas')}
-            />
-            <FileUploadCard
-              title="📋 Detalles de Factura"
-              description="Excel con facturas: cliente, fecha, vencimiento, total"
-              fileName={invoices.length > 0 ? `${invoices.length} facturas` : undefined}
-              onSelect={(files) => handleUpload(files, parseInvoices, setInvoices, 'Facturas')}
-            />
-            <FileUploadCard
-              title="💳 Pagos Recibidos"
-              description="Excel con pagos: cliente, factura, fecha, monto"
-              fileName={payments.length > 0 ? `${payments.length} pagos` : undefined}
-              onSelect={(files) => handleUpload(files, parsePayments, setPayments, 'Pagos')}
-            />
-            <FileUploadCard
-              title="🛒 Ventas por Artículo"
-              description="Excel con ventas: cliente, SKU, cantidad, importe"
-              fileName={sales.length > 0 ? `${sales.length} líneas` : undefined}
-              onSelect={(files) => handleUpload(files, parseSales, setSales, 'Ventas')}
-            />
-            <FileUploadCard
-              title="📦 Base Maestra"
-              description="Excel con productos: SKU, costo unitario"
-              fileName={master.length > 0 ? `${master.length} productos` : undefined}
-              onSelect={(files) => handleUpload(files, parseMaster, setMaster, 'Base Maestra')}
-            />
-          </div>
-
-          <div className="card" style={{ marginTop: '16px' }}>
-            <div className="card__header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>📂 Carpeta sincronizada</h3>
-              {watchStatus && <span style={{ fontSize: '12px', color: 'var(--muted)' }}>{watchStatus}</span>}
-            </div>
-            <div style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
-              <button className="pill" onClick={handlePickFolder}>
-                Vincular carpeta
-              </button>
-              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                Archivos vinculados: {Object.keys(watchHandles).length}
-              </span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--muted)' }}>
-                <input
-                  type="checkbox"
-                  checked={watchEnabled}
-                  onChange={(e) => setWatchEnabled(e.target.checked)}
-                />
-                Auto-actualizar cada 10s
-              </label>
-              <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                Se detectan archivos por nombre (hist, factur, pago, venta, master).
-              </span>
-            </div>
-          </div>
-
-          {errors.length > 0 && (
-            <div className="alert alert--error">
-              {errors.map((e) => (
-                <p key={e}>⚠️ {e}</p>
-              ))}
-              <button className="pill" onClick={() => setErrors([])}>
-                Limpiar errores
-              </button>
-            </div>
-          )}
-
-          <div className="hero__actions">
-            <button
-              className="btn btn--primary"
-              onClick={() => setView('app')}
-              disabled={!hasData}
-              style={{ padding: '16px 48px', fontSize: '18px' }}
-            >
-              🚀 Analizar Datos
-            </button>
-          </div>
-        </header>
+      <div className="page" style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', maxWidth: 460, padding: 24 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+          <h2 style={{ margin: '0 0 8px' }}>No se pudieron cargar los datos</h2>
+          <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
+            {errors[0] || 'El hub de Zoho no devolvió datos. Reintenta en unos segundos.'}
+          </p>
+          <button className="btn btn--primary" onClick={() => window.location.reload()} style={{ padding: '12px 32px' }}>
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }
@@ -973,7 +679,7 @@ export default function App() {
           setActiveTab(tab);
           setDetailClient(null); // Reset detail view when switching main tabs
         }}
-        onLogout={() => setView('upload')}
+        onLogout={() => window.location.reload()}
       />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px', position: 'relative' }}>
