@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Package, RefreshCw, AlertCircle } from 'lucide-react';
 import { ResultsTable } from './components/ResultTable';
-import { processInventoryData } from './utils/calculations';
+import { runInventoryAnalysis } from './runInventoryWorker';
 import type { AnalysisResult, RawSalesData, RawInventoryData, RawLeadTimeData } from './types';
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
@@ -31,14 +31,14 @@ function App() {
       if (!keys.every((k) => Array.isArray(d?.[k]))) {
         throw new Error('Respuesta del hub con formato inesperado');
       }
-      const analyzed = processInventoryData(
-        d.sales2026 as RawSalesData[],
-        d.sales2025 as RawSalesData[],
-        d.sales2024 as RawSalesData[],
-        d.sales2023 as RawSalesData[],
-        d.inventory as RawInventoryData[],
-        d.leadTime as RawLeadTimeData[],
-      );
+      const analyzed = await runInventoryAnalysis({
+        sales2026: d.sales2026 as RawSalesData[],
+        sales2025: d.sales2025 as RawSalesData[],
+        sales2024: d.sales2024 as RawSalesData[],
+        sales2023: d.sales2023 as RawSalesData[],
+        inventory: d.inventory as RawInventoryData[],
+        leadTime: d.leadTime as RawLeadTimeData[],
+      });
       setResults(analyzed);
     } catch (err) {
       setError('No se pudieron cargar los datos del hub de Zoho. Reintenta.');
