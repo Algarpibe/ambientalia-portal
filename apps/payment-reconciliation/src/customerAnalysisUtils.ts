@@ -23,6 +23,13 @@ export const parseExcelDate = (val: any): Date | null => {
                 return new Date(year, month, day);
             }
         }
+        // ISO date-only (YYYY-MM-DD): parsear como fecha LOCAL, no UTC. `new
+        // Date("2026-04-06")` sería medianoche UTC y, formateado con getters
+        // locales en UTC-5, se corría un día (mostraba 05/04 en vez de 06/04).
+        const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(val);
+        if (iso) {
+            return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+        }
         const parsed = new Date(val);
         return isNaN(parsed.getTime()) ? null : parsed;
     }
