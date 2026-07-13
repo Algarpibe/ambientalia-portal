@@ -3,7 +3,7 @@ import type { AnalysisResult } from '../types';
 import { StatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
 import DeadStock from './DeadStock';
-import { ArrowUpDown, Download, Settings2, Eye, EyeOff, GripVertical } from 'lucide-react';
+import { ArrowUpDown, Download, Settings2 } from 'lucide-react';
 import {
     DndContext,
     closestCenter,
@@ -18,9 +18,7 @@ import {
     SortableContext,
     sortableKeyboardCoordinates,
     verticalListSortingStrategy,
-    useSortable,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import AbcXyzMatrix from './AbcXyzMatrix';
 
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
@@ -28,76 +26,7 @@ import {
     computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories,
 } from '../utils/resultTableLogic';
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
-
-interface SortableItemProps {
-    id: string;
-    col: ColumnConfig;
-    isVisible: boolean;
-    onToggle: (key: string) => void;
-}
-
-const SortableItem: React.FC<SortableItemProps> = ({ id, col, isVisible, onToggle }) => {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-        zIndex: isDragging ? 50 : undefined,
-    };
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            className={cn(
-                "flex items-center justify-between p-1.5 hover:bg-gray-50 rounded-md group",
-                isDragging && "bg-indigo-50 shadow-md ring-1 ring-indigo-200"
-            )}
-        >
-            <div className="flex items-center gap-2 overflow-hidden">
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onToggle(col.key);
-                    }}
-                    className={cn(
-                        "p-0.5 rounded transition-colors",
-                        isVisible
-                            ? "text-indigo-600 hover:bg-indigo-50"
-                            : "text-gray-300 hover:bg-gray-100"
-                    )}
-                >
-                    {isVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                </button>
-                <span className={cn(
-                    "text-[11px] truncate select-none",
-                    isVisible ? "text-gray-900 font-medium" : "text-gray-400"
-                )}>
-                    {col.label}
-                </span>
-            </div>
-            <div
-                {...attributes}
-                {...listeners}
-                className="cursor-grab active:cursor-grabbing p-1 text-gray-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-                <GripVertical className="w-3.5 h-3.5" />
-            </div>
-        </div>
-    );
-};
-
-interface ColumnConfig {
-    key: string;
-    label: string;
-}
+import { SortableColumnItem, type ColumnConfig } from './SortableColumnItem';
 
 interface ResultsTableProps {
     data: AnalysisResult[];
@@ -708,7 +637,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             strategy={verticalListSortingStrategy}
                                         >
                                             {columns[activeTab].map((col) => (
-                                                <SortableItem
+                                                <SortableColumnItem
                                                     key={col.key}
                                                     id={col.key}
                                                     col={col}
@@ -1153,7 +1082,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                                         strategy={verticalListSortingStrategy}
                                                     >
                                                         {columns['history'].map((col) => (
-                                                            <SortableItem
+                                                            <SortableColumnItem
                                                                 key={col.key}
                                                                 id={col.key}
                                                                 col={col}
