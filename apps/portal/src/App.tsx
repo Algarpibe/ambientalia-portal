@@ -3,6 +3,7 @@ import { lazy, Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
 import RequireAuth from './components/RequireAuth';
+import NotificationHost from './components/NotificationHost';
 import { captureError } from './sentry';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
@@ -68,6 +69,8 @@ function LoadingFallback() {
 function App() {
   return (
     <BrowserRouter>
+      {/* Host global de notificaciones (toasts) — visible en toda la app. */}
+      <NotificationHost />
       <Routes>
         {/* Authentication page - no sidebar */}
         <Route path="/auth" element={<Auth />} />

@@ -191,7 +191,7 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
   - Ejecutar `vitest --run` en `apps/hub-api` para confirmar que todos los tests pasan. Verificar que el servidor arranca y los endpoints responden correctamente con supertest. Consultar al usuario si hay dudas.
 
 - [ ] 12. Implementar `useAuth` hook en el Portal
-  - [ ] 12.1 Crear `apps/portal/src/hooks/useAuth.ts`
+  - [x] 12.1 Crear `apps/portal/src/hooks/useAuth.ts`
     - Leer el JWT de `localStorage` bajo la clave `ambientalia_token`
     - Decodificar el payload (sin verificar firma) usando `atob` o una librería ligera
     - Retornar `{ isAuthenticated, user_id, email, role, apps }` según `AuthState`
@@ -199,27 +199,27 @@ El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y por
     - Si `apps` del JWT está malformado o no es array: tratar como `[]`
     - _Requirements: 3.4, 4.4, 4.6_
 
-  - [ ]* 12.2 Escribir tests unitarios para `useAuth`
+  - [x]* 12.2 Escribir tests unitarios para `useAuth`
     - Parseo correcto de JWT válido con todos los campos
     - Token vacío, expirado y malformado retornan estado vacío
     - Campo `apps` malformado retorna `[]`
     - _Requirements: 3.4, 4.4, 4.6_
 
 - [ ] 13. Implementar guards de ruta en el Portal
-  - [ ] 13.1 Crear `apps/portal/src/components/RequireAdmin.tsx`
+  - [x] 13.1 Crear `apps/portal/src/components/RequireAdmin.tsx`
     - Usa `useAuth` para obtener estado de autenticación y rol
     - Si no autenticado → `<Navigate to="/auth" />`
     - Si `role !== 'admin'` → `<Navigate to="/" />`
     - Si `role === 'admin'` → renderiza `children`
     - _Requirements: 5.1, 5.2, 5.3_
 
-  - [ ] 13.2 Crear `apps/portal/src/components/AppGuard.tsx`
+  - [x] 13.2 Crear `apps/portal/src/components/AppGuard.tsx`
     - Props: `appId: string`, `children: ReactNode`
     - Lee `apps[]` del JWT via `useAuth`
     - Si `appId` no está en `apps[]` → `<Navigate to="/" />` + mostrar toast de acceso no autorizado
     - _Requirements: 4.5_
 
-  - [ ]* 13.3 Escribir tests unitarios para `RequireAdmin` y `AppGuard`
+  - [x]* 13.3 Escribir tests unitarios para `RequireAdmin` y `AppGuard`
     - `RequireAdmin`: usuario sin sesión redirige a `/auth`, lector redirige a `/`, admin renderiza children
     - `AppGuard`: app asignada renderiza children, app no asignada redirige a `/` con notificación
     - _Requirements: 5.1, 5.2, 5.3, 4.5_
