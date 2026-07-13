@@ -1,7 +1,18 @@
 # Build context is the repo ROOT (needs .npmrc + apps/hub-api/*).
 # In EasyPanel: Dockerfile path = apps/hub-api/Dockerfile, build context = repo root.
-# NPM_TOKEN is an ARG used INLINE in the RUN (never an ENV) so it is not baked
-# into any image layer/history; docker history shows "$NPM_TOKEN", not the value.
+#
+# NPM_TOKEN (scope read:packages, para @algarpibe/zoho-sync privado) es un ARG
+# usado INLINE en el RUN (nunca ENV), así que no queda en la historia de la
+# imagen (docker history muestra "$NPM_TOKEN", no el valor).
+#
+# LIMITACIÓN CONOCIDA: BuildKit sustituye el ARG en la línea RUN al imprimirla,
+# así que el token SÍ aparece en los *logs de build*. El arreglo limpio sería un
+# secret mount (--mount=type=secret), pero EasyPanel no expone build-secrets:
+# solo pasa las variables de Entorno como build-args. Mitigaciones vigentes:
+#  - token de mínimo privilegio (read:packages) y rotable,
+#  - logs de build de acceso restringido (tratarlos como sensibles),
+#  - fix definitivo pendiente: construir la imagen en CI (GitHub Actions maneja
+#    secrets bien) y que EasyPanel consuma "Imagen Docker" desde el registry.
 FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
 WORKDIR /app
 ARG NPM_TOKEN
