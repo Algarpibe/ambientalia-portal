@@ -39,7 +39,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         main: [
             { key: 'sku', label: 'SKU' },
             { key: 'itemName', label: 'Artículo' },
-            { key: 'unitPrice', label: 'Precio (USD)' },
+            { key: 'unitPrice', label: 'Precio de Venta (USD)' },
+            { key: 'unitCost', label: 'Precio de Compra (USD)' },
             { key: 'category', label: 'Categoría' },
             { key: 'status', label: 'Estatus' },
             { key: 'abcXyz', label: 'ABC-XYZ' },
@@ -63,7 +64,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
         service: [
             { key: 'sku', label: 'SKU' },
             { key: 'itemName', label: 'Artículo' },
-            { key: 'unitPrice', label: 'Precio (USD)' },
+            { key: 'unitPrice', label: 'Precio de Venta (USD)' },
+            { key: 'unitCost', label: 'Precio de Compra (USD)' },
             { key: 'category', label: 'Categoría' },
             { key: 'status', label: 'Estatus' },
             { key: 'abcXyz', label: 'ABC-XYZ' },
@@ -248,6 +250,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                         if (key === 'current_inventory' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
                         if (key === 'main' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
                         if (key === 'main' && !currentKeys.has('orderedQuantity')) currentKeys.add('orderedQuantity');
+                        if ((key === 'main' || key === 'service') && !currentKeys.has('unitCost')) currentKeys.add('unitCost');
                     }
                 });
                 return result;
@@ -811,7 +814,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             );
                                         }
 
-                                        if (col.key === 'unitPrice' && typeof value === 'number') {
+                                        if ((col.key === 'unitPrice' || col.key === 'unitCost') && typeof value === 'number') {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     {value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
