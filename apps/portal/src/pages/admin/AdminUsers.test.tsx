@@ -37,10 +37,10 @@ describe('AdminUsers', () => {
     expect(await screen.findByText('Ana')).toBeTruthy();
     expect(screen.getByText('Beto')).toBeTruthy();
     expect(screen.getByText('Caro')).toBeTruthy();
-    expect(screen.getByText('3 usuarios en total')).toBeTruthy();
+    expect(screen.getByText('3 usuarios registrados en total.')).toBeTruthy();
     expect(screen.getByText('Página 1 de 1')).toBeTruthy();
-    // Estados como badges.
-    expect(screen.getByText('Activo')).toBeTruthy();
+    // Estados como badges (active se muestra como "Aprobado").
+    expect(screen.getByText('Aprobado')).toBeTruthy();
     expect(screen.getByText('Pendiente')).toBeTruthy();
     expect(screen.getByText('Inactivo')).toBeTruthy();
   });

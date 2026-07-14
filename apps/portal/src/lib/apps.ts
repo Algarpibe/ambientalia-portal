@@ -6,20 +6,23 @@
 // (coincide con el nombre de la sub-app en el monorepo). `route` es la ruta en
 // el router del portal.
 
+export type AppCategory = 'herramienta' | 'aplicacion';
+
 export interface AppInfo {
   id: string;
   label: string;
   route: string;
+  category: AppCategory;
 }
 
 export const APPS: AppInfo[] = [
-  { id: 'payment-reconciliation', label: 'Conciliador de Pagos', route: '/conciliador-pagos' },
-  { id: 'customer-profitability', label: 'Rentabilidad de Clientes', route: '/rentabilidad-clientes' },
-  { id: 'inventory-optimization', label: 'Análisis de Inventario', route: '/analisis-inventario' },
-  { id: 'inventory-consolidation', label: 'Consolidador de Inventario', route: '/consolidador-inventario' },
-  { id: 'product-sales', label: 'Ventas por Artículos', route: '/ventas-articulos' },
-  { id: 'laboratorios-ambientales', label: 'Laboratorios Ambientales', route: '/laboratorios-ambientales' },
-  { id: 'customer-valuation', label: 'Valoración de Clientes', route: '/valoracion-clientes' },
+  { id: 'payment-reconciliation', label: 'Conciliador de Pagos', route: '/conciliador-pagos', category: 'aplicacion' },
+  { id: 'customer-profitability', label: 'Rentabilidad de Clientes', route: '/rentabilidad-clientes', category: 'aplicacion' },
+  { id: 'inventory-optimization', label: 'Análisis de Inventario', route: '/analisis-inventario', category: 'aplicacion' },
+  { id: 'inventory-consolidation', label: 'Consolidador de Inventario', route: '/consolidador-inventario', category: 'herramienta' },
+  { id: 'product-sales', label: 'Ventas por Artículos', route: '/ventas-articulos', category: 'herramienta' },
+  { id: 'laboratorios-ambientales', label: 'Laboratorios Ambientales', route: '/laboratorios-ambientales', category: 'aplicacion' },
+  { id: 'customer-valuation', label: 'Valoración de Clientes', route: '/valoracion-clientes', category: 'aplicacion' },
 ];
 
 /** Devuelve la info de una app por su id. */
@@ -36,4 +39,9 @@ export function getAppByRoute(route: string): AppInfo | undefined {
 export function isRouteAssigned(route: string, assignedIds: string[]): boolean {
   const info = getAppByRoute(route);
   return info ? assignedIds.includes(info.id) : false;
+}
+
+/** True si el usuario tiene al menos una app asignada de la categoría dada. */
+export function hasAssignedInCategory(category: AppCategory, assignedIds: string[]): boolean {
+  return APPS.some((a) => a.category === category && assignedIds.includes(a.id));
 }

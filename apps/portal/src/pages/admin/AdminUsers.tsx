@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ShieldCheck, Users } from 'lucide-react';
 import { authFetch } from '../../lib/api';
 import { clearToken } from '../../auth';
 import { notify } from '../../lib/notify';
 import { useAuth } from '../../hooks/useAuth';
-import type { AdminUser, PaginatedUsers } from './types';
+import type { AdminUser, PaginatedUsers, UserRole } from './types';
 import UserTable from './UserTable';
 import AppAssignModal from './AppAssignModal';
 
@@ -104,8 +105,8 @@ export default function AdminUsers() {
   const handleReactivate = (u: AdminUser) => changeStatus(u, 'active', 'Usuario reactivado.');
   const handleDeactivate = (u: AdminUser) => changeStatus(u, 'inactive', 'Usuario desactivado.');
 
-  const handleChangeRole = (u: AdminUser) => {
-    const role = u.role === 'admin' ? 'reader' : 'admin';
+  const handleChangeRole = (u: AdminUser, role: UserRole) => {
+    if (role === u.role) return;
     act(() => authFetch(`/api/users/${u.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }), 'Rol actualizado.');
   };
 
@@ -118,25 +119,46 @@ export default function AdminUsers() {
 
   return (
     <div className="flex-grow bg-[#F7F8FA] p-8">
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Gestión de usuarios</h1>
-        <p className="text-gray-500 mb-6">{total} usuario{total === 1 ? '' : 's'} en total</p>
+      <div className="max-w-6xl mx-auto">
+        {/* Cabecera */}
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Gestión de Usuarios</h1>
+            <p className="text-gray-500 mt-1">Aprueba o desactiva el acceso de los usuarios a la plataforma.</p>
+          </div>
+          <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+            <Users className="w-5 h-5" />
+          </div>
+        </div>
 
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
         )}
 
-        <UserTable
-          users={users}
-          loading={loading}
-          currentUserId={user_id}
-          onApprove={handleApprove}
-          onDeactivate={handleDeactivate}
-          onReactivate={handleReactivate}
-          onChangeRole={handleChangeRole}
-          onDelete={handleDelete}
-          onAssignApps={setAppsUser}
-        />
+        {/* Card: Lista de Usuarios */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-blue-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Lista de Usuarios</h2>
+            </div>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {total} usuario{total === 1 ? '' : 's'} registrado{total === 1 ? '' : 's'} en total.
+            </p>
+          </div>
+
+          <UserTable
+            users={users}
+            loading={loading}
+            currentUserId={user_id}
+            onApprove={handleApprove}
+            onDeactivate={handleDeactivate}
+            onReactivate={handleReactivate}
+            onChangeRole={handleChangeRole}
+            onDelete={handleDelete}
+            onAssignApps={setAppsUser}
+          />
+        </div>
 
         {appsUser && (
           <AppAssignModal

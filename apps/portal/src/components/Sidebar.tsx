@@ -10,11 +10,14 @@ import {
 } from 'lucide-react';
 import { clearToken } from '../auth';
 import { useAuth } from '../hooks/useAuth';
+import { hasAssignedInCategory } from '../lib/apps';
 
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, apps } = useAuth();
+  const showHerramientas = hasAssignedInCategory('herramienta', apps);
+  const showAplicaciones = hasAssignedInCategory('aplicacion', apps);
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -39,18 +42,22 @@ export default function Sidebar() {
         >
           <LayoutDashboard size={20} /> Dashboard
         </Link>
-        <Link
-          to="/herramientas"
-          className={`nav-item w-full ${isActive('/herramientas') ? 'active' : ''}`}
-        >
-          <Wrench size={20} /> Herramientas
-        </Link>
-        <Link
-          to="/aplicaciones"
-          className={`nav-item w-full ${isActive('/aplicaciones') ? 'active' : ''}`}
-        >
-          <Box size={20} /> Aplicaciones
-        </Link>
+        {showHerramientas && (
+          <Link
+            to="/herramientas"
+            className={`nav-item w-full ${isActive('/herramientas') ? 'active' : ''}`}
+          >
+            <Wrench size={20} /> Herramientas
+          </Link>
+        )}
+        {showAplicaciones && (
+          <Link
+            to="/aplicaciones"
+            className={`nav-item w-full ${isActive('/aplicaciones') ? 'active' : ''}`}
+          >
+            <Box size={20} /> Aplicaciones
+          </Link>
+        )}
         {role === 'admin' && (
           <Link
             to="/admin/users"
