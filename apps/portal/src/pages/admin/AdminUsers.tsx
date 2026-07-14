@@ -119,7 +119,7 @@ export default function AdminUsers() {
 
   return (
     <div className="flex-grow bg-[#F7F8FA] p-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="w-full">
         {/* Cabecera */}
         <div className="flex items-start justify-between mb-6">
           <div>
