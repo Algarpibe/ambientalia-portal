@@ -54,6 +54,10 @@ const INVENTORY_SQL = `
          -- Estado del artículo en Zoho ('active'/'inactive'). Permite excluir del
          -- análisis de reposición los artículos dados de baja/sustituidos.
          COALESCE(NULLIF(it.raw ->> 'status', ''), 'active') AS "Estado del artículo",
+         -- ¿El artículo hace seguimiento de inventario en Zoho? ('true'/'false').
+         -- Define "con seguimiento" (Análisis Principal), independiente del
+         -- reorder_level (que muchos artículos no tienen configurado).
+         COALESCE(it.raw ->> 'track_inventory', 'false') AS "Seguimiento inventario",
          COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
          por.proxima_oc_fecha AS "Fecha OC próxima",
          -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,

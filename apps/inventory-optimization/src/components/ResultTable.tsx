@@ -806,7 +806,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
                                                     {value === -1 ? (
-                                                        <span className="text-gray-400 italic">Sin Seguimiento</span>
+                                                        <span className="text-gray-400 italic" title="El artículo no tiene nivel de reposición configurado en el ERP">Sin configurar</span>
                                                     ) : value}
                                                 </td>
                                             );

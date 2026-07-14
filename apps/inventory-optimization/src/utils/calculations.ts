@@ -103,6 +103,7 @@ export const processInventoryData = (
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
     const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
     const STATUS_KEYS = ['Estado del artículo', 'Estado', 'status', 'Status'];
+    const TRACK_KEYS = ['Seguimiento inventario', 'track_inventory'];
 
     // Create collections and maps
     const allSkus = new Set<string>();
@@ -154,7 +155,8 @@ export const processInventoryData = (
                         vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim(),
                         cost: Number(getValueByKeys(item, COST_KEYS) || 0),
                         orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10),
-                        itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim()
+                        itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim(),
+                        tracksInventory: String(getValueByKeys(item, TRACK_KEYS) || 'false').toLowerCase().trim() === 'true'
                     });
                 } else if (isLeadTime) {
                     targetMap.set(sku, {
@@ -210,7 +212,8 @@ export const processInventoryData = (
             vendor: 'Sin proveedor',
             cost: 0,
             orderDate: '',
-            itemStatus: 'active'
+            itemStatus: 'active',
+            tracksInventory: false
         };
         const actualCurrentLevel = inventoryInfo.level;
         const itemStatus = String(inventoryInfo.itemStatus || 'active').toLowerCase();
@@ -287,12 +290,11 @@ export const processInventoryData = (
             }
         }
 
-        // "Con seguimiento" (Análisis Principal) = el artículo tiene Nivel ERP
-        // (reorder_level) configurado en el ERP. El lead time es un tema aparte: un
-        // artículo con Nivel ERP pero sin lead time SÍ tiene seguimiento (aparecerá
-        // en Análisis Principal, aunque sin sugerencia de pedido hasta cargar el LT).
-        // "Sin seguimiento" = sin Nivel ERP (actualCurrentLevel === -1).
-        const isService = actualCurrentLevel === -1;
+        // "Con seguimiento" (Análisis Principal) = el artículo hace seguimiento de
+        // inventario en Zoho (track_inventory = true), independiente del reorder_level
+        // y del lead time (que son temas aparte). "Sin seguimiento" = artículos que
+        // NO son de inventario (servicios, sales/purchases sin stock).
+        const isService = !inventoryInfo.tracksInventory;
 
         // Serie mensual cronológica 2023 → mes actual (se trunca el futuro del año en curso).
         const monthlySeries: number[] = [
