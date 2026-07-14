@@ -47,9 +47,14 @@ const INVENTORY_SQL = `
          COALESCE(NULLIF(it.raw ->> 'reorder_level', '')::numeric, -1)         AS "Nivel de reposición",
          COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)          AS "Existencias a mano",
          COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) AS "Existencias físicas",
-         COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)
-           - COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
-         COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
+         -- Comprometido (base FÍSICA) = Σ (cantidad − entregado − cancelado) de las OV
+         -- abiertas. Zoho NO sincroniza 'committed_stock' (viene vacío) y 'available_stock'
+         -- queda igual al a-mano, así que el comprometido hay que calcularlo desde las
+         -- líneas. Esto reconstruye exacto el bloque "Existencias físicas" de Zoho.
+         -- Disponible = a-mano FÍSICO (actual_available_stock) − comprometido, para que
+         -- reconcilien: p. ej. Disposition 16 − 21 = −5 (idéntico a Zoho).
+         COALESCE(com.comprometido, 0) AS "Existencias comprometidas",
+         COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) - COALESCE(com.comprometido, 0) AS "Disponible para la venta",
          COALESCE(it.purchase_rate, 0) AS "Costo",
          -- Precio de venta configurado en el ítem de Zoho (maestro, no el facturado).
          COALESCE(NULLIF(it.raw ->> 'rate', '')::numeric, 0) AS "Precio de venta",
@@ -85,6 +90,21 @@ const INVENTORY_SQL = `
        WHERE po.status NOT IN ('draft', 'cancelled')
        GROUP BY poli.item_id
     ) por ON por.item_id = it.item_id
+    LEFT JOIN (
+      -- Comprometido real = Σ (cantidad − entregado − cancelado) de las líneas de OV
+      -- cuyo pedido NO está anulado, en borrador ni pendiente de aprobación (solo
+      -- órdenes confirmadas reservan stock). Las OV ya facturadas/entregadas aportan 0
+      -- porque quantity_delivered = quantity. Validado: Xenon 3030020915 = 2 (open+overdue).
+      SELECT soli.item_id,
+             SUM(GREATEST(
+               COALESCE(soli.quantity, 0)
+               - COALESCE(NULLIF(soli.raw ->> 'quantity_delivered', '')::numeric, 0)
+               - COALESCE(NULLIF(soli.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)) AS comprometido
+        FROM books.salesorder_line_items soli
+        JOIN books.sales_orders so ON so.salesorder_id = soli.salesorder_id
+       WHERE so.status NOT IN ('void', 'draft', 'pending_approval')
+       GROUP BY soli.item_id
+    ) com ON com.item_id = it.item_id
     LEFT JOIN (
       SELECT item_id, vendor_name FROM (
         SELECT poli.item_id, po.vendor_name,
