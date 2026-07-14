@@ -40,6 +40,9 @@ Archivos/
 *.xlsx
 *.docx
 *.webp
+*.csv
+load_lead_times.sql
+Importar_*
 
 # OS files
 Thumbs.db
