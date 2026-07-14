@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { AnalysisResult } from '../types';
-import { StatusBadge, cn, Modal } from './ui';
+import { StatusBadge, LevelStatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
 import DeadStock from './DeadStock';
 import { ArrowUpDown, Download, Settings2 } from 'lucide-react';
@@ -224,6 +224,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [eoqHoldingRate, setEoqHoldingRate] = useState<number>(() => Number(localStorage.getItem('eoq_holding_rate')) || 25);
     useEffect(() => { localStorage.setItem('eoq_order_cost', String(eoqOrderCost)); }, [eoqOrderCost]);
     useEffect(() => { localStorage.setItem('eoq_holding_rate', String(eoqHoldingRate)); }, [eoqHoldingRate]);
+    // El filtro de estatus cambia de dominio entre pestañas (operativo vs nivel ERP);
+    // se resetea al cambiar de pestaña para no dejar un valor inexistente en la otra.
+    useEffect(() => { setStatusFilter('all'); }, [activeTab]);
 
     const [visibleColumns, setVisibleColumns] = useState<Record<string, Set<string>>>(() => {
         const saved = localStorage.getItem('table_columns_visibility');
@@ -495,12 +498,24 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                             onChange={(e) => setStatusFilter(e.target.value)}
                         >
                             <option value="all">Estatus</option>
-                            <option value="Urgente">Urgente</option>
-                            <option value="EnCamino">En camino</option>
-                            <option value="Pedir">Pedir</option>
-                            <option value="Overstock">Sobrestock</option>
-                            <option value="Optimized">Optimizado</option>
-                            <option value="Ignored">Ignorado</option>
+                            {(activeTab === 'main' || activeTab === 'service') ? (
+                                <>
+                                    <option value="Subir">Subir nivel</option>
+                                    <option value="Bajar">Bajar nivel</option>
+                                    <option value="OK">Nivel OK</option>
+                                    <option value="SinConfigurar">Sin configurar</option>
+                                    <option value="SinDatos">Sin datos</option>
+                                </>
+                            ) : (
+                                <>
+                                    <option value="Urgente">Urgente</option>
+                                    <option value="EnCamino">En camino</option>
+                                    <option value="Pedir">Pedir</option>
+                                    <option value="Overstock">Sobrestock</option>
+                                    <option value="Optimized">Optimizado</option>
+                                    <option value="Ignored">Ignorado</option>
+                                </>
+                            )}
                         </select>
                     )}
                     {activeTab === 'current_inventory' && (
@@ -760,7 +775,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-normal min-w-[150px]">
                                                     <div className="flex flex-col gap-1">
-                                                        <StatusBadge status={row.status} />
+                                                        {(activeTab === 'main' || activeTab === 'service')
+                                                            ? <LevelStatusBadge status={row.levelStatus} />
+                                                            : <StatusBadge status={row.status} />}
                                                         <span className={cn(
                                                             "text-[9px] font-bold uppercase",
                                                             row.variabilityClass === 'Alta' ? "text-red-600" :

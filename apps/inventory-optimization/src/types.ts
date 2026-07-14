@@ -39,6 +39,8 @@ export interface AnalysisResult {
     optimalQuantity: number;
     deviation: number;
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
+    // Recomendación de ajuste del nivel de reposición del ERP (pestaña Análisis Principal)
+    levelStatus: 'Subir' | 'Bajar' | 'OK' | 'SinConfigurar' | 'SinDatos';
     itemStatus: string;     // estado maestro del artículo en Zoho ('active' | 'inactive')
     coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)

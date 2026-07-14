@@ -101,6 +101,7 @@ export const processInventoryData = (
     const MANUFACTURER_KEYS = ['Fabricante', 'Manufacturer'];
     const VENDOR_KEYS = ['Proveedor', 'Provider', 'Vendor'];
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
+    const SALE_PRICE_KEYS = ['Precio de venta', 'Precio de Venta por unidad', 'rate', 'Sale Price'];
     const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
     const STATUS_KEYS = ['Estado del artículo', 'Estado', 'status', 'Status'];
     const TRACK_KEYS = ['Seguimiento inventario', 'track_inventory'];
@@ -154,6 +155,7 @@ export const processInventoryData = (
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim(),
                         vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim(),
                         cost: Number(getValueByKeys(item, COST_KEYS) || 0),
+                        salePrice: Number(getValueByKeys(item, SALE_PRICE_KEYS) || 0),
                         orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10),
                         itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim(),
                         tracksInventory: String(getValueByKeys(item, TRACK_KEYS) || 'false').toLowerCase().trim() === 'true'
@@ -211,6 +213,7 @@ export const processInventoryData = (
             manufacturer: 'Sin Fabricante',
             vendor: 'Sin proveedor',
             cost: 0,
+            salePrice: 0,
             orderDate: '',
             itemStatus: 'active',
             tracksInventory: false
@@ -380,7 +383,9 @@ export const processInventoryData = (
         );
 
         // Financial Overrides Logic
-        const unitPrice = priceMap.get(sku) || 0;
+        // Precio de venta: el configurado en el ítem de Zoho (ERP); si no está
+        // configurado, se usa como respaldo el promedio realmente facturado.
+        const unitPrice = inventoryInfo.salePrice > 0 ? inventoryInfo.salePrice : (priceMap.get(sku) || 0);
         let ss = 0;
         let pdp = 0;
         let q = 0;
@@ -502,6 +507,15 @@ export const processInventoryData = (
 
         const deviation = reportedLevel !== -1 ? reportedLevel - pdp : 0;
 
+        // Recomendación de ajuste del nivel de reposición del ERP vs el PdP calculado
+        // (para la pestaña Análisis Principal). Independiente del estatus operativo.
+        let levelStatus: AnalysisResult['levelStatus'];
+        if (reportedLevel === -1) levelStatus = 'SinConfigurar';
+        else if (leadTimeDays === 0 || roundedPdp < 1) levelStatus = 'SinDatos';
+        else if (reportedLevel < roundedPdp) levelStatus = 'Subir';
+        else if (reportedLevel > roundedPdp * 1.2) levelStatus = 'Bajar';
+        else levelStatus = 'OK';
+
         results.push({
             sku,
             itemName,
@@ -517,6 +531,7 @@ export const processInventoryData = (
             optimalQuantity: q,
             deviation,
             status,
+            levelStatus,
             itemStatus,
             coverageDays,
             coverageRisk,

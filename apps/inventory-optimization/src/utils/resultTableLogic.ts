@@ -64,7 +64,10 @@ export function filterResults(data: AnalysisResult[], activeTab: string, f: Resu
       item.sku.toLowerCase().includes(term) ||
       item.itemName.toLowerCase().includes(term) ||
       item.category.toLowerCase().includes(term);
-    const matchesStatus = activeTab === 'urgent' || f.statusFilter === 'all' || item.status === f.statusFilter;
+    // En Análisis Principal / Sin Seguimiento el estatus es la recomendación de
+    // nivel ERP (levelStatus); en el resto, el estatus operativo (status).
+    const statusField = activeTab === 'main' || activeTab === 'service' ? item.levelStatus : item.status;
+    const matchesStatus = activeTab === 'urgent' || f.statusFilter === 'all' || statusField === f.statusFilter;
     const matchesManufacturer = f.manufacturerFilter === 'all' || item.manufacturer === f.manufacturerFilter;
     const matchesCategory = f.categoryFilter === 'all' || item.category === f.categoryFilter;
     const matchesCommitted = activeTab !== 'urgent' || !f.onlyCommitted || item.committedQuantity > 0;

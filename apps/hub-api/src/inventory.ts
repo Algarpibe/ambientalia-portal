@@ -51,6 +51,8 @@ const INVENTORY_SQL = `
            - COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Existencias comprometidas",
          COALESCE(NULLIF(it.raw ->> 'available_for_sale', '')::numeric, NULLIF(it.raw ->> 'available_stock', '')::numeric, 0) AS "Disponible para la venta",
          COALESCE(it.purchase_rate, 0) AS "Costo",
+         -- Precio de venta configurado en el ítem de Zoho (maestro, no el facturado).
+         COALESCE(NULLIF(it.raw ->> 'rate', '')::numeric, 0) AS "Precio de venta",
          -- Estado del artículo en Zoho ('active'/'inactive'). Permite excluir del
          -- análisis de reposición los artículos dados de baja/sustituidos.
          COALESCE(NULLIF(it.raw ->> 'status', ''), 'active') AS "Estado del artículo",
