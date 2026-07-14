@@ -47,6 +47,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
             { key: 'xyzClass', label: 'XYZ' },
             { key: 'demandPattern', label: 'Patrón' },
             { key: 'currentLevel', label: 'Nivel ERP' },
+            { key: 'physicalHandQuantity', label: 'Existencias Físicas' },
+            { key: 'orderedQuantity', label: 'Por Recibir' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
             { key: 'eoq', label: 'EOQ' },
@@ -241,6 +243,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                         const currentKeys = result[key];
                         if (key === 'urgent' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
                         if (key === 'current_inventory' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
+                        if (key === 'main' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
+                        if (key === 'main' && !currentKeys.has('orderedQuantity')) currentKeys.add('orderedQuantity');
                     }
                 });
                 return result;

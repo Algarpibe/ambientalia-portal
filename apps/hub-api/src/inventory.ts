@@ -33,6 +33,7 @@ const SALES_BY_YEAR_SQL = `
      AND inv.date >= make_date($1::int, 1, 1)
      AND inv.date <  make_date($1::int + 1, 1, 1)
      AND it.sku IS NOT NULL AND it.sku <> ''
+     AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'
    GROUP BY it.sku`;
 
 // NULLIF(...,'') guards against service/non-inventory items whose Zoho stock
@@ -85,7 +86,8 @@ const INVENTORY_SQL = `
          GROUP BY poli.item_id, po.vendor_name
       ) ranked WHERE rn = 1
     ) ven ON ven.item_id = it.item_id
-   WHERE it.sku IS NOT NULL AND it.sku <> ''`;
+   WHERE it.sku IS NOT NULL AND it.sku <> ''
+     AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 
 // Lead time: prefer the REAL lead time computed from received purchase orders
 // (min receive date − order date), when the item has >= 3 received POs — with its
@@ -126,7 +128,8 @@ const LEAD_TIME_SQL = `
     FROM books.items it
     LEFT JOIN lt_stats s ON s.item_id = it.item_id
     LEFT JOIN public.item_lead_times seed ON seed.sku = it.sku
-   WHERE it.sku IS NOT NULL AND it.sku <> ''`;
+   WHERE it.sku IS NOT NULL AND it.sku <> ''
+     AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 
 export async function getInventoryData(db: Pool): Promise<InventoryData> {
   const [s2026, s2025, s2024, s2023, inv, lt] = await Promise.all([
