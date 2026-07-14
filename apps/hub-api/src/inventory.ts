@@ -89,44 +89,24 @@ const INVENTORY_SQL = `
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 
-// Lead time: prefer the REAL lead time computed from received purchase orders
-// (min receive date − order date), when the item has >= 3 received POs — with its
-// standard deviation for the safety-stock formula. Otherwise fall back to the
-// manual value: the Zoho item "Lead Time" custom field (cf_lead_time), then the
-// seeded public.item_lead_times table (from the Importar Excel).
+// Lead time (POR AHORA): SOLO el valor sembrado desde el Excel de importación
+// (public.item_lead_times, columna G de "Importar_120726"). Un artículo sin valor
+// en esa tabla queda con lead time 0 → aparece en el análisis pero sin sugerencia
+// de pedido hasta que se cargue su lead time.
+//
+// MEJORAS FUTURAS (aún no implementadas — no estamos preparados para ello):
+//   1) Tomar el lead time del campo habilitado de Zoho (cf_lead_time).
+//   2) Calcular el lead time REAL = tiempo entre la OC y la recepción
+//      (min fecha de recepción − fecha de la OC), con su desviación, cuando el
+//      artículo tenga suficientes OC recibidas.
 const LEAD_TIME_SQL = `
-  WITH po_lt AS (
-    SELECT poli.item_id,
-           ((SELECT MIN(NULLIF(r ->> 'date', '')::date)
-               FROM jsonb_array_elements(po.raw -> 'purchasereceives') r) - po.date) AS lt_days
-      FROM books.purchase_order_line_items poli
-      JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
-     WHERE po.date IS NOT NULL
-       AND jsonb_typeof(po.raw -> 'purchasereceives') = 'array'
-       AND jsonb_array_length(po.raw -> 'purchasereceives') > 0
-  ),
-  lt_stats AS (
-    SELECT item_id,
-           round(avg(lt_days))::int              AS lt_avg,
-           round(COALESCE(stddev_pop(lt_days), 0))::int AS lt_std,
-           count(*)::int                         AS lt_n
-      FROM po_lt
-     WHERE lt_days IS NOT NULL AND lt_days >= 0
-     GROUP BY item_id
-  )
   SELECT it.sku                                  AS "Código de Producto",
          COALESCE(it.raw ->> 'manufacturer', '') AS "Fabricante",
-         CASE WHEN s.lt_n >= 3 THEN s.lt_avg::text
-              ELSE COALESCE(
-                NULLIF(it.raw ->> 'cf_lead_time', ''),
-                NULLIF(it.raw -> 'custom_field_hash' ->> 'cf_lead_time', ''),
-                seed.lead_time_days::text
-              ) END                              AS "Lead Time",
-         CASE WHEN s.lt_n >= 3 THEN s.lt_std ELSE 0 END AS "Lead Time Desv",
-         CASE WHEN s.lt_n >= 3 THEN 'Calculado' ELSE 'Manual' END AS "Lead Time Fuente",
-         COALESCE(s.lt_n, 0)                     AS "Lead Time N"
+         seed.lead_time_days::text               AS "Lead Time",
+         0                                        AS "Lead Time Desv",
+         'Manual'                                 AS "Lead Time Fuente",
+         0                                        AS "Lead Time N"
     FROM books.items it
-    LEFT JOIN lt_stats s ON s.item_id = it.item_id
     LEFT JOIN public.item_lead_times seed ON seed.sku = it.sku
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
