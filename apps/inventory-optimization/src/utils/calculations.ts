@@ -102,6 +102,7 @@ export const processInventoryData = (
     const VENDOR_KEYS = ['Proveedor', 'Provider', 'Vendor'];
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
     const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
+    const STATUS_KEYS = ['Estado del artículo', 'Estado', 'status', 'Status'];
 
     // Create collections and maps
     const allSkus = new Set<string>();
@@ -152,7 +153,8 @@ export const processInventoryData = (
                         manufacturer: String(getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin Fabricante').trim(),
                         vendor: String(getValueByKeys(item, VENDOR_KEYS) || getValueByKeys(item, MANUFACTURER_KEYS) || 'Sin proveedor').trim(),
                         cost: Number(getValueByKeys(item, COST_KEYS) || 0),
-                        orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10)
+                        orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10),
+                        itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim()
                     });
                 } else if (isLeadTime) {
                     targetMap.set(sku, {
@@ -207,9 +209,12 @@ export const processInventoryData = (
             manufacturer: 'Sin Fabricante',
             vendor: 'Sin proveedor',
             cost: 0,
-            orderDate: ''
+            orderDate: '',
+            itemStatus: 'active'
         };
         const actualCurrentLevel = inventoryInfo.level;
+        const itemStatus = String(inventoryInfo.itemStatus || 'active').toLowerCase();
+        const isInactive = itemStatus === 'inactive';
 
         const getStats = (item: any, isPartial = false) => {
             const values = months.map(m => Number(item[m] || 0));
@@ -466,8 +471,9 @@ export const processInventoryData = (
             : 0;
         const overstockValue = overstockUnits * unitCost;
 
-        if (leadTimeDays === 0 || roundedPdp < 1) {
-            // Servicio, o sin demanda relevante → no se analiza stock.
+        if (isInactive || leadTimeDays === 0 || roundedPdp < 1) {
+            // Artículo inactivo (dado de baja/sustituido en Zoho), servicio, o sin
+            // demanda relevante → no se analiza stock ni se sugiere reposición.
             status = 'Ignored';
         } else if (physicalAvailable <= 0 && incoming <= 0) {
             // Físicamente en cero (o comprometido más de lo que hay) y nada en camino → pedir YA.
@@ -505,6 +511,7 @@ export const processInventoryData = (
             optimalQuantity: q,
             deviation,
             status,
+            itemStatus,
             coverageDays,
             coverageRisk,
             orderDate: inventoryInfo.orderDate,

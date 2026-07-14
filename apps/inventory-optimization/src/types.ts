@@ -39,6 +39,7 @@ export interface AnalysisResult {
     optimalQuantity: number;
     deviation: number;
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
+    itemStatus: string;     // estado maestro del artículo en Zoho ('active' | 'inactive')
     coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
     orderDate: string;      // fecha de la OC abierta más próxima (ISO); '' si ninguna

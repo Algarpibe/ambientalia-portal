@@ -19,7 +19,7 @@ import AbcXyzMatrix from './AbcXyzMatrix';
 
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
 import {
-    computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories,
+    computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories, isUrgentItem,
 } from '../utils/resultTableLogic';
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
 import { type ColumnConfig } from './SortableColumnItem';
@@ -392,12 +392,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                             : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
                     )}
                 >
-                    Pedidos Urgentes ({data.filter(item => {
-                        const threshold = Math.max(item.reorderPoint, item.erpLevel);
-                        const suggestedOrder = Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)));
-                        return suggestedOrder > 0 && (threshold > 0 || item.availableQuantity < 0) &&
-                            (item.availableQuantity < 0 || (item.availableQuantity + item.orderedQuantity) <= threshold);
-                    }).length})
+                    Pedidos Urgentes ({data.filter(isUrgentItem).length})
                 </button>
                 <button
                     onClick={() => {

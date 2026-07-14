@@ -15,6 +15,8 @@ export function computeEoq(annualUnits: number, unitCost: number, orderCost: num
 // Un ítem es "urgente" (hay que pedir ya) si el pedido sugerido es > 0 y hay
 // señal de umbral/negativo. Se usaba duplicado en 3 sitios del componente.
 export function isUrgentItem(item: AnalysisResult): boolean {
+  // Los artículos inactivos en Zoho (dados de baja/sustituidos) no se piden.
+  if (item.itemStatus === 'inactive') return false;
   const threshold = Math.max(item.reorderPoint, item.erpLevel);
   const suggestedOrder = Math.max(
     0,
