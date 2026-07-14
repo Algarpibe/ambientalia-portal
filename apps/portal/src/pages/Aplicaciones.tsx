@@ -7,6 +7,8 @@ import {
   Beaker,
   Users
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { isRouteAssigned } from '../lib/apps';
 
 interface AppConfig {
   name: string;
@@ -55,6 +57,9 @@ const aplicaciones: AppConfig[] = [
 ];
 
 export default function Aplicaciones() {
+  // Solo las apps asignadas al usuario (Req 4.4).
+  const { apps: assigned } = useAuth();
+  const visibles = aplicaciones.filter((app) => isRouteAssigned(app.path, assigned));
   return (
     <main className="flex-grow bg-transparent p-6 overflow-y-auto">
       {/* Header */}
@@ -70,9 +75,16 @@ export default function Aplicaciones() {
         </div>
       </header>
 
+      {visibles.length === 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center shadow-soft mb-6">
+          <p className="text-gray-700 font-semibold mb-1">No tienes aplicaciones asignadas todavía</p>
+          <p className="text-gray-500 text-sm">Contacta a un administrador para obtener acceso a las aplicaciones.</p>
+        </div>
+      )}
+
       {/* Grid de Aplicaciones */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {aplicaciones.map((app, index) => (
+        {visibles.map((app, index) => (
           <Link
             key={index}
             to={app.path}
@@ -111,7 +123,7 @@ export default function Aplicaciones() {
       <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
           <h3 className="text-sm font-medium text-gray-600 mb-2">Total Aplicaciones</h3>
-          <p className="text-3xl font-bold text-gray-900">{aplicaciones.length}</p>
+          <p className="text-3xl font-bold text-gray-900">{visibles.length}</p>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
           <h3 className="text-sm font-medium text-gray-600 mb-2">Sesiones Activas</h3>

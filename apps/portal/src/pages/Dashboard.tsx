@@ -11,6 +11,8 @@ import {
   Wrench,
   Star
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { isRouteAssigned } from '../lib/apps';
 
 interface AppConfig {
   name: string;
@@ -73,8 +75,11 @@ const apps: AppConfig[] = [
 ];
 
 export default function Dashboard() {
-  const herramientas = apps.filter(app => app.section === 'herramientas');
-  const aplicaciones = apps.filter(app => app.section === 'aplicaciones');
+  // Solo se muestran las apps asignadas al usuario (Req 4.4).
+  const { apps: assigned } = useAuth();
+  const visibles = apps.filter(app => isRouteAssigned(app.path, assigned));
+  const herramientas = visibles.filter(app => app.section === 'herramientas');
+  const aplicaciones = visibles.filter(app => app.section === 'aplicaciones');
 
   return (
     <main className="flex-grow bg-transparent p-6 overflow-y-auto">
@@ -100,7 +105,16 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* Sin apps asignadas (Req 4.4) */}
+      {visibles.length === 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center shadow-soft">
+          <p className="text-gray-700 font-semibold mb-1">No tienes aplicaciones asignadas todavía</p>
+          <p className="text-gray-500 text-sm">Contacta a un administrador para obtener acceso a las aplicaciones.</p>
+        </div>
+      )}
+
       {/* Herramientas Section */}
+      {herramientas.length > 0 && (
       <section id="herramientas" className="mb-12">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl flex items-center justify-center shadow-soft">
@@ -136,8 +150,10 @@ export default function Dashboard() {
           ))}
         </div>
       </section>
+      )}
 
       {/* Aplicaciones Section */}
+      {aplicaciones.length > 0 && (
       <section id="aplicaciones" className="mb-12">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-2xl flex items-center justify-center shadow-soft">
@@ -182,6 +198,7 @@ export default function Dashboard() {
           </button>
         </div>
       </section>
+      )}
 
       {/* System Stats Footer Area */}
       <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6">
