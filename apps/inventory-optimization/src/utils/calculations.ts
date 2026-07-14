@@ -287,8 +287,12 @@ export const processInventoryData = (
             }
         }
 
-        // Is Service Check
-        const isService = leadTimeDays === 0 || actualCurrentLevel === -1;
+        // "Con seguimiento" (Análisis Principal) = el artículo tiene Nivel ERP
+        // (reorder_level) configurado en el ERP. El lead time es un tema aparte: un
+        // artículo con Nivel ERP pero sin lead time SÍ tiene seguimiento (aparecerá
+        // en Análisis Principal, aunque sin sugerencia de pedido hasta cargar el LT).
+        // "Sin seguimiento" = sin Nivel ERP (actualCurrentLevel === -1).
+        const isService = actualCurrentLevel === -1;
 
         // Serie mensual cronológica 2023 → mes actual (se trunca el futuro del año en curso).
         const monthlySeries: number[] = [
