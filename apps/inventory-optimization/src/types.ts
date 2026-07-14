@@ -33,7 +33,7 @@ export interface AnalysisResult {
     leadTimeMonths: number;
     leadTimeStdDays: number;
     leadTimeSource: string;
-    leadTimeN: number;
+    leadTimeN: string;      // "# OC": nº de la orden de compra a mostrar (OC abierta próxima, o la más reciente)
     safetyStock: number;
     reorderPoint: number;
     optimalQuantity: number;

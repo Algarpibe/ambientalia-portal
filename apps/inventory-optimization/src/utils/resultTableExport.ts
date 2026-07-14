@@ -24,7 +24,7 @@ export async function exportInventoryToExcel(
     'Tiempo Entrega (Meses)': item.leadTimeMonths.toFixed(2),
     'σ Lead Time (Días)': item.leadTimeStdDays,
     'Fuente Lead Time': item.leadTimeSource,
-    '# OC Recibidas': item.leadTimeN,
+    '# OC': item.leadTimeN,
     'Cobertura (Días)': item.coverageDays < 0 ? 'N/A' : item.coverageDays,
     'Riesgo Quiebre (Cob<LT)': item.coverageRisk ? 'SÍ' : 'NO',
     'ETA (llegada)': item.etaDate || '',

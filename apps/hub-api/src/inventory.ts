@@ -62,6 +62,7 @@ const INVENTORY_SQL = `
          COALESCE(it.raw ->> 'track_inventory', 'false') AS "Seguimiento inventario",
          COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
          por.proxima_oc_fecha AS "Fecha OC próxima",
+         COALESCE(por.proxima_oc_num, por.ultima_oc_num, '') AS "OC Número",
          -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,
          -- con fallback al Fabricante y luego a un literal.
          COALESCE(ven.vendor_name, NULLIF(it.raw ->> 'manufacturer', ''), NULLIF(it.raw ->> 'brand', ''), 'Sin proveedor') AS "Proveedor"
@@ -73,7 +74,12 @@ const INVENTORY_SQL = `
              -- pendiente): fecha OC + lead time = ETA de la próxima entrada de stock.
              MIN(po.date) FILTER (
                WHERE GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0) > 0
-             )::text AS proxima_oc_fecha
+             )::text AS proxima_oc_fecha,
+             -- Nº de OC a mostrar: la OC abierta más próxima (con saldo pendiente);
+             -- si ninguna está abierta, la OC más reciente.
+             (array_agg(po.raw ->> 'purchaseorder_number' ORDER BY po.date ASC)
+               FILTER (WHERE GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0) > 0))[1] AS proxima_oc_num,
+             (array_agg(po.raw ->> 'purchaseorder_number' ORDER BY po.date DESC))[1] AS ultima_oc_num
         FROM books.purchase_order_line_items poli
         JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
        WHERE po.status NOT IN ('draft', 'cancelled')
@@ -105,26 +111,15 @@ const INVENTORY_SQL = `
 //   2) Calcular el lead time REAL = tiempo entre la OC y la recepción
 //      (min fecha de recepción − fecha de la OC), con su desviación, cuando el
 //      artículo tenga suficientes OC recibidas.
-// "Lead Time N" (columna "# OC" en la UI) = nº de órdenes de compra reales del
-// artículo (no borrador/canceladas). Antes contaba solo las OC recibidas que
-// alimentaban el lead time calculado; ahora que el LT es manual, se desacopla y
-// cuenta las OC existentes en el sistema.
 const LEAD_TIME_SQL = `
   SELECT it.sku                                  AS "Código de Producto",
          COALESCE(it.raw ->> 'manufacturer', '') AS "Fabricante",
          seed.lead_time_days::text               AS "Lead Time",
          0                                        AS "Lead Time Desv",
          'Manual'                                 AS "Lead Time Fuente",
-         COALESCE(oc.num_oc, 0)                   AS "Lead Time N"
+         0                                        AS "Lead Time N"
     FROM books.items it
     LEFT JOIN public.item_lead_times seed ON seed.sku = it.sku
-    LEFT JOIN (
-      SELECT poli.item_id, COUNT(DISTINCT poli.purchaseorder_id) AS num_oc
-        FROM books.purchase_order_line_items poli
-        JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
-       WHERE po.status NOT IN ('draft', 'cancelled')
-       GROUP BY poli.item_id
-    ) oc ON oc.item_id = it.item_id
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 

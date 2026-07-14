@@ -103,6 +103,7 @@ export const processInventoryData = (
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
     const SALE_PRICE_KEYS = ['Precio de venta', 'Precio de Venta por unidad', 'rate', 'Sale Price'];
     const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
+    const OC_NUMBER_KEYS = ['OC Número', 'OC Numero', 'Número OC'];
     const STATUS_KEYS = ['Estado del artículo', 'Estado', 'status', 'Status'];
     const TRACK_KEYS = ['Seguimiento inventario', 'track_inventory'];
 
@@ -157,6 +158,7 @@ export const processInventoryData = (
                         cost: Number(getValueByKeys(item, COST_KEYS) || 0),
                         salePrice: Number(getValueByKeys(item, SALE_PRICE_KEYS) || 0),
                         orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10),
+                        ocNumber: String(getValueByKeys(item, OC_NUMBER_KEYS) || ''),
                         itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim(),
                         tracksInventory: String(getValueByKeys(item, TRACK_KEYS) || 'false').toLowerCase().trim() === 'true'
                     });
@@ -215,6 +217,7 @@ export const processInventoryData = (
             cost: 0,
             salePrice: 0,
             orderDate: '',
+            ocNumber: '',
             itemStatus: 'active',
             tracksInventory: false
         };
@@ -525,7 +528,7 @@ export const processInventoryData = (
             leadTimeMonths: leadTimeTotalMonths,
             leadTimeStdDays,
             leadTimeSource: leadInfo.source,
-            leadTimeN: leadInfo.n,
+            leadTimeN: inventoryInfo.ocNumber, // "# OC": número de la OC a mostrar
             safetyStock: ss,
             reorderPoint: pdp,
             optimalQuantity: q,

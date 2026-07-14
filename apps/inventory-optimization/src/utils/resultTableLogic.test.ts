@@ -9,7 +9,7 @@ import {
 function item(over: Partial<AnalysisResult> = {}): AnalysisResult {
   return {
     sku: 'SKU1', itemName: 'Item', currentLevel: 10, leadTimeDays: 30, leadTimeMonths: 1,
-    leadTimeStdDays: 5, leadTimeSource: 'x', leadTimeN: 3, safetyStock: 5, reorderPoint: 10,
+    leadTimeStdDays: 5, leadTimeSource: 'x', leadTimeN: 'OC-1', safetyStock: 5, reorderPoint: 10,
     optimalQuantity: 20, deviation: 0, status: 'Pedir', levelStatus: 'OK', itemStatus: 'active', coverageDays: 30, coverageRisk: false,
     orderDate: '', etaDate: '', etaDays: 0, unitCost: 10, annualValue: 100, annualValueRevenue: 120,
     coefVariation: 0.2, abcClass: 'A', xyzClass: 'X', abcXyz: 'AX', abcClassRevenue: 'A',
