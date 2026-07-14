@@ -53,6 +53,41 @@ export function createUsersRouter(pool: Pool): Router {
     }
   });
 
+  // GET /api/users/me — perfil propio (nombre, email, rol, avatar, alta).
+  router.get('/users/me', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      res.json(await service.getSelfProfile(payload.user_id));
+    } catch (e) {
+      sendError(res, e, 'get_self_profile');
+    }
+  });
+
+  // PATCH /api/users/me/profile { fullName } — el usuario edita su propio nombre.
+  router.patch('/users/me/profile', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      const profile = await service.updateName(payload.user_id, (req.body ?? {}).fullName);
+      res.json({ message: 'profile_updated', profile });
+    } catch (e) {
+      sendError(res, e, 'update_profile');
+    }
+  });
+
+  // PATCH /api/users/me/avatar { avatar } — data URL de imagen (thumbnail).
+  router.patch('/users/me/avatar', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      await service.updateAvatar(payload.user_id, (req.body ?? {}).avatar);
+      res.json({ message: 'avatar_updated' });
+    } catch (e) {
+      sendError(res, e, 'update_avatar');
+    }
+  });
+
   // PATCH /api/users/me/password — el usuario autenticado cambia su propia clave.
   // El objetivo es el user_id del JWT (no un :id de ruta), así que basta
   // requireAuth. changePassword verifica la contraseña actual con bcrypt. No se

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import Sidebar from './components/Sidebar';
+import TopBar from './components/TopBar';
 import RequireAuth from './components/RequireAuth';
 import RequireAdmin from './components/RequireAdmin';
 import AppGuard from './components/AppGuard';
@@ -11,6 +12,7 @@ import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
 import Auth from './pages/Auth';
+import Configuracion from './pages/Configuracion';
 import AdminUsers from './pages/admin/AdminUsers';
 
 // Lazy load apps
@@ -85,12 +87,15 @@ function App() {
             <RequireAuth>
             <div className="flex min-h-screen bg-[#F7F8FA] text-gray-900">
               <Sidebar />
-              <ErrorBoundary>
-                <Suspense fallback={<LoadingFallback />}>
-                  <Routes>
+              <div className="flex-1 flex flex-col min-w-0">
+                <TopBar />
+                <ErrorBoundary>
+                  <Suspense fallback={<LoadingFallback />}>
+                    <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/herramientas" element={<Herramientas />} />
                     <Route path="/aplicaciones" element={<Aplicaciones />} />
+                    <Route path="/configuracion" element={<Configuracion />} />
                     {/* Panel de administración — solo admin (Req 5.1-5.3) */}
                     <Route path="/admin/users" element={<RequireAdmin><AdminUsers /></RequireAdmin>} />
                     {/* Rutas de aplicaciones — protegidas por AppGuard según apps[] del JWT (Req 4.5) */}
@@ -105,6 +110,7 @@ function App() {
                   </Routes>
                 </Suspense>
               </ErrorBoundary>
+              </div>
             </div>
             </RequireAuth>
           }

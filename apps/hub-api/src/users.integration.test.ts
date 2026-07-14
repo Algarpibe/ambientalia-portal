@@ -20,6 +20,7 @@ interface Row {
   role: string;
   status: string;
   created_at: string;
+  avatar?: string | null;
   _seq: number;
 }
 
@@ -107,6 +108,18 @@ class FakeDb {
       const [id, hash] = params as string[];
       const u = this.users.find((x) => x.id === id);
       if (u) u.password_hash = hash;
+      return { rows: [], rowCount: u ? 1 : 0 };
+    }
+    if (/^UPDATE portal.users SET full_name/i.test(sql)) {
+      const [id, full_name] = params as string[];
+      const u = this.users.find((x) => x.id === id);
+      if (u) u.full_name = full_name;
+      return { rows: u ? [{ ...this.pub(u), avatar: u.avatar ?? null }] : [], rowCount: u ? 1 : 0 };
+    }
+    if (/^UPDATE portal.users SET avatar/i.test(sql)) {
+      const [id, avatar] = params as string[];
+      const u = this.users.find((x) => x.id === id);
+      if (u) u.avatar = avatar;
       return { rows: [], rowCount: u ? 1 : 0 };
     }
     if (/count\(\*\)/i.test(sql)) {
@@ -308,6 +321,45 @@ describe('DELETE /api/users/:id', () => {
   it('usuario inexistente → 404', async () => {
     const res = await request(app).delete('/api/users/no-existe').set(bearer(adminToken));
     expect(res.status).toBe(404);
+  });
+});
+
+describe('perfil propio (/api/users/me)', () => {
+  it('GET /me sin token → 401', async () => {
+    const res = await request(app).get('/api/users/me');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /me devuelve el perfil propio', async () => {
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: READER_ID, email: 'reader@x.com', role: 'reader' });
+    expect(res.body).toHaveProperty('avatar');
+    expect(res.body).not.toHaveProperty('password_hash');
+  });
+
+  it('PATCH /me/profile actualiza el nombre; vacío → 400', async () => {
+    const ok = await request(app).patch('/api/users/me/profile').set(bearer(readerToken)).send({ fullName: 'Nuevo Nombre' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.profile.full_name).toBe('Nuevo Nombre');
+
+    const bad = await request(app).patch('/api/users/me/profile').set(bearer(readerToken)).send({ fullName: '   ' });
+    expect(bad.status).toBe(400);
+  });
+
+  it('PATCH /me/avatar: data URL válida → 200, basura → 400', async () => {
+    const ok = await request(app)
+      .patch('/api/users/me/avatar')
+      .set(bearer(readerToken))
+      .send({ avatar: 'data:image/png;base64,AAABBB' });
+    expect(ok.status).toBe(200);
+
+    const bad = await request(app).patch('/api/users/me/avatar').set(bearer(readerToken)).send({ avatar: 'no-es-imagen' });
+    expect(bad.status).toBe(400);
+
+    // El GET /me ahora refleja el avatar guardado.
+    const me = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(me.body.avatar).toBe('data:image/png;base64,AAABBB');
   });
 });
 

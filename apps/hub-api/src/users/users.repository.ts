@@ -1,5 +1,5 @@
 import type { Pool } from '@algarpibe/zoho-sync';
-import type { RegisterInput, UserPublic, UserRow, UserStatus, UserRole, PaginatedUsers } from './users.types.js';
+import type { RegisterInput, UserPublic, UserRow, UserStatus, UserRole, PaginatedUsers, SelfProfile } from './users.types.js';
 
 // El tipo del cliente transaccional se deriva del Pool para no depender de un
 // import directo de 'pg' (sus @types no están instalados en este paquete).
@@ -84,6 +84,35 @@ export class UserRepository {
       [id, role],
     );
     return rows[0] ? toPublic(rows[0]) : null;
+  }
+
+  /** Perfil propio (incluye avatar). null si no existe. */
+  async getSelfProfile(id: string): Promise<SelfProfile | null> {
+    const { rows } = await this.pool.query(
+      `SELECT ${PUBLIC_COLUMNS}, avatar FROM portal.users WHERE id = $1`,
+      [id],
+    );
+    if (!rows[0]) return null;
+    return { ...toPublic(rows[0]), avatar: rows[0].avatar ?? null };
+  }
+
+  /** Actualiza el nombre completo. Devuelve el perfil o null si no existe. */
+  async updateName(id: string, fullName: string): Promise<SelfProfile | null> {
+    const { rows } = await this.pool.query(
+      `UPDATE portal.users SET full_name = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}, avatar`,
+      [id, fullName.trim()],
+    );
+    if (!rows[0]) return null;
+    return { ...toPublic(rows[0]), avatar: rows[0].avatar ?? null };
+  }
+
+  /** Actualiza el avatar (data URL). Devuelve true si el usuario existía. */
+  async updateAvatar(id: string, avatar: string): Promise<boolean> {
+    const res = await this.pool.query(
+      'UPDATE portal.users SET avatar = $2 WHERE id = $1',
+      [id, avatar],
+    );
+    return (res.rowCount ?? 0) > 0;
   }
 
   /** Actualiza el hash de contraseña. Devuelve true si el usuario existía. */

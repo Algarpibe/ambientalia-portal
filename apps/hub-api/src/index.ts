@@ -29,8 +29,9 @@ if (ALLOWED_ORIGINS.length === 0) {
 }
 app.use(cors({ origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : false }));
 
-// Body JSON acotado (solo lo usa /api/login; los datos son GET).
-app.use(express.json({ limit: '10kb' }));
+// Body JSON. Límite de 2mb para permitir la subida del avatar (data URL de un
+// thumbnail); el resto de payloads son pequeños y hay rate limiting.
+app.use(express.json({ limit: '2mb' }));
 
 // SEC-005 — rate limiting en la API de datos (mitiga scraping/DoS).
 app.use('/api/', rateLimit({

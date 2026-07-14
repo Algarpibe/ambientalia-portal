@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import type { UserRepository } from './users.repository.js';
-import type { PaginatedUsers, RegisterInput, UserPublic, UserRole } from './users.types.js';
+import type { PaginatedUsers, RegisterInput, UserPublic, UserRole, SelfProfile } from './users.types.js';
 
 // Lógica de negocio del módulo user-management. Valida entradas, aplica reglas
 // (rol por defecto al aprobar, auto-protección del admin) y traduce fallos a
@@ -151,6 +151,39 @@ export class UserService {
   async listUsers(page: number): Promise<PaginatedUsers> {
     const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
     return this.repo.listPaginated(safePage, USERS_PER_PAGE);
+  }
+
+  /** Perfil propio del usuario autenticado; 404 si no existe. */
+  async getSelfProfile(id: string): Promise<SelfProfile> {
+    const profile = await this.repo.getSelfProfile(id);
+    if (!profile) throw new UserError('user_not_found', 404);
+    return profile;
+  }
+
+  /** Actualiza el nombre propio (1–100 chars). 404 si no existe. */
+  async updateName(id: string, fullName: string): Promise<SelfProfile> {
+    const name = String(fullName ?? '').trim();
+    if (name.length < 1 || name.length > MAX_FULL_NAME_LENGTH) {
+      throw new UserError('invalid_full_name', 400, 'fullName');
+    }
+    const updated = await this.repo.updateName(id, name);
+    if (!updated) throw new UserError('user_not_found', 404);
+    return updated;
+  }
+
+  /** Actualiza el avatar propio (data URL de imagen, tamaño acotado). */
+  async updateAvatar(id: string, avatar: string): Promise<void> {
+    const value = String(avatar ?? '');
+    if (!/^data:image\/(png|jpe?g|webp|gif);base64,/.test(value)) {
+      throw new UserError('invalid_avatar', 400, 'avatar');
+    }
+    if (value.length > 1_500_000) {
+      // ~1.1 MB de imagen; el cliente ya redimensiona a un thumbnail pequeño.
+      throw new UserError('avatar_too_large', 400, 'avatar');
+    }
+    if (!(await this.repo.updateAvatar(id, value))) {
+      throw new UserError('user_not_found', 404);
+    }
   }
 
   /** Cambia la contraseña del propio usuario, verificando la actual (Req 3.5/3.6). */

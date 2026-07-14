@@ -33,6 +33,11 @@ export interface UserPublic {
   created_at: string;
 }
 
+/** Perfil propio del usuario autenticado (incluye avatar). */
+export interface SelfProfile extends UserPublic {
+  avatar: string | null;
+}
+
 /** Payload de entrada del registro por autoservicio (`POST /api/auth/register`). */
 export interface RegisterInput {
   fullName: string;
