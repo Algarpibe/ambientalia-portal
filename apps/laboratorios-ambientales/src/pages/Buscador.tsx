@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { FilterState, Laboratorio } from '../types';
 import { EMPTY_FILTERS } from '../types';
 import type { ChangedField } from '../lib/filters';
 import { applyFilters, clearDownstream, optionsFor } from '../lib/filters';
+import { pageRange, pageSlice, totalPages } from '../lib/pagination';
 
 type Props = {
   data: Laboratorio[];
@@ -11,16 +12,20 @@ type Props = {
   onBack: () => void;
 };
 
-// Tope de tarjetas pintadas. El encabezado sigue informando del total real: un
-// recorte de render no debe disfrazarse de recuento de resultados.
-const MAX_VISIBLE = 60;
-
 // El dataset solo tiene estos dos estados (18 689 activas / 367 suspendidas), así
 // que la lista es fija y no se deriva de los datos.
 const ESTADOS = ['Activa', 'Suspendida'];
 
 const SELECT_CLASS =
   'w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-400';
+
+// En 8 631 registros (45%) ciudad y departamento son el mismo valor —todos
+// 'Bogotá, D.C.'— y unirlos sin más produce «Bogotá, D.C., Bogotá, D.C.».
+function ubicacion(registro: Laboratorio): string {
+  const partes = [registro.ciudad, registro.departamento].map((p) => p.trim()).filter(Boolean);
+  if (partes.length === 2 && partes[0].toLowerCase() === partes[1].toLowerCase()) return partes[0];
+  return partes.join(', ') || '—';
+}
 
 export default function Buscador({ data, filters, onFiltersChange, onBack }: Props) {
   // Todo lo derivado va memoizado: se recalcula sobre ~19 000 registros en cada
@@ -55,7 +60,23 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
     onFiltersChange(clearDownstream({ ...filters, variables: seleccionadas }, 'variable'));
   };
 
-  const visibles = resultados.slice(0, MAX_VISIBLE);
+  const [pagina, setPagina] = useState(1);
+
+  // Al cambiar los filtros hay que volver al principio: estando en la página 300
+  // y filtrando a 5 resultados, la tabla saldría vacía. El ajuste va en render y
+  // no en un useEffect porque la regla react-hooks/set-state-in-effect prohíbe
+  // el setState síncrono dentro de un efecto; este es el patrón que documenta
+  // React para «ajustar estado cuando cambia una prop», y se comporta igual:
+  // compara la identidad de `filters`, que el padre recrea en cada cambio.
+  const [filtrosPrevios, setFiltrosPrevios] = useState(filters);
+  if (filtrosPrevios !== filters) {
+    setFiltrosPrevios(filters);
+    setPagina(1);
+  }
+
+  const paginas = totalPages(resultados.length);
+  const visibles = useMemo(() => pageSlice(resultados, pagina), [resultados, pagina]);
+  const rango = pageRange(resultados.length, pagina);
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -230,9 +251,9 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
           <h3 className="text-xl font-bold text-gray-800">
             Vista por Parámetro ({resultados.length.toLocaleString('es-CO')} registros)
           </h3>
-          {resultados.length > MAX_VISIBLE && (
-            <p className="text-sm text-gray-500 italic">
-              Mostrando {MAX_VISIBLE} de {resultados.length.toLocaleString('es-CO')} registros
+          {resultados.length > 0 && (
+            <p className="text-sm text-gray-500">
+              Mostrando {rango.desde.toLocaleString('es-CO')}–{rango.hasta.toLocaleString('es-CO')}
             </p>
           )}
         </div>
@@ -245,54 +266,75 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
             <p className="text-lg font-bold text-slate-400">No se encontraron parámetros con los filtros seleccionados</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {visibles.map((registro, idx) => (
-              <div
-                key={`${registro.codigo}-${registro.variable}-${idx}`}
-                className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all ring-1 ring-slate-200 overflow-hidden flex flex-col group"
-              >
-                <div className="bg-indigo-50 p-4 border-b border-indigo-100 group-hover:bg-indigo-100 transition-colors">
-                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 block">
-                    {registro.matriz || 'Sin matriz'}
-                  </span>
-                  <h4 className="font-extrabold text-indigo-900 leading-tight line-clamp-2 min-h-[3rem]">
-                    {registro.variable || 'Parámetro no especificado'}
-                  </h4>
-                </div>
-                <div className="p-5 flex-grow space-y-3">
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase mb-0.5">Laboratorio</p>
-                    <p className="text-sm font-bold text-slate-800 line-clamp-2">{registro.nombreLaboratorio}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 pt-2">
-                    <div>
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase">Ubicación</p>
-                      <p className="text-xs text-slate-600 font-medium">
-                        {[registro.ciudad, registro.departamento].filter(Boolean).join(', ')}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase">Estado</p>
-                      {/* 'Activa' es el literal real del dataset. */}
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold text-white ${
-                          registro.estado === 'Activa' ? 'bg-emerald-500' : 'bg-slate-400'
-                        }`}
+          <>
+            <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm text-left border-collapse">
+                  <thead className="bg-slate-50 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Laboratorio</th>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Variable</th>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Matriz</th>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Ubicación</th>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Estado</th>
+                      <th className="px-3 py-2 font-semibold text-slate-600">Método</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibles.map((registro, idx) => (
+                      <tr
+                        key={`${registro.codigo}-${registro.variable}-${idx}`}
+                        className="border-t border-slate-100 hover:bg-slate-50 transition-colors"
                       >
-                        {registro.estado || 'Sin estado'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 mt-2">
-                    <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Método de Análisis</p>
-                    <p className="text-[11px] text-slate-600 leading-relaxed italic line-clamp-3">
-                      {registro.metodo || 'No especificado'}
-                    </p>
-                  </div>
-                </div>
+                        <td className="px-3 py-2 font-medium text-slate-800">{registro.nombreLaboratorio}</td>
+                        <td className="px-3 py-2 text-slate-700">{registro.variable || 'No especificado'}</td>
+                        <td className="px-3 py-2 text-slate-600">{registro.matriz || '—'}</td>
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{ubicacion(registro)}</td>
+                        <td className="px-3 py-2">
+                          {/* 'Activa' es el literal real del dataset. */}
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold text-white ${
+                              registro.estado === 'Activa' ? 'bg-emerald-500' : 'bg-slate-400'
+                            }`}
+                          >
+                            {registro.estado || 'Sin estado'}
+                          </span>
+                        </td>
+                        <td
+                          className="px-3 py-2 text-slate-500 max-w-xs truncate"
+                          title={registro.metodo || 'No especificado'}
+                        >
+                          {registro.metodo || 'No especificado'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
+            </div>
+
+            {paginas > 1 && (
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                  disabled={pagina <= 1}
+                  className="px-4 py-2 bg-white ring-1 ring-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ← Anterior
+                </button>
+                <p className="text-sm text-gray-500">
+                  Página {pagina.toLocaleString('es-CO')} de {paginas.toLocaleString('es-CO')}
+                </p>
+                <button
+                  onClick={() => setPagina((p) => Math.min(paginas, p + 1))}
+                  disabled={pagina >= paginas}
+                  className="px-4 py-2 bg-white ring-1 ring-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Siguiente →
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
