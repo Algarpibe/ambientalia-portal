@@ -20,6 +20,7 @@ import AbcXyzMatrix from './AbcXyzMatrix';
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
 import {
     computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories, isUrgentItem,
+    isReplenishable, suggestedOrderFor,
 } from '../utils/resultTableLogic';
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
 import { type ColumnConfig } from './SortableColumnItem';
@@ -418,8 +419,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                 >
                     OC Sugerida ({data.filter(item => {
                         if (item.status !== 'Urgente' && item.status !== 'Pedir') return false;
-                        const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
-                        return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity))) > 0;
+                        return isReplenishable(item) && suggestedOrderFor(item) > 0;
                     }).length})
                 </button>
                 <button
@@ -951,8 +951,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                         }
 
                                         if (col.key === 'suggestedOrder') {
-                                            const threshold = Math.max(row.reorderPoint, Math.max(row.erpLevel ?? 0, 0));
-                                            const suggested = Math.max(0, Math.round(threshold + row.optimalQuantity - (row.availableQuantity + row.orderedQuantity)));
+                                            const suggested = suggestedOrderFor(row);
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-indigo-600 font-bold">
                                                     {suggested}

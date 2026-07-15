@@ -9,24 +9,48 @@ import type { AnalysisResult } from '../types';
 // los consumidores (ResultTable, resultTableExport, tests).
 export { computeEoq } from './eoq';
 
-// Un ítem es "urgente" (hay que pedir ya) si el pedido sugerido es > 0 y hay
-// señal de umbral/negativo. Se usaba duplicado en 3 sitios del componente.
-export function isUrgentItem(item: AnalysisResult): boolean {
+/**
+ * ¿Este artículo entra en la reposición automática? Es la puerta común de Pedidos
+ * Urgentes y OC Sugerida: quién NO se repone nunca, al margen de los números.
+ */
+export function isReplenishable(item: AnalysisResult): boolean {
   // Los artículos inactivos en Zoho (dados de baja/sustituidos) no se piden.
   if (item.itemStatus === 'inactive') return false;
   // Un servicio/alquiler no se stockea, así que no se repone: nunca es urgente por
   // mucho que su disponible salga negativo.
   if (item.isService) return false;
-  // El umbral es el mayor entre el PdP calculado y el nivel del ERP. El nivel puede
-  // venir sin configurar (null) o ser -1 ("bajo demanda"); ninguno de los dos es un
-  // umbral, así que cuentan como 0 y manda el PdP.
-  const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
-  const suggestedOrder = Math.max(
+  // Los marcados en el ERP como "bajo demanda" (-1) no se reponen contra el PdP: el
+  // usuario decidió no mantenerles stock. La única excepción es deberle unidades a un
+  // cliente (hay comprometido y el disponible no lo cubre): comprarlas entonces es
+  // justamente pedir bajo demanda. Ojo, se exige comprometido > 0 — un disponible
+  // negativo sin nada comprometido es una inconsistencia del stock en Zoho, no una
+  // necesidad de compra.
+  if (item.erpLevel === -1 && !(item.committedQuantity > 0 && item.availableQuantity < 0)) return false;
+  return true;
+}
+
+// El umbral de reposición: el mayor entre el PdP calculado y el nivel del ERP. El
+// nivel puede venir sin configurar (null) o ser -1 ("bajo demanda"); ninguno de los
+// dos es un umbral, así que cuentan como 0 y manda el PdP.
+function reorderThreshold(item: AnalysisResult): number {
+  return Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
+}
+
+/** Cantidad a pedir para dejar el stock (contando lo que ya viene) en umbral + Q óptima. */
+export function suggestedOrderFor(item: AnalysisResult): number {
+  return Math.max(
     0,
-    Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)),
+    Math.round(reorderThreshold(item) + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)),
   );
+}
+
+// Un ítem es "urgente" (hay que pedir ya) si el pedido sugerido es > 0 y hay
+// señal de umbral/negativo.
+export function isUrgentItem(item: AnalysisResult): boolean {
+  if (!isReplenishable(item)) return false;
+  const threshold = reorderThreshold(item);
   return (
-    suggestedOrder > 0 &&
+    suggestedOrderFor(item) > 0 &&
     (threshold > 0 || item.availableQuantity < 0) &&
     (item.availableQuantity < 0 || item.availableQuantity + item.orderedQuantity <= threshold)
   );

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { AnalysisResult } from '../types';
 import { cn } from './ui';
+import { isReplenishable, suggestedOrderFor } from '../utils/resultTableLogic';
 
 interface SuggestedLine {
     sku: string;
@@ -27,21 +28,15 @@ interface VendorGroup {
 const usd = (n: number) =>
     n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
-// Misma fórmula que la pestaña "Pedidos Urgentes": cantidad para volver a dejar el
-// stock (contando lo que ya viene) en el umbral + Q óptima.
-function suggestedQtyFor(item: AnalysisResult): number {
-    // El nivel del ERP puede ser null (sin configurar) o -1 ("bajo demanda"); ninguno
-    // es un umbral, así que cuentan como 0 y manda el PdP.
-    const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
-    return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)));
-}
-
 function buildGroups(data: AnalysisResult[]): VendorGroup[] {
     const byVendor = new Map<string, SuggestedLine[]>();
     data.forEach((item) => {
         // Alcance: Urgente + Pedir (lo que hay que ordenar ya).
         if (item.status !== 'Urgente' && item.status !== 'Pedir') return;
-        const suggestedQty = suggestedQtyFor(item);
+        // Misma puerta que Pedidos Urgentes: fuera inactivos, servicios y los "bajo
+        // demanda" a los que no les debes unidades.
+        if (!isReplenishable(item)) return;
+        const suggestedQty = suggestedOrderFor(item);
         if (suggestedQty <= 0) return;
         const line: SuggestedLine = {
             sku: item.sku,

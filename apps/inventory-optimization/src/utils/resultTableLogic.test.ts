@@ -70,9 +70,28 @@ describe('isUrgentItem', () => {
       isUrgentItem(item({ erpLevel: null, reorderPoint: 50, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
     ).toBe(true);
   });
-  it('un -1 ("bajo demanda") no cuenta como umbral: manda el PdP', () => {
+  it('un "bajo demanda" (-1) no se pide por PdP: el usuario decidió no stockearlo', () => {
+    // Caso real: PdP 1 y disponible 0 metían en Urgentes justo lo marcado como no stockear.
     expect(
-      isUrgentItem(item({ erpLevel: -1, reorderPoint: 50, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
+      isUrgentItem(item({ erpLevel: -1, reorderPoint: 1, optimalQuantity: 0, availableQuantity: 0, committedQuantity: 0, orderedQuantity: 0 })),
+    ).toBe(false);
+  });
+  it('un "bajo demanda" SÍ se pide si le debes unidades a un cliente', () => {
+    // Comprometido sin cubrir → comprarlo es, literalmente, pedir bajo demanda.
+    expect(
+      isUrgentItem(item({ erpLevel: -1, reorderPoint: 1, optimalQuantity: 0, availableQuantity: -5, committedQuantity: 5, orderedQuantity: 0 })),
+    ).toBe(true);
+  });
+  it('un "bajo demanda" con disponible negativo pero sin comprometido no se pide', () => {
+    // Stock físico negativo sin nada comprometido (p. ej. CU2-NH3, existencias -1) es
+    // una inconsistencia del dato en Zoho, no una necesidad de compra.
+    expect(
+      isUrgentItem(item({ erpLevel: -1, reorderPoint: 1, optimalQuantity: 0, availableQuantity: -1, committedQuantity: 0, orderedQuantity: 0 })),
+    ).toBe(false);
+  });
+  it('un nivel normal sigue pidiéndose por PdP', () => {
+    expect(
+      isUrgentItem(item({ erpLevel: 0, reorderPoint: 50, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
     ).toBe(true);
   });
 });
