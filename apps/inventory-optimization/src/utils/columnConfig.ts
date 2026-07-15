@@ -12,6 +12,12 @@ import type { ColumnConfig } from '../components/SortableColumnItem';
  * Orden de columnas por pestaña: respeta el orden guardado por el usuario, purga
  * las columnas (y pestañas) que ya no existen en el código, y añade al final las
  * que se hayan incorporado.
+ *
+ * Del guardado se toma SOLO el orden: la etiqueta manda siempre desde el código.
+ * El usuario no puede renombrar columnas (solo mostrar/ocultar y reordenar), asi
+ * que conservar la etiqueta guardada haria que un renombrado no llegase nunca a
+ * quien ya tuviera config — por eso se seguia viendo "Existencias" donde el codigo
+ * decia "Contable".
  */
 export function mergeColumnOrder(
   saved: Record<string, ColumnConfig[]>,
@@ -24,9 +30,11 @@ export function mergeColumnOrder(
       result[tab] = [...defaults[tab]];
       return;
     }
-    const validKeys = new Set(defaults[tab].map((c) => c.key));
-    // Se conserva el orden guardado, pero solo de columnas que sigan existiendo.
-    const kept = savedTab.filter((c) => validKeys.has(c.key));
+    const byKey = new Map(defaults[tab].map((c) => [c.key, c]));
+    // Orden del usuario, etiqueta del código; solo columnas que sigan existiendo.
+    const kept = savedTab
+      .map((c) => byKey.get(c.key))
+      .filter((c): c is ColumnConfig => c !== undefined);
     const keptKeys = new Set(kept.map((c) => c.key));
     defaults[tab].forEach((c) => {
       if (!keptKeys.has(c.key)) kept.push(c);

@@ -60,6 +60,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'demandPattern', label: 'Patrón' },
             { key: 'currentLevel', label: 'Nivel ERP' },
             { key: 'physicalHandQuantity', label: 'Existencias Físicas' },
+            { key: 'handQuantity', label: 'Existencias de Contabilidad' },
             { key: 'orderedQuantity', label: 'Por Recibir' },
             { key: 'reorderPoint', label: 'PdP Propuesto' },
             { key: 'optimalQuantity', label: 'Q Sugerida' },
@@ -98,8 +99,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'sku', label: 'SKU' },
             { key: 'itemName', label: 'Artículo' },
             { key: 'category', label: 'Categoría' },
-            { key: 'handQuantity', label: 'Contable' },
-            { key: 'physicalHandQuantity', label: 'Física' },
+            { key: 'handQuantity', label: 'Existencias de Contabilidad' },
+            { key: 'physicalHandQuantity', label: 'Existencias Físicas' },
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
@@ -114,8 +115,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'sku', label: 'SKU' },
             { key: 'itemName', label: 'Artículo' },
             { key: 'category', label: 'Categoría' },
-            { key: 'handQuantity', label: 'Contable' },
-            { key: 'physicalHandQuantity', label: 'Física' },
+            { key: 'handQuantity', label: 'Existencias de Contabilidad' },
+            { key: 'physicalHandQuantity', label: 'Existencias Físicas' },
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
@@ -236,6 +237,9 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     if (key === 'main' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
                     if (key === 'main' && !currentKeys.has('orderedQuantity')) currentKeys.add('orderedQuantity');
                     if ((key === 'main' || key === 'service') && !currentKeys.has('unitCost')) currentKeys.add('unitCost');
+                    // Existencias físicas y de contabilidad, juntas en las dos pestañas.
+                    if (key === 'main' && !currentKeys.has('handQuantity')) currentKeys.add('handQuantity');
+                    if (key === 'urgent' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
                 });
                 return result;
             } catch (e) {

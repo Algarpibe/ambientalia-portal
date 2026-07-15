@@ -28,6 +28,14 @@ describe('mergeColumnOrder', () => {
       .toEqual(['sku', 'reorderPoint', 'coverageDays']);
   });
 
+  it('la etiqueta manda desde el código, no desde lo guardado', () => {
+    // Regresión real: el usuario no puede renombrar columnas (solo mostrar/ocultar y
+    // reordenar), así que conservar la etiqueta guardada dejaba el renombrado fuera
+    // del alcance de quien ya tenía config — se veía "Existencias" tras renombrarla.
+    const saved = { main: [{ key: 'reorderPoint', label: 'Nombre viejo' }] };
+    expect(mergeColumnOrder(saved, defaults).main[0].label).toBe('PdP Propuesto');
+  });
+
   it('respeta el orden que el usuario guardó', () => {
     const saved = {
       main: [
