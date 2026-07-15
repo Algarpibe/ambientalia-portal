@@ -90,6 +90,11 @@ export interface AnalysisResult {
     physicalHandQuantity: number;
     committedQuantity: number;
     availableQuantity: number;
+    // Posición de inventario: lo que quedará disponible cuando llegue lo pedido a
+    // fábrica = físicas + por recibir − comprometido. OJO: no tiene en cuenta el
+    // tiempo; hay que leerla junto a la ETA (un pedido que llega en 3 meses no cubre
+    // un compromiso de la semana que viene).
+    futureAvailable: number;
     manufacturer: string;
     vendor: string;
     erpLevel: number | null; // mismo dato que currentLevel (null / -1 / n)

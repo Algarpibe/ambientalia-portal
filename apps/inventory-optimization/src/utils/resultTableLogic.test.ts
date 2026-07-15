@@ -18,7 +18,8 @@ function item(over: Partial<AnalysisResult> = {}): AnalysisResult {
     overstockValue: 0, inventoryValue: 0, monthlyAverage: 5, annualSales: 60, stdDev: 1,
     demandSource: 'Ventas 2026', manualReview: false, variabilityRatio: 1, category: 'Cat',
     isService: false, unitPrice: 15, orderedQuantity: 0, handQuantity: 10, physicalHandQuantity: 10,
-    committedQuantity: 0, availableQuantity: 100, manufacturer: 'Fab', vendor: 'Prov', erpLevel: 8,
+    committedQuantity: 0, availableQuantity: 100, futureAvailable: 100,
+    manufacturer: 'Fab', vendor: 'Prov', erpLevel: 8,
     variabilityClass: 'Media', demandType: 'Normal', valueClass: 'Estándar', history: {},
     ...over,
   };

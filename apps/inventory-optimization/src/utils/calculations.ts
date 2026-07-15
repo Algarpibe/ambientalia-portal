@@ -647,6 +647,8 @@ export const processInventoryData = (
             physicalHandQuantity: inventoryInfo.physicalHand,
             committedQuantity: inventoryInfo.committed,
             availableQuantity: inventoryInfo.available,
+            // Posición de inventario = físicas + por recibir − comprometido.
+            futureAvailable: inventoryInfo.physicalHand + inventoryInfo.ordered - inventoryInfo.committed,
             manufacturer: inventoryInfo.manufacturer,
             vendor: inventoryInfo.vendor,
             erpLevel: inventoryInfo.level,

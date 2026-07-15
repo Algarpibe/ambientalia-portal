@@ -104,6 +104,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
+            { key: 'futureAvailable', label: 'Disponible a Futuro' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'reorderPoint', label: 'PdP' },
@@ -120,6 +121,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'orderedQuantity', label: 'Pedido Fábrica' },
             { key: 'committedQuantity', label: 'Comprometido' },
             { key: 'availableQuantity', label: 'Disponible' },
+            { key: 'futureAvailable', label: 'Disponible a Futuro' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'reorderPoint', label: 'PDP Propuesto' },
@@ -240,6 +242,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     // Existencias físicas y de contabilidad, juntas en las dos pestañas.
                     if (key === 'main' && !currentKeys.has('handQuantity')) currentKeys.add('handQuantity');
                     if (key === 'urgent' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
+                    if (!currentKeys.has('futureAvailable')) currentKeys.add('futureAvailable');
                 });
                 return result;
             } catch (e) {
@@ -939,7 +942,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                             );
                                         }
 
-                                        if (col.key === 'availableQuantity' && typeof value === 'number') {
+                                        // "Disponible a Futuro" se pinta igual que "Disponible" para
+                                        // que se lean en pareja: el rojo señala el faltante real,
+                                        // el que no cubre ni lo que ya viene en camino.
+                                        if ((col.key === 'availableQuantity' || col.key === 'futureAvailable') && typeof value === 'number') {
                                             return (
                                                 <td key={col.key} className={cn(
                                                     "px-3 py-4 whitespace-nowrap text-sm font-bold",

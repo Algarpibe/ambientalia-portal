@@ -228,6 +228,24 @@ describe('processInventoryData — punto de pedido', () => {
     expect(r.levelStatus).toBe('NoStockear');
   });
 
+  it('"disponible a futuro" = físicas + por recibir − comprometido', () => {
+    const sku = 'FUT';
+    // Caso real (Disposition filter J04993305BQ): disponible -5 asusta, pero con 40
+    // en camino su posición real es +35.
+    const [r] = processInventoryData(
+      [], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))],
+      [invRow(sku, {
+        'Existencias físicas': 16,
+        'Cantidad pedida': 40,
+        'Existencias comprometidas': 21,
+        'Disponible para la venta': -5,
+      })],
+      [ltRow(sku, 30)],
+    );
+    expect(r.availableQuantity).toBe(-5);
+    expect(r.futureAvailable).toBe(35);
+  });
+
   it('sin lead time sí es "Sin datos"', () => {
     const sku = 'NOLT';
     const [r] = processInventoryData(
