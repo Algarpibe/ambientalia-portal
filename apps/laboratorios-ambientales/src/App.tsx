@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import '../index.css';
 import type { Laboratorio, FilterState } from './types';
-import { fetchLaboratorios, analyzeWithAI } from './services/api';
+import { fetchLaboratorios } from './services/api';
 
 function App() {
     console.log("Laboratorios App: Component Mounting");
 
-    const [view, setView] = useState<'main' | 'buscador' | 'dashboard' | 'analisis'>('main');
+    const [view, setView] = useState<'main' | 'buscador' | 'dashboard'>('main');
     const [loading, setLoading] = useState<boolean>(true);
     const [data, setData] = useState<Laboratorio[]>([]);
     const [filters, setFilters] = useState<FilterState>({
@@ -18,9 +18,6 @@ function App() {
         variable: '',
         metodo: ''
     });
-    const [aiQuery, setAiQuery] = useState('');
-    const [aiResponse, setAiResponse] = useState('');
-    const [aiLoading, setAiLoading] = useState(false);
 
     useEffect(() => {
         const loadData = async () => {
@@ -63,19 +60,6 @@ function App() {
         });
     }, [data, filters]);
 
-    const handleAiAnalysis = async () => {
-        if (!aiQuery.trim()) return;
-        setAiLoading(true);
-        try {
-            const response = await analyzeWithAI(aiQuery, data);
-            setAiResponse(response);
-        } catch (e) {
-            setAiResponse("Hubo un error al procesar tu consulta.");
-        } finally {
-            setAiLoading(false);
-        }
-    };
-
     // Derived stats for Dashboard
     const totalLabs = data.length;
     const activeLabs = data.filter(d => d.estado === 'Activo' || d.estado === 'VIGENTE').length;
@@ -103,9 +87,6 @@ function App() {
                                     </button>
                                     <button onClick={() => setView('dashboard')} className="px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md text-lg transition-colors">
                                         Análisis de Marcas
-                                    </button>
-                                    <button onClick={() => setView('analisis')} className="px-8 py-4 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-md text-lg transition-colors">
-                                        Análisis con IA
                                     </button>
                                 </div>
                             )}
@@ -277,62 +258,6 @@ function App() {
                 </div>
             )}
 
-            {/* VISTA ANALISIS IA */}
-            {view === 'analisis' && (
-                <div id="analisis-page">
-                    <div className="max-w-4xl mx-auto p-6">
-                        <button onClick={() => setView('main')} className="mb-4 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition-colors">
-                            &larr; Volver al Menú Principal
-                        </button>
-                        <div className="text-center mb-8">
-                            <h1 className="text-3xl sm:text-4xl font-bold text-gray-800">Módulo de Análisis con IA</h1>
-                            <p className="mt-2 text-lg text-gray-600">Realiza consultas en lenguaje natural sobre los datos.</p>
-                        </div>
-
-                        <div className="bg-white p-6 rounded-xl shadow-md mb-8">
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Tu consulta</label>
-                                    <textarea
-                                        value={aiQuery}
-                                        onChange={(e) => setAiQuery(e.target.value)}
-                                        rows={4}
-                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                        placeholder="Ej: ¿Cuántos laboratorios hay en Antioquia?"
-                                    ></textarea>
-                                </div>
-                                <div className="flex justify-end">
-                                    <button
-                                        onClick={handleAiAnalysis}
-                                        disabled={aiLoading || !aiQuery.trim()}
-                                        className="inline-flex items-center px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 disabled:bg-indigo-400 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        <span>{aiLoading ? 'Analizando...' : 'Analizar'}</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {(aiLoading || aiResponse) && (
-                            <div className="p-6 bg-white rounded-xl shadow-md animate-fade-in">
-                                {aiLoading ? (
-                                    <div className="text-center py-4">
-                                        <div className="w-8 h-8 rounded-full border-4 border-t-indigo-600 border-gray-200 animate-spin mx-auto"></div>
-                                        <p className="mt-2 text-gray-500">Procesando consulta...</p>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <h3 className="text-xl font-semibold text-gray-800 mb-4 border-b pb-2">Respuesta de la IA</h3>
-                                        <div className="prose max-w-none text-gray-700">
-                                            {aiResponse}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

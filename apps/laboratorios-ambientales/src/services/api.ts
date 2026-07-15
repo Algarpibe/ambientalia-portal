@@ -66,21 +66,3 @@ export const fetchLaboratorios = async (): Promise<Laboratorio[]> => {
         return [];
     }
 };
-
-export const analyzeWithAI = async (query: string, data: Laboratorio[]): Promise<string> => {
-    // Placeholder for AI logic
-    // In a real implementation this would call the Gemini API
-    console.log("Analyzing with AI:", query);
-
-    // Simple mock response based on keyword matching
-    if (query.toLowerCase().includes('cantidad')) {
-        return `Se encontraron ${data.length} registros de laboratorios en la base de datos actual.`;
-    }
-
-    if (query.toLowerCase().includes('agua')) {
-        const aguaLabs = data.filter(l => l.matriz?.toLowerCase().includes('agua')).length;
-        return `Hay ${aguaLabs} laboratorios acreditados para la matriz Agua.`;
-    }
-
-    return "Lo siento, soy una IA en modo demostración. Para análisis completos se requiere configurar la API Key de Gemini.";
-};

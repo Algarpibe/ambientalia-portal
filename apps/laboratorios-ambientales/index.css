@@ -40,25 +40,3 @@ body {
 .custom-scroll::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
-/* Estilos para la respuesta de la IA renderizada */
-#ai-response ul {
-    list-style-type: disc;
-    padding-left: 2rem;
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
-}
-#ai-response ol {
-    list-style-type: decimal;
-    padding-left: 2rem;
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
-}
-#ai-response p {
-    margin-bottom: 1rem;
-}
-#ai-response p:last-child {
-    margin-bottom: 0;
-}
-#ai-response strong {
-    font-weight: 600;
-}
