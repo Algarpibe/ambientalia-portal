@@ -1,6 +1,9 @@
 # Dependency directories
 node_modules/
 
+# Worktrees de Claude Code (viven dentro del repo; no versionar su contenido)
+.claude/worktrees/
+
 # Build artifacts
 dist/
 dist-ssr/
