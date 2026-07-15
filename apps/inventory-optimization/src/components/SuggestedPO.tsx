@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { AnalysisResult } from '../types';
 import { cn } from './ui';
-import { isReplenishable, suggestedOrderFor } from '../utils/resultTableLogic';
+import { isUrgentItem, suggestedOrderFor } from '../utils/resultTableLogic';
 
 interface SuggestedLine {
     sku: string;
@@ -31,11 +31,12 @@ const usd = (n: number) =>
 function buildGroups(data: AnalysisResult[]): VendorGroup[] {
     const byVendor = new Map<string, SuggestedLine[]>();
     data.forEach((item) => {
-        // Alcance: Urgente + Pedir (lo que hay que ordenar ya).
-        if (item.status !== 'Urgente' && item.status !== 'Pedir') return;
-        // Misma puerta que Pedidos Urgentes: fuera inactivos, servicios y los "bajo
-        // demanda" a los que no les debes unidades.
-        if (!isReplenishable(item)) return;
+        // La OC sugerida es la pestaña "Pedidos Urgentes" agrupada por proveedor, así
+        // que usa EXACTAMENTE su mismo predicado. Antes filtraba por su cuenta
+        // (status Urgente/Pedir), que se calcula en el motor con otro umbral —solo el
+        // PdP, ignorando el nivel del ERP—, y las dos listas no cuadraban: 28 urgentes
+        // contra 6 en la OC.
+        if (!isUrgentItem(item)) return;
         const suggestedQty = suggestedOrderFor(item);
         if (suggestedQty <= 0) return;
         const line: SuggestedLine = {

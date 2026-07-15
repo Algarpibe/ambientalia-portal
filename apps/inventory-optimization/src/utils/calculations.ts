@@ -778,12 +778,12 @@ export const processInventoryData = (
         } else if (c.physicalAvailable <= 0 && c.incoming <= 0) {
             // Físicamente en cero (o comprometido más de lo que hay) y nada en camino → pedir YA.
             status = 'Urgente';
-        } else if (c.position < roundedPdp && c.incoming > 0) {
-            // Falta stock pero ya hay una orden en tránsito → reposición en camino.
-            status = 'EnCamino';
         } else if (c.position < roundedPdp) {
-            // Bajo el punto de pedido, sin urgencia física ni tránsito → colocar orden.
-            status = 'Pedir';
+            // Falta stock. "En camino" solo si lo que ya viene CUBRE el hueco; si no
+            // alcanza, sigue habiendo que pedir. Antes bastaba con que hubiera algo en
+            // tránsito para decir "tranquilo", aunque llegara corto — y esos artículos
+            // desaparecían de la OC sugerida con el faltante sin resolver.
+            status = (c.position + c.incoming >= roundedPdp) ? 'EnCamino' : 'Pedir';
         } else if (c.position > (roundedPdp * 1.2)) {
             status = 'Overstock';
         }

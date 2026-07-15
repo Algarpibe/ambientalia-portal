@@ -20,7 +20,7 @@ import AbcXyzMatrix from './AbcXyzMatrix';
 import { ABC_XYZ_COLORS, DEMAND_PATTERN_COLORS } from './abcXyz';
 import {
     computeEoq, filterByTab, filterResults, sortResults, uniqueManufacturers, uniqueCategories, isUrgentItem,
-    isReplenishable, suggestedOrderFor,
+    suggestedOrderFor,
 } from '../utils/resultTableLogic';
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
 import { type ColumnConfig } from './SortableColumnItem';
@@ -454,10 +454,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                             : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
                     )}
                 >
-                    OC Sugerida ({data.filter(item => {
-                        if (item.status !== 'Urgente' && item.status !== 'Pedir') return false;
-                        return isReplenishable(item) && suggestedOrderFor(item) > 0;
-                    }).length})
+                    OC Sugerida ({data.filter(item => isUrgentItem(item) && suggestedOrderFor(item) > 0).length})
                 </button>
                 <button
                     onClick={() => {

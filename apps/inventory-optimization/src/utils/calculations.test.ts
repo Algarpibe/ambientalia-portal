@@ -246,6 +246,28 @@ describe('processInventoryData — punto de pedido', () => {
     expect(r.futureAvailable).toBe(35);
   });
 
+  it('"En camino" solo si lo que viene cubre el hueco; si llega corto, hay que pedir', () => {
+    const base = {
+      'Existencias físicas': 0,
+      'Existencias comprometidas': 2,
+      'Disponible para la venta': -2,
+      'Nivel de reposición': 3,
+    };
+    const run = (ordered: number) => processInventoryData(
+      [], [salesRow('EC', flat(10))], [salesRow('EC', flat(10))], [salesRow('EC', flat(10))],
+      [invRow('EC', { ...base, 'Cantidad pedida': ordered })], [ltRow('EC', 30)],
+    )[0];
+
+    // Caso real (4036167): -2 disponible y 3 en camino → se queda en 1, por debajo del
+    // PdP. Antes decía "EnCamino" ("tranquilo") y se caía de la OC sugerida.
+    const corto = run(3);
+    expect(corto.reorderPoint).toBeGreaterThan(1); // el hueco sigue abierto
+    expect(corto.status).toBe('Pedir');
+
+    // Con lo que viene de sobra, sí es "EnCamino": no hay que pedir más.
+    expect(run(999).status).toBe('EnCamino');
+  });
+
   it('sin lead time sí es "Sin datos"', () => {
     const sku = 'NOLT';
     const [r] = processInventoryData(
