@@ -131,8 +131,11 @@ describe('fetchLaboratorios', () => {
 // sin este stub readCache lanza ReferenceError, su catch lo traga y devuelve
 // null, así que el camino del cache no se ejecutaría ni una vez.
 describe('fetchLaboratorios: cache de localStorage', () => {
-  const CACHE_KEY_DATA = 'labs_cache_data';
-  const CACHE_KEY_TIMESTAMP = 'labs_cache_timestamp';
+  // La clave lleva versión: el esquema de Laboratorio cambió y un cache escrito
+  // por la versión anterior no debe leerse con el nuevo. Ver el describe de
+  // «migración del cache v1» más abajo.
+  const CACHE_KEY_DATA = 'labs_cache_v2_data';
+  const CACHE_KEY_TIMESTAMP = 'labs_cache_v2_timestamp';
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
   // Doble en memoria: solo los métodos que api.ts usa. `store` queda expuesto
@@ -229,5 +232,68 @@ describe('fetchLaboratorios: cache de localStorage', () => {
     expect(removeItem).toHaveBeenCalledWith(CACHE_KEY_TIMESTAMP);
     expect(store.has(CACHE_KEY_DATA)).toBe(false);
     expect(store.has(CACHE_KEY_TIMESTAMP)).toBe(false);
+  });
+
+  // La versión anterior de la app cacheaba con OTRO esquema bajo las claves sin
+  // versionar. Al desplegar, esos navegadores traen ese cache: readCache hace
+  // `JSON.parse(data) as Laboratorio[]` —un cast a ciegas que nada valida en
+  // runtime— así que leerlo daría undefined en cada columna durante 24 h.
+  describe('migración del cache v1', () => {
+    const V1_KEY_DATA = 'labs_cache_data';
+    const V1_KEY_TIMESTAMP = 'labs_cache_timestamp';
+
+    // Un registro tal y como lo guardaba la versión anterior.
+    const REGISTRO_V1 = {
+      nombre_laboratorio: 'Lab Viejo',
+      parametro: 'pH',
+      estado: 'VIGENTE',
+      municipio: 'Medellín',
+    };
+
+    it('ignora el cache v1 y vuelve a descargar, en vez de leerlo con el esquema nuevo', async () => {
+      stubLocalStorage({
+        [V1_KEY_DATA]: JSON.stringify([REGISTRO_V1]),
+        [V1_KEY_TIMESTAMP]: String(Date.now()),
+      });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const data = await fetchLaboratorios();
+
+      expect(fetchMock).toHaveBeenCalled();
+      expect(data[0].nombreLaboratorio).toBe(RAW.nombre_del_laboratorio);
+      expect(data[0].estado).toBe('Activa');
+    });
+
+    it('borra las claves de la v1 para liberar su cuota', async () => {
+      const { store } = stubLocalStorage({
+        [V1_KEY_DATA]: JSON.stringify([REGISTRO_V1]),
+        [V1_KEY_TIMESTAMP]: String(Date.now()),
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) }));
+
+      await fetchLaboratorios();
+
+      expect(store.has(V1_KEY_DATA)).toBe(false);
+      expect(store.has(V1_KEY_TIMESTAMP)).toBe(false);
+    });
+
+    // Sin esto, los ~3 MB de la v1 no se liberarían nunca en quien ya tenga
+    // cache nuevo, y ocupan buena parte de los ~5 MB del origen.
+    it('borra la v1 aunque el cache v2 esté fresco y no se toque la red', async () => {
+      const { store } = stubLocalStorage({
+        ...cacheDe([mapRecord(RAW)]),
+        [V1_KEY_DATA]: JSON.stringify([REGISTRO_V1]),
+        [V1_KEY_TIMESTAMP]: String(Date.now()),
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      await fetchLaboratorios();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(store.has(V1_KEY_DATA)).toBe(false);
+      expect(store.has(V1_KEY_TIMESTAMP)).toBe(false);
+    });
   });
 });

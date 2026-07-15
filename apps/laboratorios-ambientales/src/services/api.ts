@@ -8,9 +8,21 @@ const BASE_URL = `https://www.datos.gov.co/resource/${DATASET_ID}.json`;
 
 export const PAGE_SIZE = 5000;
 
-const CACHE_KEY_DATA = 'labs_cache_data';
-const CACHE_KEY_TIMESTAMP = 'labs_cache_timestamp';
+// La clave va versionada. readCache hace `JSON.parse(data) as Laboratorio[]`, un
+// cast que nada valida en runtime: si el esquema de Laboratorio cambia y la clave
+// no, los navegadores con cache previo leen datos viejos como si fueran nuevos y
+// la app sale vacía hasta que expire. **Al cambiar la forma de Laboratorio hay que
+// subir CACHE_VERSION y añadir las claves anteriores a LEGACY_CACHE_KEYS.**
+const CACHE_VERSION = 'v2';
+const CACHE_KEY_DATA = `labs_cache_${CACHE_VERSION}_data`;
+const CACHE_KEY_TIMESTAMP = `labs_cache_${CACHE_VERSION}_timestamp`;
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+// Claves de versiones anteriores. Hay que borrarlas activamente, no solo dejar de
+// leerlas: ocupaban ~3 MB de los ~5 MB que el portal comparte por origen, así que
+// abandonarlas haría fallar por cuota la escritura del cache nuevo.
+// v1 (hasta 2026-07-15): esquema con nombre_laboratorio/parametro/estado 'VIGENTE'.
+const LEGACY_CACHE_KEYS = ['labs_cache_data', 'labs_cache_timestamp'];
 
 export function mapRecord(record: Record<string, string | undefined>): Laboratorio {
   return {
@@ -44,6 +56,17 @@ export function mapRecord(record: Record<string, string | undefined>): Laborator
   };
 }
 
+// Se llama antes de leer el cache, y también cuando el cache nuevo está fresco:
+// si solo se purgara al descargar, quien ya tenga cache v2 arrastraría los ~3 MB
+// de la v1 para siempre.
+function purgeLegacyCache(): void {
+  try {
+    for (const key of LEGACY_CACHE_KEYS) localStorage.removeItem(key);
+  } catch {
+    // localStorage no disponible; nada que purgar.
+  }
+}
+
 function readCache(ignoreAge = false): Laboratorio[] | null {
   try {
     const data = localStorage.getItem(CACHE_KEY_DATA);
@@ -74,6 +97,8 @@ function writeCache(data: Laboratorio[]): void {
 }
 
 export async function fetchLaboratorios(onProgress?: (cargados: number) => void): Promise<Laboratorio[]> {
+  purgeLegacyCache();
+
   const cached = readCache();
   if (cached) return cached;
 
