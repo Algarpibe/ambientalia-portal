@@ -58,6 +58,23 @@ describe('isUrgentItem', () => {
       isUrgentItem(item({ itemStatus: 'inactive', reorderPoint: 50, erpLevel: 0, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
     ).toBe(false);
   });
+  it('un servicio nunca es urgente, ni con disponible muy negativo', () => {
+    // Caso real (AMB-AUDALQ-003, un alquiler): sin el filtro, la app pedía comprar
+    // 108 unidades de "Alquiler de generador de Aire Cero".
+    expect(
+      isUrgentItem(item({ isService: true, availableQuantity: -108, reorderPoint: 0, erpLevel: null, optimalQuantity: 0, orderedQuantity: 0 })),
+    ).toBe(false);
+  });
+  it('el nivel del ERP sin configurar (null) no rompe el umbral', () => {
+    expect(
+      isUrgentItem(item({ erpLevel: null, reorderPoint: 50, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
+    ).toBe(true);
+  });
+  it('un -1 ("bajo demanda") no cuenta como umbral: manda el PdP', () => {
+    expect(
+      isUrgentItem(item({ erpLevel: -1, reorderPoint: 50, optimalQuantity: 20, availableQuantity: 5, orderedQuantity: 0 })),
+    ).toBe(true);
+  });
 });
 
 describe('filterByTab', () => {

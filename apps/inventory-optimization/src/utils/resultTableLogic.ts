@@ -14,6 +14,9 @@ export { computeEoq } from './eoq';
 export function isUrgentItem(item: AnalysisResult): boolean {
   // Los artículos inactivos en Zoho (dados de baja/sustituidos) no se piden.
   if (item.itemStatus === 'inactive') return false;
+  // Un servicio/alquiler no se stockea, así que no se repone: nunca es urgente por
+  // mucho que su disponible salga negativo.
+  if (item.isService) return false;
   // El umbral es el mayor entre el PdP calculado y el nivel del ERP. El nivel puede
   // venir sin configurar (null) o ser -1 ("bajo demanda"); ninguno de los dos es un
   // umbral, así que cuentan como 0 y manda el PdP.

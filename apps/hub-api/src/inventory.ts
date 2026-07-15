@@ -66,8 +66,18 @@ const INVENTORY_SQL = `
          -- líneas. Esto reconstruye exacto el bloque "Existencias físicas" de Zoho.
          -- Disponible = a-mano FÍSICO (actual_available_stock) − comprometido, para que
          -- reconcilien: p. ej. Disposition 16 − 21 = −5 (idéntico a Zoho).
-         COALESCE(com.comprometido, 0) AS "Existencias comprometidas",
-         COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) - COALESCE(com.comprometido, 0) AS "Disponible para la venta",
+         --
+         -- SOLO para artículos con seguimiento de inventario. En un servicio o alquiler
+         -- (track_inventory = false) no hay despacho, así que 'quantity_delivered' se
+         -- queda en 0 de por vida y la resta contaría como pendiente TODA la historia de
+         -- ventas del artículo (p. ej. AMB-AUDALQ-003: 32 líneas facturadas desde 2020
+         -- sumaban un comprometido fantasma de 108). Sin stock, comprometido y disponible
+         -- no significan nada: van a 0.
+         CASE WHEN COALESCE(it.raw ->> 'track_inventory', 'false') = 'true'
+              THEN COALESCE(com.comprometido, 0) ELSE 0 END AS "Existencias comprometidas",
+         CASE WHEN COALESCE(it.raw ->> 'track_inventory', 'false') = 'true'
+              THEN COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) - COALESCE(com.comprometido, 0)
+              ELSE 0 END AS "Disponible para la venta",
          COALESCE(it.purchase_rate, 0) AS "Costo",
          -- Precio de venta configurado en el ítem de Zoho (maestro, no el facturado).
          COALESCE(NULLIF(it.raw ->> 'rate', '')::numeric, 0) AS "Precio de venta",
