@@ -76,6 +76,29 @@ describe('optionsFor', () => {
     const filters = { ...EMPTY_FILTERS, matriz: 'Aire', componente: 'Calidad del Aire' };
     expect(optionsFor(DATA, 'componente', filters)).toEqual(['Calidad del Aire', 'Fuentes Fijas']);
   });
+
+  it('acota matriz por estado: no ofrece matrices sin registros en ese estado', () => {
+    const soloSuspendida: Laboratorio[] = [
+      lab({ matriz: 'Agua', estado: 'Activa' }),
+      lab({ matriz: 'Aire', estado: 'Activa' }),
+      lab({ matriz: 'Lodo', estado: 'Suspendida' }),
+    ];
+    expect(optionsFor(soloSuspendida, 'matriz', { ...EMPTY_FILTERS, estado: 'Suspendida' })).toEqual(['Lodo']);
+    expect(optionsFor(soloSuspendida, 'matriz', { ...EMPTY_FILTERS, estado: 'Activa' })).toEqual(['Agua', 'Aire']);
+  });
+
+  it('no acota matriz por sí misma: sigue ofreciendo todas para poder cambiar de opción', () => {
+    const data: Laboratorio[] = [lab({ matriz: 'Agua' }), lab({ matriz: 'Aire' })];
+    expect(optionsFor(data, 'matriz', { ...EMPTY_FILTERS, matriz: 'Agua' })).toEqual(['Agua', 'Aire']);
+  });
+
+  it('no acota matriz por los filtros de aguas abajo', () => {
+    const data: Laboratorio[] = [
+      lab({ matriz: 'Agua', componente: 'Continental' }),
+      lab({ matriz: 'Aire', componente: 'Calidad del Aire' }),
+    ];
+    expect(optionsFor(data, 'matriz', { ...EMPTY_FILTERS, componente: 'Continental' })).toEqual(['Agua', 'Aire']);
+  });
 });
 
 // El dataset trae 'variable' con grafías divergentes (994 crudas -> 888 reales,

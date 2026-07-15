@@ -5,13 +5,17 @@ import { EMPTY_FILTERS } from '../types';
 // variable -> metodo. Cada filtro solo ofrece lo que existe dentro de lo ya
 // elegido aguas ARRIBA; nunca se acota por sí mismo (si no, al elegir un valor
 // el desplegable quedaría con esa única opción) ni por los de abajo.
-export type CascadeField = 'componente' | 'actividad' | 'variable' | 'metodo';
+export type CascadeField = 'matriz' | 'componente' | 'actividad' | 'variable' | 'metodo';
 
 // Los filtros que pueden invalidar a los de aguas abajo al cambiar. 'metodo' es
 // el último de la cascada: no tiene nada debajo, así que no entra aquí.
-export type ChangedField = 'matriz' | 'componente' | 'actividad' | 'variable';
+export type ChangedField = Exclude<CascadeField, 'metodo'>;
 
-const CASCADE: readonly ChangedField[] = ['matriz', 'componente', 'actividad', 'variable'];
+// El orden de la cascada. Manda tanto en el ámbito de cada desplegable
+// (scopeFor) como en la limpieza al cambiar un filtro (clearDownstream).
+const CASCADE: readonly CascadeField[] = ['matriz', 'componente', 'actividad', 'variable', 'metodo'];
+
+const posicionEn = (field: CascadeField): number => CASCADE.indexOf(field);
 
 const compare = (a: string, b: string): number => a.localeCompare(b, 'es');
 
@@ -47,19 +51,23 @@ export function applyFilters(data: Laboratorio[], filters: FilterState): Laborat
 }
 
 // El recorte con el que se calculan las opciones de `field`: solo lo que tiene
-// aguas arriba, más `estado`. `estado` no está en la cascada pero sí acota (un
-// componente que solo existe en registros suspendidos no debe ofrecerse si se
-// filtra por Activa). `busqueda` NO acota: es un texto libre y volatilizaría los
-// desplegables mientras se teclea.
+// estrictamente aguas arriba, más `estado`. `estado` no está en la cascada pero
+// sí acota (un componente que solo existe en registros suspendidos no debe
+// ofrecerse si se filtra por Activa). `busqueda` NO acota: es un texto libre y
+// volatilizaría los desplegables mientras se teclea.
+// El `>` estricto es lo que deja fuera al propio campo: si se acotara por sí
+// mismo, elegir un valor dejaría el desplegable con esa única opción. 'matriz'
+// encabeza la cascada, así que solo la acota `estado`.
 function scopeFor(field: CascadeField, filters: FilterState): FilterState {
+  const posicion = posicionEn(field);
   return {
     ...EMPTY_FILTERS,
     estado: filters.estado,
-    matriz: filters.matriz,
-    componente: field === 'componente' ? '' : filters.componente,
-    actividad: field === 'componente' || field === 'actividad' ? '' : filters.actividad,
+    matriz: posicion > posicionEn('matriz') ? filters.matriz : '',
+    componente: posicion > posicionEn('componente') ? filters.componente : '',
+    actividad: posicion > posicionEn('actividad') ? filters.actividad : '',
     // 'metodo' es el único aguas abajo del multiselect de variables.
-    variables: field === 'metodo' ? filters.variables : [],
+    variables: posicion > posicionEn('variable') ? filters.variables : [],
   };
 }
 
@@ -106,12 +114,12 @@ function canonicalVariables(valores: string[]): string[] {
 // de existir dentro del nuevo recorte. `busqueda` y `estado` quedan fuera de la
 // cascada y nunca se tocan.
 export function clearDownstream(filters: FilterState, changed: ChangedField): FilterState {
-  const posicion = CASCADE.indexOf(changed);
+  const posicion = posicionEn(changed);
   return {
     ...filters,
-    componente: posicion < CASCADE.indexOf('componente') ? '' : filters.componente,
-    actividad: posicion < CASCADE.indexOf('actividad') ? '' : filters.actividad,
-    variables: posicion < CASCADE.indexOf('variable') ? [] : filters.variables,
+    componente: posicion < posicionEn('componente') ? '' : filters.componente,
+    actividad: posicion < posicionEn('actividad') ? '' : filters.actividad,
+    variables: posicion < posicionEn('variable') ? [] : filters.variables,
     // 'metodo' cierra la cascada: cualquier cambio aguas arriba lo invalida.
     metodo: '',
   };

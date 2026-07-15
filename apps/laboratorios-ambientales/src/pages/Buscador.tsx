@@ -32,14 +32,7 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
   // pulsación de tecla del campo de búsqueda.
   const resultados = useMemo(() => applyFilters(data, filters), [data, filters]);
 
-  const matrices = useMemo(
-    () =>
-      [...new Set(data.map((registro) => registro.matriz).filter((valor) => valor !== ''))].sort((a, b) =>
-        a.localeCompare(b, 'es'),
-      ),
-    [data],
-  );
-
+  const matrices = useMemo(() => optionsFor(data, 'matriz', filters), [data, filters]);
   const componentes = useMemo(() => optionsFor(data, 'componente', filters), [data, filters]);
   const actividades = useMemo(() => optionsFor(data, 'actividad', filters), [data, filters]);
   const variables = useMemo(() => optionsFor(data, 'variable', filters), [data, filters]);
