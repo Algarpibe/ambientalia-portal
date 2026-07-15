@@ -2,7 +2,8 @@ import type { Pool } from '@algarpibe/zoho-sync';
 
 // Feeds the "Análisis de Inventario" SPA (inventory-optimization), replacing its
 // six Excel uploads with hub data:
-// - sales{year}: monthly quantities sold per SKU (invoice lines by month/year).
+// - sales{year}: monthly demand per SKU (sales-order lines by month/year — the date
+//   the customer ordered, NOT the invoice date; see SALES_BY_YEAR_SQL).
 // - inventory: current stock from books.items (reorder level, on-hand, committed,
 //   available, manufacturer).
 // - leadTime: per-item lead time from the Zoho "Lead Time" custom field (in the
@@ -20,18 +21,25 @@ export interface InventoryData {
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+// La demanda se mide por ORDEN DE VENTA (cuándo pidió el cliente), no por factura.
+// La factura es un evento contable que puede ir meses por detrás y que además se
+// emite en bloque: eso apelotonaba varios meses de demanda en el mes de facturación
+// (p. ej. junio 2026), fabricando una variabilidad que no existe en la demanda real
+// — los artículos salían como "Lumpy"/intermitentes y se les inflaba el safety stock.
+// Verificado que las OV cubren 2023-2026 con el mismo volumen que las facturas
+// (2023: 1898 vs 1902 uds; 2024: 2822 vs 2828), así que no se pierde histórico.
 const SALES_BY_YEAR_SQL = `
   SELECT it.sku                AS sku,
          MAX(it.name)          AS item_name,
          MAX(it.category_name) AS category_name,
-         ${MONTHS.map((m, i) => `SUM(CASE WHEN extract(month from inv.date) = ${i + 1} THEN li.quantity ELSE 0 END) AS "${m}"`).join(',\n         ')},
-         AVG(li.bcy_rate)      AS average_price
-    FROM books.invoice_line_items li
-    JOIN books.invoices inv ON inv.invoice_id = li.invoice_id
-    JOIN books.items it     ON it.item_id     = li.item_id
-   WHERE inv.status NOT IN ('void', 'draft')
-     AND inv.date >= make_date($1::int, 1, 1)
-     AND inv.date <  make_date($1::int + 1, 1, 1)
+         ${MONTHS.map((m, i) => `SUM(CASE WHEN extract(month from so.date) = ${i + 1} THEN soli.quantity ELSE 0 END) AS "${m}"`).join(',\n         ')},
+         AVG(soli.bcy_rate)    AS average_price
+    FROM books.salesorder_line_items soli
+    JOIN books.sales_orders so ON so.salesorder_id = soli.salesorder_id
+    JOIN books.items it        ON it.item_id       = soli.item_id
+   WHERE so.status NOT IN ('void', 'draft')
+     AND so.date >= make_date($1::int, 1, 1)
+     AND so.date <  make_date($1::int + 1, 1, 1)
      AND it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'
    GROUP BY it.sku`;
