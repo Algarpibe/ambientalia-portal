@@ -122,3 +122,108 @@ describe('fetchLaboratorios', () => {
     await expect(fetchLaboratorios()).rejects.toThrow('503');
   });
 });
+
+// Los tests corren en el entorno 'node' de vitest, donde localStorage no existe:
+// sin este stub readCache lanza ReferenceError, su catch lo traga y devuelve
+// null, así que el camino del cache no se ejecutaría ni una vez.
+describe('fetchLaboratorios: cache de localStorage', () => {
+  const CACHE_KEY_DATA = 'labs_cache_data';
+  const CACHE_KEY_TIMESTAMP = 'labs_cache_timestamp';
+  const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+  // Doble en memoria: solo los métodos que api.ts usa. `store` queda expuesto
+  // para sembrar el cache y para cotejar lo que se escribió.
+  function stubLocalStorage(seed: Record<string, string> = {}) {
+    const store = new Map(Object.entries(seed));
+    const setItem = vi.fn((k: string, v: string) => void store.set(k, v));
+    const removeItem = vi.fn((k: string) => void store.delete(k));
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem,
+      removeItem,
+    });
+    return { store, setItem, removeItem };
+  }
+
+  const cacheDe = (labs: unknown[], edad = 0) => ({
+    [CACHE_KEY_DATA]: JSON.stringify(labs),
+    [CACHE_KEY_TIMESTAMP]: String(Date.now() - edad),
+  });
+
+  it('con cache fresco no toca la red y devuelve lo cacheado', async () => {
+    stubLocalStorage(cacheDe([mapRecord(RAW)]));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await fetchLaboratorios();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(data).toHaveLength(1);
+    expect(data[0].metodo).toBe('SM 2320 B');
+  });
+
+  it('con cache caducado (>24 h) vuelve a descargar y lo refresca', async () => {
+    const { store } = stubLocalStorage(cacheDe([mapRecord(RAW)], CACHE_DURATION + 1000));
+    const antes = store.get(CACHE_KEY_TIMESTAMP);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => page(3) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await fetchLaboratorios();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(data).toHaveLength(3);
+    expect(JSON.parse(store.get(CACHE_KEY_DATA) as string)).toHaveLength(3);
+    expect(store.get(CACHE_KEY_TIMESTAMP)).not.toBe(antes);
+  });
+
+  it('tras una descarga con éxito deja el cache escrito: datos y timestamp', async () => {
+    const { store } = stubLocalStorage();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) }));
+
+    const antes = Date.now();
+    await fetchLaboratorios();
+
+    expect(JSON.parse(store.get(CACHE_KEY_DATA) as string)).toHaveLength(2);
+    const ts = parseInt(store.get(CACHE_KEY_TIMESTAMP) as string, 10);
+    expect(ts).toBeGreaterThanOrEqual(antes);
+    expect(ts).toBeLessThanOrEqual(Date.now());
+  });
+
+  // El fallback que hoy no se prueba: más vale servir datos rancios que dejar
+  // la app en blanco porque datos.gov.co esté caído.
+  it('si la red falla y el cache está caducado, lo devuelve rancio en vez de lanzar', async () => {
+    stubLocalStorage(cacheDe([mapRecord(RAW)], CACHE_DURATION + 1000));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+    const data = await fetchLaboratorios();
+
+    expect(data).toHaveLength(1);
+    expect(data[0].metodo).toBe('SM 2320 B');
+  });
+
+  it('si la red falla y no hay cache que servir, lanza', async () => {
+    stubLocalStorage();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+    await expect(fetchLaboratorios()).rejects.toThrow('503');
+  });
+
+  // El dataset ronda los 3 MB y comparte los ~5 MB del origen con el portal.
+  it('si setItem lanza por cuota devuelve los datos igual y no deja una entrada a medias', async () => {
+    const { store, setItem, removeItem } = stubLocalStorage();
+    setItem.mockImplementation(() => {
+      throw new DOMException('exceeded the quota', 'QuotaExceededError');
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => page(2) }));
+
+    const data = await fetchLaboratorios();
+
+    // Los datos ya están en memoria: la sesión sigue funcionando.
+    expect(data).toHaveLength(2);
+    // Y el cache queda limpio, no a medias: ninguna de las dos claves sobrevive.
+    expect(removeItem).toHaveBeenCalledWith(CACHE_KEY_DATA);
+    expect(removeItem).toHaveBeenCalledWith(CACHE_KEY_TIMESTAMP);
+    expect(store.has(CACHE_KEY_DATA)).toBe(false);
+    expect(store.has(CACHE_KEY_TIMESTAMP)).toBe(false);
+  });
+});
