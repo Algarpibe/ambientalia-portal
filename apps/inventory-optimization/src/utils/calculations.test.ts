@@ -63,6 +63,22 @@ describe('crostonSBA — pronóstico (SBA)', () => {
     expect(r.meanSize).toBe(0);
     expect(r.sigmaSize).toBe(0);
   });
+
+  it('el silencio posterior a la última venta amortigua el pronóstico', () => {
+    // Una sola venta y luego 12 períodos en cero. Croston a secas fijaría p=3 (el hueco
+    // inicial) y pronosticaría 0.85/3 = 0.283 para siempre, ignorando el silencio.
+    const unaVentaYSilencio = [0, 0, 1, ...Array(12).fill(0)];
+    const r = crostonSBA(unaVentaYSilencio);
+    // El intervalo no puede ser menor que los 12 períodos que llevamos esperando.
+    expect(r.forecast).toBeCloseTo(0.85 / 12, 4);
+    expect(r.forecast).toBeLessThan(0.85 / 3); // muy por debajo del Croston ingenuo
+  });
+
+  it('si la última venta es del último período, no se amortiga nada', () => {
+    // Serie que termina en venta → q = 0 → el pronóstico es el de siempre.
+    const r = crostonSBA([10, 10, 10, 10, 10, 10]);
+    expect(r.forecast).toBeCloseTo(8.5, 1);
+  });
 });
 
 // --- Motor de reposición (PdP / Q) ---
@@ -182,6 +198,33 @@ describe('processInventoryData — punto de pedido', () => {
       [invRow(sku, { 'Nivel de reposición': 0 })], [ltRow(sku, 60)],
     );
     expect(r.reorderPoint).toBeLessThan(1);
+    expect(r.levelStatus).toBe('NoStockear');
+  });
+
+  it('sin ventas en más de 12 meses → "No stockear", aunque el modelo proponga stock', () => {
+    const sku = 'OBS';
+    // Vendió bien todo 2024 y nada desde entonces (última venta: dic 2024, hace 19
+    // meses). Sin la regla, el pronóstico aún propondría un PdP de dos dígitos.
+    const [r] = processInventoryData(
+      [], [], [salesRow(sku, flat(10))], [],
+      [invRow(sku)], [ltRow(sku, 30)],
+    );
+    expect(r.monthsSinceLastSale).toBeGreaterThan(12);
+    expect(r.reorderPoint).toBe(0);
+    expect(r.optimalQuantity).toBe(0);
+    expect(r.levelStatus).toBe('NoStockear');
+    expect(r.status).toBe('Ignored');
+  });
+
+  it('el caso del Blower: 1 ud hace años → no se stockea', () => {
+    const sku = 'BLW';
+    // Caso real (4020012): 1 ud en marzo 2023, nada desde entonces, y proponía PdP 2
+    // (~$3.400 de capital muerto) porque Croston ignoraba los 40 meses de silencio.
+    const [r] = processInventoryData(
+      [], [], [], [salesRow(sku, [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])],
+      [invRow(sku, { 'Precio de venta': 3291.68, Costo: 1680.96 })], [ltRow(sku, 90)],
+    );
+    expect(r.reorderPoint).toBe(0);
     expect(r.levelStatus).toBe('NoStockear');
   });
 

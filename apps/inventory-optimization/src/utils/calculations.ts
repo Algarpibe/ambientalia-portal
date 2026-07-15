@@ -25,6 +25,11 @@ const HIGH_VALUE_Z_CAP = 1.28;    // Alto valor: techo de servicio 90% (no sobre
 // time más 2 meses de colchón justifica más stock que esto.
 const PDP_CAP_EXTRA_MONTHS = 2;
 
+// Obsolescencia (política del negocio): si un artículo no se vende hace más de 12
+// meses —o no se ha vendido nunca— no se stockea, punto. Es una red de seguridad
+// independiente del pronóstico: aunque el modelo proponga un PdP, aquí se corta.
+const OBSOLETE_MONTHS = 12;
+
 // Rango sano de la cantidad óptima (Q), en meses de demanda.
 const Q_MIN_MONTHS = 1;
 const Q_MAX_MONTHS_STANDARD = 6;
@@ -71,7 +76,15 @@ export function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
     if (!init || p <= 0) {
         return { forecast: 0, adi: series.length || Infinity, cv2: 0, pattern: 'Suave', demands: 0, meanSize: 0, sigmaSize: 0 };
     }
-    const forecast = (1 - alpha / 2) * (z / p); // SBA
+    // Al salir del bucle, q = períodos transcurridos desde la ÚLTIMA demanda. Croston
+    // a secas lo descarta, y por eso sigue pronosticando como si el artículo aún se
+    // vendiera: con una sola venta, p se queda clavado en el hueco inicial y los años
+    // de silencio posteriores no cuentan (un artículo con 1 ud en 43 meses pronosticaba
+    // 0.283/mes en vez de 0.024 — 12× de más).
+    // El intervalo entre demandas no puede ser más corto que lo que ya llevamos
+    // esperando: si hace 40 meses que no se vende, el intervalo es 40 como mínimo.
+    const effectiveP = Math.max(p, q);
+    const forecast = (1 - alpha / 2) * (z / effectiveP); // SBA
     const adi = series.length / demands;
     const meanSize = sizes.reduce((a, b) => a + b, 0) / sizes.length;
     const variance = sizes.reduce((a, b) => a + (b - meanSize) ** 2, 0) / sizes.length;
@@ -686,8 +699,14 @@ export const processInventoryData = (
         let pdp = 0;
         let q = 0;
 
+        // Sin ventas en más de 12 meses (o nunca vendido) → no se stockea, sea cual sea
+        // el pronóstico. La señal de demanda está muerta y no hay modelo que la resucite.
+        const isObsolete = r.monthsSinceLastSale === -1 || r.monthsSinceLastSale > OBSOLETE_MONTHS;
+
         if (c.leadTimeDays === 0) {
             // Servicios: no se analiza stock.
+        } else if (isObsolete) {
+            // Demanda muerta: PdP y Q se quedan en 0 → "No stockear".
         } else if (c.unitPrice > ULTRA_VALUE_PRICE) {
             // Ultra-alto valor: se pide contra pedido, uno a uno.
             pdp = 1;
