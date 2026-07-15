@@ -28,19 +28,28 @@ export interface RawLeadTimeData {
 export interface AnalysisResult {
     sku: string;
     itemName: string;
-    currentLevel: number;
+    // Nivel de reposición del ERP, con tres estados distintos:
+    //   null = el campo no existe en Zoho (nunca se configuró; típico de servicios)
+    //   -1   = marca manual del usuario: "solo bajo demanda, no stockear"
+    //   n    = nivel real configurado (0 incluido)
+    currentLevel: number | null;
     leadTimeDays: number;
     leadTimeMonths: number;
     leadTimeStdDays: number;
     leadTimeSource: string;
-    leadTimeN: string;      // "# OC": nº de la orden de compra a mostrar (OC abierta próxima, o la más reciente)
     safetyStock: number;
     reorderPoint: number;
     optimalQuantity: number;
     deviation: number;
     status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored';
-    // Recomendación de ajuste del nivel de reposición del ERP (pestaña Análisis Principal)
-    levelStatus: 'Subir' | 'Bajar' | 'OK' | 'SinConfigurar' | 'SinDatos';
+    // Recomendación de ajuste del nivel de reposición del ERP (pestaña Análisis Principal).
+    // Es SOLO la recomendación: el estado del ERP se lee en currentLevel. Antes mezclaba
+    // ambas cosas y reportaba "sin configurar"/"sin datos" para artículos ya decididos.
+    //   SinDatos     = falta el lead time → no se puede calcular
+    //   NoStockear   = calculado: el PdP no llega a 1 unidad, no amerita stock
+    //   SinConfigurar= hay PdP pero el ERP no tiene nivel (null)
+    //   Subir/Bajar/OK = el nivel del ERP frente al PdP (un -1 con PdP alto cae en Subir)
+    levelStatus: 'Subir' | 'Bajar' | 'OK' | 'SinConfigurar' | 'SinDatos' | 'NoStockear';
     itemStatus: string;     // estado maestro del artículo en Zoho ('active' | 'inactive')
     coverageDays: number;   // días de inventario (stock físico / demanda diaria); -1 = N/A
     coverageRisk: boolean;  // true si cobertura < lead time (riesgo de quiebre)
@@ -83,7 +92,7 @@ export interface AnalysisResult {
     availableQuantity: number;
     manufacturer: string;
     vendor: string;
-    erpLevel: number;
+    erpLevel: number | null; // mismo dato que currentLevel (null / -1 / n)
     variabilityClass: 'Alta' | 'Media' | 'Baja';
     demandType: 'Normal' | 'Anormal';
     valueClass: 'Ultra Alto' | 'Alto' | 'Estándar';

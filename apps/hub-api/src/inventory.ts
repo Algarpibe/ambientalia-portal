@@ -52,7 +52,12 @@ const INVENTORY_SQL = `
   SELECT it.sku                                                  AS "SKU (Código de artículo)",
          it.name                                                 AS "Nombre del artículo",
          COALESCE(it.raw ->> 'manufacturer', it.raw ->> 'brand', '') AS "Fabricante",
-         COALESCE(NULLIF(it.raw ->> 'reorder_level', '')::numeric, -1)         AS "Nivel de reposición",
+         -- Nivel de reposición TAL CUAL viene de Zoho; NULL si el campo no existe o
+         -- está vacío. Ojo: NO se colapsa el ausente a -1, porque -1 es un valor real
+         -- con significado propio — es la marca manual de "solo bajo demanda, no
+         -- stockear" (952 artículos la llevan). Aplastarlos juntos hacía que la app
+         -- reportara como "sin configurar" decisiones ya tomadas.
+         NULLIF(it.raw ->> 'reorder_level', '')::numeric AS "Nivel de reposición",
          COALESCE(NULLIF(it.raw ->> 'stock_on_hand', '')::numeric, 0)          AS "Existencias a mano",
          COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0) AS "Existencias físicas",
          -- Comprometido (base FÍSICA) = Σ (cantidad − entregado − cancelado) de las OV
@@ -75,7 +80,6 @@ const INVENTORY_SQL = `
          COALESCE(it.raw ->> 'track_inventory', 'false') AS "Seguimiento inventario",
          COALESCE(por.por_recibir, 0) AS "Cantidad pedida",
          por.proxima_oc_fecha AS "Fecha OC próxima",
-         COALESCE(por.proxima_oc_num, por.ultima_oc_num, '') AS "OC Número",
          -- Proveedor real: el vendor más frecuente en las OC pasadas del artículo,
          -- con fallback al Fabricante y luego a un literal.
          COALESCE(ven.vendor_name, NULLIF(it.raw ->> 'manufacturer', ''), NULLIF(it.raw ->> 'brand', ''), 'Sin proveedor') AS "Proveedor"
@@ -87,12 +91,7 @@ const INVENTORY_SQL = `
              -- pendiente): fecha OC + lead time = ETA de la próxima entrada de stock.
              MIN(po.date) FILTER (
                WHERE GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0) > 0
-             )::text AS proxima_oc_fecha,
-             -- Nº de OC a mostrar: la OC abierta más próxima (con saldo pendiente);
-             -- si ninguna está abierta, la OC más reciente.
-             (array_agg(po.raw ->> 'purchaseorder_number' ORDER BY po.date ASC)
-               FILTER (WHERE GREATEST(COALESCE(poli.quantity, 0) - COALESCE(poli.quantity_received, 0) - COALESCE(poli.quantity_cancelled, 0), 0) > 0))[1] AS proxima_oc_num,
-             (array_agg(po.raw ->> 'purchaseorder_number' ORDER BY po.date DESC))[1] AS ultima_oc_num
+             )::text AS proxima_oc_fecha
         FROM books.purchase_order_line_items poli
         JOIN books.purchase_orders po ON po.purchaseorder_id = poli.purchaseorder_id
        WHERE po.status NOT IN ('draft', 'cancelled')

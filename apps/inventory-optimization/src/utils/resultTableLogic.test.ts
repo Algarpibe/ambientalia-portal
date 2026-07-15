@@ -9,7 +9,7 @@ import {
 function item(over: Partial<AnalysisResult> = {}): AnalysisResult {
   return {
     sku: 'SKU1', itemName: 'Item', currentLevel: 10, leadTimeDays: 30, leadTimeMonths: 1,
-    leadTimeStdDays: 5, leadTimeSource: 'x', leadTimeN: 'OC-1', safetyStock: 5, reorderPoint: 10,
+    leadTimeStdDays: 5, leadTimeSource: 'x', safetyStock: 5, reorderPoint: 10,
     optimalQuantity: 20, deviation: 0, status: 'Pedir', levelStatus: 'OK', itemStatus: 'active', coverageDays: 30, coverageRisk: false,
     orderDate: '', etaDate: '', etaDays: 0, unitCost: 10, annualValue: 100, annualValueRevenue: 120,
     coefVariation: 0.2, abcClass: 'A', xyzClass: 'X', abcXyz: 'AX', abcClassRevenue: 'A',
@@ -83,8 +83,8 @@ describe('filterByTab', () => {
 
 describe('filterResults', () => {
   const data = [
-    item({ sku: 'ABC', itemName: 'Bomba', category: 'Agua', status: 'Urgente', currentLevel: 5 }),
-    item({ sku: 'XYZ', itemName: 'Filtro', category: 'Aire', status: 'Pedir', currentLevel: -1 }),
+    item({ sku: 'ABC', itemName: 'Bomba', category: 'Agua', status: 'Urgente', currentLevel: 5, isService: false }),
+    item({ sku: 'XYZ', itemName: 'Filtro', category: 'Aire', status: 'Pedir', currentLevel: null, isService: true }),
   ];
   it('búsqueda por sku/nombre/categoría (case-insensitive)', () => {
     expect(filterResults(data, 'main', { ...allFilters, filter: 'bomba' }).map((i) => i.sku)).toEqual(['ABC']);
@@ -94,8 +94,17 @@ describe('filterResults', () => {
     // statusFilter='Pedir' pero en 'urgent' no aplica → devuelve ambos
     expect(filterResults(data, 'urgent', { ...allFilters, statusFilter: 'Pedir' })).toHaveLength(2);
   });
-  it('trackingFilter untracked → currentLevel === -1', () => {
-    expect(filterResults(data, 'main', { ...allFilters, trackingFilter: 'untracked' }).map((i) => i.sku)).toEqual(['XYZ']);
+  it('trackingFilter usa el seguimiento del ERP (isService), no el nivel', () => {
+    expect(filterResults(data, 'current_inventory', { ...allFilters, trackingFilter: 'untracked' }).map((i) => i.sku)).toEqual(['XYZ']);
+    expect(filterResults(data, 'current_inventory', { ...allFilters, trackingFilter: 'tracked' }).map((i) => i.sku)).toEqual(['ABC']);
+  });
+
+  it('un -1 ("bajo demanda") cuenta como CON seguimiento, no como sin configurar', () => {
+    // Regresión: antes el filtro usaba currentLevel === -1 como proxy de "sin
+    // seguimiento", así que los 952 artículos bajo demanda caían del lado erróneo.
+    const bajoDemanda = [item({ sku: 'BD', currentLevel: -1, isService: false })];
+    expect(filterResults(bajoDemanda, 'current_inventory', { ...allFilters, trackingFilter: 'tracked' })).toHaveLength(1);
+    expect(filterResults(bajoDemanda, 'current_inventory', { ...allFilters, trackingFilter: 'untracked' })).toHaveLength(0);
   });
 });
 

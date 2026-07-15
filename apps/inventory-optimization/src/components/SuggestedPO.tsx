@@ -30,7 +30,9 @@ const usd = (n: number) =>
 // Misma fórmula que la pestaña "Pedidos Urgentes": cantidad para volver a dejar el
 // stock (contando lo que ya viene) en el umbral + Q óptima.
 function suggestedQtyFor(item: AnalysisResult): number {
-    const threshold = Math.max(item.reorderPoint, item.erpLevel);
+    // El nivel del ERP puede ser null (sin configurar) o -1 ("bajo demanda"); ninguno
+    // es un umbral, así que cuentan como 0 y manda el PdP.
+    const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
     return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)));
 }
 

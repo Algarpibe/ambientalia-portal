@@ -173,7 +173,7 @@ type ItemCtx = {
     physicalAvailable: number;
     incoming: number;
     physicalOnHand: number;
-    reportedLevel: number;
+    reportedLevel: number | null; // null = el ERP no tiene nivel; -1 = "bajo demanda"
 };
 
 export const processInventoryData = (
@@ -206,7 +206,6 @@ export const processInventoryData = (
     const COST_KEYS = ['Costo', 'purchase_rate', 'Precio de Compra por unidad', 'Cost'];
     const SALE_PRICE_KEYS = ['Precio de venta', 'Precio de Venta por unidad', 'rate', 'Sale Price'];
     const ORDER_DATE_KEYS = ['Fecha OC próxima', 'Fecha OC proxima', 'Fecha OC', 'PO Date'];
-    const OC_NUMBER_KEYS = ['OC Número', 'OC Numero', 'Número OC'];
     const STATUS_KEYS = ['Estado del artículo', 'Estado', 'status', 'Status'];
     const TRACK_KEYS = ['Seguimiento inventario', 'track_inventory'];
 
@@ -249,8 +248,14 @@ export const processInventoryData = (
 
             if (targetMap) {
                 if (isInventory) {
+                    // El nivel se preserva con sus tres estados (null / -1 / n). Cuidado:
+                    // un `|| 0` aquí convertiría el "no configurado" en un nivel 0 real,
+                    // que es un valor legítimo y distinto.
+                    const rawLevel = getValueByKeys(item, REPOSITION_KEYS);
                     targetMap.set(sku, {
-                        level: Number(getValueByKeys(item, REPOSITION_KEYS) || 0),
+                        level: rawLevel === undefined || rawLevel === null || rawLevel === ''
+                            ? null
+                            : Number(rawLevel),
                         ordered: Number(getValueByKeys(item, ORDERED_KEYS) || 0),
                         hand: Number(getValueByKeys(item, HAND_KEYS) || 0),
                         physicalHand: Number(getValueByKeys(item, PHYSICAL_KEYS) || 0),
@@ -261,7 +266,6 @@ export const processInventoryData = (
                         cost: Number(getValueByKeys(item, COST_KEYS) || 0),
                         salePrice: Number(getValueByKeys(item, SALE_PRICE_KEYS) || 0),
                         orderDate: String(getValueByKeys(item, ORDER_DATE_KEYS) || '').slice(0, 10),
-                        ocNumber: String(getValueByKeys(item, OC_NUMBER_KEYS) || ''),
                         itemStatus: String(getValueByKeys(item, STATUS_KEYS) || 'active').toLowerCase().trim(),
                         tracksInventory: String(getValueByKeys(item, TRACK_KEYS) || 'false').toLowerCase().trim() === 'true'
                     });
@@ -310,7 +314,7 @@ export const processInventoryData = (
         const item2023 = salesMap2023.get(sku) || {};
 
         const inventoryInfo = inventoryMap.get(sku) || {
-            level: -1,
+            level: null,
             ordered: 0,
             hand: 0,
             physicalHand: 0,
@@ -321,7 +325,6 @@ export const processInventoryData = (
             cost: 0,
             salePrice: 0,
             orderDate: '',
-            ocNumber: '',
             itemStatus: 'active',
             tracksInventory: false
         };
@@ -583,7 +586,6 @@ export const processInventoryData = (
             leadTimeMonths: leadTimeTotalMonths,
             leadTimeStdDays,
             leadTimeSource: leadInfo.source,
-            leadTimeN: inventoryInfo.ocNumber, // "# OC": número de la OC a mostrar
             // SS/PdP/Q y todo lo que cuelga de ellos (estatus, cobertura, sobrestock,
             // desviación) se rellenan en la pasada final: dependen del nivel de servicio,
             // que sale de la clase ABC y esa es un ranking global.
@@ -723,12 +725,17 @@ export const processInventoryData = (
         }
 
         const roundedPdp = Math.round(pdp);
+        // ¿Amerita stock? Un PdP que no llega a 1 unidad significa "no stockear": no se
+        // puede tener media unidad en la estantería. Se mira el PdP CRUDO, no el
+        // redondeado — Math.round(0.75) da 1 y convertiría un "no amerita stock" en un
+        // "sube el nivel a 1" para artículos que venden 2 uds en 4 años.
+        const worthStocking = pdp >= 1;
 
         // Cobertura / días de inventario: cuántos días aguanta el stock físico disponible
         // a la demanda actual. Riesgo (rojo) si la cobertura es menor que el lead time
         // efectivo → nos quedaríamos sin stock antes de que llegue una reposición pedida hoy.
         const dailyDemand = c.selectedMonthlyAverage / 30;
-        const coverageApplicable = dailyDemand > 0 && c.leadTimeDays > 0 && roundedPdp >= 1;
+        const coverageApplicable = dailyDemand > 0 && c.leadTimeDays > 0 && worthStocking;
         const coverageDays = coverageApplicable
             ? Math.max(0, Math.round(c.physicalAvailable / dailyDemand))
             : -1; // -1 = N/A (servicio o sin demanda)
@@ -743,7 +750,7 @@ export const processInventoryData = (
             : 0;
 
         let status: AnalysisResult['status'] = 'Optimized';
-        if (c.isInactive || c.leadTimeDays === 0 || roundedPdp < 1) {
+        if (c.isInactive || c.leadTimeDays === 0 || !worthStocking) {
             // Artículo inactivo (dado de baja/sustituido en Zoho), servicio, o sin
             // demanda relevante → no se analiza stock ni se sugiere reposición.
             status = 'Ignored';
@@ -761,18 +768,32 @@ export const processInventoryData = (
         }
 
         // Recomendación de ajuste del nivel de reposición del ERP vs el PdP calculado
-        // (para la pestaña Análisis Principal). Independiente del estatus operativo.
+        // (pestaña Análisis Principal). Es SOLO la recomendación: el estado del ERP se
+        // reporta aparte en currentLevel (null = sin configurar, -1 = bajo demanda).
+        // Antes esto mezclaba ambas cosas y mentía en dos casos: llamaba "sin configurar"
+        // a los -1 (que son una decisión tomada) y "sin datos" a un PdP < 1 (que no es
+        // falta de datos, es la conclusión del análisis).
         let levelStatus: AnalysisResult['levelStatus'];
-        if (c.reportedLevel === -1) levelStatus = 'SinConfigurar';
-        else if (c.leadTimeDays === 0 || roundedPdp < 1) levelStatus = 'SinDatos';
-        else if (c.reportedLevel < roundedPdp) levelStatus = 'Subir';
-        else if (c.reportedLevel > roundedPdp * 1.2) levelStatus = 'Bajar';
-        else levelStatus = 'OK';
+        if (c.leadTimeDays === 0) {
+            levelStatus = 'SinDatos';       // sin lead time no hay nada que calcular
+        } else if (!worthStocking) {
+            levelStatus = 'NoStockear';     // calculado: la demanda no justifica stock
+        } else if (c.reportedLevel === null) {
+            levelStatus = 'SinConfigurar';  // hay PdP, pero el ERP no tiene nivel
+        } else if (c.reportedLevel < roundedPdp) {
+            // Aquí caen los -1 ("bajo demanda") cuyo PdP ya justifica stock: el análisis
+            // reta la política y propone subirlos.
+            levelStatus = 'Subir';
+        } else if (c.reportedLevel > roundedPdp * 1.2) {
+            levelStatus = 'Bajar';
+        } else {
+            levelStatus = 'OK';
+        }
 
         r.safetyStock = ss;
         r.reorderPoint = pdp;
         r.optimalQuantity = q;
-        r.deviation = c.reportedLevel !== -1 ? c.reportedLevel - pdp : 0;
+        r.deviation = c.reportedLevel !== null ? c.reportedLevel - pdp : 0;
         r.status = status;
         r.levelStatus = levelStatus;
         r.coverageDays = coverageDays;

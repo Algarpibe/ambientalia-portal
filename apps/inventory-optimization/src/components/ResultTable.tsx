@@ -65,7 +65,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'leadTimeDays', label: 'LT (Días)' },
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
-            { key: 'leadTimeN', label: '# OC' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'deviation', label: 'Desviación' },
@@ -88,7 +87,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'leadTimeDays', label: 'LT (Días)' },
             { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'leadTimeSource', label: 'Fuente LT' },
-            { key: 'leadTimeN', label: '# OC' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
             { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'deviation', label: 'Desviación' },
@@ -440,7 +438,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                 >
                     OC Sugerida ({data.filter(item => {
                         if (item.status !== 'Urgente' && item.status !== 'Pedir') return false;
-                        const threshold = Math.max(item.reorderPoint, item.erpLevel);
+                        const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
                         return Math.max(0, Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity))) > 0;
                     }).length})
                 </button>
@@ -511,6 +509,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                     <option value="Subir">Subir nivel</option>
                                     <option value="Bajar">Bajar nivel</option>
                                     <option value="OK">Nivel OK</option>
+                                    <option value="NoStockear">No stockear</option>
                                     <option value="SinConfigurar">Sin configurar</option>
                                     <option value="SinDatos">Sin datos</option>
                                 </>
@@ -827,11 +826,16 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                             );
                                         }
 
-                                        if (col.key === 'currentLevel') {
+                                        // Nivel del ERP: tres estados distintos. null = el campo
+                                        // no existe en Zoho; -1 = marca manual "solo bajo demanda";
+                                        // cualquier otro número = el nivel real (0 incluido).
+                                        if (col.key === 'currentLevel' || col.key === 'erpLevel') {
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                    {value === -1 ? (
+                                                    {value === null || value === undefined ? (
                                                         <span className="text-gray-400 italic" title="El artículo no tiene nivel de reposición configurado en el ERP">Sin configurar</span>
+                                                    ) : value === -1 ? (
+                                                        <span className="text-indigo-600 font-medium" title="Marcado en el ERP como -1: solo se pide bajo demanda, no se mantiene stock">Bajo demanda</span>
                                                     ) : value}
                                                 </td>
                                             );
@@ -967,7 +971,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                         }
 
                                         if (col.key === 'suggestedOrder') {
-                                            const threshold = Math.max(row.reorderPoint, row.erpLevel);
+                                            const threshold = Math.max(row.reorderPoint, Math.max(row.erpLevel ?? 0, 0));
                                             const suggested = Math.max(0, Math.round(threshold + row.optimalQuantity - (row.availableQuantity + row.orderedQuantity)));
                                             return (
                                                 <td key={col.key} className="px-3 py-4 whitespace-nowrap text-sm text-indigo-600 font-bold">

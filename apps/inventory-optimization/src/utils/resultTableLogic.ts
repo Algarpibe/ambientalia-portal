@@ -14,7 +14,10 @@ export { computeEoq } from './eoq';
 export function isUrgentItem(item: AnalysisResult): boolean {
   // Los artículos inactivos en Zoho (dados de baja/sustituidos) no se piden.
   if (item.itemStatus === 'inactive') return false;
-  const threshold = Math.max(item.reorderPoint, item.erpLevel);
+  // El umbral es el mayor entre el PdP calculado y el nivel del ERP. El nivel puede
+  // venir sin configurar (null) o ser -1 ("bajo demanda"); ninguno de los dos es un
+  // umbral, así que cuentan como 0 y manda el PdP.
+  const threshold = Math.max(item.reorderPoint, Math.max(item.erpLevel ?? 0, 0));
   const suggestedOrder = Math.max(
     0,
     Math.round(threshold + item.optimalQuantity - (item.availableQuantity + item.orderedQuantity)),
@@ -71,10 +74,15 @@ export function filterResults(data: AnalysisResult[], activeTab: string, f: Resu
     const matchesVariability = f.variabilityFilter === 'all' || item.variabilityClass === f.variabilityFilter;
     const matchesDemandType = f.demandTypeFilter === 'all' || item.demandType === f.demandTypeFilter;
     const matchesValueType = f.valueTypeFilter === 'all' || item.valueClass === f.valueTypeFilter;
+    // "Seguimiento" = el artículo hace seguimiento de inventario en el ERP
+    // (track_inventory de Zoho, que es isService invertido). Antes se usaba
+    // currentLevel !== -1 como proxy, que ya era erróneo (el -1 no dice nada del
+    // seguimiento) y ahora directamente miente: un -1 es "bajo demanda", un
+    // artículo con seguimiento y decisión tomada.
     const matchesTracking =
       f.trackingFilter === 'all' ||
-      (f.trackingFilter === 'tracked' && item.currentLevel !== -1) ||
-      (f.trackingFilter === 'untracked' && item.currentLevel === -1);
+      (f.trackingFilter === 'tracked' && !item.isService) ||
+      (f.trackingFilter === 'untracked' && item.isService);
     const itemAbc = f.abcBasis === 'cost' ? item.abcClass : item.abcClassRevenue;
     const matchesAbc = f.abcFilter === 'all' || itemAbc === f.abcFilter;
     const matchesXyz = f.xyzFilter === 'all' || item.xyzClass === f.xyzFilter;

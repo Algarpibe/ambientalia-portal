@@ -169,6 +169,54 @@ describe('processInventoryData — punto de pedido', () => {
     expect(a.safetyStock).toBeGreaterThan(c.safetyStock);
   });
 
+  // El estatus es SOLO la recomendación; el estado del ERP se reporta en currentLevel.
+  // Antes se mezclaban y mentía en los dos casos de abajo.
+  it('demanda ínfima con lead time → "No stockear", no "Sin datos"', () => {
+    const sku = 'CAT';
+    // Caso real (Catalyzer Tube 3014059457): 2 uds en 4 años, pero lead time 60 días.
+    // Hay datos de sobra; la conclusión es que no amerita stock.
+    const [r] = processInventoryData(
+      [salesRow(sku, [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])],
+      [salesRow(sku, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])],
+      [salesRow(sku, Array(12).fill(0))], [salesRow(sku, Array(12).fill(0))],
+      [invRow(sku, { 'Nivel de reposición': 0 })], [ltRow(sku, 60)],
+    );
+    expect(r.reorderPoint).toBeLessThan(1);
+    expect(r.levelStatus).toBe('NoStockear');
+  });
+
+  it('sin lead time sí es "Sin datos"', () => {
+    const sku = 'NOLT';
+    const [r] = processInventoryData(
+      [], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))],
+      [invRow(sku)], [ltRow(sku, 0)],
+    );
+    expect(r.levelStatus).toBe('SinDatos');
+  });
+
+  it('un -1 ("bajo demanda") con PdP alto se reporta como Subir, no como Sin configurar', () => {
+    const sku = 'BD';
+    // El -1 es la marca manual "no stockear". Si la demanda ya justifica stock, el
+    // análisis reta la política en vez de tragársela.
+    const [r] = processInventoryData(
+      [], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))],
+      [invRow(sku, { 'Nivel de reposición': -1 })], [ltRow(sku, 30)],
+    );
+    expect(r.currentLevel).toBe(-1);      // se preserva el dato del ERP tal cual
+    expect(r.reorderPoint).toBeGreaterThanOrEqual(1);
+    expect(r.levelStatus).toBe('Subir');
+  });
+
+  it('el nivel ausente en el ERP llega como null y no se confunde con 0', () => {
+    const sku = 'NL';
+    const [r] = processInventoryData(
+      [], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))], [salesRow(sku, flat(10))],
+      [invRow(sku, { 'Nivel de reposición': null })], [ltRow(sku, 30)],
+    );
+    expect(r.currentLevel).toBeNull();
+    expect(r.levelStatus).toBe('SinConfigurar');
+  });
+
   it('un ítem que él solo concentra casi todo el valor es A, no C', () => {
     // Regresión del Pareto: clasificar por el acumulado DESPUÉS mandaba el primero a C.
     const demand = flat(10);
