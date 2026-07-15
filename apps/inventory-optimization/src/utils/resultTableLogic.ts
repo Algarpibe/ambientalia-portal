@@ -4,13 +4,10 @@
 // lógica, para testearla aislada (el EOQ es un cálculo financiero).
 import type { AnalysisResult } from '../types';
 
-// EOQ = √(2·D·S / H), con H = tasa mantenimiento anual × costo unitario.
-// D = demanda anual (uds), S = costo por pedido. 0 si no hay demanda o costo.
-export function computeEoq(annualUnits: number, unitCost: number, orderCost: number, holdingRatePct: number): number {
-  const H = (holdingRatePct / 100) * unitCost;
-  if (annualUnits <= 0 || H <= 0 || orderCost <= 0) return 0;
-  return Math.max(1, Math.round(Math.sqrt((2 * annualUnits * orderCost) / H)));
-}
+// El EOQ se movió a ./eoq para que lo compartan la tabla y el motor de cálculo sin
+// que importarlo aquí arrastre el motor al bundle. Se re-exporta para no romper a
+// los consumidores (ResultTable, resultTableExport, tests).
+export { computeEoq } from './eoq';
 
 // Un ítem es "urgente" (hay que pedir ya) si el pedido sugerido es > 0 y hay
 // señal de umbral/negativo. Se usaba duplicado en 3 sitios del componente.

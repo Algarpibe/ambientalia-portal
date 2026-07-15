@@ -1,20 +1,52 @@
 import type { RawInventoryData, RawSalesData, AnalysisResult, RawLeadTimeData } from '../types';
+import { computeEoq } from './eoq';
 
 // Constants
 const ADMIN_DELAY_DAYS = 30;
-const SERVICE_LEVEL_Z = 1.645; // 95%
 const MIN_MONTHS_FOR_TREND = 3;
 const CROSTON_ALPHA = 0.3;      // suavizado de Croston/SBA
 const ADI_THRESHOLD = 1.32;     // Syntetos-Boylan: ADI ≥ 1.32 → intermitente/lumpy
 const CV2_THRESHOLD = 0.49;     // CV² ≥ 0.49 → errática/lumpy
+
+// --- Nivel de servicio diferenciado (matriz ABC-XYZ) ---
+// Filas ABC = importancia (Pareto del valor de consumo anual): los A se protegen más.
+// Columnas XYZ = predictibilidad de la demanda: cuanto más errática (Z), más se rebaja
+// el objetivo, porque cada punto de servicio sobre ruido cuesta muchísimo stock (y es
+// justo lo que inflaba el PdP). BY = 1.645 (95%) conserva el nivel histórico como ancla.
+const SERVICE_Z: Record<string, number> = {
+  AX: 2.05, AY: 1.88, AZ: 1.75,   // 98% · 97% · 96%
+  BX: 1.75, BY: 1.645, BZ: 1.48,  // 96% · 95% · 93%
+  CX: 1.48, CY: 1.28, CZ: 1.04,   // 93% · 90% · 85%
+};
+const DEFAULT_SERVICE_Z = 1.645;  // 95% — respaldo si no hay clase ABC-XYZ
+const HIGH_VALUE_Z_CAP = 1.28;    // Alto valor: techo de servicio 90% (no sobre-stockear caro)
+
+// Tope de cordura del PdP: ni el PEOR mes histórico sostenido durante todo el lead
+// time más 2 meses de colchón justifica más stock que esto.
+const PDP_CAP_EXTRA_MONTHS = 2;
+
+// Rango sano de la cantidad óptima (Q), en meses de demanda.
+const Q_MIN_MONTHS = 1;
+const Q_MAX_MONTHS_STANDARD = 6;
+const Q_MAX_MONTHS_HIGH_VALUE = 3;
+
+const HIGH_VALUE_PRICE = 1500;    // USD — a partir de aquí "Alto valor"
+const ULTRA_VALUE_PRICE = 10000;  // USD — a partir de aquí "Ultra alto" (PdP = Q = 1)
+
+// Parámetros EOQ por defecto (los mismos que la barra de la tabla).
+const EOQ_DEFAULT_ORDER_COST = 100;   // S: costo por pedido (USD)
+const EOQ_DEFAULT_HOLDING_RATE = 25;  // H: tasa de mantenimiento anual (% del costo)
 
 type DemandPattern = 'Suave' | 'Intermitente' | 'Errática' | 'Lumpy';
 
 // Croston / SBA (Syntetos-Boylan Approximation) sobre una serie mensual.
 // Separa tamaño de demanda (z) e intervalo entre demandas (p), ambos suavizados
 // por exponencial. Devuelve el pronóstico por período, ADI, CV² y el patrón.
+// meanSize/sigmaSize describen la distribución del TAMAÑO de los pedidos no nulos
+// (ignorando los meses en cero): son la base del safety stock de demanda intermitente.
 export function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
     forecast: number; adi: number; cv2: number; pattern: DemandPattern; demands: number;
+    meanSize: number; sigmaSize: number;
 } {
     let z = 0;      // tamaño suavizado
     let p = 0;      // intervalo suavizado
@@ -37,18 +69,61 @@ export function crostonSBA(series: number[], alpha = CROSTON_ALPHA): {
         }
     }
     if (!init || p <= 0) {
-        return { forecast: 0, adi: series.length || Infinity, cv2: 0, pattern: 'Suave', demands: 0 };
+        return { forecast: 0, adi: series.length || Infinity, cv2: 0, pattern: 'Suave', demands: 0, meanSize: 0, sigmaSize: 0 };
     }
     const forecast = (1 - alpha / 2) * (z / p); // SBA
     const adi = series.length / demands;
     const meanSize = sizes.reduce((a, b) => a + b, 0) / sizes.length;
     const variance = sizes.reduce((a, b) => a + (b - meanSize) ** 2, 0) / sizes.length;
+    const sigmaSize = Math.sqrt(variance);
     const cv2 = meanSize > 0 ? variance / (meanSize * meanSize) : 0;
     const pattern: DemandPattern =
         adi >= ADI_THRESHOLD
             ? (cv2 >= CV2_THRESHOLD ? 'Lumpy' : 'Intermitente')
             : (cv2 >= CV2_THRESHOLD ? 'Errática' : 'Suave');
-    return { forecast, adi, cv2, pattern, demands };
+    return { forecast, adi, cv2, pattern, demands, meanSize, sigmaSize };
+}
+
+// --- Safety stock (#4) ---
+// Demanda suave/errática (ADI < 1.32) → modelo normal: SS = z × σ combinada
+// (variabilidad de demanda + de lead time).
+// Demanda intermitente/lumpy → Poisson compuesto: durante el lead time ocurren N
+// pedidos (N ~ Poisson, E[N] = LT_meses / ADI) de tamaño X. La varianza de la demanda
+// total es E[N]·(σ_X² + μ_X²). Esto protege contra el PICO real de un pedido esporádico
+// en vez de promediarlo con los meses en cero, que es lo que distorsiona el σ mensual.
+function safetyStockFor(
+    z: number,
+    combinedSigma: number,
+    opts: { isIntermittent: boolean; adi: number; meanSize: number; sigmaSize: number; leadTimeMonths: number },
+): number {
+    const { isIntermittent, adi, meanSize, sigmaSize, leadTimeMonths } = opts;
+    if (isIntermittent && adi > 0 && meanSize > 0 && leadTimeMonths > 0) {
+        const expectedOccurrences = leadTimeMonths / adi;
+        if (expectedOccurrences > 0) {
+            const variance = expectedOccurrences * (sigmaSize * sigmaSize + meanSize * meanSize);
+            return z * Math.sqrt(variance);
+        }
+    }
+    return z * combinedSigma;
+}
+
+// --- Cantidad óptima (#6) ---
+// Q = EOQ (Wilson) acotado a un rango sano de meses de demanda: el EOQ puro puede
+// pedir años de stock en ítems baratos o lotes ridículos en los caros. Sin costo o
+// sin demanda el EOQ es 0 → se cae a la heurística de meses de siempre.
+function optimalQuantityFor(
+    annualSales: number,
+    monthlyAverage: number,
+    unitCost: number,
+    orderCost: number,
+    holdingRate: number,
+    maxMonths: number,
+): number {
+    const maxQ = monthlyAverage * maxMonths;
+    if (maxQ <= 0) return 0;
+    const eoq = computeEoq(annualSales, unitCost, orderCost, holdingRate);
+    if (eoq <= 0) return maxQ; // sin datos para EOQ → heurística de meses
+    return Math.min(Math.max(eoq, monthlyAverage * Q_MIN_MONTHS), maxQ);
 }
 const months = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -75,13 +150,41 @@ const getValueByKeys = (obj: any, keys: string[]): any => {
     return undefined;
 };
 
+// Ingredientes por ítem para la pasada final. El SS/PdP dependen del nivel de
+// servicio, que sale de la clase ABC — y el ABC es un ranking global (Pareto) que
+// solo se conoce tras recorrer TODOS los ítems. Por eso la 1ª pasada calcula la
+// demanda y el stock, y el PdP se resuelve al final.
+type ItemCtx = {
+    selectedMonthlyAverage: number;
+    selectedAnnualSales: number;
+    combinedSigma: number;
+    leadTimeTotalMonths: number;
+    effectiveLeadTimeDays: number;
+    leadTimeDays: number;
+    maxMonthlyDemand: number;
+    isIntermittent: boolean;
+    adi: number;
+    meanSize: number;
+    sigmaSize: number;
+    unitPrice: number;
+    unitCost: number;
+    isInactive: boolean;
+    position: number;
+    physicalAvailable: number;
+    incoming: number;
+    physicalOnHand: number;
+    reportedLevel: number;
+};
+
 export const processInventoryData = (
     sales2026: RawSalesData[],
     sales2025: RawSalesData[],
     sales2024: RawSalesData[],
     sales2023: RawSalesData[],
     inventoryData: RawInventoryData[],
-    leadTimeData: RawLeadTimeData[]
+    leadTimeData: RawLeadTimeData[],
+    eoqOrderCost: number = EOQ_DEFAULT_ORDER_COST,
+    eoqHoldingRate: number = EOQ_DEFAULT_HOLDING_RATE,
 ): AnalysisResult[] => {
     // Keys Mapping
     const SKU_KEYS = ['sku', 'SKU (Código de artículo)', 'Código', 'Código de Producto'];
@@ -193,6 +296,7 @@ export const processInventoryData = (
     processSource(sales2023, salesMap2023);
 
     const results: AnalysisResult[] = [];
+    const contexts: ItemCtx[] = []; // paralelo a results (mismo índice)
 
     // Referencia temporal para "meses sin venta" (dead stock). El historial cubre
     // 2023-2026 en índices año*12 + mes (mes 0-11).
@@ -242,6 +346,10 @@ export const processInventoryData = (
                 }
             }
 
+            // Mes (0-11) de la PRIMERA venta del año; -1 si no vendió nunca. Se usa
+            // para no penalizar a los artículos nuevos al anualizar (#2).
+            const firstSaleMonth = values.findIndex(v => v > 0);
+
             return {
                 values,
                 total,
@@ -249,7 +357,8 @@ export const processInventoryData = (
                 stdDev: isPartial && activeMonths > 0
                     ? calculateStdDev(values, activeMonths)
                     : calculateStdDev(values),
-                activeMonths
+                activeMonths,
+                firstSaleMonth
             };
         };
 
@@ -313,21 +422,31 @@ export const processInventoryData = (
         const demandPattern = croston.pattern;
         const isIntermittent = croston.adi >= ADI_THRESHOLD; // Intermitente o Lumpy
 
+        // Denominador para anualizar 2026: meses TRANSCURRIDOS desde la primera venta
+        // hasta el mes en curso, NO los meses "activos" (los que van hasta la última
+        // venta). Dividir por los activos descarta los ceros recientes e infla la tasa
+        // — era la causa principal del PdP excesivo. Arrancar en la primera venta evita
+        // castigar a los artículos nuevos, que todavía no tienen año completo.
+        const runRateMonths2026 = stats2026.firstSaleMonth >= 0
+            ? Math.max(1, upto2026 - stats2026.firstSaleMonth)
+            : Math.max(1, upto2026);
+
         // Abnormal Demand Logic (Policy v2.0)
         let demandSource: AnalysisResult['demandSource'] = 'Ventas 2025';
         let selectedMonthlyAverage = stats2025.avg;
 
         if (has2026Data && activeMonths2026 >= MIN_MONTHS_FOR_TREND) {
             const avgPrevFor2026 = (stats2025.total + stats2024.total) / 2;
-            const annualProjected2026 = (stats2026.total / Math.max(1, activeMonths2026)) * 12;
+            const annualProjected2026 = (stats2026.total / runRateMonths2026) * 12;
             const isAbnormal2026 = annualProjected2026 < (0.8 * avgPrevFor2026) && avgPrevFor2026 > 0;
 
             if (isAbnormal2026) {
                 demandSource = 'Promedio Trienal';
-                selectedMonthlyAverage = (stats2026.total + stats2025.total + stats2024.total) / 36;
+                // 2026 va parcial (upto2026 meses) + 2025 y 2024 completos.
+                selectedMonthlyAverage = (stats2026.total + stats2025.total + stats2024.total) / (24 + upto2026);
             } else {
                 demandSource = 'Ventas 2026';
-                selectedMonthlyAverage = stats2026.total / Math.max(1, activeMonths2026);
+                selectedMonthlyAverage = stats2026.total / runRateMonths2026;
             }
         } else {
             // If we don't have enough 2026 data, or no 2026 data at all, base on 2025
@@ -338,7 +457,7 @@ export const processInventoryData = (
                 demandSource = 'Promedio Trienal';
                 // Include 2026 in the trienal average if it has data, even if below trend threshold
                 const totalSales = stats2025.total + stats2024.total + stats2023.total + (has2026Data ? stats2026.total : 0);
-                const totalMonths = 36 + (has2026Data ? activeMonths2026 : 0);
+                const totalMonths = 36 + (has2026Data ? upto2026 : 0);
                 selectedMonthlyAverage = totalSales / totalMonths;
             } else {
                 demandSource = 'Ventas 2025';
@@ -389,32 +508,10 @@ export const processInventoryData = (
         // Precio de venta: el configurado en el ítem de Zoho (ERP); si no está
         // configurado, se usa como respaldo el promedio realmente facturado.
         const unitPrice = inventoryInfo.salePrice > 0 ? inventoryInfo.salePrice : (priceMap.get(sku) || 0);
-        let ss = 0;
-        let pdp = 0;
-        let q = 0;
 
-        if (leadTimeDays === 0) {
-            // Servicios: No analizar stock
-            ss = 0;
-            pdp = 0;
-            q = 0;
-        } else if (unitPrice > 10000) {
-            // Ultra-Alto Valor: Precio > 10,000 USD
-            pdp = 1;
-            q = 1;
-            ss = 0;
-        } else if (unitPrice >= 1500) {
-            // Alto Valor: Precio 1,500 - 10,000 USD
-            const highValueZ = 1.28; // 80% confidence
-            ss = highValueZ * combinedSigma;
-            pdp = (selectedMonthlyAverage * leadTimeTotalMonths) + ss;
-            q = selectedMonthlyAverage * 3; // 3 months demand
-        } else {
-            // Estándar: Precio < 1,500 USD
-            ss = SERVICE_LEVEL_Z * combinedSigma;
-            pdp = (selectedMonthlyAverage * leadTimeTotalMonths) + ss;
-            q = selectedMonthlyAverage * 6; // 6 months demand (standard logic)
-        }
+        // Peor mes histórico: base del tope de cordura del PdP (#5), que se aplica en
+        // la pasada final junto con el SS/PdP.
+        const maxMonthlyDemand = monthlySeries.length ? Math.max(...monthlySeries) : 0;
 
         // Variability Calculation Logic
         const maxHistoricalStdDev = Math.max(stats2024.stdDev, stats2023.stdDev);
@@ -434,26 +531,11 @@ export const processInventoryData = (
         if (unitPrice > 10000) valueClass = 'Ultra Alto';
         else if (unitPrice >= 1500) valueClass = 'Alto';
 
-        let status: 'Urgente' | 'EnCamino' | 'Pedir' | 'Overstock' | 'Optimized' | 'Ignored' = 'Optimized';
-        const roundedPdp = Math.round(pdp);
-
         // Posición de inventario = Disponible contable (= físico − comprometido + por recibir):
         // lo que efectivamente tienes para cubrir demanda, contando lo que ya viene.
         const position = inventoryInfo.available;
         const physicalAvailable = inventoryInfo.physicalHand - inventoryInfo.committed;
         const incoming = inventoryInfo.ordered; // por recibir
-
-        // Cobertura / días de inventario: cuántos días aguanta el stock físico
-        // disponible a la demanda actual. Riesgo (rojo) si la cobertura es menor
-        // que el lead time efectivo → nos quedaríamos sin stock antes de que
-        // llegue una reposición pedida hoy.
-        const dailyDemand = selectedMonthlyAverage / 30;
-        const coverageApplicable = dailyDemand > 0 && leadTimeDays > 0 && roundedPdp >= 1;
-        const coverageDays = coverageApplicable
-            ? Math.max(0, Math.round(physicalAvailable / dailyDemand))
-            : -1; // -1 = N/A (servicio o sin demanda)
-        const coverageRisk = coverageApplicable
-            && (physicalAvailable / dailyDemand) < effectiveLeadTimeDays;
 
         // --- Dead stock / capital inmovilizado ---
         // Meses desde la última venta (recorriendo 2023-2026); -1 = nunca vendido.
@@ -477,47 +559,20 @@ export const processInventoryData = (
         }
         const deadStockValue = (deadStockClass === 'Muerto' || deadStockClass === 'Obsoleto') ? inventoryValue : 0;
 
-        // Sobrestock: exceso sobre el techo sano (PdP + Q óptima) SOLO en ítems que
-        // rotan (Activo/Lento); los muertos ya cuentan como dead capital (sin doble conteo).
-        const stockCeiling = Math.max(1, Math.round(pdp + q));
-        const overstockUnits = (deadStockClass === 'Activo' || deadStockClass === 'Lento')
-            ? Math.max(0, Math.round(physicalOnHand) - stockCeiling)
-            : 0;
-        const overstockValue = overstockUnits * unitCost;
-
-        if (isInactive || leadTimeDays === 0 || roundedPdp < 1) {
-            // Artículo inactivo (dado de baja/sustituido en Zoho), servicio, o sin
-            // demanda relevante → no se analiza stock ni se sugiere reposición.
-            status = 'Ignored';
-        } else if (physicalAvailable <= 0 && incoming <= 0) {
-            // Físicamente en cero (o comprometido más de lo que hay) y nada en camino → pedir YA.
-            status = 'Urgente';
-        } else if (position < roundedPdp && incoming > 0) {
-            // Falta stock pero ya hay una orden en tránsito → reposición en camino.
-            status = 'EnCamino';
-        } else if (position < roundedPdp) {
-            // Bajo el punto de pedido, sin urgencia física ni tránsito → colocar orden.
-            status = 'Pedir';
-        } else if (position > (roundedPdp * 1.2)) {
-            status = 'Overstock';
-        }
-
         const itemName = namesMap.get(sku) || 'Unknown';
         const category = categoryMap.get(sku) || 'Sin Categoría';
 
         // Final level to report: keep actual level if it's not -1
         const reportedLevel = actualCurrentLevel;
 
-        const deviation = reportedLevel !== -1 ? reportedLevel - pdp : 0;
-
-        // Recomendación de ajuste del nivel de reposición del ERP vs el PdP calculado
-        // (para la pestaña Análisis Principal). Independiente del estatus operativo.
-        let levelStatus: AnalysisResult['levelStatus'];
-        if (reportedLevel === -1) levelStatus = 'SinConfigurar';
-        else if (leadTimeDays === 0 || roundedPdp < 1) levelStatus = 'SinDatos';
-        else if (reportedLevel < roundedPdp) levelStatus = 'Subir';
-        else if (reportedLevel > roundedPdp * 1.2) levelStatus = 'Bajar';
-        else levelStatus = 'OK';
+        // Ingredientes para la pasada final (SS/PdP/Q/estatus), que necesita la clase ABC.
+        contexts.push({
+            selectedMonthlyAverage, selectedAnnualSales, combinedSigma, leadTimeTotalMonths,
+            effectiveLeadTimeDays, leadTimeDays, maxMonthlyDemand,
+            isIntermittent, adi: croston.adi, meanSize: croston.meanSize, sigmaSize: croston.sigmaSize,
+            unitPrice, unitCost, isInactive, position, physicalAvailable, incoming,
+            physicalOnHand, reportedLevel,
+        });
 
         results.push({
             sku,
@@ -529,15 +584,18 @@ export const processInventoryData = (
             leadTimeStdDays,
             leadTimeSource: leadInfo.source,
             leadTimeN: inventoryInfo.ocNumber, // "# OC": número de la OC a mostrar
-            safetyStock: ss,
-            reorderPoint: pdp,
-            optimalQuantity: q,
-            deviation,
-            status,
-            levelStatus,
+            // SS/PdP/Q y todo lo que cuelga de ellos (estatus, cobertura, sobrestock,
+            // desviación) se rellenan en la pasada final: dependen del nivel de servicio,
+            // que sale de la clase ABC y esa es un ranking global.
+            safetyStock: 0,
+            reorderPoint: 0,
+            optimalQuantity: 0,
+            deviation: 0,
+            status: 'Optimized',
+            levelStatus: 'OK',
             itemStatus,
-            coverageDays,
-            coverageRisk,
+            coverageDays: -1,
+            coverageRisk: false,
             orderDate: inventoryInfo.orderDate,
             etaDate,
             etaDays,
@@ -557,8 +615,8 @@ export const processInventoryData = (
             monthsSinceLastSale,
             deadStockClass,
             deadStockValue,
-            overstockUnits,
-            overstockValue,
+            overstockUnits: 0,   // depende del techo PdP+Q → pasada final
+            overstockValue: 0,   // idem
             inventoryValue,
             monthlyAverage: selectedMonthlyAverage,
             annualSales: selectedAnnualSales,
@@ -603,15 +661,125 @@ export const processInventoryData = (
             if (total <= 0 || valueOf(r) <= 0) {
                 assign(r, 'C');
             } else {
+                // Se clasifica por el acumulado ANTES del ítem: un ítem es A mientras lo
+                // ya acumulado no haya cubierto el 80%. Con el acumulado DESPUÉS, un ítem
+                // que por sí solo vale el 99% caería en C — y ahora el ABC fija el nivel
+                // de servicio, así que esa mala clasificación sí duele.
+                const pctBefore = cumulative / total;
                 cumulative += valueOf(r);
-                const pct = cumulative / total;
-                assign(r, pct <= 0.8 ? 'A' : pct <= 0.95 ? 'B' : 'C');
+                assign(r, pctBefore < 0.8 ? 'A' : pctBefore < 0.95 ? 'B' : 'C');
             }
         });
     };
 
     classifyABC(r => r.annualValue, (r, cls) => { r.abcClass = cls; r.abcXyz = `${cls}${r.xyzClass}`; });
     classifyABC(r => r.annualValueRevenue, (r, cls) => { r.abcClassRevenue = cls; r.abcXyzRevenue = `${cls}${r.xyzClass}`; });
+
+    // 3ª pasada — SS / PdP / Q y todo lo que depende de ellos. Va aquí porque el nivel
+    // de servicio se lee de la matriz ABC-XYZ, que necesita el Pareto ya resuelto.
+    results.forEach((r, i) => {
+        const c = contexts[i];
+
+        let ss = 0;
+        let pdp = 0;
+        let q = 0;
+
+        if (c.leadTimeDays === 0) {
+            // Servicios: no se analiza stock.
+        } else if (c.unitPrice > ULTRA_VALUE_PRICE) {
+            // Ultra-alto valor: se pide contra pedido, uno a uno.
+            pdp = 1;
+            q = 1;
+        } else {
+            // Nivel de servicio por criticidad (ABC) × predictibilidad (XYZ). En los de
+            // alto valor se aplica un techo: no se sobre-stockea lo caro aunque sea clase A.
+            const matrixZ = SERVICE_Z[r.abcXyz] ?? DEFAULT_SERVICE_Z;
+            const z = c.unitPrice >= HIGH_VALUE_PRICE ? Math.min(matrixZ, HIGH_VALUE_Z_CAP) : matrixZ;
+
+            ss = safetyStockFor(z, c.combinedSigma, {
+                isIntermittent: c.isIntermittent,
+                adi: c.adi,
+                meanSize: c.meanSize,
+                sigmaSize: c.sigmaSize,
+                leadTimeMonths: c.leadTimeTotalMonths,
+            });
+            pdp = (c.selectedMonthlyAverage * c.leadTimeTotalMonths) + ss;
+
+            // Tope de cordura: aunque el σ dispare el SS, no tiene sentido cubrir más de
+            // lo que consumiría el PEOR mes histórico durante el lead time + 2 meses.
+            if (c.maxMonthlyDemand > 0) {
+                const cap = c.maxMonthlyDemand * (c.leadTimeTotalMonths + PDP_CAP_EXTRA_MONTHS);
+                if (pdp > cap) {
+                    pdp = cap;
+                    ss = Math.max(0, pdp - c.selectedMonthlyAverage * c.leadTimeTotalMonths);
+                }
+            }
+
+            q = optimalQuantityFor(
+                c.selectedAnnualSales, c.selectedMonthlyAverage, c.unitCost,
+                eoqOrderCost, eoqHoldingRate,
+                c.unitPrice >= HIGH_VALUE_PRICE ? Q_MAX_MONTHS_HIGH_VALUE : Q_MAX_MONTHS_STANDARD,
+            );
+        }
+
+        const roundedPdp = Math.round(pdp);
+
+        // Cobertura / días de inventario: cuántos días aguanta el stock físico disponible
+        // a la demanda actual. Riesgo (rojo) si la cobertura es menor que el lead time
+        // efectivo → nos quedaríamos sin stock antes de que llegue una reposición pedida hoy.
+        const dailyDemand = c.selectedMonthlyAverage / 30;
+        const coverageApplicable = dailyDemand > 0 && c.leadTimeDays > 0 && roundedPdp >= 1;
+        const coverageDays = coverageApplicable
+            ? Math.max(0, Math.round(c.physicalAvailable / dailyDemand))
+            : -1; // -1 = N/A (servicio o sin demanda)
+        const coverageRisk = coverageApplicable
+            && (c.physicalAvailable / dailyDemand) < c.effectiveLeadTimeDays;
+
+        // Sobrestock: exceso sobre el techo sano (PdP + Q óptima) SOLO en ítems que
+        // rotan (Activo/Lento); los muertos ya cuentan como dead capital (sin doble conteo).
+        const stockCeiling = Math.max(1, Math.round(pdp + q));
+        const overstockUnits = (r.deadStockClass === 'Activo' || r.deadStockClass === 'Lento')
+            ? Math.max(0, Math.round(c.physicalOnHand) - stockCeiling)
+            : 0;
+
+        let status: AnalysisResult['status'] = 'Optimized';
+        if (c.isInactive || c.leadTimeDays === 0 || roundedPdp < 1) {
+            // Artículo inactivo (dado de baja/sustituido en Zoho), servicio, o sin
+            // demanda relevante → no se analiza stock ni se sugiere reposición.
+            status = 'Ignored';
+        } else if (c.physicalAvailable <= 0 && c.incoming <= 0) {
+            // Físicamente en cero (o comprometido más de lo que hay) y nada en camino → pedir YA.
+            status = 'Urgente';
+        } else if (c.position < roundedPdp && c.incoming > 0) {
+            // Falta stock pero ya hay una orden en tránsito → reposición en camino.
+            status = 'EnCamino';
+        } else if (c.position < roundedPdp) {
+            // Bajo el punto de pedido, sin urgencia física ni tránsito → colocar orden.
+            status = 'Pedir';
+        } else if (c.position > (roundedPdp * 1.2)) {
+            status = 'Overstock';
+        }
+
+        // Recomendación de ajuste del nivel de reposición del ERP vs el PdP calculado
+        // (para la pestaña Análisis Principal). Independiente del estatus operativo.
+        let levelStatus: AnalysisResult['levelStatus'];
+        if (c.reportedLevel === -1) levelStatus = 'SinConfigurar';
+        else if (c.leadTimeDays === 0 || roundedPdp < 1) levelStatus = 'SinDatos';
+        else if (c.reportedLevel < roundedPdp) levelStatus = 'Subir';
+        else if (c.reportedLevel > roundedPdp * 1.2) levelStatus = 'Bajar';
+        else levelStatus = 'OK';
+
+        r.safetyStock = ss;
+        r.reorderPoint = pdp;
+        r.optimalQuantity = q;
+        r.deviation = c.reportedLevel !== -1 ? c.reportedLevel - pdp : 0;
+        r.status = status;
+        r.levelStatus = levelStatus;
+        r.coverageDays = coverageDays;
+        r.coverageRisk = coverageRisk;
+        r.overstockUnits = overstockUnits;
+        r.overstockValue = overstockUnits * c.unitCost;
+    });
 
     return results;
 };

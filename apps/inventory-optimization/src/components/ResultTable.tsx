@@ -27,9 +27,18 @@ import { SortableColumnList } from './SortableColumnList';
 
 interface ResultsTableProps {
     data: AnalysisResult[];
+    // Los parámetros del EOQ los gobierna App: además de la columna EOQ, alimentan
+    // la cantidad óptima (Q) que se calcula en el análisis, así que cambiarlos
+    // obliga a recalcular y no basta con re-renderizar la tabla.
+    eoqOrderCost: number;
+    eoqHoldingRate: number;
+    onEoqOrderCostChange: (v: number) => void;
+    onEoqHoldingRateChange: (v: number) => void;
 }
 
-export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
+export const ResultsTable: React.FC<ResultsTableProps> = ({
+    data, eoqOrderCost, eoqHoldingRate, onEoqOrderCostChange, onEoqHoldingRateChange,
+}) => {
     const [selectedItem, setSelectedItem] = useState<AnalysisResult | null>(null);
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const [showHistoryColumnPicker, setShowHistoryColumnPicker] = useState(false);
@@ -222,10 +231,6 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
     const [xyzFilter, setXyzFilter] = useState<string>('all');
     const [abcBasis, setAbcBasis] = useState<'cost' | 'revenue'>('cost');
     const [patternFilter, setPatternFilter] = useState<string>('all');
-    const [eoqOrderCost, setEoqOrderCost] = useState<number>(() => Number(localStorage.getItem('eoq_order_cost')) || 100);
-    const [eoqHoldingRate, setEoqHoldingRate] = useState<number>(() => Number(localStorage.getItem('eoq_holding_rate')) || 25);
-    useEffect(() => { localStorage.setItem('eoq_order_cost', String(eoqOrderCost)); }, [eoqOrderCost]);
-    useEffect(() => { localStorage.setItem('eoq_holding_rate', String(eoqHoldingRate)); }, [eoqHoldingRate]);
     // El filtro de estatus cambia de dominio entre pestañas (operativo vs nivel ERP);
     // se resetea al cambiar de pestaña para no dejar un valor inexistente en la otra.
     useEffect(() => { setStatusFilter('all'); }, [activeTab]);
@@ -686,7 +691,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                             type="number"
                             min={0}
                             value={eoqOrderCost}
-                            onChange={(e) => setEoqOrderCost(Math.max(0, Number(e.target.value)))}
+                            onChange={(e) => onEoqOrderCostChange(Math.max(0, Number(e.target.value)))}
                             className="w-20 border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </label>
@@ -697,7 +702,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ data }) => {
                             min={0}
                             max={100}
                             value={eoqHoldingRate}
-                            onChange={(e) => setEoqHoldingRate(Math.min(100, Math.max(0, Number(e.target.value))))}
+                            onChange={(e) => onEoqHoldingRateChange(Math.min(100, Math.max(0, Number(e.target.value))))}
                             className="w-16 border border-gray-300 rounded-md px-2 py-1 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                         />
                     </label>

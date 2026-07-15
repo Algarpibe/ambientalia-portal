@@ -11,6 +11,10 @@ export interface InventoryWorkerInput {
   sales2023: RawSalesData[];
   inventory: RawInventoryData[];
   leadTime: RawLeadTimeData[];
+  // Parámetros del EOQ (S y H). Entran al análisis porque la cantidad óptima (Q)
+  // se calcula con el EOQ; si se omiten, calculations usa sus defaults (100/25).
+  eoqOrderCost?: number;
+  eoqHoldingRate?: number;
 }
 
 // Tipado mínimo del contexto del worker para no depender de la lib "webworker"
@@ -25,6 +29,7 @@ ctx.onmessage = (e: MessageEvent) => {
   try {
     const result = processInventoryData(
       d.sales2026, d.sales2025, d.sales2024, d.sales2023, d.inventory, d.leadTime,
+      d.eoqOrderCost, d.eoqHoldingRate,
     );
     ctx.postMessage({ ok: true, result });
   } catch (err) {

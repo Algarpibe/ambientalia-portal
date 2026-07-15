@@ -34,7 +34,7 @@ export async function runInventoryAnalysis(input: InventoryWorkerInput): Promise
     const { processInventoryData } = await import('./utils/calculations');
     return processInventoryData(
       input.sales2026, input.sales2025, input.sales2024, input.sales2023,
-      input.inventory, input.leadTime,
+      input.inventory, input.leadTime, input.eoqOrderCost, input.eoqHoldingRate,
     );
   }
 }

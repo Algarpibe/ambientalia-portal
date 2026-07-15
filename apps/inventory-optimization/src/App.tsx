@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Package, RefreshCw, AlertCircle } from 'lucide-react';
 import { ResultsTable } from './components/ResultTable';
 import { runInventoryAnalysis } from './runInventoryWorker';
+import type { InventoryWorkerInput } from './workers/inventory.worker';
 import type { AnalysisResult, RawSalesData, RawInventoryData, RawLeadTimeData } from './types';
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
@@ -11,10 +12,25 @@ const authHeaders = (): Record<string, string> => {
   return t ? { Authorization: `Bearer ${t}` } : {};
 };
 
+type RawPayload = Omit<InventoryWorkerInput, 'eoqOrderCost' | 'eoqHoldingRate'>;
+
 function App() {
   const [results, setResults] = useState<AnalysisResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Los parámetros del EOQ viven aquí, no en la tabla: alimentan la cantidad óptima
+  // (Q), que se calcula dentro del análisis → cambiarlos exige recalcular.
+  const [eoqOrderCost, setEoqOrderCost] = useState<number>(() => Number(localStorage.getItem('eoq_order_cost')) || 100);
+  const [eoqHoldingRate, setEoqHoldingRate] = useState<number>(() => Number(localStorage.getItem('eoq_holding_rate')) || 25);
+  useEffect(() => { localStorage.setItem('eoq_order_cost', String(eoqOrderCost)); }, [eoqOrderCost]);
+  useEffect(() => { localStorage.setItem('eoq_holding_rate', String(eoqHoldingRate)); }, [eoqHoldingRate]);
+
+  // Datos crudos del hub: se cachean para poder recalcular al cambiar los parámetros
+  // sin volver a pedirlos. En refs (no en estado) porque solo los lee el análisis.
+  const rawRef = useRef<RawPayload | null>(null);
+  const eoqRef = useRef({ S: eoqOrderCost, H: eoqHoldingRate });
+  eoqRef.current = { S: eoqOrderCost, H: eoqHoldingRate };
 
   const loadFromHub = useCallback(async () => {
     setLoading(true);
@@ -31,13 +47,19 @@ function App() {
       if (!keys.every((k) => Array.isArray(d?.[k]))) {
         throw new Error('Respuesta del hub con formato inesperado');
       }
-      const analyzed = await runInventoryAnalysis({
+      const raw: RawPayload = {
         sales2026: d.sales2026 as RawSalesData[],
         sales2025: d.sales2025 as RawSalesData[],
         sales2024: d.sales2024 as RawSalesData[],
         sales2023: d.sales2023 as RawSalesData[],
         inventory: d.inventory as RawInventoryData[],
         leadTime: d.leadTime as RawLeadTimeData[],
+      };
+      rawRef.current = raw;
+      const analyzed = await runInventoryAnalysis({
+        ...raw,
+        eoqOrderCost: eoqRef.current.S,
+        eoqHoldingRate: eoqRef.current.H,
       });
       setResults(analyzed);
     } catch (err) {
@@ -51,6 +73,22 @@ function App() {
   useEffect(() => {
     loadFromHub();
   }, [loadFromHub]);
+
+  // Recalcula al tocar los parámetros del EOQ, reusando los datos ya descargados.
+  // Con debounce para no lanzar un análisis por cada tecla. Se salta la primera
+  // ejecución: de la carga inicial ya se encarga loadFromHub.
+  const skipFirstEoqRun = useRef(true);
+  useEffect(() => {
+    if (skipFirstEoqRun.current) { skipFirstEoqRun.current = false; return; }
+    const raw = rawRef.current;
+    if (!raw) return;
+    const t = setTimeout(() => {
+      runInventoryAnalysis({ ...raw, eoqOrderCost, eoqHoldingRate })
+        .then(setResults)
+        .catch((err) => console.error(err));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [eoqOrderCost, eoqHoldingRate]);
 
   const summaryMetrics = results
     ? {
@@ -130,7 +168,13 @@ function App() {
               </div>
             </div>
 
-            <ResultsTable data={results} />
+            <ResultsTable
+              data={results}
+              eoqOrderCost={eoqOrderCost}
+              eoqHoldingRate={eoqHoldingRate}
+              onEoqOrderCostChange={setEoqOrderCost}
+              onEoqHoldingRateChange={setEoqHoldingRate}
+            />
           </div>
         )}
       </main>
