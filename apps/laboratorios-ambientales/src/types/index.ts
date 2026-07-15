@@ -1,30 +1,47 @@
+import type { EstadoAcreditacion } from '../lib/normalize';
+
+// Un registro = un parámetro acreditado de un laboratorio (no un laboratorio).
+// Los nombres de campo derivan del dataset 2waz-acaa de datos.gov.co.
 export type Laboratorio = {
-    nombre_laboratorio: string;
-    departamento: string;
-    municipio: string;
-    direccion: string;
-    telefono: string;
-    correo_electronico: string;
-    vigencia_acreditacion: string;
-    estado: string;
-    matriz: string;
-    parametro: string;
-    metodo: string;
-    resolucion: string;
-    fecha_resolucion: string;
-}
+  codigo: string;
+  estado: EstadoAcreditacion;
+  matriz: string;
+  componente: string;
+  actividad: string;
+  grupo: string;
+  variable: string;
+  tecnica: string;
+  metodo: string;
+  rango: string;
+  nombreLaboratorio: string;
+  nit: string;
+  contacto: string;
+  ciudad: string;
+  departamento: string;
+  direccion: string;
+  telefono: string;
+  correo: string;
+  actoAdministrativo: string;
+  desde: string;
+  hasta: string;
+};
 
 export type FilterState = {
-    nombre: string;
-    estado: string;
-    matriz: string;
-    componente: string;
-    actividad: string;
-    variable: string;
-    metodo: string;
-}
+  busqueda: string;
+  estado: string;
+  matriz: string;
+  componente: string;
+  actividad: string;
+  variables: string[];
+  metodo: string;
+};
 
-export interface AIResponse {
-    text: string;
-    data?: any;
-}
+export const EMPTY_FILTERS: FilterState = {
+  busqueda: '',
+  estado: '',
+  matriz: '',
+  componente: '',
+  actividad: '',
+  variables: [],
+  metodo: '',
+};

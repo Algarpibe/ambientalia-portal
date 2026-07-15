@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import '../index.css';
 import type { Laboratorio, FilterState } from './types';
+import { EMPTY_FILTERS } from './types';
 import { fetchLaboratorios } from './services/api';
 
 function App() {
@@ -9,15 +10,7 @@ function App() {
     const [view, setView] = useState<'main' | 'buscador' | 'dashboard'>('main');
     const [loading, setLoading] = useState<boolean>(true);
     const [data, setData] = useState<Laboratorio[]>([]);
-    const [filters, setFilters] = useState<FilterState>({
-        nombre: '',
-        estado: '',
-        matriz: '',
-        componente: '',
-        actividad: '',
-        variable: '',
-        metodo: ''
-    });
+    const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
 
     useEffect(() => {
         const loadData = async () => {
@@ -44,13 +37,13 @@ function App() {
         return data.filter(item => {
             try {
                 return (
-                    (!filters.nombre ||
-                        item.nombre_laboratorio?.toLowerCase().includes(filters.nombre.toLowerCase()) ||
-                        item.parametro?.toLowerCase().includes(filters.nombre.toLowerCase())
+                    (!filters.busqueda ||
+                        item.nombreLaboratorio?.toLowerCase().includes(filters.busqueda.toLowerCase()) ||
+                        item.variable?.toLowerCase().includes(filters.busqueda.toLowerCase())
                     ) &&
                     (!filters.estado || item.estado === filters.estado) &&
                     (!filters.matriz || item.matriz === filters.matriz) &&
-                    (!filters.componente || item.parametro === filters.componente) &&
+                    (!filters.componente || item.componente === filters.componente) &&
                     (!filters.metodo || item.metodo === filters.metodo)
                 );
             } catch (e) {
@@ -62,7 +55,7 @@ function App() {
 
     // Derived stats for Dashboard
     const totalLabs = data.length;
-    const activeLabs = data.filter(d => d.estado === 'Activo' || d.estado === 'VIGENTE').length;
+    const activeLabs = data.filter(d => d.estado === 'Activa').length;
 
     return (
         <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
@@ -115,8 +108,8 @@ function App() {
                                     <label className="block text-sm font-semibold text-gray-700 mb-1">Buscar Parámetro o Laboratorio</label>
                                     <input
                                         type="text"
-                                        value={filters.nombre}
-                                        onChange={(e) => setFilters(prev => ({ ...prev, nombre: e.target.value }))}
+                                        value={filters.busqueda}
+                                        onChange={(e) => setFilters(prev => ({ ...prev, busqueda: e.target.value }))}
                                         placeholder="Ej: pH, Alcalinidad, Corantioquia..."
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
                                     />
@@ -146,7 +139,7 @@ function App() {
                             </div>
                             <div className="mt-4 flex justify-end gap-3">
                                 <button
-                                    onClick={() => setFilters({ nombre: '', estado: '', matriz: '', componente: '', actividad: '', variable: '', metodo: '' })}
+                                    onClick={() => setFilters(EMPTY_FILTERS)}
                                     className="px-6 py-2 bg-slate-100 text-slate-700 font-semibold rounded-lg hover:bg-slate-200 transition-colors"
                                 >
                                     Limpiar Filtros
@@ -166,21 +159,21 @@ function App() {
                                     <div key={idx} className="bg-white rounded-2xl shadow-sm hover:shadow-md transition-all border border-slate-100 overflow-hidden flex flex-col group">
                                         <div className="bg-indigo-50 p-4 border-b border-indigo-100 group-hover:bg-indigo-100 transition-colors">
                                             <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 block">{lab.matriz}</span>
-                                            <h4 className="font-extrabold text-indigo-900 leading-tight line-clamp-2 min-h-[3rem]">{lab.parametro || 'Parámetro no especificado'}</h4>
+                                            <h4 className="font-extrabold text-indigo-900 leading-tight line-clamp-2 min-h-[3rem]">{lab.variable || 'Parámetro no especificado'}</h4>
                                         </div>
                                         <div className="p-5 flex-grow space-y-3">
                                             <div>
                                                 <p className="text-[10px] font-semibold text-slate-400 uppercase mb-0.5">Laboratorio</p>
-                                                <p className="text-sm font-bold text-slate-800 line-clamp-2">{lab.nombre_laboratorio}</p>
+                                                <p className="text-sm font-bold text-slate-800 line-clamp-2">{lab.nombreLaboratorio}</p>
                                             </div>
                                             <div className="grid grid-cols-2 gap-3 pt-2">
                                                 <div>
                                                     <p className="text-[10px] font-semibold text-slate-400 uppercase">Ubicación</p>
-                                                    <p className="text-xs text-slate-600 font-medium">{lab.municipio}, {lab.departamento}</p>
+                                                    <p className="text-xs text-slate-600 font-medium">{lab.ciudad}, {lab.departamento}</p>
                                                 </div>
                                                 <div className="text-right">
                                                     <p className="text-[10px] font-semibold text-slate-400 uppercase">Estado</p>
-                                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold text-white ${lab.estado === 'VIGENTE' ? 'bg-emerald-500' : 'bg-slate-400'}`}>
+                                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold text-white ${lab.estado === 'Activa' ? 'bg-emerald-500' : 'bg-slate-400'}`}>
                                                         {lab.estado}
                                                     </span>
                                                 </div>
