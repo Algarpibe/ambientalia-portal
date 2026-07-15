@@ -59,6 +59,10 @@ describe('mapRecord', () => {
     expect(mapRecord({ ...RAW, variable: '  n-Decano (C10)  ' }).variable).toBe('n-Decano (C10)');
   });
 
+  it('recorta metodo: optionsFor ofrece el valor trimeado y applyFilters compara exacto', () => {
+    expect(mapRecord({ ...RAW, m_todo: '  SM 2320 B  ' }).metodo).toBe('SM 2320 B');
+  });
+
   it('convierte los campos ausentes en cadena vacía, no undefined', () => {
     const lab = mapRecord({ variable: 'pH' });
     expect(lab.nombreLaboratorio).toBe('');

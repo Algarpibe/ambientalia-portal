@@ -25,7 +25,10 @@ export function mapRecord(record: Record<string, string | undefined>): Laborator
     // divergentes se resuelven al cotejar (filters.ts), no al mapear.
     variable: (record.variable ?? '').trim(),
     tecnica: record.t_cnica ?? '',
-    metodo: record.m_todo ?? '',
+    // Como 'variable', 'metodo' no se normaliza (es texto libre con códigos de
+    // norma), pero sí se recorta: optionsFor ofrece el valor trimeado y
+    // applyFilters compara por igualdad exacta.
+    metodo: (record.m_todo ?? '').trim(),
     rango: record.rango_de_trabajo ?? '',
     nombreLaboratorio: record.nombre_del_laboratorio ?? '',
     nit: record.nit ?? '',
