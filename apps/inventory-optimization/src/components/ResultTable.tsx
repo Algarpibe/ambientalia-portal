@@ -24,6 +24,7 @@ import {
 import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/resultTableExport';
 import { type ColumnConfig } from './SortableColumnItem';
 import { SortableColumnList } from './SortableColumnList';
+import { mergeColumnOrder, pruneColumnVisibility } from '../utils/columnConfig';
 
 interface ResultsTableProps {
     data: AnalysisResult[];
@@ -148,22 +149,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         const saved = localStorage.getItem('table_columns_order');
         if (saved) {
             try {
-                const parsed = JSON.parse(saved);
-                // Ensure all default keys and individual columns are present (for migration/updates)
-                Object.keys(defaultColumns).forEach(key => {
-                    if (!parsed[key]) {
-                        parsed[key] = defaultColumns[key];
-                    } else {
-                        // Check for missing individual columns (like erpLevel)
-                        const currentKeys = new Set(parsed[key].map((c: any) => c.key));
-                        defaultColumns[key].forEach(defaultCol => {
-                            if (!currentKeys.has(defaultCol.key)) {
-                                parsed[key].push(defaultCol);
-                            }
-                        });
-                    }
-                });
-                return parsed;
+                return mergeColumnOrder(JSON.parse(saved), defaultColumns);
             } catch (e) {
                 console.error('Error parsing saved columns order', e);
             }
@@ -237,24 +223,18 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         const saved = localStorage.getItem('table_columns_visibility');
         if (saved) {
             try {
-                const parsed = JSON.parse(saved);
-                const result: Record<string, Set<string>> = {};
-                Object.keys(parsed).forEach(key => {
-                    result[key] = new Set(parsed[key]);
-                });
-                // Ensure all tabs are present and new columns are added if they were missing
+                // Purga lo que ya no existe (incluidas las pestañas retiradas).
+                const result = pruneColumnVisibility(JSON.parse(saved), defaultColumns);
+                // Alta manual de columnas añadidas después: el formato guardado (lista de
+                // VISIBLES) no distingue "nueva" de "el usuario la ocultó", así que cada
+                // columna nueva se activa aquí a propósito. Ver nota en columnConfig.ts.
                 Object.keys(defaultColumns).forEach(key => {
-                    if (!result[key]) {
-                        result[key] = new Set(defaultColumns[key].map(c => c.key));
-                    } else {
-                        // Check if specific new columns like 'erpLevel' are missing and add them
-                        const currentKeys = result[key];
-                        if (key === 'urgent' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
-                        if (key === 'current_inventory' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
-                        if (key === 'main' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
-                        if (key === 'main' && !currentKeys.has('orderedQuantity')) currentKeys.add('orderedQuantity');
-                        if ((key === 'main' || key === 'service') && !currentKeys.has('unitCost')) currentKeys.add('unitCost');
-                    }
+                    const currentKeys = result[key];
+                    if (key === 'urgent' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
+                    if (key === 'current_inventory' && !currentKeys.has('erpLevel')) currentKeys.add('erpLevel');
+                    if (key === 'main' && !currentKeys.has('physicalHandQuantity')) currentKeys.add('physicalHandQuantity');
+                    if (key === 'main' && !currentKeys.has('orderedQuantity')) currentKeys.add('orderedQuantity');
+                    if ((key === 'main' || key === 'service') && !currentKeys.has('unitCost')) currentKeys.add('unitCost');
                 });
                 return result;
             } catch (e) {
