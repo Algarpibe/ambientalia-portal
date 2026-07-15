@@ -346,7 +346,7 @@ describe('normalizeMatriz', () => {
 
 describe('normalizeComponente', () => {
   it('canoniza los componentes conocidos', () => {
-    expect(normalizeComponente('CALIDAD DE AIRE')).toBe('Calidad de aire');
+    expect(normalizeComponente('CALIDAD DE AIRE')).toBe('Calidad del Aire');
     expect(normalizeComponente('fuentes fijas')).toBe('Fuentes Fijas');
   });
 
@@ -408,7 +408,7 @@ export function normalizeComponente(value: string): string {
   const v = value.toLowerCase().trim();
   // El dataset trae 'Calidad del Aire' (1302) y 'Calidad de aire' (15): la misma
   // faceta con distinta preposición. La Task 7 filtra por el literal canónico.
-  if (v.includes('calidad de aire') || v.includes('calidad del aire')) return 'Calidad de aire';
+  if (v.includes('calidad de aire') || v.includes('calidad del aire')) return 'Calidad del Aire';
   if (v.includes('fuentes fijas')) return 'Fuentes Fijas';
   return normalizeActividad(value);
 }
@@ -434,7 +434,17 @@ export function normalizeActividad(value: string): string {
 >
 > **`actividad`** trae 37 valores con la misma clase de divergencia, que el title-case ya resuelve (`Determinación directa` 631 / `Determinación Directa` 37, `Muestreo puntual` 52 / `Muestreo Puntual` 1201…). Dos quedan **sin resolver a propósito**: el typo de origen `Muestreo Intregrado` (27 registros, ~4 variantes) no se corrige — no nos toca inventar ortografía sobre la fuente oficial; el doble espacio de `Muestreo  Integrado en Cuerpo Lótico` (7) sí, colapsando espacios internos.
 >
-> **Lección para el resto del plan:** ningún literal de faceta (`'Calidad de aire'`, `'Aire'`, `'Activa'`…) debe darse por bueno sin comprobarlo con `$select=<campo>,count(*)&$group=<campo>`. La fuente es un dataset público con captura manual y la divergencia de grafías es la norma, no la excepción.
+> **Lección para el resto del plan:** ningún literal de faceta debe darse por bueno sin comprobarlo con `$select=<campo>,count(*)&$group=<campo>`. La fuente es un dataset público con captura manual y la divergencia de grafías es la norma, no la excepción.
+>
+> **Ejecutado (Task 2, commits `f70d47b` + `5c92567`).** El resultado se apartó del borrador en tres puntos, todos por evidencia:
+>
+> - **🔴 El literal canónico de calidad del aire es `'Calidad del Aire'`, NO `'Calidad de aire'`.** El borrador imponía la grafía minoritaria (15 registros) sobre la mayoritaria (1302), que además es el español correcto y encaja con el estilo title-case del resto del desplegable. **Las Tasks 5, 7, 9 y 11 usan `'Calidad del Aire'`.**
+> - **Las reglas `agua`/`aire`/`suelo`/`fuentes fijas` se eliminaron.** Sobre los valores reales eran no-ops (los datos ya vienen exactos, y `Fuentes fijas` llega a `Fuentes Fijas` por title-case igual). Y `includes('agua')` era además sobre-ansiosa: con `Agua de Poro` como componente real, una matriz futura así se colapsaría a `Agua`, destruyendo una faceta. Criterio adoptado: **una regla explícita por cada colapso que los datos exijan, cero generalidad especulativa.**
+> - **`toTitleCase` se extrajo de `normalizeActividad`** (que queda como alias): `normalizeMatriz` llamando a `normalizeActividad` para normalizar matrices confundía.
+>
+> Resultado verificado ejecutando las funciones contra los valores reales: `matriz` 11 grafías → **9 opciones**, `componente` 28 → **20**, con los 1317 registros de calidad del aire en una sola y el acrónimo RESPEL intacto en ambos campos.
+>
+> **Riesgo anotado (no es bug hoy):** los fallthroughs aplican title-case a cualquier valor nuevo, así que un acrónimo futuro del IDEAM (`COV`, `HAP`) se degradaría en silencio a `Cov`/`Hap`. Los 39 valores actuales están verificados uno a uno; cuando aparezca uno nuevo, se le añade su regla explícita.
 
 ### ⚠️ `variable`: mismo problema, solución distinta (afecta a las Tasks 4, 5 y 8)
 
@@ -850,7 +860,7 @@ const lab = (over: Partial<Laboratorio>): Laboratorio => ({
 const DATA: Laboratorio[] = [
   lab({ matriz: 'Agua', componente: 'Continental', variable: 'pH', metodo: 'SM 4500' }),
   lab({ matriz: 'Agua', componente: 'Continental', variable: 'Alcalinidad', metodo: 'SM 2320 B' }),
-  lab({ matriz: 'Aire', componente: 'Calidad de aire', variable: 'PM10', metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' }),
+  lab({ matriz: 'Aire', componente: 'Calidad del Aire', variable: 'PM10', metodo: 'EQPM-0798-122', nombreLaboratorio: 'Lab Dos' }),
   lab({ matriz: 'Aire', componente: 'Fuentes Fijas', variable: 'SO2', metodo: 'M6', estado: 'Suspendida' }),
 ];
 
@@ -888,11 +898,11 @@ describe('applyFilters', () => {
 describe('optionsFor', () => {
   it('acota componente a la matriz elegida', () => {
     expect(optionsFor(DATA, 'componente', { ...EMPTY_FILTERS, matriz: 'Agua' })).toEqual(['Continental']);
-    expect(optionsFor(DATA, 'componente', { ...EMPTY_FILTERS, matriz: 'Aire' })).toEqual(['Calidad de aire', 'Fuentes Fijas']);
+    expect(optionsFor(DATA, 'componente', { ...EMPTY_FILTERS, matriz: 'Aire' })).toEqual(['Calidad del Aire', 'Fuentes Fijas']);
   });
 
   it('sin filtros aguas arriba ofrece todas las opciones, ordenadas y sin repetir', () => {
-    expect(optionsFor(DATA, 'componente', EMPTY_FILTERS)).toEqual(['Calidad de aire', 'Continental', 'Fuentes Fijas']);
+    expect(optionsFor(DATA, 'componente', EMPTY_FILTERS)).toEqual(['Calidad del Aire', 'Continental', 'Fuentes Fijas']);
   });
 
   it('acota variable a matriz + componente', () => {
@@ -906,12 +916,12 @@ describe('optionsFor', () => {
   });
 
   it('el estado también acota, aunque no esté en la cascada', () => {
-    expect(optionsFor(DATA, 'componente', { ...EMPTY_FILTERS, matriz: 'Aire', estado: 'Activa' })).toEqual(['Calidad de aire']);
+    expect(optionsFor(DATA, 'componente', { ...EMPTY_FILTERS, matriz: 'Aire', estado: 'Activa' })).toEqual(['Calidad del Aire']);
   });
 
   it('ignora el propio filtro del campo al calcular sus opciones', () => {
-    const filters = { ...EMPTY_FILTERS, matriz: 'Aire', componente: 'Calidad de aire' };
-    expect(optionsFor(DATA, 'componente', filters)).toEqual(['Calidad de aire', 'Fuentes Fijas']);
+    const filters = { ...EMPTY_FILTERS, matriz: 'Aire', componente: 'Calidad del Aire' };
+    expect(optionsFor(DATA, 'componente', filters)).toEqual(['Calidad del Aire', 'Fuentes Fijas']);
   });
 });
 ```
@@ -1245,7 +1255,7 @@ import type { Laboratorio } from '../types';
 import { groupLabsByEquipment } from './brands';
 
 const lab = (over: Partial<Laboratorio>): Laboratorio => ({
-  codigo: '1', estado: 'Activa', matriz: 'Aire', componente: 'Calidad de aire',
+  codigo: '1', estado: 'Activa', matriz: 'Aire', componente: 'Calidad del Aire',
   actividad: 'Análisis', grupo: '', variable: 'PM10', tecnica: '', metodo: '',
   rango: '', nombreLaboratorio: 'Lab Uno', nit: '', contacto: 'Ana Ruiz',
   ciudad: 'Bogotá', departamento: 'Cundinamarca', direccion: '', telefono: '601',
@@ -1360,7 +1370,7 @@ export function groupLabsByEquipment(data: Laboratorio[], brand: string, model: 
   for (const item of data) {
     if (item.estado !== 'Activa') continue;
     if (item.matriz !== 'Aire') continue;
-    if (item.componente !== 'Calidad de aire') continue;
+    if (item.componente !== 'Calidad del Aire') continue;
     if (!item.nombreLaboratorio) continue;
 
     const equipo = extractEquipment(item.metodo);
@@ -1694,7 +1704,7 @@ export default function Dashboard({ data, onBack }: Props) {
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-600">
             <p><strong>Estado:</strong> Activa</p>
             <p><strong>Matriz:</strong> Aire</p>
-            <p><strong>Componente:</strong> Calidad de aire</p>
+            <p><strong>Componente:</strong> Calidad del Aire</p>
           </div>
         </div>
 
@@ -1965,8 +1975,8 @@ Recargar la página. Esperado:
 - [ ] **Step 3: Verificar la cascada del buscador**
 
 Entrar a "Buscador de Laboratorios":
-- Elegir Matriz = **Aire** → el select de Componente debe ofrecer solo componentes de aire (entre ellos "Calidad de aire" y "Fuentes Fijas"), no los de agua.
-- Elegir Componente = **Calidad de aire** → la lista de Variables debe reducirse.
+- Elegir Matriz = **Aire** → el select de Componente debe ofrecer solo componentes de aire (entre ellos "Calidad del Aire" y "Fuentes Fijas"), no los de agua.
+- Elegir Componente = **Calidad del Aire** → la lista de Variables debe reducirse.
 - Volver a poner Matriz = **Todas** → Componente, Actividad, Variables y Método deben quedar limpios.
 - Marcar dos variables → el contador de resultados debe crecer respecto a marcar una sola (es un OR).
 - Con Estado = **Activa**, las tarjetas deben mostrar el badge **verde**. Con **Suspendida**, gris. (Antes ninguna era verde.)
