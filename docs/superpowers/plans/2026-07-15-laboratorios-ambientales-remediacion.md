@@ -326,6 +326,22 @@ describe('normalizeMatriz', () => {
   it('deja pasar sin tocar un valor desconocido, solo recortado', () => {
     expect(normalizeMatriz('  Biota ')).toBe('Biota');
   });
+
+  it('unifica las dos grafías de aceite dieléctrico que trae el dataset', () => {
+    expect(normalizeMatriz('Aceite Dieléctrico')).toBe('Aceite Dieléctrico');
+    expect(normalizeMatriz('Aceite dieléctrico')).toBe('Aceite Dieléctrico');
+  });
+
+  it('no estropea los demás valores desconocidos del dataset', () => {
+    expect(normalizeMatriz('Sedimento')).toBe('Sedimento');
+    expect(normalizeMatriz('Biosólido')).toBe('Biosólido');
+    expect(normalizeMatriz('Biota')).toBe('Biota');
+    expect(normalizeMatriz('Lodo')).toBe('Lodo');
+  });
+
+  it('unifica también las dos grafías de RESPEL', () => {
+    expect(normalizeMatriz('ReSIduos Peligrosos (RESPEL)')).toBe('Residuos Peligrosos (RESPEL)');
+  });
 });
 
 describe('normalizeComponente', () => {
@@ -382,22 +398,62 @@ export function normalizeMatriz(value: string): string {
   if (v.includes('agua')) return 'Agua';
   if (v.includes('aire')) return 'Aire';
   if (v.includes('suelo')) return 'Suelo';
-  return value.trim();
+  // El dataset trae la misma matriz con distinta capitalización ('Aceite Dieléctrico'
+  // vs 'Aceite dieléctrico'): sin unificar, cada grafía sería una opción de filtro.
+  return normalizeActividad(value);
 }
 
 export function normalizeComponente(value: string): string {
   if (!value) return '';
   const v = value.toLowerCase().trim();
-  if (v.includes('calidad de aire')) return 'Calidad de aire';
+  // El dataset trae 'Calidad del Aire' (1302) y 'Calidad de aire' (15): la misma
+  // faceta con distinta preposición. La Task 7 filtra por el literal canónico.
+  if (v.includes('calidad de aire') || v.includes('calidad del aire')) return 'Calidad de aire';
   if (v.includes('fuentes fijas')) return 'Fuentes Fijas';
-  return value.trim();
+  return normalizeActividad(value);
 }
 
 export function normalizeActividad(value: string): string {
   if (!value) return '';
-  return value.trim().toLowerCase().replace(/\b\w/g, (l) => l.toUpperCase());
+  // \b\w NO sirve: \w es solo ASCII, así que en «análisis» abre un límite de palabra
+  // falso tras la «á» y produce «AnáLisis». El dataset es colombiano y va lleno de
+  // tildes, así que el title-case tiene que ser Unicode-aware.
+  return value.trim().toLowerCase().replace(/(?<![\p{L}\p{N}])\p{L}/gu, (l) => l.toUpperCase());
 }
 ```
+
+> **Corregido durante la ejecución (2026-07-15).** El borrador de este plan traía tres bugs, los tres detectados al contrastar con el dataset en vivo:
+>
+> 1. **`/\b\w/g` rompía todo valor con tilde.** `\w` es solo ASCII, así que en «análisis» abre un límite de palabra falso tras la «á»: producía `AnáLisis`, `MedicióN`, `ñAndú`. Contradecía al propio test del plan. Viene heredado del prototipo.
+> 2. **`normalizeMatriz` y `normalizeComponente` hacían `return value.trim()`** en el fallthrough, dejando la misma faceta con dos o tres grafías como opciones de filtro distintas (`Aceite dieléctrico`/`Aceite Dieléctrico`, `Biota acuática marina`/`Biota Acuática Marina`/`Biota acuática Marina`, `Olores ofensivos`/`Olores Ofensivos`…).
+> 3. **🔴 El más grave: la regla de calidad del aire perdía el 98,9% de sus registros.** El dataset trae `Calidad del Aire` (1302) y `Calidad de aire` (15) — la misma faceta con distinta preposición. `v.includes('calidad de aire')` **no** captura `"calidad del aire"` (hay una `l` en medio), así que 1302 registros caían al fallthrough. Como la Task 7 filtra el Análisis de Marcas por `componente === 'Calidad de aire'`, esa vista habría mostrado **15 de 1317 registros** — y habría parecido que funcionaba.
+>
+> **Los 11 valores reales de `matriz`**: Agua 12058 · Aire 2534 · Suelo 1426 · Biota 1136 · Sedimento 983 · Residuos Peligrosos (RESPEL) 392 · Lodo 372 · Aceite Dieléctrico 78 · Biosólido 53 · ReSIduos Peligrosos (RESPEL) 16 · Aceite dieléctrico 8. Ninguno contiene «agua» y «aire» a la vez, así que el orden de las reglas es seguro.
+>
+> **Los 28 de `componente`**: Continental 11415 · Suelo 1424 · Calidad del Aire 1302 · Biota Acuática Continental 949 · Fuentes Fijas 885 · Marina 658 · Sedimento Continental 578 · Residuos Peligrosos (RESPEL) 408 · Sedimento Marino 378 · Lodo 372 · Ruido 185 · Biota Acuática Marina 95 · Olores Ofensivos 80 · Aceite Dieléctrico 74 · Fuentes fijas 60 · Biosólido 53 · Biota Terrestre 31 · Biota acuática continental 27 · Biota acuática marina 22 · Calidad de aire 15 · Biota acuática Marina 12 · Sedimento 10 · Aceite dieléctrico 7 · Vibraciones 6 · Superficies Sólidas No Porosas 4 · Agua de Poro 3 · Olores ofensivos 2 · Superficies sólidas no porosas 1.
+>
+> **`actividad`** trae 37 valores con la misma clase de divergencia, que el title-case ya resuelve (`Determinación directa` 631 / `Determinación Directa` 37, `Muestreo puntual` 52 / `Muestreo Puntual` 1201…). Dos quedan **sin resolver a propósito**: el typo de origen `Muestreo Intregrado` (27 registros, ~4 variantes) no se corrige — no nos toca inventar ortografía sobre la fuente oficial; el doble espacio de `Muestreo  Integrado en Cuerpo Lótico` (7) sí, colapsando espacios internos.
+>
+> **Lección para el resto del plan:** ningún literal de faceta (`'Calidad de aire'`, `'Aire'`, `'Activa'`…) debe darse por bueno sin comprobarlo con `$select=<campo>,count(*)&$group=<campo>`. La fuente es un dataset público con captura manual y la divergencia de grafías es la norma, no la excepción.
+
+### ⚠️ `variable`: mismo problema, solución distinta (afecta a las Tasks 4, 5 y 8)
+
+`variable` alimenta el multiselect del Buscador y **arrastra la misma divergencia**: 994 valores crudos que colapsan a 888 al bajar a minúsculas y colapsar espacios — **99 grupos duplicados** (`Plomo`/`plomo`, `Dureza Total`/`Dureza total`, `Sólidos Totales`/`Sólidos totales`, `Fósforo Reactivo Total (Leído como Ortofosfato)` en 3 grafías…).
+
+**Pero aquí title-case NO sirve: destruiría 74 nombres técnicos.** Verificado:
+
+| Crudo | Con title-case (❌) |
+|---|---|
+| `pH` | `Ph` |
+| `Demanda Química de Oxígeno (DQO)` | `Demanda Química De Oxígeno (Dqo)` |
+| `n-Decano (C10)` | `N-Decano (C10)` |
+| `p-Xileno` | `P-Xileno` |
+| `Compuestos Orgánicos Volátiles - BTEX` | `Compuestos Orgánicos Volátiles - Btex` |
+| `Surfactantes Aniónicos como SAAM` | `Surfactantes Aniónicos Como Saam` |
+
+`matriz`/`componente`/`actividad` son facetas en prosa y admiten title-case; `variable` es **nomenclatura técnica**, donde la capitalización es semántica. No añadir un `normalizeVariable` con title-case.
+
+**Enfoque para `variable`:** `mapRecord` (Task 4) solo hace `trim()` + colapsar espacios internos, sin tocar mayúsculas. La deduplicación se resuelve al **cotejar**, no al normalizar: `optionsFor` (Task 5) agrupa por clave en minúsculas y muestra como canónica la grafía más frecuente, y `applyFilters` compara en minúsculas para que seleccionar `Plomo` no pierda los registros de `plomo`. Sin esto, el multiselect muestra 994 opciones con ~99 duplicados y filtrar por una grafía pierde la otra.
 
 - [ ] **Step 4: Correr el test para verificar que pasa**
 
