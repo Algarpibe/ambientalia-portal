@@ -88,6 +88,30 @@ export function createUsersRouter(pool: Pool): Router {
     }
   });
 
+  // GET /api/users/me/preferences — preferencias de UI propias (blob JSON libre).
+  router.get('/users/me/preferences', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      res.json({ preferences: await service.getPreferences(payload.user_id) });
+    } catch (e) {
+      sendError(res, e, 'get_preferences');
+    }
+  });
+
+  // PATCH /api/users/me/preferences { ...parche } — fusiona (no reemplaza), para que
+  // cada app escriba su propia clave sin pisar las de las demás.
+  router.patch('/users/me/preferences', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      const preferences = await service.updatePreferences(payload.user_id, req.body);
+      res.json({ message: 'preferences_updated', preferences });
+    } catch (e) {
+      sendError(res, e, 'update_preferences');
+    }
+  });
+
   // PATCH /api/users/me/password — el usuario autenticado cambia su propia clave.
   // El objetivo es el user_id del JWT (no un :id de ruta), así que basta
   // requireAuth. changePassword verifica la contraseña actual con bcrypt. No se

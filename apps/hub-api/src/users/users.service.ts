@@ -186,6 +186,30 @@ export class UserService {
     }
   }
 
+  /** Preferencias de UI del propio usuario. */
+  async getPreferences(id: string): Promise<Record<string, unknown>> {
+    const prefs = await this.repo.getPreferences(id);
+    if (prefs === null) throw new UserError('user_not_found', 404);
+    return prefs;
+  }
+
+  /**
+   * Fusiona un parche en las preferencias. Es un merge (no un reemplazo) para que
+   * cada app escriba su clave sin pisar las de las demás.
+   */
+  async updatePreferences(id: string, patch: unknown): Promise<Record<string, unknown>> {
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw new UserError('invalid_preferences', 400, 'preferences');
+    }
+    // Techo de cordura: esto guarda config de UI (unos pocos KB), no datos.
+    if (JSON.stringify(patch).length > 100_000) {
+      throw new UserError('preferences_too_large', 400, 'preferences');
+    }
+    const prefs = await this.repo.mergePreferences(id, patch as Record<string, unknown>);
+    if (prefs === null) throw new UserError('user_not_found', 404);
+    return prefs;
+  }
+
   /** Cambia la contraseña del propio usuario, verificando la actual (Req 3.5/3.6). */
   async changePassword(id: string, currentPwd: string, newPwd: string): Promise<void> {
     const user = await this.repo.findById(id);

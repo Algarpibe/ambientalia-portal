@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { AnalysisResult } from '../types';
 import { StatusBadge, LevelStatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
@@ -26,6 +26,7 @@ import { exportInventoryToExcel, exportInventoryToErpCsv } from '../utils/result
 import { type ColumnConfig } from './SortableColumnItem';
 import { SortableColumnList } from './SortableColumnList';
 import { mergeColumnOrder, pruneColumnVisibility } from '../utils/columnConfig';
+import { fetchColumnPrefs, saveColumnPrefs } from '../utils/preferences';
 
 interface ResultsTableProps {
     data: AnalysisResult[];
@@ -260,7 +261,23 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         };
     });
 
-    // Save to localStorage whenever columns or visibility changes
+    // La config de columnas vive en el PERFIL del usuario (hub-api). El localStorage
+    // se mantiene como caché para pintar al instante sin esperar a la red, pero la
+    // fuente de verdad es el servidor: al llegar su respuesta, manda ella.
+    useEffect(() => {
+        let cancelled = false;
+        fetchColumnPrefs().then(prefs => {
+            if (cancelled || !prefs) return; // sin nada guardado (o hub caído) → sigue lo local
+            if (prefs.order) setColumns(mergeColumnOrder(prefs.order, defaultColumns));
+            if (prefs.visibility) setVisibleColumns(pruneColumnVisibility(prefs.visibility, defaultColumns));
+        });
+        return () => { cancelled = true; };
+        // Solo al montar: después manda el estado local, que es el que el usuario toca.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Guardado: caché local al momento y perfil con debounce (arrastrar una columna
+    // dispara muchos cambios seguidos; no hace falta un PATCH por cada uno).
     useEffect(() => {
         localStorage.setItem('table_columns_order', JSON.stringify(columns));
     }, [columns]);
@@ -272,6 +289,19 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
         });
         localStorage.setItem('table_columns_visibility', JSON.stringify(toSave));
     }, [visibleColumns]);
+
+    const prefsLoaded = useRef(false);
+    useEffect(() => {
+        // Se salta el primer disparo: es el estado inicial, no un cambio del usuario.
+        // Sin esto, al montar se subiría al perfil lo que acabamos de leer de él.
+        if (!prefsLoaded.current) { prefsLoaded.current = true; return; }
+        const visibility: Record<string, string[]> = {};
+        Object.keys(visibleColumns).forEach(key => {
+            visibility[key] = Array.from(visibleColumns[key]);
+        });
+        const t = setTimeout(() => saveColumnPrefs({ order: columns, visibility }), 800);
+        return () => clearTimeout(t);
+    }, [columns, visibleColumns]);
 
     const toggleColumnVisibility = (tab: string, key: string) => {
         setVisibleColumns(prev => {

@@ -115,6 +115,30 @@ export class UserRepository {
     return (res.rowCount ?? 0) > 0;
   }
 
+  /** Preferencias de UI del usuario ({} si no tiene). null si no existe. */
+  async getPreferences(id: string): Promise<Record<string, unknown> | null> {
+    const { rows } = await this.pool.query(
+      'SELECT preferences FROM portal.users WHERE id = $1',
+      [id],
+    );
+    if (!rows[0]) return null;
+    return rows[0].preferences ?? {};
+  }
+
+  /**
+   * Fusiona un parche en las preferencias (merge de primer nivel, `||` de jsonb):
+   * cada app escribe su propia clave sin pisar las de las demás. Devuelve el blob
+   * resultante, o null si el usuario no existe.
+   */
+  async mergePreferences(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+    const { rows } = await this.pool.query(
+      'UPDATE portal.users SET preferences = COALESCE(preferences, \'{}\'::jsonb) || $2::jsonb WHERE id = $1 RETURNING preferences',
+      [id, JSON.stringify(patch)],
+    );
+    if (!rows[0]) return null;
+    return rows[0].preferences ?? {};
+  }
+
   /** Actualiza el hash de contraseña. Devuelve true si el usuario existía. */
   async updatePassword(id: string, passwordHash: string): Promise<boolean> {
     const res = await this.pool.query(

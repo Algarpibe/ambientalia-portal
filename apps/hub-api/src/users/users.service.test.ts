@@ -23,7 +23,20 @@ interface StoredUser {
 class FakeUserRepository {
   private users: StoredUser[] = [];
   private apps = new Map<string, Set<string>>();
+  private prefs = new Map<string, Record<string, unknown>>();
   private seq = 0;
+
+  async getPreferences(id: string): Promise<Record<string, unknown> | null> {
+    if (!this.users.some((u) => u.id === id)) return null;
+    return this.prefs.get(id) ?? {};
+  }
+
+  async mergePreferences(id: string, patch: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+    if (!this.users.some((u) => u.id === id)) return null;
+    const merged = { ...(this.prefs.get(id) ?? {}), ...patch };
+    this.prefs.set(id, merged);
+    return merged;
+  }
 
   count(): number {
     return this.users.length;
@@ -157,6 +170,63 @@ const appListArb = fc.subarray(APP_IDS);
 // bajo contención de CPU en la suite completa puede acercarse al minuto. Timeout
 // holgado para no ser flaky, manteniendo las 100 iteraciones que exige el diseño.
 const HASH_TIMEOUT = 180_000;
+
+describe('UserService — preferencias de UI', () => {
+  it('un usuario nuevo no tiene preferencias', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    await expect(service.getPreferences(u.id)).resolves.toEqual({});
+  });
+
+  it('guarda y devuelve lo escrito', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    const cols = { main: ['sku', 'reorderPoint'] };
+    await service.updatePreferences(u.id, { inventoryColumns: cols });
+    await expect(service.getPreferences(u.id)).resolves.toEqual({ inventoryColumns: cols });
+  });
+
+  it('fusiona: escribir una clave no pisa las de otras apps', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    await service.updatePreferences(u.id, { inventoryColumns: { main: ['sku'] } });
+    await service.updatePreferences(u.id, { otraApp: { tema: 'oscuro' } });
+    await expect(service.getPreferences(u.id)).resolves.toEqual({
+      inventoryColumns: { main: ['sku'] },
+      otraApp: { tema: 'oscuro' },
+    });
+  });
+
+  it('reescribir la misma clave la reemplaza entera', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    await service.updatePreferences(u.id, { inventoryColumns: { main: ['sku', 'eoq'] } });
+    await service.updatePreferences(u.id, { inventoryColumns: { main: ['sku'] } });
+    await expect(service.getPreferences(u.id)).resolves.toEqual({ inventoryColumns: { main: ['sku'] } });
+  });
+
+  it('rechaza lo que no sea un objeto', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    for (const bad of [null, 'texto', 42, ['a'], undefined]) {
+      await expect(service.updatePreferences(u.id, bad)).rejects.toThrow(UserError);
+    }
+  });
+
+  it('rechaza un blob desproporcionado (esto guarda UI, no datos)', async () => {
+    const { repo, service } = makeService();
+    const u = repo.seed();
+    await expect(
+      service.updatePreferences(u.id, { basura: 'x'.repeat(100_001) }),
+    ).rejects.toThrow(UserError);
+  });
+
+  it('usuario inexistente → 404', async () => {
+    const { service } = makeService();
+    await expect(service.getPreferences('no-existe')).rejects.toThrow(UserError);
+    await expect(service.updatePreferences('no-existe', { a: 1 })).rejects.toThrow(UserError);
+  });
+});
 
 describe('UserService — property tests', () => {
   // Feature: user-management, Property 1: Registro crea usuario en estado pending
