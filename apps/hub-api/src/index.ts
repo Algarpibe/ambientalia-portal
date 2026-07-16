@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { getHubPool, initDb } from './db.js';
 import { requireAuth, loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
+import { createWoSalesRouter } from './wo-sales/router.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
@@ -132,6 +133,9 @@ initDb()
     // Montado en '/api' → expone /api/users*, /api/auth/register. El rate limit
     // propio del router corre antes de requireAuth/requireAdmin.
     app.use('/api', createUsersRouter(getHubPool()));
+    // Router de WO-sales → /api/wo-sales/preview y /api/wo-sales/csv. Se monta aquí
+    // por lo mismo que el de usuarios: necesita getHubPool() ya validado.
+    app.use('/api', createWoSalesRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
   })
   .catch((e) => {
