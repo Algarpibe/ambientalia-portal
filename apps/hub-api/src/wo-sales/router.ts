@@ -9,7 +9,6 @@ import { DEFAULT_CONFIG } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
 import type { Warning } from './types.js';
 import { computarPendiente, confirmarEnvio } from './email.js';
-import { listarDestinatarios, crearDestinatario, setActivo, borrarDestinatario } from './email.repo.js';
 
 // Router de WO-sales, montado bajo `/api` (ver index.ts). Expone la vista previa y
 // la descarga del CSV que World Office importa como pedidos.
@@ -205,8 +204,6 @@ export function createWoSalesRouter(db: Pool): Router {
     }
   });
 
-  const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
   // ── Para n8n (auth por token de cron, no JWT) ──
   router.get('/wo-sales/email/pendiente', requireCronToken, async (_req: Request, res: Response) => {
     try {
@@ -230,49 +227,9 @@ export function createWoSalesRouter(db: Pool): Router {
     }
   });
 
-  // ── CRUD de destinatarios (auth por app) ──
-  router.get('/wo-sales/destinatarios', requireAuth, requireApp(APP_ID), async (_req, res) => {
-    try {
-      res.json(await listarDestinatarios(db));
-    } catch (e) {
-      sendError(res, e, 'wo_sales_destinatarios_list');
-    }
-  });
-
-  router.post('/wo-sales/destinatarios', requireAuth, requireApp(APP_ID), async (req, res) => {
-    try {
-      const { email, nombre } = (req.body ?? {}) as { email?: string; nombre?: string };
-      if (!email || !EMAIL.test(email)) return void res.status(400).json({ error: 'email inválido' });
-      if (!nombre?.trim()) return void res.status(400).json({ error: 'falta el nombre' });
-      const creado = await crearDestinatario(db, email.trim(), nombre.trim());
-      if (!creado) return void res.status(409).json({ error: 'ese correo ya está en la lista' });
-      res.status(201).json(creado);
-    } catch (e) {
-      sendError(res, e, 'wo_sales_destinatarios_create');
-    }
-  });
-
-  router.patch('/wo-sales/destinatarios/:id', requireAuth, requireApp(APP_ID), async (req, res) => {
-    try {
-      const activo = (req.body as { activo?: unknown } | undefined)?.activo;
-      if (typeof activo !== 'boolean') return void res.status(400).json({ error: 'activo debe ser boolean' });
-      const r = await setActivo(db, req.params.id, activo);
-      if (!r) return void res.status(404).json({ error: 'no existe' });
-      res.json(r);
-    } catch (e) {
-      sendError(res, e, 'wo_sales_destinatarios_patch');
-    }
-  });
-
-  router.delete('/wo-sales/destinatarios/:id', requireAuth, requireApp(APP_ID), async (req, res) => {
-    try {
-      const ok = await borrarDestinatario(db, req.params.id);
-      if (!ok) return void res.status(404).json({ error: 'no existe' });
-      res.status(204).end();
-    } catch (e) {
-      sendError(res, e, 'wo_sales_destinatarios_delete');
-    }
-  });
+  // Los destinatarios del correo NO se gestionan aquí: son los usuarios del portal con
+  // la app WO-sales asignada (ver email.repo.ts → listarActivos). Se administran desde
+  // "Gestión de Usuarios → Asignar apps", así que no hay CRUD de destinatarios.
 
   return router;
 }

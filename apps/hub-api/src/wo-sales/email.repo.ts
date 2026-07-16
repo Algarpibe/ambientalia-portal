@@ -1,57 +1,27 @@
 import type { Pool } from '@algarpibe/zoho-sync';
-import type { EmailEstado, Recipient } from './types.js';
+import type { DestinatarioCorreo, EmailEstado } from './types.js';
 import type { WoSalesConfig } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
 
-interface FilaRecipient {
-  id: string;
-  email: string;
-  nombre: string;
-  activo: boolean;
-}
-const mapRecipient = (r: FilaRecipient): Recipient => ({
-  id: r.id,
-  email: r.email,
-  nombre: r.nombre,
-  activo: r.activo,
-});
+/** El id de la app en portal.user_apps (mismo que en el frontend y en requireApp). */
+const APP_ID = 'WO-sales';
 
-export async function listarDestinatarios(db: Pool): Promise<Recipient[]> {
+/**
+ * Destinatarios del correo automático = usuarios del portal APROBADOS (status 'active')
+ * que tengan la app WO-sales asignada. Una sola fuente de verdad: quien puede usar la
+ * app es quien recibe el archivo. Se gestiona desde "Gestión de Usuarios → Asignar apps",
+ * no hay lista aparte.
+ */
+export async function listarActivos(db: Pool): Promise<DestinatarioCorreo[]> {
   const { rows } = await db.query(
-    'SELECT id, email, nombre, activo FROM portal.wo_sales_recipients ORDER BY created_at'
+    `SELECT u.email, u.full_name AS nombre
+       FROM portal.users u
+       JOIN portal.user_apps ua ON ua.user_id = u.id
+      WHERE ua.app_id = $1 AND u.status = 'active'
+      ORDER BY u.email`,
+    [APP_ID]
   );
-  return (rows as FilaRecipient[]).map(mapRecipient);
-}
-
-export async function listarActivos(db: Pool): Promise<Recipient[]> {
-  const { rows } = await db.query(
-    'SELECT id, email, nombre, activo FROM portal.wo_sales_recipients WHERE activo = TRUE ORDER BY created_at'
-  );
-  return (rows as FilaRecipient[]).map(mapRecipient);
-}
-
-/** Devuelve null si ese email ya existe (email es UNIQUE; se normaliza a minúsculas). */
-export async function crearDestinatario(db: Pool, email: string, nombre: string): Promise<Recipient | null> {
-  const { rows } = await db.query(
-    `INSERT INTO portal.wo_sales_recipients (email, nombre) VALUES (lower($1), $2)
-     ON CONFLICT (email) DO NOTHING
-     RETURNING id, email, nombre, activo`,
-    [email, nombre]
-  );
-  return rows.length ? mapRecipient(rows[0] as FilaRecipient) : null;
-}
-
-export async function setActivo(db: Pool, id: string, activo: boolean): Promise<Recipient | null> {
-  const { rows } = await db.query(
-    'UPDATE portal.wo_sales_recipients SET activo = $2 WHERE id = $1 RETURNING id, email, nombre, activo',
-    [id, activo]
-  );
-  return rows.length ? mapRecipient(rows[0] as FilaRecipient) : null;
-}
-
-export async function borrarDestinatario(db: Pool, id: string): Promise<boolean> {
-  const { rowCount } = await db.query('DELETE FROM portal.wo_sales_recipients WHERE id = $1', [id]);
-  return (rowCount ?? 0) > 0;
+  return rows as DestinatarioCorreo[];
 }
 
 export async function leerEstado(db: Pool): Promise<EmailEstado> {

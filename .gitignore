@@ -60,3 +60,6 @@ Desktop.ini
 AUDIT_FINDINGS.md
 AUDIT_REPORT.md
 PLAN_REMEDIACION.md
+
+# Muestras/descargas .xls de WO-sales (artefactos, no fuente)
+*.xls
