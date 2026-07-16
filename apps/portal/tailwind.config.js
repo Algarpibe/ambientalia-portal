@@ -9,6 +9,11 @@ export default {
     "../product-sales/src/**/*.{js,ts,jsx,tsx}",
     "../inventory-optimization/src/**/*.{js,ts,jsx,tsx}",
     "../laboratorios-ambientales/src/**/*.{js,ts,jsx,tsx}",
+    // Cuarto punto de registro de una mini app, ademas de apps.ts, App.tsx y la
+    // tarjeta: el portal genera aqui las clases de las sub-apps que importa. Sin
+    // esta linea, la app compila y funciona pero se ve SIN ESTILOS.
+    // (customer-valuation no esta porque trae su propio styles.css a mano.)
+    "../WO-sales/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
