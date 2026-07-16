@@ -224,7 +224,11 @@ function App() {
       const cabecera = res.headers.get('X-WO-Sales-Warnings');
       const enArchivo = cabecera === null ? null : Number(cabecera);
       if (enArchivo !== null && Number.isFinite(enArchivo) && enArchivo !== avisosArchivo) {
+        // Se corta ANTES de guardar el archivo, no después. Si ya está en Descargas,
+        // "no lo subas" es solo una petición: el archivo existe y alguien lo subirá.
+        // Sabemos que no es el que se revisó, así que no se entrega.
         setDesajuste({ revisados: avisosArchivo, archivo: enArchivo });
+        return;
       }
 
       const blob = await res.blob();
@@ -354,7 +358,7 @@ function App() {
         </div>
       )}
 
-      {/* El archivo descargado no coincide con el que se revisó en pantalla */}
+      {/* La descarga se cancelo: el archivo no coincidia con lo revisado en pantalla */}
       {desajuste && (
         <div
           role="alert"
@@ -363,14 +367,14 @@ function App() {
           <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={20} />
           <div>
             <p className="font-semibold text-red-900 text-sm">
-              El archivo descargado no es el que has revisado
+              Descarga cancelada: el archivo no es el que has revisado
             </p>
             <p className="text-red-800 text-sm mt-0.5">
               En pantalla revisaste {desajuste.revisados}{' '}
-              {desajuste.revisados === 1 ? 'advertencia' : 'advertencias'}, pero el archivo trae{' '}
-              {desajuste.archivo}. Las órdenes han debido cambiar mientras lo generabas.{' '}
-              <strong>No subas este archivo a World Office</strong>: vuelve a pulsar «Ver órdenes»,
-              revisa las advertencias y descárgalo otra vez.
+              {desajuste.revisados === 1 ? 'advertencia' : 'advertencias'}, pero el archivo traía{' '}
+              {desajuste.archivo}. Las órdenes han debido cambiar mientras lo generabas, así que no
+              se ha descargado nada. Vuelve a pulsar «Ver órdenes», revisa las advertencias y
+              descárgalo otra vez.
             </p>
           </div>
         </div>
