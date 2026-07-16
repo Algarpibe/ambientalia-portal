@@ -242,3 +242,18 @@ export async function requireOwnerOrAdmin(req: Request, res: Response, next: Nex
     }
   });
 }
+
+/**
+ * Auth máquina-a-máquina para los endpoints que consume n8n. No es JWT de usuario:
+ * compara una cabecera secreta contra WO_SALES_CRON_TOKEN. Fail-closed: si el secreto
+ * no está configurado, no pasa nadie.
+ */
+export function requireCronToken(req: Request, res: Response, next: NextFunction): void {
+  const esperado = process.env.WO_SALES_CRON_TOKEN;
+  const recibido = req.header('X-WO-Sales-Cron-Token');
+  if (esperado && recibido && recibido === esperado) {
+    next();
+    return;
+  }
+  res.status(401).json({ error: 'unauthorized' });
+}
