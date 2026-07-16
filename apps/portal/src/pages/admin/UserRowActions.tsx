@@ -49,15 +49,15 @@ export default function UserRowActions(props: UserRowActionsProps) {
 
       {/* Selector de rol (active, no en la propia cuenta) */}
       {user.status === 'active' && !isSelf && (
-        <div className="relative inline-flex items-center gap-1.5 border border-gray-200 rounded-lg pl-2.5 pr-6 py-1.5 text-gray-700">
-          <UserCog className="w-4 h-4 text-gray-400" />
+        <div className="relative inline-flex items-center gap-2 border border-gray-200 rounded-lg pl-2.5 pr-7 py-1.5 text-gray-700">
+          <UserCog className="w-4 h-4 text-gray-400 shrink-0" />
           <select
             aria-label="Cambiar rol"
             value={user.role}
             onChange={(e) => props.onChangeRole(user, e.target.value as UserRole)}
-            className="appearance-none bg-transparent text-sm focus:outline-none cursor-pointer">
-            <option value="reader">lector</option>
-            <option value="admin">admin</option>
+            className="appearance-none bg-transparent text-sm focus:outline-none cursor-pointer min-w-[8rem]">
+            <option value="reader">Lector</option>
+            <option value="admin">Administrador</option>
           </select>
           <ChevronDown className="w-3.5 h-3.5 text-gray-400 pointer-events-none absolute right-2" />
         </div>
