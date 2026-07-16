@@ -32,6 +32,7 @@ type WarningTipo =
   | 'sin_sku'
   | 'sin_empresa'
   | 'moneda_no_cop'
+  | 'descuento_cabecera_ignorado'
   | 'forma_pago_desconocida'
   | 'ov_antigua'
   | 'ov_sin_lineas'
@@ -93,6 +94,7 @@ const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'ord
   sin_nit: { titulo: 'Cliente sin NIT', unidad: 'orden' },
   sin_empresa: { titulo: 'Sin empresa asignada', unidad: 'orden' },
   moneda_no_cop: { titulo: 'Moneda distinta de pesos', unidad: 'orden' },
+  descuento_cabecera_ignorado: { titulo: 'Descuento de la OV que no llega al archivo', unidad: 'orden' },
   forma_pago_desconocida: { titulo: 'Forma de pago desconocida', unidad: 'orden' },
   ov_sin_lineas: { titulo: 'Orden sin líneas de producto', unidad: 'orden' },
   ov_antigua: { titulo: 'Orden antigua que sigue abierta', unidad: 'orden' },

@@ -151,6 +151,18 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `Moneda ${ov.moneda}: el valor unitario NO está en pesos y World Office lo cargaría mal.`,
       });
     }
+    if (ov.descuentoCabecera > 0) {
+      // El descuento de esta OV está a nivel de documento (discount_type "entity_level"
+      // en Zoho), y el CSV solo tiene columna de descuento por línea. No se reparte
+      // automáticamente porque cómo prorratearlo es una decisión contable, no técnica
+      // (VALIDAR con Xiomara). Lo que NO se puede es callarlo: el pedido entraría a
+      // World Office a precio completo.
+      avisar({
+        tipo: 'descuento_cabecera_ignorado',
+        orden: ov.numero,
+        mensaje: `La OV tiene un descuento de ${ov.descuentoCabecera} a nivel de documento que NO aparece en el archivo: el pedido entraría a World Office a precio completo. Aplícalo a mano o revísalo antes de subir.`,
+      });
+    }
 
     const formaPago = ov.formaPagoZoho ? config.formasPago[ov.formaPagoZoho] : undefined;
     if (ov.formaPagoZoho && !formaPago) {

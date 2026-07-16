@@ -52,7 +52,10 @@ const ORDENES_VIVAS_SQL = `
            so.currency_code,
            c.nit,
            NULLIF(so.raw ->> 'shipment_date', '')    AS fecha_entrega,
-           NULLIF(so.raw ->> 'payment_terms_label', '') AS forma_pago
+           NULLIF(so.raw ->> 'payment_terms_label', '') AS forma_pago,
+           -- Descuento a nivel de documento. Texto, no ::numeric: un valor con % de
+           -- Zoho abortaría la consulta entera (ver el bloque de descuento de línea).
+           NULLIF(so.raw ->> 'discount_total', '')   AS descuento_cabecera
       FROM books.sales_orders so
       LEFT JOIN books.contacts c ON c.contact_id = so.customer_id
      WHERE so.status = ANY($1::text[])
@@ -66,7 +69,7 @@ const ORDENES_VIVAS_SQL = `
        )
   )
   SELECT v.salesorder_id, v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
-         v.fecha_entrega, v.forma_pago,
+         v.fecha_entrega, v.forma_pago, v.descuento_cabecera,
          li.line_item_id,
          li.quantity,
          li.rate,
@@ -107,6 +110,8 @@ interface Fila {
   nit: string | null;
   fecha_entrega: string | null;
   forma_pago: string | null;
+  /** Texto crudo del descuento de documento, sin castear: ver `aNumero`. */
+  descuento_cabecera: string | null;
   /** NULL cuando la OV no tiene ninguna línea (el LEFT JOIN la trae igual). */
   line_item_id: string | null;
   quantity: number | null;
@@ -180,6 +185,10 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
             formaPagoZoho: f.forma_pago,
             fechaEntrega: f.fecha_entrega,
             moneda: f.currency_code,
+            // aNumero (no aNumeroObligatorio): un descuento ausente ES 0, no un dato
+            // que falta. Un "12.5%" se vuelve NaN; el builder solo avisa si es > 0,
+            // y NaN > 0 es false, así que ese caso raro no genera ruido.
+            descuentoCabecera: aNumero(f.descuento_cabecera),
             lineas: [],
           };
           porOrden.set(f.salesorder_id, ov);

@@ -16,6 +16,7 @@ const OV_BASE: SalesOrder = {
   formaPagoZoho: '30 días fecha de factura',
   fechaEntrega: '2026-07-20',
   moneda: 'COP',
+  descuentoCabecera: 0,
   lineas: [
     {
       sku: 'AMB-STCALENVIRO-01',
@@ -242,6 +243,33 @@ describe('advertencias', () => {
     expect(decodificar(csv)[1].split(';')).toHaveLength(57);
     expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Detalle: Nota')]).toBe('Sonda pH, 3 metros');
     expect(warnings.map((w) => w.tipo)).toContain('valor_saneado');
+  });
+
+  it('avisa del descuento de cabecera, que el archivo no lleva a ninguna columna', () => {
+    // Esta organización descuenta a nivel de documento (discount_type "entity_level"):
+    // las líneas traen discount 0 y el descuento vive en la cabecera de la OV. El CSV
+    // solo tiene "Detalle: Descuento" (de línea), así que el pedido entraría a World
+    // Office a precio completo. Repartirlo es una decisión de negocio sin cerrar; lo
+    // que NO se puede es callarlo.
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, descuentoCabecera: 190000 }], DEFAULT_CONFIG);
+    const aviso = warnings.find((w) => w.tipo === 'descuento_cabecera_ignorado');
+    expect(aviso).toBeDefined();
+    // El importe va en el mensaje: la operadora tiene que poder cotejarlo con Zoho.
+    expect(aviso?.mensaje).toContain('190000');
+    expect(aviso?.orden).toBe('OV-2026-138');
+  });
+
+  it('no avisa del descuento de cabecera cuando la OV no tiene descuento', () => {
+    // Si saltara en todas las OV (la mayoría no llevan descuento), la operadora
+    // dejaría de leer las advertencias y el cortafuegos entero se pierde.
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, descuentoCabecera: 0 }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).not.toContain('descuento_cabecera_ignorado');
+  });
+
+  it('el descuento de cabecera avisa pero no aborta: la fila sale con sus 57 campos', () => {
+    const { csv, filas } = buildWorldOfficeCsv([{ ...OV_BASE, descuentoCabecera: 190000 }], DEFAULT_CONFIG);
+    expect(filas).toBe(1);
+    expect(decodificar(csv)[1].split(';')).toHaveLength(57);
   });
 
   it('no emite advertencias con una OV completa y correcta', () => {

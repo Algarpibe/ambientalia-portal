@@ -25,6 +25,11 @@ export interface SalesOrder {
   /** ISO YYYY-MM-DD, o null si Zoho no la tiene. */
   fechaEntrega: string | null;
   moneda: string | null;
+  /** Descuento a nivel de documento (raw->>'discount_total'). Esta organización
+   *  descuenta con discount_type "entity_level", así que el descuento NO está en las
+   *  líneas — está aquí. El CSV solo tiene columna de descuento por línea, así que un
+   *  valor > 0 no llega al archivo: el builder avisa. 0 si no hay o no se pudo leer. */
+  descuentoCabecera: number;
   lineas: SalesOrderLine[];
 }
 
@@ -37,6 +42,7 @@ export type WarningTipo =
   | 'sin_sku'
   | 'sin_empresa'
   | 'moneda_no_cop'
+  | 'descuento_cabecera_ignorado'
   | 'forma_pago_desconocida'
   | 'ov_antigua'
   | 'ov_sin_lineas'
