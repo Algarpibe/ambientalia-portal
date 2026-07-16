@@ -5,7 +5,8 @@ import {
   TrendingUp,
   ChevronRight,
   Beaker,
-  Users
+  Users,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -53,6 +54,13 @@ const aplicaciones: AppConfig[] = [
     path: "/valoracion-clientes",
     icon: Users,
     color: "from-violet-400 to-purple-600"
+  },
+  {
+    name: "Carga de Pedidos WO",
+    description: "Genera el archivo plano de pedidos que World Office importa, desde las órdenes de venta vivas de Zoho.",
+    path: "/carga-pedidos-wo",
+    icon: FileSpreadsheet,
+    color: "from-amber-400 to-orange-500"
   }
 ];
 
