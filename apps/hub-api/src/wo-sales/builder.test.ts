@@ -17,6 +17,7 @@ const OV_BASE: SalesOrder = {
   fechaEntrega: '2026-07-20',
   moneda: 'COP',
   descuentoCabecera: 0,
+  cantidadFacturada: 0,
   lineas: [
     {
       sku: 'AMB-STCALENVIRO-01',
@@ -270,6 +271,22 @@ describe('advertencias', () => {
     const { csv, filas } = buildWorldOfficeCsv([{ ...OV_BASE, descuentoCabecera: 190000 }], DEFAULT_CONFIG);
     expect(filas).toBe(1);
     expect(decodificar(csv)[1].split(';')).toHaveLength(57);
+  });
+
+  it('avisa cuando la OV está parcialmente facturada (el archivo trae solo lo pendiente)', () => {
+    // La cantidad de la línea ya viene pendiente desde la capa de datos; aquí solo se
+    // avisa de que hubo facturación parcial, con la cantidad ya facturada, para que
+    // Xiomara cuadre el archivo contra Zoho.
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, cantidadFacturada: 12 }], DEFAULT_CONFIG);
+    const aviso = warnings.find((w) => w.tipo === 'ov_parcialmente_facturada');
+    expect(aviso).toBeDefined();
+    expect(aviso?.mensaje).toContain('12');
+    expect(aviso?.orden).toBe('OV-2026-138');
+  });
+
+  it('no avisa de facturación parcial cuando la OV no tiene nada facturado', () => {
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, cantidadFacturada: 0 }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).not.toContain('ov_parcialmente_facturada');
   });
 
   it('no emite advertencias con una OV completa y correcta', () => {

@@ -33,6 +33,7 @@ type WarningTipo =
   | 'sin_empresa'
   | 'moneda_no_cop'
   | 'descuento_cabecera_ignorado'
+  | 'ov_parcialmente_facturada'
   | 'forma_pago_desconocida'
   | 'ov_antigua'
   | 'ov_sin_lineas'
@@ -95,6 +96,7 @@ const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'ord
   sin_empresa: { titulo: 'Sin empresa asignada', unidad: 'orden' },
   moneda_no_cop: { titulo: 'Moneda distinta de pesos', unidad: 'orden' },
   descuento_cabecera_ignorado: { titulo: 'Descuento de la OV que no llega al archivo', unidad: 'orden' },
+  ov_parcialmente_facturada: { titulo: 'OV parcialmente facturada (solo va lo pendiente)', unidad: 'orden' },
   forma_pago_desconocida: { titulo: 'Forma de pago desconocida', unidad: 'orden' },
   ov_sin_lineas: { titulo: 'Orden sin líneas de producto', unidad: 'orden' },
   ov_antigua: { titulo: 'Orden antigua que sigue abierta', unidad: 'orden' },

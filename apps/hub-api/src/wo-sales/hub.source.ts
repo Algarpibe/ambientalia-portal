@@ -62,12 +62,12 @@ const ORDENES_VIVAS_SQL = `
        AND so.date >= $2::date
        AND so.date <= $3::date
        AND ($4::text IS NULL OR so.customer_name ILIKE '%' || $4 || '%')
-       AND NOT EXISTS (
-         SELECT 1 FROM books.invoices i
-          WHERE i.salesorder_id = so.salesorder_id
-            AND i.status <> ALL($5::text[])
-       )
   )
+  -- No se excluye la OV por tener factura: la facturación se descuenta POR LÍNEA con
+  -- quantity_invoiced (más abajo, en TS). Una OV parcialmente facturada aparece con
+  -- sus líneas aún pendientes; una totalmente facturada ya está fuera por su status
+  -- ('invoiced' no está en estadosVivos). Esto reemplaza la antigua exclusión por
+  -- factura, que hacía desaparecer enteras las OV parcialmente facturadas.
   SELECT v.salesorder_id, v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
          v.fecha_entrega, v.forma_pago, v.descuento_cabecera,
          li.line_item_id,
@@ -76,6 +76,10 @@ const ORDENES_VIVAS_SQL = `
          it.sku,
          it.name                                                        AS item_name,
          NULLIF(li.raw ->> 'discount', '')                              AS descuento,
+         -- Cantidades ya facturada/cancelada, por línea (mismo raw del que inventory.ts
+         -- lee quantity_delivered). Texto, no ::numeric: ver el bloque de descuento.
+         NULLIF(li.raw ->> 'quantity_invoiced', '')                     AS cantidad_facturada,
+         NULLIF(li.raw ->> 'quantity_cancelled', '')                    AS cantidad_cancelada,
          it.raw -> 'custom_field_hash' ->> 'cf_centro_de_costos'        AS centro_costos
     FROM vivas v
     LEFT JOIN books.salesorder_line_items li ON li.salesorder_id = v.salesorder_id
@@ -93,11 +97,6 @@ const ORDENES_ANTIGUAS_SQL = `
    WHERE so.status = ANY($1::text[])
      AND so.date < $2::date
      AND ($3::text IS NULL OR so.customer_name ILIKE '%' || $3 || '%')
-     AND NOT EXISTS (
-       SELECT 1 FROM books.invoices i
-        WHERE i.salesorder_id = so.salesorder_id
-          AND i.status <> ALL($4::text[])
-     )
    ORDER BY so.date`;
 
 interface Fila {
@@ -120,6 +119,9 @@ interface Fila {
   item_name: string | null;
   /** Texto crudo de Zoho, sin castear: ver `aNumero`. */
   descuento: string | null;
+  /** Cantidad ya facturada / cancelada de esta línea (texto crudo del raw). */
+  cantidad_facturada: string | null;
+  cantidad_cancelada: string | null;
   centro_costos: string | null;
 }
 
@@ -159,6 +161,24 @@ function aNumeroObligatorio(valor: unknown): number {
   return Number(valor);
 }
 
+/**
+ * Cantidad pendiente de facturar de una línea = pedida − facturada − cancelada, y si
+ * la línea debe entrar al archivo. Entra si queda algo pendiente (> 0). Una línea ya
+ * facturada del todo (pendiente 0, o negativo por descuadre) NO entra. Un cálculo NaN
+ * (dato corrupto: cantidad pedida ausente, o un valor no numérico en el raw) SÍ entra:
+ * no se descarta en silencio — pasa como cantidad y el builder lo caza con
+ * 'valor_no_numerico', dejando la celda vacía y avisando de esa línea.
+ */
+export function pendientePorFacturar(
+  pedida: number,
+  facturada: number,
+  cancelada: number
+): { cantidad: number; incluir: boolean } {
+  const pendiente = pedida - facturada - cancelada;
+  const incluir = !(Number.isFinite(pendiente) && pendiente <= 0);
+  return { cantidad: pendiente, incluir };
+}
+
 export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): SalesOrderSource {
   return {
     async ordenesVivas(filtro: SalesOrderFiltro): Promise<SalesOrder[]> {
@@ -167,7 +187,6 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         filtro.desde,
         filtro.hasta,
         filtro.cliente ?? null,
-        config.estadosFacturaIgnorados,
       ]);
 
       // Clave = salesorder_id (la PK), no el número: si dos OV compartieran número,
@@ -189,6 +208,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
             // que falta. Un "12.5%" se vuelve NaN; el builder solo avisa si es > 0,
             // y NaN > 0 es false, así que ese caso raro no genera ruido.
             descuentoCabecera: aNumero(f.descuento_cabecera),
+            cantidadFacturada: 0,
             lineas: [],
           };
           porOrden.set(f.salesorder_id, ov);
@@ -196,11 +216,23 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         // OV sin líneas: el LEFT JOIN da una fila con todo el detalle en NULL. La OV
         // queda registrada (con lineas: []) para que el builder avise 'ov_sin_lineas'.
         if (f.line_item_id === null) continue;
+
+        // Cantidad PENDIENTE de facturar = pedida − facturada − cancelada. World Office
+        // solo debe crear el pedido de lo que aún no se facturó; cargar lo ya facturado
+        // duplicaría inventario y facturación. Lo facturado se acumula para que el
+        // builder avise (ov_parcialmente_facturada) de que el archivo trae solo lo vivo.
+        const facturada = aNumero(f.cantidad_facturada);
+        const cancelada = aNumero(f.cantidad_cancelada);
+        const pedida = aNumeroObligatorio(f.quantity);
+        if (Number.isFinite(facturada)) ov.cantidadFacturada += facturada;
+        const { cantidad, incluir } = pendientePorFacturar(pedida, facturada, cancelada);
+        if (!incluir) continue;
+
         const cc = centros(f.centro_costos);
         const linea: SalesOrderLine = {
           sku: f.sku,
           descripcion: f.item_name,
-          cantidad: aNumeroObligatorio(f.quantity),
+          cantidad,
           valorUnitario: aNumeroObligatorio(f.rate),
           descuento: aNumero(f.descuento),
           centroCostos: cc[0] ?? null,
@@ -216,7 +248,6 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         config.estadosVivos,
         filtro.desde,
         filtro.cliente ?? null,
-        config.estadosFacturaIgnorados,
       ]);
       return (rows as { salesorder_number: string; fecha: string; customer_name: string | null }[]).map(
         (r) => ({ numero: r.salesorder_number, fecha: r.fecha, clienteNombre: r.customer_name })

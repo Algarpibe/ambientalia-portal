@@ -151,6 +151,16 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `Moneda ${ov.moneda}: el valor unitario NO está en pesos y World Office lo cargaría mal.`,
       });
     }
+    if (ov.cantidadFacturada > 0) {
+      // Informativo, no un fallo: la OV está parcialmente facturada y el archivo trae
+      // solo lo pendiente (las líneas ya facturadas del todo se quedaron fuera). Se
+      // avisa para que Xiomara pueda cuadrar el archivo contra lo ya facturado en Zoho.
+      avisar({
+        tipo: 'ov_parcialmente_facturada',
+        orden: ov.numero,
+        mensaje: `Esta OV ya tiene ${ov.cantidadFacturada} unidad(es) facturada(s): el archivo trae solo las cantidades pendientes de facturar.`,
+      });
+    }
     if (ov.descuentoCabecera > 0) {
       // El descuento de esta OV está a nivel de documento (discount_type "entity_level"
       // en Zoho), y el CSV solo tiene columna de descuento por línea. No se reparte

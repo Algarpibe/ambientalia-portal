@@ -17,8 +17,6 @@ export interface WoSalesConfig {
   vencimiento: string;
   /** Estados de OV que se consideran vivas. */
   estadosVivos: string[];
-  /** Estados de factura que NO matan la OV. Cualquier otro sí. */
-  estadosFacturaIgnorados: string[];
   formasPago: Record<string, string>;
   formaPagoPorDefecto: string;
 }
@@ -42,10 +40,11 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
 
   // Verificado en la base: open 16, overdue 11, partially_invoiced 6 = 33 OV vivas.
   // (invoiced 1073, void 23, draft 1, pending_approval 1 quedan fuera.)
+  // Las parcialmente facturadas entran, pero SOLO con sus líneas aún pendientes: lo ya
+  // facturado se descuenta por línea con quantity_invoiced (ver hub.source.ts). Por eso
+  // ya no hay lista de "estados de factura que excluyen la OV": una OV totalmente
+  // facturada sale por su status ('invoiced'), no por mirar sus facturas.
   estadosVivos: ['open', 'overdue', 'partially_invoiced'],
-  // Más amplio que el "Enviado" del acta a propósito: una factura 'paid' deja la OV
-  // igual de muerta que una 'sent'. Verificado: 4 OV vivas ya tienen factura 'sent'.
-  estadosFacturaIgnorados: ['draft', 'void'],
 
   // VALIDAR con Xiomara, sobre todo los mixtos. Las 8 etiquetas son las reales de
   // las OV vivas; ninguna es Credito/Contado, que es lo que usa la muestra de WO.
