@@ -190,3 +190,58 @@ describe('buildWorldOfficeCsv', () => {
     expect(warnings.map((w) => w.tipo)).toContain('sin_empresa');
   });
 });
+
+describe('advertencias', () => {
+  it('avisa cuando el artículo no tiene centro de costos', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], centroCostos: null, centrosCostosCount: 0 }] };
+    const { warnings, csv } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('sin_centro_costos');
+    // No aborta: las dos columnas salen vacías y el resto de la fila es válido.
+    const campos = decodificar(csv)[1].split(';');
+    expect(campos[COLUMNS.indexOf('Detalle: Centro costos')]).toBe('');
+    expect(campos[COLUMNS.indexOf('Detalle: Código Centro Costos')]).toBe('');
+    expect(campos).toHaveLength(57);
+  });
+
+  it('avisa si el artículo tiene varios centros de costo', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], centrosCostosCount: 3 }] };
+    const { warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(warnings.find((w) => w.tipo === 'varios_centros_costos')?.mensaje).toContain('3');
+  });
+
+  it('avisa si la OV no está en COP, porque el valor unitario no sería pesos', () => {
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, moneda: 'USD' }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('moneda_no_cop');
+  });
+
+  it('avisa y usa el valor por defecto si el término de pago no está homologado', () => {
+    const { warnings, csv } = buildWorldOfficeCsv([{ ...OV_BASE, formaPagoZoho: 'Pago con cheque' }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('forma_pago_desconocida');
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Encab: FormaPago')]).toBe('Credito');
+  });
+
+  it('avisa si falta el NIT o la fecha de entrega, sin abortar', () => {
+    const { warnings, filas } = buildWorldOfficeCsv([{ ...OV_BASE, nit: null, fechaEntrega: null }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toEqual(expect.arrayContaining(['sin_nit', 'sin_fecha_entrega']));
+    expect(filas).toBe(1);
+  });
+
+  it('avisa de la línea sin SKU, que World Office rechazaría', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], sku: null }] };
+    const { warnings, filas } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('sin_sku');
+    expect(filas).toBe(1);
+  });
+
+  it('sanea el ; de un nombre de producto para no romper la fila', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], descripcion: 'Sonda pH; 3 metros' }] };
+    const { csv, warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(decodificar(csv)[1].split(';')).toHaveLength(57);
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Detalle: Nota')]).toBe('Sonda pH, 3 metros');
+    expect(warnings.map((w) => w.tipo)).toContain('valor_saneado');
+  });
+
+  it('no emite advertencias con una OV completa y correcta', () => {
+    expect(buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG).warnings).toEqual([]);
+  });
+});
