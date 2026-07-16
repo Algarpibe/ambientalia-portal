@@ -30,13 +30,17 @@ export interface SalesOrder {
 
 export type WarningTipo =
   | 'sin_centro_costos'
+  | 'centro_costos_invalido'
   | 'varios_centros_costos'
   | 'sin_fecha_entrega'
   | 'sin_nit'
   | 'sin_sku'
+  | 'sin_empresa'
   | 'moneda_no_cop'
   | 'forma_pago_desconocida'
   | 'ov_antigua'
+  | 'ov_sin_lineas'
+  | 'valor_no_numerico'
   | 'valor_saneado';
 
 export interface Warning {

@@ -94,7 +94,8 @@ describe('buildWorldOfficeCsv', () => {
       ],
     };
     const filas = decodificar(buildWorldOfficeCsv([ov], DEFAULT_CONFIG).csv).slice(1, 3);
-    const encabezado = (f: string) => f.split(';').slice(0, 31).join(';');
+    const INICIO_DETALLE = COLUMNS.findIndex((c) => c.startsWith('Detalle:'));
+    const encabezado = (f: string) => f.split(';').slice(0, INICIO_DETALLE).join(';');
     expect(encabezado(filas[0])).toBe(encabezado(filas[1]));
     expect(filas[0].split(';')[COLUMNS.indexOf('Detalle: Producto')]).toBe('AMB-STCALENVIRO-01');
     expect(filas[1].split(';')[COLUMNS.indexOf('Detalle: Producto')]).toBe('SKU-2');
@@ -105,5 +106,87 @@ describe('buildWorldOfficeCsv', () => {
     // "Número" en la cabecera: la ú debe ser 0xFA, no C3 BA.
     expect(csv.includes(Buffer.from([0xfa]))).toBe(true);
     expect(csv.includes(Buffer.from([0xc3, 0xba]))).toBe(false);
+  });
+
+  it('las columnas que deben ir vacías están vacías, todas', () => {
+    const campos = decodificar(buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG).csv)[1].split(';');
+    // OJO: "Documento[ _]Externo" y no "Documento Externo": la columna 11 se llama
+    // 'Encab: Número_Documento_Externo', con guiones bajos, y con espacio se escapaba.
+    const debenIrVacias = COLUMNS.filter((c) =>
+      /Personalizado|Documento[ _]Externo|Clasificación|Sucursal|Prefijo/.test(c)
+    );
+    // Un objeto por columna para que el fallo diga CUÁL, no solo que algo falló.
+    for (const c of debenIrVacias) {
+      expect({ [c]: campos[COLUMNS.indexOf(c)] }).toEqual({ [c]: '' });
+    }
+    expect(debenIrVacias.length).toBe(35);
+  });
+
+  it('sanea el salto de línea: sigue siendo una sola fila de 57 campos, y avisa', () => {
+    const ov: SalesOrder = {
+      ...OV_BASE,
+      lineas: [{ ...OV_BASE.lineas[0], descripcion: 'Sonda pH\nmodelo X' }],
+    };
+    const { csv, warnings, filas } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    // Se parte por cualquier terminador, no solo \r\n: un \n suelto que se hubiera
+    // colado partiría la fila y con split('\r\n') no lo veríamos.
+    const lineas = new TextDecoder('windows-1252').decode(csv).split(/\r\n|\r|\n/);
+    expect(filas).toBe(1);
+    expect(lineas[1].split(';')).toHaveLength(57);
+    expect(lineas[1]).toContain('Sonda pH modelo X');
+    expect(warnings.map((w) => w.tipo)).toContain('valor_saneado');
+  });
+
+  it('descarta el centro de costos cuyo código no es numérico, y avisa', () => {
+    const ov: SalesOrder = {
+      ...OV_BASE,
+      lineas: [{ ...OV_BASE.lineas[0], centroCostos: 'CALIBRACION ENVIRO' }],
+    };
+    const { csv, warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    const campos = decodificar(csv)[1].split(';');
+    // Mejor las dos columnas vacías que "CALIBRACION" en la columna del código contable.
+    expect(campos[COLUMNS.indexOf('Detalle: Código Centro Costos')]).toBe('');
+    expect(campos[COLUMNS.indexOf('Detalle: Centro costos')]).toBe('');
+    expect(warnings.find((w) => w.tipo === 'centro_costos_invalido')?.mensaje).toContain(
+      'CALIBRACION ENVIRO'
+    );
+  });
+
+  it('tolera espacios múltiples y NBSP en el centro de costos', () => {
+    const ov: SalesOrder = {
+      ...OV_BASE,
+      lineas: [{ ...OV_BASE.lineas[0], centroCostos: '330801  CALIBRACION ENVIRO' }],
+    };
+    const campos = decodificar(buildWorldOfficeCsv([ov], DEFAULT_CONFIG).csv)[1].split(';');
+    expect(campos[COLUMNS.indexOf('Detalle: Código Centro Costos')]).toBe('330801');
+    expect(campos[COLUMNS.indexOf('Detalle: Centro costos')]).toBe('CALIBRACION ENVIRO');
+  });
+
+  it('deja vacío, y avisa, en vez de escribir "NaN" en una columna de importes', () => {
+    const ov: SalesOrder = {
+      ...OV_BASE,
+      lineas: [{ ...OV_BASE.lineas[0], cantidad: NaN }],
+    };
+    const { csv, warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    const campos = decodificar(csv)[1].split(';');
+    // Vacío y no 0: World Office debe rechazar la línea ruidosamente, no cargar un 0.
+    expect(campos[COLUMNS.indexOf('Detalle: Cantidad')]).toBe('');
+    const aviso = warnings.find((w) => w.tipo === 'valor_no_numerico');
+    expect(aviso?.mensaje).toContain('Cantidad');
+    // El aviso lo lee un humano que va a corregir el dato en Zoho: debe decir NaN.
+    // JSON.stringify(NaN) da "null" y lo mandaría a buscar un campo vacío.
+    expect(aviso?.mensaje).toContain('NaN');
+  });
+
+  it('avisa de la OV sin líneas en vez de dejarla desaparecer del archivo', () => {
+    const { csv, warnings, filas } = buildWorldOfficeCsv([{ ...OV_BASE, lineas: [] }], DEFAULT_CONFIG);
+    expect(filas).toBe(0);
+    expect(decodificar(csv)).toEqual([COLUMNS.join(';'), '']);
+    expect(warnings.map((w) => w.tipo)).toContain('ov_sin_lineas');
+  });
+
+  it('avisa cuando la empresa sale del cliente y el cliente no tiene nombre', () => {
+    const { warnings } = buildWorldOfficeCsv([{ ...OV_BASE, clienteNombre: null }], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('sin_empresa');
   });
 });
