@@ -157,10 +157,19 @@ export function createWoSalesRouter(db: Pool): Router {
       const { csv, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
       res.setHeader('Content-Type', 'text/csv; charset=windows-1252');
       res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso)}"`);
+      // El mismo motivo por el que no se usa cached(): un CSV desactualizado subido al
+      // ERP reserva inventario mal. Sin esto, el navegador puede cachear este GET por
+      // heurística y devolver el archivo de hace un rato.
+      res.setHeader('Cache-Control', 'no-store');
       // Las advertencias son el cortafuegos entre un dato malo de Zoho y un pedido mal
       // cargado en el ERP, pero este endpoint es accesible sin pasar por /preview. No
       // se puede exigir "ya las viste" sin guardar estado, así que al menos el número
       // viaja con la descarga: la UI debe pasar por /preview y avisar si no es 0.
+      // OJO: cuenta solo los avisos del builder, que son los del archivo. /preview
+      // devuelve además los 'ov_antigua', que por definición NO están en el CSV — por
+      // eso los dos números no coinciden, y es correcto que no coincidan.
+      // Ambas cabeceras requieren exposedHeaders en el CORS de index.ts para que el
+      // navegador deje leerlas desde JavaScript.
       res.setHeader('X-WO-Sales-Warnings', String(warnings.length));
       res.send(csv);
       // Fase 2: aquí engancha el envío por correo a Xiomara y Marcela, después del
