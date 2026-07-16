@@ -81,6 +81,18 @@ describe('loginUser — JWT extendido (task 8.5)', () => {
     );
   });
 
+  it('la sesión dura 30 días por defecto (no vuelve a 8h por descuido)', async () => {
+    state.user = {
+      id: 'u1', full_name: 'X', email: 'ttl@empresa.com', password_hash: PASSWORD_HASH,
+      role: 'reader', status: 'active', created_at: '2025-01-01T00:00:00.000Z',
+    };
+    state.apps = [];
+    const result = await auth.loginUser('ttl@empresa.com', PASSWORD);
+    const payload = jwt.verify(result.token as string, SECRET) as { iat: number; exp: number };
+    const days = (payload.exp - payload.iat) / 86400;
+    expect(days).toBeCloseTo(30, 0);
+  });
+
   it('usuario no activo → 403 sin emitir token', async () => {
     await fc.assert(
       fc.asyncProperty(fc.uuid(), emailArb, fc.constantFrom('pending', 'inactive'), async (userId, email, status) => {

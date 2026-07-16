@@ -21,7 +21,12 @@ declare global {
 // (los hashes bcrypt no contienen ',' ni ':', así que el parseo es seguro).
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
-const TOKEN_TTL = process.env.JWT_TTL || '8h';
+// Sesión de 30 días por defecto: es una herramienta interna y molestaba tener que
+// reloguear a diario (el token vivía 8h). Como cada petición revalida que el usuario
+// siga `active` en la BD (ver requireAuth), un token largo NO impide cortar el acceso
+// al instante desactivando al usuario. Sobrescribible con JWT_TTL (formato de
+// jsonwebtoken: '8h', '7d', '30d'…).
+const TOKEN_TTL = process.env.JWT_TTL || '30d';
 
 if (!JWT_SECRET) {
   console.warn('WARNING: JWT_SECRET no configurado — el login JWT está deshabilitado.');
