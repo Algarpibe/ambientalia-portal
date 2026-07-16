@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { requireAuth, requireApp } from '../auth.js';
+import { requireAuth, requireApp, requireCronToken } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { buildWorldOfficeCsv } from './builder.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
@@ -8,6 +8,8 @@ import { createHubSalesOrderSource } from './hub.source.js';
 import { DEFAULT_CONFIG } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
 import type { Warning } from './types.js';
+import { computarPendiente, confirmarEnvio } from './email.js';
+import { listarDestinatarios, crearDestinatario, setActivo, borrarDestinatario } from './email.repo.js';
 
 // Router de WO-sales, montado bajo `/api` (ver index.ts). Expone la vista previa y
 // la descarga del CSV que World Office importa como pedidos.
@@ -200,6 +202,73 @@ export function createWoSalesRouter(db: Pool): Router {
       res.send(xls);
     } catch (e) {
       sendError(res, e, 'wo_sales_xlsx');
+    }
+  });
+
+  const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+  // ── Para n8n (auth por token de cron, no JWT) ──
+  router.get('/wo-sales/email/pendiente', requireCronToken, async (_req: Request, res: Response) => {
+    try {
+      const hoyIso = hoyEnBogota(new Date());
+      const filtro: SalesOrderFiltro = { ...rangoPorDefecto(hoyIso) };
+      const pendiente = await computarPendiente(db, source, DEFAULT_CONFIG, filtro, nombreArchivo(hoyIso, 'xls'));
+      res.json(pendiente);
+    } catch (e) {
+      sendError(res, e, 'wo_sales_email_pendiente');
+    }
+  });
+
+  router.post('/wo-sales/email/confirmado', requireCronToken, async (req: Request, res: Response) => {
+    try {
+      const token = (req.body as { token?: string } | undefined)?.token;
+      if (!token) return void res.status(400).json({ error: 'missing token' });
+      await confirmarEnvio(db, token);
+      res.json({ ok: true });
+    } catch (e) {
+      sendError(res, e, 'wo_sales_email_confirmado');
+    }
+  });
+
+  // ── CRUD de destinatarios (auth por app) ──
+  router.get('/wo-sales/destinatarios', requireAuth, requireApp(APP_ID), async (_req, res) => {
+    try {
+      res.json(await listarDestinatarios(db));
+    } catch (e) {
+      sendError(res, e, 'wo_sales_destinatarios_list');
+    }
+  });
+
+  router.post('/wo-sales/destinatarios', requireAuth, requireApp(APP_ID), async (req, res) => {
+    try {
+      const { email, nombre } = (req.body ?? {}) as { email?: string; nombre?: string };
+      if (!email || !EMAIL.test(email)) return void res.status(400).json({ error: 'email inválido' });
+      if (!nombre?.trim()) return void res.status(400).json({ error: 'falta el nombre' });
+      res.status(201).json(await crearDestinatario(db, email.trim(), nombre.trim()));
+    } catch (e) {
+      sendError(res, e, 'wo_sales_destinatarios_create');
+    }
+  });
+
+  router.patch('/wo-sales/destinatarios/:id', requireAuth, requireApp(APP_ID), async (req, res) => {
+    try {
+      const activo = (req.body as { activo?: unknown } | undefined)?.activo;
+      if (typeof activo !== 'boolean') return void res.status(400).json({ error: 'activo debe ser boolean' });
+      const r = await setActivo(db, req.params.id, activo);
+      if (!r) return void res.status(404).json({ error: 'no existe' });
+      res.json(r);
+    } catch (e) {
+      sendError(res, e, 'wo_sales_destinatarios_patch');
+    }
+  });
+
+  router.delete('/wo-sales/destinatarios/:id', requireAuth, requireApp(APP_ID), async (req, res) => {
+    try {
+      const ok = await borrarDestinatario(db, req.params.id);
+      if (!ok) return void res.status(404).json({ error: 'no existe' });
+      res.status(204).end();
+    } catch (e) {
+      sendError(res, e, 'wo_sales_destinatarios_delete');
     }
   });
 
