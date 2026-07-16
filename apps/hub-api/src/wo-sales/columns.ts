@@ -44,3 +44,34 @@ export const COLUMNS: readonly string[] = [
   ...PERSONALIZADOS_DETALLE,
   'Detalle: Código Centro Costos',
 ];
+
+/**
+ * Tipo de cada columna en el .xls de World Office. El CSV es todo texto, pero el .xls
+ * de la muestra tiene celdas TIPADAS: fechas como serial de Excel (43466 = 01/01/2019),
+ * importes y NIT como número, y el resto texto. Un .xls con todo texto (o un CSV
+ * renombrado) no importaría bien. Verificado celda a celda contra la muestra .xls.
+ *
+ * Dos desviaciones deliberadas respecto de la muestra:
+ * - 'Documento Número' va como TEXTO, no número: usamos el consecutivo alfanumérico
+ *   'OV-2026-138'. // VALIDAR con Xiomara: la muestra usa un consecutivo numérico
+ *   (1, 2, 3); pendiente confirmar cuál acepta World Office.
+ * - 'Tercero Externo' (NIT) es 'numero', pero el serializador cae a texto si el NIT
+ *   trae guion o letra, para no corromperlo.
+ */
+export type TipoColumna = 'texto' | 'numero' | 'fecha';
+
+const NUMERO = new Set<string>([
+  'Encab: Tercero Interno',
+  'Encab: Tercero Externo',
+  'Encab: Verificado',
+  'Encab: Anulado',
+  'Detalle: Cantidad',
+  'Detalle: IVA',
+  'Detalle: Valor Unitario',
+  'Detalle: Descuento',
+]);
+const FECHA = new Set<string>(['Encab: Fecha', 'Encab: Fecha Entrega', 'Detalle: Vencimiento']);
+
+export const TIPO_COLUMNA: readonly TipoColumna[] = COLUMNS.map((c) =>
+  FECHA.has(c) ? 'fecha' : NUMERO.has(c) ? 'numero' : 'texto'
+);

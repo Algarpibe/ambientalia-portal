@@ -43,7 +43,10 @@ export function partirCentroCostos(valor: string | null): {
 
 export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig): BuildResult {
   const warnings: Warning[] = [];
-  const filas: string[] = [COLUMNS.join(SEP)];
+  // Matriz de celdas (cabecera + una fila por línea), como strings. Es la fuente única
+  // para los dos formatos: el CSV se serializa uniendo con ';' y codificando a cp1252;
+  // el .xls re-tipa cada celda según TIPO_COLUMNA. Así .csv y .xls no pueden divergir.
+  const matriz: string[][] = [[...COLUMNS]];
 
   const avisar = (w: Warning) => warnings.push(w);
 
@@ -215,14 +218,15 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     ];
 
     for (const linea of ov.lineas) {
-      filas.push([...encabezado, ...detalle(ov, linea)].join(SEP));
+      matriz.push([...encabezado, ...detalle(ov, linea)]);
     }
   }
 
   return {
-    csv: toWindows1252(filas.join(EOL) + EOL),
+    csv: toWindows1252(matriz.map((f) => f.join(SEP)).join(EOL) + EOL),
+    matriz,
     warnings,
-    filas: filas.length - 1,
+    filas: matriz.length - 1,
     ordenes: ordenes.length,
   };
 }

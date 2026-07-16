@@ -66,6 +66,8 @@ export interface Warning {
 
 export interface BuildResult {
   csv: Buffer;
+  /** Cabecera + una fila por línea, como strings. Fuente única para .csv y .xls. */
+  matriz: string[][];
   warnings: Warning[];
   filas: number;
   ordenes: number;

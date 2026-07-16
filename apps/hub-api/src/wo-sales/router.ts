@@ -3,6 +3,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { requireAuth, requireApp } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { buildWorldOfficeCsv } from './builder.js';
+import { buildWorldOfficeXlsx } from './xlsx.js';
 import { createHubSalesOrderSource } from './hub.source.js';
 import { DEFAULT_CONFIG } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
@@ -115,8 +116,8 @@ function leerFiltro(q: Record<string, unknown>, hoyIso: string): FiltroResult {
   };
 }
 
-function nombreArchivo(hoyIso: string): string {
-  return `DocumentosVentasEncabezadosMovimientoInventarioWO_${hoyIso}.csv`;
+function nombreArchivo(hoyIso: string, ext: 'csv' | 'xls'): string {
+  return `DocumentosVentasEncabezadosMovimientoInventarioWO_${hoyIso}.${ext}`;
 }
 
 export function createWoSalesRouter(db: Pool): Router {
@@ -156,7 +157,7 @@ export function createWoSalesRouter(db: Pool): Router {
       const ordenes = await source.ordenesVivas(leido.filtro);
       const { csv, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
       res.setHeader('Content-Type', 'text/csv; charset=windows-1252');
-      res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso)}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso, 'csv')}"`);
       // El mismo motivo por el que no se usa cached(): un CSV desactualizado subido al
       // ERP reserva inventario mal. Sin esto, el navegador puede cachear este GET por
       // heurística y devolver el archivo de hace un rato.
@@ -176,6 +177,29 @@ export function createWoSalesRouter(db: Pool): Router {
       // build y sin tocarlo.
     } catch (e) {
       sendError(res, e, 'wo_sales_csv');
+    }
+  });
+
+  // Mismo archivo que /csv pero como .xls binario real (BIFF8), que es lo que la
+  // muestra de World Office usa: 57 columnas con celdas tipadas (fechas como serial,
+  // importes como número). Se construye desde la MISMA matriz del builder, así que
+  // .csv y .xls siempre coinciden en contenido.
+  router.get('/wo-sales/xlsx', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const hoyIso = hoyEnBogota(new Date());
+      const leido = leerFiltro(req.query as Record<string, unknown>, hoyIso);
+      if (!leido.ok) return void res.status(400).json({ error: leido.error, field: leido.field });
+
+      const ordenes = await source.ordenesVivas(leido.filtro);
+      const { matriz, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
+      const xls = buildWorldOfficeXlsx(matriz);
+      res.setHeader('Content-Type', 'application/vnd.ms-excel');
+      res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso, 'xls')}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-WO-Sales-Warnings', String(warnings.length));
+      res.send(xls);
+    } catch (e) {
+      sendError(res, e, 'wo_sales_xlsx');
     }
   });
 

@@ -165,6 +165,7 @@ function App() {
   const [data, setData] = useState<PreviewResponse | null>(null);
   const [cargando, setCargando] = useState(false);
   const [descargando, setDescargando] = useState(false);
+  const [formato, setFormato] = useState<'csv' | 'xlsx'>('csv');
   const [error, setError] = useState<string | null>(null);
   const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
   const [desajuste, setDesajuste] = useState<{ revisados: number; archivo: number } | null>(null);
@@ -206,13 +207,13 @@ function App() {
     }
   };
 
-  const descargarCsv = async () => {
+  const descargar = async (formato: 'csv' | 'xlsx') => {
     setDescargando(true);
     setError(null);
     setDesajuste(null);
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
-      const res = await fetch(`${API_BASE}/api/wo-sales/csv?${queryString()}`, {
+      const res = await fetch(`${API_BASE}/api/wo-sales/${formato}?${queryString()}`, {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error(await mensajeDeError(res));
@@ -238,7 +239,7 @@ function App() {
       const blob = await res.blob();
       const nombre =
         nombreDesdeCabecera(res.headers.get('Content-Disposition')) ??
-        'DocumentosVentasEncabezadosMovimientoInventarioWO.csv';
+        `DocumentosVentasEncabezadosMovimientoInventarioWO.${formato === 'xlsx' ? 'xls' : 'csv'}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -426,18 +427,36 @@ function App() {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={descargarCsv}
-                disabled={!puedeDescargar}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-soft hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {descargando ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Download size={16} />
-                )}
-                {descargando ? 'Generando…' : 'Generar y descargar CSV'}
-              </button>
+              <div className="inline-flex items-stretch rounded-xl shadow-soft overflow-hidden">
+                <button
+                  onClick={() => descargar(formato)}
+                  disabled={!puedeDescargar}
+                  className="inline-flex items-center gap-2 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {descargando ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  {descargando
+                    ? 'Generando…'
+                    : `Generar y descargar ${formato === 'xlsx' ? 'Excel (.xls)' : 'CSV'}`}
+                </button>
+                <label className="sr-only" htmlFor="formato-archivo">
+                  Formato del archivo
+                </label>
+                <select
+                  id="formato-archivo"
+                  value={formato}
+                  onChange={(e) => setFormato(e.target.value as 'csv' | 'xlsx')}
+                  disabled={descargando}
+                  className="border-l border-emerald-500 bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer focus:outline-none"
+                  title="Formato del archivo"
+                >
+                  <option value="csv">CSV</option>
+                  <option value="xlsx">Excel (.xls)</option>
+                </select>
+              </div>
             </div>
             {data.filas === 0 && (
               <p className="text-sm text-gray-500 mt-4">
