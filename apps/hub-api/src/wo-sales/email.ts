@@ -62,7 +62,16 @@ export async function computarPendiente(
     return { enviar: false };
   }
 
-  const cambiadas = await cambiadasDesde(db, config, filtro, estado.ultimoEnvioAt);
+  // Mejor esfuerzo: la lista de OV cambiadas es SOLO para el cuerpo del correo. Si esta
+  // consulta falla, NO debe impedir el envío — el archivo, que es lo que de verdad
+  // importa, ya está construido. Se degrada a lista vacía en vez de tumbar el envío
+  // (que dejaría a n8n con un 500 y la feature sin enviar nada, en silencio).
+  let cambiadas: string[] = [];
+  try {
+    cambiadas = await cambiadasDesde(db, config, filtro, estado.ultimoEnvioAt);
+  } catch (e) {
+    console.error('wo-sales cambiadasDesde (best-effort) falló; se envía sin la lista:', e);
+  }
   const resumen: ResumenEmail = {
     ordenes: ordenes.length,
     filas: matriz.length - 1,

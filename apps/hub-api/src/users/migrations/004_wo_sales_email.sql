@@ -1,7 +1,7 @@
 -- Destinatarios del correo automático de WO-sales, configurables desde la app.
 CREATE TABLE IF NOT EXISTS portal.wo_sales_recipients (
   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  email       TEXT        NOT NULL,
+  email       TEXT        NOT NULL UNIQUE,   -- sin duplicados: no reenviar dos veces al mismo
   nombre      TEXT        NOT NULL,
   activo      BOOLEAN     NOT NULL DEFAULT TRUE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -30,12 +30,15 @@ export async function listarActivos(db: Pool): Promise<Recipient[]> {
   return (rows as FilaRecipient[]).map(mapRecipient);
 }
 
-export async function crearDestinatario(db: Pool, email: string, nombre: string): Promise<Recipient> {
+/** Devuelve null si ese email ya existe (email es UNIQUE; se normaliza a minúsculas). */
+export async function crearDestinatario(db: Pool, email: string, nombre: string): Promise<Recipient | null> {
   const { rows } = await db.query(
-    'INSERT INTO portal.wo_sales_recipients (email, nombre) VALUES ($1, $2) RETURNING id, email, nombre, activo',
+    `INSERT INTO portal.wo_sales_recipients (email, nombre) VALUES (lower($1), $2)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id, email, nombre, activo`,
     [email, nombre]
   );
-  return mapRecipient(rows[0] as FilaRecipient);
+  return rows.length ? mapRecipient(rows[0] as FilaRecipient) : null;
 }
 
 export async function setActivo(db: Pool, id: string, activo: boolean): Promise<Recipient | null> {

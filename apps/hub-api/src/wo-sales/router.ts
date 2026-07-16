@@ -244,7 +244,9 @@ export function createWoSalesRouter(db: Pool): Router {
       const { email, nombre } = (req.body ?? {}) as { email?: string; nombre?: string };
       if (!email || !EMAIL.test(email)) return void res.status(400).json({ error: 'email inválido' });
       if (!nombre?.trim()) return void res.status(400).json({ error: 'falta el nombre' });
-      res.status(201).json(await crearDestinatario(db, email.trim(), nombre.trim()));
+      const creado = await crearDestinatario(db, email.trim(), nombre.trim());
+      if (!creado) return void res.status(409).json({ error: 'ese correo ya está en la lista' });
+      res.status(201).json(creado);
     } catch (e) {
       sendError(res, e, 'wo_sales_destinatarios_create');
     }
