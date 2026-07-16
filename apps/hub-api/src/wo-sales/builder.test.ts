@@ -203,10 +203,13 @@ describe('advertencias', () => {
     expect(campos).toHaveLength(57);
   });
 
-  it('avisa si el artículo tiene varios centros de costo', () => {
-    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], centrosCostosCount: 3 }] };
+  it('avisa desde el primer centro de costos de más (exactamente 2)', () => {
+    // 2 y no 3: fija la frontera. Con 3, un off-by-one (> 1 → > 2) pasaría
+    // desapercibido y el builder elegiría el primer centro de costos en silencio,
+    // que es justo la corrupción muda que este módulo no se puede permitir.
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], centrosCostosCount: 2 }] };
     const { warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
-    expect(warnings.find((w) => w.tipo === 'varios_centros_costos')?.mensaje).toContain('3');
+    expect(warnings.find((w) => w.tipo === 'varios_centros_costos')?.mensaje).toContain('2');
   });
 
   it('avisa si la OV no está en COP, porque el valor unitario no sería pesos', () => {
