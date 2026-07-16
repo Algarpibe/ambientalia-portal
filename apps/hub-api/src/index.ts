@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { getHubPool, initDb } from './db.js';
 import { requireAuth, loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
+import { createWoSalesRouter } from './wo-sales/router.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
@@ -27,7 +28,16 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || '')
 if (ALLOWED_ORIGINS.length === 0) {
   console.warn('WARNING: ALLOWED_ORIGIN no configurado — CORS bloqueará peticiones cross-origin del navegador.');
 }
-app.use(cors({ origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : false }));
+// exposedHeaders: sin esto el navegador OCULTA a JavaScript cualquier cabecera que no
+// sea de la lista segura del CORS. La descarga de WO-sales necesita Authorization, asi
+// que va por fetch y no por <a href>: sin exponerlas, la UI no podria leer ni el numero
+// de advertencias ni el nombre del archivo, y el aviso seria un no-op silencioso.
+app.use(
+  cors({
+    origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : false,
+    exposedHeaders: ['Content-Disposition', 'X-WO-Sales-Warnings'],
+  })
+);
 
 // Body JSON. Límite de 2mb para permitir la subida del avatar (data URL de un
 // thumbnail); el resto de payloads son pequeños y hay rate limiting.
@@ -132,6 +142,9 @@ initDb()
     // Montado en '/api' → expone /api/users*, /api/auth/register. El rate limit
     // propio del router corre antes de requireAuth/requireAdmin.
     app.use('/api', createUsersRouter(getHubPool()));
+    // Router de WO-sales → /api/wo-sales/preview y /api/wo-sales/csv. Se monta aquí
+    // por lo mismo que el de usuarios: necesita getHubPool() ya validado.
+    app.use('/api', createWoSalesRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
   })
   .catch((e) => {

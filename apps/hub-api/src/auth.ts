@@ -200,6 +200,31 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 }
 
 /**
+ * Exige que el JWT tenga `appId` en `apps[]`. Se usa detrás de `requireAuth`
+ * (este middleware asume que `req.user` ya fue adjuntado).
+ *
+ * El resto de endpoints de datos solo comprueban `requireAuth`: la autorización
+ * por app era solo UX en el frontend (ver `AppGuard`, cuyo propio comentario
+ * dice que la verificación real vive en el backend — pero no existía). WO-sales
+ * expone el NIT de cada cliente (dato personal, Ley 1581), así que aquí sí se
+ * comprueba en el servidor. Ver docs/PRIVACY-RETENTION.md.
+ *
+ * `admin` tiene bypass (igual que `requireAdmin`/`requireOwnerOrAdmin`): un
+ * admin gestiona el acceso de todas las apps y no depende de tener la app
+ * asignada en su propio JWT.
+ */
+export function requireApp(appId: string) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const user = getPayload(req);
+    if (user?.role === 'admin' || user?.apps?.includes(appId)) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: 'forbidden' });
+  };
+}
+
+/**
  * Requiere JWT válido + usuario activo (vía requireAuth) y que el recurso sea
  * del propio usuario (`user_id === :id`) O que el solicitante sea `admin`
  * (Req 3.5, 3.6). En otro caso → 403.
