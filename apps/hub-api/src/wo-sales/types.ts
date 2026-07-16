@@ -73,11 +73,10 @@ export interface BuildResult {
   ordenes: number;
 }
 
-export interface Recipient {
-  id: string;
+/** Un destinatario del correo automático: un usuario del portal con la app asignada. */
+export interface DestinatarioCorreo {
   email: string;
   nombre: string;
-  activo: boolean;
 }
 
 export interface EmailEstado {
