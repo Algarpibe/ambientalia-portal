@@ -94,6 +94,9 @@ no JWT de usuario. 401 si falta o no coincide.
   advertencias: number }, token }`
   El `asunto` y `cuerpo` los arma hub-api (una sola fuente, testeable). `cambiadas` =
   OV vivas con `zoho_last_modified > ultimo_envio_at` (mejor esfuerzo, para el cuerpo).
+  - **Asunto**: `Nueva actualización de MovimientoInventarioWO`
+  - **Cuerpo**: esa misma línea como encabezado + el resumen (nº de OV, nº de líneas,
+    OV que cambiaron, y nº de advertencias si las hay). Ajustable en `config.ts`.
 - `POST /api/wo-sales/email/confirmado`  `{ token }`
   → valida que el token siga siendo el hash actual, guarda `ultimo_hash = token`,
   `ultimo_envio_at = now()`. 200 idempotente.
@@ -141,6 +144,6 @@ transitorios; si aun así falla, al no confirmar, el ciclo siguiente reintenta.
 
 - **`WO_SALES_CRON_TOKEN`**: secreto nuevo en el env de hub-api (EasyPanel).
 - **Intervalo del Schedule** en n8n: sugerido 5 min (≥ los 3 min del sync).
-- **Remitente, asunto base y plantilla del cuerpo**: el asunto/cuerpo los arma hub-api;
-  el remitente es la credencial de correo de n8n. Confirmar con Xiomara el texto.
+- **Remitente**: la credencial de correo de n8n. Asunto/cuerpo ya definidos (§6),
+  ajustables en `config.ts`.
 - **Rotar** la API key de n8n que quedó expuesta en el chat al montar el MCP.
