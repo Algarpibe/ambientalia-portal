@@ -126,24 +126,6 @@ export default function Aplicaciones() {
           <p className="text-xs text-gray-500 mt-2">Añadir nueva aplicación local</p>
         </button>
       </div>
-
-      {/* Stats */}
-      <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Total Aplicaciones</h3>
-          <p className="text-3xl font-bold text-gray-900">{visibles.length}</p>
-        </div>
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Sesiones Activas</h3>
-          <p className="text-3xl font-bold text-gray-900">8</p>
-          <p className="text-xs text-blue-600 mt-1">En este momento</p>
-        </div>
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Datos Procesados</h3>
-          <p className="text-3xl font-bold text-gray-900">2.4 GB</p>
-          <p className="text-xs text-gray-500 mt-1">Esta semana</p>
-        </div>
-      </div>
     </main>
   );
 }
