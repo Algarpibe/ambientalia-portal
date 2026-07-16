@@ -5,25 +5,11 @@ import type { EmailPendiente, ResumenEmail } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 import { buildWorldOfficeCsv } from './builder.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
-import { cambiadasDesde, guardarEstado, leerEstado, listarActivos } from './email.repo.js';
+import { cambiadasDesde, guardarEstado, leerEstado, marcarEnviados, recipientesPendientes } from './email.repo.js';
 
 /** Huella estable del contenido del archivo. Cubre OV nueva, modificada y la que sale. */
 export function hashMatriz(matriz: string[][]): string {
   return createHash('sha256').update(JSON.stringify(matriz)).digest('hex');
-}
-
-export type Decision = 'sin_cambios' | 'sin_destinatarios' | 'enviar';
-
-/**
- * Decisión pura de envío. sin_cambios manda sobre todo (si el archivo es el mismo, no
- * hay nada que hacer aunque no haya destinatarios). Solo se envía si cambió Y hay a
- * quién. Con 'sin_destinatarios' el hash NO se avanza (ver computarPendiente), para que
- * el envío pendiente salga cuando se añada un destinatario.
- */
-export function decidirEnvio(token: string, ultimoHash: string | null, hayDestinatarios: boolean): Decision {
-  if (token === ultimoHash) return 'sin_cambios';
-  if (!hayDestinatarios) return 'sin_destinatarios';
-  return 'enviar';
 }
 
 export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): string {
@@ -41,9 +27,11 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
 }
 
 /**
- * Decide si hay que enviar y arma el payload para n8n. Envía solo si el archivo cambió
- * respecto del último CONFIRMADO y hay destinatarios activos. NO avanza el hash aquí
- * (eso lo hace confirmarEnvio): si n8n no confirma, el próximo ciclo reintenta.
+ * Decide si hay que enviar y arma el payload para n8n. Envía a los destinatarios que aún
+ * no tienen el archivo actual (su último hash recibido ≠ el de ahora): todos cuando el
+ * contenido cambió, o solo el usuario recién añadido si el contenido es el mismo. NO
+ * marca nada como enviado aquí (eso lo hace confirmarEnvio): si n8n no confirma, el
+ * próximo ciclo reintenta a los mismos.
  */
 export async function computarPendiente(
   db: Pool,
@@ -57,8 +45,9 @@ export async function computarPendiente(
   const token = hashMatriz(matriz);
 
   const estado = await leerEstado(db);
-  const destinatarios = await listarActivos(db);
-  if (decidirEnvio(token, estado.ultimoHash, destinatarios.length > 0) !== 'enviar') {
+  const destinatarios = await recipientesPendientes(db, token);
+  if (destinatarios.length === 0) {
+    // Nadie pendiente: o no hay destinatarios, o todos ya tienen el archivo actual.
     return { enviar: false };
   }
 
@@ -90,7 +79,17 @@ export async function computarPendiente(
   };
 }
 
-/** Marca ese hash como enviado. Idempotente. */
-export async function confirmarEnvio(db: Pool, token: string): Promise<void> {
+/**
+ * Marca ese hash como recibido por los destinatarios a los que n8n lo envió. Idempotente.
+ * `emails` viene del payload que n8n devuelve (los mismos `destinatarios` que recibió en
+ * /pendiente), para marcar EXACTAMENTE a quien se le envió y no a quien se haya podido
+ * añadir entre el /pendiente y el /confirmado. Si n8n no los devuelve (compatibilidad),
+ * se cae a marcar a todos los que están pendientes de ese hash ahora mismo.
+ * Además sella la fecha global de último envío, que alimenta la lista "OV con cambios"
+ * del cuerpo del correo (cambiadasDesde).
+ */
+export async function confirmarEnvio(db: Pool, token: string, emails?: string[]): Promise<void> {
+  const destinatarios = emails ?? (await recipientesPendientes(db, token)).map((d) => d.email);
+  await marcarEnviados(db, token, destinatarios);
   await guardarEstado(db, token);
 }

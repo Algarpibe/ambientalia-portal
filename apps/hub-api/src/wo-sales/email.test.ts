@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { hashMatriz, construirCuerpo, decidirEnvio } from './email.js';
+import { hashMatriz, construirCuerpo, computarPendiente } from './email.js';
 import { DEFAULT_CONFIG } from './config.js';
+import type { SalesOrder } from './types.js';
+import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 
 describe('hashMatriz', () => {
   it('la misma matriz da el mismo hash (estable)', () => {
@@ -15,18 +17,52 @@ describe('hashMatriz', () => {
   });
 });
 
-describe('decidirEnvio', () => {
-  it('sin_cambios cuando el hash coincide con el último enviado', () => {
-    expect(decidirEnvio('abc', 'abc', true)).toBe('sin_cambios');
+describe('computarPendiente', () => {
+  // Una OV mínima válida; el builder real produce una matriz estable a partir de ella.
+  const ov: SalesOrder = {
+    numero: 'OV-1',
+    fecha: '2026-07-14',
+    clienteNombre: 'ACME',
+    nit: '900123',
+    formaPagoZoho: '100% Anticipado',
+    fechaEntrega: '2026-07-20',
+    moneda: 'COP',
+    descuentoCabecera: 0,
+    cantidadFacturada: 0,
+    lineas: [
+      { sku: 'S1', descripcion: 'x', cantidad: 2, valorUnitario: 100, descuento: 0, centroCostos: '330801 X', centrosCostosCount: 1 },
+    ],
+  };
+  const source: SalesOrderSource = {
+    ordenesVivas: async () => [ov],
+    ordenesAntiguas: async () => [],
+  } as unknown as SalesOrderSource;
+  const filtro: SalesOrderFiltro = { desde: '2026-01-01', hasta: '2026-12-31' };
+
+  /** Fake db: `pendientes` son los destinatarios que devuelve recipientesPendientes. */
+  function fakeDb(pendientes: { email: string; nombre: string }[]) {
+    return {
+      query: async (sql: string) => {
+        if (sql.includes('wo_sales_email_estado')) return { rows: [] };
+        if (sql.includes('wo_sales_email_sent')) return { rows: pendientes };
+        if (sql.includes('books.sales_orders')) return { rows: [{ salesorder_number: 'OV-1' }] };
+        return { rows: [] };
+      },
+    } as any;
+  }
+
+  it('envía solo a los destinatarios pendientes de ese hash', async () => {
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), source, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) {
+      expect(r.destinatarios).toEqual([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]);
+      expect(r.token).toMatch(/^[0-9a-f]{64}$/); // el token es el sha256 del contenido
+    }
   });
-  it('enviar cuando el hash cambió y hay destinatarios', () => {
-    expect(decidirEnvio('abc', 'viejo', true)).toBe('enviar');
-  });
-  it('sin_destinatarios cuando cambió pero no hay a quién enviar', () => {
-    expect(decidirEnvio('abc', 'viejo', false)).toBe('sin_destinatarios');
-  });
-  it('sin_cambios manda sobre la falta de destinatarios (no hay nada que enviar)', () => {
-    expect(decidirEnvio('abc', 'abc', false)).toBe('sin_cambios');
+
+  it('no envía cuando no hay pendientes (todos ya tienen el archivo actual o no hay destinatarios)', async () => {
+    const r = await computarPendiente(fakeDb([]), source, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(false);
   });
 });
 

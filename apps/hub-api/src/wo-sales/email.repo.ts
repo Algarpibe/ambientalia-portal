@@ -7,21 +7,39 @@ import type { SalesOrderFiltro } from './source.js';
 const APP_ID = 'WO-sales';
 
 /**
- * Destinatarios del correo automático = usuarios del portal APROBADOS (status 'active')
- * que tengan la app WO-sales asignada. Una sola fuente de verdad: quien puede usar la
- * app es quien recibe el archivo. Se gestiona desde "Gestión de Usuarios → Asignar apps",
- * no hay lista aparte.
+ * Destinatarios PENDIENTES para un hash dado: usuarios del portal APROBADOS (status
+ * 'active') con la app WO-sales asignada que aún NO tienen registrado ese hash como
+ * recibido. Cubre dos casos con una sola regla:
+ *   - cambió el contenido (hash nuevo) → todos quedan pendientes → se envía a todos;
+ *   - se añadió un usuario → no tiene fila en wo_sales_email_sent (hash NULL) → solo él
+ *     queda pendiente → recibe el archivo actual sin esperar un cambio ni reenviar a los
+ *     demás (`IS DISTINCT FROM` trata NULL como "distinto", así que el usuario nuevo entra).
+ * Quien puede usar la app es quien recibe el archivo: una sola fuente de verdad, que se
+ * gestiona desde "Gestión de Usuarios → Asignar apps".
  */
-export async function listarActivos(db: Pool): Promise<DestinatarioCorreo[]> {
+export async function recipientesPendientes(db: Pool, hash: string): Promise<DestinatarioCorreo[]> {
   const { rows } = await db.query(
     `SELECT u.email, u.full_name AS nombre
        FROM portal.users u
        JOIN portal.user_apps ua ON ua.user_id = u.id
+       LEFT JOIN portal.wo_sales_email_sent s ON s.email = u.email
       WHERE ua.app_id = $1 AND u.status = 'active'
+        AND s.hash IS DISTINCT FROM $2
       ORDER BY u.email`,
-    [APP_ID]
+    [APP_ID, hash]
   );
   return rows as DestinatarioCorreo[];
+}
+
+/** Registra ese hash como recibido por cada email. Idempotente (upsert por email). */
+export async function marcarEnviados(db: Pool, hash: string, emails: string[]): Promise<void> {
+  if (emails.length === 0) return;
+  await db.query(
+    `INSERT INTO portal.wo_sales_email_sent (email, hash, sent_at)
+     SELECT email, $2, now() FROM unnest($1::text[]) AS t(email)
+     ON CONFLICT (email) DO UPDATE SET hash = EXCLUDED.hash, sent_at = EXCLUDED.sent_at`,
+    [emails, hash]
+  );
 }
 
 export async function leerEstado(db: Pool): Promise<EmailEstado> {
