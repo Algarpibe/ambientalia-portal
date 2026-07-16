@@ -218,9 +218,15 @@ export function createWoSalesRouter(db: Pool): Router {
 
   router.post('/wo-sales/email/confirmado', requireCronToken, async (req: Request, res: Response) => {
     try {
-      const token = (req.body as { token?: string } | undefined)?.token;
+      const body = req.body as { token?: string; emails?: unknown } | undefined;
+      const token = body?.token;
       if (!token) return void res.status(400).json({ error: 'missing token' });
-      await confirmarEnvio(db, token);
+      // Los emails a los que n8n realmente envió (opcional). Se sanea a string[] para no
+      // pasar basura al SQL; si no viene, confirmarEnvio marca a los pendientes de ese hash.
+      const emails = Array.isArray(body?.emails)
+        ? (body!.emails as unknown[]).filter((e): e is string => typeof e === 'string')
+        : undefined;
+      await confirmarEnvio(db, token, emails);
       res.json({ ok: true });
     } catch (e) {
       sendError(res, e, 'wo_sales_email_confirmado');
