@@ -44,6 +44,11 @@ Archivos/
 *.docx
 *.webp
 *.csv
+# Excepcion: la muestra de World Office es la fuente de verdad del formato de
+# WO-sales y columns.test.ts la lee para comparar las 57 columnas. Sin versionarla,
+# ese test pasa en local y falla en CI, y deja de proteger a todo el que no tenga
+# el fichero en su disco. Son datos de demo del ERP, no de clientes reales.
+!apps/WO-sales/DocumentosVentasEncabezadosMovimientoInventarioWO_Muestra.csv
 load_lead_times.sql
 Importar_*
 
