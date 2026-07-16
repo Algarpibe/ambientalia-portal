@@ -19,6 +19,8 @@ export interface WoSalesConfig {
   estadosVivos: string[];
   formasPago: Record<string, string>;
   formaPagoPorDefecto: string;
+  /** Asunto (y encabezado del cuerpo) del correo automático. */
+  emailAsunto: string;
 }
 
 export const DEFAULT_CONFIG: WoSalesConfig = {
@@ -59,4 +61,5 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
     '50% Contra Entrega + 50% a 30 días ff': 'Credito',
   },
   formaPagoPorDefecto: 'Credito',
+  emailAsunto: 'Nueva actualización de MovimientoInventarioWO',
 };

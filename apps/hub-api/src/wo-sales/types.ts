@@ -72,3 +72,35 @@ export interface BuildResult {
   filas: number;
   ordenes: number;
 }
+
+export interface Recipient {
+  id: string;
+  email: string;
+  nombre: string;
+  activo: boolean;
+}
+
+export interface EmailEstado {
+  ultimoHash: string | null;
+  ultimoEnvioAt: string | null;
+}
+
+export interface ResumenEmail {
+  ordenes: number;
+  filas: number;
+  cambiadas: string[];
+  advertencias: number;
+}
+
+export type EmailPendiente =
+  | { enviar: false }
+  | {
+      enviar: true;
+      xlsBase64: string;
+      nombreArchivo: string;
+      destinatarios: { email: string; nombre: string }[];
+      asunto: string;
+      cuerpo: string;
+      resumen: ResumenEmail;
+      token: string;
+    };
