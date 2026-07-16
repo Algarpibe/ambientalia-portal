@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { lazy, Suspense, Component } from 'react';
+import { Suspense, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { lazyConReintento } from './lib/lazyConReintento';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import RequireAuth from './components/RequireAuth';
@@ -16,14 +17,14 @@ import Configuracion from './pages/Configuracion';
 import AdminUsers from './pages/admin/AdminUsers';
 
 // Lazy load apps
-const ConciliadorPagos = lazy(() => import('../../payment-reconciliation/src/App'));
-const AnalisisInventario = lazy(() => import('../../inventory-optimization/src/App'));
-const ConsolidadorInventario = lazy(() => import('../../inventory-consolidation'));
-const RentabilidadClientes = lazy(() => import('../../customer-profitability/src/App'));
-const VentasArticulos = lazy(() => import('../../product-sales/src/App'));
-const LaboratoriosAmbientales = lazy(() => import('../../laboratorios-ambientales/src/App.tsx'));
-const ValoracionClientes = lazy(() => import('../../customer-valuation/src/App'));
-const CargaPedidosWO = lazy(() => import('../../WO-sales/src/App'));
+const ConciliadorPagos = lazyConReintento(() => import('../../payment-reconciliation/src/App'));
+const AnalisisInventario = lazyConReintento(() => import('../../inventory-optimization/src/App'));
+const ConsolidadorInventario = lazyConReintento(() => import('../../inventory-consolidation'));
+const RentabilidadClientes = lazyConReintento(() => import('../../customer-profitability/src/App'));
+const VentasArticulos = lazyConReintento(() => import('../../product-sales/src/App'));
+const LaboratoriosAmbientales = lazyConReintento(() => import('../../laboratorios-ambientales/src/App.tsx'));
+const ValoracionClientes = lazyConReintento(() => import('../../customer-valuation/src/App'));
+const CargaPedidosWO = lazyConReintento(() => import('../../WO-sales/src/App'));
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: { children: ReactNode }) {
