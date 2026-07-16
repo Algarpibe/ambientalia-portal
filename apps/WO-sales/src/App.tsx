@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import type { ChangeEvent } from 'react';
 import {
   FileSpreadsheet,
   Search,
@@ -162,6 +163,18 @@ function App() {
   const [descargando, setDescargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
+  const [desajuste, setDesajuste] = useState<{ revisados: number; archivo: number } | null>(null);
+
+  // Al cambiar un filtro se descarta la vista previa: el CSV se construye con el
+  // estado vivo de los inputs, así que dejar en pantalla el resumen del rango
+  // anterior permitiría descargar un archivo cuyas advertencias nadie ha visto.
+  // Las advertencias son el único cortafuegos antes de que el pedido entre al ERP.
+  const cambiarFiltro =
+    (set: (v: string) => void) => (e: ChangeEvent<HTMLInputElement>) => {
+      set(e.target.value);
+      setData(null);
+      setDesajuste(null);
+    };
 
   const queryString = () => {
     const p = new URLSearchParams({ from: desde, to: hasta });
@@ -173,6 +186,7 @@ function App() {
     setCargando(true);
     setError(null);
     setData(null);
+    setDesajuste(null);
     setAbiertos({});
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
@@ -191,12 +205,28 @@ function App() {
   const descargarCsv = async () => {
     setDescargando(true);
     setError(null);
+    setDesajuste(null);
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
       const res = await fetch(`${API_BASE}/api/wo-sales/csv?${queryString()}`, {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error(await mensajeDeError(res));
+
+      // Segunda red: el archivo se genera en una consulta aparte de la vista previa,
+      // así que puede no ser el que se revisó (una OV nueva sincronizada entretanto,
+      // por ejemplo). X-WO-Sales-Warnings cuenta SOLO los avisos del builder, que son
+      // los del archivo — sin los `ov_antigua` —, así que se compara contra
+      // avisosArchivo y no contra el total de /preview. Si el header no llega, no se
+      // puede concluir nada y no se inventa una alarma.
+      // OJO: Number(null) es 0, no NaN. Sin este chequeo explícito, un header ausente
+      // se leería como "0 avisos" y dispararía una falsa alarma en cada descarga.
+      const cabecera = res.headers.get('X-WO-Sales-Warnings');
+      const enArchivo = cabecera === null ? null : Number(cabecera);
+      if (enArchivo !== null && Number.isFinite(enArchivo) && enArchivo !== avisosArchivo) {
+        setDesajuste({ revisados: avisosArchivo, archivo: enArchivo });
+      }
+
       const blob = await res.blob();
       const nombre =
         nombreDesdeCabecera(res.headers.get('Content-Disposition')) ??
@@ -270,7 +300,7 @@ function App() {
               id="wo-desde"
               type="date"
               value={desde}
-              onChange={(e) => setDesde(e.target.value)}
+              onChange={cambiarFiltro(setDesde)}
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
             />
           </div>
@@ -282,7 +312,7 @@ function App() {
               id="wo-hasta"
               type="date"
               value={hasta}
-              onChange={(e) => setHasta(e.target.value)}
+              onChange={cambiarFiltro(setHasta)}
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
             />
           </div>
@@ -294,7 +324,7 @@ function App() {
               id="wo-cliente"
               type="text"
               value={cliente}
-              onChange={(e) => setCliente(e.target.value)}
+              onChange={cambiarFiltro(setCliente)}
               placeholder="Nombre del cliente"
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
             />
@@ -312,11 +342,36 @@ function App() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
+        <div
+          role="alert"
+          className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 flex items-start gap-3"
+        >
           <XCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
           <div>
             <p className="font-semibold text-red-900 text-sm">No se ha podido completar la operación</p>
             <p className="text-red-800 text-sm mt-0.5">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* El archivo descargado no coincide con el que se revisó en pantalla */}
+      {desajuste && (
+        <div
+          role="alert"
+          className="bg-red-50 border-2 border-red-300 rounded-2xl p-4 mb-6 flex items-start gap-3"
+        >
+          <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={20} />
+          <div>
+            <p className="font-semibold text-red-900 text-sm">
+              El archivo descargado no es el que has revisado
+            </p>
+            <p className="text-red-800 text-sm mt-0.5">
+              En pantalla revisaste {desajuste.revisados}{' '}
+              {desajuste.revisados === 1 ? 'advertencia' : 'advertencias'}, pero el archivo trae{' '}
+              {desajuste.archivo}. Las órdenes han debido cambiar mientras lo generabas.{' '}
+              <strong>No subas este archivo a World Office</strong>: vuelve a pulsar «Ver órdenes»,
+              revisa las advertencias y descárgalo otra vez.
+            </p>
           </div>
         </div>
       )}
