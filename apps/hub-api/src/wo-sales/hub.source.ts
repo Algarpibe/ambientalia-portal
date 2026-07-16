@@ -27,6 +27,21 @@ import type { WoSalesConfig } from './config.js';
  *   justo lo que ese aviso existe para evitar.
  * - LEFT JOIN a items: si el item_id no existe, sku/nombre van NULL y el builder
  *   avisa 'sin_sku' en vez de perder la línea.
+ *
+ * Verificado contra la API de Zoho (OV-2026-138), dos cosas que condicionan el mapeo:
+ *
+ * - discount_type = "entity_level": esta organización descuenta a nivel de DOCUMENTO,
+ *   no de línea. Por eso todas las líneas traen discount: 0 y el descuento real vive
+ *   en la cabecera (raw->>'discount_total', raw->>'discount_percent'). La columna
+ *   "Detalle: Descuento" del CSV se alimenta del descuento de LÍNEA, así que hoy un
+ *   descuento real NO llegaría a World Office.
+ *   VALIDAR con Xiomara: si aparece una OV con discount_total > 0, hay que decidir si
+ *   se reparte por línea (¿prorrateado por importe?) o si va a otra columna. Es una
+ *   decisión de negocio y por eso no está implementada: se deja el descuento de línea
+ *   tal cual lo da Zoho.
+ *
+ * - price_precision = 0: el COP no lleva decimales en esta organización, así que la
+ *   duda del separador decimal (punto vs coma) es teórica para importes en pesos.
  */
 const ORDENES_VIVAS_SQL = `
   WITH vivas AS (
@@ -50,7 +65,7 @@ const ORDENES_VIVAS_SQL = `
             AND i.status <> ALL($5::text[])
        )
   )
-  SELECT v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
+  SELECT v.salesorder_id, v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
          v.fecha_entrega, v.forma_pago,
          li.line_item_id,
          li.quantity,
@@ -64,20 +79,27 @@ const ORDENES_VIVAS_SQL = `
     LEFT JOIN books.items it                 ON it.item_id       = li.item_id
    ORDER BY v.fecha, v.salesorder_number, li.line_item_id`;
 
-/** Mismas reglas de "viva", pero anteriores al rango: candidatas a estar abandonadas. */
+/**
+ * Mismas reglas de "viva", pero anteriores al rango: candidatas a estar abandonadas.
+ * Aplica el mismo filtro de cliente que ordenesVivas: si el usuario pidió "ACME", no
+ * tiene sentido listarle OV antiguas de otros clientes.
+ */
 const ORDENES_ANTIGUAS_SQL = `
   SELECT so.salesorder_number, so.date::text AS fecha, so.customer_name
     FROM books.sales_orders so
    WHERE so.status = ANY($1::text[])
      AND so.date < $2::date
+     AND ($3::text IS NULL OR so.customer_name ILIKE '%' || $3 || '%')
      AND NOT EXISTS (
        SELECT 1 FROM books.invoices i
         WHERE i.salesorder_id = so.salesorder_id
-          AND i.status <> ALL($3::text[])
+          AND i.status <> ALL($4::text[])
      )
    ORDER BY so.date`;
 
 interface Fila {
+  /** La PK real. Se agrupa por aquí, no por el número (ver ordenesVivas). */
+  salesorder_id: string;
   salesorder_number: string;
   fecha: string;
   customer_name: string | null;
@@ -96,26 +118,39 @@ interface Fila {
   centro_costos: string | null;
 }
 
-/** cf_centro_de_costos es multiselect: Zoho separa los valores con coma. */
-function contarCentros(valor: string | null): number {
-  if (!valor) return 0;
-  return valor.split(',').filter((s) => s.trim()).length;
-}
-
-function primerCentro(valor: string | null): string | null {
-  if (!valor) return null;
-  return valor.split(',')[0].trim() || null;
+/**
+ * cf_centro_de_costos es multiselect: Zoho separa los valores con coma. Una sola
+ * función para partir, porque contar y coger el primero tienen que estar de acuerdo:
+ * con ", 5501 HORIBA" (coma inicial), contar filtrando vacíos y coger split[0] a
+ * ciegas daban count 1 y valor null, perdiendo un centro que sí existe.
+ */
+function centros(valor: string | null): string[] {
+  if (!valor) return [];
+  return valor.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 /**
+ * Para el descuento: aquí el 0 SÍ es correcto, porque el campo ausente en el raw
+ * significa "sin descuento", no "dato que falta".
+ *
  * El `discount` del raw NO se castea a ::numeric en SQL a propósito: Zoho lo documenta
  * como "% o importe" ("12.5%" o "190"), y un solo '12.5%'::numeric aborta la consulta
  * entera con invalid input syntax, tumbando el export de todas las OV. Aquí un valor
- * no numérico se vuelve NaN, y el builder lo caza con 'valor_no_numerico': deja la
- * columna vacía y avisa de esa línea, en vez de romperlo todo o inventarse un 0.
+ * presente pero no numérico se vuelve NaN, y el builder lo caza con 'valor_no_numerico':
+ * deja la columna vacía y avisa de esa línea, en vez de romperlo todo.
  */
 function aNumero(valor: unknown): number {
   if (valor === null || valor === undefined || valor === '') return 0;
+  return Number(valor);
+}
+
+/**
+ * Para los campos obligatorios (cantidad, valor unitario): un NULL en la réplica NO
+ * es un 0 — es un dato que falta. Propaga NaN para que num() del builder lo cace y
+ * deje la celda vacía con aviso, en vez de escribir un 0 que nadie revisaría.
+ */
+function aNumeroObligatorio(valor: unknown): number {
+  if (valor === null || valor === undefined || valor === '') return NaN;
   return Number(valor);
 }
 
@@ -130,9 +165,12 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         config.estadosFacturaIgnorados,
       ]);
 
+      // Clave = salesorder_id (la PK), no el número: si dos OV compartieran número,
+      // agrupar por número fundiría sus líneas en un pedido y el CSV reservaría mal
+      // el inventario. Hoy no pasa, pero quitar la suposición sale gratis.
       const porOrden = new Map<string, SalesOrder>();
       for (const f of rows as Fila[]) {
-        let ov = porOrden.get(f.salesorder_number);
+        let ov = porOrden.get(f.salesorder_id);
         if (!ov) {
           ov = {
             numero: f.salesorder_number,
@@ -144,19 +182,20 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
             moneda: f.currency_code,
             lineas: [],
           };
-          porOrden.set(f.salesorder_number, ov);
+          porOrden.set(f.salesorder_id, ov);
         }
         // OV sin líneas: el LEFT JOIN da una fila con todo el detalle en NULL. La OV
         // queda registrada (con lineas: []) para que el builder avise 'ov_sin_lineas'.
         if (f.line_item_id === null) continue;
+        const cc = centros(f.centro_costos);
         const linea: SalesOrderLine = {
           sku: f.sku,
           descripcion: f.item_name,
-          cantidad: aNumero(f.quantity),
-          valorUnitario: aNumero(f.rate),
+          cantidad: aNumeroObligatorio(f.quantity),
+          valorUnitario: aNumeroObligatorio(f.rate),
           descuento: aNumero(f.descuento),
-          centroCostos: primerCentro(f.centro_costos),
-          centrosCostosCount: contarCentros(f.centro_costos),
+          centroCostos: cc[0] ?? null,
+          centrosCostosCount: cc.length,
         };
         ov.lineas.push(linea);
       }
@@ -167,6 +206,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
       const { rows } = await db.query(ORDENES_ANTIGUAS_SQL, [
         config.estadosVivos,
         filtro.desde,
+        filtro.cliente ?? null,
         config.estadosFacturaIgnorados,
       ]);
       return (rows as { salesorder_number: string; fecha: string; customer_name: string | null }[]).map(
