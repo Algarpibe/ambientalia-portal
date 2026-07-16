@@ -36,7 +36,11 @@ export const COLUMNS: readonly string[] = [
   'Detalle: Descuento',
   'Detalle: Vencimiento',
   'Detalle: Nota',
+  // OJO: existen dos columnas de centro de costos, casi homónimas y en extremos
+  // opuestos del array: esta (descripción, índice 40) y 'Detalle: Código Centro
+  // Costos' (código, índice 56). Zoho da ambos valores en un solo campo,
+  // "330801 CALIBRACION ENVIRO", que el builder parte en dos.
   'Detalle: Centro costos',
   ...PERSONALIZADOS_DETALLE,
   'Detalle: Código Centro Costos',
-] as const;
+];
