@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
+import Destinatarios from './Destinatarios';
 import {
   FileSpreadsheet,
   Search,
@@ -614,6 +615,8 @@ function App() {
           </section>
         </>
       )}
+
+      <Destinatarios />
     </main>
   );
 }
