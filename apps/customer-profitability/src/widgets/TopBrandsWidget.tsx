@@ -7,6 +7,9 @@ import { analyze, formatMoney } from './analysis';
 
 const BAR_COLOR = '#6366f1';
 
+/** Acorta la etiqueta del eje para que no se parta en varias líneas. */
+const truncate = (s: string, max = 16) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
 export default function TopBrandsWidget() {
   const { sales, products, loading, error } = useProfitabilityData();
   const data = useMemo(() => {
@@ -25,13 +28,16 @@ export default function TopBrandsWidget() {
         <YAxis
           type="category"
           dataKey="name"
-          width={110}
+          width={120}
           tick={{ fontSize: 11, fill: '#64748b' }}
+          tickFormatter={(v: string) => truncate(v)}
           tickLine={false}
           axisLine={false}
+          interval={0}
         />
         <Tooltip
           formatter={(v) => [formatMoney(Number(v) || 0), 'Ventas']}
+          labelFormatter={(label) => String(label)}
           cursor={{ fill: 'rgba(99,102,241,0.06)' }}
           contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
         />
