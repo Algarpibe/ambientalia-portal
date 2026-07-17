@@ -1,6 +1,7 @@
 import type { WidgetDescriptor } from '../../../portal/src/widgets/types';
 import SummaryWidget from './SummaryWidget';
 import TopPendingWidget from './TopPendingWidget';
+import OpenInvoicesWidget from './OpenInvoicesWidget';
 
 // Widgets que esta app expone al Dashboard del Portal. El Portal los descubre
 // vía import dinámico (portal/src/widgets/registry.ts).
@@ -21,6 +22,14 @@ const widgets: WidgetDescriptor[] = [
     description: 'Ranking de clientes con mayor saldo pendiente por conciliar.',
     defaultSize: { w: 5, h: 4 },
     component: TopPendingWidget,
+  },
+  {
+    id: 'payment-reconciliation-open-invoices',
+    appId: 'payment-reconciliation',
+    name: 'Facturas Pendientes y Parciales',
+    description: 'Facturas con saldo por cobrar, de vencimiento más próximo a más lejano.',
+    defaultSize: { w: 8, h: 5 },
+    component: OpenInvoicesWidget,
   },
 ];
 
