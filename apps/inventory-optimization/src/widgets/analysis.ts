@@ -33,6 +33,59 @@ export interface InventorySummary {
 const EOQ_DEFAULT_ORDER_COST = 100;
 const EOQ_DEFAULT_HOLDING_RATE = 25;
 
+/** Corre el motor de análisis de la app sobre los datos crudos del hub. */
+export function runAnalysis(data: InventoryData): AnalysisResult[] {
+  return processInventoryData(
+    data.sales2026,
+    data.sales2025,
+    data.sales2024,
+    data.sales2023,
+    data.inventory,
+    data.leadTime,
+    EOQ_DEFAULT_ORDER_COST,
+    EOQ_DEFAULT_HOLDING_RATE,
+  );
+}
+
+// ─── Pedidos urgentes (tabla) ────────────────────────────────────────────────
+
+/** Fila de la tabla "Pedidos Urgentes" (mismas columnas que la pantalla). */
+export interface UrgentRow {
+  manufacturer: string;   // Fabricante
+  sku: string;            // SKU
+  itemName: string;       // Artículo
+  category: string;       // Categoría
+  physical: number;       // Existencias físicas
+  accounting: number;     // Existencias de contabilidad
+  factoryOrder: number;   // Pedido a fábrica (por recibir)
+  committed: number;      // Comprometido
+  available: number;      // Disponible (contable)
+  futureAvailable: number; // Disponible a futuro
+}
+
+/** Filas de la pestaña "Pedidos Urgentes": artículos con estado 'Urgente'. */
+export function urgentOrders(data: InventoryData): UrgentRow[] {
+  return runAnalysis(data)
+    .filter((r) => r.status === 'Urgente')
+    .map((r) => ({
+      manufacturer: r.manufacturer || '—',
+      sku: r.sku,
+      itemName: r.itemName,
+      category: r.category || '—',
+      physical: Math.round(r.physicalHandQuantity),
+      accounting: Math.round(r.handQuantity),
+      factoryOrder: Math.round(r.orderedQuantity),
+      committed: Math.round(r.committedQuantity),
+      available: Math.round(r.availableQuantity),
+      futureAvailable: Math.round(r.futureAvailable),
+    }));
+}
+
+/** Lista ordenada de fabricantes presentes en un conjunto de filas. */
+export function manufacturersOf(rows: UrgentRow[]): string[] {
+  return [...new Set(rows.map((r) => r.manufacturer))].filter((m) => m && m !== '—').sort();
+}
+
 /** Calcula el resumen de inventario a partir de los datos crudos del hub. */
 export function analyze(data: InventoryData): InventorySummary {
   const empty: InventorySummary = {
@@ -46,16 +99,7 @@ export function analyze(data: InventoryData): InventorySummary {
     atRisk: [],
   };
 
-  const results: AnalysisResult[] = processInventoryData(
-    data.sales2026,
-    data.sales2025,
-    data.sales2024,
-    data.sales2023,
-    data.inventory,
-    data.leadTime,
-    EOQ_DEFAULT_ORDER_COST,
-    EOQ_DEFAULT_HOLDING_RATE,
-  );
+  const results: AnalysisResult[] = runAnalysis(data);
 
   if (results.length === 0) return empty;
 
