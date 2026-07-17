@@ -12,6 +12,7 @@ import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
 import { getCustomerValuationData } from './customerValuation.js';
+import { getPendingSalesOrders } from './salesOrders.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -126,6 +127,15 @@ app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
     res.json(data);
   } catch (e) {
     sendError(res, e, 'customer-valuation');
+  }
+});
+
+app.get('/api/sales-orders/pending', requireAuth, async (_req, res) => {
+  try {
+    const data = await cached('sales-orders-pending', () => getPendingSalesOrders(getHubPool()));
+    res.json({ orders: data });
+  } catch (e) {
+    sendError(res, e, 'sales-orders-pending');
   }
 });
 

@@ -1,3 +1,5 @@
+import { ESTADOS_OV_POR_FACTURAR } from '../salesOrderStatus.js';
+
 /**
  * Todo lo ajustable del formato en un solo sitio: valores fijos, campos en disputa
  * y homologaciones. La lógica del builder no debe contener ninguna constante.
@@ -40,13 +42,11 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   // VALIDAR con Xiomara: la descripción dice vacío; la muestra trae fecha.
   vencimiento: '',
 
-  // Verificado en la base: open 16, overdue 11, partially_invoiced 6 = 33 OV vivas.
-  // (invoiced 1073, void 23, draft 1, pending_approval 1 quedan fuera.)
-  // Las parcialmente facturadas entran, pero SOLO con sus líneas aún pendientes: lo ya
-  // facturado se descuenta por línea con quantity_invoiced (ver hub.source.ts). Por eso
-  // ya no hay lista de "estados de factura que excluyen la OV": una OV totalmente
-  // facturada sale por su status ('invoiced'), no por mirar sus facturas.
-  estadosVivos: ['open', 'overdue', 'partially_invoiced'],
+  // Fuente única en salesOrderStatus.ts (la comparte el endpoint de órdenes por
+  // facturar). Las parcialmente facturadas entran, pero SOLO con sus líneas aún
+  // pendientes: lo ya facturado se descuenta por línea con quantity_invoiced (ver
+  // hub.source.ts). Una OV totalmente facturada sale por su status ('invoiced').
+  estadosVivos: [...ESTADOS_OV_POR_FACTURAR],
 
   // VALIDAR con Xiomara, sobre todo los mixtos. Las 8 etiquetas son las reales de
   // las OV vivas; ninguna es Credito/Contado, que es lo que usa la muestra de WO.
