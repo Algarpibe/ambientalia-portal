@@ -3,13 +3,30 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AuthState } from '../hooks/useAuth';
+import type { RegistryState } from '../hooks/useWidgetRegistry';
+import type { WidgetDescriptor } from '../widgets/types';
 import Dashboard from './Dashboard';
 
-const state = vi.hoisted(() => ({ value: null as AuthState | null }));
-vi.mock('../hooks/useAuth', () => ({ useAuth: () => state.value }));
+const authState = vi.hoisted(() => ({ value: null as AuthState | null }));
+const registryState = vi.hoisted(() => ({ value: { status: 'ready', widgets: [] } as RegistryState }));
 
-function renderDashboard(apps: string[]) {
-  state.value = { isAuthenticated: true, user_id: 'u', email: 'e@x.com', role: 'reader', apps };
+vi.mock('../hooks/useAuth', () => ({ useAuth: () => authState.value }));
+vi.mock('../hooks/useWidgetRegistry', () => ({ useWidgetRegistry: () => registryState.value }));
+// Layout siempre vacío: el foco de estos tests es el estado del panel, no la persistencia.
+vi.mock('../hooks/useDashboardLayout', () => ({
+  useDashboardLayout: () => ({
+    layoutItems: [],
+    anchoredWidgetIds: new Set<string>(),
+    addWidget: vi.fn(),
+    removeWidget: vi.fn(),
+    onLayoutChange: vi.fn(),
+    persistError: null,
+  }),
+}));
+
+function renderDashboard(apps: string[], registry: RegistryState = { status: 'ready', widgets: [] }) {
+  authState.value = { isAuthenticated: true, user_id: 'u', email: 'e@x.com', role: 'reader', apps };
+  registryState.value = registry;
   render(
     <MemoryRouter>
       <Dashboard />
@@ -17,28 +34,48 @@ function renderDashboard(apps: string[]) {
   );
 }
 
+const fakeWidget = (id: string): WidgetDescriptor => ({
+  id,
+  appId: 'customer-profitability',
+  name: `Widget ${id}`,
+  description: 'desc',
+  defaultSize: { w: 4, h: 3 },
+  component: () => null,
+});
+
 afterEach(cleanup);
 
-describe('Dashboard — filtrado por apps asignadas (Req 4.4)', () => {
-  it('muestra solo las apps asignadas', () => {
-    renderDashboard(['payment-reconciliation', 'customer-profitability']);
-    expect(screen.getByText('Conciliador de Pagos')).toBeTruthy();
-    expect(screen.getByText('Rentabilidad Clientes')).toBeTruthy();
-    // No asignadas → ocultas.
-    expect(screen.queryByText('Análisis de Inventario')).toBeNull();
-    expect(screen.queryByText('Consolidador de Inventario')).toBeNull();
-    expect(screen.queryByText('Valoración de Clientes')).toBeNull();
+describe('Dashboard — panel de widgets', () => {
+  it('muestra los controles del panel (Mi Panel, Editar panel)', () => {
+    renderDashboard(['customer-profitability']);
+    expect(screen.getByText('Mi Panel')).toBeTruthy();
+    expect(screen.getByText(/Editar panel/i)).toBeTruthy();
   });
 
-  it('sin apps asignadas → estado vacío, ninguna tarjeta', () => {
+  it('sin apps asignadas → aviso de contactar al administrador', () => {
     renderDashboard([]);
     expect(screen.getByText(/No tienes aplicaciones asignadas/i)).toBeTruthy();
-    expect(screen.queryByText('Conciliador de Pagos')).toBeNull();
   });
 
-  it('app en sección Herramientas también se filtra', () => {
-    renderDashboard(['product-sales']); // "Ventas Artículos" (herramientas)
-    expect(screen.getByText('Ventas Artículos')).toBeTruthy();
+  it('con apps pero sin widgets anclados ni disponibles → panel vacío', () => {
+    renderDashboard(['customer-profitability'], { status: 'ready', widgets: [] });
+    expect(screen.getByText(/Tu panel está vacío/i)).toBeTruthy();
+    expect(screen.getByText(/Aún no hay widgets disponibles/i)).toBeTruthy();
+  });
+
+  it('con widgets disponibles no anclados → invita a añadir', () => {
+    renderDashboard(['customer-profitability'], { status: 'ready', widgets: [fakeWidget('w1')] });
+    expect(screen.getByText(/Añade widgets de tus aplicaciones/i)).toBeTruthy();
+  });
+
+  it('registry cargando → muestra spinner de carga', () => {
+    renderDashboard(['customer-profitability'], { status: 'loading' });
+    expect(screen.getByText(/Cargando widgets/i)).toBeTruthy();
+  });
+
+  it('el directorio de apps ya no se renderiza en el dashboard', () => {
+    renderDashboard(['payment-reconciliation', 'customer-profitability']);
     expect(screen.queryByText('Conciliador de Pagos')).toBeNull();
+    expect(screen.queryByText('Todas mis aplicaciones')).toBeNull();
   });
 });
