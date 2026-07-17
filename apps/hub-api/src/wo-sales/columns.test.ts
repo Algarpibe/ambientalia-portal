@@ -16,7 +16,12 @@ describe('COLUMNS', () => {
   it('coincide exactamente con la cabecera del CSV de muestra', () => {
     const bytes = readFileSync(MUESTRA);
     const texto = new TextDecoder('windows-1252').decode(bytes);
-    const cabecera = texto.split('\r\n')[0].split(';');
+    // Se parte con /\r?\n/ y no con '\r\n': la muestra está versionada con LF, y
+    // git solo la entrega con CRLF donde autocrlf lo hace (Windows). Asumir CRLF
+    // hacía que en Linux (CI) no se encontrara ningún salto: el archivo entero se
+    // tomaba como una línea y la cabecera salía con 393 campos en vez de 57.
+    // El EOL real del archivo que se genera no depende de esto: lo fija builder.ts.
+    const cabecera = texto.split(/\r?\n/)[0].split(';');
     expect(COLUMNS).toEqual(cabecera);
   });
 
