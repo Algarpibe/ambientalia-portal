@@ -35,7 +35,10 @@ const fmtDate = (iso: string | null) => {
 
 const isPartial = (status: string) => status === 'partially_invoiced';
 
-export default function SalesOrdersPending() {
+// `bare`: sin la tarjeta exterior y ocupando todo el alto — para embeberla en una
+// celda del dashboard (el WidgetCell ya aporta tarjeta y padding). Sin `bare` se
+// usa como vista de pestaña en la app, con su propia tarjeta.
+export default function SalesOrdersPending({ bare = false }: { bare?: boolean }) {
   const [orders, setOrders] = useState<PendingOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +84,11 @@ export default function SalesOrdersPending() {
 
   const totalPending = useMemo(() => filtered.reduce((s, o) => s + o.pending, 0), [filtered]);
 
+  const stateBox = 'flex flex-col items-center justify-center h-full min-h-[240px] gap-4';
+
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+      <div className={stateBox}>
         <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
         <span className="text-slate-500 font-medium">Cargando órdenes por facturar…</span>
       </div>
@@ -92,7 +97,7 @@ export default function SalesOrdersPending() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+      <div className={stateBox}>
         <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2 text-sm border border-red-100">
           <AlertCircle size={18} /> {error}
         </div>
@@ -104,9 +109,13 @@ export default function SalesOrdersPending() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-hidden">
+    <div
+      className={`flex flex-col overflow-hidden ${
+        bare ? 'h-full' : 'bg-white rounded-2xl border border-slate-100 shadow-soft'
+      }`}
+    >
       {/* Controles */}
-      <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100">
+      <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100 shrink-0">
         <select
           value={client}
           onChange={(e) => setClient(e.target.value)}
@@ -142,9 +151,9 @@ export default function SalesOrdersPending() {
       </div>
 
       {/* Tabla */}
-      <div className="overflow-x-auto">
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full text-sm border-collapse min-w-[820px]">
-          <thead className="bg-slate-50">
+          <thead className="bg-slate-50 sticky top-0 z-10">
             <tr>
               {['Fecha', 'Orden de Venta', 'Cliente'].map((h) => (
                 <th key={h} className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>

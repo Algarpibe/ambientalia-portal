@@ -37,7 +37,7 @@ const widgets: WidgetDescriptor[] = [
     appId: 'payment-reconciliation',
     name: 'Órdenes por Facturar',
     description: 'Órdenes de venta sin facturar o parciales, con el valor pendiente por facturar.',
-    defaultSize: { w: 5, h: 4 },
+    defaultSize: { w: 8, h: 5 },
     component: PendingSalesOrdersWidget,
   },
 ];
