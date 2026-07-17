@@ -5,6 +5,7 @@
 // que muestra la pantalla de "Análisis de Inventario".
 
 import { processInventoryData } from '../utils/calculations';
+import { isUrgentItem } from '../utils/resultTableLogic';
 import type { AnalysisResult } from '../types';
 import type { InventoryData } from './useInventoryData';
 
@@ -29,11 +30,12 @@ export interface InventorySummary {
   atRisk: RiskItem[];      // artículos en riesgo, del más crítico al menos
 }
 
-// Parámetros EOQ por defecto (los mismos que usa la app si no se tocan los sliders).
-const EOQ_DEFAULT_ORDER_COST = 100;
-const EOQ_DEFAULT_HOLDING_RATE = 25;
-
-/** Corre el motor de análisis de la app sobre los datos crudos del hub. */
+/**
+ * Corre el motor de análisis de la app sobre los datos crudos del hub. Se omiten
+ * los parámetros EOQ para que rijan los valores por defecto de processInventoryData
+ * (los mismos que la app usa si no se tocan los sliders); así no se duplican aquí
+ * unas constantes que podrían quedar desfasadas.
+ */
 export function runAnalysis(data: InventoryData): AnalysisResult[] {
   return processInventoryData(
     data.sales2026,
@@ -42,8 +44,6 @@ export function runAnalysis(data: InventoryData): AnalysisResult[] {
     data.sales2023,
     data.inventory,
     data.leadTime,
-    EOQ_DEFAULT_ORDER_COST,
-    EOQ_DEFAULT_HOLDING_RATE,
   );
 }
 
@@ -63,10 +63,16 @@ export interface UrgentRow {
   futureAvailable: number; // Disponible a futuro
 }
 
-/** Filas de la pestaña "Pedidos Urgentes": artículos con estado 'Urgente'. */
+/**
+ * Filas de la pestaña "Pedidos Urgentes". Usa EXACTAMENTE el mismo predicado que
+ * la pantalla (`isUrgentItem` de utils/resultTableLogic), no `status === 'Urgente'`:
+ * son criterios distintos en la app — el status alimenta la tarjeta "Urgente (pedir
+ * ya)" del resumen, mientras que la pestaña filtra por reposición sugerida (> 0)
+ * contra el umbral de pedido. Filtrar por status daba otra lista de artículos.
+ */
 export function urgentOrders(data: InventoryData): UrgentRow[] {
   return runAnalysis(data)
-    .filter((r) => r.status === 'Urgente')
+    .filter(isUrgentItem)
     .map((r) => ({
       manufacturer: r.manufacturer || '—',
       sku: r.sku,
