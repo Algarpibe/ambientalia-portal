@@ -1,0 +1,197 @@
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
+
+// Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
+// desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
+
+const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
+
+function authHeaders(): Record<string, string> {
+  const t = localStorage.getItem('ambientalia_token');
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+interface PendingOrder {
+  salesorder_number: string;
+  date: string;
+  customer_name: string | null;
+  status: string;
+  currency_code: string | null;
+  total: number;
+  pending: number;
+  shipment_date: string | null;
+}
+
+type StatusFilter = 'all' | 'unbilled' | 'partial';
+
+const money = (v: number) =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v || 0);
+
+const fmtDate = (iso: string | null) => {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('T')[0].split('-');
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+};
+
+const isPartial = (status: string) => status === 'partially_invoiced';
+
+export default function SalesOrdersPending() {
+  const [orders, setOrders] = useState<PendingOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [client, setClient] = useState<string>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (!API_BASE) throw new Error('Falta VITE_HUB_API_URL');
+      const res = await fetch(`${API_BASE}/api/sales-orders/pending`, { headers: authHeaders() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data?.orders)) throw new Error('Formato inesperado del hub');
+      setOrders(data.orders);
+    } catch (err) {
+      setError('No se pudieron cargar las órdenes por facturar.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const clients = useMemo(
+    () => [...new Set(orders.map((o) => o.customer_name).filter((c): c is string => !!c))].sort(),
+    [orders],
+  );
+
+  const filtered = useMemo(() => {
+    return orders.filter((o) => {
+      if (client !== 'all' && o.customer_name !== client) return false;
+      if (status === 'partial' && !isPartial(o.status)) return false;
+      if (status === 'unbilled' && isPartial(o.status)) return false;
+      return true;
+    });
+  }, [orders, client, status]);
+
+  const totalPending = useMemo(() => filtered.reduce((s, o) => s + o.pending, 0), [filtered]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+        <span className="text-slate-500 font-medium">Cargando órdenes por facturar…</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+        <div className="p-4 bg-red-50 text-red-600 rounded-xl flex items-center gap-2 text-sm border border-red-100">
+          <AlertCircle size={18} /> {error}
+        </div>
+        <button onClick={load} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold">
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-hidden">
+      {/* Controles */}
+      <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100">
+        <select
+          value={client}
+          onChange={(e) => setClient(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none max-w-xs"
+        >
+          <option value="all">Todos los clientes ({clients.length})</option>
+          {clients.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value as StatusFilter)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none"
+        >
+          <option value="all">Todos los estados</option>
+          <option value="unbilled">Sin facturar</option>
+          <option value="partial">Parcial</option>
+        </select>
+
+        <div className="ml-auto flex items-center gap-4 text-sm">
+          <span className="text-slate-500">
+            <strong className="text-slate-800">{filtered.length}</strong> órdenes
+          </span>
+          <span className="text-slate-500">
+            Pendiente por facturar: <strong className="text-indigo-700">{money(totalPending)}</strong>
+          </span>
+          <button onClick={load} title="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50">
+            <RefreshCw size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Tabla */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse min-w-[820px]">
+          <thead className="bg-slate-50">
+            <tr>
+              {['Fecha', 'Orden de Venta', 'Cliente'].map((h) => (
+                <th key={h} className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+              ))}
+              <th className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">Estado</th>
+              {['Total', 'Pendiente por Facturar'].map((h) => (
+                <th key={h} className="px-4 py-3 text-right font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+              ))}
+              <th className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">Entrega</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                  No hay órdenes por facturar con estos filtros.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((o) => {
+                const partial = isPartial(o.status);
+                return (
+                  <tr key={o.salesorder_number} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(o.date)}</td>
+                    <td className="px-4 py-3 font-semibold text-indigo-700 whitespace-nowrap">{o.salesorder_number}</td>
+                    <td className="px-4 py-3 text-slate-700 max-w-[240px] truncate" title={o.customer_name ?? ''}>
+                      {o.customer_name ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span
+                        className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          partial ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {partial ? '◐ Parcial' : '○ Sin facturar'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 whitespace-nowrap">{money(o.total)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-indigo-700 whitespace-nowrap">{money(o.pending)}</td>
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(o.shipment_date)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

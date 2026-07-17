@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
-import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
+import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical, ClipboardList } from 'lucide-react';
 import './App.css';
 import type { InvoiceDetails, PaymentRecord, ReconciledRow, DateRangeOption } from './types';
 import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
+import SalesOrdersPending from './SalesOrdersPending';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 
-type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis';
+type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis' | 'salesOrders';
 
 function App() {
   const [invoices, setInvoices] = useState<InvoiceDetails[]>([]);
@@ -363,6 +364,16 @@ function App() {
           >
             <BarChart3 size={18} />
             KPIs
+          </button>
+          <button
+            onClick={() => setActiveView('salesOrders')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${activeView === 'salesOrders'
+              ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-600'
+              : 'text-slate-500 hover:bg-slate-50 border-b-2 border-transparent'
+              }`}
+          >
+            <ClipboardList size={18} />
+            Órdenes por Facturar
           </button>
         </div>
       </header>
@@ -908,6 +919,9 @@ function App() {
             mode="kpis"
           />
         )}
+
+        {/* Órdenes por Facturar View — autocontenida (su propio fetch al hub) */}
+        {activeView === 'salesOrders' && <SalesOrdersPending />}
 
       </main>
     </div >
