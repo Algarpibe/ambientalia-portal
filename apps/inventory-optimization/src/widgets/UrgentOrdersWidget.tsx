@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useInventoryData } from './useInventoryData';
 import { urgentOrders, manufacturersOf, type UrgentRow } from './analysis';
 import { useSortable, sortArrow } from './useSortable';
+import { useColumnOrder } from './useColumnOrder';
 
 // Widget: tabla "Pedidos Urgentes" (artículos con estado 'Urgente'), con las
 // mismas columnas que la pantalla de la app y un filtro por fabricante.
@@ -53,6 +54,9 @@ export default function UrgentOrdersWidget() {
     [byManufacturer, category],
   );
   const { sorted, sortKey, sortDir, toggle } = useSortable<UrgentRow>(filtered);
+  const { order, dragProps, dragging } = useColumnOrder('cols_urgent_orders', COLS.map((c) => c.key));
+  const colMap = useMemo(() => Object.fromEntries(COLS.map((c) => [c.key, c])) as Record<string, (typeof COLS)[number]>, []);
+  const orderedCols = order.map((k) => colMap[k]).filter(Boolean);
 
   if (loading) return <StateMsg>Cargando…</StateMsg>;
   if (error) return <StateMsg tone="error">{error}</StateMsg>;
@@ -98,11 +102,13 @@ export default function UrgentOrdersWidget() {
         <table className="w-full text-xs border-collapse min-w-[640px]">
           <thead className="sticky top-0 bg-gray-50 z-10">
             <tr>
-              {COLS.map((c) => (
+              {orderedCols.map((c) => (
                 <th
                   key={c.key}
+                  {...dragProps(c.key)}
                   onClick={() => toggle(c.key)}
-                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'}`}
+                  title="Clic para ordenar · arrastra para mover la columna"
+                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-move select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'} ${dragging === c.key ? 'opacity-40' : ''}`}
                 >
                   {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>
@@ -112,7 +118,7 @@ export default function UrgentOrdersWidget() {
           <tbody>
             {sorted.map((r, i) => (
               <tr key={`${r.sku}-${i}`} className="border-b border-gray-100 hover:bg-gray-50">
-                {COLS.map((c) => {
+                {orderedCols.map((c) => {
                   const value = r[c.key];
                   return (
                     <td
