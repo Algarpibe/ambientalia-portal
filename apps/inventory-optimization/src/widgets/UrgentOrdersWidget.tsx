@@ -37,10 +37,20 @@ export default function UrgentOrdersWidget() {
     }
   }, [manufacturer, manufacturers]);
 
+  const [category, setCategory] = useState<string>('all');
   const selected = manufacturer ?? '';
-  const filtered = useMemo(
+  // Filtra primero por fabricante; las categorías disponibles salen de ese subconjunto.
+  const byManufacturer = useMemo(
     () => (selected ? rows.filter((r) => r.manufacturer === selected) : rows),
     [rows, selected],
+  );
+  const categories = useMemo(
+    () => [...new Set(byManufacturer.map((r) => r.category).filter((c) => c && c !== '—'))].sort(),
+    [byManufacturer],
+  );
+  const filtered = useMemo(
+    () => (category === 'all' ? byManufacturer : byManufacturer.filter((r) => r.category === category)),
+    [byManufacturer, category],
   );
   const { sorted, sortKey, sortDir, toggle } = useSortable<UrgentRow>(filtered);
 
@@ -57,17 +67,30 @@ export default function UrgentOrdersWidget() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
         <select
           aria-label="Filtrar por fabricante"
           value={selected}
-          onChange={(e) => setManufacturer(e.target.value)}
-          className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none max-w-[60%]"
+          onChange={(e) => { setManufacturer(e.target.value); setCategory('all'); }}
+          className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none max-w-[10rem]"
         >
           <option value="">Todos los fabricantes</option>
           {manufacturers.map((m) => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
+        <select
+          aria-label="Filtrar por categoría"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 focus:outline-none max-w-[10rem]"
+        >
+          <option value="all">Todas las categorías</option>
+          {categories.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        </div>
         <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} en vista</span>
       </div>
 
