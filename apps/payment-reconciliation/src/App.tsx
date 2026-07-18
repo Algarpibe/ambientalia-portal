@@ -17,7 +17,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string>('all');
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  // Orden por defecto: fecha de factura descendente (de la más nueva a la más antigua).
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'invoiceDate', direction: 'desc' });
   const [activeView, setActiveView] = useState<ActiveView>('reconciliation');
   const [dateRange, setDateRange] = useState<DateRangeOption>('all');
   const [customStartDate, setCustomStartDate] = useState<string>('');
