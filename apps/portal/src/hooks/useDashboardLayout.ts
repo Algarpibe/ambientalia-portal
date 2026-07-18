@@ -8,25 +8,21 @@ import {
   type WidgetDescriptor,
 } from '../widgets/types';
 
-// Gestiona el layout de widgets anclados por usuario: lectura/persistencia en
-// localStorage, packing al añadir, y reconciliación cuando una app deja de estar
-// disponible. Ver design.md, Propiedades 4, 6, 7, 9, 10.
+// Gestiona el layout de widgets por usuario. El panel AUTO-PUEBLA con todos los
+// widgets de las apps asignadas (los que devuelve el registry): cualquier widget
+// disponible que no esté ya puesto y que el usuario no haya quitado se añade solo.
+// Al quitar un widget se marca como "descartado" (no vuelve a auto-añadirse; se
+// puede re-añadir desde el catálogo). Persistencia en localStorage por usuario.
 
 const GRID_COLS = 12;
 const PERSIST_DEBOUNCE_MS = 500;
 
 export interface DashboardLayoutHook {
-  /** Items del layout actualmente anclados. */
   layoutItems: LayoutItem[];
-  /** IDs de widgets anclados (para filtrar el CatalogPanel). */
   anchoredWidgetIds: Set<string>;
-  /** Añade un widget al grid en la primera posición libre disponible. */
   addWidget: (descriptor: WidgetDescriptor) => void;
-  /** Elimina un widget del grid. */
   removeWidget: (widgetId: string) => void;
-  /** Callback para el evento onLayoutChange de react-grid-layout. */
   onLayoutChange: (newLayout: Layout[]) => void;
-  /** Error de persistencia (null si no hay error). */
   persistError: string | null;
 }
 
@@ -34,15 +30,14 @@ function storageKey(userId: string): string {
   return `dashboard_layout_${userId}`;
 }
 
-/** Lee y valida el LayoutConfig del usuario; vacío si ausente/corrupto. */
-function readLayout(userId: string): LayoutItem[] {
+/** Lee items + descartados del usuario; vacío si ausente/corrupto. */
+function readLayout(userId: string): { items: LayoutItem[]; dismissed: Set<string> } {
   try {
     const raw = localStorage.getItem(storageKey(userId));
-    if (!raw) return [];
+    if (!raw) return { items: [], dismissed: new Set() };
     const parsed: unknown = JSON.parse(raw);
-    if (!isValidLayoutConfig(parsed)) return [];
-    // Filtra items que no tengan la forma esperada (defensivo).
-    return parsed.widgets.filter(
+    if (!isValidLayoutConfig(parsed)) return { items: [], dismissed: new Set() };
+    const items = parsed.widgets.filter(
       (it): it is LayoutItem =>
         !!it &&
         typeof (it as LayoutItem).widgetId === 'string' &&
@@ -51,14 +46,18 @@ function readLayout(userId: string): LayoutItem[] {
         typeof (it as LayoutItem).w === 'number' &&
         typeof (it as LayoutItem).h === 'number',
     );
+    const dismissed = new Set(
+      Array.isArray(parsed.dismissed) ? parsed.dismissed.filter((d): d is string => typeof d === 'string') : [],
+    );
+    return { items, dismissed };
   } catch {
-    return [];
+    return { items: [], dismissed: new Set() };
   }
 }
 
-/** Persiste el layout; devuelve true si tuvo éxito. */
-function writeLayout(userId: string, items: LayoutItem[]): boolean {
-  const config: LayoutConfig = { version: LAYOUT_SCHEMA_VERSION, widgets: items };
+/** Persiste layout + descartados; devuelve true si tuvo éxito. */
+function writeLayout(userId: string, items: LayoutItem[], dismissed: Set<string>): boolean {
+  const config: LayoutConfig = { version: LAYOUT_SCHEMA_VERSION, widgets: items, dismissed: [...dismissed] };
   try {
     localStorage.setItem(storageKey(userId), JSON.stringify(config));
     return true;
@@ -85,41 +84,26 @@ export function firstFreeSlot(items: LayoutItem[], w: number, h: number): { x: n
 
 export function useDashboardLayout(
   userId: string | null,
-  availableIds: Set<string> | null,
+  availableWidgets: WidgetDescriptor[] | null,
 ): DashboardLayoutHook {
-  const [items, setItems] = useState<LayoutItem[]>(() => (userId ? readLayout(userId) : []));
+  const initial = userId ? readLayout(userId) : { items: [], dismissed: new Set<string>() };
+  const [items, setItems] = useState<LayoutItem[]>(initial.items);
+  const [dismissed, setDismissed] = useState<Set<string>>(initial.dismissed);
   const [persistError, setPersistError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Refs para leer el valor actual dentro de efectos/callbacks sin re-crearlos.
+  const dismissedRef = useRef(dismissed);
+  dismissedRef.current = dismissed;
+  const availRef = useRef(availableWidgets);
+  availRef.current = availableWidgets;
+
   // Re-lee cuando cambia el usuario (login/logout).
   useEffect(() => {
-    setItems(userId ? readLayout(userId) : []);
+    const next = userId ? readLayout(userId) : { items: [], dismissed: new Set<string>() };
+    setItems(next.items);
+    setDismissed(next.dismissed);
   }, [userId]);
-
-  // Persistencia con debounce para cambios frecuentes (mover/redimensionar).
-  const schedulePersist = useCallback(
-    (next: LayoutItem[]) => {
-      if (!userId) return;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        const ok = writeLayout(userId, next);
-        setPersistError(ok ? null : 'Los cambios de posición no pudieron guardarse.');
-      }, PERSIST_DEBOUNCE_MS);
-    },
-    [userId],
-  );
-
-  // Persistencia inmediata para cambios estructurales (añadir/eliminar).
-  const persistNow = useCallback(
-    (next: LayoutItem[]): boolean => {
-      if (!userId) return false;
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      const ok = writeLayout(userId, next);
-      setPersistError(ok ? null : 'Los cambios no pudieron guardarse.');
-      return ok;
-    },
-    [userId],
-  );
 
   useEffect(() => {
     return () => {
@@ -127,39 +111,79 @@ export function useDashboardLayout(
     };
   }, []);
 
-  // Reconciliación (Req 5.3): descarta items cuya app/ widget ya no está disponible.
-  // Solo actúa cuando el registry ya resolvió (availableIds != null) para no borrar
-  // items mientras aún carga.
-  useEffect(() => {
-    if (!availableIds) return;
-    setItems((prev) => {
-      const next = prev.filter((it) => availableIds.has(it.widgetId));
-      if (next.length !== prev.length && userId) writeLayout(userId, next);
-      return next.length === prev.length ? prev : next;
-    });
-  }, [availableIds, userId]);
+  // Clave estable del conjunto disponible: dispara la reconciliación/auto-poblado
+  // solo cuando cambia el CONTENIDO (no la referencia del array).
+  const availableKey = availableWidgets ? availableWidgets.map((w) => w.id).sort().join(',') : null;
 
+  // Reconciliación + auto-poblado (cuando el registry ya resolvió):
+  //  1. quita items cuyo widget ya no está disponible (app desasignada / borrada).
+  //  2. añade los widgets disponibles que no están puestos ni descartados.
+  useEffect(() => {
+    if (availableKey === null || !userId) return;
+    const avail = availRef.current ?? [];
+    const availIds = new Set(avail.map((w) => w.id));
+    setItems((prev) => {
+      let next = prev.filter((it) => availIds.has(it.widgetId));
+      const placed = new Set(next.map((it) => it.widgetId));
+      const toAdd = avail.filter((w) => !placed.has(w.id) && !dismissedRef.current.has(w.id));
+      for (const w of toAdd) {
+        const { w: cw, h } = w.defaultSize;
+        const { x, y } = firstFreeSlot(next, cw, h);
+        next = [...next, { widgetId: w.id, x, y, w: Math.min(cw, GRID_COLS), h }];
+      }
+      const changed = next.length !== prev.length;
+      if (!changed) return prev;
+      writeLayout(userId, next, dismissedRef.current);
+      return next;
+    });
+  }, [availableKey, userId]);
+
+  const schedulePersist = useCallback(
+    (next: LayoutItem[]) => {
+      if (!userId) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const ok = writeLayout(userId, next, dismissedRef.current);
+        setPersistError(ok ? null : 'Los cambios de posición no pudieron guardarse.');
+      }, PERSIST_DEBOUNCE_MS);
+    },
+    [userId],
+  );
+
+  // Añadir desde el catálogo: quita el widget de "descartados" si estaba.
   const addWidget = useCallback(
     (descriptor: WidgetDescriptor) => {
+      if (!userId) return;
+      let nextDismissed = dismissedRef.current;
+      if (nextDismissed.has(descriptor.id)) {
+        nextDismissed = new Set(nextDismissed);
+        nextDismissed.delete(descriptor.id);
+        setDismissed(nextDismissed);
+      }
       setItems((prev) => {
         if (prev.some((it) => it.widgetId === descriptor.id)) return prev;
         const { w, h } = descriptor.defaultSize;
         const { x, y } = firstFreeSlot(prev, w, h);
         const next = [...prev, { widgetId: descriptor.id, x, y, w: Math.min(w, GRID_COLS), h }];
-        persistNow(next);
+        const ok = writeLayout(userId, next, nextDismissed);
+        setPersistError(ok ? null : 'Los cambios no pudieron guardarse.');
         return next;
       });
     },
-    [persistNow],
+    [userId],
   );
 
+  // Quitar: lo saca del grid y lo marca como descartado (no vuelve a auto-añadirse).
   const removeWidget = useCallback(
     (widgetId: string) => {
+      if (!userId) return;
+      const nextDismissed = new Set(dismissedRef.current);
+      nextDismissed.add(widgetId);
+      setDismissed(nextDismissed);
       setItems((prev) => {
         const next = prev.filter((it) => it.widgetId !== widgetId);
         if (next.length === prev.length) return prev;
-        const ok = persistNow(next);
-        // Req 4.7: si no se pudo persistir la eliminación, revertir.
+        const ok = writeLayout(userId, next, nextDismissed);
         if (!ok) {
           setPersistError('No se pudo eliminar el widget. Se ha revertido el cambio.');
           return prev;
@@ -167,7 +191,7 @@ export function useDashboardLayout(
         return next;
       });
     },
-    [persistNow],
+    [userId],
   );
 
   const onLayoutChange = useCallback(
@@ -177,11 +201,13 @@ export function useDashboardLayout(
         const next = newLayout
           .filter((l) => byId.has(l.i))
           .map((l) => ({ widgetId: l.i, x: l.x, y: l.y, w: l.w, h: l.h }));
-        // Ignora callbacks espurios de react-grid-layout que no cambian nada.
-        if (next.length === prev.length && next.every((n, i) => {
-          const p = prev[i];
-          return p && n.widgetId === p.widgetId && n.x === p.x && n.y === p.y && n.w === p.w && n.h === p.h;
-        })) {
+        if (
+          next.length === prev.length &&
+          next.every((n, i) => {
+            const p = prev[i];
+            return p && n.widgetId === p.widgetId && n.x === p.x && n.y === p.y && n.w === p.w && n.h === p.h;
+          })
+        ) {
           return prev;
         }
         schedulePersist(next);
