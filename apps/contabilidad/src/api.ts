@@ -37,15 +37,16 @@ export interface Resumen {
   meses: ResumenMes[];
   totalFacturadoSinIva: number;
   totalIva: number;
-  presupuesto2026: number;
-  facturacion2025: number;
-  facturacion2024: number;
-  cumplimientoPct: number;
+  presupuesto: number | null;
+  cumplimientoPct: number | null;
+  comparativos: { anio: number; facturado: number }[];
 }
 
 export interface ContabilidadData {
   facturas: FacturaContable[];
   resumen: Resumen;
+  anioActual: number;
+  aniosDisponibles: number[];
 }
 
 async function mensajeDeError(res: Response): Promise<string> {
@@ -54,9 +55,10 @@ async function mensajeDeError(res: Response): Promise<string> {
   return `No se pudieron cargar los datos (error ${res.status}). Inténtalo de nuevo en un momento.`;
 }
 
-/** Carga las facturas 2026 + resumen. Lanza Error con mensaje en español si falla. */
-export async function fetchContabilidad(): Promise<ContabilidadData> {
-  const res = await fetch(`${API_BASE}/api/contabilidad/facturas`, { headers: authHeaders() });
+/** Carga las facturas del año + resumen. Lanza Error con mensaje en español si falla. */
+export async function fetchContabilidad(year?: number): Promise<ContabilidadData> {
+  const qs = year ? `?year=${year}` : '';
+  const res = await fetch(`${API_BASE}/api/contabilidad/facturas${qs}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await mensajeDeError(res));
   return (await res.json()) as ContabilidadData;
 }
@@ -69,4 +71,26 @@ export async function guardarCartera(invoiceNumber: string, cartera: string): Pr
     body: JSON.stringify({ cartera }),
   });
   if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
+/** Guarda el presupuesto de un año (solo admin en el backend). */
+export async function guardarPresupuesto(year: number, presupuesto: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/budget/${year}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ presupuesto }),
+  });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
+/** True si el JWT en localStorage tiene rol admin (solo para gating de UX). */
+export function esAdmin(): boolean {
+  const t = localStorage.getItem('ambientalia_token');
+  if (!t) return false;
+  try {
+    const payload = JSON.parse(atob(t.split('.')[1] || ''));
+    return payload.role === 'admin';
+  } catch {
+    return false;
+  }
 }
