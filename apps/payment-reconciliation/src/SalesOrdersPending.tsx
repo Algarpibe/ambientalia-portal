@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSortable, sortArrow } from './useSortable';
+import { useColumnOrder } from './useColumnOrder';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -38,14 +40,35 @@ const isPartial = (status: string) => status === 'partially_invoiced';
 
 // Columnas de la tabla. `key` es el campo por el que ordena (el subyacente, no el
 // texto formateado): `date`/`shipment_date` son ISO → orden lexicográfico = cronológico.
-const COLUMNS: { key: keyof PendingOrder; label: string; align: 'left' | 'right' }[] = [
-  { key: 'date', label: 'Fecha', align: 'left' },
-  { key: 'salesorder_number', label: 'Orden de Venta', align: 'left' },
-  { key: 'customer_name', label: 'Cliente', align: 'left' },
-  { key: 'status', label: 'Estado', align: 'left' },
-  { key: 'total', label: 'Total', align: 'right' },
-  { key: 'pending', label: 'Pendiente por Facturar', align: 'right' },
-  { key: 'shipment_date', label: 'Entrega', align: 'left' },
+// `render` genera la celda (para poder reordenar columnas: encabezado y cuerpo se
+// pintan siguiendo el mismo orden).
+interface Col {
+  key: keyof PendingOrder;
+  label: string;
+  align: 'left' | 'right';
+  cellClass?: string;
+  render: (o: PendingOrder) => ReactNode;
+  title?: (o: PendingOrder) => string;
+}
+
+const COLUMNS: Col[] = [
+  { key: 'date', label: 'Fecha', align: 'left', cellClass: 'text-slate-500', render: (o) => fmtDate(o.date) },
+  { key: 'salesorder_number', label: 'Orden de Venta', align: 'left', cellClass: 'font-semibold text-indigo-700', render: (o) => o.salesorder_number },
+  { key: 'customer_name', label: 'Cliente', align: 'left', cellClass: 'text-slate-700 max-w-[240px] truncate', render: (o) => o.customer_name ?? '—', title: (o) => o.customer_name ?? '' },
+  {
+    key: 'status', label: 'Estado', align: 'left',
+    render: (o) => {
+      const partial = isPartial(o.status);
+      return (
+        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${partial ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+          {partial ? '◐ Parcial' : '○ Sin facturar'}
+        </span>
+      );
+    },
+  },
+  { key: 'total', label: 'Total', align: 'right', cellClass: 'tabular-nums text-slate-700', render: (o) => money(o.total) },
+  { key: 'pending', label: 'Pendiente por Facturar', align: 'right', cellClass: 'tabular-nums font-semibold text-indigo-700', render: (o) => money(o.pending) },
+  { key: 'shipment_date', label: 'Entrega', align: 'left', cellClass: 'text-slate-500', render: (o) => fmtDate(o.shipment_date) },
 ];
 
 // `bare`: sin la tarjeta exterior y ocupando todo el alto — para embeberla en una
@@ -99,6 +122,9 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
 
   // Orden por defecto: pendiente por facturar descendente (como llega del endpoint).
   const { sorted, sortKey, sortDir, toggle } = useSortable<PendingOrder>(filtered, 'pending', 'desc');
+  const { order, dragProps, dragging } = useColumnOrder('cols_sales_orders_pending', COLUMNS.map((c) => c.key));
+  const colMap = useMemo(() => Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<string, Col>, []);
+  const orderedCols = order.map((k) => colMap[k]).filter(Boolean);
 
   const stateBox = 'flex flex-col items-center justify-center h-full min-h-[240px] gap-4';
 
@@ -171,11 +197,13 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
         <table className="w-full text-sm border-collapse min-w-[820px]">
           <thead className="bg-slate-50 sticky top-0 z-10">
             <tr>
-              {COLUMNS.map((c) => (
+              {orderedCols.map((c) => (
                 <th
                   key={c.key}
+                  {...dragProps(c.key)}
                   onClick={() => toggle(c.key)}
-                  className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-pointer select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+                  title="Clic para ordenar · arrastra para mover la columna"
+                  className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-move select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'} ${dragging === c.key ? 'opacity-40' : ''}`}
                 >
                   {c.label} <span className="text-slate-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>
@@ -185,35 +213,24 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={orderedCols.length} className="px-4 py-10 text-center text-slate-400">
                   No hay órdenes por facturar con estos filtros.
                 </td>
               </tr>
             ) : (
-              sorted.map((o) => {
-                const partial = isPartial(o.status);
-                return (
-                  <tr key={o.salesorder_number} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(o.date)}</td>
-                    <td className="px-4 py-3 font-semibold text-indigo-700 whitespace-nowrap">{o.salesorder_number}</td>
-                    <td className="px-4 py-3 text-slate-700 max-w-[240px] truncate" title={o.customer_name ?? ''}>
-                      {o.customer_name ?? '—'}
+              sorted.map((o) => (
+                <tr key={o.salesorder_number} className="border-t border-slate-100 hover:bg-slate-50">
+                  {orderedCols.map((c) => (
+                    <td
+                      key={c.key}
+                      title={c.title?.(o)}
+                      className={`px-4 py-3 whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.cellClass ?? ''}`}
+                    >
+                      {c.render(o)}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          partial ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {partial ? '◐ Parcial' : '○ Sin facturar'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-slate-700 whitespace-nowrap">{money(o.total)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-indigo-700 whitespace-nowrap">{money(o.pending)}</td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{fmtDate(o.shipment_date)}</td>
-                  </tr>
-                );
-              })
+                  ))}
+                </tr>
+              ))
             )}
           </tbody>
         </table>
