@@ -55,7 +55,16 @@ describe('GET /api/contabilidad/facturas', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.facturas)).toBe(true);
     expect(res.body.resumen.meses).toHaveLength(12);
-    expect(res.body.resumen.presupuesto2026).toBe(4416000000);
+  });
+
+  it('200 devuelve anioActual y aniosDisponibles', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/facturas?year=2025')
+      .set('Authorization', `Bearer ${token(['contabilidad'])}`);
+    expect(res.status).toBe(200);
+    expect(res.body.anioActual).toBe(2025);
+    expect(Array.isArray(res.body.aniosDisponibles)).toBe(true);
+    expect(res.body.resumen.cumplimientoPct).toBeNull(); // sin presupuesto en fakePool
   });
 });
 
@@ -85,5 +94,15 @@ describe('PUT /api/contabilidad/cartera/:invoiceNumber', () => {
       .set('Authorization', `Bearer ${token(['contabilidad'])}`)
       .send({});
     expect(res.status).toBe(400);
+  });
+});
+
+describe('PUT /api/contabilidad/budget/:year', () => {
+  it('403 si no es admin', async () => {
+    const res = await request(appConPool(fakePool()))
+      .put('/api/contabilidad/budget/2027')
+      .set('Authorization', `Bearer ${token(['contabilidad'], 'reader')}`)
+      .send({ presupuesto: 1000 });
+    expect(res.status).toBe(403);
   });
 });
