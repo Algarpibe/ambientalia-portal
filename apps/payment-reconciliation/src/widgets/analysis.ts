@@ -121,6 +121,7 @@ export interface OpenInvoiceRow {
   paidPercent: number;  // fracción pagada [0, 1]
   status: PaymentStatus;
   dueTime: number;      // vencimiento en ms para ordenar; Infinity si no hay fecha
+  invoiceTime: number;  // fecha de factura en ms para filtrar; NaN si no hay fecha
 }
 
 /**
@@ -139,6 +140,7 @@ export function openInvoices(invoices: any[], statuses: PaymentStatus[]): OpenIn
       const total = parseNumber(inv?.total);
       const balance = parseNumber(inv?.balance);
       const due = toDate(inv?.dueDate);
+      const emitted = toDate(inv?.invoiceDate);
       return {
         invoiceNumber: String(inv?.invoiceNumber ?? ''),
         clientName: inv?.clientName || 'Cliente General',
@@ -149,6 +151,7 @@ export function openInvoices(invoices: any[], statuses: PaymentStatus[]): OpenIn
         paidPercent: total > 0 ? Math.min(1, Math.max(0, (total - balance) / total)) : 0,
         status: paymentStatusOf(inv),
         dueTime: due ? due.getTime() : Infinity,
+        invoiceTime: emitted ? emitted.getTime() : NaN,
       };
     })
     .sort((a, b) => a.dueTime - b.dueTime);
