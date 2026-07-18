@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import { useSortable, sortArrow } from './useSortable';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -34,6 +35,18 @@ const fmtDate = (iso: string | null) => {
 };
 
 const isPartial = (status: string) => status === 'partially_invoiced';
+
+// Columnas de la tabla. `key` es el campo por el que ordena (el subyacente, no el
+// texto formateado): `date`/`shipment_date` son ISO → orden lexicográfico = cronológico.
+const COLUMNS: { key: keyof PendingOrder; label: string; align: 'left' | 'right' }[] = [
+  { key: 'date', label: 'Fecha', align: 'left' },
+  { key: 'salesorder_number', label: 'Orden de Venta', align: 'left' },
+  { key: 'customer_name', label: 'Cliente', align: 'left' },
+  { key: 'status', label: 'Estado', align: 'left' },
+  { key: 'total', label: 'Total', align: 'right' },
+  { key: 'pending', label: 'Pendiente por Facturar', align: 'right' },
+  { key: 'shipment_date', label: 'Entrega', align: 'left' },
+];
 
 // `bare`: sin la tarjeta exterior y ocupando todo el alto — para embeberla en una
 // celda del dashboard (el WidgetCell ya aporta tarjeta y padding). Sin `bare` se
@@ -83,6 +96,9 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
   }, [orders, client, status]);
 
   const totalPending = useMemo(() => filtered.reduce((s, o) => s + o.pending, 0), [filtered]);
+
+  // Orden por defecto: pendiente por facturar descendente (como llega del endpoint).
+  const { sorted, sortKey, sortDir, toggle } = useSortable<PendingOrder>(filtered, 'pending', 'desc');
 
   const stateBox = 'flex flex-col items-center justify-center h-full min-h-[240px] gap-4';
 
@@ -155,25 +171,26 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
         <table className="w-full text-sm border-collapse min-w-[820px]">
           <thead className="bg-slate-50 sticky top-0 z-10">
             <tr>
-              {['Fecha', 'Orden de Venta', 'Cliente'].map((h) => (
-                <th key={h} className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+              {COLUMNS.map((c) => (
+                <th
+                  key={c.key}
+                  onClick={() => toggle(c.key)}
+                  className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-pointer select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+                >
+                  {c.label} <span className="text-slate-300">{sortArrow(sortKey === c.key, sortDir)}</span>
+                </th>
               ))}
-              <th className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">Estado</th>
-              {['Total', 'Pendiente por Facturar'].map((h) => (
-                <th key={h} className="px-4 py-3 text-right font-semibold text-slate-500 whitespace-nowrap">{h}</th>
-              ))}
-              <th className="px-4 py-3 text-left font-semibold text-slate-500 whitespace-nowrap">Entrega</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {sorted.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                   No hay órdenes por facturar con estos filtros.
                 </td>
               </tr>
             ) : (
-              filtered.map((o) => {
+              sorted.map((o) => {
                 const partial = isPartial(o.status);
                 return (
                   <tr key={o.salesorder_number} className="border-t border-slate-100 hover:bg-slate-50">

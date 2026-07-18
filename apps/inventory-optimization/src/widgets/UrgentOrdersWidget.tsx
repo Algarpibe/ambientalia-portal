@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useInventoryData } from './useInventoryData';
 import { urgentOrders, manufacturersOf, type UrgentRow } from './analysis';
+import { useSortable, sortArrow } from './useSortable';
 
 // Widget: tabla "Pedidos Urgentes" (artículos con estado 'Urgente'), con las
 // mismas columnas que la pantalla de la app y un filtro por fabricante.
@@ -36,12 +37,16 @@ export default function UrgentOrdersWidget() {
     }
   }, [manufacturer, manufacturers]);
 
+  const selected = manufacturer ?? '';
+  const filtered = useMemo(
+    () => (selected ? rows.filter((r) => r.manufacturer === selected) : rows),
+    [rows, selected],
+  );
+  const { sorted, sortKey, sortDir, toggle } = useSortable<UrgentRow>(filtered);
+
   if (loading) return <StateMsg>Cargando…</StateMsg>;
   if (error) return <StateMsg tone="error">{error}</StateMsg>;
   if (rows.length === 0) return <StateMsg>No hay pedidos urgentes. 🎉</StateMsg>;
-
-  const selected = manufacturer ?? '';
-  const filtered = selected ? rows.filter((r) => r.manufacturer === selected) : rows;
 
   const cellTone = (key: keyof UrgentRow, value: number): string => {
     if (key === 'available') return value < 0 ? 'text-red-600 font-semibold' : 'text-gray-800';
@@ -73,15 +78,16 @@ export default function UrgentOrdersWidget() {
               {COLS.map((c) => (
                 <th
                   key={c.key}
-                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap ${c.numeric ? 'text-right' : 'text-left'}`}
+                  onClick={() => toggle(c.key)}
+                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'}`}
                 >
-                  {c.label}
+                  {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
+            {sorted.map((r, i) => (
               <tr key={`${r.sku}-${i}`} className="border-b border-gray-100 hover:bg-gray-50">
                 {COLS.map((c) => {
                   const value = r[c.key];

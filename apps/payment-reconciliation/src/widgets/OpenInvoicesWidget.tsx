@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useReconciliationData } from './useReconciliationData';
-import { openInvoices, formatMoney, STATUS_LABEL, type PaymentStatus } from './analysis';
+import { openInvoices, formatMoney, STATUS_LABEL, type PaymentStatus, type OpenInvoiceRow } from './analysis';
+import { useSortable, sortArrow } from '../useSortable';
 
 // Widget: facturas de la pestaña Conciliación con estado de pago Pendiente o
 // Parcial (las que aún tienen saldo). Autocontenido: carga sus propios datos y
@@ -16,6 +17,18 @@ const CHIP: Record<PaymentStatus, string> = {
 
 // Un input date 'YYYY-MM-DD' a ms (inicio del día). NaN si vacío.
 const dayMs = (v: string) => (v ? new Date(`${v}T00:00:00`).getTime() : NaN);
+
+// Columnas. `key` es el campo por el que ordena: 'Fecha' ordena por invoiceTime y
+// 'Vencimiento' por dueTime (ms), no por el texto ya formateado.
+const COLUMNS: { key: keyof OpenInvoiceRow; label: string; align: 'left' | 'right' }[] = [
+  { key: 'invoiceNumber', label: 'Factura', align: 'left' },
+  { key: 'clientName', label: 'Cliente', align: 'left' },
+  { key: 'invoiceTime', label: 'Fecha', align: 'left' },
+  { key: 'dueTime', label: 'Vencimiento', align: 'left' },
+  { key: 'total', label: 'Total', align: 'right' },
+  { key: 'balance', label: 'Saldo', align: 'right' },
+  { key: 'status', label: 'Estado', align: 'left' },
+];
 
 export default function OpenInvoicesWidget() {
   const { invoices, loading, error } = useReconciliationData();
@@ -42,6 +55,9 @@ export default function OpenInvoicesWidget() {
   }, [allRows, client, from, to]);
 
   const totalPending = useMemo(() => rows.reduce((s, r) => s + r.balance, 0), [rows]);
+
+  // Orden por defecto: vencimiento ascendente (lo más vencido primero).
+  const { sorted, sortKey, sortDir, toggle } = useSortable<OpenInvoiceRow>(rows, 'dueTime', 'asc');
 
   if (loading) return <StateMsg>Cargando…</StateMsg>;
   if (error) return <StateMsg tone="error">{error}</StateMsg>;
@@ -88,30 +104,26 @@ export default function OpenInvoicesWidget() {
         <table className="w-full text-xs border-collapse min-w-[620px]">
           <thead className="sticky top-0 bg-gray-50 z-10">
             <tr>
-              {['Factura', 'Cliente', 'Fecha', 'Vencimiento'].map((h) => (
-                <th key={h} className="px-2 py-1.5 text-left font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap">
-                  {h}
+              {COLUMNS.map((c) => (
+                <th
+                  key={c.key}
+                  onClick={() => toggle(c.key)}
+                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+                >
+                  {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>
               ))}
-              {['Total', 'Saldo'].map((h) => (
-                <th key={h} className="px-2 py-1.5 text-right font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap">
-                  {h}
-                </th>
-              ))}
-              <th className="px-2 py-1.5 text-left font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap">
-                Estado
-              </th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-2 py-8 text-center text-gray-400">
                   No hay facturas con estos filtros.
                 </td>
               </tr>
             )}
-            {rows.map((r, i) => (
+            {sorted.map((r, i) => (
               <tr key={`${r.invoiceNumber}-${i}`} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-2 py-1.5 font-semibold text-gray-800 whitespace-nowrap">{r.invoiceNumber}</td>
                 <td className="px-2 py-1.5 text-gray-700 max-w-[180px] truncate" title={r.clientName}>{r.clientName}</td>
