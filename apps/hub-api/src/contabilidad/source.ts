@@ -39,10 +39,20 @@ const FACTURAS_SQL = `
          NULLIF(i.raw ->> 'tax_amount_withheld', '')   AS retenciones,
          d.deal_name                                   AS deal_name,
          d.numero_ticket                               AS ticket_number,
+         qt.no_cotizacion                              AS qt,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
            ON d.id = NULLIF(i.raw ->> 'zcrm_potential_id', '')
+    -- QT = número de la última cotización del deal (crm.quotes.no_cotizacion,
+    -- formato "2025-551" del Excel; la más reciente por fecha_cotizacion).
+    LEFT JOIN LATERAL (
+           SELECT q.no_cotizacion
+             FROM crm.quotes q
+            WHERE q.deal_id = d.id
+            ORDER BY q.fecha_cotizacion DESC NULLS LAST, q.created_time DESC
+            LIMIT 1
+         ) qt ON TRUE
    WHERE i.date >= $1::date AND i.date < $2::date
      -- Excluir facturas internas/de ajuste de Ambientalia (siempre en $0): las de
      -- número 'AMI-...' o cuya orden es 'OVI-...'. No son facturación al cliente.

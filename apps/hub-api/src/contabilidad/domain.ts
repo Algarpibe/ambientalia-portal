@@ -31,7 +31,8 @@ export interface FacturaRawRow {
   balance: string | null;     // raw->>'balance' (texto)
   retenciones: string | null; // raw->>'tax_amount_withheld' (texto)
   deal_name: string | null;   // crm.deals.deal_name (puede faltar)
-  ticket_number: string | null; // desk.tickets.number (puede faltar)
+  ticket_number: string | null; // crm.deals.numero_ticket (puede faltar)
+  qt: string | null;          // crm.quotes.no_cotizacion de la última cotización del deal
   synced_at: string | null;
 }
 
@@ -65,7 +66,7 @@ export function mapFacturaRow(row: FacturaRawRow, overrides: Map<string, string>
   return {
     invoiceNumber: str(row.invoice_number),
     razonSocial: str(row.customer_name),
-    qt: '', // La cotización de CRM no se replica a Postgres. Columna presente por paridad con el Excel; queda vacía.
+    qt: str(row.qt), // nº de la última cotización del deal (crm.quotes.no_cotizacion)
     fechaFactura: str(row.date),
     fechaVencimiento: str(row.due_date),
     ov: str(row.reference_number),
