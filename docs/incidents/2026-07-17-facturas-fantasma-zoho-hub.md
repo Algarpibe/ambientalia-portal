@@ -45,6 +45,30 @@ aparecer duplicada y pendiente.
 
 > Nota: es un arreglo del **síntoma** de un caso. La causa raíz sigue abierta.
 
+## Barrido completo del sistema (2026-07-17)
+
+Tras FP-341 se barrió toda la réplica buscando el mismo patrón (un mismo número en
+más de una fila). Se encontraron y remediaron **tres huérfanos en total**, cada uno
+verificado contra Zoho por API para confirmar cuál era el `invoice_id`/`salesorder_id`
+vigente antes de borrar:
+
+| Documento | Vigente en Zoho (se mantiene) | Huérfano borrado | Monto fantasma |
+|---|---|---|---|
+| FP-341 (factura) | `2251824000057676058` · paid | `2251824000003417063` · overdue | 1.190.000 |
+| AM1440 (factura) | `2251824000056806187` · sent · 53.312.224 | `2251824000056806079` · approved · 64.038.264 | 64.038.264 |
+| OV-2026-130 (orden de venta) | `2251824000056833038` · invoiced | `2251824000056833001` · pending_approval | 1.576.443 |
+
+Notas:
+- FP-341 y AM1440 inflaban el "pendiente por cobrar" del Conciliador (montos fantasma).
+- El huérfano de OV-2026-130 estaba en `pending_approval` — fuera de los estados "por
+  facturar" (`open/overdue/partially_invoiced`) — así que NO contaminaba la pestaña
+  "Órdenes por Facturar" ni WO-sales; se limpió igual.
+- **Las órdenes de venta requieren borrar primero sus líneas** (`books.salesorder_line_items`)
+  por la foreign key; las facturas se borran directo.
+
+Tras el barrido, la réplica quedó **sin duplicados conocidos**. Conviene repetir el
+barrido (apéndice) periódicamente hasta que se corrija la causa raíz.
+
 ## Causa raíz
 
 La sincronización Zoho → `zoho-hub` la hace un worker aparte (**`zoho-hub-sync`**,
@@ -110,6 +134,62 @@ dejaría de ver duplicados aunque la réplica tenga huérfanos.
 
 ## Estado
 
-- [x] Síntoma corregido (huérfano de FP-341 borrado el 2026-07-17).
+- [x] Síntoma corregido — 3 huérfanos borrados el 2026-07-17 (FP-341, AM1440,
+      OV-2026-130). Réplica sin duplicados conocidos.
 - [ ] Causa raíz — pendiente en `ambientalia-desk` (worker `zoho-hub-sync`).
 - [ ] Mitigación opcional en `hub-api` (`reconciliation.ts`), si se decide.
+
+## Apéndice — consultas de diagnóstico
+
+Ejecutar conectado a la base **`zoho-hub`** (no `postgres`). No existe columna
+`balance`: el saldo es `raw->>'balance'`.
+
+**Facturas duplicadas (mismo número, más de una fila):**
+```sql
+SELECT invoice_number, COUNT(*) AS filas
+FROM books.invoices
+GROUP BY invoice_number
+HAVING COUNT(*) > 1
+ORDER BY filas DESC, invoice_number;
+```
+
+**Detalle de cada grupo duplicado (para ver cuál es el huérfano):**
+```sql
+WITH dup AS (
+  SELECT invoice_number FROM books.invoices
+  GROUP BY invoice_number HAVING COUNT(*) > 1
+)
+SELECT i.invoice_number, i.invoice_id, i.customer_name, i.status,
+       i.total, i.raw->>'balance' AS balance, i.date::text
+FROM books.invoices i
+JOIN dup USING (invoice_number)
+ORDER BY i.invoice_number, i.status;
+```
+
+**Órdenes de venta duplicadas:**
+```sql
+SELECT salesorder_number, COUNT(*) AS filas
+FROM books.sales_orders
+GROUP BY salesorder_number
+HAVING COUNT(*) > 1
+ORDER BY filas DESC, salesorder_number;
+```
+
+**Remediación de un huérfano confirmado** (siempre verificar antes en Zoho cuál es el
+`invoice_id`/`salesorder_id` vigente):
+```sql
+-- Factura:
+BEGIN;
+DELETE FROM books.invoices WHERE invoice_id = '<id_huerfano>';   -- DELETE 1
+COMMIT;
+
+-- Orden de venta (líneas primero, por la FK):
+BEGIN;
+DELETE FROM books.salesorder_line_items WHERE salesorder_id = '<id_huerfano>';
+DELETE FROM books.sales_orders          WHERE salesorder_id = '<id_huerfano>';   -- DELETE 1
+COMMIT;
+```
+
+> Recordatorios: un `COMMIT` sobre una transacción abortada hace ROLLBACK; verificar
+> con un `SELECT` (aún dentro del `BEGIN`) que queda solo la fila vigente antes de hacer
+> `COMMIT`.
