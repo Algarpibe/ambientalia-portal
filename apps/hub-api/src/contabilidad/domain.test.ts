@@ -4,7 +4,6 @@ import {
   dedupeByInvoiceNumber,
   withParticipacion,
   buildResumen,
-  PRESUPUESTO_2026,
   type FacturaRawRow,
 } from './domain.js';
 
@@ -110,25 +109,41 @@ describe('withParticipacion', () => {
 });
 
 describe('buildResumen', () => {
+  const facturado = { 2024: 1000, 2025: 2000, 2026: 3000 };
+
   it('agrega facturación (subtotal) e IVA por mes y calcula acumulado', () => {
     const facturas = [
       mapFacturaRow(raw({ invoice_number: 'A', date: '2026-01-10', sub_total: 1000, iva: '190' }), new Map()),
       mapFacturaRow(raw({ invoice_number: 'B', date: '2026-01-20', sub_total: 2000, iva: '380' }), new Map()),
       mapFacturaRow(raw({ invoice_number: 'C', date: '2026-03-05', sub_total: 1000, iva: '190' }), new Map()),
     ];
-    const r = buildResumen(facturas);
-    expect(r.meses[0].facturacion).toBeCloseTo(3000, 2); // enero: 1000+2000 (subtotal)
+    const r = buildResumen(facturas, 2026, 4416000000, facturado);
+    expect(r.meses[0].facturacion).toBeCloseTo(3000, 2);
     expect(r.meses[0].iva).toBeCloseTo(570, 2);
-    expect(r.meses[1].facturacion).toBe(0);              // febrero
+    expect(r.meses[1].facturacion).toBe(0);
     expect(r.meses[0].acumulado).toBeCloseTo(3000, 2);
-    expect(r.meses[2].acumulado).toBeCloseTo(4000, 2);   // marzo acumula enero+marzo (subtotal)
+    expect(r.meses[2].acumulado).toBeCloseTo(4000, 2);
   });
 
-  it('calcula el cumplimiento del presupuesto sobre el subtotal facturado del año', () => {
-    const facturas = [mapFacturaRow(raw({ total: 1190, sub_total: 1000 }), new Map())];
-    const r = buildResumen(facturas);
+  it('calcula cumplimiento cuando hay presupuesto', () => {
+    const facturas = [mapFacturaRow(raw({ sub_total: 1000 }), new Map())];
+    const r = buildResumen(facturas, 2026, 4416000000, facturado);
     expect(r.totalFacturadoSinIva).toBe(1000);
-    expect(r.presupuesto2026).toBe(PRESUPUESTO_2026);
-    expect(r.cumplimientoPct).toBeCloseTo(1000 / PRESUPUESTO_2026, 10);
+    expect(r.presupuesto).toBe(4416000000);
+    expect(r.cumplimientoPct).toBeCloseTo(1000 / 4416000000, 12);
+  });
+
+  it('presupuesto null -> cumplimiento null (sin dividir)', () => {
+    const r = buildResumen([mapFacturaRow(raw({ sub_total: 1000 }), new Map())], 2027, null, facturado);
+    expect(r.presupuesto).toBeNull();
+    expect(r.cumplimientoPct).toBeNull();
+  });
+
+  it('comparativos = años anteriores con datos, de mayor a menor', () => {
+    const r = buildResumen([], 2026, null, facturado);
+    expect(r.comparativos).toEqual([
+      { anio: 2025, facturado: 2000 },
+      { anio: 2024, facturado: 1000 },
+    ]);
   });
 });

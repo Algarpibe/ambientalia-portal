@@ -12,11 +12,6 @@ const num = (v: unknown): number => {
 };
 const str = (v: unknown): string => (v == null ? '' : String(v));
 
-// Presupuesto y comparativos sembrados del Excel (COP, sin IVA).
-export const PRESUPUESTO_2026 = 4_416_000_000;
-export const FACTURACION_2025 = 4_079_226_260;
-export const FACTURACION_2024 = 2_423_070_754;
-
 /** Fila cruda tal como la devuelve el SQL (numéricos de raw llegan como texto). */
 export interface FacturaRawRow {
   invoice_number: string;
@@ -111,19 +106,22 @@ export interface Resumen {
   meses: ResumenMes[];
   totalFacturadoSinIva: number;
   totalIva: number;
-  presupuesto2026: number;
-  facturacion2025: number;
-  facturacion2024: number;
-  cumplimientoPct: number; // totalFacturadoSinIva / presupuesto
+  presupuesto: number | null;
+  cumplimientoPct: number | null; // null si no hay presupuesto
+  comparativos: { anio: number; facturado: number }[]; // años anteriores, mayor→menor
 }
 
 /**
- * Resumen mensual/anual. El detalle mensual (facturacion/iva/acumulado) usa el
- * SUBTOTAL sin IVA de cada factura (f.total), la misma base que el KPI anual
- * "Facturado 2026 (sin IVA)" y que el presupuesto — así la serie mensual y el
- * cumplimiento del presupuesto son reconciliables entre sí.
+ * Resumen mensual/anual del año `anio`. El detalle mensual usa el SUBTOTAL sin IVA
+ * (f.total). `presupuesto` viene de la config por año (null si no hay). Los
+ * comparativos son el facturado de años anteriores presentes en `facturadoPorAnio`.
  */
-export function buildResumen(facturas: FacturaContable[]): Resumen {
+export function buildResumen(
+  facturas: FacturaContable[],
+  anio: number,
+  presupuesto: number | null,
+  facturadoPorAnio: Record<number, number>,
+): Resumen {
   const meses: ResumenMes[] = Array.from({ length: 12 }, (_, i) => ({
     mes: i + 1,
     facturacion: 0,
@@ -131,7 +129,7 @@ export function buildResumen(facturas: FacturaContable[]): Resumen {
     acumulado: 0,
   }));
   for (const f of facturas) {
-    const m = Number(f.fechaFactura.slice(5, 7)); // 'YYYY-MM-...' -> MM
+    const m = Number(f.fechaFactura.slice(5, 7));
     if (m >= 1 && m <= 12) {
       meses[m - 1].facturacion += f.total;
       meses[m - 1].iva += f.iva;
@@ -144,13 +142,16 @@ export function buildResumen(facturas: FacturaContable[]): Resumen {
   }
   const totalFacturadoSinIva = meses.reduce((a, m) => a + m.facturacion, 0);
   const totalIva = meses.reduce((a, m) => a + m.iva, 0);
+  const comparativos = Object.entries(facturadoPorAnio)
+    .map(([y, facturado]) => ({ anio: Number(y), facturado }))
+    .filter((c) => c.anio < anio)
+    .sort((a, b) => b.anio - a.anio);
   return {
     meses,
     totalFacturadoSinIva,
     totalIva,
-    presupuesto2026: PRESUPUESTO_2026,
-    facturacion2025: FACTURACION_2025,
-    facturacion2024: FACTURACION_2024,
-    cumplimientoPct: PRESUPUESTO_2026 > 0 ? totalFacturadoSinIva / PRESUPUESTO_2026 : 0,
+    presupuesto,
+    cumplimientoPct: presupuesto && presupuesto > 0 ? totalFacturadoSinIva / presupuesto : null,
+    comparativos,
   };
 }
