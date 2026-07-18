@@ -21,7 +21,10 @@ const HASTA = `${ANIO + 1}-01-01`;
 
 // Numéricos de raw como TEXTO (regla de la casa: un ::numeric con "12.5%" aborta
 // la consulta). sub_total/total son columnas numéricas reales -> llegan casteadas.
-// Trato y Ticket por LEFT JOIN; suelen venir NULL (link vacío en Zoho) -> columna vacía.
+// Trato y Ticket salen del deal de CRM enlazado por raw->>'zcrm_potential_id'
+// (verificado contra datos reales 2026: el deal resuelve en casi todas las facturas
+// y crm.deals.numero_ticket coincide con el TICKET del Excel). NO se usa
+// desk.tickets: su columna orden_venta está siempre NULL en la réplica.
 const FACTURAS_SQL = `
   SELECT i.invoice_number,
          i.reference_number,
@@ -35,18 +38,11 @@ const FACTURAS_SQL = `
          NULLIF(i.raw ->> 'balance', '')               AS balance,
          NULLIF(i.raw ->> 'tax_amount_withheld', '')   AS retenciones,
          d.deal_name                                   AS deal_name,
-         tk.number                                     AS ticket_number,
+         d.numero_ticket                               AS ticket_number,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
            ON d.id = NULLIF(i.raw ->> 'zcrm_potential_id', '')
-    LEFT JOIN LATERAL (
-           SELECT t.number
-             FROM desk.tickets t
-            WHERE t.orden_venta = i.reference_number
-            ORDER BY t.number
-            LIMIT 1
-         ) tk ON TRUE
    WHERE i.date >= $1::date AND i.date < $2::date
    ORDER BY i.date, i.invoice_number`;
 
