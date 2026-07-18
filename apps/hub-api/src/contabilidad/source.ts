@@ -44,6 +44,10 @@ const FACTURAS_SQL = `
     LEFT JOIN crm.deals d
            ON d.id = NULLIF(i.raw ->> 'zcrm_potential_id', '')
    WHERE i.date >= $1::date AND i.date < $2::date
+     -- Excluir facturas internas/de ajuste de Ambientalia (siempre en $0): las de
+     -- número 'AMI-...' o cuya orden es 'OVI-...'. No son facturación al cliente.
+     AND i.invoice_number NOT ILIKE 'AMI-%'
+     AND COALESCE(i.reference_number, '') NOT ILIKE 'OVI-%'
    ORDER BY i.date, i.invoice_number`;
 
 /** Lee el mapa de overrides de cartera (invoice_number -> texto). */
