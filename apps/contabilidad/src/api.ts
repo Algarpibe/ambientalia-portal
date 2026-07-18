@@ -49,6 +49,18 @@ export interface ContabilidadData {
   aniosDisponibles: number[];
 }
 
+// Espejo de apps/hub-api/src/salesOrders.ts (endpoint /api/sales-orders/pending)
+export interface PendingSalesOrder {
+  salesorder_number: string;
+  date: string;
+  customer_name: string | null;
+  status: string; // 'open' | 'overdue' | 'partially_invoiced'
+  currency_code: string | null;
+  total: number;
+  pending: number; // valor aún por facturar
+  shipment_date: string | null;
+}
+
 async function mensajeDeError(res: Response): Promise<string> {
   if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
   if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
@@ -81,6 +93,15 @@ export async function guardarPresupuesto(year: number, presupuesto: number): Pro
     body: JSON.stringify({ presupuesto }),
   });
   if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
+/** Carga las OV pendientes de facturar (endpoint compartido del hub). */
+export async function fetchOVPendientes(): Promise<PendingSalesOrder[]> {
+  const res = await fetch(`${API_BASE}/api/sales-orders/pending`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { orders?: PendingSalesOrder[] };
+  if (!Array.isArray(data.orders)) throw new Error('Formato inesperado del hub (OV pendientes).');
+  return data.orders;
 }
 
 /** True si el JWT en localStorage tiene rol admin (solo para gating de UX). */

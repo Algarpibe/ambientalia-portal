@@ -4,6 +4,7 @@ import { fetchContabilidad, guardarCartera, guardarPresupuesto, esAdmin, type Co
 import { formatCOP } from './format';
 import FacturasTable from './FacturasTable';
 import ResumenMensual from './ResumenMensual';
+import OVPendientes from './OVPendientes';
 
 type Estado = 'todas' | 'pagada' | 'saldo' | 'vencida';
 
@@ -162,6 +163,7 @@ export default function App() {
             onGuardarPresupuesto={onGuardarPresupuesto}
             guardandoPresupuesto={guardandoPpto}
           />
+          <OVPendientes />
         </>
       )}
     </main>
