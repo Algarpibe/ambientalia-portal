@@ -4,6 +4,7 @@ import { useReconciliationData } from './useReconciliationData';
 import { openInvoices, formatMoney, STATUS_LABEL, type PaymentStatus, type OpenInvoiceRow } from './analysis';
 import { useSortable, sortArrow } from '../useSortable';
 import { useColumnOrder } from '../useColumnOrder';
+import ColumnOrderMenu from '../ColumnOrderMenu';
 
 // Widget: facturas de la pestaña Conciliación con estado de pago Pendiente o
 // Parcial (las que aún tienen saldo). Autocontenido: carga sus propios datos y
@@ -78,7 +79,7 @@ export default function OpenInvoicesWidget() {
 
   // Orden por defecto: vencimiento ascendente (lo más vencido primero).
   const { sorted, sortKey, sortDir, toggle } = useSortable<OpenInvoiceRow>(rows, 'dueTime', 'asc');
-  const { order, dragProps, dragging } = useColumnOrder('cols_open_invoices', COLUMNS.map((c) => c.key));
+  const { order, move } = useColumnOrder('cols_open_invoices', COLUMNS.map((c) => c.key));
   const colMap = useMemo(() => Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<string, Col>, []);
   const orderedCols = order.map((k) => colMap[k]).filter(Boolean);
 
@@ -112,6 +113,9 @@ export default function OpenInvoicesWidget() {
             Limpiar
           </button>
         )}
+        <div className="ml-auto">
+          <ColumnOrderMenu columns={orderedCols.map((c) => ({ key: String(c.key), label: c.label }))} onMove={move} />
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3 mb-2 shrink-0 text-xs">
@@ -130,10 +134,9 @@ export default function OpenInvoicesWidget() {
               {orderedCols.map((c) => (
                 <th
                   key={c.key}
-                  {...dragProps(c.key)}
                   onClick={() => toggle(c.key)}
-                  title="Clic para ordenar · arrastra para mover la columna"
-                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-move select-none hover:text-gray-700 ${c.align === 'right' ? 'text-right' : 'text-left'} ${dragging === c.key ? 'opacity-40' : ''}`}
+                  title={`Ordenar por ${c.label}`}
+                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
                 >
                   {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>

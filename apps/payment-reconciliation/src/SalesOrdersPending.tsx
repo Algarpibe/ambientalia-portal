@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSortable, sortArrow } from './useSortable';
 import { useColumnOrder } from './useColumnOrder';
+import ColumnOrderMenu from './ColumnOrderMenu';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -122,7 +123,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
 
   // Orden por defecto: pendiente por facturar descendente (como llega del endpoint).
   const { sorted, sortKey, sortDir, toggle } = useSortable<PendingOrder>(filtered, 'pending', 'desc');
-  const { order, dragProps, dragging } = useColumnOrder('cols_sales_orders_pending', COLUMNS.map((c) => c.key));
+  const { order, move } = useColumnOrder('cols_sales_orders_pending', COLUMNS.map((c) => c.key));
   const colMap = useMemo(() => Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<string, Col>, []);
   const orderedCols = order.map((k) => colMap[k]).filter(Boolean);
 
@@ -186,6 +187,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
           <span className="text-slate-500">
             Pendiente por facturar: <strong className="text-indigo-700">{money(totalPending)}</strong>
           </span>
+          <ColumnOrderMenu columns={orderedCols.map((c) => ({ key: String(c.key), label: c.label }))} onMove={move} />
           <button onClick={load} title="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50">
             <RefreshCw size={16} />
           </button>
@@ -200,10 +202,9 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
               {orderedCols.map((c) => (
                 <th
                   key={c.key}
-                  {...dragProps(c.key)}
                   onClick={() => toggle(c.key)}
-                  title="Clic para ordenar · arrastra para mover la columna"
-                  className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-move select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'} ${dragging === c.key ? 'opacity-40' : ''}`}
+                  title={`Ordenar por ${c.label}`}
+                  className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-pointer select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
                 >
                   {c.label} <span className="text-slate-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>

@@ -3,6 +3,7 @@ import { useInventoryData } from './useInventoryData';
 import { urgentOrders, manufacturersOf, type UrgentRow } from './analysis';
 import { useSortable, sortArrow } from './useSortable';
 import { useColumnOrder } from './useColumnOrder';
+import ColumnOrderMenu from './ColumnOrderMenu';
 
 // Widget: tabla "Pedidos Urgentes" (artículos con estado 'Urgente'), con las
 // mismas columnas que la pantalla de la app y un filtro por fabricante.
@@ -54,7 +55,7 @@ export default function UrgentOrdersWidget() {
     [byManufacturer, category],
   );
   const { sorted, sortKey, sortDir, toggle } = useSortable<UrgentRow>(filtered);
-  const { order, dragProps, dragging } = useColumnOrder('cols_urgent_orders', COLS.map((c) => c.key));
+  const { order, move } = useColumnOrder('cols_urgent_orders', COLS.map((c) => c.key));
   const colMap = useMemo(() => Object.fromEntries(COLS.map((c) => [c.key, c])) as Record<string, (typeof COLS)[number]>, []);
   const orderedCols = order.map((k) => colMap[k]).filter(Boolean);
 
@@ -95,7 +96,10 @@ export default function UrgentOrdersWidget() {
           ))}
         </select>
         </div>
-        <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} en vista</span>
+        <div className="flex items-center gap-3 shrink-0">
+          <ColumnOrderMenu columns={orderedCols.map((c) => ({ key: String(c.key), label: c.label }))} onMove={move} />
+          <span className="text-xs text-gray-400 whitespace-nowrap">{filtered.length} en vista</span>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto">
@@ -105,10 +109,9 @@ export default function UrgentOrdersWidget() {
               {orderedCols.map((c) => (
                 <th
                   key={c.key}
-                  {...dragProps(c.key)}
                   onClick={() => toggle(c.key)}
-                  title="Clic para ordenar · arrastra para mover la columna"
-                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-move select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'} ${dragging === c.key ? 'opacity-40' : ''}`}
+                  title={`Ordenar por ${c.label}`}
+                  className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'}`}
                 >
                   {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
                 </th>
