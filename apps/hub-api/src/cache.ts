@@ -25,3 +25,11 @@ export async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
 export function clearCache(): void {
   store.clear();
 }
+
+/**
+ * Invalida una sola clave, sin tocar el resto de la caché. Se usa tras una
+ * escritura para refrescar solo el dato afectado (no evictar el de otras apps).
+ */
+export function clearCacheKey(key: string): void {
+  store.delete(key);
+}
