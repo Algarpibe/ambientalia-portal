@@ -41,7 +41,7 @@ export default function ResumenMensual({ resumen }: { resumen: Resumen }) {
         </table>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Kpi label="Facturado 2026 (sin IVA)" value={formatCOP(resumen.totalFacturadoSinIva)} />
         <Kpi label="Presupuesto 2026" value={formatCOP(resumen.presupuesto2026)} />
         <Kpi label="Cumplimiento" value={formatPct(resumen.cumplimientoPct)} />

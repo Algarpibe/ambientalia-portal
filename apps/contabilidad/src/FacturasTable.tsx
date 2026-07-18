@@ -87,6 +87,10 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando }: 
               ))}
               <td className="px-2 py-1">
                 <input
+                  // key incluye la cartera: si un guardado falla y App revierte el
+                  // valor en estado, el input se remonta y muestra el valor revertido
+                  // (un input no controlado con defaultValue no se actualizaría solo).
+                  key={`${f.invoiceNumber}:${f.cartera}`}
                   type="text"
                   defaultValue={f.cartera}
                   disabled={guardando === f.invoiceNumber}
