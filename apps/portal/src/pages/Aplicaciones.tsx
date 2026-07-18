@@ -6,7 +6,8 @@ import {
   ChevronRight,
   Beaker,
   Users,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Landmark
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -61,6 +62,13 @@ const aplicaciones: AppConfig[] = [
     path: "/carga-pedidos-wo",
     icon: FileSpreadsheet,
     color: "from-amber-400 to-orange-500"
+  },
+  {
+    name: "Contabilidad",
+    description: "Facturación 2026 en vivo desde Zoho: cartera, cobros, IVA y retenciones, con avance mensual frente al presupuesto.",
+    path: "/contabilidad",
+    icon: Landmark,
+    color: "from-teal-400 to-emerald-600"
   }
 ];
 
