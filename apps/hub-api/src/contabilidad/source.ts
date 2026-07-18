@@ -12,12 +12,9 @@ import {
 export interface ContabilidadData {
   facturas: FacturaContable[];
   resumen: Resumen;
+  anioActual: number;
+  aniosDisponibles: number[];
 }
-
-// Rango del año contable. La app es "Facturación 2026".
-const ANIO = 2026;
-const DESDE = `${ANIO}-01-01`;
-const HASTA = `${ANIO + 1}-01-01`;
 
 // Numéricos de raw como TEXTO (regla de la casa: un ::numeric con "12.5%" aborta
 // la consulta). sub_total/total son columnas numéricas reales -> llegan casteadas.
@@ -60,6 +57,22 @@ const FACTURAS_SQL = `
      AND COALESCE(i.reference_number, '') NOT ILIKE 'OVI-%'
    ORDER BY i.date, i.invoice_number`;
 
+// Rango del año contable (parametrizable). Antes fijo en 2026.
+function rango(anio: number): [string, string] {
+  return [`${anio}-01-01`, `${anio + 1}-01-01`];
+}
+
+// Facturado (subtotal) por año, excluyendo las internas AMI-/OVI-. Sirve para el
+// selector de años y para los comparativos del resumen.
+const FACTURADO_POR_ANIO_SQL = `
+  SELECT date_part('year', i.date)::int AS anio,
+         SUM(i.sub_total)               AS facturado
+    FROM books.invoices i
+   WHERE i.invoice_number NOT ILIKE 'AMI-%'
+     AND COALESCE(i.reference_number, '') NOT ILIKE 'OVI-%'
+   GROUP BY 1
+   ORDER BY 1`;
+
 /** Lee el mapa de overrides de cartera (invoice_number -> texto). */
 export async function getCarteraOverrides(db: Pool): Promise<Map<string, string>> {
   const { rows } = await db.query(
@@ -88,14 +101,55 @@ export async function upsertCartera(
   );
 }
 
-/** Facturas 2026 + resumen, con la cartera fusionada. */
-export async function getContabilidadData(db: Pool): Promise<ContabilidadData> {
-  const [{ rows }, overrides] = await Promise.all([
-    db.query(FACTURAS_SQL, [DESDE, HASTA]),
+/** Presupuesto de un año (null si no está configurado). */
+export async function getBudget(db: Pool, anio: number): Promise<number | null> {
+  const { rows } = await db.query(
+    `SELECT presupuesto FROM portal.contabilidad_budget WHERE year = $1`,
+    [anio],
+  );
+  if (!rows.length) return null;
+  const n = Number((rows[0] as { presupuesto: unknown }).presupuesto);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Upsert del presupuesto de un año. */
+export async function upsertBudget(
+  db: Pool,
+  anio: number,
+  presupuesto: number,
+  updatedBy: string | null,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO portal.contabilidad_budget (year, presupuesto, updated_at, updated_by)
+     VALUES ($1, $2, NOW(), $3)
+     ON CONFLICT (year)
+     DO UPDATE SET presupuesto = EXCLUDED.presupuesto, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+    [anio, presupuesto, updatedBy],
+  );
+}
+
+/** Facturado por año (para selector + comparativos). */
+async function getFacturadoPorAnio(db: Pool): Promise<Record<number, number>> {
+  const { rows } = await db.query(FACTURADO_POR_ANIO_SQL);
+  const out: Record<number, number> = {};
+  for (const r of rows as { anio: number; facturado: unknown }[]) {
+    out[Number(r.anio)] = Number(r.facturado) || 0;
+  }
+  return out;
+}
+
+/** Facturas del año + resumen + años disponibles, con la cartera fusionada. */
+export async function getContabilidadData(db: Pool, anio: number): Promise<ContabilidadData> {
+  const [desde, hasta] = rango(anio);
+  const [{ rows }, overrides, presupuesto, facturadoPorAnio] = await Promise.all([
+    db.query(FACTURAS_SQL, [desde, hasta]),
     getCarteraOverrides(db),
+    getBudget(db, anio),
+    getFacturadoPorAnio(db),
   ]);
   const dedup = dedupeByInvoiceNumber(rows as FacturaRawRow[]);
   const facturas = withParticipacion(dedup.map((r) => mapFacturaRow(r, overrides)));
-  const resumen = buildResumen(facturas);
-  return { facturas, resumen };
+  const resumen = buildResumen(facturas, anio, presupuesto, facturadoPorAnio);
+  const aniosDisponibles = Object.keys(facturadoPorAnio).map(Number).sort((a, b) => b - a);
+  return { facturas, resumen, anioActual: anio, aniosDisponibles };
 }
