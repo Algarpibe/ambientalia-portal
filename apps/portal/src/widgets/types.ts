@@ -87,12 +87,6 @@ export interface LayoutConfig {
   version: number;
   /** Lista de widgets anclados con su posición y tamaño en el grid. */
   widgets: LayoutItem[];
-  /**
-   * IDs de widgets que el usuario quitó explícitamente. No se vuelven a
-   * auto-añadir (el panel auto-puebla con TODOS los widgets de las apps
-   * asignadas salvo estos). Se pueden volver a añadir desde el catálogo.
-   */
-  dismissed?: string[];
 }
 
 /** Versión actual del schema de LayoutConfig. */

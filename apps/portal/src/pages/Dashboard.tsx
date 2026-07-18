@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { BarChart3, Search, Bell, Plus, Pencil, Check, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useWidgetRegistry } from '../hooks/useWidgetRegistry';
@@ -14,16 +14,18 @@ export default function Dashboard() {
   const { apps: assigned, user_id } = useAuth();
 
   const registry = useWidgetRegistry();
-  const allWidgets = registry.status === 'ready' ? registry.widgets : [];
-  // null mientras carga (para no auto-poblar/reconciliar prematuramente).
-  const availableWidgetsForLayout = registry.status === 'ready' ? registry.widgets : null;
+  const availableIds = useMemo(
+    () => (registry.status === 'ready' ? new Set(registry.widgets.map((w) => w.id)) : null),
+    [registry],
+  );
   const { layoutItems, anchoredWidgetIds, addWidget, removeWidget, onLayoutChange, persistError } =
-    useDashboardLayout(user_id, availableWidgetsForLayout);
+    useDashboardLayout(user_id, availableIds);
 
   const [editMode, setEditMode] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  const allWidgets = registry.status === 'ready' ? registry.widgets : [];
   const availableWidgets = allWidgets.filter((w) => !anchoredWidgetIds.has(w.id));
   const hasWidgets = anchoredWidgetIds.size > 0;
   const deleteTarget = confirmDelete ? allWidgets.find((w) => w.id === confirmDelete) : null;
