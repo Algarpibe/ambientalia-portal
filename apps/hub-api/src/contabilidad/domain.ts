@@ -118,9 +118,9 @@ export interface Resumen {
 
 /**
  * Resumen mensual/anual. El detalle mensual (facturacion/iva/acumulado) usa el
- * TOTAL+IVA de cada factura (como la serie mensual del Excel), mientras que el
- * total anual comparado contra el presupuesto usa el SUBTOTAL sin IVA (f.total),
- * sumado directamente sobre las facturas — no es la suma de meses.facturacion.
+ * SUBTOTAL sin IVA de cada factura (f.total), la misma base que el KPI anual
+ * "Facturado 2026 (sin IVA)" y que el presupuesto — así la serie mensual y el
+ * cumplimiento del presupuesto son reconciliables entre sí.
  */
 export function buildResumen(facturas: FacturaContable[]): Resumen {
   const meses: ResumenMes[] = Array.from({ length: 12 }, (_, i) => ({
@@ -132,7 +132,7 @@ export function buildResumen(facturas: FacturaContable[]): Resumen {
   for (const f of facturas) {
     const m = Number(f.fechaFactura.slice(5, 7)); // 'YYYY-MM-...' -> MM
     if (m >= 1 && m <= 12) {
-      meses[m - 1].facturacion += f.totalConIva;
+      meses[m - 1].facturacion += f.total;
       meses[m - 1].iva += f.iva;
     }
   }
@@ -141,7 +141,7 @@ export function buildResumen(facturas: FacturaContable[]): Resumen {
     acc += mes.facturacion;
     mes.acumulado = acc;
   }
-  const totalFacturadoSinIva = facturas.reduce((a, f) => a + f.total, 0);
+  const totalFacturadoSinIva = meses.reduce((a, m) => a + m.facturacion, 0);
   const totalIva = meses.reduce((a, m) => a + m.iva, 0);
   return {
     meses,

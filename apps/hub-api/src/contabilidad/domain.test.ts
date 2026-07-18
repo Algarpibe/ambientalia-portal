@@ -104,18 +104,18 @@ describe('withParticipacion', () => {
 });
 
 describe('buildResumen', () => {
-  it('agrega facturación e IVA por mes y calcula acumulado', () => {
+  it('agrega facturación (subtotal) e IVA por mes y calcula acumulado', () => {
     const facturas = [
-      mapFacturaRow(raw({ invoice_number: 'A', date: '2026-01-10', total: 1190, iva: '190' }), new Map()),
-      mapFacturaRow(raw({ invoice_number: 'B', date: '2026-01-20', total: 2380, iva: '380' }), new Map()),
-      mapFacturaRow(raw({ invoice_number: 'C', date: '2026-03-05', total: 1190, iva: '190' }), new Map()),
+      mapFacturaRow(raw({ invoice_number: 'A', date: '2026-01-10', sub_total: 1000, iva: '190' }), new Map()),
+      mapFacturaRow(raw({ invoice_number: 'B', date: '2026-01-20', sub_total: 2000, iva: '380' }), new Map()),
+      mapFacturaRow(raw({ invoice_number: 'C', date: '2026-03-05', sub_total: 1000, iva: '190' }), new Map()),
     ];
     const r = buildResumen(facturas);
-    expect(r.meses[0].facturacion).toBeCloseTo(3570, 2); // enero: 1190+2380
+    expect(r.meses[0].facturacion).toBeCloseTo(3000, 2); // enero: 1000+2000 (subtotal)
     expect(r.meses[0].iva).toBeCloseTo(570, 2);
     expect(r.meses[1].facturacion).toBe(0);              // febrero
-    expect(r.meses[0].acumulado).toBeCloseTo(3570, 2);
-    expect(r.meses[2].acumulado).toBeCloseTo(4760, 2);   // marzo acumula enero+marzo
+    expect(r.meses[0].acumulado).toBeCloseTo(3000, 2);
+    expect(r.meses[2].acumulado).toBeCloseTo(4000, 2);   // marzo acumula enero+marzo (subtotal)
   });
 
   it('calcula el cumplimiento del presupuesto sobre el subtotal facturado del año', () => {
