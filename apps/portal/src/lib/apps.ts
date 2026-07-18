@@ -24,6 +24,7 @@ export const APPS: AppInfo[] = [
   { id: 'laboratorios-ambientales', label: 'Laboratorios Ambientales', route: '/laboratorios-ambientales', category: 'aplicacion' },
   { id: 'customer-valuation', label: 'Valoración de Clientes', route: '/valoracion-clientes', category: 'aplicacion' },
   { id: 'WO-sales', label: 'Carga de Pedidos WO', route: '/carga-pedidos-wo', category: 'aplicacion' },
+  { id: 'contabilidad', label: 'Contabilidad', route: '/contabilidad', category: 'aplicacion' },
 ];
 
 /** Devuelve la info de una app por su id. */

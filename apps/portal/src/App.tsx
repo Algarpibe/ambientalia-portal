@@ -25,6 +25,7 @@ const VentasArticulos = lazyConReintento(() => import('../../product-sales/src/A
 const LaboratoriosAmbientales = lazyConReintento(() => import('../../laboratorios-ambientales/src/App.tsx'));
 const ValoracionClientes = lazyConReintento(() => import('../../customer-valuation/src/App'));
 const CargaPedidosWO = lazyConReintento(() => import('../../WO-sales/src/App'));
+const Contabilidad = lazyConReintento(() => import('../../contabilidad/src/App'));
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -109,6 +110,7 @@ function App() {
                     <Route path="/laboratorios-ambientales/*" element={<AppGuard appId="laboratorios-ambientales"><LaboratoriosAmbientales /></AppGuard>} />
                     <Route path="/valoracion-clientes/*" element={<AppGuard appId="customer-valuation"><ValoracionClientes /></AppGuard>} />
                     <Route path="/carga-pedidos-wo/*" element={<AppGuard appId="WO-sales"><CargaPedidosWO /></AppGuard>} />
+                    <Route path="/contabilidad/*" element={<AppGuard appId="contabilidad"><Contabilidad /></AppGuard>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>
