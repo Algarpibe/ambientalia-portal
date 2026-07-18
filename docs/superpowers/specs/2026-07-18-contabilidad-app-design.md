@@ -40,7 +40,7 @@ Mapeo a la réplica (`books.invoices` + joins), siguiendo `apps/hub-api/src/reco
 **Riesgo conocido:** Trato, Ticket y **QT** existen en Zoho pero enlazarlos por factura requiere una clave de join que hay que confirmar contra la réplica durante la implementación. Si para una factura no hay enlace fiable, ese campo se muestra vacío (no se inventa). No se convierten en editables en esta fase.
 
 ### Manual (editable, guardado en BD de usuarios — que sí es de escritura)
-- **Cartera** — clasificación/nota de estado de cobro por factura. En la muestra está vacía. Editable en línea.
+- **Cartera** — nota de estado de cobro por factura, **texto libre**. En la muestra está vacía. Editable en línea.
 
 ### Sembrado (constante, sin UI de edición por ahora)
 - **Presupuesto (Pto 2026)** y comparativos, extraídos del Excel:
@@ -107,4 +107,3 @@ Mismo patrón que WO-sales (React 19 + Vite + lucide-react, sin Tailwind propio 
 
 - Claves de join para **Trato / Ticket / QT** por factura (puede requerir inspeccionar `raw`).
 - Key exacta de **Retenciones** e **IVA** dentro de `books.invoices.raw`.
-- Definir el conjunto de valores de **Cartera** (¿lista fija: al día / en gestión / vencida / acuerdo? ¿o texto libre?) — decidir con el usuario antes de construir el editor.
