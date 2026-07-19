@@ -18,6 +18,12 @@ import { getPendingSalesOrders } from './salesOrders.js';
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
+// Detrás del proxy inverso de EasyPanel (un salto): confiar SOLO en el primer
+// X-Forwarded-For para que express-rate-limit identifique la IP real del cliente.
+// No usar `true` (confiar en todos) porque permitiría falsear la IP y saltarse el
+// rate-limit. Si algún día se antepone otro proxy (p. ej. Cloudflare), subir el número.
+app.set('trust proxy', 1);
+
 // DATA-001 — compresión gzip: los payloads JSON (facturas/pagos/ítems) comprimen
 // ~5-10×, reduciendo mucho el tamaño en la red sin cambiar el dato ni la lógica.
 app.use(compression());
