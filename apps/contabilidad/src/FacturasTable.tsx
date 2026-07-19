@@ -7,6 +7,7 @@ interface Props {
   facturas: FacturaContable[];
   onEditarCartera: (invoiceNumber: string, cartera: string) => void;
   guardando: string | null; // invoiceNumber que se está guardando, o null
+  onAbrirDetalle?: (invoiceNumber: string) => void;
 }
 
 const COLUMNS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text' | 'money' | 'pct' }[] = [
@@ -35,7 +36,7 @@ function cell(f: FacturaContable, kind: 'text' | 'money' | 'pct', key: SortKey):
   return String(v ?? '');
 }
 
-export default function FacturasTable({ facturas, onEditarCartera, guardando }: Props) {
+export default function FacturasTable({ facturas, onEditarCartera, guardando, onAbrirDetalle }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'fechaFactura', dir: 1 });
 
   const ordenadas = useMemo(() => {
@@ -75,7 +76,11 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando }: 
         </thead>
         <tbody className="divide-y divide-gray-100">
           {ordenadas.map((f, i) => (
-            <tr key={f.invoiceNumber} className="hover:bg-blue-50/40">
+            <tr
+              key={f.invoiceNumber}
+              onClick={() => onAbrirDetalle?.(f.invoiceNumber)}
+              className="cursor-pointer hover:bg-blue-50/40"
+            >
               <td className="px-2 py-1 text-gray-400">{i + 1}</td>
               {COLUMNS.map((c) => (
                 <td
@@ -85,7 +90,7 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando }: 
                   {cell(f, c.kind, c.key)}
                 </td>
               ))}
-              <td className="px-2 py-1">
+              <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
                 <input
                   // key incluye la cartera: si un guardado falla y App revierte el
                   // valor en estado, el input se remonta y muestra el valor revertido

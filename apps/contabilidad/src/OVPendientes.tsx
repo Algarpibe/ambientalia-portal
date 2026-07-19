@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, PackageOpen } from 'lucide-react';
 import { fetchOVPendientes, type OVPendienteFacturable } from './api';
 import { formatCOP } from './format';
+import DetalleModal from './DetalleModal';
 
 type SortKey = keyof OVPendienteFacturable;
 
@@ -43,6 +44,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
   const [filtro, setFiltro] = useState('');
   const [soloFacturables, setSoloFacturables] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'pending', dir: -1 });
+  const [detalleOV, setDetalleOV] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -140,7 +142,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtradas.map((o) => (
-                  <tr key={o.salesorder_number} className="hover:bg-amber-50/40">
+                  <tr key={o.salesorder_number} onClick={() => setDetalleOV(o.salesorder_number)} className="cursor-pointer hover:bg-amber-50/40">
                     <td className="px-2 py-1"><Luces o={o} /></td>
                     {COLS.map((c) => {
                       const v = o[c.key];
@@ -160,6 +162,10 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
             </table>
           </div>
         </>
+      )}
+
+      {detalleOV && (
+        <DetalleModal tipo="ov" numero={detalleOV} onClose={() => setDetalleOV(null)} />
       )}
     </section>
   );

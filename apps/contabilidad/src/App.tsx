@@ -5,6 +5,7 @@ import { formatCOP } from './format';
 import FacturasTable from './FacturasTable';
 import ResumenMensual from './ResumenMensual';
 import OVPendientes from './OVPendientes';
+import DetalleModal from './DetalleModal';
 
 type Estado = 'todas' | 'pagada' | 'saldo' | 'vencida';
 
@@ -25,6 +26,7 @@ export default function App() {
   const [mes, setMes] = useState(0); // 0 = todos
   const [guardando, setGuardando] = useState<string | null>(null);
   const [guardandoPpto, setGuardandoPpto] = useState(false);
+  const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
 
   const puedeEditar = esAdmin();
   const hoy = new Date().toISOString().slice(0, 10);
@@ -155,7 +157,7 @@ export default function App() {
             <span className="text-gray-700">Por cobrar: <b className="tabular-nums">{formatCOP(totales.porCobrar)}</b></span>
           </div>
 
-          <FacturasTable facturas={facturasFiltradas} onEditarCartera={onEditarCartera} guardando={guardando} />
+          <FacturasTable facturas={facturasFiltradas} onEditarCartera={onEditarCartera} guardando={guardando} onAbrirDetalle={setDetalleFactura} />
           <ResumenMensual
             resumen={data.resumen}
             anio={data.anioActual}
@@ -165,6 +167,10 @@ export default function App() {
           />
           <OVPendientes />
         </>
+      )}
+
+      {detalleFactura && (
+        <DetalleModal tipo="factura" numero={detalleFactura} onClose={() => setDetalleFactura(null)} />
       )}
     </main>
   );
