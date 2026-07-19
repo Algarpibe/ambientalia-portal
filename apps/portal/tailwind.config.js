@@ -15,6 +15,7 @@ export default {
     // (customer-valuation no esta porque trae su propio styles.css a mano.)
     "../WO-sales/src/**/*.{js,ts,jsx,tsx}",
     "../contabilidad/src/**/*.{js,ts,jsx,tsx}",
+    "../salestracker/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
