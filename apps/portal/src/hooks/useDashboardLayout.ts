@@ -9,8 +9,11 @@ import {
 } from '../widgets/types';
 
 // Gestiona el layout de widgets anclados por usuario: lectura/persistencia en
-// localStorage, packing al añadir, y reconciliación cuando una app deja de estar
-// disponible. Ver design.md, Propiedades 4, 6, 7, 9, 10.
+// localStorage y packing al añadir. La disponibilidad de widgets solo FILTRA lo
+// que se muestra (`layoutItems`); el layout guardado es la fuente de verdad y
+// nunca se poda por el registro (evita la pérdida de datos que causaba borrar de
+// localStorage los widgets cuando el registro resolvía vacío tras un redeploy).
+// Ver design.md, Propiedades 4, 6, 7, 9, 10.
 
 const GRID_COLS = 12;
 const PERSIST_DEBOUNCE_MS = 500;
@@ -127,17 +130,17 @@ export function useDashboardLayout(
     };
   }, []);
 
-  // Reconciliación (Req 5.3): descarta items cuya app/ widget ya no está disponible.
-  // Solo actúa cuando el registry ya resolvió (availableIds != null) para no borrar
-  // items mientras aún carga.
-  useEffect(() => {
-    if (!availableIds) return;
-    setItems((prev) => {
-      const next = prev.filter((it) => availableIds.has(it.widgetId));
-      if (next.length !== prev.length && userId) writeLayout(userId, next);
-      return next.length === prev.length ? prev : next;
-    });
-  }, [availableIds, userId]);
+  // Vista visible (Req 5.3): oculta los items cuyo widget no está disponible AHORA.
+  // Es SOLO para mostrar — `items` (el layout guardado) queda intacto en
+  // localStorage. Así un registro transitoriamente vacío (p. ej. los chunks de
+  // widgets que fallan al cargar tras un redeploy → registro `ready` con lista
+  // vacía) oculta los widgets esa sesión pero NUNCA los borra; al recuperarse el
+  // registro reaparecen sin recargar. Antes se persistía el layout podado y la
+  // pérdida era permanente.
+  const visibleItems = useMemo(
+    () => (availableIds ? items.filter((it) => availableIds.has(it.widgetId)) : items),
+    [items, availableIds],
+  );
 
   const addWidget = useCallback(
     (descriptor: WidgetDescriptor) => {
@@ -173,17 +176,19 @@ export function useDashboardLayout(
   const onLayoutChange = useCallback(
     (newLayout: Layout[]) => {
       setItems((prev) => {
-        const byId = new Map(prev.map((it) => [it.widgetId, it]));
-        const next = newLayout
-          .filter((l) => byId.has(l.i))
-          .map((l) => ({ widgetId: l.i, x: l.x, y: l.y, w: l.w, h: l.h }));
-        // Ignora callbacks espurios de react-grid-layout que no cambian nada.
-        if (next.length === prev.length && next.every((n, i) => {
-          const p = prev[i];
-          return p && n.widgetId === p.widgetId && n.x === p.x && n.y === p.y && n.w === p.w && n.h === p.h;
-        })) {
-          return prev;
-        }
+        // react-grid-layout solo reporta los items RENDERIZADOS (los visibles).
+        // Fusionamos sus posiciones sobre el layout COMPLETO para no perder los
+        // items ocultos (widgets guardados cuya app no está disponible ahora).
+        const pos = new Map(newLayout.map((l) => [l.i, l]));
+        let changed = false;
+        const next = prev.map((it) => {
+          const l = pos.get(it.widgetId);
+          if (!l) return it; // oculto: se conserva sin cambios
+          if (l.x === it.x && l.y === it.y && l.w === it.w && l.h === it.h) return it;
+          changed = true;
+          return { widgetId: it.widgetId, x: l.x, y: l.y, w: l.w, h: l.h };
+        });
+        if (!changed) return prev; // callback espurio: nada que persistir
         schedulePersist(next);
         return next;
       });
@@ -191,7 +196,10 @@ export function useDashboardLayout(
     [schedulePersist],
   );
 
-  const anchoredWidgetIds = useMemo(() => new Set(items.map((it) => it.widgetId)), [items]);
+  // Basado en los visibles: alimenta el estado vacío (hasWidgets) y el filtro del
+  // catálogo. Un widget guardado pero oculto no aparece en el catálogo porque su
+  // app no está en el registro; addWidget además deduplica por id.
+  const anchoredWidgetIds = useMemo(() => new Set(visibleItems.map((it) => it.widgetId)), [visibleItems]);
 
-  return { layoutItems: items, anchoredWidgetIds, addWidget, removeWidget, onLayoutChange, persistError };
+  return { layoutItems: visibleItems, anchoredWidgetIds, addWidget, removeWidget, onLayoutChange, persistError };
 }
