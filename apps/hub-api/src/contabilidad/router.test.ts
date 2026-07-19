@@ -106,3 +106,18 @@ describe('PUT /api/contabilidad/budget/:year', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('detalle', () => {
+  it('GET /api/contabilidad/factura/:numero → 404 si no existe (fakePool vacío)', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/factura/AM9999')
+      .set('Authorization', `Bearer ${token(['contabilidad'])}`);
+    expect(res.status).toBe(404);
+  });
+  it('GET /api/contabilidad/factura/:numero → 403 sin la app', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/factura/AM1')
+      .set('Authorization', `Bearer ${token([])}`);
+    expect(res.status).toBe(403);
+  });
+});

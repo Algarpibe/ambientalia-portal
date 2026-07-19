@@ -5,6 +5,7 @@ import { captureError } from '../sentry.js';
 import { cached, clearCache, clearCacheKey } from '../cache.js';
 import { getContabilidadData, upsertCartera, upsertBudget } from './source.js';
 import { getOVPendientesFacturables } from './ovPendientes.js';
+import { getDetalleFactura, getDetalleOV } from './detalle.js';
 
 const APP_ID = 'contabilidad';
 const CACHE_KEY = 'contabilidad:facturas';
@@ -78,6 +79,26 @@ export function createContabilidadRouter(db: Pool): Router {
       res.json({ orders });
     } catch (e) {
       sendError(res, e, 'contabilidad_ov_pendientes');
+    }
+  });
+
+  router.get('/contabilidad/factura/:numero', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const d = await getDetalleFactura(db, req.params.numero);
+      if (!d) return void res.status(404).json({ error: 'factura no encontrada' });
+      res.json(d);
+    } catch (e) {
+      sendError(res, e, 'contabilidad_detalle_factura');
+    }
+  });
+
+  router.get('/contabilidad/ov/:numero', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const d = await getDetalleOV(db, req.params.numero);
+      if (!d) return void res.status(404).json({ error: 'ov no encontrada' });
+      res.json(d);
+    } catch (e) {
+      sendError(res, e, 'contabilidad_detalle_ov');
     }
   });
 
