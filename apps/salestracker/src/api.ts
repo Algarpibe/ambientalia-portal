@@ -50,3 +50,20 @@ export async function fetchItemSales(params: { tipo: RecordTypeIO; desde: string
   if (!Array.isArray(data.rows)) throw new Error('Formato inesperado del hub (artículos).');
   return data.rows;
 }
+
+// Espejo de apps/hub-api/src/salestracker/types.ts
+export interface CustomerYearRow {
+  customer: string;
+  year: number;
+  ventas: number;
+}
+
+/** Ventas por cliente y año (tipo OV/FAC, rango de años). */
+export async function fetchCustomerSales(params: { tipo: RecordTypeIO; desdeAnio: number; hastaAnio: number }): Promise<CustomerYearRow[]> {
+  const qs = new URLSearchParams({ tipo: params.tipo, desdeAnio: String(params.desdeAnio), hastaAnio: String(params.hastaAnio) });
+  const res = await fetch(`${API_BASE}/api/salestracker/customer-sales?${qs}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { rows?: CustomerYearRow[] };
+  if (!Array.isArray(data.rows)) throw new Error('Formato inesperado del hub (clientes).');
+  return data.rows;
+}
