@@ -1,16 +1,12 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { QueryProvider } from './components/QueryProvider';
 import Nav from './components/Nav';
+import { APP_BASE } from './appBase';
 import Home from './pages/Home';
 import Articulos from './pages/Articulos';
 import Clientes from './pages/Clientes';
 
-// Layout con la navegación. Al renderizar el <Nav/> DENTRO de una route (vía
-// <Outlet/>), los NavLink relativos ('.', 'articulos', 'clientes') se resuelven
-// desde la raíz de la sub-app (montada en /salestracker/*), no desde la ruta
-// actual. Antes el <Nav/> vivía fuera de <Routes>, así que "Clientes" desde
-// /salestracker/articulos apilaba a /salestracker/articulos/clientes (pantalla en
-// blanco). Sin hardcodear el slug.
+// Layout con la navegación compartida (Nav + página vía <Outlet/>).
 function Layout() {
   return (
     <>
@@ -28,7 +24,9 @@ export default function App() {
           <Route index element={<Home />} />
           <Route path="articulos" element={<Articulos />} />
           <Route path="clientes" element={<Clientes />} />
-          <Route path="*" element={<Navigate to="." replace />} />
+          {/* Ruta absoluta: bajo el splat, un `to="."` se resolvía contra la ruta
+              actual y no volvía a la raíz de la sub-app. Ver appBase.ts. */}
+          <Route path="*" element={<Navigate to={APP_BASE} replace />} />
         </Route>
       </Routes>
     </QueryProvider>
