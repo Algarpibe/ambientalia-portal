@@ -11,7 +11,11 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchSales().then(setRows).catch((e: Error) => setError(e.message));
+    let vivo = true;
+    fetchSales()
+      .then((r) => { if (vivo) setRows(r); })
+      .catch((e: Error) => { if (vivo) setError(e.message); });
+    return () => { vivo = false; };
   }, []);
 
   if (error) return <div className="p-8 text-red-600">{error}</div>;

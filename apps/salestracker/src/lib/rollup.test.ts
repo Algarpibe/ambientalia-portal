@@ -16,6 +16,21 @@ describe('totalsByCategory', () => {
       { categoryName: 'Servicios', total: 30 },
     ]);
   });
+
+  it('ordena desc por total aunque la categoría mayor aparezca después', () => {
+    const desordenadas: SalesRow[] = [
+      { categoryName: 'Pequeña', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 10 },
+      { categoryName: 'Grande', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 500 },
+    ];
+    expect(totalsByCategory(desordenadas, 'INVOICE')).toEqual([
+      { categoryName: 'Grande', total: 500 },
+      { categoryName: 'Pequeña', total: 10 },
+    ]);
+  });
+
+  it('devuelve [] cuando no hay filas', () => {
+    expect(totalsByCategory([], 'INVOICE')).toEqual([]);
+  });
 });
 
 describe('grandTotal', () => {
