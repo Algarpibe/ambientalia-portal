@@ -23,3 +23,10 @@ export interface ItemSalesRow {
   cantidad: number;
   importe: number;
 }
+
+// Fila de ventas por cliente y año. Contrato de GET /api/salestracker/customer-sales.
+export interface CustomerYearRow {
+  customer: string;
+  year: number;
+  ventas: number;
+}
