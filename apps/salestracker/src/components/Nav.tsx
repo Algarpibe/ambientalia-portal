@@ -6,6 +6,7 @@ export default function Nav() {
     <nav className="flex gap-2 px-8 py-3 border-b bg-white">
       <NavLink to="." end className={link}>Inicio</NavLink>
       <NavLink to="articulos" className={link}>Artículos</NavLink>
+      <NavLink to="clientes" className={link}>Clientes</NavLink>
     </nav>
   );
 }
