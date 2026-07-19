@@ -19,4 +19,5 @@ export const WIDGET_FACTORIES: Record<string, () => Promise<WidgetModule>> = {
   'payment-reconciliation': () => import('../../../payment-reconciliation/src/widgets/index'),
   'customer-valuation': () => import('../../../customer-valuation/src/widgets/index'),
   'inventory-optimization': () => import('../../../inventory-optimization/src/widgets/index'),
+  'contabilidad': () => import('../../../contabilidad/src/widgets/index'),
 };

@@ -35,7 +35,7 @@ function Luces({ o }: { o: OVPendienteFacturable }) {
   );
 }
 
-export default function OVPendientes() {
+export default function OVPendientes({ bare = false }: { bare?: boolean }) {
   const [ordenes, setOrdenes] = useState<OVPendienteFacturable[] | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,11 +80,13 @@ export default function OVPendientes() {
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === 'pending' || key === 'total' ? -1 : 1 }));
 
   return (
-    <section className="mt-10 space-y-3">
-      <div className="flex items-center gap-2">
-        <PackageOpen className="h-5 w-5 text-amber-600" />
-        <h2 className="text-sm font-semibold text-gray-700">OV pendientes de facturar</h2>
-      </div>
+    <section className={`${bare ? '' : 'mt-10 '}space-y-3`}>
+      {!bare && (
+        <div className="flex items-center gap-2">
+          <PackageOpen className="h-5 w-5 text-amber-600" />
+          <h2 className="text-sm font-semibold text-gray-700">OV pendientes de facturar</h2>
+        </div>
+      )}
 
       {cargando && (
         <div className="flex items-center gap-2 text-gray-500"><Loader2 className="h-5 w-5 animate-spin" /> Cargando OV…</div>
