@@ -8,6 +8,7 @@ import { requireAuth, loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
+import { createSalestrackerRouter } from './salestracker/router.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getProfitabilityData } from './profitability.js';
@@ -184,6 +185,7 @@ initDb()
     // por lo mismo que el de usuarios: necesita getHubPool() ya validado.
     app.use('/api', createWoSalesRouter(getHubPool()));
     app.use('/api', createContabilidadRouter(getHubPool()));
+    app.use('/api', createSalestrackerRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
   })
   .catch((e) => {
