@@ -4,6 +4,7 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useSortable, sortArrow } from './useSortable';
 import { useColumnOrder } from './useColumnOrder';
 import ColumnOrderMenu from './ColumnOrderMenu';
+import DetalleModal from './DetalleModal';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -81,6 +82,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<string>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
+  const [detalleOV, setDetalleOV] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -220,7 +222,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
               </tr>
             ) : (
               sorted.map((o) => (
-                <tr key={o.salesorder_number} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr key={o.salesorder_number} onClick={() => setDetalleOV(o.salesorder_number)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
                   {orderedCols.map((c) => (
                     <td
                       key={c.key}
@@ -236,6 +238,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
           </tbody>
         </table>
       </div>
+      {detalleOV && <DetalleModal tipo="ov" numero={detalleOV} onClose={() => setDetalleOV(null)} />}
     </div>
   );
 }

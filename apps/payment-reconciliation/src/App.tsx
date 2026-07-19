@@ -7,6 +7,7 @@ import GeneralAnalysis from './GeneralAnalysis';
 import SalesOrdersPending from './SalesOrdersPending';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
+import DetalleModal from './DetalleModal';
 
 type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis' | 'salesOrders';
 
@@ -55,6 +56,7 @@ function App() {
   ]);
 
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
+  const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
 
   const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
@@ -743,7 +745,7 @@ function App() {
                           <SkeletonTableBody rows={8} columns={8} />
                         ) : (
                           filteredAndSortedData.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                            <tr key={idx} onClick={() => setDetalleFactura(row.invoiceNumber)} className="cursor-pointer hover:bg-slate-50/50 transition-colors">
                               {columnOrder.map((column) => {
                                 if (!columnVisibility[column as keyof typeof columnVisibility]) return null;
 
@@ -925,6 +927,7 @@ function App() {
         {activeView === 'salesOrders' && <SalesOrdersPending />}
 
       </main>
+      {detalleFactura && <DetalleModal tipo="factura" numero={detalleFactura} onClose={() => setDetalleFactura(null)} />}
     </div >
   );
 }
