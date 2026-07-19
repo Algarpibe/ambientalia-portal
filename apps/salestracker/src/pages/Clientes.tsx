@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { APP_BASE } from '../appBase';
 import { fetchCustomerSales, type RecordTypeIO } from '../api';
 import {
   buildCustomerMatrix,
@@ -251,7 +253,14 @@ export default function Clientes() {
                 : null;
               return (
                 <tr key={r.customer} className="border-t">
-                  <td className="px-3 py-2">{r.customer}</td>
+                  <td className="px-3 py-2">
+                    <Link
+                      to={`${APP_BASE}/clientes/${encodeURIComponent(r.customer)}`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {r.customer}
+                    </Link>
+                  </td>
                   {years.map((y) => (
                     <td key={y} className="px-3 py-2 text-right">{formatUSD(r.byYear[y] ?? 0)}</td>
                   ))}
