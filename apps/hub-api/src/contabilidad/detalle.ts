@@ -1,0 +1,153 @@
+import type { Pool } from '@algarpibe/zoho-sync';
+
+// Detalle de una factura / OV para el modal de la app Contabilidad: cabecera +
+// líneas (SKU/nombre/uds/precio) + totales. Los totales salen de la cabecera del
+// documento (sub_total/total/tax_total), NO de sumar líneas, para cuadrar con Zoho.
+
+export interface DetalleLinea {
+  sku: string;
+  nombre: string;
+  cantidad: number;
+  precio: number; // COP
+  total: number;  // cantidad * precio
+}
+
+export interface DetalleFactura {
+  numero: string;
+  cliente: string;
+  nit: string | null;
+  direccion: string | null;
+  fecha: string;
+  vencimiento: string | null;
+  terminos: string | null;
+  ov: string | null;
+  saldo: number;
+  lineas: DetalleLinea[];
+  subtotal: number;
+  iva: number;
+  total: number;
+}
+
+export interface DetalleOV {
+  numero: string;
+  cliente: string;
+  nit: string | null;
+  direccion: string | null;
+  fecha: string;
+  entrega: string | null;
+  terminos: string | null;
+  lineas: DetalleLinea[];
+  subtotal: number;
+  iva: number;
+  total: number;
+}
+
+export interface LineaRow {
+  sku: string | null;
+  nombre: string | null;
+  cantidad: number | null;
+  precio: number | null;
+}
+
+function n(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+/** Mapea filas de línea a DetalleLinea, calculando el total por línea. Puro. */
+export function buildLineas(rows: LineaRow[]): DetalleLinea[] {
+  return rows.map((r) => {
+    const cantidad = n(r.cantidad);
+    const precio = n(r.precio);
+    return { sku: r.sku ?? '', nombre: r.nombre ?? '', cantidad, precio, total: cantidad * precio };
+  });
+}
+
+const DIRECCION = (col: string) =>
+  `NULLIF(concat_ws(', ', NULLIF(${col} -> 'billing_address' ->> 'address', ''), NULLIF(${col} -> 'billing_address' ->> 'city', '')), '')`;
+
+const FACTURA_HEADER_SQL = `
+  SELECT i.invoice_number, i.customer_name, i.date::text AS fecha, i.due_date::text AS vencimiento,
+         i.sub_total, i.total,
+         NULLIF(i.raw ->> 'tax_total', '')            AS iva,
+         NULLIF(i.raw ->> 'balance', '')              AS saldo,
+         NULLIF(i.raw ->> 'payment_terms_label', '')  AS terminos,
+         i.reference_number                           AS ov,
+         c.nit,
+         ${DIRECCION('i.raw')}                        AS direccion
+    FROM books.invoices i
+    LEFT JOIN books.contacts c ON c.contact_id = i.customer_id
+   WHERE i.invoice_number = $1
+   LIMIT 1`;
+
+const FACTURA_LINEAS_SQL = `
+  SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio
+    FROM books.invoice_line_items li
+    JOIN books.invoices i ON i.invoice_id = li.invoice_id
+    LEFT JOIN books.items it ON it.item_id = li.item_id
+   WHERE i.invoice_number = $1
+   ORDER BY li.line_item_id`;
+
+const OV_HEADER_SQL = `
+  SELECT so.salesorder_number, so.customer_name, so.date::text AS fecha,
+         NULLIF(so.raw ->> 'shipment_date', '')       AS entrega,
+         so.sub_total, so.total,
+         NULLIF(so.raw ->> 'tax_total', '')           AS iva,
+         NULLIF(so.raw ->> 'payment_terms_label', '') AS terminos,
+         c.nit,
+         ${DIRECCION('so.raw')}                       AS direccion
+    FROM books.sales_orders so
+    LEFT JOIN books.contacts c ON c.contact_id = so.customer_id
+   WHERE so.salesorder_number = $1
+   LIMIT 1`;
+
+const OV_LINEAS_SQL = `
+  SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio
+    FROM books.salesorder_line_items li
+    JOIN books.sales_orders so ON so.salesorder_id = li.salesorder_id
+    LEFT JOIN books.items it ON it.item_id = li.item_id
+   WHERE so.salesorder_number = $1
+   ORDER BY li.line_item_id`;
+
+export async function getDetalleFactura(db: Pool, numero: string): Promise<DetalleFactura | null> {
+  const { rows: h } = await db.query(FACTURA_HEADER_SQL, [numero]);
+  if (!h.length) return null;
+  const head = h[0] as Record<string, unknown>;
+  const { rows: l } = await db.query(FACTURA_LINEAS_SQL, [numero]);
+  return {
+    numero: String(head.invoice_number),
+    cliente: (head.customer_name as string) ?? '',
+    nit: (head.nit as string) ?? null,
+    direccion: (head.direccion as string) ?? null,
+    fecha: head.fecha as string,
+    vencimiento: (head.vencimiento as string) ?? null,
+    terminos: (head.terminos as string) ?? null,
+    ov: (head.ov as string) ?? null,
+    saldo: n(head.saldo),
+    lineas: buildLineas(l as LineaRow[]),
+    subtotal: n(head.sub_total),
+    iva: n(head.iva),
+    total: n(head.total),
+  };
+}
+
+export async function getDetalleOV(db: Pool, numero: string): Promise<DetalleOV | null> {
+  const { rows: h } = await db.query(OV_HEADER_SQL, [numero]);
+  if (!h.length) return null;
+  const head = h[0] as Record<string, unknown>;
+  const { rows: l } = await db.query(OV_LINEAS_SQL, [numero]);
+  return {
+    numero: String(head.salesorder_number),
+    cliente: (head.customer_name as string) ?? '',
+    nit: (head.nit as string) ?? null,
+    direccion: (head.direccion as string) ?? null,
+    fecha: head.fecha as string,
+    entrega: (head.entrega as string) ?? null,
+    terminos: (head.terminos as string) ?? null,
+    lineas: buildLineas(l as LineaRow[]),
+    subtotal: n(head.sub_total),
+    iva: n(head.iva),
+    total: n(head.total),
+  };
+}
