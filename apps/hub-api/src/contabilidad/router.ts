@@ -4,6 +4,7 @@ import { requireAuth, requireApp, requireAdmin, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { cached, clearCache, clearCacheKey } from '../cache.js';
 import { getContabilidadData, upsertCartera, upsertBudget } from './source.js';
+import { getOVPendientesFacturables } from './ovPendientes.js';
 
 const APP_ID = 'contabilidad';
 const CACHE_KEY = 'contabilidad:facturas';
@@ -68,6 +69,15 @@ export function createContabilidadRouter(db: Pool): Router {
       res.json({ ok: true });
     } catch (e) {
       sendError(res, e, 'contabilidad_budget');
+    }
+  });
+
+  router.get('/contabilidad/ov-pendientes', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+    try {
+      const orders = await cached('contabilidad:ov-pendientes', () => getOVPendientesFacturables(db));
+      res.json({ orders });
+    } catch (e) {
+      sendError(res, e, 'contabilidad_ov_pendientes');
     }
   });
 
