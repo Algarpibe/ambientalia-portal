@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, PackageOpen } from 'lucide-react';
-import { fetchOVPendientes, type PendingSalesOrder } from './api';
+import { fetchOVPendientes, type OVPendienteFacturable } from './api';
 import { formatCOP } from './format';
 
-type SortKey = keyof PendingSalesOrder;
+type SortKey = keyof OVPendienteFacturable;
 
-// Etiqueta + color por estado de la OV (los que devuelve getPendingSalesOrders).
 const ESTADO: Record<string, { texto: string; cls: string }> = {
   open: { texto: 'Abierta', cls: 'bg-blue-50 text-blue-700' },
   overdue: { texto: 'Vencida', cls: 'bg-red-50 text-red-700' },
@@ -23,12 +22,25 @@ const COLS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text'
   { key: 'status', label: 'ESTADO', align: 'left', kind: 'estado' },
 ];
 
+const LUZ = 'inline-block h-2.5 w-2.5 rounded-full';
+
+function Luces({ o }: { o: OVPendienteFacturable }) {
+  return (
+    <div className="flex items-center gap-1">
+      {o.despachada && <span title="Despachada (paquete y envío)" className={`${LUZ} bg-green-500`} />}
+      {o.soloPaquete && <span title="Sólo paquete (sin enviar)" className={`${LUZ} bg-amber-400`} />}
+      {o.ticketPorFacturar && <span title="Ticket por facturar" className={`${LUZ} bg-red-500`} />}
+    </div>
+  );
+}
+
 export default function OVPendientes() {
-  const [ordenes, setOrdenes] = useState<PendingSalesOrder[] | null>(null);
+  const [ordenes, setOrdenes] = useState<OVPendienteFacturable[] | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [estado, setEstado] = useState('todos');
   const [filtro, setFiltro] = useState('');
+  const [soloFacturables, setSoloFacturables] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'pending', dir: -1 });
 
   useEffect(() => {
@@ -44,6 +56,7 @@ export default function OVPendientes() {
     if (!ordenes) return [];
     const q = filtro.trim().toLowerCase();
     const arr = ordenes.filter((o) => {
+      if (soloFacturables && !o.facturable) return false;
       if (estado !== 'todos' && o.status !== estado) return false;
       if (q && !(o.salesorder_number.toLowerCase().includes(q) || (o.customer_name ?? '').toLowerCase().includes(q))) return false;
       return true;
@@ -55,7 +68,7 @@ export default function OVPendientes() {
       return String(av ?? '').localeCompare(String(bv ?? ''), 'es') * sort.dir;
     });
     return arr;
-  }, [ordenes, estado, filtro, sort]);
+  }, [ordenes, estado, filtro, soloFacturables, sort]);
 
   const totales = useMemo(
     () => filtradas.reduce((a, o) => ({ n: a.n + 1, total: a.total + o.total, pending: a.pending + o.pending }), { n: 0, total: 0, pending: 0 }),
@@ -84,7 +97,7 @@ export default function OVPendientes() {
 
       {ordenes && !cargando && (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <select className="rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" value={estado} onChange={(e) => setEstado(e.target.value)}>
               <option value="todos">Todos los estados</option>
               <option value="open">Abiertas</option>
@@ -92,6 +105,10 @@ export default function OVPendientes() {
               <option value="partially_invoiced">Parciales</option>
             </select>
             <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar OV o cliente…" className="w-64 rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" />
+            <label className="flex items-center gap-1.5 text-sm text-gray-600">
+              <input type="checkbox" checked={soloFacturables} onChange={(e) => setSoloFacturables(e.target.checked)} />
+              Solo facturables
+            </label>
             <div className="flex flex-wrap gap-4 text-sm">
               <span className="text-gray-500">{totales.n} OV</span>
               <span className="text-gray-700">Total: <b className="tabular-nums">{formatCOP(totales.total)}</b></span>
@@ -99,10 +116,18 @@ export default function OVPendientes() {
             </div>
           </div>
 
+          {/* Leyenda de luces */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+            <span className="flex items-center gap-1"><span className={`${LUZ} bg-green-500`} /> Despachada</span>
+            <span className="flex items-center gap-1"><span className={`${LUZ} bg-amber-400`} /> Sólo paquete</span>
+            <span className="flex items-center gap-1"><span className={`${LUZ} bg-red-500`} /> Ticket por facturar</span>
+          </div>
+
           <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
             <table className="min-w-full text-xs">
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
+                  <th className="px-2 py-2 text-left font-semibold whitespace-nowrap">INDICIO</th>
                   {COLS.map((c) => (
                     <th key={c.key} onClick={() => toggleSort(c.key)} className={`cursor-pointer select-none px-2 py-2 font-semibold whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'} hover:text-gray-900`}>
                       {c.label}{sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
@@ -113,6 +138,7 @@ export default function OVPendientes() {
               <tbody className="divide-y divide-gray-100">
                 {filtradas.map((o) => (
                   <tr key={o.salesorder_number} className="hover:bg-amber-50/40">
+                    <td className="px-2 py-1"><Luces o={o} /></td>
                     {COLS.map((c) => {
                       const v = o[c.key];
                       if (c.kind === 'money') return <td key={c.key} className="px-2 py-1 text-right tabular-nums">{formatCOP(v as number)}</td>;
@@ -125,7 +151,7 @@ export default function OVPendientes() {
                   </tr>
                 ))}
                 {filtradas.length === 0 && (
-                  <tr><td colSpan={COLS.length} className="px-2 py-4 text-center text-gray-400">Sin OV pendientes con estos filtros.</td></tr>
+                  <tr><td colSpan={COLS.length + 1} className="px-2 py-4 text-center text-gray-400">Sin OV pendientes con estos filtros.</td></tr>
                 )}
               </tbody>
             </table>
