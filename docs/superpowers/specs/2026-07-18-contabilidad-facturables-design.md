@@ -24,7 +24,7 @@ En la tabla de OV pendientes, mostrar una **luz de color por fila** que señale 
   - `shipped_status`: `fulfilled` | `partially_shipped` | `pending` | `''` (void/draft).
   - `packages`: array JSON (paquetes creados). `shipment_date` NO sirve (está puesto casi siempre, es fecha prevista).
   - `zcrm_potential_id`: enlace al deal de CRM.
-- Ticket: `books.sales_orders.raw->>'zcrm_potential_id'` → `crm.deals.id` → `crm.deals.numero_ticket` → `desk.tickets.number` → `desk.tickets.status`. Estado exacto: **`Por Facturar`** (confirmado; hay tickets en ese estado).
+- Ticket: `books.sales_orders.raw->>'zcrm_potential_id'` → `crm.deals.id` → `crm.deals.numero_ticket` → `desk.tickets.number` → `desk.tickets.status`. Estado exacto: **`Por Facturar`** (confirmado). **Verificado contra la réplica:** `desk.tickets.salesorder_id` y `orden_venta` están SIEMPRE vacíos (no sirven para enlazar); la ÚNICA vía es el deal, y funciona: 339 OV enlazan a un ticket por ese chain. `t.number` es `integer` y `numero_ticket` es `numeric` → Postgres los compara sin cast. Hoy hay 2 tickets `Por Facturar` pero ninguno con OV enlazada, así que la luz roja no encenderá aún; el mecanismo es correcto y encenderá cuando un ticket `Por Facturar` tenga OV.
 
 ## 1. Backend — endpoint propio enriquecido
 
@@ -59,8 +59,8 @@ Respuesta: `{ orders: OVPendienteFacturable[] }` (mismo envoltorio `{ orders }` 
 
 **El endpoint compartido `/api/sales-orders/pending` NO se modifica** (el Conciliador sigue igual). La lógica "facturable" queda aislada en el módulo de contabilidad.
 
-### Join del ticket (a verificar en el plan)
-`crm.deals.numero_ticket` es numérico y `desk.tickets.number` puede ser texto; el plan confirma los tipos y castea de forma segura (p. ej. `t.number = d.numero_ticket::text` o casteo inverso con guarda). Si el tipo no casa, se ajusta el cast; es un detalle acotado.
+### Join del ticket (VERIFICADO)
+La señal de ticket se calcula como `EXISTS (SELECT 1 FROM crm.deals d JOIN desk.tickets t ON t.number = d.numero_ticket WHERE d.id = NULLIF(so.raw->>'zcrm_potential_id','') AND t.status = 'Por Facturar')` — subconsulta correlacionada por OV (no multiplica las filas de línea). `t.number = d.numero_ticket` sin cast (integer vs numeric). Verificado: 339 OV enlazan por este chain.
 
 ## 2. Frontend — luces + filtro
 
@@ -87,5 +87,6 @@ Respuesta: `{ orders: OVPendienteFacturable[] }` (mismo envoltorio `{ orders }` 
 
 ## 5. Riesgos
 
-- El join OV→deal→ticket depende de que `zcrm_potential_id` esté poblado en la OV (como pasó con las facturas, suele estarlo, pero puede faltar en algunas → esas no tendrán luz roja aunque tengan ticket).
-- `packages` podría venir vacío en la réplica si el sync trajo la vista de lista en vez del detalle; el plan verifica que `packages`/`shipped_status` estén poblados en OV reales antes de dar por bueno el criterio.
+- El join OV→deal→ticket depende de que `zcrm_potential_id` esté poblado en la OV (suele estarlo; verificado: 339 OV enlazan). Una OV sin deal no tendrá luz roja aunque exista un ticket.
+- `packages` y `shipped_status` están poblados en la réplica (verificado en la distribución: `tiene_paquete=t` y `shipped_status` con valores reales), así que el criterio de despacho es fiable.
+- La luz roja no encenderá hasta que un ticket `Por Facturar` tenga una OV enlazada (hoy 0). No es un bug: es el estado actual del dato.
