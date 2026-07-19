@@ -17,6 +17,7 @@ export interface OVPendienteFacturable {
   soloPaquete: boolean;       // tiene paquete && !despachada
   ticketPorFacturar: boolean; // ticket de la OV (vía deal) en estado 'Por Facturar'
   facturable: boolean;        // despachada || soloPaquete || ticketPorFacturar
+  ticket: string | null;      // nº de ticket de la OV (crm.deals.numero_ticket vía deal)
 }
 
 // Una fila por LÍNEA de OV (mismo motivo que salesOrders.ts: cantidades en texto).
@@ -33,6 +34,7 @@ export interface LineRow {
   shipped_status: string | null;
   tiene_paquete: boolean;
   ticket_por_facturar: boolean;
+  ticket: string | null;
   quantity: number | null;
   rate: number | null;
   cantidad_facturada: string | null;
@@ -57,6 +59,10 @@ const SQL = `
             WHERE d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
               AND t.status = 'Por Facturar'
          )                                          AS ticket_por_facturar,
+         (SELECT d.numero_ticket::text
+            FROM crm.deals d
+           WHERE d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
+           LIMIT 1)                                  AS ticket,
          li.quantity,
          li.rate,
          NULLIF(li.raw ->> 'quantity_invoiced', '') AS cantidad_facturada,
@@ -95,6 +101,7 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
         soloPaquete,
         ticketPorFacturar: r.ticket_por_facturar,
         facturable: despachada || soloPaquete || r.ticket_por_facturar,
+        ticket: r.ticket,
       };
       byId.set(r.salesorder_id, o);
     }

@@ -14,6 +14,7 @@ const estadoDe = (s: string) => ESTADO[s] ?? { texto: s, cls: 'bg-gray-100 text-
 
 const COLS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text' | 'money' | 'estado' }[] = [
   { key: 'salesorder_number', label: 'OV', align: 'left', kind: 'text' },
+  { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text' },
   { key: 'customer_name', label: 'CLIENTE', align: 'left', kind: 'text' },
   { key: 'date', label: 'FECHA OV', align: 'left', kind: 'text' },
   { key: 'shipment_date', label: 'ENTREGA', align: 'left', kind: 'text' },

@@ -12,6 +12,7 @@ const line = (over: Partial<LineRow>): LineRow => ({
   shipped_status: 'pending',
   tiene_paquete: false,
   ticket_por_facturar: false,
+  ticket: null,
   quantity: 2,
   rate: 100,
   cantidad_facturada: '0',

@@ -66,6 +66,7 @@ export interface OVPendienteFacturable extends PendingSalesOrder {
   soloPaquete: boolean;
   ticketPorFacturar: boolean;
   facturable: boolean;
+  ticket: string | null;
 }
 
 async function mensajeDeError(res: Response): Promise<string> {
