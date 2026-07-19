@@ -49,7 +49,13 @@ export default function Clientes() {
   const [anioA, setAnioA] = useState(anioActual);
   const [anioB, setAnioB] = useState(anioActual - 1);
 
-  const years = useMemo(() => yearRange(desdeAnio, hastaAnio), [desdeAnio, hastaAnio]);
+  const years = useMemo(
+    () =>
+      desdeAnio >= 2000 && hastaAnio >= desdeAnio && hastaAnio - desdeAnio <= 30
+        ? yearRange(desdeAnio, hastaAnio)
+        : [],
+    [desdeAnio, hastaAnio]
+  );
 
   const q = useQuery({
     queryKey: ['customer-sales', tipo, desdeAnio, hastaAnio],
