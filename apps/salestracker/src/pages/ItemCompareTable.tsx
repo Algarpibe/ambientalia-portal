@@ -20,7 +20,7 @@ export default function ItemCompareTable({ tipo, anioA, anioB, search }: {
   }, [qA.data, qB.data, search]);
 
   if (qA.isLoading || qB.isLoading) return <div className="p-6 text-gray-500">Cargando comparación…</div>;
-  if (qA.error || qB.error) return <div className="p-6 text-red-600">{String((qA.error ?? qB.error) as Error)}</div>;
+  if (qA.error || qB.error) return <div className="p-6 text-red-600">{((qA.error ?? qB.error) as Error).message}</div>;
 
   return (
     <div className="overflow-x-auto rounded-xl border bg-white">
