@@ -112,6 +112,30 @@ export async function fetchOVPendientes(): Promise<OVPendienteFacturable[]> {
   return data.orders;
 }
 
+export interface DetalleLinea { sku: string; nombre: string; cantidad: number; precio: number; total: number; }
+export interface DetalleFactura {
+  numero: string; cliente: string; nit: string | null; direccion: string | null;
+  fecha: string; vencimiento: string | null; terminos: string | null; ov: string | null;
+  saldo: number; lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
+}
+export interface DetalleOV {
+  numero: string; cliente: string; nit: string | null; direccion: string | null;
+  fecha: string; entrega: string | null; terminos: string | null;
+  lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
+}
+
+export async function fetchFacturaDetalle(numero: string): Promise<DetalleFactura> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/factura/${encodeURIComponent(numero)}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return (await res.json()) as DetalleFactura;
+}
+
+export async function fetchOVDetalle(numero: string): Promise<DetalleOV> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/ov/${encodeURIComponent(numero)}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return (await res.json()) as DetalleOV;
+}
+
 /** True si el JWT en localStorage tiene rol admin (solo para gating de UX). */
 export function esAdmin(): boolean {
   const t = localStorage.getItem('ambientalia_token');
