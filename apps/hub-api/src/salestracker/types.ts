@@ -30,3 +30,28 @@ export interface CustomerYearRow {
   year: number;
   ventas: number;
 }
+
+// Ventas por (cliente, artículo) en un año. GET /api/salestracker/customer-item-sales.
+export interface CustomerItemRow {
+  customer: string;
+  sku: string | null;
+  marca: string | null;
+  nombre: string;
+  categoria: string | null;
+  cantidad: number;
+  importe: number;
+}
+
+// Ventas por (cliente, mes) en un año. GET /api/salestracker/customer-month-sales.
+export interface CustomerMonthRow {
+  customer: string;
+  mes: number; // 1-12
+  importe: number;
+}
+
+// Ventas y costo estándar por cliente en un año. GET /api/salestracker/margin-by-customer.
+export interface MarginCustomerRow {
+  customer: string;
+  ventas: number;
+  costo: number;
+}

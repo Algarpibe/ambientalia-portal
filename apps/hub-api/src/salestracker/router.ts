@@ -6,6 +6,9 @@ import { cached } from '../cache.js';
 import { getSalesRows } from './sales.js';
 import { getItemSalesRows } from './item-sales.js';
 import { getCustomerSalesRows } from './customer-sales.js';
+import { getCustomerItemSalesRows } from './customer-item-sales.js';
+import { getCustomerMonthSalesRows } from './customer-month-sales.js';
+import { getMarginByCustomerRows } from './margin-by-customer.js';
 import type { RecordTypeIO } from './types.js';
 
 const APP_ID = 'salestracker';
@@ -63,6 +66,36 @@ export function createSalestrackerRouter(db: Pool): Router {
     } catch (e) {
       sendError(res, e, 'salestracker_customer_sales');
     }
+  });
+
+  router.get('/salestracker/customer-item-sales', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const anio = parseAnio(req.query.anio);
+      if (anio === null) return void res.status(400).json({ error: 'anio inválido (2000-2100)' });
+      const rows = await cached(`salestracker:customer-item-sales:${tipo}:${anio}`, () => getCustomerItemSalesRows(db, { tipo: tipo as RecordTypeIO, anio }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_customer_item_sales'); }
+  });
+
+  router.get('/salestracker/customer-month-sales', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const anio = parseAnio(req.query.anio);
+      if (anio === null) return void res.status(400).json({ error: 'anio inválido (2000-2100)' });
+      const rows = await cached(`salestracker:customer-month-sales:${tipo}:${anio}`, () => getCustomerMonthSalesRows(db, { tipo: tipo as RecordTypeIO, anio }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_customer_month_sales'); }
+  });
+
+  router.get('/salestracker/margin-by-customer', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const anio = parseAnio(req.query.anio);
+      if (anio === null) return void res.status(400).json({ error: 'anio inválido (2000-2100)' });
+      const rows = await cached(`salestracker:margin-by-customer:${tipo}:${anio}`, () => getMarginByCustomerRows(db, { tipo: tipo as RecordTypeIO, anio }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_margin_by_customer'); }
   });
 
   return router;
