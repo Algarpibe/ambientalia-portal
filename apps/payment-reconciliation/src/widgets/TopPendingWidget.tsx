@@ -5,7 +5,7 @@ import { pendingByCustomer, formatMoney } from './analysis';
 // Widget: ranking de clientes con mayor saldo pendiente por conciliar, con
 // barras HTML (sin librerías de gráficos). Autocontenido, no recibe props.
 
-const TOP_N = 6;
+const TOP_N = 10;
 
 export default function TopPendingWidget() {
   const { invoices, loading, error } = useReconciliationData();
