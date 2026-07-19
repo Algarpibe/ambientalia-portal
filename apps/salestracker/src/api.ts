@@ -67,3 +67,46 @@ export async function fetchCustomerSales(params: { tipo: RecordTypeIO; desdeAnio
   if (!Array.isArray(data.rows)) throw new Error('Formato inesperado del hub (clientes).');
   return data.rows;
 }
+
+// Espejo de apps/hub-api/src/salestracker/types.ts
+export interface CustomerItemRow {
+  customer: string;
+  sku: string | null;
+  marca: string | null;
+  nombre: string;
+  categoria: string | null;
+  cantidad: number;
+  importe: number;
+}
+export interface CustomerMonthRow {
+  customer: string;
+  mes: number;
+  importe: number;
+}
+export interface MarginCustomerRow {
+  customer: string;
+  ventas: number;
+  costo: number;
+}
+
+/** Helper genérico: GET {path}?{params} → { rows: T[] }. Lanza Error en español si falla. */
+async function fetchRows<T>(path: string, params: Record<string, string>, contexto: string): Promise<T[]> {
+  const qs = new URLSearchParams(params);
+  const res = await fetch(`${API_BASE}${path}?${qs}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { rows?: T[] };
+  if (!Array.isArray(data.rows)) throw new Error(`Formato inesperado del hub (${contexto}).`);
+  return data.rows;
+}
+
+/** Ventas por (cliente, artículo) en un año (tipo OV/FAC). */
+export const fetchCustomerItemSales = (p: { tipo: RecordTypeIO; anio: number }) =>
+  fetchRows<CustomerItemRow>('/api/salestracker/customer-item-sales', { tipo: p.tipo, anio: String(p.anio) }, 'cliente×artículo');
+
+/** Ventas por (cliente, mes) en un año (tipo OV/FAC). */
+export const fetchCustomerMonthSales = (p: { tipo: RecordTypeIO; anio: number }) =>
+  fetchRows<CustomerMonthRow>('/api/salestracker/customer-month-sales', { tipo: p.tipo, anio: String(p.anio) }, 'estacionalidad');
+
+/** Ventas y costo estándar por cliente en un año (tipo OV/FAC). */
+export const fetchMarginByCustomer = (p: { tipo: RecordTypeIO; anio: number }) =>
+  fetchRows<MarginCustomerRow>('/api/salestracker/margin-by-customer', { tipo: p.tipo, anio: String(p.anio) }, 'margen');
