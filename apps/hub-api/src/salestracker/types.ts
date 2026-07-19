@@ -10,3 +10,16 @@ export interface SalesRow {
   year: number;
   amountUsd: number;
 }
+
+// Tipo de registro para las vistas OV/FAC (BACKLOG no aplica a item-sales).
+export type RecordTypeIO = 'SALES_ORDER' | 'INVOICE';
+
+// Fila de ventas por artículo. Contrato de GET /api/salestracker/item-sales.
+export interface ItemSalesRow {
+  itemId: string;
+  sku: string | null;
+  nombre: string;
+  categoria: string | null;
+  cantidad: number;
+  importe: number;
+}
