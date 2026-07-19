@@ -14,6 +14,7 @@ import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
 import { getCustomerValuationData } from './customerValuation.js';
 import { getPendingSalesOrders } from './salesOrders.js';
+import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -143,6 +144,26 @@ app.get('/api/sales-orders/pending', requireAuth, async (_req, res) => {
     res.json({ orders: data });
   } catch (e) {
     sendError(res, e, 'sales-orders-pending');
+  }
+});
+
+app.get('/api/invoices/:numero/detail', requireAuth, async (req, res) => {
+  try {
+    const d = await getDetalleFactura(getHubPool(), req.params.numero);
+    if (!d) return void res.status(404).json({ error: 'factura no encontrada' });
+    res.json(d);
+  } catch (e) {
+    sendError(res, e, 'invoice_detail');
+  }
+});
+
+app.get('/api/sales-orders/:numero/detail', requireAuth, async (req, res) => {
+  try {
+    const d = await getDetalleOV(getHubPool(), req.params.numero);
+    if (!d) return void res.status(404).json({ error: 'ov no encontrada' });
+    res.json(d);
+  } catch (e) {
+    sendError(res, e, 'sales_order_detail');
   }
 });
 
