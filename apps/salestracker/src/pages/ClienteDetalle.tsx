@@ -103,9 +103,11 @@ export default function ClienteDetalle() {
           Año
           <input
             type="number"
+            min={2000}
+            max={anioActual}
             className="mt-1 w-24 rounded-md border px-2 py-1.5 text-gray-900"
             value={anio}
-            onChange={(e) => setAnio(Number(e.target.value))}
+            onChange={(e) => setAnio(Number(e.target.value) || anioActual)}
           />
         </label>
       </div>
