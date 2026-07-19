@@ -54,6 +54,7 @@ esa página.
 3. `apps/portal/src/pages/Aplicaciones.tsx` → objeto en `aplicaciones[]` (icono +
    descripción + color + path). **← el que se suele olvidar.**
 4. `Dockerfile` → `COPY apps/<app>/package*.json ./apps/<app>/`.
+4b. `apps/portal/tailwind.config.js` → añadir `"../<app>/src/**/*.{js,ts,jsx,tsx}"` al `content`. **← el otro que se olvida.** Sin esto, las clases que SOLO usa esa app se purgan: la app parece estilada (por solape con otras sub-apps) pero las clases únicas salen invisibles (p. ej. colores/tamaños concretos). Costó un rato con las "luces" de OV pendientes.
 5. Backend: guard `requireApp('<id>')` en los endpoints de datos de la app.
 6. Asignar la app a los usuarios en *Admin → Usuarios* (escribe `user_apps` → JWT).
 7. Los usuarios ya logueados: **cerrar sesión y volver a entrar** (ver punto 1).
