@@ -61,6 +61,13 @@ export interface PendingSalesOrder {
   shipment_date: string | null;
 }
 
+export interface OVPendienteFacturable extends PendingSalesOrder {
+  despachada: boolean;
+  soloPaquete: boolean;
+  ticketPorFacturar: boolean;
+  facturable: boolean;
+}
+
 async function mensajeDeError(res: Response): Promise<string> {
   if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
   if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
@@ -95,11 +102,11 @@ export async function guardarPresupuesto(year: number, presupuesto: number): Pro
   if (!res.ok) throw new Error(await mensajeDeError(res));
 }
 
-/** Carga las OV pendientes de facturar (endpoint compartido del hub). */
-export async function fetchOVPendientes(): Promise<PendingSalesOrder[]> {
-  const res = await fetch(`${API_BASE}/api/sales-orders/pending`, { headers: authHeaders() });
+/** Carga las OV pendientes con las señales "facturable" (endpoint propio de contabilidad). */
+export async function fetchOVPendientes(): Promise<OVPendienteFacturable[]> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/ov-pendientes`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await mensajeDeError(res));
-  const data = (await res.json()) as { orders?: PendingSalesOrder[] };
+  const data = (await res.json()) as { orders?: OVPendienteFacturable[] };
   if (!Array.isArray(data.orders)) throw new Error('Formato inesperado del hub (OV pendientes).');
   return data.orders;
 }
