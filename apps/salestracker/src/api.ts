@@ -29,3 +29,24 @@ export async function fetchSales(): Promise<SalesRow[]> {
   if (!Array.isArray(data.rows)) throw new Error('Formato inesperado del hub (ventas).');
   return data.rows;
 }
+
+// Espejo de apps/hub-api/src/salestracker/types.ts
+export type RecordTypeIO = 'SALES_ORDER' | 'INVOICE';
+export interface ItemSalesRow {
+  itemId: string;
+  sku: string | null;
+  nombre: string;
+  categoria: string | null;
+  cantidad: number;
+  importe: number;
+}
+
+/** Ventas por artículo (tipo OV/FAC, rango de fechas YYYY-MM-DD). */
+export async function fetchItemSales(params: { tipo: RecordTypeIO; desde: string; hasta: string }): Promise<ItemSalesRow[]> {
+  const qs = new URLSearchParams({ tipo: params.tipo, desde: params.desde, hasta: params.hasta });
+  const res = await fetch(`${API_BASE}/api/salestracker/item-sales?${qs}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { rows?: ItemSalesRow[] };
+  if (!Array.isArray(data.rows)) throw new Error('Formato inesperado del hub (artículos).');
+  return data.rows;
+}
