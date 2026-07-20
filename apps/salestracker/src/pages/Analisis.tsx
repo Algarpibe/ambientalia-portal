@@ -13,6 +13,7 @@ import MarginKpiCard from './margen/MarginKpiCard';
 import MarginByItemCard from './margen/MarginByItemCard';
 import MarginScatterCard from './margen/MarginScatterCard';
 import MarginByCustomerCard from './margen/MarginByCustomerCard';
+import ForecastGrid from './forecast/ForecastGrid';
 
 const anioActual = new Date().getFullYear();
 const YEARS: number[] = [];
@@ -21,7 +22,7 @@ for (let y = anioActual; y >= 2021; y--) YEARS.push(y);
 export default function Analisis() {
   const [tipo, setTipo] = useState<RecordTypeIO>('INVOICE');
   const [yearA, setYearA] = useState(anioActual);
-  const [tab, setTab] = useState<'comercial' | 'margen'>('comercial'); // 'forecast' en 3C
+  const [tab, setTab] = useState<'comercial' | 'margen' | 'forecast'>('comercial');
 
   return (
     <div className="p-8 space-y-6">
@@ -45,6 +46,13 @@ export default function Analisis() {
         >
           Margen
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('forecast')}
+          className={`px-3 py-2 text-sm font-medium ${tab === 'forecast' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+        >
+          Forecast
+        </button>
       </div>
       {/* Controles compartidos */}
       <div className="flex flex-wrap items-center gap-3">
@@ -57,7 +65,7 @@ export default function Analisis() {
         </select>
       </div>
       {/* Grid de tarjetas según pestaña */}
-      {tab === 'comercial' ? (
+      {tab === 'comercial' && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <BucketMixCard tipo={tipo} />
           <ClientParetoCard tipo={tipo} year={yearA} />
@@ -69,7 +77,8 @@ export default function Analisis() {
           <MonthHeatmapCard tipo={tipo} year={yearA} />
           <SeasonByBucketCard tipo={tipo} year={yearA} />
         </div>
-      ) : (
+      )}
+      {tab === 'margen' && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           <MarginKpiCard tipo={tipo} />
           <MarginByItemCard tipo={tipo} year={yearA} />
@@ -77,6 +86,7 @@ export default function Analisis() {
           <MarginByCustomerCard tipo={tipo} year={yearA} />
         </div>
       )}
+      {tab === 'forecast' && <ForecastGrid tipo={tipo} year={yearA} />}
     </div>
   );
 }
