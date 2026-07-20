@@ -14,6 +14,8 @@ import MarginByItemCard from './margen/MarginByItemCard';
 import MarginScatterCard from './margen/MarginScatterCard';
 import MarginByCustomerCard from './margen/MarginByCustomerCard';
 import ForecastGrid from './forecast/ForecastGrid';
+import GlobalMonthlyCard from './exploracion/GlobalMonthlyCard';
+import TechServiceCard from './exploracion/TechServiceCard';
 
 const anioActual = new Date().getFullYear();
 const YEARS: number[] = [];
@@ -22,7 +24,8 @@ for (let y = anioActual; y >= 2021; y--) YEARS.push(y);
 export default function Analisis() {
   const [tipo, setTipo] = useState<RecordTypeIO>('INVOICE');
   const [yearA, setYearA] = useState(anioActual);
-  const [tab, setTab] = useState<'comercial' | 'margen' | 'forecast'>('comercial');
+  const [yearB, setYearB] = useState(anioActual - 1);
+  const [tab, setTab] = useState<'comercial' | 'margen' | 'forecast' | 'exploracion'>('comercial');
 
   return (
     <div className="p-8 space-y-6">
@@ -53,6 +56,13 @@ export default function Analisis() {
         >
           Forecast
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('exploracion')}
+          className={`px-3 py-2 text-sm font-medium ${tab === 'exploracion' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+        >
+          Exploración
+        </button>
       </div>
       {/* Controles compartidos */}
       <div className="flex flex-wrap items-center gap-3">
@@ -63,6 +73,14 @@ export default function Analisis() {
         <select value={yearA} onChange={(e) => setYearA(Number(e.target.value))} className="rounded-md border px-3 py-1.5 text-sm">
           {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
+        {tab === 'exploracion' && (
+          <label className="flex items-center gap-2 text-sm text-gray-500">
+            vs
+            <select value={yearB} onChange={(e) => setYearB(Number(e.target.value))} className="rounded-md border px-3 py-1.5 text-sm text-gray-900">
+              {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+        )}
       </div>
       {/* Grid de tarjetas según pestaña */}
       {tab === 'comercial' && (
@@ -87,6 +105,12 @@ export default function Analisis() {
         </div>
       )}
       {tab === 'forecast' && <ForecastGrid tipo={tipo} year={yearA} />}
+      {tab === 'exploracion' && (
+        <div className="space-y-6">
+          <GlobalMonthlyCard tipo={tipo} yearA={yearA} yearB={yearB} />
+          <TechServiceCard tipo={tipo} yearA={yearA} yearB={yearB} />
+        </div>
+      )}
     </div>
   );
 }
