@@ -2,7 +2,13 @@ import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { requireAuth, requireApp, requireAdmin, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
-import { cached } from '../cache.js';
+import { cached, clearCacheKey } from '../cache.js';
+
+// Invalida el cache de grouping-analysis (ambos tipos) tras editar grupos/mappings.
+const bustGroupingCache = (): void => {
+  clearCacheKey('salestracker:grouping-analysis:INVOICE');
+  clearCacheKey('salestracker:grouping-analysis:SALES_ORDER');
+};
 import { getSalesRows } from './sales.js';
 import { getItemSalesRows } from './item-sales.js';
 import { getCustomerSalesRows } from './customer-sales.js';
@@ -226,19 +232,19 @@ export function createSalestrackerRouter(db: Pool): Router {
     catch (e) { sendError(res, e, 'salestracker_groups_get'); }
   });
   router.post('/salestracker/category-groups', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-    try { res.json({ group: await createGrouping(db, req.body as { name: unknown }) }); }
+    try { const group = await createGrouping(db, req.body as { name: unknown }); bustGroupingCache(); res.json({ group }); }
     catch (e) { sendGroupError(res, e, 'salestracker_groups_post'); }
   });
   router.patch('/salestracker/category-groups/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-    try { await updateGrouping(db, req.params.id, req.body as { name: unknown }); res.json({ ok: true }); }
+    try { await updateGrouping(db, req.params.id, req.body as { name: unknown }); bustGroupingCache(); res.json({ ok: true }); }
     catch (e) { sendGroupError(res, e, 'salestracker_groups_patch'); }
   });
   router.delete('/salestracker/category-groups/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-    try { await deleteGrouping(db, req.params.id); res.json({ ok: true }); }
+    try { await deleteGrouping(db, req.params.id); bustGroupingCache(); res.json({ ok: true }); }
     catch (e) { sendError(res, e, 'salestracker_groups_delete'); }
   });
   router.post('/salestracker/category-groups/reorder', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-    try { const ids = (req.body as { orderedIds?: unknown }).orderedIds; await reorderGroupings(db, Array.isArray(ids) ? ids as string[] : []); res.json({ ok: true }); }
+    try { const ids = (req.body as { orderedIds?: unknown }).orderedIds; await reorderGroupings(db, Array.isArray(ids) ? ids as string[] : []); bustGroupingCache(); res.json({ ok: true }); }
     catch (e) { sendError(res, e, 'salestracker_groups_reorder'); }
   });
 
