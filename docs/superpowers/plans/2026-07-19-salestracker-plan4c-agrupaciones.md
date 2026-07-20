@@ -4,7 +4,7 @@
 
 **Goal:** Gestión de **agrupaciones** de categorías (grupos con color + orden, cada uno con N categorías), editable **solo por admins**, más el endpoint **`grouping-analysis`** que agrega las ventas del hub por grupo/año/mes. Desbloquea el **Plan 3D** (analítica por grupos). Se apoya en `portal.st_categories` (Plan 4A).
 
-**Architecture:** Migración `011_salestracker_groupings.sql` (`portal.st_category_groups` + `portal.st_category_group_mappings`, FK CASCADE a groups y a `st_categories`, GLOBAL sin company_id). CRUD transaccional (grupo + mappings) en hub-api, escrituras `requireAdmin`. `grouping-analysis` = join `st_categories` (name.lower→id) + `getSalesRows(db)` (agg del hub) + mappings → agrega por grupo. Frontend: sección **Agrupaciones** en la página Categorías (crear/editar/borrar grupos, asignar categorías, reordenar), admin-gated. Sigue el patrón de [[Plan 4A]]/[[Plan 4B]].
+**Architecture:** Migración `012_salestracker_groupings.sql` (`portal.st_category_groups` + `portal.st_category_group_mappings`, FK CASCADE a groups y a `st_categories`, GLOBAL sin company_id). CRUD transaccional (grupo + mappings) en hub-api, escrituras `requireAdmin`. `grouping-analysis` = join `st_categories` (name.lower→id) + `getSalesRows(db)` (agg del hub) + mappings → agrega por grupo. Frontend: sección **Agrupaciones** en la página Categorías (crear/editar/borrar grupos, asignar categorías, reordenar), admin-gated. Sigue el patrón de [[Plan 4A]]/[[Plan 4B]].
 
 **Auth:** reads = usuario con la app; writes = admin.
 
@@ -16,8 +16,8 @@
 
 ## File Structure
 **Backend (`apps/hub-api/src/`):**
-- `users/migrations/011_salestracker_groupings.sql` (nuevo).
-- `db.ts` (modificar) — registrar `'011_salestracker_groupings.sql'`.
+- `users/migrations/012_salestracker_groupings.sql` (nuevo).
+- `db.ts` (modificar) — registrar `'012_salestracker_groupings.sql'`.
 - `salestracker/groupings.ts` + `.test.ts` (nuevo) — CRUD tx + reorder + getGroupings + validadores.
 - `salestracker/grouping-analysis.ts` + `.test.ts` (nuevo) — `computeGroupingAnalysis` puro + `getGroupingAnalysis(db, tipo)`.
 - `salestracker/router.ts` (modificar) — rutas (reads requireApp; writes requireAdmin).
@@ -33,9 +33,9 @@ No cambia `st_categories` (4A). Reusa `getSalesRows` (agg del hub, Plan 1) + `re
 
 ## Task 1: Backend — migración + módulo groupings (CRUD tx) + endpoints
 
-- [ ] **Step 1: Migración `011_salestracker_groupings.sql`** (idempotente)
+- [ ] **Step 1: Migración `012_salestracker_groupings.sql`** (idempotente)
 ```sql
--- Migration 011: agrupaciones de categorías de salestracker (config admin, global).
+-- Migration 012: agrupaciones de categorías de salestracker (config admin, global).
 CREATE SCHEMA IF NOT EXISTS portal;
 
 CREATE TABLE IF NOT EXISTS portal.st_category_groups (
@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS st_cgm_category_idx ON portal.st_category_group_mappi
 ```
 > Añadí `UNIQUE(group_id, category_id)` (la referencia deduplicaba por delete-all-reinsert; el unique lo hace robusto sin coste).
 
-- [ ] **Step 2: Registrar en `db.ts`** — añadir `'011_salestracker_groupings.sql'` al FINAL de `MIGRATIONS`.
+- [ ] **Step 2: Registrar en `db.ts`** — añadir `'012_salestracker_groupings.sql'` al FINAL de `MIGRATIONS`.
 
 - [ ] **Step 3: Módulo `groupings.ts` (TDD para validadores)** — test primero de `validateGroupName` (1..100, trim, throw) y `validateColor` (hex o default `#6366f1`). Implementar:
 ```typescript
@@ -317,7 +317,7 @@ cd ../.. && npm run build --workspace=apps/portal
 
 - [ ] **Step 1: Verificación completa** (hub-api tsc+tests, salestracker tsc+tests, portal build). Reportar salida real.
 - [ ] **Step 2: Prueba local (si hay BD)** con token admin: importar categorías (4A) → crear un grupo con varias categorías → `GET /grouping-analysis?tipo=INVOICE` devuelve filas por grupo con años/%.
-- [ ] **Step 3: Handoff:** merge/push + redeploy **hub-api** (migración 011 + endpoints) **y portal**. Verificar en `/salestracker/categorias` → sección Agrupaciones: como admin, crear/editar/borrar/reordenar grupos asignando categorías.
+- [ ] **Step 3: Handoff:** merge/push + redeploy **hub-api** (migración 012 + endpoints) **y portal**. Verificar en `/salestracker/categorias` → sección Agrupaciones: como admin, crear/editar/borrar/reordenar grupos asignando categorías.
 
 ---
 
@@ -329,6 +329,6 @@ cd ../.. && npm run build --workspace=apps/portal
 - Auth: writes requireAdmin (back), UI gateada por rol. ✅
 - **Desbloquea Plan 3D** (consumirá `/grouping-analysis`). Anotado.
 
-Sin placeholders. Escrituras admin en el back. Join por nombre lowercased (categoría↔hub). tx con fallback anotado. **Gotcha:** migración 011 → redeploy hub-api.
+Sin placeholders. Escrituras admin en el back. Join por nombre lowercased (categoría↔hub). tx con fallback anotado. **Gotcha:** migración 012 → redeploy hub-api.
 
 ## Próximos: Plan 3D (grouping analytics: consume /grouping-analysis) · polish Tablas (remap st_categories) · Plan 5 (cutover).
