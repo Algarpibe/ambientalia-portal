@@ -4,7 +4,11 @@ import BucketMixCard from './comercial/BucketMixCard';
 import ClientParetoCard from './comercial/ClientParetoCard';
 import TopItemsCard from './comercial/TopItemsCard';
 import SkuParetoCard from './comercial/SkuParetoCard';
-// (tarjetas 5–9 se importan en la Task 4)
+import BucketByClientCard from './comercial/BucketByClientCard';
+import BrandMixCard from './comercial/BrandMixCard';
+import NewVsRecurringCard from './comercial/NewVsRecurringCard';
+import MonthHeatmapCard from './comercial/MonthHeatmapCard';
+import SeasonByBucketCard from './comercial/SeasonByBucketCard';
 
 const anioActual = new Date().getFullYear();
 const YEARS: number[] = [];
@@ -42,7 +46,11 @@ export default function Analisis() {
         <ClientParetoCard tipo={tipo} year={yearA} />
         <TopItemsCard tipo={tipo} year={yearA} />
         <SkuParetoCard tipo={tipo} year={yearA} />
-        {/* tarjetas 5–9 en Task 4 */}
+        <BucketByClientCard tipo={tipo} year={yearA} />
+        <BrandMixCard tipo={tipo} year={yearA} />
+        <NewVsRecurringCard tipo={tipo} />
+        <MonthHeatmapCard tipo={tipo} year={yearA} />
+        <SeasonByBucketCard tipo={tipo} year={yearA} />
       </div>
     </div>
   );
