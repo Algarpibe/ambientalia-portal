@@ -139,3 +139,30 @@ export const fetchMarginByItem = (p: { tipo: RecordTypeIO; anio: number }) =>
 /** Ventas por (mes, categoría) en un año (tipo OV/FAC). */
 export const fetchCategoryMonthSales = (p: { tipo: RecordTypeIO; anio: number }) =>
   fetchRows<CategoryMonthRow>('/api/salestracker/category-month-sales', { tipo: p.tipo, anio: String(p.anio) }, 'estacionalidad por categoría');
+
+// --- Estado per-usuario: favoritos + vistas guardadas ---
+export interface SavedView { id: string; name: string; state: unknown; }
+
+export async function fetchFavorites(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/api/salestracker/favorites`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { favorites?: string[] }).favorites ?? [];
+}
+export async function toggleFavorite(customer: string): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/api/salestracker/favorites/toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ customer }) });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { favorited: boolean }).favorited;
+}
+export async function fetchSavedViews(viewKey: string): Promise<SavedView[]> {
+  const res = await fetch(`${API_BASE}/api/salestracker/saved-views?viewKey=${encodeURIComponent(viewKey)}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { views?: SavedView[] }).views ?? [];
+}
+export async function saveView(viewKey: string, name: string, state: unknown): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/salestracker/saved-views`, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ viewKey, name, state }) });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+export async function deleteSavedView(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/salestracker/saved-views/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}

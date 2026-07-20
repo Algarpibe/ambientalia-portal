@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { APP_BASE } from '../appBase';
-import { fetchCustomerSales, type RecordTypeIO } from '../api';
+import { fetchCustomerSales, fetchFavorites, toggleFavorite, type RecordTypeIO } from '../api';
+import FavoriteStar from '../components/FavoriteStar';
+import SavedViewsMenu from '../components/SavedViewsMenu';
+import { type ClientesViewState } from '../lib/clientes-view-state';
 import {
   buildCustomerMatrix,
   computeColumnTotals,
@@ -50,6 +53,15 @@ export default function Clientes() {
   const [comparar, setComparar] = useState(false);
   const [anioA, setAnioA] = useState(anioActual);
   const [anioB, setAnioB] = useState(anioActual - 1);
+  const [onlyFav, setOnlyFav] = useState(false);
+
+  const qc = useQueryClient();
+  const favQ = useQuery({ queryKey: ['favorites'], queryFn: fetchFavorites });
+  const favSet = new Set(favQ.data ?? []);
+  const toggleFav = useMutation({
+    mutationFn: toggleFavorite,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['favorites'] }),
+  });
 
   const years = useMemo(
     () =>
@@ -70,7 +82,13 @@ export default function Clientes() {
     () => sortCustomerMatrix(filtered, sortKey, sortDir, comparar ? { a: anioA, b: anioB } : undefined),
     [filtered, sortKey, sortDir, comparar, anioA, anioB]
   );
-  const totals = useMemo(() => computeColumnTotals(sorted, years), [sorted, years]);
+  // Filtramos por "solo favoritos" ANTES de totales/exportes, igual que el filtro de búsqueda,
+  // para que totales y CSV/copia reflejen exactamente las filas visibles.
+  const shown = useMemo(
+    () => (onlyFav ? sorted.filter((r) => favSet.has(r.customer)) : sorted),
+    [sorted, onlyFav, favSet]
+  );
+  const totals = useMemo(() => computeColumnTotals(shown, years), [shown, years]);
   const grand = totals.grand;
 
   const pct = (n: number) => (grand > 0 ? `${((n / grand) * 100).toFixed(1)}%` : '0%');
@@ -85,7 +103,7 @@ export default function Clientes() {
   };
 
   const exportCsv = () => {
-    const blob = new Blob([customerMatrixToCsv(sorted, years, grand)], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([customerMatrixToCsv(shown, years, grand)], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -97,13 +115,13 @@ export default function Clientes() {
   };
 
   const copiar = () => {
-    void navigator.clipboard.writeText(matrixToTsv(sorted, years, grand));
+    void navigator.clipboard.writeText(matrixToTsv(shown, years, grand));
   };
 
   if (q.isLoading) return <div className="p-8 text-gray-600">Cargando clientes…</div>;
   if (q.error) return <div className="p-8 text-red-600">{(q.error as Error).message}</div>;
 
-  const noRows = sorted.length === 0;
+  const noRows = shown.length === 0;
   const sortIcon = (active: boolean) =>
     active ? <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span> : null;
 
@@ -190,7 +208,32 @@ export default function Clientes() {
           </>
         )}
 
-        <div className="ml-auto flex gap-2">
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={onlyFav}
+            onChange={(e) => setOnlyFav(e.target.checked)}
+          />
+          Solo favoritos
+        </label>
+
+        <div className="ml-auto flex items-center gap-2">
+          <SavedViewsMenu
+            viewKey="clientes"
+            currentState={{ tipo, desdeAnio, hastaAnio, search, sortKey, sortDir, comparar, anioA, anioB, onlyFav }}
+            onApply={(s: ClientesViewState) => {
+              setTipo(s.tipo);
+              setDesdeAnio(s.desdeAnio);
+              setHastaAnio(s.hastaAnio);
+              setSearch(s.search);
+              setSortKey(s.sortKey);
+              setSortDir(s.sortDir);
+              setComparar(s.comparar);
+              setAnioA(s.anioA);
+              setAnioB(s.anioB);
+              setOnlyFav(s.onlyFav);
+            }}
+          />
           <button
             type="button"
             onClick={exportCsv}
@@ -214,6 +257,7 @@ export default function Clientes() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600">
             <tr>
+              <th className="w-8 px-2 py-2" aria-label="Favorito" />
               <th
                 onClick={() => toggleSort('customer')}
                 className="cursor-pointer select-none px-3 py-2 text-left"
@@ -247,12 +291,18 @@ export default function Clientes() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => {
+            {shown.map((r) => {
               const deltaPct = comparar
                 ? computeDelta(r.byYear[anioA] ?? 0, r.byYear[anioB] ?? 0).deltaPct
                 : null;
               return (
                 <tr key={r.customer} className="border-t">
+                  <td className="px-2 py-2 text-center">
+                    <FavoriteStar
+                      active={favSet.has(r.customer)}
+                      onToggle={() => toggleFav.mutate(r.customer)}
+                    />
+                  </td>
                   <td className="px-3 py-2">
                     <Link
                       to={`${APP_BASE}/clientes/${encodeURIComponent(r.customer)}`}
@@ -285,6 +335,7 @@ export default function Clientes() {
           </tbody>
           <tfoot className="border-t bg-gray-50 font-semibold text-gray-900">
             <tr>
+              <td className="px-2 py-2" />
               <td className="px-3 py-2">TOTAL</td>
               {years.map((y) => (
                 <td key={y} className="px-3 py-2 text-right">{formatUSD(totals.byYear[y])}</td>
