@@ -18,7 +18,10 @@ export interface SalesRow {
 async function mensajeDeError(res: Response): Promise<string> {
   if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
   if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
-  if (res.status === 409) return 'Ya existe una categoría con ese nombre.';
+  if (res.status === 409) {
+    try { const d = (await res.json()) as { error?: string }; if (d.error) return d.error; } catch { /* sin body */ }
+    return 'Ya existe un registro con ese nombre.';
+  }
   if (res.status === 400) {
     try {
       const data = (await res.json()) as { error?: string };
