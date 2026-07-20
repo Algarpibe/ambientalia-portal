@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { requireAuth, requireApp } from '../auth.js';
+import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { cached } from '../cache.js';
 import { getSalesRows } from './sales.js';
@@ -12,7 +12,14 @@ import { getMarginByCustomerRows } from './margin-by-customer.js';
 import { getMarginByYearRows } from './margin-by-year.js';
 import { getMarginByItemRows } from './margin-by-item.js';
 import { getCategoryMonthSalesRows } from './category-month-sales.js';
+import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView } from './user-state.js';
 import type { RecordTypeIO } from './types.js';
+
+// dueño del JWT; null si token legacy sin user_id
+const ownerId = (req: Request): string | null => {
+  const uid = getPayload(req)?.user_id;
+  return uid ? String(uid) : null;
+};
 
 const APP_ID = 'salestracker';
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -127,6 +134,50 @@ export function createSalestrackerRouter(db: Pool): Router {
       const rows = await cached(`salestracker:category-month-sales:${tipo}:${anio}`, () => getCategoryMonthSalesRows(db, { tipo: tipo as RecordTypeIO, anio }));
       res.json({ rows });
     } catch (e) { sendError(res, e, 'salestracker_category_month_sales'); }
+  });
+
+  router.get('/salestracker/favorites', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const uid = ownerId(req);
+      res.json({ favorites: uid ? await getFavorites(db, uid) : [] });
+    } catch (e) { sendError(res, e, 'salestracker_favorites_get'); }
+  });
+  router.post('/salestracker/favorites/toggle', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const uid = ownerId(req);
+      if (!uid) return void res.status(400).json({ error: 'usuario sin identidad persistente' });
+      const customer = (req.body as { customer?: unknown }).customer;
+      if (typeof customer !== 'string' || !customer.trim()) return void res.status(400).json({ error: 'customer requerido' });
+      const favorited = await toggleFavorite(db, uid, customer);
+      res.json({ favorited });
+    } catch (e) { sendError(res, e, 'salestracker_favorites_toggle'); }
+  });
+  router.get('/salestracker/saved-views', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const uid = ownerId(req);
+      const viewKey = String(req.query.viewKey ?? '');
+      if (!viewKey) return void res.status(400).json({ error: 'viewKey requerido' });
+      res.json({ views: uid ? await getSavedViews(db, uid, viewKey) : [] });
+    } catch (e) { sendError(res, e, 'salestracker_saved_views_get'); }
+  });
+  router.put('/salestracker/saved-views', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const uid = ownerId(req);
+      if (!uid) return void res.status(400).json({ error: 'usuario sin identidad persistente' });
+      const b = req.body as { viewKey?: unknown; name?: unknown; state?: unknown };
+      if (typeof b.viewKey !== 'string' || !b.viewKey || typeof b.name !== 'string') return void res.status(400).json({ error: 'viewKey/name requeridos' });
+      const ok = await saveView(db, uid, b.viewKey, b.name, b.state);
+      if (!ok) return void res.status(400).json({ error: 'nombre vacío' });
+      res.json({ ok: true });
+    } catch (e) { sendError(res, e, 'salestracker_saved_views_put'); }
+  });
+  router.delete('/salestracker/saved-views/:id', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const uid = ownerId(req);
+      if (!uid) return void res.status(400).json({ error: 'usuario sin identidad persistente' });
+      await deleteSavedView(db, uid, req.params.id);
+      res.json({ ok: true });
+    } catch (e) { sendError(res, e, 'salestracker_saved_views_delete'); }
   });
 
   return router;
