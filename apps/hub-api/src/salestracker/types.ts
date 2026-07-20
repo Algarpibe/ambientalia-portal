@@ -55,3 +55,10 @@ export interface MarginCustomerRow {
   ventas: number;
   costo: number;
 }
+
+// Ventas por (mes, categoría) en un año. GET /api/salestracker/category-month-sales.
+export interface CategoryMonthRow {
+  mes: number; // 1-12
+  categoria: string | null;
+  importe: number;
+}

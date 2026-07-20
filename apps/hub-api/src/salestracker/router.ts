@@ -9,6 +9,7 @@ import { getCustomerSalesRows } from './customer-sales.js';
 import { getCustomerItemSalesRows } from './customer-item-sales.js';
 import { getCustomerMonthSalesRows } from './customer-month-sales.js';
 import { getMarginByCustomerRows } from './margin-by-customer.js';
+import { getCategoryMonthSalesRows } from './category-month-sales.js';
 import type { RecordTypeIO } from './types.js';
 
 const APP_ID = 'salestracker';
@@ -96,6 +97,16 @@ export function createSalestrackerRouter(db: Pool): Router {
       const rows = await cached(`salestracker:margin-by-customer:${tipo}:${anio}`, () => getMarginByCustomerRows(db, { tipo: tipo as RecordTypeIO, anio }));
       res.json({ rows });
     } catch (e) { sendError(res, e, 'salestracker_margin_by_customer'); }
+  });
+
+  router.get('/salestracker/category-month-sales', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const anio = parseAnio(req.query.anio);
+      if (anio === null) return void res.status(400).json({ error: 'anio inválido (2000-2100)' });
+      const rows = await cached(`salestracker:category-month-sales:${tipo}:${anio}`, () => getCategoryMonthSalesRows(db, { tipo: tipo as RecordTypeIO, anio }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_category_month_sales'); }
   });
 
   return router;
