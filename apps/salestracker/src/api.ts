@@ -88,6 +88,11 @@ export interface MarginCustomerRow {
   ventas: number;
   costo: number;
 }
+export interface CategoryMonthRow {
+  mes: number;
+  categoria: string | null;
+  importe: number;
+}
 
 /** Helper genérico: GET {path}?{params} → { rows: T[] }. Lanza Error en español si falla. */
 async function fetchRows<T>(path: string, params: Record<string, string>, contexto: string): Promise<T[]> {
@@ -110,3 +115,7 @@ export const fetchCustomerMonthSales = (p: { tipo: RecordTypeIO; anio: number })
 /** Ventas y costo estándar por cliente en un año (tipo OV/FAC). */
 export const fetchMarginByCustomer = (p: { tipo: RecordTypeIO; anio: number }) =>
   fetchRows<MarginCustomerRow>('/api/salestracker/margin-by-customer', { tipo: p.tipo, anio: String(p.anio) }, 'margen');
+
+/** Ventas por (mes, categoría) en un año (tipo OV/FAC). */
+export const fetchCategoryMonthSales = (p: { tipo: RecordTypeIO; anio: number }) =>
+  fetchRows<CategoryMonthRow>('/api/salestracker/category-month-sales', { tipo: p.tipo, anio: String(p.anio) }, 'estacionalidad por categoría');
