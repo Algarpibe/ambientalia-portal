@@ -12,7 +12,7 @@ import { getMarginByCustomerRows } from './margin-by-customer.js';
 import { getMarginByYearRows } from './margin-by-year.js';
 import { getMarginByItemRows } from './margin-by-item.js';
 import { getCategoryMonthSalesRows } from './category-month-sales.js';
-import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView } from './user-state.js';
+import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView, MAX_VIEW_NAME_LEN, stateTooLarge } from './user-state.js';
 import type { RecordTypeIO } from './types.js';
 
 // dueño del JWT; null si token legacy sin user_id
@@ -166,6 +166,9 @@ export function createSalestrackerRouter(db: Pool): Router {
       if (!uid) return void res.status(400).json({ error: 'usuario sin identidad persistente' });
       const b = req.body as { viewKey?: unknown; name?: unknown; state?: unknown };
       if (typeof b.viewKey !== 'string' || !b.viewKey || typeof b.name !== 'string') return void res.status(400).json({ error: 'viewKey/name requeridos' });
+      // Errores de entrada del cliente → 400 (no 500): nombre demasiado largo / state demasiado grande.
+      if (b.name.trim().length > MAX_VIEW_NAME_LEN) return void res.status(400).json({ error: `nombre demasiado largo (máx ${MAX_VIEW_NAME_LEN})` });
+      if (stateTooLarge(b.state)) return void res.status(400).json({ error: 'vista demasiado grande (máx 32 KB)' });
       const ok = await saveView(db, uid, b.viewKey, b.name, b.state);
       if (!ok) return void res.status(400).json({ error: 'nombre vacío' });
       res.json({ ok: true });
