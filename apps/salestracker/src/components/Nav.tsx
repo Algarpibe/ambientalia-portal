@@ -13,6 +13,7 @@ export default function Nav() {
       <NavLink to={`${APP_BASE}/tablas`} className={link}>Tablas</NavLink>
       <NavLink to={`${APP_BASE}/clientes`} className={link}>Clientes</NavLink>
       <NavLink to={`${APP_BASE}/cliente-articulo`} className={link}>Cliente × Artículo</NavLink>
+      <NavLink to={`${APP_BASE}/analisis`} className={link}>Análisis</NavLink>
     </nav>
   );
 }
