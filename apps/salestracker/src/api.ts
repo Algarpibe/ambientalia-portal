@@ -222,3 +222,20 @@ export const createCategoryGroup = (input: { name: string; categoryIds: string[]
 export const updateCategoryGroup = (id: string, input: { name: string; categoryIds: string[]; color?: string }) => writeJson(`/api/salestracker/category-groups/${encodeURIComponent(id)}`, 'PATCH', input);
 export const deleteCategoryGroup = (id: string) => writeJson(`/api/salestracker/category-groups/${encodeURIComponent(id)}`, 'DELETE');
 export const reorderCategoryGroups = (orderedIds: string[]) => writeJson('/api/salestracker/category-groups/reorder', 'POST', { orderedIds });
+
+// --- Análisis por agrupaciones (Plan 3D) ---
+// Espejo de apps/hub-api/src/salestracker/grouping-analysis.ts
+export interface GroupYear { amount: number; percentage: number }
+export interface GroupingRow {
+  groupId: string; groupName: string; color: string;
+  years: Record<number, GroupYear>;
+  months: Record<number, Record<number, number>>;
+  average: { amount: number; percentage: number };
+}
+export interface GroupingAnalysis { rows: GroupingRow[]; years: number[]; yearTotals: Record<number, number>; }
+
+export async function fetchGroupingAnalysis(tipo: RecordTypeIO): Promise<GroupingAnalysis> {
+  const res = await fetch(`${API_BASE}/api/salestracker/grouping-analysis?tipo=${tipo}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return (await res.json()) as GroupingAnalysis;
+}

@@ -16,6 +16,8 @@ import MarginByCustomerCard from './margen/MarginByCustomerCard';
 import ForecastGrid from './forecast/ForecastGrid';
 import GlobalMonthlyCard from './exploracion/GlobalMonthlyCard';
 import TechServiceCard from './exploracion/TechServiceCard';
+import GroupingAnalysisCard from './exploracion/GroupingAnalysisCard';
+import GroupEvolutionCard from './exploracion/GroupEvolutionCard';
 
 const anioActual = new Date().getFullYear();
 const YEARS: number[] = [];
@@ -109,6 +111,8 @@ export default function Analisis() {
         <div className="space-y-6">
           <GlobalMonthlyCard tipo={tipo} yearA={yearA} yearB={yearB} />
           <TechServiceCard tipo={tipo} yearA={yearA} yearB={yearB} />
+          <GroupingAnalysisCard tipo={tipo} />
+          <GroupEvolutionCard tipo={tipo} />
         </div>
       )}
     </div>
