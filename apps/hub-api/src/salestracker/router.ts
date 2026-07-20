@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { requireAuth, requireApp, getPayload } from '../auth.js';
+import { requireAuth, requireApp, requireAdmin, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { cached } from '../cache.js';
 import { getSalesRows } from './sales.js';
@@ -13,6 +13,7 @@ import { getMarginByYearRows } from './margin-by-year.js';
 import { getMarginByItemRows } from './margin-by-item.js';
 import { getCategoryMonthSalesRows } from './category-month-sales.js';
 import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView, MAX_VIEW_NAME_LEN, stateTooLarge } from './user-state.js';
+import { getCategories, createCategory, updateCategory, deleteCategory, importFromHub } from './categories.js';
 import type { RecordTypeIO } from './types.js';
 
 // dueño del JWT; null si token legacy sin user_id
@@ -32,6 +33,13 @@ function sendError(res: Response, e: unknown, ctx: string): void {
   console.error(`${ctx} error`, e);
   captureError(e, { endpoint: ctx });
   res.status(500).json({ error: 'internal error' });
+}
+
+function sendCategoryError(res: Response, e: unknown, ctx: string): void {
+  const msg = e instanceof Error ? e.message : '';
+  if (/requerido|demasiado largo|inválido/.test(msg)) return void res.status(400).json({ error: msg });
+  if (/(duplicate key|unique)/i.test(msg)) return void res.status(409).json({ error: 'ya existe una categoría con ese nombre' });
+  sendError(res, e, ctx);
 }
 
 export function createSalestrackerRouter(db: Pool): Router {
@@ -181,6 +189,27 @@ export function createSalestrackerRouter(db: Pool): Router {
       await deleteSavedView(db, uid, req.params.id);
       res.json({ ok: true });
     } catch (e) { sendError(res, e, 'salestracker_saved_views_delete'); }
+  });
+
+  router.get('/salestracker/categories', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+    try { res.json({ categories: await getCategories(db) }); }
+    catch (e) { sendError(res, e, 'salestracker_categories_get'); }
+  });
+  router.post('/salestracker/categories', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { res.json({ category: await createCategory(db, req.body as { name: unknown }) }); }
+    catch (e) { sendCategoryError(res, e, 'salestracker_categories_post'); }
+  });
+  router.patch('/salestracker/categories/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { await updateCategory(db, req.params.id, req.body as Record<string, unknown>); res.json({ ok: true }); }
+    catch (e) { sendCategoryError(res, e, 'salestracker_categories_patch'); }
+  });
+  router.delete('/salestracker/categories/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { await deleteCategory(db, req.params.id); res.json({ ok: true }); }
+    catch (e) { sendError(res, e, 'salestracker_categories_delete'); }
+  });
+  router.post('/salestracker/categories/import', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    try { res.json({ added: await importFromHub(db) }); }
+    catch (e) { sendError(res, e, 'salestracker_categories_import'); }
   });
 
   return router;
