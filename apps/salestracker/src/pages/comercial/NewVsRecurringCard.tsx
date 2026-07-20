@@ -21,7 +21,7 @@ export default function NewVsRecurringCard({ tipo }: { tipo: RecordTypeIO }) {
             <XAxis dataKey="year" />
             <YAxis yAxisId="l" tickFormatter={(v) => formatCompactUSD(Number(v))} />
             <YAxis yAxisId="r" orientation="right" allowDecimals={false} />
-            <Tooltip formatter={(v, n) => (n === 'countNuevos' ? Number(v).toLocaleString('es-CO') : formatUSD(Number(v)))} />
+            <Tooltip formatter={(v, _n, item) => (item?.dataKey === 'countNuevos' ? Number(v).toLocaleString('es-CO') : formatUSD(Number(v)))} />
             <Legend />
             <Bar yAxisId="l" stackId="1" dataKey="nuevos" name="Nuevos" fill="#10b981" />
             <Bar yAxisId="l" stackId="1" dataKey="recurrentes" name="Recurrentes" fill="#6366f1" />
