@@ -39,11 +39,15 @@ export function buildTechService(
   const slots = slotsForViewMode(viewMode);
   let acum = 0, acum_prev = 0;
   return slots.map((slot) => {
-    const inSlot = (r: SalesRow, y: number) => r.year === y && r.recordType === tipo && slot.months.includes(r.month);
     let st = 0, cr = 0, st_prev = 0, cr_prev = 0;
     for (const r of rows) {
-      if (inSlot(r, yearA)) { if (stSet.has(r.categoryName)) st += r.amountUsd; else if (crSet.has(r.categoryName)) cr += r.amountUsd; }
-      else if (inSlot(r, yearB)) { if (stSet.has(r.categoryName)) st_prev += r.amountUsd; else if (crSet.has(r.categoryName)) cr_prev += r.amountUsd; }
+      if (r.recordType !== tipo || !slot.months.includes(r.month)) continue;
+      const isST = stSet.has(r.categoryName);
+      const isCR = crSet.has(r.categoryName);
+      if (!isST && !isCR) continue;
+      // Pasadas independientes: yearA y yearB se cuentan por separado (si yearA===yearB → prev==current → YoY 0%).
+      if (r.year === yearA) { if (isST) st += r.amountUsd; else cr += r.amountUsd; }
+      if (r.year === yearB) { if (isST) st_prev += r.amountUsd; else cr_prev += r.amountUsd; }
     }
     const total = st + cr, total_prev = st_prev + cr_prev;
     acum += total; acum_prev += total_prev;

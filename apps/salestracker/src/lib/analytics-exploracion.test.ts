@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slotsForViewMode, buildTechService, ST_CATEGORIES, CR_CATEGORIES } from './analytics-exploracion';
+import { slotsForViewMode, buildTechService, yoy, ST_CATEGORIES, CR_CATEGORIES } from './analytics-exploracion';
 import type { SalesRow } from '../api';
 
 const rows: SalesRow[] = [
@@ -23,6 +23,15 @@ describe('buildTechService', () => {
     const t2 = pts[1];
     expect(t2.st_prev).toBe(60); // año B, T2
     expect(pts[3].acum).toBe(140); // acumulado A sin cambios en T2..T4
+  });
+});
+
+describe('yoy', () => {
+  it('calcula variación porcentual y trata base 0', () => {
+    expect(yoy(120, 100)).toBe(20);
+    expect(yoy(50, 0)).toBe(100);
+    expect(yoy(0, 0)).toBe(null);
+    expect(yoy(80, 100)).toBe(-20);
   });
 });
 
