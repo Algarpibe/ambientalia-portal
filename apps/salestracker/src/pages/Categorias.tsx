@@ -9,6 +9,7 @@ import {
   importCategories,
   type Category,
 } from '../api';
+import GroupingManager from '../components/GroupingManager';
 
 const DEFAULT_COLOR = '#3b82f6';
 
@@ -224,6 +225,8 @@ export default function Categorias() {
           </table>
         </div>
       )}
+
+      <GroupingManager admin={admin} categories={cats} />
     </div>
   );
 }

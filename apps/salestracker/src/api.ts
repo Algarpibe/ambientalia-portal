@@ -204,3 +204,18 @@ export async function importCategories(): Promise<number> {
   if (!res.ok) throw new Error(await mensajeDeError(res));
   return ((await res.json()) as { added: number }).added;
 }
+
+// --- Agrupaciones de categorías (config admin) ---
+// Espejo de apps/hub-api/src/salestracker/groupings.ts
+export interface GroupMapping { id: string; group_id: string; category_id: string; }
+export interface CategoryGroup { id: string; name: string; color: string | null; sort_order: number; mappings: GroupMapping[]; }
+
+export async function fetchCategoryGroups(): Promise<CategoryGroup[]> {
+  const res = await fetch(`${API_BASE}/api/salestracker/category-groups`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { groups?: CategoryGroup[] }).groups ?? [];
+}
+export const createCategoryGroup = (input: { name: string; categoryIds: string[]; color?: string }) => writeJson('/api/salestracker/category-groups', 'POST', input);
+export const updateCategoryGroup = (id: string, input: { name: string; categoryIds: string[]; color?: string }) => writeJson(`/api/salestracker/category-groups/${encodeURIComponent(id)}`, 'PATCH', input);
+export const deleteCategoryGroup = (id: string) => writeJson(`/api/salestracker/category-groups/${encodeURIComponent(id)}`, 'DELETE');
+export const reorderCategoryGroups = (orderedIds: string[]) => writeJson('/api/salestracker/category-groups/reorder', 'POST', { orderedIds });
