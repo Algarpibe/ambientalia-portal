@@ -11,6 +11,7 @@ export default function Nav() {
       <NavLink to={APP_BASE} end className={link}>Inicio</NavLink>
       <NavLink to={`${APP_BASE}/articulos`} className={link}>Artículos</NavLink>
       <NavLink to={`${APP_BASE}/clientes`} className={link}>Clientes</NavLink>
+      <NavLink to={`${APP_BASE}/cliente-articulo`} className={link}>Cliente × Artículo</NavLink>
     </nav>
   );
 }
