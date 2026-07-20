@@ -28,9 +28,10 @@ export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
             .sort((a, b) => b.total - a.total);
           const yearSums = years.map((y) => sorted.reduce((s, { row }) => s + (row.years[y]?.amount ?? 0), 0));
           const grandTotal = sorted.reduce((s, { total }) => s + total, 0);
-          const pie = rows
-            .filter((r) => r.average.percentage > 0)
-            .map((r) => ({ name: r.groupName, value: r.average.percentage, color: r.color }));
+          const totalPct = sorted.reduce((s, { row }) => s + row.average.percentage, 0);
+          const pie = sorted
+            .filter(({ row }) => row.average.percentage > 0)
+            .map(({ row }) => ({ name: row.groupName, value: row.average.percentage, color: row.color }));
 
           return (
             <>
@@ -66,7 +67,7 @@ export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
                         <td key={y} className="px-2 py-1.5">{formatUSD(yearSums[i])}</td>
                       ))}
                       <td className="px-2 py-1.5">{formatUSD(grandTotal)}</td>
-                      <td className="pl-2 py-1.5">100%</td>
+                      <td className="pl-2 py-1.5">{totalPct.toFixed(1)}%</td>
                     </tr>
                   </tbody>
                 </table>
@@ -76,8 +77,8 @@ export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
               <ResponsiveContainer width="100%" height={340}>
                 <PieChart>
                   <Pie data={pie} dataKey="value" nameKey="name" innerRadius={80} outerRadius={130}>
-                    {pie.map((p, i) => (
-                      <Cell key={i} fill={p.color} />
+                    {pie.map((p) => (
+                      <Cell key={p.name} fill={p.color} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
