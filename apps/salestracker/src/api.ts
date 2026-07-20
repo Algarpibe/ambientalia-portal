@@ -18,6 +18,14 @@ export interface SalesRow {
 async function mensajeDeError(res: Response): Promise<string> {
   if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
   if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
+  if (res.status === 409) return 'Ya existe una categoría con ese nombre.';
+  if (res.status === 400) {
+    try {
+      const data = (await res.json()) as { error?: string };
+      if (data.error) return data.error;
+    } catch { /* sin cuerpo JSON */ }
+    return 'Datos inválidos. Revisa el formulario e inténtalo de nuevo.';
+  }
   return `No se pudieron cargar los datos (error ${res.status}). Inténtalo de nuevo en un momento.`;
 }
 
@@ -165,4 +173,34 @@ export async function saveView(viewKey: string, name: string, state: unknown): P
 export async function deleteSavedView(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/salestracker/saved-views/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
+// --- Categorías (config admin) ---
+// Espejo de apps/hub-api/src/salestracker/categories.ts
+export interface Category { id: string; name: string; description: string | null; color: string; sort_order: number; is_active: boolean; }
+
+/** True si el JWT tiene rol admin (solo para gating de UX; el backend re-verifica). */
+export function esAdmin(): boolean {
+  const t = localStorage.getItem('ambientalia_token');
+  if (!t) return false;
+  try { return (JSON.parse(atob(t.split('.')[1] || '')) as { role?: string }).role === 'admin'; }
+  catch { return false; }
+}
+
+export async function fetchCategories(): Promise<Category[]> {
+  const res = await fetch(`${API_BASE}/api/salestracker/categories`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { categories?: Category[] }).categories ?? [];
+}
+async function writeJson(path: string, method: string, body?: unknown): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+export const createCategory = (input: { name: string; description?: string; color?: string }) => writeJson('/api/salestracker/categories', 'POST', input);
+export const updateCategory = (id: string, patch: Record<string, unknown>) => writeJson(`/api/salestracker/categories/${encodeURIComponent(id)}`, 'PATCH', patch);
+export const deleteCategory = (id: string) => writeJson(`/api/salestracker/categories/${encodeURIComponent(id)}`, 'DELETE');
+export async function importCategories(): Promise<number> {
+  const res = await fetch(`${API_BASE}/api/salestracker/categories/import`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  return ((await res.json()) as { added: number }).added;
 }

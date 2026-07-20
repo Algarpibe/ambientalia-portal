@@ -9,6 +9,7 @@ import Clientes from './pages/Clientes';
 import ClienteDetalle from './pages/ClienteDetalle';
 import ClienteArticulo from './pages/ClienteArticulo';
 import Analisis from './pages/Analisis';
+import Categorias from './pages/Categorias';
 
 // Layout con la navegación compartida (Nav + página vía <Outlet/>).
 function Layout() {
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="clientes/:customer" element={<ClienteDetalle />} />
           <Route path="cliente-articulo" element={<ClienteArticulo />} />
           <Route path="analisis" element={<Analisis />} />
+          <Route path="categorias" element={<Categorias />} />
           {/* Ruta absoluta: bajo el splat, un `to="."` se resolvía contra la ruta
               actual y no volvía a la raíz de la sub-app. Ver appBase.ts. */}
           <Route path="*" element={<Navigate to={APP_BASE} replace />} />
