@@ -14,6 +14,7 @@ import { getMarginByItemRows } from './margin-by-item.js';
 import { getCategoryMonthSalesRows } from './category-month-sales.js';
 import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView, MAX_VIEW_NAME_LEN, stateTooLarge } from './user-state.js';
 import { getCategories, createCategory, updateCategory, deleteCategory, importFromHub } from './categories.js';
+import { getGroupings, createGrouping, updateGrouping, deleteGrouping, reorderGroupings } from './groupings.js';
 import type { RecordTypeIO } from './types.js';
 
 // dueño del JWT; null si token legacy sin user_id
@@ -39,6 +40,13 @@ function sendCategoryError(res: Response, e: unknown, ctx: string): void {
   const msg = e instanceof Error ? e.message : '';
   if (/requerido|demasiado largo|inválido/.test(msg)) return void res.status(400).json({ error: msg });
   if (/(duplicate key|unique)/i.test(msg)) return void res.status(409).json({ error: 'ya existe una categoría con ese nombre' });
+  sendError(res, e, ctx);
+}
+
+function sendGroupError(res: Response, e: unknown, ctx: string): void {
+  const msg = e instanceof Error ? e.message : '';
+  if (/requerido|demasiado largo|demasiadas|inválido/.test(msg)) return void res.status(400).json({ error: msg });
+  if (/(duplicate key|unique)/i.test(msg)) return void res.status(409).json({ error: 'ya existe una agrupación con ese nombre' });
   sendError(res, e, ctx);
 }
 
@@ -210,6 +218,27 @@ export function createSalestrackerRouter(db: Pool): Router {
   router.post('/salestracker/categories/import', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
     try { res.json({ added: await importFromHub(db) }); }
     catch (e) { sendError(res, e, 'salestracker_categories_import'); }
+  });
+
+  router.get('/salestracker/category-groups', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+    try { res.json({ groups: await getGroupings(db) }); }
+    catch (e) { sendError(res, e, 'salestracker_groups_get'); }
+  });
+  router.post('/salestracker/category-groups', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { res.json({ group: await createGrouping(db, req.body as { name: unknown }) }); }
+    catch (e) { sendGroupError(res, e, 'salestracker_groups_post'); }
+  });
+  router.patch('/salestracker/category-groups/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { await updateGrouping(db, req.params.id, req.body as { name: unknown }); res.json({ ok: true }); }
+    catch (e) { sendGroupError(res, e, 'salestracker_groups_patch'); }
+  });
+  router.delete('/salestracker/category-groups/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { await deleteGrouping(db, req.params.id); res.json({ ok: true }); }
+    catch (e) { sendError(res, e, 'salestracker_groups_delete'); }
+  });
+  router.post('/salestracker/category-groups/reorder', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try { const ids = (req.body as { orderedIds?: unknown }).orderedIds; await reorderGroupings(db, Array.isArray(ids) ? ids as string[] : []); res.json({ ok: true }); }
+    catch (e) { sendError(res, e, 'salestracker_groups_reorder'); }
   });
 
   return router;
