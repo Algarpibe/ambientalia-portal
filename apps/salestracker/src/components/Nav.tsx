@@ -10,6 +10,7 @@ export default function Nav() {
     <nav className="flex gap-2 px-8 py-3 border-b bg-white">
       <NavLink to={APP_BASE} end className={link}>Inicio</NavLink>
       <NavLink to={`${APP_BASE}/articulos`} className={link}>Artículos</NavLink>
+      <NavLink to={`${APP_BASE}/tablas`} className={link}>Tablas</NavLink>
       <NavLink to={`${APP_BASE}/clientes`} className={link}>Clientes</NavLink>
       <NavLink to={`${APP_BASE}/cliente-articulo`} className={link}>Cliente × Artículo</NavLink>
     </nav>

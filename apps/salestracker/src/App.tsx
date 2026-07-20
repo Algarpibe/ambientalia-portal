@@ -4,6 +4,7 @@ import Nav from './components/Nav';
 import { APP_BASE } from './appBase';
 import Home from './pages/Home';
 import Articulos from './pages/Articulos';
+import Tablas from './pages/Tablas';
 import Clientes from './pages/Clientes';
 import ClienteDetalle from './pages/ClienteDetalle';
 import ClienteArticulo from './pages/ClienteArticulo';
@@ -25,6 +26,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="articulos" element={<Articulos />} />
+          <Route path="tablas" element={<Tablas />} />
           <Route path="clientes" element={<Clientes />} />
           <Route path="clientes/:customer" element={<ClienteDetalle />} />
           <Route path="cliente-articulo" element={<ClienteArticulo />} />
