@@ -9,6 +9,8 @@ import { getCustomerSalesRows } from './customer-sales.js';
 import { getCustomerItemSalesRows } from './customer-item-sales.js';
 import { getCustomerMonthSalesRows } from './customer-month-sales.js';
 import { getMarginByCustomerRows } from './margin-by-customer.js';
+import { getMarginByYearRows } from './margin-by-year.js';
+import { getMarginByItemRows } from './margin-by-item.js';
 import { getCategoryMonthSalesRows } from './category-month-sales.js';
 import type { RecordTypeIO } from './types.js';
 
@@ -97,6 +99,24 @@ export function createSalestrackerRouter(db: Pool): Router {
       const rows = await cached(`salestracker:margin-by-customer:${tipo}:${anio}`, () => getMarginByCustomerRows(db, { tipo: tipo as RecordTypeIO, anio }));
       res.json({ rows });
     } catch (e) { sendError(res, e, 'salestracker_margin_by_customer'); }
+  });
+
+  router.get('/salestracker/margin-by-year', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const rows = await cached(`salestracker:margin-by-year:${tipo}`, () => getMarginByYearRows(db, { tipo: tipo as RecordTypeIO }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_margin_by_year'); }
+  });
+
+  router.get('/salestracker/margin-by-item', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const anio = parseAnio(req.query.anio);
+      if (anio === null) return void res.status(400).json({ error: 'anio inválido (2000-2100)' });
+      const rows = await cached(`salestracker:margin-by-item:${tipo}:${anio}`, () => getMarginByItemRows(db, { tipo: tipo as RecordTypeIO, anio }));
+      res.json({ rows });
+    } catch (e) { sendError(res, e, 'salestracker_margin_by_item'); }
   });
 
   router.get('/salestracker/category-month-sales', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {

@@ -56,6 +56,22 @@ export interface MarginCustomerRow {
   costo: number;
 }
 
+// Ventas y costo estándar agregados por año (toda la historia). GET /api/salestracker/margin-by-year.
+export interface MarginYearRow {
+  year: number;
+  ventas: number;
+  costo: number;
+}
+
+// Ventas y costo estándar por artículo en un año. GET /api/salestracker/margin-by-item.
+export interface MarginItemRow {
+  itemId: string;
+  sku: string | null;
+  nombre: string;
+  ventas: number;
+  costo: number;
+}
+
 // Ventas por (mes, categoría) en un año. GET /api/salestracker/category-month-sales.
 export interface CategoryMonthRow {
   mes: number; // 1-12
