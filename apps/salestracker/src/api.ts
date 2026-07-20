@@ -88,6 +88,18 @@ export interface MarginCustomerRow {
   ventas: number;
   costo: number;
 }
+export interface MarginYearRow {
+  year: number;
+  ventas: number;
+  costo: number;
+}
+export interface MarginItemRow {
+  itemId: string;
+  sku: string | null;
+  nombre: string;
+  ventas: number;
+  costo: number;
+}
 export interface CategoryMonthRow {
   mes: number;
   categoria: string | null;
@@ -115,6 +127,14 @@ export const fetchCustomerMonthSales = (p: { tipo: RecordTypeIO; anio: number })
 /** Ventas y costo estándar por cliente en un año (tipo OV/FAC). */
 export const fetchMarginByCustomer = (p: { tipo: RecordTypeIO; anio: number }) =>
   fetchRows<MarginCustomerRow>('/api/salestracker/margin-by-customer', { tipo: p.tipo, anio: String(p.anio) }, 'margen');
+
+/** Ventas y costo estándar agregados por año, toda la historia (tipo OV/FAC). */
+export const fetchMarginByYear = (p: { tipo: RecordTypeIO }) =>
+  fetchRows<MarginYearRow>('/api/salestracker/margin-by-year', { tipo: p.tipo }, 'margen por año');
+
+/** Ventas y costo estándar por artículo en un año (tipo OV/FAC). */
+export const fetchMarginByItem = (p: { tipo: RecordTypeIO; anio: number }) =>
+  fetchRows<MarginItemRow>('/api/salestracker/margin-by-item', { tipo: p.tipo, anio: String(p.anio) }, 'margen por artículo');
 
 /** Ventas por (mes, categoría) en un año (tipo OV/FAC). */
 export const fetchCategoryMonthSales = (p: { tipo: RecordTypeIO; anio: number }) =>
