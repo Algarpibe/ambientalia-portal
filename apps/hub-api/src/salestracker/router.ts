@@ -15,7 +15,8 @@ import { getCategoryMonthSalesRows } from './category-month-sales.js';
 import { getFavorites, toggleFavorite, getSavedViews, saveView, deleteSavedView, MAX_VIEW_NAME_LEN, stateTooLarge } from './user-state.js';
 import { getCategories, createCategory, updateCategory, deleteCategory, importFromHub } from './categories.js';
 import { getGroupings, createGrouping, updateGrouping, deleteGrouping, reorderGroupings } from './groupings.js';
-import type { RecordTypeIO } from './types.js';
+import { getGroupingAnalysis } from './grouping-analysis.js';
+import type { RecordType, RecordTypeIO } from './types.js';
 
 // dueño del JWT; null si token legacy sin user_id
 const ownerId = (req: Request): string | null => {
@@ -239,6 +240,14 @@ export function createSalestrackerRouter(db: Pool): Router {
   router.post('/salestracker/category-groups/reorder', requireAuth, requireAdmin, async (req: Request, res: Response) => {
     try { const ids = (req.body as { orderedIds?: unknown }).orderedIds; await reorderGroupings(db, Array.isArray(ids) ? ids as string[] : []); res.json({ ok: true }); }
     catch (e) { sendError(res, e, 'salestracker_groups_reorder'); }
+  });
+
+  router.get('/salestracker/grouping-analysis', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+    try {
+      const tipo = req.query.tipo === 'SALES_ORDER' ? 'SALES_ORDER' : 'INVOICE';
+      const key = `salestracker:grouping-analysis:${tipo}`;
+      res.json(await cached(key, () => getGroupingAnalysis(db, tipo as RecordType)));
+    } catch (e) { sendError(res, e, 'salestracker_grouping_analysis'); }
   });
 
   return router;
