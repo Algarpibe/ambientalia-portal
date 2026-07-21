@@ -163,23 +163,16 @@ export default function App() {
 
       let newScoring = config;
       let newExtended = extendedConfig;
-      let changed = false;
 
       if (data.scoringConfig) {
         newScoring = mergeScoringConfig(data.scoringConfig);
         setConfig(newScoring);
         localStorage.setItem('scoringConfig', JSON.stringify(newScoring));
-        changed = true;
       }
       if (data.extendedScoringConfig) {
         newExtended = mergeExtendedConfig(data.extendedScoringConfig);
         setExtendedConfig(newExtended);
         localStorage.setItem('extendedScoringConfig', JSON.stringify(newExtended));
-        changed = true;
-      }
-
-      if (changed) {
-        console.log('Configuración restaurada desde settings.dat');
       }
     } catch (e) {
       // Ignore error if file doesn't exist
@@ -216,7 +209,6 @@ export default function App() {
         saveSettingsToDisk(syncDirHandle, newConfig, synchronizedExtendedConfig);
       }
 
-      console.log(`Configuración guardada. Modo de Scoring: ${newConfig.scoringMode}`);
       return true;
     } catch (e) {
       console.error('Error saving config', e);
@@ -240,9 +232,6 @@ export default function App() {
         useGatingForSegmentation: newConfig.useGatingForSegmentation
       };
       handleSaveConfig(newConfig, newExtendedConfig);
-
-      // Notify user via console or potentially a toast (not implemented yet)
-      console.log('Auto-switched to Extended Scoring Mode due to Sales History upload');
     }
   };
 
