@@ -4,18 +4,12 @@ import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { getHubPool, initDb } from './db.js';
-import { requireAuth, loginUser } from './auth.js';
+import { loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
 import { createSalestrackerRouter } from './salestracker/router.js';
-import { cached } from './cache.js';
-import { getReconciliationData } from './reconciliation.js';
-import { getProfitabilityData } from './profitability.js';
-import { getInventoryData } from './inventory.js';
-import { getCustomerValuationData } from './customerValuation.js';
-import { getPendingSalesOrders } from './salesOrders.js';
-import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
+import { createDataRouter } from './data.router.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -101,72 +95,10 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-app.get('/api/reconciliation/data', requireAuth, async (req, res) => {
-  try {
-    const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-    const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-    const data = await cached(`reconciliation:${from || ''}:${to || ''}`, () => getReconciliationData(getHubPool(), from, to));
-    res.json(data);
-  } catch (e) {
-    sendError(res, e, 'reconciliation');
-  }
-});
-
-app.get('/api/profitability/data', requireAuth, async (_req, res) => {
-  try {
-    const data = await cached('profitability', () => getProfitabilityData(getHubPool()));
-    res.json(data);
-  } catch (e) {
-    sendError(res, e, 'profitability');
-  }
-});
-
-app.get('/api/inventory/data', requireAuth, async (_req, res) => {
-  try {
-    const data = await cached('inventory', () => getInventoryData(getHubPool()));
-    res.json(data);
-  } catch (e) {
-    sendError(res, e, 'inventory');
-  }
-});
-
-app.get('/api/customer-valuation/data', requireAuth, async (_req, res) => {
-  try {
-    const data = await cached('customer-valuation', () => getCustomerValuationData(getHubPool()));
-    res.json(data);
-  } catch (e) {
-    sendError(res, e, 'customer-valuation');
-  }
-});
-
-app.get('/api/sales-orders/pending', requireAuth, async (_req, res) => {
-  try {
-    const data = await cached('sales-orders-pending', () => getPendingSalesOrders(getHubPool()));
-    res.json({ orders: data });
-  } catch (e) {
-    sendError(res, e, 'sales-orders-pending');
-  }
-});
-
-app.get('/api/invoices/:numero/detail', requireAuth, async (req, res) => {
-  try {
-    const d = await getDetalleFactura(getHubPool(), req.params.numero);
-    if (!d) return void res.status(404).json({ error: 'factura no encontrada' });
-    res.json(d);
-  } catch (e) {
-    sendError(res, e, 'invoice_detail');
-  }
-});
-
-app.get('/api/sales-orders/:numero/detail', requireAuth, async (req, res) => {
-  try {
-    const d = await getDetalleOV(getHubPool(), req.params.numero);
-    if (!d) return void res.status(404).json({ error: 'ov no encontrada' });
-    res.json(d);
-  } catch (e) {
-    sendError(res, e, 'sales_order_detail');
-  }
-});
+// Los endpoints de datos (/api/reconciliation, /profitability, /inventory,
+// /customer-valuation, /sales-orders/pending, /invoices/:n/detail,
+// /sales-orders/:n/detail) viven ahora en createDataRouter, con guard por-app
+// (requireApp). Se monta tras initDb junto a los demás routers.
 
 // Captura fallos no manejados del proceso (además de loguearlos).
 process.on('unhandledRejection', (reason) => { console.error('unhandledRejection', reason); captureError(reason); });
@@ -186,6 +118,8 @@ initDb()
     app.use('/api', createWoSalesRouter(getHubPool()));
     app.use('/api', createContabilidadRouter(getHubPool()));
     app.use('/api', createSalestrackerRouter(getHubPool()));
+    // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
+    app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
   })
   .catch((e) => {
