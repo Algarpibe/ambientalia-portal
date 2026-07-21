@@ -10,6 +10,7 @@ import MonthlyOvFacCard from './home/MonthlyOvFacCard';
 import CumulativeYoYCard from './home/CumulativeYoYCard';
 import ExecutionMonthlyCard from './home/ExecutionMonthlyCard';
 import CategoryMixCard from './home/CategoryMixCard';
+import TopClientesCard from './home/TopClientesCard';
 
 export default function Home() {
   const q = useQuery({ queryKey: ['sales'], queryFn: fetchSales });
@@ -58,6 +59,7 @@ export default function Home() {
         <CumulativeYoYCard rows={rows} year={yearSel} />
         <ExecutionMonthlyCard rows={rows} year={yearSel} />
         <CategoryMixCard rows={rows} year={yearSel} />
+        <TopClientesCard year={yearSel} />
       </div>
     </div>
   );
