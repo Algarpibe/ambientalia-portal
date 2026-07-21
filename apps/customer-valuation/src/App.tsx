@@ -250,7 +250,10 @@ export default function App() {
         updateSalesHistoryAndConfig(d.salesHistory);
       } catch (e) {
         if (!cancelled) {
-          setErrors([`No se pudieron cargar los datos del hub de Zoho: ${e instanceof Error ? e.message : 'error'}. Puedes subir los archivos manualmente.`]);
+          // FE-417 — no exponer el error crudo (p. ej. "HTTP 500") al usuario;
+          // se loguea para diagnóstico y se muestra un mensaje accionable.
+          console.error('customer-valuation: fallo al cargar del hub', e);
+          setErrors(['No se pudieron cargar los datos del hub de Zoho. Puedes subir los archivos manualmente.']);
         }
       } finally {
         if (!cancelled) setHubLoading(false);
@@ -363,6 +366,7 @@ export default function App() {
                     />
                     <select
                       className="filters__select"
+                      aria-label="Filtrar por cliente"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       style={{ maxWidth: '200px' }}

@@ -37,7 +37,7 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
           <h2 className="text-lg font-semibold text-gray-900">
             {tipo === 'factura' ? 'Factura' : 'Orden de venta'} {numero}
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X className="h-5 w-5" /></button>
+          <button onClick={onClose} aria-label="Cerrar" className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X className="h-5 w-5" /></button>
         </div>
 
         {cargando && <div className="flex items-center gap-2 text-gray-500"><Loader2 className="h-5 w-5 animate-spin" /> Cargando…</div>}

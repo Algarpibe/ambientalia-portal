@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, Download, RefreshCw, Trash2 } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, RefreshCw, Trash2, AlertCircle } from 'lucide-react';
 import { getMonthFromFilename, parseMonthlyFile, type SalesRecord } from './lib/excel-utils';
 import { consolidateData, generateConsolidatedExcel } from './lib/consolidate';
 import defaultCategories from './categories.json';
@@ -16,6 +16,7 @@ function App() {
   const [monthlyFiles, setMonthlyFiles] = useState<ProcessedFile[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [consolidatedBlob, setConsolidatedBlob] = useState<Blob | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleMonthlyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -36,13 +37,13 @@ function App() {
 
   const processFiles = async () => {
     setIsProcessing(true);
+    setError(null);
     try {
       // 1. Load Categories from JSON
       const categoryMap = new Map<string, string>();
       Object.entries(defaultCategories).forEach(([sku, cat]) => {
         categoryMap.set(sku, cat);
       });
-      console.log(`Loaded ${categoryMap.size} categories from default.`);
 
       // 2. Parse Monthly Files
       const parsedDataList = [];
@@ -82,7 +83,7 @@ function App() {
 
     } catch (err) {
       console.error(err);
-      alert("Ocurrió un error inesperado durante la consolidación.");
+      setError('Ocurrió un error inesperado durante la consolidación. Revisa los archivos e inténtalo de nuevo.');
     } finally {
       setIsProcessing(false);
     }
@@ -120,6 +121,12 @@ function App() {
           </div>
         </div>
 
+        {error && (
+          <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" /> {error}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
           {/* Main Upload Zone */}
@@ -137,6 +144,7 @@ function App() {
                   type="file"
                   multiple
                   accept=".xlsx"
+                  aria-label="Seleccionar archivos mensuales (.xlsx)"
                   onChange={handleMonthlyUpload}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                 />
@@ -173,10 +181,12 @@ function App() {
                       <div className="min-w-0 flex-1">
                         <p className="font-semibold text-slate-800 truncate">{f.file.name}</p>
                         <p className="text-xs text-slate-500">{f.month || "Fecha desconocida"} {f.status === 'parsed' && '✓ Procesado'}</p>
+                        {f.status === 'error' && f.error && <p className="text-xs text-red-600 mt-0.5">{f.error}</p>}
                       </div>
                     </div>
                     <button
                       onClick={() => removeFile(i)}
+                      aria-label={`Eliminar ${f.file.name}`}
                       className="text-slate-400 hover:text-red-500 hover:bg-red-100 p-2 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-5 h-5" />

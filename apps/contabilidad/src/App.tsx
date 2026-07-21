@@ -139,7 +139,7 @@ export default function App() {
         </select>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar cliente, OV o factura…" className="w-64 rounded-xl border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none" />
+          <input value={filtro} onChange={(e) => setFiltro(e.target.value)} aria-label="Buscar cliente, OV o factura" placeholder="Buscar cliente, OV o factura…" className="w-64 rounded-xl border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none" />
         </div>
       </div>
 
