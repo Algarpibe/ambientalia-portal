@@ -11,6 +11,7 @@ import CumulativeYoYCard from './home/CumulativeYoYCard';
 import ExecutionMonthlyCard from './home/ExecutionMonthlyCard';
 import CategoryMixCard from './home/CategoryMixCard';
 import TopClientesCard from './home/TopClientesCard';
+import './home/home.css';
 
 export default function Home() {
   const q = useQuery({ queryKey: ['sales'], queryFn: fetchSales });
@@ -21,45 +22,55 @@ export default function Home() {
   const [year, setYear] = useState(anioActual);
   const yearSel = years.includes(year) ? year : (years[0] ?? anioActual);
 
-  if (q.isLoading) return <div className="p-8 text-gray-600">Cargando…</div>;
-  if (q.error) return <div className="p-8 text-red-600">{(q.error as Error).message}</div>;
+  if (q.isLoading) return <div className="st-home"><div className="p-10 text-[#6E6B64]">Cargando…</div></div>;
+  if (q.error) return <div className="st-home"><div className="p-10 text-red-600">{(q.error as Error).message}</div></div>;
 
   const k = buildHomeKpis(rows, yearSel);
+  const yearOptions = years.length > 0 ? years.slice(0, 4) : [yearSel];
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <header>
-          <h1 className="text-2xl font-bold text-gray-900">SalesTracker</h1>
-          <p className="text-gray-500">Resumen anual de ventas (USD).</p>
-        </header>
-        <label className="flex flex-col text-sm text-gray-600">
-          Año
-          <select
-            className="mt-1 rounded-md border px-2 py-1.5 text-gray-900"
-            value={yearSel}
-            onChange={(e) => setYear(Number(e.target.value))}
-          >
-            {(years.length > 0 ? years : [yearSel]).map((y) => (
-              <option key={y} value={y}>{y}</option>
+    <div className="st-home">
+      <div className="st-grain" />
+      <div className="st-wrap max-w-[1160px] mx-auto px-6 md:px-8 py-10">
+        {/* Cabecera */}
+        <div className="st-reveal flex items-center justify-between gap-6 flex-wrap mb-6">
+          <div>
+            <h1 className="text-[34px] leading-[1.05] font-extrabold tracking-tight text-[#24231F]">
+              Sales<span className="font-bold text-[#9A968E]">Tracker</span>
+            </h1>
+            <p className="text-[14.5px] text-[#6E6B64] mt-1.5">Resumen anual de ventas · valores en USD</p>
+          </div>
+          <div className="st-years" role="group" aria-label="Año">
+            {yearOptions.map((y) => (
+              <button key={y} type="button" aria-pressed={y === yearSel} onClick={() => setYear(y)}>{y}</button>
             ))}
-          </select>
-        </label>
-      </div>
+          </div>
+        </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiTile label="Facturado (FAC)" value={formatUSD(k.facturado)} deltaPct={computeDelta(k.facturado, k.facturadoPrev).deltaPct} />
-        <KpiTile label="Órdenes (OV)" value={formatUSD(k.ordenes)} deltaPct={computeDelta(k.ordenes, k.ordenesPrev).deltaPct} />
-        <KpiTile label="Backlog" value={formatUSD(k.backlog)} />
-        <KpiTile label="% Ejecución" value={`${k.ejecucion.toFixed(1)}%`} deltaPct={computeDelta(k.ejecucion, k.ejecucionPrev).deltaPct} hint="FAC / OV" />
-      </div>
+        {/* Panel hero con KPIs */}
+        <section className="st-panel st-reveal p-6 md:p-7 mb-4" style={{ animationDelay: '70ms' }}>
+          <div className="flex items-center justify-between gap-3 mb-5">
+            <span className="text-[17px] font-bold tracking-tight text-[#24231F]">Resumen {yearSel}</span>
+            <span className="st-status"><span className="dot" />En vivo</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+            <KpiTile label="Facturado · FAC" value={formatUSD(k.facturado)} deltaPct={computeDelta(k.facturado, k.facturadoPrev).deltaPct} />
+            <KpiTile label="Órdenes · OV" value={formatUSD(k.ordenes)} deltaPct={computeDelta(k.ordenes, k.ordenesPrev).deltaPct} />
+            <KpiTile label="Backlog" value={formatUSD(k.backlog)} tag="no facturado" />
+            <KpiTile label="Ejecución" sublabel="FAC / OV" value={`${k.ejecucion.toFixed(1)}%`} ring={k.ejecucion} />
+          </div>
+        </section>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <MonthlyOvFacCard rows={rows} year={yearSel} />
-        <CumulativeYoYCard rows={rows} year={yearSel} />
-        <ExecutionMonthlyCard rows={rows} year={yearSel} />
-        <CategoryMixCard rows={rows} year={yearSel} />
-        <TopClientesCard year={yearSel} />
+        {/* Bento de gráficos */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <div className="st-reveal xl:col-span-2" style={{ animationDelay: '140ms' }}><MonthlyOvFacCard rows={rows} year={yearSel} /></div>
+          <div className="st-reveal xl:col-span-1 xl:row-span-2" style={{ animationDelay: '210ms' }}><CategoryMixCard rows={rows} year={yearSel} /></div>
+          <div className="st-reveal xl:col-span-2" style={{ animationDelay: '280ms' }}><CumulativeYoYCard rows={rows} year={yearSel} /></div>
+          <div className="st-reveal xl:col-span-1" style={{ animationDelay: '350ms' }}><ExecutionMonthlyCard rows={rows} year={yearSel} /></div>
+          <div className="st-reveal xl:col-span-2" style={{ animationDelay: '420ms' }}><TopClientesCard year={yearSel} /></div>
+        </div>
+
+        <p className="text-xs text-[#9A968E] font-medium mt-8">Datos en vivo desde el hub · valores en USD.</p>
       </div>
     </div>
   );
