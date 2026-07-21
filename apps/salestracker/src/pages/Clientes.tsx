@@ -118,234 +118,222 @@ export default function Clientes() {
     void navigator.clipboard.writeText(matrixToTsv(shown, years, grand));
   };
 
-  if (q.isLoading) return <div className="p-8 text-gray-600">Cargando clientes…</div>;
-  if (q.error) return <div className="p-8 text-red-600">{(q.error as Error).message}</div>;
+  if (q.isLoading)
+    return (
+      <div className="st-page">
+        <div className="st-grain" />
+        <div className="st-wrap px-6 md:px-8 py-8 text-[#6E6B64]">Cargando clientes…</div>
+      </div>
+    );
+  if (q.error)
+    return (
+      <div className="st-page">
+        <div className="st-grain" />
+        <div className="st-wrap px-6 md:px-8 py-8 text-red-600">{(q.error as Error).message}</div>
+      </div>
+    );
 
   const noRows = shown.length === 0;
   const sortIcon = (active: boolean) =>
     active ? <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span> : null;
 
   return (
-    <div className="p-8 space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
-        <p className="text-gray-500">Ventas por cliente y año (USD)</p>
-      </header>
+    <div className="st-page">
+      <div className="st-grain" />
+      <div className="st-wrap px-6 md:px-8 py-8 space-y-6">
+        <header>
+          <h1 className="text-[26px] font-extrabold tracking-tight text-[#24231F]">Clientes</h1>
+          <p className="text-[#6E6B64]">Ventas por cliente y año (USD)</p>
+        </header>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col text-sm text-gray-600">
-          Tipo
-          <select
-            className="mt-1 rounded-md border px-2 py-1.5 text-gray-900"
-            value={tipo}
-            onChange={(e) => setTipo(e.target.value as RecordTypeIO)}
-          >
-            <option value="INVOICE">Facturas (FAC)</option>
-            <option value="SALES_ORDER">Órdenes de Venta (OV)</option>
-          </select>
-        </label>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="st-field">
+            Tipo
+            <select
+              className="st-input"
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value as RecordTypeIO)}
+            >
+              <option value="INVOICE">Facturas (FAC)</option>
+              <option value="SALES_ORDER">Órdenes de Venta (OV)</option>
+            </select>
+          </label>
 
-        <label className="flex flex-col text-sm text-gray-600">
-          Desde año
-          <input
-            type="number"
-            className="mt-1 w-24 rounded-md border px-2 py-1.5 text-gray-900"
-            value={desdeAnio}
-            onChange={(e) => setDesdeAnio(Number(e.target.value))}
-          />
-        </label>
+          <label className="st-field">
+            Desde año
+            <input
+              type="number"
+              className="st-input w-24"
+              value={desdeAnio}
+              onChange={(e) => setDesdeAnio(Number(e.target.value))}
+            />
+          </label>
 
-        <label className="flex flex-col text-sm text-gray-600">
-          Hasta año
-          <input
-            type="number"
-            className="mt-1 w-24 rounded-md border px-2 py-1.5 text-gray-900"
-            value={hastaAnio}
-            onChange={(e) => setHastaAnio(Number(e.target.value))}
-          />
-        </label>
+          <label className="st-field">
+            Hasta año
+            <input
+              type="number"
+              className="st-input w-24"
+              value={hastaAnio}
+              onChange={(e) => setHastaAnio(Number(e.target.value))}
+            />
+          </label>
 
-        <label className="flex flex-col text-sm text-gray-600">
-          Buscar
-          <input
-            type="text"
-            placeholder="Buscar cliente…"
-            className="mt-1 rounded-md border px-2 py-1.5 text-gray-900"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
+          <label className="st-field">
+            Buscar
+            <input
+              type="text"
+              placeholder="Buscar cliente…"
+              className="st-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
 
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={comparar}
-            onChange={(e) => setComparar(e.target.checked)}
-          />
-          Comparar
-        </label>
+          <label className="st-check">
+            <input
+              type="checkbox"
+              checked={comparar}
+              onChange={(e) => setComparar(e.target.checked)}
+            />
+            Comparar
+          </label>
 
-        {comparar && (
-          <>
-            <label className="flex flex-col text-sm text-gray-600">
-              Año A
-              <input
-                type="number"
-                className="mt-1 w-24 rounded-md border px-2 py-1.5 text-gray-900"
-                value={anioA}
-                onChange={(e) => setAnioA(Number(e.target.value))}
-              />
-            </label>
-            <label className="flex flex-col text-sm text-gray-600">
-              Año B
-              <input
-                type="number"
-                className="mt-1 w-24 rounded-md border px-2 py-1.5 text-gray-900"
-                value={anioB}
-                onChange={(e) => setAnioB(Number(e.target.value))}
-              />
-            </label>
-          </>
-        )}
+          {comparar && (
+            <>
+              <label className="st-field">
+                Año A
+                <input
+                  type="number"
+                  className="st-input w-24"
+                  value={anioA}
+                  onChange={(e) => setAnioA(Number(e.target.value))}
+                />
+              </label>
+              <label className="st-field">
+                Año B
+                <input
+                  type="number"
+                  className="st-input w-24"
+                  value={anioB}
+                  onChange={(e) => setAnioB(Number(e.target.value))}
+                />
+              </label>
+            </>
+          )}
 
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={onlyFav}
-            onChange={(e) => setOnlyFav(e.target.checked)}
-          />
-          Solo favoritos
-        </label>
+          <label className="st-check">
+            <input
+              type="checkbox"
+              checked={onlyFav}
+              onChange={(e) => setOnlyFav(e.target.checked)}
+            />
+            Solo favoritos
+          </label>
 
-        <div className="ml-auto flex items-center gap-2">
-          <SavedViewsMenu
-            viewKey="clientes"
-            currentState={{ tipo, desdeAnio, hastaAnio, search, sortKey, sortDir, comparar, anioA, anioB, onlyFav }}
-            onApply={(s: ClientesViewState) => {
-              setTipo(s.tipo);
-              setDesdeAnio(s.desdeAnio);
-              setHastaAnio(s.hastaAnio);
-              setSearch(s.search);
-              setSortKey(s.sortKey);
-              setSortDir(s.sortDir);
-              setComparar(s.comparar);
-              setAnioA(s.anioA);
-              setAnioB(s.anioB);
-              setOnlyFav(s.onlyFav);
-            }}
-          />
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={noRows}
-            className="rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-          >
-            CSV
-          </button>
-          <button
-            type="button"
-            onClick={copiar}
-            disabled={noRows}
-            className="rounded-md border px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-          >
-            Copiar
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <SavedViewsMenu
+              viewKey="clientes"
+              currentState={{ tipo, desdeAnio, hastaAnio, search, sortKey, sortDir, comparar, anioA, anioB, onlyFav }}
+              onApply={(s: ClientesViewState) => {
+                setTipo(s.tipo);
+                setDesdeAnio(s.desdeAnio);
+                setHastaAnio(s.hastaAnio);
+                setSearch(s.search);
+                setSortKey(s.sortKey);
+                setSortDir(s.sortDir);
+                setComparar(s.comparar);
+                setAnioA(s.anioA);
+                setAnioB(s.anioB);
+                setOnlyFav(s.onlyFav);
+              }}
+            />
+            <button type="button" onClick={exportCsv} disabled={noRows} className="st-btn">
+              CSV
+            </button>
+            <button type="button" onClick={copiar} disabled={noRows} className="st-btn">
+              Copiar
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div className="overflow-x-auto rounded-xl border bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="w-8 px-2 py-2" aria-label="Favorito" />
-              <th
-                onClick={() => toggleSort('customer')}
-                className="cursor-pointer select-none px-3 py-2 text-left"
-              >
-                Cliente{sortIcon(sortKey === 'customer')}
-              </th>
-              {years.map((y) => (
-                <th
-                  key={y}
-                  onClick={() => toggleSort(y)}
-                  className="cursor-pointer select-none px-3 py-2 text-right"
-                >
-                  {y}{sortIcon(sortKey === y)}
+        <div className="st-table-wrap">
+          <table className="st-table">
+            <thead>
+              <tr>
+                <th className="w-8" aria-label="Favorito" />
+                <th onClick={() => toggleSort('customer')} className="sortable">
+                  Cliente{sortIcon(sortKey === 'customer')}
                 </th>
-              ))}
-              <th
-                onClick={() => toggleSort('total')}
-                className="cursor-pointer select-none px-3 py-2 text-right"
-              >
-                Total{sortIcon(sortKey === 'total')}
-              </th>
-              <th className="px-3 py-2 text-right">%</th>
-              {comparar && (
-                <th
-                  onClick={() => toggleSort('delta')}
-                  className="cursor-pointer select-none px-3 py-2 text-right"
-                >
-                  Δ%{sortIcon(sortKey === 'delta')}
+                {years.map((y) => (
+                  <th key={y} onClick={() => toggleSort(y)} className="sortable num">
+                    {y}{sortIcon(sortKey === y)}
+                  </th>
+                ))}
+                <th onClick={() => toggleSort('total')} className="sortable num">
+                  Total{sortIcon(sortKey === 'total')}
                 </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => {
-              const deltaPct = comparar
-                ? computeDelta(r.byYear[anioA] ?? 0, r.byYear[anioB] ?? 0).deltaPct
-                : null;
-              return (
-                <tr key={r.customer} className="border-t">
-                  <td className="px-2 py-2 text-center">
-                    <FavoriteStar
-                      active={favSet.has(r.customer)}
-                      onToggle={() => toggleFav.mutate(r.customer)}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <Link
-                      to={`${APP_BASE}/clientes/${encodeURIComponent(r.customer)}`}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {r.customer}
-                    </Link>
-                  </td>
-                  {years.map((y) => (
-                    <td key={y} className="px-3 py-2 text-right">{formatUSD(r.byYear[y] ?? 0)}</td>
-                  ))}
-                  <td className="px-3 py-2 text-right">{formatUSD(r.total)}</td>
-                  <td className="px-3 py-2 text-right">{pct(r.total)}</td>
-                  {comparar && (
-                    <td
-                      className={`px-3 py-2 text-right ${
-                        deltaPct !== null && deltaPct < 0
-                          ? 'text-red-600'
-                          : deltaPct !== null && deltaPct > 0
-                          ? 'text-green-600'
-                          : ''
-                      }`}
-                    >
-                      {formatDeltaPct(deltaPct)}
+                <th className="num">%</th>
+                {comparar && (
+                  <th onClick={() => toggleSort('delta')} className="sortable num">
+                    Δ%{sortIcon(sortKey === 'delta')}
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => {
+                const deltaPct = comparar
+                  ? computeDelta(r.byYear[anioA] ?? 0, r.byYear[anioB] ?? 0).deltaPct
+                  : null;
+                return (
+                  <tr key={r.customer}>
+                    <td className="text-center">
+                      <FavoriteStar
+                        active={favSet.has(r.customer)}
+                        onToggle={() => toggleFav.mutate(r.customer)}
+                      />
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot className="border-t bg-gray-50 font-semibold text-gray-900">
-            <tr>
-              <td className="px-2 py-2" />
-              <td className="px-3 py-2">TOTAL</td>
-              {years.map((y) => (
-                <td key={y} className="px-3 py-2 text-right">{formatUSD(totals.byYear[y])}</td>
-              ))}
-              <td className="px-3 py-2 text-right">{formatUSD(totals.grand)}</td>
-              <td className="px-3 py-2 text-right">{pct(totals.grand)}</td>
-              {comparar && <td className="px-3 py-2" />}
-            </tr>
-          </tfoot>
-        </table>
+                    <td>
+                      <Link to={`${APP_BASE}/clientes/${encodeURIComponent(r.customer)}`}>
+                        {r.customer}
+                      </Link>
+                    </td>
+                    {years.map((y) => (
+                      <td key={y} className="num">{formatUSD(r.byYear[y] ?? 0)}</td>
+                    ))}
+                    <td className="num">{formatUSD(r.total)}</td>
+                    <td className="num">{pct(r.total)}</td>
+                    {comparar && (
+                      <td
+                        className="num"
+                        style={
+                          deltaPct !== null
+                            ? { color: deltaPct >= 0 ? '#346538' : '#9F2F2D' }
+                            : undefined
+                        }
+                      >
+                        {formatDeltaPct(deltaPct)}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td />
+                <td>TOTAL</td>
+                {years.map((y) => (
+                  <td key={y} className="num">{formatUSD(totals.byYear[y])}</td>
+                ))}
+                <td className="num">{formatUSD(totals.grand)}</td>
+                <td className="num">{pct(totals.grand)}</td>
+                {comparar && <td />}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </div>
     </div>
   );

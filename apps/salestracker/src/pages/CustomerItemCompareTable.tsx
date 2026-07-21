@@ -20,39 +20,39 @@ export default function CustomerItemCompareTable({ tipo, anioA, anioB, search }:
       grp.items.some((it) => (it.sku ?? '').toLowerCase().includes(q) || it.nombre.toLowerCase().includes(q)));
   }, [qA.data, qB.data, search]);
 
-  if (qA.isLoading || qB.isLoading) return <div className="p-6 text-gray-500">Cargando comparación…</div>;
+  if (qA.isLoading || qB.isLoading) return <div className="p-6 text-[#6E6B64]">Cargando comparación…</div>;
   if (qA.error || qB.error) return <div className="p-6 text-red-600">{((qA.error ?? qB.error) as Error).message}</div>;
 
-  const deltaCls = (d: number | null) => `text-right ${(d ?? 0) < 0 ? 'text-red-600' : 'text-green-700'}`;
+  const deltaColor = (d: number | null) => ((d ?? 0) >= 0 ? '#346538' : '#9F2F2D');
 
   return (
-    <div className="overflow-x-auto rounded-xl border bg-white">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-600">
+    <div className="st-table-wrap">
+      <table className="st-table">
+        <thead>
           <tr>
-            <th className="px-3 py-2 text-left">SKU</th>
-            <th className="px-3 py-2 text-left">Nombre</th>
-            <th className="px-3 py-2 text-right">{anioA}</th>
-            <th className="px-3 py-2 text-right">{anioB}</th>
-            <th className="px-3 py-2 text-right">Δ%</th>
+            <th>SKU</th>
+            <th>Nombre</th>
+            <th className="num">{anioA}</th>
+            <th className="num">{anioB}</th>
+            <th className="num">Δ%</th>
           </tr>
         </thead>
         <tbody>
           {groups.map((g) => (
             <Fragment key={g.customer}>
-              <tr className="bg-gray-100 font-semibold border-t">
-                <td className="px-3 py-2" colSpan={2}>{g.customer}</td>
-                <td className="px-3 py-2 text-right">{formatUSD(g.totalA)}</td>
-                <td className="px-3 py-2 text-right">{formatUSD(g.totalB)}</td>
-                <td className={`px-3 py-2 ${deltaCls(g.deltaPct)}`}>{formatDeltaPct(g.deltaPct)}</td>
+              <tr className="group">
+                <td colSpan={2}>{g.customer}</td>
+                <td className="num">{formatUSD(g.totalA)}</td>
+                <td className="num">{formatUSD(g.totalB)}</td>
+                <td className="num" style={{ color: deltaColor(g.deltaPct) }}>{formatDeltaPct(g.deltaPct)}</td>
               </tr>
               {g.items.map((it, i) => (
-                <tr key={`${g.customer}-${it.sku ?? it.nombre}-${i}`} className="border-t">
-                  <td className="px-3 py-2 font-mono text-xs">{it.sku ?? '—'}</td>
-                  <td className="px-3 py-2">{it.nombre}</td>
-                  <td className="px-3 py-2 text-right">{formatUSD(it.importeA)}</td>
-                  <td className="px-3 py-2 text-right">{formatUSD(it.importeB)}</td>
-                  <td className={`px-3 py-2 ${deltaCls(it.deltaPct)}`}>{formatDeltaPct(it.deltaPct)}</td>
+                <tr key={`${g.customer}-${it.sku ?? it.nombre}-${i}`}>
+                  <td className="font-mono text-xs">{it.sku ?? '—'}</td>
+                  <td>{it.nombre}</td>
+                  <td className="num">{formatUSD(it.importeA)}</td>
+                  <td className="num">{formatUSD(it.importeB)}</td>
+                  <td className="num" style={{ color: deltaColor(it.deltaPct) }}>{formatDeltaPct(it.deltaPct)}</td>
                 </tr>
               ))}
             </Fragment>
