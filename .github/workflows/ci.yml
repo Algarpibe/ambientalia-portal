@@ -17,9 +17,11 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # INFRA-517 — actions pineadas por SHA (no por tag mutable). El comentario
+      # documenta la versión. Actualizar SHA al subir de versión.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -58,6 +60,8 @@ jobs:
       - name: Tests
         run: npm run test --workspaces --if-present
 
-      # Auditoría de dependencias (informativa; no bloquea el pipeline).
-      - name: npm audit (informativo)
-        run: npm audit --omit=dev || true
+      # INFRA-516 — auditoría de dependencias de PRODUCCIÓN: bloquea el pipeline
+      # ante vulnerabilidades CRÍTICAS. Las high/moderate (p. ej. xlsx, DEP-110)
+      # quedan informativas hasta migrar; baja el --audit-level cuando se resuelvan.
+      - name: npm audit (bloquea en críticas de prod)
+        run: npm audit --omit=dev --audit-level=critical
