@@ -1,6 +1,9 @@
 import { T } from './warmTheme';
 
-type TipItem = { name?: string; value?: number | string; color?: string };
+type TipItem = { name?: string; value?: number | string; color?: string; dataKey?: string };
+
+/** Formateador del valor; recibe también el item para formatear por serie (unidades mixtas). */
+type TipFmt = (n: number, item?: TipItem) => string;
 
 /** Tooltip oscuro y redondeado, homogéneo para todas las gráficas de la sub-app. */
 export default function ChartTooltip({
@@ -12,7 +15,7 @@ export default function ChartTooltip({
   active?: boolean;
   payload?: ReadonlyArray<TipItem>;
   label?: string | number;
-  fmt: (n: number) => string;
+  fmt: TipFmt;
 }) {
   if (!active || !payload || payload.length === 0) return null;
   return (
@@ -32,15 +35,16 @@ export default function ChartTooltip({
       {payload.map((p, i) => (
         <div key={i} style={{ display: 'flex', gap: 12, justifyContent: 'space-between' }}>
           {p.name !== undefined && <span style={{ color: '#D9D6CF' }}>{p.name}</span>}
-          <span style={{ fontWeight: 600 }}>{fmt(Number(p.value))}</span>
+          <span style={{ fontWeight: 600 }}>{fmt(Number(p.value), p)}</span>
         </div>
       ))}
     </div>
   );
 }
 
-/** Helper para el prop `content` de recharts <Tooltip>. */
-export function tooltip(fmt: (n: number) => string) {
+/** Helper para el prop `content` de recharts <Tooltip>. `fmt` puede formatear por
+ *  serie usando el 2º argumento (item) — útil para tooltips con unidades mixtas. */
+export function tooltip(fmt: TipFmt) {
   return (p: { active?: boolean; label?: string | number; payload?: ReadonlyArray<TipItem> }) => (
     <ChartTooltip active={p.active} label={p.label} payload={p.payload} fmt={fmt} />
   );

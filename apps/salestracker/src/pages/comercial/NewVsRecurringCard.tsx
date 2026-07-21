@@ -24,7 +24,7 @@ export default function NewVsRecurringCard({ tipo }: { tipo: RecordTypeIO }) {
             <XAxis dataKey="year" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
             <YAxis yAxisId="l" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
             <YAxis yAxisId="r" orientation="right" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
-            <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+            <Tooltip content={tooltip((v, it) => (it?.dataKey === 'countNuevos' ? `${Math.round(v)} clientes` : formatUSD(v)))} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
             <Legend />
             <Bar yAxisId="l" stackId="1" dataKey="nuevos" name="Nuevos" fill={CHART.fac} maxBarSize={40} />
             <Bar yAxisId="l" stackId="1" dataKey="recurrentes" name="Recurrentes" fill={CHART.ov} maxBarSize={40} />

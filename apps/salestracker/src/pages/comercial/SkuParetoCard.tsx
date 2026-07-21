@@ -22,7 +22,7 @@ export default function SkuParetoCard({ tipo, year }: { tipo: RecordTypeIO; year
             <XAxis dataKey="label" angle={-45} textAnchor="end" height={90} interval={0} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 10 }} />
             <YAxis yAxisId="l" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
             <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => `${v}%`} />
-            <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+            <Tooltip content={tooltip((v, it) => (it?.dataKey === 'cumPct' ? `${v.toFixed(1)}%` : formatUSD(v)))} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
             <ReferenceLine yAxisId="r" y={80} stroke={CHART.reference} strokeDasharray="4 4" />
             <Bar yAxisId="l" dataKey="importe" fill={CHART.fac} radius={[4, 4, 0, 0]} maxBarSize={18} />
             <Line yAxisId="r" dataKey="cumPct" stroke={CHART.accent} dot={false} />

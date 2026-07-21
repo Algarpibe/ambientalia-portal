@@ -29,7 +29,7 @@ export default function MarginScatterCard({ tipo, year }: { tipo: RecordTypeIO; 
             <XAxis type="number" dataKey="ventas" name="Ventas" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
             <YAxis type="number" dataKey="yPlot" name={mode === 'pct' ? 'Margen %' : 'Margen $'} domain={mode === 'pct' ? [FLOOR_PCT, 100] : ['auto', 'auto']} ticks={mode === 'pct' ? [-50, -25, 0, 25, 50, 75, 100] : undefined} allowDataOverflow={mode === 'pct'} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={mode === 'pct' ? (v) => `${Math.round(Number(v))}%` : (v) => formatCompactUSD(Number(v))} />
             <ZAxis range={[30, 30]} />
-            <Tooltip content={tooltip(formatUSD)} cursor={{ strokeDasharray: '3 3' }} />
+            <Tooltip content={tooltip((v, it) => (it?.dataKey === 'yPlot' ? (mode === 'pct' ? `${v.toFixed(1)}%` : formatUSD(v)) : formatUSD(v)))} cursor={{ strokeDasharray: '3 3' }} />
             <ReferenceLine y={0} stroke={CHART.baseline} strokeDasharray="2 2" />
             {mode === 'pct' && <ReferenceLine y={overallPct} stroke={CHART.accent} strokeDasharray="4 4" />}
             <Scatter data={points} fill={CHART.fac} fillOpacity={0.6} />
