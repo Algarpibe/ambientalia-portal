@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchSales, type RecordTypeIO } from '../../api';
 import { buildBucketMixByYear } from '../../lib/analytics-comercial';
 import { formatUSD, formatCompactUSD, SERIES } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from './ChartCard';
 
 export default function BucketMixCard({ tipo }: { tipo: RecordTypeIO }) {
@@ -13,9 +15,10 @@ export default function BucketMixCard({ tipo }: { tipo: RecordTypeIO }) {
       {q.isLoading ? <p className="text-gray-500">Cargando…</p> : q.error ? <p className="text-red-600">{(q.error as Error).message}</p> : data.length === 0 ? <p className="text-gray-500">Sin datos.</p> : (
         <ResponsiveContainer width="100%" height={340}>
           <AreaChart data={data}>
-            <XAxis dataKey="year" />
-            <YAxis tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <Tooltip formatter={(v) => formatUSD(Number(v))} />
+            <CartesianGrid vertical={false} stroke={CHART.grid} />
+            <XAxis dataKey="year" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+            <YAxis tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+            <Tooltip content={tooltip(formatUSD)} />
             <Legend />
             <Area stackId="1" dataKey="mano_obra" name="Mano de Obra / Cal" stroke={SERIES[0]} fill={SERIES[0]} fillOpacity={0.5} />
             <Area stackId="1" dataKey="cr" name="C&R" stroke={SERIES[1]} fill={SERIES[1]} fillOpacity={0.5} />

@@ -5,6 +5,8 @@ import { fetchGroupingAnalysis, type RecordTypeIO } from '../../api';
 import { formatUSD, formatCompactUSD, MONTHS } from '../../lib/format';
 import { calculateSeasonalityFactors, getSeasonalForecast, calculateRunRate } from '../../lib/math-utils';
 import { APP_BASE } from '../../appBase';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 
 export default function GroupForecastCard({ tipo, year }: { tipo: RecordTypeIO; year: number }) {
@@ -22,7 +24,7 @@ export default function GroupForecastCard({ tipo, year }: { tipo: RecordTypeIO; 
       ) : !q.data || q.data.rows.length === 0 ? (
         <div className="text-sm text-gray-500">
           <p className="mb-2">Sin agrupaciones definidas. Créalas en la sección Agrupaciones de Categorías.</p>
-          <Link className="text-blue-600 underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
+          <Link className="text-[#B4541A] font-semibold underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
         </div>
       ) : (
         (() => {
@@ -63,10 +65,10 @@ export default function GroupForecastCard({ tipo, year }: { tipo: RecordTypeIO; 
           return (
             <ResponsiveContainer width="100%" height={440}>
               <ComposedChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="eje" />
-                <YAxis tickFormatter={(v) => formatCompactUSD(Number(v))} />
-                <Tooltip formatter={(v) => formatUSD(Number(v))} />
+                <CartesianGrid vertical={false} stroke={CHART.grid} />
+                <XAxis dataKey="eje" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+                <YAxis tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+                <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
                 <Legend />
                 {rows.map((r) => (
                   <Bar key={r.groupId} dataKey={r.groupName} stackId="g" fill={r.color} />
@@ -75,7 +77,7 @@ export default function GroupForecastCard({ tipo, year }: { tipo: RecordTypeIO; 
                   type="monotone"
                   dataKey="total_forecast"
                   name="Forecast total"
-                  stroke="#0ea5e9"
+                  stroke={CHART.accent}
                   strokeWidth={3}
                   strokeDasharray="6 4"
                   dot={false}

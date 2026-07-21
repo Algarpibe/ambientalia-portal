@@ -31,55 +31,47 @@ export default function Analisis() {
   const [tab, setTab] = useState<'comercial' | 'margen' | 'forecast' | 'exploracion'>('comercial');
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="st-page">
+      <div className="st-grain" />
+      <div className="st-wrap px-6 md:px-8 py-8 space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-gray-900">Análisis</h1>
-        <p className="text-gray-500">Analítica comercial en vivo del hub.</p>
+        <h1 className="text-[26px] font-extrabold tracking-tight text-[#24231F]">Análisis</h1>
+        <p className="text-[#6E6B64]">Analítica comercial en vivo del hub.</p>
       </header>
       {/* Pestañas */}
-      <div className="flex gap-2 border-b">
-        <button
-          type="button"
-          onClick={() => setTab('comercial')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'comercial' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-        >
+      <div className="st-tabs">
+        <button type="button" onClick={() => setTab('comercial')} className={`st-tab${tab === 'comercial' ? ' is-active' : ''}`}>
           Comercial
         </button>
-        <button
-          type="button"
-          onClick={() => setTab('margen')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'margen' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-        >
+        <button type="button" onClick={() => setTab('margen')} className={`st-tab${tab === 'margen' ? ' is-active' : ''}`}>
           Margen
         </button>
-        <button
-          type="button"
-          onClick={() => setTab('forecast')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'forecast' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-        >
+        <button type="button" onClick={() => setTab('forecast')} className={`st-tab${tab === 'forecast' ? ' is-active' : ''}`}>
           Forecast
         </button>
-        <button
-          type="button"
-          onClick={() => setTab('exploracion')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'exploracion' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
-        >
+        <button type="button" onClick={() => setTab('exploracion')} className={`st-tab${tab === 'exploracion' ? ' is-active' : ''}`}>
           Exploración
         </button>
       </div>
       {/* Controles compartidos */}
-      <div className="flex flex-wrap items-center gap-3">
-        <select value={tipo} onChange={(e) => setTipo(e.target.value as RecordTypeIO)} className="rounded-md border px-3 py-1.5 text-sm">
-          <option value="INVOICE">Facturas (FAC)</option>
-          <option value="SALES_ORDER">Órdenes de Venta (OV)</option>
-        </select>
-        <select value={yearA} onChange={(e) => setYearA(Number(e.target.value))} className="rounded-md border px-3 py-1.5 text-sm">
-          {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="st-field">
+          Tipo
+          <select value={tipo} onChange={(e) => setTipo(e.target.value as RecordTypeIO)} className="st-input">
+            <option value="INVOICE">Facturas (FAC)</option>
+            <option value="SALES_ORDER">Órdenes de Venta (OV)</option>
+          </select>
+        </label>
+        <label className="st-field">
+          {tab === 'exploracion' ? 'Año A' : 'Año'}
+          <select value={yearA} onChange={(e) => setYearA(Number(e.target.value))} className="st-input">
+            {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
         {tab === 'exploracion' && (
-          <label className="flex items-center gap-2 text-sm text-gray-500">
-            vs
-            <select value={yearB} onChange={(e) => setYearB(Number(e.target.value))} className="rounded-md border px-3 py-1.5 text-sm text-gray-900">
+          <label className="st-field">
+            Año B
+            <select value={yearB} onChange={(e) => setYearB(Number(e.target.value))} className="st-input">
               {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
@@ -121,6 +113,7 @@ export default function Analisis() {
           <GroupEvolutionCard tipo={tipo} />
         </div>
       )}
+      </div>
     </div>
   );
 }

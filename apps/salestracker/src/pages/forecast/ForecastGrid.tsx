@@ -5,6 +5,8 @@ import { fetchSales, type RecordTypeIO } from '../../api';
 import { buildForecastInput } from '../../lib/forecast-input';
 import { computeForecast } from '../../lib/forecast';
 import { formatUSD, formatCompactUSD, MONTHS } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 import RunRateCard from './RunRateCard';
 
@@ -35,14 +37,14 @@ export default function ForecastGrid({ tipo, year }: { tipo: RecordTypeIO; year:
       <ChartCard title={`Proyección estacional ${year}`} subtitle={`Barras: ${year} vs ${year - 1}. Línea: forecast estacional del año.`}>
         <ResponsiveContainer width="100%" height={360}>
           <ComposedChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="mes" />
-            <YAxis tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <Tooltip formatter={(v) => formatUSD(Number(v))} />
+            <CartesianGrid vertical={false} stroke={CHART.grid} />
+            <XAxis dataKey="mes" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+            <YAxis tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+            <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
             <Legend />
-            <Bar dataKey="ventasA" name={`${year}`} fill="#2563eb" />
-            <Bar dataKey="ventasB" name={`${year - 1}`} fill="#cbd5e1" />
-            <Line dataKey="tendencia" name="Forecast" stroke="#f59e0b" strokeWidth={2} dot={false} />
+            <Bar dataKey="ventasA" name={`${year}`} fill={CHART.fac} radius={[4, 4, 0, 0]} maxBarSize={18} />
+            <Bar dataKey="ventasB" name={`${year - 1}`} fill={CHART.ov} radius={[4, 4, 0, 0]} maxBarSize={18} />
+            <Line dataKey="tendencia" name="Forecast" stroke={CHART.accent} strokeWidth={2} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </ChartCard>

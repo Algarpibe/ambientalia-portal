@@ -4,6 +4,8 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 import { fetchSales, type RecordTypeIO } from '../../api';
 import { buildTechService, yoy, type TechViewMode } from '../../lib/analytics-exploracion';
 import { formatUSD, formatCompactUSD } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 
 const MODES: { value: TechViewMode; label: string }[] = [
@@ -36,14 +38,9 @@ export default function TechServiceCard({ tipo, yearA, yearB }: { tipo: RecordTy
       subtitle="Servicio Técnico (mano de obra/CAL/ST) vs Consumibles y Repuestos (C&R). Clasificación por categoría."
     >
       {/* Toggle de granularidad */}
-      <div className="mb-4 inline-flex rounded-md border">
+      <div className="st-seg flat mb-4">
         {MODES.map((m) => (
-          <button
-            key={m.value}
-            type="button"
-            onClick={() => setViewMode(m.value)}
-            className={`px-3 py-1.5 text-sm ${viewMode === m.value ? 'bg-blue-600 text-white' : 'text-gray-600'}`}
-          >
+          <button key={m.value} type="button" aria-pressed={viewMode === m.value} onClick={() => setViewMode(m.value)}>
             {m.label}
           </button>
         ))}
@@ -59,17 +56,17 @@ export default function TechServiceCard({ tipo, yearA, yearB }: { tipo: RecordTy
         <>
           <ResponsiveContainer width="100%" height={380}>
             <ComposedChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" />
-              <YAxis yAxisId="left" tickFormatter={(v) => formatCompactUSD(Number(v))} />
-              <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => formatCompactUSD(Number(v))} />
-              <Tooltip formatter={(v) => formatUSD(Number(v))} />
+              <CartesianGrid vertical={false} stroke={CHART.grid} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+              <YAxis yAxisId="left" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+              <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+              <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
               <Legend />
-              <Bar yAxisId="left" dataKey="st" name={`ST ${yearA}`} stackId="a" fill="#6366f1" />
-              <Bar yAxisId="left" dataKey="cr" name={`C&R ${yearA}`} stackId="a" fill="#8b5cf6" />
-              <Bar yAxisId="left" dataKey="st_prev" name={`ST ${yearB}`} stackId="b" fill="#f59e0b" />
-              <Bar yAxisId="left" dataKey="cr_prev" name={`C&R ${yearB}`} stackId="b" fill="#fbbf24" />
-              <Line yAxisId="right" dataKey="acum" name={`Acum ${yearA}`} stroke="#10b981" strokeWidth={3} dot />
+              <Bar yAxisId="left" dataKey="st" name={`ST ${yearA}`} stackId="a" fill={CHART.stack[0]} />
+              <Bar yAxisId="left" dataKey="cr" name={`C&R ${yearA}`} stackId="a" fill={CHART.stack[1]} />
+              <Bar yAxisId="left" dataKey="st_prev" name={`ST ${yearB}`} stackId="b" fill={CHART.stack[2]} />
+              <Bar yAxisId="left" dataKey="cr_prev" name={`C&R ${yearB}`} stackId="b" fill={CHART.stack[3]} />
+              <Line yAxisId="right" dataKey="acum" name={`Acum ${yearA}`} stroke={CHART.accent} strokeWidth={3} dot />
             </ComposedChart>
           </ResponsiveContainer>
 

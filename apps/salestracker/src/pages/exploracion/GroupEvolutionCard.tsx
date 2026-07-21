@@ -5,6 +5,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { fetchGroupingAnalysis, type RecordTypeIO } from '../../api';
 import { formatUSD, formatCompactUSD, MONTHS } from '../../lib/format';
 import { APP_BASE } from '../../appBase';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 
 type ViewMode = 'ANNUAL' | 'QUARTERLY' | 'MONTHLY';
@@ -43,7 +45,7 @@ export default function GroupEvolutionCard({ tipo }: { tipo: RecordTypeIO }) {
       ) : !q.data || q.data.rows.length === 0 ? (
         <div className="text-sm text-gray-500">
           <p className="mb-2">Sin agrupaciones definidas. Créalas en la sección Agrupaciones de Categorías.</p>
-          <Link className="text-blue-600 underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
+          <Link className="text-[#B4541A] font-semibold underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
         </div>
       ) : (
         (() => {
@@ -80,27 +82,17 @@ export default function GroupEvolutionCard({ tipo }: { tipo: RecordTypeIO }) {
             <>
               {/* Controles */}
               <div className="mb-4 flex flex-wrap items-center gap-3">
-                <div className="inline-flex rounded-md border">
+                <div className="st-seg flat">
                   {MODES.map((m) => (
-                    <button
-                      key={m.value}
-                      type="button"
-                      onClick={() => setViewMode(m.value)}
-                      className={`px-3 py-1.5 text-sm ${viewMode === m.value ? 'bg-blue-600 text-white' : 'text-gray-600'}`}
-                    >
+                    <button key={m.value} type="button" aria-pressed={viewMode === m.value} onClick={() => setViewMode(m.value)}>
                       {m.label}
                     </button>
                   ))}
                 </div>
                 {viewMode !== 'ANNUAL' && (
-                  <div className="inline-flex rounded-md border">
+                  <div className="st-seg flat">
                     {data.years.map((y) => (
-                      <button
-                        key={y}
-                        type="button"
-                        onClick={() => setSelectedYear(y)}
-                        className={`px-3 py-1.5 text-sm ${selectedYear === y ? 'bg-blue-600 text-white' : 'text-gray-600'}`}
-                      >
+                      <button key={y} type="button" aria-pressed={selectedYear === y} onClick={() => setSelectedYear(y)}>
                         {y}
                       </button>
                     ))}
@@ -110,10 +102,10 @@ export default function GroupEvolutionCard({ tipo }: { tipo: RecordTypeIO }) {
 
               <ResponsiveContainer width="100%" height={420}>
                 <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="eje" />
-                  <YAxis tickFormatter={(v) => formatCompactUSD(Number(v))} />
-                  <Tooltip formatter={(v) => formatUSD(Number(v))} />
+                  <CartesianGrid vertical={false} stroke={CHART.grid} />
+                  <XAxis dataKey="eje" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+                  <YAxis tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+                  <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
                   <Legend />
                   {data.rows.map((r) => (
                     <Bar key={r.groupId} dataKey={r.groupName} stackId="g" fill={r.color} />

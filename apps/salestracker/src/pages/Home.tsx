@@ -11,7 +11,6 @@ import CumulativeYoYCard from './home/CumulativeYoYCard';
 import ExecutionMonthlyCard from './home/ExecutionMonthlyCard';
 import CategoryMixCard from './home/CategoryMixCard';
 import TopClientesCard from './home/TopClientesCard';
-import './home/home.css';
 
 export default function Home() {
   const q = useQuery({ queryKey: ['sales'], queryFn: fetchSales });

@@ -32,19 +32,22 @@ export default function SavedViewsMenu({
   return (
     <div className="relative">
       <div className="flex gap-2">
-        <button onClick={onSave} className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50">Guardar vista</button>
-        <button onClick={() => setOpen((v) => !v)} className="rounded-md border px-3 py-1.5 text-sm hover:bg-gray-50">Vistas ({q.data?.length ?? 0})</button>
+        <button onClick={onSave} className="st-btn">Guardar vista</button>
+        <button onClick={() => setOpen((v) => !v)} className="st-btn">Vistas ({q.data?.length ?? 0})</button>
       </div>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-64 rounded-lg border bg-white shadow-lg">
+        <div
+          className="absolute right-0 z-10 mt-1 w-64 rounded-2xl"
+          style={{ background: '#FCFBF9', border: '1px solid #E5E2DB', boxShadow: '0 10px 30px rgba(35,30,22,0.10), 0 2px 8px rgba(35,30,22,0.05)' }}
+        >
           {(q.data ?? []).length === 0 ? (
-            <p className="p-3 text-sm text-gray-500">Sin vistas guardadas.</p>
+            <p className="p-3 text-sm text-[#6E6B64]">Sin vistas guardadas.</p>
           ) : (
             <ul className="max-h-64 overflow-auto py-1">
               {(q.data ?? []).map((v) => (
-                <li key={v.id} className="flex items-center justify-between px-3 py-1.5 text-sm hover:bg-gray-50">
+                <li key={v.id} className="flex items-center justify-between px-3 py-1.5 text-sm hover:bg-[#F3F1EC]">
                   <button className="text-left flex-1 truncate" onClick={() => { apply(v.state); setOpen(false); }}>{v.name}</button>
-                  <button className="text-gray-400 hover:text-red-600 ml-2" onClick={() => del.mutate(v.id)} aria-label="Borrar vista">✕</button>
+                  <button className="text-gray-400 hover:text-[#9F2F2D] ml-2" onClick={() => del.mutate(v.id)} aria-label="Borrar vista">✕</button>
                 </li>
               ))}
             </ul>

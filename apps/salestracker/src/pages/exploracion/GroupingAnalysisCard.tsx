@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recha
 import { fetchGroupingAnalysis, type RecordTypeIO } from '../../api';
 import { formatUSD } from '../../lib/format';
 import { APP_BASE } from '../../appBase';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 
 export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
@@ -18,7 +19,7 @@ export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
       ) : !q.data || q.data.rows.length === 0 ? (
         <div className="text-sm text-gray-500">
           <p className="mb-2">Sin agrupaciones definidas. Créalas en la sección Agrupaciones de Categorías.</p>
-          <Link className="text-blue-600 underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
+          <Link className="text-[#B4541A] font-semibold underline" to={`${APP_BASE}/categorias`}>Ir a Categorías</Link>
         </div>
       ) : (
         (() => {
@@ -81,7 +82,7 @@ export default function GroupingAnalysisCard({ tipo }: { tipo: RecordTypeIO }) {
                       <Cell key={p.name} fill={p.color} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v) => `${Number(v).toFixed(1)}%`} />
+                  <Tooltip content={tooltip((n) => `${n.toFixed(1)}%`)} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>
