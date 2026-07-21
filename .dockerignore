@@ -4,3 +4,14 @@ dist
 **/dist
 .git
 *.tsbuildinfo
+
+# Entornos y secretos — NUNCA deben entrar al contexto de build (INFRA-511).
+# El Dockerfile raíz (portal) hace `COPY . .`; sin esto hornearía apps/hub-api/.env
+# (PAT, password DB, JWT_SECRET, cron token) en la capa de build. .env.example se
+# mantiene (no coincide con estos patrones).
+.env
+**/.env
+.env.local
+**/.env.local
+.env.*.local
+**/.env.*.local
