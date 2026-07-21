@@ -111,6 +111,10 @@ export default function Tablas() {
         </div>
       </div>
 
+      <p className="text-xs text-gray-400">
+        El CSV/portapapeles conserva el orden por total; la tabla se muestra en el orden de configuración.
+      </p>
+
       {noRows ? (
         <div className="rounded-xl border bg-white p-8 text-center text-gray-500">
           Sin datos para {yearSel} / {tipo}.

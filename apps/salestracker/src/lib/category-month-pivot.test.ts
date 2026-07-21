@@ -65,6 +65,13 @@ describe('orderAndColorRows', () => {
     expect(out[0].color).toBe('#222');
   });
 
+  it('(e) categories vacío → todas huérfanas, conservan orden de entrada y color null', () => {
+    const inputRows = [catRow('A', 100), catRow('B', 50), catRow('C', 25)];
+    const out = orderAndColorRows(inputRows, []);
+    expect(out.map((r) => r.categoryName)).toEqual(['A', 'B', 'C']);
+    expect(out.every((r) => r.color === null)).toBe(true);
+  });
+
   it('(d) no muta el array de entrada', () => {
     const inputRows = [catRow('A', 100), catRow('B', 50)];
     const before = inputRows.map((r) => r.categoryName);
