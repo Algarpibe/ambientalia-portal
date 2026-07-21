@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
+  type LucideIcon,
   BarChart3,
   Wallet,
   TrendingUp,
@@ -16,7 +17,7 @@ interface AppConfig {
   name: string;
   description: string;
   path: string;
-  icon: any;
+  icon: LucideIcon;
   color: string;
 }
 

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
+  type LucideIcon,
   Package,
   Users,
   ChevronRight,
@@ -12,7 +13,7 @@ interface AppConfig {
   name: string;
   description: string;
   path: string;
-  icon: any;
+  icon: LucideIcon;
   color: string;
 }
 

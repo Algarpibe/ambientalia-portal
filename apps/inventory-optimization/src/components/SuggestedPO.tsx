@@ -95,7 +95,8 @@ export default function SuggestedPO({ data }: { data: AnalysisResult[] }) {
     const toggle = (vendor: string) =>
         setCollapsed((prev) => {
             const next = new Set(prev);
-            next.has(vendor) ? next.delete(vendor) : next.add(vendor);
+            if (next.has(vendor)) next.delete(vendor);
+            else next.add(vendor);
             return next;
         });
 
