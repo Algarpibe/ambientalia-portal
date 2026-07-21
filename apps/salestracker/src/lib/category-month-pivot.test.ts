@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { availableYears, buildCategoryMonthPivot, pivotToCsv } from './category-month-pivot';
+import { availableYears, buildCategoryMonthPivot, orderAndColorRows, pivotToCsv } from './category-month-pivot';
+import type { CategoryRow } from './category-month-pivot';
 import type { SalesRow } from '../api';
+
+const catRow = (categoryName: string, total: number): CategoryRow => ({
+  categoryName,
+  months: new Array(12).fill(0) as number[],
+  total,
+});
 
 const rows: SalesRow[] = [
   { categoryName: 'Equipos', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 100 },
@@ -30,6 +37,44 @@ describe('buildCategoryMonthPivot', () => {
   });
   it('año/tipo sin datos → filas vacías', () => {
     expect(buildCategoryMonthPivot(rows, 2099, 'INVOICE').rows).toEqual([]);
+  });
+});
+
+describe('orderAndColorRows', () => {
+  it('(a) reordena por sort_order, no por orden de entrada/total', () => {
+    const inputRows = [catRow('A', 100), catRow('B', 50)];
+    const cats = [
+      { name: 'B', color: '#111', sort_order: 0 },
+      { name: 'A', color: '#222', sort_order: 1 },
+    ];
+    expect(orderAndColorRows(inputRows, cats).map((r) => r.categoryName)).toEqual(['B', 'A']);
+  });
+
+  it('(b) adjunta el color por match case-insensitive + trim', () => {
+    const inputRows = [catRow('bombas', 100)];
+    const cats = [{ name: '  Bombas ', color: '#0af', sort_order: 0 }];
+    expect(orderAndColorRows(inputRows, cats)[0].color).toBe('#0af');
+  });
+
+  it('(c) categoría sin config → color null y al final', () => {
+    const inputRows = [catRow('Huerfana', 100), catRow('A', 50)];
+    const cats = [{ name: 'A', color: '#222', sort_order: 0 }];
+    const out = orderAndColorRows(inputRows, cats);
+    expect(out.map((r) => r.categoryName)).toEqual(['A', 'Huerfana']);
+    expect(out[1].color).toBeNull();
+    expect(out[0].color).toBe('#222');
+  });
+
+  it('(d) no muta el array de entrada', () => {
+    const inputRows = [catRow('A', 100), catRow('B', 50)];
+    const before = inputRows.map((r) => r.categoryName);
+    const cats = [
+      { name: 'B', color: '#111', sort_order: 0 },
+      { name: 'A', color: '#222', sort_order: 1 },
+    ];
+    orderAndColorRows(inputRows, cats);
+    expect(inputRows.map((r) => r.categoryName)).toEqual(before);
+    expect(inputRows).toHaveLength(2);
   });
 });
 
