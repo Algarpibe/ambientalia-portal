@@ -81,12 +81,14 @@ app.post('/api/login',
 app.get('/health', async (_req, res) => {
   try {
     const db = getHubPool();
-    const { rows } = await db.query(
+    // SEC-212 — endpoint no autenticado: valida conectividad y existencia de los
+    // 3 esquemas, pero NO expone los conteos de negocio (deals/invoices/tickets).
+    await db.query(
       `SELECT (SELECT count(*)::int FROM crm.deals) deals,
               (SELECT count(*)::int FROM books.invoices) invoices,
               (SELECT count(*)::int FROM desk.tickets) tickets`
     );
-    res.json({ ok: true, ...rows[0] });
+    res.json({ ok: true });
   } catch (e) {
     // /health is unauthenticated — don't leak raw driver errors to callers.
     console.error('health check failed', e);

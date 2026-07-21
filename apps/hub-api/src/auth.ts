@@ -48,11 +48,18 @@ function loadUsers(): Map<string, string> {
 }
 const USERS = loadUsers();
 
+// SEC-214 — hash bcrypt fijo para ejecutar SIEMPRE un compare (también cuando el
+// email no existe en AUTH_USERS), igualando el tiempo de respuesta y evitando la
+// enumeración de usuarios por timing.
+const DUMMY_HASH = bcrypt.hashSync('sec214-timing-safe-dummy', 10);
+
 export async function verifyCredentials(email: string, password: string): Promise<boolean> {
   const hash = USERS.get(String(email || '').toLowerCase().trim());
-  if (!hash) return false;
   try {
-    return await bcrypt.compare(String(password || ''), hash);
+    // Comparamos siempre (contra DUMMY_HASH si el usuario no existe): el coste del
+    // bcrypt.compare no debe depender de si el email está o no en AUTH_USERS.
+    const ok = await bcrypt.compare(String(password || ''), hash ?? DUMMY_HASH);
+    return hash ? ok : false;
   } catch {
     return false;
   }
@@ -148,7 +155,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   let payload: JwtPayload;
   try {
-    payload = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    // SEC-213 — fijar el algoritmo (los tokens se firman con HS256). Evita que un
+    // token con `alg` distinto ('none' o asimétrico) sea aceptado.
+    payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
   } catch {
     res.status(401).json({ error: 'unauthorized' });
     return;
