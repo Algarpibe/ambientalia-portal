@@ -23,31 +23,43 @@ supresión** en esta capa técnica.
 ## 2. Inventario de datos en el hub
 
 `zoho-hub` es una **réplica read-only** de Zoho (CRM/Books/Desk). El API
-`hub-api` expone, de esa réplica, únicamente:
+`hub-api` expone, de esa réplica:
 
-- **`customer_name`** (razón social del cliente, campo "Cliente"). Para clientes
-  persona natural puede constituir dato personal.
+- **`customer_name`** (razón social del cliente, campo "Cliente"), en las apps de
+  datos y analítica. Para clientes persona natural puede constituir dato personal.
 - **Cifras agregadas**: facturas, pagos, ítems/SKU, montos, fechas.
+- **NIT** del cliente (`books.contacts.nit`), en:
+  - **WO-sales** — columna obligatoria (`Encab: Tercero Externo`) del archivo plano
+    que World Office importa para crear los pedidos: sin él la carga es imposible.
+  - **Contabilidad** y **Conciliador de Pagos** — en el modal de *detalle* de una
+    factura/OV (`/api/contabilidad/factura|ov/:numero` y
+    `/api/invoices|sales-orders/:numero/detail`), junto al encabezado del documento.
+- **Dirección** del cliente (`billing_address` → `address`, `city`), en el modal de
+  *detalle* de factura/OV de **Contabilidad** y **Conciliador de Pagos**.
 
-**No** se expone email, teléfono, cédula ni dirección (minimización verificada en
-auditoría, FASE 8).
+**Finalidad y base legal:** contable y de conciliación de cartera (identificar
+inequívocamente al tercero de un documento y su domicilio fiscal); base legal en la
+ejecución de la relación comercial y el cumplimiento de obligaciones contables/
+tributarias. Para clientes persona natural, NIT y dirección constituyen dato
+personal (Ley 1581 de 2012).
 
-**El NIT es la única excepción, y solo en la app WO-sales.** Es una columna
-obligatoria (`Encab: Tercero Externo`) del archivo plano que World Office importa
-para crear los pedidos: sin él la carga es imposible. Finalidad contable, base
-legal en la ejecución de la relación comercial. Para clientes persona natural el
-NIT constituye dato personal (Ley 1581 de 2012).
+**No** se expone email, teléfono ni cédula por ninguna query del hub.
 
 Medidas asociadas:
 
-- **Acceso restringido por app**: los endpoints `/api/wo-sales/*` comprueban
-  `apps[]` del JWT en el servidor mediante `requireApp('WO-sales')`, no solo en el
-  frontend. Es el único endpoint de datos del portal que lo hace; el resto se
-  conforma con `requireAuth`, porque no exponen PII más allá de `customer_name`.
-- **Se lee de `books.contacts.nit`**, solo para las OV vivas del rango consultado.
-  No se almacena ni se cachea: el CSV se genera bajo demanda y se descarga.
+- **Acceso restringido por app en el servidor** (`requireApp`, no solo en el
+  frontend): `/api/wo-sales/*` → `requireApp('WO-sales')`; `/api/contabilidad/*` →
+  `requireApp('contabilidad')`; y los endpoints de datos/detalle de las demás apps
+  (`payment-reconciliation`, `customer-profitability`, `inventory-optimization`,
+  `customer-valuation`) exigen su `requireApp` correspondiente. Así, solo los
+  usuarios con la app asignada acceden al NIT/dirección; un usuario sin la app
+  recibe 403 (cierre de **SEC-210 / SEC-211 / PRIV-810**).
+- **No se almacena ni se cachea el detalle**: NIT y dirección se leen bajo demanda
+  de `books.contacts` / `books.*.raw` para el documento consultado; el archivo de
+  WO-sales se genera bajo demanda y se descarga.
 
-Los `query params` son fechas y un nombre de cliente opcional.
+Los `query params` de estos endpoints son números de documento, fechas y un nombre
+de cliente opcional.
 
 ## 3. Arquitectura del dato (clave para retención/borrado)
 
@@ -121,8 +133,9 @@ de borrado (§6) no está funcionando.
 
 - **PRIV-003** (aviso de privacidad público en el portal): pendiente, asunto
   legal — publicar la política de tratamiento y el canal de derechos del titular.
-- **Minimización**: no añadir email/NIT/teléfono a las queries del hub sin revisar
-  esta política. Única excepción vigente: el NIT en WO-sales (ver §2), por finalidad
-  contable y con acceso restringido por app. Cualquier otra ampliación de la
-  superficie de PII debe decidirse de forma explícita y quedar documentada aquí, no
-  colarse dentro de una query.
+- **Minimización**: no añadir email/teléfono/cédula a las queries del hub. La PII
+  vigente (NIT y dirección, ver §2) está limitada a WO-sales y a los modales de
+  detalle de Contabilidad/Conciliador de Pagos, con finalidad contable y acceso
+  restringido por app (`requireApp`). Cualquier otra ampliación de la superficie de
+  PII debe decidirse de forma explícita y quedar documentada aquí, no colarse dentro
+  de una query.
