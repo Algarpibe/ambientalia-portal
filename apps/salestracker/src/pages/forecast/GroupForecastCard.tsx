@@ -34,23 +34,27 @@ export default function GroupForecastCard({ tipo, year }: { tipo: RecordTypeIO; 
           const lastElapsedMonth = isCurrentYear ? currentMonthIdx + 1 : 12;
           const histYears = [baseYear - 1, baseYear - 2, baseYear - 3];
 
+          // Precompute forecast per group once (nothing here depends on the month index).
+          const perGroup = rows.map((r) => {
+            const histMatrix = histYears.map((y) => MONTHS.map((_, m) => r.months[y]?.[m + 1] ?? 0));
+            const factors = calculateSeasonalityFactors(histMatrix, [3, 2, 1]);
+            const rawCur = MONTHS.map((_, m) => r.months[baseYear]?.[m + 1] ?? 0);
+            const elapsed = rawCur.slice(0, lastElapsedMonth);
+            if (isCurrentYear && elapsed.length > currentMonthIdx) {
+              const totalDays = new Date(now.getFullYear(), currentMonthIdx + 1, 0).getDate();
+              elapsed[currentMonthIdx] = calculateRunRate(elapsed[currentMonthIdx] ?? 0, now.getDate(), totalDays);
+            }
+            const projected = getSeasonalForecast(elapsed, factors);
+            return { row: r, projected };
+          });
+
           const chartData = MONTHS.map((label, idx) => {
             const monthNum = idx + 1;
             const entry: Record<string, string | number> = { eje: label };
             let totalForecast = 0;
-            rows.forEach((r) => {
-              const histMatrix = histYears.map((y) => MONTHS.map((_, m) => r.months[y]?.[m + 1] ?? 0));
-              const factors = calculateSeasonalityFactors(histMatrix, [3, 2, 1]);
-              const rawCur = MONTHS.map((_, m) => r.months[baseYear]?.[m + 1] ?? 0);
-              const elapsed = rawCur.slice(0, lastElapsedMonth);
-              if (isCurrentYear && elapsed.length > currentMonthIdx) {
-                const totalDays = new Date(now.getFullYear(), currentMonthIdx + 1, 0).getDate();
-                elapsed[currentMonthIdx] = calculateRunRate(elapsed[currentMonthIdx] ?? 0, now.getDate(), totalDays);
-              }
-              const projected = getSeasonalForecast(elapsed, factors);
-              const val = Math.round((projected[idx] || 0) * 100) / 100;
-              totalForecast += val;
-              entry[r.groupName] = monthNum <= lastElapsedMonth ? (r.months[baseYear]?.[monthNum] ?? 0) : 0;
+            perGroup.forEach(({ row, projected }) => {
+              totalForecast += Math.round((projected[idx] || 0) * 100) / 100;
+              entry[row.groupName] = monthNum <= lastElapsedMonth ? (row.months[baseYear]?.[monthNum] ?? 0) : 0;
             });
             entry.total_forecast = totalForecast;
             return entry;
