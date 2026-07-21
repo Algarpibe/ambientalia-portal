@@ -21,7 +21,7 @@ export default function TopClientesCard({ tipo = 'INVOICE', year }: { tipo?: Rec
           <BarChart data={top} layout="vertical" margin={{ left: 24 }}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis type="number" tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <YAxis type="category" dataKey="customer" width={160} tick={{ fontSize: 12 }} />
+            <YAxis type="category" dataKey="customer" width={160} tick={{ fontSize: 12 }} interval={0} />
             <Tooltip formatter={(v) => formatUSD(Number(v))} />
             <Bar dataKey="ventas" name="Ventas" fill="#6366f1" radius={[0, 4, 4, 0]} />
           </BarChart>
