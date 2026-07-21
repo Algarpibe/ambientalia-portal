@@ -11,8 +11,9 @@ export function yearRange(desde: number, hasta: number): number[] {
 export const formatCompactUSD = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(n);
 
-/** Paleta de series por bucket (mano_obra, cr, equipos, operacion). */
-export const SERIES = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'] as const;
-/** Paleta para categorías/marcas (dona) + color "Otros". */
-export const PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#8b5cf6', '#ec4899', '#14b8a6'] as const;
-export const OTROS_COLOR = '#94a3b8';
+/** Paleta cálida de series por bucket (mano_obra, cr, equipos, operacion):
+ *  charcoal, naranja, taupe, claro — ordenada por luminosidad + acento. */
+export const SERIES = ['#2F3437', '#EE7A21', '#9A8F7E', '#CBC4B6'] as const;
+/** Rampa cálida para categorías/marcas (dona), liderada por el acento + color "Otros". */
+export const PALETTE = ['#EE7A21', '#575349', '#837D72', '#ABA598', '#CFC9BC', '#9A8F7E', '#C7C1B4', '#DED9CE'] as const;
+export const OTROS_COLOR = '#CFCABF';
