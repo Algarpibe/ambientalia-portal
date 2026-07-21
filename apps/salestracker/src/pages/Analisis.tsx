@@ -14,6 +14,7 @@ import MarginByItemCard from './margen/MarginByItemCard';
 import MarginScatterCard from './margen/MarginScatterCard';
 import MarginByCustomerCard from './margen/MarginByCustomerCard';
 import ForecastGrid from './forecast/ForecastGrid';
+import GroupForecastCard from './forecast/GroupForecastCard';
 import GlobalMonthlyCard from './exploracion/GlobalMonthlyCard';
 import TechServiceCard from './exploracion/TechServiceCard';
 import GroupingAnalysisCard from './exploracion/GroupingAnalysisCard';
@@ -106,7 +107,12 @@ export default function Analisis() {
           <MarginByCustomerCard tipo={tipo} year={yearA} />
         </div>
       )}
-      {tab === 'forecast' && <ForecastGrid tipo={tipo} year={yearA} />}
+      {tab === 'forecast' && (
+        <div className="space-y-6">
+          <ForecastGrid tipo={tipo} year={yearA} />
+          <GroupForecastCard tipo={tipo} year={yearA} />
+        </div>
+      )}
       {tab === 'exploracion' && (
         <div className="space-y-6">
           <GlobalMonthlyCard tipo={tipo} yearA={yearA} yearB={yearB} />

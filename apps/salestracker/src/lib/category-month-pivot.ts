@@ -36,6 +36,28 @@ export function buildCategoryMonthPivot(rows: SalesRow[], year: number, type: Re
   return { rows: catRows, monthlyTotals, cumulative, grandTotal };
 }
 
+export interface DecoratedCategoryRow extends CategoryRow { color: string | null }
+/**
+ * Reordena las filas del pivote según el orden de config (st_categories.sort_order asc) y les
+ * adjunta el color de config. Match por nombre, case-insensitive + trim. Las categorías presentes
+ * en ventas pero NO en config van al final conservando su orden de entrada (que ya viene por total desc).
+ * No muta el array de entrada.
+ */
+export function orderAndColorRows(
+  rows: CategoryRow[],
+  categories: { name: string; color: string | null; sort_order: number }[],
+): DecoratedCategoryRow[] {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const cfg = new Map(categories.map((c) => [norm(c.name), c] as const));
+  return rows
+    .map((r, i) => {
+      const c = cfg.get(norm(r.categoryName));
+      return { row: { ...r, color: c?.color ?? null }, order: c ? c.sort_order : Number.MAX_SAFE_INTEGER, idx: i };
+    })
+    .sort((a, b) => a.order - b.order || a.idx - b.idx)
+    .map((x) => x.row);
+}
+
 function csvCell(v: string | number): string {
   const s = String(v);
   return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

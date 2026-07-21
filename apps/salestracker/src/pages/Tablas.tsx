@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchSales, type RecordType } from '../api';
+import { fetchSales, fetchCategories, type RecordType } from '../api';
 import {
   availableYears,
   buildCategoryMonthPivot,
+  orderAndColorRows,
   pivotToCsv,
   type CategoryMonthPivot,
 } from '../lib/category-month-pivot';
@@ -29,10 +30,12 @@ export default function Tablas() {
   const [year, setYear] = useState<number>(new Date().getFullYear());
 
   const q = useQuery({ queryKey: ['sales'], queryFn: fetchSales });
+  const cq = useQuery({ queryKey: ['categories'], queryFn: fetchCategories });
 
   const years = availableYears(q.data ?? []);
   const yearSel = years.includes(year) ? year : (years[0] ?? new Date().getFullYear());
   const pivot = buildCategoryMonthPivot(q.data ?? [], yearSel, tipo);
+  const displayRows = orderAndColorRows(pivot.rows, cq.data ?? []);
   const noRows = pivot.rows.length === 0;
 
   const exportCsv = () => {
@@ -108,6 +111,10 @@ export default function Tablas() {
         </div>
       </div>
 
+      <p className="text-xs text-gray-400">
+        El CSV/portapapeles conserva el orden por total; la tabla se muestra en el orden de configuración.
+      </p>
+
       {noRows ? (
         <div className="rounded-xl border bg-white p-8 text-center text-gray-500">
           Sin datos para {yearSel} / {tipo}.
@@ -125,9 +132,15 @@ export default function Tablas() {
               </tr>
             </thead>
             <tbody>
-              {pivot.rows.map((r) => (
+              {displayRows.map((r) => (
                 <tr key={r.categoryName} className="border-t">
-                  <td className="px-3 py-2 text-left">{r.categoryName}</td>
+                  <td className="px-3 py-2 text-left">
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                      style={{ backgroundColor: r.color ?? '#94a3b8' }}
+                    />
+                    {r.categoryName}
+                  </td>
                   {r.months.map((v, i) => (
                     <td key={i} className="px-3 py-2 text-right tabular-nums">{formatUSD(v)}</td>
                   ))}
