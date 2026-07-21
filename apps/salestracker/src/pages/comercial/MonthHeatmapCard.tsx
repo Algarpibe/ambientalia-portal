@@ -19,7 +19,7 @@ export default function MonthHeatmapCard({ tipo, year }: { tipo: RecordTypeIO; y
                 <tr key={r.customer}>
                   <td className="sticky left-0 bg-white px-2 py-1 whitespace-nowrap max-w-[180px] truncate">{r.customer}</td>
                   {r.months.map((v, i) => (
-                    <td key={i} className="px-2 py-1 text-right tabular-nums" style={{ backgroundColor: `rgba(16,185,129,${v > 0 ? 0.08 + 0.92 * (v / max) : 0})` }}>
+                    <td key={i} className="px-2 py-1 text-right tabular-nums" style={{ backgroundColor: `rgba(238,122,33,${v > 0 ? 0.08 + 0.92 * (v / max) : 0})` }}>
                       {v > 0 ? formatCompactUSD(v) : ''}
                     </td>
                   ))}

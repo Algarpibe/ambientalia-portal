@@ -4,6 +4,8 @@ import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Ref
 import { fetchMarginByItem, type RecordTypeIO } from '../../api';
 import { buildMarginItems, deriveMargin } from '../../lib/analytics-margin';
 import { formatUSD, formatCompactUSD } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 import AmountToggle, { type AmountMode } from './AmountToggle';
 
@@ -23,14 +25,14 @@ export default function MarginScatterCard({ tipo, year }: { tipo: RecordTypeIO; 
       {q.isLoading ? <p className="text-gray-500">Cargando…</p> : q.error ? <p className="text-red-600">{(q.error as Error).message}</p> : points.length === 0 ? <p className="text-gray-500">Sin datos.</p> : (
         <ResponsiveContainer width="100%" height={440}>
           <ScatterChart margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis type="number" dataKey="ventas" name="Ventas" tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <YAxis type="number" dataKey="yPlot" name={mode === 'pct' ? 'Margen %' : 'Margen $'} domain={mode === 'pct' ? [FLOOR_PCT, 100] : ['auto', 'auto']} ticks={mode === 'pct' ? [-50, -25, 0, 25, 50, 75, 100] : undefined} allowDataOverflow={mode === 'pct'} tickFormatter={mode === 'pct' ? (v) => `${Math.round(Number(v))}%` : (v) => formatCompactUSD(Number(v))} />
+            <CartesianGrid vertical={false} stroke={CHART.grid} />
+            <XAxis type="number" dataKey="ventas" name="Ventas" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+            <YAxis type="number" dataKey="yPlot" name={mode === 'pct' ? 'Margen %' : 'Margen $'} domain={mode === 'pct' ? [FLOOR_PCT, 100] : ['auto', 'auto']} ticks={mode === 'pct' ? [-50, -25, 0, 25, 50, 75, 100] : undefined} allowDataOverflow={mode === 'pct'} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={mode === 'pct' ? (v) => `${Math.round(Number(v))}%` : (v) => formatCompactUSD(Number(v))} />
             <ZAxis range={[30, 30]} />
-            <Tooltip cursor={{ strokeDasharray: '3 3' }} formatter={(v, n) => (n === 'Ventas' ? formatUSD(Number(v)) : n === 'Margen %' ? `${Number(v).toFixed(1)}%` : formatUSD(Number(v)))} />
-            <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="2 2" />
-            {mode === 'pct' && <ReferenceLine y={overallPct} stroke="#f59e0b" strokeDasharray="4 4" />}
-            <Scatter data={points} fill="#6366f1" fillOpacity={0.6} />
+            <Tooltip content={tooltip(formatUSD)} cursor={{ strokeDasharray: '3 3' }} />
+            <ReferenceLine y={0} stroke={CHART.baseline} strokeDasharray="2 2" />
+            {mode === 'pct' && <ReferenceLine y={overallPct} stroke={CHART.accent} strokeDasharray="4 4" />}
+            <Scatter data={points} fill={CHART.fac} fillOpacity={0.6} />
           </ScatterChart>
         </ResponsiveContainer>
       )}

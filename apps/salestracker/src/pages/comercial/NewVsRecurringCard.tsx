@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ComposedChart, Bar, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchCustomerSales, type RecordTypeIO } from '../../api';
 import { buildNewVsRecurring } from '../../lib/analytics-comercial';
 import { formatUSD, formatCompactUSD } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from './ChartCard';
 
 const anioActual = new Date().getFullYear();
@@ -18,14 +20,15 @@ export default function NewVsRecurringCard({ tipo }: { tipo: RecordTypeIO }) {
       {q.isLoading ? <p className="text-gray-500">Cargando…</p> : q.error ? <p className="text-red-600">{(q.error as Error).message}</p> : data.length === 0 ? <p className="text-gray-500">Sin datos.</p> : (
         <ResponsiveContainer width="100%" height={380}>
           <ComposedChart data={data}>
-            <XAxis dataKey="year" />
-            <YAxis yAxisId="l" tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <YAxis yAxisId="r" orientation="right" allowDecimals={false} />
-            <Tooltip formatter={(v, _n, item) => (item?.dataKey === 'countNuevos' ? Number(v).toLocaleString('es-CO') : formatUSD(Number(v)))} />
+            <CartesianGrid vertical={false} stroke={CHART.grid} />
+            <XAxis dataKey="year" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+            <YAxis yAxisId="l" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+            <YAxis yAxisId="r" orientation="right" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+            <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
             <Legend />
-            <Bar yAxisId="l" stackId="1" dataKey="nuevos" name="Nuevos" fill="#10b981" />
-            <Bar yAxisId="l" stackId="1" dataKey="recurrentes" name="Recurrentes" fill="#6366f1" />
-            <Line yAxisId="r" dataKey="countNuevos" name="Nº clientes nuevos" stroke="#f59e0b" dot={false} />
+            <Bar yAxisId="l" stackId="1" dataKey="nuevos" name="Nuevos" fill={CHART.fac} maxBarSize={40} />
+            <Bar yAxisId="l" stackId="1" dataKey="recurrentes" name="Recurrentes" fill={CHART.ov} maxBarSize={40} />
+            <Line yAxisId="r" dataKey="countNuevos" name="Nº clientes nuevos" stroke={CHART.accent} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
       )}

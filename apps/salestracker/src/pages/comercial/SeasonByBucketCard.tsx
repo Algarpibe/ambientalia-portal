@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchCategoryMonthSales, type RecordTypeIO } from '../../api';
 import { buildBucketSeason } from '../../lib/analytics-comercial';
 import { formatUSD, formatCompactUSD, MONTHS, SERIES } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from './ChartCard';
 
 export default function SeasonByBucketCard({ tipo, year }: { tipo: RecordTypeIO; year: number }) {
@@ -14,9 +16,10 @@ export default function SeasonByBucketCard({ tipo, year }: { tipo: RecordTypeIO;
       {q.isLoading ? <p className="text-gray-500">Cargando…</p> : q.error ? <p className="text-red-600">{(q.error as Error).message}</p> : !hasData ? <p className="text-gray-500">Sin datos.</p> : (
         <ResponsiveContainer width="100%" height={380}>
           <BarChart data={data}>
-            <XAxis dataKey="mesLabel" />
-            <YAxis tickFormatter={(v) => formatCompactUSD(Number(v))} />
-            <Tooltip formatter={(v) => formatUSD(Number(v))} />
+            <CartesianGrid vertical={false} stroke={CHART.grid} />
+            <XAxis dataKey="mesLabel" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
+            <YAxis tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} tickFormatter={(v) => formatCompactUSD(Number(v))} />
+            <Tooltip content={tooltip(formatUSD)} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
             <Legend />
             <Bar stackId="1" dataKey="mano_obra" name="Mano de Obra / Cal" fill={SERIES[0]} />
             <Bar stackId="1" dataKey="cr" name="C&R" fill={SERIES[1]} />

@@ -4,6 +4,8 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContai
 import { fetchMarginByYear, type RecordTypeIO } from '../../api';
 import { buildMarginByYear } from '../../lib/analytics-margin';
 import { formatUSD, formatCompactUSD } from '../../lib/format';
+import { CHART } from '../../ui/warmTheme';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from '../comercial/ChartCard';
 import AmountToggle, { type AmountMode } from './AmountToggle';
 
@@ -26,23 +28,26 @@ export default function MarginKpiCard({ tipo }: { tipo: RecordTypeIO }) {
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             {tiles.map((t) => (
-              <div key={t.label} className="rounded-lg border bg-gray-50 p-3">
-                <p className="text-xs text-gray-500">{t.label}</p>
-                <p className="text-lg font-semibold text-gray-900">{t.value}</p>
+              <div key={t.label} className="st-tile rounded-2xl p-3">
+                <p className="text-xs text-[#9A968E]">{t.label}</p>
+                <p className="text-lg font-semibold text-[#24231F]">{t.value}</p>
               </div>
             ))}
           </div>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={series} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="year" />
+              <CartesianGrid vertical={false} stroke={CHART.grid} />
+              <XAxis dataKey="year" tickLine={false} axisLine={false} tick={{ fill: CHART.muted, fontSize: 11 }} />
               <YAxis
                 domain={mode === 'pct' ? [0, 100] : ['auto', 'auto']}
                 ticks={mode === 'pct' ? [0, 25, 50, 75, 100] : undefined}
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: CHART.muted, fontSize: 11 }}
                 tickFormatter={mode === 'pct' ? (v) => `${Math.round(Number(v))}%` : (v) => formatCompactUSD(Number(v))}
               />
-              <Tooltip formatter={(v, n) => (n === 'margenPct' ? `${Number(v).toFixed(1)}%` : formatUSD(Number(v)))} />
-              <Line dataKey={mode === 'pct' ? 'margenPct' : 'margen'} stroke="#10b981" dot />
+              <Tooltip content={tooltip(mode === 'pct' ? (n) => `${n.toFixed(1)}%` : formatUSD)} />
+              <Line dataKey={mode === 'pct' ? 'margenPct' : 'margen'} stroke={CHART.fac} dot />
             </LineChart>
           </ResponsiveContainer>
         </>

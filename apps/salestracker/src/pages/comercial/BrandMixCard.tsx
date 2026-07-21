@@ -3,6 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { fetchCustomerItemSales, type RecordTypeIO } from '../../api';
 import { buildBrandMix } from '../../lib/analytics-comercial';
 import { formatUSD, PALETTE, OTROS_COLOR } from '../../lib/format';
+import { tooltip } from '../../ui/ChartTooltip';
 import ChartCard from './ChartCard';
 
 export default function BrandMixCard({ tipo, year }: { tipo: RecordTypeIO; year: number }) {
@@ -21,7 +22,7 @@ export default function BrandMixCard({ tipo, year }: { tipo: RecordTypeIO; year:
                 <Cell key={i} fill={s.marca === 'Otros' ? OTROS_COLOR : PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
-            <Tooltip formatter={(v) => formatUSD(Number(v))} />
+            <Tooltip content={tooltip(formatUSD)} />
           </PieChart>
         </ResponsiveContainer>
       )}
