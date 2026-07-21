@@ -12,22 +12,7 @@ export interface SalesRow {
   amountUsd: number;
 }
 
-async function mensajeDeError(res: Response): Promise<string> {
-  if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
-  if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
-  if (res.status === 409) {
-    try { const d = (await res.json()) as { error?: string }; if (d.error) return d.error; } catch { /* sin body */ }
-    return 'Ya existe un registro con ese nombre.';
-  }
-  if (res.status === 400) {
-    try {
-      const data = (await res.json()) as { error?: string };
-      if (data.error) return data.error;
-    } catch { /* sin cuerpo JSON */ }
-    return 'Datos inválidos. Revisa el formulario e inténtalo de nuevo.';
-  }
-  return `No se pudieron cargar los datos (error ${res.status}). Inténtalo de nuevo en un momento.`;
-}
+import { mensajeDeError } from '@suite/http';
 
 /** Carga las filas de ventas agregadas del hub. Lanza Error con mensaje en español si falla. */
 export async function fetchSales(): Promise<SalesRow[]> {

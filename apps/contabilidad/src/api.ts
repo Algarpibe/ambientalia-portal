@@ -67,11 +67,7 @@ export interface OVPendienteFacturable extends PendingSalesOrder {
   ticket: string | null;
 }
 
-async function mensajeDeError(res: Response): Promise<string> {
-  if (res.status === 401) return 'Tu sesión ha caducado. Vuelve a entrar en el portal e inténtalo de nuevo.';
-  if (res.status === 403) return 'No tienes esta aplicación asignada. Pide acceso a un administrador del portal.';
-  return `No se pudieron cargar los datos (error ${res.status}). Inténtalo de nuevo en un momento.`;
-}
+import { mensajeDeError } from '@suite/http';
 
 /** Carga las facturas del año + resumen. Lanza Error con mensaje en español si falla. */
 export async function fetchContabilidad(year?: number): Promise<ContabilidadData> {
