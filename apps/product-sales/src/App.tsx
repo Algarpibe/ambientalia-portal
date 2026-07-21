@@ -75,7 +75,9 @@ function App() {
 
       // 4. Generate Excel
       const excelBytes = generateConsolidatedExcel(consolidated);
-      const blob = new Blob([excelBytes as any], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      // Copiamos a un Uint8Array respaldado por ArrayBuffer (no ArrayBufferLike)
+      // para que sea un BlobPart válido sin `as any` (TS 5.7).
+      const blob = new Blob([new Uint8Array(excelBytes)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       setConsolidatedBlob(blob);
 
     } catch (err) {

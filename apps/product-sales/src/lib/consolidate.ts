@@ -66,16 +66,14 @@ export const generateConsolidatedExcel = (data: ConsolidatedRecord[]): Uint8Arra
 
     // Flatten for Excel
     const flattenedData = data.map(record => {
-        const row: any = {
+        const row: Record<string, string | number> = {
             sku: record.sku,
             item_name: record.item_name,
             category_name: record.category_name,
         };
 
-        let total = 0;
         allMonths.forEach(m => {
             row[m] = record.months[m] || 0;
-            total += row[m];
         });
 
         row['average_price'] = record.average_price || 0;

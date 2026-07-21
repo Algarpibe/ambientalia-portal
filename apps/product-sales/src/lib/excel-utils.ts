@@ -64,7 +64,7 @@ export const parseMonthlyFile = async (file: File): Promise<SalesRecord[]> => {
                 const sheetName = workbook.SheetNames[0];
                 const sheet = workbook.Sheets[sheetName];
 
-                const jsonData = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+                const jsonData = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
                 const records: SalesRecord[] = [];
 
                 let headerRowIndex = -1;
@@ -164,7 +164,7 @@ export const parseCategoryFile = async (file: File): Promise<Map<string, string>
                 const sheetName = workbook.SheetNames[0];
                 const sheet = workbook.Sheets[sheetName];
 
-                const jsonData = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+                const jsonData = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
                 const headers = jsonData[0] as string[];
 
                 const skuIndex = headers.findIndex(h => h?.toLowerCase().includes('sku'));
