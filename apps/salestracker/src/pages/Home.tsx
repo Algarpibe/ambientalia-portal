@@ -1,51 +1,63 @@
-import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { fetchSales, type SalesRow } from '../api';
-import { totalsByCategory, grandTotal } from '../lib/rollup';
-
-const fmtUsd = (n: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchSales } from '../api';
+import { availableYears } from '../lib/category-month-pivot';
+import { buildHomeKpis } from '../lib/home-metrics';
+import { computeDelta } from '../lib/compare';
+import { formatUSD } from '../lib/format';
+import KpiTile from './home/KpiTile';
+import MonthlyOvFacCard from './home/MonthlyOvFacCard';
+import CumulativeYoYCard from './home/CumulativeYoYCard';
+import ExecutionMonthlyCard from './home/ExecutionMonthlyCard';
+import CategoryMixCard from './home/CategoryMixCard';
 
 export default function Home() {
-  const [rows, setRows] = useState<SalesRow[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const q = useQuery({ queryKey: ['sales'], queryFn: fetchSales });
+  const rows = q.data ?? [];
 
-  useEffect(() => {
-    let vivo = true;
-    fetchSales()
-      .then((r) => { if (vivo) setRows(r); })
-      .catch((e: Error) => { if (vivo) setError(e.message); });
-    return () => { vivo = false; };
-  }, []);
+  const anioActual = new Date().getFullYear();
+  const years = availableYears(rows);
+  const [year, setYear] = useState(anioActual);
+  const yearSel = years.includes(year) ? year : (years[0] ?? anioActual);
 
-  if (error) return <div className="p-8 text-red-600">{error}</div>;
-  if (!rows) return <div className="p-8 text-gray-600">Cargando ventas…</div>;
+  if (q.isLoading) return <div className="p-8 text-gray-600">Cargando…</div>;
+  if (q.error) return <div className="p-8 text-red-600">{(q.error as Error).message}</div>;
 
-  const facturado = grandTotal(rows, 'INVOICE');
-  const porCategoria = totalsByCategory(rows, 'INVOICE').slice(0, 10);
+  const k = buildHomeKpis(rows, yearSel);
 
   return (
-    <div className="p-8 space-y-8">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">SalesTracker</h1>
-        <p className="text-gray-500">Ventas facturadas (USD)</p>
-      </header>
-
-      <div className="rounded-xl border bg-white p-6 w-fit">
-        <div className="text-sm text-gray-500">Total facturado</div>
-        <div className="text-3xl font-bold text-gray-900">{fmtUsd(facturado)}</div>
+    <div className="p-8 space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <header>
+          <h1 className="text-2xl font-bold text-gray-900">SalesTracker</h1>
+          <p className="text-gray-500">Resumen anual de ventas (USD).</p>
+        </header>
+        <label className="flex flex-col text-sm text-gray-600">
+          Año
+          <select
+            className="mt-1 rounded-md border px-2 py-1.5 text-gray-900"
+            value={yearSel}
+            onChange={(e) => setYear(Number(e.target.value))}
+          >
+            {(years.length > 0 ? years : [yearSel]).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <div className="rounded-xl border bg-white p-6">
-        <h2 className="text-lg font-semibold mb-4">Top categorías (facturado)</h2>
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={porCategoria} layout="vertical" margin={{ left: 24 }}>
-            <XAxis type="number" tickFormatter={(v) => fmtUsd(Number(v))} />
-            <YAxis type="category" dataKey="categoryName" width={140} />
-            <Tooltip formatter={(v) => fmtUsd(Number(v))} />
-            <Bar dataKey="total" fill="#2563eb" radius={[0, 4, 4, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <KpiTile label="Facturado (FAC)" value={formatUSD(k.facturado)} deltaPct={computeDelta(k.facturado, k.facturadoPrev).deltaPct} />
+        <KpiTile label="Órdenes (OV)" value={formatUSD(k.ordenes)} deltaPct={computeDelta(k.ordenes, k.ordenesPrev).deltaPct} />
+        <KpiTile label="Backlog" value={formatUSD(k.backlog)} />
+        <KpiTile label="% Ejecución" value={`${k.ejecucion.toFixed(1)}%`} deltaPct={computeDelta(k.ejecucion, k.ejecucionPrev).deltaPct} hint="FAC / OV" />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <MonthlyOvFacCard rows={rows} year={yearSel} />
+        <CumulativeYoYCard rows={rows} year={yearSel} />
+        <ExecutionMonthlyCard rows={rows} year={yearSel} />
+        <CategoryMixCard rows={rows} year={yearSel} />
       </div>
     </div>
   );
