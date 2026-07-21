@@ -31,7 +31,7 @@ export default function Home() {
   return (
     <div className="st-home">
       <div className="st-grain" />
-      <div className="st-wrap max-w-[1160px] mx-auto px-6 md:px-8 py-10">
+      <div className="st-wrap w-full px-6 md:px-10 py-10">
         {/* Cabecera */}
         <div className="st-reveal flex items-center justify-between gap-6 flex-wrap mb-6">
           <div>
