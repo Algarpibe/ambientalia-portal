@@ -15,7 +15,7 @@ export default function CategoryMixCard({ rows, year }: { rows: SalesRow[]; year
           <PieChart>
             <Pie data={mix} dataKey="importe" nameKey="categoria" innerRadius={70} outerRadius={120} label>
               {mix.map((s, i) => (
-                <Cell key={i} fill={s.categoria === 'Otros' ? OTROS_COLOR : PALETTE[i % PALETTE.length]} />
+                <Cell key={s.categoria} fill={s.categoria === 'Otros' ? OTROS_COLOR : PALETTE[i % PALETTE.length]} />
               ))}
             </Pie>
             <Tooltip formatter={(v) => formatUSD(Number(v))} />
