@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@suite/auth-client": "*",
     "@suite/format": "*",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",

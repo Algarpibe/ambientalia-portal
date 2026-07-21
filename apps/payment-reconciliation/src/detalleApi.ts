@@ -1,8 +1,5 @@
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
-function authHeaders(): Record<string, string> {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
+import { authHeaders } from '@suite/auth-client';
 
 export interface DetalleLinea { sku: string; nombre: string; cantidad: number; precio: number; total: number; }
 export interface DetalleFactura {

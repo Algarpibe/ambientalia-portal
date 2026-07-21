@@ -7,10 +7,7 @@ import type { AnalysisResult, RawSalesData, RawInventoryData, RawLeadTimeData } 
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 // Auth: JWT emitido por hub-api /api/login (guardado por el portal en localStorage).
-const authHeaders = (): Record<string, string> => {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
+import { authHeaders } from '@suite/auth-client';
 
 type RawPayload = Omit<InventoryWorkerInput, 'eoqOrderCost' | 'eoqHoldingRate'>;
 

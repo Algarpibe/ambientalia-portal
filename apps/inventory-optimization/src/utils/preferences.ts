@@ -9,10 +9,7 @@
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 const PREF_KEY = 'inventoryColumns'; // clave propia dentro del blob del perfil
 
-const authHeaders = (): Record<string, string> => {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
+import { authHeaders } from '@suite/auth-client';
 
 /** Config de columnas del análisis: orden y visibilidad, por pestaña. */
 export interface ColumnPrefs {

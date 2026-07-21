@@ -9,10 +9,7 @@ import type {
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string | undefined;
 // Auth: JWT emitido por hub-api /api/login (el portal lo guarda en localStorage).
-const authHeaders = (): Record<string, string> => {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
+import { authHeaders } from '@suite/auth-client';
 
 export interface HubDatasets {
   sales: SalesRecord[];

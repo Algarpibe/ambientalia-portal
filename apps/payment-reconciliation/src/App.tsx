@@ -6,6 +6,7 @@ import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
 import SalesOrdersPending from './SalesOrdersPending';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
+import { authHeaders } from '@suite/auth-client';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 import DetalleModal from './DetalleModal';
 
@@ -65,9 +66,8 @@ function App() {
     setError(null);
     try {
       if (!API_BASE) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
-      const token = localStorage.getItem('ambientalia_token');
       const res = await fetch(`${API_BASE}/api/reconciliation/data`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { invoices: InvoiceDetails[]; payments: PaymentRecord[] } = await res.json();

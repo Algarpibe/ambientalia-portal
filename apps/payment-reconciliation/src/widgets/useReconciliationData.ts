@@ -6,10 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
-function authHeaders(): Record<string, string> {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
+import { authHeaders } from '@suite/auth-client';
 
 export interface ReconciliationData {
   invoices: any[];

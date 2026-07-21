@@ -1,9 +1,6 @@
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
-const authHeaders = (): Record<string, string> => {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
+import { authHeaders } from '@suite/auth-client';
 
 // Espejo de apps/hub-api/src/salestracker/types.ts
 export type RecordType = 'SALES_ORDER' | 'INVOICE' | 'BACKLOG';
@@ -183,12 +180,7 @@ export async function deleteSavedView(id: string): Promise<void> {
 export interface Category { id: string; name: string; description: string | null; color: string; sort_order: number; is_active: boolean; }
 
 /** True si el JWT tiene rol admin (solo para gating de UX; el backend re-verifica). */
-export function esAdmin(): boolean {
-  const t = localStorage.getItem('ambientalia_token');
-  if (!t) return false;
-  try { return (JSON.parse(atob(t.split('.')[1] || '')) as { role?: string }).role === 'admin'; }
-  catch { return false; }
-}
+export { esAdmin } from '@suite/auth-client';
 
 export async function fetchCategories(): Promise<Category[]> {
   const res = await fetch(`${API_BASE}/api/salestracker/categories`, { headers: authHeaders() });

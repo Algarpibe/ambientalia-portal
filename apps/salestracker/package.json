@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@suite/auth-client": "*",
     "@suite/format": "*",
     "@tanstack/react-query": "^5.101.2",
     "react": "^19.2.0",

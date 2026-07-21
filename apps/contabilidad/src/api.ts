@@ -1,9 +1,7 @@
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
-const authHeaders = (): Record<string, string> => {
-  const t = localStorage.getItem('ambientalia_token');
-  return t ? { Authorization: `Bearer ${t}` } : {};
-};
+import { authHeaders, esAdmin } from '@suite/auth-client';
+export { esAdmin };
 
 // Espejo de apps/hub-api/src/contabilidad/domain.ts
 export interface FacturaContable {
@@ -137,13 +135,4 @@ export async function fetchOVDetalle(numero: string): Promise<DetalleOV> {
 }
 
 /** True si el JWT en localStorage tiene rol admin (solo para gating de UX). */
-export function esAdmin(): boolean {
-  const t = localStorage.getItem('ambientalia_token');
-  if (!t) return false;
-  try {
-    const payload = JSON.parse(atob(t.split('.')[1] || ''));
-    return payload.role === 'admin';
-  } catch {
-    return false;
-  }
-}
+// esAdmin se importa y re-exporta desde @suite/auth-client (ver arriba, AI-612).
