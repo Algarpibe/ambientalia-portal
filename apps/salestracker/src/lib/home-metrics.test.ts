@@ -43,6 +43,19 @@ describe('buildHomeKpis', () => {
     expect(Number.isFinite(k.ejecucion)).toBe(true);
     expect(k.ejecucionPrev).toBe(0);
   });
+
+  it('entrada vacía: todos los campos 0 y ejecucion finito', () => {
+    const k = buildHomeKpis([], 2025);
+    expect(k.facturado).toBe(0);
+    expect(k.facturadoPrev).toBe(0);
+    expect(k.ordenes).toBe(0);
+    expect(k.ordenesPrev).toBe(0);
+    expect(k.backlog).toBe(0);
+    expect(k.ejecucion).toBe(0);
+    expect(k.ejecucionPrev).toBe(0);
+    expect(Number.isFinite(k.ejecucion)).toBe(true);
+    expect(buildCategoryMix([], 2025)).toEqual([]);
+  });
 });
 
 describe('buildMonthlyOvFac', () => {
@@ -123,5 +136,25 @@ describe('buildCategoryMix', () => {
   it('no añade "Otros" cuando hay ≤ topN categorías', () => {
     const mix = buildCategoryMix(rows, 2026, 8);
     expect(mix.some((s) => s.categoria === 'Otros')).toBe(false);
+  });
+
+  it('borde count === topN: 3 categorías con topN=3 no genera "Otros" (resto=0)', () => {
+    const tres: SalesRow[] = [
+      { categoryName: 'A', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 30 },
+      { categoryName: 'B', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 20 },
+      { categoryName: 'C', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 10 },
+    ];
+    const mix = buildCategoryMix(tres, 2026, 3);
+    expect(mix).toHaveLength(3);
+    expect(mix.some((s) => s.categoria === 'Otros')).toBe(false);
+  });
+
+  it('desempata alfabéticamente cuando dos categorías tienen igual importe', () => {
+    const empate: SalesRow[] = [
+      { categoryName: 'Zeta', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 100 },
+      { categoryName: 'Alfa', recordType: 'INVOICE', month: 1, year: 2026, amountUsd: 100 },
+    ];
+    const mix = buildCategoryMix(empate, 2026);
+    expect(mix.map((s) => s.categoria)).toEqual(['Alfa', 'Zeta']);
   });
 });

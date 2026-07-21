@@ -84,7 +84,7 @@ export function buildCategoryMix(rows: SalesRow[], year: number, topN = 8): CatS
   }
   const ordenadas = [...acc.entries()]
     .map(([categoria, importe]) => ({ categoria, importe }))
-    .sort((a, b) => b.importe - a.importe);
+    .sort((a, b) => b.importe - a.importe || a.categoria.localeCompare(b.categoria));
   const top = ordenadas.slice(0, topN);
   const resto = ordenadas.slice(topN).reduce((s, c) => s + c.importe, 0);
   if (resto > 0) top.push({ categoria: 'Otros', importe: resto });
