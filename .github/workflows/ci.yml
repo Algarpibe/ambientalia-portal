@@ -40,6 +40,19 @@ jobs:
       - name: Build hub-api (tsc)
         run: npm run build --workspace=apps/hub-api
 
+      # Guard: ninguna app debe emitir .js/.jsx dentro de src/. Si aparece, es
+      # que un tsconfig perdió `noEmit` (tsc -b escribiendo junto al .ts) o que
+      # se commiteó salida compilada por error. Debe fallar el build.
+      - name: Guard — sin .js emitido en src
+        run: |
+          found=$(find apps/*/src \( -name '*.js' -o -name '*.jsx' \) 2>/dev/null || true)
+          if [ -n "$found" ]; then
+            echo "::error::Se encontraron .js/.jsx bajo apps/*/src (falta noEmit o salida compilada commiteada):"
+            echo "$found"
+            exit 1
+          fi
+          echo "OK: sin .js/.jsx bajo apps/*/src"
+
       # Tests de las apps que los tienen (hub-api, customer-valuation,
       # inventory-optimization). --if-present salta las que no.
       - name: Tests
