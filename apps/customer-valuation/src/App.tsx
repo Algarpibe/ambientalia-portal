@@ -260,6 +260,8 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
+    // AI-615 — solo al montar: carga inicial del hub. Re-ejecutarlo con deps
+    // recargaría los datos en cada cambio; el disable es intencional.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

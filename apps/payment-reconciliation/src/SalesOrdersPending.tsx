@@ -101,6 +101,8 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
 
   useEffect(() => {
     load();
+    // AI-615 — solo al montar: carga inicial de las OV pendientes; el disable es
+    // intencional (load usa estado que no debe re-disparar el efecto).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
