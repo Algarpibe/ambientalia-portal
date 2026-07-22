@@ -24,6 +24,13 @@ export default defineConfig([
       // usuario, fade-in al montar): se dejan como AVISO, no como error, para no
       // forzar refactors arriesgados en render que ya funciona (auditoría, ítem C).
       'react-hooks/set-state-in-effect': 'warn',
+      // Esta app procesa filas de Excel con claves de columna arbitrarias
+      // (types.ts, utils/calculations.ts): el `any` ahí es dinámico por diseño y
+      // se coerciona en uso (Number()/String()). Se deja como AVISO (AI-616 no-fix).
+      '@typescript-eslint/no-explicit-any': 'warn',
+      // ui.tsx mezcla el helper cn() con componentes: solo afecta al fast-refresh
+      // en dev, no a producción → AVISO en vez de error.
+      'react-refresh/only-export-components': 'warn',
     },
   },
 ])

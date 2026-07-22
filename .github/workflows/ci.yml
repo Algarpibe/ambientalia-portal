@@ -55,6 +55,12 @@ jobs:
           fi
           echo "OK: sin .js/.jsx bajo apps/*/src"
 
+      # INFRA-516 — lint como gate bloqueante. Las apps con eslint.config.js deben
+      # pasar con 0 errores (los warnings no bloquean; la deuda histórica benigna
+      # —any de datos, const en case, set-state-in-effect— está degradada a warn).
+      - name: Lint
+        run: npm run lint --workspaces --if-present
+
       # Tests de las apps que los tienen (hub-api, customer-valuation,
       # inventory-optimization). --if-present salta las que no.
       - name: Tests

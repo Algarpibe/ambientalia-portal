@@ -46,7 +46,7 @@ describe('AuthRightPanel — registro (task 14.1)', () => {
   });
 
   it('registro exitoso (201) → mensaje de solicitud pendiente, sin token', async () => {
-    (fetch as any).mockResolvedValue({ status: 201, json: async () => ({ message: 'registration_pending', userId: 'x' }) });
+    vi.mocked(fetch).mockResolvedValue({ status: 201, json: async () => ({ message: 'registration_pending', userId: 'x' }) } as unknown as Response);
     const { container } = renderSignup();
     fill('Juan Pérez', 'Juan Pérez');
     fill('tu@ejemplo.com', 'juan@empresa.com');
@@ -54,12 +54,12 @@ describe('AuthRightPanel — registro (task 14.1)', () => {
     submit(container);
     expect(await screen.findByText(/pendiente de aprobación/i)).toBeTruthy();
     expect(fetch).toHaveBeenCalledOnce();
-    const [url] = (fetch as any).mock.calls[0];
+    const [url] = vi.mocked(fetch).mock.calls[0];
     expect(url).toContain('/api/auth/register');
   });
 
   it('email duplicado (409) → error inline en el campo email', async () => {
-    (fetch as any).mockResolvedValue({ status: 409, json: async () => ({ error: 'email_already_registered' }) });
+    vi.mocked(fetch).mockResolvedValue({ status: 409, json: async () => ({ error: 'email_already_registered' }) } as unknown as Response);
     const { container } = renderSignup();
     fill('Juan Pérez', 'Juan Pérez');
     fill('tu@ejemplo.com', 'dup@empresa.com');
@@ -69,7 +69,7 @@ describe('AuthRightPanel — registro (task 14.1)', () => {
   });
 
   it('error de red → dispara notificación (toast)', async () => {
-    (fetch as any).mockRejectedValue(new Error('network'));
+    vi.mocked(fetch).mockRejectedValue(new Error('network'));
     const { container } = renderSignup();
     fill('Juan Pérez', 'Juan Pérez');
     fill('tu@ejemplo.com', 'juan@empresa.com');
