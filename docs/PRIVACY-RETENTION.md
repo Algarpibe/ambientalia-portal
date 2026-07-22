@@ -61,6 +61,27 @@ Medidas asociadas:
 Los `query params` de estos endpoints son números de documento, fechas y un nombre
 de cliente opcional.
 
+**PRIV-815 — `customer_name` en `query params`** (p. ej. `/api/wo-sales/preview?cliente=…`):
+la URL completa puede quedar registrada. Mitigación: Sentry **elimina la query string**
+antes de enviar (PRIV-813, `scrubEvent`), así que no se transfiere a un tercero. El
+vector residual es el **access-log del reverse-proxy de EasyPanel** — asunto de infra:
+configurar el formato de log para no registrar la query, o restringir su acceso. No se
+movió `cliente` a cabecera/cuerpo para no tocar el flujo crítico de generación de
+archivos de World Office por un riesgo bajo ya mitigado en Sentry.
+
+### 2.1 Log de auditoría de gestión de usuarios (usuarios INTERNOS) — PRIV-814
+
+`AuditLogger` (`hub-api/src/users/audit.logger.ts`) escribe una línea JSON a stdout por
+cada operación admin sobre usuarios, con `adminEmail`, `targetEmail` y `operation`
+(Requisito 5.5). Son datos de **usuarios internos** (staff), no de clientes, y el email
+es **necesario** para la finalidad del registro: trazabilidad/accountability de quién
+realizó cada cambio (base legal: interés legítimo del responsable en la seguridad y el
+control de accesos). No se sustituye por `user_id` porque perdería legibilidad y
+rompería el requisito/su test.
+
+- **Retención y acceso** `[Definir]`: fijar el periodo de conservación de estos logs en
+  el agregador (p. ej. 90–180 días) y restringir su acceso al administrador.
+
 ## 3. Arquitectura del dato (clave para retención/borrado)
 
 ```
