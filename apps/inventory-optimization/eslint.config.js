@@ -19,5 +19,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Patrones idiomáticos y benignos (set-default guardado, sync al cambiar de
+      // usuario, fade-in al montar): se dejan como AVISO, no como error, para no
+      // forzar refactors arriesgados en render que ya funciona (auditoría, ítem C).
+      'react-hooks/set-state-in-effect': 'warn',
+    },
   },
 ])

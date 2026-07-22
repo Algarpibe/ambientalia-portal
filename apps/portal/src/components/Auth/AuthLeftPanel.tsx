@@ -1,6 +1,26 @@
 import { useState, useEffect } from 'react';
 import RocketIllustration from './RocketIllustration';
 
+// Posiciones/tamaños decorativos precomputados UNA sola vez a nivel de módulo (no
+// en render): así no se llama Math.random() durante el render (react-hooks/purity)
+// ni las partículas "saltan" en cada re-render. Al ser decorativas, un patrón fijo
+// por sesión es irrelevante.
+const PARTICLES = Array.from({ length: 15 }, () => ({
+  width: Math.random() * 60 + 20,
+  height: Math.random() * 60 + 20,
+  left: Math.random() * 100,
+  top: Math.random() * 100,
+  duration: 5 + Math.random() * 10,
+  delay: Math.random() * 5,
+}));
+const STARS = Array.from({ length: 12 }, () => ({
+  left: Math.random() * 100,
+  top: Math.random() * 100,
+  opacity: Math.random() * 0.6 + 0.2,
+  duration: 3 + Math.random() * 3,
+  delay: Math.random() * 3,
+}));
+
 export default function AuthLeftPanel() {
   const [currentSlide, setCurrentSlide] = useState(0);
 
@@ -34,17 +54,17 @@ export default function AuthLeftPanel() {
       }}>
       {/* Animated background particles */}
       <div className="absolute inset-0 overflow-hidden">
-        {[...Array(15)].map((_, i) => (
+        {PARTICLES.map((p, i) => (
           <div
             key={i}
             className="absolute rounded-full bg-white opacity-10"
             style={{
-              width: Math.random() * 60 + 20 + 'px',
-              height: Math.random() * 60 + 20 + 'px',
-              left: Math.random() * 100 + '%',
-              top: Math.random() * 100 + '%',
-              animation: `float ${5 + Math.random() * 10}s ease-in-out infinite`,
-              animationDelay: Math.random() * 5 + 's'
+              width: p.width + 'px',
+              height: p.height + 'px',
+              left: p.left + '%',
+              top: p.top + '%',
+              animation: `float ${p.duration}s ease-in-out infinite`,
+              animationDelay: p.delay + 's'
             }}
           />
         ))}
@@ -52,16 +72,16 @@ export default function AuthLeftPanel() {
 
       {/* Stars */}
       <div className="absolute inset-0">
-        {[...Array(12)].map((_, i) => (
+        {STARS.map((s, i) => (
           <svg
             key={i}
             className="absolute w-2 h-2"
             style={{
-              left: Math.random() * 100 + '%',
-              top: Math.random() * 100 + '%',
-              opacity: Math.random() * 0.6 + 0.2,
-              animation: `twinkle ${3 + Math.random() * 3}s ease-in-out infinite`,
-              animationDelay: Math.random() * 3 + 's'
+              left: s.left + '%',
+              top: s.top + '%',
+              opacity: s.opacity,
+              animation: `twinkle ${s.duration}s ease-in-out infinite`,
+              animationDelay: s.delay + 's'
             }}
             viewBox="0 0 24 24"
             fill="white">
