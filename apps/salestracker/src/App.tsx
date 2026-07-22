@@ -1,23 +1,30 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import './ui/warm.css';
 import { QueryProvider } from './components/QueryProvider';
 import Nav from './components/Nav';
 import { APP_BASE } from './appBase';
-import Home from './pages/Home';
-import Articulos from './pages/Articulos';
-import Tablas from './pages/Tablas';
-import Clientes from './pages/Clientes';
-import ClienteDetalle from './pages/ClienteDetalle';
-import ClienteArticulo from './pages/ClienteArticulo';
-import Analisis from './pages/Analisis';
-import Categorias from './pages/Categorias';
+
+// FE-410 — páginas bajo demanda: cada ruta es su propio chunk y recharts (24
+// archivos) sale del bundle inicial de la sub-app, cargándose solo al abrir la
+// página que lo usa.
+const Home = lazy(() => import('./pages/Home'));
+const Articulos = lazy(() => import('./pages/Articulos'));
+const Tablas = lazy(() => import('./pages/Tablas'));
+const Clientes = lazy(() => import('./pages/Clientes'));
+const ClienteDetalle = lazy(() => import('./pages/ClienteDetalle'));
+const ClienteArticulo = lazy(() => import('./pages/ClienteArticulo'));
+const Analisis = lazy(() => import('./pages/Analisis'));
+const Categorias = lazy(() => import('./pages/Categorias'));
 
 // Layout con la navegación compartida (Nav + página vía <Outlet/>).
 function Layout() {
   return (
     <>
       <Nav />
-      <Outlet />
+      <Suspense fallback={<div style={{ padding: '2.5rem', textAlign: 'center', color: '#9a8c7d' }}>Cargando…</div>}>
+        <Outlet />
+      </Suspense>
     </>
   );
 }
