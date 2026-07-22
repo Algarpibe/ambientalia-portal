@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, AlertTriangle, X } from 'lucide-react';
 import { fetchFacturaDetalle, fetchOVDetalle, type DetalleFactura, type DetalleOV } from './api';
 import { formatCOP } from './format';
@@ -11,12 +11,20 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
   }, [onClose]);
+
+  // FE-414 — mover el foco al diálogo al abrir y devolverlo al cerrar.
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    modalRef.current?.focus();
+    return () => prev?.focus();
+  }, []);
 
   useEffect(() => {
     let vivo = true;
@@ -32,9 +40,9 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={onClose}>
-      <div className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-strong" onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="detalle-modal-title" className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-strong focus:outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">
+          <h2 id="detalle-modal-title" className="text-lg font-semibold text-gray-900">
             {tipo === 'factura' ? 'Factura' : 'Orden de venta'} {numero}
           </h2>
           <button onClick={onClose} aria-label="Cerrar" className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X className="h-5 w-5" /></button>
