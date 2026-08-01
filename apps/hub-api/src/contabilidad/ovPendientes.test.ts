@@ -12,6 +12,7 @@ const line = (over: Partial<LineRow>): LineRow => ({
   shipped_status: 'pending',
   tiene_paquete: false,
   ticket_por_facturar: false,
+  puede_armarse: false,
   ticket: null,
   quantity: 2,
   rate: 100,
@@ -55,5 +56,31 @@ describe('aggregateFacturables', () => {
       line({ salesorder_id: 'b', salesorder_number: 'B', quantity: 1, rate: 90 }),
     ]);
     expect(r.map((o) => o.salesorder_number)).toEqual(['B', 'A']);
+  });
+});
+
+describe('paquetePorCrear', () => {
+  it('true si puede armarse y NO está despachada ni tiene paquete', () => {
+    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'pending', tiene_paquete: false })]);
+    expect(r[0].paquetePorCrear).toBe(true);
+    expect(r[0].facturable).toBe(true); // entra en "solo facturables"
+  });
+
+  it('false si ya está despachada (no tiene sentido "por crear")', () => {
+    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'fulfilled' })]);
+    expect(r[0].paquetePorCrear).toBe(false);
+    expect(r[0].despachada).toBe(true);
+  });
+
+  it('false si ya tiene paquete', () => {
+    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'pending', tiene_paquete: true })]);
+    expect(r[0].paquetePorCrear).toBe(false);
+    expect(r[0].soloPaquete).toBe(true);
+  });
+
+  it('false si no hay stock suficiente', () => {
+    const r = aggregateFacturables([line({ puede_armarse: false, shipped_status: 'pending', tiene_paquete: false })]);
+    expect(r[0].paquetePorCrear).toBe(false);
+    expect(r[0].facturable).toBe(false);
   });
 });

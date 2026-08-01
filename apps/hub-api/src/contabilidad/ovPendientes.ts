@@ -16,6 +16,7 @@ export interface OVPendienteFacturable {
   despachada: boolean;        // shipped_status ∈ {fulfilled, partially_shipped}
   soloPaquete: boolean;       // tiene paquete && !despachada
   ticketPorFacturar: boolean; // ticket de la OV (vía deal) en estado 'Por Facturar'
+  paquetePorCrear: boolean;   // hay stock disponible para armar el paquete (y aún no está despachada/empaquetada)
   facturable: boolean;        // despachada || soloPaquete || ticketPorFacturar
   ticket: string | null;      // nº de ticket de la OV (crm.deals.numero_ticket vía deal)
 }
@@ -34,6 +35,7 @@ export interface LineRow {
   shipped_status: string | null;
   tiene_paquete: boolean;
   ticket_por_facturar: boolean;
+  puede_armarse: boolean;
   ticket: string | null;
   quantity: number | null;
   rate: number | null;
@@ -42,6 +44,34 @@ export interface LineRow {
 }
 
 const SQL = `
+  WITH pend AS (
+    -- Líneas aún por despachar de TODAS las OV vivas (base del comprometido).
+    SELECT so2.salesorder_id, li2.item_id,
+           GREATEST(COALESCE(li2.quantity, 0)
+                    - COALESCE(NULLIF(li2.raw ->> 'quantity_delivered', '')::numeric, 0)
+                    - COALESCE(NULLIF(li2.raw ->> 'quantity_cancelled', '')::numeric, 0), 0) AS falta
+      FROM books.sales_orders so2
+      JOIN books.salesorder_line_items li2 ON li2.salesorder_id = so2.salesorder_id
+     WHERE so2.status = ANY($1::text[])
+  ), comp AS (
+    -- Comprometido por artículo = suma de lo pendiente en todas las OV vivas.
+    SELECT item_id, SUM(falta) AS comprometido FROM pend GROUP BY item_id
+  ), armable AS (
+    -- ¿Alcanza el stock DISPONIBLE para todas las líneas pendientes de la OV?
+    -- Disponible = físico − comprometido por OTRAS OV (se resta la propia 'falta').
+    -- Los ítems de servicio (track_inventory=false) no tienen stock → no bloquean.
+    SELECT p.salesorder_id,
+           bool_and(
+             COALESCE(NULLIF(it.raw ->> 'track_inventory', '')::boolean, true) = false
+             OR COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0)
+                - (COALESCE(c.comprometido, 0) - p.falta) >= p.falta
+           ) AS puede_armarse
+      FROM pend p
+      LEFT JOIN books.items it ON it.item_id = p.item_id
+      LEFT JOIN comp c ON c.item_id = p.item_id
+     WHERE p.falta > 0
+     GROUP BY p.salesorder_id
+  )
   SELECT so.salesorder_id,
          so.salesorder_number,
          so.date::text                              AS date,
@@ -63,12 +93,14 @@ const SQL = `
             FROM crm.deals d
            WHERE d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
            LIMIT 1)                                  AS ticket,
+         COALESCE(arm.puede_armarse, false)          AS puede_armarse,
          li.quantity,
          li.rate,
          NULLIF(li.raw ->> 'quantity_invoiced', '') AS cantidad_facturada,
          NULLIF(li.raw ->> 'quantity_cancelled', '') AS cantidad_cancelada
     FROM books.sales_orders so
     LEFT JOIN books.salesorder_line_items li ON li.salesorder_id = so.salesorder_id
+    LEFT JOIN armable arm ON arm.salesorder_id = so.salesorder_id
    WHERE so.status = ANY($1::text[])
    ORDER BY so.date, so.salesorder_number`;
 
@@ -88,6 +120,7 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
     if (!o) {
       const despachada = DESPACHADO.has(r.shipped_status ?? '');
       const soloPaquete = r.tiene_paquete && !despachada;
+      const paquetePorCrear = r.puede_armarse && !despachada && !soloPaquete;
       o = {
         salesorder_number: r.salesorder_number,
         date: r.date,
@@ -100,7 +133,8 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
         despachada,
         soloPaquete,
         ticketPorFacturar: r.ticket_por_facturar,
-        facturable: despachada || soloPaquete || r.ticket_por_facturar,
+        paquetePorCrear,
+        facturable: despachada || soloPaquete || r.ticket_por_facturar || paquetePorCrear,
         ticket: r.ticket,
       };
       byId.set(r.salesorder_id, o);
