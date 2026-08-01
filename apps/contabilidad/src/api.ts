@@ -63,6 +63,7 @@ export interface OVPendienteFacturable extends PendingSalesOrder {
   despachada: boolean;
   soloPaquete: boolean;
   ticketPorFacturar: boolean;
+  paquetePorCrear: boolean;
   facturable: boolean;
   ticket: string | null;
 }

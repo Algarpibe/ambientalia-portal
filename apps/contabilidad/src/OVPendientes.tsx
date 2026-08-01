@@ -32,6 +32,7 @@ function Luces({ o }: { o: OVPendienteFacturable }) {
       {o.despachada && <span title="Despachada (paquete y envío)" className={`${LUZ} bg-green-500`} />}
       {o.soloPaquete && <span title="Sólo paquete (sin enviar)" className={`${LUZ} bg-amber-400`} />}
       {o.ticketPorFacturar && <span title="Ticket por facturar" className={`${LUZ} bg-red-500`} />}
+      {o.paquetePorCrear && <span title="Paquete por crear (hay stock disponible)" className={`${LUZ} bg-blue-500`} />}
     </div>
   );
 }
@@ -126,6 +127,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
             <span className="flex items-center gap-1"><span className={`${LUZ} bg-green-500`} /> Despachada</span>
             <span className="flex items-center gap-1"><span className={`${LUZ} bg-amber-400`} /> Sólo paquete</span>
             <span className="flex items-center gap-1"><span className={`${LUZ} bg-red-500`} /> Ticket por facturar</span>
+            <span className="flex items-center gap-1"><span className={`${LUZ} bg-blue-500`} /> Paquete por crear</span>
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
