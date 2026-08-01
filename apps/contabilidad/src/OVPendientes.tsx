@@ -26,13 +26,22 @@ const COLS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text'
 
 const LUZ = 'inline-block h-2.5 w-2.5 rounded-full';
 
+type LuzKey = 'despachada' | 'soloPaquete' | 'ticketPorFacturar' | 'paquetePorCrear';
+
+// Fuente única de las 4 luces: pinta el indicio de cada fila Y arma los botones de filtro.
+const LUCES: { key: LuzKey; label: string; cls: string; title: string }[] = [
+  { key: 'despachada', label: 'Despachada', cls: 'bg-green-500', title: 'Despachada (paquete y envío)' },
+  { key: 'soloPaquete', label: 'Sólo paquete', cls: 'bg-amber-400', title: 'Sólo paquete (sin enviar)' },
+  { key: 'ticketPorFacturar', label: 'Ticket por facturar', cls: 'bg-red-500', title: 'Ticket por facturar' },
+  { key: 'paquetePorCrear', label: 'Paquete por crear', cls: 'bg-blue-500', title: 'Paquete por crear (hay stock disponible)' },
+];
+
 function Luces({ o }: { o: OVPendienteFacturable }) {
   return (
     <div className="flex items-center gap-1">
-      {o.despachada && <span title="Despachada (paquete y envío)" className={`${LUZ} bg-green-500`} />}
-      {o.soloPaquete && <span title="Sólo paquete (sin enviar)" className={`${LUZ} bg-amber-400`} />}
-      {o.ticketPorFacturar && <span title="Ticket por facturar" className={`${LUZ} bg-red-500`} />}
-      {o.paquetePorCrear && <span title="Paquete por crear (hay stock disponible)" className={`${LUZ} bg-blue-500`} />}
+      {LUCES.filter((l) => o[l.key]).map((l) => (
+        <span key={l.key} title={l.title} className={`${LUZ} ${l.cls}`} />
+      ))}
     </div>
   );
 }
@@ -43,7 +52,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [estado, setEstado] = useState('todos');
   const [filtro, setFiltro] = useState('');
-  const [soloFacturables, setSoloFacturables] = useState(false);
+  const [luces, setLuces] = useState<LuzKey[]>([]); // vacío = sin filtro por indicio
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'pending', dir: -1 });
   const [detalleOV, setDetalleOV] = useState<string | null>(null);
 
@@ -60,7 +69,8 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
     if (!ordenes) return [];
     const q = filtro.trim().toLowerCase();
     const arr = ordenes.filter((o) => {
-      if (soloFacturables && !o.facturable) return false;
+      // Filtro por luces: OR — basta con que tenga UNA de las seleccionadas.
+      if (luces.length && !luces.some((k) => o[k])) return false;
       if (estado !== 'todos' && o.status !== estado) return false;
       if (q && !(o.salesorder_number.toLowerCase().includes(q) || (o.customer_name ?? '').toLowerCase().includes(q))) return false;
       return true;
@@ -72,7 +82,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
       return String(av ?? '').localeCompare(String(bv ?? ''), 'es') * sort.dir;
     });
     return arr;
-  }, [ordenes, estado, filtro, soloFacturables, sort]);
+  }, [ordenes, estado, filtro, luces, sort]);
 
   const totales = useMemo(
     () => filtradas.reduce((a, o) => ({ n: a.n + 1, total: a.total + o.total, pending: a.pending + o.pending }), { n: 0, total: 0, pending: 0 }),
@@ -111,10 +121,6 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
               <option value="partially_invoiced">Parciales</option>
             </select>
             <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar OV o cliente…" className="w-64 rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" />
-            <label className="flex items-center gap-1.5 text-sm text-gray-600">
-              <input type="checkbox" checked={soloFacturables} onChange={(e) => setSoloFacturables(e.target.checked)} />
-              Solo facturables
-            </label>
             <div className="flex flex-wrap gap-4 text-sm">
               <span className="text-gray-500">{totales.n} OV</span>
               <span className="text-gray-700">Total: <b className="tabular-nums">{formatCOP(totales.total)}</b></span>
@@ -122,12 +128,35 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
             </div>
           </div>
 
-          {/* Leyenda de luces */}
-          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-            <span className="flex items-center gap-1"><span className={`${LUZ} bg-green-500`} /> Despachada</span>
-            <span className="flex items-center gap-1"><span className={`${LUZ} bg-amber-400`} /> Sólo paquete</span>
-            <span className="flex items-center gap-1"><span className={`${LUZ} bg-red-500`} /> Ticket por facturar</span>
-            <span className="flex items-center gap-1"><span className={`${LUZ} bg-blue-500`} /> Paquete por crear</span>
+          {/* Luces = filtro multiselección. Sin ninguna marcada no filtra; con varias, OR
+              (basta con que la OV tenga UNA de ellas). Sustituye al antiguo "Solo facturables":
+              marcar las cuatro equivale a "las que tienen algún indicio". */}
+          <div className="flex flex-wrap items-center gap-2">
+            {LUCES.map((l) => {
+              const activa = luces.includes(l.key);
+              return (
+                <button
+                  key={l.key}
+                  type="button"
+                  onClick={() => setLuces((ls) => (ls.includes(l.key) ? ls.filter((x) => x !== l.key) : [...ls, l.key]))}
+                  title={l.title}
+                  aria-pressed={activa}
+                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    activa
+                      ? 'border-gray-400 bg-gray-100 font-semibold text-gray-900'
+                      : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <span className={`${LUZ} ${l.cls} ${activa ? '' : 'opacity-50'}`} />
+                  {l.label}
+                </button>
+              );
+            })}
+            {luces.length > 0 && (
+              <button type="button" onClick={() => setLuces([])} className="text-xs text-blue-500 hover:underline">
+                Limpiar
+              </button>
+            )}
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
