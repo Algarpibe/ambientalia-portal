@@ -42,12 +42,20 @@ const FACTURAS_SQL = `
          -- y su entrega queda sin seguimiento (p. ej. AM1467/OV-2026-107: 8 facturadas,
          -- 0 despachadas). Mismo cálculo que el comprometido de inventario.
          -- El enlace i.salesorder_id está poblado al 100% (verificado 2026-08-05).
+         --
+         -- Se EXCLUYEN las líneas de servicio (mano de obra, alquiler…): no se despachan,
+         -- así que su 'quantity_delivered' se queda en 0 de por vida y la resta las daría
+         -- como pendientes para siempre (mismo gotcha documentado en inventory.ts, que
+         -- encendía la luz en facturas de enero ya entregadas).
          (SELECT COALESCE(SUM(GREATEST(
                    COALESCE(li.quantity, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_delivered', '')::numeric, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)), 0)
             FROM books.salesorder_line_items li
-           WHERE li.salesorder_id = i.salesorder_id) AS unidades_por_despachar,
+            LEFT JOIN books.items it ON it.item_id = li.item_id
+           WHERE li.salesorder_id = i.salesorder_id
+             -- product_type ausente → se asume mercancía (sí se despacha).
+             AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') <> 'service') AS unidades_por_despachar,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
