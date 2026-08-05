@@ -25,6 +25,7 @@ export default function App() {
   const [estado, setEstado] = useState<Estado>('todas');
   const [mes, setMes] = useState(0); // 0 = todos
   const [soloEntregaPendiente, setSoloEntregaPendiente] = useState(false);
+  const [tab, setTab] = useState<'facturacion' | 'ov'>('facturacion');
   const [guardando, setGuardando] = useState<string | null>(null);
   const [guardandoPpto, setGuardandoPpto] = useState(false);
   const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
@@ -105,16 +106,38 @@ export default function App() {
       <header className="mb-6 flex items-center gap-3">
         <Landmark className="h-6 w-6 text-blue-600" />
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Contabilidad — Facturación</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Contabilidad</h1>
           <p className="text-sm text-gray-500">Datos en vivo desde Zoho. La columna Cartera se guarda al salir de la celda.</p>
         </div>
       </header>
+
+      {/* Pestañas. Ambas se mantienen montadas (se ocultan con `hidden`) para no perder los
+          filtros, el orden ni el scroll al cambiar de una a otra. */}
+      <div className="mb-4 flex gap-1 border-b border-gray-200">
+        {([['facturacion', 'Facturación'], ['ov', 'OV pendientes de facturar']] as const).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTab(k)}
+            aria-current={tab === k ? 'page' : undefined}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm transition-colors ${
+              tab === k
+                ? 'border-blue-500 font-semibold text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
         </div>
       )}
+
+      <div className={tab === 'facturacion' ? '' : 'hidden'}>
 
       {/* Barra de filtros */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -183,9 +206,15 @@ export default function App() {
             onGuardarPresupuesto={onGuardarPresupuesto}
             guardandoPresupuesto={guardandoPpto}
           />
-          <OVPendientes />
         </>
       )}
+
+      </div>
+
+      {/* `bare`: la cabecera propia de la sección sobra, ya la da la pestaña. */}
+      <div className={tab === 'ov' ? '' : 'hidden'}>
+        <OVPendientes bare />
+      </div>
 
       {detalleFactura && (
         <DetalleModal tipo="factura" numero={detalleFactura} onClose={() => setDetalleFactura(null)} />
