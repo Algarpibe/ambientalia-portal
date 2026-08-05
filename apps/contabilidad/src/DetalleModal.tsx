@@ -79,14 +79,14 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {/* Las líneas con unidades sin despachar van sombreadas: son las que
+                  {/* Las líneas con unidades sin empaquetar van sombreadas: son las que
                       encienden la luz violeta de la tabla, así se ve qué falta sacar. */}
                   {detalle.lineas.map((l, idx) => (
                     <tr key={idx} className={l.porDespachar > 0 ? 'bg-violet-50' : ''}>
                       <td className="px-2 py-1 whitespace-nowrap font-medium">
                         {l.porDespachar > 0 && (
                           <span
-                            title={`${l.porDespachar} unidad(es) sin despachar`}
+                            title={`${l.porDespachar} unidad(es) sin empaquetar`}
                             className="mr-1.5 inline-block h-2 w-2 rounded-full bg-violet-500 align-middle"
                           />
                         )}
@@ -96,7 +96,7 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
                       <td className="px-2 py-1 text-right tabular-nums">
                         {l.cantidad}
                         {l.porDespachar > 0 && (
-                          <span className="ml-1 text-[10px] font-medium text-violet-700">({l.porDespachar} sin despachar)</span>
+                          <span className="ml-1 text-[10px] font-medium text-violet-700">({l.porDespachar} sin empaquetar)</span>
                         )}
                       </td>
                       <td className="px-2 py-1 text-right tabular-nums">{formatCOP(l.precio)}</td>
@@ -111,7 +111,7 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
               {detalle.lineas.some((l) => l.porDespachar > 0) && (
                 <div className="flex items-center gap-1.5 border-t border-gray-200 bg-violet-50/50 px-2 py-1.5 text-[11px] text-violet-800">
                   <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
-                  Filas sombreadas: artículos con unidades pendientes de despachar.
+                  Filas sombreadas: artículos con unidades pendientes de empaquetar.
                 </div>
               )}
             </div>

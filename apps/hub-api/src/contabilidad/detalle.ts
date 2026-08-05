@@ -84,16 +84,17 @@ const FACTURA_HEADER_SQL = `
    WHERE i.invoice_number = $1
    LIMIT 1`;
 
-// `por_despachar`: unidades de ese artículo que siguen sin salir, buscándolas en las líneas
-// de la OV de la factura. Son las que hacen encender la luz violeta de la tabla, así que el
-// detalle deja ver EXACTAMENTE qué artículos faltan. Los servicios van a 0 (no se despachan;
-// su quantity_delivered se queda en 0 de por vida — ver source.ts).
+// `por_despachar`: unidades de ese artículo que siguen SIN EMPAQUETAR, buscándolas en las
+// líneas de la OV de la factura. Son las que hacen encender la luz violeta de la tabla, así
+// que el detalle deja ver EXACTAMENTE qué artículos faltan por preparar. Se mide contra
+// quantity_packed (no contra lo enviado: con recogida en nuestras instalaciones lo despachado
+// se queda en 0 aunque bodega ya lo tenga listo). Los servicios van a 0 — ver source.ts.
 const FACTURA_LINEAS_SQL = `
   SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio,
          CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service' THEN 0
               ELSE COALESCE((
                 SELECT SUM(GREATEST(COALESCE(sol.quantity, 0)
-                       - COALESCE(NULLIF(sol.raw ->> 'quantity_delivered', '')::numeric, 0)
+                       - COALESCE(NULLIF(sol.raw ->> 'quantity_packed', '')::numeric, 0)
                        - COALESCE(NULLIF(sol.raw ->> 'quantity_cancelled', '')::numeric, 0), 0))
                   FROM books.salesorder_line_items sol
                  WHERE sol.salesorder_id = i.salesorder_id
@@ -119,11 +120,12 @@ const OV_HEADER_SQL = `
    LIMIT 1`;
 
 // En la OV el pendiente sale de la propia línea (no hay que buscarlo en otra tabla).
+// Mismo criterio: sin empaquetar, no "sin enviar".
 const OV_LINEAS_SQL = `
   SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio,
          CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service' THEN 0
               ELSE GREATEST(COALESCE(li.quantity, 0)
-                   - COALESCE(NULLIF(li.raw ->> 'quantity_delivered', '')::numeric, 0)
+                   - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)
          END AS por_despachar
     FROM books.salesorder_line_items li

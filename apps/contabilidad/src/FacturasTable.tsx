@@ -59,7 +59,7 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
         <thead className="bg-gray-50 text-gray-600">
           <tr>
             <th className="px-2 py-2 text-left font-semibold">#</th>
-            <th className="px-2 py-2 text-left font-semibold whitespace-nowrap" title="Entrega pendiente: la OV de la factura tiene mercancía sin despachar">
+            <th className="px-2 py-2 text-left font-semibold whitespace-nowrap" title="Entrega pendiente: hay artículos de la factura sin empaquetar">
               ENTREGA
             </th>
             {COLUMNS.map((c) => (
@@ -88,7 +88,7 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
               <td className="px-2 py-1">
                 {f.unidadesPorDespachar > 0 && (
                   <span
-                    title={`Entrega pendiente: faltan ${f.unidadesPorDespachar} unidad(es) por despachar de ${f.ov || 'su OV'}`}
+                    title={`Entrega pendiente: ${f.unidadesPorDespachar} unidad(es) sin empaquetar de ${f.ov || 'su OV'}`}
                     className="inline-block h-2.5 w-2.5 rounded-full bg-violet-500"
                   />
                 )}

@@ -37,11 +37,16 @@ const FACTURAS_SQL = `
          d.deal_name                                   AS deal_name,
          d.numero_ticket                               AS ticket_number,
          qt.no_cotizacion                              AS qt,
-         -- Unidades de la OV de esta factura que AÚN NO se han despachado. Detecta el
+         -- Unidades de la OV de esta factura que AÚN NO se han EMPAQUETADO. Detecta el
          -- caso peligroso: una OV facturada al 100% sale del listado de "OV pendientes"
-         -- y su entrega queda sin seguimiento (p. ej. AM1467/OV-2026-107: 8 facturadas,
-         -- 0 despachadas). Mismo cálculo que el comprometido de inventario.
+         -- y su preparación queda sin seguimiento.
          -- El enlace i.salesorder_id está poblado al 100% (verificado 2026-08-05).
+         --
+         -- Se mide contra 'quantity_packed', NO contra 'quantity_delivered': con entrega
+         -- por recogida en nuestras instalaciones lo despachado se queda en 0 hasta que el
+         -- cliente aparece, y la mercancía ya empaquetada saldría como pendiente sin serlo
+         -- (AM1460/OV-2026-101: 9 de 9 unidades empaquetadas y 0 enviadas). Empaquetado =
+         -- bodega ya lo preparó y apartó; lo que falta es lo que ni siquiera se ha tocado.
          --
          -- Se EXCLUYEN las líneas de servicio (mano de obra, alquiler…): no se despachan,
          -- así que su 'quantity_delivered' se queda en 0 de por vida y la resta las daría
@@ -55,7 +60,7 @@ const FACTURAS_SQL = `
          -- en ninguna factura sigue visible en "OV pendientes de facturar".
          (SELECT COALESCE(SUM(GREATEST(
                    COALESCE(li.quantity, 0)
-                   - COALESCE(NULLIF(li.raw ->> 'quantity_delivered', '')::numeric, 0)
+                   - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)), 0)
             FROM books.salesorder_line_items li
             LEFT JOIN books.items it ON it.item_id = li.item_id

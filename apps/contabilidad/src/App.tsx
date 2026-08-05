@@ -143,13 +143,13 @@ export default function App() {
           <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input value={filtro} onChange={(e) => setFiltro(e.target.value)} aria-label="Buscar cliente, OV o factura" placeholder="Buscar cliente, OV o factura…" className="w-64 rounded-xl border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none" />
         </div>
-        {/* Facturas cuya OV aún tiene mercancía sin despachar: una vez facturada, la OV
-            sale del listado de pendientes y su entrega se queda sin seguimiento. */}
+        {/* Facturas con artículos aún sin empaquetar: una vez facturada, la OV
+            sale del listado de pendientes y su preparación se queda sin seguimiento. */}
         <button
           type="button"
           onClick={() => setSoloEntregaPendiente((v) => !v)}
           aria-pressed={soloEntregaPendiente}
-          title="Solo facturas cuya orden de venta tiene mercancía por despachar"
+          title="Solo facturas con artículos que aún no se han empaquetado"
           className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
             soloEntregaPendiente
               ? 'border-gray-400 bg-gray-100 font-semibold text-gray-900'
