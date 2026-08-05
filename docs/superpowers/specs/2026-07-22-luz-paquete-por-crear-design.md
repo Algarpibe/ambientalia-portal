@@ -28,10 +28,23 @@ Consulta de validación sobre las 32 OV vivas con líneas pendientes: **15 `pued
 ## Criterio (por OV)
 
 ```
-puedeArmarse = para TODAS sus líneas con falta > 0:
-    esServicio(item)  OR  (stockFisico(item) − (comprometidoTotal(item) − falta_de_esta_OV)) >= falta
+lineasProducto = líneas con falta > 0 cuyo item tiene product_type = 'goods'
+                 (los servicios se EXCLUYEN: no se despachan)
+
+puedeArmarse = existe al menos 1 linea de producto
+               AND para TODAS ellas:
+                   tieneSeguimiento(item)                                        -- si no, no se puede confirmar
+                   AND (stockFisico(item) − (comprometidoTotal(item) − falta_de_esta_OV)) >= falta
+
 paquetePorCrear = puedeArmarse AND NOT despachada AND NOT soloPaquete
 ```
+
+**CORRECCIÓN 2026-08-04 (falso positivo real):** la versión inicial eximía a todo ítem con
+`track_inventory=false` asumiendo que era un servicio. Pero hay **mercancía sin seguimiento**
+(p. ej. `CIL-MULT-CA05-1.4M3`, "Botellas Gases", `product_type='goods'` + `track_inventory=false`),
+y la luz encendía en falso (OV-2026-146). Ahora se distingue por `product_type`: los servicios se
+ignoran, y un producto sin seguimiento **bloquea** porque no hay stock que consultar. Ante la duda,
+no se marca — es preferible no señalar una OV que mandar a bodega a armar algo que no hay.
 
 ## Implementación
 

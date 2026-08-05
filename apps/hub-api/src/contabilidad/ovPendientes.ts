@@ -57,19 +57,29 @@ const SQL = `
     -- Comprometido por artículo = suma de lo pendiente en todas las OV vivas.
     SELECT item_id, SUM(falta) AS comprometido FROM pend GROUP BY item_id
   ), armable AS (
-    -- ¿Alcanza el stock DISPONIBLE para todas las líneas pendientes de la OV?
+    -- ¿Alcanza el stock DISPONIBLE para todas las líneas de PRODUCTO pendientes de la OV?
     -- Disponible = físico − comprometido por OTRAS OV (se resta la propia 'falta').
-    -- Los ítems de servicio (track_inventory=false) no tienen stock → no bloquean.
+    --
+    -- Solo se evalúan las líneas con product_type='goods' (mercancía): los SERVICIOS no
+    -- se despachan, así que se excluyen del cálculo. Si la OV no tiene ninguna línea de
+    -- producto, no hay paquete que armar → sin fila aquí → puede_armarse=false abajo.
+    --
+    -- Un producto SIN seguimiento de inventario (track_inventory=false) BLOQUEA: no
+    -- tenemos stock que consultar, así que no podemos afirmar que se pueda armar. Antes
+    -- se eximía (pensando en servicios) y encendía la luz en falso — p. ej. OV-2026-146
+    -- con CIL-MULT-CA05-1.4M3, que es 'goods' sin seguimiento. Ante la duda, no se marca.
     SELECT p.salesorder_id,
            bool_and(
-             COALESCE(NULLIF(it.raw ->> 'track_inventory', '')::boolean, true) = false
-             OR COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0)
-                - (COALESCE(c.comprometido, 0) - p.falta) >= p.falta
+             COALESCE(NULLIF(it.raw ->> 'track_inventory', '')::boolean, false) = true
+             AND COALESCE(NULLIF(it.raw ->> 'actual_available_stock', '')::numeric, 0)
+                 - (COALESCE(c.comprometido, 0) - p.falta) >= p.falta
            ) AS puede_armarse
       FROM pend p
       LEFT JOIN books.items it ON it.item_id = p.item_id
       LEFT JOIN comp c ON c.item_id = p.item_id
      WHERE p.falta > 0
+       -- product_type ausente → se asume 'goods' (conservador: exige seguimiento+stock).
+       AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'goods'
      GROUP BY p.salesorder_id
   )
   SELECT so.salesorder_id,
