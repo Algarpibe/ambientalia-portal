@@ -57,6 +57,13 @@ describe('GET /api/contabilidad/facturas', () => {
     expect(res.body.resumen.meses).toHaveLength(12);
   });
 
+  it('400 si se pide un año anterior al mínimo (2020 tiene datos incompletos)', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/facturas?year=2020')
+      .set('Authorization', `Bearer ${token(['contabilidad'])}`);
+    expect(res.status).toBe(400);
+  });
+
   it('200 devuelve anioActual y aniosDisponibles', async () => {
     const res = await request(appConPool(fakePool()))
       .get('/api/contabilidad/facturas?year=2025')

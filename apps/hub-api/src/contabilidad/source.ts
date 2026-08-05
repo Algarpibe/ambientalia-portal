@@ -96,12 +96,21 @@ function rango(anio: number): [string, string] {
 
 // Facturado (subtotal) por año, excluyendo las internas AMI-/OVI-. Sirve para el
 // selector de años y para los comparativos del resumen.
+/**
+ * Primer año con datos fiables en la réplica. 2020 solo tiene el último trimestre cargado
+ * (la primera factura es de octubre), así que se OMITE: ni sale en el selector de años ni
+ * en los comparativos del resumen, para no comparar contra una cifra que no representa el
+ * año. Si algún día se completa el histórico, basta con bajar este número.
+ */
+export const ANIO_MINIMO = 2021;
+
 const FACTURADO_POR_ANIO_SQL = `
   SELECT date_part('year', i.date)::int AS anio,
          SUM(i.sub_total)               AS facturado
     FROM books.invoices i
    WHERE i.invoice_number NOT ILIKE 'AMI-%'
      AND COALESCE(i.reference_number, '') NOT ILIKE 'OVI-%'
+     AND i.date >= '${ANIO_MINIMO}-01-01'
    GROUP BY 1
    ORDER BY 1`;
 

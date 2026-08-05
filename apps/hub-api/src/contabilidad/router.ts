@@ -3,7 +3,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { requireAuth, requireApp, requireAdmin, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { cached, clearCache, clearCacheKey } from '../cache.js';
-import { getContabilidadData, upsertCartera, upsertBudget } from './source.js';
+import { getContabilidadData, upsertCartera, upsertBudget, ANIO_MINIMO } from './source.js';
 import { getOVPendientesFacturables } from './ovPendientes.js';
 import { getDetalleFactura, getDetalleOV } from './detalle.js';
 
@@ -12,9 +12,11 @@ const CACHE_KEY = 'contabilidad:facturas';
 const CARTERA_MAX = 1000; // tope defensivo para una nota de texto libre
 const ANIO_DEFECTO = 2026;
 
+// El año se acota por abajo a ANIO_MINIMO: los datos anteriores están incompletos en la
+// réplica y no deben consultarse ni siquiera manipulando la URL (?year=2020).
 function parseAnio(v: unknown): number | null {
   const n = Number(v);
-  if (!Number.isInteger(n) || n < 2000 || n > 2100) return null;
+  if (!Number.isInteger(n) || n < ANIO_MINIMO || n > 2100) return null;
   return n;
 }
 
