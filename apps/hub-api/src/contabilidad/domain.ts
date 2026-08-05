@@ -28,6 +28,7 @@ export interface FacturaRawRow {
   deal_name: string | null;   // crm.deals.deal_name (puede faltar)
   ticket_number: string | null; // crm.deals.numero_ticket (puede faltar)
   qt: string | null;          // crm.quotes.no_cotizacion de la última cotización del deal
+  unidades_por_despachar: number | string | null; // de la OV de la factura (0 si no queda nada)
   synced_at: string | null;
 }
 
@@ -50,6 +51,8 @@ export interface FacturaContable {
   retenciones: number;
   participacion: number; // 0..1 (se asigna en withParticipacion)
   cartera: string;       // override manual
+  /** Unidades de la OV de esta factura que aún NO se han despachado (>0 = entrega pendiente). */
+  unidadesPorDespachar: number;
 }
 
 export function mapFacturaRow(row: FacturaRawRow, overrides: Map<string, string>): FacturaContable {
@@ -76,6 +79,7 @@ export function mapFacturaRow(row: FacturaRawRow, overrides: Map<string, string>
     retenciones,
     participacion: 0,
     cartera: overrides.get(str(row.invoice_number)) ?? '',
+    unidadesPorDespachar: num(row.unidades_por_despachar),
   };
 }
 

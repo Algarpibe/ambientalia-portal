@@ -23,6 +23,7 @@ const raw = (over: Partial<FacturaRawRow>): FacturaRawRow => ({
   deal_name: null,
   ticket_number: null,
   qt: null,
+  unidades_por_despachar: 0,
   synced_at: '2026-01-16T00:00:00Z',
   ...over,
 });
@@ -70,6 +71,12 @@ describe('mapFacturaRow', () => {
 
   it('cartera vacía cuando no hay override', () => {
     expect(mapFacturaRow(raw({ invoice_number: 'AM0009' }), new Map()).cartera).toBe('');
+  });
+
+  it('mapea las unidades por despachar de la OV (0 si no hay o no es numérico)', () => {
+    expect(mapFacturaRow(raw({ unidades_por_despachar: 8 }), new Map()).unidadesPorDespachar).toBe(8);
+    expect(mapFacturaRow(raw({ unidades_por_despachar: '3' }), new Map()).unidadesPorDespachar).toBe(3);
+    expect(mapFacturaRow(raw({ unidades_por_despachar: null }), new Map()).unidadesPorDespachar).toBe(0);
   });
 
   it('mapea QT desde no_cotizacion del deal (vacío si no hay cotización)', () => {

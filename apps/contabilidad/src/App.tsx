@@ -24,6 +24,7 @@ export default function App() {
   const [cliente, setCliente] = useState('');
   const [estado, setEstado] = useState<Estado>('todas');
   const [mes, setMes] = useState(0); // 0 = todos
+  const [soloEntregaPendiente, setSoloEntregaPendiente] = useState(false);
   const [guardando, setGuardando] = useState<string | null>(null);
   const [guardandoPpto, setGuardandoPpto] = useState(false);
   const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
@@ -53,10 +54,11 @@ export default function App() {
       if (cliente && f.razonSocial !== cliente) return false;
       if (estado !== 'todas' && estadoDe(f, hoy) !== estado) return false;
       if (mes && Number(f.fechaFactura.slice(5, 7)) !== mes) return false;
+      if (soloEntregaPendiente && f.unidadesPorDespachar <= 0) return false;
       if (q && !(f.razonSocial.toLowerCase().includes(q) || f.ov.toLowerCase().includes(q) || f.invoiceNumber.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [data, filtro, cliente, estado, mes, hoy]);
+  }, [data, filtro, cliente, estado, mes, soloEntregaPendiente, hoy]);
 
   const totales = useMemo(() => {
     return facturasFiltradas.reduce(
@@ -141,6 +143,22 @@ export default function App() {
           <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input value={filtro} onChange={(e) => setFiltro(e.target.value)} aria-label="Buscar cliente, OV o factura" placeholder="Buscar cliente, OV o factura…" className="w-64 rounded-xl border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:border-blue-400 focus:outline-none" />
         </div>
+        {/* Facturas cuya OV aún tiene mercancía sin despachar: una vez facturada, la OV
+            sale del listado de pendientes y su entrega se queda sin seguimiento. */}
+        <button
+          type="button"
+          onClick={() => setSoloEntregaPendiente((v) => !v)}
+          aria-pressed={soloEntregaPendiente}
+          title="Solo facturas cuya orden de venta tiene mercancía por despachar"
+          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+            soloEntregaPendiente
+              ? 'border-gray-400 bg-gray-100 font-semibold text-gray-900'
+              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+          }`}
+        >
+          <span className={`inline-block h-2.5 w-2.5 rounded-full bg-violet-500 ${soloEntregaPendiente ? '' : 'opacity-50'}`} />
+          Entrega pendiente
+        </button>
       </div>
 
       {cargando && (

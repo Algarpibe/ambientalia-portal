@@ -22,6 +22,7 @@ export interface FacturaContable {
   retenciones: number;
   participacion: number;
   cartera: string;
+  unidadesPorDespachar: number; // >0 = la OV de la factura tiene entrega pendiente
 }
 
 export interface ResumenMes {

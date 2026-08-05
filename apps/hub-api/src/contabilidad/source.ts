@@ -37,6 +37,17 @@ const FACTURAS_SQL = `
          d.deal_name                                   AS deal_name,
          d.numero_ticket                               AS ticket_number,
          qt.no_cotizacion                              AS qt,
+         -- Unidades de la OV de esta factura que AÚN NO se han despachado. Detecta el
+         -- caso peligroso: una OV facturada al 100% sale del listado de "OV pendientes"
+         -- y su entrega queda sin seguimiento (p. ej. AM1467/OV-2026-107: 8 facturadas,
+         -- 0 despachadas). Mismo cálculo que el comprometido de inventario.
+         -- El enlace i.salesorder_id está poblado al 100% (verificado 2026-08-05).
+         (SELECT COALESCE(SUM(GREATEST(
+                   COALESCE(li.quantity, 0)
+                   - COALESCE(NULLIF(li.raw ->> 'quantity_delivered', '')::numeric, 0)
+                   - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)), 0)
+            FROM books.salesorder_line_items li
+           WHERE li.salesorder_id = i.salesorder_id) AS unidades_por_despachar,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
