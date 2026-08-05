@@ -37,39 +37,38 @@ const FACTURAS_SQL = `
          d.deal_name                                   AS deal_name,
          d.numero_ticket                               AS ticket_number,
          qt.no_cotizacion                              AS qt,
-         -- Unidades de la OV de esta factura que AÚN NO se han EMPAQUETADO. Detecta el
-         -- caso peligroso: una OV facturada al 100% sale del listado de "OV pendientes"
-         -- y su preparación queda sin seguimiento.
-         -- El enlace i.salesorder_id está poblado al 100% (verificado 2026-08-05).
+         -- Unidades ya FACTURADAS de la OV que AÚN NO se han EMPAQUETADO. Detecta el caso
+         -- peligroso: una OV facturada sale del listado de "OV pendientes de facturar" y su
+         -- preparación queda sin seguimiento. Enlace por i.salesorder_id (poblado al 100%).
          --
-         -- Se mide contra 'quantity_packed', NO contra 'quantity_delivered': con entrega
-         -- por recogida en nuestras instalaciones lo despachado se queda en 0 hasta que el
-         -- cliente aparece, y la mercancía ya empaquetada saldría como pendiente sin serlo
-         -- (AM1460/OV-2026-101: 9 de 9 unidades empaquetadas y 0 enviadas). Empaquetado =
-         -- bodega ya lo preparó y apartó; lo que falta es lo que ni siquiera se ha tocado.
-         --
-         -- Se EXCLUYEN las líneas de servicio (mano de obra, alquiler…): no se despachan,
-         -- así que su 'quantity_delivered' se queda en 0 de por vida y la resta las daría
-         -- como pendientes para siempre (mismo gotcha documentado en inventory.ts, que
-         -- encendía la luz en facturas de enero ya entregadas).
-         --
-         -- Y solo cuentan los ARTÍCULOS QUE ESTA FACTURA INCLUYE: la OV puede tener otras
-         -- líneas pendientes que se facturaron aparte, y avisar de ellas aquí colgaba el
-         -- aviso de la factura equivocada (AM1277 era solo un contrato de servicio y salía
-         -- marcada por 2 unidades de otra línea de su OV). Lo que quede pendiente y NO esté
-         -- en ninguna factura sigue visible en "OV pendientes de facturar".
-         (SELECT COALESCE(SUM(GREATEST(
-                   COALESCE(li.quantity, 0)
-                   - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0)
-                   - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)), 0)
-            FROM books.salesorder_line_items li
-            LEFT JOIN books.items it ON it.item_id = li.item_id
-           WHERE li.salesorder_id = i.salesorder_id
-             -- product_type ausente → se asume mercancía (sí se despacha).
-             AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') <> 'service'
-             AND EXISTS (SELECT 1 FROM books.invoice_line_items ili
-                          WHERE ili.invoice_id = i.invoice_id
-                            AND ili.item_id = li.item_id)) AS unidades_por_despachar,
+         -- (1) FACTURADO − EMPAQUETADO, no "cantidad − empaquetado". Lo que aún no se ha
+         --     facturado no está perdido: su OV sigue viva en el otro listado. Contarlo aquí
+         --     inflaba el número (OV-2026-033: 45 uds, 15 facturadas, 10 empaquetadas →
+         --     el pendiente real es 5, no 20).
+         -- (2) EMPAQUETADO, no despachado: con entrega por recogida en nuestras instalaciones
+         --     lo enviado se queda en 0 hasta que el cliente aparece, y la mercancía ya
+         --     preparada salía marcada sin serlo (AM1460/OV-2026-101: 9 de 9 empaquetadas).
+         --     Si está empaquetado, bodega ya lo apartó y no se va a perder.
+         -- (3) Sin SERVICIOS (mano de obra, alquiler…): no se empaquetan, así que su contador
+         --     se queda en 0 de por vida y saldrían como pendientes para siempre (mismo
+         --     gotcha ya documentado en inventory.ts).
+         -- (4) UNA SOLA ALERTA POR OV, en su factura más reciente: una OV facturada en varias
+         --     parciales repetía el mismo número en todas (OV-2026-033 salía 5 veces con 20).
+         CASE WHEN i.invoice_id = (
+                SELECT i2.invoice_id FROM books.invoices i2
+                 WHERE i2.salesorder_id = i.salesorder_id
+                 ORDER BY i2.date DESC, i2.invoice_id DESC
+                 LIMIT 1)
+              THEN (SELECT COALESCE(SUM(GREATEST(
+                      COALESCE(NULLIF(li.raw ->> 'quantity_invoiced', '')::numeric, 0)
+                      - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0), 0)), 0)
+                      FROM books.salesorder_line_items li
+                      LEFT JOIN books.items it ON it.item_id = li.item_id
+                     WHERE li.salesorder_id = i.salesorder_id
+                       -- product_type ausente → se asume mercancía (sí se empaqueta).
+                       AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') <> 'service')
+              ELSE 0
+         END                                           AS unidades_por_despachar,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
