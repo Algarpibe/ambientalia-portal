@@ -5,9 +5,18 @@ import { formatCOP } from './format';
 
 type Detalle = (DetalleFactura & { _tipo: 'factura' }) | (DetalleOV & { _tipo: 'ov' });
 
-interface Props { tipo: 'factura' | 'ov'; numero: string; onClose: () => void; }
+/** Indicio a mostrar junto al título (las luces que aplican al documento). */
+export interface Indicio { label: string; cls: string; title: string }
 
-export default function DetalleModal({ tipo, numero, onClose }: Props) {
+interface Props {
+  tipo: 'factura' | 'ov';
+  numero: string;
+  onClose: () => void;
+  /** Luces que aplican, para no tener que volver a la tabla a recordar por qué está marcada. */
+  indicios?: Indicio[];
+}
+
+export default function DetalleModal({ tipo, numero, onClose, indicios }: Props) {
   const [detalle, setDetalle] = useState<Detalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,9 +51,21 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" onClick={onClose}>
       <div ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="detalle-modal-title" className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-strong focus:outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
-          <h2 id="detalle-modal-title" className="text-lg font-semibold text-gray-900">
-            {tipo === 'factura' ? 'Factura' : 'Orden de venta'} {numero}
-          </h2>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h2 id="detalle-modal-title" className="text-lg font-semibold text-gray-900">
+              {tipo === 'factura' ? 'Factura' : 'Orden de venta'} {numero}
+            </h2>
+            {indicios?.map((i) => (
+              <span
+                key={i.label}
+                title={i.title}
+                className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700"
+              >
+                <span className={`inline-block h-2.5 w-2.5 rounded-full ${i.cls}`} />
+                {i.label}
+              </span>
+            ))}
+          </div>
           <button onClick={onClose} aria-label="Cerrar" className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"><X className="h-5 w-5" /></button>
         </div>
 

@@ -198,7 +198,13 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
       )}
 
       {detalleOV && (
-        <DetalleModal tipo="ov" numero={detalleOV} onClose={() => setDetalleOV(null)} />
+        <DetalleModal
+          tipo="ov"
+          numero={detalleOV}
+          onClose={() => setDetalleOV(null)}
+          // Mismas luces que muestra su fila, con la etiqueta de lo que significan.
+          indicios={LUCES.filter((l) => ordenes?.find((o) => o.salesorder_number === detalleOV)?.[l.key])}
+        />
       )}
     </section>
   );
