@@ -47,6 +47,12 @@ const FACTURAS_SQL = `
          -- así que su 'quantity_delivered' se queda en 0 de por vida y la resta las daría
          -- como pendientes para siempre (mismo gotcha documentado en inventory.ts, que
          -- encendía la luz en facturas de enero ya entregadas).
+         --
+         -- Y solo cuentan los ARTÍCULOS QUE ESTA FACTURA INCLUYE: la OV puede tener otras
+         -- líneas pendientes que se facturaron aparte, y avisar de ellas aquí colgaba el
+         -- aviso de la factura equivocada (AM1277 era solo un contrato de servicio y salía
+         -- marcada por 2 unidades de otra línea de su OV). Lo que quede pendiente y NO esté
+         -- en ninguna factura sigue visible en "OV pendientes de facturar".
          (SELECT COALESCE(SUM(GREATEST(
                    COALESCE(li.quantity, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_delivered', '')::numeric, 0)
@@ -55,7 +61,10 @@ const FACTURAS_SQL = `
             LEFT JOIN books.items it ON it.item_id = li.item_id
            WHERE li.salesorder_id = i.salesorder_id
              -- product_type ausente → se asume mercancía (sí se despacha).
-             AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') <> 'service') AS unidades_por_despachar,
+             AND COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') <> 'service'
+             AND EXISTS (SELECT 1 FROM books.invoice_line_items ili
+                          WHERE ili.invoice_id = i.invoice_id
+                            AND ili.item_id = li.item_id)) AS unidades_por_despachar,
          i.synced_at::text                             AS synced_at
     FROM books.invoices i
     LEFT JOIN crm.deals d
