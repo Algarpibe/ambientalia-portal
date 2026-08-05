@@ -109,7 +109,7 @@ export async function fetchOVPendientes(): Promise<OVPendienteFacturable[]> {
   return data.orders;
 }
 
-export interface DetalleLinea { sku: string; nombre: string; cantidad: number; precio: number; total: number; }
+export interface DetalleLinea { sku: string; nombre: string; cantidad: number; precio: number; total: number; porDespachar: number; }
 export interface DetalleFactura {
   numero: string; cliente: string; nit: string | null; direccion: string | null;
   fecha: string; vencimiento: string | null; terminos: string | null; ov: string | null;
