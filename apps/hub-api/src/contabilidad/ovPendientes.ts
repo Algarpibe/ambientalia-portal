@@ -13,11 +13,12 @@ export interface OVPendienteFacturable {
   total: number;
   pending: number;
   shipment_date: string | null;
-  despachada: boolean;        // shipped_status ∈ {fulfilled, partially_shipped}
-  soloPaquete: boolean;       // tiene paquete && !despachada
+  despachada: boolean;        // shipped_status = 'fulfilled' (despacho COMPLETO)
+  despachoParcial: boolean;   // shipped_status = 'partially_shipped' (salió parte, falta mercancía)
+  soloPaquete: boolean;       // tiene paquete && sin despacho (ni completo ni parcial)
   ticketPorFacturar: boolean; // ticket de la OV (vía deal) en estado 'Por Facturar'
-  paquetePorCrear: boolean;   // hay stock disponible para armar el paquete (y aún no está despachada/empaquetada)
-  facturable: boolean;        // despachada || soloPaquete || ticketPorFacturar
+  paquetePorCrear: boolean;   // hay stock disponible para armar el paquete (y aún no hay despacho ni paquete)
+  facturable: boolean;        // cualquiera de los indicios anteriores
   ticket: string | null;      // nº de ticket de la OV (crm.deals.numero_ticket vía deal)
 }
 
@@ -120,7 +121,10 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-const DESPACHADO = new Set(['fulfilled', 'partially_shipped']);
+// Zoho distingue tres estados de despacho; los separamos porque mezclar 'fulfilled' con
+// 'partially_shipped' en una sola luz ocultaba que a la OV aún le falta mercancía por enviar.
+const COMPLETO = 'fulfilled';
+const PARCIAL = 'partially_shipped';
 
 /** Agrega las líneas a una fila por orden con las señales "facturable". */
 export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
@@ -128,9 +132,12 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
   for (const r of rows) {
     let o = byId.get(r.salesorder_id);
     if (!o) {
-      const despachada = DESPACHADO.has(r.shipped_status ?? '');
-      const soloPaquete = r.tiene_paquete && !despachada;
-      const paquetePorCrear = r.puede_armarse && !despachada && !soloPaquete;
+      const despachada = r.shipped_status === COMPLETO;
+      const despachoParcial = r.shipped_status === PARCIAL;
+      // Con despacho (completo o parcial) ya no aplica "sólo paquete" ni "por crear":
+      // esas dos señalan OV que todavía no han movido mercancía.
+      const soloPaquete = r.tiene_paquete && !despachada && !despachoParcial;
+      const paquetePorCrear = r.puede_armarse && !despachada && !despachoParcial && !soloPaquete;
       o = {
         salesorder_number: r.salesorder_number,
         date: r.date,
@@ -141,10 +148,11 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
         pending: 0,
         shipment_date: r.shipment_date,
         despachada,
+        despachoParcial,
         soloPaquete,
         ticketPorFacturar: r.ticket_por_facturar,
         paquetePorCrear,
-        facturable: despachada || soloPaquete || r.ticket_por_facturar || paquetePorCrear,
+        facturable: despachada || despachoParcial || soloPaquete || r.ticket_por_facturar || paquetePorCrear,
         ticket: r.ticket,
       };
       byId.set(r.salesorder_id, o);

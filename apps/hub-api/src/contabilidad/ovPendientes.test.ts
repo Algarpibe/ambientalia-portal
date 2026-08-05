@@ -32,9 +32,9 @@ describe('aggregateFacturables', () => {
     expect(r[0].pending).toBe(150);          // (2-1)*100 + 1*50
   });
 
-  it('despachada = shipped_status fulfilled o partially_shipped', () => {
+  it('despachada = SOLO fulfilled (el parcial tiene su propio indicio)', () => {
     expect(aggregateFacturables([line({ shipped_status: 'fulfilled' })])[0].despachada).toBe(true);
-    expect(aggregateFacturables([line({ shipped_status: 'partially_shipped' })])[0].despachada).toBe(true);
+    expect(aggregateFacturables([line({ shipped_status: 'partially_shipped' })])[0].despachada).toBe(false);
     expect(aggregateFacturables([line({ shipped_status: 'pending' })])[0].despachada).toBe(false);
   });
 
@@ -56,6 +56,30 @@ describe('aggregateFacturables', () => {
       line({ salesorder_id: 'b', salesorder_number: 'B', quantity: 1, rate: 90 }),
     ]);
     expect(r.map((o) => o.salesorder_number)).toEqual(['B', 'A']);
+  });
+});
+
+describe('despachoParcial', () => {
+  it('partially_shipped → despachoParcial, NO despachada', () => {
+    const r = aggregateFacturables([line({ shipped_status: 'partially_shipped' })]);
+    expect(r[0].despachoParcial).toBe(true);
+    expect(r[0].despachada).toBe(false);
+    expect(r[0].facturable).toBe(true); // se puede facturar lo ya despachado
+  });
+
+  it('fulfilled → despachada, NO parcial', () => {
+    const r = aggregateFacturables([line({ shipped_status: 'fulfilled' })]);
+    expect(r[0].despachada).toBe(true);
+    expect(r[0].despachoParcial).toBe(false);
+  });
+
+  it('con despacho parcial no se muestran soloPaquete ni paquetePorCrear', () => {
+    const r = aggregateFacturables([
+      line({ shipped_status: 'partially_shipped', tiene_paquete: true, puede_armarse: true }),
+    ]);
+    expect(r[0].despachoParcial).toBe(true);
+    expect(r[0].soloPaquete).toBe(false);
+    expect(r[0].paquetePorCrear).toBe(false);
   });
 });
 

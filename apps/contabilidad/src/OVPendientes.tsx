@@ -26,11 +26,13 @@ const COLS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text'
 
 const LUZ = 'inline-block h-2.5 w-2.5 rounded-full';
 
-type LuzKey = 'despachada' | 'soloPaquete' | 'ticketPorFacturar' | 'paquetePorCrear';
+type LuzKey = 'despachada' | 'despachoParcial' | 'soloPaquete' | 'ticketPorFacturar' | 'paquetePorCrear';
 
-// Fuente única de las 4 luces: pinta el indicio de cada fila Y arma los botones de filtro.
+// Fuente única de las 5 luces: pinta el indicio de cada fila Y arma los botones de filtro.
+// Orden = avance logístico: por crear → empaquetada → parcial → despachada (+ el ticket).
 const LUCES: { key: LuzKey; label: string; cls: string; title: string }[] = [
-  { key: 'despachada', label: 'Despachada', cls: 'bg-green-500', title: 'Despachada (paquete y envío)' },
+  { key: 'despachada', label: 'Despachada', cls: 'bg-green-500', title: 'Despacho completo (todo enviado)' },
+  { key: 'despachoParcial', label: 'Despacho parcial', cls: 'bg-violet-500', title: 'Despacho parcial: salió parte, falta mercancía por enviar' },
   { key: 'soloPaquete', label: 'Sólo paquete', cls: 'bg-amber-400', title: 'Sólo paquete (sin enviar)' },
   { key: 'ticketPorFacturar', label: 'Ticket por facturar', cls: 'bg-red-500', title: 'Ticket por facturar' },
   { key: 'paquetePorCrear', label: 'Paquete por crear', cls: 'bg-blue-500', title: 'Paquete por crear (hay stock disponible)' },
