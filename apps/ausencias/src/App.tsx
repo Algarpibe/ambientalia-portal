@@ -11,8 +11,10 @@ import FormularioSolicitud from './FormularioSolicitud';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import ImportarEmpleados from './ImportarEmpleados';
+import ImportarHistorico from './ImportarHistorico';
+import RegistroGeneral from './RegistroGeneral';
 
-type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados';
+type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'historico';
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -21,6 +23,9 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Pestana>('nueva');
+  // Se incrementa al importar para que el registro general se recargue sin
+  // desmontarlo (y sin perder los filtros que tuviera puestos).
+  const [recargarRegistro, setRecargarRegistro] = useState(0);
 
   useEffect(() => {
     let vivo = true;
@@ -53,7 +58,7 @@ export default function App() {
     const p: [Pestana, string][] = [];
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes']);
     if (contexto?.esAprobador) p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
-    if (contexto?.esAdmin) p.push(['empleados', 'Empleados']);
+    if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['historico', 'Registro general']);
     return p;
   }, [contexto, pendientes.length]);
 
@@ -154,9 +159,15 @@ export default function App() {
           )}
 
           {contexto.esAdmin && (
-            <div className={tab === 'empleados' ? '' : 'hidden'}>
-              <ImportarEmpleados />
-            </div>
+            <>
+              <div className={tab === 'empleados' ? '' : 'hidden'}>
+                <ImportarEmpleados />
+              </div>
+              <div className={tab === 'historico' ? '' : 'hidden'}>
+                <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
+                <RegistroGeneral recargarToken={recargarRegistro} />
+              </div>
+            </>
           )}
         </>
       )}

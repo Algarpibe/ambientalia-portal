@@ -160,6 +160,29 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  // ── Histórico de la hoja (solo admin) ───────────────────────────────────
+
+  /**
+   * Importa el histórico leído del Excel en el navegador. Con `dryRun: true` no
+   * escribe: devuelve el mismo recuento para que la UI lo enseñe antes.
+   */
+  router.post('/ausencias/historico/import', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.importarHistorico(db, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_historico_import');
+    }
+  });
+
+  /** Todas las solicitudes de la compañía: la vista que sustituye a la hoja. */
+  router.get('/ausencias/historico', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json({ solicitudes: await repo.todasLasSolicitudes(db) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_historico');
+    }
+  });
+
   /** Alta en bloque desde los usuarios del portal que ya tienen la app asignada. */
   router.post('/ausencias/empleados/sincronizar', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
     try {

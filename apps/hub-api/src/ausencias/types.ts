@@ -59,8 +59,13 @@ export interface Solicitud {
   solicitanteEmail: string;
   fechaInicio: string;
   fechaFin: string;
+  /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
   comentarios: string | null;
+  /** Notas al margen que traía la hoja, y el PDF de las incapacidades antiguas. */
+  observaciones: string | null;
+  /** `hoja` = importada del histórico; `portal` = nacida en la app. */
+  origen: 'portal' | 'hoja';
   estado: EstadoSolicitud;
   aprobadorCorreo: string | null;
   decididaAt: string | null;

@@ -227,12 +227,124 @@ export async function importarEmpleados(db: Pool, filas: FilaEmpleado[]): Promis
   return { importados: rowCount ?? 0 };
 }
 
+// ── Histórico importado de la hoja ─────────────────────────────────────────
+
+/** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
+export interface FilaHistoricoResuelta {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number;
+  comentarios: string | null;
+  observaciones: string | null;
+  estado: 'aprobada' | 'registrada';
+}
+
+/** Lo que la previsualización enseña antes de escribir nada. */
+export interface ResultadoImportacion {
+  total: number;
+  importadas: number;
+  yaExistian: number;
+}
+
+const ENTRADA_HISTORICO = `
+  jsonb_to_recordset($1::jsonb) AS f(
+    empleado_id uuid, tipo text, fecha_inicio date, fecha_fin date,
+    dias numeric, comentarios text, observaciones text, estado text)`;
+
+/**
+ * Solo las filas que NO están ya en la tabla, mirando por
+ * (empleado, tipo, fechas). Es la misma condición que usa el INSERT, extraída
+ * para poder responder la previsualización sin escribir nada.
+ *
+ * Cubre los dos casos de choque: lo que ya se importó antes y lo que **creó el
+ * portal** (el índice único parcial solo vigila `origen='hoja'`, así que la
+ * solicitud de prueba que la app grabó de verdad se detecta aquí).
+ */
+const NO_EXISTE_YA = `
+  NOT EXISTS (
+    SELECT 1 FROM portal.solicitudes_ausencia s
+     WHERE s.empleado_id = f.empleado_id
+       AND s.tipo        = f.tipo
+       AND s.fecha_inicio = f.fecha_inicio
+       AND s.fecha_fin    = f.fecha_fin)`;
+
+function aJsonHistorico(filas: FilaHistoricoResuelta[]): string {
+  return JSON.stringify(
+    filas.map((f) => ({
+      empleado_id: f.empleadoId,
+      tipo: f.tipo,
+      fecha_inicio: f.fechaInicio,
+      fecha_fin: f.fechaFin,
+      dias: f.dias,
+      comentarios: f.comentarios,
+      observaciones: f.observaciones,
+      estado: f.estado,
+    })),
+  );
+}
+
+/**
+ * Mete el histórico de la hoja. Con `dryRun` solo cuenta, sin escribir.
+ *
+ * `created_at` se pone a la fecha de inicio y no a `now()`: «Mis solicitudes»
+ * ordena por fecha de creación, y con `now()` las 52 filas antiguas se
+ * amontonarían todas arriba, por encima de las recientes.
+ */
+export async function importarHistorico(
+  db: Pool,
+  filas: FilaHistoricoResuelta[],
+  dryRun: boolean,
+): Promise<ResultadoImportacion> {
+  if (filas.length === 0) return { total: 0, importadas: 0, yaExistian: 0 };
+  const payload = aJsonHistorico(filas);
+
+  if (dryRun) {
+    const { rows } = await db.query(
+      `SELECT count(*)::int AS nuevas FROM ${ENTRADA_HISTORICO} WHERE ${NO_EXISTE_YA}`,
+      [payload],
+    );
+    const nuevas = (rows[0] as { nuevas: number }).nuevas;
+    return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
+  }
+
+  const { rowCount } = await db.query(
+    `INSERT INTO portal.solicitudes_ausencia
+       (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin, dias_habiles,
+        comentarios, estado, aprobador_correo, observaciones, origen, created_at)
+     SELECT f.tipo, f.empleado_id, e.correo, f.fecha_inicio, f.fecha_fin, f.dias,
+            f.comentarios, f.estado, e.aprobador_correo, f.observaciones, 'hoja',
+            f.fecha_inicio::timestamptz
+       FROM ${ENTRADA_HISTORICO}
+       JOIN portal.empleados e ON e.id = f.empleado_id
+      WHERE ${NO_EXISTE_YA}
+     ON CONFLICT (empleado_id, tipo, fecha_inicio, fecha_fin) WHERE origen = 'hoja' DO NOTHING`,
+    [payload],
+  );
+  const importadas = rowCount ?? 0;
+  return { total: filas.length, importadas, yaExistian: filas.length - importadas };
+}
+
+/** Todas las solicitudes de la compañía, para la vista que sustituye a la hoja. */
+export async function todasLasSolicitudes(db: Pool): Promise<Solicitud[]> {
+  const { rows } = await db.query(`${SELECT_SOLICITUD} ORDER BY s.fecha_inicio DESC`);
+  return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
 // ── Solicitudes ────────────────────────────────────────────────────────────
 
 const SELECT_SOLICITUD = `
   SELECT s.id, s.tipo, s.empleado_id, e.nombre_completo AS empleado_nombre, e.cargo AS empleado_cargo,
          s.solicitante_email, s.fecha_inicio::text AS fecha_inicio, s.fecha_fin::text AS fecha_fin,
-         s.dias_habiles, s.comentarios, s.estado, s.aprobador_correo,
+         -- ::float8 NO es cosmetico: desde que la columna es NUMERIC (para
+         -- admitir el medio dia del historico), el driver la devolveria como
+         -- STRING para no perder precision, y "5.0" romperia toda la aritmetica
+         -- de la UI y de los correos. Cuatro digitos con un decimal caben de
+         -- sobra en un double sin error de representacion observable.
+         s.dias_habiles::float8 AS dias_habiles,
+         s.observaciones, s.origen,
+         s.comentarios, s.estado, s.aprobador_correo,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime, a.drive_file_id,
          octet_length(a.contenido) AS adjunto_bytes
@@ -250,6 +362,8 @@ interface FilaSolicitudDb {
   fecha_inicio: string;
   fecha_fin: string;
   dias_habiles: number;
+  observaciones: string | null;
+  origen: Solicitud['origen'];
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobador_correo: string | null;
@@ -283,6 +397,8 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
     diasHabiles: r.dias_habiles,
+    observaciones: r.observaciones,
+    origen: r.origen,
     comentarios: r.comentarios,
     estado: r.estado,
     aprobadorCorreo: r.aprobador_correo,

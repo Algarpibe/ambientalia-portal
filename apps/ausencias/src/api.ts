@@ -38,8 +38,13 @@ export interface Solicitud {
   solicitanteEmail: string;
   fechaInicio: string;
   fechaFin: string;
+  /** Decimal: el histórico de la hoja trae medios días (6,5). */
   diasHabiles: number;
   comentarios: string | null;
+  /** Notas al margen de la hoja, y el PDF de las incapacidades antiguas. */
+  observaciones: string | null;
+  /** `hoja` = importada del histórico; `portal` = nacida en la app. */
+  origen: 'portal' | 'hoja';
   estado: EstadoSolicitud;
   aprobadorCorreo: string | null;
   decididaAt: string | null;
@@ -101,6 +106,35 @@ export const importarEmpleados = (empleados: unknown[]) =>
 /** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
 export const sincronizarEmpleados = () =>
   post<{ creados: number; vinculados: number }>('/api/ausencias/empleados/sincronizar', {});
+
+/** Una fila del Excel histórico, tal como la lee el navegador. */
+export interface FilaHistorico {
+  nombre: string;
+  tipo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number | string;
+  comentarios?: string | null;
+  adjunto?: string | null;
+  observaciones?: string | null;
+}
+
+export interface ResumenImportacion {
+  total: number;
+  resueltas: number;
+  importadas: number;
+  yaExistian: number;
+  sinResolver: string[];
+  ambiguos: { nombre: string; candidatos: string[] }[];
+}
+
+/** Con `dryRun` no escribe nada: solo devuelve el recuento para previsualizar. */
+export const importarHistorico = (solicitudes: FilaHistorico[], dryRun: boolean) =>
+  post<ResumenImportacion>('/api/ausencias/historico/import', { solicitudes, dryRun });
+
+/** Todas las solicitudes de la compañía (solo admin). */
+export const fetchHistorico = () =>
+  get<{ solicitudes: Solicitud[] }>('/api/ausencias/historico').then((d) => d.solicitudes);
 
 export const fetchEmpleados = () =>
   get<{ empleados: Empleado[] }>('/api/ausencias/empleados').then((d) => d.empleados);

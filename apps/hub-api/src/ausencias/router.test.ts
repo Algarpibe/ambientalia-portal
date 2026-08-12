@@ -28,6 +28,9 @@ const estado = {
   /** Si el usuario de la sesión existe en portal.users (falso = token legacy). */
   usuarioEnPortal: true,
   altasAutomaticas: 0,
+  plantilla: [] as any[],
+  yaEnBd: 0,
+  historicoInsertado: 0,
   solicitudes: [] as Record<string, unknown>[],
   eventos: [] as EventoFalso[],
   adjuntos: new Map<string, Record<string, unknown>>(),
@@ -55,9 +58,17 @@ vi.mock('./repo.js', () => ({
     return estado.empleado;
   },
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
+  // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
+  // creadas por el propio portal).
+  importarHistorico: async (_db: unknown, filas: unknown[], dryRun: boolean) => {
+    const nuevas = Math.max(0, filas.length - estado.yaEnBd);
+    if (!dryRun) estado.historicoInsertado += nuevas;
+    return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
+  },
+  todasLasSolicitudes: async () => estado.solicitudes,
   esAprobadorDeAlguien: async (_db: unknown, email: string) =>
     email.toLowerCase() === 'comercial@ambientalia.com.co',
-  listarEmpleados: async () => [],
+  listarEmpleados: async () => estado.plantilla,
   importarEmpleados: async (_db: unknown, filas: unknown[]) => ({ importados: filas.length }),
   solicitudesDeEmpleado: async () => estado.solicitudes,
   solicitudesPendientes: async (_db: unknown, correo: string, todas: boolean) =>
@@ -183,6 +194,12 @@ beforeEach(() => {
   };
   estado.usuarioEnPortal = true;
   estado.altasAutomaticas = 0;
+  estado.plantilla = [
+    { ...(estado.empleado as Record<string, unknown>), id: 'e1', nombreCompleto: 'Ana Ruiz Molina' },
+    { ...(estado.empleado as Record<string, unknown>), id: 'e2', nombreCompleto: 'Luis Prieto Cano' },
+  ];
+  estado.yaEnBd = 0;
+  estado.historicoInsertado = 0;
   estado.solicitudes = [];
   estado.eventos = [];
   estado.adjuntos = new Map();
@@ -394,6 +411,62 @@ describe('decisión', () => {
     await crear();
     const r = await request(app()).get('/api/ausencias/pendientes').set('Authorization', `Bearer ${token({ sub: 'admin@ambientalia.com.co', role: 'admin' })}`).expect(200);
     expect(r.body.solicitudes).toHaveLength(1);
+  });
+});
+
+// ── Histórico ──────────────────────────────────────────────────────────────
+
+describe('importación del histórico', () => {
+  const fila = (over: Record<string, unknown> = {}) => ({
+    nombre: 'Ana Ruiz Molina',
+    tipo: 'Vacaciones',
+    fechaInicio: '2025-11-10',
+    fechaFin: '2025-11-14',
+    dias: 5,
+    ...over,
+  });
+
+  const importar = (body: Record<string, unknown>, tok = token({ role: 'admin' })) =>
+    request(app()).post('/api/ausencias/historico/import').set('Authorization', `Bearer ${tok}`).send(body);
+
+  it('es solo para admin', async () => {
+    await importar({ solicitudes: [fila()] }, token()).expect(403);
+  });
+
+  it('la previsualización cuenta pero no escribe', async () => {
+    const r = await importar({ solicitudes: [fila(), fila({ fechaInicio: '2026-01-05', fechaFin: '2026-01-09' })], dryRun: true }).expect(200);
+    expect(r.body).toMatchObject({ total: 2, resueltas: 2, importadas: 2, yaExistian: 0 });
+    expect(estado.historicoInsertado).toBe(0);
+  });
+
+  it('sin dryRun sí escribe', async () => {
+    await importar({ solicitudes: [fila()] }).expect(200);
+    expect(estado.historicoInsertado).toBe(1);
+  });
+
+  it('lo que ya estaba no se duplica', async () => {
+    estado.yaEnBd = 1;
+    const r = await importar({ solicitudes: [fila(), fila({ fechaFin: '2025-11-11' })] }).expect(200);
+    expect(r.body).toMatchObject({ importadas: 1, yaExistian: 1 });
+  });
+
+  it('reporta los nombres que no casan en vez de abortar el lote entero', async () => {
+    // Importa lo que puede y enseña el resto: corregir el maestro y reimportar
+    // es inocuo, así que bloquear las 52 buenas por una mala sería peor.
+    const r = await importar({ solicitudes: [fila(), fila({ nombre: 'Fulano de Tal' })], dryRun: true }).expect(200);
+    expect(r.body.total).toBe(2);
+    expect(r.body.resueltas).toBe(1);
+    expect(r.body.sinResolver).toEqual(['Fulano de Tal']);
+  });
+
+  it('señala la fila exacta cuando el Excel trae una fecha imposible', async () => {
+    const r = await importar({ solicitudes: [fila(), fila({ fechaInicio: '2026-02-30' })] }).expect(400);
+    expect(r.body.field).toBe('solicitudes[1].fechaInicio');
+  });
+
+  it('la vista global es solo para admin', async () => {
+    await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token()}`).expect(403);
+    await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token({ role: 'admin' })}`).expect(200);
   });
 });
 

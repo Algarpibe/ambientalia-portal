@@ -107,6 +107,39 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
 
+## El histórico de la hoja
+
+Las cuatro pestañas de solicitudes de `consulta_vacaciones` (53 filas desde
+octubre de 2025) se importan a `portal.solicitudes_ausencia` desde
+*Registro general* (solo admin). El Excel **se lee en el navegador** y solo viaja
+el JSON: `apps/ausencias/src/leerExcel.ts`.
+
+Se lee el fichero en vez de pedir que se peguen las filas —que es lo que hace la
+importación de empleados— por un motivo concreto: **al pegar, las fechas llegan
+como `10/11/2025` y dd/mm es indistinguible de mm/dd**. El 10 de noviembre y el
+11 de octubre se confundirían en silencio y nadie lo notaría hasta tener un
+histórico mal por meses. Con `cellDates` llegan ya como `Date`.
+
+Lo que el análisis del fichero obligó a cambiar:
+
+| Hallazgo | Consecuencia |
+|---|---|
+| Hay un `6.5` y un `"1*"` en la columna Días | `dias_habiles` pasó a `NUMERIC(4,1)`. El asterisco entra como 1 y su nota va a `observaciones` |
+| 13 grafías distintas para 9 personas, y **ningún correo** en la hoja | `resolverEmpleado` casa por subconjunto de palabras normalizadas. Verificado contra el fichero real: las 13 resuelven sin ambigüedad |
+| La octava columna de vacaciones no tiene cabecera | Va a `observaciones` |
+| `Adjunto?` guarda el JSON crudo de n8n | Se extrae solo el nombre del PDF; el fichero sigue en Drive |
+| Una fila ya la había creado el portal | El INSERT lleva `NOT EXISTS` por (empleado, tipo, fechas) |
+
+La importación **reporta los nombres que no casan en vez de abortar el lote**:
+reimportar es inocuo, así que corregir el maestro y volver a pasar el fichero es
+el camino natural. La UI llama primero con `dryRun` y solo importa tras enseñar
+el recuento.
+
+> Lo que esto **no** resuelve: el saldo de vacaciones. Sale de la hoja `Total`
+> (`días trabajados / 30 × 1,25` menos las disfrutadas) y las disfrutadas viven
+> en las nueve hojas-calendario 2018-2026, no en estas cuatro pestañas. Hasta que
+> eso se migre, la hoja sigue haciendo falta para consultar saldos.
+
 ## Gotchas que costaron
 
 - **El adjunto y el límite de body.** El PDF viaja en base64 y `index.ts` tiene un
@@ -132,6 +165,13 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
   maestro: la identidad viene de la sesión. Si la ficha se importó antes de que
   existiera la cuenta, `user_id` queda NULL y el vínculo se hace por correo en
   cuanto la cuenta aparece. La pestaña *Empleados* avisa de cuántos están así.
+- **`NUMERIC` vuelve del driver como texto.** Al pasar `dias_habiles` a
+  `NUMERIC(4,1)` para admitir el medio día, `pg` empezaría a devolver `"5.0"` en
+  vez de `5` —lo hace para no perder precisión— y eso rompe la aritmética de la
+  UI y de los correos. Por eso el `SELECT` lleva `::float8`.
+- **Ojo con los backticks dentro de un SQL en template literal.** Un comentario
+  con `pg` entre acentos graves cierra la plantilla y el fichero deja de parsear
+  con un error que apunta a otro sitio.
 - **Cada automatización, su propio secreto.** `requireCronToken` acepta ahora
   `{ env, header }`; ausencias usa `AUSENCIAS_CRON_TOKEN` /
   `X-Ausencias-Cron-Token`. El token de WO-sales **no** sirve aquí, y hay un test
