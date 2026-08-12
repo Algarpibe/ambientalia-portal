@@ -87,6 +87,20 @@ function redondear(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/**
+ * El error de «fecha inválida», con el valor recibido tal cual.
+ *
+ * JSON.stringify y no una plantilla con `${valor}`: si `valor` es un objeto
+ * Date (el gotcha de un `::text` olvidado en el SELECT), la plantilla lo
+ * convierte a texto con la zona HORARIA LOCAL del proceso y el mensaje
+ * mentiría sobre qué día era —justo en el caso que esta validación existe
+ * para diagnosticar—. JSON.stringify llama a `toJSON`, que en Date es
+ * `toISOString`, siempre en UTC.
+ */
+function errorFechaInvalida(campo: string, valor: unknown): Error {
+  return new Error(`${campo} inválida (tipo ${typeof valor}): ${JSON.stringify(valor)}`);
+}
+
 /** Días naturales entre dos fechas YYYY-MM-DD, en UTC. */
 function diasEntre(desde: string, hasta: string): number {
   return (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / 86_400_000;
@@ -117,12 +131,24 @@ export function calcularSaldo(
   // Una fecha malformada es un error de programación de quien llama, no una
   // entrada legítima con la que seguir (mismo criterio que esFechaValida en
   // dias-habiles.ts). Lanzar aquí evita que la API responda 200 con un saldo
-  // en blanco —o, si `fechaCorte` llegara como objeto Date por un SELECT sin
+  // en blanco —o, si una fecha llegara como objeto Date por un SELECT sin
   // `::text`, con un `disfrutadas` en 0 igual de silencioso— sin dejar rastro
   // en los logs.
-  if (!esFechaValida(hoy)) throw new Error(`fecha inválida: ${hoy}`);
+  if (!esFechaValida(hoy)) throw errorFechaInvalida('hoy', hoy);
   if (!config) return sinConfigurar();
-  if (!esFechaValida(config.fechaCorte)) throw new Error(`fecha inválida: ${config.fechaCorte}`);
+  if (!esFechaValida(config.fechaCorte)) throw errorFechaInvalida('fechaCorte', config.fechaCorte);
+
+  // Se valida ANTES del filtro y para TODAS las solicitudes, no solo dentro
+  // del callback de `sumar`: `fechaInicio` entra en una comparación `>=`
+  // contra `fechaCorte`, y una fecha malformada ahí falla en silencio de dos
+  // formas distintas. Si es un Date, `>=` lo compara vía ToPrimitive numérico
+  // —el timestamp contra Number('YYYY-MM-DD'), que es NaN— y la comparación
+  // es SIEMPRE false: la vacación no se descontaría jamás. Si es una fecha
+  // sin cero de relleno («2026-2-1»), rompe el orden lexicográfico en
+  // cualquier sentido: podría contar como posterior a un corte muy posterior.
+  for (const v of vacaciones) {
+    if (!esFechaValida(v.fechaInicio)) throw errorFechaInvalida('fechaInicio', v.fechaInicio);
+  }
 
   // Nunca negativo: una fecha de corte futura significa «aún no empieza a
   // devengar», no un descuento.

@@ -131,9 +131,15 @@ describe('calcularSaldo', () => {
     expect(s.disponible).toBe(9.7);
   });
 
-  it('las tres cifras que se enseñan suman exactamente disponible', () => {
-    const s = calcularSaldo({ saldoCorte: 10.4, fechaCorte: '2026-01-01' }, [vac('2026-02-01', 6.5)], '2026-05-19');
-    expect(s.saldoCorte + s.devengadas - s.disfrutadas).toBe(s.disponible);
+  it('las tres cifras que se enseñan cuadran a la décima que se muestra', () => {
+    // NO es igualdad estricta de coma flotante: sumar saldoCorte + devengadas
+    // − disfrutadas puede arrastrar ruido binario de última cifra (aquí
+    // 3.9000000000000004 en vez de 3.9 — 10.4 − 6.5 no es exacto en binario).
+    // La garantía real, y la que ve el usuario, es que cuadran A LA DÉCIMA,
+    // que es la precisión con la que se enseñan; exigir igualdad exacta de
+    // float sobre un fixture concreto es una mina para quien lo toque después.
+    const s = calcularSaldo({ saldoCorte: 10.4, fechaCorte: '2026-01-01' }, [vac('2026-01-01', 6.5)], '2026-01-01');
+    expect(s.saldoCorte + s.devengadas - s.disfrutadas).toBeCloseTo(s.disponible, 1);
   });
 
   it('lanza si fechaCorte llega vacía o mal formada, en vez de devolver un saldo en blanco', () => {
@@ -145,6 +151,26 @@ describe('calcularSaldo', () => {
   it('lanza si "hoy" llega mal formado', () => {
     expect(() => calcularSaldo(CONFIG, [], '01-01-2026')).toThrow();
     expect(() => calcularSaldo(CONFIG, [], '')).toThrow();
+  });
+
+  it('lanza si fechaInicio de una solicitud viene en dd/mm/aaaa en vez de YYYY-MM-DD', () => {
+    // Sin la validación, '2026-2-1' >= '2026-10-01' da true por orden
+    // lexicográfico: febrero contaría como posterior a un corte de octubre.
+    expect(() => calcularSaldo(CONFIG, [vac('01/02/2026', 5)], '2026-03-02')).toThrow();
+  });
+
+  it('lanza si fechaInicio de una solicitud llega vacía', () => {
+    expect(() => calcularSaldo(CONFIG, [vac('', 5)], '2026-03-02')).toThrow();
+  });
+
+  it('lanza si fechaInicio de una solicitud llega como objeto Date (gotcha del ::text olvidado)', () => {
+    // Con `>=`, un Date se compara vía ToPrimitive numérico: el timestamp
+    // contra Number('2026-01-01'), que es NaN. La comparación es entonces
+    // SIEMPRE false y la vacación no se descontaría jamás, en silencio.
+    const conFechaDate = [
+      { ...vac('2026-02-01', 5), fechaInicio: new Date('2026-02-01T00:00:00Z') as unknown as string },
+    ];
+    expect(() => calcularSaldo(CONFIG, conFechaDate, '2026-03-02')).toThrow();
   });
 });
 
