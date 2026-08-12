@@ -156,11 +156,14 @@ describe('calcularSaldo', () => {
   it('lanza si fechaInicio de una solicitud viene en dd/mm/aaaa en vez de YYYY-MM-DD', () => {
     // Sin la validación, '2026-2-1' >= '2026-10-01' da true por orden
     // lexicográfico: febrero contaría como posterior a un corte de octubre.
-    expect(() => calcularSaldo(CONFIG, [vac('01/02/2026', 5)], '2026-03-02')).toThrow();
+    // La corrupta va DETRÁS de una válida a propósito: así el test distingue
+    // «se validan todas» de «se valida la primera». Sin eso, un refactor que
+    // metiera el `esFechaValida` dentro del `filter` seguiría pasando.
+    expect(() => calcularSaldo(CONFIG, [vac('2026-02-01', 3), vac('01/02/2026', 5)], '2026-03-02')).toThrow();
   });
 
   it('lanza si fechaInicio de una solicitud llega vacía', () => {
-    expect(() => calcularSaldo(CONFIG, [vac('', 5)], '2026-03-02')).toThrow();
+    expect(() => calcularSaldo(CONFIG, [vac('2026-02-01', 3), vac('', 5)], '2026-03-02')).toThrow();
   });
 
   it('lanza si fechaInicio de una solicitud llega como objeto Date (gotcha del ::text olvidado)', () => {
@@ -168,6 +171,7 @@ describe('calcularSaldo', () => {
     // contra Number('2026-01-01'), que es NaN. La comparación es entonces
     // SIEMPRE false y la vacación no se descontaría jamás, en silencio.
     const conFechaDate = [
+      vac('2026-02-01', 3),
       { ...vac('2026-02-01', 5), fechaInicio: new Date('2026-02-01T00:00:00Z') as unknown as string },
     ];
     expect(() => calcularSaldo(CONFIG, conFechaDate, '2026-03-02')).toThrow();
