@@ -28,6 +28,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     fechaFin: '2026-07-10',
     diasHabiles: 5,
     comentarios: 'Viaje familiar',
+    observaciones: null,
+    origen: 'portal',
     estado: 'pendiente',
     aprobadorCorreo: 'comercial@ambientalia.com.co',
     decididaAt: null,
