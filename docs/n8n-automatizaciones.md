@@ -109,8 +109,21 @@ o añades uno propio (y generalizas el nombre de la cabecera).
 
 ### 2.2 Lado n8n — el workflow
 
-Referencia: workflow **"WO-sales — envío de pedidos a World Office"** (id `79t0zWPuHgMZ4IMf`).
-Cadena de nodos:
+Hay dos implementaciones vivas de este patrón:
+
+| Workflow | Id | Forma |
+|---|---|---|
+| **WO-sales — envío de pedidos a World Office** | `79t0zWPuHgMZ4IMf` | Un único envío por ciclo, con hash de contenido |
+| **Ausencias — Portal** | `dh0xjWCHsGj9raYH` | **Cola de eventos**: N acciones por ciclo, cada una se confirma por su `id` |
+
+El segundo es el que conviene copiar cuando la automatización tiene que hacer
+*varias cosas distintas* (correo, calendario, hoja, Drive): hub-api emite una fila
+de outbox por cada acción, con **exactamente un correo por fila** y los efectos ya
+resueltos (`payload.calendario`, `payload.hoja`, `payload.drive`, o `null`). Así n8n
+es una **cadena lineal de IFs cuyas ramas falsas siguen adelante**, en vez de un árbol
+que hay que volver a unir. Ver [dev/app-ausencias.md](dev/app-ausencias.md).
+
+Cadena de nodos del caso simple (WO-sales):
 
 ```
 Schedule Trigger (cada 5 min)
@@ -147,8 +160,12 @@ Notas de implementación que costaron tiempo:
 
 1. **hub-api**: crea `router.ts` con `GET .../pendiente` y `POST .../confirmado`, ambos con
    `requireCronToken`. Mete la lógica en un `*.ts` puro y testeable (como `email.ts`).
-2. **Token de cron**: define la env (reutiliza `WO_SALES_CRON_TOKEN` o crea uno) en
-   EasyPanel (hub-api) **y** en n8n (Settings → Variables).
+2. **Token de cron**: define la env **propia de la automatización** en EasyPanel (hub-api)
+   **y** en n8n (Settings → Variables), y pásasela al middleware:
+   `requireCronToken({ env: 'MI_APP_CRON_TOKEN', header: 'X-Mi-App-Cron-Token' })`.
+   Sin argumentos sigue usando los de WO-sales. **No reutilices el token de otra app**:
+   rotarlo tumbaría las dos, y un flujo con un fallo no debería poder pegar a los
+   endpoints del otro (hay un test que lo comprueba en `auth.requireCronToken.test.ts`).
 3. **Destinatarios/permisos**: si aplica, filtra por `portal.user_apps` con el `id` de la
    app del catálogo. Recuerda: quien recibe = quien tiene la app asignada y está `active`.
 4. **n8n (por MCP)**: `n8n_create_workflow` con la cadena Schedule → GET → IF → acción →

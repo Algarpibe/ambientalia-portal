@@ -83,11 +83,15 @@ CREATE INDEX IF NOT EXISTS idx_adjuntos_solicitud ON portal.solicitud_adjuntos (
 -- confirma (mismo patrón que WO-sales). `enviado_at IS NULL` = pendiente. El
 -- estado NO avanza al servir el evento, solo al confirmarlo: si Gmail falla, el
 -- siguiente ciclo reintenta solo.
+--
+-- Cada fila es EXACTAMENTE UN correo (más sus efectos en Google), por eso el
+-- alta de una solicitud genera dos: `creada` (acuse al solicitante) y
+-- `aprobacion` (aviso a quien aprueba). Así el flujo de n8n es lineal.
 CREATE TABLE IF NOT EXISTS portal.ausencias_outbox (
   id           BIGSERIAL   PRIMARY KEY,
   solicitud_id UUID        NOT NULL REFERENCES portal.solicitudes_ausencia(id) ON DELETE CASCADE,
   evento       VARCHAR(20) NOT NULL
-                           CHECK (evento IN ('creada', 'aprobada', 'rechazada', 'registrada')),
+                           CHECK (evento IN ('creada', 'aprobacion', 'aprobada', 'rechazada', 'registrada')),
   payload      JSONB       NOT NULL,
   intentos     INTEGER     NOT NULL DEFAULT 0,
   enviado_at   TIMESTAMPTZ,

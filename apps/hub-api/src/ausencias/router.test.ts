@@ -47,8 +47,8 @@ vi.mock('./repo.js', () => ({
     _db: unknown,
     datos: Record<string, unknown>,
     adjunto: { nombreArchivo: string } | null,
-    evento: string,
-    construirPayload: (s: unknown) => unknown,
+    eventos: string[],
+    construirPayload: (s: unknown, evento: string) => unknown,
   ) => {
     const s = {
       id: `s${++estado.seq}`,
@@ -61,7 +61,16 @@ vi.mock('./repo.js', () => ({
       adjunto: adjunto ? { id: `a${estado.seq}`, nombreArchivo: adjunto.nombreArchivo, mime: 'application/pdf', bytes: 10, driveFileId: null } : null,
     };
     estado.solicitudes.push(s);
-    estado.eventos.push({ id: estado.eventos.length + 1, evento, solicitudId: s.id, intentos: 0, payload: construirPayload(s), enviado: false });
+    for (const evento of eventos) {
+      estado.eventos.push({
+        id: estado.eventos.length + 1,
+        evento,
+        solicitudId: s.id,
+        intentos: 0,
+        payload: construirPayload(s, evento),
+        enviado: false,
+      });
+    }
     return s;
   },
   decidirSolicitud: async (
@@ -70,7 +79,7 @@ vi.mock('./repo.js', () => ({
     aprueba: boolean,
     motivo: string | null,
     _userId: string | null,
-    construirPayload: (s: unknown) => unknown,
+    construirPayload: (s: unknown, evento: string) => unknown,
   ) => {
     const s = estado.solicitudes.find((x) => x.id === id);
     // Refleja el `WHERE estado = 'pendiente'` del UPDATE real: sin fila, 409.
@@ -78,12 +87,13 @@ vi.mock('./repo.js', () => ({
     s.estado = aprueba ? 'aprobada' : 'rechazada';
     s.motivoRechazo = aprueba ? null : motivo;
     s.decididaAt = '2026-06-02T10:00:00Z';
+    const evento = aprueba ? 'aprobada' : 'rechazada';
     estado.eventos.push({
       id: estado.eventos.length + 1,
-      evento: aprueba ? 'aprobada' : 'rechazada',
+      evento,
       solicitudId: id,
       intentos: 0,
-      payload: construirPayload(s),
+      payload: construirPayload(s, evento),
       enviado: false,
     });
     return s;
@@ -299,8 +309,8 @@ describe('decisión', () => {
     await request(app()).post(`/api/ausencias/solicitudes/${id}/decision`).set('Authorization', `Bearer ${aprobador()}`).send({ aprueba: true }).expect(200);
     const r = await request(app()).post(`/api/ausencias/solicitudes/${id}/decision`).set('Authorization', `Bearer ${aprobador()}`).send({ aprueba: false }).expect(409);
     expect(r.body.error).toBe('ya_decidida');
-    // Y solo se encoló una notificación de decisión (más la de creación).
-    expect(estado.eventos.filter((e) => e.evento !== 'creada')).toHaveLength(1);
+    // Y solo se encoló UNA notificación de decisión (además de las del alta).
+    expect(estado.eventos.filter((e) => e.evento === 'aprobada' || e.evento === 'rechazada')).toHaveLength(1);
   });
 
   it('404 si la solicitud no existe', async () => {
@@ -351,13 +361,16 @@ describe('endpoints de n8n', () => {
       .expect(401);
   });
 
-  it('crear → pendiente devuelve 1 → confirmado → pendiente devuelve 0', async () => {
+  it('crear → pendiente devuelve los eventos → confirmado → pendiente devuelve 0', async () => {
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
 
     const p1 = await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
     expect(p1.body.hay).toBe(true);
-    expect(p1.body.eventos).toHaveLength(1);
+    // Un alta son dos correos: acuse al solicitante y aviso a quien aprueba.
+    expect(p1.body.eventos.map((e: { evento: string }) => e.evento)).toEqual(['creada', 'aprobacion']);
     expect(p1.body.eventos[0].payload.tipoEtiqueta).toBe('Vacaciones');
+    expect(p1.body.eventos[0].payload.correo.para).toBe('ana.ruiz@ambientalia.com.co');
+    expect(p1.body.eventos[1].payload.correo.para).toBe('comercial@ambientalia.com.co');
 
     await request(app())
       .post('/api/ausencias/n8n/confirmado')
@@ -375,7 +388,7 @@ describe('endpoints de n8n', () => {
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
     await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
     const otra = await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
-    expect(otra.body.eventos).toHaveLength(1);
+    expect(otra.body.eventos).toHaveLength(2);
     expect(otra.body.eventos[0].intentos).toBe(2);
   });
 
@@ -389,7 +402,7 @@ describe('endpoints de n8n', () => {
 
   it('confirmar dos veces los mismos ids es inocuo', async () => {
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
-    const body = { ids: [1] };
+    const body = { ids: [1] }; // solo el primero de los dos eventos del alta
     const a = await request(app()).post('/api/ausencias/n8n/confirmado').set('X-Ausencias-Cron-Token', 'cron-ausencias').send(body).expect(200);
     const b = await request(app()).post('/api/ausencias/n8n/confirmado').set('X-Ausencias-Cron-Token', 'cron-ausencias').send(body).expect(200);
     expect(a.body.confirmados).toBe(1);

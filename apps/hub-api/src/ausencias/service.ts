@@ -1,16 +1,14 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
-import { sumarDias } from './festivos.js';
+import { construirPayload, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
 import {
   ETIQUETA_TIPO,
   TIPOS,
   requiereAprobacion,
   type Empleado,
-  type EventoOutbox,
   type FilaEmpleado,
   type NuevaSolicitud,
-  type PayloadEvento,
   type Solicitud,
   type TipoSolicitud,
 } from './types.js';
@@ -33,40 +31,8 @@ const MAX_COMENTARIOS = 2000;
 const MAX_MOTIVO = 1000;
 const MAX_NOMBRE_ARCHIVO = 200;
 
-/** Base pública del portal, para el enlace «Ver en el portal» de los correos. */
-function urlPortal(): string {
-  return (process.env.PORTAL_URL || 'https://portal.ambientalia.cloud').replace(/\/+$/, '');
-}
-
-// ── Construcción del payload que ejecuta n8n ───────────────────────────────
-
-/**
- * Todo lo que los nodos de Gmail / Calendar / Drive / Sheets necesitan, ya
- * resuelto aquí. n8n no consulta nada ni decide nada: solo ejecuta. Es la misma
- * división de trabajo que en WO-sales.
- */
-export function construirPayload(s: Solicitud): PayloadEvento {
-  return {
-    tipo: s.tipo,
-    tipoEtiqueta: ETIQUETA_TIPO[s.tipo],
-    estado: s.estado,
-    empleado: { nombre: s.empleadoNombre, correo: s.solicitanteEmail, cargo: s.empleadoCargo },
-    aprobadorCorreo: s.aprobadorCorreo,
-    fechaInicio: s.fechaInicio,
-    fechaFin: s.fechaFin,
-    // Google trata el `end` de un evento all-day como EXCLUSIVO: sin este +1 el
-    // último día de la ausencia no aparecería en el calendario. El flujo de n8n
-    // hacía la misma suma a mano dentro de cada nodo de Calendar.
-    fechaFinCalendario: sumarDias(s.fechaFin, 1),
-    diasHabiles: s.diasHabiles,
-    comentarios: s.comentarios ?? '',
-    motivoRechazo: s.motivoRechazo ?? '',
-    // La columna «Aprobado?» de la hoja de Google guarda literalmente Sí/No.
-    aprobado: s.estado === 'aprobada' ? 'Sí' : s.estado === 'rechazada' ? 'No' : '',
-    adjunto: s.adjunto ? { id: s.adjunto.id, nombreArchivo: s.adjunto.nombreArchivo } : null,
-    urlPortal: `${urlPortal()}/ausencias`,
-  };
-}
+// El contenido de los correos y los destinos de Google viven en
+// notificaciones.ts y config.ts. Aquí solo se decide QUÉ eventos se encolan.
 
 // ── Validación ─────────────────────────────────────────────────────────────
 
@@ -175,7 +141,6 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
 
   const aprueba = requiereAprobacion(datos.tipo);
   const estado = aprueba ? 'pendiente' : 'registrada';
-  const evento: EventoOutbox = aprueba ? 'creada' : 'registrada';
 
   const adjunto = datos.adjunto
     ? {
@@ -207,7 +172,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       aprobadorCorreo: aprueba ? empleado.aprobadorCorreo : null,
     },
     adjunto,
-    evento,
+    eventosDeAlta(datos.tipo),
     construirPayload,
   );
 }

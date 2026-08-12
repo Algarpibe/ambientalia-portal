@@ -230,8 +230,8 @@ export async function crearSolicitud(
   db: Pool,
   datos: DatosInsercion,
   adjunto: { nombreArchivo: string; mime: string; contenido: Buffer } | null,
-  evento: EventoOutbox,
-  construirPayload: (solicitud: Solicitud) => PayloadEvento,
+  eventos: EventoOutbox[],
+  construirPayload: (solicitud: Solicitud, evento: EventoOutbox) => PayloadEvento,
 ): Promise<Solicitud> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
@@ -265,10 +265,14 @@ export async function crearSolicitud(
     const { rows: creada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
     const solicitud = aSolicitud(creada[0] as FilaSolicitudDb);
 
-    await client.query(
-      `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-      [id, evento, JSON.stringify(construirPayload(solicitud))],
-    );
+    // El orden importa: el outbox se sirve por `id` ascendente, así que el
+    // acuse al solicitante sale antes que el aviso a quien aprueba.
+    for (const evento of eventos) {
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [id, evento, JSON.stringify(construirPayload(solicitud, evento))],
+      );
+    }
 
     return solicitud;
   });
@@ -314,7 +318,7 @@ export async function decidirSolicitud(
   aprueba: boolean,
   motivo: string | null,
   aprobadorUserId: string | null,
-  construirPayload: (solicitud: Solicitud) => PayloadEvento,
+  construirPayload: (solicitud: Solicitud, evento: EventoOutbox) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
@@ -330,10 +334,11 @@ export async function decidirSolicitud(
 
     const { rows: actualizada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
     const solicitud = aSolicitud(actualizada[0] as FilaSolicitudDb);
+    const evento: EventoOutbox = aprueba ? 'aprobada' : 'rechazada';
 
     await client.query(
       `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-      [id, aprueba ? 'aprobada' : 'rechazada', JSON.stringify(construirPayload(solicitud))],
+      [id, evento, JSON.stringify(construirPayload(solicitud, evento))],
     );
 
     return solicitud;

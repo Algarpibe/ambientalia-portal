@@ -9,7 +9,13 @@ export type TipoSolicitud = (typeof TIPOS)[number];
 export const ESTADOS = ['pendiente', 'aprobada', 'rechazada', 'registrada'] as const;
 export type EstadoSolicitud = (typeof ESTADOS)[number];
 
-export const EVENTOS = ['creada', 'aprobada', 'rechazada', 'registrada'] as const;
+/**
+ * Cada evento de la cola es **exactamente un correo** más, opcionalmente, un
+ * evento de calendario, una fila de hoja y una subida a Drive. Partir el aviso
+ * al aprobador (`aprobacion`) del acuse al solicitante (`creada`) es lo que
+ * permite que el flujo de n8n sea una cadena lineal en vez de un árbol.
+ */
+export const EVENTOS = ['creada', 'aprobacion', 'aprobada', 'rechazada', 'registrada'] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
@@ -91,21 +97,51 @@ export interface EventoPendiente {
   payload: PayloadEvento;
 }
 
+/** El correo, ya redactado. n8n solo lo pasa al nodo de Gmail. */
+export interface CorreoEvento {
+  /** Destinatarios separados por coma, como espera el campo `sendTo` de Gmail. */
+  para: string;
+  asunto: string;
+  cuerpo: string;
+}
+
+/** Evento *all-day* de Google Calendar. `fin` ya viene sumado un día. */
+export interface EventoCalendario {
+  calendarId: string;
+  resumen: string;
+  inicio: string;
+  /** Fin EXCLUSIVO: Google no pinta el último día si no se le suma uno. */
+  fin: string;
+}
+
+/** Una fila para `append` en una pestaña del libro `consulta_vacaciones`. */
+export interface FilaHoja {
+  documentId: string;
+  pestana: string;
+  /** Las claves son los encabezados literales de la hoja. */
+  columnas: Record<string, string | number>;
+}
+
+/** El PDF a subir: n8n lo descarga de hub-api y lo deja en la carpeta. */
+export interface SubidaDrive {
+  adjuntoId: string;
+  nombreArchivo: string;
+  driveId: string;
+  carpetaId: string;
+}
+
+/**
+ * Lo que n8n ejecuta para un evento. Los cuatro campos opcionales son
+ * `null` cuando ese paso no aplica, para que el flujo pueda decidirlo con un
+ * simple IF sin conocer ninguna regla de negocio.
+ */
 export interface PayloadEvento {
   tipo: TipoSolicitud;
   tipoEtiqueta: string;
   estado: EstadoSolicitud;
-  empleado: { nombre: string; correo: string; cargo: string | null };
-  aprobadorCorreo: string | null;
-  fechaInicio: string;
-  fechaFin: string;
-  /** Fin exclusivo para eventos all-day de Google Calendar (fechaFin + 1 día). */
-  fechaFinCalendario: string;
-  diasHabiles: number;
-  comentarios: string;
-  motivoRechazo: string;
-  /** «Sí» / «No» / «» — el valor exacto que espera la columna «Aprobado?». */
-  aprobado: string;
-  adjunto: { id: string; nombreArchivo: string } | null;
-  urlPortal: string;
+  empleadoNombre: string;
+  correo: CorreoEvento;
+  calendario: EventoCalendario | null;
+  hoja: FilaHoja | null;
+  drive: SubidaDrive | null;
 }

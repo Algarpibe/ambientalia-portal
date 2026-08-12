@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   AusenciaError,
-  construirPayload,
   nombreArchivoNormalizado,
   puedeDecidir,
   puedeVerAdjunto,
@@ -109,44 +108,9 @@ describe('validarNuevaSolicitud', () => {
     // La identidad sale de la sesión y los días se calculan en el servidor: si
     // estos campos se colaran, cualquiera podría pedir vacaciones a nombre de
     // otro o declararse 40 días hábiles en una semana.
-    const r = validarNuevaSolicitud(nueva({ empleadoId: 'otro', diasHabiles: 99 })) as Record<string, unknown>;
+    const r = validarNuevaSolicitud(nueva({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
     expect(r.empleadoId).toBeUndefined();
     expect(r.diasHabiles).toBeUndefined();
-  });
-});
-
-describe('construirPayload', () => {
-  it('suma un día a la fecha final para el calendario', () => {
-    // Google trata el `end` de un evento all-day como EXCLUSIVO: sin el +1 el
-    // último día de las vacaciones no saldría pintado.
-    const p = construirPayload(solicitud());
-    expect(p.fechaFin).toBe('2026-07-10');
-    expect(p.fechaFinCalendario).toBe('2026-07-11');
-  });
-
-  it('traduce el estado a la columna «Aprobado?» de la hoja', () => {
-    expect(construirPayload(solicitud({ estado: 'aprobada' })).aprobado).toBe('Sí');
-    expect(construirPayload(solicitud({ estado: 'rechazada' })).aprobado).toBe('No');
-    expect(construirPayload(solicitud({ estado: 'pendiente' })).aprobado).toBe('');
-    expect(construirPayload(solicitud({ estado: 'registrada' })).aprobado).toBe('');
-  });
-
-  it('lleva la etiqueta que espera la hoja de Google', () => {
-    expect(construirPayload(solicitud({ tipo: 'permiso' })).tipoEtiqueta).toBe('Permisos');
-    expect(construirPayload(solicitud({ tipo: 'incapacidad' })).tipoEtiqueta).toBe('Incapacidades');
-  });
-
-  it('nunca deja campos de texto en null: n8n los interpola directamente', () => {
-    const p = construirPayload(solicitud({ comentarios: null, motivoRechazo: null }));
-    expect(p.comentarios).toBe('');
-    expect(p.motivoRechazo).toBe('');
-  });
-
-  it('incluye el adjunto para que n8n lo suba a Drive', () => {
-    const p = construirPayload(
-      solicitud({ adjunto: { id: 'a1', nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf', mime: 'application/pdf', bytes: 10, driveFileId: null } }),
-    );
-    expect(p.adjunto).toEqual({ id: 'a1', nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf' });
   });
 });
 

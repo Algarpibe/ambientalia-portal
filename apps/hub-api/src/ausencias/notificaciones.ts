@@ -1,0 +1,228 @@
+import { sumarDias } from './festivos.js';
+import {
+  CALENDARIO_STAFF,
+  CARPETA_DRIVE,
+  COPIA_ADMINISTRACION,
+  DRIVE_ID,
+  FIRMA_EMPRESA,
+  FIRMA_GERENCIA,
+  HOJA_ID,
+  PESTANA,
+  urlPortal,
+} from './config.js';
+import { ETIQUETA_TIPO, type EventoOutbox, type FilaHoja, type PayloadEvento, type Solicitud } from './types.js';
+
+// Los correos, eventos de calendario y filas de hoja que antes vivían dentro de
+// los nodos de n8n. Aquí son funciones puras con tests: cambiar un texto ya no
+// obliga a abrir n8n, y una interpolación rota se ve en el test, no en el buzón
+// de un empleado.
+//
+// Cada evento de la cola produce EXACTAMENTE UN correo. Por eso el alta de una
+// solicitud genera dos eventos (`creada` = acuse al solicitante, `aprobacion` =
+// aviso a quien aprueba): así el flujo de n8n es una cadena lineal.
+
+/** Nombre del periodo tal como lo escribían los formularios del flujo viejo. */
+const PERIODO: Record<Solicitud['tipo'], string> = {
+  vacaciones: 'de vacaciones',
+  permiso: 'de permiso',
+  compensatorio: 'de compensatorio',
+  incapacidad: 'de incapacidad',
+};
+
+/** «día» / «días», para no escribir «1 días hábiles» en un correo. */
+function dias(n: number): string {
+  return `${n} ${n === 1 ? 'día hábil' : 'días hábiles'}`;
+}
+
+function bloqueFechas(s: Solicitud): string {
+  const p = PERIODO[s.tipo];
+  return [
+    `📅 Fecha primer día ${p}: ${s.fechaInicio}`,
+    `📅 Fecha último día ${p}: ${s.fechaFin}`,
+    '',
+    `📊 Total solicitado: ${dias(s.diasHabiles)}`,
+  ].join('\n');
+}
+
+function bloqueComentarios(s: Solicitud): string {
+  return s.comentarios ? `\nComentarios: ${s.comentarios}\n` : '\n';
+}
+
+/** El adjunto se menciona solo si existe: el flujo viejo escribía «undefined». */
+function bloqueAdjunto(s: Solicitud): string {
+  return s.adjunto ? `\n📎 Documento adjunto: ${s.adjunto.nombreArchivo}\n` : '';
+}
+
+// ── Los cinco correos ──────────────────────────────────────────────────────
+
+function acuseSolicitante(s: Solicitud) {
+  const esInc = s.tipo === 'incapacidad';
+  const cierre = esInc
+    ? 'Muchas gracias por reportar tu incapacidad. Esperamos tu pronta recuperación.'
+    : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
+  return {
+    para: esInc ? [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', ') : s.solicitanteEmail,
+    asunto: esInc
+      ? '¡Reporte de incapacidad registrado exitosamente!'
+      : `¡Solicitud ${PERIODO[s.tipo]} registrada exitosamente!`,
+    cuerpo: [
+      `¡Hola ${s.empleadoNombre}!`,
+      '',
+      esInc
+        ? 'Tu reporte de incapacidad ha quedado registrado. Este es el resumen:'
+        : `Tu solicitud ${PERIODO[s.tipo]} ha sido registrada. Este es el resumen:`,
+      '',
+      bloqueFechas(s),
+      bloqueComentarios(s) + bloqueAdjunto(s),
+      cierre,
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
+function avisoAprobador(s: Solicitud) {
+  return {
+    para: s.aprobadorCorreo ?? '',
+    asunto: `Solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `Has recibido una solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}${s.empleadoCargo ? ` (${s.empleadoCargo})` : ''}.`,
+      '',
+      bloqueFechas(s),
+      bloqueComentarios(s) + bloqueAdjunto(s),
+      // El cambio de fondo frente al flujo viejo: en vez de un formulario
+      // incrustado en el correo que dejaba la ejecución de n8n colgada
+      // esperando, se aprueba en el portal, donde queda rastro de quién y cuándo.
+      `Puedes aprobarla o rechazarla aquí: ${urlPortal()}/ausencias`,
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
+function correoAprobada(s: Solicitud) {
+  const disfruta = s.tipo === 'vacaciones' ? '\n¡Disfrútalas!\n' : '';
+  return {
+    para: [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', '),
+    asunto: `✅ Tu solicitud ${PERIODO[s.tipo]} ha sido aprobada`,
+    cuerpo: [
+      `¡Hola ${s.empleadoNombre}!`,
+      '',
+      `Tu solicitud ${PERIODO[s.tipo]} ha sido ✅ *aprobada*.`,
+      '',
+      bloqueFechas(s),
+      disfruta,
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+function correoRechazada(s: Solicitud) {
+  return {
+    para: [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', '),
+    asunto: `❌ Tu solicitud ${PERIODO[s.tipo]} ha sido rechazada`,
+    cuerpo: [
+      `Hola ${s.empleadoNombre}:`,
+      '',
+      `Tu solicitud ${PERIODO[s.tipo]} (${s.fechaInicio} a ${s.fechaFin}) ha sido ❌ *rechazada*.`,
+      // El motivo es la mejora que pedía el flujo viejo: antes el correo de
+      // rechazo no decía por qué y obligaba a preguntar.
+      s.motivoRechazo ? `\nMotivo: ${s.motivoRechazo}\n` : '',
+      'Si tienes dudas, por favor comunícate conmigo.',
+      '',
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+// ── Efectos en Google ──────────────────────────────────────────────────────
+
+/** El evento *all-day* del calendario «Ambientalia Staff». */
+function calendario(s: Solicitud) {
+  return {
+    calendarId: CALENDARIO_STAFF,
+    resumen: `${ETIQUETA_TIPO[s.tipo]} ${s.empleadoNombre}`,
+    inicio: s.fechaInicio,
+    // Google trata el `end` de un evento all-day como EXCLUSIVO: sin este +1 el
+    // último día de la ausencia no se pinta.
+    fin: sumarDias(s.fechaFin, 1),
+  };
+}
+
+/** La fila para la pestaña correspondiente, con los encabezados de siempre. */
+function hoja(s: Solicitud): FilaHoja {
+  const columnas: Record<string, string | number> = {
+    'Nombre y Apellidos': s.empleadoNombre,
+    'Fecha Inicio': s.fechaInicio,
+    'Fecha Fin': s.fechaFin,
+    Días: s.diasHabiles,
+    Tipo: ETIQUETA_TIPO[s.tipo],
+  };
+  // Las incapacidades no se aprueban, así que su pestaña no tiene «Aprobado?»
+  // sino «Adjunto?». Es el esquema real de la hoja, no una simplificación.
+  if (s.tipo === 'incapacidad') {
+    columnas['Adjunto?'] = s.adjunto ? s.adjunto.nombreArchivo : 'No';
+  } else {
+    columnas.Comentarios = s.comentarios ?? '';
+    columnas['Aprobado?'] = s.estado === 'aprobada' ? 'Sí' : s.estado === 'rechazada' ? 'No' : '';
+  }
+  return { documentId: HOJA_ID, pestana: PESTANA[s.tipo], columnas };
+}
+
+/** La subida a Drive, solo si hay PDF y el tipo tiene carpeta asignada. */
+function drive(s: Solicitud) {
+  const carpetaId = CARPETA_DRIVE[s.tipo];
+  if (!s.adjunto || !carpetaId) return null;
+  return { adjuntoId: s.adjunto.id, nombreArchivo: s.adjunto.nombreArchivo, driveId: DRIVE_ID, carpetaId };
+}
+
+// ── Ensamblado ─────────────────────────────────────────────────────────────
+
+const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: string; cuerpo: string }> = {
+  creada: acuseSolicitante,
+  aprobacion: avisoAprobador,
+  aprobada: correoAprobada,
+  rechazada: correoRechazada,
+  registrada: acuseSolicitante,
+};
+
+/**
+ * El payload de un evento: un correo, y los efectos en Google que le tocan.
+ *
+ * Reparto de los efectos, para que ninguno se duplique ni se pierda:
+ *  - `creada`     → nada más (la solicitud aún no es firme).
+ *  - `aprobacion` → sube el PDF a Drive: quien aprueba tiene que poder verlo,
+ *                   y este es el primer evento que se ejecuta con adjunto.
+ *  - `aprobada`   → calendario + fila en la hoja.
+ *  - `rechazada`  → fila en la hoja (sin calendario: no hay ausencia).
+ *  - `registrada` → calendario + hoja + Drive, todo de una (la incapacidad no
+ *                   pasa por aprobación, así que es su único evento).
+ */
+export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEvento {
+  const conCalendario = evento === 'aprobada' || evento === 'registrada';
+  const conHoja = evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada';
+  const conDrive = evento === 'aprobacion' || evento === 'registrada';
+
+  return {
+    tipo: s.tipo,
+    tipoEtiqueta: ETIQUETA_TIPO[s.tipo],
+    estado: s.estado,
+    empleadoNombre: s.empleadoNombre,
+    correo: CORREO_DE[evento](s),
+    calendario: conCalendario ? calendario(s) : null,
+    hoja: conHoja ? hoja(s) : null,
+    drive: conDrive ? drive(s) : null,
+  };
+}
+
+/** Los eventos que dispara el alta de una solicitud, en orden de envío. */
+export function eventosDeAlta(tipo: Solicitud['tipo']): EventoOutbox[] {
+  // La incapacidad se informa y ya: no hay a quién avisar para que apruebe.
+  return tipo === 'incapacidad' ? ['registrada'] : ['creada', 'aprobacion'];
+}

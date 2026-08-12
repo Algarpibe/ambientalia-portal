@@ -56,5 +56,17 @@ esa página.
 4. `Dockerfile` → `COPY apps/<app>/package*.json ./apps/<app>/`.
 4b. `apps/portal/tailwind.config.js` → añadir `"../<app>/src/**/*.{js,ts,jsx,tsx}"` al `content`. **← el otro que se olvida.** Sin esto, las clases que SOLO usa esa app se purgan: la app parece estilada (por solape con otras sub-apps) pero las clases únicas salen invisibles (p. ej. colores/tamaños concretos). Costó un rato con las "luces" de OV pendientes.
 5. Backend: guard `requireApp('<id>')` en los endpoints de datos de la app.
-6. Asignar la app a los usuarios en *Admin → Usuarios* (escribe `user_apps` → JWT).
-7. Los usuarios ya logueados: **cerrar sesión y volver a entrar** (ver punto 1).
+6. Si la app escribe en BD: `apps/hub-api/src/users/migrations/0NN_<app>.sql`
+   **idempotente** (se re-ejecuta en cada arranque) **+ añadirla al array
+   `MIGRATIONS` de `apps/hub-api/src/db.ts`**, que se mantiene a mano.
+7. Montar el router en `apps/hub-api/src/index.ts` **dentro de `initDb().then()`**,
+   con el import terminado en `.js` aunque el fichero sea `.ts` (NodeNext).
+8. Asignar la app a los usuarios en *Admin → Usuarios* (escribe `user_apps` → JWT).
+9. Los usuarios ya logueados: **cerrar sesión y volver a entrar** (ver punto 1).
+
+Del scaffold de la sub-app, dos cosas que el CI comprueba y no son obvias:
+`tsconfig.json` necesita `"noEmit": true` (hay un guard que falla si aparece
+cualquier `.js` bajo `apps/*/src`), y `vite.config.ts` necesita los alias de
+`react`/`react-dom` a `../../node_modules` (si no, `npm run dev` de la sub-app
+carga una segunda copia de React y los hooks revientan). Puertos de dev ya
+usados: 3000, 5173, 5175, 5182 (WO-sales), 5183 (contabilidad), 5184 (ausencias).
