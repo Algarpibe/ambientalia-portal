@@ -40,7 +40,10 @@ Mismo patrón que WO-sales (ver [n8n-automatizaciones.md](../n8n-automatizacione
 **hub-api decide QUÉ hay que hacer; n8n pregunta por horario, ejecuta y confirma.**
 
 ```
-Cada minuto → GET /api/ausencias/n8n/pendiente   (X-Ausencias-Cron-Token)
+Cada 10 min ─────────────────┐
+                             ├→ GET /api/ausencias/n8n/pendiente
+POST /webhook/ausencias-aviso┘        (X-Ausencias-Cron-Token)
+  → IF token válido ────────┘
   → IF hay → Repartir eventos (uno por evento)
   → Enviar correo (Gmail)
   → IF calendario → Google Calendar ┐
@@ -48,6 +51,22 @@ Cada minuto → GET /api/ausencias/n8n/pendiente   (X-Ausencias-Cron-Token)
   → IF drive → GET adjunto → Drive  ┘
   → POST /api/ausencias/n8n/confirmado  { ids: [id] }
 ```
+
+**Dos disparadores, uno solo obligatorio.** El barrido de 10 minutos es el
+mecanismo; el webhook es un atajo para que el correo salga en un segundo. hub-api
+pega en él al encolar (`avisar.ts`) **sin esperar respuesta y sin propagar
+errores**: si n8n está caído o el aviso se pierde, la solicitud ya está guardada
+y el barrido la recoge. Por eso el push no necesita reintentos ni cola propia.
+
+El webhook es público, así que el primer nodo compara la cabecera contra
+`$env.AUSENCIAS_CRON_TOKEN` y corta si no coincide — verificado: una llamada sin
+token ejecuta dos nodos y se para. Reutiliza el token del cron a propósito: es la
+misma frontera de confianza en el otro sentido, y un secreto más solo añadiría
+algo que rotar.
+
+Empezó siendo un barrido de 1 minuto. Funcionaba, pero eran 1.440 ejecuciones
+diarias para no hacer nada casi siempre; con el híbrido son 144 más una por
+solicitud o decisión real.
 
 **Cada fila del outbox es exactamente un correo**, y por eso el alta de una
 solicitud genera dos (`creada` = acuse al solicitante, `aprobacion` = aviso a
@@ -122,8 +141,13 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 
 1. `git push origin main` y **redesplegar hub-api** (corre la migración 015) y
    luego el **portal**. Son dos servicios distintos; commit local ≠ desplegado.
-2. Variables nuevas en hub-api: `AUSENCIAS_CRON_TOKEN` y `PORTAL_URL`.
-3. La misma `AUSENCIAS_CRON_TOKEN` en n8n (*Settings → Variables*).
+2. Variables nuevas en hub-api: `AUSENCIAS_CRON_TOKEN`, `PORTAL_URL` y
+   `AUSENCIAS_WEBHOOK_URL`
+   (`https://<n8n>/webhook/ausencias-aviso`; sin ella todo funciona, solo que el
+   correo espera al barrido).
+3. La misma `AUSENCIAS_CRON_TOKEN` como **variable de entorno del contenedor de
+   n8n** en EasyPanel, y reiniciar el servicio. No es la pantalla *Settings →
+   Variables* de n8n: los nodos la leen con `$env`, que son las del proceso.
 4. Asignar la app `ausencias` a los usuarios en *Admin → Usuarios*. Quien ya
    tuviera sesión abierta debe **cerrar sesión y volver a entrar**: el `apps[]`
    viaja congelado en el JWT. Con eso ya pueden solicitar — la ficha de empleado

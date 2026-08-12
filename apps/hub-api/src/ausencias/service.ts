@@ -1,4 +1,5 @@
 import type { Pool } from '@algarpibe/zoho-sync';
+import { avisarN8n } from './avisar.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
@@ -163,7 +164,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
     throw new AusenciaError('adjunto_demasiado_grande', 400, 'adjunto');
   }
 
-  return repo.crearSolicitud(
+  const solicitud = await repo.crearSolicitud(
     db,
     {
       tipo: datos.tipo,
@@ -182,6 +183,12 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
     eventosDeAlta(datos.tipo),
     construirPayload,
   );
+
+  // Sin await: el aviso es un atajo para que el correo salga en un segundo en vez
+  // de en unos minutos. La solicitud ya está guardada y encolada, así que esto no
+  // puede fallar de forma que importe. Ver avisar.ts.
+  void avisarN8n();
+  return solicitud;
 }
 
 export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
@@ -214,6 +221,8 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
   // El UPDATE lleva `AND estado = 'pendiente'`: si no devolvió fila es que otro
   // (o un doble clic) ya la decidió. Es un conflicto, no un fallo del servidor.
   if (!actualizada) throw new AusenciaError('ya_decidida', 409);
+
+  void avisarN8n();
   return actualizada;
 }
 
