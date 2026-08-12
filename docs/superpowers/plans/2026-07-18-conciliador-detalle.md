@@ -282,6 +282,6 @@ git commit -m "feat(payment-reconciliation): clic en fila abre el detalle (factu
 
 ## Notas
 - Reutiliza `getDetalleFactura`/`getDetalleOV` — NO reescribas la lógica ni toques `contabilidad/detalle.ts`.
-- Tests filtrados. No `npm install`. No tocar `apps/salestracker-pro`.
+- Tests filtrados. No `npm install`.
 - El endpoint nuevo es `requireAuth` (consistente con los del Conciliador); no requiere que el usuario tenga la app contabilidad.
 - Usuario en PowerShell 5.1 (deploy/push sin `&&`).

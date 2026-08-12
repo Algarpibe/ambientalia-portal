@@ -21,7 +21,7 @@ export function getHubPool(): Pool {
 
 // Migraciones aplicadas en orden al arranque. Son idempotentes (IF NOT EXISTS),
 // así que re-ejecutarlas en cada boot es seguro.
-const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '009_salestracker_user_state.sql', '010_salestracker_categories.sql', '011_salestracker_categories_seed.sql', '012_salestracker_groupings.sql', '013_user_state_fk_cascade.sql'];
+const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '013_user_state_fk_cascade.sql', '014_drop_salestracker.sql'];
 
 function migrationsDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'users', 'migrations');

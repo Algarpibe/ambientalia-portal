@@ -70,13 +70,6 @@ const aplicaciones: AppConfig[] = [
     path: "/contabilidad",
     icon: Landmark,
     color: "from-teal-400 to-emerald-600"
-  },
-  {
-    name: "SalesTracker",
-    description: "Análisis comercial: ventas, backlog y márgenes.",
-    path: "/salestracker",
-    icon: TrendingUp,
-    color: "from-sky-400 to-indigo-600"
   }
 ];
 

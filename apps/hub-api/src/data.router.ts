@@ -15,8 +15,8 @@ import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
 // usuario autenticado (incluido un token legacy AUTH_USERS con apps:[]) podía
 // leer la rentabilidad/valoración/cartera de todos los clientes y enumerar el
 // detalle de facturas/OV (NIT + dirección = PII, Ley 1581). Ahora cada ruta
-// exige requireApp(<appId>) igual que los routers de contabilidad/salestracker/
-// wo-sales: la autorización por-app se valida en el servidor, no solo en el
+// exige requireApp(<appId>) igual que los routers de contabilidad/wo-sales:
+// la autorización por-app se valida en el servidor, no solo en el
 // AppGuard del frontend. Los appId coinciden con portal/src/lib/apps.ts.
 const APP_PAGOS = 'payment-reconciliation';
 const APP_RENTABILIDAD = 'customer-profitability';
