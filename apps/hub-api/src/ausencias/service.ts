@@ -425,7 +425,9 @@ function combinar(
  * gente que aprueba si no lo es.
  */
 export async function saldosVisibles(db: Pool, sesion: Sesion): Promise<SaldoDeEmpleado[]> {
-  const empleados = await repo.empleadosConSaldo(db, sesion.esAdmin ? null : sesion.email);
+  // El `null` explícito es obligatorio: sin él, TypeScript ya no compila (ver
+  // el porqué en el JSDoc de `empleadosConSaldo`).
+  const empleados = await repo.empleadosConSaldo(db, sesion.esAdmin ? null : sesion.email, null);
   // Para quien no es admin, no aprobar a nadie es un 403. Para un admin, una
   // lista vacía es solo una lista vacía: la BD sin empleados todavía.
   if (!sesion.esAdmin && empleados.length === 0) throw new AusenciaError('no_es_aprobador', 403);
@@ -451,6 +453,13 @@ export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): P
   if (!existe) throw new AusenciaError('empleado_no_encontrado', 404);
 
   const empleados = await repo.empleadosConSaldo(db, null, empleadoId);
+  // El 404 de arriba certifica que la fila existía y estaba activa en el
+  // instante del UPDATE, pero este SELECT es una consulta aparte, sin
+  // transacción que las una: entre una y otra, una desactivación concurrente
+  // de ese mismo empleado dejaría `empleados` vacío. Sin esta guarda,
+  // `combinar([], ...)[0]` sería `undefined` y el 404 correcto degradaría en
+  // un 500 al intentar leer `.saldo` aguas arriba.
+  if (empleados.length === 0) throw new AusenciaError('empleado_no_encontrado', 404);
   const vacaciones = await repo.vacacionesDeEmpleados(db, [empleadoId]);
   return combinar(empleados, vacaciones, hoyEnColombia())[0];
 }

@@ -266,11 +266,18 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
  *  - `empleadoId` acota a una sola persona (rendimiento): el endpoint de
  *    contexto, que se llama en cada carga de la app, solo necesita el saldo de
  *    quien ha entrado y no puede pagar un escaneo entero de la tabla por eso.
+ *
+ * `empleadoId` NO tiene valor por defecto a propósito: los dos filtros son del
+ * mismo tipo (`string | null`), así que un valor por defecto dejaría compilar
+ * `empleadosConSaldo(db, id)` con `id` colado en `soloDe` — y ese error falla
+ * en SILENCIO, porque `aprobador_correo` nunca es un uuid: la consulta no
+ * lanza, simplemente devuelve `[]`. Quien no quiera acotar por empleado tiene
+ * que escribir el `null` explícito.
  */
 export async function empleadosConSaldo(
   db: Pool,
   soloDe: string | null,
-  empleadoId: string | null = null,
+  empleadoId: string | null,
 ): Promise<EmpleadoConSaldo[]> {
   const { rows } = await db.query(
     `SELECT id, nombre_completo, correo,
