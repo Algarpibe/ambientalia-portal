@@ -516,4 +516,4 @@ SELECT so.salesorder_number,
 - NO tocar `apps/hub-api/src/salesOrders.ts` ni el endpoint `/api/sales-orders/pending` (los usa el Conciliador).
 - Tests filtrados siempre (`-- ovPendientes`, `-- contabilidad`); nunca la suite completa de hub-api.
 - El usuario usa **PowerShell 5.1** (deploy/push sin `&&`).
-- No `npm install`. No tocar `apps/salestracker-pro`.
+- No `npm install`.

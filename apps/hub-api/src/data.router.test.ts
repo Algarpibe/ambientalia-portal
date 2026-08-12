@@ -66,7 +66,7 @@ describe('createDataRouter — autorización por-app (SEC-210/211, PRIV-810)', (
       });
 
       it('403 con la app equivocada', async () => {
-        const res = await request(app()).get(path).set('Authorization', `Bearer ${token(['salestracker'])}`);
+        const res = await request(app()).get(path).set('Authorization', `Bearer ${token(['otra-app'])}`);
         expect(res.status).toBe(403);
       });
 

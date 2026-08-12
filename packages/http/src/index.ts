@@ -1,6 +1,6 @@
 // @suite/http — helpers de respuesta HTTP compartidos por las apps del portal.
-// Cierra AI-611: salestracker y contabilidad definían mensajeDeError() con ramas
-// divergentes (salestracker cubría 401/403/409/400; contabilidad solo 401/403).
+// Cierra AI-611: varias apps definían mensajeDeError() con ramas divergentes
+// (unas cubrían 401/403/409/400; contabilidad solo 401/403).
 
 /**
  * Traduce una respuesta NO ok del hub-api a un mensaje en español accionable.

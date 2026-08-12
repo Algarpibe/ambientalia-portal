@@ -16,7 +16,6 @@ COPY apps/inventory-optimization/package*.json ./apps/inventory-optimization/
 COPY apps/payment-reconciliation/package*.json ./apps/payment-reconciliation/
 COPY apps/product-sales/package*.json ./apps/product-sales/
 COPY apps/contabilidad/package*.json ./apps/contabilidad/
-COPY apps/salestracker/package*.json ./apps/salestracker/
 
 # Instalar dependencias globales del monorepo
 RUN npm install

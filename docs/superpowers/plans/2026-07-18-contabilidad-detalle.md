@@ -569,6 +569,6 @@ SELECT it.sku, it.name, li.quantity, li.rate
 
 ## Notas para el implementador
 - Tests filtrados (`-- detalle`, `-- contabilidad`); nunca la suite completa de hub-api.
-- No tocar `salesOrders.ts` ni el endpoint compartido. No `npm install`. No tocar `apps/salestracker-pro`.
+- No tocar `salesOrders.ts` ni el endpoint compartido. No `npm install`.
 - Si `li.line_item_id` no existiera en `invoice_line_items` (poco probable), cambiar el `ORDER BY` por `it.name`; lo demás no cambia.
 - El usuario usa PowerShell 5.1 (deploy/push sin `&&`).

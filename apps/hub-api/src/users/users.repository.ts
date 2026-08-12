@@ -150,10 +150,9 @@ export class UserRepository {
 
   /**
    * Elimina un usuario de forma permanente. Borra `user_apps` y `users` dentro
-   * de una transacción; las FK `ON DELETE CASCADE` (mig. 001 y 013) limpian
-   * además `st_favorites` y `st_saved_views`, y ponen a NULL
-   * `contabilidad_overrides.updated_by` — supresión completa (PRIV-812, Ley 1581
-   * art. 8). La transacción garantiza atomicidad. Devuelve true si existía.
+   * de una transacción; las FK `ON DELETE CASCADE` (mig. 001 y 013) ponen además
+   * a NULL `contabilidad_overrides.updated_by` — supresión completa (PRIV-812,
+   * Ley 1581 art. 8). La transacción garantiza atomicidad. Devuelve true si existía.
    */
   async delete(id: string): Promise<boolean> {
     return this.withTransaction(async (client) => {
