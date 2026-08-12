@@ -247,14 +247,31 @@ interface FilaEmpleadoSaldoDb {
   fecha_corte: string | null;
 }
 
+function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
+  return {
+    empleadoId: r.id,
+    nombreCompleto: r.nombre_completo,
+    correo: r.correo,
+    saldoCorte: r.saldo_corte,
+    fechaCorte: r.fecha_corte,
+  };
+}
+
 /**
  * Empleados activos con su configuración de saldo.
  *
- * `soloDe` acota a los que tienen ese correo como aprobador; null = todos, que es
- * lo que recibe un admin. El saldo de vacaciones es un dato personal y no hay
- * motivo para que un aprobador vea el de gente que no aprueba.
+ * Dos filtros independientes, cada uno null = sin acotar:
+ *  - `soloDe` acota a los que tienen ese correo como aprobador (privacidad): un
+ *    aprobador no tiene por qué ver el saldo de gente que no aprueba.
+ *  - `empleadoId` acota a una sola persona (rendimiento): el endpoint de
+ *    contexto, que se llama en cada carga de la app, solo necesita el saldo de
+ *    quien ha entrado y no puede pagar un escaneo entero de la tabla por eso.
  */
-export async function empleadosConSaldo(db: Pool, soloDe: string | null): Promise<EmpleadoConSaldo[]> {
+export async function empleadosConSaldo(
+  db: Pool,
+  soloDe: string | null,
+  empleadoId: string | null = null,
+): Promise<EmpleadoConSaldo[]> {
   const { rows } = await db.query(
     `SELECT id, nombre_completo, correo,
             saldo_corte::float8 AS saldo_corte,
@@ -262,16 +279,11 @@ export async function empleadosConSaldo(db: Pool, soloDe: string | null): Promis
        FROM portal.empleados
       WHERE activo
         AND ($1::text IS NULL OR lower(aprobador_correo) = lower($1))
+        AND ($2::uuid IS NULL OR id = $2::uuid)
       ORDER BY nombre_completo`,
-    [soloDe],
+    [soloDe, empleadoId],
   );
-  return (rows as FilaEmpleadoSaldoDb[]).map((r) => ({
-    empleadoId: r.id,
-    nombreCompleto: r.nombre_completo,
-    correo: r.correo,
-    saldoCorte: r.saldo_corte,
-    fechaCorte: r.fecha_corte,
-  }));
+  return (rows as FilaEmpleadoSaldoDb[]).map(aEmpleadoConSaldo);
 }
 
 /** Una solicitud reducida a lo que el cálculo del saldo necesita. */
@@ -291,6 +303,16 @@ interface FilaVacacionDb {
   estado: Solicitud['estado'];
 }
 
+function aVacacionDeEmpleado(r: FilaVacacionDb): VacacionDeEmpleado {
+  return {
+    empleadoId: r.empleado_id,
+    tipo: r.tipo,
+    fechaInicio: r.fecha_inicio,
+    diasHabiles: r.dias_habiles,
+    estado: r.estado,
+  };
+}
+
 /**
  * Las solicitudes de esos empleados que pueden tocar el saldo.
  *
@@ -307,20 +329,22 @@ export async function vacacionesDeEmpleados(db: Pool, ids: string[]): Promise<Va
       WHERE tipo = 'vacaciones' AND empleado_id = ANY($1::uuid[])`,
     [ids],
   );
-  return (rows as FilaVacacionDb[]).map((r) => ({
-    empleadoId: r.empleado_id,
-    tipo: r.tipo,
-    fechaInicio: r.fecha_inicio,
-    diasHabiles: r.dias_habiles,
-    estado: r.estado,
-  }));
+  return (rows as FilaVacacionDb[]).map(aVacacionDeEmpleado);
 }
 
 /**
- * Fija (o vacía) el punto de corte de un empleado. Devuelve false si no existía.
+ * Fija (o vacía) el punto de corte de un empleado. Devuelve false si no existía
+ * (o estaba inactivo: ver más abajo).
  *
  * No encola nada en el outbox, igual que la edición del registro general: ajustar
  * un saldo es corregir el registro, no tomar una decisión que haya que comunicar.
+ *
+ * El `AND activo` es obligatorio y no cosmético: la escritura tiene que cubrir
+ * el mismo conjunto que la lectura (`empleadosConSaldo` también lleva
+ * `WHERE activo`). Sin él, se podría fijar el saldo de alguien desactivado y
+ * el servicio creería que fue bien (`true`) cuando en realidad ninguna lectura
+ * posterior lo va a mostrar nunca — el servicio no lanzaría su 404 y el
+ * siguiente `empleadosConSaldo` devolvería una lista vacía para ese id.
  */
 export async function fijarSaldo(
   db: Pool,
@@ -331,7 +355,7 @@ export async function fijarSaldo(
   const { rowCount } = await db.query(
     `UPDATE portal.empleados
         SET saldo_corte = $2, fecha_corte = $3::date
-      WHERE id = $1`,
+      WHERE id = $1 AND activo`,
     [empleadoId, saldoCorte, fechaCorte],
   );
   return (rowCount ?? 0) > 0;
