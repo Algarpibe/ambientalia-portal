@@ -227,6 +227,116 @@ export async function importarEmpleados(db: Pool, filas: FilaEmpleado[]): Promis
   return { importados: rowCount ?? 0 };
 }
 
+// ── Saldo de vacaciones ────────────────────────────────────────────────────
+
+/** Un empleado con su configuración de saldo, tal como sale de la BD. */
+export interface EmpleadoConSaldo {
+  empleadoId: string;
+  nombreCompleto: string;
+  correo: string;
+  /** Null mientras nadie lo haya configurado. Va siempre en pareja con la fecha. */
+  saldoCorte: number | null;
+  fechaCorte: string | null;
+}
+
+interface FilaEmpleadoSaldoDb {
+  id: string;
+  nombre_completo: string;
+  correo: string;
+  saldo_corte: number | null;
+  fecha_corte: string | null;
+}
+
+/**
+ * Empleados activos con su configuración de saldo.
+ *
+ * `soloDe` acota a los que tienen ese correo como aprobador; null = todos, que es
+ * lo que recibe un admin. El saldo de vacaciones es un dato personal y no hay
+ * motivo para que un aprobador vea el de gente que no aprueba.
+ */
+export async function empleadosConSaldo(db: Pool, soloDe: string | null): Promise<EmpleadoConSaldo[]> {
+  const { rows } = await db.query(
+    `SELECT id, nombre_completo, correo,
+            saldo_corte::float8 AS saldo_corte,
+            fecha_corte::text   AS fecha_corte
+       FROM portal.empleados
+      WHERE activo
+        AND ($1::text IS NULL OR lower(aprobador_correo) = lower($1))
+      ORDER BY nombre_completo`,
+    [soloDe],
+  );
+  return (rows as FilaEmpleadoSaldoDb[]).map((r) => ({
+    empleadoId: r.id,
+    nombreCompleto: r.nombre_completo,
+    correo: r.correo,
+    saldoCorte: r.saldo_corte,
+    fechaCorte: r.fecha_corte,
+  }));
+}
+
+/** Una solicitud reducida a lo que el cálculo del saldo necesita. */
+export interface VacacionDeEmpleado {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  fechaInicio: string;
+  diasHabiles: number;
+  estado: Solicitud['estado'];
+}
+
+interface FilaVacacionDb {
+  empleado_id: string;
+  tipo: TipoSolicitud;
+  fecha_inicio: string;
+  dias_habiles: number;
+  estado: Solicitud['estado'];
+}
+
+/**
+ * Las solicitudes de esos empleados que pueden tocar el saldo.
+ *
+ * Se filtra por tipo aquí además de en `calcularSaldo` porque traer permisos e
+ * incapacidades para descartarlos después es tráfico gratis; el filtro del módulo
+ * puro se queda igualmente como red de seguridad.
+ */
+export async function vacacionesDeEmpleados(db: Pool, ids: string[]): Promise<VacacionDeEmpleado[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await db.query(
+    `SELECT empleado_id, tipo, fecha_inicio::text AS fecha_inicio,
+            dias_habiles::float8 AS dias_habiles, estado
+       FROM portal.solicitudes_ausencia
+      WHERE tipo = 'vacaciones' AND empleado_id = ANY($1::uuid[])`,
+    [ids],
+  );
+  return (rows as FilaVacacionDb[]).map((r) => ({
+    empleadoId: r.empleado_id,
+    tipo: r.tipo,
+    fechaInicio: r.fecha_inicio,
+    diasHabiles: r.dias_habiles,
+    estado: r.estado,
+  }));
+}
+
+/**
+ * Fija (o vacía) el punto de corte de un empleado. Devuelve false si no existía.
+ *
+ * No encola nada en el outbox, igual que la edición del registro general: ajustar
+ * un saldo es corregir el registro, no tomar una decisión que haya que comunicar.
+ */
+export async function fijarSaldo(
+  db: Pool,
+  empleadoId: string,
+  saldoCorte: number | null,
+  fechaCorte: string | null,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados
+        SET saldo_corte = $2, fecha_corte = $3::date
+      WHERE id = $1`,
+    [empleadoId, saldoCorte, fechaCorte],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 // ── Histórico importado de la hoja ─────────────────────────────────────────
 
 /** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
