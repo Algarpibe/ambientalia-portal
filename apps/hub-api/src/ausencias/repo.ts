@@ -82,6 +82,90 @@ export async function empleadoDeUsuario(db: Pool, userId: string | null, email: 
 }
 
 /**
+ * Devuelve la ficha del usuario, **creándola si no existe** a partir de su
+ * cuenta del portal.
+ *
+ * La ficha casi no aporta datos propios: nombre y correo ya están en
+ * `portal.users`, `aprobador_correo` tiene DEFAULT y `cargo` es decorativo. El
+ * permiso real lo da tener la app asignada, así que exigir además un alta
+ * manual solo servía para dejar a la gente mirando una pantalla sin formulario.
+ *
+ * Hace dos cosas, en este orden:
+ *  1. Si ya hay ficha con ese correo pero sin `user_id`, la vincula (es el caso
+ *     de las importadas desde la hoja antes de que existiera la cuenta).
+ *  2. Si no hay ninguna, la crea desde `portal.users`.
+ *
+ * Devuelve null si el usuario no está en `portal.users` (token legacy de
+ * AUTH_USERS) o si su ficha está desactivada: desactivar a alguien es una
+ * decisión del admin y esto no debe deshacerla.
+ */
+export async function asegurarEmpleado(db: Pool, userId: string | null, email: string): Promise<Empleado | null> {
+  const existente = await empleadoDeUsuario(db, userId, email);
+  if (existente) {
+    if (!existente.userId && userId) {
+      await db.query('UPDATE portal.empleados SET user_id = $2 WHERE id = $1 AND user_id IS NULL', [
+        existente.id,
+        userId,
+      ]);
+      return { ...existente, userId };
+    }
+    return existente;
+  }
+
+  // ON CONFLICT DO NOTHING y no DO UPDATE: si ya existe una ficha desactivada
+  // con ese correo, se respeta tal cual y el re-read de abajo devuelve null.
+  await db.query(
+    `INSERT INTO portal.empleados (nombre_completo, correo, user_id)
+     SELECT u.full_name, lower(u.email), u.id
+       FROM portal.users u
+      WHERE u.status = 'active'
+        AND (($1::uuid IS NOT NULL AND u.id = $1::uuid) OR lower(u.email) = lower($2))
+      LIMIT 1
+     ON CONFLICT (correo) DO NOTHING`,
+    [userId, email],
+  );
+
+  return empleadoDeUsuario(db, userId, email);
+}
+
+/**
+ * Da de alta de golpe a todos los usuarios activos con la app asignada.
+ *
+ * Se hace en dos pasos y no en un solo upsert para poder decirle al admin qué
+ * pasó: cuántas fichas se crearon y cuántas ya existían y solo se vincularon
+ * (las que venían de la hoja de Google).
+ */
+export async function sincronizarDesdeUsuarios(
+  db: Pool,
+  appId: string,
+): Promise<{ creados: number; vinculados: number }> {
+  return withTransaction(db, async (client) => {
+    const vinculados = await client.query(
+      `UPDATE portal.empleados e
+          SET user_id = u.id
+         FROM portal.users u
+              JOIN portal.user_apps ua ON ua.user_id = u.id AND ua.app_id = $1
+        WHERE e.user_id IS NULL
+          AND u.status = 'active'
+          AND lower(e.correo) = lower(u.email)`,
+      [appId],
+    );
+
+    const creados = await client.query(
+      `INSERT INTO portal.empleados (nombre_completo, correo, user_id)
+       SELECT u.full_name, lower(u.email), u.id
+         FROM portal.users u
+         JOIN portal.user_apps ua ON ua.user_id = u.id AND ua.app_id = $1
+        WHERE u.status = 'active'
+       ON CONFLICT (correo) DO NOTHING`,
+      [appId],
+    );
+
+    return { creados: creados.rowCount ?? 0, vinculados: vinculados.rowCount ?? 0 };
+  });
+}
+
+/**
  * True si alguien tiene a este correo como aprobador. Se pregunta por el
  * maestro y no por las solicitudes vivas: quien aprueba sigue siendo aprobador
  * aunque ahora mismo no tenga nada pendiente, y la pestaña de la bandeja debe

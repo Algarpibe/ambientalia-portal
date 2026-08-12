@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Upload } from 'lucide-react';
-import { fetchEmpleados, importarEmpleados, type Empleado } from './api';
+import { AlertTriangle, CheckCircle2, Loader2, Upload, UserPlus } from 'lucide-react';
+import { fetchEmpleados, importarEmpleados, sincronizarEmpleados, type Empleado } from './api';
 
-// Importación del maestro de empleados desde la pestaña `consolidado` de la hoja
-// `consulta_vacaciones`. Se pega tal cual (el portapapeles de Google Sheets
-// separa columnas con tabuladores) en vez de subir un CSV: así los datos de
-// nómina no pasan por ningún archivo intermedio ni acaban en el repositorio.
+// Mantenimiento del maestro de empleados. Dos caminos, y ninguno es obligatorio
+// para arrancar: quien tiene la app asignada se da de alta solo la primera vez
+// que entra.
+//
+//  - «Dar de alta desde el portal»: crea las fichas que faltan a partir de las
+//    cuentas del portal. Un clic, sin teclear nada.
+//  - Pegar la hoja `consolidado`: rellena los CARGOS en bloque y corrige los
+//    nombres. Se pega tal cual (el portapapeles de Sheets separa con
+//    tabuladores) en vez de subir un CSV, para que los datos de nómina no pasen
+//    por ningún archivo intermedio ni acaben en el repositorio.
 
 interface Fila {
   nombreCompleto: string;
@@ -49,6 +55,7 @@ export default function ImportarEmpleados() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [importando, setImportando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
 
@@ -82,11 +89,49 @@ export default function ImportarEmpleados() {
 
   const sinCuenta = empleados.filter((e) => !e.userId).length;
 
+  async function sincronizar() {
+    setSincronizando(true);
+    setError(null);
+    setExito(null);
+    try {
+      const { creados, vinculados } = await sincronizarEmpleados();
+      setExito(
+        creados === 0 && vinculados === 0
+          ? 'Todos los usuarios con la app asignada ya tenían ficha.'
+          : `${creados} fichas nuevas y ${vinculados} vinculadas a su cuenta del portal.`,
+      );
+      recargar();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   return (
     <div className="max-w-4xl">
+      <section className="mb-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <h3 className="mb-1 text-sm font-semibold text-gray-900">Dar de alta desde el portal</h3>
+        <p className="mb-3 text-sm text-gray-600">
+          Crea la ficha de cada usuario del portal que ya tenga esta app asignada. No hace falta hacerlo: quien entre
+          por primera vez se da de alta solo. Sirve para tener la lista completa de una vez.
+        </p>
+        <button
+          type="button"
+          disabled={sincronizando}
+          onClick={() => void sincronizar()}
+          className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-100 disabled:opacity-50"
+        >
+          {sincronizando ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+          Dar de alta desde el portal
+        </button>
+      </section>
+
+      <h3 className="mb-1 text-sm font-semibold text-gray-900">Completar cargos desde la hoja</h3>
       <p className="mb-3 text-sm text-gray-600">
         Pega aquí las filas de la pestaña <b>consolidado</b> de la hoja <b>consulta_vacaciones</b>, en este orden:{' '}
-        {CABECERAS.join(' · ')}. Se actualiza por correo, así que reimportar la hoja entera es seguro.
+        {CABECERAS.join(' · ')}. Añade el cargo a quien ya esté y da de alta a quien falte. Se actualiza por correo, así
+        que reimportar la hoja entera es seguro.
       </p>
 
       <textarea

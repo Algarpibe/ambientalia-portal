@@ -127,9 +127,16 @@ export interface Sesion {
   esAdmin: boolean;
 }
 
-/** El empleado del usuario logueado, o un 403 explicando que falta darlo de alta. */
+/**
+ * El empleado del usuario logueado, dándolo de alta si aún no tenía ficha.
+ *
+ * Quien tiene la app asignada es exactamente quien debe poder solicitar, así
+ * que la asignación ya es el permiso; la ficha se deriva sola de la cuenta del
+ * portal. Solo queda 403 cuando de verdad no hay de dónde sacarla: un token
+ * legacy sin usuario en BD, o una ficha que un admin desactivó a propósito.
+ */
 export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Empleado> {
-  const empleado = await repo.empleadoDeUsuario(db, sesion.userId, sesion.email);
+  const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
   if (!empleado) throw new AusenciaError('empleado_no_registrado', 403);
   return empleado;
 }

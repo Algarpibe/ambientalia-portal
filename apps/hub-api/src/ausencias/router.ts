@@ -56,7 +56,10 @@ export function createAusenciasRouter(db: Pool): Router {
   router.get('/ausencias/contexto', ...gated, async (req: Request, res: Response) => {
     try {
       const sesion = sesionDe(req);
-      const empleado = await repo.empleadoDeUsuario(db, sesion.userId, sesion.email);
+      // Escribe en un GET, a sabiendas: si la ficha no se creara aquí, la app
+      // cargaría sin las pestañas de solicitud y el usuario no tendría forma de
+      // entender por qué. Es un upsert idempotente, no un efecto sorpresa.
+      const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
       const anio = new Date().getUTCFullYear();
       const festivos = [anio, anio + 1, anio + 2].flatMap((a) => [...festivosColombia(a)]).sort();
       res.json({
@@ -154,6 +157,15 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json(await repo.importarEmpleados(db, filas));
     } catch (e) {
       sendError(res, e, 'ausencias_empleados_import');
+    }
+  });
+
+  /** Alta en bloque desde los usuarios del portal que ya tienen la app asignada. */
+  router.post('/ausencias/empleados/sincronizar', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json(await repo.sincronizarDesdeUsuarios(db, APP_ID));
+    } catch (e) {
+      sendError(res, e, 'ausencias_empleados_sincronizar');
     }
   });
 

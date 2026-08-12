@@ -98,6 +98,10 @@ export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) 
 export const importarEmpleados = (empleados: unknown[]) =>
   post<{ importados: number }>('/api/ausencias/empleados/import', { empleados });
 
+/** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
+export const sincronizarEmpleados = () =>
+  post<{ creados: number; vinculados: number }>('/api/ausencias/empleados/sincronizar', {});
+
 export const fetchEmpleados = () =>
   get<{ empleados: Empleado[] }>('/api/ausencias/empleados').then((d) => d.empleados);
 

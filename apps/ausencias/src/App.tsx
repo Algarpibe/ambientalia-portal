@@ -93,14 +93,18 @@ export default function App() {
         </div>
       )}
 
-      {/* Sin ficha de empleado no hay identidad que asociar a la solicitud. Se
-          explica qué hacer en vez de mostrar un formulario que fallaría al enviar. */}
-      {!cargando && contexto && !contexto.empleado && !contexto.esAdmin && (
+      {/* Con el alta automática esto casi no se ve: solo cuando no hay de dónde
+          sacar la ficha (una cuenta antigua sin fila en la BD de usuarios) o
+          cuando un administrador desactivó la ficha a propósito. Se muestra
+          también a los administradores — ocultárselo les dejaba ante una
+          pantalla sin formulario y sin ninguna pista de por qué. */}
+      {!cargando && contexto && !contexto.empleado && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
-          <p className="mb-1 font-medium">Tu usuario aún no está vinculado a una ficha de empleado.</p>
+          <p className="mb-1 font-medium">Tu usuario no tiene ficha de empleado.</p>
           <p>
-            Pide a un administrador que importe el maestro de empleados incluyendo tu correo (
-            <b>{contexto.email}</b>) para poder enviar solicitudes.
+            No hemos podido crearla a partir de tu cuenta (<b>{contexto.email}</b>). Suele pasar cuando la cuenta es
+            anterior al sistema de usuarios, o cuando un administrador desactivó la ficha. Pide que te den de alta desde{' '}
+            <b>Empleados</b>.
           </p>
         </div>
       )}

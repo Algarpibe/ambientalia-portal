@@ -24,7 +24,10 @@ interface EventoFalso {
 }
 
 const estado = {
-  empleado: null as unknown,
+  empleado: null as any,
+  /** Si el usuario de la sesión existe en portal.users (falso = token legacy). */
+  usuarioEnPortal: true,
+  altasAutomaticas: 0,
   solicitudes: [] as Record<string, unknown>[],
   eventos: [] as EventoFalso[],
   adjuntos: new Map<string, Record<string, unknown>>(),
@@ -33,6 +36,25 @@ const estado = {
 
 vi.mock('./repo.js', () => ({
   empleadoDeUsuario: async () => estado.empleado,
+  // Modela el alta automática: si no hay ficha pero el usuario existe en el
+  // portal, se crea sola. `usuarioEnPortal: false` simula el token legacy.
+  asegurarEmpleado: async (_db: unknown, userId: string | null, email: string) => {
+    if (estado.empleado) return estado.empleado;
+    if (!estado.usuarioEnPortal) return null;
+    estado.empleado = {
+      id: 'e-auto',
+      nombreCompleto: 'Ana Ruiz',
+      correo: email,
+      cargo: null,
+      credencial: null,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      userId,
+      activo: true,
+    };
+    estado.altasAutomaticas += 1;
+    return estado.empleado;
+  },
+  sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   esAprobadorDeAlguien: async (_db: unknown, email: string) =>
     email.toLowerCase() === 'comercial@ambientalia.com.co',
   listarEmpleados: async () => [],
@@ -159,6 +181,8 @@ beforeEach(() => {
     userId: null,
     activo: true,
   };
+  estado.usuarioEnPortal = true;
+  estado.altasAutomaticas = 0;
   estado.solicitudes = [];
   estado.eventos = [];
   estado.adjuntos = new Map();
@@ -179,14 +203,40 @@ describe('guards de la app', () => {
       .expect(403);
   });
 
-  it('403 si el usuario no está dado de alta como empleado', async () => {
+  it('un usuario sin ficha se da de alta solo al pedir', async () => {
+    // Tener la app asignada YA es el permiso; exigir además un alta manual solo
+    // dejaba a la gente ante una pantalla sin formulario y sin explicación.
     estado.empleado = null;
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    expect(estado.altasAutomaticas).toBe(1);
+  });
+
+  it('403 solo si no hay de dónde sacar la ficha (token legacy sin usuario en BD)', async () => {
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
       .send(nueva())
       .expect(403);
     expect(r.body.error).toBe('empleado_no_registrado');
+  });
+
+  it('el alta en bloque es solo para admin', async () => {
+    await request(app())
+      .post('/api/ausencias/empleados/sincronizar')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(403);
+
+    const r = await request(app())
+      .post('/api/ausencias/empleados/sincronizar')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(r.body).toEqual({ creados: 3, vinculados: 1 });
   });
 
   it('el maestro de empleados es solo para admin', async () => {
@@ -449,6 +499,15 @@ describe('GET /ausencias/contexto', () => {
     // quedarse sin los festivos del año siguiente.
     const anios = new Set((r.body.festivos as string[]).map((f) => f.slice(0, 4)));
     expect(anios.size).toBe(3);
+  });
+
+  it('da de alta la ficha al abrir la app, para que aparezcan las pestañas', async () => {
+    // Es lo que evita el caso que rompió el despliegue: entrar y encontrarte una
+    // pantalla sin formulario y sin ninguna pista de por qué.
+    estado.empleado = null;
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.empleado).not.toBeNull();
+    expect(estado.altasAutomaticas).toBe(1);
   });
 
   it('marca como aprobador a quien lo es, aunque no tenga nada pendiente', async () => {

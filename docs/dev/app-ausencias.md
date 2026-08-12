@@ -85,7 +85,7 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, aprobador o admin |
-| `GET`/`POST` | `/api/ausencias/empleados[/import]` | `requireAdmin` |
+| `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
 
 ## Gotchas que costaron
@@ -100,10 +100,19 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
   último día de la ausencia no se pinta en el calendario.
 - **La pestaña de incapacidades tiene `Adjunto?`, no `Aprobado?`.** No es una
   simplificación: es el esquema real de la hoja.
-- **Un empleado sin cuenta del portal no puede pedir nada.** El maestro se importa
-  antes de que existan las cuentas, así que `user_id` queda en NULL y el vínculo
-  se hace por correo hasta que la cuenta aparece. La pestaña *Empleados* avisa de
-  cuántos están en esa situación.
+- **La ficha de empleado se crea sola.** Quien tiene la app asignada ya tiene el
+  permiso; la ficha se deriva de `portal.users` la primera vez que entra
+  (`asegurarEmpleado`). No hay alta manual en el onboarding. Solo queda 403
+  cuando de verdad no hay de dónde sacarla: una cuenta legacy sin fila en
+  `portal.users`, o una ficha que un admin desactivó a propósito — y eso se
+  respeta, el alta automática no la reactiva.
+  El maestro se puede importar igualmente desde la hoja para rellenar los
+  **cargos** en bloque, o rellenar de golpe con el botón *Dar de alta desde el
+  portal*. Los tres caminos van indexados por correo y se componen.
+- **Un empleado sin cuenta del portal no puede pedir nada**, aunque esté en el
+  maestro: la identidad viene de la sesión. Si la ficha se importó antes de que
+  existiera la cuenta, `user_id` queda NULL y el vínculo se hace por correo en
+  cuanto la cuenta aparece. La pestaña *Empleados* avisa de cuántos están así.
 - **Cada automatización, su propio secreto.** `requireCronToken` acepta ahora
   `{ env, header }`; ausencias usa `AUSENCIAS_CRON_TOKEN` /
   `X-Ausencias-Cron-Token`. El token de WO-sales **no** sirve aquí, y hay un test
@@ -115,11 +124,14 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
    luego el **portal**. Son dos servicios distintos; commit local ≠ desplegado.
 2. Variables nuevas en hub-api: `AUSENCIAS_CRON_TOKEN` y `PORTAL_URL`.
 3. La misma `AUSENCIAS_CRON_TOKEN` en n8n (*Settings → Variables*).
-4. Importar el maestro: *Vacaciones y Permisos → Empleados*, pegando las filas de
-   la pestaña `consolidado` (Nombre y Apellidos · Cargo · Correo · Número clave).
-5. Asignar la app `ausencias` a los usuarios en *Admin → Usuarios*. Quien ya
+4. Asignar la app `ausencias` a los usuarios en *Admin → Usuarios*. Quien ya
    tuviera sesión abierta debe **cerrar sesión y volver a entrar**: el `apps[]`
-   viaja congelado en el JWT.
+   viaja congelado en el JWT. Con eso ya pueden solicitar — la ficha de empleado
+   se crea sola al entrar.
+5. *(Opcional)* En *Vacaciones y Permisos → Empleados*, pulsar **Dar de alta
+   desde el portal** para tener la lista completa de una vez, y pegar la pestaña
+   `consolidado` (Nombre y Apellidos · Cargo · Correo · Número clave) para
+   rellenar los cargos.
 6. Activar el workflow **«Ausencias — Portal»** en n8n.
 7. Convivencia: dejar el flujo viejo (`mt75OpO0fGIXv5QG`) activo unos días y
    **desactivarlo** —no borrarlo— cuando el nuevo lleve una semana sin incidencias.
