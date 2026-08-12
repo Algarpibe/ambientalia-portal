@@ -326,6 +326,65 @@ export async function importarHistorico(
   return { total: filas.length, importadas, yaExistian: filas.length - importadas };
 }
 
+/** Los campos que un admin puede corregir desde el registro general. */
+export interface EdicionSolicitud {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number;
+  estado: Solicitud['estado'];
+  comentarios: string | null;
+  observaciones: string | null;
+}
+
+/**
+ * Corrige una solicitud. Devuelve la versión actualizada, o null si no existía.
+ *
+ * `solicitante_email` se rescribe desde el empleado nuevo: está desnormalizado
+ * en la fila, y si se reasigna a otra persona sin actualizarlo, el registro
+ * diría un nombre y el correo de otro.
+ *
+ * NO encola nada en el outbox, a propósito: esto es corregir el registro, no
+ * tomar una decisión. Aprobar o rechazar se hace en la bandeja, que es donde sí
+ * se avisa a la gente. Un admin arreglando una fecha mal importada no debe
+ * disparar correos a nadie.
+ */
+export async function actualizarSolicitud(
+  db: Pool,
+  id: string,
+  campos: EdicionSolicitud,
+): Promise<Solicitud | null> {
+  const { rows } = await db.query(
+    `UPDATE portal.solicitudes_ausencia s
+        SET empleado_id       = $2,
+            solicitante_email = e.correo,
+            tipo              = $3,
+            fecha_inicio      = $4::date,
+            fecha_fin         = $5::date,
+            dias_habiles      = $6,
+            estado            = $7,
+            comentarios       = $8,
+            observaciones     = $9
+       FROM portal.empleados e
+      WHERE s.id = $1 AND e.id = $2
+      RETURNING s.id`,
+    [
+      id,
+      campos.empleadoId,
+      campos.tipo,
+      campos.fechaInicio,
+      campos.fechaFin,
+      campos.dias,
+      campos.estado,
+      campos.comentarios,
+      campos.observaciones,
+    ],
+  );
+  if (rows.length === 0) return null;
+  return solicitudPorId(db, id);
+}
+
 /**
  * Borra una solicitud y devuelve lo que había, o null si no existía.
  *

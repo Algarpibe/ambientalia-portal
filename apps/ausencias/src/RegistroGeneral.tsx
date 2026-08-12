@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, Loader2, Trash2 } from 'lucide-react';
-import { borrarSolicitud, fetchHistorico, type Solicitud } from './api';
+import { AlertTriangle, Download, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { borrarSolicitud, fetchEmpleados, fetchHistorico, type Empleado, type Solicitud } from './api';
 import { CHIP_ESTADO, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
+import EditarSolicitud from './EditarSolicitud';
 
 // El registro general de la compañía: lo que antes había que ir a mirar a la
 // hoja. Mientras esta vista no exista, tener el histórico en Postgres no le
@@ -10,6 +11,8 @@ import { CHIP_ESTADO, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
 interface Props {
   /** Cambia cuando se importa, para recargar sin montar el componente de nuevo. */
   recargarToken: number;
+  /** Festivos del contexto, para sugerir el conteo de días al editar. */
+  festivos: Set<string>;
 }
 
 /** Escapa una celda para CSV: comillas dobles y separador dentro del texto. */
@@ -18,8 +21,10 @@ function celdaCsv(v: string | number | null): string {
   return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export default function RegistroGeneral({ recargarToken }: Props) {
+export default function RegistroGeneral({ recargarToken, festivos }: Props) {
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
+  const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [editando, setEditando] = useState<Solicitud | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tipo, setTipo] = useState('');
@@ -33,8 +38,9 @@ export default function RegistroGeneral({ recargarToken }: Props) {
   useEffect(() => {
     let vivo = true;
     setCargando(true);
-    fetchHistorico()
-      .then((s) => vivo && (setSolicitudes(s), setError(null)))
+    // Los empleados se piden a la vez: el desplegable de reasignar los necesita.
+    Promise.all([fetchHistorico(), fetchEmpleados()])
+      .then(([s, e]) => vivo && (setSolicitudes(s), setEmpleados(e), setError(null)))
       .catch((e: Error) => vivo && setError(e.message))
       .finally(() => vivo && setCargando(false));
     return () => {
@@ -238,15 +244,26 @@ export default function RegistroGeneral({ recargarToken }: Props) {
                           </button>
                         </span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmando(s.id)}
-                          aria-label={`Borrar la solicitud de ${s.empleadoNombre} del ${s.fechaInicio}`}
-                          title="Borrar del registro"
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <span className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditando(s)}
+                            aria-label={`Editar la solicitud de ${s.empleadoNombre} del ${s.fechaInicio}`}
+                            title="Editar"
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmando(s.id)}
+                            aria-label={`Borrar la solicitud de ${s.empleadoNombre} del ${s.fechaInicio}`}
+                            title="Borrar del registro"
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -255,6 +272,19 @@ export default function RegistroGeneral({ recargarToken }: Props) {
             </table>
           </div>
         </>
+      )}
+
+      {editando && (
+        <EditarSolicitud
+          solicitud={editando}
+          empleados={empleados}
+          festivos={festivos}
+          onCerrar={() => setEditando(null)}
+          onGuardada={(s) => {
+            setSolicitudes((ss) => ss.map((x) => (x.id === s.id ? s : x)));
+            setEditando(null);
+          }}
+        />
       )}
     </div>
   );

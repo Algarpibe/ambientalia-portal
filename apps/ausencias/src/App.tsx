@@ -165,7 +165,7 @@ export default function App() {
               </div>
               <div className={tab === 'historico' ? '' : 'hidden'}>
                 <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
-                <RegistroGeneral recargarToken={recargarRegistro} />
+                <RegistroGeneral recargarToken={recargarRegistro} festivos={festivos} />
               </div>
             </>
           )}

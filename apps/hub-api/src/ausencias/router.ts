@@ -4,6 +4,7 @@ import { requireAuth, requireApp, requireAdmin, requireCronToken, getPayload } f
 import { captureError } from '../sentry.js';
 import { festivosColombia } from './festivos.js';
 import { contarDiasHabiles } from './dias-habiles.js';
+import { validarEdicionSolicitud } from './historico.js';
 import * as repo from './repo.js';
 import * as service from './service.js';
 import { AusenciaError, type Sesion } from './service.js';
@@ -180,6 +181,36 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json({ solicitudes: await repo.todasLasSolicitudes(db) });
     } catch (e) {
       sendError(res, e, 'ausencias_historico');
+    }
+  });
+
+  /**
+   * Corrige una solicitud del registro. No manda correos: para aprobar o
+   * rechazar está la bandeja, que es donde sí se avisa. Ver repo.actualizarSolicitud.
+   */
+  router.patch('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const campos = validarEdicionSolicitud(req.body);
+      const actualizada = await repo.actualizarSolicitud(db, req.params.id, campos);
+      // Sin fila: o no existe la solicitud, o el empleado al que se reasigna no
+      // existe. Los dos son un 404 desde el punto de vista de quien llama.
+      if (!actualizada) return void res.status(404).json({ error: 'no_encontrada' });
+      console.log(
+        JSON.stringify({
+          event: 'ausencias_solicitud_editada',
+          timestamp: new Date().toISOString(),
+          adminEmail: sesionDe(req).email,
+          solicitudId: actualizada.id,
+          empleado: actualizada.empleadoNombre,
+          tipo: actualizada.tipo,
+          fechas: `${actualizada.fechaInicio}..${actualizada.fechaFin}`,
+          dias: actualizada.diasHabiles,
+          estado: actualizada.estado,
+        }),
+      );
+      res.json(actualizada);
+    } catch (e) {
+      sendError(res, e, 'ausencias_editar_solicitud');
     }
   });
 

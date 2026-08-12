@@ -77,15 +77,18 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function conCuerpo<T>(metodo: 'POST' | 'PATCH', path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
+    method: metodo,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await mensajeDeError(res));
   return (await res.json()) as T;
 }
+
+const post = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body);
+const patch = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body);
 
 export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
 
@@ -135,6 +138,22 @@ export const importarHistorico = (solicitudes: FilaHistorico[], dryRun: boolean)
 /** Todas las solicitudes de la compañía (solo admin). */
 export const fetchHistorico = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/historico').then((d) => d.solicitudes);
+
+/** Los campos que un admin puede corregir desde el registro general. */
+export interface EdicionSolicitud {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  fechaInicio: string;
+  fechaFin: string;
+  dias: number;
+  estado: EstadoSolicitud;
+  comentarios: string | null;
+  observaciones: string | null;
+}
+
+/** Corrige una solicitud (solo admin). No manda correos a nadie. */
+export const editarSolicitud = (id: string, campos: EdicionSolicitud) =>
+  patch<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`, campos);
 
 /** Borra una solicitud del registro (solo admin). Es irreversible. */
 export async function borrarSolicitud(id: string): Promise<void> {

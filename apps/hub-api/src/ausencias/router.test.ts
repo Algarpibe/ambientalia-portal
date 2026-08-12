@@ -66,6 +66,21 @@ vi.mock('./repo.js', () => ({
     return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
   },
   todasLasSolicitudes: async () => estado.solicitudes,
+  actualizarSolicitud: async (_db: unknown, id: string, campos: Record<string, unknown>) => {
+    const s = estado.solicitudes.find((x) => x.id === id);
+    if (!s || !estado.plantilla.some((e) => e.id === campos.empleadoId)) return null;
+    Object.assign(s, {
+      empleadoId: campos.empleadoId,
+      tipo: campos.tipo,
+      fechaInicio: campos.fechaInicio,
+      fechaFin: campos.fechaFin,
+      diasHabiles: campos.dias,
+      estado: campos.estado,
+      comentarios: campos.comentarios,
+      observaciones: campos.observaciones,
+    });
+    return s;
+  },
   borrarSolicitud: async (_db: unknown, id: string) => {
     const i = estado.solicitudes.findIndex((s) => s.id === id);
     if (i < 0) return null;
@@ -178,6 +193,12 @@ function app() {
   return a;
 }
 
+// Ids con forma de UUID: el validador de la edición la exige, para que un id
+// con basura se quede en un 400 en vez de reventar el ::uuid del SQL con un 500.
+const E1 = '11111111-1111-4111-8111-111111111111';
+const E2 = '22222222-2222-4222-8222-222222222222';
+const E_FANTASMA = '33333333-3333-4333-8333-333333333333';
+
 const PDF = Buffer.from('%PDF-1.4 fake').toString('base64');
 const nueva = (over: Record<string, unknown> = {}) => ({
   tipo: 'vacaciones',
@@ -200,8 +221,8 @@ beforeEach(() => {
   estado.usuarioEnPortal = true;
   estado.altasAutomaticas = 0;
   estado.plantilla = [
-    { ...(estado.empleado as Record<string, unknown>), id: 'e1', nombreCompleto: 'Ana Ruiz Molina' },
-    { ...(estado.empleado as Record<string, unknown>), id: 'e2', nombreCompleto: 'Luis Prieto Cano' },
+    { ...(estado.empleado as Record<string, unknown>), id: E1, nombreCompleto: 'Ana Ruiz Molina' },
+    { ...(estado.empleado as Record<string, unknown>), id: E2, nombreCompleto: 'Luis Prieto Cano' },
   ];
   estado.yaEnBd = 0;
   estado.historicoInsertado = 0;
@@ -472,6 +493,78 @@ describe('importación del histórico', () => {
   it('la vista global es solo para admin', async () => {
     await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token()}`).expect(403);
     await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token({ role: 'admin' })}`).expect(200);
+  });
+});
+
+describe('edición de solicitudes', () => {
+  const admin = () => token({ role: 'admin' });
+
+  async function crear() {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    return r.body.id as string;
+  }
+
+  const edicion = (over: Record<string, unknown> = {}) => ({
+    empleadoId: E1,
+    tipo: 'permiso',
+    fechaInicio: '2026-07-06',
+    fechaFin: '2026-07-08',
+    dias: 2.5,
+    estado: 'aprobada',
+    comentarios: 'Corregido a mano',
+    observaciones: null,
+    ...over,
+  });
+
+  const editar = (id: string, body: Record<string, unknown>, tok = admin()) =>
+    request(app()).patch(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  it('solo el admin puede editar', async () => {
+    await editar(await crear(), edicion(), token()).expect(403);
+  });
+
+  it('corrige tipo, fechas, días y estado de una vez', async () => {
+    const r = await editar(await crear(), edicion()).expect(200);
+    expect(r.body).toMatchObject({ tipo: 'permiso', fechaInicio: '2026-07-06', fechaFin: '2026-07-08', estado: 'aprobada' });
+    expect(r.body.diasHabiles).toBe(2.5);
+  });
+
+  it('conserva el medio día en vez de recalcular por las fechas', async () => {
+    // El histórico está lleno de valores que no cuadran con el conteo de días
+    // hábiles; recalcular al guardar destruiría justo lo que se corrige.
+    const r = await editar(await crear(), edicion({ dias: 6.5 })).expect(200);
+    expect(r.body.diasHabiles).toBe(6.5);
+  });
+
+  it('editar NO encola notificaciones: corregir no es decidir', async () => {
+    estado.eventos = [];
+    await editar(await crear(), edicion({ estado: 'rechazada' })).expect(200);
+    expect(estado.eventos.filter((e) => e.evento === 'rechazada')).toHaveLength(0);
+  });
+
+  it('permite reasignar la solicitud a otra persona', async () => {
+    const r = await editar(await crear(), edicion({ empleadoId: E2 })).expect(200);
+    expect(r.body.empleadoId).toBe(E2);
+  });
+
+  it('404 si la solicitud no existe o el empleado destino tampoco', async () => {
+    await editar('no-existe', edicion()).expect(404);
+    await editar(await crear(), edicion({ empleadoId: E_FANTASMA })).expect(404);
+  });
+
+  it('rechaza el rango invertido, el estado inventado y los días negativos', async () => {
+    const id = await crear();
+    await editar(id, edicion({ fechaFin: '2026-07-01' })).expect(400);
+    await editar(id, edicion({ estado: 'en_tramite' })).expect(400);
+    await editar(id, edicion({ dias: -1 })).expect(400);
+  });
+
+  it('un empleadoId con basura es 400, no un 500 del ::uuid del SQL', async () => {
+    await editar(await crear(), edicion({ empleadoId: "'; DROP TABLE" })).expect(400);
   });
 });
 
