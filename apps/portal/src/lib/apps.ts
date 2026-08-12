@@ -25,6 +25,7 @@ export const APPS: AppInfo[] = [
   { id: 'customer-valuation', label: 'Valoración de Clientes', route: '/valoracion-clientes', category: 'aplicacion' },
   { id: 'WO-sales', label: 'Carga de Pedidos WO', route: '/carga-pedidos-wo', category: 'aplicacion' },
   { id: 'contabilidad', label: 'Contabilidad', route: '/contabilidad', category: 'aplicacion' },
+  { id: 'ausencias', label: 'Vacaciones y Permisos', route: '/ausencias', category: 'aplicacion' },
 ];
 
 /** Devuelve la info de una app por su id. */

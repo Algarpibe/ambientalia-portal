@@ -254,15 +254,43 @@ export async function requireOwnerOrAdmin(req: Request, res: Response, next: Nex
 
 /**
  * Auth máquina-a-máquina para los endpoints que consume n8n. No es JWT de usuario:
- * compara una cabecera secreta contra WO_SALES_CRON_TOKEN. Fail-closed: si el secreto
- * no está configurado, no pasa nadie.
+ * compara una cabecera secreta contra una variable de entorno. Fail-closed: si el
+ * secreto no está configurado, no pasa nadie.
+ *
+ * Se puede usar de dos formas, y ambas siguen siendo middleware:
+ *   requireCronToken                                       → WO-sales (por defecto)
+ *   requireCronToken({ env: 'X_TOKEN', header: 'X-Algo' })  → otra automatización
+ *
+ * El caso por defecto conserva WO_SALES_CRON_TOKEN / X-WO-Sales-Cron-Token para no
+ * tocar ni el código ni la configuración de WO-sales, que ya está en producción.
  */
-export function requireCronToken(req: Request, res: Response, next: NextFunction): void {
-  const esperado = process.env.WO_SALES_CRON_TOKEN;
-  const recibido = req.header('X-WO-Sales-Cron-Token');
+interface CronTokenOpts {
+  env?: string;
+  header?: string;
+}
+
+function checkCronToken(req: Request, res: Response, next: NextFunction, opts: CronTokenOpts): void {
+  const esperado = process.env[opts.env ?? 'WO_SALES_CRON_TOKEN'];
+  const recibido = req.header(opts.header ?? 'X-WO-Sales-Cron-Token');
   if (esperado && recibido && recibido === esperado) {
     next();
     return;
   }
   res.status(401).json({ error: 'unauthorized' });
+}
+
+export function requireCronToken(opts: CronTokenOpts): (req: Request, res: Response, next: NextFunction) => void;
+export function requireCronToken(req: Request, res: Response, next: NextFunction): void;
+export function requireCronToken(
+  a: CronTokenOpts | Request,
+  b?: Response,
+  c?: NextFunction,
+): void | ((req: Request, res: Response, next: NextFunction) => void) {
+  // Distinguimos las dos firmas por la aridad: como middleware siempre llegan
+  // los tres argumentos de Express; como fábrica, solo el objeto de opciones.
+  if (b === undefined) {
+    const opts = (a ?? {}) as CronTokenOpts;
+    return (req, res, next) => checkCronToken(req, res, next, opts);
+  }
+  checkCronToken(a as Request, b, c as NextFunction, {});
 }

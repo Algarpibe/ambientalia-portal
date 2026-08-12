@@ -8,6 +8,7 @@ import { loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
+import { createAusenciasRouter } from './ausencias/router.js';
 import { createDataRouter } from './data.router.js';
 
 const app = express();
@@ -41,6 +42,14 @@ app.use(
     exposedHeaders: ['Content-Disposition', 'X-WO-Sales-Warnings'],
   })
 );
+
+// Excepción al límite global de abajo: crear una solicitud de ausencia puede
+// llevar adjunto el PDF de una incapacidad (hasta 8 MB, ~11 MB ya en base64).
+// TIENE que registrarse ANTES del parser global: si el de 2mb corre primero,
+// rechaza el cuerpo con un 413 y este nunca llega a verlo. body-parser se salta
+// el segundo parser cuando el primero ya dejó puesto `req.body`, así que el
+// resto de endpoints conservan su límite de 2mb.
+app.use('/api/ausencias/solicitudes', express.json({ limit: '12mb' }));
 
 // Body JSON. Límite de 2mb para permitir la subida del avatar (data URL de un
 // thumbnail); el resto de payloads son pequeños y hay rate limiting.
@@ -118,6 +127,8 @@ initDb()
     // por lo mismo que el de usuarios: necesita getHubPool() ya validado.
     app.use('/api', createWoSalesRouter(getHubPool()));
     app.use('/api', createContabilidadRouter(getHubPool()));
+    // Router de la app de vacaciones/permisos/compensatorios/incapacidades.
+    app.use('/api', createAusenciasRouter(getHubPool()));
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));

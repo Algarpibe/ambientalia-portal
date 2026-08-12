@@ -16,6 +16,11 @@ COPY apps/inventory-optimization/package*.json ./apps/inventory-optimization/
 COPY apps/payment-reconciliation/package*.json ./apps/payment-reconciliation/
 COPY apps/product-sales/package*.json ./apps/product-sales/
 COPY apps/contabilidad/package*.json ./apps/contabilidad/
+# WO-sales faltaba en esta lista: el build no se rompía porque el `COPY . .` de
+# más abajo acaba trayendo su package.json, pero eso invalida la capa de
+# `npm install` en cada cambio de código. Se añade junto con la app nueva.
+COPY apps/WO-sales/package*.json ./apps/WO-sales/
+COPY apps/ausencias/package*.json ./apps/ausencias/
 
 # Instalar dependencias globales del monorepo
 RUN npm install

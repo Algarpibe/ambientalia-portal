@@ -8,7 +8,8 @@ import {
   Beaker,
   Users,
   FileSpreadsheet,
-  Landmark
+  Landmark,
+  CalendarDays
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -70,6 +71,13 @@ const aplicaciones: AppConfig[] = [
     path: "/contabilidad",
     icon: Landmark,
     color: "from-teal-400 to-emerald-600"
+  },
+  {
+    name: "Vacaciones y Permisos",
+    description: "Solicita vacaciones, compensatorios y permisos, o informa una incapacidad, con aprobación y calendario.",
+    path: "/ausencias",
+    icon: CalendarDays,
+    color: "from-sky-400 to-indigo-600"
   }
 ];
 
