@@ -4,6 +4,7 @@ import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
+import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
 import {
   ETIQUETA_TIPO,
   TIPOS,
@@ -339,4 +340,117 @@ export function validarFilasEmpleados(body: unknown): FilaEmpleado[] {
       aprobadorCorreo: typeof r.aprobadorCorreo === 'string' ? r.aprobadorCorreo.trim().toLowerCase() : undefined,
     };
   });
+}
+
+// ── Saldo de vacaciones ────────────────────────────────────────────────────
+
+/**
+ * Tope del saldo de corte. NUMERIC(5,1) admite hasta 9999,9, pero 999 días son
+ * 66 años de devengo: por encima es un error de tecleo, no un saldo.
+ */
+const MAX_SALDO = 999;
+
+/** Lo que un admin puede fijar. Las dos a null vacía la configuración. */
+export interface SaldoAFijar {
+  saldoCorte: number | null;
+  fechaCorte: string | null;
+}
+
+/** Valida a mano lo que llega del cliente; en este repo no hay zod. */
+export function validarSaldo(body: unknown): SaldoAFijar {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const saldoVacio = b.saldoCorte === null || b.saldoCorte === undefined || b.saldoCorte === '';
+  const fechaVacia = b.fechaCorte === null || b.fechaCorte === undefined || b.fechaCorte === '';
+
+  // Vaciar la configuración es legítimo: devuelve al empleado a «sin configurar».
+  if (saldoVacio && fechaVacia) return { saldoCorte: null, fechaCorte: null };
+  // A medias, no: es justo lo que impide el CHECK de la BD, y aquí el mensaje
+  // se puede explicar.
+  if (saldoVacio || fechaVacia) throw new AusenciaError('saldo_incompleto', 400, 'saldoCorte');
+
+  const saldo =
+    typeof b.saldoCorte === 'number' ? b.saldoCorte : Number(String(b.saldoCorte).replace(',', '.'));
+  if (!Number.isFinite(saldo) || saldo < 0 || saldo > MAX_SALDO) {
+    throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
+  }
+
+  // `esFechaValida` descarta de paso los valores mágicos de Postgres
+  // (`'infinity'`, `'today'`), que la columna DATE aceptaría sin rechistar.
+  const fecha = String(b.fechaCorte);
+  if (!esFechaValida(fecha)) throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
+
+  return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: fecha };
+}
+
+/** El saldo de un empleado, listo para enseñar. */
+export interface SaldoDeEmpleado {
+  empleadoId: string;
+  nombreCompleto: string;
+  correo: string;
+  saldo: SaldoVacaciones;
+}
+
+/**
+ * Calcula el saldo de cada empleado a partir de sus vacaciones.
+ *
+ * `calcularSaldo` lanza si alguna fecha viniera corrupta. Se reetiqueta el error
+ * con el correo porque esto recorre a toda la plantilla: sin eso, una sola fila
+ * mala dejaría la lista del admin a oscuras sin decir de quién es el problema.
+ */
+function combinar(
+  empleados: repo.EmpleadoConSaldo[],
+  vacaciones: repo.VacacionDeEmpleado[],
+  hoy: string,
+): SaldoDeEmpleado[] {
+  return empleados.map((e) => {
+    const config =
+      e.saldoCorte !== null && e.fechaCorte !== null
+        ? { saldoCorte: e.saldoCorte, fechaCorte: e.fechaCorte }
+        : null;
+    try {
+      return {
+        empleadoId: e.empleadoId,
+        nombreCompleto: e.nombreCompleto,
+        correo: e.correo,
+        saldo: calcularSaldo(config, vacaciones.filter((v) => v.empleadoId === e.empleadoId), hoy),
+      };
+    } catch (err) {
+      throw new Error(`saldo de ${e.correo}: ${(err as Error).message}`);
+    }
+  });
+}
+
+/**
+ * Los saldos que esta sesión puede ver: todos si es admin, y solo los de la
+ * gente que aprueba si no lo es.
+ */
+export async function saldosVisibles(db: Pool, sesion: Sesion): Promise<SaldoDeEmpleado[]> {
+  const empleados = await repo.empleadosConSaldo(db, sesion.esAdmin ? null : sesion.email);
+  // Para quien no es admin, no aprobar a nadie es un 403. Para un admin, una
+  // lista vacía es solo una lista vacía: la BD sin empleados todavía.
+  if (!sesion.esAdmin && empleados.length === 0) throw new AusenciaError('no_es_aprobador', 403);
+  const vacaciones = await repo.vacacionesDeEmpleados(
+    db,
+    empleados.map((e) => e.empleadoId),
+  );
+  return combinar(empleados, vacaciones, hoyEnColombia());
+}
+
+/** El saldo del usuario logueado. Va dentro del contexto que carga la app. */
+export async function saldoDeSesion(db: Pool, empleado: Empleado): Promise<SaldoVacaciones> {
+  const [fila] = await repo.empleadosConSaldo(db, null, empleado.id);
+  if (!fila) return calcularSaldo(null, [], hoyEnColombia());
+  const vacaciones = await repo.vacacionesDeEmpleados(db, [empleado.id]);
+  return combinar([fila], vacaciones, hoyEnColombia())[0].saldo;
+}
+
+/** Fija el punto de corte de un empleado. Solo admin (lo exige el router). */
+export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): Promise<SaldoDeEmpleado> {
+  const { saldoCorte, fechaCorte } = validarSaldo(body);
+  const existe = await repo.fijarSaldo(db, empleadoId, saldoCorte, fechaCorte);
+  if (!existe) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const empleados = await repo.empleadosConSaldo(db, null, empleadoId);
+  const vacaciones = await repo.vacacionesDeEmpleados(db, [empleadoId]);
+  return combinar(empleados, vacaciones, hoyEnColombia())[0];
 }
