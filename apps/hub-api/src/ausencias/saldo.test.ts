@@ -25,6 +25,7 @@ describe('calcularSaldo', () => {
   it('cuenta la vacación que empieza EL MISMO día del corte', () => {
     const s = calcularSaldo(CONFIG, [vac('2026-01-01', 3)], '2026-01-01');
     expect(s.disfrutadas).toBe(3);
+    expect(s.disponible).toBe(7);
   });
 
   it('ignora la que empieza el día ANTES del corte', () => {
@@ -55,6 +56,12 @@ describe('calcularSaldo', () => {
     expect(s.disponible).toBe(10);
   });
 
+  it('una pendiente ANTES del corte no entra en enTramite', () => {
+    // Ya sería parte del saldo de corte, igual que con las aprobadas.
+    const s = calcularSaldo(CONFIG, [vac('2025-12-15', 4, 'pendiente')], '2026-01-01');
+    expect(s.enTramite).toBe(0);
+  });
+
   it('ignora permisos, compensatorios e incapacidades', () => {
     const otros: VacacionTomada[] = [
       { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada' },
@@ -72,10 +79,26 @@ describe('calcularSaldo', () => {
     expect(s.disponible).toBe(9.5);
   });
 
+  it('descuenta una aprobada aunque su inicio sea futuro respecto a "hoy"', () => {
+    // Deliberado: el saldo de partida sale de un Excel que todavía NO trae
+    // descontadas las vacaciones ya aprobadas para las próximas semanas, así
+    // que esta función tiene que descontarlas aunque aún no hayan ocurrido.
+    const s = calcularSaldo(CONFIG, [vac('2026-06-01', 5)], '2026-01-01');
+    expect(s.disfrutadas).toBe(5);
+    expect(s.disponible).toBe(5);
+  });
+
   it('devuelve configurado:false y ceros si al empleado le falta la configuración', () => {
     const s = calcularSaldo(null, [vac('2026-02-01', 5)], '2026-03-02');
     expect(s.configurado).toBe(false);
     expect(s.disponible).toBe(0);
+  });
+
+  it('SIN_CONFIGURAR no es un objeto compartido: mutar una respuesta no afecta a la siguiente', () => {
+    const s1 = calcularSaldo(null, [], '2026-03-02');
+    (s1 as { disponible: number }).disponible = 999;
+    const s2 = calcularSaldo(null, [], '2026-03-02');
+    expect(s2.disponible).toBe(0);
   });
 
   it('no devenga en negativo si la fecha de corte es futura', () => {
@@ -97,6 +120,32 @@ describe('calcularSaldo', () => {
     const s = calcularSaldo({ saldoCorte: 0, fechaCorte: '2026-01-01' }, [], '2027-01-01');
     expect(s.devengadas).toBe(15.2);
   });
+
+  it('en un empate de redondeo, disponible no penaliza al empleado', () => {
+    // 10,4 + 5,8 − 6,5 = 9,7 a mano. Si disponible se calculara desde el
+    // devengo SIN redondear (5,75), el error binario de la resta empujaría el
+    // empate x,x5 hacia abajo y daría 9,6: 0,1 días de menos, siempre en
+    // perjuicio del empleado.
+    const s = calcularSaldo({ saldoCorte: 10.4, fechaCorte: '2026-01-01' }, [vac('2026-02-01', 6.5)], '2026-05-19');
+    expect(s.devengadas).toBe(5.8);
+    expect(s.disponible).toBe(9.7);
+  });
+
+  it('las tres cifras que se enseñan suman exactamente disponible', () => {
+    const s = calcularSaldo({ saldoCorte: 10.4, fechaCorte: '2026-01-01' }, [vac('2026-02-01', 6.5)], '2026-05-19');
+    expect(s.saldoCorte + s.devengadas - s.disfrutadas).toBe(s.disponible);
+  });
+
+  it('lanza si fechaCorte llega vacía o mal formada, en vez de devolver un saldo en blanco', () => {
+    expect(() => calcularSaldo({ saldoCorte: 10, fechaCorte: '' }, [], '2026-01-01')).toThrow();
+    expect(() => calcularSaldo({ saldoCorte: 10, fechaCorte: '2026/01/01' }, [], '2026-01-01')).toThrow();
+    expect(() => calcularSaldo({ saldoCorte: 10, fechaCorte: '2026-13-45' }, [], '2026-01-01')).toThrow();
+  });
+
+  it('lanza si "hoy" llega mal formado', () => {
+    expect(() => calcularSaldo(CONFIG, [], '01-01-2026')).toThrow();
+    expect(() => calcularSaldo(CONFIG, [], '')).toThrow();
+  });
 });
 
 describe('hoyEnColombia', () => {
@@ -108,5 +157,15 @@ describe('hoyEnColombia', () => {
 
   it('a las 00:30 hora de Colombia ya es el día nuevo', () => {
     expect(hoyEnColombia(new Date('2026-08-13T05:30:00Z'))).toBe('2026-08-13');
+  });
+
+  it('en la frontera exacta, un segundo antes todavía es el día anterior', () => {
+    // Distingue UTC−5 de cualquier desfase vecino (UTC−4, UTC−4,5, UTC−5,5):
+    // todos esos coinciden con los dos tests de arriba pero fallarían aquí.
+    expect(hoyEnColombia(new Date('2026-08-13T04:59:59Z'))).toBe('2026-08-12');
+  });
+
+  it('en la frontera exacta, en el segundo exacto ya es el día nuevo', () => {
+    expect(hoyEnColombia(new Date('2026-08-13T05:00:00Z'))).toBe('2026-08-13');
   });
 });
