@@ -326,6 +326,26 @@ export async function importarHistorico(
   return { total: filas.length, importadas, yaExistian: filas.length - importadas };
 }
 
+/**
+ * Borra una solicitud y devuelve lo que había, o null si no existía.
+ *
+ * Se permite borrar CUALQUIERA, también las importadas: restringirlo a las que
+ * nacieron en el portal dejaría el único camino para una fila mala de la hoja en
+ * la consola de psql, que es justo lo que este borrado viene a evitar. Y una
+ * importada se recupera reimportando el Excel; una del portal, no. La red de
+ * seguridad es la confirmación de la interfaz, no una regla en el SQL.
+ *
+ * El adjunto y los eventos de cola se van por clave foránea. Si quedaba algún
+ * evento sin enviar, desaparece con la solicitud — que es lo correcto: no tiene
+ * sentido avisar de algo que ya no existe.
+ */
+export async function borrarSolicitud(db: Pool, id: string): Promise<Solicitud | null> {
+  const previa = await solicitudPorId(db, id);
+  if (!previa) return null;
+  await db.query('DELETE FROM portal.solicitudes_ausencia WHERE id = $1', [id]);
+  return previa;
+}
+
 /** Todas las solicitudes de la compañía, para la vista que sustituye a la hoja. */
 export async function todasLasSolicitudes(db: Pool): Promise<Solicitud[]> {
   const { rows } = await db.query(`${SELECT_SOLICITUD} ORDER BY s.fecha_inicio DESC`);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, Loader2 } from 'lucide-react';
-import { fetchHistorico, type Solicitud } from './api';
+import { AlertTriangle, Download, Loader2, Trash2 } from 'lucide-react';
+import { borrarSolicitud, fetchHistorico, type Solicitud } from './api';
 import { CHIP_ESTADO, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
 
 // El registro general de la compañía: lo que antes había que ir a mirar a la
@@ -25,6 +25,10 @@ export default function RegistroGeneral({ recargarToken }: Props) {
   const [tipo, setTipo] = useState('');
   const [persona, setPersona] = useState('');
   const [anio, setAnio] = useState('');
+  // Borrado en dos pasos: el primer clic pide confirmación en la propia fila.
+  // Es irreversible y toca el registro de la compañía; un clic suelto no basta.
+  const [confirmando, setConfirmando] = useState<string | null>(null);
+  const [borrando, setBorrando] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -65,6 +69,20 @@ export default function RegistroGeneral({ recargarToken }: Props) {
     for (const s of filtradas) m.set(s.empleadoNombre, (m.get(s.empleadoNombre) ?? 0) + Number(s.diasHabiles));
     return [...m].sort((a, b) => b[1] - a[1]);
   }, [filtradas]);
+
+  async function borrar(s: Solicitud) {
+    setBorrando(s.id);
+    setError(null);
+    try {
+      await borrarSolicitud(s.id);
+      setSolicitudes((ss) => ss.filter((x) => x.id !== s.id));
+      setConfirmando(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBorrando(null);
+    }
+  }
 
   function exportarCsv() {
     const cab = ['Nombre y Apellidos', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Estado', 'Comentarios', 'Observaciones'];
@@ -179,6 +197,7 @@ export default function RegistroGeneral({ recargarToken }: Props) {
                   <th className="px-4 py-3 text-right font-medium">Días</th>
                   <th className="px-4 py-3 font-medium">Estado</th>
                   <th className="px-4 py-3 font-medium">Comentarios</th>
+                  <th className="px-4 py-3 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -197,6 +216,38 @@ export default function RegistroGeneral({ recargarToken }: Props) {
                     <td className="max-w-md px-4 py-2.5 text-gray-600">
                       {s.comentarios || <span className="text-gray-300">—</span>}
                       {s.observaciones && <div className="mt-0.5 text-xs italic text-gray-500">{s.observaciones}</div>}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                      {confirmando === s.id ? (
+                        <span className="flex items-center justify-end gap-2">
+                          <span className="text-xs text-gray-600">¿Borrar?</span>
+                          <button
+                            type="button"
+                            disabled={borrando === s.id}
+                            onClick={() => void borrar(s)}
+                            className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
+                          >
+                            {borrando === s.id ? 'Borrando…' : 'Sí, borrar'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmando(null)}
+                            className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                          >
+                            No
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmando(s.id)}
+                          aria-label={`Borrar la solicitud de ${s.empleadoNombre} del ${s.fechaInicio}`}
+                          title="Borrar del registro"
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

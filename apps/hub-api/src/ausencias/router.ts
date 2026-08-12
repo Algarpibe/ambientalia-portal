@@ -183,6 +183,33 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Borra una solicitud. Es irreversible y toca el registro de la compañía, así
+   * que queda constancia de quién la borró y de qué era: no hay tabla de
+   * auditoría en el proyecto, pero el log de hub-api sí se conserva.
+   */
+  router.delete('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const borrada = await repo.borrarSolicitud(db, req.params.id);
+      if (!borrada) return void res.status(404).json({ error: 'no_encontrada' });
+      console.log(
+        JSON.stringify({
+          event: 'ausencias_solicitud_borrada',
+          timestamp: new Date().toISOString(),
+          adminEmail: sesionDe(req).email,
+          solicitudId: borrada.id,
+          empleado: borrada.empleadoNombre,
+          tipo: borrada.tipo,
+          fechas: `${borrada.fechaInicio}..${borrada.fechaFin}`,
+          origen: borrada.origen,
+        }),
+      );
+      res.json({ ok: true, borrada });
+    } catch (e) {
+      sendError(res, e, 'ausencias_borrar_solicitud');
+    }
+  });
+
   /** Alta en bloque desde los usuarios del portal que ya tienen la app asignada. */
   router.post('/ausencias/empleados/sincronizar', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
     try {

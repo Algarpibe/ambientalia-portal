@@ -66,6 +66,11 @@ vi.mock('./repo.js', () => ({
     return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
   },
   todasLasSolicitudes: async () => estado.solicitudes,
+  borrarSolicitud: async (_db: unknown, id: string) => {
+    const i = estado.solicitudes.findIndex((s) => s.id === id);
+    if (i < 0) return null;
+    return estado.solicitudes.splice(i, 1)[0];
+  },
   esAprobadorDeAlguien: async (_db: unknown, email: string) =>
     email.toLowerCase() === 'comercial@ambientalia.com.co',
   listarEmpleados: async () => estado.plantilla,
@@ -467,6 +472,40 @@ describe('importación del histórico', () => {
   it('la vista global es solo para admin', async () => {
     await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token()}`).expect(403);
     await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token({ role: 'admin' })}`).expect(200);
+  });
+});
+
+describe('borrado de solicitudes', () => {
+  async function crear() {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    return r.body.id as string;
+  }
+
+  it('solo el admin puede borrar', async () => {
+    const id = await crear();
+    await request(app()).delete(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${token()}`).expect(403);
+    expect(estado.solicitudes).toHaveLength(1);
+  });
+
+  it('el admin la borra y desaparece del registro', async () => {
+    const id = await crear();
+    const r = await request(app())
+      .delete(`/api/ausencias/solicitudes/${id}`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(r.body.borrada.id).toBe(id);
+    expect(estado.solicitudes).toHaveLength(0);
+  });
+
+  it('404 si ya no existe — borrar dos veces no revienta', async () => {
+    const id = await crear();
+    const admin = token({ role: 'admin' });
+    await request(app()).delete(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${admin}`).expect(200);
+    await request(app()).delete(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${admin}`).expect(404);
   });
 });
 

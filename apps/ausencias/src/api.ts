@@ -136,6 +136,15 @@ export const importarHistorico = (solicitudes: FilaHistorico[], dryRun: boolean)
 export const fetchHistorico = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/historico').then((d) => d.solicitudes);
 
+/** Borra una solicitud del registro (solo admin). Es irreversible. */
+export async function borrarSolicitud(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/ausencias/solicitudes/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
 export const fetchEmpleados = () =>
   get<{ empleados: Empleado[] }>('/api/ausencias/empleados').then((d) => d.empleados);
 
