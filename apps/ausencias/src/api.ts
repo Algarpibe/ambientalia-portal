@@ -85,6 +85,27 @@ export interface SaldoDeEmpleado {
   saldo: SaldoVacaciones;
 }
 
+/** Un día del mes, con lo que hace falta para sombrearlo. */
+export interface DiaCalendario {
+  fecha: string;
+  laborable: boolean;
+}
+
+/** Una celda pintada del calendario. */
+export interface MarcaCalendario {
+  empleadoId: string;
+  fecha: string;
+  /** Null = incapacidad de otra persona: se sabe que está ausente, no por qué. */
+  tipo: TipoSolicitud | null;
+  estado: EstadoSolicitud;
+}
+
+export interface CalendarioDelMes {
+  empleados: { id: string; nombreCompleto: string }[];
+  dias: DiaCalendario[];
+  marcas: MarcaCalendario[];
+}
+
 export interface NuevaSolicitud {
   tipo: TipoSolicitud;
   fechaInicio: string;
@@ -241,3 +262,7 @@ export const fijarSaldo = (empleadoId: string, saldoCorte: number | string | nul
     saldoCorte,
     fechaCorte,
   });
+
+/** El calendario de un mes `YYYY-MM`. Lo ve cualquiera que tenga la app. */
+export const fetchCalendario = (mes: string) =>
+  get<CalendarioDelMes>(`/api/ausencias/calendario?mes=${encodeURIComponent(mes)}`);
