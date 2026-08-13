@@ -83,8 +83,8 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `creada` | acuse al solicitante | — | — | — |
 | `aprobacion` | aviso al jefe inmediato | — | — | sube el PDF (para que pueda verlo) |
 | `aprobacion_2` | aviso al segundo aprobador | — | — | — (ya está subido) |
-| `aprobada` | aprobado (+ administración) | ✔ | ✔ | — |
-| `rechazada` | rechazado con motivo | — | ✔ | — |
+| `aprobada` | aprobado, a **toda la cadena** (+ administración) | ✔ | ✔ | — |
+| `rechazada` | rechazado con motivo, a **toda la cadena** (+ administración) | — | ✔ | — |
 | `registrada` | acuse de incapacidad | ✔ | ✔ | ✔ |
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque
@@ -328,6 +328,26 @@ consulta de auditoría necesite un `COALESCE`.
 3. **`enTramite` del saldo suma los DOS estados.** `sumar` comparaba un estado
    exacto: con `pendiente_2` fuera, la media firma no sumaba en ningún sitio y
    desaparecía del saldo, ni en trámite ni disfrutada.
+
+### Quién se entera de qué
+
+El acuse inicial menciona las dos firmas solo si hay segunda. No hay correo de
+avance intermedio: el empleado recibe el acuse y el veredicto, dos correos, y el
+paso de un nivel a otro lo ve en *Mis solicitudes* si le interesa.
+
+**Los correos de decisión van a toda la cadena que firmó**, no solo al
+solicitante: `cadenaDeDecision` junta solicitante + los dos aprobadores +
+administración. Hasta que se corrigió, el jefe inmediato daba su visto bueno y no
+volvía a saber en qué acababa; parecía que funcionaba porque el segundo firmante
+suele ser el mismo buzón que ya iba en copia a administración. En el rechazo
+importa aún más: si el segundo superior tumba algo que el jefe ya había avalado,
+es el jefe quien tiene que reorganizar el trabajo.
+
+> ⚠️ `destinatarios()` deduplica, y no es cosmético: los dos firmantes y la copia
+> fija se solapan a menudo —hoy media plantilla cuelga del buzón que ya va en
+> copia—, y sin ella el mismo correo aparecería dos veces en el `sendTo` de Gmail.
+> También filtra los nulos: `segundoAprobadorCorreo` lo es en toda cadena de una
+> sola firma, y sin filtrar saldría un «, ,» en medio de la lista.
 
 ### El historial del aprobador
 

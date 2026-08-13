@@ -141,10 +141,43 @@ function avisoSegundoAprobador(s: Solicitud) {
   };
 }
 
+/**
+ * La lista de destinatarios, sin repetidos y en el orden en que se pasan.
+ *
+ * Deduplicar no es cosmético: los dos firmantes de la cadena y la copia a
+ * administración se solapan a menudo —hoy media plantilla cuelga del mismo buzón
+ * que ya va en copia—, y sin esto el mismo correo aparecería dos veces en el
+ * `sendTo` de Gmail. Compara en minúsculas pero conserva la grafía original.
+ */
+function destinatarios(...correos: (string | null | undefined)[]): string {
+  const vistos = new Set<string>();
+  const lista: string[] = [];
+  for (const c of correos) {
+    if (!c) continue;
+    const clave = c.toLowerCase();
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    lista.push(c);
+  }
+  return lista.join(', ');
+}
+
+/**
+ * Quiénes se enteran de una decisión: el solicitante, **toda la cadena que la
+ * firmó** y administración.
+ *
+ * Los dos aprobadores van incluidos a propósito. El segundo suele coincidir con
+ * la copia a administración y por eso parecía que ya funcionaba, pero el jefe
+ * inmediato —que dio el primer visto bueno— no recibía nada: daba su firma y no
+ * volvía a saber en qué acabó.
+ */
+const cadenaDeDecision = (s: Solicitud) =>
+  destinatarios(s.solicitanteEmail, s.aprobadorCorreo, s.segundoAprobadorCorreo, ...COPIA_ADMINISTRACION);
+
 function correoAprobada(s: Solicitud) {
   const disfruta = s.tipo === 'vacaciones' ? '\n¡Disfrútalas!\n' : '';
   return {
-    para: [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', '),
+    para: cadenaDeDecision(s),
     asunto: `✅ Tu solicitud ${PERIODO[s.tipo]} ha sido aprobada`,
     cuerpo: [
       `¡Hola ${s.empleadoNombre}!`,
@@ -161,7 +194,10 @@ function correoAprobada(s: Solicitud) {
 
 function correoRechazada(s: Solicitud) {
   return {
-    para: [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', '),
+    // Misma cadena que en la aprobación, y aquí importa más: si el segundo
+    // superior tumba algo que el jefe inmediato ya había avalado, el jefe tiene
+    // que enterarse — es quien va a tener que reorganizar el trabajo.
+    para: cadenaDeDecision(s),
     asunto: `❌ Tu solicitud ${PERIODO[s.tipo]} ha sido rechazada`,
     cuerpo: [
       `Hola ${s.empleadoNombre}:`,
