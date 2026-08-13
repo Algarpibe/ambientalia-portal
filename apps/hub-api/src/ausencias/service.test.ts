@@ -214,8 +214,25 @@ describe('validarSaldo', () => {
     });
   });
 
-  it('rechaza un saldo negativo', () => {
-    expect(() => validarSaldo({ saldoCorte: -1, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  it('acepta un saldo negativo, que es quien ha adelantado vacaciones', () => {
+    // El Excel del que salen los saldos iniciales los trae: significa que esa
+    // persona ha disfrutado más días de los que lleva devengados. Rechazarlos
+    // era una suposición equivocada, y además contradecía al resto de la app,
+    // que sí calcula y pinta un disponible negativo.
+    expect(validarSaldo({ saldoCorte: -2.8, fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
+    expect(validarSaldo({ saldoCorte: '-2,8', fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
+    expect(validarSaldo({ saldoCorte: '-2.8333', fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
+  });
+
+  it('rechaza un saldo absurdamente negativo, que es un tecleo', () => {
+    expect(() => validarSaldo({ saldoCorte: -1000, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  });
+
+  it('no confunde el signo con basura', () => {
+    expect(() => validarSaldo({ saldoCorte: '-', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '--5', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '5-', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '-0x10', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
   });
 
   it('rechaza un saldo que no es número', () => {
@@ -284,7 +301,7 @@ describe('validarSaldo', () => {
     expect(() => validarSaldo({ saldoCorte: '12.5abc', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
     expect(() => validarSaldo({ saldoCorte: true, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
     expect(() => validarSaldo({ saldoCorte: {}, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
-    expect(() => validarSaldo({ saldoCorte: '-5', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '5 ', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
     expect(() => validarSaldo({ saldoCorte: Infinity, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
   });
 

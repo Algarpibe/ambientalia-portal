@@ -836,11 +836,14 @@ describe('PUT /ausencias/empleados/:id/saldo', () => {
       .expect(403);
   });
 
-  it('400 si el saldo es negativo', async () => {
+  // Un saldo negativo NO es un 400: es quien ha adelantado vacaciones, y el
+  // Excel del que salen los saldos iniciales los trae. Lo que sí se rechaza es
+  // un valor absurdo en cualquiera de los dos sentidos.
+  it('400 si el saldo es absurdo, también hacia abajo', async () => {
     await request(app())
       .put(`/api/ausencias/empleados/${E1}/saldo`)
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
-      .send({ saldoCorte: -1, fechaCorte: '2026-01-01' })
+      .send({ saldoCorte: -1000, fechaCorte: '2026-01-01' })
       .expect(400);
   });
 

@@ -345,8 +345,13 @@ export function validarFilasEmpleados(body: unknown): FilaEmpleado[] {
 // ── Saldo de vacaciones ────────────────────────────────────────────────────
 
 /**
- * Tope del saldo de corte. NUMERIC(5,1) admite hasta 9999,9, pero 999 días son
- * 66 años de devengo: por encima es un error de tecleo, no un saldo.
+ * Tope del saldo de corte, en valor absoluto. NUMERIC(5,1) admite hasta 9999,9,
+ * pero 999 días son 66 años de devengo: por encima es un error de tecleo.
+ *
+ * Se aplica también hacia abajo: el saldo PUEDE ser negativo —quien ha
+ * adelantado vacaciones ha disfrutado más días de los que lleva devengados, y
+ * el Excel del que salen los saldos iniciales los trae así— pero -1000 sigue
+ * siendo un tecleo.
  */
 const MAX_SALDO = 999;
 
@@ -357,7 +362,8 @@ export interface SaldoAFijar {
 }
 
 /**
- * Un saldo en texto: solo dígitos y, como mucho, una coma o un punto decimal.
+ * Un saldo en texto: signo menos opcional, dígitos y, como mucho, una coma o un
+ * punto decimal.
  *
  * Se comprueba la FORMA antes de convertir porque `Number()` es demasiado
  * permisivo para tratarlo como la respuesta a un formulario: acepta espacios
@@ -367,7 +373,7 @@ export interface SaldoAFijar {
  * `type="number"` rechaza en la mayoría de locales—, así que cualquiera de
  * esas rarezas puede llegar tal cual desde el campo.
  */
-const RE_SALDO = /^\d{1,3}([.,]\d+)?$/;
+const RE_SALDO = /^-?\d{1,3}([.,]\d+)?$/;
 
 /** Valida a mano lo que llega del cliente; en este repo no hay zod. */
 export function validarSaldo(body: unknown): SaldoAFijar {
@@ -410,7 +416,7 @@ export function validarSaldo(body: unknown): SaldoAFijar {
     if (!RE_SALDO.test(b.saldoCorte)) throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
     saldo = Number(b.saldoCorte.replace(',', '.'));
   }
-  if (!Number.isFinite(saldo) || saldo < 0 || saldo > MAX_SALDO) {
+  if (!Number.isFinite(saldo) || Math.abs(saldo) > MAX_SALDO) {
     throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
   }
 
