@@ -4,7 +4,6 @@ import {
   nombreArchivoNormalizado,
   puedeDecidir,
   puedeVerAdjunto,
-  validarFilasEmpleados,
   validarNuevaSolicitud,
   validarSaldo,
   type Sesion,
@@ -278,31 +277,6 @@ describe('puedeDecidir con dos firmas', () => {
   });
 });
 
-describe('validarFilasEmpleados', () => {
-  it('normaliza correos a minúsculas', () => {
-    const r = validarFilasEmpleados({
-      empleados: [{ nombreCompleto: 'Ana Ruiz', correo: 'Ana.Ruiz@Ambientalia.com.co', cargo: ' Analista ' }],
-    });
-    expect(r[0]).toMatchObject({ correo: 'ana.ruiz@ambientalia.com.co', cargo: 'Analista', credencial: null });
-  });
-
-  it('rechaza una fila sin nombre o con correo inválido, diciendo cuál', () => {
-    expect(() => validarFilasEmpleados({ empleados: [{ nombreCompleto: '', correo: 'a@b.co' }] })).toThrow(
-      expect.objectContaining({ field: 'empleados[0].nombreCompleto' }),
-    );
-    expect(() =>
-      validarFilasEmpleados({ empleados: [{ nombreCompleto: 'Ana', correo: 'a@b.co' }, { nombreCompleto: 'Luis', correo: 'no-es-correo' }] }),
-    ).toThrow(expect.objectContaining({ field: 'empleados[1].correo' }));
-  });
-
-  it('rechaza una lista vacía y una desmesurada', () => {
-    expect(() => validarFilasEmpleados({ empleados: [] })).toThrow(AusenciaError);
-    const muchos = Array.from({ length: 501 }, (_, i) => ({ nombreCompleto: `N${i}`, correo: `n${i}@a.co` }));
-    expect(() => validarFilasEmpleados({ empleados: muchos })).toThrow(
-      expect.objectContaining({ code: 'demasiados_empleados' }),
-    );
-  });
-});
 
 describe('validarSaldo', () => {
   it('acepta un saldo con decimal y su fecha', () => {

@@ -1,65 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Upload, UserPlus } from 'lucide-react';
-import { fetchEmpleados, importarEmpleados, sincronizarEmpleados, type Empleado } from './api';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Loader2, UserPlus } from 'lucide-react';
+import { fetchEmpleados, sincronizarEmpleados, type Empleado } from './api';
 
-// Mantenimiento del maestro de empleados. Dos caminos, y ninguno es obligatorio
-// para arrancar: quien tiene la app asignada se da de alta solo la primera vez
-// que entra.
+// Mantenimiento del maestro de empleados, y no es obligatorio para arrancar:
+// quien tiene la app asignada se da de alta solo la primera vez que entra.
+// «Dar de alta desde el portal» crea de golpe las fichas que falten a partir de
+// las cuentas del portal.
 //
-//  - «Dar de alta desde el portal»: crea las fichas que faltan a partir de las
-//    cuentas del portal. Un clic, sin teclear nada.
-//  - Pegar la hoja `consolidado`: rellena los CARGOS en bloque y corrige los
-//    nombres. Se pega tal cual (el portapapeles de Sheets separa con
-//    tabuladores) en vez de subir un CSV, para que los datos de nómina no pasen
-//    por ningún archivo intermedio ni acaben en el repositorio.
-
-interface Fila {
-  nombreCompleto: string;
-  correo: string;
-  cargo: string;
-  credencial: number | null;
-}
-
-const CABECERAS = ['Nombre y Apellidos', 'Cargo', 'Correo', 'Número clave'];
-
-/**
- * Convierte lo pegado en filas. Acepta tabulador (Sheets) o punto y coma, y se
- * salta la fila de cabecera si viene incluida.
- */
-export function parsearPegado(texto: string): { filas: Fila[]; descartadas: number } {
-  let descartadas = 0;
-  const filas: Fila[] = [];
-
-  for (const linea of texto.split(/\r?\n/)) {
-    if (!linea.trim()) continue;
-    const c = linea.split(linea.includes('\t') ? '\t' : ';').map((s) => s.trim());
-    // Cabecera de la hoja: se reconoce por su primera columna.
-    if (c[0]?.toLowerCase().startsWith('nombre y apellido')) continue;
-
-    const nombreCompleto = c[0] ?? '';
-    const cargo = c[1] ?? '';
-    const correo = (c[2] ?? '').toLowerCase();
-    const clave = c[3] ?? '';
-    if (!nombreCompleto || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
-      descartadas++;
-      continue;
-    }
-    const credencial = /^\d+$/.test(clave) ? Number(clave) : null;
-    filas.push({ nombreCompleto, correo, cargo, credencial });
-  }
-  return { filas, descartadas };
-}
+// Hubo un tercer camino —pegar la pestaña `consolidado` de la hoja de Google
+// para rellenar cargos en bloque— y se retiró: la plantilla ya está cargada, y
+// el organigrama, que es lo único que se sigue tocando, se mantiene en su propio
+// panel. Mantener viva una vía de escritura masiva desde una hoja que el
+// proyecto quiere desenchufar era todo riesgo y ninguna ventaja.
 
 export default function ImportarEmpleados() {
-  const [texto, setTexto] = useState('');
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [importando, setImportando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
-
-  const { filas, descartadas } = useMemo(() => parsearPegado(texto), [texto]);
 
   function recargar() {
     setCargando(true);
@@ -70,22 +29,6 @@ export default function ImportarEmpleados() {
   }
 
   useEffect(recargar, []);
-
-  async function importar() {
-    setImportando(true);
-    setError(null);
-    setExito(null);
-    try {
-      const { importados } = await importarEmpleados(filas);
-      setExito(`${importados} empleados importados o actualizados.`);
-      setTexto('');
-      recargar();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setImportando(false);
-    }
-  }
 
   const sinCuenta = empleados.filter((e) => !e.userId).length;
 
@@ -126,39 +69,6 @@ export default function ImportarEmpleados() {
           Dar de alta desde el portal
         </button>
       </section>
-
-      <h3 className="mb-1 text-sm font-semibold text-gray-900">Completar cargos desde la hoja</h3>
-      <p className="mb-3 text-sm text-gray-600">
-        Pega aquí las filas de la pestaña <b>consolidado</b> de la hoja <b>consulta_vacaciones</b>, en este orden:{' '}
-        {CABECERAS.join(' · ')}. Añade el cargo a quien ya esté y da de alta a quien falte. Se actualiza por correo, así
-        que reimportar la hoja entera es seguro.
-      </p>
-
-      <textarea
-        rows={8}
-        value={texto}
-        onChange={(e) => setTexto(e.target.value)}
-        aria-label="Filas de la hoja consolidado"
-        placeholder={'Gustavo Novoa\tDirector Técnico\tdirector.tecnico@ambientalia.com.co\t1002'}
-        className="w-full rounded-xl border border-gray-300 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-      />
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          disabled={filas.length === 0 || importando}
-          onClick={() => void importar()}
-          className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
-        >
-          {importando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          Importar {filas.length > 0 && `${filas.length} empleados`}
-        </button>
-        {descartadas > 0 && (
-          <span className="text-sm text-amber-700">
-            {descartadas} {descartadas === 1 ? 'fila descartada' : 'filas descartadas'} por falta de nombre o correo válido.
-          </span>
-        )}
-      </div>
 
       {error && (
         <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">

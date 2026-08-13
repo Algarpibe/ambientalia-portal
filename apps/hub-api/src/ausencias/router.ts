@@ -190,15 +190,6 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
-  router.post('/ausencias/empleados/import', requireAuth, requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const filas = service.validarFilasEmpleados(req.body);
-      res.json(await repo.importarEmpleados(db, filas));
-    } catch (e) {
-      sendError(res, e, 'ausencias_empleados_import');
-    }
-  });
-
   // ── Histórico de la hoja (solo admin) ───────────────────────────────────
 
   /**

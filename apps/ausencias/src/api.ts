@@ -158,8 +158,6 @@ export const crearSolicitud = (s: NuevaSolicitud) => post<Solicitud>('/api/ausen
 export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) =>
   post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/decision`, { aprueba, motivo });
 
-export const importarEmpleados = (empleados: unknown[]) =>
-  post<{ importados: number }>('/api/ausencias/empleados/import', { empleados });
 
 /** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
 export const sincronizarEmpleados = () =>

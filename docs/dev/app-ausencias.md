@@ -121,7 +121,7 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — sin acotar por rol, lo ve toda la plantilla |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
-| `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
+| `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
 
 ## El histórico de la hoja
@@ -131,11 +131,11 @@ octubre de 2025) se importan a `portal.solicitudes_ausencia` desde
 *Registro general* (solo admin). El Excel **se lee en el navegador** y solo viaja
 el JSON: `apps/ausencias/src/leerExcel.ts`.
 
-Se lee el fichero en vez de pedir que se peguen las filas —que es lo que hace la
-importación de empleados— por un motivo concreto: **al pegar, las fechas llegan
-como `10/11/2025` y dd/mm es indistinguible de mm/dd**. El 10 de noviembre y el
-11 de octubre se confundirían en silencio y nadie lo notaría hasta tener un
-histórico mal por meses. Con `cellDates` llegan ya como `Date`.
+Se lee el fichero en vez de pedir que se peguen las filas por un motivo concreto:
+**al pegar, las fechas llegan como `10/11/2025` y dd/mm es indistinguible de
+mm/dd**. El 10 de noviembre y el 11 de octubre se confundirían en silencio y
+nadie lo notaría hasta tener un histórico mal por meses. Con `cellDates` llegan
+ya como `Date`.
 
 Lo que el análisis del fichero obligó a cambiar:
 
@@ -317,14 +317,28 @@ Se hace en el **panel de organigrama** de la pestaña *Empleados*
 un ciclo prohibido. El buzón por defecto se acepta aunque no tenga ficha de
 empleado: es de quien cuelga toda la plantilla hoy.
 
-> ⚠️ **La importación de la hoja ya NO escribe `aprobador_correo`**, y no puede
-> volver a hacerlo. El `DO UPDATE SET` del upsert lo pisaba con `EXCLUDED`, que
-> viene con el `COALESCE` al buzón por defecto ya aplicado; como el parser del
-> navegador manda cuatro columnas, cada reimportación devolvía a toda la plantilla
-> al buzón por defecto y borraba el árbol entero. No se puede condicionar: dentro
-> del `DO UPDATE` no se ve el alias de la SELECT y `EXCLUDED` no distingue «no
-> vino» de «vino el valor por defecto». **La hoja de Google no es la fuente de
-> verdad del organigrama.**
+> ⚠️ **La importación de empleados por pegado se RETIRÓ** (el bloque «Completar
+> cargos desde la hoja» de la pestaña *Empleados*, con su endpoint
+> `POST /ausencias/empleados/import`, `validarFilasEmpleados` y
+> `repo.importarEmpleados`). Escribía el maestro entero desde la pestaña
+> `consolidado`, y su `DO UPDATE SET` pisaba `aprobador_correo` con `EXCLUDED`,
+> que viene con el `COALESCE` al buzón por defecto ya aplicado: como el parser del
+> navegador mandaba cuatro columnas, **cada reimportación devolvía a toda la
+> plantilla al buzón por defecto y borraba el árbol entero**. Se llegó a arreglar
+> quitando esa columna del `UPDATE` —no se puede condicionar: dentro del
+> `DO UPDATE` no se ve el alias de la SELECT y `EXCLUDED` no distingue «no vino»
+> de «vino el valor por defecto»— y luego se retiró la funcionalidad entera: la
+> plantilla ya está cargada y el organigrama se mantiene en su propio panel.
+> **No reintroducir una vía de escritura masiva del maestro desde la hoja**: es la
+> fuente de verdad de quién aprueba a quién, y el proyecto va en la dirección de
+> desenchufar esa hoja, no de darle más poder.
+
+Consecuencia asumida: `cargo` y `credencial` ya no se pueden rellenar desde
+ningún sitio. Los valores actuales siguen en la base de datos; una ficha nueva
+nace sin ellos. `cargo` solo decora (aparece en el aviso al aprobador y en la
+tabla del maestro) y `credencial` solo servía para cruzar el histórico de la
+hoja, que ya está importado. Si algún día vuelven a hacer falta, lo que toca es
+un campo editable por fila en el maestro, no resucitar el pegado.
 
 ### Lo que no cubre ningún test
 
@@ -459,9 +473,7 @@ equipo no sirve para coordinarse.
    viaja congelado en el JWT. Con eso ya pueden solicitar — la ficha de empleado
    se crea sola al entrar.
 5. *(Opcional)* En *Vacaciones y Permisos → Empleados*, pulsar **Dar de alta
-   desde el portal** para tener la lista completa de una vez, y pegar la pestaña
-   `consolidado` (Nombre y Apellidos · Cargo · Correo · Número clave) para
-   rellenar los cargos.
+   desde el portal** para tener la lista completa de una vez.
 6. Activar el workflow **«Ausencias — Portal»** en n8n.
 7. Convivencia: dejar el flujo viejo (`mt75OpO0fGIXv5QG`) activo unos días y
    **desactivarlo** —no borrarlo— cuando el nuevo lleve una semana sin incidencias.
