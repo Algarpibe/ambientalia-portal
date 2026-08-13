@@ -10,6 +10,7 @@ import {
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
+import { aprobadoresDe } from './jerarquia.js';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
 import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
@@ -17,6 +18,7 @@ import {
   ETIQUETA_TIPO,
   TIPOS,
   requiereAprobacion,
+  transicionAlDecidir,
   type Empleado,
   type FilaEmpleado,
   type NuevaSolicitud,
@@ -160,6 +162,13 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   const aprueba = requiereAprobacion(datos.tipo);
   const estado = aprueba ? 'pendiente' : 'registrada';
 
+  // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
+  // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
+  // trámite no mueva una solicitud que ya está en vuelo.
+  const firmantes = aprueba
+    ? aprobadoresDe(empleado, await repo.enlaceDe(db, empleado.aprobadorCorreo))
+    : null;
+
   const adjunto = datos.adjunto
     ? {
         nombreArchivo: nombreArchivoNormalizado(datos.tipo, empleado.nombreCompleto, datos.fechaInicio),
@@ -187,7 +196,8 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       estado,
       // Una incapacidad no la aprueba nadie: dejar aquí un aprobador la haría
       // aparecer en su bandeja de pendientes.
-      aprobadorCorreo: aprueba ? empleado.aprobadorCorreo : null,
+      aprobadorCorreo: firmantes ? firmantes.primero : null,
+      segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
     },
     adjunto,
     eventosDeAlta(datos.tipo),
@@ -220,33 +230,61 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
   if (!solicitud) throw new AusenciaError('no_encontrada', 404);
   if (!puedeDecidir(sesion, solicitud)) throw new AusenciaError('no_es_su_aprobacion', 403);
 
+  const transicion = transicionAlDecidir(solicitud, b.aprueba);
+  // Estado terminal: `puedeDecidir` deja pasar a los dos firmantes precisamente
+  // para llegar aquí, porque «ya decidida» describe mejor lo ocurrido que un 403.
+  if (!transicion) throw new AusenciaError('ya_decidida', 409);
+
   const actualizada = await repo.decidirSolicitud(
     db,
     id,
-    b.aprueba,
-    motivo || null,
+    solicitud.estado,
+    transicion,
+    b.aprueba ? null : motivo || null,
     sesion.userId,
     construirPayload,
   );
-  // El UPDATE lleva `AND estado = 'pendiente'`: si no devolvió fila es que otro
-  // (o un doble clic) ya la decidió. Es un conflicto, no un fallo del servidor.
+  // El UPDATE lleva `AND estado = <el que se leyó>`: si no devolvió fila es que
+  // otro (o un doble clic) se adelantó. Es un conflicto, no un fallo del servidor.
   if (!actualizada) throw new AusenciaError('ya_decidida', 409);
 
   void avisarN8n();
   return actualizada;
 }
 
-/** Quien la tiene asignada, o un admin (que destraba aprobaciones bloqueadas). */
+/**
+ * Quien tiene el TURNO, o un admin (que destraba aprobaciones bloqueadas).
+ *
+ * ⚠️ Las ramas están separadas por estado a propósito. Escribirlo como un OR de
+ * los dos correos —que es la forma más natural— dejaría al segundo aprobador
+ * firmar una solicitud que su jefe inmediato todavía no ha visto: la cascada
+ * dejaría de existir sin que nada fallara.
+ *
+ * En estado terminal pasan los dos firmantes, para que el 409 de «ya decidida»
+ * gane al 403: es más informativo, y es lo que ya hacía la versión de una firma.
+ */
 export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
   if (sesion.esAdmin) return true;
-  return (s.aprobadorCorreo ?? '').toLowerCase() === sesion.email.toLowerCase();
+  const yo = sesion.email.toLowerCase();
+  if (s.estado === 'pendiente') return (s.aprobadorCorreo ?? '').toLowerCase() === yo;
+  if (s.estado === 'pendiente_2') return (s.segundoAprobadorCorreo ?? '').toLowerCase() === yo;
+  return (
+    (s.aprobadorCorreo ?? '').toLowerCase() === yo || (s.segundoAprobadorCorreo ?? '').toLowerCase() === yo
+  );
 }
 
-/** El solicitante y su aprobador pueden ver el PDF; nadie más (salvo admin). */
+/** El solicitante y sus dos aprobadores pueden ver el PDF; nadie más (salvo admin). */
 export function puedeVerAdjunto(sesion: Sesion, a: repo.AdjuntoCompleto): boolean {
   if (sesion.esAdmin) return true;
   const yo = sesion.email.toLowerCase();
-  return a.solicitanteEmail.toLowerCase() === yo || (a.aprobadorCorreo ?? '').toLowerCase() === yo;
+  // El segundo aprobador entra aquí aunque todavía no sea su turno: la ruta del
+  // adjunto devuelve 404 y no 403, así que sin esto tendría que firmar un permiso
+  // sin poder abrir su soporte y sin entender por qué.
+  return (
+    a.solicitanteEmail.toLowerCase() === yo ||
+    (a.aprobadorCorreo ?? '').toLowerCase() === yo ||
+    (a.segundoAprobadorCorreo ?? '').toLowerCase() === yo
+  );
 }
 
 // ── Importación del histórico de la hoja ───────────────────────────────────

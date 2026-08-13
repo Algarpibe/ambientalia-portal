@@ -38,6 +38,54 @@ export function requiereAprobacion(tipo: TipoSolicitud): boolean {
   return tipo !== 'incapacidad';
 }
 
+/** A quién le toca firmar AHORA. `null` si el estado ya no admite firma. */
+export function correoDelTurno(s: Pick<Solicitud, 'estado' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'>): string | null {
+  if (s.estado === 'pendiente') return s.aprobadorCorreo;
+  if (s.estado === 'pendiente_2') return s.segundoAprobadorCorreo;
+  return null;
+}
+
+export interface Transicion {
+  estado: EstadoSolicitud;
+  evento: EventoOutbox;
+  /** Firma del jefe inmediato: sella `primera_firma_at`. */
+  esPrimeraFirma: boolean;
+  /** Cierra la solicitud: sella `decidida_at` y el aprobador final. */
+  esDecisionFinal: boolean;
+}
+
+/**
+ * La máquina de estados de la decisión, entera y en un solo sitio.
+ *
+ * Se calcula en TypeScript y no en el SQL a propósito: el UPDATE solo escribe si
+ * nadie se ha adelantado, y así la transición se puede probar sin base de datos.
+ *
+ * Un rechazo en el primer nivel también sella la primera firma: el jefe actuó.
+ * Cuando la cadena tiene una sola firma se sellan las dos parejas de columnas,
+ * para que ninguna consulta de auditoría necesite un COALESCE.
+ *
+ * `null` = el estado no admite firma; el servicio lo traduce a 409.
+ */
+export function transicionAlDecidir(
+  s: Pick<Solicitud, 'estado' | 'segundoAprobadorCorreo'>,
+  aprueba: boolean,
+): Transicion | null {
+  if (s.estado === 'pendiente') {
+    if (!aprueba) return { estado: 'rechazada', evento: 'rechazada', esPrimeraFirma: true, esDecisionFinal: true };
+    // Sin segundo aprobador el árbol se acaba aquí: una sola firma la deja firme,
+    // que es exactamente el comportamiento anterior a la cascada.
+    return s.segundoAprobadorCorreo
+      ? { estado: 'pendiente_2', evento: 'aprobacion_2', esPrimeraFirma: true, esDecisionFinal: false }
+      : { estado: 'aprobada', evento: 'aprobada', esPrimeraFirma: true, esDecisionFinal: true };
+  }
+  if (s.estado === 'pendiente_2') {
+    return aprueba
+      ? { estado: 'aprobada', evento: 'aprobada', esPrimeraFirma: false, esDecisionFinal: true }
+      : { estado: 'rechazada', evento: 'rechazada', esPrimeraFirma: false, esDecisionFinal: true };
+  }
+  return null;
+}
+
 /** Etiqueta legible, la que va en los correos y en la columna «Tipo» de la hoja. */
 export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
   vacaciones: 'Vacaciones',

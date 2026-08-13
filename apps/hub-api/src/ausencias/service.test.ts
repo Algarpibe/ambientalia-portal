@@ -9,7 +9,7 @@ import {
   validarSaldo,
   type Sesion,
 } from './service.js';
-import type { Solicitud } from './types.js';
+import { transicionAlDecidir, type Solicitud } from './types.js';
 
 const PDF_BASE64 = Buffer.from('%PDF-1.4 fake').toString('base64');
 
@@ -155,11 +155,12 @@ describe('permisos', () => {
     expect(puedeDecidir({ ...yo, email: 'COMERCIAL@Ambientalia.com.co' }, solicitud())).toBe(true);
   });
 
-  it('el PDF solo lo ven el solicitante, su aprobador y un admin', () => {
+  it('el PDF solo lo ven el solicitante, sus dos aprobadores y un admin', () => {
     const adj = {
       solicitudId: 's1',
       solicitanteEmail: 'director.tecnico@ambientalia.com.co',
       aprobadorCorreo: 'comercial@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
       nombreArchivo: 'i.pdf',
       mime: 'application/pdf',
       contenido: Buffer.from(''),
@@ -168,6 +169,112 @@ describe('permisos', () => {
     expect(puedeVerAdjunto(yo, adj)).toBe(true);
     expect(puedeVerAdjunto(admin, adj)).toBe(true);
     expect(puedeVerAdjunto(otro, adj)).toBe(false);
+  });
+
+  it('el segundo aprobador ve el PDF aunque todavía no sea su turno', () => {
+    // La ruta del adjunto devuelve 404, no 403: sin esto tendría que firmar un
+    // permiso sin poder abrir su soporte y sin entender por qué.
+    const adj = {
+      solicitudId: 's1',
+      solicitanteEmail: 'director.tecnico@ambientalia.com.co',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+      segundoAprobadorCorreo: 'comercial@ambientalia.com.co',
+      nombreArchivo: 'i.pdf',
+      mime: 'application/pdf',
+      contenido: Buffer.from(''),
+    };
+    expect(puedeVerAdjunto(yo, adj)).toBe(true);
+    expect(puedeVerAdjunto(otro, adj)).toBe(false);
+  });
+});
+
+describe('transicionAlDecidir', () => {
+  const conSegundo = { estado: 'pendiente' as const, segundoAprobadorCorreo: 'comercial@ambientalia.com.co' };
+  const sinSegundo = { estado: 'pendiente' as const, segundoAprobadorCorreo: null };
+
+  it('la primera firma de dos sube a pendiente_2 y NO cierra la solicitud', () => {
+    // El mutante que muere aquí: encolar `aprobada` en la primera firma manda el
+    // correo de aprobada y crea el evento de Google Calendar antes de tiempo.
+    expect(transicionAlDecidir(conSegundo, true)).toEqual({
+      estado: 'pendiente_2',
+      evento: 'aprobacion_2',
+      esPrimeraFirma: true,
+      esDecisionFinal: false,
+    });
+  });
+
+  it('sin segundo aprobador, una sola firma la deja aprobada', () => {
+    // Es el comportamiento anterior a la cascada, y el de toda la plantilla hasta
+    // que se rellene el organigrama. Mandar todo a pendiente_2 atascaría a medio
+    // mundo el día del despliegue.
+    expect(transicionAlDecidir(sinSegundo, true)).toEqual({
+      estado: 'aprobada',
+      evento: 'aprobada',
+      esPrimeraFirma: true,
+      esDecisionFinal: true,
+    });
+  });
+
+  it('la segunda firma cierra la solicitud y no vuelve a sellar la primera', () => {
+    expect(transicionAlDecidir({ estado: 'pendiente_2', segundoAprobadorCorreo: 'x@y.com' }, true)).toEqual({
+      estado: 'aprobada',
+      evento: 'aprobada',
+      esPrimeraFirma: false,
+      esDecisionFinal: true,
+    });
+  });
+
+  it('el rechazo es terminal en los dos niveles', () => {
+    expect(transicionAlDecidir(conSegundo, false)?.estado).toBe('rechazada');
+    expect(transicionAlDecidir({ estado: 'pendiente_2', segundoAprobadorCorreo: 'x@y.com' }, false)?.estado).toBe(
+      'rechazada',
+    );
+  });
+
+  it('un rechazo en el primer nivel también sella la primera firma: el jefe actuó', () => {
+    expect(transicionAlDecidir(conSegundo, false)?.esPrimeraFirma).toBe(true);
+  });
+
+  it('los estados terminales no admiten firma', () => {
+    for (const estado of ['aprobada', 'rechazada', 'registrada'] as const) {
+      expect(transicionAlDecidir({ estado, segundoAprobadorCorreo: null }, true)).toBeNull();
+    }
+  });
+});
+
+describe('puedeDecidir con dos firmas', () => {
+  const primero = { email: 'jefa.directa@ambientalia.com.co', userId: null, esAdmin: false };
+  const segundo = { email: 'comercial@ambientalia.com.co', userId: null, esAdmin: false };
+  const enCascada = solicitud({
+    aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    segundoAprobadorCorreo: 'comercial@ambientalia.com.co',
+  });
+
+  it('en pendiente firma el jefe inmediato', () => {
+    expect(puedeDecidir(primero, enCascada)).toBe(true);
+  });
+
+  it('en pendiente el segundo NO se salta la cola', () => {
+    // El mutante que muere aquí: escribirlo como un OR de los dos correos —que es
+    // la forma más natural— deja al superior firmar solo, y la cascada desaparece
+    // sin que nada falle.
+    expect(puedeDecidir(segundo, enCascada)).toBe(false);
+  });
+
+  it('en pendiente_2 firma el segundo y ya no el primero', () => {
+    const subida = { ...enCascada, estado: 'pendiente_2' as const };
+    expect(puedeDecidir(segundo, subida)).toBe(true);
+    expect(puedeDecidir(primero, subida)).toBe(false);
+  });
+
+  it('en estado terminal pasan los dos, para que gane el 409 sobre el 403', () => {
+    const cerrada = { ...enCascada, estado: 'aprobada' as const };
+    expect(puedeDecidir(primero, cerrada)).toBe(true);
+    expect(puedeDecidir(segundo, cerrada)).toBe(true);
+  });
+
+  it('un admin destraba en cualquier nivel', () => {
+    expect(puedeDecidir({ email: 'a@b.com', userId: null, esAdmin: true }, enCascada)).toBe(true);
   });
 });
 

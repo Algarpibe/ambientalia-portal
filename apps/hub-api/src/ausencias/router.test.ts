@@ -32,6 +32,8 @@ const estado = {
   yaEnBd: 0,
   historicoInsertado: 0,
   solicitudes: [] as Record<string, unknown>[],
+  /** Argumentos de la última llamada a `decidirSolicitud`, para fijar el cableado. */
+  ultimaDecision: null as { estadoEsperado: string; transicion: Record<string, unknown> } | null,
   eventos: [] as EventoFalso[],
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
@@ -86,15 +88,32 @@ vi.mock('./repo.js', () => ({
     if (i < 0) return null;
     return estado.solicitudes.splice(i, 1)[0];
   },
-  esAprobadorDeAlguien: async (_db: unknown, email: string) =>
-    email.toLowerCase() === 'comercial@ambientalia.com.co',
+  // Las dos ramas del SQL real: ser jefe de alguien en el maestro, O tener una
+  // firma pendiente. La segunda es la que sostiene la pestaña del segundo
+  // aprobador cuando le desactivan el jefe intermedio.
+  esAprobadorDeAlguien: async (_db: unknown, email: string) => {
+    const yo = email.toLowerCase();
+    if (estado.plantilla.some((e: any) => String(e.aprobadorCorreo).toLowerCase() === yo)) return true;
+    if (yo === 'comercial@ambientalia.com.co') return true;
+    return estado.solicitudes.some(
+      (s) =>
+        (s.estado === 'pendiente' || s.estado === 'pendiente_2') &&
+        (String(s.aprobadorCorreo ?? '').toLowerCase() === yo ||
+          String(s.segundoAprobadorCorreo ?? '').toLowerCase() === yo),
+    );
+  },
   listarEmpleados: async () => estado.plantilla,
   importarEmpleados: async (_db: unknown, filas: unknown[]) => ({ importados: filas.length }),
   solicitudesDeEmpleado: async () => estado.solicitudes,
+  // Filtra por TURNO, como el WHERE real: en `pendiente` la ve quien firma
+  // primero y en `pendiente_2` quien firma después, nunca los dos a la vez.
   solicitudesPendientes: async (_db: unknown, correo: string, todas: boolean) =>
-    estado.solicitudes.filter(
-      (s) => s.estado === 'pendiente' && (todas || String(s.aprobadorCorreo).toLowerCase() === correo.toLowerCase()),
-    ),
+    estado.solicitudes.filter((s) => {
+      if (s.estado !== 'pendiente' && s.estado !== 'pendiente_2') return false;
+      if (todas) return true;
+      const turno = s.estado === 'pendiente' ? s.aprobadorCorreo : s.segundoAprobadorCorreo;
+      return String(turno ?? '').toLowerCase() === correo.toLowerCase();
+    }),
   solicitudPorId: async (_db: unknown, id: string) => estado.solicitudes.find((s) => s.id === id) ?? null,
   // Saldo: se lee de `estado.plantilla`, con `saldoCorte`/`fechaCorte` colgados
   // ahí mismo (empiezan `undefined` = "sin configurar"). `vacacionesDeEmpleados`
@@ -161,28 +180,42 @@ vi.mock('./repo.js', () => ({
   decidirSolicitud: async (
     _db: unknown,
     id: string,
-    aprueba: boolean,
+    estadoEsperado: string,
+    transicion: { estado: string; evento: string; esPrimeraFirma: boolean; esDecisionFinal: boolean },
     motivo: string | null,
     _userId: string | null,
     construirPayload: (s: unknown, evento: string) => unknown,
   ) => {
+    estado.ultimaDecision = { estadoEsperado, transicion };
     const s = estado.solicitudes.find((x) => x.id === id);
-    // Refleja el `WHERE estado = 'pendiente'` del UPDATE real: sin fila, 409.
-    if (!s || s.estado !== 'pendiente') return null;
-    s.estado = aprueba ? 'aprobada' : 'rechazada';
-    s.motivoRechazo = aprueba ? null : motivo;
-    s.decididaAt = '2026-06-02T10:00:00Z';
-    const evento = aprueba ? 'aprobada' : 'rechazada';
+    // Refleja el `WHERE id = $1 AND estado = $7` del UPDATE real: si alguien se
+    // adelantó, no hay fila y el servicio lo traduce a 409. Comparar contra el
+    // estado ESPERADO y no contra una lista es lo que hace que un doble clic del
+    // jefe inmediato no encadene las dos firmas de golpe.
+    if (!s || s.estado !== estadoEsperado) return null;
+    s.estado = transicion.estado;
+    s.motivoRechazo = motivo;
+    if (transicion.esPrimeraFirma) s.primeraFirmaAt = '2026-06-02T10:00:00Z';
+    if (transicion.esDecisionFinal) s.decididaAt = '2026-06-02T10:00:00Z';
     estado.eventos.push({
       id: estado.eventos.length + 1,
-      evento,
+      evento: transicion.evento,
       solicitudId: id,
       intentos: 0,
-      payload: construirPayload(s, evento),
+      payload: construirPayload(s, transicion.evento),
       enviado: false,
     });
     return s;
   },
+  enlaceDe: async (_db: unknown, correo: string) => {
+    const e = estado.plantilla.find((x: any) => String(x.correo).toLowerCase() === correo.toLowerCase());
+    return e ? { correo: String(e.correo).toLowerCase(), aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase() } : null;
+  },
+  enlacesActivos: async () =>
+    estado.plantilla.map((e: any) => ({
+      correo: String(e.correo).toLowerCase(),
+      aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase(),
+    })),
   adjuntoPorId: async (_db: unknown, id: string) => estado.adjuntos.get(id) ?? null,
   marcarAdjuntoEnDrive: async (_db: unknown, id: string, driveFileId: string) => {
     const a = estado.adjuntos.get(id);
@@ -272,6 +305,7 @@ beforeEach(() => {
   estado.yaEnBd = 0;
   estado.historicoInsertado = 0;
   estado.solicitudes = [];
+  estado.ultimaDecision = null;
   estado.eventos = [];
   estado.adjuntos = new Map();
   estado.seq = 0;
@@ -482,6 +516,233 @@ describe('decisión', () => {
     await crear();
     const r = await request(app()).get('/api/ausencias/pendientes').set('Authorization', `Bearer ${token({ sub: 'admin@ambientalia.com.co', role: 'admin' })}`).expect(200);
     expect(r.body.solicitudes).toHaveLength(1);
+  });
+});
+
+// ── Cascada de dos firmas ──────────────────────────────────────────────────
+
+describe('aprobación en cascada', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+  const GERENCIA = 'comercial@ambientalia.com.co';
+
+  const jefa = () => token({ sub: JEFA });
+  const gerencia = () => token({ sub: GERENCIA });
+
+  beforeEach(() => {
+    // Ana → Jefa → Gerencia. La ficha de la jefa TIENE que estar en la plantilla:
+    // `enlaceDe` solo sube por fichas activas, y sin ella el árbol se cortaría en
+    // el primer escalón.
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '44444444-4444-4444-8444-444444444444',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 900,
+      aprobadorCorreo: GERENCIA,
+      userId: null,
+      activo: true,
+    });
+  });
+
+  async function crear(over: Record<string, unknown> = {}) {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva(over))
+      .expect(201);
+    return r.body as Record<string, unknown>;
+  }
+
+  const decidir = (id: string, quien: string, body: Record<string, unknown>) =>
+    request(app())
+      .post(`/api/ausencias/solicitudes/${id}/decision`)
+      .set('Authorization', `Bearer ${quien}`)
+      .send(body);
+
+  it('el alta congela los dos firmantes', async () => {
+    const s = await crear();
+    expect(s.aprobadorCorreo).toBe(JEFA);
+    expect(s.segundoAprobadorCorreo).toBe(GERENCIA);
+  });
+
+  it('el circuito completo: la primera firma sube, la segunda cierra', async () => {
+    const s = await crear();
+    const id = s.id as string;
+
+    const primera = await decidir(id, jefa(), { aprueba: true }).expect(200);
+    expect(primera.body.estado).toBe('pendiente_2');
+    // Todavía NO está decidida: si `decididaAt` se sellara aquí, el registro
+    // diría que se aprobó cuando solo se subió un escalón.
+    expect(primera.body.decididaAt).toBeNull();
+    expect(primera.body.primeraFirmaAt).not.toBeNull();
+    // Y NO se ha encolado el correo de aprobada ni el evento de calendario.
+    expect(estado.eventos.filter((e) => e.evento === 'aprobada')).toHaveLength(0);
+    expect(estado.eventos.filter((e) => e.evento === 'aprobacion_2')).toHaveLength(1);
+
+    const segunda = await decidir(id, gerencia(), { aprueba: true }).expect(200);
+    expect(segunda.body.estado).toBe('aprobada');
+    expect(segunda.body.decididaAt).not.toBeNull();
+    expect(estado.eventos.filter((e) => e.evento === 'aprobada')).toHaveLength(1);
+  });
+
+  it('el aviso de la segunda firma va SOLO al segundo aprobador', async () => {
+    const s = await crear();
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+    const aviso = estado.eventos.find((e) => e.evento === 'aprobacion_2');
+    expect((aviso!.payload as any).correo.para).toBe(GERENCIA);
+  });
+
+  it('la segunda firma no vuelve a subir el PDF a Drive ni toca calendario u hoja', async () => {
+    // `aprobacion` ya lo subió. Sin nombre de evento propio, reutilizar
+    // `aprobacion` duplicaría el fichero en la carpeta de Drive.
+    const s = await crear({ tipo: 'permiso', adjunto: { nombreArchivo: 'x.pdf', mime: 'application/pdf', contenidoBase64: PDF } });
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+    const p = estado.eventos.find((e) => e.evento === 'aprobacion_2')!.payload as any;
+    expect(p.drive).toBeNull();
+    expect(p.calendario).toBeNull();
+    expect(p.hoja).toBeNull();
+  });
+
+  it('el UPDATE se condiciona al estado que se leyó, no a una lista', async () => {
+    // Es lo que separa dos clics simultáneos del jefe: los dos leen `pendiente` y
+    // los dos pasan el guard, así que lo único que impide que una sola persona
+    // encadene `pendiente → pendiente_2 → aprobada` es que el UPDATE exija
+    // exactamente el estado leído.
+    //
+    // No se puede probar de verdad desde aquí: dos peticiones por HTTP no llegan
+    // a solaparse contra un doble en memoria, y el SQL real necesita Postgres.
+    // Lo que sí se fija es el cableado — que el servicio pasa el estado que leyó,
+    // en vez de un literal o una lista.
+    const s = await crear();
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+    expect(estado.ultimaDecision).toMatchObject({
+      estadoEsperado: 'pendiente',
+      transicion: { estado: 'pendiente_2', evento: 'aprobacion_2' },
+    });
+
+    await decidir(s.id as string, gerencia(), { aprueba: true }).expect(200);
+    expect(estado.ultimaDecision).toMatchObject({ estadoEsperado: 'pendiente_2' });
+  });
+
+  it('si otro se adelantó, la firma da 409 y no encola nada', async () => {
+    const s = await crear();
+    const id = s.id as string;
+    await decidir(id, jefa(), { aprueba: true }).expect(200);
+    const eventosAntes = estado.eventos.length;
+
+    // Un admin pasa el guard en cualquier estado, así que llega hasta el UPDATE.
+    // Se simula el adelanto cerrando la solicitud por debajo, como habría hecho
+    // la petición que ganó la carrera.
+    (estado.solicitudes.find((x) => x.id === id) as Record<string, unknown>).estado = 'aprobada';
+    const r = await decidir(id, token({ sub: 'admin@ambientalia.com.co', role: 'admin' }), {
+      aprueba: true,
+    }).expect(409);
+    expect(r.body.error).toBe('ya_decidida');
+    expect(estado.eventos).toHaveLength(eventosAntes);
+  });
+
+  it('el segundo aprobador no se salta la cola', async () => {
+    const s = await crear();
+    await decidir(s.id as string, gerencia(), { aprueba: true }).expect(403);
+  });
+
+  it('tras subir, el jefe inmediato ya no puede firmar', async () => {
+    const s = await crear();
+    const id = s.id as string;
+    await decidir(id, jefa(), { aprueba: true }).expect(200);
+    await decidir(id, jefa(), { aprueba: false, motivo: 'me arrepiento' }).expect(403);
+  });
+
+  it('la bandeja cambia de dueño al subir de nivel', async () => {
+    const s = await crear();
+    const bandeja = async (quien: string) =>
+      (await request(app()).get('/api/ausencias/pendientes').set('Authorization', `Bearer ${quien}`).expect(200)).body
+        .solicitudes;
+
+    expect(await bandeja(jefa())).toHaveLength(1);
+    expect(await bandeja(gerencia())).toHaveLength(0);
+
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+
+    expect(await bandeja(jefa())).toHaveLength(0);
+    expect(await bandeja(gerencia())).toHaveLength(1);
+  });
+
+  it('el admin ve los dos niveles en su bandeja', async () => {
+    const a = await crear();
+    const b = await crear({ fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
+    await decidir(a.id as string, jefa(), { aprueba: true }).expect(200);
+    const r = await request(app())
+      .get('/api/ausencias/pendientes')
+      .set('Authorization', `Bearer ${token({ sub: 'admin@ambientalia.com.co', role: 'admin' })}`)
+      .expect(200);
+    expect(r.body.solicitudes).toHaveLength(2);
+    expect(r.body.solicitudes.map((s: any) => s.estado).sort()).toEqual(['pendiente', 'pendiente_2']);
+    expect(b.id).toBeTruthy();
+  });
+
+  it('el admin destraba avanzando un escalón, no saltando al final', async () => {
+    const s = await crear();
+    const r = await decidir(s.id as string, token({ sub: 'admin@ambientalia.com.co', role: 'admin' }), {
+      aprueba: true,
+    }).expect(200);
+    expect(r.body.estado).toBe('pendiente_2');
+  });
+
+  it('un rechazo en el segundo nivel es terminal y guarda el motivo', async () => {
+    const s = await crear();
+    const id = s.id as string;
+    await decidir(id, jefa(), { aprueba: true }).expect(200);
+    const r = await decidir(id, gerencia(), { aprueba: false, motivo: 'Coincide con el cierre' }).expect(200);
+    expect(r.body.estado).toBe('rechazada');
+    expect(r.body.motivoRechazo).toBe('Coincide con el cierre');
+    expect(estado.eventos.filter((e) => e.evento === 'rechazada')).toHaveLength(1);
+  });
+
+  it('sin jefe del jefe basta una firma: el organigrama vacío no atasca a nadie', async () => {
+    // Es el estado del día del despliegue, cuando todo el mundo cuelga aún del
+    // buzón por defecto. Si esto mandara todo a `pendiente_2`, media plantilla se
+    // quedaría esperando una firma que nadie tiene asignada.
+    estado.empleado.aprobadorCorreo = GERENCIA;
+    const s = await crear();
+    expect(s.segundoAprobadorCorreo).toBeNull();
+    const r = await decidir(s.id as string, gerencia(), { aprueba: true }).expect(200);
+    expect(r.body.estado).toBe('aprobada');
+  });
+
+  it('el segundo aprobador puede abrir el PDF antes de que sea su turno', async () => {
+    // La ruta devuelve 404 y no 403, así que sin esto tendría que firmar un
+    // permiso sin poder abrir su soporte y sin ninguna pista de por qué.
+    estado.adjuntos.set('a1', {
+      solicitudId: 's1',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      aprobadorCorreo: JEFA,
+      segundoAprobadorCorreo: GERENCIA,
+      nombreArchivo: 'Permisos_Ana_Ruiz_2026-07-06_1.pdf',
+      mime: 'application/pdf',
+      contenido: Buffer.from('%PDF-1.4 fake'),
+    });
+    await request(app()).get('/api/ausencias/adjuntos/a1').set('Authorization', `Bearer ${gerencia()}`).expect(200);
+    await request(app())
+      .get('/api/ausencias/adjuntos/a1')
+      .set('Authorization', `Bearer ${token({ sub: 'curioso@ambientalia.com.co' })}`)
+      .expect(404);
+  });
+
+  it('la pestaña sigue apareciendo si desactivan al jefe intermedio', async () => {
+    const s = await crear();
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+    // La jefa desaparece del maestro: gerencia ya no es jefe de nadie, pero tiene
+    // una firma pendiente. Sin la segunda rama de `esAprobadorDeAlguien` perdería
+    // la pestaña y la solicitud quedaría muerta.
+    estado.plantilla = estado.plantilla.filter((e: any) => e.correo !== JEFA);
+    estado.empleado.aprobadorCorreo = 'nadie@ambientalia.com.co';
+    const r = await request(app())
+      .get('/api/ausencias/contexto')
+      .set('Authorization', `Bearer ${gerencia()}`)
+      .expect(200);
+    expect(r.body.esAprobador).toBe(true);
   });
 });
 
