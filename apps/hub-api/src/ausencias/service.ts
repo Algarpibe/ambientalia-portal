@@ -21,7 +21,6 @@ import {
   requiereAprobacion,
   transicionAlDecidir,
   type Empleado,
-  type FilaEmpleado,
   type NuevaSolicitud,
   type Solicitud,
   type TipoSolicitud,
@@ -358,36 +357,6 @@ export async function importarHistorico(db: Pool, body: unknown): Promise<Resume
   };
 }
 
-export function validarFilasEmpleados(body: unknown): FilaEmpleado[] {
-  const filas = (body as { empleados?: unknown })?.empleados;
-  if (!Array.isArray(filas) || filas.length === 0) throw new AusenciaError('empleados_requeridos', 400, 'empleados');
-  if (filas.length > 500) throw new AusenciaError('demasiados_empleados', 400, 'empleados');
-
-  return filas.map((f, i) => {
-    const r = (f ?? {}) as Record<string, unknown>;
-    const nombreCompleto = String(r.nombreCompleto ?? '').trim();
-    const correo = String(r.correo ?? '').trim().toLowerCase();
-    if (!nombreCompleto) throw new AusenciaError('nombre_requerido', 400, `empleados[${i}].nombreCompleto`);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) {
-      throw new AusenciaError('correo_invalido', 400, `empleados[${i}].correo`);
-    }
-    const credencialCruda = r.credencial;
-    const credencial =
-      credencialCruda === undefined || credencialCruda === null || credencialCruda === ''
-        ? null
-        : Number(credencialCruda);
-    if (credencial !== null && !Number.isInteger(credencial)) {
-      throw new AusenciaError('credencial_invalida', 400, `empleados[${i}].credencial`);
-    }
-    return {
-      nombreCompleto,
-      correo,
-      cargo: typeof r.cargo === 'string' ? r.cargo.trim() : undefined,
-      credencial,
-      aprobadorCorreo: typeof r.aprobadorCorreo === 'string' ? r.aprobadorCorreo.trim().toLowerCase() : undefined,
-    };
-  });
-}
 
 // ── Saldo de vacaciones ────────────────────────────────────────────────────
 

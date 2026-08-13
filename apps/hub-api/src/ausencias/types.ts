@@ -155,14 +155,6 @@ export interface NuevaSolicitud {
   adjunto?: { nombreArchivo: string; mime: string; contenidoBase64: string };
 }
 
-/** Una fila de la pestaña `consolidado` de la hoja de Google, tal como se pega. */
-export interface FilaEmpleado {
-  nombreCompleto: string;
-  correo: string;
-  cargo?: string;
-  credencial?: number | null;
-  aprobadorCorreo?: string;
-}
 
 /** Un evento listo para que n8n lo ejecute. `payload` lleva todo lo que los
  *  nodos de Gmail/Calendar/Sheets/Drive necesitan, ya resuelto por hub-api. */

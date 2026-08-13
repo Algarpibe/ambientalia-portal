@@ -6,7 +6,6 @@ import type {
   Empleado,
   EventoOutbox,
   EventoPendiente,
-  FilaEmpleado,
   PayloadEvento,
   Solicitud,
   TipoSolicitud,
@@ -230,56 +229,6 @@ export async function enlacesActivos(db: Pool): Promise<EnlaceJerarquia[]> {
 export async function listarEmpleados(db: Pool): Promise<Empleado[]> {
   const { rows } = await db.query(`SELECT ${COLS_EMPLEADO} FROM portal.empleados ORDER BY nombre_completo`);
   return (rows as FilaEmpleadoDb[]).map(aEmpleado);
-}
-
-/**
- * Importa/actualiza el maestro desde las filas de la hoja `consolidado`.
- * Upsert por correo, para que reimportar la hoja sea seguro. Además vincula
- * `user_id` con la cuenta del portal cuyo email coincida, si ya existe.
- */
-export async function importarEmpleados(db: Pool, filas: FilaEmpleado[]): Promise<{ importados: number }> {
-  if (filas.length === 0) return { importados: 0 };
-  const { rowCount } = await db.query(
-    `INSERT INTO portal.empleados (nombre_completo, correo, cargo, credencial, aprobador_correo, user_id)
-     SELECT f.nombre_completo,
-            lower(f.correo),
-            NULLIF(f.cargo, ''),
-            f.credencial,
-            COALESCE(NULLIF(f.aprobador_correo, ''), 'comercial@ambientalia.com.co'),
-            u.id
-       FROM jsonb_to_recordset($1::jsonb) AS f(
-              nombre_completo text, correo text, cargo text,
-              credencial int, aprobador_correo text)
-       LEFT JOIN portal.users u ON lower(u.email) = lower(f.correo)
-     ON CONFLICT (correo) DO UPDATE SET
-       nombre_completo  = EXCLUDED.nombre_completo,
-       cargo            = EXCLUDED.cargo,
-       credencial       = EXCLUDED.credencial,
-       -- OJO: aprobador_correo NO se actualiza, a propósito. Es el organigrama, y
-       -- se mantiene en el panel de «Empleados». El parser del navegador manda
-       -- solo cuatro columnas y el COALESCE de arriba rellena con el buzón por
-       -- defecto, así que aquí es imposible distinguir «no vino la columna» de
-       -- «vino el valor por defecto»: EXCLUDED ya lo trae aplicado y el DO UPDATE
-       -- no ve el alias f de la SELECT. Con el upsert anterior, cada reimportación
-       -- de la hoja devolvía a toda la plantilla al buzón por defecto y borraba el
-       -- árbol entero. En el INSERT (alta nueva) sí se respeta lo que venga.
-       -- Nunca se borra un vínculo ya establecido: si la cuenta del portal aún
-       -- no existía al importar, EXCLUDED.user_id es NULL y se conserva el actual.
-       user_id          = COALESCE(EXCLUDED.user_id, portal.empleados.user_id),
-       activo           = TRUE`,
-    [
-      JSON.stringify(
-        filas.map((f) => ({
-          nombre_completo: f.nombreCompleto,
-          correo: f.correo,
-          cargo: f.cargo ?? '',
-          credencial: f.credencial ?? null,
-          aprobador_correo: f.aprobadorCorreo ?? '',
-        })),
-      ),
-    ],
-  );
-  return { importados: rowCount ?? 0 };
 }
 
 // ── Saldo de vacaciones ────────────────────────────────────────────────────

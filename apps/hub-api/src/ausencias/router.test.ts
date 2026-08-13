@@ -103,7 +103,6 @@ vi.mock('./repo.js', () => ({
     );
   },
   listarEmpleados: async () => estado.plantilla,
-  importarEmpleados: async (_db: unknown, filas: unknown[]) => ({ importados: filas.length }),
   solicitudesDeEmpleado: async () => estado.solicitudes,
   // Filtra por TURNO, como el WHERE real: en `pendiente` la ve quien firma
   // primero y en `pendiente_2` quien firma después, nunca los dos a la vez.
@@ -369,16 +368,11 @@ describe('guards de la app', () => {
   });
 
   it('el maestro de empleados es solo para admin', async () => {
-    await request(app())
-      .post('/api/ausencias/empleados/import')
-      .set('Authorization', `Bearer ${token()}`)
-      .send({ empleados: [{ nombreCompleto: 'Ana', correo: 'a@b.co' }] })
-      .expect(403);
+    await request(app()).get('/api/ausencias/empleados').set('Authorization', `Bearer ${token()}`).expect(403);
 
     await request(app())
-      .post('/api/ausencias/empleados/import')
+      .get('/api/ausencias/empleados')
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
-      .send({ empleados: [{ nombreCompleto: 'Ana', correo: 'a@b.co' }] })
       .expect(200);
   });
 });
