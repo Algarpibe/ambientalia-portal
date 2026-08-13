@@ -4,7 +4,9 @@ import {
   fetchContexto,
   fetchMisSolicitudes,
   fetchPendientes,
+  fetchSaldos,
   type Contexto,
+  type SaldoDeEmpleado,
   type Solicitud,
 } from './api';
 import FormularioSolicitud from './FormularioSolicitud';
@@ -13,6 +15,7 @@ import BandejaAprobacion from './BandejaAprobacion';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
+import TarjetaSaldo from './TarjetaSaldo';
 
 type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'historico';
 
@@ -20,6 +23,7 @@ export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
   const [mias, setMias] = useState<Solicitud[]>([]);
   const [pendientes, setPendientes] = useState<Solicitud[]>([]);
+  const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Pestana>('nueva');
@@ -37,13 +41,18 @@ export default function App() {
         setError(null);
         // Las solicitudes propias solo existen si el usuario está dado de alta
         // como empleado; la bandeja, solo si aprueba algo.
-        const [propias, aAprobar] = await Promise.all([
+        const [propias, aAprobar, saldosVisibles] = await Promise.all([
           ctx.empleado ? fetchMisSolicitudes() : Promise.resolve([]),
           ctx.esAprobador ? fetchPendientes() : Promise.resolve([]),
+          // Solo tiene sentido para quien aprueba o administra; para el resto el
+          // endpoint responde 403 y no hay por qué provocarlo. El catch evita
+          // que un fallo del saldo tumbe la carga de la app entera.
+          ctx.esAprobador ? fetchSaldos().catch(() => []) : Promise.resolve([]),
         ]);
         if (!vivo) return;
         setMias(propias);
         setPendientes(aAprobar);
+        setSaldos(saldosVisibles);
       })
       .catch((e: Error) => vivo && setError(e.message))
       .finally(() => vivo && setCargando(false));
@@ -142,11 +151,13 @@ export default function App() {
                 <FormularioSolicitud
                   festivos={festivos}
                   aprobadorCorreo={contexto.empleado.aprobadorCorreo}
+                  saldo={contexto.saldo}
                   onCreada={(s) => setMias((ms) => [s, ...ms])}
                 />
               </div>
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
+                {contexto.saldo && <TarjetaSaldo saldo={contexto.saldo} />}
                 <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
               </div>
             </>
@@ -154,7 +165,7 @@ export default function App() {
 
           {contexto.esAprobador && (
             <div className={tab === 'bandeja' ? '' : 'hidden'}>
-              <BandejaAprobacion solicitudes={pendientes} onDecidida={onDecidida} onError={setError} />
+              <BandejaAprobacion solicitudes={pendientes} saldos={saldos} onDecidida={onDecidida} onError={setError} />
             </div>
           )}
 
