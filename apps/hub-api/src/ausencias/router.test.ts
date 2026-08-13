@@ -1440,6 +1440,16 @@ describe('GET /ausencias/mi-saldo', () => {
     expect(r.body).toHaveProperty('saldo', null);
   });
 
+  it('con ficha pero sin saldo de corte devuelve `configurado: false`, no null', async () => {
+    // La otra mitad del caso «no hay número que enseñar», y la que de verdad se
+    // da hoy: hay ficha, pero nadie ha fijado el punto de partida. El widget las
+    // trata igual, pero llegan por caminos distintos y la de aquí no la cubría
+    // ningún test. `estado.empleado` no está en `estado.plantilla` (ids
+    // distintos), así que `empleadosConSaldo` no lo encuentra.
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: false });
+  });
+
   it('401 sin token', async () => {
     await request(app()).get('/api/ausencias/mi-saldo').expect(401);
   });
@@ -1462,6 +1472,19 @@ describe('GET /ausencias/mi-saldo', () => {
     // Una `fechaCorte` con formato inválido es lo que hace lanzar a `calcularSaldo`.
     estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: 'fecha-invalida' });
     await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(500);
+  });
+
+  it('ignora cualquier identidad que venga del cliente: siempre el saldo de la sesión', async () => {
+    // La identidad sale de `sesionDe(req)` y de ningún otro sitio. Este test no
+    // prueba una rama de código: fija que no EXISTA la rama. Si alguien añadiera
+    // un parámetro para pedir el saldo de otra persona, se pondría rojo aquí.
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: '2026-01-01' });
+    const r = await request(app())
+      .get('/api/ausencias/mi-saldo')
+      .query({ empleadoId: E2, correo: 'otro@ambientalia.com.co' })
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.saldo).toMatchObject({ saldoCorte: 10 });
   });
 });
 

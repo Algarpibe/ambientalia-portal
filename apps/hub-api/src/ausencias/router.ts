@@ -313,10 +313,12 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  // ── Saldos ───────────────────────────────────────────────────────────────
+
   /**
    * El saldo de quien pregunta, y nada más. Existe para el widget del dashboard
    * del portal: `/ausencias/contexto` ya trae este dato, pero arrastra con él los
-   * festivos de tres años y tres consultas más que un indicador no necesita, y la
+   * festivos de tres años y dos consultas más que un indicador no necesita, y la
    * home del portal lo pagaría en cada carga.
    *
    * Mantiene el `asegurarEmpleado` del contexto a sabiendas de que es un UPSERT
