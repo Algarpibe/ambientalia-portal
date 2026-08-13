@@ -1,5 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
+import type { EnlaceJerarquia } from './jerarquia.js';
 import type {
   Adjunto,
   Empleado,
@@ -168,16 +169,61 @@ export async function sincronizarDesdeUsuarios(
 
 /**
  * True si alguien tiene a este correo como aprobador. Se pregunta por el
- * maestro y no por las solicitudes vivas: quien aprueba sigue siendo aprobador
- * aunque ahora mismo no tenga nada pendiente, y la pestaña de la bandeja debe
- * estar ahí igual (si no, parecería que la función se ha perdido).
+ * maestro y no solo por las solicitudes vivas: quien aprueba sigue siendo
+ * aprobador aunque ahora mismo no tenga nada pendiente, y la pestaña de la
+ * bandeja debe estar ahí igual (si no, parecería que la función se ha perdido).
+ *
+ * La segunda rama cubre el caso contrario, que solo aparece con la cascada: el
+ * segundo aprobador de una solicitud viva cuyo jefe intermedio se ha desactivado
+ * desde entonces. Ya no es jefe de nadie en el maestro, pero tiene una firma
+ * pendiente; sin este OR la pestaña desaparecería y la solicitud se quedaría
+ * muerta hasta que la sacara un admin.
  */
 export async function esAprobadorDeAlguien(db: Pool, email: string): Promise<boolean> {
   const { rows } = await db.query(
-    'SELECT 1 FROM portal.empleados WHERE activo AND lower(aprobador_correo) = lower($1) LIMIT 1',
+    `SELECT 1 WHERE EXISTS (
+       SELECT 1 FROM portal.empleados
+        WHERE activo AND lower(aprobador_correo) = lower($1)
+     ) OR EXISTS (
+       SELECT 1 FROM portal.solicitudes_ausencia
+        WHERE estado IN ('pendiente', 'pendiente_2')
+          AND (lower(aprobador_correo) = lower($1) OR lower(segundo_aprobador_correo) = lower($1))
+     )`,
     [email],
   );
   return rows.length > 0;
+}
+
+/**
+ * El enlace hacia arriba de un correo, si tiene ficha ACTIVA. `null` si no está
+ * en el maestro o si alguien la desactivó — las dos cosas significan lo mismo
+ * para la cascada: aquí se acaba el árbol.
+ */
+export async function enlaceDe(db: Pool, correo: string): Promise<EnlaceJerarquia | null> {
+  const { rows } = await db.query(
+    `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo
+       FROM portal.empleados
+      WHERE activo AND lower(correo) = lower($1)
+      LIMIT 1`,
+    [correo],
+  );
+  const fila = rows[0] as { correo: string; aprobador_correo: string } | undefined;
+  return fila ? { correo: fila.correo, aprobadorCorreo: fila.aprobador_correo } : null;
+}
+
+/**
+ * Todos los enlaces activos, para derivar el organigrama entero en el panel y
+ * detectar ciclos. Sin paginar: la plantilla son decenas de filas, no miles.
+ */
+export async function enlacesActivos(db: Pool): Promise<EnlaceJerarquia[]> {
+  const { rows } = await db.query(
+    `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo
+       FROM portal.empleados WHERE activo`,
+  );
+  return (rows as { correo: string; aprobador_correo: string }[]).map((r) => ({
+    correo: r.correo,
+    aprobadorCorreo: r.aprobador_correo,
+  }));
 }
 
 export async function listarEmpleados(db: Pool): Promise<Empleado[]> {
