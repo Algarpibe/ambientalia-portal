@@ -618,19 +618,34 @@ export interface CalendarioDelMes {
  * El parámetro es un mes y no un rango libre: acotarlo así impide que una
  * petición pida cinco años de golpe, y la interfaz solo navega mes a mes.
  *
- * No recibe sesión: el calendario lo ve toda la plantilla por igual (incluidas
- * las incapacidades, con su tipo tal cual — ver el router). No hay ningún dato
- * que acotar según quién pregunta, así que pedirla solo invitaría a que un
- * cambio futuro la reintrodujera para filtrar algo que el negocio ya decidió
- * que es público dentro de la empresa.
+ * **Solo un admin ve a toda la plantilla.** Quien no lo es recibe únicamente su
+ * propia fila. Esto revierte la decisión de producto original —el calendario
+ * nació visible para todos, para poder coordinarse— y se cambió a petición
+ * expresa: la rejilla enseñaba a cualquiera cuándo falta cada compañero.
+ *
+ * El recorte se hace en el SQL, no filtrando la respuesta: si las marcas ajenas
+ * llegaran al navegador ya estarían expuestas, por mucho que no se pinten. Es la
+ * misma lección del enmascarado de incapacidades que se retiró en su día.
+ *
+ * ⚠️ No oculta tanto como parece: n8n sigue publicando cada ausencia aprobada en
+ * el Google Calendar «Ambientalia Staff», con el nombre de la persona en el
+ * título. Quien tenga ese calendario compartido ve lo mismo por otra vía.
  */
-export async function calendarioDelMes(db: Pool, mes: string): Promise<CalendarioDelMes> {
+export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): Promise<CalendarioDelMes> {
   if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
+
+  // `empleadoDeUsuario` y no `empleadoDeSesion`: este es un GET y no debe crear
+  // fichas, y sobre todo no debe lanzar 403 a quien no tenga una. Sin ficha no
+  // hay nada que enseñar, y una rejilla vacía se entiende sola; un error dejaría
+  // la pestaña rota por un caso que no es un fallo.
+  const soloEmpleadoId = sesion.esAdmin
+    ? null
+    : ((await repo.empleadoDeUsuario(db, sesion.userId, sesion.email))?.id ?? ID_INEXISTENTE);
 
   const { desde, hasta } = rangoDelMes(mes);
   const [empleados, ausencias] = await Promise.all([
-    repo.empleadosActivos(db),
-    repo.ausenciasEntre(db, desde, hasta),
+    repo.empleadosActivos(db, soloEmpleadoId),
+    repo.ausenciasEntre(db, desde, hasta, soloEmpleadoId),
   ]);
 
   return {
@@ -639,3 +654,13 @@ export async function calendarioDelMes(db: Pool, mes: string): Promise<Calendari
     marcas: marcasDelMes(mes, ausencias),
   };
 }
+
+/**
+ * Un uuid que no puede existir, para acotar a «nadie».
+ *
+ * Hace falta porque `null` significa «sin acotar» en los dos repos: un usuario
+ * sin ficha que cayera en esa rama vería la plantilla entera, que es justo lo
+ * contrario de lo que toca. Un uuid con forma válida y sin dueño devuelve cero
+ * filas sin que el `::uuid` del SQL reviente.
+ */
+const ID_INEXISTENTE = '00000000-0000-4000-8000-000000000000';

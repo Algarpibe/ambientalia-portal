@@ -75,9 +75,10 @@ export default function App() {
 
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
-    // El calendario va aquí y no en el bloque de esAdmin más abajo: es
-    // decisión de producto que lo vea toda la plantilla, no solo quien
-    // administra — a diferencia de «Saldos» y «Registro general».
+    // El calendario va aquí y no en el bloque de esAdmin más abajo: la pestaña
+    // la abre cualquiera con ficha, pero lo que ENSEÑA va acotado por rol —solo
+    // un admin ve a la plantilla entera, el resto su propia fila— y ese recorte
+    // lo hace hub-api en el SQL, no esta lista.
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
     if (contexto?.esAprobador) p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
     if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
@@ -213,7 +214,11 @@ export default function App() {
               </div>
 
               <div className={tab === 'calendario' ? '' : 'hidden'}>
-                <Calendario miEmpleadoId={contexto.empleado.id} activo={tab === 'calendario'} />
+                <Calendario
+                  miEmpleadoId={contexto.empleado.id}
+                  esAdmin={contexto.esAdmin}
+                  activo={tab === 'calendario'}
+                />
               </div>
             </>
           )}
