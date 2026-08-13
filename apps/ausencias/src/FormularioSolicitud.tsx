@@ -9,7 +9,12 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
 interface Props {
   festivos: Set<string>;
-  aprobadorCorreo: string;
+  /**
+   * Cómo nombrar a quien aprueba: su nombre si tiene ficha, y si no su correo.
+   * Se resuelve en App a partir del contexto — aquí solo se pinta, para que el
+   * componente no tenga que saber cuándo hay nombre y cuándo no.
+   */
+  aprobador: string;
   /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
   saldo: SaldoVacaciones | null;
   onCreada: (s: Solicitud) => void;
@@ -17,7 +22,7 @@ interface Props {
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
-export default function FormularioSolicitud({ festivos, aprobadorCorreo, saldo, onCreada }: Props) {
+export default function FormularioSolicitud({ festivos, aprobador, saldo, onCreada }: Props) {
   const [tipo, setTipo] = useState<TipoSolicitud>('vacaciones');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -81,7 +86,7 @@ export default function FormularioSolicitud({ festivos, aprobadorCorreo, saldo, 
       });
       setExito(
         requiereAprobacion(tipo)
-          ? `Solicitud enviada. ${aprobadorCorreo} recibirá el aviso para aprobarla y te llegará un correo con el resultado.`
+          ? `Solicitud enviada. ${aprobador} recibirá el aviso para aprobarla y te llegará un correo con el resultado.`
           : 'Incapacidad registrada. Te hemos enviado el acuse por correo.',
       );
       setFechaInicio('');

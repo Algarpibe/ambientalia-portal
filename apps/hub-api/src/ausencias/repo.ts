@@ -215,6 +215,19 @@ export async function enlaceDe(db: Pool, correo: string): Promise<EnlaceJerarqui
  * Todos los enlaces activos, para derivar el organigrama entero en el panel y
  * detectar ciclos. Sin paginar: la plantilla son decenas de filas, no miles.
  */
+/**
+ * El nombre de quien tiene ese correo, para poder nombrar a una persona en vez de
+ * a un buzón. `null` si no tiene ficha activa —el aprobador por defecto puede no
+ * tenerla— y entonces al llamante le toca caer de vuelta al correo.
+ */
+export async function nombreDeCorreo(db: Pool, correo: string): Promise<string | null> {
+  const { rows } = await db.query(
+    'SELECT nombre_completo FROM portal.empleados WHERE activo AND lower(correo) = lower($1) LIMIT 1',
+    [correo],
+  );
+  return rows.length ? (rows[0] as { nombre_completo: string }).nombre_completo : null;
+}
+
 export async function enlacesActivos(db: Pool): Promise<EnlaceJerarquia[]> {
   const { rows } = await db.query(
     `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo

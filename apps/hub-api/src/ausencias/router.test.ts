@@ -233,6 +233,8 @@ vi.mock('./repo.js', () => ({
     const e = estado.plantilla.find((x: any) => String(x.correo).toLowerCase() === correo.toLowerCase());
     return e ? { correo: String(e.correo).toLowerCase(), aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase() } : null;
   },
+  nombreDeCorreo: async (_db: unknown, correo: string) =>
+    estado.plantilla.find((e: any) => String(e.correo).toLowerCase() === correo.toLowerCase())?.nombreCompleto ?? null,
   enlacesActivos: async () =>
     estado.plantilla.map((e: any) => ({
       correo: String(e.correo).toLowerCase(),
@@ -1216,6 +1218,27 @@ describe('GET /ausencias/contexto', () => {
     const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
     expect(r.body.empleado).not.toBeNull();
     expect(estado.altasAutomaticas).toBe(1);
+  });
+
+  it('trae el nombre de quien aprueba, para no enseñar un buzón al solicitante', async () => {
+    estado.empleado.aprobadorCorreo = 'jefa.directa@ambientalia.com.co';
+    estado.plantilla.push({
+      id: '55555555-5555-4555-8555-555555555555',
+      nombreCompleto: 'Jefa Directa',
+      correo: 'jefa.directa@ambientalia.com.co',
+      activo: true,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+    });
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.aprobadorNombre).toBe('Jefa Directa');
+  });
+
+  it('sin ficha del aprobador manda null y la app cae de vuelta al correo', async () => {
+    // Es el caso de hoy: el buzón por defecto no está dado de alta como empleado.
+    // Inventar un nombre aquí sería peor que enseñar el correo.
+    estado.empleado.aprobadorCorreo = 'buzon.sin.ficha@ambientalia.com.co';
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.aprobadorNombre).toBeNull();
   });
 
   it('marca como aprobador a quien lo es, aunque no tenga nada pendiente', async () => {

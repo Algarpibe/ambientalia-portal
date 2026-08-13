@@ -207,7 +207,9 @@ export default function App() {
               <div className={tab === 'nueva' ? '' : 'hidden'}>
                 <FormularioSolicitud
                   festivos={festivos}
-                  aprobadorCorreo={contexto.empleado.aprobadorCorreo}
+                  // El nombre si su jefe tiene ficha; si no, el correo. Quien
+                  // manda una solicitud no tiene por qué reconocer un buzón.
+                  aprobador={contexto.aprobadorNombre ?? contexto.empleado.aprobadorCorreo}
                   saldo={contexto.saldo}
                   onCreada={onCreada}
                 />
