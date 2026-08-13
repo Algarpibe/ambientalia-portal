@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { fetchCalendario, type CalendarioDelMes, type MarcaCalendario } from './api';
+import { fetchCalendario, type CalendarioDelMes, type MarcaCalendario, type TipoSolicitud } from './api';
 import { ETIQUETA_TIPO, TIPOS } from './dominio';
 
 // La rejilla de persona × día. Los datos llegan YA expandidos por día desde
@@ -24,8 +24,13 @@ interface Props {
   activo: boolean;
 }
 
+// Tipado por `TipoSolicitud` y no `Record<string, string>`: si el día de
+// mañana se añade un quinto tipo de solicitud, con `string` el objeto
+// compilaría igual y faltaría su color en silencio — la marca se pintaría con
+// `undefined` (invisible), o sea un día ausente que parece libre. Con
+// `TipoSolicitud` ese olvido es un error de compilación, no un bug en producción.
 /** Color de fondo por tipo. */
-const COLOR: Record<string, string> = {
+const COLOR: Record<TipoSolicitud, string> = {
   vacaciones: 'bg-blue-500',
   compensatorio: 'bg-emerald-500',
   permiso: 'bg-amber-500',
@@ -158,7 +163,16 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
         <p className="flex items-center gap-2 text-sm text-gray-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Cargando…
         </p>
-      ) : (
+      ) : error ? null : (
+        // La rejilla solo se pinta si la carga fue bien. Si falló, no se afirman
+        // los datos del mes anterior bajo la cabecera del mes nuevo: navegar de
+        // agosto a septiembre y que septiembre falle no debe dejar la rejilla de
+        // agosto puesta debajo del banner de error, como si fuera de septiembre.
+        // Mismo criterio que en PanelSaldos.tsx («la lista está vacía porque no
+        // sabemos nada, no porque no haya nadie»): aquí no se ve nada porque no
+        // se sabe qué hay, no porque el mes esté vacío — eso ya lo dice el banner
+        // de arriba. De paso evita la caja vacía (solo cabecera «Nombre» y
+        // leyenda) que se pintaba si la primera carga fallaba.
         <>
           <div className="overflow-x-auto rounded-2xl border border-gray-200">
             <table className="min-w-full border-collapse text-sm">
@@ -166,12 +180,13 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
                 <tr>
                   {/* La columna del nombre va pegada: con 31 columnas hay scroll
                       horizontal, y sin esto se pierde de vista de quién es la fila. */}
-                  <th className="sticky left-0 z-10 border-b border-gray-200 bg-gray-50 px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                  <th scope="col" className="sticky left-0 z-10 border-b border-gray-200 bg-gray-50 px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
                     Nombre
                   </th>
                   {(datos?.dias ?? []).map((d) => (
                     <th
                       key={d.fecha}
+                      scope="col"
                       className={`w-8 border-b border-gray-200 py-2 text-center text-xs font-medium ${
                         d.laborable ? 'bg-gray-50 text-gray-500' : 'bg-gray-100 text-gray-400'
                       }`}
@@ -184,18 +199,35 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
               <tbody className="divide-y divide-gray-100">
                 {filas.map((e) => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-4 py-1.5 text-gray-900">
+                    {/* `<th scope="row">` y no `<td>`: el nombre encabeza la fila
+                        tanto como el día encabeza la columna, y sin `scope="row"`
+                        un lector de pantalla no anuncia de quién es cada celda al
+                        recorrer la fila. `text-left font-normal` neutraliza el
+                        centrado y la negrita que el navegador aplica a los `<th>`
+                        por defecto, para que no cambie el aspecto de la columna. */}
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 whitespace-nowrap bg-white px-4 py-1.5 text-left font-normal text-gray-900"
+                    >
                       {e.nombreCompleto}
-                    </td>
+                    </th>
                     {(datos?.dias ?? []).map((d) => {
                       const marca = porCelda.get(`${e.id}|${d.fecha}`);
+                      // Mismo contenido que el `title`: sin un nombre accesible la
+                      // marca es un `<div>` de color sin más, y un lector de
+                      // pantalla no saca nada de la rejilla salvo celdas vacías.
+                      const descripcion = marca
+                        ? `${ETIQUETA_TIPO[marca.tipo]} · ${d.fecha}${
+                            marca.estado === 'pendiente' ? ' · pendiente de aprobar' : ''
+                          }`
+                        : '';
                       return (
                         <td key={d.fecha} className={`p-0.5 ${d.laborable ? '' : 'bg-gray-50'}`}>
                           {marca && (
                             <div
-                              title={`${ETIQUETA_TIPO[marca.tipo]} · ${d.fecha}${
-                                marca.estado === 'pendiente' ? ' · pendiente de aprobar' : ''
-                              }`}
+                              role="img"
+                              title={descripcion}
+                              aria-label={descripcion}
                               className={`h-5 w-full rounded-sm ${COLOR[marca.tipo]} ${
                                 marca.estado === 'pendiente' ? 'opacity-40 ring-1 ring-inset ring-gray-500' : ''
                               }`}

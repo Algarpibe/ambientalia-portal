@@ -77,9 +77,10 @@ lo que se acaba de hacer con quien no es empleado directo.
 
 Entran `aprobada`, `registrada` y `pendiente`. Las `rechazada` no salen nunca.
 
-Las pendientes se pintan con un estilo distinto (borde rayado) porque el valor
-está en verlas *antes* de decidir: quien aprueba abre el calendario, ve que esa
-semana ya hay dos personas fuera, y decide con eso delante.
+Las pendientes se pintan atenuadas (opacidad reducida) y con un anillo alrededor
+porque el valor está en verlas *antes* de decidir: quien aprueba abre el
+calendario, ve que esa semana ya hay dos personas fuera, y decide con eso
+delante.
 
 ### El filtro tiene que ser de solapamiento, no de contención
 
@@ -136,7 +137,7 @@ repo necesitan los correos del empleado ni de su aprobador.
 - Navegación ◀ ▶ entre meses, arrancando en el mes en curso.
 - Filtros: persona (incluido un «solo yo» para el uso personal) y tipo.
 - Columnas no laborables sombreadas, con el dato que manda el servidor.
-- Leyenda de colores por tipo, y el estilo rayado para pendientes.
+- Leyenda de colores por tipo, y el estilo atenuado con anillo para pendientes.
 - Hasta 31 columnas: va en `overflow-x-auto` con la columna del nombre fija,
   siguiendo el patrón de tabla de `RegistroGeneral` y `PanelSaldos`.
 
