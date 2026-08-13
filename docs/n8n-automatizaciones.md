@@ -117,11 +117,16 @@ Hay dos implementaciones vivas de este patrón:
 | **Ausencias — Portal** | `dh0xjWCHsGj9raYH` | **Cola de eventos**: N acciones por ciclo, cada una se confirma por su `id` |
 
 El segundo es el que conviene copiar cuando la automatización tiene que hacer
-*varias cosas distintas* (correo, calendario, hoja, Drive): hub-api emite una fila
-de outbox por cada acción, con **exactamente un correo por fila** y los efectos ya
-resueltos (`payload.calendario`, `payload.hoja`, `payload.drive`, o `null`). Así n8n
-es una **cadena lineal de IFs cuyas ramas falsas siguen adelante**, en vez de un árbol
+*varias cosas distintas* (correo, calendario, hoja): hub-api emite una fila de
+outbox por cada acción, con **exactamente un correo por fila** y los efectos ya
+resueltos (`payload.calendario`, `payload.hoja`, o `null`). Así n8n es una
+**cadena lineal de IFs cuyas ramas falsas siguen adelante**, en vez de un árbol
 que hay que volver a unir. Ver [dev/app-ausencias.md](dev/app-ausencias.md).
+
+> ⚠️ El filo de ese patrón: los IF comparan `payload.X !== null`, así que **quitar
+> un campo del payload no apaga su rama, la enciende** — `undefined !== null` es
+> `true`. Los nodos van fuera ANTES de que hub-api deje de emitir el campo. Pasó
+> al retirar la subida a Drive de ausencias.
 
 Cadena de nodos del caso simple (WO-sales):
 

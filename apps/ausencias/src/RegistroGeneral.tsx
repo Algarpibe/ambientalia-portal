@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Download, Loader2, Pencil, Trash2 } from 'lucide-react';
-import { borrarSolicitud, fetchEmpleados, fetchHistorico, type Empleado, type Solicitud } from './api';
+import { AlertTriangle, Download, Loader2, Paperclip, Pencil, Trash2 } from 'lucide-react';
+import {
+  borrarSolicitud,
+  descargarAdjunto,
+  fetchEmpleados,
+  fetchHistorico,
+  type Empleado,
+  type Solicitud,
+} from './api';
 import { chipDe, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
 import EditarSolicitud from './EditarSolicitud';
 
@@ -222,6 +229,21 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                     <td className="max-w-md px-4 py-2.5 text-gray-600">
                       {s.comentarios || <span className="text-gray-300">—</span>}
                       {s.observaciones && <div className="mt-0.5 text-xs italic text-gray-500">{s.observaciones}</div>}
+                      {/* El adjunto ya venía en el JSON de `fetchHistorico` y se
+                          estaba tirando: esta era la única pantalla donde un admin
+                          ve solicitudes ajenas, y no había forma de abrir el PDF.
+                          Va por botón y no por <a href> porque el endpoint exige
+                          la cabecera Authorization. */}
+                      {s.adjunto && (
+                        <button
+                          type="button"
+                          onClick={() => void descargarAdjunto(s.adjunto!)}
+                          className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {s.adjunto.nombreArchivo}
+                        </button>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       {confirmando === s.id ? (

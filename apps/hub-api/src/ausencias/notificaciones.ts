@@ -1,9 +1,7 @@
 import { sumarDias } from './festivos.js';
 import {
   CALENDARIO_STAFF,
-  CARPETA_DRIVE,
   COPIA_ADMINISTRACION,
-  DRIVE_ID,
   FIRMA_EMPRESA,
   FIRMA_GERENCIA,
   HOJA_ID,
@@ -248,13 +246,6 @@ function hoja(s: Solicitud): FilaHoja {
   return { documentId: HOJA_ID, pestana: PESTANA[s.tipo], columnas };
 }
 
-/** La subida a Drive, solo si hay PDF y el tipo tiene carpeta asignada. */
-function drive(s: Solicitud) {
-  const carpetaId = CARPETA_DRIVE[s.tipo];
-  if (!s.adjunto || !carpetaId) return null;
-  return { adjuntoId: s.adjunto.id, nombreArchivo: s.adjunto.nombreArchivo, driveId: DRIVE_ID, carpetaId };
-}
-
 // ── Ensamblado ─────────────────────────────────────────────────────────────
 
 const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: string; cuerpo: string }> = {
@@ -271,19 +262,22 @@ const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: 
  *
  * Reparto de los efectos, para que ninguno se duplique ni se pierda:
  *  - `creada`       → nada más (la solicitud aún no es firme).
- *  - `aprobacion`   → sube el PDF a Drive: quien aprueba tiene que poder verlo,
- *                     y este es el primer evento que se ejecuta con adjunto.
- *  - `aprobacion_2` → SOLO correo. El PDF ya está en Drive desde `aprobacion`, y
- *                     la solicitud sigue sin ser firme: ni calendario ni hoja.
+ *  - `aprobacion`   → nada más. Quien aprueba abre el PDF desde el portal.
+ *  - `aprobacion_2` → nada más, por lo mismo.
  *  - `aprobada`     → calendario + fila en la hoja.
  *  - `rechazada`    → fila en la hoja (sin calendario: no hay ausencia).
- *  - `registrada`   → calendario + hoja + Drive, todo de una (la incapacidad no
- *                     pasa por aprobación, así que es su único evento).
+ *  - `registrada`   → calendario + hoja de una vez (la incapacidad no pasa por
+ *                     aprobación, así que es su único evento).
+ *
+ * Ya no hay campo `drive`: la copia de los adjuntos a Google Drive se retiró, y
+ * el workflow de n8n perdió los tres nodos que la hacían. **No reintroducirlo sin
+ * volver a montarlos**, y menos «por compatibilidad»: el IF que lo leía comparaba
+ * `payload.drive !== null`, y con el campo ausente eso es `undefined !== null`,
+ * o sea `true` para TODOS los eventos.
  */
 export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEvento {
   const conCalendario = evento === 'aprobada' || evento === 'registrada';
   const conHoja = evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada';
-  const conDrive = evento === 'aprobacion' || evento === 'registrada';
 
   return {
     tipo: s.tipo,
@@ -293,7 +287,6 @@ export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEve
     correo: CORREO_DE[evento](s),
     calendario: conCalendario ? calendario(s) : null,
     hoja: conHoja ? hoja(s) : null,
-    drive: conDrive ? drive(s) : null,
   };
 }
 

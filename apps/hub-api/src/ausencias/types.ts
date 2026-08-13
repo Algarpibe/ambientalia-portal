@@ -22,13 +22,16 @@ export const ESTADOS_EN_TRAMITE: readonly EstadoSolicitud[] = ['pendiente', 'pen
 
 /**
  * Cada evento de la cola es **exactamente un correo** más, opcionalmente, un
- * evento de calendario, una fila de hoja y una subida a Drive. Partir el aviso
+ * evento de calendario y una fila de hoja. Partir el aviso
  * al aprobador (`aprobacion`) del acuse al solicitante (`creada`) es lo que
  * permite que el flujo de n8n sea una cadena lineal en vez de un árbol.
  *
- * `aprobacion_2` es el aviso al segundo aprobador. Tiene nombre propio y no
- * reutiliza `aprobacion` porque `construirPayload` decide la subida a Drive con
- * `evento === 'aprobacion'`: reutilizarlo subiría el PDF por segunda vez.
+ * `aprobacion_2` es el aviso al segundo aprobador, y tiene nombre propio porque
+ * su TEXTO es distinto: `avisoSegundoAprobador` dice que la solicitud ya cuenta
+ * con el visto bueno del jefe inmediato y lleva su propio asunto. `CORREO_DE`
+ * necesita una clave por texto, así que fundirlo con `aprobacion` mandaría el
+ * correo equivocado. (Nació además para no duplicar la subida a Drive; esa razón
+ * desapareció al retirar Drive, pero la de arriba sigue en pie.)
  */
 export const EVENTOS = ['creada', 'aprobacion', 'aprobacion_2', 'aprobada', 'rechazada', 'registrada'] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
@@ -110,7 +113,6 @@ export interface Adjunto {
   nombreArchivo: string;
   mime: string;
   bytes: number;
-  driveFileId: string | null;
 }
 
 export interface Solicitud {
@@ -157,7 +159,7 @@ export interface NuevaSolicitud {
 
 
 /** Un evento listo para que n8n lo ejecute. `payload` lleva todo lo que los
- *  nodos de Gmail/Calendar/Sheets/Drive necesitan, ya resuelto por hub-api. */
+ *  nodos de Gmail/Calendar/Sheets necesitan, ya resuelto por hub-api. */
 export interface EventoPendiente {
   id: number;
   evento: EventoOutbox;
@@ -191,18 +193,15 @@ export interface FilaHoja {
   columnas: Record<string, string | number>;
 }
 
-/** El PDF a subir: n8n lo descarga de hub-api y lo deja en la carpeta. */
-export interface SubidaDrive {
-  adjuntoId: string;
-  nombreArchivo: string;
-  driveId: string;
-  carpetaId: string;
-}
-
 /**
- * Lo que n8n ejecuta para un evento. Los cuatro campos opcionales son
- * `null` cuando ese paso no aplica, para que el flujo pueda decidirlo con un
- * simple IF sin conocer ninguna regla de negocio.
+ * Lo que n8n ejecuta para un evento. Los dos campos opcionales son `null` cuando
+ * ese paso no aplica, para que el flujo pueda decidirlo con un simple IF sin
+ * conocer ninguna regla de negocio.
+ *
+ * Aquí hubo un tercero, `drive`, con la subida del PDF a Google Drive. Se retiró
+ * junto con los nodos que lo leían. Si algún día vuelve un campo así, el IF de
+ * n8n tiene que existir ANTES de que hub-api empiece a emitirlo, nunca después:
+ * un `undefined !== null` es `true` y activaría la rama para todos los eventos.
  */
 export interface PayloadEvento {
   tipo: TipoSolicitud;
@@ -212,5 +211,4 @@ export interface PayloadEvento {
   correo: CorreoEvento;
   calendario: EventoCalendario | null;
   hoja: FilaHoja | null;
-  drive: SubidaDrive | null;
 }

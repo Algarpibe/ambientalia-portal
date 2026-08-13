@@ -617,7 +617,8 @@ const SELECT_SOLICITUD = `
          -- una cadena fallaria en silencio.
          s.primera_firma_at::text AS primera_firma_at,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
-         a.id AS adjunto_id, a.nombre_archivo, a.mime, a.drive_file_id,
+         a.id AS adjunto_id, a.nombre_archivo, a.mime,
+         -- octet_length y no el binario: las listas solo necesitan el tamano.
          octet_length(a.contenido) AS adjunto_bytes
     FROM portal.solicitudes_ausencia s
     JOIN portal.empleados e ON e.id = s.empleado_id
@@ -646,7 +647,6 @@ interface FilaSolicitudDb {
   adjunto_id: string | null;
   nombre_archivo: string | null;
   mime: string | null;
-  drive_file_id: string | null;
   adjunto_bytes: number | null;
 }
 
@@ -657,7 +657,6 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
         nombreArchivo: r.nombre_archivo ?? '',
         mime: r.mime ?? '',
         bytes: r.adjunto_bytes ?? 0,
-        driveFileId: r.drive_file_id,
       }
     : null;
   return {
@@ -810,6 +809,22 @@ export async function solicitudesDecididas(db: Pool, aprobadorCorreo: string): P
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
+/**
+ * Las solicitudes que llevan un PDF, de cualquiera y en cualquier estado.
+ *
+ * Sin acotar por persona: quien llega aquí ya pasó el guard de administración del
+ * servicio. Reutiliza `SELECT_SOLICITUD`, así que el binario NO viaja — solo su
+ * `octet_length`.
+ *
+ * Nota: `solicitud_adjuntos` no tiene UNIQUE sobre `solicitud_id`. Hoy no puede
+ * haber dos, porque el alta inserta uno como mucho, pero si algún día los
+ * hubiera, esta consulta duplicaría la fila y sería aquí donde se vería.
+ */
+export async function solicitudesConAdjunto(db: Pool): Promise<Solicitud[]> {
+  const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE a.id IS NOT NULL ORDER BY s.fecha_inicio DESC`);
+  return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
 export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | null> {
   const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
   return rows.length ? aSolicitud(rows[0] as FilaSolicitudDb) : null;
@@ -917,17 +932,13 @@ export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoComplet
   };
 }
 
-export async function marcarAdjuntoEnDrive(db: Pool, adjuntoId: string, driveFileId: string): Promise<void> {
-  await db.query('UPDATE portal.solicitud_adjuntos SET drive_file_id = $2 WHERE id = $1', [adjuntoId, driveFileId]);
-}
-
 // ── Outbox ─────────────────────────────────────────────────────────────────
 
 /**
  * Cuánto queda reservado un evento tras servirlo. Tiene que ser holgadamente
- * mayor que lo que tarda un lote en enviarse y confirmarse (Gmail, calendario,
- * hoja y Drive, hasta 20 eventos), y menor que el barrido de 10 minutos, para
- * que un envío que se cayó de verdad se reintente en la pasada siguiente.
+ * mayor que lo que tarda un lote en enviarse y confirmarse (Gmail, calendario y
+ * hoja, hasta 20 eventos), y menor que el barrido de 10 minutos, para que un
+ * envío que se cayó de verdad se reintente en la pasada siguiente.
  */
 const RESERVA = '5 minutes';
 

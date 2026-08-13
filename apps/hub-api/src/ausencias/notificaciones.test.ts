@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
-import { CALENDARIO_STAFF, CARPETA_DRIVE, HOJA_ID, PESTANA } from './config.js';
+import { CALENDARIO_STAFF, HOJA_ID, PESTANA } from './config.js';
 import type { Solicitud } from './types.js';
 
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
@@ -36,7 +36,6 @@ const pdf = {
   nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf',
   mime: 'application/pdf',
   bytes: 10,
-  driveFileId: null,
 };
 
 describe('eventosDeAlta', () => {
@@ -231,34 +230,38 @@ describe('la segunda firma', () => {
 });
 
 describe('efectos en Google, repartidos sin duplicar', () => {
-  it('la creación no toca calendario, hoja ni Drive: aún no es firme', () => {
+  it('el payload no lleva campo `drive`, ni siquiera a null', () => {
+    // `not.toHaveProperty` y no `toBeNull()`: la copia a Drive se retiró junto con
+    // los nodos de n8n que la hacían, y el IF que los gobernaba comparaba
+    // `payload.drive !== null`. Reintroducir el campo «por compatibilidad»
+    // resucitaría una rama que ya no existe; dejarlo en `undefined` la activaría
+    // para TODOS los eventos. Un `toBeNull()` no distinguiría ninguno de los dos.
+    const p = construirPayload(solicitud({ tipo: 'permiso', adjunto: pdf }), 'aprobacion');
+    expect(p).not.toHaveProperty('drive');
+  });
+
+  it('la creación no toca calendario ni hoja: aún no es firme', () => {
     const p = construirPayload(solicitud({ adjunto: pdf }), 'creada');
     expect(p.calendario).toBeNull();
     expect(p.hoja).toBeNull();
-    expect(p.drive).toBeNull();
   });
 
-  it('la segunda firma NO vuelve a subir el PDF ni toca calendario u hoja', () => {
-    // `aprobacion` ya lo subió. Si `aprobacion_2` entrara en `conDrive`, el
-    // fichero se duplicaría en la carpeta de Drive — y como `drive_file_id` sigue
-    // sin rellenarse, nada lo detectaría.
+  it('el aviso al aprobador es SOLO correo, aunque haya PDF', () => {
+    // Mata el error de dedo de tocar `conCalendario` o `conHoja` al quitar
+    // `conDrive`: una solicitud aún pendiente no puede crear el evento de
+    // calendario ni la fila de la hoja de Nómina.
+    const p = construirPayload(solicitud({ tipo: 'permiso', adjunto: pdf }), 'aprobacion');
+    expect(p.calendario).toBeNull();
+    expect(p.hoja).toBeNull();
+  });
+
+  it('la segunda firma tampoco toca calendario ni hoja', () => {
     const p = construirPayload(
       solicitud({ tipo: 'permiso', adjunto: pdf, estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO }),
       'aprobacion_2',
     );
-    expect(p.drive).toBeNull();
     expect(p.calendario).toBeNull();
     expect(p.hoja).toBeNull();
-  });
-
-  it('el aviso al aprobador sube el PDF, para que pueda verlo antes de decidir', () => {
-    const p = construirPayload(solicitud({ tipo: 'permiso', adjunto: pdf }), 'aprobacion');
-    expect(p.drive).toEqual({
-      adjuntoId: 'a1',
-      nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf',
-      driveId: expect.any(String),
-      carpetaId: CARPETA_DRIVE.permiso,
-    });
   });
 
   it('la aprobación crea el evento de calendario con el fin exclusivo de Google', () => {
@@ -298,21 +301,11 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     expect(p.hoja?.columnas['Aprobado?']).toBeUndefined();
   });
 
-  it('la incapacidad hace calendario, hoja y Drive de una sola vez', () => {
+  it('la incapacidad hace calendario y hoja de una sola vez', () => {
     // Es su único evento: si algo no se hiciera aquí, no se haría nunca.
     const p = construirPayload(solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf }), 'registrada');
     expect(p.calendario).not.toBeNull();
     expect(p.hoja).not.toBeNull();
-    expect(p.drive).not.toBeNull();
-  });
-
-  it('sin adjunto no hay subida a Drive', () => {
-    expect(construirPayload(solicitud({ tipo: 'permiso' }), 'aprobacion').drive).toBeNull();
-  });
-
-  it('vacaciones y compensatorios no tienen carpeta de Drive, así que nunca suben nada', () => {
-    expect(construirPayload(solicitud({ adjunto: pdf }), 'aprobacion').drive).toBeNull();
-    expect(construirPayload(solicitud({ tipo: 'compensatorio', adjunto: pdf }), 'aprobacion').drive).toBeNull();
   });
 
   it('la fila de la hoja lleva los encabezados literales de la hoja actual', () => {

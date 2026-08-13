@@ -3,7 +3,7 @@
 Sustituye al flujo de n8n *Solicitud vacaciones_permisos_compensatorios_
 incapacidades 1.5* (`mt75OpO0fGIXv5QG`, 44 nodos). El formulario, la aprobación y
 el historial viven en el portal; n8n queda como brazo ejecutor de Gmail,
-Calendar, Drive y Sheets.
+Calendar y Sheets.
 
 ## Qué cambió respecto del flujo viejo
 
@@ -18,14 +18,15 @@ Calendar, Drive y Sheets.
 | Sin historial para el empleado | Pestaña «Mis solicitudes» | — |
 
 Lo que **no** cambió, a propósito: los textos de los correos, el calendario
-«Ambientalia Staff», las carpetas de Drive y las cuatro pestañas de la hoja
+«Ambientalia Staff» y las cuatro pestañas de la hoja
 `consulta_vacaciones` con sus encabezados. Nómina no tiene que cambiar nada.
 
 ## Piezas
 
 - **Frontend**: `apps/ausencias/` — pestañas *Nueva solicitud*, *Mis solicitudes*
   y *Calendario*; *Pendientes de aprobar* e *Historial de aprobaciones* si eres
-  aprobador o admin; *Empleados*, *Saldos* y *Registro general* solo admin.
+  aprobador o admin; *Soportes adjuntos* si eres admin o estás en VISORES_ADJUNTOS;
+  *Empleados*, *Saldos* y *Registro general* solo admin.
 - **Backend**: `apps/hub-api/src/ausencias/`
   - `festivos.ts` / `dias-habiles.ts` — el cálculo, con tests.
   - `saldo.ts` / `calendario.ts` / `jerarquia.ts` — módulos puros, con tests.
@@ -34,8 +35,9 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   - `service.ts` — validación y casos de uso. `repo.ts` — SQL. `router.ts` — HTTP.
 - **BD**: migración `015_ausencias.sql` → `portal.empleados`,
   `portal.solicitudes_ausencia`, `portal.solicitud_adjuntos`,
-  `portal.ausencias_outbox`; `017` el saldo y `018` la cascada de dos firmas.
-- **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 14 nodos.
+  `portal.ausencias_outbox`; `017` el saldo, `018` la cascada de dos firmas, `019`
+  la reserva del outbox y `020` la retirada de Drive.
+- **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
 ## El contrato con n8n
 
@@ -49,11 +51,13 @@ POST /webhook/ausencias-aviso┘        (X-Ausencias-Cron-Token)
   → IF token válido ────────┘
   → IF hay → Repartir eventos (uno por evento)
   → Enviar correo (Gmail)
-  → IF calendario → Google Calendar ┐
-  → IF hoja  → Fila → Google Sheets ┤ las ramas falsas siguen la cadena
-  → IF drive → GET adjunto → Drive  ┘
+  → IF calendario → Google Calendar ┐ las ramas falsas
+  → IF hoja  → Fila → Google Sheets ┘ siguen la cadena
   → POST /api/ausencias/n8n/confirmado  { ids: [id] }
 ```
+
+Hubo un tercer IF (`drive → GET adjunto → Drive`) que subía el PDF a Google Drive.
+Se retiró: los adjuntos se consultan desde el portal. Ver «Los adjuntos» abajo.
 
 **Dos disparadores, uno solo obligatorio.** El barrido de 10 minutos es el
 mecanismo; el webhook es un atajo para que el correo salga en un segundo. hub-api
@@ -78,24 +82,33 @@ en vez de un árbol con cuatro ramas.
 
 Reparto de los efectos, para que ninguno se duplique ni se pierda:
 
-| Evento | Correo | Calendario | Hoja | Drive |
-|---|---|---|---|---|
-| `creada` | acuse al solicitante | — | — | — |
-| `aprobacion` | aviso al jefe inmediato | — | — | sube el PDF (para que pueda verlo) |
-| `aprobacion_2` | aviso al segundo aprobador | — | — | — (ya está subido) |
-| `aprobada` | aprobado, a **toda la cadena** (+ administración) | ✔ | ✔ | — |
-| `rechazada` | rechazado con motivo, a **toda la cadena** (+ administración) | — | ✔ | — |
-| `registrada` | acuse de incapacidad | ✔ | ✔ | ✔ |
+| Evento | Correo | Calendario | Hoja |
+|---|---|---|---|
+| `creada` | acuse al solicitante | — | — |
+| `aprobacion` | aviso al jefe inmediato | — | — |
+| `aprobacion_2` | aviso al segundo aprobador | — | — |
+| `aprobada` | aprobado, a **toda la cadena** (+ administración) | ✔ | ✔ |
+| `rechazada` | rechazado con motivo, a **toda la cadena** (+ administración) | — | ✔ |
+| `registrada` | acuse de incapacidad | ✔ | ✔ |
 
-`aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque
-`construirPayload` decide la subida a Drive con `evento === 'aprobacion'`:
-reutilizarlo dejaría el PDF **dos veces** en la carpeta, y como `drive_file_id`
-sigue sin rellenarse, nada lo detectaría.
+`aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
+es distinto**: `avisoSegundoAprobador` lleva su propio asunto y dice que la
+solicitud ya cuenta con el visto bueno del jefe inmediato. `CORREO_DE` necesita
+una clave por texto, así que fundirlos mandaría el correo equivocado. (Nació
+además para no duplicar la subida a Drive; esa razón desapareció al retirar Drive,
+la de arriba no.)
 
-**El workflow no discrimina por nombre de evento** —sus tres IF miran
-`payload.calendario`, `payload.hoja` y `payload.drive` contra `null`, y Gmail lee
-`payload.correo` directamente—, así que un evento nuevo fluye sin tocar n8n.
-Verificado sobre el workflow vivo al añadir `aprobacion_2`.
+**El workflow no discrimina por nombre de evento** —sus dos IF miran
+`payload.calendario` y `payload.hoja` contra `null`, y Gmail lee `payload.correo`
+directamente—, así que un evento nuevo fluye sin tocar n8n. Verificado sobre el
+workflow vivo al añadir `aprobacion_2`.
+
+> ⚠️ Ese mismo diseño tiene un filo. Los IF comparan **contra `null`**, así que si
+> hub-api deja de emitir un campo, el valor pasa a ser `undefined` y
+> `undefined !== null` es **`true`**: la rama se activa para *todos* los eventos.
+> Al retirar Drive hubo que quitar los nodos en n8n **antes** de desplegar el
+> hub-api sin el campo. Si algún día vuelve un campo así, el IF tiene que existir
+> antes de que hub-api empiece a emitirlo, nunca después.
 
 El estado **no avanza al servir el evento, solo al confirmarlo**: si Gmail falla,
 el ciclo siguiente lo reintenta. El precio es que un fallo *después* de enviar el
@@ -136,13 +149,14 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/decididas` | idem — lo que le tocaba firmar y ya está cerrado |
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
-| `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, sus **dos** aprobadores o admin |
+| `GET` | `/api/ausencias/adjuntos` | idem — solo admin o `VISORES_ADJUNTOS`; **403** al resto |
+| `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, sus **dos** aprobadores, admin o `VISORES_ADJUNTOS` |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
 | `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
-| `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
+| `GET`/`POST` | `/api/ausencias/n8n/{pendiente,confirmado}` | `requireCronToken` |
 
 ## El histórico de la hoja
 
@@ -265,6 +279,64 @@ absoluto.
   "esto no es un número". Mandando la cadena tal cual, la validación de forma
   vive en un solo sitio (`validarSaldo` en `service.ts`, con su regex) y el
   error que llega es el correcto.
+
+## Los adjuntos
+
+**El PDF vive en PostgreSQL, y siempre ha vivido ahí.**
+`portal.solicitud_adjuntos.contenido` es un `BYTEA NOT NULL` que se escribe en la
+misma transacción que la solicitud. Google Drive era una copia secundaria que n8n
+subía después tirando del propio hub-api; **se retiró**.
+
+El binario no viaja en ninguna lista: `SELECT_SOLICITUD` trae
+`octet_length(a.contenido)` y nada más. La única consulta que lo lee es
+`adjuntoPorId`, y solo la usa `GET /ausencias/adjuntos/:id`.
+
+### Quién puede abrir uno
+
+`puedeVerAdjunto`: el solicitante, sus dos aprobadores, cualquier admin, y los
+correos de **`VISORES_ADJUNTOS`** (`config.ts`). La ruta devuelve **404 y no 403**
+a quien no pasa: quien no tiene nada que ver con la solicitud tampoco debería
+poder confirmar que ese adjunto existe.
+
+> ⚠️ `VISORES_ADJUNTOS` es una llave maestra, y lo que abre incluye **el soporte
+> médico de las incapacidades ajenas** — dato de salud. La lista tiene que
+> quedarse corta. Y **no hay registro de descargas**: `/adjuntos/:id` no loguea
+> nada, a diferencia del PATCH y el DELETE del registro. Si la lista crece, ese
+> log es lo siguiente que hay que añadir.
+
+### Por qué hay una pestaña propia
+
+*Soportes adjuntos* (`GET /ausencias/adjuntos`, solo las solicitudes con PDF) la
+ven admin y los visores. Hace falta porque **las incapacidades no aparecen en
+ninguna otra pantalla**: nacen `registrada` y sin aprobador, así que ni la bandeja
+(`pendiente`/`pendiente_2`) ni el historial del aprobador
+(`aprobada`/`rechazada`) las alcanzan, y *Registro general* es solo de admin. Y
+son justo las que siempre traen soporte médico. Antes de esto, el PDF de una
+incapacidad ajena solo se podía abrir desde Drive.
+
+Ese endpoint devuelve **403** y no 404, al revés que el del fichero: allí el 404
+evita confirmar la existencia de un adjunto concreto; una colección no dice nada
+de nadie en particular.
+
+Se descartó abrir *Registro general* a los visores: habría que relajar **dos**
+guards de admin —el del histórico y el de empleados, que el componente pide
+juntos—, les daría el registro entero con su exportación CSV, y dejaría el
+borrado a un `if` de distancia.
+
+### Lo que se retiró con Drive
+
+`DRIVE_ID`, `CARPETA_DRIVE`, `construirPayload().drive`, `SubidaDrive`,
+`GET /ausencias/n8n/adjunto/:id`, el bloque `adjuntos` de `/n8n/confirmado`,
+`marcarAdjuntoEnDrive` y la columna `drive_file_id` (migración 020, estaba toda a
+NULL porque el workflow solo mandaba `{ ids }`).
+
+`/n8n/confirmado` **sigue aceptando** un `adjuntos` en el cuerpo y lo ignora sin
+protestar: un workflow antiguo que alguien reactive tiene que poder confirmar, que
+es lo único que importa.
+
+Los PDF que ya estaban en Drive **se quedan ahí**; esto solo cortó los nuevos. Las
+53 filas importadas del Excel nunca tuvieron bytes en la base de datos: su
+`observaciones` dice «Adjunto en Drive: …» y sigue siendo cierto.
 
 ## Aprobación en cascada
 
@@ -581,5 +653,10 @@ del enmascarado de arriba.
   del buzón por defecto y firma una sola persona.
 - Retirar la copia a Google Sheets cuando Nómina consulte solo el portal.
 - Widget de dashboard con las ausencias del mes.
-- `drive_file_id` se queda en NULL: el endpoint `/n8n/confirmado` acepta
-  `adjuntos: [{id, driveFileId}]`, pero el workflow todavía no lo manda.
+- **Desactivar el flujo viejo `mt75OpO0fGIXv5QG`.** Sigue `active: true` con su
+  formulario público y sus propios nodos de Google Drive, así que cualquiera con
+  la URL guardada puede seguir mandando solicitudes que esquivan el portal — y
+  subiendo PDF a Drive. Mientras siga encendido, «Drive fuera» es solo la mitad.
+- Registro de descargas de adjuntos, si `VISORES_ADJUNTOS` crece.
+
+
