@@ -225,8 +225,18 @@ export function leerComoBase64(file: File): Promise<string> {
 export const fetchSaldos = () =>
   get<{ saldos: SaldoDeEmpleado[] }>('/api/ausencias/saldos').then((d) => d.saldos);
 
-/** Fija el punto de corte de un empleado (solo admin). Las dos a null lo vacía. */
-export const fijarSaldo = (empleadoId: string, saldoCorte: number | null, fechaCorte: string | null) =>
+/**
+ * Fija el punto de corte de un empleado (solo admin). Las dos a null lo vacía.
+ *
+ * `saldoCorte` admite `string` a propósito, además de `number`: si el panel
+ * convirtiera con `Number()` antes de mandarlo, un `'abc'` tecleado por error
+ * se volvería `NaN`, y `JSON.stringify(NaN)` produce `null` — con lo que el
+ * backend recibiría «vaciar la configuración» en vez de «esto no es un
+ * número», y respondería un 400 confuso o, peor, borraría un saldo ya puesto.
+ * Mandando la cadena tal cual, la validación de forma vive en un solo sitio
+ * (el backend, con su regex) y el mensaje de error que llega es el correcto.
+ */
+export const fijarSaldo = (empleadoId: string, saldoCorte: number | string | null, fechaCorte: string | null) =>
   put<SaldoDeEmpleado>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/saldo`, {
     saldoCorte,
     fechaCorte,

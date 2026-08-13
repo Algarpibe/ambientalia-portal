@@ -16,8 +16,9 @@ import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
 import TarjetaSaldo from './TarjetaSaldo';
+import PanelSaldos from './PanelSaldos';
 
-type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'historico';
+type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'saldos' | 'historico';
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -67,7 +68,7 @@ export default function App() {
     const p: [Pestana, string][] = [];
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes']);
     if (contexto?.esAprobador) p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
-    if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['historico', 'Registro general']);
+    if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
     return p;
   }, [contexto, pendientes.length]);
 
@@ -173,6 +174,9 @@ export default function App() {
             <>
               <div className={tab === 'empleados' ? '' : 'hidden'}>
                 <ImportarEmpleados />
+              </div>
+              <div className={tab === 'saldos' ? '' : 'hidden'}>
+                <PanelSaldos />
               </div>
               <div className={tab === 'historico' ? '' : 'hidden'}>
                 <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
