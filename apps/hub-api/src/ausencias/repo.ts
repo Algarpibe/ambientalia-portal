@@ -949,10 +949,18 @@ function aEmpleadoActivo(r: FilaEmpleadoActivoDb): EmpleadoActivo {
  * arrastraría las fichas dadas de baja —justo lo que se hace con quien deja de
  * ser empleado directo— y saldrían como filas vacías para siempre.
  */
-export async function empleadosActivos(db: Pool): Promise<EmpleadoActivo[]> {
+/**
+ * Los empleados activos. `soloEmpleadoId` acota a uno: es lo que ve quien no es
+ * admin en el calendario. Sin valor por defecto a propósito —igual que en
+ * `empleadosConSaldo`—, para que acotar o no acotar sea siempre una decisión
+ * escrita en el llamante y no un olvido que enseñe la plantilla entera.
+ */
+export async function empleadosActivos(db: Pool, soloEmpleadoId: string | null): Promise<EmpleadoActivo[]> {
   const { rows } = await db.query(
     `SELECT id, nombre_completo FROM portal.empleados
-      WHERE activo ORDER BY nombre_completo`,
+      WHERE activo AND ($1::uuid IS NULL OR id = $1::uuid)
+      ORDER BY nombre_completo`,
+    [soloEmpleadoId],
   );
   return (rows as FilaEmpleadoActivoDb[]).map(aEmpleadoActivo);
 }
@@ -982,7 +990,12 @@ function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
  * exactamente las que cruzan el cambio de mes, que son las que más importa ver:
  * un mes que no las enseña miente sobre quién está fuera el día 1.
  */
-export async function ausenciasEntre(db: Pool, desde: string, hasta: string): Promise<AusenciaRango[]> {
+export async function ausenciasEntre(
+  db: Pool,
+  desde: string,
+  hasta: string,
+  soloEmpleadoId: string | null,
+): Promise<AusenciaRango[]> {
   const { rows } = await db.query(
     `SELECT s.empleado_id, s.tipo, s.estado,
             s.fecha_inicio::text AS fecha_inicio,
@@ -991,6 +1004,7 @@ export async function ausenciasEntre(db: Pool, desde: string, hasta: string): Pr
        JOIN portal.empleados e ON e.id = s.empleado_id
       WHERE e.activo
         AND s.estado <> 'rechazada'
+        AND ($3::uuid IS NULL OR s.empleado_id = $3::uuid)
         AND s.fecha_inicio <= $2::date
         AND s.fecha_fin    >= $1::date
       -- Determinismo del pintado, no estética: dos ausencias solapadas del
@@ -998,7 +1012,7 @@ export async function ausenciasEntre(db: Pool, desde: string, hasta: string): Pr
       -- el frontend arma un Map con esa clave, así que gana la última. Sin este
       -- ORDER BY, cuál de las dos "gana" podría cambiar entre peticiones.
       ORDER BY s.fecha_inicio, s.id`,
-    [desde, hasta],
+    [desde, hasta, soloEmpleadoId],
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
 }

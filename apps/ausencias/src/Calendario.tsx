@@ -10,6 +10,10 @@ import { enTramite, ETIQUETA_TIPO, TIPOS } from './dominio';
 interface Props {
   /** Id del empleado de la sesión, para el filtro «solo yo». Null si no tiene ficha. */
   miEmpleadoId: string | null;
+  /** Solo un admin recibe la plantilla entera; el resto, su propia fila. El
+   *  recorte real lo hace hub-api en el SQL — esto solo decide si tiene sentido
+   *  ofrecer los filtros de persona. */
+  esAdmin: boolean;
   /** Si la pestaña «Calendario» es la que se ve ahora mismo. Mismo motivo que
    *  `activo` en PanelSaldos: las pestañas quedan montadas y ocultas con
    *  `hidden`, así que sin este freno TODA la plantilla pagaría esta llamada
@@ -56,7 +60,7 @@ const nombreMes = (mes: string) =>
     timeZone: 'UTC',
   });
 
-export default function Calendario({ miEmpleadoId, activo }: Props) {
+export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
   const [mes, setMes] = useState(mesActual);
   const [datos, setDatos] = useState<CalendarioDelMes | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -109,7 +113,9 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
     <div>
       <h3 className="mb-1 text-sm font-semibold text-gray-900">Calendario de ausencias</h3>
       <p className="mb-3 text-sm text-gray-600">
-        Quién está fuera y cuándo. Las solicitudes pendientes de aprobar salen atenuadas y con borde.
+        {esAdmin
+          ? 'Quién está fuera y cuándo. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'
+          : 'Tus ausencias del mes. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'}
       </p>
 
       {error && (
@@ -136,26 +142,33 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
           ))}
         </select>
 
-        <select
-          className={selCls}
-          value={persona}
-          disabled={soloYo}
-          onChange={(e) => setPersona(e.target.value)}
-          aria-label="Persona"
-        >
-          <option value="">Todas las personas</option>
-          {(datos?.empleados ?? []).map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.nombreCompleto}
-            </option>
-          ))}
-        </select>
+        {/* Los dos filtros de persona solo tienen sentido cuando hay más de una:
+            quien no es admin recibe únicamente su propia fila, así que aquí
+            serían un desplegable de un elemento y una casilla que no cambia nada. */}
+        {esAdmin && (
+          <>
+            <select
+              className={selCls}
+              value={persona}
+              disabled={soloYo}
+              onChange={(e) => setPersona(e.target.value)}
+              aria-label="Persona"
+            >
+              <option value="">Todas las personas</option>
+              {(datos?.empleados ?? []).map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nombreCompleto}
+                </option>
+              ))}
+            </select>
 
-        {miEmpleadoId && (
-          <label className="flex items-center gap-1.5 text-sm text-gray-700">
-            <input type="checkbox" checked={soloYo} onChange={(e) => setSoloYo(e.target.checked)} />
-            Solo yo
-          </label>
+            {miEmpleadoId && (
+              <label className="flex items-center gap-1.5 text-sm text-gray-700">
+                <input type="checkbox" checked={soloYo} onChange={(e) => setSoloYo(e.target.checked)} />
+                Solo yo
+              </label>
+            )}
+          </>
         )}
       </div>
 

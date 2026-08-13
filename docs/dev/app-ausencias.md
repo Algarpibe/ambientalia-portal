@@ -118,7 +118,7 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, sus **dos** aprobadores o admin |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
-| `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — sin acotar por rol, lo ve toda la plantilla |
+| `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
 | `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
@@ -396,10 +396,30 @@ se aprueba). Además el dato ya es público por el otro lado: el evento que
 n8n publica en Google Calendar se llama «Incapacidades Nombre Apellido». No
 reintroducir el enmascarado creyendo que tapa algo.
 
-**La pestaña la ve todo el que tenga ficha de empleado**, no solo
-administración — a diferencia de *Saldos* y *Registro general*, que son solo
-de admin. Es decisión de producto: un calendario de equipo que no vea todo el
-equipo no sirve para coordinarse.
+**La pestaña la abre todo el que tenga ficha de empleado, pero el contenido va
+acotado por rol: solo un admin ve a la plantilla entera; el resto recibe
+únicamente su propia fila.**
+
+Nació al revés —visible para todos, para poder coordinarse— y se cambió a
+petición expresa: la rejilla le enseñaba a cualquiera cuándo falta cada
+compañero. Un aprobador tampoco ve a su equipo; si algún día hiciera falta,
+el organigrama ya está montado para acotarlo por jerarquía.
+
+El recorte se hace en el SQL (`empleadosActivos` y `ausenciasEntre` reciben un
+`soloEmpleadoId`), no filtrando la respuesta: si las marcas ajenas llegaran al
+navegador ya estarían expuestas, por mucho que no se pinten. Es la misma lección
+del enmascarado de arriba.
+
+> ⚠️ **`null` significa «sin acotar» en los dos repos.** Un usuario sin ficha que
+> cayera en esa rama vería la plantilla entera, justo lo contrario de lo que toca;
+> por eso el servicio usa un uuid inexistente en vez de `null` cuando no encuentra
+> ficha. Hay un test que lo fija.
+
+> ⚠️ **Esto no oculta tanto como parece.** n8n sigue publicando cada ausencia
+> aprobada en el Google Calendar «Ambientalia Staff» con el nombre de la persona
+> en el título. Quien tenga ese calendario compartido ve lo mismo por otra vía.
+> Si el objetivo fuera privacidad real y no orden, habría que revisar también a
+> quién está compartido ese calendario.
 
 > ⚠️ **Mantenimiento: el filtro de rechazadas usa `continue`, no `break`.**
 > `for (const a of ausencias) { if (a.estado === 'rechazada') continue; ... }`

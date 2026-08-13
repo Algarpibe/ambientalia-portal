@@ -242,19 +242,29 @@ vi.mock('./repo.js', () => ({
     }
     return n;
   },
-  empleadosActivos: async () => [
-    { id: 'e1', nombreCompleto: 'Ana Ruiz' },
-    { id: 'e2', nombreCompleto: 'Beto Díaz' },
-  ],
-  ausenciasEntre: async () => [
-    {
-      empleadoId: 'e1',
-      tipo: 'vacaciones',
-      estado: 'aprobada',
-      fechaInicio: '2026-08-10',
-      fechaFin: '2026-08-12',
-    },
-  ],
+  // Los dos modelan el `($N::uuid IS NULL OR ...)` del SQL: null = sin acotar.
+  empleadosActivos: async (_db: unknown, soloEmpleadoId: string | null) =>
+    [
+      { id: 'e1', nombreCompleto: 'Ana Ruiz' },
+      { id: 'e2', nombreCompleto: 'Beto Díaz' },
+    ].filter((e) => soloEmpleadoId === null || e.id === soloEmpleadoId),
+  ausenciasEntre: async (_db: unknown, _desde: string, _hasta: string, soloEmpleadoId: string | null) =>
+    [
+      {
+        empleadoId: 'e1',
+        tipo: 'vacaciones',
+        estado: 'aprobada',
+        fechaInicio: '2026-08-10',
+        fechaFin: '2026-08-12',
+      },
+      {
+        empleadoId: 'e2',
+        tipo: 'permiso',
+        estado: 'aprobada',
+        fechaInicio: '2026-08-11',
+        fechaFin: '2026-08-11',
+      },
+    ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
 }));
 
 const { createAusenciasRouter } = await import('./router.js');
@@ -1209,15 +1219,50 @@ describe('PUT /ausencias/empleados/:id/saldo', () => {
 // ── Calendario ─────────────────────────────────────────────────────────────
 
 describe('GET /ausencias/calendario', () => {
-  it('devuelve empleados, días y marcas del mes', async () => {
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  it('un admin ve empleados, días y marcas de toda la plantilla', async () => {
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${admin()}`)
+      .expect(200);
+    expect(r.body.empleados).toHaveLength(2);
+    expect(r.body.dias).toHaveLength(31);
+    // Tres días de Ana (del 10 al 12) y uno de Beto (el 11).
+    expect(r.body.marcas).toHaveLength(4);
+  });
+
+  it('quien no es admin solo se ve a sí mismo', async () => {
+    // El recorte lo hace el SQL: las marcas ajenas no llegan al navegador, no es
+    // que no se pinten. Si viajaran, estarían expuestas igual.
     const r = await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token()}`)
       .expect(200);
-    expect(r.body.empleados).toHaveLength(2);
-    expect(r.body.dias).toHaveLength(31);
-    // La ausencia del mock son 3 días: del 10 al 12 de agosto.
+    expect(r.body.empleados).toEqual([{ id: 'e1', nombreCompleto: 'Ana Ruiz' }]);
     expect(r.body.marcas).toHaveLength(3);
+    expect(r.body.marcas.every((m: { empleadoId: string }) => m.empleadoId === 'e1')).toBe(true);
+  });
+
+  it('un aprobador tampoco ve a su equipo: solo admin ve a los demás', async () => {
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .expect(200);
+    expect(r.body.empleados).toHaveLength(1);
+  });
+
+  it('sin ficha de empleado devuelve una rejilla vacía, no la plantilla entera', async () => {
+    // El fallo que evita: `null` significa «sin acotar» en el repo, así que caer
+    // en esa rama por no tener ficha enseñaría justo lo contrario de lo que toca.
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.empleados).toEqual([]);
+    expect(r.body.marcas).toEqual([]);
   });
 
   it('400 si el mes viene mal formado', async () => {

@@ -313,13 +313,14 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
-   * El calendario de un mes. Bajo `...gated` y no `requireAdmin`: un calendario
-   * de plantilla que solo ve administración no sirve para coordinarse, y la
-   * decisión de producto es que todo el mundo vea quién está fuera.
+   * El calendario de un mes. Sigue bajo `...gated` y no `requireAdmin` porque la
+   * pestaña la abre cualquiera, pero **el contenido sí va acotado por rol**: un
+   * admin ve a toda la plantilla y el resto solo su propia fila. El recorte lo
+   * hace el servicio, en el SQL — ver `calendarioDelMes`.
    */
   router.get('/ausencias/calendario', ...gated, async (req: Request, res: Response) => {
     try {
-      res.json(await service.calendarioDelMes(db, String(req.query.mes ?? '')));
+      res.json(await service.calendarioDelMes(db, sesionDe(req), String(req.query.mes ?? '')));
     } catch (e) {
       sendError(res, e, 'ausencias_calendario');
     }
