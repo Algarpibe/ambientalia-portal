@@ -1,5 +1,6 @@
 import { CalendarClock } from 'lucide-react';
 import type { SaldoVacaciones } from './api';
+import { formatDias } from './dominio';
 
 // El indicador del saldo, en las dos superficies donde se enseña: la cabecera de
 // la app y el widget del dashboard.
@@ -25,12 +26,13 @@ interface Props {
   variante: 'cabecera' | 'widget';
 }
 
-/** Un decimal, y sin el «,0» cuando es entero. Mismo formato que TarjetaSaldo. */
-function dias(n: number): string {
-  return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
-}
-
 export default function IndicadorSaldo({ saldo, variante }: Props) {
+  // Un `disponible` negativo es alcanzable —una vacación aprobada que el saldo de
+  // corte ya traía descontada se resta dos veces— y esto no lo arregla: es un
+  // problema de datos. Pero deja de presentarlo con la misma cara que un saldo
+  // sano, para que quien lo vea pregunte en vez de creérselo.
+  const colorNumero = saldo.disponible < 0 ? 'text-red-600' : 'text-blue-600';
+
   // Dos ramas explícitas en vez de una sola plantilla con ternarios por clase:
   // las jerarquías visuales son distintas —en el widget el número es el
   // protagonista, en la cabecera acompaña al título— y mezclarlas hace ilegibles
@@ -38,11 +40,9 @@ export default function IndicadorSaldo({ saldo, variante }: Props) {
   if (variante === 'widget') {
     return (
       <div className="text-center">
-        <p className="text-4xl font-bold leading-none tabular-nums text-blue-600">{dias(saldo.disponible)}</p>
+        <p className={`text-4xl font-bold leading-none tabular-nums ${colorNumero}`}>{formatDias(saldo.disponible)}</p>
         <p className="mt-1 text-xs text-gray-500">días disponibles</p>
-        {saldo.enTramite > 0 && (
-          <p className="mt-1.5 text-xs font-semibold text-amber-600">{dias(saldo.enTramite)} pendientes de aprobar</p>
-        )}
+        <AvisoTramite saldo={saldo} className="mt-1.5 text-xs" />
       </div>
     );
   }
@@ -53,13 +53,16 @@ export default function IndicadorSaldo({ saldo, variante }: Props) {
         <CalendarClock className="h-3.5 w-3.5 shrink-0" />
         Tu saldo hoy
       </p>
-      <p className="text-2xl font-bold leading-none tabular-nums text-blue-600">
-        {dias(saldo.disponible)}
-        <span className="ml-1 text-sm font-medium text-gray-500">días</span>
+      <p className={`text-2xl font-bold leading-none tabular-nums ${colorNumero}`}>
+        {formatDias(saldo.disponible)} <span className="text-sm font-medium text-gray-500">días</span>
       </p>
-      {saldo.enTramite > 0 && (
-        <p className="mt-0.5 text-[11px] font-semibold text-amber-600">{dias(saldo.enTramite)} pendientes de aprobar</p>
-      )}
+      <AvisoTramite saldo={saldo} className="mt-0.5 text-[11px]" />
     </div>
   );
+}
+
+/** El aviso del trámite. En un solo sitio: el texto forma parte de la regla. */
+function AvisoTramite({ saldo, className }: { saldo: SaldoVacaciones; className: string }) {
+  if (saldo.enTramite <= 0) return null;
+  return <p className={`font-semibold text-amber-700 ${className}`}>{formatDias(saldo.enTramite)} pendientes de aprobar</p>;
 }
