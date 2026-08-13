@@ -5,17 +5,32 @@
 export const TIPOS = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad'] as const;
 export type TipoSolicitud = (typeof TIPOS)[number];
 
-/** Las incapacidades se INFORMAN (terminan en `registrada`); el resto se aprueban. */
-export const ESTADOS = ['pendiente', 'aprobada', 'rechazada', 'registrada'] as const;
+/**
+ * Las incapacidades se INFORMAN (terminan en `registrada`); el resto se aprueban.
+ *
+ * `pendiente_2` es la segunda firma: el jefe inmediato ya dio el visto bueno y
+ * falta su superior. Se llama así, y no `aprobada_1` o `preaprobada`, para que un
+ * grep de «pendiente» siga encontrando los dos y para que NO contenga la
+ * subcadena «aprobada»: un filtro descuidado contaría media firma como firma
+ * entera, y en el saldo eso son días descontados que no han ocurrido.
+ */
+export const ESTADOS = ['pendiente', 'pendiente_2', 'aprobada', 'rechazada', 'registrada'] as const;
 export type EstadoSolicitud = (typeof ESTADOS)[number];
+
+/** Los dos estados en los que alguien todavía tiene que firmar. */
+export const ESTADOS_EN_TRAMITE: readonly EstadoSolicitud[] = ['pendiente', 'pendiente_2'];
 
 /**
  * Cada evento de la cola es **exactamente un correo** más, opcionalmente, un
  * evento de calendario, una fila de hoja y una subida a Drive. Partir el aviso
  * al aprobador (`aprobacion`) del acuse al solicitante (`creada`) es lo que
  * permite que el flujo de n8n sea una cadena lineal en vez de un árbol.
+ *
+ * `aprobacion_2` es el aviso al segundo aprobador. Tiene nombre propio y no
+ * reutiliza `aprobacion` porque `construirPayload` decide la subida a Drive con
+ * `evento === 'aprobacion'`: reutilizarlo subiría el PDF por segunda vez.
  */
-export const EVENTOS = ['creada', 'aprobacion', 'aprobada', 'rechazada', 'registrada'] as const;
+export const EVENTOS = ['creada', 'aprobacion', 'aprobacion_2', 'aprobada', 'rechazada', 'registrada'] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
@@ -67,7 +82,16 @@ export interface Solicitud {
   /** `hoja` = importada del histórico; `portal` = nacida en la app. */
   origen: 'portal' | 'hoja';
   estado: EstadoSolicitud;
+  /** Quien firma PRIMERO, congelado en el alta. No rota al avanzar de nivel. */
   aprobadorCorreo: string | null;
+  /**
+   * Quien firma DESPUÉS, congelado en el alta. `null` = una sola firma, porque
+   * el árbol se acaba ahí (raíz, jefe sin ficha activa, o ciclo).
+   */
+  segundoAprobadorCorreo: string | null;
+  /** Cuándo firmó el jefe inmediato. Con una sola firma coincide con `decididaAt`. */
+  primeraFirmaAt: string | null;
+  /** La decisión FINAL: la que dejó la solicitud en `aprobada` o `rechazada`. */
   decididaAt: string | null;
   motivoRechazo: string | null;
   createdAt: string;

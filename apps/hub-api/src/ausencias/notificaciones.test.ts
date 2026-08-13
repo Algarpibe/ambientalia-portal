@@ -19,6 +19,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     origen: 'portal',
     estado: 'pendiente',
     aprobadorCorreo: 'comercial@ambientalia.com.co',
+    segundoAprobadorCorreo: null,
+    primeraFirmaAt: null,
     decididaAt: null,
     motivoRechazo: null,
     createdAt: '2026-06-01T10:00:00Z',

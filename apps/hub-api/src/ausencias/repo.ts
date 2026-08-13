@@ -572,7 +572,11 @@ const SELECT_SOLICITUD = `
          -- sobra en un double sin error de representacion observable.
          s.dias_habiles::float8 AS dias_habiles,
          s.observaciones, s.origen,
-         s.comentarios, s.estado, s.aprobador_correo,
+         s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo,
+         -- ::text por lo mismo que las fechas de mas arriba: el driver devuelve
+         -- timestamptz como objeto Date, y una comparacion lexicografica contra
+         -- una cadena fallaria en silencio.
+         s.primera_firma_at::text AS primera_firma_at,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime, a.drive_file_id,
          octet_length(a.contenido) AS adjunto_bytes
@@ -595,6 +599,8 @@ interface FilaSolicitudDb {
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobador_correo: string | null;
+  segundo_aprobador_correo: string | null;
+  primera_firma_at: string | null;
   decidida_at: string | null;
   motivo_rechazo: string | null;
   created_at: string;
@@ -630,6 +636,8 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     comentarios: r.comentarios,
     estado: r.estado,
     aprobadorCorreo: r.aprobador_correo,
+    segundoAprobadorCorreo: r.segundo_aprobador_correo,
+    primeraFirmaAt: r.primera_firma_at,
     decididaAt: r.decidida_at,
     motivoRechazo: r.motivo_rechazo,
     createdAt: r.created_at,

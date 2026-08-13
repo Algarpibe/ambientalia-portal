@@ -53,13 +53,18 @@ function bloqueAdjunto(s: Solicitud): string {
   return s.adjunto ? `\n📎 Documento adjunto: ${s.adjunto.nombreArchivo}\n` : '';
 }
 
-// ── Los cinco correos ──────────────────────────────────────────────────────
+// ── Los seis correos ───────────────────────────────────────────────────────
 
 function acuseSolicitante(s: Solicitud) {
   const esInc = s.tipo === 'incapacidad';
+  // No hay correo de avance intermedio: el empleado recibe este acuse y el
+  // veredicto, dos correos. Por eso el acuse anuncia el circuito de dos firmas
+  // cuando lo hay, para que la espera no sorprenda.
   const cierre = esInc
     ? 'Muchas gracias por reportar tu incapacidad. Esperamos tu pronta recuperación.'
-    : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
+    : s.segundoAprobadorCorreo
+      ? 'Tu solicitud pasa por dos aprobaciones: primero tu jefe inmediato y después su superior. Te informaremos por este medio del resultado final.'
+      : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
   return {
     para: esInc ? [s.solicitanteEmail, ...COPIA_ADMINISTRACION].join(', ') : s.solicitanteEmail,
     asunto: esInc
@@ -96,6 +101,38 @@ function avisoAprobador(s: Solicitud) {
       // El cambio de fondo frente al flujo viejo: en vez de un formulario
       // incrustado en el correo que dejaba la ejecución de n8n colgada
       // esperando, se aprueba en el portal, donde queda rastro de quién y cuándo.
+      `Puedes aprobarla o rechazarla aquí: ${urlPortal()}/ausencias`,
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * El aviso al segundo aprobador. Lee `segundoAprobadorCorreo` DIRECTAMENTE, y no
+ * «a quien le toque según el estado»: hacerlo polimórfico ataría el correo al
+ * estado de la fila en el momento de construir el payload, que es una dependencia
+ * sutil y evitable.
+ *
+ * Sin copia a administración, a diferencia de los correos de decisión: esto es un
+ * trámite interno, no un veredicto. Y no se nombra al primer firmante — los
+ * correos de esta app no nombran a nadie, y un campo que puede faltar acaba
+ * escribiendo «undefined» en el buzón de alguien.
+ */
+function avisoSegundoAprobador(s: Solicitud) {
+  return {
+    para: s.segundoAprobadorCorreo ?? '',
+    asunto: `Segunda aprobación: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `Tienes pendiente la segunda aprobación de una solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}${s.empleadoCargo ? ` (${s.empleadoCargo})` : ''}.`,
+      '',
+      'Esta solicitud ya cuenta con el visto bueno de su jefe inmediato. Falta tu aprobación para que quede en firme.',
+      '',
+      bloqueFechas(s),
+      bloqueComentarios(s) + bloqueAdjunto(s),
       `Puedes aprobarla o rechazarla aquí: ${urlPortal()}/ausencias`,
       '',
       'Saludos,',
@@ -187,6 +224,7 @@ function drive(s: Solicitud) {
 const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: string; cuerpo: string }> = {
   creada: acuseSolicitante,
   aprobacion: avisoAprobador,
+  aprobacion_2: avisoSegundoAprobador,
   aprobada: correoAprobada,
   rechazada: correoRechazada,
   registrada: acuseSolicitante,
@@ -196,13 +234,15 @@ const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: 
  * El payload de un evento: un correo, y los efectos en Google que le tocan.
  *
  * Reparto de los efectos, para que ninguno se duplique ni se pierda:
- *  - `creada`     → nada más (la solicitud aún no es firme).
- *  - `aprobacion` → sube el PDF a Drive: quien aprueba tiene que poder verlo,
- *                   y este es el primer evento que se ejecuta con adjunto.
- *  - `aprobada`   → calendario + fila en la hoja.
- *  - `rechazada`  → fila en la hoja (sin calendario: no hay ausencia).
- *  - `registrada` → calendario + hoja + Drive, todo de una (la incapacidad no
- *                   pasa por aprobación, así que es su único evento).
+ *  - `creada`       → nada más (la solicitud aún no es firme).
+ *  - `aprobacion`   → sube el PDF a Drive: quien aprueba tiene que poder verlo,
+ *                     y este es el primer evento que se ejecuta con adjunto.
+ *  - `aprobacion_2` → SOLO correo. El PDF ya está en Drive desde `aprobacion`, y
+ *                     la solicitud sigue sin ser firme: ni calendario ni hoja.
+ *  - `aprobada`     → calendario + fila en la hoja.
+ *  - `rechazada`    → fila en la hoja (sin calendario: no hay ausencia).
+ *  - `registrada`   → calendario + hoja + Drive, todo de una (la incapacidad no
+ *                     pasa por aprobación, así que es su único evento).
  */
 export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEvento {
   const conCalendario = evento === 'aprobada' || evento === 'registrada';
