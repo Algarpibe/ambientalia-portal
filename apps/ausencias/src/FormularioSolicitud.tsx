@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Send } from 'lucide-react';
-import { crearSolicitud, leerComoBase64, type Solicitud, type TipoSolicitud } from './api';
+import { crearSolicitud, leerComoBase64, type SaldoVacaciones, type Solicitud, type TipoSolicitud } from './api';
 import { contarDiasHabiles, etiquetasFecha, requiereAprobacion, TIPOS } from './dominio';
+import TarjetaSaldo from './TarjetaSaldo';
 
 /** Mismo tope que el servidor (MAX_ADJUNTO_BYTES). Se avisa antes de subir. */
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
@@ -9,12 +10,14 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024;
 interface Props {
   festivos: Set<string>;
   aprobadorCorreo: string;
+  /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
+  saldo: SaldoVacaciones | null;
   onCreada: (s: Solicitud) => void;
 }
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
-export default function FormularioSolicitud({ festivos, aprobadorCorreo, onCreada }: Props) {
+export default function FormularioSolicitud({ festivos, aprobadorCorreo, saldo, onCreada }: Props) {
   const [tipo, setTipo] = useState<TipoSolicitud>('vacaciones');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -154,6 +157,13 @@ export default function FormularioSolicitud({ festivos, aprobadorCorreo, onCread
 
       {rangoInvertido && (
         <p className="mb-4 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
+      )}
+
+      {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo. */}
+      {tipo === 'vacaciones' && saldo && (
+        <div className="mb-4">
+          <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} />
+        </div>
       )}
 
       {/* El contador en vivo evita la sorpresa de pedir «una semana» y que el

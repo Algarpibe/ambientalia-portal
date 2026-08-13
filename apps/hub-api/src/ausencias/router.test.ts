@@ -96,6 +96,38 @@ vi.mock('./repo.js', () => ({
       (s) => s.estado === 'pendiente' && (todas || String(s.aprobadorCorreo).toLowerCase() === correo.toLowerCase()),
     ),
   solicitudPorId: async (_db: unknown, id: string) => estado.solicitudes.find((s) => s.id === id) ?? null,
+  // Saldo: se lee de `estado.plantilla`, con `saldoCorte`/`fechaCorte` colgados
+  // ahí mismo (empiezan `undefined` = "sin configurar"). `vacacionesDeEmpleados`
+  // se deriva de `estado.solicitudes`, que ya trae `empleadoId`/`tipo`/etc. desde
+  // el mock de `crearSolicitud`.
+  empleadosConSaldo: async (_db: unknown, soloDe: string | null, empleadoId: string | null) =>
+    estado.plantilla
+      .filter((e: any) => soloDe === null || String(e.aprobadorCorreo).toLowerCase() === soloDe.toLowerCase())
+      .filter((e: any) => empleadoId === null || e.id === empleadoId)
+      .map((e: any) => ({
+        empleadoId: e.id,
+        nombreCompleto: e.nombreCompleto,
+        correo: e.correo,
+        saldoCorte: e.saldoCorte ?? null,
+        fechaCorte: e.fechaCorte ?? null,
+      })),
+  vacacionesDeEmpleados: async (_db: unknown, ids: string[]) =>
+    estado.solicitudes
+      .filter((s: any) => s.tipo === 'vacaciones' && ids.includes(s.empleadoId as string))
+      .map((s: any) => ({
+        empleadoId: s.empleadoId,
+        tipo: s.tipo,
+        fechaInicio: s.fechaInicio,
+        diasHabiles: s.diasHabiles,
+        estado: s.estado,
+      })),
+  fijarSaldo: async (_db: unknown, empleadoId: string, saldoCorte: number | null, fechaCorte: string | null) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.saldoCorte = saldoCorte;
+    e.fechaCorte = fechaCorte;
+    return true;
+  },
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -726,5 +758,97 @@ describe('GET /ausencias/contexto', () => {
 
     const otro = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
     expect(otro.body.esAprobador).toBe(false);
+  });
+
+  it('incluye el saldo de vacaciones del empleado de la sesión', async () => {
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    // No está en `estado.plantilla` (el mock de saldo vive ahí), así que sale
+    // "sin configurar"; lo que importa aquí es que el campo viaja, no null.
+    expect(r.body.saldo).not.toBeNull();
+    expect(r.body.saldo).toMatchObject({ configurado: false });
+  });
+
+  it('sin ficha de empleado, el saldo viaja como `null` explícito, no como una clave ausente', async () => {
+    // `undefined` desaparece al serializar a JSON: una UI que distinga "sin
+    // ficha" de "sin configurar" comprobando `saldo === null` se rompería en
+    // silencio si aquí se colara un `undefined` en vez de un `null`.
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.empleado).toBeNull();
+    expect(r.body).toHaveProperty('saldo', null);
+  });
+
+  it('si el saldo falla al calcularse, el contexto arranca igual con `saldo: null`', async () => {
+    // El contrario de /ausencias/saldos a propósito: allí el saldo ES la
+    // respuesta y un fallo debe salir como 500 (ver el JSDoc de esa ruta). Aquí
+    // es un campo accesorio de un payload que la app necesita para poder
+    // arrancar, así que un fallo al calcularlo no puede tumbar `empleado` ni
+    // `festivos`, que sí son imprescindibles para que aparezcan las pestañas.
+    // Una `fechaCorte` con formato inválido es lo que hace lanzar a
+    // `calcularSaldo` (ver su JSDoc en saldo.ts).
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: 'fecha-invalida' });
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.empleado).not.toBeNull();
+    expect(r.body.festivos.length).toBeGreaterThan(0);
+    expect(r.body).toHaveProperty('saldo', null);
+  });
+});
+
+// ── Saldo de vacaciones ────────────────────────────────────────────────────
+
+describe('GET /ausencias/saldos', () => {
+  it('el admin recibe la lista completa', async () => {
+    const r = await request(app())
+      .get('/api/ausencias/saldos')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(Array.isArray(r.body.saldos)).toBe(true);
+    expect(r.body.saldos).toHaveLength(2); // E1 y E2 de la plantilla
+  });
+
+  it('403 a quien no es admin ni aprueba a nadie', async () => {
+    await request(app())
+      .get('/api/ausencias/saldos')
+      .set('Authorization', `Bearer ${token({ sub: 'nadie@ambientalia.com.co' })}`)
+      .expect(403);
+  });
+
+  it('403 con token válido pero sin la app asignada, aunque sí aprobaría a alguien', async () => {
+    // Distinto del 403 de arriba: ese lo lanza el SERVICIO (`no_es_aprobador`).
+    // Este debe pincharse en el `requireApp` del ROUTER, antes de llegar al
+    // servicio: por eso el `sub` es el de un aprobador real, para que la única
+    // razón posible del 403 sea la app que falta y no que el servicio también
+    // lo habría rechazado.
+    await request(app())
+      .get('/api/ausencias/saldos')
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co', apps: ['contabilidad'] })}`)
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/saldo', () => {
+  it('solo el admin puede fijar el saldo', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ saldoCorte: 10, fechaCorte: '2026-01-01' })
+      .expect(403);
+  });
+
+  it('400 si el saldo es negativo', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ saldoCorte: -1, fechaCorte: '2026-01-01' })
+      .expect(400);
+  });
+
+  it('400 si la configuración va a medias (falta fechaCorte)', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ saldoCorte: 10 })
+      .expect(400);
   });
 });

@@ -61,6 +61,28 @@ export interface Contexto {
   esAprobador: boolean;
   /** Festivos del año en curso y los dos siguientes, para contar días sin ir al servidor. */
   festivos: string[];
+  /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
+  saldo: SaldoVacaciones | null;
+}
+
+/** El saldo de vacaciones de una persona, ya calculado por hub-api. */
+export interface SaldoVacaciones {
+  /** False si nadie ha configurado todavía su punto de corte. */
+  configurado: boolean;
+  saldoCorte: number;
+  fechaCorte: string;
+  devengadas: number;
+  disfrutadas: number;
+  /** Pendientes de aprobar. No bajan el saldo firme, pero sí el que se puede pedir. */
+  enTramite: number;
+  disponible: number;
+}
+
+export interface SaldoDeEmpleado {
+  empleadoId: string;
+  nombreCompleto: string;
+  correo: string;
+  saldo: SaldoVacaciones;
 }
 
 export interface NuevaSolicitud {
@@ -77,7 +99,7 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function conCuerpo<T>(metodo: 'POST' | 'PATCH', path: string, body: unknown): Promise<T> {
+async function conCuerpo<T>(metodo: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: metodo,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -89,6 +111,7 @@ async function conCuerpo<T>(metodo: 'POST' | 'PATCH', path: string, body: unknow
 
 const post = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body);
 const patch = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body);
+const put = <T,>(path: string, body: unknown) => conCuerpo<T>('PUT', path, body);
 
 export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
 
@@ -197,3 +220,24 @@ export function leerComoBase64(file: File): Promise<string> {
     lector.readAsDataURL(file);
   });
 }
+
+/** Los saldos que puede ver quien pregunta: todos si es admin, si no los suyos. */
+export const fetchSaldos = () =>
+  get<{ saldos: SaldoDeEmpleado[] }>('/api/ausencias/saldos').then((d) => d.saldos);
+
+/**
+ * Fija el punto de corte de un empleado (solo admin). Las dos a null lo vacía.
+ *
+ * `saldoCorte` admite `string` a propósito, además de `number`: si el panel
+ * convirtiera con `Number()` antes de mandarlo, un `'abc'` tecleado por error
+ * se volvería `NaN`, y `JSON.stringify(NaN)` produce `null` — con lo que el
+ * backend recibiría «vaciar la configuración» en vez de «esto no es un
+ * número», y respondería un 400 confuso o, peor, borraría un saldo ya puesto.
+ * Mandando la cadena tal cual, la validación de forma vive en un solo sitio
+ * (el backend, con su regex) y el mensaje de error que llega es el correcto.
+ */
+export const fijarSaldo = (empleadoId: string, saldoCorte: number | string | null, fechaCorte: string | null) =>
+  put<SaldoDeEmpleado>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/saldo`, {
+    saldoCorte,
+    fechaCorte,
+  });
