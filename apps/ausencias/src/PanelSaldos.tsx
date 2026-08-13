@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
 import { fetchSaldos, fijarSaldo, type SaldoDeEmpleado } from './api';
 
@@ -35,18 +35,39 @@ function filaInicial(s: SaldoDeEmpleado): Fila {
   };
 }
 
-export default function PanelSaldos() {
+interface Props {
+  /** Si la pestaña «Saldos» es la que se ve ahora mismo. El panel se monta
+   *  siempre (las pestañas quedan montadas para no perder lo escrito al ir y
+   *  volver), pero el listado solo se pide la primera vez que `activo` se
+   *  pone en true: si no, cualquier admin pagaría esta llamada en cada carga
+   *  de la app aunque nunca abriera la pestaña, y quien además aprueba
+   *  duplicaría la petición que App.tsx ya hace para la bandeja. */
+  activo: boolean;
+}
+
+export default function PanelSaldos({ activo }: Props) {
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [filas, setFilas] = useState<Record<string, Fila>>({});
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Solo se marca en el `.then`, no al arrancar el fetch: así, si React
+  // cancela y reintenta el efecto (StrictMode en desarrollo), el segundo
+  // intento no se encuentra la bandera ya puesta por un intento que nunca
+  // llegó a resolver.
+  const yaCargado = useRef(false);
+  // Un temporizador de «guardado» por fila, para poder cancelarlo si el panel
+  // se desmonta con alguno pendiente o si se guarda la misma fila otra vez
+  // antes de que se apague el anterior.
+  const timeoutsExito = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
+    if (!activo || yaCargado.current) return;
     let vivo = true;
     setCargando(true);
     fetchSaldos()
       .then((s) => {
         if (!vivo) return;
+        yaCargado.current = true;
         setSaldos(s);
         setFilas(Object.fromEntries(s.map((e) => [e.empleadoId, filaInicial(e)])));
         setError(null);
@@ -55,6 +76,12 @@ export default function PanelSaldos() {
       .finally(() => vivo && setCargando(false));
     return () => {
       vivo = false;
+    };
+  }, [activo]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(timeoutsExito.current).forEach(clearTimeout);
     };
   }, []);
 
@@ -84,10 +111,24 @@ export default function PanelSaldos() {
       // Se resincroniza el borrador con lo que quedó guardado (la BD redondea
       // a un decimal), no con lo que se tecleó.
       actualizar(empleadoId, { ...filaInicial(actualizado), exito: true });
-      setTimeout(() => actualizar(empleadoId, { exito: false }), 2000);
+      clearTimeout(timeoutsExito.current[empleadoId]);
+      timeoutsExito.current[empleadoId] = setTimeout(() => {
+        actualizar(empleadoId, { exito: false });
+        delete timeoutsExito.current[empleadoId];
+      }, 2000);
     } catch (e) {
       actualizar(empleadoId, { guardando: false, error: (e as Error).message });
     }
+  }
+
+  function alPulsarEnter(e: React.KeyboardEvent<HTMLInputElement>, empleadoId: string) {
+    // No hay <form> alrededor de la fila (es una tabla, y un <form> no puede
+    // envolver una <tr> suelta), así que Enter no dispara un submit por su
+    // cuenta: hay que interceptarlo a mano para que se comporte como se
+    // espera de cualquier campo de un formulario.
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    void guardar(empleadoId);
   }
 
   return (
@@ -149,6 +190,7 @@ export default function PanelSaldos() {
                           inputMode="decimal"
                           value={fila.saldoCorte}
                           onChange={(e) => actualizar(s.empleadoId, { saldoCorte: e.target.value, error: null })}
+                          onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
                           placeholder="Sin configurar"
                           aria-label={`Saldo en el corte de ${s.nombreCompleto}`}
                           className="w-28 rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
@@ -159,6 +201,7 @@ export default function PanelSaldos() {
                           type="date"
                           value={fila.fechaCorte}
                           onChange={(e) => actualizar(s.empleadoId, { fechaCorte: e.target.value, error: null })}
+                          onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
                           aria-label={`Fecha de corte de ${s.nombreCompleto}`}
                           className="rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                         />
@@ -172,6 +215,7 @@ export default function PanelSaldos() {
                             type="button"
                             disabled={fila.guardando}
                             onClick={() => void guardar(s.empleadoId)}
+                            aria-label={`Guardar el saldo de ${s.nombreCompleto}`}
                             className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
                           >
                             {fila.guardando ? (
@@ -183,7 +227,19 @@ export default function PanelSaldos() {
                             )}
                             Guardar
                           </button>
-                          {fila.error && <span className="max-w-[16rem] text-right text-xs text-red-600">{fila.error}</span>}
+                          {/* El icono ya avisa con la vista, pero cambiar un icono no
+                              dice nada a quien usa lector de pantalla: sin este texto,
+                              el guardado con éxito pasaría inadvertido para esa persona. */}
+                          {fila.exito && (
+                            <span role="status" className="sr-only">
+                              Saldo de {s.nombreCompleto} guardado.
+                            </span>
+                          )}
+                          {fila.error && (
+                            <span role="alert" className="max-w-[16rem] text-right text-xs text-red-600">
+                              {fila.error}
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>

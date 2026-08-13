@@ -10,7 +10,7 @@ const MAX_PDF_BYTES = 8 * 1024 * 1024;
 interface Props {
   festivos: Set<string>;
   aprobadorCorreo: string;
-  /** Null si el usuario no tiene ficha de empleado, o si nadie configuró su punto de corte. */
+  /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
   saldo: SaldoVacaciones | null;
   onCreada: (s: Solicitud) => void;
 }
@@ -160,7 +160,11 @@ export default function FormularioSolicitud({ festivos, aprobadorCorreo, saldo, 
       )}
 
       {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo. */}
-      {tipo === 'vacaciones' && saldo && <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} />}
+      {tipo === 'vacaciones' && saldo && (
+        <div className="mb-4">
+          <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} />
+        </div>
+      )}
 
       {/* El contador en vivo evita la sorpresa de pedir «una semana» y que el
           aprobador vea 4 días porque había un festivo en medio. */}

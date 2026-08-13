@@ -45,9 +45,15 @@ export default function App() {
         const [propias, aAprobar, saldosVisibles] = await Promise.all([
           ctx.empleado ? fetchMisSolicitudes() : Promise.resolve([]),
           ctx.esAprobador ? fetchPendientes() : Promise.resolve([]),
-          // Solo tiene sentido para quien aprueba o administra; para el resto el
-          // endpoint responde 403 y no hay por qué provocarlo. El catch evita
-          // que un fallo del saldo tumbe la carga de la app entera.
+          // Solo tiene sentido para quien aprueba o administra; para el resto
+          // no se pide. El guard `ctx.esAprobador` ya deja fuera el 403: el
+          // predicado SQL de empleadosConSaldo es el mismo que el de
+          // esAprobadorDeAlguien, así que esAprobador:true garantiza al menos
+          // una fila. El catch de aquí solo atrapa fallos reales — red caída,
+          // 401, o el 500 que el backend documenta para una fila con fecha
+          // corrupta — y se traga porque, si esto revienta, el Promise.all se
+          // lleva por delante también `mias` y `pendientes`, que no tienen
+          // nada que ver con el saldo.
           ctx.esAprobador ? fetchSaldos().catch(() => []) : Promise.resolve([]),
         ]);
         if (!vivo) return;
@@ -78,9 +84,32 @@ export default function App() {
     if (pestanas.length && !pestanas.some(([id]) => id === tab)) setTab(pestanas[0][0]);
   }, [pestanas, tab]);
 
+  function onCreada(s: Solicitud) {
+    setMias((ms) => [s, ...ms]);
+    // contexto.saldo se cargó una sola vez al arrancar la app: si no se
+    // refresca aquí, la tarjeta seguiría enseñando el disponible de antes de
+    // esta solicitud y no avisaría de una segunda petición sobre los mismos
+    // días (el bug que se reportó: pedir 10, luego otros 10, y que la tarjeta
+    // siga diciendo que hay 12). No se espera esta llamada ni se propaga su
+    // error: la solicitud ya se creó, y si el refresco falla simplemente se
+    // queda el saldo anterior — es una mejora de frescura, no algo de lo que
+    // dependa haber creado la solicitud.
+    fetchContexto()
+      .then((ctx) => setContexto((actual) => (actual ? { ...actual, saldo: ctx.saldo } : actual)))
+      .catch(() => {});
+  }
+
   function onDecidida(s: Solicitud) {
     setPendientes((ps) => ps.filter((p) => p.id !== s.id));
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
+    // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
+    // disponible de esa persona, y otra fila suya en la bandeja seguiría
+    // mostrando el número de antes de esta decisión. Se llega aquí solo desde
+    // la bandeja (ya implica esAprobador), y si el refresco falla se deja el
+    // saldo anterior sin tocar el resultado de la decisión ya tomada.
+    fetchSaldos()
+      .then((s2) => setSaldos(s2))
+      .catch(() => {});
   }
 
   return (
@@ -153,12 +182,16 @@ export default function App() {
                   festivos={festivos}
                   aprobadorCorreo={contexto.empleado.aprobadorCorreo}
                   saldo={contexto.saldo}
-                  onCreada={(s) => setMias((ms) => [s, ...ms])}
+                  onCreada={onCreada}
                 />
               </div>
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
-                {contexto.saldo && <TarjetaSaldo saldo={contexto.saldo} />}
+                {contexto.saldo && (
+                  <div className="mb-4">
+                    <TarjetaSaldo saldo={contexto.saldo} />
+                  </div>
+                )}
                 <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
               </div>
             </>
@@ -176,7 +209,7 @@ export default function App() {
                 <ImportarEmpleados />
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
-                <PanelSaldos />
+                <PanelSaldos activo={tab === 'saldos'} />
               </div>
               <div className={tab === 'historico' ? '' : 'hidden'}>
                 <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />

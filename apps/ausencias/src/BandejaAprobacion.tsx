@@ -43,7 +43,15 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
         const saldoSolicitante =
           s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
         return (
-          <div className="flex w-56 flex-col gap-2">
+          // w-56 se quedaba corto en cuanto la tarjeta de saldo entró en esta
+          // celda: el titular «Saldo de {nombre}: N días» no tiene dónde
+          // encoger y con un nombre largo se partía en tres líneas ilegibles.
+          // w-72 le da a TarjetaSaldo margen para que, si el nombre no cabe en
+          // una línea, envuelva por su cuenta con flex-wrap sin descuadrar el
+          // número; con nombres cortos sigue yendo todo en una sola línea. El
+          // formulario de rechazo (lo único que llevaba w-56 originalmente)
+          // sigue sobrando ancho de sobra a w-72.
+          <div className="flex w-72 flex-col gap-2">
             {saldoSolicitante && (
               <TarjetaSaldo
                 saldo={saldoSolicitante.saldo}
