@@ -12,13 +12,12 @@ interface Props {
   miEmpleadoId: string | null;
 }
 
-/** Color de fondo por tipo. `reservado` es una incapacidad ajena, sin motivo visible. */
+/** Color de fondo por tipo. */
 const COLOR: Record<string, string> = {
   vacaciones: 'bg-blue-500',
   compensatorio: 'bg-emerald-500',
   permiso: 'bg-amber-500',
   incapacidad: 'bg-rose-500',
-  reservado: 'bg-gray-400',
 };
 
 /** El mes en curso como `YYYY-MM`, en hora de Colombia (UTC−5, sin horario de verano). */
@@ -174,15 +173,14 @@ export default function Calendario({ miEmpleadoId }: Props) {
                     </td>
                     {(datos?.dias ?? []).map((d) => {
                       const marca = porCelda.get(`${e.id}|${d.fecha}`);
-                      const clave = marca ? (marca.tipo ?? 'reservado') : '';
                       return (
                         <td key={d.fecha} className={`p-0.5 ${d.laborable ? '' : 'bg-gray-50'}`}>
                           {marca && (
                             <div
-                              title={`${marca.tipo ? ETIQUETA_TIPO[marca.tipo] : 'Ausente'} · ${d.fecha}${
+                              title={`${ETIQUETA_TIPO[marca.tipo]} · ${d.fecha}${
                                 marca.estado === 'pendiente' ? ' · pendiente de aprobar' : ''
                               }`}
-                              className={`h-5 w-full rounded-sm ${COLOR[clave]} ${
+                              className={`h-5 w-full rounded-sm ${COLOR[marca.tipo]} ${
                                 marca.estado === 'pendiente' ? 'opacity-40 ring-1 ring-inset ring-gray-500' : ''
                               }`}
                             />
@@ -202,9 +200,6 @@ export default function Calendario({ miEmpleadoId }: Props) {
                 <span className={`inline-block h-3 w-3 rounded-sm ${COLOR[t.id]}`} /> {t.label}
               </span>
             ))}
-            <span className="flex items-center gap-1.5">
-              <span className="inline-block h-3 w-3 rounded-sm bg-gray-400" /> Ausente (sin detalle)
-            </span>
             <span className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-sm bg-blue-500 opacity-40 ring-1 ring-inset ring-gray-500" />{' '}
               Pendiente de aprobar

@@ -210,8 +210,6 @@ vi.mock('./repo.js', () => ({
   ausenciasEntre: async () => [
     {
       empleadoId: 'e1',
-      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
-      aprobadorCorreo: 'comercial@ambientalia.com.co',
       tipo: 'vacaciones',
       estado: 'aprobada',
       fechaInicio: '2026-08-10',

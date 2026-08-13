@@ -312,7 +312,7 @@ export function createAusenciasRouter(db: Pool): Router {
    */
   router.get('/ausencias/calendario', ...gated, async (req: Request, res: Response) => {
     try {
-      res.json(await service.calendarioDelMes(db, sesionDe(req), String(req.query.mes ?? '')));
+      res.json(await service.calendarioDelMes(db, String(req.query.mes ?? '')));
     } catch (e) {
       sendError(res, e, 'ausencias_calendario');
     }

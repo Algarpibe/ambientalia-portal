@@ -10,7 +10,10 @@ import type { EstadoSolicitud, TipoSolicitud } from './types.js';
 // esta app ya lleva dos: el `+1` del fin exclusivo de Google Calendar y el
 // UTC−5 del saldo. Aquí hay tests; en el frontend del portal no.
 
-const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
+// El primer dígito no puede ser 0: sin esto, '0099-01' cuela como mes válido y
+// `Date.UTC(99, ...)` interpreta el año 99 como 1999 (ver el comentario en
+// `rangoDelMes`), produciendo un rango de casi 1900 años.
+const MES = /^[1-9]\d{3}-(0[1-9]|1[0-2])$/;
 
 /** Un día del mes, con lo que el frontend necesita para sombrearlo. */
 export interface DiaCalendario {
@@ -22,27 +25,17 @@ export interface DiaCalendario {
 export interface MarcaCalendario {
   empleadoId: string;
   fecha: string;
-  /** Null = incapacidad ajena: se dice que está ausente, no por qué. */
-  tipo: TipoSolicitud | null;
+  tipo: TipoSolicitud;
   estado: EstadoSolicitud;
 }
 
 /** Una ausencia sin expandir, tal como sale del repo. */
 export interface AusenciaRango {
   empleadoId: string;
-  empleadoCorreo: string;
-  /** El aprobador del EMPLEADO, no el de la solicitud. Ver `puedeVerElTipo`. */
-  aprobadorCorreo: string;
   tipo: TipoSolicitud;
   estado: EstadoSolicitud;
   fechaInicio: string;
   fechaFin: string;
-}
-
-/** Quién está mirando, que es lo que decide si se revela una incapacidad. */
-export interface QuienMira {
-  email: string;
-  esAdmin: boolean;
 }
 
 export function esMesValido(v: string): boolean {
@@ -77,19 +70,16 @@ export function diasDelMes(mes: string): DiaCalendario[] {
 }
 
 /**
- * Si a quien mira se le puede decir que la ausencia es una incapacidad.
+ * El error de «fecha inválida», con el valor recibido tal cual.
  *
- * `aprobadorCorreo` tiene que venir de `portal.empleados`, NO de la solicitud:
- * el de la solicitud está a null en todas las incapacidades a propósito —una
- * incapacidad se informa, no se aprueba, y dejar ahí un aprobador la metería en
- * su bandeja de pendientes—. Leerlo de ahí dejaría a todos los aprobadores
- * fuera y reduciría la regla, en silencio, a «solo el interesado y el admin».
+ * Mismo criterio que `errorFechaInvalida` en saldo.ts: `JSON.stringify` y no una
+ * plantilla, porque si `valor` fuera un objeto `Date` (el gotcha de un `::text`
+ * olvidado en el SELECT), la plantilla lo convertiría con la zona horaria LOCAL
+ * del proceso y el mensaje mentiría sobre qué día era. Se incluye también el
+ * `typeof` para que el mensaje diga, sin ambigüedad, qué clase de valor llegó.
  */
-function puedeVerElTipo(a: AusenciaRango, quien: QuienMira): boolean {
-  if (a.tipo !== 'incapacidad') return true;
-  if (quien.esAdmin) return true;
-  const yo = quien.email.toLowerCase();
-  return a.empleadoCorreo.toLowerCase() === yo || a.aprobadorCorreo.toLowerCase() === yo;
+function errorFechaInvalida(campo: string, valor: unknown): Error {
+  return new Error(`${campo} inválida (tipo ${typeof valor}): ${JSON.stringify(valor)}`);
 }
 
 /**
@@ -98,19 +88,23 @@ function puedeVerElTipo(a: AusenciaRango, quien: QuienMira): boolean {
  * El acotado es lo que permite que una ausencia a caballo entre dos meses se
  * pinte entera en los dos, cada uno con su trozo.
  */
-export function marcasDelMes(
-  mes: string,
-  ausencias: AusenciaRango[],
-  quien: QuienMira,
-): MarcaCalendario[] {
+export function marcasDelMes(mes: string, ausencias: AusenciaRango[]): MarcaCalendario[] {
   const { desde, hasta } = rangoDelMes(mes);
   const marcas: MarcaCalendario[] = [];
+
+  // Se valida ANTES de saltarse las rechazadas y para TODAS las ausencias, no
+  // solo las que sobreviven el filtro (mismo criterio que saldo.ts, ver su
+  // comentario largo junto al bucle equivalente): si el `continue` de abajo
+  // fuera antes, una rechazada con la fecha corrupta pasaría sin ruido. No
+  // llegaría a pintar un día equivocado, pero se perdería el diagnóstico.
+  for (const a of ausencias) {
+    if (!esFechaValida(a.fechaInicio)) throw errorFechaInvalida('fechaInicio', a.fechaInicio);
+    if (!esFechaValida(a.fechaFin)) throw errorFechaInvalida('fechaFin', a.fechaFin);
+  }
 
   for (const a of ausencias) {
     // Una rechazada no es una ausencia: nunca llegó a ocurrir.
     if (a.estado === 'rechazada') continue;
-    if (!esFechaValida(a.fechaInicio)) throw new Error(`fechaInicio inválida: ${JSON.stringify(a.fechaInicio)}`);
-    if (!esFechaValida(a.fechaFin)) throw new Error(`fechaFin inválida: ${JSON.stringify(a.fechaFin)}`);
 
     // Comparación de cadenas: con YYYY-MM-DD el orden lexicográfico ES el
     // cronológico, y no hay zona horaria que pueda desplazar nada.
@@ -118,13 +112,12 @@ export function marcasDelMes(
     const fin = a.fechaFin < hasta ? a.fechaFin : hasta;
     if (ini > fin) continue;
 
-    const tipo = puedeVerElTipo(a, quien) ? a.tipo : null;
     const ultimo = Date.parse(`${fin}T00:00:00Z`);
     for (let ms = Date.parse(`${ini}T00:00:00Z`); ms <= ultimo; ms += 86_400_000) {
       marcas.push({
         empleadoId: a.empleadoId,
         fecha: new Date(ms).toISOString().slice(0, 10),
-        tipo,
+        tipo: a.tipo,
         estado: a.estado,
       });
     }

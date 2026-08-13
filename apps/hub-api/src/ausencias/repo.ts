@@ -885,8 +885,6 @@ export async function empleadosActivos(db: Pool): Promise<EmpleadoActivo[]> {
 
 interface FilaAusenciaRangoDb {
   empleado_id: string;
-  empleado_correo: string;
-  aprobador_correo: string;
   tipo: TipoSolicitud;
   estado: Solicitud['estado'];
   fecha_inicio: string;
@@ -896,8 +894,6 @@ interface FilaAusenciaRangoDb {
 function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
   return {
     empleadoId: r.empleado_id,
-    empleadoCorreo: r.empleado_correo,
-    aprobadorCorreo: r.aprobador_correo,
     tipo: r.tipo,
     estado: r.estado,
     fechaInicio: r.fecha_inicio,
@@ -911,15 +907,10 @@ function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
  * La condición natural (`fecha_inicio >= desde AND fecha_fin <= hasta`) perdería
  * exactamente las que cruzan el cambio de mes, que son las que más importa ver:
  * un mes que no las enseña miente sobre quién está fuera el día 1.
- *
- * `aprobador_correo` sale del EMPLEADO y no de la solicitud a propósito: el de
- * la solicitud está a null en todas las incapacidades, y el enmascarado del
- * calendario depende de este dato.
  */
 export async function ausenciasEntre(db: Pool, desde: string, hasta: string): Promise<AusenciaRango[]> {
   const { rows } = await db.query(
-    `SELECT s.empleado_id, e.correo AS empleado_correo, e.aprobador_correo,
-            s.tipo, s.estado,
+    `SELECT s.empleado_id, s.tipo, s.estado,
             s.fecha_inicio::text AS fecha_inicio,
             s.fecha_fin::text    AS fecha_fin
        FROM portal.solicitudes_ausencia s
@@ -927,7 +918,12 @@ export async function ausenciasEntre(db: Pool, desde: string, hasta: string): Pr
       WHERE e.activo
         AND s.estado <> 'rechazada'
         AND s.fecha_inicio <= $2::date
-        AND s.fecha_fin    >= $1::date`,
+        AND s.fecha_fin    >= $1::date
+      -- Determinismo del pintado, no estética: dos ausencias solapadas del
+      -- mismo empleado producen dos marcas para el mismo (empleadoId, fecha), y
+      -- el frontend arma un Map con esa clave, así que gana la última. Sin este
+      -- ORDER BY, cuál de las dos "gana" podría cambiar entre peticiones.
+      ORDER BY s.fecha_inicio, s.id`,
     [desde, hasta],
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);

@@ -547,8 +547,14 @@ export interface CalendarioDelMes {
  *
  * El parámetro es un mes y no un rango libre: acotarlo así impide que una
  * petición pida cinco años de golpe, y la interfaz solo navega mes a mes.
+ *
+ * No recibe sesión: el calendario lo ve toda la plantilla por igual (incluidas
+ * las incapacidades, con su tipo tal cual — ver el router). No hay ningún dato
+ * que acotar según quién pregunta, así que pedirla solo invitaría a que un
+ * cambio futuro la reintrodujera para filtrar algo que el negocio ya decidió
+ * que es público dentro de la empresa.
  */
-export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): Promise<CalendarioDelMes> {
+export async function calendarioDelMes(db: Pool, mes: string): Promise<CalendarioDelMes> {
   if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
 
   const { desde, hasta } = rangoDelMes(mes);
@@ -560,9 +566,6 @@ export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): P
   return {
     empleados,
     dias: diasDelMes(mes),
-    // El enmascarado de las incapacidades se aplica AQUÍ, antes de responder:
-    // hacerlo al pintar significaría haber enviado ya el dato al navegador, y
-    // un dato de salud enviado es un dato expuesto.
-    marcas: marcasDelMes(mes, ausencias, { email: sesion.email, esAdmin: sesion.esAdmin }),
+    marcas: marcasDelMes(mes, ausencias),
   };
 }

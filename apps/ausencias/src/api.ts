@@ -95,8 +95,7 @@ export interface DiaCalendario {
 export interface MarcaCalendario {
   empleadoId: string;
   fecha: string;
-  /** Null = incapacidad de otra persona: se sabe que está ausente, no por qué. */
-  tipo: TipoSolicitud | null;
+  tipo: TipoSolicitud;
   estado: EstadoSolicitud;
 }
 
