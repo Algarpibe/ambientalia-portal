@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { fetchCalendario, type CalendarioDelMes, type MarcaCalendario, type TipoSolicitud } from './api';
-import { ETIQUETA_TIPO, TIPOS } from './dominio';
+import { enTramite, ETIQUETA_TIPO, TIPOS } from './dominio';
 
 // La rejilla de persona × día. Los datos llegan YA expandidos por día desde
 // hub-api: aquí no se calcula ninguna fecha de ausencia, solo se pinta lo que
@@ -216,9 +216,13 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
                       // Mismo contenido que el `title`: sin un nombre accesible la
                       // marca es un `<div>` de color sin más, y un lector de
                       // pantalla no saca nada de la rejilla salvo celdas vacías.
+                      // `enTramite` y no `=== 'pendiente'`: con la aprobación en
+                      // cascada hay dos estados sin firmar, y comparando solo el
+                      // primero la media firma se pintaría sólida — es decir,
+                      // idéntica a una aprobada, que es justo lo que no es.
                       const descripcion = marca
                         ? `${ETIQUETA_TIPO[marca.tipo]} · ${d.fecha}${
-                            marca.estado === 'pendiente' ? ' · pendiente de aprobar' : ''
+                            enTramite(marca.estado) ? ' · pendiente de aprobar' : ''
                           }`
                         : '';
                       return (
@@ -229,7 +233,7 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
                               title={descripcion}
                               aria-label={descripcion}
                               className={`h-5 w-full rounded-sm ${COLOR[marca.tipo]} ${
-                                marca.estado === 'pendiente' ? 'opacity-40 ring-1 ring-inset ring-gray-500' : ''
+                                enTramite(marca.estado) ? 'opacity-40 ring-1 ring-inset ring-gray-500' : ''
                               }`}
                             />
                           )}

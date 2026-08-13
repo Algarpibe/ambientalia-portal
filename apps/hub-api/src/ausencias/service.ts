@@ -1,5 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
+import { APROBADOR_POR_DEFECTO } from './config.js';
 import {
   diasDelMes,
   esMesValido,
@@ -10,7 +11,7 @@ import {
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
-import { aprobadoresDe } from './jerarquia.js';
+import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos } from './jerarquia.js';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
 import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
@@ -475,6 +476,68 @@ export function validarSaldo(body: unknown): SaldoAFijar {
   if (!esFechaValida(b.fechaCorte)) throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
 
   return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: b.fechaCorte };
+}
+
+// ── Organigrama ────────────────────────────────────────────────────────────
+
+/** Un empleado del maestro con su posición en el árbol ya derivada. */
+export interface EmpleadoConJefatura extends Empleado {
+  /** Quien firmaría en segundo lugar una solicitud suya creada ahora mismo. */
+  segundoAprobadorCorreo: string | null;
+  /** Su rama del organigrama forma un círculo. Se avisa, no se bloquea. */
+  enCiclo: boolean;
+}
+
+/**
+ * El maestro con el árbol resuelto. La derivación se hace AQUÍ y no en el
+ * navegador para que la regla viva en un solo sitio: el admin ve exactamente lo
+ * que se congelaría en una solicitud nueva, no una aproximación.
+ */
+export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatura[]> {
+  const [empleados, enlaces] = await Promise.all([repo.listarEmpleados(db), repo.enlacesActivos(db)]);
+  const porCorreo = new Map(enlaces.map((e) => [e.correo, e]));
+  const enCiclo = new Set(detectarCiclos(construirIndice(enlaces)).flat());
+
+  return empleados.map((e) => ({
+    ...e,
+    segundoAprobadorCorreo: aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null).segundo,
+    enCiclo: enCiclo.has(e.correo.toLowerCase()),
+  }));
+}
+
+/**
+ * Cambia el jefe inmediato de alguien.
+ *
+ * Autoasignarse es legítimo: así se declara la raíz del organigrama. Un ciclo se
+ * rechaza al escribir (409), pero uno que YA esté en la base de datos no bloquea
+ * la edición: si lo hiciera, sería imposible deshacerlo desde el panel.
+ */
+export async function fijarJefe(db: Pool, empleadoId: string, body: unknown): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  if (typeof b.aprobadorCorreo !== 'string') throw new AusenciaError('jefe_requerido', 400, 'aprobadorCorreo');
+  const jefe = b.aprobadorCorreo.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(jefe)) throw new AusenciaError('correo_invalido', 400, 'aprobadorCorreo');
+
+  const empleado = await repo.empleadoPorId(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const enlaces = await repo.enlacesActivos(db);
+  const conocido = enlaces.some((e) => e.correo === jefe);
+  // El buzón por defecto se acepta aunque no tenga ficha de empleado: es de quien
+  // cuelga toda la plantilla hoy, y rechazarlo dejaría el organigrama sin raíz.
+  if (!conocido && jefe !== APROBADOR_POR_DEFECTO.toLowerCase()) {
+    throw new AusenciaError('jefe_no_encontrado', 400, 'aprobadorCorreo');
+  }
+  if (creariaCiclo(construirIndice(enlaces), empleado.correo, jefe)) {
+    throw new AusenciaError('ciclo_jerarquia', 409, 'aprobadorCorreo');
+  }
+
+  if (!(await repo.fijarJefe(db, empleadoId, jefe))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
 }
 
 /** El saldo de un empleado, listo para enseñar. */

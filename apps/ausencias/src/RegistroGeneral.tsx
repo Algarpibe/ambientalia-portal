@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { borrarSolicitud, fetchEmpleados, fetchHistorico, type Empleado, type Solicitud } from './api';
-import { CHIP_ESTADO, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
+import { chipDe, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
 import EditarSolicitud from './EditarSolicitud';
 
 // El registro general de la compañía: lo que antes había que ir a mirar a la
@@ -101,7 +101,7 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
           s.fechaInicio,
           s.fechaFin,
           s.diasHabiles,
-          CHIP_ESTADO[s.estado].label,
+          chipDe(s.estado).label,
           s.comentarios ?? '',
           s.observaciones ?? '',
         ]
@@ -215,8 +215,8 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{formatFecha(s.fechaFin)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{s.diasHabiles}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${CHIP_ESTADO[s.estado].clase}`}>
-                        {CHIP_ESTADO[s.estado].label}
+                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chipDe(s.estado).clase}`}>
+                        {chipDe(s.estado).label}
                       </span>
                     </td>
                     <td className="max-w-md px-4 py-2.5 text-gray-600">

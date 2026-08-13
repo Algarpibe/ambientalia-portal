@@ -147,6 +147,13 @@ vi.mock('./repo.js', () => ({
     e.fechaCorte = fechaCorte;
     return true;
   },
+  empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
+  fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.aprobadorCorreo = aprobadorCorreo;
+    return true;
+  },
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -743,6 +750,81 @@ describe('aprobación en cascada', () => {
       .set('Authorization', `Bearer ${gerencia()}`)
       .expect(200);
     expect(r.body.esAprobador).toBe(true);
+  });
+});
+
+// ── Organigrama ────────────────────────────────────────────────────────────
+
+describe('PUT /ausencias/empleados/:id/jefe', () => {
+  const GERENCIA = 'comercial@ambientalia.com.co';
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  const fijar = (id: string, body: Record<string, unknown>, quien = admin()) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/jefe`).set('Authorization', `Bearer ${quien}`).send(body);
+
+  beforeEach(() => {
+    // E1 y E2 comparten correo en el `beforeEach` global (son copias de la misma
+    // ficha), y aquí hace falta que sean personas distintas para poder encadenar.
+    estado.plantilla[0].correo = 'ana.ruiz@ambientalia.com.co';
+    estado.plantilla[1].correo = 'luis.prieto@ambientalia.com.co';
+  });
+
+  it('un no-admin no toca el organigrama', async () => {
+    await fijar(E1, { aprobadorCorreo: GERENCIA }, token()).expect(403);
+  });
+
+  it('404 si el empleado no existe', async () => {
+    await fijar(E_FANTASMA, { aprobadorCorreo: GERENCIA }).expect(404);
+  });
+
+  it('400 si el correo no tiene forma de correo', async () => {
+    const r = await fijar(E1, { aprobadorCorreo: 'no-es-un-correo' }).expect(400);
+    expect(r.body.error).toBe('correo_invalido');
+  });
+
+  it('400 si el jefe no está en el maestro', async () => {
+    const r = await fijar(E1, { aprobadorCorreo: 'fantasma@ambientalia.com.co' }).expect(400);
+    expect(r.body.error).toBe('jefe_no_encontrado');
+  });
+
+  it('acepta el buzón por defecto aunque no tenga ficha de empleado', async () => {
+    // Es de quien cuelga toda la plantilla hoy. Rechazarlo dejaría el organigrama
+    // sin raíz posible.
+    estado.plantilla.forEach((e: any) => (e.aprobadorCorreo = 'ana.ruiz@ambientalia.com.co'));
+    await fijar(E2, { aprobadorCorreo: GERENCIA }).expect(200);
+  });
+
+  it('autoasignarse es como se declara la raíz, no un ciclo', async () => {
+    const r = await fijar(E1, { aprobadorCorreo: 'ana.ruiz@ambientalia.com.co' }).expect(200);
+    expect(r.body.aprobadorCorreo).toBe('ana.ruiz@ambientalia.com.co');
+    expect(r.body.segundoAprobadorCorreo).toBeNull();
+  });
+
+  it('409 si el cambio cerraría un círculo', async () => {
+    // Ana cuelga de Luis; poner a Ana como jefa de Luis cerraría el círculo.
+    estado.plantilla[0].aprobadorCorreo = 'luis.prieto@ambientalia.com.co';
+    const r = await fijar(E2, { aprobadorCorreo: 'ana.ruiz@ambientalia.com.co' }).expect(409);
+    expect(r.body.error).toBe('ciclo_jerarquia');
+  });
+
+  it('devuelve la segunda firma ya derivada, no solo el jefe', async () => {
+    // Es lo que hace comprensible el panel: al cambiar el jefe de alguien se ve
+    // al instante a quién subiría su solicitud.
+    estado.plantilla[1].aprobadorCorreo = GERENCIA;
+    const r = await fijar(E1, { aprobadorCorreo: 'luis.prieto@ambientalia.com.co' }).expect(200);
+    expect(r.body.aprobadorCorreo).toBe('luis.prieto@ambientalia.com.co');
+    expect(r.body.segundoAprobadorCorreo).toBe(GERENCIA);
+  });
+
+  it('el maestro marca a quien está en un círculo, sin bloquear nada', async () => {
+    estado.plantilla[0].aprobadorCorreo = 'luis.prieto@ambientalia.com.co';
+    estado.plantilla[1].aprobadorCorreo = 'ana.ruiz@ambientalia.com.co';
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${admin()}`)
+      .expect(200);
+    expect(r.body.empleados.every((e: any) => e.enCiclo)).toBe(true);
+    expect(r.body.empleados).toHaveLength(2);
   });
 });
 

@@ -431,6 +431,28 @@ export async function fijarSaldo(
   return (rowCount ?? 0) > 0;
 }
 
+// ── Organigrama ────────────────────────────────────────────────────────────
+
+export async function empleadoPorId(db: Pool, id: string): Promise<Empleado | null> {
+  const { rows } = await db.query(`SELECT ${COLS_EMPLEADO} FROM portal.empleados WHERE id = $1 AND activo`, [id]);
+  return rows.length ? aEmpleado(rows[0] as FilaEmpleadoDb) : null;
+}
+
+/**
+ * Cambia el jefe inmediato. El `AND activo` es el mismo criterio que `fijarSaldo`:
+ * la escritura cubre exactamente el conjunto que la lectura enseña.
+ *
+ * No valida nada: los ciclos y la existencia del jefe los comprueba el servicio,
+ * que es quien tiene el árbol entero delante.
+ */
+export async function fijarJefe(db: Pool, empleadoId: string, aprobadorCorreo: string): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET aprobador_correo = lower($2) WHERE id = $1 AND activo`,
+    [empleadoId, aprobadorCorreo],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 // ── Histórico importado de la hoja ─────────────────────────────────────────
 
 /** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
