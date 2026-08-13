@@ -10,6 +10,18 @@ import { ETIQUETA_TIPO, TIPOS } from './dominio';
 interface Props {
   /** Id del empleado de la sesión, para el filtro «solo yo». Null si no tiene ficha. */
   miEmpleadoId: string | null;
+  /** Si la pestaña «Calendario» es la que se ve ahora mismo. Mismo motivo que
+   *  `activo` en PanelSaldos: las pestañas quedan montadas y ocultas con
+   *  `hidden`, así que sin este freno TODA la plantilla pagaría esta llamada
+   *  en cada carga de la app aunque nadie abriera la pestaña — aquí pesa más
+   *  que en PanelSaldos porque el público no es solo admin, es cualquiera con
+   *  ficha de empleado. A diferencia de PanelSaldos no basta con pedirlo una
+   *  sola vez: navegar de mes cambia `mes` y hace falta una petición nueva
+   *  por cada mes, así que aquí `activo` entra en las dependencias del efecto
+   *  en vez de usarse con una ref de «ya cargado» — eso además refresca el
+   *  mes visible cada vez que se vuelve a la pestaña, que es justo lo
+   *  deseable si mientras tanto alguien aprobó o pidió algo. */
+  activo: boolean;
 }
 
 /** Color de fondo por tipo. */
@@ -39,7 +51,7 @@ const nombreMes = (mes: string) =>
     timeZone: 'UTC',
   });
 
-export default function Calendario({ miEmpleadoId }: Props) {
+export default function Calendario({ miEmpleadoId, activo }: Props) {
   const [mes, setMes] = useState(mesActual);
   const [datos, setDatos] = useState<CalendarioDelMes | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -49,6 +61,10 @@ export default function Calendario({ miEmpleadoId }: Props) {
   const [soloYo, setSoloYo] = useState(false);
 
   useEffect(() => {
+    // Mientras la pestaña está oculta no se pide nada (ver el comentario de
+    // `activo` en Props): no hay forma de cambiar `mes` estando oculta, así
+    // que este freno solo retrasa la primera carga, no pierde ninguna.
+    if (!activo) return;
     let vivo = true;
     setCargando(true);
     fetchCalendario(mes)
@@ -58,7 +74,7 @@ export default function Calendario({ miEmpleadoId }: Props) {
     return () => {
       vivo = false;
     };
-  }, [mes]);
+  }, [mes, activo]);
 
   // Clave `empleadoId|fecha`: cada celda hace una consulta directa en vez de
   // recorrer la lista entera 15 × 31 veces.

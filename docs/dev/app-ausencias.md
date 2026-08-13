@@ -105,6 +105,7 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, aprobador o admin |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador solo a los suyos |
+| `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — sin acotar por rol, lo ve toda la plantilla |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
@@ -230,6 +231,65 @@ absoluto.
   "esto no es un número". Mandando la cadena tal cual, la validación de forma
   vive en un solo sitio (`validarSaldo` en `service.ts`, con su regex) y el
   error que llega es el correcto.
+
+## Calendario
+
+La pestaña *Calendario* es una rejilla persona × día: quién está fuera y
+cuándo, para todo el mes en curso o el que se navegue. `apps/hub-api/src/
+ausencias/calendario.ts` hace la expansión (puro, sin `Pool`, mismo criterio
+que `saldo.ts`); `service.calendarioDelMes` la une con `repo.empleadosActivos`
+y `repo.ausenciasEntre`; `GET /ausencias/calendario?mes=YYYY-MM` la sirve.
+
+**Convive con el Google Calendar «Ambientalia Staff»** que n8n sigue
+publicando por cada ausencia aprobada — eso no se toca. Son dos sitios con la
+misma información y **no se sincronizan entre sí**: una edición manual en
+Google (mover un evento, borrarlo) no se refleja aquí, porque este calendario
+no lee de Google, lee de `portal.solicitudes_ausencia` directamente.
+
+**El endpoint devuelve las marcas ya expandidas por día, no los rangos.**
+`marcasDelMes` convierte cada ausencia en una fila `{empleadoId, fecha, tipo,
+estado}` por cada día que ocupa, acotada al mes pedido, y el frontend solo
+pinta lo que recibe — no calcula ninguna fecha. Es deliberado: expandir un
+rango a celdas es el cálculo que más errores de un día produce, y esta app ya
+lleva dos incidentes de esa familia (el `+1` del fin exclusivo de un evento
+*all-day* en Google Calendar, y el UTC−5 del saldo). La aritmética vive en
+hub-api porque es donde hay tests para fijarla; los del portal (`apps/
+ausencias/src/*.test.tsx`, si llegan a escribirse) no sirven de red de
+seguridad todavía — están rotos por un desajuste de `jsdom` ajeno a esta
+función.
+
+**El filtro SQL de `ausenciasEntre` es de solapamiento, no de contención.**
+La condición «natural» —`fecha_inicio >= desde AND fecha_fin <= hasta`—
+perdería exactamente las ausencias que cruzan el cambio de mes, que son las
+que más importa ver: sin ellas, el calendario de agosto no diría que alguien
+sigue fuera el día 1 porque sus vacaciones empezaron en julio. El acotado al
+mes ocurre después, en `marcasDelMes`, recortando cada rango contra los
+límites del mes antes de expandirlo.
+
+**Las incapacidades se muestran como cualquier otro tipo, sin enmascarar.**
+Hubo una versión con `tipo: null` para las incapacidades ajenas, alegando
+privacidad, y se retiró porque no ocultaba nada: `tipo: null` solo se
+producía en incapacidades ajenas, así que la propia celda enmascarada
+delataba justo lo que pretendía tapar (y `estado: 'registrada'` es un segundo
+delator independiente, por construcción — una incapacidad se *registra*, no
+se aprueba). Además el dato ya es público por el otro lado: el evento que
+n8n publica en Google Calendar se llama «Incapacidades Nombre Apellido». No
+reintroducir el enmascarado creyendo que tapa algo.
+
+**La pestaña la ve todo el que tenga ficha de empleado**, no solo
+administración — a diferencia de *Saldos* y *Registro general*, que son solo
+de admin. Es decisión de producto: un calendario de equipo que no vea todo el
+equipo no sirve para coordinarse.
+
+> ⚠️ **Mantenimiento: el filtro de rechazadas usa `continue`, no `break`.**
+> `for (const a of ausencias) { if (a.estado === 'rechazada') continue; ... }`
+> en `marcasDelMes`. Cambiarlo a `break` sobrevive a un caso de prueba con una
+> sola ausencia (con un elemento, `continue` y `break` son indistinguibles),
+> pero con varias en la lista, `break` corta el bucle entero: una única
+> rechazada a mitad de la lista borraría del calendario a todos los
+> empleados que vinieran después, sin error y sin log. Hay un test que lo fija
+> (`calendario.test.ts`, «una rechazada en medio de la lista no debe silenciar
+> a los empleados siguientes»).
 
 ## Gotchas que costaron
 
