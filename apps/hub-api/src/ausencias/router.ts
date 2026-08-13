@@ -73,6 +73,9 @@ export function createAusenciasRouter(db: Pool): Router {
         // ser aprobador de otros sin estar dado de alta como empleado.
         esAprobador: sesion.esAdmin || (await repo.esAprobadorDeAlguien(db, sesion.email)),
         festivos,
+        // Viaja aquí y no en un endpoint aparte para que el formulario pueda
+        // enseñar el saldo sin una segunda llamada al abrir la app.
+        saldo: empleado ? await service.saldoDeSesion(db, empleado) : null,
       });
     } catch (e) {
       sendError(res, e, 'ausencias_contexto');
@@ -247,6 +250,39 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json(await repo.sincronizarDesdeUsuarios(db, APP_ID));
     } catch (e) {
       sendError(res, e, 'ausencias_empleados_sincronizar');
+    }
+  });
+
+  /**
+   * Los saldos que quien pregunta puede ver: todos si es admin, y solo los de la
+   * gente que aprueba si no lo es. Sirve a la bandeja y al panel de saldos.
+   *
+   * Nota sobre el 500: `service.saldosVisibles` recorre a TODA la plantilla
+   * visible y `calcularSaldo` lanza si una fila tuviera una fecha corrupta en
+   * BD; eso convierte esa fila envenenada en un 500 para la lista entera, vía
+   * el `sendError` genérico de abajo (no se filtra el detalle al cliente, pero
+   * el correo del empleado sí queda en el mensaje que llega a Sentry). Se deja
+   * así a propósito: `calcularSaldo` ya elige lanzar en vez de devolver un
+   * saldo en blanco por la misma razón (ver su JSDoc), y enmascarar la fila
+   * mala aquí con datos parciales reintroduciría justo ese silencio para una
+   * cifra financiera. Saltar solo esa fila y reportarla (como hace
+   * `importarHistorico`) sería el arreglo correcto, pero vive en `combinar()`
+   * de service.ts, fuera del alcance de este cambio.
+   */
+  router.get('/ausencias/saldos', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json({ saldos: await service.saldosVisibles(db, sesionDe(req)) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_saldos');
+    }
+  });
+
+  /** Fija el punto de corte de un empleado. No manda ningún correo. */
+  router.put('/ausencias/empleados/:id/saldo', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarSaldo(db, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_saldo');
     }
   });
 
