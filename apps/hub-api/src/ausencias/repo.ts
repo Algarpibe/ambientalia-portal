@@ -772,6 +772,31 @@ export async function solicitudesPendientes(db: Pool, aprobadorCorreo: string, t
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
+/**
+ * Lo que ya se cerró y le tocaba firmar a este correo, en cualquiera de los dos
+ * niveles. Es el rastro que un aprobador no tenía: al decidir, la solicitud sale
+ * de su bandeja y hasta ahora no volvía a aparecer en ningún sitio.
+ *
+ * Filtra por el correo que quedó CONGELADO en la solicitud, no por quién pulsó
+ * el botón (`aprobador_user_id`). Dos razones: ese campo es NULL en las sesiones
+ * con token legacy, así que filtrar por él dejaría el historial vacío sin decir
+ * por qué; y una solicitud que un admin destrabó en su lugar sigue siendo suya
+ * —estuvo en su bandeja— y esconderla haría el historial incompleto.
+ */
+export async function solicitudesDecididas(db: Pool, aprobadorCorreo: string): Promise<Solicitud[]> {
+  const { rows } = await db.query(
+    `${SELECT_SOLICITUD}
+      WHERE s.estado IN ('aprobada', 'rechazada')
+        AND (lower(s.aprobador_correo) = lower($1) OR lower(s.segundo_aprobador_correo) = lower($1))
+      -- NULLS LAST no es decorativo: el PATCH de admin puede dejar una fila en
+      -- estado terminal sin tocar decidida_at, y sin esto esas filas encabezarían
+      -- la lista por delante de las decisiones reales de esta semana.
+      ORDER BY s.decidida_at DESC NULLS LAST, s.created_at DESC`,
+    [aprobadorCorreo],
+  );
+  return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
 export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | null> {
   const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
   return rows.length ? aSolicitud(rows[0] as FilaSolicitudDb) : null;

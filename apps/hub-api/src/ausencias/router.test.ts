@@ -113,6 +113,15 @@ vi.mock('./repo.js', () => ({
       const turno = s.estado === 'pendiente' ? s.aprobadorCorreo : s.segundoAprobadorCorreo;
       return String(turno ?? '').toLowerCase() === correo.toLowerCase();
     }),
+  // Modela el WHERE real: estado terminal Y aparecer como firmante en cualquiera
+  // de los dos niveles.
+  solicitudesDecididas: async (_db: unknown, correo: string) =>
+    estado.solicitudes.filter(
+      (s) =>
+        (s.estado === 'aprobada' || s.estado === 'rechazada') &&
+        (String(s.aprobadorCorreo ?? '').toLowerCase() === correo.toLowerCase() ||
+          String(s.segundoAprobadorCorreo ?? '').toLowerCase() === correo.toLowerCase()),
+    ),
   solicitudPorId: async (_db: unknown, id: string) => estado.solicitudes.find((s) => s.id === id) ?? null,
   // Saldo: se lee de `estado.plantilla`, con `saldoCorte`/`fechaCorte` colgados
   // ahí mismo (empiezan `undefined` = "sin configurar"). `vacacionesDeEmpleados`
@@ -754,6 +763,69 @@ describe('aprobación en cascada', () => {
       .set('Authorization', `Bearer ${gerencia()}`)
       .expect(200);
     expect(r.body.esAprobador).toBe(true);
+  });
+});
+
+// ── Historial del aprobador ────────────────────────────────────────────────
+
+describe('GET /ausencias/decididas', () => {
+  const aprobador = () => token({ sub: 'comercial@ambientalia.com.co' });
+
+  async function crearYDecidir(aprueba: boolean) {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${aprobador()}`)
+      .send({ aprueba, motivo: aprueba ? undefined : 'no toca' })
+      .expect(200);
+    return r.body.id as string;
+  }
+
+  const decididas = async (quien: string) =>
+    (await request(app()).get('/api/ausencias/decididas').set('Authorization', `Bearer ${quien}`).expect(200)).body
+      .solicitudes;
+
+  it('lista lo aprobado y lo rechazado, no lo que sigue pendiente', async () => {
+    await crearYDecidir(true);
+    await crearYDecidir(false);
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+
+    const r = await decididas(aprobador());
+    expect(r).toHaveLength(2);
+    expect(r.map((s: { estado: string }) => s.estado).sort()).toEqual(['aprobada', 'rechazada']);
+  });
+
+  it('el rechazo conserva su motivo, que es media razón de existir del historial', async () => {
+    await crearYDecidir(false);
+    const r = await decididas(aprobador());
+    expect(r[0].motivoRechazo).toBe('no toca');
+  });
+
+  it('no enseña las decisiones de otro aprobador', async () => {
+    await crearYDecidir(true);
+    expect(await decididas(token({ sub: 'otro@ambientalia.com.co' }))).toHaveLength(0);
+  });
+
+  it('a un admin le enseña lo suyo, no la empresa entera', async () => {
+    // Para verlo todo está «Registro general»: duplicarlo aquí sería un peor
+    // registro general y una sorpresa para quien abra la pestaña.
+    await crearYDecidir(true);
+    expect(await decididas(token({ sub: 'admin@ambientalia.com.co', role: 'admin' }))).toHaveLength(0);
+  });
+
+  it('403 a quien tiene token válido pero no la app asignada', async () => {
+    await request(app())
+      .get('/api/ausencias/decididas')
+      .set('Authorization', `Bearer ${token({ apps: [] })}`)
+      .expect(403);
   });
 });
 

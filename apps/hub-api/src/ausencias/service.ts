@@ -220,6 +220,19 @@ export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<Sol
   return repo.solicitudesPendientes(db, sesion.email, sesion.esAdmin);
 }
 
+/**
+ * El historial de decisiones de quien pregunta: lo que le tocaba firmar y ya
+ * está cerrado.
+ *
+ * Siempre acotado al propio correo, también para un admin. Un admin que quiera
+ * verlo todo tiene *Registro general*; que esta pestaña le enseñara la empresa
+ * entera la convertiría en un duplicado peor de aquella, y en una sorpresa para
+ * quien la abra esperando lo suyo.
+ */
+export async function decididasPorMi(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
+  return repo.solicitudesDecididas(db, sesion.email);
+}
+
 export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknown): Promise<Solicitud> {
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.aprueba !== 'boolean') throw new AusenciaError('aprueba_requerido', 400, 'aprueba');
