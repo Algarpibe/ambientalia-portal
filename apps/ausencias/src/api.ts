@@ -34,7 +34,6 @@ export interface Adjunto {
   nombreArchivo: string;
   mime: string;
   bytes: number;
-  driveFileId: string | null;
 }
 
 export interface Solicitud {
@@ -69,6 +68,8 @@ export interface Contexto {
   empleado: Empleado | null;
   /** Nombre de quien le aprueba. Null si ese correo no tiene ficha de empleado. */
   aprobadorNombre: string | null;
+  /** Puede abrir cualquier adjunto: admin, o estar en la lista de administración. */
+  esVisorAdjuntos: boolean;
   /** El correo de la sesión, para poder decir cuál hay que dar de alta. */
   email: string;
   esAdmin: boolean;
@@ -261,6 +262,10 @@ export function leerComoBase64(file: File): Promise<string> {
     lector.readAsDataURL(file);
   });
 }
+
+/** Las solicitudes con PDF. Solo para admin y la lista de administración. */
+export const fetchConAdjunto = () =>
+  get<{ solicitudes: Solicitud[] }>('/api/ausencias/adjuntos').then((d) => d.solicitudes);
 
 /** Lo que a quien pregunta le tocaba firmar y ya está cerrado. */
 export const fetchDecididas = () =>

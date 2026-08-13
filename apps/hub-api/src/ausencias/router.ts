@@ -96,6 +96,9 @@ export function createAusenciasRouter(db: Pool): Router {
         // Se deduce del maestro, no se declara en ningún sitio: alguien puede
         // ser aprobador de otros sin estar dado de alta como empleado.
         esAprobador: sesion.esAdmin || (await repo.esAprobadorDeAlguien(db, sesion.email)),
+        // Pliega admin dentro, igual que `esAprobador`: así la app decide la
+        // pestaña con un solo booleano y no replica la regla en el navegador.
+        esVisorAdjuntos: sesion.esAdmin || service.esVisorDeAdjuntos(sesion.email),
         festivos,
         // Viaja aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar el saldo sin una segunda llamada al abrir la app.
@@ -161,6 +164,19 @@ export function createAusenciasRouter(db: Pool): Router {
     } catch (e) {
       // Aquí un error solo puede venir de un rango mal formado: es un 400, no un 500.
       res.status(400).json({ error: 'rango_invalido', detalle: (e as Error).message });
+    }
+  });
+
+  /**
+   * Las solicitudes con PDF, para administración. Bajo `...gated` y con el 403 en
+   * el servicio, como `/ausencias/saldos`: quién puede verlo es una regla de
+   * negocio (la lista `VISORES_ADJUNTOS`), no un rol del portal.
+   */
+  router.get('/ausencias/adjuntos', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json({ solicitudes: await service.solicitudesConAdjunto(db, sesionDe(req)) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_adjuntos');
     }
   });
 
@@ -359,36 +375,20 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
-  /** El PDF crudo, para que n8n lo suba a Drive sin pasarlo por base64 en JSON. */
-  router.get('/ausencias/n8n/adjunto/:id', cronAuth, async (req: Request, res: Response) => {
-    try {
-      const adjunto = await repo.adjuntoPorId(db, req.params.id);
-      if (!adjunto) return void res.status(404).json({ error: 'no_encontrado' });
-      res.setHeader('Content-Type', adjunto.mime);
-      res.setHeader('Content-Disposition', `attachment; filename="${adjunto.nombreArchivo}"`);
-      res.send(adjunto.contenido);
-    } catch (e) {
-      sendError(res, e, 'ausencias_n8n_adjunto');
-    }
-  });
+  // Aquí estaba `GET /ausencias/n8n/adjunto/:id`, que servía el PDF crudo para que
+  // n8n lo subiera a Drive. Se retiró con la copia a Drive: el adjunto se consulta
+  // desde el portal (`GET /ausencias/adjuntos/:id`), con permisos de verdad.
 
   router.post('/ausencias/n8n/confirmado', cronAuth, async (req: Request, res: Response) => {
     try {
-      const body = req.body as { ids?: unknown; adjuntos?: unknown } | undefined;
+      // El cuerpo llevaba también un `adjuntos: [{id, driveFileId}]` opcional. Se
+      // ignora sin protestar en vez de rechazarlo: un workflow antiguo que alguien
+      // reactive tiene que poder seguir confirmando, que es lo único que importa.
+      const body = req.body as { ids?: unknown } | undefined;
       const ids = Array.isArray(body?.ids)
         ? (body.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
         : [];
       if (ids.length === 0) return void res.status(400).json({ error: 'ids requeridos' });
-
-      // Opcional: los ficheros que n8n acaba de dejar en Drive. Guardar el id
-      // permite localizarlos después aunque alguien mueva la carpeta.
-      if (Array.isArray(body?.adjuntos)) {
-        for (const a of body.adjuntos as { id?: unknown; driveFileId?: unknown }[]) {
-          if (typeof a?.id === 'string' && typeof a?.driveFileId === 'string') {
-            await repo.marcarAdjuntoEnDrive(db, a.id, a.driveFileId);
-          }
-        }
-      }
 
       res.json({ confirmados: await repo.confirmarEventos(db, ids) });
     } catch (e) {

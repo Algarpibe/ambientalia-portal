@@ -14,6 +14,7 @@ import FormularioSolicitud from './FormularioSolicitud';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import HistorialAprobador from './HistorialAprobador';
+import PanelAdjuntos from './PanelAdjuntos';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
@@ -22,7 +23,16 @@ import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
 
-type Pestana = 'nueva' | 'mias' | 'bandeja' | 'historial' | 'empleados' | 'saldos' | 'historico' | 'calendario';
+type Pestana =
+  | 'nueva'
+  | 'mias'
+  | 'bandeja'
+  | 'historial'
+  | 'adjuntos'
+  | 'empleados'
+  | 'saldos'
+  | 'historico'
+  | 'calendario';
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -88,6 +98,10 @@ export default function App() {
       p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
       p.push(['historial', 'Historial de aprobaciones']);
     }
+    // Va antes del bloque de admin porque no es una pestaña de admin: la abre
+    // también la lista de administración de `VISORES_ADJUNTOS`, que no puede
+    // editar ni borrar nada. El servidor decide con un solo booleano.
+    if (contexto?.esVisorAdjuntos) p.push(['adjuntos', 'Soportes adjuntos']);
     if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
     return p;
   }, [contexto, pendientes.length]);
@@ -243,6 +257,12 @@ export default function App() {
                 <HistorialAprobador activo={tab === 'historial'} recargarToken={recargarHistorial} />
               </div>
             </>
+          )}
+
+          {contexto.esVisorAdjuntos && (
+            <div className={tab === 'adjuntos' ? '' : 'hidden'}>
+              <PanelAdjuntos activo={tab === 'adjuntos'} />
+            </div>
           )}
 
           {contexto.esAdmin && (

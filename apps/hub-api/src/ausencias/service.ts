@@ -1,6 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
-import { APROBADOR_POR_DEFECTO } from './config.js';
+import { APROBADOR_POR_DEFECTO, VISORES_ADJUNTOS } from './config.js';
 import {
   diasDelMes,
   esMesValido,
@@ -233,6 +233,26 @@ export async function decididasPorMi(db: Pool, sesion: Sesion): Promise<Solicitu
   return repo.solicitudesDecididas(db, sesion.email);
 }
 
+/**
+ * Todas las solicitudes que llevan un PDF, para que administración pueda abrirlos
+ * sin salir del portal.
+ *
+ * Hace falta una pantalla propia porque **las incapacidades no aparecen en
+ * ninguna otra**: nacen `registrada` y sin aprobador, así que ni la bandeja
+ * (`pendiente`/`pendiente_2`) ni el historial (`aprobada`/`rechazada`) las
+ * alcanzan, y «Registro general» es solo de admin. Justo las incapacidades son
+ * las que siempre traen soporte médico.
+ *
+ * 403 y no 404, al revés que en `/adjuntos/:id`: allí el 404 evita confirmar que
+ * un adjunto concreto existe; una colección no dice nada de nadie en particular.
+ */
+export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
+  if (!sesion.esAdmin && !esVisorDeAdjuntos(sesion.email)) {
+    throw new AusenciaError('no_es_visor_de_adjuntos', 403);
+  }
+  return repo.solicitudesConAdjunto(db);
+}
+
 export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknown): Promise<Solicitud> {
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.aprueba !== 'boolean') throw new AusenciaError('aprueba_requerido', 400, 'aprueba');
@@ -286,9 +306,29 @@ export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
   );
 }
 
-/** El solicitante y sus dos aprobadores pueden ver el PDF; nadie más (salvo admin). */
+/**
+ * Si este correo está en la lista de administración que puede abrir cualquier
+ * adjunto. Normaliza los dos lados: `sesionDe` ya baja el correo a minúsculas,
+ * pero `puedeVerAdjunto` se llama directamente desde los tests con sesiones
+ * escritas a mano, y una comparación sensible a mayúsculas pasaría todas las
+ * pruebas y fallaría con el primer correo mal tecleado en `config.ts`.
+ */
+export function esVisorDeAdjuntos(email: string): boolean {
+  const yo = email.trim().toLowerCase();
+  return VISORES_ADJUNTOS.some((c) => c.trim().toLowerCase() === yo);
+}
+
+/**
+ * El solicitante, sus dos aprobadores y administración pueden ver el PDF; nadie
+ * más (salvo admin).
+ *
+ * La rama de los visores va como retorno propio y no dentro del `return` final:
+ * no depende del adjunto en absoluto —es una condición sobre la persona— y
+ * mezclarla ahí la haría parecer otra cosa.
+ */
 export function puedeVerAdjunto(sesion: Sesion, a: repo.AdjuntoCompleto): boolean {
   if (sesion.esAdmin) return true;
+  if (esVisorDeAdjuntos(sesion.email)) return true;
   const yo = sesion.email.toLowerCase();
   // El segundo aprobador entra aquí aunque todavía no sea su turno: la ruta del
   // adjunto devuelve 404 y no 403, así que sin esto tendría que firmar un permiso

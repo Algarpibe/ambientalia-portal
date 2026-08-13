@@ -184,7 +184,7 @@ vi.mock('./repo.js', () => ({
       decididaAt: null,
       motivoRechazo: null,
       createdAt: '2026-06-01T10:00:00Z',
-      adjunto: adjunto ? { id: `a${estado.seq}`, nombreArchivo: adjunto.nombreArchivo, mime: 'application/pdf', bytes: 10, driveFileId: null } : null,
+      adjunto: adjunto ? { id: `a${estado.seq}`, nombreArchivo: adjunto.nombreArchivo, mime: 'application/pdf', bytes: 10 } : null,
     };
     estado.solicitudes.push(s);
     for (const evento of eventos) {
@@ -241,10 +241,8 @@ vi.mock('./repo.js', () => ({
       aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase(),
     })),
   adjuntoPorId: async (_db: unknown, id: string) => estado.adjuntos.get(id) ?? null,
-  marcarAdjuntoEnDrive: async (_db: unknown, id: string, driveFileId: string) => {
-    const a = estado.adjuntos.get(id);
-    if (a) a.driveFileId = driveFileId;
-  },
+  // Modela el `WHERE a.id IS NOT NULL`: solo las solicitudes que llevan PDF.
+  solicitudesConAdjunto: async () => estado.solicitudes.filter((s) => s.adjunto !== null),
   // Modela las dos mitades del SQL real: servir NO marca como enviado (el estado
   // solo avanza al confirmar, para que un fallo se recupere solo), pero SÍ
   // reserva la fila unos minutos, o dos disparadores casi simultáneos se
@@ -632,13 +630,10 @@ describe('aprobación en cascada', () => {
     expect((aviso!.payload as any).correo.para).toBe(GERENCIA);
   });
 
-  it('la segunda firma no vuelve a subir el PDF a Drive ni toca calendario u hoja', async () => {
-    // `aprobacion` ya lo subió. Sin nombre de evento propio, reutilizar
-    // `aprobacion` duplicaría el fichero en la carpeta de Drive.
+  it('la segunda firma no toca calendario ni hoja: la solicitud aún no es firme', async () => {
     const s = await crear({ tipo: 'permiso', adjunto: { nombreArchivo: 'x.pdf', mime: 'application/pdf', contenidoBase64: PDF } });
     await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
     const p = estado.eventos.find((e) => e.evento === 'aprobacion_2')!.payload as any;
-    expect(p.drive).toBeNull();
     expect(p.calendario).toBeNull();
     expect(p.hoja).toBeNull();
   });
@@ -782,6 +777,75 @@ describe('aprobación en cascada', () => {
       .set('Authorization', `Bearer ${gerencia()}`)
       .expect(200);
     expect(r.body.esAprobador).toBe(true);
+  });
+});
+
+// ── Adjuntos para administración ───────────────────────────────────────────
+
+describe('GET /ausencias/adjuntos', () => {
+  const visor = () => token({ sub: 'administrativo@ambientalia.com.co' });
+
+  async function crearConPdf() {
+    return (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+        .expect(201)
+    ).body;
+  }
+
+  const lista = async (quien: string) =>
+    (await request(app()).get('/api/ausencias/adjuntos').set('Authorization', `Bearer ${quien}`).expect(200)).body
+      .solicitudes;
+
+  it('devuelve SOLO las solicitudes que llevan PDF', async () => {
+    // El mutante que muere: olvidar el `WHERE a.id IS NOT NULL` y devolver el
+    // registro entero — que es justo la fuga que esta pestaña quería evitar,
+    // porque quien la abre no es admin y no debería ver el resto.
+    await crearConPdf();
+    await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+
+    const r = await lista(visor());
+    expect(r).toHaveLength(1);
+    expect(r[0].adjunto).not.toBeNull();
+  });
+
+  it('un admin también la ve', async () => {
+    await crearConPdf();
+    expect(await lista(token({ sub: 'admin@ambientalia.com.co', role: 'admin' }))).toHaveLength(1);
+  });
+
+  it('un empleado normal recibe 403', async () => {
+    await request(app())
+      .get('/api/ausencias/adjuntos')
+      .set('Authorization', `Bearer ${token({ sub: 'ana.ruiz@ambientalia.com.co' })}`)
+      .expect(403);
+  });
+
+  it('403 a quien tiene token válido pero no la app asignada', async () => {
+    // Con el `sub` de un visor real, para que la única razón posible del 403 sea
+    // la app que falta y no la lista.
+    await request(app())
+      .get('/api/ausencias/adjuntos')
+      .set('Authorization', `Bearer ${token({ sub: 'administrativo@ambientalia.com.co', apps: ['contabilidad'] })}`)
+      .expect(403);
+  });
+
+  it('el visor descarga el PDF de una incapacidad ajena', async () => {
+    // La feature entera: una incapacidad no pasa por ninguna bandeja ni por el
+    // historial, así que sin esto administración no tenía dónde abrirla.
+    estado.adjuntos.set('a1', {
+      solicitudId: 's1',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      aprobadorCorreo: null,
+      segundoAprobadorCorreo: null,
+      nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf',
+      mime: 'application/pdf',
+      contenido: Buffer.from('%PDF-1.4 fake'),
+    });
+    const r = await request(app()).get('/api/ausencias/adjuntos/a1').set('Authorization', `Bearer ${visor()}`).expect(200);
+    expect(r.headers['content-type']).toContain('application/pdf');
   });
 });
 
@@ -1099,6 +1163,29 @@ describe('endpoints de n8n', () => {
       .expect(401);
   });
 
+  it('el endpoint que servía el PDF a n8n ya no existe', async () => {
+    // Se retiró con la copia a Drive. Que volviera a responder significaría que
+    // alguien reintrodujo la subida sin los nodos que la gobernaban.
+    await request(app())
+      .get('/api/ausencias/n8n/adjunto/a1')
+      .set('X-Ausencias-Cron-Token', 'cron-ausencias')
+      .expect(404);
+  });
+
+  it('confirmar sigue funcionando aunque el cuerpo traiga el viejo `adjuntos`', async () => {
+    // Un workflow antiguo que alguien reactive tiene que poder confirmar: lo
+    // único que importa es que los eventos no se queden atascados en la cola. Se
+    // ignora el campo en vez de rechazar la petición con un 400.
+    await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+    const p = await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
+    const r = await request(app())
+      .post('/api/ausencias/n8n/confirmado')
+      .set('X-Ausencias-Cron-Token', 'cron-ausencias')
+      .send({ ids: [p.body.eventos[0].id], adjuntos: [{ id: 'a1', driveFileId: 'loquesea' }] })
+      .expect(200);
+    expect(r.body.confirmados).toBe(1);
+  });
+
   it('crear → pendiente devuelve los eventos → confirmado → pendiente devuelve 0', async () => {
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
 
@@ -1218,6 +1305,16 @@ describe('GET /ausencias/contexto', () => {
     const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
     expect(r.body.empleado).not.toBeNull();
     expect(estado.altasAutomaticas).toBe(1);
+  });
+
+  it('esVisorAdjuntos pliega admin dentro, o el admin perdería la pestaña', async () => {
+    const flag = async (over: Record<string, unknown>) =>
+      (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
+        .body.esVisorAdjuntos;
+
+    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(true);
+    expect(await flag({ sub: 'administrativo@ambientalia.com.co' })).toBe(true);
+    expect(await flag({ sub: 'ana.ruiz@ambientalia.com.co' })).toBe(false);
   });
 
   it('trae el nombre de quien aprueba, para no enseñar un buzón al solicitante', async () => {

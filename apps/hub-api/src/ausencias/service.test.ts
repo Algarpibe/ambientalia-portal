@@ -170,6 +170,40 @@ describe('permisos', () => {
     expect(puedeVerAdjunto(otro, adj)).toBe(false);
   });
 
+  it('administración abre el PDF de un tercero con el que no tiene ninguna relación', () => {
+    const adj = {
+      solicitudId: 's1',
+      solicitanteEmail: 'ajena@ambientalia.com.co',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
+      nombreArchivo: 'incapacidad.pdf',
+      mime: 'application/pdf',
+      contenido: Buffer.from(''),
+    };
+    const visor = { email: 'administrativo@ambientalia.com.co', userId: null, esAdmin: false };
+    expect(puedeVerAdjunto(visor, adj)).toBe(true);
+    expect(puedeVerAdjunto(otro, adj)).toBe(false);
+  });
+
+  it('el visor entra aunque su correo llegue en MAYÚSCULAS', () => {
+    // El mutante con más probabilidad de sobrevivir: un `VISORES_ADJUNTOS.includes(
+    // sesion.email)` sin normalizar pasa todos los demás tests, porque `sesionDe`
+    // ya baja el correo a minúsculas antes de llegar aquí en producción. Solo se
+    // caza llamando a la función directamente, como hace este fichero.
+    const adj = {
+      solicitudId: 's1',
+      solicitanteEmail: 'ajena@ambientalia.com.co',
+      aprobadorCorreo: null,
+      segundoAprobadorCorreo: null,
+      nombreArchivo: 'i.pdf',
+      mime: 'application/pdf',
+      contenido: Buffer.from(''),
+    };
+    expect(puedeVerAdjunto({ email: 'ADMINISTRATIVO@AMBIENTALIA.COM.CO', userId: null, esAdmin: false }, adj)).toBe(
+      true,
+    );
+  });
+
   it('el segundo aprobador ve el PDF aunque todavía no sea su turno', () => {
     // La ruta del adjunto devuelve 404, no 403: sin esto tendría que firmar un
     // permiso sin poder abrir su soporte y sin entender por qué.
