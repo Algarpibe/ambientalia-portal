@@ -159,7 +159,11 @@ export default function PanelSaldos({ activo }: Props) {
           <Loader2 className="h-4 w-4 animate-spin" /> Cargando…
         </p>
       ) : saldos.length === 0 ? (
-        <p className="text-sm text-gray-500">No hay empleados activos.</p>
+        // El vacío solo se afirma si la carga fue bien. Si falló, la lista está
+        // vacía porque no sabemos nada, no porque no haya nadie: decir «no hay
+        // empleados activos» debajo de un error de carga es afirmar justo lo
+        // que no se ha podido averiguar.
+        error ? null : <p className="text-sm text-gray-500">No hay empleados activos.</p>
       ) : (
         <>
           {sinConfigurar > 0 && (
