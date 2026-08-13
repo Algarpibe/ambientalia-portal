@@ -18,7 +18,7 @@ import PanelAdjuntos from './PanelAdjuntos';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
-import TarjetaSaldo from './TarjetaSaldo';
+import IndicadorSaldo from './IndicadorSaldo';
 import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
@@ -151,19 +151,40 @@ export default function App() {
     fetchSaldos()
       .then((s2) => setSaldos(s2))
       .catch(() => {});
+    // Y el propio, no solo los de la bandeja: un admin puede aprobar sus propias
+    // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
+    // número de antes de la decisión hasta recargar la página. Misma política que
+    // en `onCreada`: no se espera ni se propaga el error, porque la decisión ya
+    // está tomada y esto solo mejora la frescura.
+    fetchContexto()
+      .then((ctx) => setContexto((actual) => (actual ? { ...actual, saldo: ctx.saldo } : actual)))
+      .catch(() => {});
   }
 
   return (
     <main className="flex-grow bg-transparent p-6 overflow-y-auto">
-      <header className="mb-6 flex items-center gap-3">
-        <CalendarDays className="h-6 w-6 text-blue-600" />
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Vacaciones y Permisos</h1>
-          <p className="text-sm text-gray-500">
-            Solicita vacaciones, compensatorios y permisos, o informa una incapacidad. Los días hábiles descuentan
-            fines de semana y festivos de Colombia.
-          </p>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <CalendarDays className="h-6 w-6 text-blue-600" />
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">Vacaciones y Permisos</h1>
+            <p className="text-sm text-gray-500">
+              Solicita vacaciones, compensatorios y permisos, o informa una incapacidad. Los días hábiles descuentan
+              fines de semana y festivos de Colombia.
+            </p>
+          </div>
         </div>
+        {/* Sin saldo configurado no se enseña NADA aquí, ni un cartel de aviso:
+            sería permanente y en todas las pestañas, y hoy todavía le falta el
+            saldo inicial a una decena de personas. Ese aviso ya lo da
+            TarjetaSaldo en «Nueva solicitud», que es donde importa. `null` (sin
+            ficha, o el cálculo falló) cae en la misma rama: ninguna de las dos
+            cosas se arregla poniendo un número en la cabecera. */}
+        {contexto?.saldo?.configurado && (
+          <div className="border-l border-gray-200 pl-4">
+            <IndicadorSaldo saldo={contexto.saldo} variante="cabecera" />
+          </div>
+        )}
       </header>
 
       {error && (
@@ -229,12 +250,9 @@ export default function App() {
                 />
               </div>
 
+              {/* Aquí había una TarjetaSaldo. Se retiró al subir el indicador a la
+                  cabecera: enseñaba el mismo número a un centímetro de distancia. */}
               <div className={tab === 'mias' ? '' : 'hidden'}>
-                {contexto.saldo && (
-                  <div className="mb-4">
-                    <TarjetaSaldo saldo={contexto.saldo} />
-                  </div>
-                )}
                 <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
               </div>
 
