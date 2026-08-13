@@ -73,13 +73,66 @@ describe('correos', () => {
     expect(p.correo.cuerpo).toContain('aprobarla o rechazarla');
   });
 
-  it('el correo de aprobado va también a administración', () => {
+  it('el correo de aprobado va también a administración, sin repetir al aprobador', () => {
+    // El aprobador de esta solicitud es el mismo buzón que ya va en copia: sin
+    // deduplicar, aparecería dos veces en el `sendTo` de Gmail.
     const p = construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada');
     expect(p.correo.para).toBe(
       'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
     );
     expect(p.correo.asunto).toContain('✅');
     expect(p.correo.cuerpo).toContain('¡Disfrútalas!');
+  });
+
+  it('la decisión avisa a TODA la cadena que la firmó, no solo al final', () => {
+    // El fallo real: el jefe inmediato daba su visto bueno y no volvía a saber en
+    // qué acabó. Parecía funcionar porque el segundo firmante suele ser el mismo
+    // buzón que ya iba en copia a administración.
+    const p = construirPayload(
+      solicitud({
+        estado: 'aprobada',
+        aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+        segundoAprobadorCorreo: 'gerencia@ambientalia.com.co',
+      }),
+      'aprobada',
+    );
+    expect(p.correo.para).toBe(
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+    );
+  });
+
+  it('el rechazo avisa a la misma cadena: el jefe tiene que enterarse', () => {
+    const p = construirPayload(
+      solicitud({
+        estado: 'rechazada',
+        motivoRechazo: 'coincide con el cierre',
+        aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+        segundoAprobadorCorreo: 'gerencia@ambientalia.com.co',
+      }),
+      'rechazada',
+    );
+    expect(p.correo.para).toContain('jefa.directa@ambientalia.com.co');
+    expect(p.correo.para).toContain('gerencia@ambientalia.com.co');
+  });
+
+  it('no repite un correo que ya iba en la lista, aunque cambie la grafía', () => {
+    const p = construirPayload(
+      solicitud({ estado: 'aprobada', aprobadorCorreo: 'ANA.RUIZ@ambientalia.com.co', segundoAprobadorCorreo: null }),
+      'aprobada',
+    );
+    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co');
+  });
+
+  it('sin segunda firma no deja un hueco en la lista de destinatarios', () => {
+    // `segundoAprobadorCorreo` es null en toda cadena de una sola firma, que hoy
+    // es la mayoría: sin filtrar los vacíos saldría un «, ,» en medio.
+    const p = construirPayload(
+      solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefa.directa@ambientalia.com.co', segundoAprobadorCorreo: null }),
+      'aprobada',
+    );
+    expect(p.correo.para).toBe(
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+    );
   });
 
   it('un compensatorio aprobado no dice «¡Disfrútalas!»', () => {
