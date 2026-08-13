@@ -166,11 +166,27 @@ export function createAusenciasRouter(db: Pool): Router {
 
   // ── Maestro de empleados (solo admin) ────────────────────────────────────
 
+  /** El maestro con el árbol ya resuelto: cada fila trae su segunda firma. */
   router.get('/ausencias/empleados', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
     try {
-      res.json({ empleados: await repo.listarEmpleados(db) });
+      res.json({ empleados: await service.empleadosConJefatura(db) });
     } catch (e) {
       sendError(res, e, 'ausencias_empleados');
+    }
+  });
+
+  /**
+   * Cambia el jefe inmediato de alguien. No manda ningún correo, igual que fijar
+   * el saldo: mover el organigrama no es decidir nada sobre una solicitud.
+   *
+   * Las solicitudes ya en vuelo NO se mueven: llevan sus dos firmantes congelados
+   * desde el alta.
+   */
+  router.put('/ausencias/empleados/:id/jefe', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarJefe(db, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_jefe');
     }
   });
 

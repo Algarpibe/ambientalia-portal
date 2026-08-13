@@ -56,6 +56,25 @@ describe('calcularSaldo', () => {
     expect(s.disponible).toBe(10);
   });
 
+  it('una que espera la SEGUNDA firma también va a enTramite', () => {
+    // El fallo que evita este test no da error: `sumar` comparaba un estado
+    // exacto, así que media firma no sumaba en ningún sitio y desaparecía del
+    // saldo — ni en trámite ni disfrutada. Y es justo cuando más se consulta.
+    const s = calcularSaldo(CONFIG, [vac('2026-02-01', 5, 'pendiente_2')], '2026-01-01');
+    expect(s.disfrutadas).toBe(0);
+    expect(s.enTramite).toBe(5);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('suma los dos niveles en enTramite', () => {
+    const s = calcularSaldo(
+      CONFIG,
+      [vac('2026-02-01', 5, 'pendiente'), vac('2026-03-01', 2, 'pendiente_2')],
+      '2026-01-01',
+    );
+    expect(s.enTramite).toBe(7);
+  });
+
   it('una pendiente ANTES del corte no entra en enTramite', () => {
     // Ya sería parte del saldo de corte, igual que con las aprobadas.
     const s = calcularSaldo(CONFIG, [vac('2025-12-15', 4, 'pendiente')], '2026-01-01');

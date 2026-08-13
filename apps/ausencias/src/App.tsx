@@ -9,6 +9,7 @@ import {
   type SaldoDeEmpleado,
   type Solicitud,
 } from './api';
+import { enTramite } from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
@@ -17,6 +18,7 @@ import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
 import TarjetaSaldo from './TarjetaSaldo';
 import PanelSaldos from './PanelSaldos';
+import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
 
 type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'saldos' | 'historico' | 'calendario';
@@ -104,7 +106,18 @@ export default function App() {
   }
 
   function onDecidida(s: Solicitud) {
-    setPendientes((ps) => ps.filter((p) => p.id !== s.id));
+    // Firmar no siempre saca la fila de la bandeja: si era la primera de dos, la
+    // solicitud sigue pendiente, solo que de otra persona. Un admin —que ve la
+    // bandeja entera— la perdería de vista aunque siga estando ahí. Se replica la
+    // misma regla de turno que el WHERE de `solicitudesPendientes`.
+    const meSigueTocando =
+      contexto?.esAdmin ||
+      (s.estado === 'pendiente' && s.aprobadorCorreo?.toLowerCase() === contexto?.email.toLowerCase()) ||
+      (s.estado === 'pendiente_2' && s.segundoAprobadorCorreo?.toLowerCase() === contexto?.email.toLowerCase());
+
+    setPendientes((ps) =>
+      enTramite(s.estado) && meSigueTocando ? ps.map((p) => (p.id === s.id ? s : p)) : ps.filter((p) => p.id !== s.id),
+    );
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
     // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
     // disponible de esa persona, y otra fila suya en la bandeja seguiría
@@ -215,6 +228,7 @@ export default function App() {
             <>
               <div className={tab === 'empleados' ? '' : 'hidden'}>
                 <ImportarEmpleados />
+                <PanelOrganigrama activo={tab === 'empleados'} />
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
                 <PanelSaldos activo={tab === 'saldos'} />

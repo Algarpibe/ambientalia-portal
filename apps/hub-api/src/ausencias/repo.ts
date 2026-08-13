@@ -1,5 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
+import type { EnlaceJerarquia } from './jerarquia.js';
 import type {
   Adjunto,
   Empleado,
@@ -9,6 +10,7 @@ import type {
   PayloadEvento,
   Solicitud,
   TipoSolicitud,
+  Transicion,
 } from './types.js';
 
 // Acceso a datos de la app de ausencias. SQL crudo con parámetros posicionales,
@@ -168,16 +170,61 @@ export async function sincronizarDesdeUsuarios(
 
 /**
  * True si alguien tiene a este correo como aprobador. Se pregunta por el
- * maestro y no por las solicitudes vivas: quien aprueba sigue siendo aprobador
- * aunque ahora mismo no tenga nada pendiente, y la pestaña de la bandeja debe
- * estar ahí igual (si no, parecería que la función se ha perdido).
+ * maestro y no solo por las solicitudes vivas: quien aprueba sigue siendo
+ * aprobador aunque ahora mismo no tenga nada pendiente, y la pestaña de la
+ * bandeja debe estar ahí igual (si no, parecería que la función se ha perdido).
+ *
+ * La segunda rama cubre el caso contrario, que solo aparece con la cascada: el
+ * segundo aprobador de una solicitud viva cuyo jefe intermedio se ha desactivado
+ * desde entonces. Ya no es jefe de nadie en el maestro, pero tiene una firma
+ * pendiente; sin este OR la pestaña desaparecería y la solicitud se quedaría
+ * muerta hasta que la sacara un admin.
  */
 export async function esAprobadorDeAlguien(db: Pool, email: string): Promise<boolean> {
   const { rows } = await db.query(
-    'SELECT 1 FROM portal.empleados WHERE activo AND lower(aprobador_correo) = lower($1) LIMIT 1',
+    `SELECT 1 WHERE EXISTS (
+       SELECT 1 FROM portal.empleados
+        WHERE activo AND lower(aprobador_correo) = lower($1)
+     ) OR EXISTS (
+       SELECT 1 FROM portal.solicitudes_ausencia
+        WHERE estado IN ('pendiente', 'pendiente_2')
+          AND (lower(aprobador_correo) = lower($1) OR lower(segundo_aprobador_correo) = lower($1))
+     )`,
     [email],
   );
   return rows.length > 0;
+}
+
+/**
+ * El enlace hacia arriba de un correo, si tiene ficha ACTIVA. `null` si no está
+ * en el maestro o si alguien la desactivó — las dos cosas significan lo mismo
+ * para la cascada: aquí se acaba el árbol.
+ */
+export async function enlaceDe(db: Pool, correo: string): Promise<EnlaceJerarquia | null> {
+  const { rows } = await db.query(
+    `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo
+       FROM portal.empleados
+      WHERE activo AND lower(correo) = lower($1)
+      LIMIT 1`,
+    [correo],
+  );
+  const fila = rows[0] as { correo: string; aprobador_correo: string } | undefined;
+  return fila ? { correo: fila.correo, aprobadorCorreo: fila.aprobador_correo } : null;
+}
+
+/**
+ * Todos los enlaces activos, para derivar el organigrama entero en el panel y
+ * detectar ciclos. Sin paginar: la plantilla son decenas de filas, no miles.
+ */
+export async function enlacesActivos(db: Pool): Promise<EnlaceJerarquia[]> {
+  const { rows } = await db.query(
+    `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo
+       FROM portal.empleados WHERE activo`,
+  );
+  return (rows as { correo: string; aprobador_correo: string }[]).map((r) => ({
+    correo: r.correo,
+    aprobadorCorreo: r.aprobador_correo,
+  }));
 }
 
 export async function listarEmpleados(db: Pool): Promise<Empleado[]> {
@@ -208,7 +255,14 @@ export async function importarEmpleados(db: Pool, filas: FilaEmpleado[]): Promis
        nombre_completo  = EXCLUDED.nombre_completo,
        cargo            = EXCLUDED.cargo,
        credencial       = EXCLUDED.credencial,
-       aprobador_correo = EXCLUDED.aprobador_correo,
+       -- OJO: aprobador_correo NO se actualiza, a propósito. Es el organigrama, y
+       -- se mantiene en el panel de «Empleados». El parser del navegador manda
+       -- solo cuatro columnas y el COALESCE de arriba rellena con el buzón por
+       -- defecto, así que aquí es imposible distinguir «no vino la columna» de
+       -- «vino el valor por defecto»: EXCLUDED ya lo trae aplicado y el DO UPDATE
+       -- no ve el alias f de la SELECT. Con el upsert anterior, cada reimportación
+       -- de la hoja devolvía a toda la plantilla al buzón por defecto y borraba el
+       -- árbol entero. En el INSERT (alta nueva) sí se respeta lo que venga.
        -- Nunca se borra un vínculo ya establecido: si la cuenta del portal aún
        -- no existía al importar, EXCLUDED.user_id es NULL y se conserva el actual.
        user_id          = COALESCE(EXCLUDED.user_id, portal.empleados.user_id),
@@ -262,8 +316,11 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
  * Empleados activos con su configuración de saldo.
  *
  * Dos filtros independientes, cada uno null = sin acotar:
- *  - `soloDe` acota a los que tienen ese correo como aprobador (privacidad): un
- *    aprobador no tiene por qué ver el saldo de gente que no aprueba.
+ *  - `soloDe` acota a los que aprueba ese correo, en cualquiera de los dos
+ *    niveles (privacidad): un aprobador no tiene por qué ver el saldo de gente
+ *    que no aprueba. Incluye a los «nietos» —el equipo de sus subordinados—
+ *    porque con la cascada tiene que firmar sus vacaciones, y firmarlas sin ver
+ *    el saldo es decidir a ciegas justo en el único tipo que lo consume.
  *  - `empleadoId` acota a una sola persona (rendimiento): el endpoint de
  *    contexto, que se llama en cada carga de la app, solo necesita el saldo de
  *    quien ha entrado y no puede pagar un escaneo entero de la tabla por eso.
@@ -281,14 +338,19 @@ export async function empleadosConSaldo(
   empleadoId: string | null,
 ): Promise<EmpleadoConSaldo[]> {
   const { rows } = await db.query(
-    `SELECT id, nombre_completo, correo,
-            saldo_corte::float8 AS saldo_corte,
-            fecha_corte::text   AS fecha_corte
-       FROM portal.empleados
-      WHERE activo
-        AND ($1::text IS NULL OR lower(aprobador_correo) = lower($1))
-        AND ($2::uuid IS NULL OR id = $2::uuid)
-      ORDER BY nombre_completo`,
+    `SELECT e.id, e.nombre_completo, e.correo,
+            e.saldo_corte::float8 AS saldo_corte,
+            e.fecha_corte::text   AS fecha_corte
+       FROM portal.empleados e
+      WHERE e.activo
+        AND ($1::text IS NULL
+             OR lower(e.aprobador_correo) = lower($1)
+             OR EXISTS (SELECT 1 FROM portal.empleados j
+                         WHERE j.activo
+                           AND lower(j.correo) = lower(e.aprobador_correo)
+                           AND lower(j.aprobador_correo) = lower($1)))
+        AND ($2::uuid IS NULL OR e.id = $2::uuid)
+      ORDER BY e.nombre_completo`,
     [soloDe, empleadoId],
   );
   return (rows as FilaEmpleadoSaldoDb[]).map(aEmpleadoConSaldo);
@@ -365,6 +427,28 @@ export async function fijarSaldo(
         SET saldo_corte = $2, fecha_corte = $3::date
       WHERE id = $1 AND activo`,
     [empleadoId, saldoCorte, fechaCorte],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+// ── Organigrama ────────────────────────────────────────────────────────────
+
+export async function empleadoPorId(db: Pool, id: string): Promise<Empleado | null> {
+  const { rows } = await db.query(`SELECT ${COLS_EMPLEADO} FROM portal.empleados WHERE id = $1 AND activo`, [id]);
+  return rows.length ? aEmpleado(rows[0] as FilaEmpleadoDb) : null;
+}
+
+/**
+ * Cambia el jefe inmediato. El `AND activo` es el mismo criterio que `fijarSaldo`:
+ * la escritura cubre exactamente el conjunto que la lectura enseña.
+ *
+ * No valida nada: los ciclos y la existencia del jefe los comprueba el servicio,
+ * que es quien tiene el árbol entero delante.
+ */
+export async function fijarJefe(db: Pool, empleadoId: string, aprobadorCorreo: string): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET aprobador_correo = lower($2) WHERE id = $1 AND activo`,
+    [empleadoId, aprobadorCorreo],
   );
   return (rowCount ?? 0) > 0;
 }
@@ -565,7 +649,11 @@ const SELECT_SOLICITUD = `
          -- sobra en un double sin error de representacion observable.
          s.dias_habiles::float8 AS dias_habiles,
          s.observaciones, s.origen,
-         s.comentarios, s.estado, s.aprobador_correo,
+         s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo,
+         -- ::text por lo mismo que las fechas de mas arriba: el driver devuelve
+         -- timestamptz como objeto Date, y una comparacion lexicografica contra
+         -- una cadena fallaria en silencio.
+         s.primera_firma_at::text AS primera_firma_at,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime, a.drive_file_id,
          octet_length(a.contenido) AS adjunto_bytes
@@ -588,6 +676,8 @@ interface FilaSolicitudDb {
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobador_correo: string | null;
+  segundo_aprobador_correo: string | null;
+  primera_firma_at: string | null;
   decidida_at: string | null;
   motivo_rechazo: string | null;
   created_at: string;
@@ -623,6 +713,8 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     comentarios: r.comentarios,
     estado: r.estado,
     aprobadorCorreo: r.aprobador_correo,
+    segundoAprobadorCorreo: r.segundo_aprobador_correo,
+    primeraFirmaAt: r.primera_firma_at,
     decididaAt: r.decidida_at,
     motivoRechazo: r.motivo_rechazo,
     createdAt: r.created_at,
@@ -640,6 +732,8 @@ export interface DatosInsercion {
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobadorCorreo: string | null;
+  /** Copia congelada: un cambio de organigrama no mueve una solicitud en vuelo. */
+  segundoAprobadorCorreo: string | null;
 }
 
 /**
@@ -658,8 +752,8 @@ export async function crearSolicitud(
     const { rows } = await client.query(
       `INSERT INTO portal.solicitudes_ausencia
          (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
-          dias_habiles, comentarios, estado, aprobador_correo)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9)
+          dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10)
        RETURNING id`,
       [
         datos.tipo,
@@ -671,6 +765,7 @@ export async function crearSolicitud(
         datos.comentarios,
         datos.estado,
         datos.aprobadorCorreo,
+        datos.segundoAprobadorCorreo,
       ],
     );
     const id = (rows[0] as { id: string }).id;
@@ -707,13 +802,21 @@ export async function solicitudesDeEmpleado(db: Pool, empleadoId: string): Promi
 }
 
 /**
- * Las solicitudes que le toca decidir a `aprobadorCorreo`. Un admin (`todas`)
- * ve las de todo el mundo: es quien destraba una aprobación bloqueada.
+ * Las solicitudes que le toca decidir a `aprobadorCorreo` **ahora**. Un admin
+ * (`todas`) ve las de todo el mundo: es quien destraba una aprobación bloqueada.
+ *
+ * El filtro es por TURNO, no por «aparezco en la solicitud»: en `pendiente` solo
+ * la ve quien firma primero, y en `pendiente_2` solo quien firma después. Si
+ * fuera un OR de los dos correos, el segundo aprobador vería —y podría firmar—
+ * solicitudes que su jefe intermedio todavía no ha visto.
  */
 export async function solicitudesPendientes(db: Pool, aprobadorCorreo: string, todas: boolean): Promise<Solicitud[]> {
   const { rows } = await db.query(
     `${SELECT_SOLICITUD}
-      WHERE s.estado = 'pendiente' AND ($2::boolean OR lower(s.aprobador_correo) = lower($1))
+      WHERE s.estado IN ('pendiente', 'pendiente_2')
+        AND ($2::boolean
+             OR (s.estado = 'pendiente'   AND lower(s.aprobador_correo)         = lower($1))
+             OR (s.estado = 'pendiente_2' AND lower(s.segundo_aprobador_correo) = lower($1)))
       ORDER BY s.created_at`,
     [aprobadorCorreo, todas],
   );
@@ -728,38 +831,57 @@ export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | 
 /**
  * Registra la decisión y encola su notificación, en una transacción.
  *
- * El `WHERE estado = 'pendiente'` es lo que hace la operación idempotente sin
- * bloqueos: dos clics en «Aprobar» a la vez, o un reintento del navegador, y
- * solo el primero actualiza. El segundo no encuentra fila y el servicio lo
- * traduce a 409, en vez de mandar dos correos contradictorios.
+ * El `WHERE estado = $N` es lo que hace la operación idempotente sin bloqueos:
+ * dos clics en «Aprobar» a la vez, o un reintento del navegador, y solo el
+ * primero actualiza. El segundo no encuentra fila y el servicio lo traduce a 409,
+ * en vez de mandar dos correos contradictorios.
+ *
+ * ⚠️ `estadoEsperado` es el estado que el servicio LEYÓ, y funciona como testigo
+ * de concurrencia optimista. No sustituirlo por un `IN ('pendiente','pendiente_2')`
+ * con un CASE para el destino: sería igual de atómico pero destruiría el 409, y un
+ * doble clic del jefe inmediato encadenaría `pendiente → pendiente_2 → aprobada`
+ * con una sola persona firmando las dos veces.
  */
 export async function decidirSolicitud(
   db: Pool,
   id: string,
-  aprueba: boolean,
+  estadoEsperado: Solicitud['estado'],
+  transicion: Transicion,
   motivo: string | null,
-  aprobadorUserId: string | null,
+  userId: string | null,
   construirPayload: (solicitud: Solicitud, evento: EventoOutbox) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
       `UPDATE portal.solicitudes_ausencia
-          SET estado = $2, motivo_rechazo = $3, aprobador_user_id = $4, decidida_at = now()
-        WHERE id = $1 AND estado = 'pendiente'
+          SET estado                = $2,
+              motivo_rechazo        = $3,
+              primera_firma_user_id = CASE WHEN $5::boolean THEN $4 ELSE primera_firma_user_id END,
+              primera_firma_at      = CASE WHEN $5::boolean THEN now() ELSE primera_firma_at END,
+              aprobador_user_id     = CASE WHEN $6::boolean THEN $4 ELSE aprobador_user_id END,
+              decidida_at           = CASE WHEN $6::boolean THEN now() ELSE decidida_at END
+        WHERE id = $1 AND estado = $7
         RETURNING id`,
-      [id, aprueba ? 'aprobada' : 'rechazada', aprueba ? null : motivo, aprobadorUserId],
+      [
+        id,
+        transicion.estado,
+        motivo,
+        userId,
+        transicion.esPrimeraFirma,
+        transicion.esDecisionFinal,
+        estadoEsperado,
+      ],
     );
-    // Sin fila = ya estaba decidida (o no existe). No es un error de servidor:
+    // Sin fila = ya la decidió otro (o no existe). No es un error de servidor:
     // el servicio lo traduce a 409 y no se encola ninguna notificación.
     if (rows.length === 0) return null;
 
     const { rows: actualizada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
     const solicitud = aSolicitud(actualizada[0] as FilaSolicitudDb);
-    const evento: EventoOutbox = aprueba ? 'aprobada' : 'rechazada';
 
     await client.query(
       `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-      [id, evento, JSON.stringify(construirPayload(solicitud, evento))],
+      [id, transicion.evento, JSON.stringify(construirPayload(solicitud, transicion.evento))],
     );
 
     return solicitud;
@@ -772,6 +894,7 @@ export interface AdjuntoCompleto {
   solicitudId: string;
   solicitanteEmail: string;
   aprobadorCorreo: string | null;
+  segundoAprobadorCorreo: string | null;
   nombreArchivo: string;
   mime: string;
   contenido: Buffer;
@@ -779,7 +902,7 @@ export interface AdjuntoCompleto {
 
 export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoCompleto | null> {
   const { rows } = await db.query(
-    `SELECT a.solicitud_id, s.solicitante_email, s.aprobador_correo,
+    `SELECT a.solicitud_id, s.solicitante_email, s.aprobador_correo, s.segundo_aprobador_correo,
             a.nombre_archivo, a.mime, a.contenido
        FROM portal.solicitud_adjuntos a
        JOIN portal.solicitudes_ausencia s ON s.id = a.solicitud_id
@@ -791,6 +914,7 @@ export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoComplet
     solicitud_id: string;
     solicitante_email: string;
     aprobador_correo: string | null;
+    segundo_aprobador_correo: string | null;
     nombre_archivo: string;
     mime: string;
     contenido: Buffer;
@@ -799,6 +923,7 @@ export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoComplet
     solicitudId: r.solicitud_id,
     solicitanteEmail: r.solicitante_email,
     aprobadorCorreo: r.aprobador_correo,
+    segundoAprobadorCorreo: r.segundo_aprobador_correo,
     nombreArchivo: r.nombre_archivo,
     mime: r.mime,
     contenido: r.contenido,

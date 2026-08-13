@@ -42,6 +42,10 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
         // acceso al saldo de ese empleado (podría faltar y no pasa nada, se omite).
         const saldoSolicitante =
           s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
+        // Qué firma es esta. Sin segundo aprobador no se dice nada: es el caso de
+        // siempre y no hay ningún matiz que explicar.
+        const primeraDeDos = s.estado === 'pendiente' && !!s.segundoAprobadorCorreo;
+        const segundaFirma = s.estado === 'pendiente_2';
         return (
           // w-56 se quedaba corto en cuanto la tarjeta de saldo entró en esta
           // celda: el titular «Saldo de {nombre}: N días» no tiene dónde
@@ -52,6 +56,12 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
           // formulario de rechazo (lo único que llevaba w-56 originalmente)
           // sigue sobrando ancho de sobra a w-72.
           <div className="flex w-72 flex-col gap-2">
+            {primeraDeDos && (
+              <p className="text-xs text-gray-500">
+                1ª de 2 firmas · después pasa a <span className="font-medium">{s.segundoAprobadorCorreo}</span>
+              </p>
+            )}
+            {segundaFirma && <p className="text-xs text-gray-500">2ª firma · con esta queda aprobada</p>}
             {saldoSolicitante && (
               <TarjetaSaldo
                 saldo={saldoSolicitante.saldo}
@@ -97,7 +107,11 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
                   className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
                 >
                   {ocupada === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                  Aprobar
+                  {/* «Dar visto bueno» y no «Aprobar» cuando solo se sube un
+                      escalón: el correo que recibe el empleado al final dice
+                      «aprobada», y creer que ya la has aprobado cuando falta otra
+                      firma es el malentendido más probable de la cascada. */}
+                  {primeraDeDos ? 'Dar visto bueno' : 'Aprobar'}
                 </button>
                 <button
                   type="button"

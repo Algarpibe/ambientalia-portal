@@ -1,5 +1,5 @@
 import { esFechaValida } from './dias-habiles.js';
-import type { EstadoSolicitud, TipoSolicitud } from './types.js';
+import { ESTADOS_EN_TRAMITE, type EstadoSolicitud, type TipoSolicitud } from './types.js';
 
 // El saldo de vacaciones. Puro a propósito: sin Pool, sin fechas del sistema
 // (el «hoy» se inyecta), para que todas las reglas se puedan probar sin BD.
@@ -157,15 +157,19 @@ export function calcularSaldo(
   // `disponible` más abajo.
   const devengadas = redondear((dias / DIAS_POR_MES) * DEVENGO_MENSUAL);
 
-  const sumar = (estado: EstadoSolicitud) =>
+  // Toma una LISTA de estados, no uno: desde la aprobación en cascada, «en
+  // trámite» son dos estados —`pendiente` y `pendiente_2`— y con un solo estado
+  // exacto la media firma desaparecería del saldo sin sumar en ningún sitio.
+  const sumar = (estados: readonly EstadoSolicitud[]) =>
     vacaciones
       // El filtro es por fecha de INICIO, no por si ya ocurrió respecto a
       // `hoy`: una aprobada con inicio futuro se descuenta igual, porque el
       // saldo de partida del Excel todavía no la trae descontada.
-      .filter((v) => v.tipo === 'vacaciones' && v.estado === estado && v.fechaInicio >= config.fechaCorte)
+      .filter((v) => v.tipo === 'vacaciones' && estados.includes(v.estado) && v.fechaInicio >= config.fechaCorte)
       .reduce((total, v) => total + v.diasHabiles, 0);
 
-  const disfrutadas = redondear(sumar('aprobada'));
+  // Media firma NO descuenta: sigue en trámite hasta que la solicitud queda firme.
+  const disfrutadas = redondear(sumar(['aprobada']));
 
   return {
     configurado: true,
@@ -173,7 +177,7 @@ export function calcularSaldo(
     fechaCorte: config.fechaCorte,
     devengadas,
     disfrutadas,
-    enTramite: redondear(sumar('pendiente')),
+    enTramite: redondear(sumar(ESTADOS_EN_TRAMITE)),
     // Se suma el devengo YA redondeado (no el crudo): saldoCorte, devengadas y
     // disfrutadas son entonces las tres décimas exactas que se enseñan en
     // pantalla, y su suma cuadra exactamente con disponible. Sumar el devengo

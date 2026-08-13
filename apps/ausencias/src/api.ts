@@ -8,7 +8,8 @@ const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 // Espejo de apps/hub-api/src/ausencias/types.ts. Si cambia allí, cambia aquí.
 
 export type TipoSolicitud = 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad';
-export type EstadoSolicitud = 'pendiente' | 'aprobada' | 'rechazada' | 'registrada';
+/** `pendiente_2` = el jefe inmediato ya firmó y falta su superior. */
+export type EstadoSolicitud = 'pendiente' | 'pendiente_2' | 'aprobada' | 'rechazada' | 'registrada';
 
 export interface Empleado {
   id: string;
@@ -16,9 +17,16 @@ export interface Empleado {
   correo: string;
   cargo: string | null;
   credencial: number | null;
+  /** El correo de su jefe inmediato: la única arista del organigrama. */
   aprobadorCorreo: string;
   userId: string | null;
   activo: boolean;
+}
+
+/** Un empleado del maestro con su posición en el árbol, derivada por hub-api. */
+export interface EmpleadoConJefatura extends Empleado {
+  segundoAprobadorCorreo: string | null;
+  enCiclo: boolean;
 }
 
 export interface Adjunto {
@@ -46,7 +54,11 @@ export interface Solicitud {
   /** `hoja` = importada del histórico; `portal` = nacida en la app. */
   origen: 'portal' | 'hoja';
   estado: EstadoSolicitud;
+  /** Quien firma primero, congelado en el alta. No rota al avanzar de nivel. */
   aprobadorCorreo: string | null;
+  /** Quien firma después, congelado. `null` = una sola firma. */
+  segundoAprobadorCorreo: string | null;
+  primeraFirmaAt: string | null;
   decididaAt: string | null;
   motivoRechazo: string | null;
   createdAt: string;
@@ -208,7 +220,16 @@ export async function borrarSolicitud(id: string): Promise<void> {
 }
 
 export const fetchEmpleados = () =>
-  get<{ empleados: Empleado[] }>('/api/ausencias/empleados').then((d) => d.empleados);
+  get<{ empleados: EmpleadoConJefatura[] }>('/api/ausencias/empleados').then((d) => d.empleados);
+
+/**
+ * Cambia el jefe inmediato de alguien (solo admin). No manda ningún correo.
+ *
+ * Autoasignarse declara la raíz del organigrama. Un ciclo se rechaza con 409.
+ * Las solicitudes ya en vuelo no se mueven: llevan sus firmantes congelados.
+ */
+export const fijarJefe = (empleadoId: string, aprobadorCorreo: string) =>
+  put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/jefe`, { aprobadorCorreo });
 
 /**
  * Descarga el PDF de una solicitud. Va por fetch y no por `<a href>` porque el

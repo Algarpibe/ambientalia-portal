@@ -19,6 +19,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     origen: 'portal',
     estado: 'pendiente',
     aprobadorCorreo: 'comercial@ambientalia.com.co',
+    segundoAprobadorCorreo: null,
+    primeraFirmaAt: null,
     decididaAt: null,
     motivoRechazo: null,
     createdAt: '2026-06-01T10:00:00Z',
@@ -26,6 +28,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     ...over,
   };
 }
+
+const SEGUNDO = 'gerencia@ambientalia.com.co';
 
 const pdf = {
   id: 'a1',
@@ -116,6 +120,10 @@ describe('correos', () => {
     const casos = [
       construirPayload(solicitud({ comentarios: null }), 'creada'),
       construirPayload(solicitud({ comentarios: null }), 'aprobacion'),
+      construirPayload(
+        solicitud({ comentarios: null, estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO }),
+        'aprobacion_2',
+      ),
       construirPayload(solicitud({ comentarios: null, estado: 'aprobada' }), 'aprobada'),
       construirPayload(solicitud({ comentarios: null, estado: 'rechazada' }), 'rechazada'),
       construirPayload(solicitud({ tipo: 'incapacidad', comentarios: null, estado: 'registrada' }), 'registrada'),
@@ -134,12 +142,60 @@ describe('correos', () => {
   });
 });
 
+describe('la segunda firma', () => {
+  const enCascada = (over = {}) =>
+    solicitud({ estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO, ...over });
+
+  it('el aviso va SOLO al segundo aprobador, sin copia a administración', () => {
+    // A diferencia de los correos de decisión: esto es un trámite interno, no un
+    // veredicto. Administración no necesita enterarse de cada escalón.
+    const p = construirPayload(enCascada(), 'aprobacion_2');
+    expect(p.correo.para).toBe(SEGUNDO);
+  });
+
+  it('dice que ya tiene el visto bueno del jefe y que falta la suya', () => {
+    const p = construirPayload(enCascada(), 'aprobacion_2');
+    expect(p.correo.cuerpo).toContain('visto bueno de su jefe inmediato');
+    expect(p.correo.cuerpo).toContain('quede en firme');
+  });
+
+  it('el primer aviso sigue yendo al jefe inmediato aunque haya segundo', () => {
+    const p = construirPayload(solicitud({ segundoAprobadorCorreo: SEGUNDO }), 'aprobacion');
+    expect(p.correo.para).toBe('comercial@ambientalia.com.co');
+  });
+
+  it('el acuse anuncia las dos firmas solo cuando las hay', () => {
+    expect(construirPayload(solicitud({ segundoAprobadorCorreo: SEGUNDO }), 'creada').correo.cuerpo).toContain(
+      'dos aprobaciones',
+    );
+    expect(construirPayload(solicitud(), 'creada').correo.cuerpo).not.toContain('dos aprobaciones');
+  });
+
+  it('una incapacidad nunca anuncia dos firmas: no se aprueba', () => {
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', estado: 'registrada' }), 'registrada');
+    expect(p.correo.cuerpo).not.toContain('dos aprobaciones');
+  });
+});
+
 describe('efectos en Google, repartidos sin duplicar', () => {
   it('la creación no toca calendario, hoja ni Drive: aún no es firme', () => {
     const p = construirPayload(solicitud({ adjunto: pdf }), 'creada');
     expect(p.calendario).toBeNull();
     expect(p.hoja).toBeNull();
     expect(p.drive).toBeNull();
+  });
+
+  it('la segunda firma NO vuelve a subir el PDF ni toca calendario u hoja', () => {
+    // `aprobacion` ya lo subió. Si `aprobacion_2` entrara en `conDrive`, el
+    // fichero se duplicaría en la carpeta de Drive — y como `drive_file_id` sigue
+    // sin rellenarse, nada lo detectaría.
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', adjunto: pdf, estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO }),
+      'aprobacion_2',
+    );
+    expect(p.drive).toBeNull();
+    expect(p.calendario).toBeNull();
+    expect(p.hoja).toBeNull();
   });
 
   it('el aviso al aprobador sube el PDF, para que pueda verlo antes de decidir', () => {

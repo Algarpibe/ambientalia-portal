@@ -18,13 +18,37 @@ export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
 /** Solo la incapacidad se informa; el resto pasa por el visto bueno de alguien. */
 export const requiereAprobacion = (t: TipoSolicitud) => t !== 'incapacidad';
 
+interface Chip {
+  label: string;
+  clase: string;
+}
+
 /** Las clases van completas y literales: Tailwind purga lo que construya en runtime. */
-export const CHIP_ESTADO: Record<EstadoSolicitud, { label: string; clase: string }> = {
+export const CHIP_ESTADO: Record<EstadoSolicitud, Chip> = {
   pendiente: { label: 'Pendiente', clase: 'bg-amber-100 text-amber-800 border-amber-200' },
+  // Naranja y no ámbar para distinguir de un vistazo la media firma de la que
+  // todavía no tiene ninguna.
+  pendiente_2: { label: 'Pendiente 2ª firma', clase: 'bg-orange-100 text-orange-800 border-orange-200' },
   aprobada: { label: 'Aprobada', clase: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   rechazada: { label: 'Rechazada', clase: 'bg-red-100 text-red-700 border-red-200' },
   registrada: { label: 'Registrada', clase: 'bg-sky-100 text-sky-800 border-sky-200' },
 };
+
+const CHIP_DESCONOCIDO = 'bg-gray-100 text-gray-700 border-gray-200';
+
+/**
+ * El chip de un estado, con red de seguridad.
+ *
+ * El acceso directo al Record revienta la tabla entera —y con ella la pestaña—
+ * si el backend devuelve un estado que este bundle no conoce. Pasa de verdad:
+ * hub-api y el portal son dos servicios de EasyPanel y se despliegan por
+ * separado, así que hay una ventana de minutos en que uno va por delante.
+ */
+export const chipDe = (estado: EstadoSolicitud): Chip =>
+  CHIP_ESTADO[estado] ?? { label: estado, clase: CHIP_DESCONOCIDO };
+
+/** True si la solicitud todavía espera la firma de alguien. */
+export const enTramite = (estado: EstadoSolicitud) => estado === 'pendiente' || estado === 'pendiente_2';
 
 /** Etiqueta del campo de fecha según el tipo, como en los formularios de n8n. */
 export function etiquetasFecha(tipo: TipoSolicitud): { inicio: string; fin: string } {

@@ -1,6 +1,6 @@
 import { Paperclip } from 'lucide-react';
 import { descargarAdjunto, type Solicitud } from './api';
-import { CHIP_ESTADO, ETIQUETA_TIPO, formatFecha } from './dominio';
+import { chipDe, ETIQUETA_TIPO, formatFecha } from './dominio';
 
 interface Props {
   solicitudes: Solicitud[];
@@ -33,7 +33,7 @@ export default function TablaSolicitudes({ solicitudes, mostrarSolicitante, acci
         </thead>
         <tbody className="divide-y divide-gray-100">
           {solicitudes.map((s) => {
-            const chip = CHIP_ESTADO[s.estado];
+            const chip = chipDe(s.estado);
             return (
               <tr key={s.id} className="align-top hover:bg-gray-50">
                 {mostrarSolicitante && (

@@ -12,6 +12,9 @@ import { contarDiasHabiles, TIPOS } from './dominio';
 
 const ESTADOS: { id: EstadoSolicitud; label: string }[] = [
   { id: 'pendiente', label: 'Pendiente' },
+  // Tiene que estar: sin él, un admin no podría sacar a mano una solicitud
+  // atascada esperando una segunda firma que ya no va a llegar.
+  { id: 'pendiente_2', label: 'Pendiente 2ª firma' },
   { id: 'aprobada', label: 'Aprobada' },
   { id: 'rechazada', label: 'Rechazada' },
   { id: 'registrada', label: 'Registrada' },

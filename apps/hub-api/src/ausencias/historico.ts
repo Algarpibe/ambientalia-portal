@@ -1,6 +1,6 @@
 import { esFechaValida } from './dias-habiles.js';
 import { AusenciaError } from './service.js';
-import { ETIQUETA_TIPO, TIPOS, type Empleado, type TipoSolicitud } from './types.js';
+import { ESTADOS, ETIQUETA_TIPO, TIPOS, type Empleado, type EstadoSolicitud, type TipoSolicitud } from './types.js';
 
 // Importación del histórico que hasta ahora solo vivía en las cuatro pestañas de
 // la hoja `consulta_vacaciones`.
@@ -90,7 +90,7 @@ export function validarEdicionSolicitud(body: unknown): {
   fechaInicio: string;
   fechaFin: string;
   dias: number;
-  estado: 'pendiente' | 'aprobada' | 'rechazada' | 'registrada';
+  estado: EstadoSolicitud;
   comentarios: string | null;
   observaciones: string | null;
 } {
@@ -102,9 +102,11 @@ export function validarEdicionSolicitud(body: unknown): {
   const tipo = b.tipo as TipoSolicitud;
   if (!(TIPOS as readonly string[]).includes(tipo)) throw new AusenciaError('tipo_invalido', 400, 'tipo');
 
-  const ESTADOS_VALIDOS = ['pendiente', 'aprobada', 'rechazada', 'registrada'] as const;
-  const estado = b.estado as (typeof ESTADOS_VALIDOS)[number];
-  if (!(ESTADOS_VALIDOS as readonly string[]).includes(estado)) throw new AusenciaError('estado_invalido', 400, 'estado');
+  // La lista sale de `types.ts` y no se reescribe aquí: duplicarla dejó fuera el
+  // estado intermedio de la cascada, y un admin no habría podido corregir a mano
+  // una solicitud atascada en él.
+  const estado = b.estado as EstadoSolicitud;
+  if (!(ESTADOS as readonly string[]).includes(estado)) throw new AusenciaError('estado_invalido', 400, 'estado');
 
   const fechaInicio = String(b.fechaInicio ?? '');
   const fechaFin = String(b.fechaFin ?? '');
