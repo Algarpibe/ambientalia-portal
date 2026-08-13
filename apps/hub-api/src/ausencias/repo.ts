@@ -911,23 +911,43 @@ export async function marcarAdjuntoEnDrive(db: Pool, adjuntoId: string, driveFil
 // ── Outbox ─────────────────────────────────────────────────────────────────
 
 /**
+ * Cuánto queda reservado un evento tras servirlo. Tiene que ser holgadamente
+ * mayor que lo que tarda un lote en enviarse y confirmarse (Gmail, calendario,
+ * hoja y Drive, hasta 20 eventos), y menor que el barrido de 10 minutos, para
+ * que un envío que se cayó de verdad se reintente en la pasada siguiente.
+ */
+const RESERVA = '5 minutes';
+
+/**
  * Los eventos aún no ejecutados, del más antiguo al más nuevo.
  *
- * Sirve el evento **sin** marcarlo: el estado solo avanza en `confirmarEventos`.
- * Si Gmail falla a mitad, el ciclo siguiente lo vuelve a servir. El precio es
- * que un fallo DESPUÉS de enviar el correo puede duplicarlo; se prefiere un
- * correo repetido a una solicitud que nadie ve. `intentos` se incrementa aquí
- * para poder detectar en la BD un evento que lleva reintentándose sin éxito.
+ * Sirve el evento **sin marcarlo como enviado**: el estado solo avanza en
+ * `confirmarEventos`. Si Gmail falla a mitad, el evento vuelve a la cola solo. El
+ * precio es que un fallo DESPUÉS de enviar el correo puede duplicarlo; se
+ * prefiere un correo repetido a una solicitud que nadie ve.
+ *
+ * Pero servir **sí reserva**: `servido_at` lo aparta de la cola durante unos
+ * minutos. Sin eso, los dos disparadores del workflow —el webhook del portal y el
+ * barrido de diez minutos— pueden leer las mismas filas si arrancan con pocos
+ * segundos de diferencia, porque entre servir y confirmar pasa lo que tarde el
+ * envío. Ocurrió en producción: 0,7 s de separación, correo duplicado. Sobre un
+ * evento `aprobada` habría sido además un evento de calendario y una fila de la
+ * hoja por duplicado.
+ *
+ * `intentos` se incrementa aquí para poder detectar en la BD un evento que lleva
+ * reintentándose sin éxito.
  */
 export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPendiente[]> {
   const { rows } = await db.query(
     `UPDATE portal.ausencias_outbox o
-        SET intentos = o.intentos + 1
+        SET intentos = o.intentos + 1, servido_at = now()
       WHERE o.id IN (
               SELECT id FROM portal.ausencias_outbox
-               WHERE enviado_at IS NULL ORDER BY id LIMIT $1)
+               WHERE enviado_at IS NULL
+                 AND (servido_at IS NULL OR servido_at < now() - $2::interval)
+               ORDER BY id LIMIT $1)
       RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
-    [limite],
+    [limite, RESERVA],
   );
   return (rows as { id: string; evento: EventoOutbox; solicitud_id: string; intentos: number; payload: PayloadEvento }[])
     .map((r) => ({

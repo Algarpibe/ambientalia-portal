@@ -102,6 +102,24 @@ el ciclo siguiente lo reintenta. El precio es que un fallo *después* de enviar 
 correo puede duplicarlo — se prefiere un correo repetido a una solicitud que
 nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 
+Pero servir **sí reserva**: `servido_at` aparta la fila de la cola durante cinco
+minutos (`RESERVA` en `repo.ts`, migración 019). Al expirar vuelve sola, así que
+la propiedad de arriba se mantiene intacta.
+
+> ⚠️ **Sin esa reserva los dos disparadores se pisan.** Pasó en producción el
+> 2026-08-13: el webhook del portal arrancó a las 17:40:41,3 y el barrido de diez
+> minutos a las 17:40:42,0. Entre servir y confirmar pasa lo que tarde el envío
+> (unos 3 s con Gmail), así que el segundo leyó las mismas filas que el primero
+> aún no había confirmado y **el empleado recibió el correo dos veces**
+> (ejecuciones `32915` e `32916`: mismos ids 10 y 11, `intentos` 1 y 2, y la
+> segunda confirmación devolvió `confirmados: 0`). No era solo un correo repetido:
+> sobre un evento `aprobada` habrían salido dos eventos de Google Calendar y dos
+> filas en la hoja que consulta Nómina.
+>
+> La reserva **no puede acercarse a los 10 minutos del barrido**: si la supera, un
+> envío que falló de verdad tarda dos pasadas en reintentarse. Y no puede bajar de
+> lo que tarda un lote completo, o vuelve el duplicado.
+
 > ⚠️ Los eventos se sirven en lotes de hasta 20. Si uno falla, el lote entero se
 > queda sin confirmar y se reintenta completo, así que los correos ya enviados de
 > ese lote se repiten. Con el volumen real (unas pocas solicitudes al día) el

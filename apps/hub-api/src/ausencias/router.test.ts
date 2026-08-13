@@ -21,9 +21,16 @@ interface EventoFalso {
   intentos: number;
   payload: unknown;
   enviado: boolean;
+  /** Instante del reloj falso en que se sirvió. `undefined` = nunca. */
+  servidoEn?: number;
 }
 
+/** La misma reserva que el SQL (`RESERVA` en repo.ts), en milisegundos. */
+const RESERVA_MS = 5 * 60 * 1000;
+
 const estado = {
+  /** Reloj falso, para poder pasar por delante de la reserva sin esperar. */
+  ahora: 0,
   empleado: null as any,
   /** Si el usuario de la sesión existe en portal.users (falso = token legacy). */
   usuarioEnPortal: true,
@@ -236,10 +243,19 @@ vi.mock('./repo.js', () => ({
     const a = estado.adjuntos.get(id);
     if (a) a.driveFileId = driveFileId;
   },
+  // Modela las dos mitades del SQL real: servir NO marca como enviado (el estado
+  // solo avanza al confirmar, para que un fallo se recupere solo), pero SÍ
+  // reserva la fila unos minutos, o dos disparadores casi simultáneos se
+  // llevarían el mismo evento y el correo saldría dos veces.
   eventosPendientes: async () => {
-    const pend = estado.eventos.filter((e) => !e.enviado);
-    pend.forEach((e) => (e.intentos += 1)); // se sirve, NO se marca
-    return pend.map(({ enviado: _e, ...resto }) => resto);
+    const pend = estado.eventos.filter(
+      (e) => !e.enviado && (e.servidoEn === undefined || estado.ahora - e.servidoEn >= RESERVA_MS),
+    );
+    pend.forEach((e) => {
+      e.intentos += 1;
+      e.servidoEn = estado.ahora;
+    });
+    return pend.map(({ enviado: _e, servidoEn: _s, ...resto }) => resto);
   },
   confirmarEventos: async (_db: unknown, ids: number[]) => {
     let n = 0;
@@ -331,6 +347,7 @@ beforeEach(() => {
   estado.historicoInsertado = 0;
   estado.solicitudes = [];
   estado.ultimaDecision = null;
+  estado.ahora = 0;
   estado.eventos = [];
   estado.adjuntos = new Map();
   estado.seq = 0;
@@ -1102,13 +1119,35 @@ describe('endpoints de n8n', () => {
     expect(p2.body.eventos).toHaveLength(0);
   });
 
-  it('un evento servido pero NO confirmado se vuelve a entregar', async () => {
-    // Es lo que hace que un fallo de Gmail se recupere solo en el ciclo siguiente.
+  const pedirPendiente = () =>
+    request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
+
+  it('un evento servido pero NO confirmado se vuelve a entregar al expirar la reserva', async () => {
+    // Es lo que hace que un fallo de Gmail se recupere solo, sin intervención.
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
-    await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
-    const otra = await request(app()).get('/api/ausencias/n8n/pendiente').set('X-Ausencias-Cron-Token', 'cron-ausencias').expect(200);
+    await pedirPendiente();
+
+    estado.ahora += RESERVA_MS; // pasa la reserva; el barrido siguiente lo recoge
+    const otra = await pedirPendiente();
     expect(otra.body.eventos).toHaveLength(2);
     expect(otra.body.eventos[0].intentos).toBe(2);
+  });
+
+  it('dos disparadores casi a la vez NO se llevan el mismo evento', async () => {
+    // El fallo real de producción: el webhook del portal y el barrido de diez
+    // minutos arrancaron con 0,7 s de diferencia, los dos leyeron las mismas
+    // filas —servir no marca nada hasta confirmar— y el empleado recibió el
+    // correo por duplicado. Sobre un evento `aprobada` habrían sido además un
+    // evento de calendario y una fila de la hoja de Nómina repetidos.
+    await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+
+    const primera = await pedirPendiente();
+    expect(primera.body.eventos).toHaveLength(2);
+
+    // Sin avanzar el reloj: es el segundo disparador, unos segundos después.
+    const segunda = await pedirPendiente();
+    expect(segunda.body.hay).toBe(false);
+    expect(segunda.body.eventos).toHaveLength(0);
   });
 
   it('confirmar sin ids es un 400, no un no-op silencioso', async () => {
