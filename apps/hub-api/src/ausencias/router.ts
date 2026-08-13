@@ -63,6 +63,25 @@ export function createAusenciasRouter(db: Pool): Router {
       const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
       const anio = new Date().getUTCFullYear();
       const festivos = [anio, anio + 1, anio + 2].flatMap((a) => [...festivosColombia(a)]).sort();
+      // El saldo es un campo accesorio de un payload que la app necesita para
+      // arrancar: si `saldoDeSesion` lanza, se registra el error pero NO se deja
+      // que tumbe el contexto entero, o nadie podría ni abrir la app (sin
+      // `empleado`, sin `festivos`, sin `esAprobador`). `null` ya es un valor
+      // legítimo del contrato («no hay saldo que enseñar»), así que la app
+      // arranca con la tarjeta de saldo vacía en vez de no arrancar. Es la
+      // decisión contraria a la de GET /ausencias/saldos (ver su JSDoc), y a
+      // propósito: allí el saldo ES la respuesta entera, así que camuflar un
+      // fallo con una lista incompleta sería mentir por omisión; aquí es un
+      // extra dentro de un contexto que tiene que arrancar de todos modos.
+      let saldo: Awaited<ReturnType<typeof service.saldoDeSesion>> | null = null;
+      if (empleado) {
+        try {
+          saldo = await service.saldoDeSesion(db, empleado);
+        } catch (e) {
+          console.error('ausencias_contexto_saldo error', e);
+          captureError(e, { endpoint: 'ausencias_contexto_saldo' });
+        }
+      }
       res.json({
         empleado,
         // El correo de la sesión: si no hay ficha de empleado, la UI lo enseña
@@ -75,7 +94,7 @@ export function createAusenciasRouter(db: Pool): Router {
         festivos,
         // Viaja aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar el saldo sin una segunda llamada al abrir la app.
-        saldo: empleado ? await service.saldoDeSesion(db, empleado) : null,
+        saldo,
       });
     } catch (e) {
       sendError(res, e, 'ausencias_contexto');

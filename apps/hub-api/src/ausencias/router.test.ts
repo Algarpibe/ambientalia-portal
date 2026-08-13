@@ -767,6 +767,32 @@ describe('GET /ausencias/contexto', () => {
     expect(r.body.saldo).not.toBeNull();
     expect(r.body.saldo).toMatchObject({ configurado: false });
   });
+
+  it('sin ficha de empleado, el saldo viaja como `null` explícito, no como una clave ausente', async () => {
+    // `undefined` desaparece al serializar a JSON: una UI que distinga "sin
+    // ficha" de "sin configurar" comprobando `saldo === null` se rompería en
+    // silencio si aquí se colara un `undefined` en vez de un `null`.
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.empleado).toBeNull();
+    expect(r.body).toHaveProperty('saldo', null);
+  });
+
+  it('si el saldo falla al calcularse, el contexto arranca igual con `saldo: null`', async () => {
+    // El contrario de /ausencias/saldos a propósito: allí el saldo ES la
+    // respuesta y un fallo debe salir como 500 (ver el JSDoc de esa ruta). Aquí
+    // es un campo accesorio de un payload que la app necesita para poder
+    // arrancar, así que un fallo al calcularlo no puede tumbar `empleado` ni
+    // `festivos`, que sí son imprescindibles para que aparezcan las pestañas.
+    // Una `fechaCorte` con formato inválido es lo que hace lanzar a
+    // `calcularSaldo` (ver su JSDoc en saldo.ts).
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: 'fecha-invalida' });
+    const r = await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.empleado).not.toBeNull();
+    expect(r.body.festivos.length).toBeGreaterThan(0);
+    expect(r.body).toHaveProperty('saldo', null);
+  });
 });
 
 // ── Saldo de vacaciones ────────────────────────────────────────────────────
@@ -785,6 +811,18 @@ describe('GET /ausencias/saldos', () => {
     await request(app())
       .get('/api/ausencias/saldos')
       .set('Authorization', `Bearer ${token({ sub: 'nadie@ambientalia.com.co' })}`)
+      .expect(403);
+  });
+
+  it('403 con token válido pero sin la app asignada, aunque sí aprobaría a alguien', async () => {
+    // Distinto del 403 de arriba: ese lo lanza el SERVICIO (`no_es_aprobador`).
+    // Este debe pincharse en el `requireApp` del ROUTER, antes de llegar al
+    // servicio: por eso el `sub` es el de un aprobador real, para que la única
+    // razón posible del 403 sea la app que falta y no que el servicio también
+    // lo habría rechazado.
+    await request(app())
+      .get('/api/ausencias/saldos')
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co', apps: ['contabilidad'] })}`)
       .expect(403);
   });
 });
