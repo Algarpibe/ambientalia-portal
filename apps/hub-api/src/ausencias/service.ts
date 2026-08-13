@@ -1,5 +1,13 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
+import {
+  diasDelMes,
+  esMesValido,
+  marcasDelMes,
+  rangoDelMes,
+  type DiaCalendario,
+  type MarcaCalendario,
+} from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { construirPayload, eventosDeAlta } from './notificaciones.js';
@@ -524,4 +532,40 @@ export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): P
   if (empleados.length === 0) throw new AusenciaError('empleado_no_encontrado', 404);
   const vacaciones = await repo.vacacionesDeEmpleados(db, [empleadoId]);
   return combinar(empleados, vacaciones, hoyEnColombia())[0];
+}
+
+// ── Calendario ─────────────────────────────────────────────────────────────
+
+export interface CalendarioDelMes {
+  empleados: repo.EmpleadoActivo[];
+  dias: DiaCalendario[];
+  marcas: MarcaCalendario[];
+}
+
+/**
+ * El calendario de un mes, con las marcas ya expandidas por día.
+ *
+ * El parámetro es un mes y no un rango libre: acotarlo así impide que una
+ * petición pida cinco años de golpe, y la interfaz solo navega mes a mes.
+ *
+ * No recibe sesión: el calendario lo ve toda la plantilla por igual (incluidas
+ * las incapacidades, con su tipo tal cual — ver el router). No hay ningún dato
+ * que acotar según quién pregunta, así que pedirla solo invitaría a que un
+ * cambio futuro la reintrodujera para filtrar algo que el negocio ya decidió
+ * que es público dentro de la empresa.
+ */
+export async function calendarioDelMes(db: Pool, mes: string): Promise<CalendarioDelMes> {
+  if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
+
+  const { desde, hasta } = rangoDelMes(mes);
+  const [empleados, ausencias] = await Promise.all([
+    repo.empleadosActivos(db),
+    repo.ausenciasEntre(db, desde, hasta),
+  ]);
+
+  return {
+    empleados,
+    dias: diasDelMes(mes),
+    marcas: marcasDelMes(mes, ausencias),
+  };
 }

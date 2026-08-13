@@ -203,6 +203,19 @@ vi.mock('./repo.js', () => ({
     }
     return n;
   },
+  empleadosActivos: async () => [
+    { id: 'e1', nombreCompleto: 'Ana Ruiz' },
+    { id: 'e2', nombreCompleto: 'Beto Díaz' },
+  ],
+  ausenciasEntre: async () => [
+    {
+      empleadoId: 'e1',
+      tipo: 'vacaciones',
+      estado: 'aprobada',
+      fechaInicio: '2026-08-10',
+      fechaFin: '2026-08-12',
+    },
+  ],
 }));
 
 const { createAusenciasRouter } = await import('./router.js');
@@ -853,5 +866,36 @@ describe('PUT /ausencias/empleados/:id/saldo', () => {
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .send({ saldoCorte: 10 })
       .expect(400);
+  });
+});
+
+// ── Calendario ─────────────────────────────────────────────────────────────
+
+describe('GET /ausencias/calendario', () => {
+  it('devuelve empleados, días y marcas del mes', async () => {
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.empleados).toHaveLength(2);
+    expect(r.body.dias).toHaveLength(31);
+    // La ausencia del mock son 3 días: del 10 al 12 de agosto.
+    expect(r.body.marcas).toHaveLength(3);
+  });
+
+  it('400 si el mes viene mal formado', async () => {
+    for (const mes of ['2026-13', 'agosto', '2026', '']) {
+      await request(app())
+        .get(`/api/ausencias/calendario?mes=${encodeURIComponent(mes)}`)
+        .set('Authorization', `Bearer ${token()}`)
+        .expect(400);
+    }
+  });
+
+  it('403 a quien tiene token válido pero no la app asignada', async () => {
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token({ apps: [] })}`)
+      .expect(403);
   });
 });

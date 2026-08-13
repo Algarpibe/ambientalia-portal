@@ -77,9 +77,10 @@ lo que se acaba de hacer con quien no es empleado directo.
 
 Entran `aprobada`, `registrada` y `pendiente`. Las `rechazada` no salen nunca.
 
-Las pendientes se pintan con un estilo distinto (borde rayado) porque el valor
-está en verlas *antes* de decidir: quien aprueba abre el calendario, ve que esa
-semana ya hay dos personas fuera, y decide con eso delante.
+Las pendientes se pintan atenuadas (opacidad reducida) y con un anillo alrededor
+porque el valor está en verlas *antes* de decidir: quien aprueba abre el
+calendario, ve que esa semana ya hay dos personas fuera, y decide con eso
+delante.
 
 ### El filtro tiene que ser de solapamiento, no de contención
 
@@ -93,37 +94,38 @@ Lo natural sería escribir `fecha_inicio >= $desde AND fecha_fin <= $hasta`, y e
 perdería exactamente las ausencias que cruzan el cambio de mes — que son las que
 más importa ver, porque son las que un mes solo enseña a medias. Va con test.
 
-## Privacidad de las incapacidades
+## Las incapacidades se ven como cualquier otro tipo
 
-`tipo` viaja como `null` cuando la marca es una **incapacidad de otra persona**.
-El interesado, su aprobador y un admin sí reciben el tipo; para el resto la
-celda dice «Ausente», sin motivo.
+**Esta sección describía un enmascarado que no funcionaba. Se retiró.**
 
-**El enmascarado se hace en el servidor.** Hacerlo en la interfaz significaría
-haber enviado igualmente el dato al navegador, y un dato de salud enviado es un
-dato expuesto. En Colombia la Ley 1581 trata la información de salud como
-sensible, así que la regla es no mandarla, no ocultarla al pintar.
+El diseño original ocultaba el tipo de las incapacidades ajenas mandando
+`tipo: null`, invocando la Ley 1581. La revisión demostró que no ocultaba nada,
+por dos vías independientes:
 
-El nombre de la persona sí se ve: se revela que está ausente, no por qué.
+1. `tipo: null` se producía **exclusivamente** en incapacidades ajenas. Era un
+   centinela: una celda enmascarada significaba «esto es una incapacidad» con
+   certeza, que es justo lo que pretendía tapar.
+2. `estado: 'registrada'` equivale a incapacidad por construcción, porque es el
+   único tipo que nace en ese estado (`requiereAprobacion` en `service.ts`). El
+   hecho médico viajaba igual en el segundo campo.
 
-**Cuidado con de dónde sale «su aprobador».** Tiene que ser
-`empleados.aprobador_correo`, NO `solicitudes_ausencia.aprobador_correo`. La
-segunda está a `null` en todas las incapacidades a propósito —una incapacidad se
-informa, no se aprueba, y dejar ahí un aprobador la haría aparecer en su bandeja
-de pendientes (ver el comentario de `crearSolicitud`)—. Usar ese campo dejaría a
-todos los aprobadores fuera y la regla se reduciría en silencio a «solo el
-interesado y el admin». Va con test.
+Un tercero recibía `{"tipo":null,"estado":"registrada"}`: dos señales, cada una
+suficiente. El spec afirmaba «la regla es no mandarla, no ocultarla al pintar» y
+la mandaba de todas formas.
 
-### Incoherencia conocida con Google Calendar
+Decisión: **mostrarlas como cualquier otro tipo.** Razones:
 
-El evento que n8n crea se llama `«Incapacidades Andrés García»`, así que ahí el
-motivo está a la vista de quien tenga ese calendario compartido. Enmascarar en
-el portal no oculta ese dato; evita **ensanchar** la exposición a toda la
-plantilla, que es un objetivo distinto y que se sostiene por sí solo.
+- El dato ya es público por el otro lado: el evento que n8n crea en Google se
+  llama literalmente `«Incapacidades Andrés García»`, y ese calendario no se
+  toca.
+- Un control que parece privacidad y no lo es genera confianza falsa, que es
+  peor que no tener ninguno. Quien decida sobre este dato debe saber que se ve.
+- Ocultar de verdad exigía no mandar la marca, y entonces el calendario mentiría
+  sobre la disponibilidad de esa persona — perdiendo el valor de coordinación
+  que justifica toda la vista.
 
-Alinearlos es cambiar el `resumen` del payload en `notificaciones.ts` —una
-línea— pero solo afectaría a los eventos nuevos, no a los ya creados. Queda
-fuera de este trabajo, anotado por si se decide después.
+En consecuencia, `MarcaCalendario.tipo` NO es nullable, y ni el módulo ni el
+repo necesitan los correos del empleado ni de su aprobador.
 
 ## Frontend
 
@@ -135,7 +137,7 @@ fuera de este trabajo, anotado por si se decide después.
 - Navegación ◀ ▶ entre meses, arrancando en el mes en curso.
 - Filtros: persona (incluido un «solo yo» para el uso personal) y tipo.
 - Columnas no laborables sombreadas, con el dato que manda el servidor.
-- Leyenda de colores por tipo, y el estilo rayado para pendientes.
+- Leyenda de colores por tipo, y el estilo atenuado con anillo para pendientes.
 - Hasta 31 columnas: va en `overflow-x-auto` con la columna del nombre fija,
   siguiendo el patrón de tabla de `RegistroGeneral` y `PanelSaldos`.
 
@@ -159,10 +161,14 @@ El grueso, sobre la función pura de expansión:
 - Una que empieza dentro y acaba el mes siguiente.
 - Una que cubre el mes entero por los dos lados.
 - Una que ocupa exactamente el primer día, y otra el último.
-- Las `rechazada` no producen ninguna marca.
-- El enmascarado en sus cuatro combinaciones: el propio interesado, su
-  aprobador, un admin, y un tercero.
-- `laborable`: un festivo de Colombia y un sábado salen en `false`.
+- Una enteramente posterior al mes, además de la anterior.
+- Las `rechazada` no producen ninguna marca — y con la rechazada **en medio** de
+  una lista de tres, para que las siguientes se sigan pintando. Sin ese caso, el
+  mutante `continue` → `break` sobrevive, y borraría del calendario a todos los
+  empleados posteriores a la primera rechazada, en silencio.
+- Las incapacidades salen con su tipo, como cualquier otra.
+- `laborable`: un sábado, un festivo fijo y **uno trasladado por la Ley
+  Emiliani** — el fijo solo es el caso fácil.
 
 Endpoint: rechaza un `mes` mal formado con 400, y responde 403 a quien no tiene
 la app asignada.

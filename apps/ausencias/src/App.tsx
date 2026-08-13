@@ -17,8 +17,9 @@ import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
 import TarjetaSaldo from './TarjetaSaldo';
 import PanelSaldos from './PanelSaldos';
+import Calendario from './Calendario';
 
-type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'saldos' | 'historico';
+type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'saldos' | 'historico' | 'calendario';
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -72,7 +73,10 @@ export default function App() {
 
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
-    if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes']);
+    // El calendario va aquí y no en el bloque de esAdmin más abajo: es
+    // decisión de producto que lo vea toda la plantilla, no solo quien
+    // administra — a diferencia de «Saldos» y «Registro general».
+    if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
     if (contexto?.esAprobador) p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
     if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
     return p;
@@ -193,6 +197,10 @@ export default function App() {
                   </div>
                 )}
                 <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
+              </div>
+
+              <div className={tab === 'calendario' ? '' : 'hidden'}>
+                <Calendario miEmpleadoId={contexto.empleado.id} activo={tab === 'calendario'} />
               </div>
             </>
           )}

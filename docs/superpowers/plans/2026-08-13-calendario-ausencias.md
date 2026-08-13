@@ -1,5 +1,18 @@
 # Calendario de ausencias — Plan de implementación
 
+> ⚠️ **AVISO — el enmascarado de incapacidades que aparece en este plan SE
+> RETIRÓ durante la ejecución.** El código de más abajo (`QuienMira`,
+> `puedeVerElTipo`, `tipo: TipoSolicitud | null` en `MarcaCalendario`) describe
+> un diseño que ocultaba el tipo de las incapacidades ajenas mandando
+> `tipo: null`. No ocultaba nada: `tipo: null` solo se producía en
+> incapacidades ajenas, así que la propia celda enmascarada delataba justo lo
+> que pretendía tapar. Se descartó y las incapacidades se muestran como
+> cualquier otro tipo. **No copies el código de enmascarado de este plan.**
+> Este documento es un artefacto histórico de cómo se ejecutó la tarea, no de
+> lo que hay hoy en el código; para el diseño y el razonamiento real, ver
+> `docs/superpowers/specs/2026-08-13-calendario-ausencias-design.md`
+> (sección «Las incapacidades se ven como cualquier otro tipo»).
+
 > **Para agentes:** SUB-SKILL OBLIGATORIA: usar `superpowers:subagent-driven-development`
 > (recomendada) o `superpowers:executing-plans` para ejecutar tarea a tarea. Los
 > pasos llevan casilla (`- [ ]`).
