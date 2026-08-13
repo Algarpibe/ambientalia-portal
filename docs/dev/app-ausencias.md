@@ -13,6 +13,7 @@ Calendar, Drive y Sheets.
 | Lista de **festivos escrita a mano** que terminaba el 2026-12-25 | `festivos.ts` los **calcula** (Ley Emiliani + Pascua por Butcher/Meeus) | Desde enero de 2027 el flujo habría contado los festivos como laborables, sin avisar |
 | `new Date(str)` + `toISOString()` para contar días | Aritmética en UTC sobre cadenas `YYYY-MM-DD` | El servidor corre en UTC y Colombia es UTC−5: el original podía desplazar un día |
 | Aprobación con **Gmail `sendAndWait`** | **Bandeja en el portal** con rastro de quién y cuándo | La ejecución de n8n se quedaba colgada esperando, y no había historial |
+| Una sola firma, siempre el mismo buzón | **Dos firmas en cascada**: el jefe inmediato y su superior | Un solo aprobador para toda la empresa no es una jerarquía, es un cuello de botella |
 | El rechazo no decía el motivo | El motivo viaja en el correo y queda en la BD | Obligaba a preguntar por otro canal |
 | Sin historial para el empleado | Pestaña «Mis solicitudes» | — |
 
@@ -26,12 +27,13 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   *Pendientes de aprobar* (si eres aprobador o admin) y *Empleados* (solo admin).
 - **Backend**: `apps/hub-api/src/ausencias/`
   - `festivos.ts` / `dias-habiles.ts` — el cálculo, con tests.
+  - `saldo.ts` / `calendario.ts` / `jerarquia.ts` — módulos puros, con tests.
   - `config.ts` — ids de Google, correos en copia, firmas. **Un único sitio.**
   - `notificaciones.ts` — los correos y los efectos en Google, redactados aquí.
   - `service.ts` — validación y casos de uso. `repo.ts` — SQL. `router.ts` — HTTP.
 - **BD**: migración `015_ausencias.sql` → `portal.empleados`,
   `portal.solicitudes_ausencia`, `portal.solicitud_adjuntos`,
-  `portal.ausencias_outbox`.
+  `portal.ausencias_outbox`; `017` el saldo y `018` la cascada de dos firmas.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 14 nodos.
 
 ## El contrato con n8n
@@ -78,10 +80,21 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | Evento | Correo | Calendario | Hoja | Drive |
 |---|---|---|---|---|
 | `creada` | acuse al solicitante | — | — | — |
-| `aprobacion` | aviso a quien aprueba | — | — | sube el PDF (para que pueda verlo) |
+| `aprobacion` | aviso al jefe inmediato | — | — | sube el PDF (para que pueda verlo) |
+| `aprobacion_2` | aviso al segundo aprobador | — | — | — (ya está subido) |
 | `aprobada` | aprobado (+ administración) | ✔ | ✔ | — |
 | `rechazada` | rechazado con motivo | — | ✔ | — |
 | `registrada` | acuse de incapacidad | ✔ | ✔ | ✔ |
+
+`aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque
+`construirPayload` decide la subida a Drive con `evento === 'aprobacion'`:
+reutilizarlo dejaría el PDF **dos veces** en la carpeta, y como `drive_file_id`
+sigue sin rellenarse, nada lo detectaría.
+
+**El workflow no discrimina por nombre de evento** —sus tres IF miran
+`payload.calendario`, `payload.hoja` y `payload.drive` contra `null`, y Gmail lee
+`payload.correo` directamente—, así que un evento nuevo fluye sin tocar n8n.
+Verificado sobre el workflow vivo al añadir `aprobacion_2`.
 
 El estado **no avanza al servir el evento, solo al confirmarlo**: si Gmail falla,
 el ciclo siguiente lo reintenta. El precio es que un fallo *después* de enviar el
@@ -103,10 +116,11 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET` | `/api/ausencias/pendientes` | idem |
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
-| `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, aprobador o admin |
-| `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador solo a los suyos |
+| `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, sus **dos** aprobadores o admin |
+| `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — sin acotar por rol, lo ve toda la plantilla |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
+| `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
 | `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
 
@@ -232,6 +246,98 @@ absoluto.
   vive en un solo sitio (`validarSaldo` en `service.ts`, con su regex) y el
   error que llega es el correcto.
 
+## Aprobación en cascada
+
+Una solicitud la firman **el jefe inmediato y después el superior de ese jefe**.
+La primera firma la deja en `pendiente_2`; la segunda la pasa a `aprobada`. Quien
+reporta a la cúspide del organigrama se queda con una sola firma.
+
+### El organigrama es una sola columna
+
+`portal.empleados.aprobador_correo` significa **«el correo de mi jefe
+inmediato»**. No hay tabla de jerarquía ni segundo aprobador guardado en el
+maestro: el segundo se **deriva subiendo un escalón**, que es lo que hace que el
+árbol exista una sola vez y no pueda desincronizarse consigo mismo.
+
+Las reglas viven en `apps/hub-api/src/ausencias/jerarquia.ts`, puro y con tests
+—misma convención que `saldo.ts` y `calendario.ts`—. `aprobadoresDe` devuelve
+`segundo: null` en cuatro casos: el jefe no tiene ficha **activa** (y entonces
+**no salta al abuelo**), el jefe es su propio jefe (raíz), el jefe del jefe ya
+firma primero, o el jefe del jefe es el propio solicitante. Este último corta los
+ciclos de dos: sin él, A se firmaría a sí mismo la segunda aprobación.
+
+> ⚠️ **`creariaCiclo` lleva un `Set` de visitados y no es defensivo.** Si ya hay
+> un ciclo en la base de datos ajeno al empleado que se edita, un recorrido sin
+> visitados deja un handler de Express girando para siempre — no es un error que
+> se vea, es un cuelgue. Hay un test con `timeout` que lo convierte en un fallo.
+
+Un ciclo que ya esté en la base de datos **no bloquea la edición**: bloquearla lo
+haría imposible de deshacer desde el panel. Se avisa en ámbar y `aprobadoresDe`
+lo corta.
+
+### Los firmantes se congelan en el alta
+
+La solicitud guarda `aprobador_correo` y `segundo_aprobador_correo` en el momento
+de crearse. Mover el organigrama **no mueve nada que ya esté en trámite**. La
+fuente de verdad sigue siendo el árbol de `empleados`; esto es una foto.
+
+`aprobador_correo` **no rota** al avanzar de nivel: se lee en `SELECT_SOLICITUD`,
+`adjuntoPorId`, `avisoAprobador` y `puedeVerAdjunto`, y rotarlo perdería al primer
+firmante (con tokens legacy las columnas `*_user_id` son NULL, así que la traza
+real son los correos). El turno se deriva del estado, no de quién aparece dónde.
+
+`aprobador_user_id` y `decidida_at` siguen significando **la decisión final**, así
+que ninguna fila anterior cambió de sentido; la primera firma tiene sus propias
+columnas. Con una sola firma se rellenan las dos parejas, para que ninguna
+consulta de auditoría necesite un `COALESCE`.
+
+### Tres cosas que no se pueden tocar sin romper algo en silencio
+
+1. **El UPDATE de `decidirSolicitud` se condiciona al estado que se leyó**
+   (`WHERE estado = $7`), no a un `IN ('pendiente','pendiente_2')`. La lista sería
+   igual de atómica y destruiría el 409: dos clics simultáneos del jefe leen los
+   dos `pendiente`, pasan los dos el guard, y encadenarían
+   `pendiente → pendiente_2 → aprobada` **con una sola persona firmando las dos
+   veces**. No hay test que lo cubra —dos peticiones por HTTP no llegan a
+   solaparse contra el doble en memoria, y el SQL real necesita Postgres—; solo
+   está fijado el cableado, que el servicio pasa el estado que leyó.
+2. **`puedeDecidir` separa las ramas por estado.** Escribirlo como un `OR` de los
+   dos correos —que es la forma más natural— deja al segundo aprobador firmar una
+   solicitud que su jefe todavía no ha visto: la cascada desaparece sin que nada
+   falle. En estado terminal sí pasan los dos, para que gane el 409 sobre el 403.
+3. **`enTramite` del saldo suma los DOS estados.** `sumar` comparaba un estado
+   exacto: con `pendiente_2` fuera, la media firma no sumaba en ningún sitio y
+   desaparecía del saldo, ni en trámite ni disfrutada.
+
+### El mantenimiento del árbol
+
+Se hace en el **panel de organigrama** de la pestaña *Empleados*
+(`PanelOrganigrama.tsx`, con el patrón de `PanelSaldos.tsx`), contra
+`PUT /ausencias/empleados/:id/jefe`. Autoasignarse es cómo se declara la raíz, no
+un ciclo prohibido. El buzón por defecto se acepta aunque no tenga ficha de
+empleado: es de quien cuelga toda la plantilla hoy.
+
+> ⚠️ **La importación de la hoja ya NO escribe `aprobador_correo`**, y no puede
+> volver a hacerlo. El `DO UPDATE SET` del upsert lo pisaba con `EXCLUDED`, que
+> viene con el `COALESCE` al buzón por defecto ya aplicado; como el parser del
+> navegador manda cuatro columnas, cada reimportación devolvía a toda la plantilla
+> al buzón por defecto y borraba el árbol entero. No se puede condicionar: dentro
+> del `DO UPDATE` no se ve el alias de la SELECT y `EXCLUDED` no distingue «no
+> vino» de «vino el valor por defecto». **La hoja de Google no es la fuente de
+> verdad del organigrama.**
+
+### Lo que no cubre ningún test
+
+No hay tests en el frontend de esta app. Dos sitios hay que mirarlos con los ojos
+tras desplegar, y los dos fallan enseñando algo plausible en vez de romperse:
+
+- **La atenuación del calendario** (`Calendario.tsx`) usa `enTramite(...)`, no
+  `=== 'pendiente'`. Con la comparación directa, media firma se pinta sólida:
+  **idéntica a una aprobada**.
+- **El chip del estado** se pide con `chipDe(...)`, que degrada a gris si no
+  conoce el estado. Con el acceso directo al `Record`, un estado desconocido da
+  `undefined` y **revienta la tabla entera** al leer `chip.clase`.
+
 ## Calendario
 
 La pestaña *Calendario* es una rejilla persona × día: quién está fuera y
@@ -332,6 +438,15 @@ equipo no sirve para coordinarse.
 
 1. `git push origin main` y **redesplegar hub-api** (corre la migración 015) y
    luego el **portal**. Son dos servicios distintos; commit local ≠ desplegado.
+
+   > ⚠️ **Para la aprobación en cascada el orden es el CONTRARIO: primero el
+   > portal, después hub-api.** Si hub-api va delante, el bundle viejo del portal
+   > recibe `estado: 'pendiente_2'` y —antes de que existiera `chipDe`— reventaba
+   > la tabla entera para todo el que tuviera algo en trámite. Al revés no pasa
+   > nada: los campos nuevos llegan como `undefined` y la app degrada a un solo
+   > nivel; solo el botón «Guardar» del organigrama da 404 unos minutos, en una
+   > pestaña de admin. La regla general: **quien primero deja de entender al otro
+   > va detrás.**
 2. Variables nuevas en hub-api: `AUSENCIAS_CRON_TOKEN`, `PORTAL_URL` y
    `AUSENCIAS_WEBHOOK_URL`
    (`https://<n8n>/webhook/ausencias-aviso`; sin ella todo funciona, solo que el
@@ -350,14 +465,20 @@ equipo no sirve para coordinarse.
 6. Activar el workflow **«Ausencias — Portal»** en n8n.
 7. Convivencia: dejar el flujo viejo (`mt75OpO0fGIXv5QG`) activo unos días y
    **desactivarlo** —no borrarlo— cuando el nuevo lleve una semana sin incidencias.
+8. *(Cascada)* **Se despliega apagada y se enciende sola.** Toda la plantilla
+   cuelga hoy de `comercial@ambientalia.com.co`, y ese buzón es su propio jefe por
+   el mismo DEFAULT: raíz, luego `segundo = null` para todo el mundo y una sola
+   firma, exactamente como antes. La cascada se activa persona a persona según se
+   rellena el organigrama en *Empleados*. No hay big bang: desplegar, comprobar
+   que nada cambió, y empezar por una sola persona de prueba.
 
 ## Pendiente (backlog)
 
 - Cargar los saldos iniciales del consolidado (nombre, días y a qué fecha son
   válidos) en la pestaña *Saldos*. Hasta entonces todo el mundo aparece como
   "sin configurar", que es el comportamiento correcto.
-- Aprobación por jefe directo. El campo `aprobador_correo` ya deja el hueco; hoy
-  todo va a `comercial@ambientalia.com.co`.
+- Rellenar el organigrama en *Empleados*. Hasta que se haga, todo el mundo cuelga
+  del buzón por defecto y firma una sola persona.
 - Retirar la copia a Google Sheets cuando Nómina consulte solo el portal.
 - Widget de dashboard con las ausencias del mes.
 - `drive_file_id` se queda en NULL: el endpoint `/n8n/confirmado` acepta
