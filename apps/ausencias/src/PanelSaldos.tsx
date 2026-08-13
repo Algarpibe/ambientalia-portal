@@ -48,7 +48,12 @@ interface Props {
 export default function PanelSaldos({ activo }: Props) {
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [filas, setFilas] = useState<Record<string, Fila>>({});
-  const [cargando, setCargando] = useState(false);
+  // Arranca en true aunque la carga sea diferida: con false, «aún no he pedido
+  // nada» y «la empresa no tiene empleados» renderizan lo mismo, y al abrir la
+  // pestaña se vería un fotograma diciendo «No hay empleados activos» antes de
+  // que corra el efecto. Mientras la pestaña está cerrada el panel va oculto,
+  // así que da igual lo que renderice.
+  const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Solo se marca en el `.then`, no al arrancar el fetch: así, si React
   // cancela y reintenta el efecto (StrictMode en desarrollo), el segundo
