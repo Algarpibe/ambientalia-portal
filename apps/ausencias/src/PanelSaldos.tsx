@@ -99,6 +99,15 @@ export default function PanelSaldos({ activo }: Props) {
   async function guardar(empleadoId: string) {
     const fila = filas[empleadoId];
     if (!fila) return;
+    // El corte va aquí y no solo en el `disabled` del botón porque Enter llama a
+    // esto directamente: sin él, teclear Enter sobre una fila intacta mandaría un
+    // PUT que no cambia nada y pintaría un tick de «guardado» que no significa
+    // nada.
+    const guardado = saldos.find((s) => s.empleadoId === empleadoId);
+    if (guardado) {
+      const original = filaInicial(guardado);
+      if (fila.saldoCorte === original.saldoCorte && fila.fechaCorte === original.fechaCorte) return;
+    }
     actualizar(empleadoId, { guardando: true, error: null, exito: false });
     try {
       // Se manda la cadena tal cual (recortada), NO Number(): la validación de
@@ -187,6 +196,18 @@ export default function PanelSaldos({ activo }: Props) {
               <tbody className="divide-y divide-gray-100">
                 {saldos.map((s) => {
                   const fila = filas[s.empleadoId] ?? filaInicial(s);
+                  // Se compara contra `filaInicial(s)` y no contra los campos del
+                  // saldo: así la normalización (el vacío de «sin configurar», el
+                  // String del número) es exactamente la misma en los dos lados y
+                  // no hay una segunda regla que pueda desviarse de la primera.
+                  //
+                  // Teclear «18,9» donde había «18.9» cuenta como cambio: es otro
+                  // texto, y guardarlo es idempotente. Es el lado seguro del error
+                  // — apagar el botón sobre algo que el usuario cree haber
+                  // cambiado sería mucho peor.
+                  const guardado = filaInicial(s);
+                  const haCambiado =
+                    fila.saldoCorte !== guardado.saldoCorte || fila.fechaCorte !== guardado.fechaCorte;
                   return (
                     <tr key={s.empleadoId} className="align-top hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-900">{s.nombreCompleto}</td>
@@ -222,10 +243,14 @@ export default function PanelSaldos({ activo }: Props) {
                         <div className="flex flex-col items-end gap-1">
                           <button
                             type="button"
-                            disabled={fila.guardando}
+                            // Apagado mientras no haya nada que guardar: en una
+                            // tabla de una fila por persona, un botón activo en
+                            // todas invita a pulsar el de al lado por error — y
+                            // aquí el de al lado es el saldo de otro.
+                            disabled={fila.guardando || !haCambiado}
                             onClick={() => void guardar(s.empleadoId)}
                             aria-label={`Guardar el saldo de ${s.nombreCompleto}`}
-                            className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
+                            className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                           >
                             {fila.guardando ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
