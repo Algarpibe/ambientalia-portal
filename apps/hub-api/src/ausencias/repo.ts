@@ -208,7 +208,14 @@ export async function importarEmpleados(db: Pool, filas: FilaEmpleado[]): Promis
        nombre_completo  = EXCLUDED.nombre_completo,
        cargo            = EXCLUDED.cargo,
        credencial       = EXCLUDED.credencial,
-       aprobador_correo = EXCLUDED.aprobador_correo,
+       -- OJO: aprobador_correo NO se actualiza, a propósito. Es el organigrama, y
+       -- se mantiene en el panel de «Empleados». El parser del navegador manda
+       -- solo cuatro columnas y el COALESCE de arriba rellena con el buzón por
+       -- defecto, así que aquí es imposible distinguir «no vino la columna» de
+       -- «vino el valor por defecto»: EXCLUDED ya lo trae aplicado y el DO UPDATE
+       -- no ve el alias f de la SELECT. Con el upsert anterior, cada reimportación
+       -- de la hoja devolvía a toda la plantilla al buzón por defecto y borraba el
+       -- árbol entero. En el INSERT (alta nueva) sí se respeta lo que venga.
        -- Nunca se borra un vínculo ya establecido: si la cuenta del portal aún
        -- no existía al importar, EXCLUDED.user_id es NULL y se conserva el actual.
        user_id          = COALESCE(EXCLUDED.user_id, portal.empleados.user_id),
