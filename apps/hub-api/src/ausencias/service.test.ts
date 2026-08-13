@@ -244,4 +244,61 @@ describe('validarSaldo', () => {
     expect(() => validarSaldo({ saldoCorte: 10, fechaCorte: null })).toThrow(AusenciaError);
     expect(() => validarSaldo({ saldoCorte: null, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
   });
+
+  it('en la configuración a medias, señala el campo que falta y no el que sí llegó', () => {
+    // Si señalara el que sí llegó, la interfaz resaltaría como culpable
+    // justo el campo que el admin rellenó bien.
+    expect(() => validarSaldo({ saldoCorte: 10, fechaCorte: null })).toThrow(
+      expect.objectContaining({ field: 'fechaCorte' }),
+    );
+    expect(() => validarSaldo({ saldoCorte: null, fechaCorte: '2026-08-12' })).toThrow(
+      expect.objectContaining({ field: 'saldoCorte' }),
+    );
+  });
+
+  it('rechaza espacios en blanco como saldo, aunque Number() los acepte como 0', () => {
+    // Camino de usuario real: el panel de admin usa `type="text"` y teclear
+    // solo espacios y guardar no debe colar un saldo de 0 días con un 200.
+    expect(() => validarSaldo({ saldoCorte: '  ', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '\t\n', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  });
+
+  it('rechaza un array como saldo, que Number() aceptaría vía toString', () => {
+    expect(() => validarSaldo({ saldoCorte: [], fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: [5], fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  });
+
+  it('rechaza hexadecimal y notación científica, que Number() entiende pero nadie teclea a mano', () => {
+    expect(() => validarSaldo({ saldoCorte: '0x10', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '1e2', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  });
+
+  it('sigue aceptando lo que ya funcionaba bien', () => {
+    expect(validarSaldo({ saldoCorte: '12,5', fechaCorte: '2026-08-12' }).saldoCorte).toBe(12.5);
+    expect(validarSaldo({ saldoCorte: 0, fechaCorte: '2026-08-12' }).saldoCorte).toBe(0);
+    expect(validarSaldo({ saldoCorte: '0', fechaCorte: '2026-08-12' }).saldoCorte).toBe(0);
+    expect(validarSaldo({ saldoCorte: 999, fechaCorte: '2026-08-12' }).saldoCorte).toBe(999);
+  });
+
+  it('sigue rechazando lo que ya rechazaba bien', () => {
+    expect(() => validarSaldo({ saldoCorte: '12.5abc', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: true, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: {}, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: '-5', fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldoCorte: Infinity, fechaCorte: '2026-08-12' })).toThrow(AusenciaError);
+  });
+
+  it('rechaza una fecha que no sea string, aunque String() la convierta a algo con forma de fecha', () => {
+    expect(() => validarSaldo({ saldoCorte: 10, fechaCorte: ['2026-08-12'] })).toThrow(AusenciaError);
+  });
+
+  it('vacía la configuración solo si las dos claves están presentes y en null', () => {
+    // Un body sin las claves esperadas no debe colarse como «las dos vacías»:
+    // un renombrado de campo en el front (`saldo`/`fecha` en vez de
+    // `saldoCorte`/`fechaCorte`) borraría en silencio un saldo ya configurado.
+    expect(() => validarSaldo(null)).toThrow(AusenciaError);
+    expect(() => validarSaldo({})).toThrow(AusenciaError);
+    expect(() => validarSaldo('hola')).toThrow(AusenciaError);
+    expect(() => validarSaldo({ saldo: 12.5, fecha: '2026-08-12' })).toThrow(AusenciaError);
+  });
 });

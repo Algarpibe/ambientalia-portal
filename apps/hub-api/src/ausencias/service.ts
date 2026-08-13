@@ -356,30 +356,73 @@ export interface SaldoAFijar {
   fechaCorte: string | null;
 }
 
+/**
+ * Un saldo en texto: solo dígitos y, como mucho, una coma o un punto decimal.
+ *
+ * Se comprueba la FORMA antes de convertir porque `Number()` es demasiado
+ * permisivo para tratarlo como la respuesta a un formulario: acepta espacios
+ * en blanco como 0 (`Number('  ') === 0`), hexadecimal (`Number('0x10') ===
+ * 16`) y notación científica (`Number('1e2') === 100`). El panel de admin usa
+ * `type="text"` —hace falta para admitir la coma decimal, que un
+ * `type="number"` rechaza en la mayoría de locales—, así que cualquiera de
+ * esas rarezas puede llegar tal cual desde el campo.
+ */
+const RE_SALDO = /^\d{1,3}([.,]\d+)?$/;
+
 /** Valida a mano lo que llega del cliente; en este repo no hay zod. */
 export function validarSaldo(body: unknown): SaldoAFijar {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const saldoVacio = b.saldoCorte === null || b.saldoCorte === undefined || b.saldoCorte === '';
-  const fechaVacia = b.fechaCorte === null || b.fechaCorte === undefined || b.fechaCorte === '';
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+
+  // El operador `in` mira la CLAVE, no el valor: así se distingue «vaciar a
+  // propósito» (las dos claves presentes y en null) de «el body no trae las
+  // claves que se esperan» (un `{}`, o un renombrado en el front como
+  // `{saldo: 20, fecha: '...'}`). Mirando solo el valor, los dos casos
+  // colapsarían en el mismo `undefined` y un renombrado borraría en silencio
+  // un saldo ya configurado.
+  const saldoPresente = 'saldoCorte' in b;
+  const fechaPresente = 'fechaCorte' in b;
+  if (!saldoPresente || !fechaPresente) {
+    throw new AusenciaError('saldo_incompleto', 400, !saldoPresente ? 'saldoCorte' : 'fechaCorte');
+  }
+
+  const saldoVacio = b.saldoCorte === null || b.saldoCorte === '';
+  const fechaVacia = b.fechaCorte === null || b.fechaCorte === '';
 
   // Vaciar la configuración es legítimo: devuelve al empleado a «sin configurar».
   if (saldoVacio && fechaVacia) return { saldoCorte: null, fechaCorte: null };
   // A medias, no: es justo lo que impide el CHECK de la BD, y aquí el mensaje
-  // se puede explicar.
-  if (saldoVacio || fechaVacia) throw new AusenciaError('saldo_incompleto', 400, 'saldoCorte');
+  // se puede explicar. El campo señalado es el que FALTA, no el que sí llegó
+  // (si no, la interfaz resaltaría el campo que el admin rellenó bien).
+  if (saldoVacio || fechaVacia) {
+    throw new AusenciaError('saldo_incompleto', 400, saldoVacio ? 'saldoCorte' : 'fechaCorte');
+  }
 
-  const saldo =
-    typeof b.saldoCorte === 'number' ? b.saldoCorte : Number(String(b.saldoCorte).replace(',', '.'));
+  // Se exige el tipo ANTES de convertir: un array no debe llegar siquiera a
+  // `String()` (que lo aplanaría a su primer elemento, o a "", y las dos
+  // formas parecen un número válido para lo que sigue).
+  if (typeof b.saldoCorte !== 'number' && typeof b.saldoCorte !== 'string') {
+    throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
+  }
+  let saldo: number;
+  if (typeof b.saldoCorte === 'number') {
+    saldo = b.saldoCorte;
+  } else {
+    if (!RE_SALDO.test(b.saldoCorte)) throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
+    saldo = Number(b.saldoCorte.replace(',', '.'));
+  }
   if (!Number.isFinite(saldo) || saldo < 0 || saldo > MAX_SALDO) {
     throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
   }
 
-  // `esFechaValida` descarta de paso los valores mágicos de Postgres
-  // (`'infinity'`, `'today'`), que la columna DATE aceptaría sin rechistar.
-  const fecha = String(b.fechaCorte);
-  if (!esFechaValida(fecha)) throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
+  // Mismo defecto de rebote que en el saldo: un array como `['2026-08-12']`
+  // pasaría igual por `String()`, así que se exige el tipo antes de mirar el
+  // contenido. `esFechaValida` descarta de paso los valores mágicos de
+  // Postgres (`'infinity'`, `'today'`), que la columna DATE aceptaría sin
+  // rechistar.
+  if (typeof b.fechaCorte !== 'string') throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
+  if (!esFechaValida(b.fechaCorte)) throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
 
-  return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: fecha };
+  return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: b.fechaCorte };
 }
 
 /** El saldo de un empleado, listo para enseñar. */
@@ -438,9 +481,22 @@ export async function saldosVisibles(db: Pool, sesion: Sesion): Promise<SaldoDeE
   return combinar(empleados, vacaciones, hoyEnColombia());
 }
 
-/** El saldo del usuario logueado. Va dentro del contexto que carga la app. */
+/**
+ * El saldo del usuario logueado. Va dentro del contexto que carga la app.
+ *
+ * No comprueba que `empleado` sea el de la sesión que llama —no tiene con qué:
+ * solo recibe la ficha, no la sesión—, así que esa garantía de privacidad vive
+ * ENTERA en el llamante (que debe sacarla de `empleadoDeSesion`, nunca de un
+ * id que decida el cliente). Pasarle la ficha de otro devuelve el saldo de ese
+ * otro sin rechistar.
+ */
 export async function saldoDeSesion(db: Pool, empleado: Empleado): Promise<SaldoVacaciones> {
   const [fila] = await repo.empleadosConSaldo(db, null, empleado.id);
+  // Sin fila —la ficha se desactivó después de que la sesión ya estuviera
+  // abierta, por ejemplo— se devuelve un saldo en blanco en vez de lanzar:
+  // esto viaja dentro del contexto que carga la app entera, y un 500 aquí
+  // tumbaría toda la sesión por un dato que ni siquiera es crítico para poder
+  // navegar.
   if (!fila) return calcularSaldo(null, [], hoyEnColombia());
   const vacaciones = await repo.vacacionesDeEmpleados(db, [empleado.id]);
   return combinar([fila], vacaciones, hoyEnColombia())[0].saldo;
