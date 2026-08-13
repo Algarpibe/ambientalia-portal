@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
 import { fetchSaldos, fijarSaldo, type SaldoDeEmpleado } from './api';
+import { formatDias } from './dominio';
 
 // El panel donde un admin teclea el punto de partida de cada persona. Es la
 // vía por la que entran los saldos que hoy viven en un Excel, y la que
 // permite dar de alta a quien entre nuevo o corregir un número mal puesto sin
 // pasar por psql.
-
-/** Un decimal, y sin el «,0» cuando es entero — igual que en TarjetaSaldo. */
-function dias(n: number): string {
-  return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
-}
 
 interface Fila {
   saldoCorte: string;
@@ -237,7 +233,7 @@ export default function PanelSaldos({ activo }: Props) {
                         />
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">
-                        {s.saldo.configurado ? dias(s.saldo.disponible) : <span className="text-gray-300">—</span>}
+                        {s.saldo.configurado ? formatDias(s.saldo.disponible) : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
                         <div className="flex flex-col items-end gap-1">
