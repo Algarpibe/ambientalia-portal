@@ -84,6 +84,11 @@ export function createAusenciasRouter(db: Pool): Router {
       }
       res.json({
         empleado,
+        // El nombre de quien aprueba, para poder decir «Fulano recibirá el aviso»
+        // en vez de soltarle un buzón a quien manda la solicitud. Null si ese
+        // correo no tiene ficha activa —el aprobador por defecto puede no
+        // tenerla—, y entonces la app cae de vuelta al correo.
+        aprobadorNombre: empleado ? await repo.nombreDeCorreo(db, empleado.aprobadorCorreo) : null,
         // El correo de la sesión: si no hay ficha de empleado, la UI lo enseña
         // para que se sepa exactamente qué correo hay que dar de alta.
         email: sesion.email,

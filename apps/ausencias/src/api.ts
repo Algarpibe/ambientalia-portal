@@ -67,6 +67,8 @@ export interface Solicitud {
 
 export interface Contexto {
   empleado: Empleado | null;
+  /** Nombre de quien le aprueba. Null si ese correo no tiene ficha de empleado. */
+  aprobadorNombre: string | null;
   /** El correo de la sesión, para poder decir cuál hay que dar de alta. */
   email: string;
   esAdmin: boolean;
