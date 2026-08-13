@@ -260,6 +260,10 @@ export function leerComoBase64(file: File): Promise<string> {
   });
 }
 
+/** Lo que a quien pregunta le tocaba firmar y ya está cerrado. */
+export const fetchDecididas = () =>
+  get<{ solicitudes: Solicitud[] }>('/api/ausencias/decididas').then((d) => d.solicitudes);
+
 /** Los saldos que puede ver quien pregunta: todos si es admin, si no los suyos. */
 export const fetchSaldos = () =>
   get<{ saldos: SaldoDeEmpleado[] }>('/api/ausencias/saldos').then((d) => d.saldos);

@@ -13,6 +13,7 @@ import { enTramite } from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
+import HistorialAprobador from './HistorialAprobador';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
@@ -21,7 +22,7 @@ import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
 
-type Pestana = 'nueva' | 'mias' | 'bandeja' | 'empleados' | 'saldos' | 'historico' | 'calendario';
+type Pestana = 'nueva' | 'mias' | 'bandeja' | 'historial' | 'empleados' | 'saldos' | 'historico' | 'calendario';
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -34,6 +35,9 @@ export default function App() {
   // Se incrementa al importar para que el registro general se recargue sin
   // desmontarlo (y sin perder los filtros que tuviera puestos).
   const [recargarRegistro, setRecargarRegistro] = useState(0);
+  // Lo mismo para el historial del aprobador: acabar de decidir algo tiene que
+  // hacer que aparezca ahí, no en la siguiente recarga de la app.
+  const [recargarHistorial, setRecargarHistorial] = useState(0);
 
   useEffect(() => {
     let vivo = true;
@@ -80,7 +84,10 @@ export default function App() {
     // un admin ve a la plantilla entera, el resto su propia fila— y ese recorte
     // lo hace hub-api en el SQL, no esta lista.
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
-    if (contexto?.esAprobador) p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
+    if (contexto?.esAprobador) {
+      p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
+      p.push(['historial', 'Historial de aprobaciones']);
+    }
     if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
     return p;
   }, [contexto, pendientes.length]);
@@ -120,6 +127,8 @@ export default function App() {
       enTramite(s.estado) && meSigueTocando ? ps.map((p) => (p.id === s.id ? s : p)) : ps.filter((p) => p.id !== s.id),
     );
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
+    // Si con esta firma la solicitud queda cerrada, pasa a estar en el historial.
+    if (!enTramite(s.estado)) setRecargarHistorial((n) => n + 1);
     // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
     // disponible de esa persona, y otra fila suya en la bandeja seguiría
     // mostrando el número de antes de esta decisión. Se llega aquí solo desde
@@ -224,9 +233,14 @@ export default function App() {
           )}
 
           {contexto.esAprobador && (
-            <div className={tab === 'bandeja' ? '' : 'hidden'}>
-              <BandejaAprobacion solicitudes={pendientes} saldos={saldos} onDecidida={onDecidida} onError={setError} />
-            </div>
+            <>
+              <div className={tab === 'bandeja' ? '' : 'hidden'}>
+                <BandejaAprobacion solicitudes={pendientes} saldos={saldos} onDecidida={onDecidida} onError={setError} />
+              </div>
+              <div className={tab === 'historial' ? '' : 'hidden'}>
+                <HistorialAprobador activo={tab === 'historial'} recargarToken={recargarHistorial} />
+              </div>
+            </>
           )}
 
           {contexto.esAdmin && (

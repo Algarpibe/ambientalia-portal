@@ -126,6 +126,19 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El historial de decisiones de quien pregunta. Sin `requireAdmin` y sin guard
+   * de aprobador: va acotado a su propio correo, así que quien no apruebe a nadie
+   * recibe una lista vacía en vez de un 403 que no aportaría nada.
+   */
+  router.get('/ausencias/decididas', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json({ solicitudes: await service.decididasPorMi(db, sesionDe(req)) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_decididas');
+    }
+  });
+
   router.post('/ausencias/solicitudes/:id/decision', ...gated, async (req: Request, res: Response) => {
     try {
       res.json(await service.decidir(db, sesionDe(req), req.params.id, req.body));

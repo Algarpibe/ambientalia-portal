@@ -97,3 +97,24 @@ export function formatFecha(iso: string): string {
     timeZone: 'UTC',
   });
 }
+
+/**
+ * Un instante (un `timestamptz` de la BD, como `decididaAt`) en hora de Colombia.
+ *
+ * No vale `formatFecha`: espera `YYYY-MM-DD` y le concatena `T00:00:00Z`, así que
+ * con un timestamp completo devuelve «Invalid Date». Y tampoco vale cortar los
+ * diez primeros caracteres, que es lo que primero se piensa: el servidor guarda
+ * en UTC y Colombia es UTC−5, de modo que una decisión tomada a las 20:00 en
+ * Bogotá se vería fechada al día siguiente.
+ */
+export function formatInstante(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('es-CO', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'America/Bogota',
+  });
+}

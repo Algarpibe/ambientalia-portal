@@ -1,17 +1,25 @@
 import { Paperclip } from 'lucide-react';
 import { descargarAdjunto, type Solicitud } from './api';
-import { chipDe, ETIQUETA_TIPO, formatFecha } from './dominio';
+import { chipDe, ETIQUETA_TIPO, formatFecha, formatInstante } from './dominio';
 
 interface Props {
   solicitudes: Solicitud[];
   /** Muestra la columna de quién solicita (la bandeja del aprobador la necesita). */
   mostrarSolicitante?: boolean;
+  /** Muestra cuándo se cerró la solicitud (el historial del aprobador la necesita). */
+  mostrarDecidida?: boolean;
   /** Contenido de la última columna: los botones de decisión, si los hay. */
   acciones?: (s: Solicitud) => React.ReactNode;
   vacio: string;
 }
 
-export default function TablaSolicitudes({ solicitudes, mostrarSolicitante, acciones, vacio }: Props) {
+export default function TablaSolicitudes({
+  solicitudes,
+  mostrarSolicitante,
+  mostrarDecidida,
+  acciones,
+  vacio,
+}: Props) {
   if (solicitudes.length === 0) {
     return <p className="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500">{vacio}</p>;
   }
@@ -28,6 +36,7 @@ export default function TablaSolicitudes({ solicitudes, mostrarSolicitante, acci
             <th className="px-4 py-3 text-right font-medium">Días</th>
             <th className="px-4 py-3 font-medium">Comentarios</th>
             <th className="px-4 py-3 font-medium">Estado</th>
+            {mostrarDecidida && <th className="px-4 py-3 font-medium">Decidida</th>}
             {acciones && <th className="px-4 py-3 font-medium" />}
           </tr>
         </thead>
@@ -65,6 +74,11 @@ export default function TablaSolicitudes({ solicitudes, mostrarSolicitante, acci
                   </span>
                   {s.motivoRechazo && <div className="mt-1 max-w-xs text-xs text-gray-500">{s.motivoRechazo}</div>}
                 </td>
+                {mostrarDecidida && (
+                  <td className="whitespace-nowrap px-4 py-3 text-gray-600">
+                    {formatInstante(s.decididaAt) || <span className="text-gray-300">—</span>}
+                  </td>
+                )}
                 {acciones && <td className="px-4 py-3">{acciones(s)}</td>}
               </tr>
             );

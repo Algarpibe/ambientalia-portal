@@ -23,8 +23,9 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 
 ## Piezas
 
-- **Frontend**: `apps/ausencias/` — pestañas *Nueva solicitud*, *Mis solicitudes*,
-  *Pendientes de aprobar* (si eres aprobador o admin) y *Empleados* (solo admin).
+- **Frontend**: `apps/ausencias/` — pestañas *Nueva solicitud*, *Mis solicitudes*
+  y *Calendario*; *Pendientes de aprobar* e *Historial de aprobaciones* si eres
+  aprobador o admin; *Empleados*, *Saldos* y *Registro general* solo admin.
 - **Backend**: `apps/hub-api/src/ausencias/`
   - `festivos.ts` / `dias-habiles.ts` — el cálculo, con tests.
   - `saldo.ts` / `calendario.ts` / `jerarquia.ts` — módulos puros, con tests.
@@ -113,7 +114,8 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `GET` | `/api/ausencias/contexto` | `requireAuth` + `requireApp('ausencias')` |
 | `POST` | `/api/ausencias/solicitudes` | idem |
 | `GET` | `/api/ausencias/mis-solicitudes` | idem |
-| `GET` | `/api/ausencias/pendientes` | idem |
+| `GET` | `/api/ausencias/pendientes` | idem — solo lo que le toca firmar AHORA |
+| `GET` | `/api/ausencias/decididas` | idem — lo que le tocaba firmar y ya está cerrado |
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, sus **dos** aprobadores o admin |
@@ -308,6 +310,34 @@ consulta de auditoría necesite un `COALESCE`.
 3. **`enTramite` del saldo suma los DOS estados.** `sumar` comparaba un estado
    exacto: con `pendiente_2` fuera, la media firma no sumaba en ningún sitio y
    desaparecía del saldo, ni en trámite ni disfrutada.
+
+### El historial del aprobador
+
+*Pendientes de aprobar* solo enseña lo que toca firmar **ahora**, así que al
+decidir algo desaparecía de la vista y no volvía a aparecer en ningún sitio: un
+aprobador no tenía forma de responder a «¿qué le aprobé a esta persona en marzo?».
+La pestaña *Historial de aprobaciones* (`GET /ausencias/decididas`) lo cubre.
+
+Dos decisiones que conviene no revertir sin pensarlo:
+
+- **Filtra por el correo congelado en la solicitud, no por quién pulsó el botón.**
+  `aprobador_user_id` sería más preciso, pero es NULL en las sesiones con token
+  legacy: filtrar por él dejaría el historial vacío sin decir por qué. Además una
+  solicitud que un admin destrabó en su lugar sigue siendo suya —estuvo en su
+  bandeja— y esconderla haría el historial incompleto.
+- **Va acotado al propio correo también para un admin.** Para verlo todo está
+  *Registro general*; que esta pestaña enseñara la empresa entera la convertiría
+  en un duplicado peor de aquella.
+
+⚠️ El `ORDER BY` lleva `NULLS LAST`: el `PATCH` de admin puede dejar una fila en
+estado terminal sin tocar `decidida_at`, y sin eso esas filas encabezarían la
+lista por delante de las decisiones de esta semana.
+
+⚠️ La columna «Decidida» usa `formatInstante`, no `formatFecha`. La segunda
+espera `YYYY-MM-DD` y le concatena `T00:00:00Z`, así que con un `timestamptz`
+devuelve «Invalid Date»; y cortar los diez primeros caracteres —lo que primero se
+piensa— fecharía al día siguiente todo lo decidido después de las 19:00 hora de
+Colombia.
 
 ### El mantenimiento del árbol
 
