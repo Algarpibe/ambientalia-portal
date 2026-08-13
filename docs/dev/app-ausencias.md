@@ -104,6 +104,8 @@ nadie ve. `intentos` en `portal.ausencias_outbox` delata un evento atascado.
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — solo dueño, aprobador o admin |
+| `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador solo a los suyos |
+| `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/empleados[/import\|/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,adjunto/:id,confirmado}` | `requireCronToken` |
 
@@ -135,10 +137,99 @@ reimportar es inocuo, así que corregir el maestro y volver a pasar el fichero e
 el camino natural. La UI llama primero con `dryRun` y solo importa tras enseñar
 el recuento.
 
-> Lo que esto **no** resuelve: el saldo de vacaciones. Sale de la hoja `Total`
-> (`días trabajados / 30 × 1,25` menos las disfrutadas) y las disfrutadas viven
-> en las nueve hojas-calendario 2018-2026, no en estas cuatro pestañas. Hasta que
-> eso se migre, la hoja sigue haciendo falta para consultar saldos.
+> El saldo de vacaciones no sale de aquí: estas cuatro pestañas traen el
+> histórico de solicitudes, no el consolidado de días disponibles. Ese vive en
+> la hoja `Total`, y de ahí sale la configuración por empleado que se explica
+> en la siguiente sección.
+
+## Saldo de vacaciones
+
+Última pieza para poder desenchufar `consulta_vacaciones`: cada empleado y
+quien aprueba ven, dentro de la app, cuántos días le quedan.
+`apps/hub-api/src/ausencias/saldo.ts` es el cálculo — puro, sin `Pool`, para
+que se pueda probar sin BD.
+
+**La fórmula no parte de la fecha de ingreso.** El Excel calcula
+`días trabajados / 30 × 1,25` desde el ingreso; lo implementado hace otra
+cosa: parte del saldo que hoy vive en la hoja `Total` (`saldo_corte` a
+`fecha_corte`, migración `017_saldo_vacaciones.sql`) y sigue devengando desde
+ahí:
+
+```
+saldo(hoy) = saldo_corte + (días desde el corte / 30) × 1,25 − disfrutadas desde el corte
+```
+
+Es algebraicamente idéntica a recalcular desde el ingreso —el devengo es
+proporcional al tiempo y a la MISMA tasa para todos, sin tramos por
+antigüedad— y ahorra reunir quince fechas de contratación y parsear las nueve
+hojas-calendario 2018-2026 (369 columnas cada una) donde viven las vacaciones
+disfrutadas históricas.
+
+**La fecha de corte es la frontera, y se descuenta por fecha de inicio, no por
+`origen`.** Se resta toda solicitud de vacaciones cuya `fecha_inicio` sea
+igual o posterior a `fecha_corte`, venga del portal o del histórico importado
+de la hoja. Se decidió así y no filtrando por `origen = 'portal'` porque el
+histórico trae filas con fecha posterior al corte que el consolidado del
+Excel todavía no tenía descontadas; filtrar por origen las habría dejado
+fuera y el saldo habría salido alto.
+
+> ⚠️ **El gotcha operativo más importante.** `fecha_corte` NO tiene por qué
+> ser hoy: es la última fecha en la que el consolidado estaba cuadrado. Si el
+> Excel no trae descontadas las vacaciones ya aprobadas para las próximas
+> semanas, hay que retrasar el corte hasta donde sí lo estaba. Ponerlo en
+> "hoy" porque es cuando se teclea es el error más fácil de cometer al cargar
+> los saldos iniciales, y descuadra el saldo de todo el mundo.
+
+**El año devenga 15,2 días, no 15 — a propósito.** `DIAS_POR_MES` en
+`saldo.ts` es 30, no 30,44, porque es lo que hace el Excel. El resultado,
+365/30 × 1,25, da 15,2 días al año en vez de 15. "Corregirlo" descuadraría
+contra el consolidado, así que se mantiene, y hay un test que fija el valor
+exacto (`el año devenga 15,2 días, no 15…`) para que nadie lo enmiende
+creyendo que es un bug.
+
+**Un empleado sin configurar no ve ningún número.** Dos columnas nuevas en
+`portal.empleados` —`saldo_corte` y `fecha_corte`— con la constraint
+`empleados_saldo_completo` (`CHECK (saldo_corte IS NULL) = (fecha_corte IS
+NULL)`) que impide dejar la configuración a medias. Como la ficha de empleado
+se crea sola al entrar en la app (`repo.asegurarEmpleado`), las dos columnas
+en NULL —"sin configurar"— es el estado por defecto de todo el que se da de
+alta. La app lo dice con esas palabras; nunca enseña un 0 disfrazado de saldo
+real. Los saldos iniciales del consolidado se teclean a mano en la pestaña
+*Saldos* (solo admin).
+
+**Qué cuenta como disfrutado.** Solo `tipo = 'vacaciones'` en
+`estado = 'aprobada'`. Las `pendiente` van a un contador aparte (`enTramite`,
+"en trámite") que NO resta del saldo firme (`disponible`), pero el aviso del
+formulario sí compara contra `disponible − enTramite`, para que nadie agote
+el saldo real mandando varias solicitudes seguidas antes de que se decida la
+primera. Permisos, compensatorios e incapacidades no tocan el saldo en
+absoluto.
+
+**Los tres endpoints:**
+
+| Endpoint | Quién |
+|---|---|
+| `GET /ausencias/contexto` | cualquiera con la app — trae el saldo del propio solicitante dentro del payload de arranque, sin llamada aparte |
+| `GET /ausencias/saldos` | admin ve a todos los empleados; un aprobador no-admin ve solo los suyos (los que tienen su correo en `aprobador_correo`) — misma regla que `repo.solicitudesPendientes` |
+| `PUT /ausencias/empleados/:id/saldo` | solo admin — fija el corte; no manda correos, igual que editar el registro general |
+
+**Dos decisiones que conviene no revertir sin pensar:**
+
+- *El saldo del contexto degrada a `null`; `GET /ausencias/saldos` no.* Si
+  `saldoDeSesion` lanza dentro de `/ausencias/contexto`, el error se registra
+  y se sigue: ahí el saldo es un campo accesorio de un payload que la app
+  necesita para arrancar (sin él tampoco habría festivos ni pestañas). En
+  `/ausencias/saldos` el saldo ES la respuesta entera, así que un fallo se
+  deja salir como 500 en vez de devolver una lista con una fila en blanco —
+  una lista de saldos incompleta sería un panel que miente por omisión, peor
+  que un error visible.
+- *El saldo viaja al backend como cadena, no como número.* El panel de admin
+  manda `saldoCorte` como `string`: si lo convirtiera con `Number()` antes de
+  mandarlo, un `'abc'` tecleado por error daría `NaN`, y `JSON.stringify(NaN)`
+  produce `null` — el backend recibiría "vaciar la configuración" en vez de
+  "esto no es un número". Mandando la cadena tal cual, la validación de forma
+  vive en un solo sitio (`validarSaldo` en `service.ts`, con su regex) y el
+  error que llega es el correcto.
 
 ## Gotchas que costaron
 
@@ -202,8 +293,9 @@ el recuento.
 
 ## Pendiente (backlog)
 
-- Saldo de días de vacaciones por empleado (hoy no existe en ninguna parte:
-  requiere el histórico completo y la fecha de ingreso).
+- Cargar los saldos iniciales del consolidado (nombre, días y a qué fecha son
+  válidos) en la pestaña *Saldos*. Hasta entonces todo el mundo aparece como
+  "sin configurar", que es el comportamiento correcto.
 - Aprobación por jefe directo. El campo `aprobador_correo` ya deja el hueco; hoy
   todo va a `comercial@ambientalia.com.co`.
 - Retirar la copia a Google Sheets cuando Nómina consulte solo el portal.
