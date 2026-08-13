@@ -305,6 +305,19 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El calendario de un mes. Bajo `...gated` y no `requireAdmin`: un calendario
+   * de plantilla que solo ve administración no sirve para coordinarse, y la
+   * decisión de producto es que todo el mundo vea quién está fuera.
+   */
+  router.get('/ausencias/calendario', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.calendarioDelMes(db, sesionDe(req), String(req.query.mes ?? '')));
+    } catch (e) {
+      sendError(res, e, 'ausencias_calendario');
+    }
+  });
+
   // ── Para n8n (auth por token de cron, no JWT) ────────────────────────────
   //
   // Mismo contrato que WO-sales: /pendiente entrega el trabajo SIN darlo por
