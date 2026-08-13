@@ -97,6 +97,15 @@ export default function PanelOrganigrama({ activo }: Props) {
   const activos = empleados.filter((e) => e.activo);
   const enCiclo = activos.filter((e) => e.enCiclo);
 
+  // Correo → nombre, para poder enseñar la segunda firma como persona y no como
+  // buzón. Se construye sobre `empleados` y no sobre `activos` para que un jefe
+  // recién desactivado siga teniendo nombre mientras la lista se recarga.
+  const nombrePorCorreo = new Map(empleados.map((e) => [e.correo.toLowerCase(), e.nombreCompleto]));
+
+  /** El nombre de quien firma, o el correo tal cual si no tiene ficha —el buzón
+   *  por defecto no la tiene, y enseñar un hueco sería peor que enseñar el correo. */
+  const quienFirma = (correo: string) => nombrePorCorreo.get(correo.toLowerCase()) ?? correo;
+
   return (
     <div className="mt-10 border-t border-gray-200 pt-8">
       <h3 className="mb-1 text-sm font-semibold text-gray-900">Organigrama</h3>
@@ -148,6 +157,10 @@ export default function PanelOrganigrama({ activo }: Props) {
               {activos.map((e) => {
                 const fila = filas[e.id];
                 if (!fila) return null;
+                // Se compara contra lo GUARDADO, no contra un flag de «tocado»:
+                // volver al valor original tras cambiar de idea vuelve a dejar el
+                // botón apagado, que es lo que la fila dice de verdad.
+                const haCambiado = fila.aprobadorCorreo !== e.aprobadorCorreo;
                 return (
                   <tr key={e.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5">
@@ -179,16 +192,23 @@ export default function PanelOrganigrama({ activo }: Props) {
                       </select>
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">
-                      {e.segundoAprobadorCorreo ?? <span className="text-gray-300">— una sola firma</span>}
+                      {e.segundoAprobadorCorreo ? (
+                        <span title={e.segundoAprobadorCorreo}>{quienFirma(e.segundoAprobadorCorreo)}</span>
+                      ) : (
+                        <span className="text-gray-300">— una sola firma</span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button
                           type="button"
-                          disabled={fila.guardando}
+                          // Apagado mientras no haya nada que guardar: en una tabla
+                          // de una fila por persona, un botón activo en todas invita
+                          // a pulsar el de al lado por error.
+                          disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           aria-label={`Guardar el jefe de ${e.nombreCompleto}`}
-                          className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-gray-300"
+                          className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >
                           {fila.guardando ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
