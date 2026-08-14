@@ -155,8 +155,10 @@ export default function PanelOrganigrama({ activo }: Props) {
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
         <span>
           Quien esté en <b>copia</b> recibirá también los acuses de <b>incapacidad</b> de esa persona, que son
-          información de salud. Ponlo solo si esa persona debe conocerla. Estar en copia no da acceso a abrir los
-          soportes en PDF: eso se controla aparte.
+          información de salud. Ponlo solo si esa persona debe conocerla. La copia <b>no</b> decide quién puede abrir
+          los soportes en PDF: eso ya lo pueden hacer el solicitante, su jefe inmediato, la segunda firma, los
+          administradores y los buzones de gerencia y administración. Poner a alguien en copia no le da esa llave, ni
+          quitarlo se la retira.
         </span>
       </p>
 
