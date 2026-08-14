@@ -313,6 +313,34 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  // ── Saldos ───────────────────────────────────────────────────────────────
+
+  /**
+   * El saldo de quien pregunta, y nada más. Existe para el widget del dashboard
+   * del portal: `/ausencias/contexto` ya trae este dato, pero arrastra con él los
+   * festivos de tres años y dos consultas más que un indicador no necesita, y la
+   * home del portal lo pagaría en cada carga.
+   *
+   * Mantiene el `asegurarEmpleado` del contexto a sabiendas de que es un UPSERT
+   * dentro de un GET. Es idempotente, y sin él quien acaba de ser dado de alta
+   * vería «sin configurar» en el widget hasta la primera vez que abriera la app
+   * — un mensaje que le mandaría a administración sin que hubiera nada que
+   * arreglar.
+   *
+   * Si el cálculo lanza sale un 500, no un saldo en blanco: aquí el saldo ES la
+   * respuesta. Mismo criterio que `/ausencias/saldos` y el contrario al de
+   * `/ausencias/contexto` (ver el JSDoc de las dos).
+   */
+  router.get('/ausencias/mi-saldo', ...gated, async (req: Request, res: Response) => {
+    try {
+      const sesion = sesionDe(req);
+      const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
+      res.json({ saldo: empleado ? await service.saldoDeSesion(db, empleado) : null });
+    } catch (e) {
+      sendError(res, e, 'ausencias_mi_saldo');
+    }
+  });
+
   /**
    * Los saldos que quien pregunta puede ver: todos si es admin, y solo los de la
    * gente que aprueba si no lo es. Sirve a la bandeja y al panel de saldos.

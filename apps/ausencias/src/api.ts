@@ -150,6 +150,14 @@ const put = <T,>(path: string, body: unknown) => conCuerpo<T>('PUT', path, body)
 
 export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
 
+/**
+ * Solo el saldo de quien pregunta. Lo usa el widget del dashboard, que no
+ * necesita el resto del contexto —festivos de tres años incluidos— y lo cargaría
+ * en cada visita a la home del portal.
+ */
+export const fetchMiSaldo = () =>
+  get<{ saldo: SaldoVacaciones | null }>('/api/ausencias/mi-saldo').then((d) => d.saldo);
+
 export const fetchMisSolicitudes = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/mis-solicitudes').then((d) => d.solicitudes);
 

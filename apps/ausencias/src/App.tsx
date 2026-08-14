@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarDays, Loader2 } from 'lucide-react';
 import {
   fetchContexto,
+  fetchMiSaldo,
   fetchMisSolicitudes,
   fetchPendientes,
   fetchSaldos,
@@ -18,7 +19,7 @@ import PanelAdjuntos from './PanelAdjuntos';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
-import TarjetaSaldo from './TarjetaSaldo';
+import IndicadorSaldo from './IndicadorSaldo';
 import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
@@ -112,19 +113,24 @@ export default function App() {
     if (pestanas.length && !pestanas.some(([id]) => id === tab)) setTab(pestanas[0][0]);
   }, [pestanas, tab]);
 
+  // Relee solo el saldo, no el contexto entero: es lo que existe
+  // `GET /ausencias/mi-saldo` para evitar. No se espera ni se propaga el error —
+  // la acción que lo dispara ya se completó, y esto solo mejora la frescura. Si
+  // falla, se queda el número anterior, que es mejor que vaciar la cabecera.
+  function refrescarSaldoPropio() {
+    fetchMiSaldo()
+      .then((saldo) => setContexto((actual) => (actual ? { ...actual, saldo } : actual)))
+      .catch(() => {});
+  }
+
   function onCreada(s: Solicitud) {
     setMias((ms) => [s, ...ms]);
     // contexto.saldo se cargó una sola vez al arrancar la app: si no se
-    // refresca aquí, la tarjeta seguiría enseñando el disponible de antes de
+    // refresca aquí, la cabecera seguiría enseñando el disponible de antes de
     // esta solicitud y no avisaría de una segunda petición sobre los mismos
-    // días (el bug que se reportó: pedir 10, luego otros 10, y que la tarjeta
-    // siga diciendo que hay 12). No se espera esta llamada ni se propaga su
-    // error: la solicitud ya se creó, y si el refresco falla simplemente se
-    // queda el saldo anterior — es una mejora de frescura, no algo de lo que
-    // dependa haber creado la solicitud.
-    fetchContexto()
-      .then((ctx) => setContexto((actual) => (actual ? { ...actual, saldo: ctx.saldo } : actual)))
-      .catch(() => {});
+    // días (el bug que se reportó: pedir 10, luego otros 10, y que siga
+    // diciendo que hay 12).
+    refrescarSaldoPropio();
   }
 
   function onDecidida(s: Solicitud) {
@@ -151,19 +157,47 @@ export default function App() {
     fetchSaldos()
       .then((s2) => setSaldos(s2))
       .catch(() => {});
+    // Y el propio, no solo los de la bandeja: un admin puede aprobar sus propias
+    // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
+    // número de antes de la decisión hasta recargar la página.
+    refrescarSaldoPropio();
   }
 
   return (
-    <main className="flex-grow bg-transparent p-6 overflow-y-auto">
-      <header className="mb-6 flex items-center gap-3">
-        <CalendarDays className="h-6 w-6 text-blue-600" />
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Vacaciones y Permisos</h1>
-          <p className="text-sm text-gray-500">
-            Solicita vacaciones, compensatorios y permisos, o informa una incapacidad. Los días hábiles descuentan
-            fines de semana y festivos de Colombia.
-          </p>
+    <main className="flex-grow bg-transparent p-6">
+      {/* Sticky contra el scroll del documento, NO del `main`: por eso este `main`
+          no lleva `overflow-y-auto`. Si lo llevara, `main` nunca desborda (su
+          altura es siempre la de su contenido, vía min-h-screen + flex-grow más
+          arriba en el árbol) y sería el scrollport más cercano al `<header>` —el
+          `sticky` se ancla al scrollport más cercano, exista o no desbordamiento,
+          así que quedaría pegado a un contenedor que jamás se mueve y jamás se
+          activaría. Sin esa clase, el scrollport es el viewport, que sí se
+          desplaza, y la cabecera —con el saldo— sigue a la vista al bajar por una
+          tabla larga como «Mis solicitudes». Fondo opaco con blur porque `main` es
+          `bg-transparent`: si no, el contenido se transparentaría por debajo al
+          pasar. */}
+      <header className="sticky top-0 z-20 mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white/80 py-3 backdrop-blur-xl shadow-sm">
+        <div className="flex items-center gap-3">
+          <CalendarDays className="h-6 w-6 text-blue-600" />
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">Vacaciones y Permisos</h1>
+            <p className="max-w-2xl text-sm text-gray-500">
+              Solicita vacaciones, compensatorios y permisos, o informa una incapacidad. Los días hábiles descuentan
+              fines de semana y festivos de Colombia.
+            </p>
+          </div>
         </div>
+        {/* Sin saldo configurado no se enseña NADA aquí, ni un cartel de aviso:
+            sería permanente y en todas las pestañas, y hoy todavía le falta el
+            saldo inicial a una decena de personas. Ese aviso ya lo da
+            TarjetaSaldo en «Nueva solicitud», que es donde importa. `null` (sin
+            ficha, o el cálculo falló) cae en la misma rama: ninguna de las dos
+            cosas se arregla poniendo un número en la cabecera. */}
+        {contexto?.saldo?.configurado && (
+          <div className="rounded-xl border border-gray-200 px-3 py-1.5">
+            <IndicadorSaldo saldo={contexto.saldo} variante="cabecera" />
+          </div>
+        )}
       </header>
 
       {error && (
@@ -230,11 +264,7 @@ export default function App() {
               </div>
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
-                {contexto.saldo && (
-                  <div className="mb-4">
-                    <TarjetaSaldo saldo={contexto.saldo} />
-                  </div>
-                )}
+                {/* Sin tarjeta de saldo: el número vive en la cabecera, visible desde aquí. */}
                 <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
               </div>
 
@@ -272,7 +302,7 @@ export default function App() {
                 <PanelOrganigrama activo={tab === 'empleados'} />
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
-                <PanelSaldos activo={tab === 'saldos'} />
+                <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldoPropio} />
               </div>
               <div className={tab === 'historico' ? '' : 'hidden'}>
                 <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />

@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
 import { fetchSaldos, fijarSaldo, type SaldoDeEmpleado } from './api';
+import { formatDias } from './dominio';
 
 // El panel donde un admin teclea el punto de partida de cada persona. Es la
 // vía por la que entran los saldos que hoy viven en un Excel, y la que
 // permite dar de alta a quien entre nuevo o corregir un número mal puesto sin
 // pasar por psql.
-
-/** Un decimal, y sin el «,0» cuando es entero — igual que en TarjetaSaldo. */
-function dias(n: number): string {
-  return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
-}
 
 interface Fila {
   saldoCorte: string;
@@ -43,9 +39,16 @@ interface Props {
    *  de la app aunque nunca abriera la pestaña, y quien además aprueba
    *  duplicaría la petición que App.tsx ya hace para la bandeja. */
   activo: boolean;
+  /** Se llama tras cada guardado con éxito, sea el saldo de quien sea: no hay
+   *  forma barata de saber aquí si la fila que se acaba de guardar es la del
+   *  propio admin, y una llamada de más a `mi-saldo` sale barata. Existe para
+   *  que la cabecera de App.tsx se entere si un admin se configura su propio
+   *  saldo de corte por primera vez — si no, seguiría sin indicador hasta
+   *  recargar la página. Opcional para no obligar a otros usos del panel. */
+  onSaldoFijado?: () => void;
 }
 
-export default function PanelSaldos({ activo }: Props) {
+export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [filas, setFilas] = useState<Record<string, Fila>>({});
   // Arranca en true aunque la carga sea diferida: con false, «aún no he pedido
@@ -122,6 +125,7 @@ export default function PanelSaldos({ activo }: Props) {
         fechaTexto === '' ? null : fechaTexto,
       );
       setSaldos((ss) => ss.map((s) => (s.empleadoId === empleadoId ? actualizado : s)));
+      onSaldoFijado?.();
       // Se resincroniza el borrador con lo que quedó guardado (la BD redondea
       // a un decimal), no con lo que se tecleó.
       actualizar(empleadoId, { ...filaInicial(actualizado), exito: true });
@@ -237,7 +241,7 @@ export default function PanelSaldos({ activo }: Props) {
                         />
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">
-                        {s.saldo.configurado ? dias(s.saldo.disponible) : <span className="text-gray-300">—</span>}
+                        {s.saldo.configurado ? formatDias(s.saldo.disponible) : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
                         <div className="flex flex-col items-end gap-1">

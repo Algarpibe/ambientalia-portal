@@ -152,6 +152,7 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/adjuntos` | idem — solo admin o `VISORES_ADJUNTOS`; **403** al resto |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, sus **dos** aprobadores, admin o `VISORES_ADJUNTOS` |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
+| `GET` | `/api/ausencias/mi-saldo` | idem — solo el saldo propio; **500** si el cálculo falla, no un saldo en blanco |
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
@@ -254,11 +255,12 @@ el saldo real mandando varias solicitudes seguidas antes de que se decida la
 primera. Permisos, compensatorios e incapacidades no tocan el saldo en
 absoluto.
 
-**Los tres endpoints:**
+**Los cuatro endpoints:**
 
 | Endpoint | Quién |
 |---|---|
 | `GET /ausencias/contexto` | cualquiera con la app — trae el saldo del propio solicitante dentro del payload de arranque, sin llamada aparte |
+| `GET /ausencias/mi-saldo` | cualquiera con la app — el mismo saldo propio, pero solo: lo usan el widget del dashboard y el refresco de la cabecera (los tres disparos están en «Lo que no refresca») |
 | `GET /ausencias/saldos` | admin ve a todos los empleados; un aprobador no-admin ve solo los suyos (los que tienen su correo en `aprobador_correo`) — misma regla que `repo.solicitudesPendientes` |
 | `PUT /ausencias/empleados/:id/saldo` | solo admin — fija el corte; no manda correos, igual que editar el registro general |
 
@@ -279,6 +281,73 @@ absoluto.
   "esto no es un número". Mandando la cadena tal cual, la validación de forma
   vive en un solo sitio (`validarSaldo` en `service.ts`, con su regex) y el
   error que llega es el correcto.
+
+### Dónde se ve
+
+La regla de qué número se enseña vive en un solo sitio, `IndicadorSaldo.tsx`:
+el número grande es `disponible`, y `enTramite` aparece como línea de aviso
+solo cuando hay algo pendiente. La usan dos superficies —la cabecera de la
+app y el widget del dashboard— y viven ahí precisamente para que no se
+puedan separar: si cada una escribiera la regla por su cuenta, la primera vez
+que alguien tocara una sola acabarían enseñando cifras distintas de la misma
+persona.
+
+No se enseña en grande el «pedible» (`disponible − enTramite`, la cuenta que
+de verdad se puede pedir): `disponible` es el número que ve un administrador
+en el panel de *Saldos*, y poner otro en la cabecera daría dos cifras para
+«mi saldo» sin nada que explicara la diferencia. `enTramite` no desaparece,
+solo baja de rango: queda como aviso aparte, no restado del número principal.
+
+**Un `disponible` negativo se pinta en rojo.** Es alcanzable: `calcularSaldo`
+no le pone suelo y `saldo_corte` no lleva más constraint que exigir que corte
+y fecha vayan juntos o ninguno de los dos, así que una vacación aprobada que
+el saldo de corte ya traía descontada se resta dos veces. El rojo no arregla
+el dato —eso es trabajo de datos—, pero evita que la cabecera presente un
+imposible con la misma cara que un saldo sano.
+
+**Con `saldo === null` o `configurado: false` la cabecera no enseña nada, ni
+un cartel.** Sería permanente y en todas las pestañas, y hoy todavía le falta
+el saldo inicial a una decena de personas. Ese aviso ya lo da `TarjetaSaldo`
+en *Nueva solicitud*, que es donde importa. El widget sí lo dice —ahí no hay
+nada más que enseñar—, y nunca como un 0,0: se leería como «no me quedan
+días», no como «nadie ha fijado tu punto de partida».
+
+**`TarjetaSaldo` sigue viva y no es lo mismo.** Además del saldo, avisa en
+rojo si los días que se están escribiendo en el formulario no caben. Vive en
+*Nueva solicitud* y en la bandeja de aprobación, donde el saldo es el de otra
+persona —por eso recibe el título por prop en vez de un texto fijo.
+
+**El widget** (`ausencias-mi-saldo`, tamaño `4×3`) lo sirve
+`GET /ausencias/mi-saldo`, no `/ausencias/contexto`: la home del portal no
+tiene por qué cargar los festivos de tres años para pintar un número. `3×2`
+se probó primero y no cupo —la celda deja 117 px de contenido y el widget
+mide 120 px en cuanto hay algo en trámite, justo la gente para la que
+existe la línea de aviso—. Y el tamaño del descriptor solo manda hasta que
+alguien añade el widget: `addWidget` copia `defaultSize` al layout que
+persiste en el `localStorage` de cada usuario, así que ajustarlo más tarde
+no habría corregido a quien ya lo tuviera añadido con el valor viejo.
+
+**La asimetría del admin.** `useWidgetRegistry` filtra el catálogo de
+widgets por el claim `apps` del JWT sin mirar el rol, mientras que
+`requireApp`, en el backend, deja pasar a cualquier admin aunque no tenga la
+app asignada. Un admin sin `ausencias` en su lista no ve el widget en
+«Editar panel», aunque el endpoint le respondería si lo llamara. Es un
+comportamiento de serie del mecanismo de widgets del dashboard, no algo
+propio de esta app.
+
+### Lo que no refresca
+
+`refrescarSaldoPropio` (`App.tsx`) se dispara en tres sitios: al crear una
+solicitud, al decidirla, y al fijar un saldo de corte desde el panel de
+*Saldos*. No se dispara al borrar ni al editar una solicitud desde
+*Registro general* (`RegistroGeneral.tsx`), que son acciones de admin: el
+borrado y la edición ahí solo tocan la tabla local del registro, sin avisar
+al contexto. Si un admin borra una vacación aprobada suya, su propia cabecera
+sigue enseñando el número anterior hasta que recarga la página. Se dejó así
+a propósito —cablear el aviso obligaba a hacer pasar un callback por más
+componentes de los que hoy lo conocen—, pero conviene tenerlo escrito: el
+síntoma, «mi saldo no cambió», es difícil de atribuir a una edición hecha
+desde otra pestaña.
 
 ## Los adjuntos
 
@@ -607,6 +676,52 @@ del enmascarado de arriba.
   `{ env, header }`; ausencias usa `AUSENCIAS_CRON_TOKEN` /
   `X-Ausencias-Cron-Token`. El token de WO-sales **no** sirve aquí, y hay un test
   que lo comprueba.
+- **`overflow-y-auto` en el `<main>` anula el `sticky` de la cabecera — el que
+  más caro salió.** `position: sticky` se resuelve contra el scrollport más
+  cercano, y `overflow-y: auto` crea uno exista o no desbordamiento. El
+  `<main>` de esta app nunca desborda: ningún ancestro le fija altura — el
+  contenedor raíz del portal usa `min-h-screen` (`min-height`, con
+  `height: auto`), así que no hay un alto fijo contra el que desbordar. Un
+  `overflow-y-auto` ahí crearía un scrollport que jamás se desplaza, y
+  `sticky top-0` quedaría anclado a un contenedor inerte: la clase sigue
+  aplicada, nada falla ni avisa, y la cabecera con el saldo simplemente deja
+  de acompañar el scroll. Otras páginas del portal (Dashboard, Herramientas)
+  sí llevan `overflow-y-auto` en su `<main>` — quien copie ese patrón aquí
+  rompe el sticky en silencio.
+- **`apps/ausencias/tsconfig.json` es más estricto que el del portal, y como
+  gate propio no lo ejecuta nadie — pero el código sí se typechequea, con las
+  reglas equivocadas.** Trae `verbatimModuleSyntax`, `noUnusedLocals` y
+  `noUnusedParameters` en `true`; `apps/portal/tsconfig.app.json` los trae en
+  `false` a propósito, porque empaqueta el código fuente de cada sub-app y
+  tiene que admitir convenciones distintas de las suyas. El `build` de
+  `ausencias` es `vite build` a secas —esbuild transpila sin comprobar
+  tipos— y no hay paso de CI dedicado a esta app. Pero el portal importa
+  `apps/ausencias/src/App` (la ruta `/ausencias`) y `widgets/index` (el
+  catálogo) con `import()` dinámico —para el code-splitting de Vite—, y eso
+  no cambia nada a efectos de tipos: `tsc` resuelve el especificador igual
+  que en un import estático y arrastra el módulo a su programa. Así, el
+  propio `tsc -b` del portal typechequea **20 de los 21** ficheros de
+  `ausencias/src` —falta `main.tsx`, la entrada suelta de la app que nadie
+  importa, y que por eso es el único punto donde esta red automática tiene
+  un agujero real— con las reglas relajadas del portal, no con las suyas;
+  verificado con `tsc --listFilesOnly`. El resultado es un typecheck
+  automático en cada CI, solo que el más flojo de los dos: código que
+  violara `noUnusedLocals` o `verbatimModuleSyntax` pasaría igual. El gate
+  estricto propio, `npx tsc --noEmit -p apps/ausencias/tsconfig.json`,
+  sigue siendo un comando manual que hay que acordarse de teclear — hoy
+  sale limpio, igual que el del portal.
+  **Convertirlo en portón NO es solo una línea.** Cambiar el `build` de
+  `ausencias` a `"tsc --noEmit && vite build"` no basta, porque nada
+  ejecuta ese `build`: el CI (`.github/workflows/ci.yml`) solo corre
+  `npm run build` para `apps/portal` y `apps/hub-api`, y el `build` de la
+  raíz (`npm run build --workspaces --if-present`) existe en el
+  `package.json` raíz pero no lo invoca nadie —no hay `turbo.json` pese al
+  `turbo` en las devDependencies, y los tres Dockerfiles (`Dockerfile`,
+  `apps/portal/Dockerfile`, `apps/hub-api/Dockerfile`) llaman a builds de
+  workspace concretos, nunca al de la raíz—. Haría falta el cambio en el
+  `package.json` de `ausencias` **y además** un paso nuevo en el CI que lo
+  invoque; el primero sin el segundo daría una falsa sensación de gate.
+  Sigue **pendiente de decisión**, no hecho.
 
 ## Puesta en marcha
 

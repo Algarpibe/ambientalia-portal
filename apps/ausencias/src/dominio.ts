@@ -87,6 +87,11 @@ export function contarDiasHabiles(desde: string, hasta: string, festivos: Set<st
   return dias;
 }
 
+/** Un decimal, y sin el «,0» cuando es entero. El formato de los días en toda la app. */
+export function formatDias(n: number): string {
+  return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
+}
+
 /** «6 jul 2026» — más corto que la fecha ISO y menos ambiguo que 06/07/2026. */
 export function formatFecha(iso: string): string {
   if (!iso) return '';

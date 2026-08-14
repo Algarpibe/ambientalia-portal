@@ -1,9 +1,9 @@
 import { CalendarClock } from 'lucide-react';
 import type { SaldoVacaciones } from './api';
-import { formatFecha } from './dominio';
+import { formatDias, formatFecha } from './dominio';
 
-// La tarjeta del saldo. Se usa en tres sitios (formulario, «Mis solicitudes» y
-// bandeja), por eso vive aparte y no dentro del formulario.
+// La tarjeta del saldo. Se usa en dos sitios (formulario y bandeja), por eso
+// vive aparte y no dentro del formulario.
 
 interface Props {
   saldo: SaldoVacaciones;
@@ -11,11 +11,6 @@ interface Props {
   diasPedidos?: number;
   /** Encabezado alternativo, para cuando el saldo es de otra persona. */
   titulo?: string;
-}
-
-/** Un decimal, y sin el «,0» cuando es entero. */
-function dias(n: number): string {
-  return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
 }
 
 export default function TarjetaSaldo({ saldo, diasPedidos = 0, titulo = 'Tu saldo de vacaciones' }: Props) {
@@ -53,17 +48,17 @@ export default function TarjetaSaldo({ saldo, diasPedidos = 0, titulo = 'Tu sald
           {titulo}:
         </span>
         <span>
-          <b className="tabular-nums">{dias(saldo.disponible)}</b> días
+          <b className="tabular-nums">{formatDias(saldo.disponible)}</b> días
         </span>
       </p>
       <p className="mt-0.5 text-xs opacity-80">
-        Partiendo de {dias(saldo.saldoCorte)} el {formatFecha(saldo.fechaCorte)}, más{' '}
-        {dias(saldo.devengadas)} devengados y menos {dias(saldo.disfrutadas)} disfrutados.
-        {saldo.enTramite > 0 && <> Hay {dias(saldo.enTramite)} más pendientes de aprobar.</>}
+        Partiendo de {formatDias(saldo.saldoCorte)} el {formatFecha(saldo.fechaCorte)}, más{' '}
+        {formatDias(saldo.devengadas)} devengados y menos {formatDias(saldo.disfrutadas)} disfrutados.
+        {saldo.enTramite > 0 && <> Hay {formatDias(saldo.enTramite)} más pendientes de aprobar.</>}
       </p>
       {seExcede && (
         <p className="mt-1 font-medium">
-          Estás pidiendo {dias(diasPedidos)} días y te quedan {dias(Math.max(0, pedible))}. Puedes
+          Estás pidiendo {formatDias(diasPedidos)} días y te quedan {formatDias(Math.max(0, pedible))}. Puedes
           enviar la solicitud igualmente: lo decide quien aprueba.
         </p>
       )}

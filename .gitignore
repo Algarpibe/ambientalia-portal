@@ -64,3 +64,6 @@ PLAN_REMEDIACION.md
 # Muestras/descargas .xls de WO-sales (artefactos, no fuente)
 *.xls
 reference/
+
+# Maquetas del acompanante visual de brainstorming (superpowers)
+.superpowers/

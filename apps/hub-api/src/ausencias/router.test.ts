@@ -1418,6 +1418,76 @@ describe('GET /ausencias/saldos', () => {
   });
 });
 
+describe('GET /ausencias/mi-saldo', () => {
+  it('devuelve el saldo de quien pregunta', async () => {
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: '2026-01-01' });
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: true, saldoCorte: 10, fechaCorte: '2026-01-01' });
+    // No se fija un `disponible` exacto: crece con el devengo cada día que pasa,
+    // así que un número literal convertiría este test en una bomba de relojería
+    // que estallaría sola dentro de un mes. Lo invariante es que sin vacaciones
+    // aprobadas nunca puede quedar por debajo del saldo de corte.
+    expect(r.body.saldo.disponible).toBeGreaterThanOrEqual(10);
+  });
+
+  it('sin ficha de empleado responde `saldo: null` explícito, no una clave ausente', async () => {
+    // `undefined` desaparece al serializar a JSON, y el widget distingue "sin
+    // ficha" de "sin configurar" mirando el valor: si aquí se colara un
+    // `undefined`, el widget se rompería en silencio.
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body).toHaveProperty('saldo', null);
+  });
+
+  it('con ficha pero sin saldo de corte devuelve `configurado: false`, no null', async () => {
+    // La otra mitad del caso «no hay número que enseñar», y la que de verdad se
+    // da hoy: hay ficha, pero nadie ha fijado el punto de partida. El widget las
+    // trata igual, pero llegan por caminos distintos y la de aquí no la cubría
+    // ningún test. `estado.empleado` no está en `estado.plantilla` (ids
+    // distintos), así que `empleadosConSaldo` no lo encuentra.
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: false });
+  });
+
+  it('401 sin token', async () => {
+    await request(app()).get('/api/ausencias/mi-saldo').expect(401);
+  });
+
+  it('403 con token válido pero sin la app asignada', async () => {
+    await request(app())
+      .get('/api/ausencias/mi-saldo')
+      .set('Authorization', `Bearer ${token({ apps: ['contabilidad'] })}`)
+      .expect(403);
+  });
+
+  it('500 si el cálculo del saldo lanza, en vez de un saldo en blanco', async () => {
+    // Lo CONTRARIO de /ausencias/contexto, y a propósito: allí el saldo es un
+    // accesorio de un payload que la app necesita para arrancar, y degradarlo a
+    // `null` permite abrir la app. Aquí el saldo ES la respuesta, así que
+    // devolverlo en blanco sería mentir por omisión. Sin este test, alguien
+    // "arreglaría" el endpoint copiando el try/catch del contexto y el widget
+    // pasaría a enseñar «sin configurar» ante un fallo real, mandando a la
+    // persona a administración a arreglar algo que no está roto.
+    // Una `fechaCorte` con formato inválido es lo que hace lanzar a `calcularSaldo`.
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: 'fecha-invalida' });
+    await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(500);
+  });
+
+  it('ignora cualquier identidad que venga del cliente: siempre el saldo de la sesión', async () => {
+    // La identidad sale de `sesionDe(req)` y de ningún otro sitio. Este test no
+    // prueba una rama de código: fija que no EXISTA la rama. Si alguien añadiera
+    // un parámetro para pedir el saldo de otra persona, se pondría rojo aquí.
+    estado.plantilla.push({ ...(estado.empleado as Record<string, unknown>), saldoCorte: 10, fechaCorte: '2026-01-01' });
+    const r = await request(app())
+      .get('/api/ausencias/mi-saldo')
+      .query({ empleadoId: E2, correo: 'otro@ambientalia.com.co' })
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.saldo).toMatchObject({ saldoCorte: 10 });
+  });
+});
+
 describe('PUT /ausencias/empleados/:id/saldo', () => {
   it('solo el admin puede fijar el saldo', async () => {
     await request(app())
