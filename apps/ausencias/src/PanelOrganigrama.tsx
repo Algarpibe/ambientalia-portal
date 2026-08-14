@@ -40,13 +40,35 @@ export default function PanelOrganigrama({ activo }: Props) {
   const yaCargado = useRef(false);
   const timeoutsExito = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  function cargar() {
+  /**
+   * Recarga el maestro. `idResincronizar` es la fila que se acaba de guardar.
+   *
+   * Las demás filas CONSERVAN lo que el usuario tenga a medio editar. Antes esto
+   * reconstruía `filas` entero desde el servidor, y como `guardar` termina
+   * llamando aquí, pulsar el botón de una fila descartaba en silencio lo escrito
+   * en todas las demás: sus botones se apagaban y el cambio se perdía. Con una
+   * sola columna editable casi no se notaba; con la de copia al lado, editar
+   * varias filas antes de guardar es el caso normal.
+   *
+   * La que sí se resincroniza es la recién guardada, porque el servidor pudo
+   * normalizar el valor —los correos se guardan en minúsculas— y hay que quedarse
+   * con lo que de verdad haya en la base, no con lo que se tecleó.
+   */
+  function cargar(idResincronizar?: string) {
     setCargando(true);
     return fetchEmpleados()
       .then((es) => {
         yaCargado.current = true;
         setEmpleados(es);
-        setFilas(Object.fromEntries(es.map((e) => [e.id, filaInicial(e)])));
+        setFilas((previas) =>
+          Object.fromEntries(
+            es.map((e) => {
+              const previa = previas[e.id];
+              if (!previa || e.id === idResincronizar) return [e.id, filaInicial(e)];
+              return [e.id, previa];
+            }),
+          ),
+        );
         setError(null);
       })
       .catch((e: Error) => {
@@ -91,7 +113,7 @@ export default function PanelOrganigrama({ activo }: Props) {
       // alguien cambia la SEGUNDA firma de todos los que cuelgan de él, y dejar
       // esas filas con el valor viejo sería mentir sobre a quién sube su
       // solicitud.
-      await cargar();
+      await cargar(id);
       actualizar(id, { exito: true });
       clearTimeout(timeoutsExito.current[id]);
       timeoutsExito.current[id] = setTimeout(() => {
