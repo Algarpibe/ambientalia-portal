@@ -216,10 +216,10 @@ describe('permisos', () => {
       mime: 'application/pdf',
       contenido: Buffer.from(''),
     };
-    expect(puedeVerAdjunto({ ...otro, email: 'director.tecnico@ambientalia.com.co' }, adj)).toBe(true);
-    expect(puedeVerAdjunto(yo, adj)).toBe(true);
-    expect(puedeVerAdjunto(admin, adj)).toBe(true);
-    expect(puedeVerAdjunto(otro, adj)).toBe(false);
+    expect(puedeVerAdjunto({ ...otro, email: 'director.tecnico@ambientalia.com.co' }, adj, false)).toBe(true);
+    expect(puedeVerAdjunto(yo, adj, false)).toBe(true);
+    expect(puedeVerAdjunto(admin, adj, false)).toBe(true);
+    expect(puedeVerAdjunto(otro, adj, false)).toBe(false);
   });
 
   it('administración abre el PDF de un tercero con el que no tiene ninguna relación', () => {
@@ -233,15 +233,16 @@ describe('permisos', () => {
       contenido: Buffer.from(''),
     };
     const visor = { email: 'administrativo@ambientalia.com.co', userId: null, esAdmin: false };
-    expect(puedeVerAdjunto(visor, adj)).toBe(true);
-    expect(puedeVerAdjunto(otro, adj)).toBe(false);
+    expect(puedeVerAdjunto(visor, adj, true)).toBe(true);
+    expect(puedeVerAdjunto(otro, adj, false)).toBe(false);
   });
 
   it('el visor entra aunque su correo llegue en MAYÚSCULAS', () => {
-    // El mutante con más probabilidad de sobrevivir: un `VISORES_ADJUNTOS.includes(
-    // sesion.email)` sin normalizar pasa todos los demás tests, porque `sesionDe`
-    // ya baja el correo a minúsculas antes de llegar aquí en producción. Solo se
-    // caza llamando a la función directamente, como hace este fichero.
+    // La normalización de mayúsculas de la llave ya no pasa por aquí: vive en el
+    // `lower()` del SQL de `repo.esVisorDeAdjuntos`, sin Postgres en este fichero.
+    // Este test se conserva para dejar constancia de que la rama del visor sigue
+    // ganando sin mirar el resto de la sesión, sea cual sea el casing con el que
+    // llegue el correo.
     const adj = {
       solicitudId: 's1',
       solicitanteEmail: 'ajena@ambientalia.com.co',
@@ -251,7 +252,7 @@ describe('permisos', () => {
       mime: 'application/pdf',
       contenido: Buffer.from(''),
     };
-    expect(puedeVerAdjunto({ email: 'ADMINISTRATIVO@AMBIENTALIA.COM.CO', userId: null, esAdmin: false }, adj)).toBe(
+    expect(puedeVerAdjunto({ email: 'ADMINISTRATIVO@AMBIENTALIA.COM.CO', userId: null, esAdmin: false }, adj, true)).toBe(
       true,
     );
   });
@@ -268,8 +269,31 @@ describe('permisos', () => {
       mime: 'application/pdf',
       contenido: Buffer.from(''),
     };
-    expect(puedeVerAdjunto(yo, adj)).toBe(true);
-    expect(puedeVerAdjunto(otro, adj)).toBe(false);
+    expect(puedeVerAdjunto(yo, adj, false)).toBe(true);
+    expect(puedeVerAdjunto(otro, adj, false)).toBe(false);
+  });
+
+  it('el visor puede abrir cualquier adjunto', () => {
+    // El booleano entra por parámetro y no se consulta aquí: así la regla se
+    // puede probar sin Postgres, que es como se prueba todo en este repo.
+    const ajeno = { solicitanteEmail: 'otra@ambientalia.com.co', aprobadorCorreo: null, segundoAprobadorCorreo: null } as never;
+    expect(puedeVerAdjunto({ email: 'quien.sea@ambientalia.com.co', userId: null, esAdmin: false }, ajeno, true)).toBe(true);
+  });
+
+  it('sin la llave no se abre un adjunto ajeno', () => {
+    const ajeno = { solicitanteEmail: 'otra@ambientalia.com.co', aprobadorCorreo: null, segundoAprobadorCorreo: null } as never;
+    expect(puedeVerAdjunto({ email: 'quien.sea@ambientalia.com.co', userId: null, esAdmin: false }, ajeno, false)).toBe(false);
+  });
+
+  it('quitar la llave no cierra el adjunto a quien lo pidió ni a quien lo firma', () => {
+    // La llave AÑADE acceso, no lo condiciona: si al retirarla se perdiera el
+    // acceso propio, quitársela a alguien le dejaría sin ver sus propias
+    // solicitudes.
+    const sesion = { email: 'ana@ambientalia.com.co', userId: null, esAdmin: false };
+    const propio = { solicitanteEmail: 'ana@ambientalia.com.co', aprobadorCorreo: null, segundoAprobadorCorreo: null } as never;
+    const aFirmar = { solicitanteEmail: 'otra@ambientalia.com.co', aprobadorCorreo: 'ana@ambientalia.com.co', segundoAprobadorCorreo: null } as never;
+    expect(puedeVerAdjunto(sesion, propio, false)).toBe(true);
+    expect(puedeVerAdjunto(sesion, aFirmar, false)).toBe(true);
   });
 });
 

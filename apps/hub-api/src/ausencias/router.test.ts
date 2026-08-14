@@ -163,6 +163,13 @@ vi.mock('./repo.js', () => ({
     return true;
   },
   empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
+  // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
+  // `veAdjuntos`: por defecto nadie es visor, igual que en el SQL real (la
+  // columna nace en `false`).
+  esVisorDeAdjuntos: async (_db: unknown, email: string) =>
+    estado.plantilla.some(
+      (e: any) => String(e.correo).toLowerCase() === email.toLowerCase() && e.veAdjuntos === true,
+    ),
   fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
@@ -863,6 +870,8 @@ describe('GET /ausencias/adjuntos', () => {
     // El mutante que muere: olvidar el `WHERE a.id IS NOT NULL` y devolver el
     // registro entero — que es justo la fuga que esta pestaña quería evitar,
     // porque quien la abre no es admin y no debería ver el resto.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     await crearConPdf();
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
 
@@ -895,6 +904,8 @@ describe('GET /ausencias/adjuntos', () => {
   it('el visor descarga el PDF de una incapacidad ajena', async () => {
     // La feature entera: una incapacidad no pasa por ninguna bandeja ni por el
     // historial, así que sin esto administración no tenía dónde abrirla.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     estado.adjuntos.set('a1', {
       solicitudId: 's1',
       solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
@@ -1368,6 +1379,8 @@ describe('GET /ausencias/contexto', () => {
   });
 
   it('esVisorAdjuntos pliega admin dentro, o el admin perdería la pestaña', async () => {
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     const flag = async (over: Record<string, unknown>) =>
       (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
         .body.esVisorAdjuntos;
