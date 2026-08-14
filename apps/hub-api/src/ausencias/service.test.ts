@@ -49,6 +49,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     motivoRechazo: null,
     createdAt: '2026-06-01T10:00:00Z',
     adjunto: null,
+    // Este fichero no prueba copias: null es el valor neutro.
+    copiaCorreo: null,
     ...over,
   };
 }

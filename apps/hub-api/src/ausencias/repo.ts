@@ -40,7 +40,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, user_id, activo`;
+  aprobador_correo, copia_correo, user_id, activo`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -49,6 +49,7 @@ interface FilaEmpleadoDb {
   cargo: string | null;
   credencial: number | null;
   aprobador_correo: string;
+  copia_correo: string | null;
   user_id: string | null;
   activo: boolean;
 }
@@ -61,6 +62,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     cargo: r.cargo,
     credencial: r.credencial,
     aprobadorCorreo: r.aprobador_correo,
+    copiaCorreo: r.copia_correo,
     userId: r.user_id,
     activo: r.activo,
   };
@@ -415,6 +417,18 @@ export async function fijarJefe(db: Pool, empleadoId: string, aprobadorCorreo: s
   return (rowCount ?? 0) > 0;
 }
 
+/**
+ * Fija (o quita, con `null`) la copia de un empleado. Devuelve false si no
+ * existía o estaba inactivo, igual que `fijarJefe`.
+ */
+export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: string | null): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET copia_correo = lower($2) WHERE id = $1 AND activo`,
+    [empleadoId, copiaCorreo],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 // ── Histórico importado de la hoja ─────────────────────────────────────────
 
 /** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
@@ -619,7 +633,8 @@ const SELECT_SOLICITUD = `
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime,
          -- octet_length y no el binario: las listas solo necesitan el tamano.
-         octet_length(a.contenido) AS adjunto_bytes
+         octet_length(a.contenido) AS adjunto_bytes,
+         e.copia_correo
     FROM portal.solicitudes_ausencia s
     JOIN portal.empleados e ON e.id = s.empleado_id
     LEFT JOIN portal.solicitud_adjuntos a ON a.solicitud_id = s.id`;
@@ -648,6 +663,7 @@ interface FilaSolicitudDb {
   nombre_archivo: string | null;
   mime: string | null;
   adjunto_bytes: number | null;
+  copia_correo: string | null;
 }
 
 function aSolicitud(r: FilaSolicitudDb): Solicitud {
@@ -680,6 +696,7 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     motivoRechazo: r.motivo_rechazo,
     createdAt: r.created_at,
     adjunto,
+    copiaCorreo: r.copia_correo,
   };
 }
 

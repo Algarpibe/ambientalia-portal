@@ -25,6 +25,9 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     motivoRechazo: null,
     createdAt: '2026-06-01T10:00:00Z',
     adjunto: null,
+    // La migración 021 deja a toda la plantilla con este valor sembrado: un
+    // helper con `null` describiría un estado que en producción no existe.
+    copiaCorreo: 'administrativo@ambientalia.com.co',
     ...over,
   };
 }
@@ -72,9 +75,11 @@ describe('correos', () => {
     expect(p.correo.cuerpo).toContain('aprobarla o rechazarla');
   });
 
-  it('el correo de aprobado va también a administración, sin repetir al aprobador', () => {
-    // El aprobador de esta solicitud es el mismo buzón que ya va en copia: sin
-    // deduplicar, aparecería dos veces en el `sendTo` de Gmail.
+  it('el correo de aprobado lleva también la copia de la ficha, además del aprobador', () => {
+    // Ya no ejercita el dedup: con el modelo nuevo el aprobador por defecto
+    // (comercial@) y la copia por defecto (administrativo@) son buzones
+    // distintos. Esa cobertura la da «una copia que ya firma no se duplica»,
+    // más abajo; este test solo fija que la copia se suma a la cadena.
     const p = construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada');
     expect(p.correo.para).toBe(
       'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
@@ -95,8 +100,10 @@ describe('correos', () => {
       }),
       'aprobada',
     );
+    // `comercial@` ya no aparece aquí: era la mitad fija de la vieja constante,
+    // pero en esta solicitud no es ni aprobador ni la copia de la ficha.
     expect(p.correo.para).toBe(
-      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, administrativo@ambientalia.com.co',
     );
   });
 
@@ -119,7 +126,9 @@ describe('correos', () => {
       solicitud({ estado: 'aprobada', aprobadorCorreo: 'ANA.RUIZ@ambientalia.com.co', segundoAprobadorCorreo: null }),
       'aprobada',
     );
-    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co');
+    // Sin `comercial@`: ya no es aprobador en esta solicitud ni la copia de la
+    // ficha, así que la vieja constante de dos buzones no aplica.
+    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co, administrativo@ambientalia.com.co');
   });
 
   it('sin segunda firma no deja un hueco en la lista de destinatarios', () => {
@@ -129,8 +138,9 @@ describe('correos', () => {
       solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefa.directa@ambientalia.com.co', segundoAprobadorCorreo: null }),
       'aprobada',
     );
+    // Sin `comercial@`: no es aprobador aquí ni la copia de la ficha.
     expect(p.correo.para).toBe(
-      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, administrativo@ambientalia.com.co',
     );
   });
 
@@ -317,5 +327,57 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     );
     expect(p.hoja!.columnas.Tipo).toBe('Vacaciones');
     expect(p.hoja!.columnas['Días']).toBe(5);
+  });
+});
+
+describe('la copia sale de la ficha del empleado', () => {
+  it('entra en el correo de aprobada', () => {
+    const p = construirPayload(solicitud({ estado: 'aprobada', copiaCorreo: 'copia@ambientalia.com.co' }), 'aprobada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('entra en el correo de rechazada', () => {
+    const p = construirPayload(solicitud({ estado: 'rechazada', copiaCorreo: 'copia@ambientalia.com.co' }), 'rechazada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('entra en el acuse de una incapacidad', () => {
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', copiaCorreo: 'copia@ambientalia.com.co' }), 'registrada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('gerencia sigue en copia de las incapacidades aunque la ficha diga otra cosa', () => {
+    // Una incapacidad no genera evento de decisión, así que este buzón NO llega
+    // por la cadena de firmas como en aprobada/rechazada: si no fuera fijo aquí,
+    // gerencia dejaría de enterarse de las incapacidades.
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', copiaCorreo: 'copia@ambientalia.com.co' }), 'registrada');
+    expect(p.correo.para).toContain('comercial@ambientalia.com.co');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('NO entra en el acuse de una solicitud normal', () => {
+    // Este test existe para que la copia no se convierta en una ampliación
+    // silenciosa: el acuse de vacaciones nunca ha llevado copia y no debe
+    // empezar a llevarla ahora.
+    const p = construirPayload(solicitud({ tipo: 'vacaciones', copiaCorreo: 'copia@ambientalia.com.co' }), 'creada');
+    expect(p.correo.para).not.toContain('copia@ambientalia.com.co');
+  });
+
+  it('NO entra en el aviso al aprobador', () => {
+    const p = construirPayload(solicitud({ copiaCorreo: 'copia@ambientalia.com.co' }), 'aprobacion');
+    expect(p.correo.para).not.toContain('copia@ambientalia.com.co');
+  });
+
+  it('con `copiaCorreo: null` no deja un destinatario vacío', () => {
+    // `destinatarios()` filtra nulos; sin eso saldría una coma suelta en el
+    // `sendTo` de Gmail, que es un correo a nadie con pinta de correo válido.
+    const p = construirPayload(solicitud({ estado: 'aprobada', copiaCorreo: null }), 'aprobada');
+    expect(p.correo.para).not.toMatch(/,\s*,|,\s*$/);
+  });
+
+  it('una copia que ya firma no se duplica', () => {
+    const s = solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefe@ambientalia.com.co', copiaCorreo: 'jefe@ambientalia.com.co' });
+    const p = construirPayload(s, 'aprobada');
+    expect(p.correo.para.match(/jefe@ambientalia\.com\.co/g)).toHaveLength(1);
   });
 });

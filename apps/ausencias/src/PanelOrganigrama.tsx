@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
-import { fetchEmpleados, fijarJefe, type EmpleadoConJefatura } from './api';
+import { fetchEmpleados, fijarJefe, fijarCopia, type EmpleadoConJefatura } from './api';
 
 // El organigrama de la empresa. Cada persona tiene un jefe inmediato y ese único
 // dato basta: el segundo aprobador se deriva subiendo un escalón, así que el
@@ -11,6 +11,7 @@ import { fetchEmpleados, fijarJefe, type EmpleadoConJefatura } from './api';
 
 interface Fila {
   aprobadorCorreo: string;
+  copiaCorreo: string | null;
   guardando: boolean;
   error: string | null;
   exito: boolean;
@@ -18,6 +19,7 @@ interface Fila {
 
 const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   aprobadorCorreo: e.aprobadorCorreo,
+  copiaCorreo: e.copiaCorreo,
   guardando: false,
   error: null,
   exito: false,
@@ -77,7 +79,14 @@ export default function PanelOrganigrama({ activo }: Props) {
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
     try {
-      await fijarJefe(id, fila.aprobadorCorreo);
+      // Un solo botón por fila, como hasta ahora, pero dos endpoints detrás: se
+      // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
+      // porque los dos responden el maestro entero y el segundo tiene que ver ya
+      // escrito lo del primero — con `Promise.all`, la respuesta que llegara
+      // segunda podría ser la construida ANTES del otro cambio.
+      const empleado = empleados.find((x) => x.id === id);
+      if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
+      if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
       // alguien cambia la SEGUNDA firma de todos los que cuelgan de él, y dejar
       // esas filas con el valor viejo sería mentir sobre a quién sube su
@@ -120,6 +129,14 @@ export default function PanelOrganigrama({ activo }: Props) {
         Cambiar el organigrama <b>no mueve las solicitudes que ya están en trámite</b>: cada una
         lleva sus dos firmantes anotados desde que se envió.
       </p>
+      <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+        <span>
+          Quien esté en <b>copia</b> recibirá también los acuses de <b>incapacidad</b> de esa persona, que son
+          información de salud. Ponlo solo si esa persona debe conocerla. Estar en copia no da acceso a abrir los
+          soportes en PDF: eso se controla aparte.
+        </span>
+      </p>
 
       {error && (
         <p role="alert" className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -152,6 +169,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                 <th className="px-4 py-3 font-medium">Persona</th>
                 <th className="px-4 py-3 font-medium">Jefe inmediato (1ª firma)</th>
                 <th className="px-4 py-3 font-medium">2ª firma</th>
+                <th className="px-4 py-3 font-medium">Copia</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -162,7 +180,8 @@ export default function PanelOrganigrama({ activo }: Props) {
                 // Se compara contra lo GUARDADO, no contra un flag de «tocado»:
                 // volver al valor original tras cambiar de idea vuelve a dejar el
                 // botón apagado, que es lo que la fila dice de verdad.
-                const haCambiado = fila.aprobadorCorreo !== e.aprobadorCorreo;
+                const haCambiado =
+                  fila.aprobadorCorreo !== e.aprobadorCorreo || fila.copiaCorreo !== e.copiaCorreo;
                 return (
                   <tr key={e.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5">
@@ -200,6 +219,32 @@ export default function PanelOrganigrama({ activo }: Props) {
                         <span className="text-gray-300">— una sola firma</span>
                       )}
                     </td>
+                    <td className="px-4 py-2.5">
+                      <select
+                        value={fila.copiaCorreo ?? ''}
+                        onChange={(ev) => actualizar(e.id, { copiaCorreo: ev.target.value || null, error: null })}
+                        aria-label={`Copia de ${e.nombreCompleto}`}
+                        className="rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                      >
+                        <option value="">— sin copia</option>
+                        {/* El propio empleado sale en su lista: ponerse a uno mismo
+                            es inofensivo porque el servidor deduplica los
+                            destinatarios, y excluirlo sería una regla más que
+                            explicar por un caso que no rompe nada. */}
+                        {activos.map((j) => (
+                          <option key={j.id} value={j.correo}>
+                            {j.nombreCompleto}
+                          </option>
+                        ))}
+                        {/* Misma red que en el jefe: el valor guardado puede no
+                            estar entre los activos (por ejemplo si esa persona se
+                            dio de baja después). Sin esto el select saldría en
+                            blanco y guardar borraría la copia sin pedirlo. */}
+                        {fila.copiaCorreo && !activos.some((j) => j.correo === fila.copiaCorreo) && (
+                          <option value={fila.copiaCorreo}>{fila.copiaCorreo}</option>
+                        )}
+                      </select>
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button
@@ -209,7 +254,11 @@ export default function PanelOrganigrama({ activo }: Props) {
                           // a pulsar el de al lado por error.
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
-                          aria-label={`Guardar el jefe de ${e.nombreCompleto}`}
+                          // «La fila», no «el jefe»: este botón guarda también la
+                          // copia desde que existe esa columna, y un rótulo que
+                          // nombre solo uno de los dos campos engaña justo a quien
+                          // no puede ver cuál ha cambiado.
+                          aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >
                           {fila.guardando ? (
@@ -225,7 +274,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                             pantalla: sin este texto el guardado pasa inadvertido. */}
                         {fila.exito && (
                           <span role="status" className="sr-only">
-                            Jefe de {e.nombreCompleto} guardado.
+                            Cambios de {e.nombreCompleto} guardados.
                           </span>
                         )}
                         {fila.error && (

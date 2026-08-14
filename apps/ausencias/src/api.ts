@@ -19,6 +19,8 @@ export interface Empleado {
   credencial: number | null;
   /** El correo de su jefe inmediato: la única arista del organigrama. */
   aprobadorCorreo: string;
+  /** A quién se pone en copia de sus correos. `null` = a nadie. */
+  copiaCorreo: string | null;
   userId: string | null;
   activo: boolean;
 }
@@ -57,6 +59,8 @@ export interface Solicitud {
   aprobadorCorreo: string | null;
   /** Quien firma después, congelado. `null` = una sola firma. */
   segundoAprobadorCorreo: string | null;
+  /** Leído de la ficha al consultar, no congelado en el alta. */
+  copiaCorreo: string | null;
   primeraFirmaAt: string | null;
   decididaAt: string | null;
   motivoRechazo: string | null;
@@ -239,6 +243,10 @@ export const fetchEmpleados = () =>
  */
 export const fijarJefe = (empleadoId: string, aprobadorCorreo: string) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/jefe`, { aprobadorCorreo });
+
+/** Fija a quién se pone en copia. `null` = sin copia. */
+export const fijarCopia = (id: string, copiaCorreo: string | null) =>
+  put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/copia`, { copiaCorreo });
 
 /**
  * Descarga el PDF de una solicitud. Va por fetch y no por `<a href>` porque el

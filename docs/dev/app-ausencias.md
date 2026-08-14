@@ -36,7 +36,7 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 - **BD**: migración `015_ausencias.sql` → `portal.empleados`,
   `portal.solicitudes_ausencia`, `portal.solicitud_adjuntos`,
   `portal.ausencias_outbox`; `017` el saldo, `018` la cascada de dos firmas, `019`
-  la reserva del outbox y `020` la retirada de Drive.
+  la reserva del outbox, `020` la retirada de Drive y `021` la copia configurable.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
 ## No se piden días que ya pasaron
@@ -126,9 +126,9 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `creada` | acuse al solicitante | — | — |
 | `aprobacion` | aviso al jefe inmediato | — | — |
 | `aprobacion_2` | aviso al segundo aprobador | — | — |
-| `aprobada` | aprobado, a **toda la cadena** (+ administración) | ✔ | ✔ |
-| `rechazada` | rechazado con motivo, a **toda la cadena** (+ administración) | — | ✔ |
-| `registrada` | acuse de incapacidad | ✔ | ✔ |
+| `aprobada` | aprobado, a **toda la cadena** (+ la copia de la ficha) | ✔ | ✔ |
+| `rechazada` | rechazado con motivo, a **toda la cadena** (+ la copia de la ficha) | — | ✔ |
+| `registrada` | acuse de incapacidad (+ `COPIA_INCAPACIDADES` y la copia de la ficha) | ✔ | ✔ |
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
 es distinto**: `avisoSegundoAprobador` lleva su propio asunto y dice que la
@@ -195,6 +195,7 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
+| `PUT` | `/api/ausencias/empleados/:id/copia` | `requireAdmin` — a quién se pone en copia; `null` = a nadie |
 | `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,confirmado}` | `requireCronToken` |
 
@@ -397,6 +398,66 @@ a propósito —cablear el aviso obligaba a hacer pasar un callback por más
 componentes de los que hoy lo conocen—, pero conviene tenerlo escrito: el
 síntoma, «mi saldo no cambió», es difícil de atribuir a una edición hecha
 desde otra pestaña.
+
+## La copia de los correos
+
+Quién va en copia de los correos de una persona dejó de ser una constante para
+toda la empresa —`COPIA_ADMINISTRACION`, con `comercial@` y `administrativo@`
+fijos— y pasó a ser un campo de su ficha: `portal.empleados.copia_correo`
+(migración `021`), editable desde la pestaña *Organigrama*. `NULL` es sin
+copia.
+
+Entra en dos sitios del código, y son los únicos: `cadenaDeDecision`
+—que junta solicitante, los dos aprobadores y la copia para `aprobada` y
+`rechazada`— y la rama de incapacidad de `acuseSolicitante`. El acuse de una
+solicitud normal y los avisos a los dos aprobadores no llevan copia, y hay
+tests que fijan cada una de esas ausencias para que la lista de destinatarios
+no crezca por descuido el día que alguien retoque estas funciones.
+
+**`comercial@` sigue fijo en el acuse de incapacidad**, vía `COPIA_INCAPACIDADES`
+en `config.ts`, y es la única mitad de la vieja `COPIA_ADMINISTRACION` que
+sobrevive —la otra, `administrativo@`, pasó a vivir en la ficha, sembrada por
+la `021`—. El motivo no es cosmético: una incapacidad genera un único evento,
+`registrada`, y nunca uno de decisión, así que ese buzón no le llega por
+`cadenaDeDecision` como en aprobada y rechazada. Sin la constante, gerencia
+habría dejado de enterarse de las incapacidades el día del despliegue —el plan
+de esta feature decía que el cambio no perdía nada, y para esta mitad era
+falso.
+
+**La copia no se congela en el alta**, al revés que los dos firmantes, y la
+diferencia es de fondo, no de forma: un firmante decide quién PUEDE
+decidir —es un permiso—; la copia solo decide a quién se avisa. `SELECT_SOLICITUD`
+la lee de `portal.empleados` al construir cada correo, así que corregir una
+copia mal puesta en el organigrama arregla también lo que ya está en trámite.
+Sale gratis: el `JOIN` con `empleados` ya estaba ahí por `aprobador_correo`,
+`nombre_completo` y `cargo`.
+
+La migración siembra `administrativo@ambientalia.com.co` con un `DEFAULT` en
+el `ADD COLUMN`, nunca con un `UPDATE`: `initDb()` re-ejecuta las migraciones
+en cada arranque, y un `UPDATE` machacaría en cada despliegue cualquier copia
+que se hubiera ajustado a mano desde el panel.
+
+El `DEFAULT` se queda después de sembrar. Consecuencia asumida: toda ficha
+nueva nace con administración en copia sin que nadie lo decida, y eso incluye
+el acuse de sus propias incapacidades. Es reversible con una `022` que haga
+`ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
+nunca en sitio para cambiar el valor sembrado: las bases que ya la corrieron
+no se enterarían —el `IF NOT EXISTS` corta— pero una base nueva sí, y los
+entornos divergirían en silencio; para cambiarlo hace falta una migración
+nueva con `ALTER COLUMN ... SET DEFAULT`.
+
+**`COPIA_POR_DEFECTO`** hace por la copia lo mismo que `APROBADOR_POR_DEFECTO`
+hace por el jefe: el endpoint valida el correo contra los empleados activos,
+pero acepta ese buzón aunque su ficha se desactive. Sin la excepción, el valor
+con el que la `021` sembró toda la plantilla se volvería irreponible desde el
+panel en cuanto alguien lo cambiara.
+
+**El aviso de privacidad.** Quien queda en copia recibe también los acuses de
+incapacidad de esa persona, que son datos de salud —`config.ts` ya cita la Ley
+1581 a propósito de `VISORES_ADJUNTOS`, y aplica igual aquí—, y el panel lo
+advierte en ámbar antes de guardar. `VISORES_ADJUNTOS` no cambia con esto:
+estar en copia da el aviso de que existe una incapacidad, no la llave para
+abrir el PDF del soporte. Son dos permisos distintos, y uno no implica el otro.
 
 ## Los adjuntos
 
