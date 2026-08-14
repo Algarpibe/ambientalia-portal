@@ -26,7 +26,7 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 - **Frontend**: `apps/ausencias/` — pestañas *Nueva solicitud*, *Mis solicitudes*
   y *Calendario*; *Pendientes de aprobar* e *Historial de aprobaciones* si eres
   aprobador o admin; *Soportes adjuntos* si eres admin o estás en VISORES_ADJUNTOS;
-  *Empleados*, *Saldos* y *Registro general* solo admin.
+  *Empleados*, *Organigrama*, *Saldos* y *Registro general* solo admin.
 - **Backend**: `apps/hub-api/src/ausencias/`
   - `festivos.ts` / `dias-habiles.ts` — el cálculo, con tests.
   - `saldo.ts` / `calendario.ts` / `jerarquia.ts` — módulos puros, con tests.
@@ -569,7 +569,7 @@ Colombia.
 
 ### El mantenimiento del árbol
 
-Se hace en el **panel de organigrama** de la pestaña *Empleados*
+Se hace en la pestaña *Organigrama* (solo admin; hasta 2026-08-14 vivía dentro de *Empleados*)
 (`PanelOrganigrama.tsx`, con el patrón de `PanelSaldos.tsx`), contra
 `PUT /ausencias/empleados/:id/jefe`. Autoasignarse es cómo se declara la raíz, no
 un ciclo prohibido. El buzón por defecto se acepta aunque no tenga ficha de
@@ -805,7 +805,7 @@ del enmascarado de arriba.
    cuelga hoy de `comercial@ambientalia.com.co`, y ese buzón es su propio jefe por
    el mismo DEFAULT: raíz, luego `segundo = null` para todo el mundo y una sola
    firma, exactamente como antes. La cascada se activa persona a persona según se
-   rellena el organigrama en *Empleados*. No hay big bang: desplegar, comprobar
+   rellena el organigrama en *Organigrama*. No hay big bang: desplegar, comprobar
    que nada cambió, y empezar por una sola persona de prueba.
 
 ## Pendiente (backlog)
@@ -813,7 +813,7 @@ del enmascarado de arriba.
 - Cargar los saldos iniciales del consolidado (nombre, días y a qué fecha son
   válidos) en la pestaña *Saldos*. Hasta entonces todo el mundo aparece como
   "sin configurar", que es el comportamiento correcto.
-- Rellenar el organigrama en *Empleados*. Hasta que se haga, todo el mundo cuelga
+- Rellenar el organigrama en *Organigrama*. Hasta que se haga, todo el mundo cuelga
   del buzón por defecto y firma una sola persona.
 - Retirar la copia a Google Sheets cuando Nómina consulte solo el portal.
 - Widget de dashboard con las ausencias del mes.
