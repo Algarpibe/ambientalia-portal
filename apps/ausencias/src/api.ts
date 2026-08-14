@@ -21,6 +21,8 @@ export interface Empleado {
   aprobadorCorreo: string;
   /** A quién se pone en copia de sus correos. `null` = a nadie. */
   copiaCorreo: string | null;
+  /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
+  veAdjuntos: boolean;
   userId: string | null;
   activo: boolean;
 }
@@ -247,6 +249,10 @@ export const fijarJefe = (empleadoId: string, aprobadorCorreo: string) =>
 /** Fija a quién se pone en copia. `null` = sin copia. */
 export const fijarCopia = (id: string, copiaCorreo: string | null) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/copia`, { copiaCorreo });
+
+/** Da o quita la llave maestra de los adjuntos. Queda registrado en el servidor. */
+export const fijarVisor = (id: string, veAdjuntos: boolean) =>
+  put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor`, { veAdjuntos });
 
 /**
  * Descarga el PDF de una solicitud. Va por fetch y no por `<a href>` porque el

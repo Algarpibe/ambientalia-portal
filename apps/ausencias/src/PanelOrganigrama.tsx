@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
-import { fetchEmpleados, fijarJefe, fijarCopia, type EmpleadoConJefatura } from './api';
+import { fetchEmpleados, fijarJefe, fijarCopia, fijarVisor, type EmpleadoConJefatura } from './api';
 
 // El organigrama de la empresa. Cada persona tiene un jefe inmediato y ese único
 // dato basta: el segundo aprobador se deriva subiendo un escalón, así que el
@@ -12,6 +12,7 @@ import { fetchEmpleados, fijarJefe, fijarCopia, type EmpleadoConJefatura } from 
 interface Fila {
   aprobadorCorreo: string;
   copiaCorreo: string | null;
+  veAdjuntos: boolean;
   guardando: boolean;
   error: string | null;
   exito: boolean;
@@ -20,6 +21,7 @@ interface Fila {
 const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   aprobadorCorreo: e.aprobadorCorreo,
   copiaCorreo: e.copiaCorreo,
+  veAdjuntos: e.veAdjuntos,
   guardando: false,
   error: null,
   exito: false,
@@ -109,6 +111,7 @@ export default function PanelOrganigrama({ activo }: Props) {
       const empleado = empleados.find((x) => x.id === id);
       if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
       if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
+      if (fila.veAdjuntos !== empleado?.veAdjuntos) await fijarVisor(id, fila.veAdjuntos);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
       // alguien cambia la SEGUNDA firma de todos los que cuelgan de él, y dejar
       // esas filas con el valor viejo sería mentir sobre a quién sube su
@@ -155,10 +158,9 @@ export default function PanelOrganigrama({ activo }: Props) {
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
         <span>
           Quien esté en <b>copia</b> recibirá también los acuses de <b>incapacidad</b> de esa persona, que son
-          información de salud. Ponlo solo si esa persona debe conocerla. La copia <b>no</b> decide quién puede abrir
-          los soportes en PDF: eso ya lo pueden hacer el solicitante, su jefe inmediato, la segunda firma, los
-          administradores y los buzones de gerencia y administración. Poner a alguien en copia no le da esa llave, ni
-          quitarlo se la retira.
+          información de salud. Y la casilla <b>Soportes</b> es una llave maestra: quien la tenga puede abrir el PDF de
+          cualquier incapacidad de cualquier persona, no solo de su equipo. Esa lista debe quedarse corta y cada
+          persona tener un motivo. Quién la da o la quita queda registrado.
         </span>
       </p>
 
@@ -194,6 +196,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                 <th className="px-4 py-3 font-medium">Jefe inmediato (1ª firma)</th>
                 <th className="px-4 py-3 font-medium">2ª firma</th>
                 <th className="px-4 py-3 font-medium">Copia</th>
+                <th className="px-4 py-3 font-medium">Soportes</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -205,7 +208,9 @@ export default function PanelOrganigrama({ activo }: Props) {
                 // volver al valor original tras cambiar de idea vuelve a dejar el
                 // botón apagado, que es lo que la fila dice de verdad.
                 const haCambiado =
-                  fila.aprobadorCorreo !== e.aprobadorCorreo || fila.copiaCorreo !== e.copiaCorreo;
+                  fila.aprobadorCorreo !== e.aprobadorCorreo ||
+                  fila.copiaCorreo !== e.copiaCorreo ||
+                  fila.veAdjuntos !== e.veAdjuntos;
                 return (
                   <tr key={e.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5">
@@ -268,6 +273,22 @@ export default function PanelOrganigrama({ activo }: Props) {
                           <option value={fila.copiaCorreo}>{fila.copiaCorreo}</option>
                         )}
                       </select>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          // `!!` y no el valor tal cual: si algún día llega una fila
+                          // de un backend que aún no manda `veAdjuntos`, `undefined`
+                          // volvería este checkbox «no controlado» a medio render y
+                          // React lo avisaría a gritos en la consola.
+                          checked={!!fila.veAdjuntos}
+                          onChange={(ev) => actualizar(e.id, { veAdjuntos: ev.target.checked, error: null })}
+                          aria-label={`${e.nombreCompleto} puede abrir cualquier soporte`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
+                        />
+                        Todos
+                      </label>
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
