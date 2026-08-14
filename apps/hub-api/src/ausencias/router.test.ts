@@ -1755,15 +1755,26 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
 });
 
 describe('PUT /ausencias/empleados/:id/visor', () => {
-  it('un admin da la llave y queda registrado', async () => {
+  it('un admin da la llave, y el registro dice quién la dio y a quién', async () => {
+    // El `sub` del admin es DISTINTO del correo del empleado afectado a
+    // propósito: en el fixture por defecto coinciden, y con esa coincidencia un
+    // swap de `adminEmail` por `empleadoCorreo` pasaría este test sin
+    // inmutarse. El registro es lo único que dice quién dio acceso a datos de
+    // salud desde que la lista salió del código, así que tiene que distinguir
+    // al actor del sujeto.
     const r = await request(app())
       .put(`/api/ausencias/empleados/${E1}/visor`)
-      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .set('Authorization', `Bearer ${token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' })}`)
       .send({ veAdjuntos: true })
       .expect(200);
     expect(r.body).toMatchObject({ id: E1, veAdjuntos: true });
     expect(estado.registroVisores).toHaveLength(1);
-    expect(estado.registroVisores[0]).toMatchObject({ concedido: true, empleadoId: E1 });
+    expect(estado.registroVisores[0]).toMatchObject({
+      adminEmail: 'gerencia@ambientalia.com.co',
+      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
+      empleadoId: E1,
+      concedido: true,
+    });
   });
 
   it('quitarla también se registra', async () => {
@@ -1796,6 +1807,16 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .send({ veAdjuntos: 'si' })
       .expect(400);
     expect(r.body.error).toBe('visor_invalido');
+  });
+
+  it('404 si el empleado no existe', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E_FANTASMA}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: true })
+      .expect(404);
+    // Y no deja rastro: un intento fallido no puede ensuciar el registro.
+    expect(estado.registroVisores).toHaveLength(0);
   });
 
   it('403 a quien no es admin', async () => {
