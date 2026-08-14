@@ -103,11 +103,11 @@ export default function PanelOrganigrama({ activo }: Props) {
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
     try {
-      // Un solo botón por fila, como hasta ahora, pero dos endpoints detrás: se
+      // Un solo botón por fila, como hasta ahora, pero TRES endpoints detrás: se
       // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
-      // porque los dos responden el maestro entero y el segundo tiene que ver ya
-      // escrito lo del primero — con `Promise.all`, la respuesta que llegara
-      // segunda podría ser la construida ANTES del otro cambio.
+      // porque los tres responden el maestro entero y cada uno tiene que ver ya
+      // escrito lo del anterior — con `Promise.all`, la respuesta que llegara
+      // última podría ser la construida ANTES de los otros cambios.
       const empleado = empleados.find((x) => x.id === id);
       if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
       if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
@@ -300,9 +300,9 @@ export default function PanelOrganigrama({ activo }: Props) {
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           // «La fila», no «el jefe»: este botón guarda también la
-                          // copia desde que existe esa columna, y un rótulo que
-                          // nombre solo uno de los dos campos engaña justo a quien
-                          // no puede ver cuál ha cambiado.
+                          // copia y la llave de los soportes, y un rótulo que
+                          // nombre solo uno de los tres campos engaña justo a
+                          // quien no puede ver cuál ha cambiado.
                           aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >

@@ -694,7 +694,7 @@ Set-Location "c:\Users\algar\OneDrive\Documentos\Antigravity\Portal\antigravity-
 Y contra la base `zoho-hub` (ojo a las comillas por el guion: `\c "zoho-hub"`):
 
 ```sql
-SELECT correo, ve_adjuntos FROM portal.empleados WHERE ve_adjuntos;
+SELECT correo, activo, ve_adjuntos FROM portal.empleados WHERE ve_adjuntos;
 ```
 
 Tienen que salir **exactamente** `comercial@ambientalia.com.co` y `administrativo@ambientalia.com.co`. Si falta alguno, su ficha no existía cuando corrió el sembrado, esa persona lleva sin acceso desde el despliegue, y hay que dársela a mano desde el panel.

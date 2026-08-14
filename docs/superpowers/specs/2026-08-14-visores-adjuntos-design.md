@@ -193,7 +193,7 @@ aditiva y no destruye nada.
 por buena:
 
 ```sql
-SELECT correo, ve_adjuntos FROM portal.empleados WHERE ve_adjuntos;
+SELECT correo, activo, ve_adjuntos FROM portal.empleados WHERE ve_adjuntos;
 ```
 
 Tienen que salir exactamente `comercial@` y `administrativo@`. Si falta alguno,

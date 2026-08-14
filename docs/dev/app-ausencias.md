@@ -442,8 +442,9 @@ que se hubiera ajustado a mano desde el panel.
 
 El `DEFAULT` se queda después de sembrar. Consecuencia asumida: toda ficha
 nueva nace con administración en copia sin que nadie lo decida, y eso incluye
-el acuse de sus propias incapacidades. Es reversible con una `022` que haga
-`ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
+el acuse de sus propias incapacidades. Es reversible con **la siguiente
+migración libre** —hoy la `023`, porque la `022` ya existe y es otra cosa— que
+haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
 nunca en sitio para cambiar el valor sembrado: las bases que ya la corrieron
 no se enterarían —el `IF NOT EXISTS` corta— pero una base nueva sí, y los
 entornos divergirían en silencio; para cambiarlo hace falta una migración
@@ -517,11 +518,13 @@ llave, no la plantilla entera. El `UPDATE` va **dentro del `IF NOT EXISTS`**
 que protege el `ADD COLUMN`, y no suelto como cualquier `UPDATE`:
 `initDb()` re-ejecuta las migraciones en cada arranque, y sin esa guarda
 devolvería la llave a quien un admin se la hubiera quitado, en cada
-despliegue. Y va **dentro de un `EXECUTE`** porque plpgsql analiza una
-sentencia estática contra el catálogo antes de correr el bloque, y esta
-referencia una columna que se acaba de crear dos líneas más arriba en el
-mismo `DO`; sin el `EXECUTE` esa sentencia no compilaría, la migración
-lanzaría y hub-api no arrancaría.
+despliegue. Y va **dentro de un `EXECUTE`** para no depender de cuándo plpgsql
+planifica: la sentencia referencia una columna que se acaba de crear dos líneas
+más arriba en el mismo `DO`, y `EXECUTE` difiere el análisis hasta el momento
+de ejecutarla, cuando la columna existe sin lugar a dudas. En la práctica
+plpgsql planifica de forma perezosa y habría funcionado igual, así que no es
+que sin él «no compile»; es que el margen de duda no compensa cuando el precio
+de equivocarse es que hub-api no arranque y se caiga el portal entero.
 
 > ⚠️ **En una base virgen el sembrado afecta a 0 filas.** `portal.empleados`
 > está vacía en el instante en que corre la migración —las fichas se crean

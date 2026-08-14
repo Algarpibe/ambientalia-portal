@@ -237,12 +237,14 @@ describe('permisos', () => {
     expect(puedeVerAdjunto(otro, adj, false)).toBe(false);
   });
 
-  it('el visor entra aunque su correo llegue en MAYÚSCULAS', () => {
-    // La normalización de mayúsculas de la llave ya no pasa por aquí: vive en el
-    // `lower()` del SQL de `repo.esVisorDeAdjuntos`, sin Postgres en este fichero.
-    // Este test se conserva para dejar constancia de que la rama del visor sigue
-    // ganando sin mirar el resto de la sesión, sea cual sea el casing con el que
-    // llegue el correo.
+  it('la llave no mira el correo de la sesión, al contrario que las demás ramas', () => {
+    // Se llamaba «el visor entra aunque su correo llegue en MAYÚSCULAS», y dejó de
+    // ser cierto: desde que `esVisor` entra por parámetro, la normalización vive
+    // en el `lower()` del SQL de `repo.esVisorDeAdjuntos` y aquí ya no se puede
+    // probar —no hay Postgres en este fichero—. Lo que sí fija, y por eso no se
+    // retira, es que la rama de la llave gana SIN comparar correos, a diferencia
+    // de las de solicitante y aprobadores: el correo va en mayúsculas justo para
+    // que el test caiga si alguien la reescribiera para mirarlo.
     const adj = {
       solicitudId: 's1',
       solicitanteEmail: 'ajena@ambientalia.com.co',
