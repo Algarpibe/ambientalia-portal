@@ -166,10 +166,15 @@ vi.mock('./repo.js', () => ({
   empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
   // `veAdjuntos`: por defecto nadie es visor, igual que en el SQL real (la
-  // columna nace en `false`).
+  // columna nace en `false`). `e.activo !== false` y no `=== true`: ninguna otra
+  // función de este doble modela «inactivo» con el campo `activo` (lo hacen
+  // sacando la ficha entera de `estado.plantilla`, ver el `.filter` de más abajo
+  // en el fichero), así que no hay un `=== true` que igualar; se deja abierta a
+  // que una ficha futura omita el campo sin dejar de contar como activa.
   esVisorDeAdjuntos: async (_db: unknown, email: string) =>
     estado.plantilla.some(
-      (e: any) => String(e.correo).toLowerCase() === email.toLowerCase() && e.veAdjuntos === true,
+      (e: any) =>
+        String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veAdjuntos === true,
     ),
   fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
@@ -906,6 +911,8 @@ describe('GET /ausencias/adjuntos', () => {
   it('403 a quien tiene token válido pero no la app asignada', async () => {
     // Con el `sub` de un visor real, para que la única razón posible del 403 sea
     // la app que falta y no la lista.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     await request(app())
       .get('/api/ausencias/adjuntos')
       .set('Authorization', `Bearer ${token({ sub: 'administrativo@ambientalia.com.co', apps: ['contabilidad'] })}`)
