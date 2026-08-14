@@ -58,7 +58,7 @@ function esTipo(v: unknown): v is TipoSolicitud {
  * `diasHabiles`: el primero sale de la sesión y el segundo se calcula aquí, así
  * que ni suplantar a otro ni inflar los días es posible desde el navegador.
  */
-export function validarNuevaSolicitud(body: unknown): NuevaSolicitud {
+export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitud {
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (!esTipo(b.tipo)) throw new AusenciaError('tipo_invalido', 400, 'tipo');
@@ -69,6 +69,23 @@ export function validarNuevaSolicitud(body: unknown): NuevaSolicitud {
   if (!esFechaValida(fechaInicio)) throw new AusenciaError('fecha_invalida', 400, 'fechaInicio');
   if (!esFechaValida(fechaFin)) throw new AusenciaError('fecha_invalida', 400, 'fechaFin');
   if (fechaInicio > fechaFin) throw new AusenciaError('rango_invertido', 400, 'fechaFin');
+
+  // Nada que requiera aprobación puede empezar en el pasado: cuando llegara la
+  // firma, los días ya se habrían disfrutado (o no) y el saldo ya no se podría
+  // reservar. La incapacidad queda fuera, y es la razón de que la regla mire el
+  // tipo: se INFORMA después de haber estado enfermo —uno va al médico, vuelve y
+  // sube el soporte—, así que exigirle fecha de hoy en adelante haría imposible
+  // el caso normal.
+  //
+  // `hoy` se inyecta y no se lee aquí del reloj, por lo mismo que en
+  // `calcularSaldo`: para que la regla se pueda probar sin depender del día en
+  // que se ejecuten los tests. Quien llama pasa `hoyEnColombia()`, que descuenta
+  // UTC−5 ANTES de tomar la fecha — sin eso, entre las 19:00 y medianoche hora
+  // local el servidor ya estaría en el día siguiente y rechazaría por «pasada»
+  // una solicitud para mañana.
+  if (requiereAprobacion(tipo) && fechaInicio < hoy) {
+    throw new AusenciaError('fecha_en_pasado', 400, 'fechaInicio');
+  }
 
   const diasNaturales = (Date.parse(`${fechaFin}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000 + 1;
   if (diasNaturales > MAX_DIAS_RANGO) throw new AusenciaError('rango_demasiado_largo', 400, 'fechaFin');
@@ -155,7 +172,7 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
 }
 
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
-  const datos = validarNuevaSolicitud(body);
+  const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
   const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
 

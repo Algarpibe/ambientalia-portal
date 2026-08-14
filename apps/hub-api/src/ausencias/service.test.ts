@@ -16,6 +16,17 @@ function nueva(over: Record<string, unknown> = {}) {
   return { tipo: 'vacaciones', fechaInicio: '2026-07-06', fechaFin: '2026-07-10', ...over };
 }
 
+/**
+ * Un «hoy» anterior a las fechas de `nueva()`, para que su rango caiga en el
+ * futuro. Va fijo y no `hoyEnColombia()`: con la fecha real, estos tests
+ * empezarían a fallar solos el 7 de julio de 2026 por la regla de fechas
+ * pasadas, sin que nadie hubiera tocado el código.
+ */
+const HOY = '2026-07-01';
+
+/** `validarNuevaSolicitud` con el «hoy» fijo, que es lo que quiere casi todo el fichero. */
+const validar = (body: unknown, hoy: string = HOY) => validarNuevaSolicitud(body, hoy);
+
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
   return {
     id: 's1',
@@ -44,30 +55,69 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
 
 describe('validarNuevaSolicitud', () => {
   it('acepta una solicitud correcta y limpia los comentarios', () => {
-    const r = validarNuevaSolicitud(nueva({ comentarios: '  Viaje  ' }));
+    const r = validar(nueva({ comentarios: '  Viaje  ' }));
     expect(r).toMatchObject({ tipo: 'vacaciones', fechaInicio: '2026-07-06', comentarios: 'Viaje' });
   });
 
   it('rechaza un tipo que no existe', () => {
-    expect(() => validarNuevaSolicitud(nueva({ tipo: 'sabatico' }))).toThrow(
+    expect(() => validar(nueva({ tipo: 'sabatico' }))).toThrow(
       expect.objectContaining({ code: 'tipo_invalido', status: 400 }),
     );
   });
 
   it('rechaza fechas que no son de calendario', () => {
-    expect(() => validarNuevaSolicitud(nueva({ fechaInicio: '2026-02-30' }))).toThrow(
+    expect(() => validar(nueva({ fechaInicio: '2026-02-30' }))).toThrow(
       expect.objectContaining({ code: 'fecha_invalida', field: 'fechaInicio' }),
     );
   });
 
+  it('rechaza unas vacaciones que empiezan antes de hoy', () => {
+    // Pedir aprobación de algo que ya ocurrió no tiene sentido: cuando llegue la
+    // firma, los días ya se disfrutaron (o no) y el saldo ya no se puede reservar.
+    expect(() => validar(nueva({ fechaInicio: '2026-06-30', fechaFin: '2026-07-10' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_en_pasado', status: 400, field: 'fechaInicio' }),
+    );
+  });
+
+  it('acepta unas vacaciones que empiezan HOY', () => {
+    // El límite es «anterior a hoy», no «posterior a hoy»: pedir el mismo día es
+    // legítimo y es justo el caso que un `<` mal puesto rompería en silencio.
+    expect(validar(nueva({ fechaInicio: HOY, fechaFin: '2026-07-10' }))).toMatchObject({ fechaInicio: HOY });
+  });
+
+  it('acepta una incapacidad con fechas ya pasadas', () => {
+    // La excepción que justifica que la regla mire el tipo. Una incapacidad se
+    // INFORMA después de haber estado enfermo: uno va al médico, vuelve y sube el
+    // soporte. Exigirle fecha de hoy en adelante haría imposible el caso normal.
+    const r = validar(
+      nueva({
+        tipo: 'incapacidad',
+        fechaInicio: '2026-06-01',
+        fechaFin: '2026-06-03',
+        adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 },
+      }),
+    );
+    expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: '2026-06-01' });
+  });
+
+  it('la regla del pasado también tapa permisos y compensatorios', () => {
+    // Los tres tipos que requieren aprobación van juntos: si la regla mirara solo
+    // `vacaciones`, quedaría abierta la misma puerta por otro lado.
+    for (const tipo of ['permiso', 'compensatorio'] as const) {
+      expect(() => validar(nueva({ tipo, fechaInicio: '2026-06-30' }))).toThrow(
+        expect.objectContaining({ code: 'fecha_en_pasado', field: 'fechaInicio' }),
+      );
+    }
+  });
+
   it('rechaza el rango invertido', () => {
-    expect(() => validarNuevaSolicitud(nueva({ fechaInicio: '2026-07-10', fechaFin: '2026-07-06' }))).toThrow(
+    expect(() => validar(nueva({ fechaInicio: '2026-07-10', fechaFin: '2026-07-06' }))).toThrow(
       expect.objectContaining({ code: 'rango_invertido' }),
     );
   });
 
   it('rechaza rangos de más de un año', () => {
-    expect(() => validarNuevaSolicitud(nueva({ fechaFin: '2028-07-10' }))).toThrow(
+    expect(() => validar(nueva({ fechaFin: '2028-07-10' }))).toThrow(
       expect.objectContaining({ code: 'rango_demasiado_largo' }),
     );
   });
@@ -75,13 +125,13 @@ describe('validarNuevaSolicitud', () => {
   it('exige adjunto en las incapacidades', () => {
     // Es el único tipo que nadie aprueba: el soporte médico es lo único que lo
     // respalda, así que sin él no se registra.
-    expect(() => validarNuevaSolicitud(nueva({ tipo: 'incapacidad' }))).toThrow(
+    expect(() => validar(nueva({ tipo: 'incapacidad' }))).toThrow(
       expect.objectContaining({ code: 'adjunto_requerido' }),
     );
   });
 
   it('acepta la incapacidad con su PDF', () => {
-    const r = validarNuevaSolicitud(
+    const r = validar(
       nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 } }),
     );
     expect(r.adjunto?.nombreArchivo).toBe('inc.pdf');
@@ -89,7 +139,7 @@ describe('validarNuevaSolicitud', () => {
 
   it('no permite adjuntar algo que no sea un PDF', () => {
     expect(() =>
-      validarNuevaSolicitud(
+      validar(
         nueva({ tipo: 'permiso', adjunto: { nombreArchivo: 'x.exe', mime: 'application/x-msdownload', contenidoBase64: PDF_BASE64 } }),
       ),
     ).toThrow(expect.objectContaining({ code: 'adjunto_no_es_pdf' }));
@@ -98,21 +148,21 @@ describe('validarNuevaSolicitud', () => {
   it('rechaza un adjunto por encima del tope sin llegar a decodificarlo', () => {
     const enorme = 'A'.repeat(12 * 1024 * 1024); // ~9 MB una vez decodificado
     expect(() =>
-      validarNuevaSolicitud(
+      validar(
         nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: enorme } }),
       ),
     ).toThrow(expect.objectContaining({ code: 'adjunto_demasiado_grande' }));
   });
 
   it('el permiso puede ir sin adjunto', () => {
-    expect(validarNuevaSolicitud(nueva({ tipo: 'permiso' })).adjunto).toBeUndefined();
+    expect(validar(nueva({ tipo: 'permiso' })).adjunto).toBeUndefined();
   });
 
   it('ignora cualquier empleadoId o diasHabiles que mande el cliente', () => {
     // La identidad sale de la sesión y los días se calculan en el servidor: si
     // estos campos se colaran, cualquiera podría pedir vacaciones a nombre de
     // otro o declararse 40 días hábiles en una semana.
-    const r = validarNuevaSolicitud(nueva({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
+    const r = validar(nueva({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
     expect(r.empleadoId).toBeUndefined();
     expect(r.diasHabiles).toBeUndefined();
   });
