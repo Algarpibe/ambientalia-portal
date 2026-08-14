@@ -11,9 +11,24 @@ interface Props {
   diasPedidos?: number;
   /** Encabezado alternativo, para cuando el saldo es de otra persona. */
   titulo?: string;
+  /**
+   * Callar la tarjeta cuando solo repetiría el número que ya está en la
+   * cabecera. Lo usa el formulario, que la tiene a un palmo del indicador; la
+   * bandeja NO lo pasa, porque allí el saldo es de otra persona y no está en
+   * ninguna otra parte de la pantalla.
+   *
+   * No la calla del todo: el aviso de «sin configurar» y el de exceso de días
+   * siguen saliendo, que es lo único que esta tarjeta dice y el indicador no.
+   */
+  soloSiAvisa?: boolean;
 }
 
-export default function TarjetaSaldo({ saldo, diasPedidos = 0, titulo = 'Tu saldo de vacaciones' }: Props) {
+export default function TarjetaSaldo({
+  saldo,
+  diasPedidos = 0,
+  titulo = 'Tu saldo de vacaciones',
+  soloSiAvisa = false,
+}: Props) {
   if (!saldo.configurado) {
     return (
       // Usa `titulo` (no un texto fijo) porque en la bandeja esta tarjeta es de
@@ -35,6 +50,12 @@ export default function TarjetaSaldo({ saldo, diasPedidos = 0, titulo = 'Tu sald
   // y onDecidida piden datos nuevos justo para evitar eso).
   const pedible = saldo.disponible - saldo.enTramite;
   const seExcede = diasPedidos > 0 && diasPedidos > pedible;
+
+  // Con `soloSiAvisa`, sin exceso no hay nada que esta tarjeta cuente que no
+  // cuente ya el indicador de la cabecera. La comprobación va DESPUÉS de la de
+  // «sin configurar» a propósito: ese cartel sí es exclusivo de aquí, porque la
+  // cabecera no enseña nada cuando falta el punto de partida.
+  if (soloSiAvisa && !seExcede) return null;
 
   return (
     <div
