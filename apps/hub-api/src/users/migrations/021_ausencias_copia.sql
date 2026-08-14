@@ -17,6 +17,25 @@
 -- fichas solas en el primer acceso de cada persona, y así ninguna nace sin copia
 -- por descuido. Quitarla es una edición explícita desde el organigrama.
 --
+-- Lo que eso decide, dicho entero: quien entre por primera vez de aquí en
+-- adelante nace con administración en copia sin que nadie lo haya decidido, y
+-- eso incluye el acuse de sus incapacidades, que es información de salud.
+-- Tampoco se podrá distinguir «configurado a administrativo@» de «nunca
+-- revisado». Es reversible y limpio cuando se quiera: una 022 con
+-- `ALTER TABLE portal.empleados ALTER COLUMN copia_correo DROP DEFAULT;`, que es
+-- idempotente (no-op si ya no hay default) y por tanto re-ejecutable.
+--
+-- ⚠️ NO editar el literal de este fichero para cambiar la copia por defecto: las
+-- bases que ya corrieron la migración no se enterarían (el IF NOT EXISTS corta)
+-- pero una base nueva sí, y los entornos divergirían en silencio. Cambiarlo pide
+-- una migración nueva con `ALTER COLUMN ... SET DEFAULT`.
+--
+-- Depende del orden del array `MIGRATIONS` de db.ts: la 015 crea
+-- `portal.empleados`. El `CREATE SCHEMA` de abajo es estilo de la casa, no una
+-- red — si la tabla faltara, crear el esquema vacío no evitaría el error, y como
+-- `initDb()` no captura, hub-api no arrancaría. Que falle ruidosamente es lo
+-- correcto: un `ALTER TABLE IF EXISTS` lo convertiría en un salto silencioso.
+--
 -- Aditiva y sin destruir nada: revertir el build no obliga a tocar la base, al
 -- contrario que la 020.
 
