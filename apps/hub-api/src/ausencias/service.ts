@@ -579,6 +579,38 @@ export async function fijarJefe(db: Pool, empleadoId: string, body: unknown): Pr
   return actualizado;
 }
 
+/**
+ * Fija a quién se pone en copia de los correos de alguien. `null` = a nadie.
+ *
+ * Se valida contra los empleados ACTIVOS, no solo el formato del correo: el
+ * desplegable del panel solo ofrece personas de la plantilla, y aceptar aquí
+ * cualquier cosa dejaría entrar erratas que mandarían los avisos al vacío sin
+ * que nadie se enterara. No hay comprobación de ciclos, a diferencia del jefe:
+ * esto no es un árbol y estar en copia no da ningún permiso.
+ */
+export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const bruto = b.copiaCorreo;
+  if (bruto !== null && typeof bruto !== 'string') {
+    throw new AusenciaError('copia_invalida', 400, 'copiaCorreo');
+  }
+
+  const copia = typeof bruto === 'string' && bruto.trim() ? bruto.trim().toLowerCase() : null;
+  if (copia !== null) {
+    const enlaces = await repo.enlacesActivos(db);
+    if (!enlaces.some((e) => e.correo === copia)) {
+      throw new AusenciaError('copia_no_encontrada', 400, 'copiaCorreo');
+    }
+  }
+
+  if (!(await repo.fijarCopia(db, empleadoId, copia))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
 /** El saldo de un empleado, listo para enseñar. */
 export interface SaldoDeEmpleado {
   empleadoId: string;

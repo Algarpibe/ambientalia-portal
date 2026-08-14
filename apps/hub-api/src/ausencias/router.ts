@@ -224,6 +224,24 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Cambia a quién se pone en copia de los correos de alguien. No manda ningún
+   * correo, igual que cambiar el jefe o fijar el saldo: configurar no es decidir
+   * nada sobre una solicitud.
+   *
+   * Al contrario que los firmantes, la copia NO se congela en el alta: se lee al
+   * notificar, así que este cambio afecta también a las solicitudes que ya estén
+   * en trámite. Es lo que se quiere — corregir una copia mal puesta tiene que
+   * arreglar lo que aún no ha salido.
+   */
+  router.put('/ausencias/empleados/:id/copia', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarCopia(db, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_copia');
+    }
+  });
+
   // ── Histórico de la hoja (solo admin) ───────────────────────────────────
 
   /**

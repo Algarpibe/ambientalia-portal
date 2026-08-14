@@ -169,6 +169,12 @@ vi.mock('./repo.js', () => ({
     e.aprobadorCorreo = aprobadorCorreo;
     return true;
   },
+  fijarCopia: async (_db: unknown, empleadoId: string, copia: string | null) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.copiaCorreo = copia;
+    return true;
+  },
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1633,6 +1639,44 @@ describe('GET /ausencias/calendario', () => {
     await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token({ apps: [] })}`)
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/copia', () => {
+  it('un admin fija la copia de alguien', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ copiaCorreo: 'ana.ruiz@ambientalia.com.co' })
+      .expect(200);
+    expect(r.body).toMatchObject({ id: E1, copiaCorreo: 'ana.ruiz@ambientalia.com.co' });
+  });
+
+  it('acepta `null` para dejar a alguien sin copia', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ copiaCorreo: null })
+      .expect(200);
+    expect(r.body).toHaveProperty('copiaCorreo', null);
+  });
+
+  it('400 si el correo no es de nadie de la plantilla', async () => {
+    // Se valida contra los empleados ACTIVOS y no solo el formato: una errata
+    // mandaría los avisos al vacío sin que nadie se enterara nunca.
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ copiaCorreo: 'nadie@ambientalia.com.co' })
+      .expect(400);
+  });
+
+  it('403 a quien no es admin', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ copiaCorreo: 'ana.ruiz@ambientalia.com.co' })
       .expect(403);
   });
 });
