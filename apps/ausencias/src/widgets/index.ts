@@ -10,7 +10,7 @@ const widgets: WidgetDescriptor[] = [
     appId: 'ausencias',
     name: 'Mi saldo de vacaciones',
     description: 'Días de vacaciones disponibles a día de hoy.',
-    defaultSize: { w: 3, h: 2 },
+    defaultSize: { w: 4, h: 3 },
     component: WidgetSaldo,
   },
 ];

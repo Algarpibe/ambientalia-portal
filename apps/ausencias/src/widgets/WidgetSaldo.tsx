@@ -8,7 +8,7 @@ import IndicadorSaldo from '../IndicadorSaldo';
 
 type Estado =
   | { fase: 'cargando' }
-  | { fase: 'error' }
+  | { fase: 'error'; mensaje: string }
   | { fase: 'listo'; saldo: SaldoVacaciones | null };
 
 export default function WidgetSaldo() {
@@ -18,14 +18,23 @@ export default function WidgetSaldo() {
     let vivo = true;
     fetchMiSaldo()
       .then((saldo) => vivo && setEstado({ fase: 'listo', saldo }))
-      .catch(() => vivo && setEstado({ fase: 'error' }));
+      // `mensajeDeError` (dentro de `fetchMiSaldo`) ya distingue 401 de 403 del
+      // resto: decirle a alguien «no se pudo cargar» cuando lo que pasa es que
+      // caducó su sesión —el token vive en localStorage y una pestaña puede
+      // llevar horas abierta— le hace perder el tiempo en vez de mandarlo a
+      // volver a entrar.
+      .catch(
+        (e) =>
+          vivo &&
+          setEstado({ fase: 'error', mensaje: e instanceof Error ? e.message : 'No se pudo cargar tu saldo.' }),
+      );
     return () => {
       vivo = false;
     };
   }, []);
 
   if (estado.fase === 'cargando') return <Mensaje>Cargando…</Mensaje>;
-  if (estado.fase === 'error') return <Mensaje tono="error">No se pudo cargar tu saldo.</Mensaje>;
+  if (estado.fase === 'error') return <Mensaje tono="error">{estado.mensaje}</Mensaje>;
   // `null` (sin ficha) y `configurado: false` caen juntos a propósito: en los dos
   // casos no hay número que enseñar. Y nunca un 0,0 en grande — se leería como
   // «no me quedan días», que no es lo mismo que «nadie ha fijado tu punto de
@@ -44,7 +53,7 @@ export default function WidgetSaldo() {
         href="/ausencias"
         className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50"
       >
-        Pedir vacaciones →
+        Pedir vacaciones <span aria-hidden="true">→</span>
       </a>
     </div>
   );
@@ -54,7 +63,7 @@ function Mensaje({ children, tono }: { children: React.ReactNode; tono?: 'error'
   return (
     <div
       className={`flex h-full items-center justify-center px-3 text-center text-sm ${
-        tono === 'error' ? 'text-red-500' : 'text-gray-400'
+        tono === 'error' ? 'text-red-600' : 'text-gray-500'
       }`}
     >
       {children}
