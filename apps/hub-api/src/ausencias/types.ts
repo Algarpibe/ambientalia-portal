@@ -108,6 +108,16 @@ export interface Empleado {
   copiaCorreo: string | null;
   /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
   veAdjuntos: boolean;
+  /**
+   * Si sus solicitudes necesitan también la firma del jefe de su jefe, o basta
+   * con la del jefe inmediato.
+   *
+   * Apagarlo NO deja a nadie sin enterarse: el de segundo nivel pasa de firmante
+   * a informado y sigue recibiendo el correo del resultado. El valor por defecto
+   * vive en el SQL (`DEFAULT TRUE`), no aquí — repetirlo en TypeScript daría dos
+   * fuentes de verdad para el mismo default.
+   */
+  requiereSegundaFirma: boolean;
   userId: string | null;
   activo: boolean;
 }

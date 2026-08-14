@@ -40,7 +40,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos`;
+  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos, requiere_segunda_firma`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -53,6 +53,7 @@ interface FilaEmpleadoDb {
   user_id: string | null;
   activo: boolean;
   ve_adjuntos: boolean;
+  requiere_segunda_firma: boolean;
 }
 
 function aEmpleado(r: FilaEmpleadoDb): Empleado {
@@ -65,6 +66,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     aprobadorCorreo: r.aprobador_correo,
     copiaCorreo: r.copia_correo,
     veAdjuntos: r.ve_adjuntos,
+    requiereSegundaFirma: r.requiere_segunda_firma,
     userId: r.user_id,
     activo: r.activo,
   };

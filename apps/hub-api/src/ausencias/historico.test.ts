@@ -14,6 +14,7 @@ function empleado(nombreCompleto: string, correo: string): Empleado {
     aprobadorCorreo: 'jefe@empresa.test',
     copiaCorreo: null,
     veAdjuntos: false,
+    requiereSegundaFirma: true,
     userId: null,
     activo: true,
   };
