@@ -2,8 +2,8 @@ import { CalendarClock } from 'lucide-react';
 import type { SaldoVacaciones } from './api';
 import { formatDias, formatFecha } from './dominio';
 
-// La tarjeta del saldo. Se usa en tres sitios (formulario, «Mis solicitudes» y
-// bandeja), por eso vive aparte y no dentro del formulario.
+// La tarjeta del saldo. Se usa en dos sitios (formulario y bandeja), por eso
+// vive aparte y no dentro del formulario.
 
 interface Props {
   saldo: SaldoVacaciones;
