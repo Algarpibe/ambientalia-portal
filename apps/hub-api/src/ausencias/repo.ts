@@ -40,7 +40,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, user_id, activo`;
+  aprobador_correo, copia_correo, user_id, activo`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -49,6 +49,7 @@ interface FilaEmpleadoDb {
   cargo: string | null;
   credencial: number | null;
   aprobador_correo: string;
+  copia_correo: string | null;
   user_id: string | null;
   activo: boolean;
 }
@@ -61,6 +62,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     cargo: r.cargo,
     credencial: r.credencial,
     aprobadorCorreo: r.aprobador_correo,
+    copiaCorreo: r.copia_correo,
     userId: r.user_id,
     activo: r.activo,
   };
@@ -411,6 +413,18 @@ export async function fijarJefe(db: Pool, empleadoId: string, aprobadorCorreo: s
   const { rowCount } = await db.query(
     `UPDATE portal.empleados SET aprobador_correo = lower($2) WHERE id = $1 AND activo`,
     [empleadoId, aprobadorCorreo],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Fija (o quita, con `null`) la copia de un empleado. Devuelve false si no
+ * existía o estaba inactivo, igual que `fijarJefe`.
+ */
+export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: string | null): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET copia_correo = lower($2) WHERE id = $1 AND activo`,
+    [empleadoId, copiaCorreo],
   );
   return (rowCount ?? 0) > 0;
 }

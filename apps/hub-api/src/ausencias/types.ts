@@ -104,6 +104,8 @@ export interface Empleado {
   cargo: string | null;
   credencial: number | null;
   aprobadorCorreo: string;
+  /** A quién se pone en copia de sus correos. `null` = a nadie. */
+  copiaCorreo: string | null;
   userId: string | null;
   activo: boolean;
 }
