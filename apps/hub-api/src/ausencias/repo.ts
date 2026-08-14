@@ -633,7 +633,8 @@ const SELECT_SOLICITUD = `
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime,
          -- octet_length y no el binario: las listas solo necesitan el tamano.
-         octet_length(a.contenido) AS adjunto_bytes
+         octet_length(a.contenido) AS adjunto_bytes,
+         e.copia_correo
     FROM portal.solicitudes_ausencia s
     JOIN portal.empleados e ON e.id = s.empleado_id
     LEFT JOIN portal.solicitud_adjuntos a ON a.solicitud_id = s.id`;
@@ -662,6 +663,7 @@ interface FilaSolicitudDb {
   nombre_archivo: string | null;
   mime: string | null;
   adjunto_bytes: number | null;
+  copia_correo: string | null;
 }
 
 function aSolicitud(r: FilaSolicitudDb): Solicitud {
@@ -694,6 +696,7 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     motivoRechazo: r.motivo_rechazo,
     createdAt: r.created_at,
     adjunto,
+    copiaCorreo: r.copia_correo,
   };
 }
 

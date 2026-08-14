@@ -11,8 +11,11 @@ import type { TipoSolicitud } from './types.js';
 /** Buzón que aprueba por defecto cuando el empleado no tiene otro asignado. */
 export const APROBADOR_POR_DEFECTO = 'comercial@ambientalia.com.co';
 
-/** En copia en los avisos de decisión y en el acuse de incapacidad. */
-export const COPIA_ADMINISTRACION = ['comercial@ambientalia.com.co', 'administrativo@ambientalia.com.co'];
+// Aquí vivía `COPIA_ADMINISTRACION`, con `comercial@` y `administrativo@` fijos
+// para toda la empresa. La copia es ahora un campo de la ficha del empleado
+// (`portal.empleados.copia_correo`, migración 021), editable desde la pestaña
+// Organigrama. `comercial@` no se pierde de esos correos: es primer o segundo
+// firmante de toda la plantilla y sigue llegando por `cadenaDeDecision`.
 
 /**
  * Quién puede abrir CUALQUIER adjunto de CUALQUIER persona desde el portal,

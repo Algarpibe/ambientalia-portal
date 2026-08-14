@@ -25,6 +25,9 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     motivoRechazo: null,
     createdAt: '2026-06-01T10:00:00Z',
     adjunto: null,
+    // La migración 021 deja a toda la plantilla con este valor sembrado: un
+    // helper con `null` describiría un estado que en producción no existe.
+    copiaCorreo: 'administrativo@ambientalia.com.co',
     ...over,
   };
 }
@@ -95,8 +98,10 @@ describe('correos', () => {
       }),
       'aprobada',
     );
+    // `comercial@` ya no aparece aquí: era la mitad fija de la vieja constante,
+    // pero en esta solicitud no es ni aprobador ni la copia de la ficha.
     expect(p.correo.para).toBe(
-      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, administrativo@ambientalia.com.co',
     );
   });
 
@@ -119,7 +124,9 @@ describe('correos', () => {
       solicitud({ estado: 'aprobada', aprobadorCorreo: 'ANA.RUIZ@ambientalia.com.co', segundoAprobadorCorreo: null }),
       'aprobada',
     );
-    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co');
+    // Sin `comercial@`: ya no es aprobador en esta solicitud ni la copia de la
+    // ficha, así que la vieja constante de dos buzones no aplica.
+    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co, administrativo@ambientalia.com.co');
   });
 
   it('sin segunda firma no deja un hueco en la lista de destinatarios', () => {
@@ -129,8 +136,9 @@ describe('correos', () => {
       solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefa.directa@ambientalia.com.co', segundoAprobadorCorreo: null }),
       'aprobada',
     );
+    // Sin `comercial@`: no es aprobador aquí ni la copia de la ficha.
     expect(p.correo.para).toBe(
-      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, administrativo@ambientalia.com.co',
     );
   });
 
@@ -317,5 +325,48 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     );
     expect(p.hoja!.columnas.Tipo).toBe('Vacaciones');
     expect(p.hoja!.columnas['Días']).toBe(5);
+  });
+});
+
+describe('la copia sale de la ficha del empleado', () => {
+  it('entra en el correo de aprobada', () => {
+    const p = construirPayload(solicitud({ estado: 'aprobada', copiaCorreo: 'copia@ambientalia.com.co' }), 'aprobada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('entra en el correo de rechazada', () => {
+    const p = construirPayload(solicitud({ estado: 'rechazada', copiaCorreo: 'copia@ambientalia.com.co' }), 'rechazada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('entra en el acuse de una incapacidad', () => {
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', copiaCorreo: 'copia@ambientalia.com.co' }), 'registrada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('NO entra en el acuse de una solicitud normal', () => {
+    // Este test existe para que la copia no se convierta en una ampliación
+    // silenciosa: el acuse de vacaciones nunca ha llevado copia y no debe
+    // empezar a llevarla ahora.
+    const p = construirPayload(solicitud({ tipo: 'vacaciones', copiaCorreo: 'copia@ambientalia.com.co' }), 'creada');
+    expect(p.correo.para).not.toContain('copia@ambientalia.com.co');
+  });
+
+  it('NO entra en el aviso al aprobador', () => {
+    const p = construirPayload(solicitud({ copiaCorreo: 'copia@ambientalia.com.co' }), 'aprobacion');
+    expect(p.correo.para).not.toContain('copia@ambientalia.com.co');
+  });
+
+  it('con `copiaCorreo: null` no deja un destinatario vacío', () => {
+    // `destinatarios()` filtra nulos; sin eso saldría una coma suelta en el
+    // `sendTo` de Gmail, que es un correo a nadie con pinta de correo válido.
+    const p = construirPayload(solicitud({ estado: 'aprobada', copiaCorreo: null }), 'aprobada');
+    expect(p.correo.para).not.toMatch(/,\s*,|,\s*$/);
+  });
+
+  it('una copia que ya firma no se duplica', () => {
+    const s = solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefe@ambientalia.com.co', copiaCorreo: 'jefe@ambientalia.com.co' });
+    const p = construirPayload(s, 'aprobada');
+    expect(p.correo.para.match(/jefe@ambientalia\.com\.co/g)).toHaveLength(1);
   });
 });

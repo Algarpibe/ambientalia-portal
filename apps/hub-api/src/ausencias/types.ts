@@ -148,6 +148,14 @@ export interface Solicitud {
   motivoRechazo: string | null;
   createdAt: string;
   adjunto: Adjunto | null;
+  /**
+   * A quién se pone en copia, leído de la ficha del empleado AL CONSULTAR, no
+   * congelado en el alta como los dos firmantes. La diferencia es deliberada: un
+   * firmante decide quién PUEDE decidir —un permiso—, y la copia solo decide a
+   * quién se avisa. Congelarla haría que corregir una copia mal puesta no
+   * arreglara ninguna solicitud en curso.
+   */
+  copiaCorreo: string | null;
 }
 
 /** Lo que el cliente manda al crear. `empleadoId` NO viaja: sale de la sesión. */
