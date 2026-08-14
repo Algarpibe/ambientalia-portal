@@ -260,7 +260,7 @@ absoluto.
 | Endpoint | Quién |
 |---|---|
 | `GET /ausencias/contexto` | cualquiera con la app — trae el saldo del propio solicitante dentro del payload de arranque, sin llamada aparte |
-| `GET /ausencias/mi-saldo` | cualquiera con la app — el mismo saldo propio, pero solo, para quien no necesita el resto del contexto (el widget del dashboard; ver «Dónde se ve» más abajo) |
+| `GET /ausencias/mi-saldo` | cualquiera con la app — el mismo saldo propio, pero solo: lo usan el widget del dashboard y el refresco de la cabecera tras crear o decidir una solicitud (ver «Dónde se ve» más abajo) |
 | `GET /ausencias/saldos` | admin ve a todos los empleados; un aprobador no-admin ve solo los suyos (los que tienen su correo en `aprobador_correo`) — misma regla que `repo.solicitudesPendientes` |
 | `PUT /ausencias/empleados/:id/saldo` | solo admin — fija el corte; no manda correos, igual que editar el registro general |
 
@@ -321,11 +321,11 @@ persona —por eso recibe el título por prop en vez de un texto fijo.
 `GET /ausencias/mi-saldo`, no `/ausencias/contexto`: la home del portal no
 tiene por qué cargar los festivos de tres años para pintar un número. `3×2`
 se probó primero y no cupo —la celda deja 117 px de contenido y el widget
-mide 120 px en cuanto hay algo en trámite, justo la gente para la que existe
-la línea de aviso—. Y el tamaño del descriptor solo manda hasta que alguien añade el
-widget: `addWidget` copia `defaultSize` al layout que persiste en el
-`localStorage` de cada usuario, así que ajustarlo más tarde no habría
-corregido a quien ya lo tuviera añadido con el valor viejo.
+mide 120 px en cuanto hay algo en trámite, justo la gente para la que
+existe la línea de aviso—. Y el tamaño del descriptor solo manda hasta que
+alguien añade el widget: `addWidget` copia `defaultSize` al layout que
+persiste en el `localStorage` de cada usuario, así que ajustarlo más tarde
+no habría corregido a quien ya lo tuviera añadido con el valor viejo.
 
 **La asimetría del admin.** `useWidgetRegistry` filtra el catálogo de
 widgets por el claim `apps` del JWT sin mirar el rol, mientras que
@@ -681,14 +681,13 @@ del enmascarado de arriba.
   cercano, y `overflow-y: auto` crea uno exista o no desbordamiento. El
   `<main>` de esta app nunca desborda: ningún ancestro le fija altura — el
   contenedor raíz del portal usa `min-h-screen` (`min-height`, con
-  `height: auto`) y el propio `<main>` es `flex-grow` (equivale a
-  `flex-grow: 1`, no al atajo `flex: 1`). Así que un `overflow-y-auto` ahí
-  crearía un scrollport que jamás se desplaza, y `sticky top-0` quedaría
-  anclado a un contenedor inerte: la clase sigue aplicada, nada falla ni
-  avisa, y la cabecera con el saldo simplemente deja de acompañar el scroll.
-  Otras páginas del portal (Dashboard, Herramientas) sí llevan
-  `overflow-y-auto` en su `<main>` — quien copie ese patrón aquí rompe el
-  sticky en silencio.
+  `height: auto`), así que no hay un alto fijo contra el que desbordar. Un
+  `overflow-y-auto` ahí crearía un scrollport que jamás se desplaza, y
+  `sticky top-0` quedaría anclado a un contenedor inerte: la clase sigue
+  aplicada, nada falla ni avisa, y la cabecera con el saldo simplemente deja
+  de acompañar el scroll. Otras páginas del portal (Dashboard, Herramientas)
+  sí llevan `overflow-y-auto` en su `<main>` — quien copie ese patrón aquí
+  rompe el sticky en silencio.
 - **`apps/ausencias/tsconfig.json` es más estricto que el del portal, y como
   gate propio no lo ejecuta nadie — pero el código sí se typechequea, con las
   reglas equivocadas.** Trae `verbatimModuleSyntax`, `noUnusedLocals` y
@@ -698,17 +697,31 @@ del enmascarado de arriba.
   `ausencias` es `vite build` a secas —esbuild transpila sin comprobar
   tipos— y no hay paso de CI dedicado a esta app. Pero el portal importa
   `apps/ausencias/src/App` (la ruta `/ausencias`) y `widgets/index` (el
-  catálogo) con imports normales, así que el propio `tsc -b` del portal
-  arrastra TODO el árbol de `ausencias/src` a su programa y lo compila con
-  las reglas relajadas del portal, no con las suyas — verificado con
-  `tsc --listFilesOnly`. El resultado es un typecheck automático en cada CI,
-  solo que el más flojo de los dos: código que violara `noUnusedLocals` o
-  `verbatimModuleSyntax` pasaría igual. El gate estricto propio,
-  `npx tsc --noEmit -p apps/ausencias/tsconfig.json`, sigue siendo un
-  comando manual que hay que acordarse de teclear — hoy sale limpio, igual
-  que el del portal. Convertirlo en portón sería una línea
-  (`"build": "tsc --noEmit && vite build"`), y está **pendiente de
-  decisión**, no hecho.
+  catálogo) con `import()` dinámico —para el code-splitting de Vite—, y eso
+  no cambia nada a efectos de tipos: `tsc` resuelve el especificador igual
+  que en un import estático y arrastra el módulo a su programa. Así, el
+  propio `tsc -b` del portal typechequea **20 de los 21** ficheros de
+  `ausencias/src` —falta `main.tsx`, la entrada de `vite dev` que nadie
+  importa, y que por eso es el único punto donde esta red automática tiene
+  un agujero real— con las reglas relajadas del portal, no con las suyas;
+  verificado con `tsc --listFilesOnly`. El resultado es un typecheck
+  automático en cada CI, solo que el más flojo de los dos: código que
+  violara `noUnusedLocals` o `verbatimModuleSyntax` pasaría igual. El gate
+  estricto propio, `npx tsc --noEmit -p apps/ausencias/tsconfig.json`,
+  sigue siendo un comando manual que hay que acordarse de teclear — hoy
+  sale limpio, igual que el del portal.
+  **Convertirlo en portón NO es solo una línea.** Cambiar el `build` de
+  `ausencias` a `"tsc --noEmit && vite build"` no basta, porque nada
+  ejecuta ese `build`: el CI (`.github/workflows/ci.yml`) solo corre
+  `npm run build` para `apps/portal` y `apps/hub-api`, y el `build` de la
+  raíz (`npm run build --workspaces --if-present`) existe en el
+  `package.json` raíz pero no lo invoca nadie —no hay `turbo.json` pese al
+  `turbo` en las devDependencies, y los tres Dockerfiles (`Dockerfile`,
+  `apps/portal/Dockerfile`, `apps/hub-api/Dockerfile`) llaman a builds de
+  workspace concretos, nunca al de la raíz—. Haría falta el cambio en el
+  `package.json` de `ausencias` **y además** un paso nuevo en el CI que lo
+  invoque; el primero sin el segundo daría una falsa sensación de gate.
+  Sigue **pendiente de decisión**, no hecho.
 
 ## Puesta en marcha
 
