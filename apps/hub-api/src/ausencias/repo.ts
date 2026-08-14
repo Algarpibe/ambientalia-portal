@@ -446,25 +446,41 @@ export async function esVisorDeAdjuntos(db: Pool, email: string): Promise<boolea
   return rows.length > 0;
 }
 
-/** Da o quita la llave. False si no existía o estaba inactivo. */
-export async function fijarVisor(db: Pool, empleadoId: string, veAdjuntos: boolean): Promise<boolean> {
-  const { rowCount } = await db.query(
-    `UPDATE portal.empleados SET ve_adjuntos = $2 WHERE id = $1 AND activo`,
-    [empleadoId, veAdjuntos],
-  );
-  return (rowCount ?? 0) > 0;
+/** Datos de un cambio de llave: quién la da, a quién y en qué sentido. */
+export interface CambioVisor {
+  empleadoId: string;
+  veAdjuntos: boolean;
+  adminEmail: string;
+  empleadoCorreo: string;
 }
 
-/** Deja constancia del cambio. Ver el porqué en la migración 022. */
-export async function registrarCambioVisor(
-  db: Pool,
-  e: { adminEmail: string; empleadoId: string; empleadoCorreo: string; concedido: boolean },
-): Promise<void> {
-  await db.query(
-    `INSERT INTO portal.visores_adjuntos_log (admin_email, empleado_id, empleado_correo, concedido)
-     VALUES (lower($1), $2, lower($3), $4)`,
-    [e.adminEmail, e.empleadoId, e.empleadoCorreo, e.concedido],
-  );
+/**
+ * Da o quita la llave Y deja constancia, en la MISMA transacción.
+ *
+ * No son dos funciones sueltas a propósito. Si el UPDATE cuajara y el INSERT
+ * fallara, el reintento se encontraría el valor ya cambiado, el guard de «solo
+ * si cambia» saltaría la escritura, y la llave quedaría concedida sin una sola
+ * línea de registro — justo lo que esta tabla existe para impedir, y con el
+ * reintento consolidando el hueco en vez de repararlo.
+ *
+ * Devuelve false si la ficha no existía o estaba inactiva, y entonces no se
+ * escribe registro: un intento fallido no puede ensuciar la auditoría.
+ */
+export async function fijarVisorConRegistro(db: Pool, cambio: CambioVisor): Promise<boolean> {
+  return withTransaction(db, async (client) => {
+    const { rowCount } = await client.query(
+      `UPDATE portal.empleados SET ve_adjuntos = $2 WHERE id = $1 AND activo`,
+      [cambio.empleadoId, cambio.veAdjuntos],
+    );
+    if ((rowCount ?? 0) === 0) return false;
+
+    await client.query(
+      `INSERT INTO portal.visores_adjuntos_log (admin_email, empleado_id, empleado_correo, concedido)
+       VALUES (lower($1), $2, lower($3), $4)`,
+      [cambio.adminEmail, cambio.empleadoId, cambio.empleadoCorreo, cambio.veAdjuntos],
+    );
+    return true;
+  });
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────

@@ -632,15 +632,18 @@ export async function fijarVisor(
   if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
 
   if (empleado.veAdjuntos !== b.veAdjuntos) {
-    if (!(await repo.fijarVisor(db, empleadoId, b.veAdjuntos))) {
+    // Una sola llamada que da la llave Y la registra en la misma transacción:
+    // ver el porqué en `repo.fijarVisorConRegistro`.
+    if (
+      !(await repo.fijarVisorConRegistro(db, {
+        empleadoId,
+        veAdjuntos: b.veAdjuntos,
+        adminEmail: sesion.email,
+        empleadoCorreo: empleado.correo,
+      }))
+    ) {
       throw new AusenciaError('empleado_no_encontrado', 404);
     }
-    await repo.registrarCambioVisor(db, {
-      adminEmail: sesion.email,
-      empleadoId,
-      empleadoCorreo: empleado.correo,
-      concedido: b.veAdjuntos,
-    });
   }
 
   const actualizados = await empleadosConJefatura(db);

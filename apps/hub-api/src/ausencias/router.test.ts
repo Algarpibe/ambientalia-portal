@@ -45,6 +45,8 @@ const estado = {
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
   registroVisores: [] as Record<string, unknown>[],
+  /** Para simular que la escritura del registro (dentro de la transacción) falla. */
+  fallarRegistroVisor: false,
 };
 
 vi.mock('./repo.js', () => ({
@@ -188,14 +190,26 @@ vi.mock('./repo.js', () => ({
     e.copiaCorreo = copia;
     return true;
   },
-  fijarVisor: async (_db: unknown, empleadoId: string, ve: boolean) => {
-    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+  // Una sola función para dar la llave Y registrarla, reflejando que en el
+  // repo real las dos escrituras van en la misma transacción (`repo.
+  // fijarVisorConRegistro`). El doble simula esa atomicidad: si toca fallar,
+  // lanza ANTES de tocar la ficha, para que el test de atomicidad de más abajo
+  // pueda comprobar que un fallo no deja la llave concedida a medias.
+  fijarVisorConRegistro: async (
+    _db: unknown,
+    cambio: { empleadoId: string; veAdjuntos: boolean; adminEmail: string; empleadoCorreo: string },
+  ) => {
+    const e = estado.plantilla.find((x: any) => x.id === cambio.empleadoId);
     if (!e) return false;
-    e.veAdjuntos = ve;
+    if (estado.fallarRegistroVisor) throw new Error('fallo simulado en fijarVisorConRegistro');
+    e.veAdjuntos = cambio.veAdjuntos;
+    estado.registroVisores.push({
+      adminEmail: cambio.adminEmail,
+      empleadoId: cambio.empleadoId,
+      empleadoCorreo: cambio.empleadoCorreo,
+      concedido: cambio.veAdjuntos,
+    });
     return true;
-  },
-  registrarCambioVisor: async (_db: unknown, entrada: Record<string, unknown>) => {
-    estado.registroVisores.push(entrada);
   },
   crearSolicitud: async (
     _db: unknown,
@@ -395,6 +409,7 @@ beforeEach(() => {
   estado.adjuntos = new Map();
   estado.seq = 0;
   estado.registroVisores = [];
+  estado.fallarRegistroVisor = false;
 });
 
 // Sin esto, el reloj falso se filtraría a los ficheros de test que corran
@@ -1797,6 +1812,22 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .send({ veAdjuntos: false })
       .expect(200);
+    expect(estado.registroVisores).toHaveLength(0);
+  });
+
+  it('si el registro falla, la llave no se queda concedida a medias', async () => {
+    // No se puede probar la transacción de verdad sin Postgres, así que esto fija
+    // el CABLEADO: que el servicio hace UNA llamada que escribe las dos cosas, y
+    // no dos que puedan cuajar por separado. Si alguien volviera a partirlas, el
+    // fallo del registro dejaría la llave dada y sin rastro, y el reintento no lo
+    // arreglaría porque ya no habría cambio que detectar.
+    estado.fallarRegistroVisor = true;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: true })
+      .expect(500);
+    expect(estado.plantilla[0].veAdjuntos).not.toBe(true);
     expect(estado.registroVisores).toHaveLength(0);
   });
 
