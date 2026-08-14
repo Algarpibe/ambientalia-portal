@@ -682,6 +682,10 @@ describe('aprobación en cascada', () => {
       cargo: 'Coordinadora',
       credencial: 900,
       aprobadorCorreo: GERENCIA,
+      // También aquí: `empleadosConJefatura` pasa CADA ficha de la plantilla por
+      // `aprobadoresDe`, así que sin el campo esta caería por la rama del
+      // informado y su segunda firma desaparecería del maestro.
+      requiereSegundaFirma: true,
       userId: null,
       activo: true,
     });

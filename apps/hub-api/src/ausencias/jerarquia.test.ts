@@ -33,7 +33,7 @@ describe('aprobadoresDe', () => {
     // Si esto devolviera el abuelo, desactivar a alguien mandaría las solicitudes
     // de su equipo al buzón de quien no las espera.
     const r = aprobadoresDe(solicitante(ANA, XIOMARA), null);
-    expect(r.segundo).toBeNull();
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: null });
   });
 
   it('el jefe es la raíz (jefe de sí mismo): una sola firma', () => {
@@ -88,15 +88,17 @@ describe('aprobadoresDe', () => {
   it('firmante e informado nunca tienen valor a la vez', () => {
     // La invariante de la que depende que nada más haya que tocarse: mientras
     // `segundo` sea null, todo lo que ya lee ese campo sigue siendo correcto.
-    const casos = [
-      aprobadoresDe(solicitante(ANA, XIOMARA, true), enlace(XIOMARA, ALFONSO)),
-      aprobadoresDe(solicitante(ANA, XIOMARA, false), enlace(XIOMARA, ALFONSO)),
-      aprobadoresDe(solicitante(ANA, XIOMARA, false), null),
-      aprobadoresDe(solicitante(ANA, ALFONSO, true), enlace(ALFONSO, ALFONSO)),
+    const arboles = [
+      null,                      // el jefe no tiene ficha activa
+      enlace(XIOMARA, XIOMARA),  // el jefe es la raíz
+      enlace(XIOMARA, ANA),      // ciclo de dos
+      enlace(XIOMARA, ALFONSO),  // hay abuelo de verdad
     ];
-    for (const r of casos) {
-      expect(r.segundo === null || r.informado === null).toBe(true);
-    }
+    for (const jefe of arboles)
+      for (const casilla of [true, false]) {
+        const r = aprobadoresDe(solicitante(ANA, XIOMARA, casilla), jefe);
+        expect(r.segundo === null || r.informado === null).toBe(true);
+      }
   });
 });
 

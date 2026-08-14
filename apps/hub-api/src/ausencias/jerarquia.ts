@@ -19,7 +19,10 @@ export interface EnlaceJerarquia {
 export interface Aprobadores {
   /** Quien firma primero. Siempre el `aprobadorCorreo` del solicitante. */
   primero: string;
-  /** Quien firma después, o `null` si no hay segunda firma. */
+  /**
+   * Quien firma después. `null` si el árbol se acaba o si la ficha no exige
+   * segunda firma — en ese segundo caso, el de arriba está en `informado`.
+   */
   segundo: string | null;
   /**
    * El de segundo nivel cuando NO firma: solo se le avisa del resultado.
