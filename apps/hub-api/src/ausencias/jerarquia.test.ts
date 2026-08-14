@@ -10,55 +10,93 @@ function enlace(correo: string, aprobadorCorreo: string): EnlaceJerarquia {
   return { correo, aprobadorCorreo };
 }
 
+/** Un solicitante. Por defecto con doble firma, que es el default del SQL. */
+function solicitante(correo: string, aprobadorCorreo: string, requiereSegundaFirma = true) {
+  return { correo, aprobadorCorreo, requiereSegundaFirma };
+}
+
 describe('aprobadoresDe', () => {
   it('cadena de tres: firma el jefe y luego el jefe del jefe', () => {
-    const r = aprobadoresDe({ correo: ANA, aprobadorCorreo: XIOMARA }, enlace(XIOMARA, ALFONSO));
-    expect(r).toEqual({ primero: XIOMARA, segundo: ALFONSO });
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA), enlace(XIOMARA, ALFONSO));
+    expect(r).toEqual({ primero: XIOMARA, segundo: ALFONSO, informado: null });
   });
 
   it('el jefe no tiene ficha en el maestro: una sola firma', () => {
     // El caso real de hoy: todo el mundo cuelga de un buzón que puede no estar
     // dado de alta como empleado. Tiene que seguir funcionando igual que antes.
-    const r = aprobadoresDe({ correo: ANA, aprobadorCorreo: ALFONSO }, null);
-    expect(r).toEqual({ primero: ALFONSO, segundo: null });
+    const r = aprobadoresDe(solicitante(ANA, ALFONSO), null);
+    expect(r).toEqual({ primero: ALFONSO, segundo: null, informado: null });
   });
 
   it('el jefe tiene la ficha desactivada: una sola firma, y NO salta al abuelo', () => {
     // `enlaceDe` filtra por `activo`, así que un jefe desactivado llega como null.
     // Si esto devolviera el abuelo, desactivar a alguien mandaría las solicitudes
     // de su equipo al buzón de quien no las espera.
-    const r = aprobadoresDe({ correo: ANA, aprobadorCorreo: XIOMARA }, null);
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA), null);
     expect(r.segundo).toBeNull();
   });
 
   it('el jefe es la raíz (jefe de sí mismo): una sola firma', () => {
-    const r = aprobadoresDe({ correo: XIOMARA, aprobadorCorreo: ALFONSO }, enlace(ALFONSO, ALFONSO));
-    expect(r).toEqual({ primero: ALFONSO, segundo: null });
+    const r = aprobadoresDe(solicitante(XIOMARA, ALFONSO), enlace(ALFONSO, ALFONSO));
+    expect(r).toEqual({ primero: ALFONSO, segundo: null, informado: null });
   });
 
   it('quien es su propio jefe se aprueba a sí mismo, sin segunda firma', () => {
-    const r = aprobadoresDe({ correo: ALFONSO, aprobadorCorreo: ALFONSO }, enlace(ALFONSO, ALFONSO));
-    expect(r).toEqual({ primero: ALFONSO, segundo: null });
+    const r = aprobadoresDe(solicitante(ALFONSO, ALFONSO), enlace(ALFONSO, ALFONSO));
+    expect(r).toEqual({ primero: ALFONSO, segundo: null, informado: null });
   });
 
   it('un ciclo de dos NO deja que el solicitante se firme a sí mismo', () => {
     // Ana es jefa de Xiomara y Xiomara es jefa de Ana. Sin el corte, el segundo
     // aprobador de Ana sería Ana: autoaprobación disfrazada de cascada.
-    const r = aprobadoresDe({ correo: ANA, aprobadorCorreo: XIOMARA }, enlace(XIOMARA, ANA));
-    expect(r).toEqual({ primero: XIOMARA, segundo: null });
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA), enlace(XIOMARA, ANA));
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: null });
   });
 
   it('no repite firmante cuando el jefe del jefe es el mismo que firma primero', () => {
-    const r = aprobadoresDe({ correo: ANA, aprobadorCorreo: XIOMARA }, enlace(XIOMARA, XIOMARA));
-    expect(r).toEqual({ primero: XIOMARA, segundo: null });
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA), enlace(XIOMARA, XIOMARA));
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: null });
   });
 
   it('las mayúsculas no cambian el resultado', () => {
     const r = aprobadoresDe(
-      { correo: 'Ana.Ruiz@Ambientalia.com.co', aprobadorCorreo: 'XIOMARA.perez@ambientalia.com.co' },
+      solicitante('Ana.Ruiz@Ambientalia.com.co', 'XIOMARA.perez@ambientalia.com.co'),
       enlace('xiomara.PEREZ@ambientalia.com.co', 'Comercial@ambientalia.com.co'),
     );
-    expect(r).toEqual({ primero: XIOMARA, segundo: ALFONSO });
+    expect(r).toEqual({ primero: XIOMARA, segundo: ALFONSO, informado: null });
+  });
+
+  it('con la casilla apagada el jefe del jefe no firma: solo se le informa', () => {
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA, false), enlace(XIOMARA, ALFONSO));
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: ALFONSO });
+  });
+
+  it('apagar la casilla NO inventa a quien informar si el árbol ya se acababa', () => {
+    // El jefe es la raíz. No hay segundo nivel, así que no hay ni firma que
+    // quitar ni aviso que dar: el correo tiene que salir igual que hoy.
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA, false), enlace(XIOMARA, XIOMARA));
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: null });
+  });
+
+  it('un ciclo de dos no convierte al solicitante en informado de sí mismo', () => {
+    // Las cuatro reglas de corte se aplican ANTES de repartir. Sin eso, apagar
+    // la casilla pondría a Ana en el correo de su propia solicitud.
+    const r = aprobadoresDe(solicitante(ANA, XIOMARA, false), enlace(XIOMARA, ANA));
+    expect(r).toEqual({ primero: XIOMARA, segundo: null, informado: null });
+  });
+
+  it('firmante e informado nunca tienen valor a la vez', () => {
+    // La invariante de la que depende que nada más haya que tocarse: mientras
+    // `segundo` sea null, todo lo que ya lee ese campo sigue siendo correcto.
+    const casos = [
+      aprobadoresDe(solicitante(ANA, XIOMARA, true), enlace(XIOMARA, ALFONSO)),
+      aprobadoresDe(solicitante(ANA, XIOMARA, false), enlace(XIOMARA, ALFONSO)),
+      aprobadoresDe(solicitante(ANA, XIOMARA, false), null),
+      aprobadoresDe(solicitante(ANA, ALFONSO, true), enlace(ALFONSO, ALFONSO)),
+    ];
+    for (const r of casos) {
+      expect(r.segundo === null || r.informado === null).toBe(true);
+    }
   });
 });
 

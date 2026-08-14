@@ -19,19 +19,29 @@ export interface EnlaceJerarquia {
 export interface Aprobadores {
   /** Quien firma primero. Siempre el `aprobadorCorreo` del solicitante. */
   primero: string;
-  /** Quien firma después, o `null` si el árbol se acaba: una sola firma. */
+  /** Quien firma después, o `null` si no hay segunda firma. */
   segundo: string | null;
+  /**
+   * El de segundo nivel cuando NO firma: solo se le avisa del resultado.
+   *
+   * Nunca tiene valor a la vez que `segundo` — es una firma o es un aviso. De esa
+   * exclusión depende que el resto del código no tenga que cambiar: mientras
+   * `segundo` sea `null`, «una sola firma» sigue significando lo que ya
+   * significaba.
+   */
+  informado: string | null;
 }
 
 /**
- * Los dos que tienen que firmar, para congelarlos en el alta de la solicitud.
+ * Los dos que tienen que firmar —o el que firma y el que solo se entera—, para
+ * congelarlos en el alta de la solicitud.
  *
- * @param solicitante su correo y el de su jefe inmediato.
+ * @param solicitante su correo, el de su jefe inmediato y si exige segunda firma.
  * @param jefe la ficha ACTIVA del jefe, o `null` si no la tiene (no está en el
  *   maestro, o alguien la desactivó). Lo resuelve `repo.enlaceDe`.
  */
 export function aprobadoresDe(
-  solicitante: { correo: string; aprobadorCorreo: string },
+  solicitante: { correo: string; aprobadorCorreo: string; requiereSegundaFirma: boolean },
   jefe: EnlaceJerarquia | null,
 ): Aprobadores {
   // El primer nivel NO tiene condiciones: es literalmente lo que dice la ficha,
@@ -41,25 +51,34 @@ export function aprobadoresDe(
   const primero = solicitante.aprobadorCorreo.toLowerCase();
   const yo = solicitante.correo.toLowerCase();
 
+  // No hay segundo nivel: ni firma ni aviso. Los cuatro cortes de abajo terminan
+  // aquí, y por eso se aplican ANTES de mirar la casilla — apagarla no puede
+  // inventar un destinatario donde el árbol ya se acababa.
+  const sinSegundoNivel = { primero, segundo: null, informado: null };
+
   // Sin ficha activa del jefe no se puede subir. Y NO se salta al abuelo: si a
   // alguien le desactivan el jefe, su solicitud se cierra con una firma en vez de
   // aterrizar en el buzón de quien no la esperaba.
-  if (!jefe) return { primero, segundo: null };
+  if (!jefe) return sinSegundoNivel;
 
   const abuelo = jefe.aprobadorCorreo.toLowerCase();
 
   // El jefe es su propio jefe: es la raíz del organigrama, no hay más escalones.
-  if (abuelo === jefe.correo.toLowerCase()) return { primero, segundo: null };
+  if (abuelo === jefe.correo.toLowerCase()) return sinSegundoNivel;
 
   // El jefe del jefe es el mismo que ya firma primero: una firma, no dos iguales.
-  if (abuelo === primero) return { primero, segundo: null };
+  if (abuelo === primero) return sinSegundoNivel;
 
   // El jefe del jefe soy yo. Pasa con un ciclo de dos (A jefe de B, B jefe de A).
   // Sin este corte, el solicitante se firmaría a sí mismo la segunda aprobación y
   // la cascada se convertiría en autoaprobación sin que nada fallara.
-  if (abuelo === yo) return { primero, segundo: null };
+  if (abuelo === yo) return sinSegundoNivel;
 
-  return { primero, segundo: abuelo };
+  // Hay alguien de segundo nivel, y la casilla decide su papel: firmante, o
+  // informado que se entera del resultado sin poder decidirlo.
+  return solicitante.requiereSegundaFirma
+    ? { primero, segundo: abuelo, informado: null }
+    : { primero, segundo: null, informado: abuelo };
 }
 
 /** Índice correo → correo del jefe, todo en minúsculas. */

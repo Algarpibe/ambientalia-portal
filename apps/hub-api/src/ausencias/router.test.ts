@@ -63,6 +63,9 @@ vi.mock('./repo.js', () => ({
       cargo: null,
       credencial: null,
       aprobadorCorreo: 'comercial@ambientalia.com.co',
+      // El alta automática no lo elige: la columna es NOT NULL DEFAULT TRUE, así
+      // que quien se da de alta solo nace con la cascada completa.
+      requiereSegundaFirma: true,
       userId,
       activo: true,
     };
@@ -391,6 +394,10 @@ beforeEach(() => {
     cargo: 'Analista',
     credencial: 1002,
     aprobadorCorreo: 'comercial@ambientalia.com.co',
+    // Como el DEFAULT del SQL: quien no diga lo contrario firma en cascada. Sin
+    // esto el campo llega `undefined` y todas las solicitudes de estos tests se
+    // cerrarían con una firma, que es justo lo que NO están comprobando.
+    requiereSegundaFirma: true,
     userId: null,
     activo: true,
   };
