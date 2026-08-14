@@ -889,6 +889,104 @@ describe('aprobación en cascada', () => {
   });
 });
 
+// ── La segunda firma, apagada por ficha ────────────────────────────────────
+
+describe('la segunda firma se puede apagar por ficha', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+  const GERENCIA = 'comercial@ambientalia.com.co';
+
+  beforeEach(() => {
+    // Ana → Jefa → Gerencia. La ficha de la jefa TIENE que estar en la plantilla:
+    // `enlaceDe` solo sube por fichas activas.
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '55555555-5555-4555-8555-555555555555',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 900,
+      aprobadorCorreo: GERENCIA,
+      requiereSegundaFirma: true,
+      userId: null,
+      activo: true,
+    });
+  });
+
+  const crear = async () =>
+    (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+
+  it('con la casilla apagada, el alta congela al informado y a ningún segundo firmante', async () => {
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    expect(s.aprobadorCorreo).toBe(JEFA);
+    expect(s.segundoAprobadorCorreo).toBeNull();
+    expect(s.informadoCorreo).toBe(GERENCIA);
+  });
+
+  it('con la casilla encendida hay segunda firma y nadie a quien informar', async () => {
+    const s = await crear();
+    expect(s.segundoAprobadorCorreo).toBe(GERENCIA);
+    expect(s.informadoCorreo).toBeNull();
+  });
+
+  it('la primera firma cierra la solicitud cuando la casilla está apagada', async () => {
+    // El comportamiento que justifica el diseño entero: con `segundo` en null, la
+    // máquina de estados ya cierra en la primera firma sin tocarla.
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    const r = await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba: true })
+      .expect(200);
+    expect(r.body.estado).toBe('aprobada');
+    expect(r.body.decididaAt).not.toBeNull();
+    // Y no se encola ningún aviso de segunda firma: no hay segunda firma.
+    expect(estado.eventos.filter((e) => e.evento === 'aprobacion_2')).toHaveLength(0);
+  });
+
+  it('el de segundo nivel no puede firmar una solicitud que ya no le toca', async () => {
+    // Candado. Si `informadoCorreo` acabara alguna vez leyéndose como firmante,
+    // esto se pondría rojo — que es justo lo que hay que impedir.
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: GERENCIA })}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it('una incapacidad no congela ni firmante ni informado, apagada la casilla o no', async () => {
+    // Las incapacidades se INFORMAN, no se aprueban: dejar aquí a alguien la
+    // haría aparecer en una bandeja de pendientes que nadie tiene que atender.
+    // Su aviso a gerencia sale por `COPIA_INCAPACIDADES`, que esto no toca.
+    estado.empleado.requiereSegundaFirma = false;
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(
+          nueva({
+            tipo: 'incapacidad',
+            adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+          }),
+        )
+        .expect(201)
+    ).body;
+    expect(s.estado).toBe('registrada');
+    expect(s.aprobadorCorreo).toBeNull();
+    expect(s.segundoAprobadorCorreo).toBeNull();
+    expect(s.informadoCorreo).toBeNull();
+  });
+});
+
 // ── Adjuntos para administración ───────────────────────────────────────────
 
 describe('GET /ausencias/adjuntos', () => {

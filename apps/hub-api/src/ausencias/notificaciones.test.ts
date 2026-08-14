@@ -20,6 +20,7 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     estado: 'pendiente',
     aprobadorCorreo: 'comercial@ambientalia.com.co',
     segundoAprobadorCorreo: null,
+    informadoCorreo: null,
     primeraFirmaAt: null,
     decididaAt: null,
     motivoRechazo: null,

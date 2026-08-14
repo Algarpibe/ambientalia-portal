@@ -215,6 +215,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       // aparecer en su bandeja de pendientes.
       aprobadorCorreo: firmantes ? firmantes.primero : null,
       segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
+      informadoCorreo: firmantes ? firmantes.informado : null,
     },
     adjunto,
     eventosDeAlta(datos.tipo),

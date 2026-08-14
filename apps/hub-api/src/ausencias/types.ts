@@ -153,6 +153,17 @@ export interface Solicitud {
    * el árbol se acaba ahí (raíz, jefe sin ficha activa, o ciclo).
    */
   segundoAprobadorCorreo: string | null;
+  /**
+   * El de segundo nivel cuando NO firma, congelado en el alta igual que los
+   * firmantes. Recibe el correo de la decisión final y nada más: ni firma, ni
+   * abre el adjunto, ni la solicitud le cuenta como aprobación suya.
+   *
+   * Excluyente con `segundoAprobadorCorreo`: si uno tiene valor, el otro es
+   * `null`. Se congela —al contrario que `copiaCorreo`— porque nace del ÁRBOL y
+   * no de una preferencia de aviso: un cambio de organigrama a mitad de trámite
+   * no debe reescribir a quién se le prometió el resultado.
+   */
+  informadoCorreo: string | null;
   /** Cuándo firmó el jefe inmediato. Con una sola firma coincide con `decididaAt`. */
   primeraFirmaAt: string | null;
   /** La decisión FINAL: la que dejó la solicitud en `aprobada` o `rechazada`. */

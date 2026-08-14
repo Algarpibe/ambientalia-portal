@@ -681,7 +681,7 @@ const SELECT_SOLICITUD = `
          -- sobra en un double sin error de representacion observable.
          s.dias_habiles::float8 AS dias_habiles,
          s.observaciones, s.origen,
-         s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo,
+         s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo, s.informado_correo,
          -- ::text por lo mismo que las fechas de mas arriba: el driver devuelve
          -- timestamptz como objeto Date, y una comparacion lexicografica contra
          -- una cadena fallaria en silencio.
@@ -711,6 +711,7 @@ interface FilaSolicitudDb {
   estado: Solicitud['estado'];
   aprobador_correo: string | null;
   segundo_aprobador_correo: string | null;
+  informado_correo: string | null;
   primera_firma_at: string | null;
   decidida_at: string | null;
   motivo_rechazo: string | null;
@@ -747,6 +748,7 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     estado: r.estado,
     aprobadorCorreo: r.aprobador_correo,
     segundoAprobadorCorreo: r.segundo_aprobador_correo,
+    informadoCorreo: r.informado_correo,
     primeraFirmaAt: r.primera_firma_at,
     decididaAt: r.decidida_at,
     motivoRechazo: r.motivo_rechazo,
@@ -768,6 +770,8 @@ export interface DatosInsercion {
   aprobadorCorreo: string | null;
   /** Copia congelada: un cambio de organigrama no mueve una solicitud en vuelo. */
   segundoAprobadorCorreo: string | null;
+  /** Congelado por lo mismo que los firmantes: nace del árbol, no de un ajuste. */
+  informadoCorreo: string | null;
 }
 
 /**
@@ -786,8 +790,9 @@ export async function crearSolicitud(
     const { rows } = await client.query(
       `INSERT INTO portal.solicitudes_ausencia
          (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
-          dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10)
+          dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
+          informado_correo)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
         datos.tipo,
@@ -800,6 +805,7 @@ export async function crearSolicitud(
         datos.estado,
         datos.aprobadorCorreo,
         datos.segundoAprobadorCorreo,
+        datos.informadoCorreo,
       ],
     );
     const id = (rows[0] as { id: string }).id;
