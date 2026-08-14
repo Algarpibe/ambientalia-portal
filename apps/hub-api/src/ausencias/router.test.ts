@@ -44,6 +44,7 @@ const estado = {
   eventos: [] as EventoFalso[],
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
+  registroVisores: [] as Record<string, unknown>[],
 };
 
 vi.mock('./repo.js', () => ({
@@ -181,6 +182,15 @@ vi.mock('./repo.js', () => ({
     if (!e) return false;
     e.copiaCorreo = copia;
     return true;
+  },
+  fijarVisor: async (_db: unknown, empleadoId: string, ve: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.veAdjuntos = ve;
+    return true;
+  },
+  registrarCambioVisor: async (_db: unknown, entrada: Record<string, unknown>) => {
+    estado.registroVisores.push(entrada);
   },
   crearSolicitud: async (
     _db: unknown,
@@ -379,6 +389,7 @@ beforeEach(() => {
   estado.eventos = [];
   estado.adjuntos = new Map();
   estado.seq = 0;
+  estado.registroVisores = [];
 });
 
 // Sin esto, el reloj falso se filtraría a los ficheros de test que corran
@@ -1732,6 +1743,59 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
       .put(`/api/ausencias/empleados/${E1}/copia`)
       .set('Authorization', `Bearer ${token()}`)
       .send({ copiaCorreo: 'ana.ruiz@ambientalia.com.co' })
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/visor', () => {
+  it('un admin da la llave y queda registrado', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: true })
+      .expect(200);
+    expect(r.body).toMatchObject({ id: E1, veAdjuntos: true });
+    expect(estado.registroVisores).toHaveLength(1);
+    expect(estado.registroVisores[0]).toMatchObject({ concedido: true, empleadoId: E1 });
+  });
+
+  it('quitarla también se registra', async () => {
+    estado.plantilla[0].veAdjuntos = true;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: false })
+      .expect(200);
+    expect(estado.registroVisores[0]).toMatchObject({ concedido: false });
+  });
+
+  it('sin cambio no se escribe nada en el registro', async () => {
+    // Si «Guardar» dejara una línea cada vez aunque la casilla no cambie, el
+    // registro se llenaría de ruido y dejaría de leerse — y un registro que
+    // nadie lee no es un control, es un fichero que crece.
+    estado.plantilla[0].veAdjuntos = false;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: false })
+      .expect(200);
+    expect(estado.registroVisores).toHaveLength(0);
+  });
+
+  it('400 si `veAdjuntos` no es booleano', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: 'si' })
+      .expect(400);
+    expect(r.body.error).toBe('visor_invalido');
+  });
+
+  it('403 a quien no es admin', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ veAdjuntos: true })
       .expect(403);
   });
 });

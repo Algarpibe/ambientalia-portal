@@ -608,6 +608,47 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   return actualizado;
 }
 
+/**
+ * Da o quita la llave maestra de los adjuntos, dejando constancia.
+ *
+ * Recibe la `Sesion` —al contrario que `fijarJefe` y `fijarCopia`— porque el
+ * registro tiene que decir QUIÉN lo hizo. Es lo que sustituye al historial de
+ * git desde que la lista dejó de vivir en `config.ts`.
+ *
+ * Si el valor no cambia no se escribe nada, ni en la tabla ni en el registro:
+ * el botón del panel guarda la fila entera, así que llegaría aquí también
+ * cuando lo tocado fuera el jefe o la copia.
+ */
+export async function fijarVisor(
+  db: Pool,
+  sesion: Sesion,
+  empleadoId: string,
+  body: unknown,
+): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  if (typeof b.veAdjuntos !== 'boolean') throw new AusenciaError('visor_invalido', 400, 'veAdjuntos');
+
+  const empleado = await repo.empleadoPorId(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  if (empleado.veAdjuntos !== b.veAdjuntos) {
+    if (!(await repo.fijarVisor(db, empleadoId, b.veAdjuntos))) {
+      throw new AusenciaError('empleado_no_encontrado', 404);
+    }
+    await repo.registrarCambioVisor(db, {
+      adminEmail: sesion.email,
+      empleadoId,
+      empleadoCorreo: empleado.correo,
+      concedido: b.veAdjuntos,
+    });
+  }
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
 /** El saldo de un empleado, listo para enseñar. */
 export interface SaldoDeEmpleado {
   empleadoId: string;

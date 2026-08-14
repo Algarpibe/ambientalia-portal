@@ -243,6 +243,19 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Da o quita la llave maestra de los adjuntos. Solo admin, y **queda
+   * registrado**: es lo único que dice quién dio acceso a datos de salud desde
+   * que la lista salió del código.
+   */
+  router.put('/ausencias/empleados/:id/visor', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarVisor(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_visor');
+    }
+  });
+
   // ── Histórico de la hoja (solo admin) ───────────────────────────────────
 
   /**
