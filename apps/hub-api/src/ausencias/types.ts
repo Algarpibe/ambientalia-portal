@@ -106,6 +106,8 @@ export interface Empleado {
   aprobadorCorreo: string;
   /** A quién se pone en copia de sus correos. `null` = a nadie. */
   copiaCorreo: string | null;
+  /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
+  veAdjuntos: boolean;
   userId: string | null;
   activo: boolean;
 }

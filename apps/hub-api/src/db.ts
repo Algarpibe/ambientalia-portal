@@ -21,7 +21,7 @@ export function getHubPool(): Pool {
 
 // Migraciones aplicadas en orden al arranque. Son idempotentes (IF NOT EXISTS),
 // así que re-ejecutarlas en cada boot es seguro.
-const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '013_user_state_fk_cascade.sql', '014_drop_salestracker.sql', '015_ausencias.sql', '016_ausencias_historico.sql', '017_saldo_vacaciones.sql', '018_ausencias_cascada.sql', '019_ausencias_outbox_reserva.sql', '020_ausencias_drop_drive.sql', '021_ausencias_copia.sql'];
+const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '013_user_state_fk_cascade.sql', '014_drop_salestracker.sql', '015_ausencias.sql', '016_ausencias_historico.sql', '017_saldo_vacaciones.sql', '018_ausencias_cascada.sql', '019_ausencias_outbox_reserva.sql', '020_ausencias_drop_drive.sql', '021_ausencias_copia.sql', '022_ausencias_visores.sql'];
 
 function migrationsDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'users', 'migrations');

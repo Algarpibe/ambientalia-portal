@@ -25,8 +25,9 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 
 - **Frontend**: `apps/ausencias/` — pestañas *Nueva solicitud*, *Mis solicitudes*
   y *Calendario*; *Pendientes de aprobar* e *Historial de aprobaciones* si eres
-  aprobador o admin; *Soportes adjuntos* si eres admin o estás en VISORES_ADJUNTOS;
-  *Empleados*, *Organigrama*, *Saldos* y *Registro general* solo admin.
+  aprobador o admin; *Soportes adjuntos* si eres admin o tienes la casilla
+  **Soportes** marcada en el Organigrama; *Empleados*, *Organigrama*, *Saldos*
+  y *Registro general* solo admin.
 - **Backend**: `apps/hub-api/src/ausencias/`
   - `festivos.ts` / `dias-habiles.ts` — el cálculo, con tests.
   - `saldo.ts` / `calendario.ts` / `jerarquia.ts` — módulos puros, con tests.
@@ -36,7 +37,8 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 - **BD**: migración `015_ausencias.sql` → `portal.empleados`,
   `portal.solicitudes_ausencia`, `portal.solicitud_adjuntos`,
   `portal.ausencias_outbox`; `017` el saldo, `018` la cascada de dos firmas, `019`
-  la reserva del outbox, `020` la retirada de Drive y `021` la copia configurable.
+  la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable
+  y `022` los visores configurables.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
 ## No se piden días que ya pasaron
@@ -188,14 +190,15 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/decididas` | idem — lo que le tocaba firmar y ya está cerrado |
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
-| `GET` | `/api/ausencias/adjuntos` | idem — solo admin o `VISORES_ADJUNTOS`; **403** al resto |
-| `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, sus **dos** aprobadores, admin o `VISORES_ADJUNTOS` |
+| `GET` | `/api/ausencias/adjuntos` | idem — solo admin o quien tenga la llave de los adjuntos (`ve_adjuntos`); **403** al resto |
+| `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, sus **dos** aprobadores, admin o quien tenga la llave de los adjuntos |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
 | `GET` | `/api/ausencias/mi-saldo` | idem — solo el saldo propio; **500** si el cálculo falla, no un saldo en blanco |
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
 | `PUT` | `/api/ausencias/empleados/:id/saldo` | `requireAdmin` |
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
 | `PUT` | `/api/ausencias/empleados/:id/copia` | `requireAdmin` — a quién se pone en copia; `null` = a nadie |
+| `PUT` | `/api/ausencias/empleados/:id/visor` | `requireAdmin` — da o quita la llave de los adjuntos; **queda registrado** |
 | `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,confirmado}` | `requireCronToken` |
 
@@ -439,8 +442,9 @@ que se hubiera ajustado a mano desde el panel.
 
 El `DEFAULT` se queda después de sembrar. Consecuencia asumida: toda ficha
 nueva nace con administración en copia sin que nadie lo decida, y eso incluye
-el acuse de sus propias incapacidades. Es reversible con una `022` que haga
-`ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
+el acuse de sus propias incapacidades. Es reversible con **la siguiente
+migración libre** —hoy la `023`, porque la `022` ya existe y es otra cosa— que
+haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
 nunca en sitio para cambiar el valor sembrado: las bases que ya la corrieron
 no se enterarían —el `IF NOT EXISTS` corta— pero una base nueva sí, y los
 entornos divergirían en silencio; para cambiarlo hace falta una migración
@@ -453,11 +457,11 @@ con el que la `021` sembró toda la plantilla se volvería irreponible desde el
 panel en cuanto alguien lo cambiara.
 
 **El aviso de privacidad.** Quien queda en copia recibe también los acuses de
-incapacidad de esa persona, que son datos de salud —`config.ts` ya cita la Ley
-1581 a propósito de `VISORES_ADJUNTOS`, y aplica igual aquí—, y el panel lo
-advierte en ámbar antes de guardar. `VISORES_ADJUNTOS` no cambia con esto:
-estar en copia da el aviso de que existe una incapacidad, no la llave para
-abrir el PDF del soporte. Son dos permisos distintos, y uno no implica el otro.
+incapacidad de esa persona, que son datos de salud —la migración `022` ya cita
+la Ley 1581 a propósito de la llave de los adjuntos, y aplica igual aquí—, y el
+panel lo advierte en ámbar antes de guardar. La llave de los adjuntos no cambia
+con esto: estar en copia da el aviso de que existe una incapacidad, no el
+acceso al PDF del soporte. Son dos permisos distintos, y uno no implica el otro.
 
 ## Los adjuntos
 
@@ -472,16 +476,69 @@ El binario no viaja en ninguna lista: `SELECT_SOLICITUD` trae
 
 ### Quién puede abrir uno
 
-`puedeVerAdjunto`: el solicitante, sus dos aprobadores, cualquier admin, y los
-correos de **`VISORES_ADJUNTOS`** (`config.ts`). La ruta devuelve **404 y no 403**
-a quien no pasa: quien no tiene nada que ver con la solicitud tampoco debería
-poder confirmar que ese adjunto existe.
+`puedeVerAdjunto`: el solicitante, su jefe inmediato, la segunda firma,
+cualquier admin, y quien tenga la casilla **Soportes** marcada en el
+Organigrama. La ruta devuelve **404 y no 403** a quien no pasa: quien no tiene
+nada que ver con la solicitud tampoco debería poder confirmar que ese adjunto
+existe.
 
-> ⚠️ `VISORES_ADJUNTOS` es una llave maestra, y lo que abre incluye **el soporte
-> médico de las incapacidades ajenas** — dato de salud. La lista tiene que
-> quedarse corta. Y **no hay registro de descargas**: `/adjuntos/:id` no loguea
-> nada, a diferencia del PATCH y el DELETE del registro. Si la lista crece, ese
-> log es lo siguiente que hay que añadir.
+El jefe lo tiene también en la práctica, no solo sobre el papel: *Pendientes
+de aprobar* (`BandejaAprobacion.tsx`) monta la misma `TablaSolicitudes` que
+pinta el clip de descarga en *Soportes adjuntos*, así que quien firma ve el
+PDF de la solicitud que está decidiendo sin salir de su bandeja.
+
+**La lista salió de `config.ts` a `portal.empleados.ve_adjuntos`** (migración
+`022`), editable ficha a ficha desde el Organigrama, y **cada cambio queda
+registrado** en `portal.visores_adjuntos_log`: quién lo dio o lo quitó, sobre
+quién, y cuándo. El motivo es literal, no cosmético: al salir del código, git
+dejó de ser el historial de estos accesos, y los logs de EasyPanel se rotan —
+sin esta tabla, dentro de unas semanas nadie podría reconstruir quién tuvo la
+llave el día que hiciera falta saberlo. El registro guarda el **correo además
+del id**, y **sin clave foránea**: si la ficha se borra, el rastro de a quién
+se le dio la llave tiene que sobrevivirla. Se escribe **solo cuando el valor
+cambia** — el botón del panel guarda la fila entera (jefe, copia y visor
+juntos), así que llegaría al endpoint también al tocar solo el jefe o la
+copia, y sin esa comprobación cada guardado dejaría una fila de auditoría que
+no cambió nada.
+
+`puedeVerAdjunto` **sigue siendo pura**: el booleano entra por parámetro y lo
+resuelve quien llama con `repo.esVisorDeAdjuntos`, en vez de que la propia
+función consulte la BD. La razón es la misma de siempre en esta app: **no hay
+Postgres en ningún test** del repo, y meterle el `Pool` la sacaría de la red
+de tests que hoy la cubre.
+
+**La llave AÑADE acceso y nunca lo condiciona.** Quitársela a alguien no puede
+dejarle sin ver sus propias solicitudes ni las que firma como aprobador — hay
+un test dedicado a eso (`quitar la llave no cierra el adjunto a quien lo
+pidió ni a quien lo firma`).
+
+**El sembrado de la 022 no usa un `DEFAULT`** como la 021, porque aquí el
+valor de arranque no es el mismo para todos: solo dos correos nacen con la
+llave, no la plantilla entera. El `UPDATE` va **dentro del `IF NOT EXISTS`**
+que protege el `ADD COLUMN`, y no suelto como cualquier `UPDATE`:
+`initDb()` re-ejecuta las migraciones en cada arranque, y sin esa guarda
+devolvería la llave a quien un admin se la hubiera quitado, en cada
+despliegue. Y va **dentro de un `EXECUTE`** para no depender de cuándo plpgsql
+planifica: la sentencia referencia una columna que se acaba de crear dos líneas
+más arriba en el mismo `DO`, y `EXECUTE` difiere el análisis hasta el momento
+de ejecutarla, cuando la columna existe sin lugar a dudas. En la práctica
+plpgsql planifica de forma perezosa y habría funcionado igual, así que no es
+que sin él «no compile»; es que el margen de duda no compensa cuando el precio
+de equivocarse es que hub-api no arranque y se caiga el portal entero.
+
+> ⚠️ **En una base virgen el sembrado afecta a 0 filas.** `portal.empleados`
+> está vacía en el instante en que corre la migración —las fichas se crean
+> solas al primer acceso de cada persona, no antes—, y el guard `IF NOT
+> EXISTS` impide reintentarlo en el arranque siguiente. En producción no
+> aplica, porque las fichas ya existían cuando se desplegó la 022, y es
+> recuperable aunque pasara: un admin sigue teniendo acceso sin necesitar la
+> llave. Pero en un entorno nuevo hay que dar la llave a mano desde el
+> Organigrama la primera vez.
+
+**Lo que sigue sin haber: registro de descargas.** Se sabe **quién tenía** la
+llave y desde cuándo —eso es justo lo que añade `visores_adjuntos_log`—, pero
+no **quién la usó**: `/adjuntos/:id` no loguea nada al servir el PDF. Si la
+lista de visores crece, ese log es lo siguiente que hace falta.
 
 ### Por qué hay una pestaña propia
 
@@ -882,6 +939,6 @@ del enmascarado de arriba.
   formulario público y sus propios nodos de Google Drive, así que cualquiera con
   la URL guardada puede seguir mandando solicitudes que esquivan el portal — y
   subiendo PDF a Drive. Mientras siga encendido, «Drive fuera» es solo la mitad.
-- Registro de descargas de adjuntos, si `VISORES_ADJUNTOS` crece.
+- Registro de descargas de adjuntos, si la lista de visores crece.
 
 

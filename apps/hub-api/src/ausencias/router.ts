@@ -98,7 +98,7 @@ export function createAusenciasRouter(db: Pool): Router {
         esAprobador: sesion.esAdmin || (await repo.esAprobadorDeAlguien(db, sesion.email)),
         // Pliega admin dentro, igual que `esAprobador`: así la app decide la
         // pestaña con un solo booleano y no replica la regla en el navegador.
-        esVisorAdjuntos: sesion.esAdmin || service.esVisorDeAdjuntos(sesion.email),
+        esVisorAdjuntos: sesion.esAdmin || (await repo.esVisorDeAdjuntos(db, sesion.email)),
         festivos,
         // Viaja aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar el saldo sin una segunda llamada al abrir la app.
@@ -170,7 +170,7 @@ export function createAusenciasRouter(db: Pool): Router {
   /**
    * Las solicitudes con PDF, para administración. Bajo `...gated` y con el 403 en
    * el servicio, como `/ausencias/saldos`: quién puede verlo es una regla de
-   * negocio (la lista `VISORES_ADJUNTOS`), no un rol del portal.
+   * negocio (`portal.empleados.ve_adjuntos`), no un rol del portal.
    */
   router.get('/ausencias/adjuntos', ...gated, async (req: Request, res: Response) => {
     try {
@@ -184,7 +184,8 @@ export function createAusenciasRouter(db: Pool): Router {
     try {
       const adjunto = await repo.adjuntoPorId(db, req.params.id);
       if (!adjunto) return void res.status(404).json({ error: 'no_encontrado' });
-      if (!service.puedeVerAdjunto(sesionDe(req), adjunto)) {
+      const sesion = sesionDe(req);
+      if (!service.puedeVerAdjunto(sesion, adjunto, await repo.esVisorDeAdjuntos(db, sesion.email))) {
         // 404 y no 403: quien no tiene nada que ver con la solicitud tampoco
         // debería poder confirmar que ese adjunto existe.
         return void res.status(404).json({ error: 'no_encontrado' });
@@ -239,6 +240,19 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json(await service.fijarCopia(db, req.params.id, req.body));
     } catch (e) {
       sendError(res, e, 'ausencias_fijar_copia');
+    }
+  });
+
+  /**
+   * Da o quita la llave maestra de los adjuntos. Solo admin, y **queda
+   * registrado**: es lo único que dice quién dio acceso a datos de salud desde
+   * que la lista salió del código.
+   */
+  router.put('/ausencias/empleados/:id/visor', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarVisor(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_visor');
     }
   });
 

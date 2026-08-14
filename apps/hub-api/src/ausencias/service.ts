@@ -1,6 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
-import { APROBADOR_POR_DEFECTO, COPIA_POR_DEFECTO, VISORES_ADJUNTOS } from './config.js';
+import { APROBADOR_POR_DEFECTO, COPIA_POR_DEFECTO } from './config.js';
 import {
   diasDelMes,
   esMesValido,
@@ -264,7 +264,7 @@ export async function decididasPorMi(db: Pool, sesion: Sesion): Promise<Solicitu
  * un adjunto concreto existe; una colección no dice nada de nadie en particular.
  */
 export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
-  if (!sesion.esAdmin && !esVisorDeAdjuntos(sesion.email)) {
+  if (!sesion.esAdmin && !(await repo.esVisorDeAdjuntos(db, sesion.email))) {
     throw new AusenciaError('no_es_visor_de_adjuntos', 403);
   }
   return repo.solicitudesConAdjunto(db);
@@ -324,28 +324,21 @@ export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
 }
 
 /**
- * Si este correo está en la lista de administración que puede abrir cualquier
- * adjunto. Normaliza los dos lados: `sesionDe` ya baja el correo a minúsculas,
- * pero `puedeVerAdjunto` se llama directamente desde los tests con sesiones
- * escritas a mano, y una comparación sensible a mayúsculas pasaría todas las
- * pruebas y fallaría con el primer correo mal tecleado en `config.ts`.
- */
-export function esVisorDeAdjuntos(email: string): boolean {
-  const yo = email.trim().toLowerCase();
-  return VISORES_ADJUNTOS.some((c) => c.trim().toLowerCase() === yo);
-}
-
-/**
- * El solicitante, sus dos aprobadores y administración pueden ver el PDF; nadie
- * más (salvo admin).
+ * El solicitante, sus dos aprobadores y quien tenga la llave maestra pueden ver
+ * el PDF; nadie más (salvo admin).
  *
- * La rama de los visores va como retorno propio y no dentro del `return` final:
- * no depende del adjunto en absoluto —es una condición sobre la persona— y
- * mezclarla ahí la haría parecer otra cosa.
+ * `esVisor` entra por parámetro y no se consulta aquí: desde que la lista salió
+ * de `config.ts` a `portal.empleados`, resolverla dentro obligaría a pasar el
+ * `Pool` y esta función dejaría de poder probarse sin Postgres — que no hay en
+ * ningún test del repo. Quien llama lo resuelve con `repo.esVisorDeAdjuntos`.
+ *
+ * La llave AÑADE acceso, nunca lo condiciona: por eso va como retorno propio y
+ * no como una condición del `return` final. Quitársela a alguien no puede
+ * dejarle sin ver sus propias solicitudes.
  */
-export function puedeVerAdjunto(sesion: Sesion, a: repo.AdjuntoCompleto): boolean {
+export function puedeVerAdjunto(sesion: Sesion, a: repo.AdjuntoCompleto, esVisor: boolean): boolean {
   if (sesion.esAdmin) return true;
-  if (esVisorDeAdjuntos(sesion.email)) return true;
+  if (esVisor) return true;
   const yo = sesion.email.toLowerCase();
   // El segundo aprobador entra aquí aunque todavía no sea su turno: la ruta del
   // adjunto devuelve 404 y no 403, así que sin esto tendría que firmar un permiso
@@ -608,6 +601,50 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   }
 
   if (!(await repo.fijarCopia(db, empleadoId, copia))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
+/**
+ * Da o quita la llave maestra de los adjuntos, dejando constancia.
+ *
+ * Recibe la `Sesion` —al contrario que `fijarJefe` y `fijarCopia`— porque el
+ * registro tiene que decir QUIÉN lo hizo. Es lo que sustituye al historial de
+ * git desde que la lista dejó de vivir en `config.ts`.
+ *
+ * Si el valor no cambia no se escribe nada, ni en la tabla ni en el registro:
+ * el botón del panel guarda la fila entera, así que llegaría aquí también
+ * cuando lo tocado fuera el jefe o la copia.
+ */
+export async function fijarVisor(
+  db: Pool,
+  sesion: Sesion,
+  empleadoId: string,
+  body: unknown,
+): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  if (typeof b.veAdjuntos !== 'boolean') throw new AusenciaError('visor_invalido', 400, 'veAdjuntos');
+
+  const empleado = await repo.empleadoPorId(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  if (empleado.veAdjuntos !== b.veAdjuntos) {
+    // Una sola llamada que da la llave Y la registra en la misma transacción:
+    // ver el porqué en `repo.fijarVisorConRegistro`.
+    if (
+      !(await repo.fijarVisorConRegistro(db, {
+        empleadoId,
+        veAdjuntos: b.veAdjuntos,
+        adminEmail: sesion.email,
+        empleadoCorreo: empleado.correo,
+      }))
+    ) {
+      throw new AusenciaError('empleado_no_encontrado', 404);
+    }
+  }
 
   const actualizados = await empleadosConJefatura(db);
   const actualizado = actualizados.find((e) => e.id === empleadoId);

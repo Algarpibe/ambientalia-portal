@@ -40,7 +40,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, copia_correo, user_id, activo`;
+  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -52,6 +52,7 @@ interface FilaEmpleadoDb {
   copia_correo: string | null;
   user_id: string | null;
   activo: boolean;
+  ve_adjuntos: boolean;
 }
 
 function aEmpleado(r: FilaEmpleadoDb): Empleado {
@@ -63,6 +64,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     credencial: r.credencial,
     aprobadorCorreo: r.aprobador_correo,
     copiaCorreo: r.copia_correo,
+    veAdjuntos: r.ve_adjuntos,
     userId: r.user_id,
     activo: r.activo,
   };
@@ -427,6 +429,58 @@ export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: stri
     [empleadoId, copiaCorreo],
   );
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Si ese correo tiene la llave maestra de los adjuntos.
+ *
+ * Consulta por correo y no por id porque quien pregunta es una sesión, y una
+ * sesión puede no tener ficha de empleado — en ese caso no es visor, que es la
+ * respuesta correcta.
+ */
+export async function esVisorDeAdjuntos(db: Pool, email: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados WHERE lower(correo) = lower($1) AND activo AND ve_adjuntos`,
+    [email],
+  );
+  return rows.length > 0;
+}
+
+/** Datos de un cambio de llave: quién la da, a quién y en qué sentido. */
+export interface CambioVisor {
+  empleadoId: string;
+  veAdjuntos: boolean;
+  adminEmail: string;
+  empleadoCorreo: string;
+}
+
+/**
+ * Da o quita la llave Y deja constancia, en la MISMA transacción.
+ *
+ * No son dos funciones sueltas a propósito. Si el UPDATE cuajara y el INSERT
+ * fallara, el reintento se encontraría el valor ya cambiado, el guard de «solo
+ * si cambia» saltaría la escritura, y la llave quedaría concedida sin una sola
+ * línea de registro — justo lo que esta tabla existe para impedir, y con el
+ * reintento consolidando el hueco en vez de repararlo.
+ *
+ * Devuelve false si la ficha no existía o estaba inactiva, y entonces no se
+ * escribe registro: un intento fallido no puede ensuciar la auditoría.
+ */
+export async function fijarVisorConRegistro(db: Pool, cambio: CambioVisor): Promise<boolean> {
+  return withTransaction(db, async (client) => {
+    const { rowCount } = await client.query(
+      `UPDATE portal.empleados SET ve_adjuntos = $2 WHERE id = $1 AND activo`,
+      [cambio.empleadoId, cambio.veAdjuntos],
+    );
+    if ((rowCount ?? 0) === 0) return false;
+
+    await client.query(
+      `INSERT INTO portal.visores_adjuntos_log (admin_email, empleado_id, empleado_correo, concedido)
+       VALUES (lower($1), $2, lower($3), $4)`,
+      [cambio.adminEmail, cambio.empleadoId, cambio.empleadoCorreo, cambio.veAdjuntos],
+    );
+    return true;
+  });
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────

@@ -101,8 +101,11 @@ export default function App() {
       p.push(['historial', 'Historial de aprobaciones']);
     }
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre
-    // también la lista de administración de `VISORES_ADJUNTOS`, que no puede
-    // editar ni borrar nada. El servidor decide con un solo booleano.
+    // también quien tenga la llave maestra de adjuntos sin ser administrador,
+    // y esa pestaña no puede editar ni borrar nada. Quién la tiene se decide
+    // ficha a ficha desde el Organigrama (casilla «Soportes»), no aquí: el
+    // servidor ya resuelve la regla en un solo booleano (`esVisorAdjuntos`)
+    // para que esta app no tenga que replicarla.
     if (contexto?.esVisorAdjuntos) p.push(['adjuntos', 'Soportes adjuntos']);
     if (contexto?.esAdmin) {
       // El organigrama va aparte de «Empleados» y no debajo: son dos trabajos

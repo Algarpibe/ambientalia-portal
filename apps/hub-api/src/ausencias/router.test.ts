@@ -44,6 +44,9 @@ const estado = {
   eventos: [] as EventoFalso[],
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
+  registroVisores: [] as Record<string, unknown>[],
+  /** Para simular que la escritura del registro (dentro de la transacción) falla. */
+  fallarRegistroVisor: false,
 };
 
 vi.mock('./repo.js', () => ({
@@ -163,6 +166,18 @@ vi.mock('./repo.js', () => ({
     return true;
   },
   empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
+  // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
+  // `veAdjuntos`: por defecto nadie es visor, igual que en el SQL real (la
+  // columna nace en `false`). `e.activo !== false` y no `=== true`: ninguna otra
+  // función de este doble modela «inactivo» con el campo `activo` (lo hacen
+  // sacando la ficha entera de `estado.plantilla`, ver el `.filter` de más abajo
+  // en el fichero), así que no hay un `=== true` que igualar; se deja abierta a
+  // que una ficha futura omita el campo sin dejar de contar como activa.
+  esVisorDeAdjuntos: async (_db: unknown, email: string) =>
+    estado.plantilla.some(
+      (e: any) =>
+        String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veAdjuntos === true,
+    ),
   fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
@@ -173,6 +188,27 @@ vi.mock('./repo.js', () => ({
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
     e.copiaCorreo = copia;
+    return true;
+  },
+  // Una sola función para dar la llave Y registrarla, reflejando que en el
+  // repo real las dos escrituras van en la misma transacción (`repo.
+  // fijarVisorConRegistro`). El doble simula esa atomicidad: si toca fallar,
+  // lanza ANTES de tocar la ficha, para que el test de atomicidad de más abajo
+  // pueda comprobar que un fallo no deja la llave concedida a medias.
+  fijarVisorConRegistro: async (
+    _db: unknown,
+    cambio: { empleadoId: string; veAdjuntos: boolean; adminEmail: string; empleadoCorreo: string },
+  ) => {
+    const e = estado.plantilla.find((x: any) => x.id === cambio.empleadoId);
+    if (!e) return false;
+    if (estado.fallarRegistroVisor) throw new Error('fallo simulado en fijarVisorConRegistro');
+    e.veAdjuntos = cambio.veAdjuntos;
+    estado.registroVisores.push({
+      adminEmail: cambio.adminEmail,
+      empleadoId: cambio.empleadoId,
+      empleadoCorreo: cambio.empleadoCorreo,
+      concedido: cambio.veAdjuntos,
+    });
     return true;
   },
   crearSolicitud: async (
@@ -372,6 +408,8 @@ beforeEach(() => {
   estado.eventos = [];
   estado.adjuntos = new Map();
   estado.seq = 0;
+  estado.registroVisores = [];
+  estado.fallarRegistroVisor = false;
 });
 
 // Sin esto, el reloj falso se filtraría a los ficheros de test que corran
@@ -863,6 +901,8 @@ describe('GET /ausencias/adjuntos', () => {
     // El mutante que muere: olvidar el `WHERE a.id IS NOT NULL` y devolver el
     // registro entero — que es justo la fuga que esta pestaña quería evitar,
     // porque quien la abre no es admin y no debería ver el resto.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     await crearConPdf();
     await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
 
@@ -886,6 +926,8 @@ describe('GET /ausencias/adjuntos', () => {
   it('403 a quien tiene token válido pero no la app asignada', async () => {
     // Con el `sub` de un visor real, para que la única razón posible del 403 sea
     // la app que falta y no la lista.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     await request(app())
       .get('/api/ausencias/adjuntos')
       .set('Authorization', `Bearer ${token({ sub: 'administrativo@ambientalia.com.co', apps: ['contabilidad'] })}`)
@@ -895,6 +937,8 @@ describe('GET /ausencias/adjuntos', () => {
   it('el visor descarga el PDF de una incapacidad ajena', async () => {
     // La feature entera: una incapacidad no pasa por ninguna bandeja ni por el
     // historial, así que sin esto administración no tenía dónde abrirla.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     estado.adjuntos.set('a1', {
       solicitudId: 's1',
       solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
@@ -1368,6 +1412,8 @@ describe('GET /ausencias/contexto', () => {
   });
 
   it('esVisorAdjuntos pliega admin dentro, o el admin perdería la pestaña', async () => {
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
     const flag = async (over: Record<string, unknown>) =>
       (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
         .body.esVisorAdjuntos;
@@ -1719,6 +1765,96 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
       .put(`/api/ausencias/empleados/${E1}/copia`)
       .set('Authorization', `Bearer ${token()}`)
       .send({ copiaCorreo: 'ana.ruiz@ambientalia.com.co' })
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/visor', () => {
+  it('un admin da la llave, y el registro dice quién la dio y a quién', async () => {
+    // El `sub` del admin es DISTINTO del correo del empleado afectado a
+    // propósito: en el fixture por defecto coinciden, y con esa coincidencia un
+    // swap de `adminEmail` por `empleadoCorreo` pasaría este test sin
+    // inmutarse. El registro es lo único que dice quién dio acceso a datos de
+    // salud desde que la lista salió del código, así que tiene que distinguir
+    // al actor del sujeto.
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' })}`)
+      .send({ veAdjuntos: true })
+      .expect(200);
+    expect(r.body).toMatchObject({ id: E1, veAdjuntos: true });
+    expect(estado.registroVisores).toHaveLength(1);
+    expect(estado.registroVisores[0]).toMatchObject({
+      adminEmail: 'gerencia@ambientalia.com.co',
+      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
+      empleadoId: E1,
+      concedido: true,
+    });
+  });
+
+  it('quitarla también se registra', async () => {
+    estado.plantilla[0].veAdjuntos = true;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: false })
+      .expect(200);
+    expect(estado.registroVisores[0]).toMatchObject({ concedido: false });
+  });
+
+  it('sin cambio no se escribe nada en el registro', async () => {
+    // Si «Guardar» dejara una línea cada vez aunque la casilla no cambie, el
+    // registro se llenaría de ruido y dejaría de leerse — y un registro que
+    // nadie lee no es un control, es un fichero que crece.
+    estado.plantilla[0].veAdjuntos = false;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: false })
+      .expect(200);
+    expect(estado.registroVisores).toHaveLength(0);
+  });
+
+  it('si el registro falla, la llave no se queda concedida a medias', async () => {
+    // No se puede probar la transacción de verdad sin Postgres, así que esto fija
+    // el CABLEADO: que el servicio hace UNA llamada que escribe las dos cosas, y
+    // no dos que puedan cuajar por separado. Si alguien volviera a partirlas, el
+    // fallo del registro dejaría la llave dada y sin rastro, y el reintento no lo
+    // arreglaría porque ya no habría cambio que detectar.
+    estado.fallarRegistroVisor = true;
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: true })
+      .expect(500);
+    expect(estado.plantilla[0].veAdjuntos).not.toBe(true);
+    expect(estado.registroVisores).toHaveLength(0);
+  });
+
+  it('400 si `veAdjuntos` no es booleano', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: 'si' })
+      .expect(400);
+    expect(r.body.error).toBe('visor_invalido');
+  });
+
+  it('404 si el empleado no existe', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E_FANTASMA}/visor`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ veAdjuntos: true })
+      .expect(404);
+    // Y no deja rastro: un intento fallido no puede ensuciar el registro.
+    expect(estado.registroVisores).toHaveLength(0);
+  });
+
+  it('403 a quien no es admin', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/visor`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ veAdjuntos: true })
       .expect(403);
   });
 });

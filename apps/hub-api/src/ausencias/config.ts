@@ -40,27 +40,14 @@ export const COPIA_POR_DEFECTO = 'administrativo@ambientalia.com.co';
  */
 export const COPIA_INCAPACIDADES = 'comercial@ambientalia.com.co';
 
-/**
- * Quién puede abrir CUALQUIER adjunto de CUALQUIER persona desde el portal,
- * además del solicitante, sus dos aprobadores y los administradores.
- *
- * ⚠️ Es una llave maestra, y lo que abre incluye **el soporte médico de las
- * incapacidades ajenas**: dato de salud, con lo que eso implica para la Ley 1581.
- * Esta lista tiene que quedarse corta y cada correo debe estar justificado; no se
- * añade a nadie «por si acaso». `comercial@` está aquí por lo mismo que en
- * `COPIA_INCAPACIDADES`: siempre recibe el acuse de cada incapacidad, fijo y no
- * editable, así que esta lista no le da acceso a información que no le llegara
- * ya. `administrativo@` es distinto desde que la copia se volvió configurable:
- * hoy sigue siendo el valor sembrado de `copia_correo` para toda la plantilla,
- * pero cualquier ficha puede cambiarlo desde el organigrama, así que su sitio
- * aquí ya no se apoya en «recibe el acuse» — es una decisión propia que hay que
- * revisar si alguna vez deja de tener sentido.
- *
- * No hay registro de descargas: `GET /ausencias/adjuntos/:id` no loguea nada, a
- * diferencia del PATCH y el DELETE del registro. Si esta lista crece, ese log es
- * lo siguiente que hay que añadir.
- */
-export const VISORES_ADJUNTOS = ['comercial@ambientalia.com.co', 'administrativo@ambientalia.com.co'];
+// Aquí vivía `VISORES_ADJUNTOS`, la lista de quién puede abrir CUALQUIER adjunto
+// de CUALQUIER persona. Es ahora la columna `portal.empleados.ve_adjuntos`
+// (migración 022), editable desde la pestaña Organigrama y con registro de
+// quién la dio o la quitó en `portal.visores_adjuntos_log`.
+//
+// ⚠️ Sigue siendo una llave maestra sobre datos de salud (Ley 1581): lo que
+// abre incluye el soporte médico de las incapacidades ajenas. El aviso que lo
+// dice ahora vive en el panel, que es donde se toma la decisión.
 
 export const FIRMA_GERENCIA = 'Alfonso García del Pino Beneitez\nGerente General\nAmbientalia S.A.S.';
 export const FIRMA_EMPRESA = 'Ambientalia S.A.S.';
