@@ -164,10 +164,15 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
         <p className="mb-4 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
       )}
 
-      {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo. */}
+      {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo.
+          Con `soloSiAvisa` la tarjeta se calla mientras no tenga nada que añadir
+          al indicador de la cabecera, que está a un palmo de aquí: aparece para
+          decir que falta configurar el saldo, o que los días que se están
+          pidiendo no caben. El contenedor lleva `empty:hidden` porque, cuando la
+          tarjeta se calla, su `mb-4` dejaría un hueco de 16px sin nada dentro. */}
       {tipo === 'vacaciones' && saldo && (
-        <div className="mb-4">
-          <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} />
+        <div className="mb-4 empty:hidden">
+          <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} soloSiAvisa />
         </div>
       )}
 

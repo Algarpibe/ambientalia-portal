@@ -317,6 +317,16 @@ rojo si los días que se están escribiendo en el formulario no caben. Vive en
 *Nueva solicitud* y en la bandeja de aprobación, donde el saldo es el de otra
 persona —por eso recibe el título por prop en vez de un texto fijo.
 
+En el formulario se le pasa **`soloSiAvisa`**: con el indicador de la cabecera a
+un palmo, repetir ahí el mismo número era ruido. Con esa prop la tarjeta se
+calla mientras no tenga nada que añadir, y aparece solo para las dos cosas que
+el indicador no cubre —que falta configurar el saldo, o que los días pedidos no
+caben—. El contenedor lleva `empty:hidden` porque su `mb-4` dejaría un hueco de
+16 px cuando la tarjeta no renderiza.
+
+La bandeja **no** pasa esa prop, y no debe pasarla: allí el saldo es de otra
+persona y no está en ninguna otra parte de la pantalla.
+
 **El widget** (`ausencias-mi-saldo`, tamaño `4×3`) lo sirve
 `GET /ausencias/mi-saldo`, no `/ausencias/contexto`: la home del portal no
 tiene por qué cargar los festivos de tres años para pintar un número. `3×2`
