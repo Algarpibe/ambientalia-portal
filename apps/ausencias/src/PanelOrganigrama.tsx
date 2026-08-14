@@ -107,8 +107,10 @@ export default function PanelOrganigrama({ activo }: Props) {
   const quienFirma = (correo: string) => nombrePorCorreo.get(correo.toLowerCase()) ?? correo;
 
   return (
-    <div className="mt-10 border-t border-gray-200 pt-8">
-      <h3 className="mb-1 text-sm font-semibold text-gray-900">Organigrama</h3>
+    // Sin `mt-10 border-t pt-8` ni encabezado propio: los tenía cuando compartía
+    // pestaña con la importación de empleados, y ahora dejarían una raya sin nada
+    // encima y un título que repite el nombre de la pestaña.
+    <div>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa persona.
         La <b>segunda firma</b> se deduce sola: es el jefe de su jefe. Quien no tenga a nadie por

@@ -31,6 +31,7 @@ type Pestana =
   | 'historial'
   | 'adjuntos'
   | 'empleados'
+  | 'organigrama'
   | 'saldos'
   | 'historico'
   | 'calendario';
@@ -103,7 +104,14 @@ export default function App() {
     // también la lista de administración de `VISORES_ADJUNTOS`, que no puede
     // editar ni borrar nada. El servidor decide con un solo booleano.
     if (contexto?.esVisorAdjuntos) p.push(['adjuntos', 'Soportes adjuntos']);
-    if (contexto?.esAdmin) p.push(['empleados', 'Empleados'], ['saldos', 'Saldos'], ['historico', 'Registro general']);
+    if (contexto?.esAdmin) {
+      // El organigrama va aparte de «Empleados» y no debajo: son dos trabajos
+      // distintos. Empleados es el alta —se hace una vez—, y el organigrama se
+      // revisa cada vez que alguien cambia de jefe. Juntos, el segundo quedaba
+      // enterrado bajo el primero.
+      p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos']);
+      p.push(['historico', 'Registro general']);
+    }
     return p;
   }, [contexto, pendientes.length]);
 
@@ -299,7 +307,9 @@ export default function App() {
             <>
               <div className={tab === 'empleados' ? '' : 'hidden'}>
                 <ImportarEmpleados />
-                <PanelOrganigrama activo={tab === 'empleados'} />
+              </div>
+              <div className={tab === 'organigrama' ? '' : 'hidden'}>
+                <PanelOrganigrama activo={tab === 'organigrama'} />
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
                 <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldoPropio} />
