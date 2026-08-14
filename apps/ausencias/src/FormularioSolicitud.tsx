@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Send } from 'lucide-react';
 import { crearSolicitud, leerComoBase64, type SaldoVacaciones, type Solicitud, type TipoSolicitud } from './api';
-import { contarDiasHabiles, etiquetasFecha, requiereAprobacion, TIPOS } from './dominio';
+import { contarDiasHabiles, etiquetasFecha, hoyEnColombia, requiereAprobacion, TIPOS } from './dominio';
 import TarjetaSaldo from './TarjetaSaldo';
 
 /** Mismo tope que el servidor (MAX_ADJUNTO_BYTES). Se avisa antes de subir. */
@@ -40,7 +40,19 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
 
   const rangoInvertido = Boolean(fechaInicio && fechaFin && fechaInicio > fechaFin);
   const faltaAdjunto = adjuntoObligatorio && !archivo;
-  const puedeEnviar = Boolean(fechaInicio && fechaFin) && !rangoInvertido && !faltaAdjunto && !enviando;
+
+  // Lo que requiere aprobación no puede empezar en el pasado. La incapacidad sí:
+  // se informa después de haber estado enfermo, así que `minFecha` queda
+  // `undefined` y el calendario abre entero.
+  //
+  // El `min` del input es solo la barrera cómoda —se puede teclear por encima, y
+  // algunos navegadores lo permiten—, por eso se comprueba también aquí y, sobre
+  // todo, en el servidor: `validarNuevaSolicitud` responde `fecha_en_pasado`.
+  const minFecha = requiereAprobacion(tipo) ? hoyEnColombia() : undefined;
+  const fechaEnPasado = Boolean(minFecha && fechaInicio && fechaInicio < minFecha);
+
+  const puedeEnviar =
+    Boolean(fechaInicio && fechaFin) && !rangoInvertido && !fechaEnPasado && !faltaAdjunto && !enviando;
 
   function cambiarTipo(nuevo: TipoSolicitud) {
     setTipo(nuevo);
@@ -140,6 +152,7 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
             type="date"
             required
             value={fechaInicio}
+            min={minFecha}
             onChange={(e) => setFechaInicio(e.target.value)}
             className={CAMPO}
           />
@@ -153,7 +166,7 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
             type="date"
             required
             value={fechaFin}
-            min={fechaInicio || undefined}
+            min={fechaInicio || minFecha}
             onChange={(e) => setFechaFin(e.target.value)}
             className={CAMPO}
           />
@@ -162,6 +175,15 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
 
       {rangoInvertido && (
         <p className="mb-4 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
+      )}
+
+      {/* Se explica el porqué, no solo el «no puedes»: quien llega aquí suele
+          estar regularizando algo ya disfrutado, y necesita saber a quién acudir. */}
+      {fechaEnPasado && (
+        <p className="mb-4 text-sm text-red-600">
+          No puedes pedir días que ya pasaron: la aprobación llegaría cuando ya no sirve de nada. Si necesitas
+          registrar algo del pasado, pídeselo a administración.
+        </p>
       )}
 
       {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo.

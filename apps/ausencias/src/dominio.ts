@@ -87,6 +87,20 @@ export function contarDiasHabiles(desde: string, hasta: string, festivos: Set<st
   return dias;
 }
 
+/**
+ * La fecha de hoy en Colombia (UTC−5, sin horario de verano). Espejo de
+ * `hoyEnColombia` en `apps/hub-api/src/ausencias/saldo.ts`.
+ *
+ * No vale `new Date().toISOString().slice(0, 10)` ni los métodos locales del
+ * navegador: el servidor valida contra la hora de Colombia, así que si el
+ * formulario se guiara por la zona del equipo, alguien fuera del país vería
+ * habilitado un día que el servidor va a rechazar —o bloqueado uno que aceptaría.
+ * Se resta el desfase ANTES de tomar la fecha, por lo mismo que en el servidor.
+ */
+export function hoyEnColombia(ahora: Date = new Date()): string {
+  return new Date(ahora.getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
+}
+
 /** Un decimal, y sin el «,0» cuando es entero. El formato de los días en toda la app. */
 export function formatDias(n: number): string {
   return n.toLocaleString('es-CO', { maximumFractionDigits: 1 });

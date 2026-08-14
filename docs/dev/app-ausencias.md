@@ -39,6 +39,45 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   la reserva del outbox y `020` la retirada de Drive.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
+## No se piden días que ya pasaron
+
+`validarNuevaSolicitud` rechaza con **`fecha_en_pasado`** (400) cualquier alta
+cuya `fechaInicio` sea anterior a hoy… **salvo las incapacidades**. Esa excepción
+es la razón de que la regla mire el tipo, y no es un capricho: una incapacidad se
+*informa* después de haber estado enfermo —uno va al médico, vuelve y sube el
+soporte—, así que exigirle fecha de hoy en adelante haría imposible el caso
+normal. Los tres tipos que sí requieren firma (vacaciones, permiso y
+compensatorio) van juntos: si la regla mirara solo `vacaciones`, quedaría abierta
+la misma puerta por otro lado.
+
+El motivo de fondo es que aprobar el pasado no significa nada: cuando llegara la
+firma, los días ya se habrían disfrutado (o no) y el saldo ya no se podría
+reservar.
+
+**El `min` de los `<input type="date">` es solo la barrera cómoda.** Se puede
+teclear por encima, así que la regla de verdad vive en el servidor y hay un test
+por HTTP que lo fija, no solo el de la función pura.
+
+`hoy` se **inyecta** en `validarNuevaSolicitud` en vez de leerse del reloj, por lo
+mismo que en `calcularSaldo`: para poder probar la regla sin depender del día en
+que se ejecuten los tests. Quien llama pasa `hoyEnColombia()` — el desfase UTC−5
+se resta ANTES de tomar la fecha, o entre las 19:00 y medianoche hora local el
+servidor ya estaría en el día siguiente y rechazaría por «pasada» una solicitud
+para mañana. El frontend usa el espejo de esa misma función en `dominio.ts`, y no
+la fecha local del navegador: si se guiara por la zona del equipo, alguien fuera
+del país vería habilitado un día que el servidor va a rechazar.
+
+**Consecuencia para los tests:** `router.test.ts` congela `Date` en 2026-01-15
+(solo `Date`, no los temporizadores, que supertest necesita). Sus fechas son
+literales a propósito —caen en días concretos de la semana y rodean festivos
+concretos, y de ahí salen los recuentos de días hábiles que afirma—, así que no
+se pueden volver relativas a hoy sin perder lo que comprueban; y con el reloj
+real, el servidor las rechazaría en cuanto el calendario las dejara atrás.
+`service.test.ts` hace lo mismo con una constante `HOY`.
+
+Lo que **no** pasa por esta regla, a propósito: la importación del histórico
+(fechas viejas por definición) y la edición de un admin desde *Registro general*.
+
 ## El contrato con n8n
 
 Mismo patrón que WO-sales (ver [n8n-automatizaciones.md](../n8n-automatizaciones.md)):

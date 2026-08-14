@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -327,6 +327,21 @@ const nueva = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  // El reloj se congela en enero de 2026, antes que la más temprana de las
+  // fechas que este fichero manda por POST (2026-03-30).
+  //
+  // Hace falta desde la regla de «no se piden días pasados»: las fechas de estos
+  // tests son literales a propósito —caen en días concretos de la semana y
+  // rodean festivos concretos, y de ahí salen los recuentos de días hábiles que
+  // se afirman—, así que no se pueden volver relativas a hoy sin perder lo que
+  // comprueban. Con el reloj real, en cambio, el servidor empezaría a
+  // rechazarlas por «pasadas» en cuanto el calendario las dejara atrás.
+  //
+  // Se falsea SOLO `Date`: los temporizadores de verdad los necesita supertest
+  // para resolver sus peticiones HTTP.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-01-15T12:00:00Z'));
+
   estado.empleado = {
     id: 'e1',
     nombreCompleto: 'Ana Ruiz',
@@ -351,6 +366,12 @@ beforeEach(() => {
   estado.eventos = [];
   estado.adjuntos = new Map();
   estado.seq = 0;
+});
+
+// Sin esto, el reloj falso se filtraría a los ficheros de test que corran
+// después en el mismo proceso.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ── Guards ─────────────────────────────────────────────────────────────────
@@ -436,6 +457,39 @@ describe('POST /ausencias/solicitudes', () => {
       .send(nueva({ fechaInicio: '2026-03-30', fechaFin: '2026-04-03' }))
       .expect(201);
     expect(r.body.diasHabiles).toBe(3);
+  });
+
+  it('400 al pedir días que ya pasaron', async () => {
+    // El reloj de este fichero está congelado en 2026-01-15 (ver el beforeEach),
+    // así que el 14 es ayer. Cubre el cableado entero —router → servicio→ error
+    // HTTP—, no solo la función pura: el `min` del input es cómodo pero se puede
+    // teclear por encima, y esto es lo que de verdad cierra la puerta.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: '2026-01-14', fechaFin: '2026-01-20' }))
+      .expect(400);
+    expect(r.body).toMatchObject({ error: 'fecha_en_pasado', field: 'fechaInicio' });
+    // Y no deja rastro: ni solicitud ni evento que mandar por correo.
+    expect(estado.eventos).toHaveLength(0);
+  });
+
+  it('una incapacidad SÍ puede ser de días pasados', async () => {
+    // La excepción, por HTTP y no solo en la función pura: si alguien "unificara"
+    // la regla para todos los tipos, el flujo normal de informar una incapacidad
+    // —volver del médico y subir el soporte— dejaría de funcionar.
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-01-08',
+          fechaFin: '2026-01-09',
+          adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+        }),
+      )
+      .expect(201);
   });
 
   it('la incapacidad se registra sin pasar por aprobación', async () => {
