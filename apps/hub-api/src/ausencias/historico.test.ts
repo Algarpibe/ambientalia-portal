@@ -13,6 +13,7 @@ function empleado(nombreCompleto: string, correo: string): Empleado {
     credencial: null,
     aprobadorCorreo: 'jefe@empresa.test',
     copiaCorreo: null,
+    veAdjuntos: false,
     userId: null,
     activo: true,
   };

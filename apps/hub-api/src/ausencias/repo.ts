@@ -40,7 +40,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, copia_correo, user_id, activo`;
+  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -52,6 +52,7 @@ interface FilaEmpleadoDb {
   copia_correo: string | null;
   user_id: string | null;
   activo: boolean;
+  ve_adjuntos: boolean;
 }
 
 function aEmpleado(r: FilaEmpleadoDb): Empleado {
@@ -63,6 +64,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     credencial: r.credencial,
     aprobadorCorreo: r.aprobador_correo,
     copiaCorreo: r.copia_correo,
+    veAdjuntos: r.ve_adjuntos,
     userId: r.user_id,
     activo: r.activo,
   };
@@ -427,6 +429,42 @@ export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: stri
     [empleadoId, copiaCorreo],
   );
   return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Si ese correo tiene la llave maestra de los adjuntos.
+ *
+ * Consulta por correo y no por id porque quien pregunta es una sesión, y una
+ * sesión puede no tener ficha de empleado — en ese caso no es visor, que es la
+ * respuesta correcta.
+ */
+export async function esVisorDeAdjuntos(db: Pool, email: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados WHERE lower(correo) = lower($1) AND activo AND ve_adjuntos`,
+    [email],
+  );
+  return rows.length > 0;
+}
+
+/** Da o quita la llave. False si no existía o estaba inactivo. */
+export async function fijarVisor(db: Pool, empleadoId: string, veAdjuntos: boolean): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET ve_adjuntos = $2 WHERE id = $1 AND activo`,
+    [empleadoId, veAdjuntos],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Deja constancia del cambio. Ver el porqué en la migración 022. */
+export async function registrarCambioVisor(
+  db: Pool,
+  e: { adminEmail: string; empleadoId: string; empleadoCorreo: string; concedido: boolean },
+): Promise<void> {
+  await db.query(
+    `INSERT INTO portal.visores_adjuntos_log (admin_email, empleado_id, empleado_correo, concedido)
+     VALUES (lower($1), $2, lower($3), $4)`,
+    [e.adminEmail, e.empleadoId, e.empleadoCorreo, e.concedido],
+  );
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────
