@@ -409,25 +409,9 @@ Set-Location "c:\Users\algar\OneDrive\Documentos\Antigravity\Portal\antigravity-
 
 - [ ] **Paso 1: Escribir los tests que fallan**
 
-Primero **el fixture**: en `apps/hub-api/src/ausencias/router.test.ts`, dentro del `beforeEach` de la línea 371, añade el campo a `estado.empleado` (después de `aprobadorCorreo`):
+> **Corrección sobre el plan original.** Aquí se pedía añadir `requiereSegundaFirma: true` a los fixtures de `Empleado` de `router.test.ts`. **Ya está hecho en la tarea 2** y no hay que repetirlo: en cuanto `aprobadoresDe` empezó a leer el campo, esos literales —que son `any` dentro de la factoría de `vi.mock`, así que `tsc` no los vigila— pasaron a llegar con `undefined`, que es falsy, y tumbaron 11 tests de la cascada. Pertenecía a la tarea que estrena el campo, no a esta. Si te encuentras el campo ya puesto, es correcto: no lo dupliques ni lo reescribas.
 
-```ts
-  estado.empleado = {
-    id: 'e1',
-    nombreCompleto: 'Ana Ruiz',
-    correo: 'ana.ruiz@ambientalia.com.co',
-    cargo: 'Analista',
-    credencial: 1002,
-    aprobadorCorreo: 'comercial@ambientalia.com.co',
-    // El default del SQL. Sin esto, `aprobadoresDe` leería `undefined` y TODOS
-    // los tests de la cascada perderían su segunda firma de golpe.
-    requiereSegundaFirma: true,
-    userId: null,
-    activo: true,
-  };
-```
-
-Ahora el describe nuevo. Añádelo **justo después** del `describe('aprobación en cascada', ...)` (termina cerca de la línea 800; ponlo tras su llave de cierre):
+El describe nuevo. Añádelo **justo después** del `describe('aprobación en cascada', ...)` (termina cerca de la línea 800; ponlo tras su llave de cierre):
 
 ```ts
 // ── La segunda firma, apagada por ficha ────────────────────────────────────
