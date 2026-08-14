@@ -1665,11 +1665,53 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
   it('400 si el correo no es de nadie de la plantilla', async () => {
     // Se valida contra los empleados ACTIVOS y no solo el formato: una errata
     // mandaría los avisos al vacío sin que nadie se enterara nunca.
-    await request(app())
+    const r = await request(app())
       .put(`/api/ausencias/empleados/${E1}/copia`)
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .send({ copiaCorreo: 'nadie@ambientalia.com.co' })
       .expect(400);
+    // Cierra el motivo: sin esto, el test seguiría en verde si el 400 viniera de
+    // otra rama distinta a «no está en la plantilla».
+    expect(r.body.error).toBe('copia_no_encontrada');
+  });
+
+  it('acepta la copia por defecto aunque su ficha no esté activa', async () => {
+    // Mismo motivo que `APROBADOR_POR_DEFECTO` en el jefe: es el correo con el
+    // que la migración 021 sembró toda la plantilla, y rechazarlo lo volvería
+    // irreponible desde el panel en cuanto alguien lo cambiara.
+    //
+    // No se vacía `estado.plantilla` entera: el doble de `fijarCopia` busca ahí
+    // la ficha de E1, y sin ella el PUT daría 404 en vez de probar lo que toca.
+    // Basta con que el correo por defecto no esté entre los activos que devuelve
+    // `enlacesActivos`, así que se deja solo la ficha de E1 (su correo ya es
+    // `ana.ruiz@...`, no el de administración).
+    estado.plantilla = [estado.plantilla[0]];
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ copiaCorreo: 'administrativo@ambientalia.com.co' })
+      .expect(200);
+    expect(r.body).toHaveProperty('copiaCorreo', 'administrativo@ambientalia.com.co');
+  });
+
+  it('400 si `copiaCorreo` no es ni texto ni null', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ copiaCorreo: 42 })
+      .expect(400);
+    expect(r.body.error).toBe('copia_invalida');
+  });
+
+  it('400 si el cuerpo no trae `copiaCorreo`', async () => {
+    // `undefined` no es null: un PUT sin el campo NO significa «sin copia», y
+    // tratarlo así borraría la copia de alguien por un error del cliente.
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/copia`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({})
+      .expect(400);
+    expect(r.body.error).toBe('copia_invalida');
   });
 
   it('403 a quien no es admin', async () => {

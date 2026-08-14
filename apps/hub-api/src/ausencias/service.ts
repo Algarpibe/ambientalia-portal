@@ -1,6 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
-import { APROBADOR_POR_DEFECTO, VISORES_ADJUNTOS } from './config.js';
+import { APROBADOR_POR_DEFECTO, COPIA_POR_DEFECTO, VISORES_ADJUNTOS } from './config.js';
 import {
   diasDelMes,
   esMesValido,
@@ -598,7 +598,11 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   const copia = typeof bruto === 'string' && bruto.trim() ? bruto.trim().toLowerCase() : null;
   if (copia !== null) {
     const enlaces = await repo.enlacesActivos(db);
-    if (!enlaces.some((e) => e.correo === copia)) {
+    // El buzón por defecto se acepta aunque no tenga ficha activa, igual que
+    // `APROBADOR_POR_DEFECTO` en `fijarJefe`: es el valor con el que la migración
+    // 021 sembró toda la plantilla, y rechazarlo lo dejaría irreponible desde el
+    // panel en cuanto su ficha se desactivara.
+    if (!enlaces.some((e) => e.correo === copia) && copia !== COPIA_POR_DEFECTO.toLowerCase()) {
       throw new AusenciaError('copia_no_encontrada', 400, 'copiaCorreo');
     }
   }

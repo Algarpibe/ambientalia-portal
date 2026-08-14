@@ -11,6 +11,14 @@ import type { TipoSolicitud } from './types.js';
 /** Buzón que aprueba por defecto cuando el empleado no tiene otro asignado. */
 export const APROBADOR_POR_DEFECTO = 'comercial@ambientalia.com.co';
 
+/**
+ * La copia con la que la migración 021 sembró toda la plantilla. Se acepta
+ * aunque su ficha no esté activa, por lo mismo que `APROBADOR_POR_DEFECTO`:
+ * si ese buzón se desactivara, rechazarlo convertiría el valor por defecto de
+ * toda la empresa en algo que ya no se puede volver a poner desde el panel.
+ */
+export const COPIA_POR_DEFECTO = 'administrativo@ambientalia.com.co';
+
 // Aquí vivía `COPIA_ADMINISTRACION`, con `comercial@` y `administrativo@` fijos
 // para toda la empresa. La copia es ahora un campo de la ficha del empleado
 // (`portal.empleados.copia_correo`, migración 021), editable desde la pestaña
