@@ -1,5 +1,13 @@
 import { sumarDias } from './festivos.js';
-import { CALENDARIO_STAFF, FIRMA_EMPRESA, FIRMA_GERENCIA, HOJA_ID, PESTANA, urlPortal } from './config.js';
+import {
+  CALENDARIO_STAFF,
+  COPIA_INCAPACIDADES,
+  FIRMA_EMPRESA,
+  FIRMA_GERENCIA,
+  HOJA_ID,
+  PESTANA,
+  urlPortal,
+} from './config.js';
 import { ETIQUETA_TIPO, type EventoOutbox, type FilaHoja, type PayloadEvento, type Solicitud } from './types.js';
 
 // Los correos, eventos de calendario y filas de hoja que antes vivían dentro de
@@ -56,7 +64,7 @@ function acuseSolicitante(s: Solicitud) {
       ? 'Tu solicitud pasa por dos aprobaciones: primero tu jefe inmediato y después su superior. Te informaremos por este medio del resultado final.'
       : 'Te informaremos por este medio del estado de aprobación de la solicitud.';
   return {
-    para: esInc ? destinatarios(s.solicitanteEmail, s.copiaCorreo) : s.solicitanteEmail,
+    para: esInc ? destinatarios(s.solicitanteEmail, COPIA_INCAPACIDADES, s.copiaCorreo) : s.solicitanteEmail,
     asunto: esInc
       ? '¡Reporte de incapacidad registrado exitosamente!'
       : `¡Solicitud ${PERIODO[s.tipo]} registrada exitosamente!`,

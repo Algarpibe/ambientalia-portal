@@ -75,9 +75,11 @@ describe('correos', () => {
     expect(p.correo.cuerpo).toContain('aprobarla o rechazarla');
   });
 
-  it('el correo de aprobado va también a administración, sin repetir al aprobador', () => {
-    // El aprobador de esta solicitud es el mismo buzón que ya va en copia: sin
-    // deduplicar, aparecería dos veces en el `sendTo` de Gmail.
+  it('el correo de aprobado lleva también la copia de la ficha, además del aprobador', () => {
+    // Ya no ejercita el dedup: con el modelo nuevo el aprobador por defecto
+    // (comercial@) y la copia por defecto (administrativo@) son buzones
+    // distintos. Esa cobertura la da «una copia que ya firma no se duplica»,
+    // más abajo; este test solo fija que la copia se suma a la cadena.
     const p = construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada');
     expect(p.correo.para).toBe(
       'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, administrativo@ambientalia.com.co',
@@ -341,6 +343,15 @@ describe('la copia sale de la ficha del empleado', () => {
 
   it('entra en el acuse de una incapacidad', () => {
     const p = construirPayload(solicitud({ tipo: 'incapacidad', copiaCorreo: 'copia@ambientalia.com.co' }), 'registrada');
+    expect(p.correo.para).toContain('copia@ambientalia.com.co');
+  });
+
+  it('gerencia sigue en copia de las incapacidades aunque la ficha diga otra cosa', () => {
+    // Una incapacidad no genera evento de decisión, así que este buzón NO llega
+    // por la cadena de firmas como en aprobada/rechazada: si no fuera fijo aquí,
+    // gerencia dejaría de enterarse de las incapacidades.
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', copiaCorreo: 'copia@ambientalia.com.co' }), 'registrada');
+    expect(p.correo.para).toContain('comercial@ambientalia.com.co');
     expect(p.correo.para).toContain('copia@ambientalia.com.co');
   });
 

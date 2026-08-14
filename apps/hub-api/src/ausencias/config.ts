@@ -22,8 +22,23 @@ export const COPIA_POR_DEFECTO = 'administrativo@ambientalia.com.co';
 // Aquí vivía `COPIA_ADMINISTRACION`, con `comercial@` y `administrativo@` fijos
 // para toda la empresa. La copia es ahora un campo de la ficha del empleado
 // (`portal.empleados.copia_correo`, migración 021), editable desde la pestaña
-// Organigrama. `comercial@` no se pierde de esos correos: es primer o segundo
-// firmante de toda la plantilla y sigue llegando por `cadenaDeDecision`.
+// Organigrama. `comercial@` no se pierde de los correos de decisión (aprobada y
+// rechazada): es primer o segundo firmante de toda la plantilla y sigue
+// llegando por `cadenaDeDecision`. En el acuse de incapacidad no hay cadena de
+// firmas que lo traiga —ver `COPIA_INCAPACIDADES`— así que ahí se conserva a
+// propósito, explícito y aparte.
+
+/**
+ * Siempre en copia del acuse de una incapacidad, además de la copia de la ficha.
+ *
+ * Es fijo y no configurable a propósito, y es la única mitad de la vieja
+ * `COPIA_ADMINISTRACION` que sobrevive. El motivo: una incapacidad solo genera
+ * el evento `registrada`, nunca uno de decisión, así que —al contrario que en
+ * aprobada y rechazada— este buzón NO llega por `cadenaDeDecision`. Sin esta
+ * constante, gerencia dejaría de enterarse de las incapacidades el día del
+ * despliegue.
+ */
+export const COPIA_INCAPACIDADES = 'comercial@ambientalia.com.co';
 
 /**
  * Quién puede abrir CUALQUIER adjunto de CUALQUIER persona desde el portal,
@@ -32,9 +47,14 @@ export const COPIA_POR_DEFECTO = 'administrativo@ambientalia.com.co';
  * ⚠️ Es una llave maestra, y lo que abre incluye **el soporte médico de las
  * incapacidades ajenas**: dato de salud, con lo que eso implica para la Ley 1581.
  * Esta lista tiene que quedarse corta y cada correo debe estar justificado; no se
- * añade a nadie «por si acaso». Hoy son los mismos dos buzones que ya reciben el
- * acuse de cada incapacidad, así que no ensancha a quién llega la información,
- * solo le da una vía para consultarla sin salir del portal.
+ * añade a nadie «por si acaso». `comercial@` está aquí por lo mismo que en
+ * `COPIA_INCAPACIDADES`: siempre recibe el acuse de cada incapacidad, fijo y no
+ * editable, así que esta lista no le da acceso a información que no le llegara
+ * ya. `administrativo@` es distinto desde que la copia se volvió configurable:
+ * hoy sigue siendo el valor sembrado de `copia_correo` para toda la plantilla,
+ * pero cualquier ficha puede cambiarlo desde el organigrama, así que su sitio
+ * aquí ya no se apoya en «recibe el acuse» — es una decisión propia que hay que
+ * revisar si alguna vez deja de tener sentido.
  *
  * No hay registro de descargas: `GET /ausencias/adjuntos/:id` no loguea nada, a
  * diferencia del PATCH y el DELETE del registro. Si esta lista crece, ese log es
