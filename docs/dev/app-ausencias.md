@@ -260,7 +260,7 @@ absoluto.
 | Endpoint | Quién |
 |---|---|
 | `GET /ausencias/contexto` | cualquiera con la app — trae el saldo del propio solicitante dentro del payload de arranque, sin llamada aparte |
-| `GET /ausencias/mi-saldo` | cualquiera con la app — el mismo saldo propio, pero solo: lo usan el widget del dashboard y el refresco de la cabecera tras crear o decidir una solicitud (ver «Dónde se ve» más abajo) |
+| `GET /ausencias/mi-saldo` | cualquiera con la app — el mismo saldo propio, pero solo: lo usan el widget del dashboard y el refresco de la cabecera (los tres disparos están en «Lo que no refresca») |
 | `GET /ausencias/saldos` | admin ve a todos los empleados; un aprobador no-admin ve solo los suyos (los que tienen su correo en `aprobador_correo`) — misma regla que `repo.solicitudesPendientes` |
 | `PUT /ausencias/empleados/:id/saldo` | solo admin — fija el corte; no manda correos, igual que editar el registro general |
 
@@ -701,7 +701,7 @@ del enmascarado de arriba.
   no cambia nada a efectos de tipos: `tsc` resuelve el especificador igual
   que en un import estático y arrastra el módulo a su programa. Así, el
   propio `tsc -b` del portal typechequea **20 de los 21** ficheros de
-  `ausencias/src` —falta `main.tsx`, la entrada de `vite dev` que nadie
+  `ausencias/src` —falta `main.tsx`, la entrada suelta de la app que nadie
   importa, y que por eso es el único punto donde esta red automática tiene
   un agujero real— con las reglas relajadas del portal, no con las suyas;
   verificado con `tsc --listFilesOnly`. El resultado es un typecheck

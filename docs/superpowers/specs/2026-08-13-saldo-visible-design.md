@@ -177,7 +177,7 @@ Estados del widget:
 | Estado | Qué muestra |
 |---|---|
 | Cargando | «Cargando…» |
-| Error de red o 4xx/5xx | «No se pudo cargar tu saldo.» |
+| Error de red o 4xx/5xx | El mensaje real de `mensajeDeError`, que ya distingue el 401 («tu sesión ha caducado») del 403 («no tienes esta aplicación asignada») |
 | `saldo === null` o `!configurado` | «Todavía sin configurar. Habla con administración.» |
 | Saldo | `IndicadorSaldo variante="widget"` + enlace «Pedir vacaciones →» |
 
