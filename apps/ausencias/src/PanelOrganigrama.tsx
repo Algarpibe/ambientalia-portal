@@ -254,7 +254,11 @@ export default function PanelOrganigrama({ activo }: Props) {
                           // a pulsar el de al lado por error.
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
-                          aria-label={`Guardar el jefe de ${e.nombreCompleto}`}
+                          // «La fila», no «el jefe»: este botón guarda también la
+                          // copia desde que existe esa columna, y un rótulo que
+                          // nombre solo uno de los dos campos engaña justo a quien
+                          // no puede ver cuál ha cambiado.
+                          aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >
                           {fila.guardando ? (
@@ -270,7 +274,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                             pantalla: sin este texto el guardado pasa inadvertido. */}
                         {fila.exito && (
                           <span role="status" className="sr-only">
-                            Jefe de {e.nombreCompleto} guardado.
+                            Cambios de {e.nombreCompleto} guardados.
                           </span>
                         )}
                         {fila.error && (

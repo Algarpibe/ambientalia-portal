@@ -126,9 +126,9 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `creada` | acuse al solicitante | — | — |
 | `aprobacion` | aviso al jefe inmediato | — | — |
 | `aprobacion_2` | aviso al segundo aprobador | — | — |
-| `aprobada` | aprobado, a **toda la cadena** (+ administración) | ✔ | ✔ |
-| `rechazada` | rechazado con motivo, a **toda la cadena** (+ administración) | — | ✔ |
-| `registrada` | acuse de incapacidad | ✔ | ✔ |
+| `aprobada` | aprobado, a **toda la cadena** (+ la copia de la ficha) | ✔ | ✔ |
+| `rechazada` | rechazado con motivo, a **toda la cadena** (+ la copia de la ficha) | — | ✔ |
+| `registrada` | acuse de incapacidad (+ `COPIA_INCAPACIDADES` y la copia de la ficha) | ✔ | ✔ |
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
 es distinto**: `avisoSegundoAprobador` lleva su propio asunto y dice que la
