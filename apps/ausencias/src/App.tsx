@@ -164,14 +164,19 @@ export default function App() {
   }
 
   return (
-    <main className="flex-grow bg-transparent p-6 overflow-y-auto">
-      {/* Sticky: este `main` tiene su propio `overflow-y-auto` (el scroll no ocurre
-          en la página, ocurre aquí dentro), así que sin `sticky` la cabecera —y con
-          ella el saldo— se pierde de vista en cuanto se baja por una tabla larga
-          como «Mis solicitudes», justo de la que se retiró la tarjeta duplicada.
-          Fondo opaco con blur porque `main` es `bg-transparent`: si no, el
-          contenido se transparentaría por debajo al pasar. */}
-      <header className="sticky top-0 z-20 mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white/80 backdrop-blur-xl shadow-sm">
+    <main className="flex-grow bg-transparent p-6">
+      {/* Sticky contra el scroll del documento, NO del `main`: por eso este `main`
+          no lleva `overflow-y-auto`. Si lo llevara, `main` nunca desborda (su
+          altura es siempre la de su contenido, vía min-h-screen + flex-grow más
+          arriba en el árbol) y sería el scrollport más cercano al `<header>` —el
+          `sticky` se ancla al scrollport más cercano, exista o no desbordamiento,
+          así que quedaría pegado a un contenedor que jamás se mueve y jamás se
+          activaría. Sin esa clase, el scrollport es el viewport, que sí se
+          desplaza, y la cabecera —con el saldo— sigue a la vista al bajar por una
+          tabla larga como «Mis solicitudes». Fondo opaco con blur porque `main` es
+          `bg-transparent`: si no, el contenido se transparentaría por debajo al
+          pasar. */}
+      <header className="sticky top-0 z-20 mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-gray-200 bg-white/80 py-3 backdrop-blur-xl shadow-sm">
         <div className="flex items-center gap-3">
           <CalendarDays className="h-6 w-6 text-blue-600" />
           <div>
