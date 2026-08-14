@@ -133,18 +133,34 @@ ese mensaje le mandaría a administración cuando no hay nada que arreglar.
   appId: 'ausencias',
   name: 'Mi saldo de vacaciones',
   description: 'Días de vacaciones disponibles a día de hoy.',
-  defaultSize: { w: 3, h: 2 },
+  defaultSize: { w: 4, h: 3 },
   component: WidgetSaldo,
 }
 ```
+
+El tamaño **no** es `3×2`, que fue el primer valor propuesto y no cabe: la celda
+deja 117 px de contenido y el widget mide 120 px en cuanto hay algo en trámite —
+justo la gente para la que existe la línea de aviso—. `4×3` es además el mínimo
+que usan los widgets ya desplegados, y esos apilan valores a `text-lg`, no a
+`text-4xl`. Corregirlo tarde no habría bastado: `addWidget` copia `defaultSize`
+al `localStorage` de cada usuario, así que el descriptor solo manda hasta que
+alguien añade el widget.
 
 Más una línea en `apps/portal/src/widgets/registry.ts`, y actualizar el
 comentario de ese archivo que enumera las apps sin widgets.
 
 **No hace falta lógica de permisos nueva.** `useWidgetRegistry` solo carga los
 widgets de las apps asignadas al usuario (claim `apps` del JWT). Quien no tenga
-la app no ve el widget en el catálogo, y si lo tuviera guardado de antes en su
-layout, el endpoint le respondería 403.
+la app no ve el widget en el catálogo.
+
+Y quien lo tuviera guardado de antes en su layout y **perdiera** el acceso
+tampoco llega a pedir nada: el módulo no se carga, así que el id no entra en
+`availableIds` y `visibleItems` filtra la entrada antes de renderizar. La
+petición nunca sale, y por tanto no hay ningún 403 que gestionar. El layout **no
+se poda** de `localStorage` —solo se oculta—, decisión deliberada y documentada
+en `useDashboardLayout.ts` para no repetir una pérdida de datos anterior; el
+widget no debe intentar autoeliminarse. Además `requireApp` lee el claim `apps`
+del mismo JWT que lee `useAuth`, así que frontend y backend no pueden discrepar.
 
 Hay una asimetría heredada que conviene conocer antes de dar el widget por roto:
 `requireApp` deja pasar a **cualquier admin** aunque no tenga la app en su lista
