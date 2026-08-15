@@ -930,6 +930,7 @@ describe('la segunda firma se puede apagar por ficha', () => {
   });
 
   it('con la casilla encendida hay segunda firma y nadie a quien informar', async () => {
+    estado.empleado.requiereSegundaFirma = true;
     const s = await crear();
     expect(s.segundoAprobadorCorreo).toBe(GERENCIA);
     expect(s.informadoCorreo).toBeNull();
@@ -963,28 +964,33 @@ describe('la segunda firma se puede apagar por ficha', () => {
       .expect(403);
   });
 
-  it('una incapacidad no congela ni firmante ni informado, apagada la casilla o no', async () => {
-    // Las incapacidades se INFORMAN, no se aprueban: dejar aquí a alguien la
-    // haría aparecer en una bandeja de pendientes que nadie tiene que atender.
-    // Su aviso a gerencia sale por `COPIA_INCAPACIDADES`, que esto no toca.
-    estado.empleado.requiereSegundaFirma = false;
-    const s = (
-      await request(app())
-        .post('/api/ausencias/solicitudes')
-        .set('Authorization', `Bearer ${token()}`)
-        .send(
-          nueva({
-            tipo: 'incapacidad',
-            adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
-          }),
-        )
-        .expect(201)
-    ).body;
-    expect(s.estado).toBe('registrada');
-    expect(s.aprobadorCorreo).toBeNull();
-    expect(s.segundoAprobadorCorreo).toBeNull();
-    expect(s.informadoCorreo).toBeNull();
-  });
+  it.each([true, false])(
+    'una incapacidad no congela ni firmante ni informado (casilla: %s)',
+    async (requiereSegundaFirma) => {
+      // Las incapacidades se INFORMAN, no se aprueban: dejar aquí a alguien la
+      // haría aparecer en una bandeja de pendientes que nadie tiene que atender.
+      // La casilla no interviene siquiera —`requiereAprobacion` corta antes—, y
+      // por eso se prueban los dos valores: para que ese corte quede fijado.
+      // Su aviso a gerencia sale por `COPIA_INCAPACIDADES`, que esto no toca.
+      estado.empleado.requiereSegundaFirma = requiereSegundaFirma;
+      const s = (
+        await request(app())
+          .post('/api/ausencias/solicitudes')
+          .set('Authorization', `Bearer ${token()}`)
+          .send(
+            nueva({
+              tipo: 'incapacidad',
+              adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+            }),
+          )
+          .expect(201)
+      ).body;
+      expect(s.estado).toBe('registrada');
+      expect(s.aprobadorCorreo).toBeNull();
+      expect(s.segundoAprobadorCorreo).toBeNull();
+      expect(s.informadoCorreo).toBeNull();
+    },
+  );
 });
 
 // ── Adjuntos para administración ───────────────────────────────────────────
