@@ -515,3 +515,54 @@ describe('validarSaldo', () => {
     expect(() => validarSaldo({ saldo: 12.5, fecha: '2026-08-12' })).toThrow(AusenciaError);
   });
 });
+
+describe('el informado no hereda ningún permiso del segundo firmante', () => {
+  const INFORMADO = 'gerencia@ambientalia.com.co';
+  const suSesion = { email: INFORMADO, userId: null, esAdmin: false };
+
+  const sinSegundaFirma = solicitud({
+    aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    segundoAprobadorCorreo: null,
+    informadoCorreo: INFORMADO,
+  });
+
+  it('no puede firmarla mientras está pendiente', () => {
+    expect(puedeDecidir(suSesion, sinSegundaFirma)).toBe(false);
+  });
+
+  it('tampoco cuando ya está decidida', () => {
+    // En estado terminal `puedeDecidir` deja pasar a los firmantes para que el
+    // 409 gane al 403. El informado no es firmante, así que sigue siendo 403.
+    expect(puedeDecidir(suSesion, { ...sinSegundaFirma, estado: 'aprobada' })).toBe(false);
+  });
+
+  /**
+   * El adjunto lleva `informadoCorreo` aunque `AdjuntoCompleto` NO tenga ese
+   * campo: hoy la consulta de adjuntos no lo selecciona, y por eso el dato no
+   * llega hasta aquí.
+   *
+   * Ponerlo igualmente es lo que convierte los dos tests de abajo en candados de
+   * verdad. Sin él, ampliar `puedeVerAdjunto` para mirar al informado los dejaría
+   * en VERDE —la comparación caería contra `undefined`— y estarían afirmando algo
+   * mucho más flojo: que un tercero cualquiera no abre el soporte, que ya cubren
+   * los tests de más arriba. Se comprobó rompiendo el código a propósito.
+   */
+  const adjuntoDeLaSolicitud = {
+    solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+    aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    segundoAprobadorCorreo: null,
+    informadoCorreo: INFORMADO,
+  } as never;
+
+  it('no puede abrir el soporte', () => {
+    // Que reciba el correo del resultado no le da acceso al dato de salud que lo
+    // respalda: los soportes de las incapacidades son historia clínica.
+    expect(puedeVerAdjunto(suSesion, adjuntoDeLaSolicitud, false)).toBe(false);
+  });
+
+  it('con la llave maestra sí lo abre, como cualquiera que la tenga', () => {
+    // La llave AÑADE acceso y nunca lo condiciona: no ser firmante no puede
+    // quitársela a quien la tiene por otra vía.
+    expect(puedeVerAdjunto(suSesion, adjuntoDeLaSolicitud, true)).toBe(true);
+  });
+});
