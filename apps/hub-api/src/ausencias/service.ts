@@ -610,6 +610,38 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
 }
 
 /**
+ * Enciende o apaga la segunda firma de alguien.
+ *
+ * Sin registro de auditoría, al contrario que `fijarVisor`: esto no da acceso a
+ * ningún dato personal, así que se queda al nivel del jefe y de la copia. Y sin
+ * comprobación de ciclos, al contrario que `fijarJefe`: no se toca ninguna arista
+ * del árbol, solo si el escalón de arriba firma o se limita a enterarse.
+ *
+ * Las solicitudes ya en vuelo no se mueven: llevan su reparto congelado del alta.
+ */
+export async function fijarSegundaFirma(
+  db: Pool,
+  empleadoId: string,
+  body: unknown,
+): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  // El tipo se exige, no se interpreta: `'no'` es una cadena con valor de verdad,
+  // y aceptarla dejaría encendida una casilla que alguien quiso apagar.
+  if (typeof b.requiereSegundaFirma !== 'boolean') {
+    throw new AusenciaError('segunda_firma_invalida', 400, 'requiereSegundaFirma');
+  }
+
+  if (!(await repo.fijarSegundaFirma(db, empleadoId, b.requiereSegundaFirma))) {
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
+/**
  * Da o quita la llave maestra de los adjuntos, dejando constancia.
  *
  * Recibe la `Sesion` —al contrario que `fijarJefe` y `fijarCopia`— porque el

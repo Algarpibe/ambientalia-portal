@@ -193,6 +193,12 @@ vi.mock('./repo.js', () => ({
     e.copiaCorreo = copia;
     return true;
   },
+  fijarSegundaFirma: async (_db: unknown, empleadoId: string, requiere: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.requiereSegundaFirma = requiere;
+    return true;
+  },
   // Una sola función para dar la llave Y registrarla, reflejando que en el
   // repo real las dos escrituras van en la misma transacción (`repo.
   // fijarVisorConRegistro`). El doble simula esa atomicidad: si toca fallar,
@@ -1970,6 +1976,63 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .put(`/api/ausencias/empleados/${E1}/visor`)
       .set('Authorization', `Bearer ${token()}`)
       .send({ veAdjuntos: true })
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/segunda-firma', () => {
+  it('un admin apaga la segunda firma de alguien', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: false })
+      .expect(200);
+    expect(r.body).toMatchObject({ id: E1, requiereSegundaFirma: false });
+  });
+
+  it('y la vuelve a encender', async () => {
+    estado.plantilla[0].requiereSegundaFirma = false;
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: true })
+      .expect(200);
+    expect(r.body).toHaveProperty('requiereSegundaFirma', true);
+  });
+
+  it('400 si el cuerpo no trae un booleano', async () => {
+    // `'no'` es una cadena con valor de verdad: sin la comprobación de tipo,
+    // apagar la casilla desde un cliente descuidado la dejaría encendida.
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: 'no' })
+      .expect(400);
+    expect(r.body.error).toBe('segunda_firma_invalida');
+  });
+
+  it('400 si el cuerpo viene vacío', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({})
+      .expect(400);
+    expect(r.body.error).toBe('segunda_firma_invalida');
+  });
+
+  it('404 si el empleado no existe', async () => {
+    await request(app())
+      .put('/api/ausencias/empleados/99999999-9999-4999-8999-999999999999/segunda-firma')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: false })
+      .expect(404);
+  });
+
+  it('403 a quien no es admin', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ requiereSegundaFirma: false })
       .expect(403);
   });
 });

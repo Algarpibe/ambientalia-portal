@@ -434,6 +434,18 @@ export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: stri
 }
 
 /**
+ * Enciende o apaga la segunda firma de un empleado. Devuelve false si no existía
+ * o estaba inactivo, igual que `fijarJefe` y `fijarCopia`.
+ */
+export async function fijarSegundaFirma(db: Pool, empleadoId: string, requiere: boolean): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE portal.empleados SET requiere_segunda_firma = $2 WHERE id = $1 AND activo`,
+    [empleadoId, requiere],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/**
  * Si ese correo tiene la llave maestra de los adjuntos.
  *
  * Consulta por correo y no por id porque quien pregunta es una sesión, y una
