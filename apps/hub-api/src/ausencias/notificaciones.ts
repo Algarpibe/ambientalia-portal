@@ -172,6 +172,11 @@ function destinatarios(...correos: (string | null | undefined)[]): string {
  * `informadoCorreo` es el de segundo nivel cuando su ficha no exige segunda
  * firma. Nunca coexiste con `segundoAprobadorCorreo`, así que esto no manda dos
  * correos a nadie: uno de los dos es siempre `null` y `destinatarios` lo filtra.
+ *
+ * Esa exclusión la garantiza `aprobadoresDe` (jerarquia.ts), que deriva los dos
+ * campos juntos, y `crearSolicitud`, que los congela de esa misma llamada. NO la
+ * fuerza ni el tipo ni la base de datos —la 023 no lleva ningún CHECK—, así que
+ * cualquier vía nueva que escriba estos dos campos tiene que respetarla a mano.
  */
 const cadenaDeDecision = (s: Solicitud) =>
   destinatarios(
