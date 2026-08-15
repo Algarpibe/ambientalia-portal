@@ -23,6 +23,8 @@ export interface Empleado {
   copiaCorreo: string | null;
   /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
   veAdjuntos: boolean;
+  /** Si sus solicitudes necesitan la firma del jefe de su jefe, o basta una. */
+  requiereSegundaFirma: boolean;
   userId: string | null;
   activo: boolean;
 }
@@ -30,6 +32,8 @@ export interface Empleado {
 /** Un empleado del maestro con su posición en el árbol, derivada por hub-api. */
 export interface EmpleadoConJefatura extends Empleado {
   segundoAprobadorCorreo: string | null;
+  /** El de segundo nivel cuando NO firma. Excluyente con el de arriba. */
+  informadoCorreo: string | null;
   enCiclo: boolean;
 }
 
@@ -61,6 +65,9 @@ export interface Solicitud {
   aprobadorCorreo: string | null;
   /** Quien firma después, congelado. `null` = una sola firma. */
   segundoAprobadorCorreo: string | null;
+  /** El de segundo nivel cuando NO firma: solo recibe el correo del resultado.
+   *  Excluyente con `segundoAprobadorCorreo`. Congelado en el alta. */
+  informadoCorreo: string | null;
   /** Leído de la ficha al consultar, no congelado en el alta. */
   copiaCorreo: string | null;
   primeraFirmaAt: string | null;
@@ -253,6 +260,12 @@ export const fijarCopia = (id: string, copiaCorreo: string | null) =>
 /** Da o quita la llave maestra de los adjuntos. Queda registrado en el servidor. */
 export const fijarVisor = (id: string, veAdjuntos: boolean) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor`, { veAdjuntos });
+
+/** Enciende o apaga la segunda firma de alguien. No mueve lo que ya está en vuelo. */
+export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>
+  put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/segunda-firma`, {
+    requiereSegundaFirma,
+  });
 
 /**
  * Descarga el PDF de una solicitud. Va por fetch y no por `<a href>` porque el

@@ -20,6 +20,7 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     estado: 'pendiente',
     aprobadorCorreo: 'comercial@ambientalia.com.co',
     segundoAprobadorCorreo: null,
+    informadoCorreo: null,
     primeraFirmaAt: null,
     decididaAt: null,
     motivoRechazo: null,
@@ -379,5 +380,51 @@ describe('la copia sale de la ficha del empleado', () => {
     const s = solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefe@ambientalia.com.co', copiaCorreo: 'jefe@ambientalia.com.co' });
     const p = construirPayload(s, 'aprobada');
     expect(p.correo.para.match(/jefe@ambientalia\.com\.co/g)).toHaveLength(1);
+  });
+});
+
+describe('cuando la segunda firma está apagada', () => {
+  const INFORMADO = 'gerencia@ambientalia.com.co';
+
+  // Una solicitud de firma única con alguien de segundo nivel al que solo se le
+  // informa: `segundo` en null e `informado` con valor, que es la invariante.
+  const conInformado = (over = {}) =>
+    solicitud({ segundoAprobadorCorreo: null, informadoCorreo: INFORMADO, ...over });
+
+  it('la aprobación llega también a quien no firmó', () => {
+    const p = construirPayload(conInformado({ estado: 'aprobada' }), 'aprobada');
+    expect(p.correo.para).toBe(
+      'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, gerencia@ambientalia.com.co, administrativo@ambientalia.com.co',
+    );
+  });
+
+  it('el rechazo también: quien reorganiza el trabajo tiene que enterarse', () => {
+    const p = construirPayload(conInformado({ estado: 'rechazada' }), 'rechazada');
+    expect(p.correo.para).toContain(INFORMADO);
+  });
+
+  it('el acuse del alta NO lo lleva: solo el veredicto', () => {
+    // Está informado del resultado, no metido en el trámite.
+    const p = construirPayload(conInformado(), 'creada');
+    expect(p.correo.para).toBe('ana.ruiz@ambientalia.com.co');
+  });
+
+  it('el aviso al aprobador NO lo lleva', () => {
+    const p = construirPayload(conInformado(), 'aprobacion');
+    expect(p.correo.para).toBe('comercial@ambientalia.com.co');
+  });
+
+  it('el acuse no anuncia dos aprobaciones, porque ya no las hay', () => {
+    expect(construirPayload(conInformado(), 'creada').correo.cuerpo).not.toContain('dos aprobaciones');
+  });
+
+  it('no se duplica cuando el informado es además la copia de la ficha', () => {
+    const p = construirPayload(
+      conInformado({ estado: 'aprobada', copiaCorreo: INFORMADO }),
+      'aprobada',
+    );
+    expect(p.correo.para).toBe(
+      'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, gerencia@ambientalia.com.co',
+    );
   });
 });

@@ -63,6 +63,9 @@ vi.mock('./repo.js', () => ({
       cargo: null,
       credencial: null,
       aprobadorCorreo: 'comercial@ambientalia.com.co',
+      // El alta automática no lo elige: la columna es NOT NULL DEFAULT TRUE, así
+      // que quien se da de alta solo nace con la cascada completa.
+      requiereSegundaFirma: true,
       userId,
       activo: true,
     };
@@ -188,6 +191,12 @@ vi.mock('./repo.js', () => ({
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
     e.copiaCorreo = copia;
+    return true;
+  },
+  fijarSegundaFirma: async (_db: unknown, empleadoId: string, requiere: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.requiereSegundaFirma = requiere;
     return true;
   },
   // Una sola función para dar la llave Y registrarla, reflejando que en el
@@ -391,6 +400,10 @@ beforeEach(() => {
     cargo: 'Analista',
     credencial: 1002,
     aprobadorCorreo: 'comercial@ambientalia.com.co',
+    // Como el DEFAULT del SQL: quien no diga lo contrario firma en cascada. Sin
+    // esto el campo llega `undefined` y todas las solicitudes de estos tests se
+    // cerrarían con una firma, que es justo lo que NO están comprobando.
+    requiereSegundaFirma: true,
     userId: null,
     activo: true,
   };
@@ -675,6 +688,10 @@ describe('aprobación en cascada', () => {
       cargo: 'Coordinadora',
       credencial: 900,
       aprobadorCorreo: GERENCIA,
+      // También aquí: `empleadosConJefatura` pasa CADA ficha de la plantilla por
+      // `aprobadoresDe`, así que sin el campo esta caería por la rama del
+      // informado y su segunda firma desaparecería del maestro.
+      requiereSegundaFirma: true,
       userId: null,
       activo: true,
     });
@@ -875,6 +892,125 @@ describe('aprobación en cascada', () => {
       .set('Authorization', `Bearer ${gerencia()}`)
       .expect(200);
     expect(r.body.esAprobador).toBe(true);
+  });
+});
+
+// ── La segunda firma, apagada por ficha ────────────────────────────────────
+
+describe('la segunda firma se puede apagar por ficha', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+  const GERENCIA = 'comercial@ambientalia.com.co';
+
+  beforeEach(() => {
+    // Ana → Jefa → Gerencia. La ficha de la jefa TIENE que estar en la plantilla:
+    // `enlaceDe` solo sube por fichas activas.
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '55555555-5555-4555-8555-555555555555',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 900,
+      aprobadorCorreo: GERENCIA,
+      requiereSegundaFirma: true,
+      userId: null,
+      activo: true,
+    });
+  });
+
+  const crear = async () =>
+    (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+
+  it('con la casilla apagada, el alta congela al informado y a ningún segundo firmante', async () => {
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    expect(s.aprobadorCorreo).toBe(JEFA);
+    expect(s.segundoAprobadorCorreo).toBeNull();
+    expect(s.informadoCorreo).toBe(GERENCIA);
+  });
+
+  it('con la casilla encendida hay segunda firma y nadie a quien informar', async () => {
+    estado.empleado.requiereSegundaFirma = true;
+    const s = await crear();
+    expect(s.segundoAprobadorCorreo).toBe(GERENCIA);
+    expect(s.informadoCorreo).toBeNull();
+  });
+
+  it('la primera firma cierra la solicitud cuando la casilla está apagada', async () => {
+    // El comportamiento que justifica el diseño entero: con `segundo` en null, la
+    // máquina de estados ya cierra en la primera firma sin tocarla.
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    const r = await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba: true })
+      .expect(200);
+    expect(r.body.estado).toBe('aprobada');
+    expect(r.body.decididaAt).not.toBeNull();
+    // Y no se encola ningún aviso de segunda firma: no hay segunda firma.
+    expect(estado.eventos.filter((e) => e.evento === 'aprobacion_2')).toHaveLength(0);
+  });
+
+  it('el de segundo nivel no puede firmar una solicitud que ya no le toca', async () => {
+    // Candado. Si `informadoCorreo` acabara alguna vez leyéndose como firmante,
+    // esto se pondría rojo — que es justo lo que hay que impedir.
+    estado.empleado.requiereSegundaFirma = false;
+    const s = await crear();
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: GERENCIA })}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it.each([true, false])(
+    'una incapacidad no congela ni firmante ni informado (casilla: %s)',
+    async (requiereSegundaFirma) => {
+      // Las incapacidades se INFORMAN, no se aprueban: dejar aquí a alguien la
+      // haría aparecer en una bandeja de pendientes que nadie tiene que atender.
+      // La casilla no interviene siquiera —`requiereAprobacion` corta antes—, y
+      // por eso se prueban los dos valores: para que ese corte quede fijado.
+      // Su aviso a gerencia sale por `COPIA_INCAPACIDADES`, que esto no toca.
+      estado.empleado.requiereSegundaFirma = requiereSegundaFirma;
+      const s = (
+        await request(app())
+          .post('/api/ausencias/solicitudes')
+          .set('Authorization', `Bearer ${token()}`)
+          .send(
+            nueva({
+              tipo: 'incapacidad',
+              adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+            }),
+          )
+          .expect(201)
+      ).body;
+      expect(s.estado).toBe('registrada');
+      expect(s.aprobadorCorreo).toBeNull();
+      expect(s.segundoAprobadorCorreo).toBeNull();
+      expect(s.informadoCorreo).toBeNull();
+    },
+  );
+
+  it('el maestro dice quién es el de segundo nivel aunque no firme', async () => {
+    // Si esto devolviera null, el panel pintaría «una sola firma» donde sí hay
+    // alguien arriba, y ocultaría justo lo que esta feature quiere hacer visible.
+    estado.plantilla[0].aprobadorCorreo = JEFA;
+    estado.plantilla[0].requiereSegundaFirma = false;
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    const ana = r.body.empleados.find((e: any) => e.id === E1);
+    expect(ana.segundoAprobadorCorreo).toBeNull();
+    expect(ana.informadoCorreo).toBe(GERENCIA);
+    expect(ana.requiereSegundaFirma).toBe(false);
   });
 });
 
@@ -1855,6 +1991,67 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .put(`/api/ausencias/empleados/${E1}/visor`)
       .set('Authorization', `Bearer ${token()}`)
       .send({ veAdjuntos: true })
+      .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/segunda-firma', () => {
+  it('un admin apaga la segunda firma de alguien', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: false })
+      .expect(200);
+    expect(r.body).toMatchObject({ id: E1, requiereSegundaFirma: false });
+  });
+
+  it('y la vuelve a encender', async () => {
+    estado.plantilla[0].requiereSegundaFirma = false;
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: true })
+      .expect(200);
+    expect(r.body).toHaveProperty('requiereSegundaFirma', true);
+  });
+
+  it('400 si el cuerpo no trae un booleano', async () => {
+    // `'no'` es una cadena con valor de verdad: sin la comprobación de tipo,
+    // apagar la casilla desde un cliente descuidado la dejaría encendida.
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: 'no' })
+      .expect(400);
+    expect(r.body.error).toBe('segunda_firma_invalida');
+  });
+
+  it('400 si el cuerpo viene vacío', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({})
+      .expect(400);
+    expect(r.body.error).toBe('segunda_firma_invalida');
+  });
+
+  it('404 si el empleado no existe', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E_FANTASMA}/segunda-firma`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ requiereSegundaFirma: false })
+      .expect(404);
+    // Sin esto, el test también pasaría si la ruta no estuviera montada: Express
+    // devuelve 404 para cualquier path desconocido y los dos casos serían
+    // indistinguibles.
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('403 a quien no es admin', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/segunda-firma`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ requiereSegundaFirma: false })
       .expect(403);
   });
 });

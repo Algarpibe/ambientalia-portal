@@ -13,7 +13,7 @@ Calendar y Sheets.
 | Lista de **festivos escrita a mano** que terminaba el 2026-12-25 | `festivos.ts` los **calcula** (Ley Emiliani + Pascua por Butcher/Meeus) | Desde enero de 2027 el flujo habría contado los festivos como laborables, sin avisar |
 | `new Date(str)` + `toISOString()` para contar días | Aritmética en UTC sobre cadenas `YYYY-MM-DD` | El servidor corre en UTC y Colombia es UTC−5: el original podía desplazar un día |
 | Aprobación con **Gmail `sendAndWait`** | **Bandeja en el portal** con rastro de quién y cuándo | La ejecución de n8n se quedaba colgada esperando, y no había historial |
-| Una sola firma, siempre el mismo buzón | **Dos firmas en cascada**: el jefe inmediato y su superior | Un solo aprobador para toda la empresa no es una jerarquía, es un cuello de botella |
+| Una sola firma, siempre el mismo buzón | **Firma en cascada**: el jefe inmediato y, si la ficha del solicitante lo exige, el superior de ese jefe | Un solo aprobador para toda la empresa no es una jerarquía, es un cuello de botella |
 | El rechazo no decía el motivo | El motivo viaja en el correo y queda en la BD | Obligaba a preguntar por otro canal |
 | Sin historial para el empleado | Pestaña «Mis solicitudes» | — |
 
@@ -37,8 +37,10 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 - **BD**: migración `015_ausencias.sql` → `portal.empleados`,
   `portal.solicitudes_ausencia`, `portal.solicitud_adjuntos`,
   `portal.ausencias_outbox`; `017` el saldo, `018` la cascada de dos firmas, `019`
-  la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable
-  y `022` los visores configurables.
+  la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable,
+  `022` los visores configurables y `023` la segunda firma opcional por ficha
+  (`empleados.requiere_segunda_firma`) con el correo de quien solo se entera del
+  resultado (`solicitudes_ausencia.informado_correo`).
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
 ## No se piden días que ya pasaron
@@ -128,8 +130,8 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `creada` | acuse al solicitante | — | — |
 | `aprobacion` | aviso al jefe inmediato | — | — |
 | `aprobacion_2` | aviso al segundo aprobador | — | — |
-| `aprobada` | aprobado, a **toda la cadena** (+ la copia de la ficha) | ✔ | ✔ |
-| `rechazada` | rechazado con motivo, a **toda la cadena** (+ la copia de la ficha) | — | ✔ |
+| `aprobada` | aprobado, a **toda la cadena** —incluido el informado— (+ la copia de la ficha) | ✔ | ✔ |
+| `rechazada` | rechazado con motivo, a **toda la cadena** —incluido el informado— (+ la copia de la ficha) | — | ✔ |
 | `registrada` | acuse de incapacidad (+ `COPIA_INCAPACIDADES` y la copia de la ficha) | ✔ | ✔ |
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
@@ -191,7 +193,7 @@ la propiedad de arriba se mantiene intacta.
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos` | idem — solo admin o quien tenga la llave de los adjuntos (`ve_adjuntos`); **403** al resto |
-| `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, sus **dos** aprobadores, admin o quien tenga la llave de los adjuntos |
+| `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, **quien la firma** (uno o dos, según la ficha; **nunca el informado**), admin o quien tenga la llave de los adjuntos |
 | `GET` | `/api/ausencias/saldos` | idem — acotado: admin ve a todos, aprobador los suyos y los de sus «nietos» |
 | `GET` | `/api/ausencias/mi-saldo` | idem — solo el saldo propio; **500** si el cálculo falla, no un saldo en blanco |
 | `GET` | `/api/ausencias/calendario?mes=YYYY-MM` | idem — **acotado**: admin ve la plantilla, el resto solo su fila |
@@ -199,6 +201,7 @@ la propiedad de arriba se mantiene intacta.
 | `PUT` | `/api/ausencias/empleados/:id/jefe` | `requireAdmin` — **409** si cerraría un círculo |
 | `PUT` | `/api/ausencias/empleados/:id/copia` | `requireAdmin` — a quién se pone en copia; `null` = a nadie |
 | `PUT` | `/api/ausencias/empleados/:id/visor` | `requireAdmin` — da o quita la llave de los adjuntos; **queda registrado** |
+| `PUT` | `/api/ausencias/empleados/:id/segunda-firma` | `requireAdmin` — si sus solicitudes necesitan la segunda firma o basta con la del jefe inmediato |
 | `GET`/`POST` | `/api/ausencias/empleados[/sincronizar]` | `requireAdmin` |
 | `GET`/`POST` | `/api/ausencias/n8n/{pendiente,confirmado}` | `requireCronToken` |
 
@@ -411,9 +414,9 @@ fijos— y pasó a ser un campo de su ficha: `portal.empleados.copia_correo`
 copia.
 
 Entra en dos sitios del código, y son los únicos: `cadenaDeDecision`
-—que junta solicitante, los dos aprobadores y la copia para `aprobada` y
+—que junta solicitante, quien firmó, el informado y la copia para `aprobada` y
 `rechazada`— y la rama de incapacidad de `acuseSolicitante`. El acuse de una
-solicitud normal y los avisos a los dos aprobadores no llevan copia, y hay
+solicitud normal y los avisos a los aprobadores no llevan copia, y hay
 tests que fijan cada una de esas ausencias para que la lista de destinatarios
 no crezca por descuido el día que alguien retoque estas funciones.
 
@@ -427,9 +430,14 @@ habría dejado de enterarse de las incapacidades el día del despliegue —el pl
 de esta feature decía que el cambio no perdía nada, y para esta mitad era
 falso.
 
-**La copia no se congela en el alta**, al revés que los dos firmantes, y la
-diferencia es de fondo, no de forma: un firmante decide quién PUEDE
-decidir —es un permiso—; la copia solo decide a quién se avisa. `SELECT_SOLICITUD`
+**La copia no se congela en el alta**, al revés que los firmantes y que el
+informado, y la diferencia es de fondo, no de forma: la copia es una
+**preferencia de aviso** de la ficha, mientras que los otros tres salen del
+**árbol** en el momento del alta. Por eso la línea divisoria no es «permiso sí,
+aviso no» —el informado tampoco decide nada y aun así se congela—, sino de dónde
+nace el dato: un cambio de organigrama a mitad de trámite no debe reescribir a
+quién se le prometió el resultado, pero corregir una copia mal puesta sí debe
+arreglar lo que ya está en vuelo. `SELECT_SOLICITUD`
 la lee de `portal.empleados` al construir cada correo, así que corregir una
 copia mal puesta en el organigrama arregla también lo que ya está en trámite.
 Sale gratis: el `JOIN` con `empleados` ya estaba ahí por `aprobador_correo`,
@@ -443,8 +451,8 @@ que se hubiera ajustado a mano desde el panel.
 El `DEFAULT` se queda después de sembrar. Consecuencia asumida: toda ficha
 nueva nace con administración en copia sin que nadie lo decida, y eso incluye
 el acuse de sus propias incapacidades. Es reversible con **la siguiente
-migración libre** —hoy la `023`, porque la `022` ya existe y es otra cosa— que
-haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
+migración libre** —hoy la `024`, porque la `023` ya existe y es la segunda firma
+opcional— que haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
 nunca en sitio para cambiar el valor sembrado: las bases que ya la corrieron
 no se enterarían —el `IF NOT EXISTS` corta— pero una base nueva sí, y los
 entornos divergirían en silencio; para cambiarlo hace falta una migración
@@ -481,6 +489,21 @@ cualquier admin, y quien tenga la casilla **Soportes** marcada en el
 Organigrama. La ruta devuelve **404 y no 403** a quien no pasa: quien no tiene
 nada que ver con la solicitud tampoco debería poder confirmar que ese adjunto
 existe.
+
+**El informado NO está en esa lista, y es deliberado.** Cuando la ficha del
+solicitante no exige segunda firma, el de segundo nivel recibe el correo del
+resultado pero no abre el soporte de esa solicitud: enterarse de que alguien
+estuvo incapacitado no es lo mismo que poder leer su parte médico. La función
+no necesitó ninguna rama nueva para conseguirlo —compara contra
+`segundoAprobadorCorreo`, e `informado_correo` es otra columna—, así que el
+día que alguien decida lo contrario tendrá que añadirla a mano. Lo fija el bloque
+`el informado no hereda ningún permiso del segundo firmante` de `service.test.ts`,
+que le pasa a `puedeVerAdjunto` un adjunto **con** `informadoCorreo` puesto
+aunque `AdjuntoCompleto` no tenga hoy ese campo: sin ese detalle, ampliar la
+función para mirar al informado dejaría el test en verde por comparar contra
+`undefined`. La única vía por la que un informado sí abriría el PDF es la casilla
+**Soportes**, que es una llave maestra y no tiene nada que ver con esta solicitud
+en concreto — y ese caso también está fijado.
 
 El jefe lo tiene también en la práctica, no solo sobre el papel: *Pendientes
 de aprobar* (`BandejaAprobacion.tsx`) monta la misma `TablaSolicitudes` que
@@ -576,9 +599,13 @@ Los PDF que ya estaban en Drive **se quedan ahí**; esto solo cortó los nuevos.
 
 ## Aprobación en cascada
 
-Una solicitud la firman **el jefe inmediato y después el superior de ese jefe**.
-La primera firma la deja en `pendiente_2`; la segunda la pasa a `aprobada`. Quien
-reporta a la cúspide del organigrama se queda con una sola firma.
+Una solicitud la firma **el jefe inmediato** y, **si la ficha del solicitante lo
+exige**, después el superior de ese jefe. La primera firma la deja en
+`pendiente_2`; la segunda la pasa a `aprobada`. Se queda con una sola firma quien
+reporta a la cúspide del organigrama **y también quien tenga apagada la casilla
+«Necesaria» de su ficha** — en ese segundo caso la primera firma cierra la
+solicitud, y el de arriba sigue recibiendo el correo del resultado sin firmar
+nada. Lo explica entero «La segunda firma es opcional por ficha», más abajo.
 
 ### El organigrama es una sola columna
 
@@ -589,10 +616,17 @@ maestro: el segundo se **deriva subiendo un escalón**, que es lo que hace que e
 
 Las reglas viven en `apps/hub-api/src/ausencias/jerarquia.ts`, puro y con tests
 —misma convención que `saldo.ts` y `calendario.ts`—. `aprobadoresDe` devuelve
-`segundo: null` en cuatro casos: el jefe no tiene ficha **activa** (y entonces
-**no salta al abuelo**), el jefe es su propio jefe (raíz), el jefe del jefe ya
-firma primero, o el jefe del jefe es el propio solicitante. Este último corta los
-ciclos de dos: sin él, A se firmaría a sí mismo la segunda aprobación.
+`{ primero, segundo, informado }`, y hay **cuatro cortes** que dejan a la vez
+`segundo` e `informado` en `null` porque no hay nadie de segundo nivel: el jefe
+no tiene ficha **activa** (y entonces **no salta al abuelo**), el jefe es su
+propio jefe (raíz), el jefe del jefe ya firma primero, o el jefe del jefe es el
+propio solicitante. Este último corta los ciclos de dos: sin él, A se firmaría a
+sí mismo la segunda aprobación.
+
+> **Los cuatro cortes se aplican ANTES de mirar la casilla**, y ese orden es la
+> propiedad: apagar la segunda firma no puede inventar un destinatario donde el
+> árbol ya se acababa. Solo cuando existe alguien de segundo nivel decide la
+> casilla su papel — firmante (`segundo`) o informado (`informado`).
 
 > ⚠️ **`creariaCiclo` lleva un `Set` de visitados y no es defensivo.** Si ya hay
 > un ciclo en la base de datos ajeno al empleado que se edita, un recorrido sin
@@ -603,10 +637,75 @@ Un ciclo que ya esté en la base de datos **no bloquea la edición**: bloquearla
 haría imposible de deshacer desde el panel. Se avisa en ámbar y `aprobadoresDe`
 lo corta.
 
+### La segunda firma es opcional por ficha
+
+`portal.empleados.requiere_segunda_firma` (migración `023`) decide si las
+solicitudes de esa persona necesitan la firma del jefe de su jefe o basta con la
+del jefe inmediato. Se enciende y se apaga **por trabajador**, desde la casilla
+**Necesaria** de la columna «2ª firma» del panel *Organigrama*, contra
+`PUT /ausencias/empleados/:id/segunda-firma` (solo admin, cuarto endpoint del
+panel).
+
+**Toda la plantilla arrancó con la casilla encendida.** La `023` la añade con
+`DEFAULT TRUE` y **sin ningún `UPDATE`**, por la misma razón que la `021`:
+`initDb()` re-ejecuta las migraciones en cada arranque, y un `UPDATE` devolvería
+la doble firma en cada despliegue a quien se la hubieran quitado desde el panel.
+El día del despliegue, por tanto, no cambió nada para nadie. El `DEFAULT` se
+queda después de sembrar, también a propósito: `asegurarEmpleado` crea fichas
+solas en el primer acceso de cada persona, y así ninguna nace saltándose una
+firma por descuido.
+
+**De firmante a informado, no a nadie.** Cuando hay alguien de segundo nivel y la
+casilla está apagada, ese alguien **no desaparece del circuito**: pasa a
+`informado_correo` y sigue recibiendo el correo del resultado —el de la
+aprobación **y** el del rechazo—. Lo que pierde es todo lo demás:
+
+- **No firma.** `puedeDecidir` compara contra los dos correos de firma y no
+  contra el informado, ni con la solicitud pendiente ni con la solicitud ya en
+  estado terminal — donde a los firmantes sí se les deja pasar para que gane el
+  409 sobre el 403, y a él no.
+- **No abre el soporte adjunto** de esa solicitud (ver «Quién puede abrir uno»),
+  salvo que tenga la llave maestra **Soportes**, que es otra vía y no depende de
+  esta solicitud.
+- **No le cuenta en su «Historial de aprobaciones».** `solicitudesDecididas`
+  filtra por `aprobador_correo` o `segundo_aprobador_correo`; el informado no
+  aparece en ninguno de los dos, y eso es lo correcto: no aprobó nada.
+
+**Firmante e informado son EXCLUYENTES, y de eso depende todo lo demás.**
+`segundo_aprobador_correo` tiene valor si firma; `informado_correo` si solo se
+entera; **nunca los dos**. Esa exclusión es la razón de que esta feature no haya
+tenido que tocar la máquina de estados, el permiso de firma, el del adjunto ni el
+historial: mientras `segundo_aprobador_correo` sea `NULL`, «una sola firma» sigue
+significando exactamente lo que ya significaba, y todo el código que lo lee sigue
+siendo correcto sin un solo condicional nuevo.
+
+> ⚠️ **Nada la fuerza salvo la disciplina.** La `023` **no lleva ningún `CHECK`**
+> y el tipo `Solicitud` tampoco impide que los dos campos tengan valor a la vez.
+> La exclusión la garantizan dos sitios y solo dos: `aprobadoresDe`, que deriva
+> los dos campos juntos en la misma llamada, y `crearSolicitud`, que los congela
+> de esa misma llamada. **Cualquier vía nueva que escriba estos dos campos tiene
+> que respetarla a mano** — si un día coexisten, el informado empezaría a recibir
+> correos de una solicitud que además está esperando su firma, y ninguna de las
+> piezas de arriba avisaría. Hay un test que fija la invariante
+> (`firmante e informado nunca tienen valor a la vez`, `jerarquia.test.ts`).
+
+**El reparto se congela en el alta**, así que cambiar la casilla **no mueve nada
+que ya esté en trámite**: una solicitud creada con doble firma la sigue
+necesitando aunque después se apague la casilla, y al revés. Es la misma regla
+que ya valía para los firmantes, y la sección siguiente la explica.
+
+**En el maestro, en cambio, se recalcula en cada consulta.**
+`EmpleadoConJefatura` trae `segundoAprobadorCorreo` **e** `informadoCorreo` —los
+dos, por la misma exclusión— para que el panel pueda decir QUIÉN está en el
+escalón de arriba aunque hoy no firme. No confundir ese `informadoCorreo` con el
+de `Solicitud`: aquel es una foto del alta, este cambia en cuanto se mueve el
+organigrama o se toca la casilla.
+
 ### Los firmantes se congelan en el alta
 
-La solicitud guarda `aprobador_correo` y `segundo_aprobador_correo` en el momento
-de crearse. Mover el organigrama **no mueve nada que ya esté en trámite**. La
+La solicitud guarda `aprobador_correo`, `segundo_aprobador_correo` e
+`informado_correo` en el momento de crearse. Mover el organigrama —o cambiar la
+casilla de la segunda firma— **no mueve nada que ya esté en trámite**. La
 fuente de verdad sigue siendo el árbol de `empleados`; esto es una foto.
 
 `aprobador_correo` **no rota** al avanzar de nivel: se lee en `SELECT_SOLICITUD`,
@@ -639,23 +738,32 @@ consulta de auditoría necesite un `COALESCE`.
 
 ### Quién se entera de qué
 
-El acuse inicial menciona las dos firmas solo si hay segunda. No hay correo de
-avance intermedio: el empleado recibe el acuse y el veredicto, dos correos, y el
-paso de un nivel a otro lo ve en *Mis solicitudes* si le interesa.
+El acuse inicial menciona las dos firmas solo si de verdad hay **segunda firma**
+—mira `segundoAprobadorCorreo`, no si hay alguien arriba—, así que con la casilla
+apagada el solicitante no recibe la promesa de una espera que no va a ocurrir. No
+hay correo de avance intermedio: el empleado recibe el acuse y el veredicto, dos
+correos, y el paso de un nivel a otro lo ve en *Mis solicitudes* si le interesa.
 
-**Los correos de decisión van a toda la cadena que firmó**, no solo al
-solicitante: `cadenaDeDecision` junta solicitante + los dos aprobadores +
+**Los correos de decisión van a toda la cadena**, no solo al solicitante:
+`cadenaDeDecision` junta solicitante + quien firmó + **el informado** +
 administración. Hasta que se corrigió, el jefe inmediato daba su visto bueno y no
 volvía a saber en qué acababa; parecía que funcionaba porque el segundo firmante
 suele ser el mismo buzón que ya iba en copia a administración. En el rechazo
 importa aún más: si el segundo superior tumba algo que el jefe ya había avalado,
 es el jefe quien tiene que reorganizar el trabajo.
 
-> ⚠️ `destinatarios()` deduplica, y no es cosmético: los dos firmantes y la copia
-> fija se solapan a menudo —hoy media plantilla cuelga del buzón que ya va en
+El informado entra ahí por lo mismo: apagarle la firma a alguien no era quitarle
+la información. Sin ese cuarto destinatario, encender la casilla habría dejado en
+silencio a quien hasta ese día se enteraba de todo lo que firmaba su equipo —y
+nadie lo habría notado hasta echar de menos un correo que ya no llega.
+
+> ⚠️ `destinatarios()` deduplica, y no es cosmético: los firmantes, el informado y
+> la copia se solapan a menudo —hoy media plantilla cuelga del buzón que ya va en
 > copia—, y sin ella el mismo correo aparecería dos veces en el `sendTo` de Gmail.
-> También filtra los nulos: `segundoAprobadorCorreo` lo es en toda cadena de una
-> sola firma, y sin filtrar saldría un «, ,» en medio de la lista.
+> También filtra los nulos: `segundoAprobadorCorreo` e `informadoCorreo` son
+> `null` por turnos —nunca los dos a la vez tienen valor, y en una cadena de un
+> solo escalón lo son los dos—, y sin filtrar saldría un «, ,» en medio de la
+> lista.
 
 ### El historial del aprobador
 
@@ -675,6 +783,12 @@ Dos decisiones que conviene no revertir sin pensarlo:
   *Registro general*; que esta pestaña enseñara la empresa entera la convertiría
   en un duplicado peor de aquella.
 
+**El informado no aparece aquí.** El `WHERE` mira `aprobador_correo` y
+`segundo_aprobador_correo`, y nada más: una solicitud de la que solo se recibió
+el correo del resultado no es una aprobación de nadie, y meterla en el historial
+diría que esa persona la firmó. Quien quiera el rastro completo de una solicitud
+así lo tiene en *Registro general* (admin) o en el propio correo.
+
 ⚠️ El `ORDER BY` lleva `NULLS LAST`: el `PATCH` de admin puede dejar una fila en
 estado terminal sin tocar `decidida_at`, y sin eso esas filas encabezarían la
 lista por delante de las decisiones de esta semana.
@@ -692,6 +806,22 @@ Se hace en la pestaña *Organigrama* (solo admin; hasta 2026-08-14 vivía dentro
 `PUT /ausencias/empleados/:id/jefe`. Autoasignarse es cómo se declara la raíz, no
 un ciclo prohibido. El buzón por defecto se acepta aunque no tenga ficha de
 empleado: es de quien cuelga toda la plantilla hoy.
+
+**Un solo botón por fila, pero CUATRO endpoints detrás** —jefe, 2ª firma, copia y
+soportes—, y se llama a cada uno **solo si su campo cambió**. Van **secuenciales,
+no en paralelo**: los cuatro responden el maestro entero, así que con
+`Promise.all` la respuesta que llegara última podría ser la construida ANTES de
+los otros cambios. Después se recarga el maestro completo y no solo esa fila:
+cambiar el jefe de alguien cambia quién está en el escalón de arriba de todos los
+que cuelgan de él.
+
+En la columna «2ª firma» conviven dos cosas que salen de sitios distintos, y la
+diferencia importa si se toca el componente: **quién** está arriba se lee de lo
+**guardado** (`e`) —cambiar el jefe en el desplegable cambia el abuelo y el
+navegador no puede recalcularlo—, mientras que su **papel** («— solo informado»)
+se lee de lo **editado** (`fila`), porque los cuatro cortes de `aprobadoresDe` se
+aplican antes de mirar la casilla: firmante o informado es el mismo correo en
+otra ranura, no hay nada que adivinar.
 
 > ⚠️ **La importación de empleados por pegado se RETIRÓ** (el bloque «Completar
 > cargos desde la hoja» de la pestaña *Empleados*, con su endpoint
@@ -718,8 +848,8 @@ un campo editable por fila en el maestro, no resucitar el pegado.
 
 ### Lo que no cubre ningún test
 
-No hay tests en el frontend de esta app. Dos sitios hay que mirarlos con los ojos
-tras desplegar, y los dos fallan enseñando algo plausible en vez de romperse:
+No hay tests en el frontend de esta app. Tres sitios hay que mirarlos con los ojos
+tras desplegar, y los tres fallan enseñando algo plausible en vez de romperse:
 
 - **La atenuación del calendario** (`Calendario.tsx`) usa `enTramite(...)`, no
   `=== 'pendiente'`. Con la comparación directa, media firma se pinta sólida:
@@ -727,6 +857,21 @@ tras desplegar, y los dos fallan enseñando algo plausible en vez de romperse:
 - **El chip del estado** se pide con `chipDe(...)`, que degrada a gris si no
   conoce el estado. Con el acceso directo al `Record`, un estado desconocido da
   `undefined` y **revienta la tabla entera** al leer `chip.clase`.
+- **La columna «2ª firma» del Organigrama** (`PanelOrganigrama.tsx`): la casilla
+  **Necesaria** y la línea de debajo que dice quién está arriba y si firma o solo
+  se entera.
+
+> ⚠️ **La columna «2ª firma» no tiene NINGUNA red automática.** El backend que
+> hay detrás sí —endpoint, servicio, repo y `aprobadoresDe` están cubiertos—,
+> pero la casilla en sí no la comprueba nada: `apps/ausencias` no tiene tests, y
+> su `typecheck` estricto **no es portón** (ver el último punto de «Gotchas que
+> costaron»: el `build` es `vite build` a secas y nadie corre
+> `tsc -p apps/ausencias/tsconfig.json`). Su **única** verificación es abrirla en
+> el navegador y mirarla. Los modos de fallo son de los que no se ven: la casilla
+> guardando sin que nadie la mire, el `!!` que evita que el checkbox se vuelva no
+> controlado si el backend deja de mandar el campo, o la línea de abajo diciendo
+> «— solo informado» de un correo que ya no está arriba. **El próximo que la
+> toque tiene que probarla a mano.**
 
 ## Calendario
 
@@ -925,6 +1070,20 @@ del enmascarado de arriba.
    firma, exactamente como antes. La cascada se activa persona a persona según se
    rellena el organigrama en *Organigrama*. No hay big bang: desplegar, comprobar
    que nada cambió, y empezar por una sola persona de prueba.
+9. *(Segunda firma opcional)* **También se despliega sin cambiar nada.** La `023`
+   siembra `requiere_segunda_firma = TRUE` para toda la plantilla, así que el
+   comportamiento del día del despliegue es el de siempre; apagarla es una
+   decisión persona a persona desde la casilla **Necesaria** del *Organigrama*.
+
+   > ⚠️ **Aquí el orden es el NORMAL —hub-api primero, portal después—, al revés
+   > que en la cascada.** Un bundle viejo del portal ignora los campos nuevos y
+   > sigue pintando su columna «2ª firma» de siempre. Al revés sí duele: un portal
+   > nuevo contra un hub-api viejo recibiría `requiereSegundaFirma: undefined`,
+   > que el `!!` de la casilla convierte en **apagada**, y enseñaría a un admin
+   > toda la plantilla con la segunda firma aparentemente desactivada — que es
+   > justo lo contrario de la verdad. Además el botón «Guardar» daría 404 en
+   > cuanto alguien tocara la casilla. Sigue valiendo la regla general: **quien
+   > primero deja de entender al otro va detrás.**
 
 ## Pendiente (backlog)
 

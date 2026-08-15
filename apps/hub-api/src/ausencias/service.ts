@@ -215,6 +215,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       // aparecer en su bandeja de pendientes.
       aprobadorCorreo: firmantes ? firmantes.primero : null,
       segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
+      informadoCorreo: firmantes ? firmantes.informado : null,
     },
     adjunto,
     eventosDeAlta(datos.tipo),
@@ -516,6 +517,17 @@ export function validarSaldo(body: unknown): SaldoAFijar {
 export interface EmpleadoConJefatura extends Empleado {
   /** Quien firmaría en segundo lugar una solicitud suya creada ahora mismo. */
   segundoAprobadorCorreo: string | null;
+  /**
+   * Quien solo se enteraría del resultado, si su ficha no exige segunda firma.
+   * Excluyente con el de arriba, y por eso van los dos: el panel necesita saber
+   * QUIÉN está en el escalón de arriba aunque hoy no firme.
+   *
+   * No confundir con el `informadoCorreo` de `Solicitud`: aquel se congela en el
+   * alta y vive con esa solicitud para siempre; este se recalcula en cada
+   * consulta al maestro y cambia en cuanto se mueve el organigrama o se apaga la
+   * casilla.
+   */
+  informadoCorreo: string | null;
   /** Su rama del organigrama forma un círculo. Se avisa, no se bloquea. */
   enCiclo: boolean;
 }
@@ -530,11 +542,15 @@ export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatur
   const porCorreo = new Map(enlaces.map((e) => [e.correo, e]));
   const enCiclo = new Set(detectarCiclos(construirIndice(enlaces)).flat());
 
-  return empleados.map((e) => ({
-    ...e,
-    segundoAprobadorCorreo: aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null).segundo,
-    enCiclo: enCiclo.has(e.correo.toLowerCase()),
-  }));
+  return empleados.map((e) => {
+    const arriba = aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null);
+    return {
+      ...e,
+      segundoAprobadorCorreo: arriba.segundo,
+      informadoCorreo: arriba.informado,
+      enCiclo: enCiclo.has(e.correo.toLowerCase()),
+    };
+  });
 }
 
 /**
@@ -601,6 +617,38 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   }
 
   if (!(await repo.fijarCopia(db, empleadoId, copia))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizados = await empleadosConJefatura(db);
+  const actualizado = actualizados.find((e) => e.id === empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
+/**
+ * Enciende o apaga la segunda firma de alguien.
+ *
+ * Sin registro de auditoría, al contrario que `fijarVisor`: esto no da acceso a
+ * ningún dato personal, así que se queda al nivel del jefe y de la copia. Y sin
+ * comprobación de ciclos, al contrario que `fijarJefe`: no se toca ninguna arista
+ * del árbol, solo si el escalón de arriba firma o se limita a enterarse.
+ *
+ * Las solicitudes ya en vuelo no se mueven: llevan su reparto congelado del alta.
+ */
+export async function fijarSegundaFirma(
+  db: Pool,
+  empleadoId: string,
+  body: unknown,
+): Promise<EmpleadoConJefatura> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  // El tipo se exige, no se interpreta: `'no'` es una cadena con valor de verdad,
+  // y aceptarla dejaría encendida una casilla que alguien quiso apagar.
+  if (typeof b.requiereSegundaFirma !== 'boolean') {
+    throw new AusenciaError('segunda_firma_invalida', 400, 'requiereSegundaFirma');
+  }
+
+  if (!(await repo.fijarSegundaFirma(db, empleadoId, b.requiereSegundaFirma))) {
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
 
   const actualizados = await empleadosConJefatura(db);
   const actualizado = actualizados.find((e) => e.id === empleadoId);

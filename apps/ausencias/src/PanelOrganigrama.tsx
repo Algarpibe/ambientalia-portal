@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
-import { fetchEmpleados, fijarJefe, fijarCopia, fijarVisor, type EmpleadoConJefatura } from './api';
+import { fetchEmpleados, fijarJefe, fijarCopia, fijarVisor, fijarSegundaFirma, type EmpleadoConJefatura } from './api';
 
 // El organigrama de la empresa. Cada persona tiene un jefe inmediato y ese único
 // dato basta: el segundo aprobador se deriva subiendo un escalón, así que el
@@ -13,6 +13,7 @@ interface Fila {
   aprobadorCorreo: string;
   copiaCorreo: string | null;
   veAdjuntos: boolean;
+  requiereSegundaFirma: boolean;
   guardando: boolean;
   error: string | null;
   exito: boolean;
@@ -22,6 +23,7 @@ const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   aprobadorCorreo: e.aprobadorCorreo,
   copiaCorreo: e.copiaCorreo,
   veAdjuntos: e.veAdjuntos,
+  requiereSegundaFirma: e.requiereSegundaFirma,
   guardando: false,
   error: null,
   exito: false,
@@ -103,15 +105,17 @@ export default function PanelOrganigrama({ activo }: Props) {
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
     try {
-      // Un solo botón por fila, como hasta ahora, pero TRES endpoints detrás: se
+      // Un solo botón por fila, como hasta ahora, pero CUATRO endpoints detrás: se
       // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
-      // porque los tres responden el maestro entero y cada uno tiene que ver ya
+      // porque los cuatro responden el maestro entero y cada uno tiene que ver ya
       // escrito lo del anterior — con `Promise.all`, la respuesta que llegara
       // última podría ser la construida ANTES de los otros cambios.
       const empleado = empleados.find((x) => x.id === id);
       if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
       if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
       if (fila.veAdjuntos !== empleado?.veAdjuntos) await fijarVisor(id, fila.veAdjuntos);
+      if (fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma)
+        await fijarSegundaFirma(id, fila.requiereSegundaFirma);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
       // alguien cambia la SEGUNDA firma de todos los que cuelgan de él, y dejar
       // esas filas con el valor viejo sería mentir sobre a quién sube su
@@ -146,13 +150,22 @@ export default function PanelOrganigrama({ activo }: Props) {
     // encima y un título que repite el nombre de la pestaña.
     <div>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
-        El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa persona.
-        La <b>segunda firma</b> se deduce sola: es el jefe de su jefe. Quien no tenga a nadie por
-        encima —porque es su propio jefe— cierra las solicitudes con una sola firma.
+        El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa
+        persona. <b>Quién</b> sería la segunda firma se deduce solo: es el jefe de su jefe —quien
+        no tenga a nadie por encima cierra con una sola firma—. Que haga falta o no, lo decides
+        tú con la casilla <b>Necesaria</b>.
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
-        Cambiar el organigrama <b>no mueve las solicitudes que ya están en trámite</b>: cada una
-        lleva sus dos firmantes anotados desde que se envió.
+        Si desmarcas <b>Necesaria</b>, la solicitud queda aprobada con la firma del jefe inmediato.
+        Quien estaba en el segundo escalón <b>sigue recibiendo el correo</b> con el resultado,
+        aprobado o rechazado; lo que pierde es tener que firmarlo, y con ello el acceso al soporte
+        adjunto de esa solicitud —salvo que tenga marcada <b>Soportes</b>—. Si no hay nadie por
+        encima, la casilla no cambia nada.
+      </p>
+      <p className="mb-4 max-w-3xl text-sm text-gray-600">
+        Cambiar el organigrama <b>o esta casilla</b> no mueve las solicitudes que ya están en
+        trámite: cada una lleva anotado desde que se envió quién la firma y a quién se informa
+        del resultado.
       </p>
       <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -210,7 +223,9 @@ export default function PanelOrganigrama({ activo }: Props) {
                 const haCambiado =
                   fila.aprobadorCorreo !== e.aprobadorCorreo ||
                   fila.copiaCorreo !== e.copiaCorreo ||
-                  fila.veAdjuntos !== e.veAdjuntos;
+                  fila.veAdjuntos !== e.veAdjuntos ||
+                  fila.requiereSegundaFirma !== e.requiereSegundaFirma;
+                const arriba = e.segundoAprobadorCorreo ?? e.informadoCorreo;
                 return (
                   <tr key={e.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5">
@@ -242,11 +257,39 @@ export default function PanelOrganigrama({ activo }: Props) {
                       </select>
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">
-                      {e.segundoAprobadorCorreo ? (
-                        <span title={e.segundoAprobadorCorreo}>{quienFirma(e.segundoAprobadorCorreo)}</span>
-                      ) : (
-                        <span className="text-gray-300">— una sola firma</span>
-                      )}
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          // `!!` por lo mismo que en la casilla de soportes: una
+                          // fila de un backend que aún no mande el campo volvería
+                          // el checkbox «no controlado» a medio render.
+                          checked={!!fila.requiereSegundaFirma}
+                          onChange={(ev) =>
+                            actualizar(e.id, { requiereSegundaFirma: ev.target.checked, error: null })
+                          }
+                          aria-label={`Las solicitudes de ${e.nombreCompleto} necesitan dos firmas`}
+                          aria-describedby={`arriba-${e.id}`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
+                        />
+                        Necesaria
+                      </label>
+                      {/* Quién está arriba sale de lo GUARDADO (`e`): cambiar el
+                          jefe en el desplegable sí cambia el abuelo, y el
+                          navegador no puede recalcularlo. Su PAPEL sale de lo
+                          editado (`fila`) porque los cuatro cortes de
+                          `aprobadoresDe` se aplican ANTES de mirar la casilla:
+                          firmante o informado es el mismo correo en otra ranura,
+                          no hay nada que adivinar. */}
+                      <div id={`arriba-${e.id}`} className="mt-1 text-xs">
+                        {arriba ? (
+                          <span title={arriba} className={fila.requiereSegundaFirma ? undefined : 'text-gray-500'}>
+                            {quienFirma(arriba)}
+                            {!fila.requiereSegundaFirma && ' — solo informado'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">— una sola firma</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-2.5">
                       <select
@@ -300,9 +343,9 @@ export default function PanelOrganigrama({ activo }: Props) {
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           // «La fila», no «el jefe»: este botón guarda también la
-                          // copia y la llave de los soportes, y un rótulo que
-                          // nombre solo uno de los tres campos engaña justo a
-                          // quien no puede ver cuál ha cambiado.
+                          // copia, la llave de los soportes y la segunda firma, y
+                          // un rótulo que nombre solo uno de los cuatro campos
+                          // engaña justo a quien no puede ver cuál ha cambiado.
                           aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >

@@ -244,6 +244,20 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
+   * Enciende o apaga la segunda firma de alguien. Solo admin.
+   *
+   * Las solicitudes ya en vuelo NO se mueven: cada una lleva congelado desde el
+   * alta si su segundo nivel firma o solo se entera del resultado.
+   */
+  router.put('/ausencias/empleados/:id/segunda-firma', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarSegundaFirma(db, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_segunda_firma');
+    }
+  });
+
+  /**
    * Da o quita la llave maestra de los adjuntos. Solo admin, y **queda
    * registrado**: es lo único que dice quién dio acceso a datos de salud desde
    * que la lista salió del código.
