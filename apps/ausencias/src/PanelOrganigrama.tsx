@@ -150,9 +150,10 @@ export default function PanelOrganigrama({ activo }: Props) {
     // encima y un título que repite el nombre de la pestaña.
     <div>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
-        El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa persona.
-        <b>Quién</b> sería la segunda firma se deduce solo: es el jefe de su jefe. Que haga falta o
-        no, lo decides tú con la casilla <b>Necesaria</b>.
+        El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa
+        persona. <b>Quién</b> sería la segunda firma se deduce solo: es el jefe de su jefe —quien
+        no tenga a nadie por encima cierra con una sola firma—. Que haga falta o no, lo decides
+        tú con la casilla <b>Necesaria</b>.
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         Si desmarcas <b>Necesaria</b>, la solicitud queda aprobada con la firma del jefe inmediato.
