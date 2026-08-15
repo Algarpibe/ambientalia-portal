@@ -2021,11 +2021,15 @@ describe('PUT /ausencias/empleados/:id/segunda-firma', () => {
   });
 
   it('404 si el empleado no existe', async () => {
-    await request(app())
-      .put('/api/ausencias/empleados/99999999-9999-4999-8999-999999999999/segunda-firma')
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E_FANTASMA}/segunda-firma`)
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .send({ requiereSegundaFirma: false })
       .expect(404);
+    // Sin esto, el test también pasaría si la ruta no estuviera montada: Express
+    // devuelve 404 para cualquier path desconocido y los dos casos serían
+    // indistinguibles.
+    expect(r.body.error).toBe('empleado_no_encontrado');
   });
 
   it('403 a quien no es admin', async () => {
