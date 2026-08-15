@@ -162,15 +162,25 @@ function destinatarios(...correos: (string | null | undefined)[]): string {
 
 /**
  * Quiénes se enteran de una decisión: el solicitante, **toda la cadena que la
- * firmó** y administración.
+ * firmó**, quien debía enterarse sin firmar, y administración.
  *
  * Los dos aprobadores van incluidos a propósito. El segundo suele coincidir con
  * la copia a administración y por eso parecía que ya funcionaba, pero el jefe
  * inmediato —que dio el primer visto bueno— no recibía nada: daba su firma y no
  * volvía a saber en qué acabó.
+ *
+ * `informadoCorreo` es el de segundo nivel cuando su ficha no exige segunda
+ * firma. Nunca coexiste con `segundoAprobadorCorreo`, así que esto no manda dos
+ * correos a nadie: uno de los dos es siempre `null` y `destinatarios` lo filtra.
  */
 const cadenaDeDecision = (s: Solicitud) =>
-  destinatarios(s.solicitanteEmail, s.aprobadorCorreo, s.segundoAprobadorCorreo, s.copiaCorreo);
+  destinatarios(
+    s.solicitanteEmail,
+    s.aprobadorCorreo,
+    s.segundoAprobadorCorreo,
+    s.informadoCorreo,
+    s.copiaCorreo,
+  );
 
 function correoAprobada(s: Solicitud) {
   const disfruta = s.tipo === 'vacaciones' ? '\n¡Disfrútalas!\n' : '';
