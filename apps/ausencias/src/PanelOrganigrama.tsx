@@ -151,18 +151,20 @@ export default function PanelOrganigrama({ activo }: Props) {
     <div>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa persona.
-        La <b>segunda firma</b> se deduce sola: es el jefe de su jefe. Quien no tenga a nadie por
-        encima —porque es su propio jefe— cierra las solicitudes con una sola firma.
+        <b>Quién</b> sería la segunda firma se deduce solo: es el jefe de su jefe. Que haga falta o
+        no, lo decides tú con la casilla <b>Necesaria</b>.
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         Si desmarcas <b>Necesaria</b>, la solicitud queda aprobada con la firma del jefe inmediato.
         Quien estaba en el segundo escalón <b>sigue recibiendo el correo</b> con el resultado,
-        aprobado o rechazado; lo que pierde es tener que firmarlo (y, con ello, el acceso al soporte
-        adjunto de esa solicitud).
+        aprobado o rechazado; lo que pierde es tener que firmarlo, y con ello el acceso al soporte
+        adjunto de esa solicitud —salvo que tenga marcada <b>Soportes</b>—. Si no hay nadie por
+        encima, la casilla no cambia nada.
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
-        Cambiar el organigrama <b>no mueve las solicitudes que ya están en trámite</b>: cada una
-        lleva anotado desde que se envió quién la firma y a quién se informa del resultado.
+        Cambiar el organigrama <b>o esta casilla</b> no mueve las solicitudes que ya están en
+        trámite: cada una lleva anotado desde que se envió quién la firma y a quién se informa
+        del resultado.
       </p>
       <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -222,6 +224,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                   fila.copiaCorreo !== e.copiaCorreo ||
                   fila.veAdjuntos !== e.veAdjuntos ||
                   fila.requiereSegundaFirma !== e.requiereSegundaFirma;
+                const arriba = e.segundoAprobadorCorreo ?? e.informadoCorreo;
                 return (
                   <tr key={e.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5">
@@ -264,22 +267,26 @@ export default function PanelOrganigrama({ activo }: Props) {
                             actualizar(e.id, { requiereSegundaFirma: ev.target.checked, error: null })
                           }
                           aria-label={`Las solicitudes de ${e.nombreCompleto} necesitan dos firmas`}
+                          aria-describedby={`arriba-${e.id}`}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
                         />
                         Necesaria
                       </label>
-                      {/* Se pinta lo GUARDADO (`e`), no lo editado (`fila`): hasta
-                          que no se guarde, el servidor no ha recalculado quién
-                          queda arriba y enseñarlo antes sería adivinar. */}
-                      <div className="mt-1 text-xs">
-                        {e.segundoAprobadorCorreo ? (
-                          <span title={e.segundoAprobadorCorreo}>{quienFirma(e.segundoAprobadorCorreo)}</span>
-                        ) : e.informadoCorreo ? (
-                          <span className="text-gray-400" title={e.informadoCorreo}>
-                            {quienFirma(e.informadoCorreo)} — solo informado
+                      {/* Quién está arriba sale de lo GUARDADO (`e`): cambiar el
+                          jefe en el desplegable sí cambia el abuelo, y el
+                          navegador no puede recalcularlo. Su PAPEL sale de lo
+                          editado (`fila`) porque los cuatro cortes de
+                          `aprobadoresDe` se aplican ANTES de mirar la casilla:
+                          firmante o informado es el mismo correo en otra ranura,
+                          no hay nada que adivinar. */}
+                      <div id={`arriba-${e.id}`} className="mt-1 text-xs">
+                        {arriba ? (
+                          <span title={arriba} className={fila.requiereSegundaFirma ? undefined : 'text-gray-500'}>
+                            {quienFirma(arriba)}
+                            {!fila.requiereSegundaFirma && ' — solo informado'}
                           </span>
                         ) : (
-                          <span className="text-gray-300">— una sola firma</span>
+                          <span className="text-gray-400">— una sola firma</span>
                         )}
                       </div>
                     </td>

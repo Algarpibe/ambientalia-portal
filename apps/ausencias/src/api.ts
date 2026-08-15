@@ -65,6 +65,9 @@ export interface Solicitud {
   aprobadorCorreo: string | null;
   /** Quien firma después, congelado. `null` = una sola firma. */
   segundoAprobadorCorreo: string | null;
+  /** El de segundo nivel cuando NO firma: solo recibe el correo del resultado.
+   *  Excluyente con `segundoAprobadorCorreo`. Congelado en el alta. */
+  informadoCorreo: string | null;
   /** Leído de la ficha al consultar, no congelado en el alta. */
   copiaCorreo: string | null;
   primeraFirmaAt: string | null;
