@@ -517,6 +517,17 @@ export function validarSaldo(body: unknown): SaldoAFijar {
 export interface EmpleadoConJefatura extends Empleado {
   /** Quien firmaría en segundo lugar una solicitud suya creada ahora mismo. */
   segundoAprobadorCorreo: string | null;
+  /**
+   * Quien solo se enteraría del resultado, si su ficha no exige segunda firma.
+   * Excluyente con el de arriba, y por eso van los dos: el panel necesita saber
+   * QUIÉN está en el escalón de arriba aunque hoy no firme.
+   *
+   * No confundir con el `informadoCorreo` de `Solicitud`: aquel se congela en el
+   * alta y vive con esa solicitud para siempre; este se recalcula en cada
+   * consulta al maestro y cambia en cuanto se mueve el organigrama o se apaga la
+   * casilla.
+   */
+  informadoCorreo: string | null;
   /** Su rama del organigrama forma un círculo. Se avisa, no se bloquea. */
   enCiclo: boolean;
 }
@@ -531,11 +542,15 @@ export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatur
   const porCorreo = new Map(enlaces.map((e) => [e.correo, e]));
   const enCiclo = new Set(detectarCiclos(construirIndice(enlaces)).flat());
 
-  return empleados.map((e) => ({
-    ...e,
-    segundoAprobadorCorreo: aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null).segundo,
-    enCiclo: enCiclo.has(e.correo.toLowerCase()),
-  }));
+  return empleados.map((e) => {
+    const arriba = aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null);
+    return {
+      ...e,
+      segundoAprobadorCorreo: arriba.segundo,
+      informadoCorreo: arriba.informado,
+      enCiclo: enCiclo.has(e.correo.toLowerCase()),
+    };
+  });
 }
 
 /**

@@ -997,6 +997,21 @@ describe('la segunda firma se puede apagar por ficha', () => {
       expect(s.informadoCorreo).toBeNull();
     },
   );
+
+  it('el maestro dice quién es el de segundo nivel aunque no firme', async () => {
+    // Si esto devolviera null, el panel pintaría «una sola firma» donde sí hay
+    // alguien arriba, y ocultaría justo lo que esta feature quiere hacer visible.
+    estado.plantilla[0].aprobadorCorreo = JEFA;
+    estado.plantilla[0].requiereSegundaFirma = false;
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    const ana = r.body.empleados.find((e: any) => e.id === E1);
+    expect(ana.segundoAprobadorCorreo).toBeNull();
+    expect(ana.informadoCorreo).toBe(GERENCIA);
+    expect(ana.requiereSegundaFirma).toBe(false);
+  });
 });
 
 // ── Adjuntos para administración ───────────────────────────────────────────
