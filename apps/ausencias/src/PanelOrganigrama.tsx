@@ -162,7 +162,7 @@ export default function PanelOrganigrama({ activo }: Props) {
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         Cambiar el organigrama <b>no mueve las solicitudes que ya están en trámite</b>: cada una
-        lleva sus dos firmantes anotados desde que se envió.
+        lleva anotado desde que se envió quién la firma y a quién se informa del resultado.
       </p>
       <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
@@ -335,9 +335,9 @@ export default function PanelOrganigrama({ activo }: Props) {
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           // «La fila», no «el jefe»: este botón guarda también la
-                          // copia y la llave de los soportes, y un rótulo que
-                          // nombre solo uno de los tres campos engaña justo a
-                          // quien no puede ver cuál ha cambiado.
+                          // copia, la llave de los soportes y la segunda firma, y
+                          // un rótulo que nombre solo uno de los cuatro campos
+                          // engaña justo a quien no puede ver cuál ha cambiado.
                           aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >
