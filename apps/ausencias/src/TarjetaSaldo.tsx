@@ -48,6 +48,12 @@ export default function TarjetaSaldo({
   // consumidor no lo refresca tras crear o decidir una solicitud, la tarjeta
   // sigue enseñando el número de antes de esa operación (ver App.tsx: onCreada
   // y onDecidida piden datos nuevos justo para evitar eso).
+  //
+  // Es a propósito que este número NO coincida con `saldo.disponible`, que es el
+  // firme y no resta lo pendiente (ver `calcularSaldo`: «media firma NO
+  // descuenta»). Son dos preguntas distintas —cuánto tengo y cuánto puedo pedir
+  // sin descubrirme— y por eso el aviso de abajo explica la diferencia en vez de
+  // soltar dos cifras que parecen contradecirse.
   const pedible = saldo.disponible - saldo.enTramite;
   const seExcede = diasPedidos > 0 && diasPedidos > pedible;
 
@@ -79,8 +85,22 @@ export default function TarjetaSaldo({
       </p>
       {seExcede && (
         <p className="mt-1 font-medium">
-          Estás pidiendo {formatDias(diasPedidos)} días y te quedan {formatDias(Math.max(0, pedible))}. Puedes
-          enviar la solicitud igualmente: lo decide quien aprueba.
+          {/* El déficit real, sin `Math.max(0, …)`. Enseñar «te quedan 0» cuando
+              faltan casi cinco días redondea el rojo a cero y borra justo el
+              dato por el que este aviso existe. */}
+          Estás pidiendo {formatDias(diasPedidos)} {diasPedidos === 1 ? 'día' : 'días'} y te faltan{' '}
+          {formatDias(diasPedidos - pedible)}.
+          {/* De dónde sale el número. Sin esta frase la tarjeta enseña un saldo
+              arriba y otro distinto abajo, y parece que se contradice: lo que
+              cambia entre los dos es lo que está esperando firma. */}
+          {saldo.enTramite > 0 && (
+            <>
+              {' '}
+              En la cuenta entran los {formatDias(saldo.enTramite)} días que ya tienes pendientes de
+              aprobar: se descontarán en cuanto alguien los firme.
+            </>
+          )}{' '}
+          Puedes enviar la solicitud igualmente: lo decide quien aprueba.
         </p>
       )}
     </div>
