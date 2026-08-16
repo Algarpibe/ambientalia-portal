@@ -77,6 +77,19 @@ export interface Solicitud {
   adjunto: Adjunto | null;
 }
 
+/** Una solicitud de la bandeja de aprobación. */
+export interface SolicitudPendiente extends Solicitud {
+  /**
+   * Si le toca firmarla AHORA a quien mira la bandeja. Lo calcula hub-api, que
+   * es donde vive la regla del turno.
+   *
+   * Solo llega en `false` a un **administrador**: a los demás la consulta ya les
+   * entrega únicamente su turno. Es lo que separa en la bandeja lo que uno tiene
+   * que firmar de lo que solo puede destrabar.
+   */
+  esMiTurno: boolean;
+}
+
 export interface Contexto {
   empleado: Empleado | null;
   /** Nombre de quien le aprueba. Null si ese correo no tiene ficha de empleado. */
@@ -175,7 +188,7 @@ export const fetchMisSolicitudes = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/mis-solicitudes').then((d) => d.solicitudes);
 
 export const fetchPendientes = () =>
-  get<{ solicitudes: Solicitud[] }>('/api/ausencias/pendientes').then((d) => d.solicitudes);
+  get<{ solicitudes: SolicitudPendiente[] }>('/api/ausencias/pendientes').then((d) => d.solicitudes);
 
 export const crearSolicitud = (s: NuevaSolicitud) => post<Solicitud>('/api/ausencias/solicitudes', s);
 

@@ -818,7 +818,22 @@ describe('aprobación en cascada', () => {
     expect(await bandeja(gerencia())).toHaveLength(1);
   });
 
-  it('el admin ve los dos niveles en su bandeja', async () => {
+  it('a cada firmante se le marca como suya solo la que le toca', async () => {
+    // `esMiTurno` es lo que deja separar en la bandeja lo que uno tiene que
+    // firmar de lo que solo puede destrabar. Para quien no es admin siempre es
+    // true —la consulta ya filtra por turno—, pero se fija aquí porque de ese
+    // campo depende que los botones aparezcan donde deben.
+    const s = await crear();
+    const bandeja = async (quien: string) =>
+      (await request(app()).get('/api/ausencias/pendientes').set('Authorization', `Bearer ${quien}`).expect(200)).body
+        .solicitudes;
+
+    expect((await bandeja(jefa()))[0].esMiTurno).toBe(true);
+    await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
+    expect((await bandeja(gerencia()))[0].esMiTurno).toBe(true);
+  });
+
+  it('el admin ve los dos niveles en su bandeja, y ninguno es su turno', async () => {
     const a = await crear();
     const b = await crear({ fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
     await decidir(a.id as string, jefa(), { aprueba: true }).expect(200);
@@ -828,6 +843,10 @@ describe('aprobación en cascada', () => {
       .expect(200);
     expect(r.body.solicitudes).toHaveLength(2);
     expect(r.body.solicitudes.map((s: any) => s.estado).sort()).toEqual(['pendiente', 'pendiente_2']);
+    // Ninguna de las dos le toca a él: las ve por ser admin, para poder
+    // destrabarlas. Sin esta marca, la bandeja no puede distinguir el trabajo
+    // propio del rescate y ofrece los botones como si le tocara firmar.
+    expect(r.body.solicitudes.every((s: any) => s.esMiTurno === false)).toBe(true);
     expect(b.id).toBeTruthy();
   });
 

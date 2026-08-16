@@ -1,4 +1,4 @@
-import type { EstadoSolicitud, TipoSolicitud } from './api';
+import type { EstadoSolicitud, Solicitud, TipoSolicitud } from './api';
 
 /** Los cuatro tipos, en el orden en que se ofrecen en el formulario. */
 export const TIPOS: { id: TipoSolicitud; label: string; ayuda: string }[] = [
@@ -49,6 +49,30 @@ export const chipDe = (estado: EstadoSolicitud): Chip =>
 
 /** True si la solicitud todavía espera la firma de alguien. */
 export const enTramite = (estado: EstadoSolicitud) => estado === 'pendiente' || estado === 'pendiente_2';
+
+/** Lo mínimo para saber de quién es el turno. */
+type ConTurno = Pick<Solicitud, 'estado' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'>;
+
+/**
+ * True si a `email` le toca firmar esa solicitud **ahora**. Espejo de
+ * `correoDelTurno` en `apps/hub-api/src/ausencias/types.ts`.
+ *
+ * La bandeja NO usa esto: el servidor le manda `esMiTurno` ya calculado, que es
+ * donde vive la regla de verdad. Hace falta solo para recalcularlo sobre la fila
+ * que devuelve una decisión, porque ese endpoint responde una `Solicitud` a
+ * secas. Si algún día cambia la máquina de estados, esta función y la del
+ * servidor cambian juntas.
+ */
+export function esTurnoDe(s: ConTurno, email: string): boolean {
+  return (correoDelTurno(s) ?? '').toLowerCase() === email.toLowerCase();
+}
+
+/** A quién le toca firmar ahora, o `null` si el estado ya no admite firma. */
+export function correoDelTurno(s: ConTurno): string | null {
+  if (s.estado === 'pendiente') return s.aprobadorCorreo;
+  if (s.estado === 'pendiente_2') return s.segundoAprobadorCorreo;
+  return null;
+}
 
 /** Etiqueta del campo de fecha según el tipo, como en los formularios de n8n. */
 export function etiquetasFecha(tipo: TipoSolicitud): { inicio: string; fin: string } {

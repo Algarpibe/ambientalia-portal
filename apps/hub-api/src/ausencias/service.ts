@@ -18,6 +18,7 @@ import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
 import {
   ETIQUETA_TIPO,
   TIPOS,
+  correoDelTurno,
   requiereAprobacion,
   transicionAlDecidir,
   type Empleado,
@@ -234,8 +235,27 @@ export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitu
   return repo.solicitudesDeEmpleado(db, empleado.id);
 }
 
-export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
-  return repo.solicitudesPendientes(db, sesion.email, sesion.esAdmin);
+/** Una solicitud de la bandeja, con si le toca firmarla a quien la mira. */
+export interface SolicitudPendiente extends Solicitud {
+  /**
+   * Si le toca firmar AHORA a quien pregunta.
+   *
+   * Solo puede ser `false` para un **admin**: `solicitudesPendientes` ya filtra
+   * por turno para todos los demás, y a un admin le entrega la empresa entera
+   * para que pueda destrabar una aprobación cuyo firmante no está disponible.
+   *
+   * Se calcula aquí y no en el navegador para que la regla del turno siga
+   * viviendo en un solo sitio (`correoDelTurno`). Duplicarla en el cliente es
+   * cómo se llega a que la interfaz y el servidor discrepen sin que nada falle:
+   * el 403 saltaría al pulsar, con el botón ya ofrecido.
+   */
+  esMiTurno: boolean;
+}
+
+export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<SolicitudPendiente[]> {
+  const pendientes = await repo.solicitudesPendientes(db, sesion.email, sesion.esAdmin);
+  const yo = sesion.email.toLowerCase();
+  return pendientes.map((s) => ({ ...s, esMiTurno: (correoDelTurno(s) ?? '').toLowerCase() === yo }));
 }
 
 /**
