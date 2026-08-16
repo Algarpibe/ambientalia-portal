@@ -138,8 +138,17 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
   // El servidor manda `esMiTurno` ya resuelto; aquí solo se reparte. Para quien
   // no es admin, `ajenas` está SIEMPRE vacío —la consulta ya filtra por turno—,
   // así que la segunda tabla no existe para casi nadie.
-  const mias = solicitudes.filter((s) => s.esMiTurno);
-  const ajenas = solicitudes.filter((s) => !s.esMiTurno);
+  //
+  // Se compara contra `false` y no por veracidad, y eso NO es cosmético: hub-api
+  // y el portal son dos servicios de EasyPanel que se despliegan por separado,
+  // así que hay una ventana de minutos en la que este bundle habla con un
+  // hub-api que todavía no manda el campo. Con `filter(s => s.esMiTurno)`, ese
+  // `undefined` mandaría TODAS las solicitudes al cajón del rescate y el
+  // aprobador se encontraría «Esperando la firma de sí mismo» y sin botones.
+  // Comparando contra `false`, un campo ausente degrada al comportamiento de
+  // antes de esta pantalla: todo en la lista de siempre, con sus botones.
+  const mias = solicitudes.filter((s) => s.esMiTurno !== false);
+  const ajenas = solicitudes.filter((s) => s.esMiTurno === false);
 
   return (
     <div className="flex flex-col gap-8">
