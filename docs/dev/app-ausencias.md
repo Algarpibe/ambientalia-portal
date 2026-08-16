@@ -765,6 +765,35 @@ nadie lo habría notado hasta echar de menos un correo que ya no llega.
 > solo escalón lo son los dos—, y sin filtrar saldría un «, ,» en medio de la
 > lista.
 
+### La bandeja de un admin: su turno y el rescate, separados
+
+`solicitudesPendientes` filtra por **turno** —en `pendiente` la ve quien firma
+primero, en `pendiente_2` quien firma después—, **salvo para un admin**: su
+`$2::boolean` anula el filtro entero y le entrega las pendientes de toda la
+empresa, para que pueda destrabar una aprobación cuyo firmante no está
+disponible. `puedeDecidir` le deja además firmarlas.
+
+Eso hacía que un administrador viera los botones de aprobar en solicitudes que
+esperaban a otra persona, sin nada que lo distinguiera de su propio trabajo. Se
+reportó como fallo de la cascada y no lo era: el correo de aviso solo se manda al
+firmante que toca (`avisoAprobador` lee `s.aprobadorCorreo` a secas), lo que
+sobraba era cómo se presentaba la bandeja.
+
+`pendientesDeAprobar` marca ahora cada fila con **`esMiTurno`**, calculado en el
+servidor con `correoDelTurno` para que la regla siga viviendo en un solo sitio.
+La bandeja parte la lista en dos: lo que hay que firmar, con sus botones, y
+*Esperando a otra persona*, que dice a quién se espera y esconde los botones
+detrás de un **«Firmar en su lugar»**. Dos gestos, no uno: destrabar es una
+excepción, no el trabajo de cada día.
+
+Para quien no es admin, `esMiTurno` es **siempre** `true` y la segunda lista no
+existe: la consulta ya le entrega solo su turno.
+
+⚠️ **Firmar en lugar de otro sigue registrándose a nombre de esa otra persona.**
+La transición sella el correo congelado en la solicitud, no el del admin; el
+único rastro de quién pulsó es `aprobador_user_id`, que hoy no se enseña en
+ninguna pantalla. Si algún día hace falta distinguirlo, es una spec aparte.
+
 ### El historial del aprobador
 
 *Pendientes de aprobar* solo enseña lo que toca firmar **ahora**, así que al

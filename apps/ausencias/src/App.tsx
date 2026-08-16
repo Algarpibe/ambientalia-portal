@@ -9,8 +9,9 @@ import {
   type Contexto,
   type SaldoDeEmpleado,
   type Solicitud,
+  type SolicitudPendiente,
 } from './api';
-import { enTramite } from './dominio';
+import { enTramite, esTurnoDe } from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
@@ -39,7 +40,7 @@ type Pestana =
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
   const [mias, setMias] = useState<Solicitud[]>([]);
-  const [pendientes, setPendientes] = useState<Solicitud[]>([]);
+  const [pendientes, setPendientes] = useState<SolicitudPendiente[]>([]);
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,15 +148,18 @@ export default function App() {
   function onDecidida(s: Solicitud) {
     // Firmar no siempre saca la fila de la bandeja: si era la primera de dos, la
     // solicitud sigue pendiente, solo que de otra persona. Un admin —que ve la
-    // bandeja entera— la perdería de vista aunque siga estando ahí. Se replica la
-    // misma regla de turno que el WHERE de `solicitudesPendientes`.
-    const meSigueTocando =
-      contexto?.esAdmin ||
-      (s.estado === 'pendiente' && s.aprobadorCorreo?.toLowerCase() === contexto?.email.toLowerCase()) ||
-      (s.estado === 'pendiente_2' && s.segundoAprobadorCorreo?.toLowerCase() === contexto?.email.toLowerCase());
+    // bandeja entera— la perdería de vista aunque siga estando ahí.
+    //
+    // «Sigue en mi bandeja» y «es mi turno» NO son lo mismo, y por eso se
+    // calculan aparte: un admin conserva la fila aunque haya pasado a otro, pero
+    // deja de tocarle, y la bandeja tiene que poder decirlo.
+    const esMiTurno = esTurnoDe(s, contexto?.email ?? '');
+    const meSigueTocando = contexto?.esAdmin || esMiTurno;
 
     setPendientes((ps) =>
-      enTramite(s.estado) && meSigueTocando ? ps.map((p) => (p.id === s.id ? s : p)) : ps.filter((p) => p.id !== s.id),
+      enTramite(s.estado) && meSigueTocando
+        ? ps.map((p) => (p.id === s.id ? { ...s, esMiTurno } : p))
+        : ps.filter((p) => p.id !== s.id),
     );
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
     // Si con esta firma la solicitud queda cerrada, pasa a estar en el historial.
