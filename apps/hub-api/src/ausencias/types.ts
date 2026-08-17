@@ -281,6 +281,19 @@ export interface Solicitud {
   anuladaAt: string | null;
 }
 
+/**
+ * Lo que el cliente manda al pedir un cambio, ya validado. Ni `empleadoId` ni
+ * `diasHabiles`: el primero sale de la sesión y el segundo lo cuenta el
+ * servidor, igual que en `NuevaSolicitud`.
+ */
+export interface NuevaModificacion {
+  clase: ClaseModificacion;
+  /** `null` en una anulación; con valor en un cambio de fechas. */
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  motivo: string | null;
+}
+
 /** Lo que el cliente manda al crear. `empleadoId` NO viaja: sale de la sesión. */
 export interface NuevaSolicitud {
   tipo: TipoSolicitud;

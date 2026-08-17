@@ -25,8 +25,10 @@ import {
   transicionAlDecidir,
   type ClaseModificacion,
   type Empleado,
+  type EstadoModificacion,
   type EstadoSolicitud,
   type Modificacion,
+  type NuevaModificacion,
   type NuevaSolicitud,
   type Solicitud,
   type TipoSolicitud,
@@ -142,15 +144,6 @@ function llegaConValor(v: unknown): boolean {
   return v !== undefined && v !== null && v !== '';
 }
 
-/** Lo que el cliente manda al pedir un cambio. Ni `empleadoId` ni `diasHabiles`. */
-export interface NuevaModificacion {
-  clase: ClaseModificacion;
-  /** `null` en una anulación; con valor en un cambio de fechas. */
-  fechaInicio: string | null;
-  fechaFin: string | null;
-  motivo: string | null;
-}
-
 /**
  * Valida la propuesta contra las fechas que la solicitud tiene AHORA.
  *
@@ -178,10 +171,16 @@ export function validarNuevaModificacion(
   if (clase === 'anulacion') {
     // Las fechas NO se ignoran en silencio: un cliente con un bug creería haber
     // pedido un cambio de fechas y habría pedido que le anularan las vacaciones.
-    // Se señala `clase` y no las fechas porque es el campo que hay que corregir
-    // para que la petición signifique lo que el cliente cree que significa.
+    //
+    // Código propio y no `clase_invalida`: la clase que mandó SÍ existe, así que
+    // `clase_invalida` se leería como una mentira en un log y el cliente no
+    // podría distinguir «esa clase no existe» de «tu clase contradice tus
+    // fechas». Es la misma contradicción a la que la 024 le dio nombre propio
+    // con `modificaciones_campos_por_clase`. Se señala `clase` porque es el
+    // campo que hay que corregir para que la petición signifique lo que el
+    // cliente cree que significa.
     if (llegaConValor(b.fechaInicio) || llegaConValor(b.fechaFin)) {
-      throw new AusenciaError('clase_invalida', 400, 'clase');
+      throw new AusenciaError('anulacion_con_fechas', 400, 'clase');
     }
     return { clase, fechaInicio: null, fechaFin: null, motivo: motivo || null };
   }
@@ -552,26 +551,48 @@ export async function pedirModificacion(
 }
 
 /**
+ * Por qué una propuesta ya no se puede retirar. Son dos cosas distintas y el
+ * cliente tiene que poder distinguirlas: «tu jefe ya la decidió» exige mirar el
+ * resultado, y «ya la retiraste» —el doble clic— no exige nada.
+ */
+function codigoNoPendiente(estado: EstadoModificacion): string {
+  return estado === 'retirada' ? 'ya_retirada' : 'ya_decidida';
+}
+
+/**
  * El autor retira su propia propuesta. Sin correo a nadie: retirar deja la
  * solicitud exactamente como estaba, así que no hay nada que comunicar.
  *
- * Se compara por `solicitanteEmail` —el correo desnormalizado en el satélite— y
- * no por `empleadoId`: es el dato que la propia fila ya trae, y evita una
- * segunda consulta a la solicitud solo para saber de quién era.
+ * El dueño se comprueba por `empleadoId` contra la SOLICITUD, la misma noción
+ * que usa `pedirModificacion`. Comparar aquí el `solicitanteEmail` congelado en
+ * el satélite —que es el dato que la fila ya trae, y ahorraba esta consulta—
+ * daba un 403 sobre su propia propuesta a quien hubiera cambiado de correo
+ * entre pedirla y retirarla.
  */
 export async function retirarModificacion(db: Pool, sesion: Sesion, id: string): Promise<Modificacion> {
   const empleado = await empleadoDeSesion(db, sesion);
   const modificacion = await repo.modificacionPorId(db, id);
   if (!modificacion) throw new AusenciaError('no_encontrada', 404);
-  if (modificacion.solicitanteEmail.toLowerCase() !== empleado.correo.toLowerCase()) {
-    throw new AusenciaError('no_es_su_modificacion', 403);
+
+  const solicitud = await repo.solicitudPorId(db, modificacion.solicitudId);
+  // La FK va con ON DELETE CASCADE, así que una propuesta sin solicitud no
+  // debería existir; si existiera, no hay dueño contra quien comparar y negarla
+  // es lo único seguro.
+  if (!solicitud) throw new AusenciaError('no_encontrada', 404);
+  if (solicitud.empleadoId !== empleado.id) throw new AusenciaError('no_es_su_modificacion', 403);
+
+  if (modificacion.estado !== 'pendiente') {
+    throw new AusenciaError(codigoNoPendiente(modificacion.estado), 409);
   }
-  if (modificacion.estado !== 'pendiente') throw new AusenciaError('ya_decidida', 409);
 
   const retirada = await repo.retirarModificacion(db, id);
-  // Sin fila: el jefe la decidió entre la lectura y el UPDATE. Es un conflicto,
-  // no un fallo del servidor, y su decisión gana.
-  if (!retirada) throw new AusenciaError('ya_decidida', 409);
+  if (!retirada) {
+    // Sin fila: alguien la movió entre la lectura y el UPDATE. Se relee para
+    // decir cuál de las dos cosas pasó en vez de acusar al jefe por defecto —el
+    // caso más probable aquí es el doble clic del propio autor.
+    const actual = await repo.modificacionPorId(db, id);
+    throw new AusenciaError(actual ? codigoNoPendiente(actual.estado) : 'no_encontrada', actual ? 409 : 404);
+  }
   return retirada;
 }
 

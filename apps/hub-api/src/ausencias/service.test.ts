@@ -620,11 +620,16 @@ describe('validarNuevaModificacion', () => {
     // Un cliente con un bug creería haber pedido un cambio de fechas y habría
     // pedido que le anularan las vacaciones. Aceptarlo «quedándose con la
     // clase» es la forma silenciosa de borrarle los días a alguien.
+    // Código propio: `clase_invalida` sobre un payload donde `clase` vale
+    // 'anulacion' se lee como una mentira en un log, y el cliente no puede
+    // distinguir «esa clase no existe» de «tu clase contradice tus fechas».
     expect(() => validar({ clase: 'anulacion', fechaInicio: '2026-07-13', fechaFin: '2026-07-15' })).toThrow(
-      expect.objectContaining({ code: 'clase_invalida', status: 400, field: 'clase' }),
+      expect.objectContaining({ code: 'anulacion_con_fechas', status: 400, field: 'clase' }),
     );
     // Con una sola de las dos, también.
-    expect(() => validar({ clase: 'anulacion', fechaFin: '2026-07-15' })).toThrow(AusenciaError);
+    expect(() => validar({ clase: 'anulacion', fechaFin: '2026-07-15' })).toThrow(
+      expect.objectContaining({ code: 'anulacion_con_fechas' }),
+    );
     // Y un input vacío del formulario NO cuenta como fecha.
     expect(() => validar({ clase: 'anulacion', fechaInicio: '', fechaFin: '' })).not.toThrow();
   });

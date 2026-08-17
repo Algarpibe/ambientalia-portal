@@ -6,6 +6,7 @@ import type {
   ClaseModificacion,
   Empleado,
   EstadoModificacion,
+  EventoModificacion,
   EventoOutbox,
   EventoPendiente,
   EventoSolicitud,
@@ -1105,7 +1106,15 @@ export type ResultadoAlta =
   | { ok: true; modificacion: Modificacion }
   | { ok: false; razon: 'estado' | 'duplicada' };
 
-const EVENTO_ALTA_MODIFICACION = 'modificacion_solicitada' as const;
+/**
+ * `satisfies` y no una cadena suelta: el literal viaja al CHECK de `evento` de
+ * la 024, y una errata aquí compilaría y reventaría DENTRO de la transacción,
+ * deshaciendo la propuesta entera por un fallo de tecleo.
+ */
+const EVENTO_ALTA_MODIFICACION = 'modificacion_solicitada' as const satisfies EventoModificacion;
+
+/** El índice único parcial de la 024. Se nombra para poder reconocer SU 23505. */
+const UX_UNA_PENDIENTE = 'ux_modificaciones_una_pendiente';
 
 /**
  * Guarda la propuesta y encola su aviso, en una transacción.
@@ -1127,9 +1136,10 @@ const EVENTO_ALTA_MODIFICACION = 'modificacion_solicitada' as const;
  * destruiría justo la garantía de arriba.
  *
  * Cero filas ⇒ alguien se adelantó (`razon: 'estado'`). Una violación de
- * `ux_modificaciones_una_pendiente` (23505) ⇒ ya había otra propuesta viva; esa
- * carrera la corta la BASE y no una comprobación previa, porque dos peticiones
- * simultáneas pasarían las dos comprobaciones antes de que ninguna escribiera.
+ * `ux_modificaciones_una_pendiente` (23505 **con ese nombre**) ⇒ ya había otra
+ * propuesta viva; esa carrera la corta la BASE y no una comprobación previa,
+ * porque dos peticiones simultáneas pasarían las dos comprobaciones antes de que
+ * ninguna escribiera.
  */
 export async function crearModificacion(
   db: Pool,
@@ -1148,8 +1158,18 @@ export async function crearModificacion(
             dias_habiles_previos, fecha_inicio_nueva, fecha_fin_nueva, dias_habiles_nuevos,
             motivo, aprobador_correo, solicitante_email)
          SELECT s.id, $2, s.estado, s.fecha_inicio, s.fecha_fin, s.dias_habiles,
-                $3::date, $4::date, $5, $6, $7, s.solicitante_email
+                $3::date, $4::date, $5::numeric, $6, $7, s.solicitante_email
            FROM portal.solicitudes_ausencia s
+          -- ⚠️ $8 es el estado que LEYO el servicio, NO una lista de estados
+          -- admisibles. No cambiar por IN ('pendiente','pendiente_2','aprobada'):
+          -- seria igual de atomico y estado_previo dejaria de ser cierto — si el
+          -- jefe aprueba a la vez, la propuesta se guarda como 'pendiente' sobre
+          -- algo que ya esta en el calendario de Google y el correo de la decision
+          -- no avisa de tocarlo.
+          -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory
+          -- y los 677 siguen verdes con el IN. Lo unico que lo vigila es una
+          -- asercion de FORMA en repo.test.ts que busca este texto literal, y
+          -- este comentario.
           WHERE s.id = $1 AND s.estado = $8
          RETURNING id`,
         [
@@ -1190,9 +1210,16 @@ export async function crearModificacion(
       return { ok: true, modificacion };
     });
   } catch (err) {
-    // 23505 = unique_violation. Solo puede venir del índice parcial: es la
-    // segunda propuesta viva de la misma solicitud, no un fallo del servidor.
-    if ((err as { code?: string })?.code === '23505') return { ok: false, razon: 'duplicada' };
+    const e = err as { code?: string; constraint?: string };
+    // 23505 = unique_violation, pero se exige además el NOMBRE. Dentro de este
+    // `try` hay otra tabla que no controlamos —`ausencias_outbox`—, y añadirle
+    // un UNIQUE por idempotencia es de lo más natural que puede pasar en la
+    // Fase 3, que mete tres eventos por modificación. El día que ocurra, un
+    // fallo real del outbox se convertiría en un «ya tienes una propuesta
+    // pendiente» que nadie entiende y que además diría que no se escribió nada.
+    if (e?.code === '23505' && e.constraint === UX_UNA_PENDIENTE) {
+      return { ok: false, razon: 'duplicada' };
+    }
     throw err;
   }
 }

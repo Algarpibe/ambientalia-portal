@@ -11,6 +11,7 @@ import {
 import {
   ETIQUETA_TIPO,
   type CorreoEvento,
+  type EventoModificacion,
   type EventoSolicitud,
   type FilaHoja,
   type Modificacion,
@@ -389,9 +390,13 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
  * y hasta entonces el tipo de `evento` no los admite: así no hay forma de
  * encolar un evento sin correo que n8n serviría vacío.
  */
-const CORREO_MODIFICACION_DE: Record<'modificacion_solicitada', (s: Solicitud, m: Modificacion) => CorreoEvento> = {
+const CORREO_MODIFICACION_DE = {
   modificacion_solicitada: avisoModificacion,
-};
+  // `satisfies Partial<...>` y no una anotación: comprueba que la clave existe
+  // en `EventoModificacion` —una errata no compila— pero deja que el tipo
+  // inferido conserve la clave literal, que es lo que hace que el `evento` de
+  // `construirPayloadModificacion` admita exactamente lo que hay redactado.
+} satisfies Partial<Record<EventoModificacion, (s: Solicitud, m: Modificacion) => CorreoEvento>>;
 
 /**
  * El payload de un aviso de modificación.

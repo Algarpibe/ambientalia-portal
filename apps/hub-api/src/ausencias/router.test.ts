@@ -2391,7 +2391,7 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
       fechaInicio: '2026-07-13',
       fechaFin: '2026-07-17',
     }).expect(400);
-    expect(r.body).toMatchObject({ error: 'clase_invalida', field: 'clase' });
+    expect(r.body).toMatchObject({ error: 'anulacion_con_fechas', field: 'clase' });
     expect(estado.modificaciones).toHaveLength(0);
   });
 
@@ -2414,8 +2414,13 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
 
   it('CANDADO: si la solicitud cambia de estado entre el read y el insert, 409 y ni una fila', async () => {
     // La carrera real: el jefe aprueba mientras el trabajador rellena el
-    // formulario. Sin el `AND s.estado = $8`, la propuesta se guardaría con
-    // `estado_previo = 'pendiente'` sobre algo que ya está en el calendario.
+    // formulario.
+    //
+    // ⚠️ Esto fija el CABLEADO DEL SERVICIO —que traduce `razon: 'estado'` a un
+    // 409 sin escribir nada—, NO el SQL. El `AND s.estado = $8` no lo ejecuta
+    // ningún test: este doble es in-memory y modela el testigo por su cuenta,
+    // así que quitarlo del SQL real dejaría los 677 en verde. Lo único que
+    // vigila el SQL es la aserción de forma de repo.test.ts.
     const s = await crear();
     estado.pisarEstadoAlCrearModificacion = 'aprobada';
     const r = await pedir(s.id as string, CAMBIO).expect(409);
@@ -2456,7 +2461,6 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     // sabe que se aprobaron ni por qué.
     expect(r.body.aprobadorCorreo).toBe(JEFA);
     expect((avisos()[0].payload as any).correo.para).toBe(JEFA);
-    expect((avisos()[0].payload as any).correo.para).not.toContain(NUEVO);
   });
 
   it('el aviso sale por la cola de n8n con calendario y hoja en null', async () => {
@@ -2563,7 +2567,7 @@ describe('POST /ausencias/modificaciones/:id/retirar', () => {
     expect(estado.modificaciones[0].estado).toBe('pendiente');
   });
 
-  it('409 si el jefe ya la decidió: su decisión gana', async () => {
+  it('409 `ya_decidida` si el jefe ya la decidió: su decisión gana', async () => {
     const { modificacionId } = await crearYPedir();
     estado.modificaciones[0].estado = 'aprobada';
     const r = await retirar(modificacionId).expect(409);
@@ -2571,10 +2575,15 @@ describe('POST /ausencias/modificaciones/:id/retirar', () => {
     expect(estado.modificaciones[0].estado).toBe('aprobada');
   });
 
-  it('409 al retirar dos veces — un doble clic no revienta', async () => {
+  it('409 `ya_retirada` al retirar dos veces: el doble clic no acusa al jefe', async () => {
+    // Dos 409 distintos porque son dos cosas distintas: «tu jefe ya la decidió»
+    // manda a mirar el resultado, y «ya la habías retirado» no manda a nada.
+    // Con un solo código, la UI tendría que enseñar el mensaje equivocado en
+    // uno de los dos casos.
     const { modificacionId } = await crearYPedir();
     await retirar(modificacionId).expect(200);
-    await retirar(modificacionId).expect(409);
+    const r = await retirar(modificacionId).expect(409);
+    expect(r.body.error).toBe('ya_retirada');
   });
 
   it('404 si no existe', async () => {
