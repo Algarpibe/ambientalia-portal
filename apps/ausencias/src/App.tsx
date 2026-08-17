@@ -6,13 +6,25 @@ import {
   fetchMisSolicitudes,
   fetchPendientes,
   fetchSaldos,
+  retirarModificacion,
+  type ClaseModificacion,
   type Contexto,
+  type Modificacion,
   type SaldoDeEmpleado,
   type Solicitud,
   type SolicitudPendiente,
 } from './api';
-import { enTramite, esTurnoDe } from './dominio';
+import {
+  enTramite,
+  esTurnoDe,
+  hoyEnColombia,
+  mensajeDeModificacion,
+  puedePedirAnulacion,
+  puedePedirModificacion,
+  resumenPropuesta,
+} from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
+import PedirModificacion from './PedirModificacion';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import HistorialAprobador from './HistorialAprobador';
@@ -67,6 +79,11 @@ export default function App() {
   // Lo mismo para el historial del aprobador: acabar de decidir algo tiene que
   // hacer que aparezca ahí, no en la siguiente recarga de la app.
   const [recargarHistorial, setRecargarHistorial] = useState(0);
+  // Qué solicitud tiene abierto el modal de «pedir un cambio», y con qué opción
+  // marcada de entrada: los dos botones de la fila abren el mismo formulario.
+  const [modificando, setModificando] = useState<{ solicitud: Solicitud; clase: ClaseModificacion } | null>(null);
+  // Qué propuesta se está retirando ahora mismo, por id, para apagar su enlace.
+  const [retirando, setRetirando] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -105,6 +122,10 @@ export default function App() {
   }, []);
 
   const festivos = useMemo(() => new Set(contexto?.festivos ?? []), [contexto]);
+  // La misma fecha para todas las filas de un render: si cada botón la leyera
+  // por su cuenta, una tabla pintada justo en la medianoche de Bogotá podría
+  // decidir con dos «hoy» distintos.
+  const hoy = hoyEnColombia();
 
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
@@ -192,6 +213,95 @@ export default function App() {
     // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
     // número de antes de la decisión hasta recargar la página.
     refrescarSaldoPropio();
+  }
+
+  /**
+   * Cuelga —o descuelga— la propuesta de cambio de su solicitud, en el sitio.
+   *
+   * Mismo patrón que `onDecidida`: reemplazo in-place por id sobre `mias`, para
+   * que la fila enseñe el chip «Cambio pendiente» (o lo pierda al retirarla) sin
+   * recargar la app.
+   *
+   * Aquí NO se refresca el saldo, al revés que en `onCreada` y `onDecidida`: una
+   * propuesta pendiente no mueve ni un día. El servidor la ignora a propósito al
+   * calcular el saldo —si una anulación pendiente liberara los días, se podrían
+   * pedir esos mismos días otra vez y el saldo lo bendeciría—, así que pedirlo
+   * aquí solo gastaría una llamada para volver con el mismo número.
+   */
+  function fijarPropuesta(solicitudId: string, propuesta: Modificacion | null) {
+    setMias((ms) => ms.map((m) => (m.id === solicitudId ? { ...m, modificacionPendiente: propuesta } : m)));
+  }
+
+  async function retirar(m: Modificacion) {
+    setRetirando(m.id);
+    try {
+      // El id de la solicitud sale de la respuesta y no de la fila que se tenía
+      // pintada: es el dato que el servidor acaba de confirmar.
+      fijarPropuesta((await retirarModificacion(m.id)).solicitudId, null);
+      setError(null);
+    } catch (e) {
+      // No se toca el estado local: la fila se queda como estaba y se dice por
+      // qué. Un 409 aquí es un doble clic, o que el jefe se adelantó a decidir.
+      setError(mensajeDeModificacion((e as Error).message));
+    } finally {
+      setRetirando(null);
+    }
+  }
+
+  /**
+   * La última columna de «Mis solicitudes», que hasta ahora iba vacía.
+   *
+   * Tres casos y ninguno más: si hay una propuesta viva, lo que se puede hacer
+   * es retirarla —no pedir otra encima, que el servidor corta con un 409 y un
+   * índice único—; si no la hay y la solicitud lo admite, los dos botones; y si
+   * no, nada.
+   *
+   * `s.modificacionPendiente` se lee por veracidad: un hub-api que todavía no
+   * mande el campo cae en «no hay propuesta» y ofrece los botones igual, que es
+   * el comportamiento de antes de esta feature. En el peor caso el servidor
+   * contesta 409 y el modal lo explica.
+   */
+  function accionesMias(s: Solicitud): React.ReactNode {
+    const propuesta = s.modificacionPendiente;
+    if (propuesta) {
+      return (
+        <div className="flex w-56 flex-col gap-1">
+          <p className="text-xs text-gray-600">{resumenPropuesta(propuesta)}</p>
+          <button
+            type="button"
+            disabled={retirando === propuesta.id}
+            onClick={() => void retirar(propuesta)}
+            className="self-start text-xs text-gray-500 underline hover:text-gray-700 disabled:no-underline"
+          >
+            {retirando === propuesta.id ? 'Retirando…' : 'Retirar'}
+          </button>
+        </div>
+      );
+    }
+    if (!puedePedirModificacion(s, hoy)) return null;
+    return (
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setModificando({ solicitud: s, clase: 'fechas' })}
+          className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cambiar fechas
+        </button>
+        {/* Sin botón cuando la ausencia ya empezó: anularla devolvería también
+            los días ya disfrutados. El porqué —y la salida, que es acortar las
+            fechas— se lo cuenta el modal al entrar por «Cambiar fechas». */}
+        {puedePedirAnulacion(s, hoy) && (
+          <button
+            type="button"
+            onClick={() => setModificando({ solicitud: s, clase: 'anulacion' })}
+            className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Anular
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -296,7 +406,11 @@ export default function App() {
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
                 {/* Sin tarjeta de saldo: el número vive en la cabecera, visible desde aquí. */}
-                <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
+                <TablaSolicitudes
+                  solicitudes={mias}
+                  vacio="Todavía no has enviado ninguna solicitud."
+                  acciones={accionesMias}
+                />
               </div>
 
               <div className={tab === 'calendario' ? '' : 'hidden'}>
@@ -342,6 +456,22 @@ export default function App() {
                 <RegistroGeneral recargarToken={recargarRegistro} festivos={festivos} />
               </div>
             </>
+          )}
+
+          {/* Fuera de los `div` de pestaña a propósito: son los que se ocultan
+              con `hidden`, y `display:none` lo heredarían también los hijos
+              `fixed`. Aquí el modal se pinta pase lo que pase con la pestaña. */}
+          {modificando && (
+            <PedirModificacion
+              solicitud={modificando.solicitud}
+              claseInicial={modificando.clase}
+              festivos={festivos}
+              onPedida={(m) => {
+                fijarPropuesta(m.solicitudId, m);
+                setModificando(null);
+              }}
+              onCerrar={() => setModificando(null)}
+            />
           )}
         </>
       )}

@@ -44,6 +44,41 @@ export interface Adjunto {
   bytes: number;
 }
 
+/** Qué se pide cambiar de una solicitud ya enviada. Ni el tipo ni la persona. */
+export type ClaseModificacion = 'fechas' | 'anulacion';
+
+/** `retirada` = la quitó su propio autor antes de que nadie la decidiera. */
+export type EstadoModificacion = 'pendiente' | 'aprobada' | 'rechazada' | 'retirada';
+
+/**
+ * Una propuesta de cambio sobre una solicitud ya enviada.
+ *
+ * Los campos `*Previos` son la FOTO del instante en que se pidió, no una copia
+ * redundante: son lo que permite escribir el «de estas fechas a estas otras» sin
+ * volver a mirar la solicitud, que puede haber cambiado.
+ */
+export interface Modificacion {
+  id: string;
+  solicitudId: string;
+  clase: ClaseModificacion;
+  estadoPrevio: EstadoSolicitud;
+  fechaInicioPrevia: string;
+  fechaFinPrevia: string;
+  diasHabilesPrevios: number;
+  /** Los tres van `null` en una anulación; lo garantiza un CHECK en la BD. */
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: EstadoModificacion;
+  /** Copiado de la SOLICITUD al pedirla, nunca rederivado del organigrama. */
+  aprobadorCorreo: string;
+  solicitanteEmail: string;
+  decididaAt: string | null;
+  motivoRechazo: string | null;
+  createdAt: string;
+}
+
 export interface Solicitud {
   id: string;
   tipo: TipoSolicitud;
@@ -75,6 +110,30 @@ export interface Solicitud {
   motivoRechazo: string | null;
   createdAt: string;
   adjunto: Adjunto | null;
+  /**
+   * La propuesta de cambio viva, si la hay. Viaja con TODA solicitud —el
+   * `LEFT JOIN` está en el SELECT común del servidor—, así que ninguna pantalla
+   * puede olvidarse de pedirla y enseñar como firmes unas fechas en discusión.
+   * Como mucho hay una: lo garantiza un índice único parcial en la BD.
+   *
+   * En el runtime puede llegar `undefined` pese al tipo, igual que `esMiTurno`:
+   * hub-api y el portal se despliegan por separado y hay una ventana en que el
+   * portal va por delante. Se lee siempre por veracidad (`s.modificacionPendiente
+   * && …`) para que un campo ausente degrade a «no hay propuesta» —los botones
+   * se ofrecen igual y, en el peor caso, el servidor contesta 409— y nunca a una
+   * pantalla rota.
+   */
+  modificacionPendiente: Modificacion | null;
+  /**
+   * Cuándo se anuló. Anular NO estrena estado: la solicitud queda `rechazada`,
+   * que ya hereda la semántica correcta en los filtros del servidor, así que
+   * esta marca es lo ÚNICO que distingue «anulada» de «rechazada por el jefe».
+   * La etiqueta se deriva al pintar (`chipDeSolicitud`), no se almacena.
+   *
+   * Misma ventana de despliegue que el campo de arriba: ausente se lee
+   * «Rechazada», como antes de esta feature. Menos preciso, no roto.
+   */
+  anuladaAt: string | null;
 }
 
 /** Una solicitud de la bandeja de aprobación. */
@@ -200,6 +259,35 @@ export const crearSolicitud = (s: NuevaSolicitud) => post<Solicitud>('/api/ausen
 
 export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) =>
   post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/decision`, { aprueba, motivo });
+
+/**
+ * Lo que el trabajador manda al pedir un cambio sobre una solicitud suya.
+ *
+ * Ni `empleadoId` ni los días hábiles: el primero sale de la sesión y los
+ * segundos los cuenta el servidor, igual que en `NuevaSolicitud`.
+ *
+ * Las fechas son OPCIONALES y en una anulación se OMITEN: mandarlas con valor
+ * es un 400 (`anulacion_con_fechas`) a propósito, para que un cliente con un bug
+ * no crea haber pedido un cambio de fechas habiendo pedido una anulación.
+ */
+export interface NuevaModificacion {
+  clase: ClaseModificacion;
+  fechaInicio?: string;
+  fechaFin?: string;
+  motivo?: string;
+}
+
+/** El dueño pide cambiar las fechas de una solicitud suya, o anularla. */
+export const pedirModificacion = (solicitudId: string, m: NuevaModificacion) =>
+  post<Modificacion>(`/api/ausencias/solicitudes/${encodeURIComponent(solicitudId)}/modificaciones`, m);
+
+/**
+ * El autor se echa atrás. Sin correo a nadie: retirar deja la solicitud tal como
+ * estaba. La propuesta no se borra, pasa a `retirada`; por eso es un POST y no
+ * un DELETE.
+ */
+export const retirarModificacion = (id: string) =>
+  post<Modificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/retirar`, {});
 
 
 /** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
