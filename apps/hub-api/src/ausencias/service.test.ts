@@ -3,6 +3,7 @@ import {
   AusenciaError,
   nombreArchivoNormalizado,
   puedeDecidir,
+  puedePedirAnulacion,
   puedePedirModificacion,
   puedeVerAdjunto,
   validarNuevaModificacion,
@@ -789,6 +790,37 @@ describe('puedePedirModificacion', () => {
       aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
     });
     expect(puedePedirModificacion(enCurso, HOY_MOD)).toBe(true);
+  });
+
+  it('anular exige que NO haya empezado; cambiar las fechas, no', () => {
+    // El agujero que separa las dos reglas: anular deja la solicitud en
+    // `rechazada`, y `rechazada` devuelve TODOS sus días y desaparece del
+    // calendario. Sobre una ausencia en curso eso regala los días ya
+    // disfrutados; acortarla por la cola, no.
+    const enCurso = solicitud({
+      estado: 'aprobada',
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-20',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    expect(puedePedirModificacion(enCurso, HOY_MOD)).toBe(true);
+    expect(puedePedirAnulacion(enCurso, HOY_MOD)).toBe(false);
+  });
+
+  it('anular vale hasta el primer día INCLUIDO', () => {
+    // El `>=` es deliberado: un día solo queda consumido al terminar, y
+    // cancelar la mañana del primer día es el caso normal. Con `>` esa persona
+    // se quedaría además sin salida, porque no se puede acortar a menos de un
+    // día. Ver el JSDoc de `noHaEmpezado` antes de «arreglar» esto.
+    const empiezaHoy = solicitud({
+      estado: 'aprobada',
+      fechaInicio: HOY_MOD,
+      fechaFin: '2026-07-20',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    const empiezaManana = solicitud({ ...empiezaHoy, fechaInicio: '2026-07-09' });
+    expect(puedePedirAnulacion(empiezaHoy, HOY_MOD)).toBe(true);
+    expect(puedePedirAnulacion(empiezaManana, HOY_MOD)).toBe(true);
   });
 
   it('sin decisor no admite cambio, aunque el estado y la fecha acompañen', () => {

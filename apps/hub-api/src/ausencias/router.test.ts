@@ -2358,9 +2358,65 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
   });
 
   it('el último día cuenta: una ausencia que acaba HOY todavía se puede cambiar', async () => {
+    // El borde de `fechaFin >= hoy`. Se pide un CAMBIO DE FECHAS y no una
+    // anulación: esta ausencia empezó el 10, así que anularla devolvería los
+    // días ya disfrutados y tiene su propia regla (ver el bloque de anulación).
     const s = await crear();
     Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-15' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-10',
+      fechaFin: '2026-01-14',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-14');
+  });
+
+  // ── Anular exige que no haya empezado ──────────────────────────────────
+  //
+  // El reloj de este fichero está congelado en el jueves 15 de enero de 2026.
+  // Las fechas de este bloque son relativas a ese día y se mueven por debajo,
+  // porque el alta no deja crear nada que empiece en el pasado.
+
+  it('anular una ausencia que empieza MAÑANA vale', async () => {
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-16', fechaFin: '2026-01-20' });
+    const r = await pedir(s.id as string, { clase: 'anulacion' }).expect(201);
+    expect(r.body.clase).toBe('anulacion');
+  });
+
+  it('anular una que empieza HOY vale: el día no está consumido hasta que acaba', async () => {
+    // El `>=` deliberado. Cancelar la mañana del primer día es el caso normal,
+    // y con `>` esa persona se quedaría sin salida: no se puede acortar una
+    // ausencia a menos de un día.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-15', fechaFin: '2026-01-20' });
     await pedir(s.id as string, { clase: 'anulacion' }).expect(201);
+  });
+
+  it('CANDADO: anular una ausencia YA EMPEZADA es 409, no un regalo de días', async () => {
+    // Empezó ayer y acaba el viernes. Anularla la dejaría `rechazada`, y una
+    // rechazada devuelve TODOS sus días al saldo y desaparece del calendario:
+    // los de ayer y hoy, que sí se disfrutaron, volverían como si nada.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-14', fechaFin: '2026-01-16' });
+    const r = await pedir(s.id as string, { clase: 'anulacion' }).expect(409);
+    expect(r.body.error).toBe('anulacion_ya_empezada');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('pero ACORTAR esa misma sigue valiendo: la regla es de la clase, no del estado', async () => {
+    // El test que demuestra que la restricción vive en la clase. Acortar
+    // recalcula `diasHabiles`, así que el saldo queda en los días que de verdad
+    // se tomaron — que es lo que hay que hacer en vez de anular.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-14', fechaFin: '2026-01-16' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-14',
+      fechaFin: '2026-01-15',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-15');
   });
 
   it('409 al pedir una segunda propuesta teniendo una viva', async () => {

@@ -453,7 +453,7 @@ const ESTADOS_MODIFICABLES: readonly EstadoSolicitud[] = ['pendiente', 'pendient
 /** Lo mínimo de una solicitud para saber si admite un cambio. */
 type SolicitudEnmendable = Pick<
   Solicitud,
-  'estado' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
+  'estado' | 'fechaInicio' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
 >;
 
 function estadoAdmiteModificacion(s: SolicitudEnmendable): boolean {
@@ -470,16 +470,50 @@ function sigueVigente(s: Pick<Solicitud, 'fechaFin'>, hoy: string): boolean {
 }
 
 /**
- * Si esta solicitud admite que su dueño pida cambiarla.
+ * Anular exige que la ausencia **no haya empezado**, y por eso mira
+ * `fechaInicio` donde `sigueVigente` mira `fechaFin`.
  *
- * Es el OR de las dos reglas que `pedirModificacion` comprueba por separado —él
- * las separa para poder dar el 409 exacto—, y vive aquí en una sola función
- * porque es lo que la interfaz necesita para decidir si enseña el botón.
- * Duplicar la regla en el navegador es cómo se llega a ofrecer un botón que
- * responde 409 al pulsarlo.
+ * No es simetría de más: anular deja la solicitud en `rechazada`, y `rechazada`
+ * devuelve TODOS sus días —`disfrutadas` suma solo `['aprobada']`
+ * (`saldo.ts`)— y la borra entera del calendario
+ * (`calendario.ts`: «una rechazada no es una ausencia»). Sobre unas vacaciones
+ * del 6 al 10 anuladas el día 8, eso regala los tres días que sí se
+ * disfrutaron, sin que nada falle ni nadie se entere. Para ese caso la
+ * herramienta es cambiar las fechas a 6–10 → 6–8, que recalcula `diasHabiles` y
+ * deja el saldo correcto; por eso el error lo dice.
+ *
+ * ⚠️ `>=` y no `>`: una ausencia que EMPIEZA HOY sí se puede anular. Un día solo
+ * queda consumido al terminar, y cancelar la mañana del primer día es un caso
+ * real y frecuente. El riesgo residual —quien anule a las cinco de la tarde
+ * habiendo disfrutado el día— es de UN día, exige mala fe, y deja rastro en el
+ * outbox de quién lo pidió y cuándo. Con `>` se bloquearía el caso legítimo y
+ * además esa persona se quedaría sin salida: una ausencia que empieza hoy no se
+ * puede «acortar» a menos de un día. No cambiar a `>` sin releer esto.
+ */
+function noHaEmpezado(s: Pick<Solicitud, 'fechaInicio'>, hoy: string): boolean {
+  return s.fechaInicio >= hoy;
+}
+
+/**
+ * Si esta solicitud admite que su dueño pida cambiarle las FECHAS.
+ *
+ * Es el AND de las reglas que `pedirModificacion` comprueba por separado —él las
+ * separa para poder dar el 409 exacto—, y vive aquí en una sola función porque
+ * es lo que la interfaz necesita para decidir si enseña el botón. Duplicar la
+ * regla en el navegador es cómo se llega a ofrecer un botón que responde 409 al
+ * pulsarlo.
  */
 export function puedePedirModificacion(s: SolicitudEnmendable, hoy: string): boolean {
   return estadoAdmiteModificacion(s) && sigueVigente(s, hoy);
+}
+
+/**
+ * Si además admite que se pida ANULARLA. Estrictamente más exigente que
+ * `puedePedirModificacion`: toda anulable es modificable, pero no al revés —una
+ * ausencia ya empezada solo se puede acortar. Ver `noHaEmpezado`.
+ */
+export function puedePedirAnulacion(s: SolicitudEnmendable, hoy: string): boolean {
+  return puedePedirModificacion(s, hoy) && noHaEmpezado(s, hoy);
 }
 
 /**
@@ -516,6 +550,13 @@ export async function pedirModificacion(
   if (!sigueVigente(solicitud, hoy)) throw new AusenciaError('solicitud_ya_pasada', 409);
 
   const datos = validarNuevaModificacion(body, solicitud, hoy);
+  // La vigencia depende de la CLASE, y esta comprobación va después de validar
+  // porque hasta aquí no se sabe cuál es. Anular una ausencia ya empezada
+  // devolvería también los días ya disfrutados: ver `noHaEmpezado`.
+  if (datos.clase === 'anulacion' && !noHaEmpezado(solicitud, hoy)) {
+    throw new AusenciaError('anulacion_ya_empezada', 409);
+  }
+
   const decisor = decisorDeModificacion(solicitud);
   // `estadoAdmiteModificacion` ya lo ha exigido, pero eso vive treinta líneas
   // más arriba y en otra función: se comprueba aquí para que el tipo salga sin
