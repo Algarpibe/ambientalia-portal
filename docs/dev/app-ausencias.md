@@ -383,6 +383,41 @@ alguien añade el widget: `addWidget` copia `defaultSize` al layout que
 persiste en el `localStorage` de cada usuario, así que ajustarlo más tarde
 no habría corregido a quien ya lo tuviera añadido con el valor viejo.
 
+**El widget de aprobación** (`ausencias-por-aprobar`, tamaño `4×3`) lo sirve
+`GET /ausencias/pendientes`, el mismo endpoint que la bandeja. Enseña **solo
+las de su turno**: cuenta las filas con `esMiTurno`, no la lista entera. La
+diferencia solo se ve en un admin —a los demás la consulta ya les entrega solo
+su turno—, y es deliberada: enseñarle un 12 a quien solo puede actuar sobre 3
+es el mismo malentendido que partió la bandeja en dos.
+
+El filtro es `esMiTurno !== false`, no `=== true`, por la ventana en que el
+portal va por delante de hub-api: con el campo ausente degrada a contarlas
+todas —un número inflado se ve— y no a 0, que diría «nada pendiente» mientras
+las solicitudes se pudren.
+
+La antigüedad que enseña se mide desde `primeraFirmaAt` en las `pendiente_2` y
+desde `createdAt` en las demás: al segundo firmante no se le puede cobrar la
+tardanza del primero. Y se cuenta en **días del calendario colombiano**, no en
+bloques de 24 h: `resumirPendientes` recorta el desfase UTC−5 antes de trocear,
+con el mismo criterio que `hoyEnColombia` en `dominio.ts`. Sin eso, algo
+llegado ayer a las 18:00 se anunciaría como «llegó hoy».
+
+Se refresca al montar y al volver a la pestaña (`visibilitychange` y el `focus`
+de la ventana, con 60 s de guarda), no con un `setInterval`: un dashboard se
+queda abierto toda la mañana y sondearlo serían ~12 llamadas/hora por pestaña
+aunque nadie mire.
+
+Quien no aprueba a nadie puede añadirlo igual —`useWidgetRegistry` filtra por
+app, no por rol— y verá siempre «Nada pendiente de firmar.».
+
+Para aterrizar en la bandeja, la app acepta abrir una pestaña por hash
+(`/ausencias#bandeja`): `App.tsx` lo lee en el inicializador del `useState` del
+tab, y la lista `PESTANAS_VALIDAS` es la fuente de verdad de la que se deriva el
+tipo `Pestana`. No hace falta comprobar permisos ahí, porque el efecto que
+devuelve a la primera pestaña disponible cuando la activa no le corresponde al
+usuario ya lo cubre; el hash no puede abrir nada que no se pudiera abrir
+pinchando.
+
 **La asimetría del admin.** `useWidgetRegistry` filtra el catálogo de
 widgets por el claim `apps` del JWT sin mirar el rol, mientras que
 `requireApp`, en el backend, deja pasar a cualquier admin aunque no tenga la
