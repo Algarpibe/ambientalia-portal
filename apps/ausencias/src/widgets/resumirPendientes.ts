@@ -15,6 +15,14 @@ export interface ResumenPendientes {
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
 /**
+ * El día del calendario colombiano al que pertenece un instante. Mismo criterio
+ * que `hoyEnColombia` en `dominio.ts`: restar el desfase UTC−5 ANTES de trocear
+ * en días. Sin esto se contarían bloques de 24 h, y «llegó hoy» acabaría
+ * diciéndose de una solicitud que llegó ayer por la tarde.
+ */
+const diaColombiano = (ms: number) => Math.floor((ms - 5 * 3_600_000) / MS_POR_DIA);
+
+/**
  * Desde cuándo lleva esperando a ESTE firmante.
  *
  * Para una `pendiente_2` la espera arranca en la primera firma, no en el alta:
@@ -47,10 +55,12 @@ export function resumirPendientes(
   // antigüedad, pero no se pierde el aviso. Un «NaN días» sería peor que nada.
   if (instantes.length === 0) return { total: mias.length, esperaDias: null };
 
-  // Días naturales, no hábiles: una solicitud atascada el fin de semana está
-  // atascada igual, y contar hábiles exigiría los festivos, que viajan en
-  // `/ausencias/contexto` y costarían una segunda llamada.
-  const espera = (ahora.getTime() - Math.min(...instantes)) / MS_POR_DIA;
+  // Días de calendario COLOMBIANO, no bloques de 24 h ni días hábiles: contar
+  // hábiles exigiría los festivos, que viajan en `/ausencias/contexto` y
+  // costarían una segunda llamada. Y con bloques de 24 h una solicitud creada
+  // ayer a las 18:00 y mirada hoy a las 08:00 (14 h) diría «llegó hoy», que es
+  // falso: cruzó la medianoche de Colombia y ya lleva un día natural esperando.
+  const esperaDias = diaColombiano(ahora.getTime()) - diaColombiano(Math.min(...instantes));
 
-  return { total: mias.length, esperaDias: Math.max(0, Math.floor(espera)) };
+  return { total: mias.length, esperaDias: Math.max(0, esperaDias) };
 }
