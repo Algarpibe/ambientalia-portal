@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { construirPayload, eventosDeAlta } from './notificaciones.js';
+import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
 import { CALENDARIO_STAFF, HOJA_ID, PESTANA } from './config.js';
-import type { Solicitud } from './types.js';
+import type { Modificacion, Solicitud } from './types.js';
 
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
   return {
@@ -29,9 +29,49 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     // La migración 021 deja a toda la plantilla con este valor sembrado: un
     // helper con `null` describiría un estado que en producción no existe.
     copiaCorreo: 'administrativo@ambientalia.com.co',
+    modificacionPendiente: null,
+    anuladaAt: null,
     ...over,
   };
 }
+
+/**
+ * Una propuesta de cambio de fechas, tipada. Nada de `as any`: el correo se
+ * redacta sobre estos campos, y un fixture sin tipo dejaría pasar un renombrado
+ * que solo se vería en el buzón de un jefe.
+ */
+function modificacion(over: Partial<Modificacion> = {}): Modificacion {
+  return {
+    id: 'm1',
+    solicitudId: 's1',
+    clase: 'fechas',
+    estadoPrevio: 'aprobada',
+    fechaInicioPrevia: '2026-07-06',
+    fechaFinPrevia: '2026-07-10',
+    diasHabilesPrevios: 5,
+    fechaInicioNueva: '2026-07-13',
+    fechaFinNueva: '2026-07-15',
+    diasHabilesNuevos: 3,
+    motivo: 'Me han adelantado la cita del especialista',
+    estado: 'pendiente',
+    aprobadorCorreo: 'comercial@ambientalia.com.co',
+    solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+    decididaAt: null,
+    motivoRechazo: null,
+    createdAt: '2026-06-20T10:00:00Z',
+    ...over,
+  };
+}
+
+/** La anulación: los tres campos de lo propuesto van en null (CHECK de la 024). */
+const anulacion = (over: Partial<Modificacion> = {}) =>
+  modificacion({
+    clase: 'anulacion',
+    fechaInicioNueva: null,
+    fechaFinNueva: null,
+    diasHabilesNuevos: null,
+    ...over,
+  });
 
 const SEGUNDO = 'gerencia@ambientalia.com.co';
 
@@ -380,6 +420,91 @@ describe('la copia sale de la ficha del empleado', () => {
     const s = solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefe@ambientalia.com.co', copiaCorreo: 'jefe@ambientalia.com.co' });
     const p = construirPayload(s, 'aprobada');
     expect(p.correo.para.match(/jefe@ambientalia\.com\.co/g)).toHaveLength(1);
+  });
+});
+
+describe('el aviso de que se pide un cambio', () => {
+  const aviso = (s = solicitud(), m = modificacion()) =>
+    construirPayloadModificacion(s, m, 'modificacion_solicitada');
+
+  it('va SOLO al decisor, sin la cadena ni la copia de la ficha', () => {
+    // Mismo criterio que `aprobacion_2`: es un trámite interno, no un veredicto.
+    // El solicitante ya sabe lo que ha pedido y administración no pinta nada
+    // hasta que haya decisión.
+    const p = aviso(
+      solicitud({ estado: 'aprobada', copiaCorreo: 'administrativo@ambientalia.com.co' }),
+      modificacion({ aprobadorCorreo: 'jefa.directa@ambientalia.com.co' }),
+    );
+    expect(p.correo.para).toBe('jefa.directa@ambientalia.com.co');
+  });
+
+  it('el destinatario sale de la MODIFICACIÓN, no de recalcular el turno', () => {
+    // La copia congelada en el satélite manda. Si esto mirara el estado de la
+    // solicitud, una que subiera de nivel entre el alta de la propuesta y el
+    // envío mandaría el aviso a alguien que no puede decidirla.
+    const p = aviso(
+      solicitud({ estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO }),
+      modificacion({ aprobadorCorreo: 'la.que.congelo@ambientalia.com.co' }),
+    );
+    expect(p.correo.para).toBe('la.que.congelo@ambientalia.com.co');
+  });
+
+  it('dice las fechas actuales, las propuestas y el motivo', () => {
+    // Sin esto el correo no sirve para decidir y solo repite lo que ya dice el
+    // portal, que es como se entrena a la gente a no abrirlo.
+    const p = aviso();
+    expect(p.correo.asunto).toContain('Cambio pedido');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+    expect(p.correo.cuerpo).toContain('5 días hábiles');
+    expect(p.correo.cuerpo).toContain('3 días hábiles');
+    expect(p.correo.cuerpo).toContain('Motivo: Me han adelantado la cita del especialista');
+  });
+
+  it('una anulación dice que se pide ANULAR, y no deja las fechas nuevas en «null»', () => {
+    const p = aviso(solicitud({ estado: 'aprobada' }), anulacion());
+    expect(p.correo.cuerpo).toContain('ANULAR');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it('sin motivo no deja un «Motivo:» vacío colgando', () => {
+    const p = aviso(solicitud(), modificacion({ motivo: null }));
+    expect(p.correo.cuerpo).not.toContain('Motivo:');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('avisa de que la solicitud NO cambia todavía', () => {
+    expect(aviso().correo.cuerpo).toContain('NO cambia hasta que apruebes');
+  });
+
+  it('CANDADO: el payload lleva `calendario` y `hoja` en null', () => {
+    // Es lo que hace que n8n recorra la rama de solo-correo que ya usan `creada`
+    // y `aprobacion`, SIN tocar el workflow. Emitir aquí un `calendario`
+    // —«ya que estamos, que lo arregle»— no corregiría el evento viejo: crearía
+    // uno nuevo y la persona aparecería dos veces de vacaciones.
+    for (const m of [modificacion(), anulacion()]) {
+      const p = construirPayloadModificacion(solicitud({ estado: 'aprobada' }), m, 'modificacion_solicitada');
+      expect(p.calendario).toBeNull();
+      expect(p.hoja).toBeNull();
+    }
+  });
+
+  it('no estrena ningún campo en el payload: el contrato con n8n es el de siempre', () => {
+    // Un campo nuevo con `undefined` activaría para TODOS los eventos el IF que
+    // lo leyera (`undefined !== null` es `true`). Es literalmente el bug del
+    // `drive`, y por eso se compara el juego de claves entero.
+    const p = construirPayloadModificacion(solicitud(), modificacion(), 'modificacion_solicitada');
+    expect(Object.keys(p).sort()).toEqual(
+      Object.keys(construirPayload(solicitud(), 'creada')).sort(),
+    );
+  });
+
+  it('el estado que viaja es el de la SOLICITUD, que no ha cambiado', () => {
+    // La propuesta vive en su tabla: la fila de la solicitud no se toca hasta
+    // que hay decisión, y el payload no puede insinuar lo contrario.
+    const p = aviso(solicitud({ estado: 'aprobada' }), modificacion());
+    expect(p.estado).toBe('aprobada');
   });
 });
 

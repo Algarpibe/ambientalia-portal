@@ -8,7 +8,15 @@ import {
   PESTANA,
   urlPortal,
 } from './config.js';
-import { ETIQUETA_TIPO, type EventoOutbox, type FilaHoja, type PayloadEvento, type Solicitud } from './types.js';
+import {
+  ETIQUETA_TIPO,
+  type CorreoEvento,
+  type EventoSolicitud,
+  type FilaHoja,
+  type Modificacion,
+  type PayloadEvento,
+  type Solicitud,
+} from './types.js';
 
 // Los correos, eventos de calendario y filas de hoja que antes vivían dentro de
 // los nodos de n8n. Aquí son funciones puras con tests: cambiar un texto ya no
@@ -263,7 +271,7 @@ function hoja(s: Solicitud): FilaHoja {
 
 // ── Ensamblado ─────────────────────────────────────────────────────────────
 
-const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: string; cuerpo: string }> = {
+const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
   creada: acuseSolicitante,
   aprobacion: avisoAprobador,
   aprobacion_2: avisoSegundoAprobador,
@@ -284,13 +292,22 @@ const CORREO_DE: Record<EventoOutbox, (s: Solicitud) => { para: string; asunto: 
  *  - `registrada`   → calendario + hoja de una vez (la incapacidad no pasa por
  *                     aprobación, así que es su único evento).
  *
+ * Y los tres de la modificación, que salen por `construirPayloadModificacion`:
+ *  - `modificacion_solicitada` → nada más. Solo correo, al decisor.
+ *  - `modificacion_aprobada`   → nada más. **Ni calendario ni hoja**, aunque la
+ *                     original ya estuviera en Google: el evento viejo habría
+ *                     que CORREGIRLO, y emitir `calendario` aquí crearía uno
+ *                     nuevo duplicado en vez de arreglar nada. El correo lleva
+ *                     el aviso de ajustarlo a mano.
+ *  - `modificacion_rechazada`  → nada más. La solicitud queda igual que estaba.
+ *
  * Ya no hay campo `drive`: la copia de los adjuntos a Google Drive se retiró, y
  * el workflow de n8n perdió los tres nodos que la hacían. **No reintroducirlo sin
  * volver a montarlos**, y menos «por compatibilidad»: el IF que lo leía comparaba
  * `payload.drive !== null`, y con el campo ausente eso es `undefined !== null`,
  * o sea `true` para TODOS los eventos.
  */
-export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEvento {
+export function construirPayload(s: Solicitud, evento: EventoSolicitud): PayloadEvento {
   const conCalendario = evento === 'aprobada' || evento === 'registrada';
   const conHoja = evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada';
 
@@ -305,8 +322,106 @@ export function construirPayload(s: Solicitud, evento: EventoOutbox): PayloadEve
   };
 }
 
+// ── La modificación de una solicitud ya enviada ────────────────────────────
+
+/** Las fechas de la solicitud tal como estaban al pedir el cambio. */
+function bloqueFechasPrevias(m: Modificacion): string {
+  return `📅 Fechas actuales: ${m.fechaInicioPrevia} a ${m.fechaFinPrevia} (${dias(m.diasHabilesPrevios)})`;
+}
+
+/**
+ * Lo que se pide. Se escribe entero aquí y no se deja para el portal porque
+ * quien recibe esto tiene que poder decidir leyendo el correo: si solo dijera
+ * «hay un cambio pendiente», el aviso no aportaría nada sobre el enlace.
+ *
+ * Los campos nulos se guardan detrás de la clase, nunca se interpolan a pelo:
+ * una anulación los trae los tres en `null` y el flujo viejo ya escribió
+ * «undefined» en el buzón de alguien por hacer justo eso.
+ */
+function bloqueCambio(m: Modificacion): string {
+  if (m.clase === 'anulacion') {
+    return 'Pide ANULAR la solicitud: esos días dejarían de estar reservados.';
+  }
+  const nuevas = `${m.fechaInicioNueva} a ${m.fechaFinNueva}`;
+  const cuenta = m.diasHabilesNuevos === null ? '' : ` (${dias(m.diasHabilesNuevos)})`;
+  return `📅 Fechas propuestas: ${nuevas}${cuenta}`;
+}
+
+/**
+ * El aviso de que alguien pide cambiar una solicitud suya.
+ *
+ * Va SOLO al decisor, por el mismo criterio que `avisoSegundoAprobador`: es un
+ * trámite interno, no un veredicto. Ni `cadenaDeDecision` ni `copiaCorreo`.
+ *
+ * El destinatario sale de la MODIFICACIÓN (`m.aprobadorCorreo`), que es la copia
+ * congelada de la solicitud, y no de recalcular el turno sobre `s`: si la
+ * solicitud avanzara de nivel entre el alta de la propuesta y el envío del
+ * correo, el aviso se iría a alguien distinto del que va a poder decidirla.
+ */
+function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
+  const que = m.clase === 'anulacion' ? 'anular' : 'cambiar las fechas de';
+  return {
+    para: m.aprobadorCorreo,
+    asunto: `Cambio pedido: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `${s.empleadoNombre}${s.empleadoCargo ? ` (${s.empleadoCargo})` : ''} pide ${que} una solicitud ${PERIODO[s.tipo]} que ya te envió.`,
+      '',
+      bloqueFechasPrevias(m),
+      bloqueCambio(m),
+      m.motivo ? `\nMotivo: ${m.motivo}\n` : '',
+      // Mientras no lo decidas, la solicitud sigue como estaba: es la frase que
+      // evita la llamada de «¿entonces se ha cambiado ya o no?».
+      'La solicitud NO cambia hasta que apruebes o rechaces esta petición.',
+      '',
+      `Puedes aprobarla o rechazarla aquí: ${urlPortal()}/ausencias`,
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * Los eventos de modificación que esta fase sabe redactar. Los otros dos
+ * (`modificacion_aprobada` y `modificacion_rechazada`) llegan con la decisión,
+ * y hasta entonces el tipo de `evento` no los admite: así no hay forma de
+ * encolar un evento sin correo que n8n serviría vacío.
+ */
+const CORREO_MODIFICACION_DE: Record<'modificacion_solicitada', (s: Solicitud, m: Modificacion) => CorreoEvento> = {
+  modificacion_solicitada: avisoModificacion,
+};
+
+/**
+ * El payload de un aviso de modificación.
+ *
+ * `calendario` y `hoja` van a `null` SIEMPRE, y eso es lo que hace que n8n
+ * recorra la rama de solo-correo que ya usan `creada` y `aprobacion` sin tocar
+ * el workflow. No se añade ningún campo nuevo a `PayloadEvento` para esto: el IF
+ * de n8n compara contra `null`, y un campo ausente es `undefined`, que
+ * `!== null` es `true` y activaría la rama para TODOS los eventos (ver el aviso
+ * del `drive` en `construirPayload`).
+ */
+export function construirPayloadModificacion(
+  s: Solicitud,
+  m: Modificacion,
+  evento: keyof typeof CORREO_MODIFICACION_DE,
+): PayloadEvento {
+  return {
+    tipo: s.tipo,
+    tipoEtiqueta: ETIQUETA_TIPO[s.tipo],
+    // El estado de la SOLICITUD, que no ha cambiado: la propuesta vive aparte.
+    estado: s.estado,
+    empleadoNombre: s.empleadoNombre,
+    correo: CORREO_MODIFICACION_DE[evento](s, m),
+    calendario: null,
+    hoja: null,
+  };
+}
+
 /** Los eventos que dispara el alta de una solicitud, en orden de envío. */
-export function eventosDeAlta(tipo: Solicitud['tipo']): EventoOutbox[] {
+export function eventosDeAlta(tipo: Solicitud['tipo']): EventoSolicitud[] {
   // La incapacidad se informa y ya: no hay a quién avisar para que apruebe.
   return tipo === 'incapacidad' ? ['registrada'] : ['creada', 'aprobacion'];
 }

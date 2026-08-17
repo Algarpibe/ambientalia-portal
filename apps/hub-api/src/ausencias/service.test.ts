@@ -3,12 +3,14 @@ import {
   AusenciaError,
   nombreArchivoNormalizado,
   puedeDecidir,
+  puedePedirModificacion,
   puedeVerAdjunto,
+  validarNuevaModificacion,
   validarNuevaSolicitud,
   validarSaldo,
   type Sesion,
 } from './service.js';
-import { transicionAlDecidir, type Solicitud } from './types.js';
+import { decisorDeModificacion, transicionAlDecidir, type EstadoSolicitud, type Solicitud } from './types.js';
 
 const PDF_BASE64 = Buffer.from('%PDF-1.4 fake').toString('base64');
 
@@ -52,6 +54,9 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     adjunto: null,
     // Este fichero no prueba copias: null es el valor neutro.
     copiaCorreo: null,
+    // Sin propuesta de cambio viva y sin anular: el estado de casi todas.
+    modificacionPendiente: null,
+    anuladaAt: null,
     ...over,
   };
 }
@@ -564,5 +569,206 @@ describe('el informado no hereda ningún permiso del segundo firmante', () => {
     // La llave AÑADE acceso y nunca lo condiciona: no ser firmante no puede
     // quitársela a quien la tiene por otra vía.
     expect(puedeVerAdjunto(suSesion, adjuntoDeLaSolicitud, true)).toBe(true);
+  });
+});
+
+// ── Modificación de una solicitud ya enviada ───────────────────────────────
+
+describe('validarNuevaModificacion', () => {
+  /** Las fechas que la solicitud tiene AHORA, contra las que se compara. */
+  const ACTUAL = { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' };
+  const cambio = (over: Record<string, unknown> = {}) => ({
+    clase: 'fechas',
+    fechaInicio: '2026-07-13',
+    fechaFin: '2026-07-15',
+    ...over,
+  });
+  const validar = (body: unknown) => validarNuevaModificacion(body, ACTUAL);
+
+  it('acepta un cambio de fechas y limpia el motivo', () => {
+    expect(validar(cambio({ motivo: '  Cita médica  ' }))).toEqual({
+      clase: 'fechas',
+      fechaInicio: '2026-07-13',
+      fechaFin: '2026-07-15',
+      motivo: 'Cita médica',
+    });
+  });
+
+  it('acepta una anulación, con las tres fechas en null', () => {
+    expect(validar({ clase: 'anulacion', motivo: 'Se cancela el viaje' })).toEqual({
+      clase: 'anulacion',
+      fechaInicio: null,
+      fechaFin: null,
+      motivo: 'Se cancela el viaje',
+    });
+  });
+
+  it('rechaza una clase que no existe', () => {
+    expect(() => validar(cambio({ clase: 'cambiar_tipo' }))).toThrow(
+      expect.objectContaining({ code: 'clase_invalida', status: 400, field: 'clase' }),
+    );
+    expect(() => validar({})).toThrow(expect.objectContaining({ code: 'clase_invalida' }));
+  });
+
+  it('CANDADO: una anulación que trae fechas es 400, no se ignoran en silencio', () => {
+    // Un cliente con un bug creería haber pedido un cambio de fechas y habría
+    // pedido que le anularan las vacaciones. Aceptarlo «quedándose con la
+    // clase» es la forma silenciosa de borrarle los días a alguien.
+    expect(() => validar({ clase: 'anulacion', fechaInicio: '2026-07-13', fechaFin: '2026-07-15' })).toThrow(
+      expect.objectContaining({ code: 'clase_invalida', status: 400, field: 'clase' }),
+    );
+    // Con una sola de las dos, también.
+    expect(() => validar({ clase: 'anulacion', fechaFin: '2026-07-15' })).toThrow(AusenciaError);
+    // Y un input vacío del formulario NO cuenta como fecha.
+    expect(() => validar({ clase: 'anulacion', fechaInicio: '', fechaFin: '' })).not.toThrow();
+  });
+
+  it('rechaza fechas que no son de calendario', () => {
+    expect(() => validar(cambio({ fechaInicio: '2026-02-30' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_invalida', field: 'fechaInicio' }),
+    );
+    expect(() => validar(cambio({ fechaFin: 'mañana' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_invalida', field: 'fechaFin' }),
+    );
+  });
+
+  it('rechaza el rango invertido', () => {
+    expect(() => validar(cambio({ fechaInicio: '2026-07-15', fechaFin: '2026-07-13' }))).toThrow(
+      expect.objectContaining({ code: 'rango_invertido' }),
+    );
+  });
+
+  it('rechaza rangos de más de un año', () => {
+    expect(() => validar(cambio({ fechaFin: '2028-07-15' }))).toThrow(
+      expect.objectContaining({ code: 'rango_demasiado_largo' }),
+    );
+  });
+
+  it('CANDADO: pedir exactamente las fechas que ya tiene es 400', () => {
+    // Si pasara, el jefe recibiría un correo pidiéndole que apruebe dejar todo
+    // igual — y a la tercera vez deja de leerlos.
+    expect(() => validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: ACTUAL.fechaFin }))).toThrow(
+      expect.objectContaining({ code: 'sin_cambios', status: 400 }),
+    );
+  });
+
+  it('cambiar solo una de las dos fechas SÍ es un cambio', () => {
+    // El caso principal de la feature: acortar por la cola una ausencia en curso.
+    expect(validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: '2026-07-08' }))).toMatchObject({
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-08',
+    });
+  });
+
+  it('NO aplica la regla de «fecha en pasado» del alta', () => {
+    // La sustituye la de `fechaFin >= hoy` sobre la solicitud. Sin esto no se
+    // podría acortar una ausencia ya empezada, que es el caso que más importa.
+    expect(validar(cambio({ fechaInicio: '2020-01-06', fechaFin: '2020-01-08' }))).toMatchObject({
+      fechaInicio: '2020-01-06',
+    });
+  });
+
+  it('rechaza un motivo kilométrico', () => {
+    expect(() => validar(cambio({ motivo: 'x'.repeat(2001) }))).toThrow(
+      expect.objectContaining({ code: 'motivo_demasiado_largo', field: 'motivo' }),
+    );
+    expect(validar(cambio({ motivo: 'x'.repeat(2000) })).motivo).toHaveLength(2000);
+  });
+
+  it('sin motivo se guarda null, no una cadena vacía', () => {
+    expect(validar(cambio()).motivo).toBeNull();
+    expect(validar(cambio({ motivo: '   ' })).motivo).toBeNull();
+  });
+
+  it('ignora cualquier empleadoId o diasHabiles que mande el cliente', () => {
+    // Igual que en el alta: la identidad sale de la sesión y los días los cuenta
+    // el servidor. Este test fija que no EXISTA la rama que los lea.
+    const r = validar(cambio({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
+    expect(r.empleadoId).toBeUndefined();
+    expect(r.diasHabiles).toBeUndefined();
+  });
+});
+
+describe('decisorDeModificacion', () => {
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const SEGUNDO = 'comercial@ambientalia.com.co';
+  const enCascada = (estado: EstadoSolicitud) =>
+    solicitud({ estado, aprobadorCorreo: PRIMERO, segundoAprobadorCorreo: SEGUNDO });
+
+  it('en `pendiente` decide el primer firmante', () => {
+    expect(decisorDeModificacion(enCascada('pendiente'))).toBe(PRIMERO);
+  });
+
+  it('en `pendiente_2` decide el segundo: es a quien le toca el turno', () => {
+    expect(decisorDeModificacion(enCascada('pendiente_2'))).toBe(SEGUNDO);
+  });
+
+  it('en `aprobada` decide el jefe inmediato, no el segundo', () => {
+    // Ya no hay turno que respetar, y exigir dos firmas para RENUNCIAR a unas
+    // vacaciones es absurdo. El jefe inmediato es quien reorganiza el trabajo.
+    expect(decisorDeModificacion(enCascada('aprobada'))).toBe(PRIMERO);
+  });
+
+  it('una incapacidad (`registrada`, sin aprobador) no tiene decisor', () => {
+    // Se informa, no se concede: no hay a quién mandarle la petición.
+    expect(
+      decisorDeModificacion(
+        solicitud({ estado: 'registrada', aprobadorCorreo: null, segundoAprobadorCorreo: null }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('puedePedirModificacion', () => {
+  const HOY_MOD = '2026-07-08';
+  /** Una solicitud en cascada: los dos firmantes con valor en todos los estados. */
+  const conFechaFin = (estado: EstadoSolicitud, fechaFin: string) =>
+    solicitud({
+      estado,
+      fechaFin,
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+      segundoAprobadorCorreo: 'comercial@ambientalia.com.co',
+    });
+
+  const FUTURA = '2026-07-20';
+  const HOY_MISMO = HOY_MOD;
+  const PASADA = '2026-07-07';
+
+  it.each(['pendiente', 'pendiente_2', 'aprobada'] as const)('%s admite cambio si aún no ha terminado', (estado) => {
+    expect(puedePedirModificacion(conFechaFin(estado, FUTURA), HOY_MOD)).toBe(true);
+    // El último día cuenta: la ausencia todavía está en curso.
+    expect(puedePedirModificacion(conFechaFin(estado, HOY_MISMO), HOY_MOD)).toBe(true);
+    // Ya terminada, no: eso es corrección de nómina, no una aprobación.
+    expect(puedePedirModificacion(conFechaFin(estado, PASADA), HOY_MOD)).toBe(false);
+  });
+
+  it.each(['rechazada', 'registrada'] as const)('%s no admite cambio en ninguna fecha', (estado) => {
+    for (const fechaFin of [FUTURA, HOY_MISMO, PASADA]) {
+      expect(puedePedirModificacion(conFechaFin(estado, fechaFin), HOY_MOD)).toBe(false);
+    }
+  });
+
+  it('la regla mira `fechaFin` y NO `fechaInicio`: una ausencia en curso se puede acortar', () => {
+    // Es el caso «córtala, tengo que volver». Con `fechaInicio` esto sería false
+    // y la feature no cubriría justo el momento en que más se necesita.
+    const enCurso = solicitud({
+      estado: 'aprobada',
+      fechaInicio: '2026-07-06',
+      fechaFin: FUTURA,
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    expect(puedePedirModificacion(enCurso, HOY_MOD)).toBe(true);
+  });
+
+  it('sin decisor no admite cambio, aunque el estado y la fecha acompañen', () => {
+    // La incapacidad llega aquí por el estado `registrada`, pero el candado real
+    // es que no hay a quién mandárselo: una fila sin aprobador tampoco vale.
+    const huerfana = solicitud({
+      estado: 'aprobada',
+      fechaFin: FUTURA,
+      aprobadorCorreo: null,
+      segundoAprobadorCorreo: null,
+    });
+    expect(puedePedirModificacion(huerfana, HOY_MOD)).toBe(false);
   });
 });

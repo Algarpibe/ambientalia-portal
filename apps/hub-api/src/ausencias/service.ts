@@ -12,16 +12,21 @@ import {
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos } from './jerarquia.js';
-import { construirPayload, eventosDeAlta } from './notificaciones.js';
+import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
 import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
 import {
+  CLASES_MODIFICACION,
   ETIQUETA_TIPO,
   TIPOS,
   correoDelTurno,
+  decisorDeModificacion,
   requiereAprobacion,
   transicionAlDecidir,
+  type ClaseModificacion,
   type Empleado,
+  type EstadoSolicitud,
+  type Modificacion,
   type NuevaSolicitud,
   type Solicitud,
   type TipoSolicitud,
@@ -43,6 +48,12 @@ export class AusenciaError extends Error {
 export const MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
 const MAX_COMENTARIOS = 2000;
 const MAX_MOTIVO = 1000;
+/**
+ * Más holgado que el motivo de un rechazo: quien pide un cambio tiene que
+ * explicar un caso personal («me han adelantado la cita del especialista»), y no
+ * solo justificar un no.
+ */
+const MAX_MOTIVO_MODIFICACION = 2000;
 const MAX_NOMBRE_ARCHIVO = 200;
 
 // El contenido de los correos y los destinos de Google viven en
@@ -120,6 +131,78 @@ function validarAdjunto(v: unknown): NuevaSolicitud['adjunto'] {
     throw new AusenciaError('adjunto_demasiado_grande', 400, 'adjunto');
   }
   return { nombreArchivo, mime, contenidoBase64 };
+}
+
+function esClase(v: unknown): v is ClaseModificacion {
+  return typeof v === 'string' && (CLASES_MODIFICACION as readonly string[]).includes(v);
+}
+
+/** Un campo que el cliente ha rellenado de verdad. Un `''` es un input vacío. */
+function llegaConValor(v: unknown): boolean {
+  return v !== undefined && v !== null && v !== '';
+}
+
+/** Lo que el cliente manda al pedir un cambio. Ni `empleadoId` ni `diasHabiles`. */
+export interface NuevaModificacion {
+  clase: ClaseModificacion;
+  /** `null` en una anulación; con valor en un cambio de fechas. */
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  motivo: string | null;
+}
+
+/**
+ * Valida la propuesta contra las fechas que la solicitud tiene AHORA.
+ *
+ * Recibe la solicitud actual —y no solo el cuerpo— porque `sin_cambios` no se
+ * puede decidir sin ella. Entra por parámetro, como el `hoy` de
+ * `validarNuevaSolicitud`, para que la función siga siendo pura y probable sin
+ * base de datos.
+ *
+ * Aquí NO se aplica la regla `fecha_en_pasado` del alta. La sustituye la de
+ * `fechaFin >= hoy` sobre la solicitud (`puedePedirModificacion`): una ausencia
+ * ya empezada es justo donde «córtala, tengo que volver» es legítimo, y esa
+ * propuesta empieza necesariamente en el pasado.
+ */
+export function validarNuevaModificacion(
+  body: unknown,
+  actual: Pick<Solicitud, 'fechaInicio' | 'fechaFin'>,
+): NuevaModificacion {
+  const b = (body ?? {}) as Record<string, unknown>;
+
+  if (!esClase(b.clase)) throw new AusenciaError('clase_invalida', 400, 'clase');
+  const clase = b.clase;
+
+  const motivo = typeof b.motivo === 'string' ? b.motivo.trim() : '';
+  if (motivo.length > MAX_MOTIVO_MODIFICACION) throw new AusenciaError('motivo_demasiado_largo', 400, 'motivo');
+
+  if (clase === 'anulacion') {
+    // Las fechas NO se ignoran en silencio: un cliente con un bug creería haber
+    // pedido un cambio de fechas y habría pedido que le anularan las vacaciones.
+    // Se señala `clase` y no las fechas porque es el campo que hay que corregir
+    // para que la petición signifique lo que el cliente cree que significa.
+    if (llegaConValor(b.fechaInicio) || llegaConValor(b.fechaFin)) {
+      throw new AusenciaError('clase_invalida', 400, 'clase');
+    }
+    return { clase, fechaInicio: null, fechaFin: null, motivo: motivo || null };
+  }
+
+  const fechaInicio = String(b.fechaInicio ?? '');
+  const fechaFin = String(b.fechaFin ?? '');
+  if (!esFechaValida(fechaInicio)) throw new AusenciaError('fecha_invalida', 400, 'fechaInicio');
+  if (!esFechaValida(fechaFin)) throw new AusenciaError('fecha_invalida', 400, 'fechaFin');
+  if (fechaInicio > fechaFin) throw new AusenciaError('rango_invertido', 400, 'fechaFin');
+
+  const diasNaturales = (Date.parse(`${fechaFin}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000 + 1;
+  if (diasNaturales > MAX_DIAS_RANGO) throw new AusenciaError('rango_demasiado_largo', 400, 'fechaFin');
+
+  // Pedir exactamente lo que ya tiene no es un cambio: sin esto, el jefe
+  // recibiría un correo pidiéndole que apruebe dejar todo igual.
+  if (fechaInicio === actual.fechaInicio && fechaFin === actual.fechaFin) {
+    throw new AusenciaError('sin_cambios', 400, 'fechaInicio');
+  }
+
+  return { clase, fechaInicio, fechaFin, motivo: motivo || null };
 }
 
 // `normalize('NFD')` separa la tilde de su letra, y el bloque U+0300–U+036F son
@@ -342,6 +425,136 @@ export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
   return (
     (s.aprobadorCorreo ?? '').toLowerCase() === yo || (s.segundoAprobadorCorreo ?? '').toLowerCase() === yo
   );
+}
+
+// ── Modificación de una solicitud ya enviada ───────────────────────────────
+
+/**
+ * Los estados que admiten una enmienda.
+ *
+ * `rechazada` queda fuera porque los días nunca se concedieron: lo que su dueño
+ * quiere es volver a pedirlos, y para eso está `POST /solicitudes`. `registrada`
+ * queda fuera porque una incapacidad se informa, no se concede: no hay a quién
+ * mandarle la petición (y `decisorDeModificacion` devuelve `null`, que es la
+ * comprobación que de verdad lo cierra).
+ */
+const ESTADOS_MODIFICABLES: readonly EstadoSolicitud[] = ['pendiente', 'pendiente_2', 'aprobada'];
+
+/** Lo mínimo de una solicitud para saber si admite un cambio. */
+type SolicitudEnmendable = Pick<
+  Solicitud,
+  'estado' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
+>;
+
+function estadoAdmiteModificacion(s: SolicitudEnmendable): boolean {
+  return ESTADOS_MODIFICABLES.includes(s.estado) && decisorDeModificacion(s) !== null;
+}
+
+/**
+ * Se mira `fechaFin` y NO `fechaInicio`, a propósito. Una ausencia en curso es
+ * justo el caso donde «córtala, tengo que volver» es legítimo; una ya terminada
+ * es corrección de nómina, no una aprobación que nadie pueda ya conceder.
+ */
+function sigueVigente(s: Pick<Solicitud, 'fechaFin'>, hoy: string): boolean {
+  return s.fechaFin >= hoy;
+}
+
+/**
+ * Si esta solicitud admite que su dueño pida cambiarla.
+ *
+ * Es el OR de las dos reglas que `pedirModificacion` comprueba por separado —él
+ * las separa para poder dar el 409 exacto—, y vive aquí en una sola función
+ * porque es lo que la interfaz necesita para decidir si enseña el botón.
+ * Duplicar la regla en el navegador es cómo se llega a ofrecer un botón que
+ * responde 409 al pulsarlo.
+ */
+export function puedePedirModificacion(s: SolicitudEnmendable, hoy: string): boolean {
+  return estadoAdmiteModificacion(s) && sigueVigente(s, hoy);
+}
+
+/**
+ * El dueño de una solicitud pide cambiarle las fechas o anularla.
+ *
+ * Tres cosas que NO pasan aquí, y cada una es un fallo de seguridad si se cae:
+ *
+ *  - `empleadoId` no se lee del cuerpo: sale de la sesión, igual que en
+ *    `crearSolicitud`. Solo el DUEÑO puede pedirlo, ni siquiera un admin en
+ *    nombre de otro — para corregir una fila a mano ya está el `PATCH`, que
+ *    además no manda correos.
+ *  - Los firmantes NO se rederivan. `aprobadorCorreo` sale de
+ *    `decisorDeModificacion(solicitud)`, que lee la propia solicitud. Llamar
+ *    aquí a `aprobadoresDe` mandaría «anula mis vacaciones aprobadas» a un jefe
+ *    nuevo que no sabe que se aprobaron.
+ *  - Los días hábiles los cuenta el servidor, nunca el cliente.
+ */
+export async function pedirModificacion(
+  db: Pool,
+  sesion: Sesion,
+  solicitudId: string,
+  body: unknown,
+): Promise<Modificacion> {
+  const empleado = await empleadoDeSesion(db, sesion);
+  const solicitud = await repo.solicitudPorId(db, solicitudId);
+  if (!solicitud) throw new AusenciaError('no_encontrada', 404);
+  if (solicitud.empleadoId !== empleado.id) throw new AusenciaError('no_es_su_solicitud', 403);
+
+  if (!estadoAdmiteModificacion(solicitud)) throw new AusenciaError('estado_no_admite_modificacion', 409);
+  if (!sigueVigente(solicitud, hoyEnColombia())) throw new AusenciaError('solicitud_ya_pasada', 409);
+
+  const datos = validarNuevaModificacion(body, solicitud);
+  // No puede ser null: `estadoAdmiteModificacion` ya lo ha exigido.
+  const decisor = decisorDeModificacion(solicitud) as string;
+
+  const resultado = await repo.crearModificacion(
+    db,
+    {
+      solicitudId,
+      clase: datos.clase,
+      // El estado que se acaba de LEER, como testigo de concurrencia hasta el
+      // WHERE del INSERT. Ver `repo.crearModificacion`.
+      estadoEsperado: solicitud.estado,
+      fechaInicioNueva: datos.fechaInicio,
+      fechaFinNueva: datos.fechaFin,
+      diasHabilesNuevos:
+        datos.fechaInicio && datos.fechaFin ? contarDiasHabiles(datos.fechaInicio, datos.fechaFin) : null,
+      motivo: datos.motivo,
+      aprobadorCorreo: decisor,
+    },
+    construirPayloadModificacion,
+  );
+
+  if (!resultado.ok) {
+    throw resultado.razon === 'estado'
+      ? new AusenciaError('solicitud_cambio_de_estado', 409)
+      : new AusenciaError('ya_hay_modificacion_pendiente', 409);
+  }
+
+  void avisarN8n();
+  return resultado.modificacion;
+}
+
+/**
+ * El autor retira su propia propuesta. Sin correo a nadie: retirar deja la
+ * solicitud exactamente como estaba, así que no hay nada que comunicar.
+ *
+ * Se compara por `solicitanteEmail` —el correo desnormalizado en el satélite— y
+ * no por `empleadoId`: es el dato que la propia fila ya trae, y evita una
+ * segunda consulta a la solicitud solo para saber de quién era.
+ */
+export async function retirarModificacion(db: Pool, sesion: Sesion, id: string): Promise<Modificacion> {
+  const empleado = await empleadoDeSesion(db, sesion);
+  const modificacion = await repo.modificacionPorId(db, id);
+  if (!modificacion) throw new AusenciaError('no_encontrada', 404);
+  if (modificacion.solicitanteEmail.toLowerCase() !== empleado.correo.toLowerCase()) {
+    throw new AusenciaError('no_es_su_modificacion', 403);
+  }
+  if (modificacion.estado !== 'pendiente') throw new AusenciaError('ya_decidida', 409);
+
+  const retirada = await repo.retirarModificacion(db, id);
+  // Sin fila: el jefe la decidió entre la lectura y el UPDATE. Es un conflicto,
+  // no un fallo del servidor, y su decisión gana.
+  if (!retirada) throw new AusenciaError('ya_decidida', 409);
+  return retirada;
 }
 
 /**

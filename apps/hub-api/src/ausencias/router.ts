@@ -155,6 +155,35 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El dueño pide que se le cambien las fechas o se le anule una solicitud ya
+   * enviada. Bajo `...gated` y sin `requireAdmin`: es la vía del TRABAJADOR, y
+   * el servicio comprueba que la solicitud sea suya. Un admin que quiera
+   * corregir una fila a mano tiene el `PATCH`, que no manda correos.
+   */
+  router.post('/ausencias/solicitudes/:id/modificaciones', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.status(201).json(await service.pedirModificacion(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_pedir_modificacion');
+    }
+  });
+
+  /**
+   * El autor se echa atrás.
+   *
+   * `POST .../retirar` y NO `DELETE /modificaciones/:id`: la fila no se borra,
+   * pasa a `retirada` y sigue ahí. Un `DELETE` que no borra sorprende a quien
+   * lea este router dentro de seis meses.
+   */
+  router.post('/ausencias/modificaciones/:id/retirar', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.retirarModificacion(db, sesionDe(req), req.params.id));
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirar_modificacion');
+    }
+  });
+
   /** Días hábiles de un rango. El formulario lo usa para el contador en vivo. */
   router.get('/ausencias/dias-habiles', ...gated, (req: Request, res: Response) => {
     try {

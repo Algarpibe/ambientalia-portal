@@ -28,6 +28,54 @@ interface EventoFalso {
 /** La misma reserva que el SQL (`RESERVA` en repo.ts), en milisegundos. */
 const RESERVA_MS = 5 * 60 * 1000;
 
+/**
+ * La ficha de empleado tal como la devuelven `asegurarEmpleado` y compañía.
+ *
+ * Existe para que los fixtures NUEVOS se declaren con tipo en vez de heredar el
+ * `any` de `estado.empleado` (línea de abajo): ese truco ya costó una vez 11
+ * tests caídos sin que el build dijera nada, porque `any` apaga la comprobación
+ * de todo lo que se construya esparciéndolo. El campo viejo se deja como está
+ * —tiparlo obliga a un `!` en las catorce asignaciones que ya existen, ruido
+ * ajeno a este cambio—, pero nada nuevo entra por ahí sin tipo.
+ */
+interface EmpleadoFalso {
+  id: string;
+  nombreCompleto: string;
+  correo: string;
+  cargo: string | null;
+  credencial: number | null;
+  aprobadorCorreo: string;
+  requiereSegundaFirma: boolean;
+  userId: string | null;
+  activo: boolean;
+  /** Los que el doble cuelga de la ficha para modelar otras columnas. */
+  copiaCorreo?: string | null;
+  veAdjuntos?: boolean;
+  saldoCorte?: number | null;
+  fechaCorte?: string | null;
+}
+
+/** Una propuesta de cambio, tal como sale de `portal.solicitud_modificaciones`. */
+interface ModificacionFalsa {
+  id: string;
+  solicitudId: string;
+  clase: string;
+  estadoPrevio: string;
+  fechaInicioPrevia: string;
+  fechaFinPrevia: string;
+  diasHabilesPrevios: number;
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: string;
+  aprobadorCorreo: string;
+  solicitanteEmail: string;
+  decididaAt: string | null;
+  motivoRechazo: string | null;
+  createdAt: string;
+}
+
 const estado = {
   /** Reloj falso, para poder pasar por delante de la reserva sin esperar. */
   ahora: 0,
@@ -41,7 +89,17 @@ const estado = {
   solicitudes: [] as Record<string, unknown>[],
   /** Argumentos de la última llamada a `decidirSolicitud`, para fijar el cableado. */
   ultimaDecision: null as { estadoEsperado: string; transicion: Record<string, unknown> } | null,
+  /** Ídem para `crearModificacion`: qué testigo de concurrencia le llegó. */
+  ultimaAlta: null as Record<string, unknown> | null,
   eventos: [] as EventoFalso[],
+  /** La tabla `portal.solicitud_modificaciones`. */
+  modificaciones: [] as ModificacionFalsa[],
+  /**
+   * Simula que OTRO mueve la solicitud justo entre el SELECT del servicio y el
+   * INSERT de la propuesta. Es la única forma de reproducir esa carrera contra
+   * un doble en memoria: dos peticiones HTTP no llegan a solaparse aquí.
+   */
+  pisarEstadoAlCrearModificacion: null as string | null,
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
   registroVisores: [] as Record<string, unknown>[],
@@ -236,6 +294,10 @@ vi.mock('./repo.js', () => ({
       motivoRechazo: null,
       createdAt: '2026-06-01T10:00:00Z',
       adjunto: adjunto ? { id: `a${estado.seq}`, nombreArchivo: adjunto.nombreArchivo, mime: 'application/pdf', bytes: 10 } : null,
+      // Los dos campos que el LEFT JOIN de `SELECT_SOLICITUD` añade a TODA
+      // solicitud. Nacen vacíos, como en el SQL real.
+      modificacionPendiente: null,
+      anuladaAt: null,
     };
     estado.solicitudes.push(s);
     for (const evento of eventos) {
@@ -280,6 +342,80 @@ vi.mock('./repo.js', () => ({
     });
     return s;
   },
+  // Modela las TRES garantías que el SQL real pone en una sola sentencia (ver
+  // `repo.crearModificacion`), porque de ellas dependen los candados de abajo:
+  //  1. el testigo `AND s.estado = $8`, comparado contra el estado que leyó el
+  //     servicio y NO contra una lista de estados admisibles;
+  //  2. el índice único parcial, que solo cuenta las propuestas `pendiente`;
+  //  3. la foto previa resuelta desde la SOLICITUD, no desde lo que mande quien
+  //     llama: si el servicio se inventara un `estado_previo`, aquí daría igual.
+  crearModificacion: async (
+    _db: unknown,
+    datos: Record<string, unknown>,
+    construirPayload: (s: unknown, m: unknown, evento: string) => unknown,
+  ) => {
+    estado.ultimaAlta = datos;
+    // El adelanto de otra transacción, si el test lo ha programado: ocurre
+    // DESPUÉS de que el servicio leyera la solicitud y ANTES del INSERT.
+    if (estado.pisarEstadoAlCrearModificacion) {
+      const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
+      if (s) s.estado = estado.pisarEstadoAlCrearModificacion;
+    }
+
+    const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
+    if (!s || s.estado !== datos.estadoEsperado) return { ok: false, razon: 'estado' };
+
+    if (estado.modificaciones.some((m) => m.solicitudId === datos.solicitudId && m.estado === 'pendiente')) {
+      return { ok: false, razon: 'duplicada' };
+    }
+
+    const modificacion: ModificacionFalsa = {
+      id: `m${estado.modificaciones.length + 1}`,
+      solicitudId: String(datos.solicitudId),
+      clase: String(datos.clase),
+      // La foto sale de la fila, como el SELECT de dentro del INSERT.
+      estadoPrevio: String(s.estado),
+      fechaInicioPrevia: String(s.fechaInicio),
+      fechaFinPrevia: String(s.fechaFin),
+      diasHabilesPrevios: Number(s.diasHabiles),
+      fechaInicioNueva: (datos.fechaInicioNueva as string | null) ?? null,
+      fechaFinNueva: (datos.fechaFinNueva as string | null) ?? null,
+      diasHabilesNuevos: (datos.diasHabilesNuevos as number | null) ?? null,
+      motivo: (datos.motivo as string | null) ?? null,
+      estado: 'pendiente',
+      aprobadorCorreo: String(datos.aprobadorCorreo),
+      solicitanteEmail: String(s.solicitanteEmail),
+      decididaAt: null,
+      motivoRechazo: null,
+      createdAt: '2026-06-20T10:00:00Z',
+    };
+    estado.modificaciones.push(modificacion);
+    // El LEFT JOIN: desde ya, la solicitud viaja con su propuesta viva.
+    s.modificacionPendiente = modificacion;
+
+    estado.eventos.push({
+      id: estado.eventos.length + 1,
+      evento: 'modificacion_solicitada',
+      solicitudId: String(datos.solicitudId),
+      intentos: 0,
+      payload: construirPayload(s, modificacion, 'modificacion_solicitada'),
+      enviado: false,
+    });
+    return { ok: true, modificacion };
+  },
+  // El `AND estado = 'pendiente'` del UPDATE real: si el jefe la decidió entre
+  // medias, su decisión gana y esto no devuelve fila.
+  retirarModificacion: async (_db: unknown, id: string) => {
+    const m = estado.modificaciones.find((x) => x.id === id);
+    if (!m || m.estado !== 'pendiente') return null;
+    m.estado = 'retirada';
+    m.decididaAt = '2026-01-15T12:00:00Z';
+    const s = estado.solicitudes.find((x) => x.id === m.solicitudId);
+    // Sale del índice único parcial, así que deja de colgar del LEFT JOIN.
+    if (s) s.modificacionPendiente = null;
+    return m;
+  },
+  modificacionPorId: async (_db: unknown, id: string) => estado.modificaciones.find((m) => m.id === id) ?? null,
   enlaceDe: async (_db: unknown, correo: string) => {
     const e = estado.plantilla.find((x: any) => String(x.correo).toLowerCase() === correo.toLowerCase());
     return e ? { correo: String(e.correo).toLowerCase(), aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase() } : null;
@@ -417,8 +553,11 @@ beforeEach(() => {
   estado.historicoInsertado = 0;
   estado.solicitudes = [];
   estado.ultimaDecision = null;
+  estado.ultimaAlta = null;
   estado.ahora = 0;
   estado.eventos = [];
+  estado.modificaciones = [];
+  estado.pisarEstadoAlCrearModificacion = null;
   estado.adjuntos = new Map();
   estado.seq = 0;
   estado.registroVisores = [];
@@ -2011,6 +2150,427 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .set('Authorization', `Bearer ${token()}`)
       .send({ veAdjuntos: true })
       .expect(403);
+  });
+});
+
+// ── Modificación de una solicitud ya enviada ───────────────────────────────
+
+describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
+  const APROBADOR = 'comercial@ambientalia.com.co';
+  const LUIS = 'luis.prieto@ambientalia.com.co';
+
+  /** Un cambio de fechas al 13-17 de julio de 2026: lunes a viernes, 5 hábiles. */
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-17', motivo: 'Cita médica' };
+
+  /**
+   * La ficha de OTRA persona. `asegurarEmpleado` del doble devuelve siempre
+   * `estado.empleado` sin mirar el correo, así que cambiar de sesión es cambiar
+   * esta ficha. Tipada, para que un renombrado del contrato salga en el build.
+   */
+  const otraFicha = (): EmpleadoFalso => ({
+    id: 'e9',
+    nombreCompleto: 'Luis Prieto',
+    correo: LUIS,
+    cargo: 'Analista',
+    credencial: 1003,
+    aprobadorCorreo: APROBADOR,
+    requiereSegundaFirma: true,
+    userId: null,
+    activo: true,
+  });
+
+  async function crear(over: Record<string, unknown> = {}) {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva(over))
+      .expect(201);
+    return r.body as Record<string, unknown>;
+  }
+
+  /** La fila tal como está guardada, para poder moverla por debajo. */
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  const pedir = (id: string, body: Record<string, unknown>, tok = token()) =>
+    request(app())
+      .post(`/api/ausencias/solicitudes/${id}/modificaciones`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send(body);
+
+  const avisos = () => estado.eventos.filter((e) => e.evento === 'modificacion_solicitada');
+
+  it('el dueño pide cambiar las fechas: 201 y el aviso va al decisor', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, CAMBIO).expect(201);
+    expect(r.body).toMatchObject({
+      clase: 'fechas',
+      estado: 'pendiente',
+      fechaInicioNueva: '2026-07-13',
+      fechaFinNueva: '2026-07-17',
+      motivo: 'Cita médica',
+    });
+    expect(avisos()).toHaveLength(1);
+    expect((avisos()[0].payload as any).correo.para).toBe(APROBADOR);
+  });
+
+  it('la foto previa sale de la SOLICITUD, no del cuerpo de la petición', async () => {
+    // Es lo que sostiene el «de estas fechas a estas otras» del correo. Si el
+    // cliente pudiera dictarla, el jefe leería un antes que nunca existió.
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      ...CAMBIO,
+      estadoPrevio: 'aprobada',
+      fechaInicioPrevia: '1999-01-01',
+      diasHabilesPrevios: 99,
+    }).expect(201);
+    expect(r.body).toMatchObject({
+      estadoPrevio: 'pendiente',
+      fechaInicioPrevia: '2026-07-06',
+      fechaFinPrevia: '2026-07-10',
+      diasHabilesPrevios: 5,
+    });
+  });
+
+  it('los días hábiles nuevos los cuenta el servidor', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, { ...CAMBIO, diasHabilesNuevos: 99 }).expect(201);
+    expect(r.body.diasHabilesNuevos).toBe(5);
+  });
+
+  it('una anulación se guarda con las tres columnas de lo propuesto en null', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, { clase: 'anulacion', motivo: 'Se cancela el viaje' }).expect(201);
+    expect(r.body).toMatchObject({ clase: 'anulacion', fechaInicioNueva: null, fechaFinNueva: null });
+    expect(r.body.diasHabilesNuevos).toBeNull();
+    expect((avisos()[0].payload as any).correo.cuerpo).toContain('ANULAR');
+  });
+
+  it('la solicitud viaja con su propuesta viva colgada, sin pedir nada aparte', async () => {
+    // El LEFT JOIN de `SELECT_SOLICITUD`: ninguna pantalla puede olvidarse de
+    // preguntar y enseñar como firmes unas fechas que están en discusión.
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const r = await request(app())
+      .get('/api/ausencias/mis-solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.solicitudes).toHaveLength(1);
+    expect(r.body.solicitudes[0].modificacionPendiente).toMatchObject({ clase: 'fechas', estado: 'pendiente' });
+    expect(r.body.solicitudes[0]).toHaveProperty('anuladaAt', null);
+  });
+
+  it('404 si la solicitud no existe', async () => {
+    const r = await pedir('no-existe', CAMBIO).expect(404);
+    expect(r.body.error).toBe('no_encontrada');
+  });
+
+  it('403 si la solicitud es de otro', async () => {
+    const s = await crear();
+    // Ahora quien pregunta es Luis, que no tiene nada que ver con esa solicitud.
+    estado.empleado = otraFicha();
+    const r = await pedir(s.id as string, CAMBIO, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_solicitud');
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('CANDADO: mandar `empleadoId` en el cuerpo no abre la solicitud de otro', async () => {
+    // La identidad sale de la sesión y de ningún otro sitio. Este test no
+    // prueba una rama: fija que NO exista. Si alguien añadiera un `empleadoId`
+    // «para que administración pueda pedirlo en nombre de», se pondría rojo.
+    const s = await crear();
+    const dueña = estado.empleado.id;
+    estado.empleado = otraFicha();
+    const r = await pedir(s.id as string, { ...CAMBIO, empleadoId: dueña }, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_solicitud');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('ni un admin lo pide en nombre de otro: para corregir a mano está el PATCH', async () => {
+    // El PATCH además no manda correos, que es lo que lo hace apto para
+    // corregir el registro. Esto es el debido proceso, y tiene un solo dueño.
+    const s = await crear();
+    estado.empleado = otraFicha();
+    await pedir(s.id as string, CAMBIO, token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(403);
+  });
+
+  it.each(['rechazada', 'registrada'])('409 sobre una solicitud %s', async (est) => {
+    const s = await crear();
+    fila(s.id as string).estado = est;
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('estado_no_admite_modificacion');
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('una incapacidad no admite cambio: no hay a quién mandárselo', async () => {
+    const s = await crear({
+      tipo: 'incapacidad',
+      adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+    });
+    expect(s.aprobadorCorreo).toBeNull();
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('estado_no_admite_modificacion');
+  });
+
+  it.each(['pendiente', 'pendiente_2', 'aprobada'])('%s sí admite cambio', async (est) => {
+    const s = await crear();
+    fila(s.id as string).estado = est;
+    // En `pendiente_2` decide el segundo firmante; aquí no hay, así que el
+    // decisor cae al jefe inmediato, que es lo que hace `decisorDeModificacion`.
+    fila(s.id as string).segundoAprobadorCorreo = est === 'pendiente_2' ? APROBADOR : null;
+    await pedir(s.id as string, CAMBIO).expect(201);
+  });
+
+  it('409 si la ausencia ya terminó', async () => {
+    const s = await crear();
+    // Se mueve la fila por debajo: el alta no deja crear nada en el pasado.
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-14' });
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('solicitud_ya_pasada');
+  });
+
+  it('una ausencia EN CURSO sí se puede acortar por la cola', async () => {
+    // El caso que justifica que la regla mire `fechaFin` y no `fechaInicio`:
+    // hoy es el 15 (reloj congelado), la ausencia va del 10 al 20.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-20' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-10',
+      fechaFin: '2026-01-16',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-16');
+  });
+
+  it('el último día cuenta: una ausencia que acaba HOY todavía se puede cambiar', async () => {
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-15' });
+    await pedir(s.id as string, { clase: 'anulacion' }).expect(201);
+  });
+
+  it('409 al pedir una segunda propuesta teniendo una viva', async () => {
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const r = await pedir(s.id as string, { ...CAMBIO, fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body.error).toBe('ya_hay_modificacion_pendiente');
+    expect(estado.modificaciones).toHaveLength(1);
+    expect(avisos()).toHaveLength(1);
+  });
+
+  it('400 si pide exactamente las fechas que ya tiene', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-10',
+    }).expect(400);
+    expect(r.body.error).toBe('sin_cambios');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('400 si una anulación viene con fechas', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'anulacion',
+      fechaInicio: '2026-07-13',
+      fechaFin: '2026-07-17',
+    }).expect(400);
+    expect(r.body).toMatchObject({ error: 'clase_invalida', field: 'clase' });
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('400 con su código si el cuerpo no vale', async () => {
+    const s = await crear();
+    await pedir(s.id as string, { clase: 'cambiar_tipo' }).expect(400);
+    await pedir(s.id as string, { ...CAMBIO, fechaFin: '2026-02-30' }).expect(400);
+    await pedir(s.id as string, { ...CAMBIO, fechaInicio: '2026-07-17', fechaFin: '2026-07-13' }).expect(400);
+  });
+
+  it('el alta viaja con el estado que el servicio LEYÓ, no con un literal', async () => {
+    // Lo que el testigo del SQL compara. Con un literal escrito a mano, una
+    // solicitud ya aprobada guardaría `estado_previo = 'pendiente'` y el correo
+    // de la decisión no avisaría de tocar el calendario de Google.
+    const s = await crear();
+    fila(s.id as string).estado = 'aprobada';
+    await pedir(s.id as string, CAMBIO).expect(201);
+    expect(estado.ultimaAlta).toMatchObject({ estadoEsperado: 'aprobada' });
+  });
+
+  it('CANDADO: si la solicitud cambia de estado entre el read y el insert, 409 y ni una fila', async () => {
+    // La carrera real: el jefe aprueba mientras el trabajador rellena el
+    // formulario. Sin el `AND s.estado = $8`, la propuesta se guardaría con
+    // `estado_previo = 'pendiente'` sobre algo que ya está en el calendario.
+    const s = await crear();
+    estado.pisarEstadoAlCrearModificacion = 'aprobada';
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('solicitud_cambio_de_estado');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('CANDADO: los firmantes NO se rederivan — el aviso va al jefe VIEJO', async () => {
+    const JEFA = 'jefa.directa@ambientalia.com.co';
+    const NUEVO = 'jefe.nuevo@ambientalia.com.co';
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '66666666-6666-4666-8666-666666666666',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      aprobadorCorreo: APROBADOR,
+      requiereSegundaFirma: false,
+      activo: true,
+    });
+    const s = await crear();
+    expect(s.aprobadorCorreo).toBe(JEFA);
+
+    // Reorganización: a partir de ahora Ana cuelga de otro jefe.
+    estado.empleado.aprobadorCorreo = NUEVO;
+    estado.plantilla.push({
+      id: '77777777-7777-4777-8777-777777777777',
+      nombreCompleto: 'Jefe Nuevo',
+      correo: NUEVO,
+      aprobadorCorreo: APROBADOR,
+      requiereSegundaFirma: false,
+      activo: true,
+    });
+
+    const r = await pedir(s.id as string, CAMBIO).expect(201);
+    // La propuesta la decide quien firmó la original, no quien manda hoy: al
+    // jefe nuevo «anula mis vacaciones aprobadas» no le diría nada, porque no
+    // sabe que se aprobaron ni por qué.
+    expect(r.body.aprobadorCorreo).toBe(JEFA);
+    expect((avisos()[0].payload as any).correo.para).toBe(JEFA);
+    expect((avisos()[0].payload as any).correo.para).not.toContain(NUEVO);
+  });
+
+  it('el aviso sale por la cola de n8n con calendario y hoja en null', async () => {
+    // Comprobado sobre el payload HTTP, que es el contrato que n8n lee: si
+    // emitiera `calendario`, n8n crearía un evento duplicado en el Calendar en
+    // vez de corregir el viejo.
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const p = await request(app())
+      .get('/api/ausencias/n8n/pendiente')
+      .set('X-Ausencias-Cron-Token', 'cron-ausencias')
+      .expect(200);
+    const evento = p.body.eventos.find((e: { evento: string }) => e.evento === 'modificacion_solicitada');
+    expect(evento).toBeTruthy();
+    expect(evento.payload).toHaveProperty('calendario', null);
+    expect(evento.payload).toHaveProperty('hoja', null);
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    const s = await crear();
+    await request(app()).post(`/api/ausencias/solicitudes/${s.id}/modificaciones`).send(CAMBIO).expect(401);
+    await pedir(s.id as string, CAMBIO, token({ apps: ['contabilidad'] })).expect(403);
+  });
+});
+
+describe('POST /ausencias/modificaciones/:id/retirar', () => {
+  const LUIS = 'luis.prieto@ambientalia.com.co';
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-17' };
+
+  async function crearYPedir() {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(CAMBIO)
+        .expect(201)
+    ).body as Record<string, unknown>;
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const retirar = (id: string, tok = token()) =>
+    request(app()).post(`/api/ausencias/modificaciones/${id}/retirar`).set('Authorization', `Bearer ${tok}`);
+
+  it('el autor la retira: 200, queda `retirada` y NO se encola ningún correo', async () => {
+    // Retirar deja la solicitud exactamente como estaba: la propuesta
+    // desaparece de la bandeja del jefe y ya. Avisar de eso sería ruido.
+    const { modificacionId } = await crearYPedir();
+    const eventosAntes = estado.eventos.length;
+
+    const r = await retirar(modificacionId).expect(200);
+    expect(r.body).toMatchObject({ id: modificacionId, estado: 'retirada' });
+    expect(estado.eventos).toHaveLength(eventosAntes);
+    // La fila NO se borra: queda el rastro de que se pidió y se echó atrás.
+    expect(estado.modificaciones).toHaveLength(1);
+  });
+
+  it('la solicitud queda intacta y sin propuesta colgando', async () => {
+    const { solicitudId, modificacionId } = await crearYPedir();
+    const antes = { ...(estado.solicitudes.find((s) => s.id === solicitudId) as Record<string, unknown>) };
+    await retirar(modificacionId).expect(200);
+    const despues = estado.solicitudes.find((s) => s.id === solicitudId) as Record<string, unknown>;
+    expect(despues).toMatchObject({
+      estado: antes.estado,
+      fechaInicio: antes.fechaInicio,
+      fechaFin: antes.fechaFin,
+      diasHabiles: antes.diasHabiles,
+    });
+    expect(despues.modificacionPendiente).toBeNull();
+  });
+
+  it('tras retirarla se puede pedir otra: el índice único solo mira las vivas', async () => {
+    const { solicitudId, modificacionId } = await crearYPedir();
+    await retirar(modificacionId).expect(200);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${solicitudId}/modificaciones`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ ...CAMBIO, fechaFin: '2026-07-16' })
+      .expect(201);
+    expect(estado.modificaciones).toHaveLength(2);
+  });
+
+  it('403 a un tercero', async () => {
+    const { modificacionId } = await crearYPedir();
+    estado.empleado = {
+      id: 'e9',
+      nombreCompleto: 'Luis Prieto',
+      correo: LUIS,
+      cargo: null,
+      credencial: null,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: true,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso;
+    const r = await retirar(modificacionId, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_modificacion');
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+  });
+
+  it('409 si el jefe ya la decidió: su decisión gana', async () => {
+    const { modificacionId } = await crearYPedir();
+    estado.modificaciones[0].estado = 'aprobada';
+    const r = await retirar(modificacionId).expect(409);
+    expect(r.body.error).toBe('ya_decidida');
+    expect(estado.modificaciones[0].estado).toBe('aprobada');
+  });
+
+  it('409 al retirar dos veces — un doble clic no revienta', async () => {
+    const { modificacionId } = await crearYPedir();
+    await retirar(modificacionId).expect(200);
+    await retirar(modificacionId).expect(409);
+  });
+
+  it('404 si no existe', async () => {
+    const r = await retirar('no-existe').expect(404);
+    expect(r.body.error).toBe('no_encontrada');
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    const { modificacionId } = await crearYPedir();
+    await request(app()).post(`/api/ausencias/modificaciones/${modificacionId}/retirar`).expect(401);
+    await retirar(modificacionId, token({ apps: ['contabilidad'] })).expect(403);
   });
 });
 
