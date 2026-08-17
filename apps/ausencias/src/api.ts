@@ -289,7 +289,6 @@ export const pedirModificacion = (solicitudId: string, m: NuevaModificacion) =>
 export const retirarModificacion = (id: string) =>
   post<Modificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/retirar`, {});
 
-
 /** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
 export const sincronizarEmpleados = () =>
   post<{ creados: number; vinculados: number }>('/api/ausencias/empleados/sincronizar', {});

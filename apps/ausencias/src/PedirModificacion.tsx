@@ -7,9 +7,12 @@ import {
   excedeRangoMaximo,
   hoyEnColombia,
   mensajeDeModificacion,
+  minimoInicioPropuesto,
   puedePedirAnulacion,
   rangoFechas,
   resumenCambio,
+  retrocedeAlPasado,
+  sinCambiosDeFechas,
 } from './dominio';
 
 // El trabajador pide que le cambien las fechas de una solicitud ya enviada, o
@@ -68,18 +71,12 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
   const faltaFecha = !fechaInicio || !fechaFin;
   const rangoInvertido = Boolean(fechaInicio && fechaFin && fechaInicio > fechaFin);
   const rangoLargo = excedeRangoMaximo(fechaInicio, fechaFin);
-  const sinCambios = fechaInicio === solicitud.fechaInicio && fechaFin === solicitud.fechaFin;
-
-  // Espejo de la regla `fecha_en_pasado` de `validarNuevaModificacion`: el
-  // servidor rechaza un inicio que esté a la vez en el pasado Y antes del que la
-  // solicitud ya tiene. La unión de lo que sí acepta es «desde el menor de los
-  // dos», y eso es exactamente lo que puede ir en el `min` del input.
-  //
-  // Recortar una ausencia YA EMPEZADA obliga a proponer un inicio que está en el
-  // pasado —el suyo—, así que la regla del formulario de alta («nada antes de
-  // hoy») no vale aquí: bloquearía justo el caso para el que existe esto.
-  const minInicio = solicitud.fechaInicio < hoy ? solicitud.fechaInicio : hoy;
-  const haciaAtras = Boolean(fechaInicio) && fechaInicio < minInicio;
+  const sinCambios = sinCambiosDeFechas(solicitud, fechaInicio, fechaFin);
+  // Las dos salen de `dominio.ts` y no de aquí: son el espejo de la regla
+  // `fecha_en_pasado` del servidor, y una regla enterrada en el JSX es la única
+  // de las seis que no se podría cubrir el día que esta app tenga runner.
+  const minInicio = minimoInicioPropuesto(solicitud, hoy);
+  const haciaAtras = retrocedeAlPasado(solicitud, fechaInicio, hoy);
 
   const resumen = useMemo(
     () => resumenCambio(solicitud, { clase, fechaInicio, fechaFin }, festivos),
@@ -301,8 +298,15 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
           {decisor && <p className="mt-1">{`La decidirá ${decisor}.`}</p>}
         </div>
 
+        {/* `role="alert"` porque este banner aparece DESPUÉS de pulsar y sin
+            mover el foco: sin él, quien use lector de pantalla se queda esperando
+            una confirmación que no llega y sin saber que hay un error. Es el
+            único sitio del modal donde el contenido cambia solo. */}
         {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}

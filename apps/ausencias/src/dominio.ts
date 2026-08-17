@@ -263,9 +263,56 @@ export function puedePedirModificacion(s: Enmendable, hoy: string): boolean {
  * 8, eso regalaría los tres días ya disfrutados sin que nada falle ni nadie se
  * entere. Para ese caso la herramienta es acortar las fechas, que recalcula los
  * días y deja el saldo correcto — y por eso el aviso de la interfaz lo dice.
+ *
+ * ⚠️ `>=` y no `>`: una ausencia que EMPIEZA HOY sí se puede anular. Un día solo
+ * queda consumido al terminar, y cancelar la mañana del primer día es un caso
+ * real y frecuente. Con `>` se bloquearía el caso legítimo y además esa persona
+ * se quedaría sin salida: una ausencia que empieza hoy no se puede «acortar» a
+ * menos de un día. **No cambiar a `>` sin releer esto** —«ya empezó» suena a `>`
+ * a quien lo lea rápido—, y no cambiarlo nunca sin cambiar a la vez
+ * `noHaEmpezado` en `apps/hub-api/src/ausencias/service.ts`, que es la regla de
+ * verdad.
  */
 export function puedePedirAnulacion(s: Enmendable, hoy: string): boolean {
   return puedePedirModificacion(s, hoy) && s.fechaInicio >= hoy;
+}
+
+/**
+ * La fecha de inicio más temprana que el servidor aceptaría en una propuesta.
+ * Vale tal cual para el `min` de un `input type="date"`.
+ *
+ * Espejo de la regla `fecha_en_pasado` de `validarNuevaModificacion`, que
+ * rechaza un inicio que esté **a la vez** en el pasado Y antes del que la
+ * solicitud ya tiene. Lo que sí acepta es, por tanto,
+ * `inicio >= hoy || inicio >= actual`, cuya unión es «desde el menor de los
+ * dos» — y eso es lo que devuelve esta función.
+ *
+ * La regla del formulario de alta («nada antes de hoy») NO vale aquí: recortar
+ * una ausencia YA EMPEZADA obliga a proponer un inicio que está en el pasado —el
+ * suyo—, que es justo el caso para el que existe esta pantalla. Lo que no puede
+ * es RETROCEDER: mover a enero unos días de julio todavía sin disfrutar
+ * reservaría días ya pasados y movería saldo de un año a otro.
+ */
+export function minimoInicioPropuesto(s: Pick<Solicitud, 'fechaInicio'>, hoy: string): string {
+  return s.fechaInicio < hoy ? s.fechaInicio : hoy;
+}
+
+/** True si la fecha propuesta retrocede más allá de lo que el servidor admite. */
+export function retrocedeAlPasado(s: Pick<Solicitud, 'fechaInicio'>, inicio: string, hoy: string): boolean {
+  return Boolean(inicio) && inicio < minimoInicioPropuesto(s, hoy);
+}
+
+/**
+ * Espejo de `sin_cambios`: pedir exactamente lo que ya se tiene no es un cambio.
+ * Sin esto, el jefe recibiría un correo pidiéndole que apruebe dejarlo todo
+ * igual — y el servidor contesta 400 antes de llegar ahí.
+ */
+export function sinCambiosDeFechas(
+  s: Pick<Solicitud, 'fechaInicio' | 'fechaFin'>,
+  inicio: string,
+  fin: string,
+): boolean {
+  return inicio === s.fechaInicio && fin === s.fechaFin;
 }
 
 /**
@@ -341,7 +388,17 @@ export function resumenCambio(
 ): ResumenCambio {
   const ahora = rangoConDias(s.fechaInicio, s.fechaFin, s.diasHabiles);
   if (propuesta.clase === 'anulacion') {
-    return { ahora, quedaria: null, deltaDias: s.diasHabiles, efecto: efectoEnDias(s.tipo, s.diasHabiles) };
+    return {
+      ahora,
+      quedaria: null,
+      deltaDias: s.diasHabiles,
+      // Un rango sin días hábiles se puede pedir: `crearSolicitud` cuenta los
+      // días pero no rechaza el cero, así que un sábado–domingo queda
+      // `pendiente` con `diasHabiles = 0`. Al anularlo, un delta de 0 caería en
+      // «Los mismos días, en otras fechas», que contradice de plano el
+      // «Quedaría: nada reservado» que el panel pinta justo encima.
+      efecto: s.diasHabiles > 0 ? efectoEnDias(s.tipo, s.diasHabiles) : 'La solicitud dejaría de existir.',
+    };
   }
   const dias = contarDiasHabiles(propuesta.fechaInicio, propuesta.fechaFin, festivos);
   const delta = s.diasHabiles - dias;
@@ -356,9 +413,11 @@ export function resumenCambio(
 /**
  * Qué pide una propuesta ya enviada, en una línea.
  *
- * En tercera persona («Pide…») y no en segunda: el mismo texto se lee en «Mis
- * solicitudes», en la bandeja del jefe, en su historial y en el Registro
- * general, y un «Pediste» sería falso en tres de las cuatro.
+ * En tercera persona («Pide…») y no en segunda. Como texto visible solo aparece
+ * en «Mis solicitudes», donde un «Pediste» sería correcto; pero es además el
+ * `title` del chip «Cambio pendiente», y ese chip lo pintan también la bandeja,
+ * el historial del aprobador, los soportes adjuntos y el Registro general, donde
+ * quien lee no es quien pidió nada.
  */
 export function resumenPropuesta(m: Modificacion): string {
   if (m.clase === 'anulacion') return 'Pide anular la solicitud.';
@@ -383,6 +442,13 @@ export function resumenPropuesta(m: Modificacion): string {
  * al pulsarlo es lo único que le queda.
  *
  * Un código desconocido pasa tal cual: es peor esconderlo que enseñarlo feo.
+ *
+ * ⚠️ **Solo 400 y 409.** Para 401, 403 y 404, `mensajeDeError` devuelve un texto
+ * fijo suyo y nunca mira el cuerpo, así que una clave para un código de esos
+ * —`no_es_su_solicitud` (403), `no_encontrada` (404)— no puede emparejar jamás y
+ * lo único que hace es prometer una traducción que no ocurre. Antes había tres
+ * aquí. Si algún día hace falta traducir un 403, hay que arreglarlo en
+ * `packages/http`, que es donde se pierde el código.
  */
 const MENSAJE_MODIFICACION: Record<string, string> = {
   ya_hay_modificacion_pendiente: 'Ya tienes una petición pendiente sobre esta solicitud. Retírala antes de pedir otra.',
@@ -395,9 +461,10 @@ const MENSAJE_MODIFICACION: Record<string, string> = {
   sin_cambios: 'Las fechas que propones son las que la solicitud ya tiene.',
   fecha_en_pasado: 'No puedes mover la ausencia hacia atrás: las fechas nuevas no pueden empezar antes de hoy.',
   anulacion_con_fechas: 'No se pueden mandar fechas al pedir una anulación.',
-  no_es_su_solicitud: 'Esa solicitud no es tuya.',
-  no_es_su_modificacion: 'Esa petición no es tuya.',
-  no_encontrada: 'Esa petición ya no existe. Vuelve a cargar la página.',
+  // Lo tapa `excedeRangoMaximo` antes de llegar al servidor, así que este 400
+  // solo aparece si los dos topes divergen — que es justo para lo que existe
+  // este mapa.
+  rango_demasiado_largo: 'El rango no puede pasar de un año. Revisa las fechas.',
   motivo_demasiado_largo: 'El motivo es demasiado largo. Resúmelo un poco.',
 };
 
