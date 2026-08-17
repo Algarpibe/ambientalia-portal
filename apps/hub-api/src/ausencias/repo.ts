@@ -1224,6 +1224,201 @@ export async function crearModificacion(
   }
 }
 
+// ── Modificaciones: la decisión ────────────────────────────────────────────
+
+/**
+ * Resultado de decidir. Las dos formas de fallar son un 409, pero cuentan cosas
+ * distintas y el cliente tiene que poder distinguirlas: «alguien ya la decidió»
+ * (o un doble clic) no es «la solicitud se movió debajo y hay que mirar».
+ */
+export type ResultadoDecisionModificacion =
+  | { ok: true; modificacion: Modificacion; solicitud: Solicitud }
+  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' };
+
+/**
+ * Señal interna para abortar la transacción cuando el testigo triple no casa.
+ *
+ * Es un THROW y no un `return` a propósito: cuando el paso 2 falla, el paso 1 ya
+ * ha escrito, y **solo el ROLLBACK lo deshace**. Ver el porqué entero en
+ * `decidirModificacion`. No sale de este módulo — se caza abajo y se traduce a
+ * un resultado normal, para que el servicio no tenga que conocerla.
+ */
+class ChoqueConLaSolicitud extends Error {}
+
+/**
+ * El testigo TRIPLE del UPDATE de la solicitud, escrito una sola vez para que
+ * las dos clases de cambio no puedan divergir.
+ *
+ * `$1` = id, `$2` = estado previo, `$3` = fecha de inicio previa, `$4` = fecha
+ * de fin previa. Lo que cada clase escribe empieza en `$5`.
+ */
+const TESTIGO_SOLICITUD = `
+  WHERE id = $1
+    -- ⚠️ TRES campos, y los tres hacen falta. Con solo el estado no se detecta
+    -- que un admin haya corregido las fechas por PATCH entre que se pidio el
+    -- cambio y se aprobo, y la aprobacion le pisaria la correccion EN SILENCIO
+    -- (el PATCH no encola nada, asi que nadie se enteraria nunca). Con los tres,
+    -- ese choque sale 409 y alguien mira. Es el segundo motivo por el que
+    -- existen las columnas *_previa de la 024.
+    --
+    -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory y
+    -- modela el testigo por su cuenta, asi que quitar dos de los tres campos
+    -- deja toda la bateria en verde. Lo unico que lo vigila es una asercion de
+    -- FORMA en repo.test.ts que busca este texto literal, y este comentario.
+    AND estado       = $2
+    AND fecha_inicio = $3::date
+    AND fecha_fin    = $4::date`;
+
+/**
+ * Aplica la propuesta a la fila de la solicitud. Lanza si el testigo no casa.
+ *
+ * Las dos clases escriben cosas distintas y ninguna es la otra:
+ *  - `fechas`    → reescribe las fechas y los días. **El `estado` NO se toca**:
+ *    aprobar un cambio no re-decide la solicitud, así que una `pendiente` sigue
+ *    `pendiente` y una `aprobada` sigue `aprobada`.
+ *  - `anulacion` → `rechazada` + `anulada_at`. No estrena estado: `rechazada` ya
+ *    hereda la semántica correcta en los seis filtros que miran el estado (ver
+ *    la cabecera de la 024), y `anulada_at` es lo único que la distingue de un
+ *    rechazo del jefe.
+ */
+async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise<void> {
+  const testigo = [m.solicitudId, m.estadoPrevio, m.fechaInicioPrevia, m.fechaFinPrevia];
+  const { rows } =
+    m.clase === 'anulacion'
+      ? await client.query(
+          `UPDATE portal.solicitudes_ausencia
+              SET estado = 'rechazada', anulada_at = now(),
+                  -- El motivo que escribio QUIEN PIDIO la anulacion. Sin el, la
+                  -- fila quedaria "rechazada" a secas y el historial del jefe no
+                  -- diria por que unos dias concedidos no se disfrutaron.
+                  motivo_rechazo = $5
+            ${TESTIGO_SOLICITUD}
+           RETURNING id`,
+          [...testigo, m.motivo],
+        )
+      : await client.query(
+          `UPDATE portal.solicitudes_ausencia
+              -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
+              -- una decision sobre la solicitud, es una enmienda de sus fechas.
+              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7
+            ${TESTIGO_SOLICITUD}
+           RETURNING id`,
+          [...testigo, m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos],
+        );
+  if (rows.length === 0) throw new ChoqueConLaSolicitud();
+}
+
+/**
+ * El jefe aprueba o rechaza la propuesta, en **una sola transacción** y con el
+ * evento del outbox dentro, como el resto del fichero.
+ *
+ * Tres pasos:
+ *
+ *  1. **Decidir la propuesta.** El `AND estado = 'pendiente'` mata el doble clic
+ *     igual que en `decidirSolicitud`: solo el primero actualiza, el segundo no
+ *     encuentra fila y el servicio lo traduce a 409 en vez de mandar dos correos
+ *     contradictorios.
+ *  2. **Aplicarla a la solicitud**, y solo si se aprueba. Rechazar deja la fila
+ *     exactamente como estaba: no hay nada que escribir.
+ *  3. Releer, y encolar el aviso.
+ *
+ * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
+ * importante de la función. El ROLLBACK deshace también el paso 1, así que la
+ * propuesta se queda `pendiente` y el cliente ve un 409. Si el paso 1 pudiera
+ * confirmarse con el paso 2 fallido, la propuesta diría «aprobada» mientras la
+ * solicitud conserva las fechas viejas, **y el correo anunciaría un cambio que
+ * no ha ocurrido**: el trabajador se iría de vacaciones las fechas que dice el
+ * correo y en el registro constarían otras.
+ *
+ * Es literalmente el argumento que ya está escrito en `fijarVisorConRegistro`
+ * más arriba —«si el UPDATE cuajara y el INSERT fallara… quedaría concedida sin
+ * una sola línea de registro»—, con la diferencia de que aquí el estado a medias
+ * además se comunica por correo. Por eso las dos escrituras van juntas o no van.
+ */
+export async function decidirModificacion(
+  db: Pool,
+  id: string,
+  aprueba: boolean,
+  motivoRechazo: string | null,
+  userId: string | null,
+  construirPayload: (s: Solicitud, m: Modificacion, evento: EventoModificacion) => PayloadEvento,
+): Promise<ResultadoDecisionModificacion> {
+  try {
+    return await withTransaction(db, async (client): Promise<ResultadoDecisionModificacion> => {
+      const { rows } = await client.query(
+        `UPDATE portal.solicitud_modificaciones m
+            SET estado = $2, decidida_at = now(), aprobador_user_id = $3, motivo_rechazo = $4
+          -- Mismo testigo que en decidirSolicitud: el doble clic no decide dos
+          -- veces. Cero filas = alguien se adelanto, y el servicio da 409.
+          WHERE m.id = $1 AND m.estado = 'pendiente'
+         RETURNING ${COLS_MODIFICACION}`,
+        [id, aprueba ? 'aprobada' : 'rechazada', userId, motivoRechazo],
+      );
+      if (rows.length === 0) return { ok: false, razon: 'ya_decidida' };
+      const modificacion = aModificacion(rows[0] as FilaModificacionDb);
+
+      if (aprueba) await aplicarALaSolicitud(client, modificacion);
+
+      // La solicitud se relee DESPUÉS de aplicarla: el correo se redacta sobre
+      // exactamente lo que quedó guardado. Ya no trae `modificacionPendiente`
+      // —la propuesta salió del índice único parcial al dejar de estar viva—,
+      // que es justo lo que la interfaz necesita ver.
+      const { rows: filas } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [modificacion.solicitudId]);
+      const solicitud = aSolicitud(filas[0] as FilaSolicitudDb);
+
+      // Anotado y no un literal suelto: el valor viaja al CHECK de `evento` de la
+      // 024, y una errata reventaría DENTRO de la transacción, deshaciendo una
+      // decisión que el jefe cree tomada.
+      const evento: EventoModificacion = aprueba ? 'modificacion_aprobada' : 'modificacion_rechazada';
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [modificacion.solicitudId, evento, JSON.stringify(construirPayload(solicitud, modificacion, evento))],
+      );
+
+      return { ok: true, modificacion, solicitud };
+    });
+  } catch (err) {
+    // El choque del testigo triple ya provocó el ROLLBACK dentro de
+    // `withTransaction`: aquí solo se traduce a un resultado, para que el
+    // servicio no tenga que conocer esta clase ni distinguirla de un fallo real.
+    if (err instanceof ChoqueConLaSolicitud) return { ok: false, razon: 'solicitud_cambio_de_estado' };
+    throw err;
+  }
+}
+
+/**
+ * Las solicitudes con una propuesta VIVA que le toca decidir a este correo. Un
+ * admin (`todas`) las ve todas, igual que en `solicitudesPendientes`: es quien
+ * destraba una decisión bloqueada.
+ *
+ * Devuelve SOLICITUDES y no propuestas sueltas, y no es pereza: la propuesta por
+ * sí sola no dice de quién es, ni de qué tipo, ni qué comentarios traía, así que
+ * una bandeja hecha con ellas necesitaría una segunda consulta por fila. El
+ * `LEFT JOIN` de `SELECT_SOLICITUD` ya la cuelga de su solicitud, y la trae
+ * completa.
+ *
+ * El filtro va contra `m.aprobador_correo` —el decisor CONGELADO en la
+ * propuesta— y no contra los firmantes de la solicitud: es el mismo correo que
+ * `puedeDecidirModificacion` exige, así que la bandeja no puede enseñar nada que
+ * luego responda 403 al pulsar.
+ */
+export async function modificacionesPendientes(
+  db: Pool,
+  aprobadorCorreo: string,
+  todas: boolean,
+): Promise<Solicitud[]> {
+  const { rows } = await db.query(
+    `${SELECT_SOLICITUD}
+      -- El JOIN ya filtra por m.estado = 'pendiente': esto solo descarta las
+      -- solicitudes que no tienen ninguna propuesta viva colgando.
+      WHERE m.id IS NOT NULL
+        AND ($2::boolean OR lower(m.aprobador_correo) = lower($1))
+      ORDER BY m.created_at`,
+    [aprobadorCorreo, todas],
+  );
+  return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
 /**
  * El solicitante se echa atrás. La fila NO se borra: pasa a `retirada`, sale del
  * índice único parcial —así puede pedir otra— y deja el rastro de que existió.

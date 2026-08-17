@@ -637,6 +637,119 @@ export async function retirarModificacion(db: Pool, sesion: Sesion, id: string):
   return retirada;
 }
 
+// ── Decidir la modificación ────────────────────────────────────────────────
+
+/**
+ * Quién puede aprobar o rechazar una propuesta.
+ *
+ * ⚠️ El decisor sale de la PROPUESTA (`m.aprobadorCorreo`, congelado al pedirla)
+ * y de ningún otro sitio. La solicitud entra por parámetro para el guard del
+ * solicitante —y para que el llamante ya la tenga cargada—, pero **sus firmantes
+ * NO se miran**: escribir esto como un OR de `s.aprobadorCorreo` y
+ * `s.segundoAprobadorCorreo` es lo natural y es exactamente el bug que
+ * `puedeDecidir` documenta treinta líneas más arriba. Sobre una `pendiente_2`,
+ * ese OR dejaría decidir el cambio al jefe inmediato, que ya perdió el turno.
+ *
+ * **El propio solicitante no, aunque la propuesta sea suya**: autoaprobarse
+ * convierte el debido proceso en un formulario. Se compara contra
+ * `s.solicitanteEmail` —el de la fila, que el PATCH mantiene al día— y no contra
+ * el congelado en el satélite: quien cambiara de correo entre pedirla y
+ * decidirla se saltaría el candado con la copia vieja.
+ *
+ * El admin va PRIMERO, como en `puedeDecidir`: es quien destraba una decisión
+ * cuyo firmante no está disponible. Eso deja fuera del candado a un admin que
+ * decidiera su propia propuesta, y se acepta a sabiendas: ese admin ya puede
+ * reescribir la fila entera con el `PATCH`, que **no manda ningún correo**,
+ * mientras que por aquí la decisión sale por correo a toda la cadena. Cerrarle
+ * esta puerta solo lo empujaría a la silenciosa.
+ */
+export function puedeDecidirModificacion(sesion: Sesion, m: Modificacion, s: Solicitud): boolean {
+  if (sesion.esAdmin) return true;
+  const yo = sesion.email.toLowerCase();
+  if (s.solicitanteEmail.toLowerCase() === yo) return false;
+  return m.aprobadorCorreo.toLowerCase() === yo;
+}
+
+/**
+ * Las solicitudes con una propuesta viva que le toca decidir a quien pregunta.
+ *
+ * Sin guard de aprobador: quien no tenga ninguna recibe lista vacía, no un 403.
+ * Mismo criterio que `decididasPorMi` — un 403 no aportaría nada y obligaría a
+ * la app a saber de antemano si alguien es decisor.
+ */
+export async function modificacionesPendientes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
+  return repo.modificacionesPendientes(db, sesion.email, sesion.esAdmin);
+}
+
+/**
+ * El jefe decide la propuesta. El cuerpo es `{ aprueba, motivo? }`, **idéntico**
+ * al de la decisión de una solicitud, para que la interfaz pueda reutilizar el
+ * mismo componente y el mismo manejo de errores.
+ *
+ * Decide UNA sola persona: la modificación no estrena segunda firma. La segunda
+ * firma valida la concesión, que ya está validada, y exigir dos para *renunciar*
+ * a unas vacaciones es absurdo.
+ *
+ * ⚠️ Limitación conocida y deliberada: aprobar un cambio de fechas sobre una
+ * `pendiente_2` **no la devuelve a `pendiente`** para que el primer jefe
+ * refirme. `transicionAlDecidir` es monótona por diseño, y esa arista hacia
+ * atrás repoblaría la bandeja del primer firmante mientras el segundo está
+ * decidiendo, además de romper el razonamiento del testigo (el estado previo
+ * dejaría de describir la fila). El primer firmante se entera por el correo, que
+ * va a la cadena entera.
+ */
+export async function decidirModificacion(
+  db: Pool,
+  sesion: Sesion,
+  id: string,
+  body: unknown,
+): Promise<{ modificacion: Modificacion; solicitud: Solicitud }> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (typeof b.aprueba !== 'boolean') throw new AusenciaError('aprueba_requerido', 400, 'aprueba');
+  const motivo = typeof b.motivo === 'string' ? b.motivo.trim() : '';
+  // El tope del rechazo, no el de la petición: aquí se justifica un no, que es
+  // exactamente lo mismo que hace `decidir`.
+  if (motivo.length > MAX_MOTIVO) throw new AusenciaError('motivo_demasiado_largo', 400, 'motivo');
+
+  const modificacion = await repo.modificacionPorId(db, id);
+  if (!modificacion) throw new AusenciaError('no_encontrada', 404);
+  const solicitud = await repo.solicitudPorId(db, modificacion.solicitudId);
+  // La FK va con ON DELETE CASCADE, así que esto no debería ocurrir; si
+  // ocurriera, no hay solicitud a la que aplicar nada y negarlo es lo único
+  // seguro. Mismo criterio que `retirarModificacion`.
+  if (!solicitud) throw new AusenciaError('no_encontrada', 404);
+  if (!puedeDecidirModificacion(sesion, modificacion, solicitud)) {
+    throw new AusenciaError('no_es_su_aprobacion', 403);
+  }
+  // El guard va antes que este 409 —al revés que en `decidir`— porque aquí un
+  // tercero no tiene ningún derecho a saber si la propuesta ya se decidió.
+  if (modificacion.estado !== 'pendiente') throw new AusenciaError('ya_decidida', 409);
+
+  const resultado = await repo.decidirModificacion(
+    db,
+    id,
+    b.aprueba,
+    b.aprueba ? null : motivo || null,
+    sesion.userId,
+    construirPayloadModificacion,
+  );
+  if (!resultado.ok) {
+    // Los dos son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
+    // o alguien que se adelantó; `solicitud_cambio_de_estado` es que la
+    // solicitud se movió debajo —un PATCH de admin, una decisión del jefe— y
+    // aplicar el cambio habría pisado esa corrección en silencio.
+    throw resultado.razon === 'ya_decidida'
+      ? new AusenciaError('ya_decidida', 409)
+      : new AusenciaError('solicitud_cambio_de_estado', 409);
+  }
+
+  void avisarN8n();
+  // Se devuelven las DOS filas: la decisión toca dos, y quien pintaba la
+  // solicitud necesita la versión nueva. Devolver solo la propuesta obligaría a
+  // una segunda llamada cuyo resultado podría ya no ser este.
+  return { modificacion: resultado.modificacion, solicitud: resultado.solicitud };
+}
+
 /**
  * El solicitante, sus dos aprobadores y quien tenga la llave maestra pueden ver
  * el PDF; nadie más (salvo admin).

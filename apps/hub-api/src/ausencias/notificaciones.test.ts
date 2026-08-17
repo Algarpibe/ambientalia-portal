@@ -508,6 +508,154 @@ describe('el aviso de que se pide un cambio', () => {
   });
 });
 
+describe('la decisión del cambio', () => {
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const INFORMADO = 'informado@ambientalia.com.co';
+
+  /**
+   * Una solicitud APROBADA con la cadena entera poblada: solicitante, los dos
+   * firmantes, el informado y la copia de la ficha. Los cinco correos son
+   * distintos a propósito — con alguno repetido, un destinatario que faltara
+   * pasaría desapercibido detrás de otro.
+   *
+   * `segundoAprobadorCorreo` e `informadoCorreo` no coexisten en producción
+   * (`aprobadoresDe` los deriva excluyentes), pero aquí van los dos para que un
+   * solo test cubra las dos formas de la cadena.
+   */
+  const conCadena = (over: Partial<Solicitud> = {}) =>
+    solicitud({
+      estado: 'aprobada',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      aprobadorCorreo: PRIMERO,
+      segundoAprobadorCorreo: SEGUNDO,
+      informadoCorreo: INFORMADO,
+      copiaCorreo: 'administrativo@ambientalia.com.co',
+      ...over,
+    });
+
+  const aprobada = (s = conCadena(), m = modificacion()) => construirPayloadModificacion(s, m, 'modificacion_aprobada');
+  const rechazada = (s = conCadena(), m = modificacion()) =>
+    construirPayloadModificacion(s, m, 'modificacion_rechazada');
+
+  it('los dos avisos van a la cadena de decisión ENTERA, no solo al solicitante', () => {
+    // El primer firmante avaló unas fechas concretas: si cambian —o si el cambio
+    // se rechaza y siguen en pie— tiene que enterarse, porque es quien
+    // reorganiza el trabajo. Mismo argumento que el correo de rechazo de la
+    // solicitud.
+    for (const p of [aprobada(), rechazada()]) {
+      expect(p.correo.para).toBe(
+        'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, informado@ambientalia.com.co, administrativo@ambientalia.com.co',
+      );
+    }
+  });
+
+  it('sin repetir a quien sale dos veces en la cadena', () => {
+    const s = conCadena({ copiaCorreo: SEGUNDO, informadoCorreo: null });
+    for (const p of [aprobada(s), rechazada(s)]) {
+      expect(p.correo.para.match(/gerencia@ambientalia\.com\.co/g)).toHaveLength(1);
+    }
+  });
+
+  it('CANDADO: el cuerpo de la aprobación lleva las CUATRO fechas y los dos recuentos', () => {
+    // Redactado desde la PROPUESTA y no desde la solicitud ya actualizada: desde
+    // la solicitud diría «cambiada a 13-15 jul» sin decir desde qué, y ese
+    // «desde qué» es lo único que permite encontrar el evento en el calendario
+    // para corregirlo a mano.
+    const cuerpo = aprobada().correo.cuerpo;
+    expect(cuerpo).toContain('2026-07-06');
+    expect(cuerpo).toContain('2026-07-10');
+    expect(cuerpo).toContain('2026-07-13');
+    expect(cuerpo).toContain('2026-07-15');
+    expect(cuerpo).toContain('5 días hábiles');
+    expect(cuerpo).toContain('3 días hábiles');
+  });
+
+  it('las cuatro fechas siguen ahí aunque la solicitud ya lleve las nuevas', () => {
+    // Es el caso real: al notificar, la fila YA está actualizada. Si el cuerpo se
+    // redactara desde ella, las fechas de antes desaparecerían del correo sin que
+    // ningún otro test lo notara.
+    const yaActualizada = conCadena({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15', diasHabiles: 3 });
+    const cuerpo = aprobada(yaActualizada).correo.cuerpo;
+    expect(cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(cuerpo).toContain('2026-07-13 a 2026-07-15');
+  });
+
+  it('CANDADO: el ⚠️ de Google aparece si la solicitud estaba APROBADA', () => {
+    // Solo entonces hay un evento de calendario y una fila de hoja que corregir.
+    const cuerpo = aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).toContain('⚠️');
+    expect(cuerpo).toContain('calendario');
+    expect(cuerpo).toContain('a mano');
+  });
+
+  it('CANDADO: y NO aparece si la solicitud seguía PENDIENTE', () => {
+    // La otra mitad, que es la que de verdad rinde: si la original nunca llegó a
+    // Google, el ⚠️ manda a alguien a buscar un evento que no existe. Un solo
+    // test del caso positivo no detecta ese falso positivo, y entrenar a la
+    // gente a ignorar el ⚠️ es la forma segura de que el día que importe no lo
+    // lean.
+    for (const estadoPrevio of ['pendiente', 'pendiente_2'] as const) {
+      const cuerpo = aprobada(conCadena({ estado: estadoPrevio }), modificacion({ estadoPrevio })).correo.cuerpo;
+      expect(cuerpo).not.toContain('⚠️');
+      expect(cuerpo).not.toContain('a mano');
+    }
+  });
+
+  it('el ⚠️ de una anulación manda a BORRAR, no a ajustar', () => {
+    const cuerpo = aprobada(conCadena(), anulacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).toContain('⚠️');
+    expect(cuerpo).toContain('borrar');
+  });
+
+  it('el rechazo NO lleva el ⚠️ ni sobre una aprobada: no ha cambiado nada', () => {
+    // Un ⚠️ que no pide ninguna acción es exactamente lo que enseña a no leerlos.
+    const cuerpo = rechazada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).not.toContain('⚠️');
+  });
+
+  it('la anulación aprobada dice qué fechas dejan de estar reservadas', () => {
+    const p = aprobada(conCadena(), anulacion());
+    expect(p.correo.asunto).toContain('Anulada');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).toContain('5 días hábiles');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it('el rechazo dice el motivo del jefe y que la solicitud sigue como estaba', () => {
+    const p = rechazada(conCadena(), modificacion({ motivoRechazo: 'Ya está cubierto el turno' }));
+    expect(p.correo.asunto).toContain('rechazado');
+    expect(p.correo.cuerpo).toContain('Motivo: Ya está cubierto el turno');
+    // Las fechas de la SOLICITUD, que es lo que queda en pie.
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+  });
+
+  it('un rechazo sin motivo no deja un «Motivo:» vacío colgando', () => {
+    const p = rechazada(conCadena(), modificacion({ motivoRechazo: null }));
+    expect(p.correo.cuerpo).not.toContain('Motivo:');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('CANDADO: los dos eventos llevan `calendario` y `hoja` en null', () => {
+    // Es lo que hace que n8n recorra la rama de solo-correo SIN tocar el
+    // workflow. Emitir aquí un `calendario` no corregiría el evento viejo:
+    // crearía uno nuevo y la persona aparecería dos veces de vacaciones.
+    for (const evento of ['modificacion_aprobada', 'modificacion_rechazada'] as const) {
+      for (const m of [modificacion({ estadoPrevio: 'aprobada' }), anulacion({ estadoPrevio: 'aprobada' })]) {
+        const p = construirPayloadModificacion(conCadena(), m, evento);
+        expect(p.calendario).toBeNull();
+        expect(p.hoja).toBeNull();
+      }
+    }
+  });
+
+  it('tampoco estrenan ningún campo del payload', () => {
+    for (const evento of ['modificacion_aprobada', 'modificacion_rechazada'] as const) {
+      const p = construirPayloadModificacion(conCadena(), modificacion(), evento);
+      expect(Object.keys(p).sort()).toEqual(Object.keys(construirPayload(solicitud(), 'creada')).sort());
+    }
+  });
+});
+
 describe('cuando la segunda firma está apagada', () => {
   const INFORMADO = 'gerencia@ambientalia.com.co';
 

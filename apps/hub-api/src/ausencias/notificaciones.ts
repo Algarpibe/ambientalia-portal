@@ -11,6 +11,7 @@ import {
 import {
   ETIQUETA_TIPO,
   type CorreoEvento,
+  type EstadoSolicitud,
   type EventoModificacion,
   type EventoSolicitud,
   type FilaHoja,
@@ -384,19 +385,140 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
   };
 }
 
+// ── La decisión de la propuesta ────────────────────────────────────────────
+
 /**
- * Los eventos de modificación que esta fase sabe redactar. Los otros dos
- * (`modificacion_aprobada` y `modificacion_rechazada`) llegan con la decisión,
- * y hasta entonces el tipo de `evento` no los admite: así no hay forma de
- * encolar un evento sin correo que n8n serviría vacío.
+ * Si el cambio toca algo que **ya está en Google**.
+ *
+ * Función pura y con nombre propio porque de ella depende que el ⚠️ signifique
+ * algo. Si la original seguía `pendiente`, nunca se mandó nada al calendario ni
+ * a la hoja, y el aviso sería una alarma falsa: entrenar a la gente a ignorar
+ * el ⚠️ es la forma segura de que el día que importe no lo lean.
+ *
+ * ⚠️ NO añadir `registrada` aquí, aunque sea el otro evento que lleva efectos
+ * de Google (`construirPayload`). Una incapacidad no admite modificación
+ * —`decisorDeModificacion` devuelve `null` y `estadoAdmiteModificacion` lo
+ * exige—, así que `registrada` no puede ser nunca un `estadoPrevio`: la rama
+ * sería código muerto que además haría creer que el caso está contemplado.
+ */
+const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
+
+/**
+ * Las CUATRO fechas y los dos recuentos, que es lo único que permite ajustar el
+ * calendario a mano.
+ *
+ * Se redacta desde la PROPUESTA y no desde la solicitud ya actualizada —que es
+ * el objeto que se tiene más a mano al notificar—: desde la solicitud el correo
+ * diría «cambiada a 6-8 jul» sin decir desde qué, y ese «desde qué» es
+ * justamente lo que hay que buscar en el calendario para corregirlo.
+ */
+function bloqueAntesYDespues(m: Modificacion): string {
+  // El recuento nuevo se guarda detrás del null, como en `bloqueCambio`: aquí
+  // no puede faltar (esto solo se llama con `clase = 'fechas'`, y el CHECK de la
+  // 024 lo exige), pero interpolarlo a pelo es cómo se escribe «undefined» en el
+  // buzón de alguien el día que una clase nueva pase por aquí.
+  const cuenta = m.diasHabilesNuevos === null ? '' : ` (${dias(m.diasHabilesNuevos)})`;
+  return [
+    `📅 Antes: ${m.fechaInicioPrevia} a ${m.fechaFinPrevia} (${dias(m.diasHabilesPrevios)})`,
+    `📅 Ahora: ${m.fechaInicioNueva} a ${m.fechaFinNueva}${cuenta}`,
+  ].join('\n');
+}
+
+/**
+ * El párrafo de «esto no se ha corregido solo».
+ *
+ * Es la contrapartida de que el payload vaya con `calendario: null` y
+ * `hoja: null`: nadie va a tocar Google por nosotros, así que el correo tiene
+ * que decir exactamente qué hay que hacer a mano y sobre qué fechas.
+ */
+function avisoDeAjustarGoogle(m: Modificacion): string {
+  return m.clase === 'anulacion'
+    ? '⚠️ Esta ausencia ya estaba en el calendario y en la hoja. NO se borran solas: hay que borrar a mano el evento del calendario y la fila de la hoja.'
+    : '⚠️ Esta ausencia ya estaba en el calendario y en la hoja. NO se corrigen solas: hay que ajustar a mano el evento del calendario y la fila de la hoja a las fechas nuevas.';
+}
+
+/**
+ * El cambio se aprueba. Va a `cadenaDeDecision(s)` entera, no solo a quien lo
+ * pidió: el primer firmante avaló unas fechas y tiene que enterarse de que ya
+ * no son esas — es quien reorganiza el trabajo. Mismo argumento que
+ * `correoRechazada`.
+ */
+function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento {
+  const anula = m.clase === 'anulacion';
+  return {
+    para: cadenaDeDecision(s),
+    asunto: anula
+      ? `✅ Anulada la solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`
+      : `✅ Cambio de fechas aprobado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      `Hola ${s.empleadoNombre}:`,
+      '',
+      anula
+        ? `Se ha ✅ *aprobado* anular tu solicitud ${PERIODO[s.tipo]}. Esos días dejan de estar reservados.`
+        : `Se ha ✅ *aprobado* el cambio de fechas de tu solicitud ${PERIODO[s.tipo]}.`,
+      '',
+      anula
+        ? `📅 Fechas anuladas: ${m.fechaInicioPrevia} a ${m.fechaFinPrevia} (${dias(m.diasHabilesPrevios)})`
+        : bloqueAntesYDespues(m),
+      // El motivo es el que escribió QUIEN PIDIÓ el cambio: `motivoRechazo` de la
+      // propuesta solo se rellena al rechazarla, y aquí sería siempre null.
+      m.motivo ? `\nMotivo: ${m.motivo}` : '',
+      tocaGoogle(m.estadoPrevio) ? `\n${avisoDeAjustarGoogle(m)}\n` : '',
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * El cambio se rechaza. También a la cadena entera: el primer firmante tiene
+ * que saber que las fechas que avaló siguen en pie.
+ *
+ * Sin el ⚠️ de Google en ningún caso, ni siquiera sobre una solicitud aprobada:
+ * aquí no se ha tocado nada, así que no hay nada que ajustar. Un ⚠️ que no pide
+ * ninguna acción es exactamente lo que enseña a no leerlos.
+ */
+function correoModificacionRechazada(s: Solicitud, m: Modificacion): CorreoEvento {
+  const que = m.clase === 'anulacion' ? 'anular tu solicitud' : 'cambiar las fechas de tu solicitud';
+  return {
+    para: cadenaDeDecision(s),
+    asunto: `❌ Cambio rechazado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      `Hola ${s.empleadoNombre}:`,
+      '',
+      `Tu petición de ${que} ${PERIODO[s.tipo]} ha sido ❌ *rechazada*.`,
+      '',
+      // Estas fechas salen de la SOLICITUD y no de la foto de la propuesta, al
+      // revés que en el correo de aprobación: al rechazar no se ha tocado la
+      // fila, así que la fila es la verdad de lo que queda en pie —y si un admin
+      // la corrigió por PATCH entre medias, la foto ya no lo sería.
+      `📅 La solicitud sigue como estaba: ${s.fechaInicio} a ${s.fechaFin} (${dias(s.diasHabiles)})`,
+      // El motivo del jefe, que es la mejora que pedía el flujo viejo: un
+      // rechazo sin explicación obliga a preguntar por privado.
+      m.motivoRechazo ? `\nMotivo: ${m.motivoRechazo}\n` : '',
+      'Si tienes dudas, por favor comunícate conmigo.',
+      '',
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * Los tres avisos de la modificación, cada uno con su texto.
+ *
+ * `satisfies Record<...>` completo y ya no `Partial`: los tres eventos que
+ * admite el CHECK de la 024 tienen aquí quien los redacte, así que el mapa es
+ * exhaustivo y un evento nuevo en `EVENTOS_MODIFICACION` no compila hasta que
+ * se le escribe el correo. `satisfies` y no una anotación para que el tipo
+ * inferido conserve las claves literales, que es lo que hace que el `evento` de
+ * `construirPayloadModificacion` admita exactamente lo que hay redactado.
  */
 const CORREO_MODIFICACION_DE = {
   modificacion_solicitada: avisoModificacion,
-  // `satisfies Partial<...>` y no una anotación: comprueba que la clave existe
-  // en `EventoModificacion` —una errata no compila— pero deja que el tipo
-  // inferido conserve la clave literal, que es lo que hace que el `evento` de
-  // `construirPayloadModificacion` admita exactamente lo que hay redactado.
-} satisfies Partial<Record<EventoModificacion, (s: Solicitud, m: Modificacion) => CorreoEvento>>;
+  modificacion_aprobada: correoModificacionAprobada,
+  modificacion_rechazada: correoModificacionRechazada,
+} satisfies Record<EventoModificacion, (s: Solicitud, m: Modificacion) => CorreoEvento>;
 
 /**
  * El payload de un aviso de modificación.

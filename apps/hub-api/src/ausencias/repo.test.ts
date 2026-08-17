@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { crearModificacion } from './repo.js';
+import { crearModificacion, decidirModificacion } from './repo.js';
 import type { PayloadEvento } from './types.js';
 
 // Los únicos tests del repo que no necesitan Postgres.
@@ -129,5 +129,131 @@ describe('crearModificacion contra un driver falso', () => {
     await crearModificacion(db, DATOS, payloadStub);
     const insert = sqls.find((s) => s.includes('INSERT INTO portal.solicitud_modificaciones'));
     expect(insert).toContain('AND s.estado = $8');
+  });
+});
+
+// ── La decisión ────────────────────────────────────────────────────────────
+
+/**
+ * El SQL sin comentarios ni espacios de más.
+ *
+ * Los comentarios se quitan porque el aviso que vive DENTRO de estas consultas
+ * menciona a propósito las columnas que el SET no debe tocar, y sin quitarlos la
+ * aserción de abajo se creería que sí las toca. Los espacios, para que alinear
+ * un `=` no rompa un test.
+ */
+const forma = (sql: string) =>
+  sql
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Un Pool para la decisión, con las dos escrituras programables por separado.
+ *
+ * Que cada UPDATE pueda devolver CERO filas es todo el asunto: es la única forma
+ * de ejecutar de verdad —sin Postgres— los dos caminos de fallo de
+ * `decidirModificacion`, y en particular el que deshace la transacción entera.
+ */
+function poolDecision(over: { propuesta?: unknown[]; solicitud?: unknown[] } = {}) {
+  const sqls: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      sqls.push(sql);
+      if (sql.includes('UPDATE portal.solicitud_modificaciones')) return { rows: over.propuesta ?? [FILA_MODIFICACION] };
+      if (sql.includes('UPDATE portal.solicitudes_ausencia')) return { rows: over.solicitud ?? [{ id: 's1' }] };
+      if (sql.includes('FROM portal.solicitudes_ausencia s')) return { rows: [FILA_SOLICITUD] };
+      return { rows: [] };
+    },
+    release: () => {},
+  };
+  return { db: { connect: async () => client } as unknown as Pool, sqls };
+}
+
+const hizo = (sqls: string[], trozo: string) => sqls.some((s) => s.includes(trozo));
+const updateDeLaSolicitud = (sqls: string[]) => forma(sqls.find((s) => s.includes('UPDATE portal.solicitudes_ausencia')) ?? '');
+
+describe('decidirModificacion contra un driver falso', () => {
+  it('CANDADO: si el UPDATE de la solicitud no encuentra fila, ROLLBACK y NADA en el outbox', async () => {
+    // Lo más importante de la fase, y aquí sí se ejecuta el código de verdad: el
+    // paso 1 YA ha escrito cuando el paso 2 falla. Si esto no lanzara, la
+    // propuesta quedaría «aprobada» sobre una solicitud con las fechas viejas y
+    // —peor— el correo saldría anunciando un cambio que no ha ocurrido.
+    const { db, sqls } = poolDecision({ solicitud: [] });
+    await expect(decidirModificacion(db, 'm1', true, null, null, payloadStub)).resolves.toEqual({
+      ok: false,
+      razon: 'solicitud_cambio_de_estado',
+    });
+    expect(sqls).toContain('ROLLBACK');
+    expect(sqls).not.toContain('COMMIT');
+    expect(hizo(sqls, 'INSERT INTO portal.ausencias_outbox')).toBe(false);
+  });
+
+  it('cero filas en la propuesta es «ya decidida», y ni se mira la solicitud', async () => {
+    const { db, sqls } = poolDecision({ propuesta: [] });
+    await expect(decidirModificacion(db, 'm1', true, null, null, payloadStub)).resolves.toEqual({
+      ok: false,
+      razon: 'ya_decidida',
+    });
+    expect(hizo(sqls, 'UPDATE portal.solicitudes_ausencia')).toBe(false);
+    expect(hizo(sqls, 'INSERT INTO portal.ausencias_outbox')).toBe(false);
+  });
+
+  it('rechazar NO toca la solicitud, pero sí encola su aviso', async () => {
+    const { db, sqls } = poolDecision();
+    const r = await decidirModificacion(db, 'm1', false, 'Ya esta cubierto el turno', null, payloadStub);
+    expect(r.ok).toBe(true);
+    expect(hizo(sqls, 'UPDATE portal.solicitudes_ausencia')).toBe(false);
+    expect(hizo(sqls, 'INSERT INTO portal.ausencias_outbox')).toBe(true);
+    expect(sqls).toContain('COMMIT');
+  });
+
+  it('CANDADO (de forma): el UPDATE de la solicitud lleva el testigo TRIPLE', async () => {
+    // Asertar sobre el TEXTO de una consulta es feo, y se acepta aquí por lo
+    // mismo que en `crearModificacion`: el doble de router.test.ts es in-memory
+    // y modela el testigo por su cuenta, así que quitar dos de los tres campos
+    // del WHERE deja toda la batería en verde mientras la aprobación empieza a
+    // pisar en silencio las correcciones que un admin hizo por PATCH.
+    const { db, sqls } = poolDecision();
+    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
+    const update = updateDeLaSolicitud(sqls);
+    expect(update).toContain('WHERE id = $1');
+    expect(update).toContain('AND estado = $2');
+    expect(update).toContain('AND fecha_inicio = $3::date');
+    expect(update).toContain('AND fecha_fin = $4::date');
+  });
+
+  it('CANDADO (de forma): aprobar un cambio de fechas NO escribe el estado', async () => {
+    // Aprobar un cambio no re-decide la solicitud. Si el SET tocara `estado`,
+    // una `pendiente` quedaría concedida sin que ningún firmante la firmara.
+    const { db, sqls } = poolDecision();
+    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
+    const [set] = updateDeLaSolicitud(sqls).split('WHERE');
+    expect(set).toContain('fecha_inicio');
+    expect(set).toContain('fecha_fin');
+    expect(set).toContain('dias_habiles');
+    expect(set).not.toContain('estado');
+    expect(set).not.toContain('anulada_at');
+  });
+
+  it('CANDADO (de forma): la anulación deja `rechazada` + `anulada_at`, con el mismo testigo', async () => {
+    const { db, sqls } = poolDecision({
+      propuesta: [
+        {
+          ...FILA_MODIFICACION,
+          mod_clase: 'anulacion',
+          mod_fecha_inicio_nueva: null,
+          mod_fecha_fin_nueva: null,
+          mod_dias_habiles_nuevos: null,
+        },
+      ],
+    });
+    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
+    const update = updateDeLaSolicitud(sqls);
+    expect(update).toContain("SET estado = 'rechazada'");
+    expect(update).toContain('anulada_at = now()');
+    // Las fechas NO se tocan: la ausencia anulada sigue diciendo cuál era.
+    expect(update.split('WHERE')[0]).not.toContain('fecha_inicio =');
+    expect(update).toContain('AND fecha_inicio = $3::date');
   });
 });

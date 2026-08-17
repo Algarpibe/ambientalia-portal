@@ -3,6 +3,7 @@ import {
   AusenciaError,
   nombreArchivoNormalizado,
   puedeDecidir,
+  puedeDecidirModificacion,
   puedePedirAnulacion,
   puedePedirModificacion,
   puedeVerAdjunto,
@@ -11,7 +12,13 @@ import {
   validarSaldo,
   type Sesion,
 } from './service.js';
-import { decisorDeModificacion, transicionAlDecidir, type EstadoSolicitud, type Solicitud } from './types.js';
+import {
+  decisorDeModificacion,
+  transicionAlDecidir,
+  type EstadoSolicitud,
+  type Modificacion,
+  type Solicitud,
+} from './types.js';
 
 const PDF_BASE64 = Buffer.from('%PDF-1.4 fake').toString('base64');
 
@@ -833,5 +840,85 @@ describe('puedePedirModificacion', () => {
       segundoAprobadorCorreo: null,
     });
     expect(puedePedirModificacion(huerfana, HOY_MOD)).toBe(false);
+  });
+});
+
+describe('puedeDecidirModificacion', () => {
+  const ANA = 'ana.ruiz@ambientalia.com.co';
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const SEGUNDO = 'comercial@ambientalia.com.co';
+
+  const sesion = (email: string, esAdmin = false): Sesion => ({ email, userId: null, esAdmin });
+
+  /**
+   * Una solicitud de Ana **en cascada y ya aprobada**: los dos firmantes con
+   * valor. Que los dos existan es lo que hace falsable el candado de abajo — con
+   * `segundoAprobadorCorreo: null` no habría segundo correo que colar por error.
+   */
+  const suya = solicitud({
+    estado: 'aprobada',
+    solicitanteEmail: ANA,
+    aprobadorCorreo: PRIMERO,
+    segundoAprobadorCorreo: SEGUNDO,
+  });
+
+  /** La propuesta, con su decisor CONGELADO: el jefe inmediato. */
+  const propuesta: Modificacion = {
+    id: 'm1',
+    solicitudId: 's1',
+    clase: 'fechas',
+    estadoPrevio: 'aprobada',
+    fechaInicioPrevia: '2026-07-06',
+    fechaFinPrevia: '2026-07-10',
+    diasHabilesPrevios: 5,
+    fechaInicioNueva: '2026-07-13',
+    fechaFinNueva: '2026-07-15',
+    diasHabilesNuevos: 3,
+    motivo: 'Cita médica',
+    estado: 'pendiente',
+    aprobadorCorreo: PRIMERO,
+    solicitanteEmail: ANA,
+    decididaAt: null,
+    motivoRechazo: null,
+    createdAt: '2026-06-20T10:00:00Z',
+  };
+
+  it('el decisor congelado en la propuesta decide', () => {
+    expect(puedeDecidirModificacion(sesion(PRIMERO), propuesta, suya)).toBe(true);
+  });
+
+  it('CANDADO: el OTRO firmante congelado de la solicitud NO decide', () => {
+    // Escribir el guard como un OR de `aprobadorCorreo` y
+    // `segundoAprobadorCorreo` de la SOLICITUD es lo natural, y es exactamente
+    // el bug que `puedeDecidir` documenta: dejaría decidir a quien no le toca.
+    // El decisor sale de la propuesta y de ningún otro sitio.
+    expect(puedeDecidirModificacion(sesion(SEGUNDO), propuesta, suya)).toBe(false);
+  });
+
+  it('CANDADO: el propio solicitante NO decide, ni siendo él mismo el decisor congelado', () => {
+    // Autoaprobarse convierte el debido proceso en un formulario: quien pide
+    // anular sus vacaciones no puede además concedérselo.
+    //
+    // El caso que de verdad prueba el candado es el segundo: la raíz del
+    // organigrama se declara como su propio jefe (`fijarJefe` lo admite y hay un
+    // test que lo fija), así que `decisorDeModificacion` le devuelve su propio
+    // correo. En el primero, quitar el guard no cambiaría nada —Ana tampoco es
+    // la decisora—, y un test que solo cubriera ese pasaría por construcción.
+    expect(puedeDecidirModificacion(sesion(ANA), propuesta, suya)).toBe(false);
+
+    const suPropioJefe = { ...propuesta, aprobadorCorreo: ANA };
+    expect(puedeDecidirModificacion(sesion(ANA), suPropioJefe, { ...suya, aprobadorCorreo: ANA })).toBe(false);
+  });
+
+  it('un admin decide: es quien destraba una decisión bloqueada', () => {
+    expect(puedeDecidirModificacion(sesion('admin@ambientalia.com.co', true), propuesta, suya)).toBe(true);
+  });
+
+  it('un tercero cualquiera no decide', () => {
+    expect(puedeDecidirModificacion(sesion('curioso@ambientalia.com.co'), propuesta, suya)).toBe(false);
+  });
+
+  it('compara sin distinguir mayúsculas, como el resto de los guards', () => {
+    expect(puedeDecidirModificacion(sesion('Jefa.Directa@Ambientalia.com.co'), propuesta, suya)).toBe(true);
   });
 });
