@@ -1398,9 +1398,17 @@ export async function decidirModificacion(
  * completa.
  *
  * El filtro va contra `m.aprobador_correo` —el decisor CONGELADO en la
- * propuesta— y no contra los firmantes de la solicitud: es el mismo correo que
- * `puedeDecidirModificacion` exige, así que la bandeja no puede enseñar nada que
- * luego responda 403 al pulsar.
+ * propuesta— y no contra los firmantes de la solicitud, que es el mismo correo
+ * que exige `puedeDecidirModificacion`.
+ *
+ * ⚠️ Eso NO basta para garantizar que todo lo que sale de aquí sea decidible por
+ * quien pregunta, y no hay que intentar arreglarlo en este SQL. La RAÍZ del
+ * organigrama es su propio jefe (`aprobadoresDe`), así que sobre sus propias
+ * solicitudes el decisor congelado es ella misma y el guard del solicitante la
+ * frena; y un admin recibe además las de todo el mundo. Quién puede decidir cada
+ * fila lo decora el servicio con `puedoDecidirla`, que llama al MISMO guard que
+ * el endpoint de decisión — que es lo único que impide que la bandeja ofrezca un
+ * botón que responde 403.
  */
 export async function modificacionesPendientes(
   db: Pool,

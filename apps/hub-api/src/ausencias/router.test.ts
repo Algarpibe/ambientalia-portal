@@ -2813,6 +2813,30 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
     expect(fila(solicitudId)).toMatchObject({ estado: 'pendiente', fechaInicio: '2026-07-13' });
   });
 
+  it('CANDADO: sobre una `pendiente_2` decide el SEGUNDO firmante, y aprobar NO la devuelve a `pendiente`', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta(CAMBIO, 'pendiente_2');
+    // El decisor congelado es quien tiene el turno AHORA, no quien firmó primero.
+    expect(estado.modificaciones[0].aprobadorCorreo).toBe(GERENCIA);
+
+    // La jefa inmediata ya firmó y perdió el turno. Es el caso exacto que nombra
+    // el JSDoc de `puedeDecidirModificacion`: un OR de los dos correos de la
+    // solicitud —la forma natural del guard— la dejaría decidir aquí. Todos los
+    // demás 403 de este fichero corren en la dirección contraria.
+    const no = await decidir(modificacionId, { aprueba: true }, token({ sub: JEFA })).expect(403);
+    expect(no.body.error).toBe('no_es_su_aprobacion');
+
+    await decidir(modificacionId, { aprueba: true }, token({ sub: GERENCIA })).expect(200);
+    expect(fila(solicitudId)).toMatchObject({ estado: 'pendiente_2', fechaInicio: '2026-07-13' });
+
+    // La consecuencia OBSERVABLE de que el estado no retroceda: la solicitud no
+    // reaparece en la bandeja del primer firmante mientras el segundo decide.
+    const suya = await request(app())
+      .get('/api/ausencias/pendientes')
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .expect(200);
+    expect(suya.body.solicitudes).toHaveLength(0);
+  });
+
   it('aprobar una anulación deja la solicitud rechazada CON `anuladaAt`', async () => {
     // `anulada_at` es lo único que distingue «anulada» de «rechazada por el
     // jefe»: sin él, el historial diría que se la tumbaron.
@@ -3062,7 +3086,7 @@ describe('GET /ausencias/modificaciones/pendientes', () => {
         .expect(200)
     ).body.solicitudes as Record<string, unknown>[];
 
-  it('el jefe ve las suyas y solo las suyas', async () => {
+  it('el jefe ve las suyas y solo las suyas, y puede decidirlas', async () => {
     await conPropuesta(JEFA);
     await conPropuesta(OTRO_JEFE, { fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
 
@@ -3072,12 +3096,30 @@ describe('GET /ausencias/modificaciones/pendientes', () => {
     // podría pintar ni de quién es ni qué se pide.
     expect(suyas[0].modificacionPendiente).toMatchObject({ clase: 'fechas', aprobadorCorreo: JEFA });
     expect(suyas[0].empleadoNombre).toBe('Ana Ruiz');
+    expect(suyas[0].puedoDecidirla).toBe(true);
   });
 
   it('un admin las ve todas', async () => {
     await conPropuesta(JEFA);
     await conPropuesta(OTRO_JEFE, { fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
     expect(await bandeja(token({ sub: 'admin@ambientalia.com.co', role: 'admin' }))).toHaveLength(2);
+  });
+
+  it('CANDADO: la raíz del organigrama ve SU propia fila, pero apagada', async () => {
+    // La raíz es su propio jefe (`aprobadoresDe` lo trata así a propósito), así
+    // que el decisor congelado de su propia solicitud es ella misma. Sin este
+    // campo, la Fase 5 le pintaría los botones y el POST le devolvería 403 —el
+    // camino que el JSDoc del repo llegó a declarar imposible—.
+    await conPropuesta('ana.ruiz@ambientalia.com.co');
+    const suya = await bandeja(token());
+    expect(suya).toHaveLength(1);
+    expect(suya[0].puedoDecidirla).toBe(false);
+    // Y es coherente con el endpoint: lo que la bandeja apaga, el POST rechaza.
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${estado.modificaciones[0].id}/decision`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
   });
 
   it('quien no tiene ninguna recibe lista vacía y 200, no 403', async () => {

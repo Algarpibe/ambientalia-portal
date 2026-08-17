@@ -194,6 +194,11 @@ export function createAusenciasRouter(db: Pool): Router {
    * Devuelve `solicitudes`, cada una con su `modificacionPendiente` colgada por
    * el `LEFT JOIN`: la propuesta sola no dice de quién es ni de qué tipo, y una
    * bandeja hecha con propuestas sueltas necesitaría una consulta por fila.
+   *
+   * Cada fila trae `puedoDecidirla`, el `esMiTurno` de esta bandeja: puede ser
+   * `false` (la raíz del organigrama sobre su propia solicitud, o un admin que
+   * las ve todas), y entonces la fila se pinta apagada en vez de ofrecer un
+   * botón que responde 403.
    */
   router.get('/ausencias/modificaciones/pendientes', ...gated, async (req: Request, res: Response) => {
     try {

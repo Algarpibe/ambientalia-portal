@@ -671,14 +671,49 @@ export function puedeDecidirModificacion(sesion: Sesion, m: Modificacion, s: Sol
 }
 
 /**
+ * Una solicitud de la bandeja de cambios: su propuesta viva, y si quien mira
+ * puede decidirla.
+ *
+ * `modificacionPendiente` se estrecha a NO nula: en esta respuesta nunca lo es
+ * —la consulta filtra por `m.id IS NOT NULL`—, y dejarla nullable obligaría al
+ * espejo manual del frontend a un `!` por fila para algo que no puede pasar.
+ *
+ * `puedoDecidirla` es el `esMiTurno` de esta bandeja, y existe por la misma
+ * razón: que la regla viva en un solo sitio. Duplicar el guard en el navegador
+ * es cómo se llega a ofrecer un botón que responde 403 al pulsarlo, y aquí la
+ * parte que un espejo manual se deja es justo la que más importa (la exclusión
+ * del solicitante).
+ */
+export type SolicitudConPropuesta = Solicitud & {
+  modificacionPendiente: Modificacion;
+  puedoDecidirla: boolean;
+};
+
+/** Estrecha el tipo sin `!`, y de paso descarta una fila imposible. */
+const tienePropuesta = (s: Solicitud): s is Solicitud & { modificacionPendiente: Modificacion } =>
+  s.modificacionPendiente !== null;
+
+/**
  * Las solicitudes con una propuesta viva que le toca decidir a quien pregunta.
  *
  * Sin guard de aprobador: quien no tenga ninguna recibe lista vacía, no un 403.
  * Mismo criterio que `decididasPorMi` — un 403 no aportaría nada y obligaría a
  * la app a saber de antemano si alguien es decisor.
+ *
+ * ⚠️ La fila puede venir con `puedoDecidirla: false`, y no es un caso raro: la
+ * RAÍZ del organigrama es su propio jefe (`aprobadoresDe` lo trata así a
+ * propósito), así que sobre sus propias solicitudes el decisor congelado es ella
+ * misma y el guard del solicitante la frena. Se le enseña la fila apagada —y con
+ * el botón de retirar, que sí es suyo— en vez de esconderla o de ofrecerle un
+ * botón que responde 403. Un admin también las ve todas, como en la bandeja de
+ * solicitudes.
  */
-export async function modificacionesPendientes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
-  return repo.modificacionesPendientes(db, sesion.email, sesion.esAdmin);
+export async function modificacionesPendientes(db: Pool, sesion: Sesion): Promise<SolicitudConPropuesta[]> {
+  const solicitudes = await repo.modificacionesPendientes(db, sesion.email, sesion.esAdmin);
+  return solicitudes.filter(tienePropuesta).map((s) => ({
+    ...s,
+    puedoDecidirla: puedeDecidirModificacion(sesion, s.modificacionPendiente, s),
+  }));
 }
 
 /**
