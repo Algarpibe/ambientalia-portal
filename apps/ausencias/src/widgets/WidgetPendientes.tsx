@@ -31,8 +31,13 @@ export default function WidgetPendientes() {
     const cargar = () => {
       ultimaCarga = Date.now();
       const intento = ultimaCarga;
-      // Las dos llamadas EN PARALELO y no encadenadas: son independientes, y en
-      // serie el widget tardaría el doble en enseñar un número.
+      // Las dos llamadas EN PARALELO y no encadenadas: son independientes, así
+      // que la espera es la de la más lenta y no la suma de las dos.
+      //
+      // Ojo con lo que eso NO arregla: el widget no pinta nada hasta que las dos
+      // contestan, así que si la consulta de los cambios se pone lenta el
+      // recuento tarda más que antes de existir esta sección. Con un 404 —el
+      // caso del despliegue a medias— la respuesta es inmediata y no se nota.
       Promise.all([
         fetchPendientes(),
         // El `.catch` cuelga de ESTA promesa y no del `Promise.all` a propósito.

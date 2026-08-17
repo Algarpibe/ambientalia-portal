@@ -19,6 +19,24 @@ import {
 import TablaSolicitudes from './TablaSolicitudes';
 import TarjetaSaldo from './TarjetaSaldo';
 
+/**
+ * Los dos códigos que el endpoint de decisión sabe devolver, dichos a quien
+ * DECIDE y no a quien pidió.
+ *
+ * El mapa de `mensajeDeModificacion` está escrito en segunda persona hacia el
+ * solicitante —«Tu jefe ya decidió esa petición», «mientras rellenabas esto»— y
+ * aquí esa segunda persona es otra: quien lee acaba de pulsar un botón, no está
+ * rellenando nada y es él mismo el jefe. Es la misma trampa que `efectoEnDias` y
+ * `efectoParaElDecisor` resuelven con dos redacciones en vez de una.
+ *
+ * Los textos de la Fase 4 no se tocan: son correctos para su audiencia.
+ */
+const MENSAJE_DECISION: Record<string, string> = {
+  ya_decidida: 'Esa petición ya estaba decidida. Recarga la página para ver el resultado.',
+  solicitud_cambio_de_estado:
+    'La solicitud cambió después de pedirse este cambio, así que no se puede aplicar. Pídele que lo retire.',
+};
+
 interface Props {
   solicitudes: SolicitudPendiente[];
   /**
@@ -89,8 +107,11 @@ export default function BandejaAprobacion({
     } catch (e) {
       // Traducido, al revés que en `decidir`: los 409 de aquí llegan como código
       // crudo (`ya_decidida`, `solicitud_cambio_de_estado`) y esta línea es lo
-      // único que va a leer quien pulsó.
-      onError(mensajeDeModificacion((e as Error).message));
+      // único que va a leer quien pulsó. Primero la redacción para el decisor y,
+      // si el código no es de los suyos —un 400 de forma, o uno que este bundle
+      // todavía no conoce—, la general, que como mucho será impersonal.
+      const codigo = (e as Error).message;
+      onError(MENSAJE_DECISION[codigo] ?? mensajeDeModificacion(codigo));
     } finally {
       setOcupadoCambio(null);
     }
@@ -112,43 +133,64 @@ export default function BandejaAprobacion({
     const puedo = s.puedoDecidirla !== false;
     const saldoSolicitante =
       s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
-    // Lo ÚNICO que TarjetaSaldo sabe hacer con este número es avisar de que no
-    // cabe, y ese aviso está guardado con `diasPedidos > 0`: un delta negativo
-    // —el caso de «le devuelve días»— entra sin romper nada pero tampoco dice
-    // nada. Así que a la tarjeta se le pasa solo el caso que sabe contar (los
-    // días que se piden DE MÁS, que son los que pueden descubrir el saldo) y el
-    // delta se enseña aquí al lado con sus propias palabras.
-    const diasDeMas = Math.max(0, -vista.deltaDias);
-    // El par de botones, en una sola definición: la fila bloqueada los enseña
-    // apagados y no ausentes —unos botones que desaparecen se leen como un fallo
-    // de la app—, así que la única diferencia entre los dos casos es `bloqueado`.
-    const botones = (bloqueado: boolean) => (
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={bloqueado || ocupadoCambio === m.id}
-          onClick={() => void decidirCambio(m.id, true)}
-          // El texto visible («Aprobar») va entero y al principio del
-          // aria-label, que es lo que pide WCAG 2.5.3; lo que se añade es de
-          // quién, porque en esta tabla hay un «Aprobar» por fila.
-          aria-label={`Aprobar el cambio que pide ${s.empleadoNombre}`}
-          className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
-        >
-          {ocupadoCambio === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-          Aprobar
-        </button>
-        <button
-          type="button"
-          disabled={bloqueado || ocupadoCambio === m.id}
-          onClick={() => { setRechazandoCambio(m.id); setMotivoCambio(''); }}
-          aria-label={`Rechazar el cambio que pide ${s.empleadoNombre}`}
-          className="flex items-center gap-1 rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          <X className="h-3.5 w-3.5" />
-          Rechazar
-        </button>
-      </div>
-    );
+    const ocupado = ocupadoCambio === m.id;
+    // El id del párrafo que explica el bloqueo, para poder apuntarle desde los
+    // botones. Lleva el id de la propuesta porque hay una celda de estas por
+    // fila y un id repetido no describiría a nadie.
+    const idMotivo = `cambio-bloqueado-${m.id}`;
+    /**
+     * El par de botones, en una sola definición: la fila bloqueada los enseña
+     * apagados y no ausentes —unos botones que desaparecen se leen como un fallo
+     * de la app—, así que la única diferencia entre los dos casos es `bloqueado`.
+     *
+     * `aria-disabled` y NO `disabled`: `disabled` saca el botón del orden de
+     * tabulación, de modo que quien navega con teclado nunca aterriza en él y
+     * nunca llega a oír el porqué que tiene al lado — vería una fila con dos
+     * botones que no existen para él. Con `aria-disabled` sigue siendo
+     * enfocable, se anuncia como no disponible y `aria-describedby` le lee la
+     * explicación. Lo que `aria-disabled` NO hace por sí solo es impedir el
+     * clic: de eso se encarga el guard de cada `onClick`.
+     */
+    const botones = (bloqueado: boolean) => {
+      const inactivo = bloqueado || ocupado;
+      // Gris 200/600 y no el `disabled:bg-gray-300` con texto blanco del resto
+      // de la app (1,6:1). WCAG exime a los deshabilitados, pero ahí ese estado
+      // dura lo que tarda una petición y aquí es PERMANENTE: se lee o no se lee.
+      const apagado = 'bg-gray-200 text-gray-600';
+      return (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            aria-disabled={inactivo}
+            aria-describedby={bloqueado ? idMotivo : undefined}
+            onClick={() => { if (inactivo) return; void decidirCambio(m.id, true); }}
+            // El texto visible («Aprobar») va entero y al principio del
+            // aria-label, que es lo que pide WCAG 2.5.3; lo que se añade es de
+            // quién, porque en esta tabla hay un «Aprobar» por fila.
+            aria-label={`Aprobar el cambio que pide ${s.empleadoNombre}`}
+            className={`flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-medium ${
+              inactivo ? apagado : 'bg-emerald-600 text-white hover:bg-emerald-700'
+            }`}
+          >
+            {ocupado ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+            Aprobar
+          </button>
+          <button
+            type="button"
+            aria-disabled={inactivo}
+            aria-describedby={bloqueado ? idMotivo : undefined}
+            onClick={() => { if (inactivo) return; setRechazandoCambio(m.id); setMotivoCambio(''); }}
+            aria-label={`Rechazar el cambio que pide ${s.empleadoNombre}`}
+            className={`flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium ${
+              inactivo ? `border-gray-200 ${apagado}` : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <X className="h-3.5 w-3.5" />
+            Rechazar
+          </button>
+        </div>
+      );
+    };
     return (
       // w-72, el mismo que la celda de arriba y por el mismo motivo: es lo que
       // necesita TarjetaSaldo para no partir el titular en tres líneas.
@@ -172,15 +214,19 @@ export default function BandejaAprobacion({
             Comentarios lleva los de la solicitud original. */}
         {m.motivo && <p className="text-xs text-gray-600">{`Motivo: ${m.motivo}`}</p>}
         {propuestaDesfasada(s, m) && (
+          // Sin «y que lo vuelva a mandar»: si lo que cambió fue el estado —la
+          // solicitud se cerró, o se anuló— volver a pedirlo es imposible, y
+          // `estadoAdmiteModificacion` lo rechazaría. Retirarlo sí se puede
+          // siempre, y es lo único que hay que decirle.
           <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
             La solicitud cambió después de pedirse esto, así que el «ahora» de arriba ya no es el de la fila.
-            Aprobarlo va a fallar: pídele que lo retire y lo vuelva a mandar.
+            Aprobarlo va a fallar: pídele que lo retire.
           </p>
         )}
         {saldoSolicitante && (
           <TarjetaSaldo
             saldo={saldoSolicitante.saldo}
-            diasPedidos={diasDeMas}
+            diasPedidos={vista.diasDeMas}
             titulo={`Saldo de ${s.empleadoNombre}`}
           />
         )}
@@ -191,7 +237,12 @@ export default function BandejaAprobacion({
         {!puedo ? (
           <div className="flex flex-col gap-1">
             {botones(true)}
-            <p className="text-xs text-gray-500">{motivoNoDecidible(s, m, email)}</p>
+            {/* El `id` lo apuntan los dos botones con `aria-describedby`: quien
+                navega con teclado se planta en un botón que se anuncia «no
+                disponible» y necesita oír por qué sin tener que ir a buscarlo. */}
+            <p id={idMotivo} className="text-xs text-gray-500">
+              {motivoNoDecidible(s, m, email)}
+            </p>
           </div>
         ) : rechazandoCambio === m.id ? (
           <div className="flex flex-col gap-2">
@@ -210,11 +261,11 @@ export default function BandejaAprobacion({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={ocupadoCambio === m.id}
+                disabled={ocupado}
                 onClick={() => void decidirCambio(m.id, false, motivoCambio)}
                 className="flex-1 rounded-xl bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
               >
-                {ocupadoCambio === m.id ? 'Rechazando…' : 'Confirmar'}
+                {ocupado ? 'Rechazando…' : 'Confirmar'}
               </button>
               <button
                 type="button"
@@ -407,9 +458,14 @@ export default function BandejaAprobacion({
           sección no existe. */}
       {cambios.length > 0 && (
         <div>
-          {/* El recuento va también aquí, aunque la pestaña ya lo sume: sin él,
-              «Pendientes de aprobar (5)» sobre una tabla de tres filas parece un
-              número mal contado. Con él se ve de dónde salen los dos que faltan. */}
+          {/* El recuento va también aquí, aunque la pestaña ya sume los cambios:
+              sin él, «Pendientes de aprobar (5)» sobre una tabla de tres filas
+              parece un número mal contado.
+              ⚠️ Este cuenta FILAS DE TABLA y el de la pestaña cuenta DECISIONES
+              (`contarPorAtender`, que descarta las que uno no puede decidir), así
+              que pueden no coincidir a propósito: quien es su propio jefe ve aquí
+              «(1)» y en la pestaña ningún número, porque esa fila no la decide
+              él. No unificarlos: responden a preguntas distintas. */}
           <h3 className="mb-1 text-sm font-semibold text-gray-900">{`Cambios pedidos (${cambios.length})`}</h3>
           <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-900">
             <PencilLine className="mt-0.5 h-4 w-4 flex-shrink-0" />

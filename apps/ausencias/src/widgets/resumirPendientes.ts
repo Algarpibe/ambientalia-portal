@@ -1,4 +1,5 @@
 import type { SolicitudConPropuesta, SolicitudPendiente } from '../api';
+import { meTocaDecidir, meTocaFirmar } from '../dominio';
 
 // Resumen que alimenta el widget «Solicitudes por aprobar» del Dashboard.
 // Pura a propósito —sin React, sin fetch y sin reloj propio: `ahora` entra por
@@ -51,17 +52,12 @@ export function resumirPendientes(
   cambios: SolicitudConPropuesta[],
   ahora: Date,
 ): ResumenPendientes {
-  // `!== false` y no `=== true`. Los dos servicios se despliegan por separado y
-  // hay una ventana en que el portal va por delante de hub-api; ahí el campo
-  // llega `undefined`. Así degrada a «cuéntalas todas» —el comportamiento
-  // anterior— y el peor caso es un número inflado, que se ve y se corrige solo
-  // al desplegar. Con `=== true` degradaría a 0: diría «nada pendiente»
-  // mientras las solicitudes se pudren, y eso no lo nota nadie.
-  const mias = solicitudes.filter((s) => s.esMiTurno !== false);
-  // Lo mismo con `puedoDecidirla`, que es el `esMiTurno` de los cambios: un
-  // admin recibe también los que no le tocan, y quien es su propio jefe recibe
-  // el suyo, que no puede autoaprobarse.
-  const mios = cambios.filter((c) => c.puedoDecidirla !== false);
+  // Los dos filtros salen de `dominio.ts` y NO se escriben aquí: el rótulo de la
+  // pestaña «Pendientes de aprobar (N)» cuenta con los mismos, y la única forma
+  // de que los dos números no vuelvan a divergir es que la regla exista una sola
+  // vez. Allí está también el porqué del `!== false`.
+  const mias = solicitudes.filter(meTocaFirmar);
+  const mios = cambios.filter(meTocaDecidir);
   const total = mias.length + mios.length;
   if (total === 0) return { total: 0, solicitudes: 0, cambios: 0, esperaDias: null };
   const recuento = { total, solicitudes: mias.length, cambios: mios.length };

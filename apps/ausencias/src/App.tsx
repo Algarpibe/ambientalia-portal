@@ -18,6 +18,7 @@ import {
   type SolicitudPendiente,
 } from './api';
 import {
+  contarPorAtender,
   enTramite,
   esTurnoDe,
   hoyEnColombia,
@@ -154,11 +155,16 @@ export default function App() {
       // Las dos cosas que hay que atender —firmar solicitudes y decidir los
       // cambios que piden sobre ellas— viven en esta misma pestaña, así que el
       // número las suma: es lo que un aprobador entiende por «lo que me falta».
-      // El widget «Solicitudes por aprobar» del Dashboard suma exactamente lo
-      // mismo (`resumirPendientes`); si aquí se sumara y allí no, habría dos
-      // números distintos para lo mismo y ninguna forma de saber cuál creer.
-      const porAtender = pendientes.length + cambios.length;
-      p.push(['bandeja', `Pendientes de aprobar${porAtender ? ` (${porAtender})` : ''}`]);
+      //
+      // La cuenta la hace `contarPorAtender`, que es la MISMA que usa el widget
+      // del Dashboard (`resumirPendientes` filtra con esas dos funciones). No se
+      // cuentan aquí las filas a pelo: lo que la bandeja ENSEÑA es más de lo que
+      // a uno le toca DECIDIR —un admin ve también lo de los demás, y quien es
+      // su propio jefe ve su propio cambio sin poder decidirlo—, así que
+      // `pendientes.length + cambios.length` daría un número que el widget
+      // nunca puede alcanzar.
+      const { total } = contarPorAtender(pendientes, cambios);
+      p.push(['bandeja', `Pendientes de aprobar${total ? ` (${total})` : ''}`]);
       p.push(['historial', 'Historial de aprobaciones']);
     }
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre

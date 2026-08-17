@@ -1,4 +1,12 @@
-import type { ClaseModificacion, EstadoSolicitud, Modificacion, Solicitud, TipoSolicitud } from './api';
+import type {
+  ClaseModificacion,
+  EstadoSolicitud,
+  Modificacion,
+  Solicitud,
+  SolicitudConPropuesta,
+  SolicitudPendiente,
+  TipoSolicitud,
+} from './api';
 
 /** Los cuatro tipos, en el orden en que se ofrecen en el formulario. */
 export const TIPOS: { id: TipoSolicitud; label: string; ayuda: string }[] = [
@@ -464,6 +472,17 @@ export interface VistaPropuesta {
    * fichero serían una trampa para quien lea uno y use el otro.
    */
   deltaDias: number;
+  /**
+   * Los días que esta propuesta pediría DE MÁS, y 0 si no pide ninguno.
+   *
+   * Existe para `TarjetaSaldo`, que es lo único que sabe hacer con un número
+   * así: avisar de que no caben. Su aviso está guardado con `diasPedidos > 0`,
+   * de modo que pasarle el delta a pelo funciona por casualidad en un sentido
+   * (pedir de más) y calla en el otro (devolver días) sin romper nada ni decir
+   * nada. Se calcula aquí y no en el JSX porque es una decisión de dominio —qué
+   * número significa «esto puede descubrirle el saldo»—, no de pintado.
+   */
+  diasDeMas: number;
   /** El efecto sobre el recuento, en una frase cerrada con punto. */
   efecto: string;
 }
@@ -486,12 +505,16 @@ export interface VistaPropuesta {
  */
 export function vistaDePropuesta(s: Pick<Solicitud, 'tipo'>, m: Modificacion): VistaPropuesta {
   const ahora = rangoConDias(m.fechaInicioPrevia, m.fechaFinPrevia, m.diasHabilesPrevios);
+  // Ninguna de las tres frases de `quedaria` lleva punto final: la de arriba
+  // («Ahora: …») tampoco lo lleva, y una sí y otra no se lee como una errata.
   if (m.clase === 'anulacion') {
     return {
       anula: true,
       ahora,
-      quedaria: 'nada reservado, la ausencia desaparece del calendario.',
+      quedaria: 'nada reservado, la ausencia desaparece del calendario',
       deltaDias: m.diasHabilesPrevios,
+      // Anular siempre libera días, nunca pide de más.
+      diasDeMas: 0,
       // Misma salvedad que en `resumenCambio`: un rango sin días hábiles (un
       // sábado–domingo) se puede pedir y se puede anular, y ahí un delta de 0
       // caería en «Los mismos días, en otras fechas», que contradice de plano
@@ -510,8 +533,9 @@ export function vistaDePropuesta(s: Pick<Solicitud, 'tipo'>, m: Modificacion): V
     return {
       anula: false,
       ahora,
-      quedaria: 'no se puede leer qué fechas se piden.',
+      quedaria: 'no se puede leer qué fechas se piden',
       deltaDias: 0,
+      diasDeMas: 0,
       efecto: 'Pídele que retire la petición y la vuelva a mandar.',
     };
   }
@@ -523,6 +547,7 @@ export function vistaDePropuesta(s: Pick<Solicitud, 'tipo'>, m: Modificacion): V
       ahora,
       quedaria: rangoFechas(m.fechaInicioNueva, m.fechaFinNueva),
       deltaDias: 0,
+      diasDeMas: 0,
       efecto: 'Se piden otras fechas.',
     };
   }
@@ -532,6 +557,7 @@ export function vistaDePropuesta(s: Pick<Solicitud, 'tipo'>, m: Modificacion): V
     ahora,
     quedaria: rangoConDias(m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos),
     deltaDias: delta,
+    diasDeMas: Math.max(0, -delta),
     efecto: efectoParaElDecisor(s.tipo, delta),
   };
 }
@@ -557,6 +583,57 @@ export function propuestaDesfasada(
     s.fechaInicio !== m.fechaInicioPrevia ||
     s.fechaFin !== m.fechaFinPrevia
   );
+}
+
+// ── Lo que le falta por atender a quien aprueba ────────────────────────────
+//
+// Dos sitios enseñan este número —el rótulo de la pestaña «Pendientes de
+// aprobar (N)» y el widget del Dashboard— y tienen que decir lo mismo. Los dos
+// filtros viven aquí, en una sola definición, porque la última vez que cada uno
+// contaba por su cuenta divergían: la pestaña las contaba todas y el widget solo
+// las de su turno, de modo que la raíz del organigrama —que es su propio jefe,
+// recibe su propio cambio y no puede autoaprobárselo— leía «(1)» en la pestaña y
+// «Nada pendiente» en el Dashboard.
+
+/**
+ * Si a quien mira le toca firmar ESTA solicitud.
+ *
+ * `!== false` y no `=== true`: hub-api y el portal se despliegan por separado y
+ * hay una ventana en que el campo llega `undefined`. Así degrada a «cuéntalas
+ * todas» —el comportamiento anterior, con un número inflado que se ve y se
+ * corrige solo— en vez de a 0, que diría «nada pendiente» mientras las
+ * solicitudes se pudren, y eso no lo nota nadie.
+ */
+export const meTocaFirmar = (s: Pick<SolicitudPendiente, 'esMiTurno'>): boolean => s.esMiTurno !== false;
+
+/** Si a quien mira le toca decidir ESTE cambio. Mismo criterio y mismo porqué. */
+export const meTocaDecidir = (c: Pick<SolicitudConPropuesta, 'puedoDecidirla'>): boolean =>
+  c.puedoDecidirla !== false;
+
+/** Lo que espera una decisión de quien mira, ya desglosado. */
+export interface PorAtender {
+  /** Solicitudes que esperan su firma. */
+  solicitudes: number;
+  /** Cambios pedidos que le toca decidir a él. */
+  cambios: number;
+  /** La suma: el número del rótulo de la pestaña y el grande del widget. */
+  total: number;
+}
+
+/**
+ * ⚠️ Cuenta DECISIONES, no filas de tabla. La bandeja enseña además las que solo
+ * puede destrabar (un admin) y el cambio de quien no puede decidir el suyo, así
+ * que el «(5)» del título de una sección y este total pueden no coincidir a
+ * propósito: uno dice cuántas filas hay y el otro cuántas esperan a esta
+ * persona.
+ */
+export function contarPorAtender(
+  pendientes: Pick<SolicitudPendiente, 'esMiTurno'>[],
+  cambios: Pick<SolicitudConPropuesta, 'puedoDecidirla'>[],
+): PorAtender {
+  const solicitudes = pendientes.filter(meTocaFirmar).length;
+  const mios = cambios.filter(meTocaDecidir).length;
+  return { solicitudes, cambios: mios, total: solicitudes + mios };
 }
 
 /**
