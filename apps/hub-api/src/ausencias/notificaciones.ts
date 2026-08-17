@@ -9,6 +9,7 @@ import {
   urlPortal,
 } from './config.js';
 import {
+  ESTADOS_EN_TRAMITE,
   ETIQUETA_TIPO,
   type CorreoEvento,
   type EstadoSolicitud,
@@ -432,10 +433,35 @@ function bloqueAntesYDespues(m: Modificacion): string {
  * que decir exactamente qué hay que hacer a mano y sobre qué fechas.
  */
 function avisoDeAjustarGoogle(m: Modificacion): string {
+  // Se nombra a quien tiene que actuar. Sin el «Administración:», el párrafo se
+  // lee como una tarea para el trabajador —el correo está escrito en segunda
+  // persona hacia él— y acaba sin hacerla nadie.
   return m.clase === 'anulacion'
-    ? '⚠️ Esta ausencia ya estaba en el calendario y en la hoja. NO se borran solas: hay que borrar a mano el evento del calendario y la fila de la hoja.'
-    : '⚠️ Esta ausencia ya estaba en el calendario y en la hoja. NO se corrigen solas: hay que ajustar a mano el evento del calendario y la fila de la hoja a las fechas nuevas.';
+    ? '⚠️ Administración: esta ausencia ya estaba en el calendario y en la hoja. NO se borran solas: hay que borrar a mano el evento del calendario y la fila de la hoja.'
+    : '⚠️ Administración: esta ausencia ya estaba en el calendario y en la hoja. NO se corrigen solas: hay que ajustar a mano el evento del calendario y la fila de la hoja a las fechas nuevas.';
 }
+
+/**
+ * El prefijo del asunto cuando hay algo que tocar a mano en Google.
+ *
+ * Es el único correo de toda la app que obliga a alguien a ir a editar el
+ * calendario, y sin esto llega con un asunto indistinguible de cualquier otro
+ * «✅ aprobado»: quien tiene que actuar —administración, que va en
+ * `copiaCorreo`— no vería la señal hasta abrirlo. No diluye la disciplina del
+ * ⚠️, porque la condición sigue siendo `tocaGoogle` y solo esa.
+ */
+const prefijoDeAsunto = (m: Modificacion): string =>
+  tocaGoogle(m.estadoPrevio) ? '⚠️ Ajustar calendario y hoja — ' : '';
+
+/**
+ * Bloque opcional: la línea en blanco viaja CON él.
+ *
+ * Los opcionales no pueden ser `''` sueltos dentro del array del cuerpo: el
+ * `join('\n')` les pone su salto igualmente, y con dos opcionales ausentes
+ * —sin motivo y sin aviso de Google— salían dos líneas en blanco de más justo
+ * antes de la firma.
+ */
+const siHay = (condicion: boolean, ...lineas: string[]): string[] => (condicion ? ['', ...lineas] : []);
 
 /**
  * El cambio se aprueba. Va a `cadenaDeDecision(s)` entera, no solo a quien lo
@@ -445,11 +471,21 @@ function avisoDeAjustarGoogle(m: Modificacion): string {
  */
 function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento {
   const anula = m.clase === 'anulacion';
+  // ⚠️ La solicitud sigue SIN conceder: el ✅ es del cambio, no de las
+  // vacaciones. Sin esta línea, quien viene del acuse del alta —que le prometió
+  // informarle «del estado de aprobación»— lee un ✅ con sus fechas nuevas y
+  // compra el vuelo. Es la simétrica de «La solicitud NO cambia hasta que
+  // apruebes» del aviso al jefe.
+  //
+  // Solo para un cambio de FECHAS: una anulación aprobada sobre una `pendiente`
+  // deja la solicitud `rechazada`, así que decirle que «sigue pendiente de
+  // aprobación» sería falso justo al revés.
+  const sigueEnTramite = !anula && ESTADOS_EN_TRAMITE.includes(m.estadoPrevio);
   return {
     para: cadenaDeDecision(s),
     asunto: anula
-      ? `✅ Anulada la solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`
-      : `✅ Cambio de fechas aprobado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+      ? `${prefijoDeAsunto(m)}✅ Anulada la solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`
+      : `${prefijoDeAsunto(m)}✅ Cambio de fechas aprobado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
     cuerpo: [
       `Hola ${s.empleadoNombre}:`,
       '',
@@ -460,10 +496,14 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
       anula
         ? `📅 Fechas anuladas: ${m.fechaInicioPrevia} a ${m.fechaFinPrevia} (${dias(m.diasHabilesPrevios)})`
         : bloqueAntesYDespues(m),
-      // El motivo es el que escribió QUIEN PIDIÓ el cambio: `motivoRechazo` de la
-      // propuesta solo se rellena al rechazarla, y aquí sería siempre null.
-      m.motivo ? `\nMotivo: ${m.motivo}` : '',
-      tocaGoogle(m.estadoPrevio) ? `\n${avisoDeAjustarGoogle(m)}\n` : '',
+      ...siHay(sigueEnTramite, 'Tu solicitud sigue pendiente de aprobación: esto solo cambia las fechas que se van a firmar.'),
+      // «del cambio» y no «Motivo:» a secas: en el correo de rechazo la misma
+      // palabra encabeza el motivo del JEFE, y los dos van a los mismos
+      // destinatarios sobre el mismo objeto. Este es el que escribió QUIEN PIDIÓ
+      // el cambio (`motivoRechazo` de la propuesta solo se llena al rechazarla).
+      ...siHay(!!m.motivo, `Motivo del cambio: ${m.motivo}`),
+      ...siHay(tocaGoogle(m.estadoPrevio), avisoDeAjustarGoogle(m)),
+      '',
       'Saludos,',
       FIRMA_GERENCIA,
     ].join('\n'),
@@ -488,14 +528,28 @@ function correoModificacionRechazada(s: Solicitud, m: Modificacion): CorreoEvent
       '',
       `Tu petición de ${que} ${PERIODO[s.tipo]} ha sido ❌ *rechazada*.`,
       '',
+      // QUÉ se pidió. Sin esto, el segundo firmante y administración leen un
+      // rechazo sin saber qué se tumbó, y dos rechazos seguidos sobre la misma
+      // solicitud producen correos idénticos byte a byte.
+      //
+      // Sale de la propuesta, y no choca con el párrafo de abajo: lo propuesto
+      // es un dato inmutable de la petición —no puede quedar obsoleto—, mientras
+      // que lo que queda en pie sí depende de la fila viva.
+      //
+      // Solo en un cambio de fechas: en una anulación, la primera línea ya dice
+      // literalmente qué se pidió («tu petición de anular tu solicitud»).
+      ...(m.clase === 'fechas' ? [bloqueCambio(m), ''] : []),
       // Estas fechas salen de la SOLICITUD y no de la foto de la propuesta, al
       // revés que en el correo de aprobación: al rechazar no se ha tocado la
       // fila, así que la fila es la verdad de lo que queda en pie —y si un admin
       // la corrigió por PATCH entre medias, la foto ya no lo sería.
       `📅 La solicitud sigue como estaba: ${s.fechaInicio} a ${s.fechaFin} (${dias(s.diasHabiles)})`,
-      // El motivo del jefe, que es la mejora que pedía el flujo viejo: un
-      // rechazo sin explicación obliga a preguntar por privado.
-      m.motivoRechazo ? `\nMotivo: ${m.motivoRechazo}\n` : '',
+      // El motivo del JEFE, que es la mejora que pedía el flujo viejo: un
+      // rechazo sin explicación obliga a preguntar por privado. Etiquetado
+      // «del rechazo» para no confundirlo con el «Motivo del cambio» del correo
+      // de aprobación, que es del trabajador y va a los mismos buzones.
+      ...siHay(!!m.motivoRechazo, `Motivo del rechazo: ${m.motivoRechazo}`),
+      '',
       'Si tienes dudas, por favor comunícate conmigo.',
       '',
       'Saludos,',

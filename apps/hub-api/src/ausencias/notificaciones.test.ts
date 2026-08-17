@@ -624,15 +624,93 @@ describe('la decisión del cambio', () => {
   it('el rechazo dice el motivo del jefe y que la solicitud sigue como estaba', () => {
     const p = rechazada(conCadena(), modificacion({ motivoRechazo: 'Ya está cubierto el turno' }));
     expect(p.correo.asunto).toContain('rechazado');
-    expect(p.correo.cuerpo).toContain('Motivo: Ya está cubierto el turno');
+    expect(p.correo.cuerpo).toContain('Motivo del rechazo: Ya está cubierto el turno');
     // Las fechas de la SOLICITUD, que es lo que queda en pie.
     expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
   });
 
+  it('CANDADO: el rechazo dice QUÉ se pidió, no solo lo que queda en pie', () => {
+    // Sin esto, el segundo firmante y administración leen un rechazo sin saber
+    // qué se tumbó, y dos rechazos seguidos sobre la misma solicitud producen
+    // correos idénticos byte a byte.
+    const p = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-07-13', fechaFinNueva: '2026-07-15' }));
+    expect(p.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+  });
+
+  it('dos rechazos de propuestas distintas NO producen el mismo correo', () => {
+    // La consecuencia observable del candado de arriba.
+    const a = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-07-13', fechaFinNueva: '2026-07-15' }));
+    const b = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-08-03', fechaFinNueva: '2026-08-05' }));
+    expect(a.correo.cuerpo).not.toBe(b.correo.cuerpo);
+  });
+
+  it('el rechazo de una ANULACIÓN no repite lo pedido: ya lo dice la primera línea', () => {
+    const p = rechazada(conCadena(), anulacion());
+    expect(p.correo.cuerpo).toContain('Tu petición de anular tu solicitud');
+    expect(p.correo.cuerpo).not.toContain('Fechas propuestas');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
   it('un rechazo sin motivo no deja un «Motivo:» vacío colgando', () => {
     const p = rechazada(conCadena(), modificacion({ motivoRechazo: null }));
-    expect(p.correo.cuerpo).not.toContain('Motivo:');
+    expect(p.correo.cuerpo).not.toContain('Motivo');
     expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('CANDADO: sobre una solicitud EN TRÁMITE, el ✅ avisa de que sigue sin conceder', () => {
+    // El ✅ es del CAMBIO, no de las vacaciones. Quien viene del acuse del alta
+    // —que le prometió informarle «del estado de aprobación»— lee un ✅ con sus
+    // fechas nuevas, y ese es el correo que acaba en un vuelo comprado.
+    for (const estadoPrevio of ['pendiente', 'pendiente_2'] as const) {
+      const cuerpo = aprobada(conCadena({ estado: estadoPrevio }), modificacion({ estadoPrevio })).correo.cuerpo;
+      expect(cuerpo).toContain('sigue pendiente de aprobación');
+    }
+  });
+
+  it('y NO lo dice cuando la solicitud ya estaba aprobada', () => {
+    // La otra mitad: ahí las vacaciones sí están concedidas, y decir que siguen
+    // pendientes sería la mentira contraria.
+    expect(aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo).not.toContain(
+      'sigue pendiente de aprobación',
+    );
+  });
+
+  it('una ANULACIÓN aprobada sobre una pendiente no dice que siga pendiente', () => {
+    // Queda `rechazada`: decirle que «sigue pendiente de aprobación» sería falso
+    // justo al revés. Por eso la línea es solo para el cambio de fechas.
+    const cuerpo = aprobada(conCadena({ estado: 'pendiente' }), anulacion({ estadoPrevio: 'pendiente' })).correo.cuerpo;
+    expect(cuerpo).not.toContain('sigue pendiente de aprobación');
+  });
+
+  it('CANDADO: el asunto avisa cuando hay que tocar Google, y solo entonces', () => {
+    // Es el único correo de la app que obliga a alguien a ir a editar el
+    // calendario a mano. Sin el prefijo, administración —que lo recibe por
+    // `copiaCorreo`— no ve la señal hasta abrirlo.
+    const conAviso = aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo;
+    expect(conAviso.asunto).toContain('⚠️ Ajustar calendario y hoja');
+    // Y el párrafo nombra a quien tiene que actuar: escrito sin destinatario, se
+    // lee como una tarea para el trabajador.
+    expect(conAviso.cuerpo).toContain('Administración:');
+
+    const sinAviso = aprobada(conCadena({ estado: 'pendiente' }), modificacion({ estadoPrevio: 'pendiente' })).correo;
+    expect(sinAviso.asunto).not.toContain('⚠️');
+    // El rechazo tampoco lo lleva: no hay nada que ajustar.
+    expect(rechazada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.asunto).not.toContain('⚠️');
+  });
+
+  it('ningún cuerpo deja dos líneas en blanco seguidas', () => {
+    // Los opcionales (`motivo`, el aviso de Google, la nota de trámite) aportan
+    // su propio salto: si se dejaran como cadenas vacías dentro del array, el
+    // `join` sumaría el suyo y saldría un hueco doble antes de la firma.
+    const casos = [
+      aprobada(conCadena(), modificacion({ motivo: null, estadoPrevio: 'aprobada' })),
+      aprobada(conCadena({ estado: 'pendiente' }), modificacion({ motivo: null, estadoPrevio: 'pendiente' })),
+      aprobada(conCadena(), anulacion({ motivo: null, estadoPrevio: 'aprobada' })),
+      rechazada(conCadena(), modificacion({ motivoRechazo: null })),
+      rechazada(conCadena(), anulacion({ motivoRechazo: 'No procede' })),
+    ];
+    for (const p of casos) expect(p.correo.cuerpo).not.toMatch(/\n\n\n/);
   });
 
   it('CANDADO: los dos eventos llevan `calendario` y `hoja` en null', () => {

@@ -988,9 +988,13 @@ export async function solicitudesDecididas(db: Pool, aprobadorCorreo: string): P
     `${SELECT_SOLICITUD}
       WHERE s.estado IN ('aprobada', 'rechazada')
         AND (lower(s.aprobador_correo) = lower($1) OR lower(s.segundo_aprobador_correo) = lower($1))
-      -- NULLS LAST no es decorativo: el PATCH de admin puede dejar una fila en
-      -- estado terminal sin tocar decidida_at, y sin esto esas filas encabezarían
-      -- la lista por delante de las decisiones reales de esta semana.
+      -- NULLS LAST no es decorativo: hay DOS formas de llegar a estado terminal
+      -- sin decidida_at. El PATCH de admin, que corrige la fila sin decidir
+      -- nada; y desde la 024, aprobar una ANULACION sobre una solicitud que
+      -- seguia pendiente —la deja rechazada + anulada_at, y decidida_at sigue
+      -- nula porque nadie decidio la solicitud, solo el cambio—. Sin esto, esas
+      -- filas encabezarian la lista por delante de las decisiones reales de esta
+      -- semana.
       ORDER BY s.decidida_at DESC NULLS LAST, s.created_at DESC`,
     [aprobadorCorreo],
   );
