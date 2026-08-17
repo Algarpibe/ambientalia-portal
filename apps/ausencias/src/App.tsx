@@ -25,19 +25,7 @@ import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
 
-type Pestana =
-  | 'nueva'
-  | 'mias'
-  | 'bandeja'
-  | 'historial'
-  | 'adjuntos'
-  | 'empleados'
-  | 'organigrama'
-  | 'saldos'
-  | 'historico'
-  | 'calendario';
-
-const PESTANAS_VALIDAS: Pestana[] = [
+const PESTANAS_VALIDAS = [
   'nueva',
   'mias',
   'bandeja',
@@ -48,7 +36,9 @@ const PESTANAS_VALIDAS: Pestana[] = [
   'saldos',
   'historico',
   'calendario',
-];
+] as const;
+
+type Pestana = (typeof PESTANAS_VALIDAS)[number];
 
 /**
  * La pestaña con la que arranca la app. El widget «Solicitudes por aprobar»
@@ -60,7 +50,7 @@ const PESTANAS_VALIDAS: Pestana[] = [
  */
 function pestanaInicial(): Pestana {
   const hash = window.location.hash.slice(1);
-  return (PESTANAS_VALIDAS as string[]).includes(hash) ? (hash as Pestana) : 'nueva';
+  return PESTANAS_VALIDAS.find((p) => p === hash) ?? 'nueva';
 }
 
 export default function App() {

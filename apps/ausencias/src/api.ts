@@ -86,6 +86,12 @@ export interface SolicitudPendiente extends Solicitud {
    * Solo llega en `false` a un **administrador**: a los demás la consulta ya les
    * entrega únicamente su turno. Es lo que separa en la bandeja lo que uno tiene
    * que firmar de lo que solo puede destrabar.
+   *
+   * En el runtime puede llegar `undefined` pese al tipo: hub-api y el portal se
+   * despliegan por separado, y hay una ventana en que el portal va por delante.
+   * Por eso el widget del dashboard (`resumirPendientes.ts`) comprueba
+   * `!== false` y no `=== true` — así degrada a «cuéntalas todas» en vez de a
+   * «nada pendiente».
    */
   esMiTurno: boolean;
 }
