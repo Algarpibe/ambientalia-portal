@@ -8,7 +8,14 @@ import {
   type Empleado,
   type Solicitud,
 } from './api';
-import { chipDe, ETIQUETA_TIPO, formatFecha, TIPOS } from './dominio';
+import {
+  CHIP_CAMBIO_PENDIENTE,
+  chipDeSolicitud,
+  ETIQUETA_TIPO,
+  formatFecha,
+  resumenPropuesta,
+  TIPOS,
+} from './dominio';
 import EditarSolicitud from './EditarSolicitud';
 
 // El registro general de la compañía: lo que antes había que ir a mirar a la
@@ -108,7 +115,13 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
           s.fechaInicio,
           s.fechaFin,
           s.diasHabiles,
-          chipDe(s.estado).label,
+          // `chipDeSolicitud` y NO `chipDe(s.estado)`: este CSV es el fichero
+          // que sustituye al Excel de nómina, y una anulada saldría rotulada
+          // «Rechazada» —quien lo lea entenderá que el jefe le negó unos días
+          // que en realidad devolvió la propia persona—. Se exporta la MISMA
+          // etiqueta que se ve en pantalla, que es lo que hace que el fichero y
+          // la tabla se puedan cotejar.
+          chipDeSolicitud(s).label,
           s.comentarios ?? '',
           s.observaciones ?? '',
         ]
@@ -214,7 +227,17 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filtradas.map((s) => (
+                {filtradas.map((s) => {
+                  // Mismo contrato que en `TablaSolicitudes`: el chip sale de
+                  // `chipDeSolicitud`, no del estado a pelo. Esta es la quinta
+                  // tabla que enseña el estado y la única que no usa aquel
+                  // componente, así que la regla hay que traerla a mano.
+                  const chip = chipDeSolicitud(s);
+                  // Por veracidad, como en el resto: un hub-api que todavía no
+                  // mande el campo se lee «no hay propuesta» y esta tabla queda
+                  // como estaba, en vez de reventar.
+                  const propuesta = s.modificacionPendiente;
+                  return (
                   <tr key={s.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5 text-gray-900">{s.empleadoNombre}</td>
                     <td className="px-4 py-2.5 text-gray-700">{ETIQUETA_TIPO[s.tipo]}</td>
@@ -222,9 +245,25 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{formatFecha(s.fechaFin)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{s.diasHabiles}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chipDe(s.estado).clase}`}>
-                        {chipDe(s.estado).label}
+                      <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chip.clase}`}>
+                        {chip.label}
                       </span>
+                      {/* Sin este chip, un admin abre «Editar» sobre una fila
+                          con una propuesta viva y le cambia las fechas sin saber
+                          que había una. Los datos los salva el testigo triple
+                          del servidor —la aprobación dará 409—, pero al
+                          trabajador se le queda la petición invalidada y nadie
+                          se lo dice. */}
+                      {propuesta && (
+                        <div className="mt-1">
+                          <span
+                            title={resumenPropuesta(propuesta)}
+                            className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${CHIP_CAMBIO_PENDIENTE}`}
+                          >
+                            Cambio pendiente
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="max-w-md px-4 py-2.5 text-gray-600">
                       {s.comentarios || <span className="text-gray-300">—</span>}
@@ -289,7 +328,8 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
