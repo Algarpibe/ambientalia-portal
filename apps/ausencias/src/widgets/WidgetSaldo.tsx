@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchMiSaldo, type SaldoVacaciones } from '../api';
 import IndicadorSaldo from '../IndicadorSaldo';
+import Mensaje from './Mensaje';
 
 // Widget del Dashboard del Portal. Autocontenido a la fuerza: el contrato de
 // WidgetDescriptor no le pasa props, así que carga su propio dato. El Portal lo
@@ -55,18 +56,6 @@ export default function WidgetSaldo() {
       >
         Pedir vacaciones <span aria-hidden="true">→</span>
       </a>
-    </div>
-  );
-}
-
-function Mensaje({ children, tono }: { children: React.ReactNode; tono?: 'error' }) {
-  return (
-    <div
-      className={`flex h-full items-center justify-center px-3 text-center text-sm ${
-        tono === 'error' ? 'text-red-600' : 'text-gray-500'
-      }`}
-    >
-      {children}
     </div>
   );
 }

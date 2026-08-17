@@ -25,17 +25,33 @@ import PanelSaldos from './PanelSaldos';
 import PanelOrganigrama from './PanelOrganigrama';
 import Calendario from './Calendario';
 
-type Pestana =
-  | 'nueva'
-  | 'mias'
-  | 'bandeja'
-  | 'historial'
-  | 'adjuntos'
-  | 'empleados'
-  | 'organigrama'
-  | 'saldos'
-  | 'historico'
-  | 'calendario';
+const PESTANAS_VALIDAS = [
+  'nueva',
+  'mias',
+  'bandeja',
+  'historial',
+  'adjuntos',
+  'empleados',
+  'organigrama',
+  'saldos',
+  'historico',
+  'calendario',
+] as const;
+
+type Pestana = (typeof PESTANAS_VALIDAS)[number];
+
+/**
+ * La pestaña con la que arranca la app. El widget «Solicitudes por aprobar»
+ * del Dashboard enlaza a `/ausencias#bandeja` para aterrizar directo en la
+ * bandeja en vez del formulario; si el hash no trae una pestaña reconocida
+ * (o no viene ninguno) se arranca en `nueva`, como siempre. Si la pestaña
+ * pedida no está disponible para este usuario, el efecto de más abajo ya cae
+ * a la primera que sí lo esté.
+ */
+function pestanaInicial(): Pestana {
+  const hash = window.location.hash.slice(1);
+  return PESTANAS_VALIDAS.find((p) => p === hash) ?? 'nueva';
+}
 
 export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
@@ -44,7 +60,7 @@ export default function App() {
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Pestana>('nueva');
+  const [tab, setTab] = useState<Pestana>(pestanaInicial);
   // Se incrementa al importar para que el registro general se recargue sin
   // desmontarlo (y sin perder los filtros que tuviera puestos).
   const [recargarRegistro, setRecargarRegistro] = useState(0);
