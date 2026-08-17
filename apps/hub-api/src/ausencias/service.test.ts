@@ -577,13 +577,19 @@ describe('el informado no hereda ningún permiso del segundo firmante', () => {
 describe('validarNuevaModificacion', () => {
   /** Las fechas que la solicitud tiene AHORA, contra las que se compara. */
   const ACTUAL = { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' };
+  /**
+   * Un «hoy» a mitad de la ausencia (empezó el 6, acaba el 10): es el único
+   * escenario donde recortar y retroceder se distinguen, que es lo que la regla
+   * de fechas pasadas tiene que separar.
+   */
+  const HOY_MOD = '2026-07-08';
   const cambio = (over: Record<string, unknown> = {}) => ({
     clase: 'fechas',
     fechaInicio: '2026-07-13',
     fechaFin: '2026-07-15',
     ...over,
   });
-  const validar = (body: unknown) => validarNuevaModificacion(body, ACTUAL);
+  const validar = (body: unknown, hoy: string = HOY_MOD) => validarNuevaModificacion(body, ACTUAL, hoy);
 
   it('acepta un cambio de fechas y limpia el motivo', () => {
     expect(validar(cambio({ motivo: '  Cita médica  ' }))).toEqual({
@@ -660,11 +666,31 @@ describe('validarNuevaModificacion', () => {
     });
   });
 
-  it('NO aplica la regla de «fecha en pasado» del alta', () => {
-    // La sustituye la de `fechaFin >= hoy` sobre la solicitud. Sin esto no se
-    // podría acortar una ausencia ya empezada, que es el caso que más importa.
-    expect(validar(cambio({ fechaInicio: '2020-01-06', fechaFin: '2020-01-08' }))).toMatchObject({
-      fechaInicio: '2020-01-06',
+  it('recortar una ausencia YA EMPEZADA vale, aunque su inicio esté en el pasado', () => {
+    // Hoy es 8 de julio y la ausencia empezó el 6: «córtala, tengo que volver»
+    // obliga a proponer un inicio pasado. Si esto se rechazara, la feature no
+    // cubriría el caso que la justifica.
+    expect(validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: '2026-07-08' }))).toMatchObject({
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-08',
+    });
+  });
+
+  it('CANDADO: RETROCEDER al pasado es 400, aunque la solicitud siga vigente', () => {
+    // El agujero que esto tapa: unas vacaciones de julio todavía sin empezar,
+    // movidas a enero. Pasaba la validación y los dos CHECK de la 024, y dejaba
+    // una fila legal reservando días ya pasados — al aplicarla, saldo movido de
+    // un año a otro sin que nadie lo viera.
+    expect(() => validar(cambio({ fechaInicio: '2026-01-05', fechaFin: '2026-01-08' }), '2026-06-01')).toThrow(
+      expect.objectContaining({ code: 'fecha_en_pasado', status: 400, field: 'fechaInicio' }),
+    );
+  });
+
+  it('adelantar el inicio SÍ vale mientras no caiga en el pasado', () => {
+    // «Hacia atrás» es contra el calendario, no contra las fechas actuales:
+    // pedir empezar antes es legítimo si esos días aún no han llegado.
+    expect(validar(cambio({ fechaInicio: '2026-07-02', fechaFin: '2026-07-08' }), '2026-07-01')).toMatchObject({
+      fechaInicio: '2026-07-02',
     });
   });
 

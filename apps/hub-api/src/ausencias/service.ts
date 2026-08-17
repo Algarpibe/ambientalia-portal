@@ -154,19 +154,18 @@ export interface NuevaModificacion {
 /**
  * Valida la propuesta contra las fechas que la solicitud tiene AHORA.
  *
- * Recibe la solicitud actual —y no solo el cuerpo— porque `sin_cambios` no se
- * puede decidir sin ella. Entra por parámetro, como el `hoy` de
- * `validarNuevaSolicitud`, para que la función siga siendo pura y probable sin
- * base de datos.
+ * Recibe la solicitud actual y el `hoy` —y no solo el cuerpo— porque ni
+ * `sin_cambios` ni la regla del pasado se pueden decidir sin ellos. Los dos
+ * entran por parámetro, como el `hoy` de `validarNuevaSolicitud`, para que la
+ * función siga siendo pura y probable sin base de datos ni reloj.
  *
- * Aquí NO se aplica la regla `fecha_en_pasado` del alta. La sustituye la de
- * `fechaFin >= hoy` sobre la solicitud (`puedePedirModificacion`): una ausencia
- * ya empezada es justo donde «córtala, tengo que volver» es legítimo, y esa
- * propuesta empieza necesariamente en el pasado.
+ * La regla del pasado NO es la del alta: ver el comentario de `fecha_en_pasado`
+ * más abajo.
  */
 export function validarNuevaModificacion(
   body: unknown,
   actual: Pick<Solicitud, 'fechaInicio' | 'fechaFin'>,
+  hoy: string,
 ): NuevaModificacion {
   const b = (body ?? {}) as Record<string, unknown>;
 
@@ -195,6 +194,18 @@ export function validarNuevaModificacion(
 
   const diasNaturales = (Date.parse(`${fechaFin}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000 + 1;
   if (diasNaturales > MAX_DIAS_RANGO) throw new AusenciaError('rango_demasiado_largo', 400, 'fechaFin');
+
+  // La regla del alta no vale tal cual: recortar una ausencia YA EMPEZADA obliga
+  // a proponer una fecha de inicio que está en el pasado. Lo que NO puede es
+  // RETROCEDER — mover a enero unos días de julio todavía sin disfrutar
+  // reservaría días ya pasados y movería saldo de un año a otro.
+  //
+  // Las dos condiciones juntas son el invariante «hacia dentro sí, hacia atrás
+  // no»: la segunda es la que deja pasar el recorte (proponer el MISMO inicio
+  // que ya tiene nunca es retroceder, esté o no en el pasado).
+  if (fechaInicio < hoy && fechaInicio < actual.fechaInicio) {
+    throw new AusenciaError('fecha_en_pasado', 400, 'fechaInicio');
+  }
 
   // Pedir exactamente lo que ya tiene no es un cambio: sin esto, el jefe
   // recibiría un correo pidiéndole que apruebe dejar todo igual.
@@ -498,12 +509,19 @@ export async function pedirModificacion(
   if (!solicitud) throw new AusenciaError('no_encontrada', 404);
   if (solicitud.empleadoId !== empleado.id) throw new AusenciaError('no_es_su_solicitud', 403);
 
+  // Un solo `hoy` para las dos reglas de fecha: leerlo dos veces del reloj
+  // dejaría abierta la rendija de que una caiga a un lado de la medianoche de
+  // Bogotá y la otra al otro.
+  const hoy = hoyEnColombia();
   if (!estadoAdmiteModificacion(solicitud)) throw new AusenciaError('estado_no_admite_modificacion', 409);
-  if (!sigueVigente(solicitud, hoyEnColombia())) throw new AusenciaError('solicitud_ya_pasada', 409);
+  if (!sigueVigente(solicitud, hoy)) throw new AusenciaError('solicitud_ya_pasada', 409);
 
-  const datos = validarNuevaModificacion(body, solicitud);
-  // No puede ser null: `estadoAdmiteModificacion` ya lo ha exigido.
-  const decisor = decisorDeModificacion(solicitud) as string;
+  const datos = validarNuevaModificacion(body, solicitud, hoy);
+  const decisor = decisorDeModificacion(solicitud);
+  // `estadoAdmiteModificacion` ya lo ha exigido, pero eso vive treinta líneas
+  // más arriba y en otra función: se comprueba aquí para que el tipo salga sin
+  // aserción y para que reordenar los guards no abra un `null` silencioso.
+  if (!decisor) throw new AusenciaError('estado_no_admite_modificacion', 409);
 
   const resultado = await repo.crearModificacion(
     db,

@@ -2342,6 +2342,21 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     expect(r.body.fechaFinNueva).toBe('2026-01-16');
   });
 
+  it('400 al RETROCEDER una solicitud vigente a fechas ya pasadas', async () => {
+    // La otra cara del test de arriba, y por HTTP porque es el camino real: la
+    // solicitud (julio) sigue vigente y sin empezar, así que pasa los dos 409;
+    // lo único que impide reservar días de enero es la regla de la validación.
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-08',
+    }).expect(400);
+    expect(r.body).toMatchObject({ error: 'fecha_en_pasado', field: 'fechaInicio' });
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
   it('el último día cuenta: una ausencia que acaba HOY todavía se puede cambiar', async () => {
     const s = await crear();
     Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-15' });
