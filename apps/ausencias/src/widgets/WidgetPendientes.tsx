@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { fetchPendientes } from '../api';
-import { resumirPendientes, type ResumenPendientes } from './resumirPendientes';
+import { fetchModificacionesPendientes, fetchPendientes } from '../api';
+import {
+  etiquetaDePendientes,
+  fraseDePendientes,
+  resumirPendientes,
+  textoDelEnlace,
+  type ResumenPendientes,
+} from './resumirPendientes';
 import Mensaje from './Mensaje';
 
 // Widget del Dashboard del Portal. Autocontenido a la fuerza: el contrato de
@@ -25,12 +31,23 @@ export default function WidgetPendientes() {
     const cargar = () => {
       ultimaCarga = Date.now();
       const intento = ultimaCarga;
-      fetchPendientes()
-        .then((solicitudes) => {
+      // Las dos llamadas EN PARALELO y no encadenadas: son independientes, y en
+      // serie el widget tardaría el doble en enseñar un número.
+      Promise.all([
+        fetchPendientes(),
+        // El `.catch` cuelga de ESTA promesa y no del `Promise.all` a propósito.
+        // Aquí sí se espera un fallo esperable: hub-api y el portal se
+        // despliegan por separado, así que hay una ventana en que esta ruta
+        // todavía no existe y contesta 404. Colgado de la promesa se pierde el
+        // sumando de los cambios y el widget sigue enseñando las solicitudes;
+        // colgado del `all` se perderían las dos y el widget entero diría error.
+        fetchModificacionesPendientes().catch(() => []),
+      ])
+        .then(([solicitudes, cambios]) => {
           // `intento !== ultimaCarga`: si una recarga adelantó a esta respuesta,
           // la vieja no puede pisar a la nueva con un recuento rancio.
           if (!vivo || intento !== ultimaCarga) return;
-          setEstado({ fase: 'listo', resumen: resumirPendientes(solicitudes, new Date()) });
+          setEstado({ fase: 'listo', resumen: resumirPendientes(solicitudes, cambios, new Date()) });
         })
         // `mensajeDeError` (dentro de `fetchPendientes`) ya distingue 401 y 403 del
         // resto: el token vive en localStorage y una pestaña puede llevar horas
@@ -74,7 +91,9 @@ export default function WidgetPendientes() {
   // Sin botón a propósito: no hay ninguna urgencia a la que mandar a nadie.
   if (total === 0) return <Mensaje>Nada pendiente de firmar.</Mensaje>;
 
-  const frase = total === 1 ? '1 solicitud espera tu firma' : `${total} solicitudes esperan tu firma`;
+  // Las tres frases salen de funciones puras: el widget no decide copia, la
+  // pinta. Es lo único que se puede probar de aquí el día que haya runner.
+  const frase = fraseDePendientes(estado.resumen);
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 px-3 text-center">
@@ -85,7 +104,7 @@ export default function WidgetPendientes() {
         {total}
       </span>
       <span aria-hidden="true" className="text-sm text-gray-500">
-        {total === 1 ? 'solicitud' : 'solicitudes'}
+        {etiquetaDePendientes(estado.resumen)}
       </span>
       {esperaDias !== null && (
         <span aria-hidden="true" className="mt-1 text-xs text-gray-500">
@@ -100,7 +119,11 @@ export default function WidgetPendientes() {
         href="/ausencias#bandeja"
         className="mt-2 rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 transition-colors hover:bg-blue-50"
       >
-        Ir a firmar <span aria-hidden="true">→</span>
+        {/* `{' '}` explícito y no un espacio suelto: el texto ya no es un
+            literal, y un salto de línea entre la expresión y el <span> se
+            comería el espacio dejando «Ir a firmar→». */}
+        {textoDelEnlace(estado.resumen)}{' '}
+        <span aria-hidden="true">→</span>
       </a>
     </div>
   );

@@ -1,25 +1,63 @@
 import { useState, type ReactNode } from 'react';
-import { Check, Loader2, ShieldAlert, X } from 'lucide-react';
-import { decidirSolicitud, type SaldoDeEmpleado, type Solicitud, type SolicitudPendiente } from './api';
-import { correoDelTurno } from './dominio';
+import { Check, Loader2, PencilLine, ShieldAlert, X } from 'lucide-react';
+import {
+  decidirModificacion,
+  decidirSolicitud,
+  type DecisionModificacion,
+  type SaldoDeEmpleado,
+  type Solicitud,
+  type SolicitudConPropuesta,
+  type SolicitudPendiente,
+} from './api';
+import {
+  correoDelTurno,
+  mensajeDeModificacion,
+  motivoNoDecidible,
+  propuestaDesfasada,
+  vistaDePropuesta,
+} from './dominio';
 import TablaSolicitudes from './TablaSolicitudes';
 import TarjetaSaldo from './TarjetaSaldo';
 
 interface Props {
   solicitudes: SolicitudPendiente[];
+  /**
+   * Las propuestas de cambio que esperan decisión. Llega vacío si hub-api
+   * todavía no las sirve (App.tsx traga ese 404), y entonces la sección de
+   * abajo no se pinta: la bandeja queda como antes de esta feature.
+   */
+  cambios: SolicitudConPropuesta[];
   /** Los saldos de la gente que este usuario aprueba, para decidir con contexto. */
   saldos: SaldoDeEmpleado[];
+  /** El correo de la sesión. Solo para EXPLICAR una fila que no se puede decidir. */
+  email: string;
   onDecidida: (s: Solicitud) => void;
+  onCambioDecidido: (r: DecisionModificacion) => void;
   onError: (mensaje: string) => void;
 }
 
-export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onError }: Props) {
+export default function BandejaAprobacion({
+  solicitudes,
+  cambios,
+  saldos,
+  email,
+  onDecidida,
+  onCambioDecidido,
+  onError,
+}: Props) {
   const [ocupada, setOcupada] = useState<string | null>(null);
   const [rechazando, setRechazando] = useState<string | null>(null);
   const [motivo, setMotivo] = useState('');
   // Qué fila ajena ha destapado sus botones. Firmar en lugar de otro exige dos
   // gestos a propósito: es una excepción, no el trabajo de cada día.
   const [destrabando, setDestrabando] = useState<string | null>(null);
+  // Estado PROPIO para la sección de cambios, y no las tres variables de arriba.
+  // Los ids no chocarían —son UUID de tablas distintas—, pero compartirlos ataría
+  // el formulario de motivo de un cambio al del rechazo de una solicitud: abrir
+  // uno cerraría el otro, y el texto tecleado en uno aparecería en el otro.
+  const [ocupadoCambio, setOcupadoCambio] = useState<string | null>(null);
+  const [rechazandoCambio, setRechazandoCambio] = useState<string | null>(null);
+  const [motivoCambio, setMotivoCambio] = useState('');
 
   async function decidir(id: string, aprueba: boolean, texto?: string) {
     setOcupada(id);
@@ -35,6 +73,163 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
     } finally {
       setOcupada(null);
     }
+  }
+
+  /**
+   * Decide una PROPUESTA, no la solicitud. Mismo cuerpo y mismo patrón que
+   * `decidir` —el servidor lo hizo idéntico a propósito—, con dos diferencias:
+   * el estado que toca es el suyo, y el error se traduce.
+   */
+  async function decidirCambio(id: string, aprueba: boolean, texto?: string) {
+    setOcupadoCambio(id);
+    try {
+      onCambioDecidido(await decidirModificacion(id, aprueba, texto));
+      setRechazandoCambio(null);
+      setMotivoCambio('');
+    } catch (e) {
+      // Traducido, al revés que en `decidir`: los 409 de aquí llegan como código
+      // crudo (`ya_decidida`, `solicitud_cambio_de_estado`) y esta línea es lo
+      // único que va a leer quien pulsó.
+      onError(mensajeDeModificacion((e as Error).message));
+    } finally {
+      setOcupadoCambio(null);
+    }
+  }
+
+  /**
+   * La celda de una propuesta: el antes, el después, el delta y los dos botones.
+   *
+   * Va en su propia sección y no mezclada con la tabla de arriba porque son dos
+   * decisiones distintas: los botones de allí deciden LA SOLICITUD y estos EL
+   * CAMBIO. Dos parejas de botones en la misma fila es cómo alguien aprueba lo
+   * que no era.
+   */
+  function accionesCambio(s: SolicitudConPropuesta): ReactNode {
+    const m = s.modificacionPendiente;
+    const vista = vistaDePropuesta(s, m);
+    // `!== false` y no `=== true`: un hub-api sin el campo degrada a «ofrécele
+    // los botones» (y, como mucho, un 403 explicado) y no a una fila muerta.
+    const puedo = s.puedoDecidirla !== false;
+    const saldoSolicitante =
+      s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
+    // Lo ÚNICO que TarjetaSaldo sabe hacer con este número es avisar de que no
+    // cabe, y ese aviso está guardado con `diasPedidos > 0`: un delta negativo
+    // —el caso de «le devuelve días»— entra sin romper nada pero tampoco dice
+    // nada. Así que a la tarjeta se le pasa solo el caso que sabe contar (los
+    // días que se piden DE MÁS, que son los que pueden descubrir el saldo) y el
+    // delta se enseña aquí al lado con sus propias palabras.
+    const diasDeMas = Math.max(0, -vista.deltaDias);
+    // El par de botones, en una sola definición: la fila bloqueada los enseña
+    // apagados y no ausentes —unos botones que desaparecen se leen como un fallo
+    // de la app—, así que la única diferencia entre los dos casos es `bloqueado`.
+    const botones = (bloqueado: boolean) => (
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={bloqueado || ocupadoCambio === m.id}
+          onClick={() => void decidirCambio(m.id, true)}
+          // El texto visible («Aprobar») va entero y al principio del
+          // aria-label, que es lo que pide WCAG 2.5.3; lo que se añade es de
+          // quién, porque en esta tabla hay un «Aprobar» por fila.
+          aria-label={`Aprobar el cambio que pide ${s.empleadoNombre}`}
+          className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:bg-gray-300"
+        >
+          {ocupadoCambio === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          Aprobar
+        </button>
+        <button
+          type="button"
+          disabled={bloqueado || ocupadoCambio === m.id}
+          onClick={() => { setRechazandoCambio(m.id); setMotivoCambio(''); }}
+          aria-label={`Rechazar el cambio que pide ${s.empleadoNombre}`}
+          className="flex items-center gap-1 rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+          Rechazar
+        </button>
+      </div>
+    );
+    return (
+      // w-72, el mismo que la celda de arriba y por el mismo motivo: es lo que
+      // necesita TarjetaSaldo para no partir el titular en tres líneas.
+      <div className="flex w-72 flex-col gap-2">
+        <div className="rounded-xl bg-gray-50 px-3 py-2 text-xs">
+          {/* Que se lea de un vistazo si lo que se pide es anular: aprobar una
+              anulación deja la solicitud sin efecto, que no es «mover unas
+              fechas». */}
+          <p className="font-semibold text-gray-900">
+            {vista.anula ? 'Pide anular la solicitud' : 'Pide cambiar las fechas'}
+          </p>
+          {/* Cada línea se arma entera en una plantilla en vez de pegar trozos
+              con etiquetas JSX: un salto de línea entre dos nodos de texto se
+              come el espacio y aquí saldría «Ahora:6 jul 2026». */}
+          <p className="mt-1 text-gray-600">{`Ahora: ${vista.ahora}`}</p>
+          <p className="text-gray-600">{`Quedaría: ${vista.quedaria}`}</p>
+          <p className="mt-1 font-medium text-gray-900">{vista.efecto}</p>
+        </div>
+        {/* El motivo que escribió quien lo pide. Es la mitad de lo que hay que
+            leer para decidir, y no está en ninguna otra columna: la de
+            Comentarios lleva los de la solicitud original. */}
+        {m.motivo && <p className="text-xs text-gray-600">{`Motivo: ${m.motivo}`}</p>}
+        {propuestaDesfasada(s, m) && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            La solicitud cambió después de pedirse esto, así que el «ahora» de arriba ya no es el de la fila.
+            Aprobarlo va a fallar: pídele que lo retire y lo vuelva a mandar.
+          </p>
+        )}
+        {saldoSolicitante && (
+          <TarjetaSaldo
+            saldo={saldoSolicitante.saldo}
+            diasPedidos={diasDeMas}
+            titulo={`Saldo de ${s.empleadoNombre}`}
+          />
+        )}
+        {/* Apagados CON el porqué debajo, nunca ausentes: unos botones que
+            desaparecen sin explicación se leen como un fallo de la app. Es el
+            caso de quien es su propio jefe —la raíz del organigrama— viendo su
+            propia petición, y el del admin que las ve todas. */}
+        {!puedo ? (
+          <div className="flex flex-col gap-1">
+            {botones(true)}
+            <p className="text-xs text-gray-500">{motivoNoDecidible(s, m, email)}</p>
+          </div>
+        ) : rechazandoCambio === m.id ? (
+          <div className="flex flex-col gap-2">
+            <input
+              autoFocus
+              value={motivoCambio}
+              onChange={(e) => setMotivoCambio(e.target.value)}
+              placeholder="Motivo del rechazo"
+              // Contiene literalmente el texto visible (el placeholder) y añade
+              // de quién es: en una tabla con varias filas, cuatro campos que se
+              // anuncian igual no se distinguen (WCAG 2.5.3).
+              aria-label={`Motivo del rechazo del cambio de ${s.empleadoNombre}`}
+              maxLength={1000}
+              className="rounded-xl border border-gray-300 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={ocupadoCambio === m.id}
+                onClick={() => void decidirCambio(m.id, false, motivoCambio)}
+                className="flex-1 rounded-xl bg-red-600 px-2 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:bg-gray-300"
+              >
+                {ocupadoCambio === m.id ? 'Rechazando…' : 'Confirmar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setRechazandoCambio(null); setMotivoCambio(''); }}
+                className="rounded-xl border border-gray-300 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          botones(false)
+        )}
+      </div>
+    );
   }
 
   /**
@@ -202,6 +397,39 @@ export default function BandejaAprobacion({ solicitudes, saldos, onDecidida, onE
                 </div>
               )
             }
+          />
+        </div>
+      )}
+
+      {/* La tercera sección: lo que se pide CAMBIAR de una solicitud ya enviada.
+          Separada de la tabla de arriba a propósito —ver `accionesCambio`—, y
+          debajo de todo porque es lo excepcional: casi todos los días esta
+          sección no existe. */}
+      {cambios.length > 0 && (
+        <div>
+          {/* El recuento va también aquí, aunque la pestaña ya lo sume: sin él,
+              «Pendientes de aprobar (5)» sobre una tabla de tres filas parece un
+              número mal contado. Con él se ve de dónde salen los dos que faltan. */}
+          <h3 className="mb-1 text-sm font-semibold text-gray-900">{`Cambios pedidos (${cambios.length})`}</h3>
+          <p className="mb-4 flex max-w-3xl items-start gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <PencilLine className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <span>
+              Estas solicitudes ya te las mandaron y ahora piden <b>cambiarlas</b>. Aprobar un cambio de
+              fechas las <b>reescribe</b> sin volver a decidirlas: una que estuviera aprobada sigue
+              aprobada. Aprobar una anulación la deja <b>sin efecto</b> y le devuelve los días.
+            </span>
+          </p>
+          <TablaSolicitudes
+            solicitudes={cambios}
+            mostrarSolicitante
+            vacio=""
+            // Se busca la fila en `cambios` en vez de castear la que llega: es la
+            // misma fila, pero así el tipo lo garantiza el compilador y no un
+            // `as` que dejaría de ser cierto si algún día esta tabla se compartiera.
+            acciones={(s) => {
+              const c = cambios.find((x) => x.id === s.id);
+              return c ? accionesCambio(c) : null;
+            }}
           />
         </div>
       )}

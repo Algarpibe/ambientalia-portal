@@ -4,14 +4,17 @@ import {
   fetchContexto,
   fetchMiSaldo,
   fetchMisSolicitudes,
+  fetchModificacionesPendientes,
   fetchPendientes,
   fetchSaldos,
   retirarModificacion,
   type ClaseModificacion,
   type Contexto,
+  type DecisionModificacion,
   type Modificacion,
   type SaldoDeEmpleado,
   type Solicitud,
+  type SolicitudConPropuesta,
   type SolicitudPendiente,
 } from './api';
 import {
@@ -69,6 +72,10 @@ export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
   const [mias, setMias] = useState<Solicitud[]>([]);
   const [pendientes, setPendientes] = useState<SolicitudPendiente[]>([]);
+  // Las propuestas de cambio que esperan la decisión de este usuario. Van
+  // aparte de `pendientes` y no dentro: son otra decisión, sobre otra tabla, y
+  // la bandeja las pinta en su propia sección.
+  const [cambios, setCambios] = useState<SolicitudConPropuesta[]>([]);
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,9 +102,17 @@ export default function App() {
         setError(null);
         // Las solicitudes propias solo existen si el usuario está dado de alta
         // como empleado; la bandeja, solo si aprueba algo.
-        const [propias, aAprobar, saldosVisibles] = await Promise.all([
+        const [propias, aAprobar, cambiosPedidos, saldosVisibles] = await Promise.all([
           ctx.empleado ? fetchMisSolicitudes() : Promise.resolve([]),
           ctx.esAprobador ? fetchPendientes() : Promise.resolve([]),
+          // El `.catch` NO es cosmético: hub-api y el portal son dos servicios
+          // de EasyPanel que se despliegan por separado, así que hay una ventana
+          // en que este bundle habla con un hub-api que todavía no tiene la
+          // ruta y contesta 404. Sin el catch, ese 404 se lleva por delante el
+          // Promise.all entero y con él la app: se perdería también la bandeja,
+          // el saldo y «Mis solicitudes». Con él se pierde solo la sección de
+          // cambios, que es lo que efectivamente no existe todavía.
+          ctx.esAprobador ? fetchModificacionesPendientes().catch(() => []) : Promise.resolve([]),
           // Solo tiene sentido para quien aprueba o administra; para el resto
           // no se pide. El guard `ctx.esAprobador` ya deja fuera el 403: el
           // predicado SQL de empleadosConSaldo es el mismo que el de
@@ -112,6 +127,7 @@ export default function App() {
         if (!vivo) return;
         setMias(propias);
         setPendientes(aAprobar);
+        setCambios(cambiosPedidos);
         setSaldos(saldosVisibles);
       })
       .catch((e: Error) => vivo && setError(e.message))
@@ -135,7 +151,14 @@ export default function App() {
     // lo hace hub-api en el SQL, no esta lista.
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
     if (contexto?.esAprobador) {
-      p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
+      // Las dos cosas que hay que atender —firmar solicitudes y decidir los
+      // cambios que piden sobre ellas— viven en esta misma pestaña, así que el
+      // número las suma: es lo que un aprobador entiende por «lo que me falta».
+      // El widget «Solicitudes por aprobar» del Dashboard suma exactamente lo
+      // mismo (`resumirPendientes`); si aquí se sumara y allí no, habría dos
+      // números distintos para lo mismo y ninguna forma de saber cuál creer.
+      const porAtender = pendientes.length + cambios.length;
+      p.push(['bandeja', `Pendientes de aprobar${porAtender ? ` (${porAtender})` : ''}`]);
       p.push(['historial', 'Historial de aprobaciones']);
     }
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre
@@ -154,7 +177,7 @@ export default function App() {
       p.push(['historico', 'Registro general']);
     }
     return p;
-  }, [contexto, pendientes.length]);
+  }, [contexto, pendientes.length, cambios.length]);
 
   // Si la pestaña activa no está disponible para este usuario (p. ej. un admin
   // sin ficha de empleado, que no puede crear solicitudes), caemos a la primera.
@@ -199,6 +222,16 @@ export default function App() {
         : ps.filter((p) => p.id !== s.id),
     );
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
+    // La misma solicitud puede estar además en «Cambios pedidos»: se admite pedir
+    // un cambio sobre una que todavía espera firma. Si esa fila se queda con la
+    // foto vieja, la sección no se entera de que el estado se movió y no avisa de
+    // que aprobar el cambio ya solo puede dar 409 (el testigo de tres campos del
+    // servidor mira también el estado). La propuesta se conserva tal cual: `s`
+    // trae la suya, pero con el tipo ancho —`Modificacion | null`— y aquí no
+    // puede ser nula.
+    setCambios((cs) =>
+      cs.map((c) => (c.id === s.id ? { ...c, ...s, modificacionPendiente: c.modificacionPendiente } : c)),
+    );
     // Si con esta firma la solicitud queda cerrada, pasa a estar en el historial.
     if (!enTramite(s.estado)) setRecargarHistorial((n) => n + 1);
     // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
@@ -213,6 +246,54 @@ export default function App() {
     // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
     // número de antes de la decisión hasta recargar la página.
     refrescarSaldoPropio();
+  }
+
+  /**
+   * El jefe acaba de decidir un cambio. Refresco in-place, como `onDecidida`.
+   *
+   * La decisión toca DOS filas y el servidor devuelve las dos, así que no hace
+   * falta ninguna recarga: la propuesta sale de la sección y la solicitud se
+   * repinta con lo que quedó guardado. Esa solicitud viene releída DESPUÉS de
+   * aplicarla, así que ya trae las fechas nuevas (o la anulación) y
+   * `modificacionPendiente` en `null` — que es lo que quita el chip ámbar
+   * «Cambio pendiente» de todas las tablas donde estuviera pintada.
+   */
+  function onCambioDecidido({ modificacion, solicitud }: DecisionModificacion) {
+    // Fuera de la sección, decida lo que decida. Aquí no hay «sigue siendo mi
+    // turno» que valga, al revés que en `onDecidida`: la modificación no tiene
+    // segunda firma, con una decisión queda cerrada.
+    setCambios((cs) => cs.filter((c) => c.modificacionPendiente.id !== modificacion.id));
+    // Mismo criterio que `onDecidida` para la bandeja: si la solicitud queda
+    // cerrada, se va. Pasa al aprobar una anulación, que la deja `rechazada`.
+    // Un cambio de fechas NO mueve el estado —aprobar un cambio no re-decide la
+    // solicitud—, así que esa fila se queda donde está, con su turno intacto.
+    setPendientes((ps) =>
+      enTramite(solicitud.estado)
+        ? ps.map((p) => (p.id === solicitud.id ? { ...p, ...solicitud } : p))
+        : ps.filter((p) => p.id !== solicitud.id),
+    );
+    // También en «Mis solicitudes»: un admin puede decidir un cambio suyo.
+    setMias((ms) => ms.map((m) => (m.id === solicitud.id ? solicitud : m)));
+    // Cerrada = está en el historial del aprobador, y con las fechas de ahora.
+    // Se llega aquí con `false` solo desde una solicitud todavía en trámite; el
+    // caso principal —una `aprobada` a la que le cambian las fechas— entra, y
+    // debe entrar: la fila que el historial tiene pintada acaba de envejecer.
+    if (!enTramite(solicitud.estado)) setRecargarHistorial((n) => n + 1);
+    // Al revés que al PEDIRLO (`fijarPropuesta` no toca el saldo a propósito:
+    // una propuesta pendiente no mueve ni un día), aprobar SÍ lo mueve: anular
+    // unas vacaciones devuelve todos sus días y acortarlas devuelve parte.
+    //
+    // La condición va al revés —«salvo que sepamos que fue un rechazo»— para
+    // que un valor inesperado caiga en refrescar: eso gasta una llamada de más,
+    // mientras que lo contrario deja un saldo viejo en pantalla sin avisar.
+    if (modificacion.estado !== 'rechazada') {
+      fetchSaldos()
+        .then((s2) => setSaldos(s2))
+        .catch(() => {});
+      // Y el propio, por lo mismo que en `onDecidida`: quien decide puede ser
+      // administrador y estar decidiendo sobre sus propios días.
+      refrescarSaldoPropio();
+    }
   }
 
   /**
@@ -426,7 +507,15 @@ export default function App() {
           {contexto.esAprobador && (
             <>
               <div className={tab === 'bandeja' ? '' : 'hidden'}>
-                <BandejaAprobacion solicitudes={pendientes} saldos={saldos} onDecidida={onDecidida} onError={setError} />
+                <BandejaAprobacion
+                  solicitudes={pendientes}
+                  cambios={cambios}
+                  saldos={saldos}
+                  email={contexto.email}
+                  onDecidida={onDecidida}
+                  onCambioDecidido={onCambioDecidido}
+                  onError={setError}
+                />
               </div>
               <div className={tab === 'historial' ? '' : 'hidden'}>
                 <HistorialAprobador activo={tab === 'historial'} recargarToken={recargarHistorial} />

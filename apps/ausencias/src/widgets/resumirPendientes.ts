@@ -1,14 +1,26 @@
-import type { SolicitudPendiente } from '../api';
+import type { SolicitudConPropuesta, SolicitudPendiente } from '../api';
 
 // Resumen que alimenta el widget «Solicitudes por aprobar» del Dashboard.
 // Pura a propósito —sin React, sin fetch y sin reloj propio: `ahora` entra por
 // parámetro— para poder razonarla de un vistazo, y para que cubrirla con tests
-// sea trivial el día que esta app tenga runner.
+// sea trivial el día que esta app tenga runner. Las frases que pinta el widget
+// también viven aquí, por lo mismo.
 
 export interface ResumenPendientes {
-  /** Cuántas esperan la firma de quien mira el widget. */
+  /** Todo lo que espera una decisión suya: las firmas MÁS los cambios pedidos. */
   total: number;
-  /** Días naturales que lleva esperando la más antigua. `null` si no hay ninguna. */
+  /** De ese total, las solicitudes que esperan su firma. */
+  solicitudes: number;
+  /**
+   * De ese total, los cambios pedidos sobre solicitudes ya enviadas.
+   *
+   * Se suman al total y no se cuentan aparte porque están en la misma pestaña
+   * de la app (`Pendientes de aprobar`), y ese contador los suma igual: dos
+   * números distintos para «lo que me falta por atender» no los reconcilia
+   * nadie. Van además desglosados para poder decir de qué son los del total.
+   */
+  cambios: number;
+  /** Días naturales que lleva esperando lo más antiguo. `null` si no hay nada. */
   esperaDias: number | null;
 }
 
@@ -36,6 +48,7 @@ function esperandoDesde(s: SolicitudPendiente): string {
 
 export function resumirPendientes(
   solicitudes: SolicitudPendiente[],
+  cambios: SolicitudConPropuesta[],
   ahora: Date,
 ): ResumenPendientes {
   // `!== false` y no `=== true`. Los dos servicios se despliegan por separado y
@@ -45,15 +58,25 @@ export function resumirPendientes(
   // al desplegar. Con `=== true` degradaría a 0: diría «nada pendiente»
   // mientras las solicitudes se pudren, y eso no lo nota nadie.
   const mias = solicitudes.filter((s) => s.esMiTurno !== false);
-  if (mias.length === 0) return { total: 0, esperaDias: null };
+  // Lo mismo con `puedoDecidirla`, que es el `esMiTurno` de los cambios: un
+  // admin recibe también los que no le tocan, y quien es su propio jefe recibe
+  // el suyo, que no puede autoaprobarse.
+  const mios = cambios.filter((c) => c.puedoDecidirla !== false);
+  const total = mias.length + mios.length;
+  if (total === 0) return { total: 0, solicitudes: 0, cambios: 0, esperaDias: null };
+  const recuento = { total, solicitudes: mias.length, cambios: mios.length };
 
-  const instantes = mias
-    .map((s) => new Date(esperandoDesde(s)).getTime())
-    .filter((t) => Number.isFinite(t));
+  const instantes = [
+    ...mias.map((s) => Date.parse(esperandoDesde(s))),
+    // Un cambio lleva esperando desde que se PIDIÓ, no desde que se creó la
+    // solicitud: se puede pedir meses después, y medirlo desde el alta diría
+    // «lleva 90 días esperando» de algo que llegó esta mañana.
+    ...mios.map((c) => Date.parse(c.modificacionPendiente?.createdAt ?? '')),
+  ].filter((t) => Number.isFinite(t));
 
   // Si ninguna fecha es legible seguimos sabiendo cuántas hay: se calla la
   // antigüedad, pero no se pierde el aviso. Un «NaN días» sería peor que nada.
-  if (instantes.length === 0) return { total: mias.length, esperaDias: null };
+  if (instantes.length === 0) return { ...recuento, esperaDias: null };
 
   // Días de calendario COLOMBIANO, no bloques de 24 h ni días hábiles: contar
   // hábiles exigiría los festivos, que viajan en `/ausencias/contexto` y
@@ -62,5 +85,49 @@ export function resumirPendientes(
   // falso: cruzó la medianoche de Colombia y ya lleva un día natural esperando.
   const esperaDias = diaColombiano(ahora.getTime()) - diaColombiano(Math.min(...instantes));
 
-  return { total: mias.length, esperaDias: Math.max(0, esperaDias) };
+  return { ...recuento, esperaDias: Math.max(0, esperaDias) };
 }
+
+/** «3 solicitudes», «1 cambio pedido»: el número con su sustantivo concordado. */
+const plural = (n: number, singular: string, pluralizado: string) =>
+  `${n} ${n === 1 ? singular : pluralizado}`;
+
+/**
+ * La etiqueta que va bajo el número grande.
+ *
+ * Sin cambios pedidos dice exactamente lo que decía antes de existir esta
+ * feature («solicitudes» a secas): el widget es el mismo hasta que hay algo
+ * nuevo que contar. Con los dos, desglosa — un «5» sobre la palabra
+ * «solicitudes» sería mentira si dos de esos cinco son cambios.
+ */
+export function etiquetaDePendientes(r: ResumenPendientes): string {
+  if (r.cambios === 0) return r.total === 1 ? 'solicitud' : 'solicitudes';
+  if (r.solicitudes === 0) return r.cambios === 1 ? 'cambio pedido' : 'cambios pedidos';
+  return `${plural(r.solicitudes, 'solicitud', 'solicitudes')} y ${plural(r.cambios, 'cambio', 'cambios')}`;
+}
+
+/**
+ * La frase entera, que es lo que oye un lector de pantalla: el número y su
+ * etiqueta sueltos se leerían «5» y luego «3 solicitudes y 2 cambios».
+ *
+ * Se arma en plantillas y no pegando etiquetas JSX: en este repo un salto de
+ * línea entre texto y etiqueta ya se comió un espacio dos veces.
+ */
+export function fraseDePendientes(r: ResumenPendientes): string {
+  if (r.cambios === 0) return `${plural(r.total, 'solicitud espera', 'solicitudes esperan')} tu firma`;
+  if (r.solicitudes === 0) {
+    return `${plural(r.cambios, 'cambio pedido espera', 'cambios pedidos esperan')} tu decisión`;
+  }
+  return `${plural(r.solicitudes, 'solicitud espera', 'solicitudes esperan')} tu firma, y ${plural(
+    r.cambios,
+    'cambio pedido espera',
+    'cambios pedidos esperan',
+  )} tu decisión`;
+}
+
+/**
+ * El texto del enlace. «Ir a firmar» deja de ser cierto cuando lo único que
+ * queda son cambios, que no se firman: se aprueban o se rechazan.
+ */
+export const textoDelEnlace = (r: ResumenPendientes): string =>
+  r.solicitudes === 0 ? 'Ir a decidir' : 'Ir a firmar';

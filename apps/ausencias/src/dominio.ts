@@ -432,6 +432,161 @@ export function resumenPropuesta(m: Modificacion): string {
 }
 
 /**
+ * Qué le pasa al recuento si el jefe aprueba, en una frase y en TERCERA persona.
+ *
+ * Gemela de `efectoEnDias`, que dice lo mismo al trabajador («devuelves») y no
+ * vale aquí: quien lee esto no es quien pidió nada. Se mantiene la misma
+ * distinción por tipo, porque «le devuelve días» solo es cierto en vacaciones —
+ * son las únicas que consumen saldo.
+ *
+ * `delta > 0` = la solicitud encoge (se liberan días); `< 0` = crece.
+ */
+function efectoParaElDecisor(tipo: TipoSolicitud, delta: number): string {
+  if (delta === 0) return 'Los mismos días, en otras fechas.';
+  const n = `${formatDias(Math.abs(delta))} ${Math.abs(delta) === 1 ? 'día' : 'días'}`;
+  if (tipo === 'vacaciones') {
+    return delta > 0 ? `Aprobarlo le devuelve ${n} a su saldo.` : `Aprobarlo le descuenta ${n} más de su saldo.`;
+  }
+  return delta > 0 ? `Aprobarlo son ${n} de ausencia menos.` : `Aprobarlo son ${n} de ausencia más.`;
+}
+
+/** El antes y el después de una propuesta ya enviada, como lo lee quien decide. */
+export interface VistaPropuesta {
+  /** Si lo que se pide es anular. Quien pinte esto tiene que poder decirlo. */
+  anula: boolean;
+  /** Cómo estaba la solicitud cuando se pidió el cambio. */
+  ahora: string;
+  /** Cómo quedaría si la aprueba, ya redactado. Al anular, que no queda nada. */
+  quedaria: string;
+  /**
+   * Días que se liberan (positivo) o que se piden de más (negativo). **Mismo
+   * signo que `ResumenCambio.deltaDias`**: dos convenios opuestos en el mismo
+   * fichero serían una trampa para quien lea uno y use el otro.
+   */
+  deltaDias: number;
+  /** El efecto sobre el recuento, en una frase cerrada con punto. */
+  efecto: string;
+}
+
+/**
+ * Lo que el jefe necesita leer de una propuesta antes de decidirla.
+ *
+ * Hermana de `resumenCambio`, que resume lo que se va a PEDIR (y cuenta los días
+ * nuevos en el navegador porque todavía no existen). Aquí la propuesta ya está
+ * guardada, así que los dos recuentos vienen del servidor y no se recalcula
+ * ninguno: contarlos otra vez aquí solo abriría la puerta a que la bandeja
+ * enseñara un número y el servidor aplicara otro.
+ *
+ * El «ahora» sale de la FOTO (`*Previos`) y no de la solicitud que se tenga
+ * pintada, por lo mismo que la foto existe: es el estado contra el que el
+ * servidor va a comparar su testigo de tres campos, así que es el único antes
+ * que describe lo que de verdad va a pasar al aprobar. Si la solicitud se movió
+ * por debajo, eso lo dice `propuestaDesfasada` — no se disimula cambiando el
+ * antes.
+ */
+export function vistaDePropuesta(s: Pick<Solicitud, 'tipo'>, m: Modificacion): VistaPropuesta {
+  const ahora = rangoConDias(m.fechaInicioPrevia, m.fechaFinPrevia, m.diasHabilesPrevios);
+  if (m.clase === 'anulacion') {
+    return {
+      anula: true,
+      ahora,
+      quedaria: 'nada reservado, la ausencia desaparece del calendario.',
+      deltaDias: m.diasHabilesPrevios,
+      // Misma salvedad que en `resumenCambio`: un rango sin días hábiles (un
+      // sábado–domingo) se puede pedir y se puede anular, y ahí un delta de 0
+      // caería en «Los mismos días, en otras fechas», que contradice de plano
+      // el «quedaría nada reservado» de la línea de encima.
+      efecto:
+        m.diasHabilesPrevios > 0
+          ? efectoParaElDecisor(s.tipo, m.diasHabilesPrevios)
+          : 'La solicitud dejaría de existir.',
+    };
+  }
+  // Los tres campos nuevos van juntos —o los tres con valor, o los tres nulos, y
+  // lo garantiza un CHECK en la BD—, pero se comprueban igual: interpolar un
+  // null a pelo es cómo se acaba enseñando «Quedaría: null – null» a quien tiene
+  // que decidir a partir de eso.
+  if (!m.fechaInicioNueva || !m.fechaFinNueva) {
+    return {
+      anula: false,
+      ahora,
+      quedaria: 'no se puede leer qué fechas se piden.',
+      deltaDias: 0,
+      efecto: 'Pídele que retire la petición y la vuelva a mandar.',
+    };
+  }
+  // Sin recuento no hay delta que enseñar, y un 0 inventado diría «los mismos
+  // días» sobre unas fechas que pueden ser muchas más.
+  if (typeof m.diasHabilesNuevos !== 'number') {
+    return {
+      anula: false,
+      ahora,
+      quedaria: rangoFechas(m.fechaInicioNueva, m.fechaFinNueva),
+      deltaDias: 0,
+      efecto: 'Se piden otras fechas.',
+    };
+  }
+  const delta = m.diasHabilesPrevios - m.diasHabilesNuevos;
+  return {
+    anula: false,
+    ahora,
+    quedaria: rangoConDias(m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos),
+    deltaDias: delta,
+    efecto: efectoParaElDecisor(s.tipo, delta),
+  };
+}
+
+/**
+ * True si la solicitud se movió por debajo desde que se pidió el cambio.
+ *
+ * Espejo exacto de `TESTIGO_SOLICITUD` (`repo.ts`), los MISMOS tres campos: si
+ * alguno no casa, aprobar responde 409 (`solicitud_cambio_de_estado`) y no
+ * aplica nada. Enseñarlo antes evita que el jefe decida leyendo un «antes» que
+ * ya no es el de la fila que tiene delante —y que pulse un botón que solo puede
+ * fallar.
+ *
+ * Pasa de verdad: el `PATCH` de admin corrige fechas sin encolar nada, así que
+ * nadie se entera de que la foto envejeció.
+ */
+export function propuestaDesfasada(
+  s: Pick<Solicitud, 'estado' | 'fechaInicio' | 'fechaFin'>,
+  m: Modificacion,
+): boolean {
+  return (
+    s.estado !== m.estadoPrevio ||
+    s.fechaInicio !== m.fechaInicioPrevia ||
+    s.fechaFin !== m.fechaFinPrevia
+  );
+}
+
+/**
+ * Por qué una fila de «Cambios pedidos» lleva los botones apagados.
+ *
+ * ⚠️ **No decide nada.** Quién puede decidir lo dice `puedoDecidirla`, que llega
+ * del servidor calculado con el MISMO guard que el endpoint de decisión; esta
+ * función solo REDACTA el porqué de un `false` que ya viene dado. Por eso puede
+ * permitirse mirar los correos: si la regla del servidor cambiara, lo peor que
+ * pasaría es un texto impreciso bajo unos botones que siguen apagados — nunca un
+ * botón de más.
+ *
+ * El primer caso es hoy el único que ocurre de verdad, y no es raro: la raíz del
+ * organigrama es su propio jefe, así que sobre sus propias solicitudes el
+ * decisor congelado es ella misma y el guard del solicitante la frena. Se le
+ * dice además dónde SÍ puede actuar, que si no la fila es un callejón sin
+ * salida. El segundo texto es la red para el día que la regla se amplíe.
+ */
+export function motivoNoDecidible(
+  s: Pick<Solicitud, 'solicitanteEmail'>,
+  m: Pick<Modificacion, 'aprobadorCorreo'>,
+  email: string,
+): string {
+  if (s.solicitanteEmail.toLowerCase() === email.toLowerCase()) {
+    return 'Es tu propia solicitud, así que este cambio no lo decides tú. Si te has echado atrás, puedes retirarlo desde «Mis solicitudes».';
+  }
+  return `Este cambio lo decide ${m.aprobadorCorreo}.`;
+}
+
+/**
  * Los códigos de error de hub-api, en español.
  *
  * `mensajeDeError` (@suite/http) devuelve para 400 y 409 el campo `error` del
