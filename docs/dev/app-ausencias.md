@@ -1192,8 +1192,12 @@ npm run test:db --workspace=apps/hub-api
 > **necesita Docker arrancado**; si no lo está no salen tests rojos, sale un
 > error de conexión de testcontainers.
 
-Levanta un contenedor **`postgres:16-alpine`** —la imagen se fija a mano, un
-`latest` derivaría solo— y lo migra con el array real de `MIGRATIONS` llamando a
+Levanta un contenedor **`postgres:17`** —la misma versión mayor que corre
+producción, verificada con un `SELECT version()` contra EasyPanel el 2026-08-18:
+PostgreSQL 17.10 sobre Debian. La imagen se fija a mano porque un `latest`
+derivaría solo, y se usa la variante Debian y no la `-alpine` porque alpine va
+con musl y la ordenación de texto depende de la libc— y lo migra con el array
+real de `MIGRATIONS` llamando a
 `aplicarMigraciones`, la misma función que usa `initDb` en cada arranque. Lo que
 eso garantiza es **fidelidad**: el esquema de prueba no puede divergir del de
 producción, porque los dos salen del mismo array. Lo que **no** garantiza es
