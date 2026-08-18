@@ -28,7 +28,7 @@ const cronAuth = requireCronToken({ env: 'AUSENCIAS_CRON_TOKEN', header: 'X-Ause
 function sendError(res: Response, e: unknown, ctx: string): void {
   if (e instanceof AusenciaError) {
     // `detalle` va sin condicional: `JSON.stringify` omite las claves
-    // `undefined`, asi que las respuestas que no lo llevan no cambian de forma.
+    // `undefined`, así que las respuestas que no lo llevan no cambian de forma.
     res.status(e.status).json({ error: e.code, field: e.field, detalle: e.detalle });
     return;
   }
