@@ -1,6 +1,14 @@
 import { Paperclip } from 'lucide-react';
 import { descargarAdjunto, type Solicitud } from './api';
-import { chipDe, ETIQUETA_TIPO, formatFecha, formatInstante } from './dominio';
+import {
+  CHIP_CAMBIO_PENDIENTE,
+  chipDeSolicitud,
+  ETIQUETA_TIPO,
+  etiquetaMotivo,
+  formatFecha,
+  formatInstante,
+  resumenPropuesta,
+} from './dominio';
 
 interface Props {
   solicitudes: Solicitud[];
@@ -42,7 +50,15 @@ export default function TablaSolicitudes({
         </thead>
         <tbody className="divide-y divide-gray-100">
           {solicitudes.map((s) => {
-            const chip = chipDe(s.estado);
+            // `chipDeSolicitud` y NO `chipDe(s.estado)`: una anulación deja la
+            // solicitud en `rechazada` y hay que rotularla «Anulada». Ver el
+            // porqué entero —y por qué el motivo de debajo cambia de dueño— en
+            // `dominio.ts`.
+            const chip = chipDeSolicitud(s);
+            // Se lee por veracidad: si hub-api todavía no manda el campo, un
+            // `undefined` significa «no hay propuesta» y esta tabla se pinta
+            // como antes de la feature, en vez de reventar.
+            const propuesta = s.modificacionPendiente;
             return (
               <tr key={s.id} className="align-top hover:bg-gray-50">
                 {mostrarSolicitante && (
@@ -72,7 +88,28 @@ export default function TablaSolicitudes({
                   <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chip.clase}`}>
                     {chip.label}
                   </span>
-                  {s.motivoRechazo && <div className="mt-1 max-w-xs text-xs text-gray-500">{s.motivoRechazo}</div>}
+                  {/* El chip del cambio va aquí, debajo del de estado, y no en la
+                      columna de acciones: la celda de Estado la pintan las cuatro
+                      pantallas que usan esta tabla, y la de acciones solo dos. */}
+                  {propuesta && (
+                    <div className="mt-1">
+                      <span
+                        title={resumenPropuesta(propuesta)}
+                        className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${CHIP_CAMBIO_PENDIENTE}`}
+                      >
+                        Cambio pendiente
+                      </span>
+                    </div>
+                  )}
+                  {/* La frase se arma entera en una plantilla en vez de pegar la
+                      etiqueta y el motivo con etiquetas JSX: un salto de línea
+                      entre dos nodos de texto se come el espacio, y aquí eso
+                      produciría «Motivo del rechazo:no vienes». */}
+                  {s.motivoRechazo && (
+                    <div className="mt-1 max-w-xs text-xs text-gray-500">
+                      {`${etiquetaMotivo(s)} ${s.motivoRechazo}`}
+                    </div>
+                  )}
                 </td>
                 {mostrarDecidida && (
                   <td className="whitespace-nowrap px-4 py-3 text-gray-600">

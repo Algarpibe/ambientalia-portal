@@ -4,15 +4,31 @@ import {
   fetchContexto,
   fetchMiSaldo,
   fetchMisSolicitudes,
+  fetchModificacionesPendientes,
   fetchPendientes,
   fetchSaldos,
+  retirarModificacion,
+  type ClaseModificacion,
   type Contexto,
+  type DecisionModificacion,
+  type Modificacion,
   type SaldoDeEmpleado,
   type Solicitud,
+  type SolicitudConPropuesta,
   type SolicitudPendiente,
 } from './api';
-import { enTramite, esTurnoDe } from './dominio';
+import {
+  contarPorAtender,
+  enTramite,
+  esTurnoDe,
+  hoyEnColombia,
+  mensajeDeModificacion,
+  puedePedirAnulacion,
+  puedePedirModificacion,
+  resumenPropuesta,
+} from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
+import PedirModificacion from './PedirModificacion';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import HistorialAprobador from './HistorialAprobador';
@@ -57,6 +73,10 @@ export default function App() {
   const [contexto, setContexto] = useState<Contexto | null>(null);
   const [mias, setMias] = useState<Solicitud[]>([]);
   const [pendientes, setPendientes] = useState<SolicitudPendiente[]>([]);
+  // Las propuestas de cambio que esperan la decisión de este usuario. Van
+  // aparte de `pendientes` y no dentro: son otra decisión, sobre otra tabla, y
+  // la bandeja las pinta en su propia sección.
+  const [cambios, setCambios] = useState<SolicitudConPropuesta[]>([]);
   const [saldos, setSaldos] = useState<SaldoDeEmpleado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +87,11 @@ export default function App() {
   // Lo mismo para el historial del aprobador: acabar de decidir algo tiene que
   // hacer que aparezca ahí, no en la siguiente recarga de la app.
   const [recargarHistorial, setRecargarHistorial] = useState(0);
+  // Qué solicitud tiene abierto el modal de «pedir un cambio», y con qué opción
+  // marcada de entrada: los dos botones de la fila abren el mismo formulario.
+  const [modificando, setModificando] = useState<{ solicitud: Solicitud; clase: ClaseModificacion } | null>(null);
+  // Qué propuesta se está retirando ahora mismo, por id, para apagar su enlace.
+  const [retirando, setRetirando] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -78,9 +103,17 @@ export default function App() {
         setError(null);
         // Las solicitudes propias solo existen si el usuario está dado de alta
         // como empleado; la bandeja, solo si aprueba algo.
-        const [propias, aAprobar, saldosVisibles] = await Promise.all([
+        const [propias, aAprobar, cambiosPedidos, saldosVisibles] = await Promise.all([
           ctx.empleado ? fetchMisSolicitudes() : Promise.resolve([]),
           ctx.esAprobador ? fetchPendientes() : Promise.resolve([]),
+          // El `.catch` NO es cosmético: hub-api y el portal son dos servicios
+          // de EasyPanel que se despliegan por separado, así que hay una ventana
+          // en que este bundle habla con un hub-api que todavía no tiene la
+          // ruta y contesta 404. Sin el catch, ese 404 se lleva por delante el
+          // Promise.all entero y con él la app: se perdería también la bandeja,
+          // el saldo y «Mis solicitudes». Con él se pierde solo la sección de
+          // cambios, que es lo que efectivamente no existe todavía.
+          ctx.esAprobador ? fetchModificacionesPendientes().catch(() => []) : Promise.resolve([]),
           // Solo tiene sentido para quien aprueba o administra; para el resto
           // no se pide. El guard `ctx.esAprobador` ya deja fuera el 403: el
           // predicado SQL de empleadosConSaldo es el mismo que el de
@@ -95,6 +128,7 @@ export default function App() {
         if (!vivo) return;
         setMias(propias);
         setPendientes(aAprobar);
+        setCambios(cambiosPedidos);
         setSaldos(saldosVisibles);
       })
       .catch((e: Error) => vivo && setError(e.message))
@@ -105,6 +139,10 @@ export default function App() {
   }, []);
 
   const festivos = useMemo(() => new Set(contexto?.festivos ?? []), [contexto]);
+  // La misma fecha para todas las filas de un render: si cada botón la leyera
+  // por su cuenta, una tabla pintada justo en la medianoche de Bogotá podría
+  // decidir con dos «hoy» distintos.
+  const hoy = hoyEnColombia();
 
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
@@ -114,7 +152,19 @@ export default function App() {
     // lo hace hub-api en el SQL, no esta lista.
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
     if (contexto?.esAprobador) {
-      p.push(['bandeja', `Pendientes de aprobar${pendientes.length ? ` (${pendientes.length})` : ''}`]);
+      // Las dos cosas que hay que atender —firmar solicitudes y decidir los
+      // cambios que piden sobre ellas— viven en esta misma pestaña, así que el
+      // número las suma: es lo que un aprobador entiende por «lo que me falta».
+      //
+      // La cuenta la hace `contarPorAtender`, que es la MISMA que usa el widget
+      // del Dashboard (`resumirPendientes` filtra con esas dos funciones). No se
+      // cuentan aquí las filas a pelo: lo que la bandeja ENSEÑA es más de lo que
+      // a uno le toca DECIDIR —un admin ve también lo de los demás, y quien es
+      // su propio jefe ve su propio cambio sin poder decidirlo—, así que
+      // `pendientes.length + cambios.length` daría un número que el widget
+      // nunca puede alcanzar.
+      const { total } = contarPorAtender(pendientes, cambios);
+      p.push(['bandeja', `Pendientes de aprobar${total ? ` (${total})` : ''}`]);
       p.push(['historial', 'Historial de aprobaciones']);
     }
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre
@@ -133,7 +183,7 @@ export default function App() {
       p.push(['historico', 'Registro general']);
     }
     return p;
-  }, [contexto, pendientes.length]);
+  }, [contexto, pendientes.length, cambios.length]);
 
   // Si la pestaña activa no está disponible para este usuario (p. ej. un admin
   // sin ficha de empleado, que no puede crear solicitudes), caemos a la primera.
@@ -178,6 +228,16 @@ export default function App() {
         : ps.filter((p) => p.id !== s.id),
     );
     setMias((ms) => ms.map((m) => (m.id === s.id ? s : m)));
+    // La misma solicitud puede estar además en «Cambios pedidos»: se admite pedir
+    // un cambio sobre una que todavía espera firma. Si esa fila se queda con la
+    // foto vieja, la sección no se entera de que el estado se movió y no avisa de
+    // que aprobar el cambio ya solo puede dar 409 (el testigo de tres campos del
+    // servidor mira también el estado). La propuesta se conserva tal cual: `s`
+    // trae la suya, pero con el tipo ancho —`Modificacion | null`— y aquí no
+    // puede ser nula.
+    setCambios((cs) =>
+      cs.map((c) => (c.id === s.id ? { ...c, ...s, modificacionPendiente: c.modificacionPendiente } : c)),
+    );
     // Si con esta firma la solicitud queda cerrada, pasa a estar en el historial.
     if (!enTramite(s.estado)) setRecargarHistorial((n) => n + 1);
     // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
@@ -192,6 +252,143 @@ export default function App() {
     // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
     // número de antes de la decisión hasta recargar la página.
     refrescarSaldoPropio();
+  }
+
+  /**
+   * El jefe acaba de decidir un cambio. Refresco in-place, como `onDecidida`.
+   *
+   * La decisión toca DOS filas y el servidor devuelve las dos, así que no hace
+   * falta ninguna recarga: la propuesta sale de la sección y la solicitud se
+   * repinta con lo que quedó guardado. Esa solicitud viene releída DESPUÉS de
+   * aplicarla, así que ya trae las fechas nuevas (o la anulación) y
+   * `modificacionPendiente` en `null` — que es lo que quita el chip ámbar
+   * «Cambio pendiente» de todas las tablas donde estuviera pintada.
+   */
+  function onCambioDecidido({ modificacion, solicitud }: DecisionModificacion) {
+    // Fuera de la sección, decida lo que decida. Aquí no hay «sigue siendo mi
+    // turno» que valga, al revés que en `onDecidida`: la modificación no tiene
+    // segunda firma, con una decisión queda cerrada.
+    setCambios((cs) => cs.filter((c) => c.modificacionPendiente.id !== modificacion.id));
+    // Mismo criterio que `onDecidida` para la bandeja: si la solicitud queda
+    // cerrada, se va. Pasa al aprobar una anulación, que la deja `rechazada`.
+    // Un cambio de fechas NO mueve el estado —aprobar un cambio no re-decide la
+    // solicitud—, así que esa fila se queda donde está, con su turno intacto.
+    setPendientes((ps) =>
+      enTramite(solicitud.estado)
+        ? ps.map((p) => (p.id === solicitud.id ? { ...p, ...solicitud } : p))
+        : ps.filter((p) => p.id !== solicitud.id),
+    );
+    // También en «Mis solicitudes»: un admin puede decidir un cambio suyo.
+    setMias((ms) => ms.map((m) => (m.id === solicitud.id ? solicitud : m)));
+    // Cerrada = está en el historial del aprobador, y con las fechas de ahora.
+    // Se llega aquí con `false` solo desde una solicitud todavía en trámite; el
+    // caso principal —una `aprobada` a la que le cambian las fechas— entra, y
+    // debe entrar: la fila que el historial tiene pintada acaba de envejecer.
+    if (!enTramite(solicitud.estado)) setRecargarHistorial((n) => n + 1);
+    // Al revés que al PEDIRLO (`fijarPropuesta` no toca el saldo a propósito:
+    // una propuesta pendiente no mueve ni un día), aprobar SÍ lo mueve: anular
+    // unas vacaciones devuelve todos sus días y acortarlas devuelve parte.
+    //
+    // La condición va al revés —«salvo que sepamos que fue un rechazo»— para
+    // que un valor inesperado caiga en refrescar: eso gasta una llamada de más,
+    // mientras que lo contrario deja un saldo viejo en pantalla sin avisar.
+    if (modificacion.estado !== 'rechazada') {
+      fetchSaldos()
+        .then((s2) => setSaldos(s2))
+        .catch(() => {});
+      // Y el propio, por lo mismo que en `onDecidida`: quien decide puede ser
+      // administrador y estar decidiendo sobre sus propios días.
+      refrescarSaldoPropio();
+    }
+  }
+
+  /**
+   * Cuelga —o descuelga— la propuesta de cambio de su solicitud, en el sitio.
+   *
+   * Mismo patrón que `onDecidida`: reemplazo in-place por id sobre `mias`, para
+   * que la fila enseñe el chip «Cambio pendiente» (o lo pierda al retirarla) sin
+   * recargar la app.
+   *
+   * Aquí NO se refresca el saldo, al revés que en `onCreada` y `onDecidida`: una
+   * propuesta pendiente no mueve ni un día. El servidor la ignora a propósito al
+   * calcular el saldo —si una anulación pendiente liberara los días, se podrían
+   * pedir esos mismos días otra vez y el saldo lo bendeciría—, así que pedirlo
+   * aquí solo gastaría una llamada para volver con el mismo número.
+   */
+  function fijarPropuesta(solicitudId: string, propuesta: Modificacion | null) {
+    setMias((ms) => ms.map((m) => (m.id === solicitudId ? { ...m, modificacionPendiente: propuesta } : m)));
+  }
+
+  async function retirar(m: Modificacion) {
+    setRetirando(m.id);
+    try {
+      // El id de la solicitud sale de la respuesta y no de la fila que se tenía
+      // pintada: es el dato que el servidor acaba de confirmar.
+      fijarPropuesta((await retirarModificacion(m.id)).solicitudId, null);
+      setError(null);
+    } catch (e) {
+      // No se toca el estado local: la fila se queda como estaba y se dice por
+      // qué. Un 409 aquí es un doble clic, o que el jefe se adelantó a decidir.
+      setError(mensajeDeModificacion((e as Error).message));
+    } finally {
+      setRetirando(null);
+    }
+  }
+
+  /**
+   * La última columna de «Mis solicitudes», que hasta ahora iba vacía.
+   *
+   * Tres casos y ninguno más: si hay una propuesta viva, lo que se puede hacer
+   * es retirarla —no pedir otra encima, que el servidor corta con un 409 y un
+   * índice único—; si no la hay y la solicitud lo admite, los dos botones; y si
+   * no, nada.
+   *
+   * `s.modificacionPendiente` se lee por veracidad: un hub-api que todavía no
+   * mande el campo cae en «no hay propuesta» y ofrece los botones igual, que es
+   * el comportamiento de antes de esta feature. En el peor caso el servidor
+   * contesta 409 y el modal lo explica.
+   */
+  function accionesMias(s: Solicitud): React.ReactNode {
+    const propuesta = s.modificacionPendiente;
+    if (propuesta) {
+      return (
+        <div className="flex w-56 flex-col gap-1">
+          <p className="text-xs text-gray-600">{resumenPropuesta(propuesta)}</p>
+          <button
+            type="button"
+            disabled={retirando === propuesta.id}
+            onClick={() => void retirar(propuesta)}
+            className="self-start text-xs text-gray-500 underline hover:text-gray-700 disabled:no-underline"
+          >
+            {retirando === propuesta.id ? 'Retirando…' : 'Retirar'}
+          </button>
+        </div>
+      );
+    }
+    if (!puedePedirModificacion(s, hoy)) return null;
+    return (
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setModificando({ solicitud: s, clase: 'fechas' })}
+          className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cambiar fechas
+        </button>
+        {/* Sin botón cuando la ausencia ya empezó: anularla devolvería también
+            los días ya disfrutados. El porqué —y la salida, que es acortar las
+            fechas— se lo cuenta el modal al entrar por «Cambiar fechas». */}
+        {puedePedirAnulacion(s, hoy) && (
+          <button
+            type="button"
+            onClick={() => setModificando({ solicitud: s, clase: 'anulacion' })}
+            className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Anular
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -296,7 +493,11 @@ export default function App() {
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
                 {/* Sin tarjeta de saldo: el número vive en la cabecera, visible desde aquí. */}
-                <TablaSolicitudes solicitudes={mias} vacio="Todavía no has enviado ninguna solicitud." />
+                <TablaSolicitudes
+                  solicitudes={mias}
+                  vacio="Todavía no has enviado ninguna solicitud."
+                  acciones={accionesMias}
+                />
               </div>
 
               <div className={tab === 'calendario' ? '' : 'hidden'}>
@@ -312,7 +513,15 @@ export default function App() {
           {contexto.esAprobador && (
             <>
               <div className={tab === 'bandeja' ? '' : 'hidden'}>
-                <BandejaAprobacion solicitudes={pendientes} saldos={saldos} onDecidida={onDecidida} onError={setError} />
+                <BandejaAprobacion
+                  solicitudes={pendientes}
+                  cambios={cambios}
+                  saldos={saldos}
+                  email={contexto.email}
+                  onDecidida={onDecidida}
+                  onCambioDecidido={onCambioDecidido}
+                  onError={setError}
+                />
               </div>
               <div className={tab === 'historial' ? '' : 'hidden'}>
                 <HistorialAprobador activo={tab === 'historial'} recargarToken={recargarHistorial} />
@@ -342,6 +551,22 @@ export default function App() {
                 <RegistroGeneral recargarToken={recargarRegistro} festivos={festivos} />
               </div>
             </>
+          )}
+
+          {/* Fuera de los `div` de pestaña a propósito: son los que se ocultan
+              con `hidden`, y `display:none` lo heredarían también los hijos
+              `fixed`. Aquí el modal se pinta pase lo que pase con la pestaña. */}
+          {modificando && (
+            <PedirModificacion
+              solicitud={modificando.solicitud}
+              claseInicial={modificando.clase}
+              festivos={festivos}
+              onPedida={(m) => {
+                fijarPropuesta(m.solicitudId, m);
+                setModificando(null);
+              }}
+              onCerrar={() => setModificando(null)}
+            />
           )}
         </>
       )}

@@ -3,9 +3,14 @@ import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
 import type {
   Adjunto,
+  ClaseModificacion,
   Empleado,
+  EstadoModificacion,
+  EventoModificacion,
   EventoOutbox,
   EventoPendiente,
+  EventoSolicitud,
+  Modificacion,
   PayloadEvento,
   Solicitud,
   TipoSolicitud,
@@ -681,6 +686,84 @@ export async function todasLasSolicitudes(db: Pool): Promise<Solicitud[]> {
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
+// ── Modificaciones ─────────────────────────────────────────────────────────
+
+/**
+ * Las columnas del satélite, siempre con el prefijo `mod_`.
+ *
+ * El prefijo no es cosmético: estas mismas columnas viajan dentro del `LEFT
+ * JOIN` de `SELECT_SOLICITUD`, donde `id`, `estado`, `motivo_rechazo`,
+ * `created_at`, `aprobador_correo`, `decidida_at` y `solicitante_email` chocan
+ * una a una con las de la solicitud. Con un solo juego de alias, un único mapa
+ * (`aModificacion`) sirve para la consulta suelta y para la del JOIN.
+ *
+ * Se consulta siempre con la tabla aliasada `m` por lo mismo.
+ */
+const COLS_MODIFICACION = `
+  m.id AS mod_id, m.solicitud_id AS mod_solicitud_id, m.clase AS mod_clase,
+  m.estado_previo AS mod_estado_previo,
+  m.fecha_inicio_previa::text AS mod_fecha_inicio_previa,
+  m.fecha_fin_previa::text    AS mod_fecha_fin_previa,
+  -- ::float8 por lo mismo que en dias_habiles de la solicitud: NUMERIC llega
+  -- como STRING y "5.0" rompe la aritmetica de los correos y de la UI.
+  m.dias_habiles_previos::float8 AS mod_dias_habiles_previos,
+  m.fecha_inicio_nueva::text  AS mod_fecha_inicio_nueva,
+  m.fecha_fin_nueva::text     AS mod_fecha_fin_nueva,
+  m.dias_habiles_nuevos::float8 AS mod_dias_habiles_nuevos,
+  m.motivo AS mod_motivo, m.estado AS mod_estado,
+  m.aprobador_correo AS mod_aprobador_correo,
+  m.solicitante_email AS mod_solicitante_email,
+  m.decidida_at::text AS mod_decidida_at,
+  m.motivo_rechazo AS mod_motivo_rechazo,
+  m.created_at::text AS mod_created_at`;
+
+const SELECT_MODIFICACION = `SELECT ${COLS_MODIFICACION} FROM portal.solicitud_modificaciones m`;
+
+interface FilaModificacionDb {
+  mod_id: string;
+  mod_solicitud_id: string;
+  mod_clase: ClaseModificacion;
+  mod_estado_previo: Solicitud['estado'];
+  mod_fecha_inicio_previa: string;
+  mod_fecha_fin_previa: string;
+  mod_dias_habiles_previos: number;
+  mod_fecha_inicio_nueva: string | null;
+  mod_fecha_fin_nueva: string | null;
+  mod_dias_habiles_nuevos: number | null;
+  mod_motivo: string | null;
+  mod_estado: EstadoModificacion;
+  mod_aprobador_correo: string;
+  mod_solicitante_email: string;
+  mod_decidida_at: string | null;
+  mod_motivo_rechazo: string | null;
+  mod_created_at: string;
+}
+
+/** Las mismas columnas vistas desde el LEFT JOIN: todas null si no hay propuesta. */
+type FilaModificacionJoinDb = { [K in keyof FilaModificacionDb]: FilaModificacionDb[K] | null };
+
+function aModificacion(r: FilaModificacionDb): Modificacion {
+  return {
+    id: r.mod_id,
+    solicitudId: r.mod_solicitud_id,
+    clase: r.mod_clase,
+    estadoPrevio: r.mod_estado_previo,
+    fechaInicioPrevia: r.mod_fecha_inicio_previa,
+    fechaFinPrevia: r.mod_fecha_fin_previa,
+    diasHabilesPrevios: r.mod_dias_habiles_previos,
+    fechaInicioNueva: r.mod_fecha_inicio_nueva,
+    fechaFinNueva: r.mod_fecha_fin_nueva,
+    diasHabilesNuevos: r.mod_dias_habiles_nuevos,
+    motivo: r.mod_motivo,
+    estado: r.mod_estado,
+    aprobadorCorreo: r.mod_aprobador_correo,
+    solicitanteEmail: r.mod_solicitante_email,
+    decididaAt: r.mod_decidida_at,
+    motivoRechazo: r.mod_motivo_rechazo,
+    createdAt: r.mod_created_at,
+  };
+}
+
 // ── Solicitudes ────────────────────────────────────────────────────────────
 
 const SELECT_SOLICITUD = `
@@ -699,15 +782,24 @@ const SELECT_SOLICITUD = `
          -- una cadena fallaria en silencio.
          s.primera_firma_at::text AS primera_firma_at,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
+         s.anulada_at::text AS anulada_at,
          a.id AS adjunto_id, a.nombre_archivo, a.mime,
          -- octet_length y no el binario: las listas solo necesitan el tamano.
          octet_length(a.contenido) AS adjunto_bytes,
-         e.copia_correo
+         e.copia_correo,
+         ${COLS_MODIFICACION}
     FROM portal.solicitudes_ausencia s
     JOIN portal.empleados e ON e.id = s.empleado_id
-    LEFT JOIN portal.solicitud_adjuntos a ON a.solicitud_id = s.id`;
+    LEFT JOIN portal.solicitud_adjuntos a ON a.solicitud_id = s.id
+    -- La propuesta VIVA, si la hay. El JOIN no puede multiplicar filas: el
+    -- indice unico parcial ux_modificaciones_una_pendiente de la 024 admite
+    -- como mucho una con estado 'pendiente' por solicitud. Si esa condicion
+    -- desapareciera, las OCHO consultas que usan este SELECT empezarian a
+    -- duplicar resultados a la vez.
+    LEFT JOIN portal.solicitud_modificaciones m
+           ON m.solicitud_id = s.id AND m.estado = 'pendiente'`;
 
-interface FilaSolicitudDb {
+interface FilaSolicitudDb extends FilaModificacionJoinDb {
   id: string;
   tipo: TipoSolicitud;
   empleado_id: string;
@@ -733,6 +825,7 @@ interface FilaSolicitudDb {
   mime: string | null;
   adjunto_bytes: number | null;
   copia_correo: string | null;
+  anulada_at: string | null;
 }
 
 function aSolicitud(r: FilaSolicitudDb): Solicitud {
@@ -767,6 +860,10 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     createdAt: r.created_at,
     adjunto,
     copiaCorreo: r.copia_correo,
+    // El cast es seguro por el `if`: en el LEFT JOIN, o vienen TODAS las
+    // columnas del satélite o ninguna, así que `mod_id` decide por las demás.
+    modificacionPendiente: r.mod_id ? aModificacion(r as FilaModificacionDb) : null,
+    anuladaAt: r.anulada_at,
   };
 }
 
@@ -795,8 +892,8 @@ export async function crearSolicitud(
   db: Pool,
   datos: DatosInsercion,
   adjunto: { nombreArchivo: string; mime: string; contenido: Buffer } | null,
-  eventos: EventoOutbox[],
-  construirPayload: (solicitud: Solicitud, evento: EventoOutbox) => PayloadEvento,
+  eventos: EventoSolicitud[],
+  construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
 ): Promise<Solicitud> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
@@ -891,9 +988,13 @@ export async function solicitudesDecididas(db: Pool, aprobadorCorreo: string): P
     `${SELECT_SOLICITUD}
       WHERE s.estado IN ('aprobada', 'rechazada')
         AND (lower(s.aprobador_correo) = lower($1) OR lower(s.segundo_aprobador_correo) = lower($1))
-      -- NULLS LAST no es decorativo: el PATCH de admin puede dejar una fila en
-      -- estado terminal sin tocar decidida_at, y sin esto esas filas encabezarían
-      -- la lista por delante de las decisiones reales de esta semana.
+      -- NULLS LAST no es decorativo: hay DOS formas de llegar a estado terminal
+      -- sin decidida_at. El PATCH de admin, que corrige la fila sin decidir
+      -- nada; y desde la 024, aprobar una ANULACION sobre una solicitud que
+      -- seguia pendiente —la deja rechazada + anulada_at, y decidida_at sigue
+      -- nula porque nadie decidio la solicitud, solo el cambio—. Sin esto, esas
+      -- filas encabezarian la lista por delante de las decisiones reales de esta
+      -- semana.
       ORDER BY s.decidida_at DESC NULLS LAST, s.created_at DESC`,
     [aprobadorCorreo],
   );
@@ -942,7 +1043,7 @@ export async function decidirSolicitud(
   transicion: Transicion,
   motivo: string | null,
   userId: string | null,
-  construirPayload: (solicitud: Solicitud, evento: EventoOutbox) => PayloadEvento,
+  construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
@@ -979,6 +1080,386 @@ export async function decidirSolicitud(
 
     return solicitud;
   });
+}
+
+// ── Modificaciones: alta y retirada ────────────────────────────────────────
+
+/** Lo que el servicio ya tiene resuelto cuando pide guardar la propuesta. */
+export interface DatosModificacion {
+  solicitudId: string;
+  clase: ClaseModificacion;
+  /**
+   * El estado que el servicio LEYÓ de la solicitud. Viaja hasta el SQL como
+   * testigo de concurrencia; ver el porqué en `crearModificacion`.
+   */
+  estadoEsperado: Solicitud['estado'];
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  /** Copiado de la solicitud por el servicio. NUNCA rederivado del organigrama. */
+  aprobadorCorreo: string;
+}
+
+/**
+ * Resultado del alta. Discriminado y no un `null` a secas porque las dos formas
+ * de fallar piden mensajes distintos: «alguien decidió la solicitud mientras
+ * escribías» no es «ya tienes una propuesta pendiente».
+ */
+export type ResultadoAlta =
+  | { ok: true; modificacion: Modificacion }
+  | { ok: false; razon: 'estado' | 'duplicada' };
+
+/**
+ * `satisfies` y no una cadena suelta: el literal viaja al CHECK de `evento` de
+ * la 024, y una errata aquí compilaría y reventaría DENTRO de la transacción,
+ * deshaciendo la propuesta entera por un fallo de tecleo.
+ */
+const EVENTO_ALTA_MODIFICACION = 'modificacion_solicitada' as const satisfies EventoModificacion;
+
+/** El índice único parcial de la 024. Se nombra para poder reconocer SU 23505. */
+const UX_UNA_PENDIENTE = 'ux_modificaciones_una_pendiente';
+
+/**
+ * Guarda la propuesta y encola su aviso, en una transacción.
+ *
+ * ⚠️ Dos cosas sostienen la corrección de este INSERT y ninguna es opcional:
+ *
+ *  1. El `SELECT` dentro del `INSERT` resuelve la foto previa (estado, fechas,
+ *     días, correo del solicitante) en la MISMA sentencia. Leerla antes y
+ *     grabarla después dejaría una ventana en la que la foto ya no describe lo
+ *     que hay en la tabla.
+ *  2. El `AND s.estado = $8` lleva el estado que leyó el servicio. Sin él, si el
+ *     jefe aprueba a la vez, la propuesta se guardaría con
+ *     `estado_previo = 'pendiente'` sobre algo que ya está `aprobada` y ya está
+ *     en el calendario de Google — y el correo de la decisión no avisaría de
+ *     tocarlo. Con el testigo, `estado_previo` es cierto por construcción.
+ *
+ * Mismo aviso que en `decidirSolicitud`: NO sustituir el testigo por un
+ * `IN ('pendiente','pendiente_2','aprobada')`. Sería igual de atómico y
+ * destruiría justo la garantía de arriba.
+ *
+ * Cero filas ⇒ alguien se adelantó (`razon: 'estado'`). Una violación de
+ * `ux_modificaciones_una_pendiente` (23505 **con ese nombre**) ⇒ ya había otra
+ * propuesta viva; esa carrera la corta la BASE y no una comprobación previa,
+ * porque dos peticiones simultáneas pasarían las dos comprobaciones antes de que
+ * ninguna escribiera.
+ */
+export async function crearModificacion(
+  db: Pool,
+  datos: DatosModificacion,
+  construirPayload: (
+    solicitud: Solicitud,
+    modificacion: Modificacion,
+    evento: typeof EVENTO_ALTA_MODIFICACION,
+  ) => PayloadEvento,
+): Promise<ResultadoAlta> {
+  try {
+    return await withTransaction(db, async (client): Promise<ResultadoAlta> => {
+      const { rows } = await client.query(
+        `INSERT INTO portal.solicitud_modificaciones
+           (solicitud_id, clase, estado_previo, fecha_inicio_previa, fecha_fin_previa,
+            dias_habiles_previos, fecha_inicio_nueva, fecha_fin_nueva, dias_habiles_nuevos,
+            motivo, aprobador_correo, solicitante_email)
+         SELECT s.id, $2, s.estado, s.fecha_inicio, s.fecha_fin, s.dias_habiles,
+                $3::date, $4::date, $5::numeric, $6, $7, s.solicitante_email
+           FROM portal.solicitudes_ausencia s
+          -- ⚠️ $8 es el estado que LEYO el servicio, NO una lista de estados
+          -- admisibles. No cambiar por IN ('pendiente','pendiente_2','aprobada'):
+          -- seria igual de atomico y estado_previo dejaria de ser cierto — si el
+          -- jefe aprueba a la vez, la propuesta se guarda como 'pendiente' sobre
+          -- algo que ya esta en el calendario de Google y el correo de la decision
+          -- no avisa de tocarlo.
+          -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory
+          -- y los 677 siguen verdes con el IN. Lo unico que lo vigila es una
+          -- asercion de FORMA en repo.test.ts que busca este texto literal, y
+          -- este comentario.
+          WHERE s.id = $1 AND s.estado = $8
+         RETURNING id`,
+        [
+          datos.solicitudId,
+          datos.clase,
+          datos.fechaInicioNueva,
+          datos.fechaFinNueva,
+          datos.diasHabilesNuevos,
+          datos.motivo,
+          datos.aprobadorCorreo,
+          datos.estadoEsperado,
+        ],
+      );
+      if (rows.length === 0) return { ok: false, razon: 'estado' };
+      const id = (rows[0] as { id: string }).id;
+
+      const { rows: creada } = await client.query(`${SELECT_MODIFICACION} WHERE m.id = $1`, [id]);
+      const modificacion = aModificacion(creada[0] as FilaModificacionDb);
+
+      // La solicitud se relee DESPUÉS del INSERT: así viene ya con su
+      // `modificacionPendiente` por el LEFT JOIN, y el correo se redacta sobre
+      // exactamente lo que quedó guardado.
+      const { rows: solicitudes } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [datos.solicitudId]);
+      const solicitud = aSolicitud(solicitudes[0] as FilaSolicitudDb);
+
+      // El evento va dentro de la transacción, como el resto del fichero: una
+      // propuesta guardada sin su aviso no la vería nunca quien tiene que
+      // decidirla, y un aviso sin propuesta es basura que n8n reintentaría.
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [
+          datos.solicitudId,
+          EVENTO_ALTA_MODIFICACION,
+          JSON.stringify(construirPayload(solicitud, modificacion, EVENTO_ALTA_MODIFICACION)),
+        ],
+      );
+
+      return { ok: true, modificacion };
+    });
+  } catch (err) {
+    const e = err as { code?: string; constraint?: string };
+    // 23505 = unique_violation, pero se exige además el NOMBRE. Dentro de este
+    // `try` hay otra tabla que no controlamos —`ausencias_outbox`—, y añadirle
+    // un UNIQUE por idempotencia es de lo más natural que puede pasar en la
+    // Fase 3, que mete tres eventos por modificación. El día que ocurra, un
+    // fallo real del outbox se convertiría en un «ya tienes una propuesta
+    // pendiente» que nadie entiende y que además diría que no se escribió nada.
+    if (e?.code === '23505' && e.constraint === UX_UNA_PENDIENTE) {
+      return { ok: false, razon: 'duplicada' };
+    }
+    throw err;
+  }
+}
+
+// ── Modificaciones: la decisión ────────────────────────────────────────────
+
+/**
+ * Resultado de decidir. Las dos formas de fallar son un 409, pero cuentan cosas
+ * distintas y el cliente tiene que poder distinguirlas: «alguien ya la decidió»
+ * (o un doble clic) no es «la solicitud se movió debajo y hay que mirar».
+ */
+export type ResultadoDecisionModificacion =
+  | { ok: true; modificacion: Modificacion; solicitud: Solicitud }
+  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' };
+
+/**
+ * Señal interna para abortar la transacción cuando el testigo triple no casa.
+ *
+ * Es un THROW y no un `return` a propósito: cuando el paso 2 falla, el paso 1 ya
+ * ha escrito, y **solo el ROLLBACK lo deshace**. Ver el porqué entero en
+ * `decidirModificacion`. No sale de este módulo — se caza abajo y se traduce a
+ * un resultado normal, para que el servicio no tenga que conocerla.
+ */
+class ChoqueConLaSolicitud extends Error {}
+
+/**
+ * El testigo TRIPLE del UPDATE de la solicitud, escrito una sola vez para que
+ * las dos clases de cambio no puedan divergir.
+ *
+ * `$1` = id, `$2` = estado previo, `$3` = fecha de inicio previa, `$4` = fecha
+ * de fin previa. Lo que cada clase escribe empieza en `$5`.
+ */
+const TESTIGO_SOLICITUD = `
+  WHERE id = $1
+    -- ⚠️ TRES campos, y los tres hacen falta. Con solo el estado no se detecta
+    -- que un admin haya corregido las fechas por PATCH entre que se pidio el
+    -- cambio y se aprobo, y la aprobacion le pisaria la correccion EN SILENCIO
+    -- (el PATCH no encola nada, asi que nadie se enteraria nunca). Con los tres,
+    -- ese choque sale 409 y alguien mira. Es el segundo motivo por el que
+    -- existen las columnas *_previa de la 024.
+    --
+    -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory y
+    -- modela el testigo por su cuenta, asi que quitar dos de los tres campos
+    -- deja toda la bateria en verde. Lo unico que lo vigila es una asercion de
+    -- FORMA en repo.test.ts que busca este texto literal, y este comentario.
+    AND estado       = $2
+    AND fecha_inicio = $3::date
+    AND fecha_fin    = $4::date`;
+
+/**
+ * Aplica la propuesta a la fila de la solicitud. Lanza si el testigo no casa.
+ *
+ * Las dos clases escriben cosas distintas y ninguna es la otra:
+ *  - `fechas`    → reescribe las fechas y los días. **El `estado` NO se toca**:
+ *    aprobar un cambio no re-decide la solicitud, así que una `pendiente` sigue
+ *    `pendiente` y una `aprobada` sigue `aprobada`.
+ *  - `anulacion` → `rechazada` + `anulada_at`. No estrena estado: `rechazada` ya
+ *    hereda la semántica correcta en los seis filtros que miran el estado (ver
+ *    la cabecera de la 024), y `anulada_at` es lo único que la distingue de un
+ *    rechazo del jefe.
+ */
+async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise<void> {
+  const testigo = [m.solicitudId, m.estadoPrevio, m.fechaInicioPrevia, m.fechaFinPrevia];
+  const { rows } =
+    m.clase === 'anulacion'
+      ? await client.query(
+          `UPDATE portal.solicitudes_ausencia
+              SET estado = 'rechazada', anulada_at = now(),
+                  -- El motivo que escribio QUIEN PIDIO la anulacion. Sin el, la
+                  -- fila quedaria "rechazada" a secas y el historial del jefe no
+                  -- diria por que unos dias concedidos no se disfrutaron.
+                  motivo_rechazo = $5
+            ${TESTIGO_SOLICITUD}
+           RETURNING id`,
+          [...testigo, m.motivo],
+        )
+      : await client.query(
+          `UPDATE portal.solicitudes_ausencia
+              -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
+              -- una decision sobre la solicitud, es una enmienda de sus fechas.
+              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7
+            ${TESTIGO_SOLICITUD}
+           RETURNING id`,
+          [...testigo, m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos],
+        );
+  if (rows.length === 0) throw new ChoqueConLaSolicitud();
+}
+
+/**
+ * El jefe aprueba o rechaza la propuesta, en **una sola transacción** y con el
+ * evento del outbox dentro, como el resto del fichero.
+ *
+ * Tres pasos:
+ *
+ *  1. **Decidir la propuesta.** El `AND estado = 'pendiente'` mata el doble clic
+ *     igual que en `decidirSolicitud`: solo el primero actualiza, el segundo no
+ *     encuentra fila y el servicio lo traduce a 409 en vez de mandar dos correos
+ *     contradictorios.
+ *  2. **Aplicarla a la solicitud**, y solo si se aprueba. Rechazar deja la fila
+ *     exactamente como estaba: no hay nada que escribir.
+ *  3. Releer, y encolar el aviso.
+ *
+ * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
+ * importante de la función. El ROLLBACK deshace también el paso 1, así que la
+ * propuesta se queda `pendiente` y el cliente ve un 409. Si el paso 1 pudiera
+ * confirmarse con el paso 2 fallido, la propuesta diría «aprobada» mientras la
+ * solicitud conserva las fechas viejas, **y el correo anunciaría un cambio que
+ * no ha ocurrido**: el trabajador se iría de vacaciones las fechas que dice el
+ * correo y en el registro constarían otras.
+ *
+ * Es literalmente el argumento que ya está escrito en `fijarVisorConRegistro`
+ * más arriba —«si el UPDATE cuajara y el INSERT fallara… quedaría concedida sin
+ * una sola línea de registro»—, con la diferencia de que aquí el estado a medias
+ * además se comunica por correo. Por eso las dos escrituras van juntas o no van.
+ */
+export async function decidirModificacion(
+  db: Pool,
+  id: string,
+  aprueba: boolean,
+  motivoRechazo: string | null,
+  userId: string | null,
+  construirPayload: (s: Solicitud, m: Modificacion, evento: EventoModificacion) => PayloadEvento,
+): Promise<ResultadoDecisionModificacion> {
+  try {
+    return await withTransaction(db, async (client): Promise<ResultadoDecisionModificacion> => {
+      const { rows } = await client.query(
+        `UPDATE portal.solicitud_modificaciones m
+            SET estado = $2, decidida_at = now(), aprobador_user_id = $3, motivo_rechazo = $4
+          -- Mismo testigo que en decidirSolicitud: el doble clic no decide dos
+          -- veces. Cero filas = alguien se adelanto, y el servicio da 409.
+          WHERE m.id = $1 AND m.estado = 'pendiente'
+         RETURNING ${COLS_MODIFICACION}`,
+        [id, aprueba ? 'aprobada' : 'rechazada', userId, motivoRechazo],
+      );
+      if (rows.length === 0) return { ok: false, razon: 'ya_decidida' };
+      const modificacion = aModificacion(rows[0] as FilaModificacionDb);
+
+      if (aprueba) await aplicarALaSolicitud(client, modificacion);
+
+      // La solicitud se relee DESPUÉS de aplicarla: el correo se redacta sobre
+      // exactamente lo que quedó guardado. Ya no trae `modificacionPendiente`
+      // —la propuesta salió del índice único parcial al dejar de estar viva—,
+      // que es justo lo que la interfaz necesita ver.
+      const { rows: filas } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [modificacion.solicitudId]);
+      const solicitud = aSolicitud(filas[0] as FilaSolicitudDb);
+
+      // Anotado y no un literal suelto: el valor viaja al CHECK de `evento` de la
+      // 024, y una errata reventaría DENTRO de la transacción, deshaciendo una
+      // decisión que el jefe cree tomada.
+      const evento: EventoModificacion = aprueba ? 'modificacion_aprobada' : 'modificacion_rechazada';
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [modificacion.solicitudId, evento, JSON.stringify(construirPayload(solicitud, modificacion, evento))],
+      );
+
+      return { ok: true, modificacion, solicitud };
+    });
+  } catch (err) {
+    // El choque del testigo triple ya provocó el ROLLBACK dentro de
+    // `withTransaction`: aquí solo se traduce a un resultado, para que el
+    // servicio no tenga que conocer esta clase ni distinguirla de un fallo real.
+    if (err instanceof ChoqueConLaSolicitud) return { ok: false, razon: 'solicitud_cambio_de_estado' };
+    throw err;
+  }
+}
+
+/**
+ * Las solicitudes con una propuesta VIVA que le toca decidir a este correo. Un
+ * admin (`todas`) las ve todas, igual que en `solicitudesPendientes`: es quien
+ * destraba una decisión bloqueada.
+ *
+ * Devuelve SOLICITUDES y no propuestas sueltas, y no es pereza: la propuesta por
+ * sí sola no dice de quién es, ni de qué tipo, ni qué comentarios traía, así que
+ * una bandeja hecha con ellas necesitaría una segunda consulta por fila. El
+ * `LEFT JOIN` de `SELECT_SOLICITUD` ya la cuelga de su solicitud, y la trae
+ * completa.
+ *
+ * El filtro va contra `m.aprobador_correo` —el decisor CONGELADO en la
+ * propuesta— y no contra los firmantes de la solicitud, que es el mismo correo
+ * que exige `puedeDecidirModificacion`.
+ *
+ * ⚠️ Eso NO basta para garantizar que todo lo que sale de aquí sea decidible por
+ * quien pregunta, y no hay que intentar arreglarlo en este SQL. La RAÍZ del
+ * organigrama es su propio jefe (`aprobadoresDe`), así que sobre sus propias
+ * solicitudes el decisor congelado es ella misma y el guard del solicitante la
+ * frena; y un admin recibe además las de todo el mundo. Quién puede decidir cada
+ * fila lo decora el servicio con `puedoDecidirla`, que llama al MISMO guard que
+ * el endpoint de decisión — que es lo único que impide que la bandeja ofrezca un
+ * botón que responde 403.
+ */
+export async function modificacionesPendientes(
+  db: Pool,
+  aprobadorCorreo: string,
+  todas: boolean,
+): Promise<Solicitud[]> {
+  const { rows } = await db.query(
+    `${SELECT_SOLICITUD}
+      -- El JOIN ya filtra por m.estado = 'pendiente': esto solo descarta las
+      -- solicitudes que no tienen ninguna propuesta viva colgando.
+      WHERE m.id IS NOT NULL
+        AND ($2::boolean OR lower(m.aprobador_correo) = lower($1))
+      ORDER BY m.created_at`,
+    [aprobadorCorreo, todas],
+  );
+  return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
+/**
+ * El solicitante se echa atrás. La fila NO se borra: pasa a `retirada`, sale del
+ * índice único parcial —así puede pedir otra— y deja el rastro de que existió.
+ *
+ * `decidida_at` se sella también aquí, aunque no sea una decisión del jefe: es
+ * el instante en que la propuesta dejó de estar viva, y sin él no habría forma
+ * de ordenar el historial de una solicitud con varios intentos.
+ *
+ * `AND estado = 'pendiente'` por lo mismo que el testigo del alta: si el jefe la
+ * decidió mientras tanto, esto no puede pisarle la decisión. Devuelve `null` y
+ * el servicio lo traduce a 409.
+ *
+ * No encola nada: retirar deja la solicitud exactamente como estaba, así que no
+ * hay nada que comunicar a nadie.
+ */
+export async function retirarModificacion(db: Pool, id: string): Promise<Modificacion | null> {
+  const { rows } = await db.query(
+    `UPDATE portal.solicitud_modificaciones m
+        SET estado = 'retirada', decidida_at = now()
+      WHERE m.id = $1 AND m.estado = 'pendiente'
+     RETURNING ${COLS_MODIFICACION}`,
+    [id],
+  );
+  return rows.length ? aModificacion(rows[0] as FilaModificacionDb) : null;
+}
+
+export async function modificacionPorId(db: Pool, id: string): Promise<Modificacion | null> {
+  const { rows } = await db.query(`${SELECT_MODIFICACION} WHERE m.id = $1`, [id]);
+  return rows.length ? aModificacion(rows[0] as FilaModificacionDb) : null;
 }
 
 // ── Adjuntos ───────────────────────────────────────────────────────────────

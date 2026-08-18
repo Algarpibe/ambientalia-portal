@@ -16,6 +16,7 @@ Calendar y Sheets.
 | Una sola firma, siempre el mismo buzón | **Firma en cascada**: el jefe inmediato y, si la ficha del solicitante lo exige, el superior de ese jefe | Un solo aprobador para toda la empresa no es una jerarquía, es un cuello de botella |
 | El rechazo no decía el motivo | El motivo viaja en el correo y queda en la BD | Obligaba a preguntar por otro canal |
 | Sin historial para el empleado | Pestaña «Mis solicitudes» | — |
+| Una solicitud enviada solo la podía tocar un admin, a mano y sin rastro | El trabajador **pide** cambiar las fechas o anularla, y su jefe lo decide | Cambiar de planes es normal; pedirlo por privado para que alguien edite la fila no deja ni permiso ni historial |
 
 Lo que **no** cambió, a propósito: los textos de los correos, el calendario
 «Ambientalia Staff» y las cuatro pestañas de la hoja
@@ -40,7 +41,7 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable,
   `022` los visores configurables y `023` la segunda firma opcional por ficha
   (`empleados.requiere_segunda_firma`) con el correo de quien solo se entera del
-  resultado (`solicitudes_ausencia.informado_correo`).
+  resultado (`solicitudes_ausencia.informado_correo`) y `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`).
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
 
 ## No se piden días que ya pasaron
@@ -133,6 +134,9 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `aprobada` | aprobado, a **toda la cadena** —incluido el informado— (+ la copia de la ficha) | ✔ | ✔ |
 | `rechazada` | rechazado con motivo, a **toda la cadena** —incluido el informado— (+ la copia de la ficha) | — | ✔ |
 | `registrada` | acuse de incapacidad (+ `COPIA_INCAPACIDADES` y la copia de la ficha) | ✔ | ✔ |
+| `modificacion_solicitada` | aviso a quien decide el cambio — **solo a él** | — | — |
+| `modificacion_aprobada` | cambio aprobado, a **toda la cadena** (+ la copia de la ficha) | — | — |
+| `modificacion_rechazada` | cambio rechazado, a **toda la cadena** (+ la copia de la ficha) | — | — |
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
 es distinto**: `avisoSegundoAprobador` lleva su propio asunto y dice que la
@@ -191,6 +195,12 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/pendientes` | idem — solo lo que le toca firmar AHORA |
 | `GET` | `/api/ausencias/decididas` | idem — lo que le tocaba firmar y ya está cerrado |
 | `POST` | `/api/ausencias/solicitudes/:id/decision` | idem — **409** si ya estaba decidida |
+| `POST` | `/api/ausencias/solicitudes/:id/modificaciones` | idem — el **dueño** pide cambiar las fechas o anular; **409** si el estado no lo admite, si ya hay una propuesta viva, o si la solicitud cambió mientras tanto |
+| `POST` | `/api/ausencias/modificaciones/:id/retirar` | idem — el **autor** se echa atrás; la fila no se borra, pasa a `retirada` |
+| `GET` | `/api/ausencias/modificaciones/pendientes` | idem — los cambios que le toca decidir; cada fila trae `puedoDecidirla` ya calculado. Lista vacía, no **403** |
+| `POST` | `/api/ausencias/modificaciones/:id/decision` | idem — **409** si ya estaba decidida, o si la solicitud cambió por debajo |
+| `PATCH` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — corrige el registro. **No manda ningún correo**: corregir no es decidir |
+| `DELETE` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — borra la fila; el adjunto y sus eventos se van por cascada |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos` | idem — solo admin o quien tenga la llave de los adjuntos (`ve_adjuntos`); **403** al resto |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, **quien la firma** (uno o dos, según la ficha; **nunca el informado**), admin o quien tenga la llave de los adjuntos |
@@ -486,8 +496,8 @@ que se hubiera ajustado a mano desde el panel.
 El `DEFAULT` se queda después de sembrar. Consecuencia asumida: toda ficha
 nueva nace con administración en copia sin que nadie lo decida, y eso incluye
 el acuse de sus propias incapacidades. Es reversible con **la siguiente
-migración libre** —hoy la `024`, porque la `023` ya existe y es la segunda firma
-opcional— que haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
+migración libre** —hoy la `025`, porque la `024` ya existe y es la modificación de
+solicitudes enviadas— que haga `ALTER COLUMN copia_correo DROP DEFAULT`. Y el literal de la `021` no se edita
 nunca en sitio para cambiar el valor sembrado: las bases que ya la corrieron
 no se enterarían —el `IF NOT EXISTS` corta— pero una base nueva sí, y los
 entornos divergirían en silencio; para cambiarlo hace falta una migración
@@ -821,6 +831,10 @@ La bandeja parte la lista en dos: lo que hay que firmar, con sus botones, y
 detrás de un **«Firmar en su lugar»**. Dos gestos, no uno: destrabar es una
 excepción, no el trabajo de cada día.
 
+> La pestaña tiene desde entonces una **tercera** sección, *Cambios pedidos*, que
+> NO sale de este reparto: viene de otra consulta y decide con `puedoDecidirla`,
+> no con `esMiTurno`. Ver «Modificar o anular una solicitud enviada».
+
 Para quien no es admin, `esMiTurno` es **siempre** `true` y la segunda lista no
 existe: la consulta ya le entrega solo su turno.
 
@@ -936,6 +950,252 @@ tras desplegar, y los tres fallan enseñando algo plausible en vez de romperse:
 > controlado si el backend deja de mandar el campo, o la línea de abajo diciendo
 > «— solo informado» de un correo que ya no está arriba. **El próximo que la
 > toque tiene que probarla a mano.**
+
+## Modificar o anular una solicitud enviada
+
+El trabajador pide **cambiar las fechas** o **anular** una solicitud que ya mandó
+—esté aprobada o todavía pendiente— y su jefe lo aprueba o lo rechaza. Puede
+retirar su propia petición mientras nadie la haya decidido.
+
+Antes de esto, una solicitud enviada era inmutable desde su lado: la única salida
+era pedirle por privado a un administrador que tocara la fila con
+`PATCH /api/ausencias/solicitudes/:id`, que no deja rastro de quién lo pidió ni
+por qué, y que **a propósito no manda ningún correo** («corregir el registro no es
+decidir»). Ese camino sigue existiendo y sigue siendo solo de admin; lo nuevo es
+el que pasa por aprobación.
+
+### La propuesta vive aparte, y la solicitud no se toca hasta que hay decisión
+
+La petición se guarda en `portal.solicitud_modificaciones` (migración `024`) y la
+fila de `portal.solicitudes_ausencia` **no cambia hasta que el jefe decide**.
+
+Se descartó añadir estados (`pendiente_cambio`, `anulada`) porque la máquina de
+estados no vive en un solo sitio: hay **seis filtros escritos a mano** que miran
+`estado`, y uno de ellos **falla en abierto**. `repo.ausenciasEntre` filtra
+`estado <> 'rechazada'`, así que un estado `anulada` habría seguido pintándose en
+el calendario como ausencia vigente — el fallo que nadie detecta porque no rompe
+nada. Además, un estado nuevo destruye información: una `aprobada` que pasara a
+`pendiente_cambio` perdería el hecho de que estaba aprobada, y volver atrás al
+rechazar exigiría guardar el estado previo, que es esta misma tabla con peor forma
+y dentro de la tabla caliente.
+
+Como mucho hay **una propuesta viva por solicitud**, y eso lo garantiza un índice
+único parcial en la base (`ux_modificaciones_una_pendiente`), no una comprobación
+en el servicio: dos peticiones a la vez pasarían las dos comprobaciones antes de
+que cualquiera escribiera. No es higiene — `SELECT_SOLICITUD` gana un `LEFT JOIN`
+contra esta tabla y se usa en **ocho** consultas, dos de ellas sin ningún filtro;
+dos filas vivas multiplicarían resultados en todas.
+
+Las columnas `*_previa` guardan la **foto de la solicitud** en el instante en que
+se pidió el cambio. No son redundancia: sostienen las dos cosas que sin ellas no
+se pueden hacer — que el correo diga «de estas fechas a estas otras», que es lo
+único que permite ajustar Google a mano, y el testigo de concurrencia de abajo.
+
+### Anular no estrena estado
+
+Aprobar una anulación deja la solicitud en **`rechazada` con `anulada_at` sellado**.
+`rechazada` ya hereda la semántica correcta en los seis filtros:
+
+| Filtro | Qué le pasa a una anulada | ¿Correcto? |
+|---|---|---|
+| `saldo.disfrutadas` (solo `aprobada`) | deja de consumir días | sí |
+| `saldo.enTramite` (`pendiente`/`pendiente_2`) | no entra | sí |
+| `repo.ausenciasEntre` (`<> 'rechazada'`) | sale del calendario | sí |
+| `calendario.ts` (`continue` si `rechazada`) | no se pinta | sí |
+| `repo.solicitudesPendientes` | no entra en la bandeja | sí |
+| `repo.solicitudesDecididas` (`aprobada`/`rechazada`) | **sigue en el historial del jefe** | sí — él la decidió |
+
+La etiqueta **«Anulada»** se **deriva** al pintar (`estado === 'rechazada' && anuladaAt`),
+no se almacena. Un bundle viejo lee «Rechazada»: menos preciso, no roto.
+
+> ⚠️ **`motivo_rechazo` tiene ahora dos autores.** Lo escribe el jefe al rechazar,
+> y lo escribe **el trabajador** al pedir la anulación. Por eso `TablaSolicitudes`
+> rotula el texto según el caso («Motivo del rechazo» frente a «Motivo que dio
+> quien pidió anularla»). Cualquier pantalla nueva que enseñe ese campo tiene que
+> hacer lo mismo, o atribuirá al jefe una frase que escribió otra persona. Lo
+> mismo vale para el CSV del *Registro general*, que exporta la etiqueta derivada
+> y no el estado crudo.
+
+### Quién decide, y por qué no se rederiva
+
+Decide **quien tenga el turno en ese momento**, y si la solicitud ya está cerrada,
+el jefe inmediato — todo leído de la **solicitud**, nunca del organigrama actual:
+
+```ts
+decisorDeModificacion(s) = correoDelTurno(s) ?? s.aprobadorCorreo
+```
+
+Rederivar con `aprobadoresDe` mandaría «anula mis vacaciones aprobadas» a un jefe
+nuevo que no sabe que se aprobaron ni por qué. Es el mismo invariante que congela
+los firmantes en el alta, un paso más tarde.
+
+**No hay segunda firma para el cambio.** La segunda firma valida la concesión, y
+la concesión ya está validada; y exigir dos firmas para *renunciar* a unas
+vacaciones es el mismo argumento con el que se justificó la casilla **Necesaria**.
+Sobre una `pendiente_2` decide el segundo firmante, que es el más sénior de los
+dos.
+
+**No hay rebote hacia atrás.** Aprobar un cambio de fechas sobre una `pendiente_2`
+**no** la devuelve a `pendiente` para que el primer jefe refirme: esa arista
+repoblaría su bandeja mientras el segundo decide y rompería el razonamiento del
+testigo. El primer firmante se entera por el correo, que va a la cadena entera.
+
+### El saldo no mira las propuestas
+
+Una solicitud aprobada de 5 días con una propuesta pendiente de 3 sigue contando
+**5** en `disfrutadas`. `saldo.ts` no se tocó: cero líneas.
+
+Si una anulación pendiente liberara los días, el trabajador pediría la anulación y
+acto seguido esos mismos días en otras fechas, con el saldo bendiciéndolo; y si el
+jefe rechaza, quedan dos ausencias sobre los mismos días y ningún sitio donde
+deshacerlo. Es la acción unilateral que esta feature existe para impedir,
+reintroducida por la puerta del saldo. Es además la regla que ya estaba escrita:
+«media firma NO descuenta», y una propuesta es menos que media firma.
+
+Al jefe sí se le enseña el **delta** al decidir («aprobarlo le devuelve 2 días»),
+que es el dato que necesita, sin contaminar la aritmética del saldo.
+
+### Qué admite modificación, y las dos reglas de fecha
+
+| Estado | ¿Admite? | Al aprobar |
+|---|---|---|
+| `pendiente` / `pendiente_2` | sí | fechas: reescribe. **El estado no cambia.** anulación: `rechazada` + `anulada_at` |
+| `aprobada` | sí — el caso principal | igual; **es el único que dispara el aviso de Google** |
+| `rechazada` | no — 409 | los días nunca se concedieron: lo que quiere es volver a pedir |
+| `registrada` | no — 409 | una incapacidad se informa, no se concede: no hay aprobador a quien mandarlo |
+
+Las dos reglas de vigencia son **distintas a propósito**:
+
+- **Cambiar fechas** exige `fechaFin >= hoy`. Permite acortar una ausencia **en
+  curso**, que es el caso legítimo de «vuelvo antes de tiempo».
+- **Anular** exige `fechaInicio >= hoy`. Anular una ausencia ya empezada
+  devolvería al saldo días que sí se disfrutaron: quien se fue el lunes y vuelve
+  el miércoles tiene que **acortar**, no anular.
+
+> ⚠️ **`>=` y no `>`, en la regla de anular.** Una ausencia que empieza HOY sí se
+> puede anular: un día solo queda consumido al terminar, y cancelar la mañana del
+> primer día es un caso real. Con `>` esa persona se quedaría sin salida, porque
+> tampoco se puede acortar a menos de un día. El riesgo residual —anular a las
+> cinco de la tarde habiendo disfrutado el día— es de un solo día, exige mala fe y
+> deja rastro en el outbox. **No cambiar a `>` sin releer esto.**
+
+Solo el **dueño** puede pedirla. `empleadoId` sale de la sesión y nunca del
+cuerpo, igual que en el alta.
+
+### La concurrencia: dos testigos
+
+Mismo patrón de comparar-y-actualizar que `decidirSolicitud`, en dos momentos:
+
+1. **Al pedir**, el `INSERT ... SELECT` lleva `AND s.estado = $8` con el estado que
+   leyó el servicio, y resuelve la foto previa en la misma sentencia. Sin él, si el
+   jefe aprueba a la vez, la propuesta se guardaría con `estado_previo = 'pendiente'`
+   sobre algo que ya está en el calendario, y el correo de la decisión **no
+   avisaría de tocar Google**. Con el testigo, `estado_previo` es cierto por
+   construcción.
+2. **Al aplicar**, el `UPDATE` de la solicitud lleva un **testigo de tres campos**
+   (`estado`, `fecha_inicio`, `fecha_fin`) contra las columnas `*_previa`. Con solo
+   `estado` no se detectaría que un admin corrigió las fechas por `PATCH` entre
+   medias, y la aprobación **le pisaría la corrección en silencio**. Con los tres,
+   ese choque sale 409 y alguien mira.
+
+Si el segundo paso no encuentra fila, **lanza**, y el ROLLBACK deshace también la
+decisión de la propuesta: si no, la propuesta diría «aprobada» mientras la
+solicitud conserva las fechas viejas, y el correo anunciaría un cambio que no
+ocurrió.
+
+### Los correos, y por qué n8n no se tocó
+
+Tres eventos nuevos, todos con `calendario: null` y `hoja: null`. Con los dos
+campos en `null`, el workflow recorre **la rama de solo-correo** que ya usan
+`creada` y `aprobacion`: no hay nada que cambiar en n8n.
+
+| Evento | Correo |
+|---|---|
+| `modificacion_solicitada` | **solo al decisor** — es un trámite, no un veredicto |
+| `modificacion_aprobada` | a **toda la cadena** (+ la copia de la ficha) |
+| `modificacion_rechazada` | a **toda la cadena** (+ la copia de la ficha) |
+
+Las dos decisiones van a la cadena entera porque el primer firmante tiene que
+enterarse de que lo que avaló cambió.
+
+El correo de aprobación lleva **las cuatro fechas** —las dos de antes y las dos de
+después— y los dos recuentos de días, redactado desde la propuesta y no desde la
+solicitud ya actualizada: sin el «desde qué», nadie puede ajustar el calendario.
+
+> ⚠️ **El aviso de ajustar Google a mano.** Cuando la solicitud estaba **aprobada**,
+> su evento de Calendar y su fila de la hoja ya se enviaron con las fechas viejas,
+> y **no se corrigen solos**. El correo de aprobación lleva entonces el asunto
+> prefijado con `⚠️ Ajustar calendario y hoja —` y un párrafo dirigido a
+> administración.
+>
+> Ese ⚠️ aparece **solo** si la solicitud estaba aprobada. Si seguía `pendiente`
+> nunca se mandó nada a Google, y avisar ahí sería una alarma falsa: entrenar a la
+> gente a ignorar el ⚠️ es la forma segura de que el día que importe no lo lean.
+
+### En pantalla
+
+- **Mis solicitudes** gana botones en la última columna: «Cambiar fechas» y
+  «Anular» (la segunda solo si se puede), y con una propuesta viva, el chip ámbar
+  **«Cambio pendiente»** más un enlace «Retirar». El modal dice, y no puede dejar
+  de decir, **«Esto es una petición. Las fechas no cambian hasta que tu jefe la
+  apruebe.»**
+- **Pendientes de aprobar** gana una **tercera sección, «Cambios pedidos»**,
+  separada de la tabla principal. Separada a propósito: dos parejas de botones con
+  significados distintos en la misma fila —unos deciden la solicitud, otros el
+  cambio— es cómo alguien aprueba lo que no era.
+- El chip **«Cambio pendiente»** vive en la celda de Estado de `TablaSolicitudes`,
+  así que sale en las cuatro pantallas que usan ese componente, y también en el
+  *Registro general*, para que un admin no edite a ciegas una fila con una
+  propuesta viva.
+
+**`puedoDecidirla`** es a los cambios lo que `esMiTurno` a las solicitudes: lo
+calcula el servidor y viaja por fila, para que el navegador no reimplemente el
+guard. Incluye **excluir al propio solicitante**, que no es un caso raro — la raíz
+del organigrama es su propio jefe, así que recibe su propia propuesta. Con
+`puedoDecidirla: false` la fila se ve pero los botones salen apagados con el
+motivo al lado, nunca ausentes.
+
+> ⚠️ **El contador de la pestaña y el del widget tienen que contar lo mismo.** Los
+> dos usan `contarPorAtender` de `dominio.ts` justamente para que la regla exista
+> una sola vez. El número del `<h3>` de «Cambios pedidos» es otra cosa —cuenta
+> filas de la tabla, no decisiones propias— y no hay que «unificarlo».
+
+### Lo que ningún test protege
+
+> ⚠️ **Los dos testigos de concurrencia viven en SQL que ningún test ejecuta.**
+> Los tests de este módulo corren contra un doble in-memory, así que cambiar
+> `AND s.estado = $8` por un `IN (...)` —o quitarle dos columnas al testigo
+> triple— deja **la suite entera en verde**. Está comprobado, no supuesto. Lo
+> único que los vigila son unas **aserciones de forma** en `repo.test.ts`, que
+> buscan el texto literal del `WHERE`, y los comentarios inline. Si alguien las
+> borra por parecer redundantes, el invariante se queda sin nada.
+>
+> `decidirSolicitud` arrastra exactamente el mismo hueco desde la 018: no es una
+> deuda nueva, es cómo funciona este módulo.
+
+`repo.test.ts` sí ejecuta la transacción de verdad contra un `Pool` falso para tres
+cosas que sí se pueden probar sin Postgres: que un `23505` del índice se traduzca a
+«ya hay una propuesta», que otro `23505` **propague** en vez de disfrazarse, y que
+un choque con la solicitud emita `ROLLBACK` sin escribir en el outbox.
+
+> ⚠️ **El doble in-memory ya es un segundo sistema.** Son unas 445 líneas
+> modelando un `repo.ts` de 1647, y reimplementa en JavaScript el testigo, el
+> índice único parcial y el `LEFT JOIN`. Quien toque esta tabla mantiene **dos**
+> implementaciones, no una.
+
+En el frontend no hay tests, como en el resto de la app: el modal, la tercera
+sección de la bandeja y los dos contadores se comprueban mirándolos.
+
+### Límites conocidos
+
+- **Google no se corrige solo, y no hay acuse de que alguien lo haya hecho.** El
+  correo avisa; nadie sabe si se ajustó. El arreglo barato el día que duela es una
+  columna `google_ajustado_at` y un botón «Ya lo ajusté» en el *Registro general*.
+- Se puede modificar una solicitud **ya modificada**. Es lo correcto, pero no hay
+  límite: si alguien encadena peticiones, encadena correos.
+- El jefe **no puede contraproponer** («no del 6 al 8, del 7 al 9»): rechaza con
+  motivo y el trabajador vuelve a pedir. Una contrapropuesta tendría otro autor y
+  otro decisor, y duplicaría la máquina.
 
 ## Calendario
 

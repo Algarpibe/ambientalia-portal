@@ -155,6 +155,74 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El dueño pide que se le cambien las fechas o se le anule una solicitud ya
+   * enviada. Bajo `...gated` y sin `requireAdmin`: es la vía del TRABAJADOR, y
+   * el servicio comprueba que la solicitud sea suya. Un admin que quiera
+   * corregir una fila a mano tiene el `PATCH`, que no manda correos.
+   */
+  router.post('/ausencias/solicitudes/:id/modificaciones', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.status(201).json(await service.pedirModificacion(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_pedir_modificacion');
+    }
+  });
+
+  /**
+   * El autor se echa atrás.
+   *
+   * `POST .../retirar` y NO `DELETE /modificaciones/:id`: la fila no se borra,
+   * pasa a `retirada` y sigue ahí. Un `DELETE` que no borra sorprende a quien
+   * lea este router dentro de seis meses.
+   */
+  router.post('/ausencias/modificaciones/:id/retirar', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.retirarModificacion(db, sesionDe(req), req.params.id));
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirar_modificacion');
+    }
+  });
+
+  /**
+   * La bandeja de cambios del jefe.
+   *
+   * Sin `requireAdmin` y sin guard de aprobador, igual que `/ausencias/decididas`:
+   * va acotada al propio correo, así que quien no tenga ninguna propuesta que
+   * decidir recibe una lista vacía en vez de un 403 que no aportaría nada.
+   *
+   * Devuelve `solicitudes`, cada una con su `modificacionPendiente` colgada por
+   * el `LEFT JOIN`: la propuesta sola no dice de quién es ni de qué tipo, y una
+   * bandeja hecha con propuestas sueltas necesitaría una consulta por fila.
+   *
+   * Cada fila trae `puedoDecidirla`, el `esMiTurno` de esta bandeja: puede ser
+   * `false` (la raíz del organigrama sobre su propia solicitud, o un admin que
+   * las ve todas), y entonces la fila se pinta apagada en vez de ofrecer un
+   * botón que responde 403.
+   */
+  router.get('/ausencias/modificaciones/pendientes', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json({ solicitudes: await service.modificacionesPendientes(db, sesionDe(req)) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_modificaciones_pendientes');
+    }
+  });
+
+  /**
+   * El jefe aprueba o rechaza el cambio. Mismo cuerpo que la decisión de una
+   * solicitud (`{ aprueba, motivo? }`) para que la interfaz reutilice el código.
+   *
+   * Decide una sola persona: el decisor congelado en la propuesta, o un admin.
+   * No hay segunda firma para la modificación.
+   */
+  router.post('/ausencias/modificaciones/:id/decision', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.decidirModificacion(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_decidir_modificacion');
+    }
+  });
+
   /** Días hábiles de un rango. El formulario lo usa para el contador en vivo. */
   router.get('/ausencias/dias-habiles', ...gated, (req: Request, res: Response) => {
     try {

@@ -3,12 +3,22 @@ import {
   AusenciaError,
   nombreArchivoNormalizado,
   puedeDecidir,
+  puedeDecidirModificacion,
+  puedePedirAnulacion,
+  puedePedirModificacion,
   puedeVerAdjunto,
+  validarNuevaModificacion,
   validarNuevaSolicitud,
   validarSaldo,
   type Sesion,
 } from './service.js';
-import { transicionAlDecidir, type Solicitud } from './types.js';
+import {
+  decisorDeModificacion,
+  transicionAlDecidir,
+  type EstadoSolicitud,
+  type Modificacion,
+  type Solicitud,
+} from './types.js';
 
 const PDF_BASE64 = Buffer.from('%PDF-1.4 fake').toString('base64');
 
@@ -52,6 +62,9 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     adjunto: null,
     // Este fichero no prueba copias: null es el valor neutro.
     copiaCorreo: null,
+    // Sin propuesta de cambio viva y sin anular: el estado de casi todas.
+    modificacionPendiente: null,
+    anuladaAt: null,
     ...over,
   };
 }
@@ -564,5 +577,348 @@ describe('el informado no hereda ningún permiso del segundo firmante', () => {
     // La llave AÑADE acceso y nunca lo condiciona: no ser firmante no puede
     // quitársela a quien la tiene por otra vía.
     expect(puedeVerAdjunto(suSesion, adjuntoDeLaSolicitud, true)).toBe(true);
+  });
+});
+
+// ── Modificación de una solicitud ya enviada ───────────────────────────────
+
+describe('validarNuevaModificacion', () => {
+  /** Las fechas que la solicitud tiene AHORA, contra las que se compara. */
+  const ACTUAL = { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' };
+  /**
+   * Un «hoy» a mitad de la ausencia (empezó el 6, acaba el 10): es el único
+   * escenario donde recortar y retroceder se distinguen, que es lo que la regla
+   * de fechas pasadas tiene que separar.
+   */
+  const HOY_MOD = '2026-07-08';
+  const cambio = (over: Record<string, unknown> = {}) => ({
+    clase: 'fechas',
+    fechaInicio: '2026-07-13',
+    fechaFin: '2026-07-15',
+    ...over,
+  });
+  const validar = (body: unknown, hoy: string = HOY_MOD) => validarNuevaModificacion(body, ACTUAL, hoy);
+
+  it('acepta un cambio de fechas y limpia el motivo', () => {
+    expect(validar(cambio({ motivo: '  Cita médica  ' }))).toEqual({
+      clase: 'fechas',
+      fechaInicio: '2026-07-13',
+      fechaFin: '2026-07-15',
+      motivo: 'Cita médica',
+    });
+  });
+
+  it('acepta una anulación, con las tres fechas en null', () => {
+    expect(validar({ clase: 'anulacion', motivo: 'Se cancela el viaje' })).toEqual({
+      clase: 'anulacion',
+      fechaInicio: null,
+      fechaFin: null,
+      motivo: 'Se cancela el viaje',
+    });
+  });
+
+  it('rechaza una clase que no existe', () => {
+    expect(() => validar(cambio({ clase: 'cambiar_tipo' }))).toThrow(
+      expect.objectContaining({ code: 'clase_invalida', status: 400, field: 'clase' }),
+    );
+    expect(() => validar({})).toThrow(expect.objectContaining({ code: 'clase_invalida' }));
+  });
+
+  it('CANDADO: una anulación que trae fechas es 400, no se ignoran en silencio', () => {
+    // Un cliente con un bug creería haber pedido un cambio de fechas y habría
+    // pedido que le anularan las vacaciones. Aceptarlo «quedándose con la
+    // clase» es la forma silenciosa de borrarle los días a alguien.
+    // Código propio: `clase_invalida` sobre un payload donde `clase` vale
+    // 'anulacion' se lee como una mentira en un log, y el cliente no puede
+    // distinguir «esa clase no existe» de «tu clase contradice tus fechas».
+    expect(() => validar({ clase: 'anulacion', fechaInicio: '2026-07-13', fechaFin: '2026-07-15' })).toThrow(
+      expect.objectContaining({ code: 'anulacion_con_fechas', status: 400, field: 'clase' }),
+    );
+    // Con una sola de las dos, también.
+    expect(() => validar({ clase: 'anulacion', fechaFin: '2026-07-15' })).toThrow(
+      expect.objectContaining({ code: 'anulacion_con_fechas' }),
+    );
+    // Y un input vacío del formulario NO cuenta como fecha.
+    expect(() => validar({ clase: 'anulacion', fechaInicio: '', fechaFin: '' })).not.toThrow();
+  });
+
+  it('rechaza fechas que no son de calendario', () => {
+    expect(() => validar(cambio({ fechaInicio: '2026-02-30' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_invalida', field: 'fechaInicio' }),
+    );
+    expect(() => validar(cambio({ fechaFin: 'mañana' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_invalida', field: 'fechaFin' }),
+    );
+  });
+
+  it('rechaza el rango invertido', () => {
+    expect(() => validar(cambio({ fechaInicio: '2026-07-15', fechaFin: '2026-07-13' }))).toThrow(
+      expect.objectContaining({ code: 'rango_invertido' }),
+    );
+  });
+
+  it('rechaza rangos de más de un año', () => {
+    expect(() => validar(cambio({ fechaFin: '2028-07-15' }))).toThrow(
+      expect.objectContaining({ code: 'rango_demasiado_largo' }),
+    );
+  });
+
+  it('CANDADO: pedir exactamente las fechas que ya tiene es 400', () => {
+    // Si pasara, el jefe recibiría un correo pidiéndole que apruebe dejar todo
+    // igual — y a la tercera vez deja de leerlos.
+    expect(() => validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: ACTUAL.fechaFin }))).toThrow(
+      expect.objectContaining({ code: 'sin_cambios', status: 400 }),
+    );
+  });
+
+  it('cambiar solo una de las dos fechas SÍ es un cambio', () => {
+    // El caso principal de la feature: acortar por la cola una ausencia en curso.
+    expect(validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: '2026-07-08' }))).toMatchObject({
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-08',
+    });
+  });
+
+  it('recortar una ausencia YA EMPEZADA vale, aunque su inicio esté en el pasado', () => {
+    // Hoy es 8 de julio y la ausencia empezó el 6: «córtala, tengo que volver»
+    // obliga a proponer un inicio pasado. Si esto se rechazara, la feature no
+    // cubriría el caso que la justifica.
+    expect(validar(cambio({ fechaInicio: ACTUAL.fechaInicio, fechaFin: '2026-07-08' }))).toMatchObject({
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-08',
+    });
+  });
+
+  it('CANDADO: RETROCEDER al pasado es 400, aunque la solicitud siga vigente', () => {
+    // El agujero que esto tapa: unas vacaciones de julio todavía sin empezar,
+    // movidas a enero. Pasaba la validación y los dos CHECK de la 024, y dejaba
+    // una fila legal reservando días ya pasados — al aplicarla, saldo movido de
+    // un año a otro sin que nadie lo viera.
+    expect(() => validar(cambio({ fechaInicio: '2026-01-05', fechaFin: '2026-01-08' }), '2026-06-01')).toThrow(
+      expect.objectContaining({ code: 'fecha_en_pasado', status: 400, field: 'fechaInicio' }),
+    );
+  });
+
+  it('adelantar el inicio SÍ vale mientras no caiga en el pasado', () => {
+    // «Hacia atrás» es contra el calendario, no contra las fechas actuales:
+    // pedir empezar antes es legítimo si esos días aún no han llegado.
+    expect(validar(cambio({ fechaInicio: '2026-07-02', fechaFin: '2026-07-08' }), '2026-07-01')).toMatchObject({
+      fechaInicio: '2026-07-02',
+    });
+  });
+
+  it('rechaza un motivo kilométrico', () => {
+    expect(() => validar(cambio({ motivo: 'x'.repeat(2001) }))).toThrow(
+      expect.objectContaining({ code: 'motivo_demasiado_largo', field: 'motivo' }),
+    );
+    expect(validar(cambio({ motivo: 'x'.repeat(2000) })).motivo).toHaveLength(2000);
+  });
+
+  it('sin motivo se guarda null, no una cadena vacía', () => {
+    expect(validar(cambio()).motivo).toBeNull();
+    expect(validar(cambio({ motivo: '   ' })).motivo).toBeNull();
+  });
+
+  it('ignora cualquier empleadoId o diasHabiles que mande el cliente', () => {
+    // Igual que en el alta: la identidad sale de la sesión y los días los cuenta
+    // el servidor. Este test fija que no EXISTA la rama que los lea.
+    const r = validar(cambio({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
+    expect(r.empleadoId).toBeUndefined();
+    expect(r.diasHabiles).toBeUndefined();
+  });
+});
+
+describe('decisorDeModificacion', () => {
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const SEGUNDO = 'comercial@ambientalia.com.co';
+  const enCascada = (estado: EstadoSolicitud) =>
+    solicitud({ estado, aprobadorCorreo: PRIMERO, segundoAprobadorCorreo: SEGUNDO });
+
+  it('en `pendiente` decide el primer firmante', () => {
+    expect(decisorDeModificacion(enCascada('pendiente'))).toBe(PRIMERO);
+  });
+
+  it('en `pendiente_2` decide el segundo: es a quien le toca el turno', () => {
+    expect(decisorDeModificacion(enCascada('pendiente_2'))).toBe(SEGUNDO);
+  });
+
+  it('en `aprobada` decide el jefe inmediato, no el segundo', () => {
+    // Ya no hay turno que respetar, y exigir dos firmas para RENUNCIAR a unas
+    // vacaciones es absurdo. El jefe inmediato es quien reorganiza el trabajo.
+    expect(decisorDeModificacion(enCascada('aprobada'))).toBe(PRIMERO);
+  });
+
+  it('una incapacidad (`registrada`, sin aprobador) no tiene decisor', () => {
+    // Se informa, no se concede: no hay a quién mandarle la petición.
+    expect(
+      decisorDeModificacion(
+        solicitud({ estado: 'registrada', aprobadorCorreo: null, segundoAprobadorCorreo: null }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('puedePedirModificacion', () => {
+  const HOY_MOD = '2026-07-08';
+  /** Una solicitud en cascada: los dos firmantes con valor en todos los estados. */
+  const conFechaFin = (estado: EstadoSolicitud, fechaFin: string) =>
+    solicitud({
+      estado,
+      fechaFin,
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+      segundoAprobadorCorreo: 'comercial@ambientalia.com.co',
+    });
+
+  const FUTURA = '2026-07-20';
+  const HOY_MISMO = HOY_MOD;
+  const PASADA = '2026-07-07';
+
+  it.each(['pendiente', 'pendiente_2', 'aprobada'] as const)('%s admite cambio si aún no ha terminado', (estado) => {
+    expect(puedePedirModificacion(conFechaFin(estado, FUTURA), HOY_MOD)).toBe(true);
+    // El último día cuenta: la ausencia todavía está en curso.
+    expect(puedePedirModificacion(conFechaFin(estado, HOY_MISMO), HOY_MOD)).toBe(true);
+    // Ya terminada, no: eso es corrección de nómina, no una aprobación.
+    expect(puedePedirModificacion(conFechaFin(estado, PASADA), HOY_MOD)).toBe(false);
+  });
+
+  it.each(['rechazada', 'registrada'] as const)('%s no admite cambio en ninguna fecha', (estado) => {
+    for (const fechaFin of [FUTURA, HOY_MISMO, PASADA]) {
+      expect(puedePedirModificacion(conFechaFin(estado, fechaFin), HOY_MOD)).toBe(false);
+    }
+  });
+
+  it('la regla mira `fechaFin` y NO `fechaInicio`: una ausencia en curso se puede acortar', () => {
+    // Es el caso «córtala, tengo que volver». Con `fechaInicio` esto sería false
+    // y la feature no cubriría justo el momento en que más se necesita.
+    const enCurso = solicitud({
+      estado: 'aprobada',
+      fechaInicio: '2026-07-06',
+      fechaFin: FUTURA,
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    expect(puedePedirModificacion(enCurso, HOY_MOD)).toBe(true);
+  });
+
+  it('anular exige que NO haya empezado; cambiar las fechas, no', () => {
+    // El agujero que separa las dos reglas: anular deja la solicitud en
+    // `rechazada`, y `rechazada` devuelve TODOS sus días y desaparece del
+    // calendario. Sobre una ausencia en curso eso regala los días ya
+    // disfrutados; acortarla por la cola, no.
+    const enCurso = solicitud({
+      estado: 'aprobada',
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-20',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    expect(puedePedirModificacion(enCurso, HOY_MOD)).toBe(true);
+    expect(puedePedirAnulacion(enCurso, HOY_MOD)).toBe(false);
+  });
+
+  it('anular vale hasta el primer día INCLUIDO', () => {
+    // El `>=` es deliberado: un día solo queda consumido al terminar, y
+    // cancelar la mañana del primer día es el caso normal. Con `>` esa persona
+    // se quedaría además sin salida, porque no se puede acortar a menos de un
+    // día. Ver el JSDoc de `noHaEmpezado` antes de «arreglar» esto.
+    const empiezaHoy = solicitud({
+      estado: 'aprobada',
+      fechaInicio: HOY_MOD,
+      fechaFin: '2026-07-20',
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+    });
+    const empiezaManana = solicitud({ ...empiezaHoy, fechaInicio: '2026-07-09' });
+    expect(puedePedirAnulacion(empiezaHoy, HOY_MOD)).toBe(true);
+    expect(puedePedirAnulacion(empiezaManana, HOY_MOD)).toBe(true);
+  });
+
+  it('sin decisor no admite cambio, aunque el estado y la fecha acompañen', () => {
+    // La incapacidad llega aquí por el estado `registrada`, pero el candado real
+    // es que no hay a quién mandárselo: una fila sin aprobador tampoco vale.
+    const huerfana = solicitud({
+      estado: 'aprobada',
+      fechaFin: FUTURA,
+      aprobadorCorreo: null,
+      segundoAprobadorCorreo: null,
+    });
+    expect(puedePedirModificacion(huerfana, HOY_MOD)).toBe(false);
+  });
+});
+
+describe('puedeDecidirModificacion', () => {
+  const ANA = 'ana.ruiz@ambientalia.com.co';
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const SEGUNDO = 'comercial@ambientalia.com.co';
+
+  const sesion = (email: string, esAdmin = false): Sesion => ({ email, userId: null, esAdmin });
+
+  /**
+   * Una solicitud de Ana **en cascada y ya aprobada**: los dos firmantes con
+   * valor. Que los dos existan es lo que hace falsable el candado de abajo — con
+   * `segundoAprobadorCorreo: null` no habría segundo correo que colar por error.
+   */
+  const suya = solicitud({
+    estado: 'aprobada',
+    solicitanteEmail: ANA,
+    aprobadorCorreo: PRIMERO,
+    segundoAprobadorCorreo: SEGUNDO,
+  });
+
+  /** La propuesta, con su decisor CONGELADO: el jefe inmediato. */
+  const propuesta: Modificacion = {
+    id: 'm1',
+    solicitudId: 's1',
+    clase: 'fechas',
+    estadoPrevio: 'aprobada',
+    fechaInicioPrevia: '2026-07-06',
+    fechaFinPrevia: '2026-07-10',
+    diasHabilesPrevios: 5,
+    fechaInicioNueva: '2026-07-13',
+    fechaFinNueva: '2026-07-15',
+    diasHabilesNuevos: 3,
+    motivo: 'Cita médica',
+    estado: 'pendiente',
+    aprobadorCorreo: PRIMERO,
+    solicitanteEmail: ANA,
+    decididaAt: null,
+    motivoRechazo: null,
+    createdAt: '2026-06-20T10:00:00Z',
+  };
+
+  it('el decisor congelado en la propuesta decide', () => {
+    expect(puedeDecidirModificacion(sesion(PRIMERO), propuesta, suya)).toBe(true);
+  });
+
+  it('CANDADO: el OTRO firmante congelado de la solicitud NO decide', () => {
+    // Escribir el guard como un OR de `aprobadorCorreo` y
+    // `segundoAprobadorCorreo` de la SOLICITUD es lo natural, y es exactamente
+    // el bug que `puedeDecidir` documenta: dejaría decidir a quien no le toca.
+    // El decisor sale de la propuesta y de ningún otro sitio.
+    expect(puedeDecidirModificacion(sesion(SEGUNDO), propuesta, suya)).toBe(false);
+  });
+
+  it('CANDADO: el propio solicitante NO decide, ni siendo él mismo el decisor congelado', () => {
+    // Autoaprobarse convierte el debido proceso en un formulario: quien pide
+    // anular sus vacaciones no puede además concedérselo.
+    //
+    // El caso que de verdad prueba el candado es el segundo: la raíz del
+    // organigrama se declara como su propio jefe (`fijarJefe` lo admite y hay un
+    // test que lo fija), así que `decisorDeModificacion` le devuelve su propio
+    // correo. En el primero, quitar el guard no cambiaría nada —Ana tampoco es
+    // la decisora—, y un test que solo cubriera ese pasaría por construcción.
+    expect(puedeDecidirModificacion(sesion(ANA), propuesta, suya)).toBe(false);
+
+    const suPropioJefe = { ...propuesta, aprobadorCorreo: ANA };
+    expect(puedeDecidirModificacion(sesion(ANA), suPropioJefe, { ...suya, aprobadorCorreo: ANA })).toBe(false);
+  });
+
+  it('un admin decide: es quien destraba una decisión bloqueada', () => {
+    expect(puedeDecidirModificacion(sesion('admin@ambientalia.com.co', true), propuesta, suya)).toBe(true);
+  });
+
+  it('un tercero cualquiera no decide', () => {
+    expect(puedeDecidirModificacion(sesion('curioso@ambientalia.com.co'), propuesta, suya)).toBe(false);
+  });
+
+  it('compara sin distinguir mayúsculas, como el resto de los guards', () => {
+    expect(puedeDecidirModificacion(sesion('Jefa.Directa@Ambientalia.com.co'), propuesta, suya)).toBe(true);
   });
 });

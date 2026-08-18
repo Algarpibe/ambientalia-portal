@@ -28,6 +28,54 @@ interface EventoFalso {
 /** La misma reserva que el SQL (`RESERVA` en repo.ts), en milisegundos. */
 const RESERVA_MS = 5 * 60 * 1000;
 
+/**
+ * La ficha de empleado tal como la devuelven `asegurarEmpleado` y compañía.
+ *
+ * Existe para que los fixtures NUEVOS se declaren con tipo en vez de heredar el
+ * `any` de `estado.empleado` (línea de abajo): ese truco ya costó una vez 11
+ * tests caídos sin que el build dijera nada, porque `any` apaga la comprobación
+ * de todo lo que se construya esparciéndolo. El campo viejo se deja como está
+ * —tiparlo obliga a un `!` en las catorce asignaciones que ya existen, ruido
+ * ajeno a este cambio—, pero nada nuevo entra por ahí sin tipo.
+ */
+interface EmpleadoFalso {
+  id: string;
+  nombreCompleto: string;
+  correo: string;
+  cargo: string | null;
+  credencial: number | null;
+  aprobadorCorreo: string;
+  requiereSegundaFirma: boolean;
+  userId: string | null;
+  activo: boolean;
+  /** Los que el doble cuelga de la ficha para modelar otras columnas. */
+  copiaCorreo?: string | null;
+  veAdjuntos?: boolean;
+  saldoCorte?: number | null;
+  fechaCorte?: string | null;
+}
+
+/** Una propuesta de cambio, tal como sale de `portal.solicitud_modificaciones`. */
+interface ModificacionFalsa {
+  id: string;
+  solicitudId: string;
+  clase: string;
+  estadoPrevio: string;
+  fechaInicioPrevia: string;
+  fechaFinPrevia: string;
+  diasHabilesPrevios: number;
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: string;
+  aprobadorCorreo: string;
+  solicitanteEmail: string;
+  decididaAt: string | null;
+  motivoRechazo: string | null;
+  createdAt: string;
+}
+
 const estado = {
   /** Reloj falso, para poder pasar por delante de la reserva sin esperar. */
   ahora: 0,
@@ -41,7 +89,17 @@ const estado = {
   solicitudes: [] as Record<string, unknown>[],
   /** Argumentos de la última llamada a `decidirSolicitud`, para fijar el cableado. */
   ultimaDecision: null as { estadoEsperado: string; transicion: Record<string, unknown> } | null,
+  /** Ídem para `crearModificacion`: qué testigo de concurrencia le llegó. */
+  ultimaAlta: null as Record<string, unknown> | null,
   eventos: [] as EventoFalso[],
+  /** La tabla `portal.solicitud_modificaciones`. */
+  modificaciones: [] as ModificacionFalsa[],
+  /**
+   * Simula que OTRO mueve la solicitud justo entre el SELECT del servicio y el
+   * INSERT de la propuesta. Es la única forma de reproducir esa carrera contra
+   * un doble en memoria: dos peticiones HTTP no llegan a solaparse aquí.
+   */
+  pisarEstadoAlCrearModificacion: null as string | null,
   adjuntos: new Map<string, Record<string, unknown>>(),
   seq: 0,
   registroVisores: [] as Record<string, unknown>[],
@@ -236,6 +294,10 @@ vi.mock('./repo.js', () => ({
       motivoRechazo: null,
       createdAt: '2026-06-01T10:00:00Z',
       adjunto: adjunto ? { id: `a${estado.seq}`, nombreArchivo: adjunto.nombreArchivo, mime: 'application/pdf', bytes: 10 } : null,
+      // Los dos campos que el LEFT JOIN de `SELECT_SOLICITUD` añade a TODA
+      // solicitud. Nacen vacíos, como en el SQL real.
+      modificacionPendiente: null,
+      anuladaAt: null,
     };
     estado.solicitudes.push(s);
     for (const evento of eventos) {
@@ -280,6 +342,154 @@ vi.mock('./repo.js', () => ({
     });
     return s;
   },
+  // Modela las TRES garantías que el SQL real pone en una sola sentencia (ver
+  // `repo.crearModificacion`), porque de ellas dependen los candados de abajo:
+  //  1. el testigo `AND s.estado = $8`, comparado contra el estado que leyó el
+  //     servicio y NO contra una lista de estados admisibles;
+  //  2. el índice único parcial, que solo cuenta las propuestas `pendiente`;
+  //  3. la foto previa resuelta desde la SOLICITUD, no desde lo que mande quien
+  //     llama: si el servicio se inventara un `estado_previo`, aquí daría igual.
+  crearModificacion: async (
+    _db: unknown,
+    datos: Record<string, unknown>,
+    construirPayload: (s: unknown, m: unknown, evento: string) => unknown,
+  ) => {
+    estado.ultimaAlta = datos;
+    // El adelanto de otra transacción, si el test lo ha programado: ocurre
+    // DESPUÉS de que el servicio leyera la solicitud y ANTES del INSERT.
+    if (estado.pisarEstadoAlCrearModificacion) {
+      const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
+      if (s) s.estado = estado.pisarEstadoAlCrearModificacion;
+    }
+
+    const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
+    if (!s || s.estado !== datos.estadoEsperado) return { ok: false, razon: 'estado' };
+
+    if (estado.modificaciones.some((m) => m.solicitudId === datos.solicitudId && m.estado === 'pendiente')) {
+      return { ok: false, razon: 'duplicada' };
+    }
+
+    const modificacion: ModificacionFalsa = {
+      id: `m${estado.modificaciones.length + 1}`,
+      solicitudId: String(datos.solicitudId),
+      clase: String(datos.clase),
+      // La foto sale de la fila, como el SELECT de dentro del INSERT.
+      estadoPrevio: String(s.estado),
+      fechaInicioPrevia: String(s.fechaInicio),
+      fechaFinPrevia: String(s.fechaFin),
+      diasHabilesPrevios: Number(s.diasHabiles),
+      fechaInicioNueva: (datos.fechaInicioNueva as string | null) ?? null,
+      fechaFinNueva: (datos.fechaFinNueva as string | null) ?? null,
+      diasHabilesNuevos: (datos.diasHabilesNuevos as number | null) ?? null,
+      motivo: (datos.motivo as string | null) ?? null,
+      estado: 'pendiente',
+      aprobadorCorreo: String(datos.aprobadorCorreo),
+      solicitanteEmail: String(s.solicitanteEmail),
+      decididaAt: null,
+      motivoRechazo: null,
+      createdAt: '2026-06-20T10:00:00Z',
+    };
+    estado.modificaciones.push(modificacion);
+    // El LEFT JOIN: desde ya, la solicitud viaja con su propuesta viva.
+    s.modificacionPendiente = modificacion;
+
+    estado.eventos.push({
+      id: estado.eventos.length + 1,
+      evento: 'modificacion_solicitada',
+      solicitudId: String(datos.solicitudId),
+      intentos: 0,
+      payload: construirPayload(s, modificacion, 'modificacion_solicitada'),
+      enviado: false,
+    });
+    return { ok: true, modificacion };
+  },
+  // El `AND estado = 'pendiente'` del UPDATE real: si el jefe la decidió entre
+  // medias, su decisión gana y esto no devuelve fila.
+  retirarModificacion: async (_db: unknown, id: string) => {
+    const m = estado.modificaciones.find((x) => x.id === id);
+    if (!m || m.estado !== 'pendiente') return null;
+    m.estado = 'retirada';
+    m.decididaAt = '2026-01-15T12:00:00Z';
+    const s = estado.solicitudes.find((x) => x.id === m.solicitudId);
+    // Sale del índice único parcial, así que deja de colgar del LEFT JOIN.
+    if (s) s.modificacionPendiente = null;
+    return m;
+  },
+  modificacionPorId: async (_db: unknown, id: string) => estado.modificaciones.find((m) => m.id === id) ?? null,
+  /**
+   * Modela la transacción entera de `repo.decidirModificacion`, y el ORDEN
+   * importa tanto como el resultado:
+   *
+   *  1. `AND m.estado = 'pendiente'` — el doble clic no decide dos veces.
+   *  2. El **testigo TRIPLE** (estado + las dos fechas) contra la fila de la
+   *     solicitud, comprobado ANTES de tocar nada. Así es como este doble modela
+   *     el ROLLBACK: en el repo real el paso 1 ya ha escrito cuando el paso 2 no
+   *     encuentra fila, y solo deshacer la transacción impide que la propuesta
+   *     quede «aprobada» sobre una solicitud sin cambiar —con su correo ya
+   *     encolado anunciando un cambio que no ocurrió—. Decidir primero y mirar
+   *     después dejaría pasar justo eso.
+   *  3. El evento del outbox, dentro. Si no se llega al paso 3, no se encola.
+   */
+  decidirModificacion: async (
+    _db: unknown,
+    id: string,
+    aprueba: boolean,
+    motivoRechazo: string | null,
+    _userId: string | null,
+    construirPayload: (s: unknown, m: unknown, evento: string) => unknown,
+  ) => {
+    const m = estado.modificaciones.find((x) => x.id === id);
+    if (!m || m.estado !== 'pendiente') return { ok: false, razon: 'ya_decidida' };
+
+    const s = estado.solicitudes.find((x) => x.id === m.solicitudId);
+    if (
+      aprueba &&
+      (!s ||
+        s.estado !== m.estadoPrevio ||
+        s.fechaInicio !== m.fechaInicioPrevia ||
+        s.fechaFin !== m.fechaFinPrevia)
+    ) {
+      return { ok: false, razon: 'solicitud_cambio_de_estado' };
+    }
+
+    m.estado = aprueba ? 'aprobada' : 'rechazada';
+    m.decididaAt = '2026-01-15T12:00:00Z';
+    m.motivoRechazo = motivoRechazo;
+
+    if (aprueba && s) {
+      if (m.clase === 'anulacion') {
+        // No estrena estado: `rechazada` + la marca de cuándo se anuló.
+        s.estado = 'rechazada';
+        s.anuladaAt = '2026-01-15T12:00:00Z';
+        s.motivoRechazo = m.motivo;
+      } else {
+        // Las tres columnas del cambio de fechas. El `estado` NO se toca.
+        s.fechaInicio = m.fechaInicioNueva;
+        s.fechaFin = m.fechaFinNueva;
+        s.diasHabiles = m.diasHabilesNuevos;
+      }
+    }
+    // Decidida = fuera del índice único parcial, así que deja de colgar del JOIN.
+    if (s) s.modificacionPendiente = null;
+
+    const evento = aprueba ? 'modificacion_aprobada' : 'modificacion_rechazada';
+    estado.eventos.push({
+      id: estado.eventos.length + 1,
+      evento,
+      solicitudId: m.solicitudId,
+      intentos: 0,
+      payload: construirPayload(s, m, evento),
+      enviado: false,
+    });
+    return { ok: true, modificacion: m, solicitud: s };
+  },
+  // El `WHERE m.id IS NOT NULL` del SQL, que se apoya en el LEFT JOIN: solo las
+  // solicitudes con propuesta VIVA, filtradas por el decisor CONGELADO en ella.
+  modificacionesPendientes: async (_db: unknown, correo: string, todas: boolean) =>
+    estado.solicitudes.filter((s) => {
+      const m = s.modificacionPendiente as ModificacionFalsa | null | undefined;
+      return !!m && (todas || m.aprobadorCorreo.toLowerCase() === correo.toLowerCase());
+    }),
   enlaceDe: async (_db: unknown, correo: string) => {
     const e = estado.plantilla.find((x: any) => String(x.correo).toLowerCase() === correo.toLowerCase());
     return e ? { correo: String(e.correo).toLowerCase(), aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase() } : null;
@@ -417,8 +627,11 @@ beforeEach(() => {
   estado.historicoInsertado = 0;
   estado.solicitudes = [];
   estado.ultimaDecision = null;
+  estado.ultimaAlta = null;
   estado.ahora = 0;
   estado.eventos = [];
+  estado.modificaciones = [];
+  estado.pisarEstadoAlCrearModificacion = null;
   estado.adjuntos = new Map();
   estado.seq = 0;
   estado.registroVisores = [];
@@ -2010,6 +2223,931 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .put(`/api/ausencias/empleados/${E1}/visor`)
       .set('Authorization', `Bearer ${token()}`)
       .send({ veAdjuntos: true })
+      .expect(403);
+  });
+});
+
+// ── Modificación de una solicitud ya enviada ───────────────────────────────
+
+describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
+  const APROBADOR = 'comercial@ambientalia.com.co';
+  const LUIS = 'luis.prieto@ambientalia.com.co';
+
+  /** Un cambio de fechas al 13-17 de julio de 2026: lunes a viernes, 5 hábiles. */
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-17', motivo: 'Cita médica' };
+
+  /**
+   * La ficha de OTRA persona. `asegurarEmpleado` del doble devuelve siempre
+   * `estado.empleado` sin mirar el correo, así que cambiar de sesión es cambiar
+   * esta ficha. Tipada, para que un renombrado del contrato salga en el build.
+   */
+  const otraFicha = (): EmpleadoFalso => ({
+    id: 'e9',
+    nombreCompleto: 'Luis Prieto',
+    correo: LUIS,
+    cargo: 'Analista',
+    credencial: 1003,
+    aprobadorCorreo: APROBADOR,
+    requiereSegundaFirma: true,
+    userId: null,
+    activo: true,
+  });
+
+  async function crear(over: Record<string, unknown> = {}) {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva(over))
+      .expect(201);
+    return r.body as Record<string, unknown>;
+  }
+
+  /** La fila tal como está guardada, para poder moverla por debajo. */
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  const pedir = (id: string, body: Record<string, unknown>, tok = token()) =>
+    request(app())
+      .post(`/api/ausencias/solicitudes/${id}/modificaciones`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send(body);
+
+  const avisos = () => estado.eventos.filter((e) => e.evento === 'modificacion_solicitada');
+
+  it('el dueño pide cambiar las fechas: 201 y el aviso va al decisor', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, CAMBIO).expect(201);
+    expect(r.body).toMatchObject({
+      clase: 'fechas',
+      estado: 'pendiente',
+      fechaInicioNueva: '2026-07-13',
+      fechaFinNueva: '2026-07-17',
+      motivo: 'Cita médica',
+    });
+    expect(avisos()).toHaveLength(1);
+    expect((avisos()[0].payload as any).correo.para).toBe(APROBADOR);
+  });
+
+  it('la foto previa sale de la SOLICITUD, no del cuerpo de la petición', async () => {
+    // Es lo que sostiene el «de estas fechas a estas otras» del correo. Si el
+    // cliente pudiera dictarla, el jefe leería un antes que nunca existió.
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      ...CAMBIO,
+      estadoPrevio: 'aprobada',
+      fechaInicioPrevia: '1999-01-01',
+      diasHabilesPrevios: 99,
+    }).expect(201);
+    expect(r.body).toMatchObject({
+      estadoPrevio: 'pendiente',
+      fechaInicioPrevia: '2026-07-06',
+      fechaFinPrevia: '2026-07-10',
+      diasHabilesPrevios: 5,
+    });
+  });
+
+  it('los días hábiles nuevos los cuenta el servidor', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, { ...CAMBIO, diasHabilesNuevos: 99 }).expect(201);
+    expect(r.body.diasHabilesNuevos).toBe(5);
+  });
+
+  it('una anulación se guarda con las tres columnas de lo propuesto en null', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, { clase: 'anulacion', motivo: 'Se cancela el viaje' }).expect(201);
+    expect(r.body).toMatchObject({ clase: 'anulacion', fechaInicioNueva: null, fechaFinNueva: null });
+    expect(r.body.diasHabilesNuevos).toBeNull();
+    expect((avisos()[0].payload as any).correo.cuerpo).toContain('ANULAR');
+  });
+
+  it('la solicitud viaja con su propuesta viva colgada, sin pedir nada aparte', async () => {
+    // El LEFT JOIN de `SELECT_SOLICITUD`: ninguna pantalla puede olvidarse de
+    // preguntar y enseñar como firmes unas fechas que están en discusión.
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const r = await request(app())
+      .get('/api/ausencias/mis-solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.solicitudes).toHaveLength(1);
+    expect(r.body.solicitudes[0].modificacionPendiente).toMatchObject({ clase: 'fechas', estado: 'pendiente' });
+    expect(r.body.solicitudes[0]).toHaveProperty('anuladaAt', null);
+  });
+
+  it('404 si la solicitud no existe', async () => {
+    const r = await pedir('no-existe', CAMBIO).expect(404);
+    expect(r.body.error).toBe('no_encontrada');
+  });
+
+  it('403 si la solicitud es de otro', async () => {
+    const s = await crear();
+    // Ahora quien pregunta es Luis, que no tiene nada que ver con esa solicitud.
+    estado.empleado = otraFicha();
+    const r = await pedir(s.id as string, CAMBIO, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_solicitud');
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('CANDADO: mandar `empleadoId` en el cuerpo no abre la solicitud de otro', async () => {
+    // La identidad sale de la sesión y de ningún otro sitio. Este test no
+    // prueba una rama: fija que NO exista. Si alguien añadiera un `empleadoId`
+    // «para que administración pueda pedirlo en nombre de», se pondría rojo.
+    const s = await crear();
+    const dueña = estado.empleado.id;
+    estado.empleado = otraFicha();
+    const r = await pedir(s.id as string, { ...CAMBIO, empleadoId: dueña }, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_solicitud');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('ni un admin lo pide en nombre de otro: para corregir a mano está el PATCH', async () => {
+    // El PATCH además no manda correos, que es lo que lo hace apto para
+    // corregir el registro. Esto es el debido proceso, y tiene un solo dueño.
+    const s = await crear();
+    estado.empleado = otraFicha();
+    await pedir(s.id as string, CAMBIO, token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(403);
+  });
+
+  it.each(['rechazada', 'registrada'])('409 sobre una solicitud %s', async (est) => {
+    const s = await crear();
+    fila(s.id as string).estado = est;
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('estado_no_admite_modificacion');
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('una incapacidad no admite cambio: no hay a quién mandárselo', async () => {
+    const s = await crear({
+      tipo: 'incapacidad',
+      adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+    });
+    expect(s.aprobadorCorreo).toBeNull();
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('estado_no_admite_modificacion');
+  });
+
+  it.each(['pendiente', 'pendiente_2', 'aprobada'])('%s sí admite cambio', async (est) => {
+    const s = await crear();
+    fila(s.id as string).estado = est;
+    // En `pendiente_2` decide el segundo firmante; aquí no hay, así que el
+    // decisor cae al jefe inmediato, que es lo que hace `decisorDeModificacion`.
+    fila(s.id as string).segundoAprobadorCorreo = est === 'pendiente_2' ? APROBADOR : null;
+    await pedir(s.id as string, CAMBIO).expect(201);
+  });
+
+  it('409 si la ausencia ya terminó', async () => {
+    const s = await crear();
+    // Se mueve la fila por debajo: el alta no deja crear nada en el pasado.
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-14' });
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('solicitud_ya_pasada');
+  });
+
+  it('una ausencia EN CURSO sí se puede acortar por la cola', async () => {
+    // El caso que justifica que la regla mire `fechaFin` y no `fechaInicio`:
+    // hoy es el 15 (reloj congelado), la ausencia va del 10 al 20.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-20' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-10',
+      fechaFin: '2026-01-16',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-16');
+  });
+
+  it('400 al RETROCEDER una solicitud vigente a fechas ya pasadas', async () => {
+    // La otra cara del test de arriba, y por HTTP porque es el camino real: la
+    // solicitud (julio) sigue vigente y sin empezar, así que pasa los dos 409;
+    // lo único que impide reservar días de enero es la regla de la validación.
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-08',
+    }).expect(400);
+    expect(r.body).toMatchObject({ error: 'fecha_en_pasado', field: 'fechaInicio' });
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('el último día cuenta: una ausencia que acaba HOY todavía se puede cambiar', async () => {
+    // El borde de `fechaFin >= hoy`. Se pide un CAMBIO DE FECHAS y no una
+    // anulación: esta ausencia empezó el 10, así que anularla devolvería los
+    // días ya disfrutados y tiene su propia regla (ver el bloque de anulación).
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-10', fechaFin: '2026-01-15' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-10',
+      fechaFin: '2026-01-14',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-14');
+  });
+
+  // ── Anular exige que no haya empezado ──────────────────────────────────
+  //
+  // El reloj de este fichero está congelado en el jueves 15 de enero de 2026.
+  // Las fechas de este bloque son relativas a ese día y se mueven por debajo,
+  // porque el alta no deja crear nada que empiece en el pasado.
+
+  it('anular una ausencia que empieza MAÑANA vale', async () => {
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-16', fechaFin: '2026-01-20' });
+    const r = await pedir(s.id as string, { clase: 'anulacion' }).expect(201);
+    expect(r.body.clase).toBe('anulacion');
+  });
+
+  it('anular una que empieza HOY vale: el día no está consumido hasta que acaba', async () => {
+    // El `>=` deliberado. Cancelar la mañana del primer día es el caso normal,
+    // y con `>` esa persona se quedaría sin salida: no se puede acortar una
+    // ausencia a menos de un día.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-15', fechaFin: '2026-01-20' });
+    await pedir(s.id as string, { clase: 'anulacion' }).expect(201);
+  });
+
+  it('CANDADO: anular una ausencia YA EMPEZADA es 409, no un regalo de días', async () => {
+    // Empezó ayer y acaba el viernes. Anularla la dejaría `rechazada`, y una
+    // rechazada devuelve TODOS sus días al saldo y desaparece del calendario:
+    // los de ayer y hoy, que sí se disfrutaron, volverían como si nada.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-14', fechaFin: '2026-01-16' });
+    const r = await pedir(s.id as string, { clase: 'anulacion' }).expect(409);
+    expect(r.body.error).toBe('anulacion_ya_empezada');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('pero ACORTAR esa misma sigue valiendo: la regla es de la clase, no del estado', async () => {
+    // El test que demuestra que la restricción vive en la clase. Acortar
+    // recalcula `diasHabiles`, así que el saldo queda en los días que de verdad
+    // se tomaron — que es lo que hay que hacer en vez de anular.
+    const s = await crear();
+    Object.assign(fila(s.id as string), { fechaInicio: '2026-01-14', fechaFin: '2026-01-16' });
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-01-14',
+      fechaFin: '2026-01-15',
+    }).expect(201);
+    expect(r.body.fechaFinNueva).toBe('2026-01-15');
+  });
+
+  it('409 al pedir una segunda propuesta teniendo una viva', async () => {
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const r = await pedir(s.id as string, { ...CAMBIO, fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body.error).toBe('ya_hay_modificacion_pendiente');
+    expect(estado.modificaciones).toHaveLength(1);
+    expect(avisos()).toHaveLength(1);
+  });
+
+  it('400 si pide exactamente las fechas que ya tiene', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-10',
+    }).expect(400);
+    expect(r.body.error).toBe('sin_cambios');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('400 si una anulación viene con fechas', async () => {
+    const s = await crear();
+    const r = await pedir(s.id as string, {
+      clase: 'anulacion',
+      fechaInicio: '2026-07-13',
+      fechaFin: '2026-07-17',
+    }).expect(400);
+    expect(r.body).toMatchObject({ error: 'anulacion_con_fechas', field: 'clase' });
+    expect(estado.modificaciones).toHaveLength(0);
+  });
+
+  it('400 con su código si el cuerpo no vale', async () => {
+    const s = await crear();
+    await pedir(s.id as string, { clase: 'cambiar_tipo' }).expect(400);
+    await pedir(s.id as string, { ...CAMBIO, fechaFin: '2026-02-30' }).expect(400);
+    await pedir(s.id as string, { ...CAMBIO, fechaInicio: '2026-07-17', fechaFin: '2026-07-13' }).expect(400);
+  });
+
+  it('el alta viaja con el estado que el servicio LEYÓ, no con un literal', async () => {
+    // Lo que el testigo del SQL compara. Con un literal escrito a mano, una
+    // solicitud ya aprobada guardaría `estado_previo = 'pendiente'` y el correo
+    // de la decisión no avisaría de tocar el calendario de Google.
+    const s = await crear();
+    fila(s.id as string).estado = 'aprobada';
+    await pedir(s.id as string, CAMBIO).expect(201);
+    expect(estado.ultimaAlta).toMatchObject({ estadoEsperado: 'aprobada' });
+  });
+
+  it('CANDADO: si la solicitud cambia de estado entre el read y el insert, 409 y ni una fila', async () => {
+    // La carrera real: el jefe aprueba mientras el trabajador rellena el
+    // formulario.
+    //
+    // ⚠️ Esto fija el CABLEADO DEL SERVICIO —que traduce `razon: 'estado'` a un
+    // 409 sin escribir nada—, NO el SQL. El `AND s.estado = $8` no lo ejecuta
+    // ningún test: este doble es in-memory y modela el testigo por su cuenta,
+    // así que quitarlo del SQL real dejaría los 677 en verde. Lo único que
+    // vigila el SQL es la aserción de forma de repo.test.ts.
+    const s = await crear();
+    estado.pisarEstadoAlCrearModificacion = 'aprobada';
+    const r = await pedir(s.id as string, CAMBIO).expect(409);
+    expect(r.body.error).toBe('solicitud_cambio_de_estado');
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('CANDADO: los firmantes NO se rederivan — el aviso va al jefe VIEJO', async () => {
+    const JEFA = 'jefa.directa@ambientalia.com.co';
+    const NUEVO = 'jefe.nuevo@ambientalia.com.co';
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '66666666-6666-4666-8666-666666666666',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      aprobadorCorreo: APROBADOR,
+      requiereSegundaFirma: false,
+      activo: true,
+    });
+    const s = await crear();
+    expect(s.aprobadorCorreo).toBe(JEFA);
+
+    // Reorganización: a partir de ahora Ana cuelga de otro jefe.
+    estado.empleado.aprobadorCorreo = NUEVO;
+    estado.plantilla.push({
+      id: '77777777-7777-4777-8777-777777777777',
+      nombreCompleto: 'Jefe Nuevo',
+      correo: NUEVO,
+      aprobadorCorreo: APROBADOR,
+      requiereSegundaFirma: false,
+      activo: true,
+    });
+
+    const r = await pedir(s.id as string, CAMBIO).expect(201);
+    // La propuesta la decide quien firmó la original, no quien manda hoy: al
+    // jefe nuevo «anula mis vacaciones aprobadas» no le diría nada, porque no
+    // sabe que se aprobaron ni por qué.
+    expect(r.body.aprobadorCorreo).toBe(JEFA);
+    expect((avisos()[0].payload as any).correo.para).toBe(JEFA);
+  });
+
+  it('el aviso sale por la cola de n8n con calendario y hoja en null', async () => {
+    // Comprobado sobre el payload HTTP, que es el contrato que n8n lee: si
+    // emitiera `calendario`, n8n crearía un evento duplicado en el Calendar en
+    // vez de corregir el viejo.
+    const s = await crear();
+    await pedir(s.id as string, CAMBIO).expect(201);
+    const p = await request(app())
+      .get('/api/ausencias/n8n/pendiente')
+      .set('X-Ausencias-Cron-Token', 'cron-ausencias')
+      .expect(200);
+    const evento = p.body.eventos.find((e: { evento: string }) => e.evento === 'modificacion_solicitada');
+    expect(evento).toBeTruthy();
+    expect(evento.payload).toHaveProperty('calendario', null);
+    expect(evento.payload).toHaveProperty('hoja', null);
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    const s = await crear();
+    await request(app()).post(`/api/ausencias/solicitudes/${s.id}/modificaciones`).send(CAMBIO).expect(401);
+    await pedir(s.id as string, CAMBIO, token({ apps: ['contabilidad'] })).expect(403);
+  });
+});
+
+describe('POST /ausencias/modificaciones/:id/retirar', () => {
+  const LUIS = 'luis.prieto@ambientalia.com.co';
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-17' };
+
+  async function crearYPedir() {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(CAMBIO)
+        .expect(201)
+    ).body as Record<string, unknown>;
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const retirar = (id: string, tok = token()) =>
+    request(app()).post(`/api/ausencias/modificaciones/${id}/retirar`).set('Authorization', `Bearer ${tok}`);
+
+  it('el autor la retira: 200, queda `retirada` y NO se encola ningún correo', async () => {
+    // Retirar deja la solicitud exactamente como estaba: la propuesta
+    // desaparece de la bandeja del jefe y ya. Avisar de eso sería ruido.
+    const { modificacionId } = await crearYPedir();
+    const eventosAntes = estado.eventos.length;
+
+    const r = await retirar(modificacionId).expect(200);
+    expect(r.body).toMatchObject({ id: modificacionId, estado: 'retirada' });
+    expect(estado.eventos).toHaveLength(eventosAntes);
+    // La fila NO se borra: queda el rastro de que se pidió y se echó atrás.
+    expect(estado.modificaciones).toHaveLength(1);
+  });
+
+  it('la solicitud queda intacta y sin propuesta colgando', async () => {
+    const { solicitudId, modificacionId } = await crearYPedir();
+    const antes = { ...(estado.solicitudes.find((s) => s.id === solicitudId) as Record<string, unknown>) };
+    await retirar(modificacionId).expect(200);
+    const despues = estado.solicitudes.find((s) => s.id === solicitudId) as Record<string, unknown>;
+    expect(despues).toMatchObject({
+      estado: antes.estado,
+      fechaInicio: antes.fechaInicio,
+      fechaFin: antes.fechaFin,
+      diasHabiles: antes.diasHabiles,
+    });
+    expect(despues.modificacionPendiente).toBeNull();
+  });
+
+  it('tras retirarla se puede pedir otra: el índice único solo mira las vivas', async () => {
+    const { solicitudId, modificacionId } = await crearYPedir();
+    await retirar(modificacionId).expect(200);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${solicitudId}/modificaciones`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ ...CAMBIO, fechaFin: '2026-07-16' })
+      .expect(201);
+    expect(estado.modificaciones).toHaveLength(2);
+  });
+
+  it('403 a un tercero', async () => {
+    const { modificacionId } = await crearYPedir();
+    estado.empleado = {
+      id: 'e9',
+      nombreCompleto: 'Luis Prieto',
+      correo: LUIS,
+      cargo: null,
+      credencial: null,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: true,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso;
+    const r = await retirar(modificacionId, token({ sub: LUIS })).expect(403);
+    expect(r.body.error).toBe('no_es_su_modificacion');
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+  });
+
+  it('409 `ya_decidida` si el jefe ya la decidió: su decisión gana', async () => {
+    const { modificacionId } = await crearYPedir();
+    estado.modificaciones[0].estado = 'aprobada';
+    const r = await retirar(modificacionId).expect(409);
+    expect(r.body.error).toBe('ya_decidida');
+    expect(estado.modificaciones[0].estado).toBe('aprobada');
+  });
+
+  it('409 `ya_retirada` al retirar dos veces: el doble clic no acusa al jefe', async () => {
+    // Dos 409 distintos porque son dos cosas distintas: «tu jefe ya la decidió»
+    // manda a mirar el resultado, y «ya la habías retirado» no manda a nada.
+    // Con un solo código, la UI tendría que enseñar el mensaje equivocado en
+    // uno de los dos casos.
+    const { modificacionId } = await crearYPedir();
+    await retirar(modificacionId).expect(200);
+    const r = await retirar(modificacionId).expect(409);
+    expect(r.body.error).toBe('ya_retirada');
+  });
+
+  it('404 si no existe', async () => {
+    const r = await retirar('no-existe').expect(404);
+    expect(r.body.error).toBe('no_encontrada');
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    const { modificacionId } = await crearYPedir();
+    await request(app()).post(`/api/ausencias/modificaciones/${modificacionId}/retirar`).expect(401);
+    await retirar(modificacionId, token({ apps: ['contabilidad'] })).expect(403);
+  });
+});
+
+describe('POST /ausencias/modificaciones/:id/decision', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+  const GERENCIA = 'comercial@ambientalia.com.co';
+
+  /** 13 al 15 de julio de 2026: lunes a miércoles, 3 hábiles (la original tiene 5). */
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-15', motivo: 'Cita médica' };
+
+  beforeEach(() => {
+    // Ana → Jefa → Gerencia. Hacen falta los DOS firmantes congelados: sin el
+    // segundo no habría ningún correo «del otro firmante» que colar por error, y
+    // el candado de más abajo pasaría por construcción.
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '88888888-8888-4888-8888-888888888888',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 900,
+      aprobadorCorreo: GERENCIA,
+      requiereSegundaFirma: true,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+  });
+
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  /**
+   * Crea una solicitud, la deja en `estadoSolicitud` y pide el cambio.
+   *
+   * Por defecto `aprobada`, que es el caso principal de la feature: es el único
+   * en el que la original ya está en el calendario de Google.
+   */
+  async function conPropuesta(cuerpo: Record<string, unknown> = CAMBIO, estadoSolicitud = 'aprobada') {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    fila(s.id as string).estado = estadoSolicitud;
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(cuerpo)
+        .expect(201)
+    ).body as Record<string, unknown>;
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const decidir = (id: string, body: Record<string, unknown>, tok = token({ sub: JEFA })) =>
+    request(app()).post(`/api/ausencias/modificaciones/${id}/decision`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  /** Los avisos de la DECISIÓN, sin contar el del alta de la propuesta. */
+  const decisiones = () =>
+    estado.eventos.filter((e) => e.evento === 'modificacion_aprobada' || e.evento === 'modificacion_rechazada');
+
+  it('CANDADO: aprobar un cambio de fechas reescribe las tres columnas y NO re-decide la solicitud', async () => {
+    // Aprobar un cambio no es aprobar la solicitud: una `aprobada` sigue
+    // `aprobada` y una `pendiente` sigue `pendiente`. Si esto tocara el estado,
+    // una solicitud en trámite quedaría concedida por la puerta de atrás, sin
+    // que ninguno de sus firmantes la hubiera firmado.
+    const { solicitudId, modificacionId } = await conPropuesta();
+    const r = await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    expect(r.body.modificacion).toMatchObject({ id: modificacionId, estado: 'aprobada' });
+    expect(fila(solicitudId)).toMatchObject({
+      fechaInicio: '2026-07-13',
+      fechaFin: '2026-07-15',
+      diasHabiles: 3,
+      estado: 'aprobada',
+    });
+    // Y no se ha anulado nada por el camino.
+    expect(fila(solicitudId).anuladaAt).toBeNull();
+    expect(decisiones()).toHaveLength(1);
+  });
+
+  it('sobre una PENDIENTE, el estado tampoco se mueve', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta(CAMBIO, 'pendiente');
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+    expect(fila(solicitudId)).toMatchObject({ estado: 'pendiente', fechaInicio: '2026-07-13' });
+  });
+
+  it('CANDADO: sobre una `pendiente_2` decide el SEGUNDO firmante, y aprobar NO la devuelve a `pendiente`', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta(CAMBIO, 'pendiente_2');
+    // El decisor congelado es quien tiene el turno AHORA, no quien firmó primero.
+    expect(estado.modificaciones[0].aprobadorCorreo).toBe(GERENCIA);
+
+    // La jefa inmediata ya firmó y perdió el turno. Es el caso exacto que nombra
+    // el JSDoc de `puedeDecidirModificacion`: un OR de los dos correos de la
+    // solicitud —la forma natural del guard— la dejaría decidir aquí. Todos los
+    // demás 403 de este fichero corren en la dirección contraria.
+    const no = await decidir(modificacionId, { aprueba: true }, token({ sub: JEFA })).expect(403);
+    expect(no.body.error).toBe('no_es_su_aprobacion');
+
+    await decidir(modificacionId, { aprueba: true }, token({ sub: GERENCIA })).expect(200);
+    expect(fila(solicitudId)).toMatchObject({ estado: 'pendiente_2', fechaInicio: '2026-07-13' });
+
+    // La consecuencia OBSERVABLE de que el estado no retroceda: la solicitud no
+    // reaparece en la bandeja del primer firmante mientras el segundo decide.
+    const suya = await request(app())
+      .get('/api/ausencias/pendientes')
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .expect(200);
+    expect(suya.body.solicitudes).toHaveLength(0);
+  });
+
+  it('aprobar una anulación deja la solicitud rechazada CON `anuladaAt`', async () => {
+    // `anulada_at` es lo único que distingue «anulada» de «rechazada por el
+    // jefe»: sin él, el historial diría que se la tumbaron.
+    const { solicitudId, modificacionId } = await conPropuesta({
+      clase: 'anulacion',
+      motivo: 'Se cancela el viaje',
+    });
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    expect(fila(solicitudId)).toMatchObject({
+      estado: 'rechazada',
+      // El motivo del TRABAJADOR: es lo único que explica por qué unos días
+      // concedidos no se disfrutaron.
+      motivoRechazo: 'Se cancela el viaje',
+      // Las fechas no se tocan: la ausencia anulada sigue diciendo cuál era.
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-10',
+    });
+    expect(fila(solicitudId).anuladaAt).not.toBeNull();
+  });
+
+  it('CANDADO: rechazar deja la solicitud IDÉNTICA', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta();
+    const { modificacionPendiente: _viva, ...antes } = { ...fila(solicitudId) };
+
+    const r = await decidir(modificacionId, { aprueba: false, motivo: 'Ya está cubierto el turno' }).expect(200);
+
+    const { modificacionPendiente: despuesViva, ...despues } = fila(solicitudId);
+    // El objeto ENTERO y no campo a campo: así un campo que alguien empiece a
+    // tocar al rechazar —`decididaAt`, `motivoRechazo`, `anuladaAt`— sale rojo
+    // sin que nadie tenga que acordarse de añadirlo a la lista.
+    expect(despues).toEqual(antes);
+    // Lo único que cambia es que la propuesta deja de estar viva: sale del
+    // índice único parcial y por tanto del LEFT JOIN.
+    expect(despuesViva).toBeNull();
+    expect(r.body.modificacion).toMatchObject({ estado: 'rechazada', motivoRechazo: 'Ya está cubierto el turno' });
+  });
+
+  it('403 al OTRO firmante congelado de la solicitud', async () => {
+    // Gerencia es el segundo firmante de esta solicitud, pero el decisor
+    // congelado en la propuesta es la jefa. Un OR de los dos correos —la forma
+    // natural de escribir el guard— dejaría pasar esto.
+    const { modificacionId } = await conPropuesta();
+    const r = await decidir(modificacionId, { aprueba: true }, token({ sub: GERENCIA })).expect(403);
+    expect(r.body.error).toBe('no_es_su_aprobacion');
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(decisiones()).toHaveLength(0);
+  });
+
+  it('CANDADO: 403 al propio solicitante aunque sea SU PROPIO decisor congelado', async () => {
+    // La raíz del organigrama se declara como su propio jefe —`fijarJefe` lo
+    // admite y hay un test que lo fija—, así que `decisorDeModificacion` le
+    // devuelve su propio correo y sin el guard se autoaprobaría el cambio.
+    //
+    // Se monta ese caso y no uno con Ana pidiendo sobre la propuesta de la jefa:
+    // ahí el 403 saldría igual por no ser la decisora, y el candado pasaría por
+    // construcción sin vigilar nada.
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    Object.assign(fila(s.id as string), {
+      estado: 'aprobada',
+      aprobadorCorreo: 'ana.ruiz@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
+    });
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(CAMBIO)
+        .expect(201)
+    ).body as Record<string, unknown>;
+    expect(m.aprobadorCorreo).toBe('ana.ruiz@ambientalia.com.co');
+
+    const r = await decidir(m.id as string, { aprueba: true }, token()).expect(403);
+    expect(r.body.error).toBe('no_es_su_aprobacion');
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(decisiones()).toHaveLength(0);
+  });
+
+  it('200 al admin: es quien destraba una decisión bloqueada', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta();
+    await decidir(modificacionId, { aprueba: true }, token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(
+      200,
+    );
+    expect(fila(solicitudId).fechaInicio).toBe('2026-07-13');
+  });
+
+  it('CANDADO de doble clic: 200 y 409, y UN SOLO evento en el outbox', async () => {
+    // Dos clics no pueden mandar dos correos contradictorios sobre la misma
+    // propuesta.
+    const { modificacionId } = await conPropuesta();
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+    const r = await decidir(modificacionId, { aprueba: false, motivo: 'me arrepiento' }).expect(409);
+    expect(r.body.error).toBe('ya_decidida');
+    expect(decisiones()).toHaveLength(1);
+    expect(decisiones()[0].evento).toBe('modificacion_aprobada');
+  });
+
+  it('CANDADO del testigo triple: un PATCH de admin entre medias da 409 y NO le pisa las fechas', async () => {
+    // La carrera que solo detectan los tres campos: el estado no cambia, las
+    // fechas sí. Y el `PATCH` no encola nada —corregir el registro no es
+    // decidir—, así que sin el testigo la aprobación borraría la corrección del
+    // admin sin dejar rastro en ningún sitio.
+    const { solicitudId, modificacionId } = await conPropuesta();
+    await request(app())
+      .patch(`/api/ausencias/solicitudes/${solicitudId}`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({
+        empleadoId: E1,
+        tipo: 'vacaciones',
+        fechaInicio: '2026-07-07',
+        fechaFin: '2026-07-09',
+        dias: 3,
+        estado: 'aprobada',
+        comentarios: 'Corregido a mano',
+        observaciones: null,
+      })
+      .expect(200);
+
+    const r = await decidir(modificacionId, { aprueba: true }).expect(409);
+    expect(r.body.error).toBe('solicitud_cambio_de_estado');
+    // Las fechas del admin siguen ahí.
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-07', fechaFin: '2026-07-09' });
+    // Y la propuesta sigue viva, para que alguien la mire.
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(decisiones()).toHaveLength(0);
+  });
+
+  it('CANDADO de atomicidad: si el UPDATE de la solicitud no encuentra fila, no se decide NI se encola nada', async () => {
+    // El jefe rechaza la solicitud entera mientras la propuesta espera. Sin la
+    // transacción, la propuesta quedaría «aprobada» sobre una solicitud sin
+    // cambiar y el correo anunciaría un cambio que no ha ocurrido: el trabajador
+    // se iría las fechas del correo y en el registro constarían otras.
+    const { solicitudId, modificacionId } = await conPropuesta();
+    fila(solicitudId).estado = 'rechazada';
+
+    const r = await decidir(modificacionId, { aprueba: true }).expect(409);
+    expect(r.body.error).toBe('solicitud_cambio_de_estado');
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(estado.modificaciones[0].decididaAt).toBeNull();
+    expect(decisiones()).toHaveLength(0);
+  });
+
+  it('rechazar SÍ funciona aunque la solicitud se haya movido: no hay nada que aplicar', async () => {
+    // La asimetría es deliberada: el testigo protege la ESCRITURA sobre la
+    // solicitud, y un rechazo no escribe nada en ella. Bloquearlo también
+    // dejaría la propuesta muerta en la bandeja del jefe sin forma de quitarla.
+    const { solicitudId, modificacionId } = await conPropuesta();
+    fila(solicitudId).estado = 'rechazada';
+    await decidir(modificacionId, { aprueba: false, motivo: 'Ya no aplica' }).expect(200);
+    expect(estado.modificaciones[0].estado).toBe('rechazada');
+  });
+
+  it('404 si la propuesta no existe', async () => {
+    const r = await decidir('no-existe', { aprueba: true }).expect(404);
+    expect(r.body.error).toBe('no_encontrada');
+  });
+
+  it('409 al decidir una que el autor ya había retirado', async () => {
+    const { modificacionId } = await conPropuesta();
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${modificacionId}/retirar`)
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    const r = await decidir(modificacionId, { aprueba: true }).expect(409);
+    expect(r.body.error).toBe('ya_decidida');
+    expect(decisiones()).toHaveLength(0);
+  });
+
+  it('400 si falta `aprueba` o el motivo es kilométrico', async () => {
+    const { modificacionId } = await conPropuesta();
+    const sin = await decidir(modificacionId, {}).expect(400);
+    expect(sin.body).toMatchObject({ error: 'aprueba_requerido', field: 'aprueba' });
+    const largo = await decidir(modificacionId, { aprueba: false, motivo: 'x'.repeat(1001) }).expect(400);
+    expect(largo.body).toMatchObject({ error: 'motivo_demasiado_largo', field: 'motivo' });
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+  });
+
+  it('el aviso de la decisión va a la cadena ENTERA y sale sin calendario ni hoja', async () => {
+    // Comprobado sobre el payload HTTP, que es el contrato que n8n lee: con un
+    // `calendario` aquí, n8n crearía un evento nuevo en vez de corregir el viejo
+    // y la persona aparecería dos veces de vacaciones.
+    const { modificacionId } = await conPropuesta();
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    const p = await request(app())
+      .get('/api/ausencias/n8n/pendiente')
+      .set('X-Ausencias-Cron-Token', 'cron-ausencias')
+      .expect(200);
+    const evento = p.body.eventos.find((e: { evento: string }) => e.evento === 'modificacion_aprobada');
+    expect(evento).toBeTruthy();
+    expect(evento.payload).toHaveProperty('calendario', null);
+    expect(evento.payload).toHaveProperty('hoja', null);
+    // El primer firmante avaló unas fechas: tiene que enterarse de que cambiaron.
+    expect(evento.payload.correo.para).toContain('ana.ruiz@ambientalia.com.co');
+    expect(evento.payload.correo.para).toContain(JEFA);
+    expect(evento.payload.correo.para).toContain(GERENCIA);
+    // Y lleva las cuatro fechas, no solo las nuevas.
+    expect(evento.payload.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(evento.payload.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    const { modificacionId } = await conPropuesta();
+    await request(app()).post(`/api/ausencias/modificaciones/${modificacionId}/decision`).send({ aprueba: true }).expect(401);
+    await decidir(modificacionId, { aprueba: true }, token({ sub: JEFA, apps: ['contabilidad'] })).expect(403);
+  });
+});
+
+describe('GET /ausencias/modificaciones/pendientes', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+  const OTRO_JEFE = 'otro.jefe@ambientalia.com.co';
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-15' };
+
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  /** Una solicitud con propuesta viva, con el decisor que se le indique. */
+  async function conPropuesta(decisor: string, over: Record<string, unknown> = {}) {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva(over))
+        .expect(201)
+    ).body as Record<string, unknown>;
+    // El decisor sale de la SOLICITUD (`decisorDeModificacion`), así que se
+    // ajusta ahí y no en el cuerpo de la petición: el cliente no lo elige.
+    Object.assign(fila(s.id as string), { aprobadorCorreo: decisor, segundoAprobadorCorreo: null });
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send(CAMBIO)
+      .expect(201);
+    return s.id as string;
+  }
+
+  const bandeja = async (tok: string) =>
+    (
+      await request(app())
+        .get('/api/ausencias/modificaciones/pendientes')
+        .set('Authorization', `Bearer ${tok}`)
+        .expect(200)
+    ).body.solicitudes as Record<string, unknown>[];
+
+  it('el jefe ve las suyas y solo las suyas, y puede decidirlas', async () => {
+    await conPropuesta(JEFA);
+    await conPropuesta(OTRO_JEFE, { fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
+
+    const suyas = await bandeja(token({ sub: JEFA }));
+    expect(suyas).toHaveLength(1);
+    // Viene la solicitud entera con su propuesta colgada: sin ella la bandeja no
+    // podría pintar ni de quién es ni qué se pide.
+    expect(suyas[0].modificacionPendiente).toMatchObject({ clase: 'fechas', aprobadorCorreo: JEFA });
+    expect(suyas[0].empleadoNombre).toBe('Ana Ruiz');
+    expect(suyas[0].puedoDecidirla).toBe(true);
+  });
+
+  it('un admin las ve todas', async () => {
+    await conPropuesta(JEFA);
+    await conPropuesta(OTRO_JEFE, { fechaInicio: '2026-08-03', fechaFin: '2026-08-05' });
+    expect(await bandeja(token({ sub: 'admin@ambientalia.com.co', role: 'admin' }))).toHaveLength(2);
+  });
+
+  it('CANDADO: la raíz del organigrama ve SU propia fila, pero apagada', async () => {
+    // La raíz es su propio jefe (`aprobadoresDe` lo trata así a propósito), así
+    // que el decisor congelado de su propia solicitud es ella misma. Sin este
+    // campo, la Fase 5 le pintaría los botones y el POST le devolvería 403 —el
+    // camino que el JSDoc del repo llegó a declarar imposible—.
+    await conPropuesta('ana.ruiz@ambientalia.com.co');
+    const suya = await bandeja(token());
+    expect(suya).toHaveLength(1);
+    expect(suya[0].puedoDecidirla).toBe(false);
+    // Y es coherente con el endpoint: lo que la bandeja apaga, el POST rechaza.
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${estado.modificaciones[0].id}/decision`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it('quien no tiene ninguna recibe lista vacía y 200, no 403', async () => {
+    // Mismo criterio que `/ausencias/decididas`: va acotada al propio correo, así
+    // que un 403 no aportaría nada y obligaría a la app a saber de antemano si
+    // alguien es decisor de algo.
+    await conPropuesta(JEFA);
+    expect(await bandeja(token({ sub: 'nadie@ambientalia.com.co' }))).toEqual([]);
+  });
+
+  it('la solicitud sin propuesta viva no sale, aunque le toque a ese jefe', async () => {
+    const id = await conPropuesta(JEFA);
+    const m = estado.modificaciones[0];
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${m.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba: true })
+      .expect(200);
+    expect(await bandeja(token({ sub: JEFA }))).toHaveLength(0);
+    // La solicitud sigue ahí: lo que desapareció es la propuesta.
+    expect(fila(id)).toBeTruthy();
+  });
+
+  it('401 sin token y 403 sin la app asignada', async () => {
+    await request(app()).get('/api/ausencias/modificaciones/pendientes').expect(401);
+    await request(app())
+      .get('/api/ausencias/modificaciones/pendientes')
+      .set('Authorization', `Bearer ${token({ apps: ['contabilidad'] })}`)
       .expect(403);
   });
 });

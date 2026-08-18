@@ -33,7 +33,34 @@ export const ESTADOS_EN_TRAMITE: readonly EstadoSolicitud[] = ['pendiente', 'pen
  * correo equivocado. (Nació además para no duplicar la subida a Drive; esa razón
  * desapareció al retirar Drive, pero la de arriba sigue en pie.)
  */
-export const EVENTOS = ['creada', 'aprobacion', 'aprobacion_2', 'aprobada', 'rechazada', 'registrada'] as const;
+export const EVENTOS_SOLICITUD = [
+  'creada',
+  'aprobacion',
+  'aprobacion_2',
+  'aprobada',
+  'rechazada',
+  'registrada',
+] as const;
+export type EventoSolicitud = (typeof EVENTOS_SOLICITUD)[number];
+
+/**
+ * Los avisos de la propuesta de modificación. Van aparte de los de la solicitud
+ * porque hablan de OTRA fila —la del satélite— y su correo necesita las dos
+ * fotos de fechas, no solo la de la solicitud.
+ *
+ * Se declaran los tres aunque la Fase 2 solo emita el primero: el CHECK de
+ * `evento` en la 024 ya admite los tres, y separarlos del tipo dejaría la BD
+ * aceptando un valor que TypeScript no conoce (o al revés, que es peor: el
+ * INSERT reventaría dentro de la transacción de la decisión).
+ */
+export const EVENTOS_MODIFICACION = [
+  'modificacion_solicitada',
+  'modificacion_aprobada',
+  'modificacion_rechazada',
+] as const;
+export type EventoModificacion = (typeof EVENTOS_MODIFICACION)[number];
+
+export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
@@ -48,9 +75,68 @@ export function correoDelTurno(s: Pick<Solicitud, 'estado' | 'aprobadorCorreo' |
   return null;
 }
 
+// ── La propuesta de modificación ───────────────────────────────────────────
+
+/** Qué se pide cambiar. Ni el tipo ni la persona: eso sigue siendo del admin. */
+export const CLASES_MODIFICACION = ['fechas', 'anulacion'] as const;
+export type ClaseModificacion = (typeof CLASES_MODIFICACION)[number];
+
+/**
+ * `retirada` es la que el propio solicitante quita antes de que nadie la mire.
+ * No se borra la fila: la propuesta desaparece de la bandeja del jefe pero
+ * queda el rastro de que se pidió y se echó atrás.
+ */
+export const ESTADOS_MODIFICACION = ['pendiente', 'aprobada', 'rechazada', 'retirada'] as const;
+export type EstadoModificacion = (typeof ESTADOS_MODIFICACION)[number];
+
+/**
+ * Una propuesta de cambio sobre una solicitud ya enviada.
+ *
+ * Los campos `*Previos` son la FOTO del instante en que se pidió, no una copia
+ * redundante: sostienen el «de estas fechas a estas otras» del correo —lo único
+ * que permite ajustar el calendario a mano— y son el testigo de concurrencia al
+ * aplicarla.
+ */
+export interface Modificacion {
+  id: string;
+  solicitudId: string;
+  clase: ClaseModificacion;
+  estadoPrevio: EstadoSolicitud;
+  fechaInicioPrevia: string;
+  fechaFinPrevia: string;
+  diasHabilesPrevios: number;
+  /** Los tres van `null` en una anulación; lo garantiza un CHECK de la 024. */
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: EstadoModificacion;
+  /** Copiado de la SOLICITUD, nunca rederivado. Ver `decisorDeModificacion`. */
+  aprobadorCorreo: string;
+  solicitanteEmail: string;
+  decididaAt: string | null;
+  motivoRechazo: string | null;
+  createdAt: string;
+}
+
+/**
+ * Quién decide una modificación. Sale de la SOLICITUD, nunca del organigrama:
+ * rederivar movería la decisión a alguien que no vio la original.
+ */
+export function decisorDeModificacion(
+  s: Pick<Solicitud, 'estado' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'>,
+): string | null {
+  return correoDelTurno(s) ?? s.aprobadorCorreo;
+}
+
 export interface Transicion {
   estado: EstadoSolicitud;
-  evento: EventoOutbox;
+  /**
+   * `EventoSolicitud` y no `EventoOutbox`: decidir una solicitud nunca puede
+   * emitir un aviso de modificación, y dejarlo abierto obligaría a `CORREO_DE` a
+   * tener una entrada para eventos que no sabe redactar.
+   */
+  evento: EventoSolicitud;
   /** Firma del jefe inmediato: sella `primera_firma_at`. */
   esPrimeraFirma: boolean;
   /** Cierra la solicitud: sella `decidida_at` y el aprobador final. */
@@ -179,6 +265,33 @@ export interface Solicitud {
    * arreglara ninguna solicitud en curso.
    */
   copiaCorreo: string | null;
+  /**
+   * La propuesta de cambio viva, si la hay. Viaja con TODA solicitud porque el
+   * `LEFT JOIN` está en `SELECT_SOLICITUD`: así ninguna pantalla puede olvidarse
+   * de pedirla y enseñar unas fechas que están en discusión como si fueran
+   * firmes. Como mucho hay una: lo garantiza el índice único parcial de la 024.
+   */
+  modificacionPendiente: Modificacion | null;
+  /**
+   * Cuándo se anuló. Anular NO estrena estado —la solicitud queda `rechazada`,
+   * que ya hereda la semántica correcta en los seis filtros que miran el
+   * estado—, así que esta marca es lo único que distingue «anulada» de
+   * «rechazada por el jefe». La etiqueta se deriva al pintar, no se almacena.
+   */
+  anuladaAt: string | null;
+}
+
+/**
+ * Lo que el cliente manda al pedir un cambio, ya validado. Ni `empleadoId` ni
+ * `diasHabiles`: el primero sale de la sesión y el segundo lo cuenta el
+ * servidor, igual que en `NuevaSolicitud`.
+ */
+export interface NuevaModificacion {
+  clase: ClaseModificacion;
+  /** `null` en una anulación; con valor en un cambio de fechas. */
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  motivo: string | null;
 }
 
 /** Lo que el cliente manda al crear. `empleadoId` NO viaja: sale de la sesión. */

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { construirPayload, eventosDeAlta } from './notificaciones.js';
+import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
 import { CALENDARIO_STAFF, HOJA_ID, PESTANA } from './config.js';
-import type { Solicitud } from './types.js';
+import type { Modificacion, Solicitud } from './types.js';
 
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
   return {
@@ -29,9 +29,49 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     // La migración 021 deja a toda la plantilla con este valor sembrado: un
     // helper con `null` describiría un estado que en producción no existe.
     copiaCorreo: 'administrativo@ambientalia.com.co',
+    modificacionPendiente: null,
+    anuladaAt: null,
     ...over,
   };
 }
+
+/**
+ * Una propuesta de cambio de fechas, tipada. Nada de `as any`: el correo se
+ * redacta sobre estos campos, y un fixture sin tipo dejaría pasar un renombrado
+ * que solo se vería en el buzón de un jefe.
+ */
+function modificacion(over: Partial<Modificacion> = {}): Modificacion {
+  return {
+    id: 'm1',
+    solicitudId: 's1',
+    clase: 'fechas',
+    estadoPrevio: 'aprobada',
+    fechaInicioPrevia: '2026-07-06',
+    fechaFinPrevia: '2026-07-10',
+    diasHabilesPrevios: 5,
+    fechaInicioNueva: '2026-07-13',
+    fechaFinNueva: '2026-07-15',
+    diasHabilesNuevos: 3,
+    motivo: 'Me han adelantado la cita del especialista',
+    estado: 'pendiente',
+    aprobadorCorreo: 'comercial@ambientalia.com.co',
+    solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+    decididaAt: null,
+    motivoRechazo: null,
+    createdAt: '2026-06-20T10:00:00Z',
+    ...over,
+  };
+}
+
+/** La anulación: los tres campos de lo propuesto van en null (CHECK de la 024). */
+const anulacion = (over: Partial<Modificacion> = {}) =>
+  modificacion({
+    clase: 'anulacion',
+    fechaInicioNueva: null,
+    fechaFinNueva: null,
+    diasHabilesNuevos: null,
+    ...over,
+  });
 
 const SEGUNDO = 'gerencia@ambientalia.com.co';
 
@@ -380,6 +420,317 @@ describe('la copia sale de la ficha del empleado', () => {
     const s = solicitud({ estado: 'aprobada', aprobadorCorreo: 'jefe@ambientalia.com.co', copiaCorreo: 'jefe@ambientalia.com.co' });
     const p = construirPayload(s, 'aprobada');
     expect(p.correo.para.match(/jefe@ambientalia\.com\.co/g)).toHaveLength(1);
+  });
+});
+
+describe('el aviso de que se pide un cambio', () => {
+  const aviso = (s = solicitud(), m = modificacion()) =>
+    construirPayloadModificacion(s, m, 'modificacion_solicitada');
+
+  it('va SOLO al decisor, sin la cadena ni la copia de la ficha', () => {
+    // Mismo criterio que `aprobacion_2`: es un trámite interno, no un veredicto.
+    // El solicitante ya sabe lo que ha pedido y administración no pinta nada
+    // hasta que haya decisión.
+    const p = aviso(
+      solicitud({ estado: 'aprobada', copiaCorreo: 'administrativo@ambientalia.com.co' }),
+      modificacion({ aprobadorCorreo: 'jefa.directa@ambientalia.com.co' }),
+    );
+    expect(p.correo.para).toBe('jefa.directa@ambientalia.com.co');
+  });
+
+  it('el destinatario sale de la MODIFICACIÓN, no de recalcular el turno', () => {
+    // La copia congelada en el satélite manda. Si esto mirara el estado de la
+    // solicitud, una que subiera de nivel entre el alta de la propuesta y el
+    // envío mandaría el aviso a alguien que no puede decidirla.
+    const p = aviso(
+      solicitud({ estado: 'pendiente_2', segundoAprobadorCorreo: SEGUNDO }),
+      modificacion({ aprobadorCorreo: 'la.que.congelo@ambientalia.com.co' }),
+    );
+    expect(p.correo.para).toBe('la.que.congelo@ambientalia.com.co');
+  });
+
+  it('dice las fechas actuales, las propuestas y el motivo', () => {
+    // Sin esto el correo no sirve para decidir y solo repite lo que ya dice el
+    // portal, que es como se entrena a la gente a no abrirlo.
+    const p = aviso();
+    expect(p.correo.asunto).toContain('Cambio pedido');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+    expect(p.correo.cuerpo).toContain('5 días hábiles');
+    expect(p.correo.cuerpo).toContain('3 días hábiles');
+    expect(p.correo.cuerpo).toContain('Motivo: Me han adelantado la cita del especialista');
+  });
+
+  it('una anulación dice que se pide ANULAR, y no deja las fechas nuevas en «null»', () => {
+    const p = aviso(solicitud({ estado: 'aprobada' }), anulacion());
+    expect(p.correo.cuerpo).toContain('ANULAR');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it('sin motivo no deja un «Motivo:» vacío colgando', () => {
+    const p = aviso(solicitud(), modificacion({ motivo: null }));
+    expect(p.correo.cuerpo).not.toContain('Motivo:');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('avisa de que la solicitud NO cambia todavía', () => {
+    expect(aviso().correo.cuerpo).toContain('NO cambia hasta que apruebes');
+  });
+
+  it('CANDADO: el payload lleva `calendario` y `hoja` en null', () => {
+    // Es lo que hace que n8n recorra la rama de solo-correo que ya usan `creada`
+    // y `aprobacion`, SIN tocar el workflow. Emitir aquí un `calendario`
+    // —«ya que estamos, que lo arregle»— no corregiría el evento viejo: crearía
+    // uno nuevo y la persona aparecería dos veces de vacaciones.
+    for (const m of [modificacion(), anulacion()]) {
+      const p = construirPayloadModificacion(solicitud({ estado: 'aprobada' }), m, 'modificacion_solicitada');
+      expect(p.calendario).toBeNull();
+      expect(p.hoja).toBeNull();
+    }
+  });
+
+  it('no estrena ningún campo en el payload: el contrato con n8n es el de siempre', () => {
+    // Un campo nuevo con `undefined` activaría para TODOS los eventos el IF que
+    // lo leyera (`undefined !== null` es `true`). Es literalmente el bug del
+    // `drive`, y por eso se compara el juego de claves entero.
+    const p = construirPayloadModificacion(solicitud(), modificacion(), 'modificacion_solicitada');
+    expect(Object.keys(p).sort()).toEqual(
+      Object.keys(construirPayload(solicitud(), 'creada')).sort(),
+    );
+  });
+
+  it('el estado que viaja es el de la SOLICITUD, que no ha cambiado', () => {
+    // La propuesta vive en su tabla: la fila de la solicitud no se toca hasta
+    // que hay decisión, y el payload no puede insinuar lo contrario.
+    const p = aviso(solicitud({ estado: 'aprobada' }), modificacion());
+    expect(p.estado).toBe('aprobada');
+  });
+});
+
+describe('la decisión del cambio', () => {
+  const PRIMERO = 'jefa.directa@ambientalia.com.co';
+  const INFORMADO = 'informado@ambientalia.com.co';
+
+  /**
+   * Una solicitud APROBADA con la cadena entera poblada: solicitante, los dos
+   * firmantes, el informado y la copia de la ficha. Los cinco correos son
+   * distintos a propósito — con alguno repetido, un destinatario que faltara
+   * pasaría desapercibido detrás de otro.
+   *
+   * `segundoAprobadorCorreo` e `informadoCorreo` no coexisten en producción
+   * (`aprobadoresDe` los deriva excluyentes), pero aquí van los dos para que un
+   * solo test cubra las dos formas de la cadena.
+   */
+  const conCadena = (over: Partial<Solicitud> = {}) =>
+    solicitud({
+      estado: 'aprobada',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      aprobadorCorreo: PRIMERO,
+      segundoAprobadorCorreo: SEGUNDO,
+      informadoCorreo: INFORMADO,
+      copiaCorreo: 'administrativo@ambientalia.com.co',
+      ...over,
+    });
+
+  const aprobada = (s = conCadena(), m = modificacion()) => construirPayloadModificacion(s, m, 'modificacion_aprobada');
+  const rechazada = (s = conCadena(), m = modificacion()) =>
+    construirPayloadModificacion(s, m, 'modificacion_rechazada');
+
+  it('los dos avisos van a la cadena de decisión ENTERA, no solo al solicitante', () => {
+    // El primer firmante avaló unas fechas concretas: si cambian —o si el cambio
+    // se rechaza y siguen en pie— tiene que enterarse, porque es quien
+    // reorganiza el trabajo. Mismo argumento que el correo de rechazo de la
+    // solicitud.
+    for (const p of [aprobada(), rechazada()]) {
+      expect(p.correo.para).toBe(
+        'ana.ruiz@ambientalia.com.co, jefa.directa@ambientalia.com.co, gerencia@ambientalia.com.co, informado@ambientalia.com.co, administrativo@ambientalia.com.co',
+      );
+    }
+  });
+
+  it('sin repetir a quien sale dos veces en la cadena', () => {
+    const s = conCadena({ copiaCorreo: SEGUNDO, informadoCorreo: null });
+    for (const p of [aprobada(s), rechazada(s)]) {
+      expect(p.correo.para.match(/gerencia@ambientalia\.com\.co/g)).toHaveLength(1);
+    }
+  });
+
+  it('CANDADO: el cuerpo de la aprobación lleva las CUATRO fechas y los dos recuentos', () => {
+    // Redactado desde la PROPUESTA y no desde la solicitud ya actualizada: desde
+    // la solicitud diría «cambiada a 13-15 jul» sin decir desde qué, y ese
+    // «desde qué» es lo único que permite encontrar el evento en el calendario
+    // para corregirlo a mano.
+    const cuerpo = aprobada().correo.cuerpo;
+    expect(cuerpo).toContain('2026-07-06');
+    expect(cuerpo).toContain('2026-07-10');
+    expect(cuerpo).toContain('2026-07-13');
+    expect(cuerpo).toContain('2026-07-15');
+    expect(cuerpo).toContain('5 días hábiles');
+    expect(cuerpo).toContain('3 días hábiles');
+  });
+
+  it('las cuatro fechas siguen ahí aunque la solicitud ya lleve las nuevas', () => {
+    // Es el caso real: al notificar, la fila YA está actualizada. Si el cuerpo se
+    // redactara desde ella, las fechas de antes desaparecerían del correo sin que
+    // ningún otro test lo notara.
+    const yaActualizada = conCadena({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15', diasHabiles: 3 });
+    const cuerpo = aprobada(yaActualizada).correo.cuerpo;
+    expect(cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(cuerpo).toContain('2026-07-13 a 2026-07-15');
+  });
+
+  it('CANDADO: el ⚠️ de Google aparece si la solicitud estaba APROBADA', () => {
+    // Solo entonces hay un evento de calendario y una fila de hoja que corregir.
+    const cuerpo = aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).toContain('⚠️');
+    expect(cuerpo).toContain('calendario');
+    expect(cuerpo).toContain('a mano');
+  });
+
+  it('CANDADO: y NO aparece si la solicitud seguía PENDIENTE', () => {
+    // La otra mitad, que es la que de verdad rinde: si la original nunca llegó a
+    // Google, el ⚠️ manda a alguien a buscar un evento que no existe. Un solo
+    // test del caso positivo no detecta ese falso positivo, y entrenar a la
+    // gente a ignorar el ⚠️ es la forma segura de que el día que importe no lo
+    // lean.
+    for (const estadoPrevio of ['pendiente', 'pendiente_2'] as const) {
+      const cuerpo = aprobada(conCadena({ estado: estadoPrevio }), modificacion({ estadoPrevio })).correo.cuerpo;
+      expect(cuerpo).not.toContain('⚠️');
+      expect(cuerpo).not.toContain('a mano');
+    }
+  });
+
+  it('el ⚠️ de una anulación manda a BORRAR, no a ajustar', () => {
+    const cuerpo = aprobada(conCadena(), anulacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).toContain('⚠️');
+    expect(cuerpo).toContain('borrar');
+  });
+
+  it('el rechazo NO lleva el ⚠️ ni sobre una aprobada: no ha cambiado nada', () => {
+    // Un ⚠️ que no pide ninguna acción es exactamente lo que enseña a no leerlos.
+    const cuerpo = rechazada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo;
+    expect(cuerpo).not.toContain('⚠️');
+  });
+
+  it('la anulación aprobada dice qué fechas dejan de estar reservadas', () => {
+    const p = aprobada(conCadena(), anulacion());
+    expect(p.correo.asunto).toContain('Anulada');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(p.correo.cuerpo).toContain('5 días hábiles');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null|\[object/);
+  });
+
+  it('el rechazo dice el motivo del jefe y que la solicitud sigue como estaba', () => {
+    const p = rechazada(conCadena(), modificacion({ motivoRechazo: 'Ya está cubierto el turno' }));
+    expect(p.correo.asunto).toContain('rechazado');
+    expect(p.correo.cuerpo).toContain('Motivo del rechazo: Ya está cubierto el turno');
+    // Las fechas de la SOLICITUD, que es lo que queda en pie.
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+  });
+
+  it('CANDADO: el rechazo dice QUÉ se pidió, no solo lo que queda en pie', () => {
+    // Sin esto, el segundo firmante y administración leen un rechazo sin saber
+    // qué se tumbó, y dos rechazos seguidos sobre la misma solicitud producen
+    // correos idénticos byte a byte.
+    const p = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-07-13', fechaFinNueva: '2026-07-15' }));
+    expect(p.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+    expect(p.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+  });
+
+  it('dos rechazos de propuestas distintas NO producen el mismo correo', () => {
+    // La consecuencia observable del candado de arriba.
+    const a = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-07-13', fechaFinNueva: '2026-07-15' }));
+    const b = rechazada(conCadena(), modificacion({ fechaInicioNueva: '2026-08-03', fechaFinNueva: '2026-08-05' }));
+    expect(a.correo.cuerpo).not.toBe(b.correo.cuerpo);
+  });
+
+  it('el rechazo de una ANULACIÓN no repite lo pedido: ya lo dice la primera línea', () => {
+    const p = rechazada(conCadena(), anulacion());
+    expect(p.correo.cuerpo).toContain('Tu petición de anular tu solicitud');
+    expect(p.correo.cuerpo).not.toContain('Fechas propuestas');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('un rechazo sin motivo no deja un «Motivo:» vacío colgando', () => {
+    const p = rechazada(conCadena(), modificacion({ motivoRechazo: null }));
+    expect(p.correo.cuerpo).not.toContain('Motivo');
+    expect(p.correo.cuerpo).not.toMatch(/undefined|null/);
+  });
+
+  it('CANDADO: sobre una solicitud EN TRÁMITE, el ✅ avisa de que sigue sin conceder', () => {
+    // El ✅ es del CAMBIO, no de las vacaciones. Quien viene del acuse del alta
+    // —que le prometió informarle «del estado de aprobación»— lee un ✅ con sus
+    // fechas nuevas, y ese es el correo que acaba en un vuelo comprado.
+    for (const estadoPrevio of ['pendiente', 'pendiente_2'] as const) {
+      const cuerpo = aprobada(conCadena({ estado: estadoPrevio }), modificacion({ estadoPrevio })).correo.cuerpo;
+      expect(cuerpo).toContain('sigue pendiente de aprobación');
+    }
+  });
+
+  it('y NO lo dice cuando la solicitud ya estaba aprobada', () => {
+    // La otra mitad: ahí las vacaciones sí están concedidas, y decir que siguen
+    // pendientes sería la mentira contraria.
+    expect(aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.cuerpo).not.toContain(
+      'sigue pendiente de aprobación',
+    );
+  });
+
+  it('una ANULACIÓN aprobada sobre una pendiente no dice que siga pendiente', () => {
+    // Queda `rechazada`: decirle que «sigue pendiente de aprobación» sería falso
+    // justo al revés. Por eso la línea es solo para el cambio de fechas.
+    const cuerpo = aprobada(conCadena({ estado: 'pendiente' }), anulacion({ estadoPrevio: 'pendiente' })).correo.cuerpo;
+    expect(cuerpo).not.toContain('sigue pendiente de aprobación');
+  });
+
+  it('CANDADO: el asunto avisa cuando hay que tocar Google, y solo entonces', () => {
+    // Es el único correo de la app que obliga a alguien a ir a editar el
+    // calendario a mano. Sin el prefijo, administración —que lo recibe por
+    // `copiaCorreo`— no ve la señal hasta abrirlo.
+    const conAviso = aprobada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo;
+    expect(conAviso.asunto).toContain('⚠️ Ajustar calendario y hoja');
+    // Y el párrafo nombra a quien tiene que actuar: escrito sin destinatario, se
+    // lee como una tarea para el trabajador.
+    expect(conAviso.cuerpo).toContain('Administración:');
+
+    const sinAviso = aprobada(conCadena({ estado: 'pendiente' }), modificacion({ estadoPrevio: 'pendiente' })).correo;
+    expect(sinAviso.asunto).not.toContain('⚠️');
+    // El rechazo tampoco lo lleva: no hay nada que ajustar.
+    expect(rechazada(conCadena(), modificacion({ estadoPrevio: 'aprobada' })).correo.asunto).not.toContain('⚠️');
+  });
+
+  it('ningún cuerpo deja dos líneas en blanco seguidas', () => {
+    // Los opcionales (`motivo`, el aviso de Google, la nota de trámite) aportan
+    // su propio salto: si se dejaran como cadenas vacías dentro del array, el
+    // `join` sumaría el suyo y saldría un hueco doble antes de la firma.
+    const casos = [
+      aprobada(conCadena(), modificacion({ motivo: null, estadoPrevio: 'aprobada' })),
+      aprobada(conCadena({ estado: 'pendiente' }), modificacion({ motivo: null, estadoPrevio: 'pendiente' })),
+      aprobada(conCadena(), anulacion({ motivo: null, estadoPrevio: 'aprobada' })),
+      rechazada(conCadena(), modificacion({ motivoRechazo: null })),
+      rechazada(conCadena(), anulacion({ motivoRechazo: 'No procede' })),
+    ];
+    for (const p of casos) expect(p.correo.cuerpo).not.toMatch(/\n\n\n/);
+  });
+
+  it('CANDADO: los dos eventos llevan `calendario` y `hoja` en null', () => {
+    // Es lo que hace que n8n recorra la rama de solo-correo SIN tocar el
+    // workflow. Emitir aquí un `calendario` no corregiría el evento viejo:
+    // crearía uno nuevo y la persona aparecería dos veces de vacaciones.
+    for (const evento of ['modificacion_aprobada', 'modificacion_rechazada'] as const) {
+      for (const m of [modificacion({ estadoPrevio: 'aprobada' }), anulacion({ estadoPrevio: 'aprobada' })]) {
+        const p = construirPayloadModificacion(conCadena(), m, evento);
+        expect(p.calendario).toBeNull();
+        expect(p.hoja).toBeNull();
+      }
+    }
+  });
+
+  it('tampoco estrenan ningún campo del payload', () => {
+    for (const evento of ['modificacion_aprobada', 'modificacion_rechazada'] as const) {
+      const p = construirPayloadModificacion(conCadena(), modificacion(), evento);
+      expect(Object.keys(p).sort()).toEqual(Object.keys(construirPayload(solicitud(), 'creada')).sort());
+    }
   });
 });
 
