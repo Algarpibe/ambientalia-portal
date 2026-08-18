@@ -960,7 +960,13 @@ tras desplegar, y los tres fallan enseñando algo plausible en vez de romperse:
   `undefined` y **revienta la tabla entera** al leer `chip.clase`.
 - **La columna «2ª firma» del Organigrama** (`PanelOrganigrama.tsx`): la casilla
   **Necesaria** y la línea de debajo que dice quién está arriba y si firma o solo
-  se entera.
+  se entera. Desde el 2026-08-18 la casilla se **apaga** cuando `arriba` es
+  `null` —nadie por encima del jefe—, porque ahí no decide nada: marcarla o no
+  daba el mismo resultado, y leer «Necesaria» junto a «una sola firma» se
+  interpretaba como una contradicción del sistema. La condición es `arriba`, la
+  misma con la que la fila ya elegía el texto, y no el nombre de quien esté hoy en
+  la raíz. El valor guardado no se toca: si esa persona pasa a colgar de alguien
+  con jefe, su política vuelve tal cual.
 
 > ⚠️ **La columna «2ª firma» no tiene NINGUNA red automática de comportamiento.**
 > El backend que hay detrás sí —endpoint, servicio, repo y `aprobadoresDe` están
@@ -1380,6 +1386,24 @@ sección de la bandeja y los dos contadores se comprueban mirándolos.
 - El jefe **no puede contraproponer** («no del 6 al 8, del 7 al 9»): rechaza con
   motivo y el trabajador vuelve a pedir. Una contrapropuesta tendría otro autor y
   otro decisor, y duplicaría la máquina.
+
+#### La asimetría de firmas: dos para conceder, una para deshacer
+
+`decisorDeModificacion` devuelve **un** correo, nunca dos: una modificación no
+hereda la cascada. Y sobre una solicitud ya `aprobada`, `correoDelTurno` es
+`null`, así que el decisor es `s.aprobadorCorreo` — **el jefe inmediato**, no el
+segundo firmante que fue quien la dejó firme.
+
+De ahí sale una asimetría real: unas vacaciones que necesitaron **dos** firmas
+para concederse pueden moverse o anularse con **una**, y además la del escalón de
+abajo. Nació como alcance del proyecto de agosto («segunda firma de la
+modificación» estaba en la lista de YAGNI del plan del 17), pero **se revisó a
+propósito el 2026-08-18 y se decidió dejarla así**: quien pide el cambio es el
+propio trabajador, y exigir dos firmas para acortar unas vacaciones o renunciar a
+ellas cuesta más de lo que protege.
+
+Se anota aquí, y no como límite pendiente, para que dentro de seis meses nadie lo
+lea como un descuido: está mirado y es la decisión.
 
 ## Calendario
 
