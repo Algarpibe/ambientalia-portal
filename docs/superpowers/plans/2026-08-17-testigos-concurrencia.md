@@ -950,6 +950,16 @@ describe('lo que escribe aprobar una modificacion', () => {
 
 Ahora sí, borrar de `repo.test.ts` el `it('CANDADO (de forma): la anulacion deja `rechazada` + `anulada_at`, con el mismo testigo', ...)`.
 
+- [ ] **Step 3b: Cerrar los dos huecos que abre el borrado**
+
+Al quitar las aserciones de forma se pierde cobertura que **ningún** test de comportamiento tenía. Verificado mutando: neutralizando las dos cosas de abajo, los 742 + 8 se quedan verdes y nadie se entera.
+
+Añadir dos `it` más al `describe('el testigo TRIPLE de aplicarALaSolicitud')`:
+
+1. **El campo `estado` del testigo triple.** Ningún test movía el estado entre el alta de la propuesta y su decisión. Sembrar `pendiente` con cascada, crear la propuesta, mover la solicitud a `pendiente_2` con `decidirSolicitud` real, y aprobar: `{ok:false, razon:'solicitud_cambio_de_estado'}`, propuesta en `pendiente`, fechas originales intactas. *Falsación:* `AND estado = $2` → `AND $2::text IS NOT NULL`.
+
+2. **La rama de anulación.** Las dos clases comparten `TESTIGO_SOLICITUD` con `SET` distintos, y **todos** los tests del testigo corrían por la rama de `fechas`: desenganchar la de anulación dejaba la batería en verde. Sembrar `aprobada`, propuesta de `clase: 'anulacion'` (los tres campos nuevos a `null`, lo exige el CHECK `modificaciones_campos_por_clase`), PATCH del admin sobre las fechas, y aprobar: mismo choque. *Falsación:* dejarle a la rama de anulación un `WHERE id = $1` a secas.
+
 - [ ] **Step 4: Verificar los cuatro portones**
 
 ```bash
@@ -959,7 +969,7 @@ npm run test:db --workspace=apps/hub-api
 npm run build --workspace=apps/portal
 ```
 
-Esperado: build limpio, 743 tests en verde (746 menos los tres borrados), 8 tests de BD en verde, portal compila.
+Esperado: build limpio, **742** tests en verde (746 menos los **cuatro** borrados), **10** tests de BD en verde, portal compila.
 
 - [ ] **Step 5: Commit**
 
