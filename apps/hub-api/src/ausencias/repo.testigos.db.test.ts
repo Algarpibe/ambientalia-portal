@@ -405,3 +405,91 @@ describe('lo que escribe aprobar una modificacion', () => {
     expect(final?.fechaFin).toBe('2026-07-10');
   });
 });
+
+describe('decidirModificacion contra Postgres real', () => {
+  it('CANDADO: el doble clic sobre la propuesta decide UNA vez, no dos', async () => {
+    // Se RECHAZA a proposito y no se aprueba. Aprobar habria disparado tambien
+    // `aplicarALaSolicitud`, y la segunda llamada habria chocado con el testigo
+    // TRIPLE (las fechas ya habrian cambiado en la primera) en vez de con este
+    // candado: el test se pondria verde por el motivo equivocado
+    // (`solicitud_cambio_de_estado`, no `ya_decidida`). Rechazar no toca la
+    // solicitud —`decidirModificacion` solo llama a `aplicarALaSolicitud` si
+    // `aprueba`—, asi que aisla el paso 1 solo.
+    const s = await sembrarCaso('pendiente');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    const primera = await decidirModificacion(db, alta.modificacion.id, false, 'no procede', null, payloadStub);
+    const segunda = await decidirModificacion(db, alta.modificacion.id, false, 'no procede', null, payloadStub);
+
+    expect(primera.ok).toBe(true);
+    // El servicio traduce esto a 409. Si ademas el rojo dijera
+    // 'solicitud_cambio_de_estado', seria la senal de que el escenario eligio la
+    // clase equivocada (ver el comentario de arriba).
+    expect(segunda).toEqual({ ok: false, razon: 'ya_decidida' });
+
+    // El dano real: dos correos diciendo cosas distintas a toda la cadena. Solo
+    // tiene que haber UN aviso de rechazo, no dos.
+    expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada', 'modificacion_rechazada']);
+  });
+});
+
+describe('lo que cuelga de la solicitud (modificacionPendiente)', () => {
+  it('CANDADO: una propuesta viva cuelga de su solicitud, y deja de colgar en cuanto se decide', async () => {
+    // El LEFT JOIN de SELECT_SOLICITUD filtra por m.estado = 'pendiente'. Sin ese
+    // filtro, una propuesta ya decidida seguiria colgando de su solicitud: la
+    // bandeja y la interfaz mostrarian un cambio pendiente que no existe.
+    const s = await sembrarCaso('pendiente');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    // Con la propuesta viva, tiene que traerla completa (ejercita el aliasing
+    // mod_* y aModificacion), no solo un id suelto.
+    const conPropuesta = await solicitudPorId(db, s.id);
+    expect(conPropuesta?.modificacionPendiente).not.toBeNull();
+    expect(conPropuesta?.modificacionPendiente?.id).toBe(alta.modificacion.id);
+    expect(conPropuesta?.modificacionPendiente?.clase).toBe('fechas');
+    expect(conPropuesta?.modificacionPendiente?.fechaInicioNueva).toBe('2026-07-13');
+    expect(conPropuesta?.modificacionPendiente?.fechaFinNueva).toBe('2026-07-17');
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r.ok).toBe(true);
+
+    // Decidida, ya no esta viva: el JOIN no la trae.
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.modificacionPendiente).toBeNull();
+
+    // Pero la propuesta sigue existiendo en su tabla, solo que ya no viva: la
+    // ausencia en el JOIN es por el filtro, no porque la fila desapareciera.
+    const m = await modificacionPorId(db, alta.modificacion.id);
+    expect(m?.estado).toBe('aprobada');
+  });
+});
