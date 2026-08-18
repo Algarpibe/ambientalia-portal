@@ -770,9 +770,11 @@ consulta de auditoría necesite un `COALESCE`.
    igual de atómica y destruiría el 409: dos clics simultáneos del jefe leen los
    dos `pendiente`, pasan los dos el guard, y encadenarían
    `pendiente → pendiente_2 → aprobada` **con una sola persona firmando las dos
-   veces**. No hay test que lo cubra —dos peticiones por HTTP no llegan a
-   solaparse contra el doble en memoria, y el SQL real necesita Postgres—; solo
-   está fijado el cableado, que el servicio pasa el estado que leyó.
+   veces**. Dos peticiones por HTTP no llegan a solaparse contra el doble en
+   memoria, así que esto vivió sin test hasta el **cuarto portón**: hoy lo cubre
+   `repo.testigos.db.test.ts` contra un Postgres de verdad —dos llamadas con el
+   mismo `estadoEsperado`, y la segunda tiene que dar `null` sin encolar un
+   segundo correo—, y se falsó sustituyendo el testigo por un `IN`.
 2. **`puedeDecidir` separa las ramas por estado.** Escribirlo como un `OR` de los
    dos correos —que es la forma más natural— deja al segundo aprobador firmar una
    solicitud que su jefe todavía no ha visto: la cascada desaparece sin que nada
@@ -1082,16 +1084,23 @@ Las dos reglas de vigencia son **distintas a propósito**:
 Solo el **dueño** puede pedirla. `empleadoId` sale de la sesión y nunca del
 cuerpo, igual que en el alta.
 
-### La concurrencia: dos testigos
+### La concurrencia: dos testigos aquí, y el de `decidirSolicitud`
 
 Mismo patrón de comparar-y-actualizar que `decidirSolicitud`, en dos momentos:
 
 1. **Al pedir**, el `INSERT ... SELECT` lleva `AND s.estado = $8` con el estado que
-   leyó el servicio, y resuelve la foto previa en la misma sentencia. Sin él, si el
-   jefe aprueba a la vez, la propuesta se guardaría con `estado_previo = 'pendiente'`
-   sobre algo que ya está en el calendario, y el correo de la decisión **no
-   avisaría de tocar Google**. Con el testigo, `estado_previo` es cierto por
-   construcción.
+   leyó el servicio, y resuelve la foto previa en la misma sentencia. Son dos
+   garantías distintas y conviene no confundirlas, porque este texto las confundió
+   hasta que unas sondas contra Postgres real lo desmintieron: que `estado_previo`
+   sea el estado real de la fila lo da el `SELECT` de dentro del `INSERT`, **con
+   testigo y sin él**. Lo que el testigo protege es **`aprobador_correo`**, el único
+   dato que el servicio derivó de su lectura anterior (`decisorDeModificacion`, que
+   devuelve el firmante *del turno* y por tanto depende del estado). Si la solicitud
+   avanza de nivel entre la lectura y el `INSERT`, la propuesta se congela a nombre
+   del jefe que **ya firmó y salió del turno** — y la bandeja de cambios, el guard
+   `puedeDecidirModificacion` y el correo del alta filtran los tres por ese campo:
+   la propuesta aterriza entera en la bandeja de quien ya no tiene el turno, y el
+   firmante que sí lo tiene no la ve nunca. Sin 403 y sin error.
 2. **Al aplicar**, el `UPDATE` de la solicitud lleva un **testigo de tres campos**
    (`estado`, `fecha_inicio`, `fecha_fin`) contra las columnas `*_previa`. Con solo
    `estado` no se detectaría que un admin corrigió las fechas por `PATCH` entre
@@ -1102,6 +1111,11 @@ Si el segundo paso no encuentra fila, **lanza**, y el ROLLBACK deshace también 
 decisión de la propuesta: si no, la propuesta diría «aprobada» mientras la
 solicitud conserva las fechas viejas, y el correo anunciaría un cambio que no
 ocurrió.
+
+Los **tres** testigos —estos dos y el `WHERE estado = $7` de `decidirSolicitud`,
+que arrastraba el mismo hueco desde la 018— los ejecuta ya el cuarto portón contra
+un Postgres de verdad, y cada uno se falsó rompiéndolo. Ver «El cuarto portón, y
+lo que sigue sin proteger», más abajo.
 
 ### Los correos, y por qué n8n no se tocó
 
@@ -1160,28 +1174,57 @@ motivo al lado, nunca ausentes.
 > una sola vez. El número del `<h3>` de «Cambios pedidos» es otra cosa —cuenta
 > filas de la tabla, no decisiones propias— y no hay que «unificarlo».
 
-### Lo que ningún test protege
+### El cuarto portón, y lo que sigue sin proteger
 
-> ⚠️ **Los dos testigos de concurrencia viven en SQL que ningún test ejecuta.**
-> Los tests de este módulo corren contra un doble in-memory, así que cambiar
-> `AND s.estado = $8` por un `IN (...)` —o quitarle dos columnas al testigo
-> triple— deja **la suite entera en verde**. Está comprobado, no supuesto. Lo
-> único que los vigila son unas **aserciones de forma** en `repo.test.ts`, que
-> buscan el texto literal del `WHERE`, y los comentarios inline. Si alguien las
-> borra por parecer redundantes, el invariante se queda sin nada.
->
-> `decidirSolicitud` arrastra exactamente el mismo hueco desde la 018: no es una
-> deuda nueva, es cómo funciona este módulo.
+Los tests de este módulo corren contra un doble in-memory, así que durante toda la
+vida de la app cambiar `AND s.estado = $8` por un `IN (...)` —o quitarle dos
+columnas al testigo triple— dejaba **la suite entera en verde**. Ya no: hay un
+**cuarto portón** que ejecuta ese SQL de verdad.
 
-`repo.test.ts` sí ejecuta la transacción de verdad contra un `Pool` falso para tres
-cosas que sí se pueden probar sin Postgres: que un `23505` del índice se traduzca a
-«ya hay una propuesta», que otro `23505` **propague** en vez de disfrazarse, y que
-un choque con la solicitud emita `ROLLBACK` sin escribir en el outbox.
+```bash
+npm run test:db --workspace=apps/hub-api
+```
+
+> ⚠️ **No corre con `npm run test`, y el CI tampoco lo invoca.** El portón de
+> siempre sigue en 742 tests, sin infraestructura y en segundos, porque
+> `vitest.config.ts` excluye los `*.db.test.ts`: el portón que corre en cada
+> commit no debe poder fallar porque un demonio esté parado. Este otro
+> **necesita Docker arrancado**; si no lo está no salen tests rojos, sale un
+> error de conexión de testcontainers.
+
+Levanta un contenedor **`postgres:16-alpine`** —la imagen se fija a mano, un
+`latest` derivaría solo— y lo migra con el array real de `MIGRATIONS` llamando a
+`aplicarMigraciones`, la misma función que usa `initDb` en cada arranque. Así que
+una migración nueva que no se apunte en `MIGRATIONS` se delata aquí.
+
+Son **10** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
+**y con datos** sin romper nada —que es como re-arranca producción—, y que los
+nueve eventos del outbox pasen el `CHECK` **y quepan en la columna**, que era la
+regresión del `22001` del 2026-08-17: dos restricciones distintas de las que solo
+se miró una. Ocho de los testigos: `decidirSolicitud`, `crearModificacion`, los
+**tres** del testigo triple (fechas por `PATCH`, avance de nivel, y la rama de
+anulación, que comparte el testigo con la de fechas pero tiene otro `SET`), el
+`23505` del índice único parcial emitido por Postgres y reconocido por su nombre,
+y lo que escribe aprobar una modificación de cada clase.
+
+**Cada candado se falsó rompiendo el código de verdad** y comprobando que se pone
+rojo por el motivo correcto.
+
+`repo.test.ts` se queda con lo que un Postgres real no da: los errores del `Pool`
+que la base no provoca sin ensuciar el esquema —un `23505` de **otro** constraint,
+que tiene que propagar en vez de disfrazarse de «ya hay una propuesta»— y qué
+sentencias llegaron a mandarse, que no se lee en las filas resultantes: que hubo
+`ROLLBACK` y no `COMMIT`, que no se escribió en el outbox.
 
 > ⚠️ **El doble in-memory ya es un segundo sistema.** Son unas 445 líneas
-> modelando un `repo.ts` de 1647, y reimplementa en JavaScript el testigo, el
+> modelando un `repo.ts` de 1682, y reimplementa en JavaScript el testigo, el
 > índice único parcial y el `LEFT JOIN`. Quien toque esta tabla mantiene **dos**
 > implementaciones, no una.
+>
+> El cuarto portón **no cierra ese hueco**: solo cubre los testigos. Los demás
+> invariantes que viven únicamente en SQL siguen sin ejecutarse en ningún test
+> —el `AND s.estado <> 'rechazada'` de `ausenciasEntre`, los filtros de las
+> bandejas, las consultas del saldo—, y ahí sigue mandando el doble.
 
 En el frontend no hay tests, como en el resto de la app: el modal, la tercera
 sección de la bandeja y los dos contadores se comprueban mirándolos.

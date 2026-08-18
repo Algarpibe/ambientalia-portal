@@ -1035,6 +1035,11 @@ export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | 
  * con un CASE para el destino: sería igual de atómico pero destruiría el 409, y un
  * doble clic del jefe inmediato encadenaría `pendiente → pendiente_2 → aprobada`
  * con una sola persona firmando las dos veces.
+ *
+ * Lo vigila `repo.testigos.db.test.ts`: dos llamadas con el mismo
+ * `estadoEsperado` —el doble clic— y la segunda tiene que devolver `null` sin
+ * encolar un segundo correo. Falsado sustituyendo el testigo por un `IN`: el
+ * test se pone rojo. Corre en el cuarto portón, `npm run test:db`.
  */
 export async function decidirSolicitud(
   db: Pool,
@@ -1128,16 +1133,30 @@ const UX_UNA_PENDIENTE = 'ux_modificaciones_una_pendiente';
  *  1. El `SELECT` dentro del `INSERT` resuelve la foto previa (estado, fechas,
  *     días, correo del solicitante) en la MISMA sentencia. Leerla antes y
  *     grabarla después dejaría una ventana en la que la foto ya no describe lo
- *     que hay en la tabla.
- *  2. El `AND s.estado = $8` lleva el estado que leyó el servicio. Sin él, si el
- *     jefe aprueba a la vez, la propuesta se guardaría con
- *     `estado_previo = 'pendiente'` sobre algo que ya está `aprobada` y ya está
- *     en el calendario de Google — y el correo de la decisión no avisaría de
- *     tocarlo. Con el testigo, `estado_previo` es cierto por construcción.
+ *     que hay en la tabla. De AQUÍ, y no del testigo, sale que `estado_previo`
+ *     sea el estado real de la fila. Con un matiz que conviene no perder: es
+ *     cierto respecto al snapshot de ESA sentencia, no para siempre —
+ *     `withTransaction` abre un `BEGIN` pelado (READ COMMITTED) y el `SELECT` no
+ *     lleva `FOR UPDATE`, así que una aprobación que confirme justo después lo
+ *     deja obsoleto. Quien lo verifica en el momento de USARLO es el testigo
+ *     TRIPLE de `aplicarALaSolicitud`.
+ *  2. El `AND s.estado = $8` lleva el estado que leyó el servicio, y lo que
+ *     protege es **`aprobador_correo` (`$7`)**: el único dato de este INSERT que
+ *     el servicio DERIVÓ de su lectura anterior, con `decisorDeModificacion`,
+ *     que devuelve el firmante DEL TURNO y por tanto depende del estado. Si la
+ *     solicitud avanza de nivel entre la lectura y el INSERT, la propuesta se
+ *     congela a nombre del jefe que ya firmó y salió del turno — y
+ *     `modificacionesPendientes`, `puedeDecidirModificacion` y el correo del
+ *     alta filtran los tres por ese mismo campo: la propuesta entera aterriza en
+ *     la bandeja de quien ya no tiene el turno, y el firmante que sí lo tiene no
+ *     la ve nunca. Sin 403 y sin error.
  *
  * Mismo aviso que en `decidirSolicitud`: NO sustituir el testigo por un
- * `IN ('pendiente','pendiente_2','aprobada')`. Sería igual de atómico y
- * destruiría justo la garantía de arriba.
+ * `IN ('pendiente','pendiente_2','aprobada')`. Es tentador precisamente porque
+ * `estado_previo` seguiría siendo cierto —lo da el `SELECT` de al lado—, pero lo
+ * que destruye es la coherencia entre la fila y el decisor congelado sobre ella.
+ * Lo vigila `repo.testigos.db.test.ts`, que ejecuta este SQL contra un Postgres
+ * de verdad en el cuarto portón (`npm run test:db`).
  *
  * Cero filas ⇒ alguien se adelantó (`razon: 'estado'`). Una violación de
  * `ux_modificaciones_una_pendiente` (23505 **con ese nombre**) ⇒ ya había otra
@@ -1166,14 +1185,14 @@ export async function crearModificacion(
            FROM portal.solicitudes_ausencia s
           -- ⚠️ $8 es el estado que LEYO el servicio, NO una lista de estados
           -- admisibles. No cambiar por IN ('pendiente','pendiente_2','aprobada'):
-          -- seria igual de atomico y estado_previo dejaria de ser cierto — si el
-          -- jefe aprueba a la vez, la propuesta se guarda como 'pendiente' sobre
-          -- algo que ya esta en el calendario de Google y el correo de la decision
-          -- no avisa de tocarlo.
-          -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory
-          -- y los 677 siguen verdes con el IN. Lo unico que lo vigila es una
-          -- asercion de FORMA en repo.test.ts que busca este texto literal, y
-          -- este comentario.
+          -- estado_previo seguiria siendo cierto —sale de s.estado, aqui al
+          -- lado—, pero $7, el decisor congelado, lo calculo el servicio con el
+          -- estado viejo. Si la solicitud avanza de nivel entre medias, la
+          -- propuesta queda a nombre del firmante que ya firmo, y la bandeja, el
+          -- guard y el correo la mandan los tres alli: el que tiene el turno no
+          -- la ve. Lo vigila repo.testigos.db.test.ts, que ejecuta este SQL
+          -- contra un Postgres de verdad; se comprobo poniendo el IN y el test se
+          -- pone rojo. Corre en el cuarto porton, "npm run test:db".
           WHERE s.id = $1 AND s.estado = $8
          RETURNING id`,
         [
@@ -1265,10 +1284,14 @@ const TESTIGO_SOLICITUD = `
     -- ese choque sale 409 y alguien mira. Es el segundo motivo por el que
     -- existen las columnas *_previa de la 024.
     --
-    -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory y
-    -- modela el testigo por su cuenta, asi que quitar dos de los tres campos
-    -- deja toda la bateria en verde. Lo unico que lo vigila es una asercion de
-    -- FORMA en repo.test.ts que busca este texto literal, y este comentario.
+    -- Lo vigilan TRES tests de repo.testigos.db.test.ts, uno por cada cosa que
+    -- este testigo puede perder: que un admin corrija las fechas por PATCH entre
+    -- medias, que la solicitud avance de nivel —ese es el campo estado, y las
+    -- fechas no lo ven— y que la rama de ANULACION lleve el mismo testigo que la
+    -- de fechas: las dos comparten esta constante pero tienen SET distintos, y
+    -- desenganchar la de anulacion dejaba la bateria entera en verde. Los tres se
+    -- falsaron rompiendo el SQL. Corren en el cuarto porton, "npm run test:db",
+    -- contra un Postgres de verdad.
     AND estado       = $2
     AND fecha_inicio = $3::date
     AND fecha_fin    = $4::date`;

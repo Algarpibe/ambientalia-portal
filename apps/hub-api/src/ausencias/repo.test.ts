@@ -3,13 +3,22 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { crearModificacion, decidirModificacion } from './repo.js';
 import type { PayloadEvento } from './types.js';
 
-// Los únicos tests del repo que no necesitan Postgres.
+// Los tests del repo que NO necesitan Postgres.
 //
-// El resto del fichero es SQL y se prueba a través del doble in-memory de
-// `router.test.ts`, que lo sustituye entero. Aquí quedan las dos cosas que ese
-// doble NO puede cubrir por construcción: cómo se traduce un error del DRIVER
-// (que el doble nunca lanza, porque comprueba en JS antes de escribir) y la
-// forma del SQL que el doble reemplaza.
+// El resto de `repo.ts` es SQL y se prueba por otros dos caminos: el doble
+// in-memory de `router.test.ts`, que lo sustituye entero, y
+// `repo.testigos.db.test.ts`, que ejecuta las consultas de verdad contra un
+// Postgres en Docker (`npm run test:db`, el cuarto portón). Ahí se fue lo que
+// aquí era «la forma del SQL»: asertar sobre el TEXTO de una consulta protege el
+// texto, no lo que hace.
+//
+// Aquí quedan las dos cosas que ninguno de esos dos caminos da. Una, cómo se
+// traduce un error del DRIVER: el doble nunca lanza —comprueba en JS antes de
+// escribir— y Postgres real no lo provoca sin ensuciar el esquema, porque hoy no
+// hay ningún otro constraint que emita un `23505` dentro de este `try`. Otra,
+// QUÉ sentencias llegaron a mandarse, que no se lee en las filas resultantes:
+// que el `UPDATE` de la solicitud ni se intentó, que no se escribió en el
+// outbox, que hubo `ROLLBACK` y no `COMMIT`.
 //
 // `crearModificacion` solo usa `db.connect()`, así que un Pool falso de quince
 // líneas basta.
