@@ -1759,9 +1759,9 @@ export interface Solape {
  * comprobación ve lo que la propia transacción ya escribió sin confirmar
  * —una consulta por el `Pool` no lo vería— y se deshace con el mismo
  * `ROLLBACK`. Lo que **no** da es un snapshot compartido: `BEGIN` pelado es
- * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera no
- * se cierra con eso —`BEGIN` pelado es READ COMMITTED y este `SELECT` no
- * lleva `FOR UPDATE`—, y dos altas simultáneas la pasan las dos. Cerrarla del
+ * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera
+ * tampoco se cierra —este `SELECT` no lleva `FOR UPDATE`—, y dos altas
+ * simultáneas la pasan las dos. Cerrarla del
  * todo pediría un candado en la BD, como el índice único parcial de la 024
  * hace con las propuestas. Se decidió no ponerlo: la restricción falla al
  * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
