@@ -7,7 +7,8 @@ export default defineConfig({
     // Un solo Postgres para toda la suite y un TRUNCATE por test: dos ficheros
     // corriendo a la vez se borrarian las filas el uno al otro.
     fileParallelism: false,
-    // Arrancar el contenedor y migrarlo la primera vez baja una imagen.
+    // Cubre los before*/after* de los tests, NO el arranque del contenedor: el
+    // globalSetup se protege solo, con su propio `withStartupTimeout`.
     hookTimeout: 180_000,
     testTimeout: 30_000,
   },
