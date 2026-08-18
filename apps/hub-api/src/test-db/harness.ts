@@ -1,7 +1,7 @@
 import { inject } from 'vitest';
 import { createPoolFromUrl, type Pool } from '@algarpibe/zoho-sync';
 import { crearSolicitud } from '../ausencias/repo.js';
-import type { PayloadEvento, Solicitud } from '../ausencias/types.js';
+import type { PayloadEvento, Solicitud, TipoSolicitud } from '../ausencias/types.js';
 
 /** El pool REAL de produccion, apuntando al contenedor. Ningun doble. */
 export function poolDePrueba(): Pool {
@@ -62,6 +62,13 @@ export interface DatosSiembra {
   fechaFin: string;
   /** Con correo, la solicitud lleva cascada de dos firmas; con null, una sola. */
   segundoAprobadorCorreo: string | null;
+  /**
+   * Opcional porque a casi ningun test le importa. Hace falta en cuanto uno
+   * siembre una `registrada`: ese estado es el terminal de las INCAPACIDADES, y
+   * dejarlo con el `vacaciones` por defecto crearia una fila que produccion no
+   * puede producir, y un fixture imposible prueba menos de lo que aparenta.
+   */
+  tipo?: TipoSolicitud;
 }
 
 /** Una solicitud creada por `crearSolicitud`, sin adjunto y sin eventos. */
@@ -69,7 +76,7 @@ export async function sembrarSolicitud(db: Pool, d: DatosSiembra): Promise<Solic
   return crearSolicitud(
     db,
     {
-      tipo: 'vacaciones',
+      tipo: d.tipo ?? 'vacaciones',
       empleadoId: d.empleadoId,
       solicitanteEmail: d.correo,
       fechaInicio: d.fechaInicio,
