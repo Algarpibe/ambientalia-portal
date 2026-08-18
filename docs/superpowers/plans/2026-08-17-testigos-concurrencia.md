@@ -47,7 +47,7 @@
 - Create: `apps/hub-api/vitest.db.config.ts`
 - Modify: `apps/hub-api/package.json`
 
-- [ ] **Step 1: Instalar la dependencia de desarrollo**
+- [x] **Step 1: Instalar la dependencia de desarrollo**
 
 ```bash
 npm install -D @testcontainers/postgresql --workspace=apps/hub-api
@@ -55,7 +55,7 @@ npm install -D @testcontainers/postgresql --workspace=apps/hub-api
 
 Si falla pidiendo credenciales del registro privado (`@algarpibe/zoho-sync`), el `.npmrc` de la raíz del monorepo no tiene token válido: pararse y avisar, **no** editar el `.npmrc`.
 
-- [ ] **Step 2: Crear `apps/hub-api/vitest.config.ts`**
+- [x] **Step 2: Crear `apps/hub-api/vitest.config.ts`**
 
 ```ts
 import { defineConfig, configDefaults } from 'vitest/config';
@@ -71,7 +71,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Crear `apps/hub-api/vitest.db.config.ts`**
+- [x] **Step 3: Crear `apps/hub-api/vitest.db.config.ts`**
 
 ```ts
 import { defineConfig } from 'vitest/config';
@@ -90,7 +90,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Añadir el script en `apps/hub-api/package.json`**
+- [x] **Step 4: Añadir el script en `apps/hub-api/package.json`**
 
 En el bloque `"scripts"`, después de `"test": "vitest run"`:
 
@@ -98,7 +98,7 @@ En el bloque `"scripts"`, después de `"test": "vitest run"`:
     "test:db": "vitest run --config vitest.db.config.ts"
 ```
 
-- [ ] **Step 5: Verificar que el portón de siempre no ha cambiado**
+- [x] **Step 5: Verificar que el portón de siempre no ha cambiado**
 
 ```bash
 npm run test --workspace=apps/hub-api
@@ -106,7 +106,7 @@ npm run test --workspace=apps/hub-api
 
 Esperado: los mismos 746 tests en verde, en segundos, sin Docker. (Flake conocido: `users.service.test.ts > property tests` da timeouts de fast-check ~1 de cada 5 veces. Reejecutar.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/hub-api/vitest.config.ts apps/hub-api/vitest.db.config.ts
@@ -120,7 +120,7 @@ git commit -m "test(hub-api): separa los tests que necesitan Postgres en su prop
 **Files:**
 - Modify: `apps/hub-api/src/db.ts:53-58`
 
-- [ ] **Step 1: Extraer el bucle a una función exportada**
+- [x] **Step 1: Extraer el bucle a una función exportada**
 
 En `apps/hub-api/src/db.ts`, sustituir el bucle que hoy vive dentro de `initDb()` por una función exportada, y hacer que `initDb()` la llame. El resultado:
 
@@ -152,7 +152,7 @@ Y en `initDb()`, donde estaba el bucle:
 
 `initDb()` no se reutiliza tal cual en los tests: hace `process.exit(1)` sin `HUB_DB_URL` —mataría a vitest— y siembra usuarios desde `AUTH_USERS`.
 
-- [ ] **Step 2: Verificar los dos portones**
+- [x] **Step 2: Verificar los dos portones**
 
 ```bash
 npm run build --workspace=apps/hub-api
@@ -161,7 +161,7 @@ npm run test --workspace=apps/hub-api
 
 Esperado: build sin errores, 746 en verde.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git commit -m "refactor(hub-api): aplicarMigraciones sale de initDb para poder sembrar un contenedor" -- apps/hub-api/src/db.ts
@@ -176,7 +176,7 @@ git commit -m "refactor(hub-api): aplicarMigraciones sale de initDb para poder s
 - Create: `apps/hub-api/src/test-db/harness.ts`
 - Create: `apps/hub-api/src/db.migraciones.db.test.ts`
 
-- [ ] **Step 1: Escribir el test que va a fallar**
+- [x] **Step 1: Escribir el test que va a fallar**
 
 Crear `apps/hub-api/src/db.migraciones.db.test.ts`:
 
@@ -237,7 +237,7 @@ describe('las migraciones contra una base de verdad', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutarlo para verlo fallar**
+- [x] **Step 2: Ejecutarlo para verlo fallar**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -245,7 +245,7 @@ npm run test:db --workspace=apps/hub-api
 
 Esperado: FALLA al resolver `./test-db/harness.js` (no existe todavía).
 
-- [ ] **Step 3: Crear el `globalSetup`**
+- [x] **Step 3: Crear el `globalSetup`**
 
 `apps/hub-api/src/test-db/contenedor.ts`:
 
@@ -294,7 +294,7 @@ declare module 'vitest' {
 }
 ```
 
-- [ ] **Step 4: Crear el harness**
+- [x] **Step 4: Crear el harness**
 
 `apps/hub-api/src/test-db/harness.ts`:
 
@@ -385,7 +385,7 @@ export async function eventosDelOutbox(db: Pool): Promise<string[]> {
 }
 ```
 
-- [ ] **Step 4b: Corregir el comentario de `vitest.db.config.ts`**
+- [x] **Step 4b: Corregir el comentario de `vitest.db.config.ts`**
 
 El comentario que hoy acompaña al `hookTimeout` promete algo que ese ajuste no da (no cubre el `globalSetup`). Sustituirlo:
 
@@ -395,7 +395,7 @@ El comentario que hoy acompaña al `hookTimeout` promete algo que ese ajuste no 
     hookTimeout: 180_000,
 ```
 
-- [ ] **Step 5: Ejecutar y ver verde**
+- [x] **Step 5: Ejecutar y ver verde**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -403,7 +403,7 @@ npm run test:db --workspace=apps/hub-api
 
 Esperado: 2 tests en verde. La primera vez tarda (descarga de la imagen).
 
-- [ ] **Step 6: Falsar el candado del `22001`**
+- [x] **Step 6: Falsar el candado del `22001`**
 
 Quitar `'025_ausencias_evento_ancho.sql'` del array `MIGRATIONS` de `apps/hub-api/src/db.ts` y volver a correr `npm run test:db`.
 
@@ -411,7 +411,7 @@ Esperado: el test del outbox **falla con `22001` (`value too long for type chara
 
 Revertir: `git checkout -- apps/hub-api/src/db.ts` y confirmar que vuelve a verde. **Reportar la salida de las dos ejecuciones.**
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/hub-api/src/test-db/contenedor.ts apps/hub-api/src/test-db/harness.ts apps/hub-api/src/db.migraciones.db.test.ts
@@ -425,7 +425,7 @@ git commit -m "test(hub-api): las migraciones se prueban contra un Postgres de v
 **Files:**
 - Create: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
-- [ ] **Step 1: Escribir el test**
+- [x] **Step 1: Escribir el test**
 
 ```ts
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -488,7 +488,7 @@ describe('decidirSolicitud contra Postgres real', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar y ver verde**
+- [x] **Step 2: Ejecutar y ver verde**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -496,7 +496,7 @@ npm run test:db --workspace=apps/hub-api
 
 Esperado: 3 tests en verde.
 
-- [ ] **Step 3: Falsar el candado**
+- [x] **Step 3: Falsar el candado**
 
 En `apps/hub-api/src/ausencias/repo.ts:1057`, sustituir:
 
@@ -518,7 +518,7 @@ Esperado: **rojo**. `segunda` deja de ser `null` (la segunda petición vuelve a 
 
 Revertir con `git checkout -- apps/hub-api/src/ausencias/repo.ts`, confirmar verde y **reportar las dos salidas**.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/hub-api/src/ausencias/repo.testigos.db.test.ts
@@ -532,7 +532,7 @@ git commit -m "test(ausencias): el testigo de decidirSolicitud se prueba ejecuta
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
-- [ ] **Step 0: Factorizar la siembra antes de que se copie cinco veces**
+- [x] **Step 0: Factorizar la siembra antes de que se copie cinco veces**
 
 Las tareas 5 a 8 siembran todas lo mismo y solo cambian el `estado`. Introducir en el fichero, bajo la constante `CORREO`, un helper local:
 
@@ -570,7 +570,7 @@ Correr `npm run test:db` y comprobar que los 3 tests siguen en verde antes de se
 
 Aprovechar para copiar en el `afterAll` de este fichero el comentario que ya justifica el `db?.end()` en `db.migraciones.db.test.ts`: sin él, un futuro editor quita el `?` creyendo que sobra, y el TypeError taparía el error que de verdad importa.
 
-- [ ] **Step 1: Añadir el import de `crearModificacion`**
+- [x] **Step 1: Añadir el import de `crearModificacion`**
 
 En la línea del import de `./repo.js`, dejarla así:
 
@@ -578,7 +578,7 @@ En la línea del import de `./repo.js`, dejarla así:
 import { decidirSolicitud, solicitudPorId, crearModificacion } from './repo.js';
 ```
 
-- [ ] **Step 2: Añadir el bloque de test al final del fichero**
+- [x] **Step 2: Añadir el bloque de test al final del fichero**
 
 ```ts
 describe('crearModificacion contra Postgres real', () => {
@@ -616,7 +616,7 @@ describe('crearModificacion contra Postgres real', () => {
 });
 ```
 
-- [ ] **Step 3: Ejecutar y ver verde**
+- [x] **Step 3: Ejecutar y ver verde**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -624,7 +624,7 @@ npm run test:db --workspace=apps/hub-api
 
 Esperado: 4 tests en verde.
 
-- [ ] **Step 4: Falsar el candado**
+- [x] **Step 4: Falsar el candado**
 
 En `apps/hub-api/src/ausencias/repo.ts`, dentro del `INSERT INTO portal.solicitud_modificaciones`, sustituir:
 
@@ -646,7 +646,7 @@ Esperado: **rojo**. `r` pasa a `{ok:true, ...}`, queda una fila en `solicitud_mo
 
 Revertir, confirmar verde y **reportar las dos salidas**.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "test(ausencias): el testigo de crearModificacion se prueba ejecutando el SQL" -- apps/hub-api/src/ausencias/repo.testigos.db.test.ts
@@ -659,7 +659,7 @@ git commit -m "test(ausencias): el testigo de crearModificacion se prueba ejecut
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
-- [ ] **Step 0: Que el rojo del test anterior nombre el daño**
+- [x] **Step 0: Que el rojo del test anterior nombre el daño**
 
 En el test de `crearModificacion`, justo antes de `expect(r).toEqual({ ok: false, razon: 'estado' })`, añadir:
 
@@ -676,7 +676,7 @@ En el test de `crearModificacion`, justo antes de `expect(r).toEqual({ ok: false
 
 Y rebajar el comentario de la aserción de `modificacionesPendientes` a lo que de verdad es: en verde es redundante con el `count(*) = 0` de dos líneas antes, y en rojo no llega a ejecutarse porque Vitest aborta en el primer `expect` fallido. Está ahí para que el lector vea cuál era la consecuencia, no para probarla.
 
-- [ ] **Step 1: Ampliar el import de `./repo.js`**
+- [x] **Step 1: Ampliar el import de `./repo.js`**
 
 ```ts
 import {
@@ -688,7 +688,7 @@ import {
 } from './repo.js';
 ```
 
-- [ ] **Step 2: Añadir el bloque de test al final del fichero**
+- [x] **Step 2: Añadir el bloque de test al final del fichero**
 
 ```ts
 describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
@@ -743,7 +743,7 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
 });
 ```
 
-- [ ] **Step 3: Ejecutar y ver verde**
+- [x] **Step 3: Ejecutar y ver verde**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -753,7 +753,7 @@ Esperado: 5 tests en verde.
 
 Las fechas se comparan contra cadenas porque `SELECT_SOLICITUD` las castea: `s.fecha_inicio::text AS fecha_inicio` (`repo.ts:771`). Sin ese cast el driver las devolvería como `Date` y la comparación fallaría en silencio.
 
-- [ ] **Step 4: Falsar el candado**
+- [x] **Step 4: Falsar el candado**
 
 En `apps/hub-api/src/ausencias/repo.ts`, en la constante `TESTIGO_SOLICITUD`, reducir el testigo al estado **manteniendo los dos parámetros mencionados y tipados**:
 
@@ -772,7 +772,7 @@ Esperado: **rojo** en `expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_d
 
 Revertir, confirmar verde y **reportar las dos salidas**.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "test(ausencias): el testigo triple se prueba ejecutando el SQL" -- apps/hub-api/src/ausencias/repo.testigos.db.test.ts
@@ -785,7 +785,7 @@ git commit -m "test(ausencias): el testigo triple se prueba ejecutando el SQL" -
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
-- [ ] **Step 1: Añadir el bloque de test al final del fichero**
+- [x] **Step 1: Añadir el bloque de test al final del fichero**
 
 ```ts
 describe('el indice unico parcial de la 024', () => {
@@ -820,7 +820,7 @@ describe('el indice unico parcial de la 024', () => {
 });
 ```
 
-- [ ] **Step 2: Ejecutar y ver verde**
+- [x] **Step 2: Ejecutar y ver verde**
 
 ```bash
 npm run test:db --workspace=apps/hub-api
@@ -828,7 +828,7 @@ npm run test:db --workspace=apps/hub-api
 
 Esperado: 6 tests en verde.
 
-- [ ] **Step 3: Falsar el candado**
+- [x] **Step 3: Falsar el candado**
 
 En `apps/hub-api/src/ausencias/repo.ts`, cambiar la constante:
 
@@ -848,7 +848,7 @@ Esperado: **rojo**, con el error del driver propagándose (`duplicate key value 
 
 Revertir, confirmar verde y **reportar las dos salidas**.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -m "test(ausencias): el 23505 del indice unico lo emite Postgres, no el test" -- apps/hub-api/src/ausencias/repo.testigos.db.test.ts
@@ -861,7 +861,7 @@ git commit -m "test(ausencias): el 23505 del indice unico lo emite Postgres, no 
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.test.ts`
 
-- [ ] **Step 1: Borrar los tres tests de forma redundantes**
+- [x] **Step 1: Borrar los tres tests de forma redundantes**
 
 Borrar de `apps/hub-api/src/ausencias/repo.test.ts`, enteros:
 
@@ -875,7 +875,7 @@ Borrar de `apps/hub-api/src/ausencias/repo.test.ts`, enteros:
 
 Si al borrar quedan sin usar los helpers `forma`, `hizo` o `updateDeLaSolicitud`, borrar también los que ya no se usen — el typecheck lo dirá.
 
-- [ ] **Step 2: Sustituirlos por comportamiento en el fichero de BD**
+- [x] **Step 2: Sustituirlos por comportamiento en el fichero de BD**
 
 Añadir al final de `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`:
 
@@ -946,11 +946,11 @@ describe('lo que escribe aprobar una modificacion', () => {
 });
 ```
 
-- [ ] **Step 3: Borrar el test de forma de la anulación**
+- [x] **Step 3: Borrar el test de forma de la anulación**
 
 Ahora sí, borrar de `repo.test.ts` el `it('CANDADO (de forma): la anulacion deja `rechazada` + `anulada_at`, con el mismo testigo', ...)`.
 
-- [ ] **Step 3b: Cerrar los dos huecos que abre el borrado**
+- [x] **Step 3b: Cerrar los dos huecos que abre el borrado**
 
 Al quitar las aserciones de forma se pierde cobertura que **ningún** test de comportamiento tenía. Verificado mutando: neutralizando las dos cosas de abajo, los 742 + 8 se quedan verdes y nadie se entera.
 
@@ -960,7 +960,7 @@ Añadir dos `it` más al `describe('el testigo TRIPLE de aplicarALaSolicitud')`:
 
 2. **La rama de anulación.** Las dos clases comparten `TESTIGO_SOLICITUD` con `SET` distintos, y **todos** los tests del testigo corrían por la rama de `fechas`: desenganchar la de anulación dejaba la batería en verde. Sembrar `aprobada`, propuesta de `clase: 'anulacion'` (los tres campos nuevos a `null`, lo exige el CHECK `modificaciones_campos_por_clase`), PATCH del admin sobre las fechas, y aprobar: mismo choque. *Falsación:* dejarle a la rama de anulación un `WHERE id = $1` a secas.
 
-- [ ] **Step 4: Verificar los cuatro portones**
+- [x] **Step 4: Verificar los cuatro portones**
 
 ```bash
 npm run build --workspace=apps/hub-api
@@ -971,7 +971,7 @@ npm run build --workspace=apps/portal
 
 Esperado: build limpio, **742** tests en verde (746 menos los **cuatro** borrados), **10** tests de BD en verde, portal compila.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "test(ausencias): las aserciones de forma dejan paso al comportamiento" -- apps/hub-api/src/ausencias/repo.test.ts apps/hub-api/src/ausencias/repo.testigos.db.test.ts
@@ -986,7 +986,7 @@ git commit -m "test(ausencias): las aserciones de forma dejan paso al comportami
 - Modify: `apps/hub-api/src/ausencias/repo.test.ts`
 - Modify: `docs/dev/app-ausencias.md`
 
-- [ ] **Step 1: Reescribir el comentario de `crearModificacion`**
+- [x] **Step 1: Reescribir el comentario de `crearModificacion`**
 
 ⚠️ **El JSDoc SÍ se toca, y es lo más importante de esta tarea.** La revisión de la Task 5 demostró, con sondas contra Postgres real, que su explicación es falsa: dice que sin el testigo la propuesta se guardaría con `estado_previo = 'pendiente'` sobre algo ya aprobado, pero `estado_previo` sale de `s.estado` en el mismo `SELECT` y es el valor real de la fila **con testigo y sin él**. Esa garantía es del punto 1 (el `SELECT` dentro del `INSERT`), no del testigo.
 
@@ -1022,7 +1022,7 @@ por:
           -- pone rojo. Corre en el cuarto porton, `npm run test:db`.
 ```
 
-- [ ] **Step 2: Reescribir el comentario de `TESTIGO_SOLICITUD`**
+- [x] **Step 2: Reescribir el comentario de `TESTIGO_SOLICITUD`**
 
 Sustituir:
 
@@ -1042,7 +1042,7 @@ por:
     -- en el cuarto porton, `npm run test:db`.
 ```
 
-- [ ] **Step 3: Añadir a `decidirSolicitud` la nota que nunca tuvo**
+- [x] **Step 3: Añadir a `decidirSolicitud` la nota que nunca tuvo**
 
 En su JSDoc, después del párrafo del `⚠️ estadoEsperado`, añadir:
 
@@ -1052,7 +1052,7 @@ En su JSDoc, después del párrafo del `⚠️ estadoEsperado`, añadir:
  * correo. Falsado sustituyendolo por un `IN`: el test se pone rojo.
 ```
 
-- [ ] **Step 4: Actualizar la cabecera de `repo.test.ts`**
+- [x] **Step 4: Actualizar la cabecera de `repo.test.ts`**
 
 Sustituir «Los únicos tests del repo que no necesitan Postgres» y el párrafo que sigue por una cabecera que diga qué queda aquí y qué se fue:
 
@@ -1066,7 +1066,7 @@ Sustituir «Los únicos tests del repo que no necesitan Postgres» y el párrafo
 // sobre el texto de una consulta protege el texto, no lo que hace.
 ```
 
-- [ ] **Step 5: Actualizar la documentación viva**
+- [x] **Step 5: Actualizar la documentación viva**
 
 En `docs/dev/app-ausencias.md`, en los sitios exactos donde hoy vive el texto invalidado:
 
@@ -1075,7 +1075,7 @@ En `docs/dev/app-ausencias.md`, en los sitios exactos donde hoy vive el texto in
 - **Línea 1182**, el párrafo del doble in-memory de `router.test.ts`: se queda, sigue siendo deuda. Añadir que los demás invariantes que solo viven en SQL (`ausenciasEntre`, bandejas, saldo) siguen sin ejecutarse en ningún test.
 - Donde se listan los portones, añadir el cuarto dejando claro que **no** corre con `npm run test`.
 
-- [ ] **Step 6: Verificar los cuatro portones otra vez**
+- [x] **Step 6: Verificar los cuatro portones otra vez**
 
 ```bash
 npm run build --workspace=apps/hub-api
@@ -1084,7 +1084,7 @@ npm run test:db --workspace=apps/hub-api
 npm run build --workspace=apps/portal
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git commit -m "docs(ausencias): el texto de los testigos cuenta lo que ahora los vigila" -- apps/hub-api/src/ausencias/repo.ts apps/hub-api/src/ausencias/repo.test.ts docs/dev/app-ausencias.md
@@ -1096,7 +1096,7 @@ git commit -m "docs(ausencias): el texto de los testigos cuenta lo que ahora los
 
 **Files:** ninguno nuevo.
 
-- [ ] **Step 1: Los cuatro portones, en limpio y seguidos**
+- [x] **Step 1: Los cuatro portones, en limpio y seguidos**
 
 ```bash
 npm run build --workspace=apps/hub-api
@@ -1107,7 +1107,7 @@ npm run build --workspace=apps/portal
 
 Reportar el número exacto de tests de cada uno. Si `users.service.test.ts > property tests` da timeout, reejecutar (flake conocido de fast-check).
 
-- [ ] **Step 2: Revisar el diff entero**
+- [x] **Step 2: Revisar el diff entero**
 
 ```bash
 git diff main...test/testigos-concurrencia --stat
@@ -1116,14 +1116,14 @@ git diff main...test/testigos-concurrencia
 
 Comprobar que **ninguna** de las cinco mutaciones de falsación se ha quedado dentro. Esto es lo más importante de la revisión: una mutación olvidada en `repo.ts` va a producción.
 
-- [ ] **Step 3: Mezclar**
+- [x] **Step 3: Mezclar**
 
 ```bash
 git checkout main
 git merge --no-ff test/testigos-concurrencia -m "merge: los testigos de concurrencia se prueban contra Postgres de verdad"
 ```
 
-- [ ] **Step 4: No desplegar todavía**
+- [x] **Step 4: No desplegar todavía**
 
 Esto no toca código de producción salvo la extracción de `aplicarMigraciones` en `db.ts`, que sí va en la imagen. Empujar cuando el usuario lo diga; el orden de despliegue es hub-api primero, portal después.
 
