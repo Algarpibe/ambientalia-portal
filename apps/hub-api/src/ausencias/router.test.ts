@@ -2982,6 +2982,12 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
       error: 'rango_solapado',
       detalle: { fechaInicio: '2026-07-20', fechaFin: '2026-07-22' },
     });
+    // Sin esto el 409 podría estar decorativo: la puerta puesta DESPUÉS de
+    // escribir devuelve el mismo 409 al cliente, pero deja la propuesta viva en
+    // la bandeja del jefe y el correo ya encolado. Mismo patrón que los demás
+    // negativos de este describe (403 de otro dueño, 409 de estado, etc.).
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
   });
 
   it('CANDADO: acortar una solicitud NO la hace chocar consigo misma', async () => {
@@ -2994,6 +3000,13 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
 
   it('anular no comprueba solapes: quitar una ausencia nunca choca', async () => {
     const id = await aprobadaEntre('2026-07-06', '2026-07-08');
+    const vecino = await aprobadaEntre('2026-07-20', '2026-07-22');
+    // El vecino que hace que este test PUEDA ponerse rojo: sin él, la anulación
+    // llega con las fechas en null y no hay rango contra el que chocar, así que
+    // pasaría igual aunque la puerta se aplicara también a las anulaciones. Se
+    // mueve por debajo, porque el alta no deja crear dos solicitudes que ya se
+    // pisen — esa es la puerta de la Task 3.
+    Object.assign(fila(vecino), { fechaInicio: '2026-07-06', fechaFin: '2026-07-08' });
     await pedir(id, { clase: 'anulacion', motivo: 'Se cancela el viaje' }).expect(201);
   });
 

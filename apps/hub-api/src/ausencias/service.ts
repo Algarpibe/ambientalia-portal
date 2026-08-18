@@ -603,9 +603,25 @@ export async function pedirModificacion(
     throw new AusenciaError('anulacion_ya_empezada', 409);
   }
 
-  // Solo un cambio de fechas puede crear un solapamiento: anular quita una
-  // ausencia, y quitar nunca choca con nada. Se excluye la propia solicitud, o
-  // acortarla chocaría contra ella misma.
+  // Las dos mitades de este `if` comprueban cosas distintas, no la misma cosa
+  // por partida doble:
+  //  - `datos.fechaInicio && datos.fechaFin` es la que pide EL COMPILADOR.
+  //    `NuevaModificacion` (types.ts) es una interface plana, no una unión
+  //    discriminada por `clase`, así que comprobar `datos.clase === 'fechas'`
+  //    no estrecha `fechaInicio`/`fechaFin` de `string | null` a `string`:
+  //    sin este trozo, `exigirSinSolape` no compilaría.
+  //  - `datos.clase === 'fechas'` es la que HOY no puede fallar en la
+  //    práctica: en toda anulación `validarNuevaModificacion` devuelve las dos
+  //    fechas en `null` (arriba, la rama de `clase === 'anulacion'`), así que
+  //    el trozo del compilador ya la excluye por su cuenta. Se deja de todos
+  //    modos porque es la DECISIÓN DE DOMINIO de a qué clases se les aplica la
+  //    regla — hoy `CLASES_MODIFICACION` solo tiene dos, pero quien añada una
+  //    tercera que también lleve fechas tiene que pasar por esta línea y
+  //    decidir a propósito si le toca el candado, en vez de heredarlo (o de
+  //    quedar fuera de él) por una guarda que no la nombra.
+  //
+  // Y no es solo acortar: moverle las fechas a una solicitud viva puede
+  // solaparla consigo misma alargándola o desplazándola igual que acortándola.
   if (datos.clase === 'fechas' && datos.fechaInicio && datos.fechaFin) {
     await exigirSinSolape(db, empleado.id, solicitud.tipo, datos.fechaInicio, datos.fechaFin, solicitud.id);
   }
