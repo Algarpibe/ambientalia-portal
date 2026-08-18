@@ -265,7 +265,11 @@ let contenedor: StartedPostgreSqlContainer | null = null;
  * fiel a produccion mientras deriva solo.
  */
 export async function setup({ provide }: GlobalSetupContext): Promise<void> {
-  contenedor = await new PostgreSqlContainer('postgres:16-alpine').start();
+  // El timeout va AQUI y no en el `hookTimeout` de vitest: ese solo envuelve los
+  // before*/after* de los tests, y NO la funcion `setup` de un globalSetup
+  // (comprobado en el codigo de vitest 2.1.9). Sin esto, un registry lento o una
+  // VPN caida dejan `test:db` colgado para siempre en vez de fallar.
+  contenedor = await new PostgreSqlContainer('postgres:16-alpine').withStartupTimeout(180_000).start();
   const url = contenedor.getConnectionUri();
 
   const db = createPoolFromUrl(url);
@@ -379,6 +383,16 @@ export async function eventosDelOutbox(db: Pool): Promise<string[]> {
   const { rows } = await db.query('SELECT evento FROM portal.ausencias_outbox ORDER BY id');
   return (rows as { evento: string }[]).map((r) => r.evento);
 }
+```
+
+- [ ] **Step 4b: Corregir el comentario de `vitest.db.config.ts`**
+
+El comentario que hoy acompaña al `hookTimeout` promete algo que ese ajuste no da (no cubre el `globalSetup`). Sustituirlo:
+
+```ts
+    // Cubre los before*/after* de los tests, NO el arranque del contenedor: el
+    // globalSetup se protege solo, con su propio `withStartupTimeout`.
+    hookTimeout: 180_000,
 ```
 
 - [ ] **Step 5: Ejecutar y ver verde**
@@ -1070,5 +1084,5 @@ Esto no toca código de producción salvo la extracción de `aplicarMigraciones`
 
 - **La imagen `postgres:16-alpine` es una asunción.** No está confirmada la versión de EasyPanel. Si resulta ser otra, cambiarla en `contenedor.ts` y volver a correr el cuarto portón.
 - **Docker tiene que estar arrancado.** Si el demonio está parado, `test:db` falla con un error de conexión de testcontainers, no con un test rojo. Es esperado: por eso vive en un portón aparte.
-- **La primera ejecución descarga la imagen** y puede tardar minutos. De ahí el `hookTimeout` de 180 s.
+- **La primera ejecución descarga la imagen** y puede tardar minutos. El límite lo pone `withStartupTimeout(180_000)` dentro de `contenedor.ts`, **no** el `hookTimeout` de Vitest: ese no envuelve la función `setup()` de un `globalSetup` (comprobado en el código de Vitest 2.1.9).
 - **`tsconfig.json` incluye `src` entero**, así que `tsc -b` typechequea también los `*.db.test.ts`. Si `@testcontainers/postgresql` no está instalado, el portón de build falla — no solo el de BD.
