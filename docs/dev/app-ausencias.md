@@ -4,7 +4,7 @@ Sustituye al flujo de n8n *Solicitud vacaciones_permisos_compensatorios_
 incapacidades 1.5* (`mt75OpO0fGIXv5QG`, 44 nodos), **despublicado el 2026-08-18**.
 El formulario, la aprobación y el historial viven en el portal; n8n queda como
 brazo ejecutor de Gmail, Calendar y Sheets, en el workflow *Ausencias — Portal*
-(`dh0xjWCHsGj9raYH`, 13 nodos), que es el que consume el outbox.
+(`dh0xjWCHsGj9raYH`, 18 nodos), que es el que consume el outbox.
 
 ## Qué cambió respecto del flujo viejo
 
@@ -43,7 +43,7 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   `022` los visores configurables y `023` la segunda firma opcional por ficha
   (`empleados.requiere_segunda_firma`) con el correo de quien solo se entera del
   resultado (`solicitudes_ausencia.informado_correo`) y `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`).
-- **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 13 nodos.
+- **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
 
@@ -96,8 +96,14 @@ POST /webhook/ausencias-aviso┘        (X-Ausencias-Cron-Token)
   → IF token válido ────────┘
   → IF hay → Repartir eventos (uno por evento)
   → Enviar correo (Gmail)
-  → IF calendario → Google Calendar ┐ las ramas falsas
-  → IF hoja  → Fila → Google Sheets ┘ siguen la cadena
+  → IF calendario → Switch por `accion` ┬→ crear (con id impuesto) ┐
+  │                                      ├→ actualizar             │ las ramas
+  │                                      ├→ borrar                 │ falsas
+  │                                      └→ fallback: crear (legado)┘ siguen
+  │     los tres nodos nuevos mandan sus fallos a «¿El fallo es esperable?»,
+  │     que deja pasar 404/409/410 —el estado deseado ya se cumple— y corta
+  │     cualquier otro, para que el evento siga pendiente y se reintente.
+  → IF hoja  → Fila → Google Sheets ┘
   → POST /api/ausencias/n8n/confirmado  { ids: [id] }
 ```
 
@@ -136,8 +142,13 @@ Reparto de los efectos, para que ninguno se duplique ni se pierda:
 | `rechazada` | rechazado con motivo, a **toda la cadena** —incluido el informado— (+ la copia de la ficha) | — | ✔ |
 | `registrada` | acuse de incapacidad (+ `COPIA_INCAPACIDADES` y la copia de la ficha) | ✔ | ✔ |
 | `modificacion_solicitada` | aviso a quien decide el cambio — **solo a él** | — | — |
-| `modificacion_aprobada` | cambio aprobado, a **toda la cadena** (+ la copia de la ficha) | — | — |
+| `modificacion_aprobada` | cambio aprobado, a **toda la cadena** (+ la copia de la ficha) | ✔ *(corrige o borra, si se puede)* | — |
 | `modificacion_rechazada` | cambio rechazado, a **toda la cadena** (+ la copia de la ficha) | — | — |
+
+El ✔ de `modificacion_aprobada` es el único que **no crea**: lleva un
+`accion: 'actualizar'` o `'borrar'` sobre el evento que creó su `aprobada`. Sale
+solo si la solicitud estaba `aprobada` **y** tiene `evento_calendario_id`; ver
+«El calendario se corrige solo» más abajo.
 
 `aprobacion_2` tiene nombre propio y no reutiliza `aprobacion` porque su **texto
 es distinto**: `avisoSegundoAprobador` lleva su propio asunto y dice que la
@@ -157,6 +168,15 @@ workflow vivo al añadir `aprobacion_2`.
 > Al retirar Drive hubo que quitar los nodos en n8n **antes** de desplegar el
 > hub-api sin el campo. Si algún día vuelve un campo así, el IF tiene que existir
 > antes de que hub-api empiece a emitirlo, nunca después.
+>
+> Y se cobró por el otro lado en la corrección del calendario (2026-08-18): un
+> `modificacion_aprobada` con `calendario` **no nulo** entra por el IF de
+> siempre, y con el workflow anterior habría caído en el nodo de crear —una
+> anulación estrenando un evento para la ausencia que se acaba de cancelar—. Por
+> eso el Switch por `accion` se publicó **antes**, y su salida *fallback* apunta
+> al nodo de crear de siempre: mientras hub-api no mande `accion`, todo cae ahí
+> y el comportamiento es idéntico. Esa salida es lo que permitió desplegar n8n
+> solo y comprobarlo sin cambiar nada.
 
 El estado **no avanza al servir el evento, solo al confirmarlo**: si Gmail falla,
 el ciclo siguiente lo reintenta. El precio es que un fallo *después* de enviar el
@@ -1118,11 +1138,15 @@ que arrastraba el mismo hueco desde la 018— los ejecuta ya el cuarto portón c
 un Postgres de verdad, y cada uno se falsó rompiéndolo. Ver «El cuarto portón, y
 lo que sigue sin proteger», más abajo.
 
-### Los correos, y por qué n8n no se tocó
+### Los correos
 
-Tres eventos nuevos, todos con `calendario: null` y `hoja: null`. Con los dos
-campos en `null`, el workflow recorre **la rama de solo-correo** que ya usan
-`creada` y `aprobacion`: no hay nada que cambiar en n8n.
+Tres eventos nuevos. `modificacion_solicitada` y `modificacion_rechazada` van con
+`calendario: null` y `hoja: null`, y con los dos campos en `null` el workflow
+recorre **la rama de solo-correo** que ya usan `creada` y `aprobacion`.
+
+> Esto decía «y por eso n8n no se tocó», y fue cierto hasta el 2026-08-18.
+> `modificacion_aprobada` lleva ahora `calendario` cuando puede corregirlo: ver
+> «El calendario se corrige solo».
 
 | Evento | Correo |
 |---|---|
@@ -1138,14 +1162,88 @@ después— y los dos recuentos de días, redactado desde la propuesta y no desd
 solicitud ya actualizada: sin el «desde qué», nadie puede ajustar el calendario.
 
 > ⚠️ **El aviso de ajustar Google a mano.** Cuando la solicitud estaba **aprobada**,
-> su evento de Calendar y su fila de la hoja ya se enviaron con las fechas viejas,
-> y **no se corrigen solos**. El correo de aprobación lleva entonces el asunto
-> prefijado con `⚠️ Ajustar calendario y hoja —` y un párrafo dirigido a
-> administración.
+> su evento de Calendar y su fila de la hoja ya se enviaron con las fechas viejas.
+> **El calendario ya se corrige solo**; la hoja no, así que el correo de
+> aprobación llega con el asunto prefijado `⚠️ Ajustar la hoja —` y un párrafo
+> dirigido a administración que dice qué se hizo solo y qué queda.
+>
+> Si la solicitud es de las que **no** tienen `evento_calendario_id` —aprobadas
+> antes de la 026— el aviso vuelve a ser el de siempre, `⚠️ Ajustar calendario y
+> hoja —`, porque ahí sigue siendo verdad.
 >
 > Ese ⚠️ aparece **solo** si la solicitud estaba aprobada. Si seguía `pendiente`
 > nunca se mandó nada a Google, y avisar ahí sería una alarma falsa: entrenar a la
 > gente a ignorar el ⚠️ es la forma segura de que el día que importe no lo lean.
+> Por lo mismo el texto enumera **lo que queda**, no lo que hubo: un ⚠️ que manda
+> al calendario cuando el calendario ya está bien enseña a no leerlos igual de
+> rápido. El aviso y el payload salen los dos de `correccionDeCalendario`, así que
+> no pueden discrepar.
+
+### El calendario se corrige solo
+
+Desde el 2026-08-18, anular una ausencia **borra** su evento del Google Calendar
+«Ambientalia Staff» y reprogramarla lo **mueve**, sin que nadie toque Google.
+
+Esto estuvo mucho tiempo descartado por una razón que resultó ser falsa. El
+argumento era: el payload no lleva ninguna identidad del evento creado, así que
+emitir `calendario` en una modificación crearía uno nuevo en vez de corregir el
+viejo. Cierto, pero la premisa de fondo —que el id lo decide Google— no lo es:
+
+> **El id del evento no hay que averiguarlo: se puede imponer.** El nodo de Google
+> Calendar expone `additionalFields.id` en el `create`, y Google acepta cualquier
+> id base32hex (de 5 a 1024 caracteres de `[0-9a-v]`). Un uuid sin guiones son 32
+> caracteres de `[0-9a-f]`, que cae dentro. Así que el evento se llama como la
+> solicitud, y volver a él es trivial.
+
+`idDeEventoCalendario(solicitudId)` es esa derivación, y tiene un candado sobre el
+alfabeto que **no es decorativo**: una derivación que se salga de `[0-9a-v]` no
+rompe ningún test de forma, rompe contra Google y solo en producción.
+
+**`portal.solicitudes_ausencia.evento_calendario_id` (migración 026).** Lo que la
+hace útil no es el valor —que se deriva del `id`— sino que **esté o no esté**:
+
+| Valor | Qué significa | Qué pasa al anular o reprogramar |
+|---|---|---|
+| `NULL` y estado nunca aprobado | nunca se mandó nada a Google | nada que corregir, y **sin** ⚠️ |
+| `NULL` y aprobada | aprobada **antes** de la 026: su evento lleva el id que inventó Google, que nadie apuntó | no se puede localizar → ⚠️ completo, a mano |
+| con id | el evento lo creamos nosotros | se corrige o se borra solo → ⚠️ solo de la hoja |
+
+Esa segunda fila es la cola, y se vacía sola. **No hay backfill**: rellenar la
+columna para las viejas sería afirmar que controlamos un evento que no
+controlamos, justo lo que la columna existe para distinguir.
+
+La marca la escribe `anotarEventoDeCalendario` (repo.ts) **dentro de la misma
+transacción** que encola el evento del outbox, y decide leyendo el **payload** y
+no una lista de eventos copiada allí: así se escribe exactamente cuando se emite
+una creación, y no puede desincronizarse de `construirPayload` el día que cambie
+el reparto de efectos.
+
+**Un regalo:** con el id impuesto, un evento servido dos veces —la reserva de 5
+min expira y n8n lo reprocesa— devuelve **409 duplicado** en vez de crear un
+segundo evento. Es exactamente el incidente del 2026-08-13, cerrado por
+construcción y no por vigilancia.
+
+⚠️ **Orden de despliegue: n8n primero, siempre.** Ver el filo del `undefined !==
+null` en «El contrato con n8n». El Switch por `accion` tiene una salida
+*fallback* que apunta al nodo de crear de siempre, así que se puede publicar solo
+y no cambia nada mientras hub-api no mande `accion`.
+
+**Los fallos que n8n tolera.** `409` al crear («ya existe»), `404` y `410` al
+actualizar o borrar («ya no está»). En los tres el estado deseado ya se cumple:
+reintentar no arregla nada y el evento no se confirmaría nunca, así que n8n lo
+reprocesaría cada 10 minutos para siempre. Cualquier otro fallo se queda **sin
+salida** a propósito: el evento sigue pendiente en hub-api y el ciclo siguiente lo
+reintenta, que es la red que ya existía.
+
+**Lo que sigue a mano.** La hoja. n8n hace `append` y no queda constancia de en
+qué fila cayó, así que a esa fila no se puede volver. Cerrarlo exigiría una
+columna clave con el uuid en las cuatro pestañas y pasar el nodo a
+`appendOrUpdate`, y hay que decidirlo con Nómina — que es quien lee esa hoja— y
+sopesarlo contra el backlog, que dice retirar esa copia, no invertir en ella.
+
+Y `PATCH /ausencias/solicitudes/:id`: un admin sigue pudiendo mover las fechas de
+una aprobada sin encolar nada, así que ni avisa ni corrige. Ahora se nota más,
+porque por la vía del trabajador sí se corrige.
 
 ### En pantalla
 
@@ -1187,7 +1285,7 @@ npm run test:db --workspace=apps/hub-api
 ```
 
 > ⚠️ **No corre con `npm run test`, pero el CI sí lo invoca**, en un step propio
-> (`Tests contra Postgres real`). El portón de siempre sigue en 742 tests, sin
+> (`Tests contra Postgres real`). El portón de siempre sigue en 752 tests, sin
 > infraestructura y en segundos, porque `vitest.config.ts` excluye los
 > `*.db.test.ts`: el portón que corre en cada commit no debe poder fallar porque
 > un demonio esté parado en la máquina de alguien. En local, este otro **necesita
@@ -1217,7 +1315,7 @@ detectar una migración que nadie apuntó en `MIGRATIONS` —producción tampoco
 aplicaría, así que los dos esquemas coinciden en no tenerla—; eso solo se delata
 de rebote, cuando algún test de BD toca el esquema que esa migración traía.
 
-Son **14** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
+Son **22** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
 **y con datos** sin romper nada —que es como re-arranca producción—, y que los
 nueve eventos del outbox pasen el `CHECK` **y quepan en la columna**, que era la
 regresión del `22001` del 2026-08-17: dos restricciones distintas de las que solo
@@ -1236,6 +1334,19 @@ de «el de todos». Ese `AND s.estado <> 'rechazada'` es el que **falla en abier
 y por eso el test que fija que la anulada desaparece sostiene una decisión de
 diseño: si anular hubiera estrenado un estado `'anulada'` en vez de reutilizar
 `rechazada`, seguiría pintándose como ausencia vigente.
+
+Y **seis de la marca del calendario** (`repo.evento-calendario.db.test.ts`), que
+usan el `construirPayload` real y no el `payloadStub` del harness, porque lo que
+se prueba es justamente que la marca sale del payload: que aprobar anota el id y
+es el **mismo** que viaja en el evento —si se separaran, la fila apuntaría a un
+evento que Google no creó nunca y la corrección daría un 404 en silencio—; que la
+solicitud devuelta lo lleva ya, y no el `null` que se leyó un `UPDATE` antes; que
+rechazar no anota nada; que una incapacidad `registrada` sí, que es el camino que
+no pasa por `decidirSolicitud` y el que se olvida; que el doble clic del jefe deja
+un evento y una marca; y que `SELECT_SOLICITUD` la trae, sin lo cual
+`construirPayloadModificacion` vería `undefined`, no entraría por la guarda de
+`null` y emitiría una corrección con `eventId: undefined` —que no es hipotético:
+pasó al escribir esto, y lo destapó el doble in-memory de `router.test.ts`—.
 
 **Cada candado se falsó rompiendo el código de verdad** y comprobando que se pone
 rojo por el motivo correcto.
@@ -1261,7 +1372,7 @@ sección de la bandeja y los dos contadores se comprueban mirándolos.
 
 ### Límites conocidos
 
-- **Google no se corrige solo, y no hay acuse de que alguien lo haya hecho.** El
+- **La hoja no se corrige sola, y no hay acuse de que alguien lo haya hecho.** El
   correo avisa; nadie sabe si se ajustó. El arreglo barato el día que duela es una
   columna `google_ajustado_at` y un botón «Ya lo ajusté» en el *Registro general*.
 - Se puede modificar una solicitud **ya modificada**. Es lo correcto, pero no hay
