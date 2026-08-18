@@ -40,6 +40,12 @@ export class AusenciaError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly field?: string,
+    /**
+     * Datos del conflicto, para los errores que sin ellos no se pueden accionar.
+     * «Te solapas» sin decir CON QUÉ deja a la persona sin saber qué corregir.
+     * Opcional: la inmensa mayoría de los errores se explican solos con `code`.
+     */
+    public readonly detalle?: Record<string, unknown>,
   ) {
     super(code);
     this.name = 'AusenciaError';

@@ -3501,3 +3501,17 @@ describe('PUT /ausencias/empleados/:id/segunda-firma', () => {
       .expect(403);
   });
 });
+
+describe('la forma de los errores del router', () => {
+  it('CANDADO: un error sin detalle NO estrena la clave en la respuesta', async () => {
+    // `JSON.stringify` omite las claves `undefined`, y de eso depende que
+    // ninguna respuesta actual cambie de forma al añadir `detalle`. Si algun dia
+    // se serializara como `null`, todos los clientes verian una clave nueva.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: 'no-es-fecha' }))
+      .expect(400);
+    expect(r.body).toEqual({ error: 'fecha_invalida', field: 'fechaInicio' });
+  });
+});
