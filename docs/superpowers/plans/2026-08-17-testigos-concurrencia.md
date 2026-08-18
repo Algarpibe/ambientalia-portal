@@ -532,6 +532,44 @@ git commit -m "test(ausencias): el testigo de decidirSolicitud se prueba ejecuta
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
+- [ ] **Step 0: Factorizar la siembra antes de que se copie cinco veces**
+
+Las tareas 5 a 8 siembran todas lo mismo y solo cambian el `estado`. Introducir en el fichero, bajo la constante `CORREO`, un helper local:
+
+```ts
+/**
+ * La solicitud de partida de cada caso. Solo varian el estado y si hay cascada:
+ * las fechas y el correo son los mismos en todos, y repetirlos en cada test
+ * enterraria lo unico que cada uno cambia.
+ */
+async function sembrarCaso(
+  estado: Solicitud['estado'],
+  segundoAprobadorCorreo: string | null = null,
+): Promise<Solicitud> {
+  const empleadoId = await sembrarEmpleado(db, CORREO);
+  return sembrarSolicitud(db, {
+    empleadoId,
+    correo: CORREO,
+    estado,
+    fechaInicio: '2026-07-06',
+    fechaFin: '2026-07-10',
+    segundoAprobadorCorreo,
+  });
+}
+```
+
+Necesita `import type { Solicitud } from './types.js';` junto al de `transicionAlDecidir`.
+
+Y reescribir la siembra del test de la Task 4 para usarlo:
+
+```ts
+    const s = await sembrarCaso('pendiente', 'jefe2@ambientalia.com.co');
+```
+
+Correr `npm run test:db` y comprobar que los 3 tests siguen en verde antes de seguir: es un refactor, no debe cambiar ningún resultado.
+
+Aprovechar para copiar en el `afterAll` de este fichero el comentario que ya justifica el `db?.end()` en `db.migraciones.db.test.ts`: sin él, un futuro editor quita el `?` creyendo que sobra, y el TypeError taparía el error que de verdad importa.
+
 - [ ] **Step 1: Añadir el import de `crearModificacion`**
 
 En la línea del import de `./repo.js`, dejarla así:
@@ -549,15 +587,7 @@ describe('crearModificacion contra Postgres real', () => {
     // guardara una foto que dice `pendiente` sobre algo que ya esta aprobada y
     // ya esta en el calendario de Google, el correo de la decision no avisaria
     // de tocarlo.
-    const empleadoId = await sembrarEmpleado(db, CORREO);
-    const s = await sembrarSolicitud(db, {
-      empleadoId,
-      correo: CORREO,
-      estado: 'pendiente',
-      fechaInicio: '2026-07-06',
-      fechaFin: '2026-07-10',
-      segundoAprobadorCorreo: null,
-    });
+    const s = await sembrarCaso('pendiente');
 
     // El jefe la aprueba entre que el servicio leyo el estado y llega el INSERT.
     await db.query(`UPDATE portal.solicitudes_ausencia SET estado = 'aprobada' WHERE id = $1`, [s.id]);
@@ -649,15 +679,7 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     // Los tres campos hacen falta. Solo con el estado no se detecta que un admin
     // haya corregido las fechas entre medias, y la aprobacion se las pisaria EN
     // SILENCIO: el PATCH no encola nada, asi que nadie se enteraria nunca.
-    const empleadoId = await sembrarEmpleado(db, CORREO);
-    const s = await sembrarSolicitud(db, {
-      empleadoId,
-      correo: CORREO,
-      estado: 'aprobada',
-      fechaInicio: '2026-07-06',
-      fechaFin: '2026-07-10',
-      segundoAprobadorCorreo: null,
-    });
+    const s = await sembrarCaso('aprobada');
 
     const alta = await crearModificacion(
       db,
@@ -752,15 +774,7 @@ describe('el indice unico parcial de la 024', () => {
     // exige el NOMBRE del constraint, asi que el que emite Postgres y el que
     // compara el codigo tienen que ser el mismo. Con un pool falso eso es
     // circular: el test se inventa el nombre que el codigo espera.
-    const empleadoId = await sembrarEmpleado(db, CORREO);
-    const s = await sembrarSolicitud(db, {
-      empleadoId,
-      correo: CORREO,
-      estado: 'aprobada',
-      fechaInicio: '2026-07-06',
-      fechaFin: '2026-07-10',
-      segundoAprobadorCorreo: null,
-    });
+    const s = await sembrarCaso('aprobada');
 
     const datos = {
       solicitudId: s.id,
@@ -849,15 +863,7 @@ describe('lo que escribe aprobar una modificacion', () => {
   it('CANDADO: aprobar un cambio de fechas NO re-decide la solicitud', async () => {
     // Aprobar un cambio no es decidir la solicitud. Si el SET tocara `estado`,
     // una `pendiente` quedaria concedida sin que ningun firmante la firmara.
-    const empleadoId = await sembrarEmpleado(db, CORREO);
-    const s = await sembrarSolicitud(db, {
-      empleadoId,
-      correo: CORREO,
-      estado: 'pendiente',
-      fechaInicio: '2026-07-06',
-      fechaFin: '2026-07-10',
-      segundoAprobadorCorreo: null,
-    });
+    const s = await sembrarCaso('pendiente');
 
     const alta = await crearModificacion(
       db,
@@ -889,15 +895,7 @@ describe('lo que escribe aprobar una modificacion', () => {
     // los seis filtros que miran el estado, y `anulada_at` es lo unico que la
     // distingue de un rechazo del jefe. Las fechas se conservan: la ausencia
     // anulada sigue diciendo cual era.
-    const empleadoId = await sembrarEmpleado(db, CORREO);
-    const s = await sembrarSolicitud(db, {
-      empleadoId,
-      correo: CORREO,
-      estado: 'aprobada',
-      fechaInicio: '2026-07-06',
-      fechaFin: '2026-07-10',
-      segundoAprobadorCorreo: null,
-    });
+    const s = await sembrarCaso('aprobada');
 
     const alta = await crearModificacion(
       db,
