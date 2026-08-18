@@ -308,7 +308,11 @@ async function exigirSinSolape(
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
-  // Va aquí porque necesita el id del empleado, y antes de escribir nada.
+  // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
+  // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
+  // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
+  // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
+  // esta comprobación necesita, así que tiene que ir antes por fuerza.
   await exigirSinSolape(db, empleado.id, datos.tipo, datos.fechaInicio, datos.fechaFin, null);
   const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
 

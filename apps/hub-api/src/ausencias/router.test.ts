@@ -690,6 +690,23 @@ vi.mock('./repo.js', () => ({
     fechaFin: string,
     excluirSolicitudId: string | null,
   ) => {
+    // El SQL castea este parámetro a `::uuid`: lo que no tenga esa forma revienta
+    // con 22P02 contra Postgres de verdad. Un `!==` a secas —lo que este doble
+    // hacía antes de esta guarda— se traga cualquier cosa en silencio, y eso es
+    // justo lo que dejaba pasar sin avisar un `excluirSolicitudId` con la forma
+    // equivocada (comprobado: mandar aquí `datos.tipo` en vez de `null` no
+    // ponía rojo ni un test ni el `tsc`, y contra la base real es un 500 en
+    // cada alta). Se admite también la forma `sN` que usa el propio doble para
+    // sus ids (`crearSolicitud`, más abajo) porque esos ids nunca llegan a un
+    // `::uuid` real —viven y mueren en este fichero— así que exigirles forma de
+    // uuid sería una guarda más estricta que el SQL que dice imitar.
+    if (
+      excluirSolicitudId !== null &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(excluirSolicitudId) &&
+      !/^s\d+$/.test(excluirSolicitudId)
+    ) {
+      throw new Error(`solapeDe: excluirSolicitudId no es un uuid ni un id del doble: ${excluirSolicitudId}`);
+    }
     const choque = estado.solicitudes.find(
       (s: any) =>
         s.empleadoId === empleadoId &&
@@ -1063,6 +1080,10 @@ describe('no se puede estar ausente dos veces a la vez', () => {
       field: 'fechaInicio',
       detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-07-10', fechaFin: '2026-07-14' },
     });
+    // `toMatchObject` es parcial: por sí solo no impediría que se colara un
+    // campo de más, y el `id` del choque es exactamente lo que `exigirSinSolape`
+    // dice que NO manda al cliente. Esto ata esa promesa.
+    expect(Object.keys(r.body.detalle).sort()).toEqual(['estado', 'fechaFin', 'fechaInicio', 'tipo']);
   });
 
   it('CANDADO: adyacente pasa — el borde es donde se rompen estas reglas', async () => {
@@ -1083,14 +1104,17 @@ describe('no se puede estar ausente dos veces a la vez', () => {
 
   it('una anulada tampoco ocupa', async () => {
     // Una anulación no estrena estado propio: queda `rechazada` con `anuladaAt`
-    // puesto (ver `decidirModificacion` en el doble, y el comentario de
-    // `noHaEmpezado` en service.ts). Para el candado de solapes eso ya la deja
-    // fuera por el mismo `estado <> 'rechazada'` que descarta un rechazo
-    // corriente, así que este test no ejercita una rama nueva del código — pero
-    // sí fija, a nivel HTTP, que la forma REAL de una anulación no ocupa sitio.
-    // Sin este test, quien mañana ligue el candado a algo más fino que `estado`
-    // (por ejemplo, a `anuladaAt IS NULL`) no tendría quien le avisara si esa
-    // ruta se rompe.
+    // puesto (fuente canónica: el JSDoc de `anuladaAt` en `types.ts` y el de
+    // `aplicarALaSolicitud` en `repo.ts`, que es quien escribe esas dos
+    // columnas al aprobar la clase `anulacion`). Para el candado de solapes eso
+    // ya la deja fuera por el mismo `estado <> 'rechazada'` que
+    // descarta un rechazo corriente, y ese predicado YA tiene su propio
+    // candado contra Postgres real: `repo.solapes.db.test.ts` > «CANDADO: una
+    // anulada tampoco, que es una rechazada con marca». Este test no ejercita
+    // una rama nueva del SQL, entonces — lo que fija es que la forma REAL de
+    // una anulación (`estado` + `anuladaAt`, no un estado propio) tampoco ocupa
+    // sitio visto desde el HTTP del alta, con el mismo doble que usan los tests
+    // vecinos de este bloque.
     const id = await conAusencia();
     Object.assign(fila(id), { estado: 'rechazada', anuladaAt: '2026-01-15T12:00:00Z' });
     await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
