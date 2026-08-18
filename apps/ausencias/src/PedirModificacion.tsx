@@ -14,6 +14,7 @@ import {
   retrocedeAlPasado,
   sinCambiosDeFechas,
 } from './dominio';
+import { useFocoDeModal } from './focoDeModal';
 
 // El trabajador pide que le cambien las fechas de una solicitud ya enviada, o
 // que se la anulen. NO cambia nada por su cuenta: guarda una propuesta que su
@@ -66,6 +67,11 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
   const [motivo, setMotivo] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // La misma trampa de foco que EditarSolicitud, del que este modal es copia:
+  // el mismo hook y no una copia del codigo, porque dos trampas de foco se
+  // separan con los meses y la que se quede vieja no lo dice.
+  const dialogo = useFocoDeModal<HTMLFormElement>(onCerrar);
 
   const anula = clase === 'anulacion';
   const faltaFecha = !fechaInicio || !fechaFin;
@@ -131,11 +137,14 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
       role="presentation"
     >
       <form
+        ref={dialogo}
         onSubmit={enviar}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Pedir un cambio en la solicitud"
+        // Igual que en el molde: enfocable al abrir, pero sin parada de Tab.
+        tabIndex={-1}
         className="my-8 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
       >
         <div className="mb-4 flex items-start justify-between gap-4">
