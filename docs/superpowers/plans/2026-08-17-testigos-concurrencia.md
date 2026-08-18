@@ -957,7 +957,17 @@ git commit -m "test(ausencias): las aserciones de forma dejan paso al comportami
 
 - [ ] **Step 1: Reescribir el comentario de `crearModificacion`**
 
-El JSDoc **no se toca**: su aviso de «NO sustituir el testigo por un `IN (...)`» sigue siendo cierto y sigue haciendo falta. Lo caduco está dentro del SQL. Sustituir el bloque:
+⚠️ **El JSDoc SÍ se toca, y es lo más importante de esta tarea.** La revisión de la Task 5 demostró, con sondas contra Postgres real, que su explicación es falsa: dice que sin el testigo la propuesta se guardaría con `estado_previo = 'pendiente'` sobre algo ya aprobado, pero `estado_previo` sale de `s.estado` en el mismo `SELECT` y es el valor real de la fila **con testigo y sin él**. Esa garantía es del punto 1 (el `SELECT` dentro del `INSERT`), no del testigo.
+
+Lo que el testigo protege de verdad es **`aprobador_correo` (`$7`)**, el único dato del INSERT que el servicio DERIVÓ de su lectura: `service.ts:579` lo rellena con `decisorDeModificacion(solicitud)` = `correoDelTurno(s) ?? s.aprobadorCorreo`, y `correoDelTurno` depende del estado. Si la solicitud avanza de `pendiente` a `pendiente_2` entre la lectura y el INSERT, la propuesta se congela a nombre del jefe que **ya firmó**; y `modificacionesPendientes`, `puedeDecidirModificacion` y el correo del alta filtran los tres por ese campo, así que la propuesta entera aterriza en la bandeja de quien ya no tiene el turno y el firmante que sí lo tiene no la ve nunca. Sin 403 y sin error: se decide en silencio y mal.
+
+Hay un segundo matiz que el JSDoc borra: `estado_previo` es cierto respecto al **snapshot de su sentencia**, no para siempre. `withTransaction` abre un `BEGIN` pelado (READ COMMITTED) y el `SELECT` no lleva `FOR UPDATE`, así que una aprobación que confirme justo después lo deja obsoleto — con testigo y sin él por igual. Quien lo verifica en el momento de USARLO es el testigo TRIPLE de `aplicarALaSolicitud`.
+
+Reescribir el bullet 2 del JSDoc con ese contenido, y el párrafo del «Mismo aviso que en `decidirSolicitud`» dejando claro que el `IN` es tentador precisamente porque `estado_previo` seguiría siendo cierto, y que lo que destruye es la coherencia entre la fila y el decisor congelado.
+
+La misma corrección va en `docs/dev/app-ausencias.md`, punto 1 de «La concurrencia: dos testigos» (línea 1087 aprox.).
+
+Y dentro del SQL, sustituir el bloque:
 
 ```
           -- NINGUN TEST EJECUTA ESTE SQL: el doble de router.test.ts es in-memory
@@ -969,9 +979,15 @@ El JSDoc **no se toca**: su aviso de «NO sustituir el testigo por un `IN (...)`
 por:
 
 ```
-          -- Lo vigila `repo.testigos.db.test.ts`, que ejecuta este SQL contra un
-          -- Postgres de verdad: se aprueba la solicitud entre medias y el INSERT
-          -- tiene que devolver cero filas. Se comprobo poniendo el IN: el test se
+          -- ⚠️ $8 es el estado que LEYO el servicio, NO una lista de estados
+          -- admisibles. No cambiar por IN ('pendiente','pendiente_2','aprobada'):
+          -- `estado_previo` seguiria siendo cierto —sale de s.estado, aqui al
+          -- lado—, pero $7, el decisor congelado, lo calculo el servicio con el
+          -- estado viejo. Si la solicitud avanza de nivel entre medias, la
+          -- propuesta queda a nombre del firmante que ya firmo, y la bandeja, el
+          -- guard y el correo la mandan los tres alli: el que tiene el turno no
+          -- la ve. Lo vigila `repo.testigos.db.test.ts`, que ejecuta este SQL
+          -- contra un Postgres de verdad; se comprobo poniendo el IN y el test se
           -- pone rojo. Corre en el cuarto porton, `npm run test:db`.
 ```
 
