@@ -675,9 +675,14 @@ vi.mock('./repo.js', () => ({
         fechaFin: '2026-08-11',
       },
     ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
-  // REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
   // `repo.solapeDe`, y quien lo ejecuta contra Postgres real es
-  // `repo.solapes.db.test.ts`. Esto solo IMITA su resultado.
+  // `repo.solapes.db.test.ts`. Esto solo IMITA su resultado, y puede divergir
+  // en un borde: `.find()` devuelve la primera colision por orden de
+  // INSERCION, mientras que el SQL ordena por `fecha_inicio, id`. Con dos
+  // solicitudes vivas solapadas entre si, los dos pueden nombrar colisiones
+  // distintas. No se ordena el doble para igualarlo: solo haria falta si algun
+  // test llegara a asertar CUAL de las dos colisiones se nombra.
   solapeDe: async (
     _db: unknown,
     empleadoId: string,

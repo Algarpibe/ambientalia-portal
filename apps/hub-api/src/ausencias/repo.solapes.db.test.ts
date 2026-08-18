@@ -43,7 +43,7 @@ describe('solapeDe', () => {
     expect(await solapeDe(db, empleadoId, '2026-07-10', '2026-07-14', null)).toBeNull();
   });
 
-  it('CANDADO: los cuatro bordes del predicado', async () => {
+  it('CANDADO: solapa con un solo dia en comun; adyacente no', async () => {
     await sembrarBase();
 
     // Contenida, identica y desbordante: los tres solapan.
@@ -62,6 +62,15 @@ describe('solapeDe', () => {
 
   it('las pendientes tambien ocupan', async () => {
     await sembrarBase('pendiente');
+    expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).not.toBeNull();
+  });
+
+  it('CANDADO: pendiente_2 (media firma) tambien ocupa', async () => {
+    // types.ts avisa de esto mismo sobre el nombre del estado: un filtro
+    // descuidado que solo reconozca 'pendiente' contaria media firma como si
+    // no existiera, y dejaria pasar una segunda ausencia sobre alguien que
+    // todavia no tiene aprobacion completa.
+    await sembrarBase('pendiente_2');
     expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).not.toBeNull();
   });
 
@@ -106,8 +115,9 @@ describe('solapeDe', () => {
   });
 
   it('devuelve lo justo para redactar el aviso', async () => {
-    await sembrarBase();
+    const s = await sembrarBase();
     expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).toMatchObject({
+      id: s.id,
       tipo: 'vacaciones',
       estado: 'aprobada',
       fechaInicio: '2026-07-10',
