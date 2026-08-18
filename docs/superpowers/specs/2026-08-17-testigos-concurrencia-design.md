@@ -190,9 +190,12 @@ Tampoco entra el doble in-memory de `router.test.ts` (~445 líneas modelando un
 
 ## Asunciones
 
-- **Imagen `postgres:16-alpine`.** No está confirmada la versión que corre EasyPanel.
-  Si es otra, es un cambio de una línea en el `globalSetup`, pero hasta confirmarlo
-  la fidelidad del harness es una suposición.
+- ~~**Imagen `postgres:16-alpine`.** No está confirmada la versión que corre EasyPanel.~~
+  **Cerrada el 2026-08-18, y era falsa:** producción corre **PostgreSQL 17.10 sobre
+  Debian**, no la 16. El harness estuvo probando contra otra versión mayor mientras
+  su propio comentario presumía de fidelidad. Corregido a `postgres:17`, en variante
+  Debian y no alpine, porque alpine va con musl y la ordenación de texto depende de
+  la libc. Cuarta suposición de este diseño que la verificación desmiente.
 - **Docker arrancado** al correr el cuarto portón. Verificado disponible en la
   máquina de desarrollo (29.6.2, demonio respondiendo).
 - `@testcontainers/postgresql` como dependencia de desarrollo, por la espera de

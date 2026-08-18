@@ -1131,7 +1131,7 @@ Esto no toca código de producción salvo la extracción de `aplicarMigraciones`
 
 ## Riesgos conocidos
 
-- **La imagen `postgres:16-alpine` es una asunción.** No está confirmada la versión de EasyPanel. Si resulta ser otra, cambiarla en `contenedor.ts` y volver a correr el cuarto portón.
+- ~~**La imagen `postgres:16-alpine` es una asunción.**~~ **Cerrado el 2026-08-18: era falsa.** EasyPanel corre **PostgreSQL 17.10 sobre Debian**. Corregido a `postgres:17` (variante Debian, no alpine: alpine va con musl y la ordenación de texto depende de la libc). Los 10 tests pasan contra la 17, y las 21 migraciones aplican limpias sobre ella desde cero.
 - **Docker tiene que estar arrancado.** Si el demonio está parado, `test:db` falla con un error de conexión de testcontainers, no con un test rojo. Es esperado: por eso vive en un portón aparte.
 - **La primera ejecución descarga la imagen** y puede tardar minutos. El límite lo pone `withStartupTimeout(180_000)` dentro de `contenedor.ts`, **no** el `hookTimeout` de Vitest: ese no envuelve la función `setup()` de un `globalSetup` (comprobado en el código de Vitest 2.1.9).
 - **`tsconfig.json` incluye `src` entero**, así que `tsc -b` typechequea también los `*.db.test.ts`. Si `@testcontainers/postgresql` no está instalado, el portón de build falla — no solo el de BD.
