@@ -267,7 +267,14 @@ export default function PanelOrganigrama({ activo }: Props) {
                           onChange={(ev) =>
                             actualizar(e.id, { requiereSegundaFirma: ev.target.checked, error: null })
                           }
-                          aria-label={`Las solicitudes de ${e.nombreCompleto} necesitan dos firmas`}
+                          // El texto visible («Necesaria») va entero y al
+                          // principio del aria-label, que es lo que pide WCAG
+                          // 2.5.3: quien maneja el portal por voz dice «pulsa
+                          // Necesaria» y el software busca ese texto DENTRO del
+                          // nombre accesible; sin el, la casilla no existe para
+                          // esa persona. Lo que se pone detras es de quien,
+                          // porque en esta tabla hay una «Necesaria» por fila.
+                          aria-label={`Necesaria: las solicitudes de ${e.nombreCompleto} necesitan dos firmas`}
                           aria-describedby={`arriba-${e.id}`}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
                         />
@@ -327,7 +334,13 @@ export default function PanelOrganigrama({ activo }: Props) {
                           // React lo avisaría a gritos en la consola.
                           checked={!!fila.veAdjuntos}
                           onChange={(ev) => actualizar(e.id, { veAdjuntos: ev.target.checked, error: null })}
-                          aria-label={`${e.nombreCompleto} puede abrir cualquier soporte`}
+                          // Mismo criterio que la casilla de la segunda firma
+                          // (WCAG 2.5.3): «Todos» —el texto visible— entero y
+                          // al principio, y detras de quien, porque hay una
+                          // casilla por fila. El nombre de la persona iba
+                          // delante y dejaba la casilla fuera del alcance de
+                          // quien la nombra por voz, que es como se ve.
+                          aria-label={`Todos: ${e.nombreCompleto} puede abrir cualquier soporte`}
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
                         />
                         Todos
