@@ -2954,6 +2954,62 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     await request(app()).post(`/api/ausencias/solicitudes/${s.id}/modificaciones`).send(CAMBIO).expect(401);
     await pedir(s.id as string, CAMBIO, token({ apps: ['contabilidad'] })).expect(403);
   });
+
+  // ── El candado de solapes también se aplica a la propuesta ────────────────
+  //
+  // `exigirSinSolape` es la misma función que usa el alta (`crearSolicitud`):
+  // aquí solo se fija que la puerta esté puesta AQUÍ también, con el
+  // `excluirSolicitudId` correcto — el de la solicitud, no el de la
+  // modificación que se está creando.
+
+  /** Crea una solicitud aprobada con esas fechas y devuelve su id. */
+  async function aprobadaEntre(fechaInicio: string, fechaFin: string) {
+    const s = await crear({ fechaInicio, fechaFin });
+    fila(s.id as string).estado = 'aprobada';
+    return s.id as string;
+  }
+
+  it('CANDADO: mover las fechas encima de otra viva da 409', async () => {
+    const mueve = await aprobadaEntre('2026-07-06', '2026-07-08');
+    await aprobadaEntre('2026-07-20', '2026-07-22');
+
+    const r = await pedir(mueve, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-21',
+      fechaFin: '2026-07-23',
+    }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      detalle: { fechaInicio: '2026-07-20', fechaFin: '2026-07-22' },
+    });
+  });
+
+  it('CANDADO: acortar una solicitud NO la hace chocar consigo misma', async () => {
+    // Es lo que rompe quitar `excluirSolicitudId`: sin él, acortar del 6-10 al
+    // 6-8 daría 409 contra la propia solicitud que se está acortando, y cambiar
+    // fechas dejaría de funcionar para todo el mundo.
+    const id = await aprobadaEntre('2026-07-06', '2026-07-10');
+    await pedir(id, { clase: 'fechas', fechaInicio: '2026-07-06', fechaFin: '2026-07-08' }).expect(201);
+  });
+
+  it('anular no comprueba solapes: quitar una ausencia nunca choca', async () => {
+    const id = await aprobadaEntre('2026-07-06', '2026-07-08');
+    await pedir(id, { clase: 'anulacion', motivo: 'Se cancela el viaje' }).expect(201);
+  });
+
+  it('proponer un cambio hacia fechas ocupadas por una RECHAZADA pasa', async () => {
+    // El complemento del primer CANDADO: la puerta hereda el mismo filtro de
+    // estados que `solapeDe` — una rechazada no cuenta como ocupación.
+    const mueve = await aprobadaEntre('2026-07-06', '2026-07-08');
+    const otra = await aprobadaEntre('2026-07-20', '2026-07-22');
+    fila(otra).estado = 'rechazada';
+
+    await pedir(mueve, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-20',
+      fechaFin: '2026-07-22',
+    }).expect(201);
+  });
 });
 
 describe('POST /ausencias/modificaciones/:id/retirar', () => {

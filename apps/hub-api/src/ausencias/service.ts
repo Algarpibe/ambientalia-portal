@@ -603,6 +603,13 @@ export async function pedirModificacion(
     throw new AusenciaError('anulacion_ya_empezada', 409);
   }
 
+  // Solo un cambio de fechas puede crear un solapamiento: anular quita una
+  // ausencia, y quitar nunca choca con nada. Se excluye la propia solicitud, o
+  // acortarla chocaría contra ella misma.
+  if (datos.clase === 'fechas' && datos.fechaInicio && datos.fechaFin) {
+    await exigirSinSolape(db, empleado.id, solicitud.tipo, datos.fechaInicio, datos.fechaFin, solicitud.id);
+  }
+
   const decisor = decisorDeModificacion(solicitud);
   // `estadoAdmiteModificacion` ya lo ha exigido, pero eso vive treinta líneas
   // más arriba y en otra función: se comprueba aquí para que el tipo salga sin
