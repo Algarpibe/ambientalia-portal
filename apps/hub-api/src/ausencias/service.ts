@@ -838,10 +838,24 @@ export async function decidirModificacion(
     construirPayloadModificacion,
   );
   if (!resultado.ok) {
-    // Los dos son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
+    // Los tres son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
     // o alguien que se adelantó; `solicitud_cambio_de_estado` es que la
     // solicitud se movió debajo —un PATCH de admin, una decisión del jefe— y
-    // aplicar el cambio habría pisado esa corrección en silencio.
+    // aplicar el cambio habría pisado esa corrección en silencio; `rango_solapado`
+    // es que a esa persona le aprobaron OTRA ausencia sobre esos días entre que
+    // se propuso el cambio y se firma, así que la propuesta era legal cuando se
+    // pidió y ha dejado de serlo sin que nadie hiciera nada mal.
+    if (resultado.razon === 'solape') {
+      // Campo a campo y sin el `id`, por lo mismo que en `exigirSinSolape`: hace
+      // que compile —`Solape` es una interface, sin index signature— y evita
+      // mandarle al cliente un uuid que no necesita.
+      throw new AusenciaError('rango_solapado', 409, 'fechaInicio', {
+        tipo: resultado.solape.tipo,
+        estado: resultado.solape.estado,
+        fechaInicio: resultado.solape.fechaInicio,
+        fechaFin: resultado.solape.fechaFin,
+      });
+    }
     throw resultado.razon === 'ya_decidida'
       ? new AusenciaError('ya_decidida', 409)
       : new AusenciaError('solicitud_cambio_de_estado', 409);

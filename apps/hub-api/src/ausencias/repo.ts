@@ -1290,13 +1290,19 @@ export async function crearModificacion(
 // ── Modificaciones: la decisión ────────────────────────────────────────────
 
 /**
- * Resultado de decidir. Las dos formas de fallar son un 409, pero cuentan cosas
+ * Resultado de decidir. Las tres formas de fallar son un 409, pero cuentan cosas
  * distintas y el cliente tiene que poder distinguirlas: «alguien ya la decidió»
  * (o un doble clic) no es «la solicitud se movió debajo y hay que mirar».
+ *
+ * `solape` es la única de las tres que no habla de quien firma: la propuesta era
+ * legal cuando se pidió y el destino se ocupó después, así que el mensaje no
+ * puede quedarse en «no se puede» — tiene que nombrar la ausencia con la que
+ * choca, y por eso esta razón viaja acompañada y las otras dos no.
  */
 export type ResultadoDecisionModificacion =
   | { ok: true; modificacion: Modificacion; solicitud: Solicitud }
-  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' };
+  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' }
+  | { ok: false; razon: 'solape'; solape: Solape };
 
 /**
  * Señal interna para abortar la transacción cuando el testigo triple no casa.
@@ -1307,6 +1313,27 @@ export type ResultadoDecisionModificacion =
  * un resultado normal, para que el servicio no tenga que conocerla.
  */
 class ChoqueConLaSolicitud extends Error {}
+
+/**
+ * Señal interna para abortar la transacción cuando las fechas que se van a
+ * firmar ya están ocupadas por otra ausencia viva de la misma persona.
+ *
+ * THROW y no `return` por el mismo motivo que `ChoqueConLaSolicitud`, y aquí es
+ * todavía más fácil de perder de vista: cuando esto salta, el paso 1 **ya ha
+ * marcado la propuesta como aprobada**. Un `return` desde dentro de
+ * `withTransaction` sale por la puerta del `COMMIT` —no hay error que provoque
+ * el `ROLLBACK`—, así que confirmaría esa marca y dejaría la propuesta decidida
+ * sobre una solicitud que nadie cambió. Se comprobó cambiándolo por un `return`:
+ * el test del ROLLBACK se pone rojo, con la propuesta en `aprobada`.
+ *
+ * Lleva el choque encima porque el aviso tiene que nombrarlo. No sale de este
+ * módulo — se caza abajo y se traduce a un resultado normal.
+ */
+class SolapeAlAplicar extends Error {
+  constructor(public readonly solape: Solape) {
+    super('solape');
+  }
+}
 
 /**
  * El testigo TRIPLE del UPDATE de la solicitud, escrito una sola vez para que
@@ -1386,7 +1413,15 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
  *     encuentra fila y el servicio lo traduce a 409 en vez de mandar dos correos
  *     contradictorios.
  *  2. **Aplicarla a la solicitud**, y solo si se aprueba. Rechazar deja la fila
- *     exactamente como estaba: no hay nada que escribir.
+ *     exactamente como estaba: no hay nada que escribir. Antes de escribir, un
+ *     cambio de fechas pasa por la tercera puerta del solapamiento: entre
+ *     proponer y firmar le han podido aprobar a esa persona otra ausencia
+ *     encima, y esta es la única comprobación que llega a tiempo de verlo —la de
+ *     `pedirModificacion` miró cuando el destino aún estaba libre—. Va por el
+ *     mismo `client`, así que ve lo que esta transacción ya escribió sin
+ *     confirmar y se deshace con su mismo `ROLLBACK`. Lo que **no** hace es
+ *     cerrar la carrera: esto es READ COMMITTED y el `SELECT` no lleva
+ *     `FOR UPDATE` (el porqué entero, en `solapeDe`).
  *  3. Releer, y encolar el aviso.
  *
  * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
@@ -1424,6 +1459,46 @@ export async function decidirModificacion(
       if (rows.length === 0) return { ok: false, razon: 'ya_decidida' };
       const modificacion = aModificacion(rows[0] as FilaModificacionDb);
 
+      // Solo al APROBAR, y solo un cambio de FECHAS.
+      //
+      // `aprueba` no es un atajo de rendimiento: rechazar no escribe nada en la
+      // solicitud, así que no puede solapar a nadie, y comprobarlo también ahí
+      // dejaría IRRECHAZABLE una propuesta que se quedó solapada —409 al jefe
+      // cada vez que lo intentara, y solo el solicitante podría quitarla de en
+      // medio retirándola—. Lo vigila un test de `repo.solapes.db.test.ts`
+      // escrito para esto: antes de él, quitar el `aprueba &&` dejaba los cuatro
+      // portones enteros en verde.
+      //
+      // La clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
+      // anulación las tres columnas nuevas van a `null` —lo exige el CHECK
+      // `modificaciones_campos_por_clase` de la 024—, así que el trozo de las
+      // fechas, que pide el compilador (`Modificacion` es plana y
+      // `clase === 'fechas'` no estrecha `string | null`), ya la excluye por su
+      // cuenta. Se deja porque nombra a qué clase se aplica la regla, igual que
+      // en `pedirModificacion`, y con la misma letra pequeña: no obliga a nadie
+      // a volver aquí si mañana aparece una tercera clase con fechas.
+      if (aprueba && modificacion.clase === 'fechas' && modificacion.fechaInicioNueva && modificacion.fechaFinNueva) {
+        // De quién es la ausencia, y nada más que eso: la solicitud entera se
+        // relee más abajo y a propósito DESPUÉS de aplicarla, que es lo que hace
+        // que el correo hable de lo que quedó guardado.
+        const { rows: titular } = await client.query(
+          `SELECT s.empleado_id FROM portal.solicitudes_ausencia s WHERE s.id = $1`,
+          [modificacion.solicitudId],
+        );
+        const choque = await solapeDe(
+          client,
+          (titular[0] as { empleado_id: string }).empleado_id,
+          modificacion.fechaInicioNueva,
+          modificacion.fechaFinNueva,
+          // El id de la SOLICITUD, no el de la propuesta: sin esta exclusión, la
+          // ausencia chocaría contra sí misma en cuanto las fechas nuevas rocen
+          // a las viejas —acortar o desplazar un día— y no se podría aprobar ni
+          // un solo cambio de los que se piden de verdad.
+          modificacion.solicitudId,
+        );
+        if (choque) throw new SolapeAlAplicar(choque);
+      }
+
       if (aprueba) await aplicarALaSolicitud(client, modificacion);
 
       // La solicitud se relee DESPUÉS de aplicarla: el correo se redacta sobre
@@ -1445,10 +1520,11 @@ export async function decidirModificacion(
       return { ok: true, modificacion, solicitud };
     });
   } catch (err) {
-    // El choque del testigo triple ya provocó el ROLLBACK dentro de
-    // `withTransaction`: aquí solo se traduce a un resultado, para que el
-    // servicio no tenga que conocer esta clase ni distinguirla de un fallo real.
+    // Los dos choques ya provocaron el ROLLBACK dentro de `withTransaction`:
+    // aquí solo se traducen a un resultado, para que el servicio no tenga que
+    // conocer estas clases ni distinguirlas de un fallo real.
     if (err instanceof ChoqueConLaSolicitud) return { ok: false, razon: 'solicitud_cambio_de_estado' };
+    if (err instanceof SolapeAlAplicar) return { ok: false, razon: 'solape', solape: err.solape };
     throw err;
   }
 }
