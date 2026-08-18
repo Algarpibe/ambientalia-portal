@@ -194,6 +194,100 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     // el outbox solo esta el aviso del alta de la propuesta.
     expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada']);
   });
+
+  it('CANDADO: aprobar un cambio NO se aplica sobre una solicitud que ya avanzo de nivel', async () => {
+    // El tercer campo del testigo, el que las fechas no cubren. La propuesta se
+    // pidio sobre una solicitud en tramite y se aprobaria sobre otra que ya lleva
+    // una firma mas. Y aprobar el cambio NO re-decide la solicitud —el SET de la
+    // rama de fechas no toca `estado`—, asi que sin `AND estado = $2` el cambio
+    // se aplicaria a una fila que ya no es la que se fotografio, sin 409 y sin
+    // que nadie se entere.
+    const s = await sembrarCaso('pendiente', 'jefe2@ambientalia.com.co');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    // El jefe inmediato firma entre medias. Con `decidirSolicitud` y no con un
+    // UPDATE a pelo: es la transicion que produce produccion. Las fechas NO
+    // cambian, asi que los otros dos campos del testigo siguen casando y este
+    // choque solo lo puede ver el campo `estado`.
+    const transicion = transicionAlDecidir(s, true);
+    if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
+    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub);
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_de_estado' });
+
+    // El ROLLBACK deshace el paso 1: la propuesta vuelve a esperar decision.
+    const m = await modificacionPorId(db, alta.modificacion.id);
+    expect(m?.estado).toBe('pendiente');
+
+    // La firma del jefe sigue en pie y las fechas siguen siendo las originales:
+    // el cambio no se colo por debajo.
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.estado).toBe('pendiente_2');
+    expect(final?.fechaInicio).toBe('2026-07-06');
+    expect(final?.fechaFin).toBe('2026-07-10');
+  });
+
+  it('CANDADO: la rama de ANULACION lleva el mismo testigo que la de fechas', async () => {
+    // Las dos clases comparten `TESTIGO_SOLICITUD` pero tienen `SET` distintos, y
+    // hasta este test TODOS los del testigo corrian por la rama de `fechas`:
+    // desenganchar la de anulacion del testigo dejaba la bateria entera en verde
+    // mientras una anulacion pisaba en silencio la correccion de un admin.
+    const s = await sembrarCaso('aprobada');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'anulacion',
+        estadoEsperado: 'aprobada',
+        // Los tres a null: lo exige el CHECK `modificaciones_campos_por_clase`.
+        fechaInicioNueva: null,
+        fechaFinNueva: null,
+        diasHabilesNuevos: null,
+        motivo: 'Se cancelo el viaje',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    // El admin corrige las fechas por PATCH. No encola nada.
+    await db.query(
+      `UPDATE portal.solicitudes_ausencia
+          SET fecha_inicio = '2026-07-07', fecha_fin = '2026-07-11'
+        WHERE id = $1`,
+      [s.id],
+    );
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_de_estado' });
+
+    const m = await modificacionPorId(db, alta.modificacion.id);
+    expect(m?.estado).toBe('pendiente');
+
+    // La correccion del admin sigue en pie, y la solicitud sin anular.
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.estado).toBe('aprobada');
+    expect(final?.anuladaAt).toBeNull();
+    expect(final?.fechaInicio).toBe('2026-07-07');
+    expect(final?.fechaFin).toBe('2026-07-11');
+  });
 });
 
 describe('el indice unico parcial de la 024', () => {
