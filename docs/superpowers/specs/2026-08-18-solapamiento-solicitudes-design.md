@@ -101,8 +101,10 @@ buscar todas sería trabajo que nadie lee.
 Dos cosas que el código tiene que explicar:
 
 - **`id <> $4` es imprescindible.** Sin él, cambiar las fechas de una solicitud
-  chocaría siempre contra ella misma. Va como parámetro opcional porque el alta no
-  tiene id todavía.
+  chocaría siempre contra ella misma. Qué pasa cada puerta: el **alta**, `null`
+  —todavía no hay fila—; las otras tres, **el id de la solicitud que se está
+  moviendo**. Y las fechas que se comparan son siempre **las propuestas**, no las
+  que la solicitud tiene ahora.
 - **Aquí el filtro de rechazadas falla en CERRADO**, al revés que en
   `ausenciasEntre`. Si mañana aparece un estado nuevo, allí se pintaría de más y
   aquí se bloquearía de más. Bloquear de más lo reporta un usuario el mismo día;
