@@ -226,3 +226,68 @@ describe('el indice unico parcial de la 024', () => {
     expect((rows[0] as { n: number }).n).toBe(1);
   });
 });
+
+describe('lo que escribe aprobar una modificacion', () => {
+  it('CANDADO: aprobar un cambio de fechas NO re-decide la solicitud', async () => {
+    // Aprobar un cambio no es decidir la solicitud. Si el SET tocara `estado`,
+    // una `pendiente` quedaria concedida sin que ningun firmante la firmara.
+    const s = await sembrarCaso('pendiente');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r.ok).toBe(true);
+
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.estado).toBe('pendiente');
+    expect(final?.fechaInicio).toBe('2026-07-13');
+    expect(final?.anuladaAt).toBeNull();
+  });
+
+  it('CANDADO: anular deja rechazada + anulada_at, y NO toca las fechas', async () => {
+    // Anular no estrena estado: `rechazada` ya hereda la semantica correcta en
+    // los seis filtros que miran el estado, y `anulada_at` es lo unico que la
+    // distingue de un rechazo del jefe. Las fechas se conservan: la ausencia
+    // anulada sigue diciendo cual era.
+    const s = await sembrarCaso('aprobada');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'anulacion',
+        estadoEsperado: 'aprobada',
+        fechaInicioNueva: null,
+        fechaFinNueva: null,
+        diasHabilesNuevos: null,
+        motivo: 'Se cancelo el viaje',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r.ok).toBe(true);
+
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.estado).toBe('rechazada');
+    expect(final?.anuladaAt).not.toBeNull();
+    expect(final?.fechaInicio).toBe('2026-07-06');
+    expect(final?.fechaFin).toBe('2026-07-10');
+  });
+});
