@@ -279,6 +279,16 @@ export interface Solicitud {
    * «rechazada por el jefe». La etiqueta se deriva al pintar, no se almacena.
    */
   anuladaAt: string | null;
+  /**
+   * El evento del calendario del que esta solicitud es dueña, o `null`.
+   *
+   * `null` cubre dos casos distintos, y ninguno es «no está en Google»: o la
+   * solicitud nunca llegó a aprobarse, o se aprobó ANTES de que impusiéramos el
+   * id y su evento lleva el que Google inventó, que nadie apuntó. La conclusión
+   * operativa es la misma en los dos: ese evento no se puede corregir solo, y
+   * el correo tiene que seguir pidiendo el ajuste a mano.
+   */
+  eventoCalendarioId: string | null;
 }
 
 /**
@@ -322,9 +332,32 @@ export interface CorreoEvento {
   cuerpo: string;
 }
 
+/**
+ * Qué hay que hacerle al evento del calendario.
+ *
+ * `crear` es lo de siempre. Los otros dos existen porque el evento se crea con
+ * un id que decidimos nosotros —ver `idDeEventoCalendario`—, y tener ese id es
+ * lo que permite volver a él: reprogramar una ausencia lo mueve y anularla lo
+ * borra, en vez de pedirle a alguien que lo ajuste a mano.
+ */
+export type AccionCalendario = 'crear' | 'actualizar' | 'borrar';
+
 /** Evento *all-day* de Google Calendar. `fin` ya viene sumado un día. */
 export interface EventoCalendario {
   calendarId: string;
+  /**
+   * El id del evento DENTRO de ese calendario. Se impone al crearlo, y por eso
+   * sirve también para localizarlo después.
+   */
+  eventId: string;
+  accion: AccionCalendario;
+  /**
+   * Los tres de abajo viajan SIEMPRE, también en un `borrar`, donde describen
+   * el evento tal como está justo antes de desaparecer. Dejarlos fuera cuando
+   * no hacen falta sería reintroducir por la puerta de atrás el problema que
+   * avisa `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y
+   * este contrato no distingue eso de un valor.
+   */
   resumen: string;
   inicio: string;
   /** Fin EXCLUSIVO: Google no pinta el último día si no se le suma uno. */

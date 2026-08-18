@@ -134,6 +134,17 @@ export interface Solicitud {
    * «Rechazada», como antes de esta feature. Menos preciso, no roto.
    */
   anuladaAt: string | null;
+  /**
+   * El evento de Google Calendar del que esta solicitud es dueña, cuando lo
+   * creó el portal con un id propio. Está aquí porque viaja en la respuesta y
+   * este fichero es un espejo, no porque haga falta: **ninguna pantalla lo
+   * lee**, y decide cosas que ocurren enteras en el servidor —si una anulación
+   * corrige el calendario sola o si el correo pide hacerlo a mano—.
+   *
+   * Opcional a propósito: es más nuevo que los dos de arriba, así que la ventana
+   * de despliegue en la que no llega es aún más ancha.
+   */
+  eventoCalendarioId?: string | null;
 }
 
 /** Una solicitud de la bandeja de aprobación. */
