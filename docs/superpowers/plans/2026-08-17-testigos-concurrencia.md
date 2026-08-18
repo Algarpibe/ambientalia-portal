@@ -507,8 +507,10 @@ En `apps/hub-api/src/ausencias/repo.ts:1057`, sustituir:
 por:
 
 ```sql
-        WHERE id = $1 AND estado IN ('pendiente', 'pendiente_2')
+        WHERE id = $1 AND estado IN ('pendiente', 'pendiente_2') AND $7::text IS NOT NULL
 ```
+
+⚠️ El `AND $7::text IS NOT NULL` es imprescindible y no es decorativo. Si se quita `$7` del todo, el array de valores sigue mandando siete y Postgres **rechaza el bind** («bind message supplies 7 parameters, but prepared statement requires 6») antes de ejecutar nada: el test se pone rojo, pero por un error del driver en la PRIMERA llamada, sin llegar a ejercitar la carrera. Eso no falsa el candado, solo demuestra que el SQL está roto. Manteniendo el parámetro pero inerte, el testigo muere y la carrera sí ocurre. El `::text` fija el tipo, que si no Postgres no puede inferirlo.
 
 Correr `npm run test:db`.
 
@@ -603,8 +605,10 @@ En `apps/hub-api/src/ausencias/repo.ts`, dentro del `INSERT INTO portal.solicitu
 por:
 
 ```sql
-          WHERE s.id = $1 AND s.estado IN ('pendiente', 'pendiente_2', 'aprobada')
+          WHERE s.id = $1 AND s.estado IN ('pendiente', 'pendiente_2', 'aprobada') AND $8::text IS NOT NULL
 ```
+
+⚠️ Igual que en la Task 4: el `AND $8::text IS NOT NULL` mantiene vivo el parámetro. Sin él, el array sigue mandando ocho valores para siete placeholders y Postgres rechaza el bind antes de ejecutar nada — un rojo del driver que no falsa el candado.
 
 Correr `npm run test:db`.
 
