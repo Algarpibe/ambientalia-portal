@@ -324,18 +324,30 @@ describe('el indice unico parcial de la 024', () => {
 describe('lo que escribe aprobar una modificacion', () => {
   it('CANDADO: aprobar un cambio de fechas NO re-decide la solicitud', async () => {
     // Aprobar un cambio no es decidir la solicitud. Si el SET tocara `estado`,
-    // una `pendiente` quedaria concedida sin que ningun firmante la firmara.
+    // una `pendiente` quedaria concedida sin que ningun firmante la firmara. Y
+    // las tres columnas que SI escribe tienen que llegar de verdad a la fila.
     const s = await sembrarCaso('pendiente');
 
+    // Las fechas nuevas SOLAPAN a proposito con las viejas (6-10 de julio), y
+    // los dias nuevos son SEIS y no cinco. Las dos cosas son deliberadas y sin
+    // ellas el test no vigila nada:
+    //  - Si los dias coincidieran con los sembrados, anular la escritura de
+    //    `dias_habiles` no cambiaria el resultado y la asercion pasaria igual.
+    //  - Si el rango nuevo cayera entero DESPUES del viejo, anular una sola de
+    //    las dos fechas dejaria la fila invertida y saltaria el CHECK
+    //    `solicitudes_rango_valido`: el test se pondria rojo por un error del
+    //    constraint y no por la asercion, tapando cual de las dos columnas se
+    //    dejo de escribir. Solapando, las dos mutaciones dejan un rango valido y
+    //    es la asercion la que las caza.
     const alta = await crearModificacion(
       db,
       {
         solicitudId: s.id,
         clase: 'fechas',
         estadoEsperado: 'pendiente',
-        fechaInicioNueva: '2026-07-13',
-        fechaFinNueva: '2026-07-17',
-        diasHabilesNuevos: 5,
+        fechaInicioNueva: '2026-07-08',
+        fechaFinNueva: '2026-07-15',
+        diasHabilesNuevos: 6,
         motivo: 'Cita medica',
         aprobadorCorreo: 'jefe1@ambientalia.com.co',
       },
@@ -348,7 +360,11 @@ describe('lo que escribe aprobar una modificacion', () => {
 
     const final = await solicitudPorId(db, s.id);
     expect(final?.estado).toBe('pendiente');
-    expect(final?.fechaInicio).toBe('2026-07-13');
+    expect(final?.fechaInicio).toBe('2026-07-08');
+    expect(final?.fechaFin).toBe('2026-07-15');
+    // Llega como numero, no como cadena: `SELECT_SOLICITUD` castea a ::float8
+    // justo para eso (la columna es NUMERIC desde que admite el medio dia).
+    expect(final?.diasHabiles).toBe(6);
     expect(final?.anuladaAt).toBeNull();
   });
 
@@ -381,6 +397,10 @@ describe('lo que escribe aprobar una modificacion', () => {
     const final = await solicitudPorId(db, s.id);
     expect(final?.estado).toBe('rechazada');
     expect(final?.anuladaAt).not.toBeNull();
+    // El motivo lo escribio QUIEN PIDIO la anulacion: sin el, la fila quedaria
+    // `rechazada` a secas y el historial del jefe no diria por que unos dias
+    // concedidos no se disfrutaron.
+    expect(final?.motivoRechazo).toBe('Se cancelo el viaje');
     expect(final?.fechaInicio).toBe('2026-07-06');
     expect(final?.fechaFin).toBe('2026-07-10');
   });

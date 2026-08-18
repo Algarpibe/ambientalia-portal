@@ -1194,8 +1194,12 @@ npm run test:db --workspace=apps/hub-api
 
 Levanta un contenedor **`postgres:16-alpine`** —la imagen se fija a mano, un
 `latest` derivaría solo— y lo migra con el array real de `MIGRATIONS` llamando a
-`aplicarMigraciones`, la misma función que usa `initDb` en cada arranque. Así que
-una migración nueva que no se apunte en `MIGRATIONS` se delata aquí.
+`aplicarMigraciones`, la misma función que usa `initDb` en cada arranque. Lo que
+eso garantiza es **fidelidad**: el esquema de prueba no puede divergir del de
+producción, porque los dos salen del mismo array. Lo que **no** garantiza es
+detectar una migración que nadie apuntó en `MIGRATIONS` —producción tampoco la
+aplicaría, así que los dos esquemas coinciden en no tenerla—; eso solo se delata
+de rebote, cuando algún test de BD toca el esquema que esa migración traía.
 
 Son **10** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
 **y con datos** sin romper nada —que es como re-arranca producción—, y que los

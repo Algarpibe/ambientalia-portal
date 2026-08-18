@@ -31,8 +31,10 @@ function migrationsDir(): string {
  * Aplica en orden las migraciones del array. Exportada —y no en linea dentro de
  * `initDb()`— porque los tests contra Postgres real siembran su contenedor con
  * ESTA funcion: asi recorren el mismo array `MIGRATIONS` y el esquema de test no
- * puede envejecer por su cuenta. Anadir una migracion sin apuntarla en el array
- * es el olvido que no da error, y ahi es donde se delata.
+ * puede divergir del de produccion. Lo que eso NO detecta es una migracion que
+ * nadie apunto en el array: produccion tampoco la aplicaria, asi que los dos
+ * esquemas coinciden en no tenerla y nadie se queja. Eso solo se delata de
+ * rebote, cuando algun test de BD toca el esquema que esa migracion traia.
  */
 export async function aplicarMigraciones(db: Pool): Promise<void> {
   const dir = migrationsDir();
