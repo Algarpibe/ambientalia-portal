@@ -203,8 +203,15 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
           <textarea id="ed-obs" rows={2} className={CAMPO} value={observaciones} maxLength={2000} onChange={(e) => setObservaciones(e.target.value)} />
         </div>
 
+        {/* `role="alert"` por lo mismo que en PedirModificacion, que ya lo
+            lleva: el banner sale DESPUES de pulsar y sin mover el foco. Aqui
+            ademas el modal se queda abierto y con todo lo escrito intacto, que
+            es exactamente lo que parece un guardado que salio bien. */}
         {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}
