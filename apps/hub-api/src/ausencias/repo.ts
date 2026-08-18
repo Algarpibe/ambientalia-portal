@@ -1491,7 +1491,8 @@ export async function decidirModificacion(
       //    lo que la siguiente niega: la 2 deja pasar la propuesta por la
       //    exención y firmarla daría 409. Alcanzable hoy — el `PATCH` de admin
       //    admite cualquier tipo con cualquier estado, así que hay
-      //    `incapacidad`es en `aprobada`.
+      //    `incapacidad`es en `aprobada`. Y son TRES copias, no dos: el doble
+      //    in-memory de `router.test.ts` la repite también.
       //  - la clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
       //    anulación las tres columnas nuevas van a `null` —lo exige el CHECK
       //    `modificaciones_campos_por_clase` de la 024—, así que el trozo de las

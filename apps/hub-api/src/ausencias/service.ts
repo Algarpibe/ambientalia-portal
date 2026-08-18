@@ -315,6 +315,11 @@ async function exigirSinSolape(
   // Una incapacidad no se pide: se informa después de haber estado enfermo. Con
   // las fechas ya pasadas no se puede anular ni acortar nada para hacerle sitio,
   // así que bloquearla dejaría a esa persona sin poder registrarla.
+  //
+  // ⚠️ Esta línea está TRES veces: aquí, en la puerta de la firma
+  // (`repo.decidirModificacion`, que no puede llamar a esta función porque
+  // corre dentro de su transacción) y en el doble in-memory de
+  // `router.test.ts`. Quien la toque tiene que tocar las tres: nada las ata.
   if (tipo === 'incapacidad') return;
 
   const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
