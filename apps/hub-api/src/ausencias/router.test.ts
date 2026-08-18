@@ -1026,6 +1026,95 @@ describe('POST /ausencias/solicitudes', () => {
   });
 });
 
+// ── El candado del solapamiento ────────────────────────────────────────────
+
+describe('no se puede estar ausente dos veces a la vez', () => {
+  /** La fila tal como está guardada, para poder moverla por debajo. */
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  /**
+   * Deja una solicitud viva del 10 al 14 de julio y devuelve su id.
+   *
+   * El parámetro se llama `estadoFila` y no `estado` a propósito: este fichero
+   * ya tiene un `estado` de nivel de módulo —el doble del repositorio, que casi
+   * todos los tests de aquí abajo leen o mutan— y darle el mismo nombre a un
+   * parámetro lo taparía dentro de esta función sin que nada avisara.
+   */
+  async function conAusencia(estadoFila = 'aprobada') {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva({ fechaInicio: '2026-07-10', fechaFin: '2026-07-14' }))
+        .expect(201)
+    ).body as Record<string, unknown>;
+    fila(s.id as string).estado = estadoFila;
+    return s.id as string;
+  }
+
+  const pedir = (over: Record<string, unknown>) =>
+    request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva(over));
+
+  it('CANDADO: pedir encima de una aprobada da 409 y dice con que choca', async () => {
+    await conAusencia();
+    const r = await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-07-10', fechaFin: '2026-07-14' },
+    });
+  });
+
+  it('CANDADO: adyacente pasa — el borde es donde se rompen estas reglas', async () => {
+    await conAusencia();
+    await pedir({ fechaInicio: '2026-07-15', fechaFin: '2026-07-17' }).expect(201);
+  });
+
+  it('una pendiente también ocupa', async () => {
+    await conAusencia('pendiente');
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(409);
+  });
+
+  it('una rechazada no ocupa', async () => {
+    const id = await conAusencia('rechazada');
+    expect(fila(id).estado).toBe('rechazada');
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
+  });
+
+  it('una anulada tampoco ocupa', async () => {
+    // Una anulación no estrena estado propio: queda `rechazada` con `anuladaAt`
+    // puesto (ver `decidirModificacion` en el doble, y el comentario de
+    // `noHaEmpezado` en service.ts). Para el candado de solapes eso ya la deja
+    // fuera por el mismo `estado <> 'rechazada'` que descarta un rechazo
+    // corriente, así que este test no ejercita una rama nueva del código — pero
+    // sí fija, a nivel HTTP, que la forma REAL de una anulación no ocupa sitio.
+    // Sin este test, quien mañana ligue el candado a algo más fino que `estado`
+    // (por ejemplo, a `anuladaAt IS NULL`) no tendría quien le avisara si esa
+    // ruta se rompe.
+    const id = await conAusencia();
+    Object.assign(fila(id), { estado: 'rechazada', anuladaAt: '2026-01-15T12:00:00Z' });
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
+  });
+
+  it('CANDADO: una incapacidad se puede informar SIEMPRE, encima de lo que sea', async () => {
+    // Quien cae malo de vacaciones no puede anularlas —las fechas ya pasaron— ni
+    // acortarlas. Bloquear la incapacidad la dejaría sin poder registrarla.
+    await conAusencia();
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-07-12',
+          fechaFin: '2026-07-13',
+          adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+        }),
+      )
+      .expect(201);
+  });
+});
+
 // ── Aprobación ─────────────────────────────────────────────────────────────
 
 describe('decisión', () => {
@@ -1548,11 +1637,11 @@ describe('GET /ausencias/adjuntos', () => {
 describe('GET /ausencias/decididas', () => {
   const aprobador = () => token({ sub: 'comercial@ambientalia.com.co' });
 
-  async function crearYDecidir(aprueba: boolean) {
+  async function crearYDecidir(aprueba: boolean, over: Record<string, unknown> = {}) {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva())
+      .send(nueva(over))
       .expect(201);
     await request(app())
       .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
@@ -1567,12 +1656,16 @@ describe('GET /ausencias/decididas', () => {
       .solicitudes;
 
   it('lista lo aprobado y lo rechazado, no lo que sigue pendiente', async () => {
-    await crearYDecidir(true);
-    await crearYDecidir(false);
+    // Tres rangos que no se tocan: la primera queda `aprobada` y sigue viva
+    // después de decidida, así que con el candado de solapes ya en marcha
+    // reutilizar las mismas fechas por defecto para las otras dos chocaría con
+    // ella antes de llegar a lo que este test quiere comprobar.
+    await crearYDecidir(true, { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
+    await crearYDecidir(false, { fechaInicio: '2026-07-13', fechaFin: '2026-07-17' });
     await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva())
+      .send(nueva({ fechaInicio: '2026-07-20', fechaFin: '2026-07-24' }))
       .expect(201);
 
     const r = await decididas(aprobador());

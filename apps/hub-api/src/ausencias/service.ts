@@ -271,9 +271,45 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
   return empleado;
 }
 
+/**
+ * Corta si esta persona ya tiene una ausencia viva en esas fechas.
+ *
+ * Único sitio donde se decide qué es un solapamiento, para que las cuatro
+ * puertas —esta alta, proponer un cambio de fechas, aprobarlo y el `PATCH` de
+ * admin— no puedan discrepar entre ellas.
+ */
+async function exigirSinSolape(
+  db: Pool,
+  empleadoId: string,
+  tipo: TipoSolicitud,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+): Promise<void> {
+  // Una incapacidad no se pide: se informa después de haber estado enfermo. Con
+  // las fechas ya pasadas no se puede anular ni acortar nada para hacerle sitio,
+  // así que bloquearla dejaría a esa persona sin poder registrarla.
+  if (tipo === 'incapacidad') return;
+
+  const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
+  if (!choque) return;
+  // Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
+  // —`Solape` es una interface, sin index signature implícita, así que
+  // `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
+  // uuid que no necesita.
+  throw new AusenciaError('rango_solapado', 409, 'fechaInicio', {
+    tipo: choque.tipo,
+    estado: choque.estado,
+    fechaInicio: choque.fechaInicio,
+    fechaFin: choque.fechaFin,
+  });
+}
+
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
+  // Va aquí porque necesita el id del empleado, y antes de escribir nada.
+  await exigirSinSolape(db, empleado.id, datos.tipo, datos.fechaInicio, datos.fechaFin, null);
   const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
 
   const aprueba = requiereAprobacion(datos.tipo);
