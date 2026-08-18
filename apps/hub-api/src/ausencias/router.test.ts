@@ -675,6 +675,35 @@ vi.mock('./repo.js', () => ({
         fechaFin: '2026-08-11',
       },
     ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
+  // REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
+  // `repo.solapeDe`, y quien lo ejecuta contra Postgres real es
+  // `repo.solapes.db.test.ts`. Esto solo IMITA su resultado.
+  solapeDe: async (
+    _db: unknown,
+    empleadoId: string,
+    fechaInicio: string,
+    fechaFin: string,
+    excluirSolicitudId: string | null,
+  ) => {
+    const choque = estado.solicitudes.find(
+      (s: any) =>
+        s.empleadoId === empleadoId &&
+        s.estado !== 'rechazada' &&
+        s.tipo !== 'incapacidad' &&
+        (excluirSolicitudId === null || s.id !== excluirSolicitudId) &&
+        s.fechaInicio <= fechaFin &&
+        s.fechaFin >= fechaInicio,
+    );
+    return choque
+      ? {
+          id: choque.id,
+          tipo: choque.tipo,
+          estado: choque.estado,
+          fechaInicio: choque.fechaInicio,
+          fechaFin: choque.fechaFin,
+        }
+      : null;
+  },
 }));
 
 // ── El candado del doble ───────────────────────────────────────────────────
@@ -683,7 +712,7 @@ vi.mock('./repo.js', () => ({
  * Este candado va PEGADO al doble a proposito: quien lo edite tiene que verlo.
  *
  * Lo de arriba no es un stub, es un SEGUNDO SISTEMA — mas de quinientas lineas
- * que reimplementan en memoria las 38 funciones de `repo.ts`, o sea el
+ * que reimplementan en memoria las 39 funciones de `repo.ts`, o sea el
  * repositorio entero. Los mas de doscientos tests de este fichero corren contra
  * esa copia, asi que quien toca el repositorio mantiene dos implementaciones, lo
  * sepa o no.
@@ -726,7 +755,7 @@ describe('el doble del repositorio', () => {
 
     // Las dos direcciones por separado, y no un `toEqual` entre las dos listas:
     // asi el rojo dice el NOMBRE de lo que falla en vez de escupir dos listas de
-    // 38 elementos para que las compare el lector.
+    // 39 elementos para que las compare el lector.
     expect(
       enElRepo.filter((n) => !enElDoble.includes(n)),
       'repo.ts exporta funciones que el doble de este fichero no modela',

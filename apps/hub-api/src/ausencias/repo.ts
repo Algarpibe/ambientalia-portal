@@ -1720,3 +1720,69 @@ export async function ausenciasEntre(
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
 }
+
+/** Una ausencia viva que se cruza con un rango. Lo justo para redactar el aviso. */
+export interface Solape {
+  id: string;
+  tipo: TipoSolicitud;
+  estado: Solicitud['estado'];
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+/**
+ * La primera ausencia VIVA de esta persona que se cruza con el rango, o `null`.
+ *
+ * Mismo predicado que `ausenciasEntre` —solapa, no contiene—, y a propósito: son
+ * la misma pregunta hecha desde dos sitios, y dos formulaciones distintas
+ * acabarían discrepando en los bordes.
+ *
+ * `LIMIT 1` porque el mensaje solo puede nombrar una colisión; buscarlas todas
+ * sería trabajo que nadie lee.
+ *
+ * ⚠️ Aquí el filtro de estado falla en CERRADO, al revés que en `ausenciasEntre`.
+ * Un estado nuevo que nadie añada a la lista se contaría como ocupado y
+ * bloquearía de más: eso lo reporta un usuario el mismo día. Allí pasaría lo
+ * contrario —se pintaría de más—, y eso no lo nota nadie.
+ *
+ * `excluirSolicitudId` es imprescindible al mover fechas: sin él, una solicitud
+ * chocaría siempre contra ella misma. El alta pasa `null` porque todavía no hay
+ * fila.
+ *
+ * Acepta `PoolClient` además de `Pool` para poder llamarse DENTRO de la
+ * transacción que aplica un cambio de fechas, que es donde la comprobación deja
+ * de tener ventana de carrera.
+ */
+export async function solapeDe(
+  db: Pool | PoolClient,
+  empleadoId: string,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+): Promise<Solape | null> {
+  const { rows } = await db.query(
+    `SELECT id, tipo, estado,
+            fecha_inicio::text AS fecha_inicio,
+            fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia
+      WHERE empleado_id = $1
+        AND estado <> 'rechazada'
+        -- La incapacidad no se pide, se informa: no ocupa ni se le puede negar.
+        AND tipo   <> 'incapacidad'
+        AND ($4::uuid IS NULL OR id <> $4)
+        AND fecha_inicio <= $3::date
+        AND fecha_fin    >= $2::date
+      ORDER BY fecha_inicio, id
+      LIMIT 1`,
+    [empleadoId, fechaInicio, fechaFin, excluirSolicitudId],
+  );
+  if (rows.length === 0) return null;
+  const r = rows[0] as {
+    id: string;
+    tipo: TipoSolicitud;
+    estado: Solicitud['estado'];
+    fecha_inicio: string;
+    fecha_fin: string;
+  };
+  return { id: r.id, tipo: r.tipo, estado: r.estado, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin };
+}
