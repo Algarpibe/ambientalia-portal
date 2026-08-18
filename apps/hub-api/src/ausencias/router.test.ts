@@ -14,6 +14,30 @@ process.env.WO_SALES_CRON_TOKEN = 'cron-wo-sales';
 
 // ── Doble del repositorio ──────────────────────────────────────────────────
 
+/**
+ * ⚠️ Este doble NO modela concurrencia, y ningun test de este fichero prueba
+ * que una carrera se corte.
+ *
+ * Las carreras de verdad las cortan Postgres y solo Postgres: el
+ * `AND estado = $N` de los UPDATE y el indice unico parcial
+ * `ux_modificaciones_una_pendiente`. Aqui no hay motor y no hay simultaneidad —
+ * los tests hacen `await` de una peticion antes de lanzar la siguiente, y cada
+ * funcion de abajo comprueba y escribe sin ceder el turno, asi que dos
+ * escrituras no llegan a solaparse jamas. El escenario que los testigos existen
+ * para atajar no se puede reproducir aqui ni queriendo, y por eso el test que
+ * mas se acerca —el de `pisarEstadoAlCrearModificacion`— tiene que PROGRAMAR el
+ * adelanto a mano en vez de provocarlo.
+ *
+ * Asi que cuando un test de este fichero afirma un 409, lo que comprueba es el
+ * CABLEADO: que el router traduce a 409 el `null` (o el `{ ok: false }`) que le
+ * devuelve el repositorio. Quien produce ese `null` aqui es un `if` de
+ * JavaScript escrito a mano, no el motor.
+ *
+ * La garantia de que la carrera se corta de verdad vive en el cuarto porton,
+ * `npm run test:db`, donde `repo.testigos.db.test.ts` ejecuta ese SQL contra un
+ * Postgres 17 real. Quien la busque, que la busque alli y no aqui.
+ */
+
 interface EventoFalso {
   id: number;
   evento: string;
@@ -234,6 +258,20 @@ vi.mock('./repo.js', () => ({
   // sacando la ficha entera de `estado.plantilla`, ver el `.filter` de más abajo
   // en el fichero), así que no hay un `=== true` que igualar; se deja abierta a
   // que una ficha futura omita el campo sin dejar de contar como activa.
+  //
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y HOY NO LA VIGILA NINGUN TEST DE BD.
+  // La fuente de verdad es el `AND activo AND ve_adjuntos` de
+  // `repo.esVisorDeAdjuntos`, y el cuarto porton no toca esa funcion: quitarle
+  // el `activo` dejaria los catorce tests de BD en verde y a un ex-empleado
+  // descargando los PDF medicos de la plantilla.
+  //
+  // Ojo con confundirlo con lo que SI esta cubierto: `repo.calendario.db.test.ts`
+  // > «CANDADO: un empleado desactivado no aporta ausencias, aunque las tenga en
+  // rango» vigila el `e.activo` de `ausenciasEntre`, que es OTRO filtro sobre
+  // otra consulta — y que este doble ni siquiera modela (su `ausenciasEntre`
+  // devuelve una lista fija). Es decir: de los dos `activo`, el que este doble
+  // reimplementa es el que nadie ejecuta, y el que alguien ejecuta es el que
+  // este doble no reimplementa.
   esVisorDeAdjuntos: async (_db: unknown, email: string) =>
     estado.plantilla.some(
       (e: any) =>
@@ -327,6 +365,14 @@ vi.mock('./repo.js', () => ({
     // adelantó, no hay fila y el servicio lo traduce a 409. Comparar contra el
     // estado ESPERADO y no contra una lista es lo que hace que un doble clic del
     // jefe inmediato no encadene las dos firmas de golpe.
+    //
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es ese `WHERE`, y
+    // quien lo ejecuta contra un Postgres real es
+    // `repo.testigos.db.test.ts` > «CANDADO: el doble clic del jefe decide UNA
+    // vez, no dos», en el cuarto porton (`npm run test:db`). Este `if` solo
+    // IMITA su resultado: si aquel testigo cambia, este `if` tiene que seguirlo,
+    // porque nada de este fichero se pondria rojo si se quedara con la regla
+    // vieja.
     if (!s || s.estado !== estadoEsperado) return null;
     s.estado = transicion.estado;
     s.motivoRechazo = motivo;
@@ -363,8 +409,33 @@ vi.mock('./repo.js', () => ({
     }
 
     const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+    // `AND s.estado = $8` del INSERT de `repo.crearModificacion`, y lo ejecuta
+    // contra un Postgres real `repo.testigos.db.test.ts` > «CANDADO: si la
+    // solicitud avanza de nivel mientras escribes, la propuesta NO se congela
+    // con el decisor equivocado» (cuarto porton, `npm run test:db`).
+    //
+    // Lo que ese test deja escrito y este `if` no se ve: el testigo NO protege
+    // `estadoPrevio` —eso sale de la fila, aqui abajo, y seria cierto con
+    // testigo y sin el— sino `aprobadorCorreo`, el decisor que el servicio
+    // calculo con el estado VIEJO. Por eso no se puede relajar a un
+    // `IN (...)` de estados admisibles, por mucho que la foto siguiera saliendo
+    // bien.
     if (!s || s.estado !== datos.estadoEsperado) return { ok: false, razon: 'estado' };
 
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y AL REVES. La fuente de verdad es el
+    // indice unico parcial `ux_modificaciones_una_pendiente` de la 024: el repo
+    // real NO comprueba nada antes, deja fallar el INSERT y reconoce el 23505
+    // POR EL NOMBRE del constraint. Lo vigila
+    // `repo.testigos.db.test.ts` > «CANDADO: la segunda propuesta viva la corta
+    // la BASE, y el codigo la reconoce por su nombre», que ademas es de los que
+    // solo tienen sentido contra Postgres: con un pool falso, el nombre del
+    // constraint que emite el motor y el que espera el `catch` serian el mismo
+    // por construccion.
+    //
+    // Este `some(...)` es justo la comprobacion previa que el repo real evita, y
+    // no puede ser otra cosa: la carrera que el indice corta —dos altas
+    // simultaneas— no ocurre en memoria.
     if (estado.modificaciones.some((m) => m.solicitudId === datos.solicitudId && m.estado === 'pendiente')) {
       return { ok: false, razon: 'duplicada' };
     }
@@ -391,6 +462,22 @@ vi.mock('./repo.js', () => ({
     };
     estado.modificaciones.push(modificacion);
     // El LEFT JOIN: desde ya, la solicitud viaja con su propuesta viva.
+    //
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y HOY NO LA VIGILA NINGUN TEST DE BD.
+    // La fuente de verdad es el `LEFT JOIN portal.solicitud_modificaciones m ON
+    // m.solicitud_id = s.id AND m.estado = 'pendiente'` de `SELECT_SOLICITUD`,
+    // del que cuelgan TODAS las consultas que devuelven solicitudes (once, hoy).
+    // Los tests del cuarto
+    // porton EJECUTAN ese SELECT —`crearModificacion` lo relee para el correo—,
+    // pero ninguno AFIRMA nada sobre lo que trae: `payloadStub` ignora la
+    // solicitud que recibe, y la unica asercion sobre la bandeja
+    // (`modificacionesPendientes(...)` en el test del decisor congelado) espera
+    // lista vacia, o sea el caso en que no hay propuesta que colgar.
+    //
+    // Traducido: si el JOIN dejara de colgar la propuesta viva, el cuarto porton
+    // seguiria verde y este doble tambien. Lo que si esta cubierto es la
+    // condicion de UNICIDAD en la que el JOIN se apoya para no multiplicar filas
+    // (el indice parcial, arriba).
     s.modificacionPendiente = modificacion;
 
     estado.eventos.push({
@@ -439,9 +526,27 @@ vi.mock('./repo.js', () => ({
     construirPayload: (s: unknown, m: unknown, evento: string) => unknown,
   ) => {
     const m = estado.modificaciones.find((x) => x.id === id);
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y HOY NO LA VIGILA NINGUN TEST DE BD.
+    // La fuente de verdad es el `WHERE m.id = $1 AND m.estado = 'pendiente'` del
+    // UPDATE de `repo.decidirModificacion`. Los cinco tests del cuarto porton
+    // que llaman a esa funcion se reparten entre los tres del testigo TRIPLE del
+    // paso 2 (`razon: 'solicitud_cambio_de_estado'`) y dos que aprueban con
+    // exito; ninguno la llama DOS VECES sobre la misma propuesta, asi que a
+    // `razon: 'ya_decidida'` no llega nadie. Quitar ese `AND` del SQL dejaria
+    // los catorce tests de BD en verde.
+    //
+    // Mismo agujero, sin anotar aparte, en `retirarModificacion` de mas abajo:
+    // su `AND estado = 'pendiente'` tampoco lo ejecuta nadie contra Postgres.
     if (!m || m.estado !== 'pendiente') return { ok: false, razon: 'ya_decidida' };
 
     const s = estado.solicitudes.find((x) => x.id === m.solicitudId);
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es
+    // `TESTIGO_SOLICITUD` (estado + las dos fechas), compartido por las dos
+    // clases de cambio. Lo vigilan TRES tests de `repo.testigos.db.test.ts`, uno
+    // por cada cosa que el testigo puede perder: «aprobar un cambio NO pisa la
+    // correccion que un admin hizo por PATCH», «... NO se aplica sobre una
+    // solicitud que ya avanzo de nivel» y «la rama de ANULACION lleva el mismo
+    // testigo que la de fechas». Los tres corren en el cuarto porton.
     if (
       aprueba &&
       (!s ||
@@ -552,6 +657,70 @@ vi.mock('./repo.js', () => ({
       },
     ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
 }));
+
+// ── El candado del doble ───────────────────────────────────────────────────
+
+/**
+ * Este candado va PEGADO al doble a proposito: quien lo edite tiene que verlo.
+ *
+ * Lo de arriba no es un stub, es un SEGUNDO SISTEMA — mas de quinientas lineas
+ * que reimplementan en memoria las 38 funciones de `repo.ts`, o sea el
+ * repositorio entero. Los mas de doscientos tests de este fichero corren contra
+ * esa copia, asi que quien toca el repositorio mantiene dos implementaciones, lo
+ * sepa o no.
+ *
+ * Sin este candado, anadir una funcion al repo y olvidarla aqui NO da error, y
+ * los dos finales posibles son malos:
+ *
+ *  - Algun test la llama, y revienta con un `is not a function` que no apunta a
+ *    nada: el rojo aparece en una ruta del router y la causa esta aqui arriba,
+ *    en una lista de propiedades que nadie relaciona con el fallo.
+ *  - O —peor— ninguno la ejercita, todo sigue verde, y la funcion nueva llega a
+ *    produccion sin que la haya mirado un solo test. Nadie se entera, porque no
+ *    hay nada que se ponga rojo.
+ *
+ * Por eso compara SUPERFICIES y no comportamiento: la igualdad de nombres es lo
+ * unico que se puede exigir barato desde aqui. Que ademas el doble se comporte
+ * como el SQL no lo puede saber este fichero — eso lo vigilan las anotaciones
+ * «REGLA DE SQL REIMPLEMENTADA AQUI» repartidas por el doble, cada una con el
+ * test del cuarto porton que le corresponde (o con el aviso de que no hay
+ * ninguno).
+ */
+describe('el doble del repositorio', () => {
+  it('CANDADO: modela exactamente las funciones que exporta repo.ts, ni una mas ni una menos', async () => {
+    // Dentro de este fichero `./repo.js` esta mockeado, asi que un import normal
+    // devuelve el doble. `vi.importActual` es la unica forma de alcanzar a la
+    // vez el modulo de verdad y poder compararlos.
+    const real = await vi.importActual<typeof import('./repo.js')>('./repo.js');
+    const doble = await import('./repo.js');
+
+    // Solo lo que existe en RUNTIME. Las `interface` y los `type` de `repo.ts`
+    // se borran al compilar: exigir que el doble los modele seria exigirle algo
+    // que no se puede ni observar desde aqui.
+    const funciones = (m: object): string[] =>
+      Object.keys(m)
+        .filter((k) => typeof (m as Record<string, unknown>)[k] === 'function')
+        .sort();
+
+    const enElRepo = funciones(real);
+    const enElDoble = funciones(doble);
+
+    // Las dos direcciones por separado, y no un `toEqual` entre las dos listas:
+    // asi el rojo dice el NOMBRE de lo que falla en vez de escupir dos listas de
+    // 38 elementos para que las compare el lector.
+    expect(
+      enElRepo.filter((n) => !enElDoble.includes(n)),
+      'repo.ts exporta funciones que el doble de este fichero no modela',
+    ).toEqual([]);
+    // La direccion contraria importa igual: una funcion que sobra en el doble
+    // significa que el repo ya no la exporta, y entonces hay tests verdes
+    // ejercitando codigo que se borro.
+    expect(
+      enElDoble.filter((n) => !enElRepo.includes(n)),
+      'el doble modela funciones que repo.ts ya no exporta',
+    ).toEqual([]);
+  });
+});
 
 const { createAusenciasRouter } = await import('./router.js');
 
