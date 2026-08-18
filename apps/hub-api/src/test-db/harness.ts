@@ -5,11 +5,23 @@ import type { PayloadEvento, Solicitud } from '../ausencias/types.js';
 
 /** El pool REAL de produccion, apuntando al contenedor. Ningun doble. */
 export function poolDePrueba(): Pool {
-  return createPoolFromUrl(inject('urlBd'));
+  const db = createPoolFromUrl(inject('urlBd'));
+  // El mismo listener que instala `getHubPool()` en db.ts, y por lo mismo que
+  // explica alli: sin el, un 'error' de cliente inactivo es un error de
+  // EventEmitter sin manejar. Aqui se llevaria por delante el proceso de vitest
+  // entero —error opaco, ningun test rojo— en vez de fallar el test que corre.
+  db.on('error', (err: Error) => console.error('pool de prueba', err));
+  return db;
 }
 
 /**
  * Vacia las tablas entre tests.
+ *
+ * `portal.solicitud_adjuntos` no esta en la lista y se vacia igual: cuelga de
+ * `solicitudes_ausencia` por FK y el CASCADE se la lleva. Se dice aqui porque
+ * no vale de regla general — este esquema tiene auditoria SIN FK a proposito
+ * (`visores_adjuntos_log`, ver la 022), y esa habria que anadirla a mano el dia
+ * que un test la toque.
  *
  * No sirve envolver cada test en una transaccion: el codigo bajo prueba abre las
  * suyas con `withTransaction`, y anidarlas exigiria savepoints — justo lo que no
