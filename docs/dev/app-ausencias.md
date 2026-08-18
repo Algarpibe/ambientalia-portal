@@ -942,12 +942,12 @@ tras desplegar, y los tres fallan enseñando algo plausible en vez de romperse:
   **Necesaria** y la línea de debajo que dice quién está arriba y si firma o solo
   se entera.
 
-> ⚠️ **La columna «2ª firma» no tiene NINGUNA red automática.** El backend que
-> hay detrás sí —endpoint, servicio, repo y `aprobadoresDe` están cubiertos—,
-> pero la casilla en sí no la comprueba nada: `apps/ausencias` no tiene tests, y
-> su `typecheck` estricto **no es portón** (ver el último punto de «Gotchas que
-> costaron»: el `build` es `vite build` a secas y nadie corre
-> `tsc -p apps/ausencias/tsconfig.json`). Su **única** verificación es abrirla en
+> ⚠️ **La columna «2ª firma» no tiene NINGUNA red automática de comportamiento.**
+> El backend que hay detrás sí —endpoint, servicio, repo y `aprobadoresDe` están
+> cubiertos—, pero lo que la casilla *hace* no lo comprueba nada: `apps/ausencias`
+> no tiene tests. Desde el 2026-08-18 su `typecheck` estricto **sí es portón**
+> (`npm run typecheck`, con su paso propio en el CI), así que los errores de tipo
+> ya no pasan; lo que sigue sin red es la lógica. Su **única** verificación es abrirla en
 > el navegador y mirarla. Los modos de fallo son de los que no se ven: la casilla
 > guardando sin que nadie la mire, el `!!` que evita que el checkbox se vuelva no
 > controlado si el backend deja de mandar el campo, o la línea de abajo diciendo
@@ -1419,18 +1419,21 @@ del enmascarado de arriba.
   estricto propio, `npx tsc --noEmit -p apps/ausencias/tsconfig.json`,
   sigue siendo un comando manual que hay que acordarse de teclear — hoy
   sale limpio, igual que el del portal.
-  **Convertirlo en portón NO es solo una línea.** Cambiar el `build` de
-  `ausencias` a `"tsc --noEmit && vite build"` no basta, porque nada
-  ejecuta ese `build`: el CI (`.github/workflows/ci.yml`) solo corre
-  `npm run build` para `apps/portal` y `apps/hub-api`, y el `build` de la
-  raíz (`npm run build --workspaces --if-present`) existe en el
-  `package.json` raíz pero no lo invoca nadie —no hay `turbo.json` pese al
-  `turbo` en las devDependencies, y los tres Dockerfiles (`Dockerfile`,
-  `apps/portal/Dockerfile`, `apps/hub-api/Dockerfile`) llaman a builds de
-  workspace concretos, nunca al de la raíz—. Haría falta el cambio en el
-  `package.json` de `ausencias` **y además** un paso nuevo en el CI que lo
-  invoque; el primero sin el segundo daría una falsa sensación de gate.
-  Sigue **pendiente de decisión**, no hecho.
+  **Hecho el 2026-08-18, y efectivamente no era una línea.** Como decía este
+  punto, cambiar el `build` de `ausencias` no habría servido de nada: nada lo
+  invoca —el CI solo construye `apps/portal` y `apps/hub-api`, el `build` de
+  la raíz no lo llama nadie (no hay `turbo.json` pese al `turbo` de las
+  devDependencies) y los tres Dockerfiles apuntan a workspaces concretos—.
+  Hicieron falta las dos piezas: un script `typecheck` en el `package.json`
+  de `ausencias` (`tsc --noEmit -p tsconfig.json`) **y** un paso propio en
+  `ci.yml` que corre `npm run typecheck --workspaces --if-present`, con
+  `--if-present` para que la sub-app que lo añada mañana entre sola.
+
+  El agujero era real, no teórico, y se comprobó antes de taparlo: metiendo
+  `const variableQueNadieUsa = 42;` en `focoDeModal.ts`, el tsconfig propio
+  da `TS6133` y el build del portal pasa **sin una queja**, porque
+  `apps/portal/tsconfig.app.json` pone `noUnusedLocals`,
+  `noUnusedParameters` y `verbatimModuleSyntax` en `false` a propósito.
 
 ## Puesta en marcha
 
