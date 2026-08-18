@@ -1,9 +1,10 @@
 # App «Vacaciones y Permisos» (`ausencias`)
 
 Sustituye al flujo de n8n *Solicitud vacaciones_permisos_compensatorios_
-incapacidades 1.5* (`mt75OpO0fGIXv5QG`, 44 nodos). El formulario, la aprobación y
-el historial viven en el portal; n8n queda como brazo ejecutor de Gmail,
-Calendar y Sheets.
+incapacidades 1.5* (`mt75OpO0fGIXv5QG`, 44 nodos), **despublicado el 2026-08-18**.
+El formulario, la aprobación y el historial viven en el portal; n8n queda como
+brazo ejecutor de Gmail, Calendar y Sheets, en el workflow *Ausencias — Portal*
+(`dh0xjWCHsGj9raYH`, 13 nodos), que es el que consume el outbox.
 
 ## Qué cambió respecto del flujo viejo
 
@@ -1460,6 +1461,8 @@ del enmascarado de arriba.
 6. Activar el workflow **«Ausencias — Portal»** en n8n.
 7. Convivencia: dejar el flujo viejo (`mt75OpO0fGIXv5QG`) activo unos días y
    **desactivarlo** —no borrarlo— cuando el nuevo lleve una semana sin incidencias.
+   **Hecho el 2026-08-18**: despublicado, no borrado, y sigue ahí por si hay que
+   consultar cómo redactaba algún correo.
 8. *(Cascada)* **Se despliega apagada y se enciende sola.** Toda la plantilla
    cuelga hoy de `comercial@ambientalia.com.co`, y ese buzón es su propio jefe por
    el mismo DEFAULT: raíz, luego `segundo = null` para todo el mundo y una sola
@@ -1490,10 +1493,14 @@ del enmascarado de arriba.
   del buzón por defecto y firma una sola persona.
 - Retirar la copia a Google Sheets cuando Nómina consulte solo el portal.
 - Widget de dashboard con las ausencias del mes.
-- **Desactivar el flujo viejo `mt75OpO0fGIXv5QG`.** Sigue `active: true` con su
-  formulario público y sus propios nodos de Google Drive, así que cualquiera con
-  la URL guardada puede seguir mandando solicitudes que esquivan el portal — y
-  subiendo PDF a Drive. Mientras siga encendido, «Drive fuera» es solo la mitad.
+- ~~**Desactivar el flujo viejo `mt75OpO0fGIXv5QG`.**~~ **Hecho el 2026-08-18.** Se
+  despublicó, y con él se cerró el formulario público y sus nodos de Google Drive:
+  ya no hay forma de mandar una solicitud que esquive el portal. Verificado antes
+  de apagarlo que su **único** disparador era `On form submission` y que ninguno de
+  sus 44 nodos tocaba el outbox — los correos de la app los sirve *Ausencias —
+  Portal* (`dh0xjWCHsGj9raYH`), que sigue activo y es otro workflow. Ojo al
+  nombre: existe además un `4UZH0VUYgOj6Zpwp` llamado «…_Portal_1.5» que está
+  archivado desde agosto y no sirve a nada; los tres nombres se parecen mucho.
 - Registro de descargas de adjuntos, si la lista de visores crece.
 
 
