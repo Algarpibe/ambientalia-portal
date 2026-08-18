@@ -65,6 +65,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     // Sin propuesta de cambio viva y sin anular: el estado de casi todas.
     modificacionPendiente: null,
     anuladaAt: null,
+    // Este fichero no llega a Google: una `pendiente` no tiene evento.
+    eventoCalendarioId: null,
     ...over,
   };
 }

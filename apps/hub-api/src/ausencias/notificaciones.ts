@@ -13,6 +13,7 @@ import {
   ETIQUETA_TIPO,
   type CorreoEvento,
   type EstadoSolicitud,
+  type EventoCalendario,
   type EventoModificacion,
   type EventoSolicitud,
   type FilaHoja,
@@ -240,10 +241,27 @@ function correoRechazada(s: Solicitud) {
 
 // ── Efectos en Google ──────────────────────────────────────────────────────
 
-/** El evento *all-day* del calendario «Ambientalia Staff». */
-function calendario(s: Solicitud) {
+/**
+ * El id que le IMPONEMOS al evento de Google, derivado del uuid de la solicitud.
+ *
+ * Google deja que quien crea un evento le fije el id, y esa es la única razón
+ * por la que una anulación puede borrarlo después. La alternativa —buscarlo por
+ * título y fechas— se cae sola: el título es «Vacaciones <nombre>», así que dos
+ * ausencias solapadas de la misma persona bastan para borrar la que no era.
+ *
+ * El formato lo exige Google: base32hex, de 5 a 1024 caracteres de [0-9a-v]. Un
+ * uuid sin guiones son 32 caracteres de [0-9a-f], que cae dentro. Hay un candado
+ * en los tests sobre ese alfabeto, y no es decorativo: una derivación que se
+ * salga de él no falla aquí, falla contra Google y solo en producción.
+ */
+export const idDeEventoCalendario = (solicitudId: string): string => solicitudId.replaceAll('-', '');
+
+/** El evento *all-day* del calendario «Ambientalia Staff», recién creado. */
+function calendario(s: Solicitud): EventoCalendario {
   return {
     calendarId: CALENDARIO_STAFF,
+    eventId: idDeEventoCalendario(s.id),
+    accion: 'crear',
     resumen: `${ETIQUETA_TIPO[s.tipo]} ${s.empleadoNombre}`,
     inicio: s.fechaInicio,
     // Google trata el `end` de un evento all-day como EXCLUSIVO: sin este +1 el
@@ -297,11 +315,12 @@ const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
  *
  * Y los tres de la modificación, que salen por `construirPayloadModificacion`:
  *  - `modificacion_solicitada` → nada más. Solo correo, al decisor.
- *  - `modificacion_aprobada`   → nada más. **Ni calendario ni hoja**, aunque la
- *                     original ya estuviera en Google: el evento viejo habría
- *                     que CORREGIRLO, y emitir `calendario` aquí crearía uno
- *                     nuevo duplicado en vez de arreglar nada. El correo lleva
- *                     el aviso de ajustarlo a mano.
+ *  - `modificacion_aprobada`   → **calendario cuando se puede** —un `actualizar`
+ *                     o un `borrar` sobre el evento que creó la `aprobada`, ver
+ *                     `correccionDeCalendario`— y **hoja nunca**: a la fila no
+ *                     se puede volver, porque n8n hace `append` y no queda
+ *                     constancia de dónde cayó. Por eso el correo sigue pidiendo
+ *                     el ajuste a mano, pero ya solo el de la hoja.
  *  - `modificacion_rechazada`  → nada más. La solicitud queda igual que estaba.
  *
  * Ya no hay campo `drive`: la copia de los adjuntos a Google Drive se retiró, y
@@ -405,6 +424,37 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
 const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
 
 /**
+ * La corrección que hay que hacerle al evento del calendario, o `null` si no
+ * hay ninguna que hacer.
+ *
+ * Devuelve `null` por dos motivos que no hay que confundir:
+ *
+ *  - `tocaGoogle` dice que no: la solicitud nunca estuvo aprobada, así que
+ *    nunca se mandó nada al calendario y no hay evento que tocar.
+ *  - No hay `eventoCalendarioId`: la solicitud se aprobó ANTES de que
+ *    empezáramos a imponer el id, y su evento lleva el que Google inventó, que
+ *    nadie apuntó. Existe, pero no se puede localizar. Esas se van vaciando
+ *    solas y hasta entonces siguen con el aviso manual.
+ *
+ * Es la ÚNICA fuente de esta decisión: el correo pregunta por aquí y el payload
+ * se construye desde aquí, así que el texto que lee administración y lo que n8n
+ * hace de verdad no pueden discrepar. Un ⚠️ que pide ajustar a mano algo que ya
+ * se ajustó solo es la forma segura de que dejen de leerlos.
+ */
+function correccionDeCalendario(s: Solicitud, m: Modificacion): EventoCalendario | null {
+  if (!tocaGoogle(m.estadoPrevio) || s.eventoCalendarioId === null) return null;
+  return {
+    // Las fechas salen de la solicitud YA aplicada, que es lo que se quiere en
+    // los dos casos: en un cambio de fechas son las nuevas, y en una anulación
+    // `aplicarALaSolicitud` no las tocó, así que describen el evento que se va
+    // a borrar.
+    ...calendario(s),
+    eventId: s.eventoCalendarioId,
+    accion: m.clase === 'anulacion' ? 'borrar' : 'actualizar',
+  };
+}
+
+/**
  * Las CUATRO fechas y los dos recuentos, que es lo único que permite ajustar el
  * calendario a mano.
  *
@@ -426,32 +476,45 @@ function bloqueAntesYDespues(m: Modificacion): string {
 }
 
 /**
- * El párrafo de «esto no se ha corregido solo».
+ * El párrafo de «esto que queda no se corrige solo».
  *
- * Es la contrapartida de que el payload vaya con `calendario: null` y
- * `hoja: null`: nadie va a tocar Google por nosotros, así que el correo tiene
- * que decir exactamente qué hay que hacer a mano y sobre qué fechas.
+ * La hoja siempre está aquí: n8n hace `append` y no se guarda en qué fila cayó,
+ * así que a esa fila no se puede volver. El calendario solo cuando no se ha
+ * podido corregir —ver `correccionDeCalendario`—, y entonces el párrafo vuelve
+ * a ser el de siempre.
  */
-function avisoDeAjustarGoogle(m: Modificacion): string {
+function avisoDeAjustarGoogle(s: Solicitud, m: Modificacion): string {
   // Se nombra a quien tiene que actuar. Sin el «Administración:», el párrafo se
   // lee como una tarea para el trabajador —el correo está escrito en segunda
   // persona hacia él— y acaba sin hacerla nadie.
-  return m.clase === 'anulacion'
+  const anula = m.clase === 'anulacion';
+  if (correccionDeCalendario(s, m) !== null) {
+    // Se dice que el calendario ya está hecho, y no se calla: quien lee esto
+    // llevaba meses yendo a Google, y sin la frase iría igual, a mirar un
+    // evento que ya está bien.
+    return anula
+      ? '⚠️ Administración: el evento del calendario ya se ha borrado solo. La fila de la hoja no: hay que borrarla a mano.'
+      : '⚠️ Administración: el evento del calendario ya se ha corregido solo. La fila de la hoja no: hay que ajustarla a mano a las fechas nuevas.';
+  }
+  return anula
     ? '⚠️ Administración: esta ausencia ya estaba en el calendario y en la hoja. NO se borran solas: hay que borrar a mano el evento del calendario y la fila de la hoja.'
     : '⚠️ Administración: esta ausencia ya estaba en el calendario y en la hoja. NO se corrigen solas: hay que ajustar a mano el evento del calendario y la fila de la hoja a las fechas nuevas.';
 }
 
 /**
- * El prefijo del asunto cuando hay algo que tocar a mano en Google.
+ * El prefijo del asunto cuando queda algo que tocar a mano en Google.
  *
- * Es el único correo de toda la app que obliga a alguien a ir a editar el
- * calendario, y sin esto llega con un asunto indistinguible de cualquier otro
- * «✅ aprobado»: quien tiene que actuar —administración, que va en
- * `copiaCorreo`— no vería la señal hasta abrirlo. No diluye la disciplina del
- * ⚠️, porque la condición sigue siendo `tocaGoogle` y solo esa.
+ * Sin esto el correo llega con un asunto indistinguible de cualquier otro «✅
+ * aprobado», y quien tiene que actuar —administración, que va en
+ * `copiaCorreo`— no vería la señal hasta abrirlo. La condición de que aparezca
+ * sigue siendo `tocaGoogle` y solo esa; lo que cambia es QUÉ nombra, porque un
+ * ⚠️ que pide ir al calendario cuando el calendario ya está corregido es
+ * exactamente lo que enseña a no leerlos.
  */
-const prefijoDeAsunto = (m: Modificacion): string =>
-  tocaGoogle(m.estadoPrevio) ? '⚠️ Ajustar calendario y hoja — ' : '';
+const prefijoDeAsunto = (s: Solicitud, m: Modificacion): string => {
+  if (!tocaGoogle(m.estadoPrevio)) return '';
+  return correccionDeCalendario(s, m) !== null ? '⚠️ Ajustar la hoja — ' : '⚠️ Ajustar calendario y hoja — ';
+};
 
 /**
  * Bloque opcional: la línea en blanco viaja CON él.
@@ -484,8 +547,8 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
   return {
     para: cadenaDeDecision(s),
     asunto: anula
-      ? `${prefijoDeAsunto(m)}✅ Anulada la solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`
-      : `${prefijoDeAsunto(m)}✅ Cambio de fechas aprobado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+      ? `${prefijoDeAsunto(s, m)}✅ Anulada la solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`
+      : `${prefijoDeAsunto(s, m)}✅ Cambio de fechas aprobado: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
     cuerpo: [
       `Hola ${s.empleadoNombre}:`,
       '',
@@ -502,7 +565,7 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
       // destinatarios sobre el mismo objeto. Este es el que escribió QUIEN PIDIÓ
       // el cambio (`motivoRechazo` de la propuesta solo se llena al rechazarla).
       ...siHay(!!m.motivo, `Motivo del cambio: ${m.motivo}`),
-      ...siHay(tocaGoogle(m.estadoPrevio), avisoDeAjustarGoogle(m)),
+      ...siHay(tocaGoogle(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
       '',
       'Saludos,',
       FIRMA_GERENCIA,
@@ -577,12 +640,18 @@ const CORREO_MODIFICACION_DE = {
 /**
  * El payload de un aviso de modificación.
  *
- * `calendario` y `hoja` van a `null` SIEMPRE, y eso es lo que hace que n8n
- * recorra la rama de solo-correo que ya usan `creada` y `aprobacion` sin tocar
- * el workflow. No se añade ningún campo nuevo a `PayloadEvento` para esto: el IF
- * de n8n compara contra `null`, y un campo ausente es `undefined`, que
- * `!== null` es `true` y activaría la rama para TODOS los eventos (ver el aviso
- * del `drive` en `construirPayload`).
+ * `hoja` va a `null` SIEMPRE: n8n hace `append` y no queda constancia de en qué
+ * fila cayó, así que a esa fila no se puede volver. `calendario` va a `null`
+ * salvo cuando el cambio se aprueba y hay un evento localizable que corregir
+ * —ver `correccionDeCalendario`—, y entonces lleva la acción que toque.
+ *
+ * ⚠️ ORDEN DE DESPLIEGUE. Este es el punto exacto donde un `modificacion_*`
+ * empieza a llevar `calendario` no nulo, y el IF de n8n solo mira si es `null`.
+ * Con el workflow ANTERIOR, esto entra en el nodo de crear: una anulación
+ * estrenaría un evento nuevo en el calendario para una ausencia que se acaba de
+ * cancelar. El Switch por `accion` tiene que estar publicado en n8n ANTES de
+ * desplegar esto, nunca después. Es la misma trampa que documenta el aviso del
+ * `drive` en `construirPayload`, cobrada por el otro lado.
  */
 export function construirPayloadModificacion(
   s: Solicitud,
@@ -596,7 +665,9 @@ export function construirPayloadModificacion(
     estado: s.estado,
     empleadoNombre: s.empleadoNombre,
     correo: CORREO_MODIFICACION_DE[evento](s, m),
-    calendario: null,
+    // Solo la aprobación toca Google. Pedir el cambio no cambia nada todavía, y
+    // rechazarlo deja la solicitud exactamente como estaba.
+    calendario: evento === 'modificacion_aprobada' ? correccionDeCalendario(s, m) : null,
     hoja: null,
   };
 }

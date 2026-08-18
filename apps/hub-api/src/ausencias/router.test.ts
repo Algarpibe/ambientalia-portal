@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import { idDeEventoCalendario } from './notificaciones.js';
+import { CALENDARIO_STAFF } from './config.js';
 
 // Tests de integración HTTP del router de ausencias: guards de auth, códigos de
 // error y el ciclo del outbox con n8n. El repositorio se sustituye por un doble
@@ -129,6 +131,17 @@ const estado = {
   registroVisores: [] as Record<string, unknown>[],
   /** Para simular que la escritura del registro (dentro de la transacción) falla. */
   fallarRegistroVisor: false,
+};
+
+/**
+ * Modela `repo.anotarEventoDeCalendario`.
+ *
+ * La condicion se lee del PAYLOAD y no del nombre del evento, igual que en el
+ * repo real: si algun dia cambia el reparto de efectos, el doble lo sigue solo.
+ */
+const anotarEventoDeCalendario = (s: Record<string, unknown>, payload: unknown) => {
+  const cal = (payload as { calendario?: { accion?: string; eventId?: string } } | null)?.calendario;
+  if (cal?.accion === 'crear') s.eventoCalendarioId = cal.eventId;
 };
 
 vi.mock('./repo.js', () => ({
@@ -336,17 +349,21 @@ vi.mock('./repo.js', () => ({
       // solicitud. Nacen vacíos, como en el SQL real.
       modificacionPendiente: null,
       anuladaAt: null,
+      // Sin evento de calendario todavia: lo estrena el evento que lo crea.
+      eventoCalendarioId: null,
     };
     estado.solicitudes.push(s);
     for (const evento of eventos) {
+      const payload = construirPayload(s, evento);
       estado.eventos.push({
         id: estado.eventos.length + 1,
         evento,
         solicitudId: s.id,
         intentos: 0,
-        payload: construirPayload(s, evento),
+        payload,
         enviado: false,
       });
+      anotarEventoDeCalendario(s, payload);
     }
     return s;
   },
@@ -378,14 +395,16 @@ vi.mock('./repo.js', () => ({
     s.motivoRechazo = motivo;
     if (transicion.esPrimeraFirma) s.primeraFirmaAt = '2026-06-02T10:00:00Z';
     if (transicion.esDecisionFinal) s.decididaAt = '2026-06-02T10:00:00Z';
+    const payload = construirPayload(s, transicion.evento);
     estado.eventos.push({
       id: estado.eventos.length + 1,
       evento: transicion.evento,
       solicitudId: id,
       intentos: 0,
-      payload: construirPayload(s, transicion.evento),
+      payload,
       enviado: false,
     });
+    anotarEventoDeCalendario(s, payload);
     return s;
   },
   // Modela las TRES garantías que el SQL real pone en una sola sentencia (ver
@@ -2931,7 +2950,11 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
    * Por defecto `aprobada`, que es el caso principal de la feature: es el único
    * en el que la original ya está en el calendario de Google.
    */
-  async function conPropuesta(cuerpo: Record<string, unknown> = CAMBIO, estadoSolicitud = 'aprobada') {
+  async function conPropuesta(
+    cuerpo: Record<string, unknown> = CAMBIO,
+    estadoSolicitud = 'aprobada',
+    conEventoEnGoogle = true,
+  ) {
     const s = (
       await request(app())
         .post('/api/ausencias/solicitudes')
@@ -2940,6 +2963,17 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
         .expect(201)
     ).body as Record<string, unknown>;
     fila(s.id as string).estado = estadoSolicitud;
+    // El estado se fuerza en vez de pasar por la bandeja, que es un atajo
+    // razonable. Pero una `aprobada` de verdad SIEMPRE emitio su evento
+    // `aprobada`, y ese evento es el que deja anotado el id del evento de
+    // Google. Sin esta linea el fichero probaria una `aprobada` sin evento —un
+    // estado que solo existe para las solicitudes anteriores a la 026— y los
+    // candados de correccion automatica no se ejecutarian nunca.
+    //
+    // `conEventoEnGoogle: false` fabrica justamente esa solicitud antigua.
+    if (estadoSolicitud === 'aprobada' && conEventoEnGoogle) {
+      fila(s.id as string).eventoCalendarioId = idDeEventoCalendario(s.id as string);
+    }
     const m = (
       await request(app())
         .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
@@ -3190,28 +3224,79 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
     expect(estado.modificaciones[0].estado).toBe('pendiente');
   });
 
-  it('el aviso de la decisión va a la cadena ENTERA y sale sin calendario ni hoja', async () => {
-    // Comprobado sobre el payload HTTP, que es el contrato que n8n lee: con un
-    // `calendario` aquí, n8n crearía un evento nuevo en vez de corregir el viejo
-    // y la persona aparecería dos veces de vacaciones.
-    const { modificacionId } = await conPropuesta();
-    await decidir(modificacionId, { aprueba: true }).expect(200);
-
+  /** El aviso de la decisión tal y como lo lee n8n. */
+  const avisoDeLaDecision = async () => {
     const p = await request(app())
       .get('/api/ausencias/n8n/pendiente')
       .set('X-Ausencias-Cron-Token', 'cron-ausencias')
       .expect(200);
     const evento = p.body.eventos.find((e: { evento: string }) => e.evento === 'modificacion_aprobada');
     expect(evento).toBeTruthy();
-    expect(evento.payload).toHaveProperty('calendario', null);
-    expect(evento.payload).toHaveProperty('hoja', null);
+    return evento.payload;
+  };
+
+  it('el aviso de la decisión va a la cadena ENTERA y manda CORREGIR el evento, no crear otro', async () => {
+    // Comprobado sobre el payload HTTP, que es el contrato que n8n lee. Lo que
+    // distingue una corrección de un duplicado es `accion`: sin ella el Switch
+    // de n8n cae en su salida por defecto —la de crear— y la persona aparecería
+    // dos veces de vacaciones.
+    const { solicitudId, modificacionId } = await conPropuesta();
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    const payload = await avisoDeLaDecision();
+    expect(payload.calendario).toEqual({
+      calendarId: CALENDARIO_STAFF,
+      eventId: idDeEventoCalendario(solicitudId),
+      accion: 'actualizar',
+      resumen: 'Vacaciones Ana Ruiz',
+      // Las fechas NUEVAS, y el fin sumado un día como al crearlo.
+      inicio: '2026-07-13',
+      fin: '2026-07-16',
+    });
+    // La hoja no: n8n hace `append` y no queda constancia de en qué fila cayó.
+    expect(payload).toHaveProperty('hoja', null);
+    // Y el correo ya no manda a nadie al calendario, solo a la hoja.
+    expect(payload.correo.asunto).toContain('⚠️ Ajustar la hoja —');
+    expect(payload.correo.cuerpo).toContain('ya se ha corregido solo');
+
     // El primer firmante avaló unas fechas: tiene que enterarse de que cambiaron.
-    expect(evento.payload.correo.para).toContain('ana.ruiz@ambientalia.com.co');
-    expect(evento.payload.correo.para).toContain(JEFA);
-    expect(evento.payload.correo.para).toContain(GERENCIA);
+    expect(payload.correo.para).toContain('ana.ruiz@ambientalia.com.co');
+    expect(payload.correo.para).toContain(JEFA);
+    expect(payload.correo.para).toContain(GERENCIA);
     // Y lleva las cuatro fechas, no solo las nuevas.
-    expect(evento.payload.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
-    expect(evento.payload.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+    expect(payload.correo.cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(payload.correo.cuerpo).toContain('2026-07-13 a 2026-07-15');
+  });
+
+  it('CANDADO: aprobar una anulación manda BORRAR el evento del calendario', async () => {
+    const { solicitudId, modificacionId } = await conPropuesta({ clase: 'anulacion', motivo: 'Se cancela el viaje' });
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    const payload = await avisoDeLaDecision();
+    expect(payload.calendario).toMatchObject({
+      eventId: idDeEventoCalendario(solicitudId),
+      accion: 'borrar',
+      // Las fechas describen el evento que se va a borrar: `aplicarALaSolicitud`
+      // no las toca al anular.
+      inicio: '2026-07-06',
+      fin: '2026-07-11',
+    });
+    expect(payload.correo.asunto).toContain('⚠️ Ajustar la hoja —');
+    expect(payload.correo.cuerpo).toContain('ya se ha borrado solo');
+  });
+
+  it('CANDADO: una aprobada de ANTES de la 026 no se corrige sola y sigue pidiendo el ajuste a mano', async () => {
+    // Su evento en Google lleva el id que invento Google, que nadie apunto: no
+    // se puede localizar. Emitir una corrección contra un id derivado daría un
+    // 404 y, peor, el correo habría dicho que ya estaba arreglado.
+    const { modificacionId } = await conPropuesta(CAMBIO, 'aprobada', false);
+    await decidir(modificacionId, { aprueba: true }).expect(200);
+
+    const payload = await avisoDeLaDecision();
+    expect(payload).toHaveProperty('calendario', null);
+    expect(payload).toHaveProperty('hoja', null);
+    expect(payload.correo.asunto).toContain('⚠️ Ajustar calendario y hoja —');
+    expect(payload.correo.cuerpo).toContain('hay que ajustar a mano el evento del calendario');
   });
 
   it('401 sin token y 403 sin la app asignada', async () => {

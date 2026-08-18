@@ -783,6 +783,8 @@ const SELECT_SOLICITUD = `
          s.primera_firma_at::text AS primera_firma_at,
          s.decidida_at::text AS decidida_at, s.motivo_rechazo, s.created_at::text AS created_at,
          s.anulada_at::text AS anulada_at,
+         -- Sin ::text: es TEXT en la base, no una fecha ni un numero.
+         s.evento_calendario_id,
          a.id AS adjunto_id, a.nombre_archivo, a.mime,
          -- octet_length y no el binario: las listas solo necesitan el tamano.
          octet_length(a.contenido) AS adjunto_bytes,
@@ -826,6 +828,7 @@ interface FilaSolicitudDb extends FilaModificacionJoinDb {
   adjunto_bytes: number | null;
   copia_correo: string | null;
   anulada_at: string | null;
+  evento_calendario_id: string | null;
 }
 
 function aSolicitud(r: FilaSolicitudDb): Solicitud {
@@ -864,6 +867,7 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     // columnas del satélite o ninguna, así que `mod_id` decide por las demás.
     modificacionPendiente: r.mod_id ? aModificacion(r as FilaModificacionDb) : null,
     anuladaAt: r.anulada_at,
+    eventoCalendarioId: r.evento_calendario_id,
   };
 }
 
@@ -881,6 +885,38 @@ export interface DatosInsercion {
   segundoAprobadorCorreo: string | null;
   /** Congelado por lo mismo que los firmantes: nace del árbol, no de un ajuste. */
   informadoCorreo: string | null;
+}
+
+/**
+ * Deja constancia de que esta solicitud es dueña de un evento del calendario.
+ *
+ * Lo que hace útil a la columna no es el valor —que se deriva del `id`— sino
+ * que esté o no esté: solo se puede corregir en Google el evento que creamos
+ * nosotros con un id impuesto. Las solicitudes aprobadas antes de esto llevan
+ * en Google un id que inventó Google y que nadie apuntó, y por eso siguen
+ * pidiendo el ajuste a mano. Ver `correccionDeCalendario` en notificaciones.ts.
+ *
+ * Va en la MISMA transacción que el INSERT del outbox: si el evento sale, la
+ * marca existe, y si hay ROLLBACK no queda ninguna de las dos.
+ */
+async function anotarEventoDeCalendario(
+  client: PoolClient,
+  solicitud: Solicitud,
+  payload: PayloadEvento,
+): Promise<void> {
+  // La condicion se lee del PAYLOAD, no de una lista de eventos copiada aqui:
+  // asi la marca se escribe exactamente cuando se emite una creacion, y no puede
+  // desincronizarse de construirPayload el dia que cambie el reparto de efectos.
+  if (payload.calendario?.accion !== 'crear') return;
+  await client.query(`UPDATE portal.solicitudes_ausencia SET evento_calendario_id = $2 WHERE id = $1`, [
+    solicitud.id,
+    payload.calendario.eventId,
+  ]);
+  // La fila se leyo con SELECT_SOLICITUD ANTES de este UPDATE, asi que el objeto
+  // que se devuelve llevaria un null que dejo de ser cierto hace dos lineas. Y
+  // este campo decide si Google se corrige solo: devolverlo obsoleto es
+  // exactamente la clase de texto caducado que mas cara sale en esta app.
+  solicitud.eventoCalendarioId = payload.calendario.eventId;
 }
 
 /**
@@ -933,10 +969,12 @@ export async function crearSolicitud(
     // El orden importa: el outbox se sirve por `id` ascendente, así que el
     // acuse al solicitante sale antes que el aviso a quien aprueba.
     for (const evento of eventos) {
+      const payload = construirPayload(solicitud, evento);
       await client.query(
         `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-        [id, evento, JSON.stringify(construirPayload(solicitud, evento))],
+        [id, evento, JSON.stringify(payload)],
       );
+      await anotarEventoDeCalendario(client, solicitud, payload);
     }
 
     return solicitud;
@@ -1078,10 +1116,12 @@ export async function decidirSolicitud(
     const { rows: actualizada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
     const solicitud = aSolicitud(actualizada[0] as FilaSolicitudDb);
 
+    const payload = construirPayload(solicitud, transicion.evento);
     await client.query(
       `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-      [id, transicion.evento, JSON.stringify(construirPayload(solicitud, transicion.evento))],
+      [id, transicion.evento, JSON.stringify(payload)],
     );
+    await anotarEventoDeCalendario(client, solicitud, payload);
 
     return solicitud;
   });

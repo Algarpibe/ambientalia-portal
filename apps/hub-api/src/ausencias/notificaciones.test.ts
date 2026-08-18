@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
+import {
+  construirPayload,
+  construirPayloadModificacion,
+  eventosDeAlta,
+  idDeEventoCalendario,
+} from './notificaciones.js';
 import { CALENDARIO_STAFF, HOJA_ID, PESTANA } from './config.js';
 import type { Modificacion, Solicitud } from './types.js';
 
@@ -31,6 +36,10 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     copiaCorreo: 'administrativo@ambientalia.com.co',
     modificacionPendiente: null,
     anuladaAt: null,
+    // `null` porque esta solicitud base esta `pendiente`: no ha creado ningun
+    // evento. Los tests que prueban la correccion automatica lo ponen a mano,
+    // igual que ponen `estado: 'aprobada'`.
+    eventoCalendarioId: null,
     ...over,
   };
 }
@@ -320,10 +329,33 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     const p = construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada');
     expect(p.calendario).toEqual({
       calendarId: CALENDARIO_STAFF,
+      // El id se IMPONE al crear: es lo único que permite volver a este evento
+      // para corregirlo o borrarlo cuando la ausencia cambie.
+      eventId: 's1',
+      accion: 'crear',
       resumen: 'Vacaciones Ana Ruiz',
       inicio: '2026-07-06',
       fin: '2026-07-11',
     });
+  });
+
+  it('la incapacidad registrada también nace con su id impuesto', () => {
+    // `registrada` es el otro evento que crea calendario, y se le olvida con
+    // facilidad porque no pasa por la bandeja de nadie.
+    const p = construirPayload(solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf }), 'registrada');
+    expect(p.calendario).toMatchObject({ eventId: 's1', accion: 'crear' });
+  });
+
+  it('CANDADO: el id del evento cumple el alfabeto que exige Google', () => {
+    // Google solo acepta base32hex —de 5 a 1024 caracteres de [0-9a-v]— y un
+    // uuid sin guiones cae dentro. Este candado NO es decorativo: una derivación
+    // que se salga del alfabeto no falla en ningún test de forma, falla contra
+    // Google y solo en producción, y el correo ya habría dicho que el calendario
+    // estaba corregido.
+    const uuid = '9f2c1e40-7b3a-4d51-8e6f-0a1b2c3d4e5f';
+    const id = idDeEventoCalendario(uuid);
+    expect(id).toBe('9f2c1e407b3a4d518e6f0a1b2c3d4e5f');
+    expect(id).toMatch(/^[0-9a-v]{5,1024}$/);
   });
 
   it('un rechazo va a la hoja pero NO al calendario: no hay ausencia que pintar', () => {
@@ -479,12 +511,15 @@ describe('el aviso de que se pide un cambio', () => {
   });
 
   it('CANDADO: el payload lleva `calendario` y `hoja` en null', () => {
-    // Es lo que hace que n8n recorra la rama de solo-correo que ya usan `creada`
-    // y `aprobacion`, SIN tocar el workflow. Emitir aquí un `calendario`
-    // —«ya que estamos, que lo arregle»— no corregiría el evento viejo: crearía
-    // uno nuevo y la persona aparecería dos veces de vacaciones.
+    // PEDIR un cambio no cambia nada todavía: la solicitud sigue con sus fechas
+    // y su evento sigue siendo correcto. Tocar Google aquí adelantaría en el
+    // calendario un cambio que el jefe todavía puede rechazar.
+    //
+    // Con `eventoCalendarioId` puesto, que es el caso en el que SÍ se sabría
+    // corregir: lo que lo impide es el momento, no la capacidad.
+    const s = solicitud({ estado: 'aprobada', eventoCalendarioId: 'ev0deadbeef' });
     for (const m of [modificacion(), anulacion()]) {
-      const p = construirPayloadModificacion(solicitud({ estado: 'aprobada' }), m, 'modificacion_solicitada');
+      const p = construirPayloadModificacion(s, m, 'modificacion_solicitada');
       expect(p.calendario).toBeNull();
       expect(p.hoja).toBeNull();
     }
@@ -713,17 +748,94 @@ describe('la decisión del cambio', () => {
     for (const p of casos) expect(p.correo.cuerpo).not.toMatch(/\n\n\n/);
   });
 
-  it('CANDADO: los dos eventos llevan `calendario` y `hoja` en null', () => {
-    // Es lo que hace que n8n recorra la rama de solo-correo SIN tocar el
-    // workflow. Emitir aquí un `calendario` no corregiría el evento viejo:
-    // crearía uno nuevo y la persona aparecería dos veces de vacaciones.
-    for (const evento of ['modificacion_aprobada', 'modificacion_rechazada'] as const) {
-      for (const m of [modificacion({ estadoPrevio: 'aprobada' }), anulacion({ estadoPrevio: 'aprobada' })]) {
-        const p = construirPayloadModificacion(conCadena(), m, evento);
-        expect(p.calendario).toBeNull();
-        expect(p.hoja).toBeNull();
-      }
+  // El id que dejó anotado la aprobación. A propósito distinto del que saldría
+  // de derivar `s.id`: el payload tiene que usar el id GUARDADO y no volver a
+  // derivarlo. Si alguien «simplifica» eso, este valor sale rojo.
+  const EV = 'ev0deadbeef';
+
+  it('CANDADO: aprobar un cambio de fechas manda CORREGIR el evento, no crear otro', () => {
+    // Las fechas salen de la solicitud, que a estas alturas ya está actualizada
+    // (`aplicarALaSolicitud` corre en la misma transacción). Y el fin lleva el
+    // +1 de siempre: un evento movido sin él pierde su último día.
+    const s = conCadena({ eventoCalendarioId: EV, fechaInicio: '2026-07-13', fechaFin: '2026-07-15' });
+    const p = construirPayloadModificacion(s, modificacion(), 'modificacion_aprobada');
+    expect(p.calendario).toEqual({
+      calendarId: CALENDARIO_STAFF,
+      eventId: EV,
+      accion: 'actualizar',
+      resumen: 'Vacaciones Ana Ruiz',
+      inicio: '2026-07-13',
+      fin: '2026-07-16',
+    });
+    // La hoja NO: n8n hace `append` y no queda constancia de en qué fila cayó.
+    expect(p.hoja).toBeNull();
+  });
+
+  it('CANDADO: aprobar una anulación manda BORRAR el evento', () => {
+    // Aquí las fechas de la solicitud NO se tocaron —anular no las cambia—, así
+    // que describen el evento que está a punto de desaparecer.
+    const p = construirPayloadModificacion(
+      conCadena({ eventoCalendarioId: EV }),
+      anulacion(),
+      'modificacion_aprobada',
+    );
+    expect(p.calendario).toMatchObject({ eventId: EV, accion: 'borrar', inicio: '2026-07-06', fin: '2026-07-11' });
+    expect(p.hoja).toBeNull();
+  });
+
+  it('CANDADO: rechazar el cambio no toca Google, ni con evento anotado', () => {
+    // La solicitud queda exactamente como estaba: no hay nada que corregir, y un
+    // `calendario` aquí reescribiría el evento con las fechas que se acaban de
+    // denegar.
+    for (const m of [modificacion({ estadoPrevio: 'aprobada' }), anulacion({ estadoPrevio: 'aprobada' })]) {
+      const p = construirPayloadModificacion(conCadena({ eventoCalendarioId: EV }), m, 'modificacion_rechazada');
+      expect(p.calendario).toBeNull();
+      expect(p.hoja).toBeNull();
     }
+  });
+
+  it('CANDADO: si la original no estaba aprobada no hay nada que corregir', () => {
+    // Nunca se mandó nada al calendario, así que un `actualizar` daría un 404 y
+    // el correo habría anunciado una corrección que no ocurrió. Con el id
+    // anotado a propósito: lo que decide es `estadoPrevio`, no tener id.
+    for (const previo of ['pendiente', 'pendiente_2'] as const) {
+      const p = construirPayloadModificacion(
+        conCadena({ estado: previo, eventoCalendarioId: EV }),
+        modificacion({ estadoPrevio: previo }),
+        'modificacion_aprobada',
+      );
+      expect(p.calendario).toBeNull();
+      expect(p.correo.asunto).not.toContain('Ajustar');
+    }
+  });
+
+  it('CANDADO: una aprobada SIN evento anotado no se corrige sola', () => {
+    // Es la cola de solicitudes aprobadas antes de la 026: su evento lleva el id
+    // que inventó Google, que nadie apuntó, y no se puede localizar. El aviso a
+    // mano tiene que seguir saliendo entero.
+    for (const m of [modificacion(), anulacion()]) {
+      const p = construirPayloadModificacion(conCadena({ eventoCalendarioId: null }), m, 'modificacion_aprobada');
+      expect(p.calendario).toBeNull();
+      expect(p.correo.asunto).toContain('Ajustar calendario y hoja —');
+      expect(p.correo.cuerpo).toContain('el evento del calendario y la fila de la hoja');
+    }
+  });
+
+  it('CANDADO: el aviso nombra SOLO lo que queda por hacer a mano', () => {
+    // Un aviso que manda al calendario cuando el calendario ya está corregido es
+    // exactamente lo que entrena a la gente a no leerlos. El texto y el payload
+    // salen los dos de `correccionDeCalendario`, así que no pueden discrepar.
+    const s = conCadena({ eventoCalendarioId: EV });
+    const cambio = construirPayloadModificacion(s, modificacion(), 'modificacion_aprobada');
+    expect(cambio.correo.asunto).toContain('Ajustar la hoja —');
+    expect(cambio.correo.cuerpo).toContain('ya se ha corregido solo');
+    expect(cambio.correo.cuerpo).toContain('La fila de la hoja no');
+    expect(cambio.correo.cuerpo).not.toContain('hay que ajustar a mano el evento del calendario');
+
+    const anula = construirPayloadModificacion(s, anulacion(), 'modificacion_aprobada');
+    expect(anula.correo.asunto).toContain('Ajustar la hoja —');
+    expect(anula.correo.cuerpo).toContain('ya se ha borrado solo');
+    expect(anula.correo.cuerpo).not.toContain('hay que borrar a mano el evento del calendario');
   });
 
   it('tampoco estrenan ningún campo del payload', () => {

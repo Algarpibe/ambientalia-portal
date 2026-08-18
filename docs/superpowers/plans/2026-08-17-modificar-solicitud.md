@@ -9,6 +9,7 @@ Esta feature abre ese camino con su debido proceso: **el trabajador pide cambiar
 **Decisiones de producto ya tomadas:**
 - Alcance: **cambiar fechas** y **anular**. No cambiar el tipo ni reasignar (eso sigue siendo del admin).
 - Google: cuando se apruebe un cambio sobre una solicitud ya aprobada, el evento de Calendar y la fila de la hoja **no se corrigen solos**. Se manda un correo avisando de qué cambió y alguien lo ajusta a mano. No se toca n8n — el objetivo del proyecto es desenganchar Google, no invertir más en él.
+  > **Superado el 2026-08-18 para el calendario.** Esta decisión daba por hecho que corregir el evento era caro porque no se sabía cuál era. Resultó que el id se puede **imponer** al crearlo, y con eso anular borra el evento y reprogramar lo mueve. La hoja sigue como dice este párrafo. Ver «El calendario se corrige solo» en `docs/dev/app-ausencias.md`.
 
 ## La forma: una tabla satélite, no estados nuevos
 
@@ -118,4 +119,4 @@ Cada una desplegable sola; hub-api siempre antes que el portal.
 
 **Riesgos:** el `DROP + ADD CONSTRAINT` toma un ACCESS EXCLUSIVE momentáneo sobre `ausencias_outbox`, que es la tabla que n8n consulta cada minuto (milisegundos, aceptable). La guarda de idempotencia del CHECK **no puede copiarse tal cual de la 018**: allí el constraint no existía y se comprobaba por nombre; aquí sí existe, así que la guarda debe mirar el **contenido** (`pg_get_constraintdef ... LIKE '%modificacion_solicitada%'`) o el bloque nunca se ejecutaría y el INSERT del outbox reventaría dentro de la transacción de la primera decisión. La corrección manual de Google no tiene acuse: nadie sabe si se hizo — aceptado por decisión de producto.
 
-**Fuera de alcance (YAGNI):** cambiar el tipo o reasignar; segunda firma de la modificación; corrección automática de Google; historial de propuestas en la UI (la tabla las guarda todas, ninguna pantalla las lista); contra-propuesta del jefe (rechaza con motivo y el trabajador vuelve a pedir); adjuntar PDF a la modificación; runner de tests del frontend; tocar n8n.
+**Fuera de alcance (YAGNI):** cambiar el tipo o reasignar; segunda firma de la modificación; corrección automática de Google *(se hizo el 2026-08-18 para el calendario: ver la nota de arriba)*; historial de propuestas en la UI (la tabla las guarda todas, ninguna pantalla las lista); contra-propuesta del jefe (rechaza con motivo y el trabajador vuelve a pedir); adjuntar PDF a la modificación; runner de tests del frontend; tocar n8n.
