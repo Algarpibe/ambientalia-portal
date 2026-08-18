@@ -61,6 +61,20 @@ jobs:
       - name: Lint
         run: npm run lint --workspaces --if-present
 
+      # Typecheck ESTRICTO de las sub-apps que lo pidan. No es redundante con los
+      # builds de arriba: el del portal type-checkea las sub-apps porque las
+      # importa por codigo fuente, pero con SU tsconfig, que relaja a proposito
+      # `noUnusedLocals`, `noUnusedParameters` y `verbatimModuleSyntax`
+      # (apps/portal/tsconfig.app.json los pone en false). Las sub-apps con un
+      # tsconfig mas estricto lo tenian escrito y sin ejecutar: comprobado
+      # metiendo una variable sin usar en apps/ausencias, que da TS6133 con su
+      # propio tsconfig y pasa el build del portal sin una queja.
+      #
+      # `--workspaces --if-present` y no una ruta concreta: hoy solo `ausencias`
+      # trae este script, y asi la que lo anada manana entra sola.
+      - name: Typecheck estricto (sub-apps)
+        run: npm run typecheck --workspaces --if-present
+
       # Tests de las apps que los tienen (hub-api, customer-valuation,
       # inventory-optimization). --if-present salta las que no.
       - name: Tests
