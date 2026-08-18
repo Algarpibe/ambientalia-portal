@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { crearModificacion, decidirModificacion, modificacionPorId, solapeDe } from './repo.js';
+import { crearModificacion, decidirModificacion, modificacionPorId, solapeDe, solicitudPorId } from './repo.js';
 import {
   poolDePrueba,
   limpiar,
@@ -246,5 +246,39 @@ describe('decidirModificacion frente al solape', () => {
     expect(decidida.ok).toBe(true);
     expect((await modificacionPorId(db, propuesta.id))?.estado).toBe('rechazada');
     expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada', 'modificacion_rechazada']);
+  });
+
+  it('CANDADO: a una incapacidad no la frena el solape, igual que en las otras puertas', async () => {
+    // Una incapacidad no se pide, se informa despues de haber estado enfermo: no
+    // se le puede negar, y por eso `exigirSinSolape` la exime. Esta puerta corre
+    // dentro de la transaccion del repo y no puede llamar a aquel helper, asi que
+    // repite la exencion a mano. Si divergen, la puerta de PROPONER deja pasar el
+    // cambio por la exencion y la de FIRMAR lo niega con un 409: una autoriza lo
+    // que la siguiente prohibe, y la propuesta se queda atascada para siempre.
+    //
+    // `incapacidad` + `aprobada` no es un fixture imposible: el PATCH de admin
+    // acepta cualquier tipo con cualquier estado.
+    const baja = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'aprobada',
+      tipo: 'incapacidad',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+      segundoAprobadorCorreo: null,
+    });
+    // Y unas vacaciones aprobadas justo donde se quiere mover la baja.
+    await ocuparElDestino();
+
+    const propuesta = await proponerFechas(baja.id, '2026-07-20', '2026-07-22', 3);
+    const decidida = await decidirModificacion(db, propuesta.id, true, null, null, payloadStub);
+
+    expect(decidida.ok).toBe(true);
+    // Y el cambio se aplico de verdad: `solapeDe` no sirve para verlo —una
+    // incapacidad nunca sale de esa consulta—, asi que se mira la fila.
+    expect(await solicitudPorId(db, baja.id)).toMatchObject({
+      fechaInicio: '2026-07-20',
+      fechaFin: '2026-07-22',
+    });
   });
 });

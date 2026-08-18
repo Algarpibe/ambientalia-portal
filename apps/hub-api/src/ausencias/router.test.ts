@@ -144,6 +144,48 @@ const anotarEventoDeCalendario = (s: Record<string, unknown>, payload: unknown) 
   if (cal?.accion === 'crear') s.eventoCalendarioId = cal.eventId;
 };
 
+/**
+ * El predicado del solapamiento, fuera del doble porque lo necesitan DOS de sus
+ * funciones: `solapeDe`, que lo expone tal cual, y `decidirModificacion`, que lo
+ * repite dentro de su transaccion igual que hace el repo real. Copiarlo en las
+ * dos seria plantar la divergencia a mano en un fichero que ya mantiene un
+ * segundo sistema entero.
+ *
+ * ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
+ * `repo.solapeDe`, y quien lo ejecuta contra Postgres real es
+ * `repo.solapes.db.test.ts`. Esto solo IMITA su resultado, y puede divergir en
+ * un borde: `.find()` devuelve la primera colision por orden de INSERCION,
+ * mientras que el SQL ordena por `fecha_inicio, id`. Con dos solicitudes vivas
+ * solapadas entre si, los dos pueden nombrar colisiones distintas. No se ordena
+ * para igualarlo: solo haria falta si algun test llegara a asertar CUAL de las
+ * dos colisiones se nombra.
+ */
+const buscarSolape = (
+  empleadoId: string,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+) => {
+  const choque = estado.solicitudes.find(
+    (s: any) =>
+      s.empleadoId === empleadoId &&
+      s.estado !== 'rechazada' &&
+      s.tipo !== 'incapacidad' &&
+      (excluirSolicitudId === null || s.id !== excluirSolicitudId) &&
+      s.fechaInicio <= fechaFin &&
+      s.fechaFin >= fechaInicio,
+  );
+  return choque
+    ? {
+        id: choque.id,
+        tipo: choque.tipo,
+        estado: choque.estado,
+        fechaInicio: choque.fechaInicio,
+        fechaFin: choque.fechaFin,
+      }
+    : null;
+};
+
 vi.mock('./repo.js', () => ({
   empleadoDeUsuario: async () => estado.empleado,
   // Modela el alta automática: si no hay ficha pero el usuario existe en el
@@ -576,6 +618,26 @@ vi.mock('./repo.js', () => ({
       return { ok: false, razon: 'solicitud_cambio_de_estado' };
     }
 
+    // ⚠️ REGLA REIMPLEMENTADA AQUI. La fuente de verdad es la TERCERA puerta del
+    // solapamiento de `repo.decidirModificacion`, que llama a `solapeDe` por el
+    // mismo `client` DENTRO de la transaccion. La vigilan tres tests de
+    // `repo.solapes.db.test.ts` («aprobar una propuesta que se volvio solapada
+    // hace ROLLBACK», el de RECHAZAR —que es lo que ata el `aprueba`— y el de la
+    // incapacidad), en el cuarto porton.
+    //
+    // Se comprueba ANTES de escribir por lo mismo que el testigo de arriba: asi
+    // es como este doble modela el ROLLBACK. El repo real la comprueba DESPUES
+    // del UPDATE, y da igual: las dos excluyen la propia solicitud por su id.
+    if (aprueba && m.clase === 'fechas' && s && s.tipo !== 'incapacidad') {
+      const choque = buscarSolape(
+        s.empleadoId as string,
+        m.fechaInicioNueva as string,
+        m.fechaFinNueva as string,
+        m.solicitudId,
+      );
+      if (choque) return { ok: false, razon: 'solape', solape: choque };
+    }
+
     m.estado = aprueba ? 'aprobada' : 'rechazada';
     m.decididaAt = '2026-01-15T12:00:00Z';
     m.motivoRechazo = motivoRechazo;
@@ -675,14 +737,10 @@ vi.mock('./repo.js', () => ({
         fechaFin: '2026-08-11',
       },
     ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
-  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
-  // `repo.solapeDe`, y quien lo ejecuta contra Postgres real es
-  // `repo.solapes.db.test.ts`. Esto solo IMITA su resultado, y puede divergir
-  // en un borde: `.find()` devuelve la primera colision por orden de
-  // INSERCION, mientras que el SQL ordena por `fecha_inicio, id`. Con dos
-  // solicitudes vivas solapadas entre si, los dos pueden nombrar colisiones
-  // distintas. No se ordena el doble para igualarlo: solo haria falta si algun
-  // test llegara a asertar CUAL de las dos colisiones se nombra.
+  // El predicado vive en `buscarSolape`, arriba, con su aviso de REGLA DE SQL
+  // REIMPLEMENTADA: aqui solo queda la guarda del `::uuid`, que es de esta
+  // funcion y no de la regla —`decidirModificacion` no la necesita, porque el id
+  // que le pasa sale del propio doble.
   solapeDe: async (
     _db: unknown,
     empleadoId: string,
@@ -707,24 +765,7 @@ vi.mock('./repo.js', () => ({
     ) {
       throw new Error(`solapeDe: excluirSolicitudId no es un uuid ni un id del doble: ${excluirSolicitudId}`);
     }
-    const choque = estado.solicitudes.find(
-      (s: any) =>
-        s.empleadoId === empleadoId &&
-        s.estado !== 'rechazada' &&
-        s.tipo !== 'incapacidad' &&
-        (excluirSolicitudId === null || s.id !== excluirSolicitudId) &&
-        s.fechaInicio <= fechaFin &&
-        s.fechaFin >= fechaInicio,
-    );
-    return choque
-      ? {
-          id: choque.id,
-          tipo: choque.tipo,
-          estado: choque.estado,
-          fechaInicio: choque.fechaInicio,
-          fechaFin: choque.fechaFin,
-        }
-      : null;
+    return buscarSolape(empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
   },
 }));
 
@@ -3229,6 +3270,40 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
     // Y no se ha anulado nada por el camino.
     expect(fila(solicitudId).anuladaAt).toBeNull();
     expect(decisiones()).toHaveLength(1);
+  });
+
+  it('CANDADO: si le aprobaron otra ausencia encima, firmar el cambio da 409 y dice con que choca', async () => {
+    // La tercera puerta del solapamiento, vista desde HTTP: lo que se ata aqui
+    // es la traduccion del servicio —`razon: 'solape'` → 409 `rango_solapado`
+    // con su detalle—, que el cuarto porton no puede ver porque llega hasta el
+    // repositorio y no mas alla.
+    const { solicitudId, modificacionId } = await conPropuesta();
+
+    // El destino se ocupa DESPUES de proponer, y por eso no lo para nadie mas:
+    // del 15 al 17 no toca al 6-10 de la original, asi que la puerta del alta lo
+    // deja pasar, y la de proponer ya miro cuando el 15 estaba libre.
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: '2026-07-15', fechaFin: '2026-07-17' }))
+      .expect(201);
+
+    const r = await decidir(modificacionId, { aprueba: true }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'vacaciones', estado: 'pendiente', fechaInicio: '2026-07-15', fechaFin: '2026-07-17' },
+    });
+    // Igual que en la puerta del alta: `toMatchObject` es parcial y por si solo
+    // no impediria que se colara el `id` del choque, que es justo lo que
+    // `detalleDelSolape` promete NO mandar al cliente.
+    expect(Object.keys(r.body.detalle).sort()).toEqual(['estado', 'fechaFin', 'fechaInicio', 'tipo']);
+
+    // Y no se ha firmado nada: la propuesta sigue esperando decision, la
+    // solicitud conserva sus fechas y no ha salido ningun correo de decision.
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
+    expect(decisiones()).toHaveLength(0);
   });
 
   it('sobre una PENDIENTE, el estado tampoco se mueve', async () => {

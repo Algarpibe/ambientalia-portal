@@ -272,11 +272,37 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
 }
 
 /**
+ * Lo que el cliente necesita saber del choque, y nada más.
+ *
+ * Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
+ * —`Solape` es una interface, sin index signature implícita, así que
+ * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
+ * uuid que no necesita. Escrito UNA vez porque lo usan las dos puertas que
+ * responden este 409 —el alta y la propuesta por un lado, firmar el cambio por
+ * otro— y esa promesa de no filtrar el `id` tiene que poder atarse en un solo
+ * sitio: la vigila `router.test.ts` comparando las claves exactas del `detalle`.
+ */
+function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
+  return {
+    tipo: choque.tipo,
+    estado: choque.estado,
+    fechaInicio: choque.fechaInicio,
+    fechaFin: choque.fechaFin,
+  };
+}
+
+/**
  * Corta si esta persona ya tiene una ausencia viva en esas fechas.
  *
- * Único sitio donde se decide qué es un solapamiento, para que las cuatro
- * puertas —esta alta, proponer un cambio de fechas, aprobarlo y el `PATCH` de
- * admin— no puedan discrepar entre ellas.
+ * Aquí se decide qué es un solapamiento para las tres puertas que pasan por el
+ * servicio: esta alta, proponer un cambio de fechas y el `PATCH` de admin.
+ *
+ * ⚠️ La CUARTA —firmar el cambio— no puede pasar por aquí y no pasa: vive dentro
+ * de la transacción de `repo.decidirModificacion`, con un `PoolClient` y sin
+ * poder lanzar `AusenciaError`, así que llama a `repo.solapeDe` por su cuenta y
+ * **repite a mano la exención de la incapacidad de aquí abajo**. Nada obliga a
+ * las dos a coincidir, y si divergen una puerta autoriza lo que la siguiente
+ * niega. Quien toque la exención tiene que tocar las dos.
  */
 async function exigirSinSolape(
   db: Pool,
@@ -293,16 +319,7 @@ async function exigirSinSolape(
 
   const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
   if (!choque) return;
-  // Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
-  // —`Solape` es una interface, sin index signature implícita, así que
-  // `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
-  // uuid que no necesita.
-  throw new AusenciaError('rango_solapado', 409, 'fechaInicio', {
-    tipo: choque.tipo,
-    estado: choque.estado,
-    fechaInicio: choque.fechaInicio,
-    fechaFin: choque.fechaFin,
-  });
+  throw new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(choque));
 }
 
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
@@ -846,15 +863,10 @@ export async function decidirModificacion(
     // se propuso el cambio y se firma, así que la propuesta era legal cuando se
     // pidió y ha dejado de serlo sin que nadie hiciera nada mal.
     if (resultado.razon === 'solape') {
-      // Campo a campo y sin el `id`, por lo mismo que en `exigirSinSolape`: hace
-      // que compile —`Solape` es una interface, sin index signature— y evita
-      // mandarle al cliente un uuid que no necesita.
-      throw new AusenciaError('rango_solapado', 409, 'fechaInicio', {
-        tipo: resultado.solape.tipo,
-        estado: resultado.solape.estado,
-        fechaInicio: resultado.solape.fechaInicio,
-        fechaFin: resultado.solape.fechaFin,
-      });
+      // Mismo `code`, mismo `field` y mismo `detalle` que las otras puertas: la
+      // interfaz ya sabe pintar este error, y llegar aquí con una forma distinta
+      // la obligaría a aprender un segundo caso para decir lo mismo.
+      throw new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(resultado.solape));
     }
     throw resultado.razon === 'ya_decidida'
       ? new AusenciaError('ya_decidida', 409)

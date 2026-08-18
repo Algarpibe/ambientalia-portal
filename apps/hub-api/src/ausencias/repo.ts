@@ -1319,12 +1319,14 @@ class ChoqueConLaSolicitud extends Error {}
  * firmar ya están ocupadas por otra ausencia viva de la misma persona.
  *
  * THROW y no `return` por el mismo motivo que `ChoqueConLaSolicitud`, y aquí es
- * todavía más fácil de perder de vista: cuando esto salta, el paso 1 **ya ha
- * marcado la propuesta como aprobada**. Un `return` desde dentro de
- * `withTransaction` sale por la puerta del `COMMIT` —no hay error que provoque
- * el `ROLLBACK`—, así que confirmaría esa marca y dejaría la propuesta decidida
- * sobre una solicitud que nadie cambió. Se comprobó cambiándolo por un `return`:
- * el test del ROLLBACK se pone rojo, con la propuesta en `aprobada`.
+ * todavía más fácil de perder de vista: cuando esto salta, **las dos escrituras
+ * ya están hechas** —la propuesta marcada `aprobada` y la solicitud movida a las
+ * fechas nuevas—. Un `return` desde dentro de `withTransaction` sale por la
+ * puerta del `COMMIT` —no hay error que provoque el `ROLLBACK`—, así que
+ * confirmaría las dos y dejaría exactamente el estado que esta puerta existe
+ * para impedir: dos ausencias vivas de la misma persona sobre el mismo día, con
+ * un 409 devuelto al jefe diciéndole que no se hizo nada. Se comprobó
+ * cambiándolo por un `return`: el test del ROLLBACK se pone rojo.
  *
  * Lleva el choque encima porque el aviso tiene que nombrarlo. No sale de este
  * módulo — se caza abajo y se traduce a un resultado normal.
@@ -1413,16 +1415,21 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
  *     encuentra fila y el servicio lo traduce a 409 en vez de mandar dos correos
  *     contradictorios.
  *  2. **Aplicarla a la solicitud**, y solo si se aprueba. Rechazar deja la fila
- *     exactamente como estaba: no hay nada que escribir. Antes de escribir, un
- *     cambio de fechas pasa por la tercera puerta del solapamiento: entre
- *     proponer y firmar le han podido aprobar a esa persona otra ausencia
- *     encima, y esta es la única comprobación que llega a tiempo de verlo —la de
- *     `pedirModificacion` miró cuando el destino aún estaba libre—. Va por el
- *     mismo `client`, así que ve lo que esta transacción ya escribió sin
- *     confirmar y se deshace con su mismo `ROLLBACK`. Lo que **no** hace es
- *     cerrar la carrera: esto es READ COMMITTED y el `SELECT` no lleva
- *     `FOR UPDATE` (el porqué entero, en `solapeDe`).
- *  3. Releer, y encolar el aviso.
+ *     exactamente como estaba: no hay nada que escribir.
+ *  3. Releer, comprobar que el cambio no ha dejado a esa persona con dos
+ *     ausencias vivas sobre el mismo día, y encolar el aviso.
+ *
+ * ⚠️ Esa comprobación del paso 3 es la TERCERA puerta del solapamiento, y la
+ * única que llega a tiempo: entre PROPONER el cambio y FIRMARLO le han podido
+ * aprobar a esa persona otra ausencia encima, y la de `pedirModificacion` miró
+ * cuando el destino aún estaba libre. Va DESPUÉS del UPDATE y no antes porque
+ * ahí `solicitud` ya está releída y trae el empleado y el tipo, que es lo único
+ * que le falta a `Modificacion`; ve exactamente lo mismo que vería antes, porque
+ * `solapeDe` excluye a esta solicitud por su id. Si choca, **LANZA** —por lo
+ * mismo que el paso 2, ver abajo— y el ROLLBACK se lleva por delante los pasos
+ * 1 y 2, con lo que el outbox se queda sin aviso. Lo que **no** hace es cerrar
+ * la carrera: esto es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE` (el
+ * porqué entero, en `solapeDe`).
  *
  * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
  * importante de la función. El ROLLBACK deshace también el paso 1, así que la
@@ -1459,46 +1466,6 @@ export async function decidirModificacion(
       if (rows.length === 0) return { ok: false, razon: 'ya_decidida' };
       const modificacion = aModificacion(rows[0] as FilaModificacionDb);
 
-      // Solo al APROBAR, y solo un cambio de FECHAS.
-      //
-      // `aprueba` no es un atajo de rendimiento: rechazar no escribe nada en la
-      // solicitud, así que no puede solapar a nadie, y comprobarlo también ahí
-      // dejaría IRRECHAZABLE una propuesta que se quedó solapada —409 al jefe
-      // cada vez que lo intentara, y solo el solicitante podría quitarla de en
-      // medio retirándola—. Lo vigila un test de `repo.solapes.db.test.ts`
-      // escrito para esto: antes de él, quitar el `aprueba &&` dejaba los cuatro
-      // portones enteros en verde.
-      //
-      // La clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
-      // anulación las tres columnas nuevas van a `null` —lo exige el CHECK
-      // `modificaciones_campos_por_clase` de la 024—, así que el trozo de las
-      // fechas, que pide el compilador (`Modificacion` es plana y
-      // `clase === 'fechas'` no estrecha `string | null`), ya la excluye por su
-      // cuenta. Se deja porque nombra a qué clase se aplica la regla, igual que
-      // en `pedirModificacion`, y con la misma letra pequeña: no obliga a nadie
-      // a volver aquí si mañana aparece una tercera clase con fechas.
-      if (aprueba && modificacion.clase === 'fechas' && modificacion.fechaInicioNueva && modificacion.fechaFinNueva) {
-        // De quién es la ausencia, y nada más que eso: la solicitud entera se
-        // relee más abajo y a propósito DESPUÉS de aplicarla, que es lo que hace
-        // que el correo hable de lo que quedó guardado.
-        const { rows: titular } = await client.query(
-          `SELECT s.empleado_id FROM portal.solicitudes_ausencia s WHERE s.id = $1`,
-          [modificacion.solicitudId],
-        );
-        const choque = await solapeDe(
-          client,
-          (titular[0] as { empleado_id: string }).empleado_id,
-          modificacion.fechaInicioNueva,
-          modificacion.fechaFinNueva,
-          // El id de la SOLICITUD, no el de la propuesta: sin esta exclusión, la
-          // ausencia chocaría contra sí misma en cuanto las fechas nuevas rocen
-          // a las viejas —acortar o desplazar un día— y no se podría aprobar ni
-          // un solo cambio de los que se piden de verdad.
-          modificacion.solicitudId,
-        );
-        if (choque) throw new SolapeAlAplicar(choque);
-      }
-
       if (aprueba) await aplicarALaSolicitud(client, modificacion);
 
       // La solicitud se relee DESPUÉS de aplicarla: el correo se redacta sobre
@@ -1507,6 +1474,52 @@ export async function decidirModificacion(
       // que es justo lo que la interfaz necesita ver.
       const { rows: filas } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [modificacion.solicitudId]);
       const solicitud = aSolicitud(filas[0] as FilaSolicitudDb);
+
+      // Las tres condiciones, y ninguna sobra igual:
+      //  - `aprueba` no es un atajo de rendimiento: rechazar no escribe nada en
+      //    la solicitud, así que no puede solapar a nadie, y comprobarlo también
+      //    ahí dejaría IRRECHAZABLE una propuesta que se quedó solapada —409 al
+      //    jefe cada vez, y solo el solicitante podría quitarla de en medio
+      //    retirándola—. Lo vigila un test de `repo.solapes.db.test.ts` escrito
+      //    para esto: antes de él, quitarlo dejaba los cuatro portones en verde.
+      //  - `tipo` repite a mano la exención de `exigirSinSolape`: una incapacidad
+      //    no se pide, se informa después de haber estado enfermo, y no se le
+      //    puede negar. No se comparte aquel helper porque esto vive en el repo,
+      //    dentro de la transacción y con un `PoolClient`, y él lanza
+      //    `AusenciaError` desde el servicio con un `Pool`. Que las dos digan lo
+      //    mismo NO lo garantiza el compilador, y si divergen una puerta autoriza
+      //    lo que la siguiente niega: la 2 deja pasar la propuesta por la
+      //    exención y firmarla daría 409. Alcanzable hoy — el `PATCH` de admin
+      //    admite cualquier tipo con cualquier estado, así que hay
+      //    `incapacidad`es en `aprobada`.
+      //  - la clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
+      //    anulación las tres columnas nuevas van a `null` —lo exige el CHECK
+      //    `modificaciones_campos_por_clase` de la 024—, así que el trozo de las
+      //    fechas, que pide el compilador (`Modificacion` es plana y
+      //    `clase === 'fechas'` no estrecha `string | null`), ya la excluye sola.
+      //    Se deja porque nombra a qué clase se aplica la regla, igual que en
+      //    `pedirModificacion`, y con la misma letra pequeña: no obliga a nadie a
+      //    volver aquí si mañana aparece una tercera clase con fechas.
+      if (
+        aprueba &&
+        solicitud.tipo !== 'incapacidad' &&
+        modificacion.clase === 'fechas' &&
+        modificacion.fechaInicioNueva &&
+        modificacion.fechaFinNueva
+      ) {
+        const choque = await solapeDe(
+          client,
+          solicitud.empleadoId,
+          modificacion.fechaInicioNueva,
+          modificacion.fechaFinNueva,
+          // El id de la SOLICITUD, no el de la propuesta: sin esta exclusión la
+          // ausencia choca SIEMPRE contra sí misma —la fila que se acaba de
+          // mover ya lleva las fechas nuevas— y no se podría aprobar ni un solo
+          // cambio de los que se piden de verdad.
+          modificacion.solicitudId,
+        );
+        if (choque) throw new SolapeAlAplicar(choque);
+      }
 
       // Anotado y no un literal suelto: el valor viaja al CHECK de `evento` de la
       // 024, y una errata reventaría DENTRO de la transacción, deshaciendo una
