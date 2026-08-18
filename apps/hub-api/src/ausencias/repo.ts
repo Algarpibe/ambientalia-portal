@@ -1736,15 +1736,15 @@ export interface Solape {
  * El predicado de fechas es el mismo que usa `ausenciasEntre` —solapa, no
  * contiene—, pero es el mismo predicado dentro de una pregunta distinta:
  * aquella une con `empleados` y filtra por `e.activo`, no filtra por `tipo`, y
- * su `soloEmpleadoId` es opcional. Esta no mira `empleados.activo` porque la
- * pregunta ya es sobre una persona concreta, no sobre a quién pintar en un
- * calendario.
+ * su `soloEmpleadoId` admite `null` para no acotar. Esta no mira
+ * `empleados.activo` porque la pregunta ya es sobre una persona concreta, no
+ * sobre a quién pintar en un calendario.
  *
  * `LIMIT 1` porque el mensaje solo puede nombrar una colisión; buscarlas todas
  * sería trabajo que nadie lee.
  *
- * ⚠️ El filtro de estado —`estado <> 'rechazada'`— es idéntico carácter a
- * carácter al de `ausenciasEntre`; lo que se invierte no es el filtro sino la
+ * ⚠️ El filtro de estado —`estado <> 'rechazada'`— es el mismo filtro que en
+ * `ausenciasEntre`; lo que se invierte no es el filtro sino la
  * CONSECUENCIA de que falle en abierto: un estado nuevo que nadie añada a la
  * lista entra igual por los dos lados, pero aquí eso cuenta como ocupado y
  * bloquea de más —lo reporta un usuario el mismo día—, mientras que allí se
@@ -1755,13 +1755,18 @@ export interface Solape {
  * fila.
  *
  * Acepta `PoolClient` además de `Pool` para poder llamarse DENTRO de la
- * transacción que aplica un cambio de fechas: así la lectura ve el mismo
- * snapshot que la escritura. La ventana de carrera **no** se cierra con eso
- * —`BEGIN` pelado es READ COMMITTED y este `SELECT` no lleva `FOR UPDATE`—, y
- * dos altas simultáneas la pasan las dos. Cerrarla del todo pediría un candado
- * en la BD, como el índice único parcial de la 024 hace con las propuestas. Se
- * decidió no ponerlo: la restricción falla al aplicarse si hay datos que ya la
- * incumplen, y en producción los hay.
+ * transacción que aplica un cambio de fechas: por esa misma conexión la
+ * comprobación ve lo que la propia transacción ya escribió sin confirmar
+ * —una consulta por el `Pool` no lo vería— y se deshace con el mismo
+ * `ROLLBACK`. Lo que **no** da es un snapshot compartido: `BEGIN` pelado es
+ * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera no
+ * se cierra con eso —`BEGIN` pelado es READ COMMITTED y este `SELECT` no
+ * lleva `FOR UPDATE`—, y dos altas simultáneas la pasan las dos. Cerrarla del
+ * todo pediría un candado en la BD, como el índice único parcial de la 024
+ * hace con las propuestas. Se decidió no ponerlo: la restricción falla al
+ * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
+ * 2026-08-18 contra producción, un empleado tiene vacaciones aprobadas del 10
+ * al 14 de agosto de 2026 y un permiso aprobado el 14.
  */
 export async function solapeDe(
   db: Pool | PoolClient,
