@@ -66,6 +66,26 @@ jobs:
       - name: Tests
         run: npm run test --workspaces --if-present
 
+      # El CUARTO PORTÓN: ejecuta el SQL crudo de hub-api contra un PostgreSQL 17
+      # de verdad, levantado con testcontainers (la misma versión mayor que corre
+      # producción). Cubre los testigos de concurrencia de la app de ausencias, el
+      # filtro del calendario y que las migraciones aplican limpias e idempotentes.
+      #
+      # Va en un step APARTE del de arriba, y no dentro de `npm run test`, a
+      # propósito: el portón que corre en cada commit no debe poder fallar porque
+      # un demonio de Docker esté parado en la máquina de alguien. Por eso
+      # `vitest.config.ts` excluye los `*.db.test.ts` del run normal. Aquí, en
+      # cambio, Docker siempre está, así que el candado se vigila solo en lugar de
+      # depender de que alguien se acuerde de invocarlo a mano — que es la deuda
+      # que estos tests vinieron a cerrar, un nivel más arriba.
+      #
+      # El timeout acota el caso de un registry lento: `contenedor.ts` ya trae su
+      # propio `withStartupTimeout`, pero si algo se atasca fuera de él, mejor
+      # fallar en 15 minutos que gastar el presupuesto del job entero.
+      - name: Tests contra Postgres real (hub-api)
+        run: npm run test:db --workspace=apps/hub-api
+        timeout-minutes: 15
+
       # INFRA-516 — auditoría de dependencias de PRODUCCIÓN: bloquea el pipeline
       # ante vulnerabilidades CRÍTICAS. Las high/moderate (p. ej. xlsx, DEP-110)
       # quedan informativas hasta migrar; baja el --audit-level cuando se resuelvan.
