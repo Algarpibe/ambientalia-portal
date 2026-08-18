@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, Loader2, Save, X } from 'lucide-react';
 import { editarSolicitud, type Empleado, type EstadoSolicitud, type Solicitud, type TipoSolicitud } from './api';
 import { contarDiasHabiles, TIPOS } from './dominio';
+import { useFocoDeModal } from './focoDeModal';
 
 // Corrección de una fila del registro, para el admin. Sirve sobre todo para dos
 // cosas: arreglar un dato que ya venía mal en la hoja, y reasignar una solicitud
@@ -42,6 +43,11 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
   const [observaciones, setObservaciones] = useState(solicitud.observaciones ?? '');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // El foco entra aqui al abrir, no sale tabulando y vuelve a su sitio al
+  // cerrar; Escape cierra por el mismo camino que el aspa y el clic fuera. El
+  // porque de cada decision esta en `focoDeModal.ts`.
+  const dialogo = useFocoDeModal<HTMLFormElement>(onCerrar);
 
   const calculados = useMemo(
     () => contarDiasHabiles(fechaInicio, fechaFin, festivos),
@@ -85,11 +91,15 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
       role="presentation"
     >
       <form
+        ref={dialogo}
         onSubmit={guardar}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Editar solicitud"
+        // `-1`: enfocable a mano al abrir, pero fuera del ciclo de tabulacion,
+        // para que Tab no gaste una parada en el contenedor.
+        tabIndex={-1}
         className="my-8 w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
       >
         <div className="mb-4 flex items-start justify-between gap-4">
@@ -193,8 +203,15 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
           <textarea id="ed-obs" rows={2} className={CAMPO} value={observaciones} maxLength={2000} onChange={(e) => setObservaciones(e.target.value)} />
         </div>
 
+        {/* `role="alert"` por lo mismo que en PedirModificacion, que ya lo
+            lleva: el banner sale DESPUES de pulsar y sin mover el foco. Aqui
+            ademas el modal se queda abierto y con todo lo escrito intacto, que
+            es exactamente lo que parece un guardado que salio bien. */}
         {error && (
-          <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
           </div>
         )}
