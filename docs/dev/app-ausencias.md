@@ -1194,6 +1194,15 @@ npm run test:db --workspace=apps/hub-api
 > conexión de testcontainers. En el runner de Actions Docker siempre está, así
 > que ahí el candado se vigila solo en vez de depender de que alguien se acuerde.
 
+> ⚠️ **`@testcontainers/postgresql` se queda en la línea 11.** La 12 arrastra
+> `undici@8`, que exige Node ≥ 22.19 y revienta al cargar el módulo
+> (`webidl.util.markAsUncloneable is not a function`), antes de levantar ningún
+> contenedor. Este repo va por **Node 20** —`.nvmrc` y `node:20-alpine` en el
+> Dockerfile—, y la línea 11 trae `undici@7`, que pide ≥ 20.18.1. Se descubrió en
+> el CI y no en local: en la máquina de desarrollo había Node 26, donde la 12
+> funciona, y el `npm install` sólo avisó de `engines`. Subir esa dependencia
+> obliga a subir Node antes, en el `.nvmrc` **y** en el Dockerfile.
+
 Levanta un contenedor **`postgres:17`** —la misma versión mayor que corre
 producción, verificada con un `SELECT version()` contra EasyPanel el 2026-08-18:
 PostgreSQL 17.10 sobre Debian. La imagen se fija a mano porque un `latest`
