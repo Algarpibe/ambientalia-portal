@@ -150,6 +150,34 @@ que sale rojo por ese motivo y se revierte. Los cinco resultados se reportan con
 salida. Un candado que pasa por construcción no es un candado, y esta app ya tuvo
 uno: el del solicitante que no puede autoaprobarse, que daba 403 por otra rama.
 
+## Lo que la ejecución corrigió de este diseño
+
+Tres afirmaciones de arriba resultaron falsas al ejecutarlas. Se dejan escritas
+para que se vea qué se creía, pero **manda lo que sigue**:
+
+1. **El testigo de `crearModificacion` NO protege `estado_previo`.** El punto 2 de
+   «Los cinco tests» decía que sin él la propuesta se guardaría con
+   `estado_previo = 'pendiente'` sobre algo ya aprobado. Es falso: `estado_previo`
+   sale de `s.estado` en el mismo `SELECT`, y es el valor real de la fila con
+   testigo y sin él. Lo que protege es `aprobador_correo`, que el servicio derivó
+   con `decisorDeModificacion` sobre el estado viejo. Si la solicitud avanza de
+   `pendiente` a `pendiente_2` entre la lectura y el INSERT, la propuesta se
+   congela a nombre del jefe que ya firmó, y la bandeja, el guard y el correo la
+   mandan los tres allí. Verificado con sondas: `modificacionesPendientes(jefe1)`
+   devuelve la propuesta con el testigo roto y cero con el testigo puesto.
+
+2. **Una falsación debe mantener vivos los parámetros del SQL.** Quitar el
+   placeholder del testigo descuadra el bind (tareas 4 y 5) o deja a Postgres sin
+   inferir el tipo (tarea 6, `could not determine data type of parameter $3`). En
+   los tres casos el test se pone rojo sin llegar a ejecutar nada, y ese rojo no
+   falsa nada: solo dice que el SQL ya no compila. La mutación correcta conserva
+   el parámetro y lo hace inerte (`AND $7::text IS NOT NULL`).
+
+3. **Un rojo no basta: hay que mirar el daño.** El primer test de
+   `crearModificacion` se ponía rojo al falsarlo, pero había elegido el único
+   escenario —sin cascada— donde la mutación no causaba ningún daño observable.
+   Falsar es comprobar que el candado muerde Y que lo que muerde importa.
+
 ## Lo que NO entra
 
 Los demás invariantes que solo viven en SQL: `ausenciasEntre` con su
