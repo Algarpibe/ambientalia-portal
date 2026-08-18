@@ -659,6 +659,23 @@ git commit -m "test(ausencias): el testigo de crearModificacion se prueba ejecut
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/repo.testigos.db.test.ts`
 
+- [ ] **Step 0: Que el rojo del test anterior nombre el daño**
+
+En el test de `crearModificacion`, justo antes de `expect(r).toEqual({ ok: false, razon: 'estado' })`, añadir:
+
+```ts
+    // El rojo tiene que decir QUE se colo, no solo que se colo: sin esto el diff
+    // elide los 17 campos de la propuesta y el decisor obsoleto —lo unico que
+    // protege el testigo— no aparece por ningun lado.
+    if (r.ok) {
+      throw new Error(
+        `el testigo dejo pasar la propuesta, congelada a nombre de ${r.modificacion.aprobadorCorreo} cuando el turno es de jefe2@ambientalia.com.co`,
+      );
+    }
+```
+
+Y rebajar el comentario de la aserción de `modificacionesPendientes` a lo que de verdad es: en verde es redundante con el `count(*) = 0` de dos líneas antes, y en rojo no llega a ejecutarse porque Vitest aborta en el primer `expect` fallido. Está ahí para que el lector vea cuál era la consecuencia, no para probarla.
+
 - [ ] **Step 1: Ampliar el import de `./repo.js`**
 
 ```ts
@@ -738,16 +755,20 @@ Las fechas se comparan contra cadenas porque `SELECT_SOLICITUD` las castea: `s.f
 
 - [ ] **Step 4: Falsar el candado**
 
-En `apps/hub-api/src/ausencias/repo.ts`, en la constante `TESTIGO_SOLICITUD`, borrar las dos líneas de fecha y dejar solo:
+En `apps/hub-api/src/ausencias/repo.ts`, en la constante `TESTIGO_SOLICITUD`, reducir el testigo al estado **manteniendo los dos parámetros mencionados y tipados**:
 
 ```sql
   WHERE id = $1
     AND estado       = $2
+    AND $3::date IS NOT NULL
+    AND $4::date IS NOT NULL
 ```
+
+⚠️ Borrar las dos líneas a secas **no funciona**, y por un motivo distinto al de las tareas 4 y 5. Aquí el número de parámetros sí cuadra (`$5`, `$6` y `$7` siguen usándose en el `SET`), pero al desaparecer `$3` y `$4` del texto Postgres **no tiene de dónde inferir su tipo** y falla en el `Parse`: «could not determine data type of parameter $3». Ese rojo solo demuestra que el SQL ya no compila. Con el `::date` siguen tipados y son siempre ciertos, así que el testigo queda reducido al estado y la carrera ocurre de verdad.
 
 Correr `npm run test:db`.
 
-Esperado: **rojo**. `r` pasa a `{ok:true, ...}` y la solicitud queda con `2026-07-13`/`2026-07-17`: la aprobación ha pisado la corrección del admin, y encima sale el correo.
+Esperado: **rojo** en `expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_de_estado' })`. Y el daño, verificado con sonda: la solicitud queda con `2026-07-13`/`2026-07-17` —la corrección del admin pisada y sin rastro, porque el PATCH no encola nada—, la propuesta queda `aprobada` (sin `ChoqueConLaSolicitud` no hay ROLLBACK) y el outbox trae `modificacion_aprobada`, o sea el correo anunciando un cambio que nadie autorizó.
 
 Revertir, confirmar verde y **reportar las dos salidas**.
 
