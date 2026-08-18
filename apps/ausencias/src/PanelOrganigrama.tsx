@@ -153,7 +153,8 @@ export default function PanelOrganigrama({ activo }: Props) {
         El <b>jefe inmediato</b> es quien da el primer visto bueno a las solicitudes de esa
         persona. <b>Quién</b> sería la segunda firma se deduce solo: es el jefe de su jefe —quien
         no tenga a nadie por encima cierra con una sola firma—. Que haga falta o no, lo decides
-        tú con la casilla <b>Necesaria</b>.
+        tú con la casilla <b>Necesaria</b>, que aparece apagada justo en esas filas: sin nadie
+        por encima del jefe no hay segunda firma que pedir, y marcarla no cambiaría nada.
       </p>
       <p className="mb-4 max-w-3xl text-sm text-gray-600">
         Si desmarcas <b>Necesaria</b>, la solicitud queda aprobada con la firma del jefe inmediato.
@@ -257,13 +258,28 @@ export default function PanelOrganigrama({ activo }: Props) {
                       </select>
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">
-                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                      <label
+                        className={`flex items-center gap-2 text-xs ${arriba ? 'text-gray-600' : 'text-gray-400'}`}
+                      >
                         <input
                           type="checkbox"
                           // `!!` por lo mismo que en la casilla de soportes: una
                           // fila de un backend que aún no mande el campo volvería
                           // el checkbox «no controlado» a medio render.
                           checked={!!fila.requiereSegundaFirma}
+                          // Sin nadie por encima del jefe no hay segunda firma que
+                          // pedir, así que la casilla no decide nada: marcarla o
+                          // desmarcarla daba exactamente el mismo resultado, y leer
+                          // «Necesaria» junto a «una sola firma» parecía una
+                          // contradicción del sistema. Se apaga con el porqué al
+                          // lado —el <div> de abajo, que va en su
+                          // `aria-describedby`— y no se esconde: quien no sabe que
+                          // la opción existe no puede preguntarse por qué le falta.
+                          //
+                          // El valor guardado NO se toca. Si mañana esta persona
+                          // pasa a colgar de alguien que sí tiene jefe, su política
+                          // sigue siendo la que era y la casilla vuelve sola.
+                          disabled={!arriba}
                           onChange={(ev) =>
                             actualizar(e.id, { requiereSegundaFirma: ev.target.checked, error: null })
                           }
@@ -286,7 +302,13 @@ export default function PanelOrganigrama({ activo }: Props) {
                           editado (`fila`) porque los cuatro cortes de
                           `aprobadoresDe` se aplican ANTES de mirar la casilla:
                           firmante o informado es el mismo correo en otra ranura,
-                          no hay nada que adivinar. */}
+                          no hay nada que adivinar.
+
+                          Que `arriba` venga de lo guardado también gobierna cuándo
+                          se apaga la casilla, y eso se nota: al cambiarle el jefe a
+                          alguien, la casilla no se entera hasta que se guarda. Es
+                          preferible a adivinar un abuelo que el navegador no
+                          conoce. */}
                       <div id={`arriba-${e.id}`} className="mt-1 text-xs">
                         {arriba ? (
                           <span title={arriba} className={fila.requiereSegundaFirma ? undefined : 'text-gray-500'}>
@@ -294,7 +316,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                             {!fila.requiereSegundaFirma && ' — solo informado'}
                           </span>
                         ) : (
-                          <span className="text-gray-400">— una sola firma</span>
+                          <span className="text-gray-400">— su jefe no tiene jefe: una sola firma</span>
                         )}
                       </div>
                     </td>
