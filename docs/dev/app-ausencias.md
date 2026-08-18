@@ -1185,12 +1185,14 @@ columnas al testigo triple— dejaba **la suite entera en verde**. Ya no: hay un
 npm run test:db --workspace=apps/hub-api
 ```
 
-> ⚠️ **No corre con `npm run test`, y el CI tampoco lo invoca.** El portón de
-> siempre sigue en 742 tests, sin infraestructura y en segundos, porque
-> `vitest.config.ts` excluye los `*.db.test.ts`: el portón que corre en cada
-> commit no debe poder fallar porque un demonio esté parado. Este otro
-> **necesita Docker arrancado**; si no lo está no salen tests rojos, sale un
-> error de conexión de testcontainers.
+> ⚠️ **No corre con `npm run test`, pero el CI sí lo invoca**, en un step propio
+> (`Tests contra Postgres real`). El portón de siempre sigue en 742 tests, sin
+> infraestructura y en segundos, porque `vitest.config.ts` excluye los
+> `*.db.test.ts`: el portón que corre en cada commit no debe poder fallar porque
+> un demonio esté parado en la máquina de alguien. En local, este otro **necesita
+> Docker arrancado**; si no lo está no salen tests rojos, sale un error de
+> conexión de testcontainers. En el runner de Actions Docker siempre está, así
+> que ahí el candado se vigila solo en vez de depender de que alguien se acuerde.
 
 Levanta un contenedor **`postgres:17`** —la misma versión mayor que corre
 producción, verificada con un `SELECT version()` contra EasyPanel el 2026-08-18:
@@ -1205,7 +1207,7 @@ detectar una migración que nadie apuntó en `MIGRATIONS` —producción tampoco
 aplicaría, así que los dos esquemas coinciden en no tenerla—; eso solo se delata
 de rebote, cuando algún test de BD toca el esquema que esa migración traía.
 
-Son **10** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
+Son **14** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
 **y con datos** sin romper nada —que es como re-arranca producción—, y que los
 nueve eventos del outbox pasen el `CHECK` **y quepan en la columna**, que era la
 regresión del `22001` del 2026-08-17: dos restricciones distintas de las que solo
@@ -1214,6 +1216,16 @@ se miró una. Ocho de los testigos: `decidirSolicitud`, `crearModificacion`, los
 anulación, que comparte el testigo con la de fechas pero tiene otro `SET`), el
 `23505` del índice único parcial emitido por Postgres y reconocido por su nombre,
 y lo que escribe aprobar una modificación de cada clase.
+
+Y **cuatro del calendario**, sobre `ausenciasEntre`: que la consulta busca las que
+**solapan** con el rango y no las contenidas en él —la condición natural perdería
+justo las que cruzan el cambio de mes, que son las que más importa ver—; que una
+solicitud anulada no se pinta y una incapacidad `registrada` sí; que una ficha
+desactivada no aporta ausencias; y que el filtro por empleado distingue «el mío»
+de «el de todos». Ese `AND s.estado <> 'rechazada'` es el que **falla en abierto**,
+y por eso el test que fija que la anulada desaparece sostiene una decisión de
+diseño: si anular hubiera estrenado un estado `'anulada'` en vez de reutilizar
+`rechazada`, seguiría pintándose como ausencia vigente.
 
 **Cada candado se falsó rompiendo el código de verdad** y comprobando que se pone
 rojo por el motivo correcto.
@@ -1229,10 +1241,10 @@ sentencias llegaron a mandarse, que no se lee en las filas resultantes: que hubo
 > índice único parcial y el `LEFT JOIN`. Quien toque esta tabla mantiene **dos**
 > implementaciones, no una.
 >
-> El cuarto portón **no cierra ese hueco**: solo cubre los testigos. Los demás
-> invariantes que viven únicamente en SQL siguen sin ejecutarse en ningún test
-> —el `AND s.estado <> 'rechazada'` de `ausenciasEntre`, los filtros de las
-> bandejas, las consultas del saldo—, y ahí sigue mandando el doble.
+> El cuarto portón **no cierra ese hueco**: cubre los testigos y el filtro del
+> calendario, y nada más. Los demás invariantes que viven únicamente en SQL siguen
+> sin ejecutarse en ningún test —los filtros de las bandejas, las consultas del
+> saldo—, y ahí sigue mandando el doble.
 
 En el frontend no hay tests, como en el resto de la app: el modal, la tercera
 sección de la bandeja y los dos contadores se comprueban mirándolos.
