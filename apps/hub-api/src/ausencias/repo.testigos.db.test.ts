@@ -195,3 +195,34 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada']);
   });
 });
+
+describe('el indice unico parcial de la 024', () => {
+  it('CANDADO: la segunda propuesta viva la corta la BASE, y el codigo la reconoce por su nombre', async () => {
+    // Esta carrera no la puede cortar una comprobacion en JS: dos peticiones
+    // simultaneas pasarian las dos antes de que ninguna escribiera. Y el `catch`
+    // exige el NOMBRE del constraint, asi que el que emite Postgres y el que
+    // compara el codigo tienen que ser el mismo. Con un pool falso eso es
+    // circular: el test se inventa el nombre que el codigo espera.
+    const s = await sembrarCaso('aprobada');
+
+    const datos = {
+      solicitudId: s.id,
+      clase: 'fechas' as const,
+      estadoEsperado: 'aprobada' as const,
+      fechaInicioNueva: '2026-07-13',
+      fechaFinNueva: '2026-07-17',
+      diasHabilesNuevos: 5,
+      motivo: 'Cita medica',
+      aprobadorCorreo: 'jefe1@ambientalia.com.co',
+    };
+
+    const primera = await crearModificacion(db, datos, payloadStub);
+    expect(primera.ok).toBe(true);
+
+    const segunda = await crearModificacion(db, datos, payloadStub);
+    expect(segunda).toEqual({ ok: false, razon: 'duplicada' });
+
+    const { rows } = await db.query('SELECT count(*)::int AS n FROM portal.solicitud_modificaciones');
+    expect((rows[0] as { n: number }).n).toBe(1);
+  });
+});
