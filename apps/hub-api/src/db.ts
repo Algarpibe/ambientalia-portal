@@ -28,6 +28,24 @@ function migrationsDir(): string {
 }
 
 /**
+ * Aplica en orden las migraciones del array. Exportada —y no en linea dentro de
+ * `initDb()`— porque los tests contra Postgres real siembran su contenedor con
+ * ESTA funcion: asi recorren el mismo array `MIGRATIONS` y el esquema de test no
+ * puede divergir del de produccion. Lo que eso NO detecta es una migracion que
+ * nadie apunto en el array: produccion tampoco la aplicaria, asi que los dos
+ * esquemas coinciden en no tenerla y nadie se queja. Eso solo se delata de
+ * rebote, cuando algun test de BD toca el esquema que esa migracion traia.
+ */
+export async function aplicarMigraciones(db: Pool): Promise<void> {
+  const dir = migrationsDir();
+  for (const file of MIGRATIONS) {
+    const sql = readFileSync(join(dir, file), 'utf8');
+    await db.query(sql);
+    console.log(`migration applied: ${file}`);
+  }
+}
+
+/**
  * Inicialización de BD en el arranque (Requirements 6.3, 6.5):
  *  - Si HUB_DB_URL no está definida → termina el proceso (< 5 s).
  *  - Si la BD no es alcanzable → termina el proceso con mensaje de error.
@@ -50,12 +68,7 @@ export async function initDb(): Promise<void> {
     process.exit(1);
   }
 
-  const dir = migrationsDir();
-  for (const file of MIGRATIONS) {
-    const sql = readFileSync(join(dir, file), 'utf8');
-    await db.query(sql);
-    console.log(`migration applied: ${file}`);
-  }
+  await aplicarMigraciones(db);
 
   await seedUsersFromEnv(db);
 }

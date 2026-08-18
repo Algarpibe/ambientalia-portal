@@ -2533,9 +2533,10 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
   });
 
   it('el alta viaja con el estado que el servicio LEYÓ, no con un literal', async () => {
-    // Lo que el testigo del SQL compara. Con un literal escrito a mano, una
-    // solicitud ya aprobada guardaría `estado_previo = 'pendiente'` y el correo
-    // de la decisión no avisaría de tocar el calendario de Google.
+    // Lo que el testigo del SQL compara. Con un literal escrito a mano, el
+    // `WHERE s.estado = $8` no casaría nunca sobre una solicitud ya aprobada y
+    // el trabajador se comería un 409 que no le toca. (`estado_previo` no entra
+    // aquí: sale de `s.estado` en el mismo SELECT. Ver `repo.crearModificacion`.)
     const s = await crear();
     fila(s.id as string).estado = 'aprobada';
     await pedir(s.id as string, CAMBIO).expect(201);
@@ -2547,10 +2548,10 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     // formulario.
     //
     // ⚠️ Esto fija el CABLEADO DEL SERVICIO —que traduce `razon: 'estado'` a un
-    // 409 sin escribir nada—, NO el SQL. El `AND s.estado = $8` no lo ejecuta
-    // ningún test: este doble es in-memory y modela el testigo por su cuenta,
-    // así que quitarlo del SQL real dejaría los 677 en verde. Lo único que
-    // vigila el SQL es la aserción de forma de repo.test.ts.
+    // 409 sin escribir nada—, NO el SQL. Este doble es in-memory y modela el
+    // testigo por su cuenta, así que quitar el `AND s.estado = $8` del SQL real
+    // dejaría esta batería entera en verde. Quien ejecuta ese SQL es
+    // `repo.testigos.db.test.ts`, en el cuarto portón (`npm run test:db`).
     const s = await crear();
     estado.pisarEstadoAlCrearModificacion = 'aprobada';
     const r = await pedir(s.id as string, CAMBIO).expect(409);

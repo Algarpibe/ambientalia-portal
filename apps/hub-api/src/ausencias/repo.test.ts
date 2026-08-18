@@ -3,13 +3,22 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { crearModificacion, decidirModificacion } from './repo.js';
 import type { PayloadEvento } from './types.js';
 
-// Los únicos tests del repo que no necesitan Postgres.
+// Los tests del repo que NO necesitan Postgres.
 //
-// El resto del fichero es SQL y se prueba a través del doble in-memory de
-// `router.test.ts`, que lo sustituye entero. Aquí quedan las dos cosas que ese
-// doble NO puede cubrir por construcción: cómo se traduce un error del DRIVER
-// (que el doble nunca lanza, porque comprueba en JS antes de escribir) y la
-// forma del SQL que el doble reemplaza.
+// El resto de `repo.ts` es SQL y se prueba por otros dos caminos: el doble
+// in-memory de `router.test.ts`, que lo sustituye entero, y
+// `repo.testigos.db.test.ts`, que ejecuta las consultas de verdad contra un
+// Postgres en Docker (`npm run test:db`, el cuarto portón). Ahí se fue lo que
+// aquí era «la forma del SQL»: asertar sobre el TEXTO de una consulta protege el
+// texto, no lo que hace.
+//
+// Aquí quedan las dos cosas que ninguno de esos dos caminos da. Una, cómo se
+// traduce un error del DRIVER: el doble nunca lanza —comprueba en JS antes de
+// escribir— y Postgres real no lo provoca sin ensuciar el esquema, porque hoy no
+// hay ningún otro constraint que emita un `23505` dentro de este `try`. Otra,
+// QUÉ sentencias llegaron a mandarse, que no se lee en las filas resultantes:
+// que el `UPDATE` de la solicitud ni se intentó, que no se escribió en el
+// outbox, que hubo `ROLLBACK` y no `COMMIT`.
 //
 // `crearModificacion` solo usa `db.connect()`, así que un Pool falso de quince
 // líneas basta.
@@ -115,38 +124,9 @@ describe('crearModificacion contra un driver falso', () => {
     const { db } = poolFalso({ code: '40001' });
     await expect(crearModificacion(db, DATOS, payloadStub)).rejects.toThrow('duplicate key value');
   });
-
-  it('CANDADO (de forma): el INSERT lleva el testigo `AND s.estado = $8`', async () => {
-    // Asertar sobre el TEXTO de una consulta es feo y se rompe con un
-    // reformateo inocente. Se acepta aquí, y solo aquí, porque es lo único
-    // mecánico que protege un invariante que ya sabemos que nadie más cubre:
-    // el doble de router.test.ts es in-memory, así que cambiar este WHERE por
-    // un `IN (...)` deja los 677 tests en verde mientras `estado_previo` pasa a
-    // poder mentir sobre una solicitud que ya está en el calendario de Google.
-    // Si el reformateo rompe este test, la respuesta es arreglar el literal, no
-    // borrar el test.
-    const { db, sqls } = poolFalso();
-    await crearModificacion(db, DATOS, payloadStub);
-    const insert = sqls.find((s) => s.includes('INSERT INTO portal.solicitud_modificaciones'));
-    expect(insert).toContain('AND s.estado = $8');
-  });
 });
 
 // ── La decisión ────────────────────────────────────────────────────────────
-
-/**
- * El SQL sin comentarios ni espacios de más.
- *
- * Los comentarios se quitan porque el aviso que vive DENTRO de estas consultas
- * menciona a propósito las columnas que el SET no debe tocar, y sin quitarlos la
- * aserción de abajo se creería que sí las toca. Los espacios, para que alinear
- * un `=` no rompa un test.
- */
-const forma = (sql: string) =>
-  sql
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 
 /**
  * Un Pool para la decisión, con las dos escrituras programables por separado.
@@ -171,7 +151,6 @@ function poolDecision(over: { propuesta?: unknown[]; solicitud?: unknown[] } = {
 }
 
 const hizo = (sqls: string[], trozo: string) => sqls.some((s) => s.includes(trozo));
-const updateDeLaSolicitud = (sqls: string[]) => forma(sqls.find((s) => s.includes('UPDATE portal.solicitudes_ausencia')) ?? '');
 
 describe('decidirModificacion contra un driver falso', () => {
   it('CANDADO: si el UPDATE de la solicitud no encuentra fila, ROLLBACK y NADA en el outbox', async () => {
@@ -206,54 +185,5 @@ describe('decidirModificacion contra un driver falso', () => {
     expect(hizo(sqls, 'UPDATE portal.solicitudes_ausencia')).toBe(false);
     expect(hizo(sqls, 'INSERT INTO portal.ausencias_outbox')).toBe(true);
     expect(sqls).toContain('COMMIT');
-  });
-
-  it('CANDADO (de forma): el UPDATE de la solicitud lleva el testigo TRIPLE', async () => {
-    // Asertar sobre el TEXTO de una consulta es feo, y se acepta aquí por lo
-    // mismo que en `crearModificacion`: el doble de router.test.ts es in-memory
-    // y modela el testigo por su cuenta, así que quitar dos de los tres campos
-    // del WHERE deja toda la batería en verde mientras la aprobación empieza a
-    // pisar en silencio las correcciones que un admin hizo por PATCH.
-    const { db, sqls } = poolDecision();
-    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
-    const update = updateDeLaSolicitud(sqls);
-    expect(update).toContain('WHERE id = $1');
-    expect(update).toContain('AND estado = $2');
-    expect(update).toContain('AND fecha_inicio = $3::date');
-    expect(update).toContain('AND fecha_fin = $4::date');
-  });
-
-  it('CANDADO (de forma): aprobar un cambio de fechas NO escribe el estado', async () => {
-    // Aprobar un cambio no re-decide la solicitud. Si el SET tocara `estado`,
-    // una `pendiente` quedaría concedida sin que ningún firmante la firmara.
-    const { db, sqls } = poolDecision();
-    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
-    const [set] = updateDeLaSolicitud(sqls).split('WHERE');
-    expect(set).toContain('fecha_inicio');
-    expect(set).toContain('fecha_fin');
-    expect(set).toContain('dias_habiles');
-    expect(set).not.toContain('estado');
-    expect(set).not.toContain('anulada_at');
-  });
-
-  it('CANDADO (de forma): la anulación deja `rechazada` + `anulada_at`, con el mismo testigo', async () => {
-    const { db, sqls } = poolDecision({
-      propuesta: [
-        {
-          ...FILA_MODIFICACION,
-          mod_clase: 'anulacion',
-          mod_fecha_inicio_nueva: null,
-          mod_fecha_fin_nueva: null,
-          mod_dias_habiles_nuevos: null,
-        },
-      ],
-    });
-    await decidirModificacion(db, 'm1', true, null, null, payloadStub);
-    const update = updateDeLaSolicitud(sqls);
-    expect(update).toContain("SET estado = 'rechazada'");
-    expect(update).toContain('anulada_at = now()');
-    // Las fechas NO se tocan: la ausencia anulada sigue diciendo cuál era.
-    expect(update.split('WHERE')[0]).not.toContain('fecha_inicio =');
-    expect(update).toContain('AND fecha_inicio = $3::date');
   });
 });
