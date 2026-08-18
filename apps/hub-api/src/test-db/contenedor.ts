@@ -6,6 +6,18 @@ import { aplicarMigraciones } from '../db.js';
 let contenedor: StartedPostgreSqlContainer | null = null;
 
 /**
+ * ⚠️ `@testcontainers/postgresql` se queda en la linea **11**, y no es pereza de
+ * actualizar. La 12 arrastra `undici@8`, que exige Node >= 22.19 y revienta al
+ * CARGAR el modulo con «webidl.util.markAsUncloneable is not a function» — antes
+ * de levantar ningun contenedor. Este repo va por Node 20: lo dice `.nvmrc` y lo
+ * usa el Dockerfile (`node:20-alpine`). La linea 11 trae `undici@7`, que pide
+ * >= 20.18.1 y encaja.
+ *
+ * Se descubrio en el CI y no en local, porque en local habia Node 26 y ahi la 12
+ * funciona: el `npm install` solo aviso de `engines` y nadie lo leyo. Si alguien
+ * sube esta dependencia, tiene que subir antes Node en `.nvmrc` Y en el
+ * Dockerfile, que es otra decision.
+ *
  * Un Postgres de verdad para toda la suite, migrado con el MISMO array que usa
  * el arranque de produccion.
  *
