@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { decidirSolicitud, solicitudPorId, crearModificacion, modificacionesPendientes } from './repo.js';
+import {
+  decidirSolicitud,
+  solicitudPorId,
+  crearModificacion,
+  decidirModificacion,
+  modificacionPorId,
+  modificacionesPendientes,
+} from './repo.js';
 import { transicionAlDecidir, decisorDeModificacion, type Solicitud } from './types.js';
 import {
   poolDePrueba,
@@ -114,14 +121,77 @@ describe('crearModificacion contra Postgres real', () => {
       payloadStub,
     );
 
+    // El rojo tiene que decir QUE se colo, no solo que se colo: sin esto el diff
+    // elide los 17 campos de la propuesta y el decisor obsoleto —lo unico que
+    // protege el testigo— no aparece por ningun lado.
+    if (r.ok) {
+      throw new Error(
+        `el testigo dejo pasar la propuesta, congelada a nombre de ${r.modificacion.aprobadorCorreo} cuando el turno es de jefe2@ambientalia.com.co`,
+      );
+    }
+
     expect(r).toEqual({ ok: false, razon: 'estado' });
 
     const { rows } = await db.query('SELECT count(*)::int AS n FROM portal.solicitud_modificaciones');
     expect((rows[0] as { n: number }).n).toBe(0);
-    // La asercion que nombra el dano: ninguna bandeja de cambios, y menos la del
-    // firmante que ya salio del turno.
+    // Esto no prueba nada por su cuenta: en verde es redundante con el
+    // count(*) = 0 de dos lineas arriba, y en rojo no llega a ejecutarse porque
+    // Vitest aborta en el primer expect que falla. Esta aqui para que el lector
+    // vea cual era la consecuencia —la bandeja del firmante que ya salio del
+    // turno—, no para demostrarla.
     expect(await modificacionesPendientes(db, 'jefe1@ambientalia.com.co', false)).toEqual([]);
     // Solo el aviso al segundo firmante: el alta no encolo nada.
     expect(await eventosDelOutbox(db)).toEqual(['aprobacion_2']);
+  });
+});
+
+describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
+  it('CANDADO: aprobar un cambio NO pisa la correccion que un admin hizo por PATCH', async () => {
+    // Los tres campos hacen falta. Solo con el estado no se detecta que un admin
+    // haya corregido las fechas entre medias, y la aprobacion se las pisaria EN
+    // SILENCIO: el PATCH no encola nada, asi que nadie se enteraria nunca.
+    const s = await sembrarCaso('aprobada');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'aprobada',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    // El admin corrige las fechas por PATCH. No encola nada.
+    await db.query(
+      `UPDATE portal.solicitudes_ausencia
+          SET fecha_inicio = '2026-07-07', fecha_fin = '2026-07-11'
+        WHERE id = $1`,
+      [s.id],
+    );
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_de_estado' });
+
+    // El ROLLBACK de verdad: el paso 1 YA habia escrito «aprobada» sobre la
+    // propuesta cuando el paso 2 choco, y solo deshacer la transaccion entera lo
+    // devuelve a `pendiente`.
+    const m = await modificacionPorId(db, alta.modificacion.id);
+    expect(m?.estado).toBe('pendiente');
+
+    // La correccion del admin sigue en pie.
+    const final = await solicitudPorId(db, s.id);
+    expect(final?.fechaInicio).toBe('2026-07-07');
+    expect(final?.fechaFin).toBe('2026-07-11');
+
+    // Y no ha salido ningun correo anunciando un cambio que no ha ocurrido: en
+    // el outbox solo esta el aviso del alta de la propuesta.
+    expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada']);
   });
 });
