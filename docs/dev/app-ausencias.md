@@ -220,7 +220,7 @@ la propiedad de arriba se mantiene intacta.
 | `POST` | `/api/ausencias/modificaciones/:id/retirar` | idem — el **autor** se echa atrás; la fila no se borra, pasa a `retirada` |
 | `GET` | `/api/ausencias/modificaciones/pendientes` | idem — los cambios que le toca decidir; cada fila trae `puedoDecidirla` ya calculado. Lista vacía, no **403** |
 | `POST` | `/api/ausencias/modificaciones/:id/decision` | idem — **409** si ya estaba decidida, o si la solicitud cambió por debajo |
-| `PATCH` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — corrige el registro. **No manda ningún correo**: corregir no es decidir |
+| `PATCH` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — corrige el registro. No avisa a la cadena de firmas ni al trabajador: corregir no es decidir. Desde el 2026-08-19 sí avisa a **administración** cuando la corrección desajusta un evento que ya estaba en Google — ver «Corregir desde el registro no deja Google desincronizado» |
 | `DELETE` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — borra la fila; el adjunto y sus eventos se van por cascada |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos` | idem — solo admin o quien tenga la llave de los adjuntos (`ve_adjuntos`); **403** al resto |
@@ -989,9 +989,12 @@ retirar su propia petición mientras nadie la haya decidido.
 Antes de esto, una solicitud enviada era inmutable desde su lado: la única salida
 era pedirle por privado a un administrador que tocara la fila con
 `PATCH /api/ausencias/solicitudes/:id`, que no deja rastro de quién lo pidió ni
-por qué, y que **a propósito no manda ningún correo** («corregir el registro no es
-decidir»). Ese camino sigue existiendo y sigue siendo solo de admin; lo nuevo es
-el que pasa por aprobación.
+por qué, y que **a propósito no avisaba a nadie** («corregir el registro no es
+decidir»). Ese camino sigue existiendo, sigue siendo solo de admin y sigue sin
+avisar a quien pidió la solicitud ni a quien la firmó — eso no cambió; lo nuevo es
+el que pasa por aprobación. Lo que sí ganó, el 2026-08-19, es un aviso a
+administración cuando la corrección desajusta un evento que ya estaba en Google:
+ver «Corregir desde el registro no deja Google desincronizado».
 
 ### La propuesta vive aparte, y la solicitud no se toca hasta que hay decisión
 
@@ -1247,9 +1250,11 @@ columna clave con el uuid en las cuatro pestañas y pasar el nodo a
 `appendOrUpdate`, y hay que decidirlo con Nómina — que es quien lee esa hoja— y
 sopesarlo contra el backlog, que dice retirar esa copia, no invertir en ella.
 
-Y `PATCH /ausencias/solicitudes/:id`: un admin sigue pudiendo mover las fechas de
-una aprobada sin encolar nada, así que ni avisa ni corrige. Ahora se nota más,
-porque por la vía del trabajador sí se corrige.
+Y `PATCH /ausencias/solicitudes/:id`: desde el 2026-08-19 ya no es la excepción.
+Mover las fechas de una aprobada desde el registro también corrige el evento —o
+avisa a administración cuando no puede—, por la misma maquinaria que el cambio de
+fechas del trabajador. El detalle vive en su propia sección: «Corregir desde el
+registro no deja Google desincronizado».
 
 ### En pantalla
 
@@ -1639,6 +1644,208 @@ SELECT a.empleado_id,
 
 **Nada la ejecuta sola**: no hay aviso, ni pantalla, ni contador que liste los
 solapes que ya existen. Hay que correrla a mano por consola.
+
+## Corregir desde el registro no deja Google desincronizado
+
+Hasta el 2026-08-19, `PATCH /api/ausencias/solicitudes/:id` podía mover las
+fechas de una ausencia **aprobada** sin encolar nada: el registro decía una cosa
+y el evento del Google Calendar seguía diciendo la anterior, para siempre y sin
+que nadie se enterara. Se notaba más desde el 2026-08-18, porque las otras dos
+vías que tocan Google —aprobar un cambio de fechas y anular, ver «El calendario
+se corrige solo»— **sí** se corregían solas. El diseño completo, con lo que se
+probó y se descartó, está en
+[el spec del 2026-08-19](../superpowers/specs/2026-08-19-correccion-admin-calendario-design.md).
+
+### Qué gana el `PATCH`, y qué sigue sin hacer
+
+Ahora, dentro de la MISMA transacción que aplica la corrección,
+`repo.actualizarSolicitud` puede encolar un evento nuevo, `correccion_admin`, que
+corrige el evento de Google cuando se puede y avisa a administración de lo que
+queda a mano.
+
+El portón que decide si se encola algo es
+`estaEnElCalendario(previa.estado) && cambiaLaHoja(previa, actual)`. Las dos
+mitades hacen falta y niegan cosas distintas: la primera dice que la fila
+**estaba** en Google —corregir una `pendiente` no desajusta nada, porque nunca se
+mandó nada—; la segunda dice que hay algo de verdad que ajustar. Y como cada fila
+del outbox es EXACTAMENTE UN correo, esa misma condición es la de que exista la
+fila: no hay corrección de calendario sin correo ni correo sin corrección.
+
+Dos cosas que sigue sin hacer, y es decisión tomada, no olvido:
+
+- **No crea eventos.** Que un admin lleve una solicitud de `pendiente` a
+  `aprobada` desde el registro no pone nada en Google ni en la hoja: aprobar se
+  hace en la bandeja. Meter el `crear` aquí convertiría el `PATCH` en un segundo
+  canal de aprobación que además no avisa al trabajador, y eso es otro diseño.
+- **No toca la hoja.** Nunca, por la razón de siempre: n8n hace `append` y no
+  queda constancia de en qué fila cayó, así que a esa fila no se puede volver. Lo
+  que sí hace es pedírselo a administración por correo.
+
+### Las tres preguntas
+
+Una vez el portón se abre, `situacionDelCalendario(previa, actual)`
+(`notificaciones.ts`) decide con tres preguntas distintas, y confundirlas es el
+bug que ya costó una vez con `ocupaAgenda`:
+
+- **Antes** — ¿había un evento vivo que se pudiera localizar?
+  `previa.eventoCalendarioId !== null`, leído dentro de la transacción y antes
+  del `UPDATE`.
+- **Después** — ¿la fila corregida debería tener evento?
+  `estaEnElCalendario(actual.estado)`.
+- **¿Cambió algo que el calendario enseña?** — `cambiaElCalendario(previa,
+  actual)`.
+
+| Antes | Después | ¿Cambió el calendario? | Acción |
+|---|---|---|---|
+| hay id | sí | sí | `actualizar` |
+| hay id | sí | no | ninguna — sería un `actualizar` idéntico |
+| hay id | no | — (la presencia ya cambió) | `borrar` |
+| sin id | — | — | ninguna: no hay id que darle a Google |
+
+La última fila es la cola de las aprobadas anteriores a la migración 026 —y de una
+anulada que un admin reabrió, cuyo id se vació al borrar, ver abajo—: el evento
+puede existir en Google, pero no se puede localizar. Ahí el correo pide el ajuste
+a mano en vez de mandar un `actualizar` contra un id inventado.
+
+### `estaEnElCalendario` no es `ocupaAgenda`
+
+`ocupaAgenda` (`repo.ts`) contesta a la regla de solapamiento y **excluye las
+incapacidades**: se informan, no se conceden, y no bloquean la agenda de nadie.
+`estaEnElCalendario` (`types.ts`) contesta una pregunta distinta —qué hay en
+Google—, y ahí una incapacidad `registrada` **sí** cuenta: `construirPayload` le
+da `calendario` y `hoja` igual que a una aprobada. Casi las mismas filas, dos
+respuestas distintas sobre la misma fila: es exactamente la forma que tuvo el bug
+de la cuarta puerta del solapamiento, donde se copió solo media regla.
+
+Viven en ficheros distintos a propósito. `estaEnElCalendario` no puede vivir junto
+a `ocupaAgenda` en `repo.ts` porque **`repo.ts` no puede importar
+`notificaciones.ts`** —la inyección de `construirPayload` como parámetro de
+`actualizarSolicitud` existe justo para eso—, y el `PATCH` necesita el predicado
+dentro de la transacción para decidir si emite. Vive en `types.ts`, de donde ya
+bebían `requiereAprobacion` y `correoDelTurno`, y de donde beben los dos módulos.
+El JSDoc de las dos funciones repite la advertencia, porque no son vecinas: nadie
+las va a ver juntas por casualidad.
+
+Antes de esto, `notificaciones.ts` hacía esta misma pregunta con otro nombre,
+`tocaGoogle`, y excluía `registrada` a propósito: por el flujo de modificaciones
+ese estado es inalcanzable (`estadoAdmiteModificacion` lo impide), así que
+contemplarlo habría sido una rama muerta que hacía creer que el caso estaba
+cubierto. El `PATCH` sí lo alcanza —admite cualquier tipo con cualquier estado—,
+así que la pregunta se ensanchó a `registrada` y se movió a `types.ts` con su
+nombre actual. Para el flujo de modificaciones el comportamiento no cambió: ahí
+`registrada` sigue sin poder darse.
+
+### La hoja tiene dos formas, no una
+
+`hoja()` (`notificaciones.ts`) no escribe siempre las mismas columnas: la pestaña
+de incapacidades lleva **«Adjunto?»** y no tiene ni «Comentarios» ni
+**«¿Aprobado?»**.
+
+| | Nombre | Fechas | Días | Tipo | Comentarios | ¿Aprobado? | Adjunto? |
+|---|---|---|---|---|---|---|---|
+| Incapacidad | ✓ | ✓ | ✓ | ✓ | — | — | ✓ |
+| Las otras tres | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+
+De ahí salen las dos decisiones de `cambiaLaHoja` que un `cambiaElCalendario +
+días + comentarios` ingenuo habría hecho mal:
+
+- **Mira el tipo.** En una incapacidad, corregir los comentarios no cambia la
+  hoja: esa pestaña no tiene esa columna, así que contarlos daría un ⚠️ pidiendo
+  ajustar una celda que no existe. El adjunto no se mira porque
+  `validarEdicionSolicitud` no admite tocarlo desde el registro.
+- **Compara el ESTADO ENTERO, no `estaEnElCalendario`.** La celda «¿Aprobado?»
+  tiene TRES valores —`Sí`, `No` y vacío— y `estaEnElCalendario` solo distingue
+  dos. `aprobada → registrada` cambia la celda de `Sí` a vacío sin mover nada del
+  calendario —`cambiaElCalendario` da `false` para ese mismo par—; mirar la hoja
+  a través de `estaEnElCalendario` perdería ese caso. Cada artefacto compara por
+  su propia pregunta.
+
+### La contención de `cambiaLaHoja` sobre `cambiaElCalendario` está IMPUESTA, no es emergente
+
+```ts
+if (cambiaElCalendario(previa, actual) || previa.diasHabiles !== actual.diasHabiles) return true;
+if (actual.tipo === 'incapacidad') return false;
+return previa.comentarios !== actual.comentarios || previa.estado !== actual.estado;
+```
+
+La delegación va en la PRIMERA línea, a propósito, y de eso depende que
+`cambiaLaHoja` pueda ser el portón único de «hay algo que ajustar» sin dejar
+fuera ningún caso de calendario. **No** es cierto que «todo lo que mueve el
+evento de Google mueve también la hoja»: una incapacidad `registrada → rechazada`
+obliga a **borrar** su evento —`estaEnElCalendario` pasa de `true` a `false`— y
+no cambia ni una celda de su pestaña, que no tiene «¿Aprobado?» y por tanto no
+enseña el estado. Lo único que hace que `cambiaLaHoja` devuelva `true` en ese
+caso es que delega en `cambiaElCalendario` ANTES del corte de tipo de abajo.
+
+Reordenar las ramas —subir el corte de las incapacidades por encima de la
+delegación, que es el reordenado que parece inocente— rompe la garantía **en
+silencio**: una incapacidad reprogramada dejaría su evento de Google con las
+fechas viejas para siempre, y nada se pondría rojo salvo ese caso concreto. Lo
+cubre el candado estructural de `types.test.ts`, «CANDADO: contiene a
+cambiaElCalendario, y la delegacion va primera», con un caso explícito —una
+corrección de FECHA sobre una incapacidad `registrada`, no de estado— dentro del
+bucle que comprueba que cada mutación de calendario también mueve la hoja.
+
+### `evento_calendario_id` cambia de significado
+
+Hasta ahora la columna significaba «alguna vez impusimos un id»:
+`anotarEventoDeCalendario` solo escribía, y solo en un `crear`. Pasa a significar
+**«hay un evento vivo en Google ahora mismo»**: sigue escribiendo en el `crear`, y
+ahora además se VACÍA cuando se emite un `borrar`.
+
+Sin este cambio había un bug ya en producción: tras aprobar una anulación, la
+columna seguía apuntando a un evento que Google ya había borrado, así que
+devolver esa solicitud a `aprobada` mandaría un `actualizar` contra un evento
+inexistente. El `IF` de fallos esperables de n8n se lo traga como un 404 más, y
+**nadie se entera de que el evento no volvió**. `decidirModificacion` también
+pasa a llamar a `anotarEventoDeCalendario` para su `borrar`, que hasta ahora hacía
+el `INSERT` directo y dejaba el id puesto.
+
+La migración `027_ausencias_correccion_admin.sql` solo amplía el `CHECK
+outbox_evento_check` con `correccion_admin`; el ancho de la columna no hace falta
+tocarlo —la 025 la dejó en `VARCHAR(40)` y el nombre mide 16—. DDL puro e
+idempotente, como el resto de las migraciones de este módulo.
+
+### n8n no se tocó
+
+Ningún nodo del workflow publicado *Ausencias — Portal* (`dh0xjWCHsGj9raYH`, 18
+nodos) lee el nombre del evento del outbox: el nodo de Gmail lee
+`payload.correo.*`, dos `IF` miran `payload.calendario` y `payload.hoja` contra
+`null`, y el `Switch` mira `payload.calendario.accion`. El evento nuevo,
+`correccion_admin`, fluye por esos mismos nodos sin que nadie tenga que
+enseñarles su nombre, así que este trabajo no tuvo ningún orden de despliegue que
+respetar entre hub-api y n8n — al revés que el `crear`/`actualizar`/`borrar` de
+«El calendario se corrige solo», donde el Switch tuvo que publicarse primero.
+
+### Riesgo aceptado
+
+El `PATCH` empieza a mandar correos donde antes no mandaba ninguno. Las filas
+importadas del Excel no tienen `evento_calendario_id` pero sí
+`estado='aprobada'`, así que caen en la situación «a mano» — la que **sí** manda
+correo. `cambiaLaHoja` recorta el ruido pero no lo elimina: solo se callan las
+correcciones de solo `observaciones`. Marcar una fila `rechazada` o cuadrarle los
+días manda correo igual, y son justo las dos cosas que hace una limpieza del
+histórico. No se filtró por `origen`: una fila `origen='hoja'` está en el
+calendario y en la hoja igual que las demás —las puso ahí el flujo viejo de
+n8n—, y el ⚠️ dice la verdad sobre ellas.
+
+### Lo que no cubre ningún test
+
+Escrito en la cabecera de `repo.correccion-admin.db.test.ts`, para que nadie lo dé
+por cubierto: **ningún test de ahí caza que el `INSERT` del outbox se saque de la
+transacción.** Se comprobó con la mutación de verdad —cambiar el `client.query`
+del `INSERT` por `db.query`— y los siete tests siguen en verde, porque después de
+ese `INSERT` no queda nada que pueda fallar: `anotarEventoDeCalendario` es lo
+último y no tiene cómo reventar. No se inventa un gancho solo para poder
+testearlo.
+
+Lo que sí está cubierto es la dirección que hace daño de verdad: si el
+constructor del payload revienta, la corrección **no** se queda escrita —el
+candado «si el aviso revienta, la correccion NO se queda escrita», falsado
+sacando el `UPDATE` de la transacción—. Una corrección guardada cuyo aviso nunca
+salió dejaría el registro movido, Google en las fechas viejas y a nadie
+enterado: exactamente el agujero que esta feature cierra, reabierto por una
+excepción.
 
 ## Calendario
 

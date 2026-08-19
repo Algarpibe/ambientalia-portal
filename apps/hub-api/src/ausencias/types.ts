@@ -60,12 +60,136 @@ export const EVENTOS_MODIFICACION = [
 ] as const;
 export type EventoModificacion = (typeof EVENTOS_MODIFICACION)[number];
 
-export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION] as const;
+/**
+ * La corrección de una solicitud desde *Registro general*.
+ *
+ * Grupo propio y no un `EVENTO_SOLICITUD` más, por lo mismo que los de
+ * modificación están aparte: su payload se construye a partir de DOS
+ * solicitudes —la de antes del `PATCH` y la de después—, y los constructores de
+ * eventos de solicitud solo reciben una. Uno solo por ahora; si aparece un
+ * segundo, se añade aquí.
+ *
+ * ⚠️ El valor viaja al CHECK `outbox_evento_check`, que amplía la migración 027.
+ * Añadir uno nuevo aquí sin ampliar el CHECK revienta DENTRO de la transacción
+ * que lo encola, y el ROLLBACK se lleva por delante el trabajo del usuario. La
+ * otra mitad de esa lección —el ancho de la columna— la pagó la 024 y la arregló
+ * la 025.
+ */
+export const EVENTOS_CORRECCION = ['correccion_admin'] as const;
+export type EventoCorreccion = (typeof EVENTOS_CORRECCION)[number];
+
+export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION, ...EVENTOS_CORRECCION] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
 export function requiereAprobacion(tipo: TipoSolicitud): boolean {
   return tipo !== 'incapacidad';
+}
+
+/**
+ * Si una fila con este estado tiene un evento en el calendario de Google.
+ *
+ * ⚠️ **NO es `ocupaAgenda`** (`repo.ts`), aunque las dos digan «sí» sobre casi
+ * las mismas filas. `ocupaAgenda` contesta a la regla de solapamiento y
+ * **excluye las incapacidades**; esta contesta a qué hay en Google, y una
+ * incapacidad `registrada` **sí** tiene evento —`construirPayload` le da
+ * `calendario` y `hoja`—. Son dos preguntas distintas sobre la misma fila, y
+ * contestar una con la otra es la forma exacta que tuvo el bug de la cuarta
+ * puerta del solapamiento. La advertencia va repetida en `ocupaAgenda` porque
+ * las dos funciones no son vecinas: nadie las va a ver juntas por casualidad.
+ *
+ * Va por ESTADO y no por tipo porque el estado es lo que la fila conserva:
+ * `aprobada` y `registrada` son justo los dos estados que dejan los dos únicos
+ * eventos que emiten una acción `crear`.
+ *
+ * `registrada` está aquí desde el 2026-08-19 y ya no es una rama muerta. Antes
+ * esta pregunta la hacía `tocaGoogle` en `notificaciones.ts`, que lo excluía a
+ * propósito: por el flujo de modificaciones es inalcanzable
+ * (`estadoAdmiteModificacion` lo impide), así que contemplarlo habría hecho
+ * creer que el caso estaba cubierto. **El `PATCH` del registro general sí lo
+ * alcanza** —admite cualquier tipo con cualquier estado—, y una incapacidad
+ * editada por un admin tiene evento en Google. Para el flujo de modificaciones
+ * el comportamiento no cambia: allí `registrada` sigue sin poder darse.
+ */
+export function estaEnElCalendario(estado: EstadoSolicitud): boolean {
+  return estado === 'aprobada' || estado === 'registrada';
+}
+
+/**
+ * Si una corrección cambia algo que el EVENTO del calendario enseña.
+ *
+ * El evento solo enseña tres cosas: que existe, sus fechas y su `resumen`
+ * —`${ETIQUETA_TIPO[tipo]} ${empleadoNombre}`, ver `calendario()` en
+ * `notificaciones.ts`—. Por eso `dias`, `comentarios` y `observaciones` quedan
+ * fuera, y no por descuido: corregir el recuento de días de una aprobada —el
+ * caso más corriente del histórico importado, donde el Excel anotó recuentos
+ * que no cuadran— mandaría a Google un `actualizar` idéntico al evento que ya
+ * hay, y con él un correo diciendo que algo se corrigió solo. Un ⚠️ que avisa
+ * de lo que no ha pasado es cómo se enseña a la gente a no leerlos.
+ *
+ * El empleado va por `empleadoId` y no por `empleadoNombre`: el nombre es un
+ * campo desnormalizado que viene del JOIN, y reasignar la solicitud a otra
+ * persona es justo lo que hay que detectar.
+ */
+export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolean {
+  return (
+    estaEnElCalendario(previa.estado) !== estaEnElCalendario(actual.estado) ||
+    previa.fechaInicio !== actual.fechaInicio ||
+    previa.fechaFin !== actual.fechaFin ||
+    previa.tipo !== actual.tipo ||
+    previa.empleadoId !== actual.empleadoId
+  );
+}
+
+/**
+ * Si una corrección cambia algo que la FILA DE LA HOJA enseña.
+ *
+ * La hoja tiene DOS formas —ver `hoja()` en `notificaciones.ts`—, y no una:
+ * una incapacidad lleva nombre, fechas, días, tipo y «Adjunto?»; el resto lleva
+ * nombre, fechas, días, tipo, «Comentarios» y «Aprobado?». Por eso esta función
+ * no es una lista fija de campos, sino `cambiaElCalendario` **más** `dias`
+ * siempre, y «Comentarios»/«Aprobado?» solo cuando la fila NO es una
+ * incapacidad —el adjunto no se mira porque `validarEdicionSolicitud` no admite
+ * corregirlo desde el registro—. `observaciones` queda fuera de las dos formas:
+ * es una nota interna que no viaja a ningún sitio.
+ *
+ * La celda «Aprobado?» tiene TRES valores —`'Sí'`, `'No'` y vacío para
+ * cualquier otro estado, incluida `registrada`—, así que se mira por el ESTADO
+ * ENTERO y no por `estaEnElCalendario`: aquel predicado solo distingue dos, y
+ * `aprobada → registrada` cambia la celda de `'Sí'` a vacío sin que
+ * `estaEnElCalendario` note la diferencia.
+ *
+ * ⚠️ **La contención de `cambiaElCalendario` NO es emergente: la impone que su
+ * delegación vaya en la PRIMERA línea, a propósito**, y reordenar las ramas
+ * rompe la invariante EN SILENCIO —los 15 tests de `types.test.ts` seguían en
+ * verde la primera vez que se comprobó—. No es cierto que «todo lo que mueve
+ * el calendario mueva también la hoja»: una incapacidad `registrada →
+ * rechazada` mueve el evento —hay que BORRARLO, `estaEnElCalendario` pasa de
+ * `true` a `false`— y no cambia ni una celda de su pestaña, que no tiene
+ * «Aprobado?» y por tanto no enseña el estado. Si el corte
+ * `actual.tipo === 'incapacidad'` de abajo se evaluara ANTES que la
+ * delegación, ese caso devolvería `false` y el evento viejo se quedaría en
+ * Google para siempre, sin avisar a nadie. El candado de este caso —con una
+ * corrección de fecha, no de estado— vive en `types.test.ts`, dentro del test
+ * «contiene a `cambiaElCalendario`»: si algún día se reordena una rama o se le
+ * quita un campo, hay que comprobar que ese caso lo sigue cazando.
+ */
+export function cambiaLaHoja(previa: Solicitud, actual: Solicitud): boolean {
+  // Esta delegación va PRIMERA a propósito: es lo único que hace que esta
+  // función CONTENGA a `cambiaElCalendario` (ver el ⚠️ del JSDoc). Moverla
+  // después del corte de incapacidad de abajo rompe esa garantía en silencio.
+  if (cambiaElCalendario(previa, actual) || previa.diasHabiles !== actual.diasHabiles) return true;
+  // Las otras dos columnas solo existen en las pestañas que NO son de
+  // incapacidad: la suya lleva «Adjunto?» en vez de «Comentarios» y
+  // «Aprobado?» —ver `hoja()`—, y el adjunto no se puede corregir desde el
+  // registro (`validarEdicionSolicitud` no lo admite), así que ahí no queda
+  // nada más que mirar. Basta con el tipo de la fila corregida: si el tipo
+  // CAMBIÓ, `cambiaElCalendario` ya ha dicho que sí más arriba.
+  if (actual.tipo === 'incapacidad') return false;
+  // El estado ENTERO y no `estaEnElCalendario`: la celda «Aprobado?» tiene
+  // TRES valores («Sí», «No» y vacío) y aquel predicado solo distingue dos, así
+  // que `aprobada → registrada` cambiaría la celda sin que nadie lo viera.
+  return previa.comentarios !== actual.comentarios || previa.estado !== actual.estado;
 }
 
 /** A quién le toca firmar AHORA. `null` si el estado ya no admite firma. */
@@ -282,10 +406,19 @@ export interface Solicitud {
   /**
    * El evento del calendario del que esta solicitud es dueña, o `null`.
    *
-   * `null` cubre dos casos distintos, y ninguno es «no está en Google»: o la
-   * solicitud nunca llegó a aprobarse, o se aprobó ANTES de que impusiéramos el
-   * id y su evento lleva el que Google inventó, que nadie apuntó. La conclusión
-   * operativa es la misma en los dos: ese evento no se puede corregir solo, y
+   * Responde una única pregunta: ¿hay AHORA MISMO un evento vivo en Google que
+   * sepamos localizar? `null` es un «no», y hay tres formas distintas de llegar
+   * a ese «no» —ninguna es la misma historia, aunque las tres acaben igual—:
+   *
+   *  1. La solicitud nunca llegó a aprobarse: no se mandó nada a Google.
+   *  2. Se aprobó ANTES de que impusiéramos el id: el evento existe en Google,
+   *     pero lleva el que Google inventó, que nadie apuntó, así que no se puede
+   *     localizar.
+   *  3. Tuvo un evento con id impuesto y lo perdió: una anulación aprobada lo
+   *     borró de Google, y `anotarEventoDeCalendario` (repo.ts) vació esta
+   *     columna con él. Aquí el evento sencillamente no existe.
+   *
+   * La conclusión operativa es la misma en los tres: nada que hacer por API, y
    * el correo tiene que seguir pidiendo el ajuste a mano.
    */
   eventoCalendarioId: string | null;

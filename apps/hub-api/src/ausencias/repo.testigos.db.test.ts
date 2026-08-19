@@ -149,7 +149,8 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
   it('CANDADO: aprobar un cambio NO pisa la correccion que un admin hizo por PATCH', async () => {
     // Los tres campos hacen falta. Solo con el estado no se detecta que un admin
     // haya corregido las fechas entre medias, y la aprobacion se las pisaria EN
-    // SILENCIO: el PATCH no encola nada, asi que nadie se enteraria nunca.
+    // SILENCIO: el aviso que el PATCH encola habla de la correccion, no de que
+    // se la pisen despues, asi que del pisoton no se enteraria nadie nunca.
     const s = await sembrarCaso('aprobada');
 
     const alta = await crearModificacion(
@@ -168,7 +169,9 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     );
     if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
 
-    // El admin corrige las fechas por PATCH. No encola nada.
+    // El admin corrige las fechas. Se simula con un UPDATE pelado y no llamando
+    // al PATCH: asi el outbox de este test cuenta SOLO lo que provoca la
+    // decision de la propuesta, que es lo que aqui se mira.
     await db.query(
       `UPDATE portal.solicitudes_ausencia
           SET fecha_inicio = '2026-07-07', fecha_fin = '2026-07-11'
@@ -267,7 +270,9 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     );
     if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
 
-    // El admin corrige las fechas por PATCH. No encola nada.
+    // El admin corrige las fechas. Se simula con un UPDATE pelado y no llamando
+    // al PATCH: asi el outbox de este test cuenta SOLO lo que provoca la
+    // decision de la propuesta, que es lo que aqui se mira.
     await db.query(
       `UPDATE portal.solicitudes_ausencia
           SET fecha_inicio = '2026-07-07', fecha_fin = '2026-07-11'

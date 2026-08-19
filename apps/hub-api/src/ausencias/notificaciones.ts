@@ -2,6 +2,7 @@ import { sumarDias } from './festivos.js';
 import {
   CALENDARIO_STAFF,
   COPIA_INCAPACIDADES,
+  COPIA_POR_DEFECTO,
   FIRMA_EMPRESA,
   FIRMA_GERENCIA,
   HOJA_ID,
@@ -11,6 +12,8 @@ import {
 import {
   ESTADOS_EN_TRAMITE,
   ETIQUETA_TIPO,
+  cambiaElCalendario,
+  estaEnElCalendario,
   type CorreoEvento,
   type EstadoSolicitud,
   type EventoCalendario,
@@ -408,33 +411,28 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
 // ── La decisión de la propuesta ────────────────────────────────────────────
 
 /**
- * Si el cambio toca algo que **ya está en Google**.
- *
- * Función pura y con nombre propio porque de ella depende que el ⚠️ signifique
- * algo. Si la original seguía `pendiente`, nunca se mandó nada al calendario ni
- * a la hoja, y el aviso sería una alarma falsa: entrenar a la gente a ignorar
- * el ⚠️ es la forma segura de que el día que importe no lo lean.
- *
- * ⚠️ NO añadir `registrada` aquí, aunque sea el otro evento que lleva efectos
- * de Google (`construirPayload`). Una incapacidad no admite modificación
- * —`decisorDeModificacion` devuelve `null` y `estadoAdmiteModificacion` lo
- * exige—, así que `registrada` no puede ser nunca un `estadoPrevio`: la rama
- * sería código muerto que además haría creer que el caso está contemplado.
- */
-const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
-
-/**
  * La corrección que hay que hacerle al evento del calendario, o `null` si no
  * hay ninguna que hacer.
  *
- * Devuelve `null` por dos motivos que no hay que confundir:
+ * Devuelve `null` cuando no hay un evento vivo en Google que corregir, y a eso
+ * se llega por tres motivos que no hay que confundir:
  *
- *  - `tocaGoogle` dice que no: la solicitud nunca estuvo aprobada, así que
- *    nunca se mandó nada al calendario y no hay evento que tocar.
- *  - No hay `eventoCalendarioId`: la solicitud se aprobó ANTES de que
- *    empezáramos a imponer el id, y su evento lleva el que Google inventó, que
- *    nadie apuntó. Existe, pero no se puede localizar. Esas se van vaciando
- *    solas y hasta entonces siguen con el aviso manual.
+ *  - `estaEnElCalendario` dice que no: la solicitud nunca estuvo aprobada, así
+ *    que nunca se mandó nada al calendario y no hay evento que tocar.
+ *  - `eventoCalendarioId` es `null` porque la solicitud se aprobó ANTES de que
+ *    empezáramos a imponer el id: su evento existe en Google, pero lleva el
+ *    que Google inventó, que nadie apuntó, y no se puede localizar.
+ *  - `eventoCalendarioId` es `null` porque un `borrar` anterior lo vació de
+ *    verdad —ver `anotarEventoDeCalendario` en repo.ts—: el evento existió y
+ *    lo borramos nosotros al aprobar una anulación.
+ *
+ * Este tercer motivo NO es alcanzable por esta vía: para llegar aquí con
+ * `estadoPrevio` describiendo una solicitud ya anulada haría falta poder
+ * proponerle una modificación a una `rechazada`, y `estadoAdmiteModificacion`
+ * (service.ts) lo impide antes de que `crearModificacion` llegue a grabar la
+ * propuesta. Se deja escrito para que nadie dé el caso por imposible sin más
+ * si ese guard cambia algún día — y porque la MISMA columna, leída por
+ * `situacionDelCalendario` más abajo, sí lo alcanza.
  *
  * Es la ÚNICA fuente de esta decisión: el correo pregunta por aquí y el payload
  * se construye desde aquí, así que el texto que lee administración y lo que n8n
@@ -442,7 +440,7 @@ const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 
  * se ajustó solo es la forma segura de que dejen de leerlos.
  */
 function correccionDeCalendario(s: Solicitud, m: Modificacion): EventoCalendario | null {
-  if (!tocaGoogle(m.estadoPrevio) || s.eventoCalendarioId === null) return null;
+  if (!estaEnElCalendario(m.estadoPrevio) || s.eventoCalendarioId === null) return null;
   return {
     // Las fechas salen de la solicitud YA aplicada, que es lo que se quiere en
     // los dos casos: en un cambio de fechas son las nuevas, y en una anulación
@@ -507,12 +505,12 @@ function avisoDeAjustarGoogle(s: Solicitud, m: Modificacion): string {
  * Sin esto el correo llega con un asunto indistinguible de cualquier otro «✅
  * aprobado», y quien tiene que actuar —administración, que va en
  * `copiaCorreo`— no vería la señal hasta abrirlo. La condición de que aparezca
- * sigue siendo `tocaGoogle` y solo esa; lo que cambia es QUÉ nombra, porque un
- * ⚠️ que pide ir al calendario cuando el calendario ya está corregido es
- * exactamente lo que enseña a no leerlos.
+ * sigue siendo `estaEnElCalendario` y solo esa; lo que cambia es QUÉ nombra,
+ * porque un ⚠️ que pide ir al calendario cuando el calendario ya está
+ * corregido es exactamente lo que enseña a no leerlos.
  */
 const prefijoDeAsunto = (s: Solicitud, m: Modificacion): string => {
-  if (!tocaGoogle(m.estadoPrevio)) return '';
+  if (!estaEnElCalendario(m.estadoPrevio)) return '';
   return correccionDeCalendario(s, m) !== null ? '⚠️ Ajustar la hoja — ' : '⚠️ Ajustar calendario y hoja — ';
 };
 
@@ -565,7 +563,7 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
       // destinatarios sobre el mismo objeto. Este es el que escribió QUIEN PIDIÓ
       // el cambio (`motivoRechazo` de la propuesta solo se llena al rechazarla).
       ...siHay(!!m.motivo, `Motivo del cambio: ${m.motivo}`),
-      ...siHay(tocaGoogle(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
+      ...siHay(estaEnElCalendario(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
       '',
       'Saludos,',
       FIRMA_GERENCIA,
@@ -668,6 +666,221 @@ export function construirPayloadModificacion(
     // Solo la aprobación toca Google. Pedir el cambio no cambia nada todavía, y
     // rechazarlo deja la solicitud exactamente como estaba.
     calendario: evento === 'modificacion_aprobada' ? correccionDeCalendario(s, m) : null,
+    hoja: null,
+  };
+}
+
+// ── La corrección de una solicitud desde Registro general ──────────────────
+
+/**
+ * Cómo se llama cada estado en un correo.
+ *
+ * Hace falta porque la corrección más corriente —marcar `rechazada` una fila que
+ * el registro daba por aprobada— **no mueve las fechas**: sin el estado, el
+ * bloque de antes y después saldría con las dos líneas idénticas.
+ */
+const ETIQUETA_ESTADO: Record<EstadoSolicitud, string> = {
+  pendiente: 'pendiente de firma',
+  pendiente_2: 'pendiente de la segunda firma',
+  aprobada: 'aprobada',
+  rechazada: 'rechazada',
+  registrada: 'registrada',
+};
+
+/** Una de las dos fotos del bloque «antes / ahora». */
+const fotoDe = (s: Solicitud): string =>
+  `${s.fechaInicio} a ${s.fechaFin} (${dias(s.diasHabiles)}) — ${ETIQUETA_ESTADO[s.estado]}`;
+
+/**
+ * En qué queda el evento del calendario tras una corrección. Cuatro
+ * situaciones, y las cuatro las decide ESTA función y solo ella.
+ *
+ * Existe porque el payload y los dos textos del correo necesitan la misma
+ * respuesta, y un `EventoCalendario | null` no vale para compartirla: su
+ * `null` colapsa «no hay nada que hacer» con «hay que hacerlo a mano», que es
+ * justamente la distinción que el asunto tiene que enseñar. Con tres sitios
+ * recalculando las mismas ramas, cambiar una condición y olvidar las otras
+ * dejaría el correo diciendo una cosa y n8n haciendo otra — y nadie lo
+ * notaría hasta que administración fuera al calendario a arreglar algo ya
+ * arreglado.
+ *
+ *  - `no_cambia`: `cambiaElCalendario` dice que no. El evento ya dice lo que
+ *    tiene que decir; un `actualizar` idéntico sería un viaje a Google para
+ *    nada, y peor, haría que el correo anunciara una corrección que nadie hizo.
+ *  - `a_mano`: `eventoCalendarioId` es `null`, y aquí SÍ llegan los dos motivos
+ *    que en `correccionDeCalendario` uno estaba bloqueado —esa función solo ve
+ *    solicitudes vivas, esta ve cualquier corrección del registro—:
+ *      1. La solicitud se aprobó ANTES de que empezáramos a imponer el id: su
+ *         evento existe en Google, pero no se puede localizar.
+ *      2. Un `borrar` anterior lo vació de verdad —ver
+ *         `anotarEventoDeCalendario` en repo.ts— y el PATCH de Registro
+ *         General devuelve a `aprobada` una fila que había quedado anulada.
+ *         Aquí el evento sencillamente NO EXISTE: lo que haría falta es un
+ *         `crear`, no un `actualizar`, y crear un evento está fuera del
+ *         alcance de esta corrección. Caer en `a_mano` es lo correcto —un
+ *         `actualizar` contra la nada es exactamente el 404 silencioso que
+ *         esta columna existe para evitar—, aunque el aviso manual que sale
+ *         pida «ajustar» un evento que en realidad hay que crear desde cero.
+ *  - `actualizado` / `borrado`: sí hay id y sí cambia algo que el calendario
+ *    enseña; la solicitud entra o sale de `estaEnElCalendario` según toque.
+ */
+type SituacionCalendario = 'no_cambia' | 'a_mano' | 'actualizado' | 'borrado';
+
+function situacionDelCalendario(previa: Solicitud, actual: Solicitud): SituacionCalendario {
+  if (!cambiaElCalendario(previa, actual)) return 'no_cambia';
+  if (previa.eventoCalendarioId === null) return 'a_mano';
+  return estaEnElCalendario(actual.estado) ? 'actualizado' : 'borrado';
+}
+
+/**
+ * Traduce la situación a lo que n8n tiene que ejecutar, o `null` si no hay
+ * nada que ejecutar —ni por API (`no_cambia`) ni porque no se puede
+ * localizar el evento (`a_mano`)—.
+ */
+function correccionDelRegistro(
+  previa: Solicitud,
+  actual: Solicitud,
+  situacion: SituacionCalendario,
+): EventoCalendario | null {
+  // El id GUARDADO, no el derivado: son el mismo valor hoy, pero el guardado es
+  // el que prueba que ese evento lo creamos nosotros.
+  const eventId = previa.eventoCalendarioId;
+  // Se vuelve a preguntar por el id en vez de darlo por bueno con un `!`. No es
+  // una segunda decisión —quien decide sigue siendo `situacionDelCalendario`, y
+  // hoy `actualizado` y `borrado` ya implican que hay id—, es negarse a emitir un
+  // payload roto: un `!` convertiría esa garantía, que vive en OTRA función, en un
+  // `eventId: null` que n8n mandaría a Google tal cual el día que alguien la
+  // relaje. Un `if` de más cuesta una línea; ese fallo no avisa.
+  if (eventId === null || situacion === 'no_cambia' || situacion === 'a_mano') return null;
+  return {
+    // Las fechas salen de la solicitud YA corregida: en un `actualizar` son las
+    // nuevas, y en un `borrar` describen el evento justo antes de desaparecer.
+    ...calendario(actual),
+    eventId,
+    accion: situacion === 'actualizado' ? 'actualizar' : 'borrar',
+  };
+}
+
+/**
+ * El párrafo de qué queda por hacer a mano, uno por situación.
+ *
+ * `Record` y no un `if`/`switch`: así una `SituacionCalendario` nueva no
+ * compila hasta que alguien le escribe el texto, en vez de caer en silencio
+ * en la rama por defecto. `avisoDeAjustarGoogle` —el de las
+ * modificaciones— contempla dos situaciones, y aquí hay dos más que allí no
+ * existen: `no_cambia`, porque un cambio de días o de comentarios desajusta
+ * la hoja y deja el evento exactamente como estaba, y decir ahí «el evento ya
+ * se ha corregido solo» sería falso.
+ *
+ * Se nombra a quien tiene que actuar («Administración:») por lo mismo que en
+ * el otro aviso: sin eso, el párrafo se lee como una tarea de nadie.
+ */
+const AVISO_DE: Record<SituacionCalendario, string> = {
+  no_cambia:
+    '⚠️ Administración: el evento del calendario no cambia con esta corrección. La fila de la hoja sí: hay que ajustarla a mano.',
+  // No dice «el evento ya está en el calendario», que es lo que decía antes: en
+  // esta situación puede estar o NO estar. Sin `eventoCalendarioId` hay dos
+  // historias distintas —una aprobada anterior a la 026, cuyo evento existe con
+  // un id que no controlamos, y una anulada que un admin reabrió, cuyo evento
+  // borramos nosotros— y desde aquí no se distinguen. Prometer que hay algo que
+  // ajustar mandaría a administración a buscar un evento que no existe, que es la
+  // misma forma de ⚠️ falso que el resto de este mapa evita.
+  a_mano:
+    '⚠️ Administración: esta ausencia no se corrige sola en Google. Hay que revisar a mano el evento del calendario —puede que haya que ajustarlo, o crearlo si ya no está— y la fila de la hoja.',
+  actualizado:
+    '⚠️ Administración: el evento del calendario ya se ha corregido solo. La fila de la hoja no: hay que ajustarla a mano a lo nuevo.',
+  borrado:
+    '⚠️ Administración: el evento del calendario ya se ha borrado solo. La fila de la hoja no: hay que ajustarla a mano.',
+};
+
+/**
+ * El prefijo del asunto. Solo distingue si queda calendario por tocar a mano
+ * (`a_mano`): la hoja siempre queda, así que nombrarla no aporta nada al
+ * asunto.
+ */
+const prefijoDeLaCorreccion = (situacion: SituacionCalendario): string =>
+  situacion === 'a_mano' ? '⚠️ Ajustar calendario y hoja — ' : '⚠️ Ajustar la hoja — ';
+
+/**
+ * El aviso de que un admin corrigió el registro.
+ *
+ * Va SOLO a la copia de la ficha —administración—, y no a la cadena de decisión.
+ * Es deliberado: el `PATCH` es la vía de corregir el registro, y avisar al dueño
+ * de cada errata corregida es justo lo que evita la decisión escrita en
+ * `repo.actualizarSolicitud`. Lo que sí cambia respecto a ella es el calendario,
+ * que es un artefacto derivado y no una notificación.
+ *
+ * ⚠️ El `??` NO es paranoia. Este es el único correo de la app con una sola
+ * fuente de destinatario: en todos los demás la cadena de firmas rellena la
+ * lista. `copiaCorreo` es nulable y `destinatarios` salta los nulos, así que una
+ * ficha con la copia vaciada desde el Organigrama daría un `sendTo` vacío — que
+ * no es un aviso degradado, es una fila del outbox que Gmail rechaza y n8n
+ * reintenta cada diez minutos para siempre.
+ *
+ * Recibe `situacion` ya calculada —no la vuelve a derivar— para que el asunto y
+ * el cuerpo lean la MISMA respuesta que el payload lleva en `calendario`.
+ */
+function correoCorreccion(
+  previa: Solicitud,
+  actual: Solicitud,
+  adminEmail: string,
+  situacion: SituacionCalendario,
+): CorreoEvento {
+  return {
+    para: destinatarios(actual.copiaCorreo ?? COPIA_POR_DEFECTO),
+    asunto: `${prefijoDeLaCorreccion(situacion)}Corregida en el registro: solicitud ${PERIODO[actual.tipo]} de ${actual.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `${adminEmail} ha corregido desde *Registro general* una solicitud ${PERIODO[actual.tipo]} de ${actual.empleadoNombre} que ya estaba en el calendario y en la hoja.`,
+      '',
+      `📅 Antes: ${fotoDe(previa)}`,
+      `📅 Ahora: ${fotoDe(actual)}`,
+      '',
+      AVISO_DE[situacion],
+      '',
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * El payload de una corrección del registro.
+ *
+ * ⚠️ PRECONDICIÓN, no comprobada aquí: solo se debe llamar cuando
+ * `estaEnElCalendario(previa.estado)` es `true`. El cuerpo del correo afirma
+ * como un hecho que la solicitud «ya estaba en el calendario y en la hoja»;
+ * llamarla sobre una que nunca salió de `pendiente` mandaría a administración
+ * un aviso falso. El portón que lo garantiza vive en quien la invoca —la Tarea
+ * 7, con `estaEnElCalendario(previa.estado) && cambiaLaHoja(previa, actual)` en
+ * el repositorio—, no en este módulo: repetirlo aquí sería la misma decisión
+ * tomada dos veces, con el riesgo de que un día digan cosas distintas.
+ *
+ * `hoja` va a `null` SIEMPRE, por lo mismo que en las modificaciones: n8n hace
+ * `append` y no queda constancia de en qué fila cayó, así que a esa fila no se
+ * puede volver. Por eso el ⚠️ la nombra en los cuatro textos.
+ *
+ * Sin parámetro `evento`, al contrario que `construirPayloadModificacion`: allí
+ * hay tres textos entre los que elegir y aquí uno solo.
+ *
+ * `situacion` se calcula UNA sola vez aquí y se reparte al correo y al
+ * calendario: es la única llamada a `situacionDelCalendario` por payload, así
+ * que los dos leen exactamente la misma respuesta y no pueden discrepar.
+ */
+export function construirPayloadCorreccion(
+  previa: Solicitud,
+  actual: Solicitud,
+  adminEmail: string,
+): PayloadEvento {
+  const situacion = situacionDelCalendario(previa, actual);
+  return {
+    tipo: actual.tipo,
+    tipoEtiqueta: ETIQUETA_TIPO[actual.tipo],
+    estado: actual.estado,
+    empleadoNombre: actual.empleadoNombre,
+    correo: correoCorreccion(previa, actual, adminEmail, situacion),
+    calendario: correccionDelRegistro(previa, actual, situacion),
     hoja: null,
   };
 }
