@@ -162,7 +162,9 @@ export function createAusenciasRouter(db: Pool): Router {
    * El dueño pide que se le cambien las fechas o se le anule una solicitud ya
    * enviada. Bajo `...gated` y sin `requireAdmin`: es la vía del TRABAJADOR, y
    * el servicio comprueba que la solicitud sea suya. Un admin que quiera
-   * corregir una fila a mano tiene el `PATCH`, que no manda correos.
+   * corregir una fila a mano tiene el `PATCH`, que no avisa al trabajador ni a
+   * su cadena de firmas —solo a administración, y solo si la corrección
+   * desajusta el calendario o la hoja—.
    */
   router.post('/ausencias/solicitudes/:id/modificaciones', ...gated, async (req: Request, res: Response) => {
     try {
