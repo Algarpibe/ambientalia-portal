@@ -126,23 +126,41 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
 /**
  * Si una corrección cambia algo que la FILA DE LA HOJA enseña.
  *
- * La hoja lleva nombre, fechas, días, tipo, comentarios y el «¿Aprobado?» —ver
- * `hoja()` en `notificaciones.ts`—, así que es `cambiaElCalendario` **más**
- * `dias` y `comentarios`. Solo `observaciones` queda fuera de las dos: es una
- * nota interna que no viaja a ningún sitio.
+ * La hoja tiene DOS formas —ver `hoja()` en `notificaciones.ts`—, y no una:
+ * una incapacidad lleva nombre, fechas, días, tipo y «Adjunto?»; el resto lleva
+ * nombre, fechas, días, tipo, «Comentarios» y «¿Aprobado?». Por eso esta función
+ * no es una lista fija de campos, sino `cambiaElCalendario` **más** `dias`
+ * siempre, y «Comentarios»/«¿Aprobado?» solo cuando la fila NO es una
+ * incapacidad —el adjunto no se mira porque `validarEdicionSolicitud` no admite
+ * corregirlo desde el registro—. `observaciones` queda fuera de las dos formas:
+ * es una nota interna que no viaja a ningún sitio.
+ *
+ * La celda «¿Aprobado?» tiene TRES valores —`'Sí'`, `'No'` y vacío para
+ * cualquier otro estado, incluida `registrada`—, así que se mira por el ESTADO
+ * ENTERO y no por `estaEnElCalendario`: aquel predicado solo distingue dos, y
+ * `aprobada → registrada` cambia la celda de `'Sí'` a vacío sin que
+ * `estaEnElCalendario` note la diferencia.
  *
  * ⚠️ **Esta función CONTIENE a `cambiaElCalendario`**, y de eso depende que no
  * se pierda ninguna corrección: es el portón único de «hay algo que ajustar»
- * —`actualizarSolicitud` no emite nada si devuelve `false`—, así que si dejara
- * de contenerla habría acciones de calendario que no se emitirían nunca. Si
- * algún día se le quita un campo, hay que comprobar que sigue conteniéndola.
+ * —cuando `actualizarSolicitud` lo consuma, no emitirá nada si devuelve
+ * `false`—, así que si dejara de contenerla habría acciones de calendario que
+ * no se emitirían nunca. Si algún día se le quita un campo, hay que comprobar
+ * que sigue conteniéndola.
  */
 export function cambiaLaHoja(previa: Solicitud, actual: Solicitud): boolean {
-  return (
-    cambiaElCalendario(previa, actual) ||
-    previa.diasHabiles !== actual.diasHabiles ||
-    previa.comentarios !== actual.comentarios
-  );
+  if (cambiaElCalendario(previa, actual) || previa.diasHabiles !== actual.diasHabiles) return true;
+  // Las otras dos columnas solo existen en las pestañas que NO son de
+  // incapacidad: la suya lleva «Adjunto?» en vez de «Comentarios» y
+  // «¿Aprobado?» —ver `hoja()`—, y el adjunto no se puede corregir desde el
+  // registro (`validarEdicionSolicitud` no lo admite), así que ahí no queda
+  // nada más que mirar. Basta con el tipo de la fila corregida: si el tipo
+  // CAMBIÓ, `cambiaElCalendario` ya ha dicho que sí más arriba.
+  if (actual.tipo === 'incapacidad') return false;
+  // El estado ENTERO y no `estaEnElCalendario`: la celda «¿Aprobado?» tiene
+  // TRES valores («Sí», «No» y vacío) y aquel predicado solo distingue dos, así
+  // que `aprobada → registrada` cambiaría la celda sin que nadie lo viera.
+  return previa.comentarios !== actual.comentarios || previa.estado !== actual.estado;
 }
 
 /** A quién le toca firmar AHORA. `null` si el estado ya no admite firma. */

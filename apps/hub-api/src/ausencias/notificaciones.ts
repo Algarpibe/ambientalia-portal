@@ -420,6 +420,13 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
  * —`decisorDeModificacion` devuelve `null` y `estadoAdmiteModificacion` lo
  * exige—, así que `registrada` no puede ser nunca un `estadoPrevio`: la rama
  * sería código muerto que además haría creer que el caso está contemplado.
+ *
+ * `estaEnElCalendario` (`types.ts`) SÍ incluye `registrada`, y no es una
+ * contradicción con lo anterior: esa función contesta la misma pregunta para
+ * el `PATCH` del registro general, que alcanza cualquier tipo con cualquier
+ * estado y por tanto sí puede ver una incapacidad `registrada`. Esta función
+ * se retira entera junto con el resto del flujo de modificaciones cuando ese
+ * `PATCH` quede cableado.
  */
 const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
 
