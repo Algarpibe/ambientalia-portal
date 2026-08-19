@@ -11,6 +11,15 @@ import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud, eventosDelOut
 // Estos candados NO los caza el porton rapido: `router.test.ts` mockea el repo
 // entero, asi que el INSERT del outbox y su transaccion no existen ahi. Es la
 // misma leccion del solapamiento: estrechar el WHERE dejaba 531/531 en verde.
+//
+// ⚠️ HUECO CONOCIDO, escrito para que nadie lo de por cubierto: ningun test de
+// aqui caza que el INSERT del outbox se saque de la transaccion. Comprobado con
+// la mutacion —cambiarle el `client.query` por `db.query`— y los siete siguen en
+// verde. Para cazarla haria falta algo que pudiera fallar DESPUES del INSERT, y
+// no queda nada: `anotarEventoDeCalendario` es lo ultimo y no tiene como
+// reventar. No se inventa un gancho solo para poder testearlo. Lo que si esta
+// cubierto es la direccion que hace dano —la fila corregida sin su aviso—, con
+// el candado del payload que revienta.
 
 const CORREO = 'ana.ruiz@ambientalia.com.co';
 const ADMIN = 'comercial@ambientalia.com.co';
@@ -122,10 +131,14 @@ describe('corregir una solicitud desde el registro general', () => {
     expect((await ultimoPayload()).calendario).toBeNull();
   });
 
-  // CANDADO. El INSERT del outbox y el UPDATE tienen que deshacerse juntos: una
-  // correccion que revienta no puede dejar el correo dicho. Se provoca con la
-  // cuarta puerta del solapamiento, que lanza DENTRO de la transaccion.
-  it('CANDADO: si la correccion choca con otra ausencia, no queda ni fila ni correo', async () => {
+  // Lo que este test prueba y lo que NO, dicho a proposito. PRUEBA que un
+  // rechazo temprano no deja rastro: ni la fila movida ni el correo. NO prueba
+  // nada de la atomicidad del INSERT, y ese era su nombre viejo: la puerta del
+  // solapamiento lanza ANTES del UPDATE y del INSERT, asi que cuando salta
+  // todavia no se ha escrito nada y no hay ROLLBACK que mirar. Pasaba igual con
+  // `actualizarSolicitud` sin implementar. La atomicidad la prueba el candado de
+  // debajo, que revienta DESPUES del UPDATE.
+  it('una correccion que choca no escribe nada, porque falla antes de escribir', async () => {
     const s = await aprobadaConEvento();
     await sembrarSolicitud(db, {
       empleadoId: s.empleadoId,
@@ -141,5 +154,30 @@ describe('corregir una solicitud desde el registro general', () => {
     expect(await eventosDelOutbox(db)).toEqual(['aprobada']);
     const { rows } = await db.query('SELECT fecha_inicio::text FROM portal.solicitudes_ausencia WHERE id = $1', [s.id]);
     expect((rows[0] as { fecha_inicio: string }).fecha_inicio).toBe('2026-07-06');
+  });
+
+  // CANDADO de la ATOMICIDAD, y este si la prueba. El constructor del payload se
+  // llama DESPUES del UPDATE, asi que hacerlo reventar deja la fila ya escrita
+  // por el `client` de la transaccion y obliga al ROLLBACK a deshacerla. Es la
+  // direccion que hace dano de verdad: una correccion GUARDADA cuyo aviso nunca
+  // salio deja el registro movido, Google en las fechas viejas y a nadie
+  // enterado — justo el agujero que esta feature viene a cerrar, reabierto por
+  // una excepcion. Falsado sacando el UPDATE de la transaccion (`db.query` en vez
+  // de `client.query`): se pone rojo aqui.
+  it('CANDADO: si el aviso revienta, la correccion NO se queda escrita', async () => {
+    const s = await aprobadaConEvento();
+
+    await expect(
+      actualizarSolicitud(db, s.id, edicionDe(s, { fechaInicio: '2026-07-13', fechaFin: '2026-07-17' }), ADMIN, () => {
+        throw new Error('el payload revienta');
+      }),
+    ).rejects.toThrow('el payload revienta');
+
+    const { rows } = await db.query(
+      'SELECT fecha_inicio::text, fecha_fin::text FROM portal.solicitudes_ausencia WHERE id = $1',
+      [s.id],
+    );
+    expect(rows[0]).toMatchObject({ fecha_inicio: '2026-07-06', fecha_fin: '2026-07-10' });
+    expect(await eventosDelOutbox(db)).toEqual(['aprobada']);
   });
 });

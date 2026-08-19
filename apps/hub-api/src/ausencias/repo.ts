@@ -712,8 +712,9 @@ export async function actualizarSolicitud(
     // borrada cuyo destino esta ocupado, donde hoy sale el solape. Ese reparto
     // esta FIJADO por un test de `repo.solapes.db.test.ts` («sobre una solicitud
     // que no existe manda el solape, no el 404»), que es justo quien caza el
-    // volteo. Aqui la posicion no cambia nada mas: la puerta se pregunta por
-    // `campos`, no por `previa`.
+    // volteo. Subirla arriba del todo «para tenerlo junto» cambia una decision
+    // ajena a esta feature. Aqui abajo la posicion no cuesta nada: la puerta se
+    // pregunta por `campos`, no por `previa`.
     const previa = await solicitudPorId(client, id);
     if (previa === null) return null;
 

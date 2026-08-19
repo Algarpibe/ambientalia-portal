@@ -354,6 +354,13 @@ describe('actualizarSolicitud frente al solape', () => {
    * pasan para cumplir la firma y con el `payloadStub` de siempre. Aqui se prueba
    * la puerta del solape; que el aviso se emita —y cuando no— lo prueba contra
    * Postgres `repo.correccion-admin.db.test.ts`.
+   *
+   * Dos de los cinco casos de abajo SI encolan un `correccion_admin` de paso —los
+   * dos que corrigen con exito una `aprobada`: «corregir sin mover las fechas» y
+   * el de la incapacidad—. Se deja asi y no se asierta: este bloque no mira el
+   * outbox en ninguno de sus cinco tests, comprobado con una sonda. Si algun dia
+   * se le anade una asercion de outbox, hay que contar con esas dos filas o el
+   * test dira menos de lo que su nombre promete.
    */
   const ADMIN = 'comercial@ambientalia.com.co';
 
