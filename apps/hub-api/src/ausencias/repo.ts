@@ -944,16 +944,18 @@ export interface DatosInsercion {
 }
 
 /**
- * Deja constancia de que esta solicitud es dueña de un evento del calendario.
+ * Deja constancia de si esta solicitud es dueña de un evento VIVO en el
+ * calendario.
  *
- * Lo que hace útil a la columna no es el valor —que se deriva del `id`— sino
- * que esté o no esté: solo se puede corregir en Google el evento que creamos
- * nosotros con un id impuesto. Las solicitudes aprobadas antes de esto llevan
- * en Google un id que inventó Google y que nadie apuntó, y por eso siguen
- * pidiendo el ajuste a mano. Ver `correccionDeCalendario` en notificaciones.ts.
+ * La columna no significa «alguna vez impusimos un id»: significa «ahora
+ * mismo hay un evento en Google que responde a este id». `crear` la anota y
+ * `borrar` la vacía, porque el evento que describía ya no existe. Las
+ * solicitudes aprobadas antes de esto nunca la anotaron: llevan en Google un
+ * id que inventó Google y que nadie apuntó, y por eso siguen pidiendo el
+ * ajuste a mano. Ver `correccionDeCalendario` en notificaciones.ts.
  *
  * Va en la MISMA transacción que el INSERT del outbox: si el evento sale, la
- * marca existe, y si hay ROLLBACK no queda ninguna de las dos.
+ * marca cambia, y si hay ROLLBACK no cambia ninguna de las dos.
  */
 async function anotarEventoDeCalendario(
   client: PoolClient,
@@ -961,18 +963,24 @@ async function anotarEventoDeCalendario(
   payload: PayloadEvento,
 ): Promise<void> {
   // La condicion se lee del PAYLOAD, no de una lista de eventos copiada aqui:
-  // asi la marca se escribe exactamente cuando se emite una creacion, y no puede
+  // asi la marca se escribe exactamente cuando se emite la accion, y no puede
   // desincronizarse de construirPayload el dia que cambie el reparto de efectos.
-  if (payload.calendario?.accion !== 'crear') return;
+  const cal = payload.calendario;
+  if (cal?.accion !== 'crear' && cal?.accion !== 'borrar') return;
+  // `borrar` la VACIA: la columna dice si hay evento vivo en Google, no si
+  // alguna vez impusimos un id. Dejarla puesta tras un borrado hace que la
+  // siguiente correccion mande un `actualizar` contra un evento que no existe,
+  // y el IF de fallos esperables de n8n se lo traga como 404: en silencio.
+  const id = cal.accion === 'crear' ? cal.eventId : null;
   await client.query(`UPDATE portal.solicitudes_ausencia SET evento_calendario_id = $2 WHERE id = $1`, [
     solicitud.id,
-    payload.calendario.eventId,
+    id,
   ]);
   // La fila se leyo con SELECT_SOLICITUD ANTES de este UPDATE, asi que el objeto
-  // que se devuelve llevaria un null que dejo de ser cierto hace dos lineas. Y
+  // que se devuelve llevaria un valor que dejo de ser cierto hace dos lineas. Y
   // este campo decide si Google se corrige solo: devolverlo obsoleto es
   // exactamente la clase de texto caducado que mas cara sale en esta app.
-  solicitud.eventoCalendarioId = payload.calendario.eventId;
+  solicitud.eventoCalendarioId = id;
 }
 
 /**
@@ -1600,10 +1608,15 @@ export async function decidirModificacion(
       // 024, y una errata reventaría DENTRO de la transacción, deshaciendo una
       // decisión que el jefe cree tomada.
       const evento: EventoModificacion = aprueba ? 'modificacion_aprobada' : 'modificacion_rechazada';
+      const payload = construirPayload(solicitud, modificacion, evento);
       await client.query(
         `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-        [modificacion.solicitudId, evento, JSON.stringify(construirPayload(solicitud, modificacion, evento))],
+        [modificacion.solicitudId, evento, JSON.stringify(payload)],
       );
+      // Va DESPUES del INSERT y en la MISMA transaccion, igual que en
+      // `decidirSolicitud`: si el evento sale, la marca cambia, y si hay ROLLBACK
+      // no cambia ninguna de las dos.
+      await anotarEventoDeCalendario(client, solicitud, payload);
 
       return { ok: true, modificacion, solicitud };
     });

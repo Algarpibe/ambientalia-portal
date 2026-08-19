@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { crearSolicitud, decidirSolicitud, solicitudPorId } from './repo.js';
-import { construirPayload, idDeEventoCalendario } from './notificaciones.js';
+import { crearSolicitud, decidirSolicitud, solicitudPorId, crearModificacion, decidirModificacion } from './repo.js';
+import { construirPayload, idDeEventoCalendario, construirPayloadModificacion } from './notificaciones.js';
 import { transicionAlDecidir, type Solicitud } from './types.js';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from '../test-db/harness.js';
 
@@ -58,6 +58,32 @@ function transicionDe(s: Solicitud, aprueba: boolean) {
 
 const aprobar = (s: Solicitud) =>
   decidirSolicitud(db, s.id, s.estado, transicionDe(s, true), null, null, construirPayload);
+
+/** Pide una anulacion y la aprueba, que es como se borra un evento de verdad. */
+async function anularPorModificacion(s: Solicitud): Promise<void> {
+  const alta = await crearModificacion(
+    db,
+    {
+      solicitudId: s.id,
+      clase: 'anulacion',
+      // El testigo compara con el estado REAL de la fila; una `aprobada` recien
+      // decidida lo cumple.
+      estadoEsperado: s.estado,
+      // Los tres a null los EXIGE el CHECK `modificaciones_campos_por_clase` de
+      // la 024 para una anulacion.
+      fechaInicioNueva: null,
+      fechaFinNueva: null,
+      diasHabilesNuevos: null,
+      motivo: 'ya no las necesito',
+      aprobadorCorreo: 'jefe1@ambientalia.com.co',
+    },
+    construirPayloadModificacion,
+  );
+  if (!alta.ok) throw new Error(`el alta de la propuesta deberia haber funcionado, y dio ${alta.razon}`);
+
+  const decidida = await decidirModificacion(db, alta.modificacion.id, true, null, null, construirPayloadModificacion);
+  if (!decidida.ok) throw new Error(`la decision deberia haber funcionado, y dio ${decidida.razon}`);
+}
 
 describe('la marca del evento de calendario', () => {
   it('nace vacia: una solicitud pendiente no ha creado ningun evento', async () => {
@@ -147,5 +173,19 @@ describe('la marca del evento de calendario', () => {
     await aprobar(s);
     const leida = await solicitudPorId(db, s.id);
     expect(leida?.eventoCalendarioId).toBe(idDeEventoCalendario(s.id));
+  });
+
+  // CANDADO. La columna significa "hay un evento vivo en Google", no "impusimos
+  // un id alguna vez". Sin el vaciado, una fila anulada conserva el id de un
+  // evento borrado, y la siguiente correccion mandaria un `actualizar` contra
+  // algo que no existe: n8n lo tragaria como 404 esperable, en silencio.
+  it('CANDADO: anular vacia el id, porque el evento ya no existe en Google', async () => {
+    const s = await sembrarCaso('pendiente');
+    const aprobada = await aprobar(s);
+    expect(await idEnLaBase(s.id)).toBe(idDeEventoCalendario(s.id));
+
+    await anularPorModificacion(aprobada!);
+
+    expect(await idEnLaBase(s.id)).toBeNull();
   });
 });
