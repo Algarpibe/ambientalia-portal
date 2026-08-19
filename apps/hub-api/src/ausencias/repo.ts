@@ -1930,6 +1930,10 @@ export interface Solape {
  * unitarios —531 en `src/ausencias`, 222 de ellos de `router.test.ts`— siguen
  * verdes en los dos casos.
  *
+ * Que no lo vigile el portón rápido NO significa que no lo vigile nada: el cuarto
+ * portón es un step BLOQUEANTE del CI (`ci.yml`, «Tests contra Postgres real»).
+ * Lo que se puede romper en silencio es la máquina de quien edita, no la rama.
+ *
  * Y de ahí lo que hoy NO está acreditado: las dos puertas que viven en el
  * servicio —el alta y la propuesta— se prueban de sobra, pero contra la copia
  * del doble. Nada comprueba que ejecuten la MISMA regla que las otras dos; el

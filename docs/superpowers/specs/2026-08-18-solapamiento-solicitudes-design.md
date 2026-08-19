@@ -180,8 +180,15 @@ La validación pura ya no cubre esto, así que la cobertura se reparte:
   hace `ROLLBACK` y no deja rastro en el outbox.
 
 **Falsación**: cada candado se rompe de verdad. En concreto, quitar `id <> $4` debe
-poner rojo el test de «no choca consigo misma» **y solo ése**, y estrechar el filtro
-de estados a solo las aprobadas debe poner rojo el de las pendientes.
+poner rojo el test de «no choca consigo misma», y estrechar el filtro de estados a
+solo las aprobadas debe poner rojo el de las pendientes.
+
+> ⚠️ Este párrafo decía «**y solo ése**», y era falso. Medido el 2026-08-18 sobre
+> lo ya implementado: quitar `id <> $4` pone rojos **cuatro** tests, uno de ellos
+> de camino feliz. La cobertura salió mejor de lo que este spec prometió, pero la
+> afirmación estaba equivocada — y en el párrafo que existe justo para registrar
+> falsaciones. La otra mitad sí se cumple: estrechar el filtro de estados pone
+> rojos exactamente dos, los dos de las pendientes.
 
 ## Lo que NO hace
 
