@@ -128,36 +128,47 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
  *
  * La hoja tiene DOS formas —ver `hoja()` en `notificaciones.ts`—, y no una:
  * una incapacidad lleva nombre, fechas, días, tipo y «Adjunto?»; el resto lleva
- * nombre, fechas, días, tipo, «Comentarios» y «¿Aprobado?». Por eso esta función
+ * nombre, fechas, días, tipo, «Comentarios» y «Aprobado?». Por eso esta función
  * no es una lista fija de campos, sino `cambiaElCalendario` **más** `dias`
- * siempre, y «Comentarios»/«¿Aprobado?» solo cuando la fila NO es una
+ * siempre, y «Comentarios»/«Aprobado?» solo cuando la fila NO es una
  * incapacidad —el adjunto no se mira porque `validarEdicionSolicitud` no admite
  * corregirlo desde el registro—. `observaciones` queda fuera de las dos formas:
  * es una nota interna que no viaja a ningún sitio.
  *
- * La celda «¿Aprobado?» tiene TRES valores —`'Sí'`, `'No'` y vacío para
+ * La celda «Aprobado?» tiene TRES valores —`'Sí'`, `'No'` y vacío para
  * cualquier otro estado, incluida `registrada`—, así que se mira por el ESTADO
  * ENTERO y no por `estaEnElCalendario`: aquel predicado solo distingue dos, y
  * `aprobada → registrada` cambia la celda de `'Sí'` a vacío sin que
  * `estaEnElCalendario` note la diferencia.
  *
- * ⚠️ **Esta función CONTIENE a `cambiaElCalendario`**, y de eso depende que no
- * se pierda ninguna corrección: es el portón único de «hay algo que ajustar»
- * —cuando `actualizarSolicitud` lo consuma, no emitirá nada si devuelve
- * `false`—, así que si dejara de contenerla habría acciones de calendario que
- * no se emitirían nunca. Si algún día se le quita un campo, hay que comprobar
- * que sigue conteniéndola.
+ * ⚠️ **La contención de `cambiaElCalendario` NO es emergente: la impone que su
+ * delegación vaya en la PRIMERA línea, a propósito**, y reordenar las ramas
+ * rompe la invariante EN SILENCIO —los 15 tests de `types.test.ts` seguían en
+ * verde la primera vez que se comprobó—. No es cierto que «todo lo que mueve
+ * el calendario mueva también la hoja»: una incapacidad `registrada →
+ * rechazada` mueve el evento —hay que BORRARLO, `estaEnElCalendario` pasa de
+ * `true` a `false`— y no cambia ni una celda de su pestaña, que no tiene
+ * «Aprobado?» y por tanto no enseña el estado. Si el corte
+ * `actual.tipo === 'incapacidad'` de abajo se evaluara ANTES que la
+ * delegación, ese caso devolvería `false` y el evento viejo se quedaría en
+ * Google para siempre, sin avisar a nadie. El candado de este caso —con una
+ * corrección de fecha, no de estado— vive en `types.test.ts`, dentro del test
+ * «contiene a `cambiaElCalendario`»: si algún día se reordena una rama o se le
+ * quita un campo, hay que comprobar que ese caso lo sigue cazando.
  */
 export function cambiaLaHoja(previa: Solicitud, actual: Solicitud): boolean {
+  // Esta delegación va PRIMERA a propósito: es lo único que hace que esta
+  // función CONTENGA a `cambiaElCalendario` (ver el ⚠️ del JSDoc). Moverla
+  // después del corte de incapacidad de abajo rompe esa garantía en silencio.
   if (cambiaElCalendario(previa, actual) || previa.diasHabiles !== actual.diasHabiles) return true;
   // Las otras dos columnas solo existen en las pestañas que NO son de
   // incapacidad: la suya lleva «Adjunto?» en vez de «Comentarios» y
-  // «¿Aprobado?» —ver `hoja()`—, y el adjunto no se puede corregir desde el
+  // «Aprobado?» —ver `hoja()`—, y el adjunto no se puede corregir desde el
   // registro (`validarEdicionSolicitud` no lo admite), así que ahí no queda
   // nada más que mirar. Basta con el tipo de la fila corregida: si el tipo
   // CAMBIÓ, `cambiaElCalendario` ya ha dicho que sí más arriba.
   if (actual.tipo === 'incapacidad') return false;
-  // El estado ENTERO y no `estaEnElCalendario`: la celda «¿Aprobado?» tiene
+  // El estado ENTERO y no `estaEnElCalendario`: la celda «Aprobado?» tiene
   // TRES valores («Sí», «No» y vacío) y aquel predicado solo distingue dos, así
   // que `aprobada → registrada` cambiaría la celda sin que nadie lo viera.
   return previa.comentarios !== actual.comentarios || previa.estado !== actual.estado;

@@ -109,7 +109,7 @@ describe('cambiaLaHoja', () => {
   });
 
   // CANDADO. La pestaña de incapacidad lleva «Adjunto?» en vez de «Comentarios»
-  // y «¿Aprobado?» —ver `hoja()` en notificaciones.ts—, así que corregir solo
+  // y «Aprobado?» —ver `hoja()` en notificaciones.ts—, así que corregir solo
   // los comentarios de una incapacidad no toca ninguna celda que esa pestaña
   // tenga. Sin este `false`, el admin vería un aviso de «Ajustar la hoja» por
   // una columna que no existe.
@@ -119,7 +119,7 @@ describe('cambiaLaHoja', () => {
     expect(cambiaLaHoja(previaIncapacidad, actualIncapacidad)).toBe(false);
   });
 
-  // CANDADO. La celda «¿Aprobado?» tiene TRES valores («Sí», «No» y vacío), y
+  // CANDADO. La celda «Aprobado?» tiene TRES valores («Sí», «No» y vacío), y
   // `aprobada → registrada` la cambia de «Sí» a vacío aunque las dos dejen un
   // evento en el calendario —por eso `cambiaElCalendario` da `false` para el
   // mismo par—. Si `cambiaLaHoja` mirara el estado a través de
@@ -135,17 +135,26 @@ describe('cambiaLaHoja', () => {
   // ajustar»: si dejara de contener a `cambiaElCalendario`, habría correcciones
   // de calendario que no se emitirían nunca.
   it('CANDADO: contiene a cambiaElCalendario en los cinco campos', () => {
-    const cambios: Partial<Solicitud>[] = [
-      { fechaInicio: '2026-07-07' },
-      { fechaFin: '2026-07-13' },
-      { tipo: 'permiso' },
-      { empleadoId: 'e2' },
-      { estado: 'rechazada' },
+    const casos: Array<{ previa: Solicitud; actual: Solicitud }> = [
+      { previa, actual: solicitud({ fechaInicio: '2026-07-07' }) },
+      { previa, actual: solicitud({ fechaFin: '2026-07-13' }) },
+      { previa, actual: solicitud({ tipo: 'permiso' }) },
+      { previa, actual: solicitud({ empleadoId: 'e2' }) },
+      { previa, actual: solicitud({ estado: 'rechazada' }) },
+      // CANDADO DE ORDEN. Este caso es el que caza reordenar las ramas de
+      // `cambiaLaHoja`: una incapacidad `registrada` no tiene «Comentarios» ni
+      // «Aprobado?» en su pestaña, así que si el corte de incapacidad se
+      // evaluara ANTES que la delegación en `cambiaElCalendario`, un cambio de
+      // fecha —que sí hay que llevar a Google— daría `false` aquí sin que
+      // nadie se enterara.
+      {
+        previa: solicitud({ tipo: 'incapacidad', estado: 'registrada' }),
+        actual: solicitud({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-07' }),
+      },
     ];
-    for (const c of cambios) {
-      const actual = solicitud(c);
-      expect(cambiaElCalendario(previa, actual)).toBe(true);
-      expect(cambiaLaHoja(previa, actual)).toBe(true);
+    for (const { previa: p, actual } of casos) {
+      expect(cambiaElCalendario(p, actual)).toBe(true);
+      expect(cambiaLaHoja(p, actual)).toBe(true);
     }
   });
 });

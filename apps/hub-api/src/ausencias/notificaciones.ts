@@ -424,9 +424,11 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
  * `estaEnElCalendario` (`types.ts`) SÍ incluye `registrada`, y no es una
  * contradicción con lo anterior: esa función contesta la misma pregunta para
  * el `PATCH` del registro general, que alcanza cualquier tipo con cualquier
- * estado y por tanto sí puede ver una incapacidad `registrada`. Esta función
- * se retira entera junto con el resto del flujo de modificaciones cuando ese
- * `PATCH` quede cableado.
+ * estado y por tanto sí puede ver una incapacidad `registrada`. Lo que se
+ * retira es ESTA función, no el flujo de modificaciones —que sigue vivo—, y no
+ * en la Tarea 7 sino en la siguiente: la Tarea 3 hace que sus tres usos
+ * (`correccionDeCalendario`, `prefijoDeAsunto`, `correoModificacionAprobada`)
+ * llamen a `estaEnElCalendario` en su lugar.
  */
 const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
 
