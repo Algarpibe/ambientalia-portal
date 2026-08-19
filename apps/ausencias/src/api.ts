@@ -235,7 +235,7 @@ export interface NuevaSolicitud {
 
 // ── El 409 del solapamiento ────────────────────────────────────────────────
 
-/** El conflicto que devuelve un `rango_solapado`. Espejo de `service.ts`. */
+/** El conflicto que devuelve un `rango_solapado`. Espejo de `detalleDelSolape`. */
 export interface SolapeDetalle {
   tipo: TipoSolicitud;
   estado: EstadoSolicitud;
@@ -255,29 +255,36 @@ export interface SolapeDetalle {
  * nunca en el `detalle`; si algún día llegara, o llegara un estado que este
  * bundle todavía no conozca, sale por la rama sin estado de `mensajeDeSolape`.
  *
- * Los textos son IMPERSONALES a propósito. Los cuatro endpoints que contestan
- * este 409 tienen dos audiencias distintas: el dueño, que pide el alta o el
- * cambio, y el jefe que firma la propuesta o el admin que corrige el registro —
- * y para esos dos la ausencia que choca no es suya. Un «ya tienes» sería falso
- * la mitad de las veces. Es la misma trampa que `MENSAJE_DECISION` resuelve en
- * la bandeja con una segunda redacción; aquí se esquiva no hablándole a nadie.
+ * Cada `salida` describe la CONDICIÓN —cuándo se sueltan esos días— y no receta
+ * un botón, y eso no es estilo: es lo único que puede ser cierto a la vez para
+ * los tres lectores posibles de estos cuatro 409. El dueño tiene las dos
+ * palancas (cambiar las fechas, pedir la anulación); el admin que corrige el
+ * registro solo la primera, porque anular se pide desde la pantalla del dueño; y
+ * el jefe que firma una propuesta no tiene ninguna —solo aprueba o rechaza, y no
+ * puede anular la ausencia de otro—. «Anula esa solicitud primero» habría sido
+ * un consejo imposible para dos de los tres. Dicho como condición, cada uno lo
+ * mapea a la palanca que tenga, y rechazar la propuesta cuenta como una de ellas.
+ *
+ * Por lo mismo no hay «ya tienes»: para el jefe y para el admin la ausencia que
+ * choca no es suya. Es la trampa que `MENSAJE_DECISION` resuelve en la bandeja
+ * con una segunda redacción; aquí se esquiva no hablándole a nadie en concreto.
  */
 const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salida: string }>> = {
   pendiente: {
     estado: 'pendiente de aprobar',
-    salida: 'Mientras siga en pie ocupa esos días: hay que cambiar estas fechas, o anular esa solicitud primero.',
+    salida: 'Mientras siga en pie ocupa esos días: no se liberan hasta que se rechace, se cambie o se anule.',
   },
   pendiente_2: {
     estado: 'pendiente de la segunda firma',
-    salida: 'Mientras siga en pie ocupa esos días: hay que cambiar estas fechas, o anular esa solicitud primero.',
+    salida: 'Mientras siga en pie ocupa esos días: no se liberan hasta que se rechace, se cambie o se anule.',
   },
   aprobada: {
     estado: 'aprobada',
-    salida: 'Esos días ya están concedidos: hay que cambiar estas fechas, o anular esa solicitud primero.',
+    salida: 'Esos días ya están concedidos: no se liberan hasta que esa solicitud se cambie o se anule.',
   },
   registrada: {
     estado: 'registrada',
-    salida: 'Esos días ya están ocupados: hay que cambiar estas fechas, o anular esa solicitud primero.',
+    salida: 'Esos días ya están ocupados: no se liberan hasta que esa solicitud se cambie o se anule.',
   },
 };
 
@@ -292,14 +299,23 @@ const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salid
  * las tablas pintan sus columnas: así el rango del aviso y la fila que se ve en
  * pantalla se escriben igual. De regalo, colapsa el rango de un solo día en una
  * fecha sola en vez de repetirla.
+ *
+ * El estado va PEGADO al tipo entre paréntesis y no como tercer elemento de la
+ * lista. Con el `es-CO` de hoy `formatFecha` escribe «10 de jul de 2026», así que
+ * un «…, 10 de jul de 2026 – 14 de jul de 2026, aprobada.» se lee un instante
+ * como si «aprobada» calificara a la fecha de fin.
  */
-export function mensajeDeSolape(d: SolapeDetalle): string {
+function mensajeDeSolape(d: SolapeDetalle): string {
   const cuando = rangoFechas(d.fechaInicio, d.fechaFin);
+  // Un tipo que este bundle no conozca cae en su propio código —feo, pero dice
+  // algo— en vez de en un «undefined» a mitad de frase. Misma ventana de
+  // despliegue que cubre la rama sin estado de aquí abajo.
+  const tipo = ETIQUETA_TIPO[d.tipo] ?? d.tipo;
   const como = SOLAPE_POR_ESTADO[d.estado];
   if (!como) {
-    return `Esas fechas chocan con otra ausencia: ${ETIQUETA_TIPO[d.tipo]}, ${cuando}. Hay que cambiar estas fechas, o anular esa solicitud primero.`;
+    return `Esas fechas chocan con otra ausencia: ${tipo}, ${cuando}. Esos días no se liberan hasta que esa solicitud se cambie o se anule.`;
   }
-  return `Esas fechas chocan con otra ausencia: ${ETIQUETA_TIPO[d.tipo]}, ${cuando}, ${como.estado}. ${como.salida}`;
+  return `Esas fechas chocan con otra ausencia: ${tipo} (${como.estado}), ${cuando}. ${como.salida}`;
 }
 
 /** El error de un endpoint corriente: el texto de `mensajeDeError` y nada más. */
