@@ -224,7 +224,7 @@ export type EventoCorreccion = (typeof EVENTOS_CORRECCION)[number];
 export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION, ...EVENTOS_CORRECCION] as const;
 ```
 
-`construirPayloadCorreccion(s, previa, adminEmail)` devuelve:
+`construirPayloadCorreccion(previa, actual, adminEmail)` devuelve:
 
 - `correo`: el de arriba.
 - `calendario`: la acción de la tabla, o `null`.
@@ -234,9 +234,9 @@ Sin parámetro `evento`, al contrario que `construirPayloadModificacion`: allí 
 tres textos que elegir y aquí uno solo. Si algún día aparece un segundo, se añade
 entonces.
 
-**`previa` es una `Solicitud` entera**, la que devuelve la relectura previa al
-UPDATE, no una estructura nueva. Lleva ya los seis campos que hacen falta —estado,
-fechas, días, tipo, nombre del empleado y `eventoCalendarioId`— y una foto parcial
+**Los dos primeros parámetros son `Solicitud` enteras** —la relectura previa al
+UPDATE y la posterior—, no estructuras nuevas. Llevan ya todo lo que hace falta
+—estado, fechas, días, tipo, empleado y `eventoCalendarioId`— y una foto parcial
 sería una tercera forma de describir la misma fila.
 
 ### Migración 027
