@@ -243,7 +243,7 @@ sería una tercera forma de describir la misma fila.
 
 Solo para ampliar el CHECK `outbox_evento_check` con `correccion_admin`. El ancho
 **no** hace falta tocarlo: la 025 dejó la columna en `VARCHAR(40)` y el nombre
-mide 17. Se dice explícito aquí porque la lección de la 024 fue justo esa —CHECK y
+mide 16. Se dice explícito aquí porque la lección de la 024 fue justo esa —CHECK y
 ancho son dos restricciones distintas—, y esta vez la mitad que faltaba ya está
 pagada.
 

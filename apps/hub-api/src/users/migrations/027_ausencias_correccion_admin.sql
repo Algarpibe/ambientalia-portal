@@ -8,7 +8,7 @@
 --
 -- El ANCHO no hace falta tocarlo, y se dice explícito porque esa fue la mitad
 -- que se olvidó en la 024: la 025 dejó la columna en VARCHAR(40) y
--- `correccion_admin` mide 17. CHECK y ancho son dos restricciones distintas.
+-- `correccion_admin` mide 16. CHECK y ancho son dos restricciones distintas.
 --
 -- Solo DDL e idempotente: `initDb()` la re-ejecuta en cada arranque.
 
