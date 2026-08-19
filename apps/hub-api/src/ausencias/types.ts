@@ -60,7 +60,25 @@ export const EVENTOS_MODIFICACION = [
 ] as const;
 export type EventoModificacion = (typeof EVENTOS_MODIFICACION)[number];
 
-export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION] as const;
+/**
+ * La corrección de una solicitud desde *Registro general*.
+ *
+ * Grupo propio y no un `EVENTO_SOLICITUD` más, por lo mismo que los de
+ * modificación están aparte: su payload se construye a partir de DOS
+ * solicitudes —la de antes del `PATCH` y la de después—, y los constructores de
+ * eventos de solicitud solo reciben una. Uno solo por ahora; si aparece un
+ * segundo, se añade aquí.
+ *
+ * ⚠️ El valor viaja al CHECK `outbox_evento_check`, que amplía la migración 027.
+ * Añadir uno nuevo aquí sin ampliar el CHECK revienta DENTRO de la transacción
+ * que lo encola, y el ROLLBACK se lleva por delante el trabajo del usuario. La
+ * otra mitad de esa lección —el ancho de la columna— la pagó la 024 y la arregló
+ * la 025.
+ */
+export const EVENTOS_CORRECCION = ['correccion_admin'] as const;
+export type EventoCorreccion = (typeof EVENTOS_CORRECCION)[number];
+
+export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION, ...EVENTOS_CORRECCION] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
