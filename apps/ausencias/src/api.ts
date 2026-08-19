@@ -257,13 +257,17 @@ export interface SolapeDetalle {
  *
  * Cada `salida` describe la CONDICIÓN —cuándo se sueltan esos días— y no receta
  * un botón, y eso no es estilo: es lo único que puede ser cierto a la vez para
- * los tres lectores posibles de estos cuatro 409. El dueño tiene las dos
- * palancas (cambiar las fechas, pedir la anulación); el admin que corrige el
- * registro solo la primera, porque anular se pide desde la pantalla del dueño; y
- * el jefe que firma una propuesta no tiene ninguna —solo aprueba o rechaza, y no
- * puede anular la ausencia de otro—. «Anula esa solicitud primero» habría sido
- * un consejo imposible para dos de los tres. Dicho como condición, cada uno lo
- * mapea a la palanca que tenga, y rechazar la propuesta cuenta como una de ellas.
+ * los tres lectores posibles de estos cuatro 409. El dueño puede cambiar las
+ * fechas o pedir la anulación; el admin que corrige el registro puede editar esa
+ * otra solicitud —fechas o estado— o borrarla; y el jefe que firma una propuesta
+ * no puede tocar la ausencia que choca, solo rechazar la propuesta que se la
+ * pisa. «Anula esa solicitud primero» nombraba un botón que solo el dueño tiene.
+ * Dicho como condición, cada uno lo mapea a lo que sí pueda hacer.
+ *
+ * Ojo al sujeto de los tres verbos de las `salida`: son cosas que le pasan a ESA
+ * solicitud, la que choca. Rechazar la propuesta que se la pisa no es ninguna de
+ * las tres —quita la demanda de esos días, no su ocupación—, y por eso no se
+ * nombra.
  *
  * Por lo mismo no hay «ya tienes»: para el jefe y para el admin la ausencia que
  * choca no es suya. Es la trampa que `MENSAJE_DECISION` resuelve en la bandeja
