@@ -406,10 +406,19 @@ export interface Solicitud {
   /**
    * El evento del calendario del que esta solicitud es dueña, o `null`.
    *
-   * `null` cubre dos casos distintos, y ninguno es «no está en Google»: o la
-   * solicitud nunca llegó a aprobarse, o se aprobó ANTES de que impusiéramos el
-   * id y su evento lleva el que Google inventó, que nadie apuntó. La conclusión
-   * operativa es la misma en los dos: ese evento no se puede corregir solo, y
+   * Responde una única pregunta: ¿hay AHORA MISMO un evento vivo en Google que
+   * sepamos localizar? `null` es un «no», y hay tres formas distintas de llegar
+   * a ese «no» —ninguna es la misma historia, aunque las tres acaben igual—:
+   *
+   *  1. La solicitud nunca llegó a aprobarse: no se mandó nada a Google.
+   *  2. Se aprobó ANTES de que impusiéramos el id: el evento existe en Google,
+   *     pero lleva el que Google inventó, que nadie apuntó, así que no se puede
+   *     localizar.
+   *  3. Tuvo un evento con id impuesto y lo perdió: una anulación aprobada lo
+   *     borró de Google, y `anotarEventoDeCalendario` (repo.ts) vació esta
+   *     columna con él. Aquí el evento sencillamente no existe.
+   *
+   * La conclusión operativa es la misma en los tres: nada que hacer por API, y
    * el correo tiene que seguir pidiendo el ajuste a mano.
    */
   eventoCalendarioId: string | null;

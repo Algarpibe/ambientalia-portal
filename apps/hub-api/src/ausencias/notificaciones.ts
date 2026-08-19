@@ -414,14 +414,25 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
  * La corrección que hay que hacerle al evento del calendario, o `null` si no
  * hay ninguna que hacer.
  *
- * Devuelve `null` por dos motivos que no hay que confundir:
+ * Devuelve `null` cuando no hay un evento vivo en Google que corregir, y a eso
+ * se llega por tres motivos que no hay que confundir:
  *
  *  - `estaEnElCalendario` dice que no: la solicitud nunca estuvo aprobada, así
  *    que nunca se mandó nada al calendario y no hay evento que tocar.
- *  - No hay `eventoCalendarioId`: la solicitud se aprobó ANTES de que
- *    empezáramos a imponer el id, y su evento lleva el que Google inventó, que
- *    nadie apuntó. Existe, pero no se puede localizar. Esas se van vaciando
- *    solas y hasta entonces siguen con el aviso manual.
+ *  - `eventoCalendarioId` es `null` porque la solicitud se aprobó ANTES de que
+ *    empezáramos a imponer el id: su evento existe en Google, pero lleva el
+ *    que Google inventó, que nadie apuntó, y no se puede localizar.
+ *  - `eventoCalendarioId` es `null` porque un `borrar` anterior lo vació de
+ *    verdad —ver `anotarEventoDeCalendario` en repo.ts—: el evento existió y
+ *    lo borramos nosotros al aprobar una anulación.
+ *
+ * Este tercer motivo NO es alcanzable por esta vía: para llegar aquí con
+ * `estadoPrevio` describiendo una solicitud ya anulada haría falta poder
+ * proponerle una modificación a una `rechazada`, y `estadoAdmiteModificacion`
+ * (service.ts) lo impide antes de que `crearModificacion` llegue a grabar la
+ * propuesta. Se deja escrito para que nadie dé el caso por imposible sin más
+ * si ese guard cambia algún día — y porque la MISMA columna, leída por
+ * `situacionDelCalendario` más abajo, sí lo alcanza.
  *
  * Es la ÚNICA fuente de esta decisión: el correo pregunta por aquí y el payload
  * se construye desde aquí, así que el texto que lee administración y lo que n8n
@@ -696,9 +707,20 @@ const fotoDe = (s: Solicitud): string =>
  *  - `no_cambia`: `cambiaElCalendario` dice que no. El evento ya dice lo que
  *    tiene que decir; un `actualizar` idéntico sería un viaje a Google para
  *    nada, y peor, haría que el correo anunciara una corrección que nadie hizo.
- *  - `a_mano`: la solicitud se aprobó ANTES de que empezáramos a imponer el
- *    id, así que su evento existe pero no se puede localizar. Sigue con el
- *    aviso manual y se vacía sola.
+ *  - `a_mano`: `eventoCalendarioId` es `null`, y aquí SÍ llegan los dos motivos
+ *    que en `correccionDeCalendario` uno estaba bloqueado —esa función solo ve
+ *    solicitudes vivas, esta ve cualquier corrección del registro—:
+ *      1. La solicitud se aprobó ANTES de que empezáramos a imponer el id: su
+ *         evento existe en Google, pero no se puede localizar.
+ *      2. Un `borrar` anterior lo vació de verdad —ver
+ *         `anotarEventoDeCalendario` en repo.ts— y el PATCH de Registro
+ *         General devuelve a `aprobada` una fila que había quedado anulada.
+ *         Aquí el evento sencillamente NO EXISTE: lo que haría falta es un
+ *         `crear`, no un `actualizar`, y crear un evento está fuera del
+ *         alcance de esta corrección. Caer en `a_mano` es lo correcto —un
+ *         `actualizar` contra la nada es exactamente el 404 silencioso que
+ *         esta columna existe para evitar—, aunque el aviso manual que sale
+ *         pida «ajustar» un evento que en realidad hay que crear desde cero.
  *  - `actualizado` / `borrado`: sí hay id y sí cambia algo que el calendario
  *    enseña; la solicitud entra o sale de `estaEnElCalendario` según toque.
  */
