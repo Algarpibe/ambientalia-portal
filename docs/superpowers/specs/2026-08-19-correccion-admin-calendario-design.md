@@ -124,11 +124,22 @@ Solo `observaciones` queda fuera de los dos predicados: es una nota interna que 
 viaja a ningún sitio.
 
 ⚠️ **`cambiaElCalendario` está contenido en `cambiaLaHoja`**, y de eso depende que
-no se pierda ninguna corrección: todo lo que mueve el evento de Google mueve
-también la fila de la hoja. Por eso `cambiaLaHoja` puede hacer de portón único de
-«hay algo que ajustar» sin dejar fuera ningún caso de calendario. Si algún día se
-le quita un campo a `cambiaLaHoja`, hay que comprobar que sigue conteniendo al
-otro, o habrá correcciones de calendario que no se emitan.
+`cambiaLaHoja` pueda hacer de portón único de «hay algo que ajustar» sin dejar
+fuera ningún caso de calendario.
+
+**Esa contención es IMPUESTA, no emergente**, y confundirlo es peligroso. Este
+spec dijo primero que se sostenía sola —«todo lo que mueve el evento de Google
+mueve también la fila de la hoja»—, y **es falso**: una incapacidad
+`registrada → rechazada` obliga a borrar su evento del calendario y no cambia
+**ninguna** celda de su pestaña, que no enseña el estado. Lo único que hace que
+`cambiaLaHoja` devuelva `true` en ese caso es que **delega en
+`cambiaElCalendario` en su primera línea, antes de la rama del tipo**.
+
+Consecuencia práctica: reordenar las ramas —subir el corte de las incapacidades
+por encima de la delegación, que es el reordenado que parece inocente— rompe la
+invariante **en silencio**, y una incapacidad reprogramada dejaría su evento de
+Google con las fechas viejas para siempre. Lo cubre un caso del candado
+estructural de `types.test.ts`; sin él, la mutación pasa con todo en verde.
 
 ### `estaEnElCalendario` NO es `ocupaAgenda`
 
