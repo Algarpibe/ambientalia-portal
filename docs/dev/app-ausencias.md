@@ -1405,6 +1405,232 @@ ellas cuesta más de lo que protege.
 Se anota aquí, y no como límite pendiente, para que dentro de seis meses nadie lo
 lea como un descuido: está mirado y es la decisión.
 
+## Una persona no puede estar ausente dos veces a la vez
+
+Dos ausencias **vivas** de la misma persona no pueden compartir ni un día. Hasta
+agosto de 2026 nada lo impedía, y en producción quedó al menos un caso creado sin
+que el sistema dijera nada. El diseño entero —con lo que se descartó y por qué—
+está en [el spec del 2026-08-18](../superpowers/specs/2026-08-18-solapamiento-solicitudes-design.md).
+
+### Qué ocupa agenda y qué no
+
+La regla vive en **`repo.ocupaAgenda`**, escrita en negativo y una sola vez:
+
+```ts
+ocupaAgenda(tipo, estado) = tipo !== 'incapacidad' && estado !== 'rechazada'
+```
+
+Ocupa, por tanto, **todo lo que no sea una `rechazada`** —`pendiente`,
+`pendiente_2`, `aprobada` y `registrada`—, **salvo las incapacidades, que no
+ocupan nunca**. En negativo y no enumerando los estados vivos porque un estado
+nuevo que nadie añadiera a la lista se quedaría fuera, y aquí quedarse fuera
+significa dejar pasar un solapamiento.
+
+Que `registrada` cuente no es teórico aunque hoy solo nazca así una incapacidad
+—que no ocupa por su tipo—: `validarEdicionSolicitud` admite **cualquier tipo con
+cualquier estado**, así que un permiso `registrada` es alcanzable por el `PATCH`
+del *Registro general*, y ocupa.
+
+El filtro de estado es **literalmente el mismo** que el de `repo.ausenciasEntre`
+(`estado <> 'rechazada'`), y los dos fallan en abierto: un estado nuevo entra por
+los dos lados. Lo que cambia es la consecuencia, y por eso está bien así — allí se
+pintaría de más en el calendario y no lo notaría nadie; aquí contaría como
+ocupado y bloquearía de más, que lo reporta un usuario el mismo día.
+
+**Los rangos son inclusivos**: 10–14 y 14–14 solapan; 10–14 y 15–20, adyacentes,
+no. El predicado es el de `ausenciasEntre` —`fecha_inicio <= hasta AND fecha_fin
+>= desde`, **solapa** y no contiene—, escrito otra vez en el `WHERE` de
+`repo.solapeDe` porque aquella consulta hace una pregunta distinta: une con
+`empleados`, filtra por `activo` y no filtra por tipo.
+
+**Una anulada tampoco ocupa, y no hubo que escribir nada para eso**: anular deja
+la solicitud en `rechazada` con `anulada_at` sellado (ver «Anular no estrena
+estado»), y `rechazada` es exactamente lo que no ocupa. Es un séptimo filtro que
+hereda la semántica correcta de reutilizar ese estado, después de los seis de
+aquella tabla.
+
+### Por qué las pendientes también ocupan
+
+Bloquear solo contra las aprobadas deja un agujero que se cierra en el peor
+momento: nada frenaría que se pidan dos solicitudes solapadas mientras ninguna
+esté firmada, y al aprobarlas el solapamiento existe igual, ya sin nadie que pueda
+impedirlo.
+
+Ya sin nadie porque **aprobar una solicitud no comprueba la agenda**:
+`decidirSolicitud` no es ninguna de las cuatro puertas, y no debe serlo. La firma
+no mueve fechas, así que si el alta se comprobó no hay nada nuevo que mirar; y
+poner ahí la comprobación le pondría al jefe un 409 sobre algo que él no pidió.
+La regla tiene que morder antes de la firma
+o no muerde.
+
+### Por qué la incapacidad es la excepción
+
+Una incapacidad **no se pide: se informa**, después de haber estado enfermo. Quien
+cae malo durante sus vacaciones tiene que poder registrarla, y con las fechas ya
+pasadas no le queda ninguna salida para hacerle sitio: no puede anular las
+vacaciones (exige `fechaInicio >= hoy`) ni acortarlas (exige `fechaFin >= hoy`).
+Bloquearla dejaría a esa persona sin forma de registrar algo que la ley sí
+reconoce. Es la misma excepción, y por el mismo motivo, que la de «No se piden
+días que ya pasaron».
+
+Va por los **dos** lados, y hacen falta los dos: una incapacidad **no se bloquea**
+—`ocupaAgenda` dice que no ocupa, y las cuatro puertas se lo preguntan sobre la
+fila que van a dejar escrita— y **no bloquea a nadie** —el `tipo <> 'incapacidad'`
+del `WHERE` de `solapeDe` la deja fuera de las colisiones posibles—.
+
+**Fuera de alcance, y es una decisión, no un olvido**: informar una incapacidad
+sobre unas vacaciones aprobadas **no** libera esos días ni los devuelve al saldo.
+Es lo que suele hacer la ley, pero toca saldo, calendario, correos y el evento de
+Google, y es un proyecto propio.
+
+### Las cuatro puertas, y por qué son cuatro y no tres
+
+| Puerta | Cuándo | Dónde | Qué excluye del choque |
+|---|---|---|---|
+| Alta | al crear | `service.crearSolicitud` → `exigirSinSolape` | nada: todavía no hay fila |
+| Cambio de fechas, al **proponerlo** | el trabajador lo pide | `service.pedirModificacion` → `exigirSinSolape` | la propia solicitud |
+| Cambio de fechas, al **firmarlo** | el jefe lo aprueba | dentro de la transacción de `repo.decidirModificacion` | la propia solicitud |
+| `PATCH` del *Registro general* | un admin corrige | dentro de la transacción de `repo.actualizarSolicitud` | la propia fila |
+
+El cambio de fechas son **dos** puertas y no una porque son dos momentos separados
+por lo que el jefe tarde en firmar: se propone mover al 20–22 con esos días
+libres, entre medias le aprueban a esa persona otra ausencia el 21, y sin la
+tercera puerta el jefe firma el cambio encima. La de `pedirModificacion` miró
+cuando el destino aún estaba libre y no tiene forma de enterarse.
+
+La exclusión por id (`solapeDe(..., excluirSolicitudId)`) es imprescindible en las
+tres últimas: sin ella, mover las fechas de una solicitud viva —acortarla,
+alargarla o desplazarla— la haría chocar **contra ella misma**, y no se podría
+tocar ni una. El alta pasa `null` porque su fila todavía no existe.
+
+Las dos últimas van **dentro de la transacción** que aplica el cambio, y no en el
+servicio, por dos razones: la comprobación tiene que viajar por la misma conexión
+que el `UPDATE` —mirar por una conexión y escribir por otra no acredita nada— y si
+choca, el `ROLLBACK` se lleva por delante lo ya escrito, incluido el aviso que iba
+al outbox. La del `PATCH` además no tendría dónde vivir en el servicio: esa ruta
+llama al repo directamente.
+
+Como el repo no puede lanzar un `AusenciaError` —no conoce el servicio—, las dos
+lanzan el centinela **`repo.SolapeAlAplicar`**, y lo traduce a 409 el servicio
+(para `decidirModificacion`) o el `catch` de la ruta (para el `PATCH`). Los cuatro
+409 salen de **`service.errorDeSolape`**, así que llevan el mismo `code`
+(`rango_solapado`), el mismo 409, el mismo `field` (`fechaInicio`) y el mismo
+`detalle` —tipo, estado y las dos fechas del choque, **sin su `id`**—. Escrito una
+sola vez porque con esa tripleta tecleada a mano en cada puerta bastaba con que
+una dijera `fechaFin` para que la interfaz tuviera que aprender dos formas de
+contar lo mismo, y ningún test lo habría visto: cada puerta afirma la suya.
+
+**Anular no se comprueba**: quitar una ausencia nunca puede crear un solapamiento.
+
+### El aviso dice la condición, no receta un botón
+
+`apps/ausencias/src/api.ts` lee ese `detalle` sobre un **`res.clone()`**, porque
+`mensajeDeError` de `@suite/http` devuelve para un 409 solo el campo `error` y
+tira el resto del cuerpo — y el resto del cuerpo es justo contra qué se choca. No
+se arregla allí: ese helper lo comparten las doce apps del portal. El `clone()`
+hace falta porque el cuerpo de una `Response` se lee una sola vez, y el helper lo
+vuelve a leer para todo lo demás.
+
+El texto nombra el choque y **cuándo se liberan esos días** —«esos días ya están
+concedidos: no se liberan hasta que esa solicitud se cambie o se anule»— en vez de
+mandar pulsar algo. Los cuatro 409 los puede leer el dueño, su jefe o un admin, y
+los tres pueden hacer cosas distintas: el dueño cambia las fechas o pide la
+anulación; el admin edita esa otra fila o la borra; y el jefe que firma no puede
+tocar la ausencia que choca, solo rechazar la propuesta que se la pisa. «Anula esa
+solicitud primero» nombraba un botón que solo el dueño tiene.
+
+### `ocupaAgenda` existe porque duplicar la regla ya costó un bug
+
+Son dos mitades, pero la del **estado** es la que se escapa: en el `WHERE` de
+`solapeDe` va tres líneas por debajo de la del tipo. La cuarta puerta, la del
+`PATCH`, nació copiando **solo la del tipo**. Y lo que provocó no fue un
+solapamiento colado, sino lo contrario: cualquier **rechazada** con una ausencia
+viva encima quedaba **inmodificable** —409 señalando `fechaInicio`, un campo que
+el admin no había tocado—, que es justo el caso corriente de a quien le rechazan
+unos días y los vuelve a pedir en fechas que se cruzan con las primeras.
+
+Por eso la regla se comparte, y por eso las cuatro puertas la preguntan sobre la
+fila que van a **dejar escrita** y no sobre la que había. Y por eso
+`exigirSinSolape` recibe el estado aunque hoy por sus dos puertas no pase ninguna
+fila que no ocupe por su estado: preguntar por la fila entera es lo que impide que
+una puerta vuelva a divergir.
+
+> ⚠️ **El portón de siempre no puede ver un cambio en `ocupaAgenda`.**
+> `router.test.ts` mockea `./repo.js` entero y **reimplementa** esa función en su
+> doble, así que romper la de `repo.ts` deja sus 222 tests en verde. Quien la
+> vigila es el cuarto portón, contra Postgres real, y solo por las dos puertas que
+> viven en el repo: comprobado rompiéndola el 2026-08-18, quitarle la mitad del
+> tipo pone rojos dos tests de `repo.solapes.db.test.ts` y quitarle la del estado,
+> uno. Las dos puertas del servicio —el alta y la propuesta— se prueban de sobra,
+> pero contra la copia del doble: hoy nada acredita que usen la MISMA regla que
+> las otras dos.
+
+### Lo que NO hace
+
+- **No hay ninguna restricción en Postgres**, así que la ventana de carrera sigue
+  abierta: los `SELECT` de las cuatro puertas corren en READ COMMITTED y ninguno
+  lleva `FOR UPDATE`, y dos peticiones simultáneas la pasan las dos. Se descartó
+  **a propósito**: un `EXCLUDE` falla al aplicarse si hay datos que ya lo
+  incumplen, y en producción los hay; una migración que lanza deja hub-api sin
+  arrancar y el portal entero en 502. Lo que se protege es el caso corriente —una
+  persona, dos pantallas, un minuto de diferencia—, no dos escrituras en el mismo
+  milisegundo.
+- **`importarHistorico` está exento, y por ese mismo motivo**: es la vía por la
+  que entran precisamente esos datos. La hoja trae solapes reales, y una
+  importación que los rechazara dejaría el histórico a medias. Lo que sí impide es
+  duplicar, y de eso responde su `ON CONFLICT`.
+- **No hay escape para el admin.** El `PATCH` del *Registro general* está sujeto a
+  la misma regla que el alta. Si algún día hace falta una excepción habrá que
+  quitarla de ahí a conciencia, no encontrársela puesta.
+- **No libera días**: informar una incapacidad sobre unas vacaciones aprobadas no
+  las devuelve al saldo.
+
+### ⚠️ Los solapes que ya existen quedan congelados
+
+Esto es lo que hay que mirar **antes** de desplegar.
+
+Comprobado el 2026-08-18 contra producción: hay un empleado con **vacaciones
+aprobadas del 10 al 14 de agosto de 2026 y un permiso aprobado el 14**. Las dos
+están vivas y comparten un día, así que cada una es el choque de la otra. Con la
+regla puesta —verificado contra Postgres real reproduciendo esas dos filas—:
+
+| Sobre cualquiera de esas dos filas | Qué pasa |
+|---|---|
+| `PATCH` que **no** mueve las fechas (una errata en el comentario, el número de días) | **409** |
+| `PATCH` que reduce el solape pero sigue tocando (10–14 → 12–14) | **409** |
+| `PATCH` que lo elimina del todo (10–14 → 10–13) | pasa |
+| `PATCH` que marca una de las dos `rechazada`, sin mover fechas | pasa: deja de ocupar, así que no hay nada que comprobar |
+| Proponer un cambio de fechas que siga tocando | **409** al proponerlo |
+
+O sea: **mientras las dos sigan vivas y encima, ninguna admite ninguna corrección
+que no deshaga el solape.** Al admin le queda salida —mover una fuera del rango de
+la otra, marcarla `rechazada` o borrarla—, pero es una salida que cambia el
+registro, no que lo corrige. Al dueño de estas dos en concreto no le queda
+ninguna, y eso ya era así antes de esta regla: sus fechas pasaron, así que ni
+anular (`fechaInicio >= hoy`) ni acortar (`fechaFin >= hoy`) le sirven.
+
+**Conviene limpiar esos datos antes de desplegar.** La consulta que los saca es el
+predicado de `solapeDe` con sus dos filtros, contra la tabla consigo misma:
+
+```sql
+SELECT a.empleado_id,
+       a.id, a.tipo, a.estado, a.fecha_inicio, a.fecha_fin,
+       b.id, b.tipo, b.estado, b.fecha_inicio, b.fecha_fin
+  FROM portal.solicitudes_ausencia a
+  JOIN portal.solicitudes_ausencia b
+    ON b.empleado_id = a.empleado_id
+   -- `b.id > a.id` para que cada par salga UNA vez y no dos.
+   AND b.id > a.id
+ WHERE a.estado <> 'rechazada' AND a.tipo <> 'incapacidad'
+   AND b.estado <> 'rechazada' AND b.tipo <> 'incapacidad'
+   AND a.fecha_inicio <= b.fecha_fin
+   AND b.fecha_inicio <= a.fecha_fin
+ ORDER BY a.empleado_id, a.fecha_inicio;
+```
+
+**Nada la ejecuta sola**: no hay aviso, ni pantalla, ni contador que liste los
+solapes que ya existen. Hay que correrla a mano por consola.
+
 ## Calendario
 
 La pestaña *Calendario* es una rejilla persona × día: quién está fuera y
