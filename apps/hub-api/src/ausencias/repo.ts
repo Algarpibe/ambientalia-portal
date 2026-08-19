@@ -1939,6 +1939,11 @@ export interface Solape {
  * del doble. Nada comprueba que ejecuten la MISMA regla que las otras dos; el
  * CANDADO de la superficie de `router.test.ts` solo exige que esta función se
  * exporte, no que diga lo mismo.
+ *
+ * ⚠️ NO confundir con `estaEnElCalendario` (`types.ts`). Esta pregunta si la fila
+ * RESERVA días —y por eso excluye las incapacidades, que se informan y no se
+ * conceden—; aquella pregunta si la fila tiene evento en Google, y ahí las
+ * incapacidades SÍ cuentan. Casi las mismas filas, dos respuestas distintas.
  */
 export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
   return tipo !== 'incapacidad' && estado !== 'rechazada';
