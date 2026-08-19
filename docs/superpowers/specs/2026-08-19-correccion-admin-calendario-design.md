@@ -219,19 +219,37 @@ original de `repo.ts:631` quería evitar.
 ### Qué dice
 
 ⚠️ **El texto se escribe nuevo, NO se reutiliza `avisoDeAjustarGoogle`.** Aquel
-contempla dos situaciones y aquí hay **tres**, porque el calendario puede no
-necesitar nada:
+contempla dos situaciones y aquí hay **cuatro**, porque el calendario puede además
+no necesitar nada:
 
-| Situación | Prefijo del asunto | Qué dice del calendario |
-|---|---|---|
-| El calendario cambió y hay id | `⚠️ Ajustar la hoja — ` | ya se ha corregido solo |
-| El calendario cambió y no hay id | `⚠️ Ajustar calendario y hoja — ` | hay que ajustarlo a mano |
-| El calendario no cambió | `⚠️ Ajustar la hoja — ` | no se menciona |
+| `SituacionCalendario` | Acción en el payload | Prefijo del asunto | Qué dice el cuerpo |
+|---|---|---|---|
+| `no_cambia` | ninguna | `⚠️ Ajustar la hoja — ` | el evento no cambia |
+| `a_mano` | ninguna | `⚠️ Ajustar calendario y hoja — ` | hay que ajustarlo a mano |
+| `actualizado` | `actualizar` | `⚠️ Ajustar la hoja — ` | ya se ha corregido solo |
+| `borrado` | `borrar` | `⚠️ Ajustar la hoja — ` | ya se ha borrado solo |
 
-Las dos primeras filas dan el mismo prefijo pero **no** el mismo cuerpo: decir «el
-evento ya se ha corregido solo» en la tercera sería falso, porque no se tocó. Y
-callarse en la tercera lo que sí hay que hacer con la hoja dejaría la corrección a
-medias.
+**Las cuatro las decide una sola función**, `situacionDelCalendario(previa, actual)`,
+y de ella derivan el payload y los dos textos. Esto no es adorno: el primer intento
+de este diseño calculaba la condición **tres veces en paralelo** —una en el
+constructor del payload y una en cada texto— con un JSDoc que afirmaba ser fuente
+única. Lo cazó la revisión de la Tarea 5. Cambiar una rama y olvidar las otras
+habría dejado el correo diciendo una cosa y n8n haciendo otra, sin que nada se
+pusiera rojo.
+
+Y no vale compartir un `EventoCalendario | null`, que es lo que hace el flujo
+hermano: ese `null` colapsa `no_cambia` con `a_mano`, y **esa es justamente la
+distinción que el asunto tiene que enseñar**. Por eso hay un tipo con nombre y no
+una comprobación de nulidad. El aviso es un `Record<SituacionCalendario, string>`
+exhaustivo, para que una situación nueva no compile hasta que se le escriba texto.
+
+**Precondición de `construirPayloadCorreccion`, y va escrita en su JSDoc:** solo
+puede llamarse cuando `estaEnElCalendario(previa.estado)`. El cuerpo del correo
+afirma «que ya estaba en el calendario y en la hoja» como un hecho, así que
+llamarla sobre una solicitud que nunca salió de `pendiente` mandaría a
+administración un aviso falso. Quien la garantiza es el portón del repo; no se
+duplica aquí como comprobación defensiva, porque eso sería otra vez dos sitios
+decidiendo lo mismo.
 
 `prefijoDeAsunto` y `avisoDeAjustarGoogle` tampoco son reutilizables aunque se
 quisiera: los dos toman una `Modificacion`, que aquí no existe. Lo que sí se
