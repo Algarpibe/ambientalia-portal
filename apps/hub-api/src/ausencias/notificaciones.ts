@@ -778,8 +778,15 @@ function correccionDelRegistro(
 const AVISO_DE: Record<SituacionCalendario, string> = {
   no_cambia:
     '⚠️ Administración: el evento del calendario no cambia con esta corrección. La fila de la hoja sí: hay que ajustarla a mano.',
+  // No dice «el evento ya está en el calendario», que es lo que decía antes: en
+  // esta situación puede estar o NO estar. Sin `eventoCalendarioId` hay dos
+  // historias distintas —una aprobada anterior a la 026, cuyo evento existe con
+  // un id que no controlamos, y una anulada que un admin reabrió, cuyo evento
+  // borramos nosotros— y desde aquí no se distinguen. Prometer que hay algo que
+  // ajustar mandaría a administración a buscar un evento que no existe, que es la
+  // misma forma de ⚠️ falso que el resto de este mapa evita.
   a_mano:
-    '⚠️ Administración: esta ausencia ya estaba en el calendario y en la hoja, y NO se corrigen solas: hay que ajustar a mano el evento del calendario y la fila de la hoja.',
+    '⚠️ Administración: esta ausencia no se corrige sola en Google. Hay que revisar a mano el evento del calendario —puede que haya que ajustarlo, o crearlo si ya no está— y la fila de la hoja.',
   actualizado:
     '⚠️ Administración: el evento del calendario ya se ha corregido solo. La fila de la hoja no: hay que ajustarla a mano a lo nuevo.',
   borrado:
