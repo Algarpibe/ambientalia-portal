@@ -11,8 +11,8 @@ import {
 import {
   ESTADOS_EN_TRAMITE,
   ETIQUETA_TIPO,
+  estaEnElCalendario,
   type CorreoEvento,
-  type EstadoSolicitud,
   type EventoCalendario,
   type EventoModificacion,
   type EventoSolicitud,
@@ -408,38 +408,13 @@ function avisoModificacion(s: Solicitud, m: Modificacion): CorreoEvento {
 // ── La decisión de la propuesta ────────────────────────────────────────────
 
 /**
- * Si el cambio toca algo que **ya está en Google**.
- *
- * Función pura y con nombre propio porque de ella depende que el ⚠️ signifique
- * algo. Si la original seguía `pendiente`, nunca se mandó nada al calendario ni
- * a la hoja, y el aviso sería una alarma falsa: entrenar a la gente a ignorar
- * el ⚠️ es la forma segura de que el día que importe no lo lean.
- *
- * ⚠️ NO añadir `registrada` aquí, aunque sea el otro evento que lleva efectos
- * de Google (`construirPayload`). Una incapacidad no admite modificación
- * —`decisorDeModificacion` devuelve `null` y `estadoAdmiteModificacion` lo
- * exige—, así que `registrada` no puede ser nunca un `estadoPrevio`: la rama
- * sería código muerto que además haría creer que el caso está contemplado.
- *
- * `estaEnElCalendario` (`types.ts`) SÍ incluye `registrada`, y no es una
- * contradicción con lo anterior: esa función contesta la misma pregunta para
- * el `PATCH` del registro general, que alcanza cualquier tipo con cualquier
- * estado y por tanto sí puede ver una incapacidad `registrada`. Lo que se
- * retira es ESTA función, no el flujo de modificaciones —que sigue vivo—, y no
- * en la Tarea 7 sino en la siguiente: la Tarea 3 hace que sus tres usos
- * (`correccionDeCalendario`, `prefijoDeAsunto`, `correoModificacionAprobada`)
- * llamen a `estaEnElCalendario` en su lugar.
- */
-const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 'aprobada';
-
-/**
  * La corrección que hay que hacerle al evento del calendario, o `null` si no
  * hay ninguna que hacer.
  *
  * Devuelve `null` por dos motivos que no hay que confundir:
  *
- *  - `tocaGoogle` dice que no: la solicitud nunca estuvo aprobada, así que
- *    nunca se mandó nada al calendario y no hay evento que tocar.
+ *  - `estaEnElCalendario` dice que no: la solicitud nunca estuvo aprobada, así
+ *    que nunca se mandó nada al calendario y no hay evento que tocar.
  *  - No hay `eventoCalendarioId`: la solicitud se aprobó ANTES de que
  *    empezáramos a imponer el id, y su evento lleva el que Google inventó, que
  *    nadie apuntó. Existe, pero no se puede localizar. Esas se van vaciando
@@ -451,7 +426,7 @@ const tocaGoogle = (estadoPrevio: EstadoSolicitud): boolean => estadoPrevio === 
  * se ajustó solo es la forma segura de que dejen de leerlos.
  */
 function correccionDeCalendario(s: Solicitud, m: Modificacion): EventoCalendario | null {
-  if (!tocaGoogle(m.estadoPrevio) || s.eventoCalendarioId === null) return null;
+  if (!estaEnElCalendario(m.estadoPrevio) || s.eventoCalendarioId === null) return null;
   return {
     // Las fechas salen de la solicitud YA aplicada, que es lo que se quiere en
     // los dos casos: en un cambio de fechas son las nuevas, y en una anulación
@@ -516,12 +491,12 @@ function avisoDeAjustarGoogle(s: Solicitud, m: Modificacion): string {
  * Sin esto el correo llega con un asunto indistinguible de cualquier otro «✅
  * aprobado», y quien tiene que actuar —administración, que va en
  * `copiaCorreo`— no vería la señal hasta abrirlo. La condición de que aparezca
- * sigue siendo `tocaGoogle` y solo esa; lo que cambia es QUÉ nombra, porque un
- * ⚠️ que pide ir al calendario cuando el calendario ya está corregido es
- * exactamente lo que enseña a no leerlos.
+ * sigue siendo `estaEnElCalendario` y solo esa; lo que cambia es QUÉ nombra,
+ * porque un ⚠️ que pide ir al calendario cuando el calendario ya está
+ * corregido es exactamente lo que enseña a no leerlos.
  */
 const prefijoDeAsunto = (s: Solicitud, m: Modificacion): string => {
-  if (!tocaGoogle(m.estadoPrevio)) return '';
+  if (!estaEnElCalendario(m.estadoPrevio)) return '';
   return correccionDeCalendario(s, m) !== null ? '⚠️ Ajustar la hoja — ' : '⚠️ Ajustar calendario y hoja — ';
 };
 
@@ -574,7 +549,7 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
       // destinatarios sobre el mismo objeto. Este es el que escribió QUIEN PIDIÓ
       // el cambio (`motivoRechazo` de la propuesta solo se llena al rechazarla).
       ...siHay(!!m.motivo, `Motivo del cambio: ${m.motivo}`),
-      ...siHay(tocaGoogle(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
+      ...siHay(estaEnElCalendario(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
       '',
       'Saludos,',
       FIRMA_GERENCIA,
