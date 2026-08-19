@@ -10,6 +10,7 @@ import {
   SolapeAlAplicar,
   type EdicionSolicitud,
 } from './repo.js';
+import type { EstadoSolicitud } from './types.js';
 import {
   poolDePrueba,
   limpiar,
@@ -153,13 +154,21 @@ describe('solapeDe', () => {
 
 describe('decidirModificacion frente al solape', () => {
   /** La propuesta de mover la solicitud a `desde`-`hasta`, ya guardada. */
-  async function proponerFechas(solicitudId: string, desde: string, hasta: string, dias: number) {
+  async function proponerFechas(
+    solicitudId: string,
+    desde: string,
+    hasta: string,
+    dias: number,
+    // El testigo de `crearModificacion` compara con el estado REAL de la fila, asi
+    // que sembrar una solicitud que no este `aprobada` obliga a decirlo aqui.
+    estadoEsperado: EstadoSolicitud = 'aprobada',
+  ) {
     const alta = await crearModificacion(
       db,
       {
         solicitudId,
         clase: 'fechas',
-        estadoEsperado: 'aprobada',
+        estadoEsperado,
         fechaInicioNueva: desde,
         fechaFinNueva: hasta,
         diasHabilesNuevos: dias,
@@ -257,6 +266,45 @@ describe('decidirModificacion frente al solape', () => {
     expect(await eventosDelOutbox(db)).toEqual(['modificacion_solicitada', 'modificacion_rechazada']);
   });
 
+  it('CANDADO: sobre una RECHAZADA tampoco frena, que es la otra mitad de la regla', async () => {
+    // La mitad del ESTADO, por esta puerta. Es la que se escapa —en el `WHERE`
+    // de `solapeDe` va tres lineas por debajo de la del tipo— y la que ya
+    // divergio una vez: el PATCH de admin nacio copiando solo la del tipo.
+    //
+    // ⚠️ El fixture NO es alcanzable desde la app, y conviene decirlo antes de
+    // que alguien lo lea como un caso de uso: una solicitud rechazada si es
+    // corriente, pero una propuesta de FECHAS viva colgando de ella no —
+    // `estadoAdmiteModificacion` deja fuera a las rechazadas antes de dejar
+    // proponer, y si la solicitud se rechazara ENTRE la propuesta y la firma, el
+    // testigo triple cortaria antes de llegar a esta comprobacion—. Lo que ata
+    // este test no es un caso de usuario, es que esta puerta ejecute la MISMA
+    // `ocupaAgenda` que las otras tres. Sin el, quitarle a esa funcion la mitad
+    // del estado solo ponia rojo el candado del PATCH —comprobado rompiendola el
+    // 2026-08-18—, y esta puerta se podia quedar con media regla sin que nada lo
+    // dijera.
+    const a = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'rechazada',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+      segundoAprobadorCorreo: null,
+    });
+    const propuesta = await proponerFechas(a.id, '2026-07-20', '2026-07-22', 3, 'rechazada');
+    // Y el destino ocupado por una ausencia VIVA, que es contra lo que chocaria
+    // si la puerta mirara media regla.
+    await ocuparElDestino();
+
+    const decidida = await decidirModificacion(db, propuesta.id, true, null, null, payloadStub);
+
+    expect(decidida.ok).toBe(true);
+    // Y se aplico de verdad: una rechazada nunca sale de `solapeDe`, asi que la
+    // unica forma de verlo es mirar la fila.
+    expect(await solicitudPorId(db, a.id)).toMatchObject({
+      fechaInicio: '2026-07-20',
+      fechaFin: '2026-07-22',
+    });
+  });
   it('CANDADO: a una incapacidad no la frena el solape, igual que en las otras puertas', async () => {
     // Una incapacidad no se pide, se informa despues de haber estado enfermo: no
     // se le puede negar, y por eso `exigirSinSolape` la exime. Esta puerta corre

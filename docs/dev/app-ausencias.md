@@ -1321,15 +1321,17 @@ detectar una migración que nadie apuntó en `MIGRATIONS` —producción tampoco
 aplicaría, así que los dos esquemas coinciden en no tenerla—; eso solo se delata
 de rebote, cuando algún test de BD toca el esquema que esa migración traía.
 
-Son **22** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
+Son **42** tests. Dos de migraciones: que se re-ejecuten sobre una base ya migrada
 **y con datos** sin romper nada —que es como re-arranca producción—, y que los
 nueve eventos del outbox pasen el `CHECK` **y quepan en la columna**, que era la
 regresión del `22001` del 2026-08-17: dos restricciones distintas de las que solo
-se miró una. Ocho de los testigos: `decidirSolicitud`, `crearModificacion`, los
-**tres** del testigo triple (fechas por `PATCH`, avance de nivel, y la rama de
-anulación, que comparte el testigo con la de fechas pero tiene otro `SET`), el
+se miró una. **Diez** de los testigos: `decidirSolicitud`, `crearModificacion`,
+los **tres** del testigo triple (fechas por `PATCH`, avance de nivel, y la rama
+de anulación, que comparte el testigo con la de fechas pero tiene otro `SET`), el
 `23505` del índice único parcial emitido por Postgres y reconocido por su nombre,
-y lo que escribe aprobar una modificación de cada clase.
+lo que escribe aprobar una modificación de cada clase, el doble clic sobre la
+propuesta, y que una propuesta viva cuelgue de su solicitud y deje de colgar en
+cuanto se decide.
 
 Y **cuatro del calendario**, sobre `ausenciasEntre`: que la consulta busca las que
 **solapan** con el rango y no las contenidas en él —la condición natural perdería
@@ -1353,6 +1355,12 @@ un evento y una marca; y que `SELECT_SOLICITUD` la trae, sin lo cual
 `construirPayloadModificacion` vería `undefined`, no entraría por la guarda de
 `null` y emitiría una corrección con `eventId: undefined` —que no es hipotético:
 pasó al escribir esto, y lo destapó el doble in-memory de `router.test.ts`—.
+
+Y **veinte del solapamiento** (`repo.solapes.db.test.ts`): el predicado de fechas
+y sus bordes, las dos mitades de qué ocupa agenda —una incapacidad, una rechazada
+y una anulada no ocupan— y las dos puertas de esa regla que viven en el repo,
+firmar un cambio de fechas y el `PATCH` de admin. Tienen su propia sección: «Una
+persona no puede estar ausente dos veces a la vez».
 
 **Cada candado se falsó rompiendo el código de verdad** y comprobando que se pone
 rojo por el motivo correcto.
@@ -1561,9 +1569,10 @@ una puerta vuelva a divergir.
 > vigila es el cuarto portón, contra Postgres real, y solo por las dos puertas que
 > viven en el repo: comprobado rompiéndola el 2026-08-18, quitarle la mitad del
 > tipo pone rojos dos tests de `repo.solapes.db.test.ts` y quitarle la del estado,
-> uno. Las dos puertas del servicio —el alta y la propuesta— se prueban de sobra,
-> pero contra la copia del doble: hoy nada acredita que usen la MISMA regla que
-> las otras dos.
+> otros dos —el segundo se añadió ese mismo día, porque antes la mitad del estado
+> solo la sujetaba la puerta del `PATCH`—. Las dos puertas del servicio —el alta y
+> la propuesta— se prueban de sobra, pero contra la copia del doble: hoy nada
+> acredita que usen la MISMA regla que las otras dos.
 
 ### Lo que NO hace
 

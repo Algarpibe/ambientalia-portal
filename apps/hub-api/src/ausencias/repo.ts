@@ -1911,10 +1911,30 @@ export interface Solape {
  * que van a dejar: la que no ocupa agenda no puede chocar con nadie, y
  * comprobarla igualmente niega correcciones legítimas.
  *
- * Quedan dos reescrituras que el compilador no puede atar a esta, y las dos
- * están vigiladas: el `WHERE` de `solapeDe`, que dice esto mismo en SQL y ejecuta
- * contra Postgres de verdad en `repo.solapes.db.test.ts` —con un test por mitad—,
- * y el doble in-memory de `router.test.ts`, que lo reimplementa una vez.
+ * Quedan DOS reescrituras que el compilador no puede atar a esta, y no están en
+ * la misma situación, por más que las dos digan lo mismo:
+ *
+ *  - El `WHERE` de `solapeDe` dice esto en SQL, y **lo vigila** el cuarto
+ *    portón: ejecuta contra Postgres de verdad en `repo.solapes.db.test.ts`,
+ *    con un test para la mitad del tipo (la incapacidad) y dos para la del
+ *    estado (la rechazada y la anulada, que es una rechazada con marca).
+ *  - El doble in-memory de `router.test.ts` **no vigila: replica**. Ese fichero
+ *    hace `vi.mock('./repo.js')` y reimplementa esta función, así que el
+ *    servicio bajo prueba nunca llega a ejecutar ESTA.
+ *
+ * De donde sale la consecuencia que hay que tener delante antes de tocar la
+ * línea de abajo: **romper esta regla no pone rojo el portón rápido.**
+ * Comprobado el 2026-08-18 rompiéndola de verdad, una mitad cada vez: quitar la
+ * del tipo pone rojos DOS tests y quitar la del estado, otros DOS, los cuatro en
+ * el cuarto portón y todos de `decidirModificacion` y `actualizarSolicitud`; los
+ * unitarios —531 en `src/ausencias`, 222 de ellos de `router.test.ts`— siguen
+ * verdes en los dos casos.
+ *
+ * Y de ahí lo que hoy NO está acreditado: las dos puertas que viven en el
+ * servicio —el alta y la propuesta— se prueban de sobra, pero contra la copia
+ * del doble. Nada comprueba que ejecuten la MISMA regla que las otras dos; el
+ * CANDADO de la superficie de `router.test.ts` solo exige que esta función se
+ * exporte, no que diga lo mismo.
  */
 export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
   return tipo !== 'incapacidad' && estado !== 'rechazada';

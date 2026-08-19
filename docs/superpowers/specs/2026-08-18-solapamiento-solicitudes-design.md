@@ -37,6 +37,25 @@ Para una misma persona, dos ausencias **vivas** no pueden compartir ningún día
 - **Las incapacidades no participan**: ni se bloquean ni bloquean a nadie.
 - **Rangos inclusivos**: 10–14 y 14–14 solapan. Adyacentes (10–14 y 15–20) no.
 
+> ⚠️ **Esa enumeración se quedó corta, y se anota en vez de reescribirse.**
+> Comprobado contra el código el 2026-08-18, al documentar la regla ya
+> implementada: `repo.ocupaAgenda` **no enumera** los estados vivos, dice
+> `estado !== 'rechazada'`. Así que **`registrada` también ocupa**, y falta en
+> la lista de arriba.
+>
+> No es un matiz sin consecuencia: hoy solo nace `registrada` una incapacidad
+> —que queda fuera por su tipo—, pero `validarEdicionSolicitud` admite
+> **cualquier tipo con cualquier estado**, así que un permiso `registrada` es
+> alcanzable por el `PATCH` del *Registro general*, y ese sí ocupa agenda. El
+> frontend ya lo contempla: `SOLAPE_POR_ESTADO` (`api.ts`) tiene su rama.
+>
+> Y está escrito en negativo **a propósito**, no por descuido de este spec: una
+> lista de estados vivos deja fuera al que se invente mañana, y aquí quedarse
+> fuera significa dejar pasar un solapamiento. El párrafo de arriba se deja como
+> estaba, que es lo que este documento decía el día que se diseñó; la versión
+> vigente vive en `docs/dev/app-ausencias.md`, sección «Una persona no puede
+> estar ausente dos veces a la vez».
+
 ### Por qué las pendientes también ocupan
 
 Bloquear solo contra las aprobadas deja un agujero que se cierra solo en el peor
