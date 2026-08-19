@@ -357,8 +357,8 @@ describe('actualizarSolicitud frente al solape', () => {
 
   it('corregir sin mover las fechas se guarda: la solicitud se excluye a si misma', async () => {
     // El camino bueno, y aqui hace falta por dos cosas distintas. Una: sin la
-    // exclusion por id la fila chocaria SIEMPRE contra ella misma y el registro
-    // entero quedaria inmodificable. Otra: la relectura final va por el `client`
+    // exclusion por id la fila chocaria SIEMPRE contra ella misma y no se podria
+    // tocar ninguna solicitud VIVA. Otra: la relectura final va por el `client`
     // de la transaccion, y si fuera por el `Pool` saldria de ella y devolveria la
     // fila de ANTES del UPDATE —el estado y el comentario viejos—.
     const a = await sembrarBase();
@@ -373,7 +373,49 @@ describe('actualizarSolicitud frente al solape', () => {
     });
   });
 
-  it('CANDADO: a una incapacidad no la frena el solape, igual que en las otras puertas', async () => {
+  it('sobre una solicitud que no existe manda el solape, no el 404', async () => {
+    // La comprobacion va ANTES del UPDATE, asi que una correccion sobre una fila
+    // borrada cuyo destino este ocupado sale por el solape y no por «no
+    // encontrada». Se acepta: las dos respuestas son un rechazo, y las dos son
+    // ciertas —el destino esta ocupado Y la fila no esta—. Se fija porque hasta
+    // este test no lo afirmaba nada en ninguna direccion: mover la comprobacion
+    // detras del UPDATE lo voltea a `null` (404), y eso no ponia rojo ni un test.
+    // Comprobado moviendola: antes, verde; con esta linea, rojo.
+    await sembrarBase();
+    const err = await actualizarSolicitud(
+      db,
+      '99999999-9999-4999-8999-999999999999',
+      edicion({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12', dias: 1 }),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SolapeAlAplicar);
+  });
+
+  it('CANDADO: corregir una RECHAZADA que solapa a una viva sigue siendo posible', async () => {
+    // Una rechazada no ocupa agenda —`solapeDe` la ignora— asi que tener una
+    // viva justo encima es lo normal: te rechazan y vuelves a pedir los mismos
+    // dias. Una puerta que mirara solo el tipo la dejaria INMODIFICABLE, con un
+    // 409 por corregirle el comentario sin tocarle las fechas. Es la misma
+    // trampa que `decidirModificacion` ya tiene anotada para el RECHAZO.
+    const rechazada = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'rechazada',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+      segundoAprobadorCorreo: null,
+    });
+    await sembrarBase();
+
+    const r = await actualizarSolicitud(
+      db,
+      rechazada.id,
+      edicion({ estado: 'rechazada', comentarios: 'Arreglando una errata' }),
+    );
+
+    expect(r).toMatchObject({ estado: 'rechazada', comentarios: 'Arreglando una errata' });
+  });
+
+  it('CANDADO: a una incapacidad no la frena el solape al corregirla a mano', async () => {
     // Misma exencion y mismo motivo que en las otras tres: una incapacidad no se
     // pide, se informa despues de haber estado enfermo, y con las fechas ya
     // pasadas no hay nada que anular ni acortar para hacerle sitio. Aqui ademas

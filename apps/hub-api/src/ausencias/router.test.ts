@@ -161,6 +161,22 @@ class SolapeAlAplicar extends Error {
 }
 
 /**
+ * Que cuenta como ausencia VIVA. Fuente de verdad: `repo.ocupaAgenda`, que el
+ * repo real comparte entre sus cuatro puertas.
+ *
+ * Se reimplementa —no se importa— porque este fichero es un segundo sistema, y
+ * porque el `repo.js` que ve el servicio bajo prueba es ESTE: si el doble no la
+ * exportara, `exigirSinSolape` reventaria con un `is not a function`. El CANDADO
+ * de la superficie, mas abajo, es lo que obliga a que exista.
+ *
+ * Los parametros van sueltos (`unknown`) y no tipados como en el repo: las filas
+ * del doble son `Record<string, unknown>`, y exigir los tipos aqui solo anadiria
+ * `as` en los cuatro sitios que la llaman.
+ */
+const ocupaAgenda = (tipo: unknown, estado: unknown): boolean =>
+  tipo !== 'incapacidad' && estado !== 'rechazada';
+
+/**
  * El predicado del solapamiento, fuera del doble porque lo necesitan TRES de sus
  * funciones: `solapeDe`, que lo expone tal cual, y `decidirModificacion` y
  * `actualizarSolicitud`, que lo repiten dentro de su transaccion igual que hace
@@ -185,8 +201,7 @@ const buscarSolape = (
   const choque = estado.solicitudes.find(
     (s: any) =>
       s.empleadoId === empleadoId &&
-      s.estado !== 'rechazada' &&
-      s.tipo !== 'incapacidad' &&
+      ocupaAgenda(s.tipo, s.estado) &&
       (excluirSolicitudId === null || s.id !== excluirSolicitudId) &&
       s.fechaInicio <= fechaFin &&
       s.fechaFin >= fechaInicio,
@@ -235,6 +250,7 @@ vi.mock('./repo.js', () => ({
   },
   todasLasSolicitudes: async () => estado.solicitudes,
   SolapeAlAplicar,
+  ocupaAgenda,
   actualizarSolicitud: async (_db: unknown, id: string, campos: Record<string, unknown>) => {
     // ⚠️ REGLA REIMPLEMENTADA AQUI. La fuente de verdad es la CUARTA puerta del
     // solapamiento, en `repo.actualizarSolicitud`, que llama a `solapeDe` por el
@@ -250,7 +266,7 @@ vi.mock('./repo.js', () => ({
     // `solapeDe` revienta con 22P02, y si no lo hiciera, el `s.id = $1` del UPDATE—.
     // Esa divergencia venia de antes de esta puerta, y arreglarla aqui pondria
     // rojo un test que hoy afirma ese 404; no es asunto de esta puerta.
-    if (campos.tipo !== 'incapacidad') {
+    if (ocupaAgenda(campos.tipo, campos.estado)) {
       const choque = buscarSolape(
         campos.empleadoId as string,
         campos.fechaInicio as string,
@@ -668,7 +684,7 @@ vi.mock('./repo.js', () => ({
     // Se comprueba ANTES de escribir por lo mismo que el testigo de arriba: asi
     // es como este doble modela el ROLLBACK. El repo real la comprueba DESPUES
     // del UPDATE, y da igual: las dos excluyen la propia solicitud por su id.
-    if (aprueba && m.clase === 'fechas' && s && s.tipo !== 'incapacidad') {
+    if (aprueba && m.clase === 'fechas' && s && ocupaAgenda(s.tipo, s.estado)) {
       const choque = buscarSolape(
         s.empleadoId as string,
         m.fechaInicioNueva as string,
@@ -2017,14 +2033,14 @@ describe('edición de solicitudes', () => {
    * nunca. La reasignación la hace el propio PATCH, que es lo que este bloque ya
    * prueba más arriba.
    */
-  async function crearDeE1(fechaInicio: string, fechaFin: string): Promise<string> {
+  async function crearDeE1(fechaInicio: string, fechaFin: string, estadoFila = 'aprobada'): Promise<string> {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
       .send(nueva({ fechaInicio, fechaFin }))
       .expect(201);
     const id = r.body.id as string;
-    await editar(id, edicion({ fechaInicio, fechaFin })).expect(200);
+    await editar(id, edicion({ fechaInicio, fechaFin, estado: estadoFila })).expect(200);
     return id;
   }
 
@@ -2060,15 +2076,34 @@ describe('edición de solicitudes', () => {
 
   it('CANDADO: corregir una solicitud sin moverla de sus fechas sigue funcionando', async () => {
     // La comprobación excluye a la propia solicitud por su id. Sin esa
-    // exclusión, la fila chocaría SIEMPRE contra ella misma y el registro entero
-    // quedaría inmodificable: ni un comentario, ni un estado, ni un día mal
-    // contado.
+    // exclusión, la fila chocaría SIEMPRE contra ella misma y no habría forma de
+    // tocar una solicitud VIVA: ni un comentario, ni un estado, ni un día mal
+    // contado. (Las rechazadas y las incapacidades seguirían editándose: esas ni
+    // llegan a la comprobación.)
     const a = await crearDeE1('2026-07-06', '2026-07-10');
     const r = await editar(
       a,
       edicion({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Otra nota' }),
     ).expect(200);
     expect(r.body).toMatchObject({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Otra nota' });
+  });
+
+  it('CANDADO: editar una RECHAZADA que solapa a una viva sigue siendo posible', async () => {
+    // Una rechazada NO ocupa agenda: `solapeDe` la ignora, y por eso pedir otra
+    // vez esas mismas fechas está permitido y tener las dos encima es lo normal
+    // —te rechazan y vuelves a pedir—. Si la puerta mirara solo el tipo, la
+    // rechazada quedaría inmodificable: 409 `rango_solapado` con
+    // `field: 'fechaInicio'` por corregirle una errata al comentario, sin tocar
+    // las fechas siquiera. Es la misma trampa que `decidirModificacion` tiene
+    // anotada para RECHAZAR una propuesta solapada.
+    const rechazada = await crearDeE1('2026-07-06', '2026-07-10', 'rechazada');
+    // Encima de ella, y legítimamente: la de arriba no ocupa.
+    await crearDeE1('2026-07-06', '2026-07-10');
+
+    await editar(
+      rechazada,
+      edicion({ estado: 'rechazada', fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Arreglando una errata' }),
+    ).expect(200);
   });
 
   it('CANDADO: una incapacidad se puede editar encima de lo que sea', async () => {

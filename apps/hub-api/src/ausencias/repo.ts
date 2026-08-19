@@ -566,6 +566,14 @@ function aJsonHistorico(filas: FilaHistoricoResuelta[]): string {
  * `created_at` se pone a la fecha de inicio y no a `now()`: «Mis solicitudes»
  * ordena por fecha de creación, y con `now()` las 52 filas antiguas se
  * amontonarían todas arriba, por encima de las recientes.
+ *
+ * ⚠️ Es el ÚNICO escritor de solicitudes que no pasa por la regla del
+ * solapamiento, y está exento a propósito: la hoja trae precisamente los datos
+ * que ya la incumplen —comprobado el 2026-08-18 contra producción, un empleado
+ * tiene vacaciones aprobadas del 10 al 14 de agosto de 2026 y un permiso
+ * aprobado el 14—, y una importación que los rechazara dejaría el histórico a
+ * medias. Es la misma razón por la que no hay constraint en la BD (ver
+ * `solapeDe`). Lo que sí impide es duplicar: de eso responde el `ON CONFLICT`.
  */
 export async function importarHistorico(
   db: Pool,
@@ -625,15 +633,19 @@ export interface EdicionSolicitud {
  * se avisa a la gente. Un admin arreglando una fecha mal importada no debe
  * disparar correos a nadie.
  *
- * ⚠️ Es la CUARTA puerta del solapamiento y la última: el registro general es la
- * única vía que puede llevar cualquier ausencia a cualquier fecha, y la única de
- * las cuatro que no pasa por el servicio —el router llama aquí directamente—,
+ * ⚠️ Es la CUARTA puerta del solapamiento: el registro general es la única vía
+ * INTERACTIVA que puede llevar cualquier ausencia a cualquier fecha, y la única
+ * de las cuatro que no pasa por el servicio —el router llama aquí directamente—,
  * así que su comprobación no puede vivir en `exigirSinSolape` como la del alta.
  * Si el destino está ocupado **LANZA** `SolapeAlAplicar`, y de ahí sale que esa
  * señal se exporte: no hay función intermedia donde cazarla, la traduce a 409 el
  * `catch` de la ruta en `router.ts`. Lanzar y no devolver `null` tampoco es
  * gusto: `null` ya significa «no encontrada» aquí, y el router lo contesta con
  * un 404 — un choque saldría diciendo que la solicitud no existe.
+ *
+ * Lo que NO es: el último escritor de la tabla. `importarHistorico` mete filas
+ * sin pasar por puerta ninguna, y está exento a propósito — el porqué, en su
+ * JSDoc.
  *
  * Va dentro de una transacción, y conviene decir exacto lo que eso da. Da que la
  * comprobación y el UPDATE viajen por la misma conexión, y que la relectura
@@ -651,11 +663,12 @@ export async function actualizarSolicitud(
   campos: EdicionSolicitud,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
-    // Una incapacidad no se pide: se informa después de haber estado enfermo, y
-    // no se le puede negar. ⚠️ Esta exención está repetida a mano en todas las
-    // puertas —el aviso de `exigirSinSolape`, en el servicio, las enumera—:
-    // nada las ata, y si divergen una autoriza lo que la siguiente niega.
-    if (campos.tipo !== 'incapacidad') {
+    // Solo hay algo que comprobar si la fila que va a quedar OCUPA agenda. Las
+    // dos mitades importan y la del estado se pasó por alto la primera vez: sin
+    // ella, corregirle una errata a una RECHAZADA que tuviera una ausencia viva
+    // encima —el caso corriente de a quien le rechazan unos días y los vuelve a
+    // pedir— salía 409 señalando `fechaInicio`, un campo que nadie había tocado.
+    if (ocupaAgenda(campos.tipo, campos.estado)) {
       const choque = await solapeDe(
         client,
         // El empleado DESTINO, no el que tuviera la fila: si la corrección la
@@ -665,7 +678,8 @@ export async function actualizarSolicitud(
         campos.fechaFin,
         // Excluida por su id, o una corrección que no mueva las fechas —el
         // estado, un comentario, un día mal contado— chocaría contra la propia
-        // fila que corrige, y el registro entero sería inmodificable.
+        // fila que corrige, y ninguna solicitud VIVA se podría ya tocar (las
+        // rechazadas y las incapacidades sí: no llegan hasta aquí).
         id,
       );
       if (choque) throw new SolapeAlAplicar(choque);
@@ -1543,19 +1557,16 @@ export async function decidirModificacion(
       //    jefe cada vez, y solo el solicitante podría quitarla de en medio
       //    retirándola—. Lo vigila un test de `repo.solapes.db.test.ts` escrito
       //    para esto: antes de él, quitarlo dejaba los cuatro portones en verde.
-      //  - `tipo` repite a mano la exención de `exigirSinSolape`: una incapacidad
-      //    no se pide, se informa después de haber estado enfermo, y no se le
-      //    puede negar. No se comparte aquel helper porque esto vive en el repo,
-      //    dentro de la transacción y con un `PoolClient`, y él lanza
-      //    `AusenciaError` desde el servicio con un `Pool`. Que todas digan lo
-      //    mismo NO lo garantiza el compilador, y si divergen una puerta autoriza
-      //    lo que la siguiente niega: la 2 deja pasar la propuesta por la
-      //    exención y firmarla daría 409. Alcanzable hoy — el `PATCH` de admin
+      //  - `ocupaAgenda` es la MISMA función que usan las otras tres puertas, y
+      //    no una copia: pregunta si la fila que queda escrita cuenta como
+      //    ausencia viva. `solicitud` viene releída, así que su tipo y su estado
+      //    son los de la fila, no los que traía la petición. Sigue sin poder
+      //    llamarse a `exigirSinSolape` —aquello vive en el servicio, con un
+      //    `Pool` y lanzando `AusenciaError`—; lo que se comparte es la REGLA,
+      //    que es lo que podía divergir. Divergió: la puerta del `PATCH` nació
+      //    copiando solo la mitad del tipo. Alcanzable hoy — ese mismo `PATCH`
       //    admite cualquier tipo con cualquier estado, así que hay
-      //    `incapacidad`es en `aprobada`. Y son CINCO copias, no dos: esta, la de
-      //    `actualizarSolicitud` —el `PATCH`, que tampoco pasa por el servicio—,
-      //    la de `exigirSinSolape`, y las dos que el doble in-memory de
-      //    `router.test.ts` copia de estas.
+      //    `incapacidad`es en `aprobada`.
       //  - la clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
       //    anulación las tres columnas nuevas van a `null` —lo exige el CHECK
       //    `modificaciones_campos_por_clase` de la 024—, así que el trozo de las
@@ -1566,7 +1577,7 @@ export async function decidirModificacion(
       //    volver aquí si mañana aparece una tercera clase con fechas.
       if (
         aprueba &&
-        solicitud.tipo !== 'incapacidad' &&
+        ocupaAgenda(solicitud.tipo, solicitud.estado) &&
         modificacion.clase === 'fechas' &&
         modificacion.fechaInicioNueva &&
         modificacion.fechaFinNueva
@@ -1884,6 +1895,32 @@ export interface Solape {
 }
 
 /**
+ * Qué cuenta como ausencia VIVA, escrito una sola vez.
+ *
+ * Son dos mitades de la misma regla y ninguna se sostiene sin la otra: una
+ * incapacidad no se pide, se informa después de haber estado enfermo, y no se le
+ * puede negar; una rechazada no concedió ni un día, así que no ocupa nada. La
+ * del estado es la que se escapa con facilidad —en el `WHERE` de `solapeDe` va
+ * tres líneas por debajo de la del tipo—, y escaparse le costó a la puerta del
+ * `PATCH` dejar INMODIFICABLE cualquier rechazada con una ausencia viva encima,
+ * que es el caso corriente de a quien le rechazan unos días y los vuelve a pedir.
+ *
+ * La llaman los tres sitios que comprueban un solape antes de dejar la fila
+ * escrita —`exigirSinSolape` en el servicio (el alta y la propuesta),
+ * `decidirModificacion` y `actualizarSolicitud` aquí—, y siempre sobre la fila
+ * que van a dejar: la que no ocupa agenda no puede chocar con nadie, y
+ * comprobarla igualmente niega correcciones legítimas.
+ *
+ * Quedan dos reescrituras que el compilador no puede atar a esta, y las dos
+ * están vigiladas: el `WHERE` de `solapeDe`, que dice esto mismo en SQL y ejecuta
+ * contra Postgres de verdad en `repo.solapes.db.test.ts` —con un test por mitad—,
+ * y el doble in-memory de `router.test.ts`, que lo reimplementa una vez.
+ */
+export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
+  return tipo !== 'incapacidad' && estado !== 'rechazada';
+}
+
+/**
  * La primera ausencia VIVA de esta persona que se cruza con el rango, o `null`.
  *
  * El predicado de fechas es el mismo que usa `ausenciasEntre` —solapa, no
@@ -1895,6 +1932,11 @@ export interface Solape {
  *
  * `LIMIT 1` porque el mensaje solo puede nombrar una colisión; buscarlas todas
  * sería trabajo que nadie lee.
+ *
+ * Las dos condiciones de «viva» de su `WHERE` —`estado <> 'rechazada'` y
+ * `tipo <> 'incapacidad'`— son `ocupaAgenda` escrito en SQL. Quien tenga que
+ * hacerse la misma pregunta desde TypeScript llama a aquella función; aquí no se
+ * puede.
  *
  * ⚠️ El filtro de estado —`estado <> 'rechazada'`— es el mismo filtro que en
  * `ausenciasEntre`; lo que se invierte no es el filtro sino la

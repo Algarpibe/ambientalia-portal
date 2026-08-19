@@ -277,20 +277,36 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
  * Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
  * —`Solape` es una interface, sin index signature implícita, así que
  * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
- * uuid que no necesita. Escrito UNA vez porque lo usan las CUATRO puertas que
- * responden este 409 —el alta y la propuesta por `exigirSinSolape`, firmar el
- * cambio aquí abajo, y el `PATCH` de admin desde el `catch` de `router.ts`, que
- * es lo único que obliga a exportarlo— y esa promesa de no filtrar el `id` tiene
- * que poder atarse en un solo sitio: la vigila `router.test.ts` comparando las
- * claves exactas del `detalle`.
+ * uuid que no necesita. Privado a propósito: quien lo necesita desde fuera
+ * necesita en realidad el error entero, y para eso está `errorDeSolape`.
  */
-export function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
+function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
   return {
     tipo: choque.tipo,
     estado: choque.estado,
     fechaInicio: choque.fechaInicio,
     fechaFin: choque.fechaFin,
   };
+}
+
+/**
+ * El 409 del solapamiento entero, escrito una sola vez.
+ *
+ * El `detalle` no era lo único que había que atar: `code`, `status` y `field` son
+ * igual de contrato, y estaban tecleados a mano en los tres sitios que responden
+ * este error —`exigirSinSolape` para el alta y la propuesta, la traducción de
+ * `decidirModificacion` más abajo, y el `catch` del `PATCH` en `router.ts`—. Con
+ * la tripleta suelta bastaba con que uno dijera `fechaFin`, o un `code` con otra
+ * letra, para que la interfaz tuviera que aprender dos formas de contar lo mismo,
+ * y ningún test lo habría visto: cada puerta afirma la SUYA.
+ *
+ * Lo vigilan los cuatro tests de `router.test.ts` que afirman
+ * `error: 'rango_solapado'` desde HTTP, uno por puerta; tres comparan además las
+ * claves exactas del `detalle`, que es donde vive la promesa de no filtrar el
+ * `id` del choque.
+ */
+export function errorDeSolape(choque: repo.Solape): AusenciaError {
+  return new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(choque));
 }
 
 /**
@@ -304,48 +320,54 @@ export function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
  * sin poder lanzar `AusenciaError`. Y el `PATCH` de admin no tiene función de
  * servicio —el router llama a `repo.actualizarSolicitud` derecho— y su
  * comprobación va también dentro de esa transacción, para no mirar por una
- * conexión y escribir por otra. Las dos llaman a `repo.solapeDe` por su cuenta y
- * **repiten a mano la exención de la incapacidad de aquí abajo**. Nada obliga a
- * las cuatro a coincidir, y si divergen una puerta autoriza lo que la siguiente
- * niega.
+ * conexión y escribir por otra. Las dos llaman a `repo.solapeDe` por su cuenta,
+ * pero la REGLA de qué ocupa agenda ya no se repite en ninguna: las cuatro
+ * puertas llaman a `repo.ocupaAgenda`. Se comparte porque copiarla salió mal —el
+ * `PATCH` nació copiando media, el tipo sin el estado— y porque los candados no
+ * lo habrían visto: cada puerta prueba la suya, así que cambiar la regla en un
+ * solo sitio deja verdes los tests de las otras.
  */
 async function exigirSinSolape(
   db: Pool,
   empleadoId: string,
   tipo: TipoSolicitud,
+  estado: EstadoSolicitud,
   fechaInicio: string,
   fechaFin: string,
   excluirSolicitudId: string | null,
 ): Promise<void> {
-  // Una incapacidad no se pide: se informa después de haber estado enfermo. Con
-  // las fechas ya pasadas no se puede anular ni acortar nada para hacerle sitio,
-  // así que bloquearla dejaría a esa persona sin poder registrarla.
+  // La fila que va a quedar escrita solo puede chocar con alguien si ella misma
+  // OCUPA agenda; si no, comprobarla solo sirve para negar lo que nadie tenía por
+  // qué negar. El porqué de cada mitad, en `repo.ocupaAgenda`.
   //
-  // ⚠️ Esta línea está CINCO veces: aquí, en las dos puertas del repo que no
-  // pueden llamar a esta función porque corren dentro de una transacción
-  // (`repo.decidirModificacion` y `repo.actualizarSolicitud`), y en las dos que
-  // el doble in-memory de `router.test.ts` copia de ellas. Quien la toque tiene
-  // que tocarlas todas: nada las ata.
-  if (tipo === 'incapacidad') return;
+  // Por estas dos puertas hoy no pasa ninguna fila que no ocupe por su estado: el
+  // alta nace `pendiente` o `registrada` —nunca `rechazada`— y
+  // `estadoAdmiteModificacion` deja fuera a las rechazadas mucho antes de llegar a
+  // la propuesta. Se pasa el estado igual, porque preguntar por la fila ENTERA es
+  // lo que impide que esta puerta diverja de las otras tres — que es exactamente
+  // lo que pasó cuando el `PATCH` copió media regla.
+  if (!repo.ocupaAgenda(tipo, estado)) return;
 
   const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
   if (!choque) return;
-  throw new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(choque));
+  throw errorDeSolape(choque);
 }
 
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
+  // Los dos suben aquí porque la comprobación de solape pregunta por la fila que
+  // se va a crear, y eso incluye con qué estado nace. Son derivaciones puras de
+  // `datos.tipo`, así que adelantarlas no cambia nada más.
+  const aprueba = requiereAprobacion(datos.tipo);
+  const estado = aprueba ? 'pendiente' : 'registrada';
   // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
   // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
   // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
   // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
   // esta comprobación necesita, así que tiene que ir antes por fuerza.
-  await exigirSinSolape(db, empleado.id, datos.tipo, datos.fechaInicio, datos.fechaFin, null);
+  await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
   const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
-
-  const aprueba = requiereAprobacion(datos.tipo);
-  const estado = aprueba ? 'pendiente' : 'registrada';
 
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
@@ -651,7 +673,15 @@ export async function pedirModificacion(
   //    `CLASES_MODIFICACION` gana una tercera clase con fechas, quedará fuera
   //    del candado en silencio mientras nadie toque esta línea.
   if (datos.clase === 'fechas' && datos.fechaInicio && datos.fechaFin) {
-    await exigirSinSolape(db, empleado.id, solicitud.tipo, datos.fechaInicio, datos.fechaFin, solicitud.id);
+    await exigirSinSolape(
+      db,
+      empleado.id,
+      solicitud.tipo,
+      solicitud.estado,
+      datos.fechaInicio,
+      datos.fechaFin,
+      solicitud.id,
+    );
   }
 
   const decisor = decisorDeModificacion(solicitud);
@@ -874,10 +904,11 @@ export async function decidirModificacion(
     // se propuso el cambio y se firma, así que la propuesta era legal cuando se
     // pidió y ha dejado de serlo sin que nadie hiciera nada mal.
     if (resultado.razon === 'solape') {
-      // Mismo `code`, mismo `field` y mismo `detalle` que las otras puertas: la
-      // interfaz ya sabe pintar este error, y llegar aquí con una forma distinta
-      // la obligaría a aprender un segundo caso para decir lo mismo.
-      throw new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(resultado.solape));
+      // Mismo `code`, mismo `field` y mismo `detalle` que las otras tres puertas,
+      // y ya no por buena voluntad: los cuatro salen de `errorDeSolape`. Llegar
+      // aquí con una forma distinta obligaría a la interfaz a aprender un segundo
+      // caso para decir lo mismo.
+      throw errorDeSolape(resultado.solape);
     }
     throw resultado.razon === 'ya_decidida'
       ? new AusenciaError('ya_decidida', 409)

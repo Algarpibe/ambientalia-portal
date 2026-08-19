@@ -393,12 +393,11 @@ export function createAusenciasRouter(db: Pool): Router {
       // servicio, como las otras tres, porque esta ruta no pasa por él: llama al
       // repo derecho. Y `repo.actualizarSolicitud` no puede lanzar un
       // `AusenciaError` —el repo no conoce el servicio—, así que lanza su
-      // centinela y la traducción vive aquí: mismo 409 que las demás y el mismo
-      // `detalleDelSolape`, que es lo que promete no filtrar el `id` del choque.
-      const error =
-        e instanceof repo.SolapeAlAplicar
-          ? new AusenciaError('rango_solapado', 409, 'fechaInicio', service.detalleDelSolape(e.solape))
-          : e;
+      // centinela y aquí se traduce. El error NO se teclea a mano: sale de
+      // `service.errorDeSolape`, que es lo que garantiza que este 409 sea el mismo
+      // `code`, el mismo `field` y el mismo `detalle` —sin el `id` del choque— que
+      // el de las otras tres puertas.
+      const error = e instanceof repo.SolapeAlAplicar ? service.errorDeSolape(e.solape) : e;
       sendError(res, error, 'ausencias_editar_solicitud');
     }
   });
