@@ -3170,6 +3170,7 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     }).expect(409);
     expect(r.body).toMatchObject({
       error: 'rango_solapado',
+      field: 'fechaInicio',
       detalle: { fechaInicio: '2026-07-20', fechaFin: '2026-07-22' },
     });
     // Sin esto el 409 podría estar decorativo: la puerta puesta DESPUÉS de
