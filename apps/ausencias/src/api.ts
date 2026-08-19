@@ -1,5 +1,8 @@
 import { authHeaders, esAdmin } from '@suite/auth-client';
 import { mensajeDeError } from '@suite/http';
+// No cierra ciclo en runtime: lo que `dominio` coge de aquí son solo tipos, con
+// `import type`, y con `verbatimModuleSyntax` esa línea se borra al compilar.
+import { ETIQUETA_TIPO, rangoFechas } from './dominio';
 
 export { esAdmin };
 
@@ -230,25 +233,135 @@ export interface NuevaSolicitud {
   adjunto?: { nombreArchivo: string; mime: string; contenidoBase64: string };
 }
 
+// ── El 409 del solapamiento ────────────────────────────────────────────────
+
+/** El conflicto que devuelve un `rango_solapado`. Espejo de `service.ts`. */
+export interface SolapeDetalle {
+  tipo: TipoSolicitud;
+  estado: EstadoSolicitud;
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+/**
+ * Cómo se nombra el estado del choque, y qué se deduce de él.
+ *
+ * El estado va en el texto porque cambia lo que queda por hacer: una aprobada ya
+ * concedió esos días y solo los suelta si se anula, mientras que una sin decidir
+ * puede acabar rechazada y soltarlos sola.
+ *
+ * Falta `rechazada` porque el `WHERE` de `solapeDe` (`repo.ts`) solo devuelve
+ * ausencias vivas y una rechazada no lo es, así que hoy el servidor no la manda
+ * nunca en el `detalle`; si algún día llegara, o llegara un estado que este
+ * bundle todavía no conozca, sale por la rama sin estado de `mensajeDeSolape`.
+ *
+ * Los textos son IMPERSONALES a propósito. Los cuatro endpoints que contestan
+ * este 409 tienen dos audiencias distintas: el dueño, que pide el alta o el
+ * cambio, y el jefe que firma la propuesta o el admin que corrige el registro —
+ * y para esos dos la ausencia que choca no es suya. Un «ya tienes» sería falso
+ * la mitad de las veces. Es la misma trampa que `MENSAJE_DECISION` resuelve en
+ * la bandeja con una segunda redacción; aquí se esquiva no hablándole a nadie.
+ */
+const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salida: string }>> = {
+  pendiente: {
+    estado: 'pendiente de aprobar',
+    salida: 'Mientras siga en pie ocupa esos días: hay que cambiar estas fechas, o anular esa solicitud primero.',
+  },
+  pendiente_2: {
+    estado: 'pendiente de la segunda firma',
+    salida: 'Mientras siga en pie ocupa esos días: hay que cambiar estas fechas, o anular esa solicitud primero.',
+  },
+  aprobada: {
+    estado: 'aprobada',
+    salida: 'Esos días ya están concedidos: hay que cambiar estas fechas, o anular esa solicitud primero.',
+  },
+  registrada: {
+    estado: 'registrada',
+    salida: 'Esos días ya están ocupados: hay que cambiar estas fechas, o anular esa solicitud primero.',
+  },
+};
+
+/**
+ * El choque, dicho entero: contra qué se choca y qué hacer con ello.
+ *
+ * Decir el tipo y las fechas es toda su razón de ser: sin eso el aviso es «no
+ * puedes» a secas, y quien lo lee no tiene por qué acordarse de qué días tenía
+ * ya cogidos.
+ *
+ * Las fechas van por `rangoFechas`, que las pasa por el `formatFecha` con el que
+ * las tablas pintan sus columnas: así el rango del aviso y la fila que se ve en
+ * pantalla se escriben igual. De regalo, colapsa el rango de un solo día en una
+ * fecha sola en vez de repetirla.
+ */
+export function mensajeDeSolape(d: SolapeDetalle): string {
+  const cuando = rangoFechas(d.fechaInicio, d.fechaFin);
+  const como = SOLAPE_POR_ESTADO[d.estado];
+  if (!como) {
+    return `Esas fechas chocan con otra ausencia: ${ETIQUETA_TIPO[d.tipo]}, ${cuando}. Hay que cambiar estas fechas, o anular esa solicitud primero.`;
+  }
+  return `Esas fechas chocan con otra ausencia: ${ETIQUETA_TIPO[d.tipo]}, ${cuando}, ${como.estado}. ${como.salida}`;
+}
+
+/** El error de un endpoint corriente: el texto de `mensajeDeError` y nada más. */
+async function errorGenerico(res: Response): Promise<Error> {
+  return new Error(await mensajeDeError(res));
+}
+
+/**
+ * Igual, pero conservando el `detalle` de un `rango_solapado`.
+ *
+ * Hace falta porque `mensajeDeError` (@suite/http) devuelve para un 409 solo el
+ * campo `error` y tira el resto del cuerpo — y el resto del cuerpo es justo
+ * contra qué se choca. No se arregla allí: ese helper lo comparten las doce apps
+ * del portal. El cuerpo se lee sobre un `clone()` porque el de una `Response` se
+ * puede leer una sola vez, y el helper lo vuelve a leer para todo lo demás.
+ *
+ * Cualquier otro fallo —otro 409, un 400, un 500, un cuerpo que no sea JSON, o
+ * un `rango_solapado` al que le faltara el `detalle`— sale por `mensajeDeError`
+ * exactamente como antes de esto.
+ */
+async function errorDeAusencia(res: Response): Promise<Error> {
+  const cuerpo = (await res
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: string; detalle?: SolapeDetalle } | null;
+  if (cuerpo?.error === 'rango_solapado' && cuerpo.detalle) return new Error(mensajeDeSolape(cuerpo.detalle));
+  return errorGenerico(res);
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await mensajeDeError(res));
   return (await res.json()) as T;
 }
 
-async function conCuerpo<T>(metodo: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<T> {
+async function conCuerpo<T>(
+  metodo: 'POST' | 'PATCH' | 'PUT',
+  path: string,
+  body: unknown,
+  leerError: (res: Response) => Promise<Error> = errorGenerico,
+): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: metodo,
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await mensajeDeError(res));
+  if (!res.ok) throw await leerError(res);
   return (await res.json()) as T;
 }
 
 const post = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body);
-const patch = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body);
 const put = <T,>(path: string, body: unknown) => conCuerpo<T>('PUT', path, body);
+
+/**
+ * Los verbos de las CUATRO puertas del solapamiento —el alta, pedir un cambio de
+ * fechas, firmarlo y el `PATCH` del registro—, que son las cuatro que pueden
+ * contestar `rango_solapado`. El resto de endpoints sigue con `post`/`put`.
+ *
+ * `patch` a secas ya no existe: el `PATCH` del registro era su único usuario.
+ */
+const postSolapable = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body, errorDeAusencia);
+const patchSolapable = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body, errorDeAusencia);
 
 export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
 
@@ -266,7 +379,7 @@ export const fetchMisSolicitudes = () =>
 export const fetchPendientes = () =>
   get<{ solicitudes: SolicitudPendiente[] }>('/api/ausencias/pendientes').then((d) => d.solicitudes);
 
-export const crearSolicitud = (s: NuevaSolicitud) => post<Solicitud>('/api/ausencias/solicitudes', s);
+export const crearSolicitud = (s: NuevaSolicitud) => postSolapable<Solicitud>('/api/ausencias/solicitudes', s);
 
 export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) =>
   post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/decision`, { aprueba, motivo });
@@ -290,7 +403,7 @@ export interface NuevaModificacion {
 
 /** El dueño pide cambiar las fechas de una solicitud suya, o anularla. */
 export const pedirModificacion = (solicitudId: string, m: NuevaModificacion) =>
-  post<Modificacion>(`/api/ausencias/solicitudes/${encodeURIComponent(solicitudId)}/modificaciones`, m);
+  postSolapable<Modificacion>(`/api/ausencias/solicitudes/${encodeURIComponent(solicitudId)}/modificaciones`, m);
 
 /**
  * El autor se echa atrás. Sin correo a nadie: retirar deja la solicitud tal como
@@ -352,7 +465,7 @@ export interface DecisionModificacion {
  * (`{ aprueba, motivo? }`) a propósito, para reutilizar el patrón de la bandeja.
  */
 export const decidirModificacion = (id: string, aprueba: boolean, motivo?: string) =>
-  post<DecisionModificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/decision`, {
+  postSolapable<DecisionModificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/decision`, {
     aprueba,
     motivo,
   });
@@ -404,7 +517,7 @@ export interface EdicionSolicitud {
 
 /** Corrige una solicitud (solo admin). No manda correos a nadie. */
 export const editarSolicitud = (id: string, campos: EdicionSolicitud) =>
-  patch<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`, campos);
+  patchSolapable<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`, campos);
 
 /** Borra una solicitud del registro (solo admin). Es irreversible. */
 export async function borrarSolicitud(id: string): Promise<void> {
