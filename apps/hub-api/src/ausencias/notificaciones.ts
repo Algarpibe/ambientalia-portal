@@ -720,16 +720,21 @@ function correccionDelRegistro(
   actual: Solicitud,
   situacion: SituacionCalendario,
 ): EventoCalendario | null {
-  if (situacion === 'no_cambia' || situacion === 'a_mano') return null;
+  // El id GUARDADO, no el derivado: son el mismo valor hoy, pero el guardado es
+  // el que prueba que ese evento lo creamos nosotros.
+  const eventId = previa.eventoCalendarioId;
+  // Se vuelve a preguntar por el id en vez de darlo por bueno con un `!`. No es
+  // una segunda decisión —quien decide sigue siendo `situacionDelCalendario`, y
+  // hoy `actualizado` y `borrado` ya implican que hay id—, es negarse a emitir un
+  // payload roto: un `!` convertiría esa garantía, que vive en OTRA función, en un
+  // `eventId: null` que n8n mandaría a Google tal cual el día que alguien la
+  // relaje. Un `if` de más cuesta una línea; ese fallo no avisa.
+  if (eventId === null || situacion === 'no_cambia' || situacion === 'a_mano') return null;
   return {
     // Las fechas salen de la solicitud YA corregida: en un `actualizar` son las
     // nuevas, y en un `borrar` describen el evento justo antes de desaparecer.
     ...calendario(actual),
-    // El id GUARDADO, no el derivado: son el mismo valor hoy, pero el guardado es
-    // el que prueba que ese evento lo creamos nosotros. El `!` es seguro: solo se
-    // llega aquí con `situacion` en `actualizado`/`borrado`, y `situacionDelCalendario`
-    // solo devuelve esas dos cuando `eventoCalendarioId` no es `null`.
-    eventId: previa.eventoCalendarioId!,
+    eventId,
     accion: situacion === 'actualizado' ? 'actualizar' : 'borrar',
   };
 }
