@@ -97,10 +97,31 @@ Google un `actualizar` idéntico al evento que ya hay y un correo diciendo que �
 evento del calendario ya se ha corregido solo». Es literalmente el ⚠️ falso contra
 el que avisa el JSDoc de `correccionDeCalendario`.
 
-**La hoja** muestra más: nombre, fechas, días, tipo, comentarios y el «¿Aprobado?».
-Así que `cambiaLaHoja` es todo lo anterior **más `dias` y `comentarios`**. Solo
-`observaciones` queda fuera de las dos: es una nota interna que no viaja a ningún
-sitio.
+**La hoja** muestra más, y —esto se descubrió revisando la implementación, no
+diseñando— **muestra cosas distintas según el tipo**. `hoja()` tiene dos juegos de
+columnas:
+
+| | Nombre | Fechas | Días | Tipo | Comentarios | ¿Aprobado? | Adjunto? |
+|---|---|---|---|---|---|---|---|
+| Incapacidad | ✓ | ✓ | ✓ | ✓ | — | — | ✓ |
+| Las otras tres | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+
+De ahí salen dos cosas que un `cambiaElCalendario + dias + comentarios` ingenuo
+habría hecho mal:
+
+- **En una incapacidad, los comentarios no salen en la hoja.** Contarlos daría un
+  ⚠️ «ajustar la hoja» por una celda que esa pestaña no tiene — el ⚠️ falso que
+  esta feature existe para evitar. Y una incapacidad `registrada` pasa el portón
+  de fuera, así que el caso es alcanzable. `Adjunto?` no hace falta mirarlo:
+  `validarEdicionSolicitud` no admite tocar el adjunto.
+- **La celda «¿Aprobado?» tiene TRES valores** —`Sí`, `No` y vacío— y
+  `estaEnElCalendario` solo distingue dos. Mirarla a través de ese predicado
+  perdería `aprobada → registrada`, que cambia la celda de `Sí` a vacío sin mover
+  nada del calendario. Por eso la hoja compara el **estado entero** donde el
+  calendario compara solo la presencia: cada artefacto con su pregunta.
+
+Solo `observaciones` queda fuera de los dos predicados: es una nota interna que no
+viaja a ningún sitio.
 
 ⚠️ **`cambiaElCalendario` está contenido en `cambiaLaHoja`**, y de eso depende que
 no se pierda ninguna corrección: todo lo que mueve el evento de Google mueve

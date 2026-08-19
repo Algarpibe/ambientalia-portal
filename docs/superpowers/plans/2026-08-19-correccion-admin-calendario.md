@@ -139,6 +139,21 @@ git commit -m "feat(ausencias): el outbox admite el evento de correccion del reg
 
 Van en `types.ts` y no en `repo.ts` junto a `ocupaAgenda` por una razón dura: los usan **`repo.ts` y `notificaciones.ts`**, y `repo.ts` no puede importar `notificaciones.ts` — la inyección de `construirPayload` como parámetro existe justo para evitar esa dependencia.
 
+> **Enmienda del 2026-08-19, tras la revisión de calidad.** El bloque de tests de
+> abajo se quedó corto: no cubría que **la hoja tiene dos formas**. Hay que
+> añadirle además estos cuatro casos, y el `cambiaLaHoja` de más abajo ya lleva la
+> corrección:
+>
+> 1. En una incapacidad `registrada`, corregir solo los comentarios → `false`
+>    (esa pestaña no tiene columna «Comentarios»).
+> 2. En una no-incapacidad, `aprobada → registrada` → `cambiaLaHoja` `true` y
+>    `cambiaElCalendario` `false`. Es el par que separa a los dos predicados.
+> 3. Una línea base de `cambiaLaHoja` sin ningún cambio → `false`.
+> 4. El test «una incapacidad registrada SÍ está en el calendario» era un
+>    duplicado exacto de la aserción de tres líneas más arriba y no podía fallar
+>    solo: hay que bajarlo a `cambiaElCalendario` con una `previa` de tipo
+>    incapacidad, o borrarlo.
+
 - [ ] **Step 1: Escribir los tests que fallan**
 
 Crear `apps/hub-api/src/ausencias/types.test.ts`:
@@ -332,23 +347,32 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
 /**
  * Si una corrección cambia algo que la FILA DE LA HOJA enseña.
  *
- * La hoja lleva nombre, fechas, días, tipo, comentarios y el «¿Aprobado?» —ver
- * `hoja()` en `notificaciones.ts`—, así que es `cambiaElCalendario` **más**
- * `dias` y `comentarios`. Solo `observaciones` queda fuera de las dos: es una
- * nota interna que no viaja a ningún sitio.
+ * ⚠️ La hoja tiene DOS formas, no una —ver `hoja()` en `notificaciones.ts`—: la
+ * pestaña de incapacidades lleva «Adjunto?» y NO tiene «Comentarios» ni
+ * «¿Aprobado?»; las otras tres es al revés. Por eso este predicado mira el tipo.
+ *
+ * Solo `observaciones` queda fuera de los dos predicados: es una nota interna
+ * que no viaja a ningún sitio.
  *
  * ⚠️ **Esta función CONTIENE a `cambiaElCalendario`**, y de eso depende que no
  * se pierda ninguna corrección: es el portón único de «hay algo que ajustar»
- * —`actualizarSolicitud` no emite nada si devuelve `false`—, así que si dejara
- * de contenerla habría acciones de calendario que no se emitirían nunca. Si
- * algún día se le quita un campo, hay que comprobar que sigue conteniéndola.
+ * —cuando `actualizarSolicitud` lo consuma, no emitirá nada si devuelve
+ * `false`—, así que si dejara de contenerla habría acciones de calendario que no
+ * se emitirían nunca. Lo garantiza la delegación de la primera línea, no una
+ * lista de campos que haya que revisar a mano.
  */
 export function cambiaLaHoja(previa: Solicitud, actual: Solicitud): boolean {
-  return (
-    cambiaElCalendario(previa, actual) ||
-    previa.diasHabiles !== actual.diasHabiles ||
-    previa.comentarios !== actual.comentarios
-  );
+  if (cambiaElCalendario(previa, actual) || previa.diasHabiles !== actual.diasHabiles) return true;
+  // Las otras dos columnas solo existen en las pestañas que NO son de
+  // incapacidad, y el adjunto —lo único propio de la suya— no se puede corregir
+  // desde el registro (`validarEdicionSolicitud` no lo admite), así que ahí no
+  // queda nada más que mirar. Basta el tipo de la fila corregida: si el tipo
+  // CAMBIÓ, `cambiaElCalendario` ya ha dicho que sí más arriba.
+  if (actual.tipo === 'incapacidad') return false;
+  // El estado ENTERO y no `estaEnElCalendario`: la celda «¿Aprobado?» tiene TRES
+  // valores («Sí», «No» y vacío) y aquel predicado solo distingue dos, así que
+  // `aprobada → registrada` cambiaría la celda sin que nadie lo viera.
+  return previa.comentarios !== actual.comentarios || previa.estado !== actual.estado;
 }
 ```
 
