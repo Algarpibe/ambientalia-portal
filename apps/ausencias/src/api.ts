@@ -535,7 +535,11 @@ export interface EdicionSolicitud {
   observaciones: string | null;
 }
 
-/** Corrige una solicitud (solo admin). No manda correos a nadie. */
+/**
+ * Corrige una solicitud (solo admin). No avisa a la cadena de firmas ni al
+ * trabajador; si la corrección desajusta el calendario o la hoja de una que ya
+ * estaba en Google, corrige el evento y avisa a administración.
+ */
 export const editarSolicitud = (id: string, campos: EdicionSolicitud) =>
   patchSolapable<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`, campos);
 

@@ -251,7 +251,20 @@ vi.mock('./repo.js', () => ({
   todasLasSolicitudes: async () => estado.solicitudes,
   SolapeAlAplicar,
   ocupaAgenda,
-  actualizarSolicitud: async (_db: unknown, id: string, campos: Record<string, unknown>) => {
+  // `_adminEmail` y `_construirPayload` se aceptan y se IGNORAN a proposito. El
+  // repo real los usa para encolar un `correccion_admin` cuando la correccion
+  // desajusta el calendario o la hoja, y eso aqui no se puede probar: no hay
+  // transaccion, ni outbox, ni la foto previa que decide si se emite. Imitarlo
+  // seria plantar un tercer sitio donde vive la regla — exactamente lo que dejo
+  // los 531 unitarios en verde con el SQL del solapamiento roto. Quien lo
+  // ejecuta contra Postgres real es `repo.correccion-admin.db.test.ts`.
+  actualizarSolicitud: async (
+    _db: unknown,
+    id: string,
+    campos: Record<string, unknown>,
+    _adminEmail: string,
+    _construirPayload: unknown,
+  ) => {
     // ⚠️ REGLA REIMPLEMENTADA AQUI. La fuente de verdad es la CUARTA puerta del
     // solapamiento, en `repo.actualizarSolicitud`, que llama a `solapeDe` por el
     // `client` de su transaccion ANTES del UPDATE y lanza si choca. La vigilan
@@ -3591,9 +3604,10 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
 
   it('CANDADO del testigo triple: un PATCH de admin entre medias da 409 y NO le pisa las fechas', async () => {
     // La carrera que solo detectan los tres campos: el estado no cambia, las
-    // fechas sí. Y el `PATCH` no encola nada —corregir el registro no es
-    // decidir—, así que sin el testigo la aprobación borraría la corrección del
-    // admin sin dejar rastro en ningún sitio.
+    // fechas sí. Y lo que el `PATCH` encola —un aviso a administración— no la
+    // frena: avisa de la corrección, no de que luego se la pisen. Sin el testigo
+    // la aprobación borraría la corrección del admin sin dejar rastro, y encima
+    // después de haber mandado el correo que la anunciaba.
     const { solicitudId, modificacionId } = await conPropuesta();
     await request(app())
       .patch(`/api/ausencias/solicitudes/${solicitudId}`)

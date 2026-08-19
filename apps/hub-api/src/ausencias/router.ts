@@ -5,6 +5,7 @@ import { captureError } from '../sentry.js';
 import { festivosColombia } from './festivos.js';
 import { contarDiasHabiles } from './dias-habiles.js';
 import { validarEdicionSolicitud } from './historico.js';
+import { construirPayloadCorreccion } from './notificaciones.js';
 import * as repo from './repo.js';
 import * as service from './service.js';
 import { AusenciaError, type Sesion } from './service.js';
@@ -364,13 +365,23 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
-   * Corrige una solicitud del registro. No manda correos: para aprobar o
-   * rechazar está la bandeja, que es donde sí se avisa. Ver repo.actualizarSolicitud.
+   * Corrige una solicitud del registro. No avisa a la cadena de firmas ni al
+   * trabajador: para aprobar o rechazar está la bandeja, que es donde sí se
+   * avisa. Lo que sí hace, cuando la corrección desajusta el calendario o la
+   * hoja de una solicitud que ya estaba en Google, es corregir el evento —si la
+   * fila tiene apuntado su id— y mandar un aviso a administración con lo que
+   * queda por ajustar a mano. Ver repo.actualizarSolicitud.
    */
   router.patch('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
     try {
       const campos = validarEdicionSolicitud(req.body);
-      const actualizada = await repo.actualizarSolicitud(db, req.params.id, campos);
+      const actualizada = await repo.actualizarSolicitud(
+        db,
+        req.params.id,
+        campos,
+        sesionDe(req).email,
+        construirPayloadCorreccion,
+      );
       // Sin fila: o no existe la solicitud, o el empleado al que se reasigna no
       // existe. Los dos son un 404 desde el punto de vista de quien llama.
       if (!actualizada) return void res.status(404).json({ error: 'no_encontrada' });

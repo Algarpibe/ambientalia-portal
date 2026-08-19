@@ -1,11 +1,13 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
+import { cambiaLaHoja, estaEnElCalendario } from './types.js';
 import type {
   Adjunto,
   ClaseModificacion,
   Empleado,
   EstadoModificacion,
+  EventoCorreccion,
   EventoModificacion,
   EventoOutbox,
   EventoPendiente,
@@ -628,10 +630,22 @@ export interface EdicionSolicitud {
  * en la fila, y si se reasigna a otra persona sin actualizarlo, el registro
  * diría un nombre y el correo de otro.
  *
- * NO encola nada en el outbox, a propósito: esto es corregir el registro, no
- * tomar una decisión. Aprobar o rechazar se hace en la bandeja, que es donde sí
- * se avisa a la gente. Un admin arreglando una fecha mal importada no debe
- * disparar correos a nadie.
+ * NO avisa a la cadena de firmas ni al trabajador, y eso sigue siendo a
+ * propósito: esto es corregir el registro, no tomar una decisión. Aprobar o
+ * rechazar se hace en la bandeja, que es donde sí se avisa a la gente. Un admin
+ * arreglando una fecha mal importada no manda a nadie a revisar su solicitud.
+ *
+ * Lo que sí encola —desde el 2026-08-19— es un `correccion_admin`, y por lo que
+ * la decisión original pasaba por alto: el evento del calendario es un artefacto
+ * DERIVADO de esta fila, así que o se corrige o se queda mintiendo para siempre
+ * sin que nadie se entere. Mover las fechas de una aprobada dejaba el registro
+ * diciendo una cosa y Google la anterior. El evento hace las dos mitades del
+ * arreglo: la que se puede automatizar —Google, cuando la fila tiene apuntado su
+ * `evento_calendario_id`— y la que no —la hoja, a la que n8n hace `append` y a
+ * cuya fila no se puede volver—, que se le pide a administración por correo.
+ *
+ * El portón es `estaEnElCalendario(previa.estado) && cambiaLaHoja(previa,
+ * actual)`, y el porqué de cada mitad está donde se aplica, más abajo.
  *
  * ⚠️ Es la CUARTA puerta del solapamiento: el registro general es la única vía
  * INTERACTIVA que puede llevar cualquier ausencia a cualquier fecha, y la única
@@ -648,11 +662,13 @@ export interface EdicionSolicitud {
  * JSDoc.
  *
  * Va dentro de una transacción, y conviene decir exacto lo que eso da. Da que la
- * comprobación y el UPDATE viajen por la misma conexión, y que la relectura
- * final vaya DESPUÉS del UPDATE por ese mismo `client`: el UPDATE deja la fila
- * bloqueada hasta el COMMIT, así que lo que se devuelve lleva lo que ESTA
- * petición escribió y no lo que otra transacción pudiera colar entre dos
- * consultas sueltas del pool. Lo que **no** da es cerrar la ventana de carrera:
+ * lectura de la foto previa, la comprobación, el UPDATE y el INSERT del outbox
+ * viajen por la misma conexión y se deshagan juntos —una corrección que revienta
+ * no puede dejar el correo dicho—, y que la relectura final vaya DESPUÉS del
+ * UPDATE por ese mismo `client`: el UPDATE deja la fila bloqueada hasta el
+ * COMMIT, así que lo que se devuelve lleva lo que ESTA petición escribió y no lo
+ * que otra transacción pudiera colar entre dos consultas sueltas del pool. Lo
+ * que **no** da es cerrar la ventana de carrera:
  * `BEGIN` pelado es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE`, así que
  * dos correcciones simultáneas la pasan las dos (el porqué entero, en
  * `solapeDe`).
@@ -661,6 +677,8 @@ export async function actualizarSolicitud(
   db: Pool,
   id: string,
   campos: EdicionSolicitud,
+  adminEmail: string,
+  construirPayload: (previa: Solicitud, actual: Solicitud, adminEmail: string) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
     // Solo hay algo que comprobar si la fila que va a quedar OCUPA agenda. Las
@@ -684,6 +702,20 @@ export async function actualizarSolicitud(
       );
       if (choque) throw new SolapeAlAplicar(choque);
     }
+
+    // La foto del ANTES, dentro de la transaccion y antes del UPDATE. Es lo
+    // unico que permite saber si la fila estaba en Google y si la correccion
+    // desajusta algo: despues del UPDATE ese dato ya no existe en ningun sitio.
+    //
+    // Va DESPUES de la puerta del solape y no antes, y no es indiferente: por
+    // delante, su `return null` contestaria 404 a una correccion sobre una fila
+    // borrada cuyo destino esta ocupado, donde hoy sale el solape. Ese reparto
+    // esta FIJADO por un test de `repo.solapes.db.test.ts` («sobre una solicitud
+    // que no existe manda el solape, no el 404»), que es justo quien caza el
+    // volteo. Aqui la posicion no cambia nada mas: la puerta se pregunta por
+    // `campos`, no por `previa`.
+    const previa = await solicitudPorId(client, id);
+    if (previa === null) return null;
 
     const { rows } = await client.query(
       `UPDATE portal.solicitudes_ausencia s
@@ -712,7 +744,42 @@ export async function actualizarSolicitud(
       ],
     );
     if (rows.length === 0) return null;
-    return solicitudPorId(client, id);
+
+    const actual = await solicitudPorId(client, id);
+    // Imposible en la practica —acabamos de escribir esa fila por este mismo
+    // client—, pero el tipo lo admite y devolver `previa` seria mentir.
+    if (actual === null) return null;
+
+    // Las dos mitades niegan cosas distintas y las dos hacen falta:
+    //  - `estaEnElCalendario(previa.estado)`: la fila ESTABA en Google. Corregir
+    //    una pendiente no desajusta nada, porque nunca se mando nada. Es ademas
+    //    la precondicion que `construirPayloadCorreccion` documenta: su correo
+    //    afirma que la ausencia ya estaba alli.
+    //  - `cambiaLaHoja`: hay algo que ajustar de verdad. Es el porton unico, y
+    //    CONTIENE a `cambiaElCalendario`, asi que no se pierde ninguna
+    //    correccion de calendario por pasar por aqui.
+    //
+    // Y como cada fila del outbox es EXACTAMENTE UN correo, esta condicion es a
+    // la vez la de que exista la fila: no hay correccion de calendario sin
+    // correo ni correo sin correccion.
+    if (estaEnElCalendario(previa.estado) && cambiaLaHoja(previa, actual)) {
+      // Anotado y no un literal suelto, por lo mismo que en
+      // `decidirModificacion`: el valor viaja al CHECK de `evento` de la 027, y
+      // una errata compilaria y reventaria DENTRO de la transaccion, deshaciendo
+      // una correccion que el admin cree guardada.
+      const evento: EventoCorreccion = 'correccion_admin';
+      const payload = construirPayload(previa, actual, adminEmail);
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [id, evento, JSON.stringify(payload)],
+      );
+      // Va DESPUES del INSERT y en la MISMA transaccion, igual que en
+      // `decidirSolicitud` y `decidirModificacion`: si el evento sale, la marca
+      // cambia, y si hay ROLLBACK no cambia ninguna de las dos.
+      await anotarEventoDeCalendario(client, actual, payload);
+    }
+
+    return actual;
   });
 }
 

@@ -349,6 +349,14 @@ describe('decidirModificacion frente al solape', () => {
 // «no encontrada» ahi, y el router lo traduce a 404—.
 
 describe('actualizarSolicitud frente al solape', () => {
+  /**
+   * Los dos argumentos del aviso de correccion, que este fichero NO ejercita: se
+   * pasan para cumplir la firma y con el `payloadStub` de siempre. Aqui se prueba
+   * la puerta del solape; que el aviso se emita —y cuando no— lo prueba contra
+   * Postgres `repo.correccion-admin.db.test.ts`.
+   */
+  const ADMIN = 'comercial@ambientalia.com.co';
+
   /** El cuerpo completo que exige el PATCH, con lo minimo cambiado encima. */
   const edicion = (over: Partial<EdicionSolicitud> = {}): EdicionSolicitud => ({
     empleadoId,
@@ -381,6 +389,8 @@ describe('actualizarSolicitud frente al solape', () => {
       db,
       a.id,
       edicion({ fechaInicio: '2026-07-20', fechaFin: '2026-07-22', dias: 3 }),
+      ADMIN,
+      payloadStub,
     ).catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(SolapeAlAplicar);
@@ -411,7 +421,13 @@ describe('actualizarSolicitud frente al solape', () => {
     // fila de ANTES del UPDATE —el estado y el comentario viejos—.
     const a = await sembrarBase();
 
-    const r = await actualizarSolicitud(db, a.id, edicion({ estado: 'pendiente', comentarios: 'Corregido a mano' }));
+    const r = await actualizarSolicitud(
+      db,
+      a.id,
+      edicion({ estado: 'pendiente', comentarios: 'Corregido a mano' }),
+      ADMIN,
+      payloadStub,
+    );
 
     expect(r).toMatchObject({
       estado: 'pendiente',
@@ -434,6 +450,8 @@ describe('actualizarSolicitud frente al solape', () => {
       db,
       '99999999-9999-4999-8999-999999999999',
       edicion({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12', dias: 1 }),
+      ADMIN,
+      payloadStub,
     ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SolapeAlAplicar);
   });
@@ -458,6 +476,8 @@ describe('actualizarSolicitud frente al solape', () => {
       db,
       rechazada.id,
       edicion({ estado: 'rechazada', comentarios: 'Arreglando una errata' }),
+      ADMIN,
+      payloadStub,
     );
 
     expect(r).toMatchObject({ estado: 'rechazada', comentarios: 'Arreglando una errata' });
@@ -476,6 +496,8 @@ describe('actualizarSolicitud frente al solape', () => {
       db,
       a.id,
       edicion({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-20', fechaFin: '2026-07-22', dias: 3 }),
+      ADMIN,
+      payloadStub,
     );
 
     expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: '2026-07-20', fechaFin: '2026-07-22' });
