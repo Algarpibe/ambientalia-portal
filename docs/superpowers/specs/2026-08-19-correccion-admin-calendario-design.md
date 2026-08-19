@@ -111,12 +111,16 @@ otro, o habrá correcciones de calendario que no se emitan.
 
 ### `estaEnElCalendario` NO es `ocupaAgenda`
 
-Se escribe con esa advertencia en el JSDoc, en grande. `ocupaAgenda` contesta a la
-regla de solapamiento y **excluye las incapacidades**; `estaEnElCalendario`
-contesta a qué hay en Google, y una incapacidad `registrada` **sí** tiene evento
-—`construirPayload` le da `calendario` y `hoja`—. Dos preguntas sobre la misma
-fila con dos respuestas distintas: es exactamente la forma que tuvo el bug de la
-cuarta puerta, donde se copió media regla.
+`ocupaAgenda` contesta a la regla de solapamiento y **excluye las incapacidades**;
+`estaEnElCalendario` contesta a qué hay en Google, y una incapacidad `registrada`
+**sí** tiene evento —`construirPayload` le da `calendario` y `hoja`—. Dos
+preguntas sobre la misma fila con dos respuestas distintas: es exactamente la
+forma que tuvo el bug de la cuarta puerta, donde se copió media regla.
+
+La advertencia va en el JSDoc **de las dos**, y en grande, porque no son vecinas:
+`ocupaAgenda` vive en `repo.ts` y `estaEnElCalendario` tiene que vivir en
+`types.ts` —la usan `repo.ts` y `notificaciones.ts`, y el primero no puede
+importar al segundo—. Nadie las va a ver juntas por casualidad.
 
 Va por **estado** y no por evento porque el estado es lo que la fila conserva:
 `aprobada` y `registrada` son los estados que dejan los dos únicos eventos que
@@ -126,14 +130,14 @@ emiten un `crear`.
 
 ### Cuándo
 
-`tocaGoogle(estadoPrevio) && cambiaLaHoja(previa, campos)`. Las dos mitades hacen
-falta y niegan cosas distintas:
+`estaEnElCalendario(previa.estado) && cambiaLaHoja(previa, actual)`. Las dos
+mitades hacen falta y niegan cosas distintas:
 
-- **`tocaGoogle(estadoPrevio)`** — la fila **estaba** en Google. No es «el
-  calendario se pudo corregir»: el caso que más necesita a una persona es una
+- **`estaEnElCalendario(previa.estado)`** — la fila **estaba** en Google. No es
+  «el calendario se pudo corregir»: el caso que más necesita a una persona es una
   aprobada **anterior a la migración 026**, que no tiene id, y ni su calendario ni
   su hoja se corrigen solos. Con el criterio estrecho ese caso no mandaría nada.
-- **`cambiaLaHoja(previa, campos)`** — hay algo que ajustar de verdad. Corregir
+- **`cambiaLaHoja(previa, actual)`** — hay algo que ajustar de verdad. Corregir
   solo las `observaciones` de una aprobada no deja nada desincronizado, y un ⚠️
   por eso es un ⚠️ que enseña a no leerlos.
 
@@ -141,16 +145,28 @@ Se emite el evento del outbox solo si se cumplen las dos. Y como cada fila del
 outbox es exactamente un correo, **eso es también la condición de que exista la
 fila**: no hay corrección de calendario sin correo ni correo sin corrección.
 
-⚠️ **Hay que ensanchar `tocaGoogle` a `registrada`.** Hoy lo excluye a propósito y
-con razón escrita: por el flujo de modificaciones ese estado es inalcanzable
-(`estadoAdmiteModificacion` lo impide), así que la rama sería código muerto que
-haría creer que el caso está contemplado. **El `PATCH` sí lo alcanza**, y una
-incapacidad editada por un admin tiene evento en Google. Se ensancha **la única
-definición** y se reescribe su JSDoc para decir por qué dejó de ser inalcanzable;
-no se crea una segunda función gemela. Es la lección de `ocupaAgenda`.
+### `tocaGoogle` desaparece: era `estaEnElCalendario` con otro nombre
 
-Para el flujo de modificaciones el comportamiento no cambia: `registrada` sigue
-siendo inalcanzable por ahí.
+`tocaGoogle(estadoPrevio)` pregunta «¿esta fila estaba en Google?» y
+`estaEnElCalendario(estado)` pregunta «¿una fila con este estado está en Google?».
+Una vez ensanchado el primero a `registrada`, **son la misma función aplicada a
+argumentos distintos**. Se deja una sola, en `types.ts`, y `notificaciones.ts`
+pasa a llamar `estaEnElCalendario(m.estadoPrevio)`.
+
+Tenía que salir de `notificaciones.ts` de todos modos: **`repo.ts` no puede
+importar `notificaciones.ts`** —la inyección de `construirPayload` como parámetro
+existe justo para que no dependa de él— y el `PATCH` necesita el predicado dentro
+de la transacción para decidir si emite. `types.ts` es donde ya viven
+`requiereAprobacion` y `correoDelTurno`, y de donde beben los dos módulos.
+
+El ensanche a `registrada` sigue siendo el punto delicado: hoy `tocaGoogle` lo
+excluye a propósito y con razón escrita —por el flujo de modificaciones es
+inalcanzable, así que la rama sería código muerto que haría creer que el caso está
+contemplado—. **El `PATCH` sí lo alcanza**, y una incapacidad editada por un admin
+tiene evento en Google. El JSDoc de `estaEnElCalendario` tiene que conservar esa
+explicación y decir qué la volvió alcanzable, o el próximo que lo lea creerá que
+sobra. Para el flujo de modificaciones el comportamiento no cambia: `registrada`
+sigue siendo inalcanzable por ahí.
 
 ### A quién
 
@@ -265,7 +281,7 @@ Cada candado se falsa rompiéndolo de verdad y comprobando por qué cae:
 |---|---|
 | El predicado del «después» se estrecha a solo `aprobada` | Una incapacidad `registrada` editada deja su evento colgado en Google |
 | Se quita `cambiaElCalendario` y se emite `actualizar` siempre | Corregir solo los días de una aprobada manda a Google un update idéntico y un correo que dice que se corrigió algo |
-| Se quita `cambiaLaHoja` y se emite con solo `tocaGoogle` | Corregir solo las `observaciones` manda un ⚠️ sin nada que ajustar |
+| Se quita `cambiaLaHoja` y se emite con solo `estaEnElCalendario` | Corregir solo las `observaciones` manda un ⚠️ sin nada que ajustar |
 | `cambiaElCalendario` se amplía a `dias` o `comentarios` | Vuelve el update no-op: esos dos campos no salen en el evento de Google |
 | Se quita el vaciado del id en `borrar` | Re-aprobar una anulada emite `actualizar` sobre un evento inexistente |
 | El `INSERT` del outbox sale de la transacción | Una corrección que revienta deja el correo dicho |
