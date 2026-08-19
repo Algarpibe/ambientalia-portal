@@ -987,4 +987,33 @@ describe('el payload de una corrección del registro', () => {
     expect(cuerpo).toContain('aprobada');
     expect(cuerpo).toContain('rechazada');
   });
+
+  // CANDADO. El candado que cierra el resto: `calendario` y `correo.cuerpo`
+  // salen de la MISMA `situacionDelCalendario`, así que no pueden discrepar.
+  // Antes de esa refactorización, tres sitios recalculaban la misma condición
+  // por separado, y nada impedía que uno divergiera del otro sin que ningún
+  // test se enterara.
+  it('CANDADO: el calendario del payload y el texto del correo cuentan la misma historia', () => {
+    const casos = [
+      // no_cambia: no se toca el calendario, y el correo no dice que se arregló.
+      { previa: aprobadaConEvento(), actual: aprobadaConEvento({ diasHabiles: 4 }) },
+      // a_mano: tampoco se toca, y tampoco se dice que se arregló solo (sin id).
+      {
+        previa: solicitud({ estado: 'aprobada', eventoCalendarioId: null }),
+        actual: solicitud({ estado: 'aprobada', eventoCalendarioId: null, fechaInicio: '2026-07-13' }),
+      },
+      // actualizado: SÍ se toca, y el correo SÍ dice que se arregló solo.
+      { previa: aprobadaConEvento(), actual: aprobadaConEvento({ fechaInicio: '2026-07-13' }) },
+      // borrado: SÍ se toca, y el correo SÍ dice que se arregló solo.
+      { previa: aprobadaConEvento(), actual: aprobadaConEvento({ estado: 'rechazada' }) },
+    ];
+
+    for (const { previa, actual } of casos) {
+      const p = construirPayloadCorreccion(previa, actual, ADMIN);
+      const diceQueSeArregloSolo = p.correo.cuerpo.includes('ya se ha');
+      // Coinciden SIEMPRE: hay algo que ejecutar en el calendario exactamente
+      // cuando el correo dice que ya se arregló solo.
+      expect(p.calendario !== null).toBe(diceQueSeArregloSolo);
+    }
+  });
 });
