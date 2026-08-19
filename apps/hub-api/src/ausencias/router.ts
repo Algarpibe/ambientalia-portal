@@ -27,7 +27,9 @@ const cronAuth = requireCronToken({ env: 'AUSENCIAS_CRON_TOKEN', header: 'X-Ause
  */
 function sendError(res: Response, e: unknown, ctx: string): void {
   if (e instanceof AusenciaError) {
-    res.status(e.status).json({ error: e.code, field: e.field });
+    // `detalle` va sin condicional: `JSON.stringify` omite las claves
+    // `undefined`, así que las respuestas que no lo llevan no cambian de forma.
+    res.status(e.status).json({ error: e.code, field: e.field, detalle: e.detalle });
     return;
   }
   console.error(`${ctx} error`, e);
@@ -387,7 +389,16 @@ export function createAusenciasRouter(db: Pool): Router {
       );
       res.json(actualizada);
     } catch (e) {
-      sendError(res, e, 'ausencias_editar_solicitud');
+      // La CUARTA puerta del solapamiento contesta desde aquí y no desde el
+      // servicio, como las otras tres, porque esta ruta no pasa por él: llama al
+      // repo derecho. Y `repo.actualizarSolicitud` no puede lanzar un
+      // `AusenciaError` —el repo no conoce el servicio—, así que lanza su
+      // centinela y aquí se traduce. El error NO se teclea a mano: sale de
+      // `service.errorDeSolape`, que es lo que garantiza que este 409 sea el mismo
+      // `code`, el mismo `field` y el mismo `detalle` —sin el `id` del choque— que
+      // el de las otras tres puertas.
+      const error = e instanceof repo.SolapeAlAplicar ? service.errorDeSolape(e.solape) : e;
+      sendError(res, error, 'ausencias_editar_solicitud');
     }
   });
 

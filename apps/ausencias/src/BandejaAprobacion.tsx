@@ -110,6 +110,11 @@ export default function BandejaAprobacion({
       // único que va a leer quien pulsó. Primero la redacción para el decisor y,
       // si el código no es de los suyos —un 400 de forma, o uno que este bundle
       // todavía no conoce—, la general, que como mucho será impersonal.
+      //
+      // El tercer 409, `rango_solapado`, no viene crudo: lo redacta `api.ts`, que
+      // es donde se puede leer el `detalle` con las fechas del choque. Atraviesa
+      // los dos mapas sin tocarse —ninguno lo tiene como clave y los dos dejan
+      // pasar lo que no reconocen—, que es justo lo que se busca.
       const codigo = (e as Error).message;
       onError(MENSAJE_DECISION[codigo] ?? mensajeDeModificacion(codigo));
     } finally {

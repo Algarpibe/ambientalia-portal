@@ -116,7 +116,9 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
     } catch (err) {
       // El código del servidor se traduce aquí: `mensajeDeError` devuelve para
       // los 400/409 el campo `error` crudo, y `anulacion_ya_empezada` no le dice
-      // nada a nadie.
+      // nada a nadie. La excepción es `rango_solapado`, que llega ya redactado
+      // desde `api.ts` —necesita el `detalle`, que este mapa no recibe—; lo pinta
+      // igual porque `mensajeDeModificacion` deja pasar lo que no reconoce.
       setError(mensajeDeModificacion((err as Error).message));
     } finally {
       setEnviando(false);

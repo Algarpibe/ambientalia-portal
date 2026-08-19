@@ -144,6 +144,79 @@ const anotarEventoDeCalendario = (s: Record<string, unknown>, payload: unknown) 
   if (cal?.accion === 'crear') s.eventoCalendarioId = cal.eventId;
 };
 
+/**
+ * El centinela que `repo.actualizarSolicitud` lanza cuando el destino esta
+ * ocupado, reimplementado aqui porque el `catch` del PATCH lo caza con
+ * `instanceof`: si el doble lanzara otra clase, el router lo tomaria por un fallo
+ * interno y contestaria 500 en vez de 409.
+ *
+ * Es la unica clase que `repo.ts` exporta, y por eso el CANDADO de la superficie
+ * la exige aqui abajo: compara los exports que en RUNTIME son funciones, y una
+ * clase lo es.
+ */
+class SolapeAlAplicar extends Error {
+  constructor(public readonly solape: Record<string, unknown>) {
+    super('solape');
+  }
+}
+
+/**
+ * Que cuenta como ausencia VIVA. Fuente de verdad: `repo.ocupaAgenda`, que el
+ * repo real comparte entre sus cuatro puertas.
+ *
+ * Se reimplementa —no se importa— porque este fichero es un segundo sistema, y
+ * porque el `repo.js` que ve el servicio bajo prueba es ESTE: si el doble no la
+ * exportara, `exigirSinSolape` reventaria con un `is not a function`. El CANDADO
+ * de la superficie, mas abajo, es lo que obliga a que exista.
+ *
+ * Los parametros van sueltos (`unknown`) y no tipados como en el repo: las filas
+ * del doble son `Record<string, unknown>`, y exigir los tipos aqui solo anadiria
+ * `as` en los cuatro sitios que la llaman.
+ */
+const ocupaAgenda = (tipo: unknown, estado: unknown): boolean =>
+  tipo !== 'incapacidad' && estado !== 'rechazada';
+
+/**
+ * El predicado del solapamiento, fuera del doble porque lo necesitan TRES de sus
+ * funciones: `solapeDe`, que lo expone tal cual, y `decidirModificacion` y
+ * `actualizarSolicitud`, que lo repiten dentro de su transaccion igual que hace
+ * el repo real. Copiarlo en las tres seria plantar la divergencia a mano en un
+ * fichero que ya mantiene un segundo sistema entero.
+ *
+ * ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el predicado de
+ * `repo.solapeDe`, y quien lo ejecuta contra Postgres real es
+ * `repo.solapes.db.test.ts`. Esto solo IMITA su resultado, y puede divergir en
+ * un borde: `.find()` devuelve la primera colision por orden de INSERCION,
+ * mientras que el SQL ordena por `fecha_inicio, id`. Con dos solicitudes vivas
+ * solapadas entre si, los dos pueden nombrar colisiones distintas. No se ordena
+ * para igualarlo: solo haria falta si algun test llegara a asertar CUAL de las
+ * dos colisiones se nombra.
+ */
+const buscarSolape = (
+  empleadoId: string,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+) => {
+  const choque = estado.solicitudes.find(
+    (s: any) =>
+      s.empleadoId === empleadoId &&
+      ocupaAgenda(s.tipo, s.estado) &&
+      (excluirSolicitudId === null || s.id !== excluirSolicitudId) &&
+      s.fechaInicio <= fechaFin &&
+      s.fechaFin >= fechaInicio,
+  );
+  return choque
+    ? {
+        id: choque.id,
+        tipo: choque.tipo,
+        estado: choque.estado,
+        fechaInicio: choque.fechaInicio,
+        fechaFin: choque.fechaFin,
+      }
+    : null;
+};
+
 vi.mock('./repo.js', () => ({
   empleadoDeUsuario: async () => estado.empleado,
   // Modela el alta automática: si no hay ficha pero el usuario existe en el
@@ -176,7 +249,32 @@ vi.mock('./repo.js', () => ({
     return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
   },
   todasLasSolicitudes: async () => estado.solicitudes,
+  SolapeAlAplicar,
+  ocupaAgenda,
   actualizarSolicitud: async (_db: unknown, id: string, campos: Record<string, unknown>) => {
+    // ⚠️ REGLA REIMPLEMENTADA AQUI. La fuente de verdad es la CUARTA puerta del
+    // solapamiento, en `repo.actualizarSolicitud`, que llama a `solapeDe` por el
+    // `client` de su transaccion ANTES del UPDATE y lanza si choca. La vigilan
+    // tres tests de `repo.solapes.db.test.ts` («mover una solicitud encima de
+    // otra lanza y deja la fila INTACTA», el de corregir sin mover —que es lo que
+    // ata la exclusion por id— y el de la incapacidad), en el cuarto porton.
+    //
+    // Se llama a `buscarSolape` y no al `solapeDe` de mas abajo a proposito: ese
+    // lleva una guarda de `::uuid` sobre el id excluido, y aqui el id llega de la
+    // URL. Pasarlo por la guarda cambiaria lo que este doble contesta hoy a un
+    // `:id` con basura: 404 en vez del 500 que da Postgres —el `$4::uuid` de
+    // `solapeDe` revienta con 22P02, y si no lo hiciera, el `s.id = $1` del UPDATE—.
+    // Esa divergencia venia de antes de esta puerta, y arreglarla aqui pondria
+    // rojo un test que hoy afirma ese 404; no es asunto de esta puerta.
+    if (ocupaAgenda(campos.tipo, campos.estado)) {
+      const choque = buscarSolape(
+        campos.empleadoId as string,
+        campos.fechaInicio as string,
+        campos.fechaFin as string,
+        id,
+      );
+      if (choque) throw new SolapeAlAplicar(choque);
+    }
     const s = estado.solicitudes.find((x) => x.id === id);
     if (!s || !estado.plantilla.some((e) => e.id === campos.empleadoId)) return null;
     Object.assign(s, {
@@ -576,6 +674,26 @@ vi.mock('./repo.js', () => ({
       return { ok: false, razon: 'solicitud_cambio_de_estado' };
     }
 
+    // ⚠️ REGLA REIMPLEMENTADA AQUI. La fuente de verdad es la TERCERA puerta del
+    // solapamiento de `repo.decidirModificacion`, que llama a `solapeDe` por el
+    // mismo `client` DENTRO de la transaccion. La vigilan tres tests de
+    // `repo.solapes.db.test.ts` («aprobar una propuesta que se volvio solapada
+    // hace ROLLBACK», el de RECHAZAR —que es lo que ata el `aprueba`— y el de la
+    // incapacidad), en el cuarto porton.
+    //
+    // Se comprueba ANTES de escribir por lo mismo que el testigo de arriba: asi
+    // es como este doble modela el ROLLBACK. El repo real la comprueba DESPUES
+    // del UPDATE, y da igual: las dos excluyen la propia solicitud por su id.
+    if (aprueba && m.clase === 'fechas' && s && ocupaAgenda(s.tipo, s.estado)) {
+      const choque = buscarSolape(
+        s.empleadoId as string,
+        m.fechaInicioNueva as string,
+        m.fechaFinNueva as string,
+        m.solicitudId,
+      );
+      if (choque) return { ok: false, razon: 'solape', solape: choque };
+    }
+
     m.estado = aprueba ? 'aprobada' : 'rechazada';
     m.decididaAt = '2026-01-15T12:00:00Z';
     m.motivoRechazo = motivoRechazo;
@@ -675,6 +793,36 @@ vi.mock('./repo.js', () => ({
         fechaFin: '2026-08-11',
       },
     ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
+  // El predicado vive en `buscarSolape`, arriba, con su aviso de REGLA DE SQL
+  // REIMPLEMENTADA: aqui solo queda la guarda del `::uuid`, que es de esta
+  // funcion y no de la regla —`decidirModificacion` no la necesita, porque el id
+  // que le pasa sale del propio doble.
+  solapeDe: async (
+    _db: unknown,
+    empleadoId: string,
+    fechaInicio: string,
+    fechaFin: string,
+    excluirSolicitudId: string | null,
+  ) => {
+    // El SQL castea este parámetro a `::uuid`: lo que no tenga esa forma revienta
+    // con 22P02 contra Postgres de verdad. Un `!==` a secas —lo que este doble
+    // hacía antes de esta guarda— se traga cualquier cosa en silencio, y eso es
+    // justo lo que dejaba pasar sin avisar un `excluirSolicitudId` con la forma
+    // equivocada (comprobado: mandar aquí `datos.tipo` en vez de `null` no
+    // ponía rojo ni un test ni el `tsc`, y contra la base real es un 500 en
+    // cada alta). Se admite también la forma `sN` que usa el propio doble para
+    // sus ids (`crearSolicitud`, más abajo) porque esos ids nunca llegan a un
+    // `::uuid` real —viven y mueren en este fichero— así que exigirles forma de
+    // uuid sería una guarda más estricta que el SQL que dice imitar.
+    if (
+      excluirSolicitudId !== null &&
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(excluirSolicitudId) &&
+      !/^s\d+$/.test(excluirSolicitudId)
+    ) {
+      throw new Error(`solapeDe: excluirSolicitudId no es un uuid ni un id del doble: ${excluirSolicitudId}`);
+    }
+    return buscarSolape(empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
+  },
 }));
 
 // ── El candado del doble ───────────────────────────────────────────────────
@@ -683,7 +831,7 @@ vi.mock('./repo.js', () => ({
  * Este candado va PEGADO al doble a proposito: quien lo edite tiene que verlo.
  *
  * Lo de arriba no es un stub, es un SEGUNDO SISTEMA — mas de quinientas lineas
- * que reimplementan en memoria las 38 funciones de `repo.ts`, o sea el
+ * que reimplementan en memoria las 39 funciones de `repo.ts`, o sea el
  * repositorio entero. Los mas de doscientos tests de este fichero corren contra
  * esa copia, asi que quien toca el repositorio mantiene dos implementaciones, lo
  * sepa o no.
@@ -726,7 +874,7 @@ describe('el doble del repositorio', () => {
 
     // Las dos direcciones por separado, y no un `toEqual` entre las dos listas:
     // asi el rojo dice el NOMBRE de lo que falla en vez de escupir dos listas de
-    // 38 elementos para que las compare el lector.
+    // 39 elementos para que las compare el lector.
     expect(
       enElRepo.filter((n) => !enElDoble.includes(n)),
       'repo.ts exporta funciones que el doble de este fichero no modela',
@@ -988,6 +1136,102 @@ describe('POST /ausencias/solicitudes', () => {
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
       .send(nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: grande } }))
+      .expect(201);
+  });
+});
+
+// ── El candado del solapamiento ────────────────────────────────────────────
+
+describe('no se puede estar ausente dos veces a la vez', () => {
+  /** La fila tal como está guardada, para poder moverla por debajo. */
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  /**
+   * Deja una solicitud viva del 10 al 14 de julio y devuelve su id.
+   *
+   * El parámetro se llama `estadoFila` y no `estado` a propósito: este fichero
+   * ya tiene un `estado` de nivel de módulo —el doble del repositorio, que casi
+   * todos los tests de aquí abajo leen o mutan— y darle el mismo nombre a un
+   * parámetro lo taparía dentro de esta función sin que nada avisara.
+   */
+  async function conAusencia(estadoFila = 'aprobada') {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva({ fechaInicio: '2026-07-10', fechaFin: '2026-07-14' }))
+        .expect(201)
+    ).body as Record<string, unknown>;
+    fila(s.id as string).estado = estadoFila;
+    return s.id as string;
+  }
+
+  const pedir = (over: Record<string, unknown>) =>
+    request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva(over));
+
+  it('CANDADO: pedir encima de una aprobada da 409 y dice con que choca', async () => {
+    await conAusencia();
+    const r = await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-07-10', fechaFin: '2026-07-14' },
+    });
+    // `toMatchObject` es parcial: por sí solo no impediría que se colara un
+    // campo de más, y el `id` del choque es exactamente lo que `exigirSinSolape`
+    // dice que NO manda al cliente. Esto ata esa promesa.
+    expect(Object.keys(r.body.detalle).sort()).toEqual(['estado', 'fechaFin', 'fechaInicio', 'tipo']);
+  });
+
+  it('CANDADO: adyacente pasa — el borde es donde se rompen estas reglas', async () => {
+    await conAusencia();
+    await pedir({ fechaInicio: '2026-07-15', fechaFin: '2026-07-17' }).expect(201);
+  });
+
+  it('una pendiente también ocupa', async () => {
+    await conAusencia('pendiente');
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(409);
+  });
+
+  it('una rechazada no ocupa', async () => {
+    const id = await conAusencia('rechazada');
+    expect(fila(id).estado).toBe('rechazada');
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
+  });
+
+  it('una anulada tampoco ocupa', async () => {
+    // Una anulación no estrena estado propio: queda `rechazada` con `anuladaAt`
+    // puesto (fuente canónica: el JSDoc de `anuladaAt` en `types.ts` y el de
+    // `aplicarALaSolicitud` en `repo.ts`, que es quien escribe esas dos
+    // columnas al aprobar la clase `anulacion`). Para el candado de solapes eso
+    // ya la deja fuera por el mismo `estado <> 'rechazada'` que
+    // descarta un rechazo corriente, y ese predicado YA tiene su propio
+    // candado contra Postgres real: `repo.solapes.db.test.ts` > «CANDADO: una
+    // anulada tampoco, que es una rechazada con marca». Este test no ejercita
+    // una rama nueva del SQL, entonces — lo que fija es que la forma REAL de
+    // una anulación (`estado` + `anuladaAt`, no un estado propio) tampoco ocupa
+    // sitio visto desde el HTTP del alta, con el mismo doble que usan los tests
+    // vecinos de este bloque.
+    const id = await conAusencia();
+    Object.assign(fila(id), { estado: 'rechazada', anuladaAt: '2026-01-15T12:00:00Z' });
+    await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
+  });
+
+  it('CANDADO: una incapacidad se puede informar SIEMPRE, encima de lo que sea', async () => {
+    // Quien cae malo de vacaciones no puede anularlas —las fechas ya pasaron— ni
+    // acortarlas. Bloquear la incapacidad la dejaría sin poder registrarla.
+    await conAusencia();
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-07-12',
+          fechaFin: '2026-07-13',
+          adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+        }),
+      )
       .expect(201);
   });
 });
@@ -1514,11 +1758,11 @@ describe('GET /ausencias/adjuntos', () => {
 describe('GET /ausencias/decididas', () => {
   const aprobador = () => token({ sub: 'comercial@ambientalia.com.co' });
 
-  async function crearYDecidir(aprueba: boolean) {
+  async function crearYDecidir(aprueba: boolean, over: Record<string, unknown> = {}) {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva())
+      .send(nueva(over))
       .expect(201);
     await request(app())
       .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
@@ -1533,12 +1777,16 @@ describe('GET /ausencias/decididas', () => {
       .solicitudes;
 
   it('lista lo aprobado y lo rechazado, no lo que sigue pendiente', async () => {
-    await crearYDecidir(true);
-    await crearYDecidir(false);
+    // Tres rangos que no se tocan: la primera queda `aprobada` y sigue viva
+    // después de decidida, así que con el candado de solapes ya en marcha
+    // reutilizar las mismas fechas por defecto para las otras dos chocaría con
+    // ella antes de llegar a lo que este test quiere comprobar.
+    await crearYDecidir(true, { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
+    await crearYDecidir(false, { fechaInicio: '2026-07-13', fechaFin: '2026-07-17' });
     await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva())
+      .send(nueva({ fechaInicio: '2026-07-20', fechaFin: '2026-07-24' }))
       .expect(201);
 
     const r = await decididas(aprobador());
@@ -1772,6 +2020,99 @@ describe('edición de solicitudes', () => {
 
   it('un empleadoId con basura es 400, no un 500 del ::uuid del SQL', async () => {
     await editar(await crear(), edicion({ empleadoId: "'; DROP TABLE" })).expect(400);
+  });
+
+  // ── La cuarta puerta del solapamiento ────────────────────────────────────
+
+  /**
+   * Una solicitud viva de E1 en esas fechas, y devuelve su id.
+   *
+   * Son dos pasos porque el alta cuelga lo que crea del empleado de la SESIÓN
+   * (`e1`) y el cuerpo de `edicion()` nombra a E1: sin reasignarla, las filas de
+   * estos candados serían de dos personas distintas y no podrían solaparse
+   * nunca. La reasignación la hace el propio PATCH, que es lo que este bloque ya
+   * prueba más arriba.
+   */
+  async function crearDeE1(fechaInicio: string, fechaFin: string, estadoFila = 'aprobada'): Promise<string> {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio, fechaFin }))
+      .expect(201);
+    const id = r.body.id as string;
+    await editar(id, edicion({ fechaInicio, fechaFin, estado: estadoFila })).expect(200);
+    return id;
+  }
+
+  it('CANDADO: el PATCH de admin tampoco puede pisar otra ausencia', async () => {
+    // El admin es la ultima via por la que se pueden mover fechas. Sin esta
+    // puerta, la regla se cumple para toda la plantilla menos para quien mas
+    // facil lo tiene para saltarsela sin darse cuenta.
+    const a = await crearDeE1('2026-07-06', '2026-07-10');
+    await crearDeE1('2026-07-20', '2026-07-24');
+
+    const r = await editar(a, edicion({ fechaInicio: '2026-07-22', fechaFin: '2026-07-24' })).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'permiso', estado: 'aprobada', fechaInicio: '2026-07-20', fechaFin: '2026-07-24' },
+    });
+    // Igual que en el alta: `toMatchObject` es parcial, así que sin esta línea un
+    // campo de más no pondría nada rojo, y el `id` del choque es justo lo que
+    // `detalleDelSolape` promete no mandar al cliente. Misma promesa y mismo
+    // helper que las otras puertas, atado aquí también para esta.
+    expect(Object.keys(r.body.detalle).sort()).toEqual(['estado', 'fechaFin', 'fechaInicio', 'tipo']);
+
+    // Y la fila no se ha movido. En el repo real de eso responde el ROLLBACK, y
+    // lo acredita `repo.solapes.db.test.ts` contra Postgres de verdad; este doble
+    // no tiene ninguno, así que lo modela comprobando ANTES de escribir. Sin esta
+    // línea, mover la comprobación detrás de la escritura no ponía nada rojo aquí
+    // —comprobado—, y el doble se quedaba contestando 409 con la fila ya movida.
+    expect(estado.solicitudes.find((s) => s.id === a)).toMatchObject({
+      fechaInicio: '2026-07-06',
+      fechaFin: '2026-07-10',
+    });
+  });
+
+  it('CANDADO: corregir una solicitud sin moverla de sus fechas sigue funcionando', async () => {
+    // La comprobación excluye a la propia solicitud por su id. Sin esa
+    // exclusión, la fila chocaría SIEMPRE contra ella misma y no habría forma de
+    // tocar una solicitud VIVA: ni un comentario, ni un estado, ni un día mal
+    // contado. (Las rechazadas y las incapacidades seguirían editándose: esas ni
+    // llegan a la comprobación.)
+    const a = await crearDeE1('2026-07-06', '2026-07-10');
+    const r = await editar(
+      a,
+      edicion({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Otra nota' }),
+    ).expect(200);
+    expect(r.body).toMatchObject({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Otra nota' });
+  });
+
+  it('CANDADO: editar una RECHAZADA que solapa a una viva sigue siendo posible', async () => {
+    // Una rechazada NO ocupa agenda: `solapeDe` la ignora, y por eso pedir otra
+    // vez esas mismas fechas está permitido y tener las dos encima es lo normal
+    // —te rechazan y vuelves a pedir—. Si la puerta mirara solo el tipo, la
+    // rechazada quedaría inmodificable: 409 `rango_solapado` con
+    // `field: 'fechaInicio'` por corregirle una errata al comentario, sin tocar
+    // las fechas siquiera. Es la misma trampa que `decidirModificacion` tiene
+    // anotada para RECHAZAR una propuesta solapada.
+    const rechazada = await crearDeE1('2026-07-06', '2026-07-10', 'rechazada');
+    // Encima de ella, y legítimamente: la de arriba no ocupa.
+    await crearDeE1('2026-07-06', '2026-07-10');
+
+    await editar(
+      rechazada,
+      edicion({ estado: 'rechazada', fechaInicio: '2026-07-06', fechaFin: '2026-07-10', comentarios: 'Arreglando una errata' }),
+    ).expect(200);
+  });
+
+  it('CANDADO: una incapacidad se puede editar encima de lo que sea', async () => {
+    // La misma exención que en el alta y en la firma: una incapacidad no se
+    // pide, se informa después de haber estado enfermo, y con las fechas ya
+    // pasadas no hay nada que anular ni acortar para hacerle sitio.
+    const a = await crearDeE1('2026-07-06', '2026-07-10');
+    await crearDeE1('2026-07-20', '2026-07-24');
+    await editar(a, edicion({ tipo: 'incapacidad', fechaInicio: '2026-07-22', fechaFin: '2026-07-24' })).expect(200);
   });
 });
 
@@ -2803,6 +3144,76 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
     await request(app()).post(`/api/ausencias/solicitudes/${s.id}/modificaciones`).send(CAMBIO).expect(401);
     await pedir(s.id as string, CAMBIO, token({ apps: ['contabilidad'] })).expect(403);
   });
+
+  // ── El candado de solapes también se aplica a la propuesta ────────────────
+  //
+  // `exigirSinSolape` es la misma función que usa el alta (`crearSolicitud`):
+  // aquí solo se fija que la puerta esté puesta AQUÍ también, con el
+  // `excluirSolicitudId` correcto — el de la solicitud, no el de la
+  // modificación que se está creando.
+
+  /** Crea una solicitud aprobada con esas fechas y devuelve su id. */
+  async function aprobadaEntre(fechaInicio: string, fechaFin: string) {
+    const s = await crear({ fechaInicio, fechaFin });
+    fila(s.id as string).estado = 'aprobada';
+    return s.id as string;
+  }
+
+  it('CANDADO: mover las fechas encima de otra viva da 409', async () => {
+    const mueve = await aprobadaEntre('2026-07-06', '2026-07-08');
+    await aprobadaEntre('2026-07-20', '2026-07-22');
+
+    const r = await pedir(mueve, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-21',
+      fechaFin: '2026-07-23',
+    }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { fechaInicio: '2026-07-20', fechaFin: '2026-07-22' },
+    });
+    // Sin esto el 409 podría estar decorativo: la puerta puesta DESPUÉS de
+    // escribir devuelve el mismo 409 al cliente, pero deja la propuesta viva en
+    // la bandeja del jefe y el correo ya encolado. Mismo patrón que los demás
+    // negativos de este describe (403 de otro dueño, 409 de estado, etc.).
+    expect(estado.modificaciones).toHaveLength(0);
+    expect(avisos()).toHaveLength(0);
+  });
+
+  it('CANDADO: acortar una solicitud NO la hace chocar consigo misma', async () => {
+    // Es lo que rompe quitar `excluirSolicitudId`: sin él, acortar del 6-10 al
+    // 6-8 daría 409 contra la propia solicitud que se está acortando, y cambiar
+    // fechas dejaría de funcionar para todo el mundo.
+    const id = await aprobadaEntre('2026-07-06', '2026-07-10');
+    await pedir(id, { clase: 'fechas', fechaInicio: '2026-07-06', fechaFin: '2026-07-08' }).expect(201);
+  });
+
+  it('anular no comprueba solapes: quitar una ausencia nunca choca', async () => {
+    const id = await aprobadaEntre('2026-07-06', '2026-07-08');
+    const vecino = await aprobadaEntre('2026-07-20', '2026-07-22');
+    // El vecino que hace que este test PUEDA ponerse rojo: sin él, la anulación
+    // llega con las fechas en null y no hay rango contra el que chocar, así que
+    // pasaría igual aunque la puerta se aplicara también a las anulaciones. Se
+    // mueve por debajo, porque el alta no deja crear dos solicitudes que ya se
+    // pisen — esa es la puerta de la Task 3.
+    Object.assign(fila(vecino), { fechaInicio: '2026-07-06', fechaFin: '2026-07-08' });
+    await pedir(id, { clase: 'anulacion', motivo: 'Se cancela el viaje' }).expect(201);
+  });
+
+  it('proponer un cambio hacia fechas ocupadas por una RECHAZADA pasa', async () => {
+    // El complemento del primer CANDADO: la puerta hereda el mismo filtro de
+    // estados que `solapeDe` — una rechazada no cuenta como ocupación.
+    const mueve = await aprobadaEntre('2026-07-06', '2026-07-08');
+    const otra = await aprobadaEntre('2026-07-20', '2026-07-22');
+    fila(otra).estado = 'rechazada';
+
+    await pedir(mueve, {
+      clase: 'fechas',
+      fechaInicio: '2026-07-20',
+      fechaFin: '2026-07-22',
+    }).expect(201);
+  });
 });
 
 describe('POST /ausencias/modificaciones/:id/retirar', () => {
@@ -3009,6 +3420,40 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
     // Y no se ha anulado nada por el camino.
     expect(fila(solicitudId).anuladaAt).toBeNull();
     expect(decisiones()).toHaveLength(1);
+  });
+
+  it('CANDADO: si le aprobaron otra ausencia encima, firmar el cambio da 409 y dice con que choca', async () => {
+    // La tercera puerta del solapamiento, vista desde HTTP: lo que se ata aqui
+    // es la traduccion del servicio —`razon: 'solape'` → 409 `rango_solapado`
+    // con su detalle—, que el cuarto porton no puede ver porque llega hasta el
+    // repositorio y no mas alla.
+    const { solicitudId, modificacionId } = await conPropuesta();
+
+    // El destino se ocupa DESPUES de proponer, y por eso no lo para nadie mas:
+    // del 15 al 17 no toca al 6-10 de la original, asi que la puerta del alta lo
+    // deja pasar, y la de proponer ya miro cuando el 15 estaba libre.
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: '2026-07-15', fechaFin: '2026-07-17' }))
+      .expect(201);
+
+    const r = await decidir(modificacionId, { aprueba: true }).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'vacaciones', estado: 'pendiente', fechaInicio: '2026-07-15', fechaFin: '2026-07-17' },
+    });
+    // Igual que en la puerta del alta: `toMatchObject` es parcial y por si solo
+    // no impediria que se colara el `id` del choque, que es justo lo que
+    // `detalleDelSolape` promete NO mandar al cliente.
+    expect(Object.keys(r.body.detalle).sort()).toEqual(['estado', 'fechaFin', 'fechaInicio', 'tipo']);
+
+    // Y no se ha firmado nada: la propuesta sigue esperando decision, la
+    // solicitud conserva sus fechas y no ha salido ningun correo de decision.
+    expect(estado.modificaciones[0].estado).toBe('pendiente');
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
+    expect(decisiones()).toHaveLength(0);
   });
 
   it('sobre una PENDIENTE, el estado tampoco se mueve', async () => {
@@ -3465,5 +3910,19 @@ describe('PUT /ausencias/empleados/:id/segunda-firma', () => {
       .set('Authorization', `Bearer ${token()}`)
       .send({ requiereSegundaFirma: false })
       .expect(403);
+  });
+});
+
+describe('la forma de los errores del router', () => {
+  it('CANDADO: un error sin detalle NO estrena la clave en la respuesta', async () => {
+    // `JSON.stringify` omite las claves `undefined`, y de eso depende que
+    // ninguna respuesta actual cambie de forma al añadir `detalle`. Si algun dia
+    // se serializara como `null`, todos los clientes verian una clave nueva.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: 'no-es-fecha' }))
+      .expect(400);
+    expect(r.body).toEqual({ error: 'fecha_invalida', field: 'fechaInicio' });
   });
 });

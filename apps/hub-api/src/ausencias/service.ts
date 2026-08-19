@@ -40,6 +40,12 @@ export class AusenciaError extends Error {
     public readonly code: string,
     public readonly status: number,
     public readonly field?: string,
+    /**
+     * Datos del conflicto, para los errores que sin ellos no se pueden accionar.
+     * «Te solapas» sin decir CON QUÉ deja a la persona sin saber qué corregir.
+     * Opcional: la inmensa mayoría de los errores se explican solos con `code`.
+     */
+    public readonly detalle?: Record<string, unknown>,
   ) {
     super(code);
     this.name = 'AusenciaError';
@@ -265,13 +271,103 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
   return empleado;
 }
 
+/**
+ * Lo que el cliente necesita saber del choque, y nada más.
+ *
+ * Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
+ * —`Solape` es una interface, sin index signature implícita, así que
+ * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
+ * uuid que no necesita. Privado a propósito: quien lo necesita desde fuera
+ * necesita en realidad el error entero, y para eso está `errorDeSolape`.
+ */
+function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
+  return {
+    tipo: choque.tipo,
+    estado: choque.estado,
+    fechaInicio: choque.fechaInicio,
+    fechaFin: choque.fechaFin,
+  };
+}
+
+/**
+ * El 409 del solapamiento entero, escrito una sola vez.
+ *
+ * El `detalle` no era lo único que había que atar: `code`, `status` y `field` son
+ * igual de contrato, y estaban tecleados a mano en los tres sitios que responden
+ * este error —`exigirSinSolape` para el alta y la propuesta, la traducción de
+ * `decidirModificacion` más abajo, y el `catch` del `PATCH` en `router.ts`—. Con
+ * la tripleta suelta bastaba con que uno dijera `fechaFin`, o un `code` con otra
+ * letra, para que la interfaz tuviera que aprender dos formas de contar lo mismo,
+ * y ningún test lo habría visto: cada puerta afirma la SUYA.
+ *
+ * Lo vigilan los cuatro tests de `router.test.ts` que afirman
+ * `error: 'rango_solapado'` desde HTTP, uno por puerta; tres comparan además las
+ * claves exactas del `detalle`, que es donde vive la promesa de no filtrar el
+ * `id` del choque.
+ */
+export function errorDeSolape(choque: repo.Solape): AusenciaError {
+  return new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(choque));
+}
+
+/**
+ * Corta si esta persona ya tiene una ausencia viva en esas fechas.
+ *
+ * Aquí se decide qué es un solapamiento para las DOS puertas que pasan por el
+ * servicio: esta alta y proponer un cambio de fechas.
+ *
+ * ⚠️ Las otras dos no pasan por aquí, y no es descuido. Firmar el cambio vive
+ * dentro de la transacción de `repo.decidirModificacion`, con un `PoolClient` y
+ * sin poder lanzar `AusenciaError`. Y el `PATCH` de admin no tiene función de
+ * servicio —el router llama a `repo.actualizarSolicitud` derecho— y su
+ * comprobación va también dentro de esa transacción, para no mirar por una
+ * conexión y escribir por otra. Las dos llaman a `repo.solapeDe` por su cuenta,
+ * pero la REGLA de qué ocupa agenda ya no se repite en ninguna: las cuatro
+ * puertas llaman a `repo.ocupaAgenda`. Se comparte porque copiarla salió mal —el
+ * `PATCH` nació copiando media, el tipo sin el estado— y porque los candados no
+ * lo habrían visto: cada puerta prueba la suya, así que cambiar la regla en un
+ * solo sitio deja verdes los tests de las otras.
+ */
+async function exigirSinSolape(
+  db: Pool,
+  empleadoId: string,
+  tipo: TipoSolicitud,
+  estado: EstadoSolicitud,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+): Promise<void> {
+  // La fila que va a quedar escrita solo puede chocar con alguien si ella misma
+  // OCUPA agenda; si no, comprobarla solo sirve para negar lo que nadie tenía por
+  // qué negar. El porqué de cada mitad, en `repo.ocupaAgenda`.
+  //
+  // Por estas dos puertas hoy no pasa ninguna fila que no ocupe por su estado: el
+  // alta nace `pendiente` o `registrada` —nunca `rechazada`— y
+  // `estadoAdmiteModificacion` deja fuera a las rechazadas mucho antes de llegar a
+  // la propuesta. Se pasa el estado igual, porque preguntar por la fila ENTERA es
+  // lo que impide que esta puerta diverja de las otras tres — que es exactamente
+  // lo que pasó cuando el `PATCH` copió media regla.
+  if (!repo.ocupaAgenda(tipo, estado)) return;
+
+  const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
+  if (!choque) return;
+  throw errorDeSolape(choque);
+}
+
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
-  const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
-
+  // Los dos suben aquí porque la comprobación de solape pregunta por la fila que
+  // se va a crear, y eso incluye con qué estado nace. Son derivaciones puras de
+  // `datos.tipo`, así que adelantarlas no cambia nada más.
   const aprueba = requiereAprobacion(datos.tipo);
   const estado = aprueba ? 'pendiente' : 'registrada';
+  // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
+  // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
+  // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
+  // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
+  // esta comprobación necesita, así que tiene que ir antes por fuerza.
+  await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
+  const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
 
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
@@ -557,6 +653,37 @@ export async function pedirModificacion(
     throw new AusenciaError('anulacion_ya_empezada', 409);
   }
 
+  // Solo un cambio de fechas puede crear un solapamiento: anular quita una
+  // ausencia, y quitar nunca choca con nada. Se le pasa `solicitud.id` como
+  // `excluirSolicitudId` porque si no, moverle las fechas a una solicitud viva
+  // —acortarla, alargarla o desplazarla— la haría chocar contra ella misma; y
+  // acortar es la única salida que le queda a una ausencia ya empezada, que no
+  // se puede anular (ver `noHaEmpezado`).
+  //
+  // Las dos mitades del `if` no comprueban lo mismo por partida doble:
+  //  - `datos.fechaInicio && datos.fechaFin` la pide EL COMPILADOR:
+  //    `NuevaModificacion` (types.ts) es una interface plana, no una unión
+  //    discriminada, así que `clase === 'fechas'` no estrecha `string | null` a
+  //    `string` y sin ese trozo `exigirSinSolape` no compila.
+  //  - `datos.clase === 'fechas'` hoy no cambia nada: en toda anulación
+  //    `validarNuevaModificacion` devuelve las dos fechas en `null`, así que el
+  //    trozo del compilador ya excluye la anulación por su cuenta —quitarla no
+  //    pone rojo ni un test—. Se deja porque nombra a qué clase se le aplica la
+  //    regla. Lo que NO hace: obligar a nadie a volver aquí. Si mañana
+  //    `CLASES_MODIFICACION` gana una tercera clase con fechas, quedará fuera
+  //    del candado en silencio mientras nadie toque esta línea.
+  if (datos.clase === 'fechas' && datos.fechaInicio && datos.fechaFin) {
+    await exigirSinSolape(
+      db,
+      empleado.id,
+      solicitud.tipo,
+      solicitud.estado,
+      datos.fechaInicio,
+      datos.fechaFin,
+      solicitud.id,
+    );
+  }
+
   const decisor = decisorDeModificacion(solicitud);
   // `estadoAdmiteModificacion` ya lo ha exigido, pero eso vive treinta líneas
   // más arriba y en otra función: se comprueba aquí para que el tipo salga sin
@@ -769,10 +896,20 @@ export async function decidirModificacion(
     construirPayloadModificacion,
   );
   if (!resultado.ok) {
-    // Los dos son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
+    // Los tres son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
     // o alguien que se adelantó; `solicitud_cambio_de_estado` es que la
     // solicitud se movió debajo —un PATCH de admin, una decisión del jefe— y
-    // aplicar el cambio habría pisado esa corrección en silencio.
+    // aplicar el cambio habría pisado esa corrección en silencio; `rango_solapado`
+    // es que a esa persona le aprobaron OTRA ausencia sobre esos días entre que
+    // se propuso el cambio y se firma, así que la propuesta era legal cuando se
+    // pidió y ha dejado de serlo sin que nadie hiciera nada mal.
+    if (resultado.razon === 'solape') {
+      // Mismo `code`, mismo `field` y mismo `detalle` que las otras tres puertas,
+      // y ya no por buena voluntad: los cuatro salen de `errorDeSolape`. Llegar
+      // aquí con una forma distinta obligaría a la interfaz a aprender un segundo
+      // caso para decir lo mismo.
+      throw errorDeSolape(resultado.solape);
+    }
     throw resultado.razon === 'ya_decidida'
       ? new AusenciaError('ya_decidida', 409)
       : new AusenciaError('solicitud_cambio_de_estado', 409);

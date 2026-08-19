@@ -566,6 +566,14 @@ function aJsonHistorico(filas: FilaHistoricoResuelta[]): string {
  * `created_at` se pone a la fecha de inicio y no a `now()`: «Mis solicitudes»
  * ordena por fecha de creación, y con `now()` las 52 filas antiguas se
  * amontonarían todas arriba, por encima de las recientes.
+ *
+ * ⚠️ Es el ÚNICO escritor de solicitudes que no pasa por la regla del
+ * solapamiento, y está exento a propósito: la hoja trae precisamente los datos
+ * que ya la incumplen —comprobado el 2026-08-18 contra producción, un empleado
+ * tiene vacaciones aprobadas del 10 al 14 de agosto de 2026 y un permiso
+ * aprobado el 14—, y una importación que los rechazara dejaría el histórico a
+ * medias. Es la misma razón por la que no hay constraint en la BD (ver
+ * `solapeDe`). Lo que sí impide es duplicar: de eso responde el `ON CONFLICT`.
  */
 export async function importarHistorico(
   db: Pool,
@@ -624,40 +632,88 @@ export interface EdicionSolicitud {
  * tomar una decisión. Aprobar o rechazar se hace en la bandeja, que es donde sí
  * se avisa a la gente. Un admin arreglando una fecha mal importada no debe
  * disparar correos a nadie.
+ *
+ * ⚠️ Es la CUARTA puerta del solapamiento: el registro general es la única vía
+ * INTERACTIVA que puede llevar cualquier ausencia a cualquier fecha, y la única
+ * de las cuatro que no pasa por el servicio —el router llama aquí directamente—,
+ * así que su comprobación no puede vivir en `exigirSinSolape` como la del alta.
+ * Si el destino está ocupado **LANZA** `SolapeAlAplicar`, y de ahí sale que esa
+ * señal se exporte: no hay función intermedia donde cazarla, la traduce a 409 el
+ * `catch` de la ruta en `router.ts`. Lanzar y no devolver `null` tampoco es
+ * gusto: `null` ya significa «no encontrada» aquí, y el router lo contesta con
+ * un 404 — un choque saldría diciendo que la solicitud no existe.
+ *
+ * Lo que NO es: el último escritor de la tabla. `importarHistorico` mete filas
+ * sin pasar por puerta ninguna, y está exento a propósito — el porqué, en su
+ * JSDoc.
+ *
+ * Va dentro de una transacción, y conviene decir exacto lo que eso da. Da que la
+ * comprobación y el UPDATE viajen por la misma conexión, y que la relectura
+ * final vaya DESPUÉS del UPDATE por ese mismo `client`: el UPDATE deja la fila
+ * bloqueada hasta el COMMIT, así que lo que se devuelve lleva lo que ESTA
+ * petición escribió y no lo que otra transacción pudiera colar entre dos
+ * consultas sueltas del pool. Lo que **no** da es cerrar la ventana de carrera:
+ * `BEGIN` pelado es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE`, así que
+ * dos correcciones simultáneas la pasan las dos (el porqué entero, en
+ * `solapeDe`).
  */
 export async function actualizarSolicitud(
   db: Pool,
   id: string,
   campos: EdicionSolicitud,
 ): Promise<Solicitud | null> {
-  const { rows } = await db.query(
-    `UPDATE portal.solicitudes_ausencia s
-        SET empleado_id       = $2,
-            solicitante_email = e.correo,
-            tipo              = $3,
-            fecha_inicio      = $4::date,
-            fecha_fin         = $5::date,
-            dias_habiles      = $6,
-            estado            = $7,
-            comentarios       = $8,
-            observaciones     = $9
-       FROM portal.empleados e
-      WHERE s.id = $1 AND e.id = $2
-      RETURNING s.id`,
-    [
-      id,
-      campos.empleadoId,
-      campos.tipo,
-      campos.fechaInicio,
-      campos.fechaFin,
-      campos.dias,
-      campos.estado,
-      campos.comentarios,
-      campos.observaciones,
-    ],
-  );
-  if (rows.length === 0) return null;
-  return solicitudPorId(db, id);
+  return withTransaction(db, async (client) => {
+    // Solo hay algo que comprobar si la fila que va a quedar OCUPA agenda. Las
+    // dos mitades importan y la del estado se pasó por alto la primera vez: sin
+    // ella, corregirle una errata a una RECHAZADA que tuviera una ausencia viva
+    // encima —el caso corriente de a quien le rechazan unos días y los vuelve a
+    // pedir— salía 409 señalando `fechaInicio`, un campo que nadie había tocado.
+    if (ocupaAgenda(campos.tipo, campos.estado)) {
+      const choque = await solapeDe(
+        client,
+        // El empleado DESTINO, no el que tuviera la fila: si la corrección la
+        // reasigna, la agenda que hay que mirar es la de quien se la queda.
+        campos.empleadoId,
+        campos.fechaInicio,
+        campos.fechaFin,
+        // Excluida por su id, o una corrección que no mueva las fechas —el
+        // estado, un comentario, un día mal contado— chocaría contra la propia
+        // fila que corrige, y ninguna solicitud VIVA se podría ya tocar (las
+        // rechazadas y las incapacidades sí: no llegan hasta aquí).
+        id,
+      );
+      if (choque) throw new SolapeAlAplicar(choque);
+    }
+
+    const { rows } = await client.query(
+      `UPDATE portal.solicitudes_ausencia s
+          SET empleado_id       = $2,
+              solicitante_email = e.correo,
+              tipo              = $3,
+              fecha_inicio      = $4::date,
+              fecha_fin         = $5::date,
+              dias_habiles      = $6,
+              estado            = $7,
+              comentarios       = $8,
+              observaciones     = $9
+         FROM portal.empleados e
+        WHERE s.id = $1 AND e.id = $2
+        RETURNING s.id`,
+      [
+        id,
+        campos.empleadoId,
+        campos.tipo,
+        campos.fechaInicio,
+        campos.fechaFin,
+        campos.dias,
+        campos.estado,
+        campos.comentarios,
+        campos.observaciones,
+      ],
+    );
+    if (rows.length === 0) return null;
+    return solicitudPorId(client, id);
+  });
 }
 
 /**
@@ -1055,7 +1111,15 @@ export async function solicitudesConAdjunto(db: Pool): Promise<Solicitud[]> {
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
-export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | null> {
+/**
+ * Una solicitud por su id, con lo que le cuelga del `SELECT_SOLICITUD`.
+ *
+ * Acepta `PoolClient` además de `Pool` por lo mismo que `solapeDe`: cuando
+ * `actualizarSolicitud` la usa para releer lo que acaba de escribir, tiene que ir
+ * por la conexión de la transacción o no vería el UPDATE sin confirmar y
+ * devolvería la fila de antes.
+ */
+export async function solicitudPorId(db: Pool | PoolClient, id: string): Promise<Solicitud | null> {
   const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
   return rows.length ? aSolicitud(rows[0] as FilaSolicitudDb) : null;
 }
@@ -1290,13 +1354,19 @@ export async function crearModificacion(
 // ── Modificaciones: la decisión ────────────────────────────────────────────
 
 /**
- * Resultado de decidir. Las dos formas de fallar son un 409, pero cuentan cosas
+ * Resultado de decidir. Las tres formas de fallar son un 409, pero cuentan cosas
  * distintas y el cliente tiene que poder distinguirlas: «alguien ya la decidió»
  * (o un doble clic) no es «la solicitud se movió debajo y hay que mirar».
+ *
+ * `solape` es la única de las tres que no habla de quien firma: la propuesta era
+ * legal cuando se pidió y el destino se ocupó después, así que el mensaje no
+ * puede quedarse en «no se puede» — tiene que nombrar la ausencia con la que
+ * choca, y por eso esta razón viaja acompañada y las otras dos no.
  */
 export type ResultadoDecisionModificacion =
   | { ok: true; modificacion: Modificacion; solicitud: Solicitud }
-  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' };
+  | { ok: false; razon: 'ya_decidida' | 'solicitud_cambio_de_estado' }
+  | { ok: false; razon: 'solape'; solape: Solape };
 
 /**
  * Señal interna para abortar la transacción cuando el testigo triple no casa.
@@ -1307,6 +1377,40 @@ export type ResultadoDecisionModificacion =
  * un resultado normal, para que el servicio no tenga que conocerla.
  */
 class ChoqueConLaSolicitud extends Error {}
+
+/**
+ * Señal para abortar la transacción cuando las fechas que se van a escribir ya
+ * están ocupadas por otra ausencia viva de la misma persona. La lanzan las dos
+ * puertas del solapamiento que corren dentro de una transacción de este módulo:
+ * firmar el cambio (`decidirModificacion`) y el `PATCH` de admin
+ * (`actualizarSolicitud`).
+ *
+ * En `decidirModificacion` es THROW y no `return` por el mismo motivo que
+ * `ChoqueConLaSolicitud`, y allí es todavía más fácil de perder de vista: cuando
+ * esto salta, **las dos escrituras ya están hechas** —la propuesta marcada
+ * `aprobada` y la solicitud movida a las fechas nuevas—. Un `return` desde dentro
+ * de `withTransaction` sale por la puerta del `COMMIT` —no hay error que provoque
+ * el `ROLLBACK`—, así que confirmaría las dos y dejaría exactamente el estado que
+ * esa puerta existe para impedir: dos ausencias vivas de la misma persona sobre
+ * el mismo día, con un 409 devuelto al jefe diciéndole que no se hizo nada. Se
+ * comprobó cambiándolo por un `return`: el test del ROLLBACK se pone rojo. En
+ * `actualizarSolicitud` la comprobación va ANTES del UPDATE, así que cuando salta
+ * no hay nada escrito: allí el throw no deshace la escritura, la impide — y
+ * `return null` está ocupado, porque significa «no encontrada».
+ *
+ * Lleva el choque encima porque el aviso tiene que nombrarlo.
+ *
+ * ⚠️ Es la única de las dos señales que SALE del módulo, y se exporta por una
+ * razón concreta: el `PATCH` va del router al repo sin pasar por el servicio, así
+ * que no hay ninguna función intermedia donde cazarla y traducirla a un
+ * resultado, como sí hace `decidirModificacion` aquí abajo. La caza el `catch` de
+ * esa ruta en `router.ts`.
+ */
+export class SolapeAlAplicar extends Error {
+  constructor(public readonly solape: Solape) {
+    super('solape');
+  }
+}
 
 /**
  * El testigo TRIPLE del UPDATE de la solicitud, escrito una sola vez para que
@@ -1387,7 +1491,20 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
  *     contradictorios.
  *  2. **Aplicarla a la solicitud**, y solo si se aprueba. Rechazar deja la fila
  *     exactamente como estaba: no hay nada que escribir.
- *  3. Releer, y encolar el aviso.
+ *  3. Releer, comprobar que el cambio no ha dejado a esa persona con dos
+ *     ausencias vivas sobre el mismo día, y encolar el aviso.
+ *
+ * ⚠️ Esa comprobación del paso 3 es la TERCERA puerta del solapamiento, y la
+ * única que llega a tiempo: entre PROPONER el cambio y FIRMARLO le han podido
+ * aprobar a esa persona otra ausencia encima, y la de `pedirModificacion` miró
+ * cuando el destino aún estaba libre. Va DESPUÉS del UPDATE y no antes porque
+ * ahí `solicitud` ya está releída y trae el empleado y el tipo, que es lo único
+ * que le falta a `Modificacion`; ve exactamente lo mismo que vería antes, porque
+ * `solapeDe` excluye a esta solicitud por su id. Si choca, **LANZA** —por lo
+ * mismo que el paso 2, ver abajo— y el ROLLBACK se lleva por delante los pasos
+ * 1 y 2, con lo que el outbox se queda sin aviso. Lo que **no** hace es cerrar
+ * la carrera: esto es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE` (el
+ * porqué entero, en `solapeDe`).
  *
  * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
  * importante de la función. El ROLLBACK deshace también el paso 1, así que la
@@ -1433,6 +1550,52 @@ export async function decidirModificacion(
       const { rows: filas } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [modificacion.solicitudId]);
       const solicitud = aSolicitud(filas[0] as FilaSolicitudDb);
 
+      // Las tres condiciones, y ninguna sobra igual:
+      //  - `aprueba` no es un atajo de rendimiento: rechazar no escribe nada en
+      //    la solicitud, así que no puede solapar a nadie, y comprobarlo también
+      //    ahí dejaría IRRECHAZABLE una propuesta que se quedó solapada —409 al
+      //    jefe cada vez, y solo el solicitante podría quitarla de en medio
+      //    retirándola—. Lo vigila un test de `repo.solapes.db.test.ts` escrito
+      //    para esto: antes de él, quitarlo dejaba los cuatro portones en verde.
+      //  - `ocupaAgenda` es la MISMA función que usan las otras tres puertas, y
+      //    no una copia: pregunta si la fila que queda escrita cuenta como
+      //    ausencia viva. `solicitud` viene releída, así que su tipo y su estado
+      //    son los de la fila, no los que traía la petición. Sigue sin poder
+      //    llamarse a `exigirSinSolape` —aquello vive en el servicio, con un
+      //    `Pool` y lanzando `AusenciaError`—; lo que se comparte es la REGLA,
+      //    que es lo que podía divergir. Divergió: la puerta del `PATCH` nació
+      //    copiando solo la mitad del tipo. Alcanzable hoy — ese mismo `PATCH`
+      //    admite cualquier tipo con cualquier estado, así que hay
+      //    `incapacidad`es en `aprobada`.
+      //  - la clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
+      //    anulación las tres columnas nuevas van a `null` —lo exige el CHECK
+      //    `modificaciones_campos_por_clase` de la 024—, así que el trozo de las
+      //    fechas, que pide el compilador (`Modificacion` es plana y
+      //    `clase === 'fechas'` no estrecha `string | null`), ya la excluye sola.
+      //    Se deja porque nombra a qué clase se aplica la regla, igual que en
+      //    `pedirModificacion`, y con la misma letra pequeña: no obliga a nadie a
+      //    volver aquí si mañana aparece una tercera clase con fechas.
+      if (
+        aprueba &&
+        ocupaAgenda(solicitud.tipo, solicitud.estado) &&
+        modificacion.clase === 'fechas' &&
+        modificacion.fechaInicioNueva &&
+        modificacion.fechaFinNueva
+      ) {
+        const choque = await solapeDe(
+          client,
+          solicitud.empleadoId,
+          modificacion.fechaInicioNueva,
+          modificacion.fechaFinNueva,
+          // El id de la SOLICITUD, no el de la propuesta: sin esta exclusión la
+          // ausencia choca SIEMPRE contra sí misma —la fila que se acaba de
+          // mover ya lleva las fechas nuevas— y no se podría aprobar ni un solo
+          // cambio de los que se piden de verdad.
+          modificacion.solicitudId,
+        );
+        if (choque) throw new SolapeAlAplicar(choque);
+      }
+
       // Anotado y no un literal suelto: el valor viaja al CHECK de `evento` de la
       // 024, y una errata reventaría DENTRO de la transacción, deshaciendo una
       // decisión que el jefe cree tomada.
@@ -1445,10 +1608,11 @@ export async function decidirModificacion(
       return { ok: true, modificacion, solicitud };
     });
   } catch (err) {
-    // El choque del testigo triple ya provocó el ROLLBACK dentro de
-    // `withTransaction`: aquí solo se traduce a un resultado, para que el
-    // servicio no tenga que conocer esta clase ni distinguirla de un fallo real.
+    // Los dos choques ya provocaron el ROLLBACK dentro de `withTransaction`:
+    // aquí solo se traducen a un resultado, para que el servicio no tenga que
+    // conocer estas clases ni distinguirlas de un fallo real.
     if (err instanceof ChoqueConLaSolicitud) return { ok: false, razon: 'solicitud_cambio_de_estado' };
+    if (err instanceof SolapeAlAplicar) return { ok: false, razon: 'solape', solape: err.solape };
     throw err;
   }
 }
@@ -1719,4 +1883,140 @@ export async function ausenciasEntre(
     [desde, hasta, soloEmpleadoId],
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
+}
+
+/** Una ausencia viva que se cruza con un rango. Lo justo para redactar el aviso. */
+export interface Solape {
+  id: string;
+  tipo: TipoSolicitud;
+  estado: Solicitud['estado'];
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+/**
+ * Qué cuenta como ausencia VIVA, escrito una sola vez.
+ *
+ * Son dos mitades de la misma regla y ninguna se sostiene sin la otra: una
+ * incapacidad no se pide, se informa después de haber estado enfermo, y no se le
+ * puede negar; una rechazada no concedió ni un día, así que no ocupa nada. La
+ * del estado es la que se escapa con facilidad —en el `WHERE` de `solapeDe` va
+ * tres líneas por debajo de la del tipo—, y escaparse le costó a la puerta del
+ * `PATCH` dejar INMODIFICABLE cualquier rechazada con una ausencia viva encima,
+ * que es el caso corriente de a quien le rechazan unos días y los vuelve a pedir.
+ *
+ * La llaman los tres sitios que comprueban un solape antes de dejar la fila
+ * escrita —`exigirSinSolape` en el servicio (el alta y la propuesta),
+ * `decidirModificacion` y `actualizarSolicitud` aquí—, y siempre sobre la fila
+ * que van a dejar: la que no ocupa agenda no puede chocar con nadie, y
+ * comprobarla igualmente niega correcciones legítimas.
+ *
+ * Quedan DOS reescrituras que el compilador no puede atar a esta, y no están en
+ * la misma situación, por más que las dos digan lo mismo:
+ *
+ *  - El `WHERE` de `solapeDe` dice esto en SQL, y **lo vigila** el cuarto
+ *    portón: ejecuta contra Postgres de verdad en `repo.solapes.db.test.ts`,
+ *    con un test para la mitad del tipo (la incapacidad) y dos para la del
+ *    estado (la rechazada y la anulada, que es una rechazada con marca).
+ *  - El doble in-memory de `router.test.ts` **no vigila: replica**. Ese fichero
+ *    hace `vi.mock('./repo.js')` y reimplementa esta función, así que el
+ *    servicio bajo prueba nunca llega a ejecutar ESTA.
+ *
+ * De donde sale la consecuencia que hay que tener delante antes de tocar la
+ * línea de abajo: **romper esta regla no pone rojo el portón rápido.**
+ * Comprobado el 2026-08-18 rompiéndola de verdad, una mitad cada vez: quitar la
+ * del tipo pone rojos DOS tests y quitar la del estado, otros DOS, los cuatro en
+ * el cuarto portón y todos de `decidirModificacion` y `actualizarSolicitud`; los
+ * unitarios —531 en `src/ausencias`, 222 de ellos de `router.test.ts`— siguen
+ * verdes en los dos casos.
+ *
+ * Que no lo vigile el portón rápido NO significa que no lo vigile nada: el cuarto
+ * portón es un step BLOQUEANTE del CI (`ci.yml`, «Tests contra Postgres real»).
+ * Lo que se puede romper en silencio es la máquina de quien edita, no la rama.
+ *
+ * Y de ahí lo que hoy NO está acreditado: las dos puertas que viven en el
+ * servicio —el alta y la propuesta— se prueban de sobra, pero contra la copia
+ * del doble. Nada comprueba que ejecuten la MISMA regla que las otras dos; el
+ * CANDADO de la superficie de `router.test.ts` solo exige que esta función se
+ * exporte, no que diga lo mismo.
+ */
+export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
+  return tipo !== 'incapacidad' && estado !== 'rechazada';
+}
+
+/**
+ * La primera ausencia VIVA de esta persona que se cruza con el rango, o `null`.
+ *
+ * El predicado de fechas es el mismo que usa `ausenciasEntre` —solapa, no
+ * contiene—, pero es el mismo predicado dentro de una pregunta distinta:
+ * aquella une con `empleados` y filtra por `e.activo`, no filtra por `tipo`, y
+ * su `soloEmpleadoId` admite `null` para no acotar. Esta no mira
+ * `empleados.activo` porque la pregunta ya es sobre una persona concreta, no
+ * sobre a quién pintar en un calendario.
+ *
+ * `LIMIT 1` porque el mensaje solo puede nombrar una colisión; buscarlas todas
+ * sería trabajo que nadie lee.
+ *
+ * Las dos condiciones de «viva» de su `WHERE` —`estado <> 'rechazada'` y
+ * `tipo <> 'incapacidad'`— son `ocupaAgenda` escrito en SQL. Quien tenga que
+ * hacerse la misma pregunta desde TypeScript llama a aquella función; aquí no se
+ * puede.
+ *
+ * ⚠️ El filtro de estado —`estado <> 'rechazada'`— es el mismo filtro que en
+ * `ausenciasEntre`; lo que se invierte no es el filtro sino la
+ * CONSECUENCIA de que falle en abierto: un estado nuevo que nadie añada a la
+ * lista entra igual por los dos lados, pero aquí eso cuenta como ocupado y
+ * bloquea de más —lo reporta un usuario el mismo día—, mientras que allí se
+ * pintaría de más y eso no lo nota nadie.
+ *
+ * `excluirSolicitudId` es imprescindible al mover fechas: sin él, una solicitud
+ * chocaría siempre contra ella misma. El alta pasa `null` porque todavía no hay
+ * fila.
+ *
+ * Acepta `PoolClient` además de `Pool` para poder llamarse DENTRO de la
+ * transacción que aplica un cambio de fechas: por esa misma conexión la
+ * comprobación ve lo que la propia transacción ya escribió sin confirmar
+ * —una consulta por el `Pool` no lo vería— y se deshace con el mismo
+ * `ROLLBACK`. Lo que **no** da es un snapshot compartido: `BEGIN` pelado es
+ * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera
+ * tampoco se cierra —este `SELECT` no lleva `FOR UPDATE`—, y dos altas
+ * simultáneas la pasan las dos. Cerrarla del
+ * todo pediría un candado en la BD, como el índice único parcial de la 024
+ * hace con las propuestas. Se decidió no ponerlo: la restricción falla al
+ * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
+ * 2026-08-18 contra producción, un empleado tiene vacaciones aprobadas del 10
+ * al 14 de agosto de 2026 y un permiso aprobado el 14.
+ */
+export async function solapeDe(
+  db: Pool | PoolClient,
+  empleadoId: string,
+  fechaInicio: string,
+  fechaFin: string,
+  excluirSolicitudId: string | null,
+): Promise<Solape | null> {
+  const { rows } = await db.query(
+    `SELECT id, tipo, estado,
+            fecha_inicio::text AS fecha_inicio,
+            fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia
+      WHERE empleado_id = $1
+        AND estado <> 'rechazada'
+        -- La incapacidad no se pide, se informa: no ocupa ni se le puede negar.
+        AND tipo   <> 'incapacidad'
+        AND ($4::uuid IS NULL OR id <> $4)
+        AND fecha_inicio <= $3::date
+        AND fecha_fin    >= $2::date
+      ORDER BY fecha_inicio, id
+      LIMIT 1`,
+    [empleadoId, fechaInicio, fechaFin, excluirSolicitudId],
+  );
+  if (rows.length === 0) return null;
+  const r = rows[0] as {
+    id: string;
+    tipo: TipoSolicitud;
+    estado: Solicitud['estado'];
+    fecha_inicio: string;
+    fecha_fin: string;
+  };
+  return { id: r.id, tipo: r.tipo, estado: r.estado, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin };
 }
