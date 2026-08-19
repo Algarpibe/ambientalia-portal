@@ -134,7 +134,7 @@ describe('cambiaLaHoja', () => {
   // CANDADO ESTRUCTURAL. `cambiaLaHoja` es el portón único de «hay algo que
   // ajustar»: si dejara de contener a `cambiaElCalendario`, habría correcciones
   // de calendario que no se emitirían nunca.
-  it('CANDADO: contiene a cambiaElCalendario en los cinco campos', () => {
+  it('CANDADO: contiene a cambiaElCalendario, y la delegacion va primera', () => {
     const casos: Array<{ previa: Solicitud; actual: Solicitud }> = [
       { previa, actual: solicitud({ fechaInicio: '2026-07-07' }) },
       { previa, actual: solicitud({ fechaFin: '2026-07-13' }) },
