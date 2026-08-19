@@ -624,40 +624,82 @@ export interface EdicionSolicitud {
  * tomar una decisión. Aprobar o rechazar se hace en la bandeja, que es donde sí
  * se avisa a la gente. Un admin arreglando una fecha mal importada no debe
  * disparar correos a nadie.
+ *
+ * ⚠️ Es la CUARTA puerta del solapamiento y la última: el registro general es la
+ * única vía que puede llevar cualquier ausencia a cualquier fecha, y la única de
+ * las cuatro que no pasa por el servicio —el router llama aquí directamente—,
+ * así que su comprobación no puede vivir en `exigirSinSolape` como la del alta.
+ * Si el destino está ocupado **LANZA** `SolapeAlAplicar`, y de ahí sale que esa
+ * señal se exporte: no hay función intermedia donde cazarla, la traduce a 409 el
+ * `catch` de la ruta en `router.ts`. Lanzar y no devolver `null` tampoco es
+ * gusto: `null` ya significa «no encontrada» aquí, y el router lo contesta con
+ * un 404 — un choque saldría diciendo que la solicitud no existe.
+ *
+ * Va dentro de una transacción, y conviene decir exacto lo que eso da. Da que la
+ * comprobación y el UPDATE viajen por la misma conexión, y que la relectura
+ * final vaya DESPUÉS del UPDATE por ese mismo `client`: el UPDATE deja la fila
+ * bloqueada hasta el COMMIT, así que lo que se devuelve lleva lo que ESTA
+ * petición escribió y no lo que otra transacción pudiera colar entre dos
+ * consultas sueltas del pool. Lo que **no** da es cerrar la ventana de carrera:
+ * `BEGIN` pelado es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE`, así que
+ * dos correcciones simultáneas la pasan las dos (el porqué entero, en
+ * `solapeDe`).
  */
 export async function actualizarSolicitud(
   db: Pool,
   id: string,
   campos: EdicionSolicitud,
 ): Promise<Solicitud | null> {
-  const { rows } = await db.query(
-    `UPDATE portal.solicitudes_ausencia s
-        SET empleado_id       = $2,
-            solicitante_email = e.correo,
-            tipo              = $3,
-            fecha_inicio      = $4::date,
-            fecha_fin         = $5::date,
-            dias_habiles      = $6,
-            estado            = $7,
-            comentarios       = $8,
-            observaciones     = $9
-       FROM portal.empleados e
-      WHERE s.id = $1 AND e.id = $2
-      RETURNING s.id`,
-    [
-      id,
-      campos.empleadoId,
-      campos.tipo,
-      campos.fechaInicio,
-      campos.fechaFin,
-      campos.dias,
-      campos.estado,
-      campos.comentarios,
-      campos.observaciones,
-    ],
-  );
-  if (rows.length === 0) return null;
-  return solicitudPorId(db, id);
+  return withTransaction(db, async (client) => {
+    // Una incapacidad no se pide: se informa después de haber estado enfermo, y
+    // no se le puede negar. ⚠️ Esta exención está repetida a mano en todas las
+    // puertas —el aviso de `exigirSinSolape`, en el servicio, las enumera—:
+    // nada las ata, y si divergen una autoriza lo que la siguiente niega.
+    if (campos.tipo !== 'incapacidad') {
+      const choque = await solapeDe(
+        client,
+        // El empleado DESTINO, no el que tuviera la fila: si la corrección la
+        // reasigna, la agenda que hay que mirar es la de quien se la queda.
+        campos.empleadoId,
+        campos.fechaInicio,
+        campos.fechaFin,
+        // Excluida por su id, o una corrección que no mueva las fechas —el
+        // estado, un comentario, un día mal contado— chocaría contra la propia
+        // fila que corrige, y el registro entero sería inmodificable.
+        id,
+      );
+      if (choque) throw new SolapeAlAplicar(choque);
+    }
+
+    const { rows } = await client.query(
+      `UPDATE portal.solicitudes_ausencia s
+          SET empleado_id       = $2,
+              solicitante_email = e.correo,
+              tipo              = $3,
+              fecha_inicio      = $4::date,
+              fecha_fin         = $5::date,
+              dias_habiles      = $6,
+              estado            = $7,
+              comentarios       = $8,
+              observaciones     = $9
+         FROM portal.empleados e
+        WHERE s.id = $1 AND e.id = $2
+        RETURNING s.id`,
+      [
+        id,
+        campos.empleadoId,
+        campos.tipo,
+        campos.fechaInicio,
+        campos.fechaFin,
+        campos.dias,
+        campos.estado,
+        campos.comentarios,
+        campos.observaciones,
+      ],
+    );
+    if (rows.length === 0) return null;
+    return solicitudPorId(client, id);
+  });
 }
 
 /**
@@ -1055,7 +1097,15 @@ export async function solicitudesConAdjunto(db: Pool): Promise<Solicitud[]> {
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
-export async function solicitudPorId(db: Pool, id: string): Promise<Solicitud | null> {
+/**
+ * Una solicitud por su id, con lo que le cuelga del `SELECT_SOLICITUD`.
+ *
+ * Acepta `PoolClient` además de `Pool` por lo mismo que `solapeDe`: cuando
+ * `actualizarSolicitud` la usa para releer lo que acaba de escribir, tiene que ir
+ * por la conexión de la transacción o no vería el UPDATE sin confirmar y
+ * devolvería la fila de antes.
+ */
+export async function solicitudPorId(db: Pool | PoolClient, id: string): Promise<Solicitud | null> {
   const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
   return rows.length ? aSolicitud(rows[0] as FilaSolicitudDb) : null;
 }
@@ -1315,23 +1365,34 @@ export type ResultadoDecisionModificacion =
 class ChoqueConLaSolicitud extends Error {}
 
 /**
- * Señal interna para abortar la transacción cuando las fechas que se van a
- * firmar ya están ocupadas por otra ausencia viva de la misma persona.
+ * Señal para abortar la transacción cuando las fechas que se van a escribir ya
+ * están ocupadas por otra ausencia viva de la misma persona. La lanzan las dos
+ * puertas del solapamiento que corren dentro de una transacción de este módulo:
+ * firmar el cambio (`decidirModificacion`) y el `PATCH` de admin
+ * (`actualizarSolicitud`).
  *
- * THROW y no `return` por el mismo motivo que `ChoqueConLaSolicitud`, y aquí es
- * todavía más fácil de perder de vista: cuando esto salta, **las dos escrituras
- * ya están hechas** —la propuesta marcada `aprobada` y la solicitud movida a las
- * fechas nuevas—. Un `return` desde dentro de `withTransaction` sale por la
- * puerta del `COMMIT` —no hay error que provoque el `ROLLBACK`—, así que
- * confirmaría las dos y dejaría exactamente el estado que esta puerta existe
- * para impedir: dos ausencias vivas de la misma persona sobre el mismo día, con
- * un 409 devuelto al jefe diciéndole que no se hizo nada. Se comprobó
- * cambiándolo por un `return`: el test del ROLLBACK se pone rojo.
+ * En `decidirModificacion` es THROW y no `return` por el mismo motivo que
+ * `ChoqueConLaSolicitud`, y allí es todavía más fácil de perder de vista: cuando
+ * esto salta, **las dos escrituras ya están hechas** —la propuesta marcada
+ * `aprobada` y la solicitud movida a las fechas nuevas—. Un `return` desde dentro
+ * de `withTransaction` sale por la puerta del `COMMIT` —no hay error que provoque
+ * el `ROLLBACK`—, así que confirmaría las dos y dejaría exactamente el estado que
+ * esa puerta existe para impedir: dos ausencias vivas de la misma persona sobre
+ * el mismo día, con un 409 devuelto al jefe diciéndole que no se hizo nada. Se
+ * comprobó cambiándolo por un `return`: el test del ROLLBACK se pone rojo. En
+ * `actualizarSolicitud` la comprobación va ANTES del UPDATE, así que cuando salta
+ * no hay nada escrito: allí el throw no deshace la escritura, la impide — y
+ * `return null` está ocupado, porque significa «no encontrada».
  *
- * Lleva el choque encima porque el aviso tiene que nombrarlo. No sale de este
- * módulo — se caza abajo y se traduce a un resultado normal.
+ * Lleva el choque encima porque el aviso tiene que nombrarlo.
+ *
+ * ⚠️ Es la única de las dos señales que SALE del módulo, y se exporta por una
+ * razón concreta: el `PATCH` va del router al repo sin pasar por el servicio, así
+ * que no hay ninguna función intermedia donde cazarla y traducirla a un
+ * resultado, como sí hace `decidirModificacion` aquí abajo. La caza el `catch` de
+ * esa ruta en `router.ts`.
  */
-class SolapeAlAplicar extends Error {
+export class SolapeAlAplicar extends Error {
   constructor(public readonly solape: Solape) {
     super('solape');
   }
@@ -1486,13 +1547,15 @@ export async function decidirModificacion(
       //    no se pide, se informa después de haber estado enfermo, y no se le
       //    puede negar. No se comparte aquel helper porque esto vive en el repo,
       //    dentro de la transacción y con un `PoolClient`, y él lanza
-      //    `AusenciaError` desde el servicio con un `Pool`. Que las dos digan lo
+      //    `AusenciaError` desde el servicio con un `Pool`. Que todas digan lo
       //    mismo NO lo garantiza el compilador, y si divergen una puerta autoriza
       //    lo que la siguiente niega: la 2 deja pasar la propuesta por la
       //    exención y firmarla daría 409. Alcanzable hoy — el `PATCH` de admin
       //    admite cualquier tipo con cualquier estado, así que hay
-      //    `incapacidad`es en `aprobada`. Y son TRES copias, no dos: el doble
-      //    in-memory de `router.test.ts` la repite también.
+      //    `incapacidad`es en `aprobada`. Y son CINCO copias, no dos: esta, la de
+      //    `actualizarSolicitud` —el `PATCH`, que tampoco pasa por el servicio—,
+      //    la de `exigirSinSolape`, y las dos que el doble in-memory de
+      //    `router.test.ts` copia de estas.
       //  - la clase, en cambio, hoy no cambia el resultado por su cuenta: en toda
       //    anulación las tres columnas nuevas van a `null` —lo exige el CHECK
       //    `modificaciones_campos_por_clase` de la 024—, así que el trozo de las

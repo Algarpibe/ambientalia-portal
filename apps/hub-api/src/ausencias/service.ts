@@ -277,12 +277,14 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
  * Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
  * —`Solape` es una interface, sin index signature implícita, así que
  * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
- * uuid que no necesita. Escrito UNA vez porque lo usan las dos puertas que
- * responden este 409 —el alta y la propuesta por un lado, firmar el cambio por
- * otro— y esa promesa de no filtrar el `id` tiene que poder atarse en un solo
- * sitio: la vigila `router.test.ts` comparando las claves exactas del `detalle`.
+ * uuid que no necesita. Escrito UNA vez porque lo usan las CUATRO puertas que
+ * responden este 409 —el alta y la propuesta por `exigirSinSolape`, firmar el
+ * cambio aquí abajo, y el `PATCH` de admin desde el `catch` de `router.ts`, que
+ * es lo único que obliga a exportarlo— y esa promesa de no filtrar el `id` tiene
+ * que poder atarse en un solo sitio: la vigila `router.test.ts` comparando las
+ * claves exactas del `detalle`.
  */
-function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
+export function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
   return {
     tipo: choque.tipo,
     estado: choque.estado,
@@ -294,15 +296,18 @@ function detalleDelSolape(choque: repo.Solape): Record<string, unknown> {
 /**
  * Corta si esta persona ya tiene una ausencia viva en esas fechas.
  *
- * Aquí se decide qué es un solapamiento para las tres puertas que pasan por el
- * servicio: esta alta, proponer un cambio de fechas y el `PATCH` de admin.
+ * Aquí se decide qué es un solapamiento para las DOS puertas que pasan por el
+ * servicio: esta alta y proponer un cambio de fechas.
  *
- * ⚠️ La CUARTA —firmar el cambio— no puede pasar por aquí y no pasa: vive dentro
- * de la transacción de `repo.decidirModificacion`, con un `PoolClient` y sin
- * poder lanzar `AusenciaError`, así que llama a `repo.solapeDe` por su cuenta y
- * **repite a mano la exención de la incapacidad de aquí abajo**. Nada obliga a
- * las dos a coincidir, y si divergen una puerta autoriza lo que la siguiente
- * niega. Quien toque la exención tiene que tocar las dos.
+ * ⚠️ Las otras dos no pasan por aquí, y no es descuido. Firmar el cambio vive
+ * dentro de la transacción de `repo.decidirModificacion`, con un `PoolClient` y
+ * sin poder lanzar `AusenciaError`. Y el `PATCH` de admin no tiene función de
+ * servicio —el router llama a `repo.actualizarSolicitud` derecho— y su
+ * comprobación va también dentro de esa transacción, para no mirar por una
+ * conexión y escribir por otra. Las dos llaman a `repo.solapeDe` por su cuenta y
+ * **repiten a mano la exención de la incapacidad de aquí abajo**. Nada obliga a
+ * las cuatro a coincidir, y si divergen una puerta autoriza lo que la siguiente
+ * niega.
  */
 async function exigirSinSolape(
   db: Pool,
@@ -316,10 +321,11 @@ async function exigirSinSolape(
   // las fechas ya pasadas no se puede anular ni acortar nada para hacerle sitio,
   // así que bloquearla dejaría a esa persona sin poder registrarla.
   //
-  // ⚠️ Esta línea está TRES veces: aquí, en la puerta de la firma
-  // (`repo.decidirModificacion`, que no puede llamar a esta función porque
-  // corre dentro de su transacción) y en el doble in-memory de
-  // `router.test.ts`. Quien la toque tiene que tocar las tres: nada las ata.
+  // ⚠️ Esta línea está CINCO veces: aquí, en las dos puertas del repo que no
+  // pueden llamar a esta función porque corren dentro de una transacción
+  // (`repo.decidirModificacion` y `repo.actualizarSolicitud`), y en las dos que
+  // el doble in-memory de `router.test.ts` copia de ellas. Quien la toque tiene
+  // que tocarlas todas: nada las ata.
   if (tipo === 'incapacidad') return;
 
   const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);

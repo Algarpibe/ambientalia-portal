@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { crearModificacion, decidirModificacion, modificacionPorId, solapeDe, solicitudPorId } from './repo.js';
+import {
+  actualizarSolicitud,
+  crearModificacion,
+  decidirModificacion,
+  modificacionPorId,
+  solapeDe,
+  solicitudPorId,
+  SolapeAlAplicar,
+  type EdicionSolicitud,
+} from './repo.js';
 import {
   poolDePrueba,
   limpiar,
@@ -280,5 +289,105 @@ describe('decidirModificacion frente al solape', () => {
       fechaInicio: '2026-07-20',
       fechaFin: '2026-07-22',
     });
+  });
+});
+
+// ── La cuarta puerta: el PATCH de admin ────────────────────────────────────
+//
+// El registro general puede mover CUALQUIER ausencia a CUALQUIER fecha, y es la
+// unica de las cuatro puertas que no pasa por el servicio: el router llama al
+// repo directamente. Por eso la comprobacion vive dentro de la transaccion de
+// `actualizarSolicitud`, y por eso lanza en vez de devolver —`null` ya significa
+// «no encontrada» ahi, y el router lo traduce a 404—.
+
+describe('actualizarSolicitud frente al solape', () => {
+  /** El cuerpo completo que exige el PATCH, con lo minimo cambiado encima. */
+  const edicion = (over: Partial<EdicionSolicitud> = {}): EdicionSolicitud => ({
+    empleadoId,
+    tipo: 'vacaciones',
+    fechaInicio: '2026-07-10',
+    fechaFin: '2026-07-14',
+    dias: 5,
+    estado: 'aprobada',
+    comentarios: null,
+    observaciones: null,
+    ...over,
+  });
+
+  /** Otra ausencia aprobada el 21, justo encima del destino de la correccion. */
+  const ocuparElVeintiuno = () =>
+    sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'aprobada',
+      fechaInicio: '2026-07-21',
+      fechaFin: '2026-07-21',
+      segundoAprobadorCorreo: null,
+    });
+
+  it('CANDADO: mover una solicitud encima de otra lanza y deja la fila INTACTA', async () => {
+    const a = await sembrarBase();
+    await ocuparElVeintiuno();
+
+    const err = await actualizarSolicitud(
+      db,
+      a.id,
+      edicion({ fechaInicio: '2026-07-20', fechaFin: '2026-07-22', dias: 3 }),
+    ).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(SolapeAlAplicar);
+    // Y nombra CON QUE choca: de ahi sale el `detalle` del 409, y sin el el admin
+    // recibe un «no se puede» sin saber que mirar.
+    expect((err as SolapeAlAplicar).solape).toMatchObject({
+      fechaInicio: '2026-07-21',
+      fechaFin: '2026-07-21',
+    });
+
+    // Lo que el doble in-memory no puede acreditar: contra Postgres de verdad la
+    // fila sigue donde estaba. Hoy la comprobacion va DELANTE del UPDATE, asi que
+    // cuando lanza todavia no se ha escrito nada y el ROLLBACK no deshace nada;
+    // lo que esta asercion vigila es que siga siendo asi —una escritura que se
+    // colara delante y no se deshiciera dejaria aqui las fechas nuevas—.
+    expect(await solicitudPorId(db, a.id)).toMatchObject({
+      tipo: 'vacaciones',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+    });
+  });
+
+  it('corregir sin mover las fechas se guarda: la solicitud se excluye a si misma', async () => {
+    // El camino bueno, y aqui hace falta por dos cosas distintas. Una: sin la
+    // exclusion por id la fila chocaria SIEMPRE contra ella misma y el registro
+    // entero quedaria inmodificable. Otra: la relectura final va por el `client`
+    // de la transaccion, y si fuera por el `Pool` saldria de ella y devolveria la
+    // fila de ANTES del UPDATE —el estado y el comentario viejos—.
+    const a = await sembrarBase();
+
+    const r = await actualizarSolicitud(db, a.id, edicion({ estado: 'pendiente', comentarios: 'Corregido a mano' }));
+
+    expect(r).toMatchObject({
+      estado: 'pendiente',
+      comentarios: 'Corregido a mano',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+    });
+  });
+
+  it('CANDADO: a una incapacidad no la frena el solape, igual que en las otras puertas', async () => {
+    // Misma exencion y mismo motivo que en las otras tres: una incapacidad no se
+    // pide, se informa despues de haber estado enfermo, y con las fechas ya
+    // pasadas no hay nada que anular ni acortar para hacerle sitio. Aqui ademas
+    // es donde MAS falta hace: corregir a mano una baja mal registrada es
+    // exactamente para lo que existe este endpoint.
+    const a = await sembrarBase();
+    await ocuparElVeintiuno();
+
+    const r = await actualizarSolicitud(
+      db,
+      a.id,
+      edicion({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-20', fechaFin: '2026-07-22', dias: 3 }),
+    );
+
+    expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: '2026-07-20', fechaFin: '2026-07-22' });
   });
 });

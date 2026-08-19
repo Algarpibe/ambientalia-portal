@@ -389,7 +389,17 @@ export function createAusenciasRouter(db: Pool): Router {
       );
       res.json(actualizada);
     } catch (e) {
-      sendError(res, e, 'ausencias_editar_solicitud');
+      // La CUARTA puerta del solapamiento contesta desde aquí y no desde el
+      // servicio, como las otras tres, porque esta ruta no pasa por él: llama al
+      // repo derecho. Y `repo.actualizarSolicitud` no puede lanzar un
+      // `AusenciaError` —el repo no conoce el servicio—, así que lanza su
+      // centinela y la traducción vive aquí: mismo 409 que las demás y el mismo
+      // `detalleDelSolape`, que es lo que promete no filtrar el `id` del choque.
+      const error =
+        e instanceof repo.SolapeAlAplicar
+          ? new AusenciaError('rango_solapado', 409, 'fechaInicio', service.detalleDelSolape(e.solape))
+          : e;
+      sendError(res, error, 'ausencias_editar_solicitud');
     }
   });
 
