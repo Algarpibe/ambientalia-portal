@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   construirPayload,
+  construirPayloadCorreccion,
   construirPayloadModificacion,
   eventosDeAlta,
   idDeEventoCalendario,
 } from './notificaciones.js';
-import { CALENDARIO_STAFF, HOJA_ID, PESTANA } from './config.js';
+import { CALENDARIO_STAFF, COPIA_POR_DEFECTO, HOJA_ID, PESTANA } from './config.js';
 import type { Modificacion, Solicitud } from './types.js';
 
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
@@ -889,5 +890,101 @@ describe('cuando la segunda firma está apagada', () => {
     expect(p.correo.para).toBe(
       'ana.ruiz@ambientalia.com.co, comercial@ambientalia.com.co, gerencia@ambientalia.com.co',
     );
+  });
+});
+
+describe('el payload de una corrección del registro', () => {
+  const ADMIN = 'comercial@ambientalia.com.co';
+  const EVENT_ID = '2993c29668a94bf38708574110cde669';
+
+  const aprobadaConEvento = (over: Partial<Solicitud> = {}) =>
+    solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID, ...over });
+
+  it('mueve el evento cuando cambian las fechas', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ fechaInicio: '2026-07-13', fechaFin: '2026-07-17' });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.calendario).toMatchObject({
+      calendarId: CALENDARIO_STAFF,
+      eventId: EVENT_ID,
+      accion: 'actualizar',
+      inicio: '2026-07-13',
+      // Fin EXCLUSIVO: Google no pinta el último día si no se le suma uno.
+      fin: '2026-07-18',
+    });
+    expect(p.correo.asunto).toContain('⚠️ Ajustar la hoja —');
+    expect(p.correo.cuerpo).toContain('ya se ha corregido solo');
+  });
+
+  it('borra el evento cuando la solicitud sale del calendario', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ estado: 'rechazada' });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.calendario).toMatchObject({ eventId: EVENT_ID, accion: 'borrar' });
+    expect(p.correo.cuerpo).toContain('ya se ha borrado solo');
+  });
+
+  // CANDADO. Sin él, corregir el recuento de días manda a Google un update
+  // idéntico al evento que ya hay y un correo diciendo que se corrigió algo.
+  it('CANDADO: corregir solo los días no toca el calendario, pero sí avisa de la hoja', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ diasHabiles: 4 });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.calendario).toBeNull();
+    expect(p.correo.asunto).toContain('⚠️ Ajustar la hoja —');
+    expect(p.correo.cuerpo).toContain('el evento del calendario no cambia');
+    expect(p.correo.cuerpo).not.toContain('se ha corregido solo');
+  });
+
+  // CANDADO. Las aprobadas ANTERIORES a la migración 026 llevan en Google un id
+  // que inventó Google y que nadie apuntó: existen, pero no se pueden localizar.
+  it('CANDADO: sin id no se corrige nada y el aviso pide las dos cosas a mano', () => {
+    const previa = solicitud({ estado: 'aprobada', eventoCalendarioId: null });
+    const actual = solicitud({ estado: 'aprobada', eventoCalendarioId: null, fechaInicio: '2026-07-13' });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.calendario).toBeNull();
+    expect(p.correo.asunto).toContain('⚠️ Ajustar calendario y hoja —');
+  });
+
+  it('la hoja va a null SIEMPRE: n8n hace append y a esa fila no se puede volver', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ fechaInicio: '2026-07-13' });
+    expect(construirPayloadCorreccion(previa, actual, ADMIN).hoja).toBeNull();
+  });
+
+  it('el correo va a la copia de la ficha y nombra al admin que lo hizo', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ fechaInicio: '2026-07-13' });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.correo.para).toBe('administrativo@ambientalia.com.co');
+    expect(p.correo.cuerpo).toContain(ADMIN);
+  });
+
+  // CANDADO. Este es el ÚNICO correo de la app con una sola fuente de
+  // destinatario: en los demás la cadena de firmas rellena la lista. Un `para`
+  // vacío no degrada el aviso, deja una fila del outbox que Gmail rechaza y n8n
+  // reintenta cada diez minutos para siempre.
+  it('CANDADO: una ficha sin copia cae en el valor por defecto, nunca en vacío', () => {
+    const previa = aprobadaConEvento({ copiaCorreo: null });
+    const actual = aprobadaConEvento({ copiaCorreo: null, fechaInicio: '2026-07-13' });
+    const p = construirPayloadCorreccion(previa, actual, ADMIN);
+
+    expect(p.correo.para).toBe(COPIA_POR_DEFECTO);
+    expect(p.correo.para).not.toBe('');
+  });
+
+  it('el cuerpo enseña el antes y el después, con estado y recuento', () => {
+    const previa = aprobadaConEvento();
+    const actual = aprobadaConEvento({ estado: 'rechazada' });
+    const cuerpo = construirPayloadCorreccion(previa, actual, ADMIN).correo.cuerpo;
+
+    expect(cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(cuerpo).toContain('aprobada');
+    expect(cuerpo).toContain('rechazada');
   });
 });
