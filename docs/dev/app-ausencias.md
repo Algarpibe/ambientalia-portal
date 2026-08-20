@@ -381,6 +381,39 @@ bandera, no un `COALESCE`: aquí NULL es un valor con significado.
 la pestaña *Saldos*. El hueco está preparado: `calcularSaldoCompensatorios` deja
 sitio a un `otorgados` sin cambiar de firma.
 
+**Pedir más de lo que hay se BLOQUEA**, al contrario que en vacaciones, donde
+solo se avisa y decide quien firma. El motivo es que esta bolsa no se devenga: un
+descubierto no se cura esperando, y nadie puede autorizarlo porque los días o se
+han ganado o no. Lo hace `exigirCompensatoriosSuficientes` en `crearSolicitud`,
+con dos códigos —`compensatorios_sin_saldo` (409) y
+`compensatorios_insuficientes` (409, con `detalle`)—, porque la acción del
+empleado es distinta en cada caso.
+
+Cuatro matices que son cada uno un candado:
+
+- Se compara contra **`pedible` (`disponible − enTramite`)** y no contra
+  `disponible`. Con el firme a secas, tres solicitudes de un día con un día de
+  bolsa pasarían las tres: media firma no descuenta.
+- `pedible` **redondea**, y el cliente usa el espejo de `dominio.ts`. Sin eso,
+  `disponible − enTramite` da cosas como `3.9000000000000004` y las dos mitades
+  discrepan justo en el borde en el que la pantalla dice «te falta 0».
+- **Solo al crear.** Bloquear en la firma dejaría pendientes imposibles de
+  decidir si la bolsa baja entre medias. El `PATCH` de admin tampoco bloquea.
+- **Un rango de 0 días hábiles sale sin mirar la bolsa.** Sin ese corte, con la
+  bolsa en negativo `0 > −2` bloquearía algo que no consume un día.
+
+⚠️ **«Sin configurar» cuenta como cero y bloquea**, y eso tiene una consecuencia
+de despliegue que no se puede olvidar: las migraciones tienen prohibido sembrar
+datos, así que el día que el bloqueo entra, la bolsa está vacía para TODA la
+plantilla. Por eso viaja en un empuje POSTERIOR al de la pestaña que permite
+sembrarla. El contador de «sin bolsa de compensatorios» del panel de *Saldos* es
+el que dice cuándo se puede activar: mientras no esté en cero, corta a gente que
+no tiene forma de arreglarlo por su cuenta.
+
+⚠️ **No cierra la carrera de dos altas simultáneas**: son dos SELECT sin
+`FOR UPDATE`, igual que `solapeDe` y por la misma razón. Dos pestañas mandando a
+la vez pueden colar un día de más.
+
 **Los cuatro endpoints:**
 
 | Endpoint | Quién |
