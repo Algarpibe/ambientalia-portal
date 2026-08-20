@@ -8,7 +8,15 @@ import {
   type Solicitud,
   type TipoSolicitud,
 } from './api';
-import { contarDiasHabiles, etiquetasFecha, hoyEnColombia, pedible, requiereAprobacion, TIPOS } from './dominio';
+import {
+  contarDiasHabiles,
+  esOtorgamiento,
+  etiquetasFecha,
+  hoyEnColombia,
+  pedible,
+  requiereAprobacion,
+  TIPOS,
+} from './dominio';
 import TarjetaSaldo from './TarjetaSaldo';
 import TarjetaCompensatorios from './TarjetaCompensatorios';
 
@@ -37,11 +45,21 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [comentarios, setComentarios] = useState('');
+  /** Los días que se piden conceder. Solo lo usa el otorgamiento. */
+  const [diasTexto, setDiasTexto] = useState('');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
   const inputArchivo = useRef<HTMLInputElement>(null);
+
+  const pideOtorgamiento = esOtorgamiento(tipo);
+  // Texto y no número, por lo mismo que en el panel de saldos: convertirlo aquí
+  // haría que un «abc» viajara como NaN → `null` en JSON, y el servidor leería
+  // «sin días» en vez de «esto no es un número». La validación de forma vive
+  // entera en el backend, que es quien redacta el error.
+  const diasConcedidos = Number(diasTexto.trim().replace(',', '.'));
+  const diasConcedidosValidos = /^\d{1,2}([.,]\d)?$/.test(diasTexto.trim()) && diasConcedidos > 0;
 
   const etiquetas = etiquetasFecha(tipo);
   const dias = useMemo(() => contarDiasHabiles(fechaInicio, fechaFin, festivos), [fechaInicio, fechaFin, festivos]);
@@ -79,13 +97,18 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
     dias > 0 &&
     dias > pedible(compensatorios);
 
-  const puedeEnviar =
-    Boolean(fechaInicio && fechaFin) &&
-    !rangoInvertido &&
-    !fechaEnPasado &&
-    !faltaAdjunto &&
-    !excedeCompensatorios &&
-    !enviando;
+  // Un otorgamiento tiene otros requisitos: no hay fecha fin que rellenar, pero
+  // sí una cantidad y un motivo, los dos obligatorios. Lo que no se comprueba
+  // aquí es el tope de 30 días ni el año hacia atrás: esas dos las redacta el
+  // servidor con su mensaje, y duplicarlas aquí sería tener la regla dos veces.
+  const puedeEnviar = pideOtorgamiento
+    ? Boolean(fechaInicio) && diasConcedidosValidos && Boolean(comentarios.trim()) && !enviando
+    : Boolean(fechaInicio && fechaFin) &&
+      !rangoInvertido &&
+      !fechaEnPasado &&
+      !faltaAdjunto &&
+      !excedeCompensatorios &&
+      !enviando;
 
   function cambiarTipo(nuevo: TipoSolicitud) {
     setTipo(nuevo);
@@ -123,20 +146,27 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
       const creada = await crearSolicitud({
         tipo,
         fechaInicio,
-        fechaFin,
+        // Un otorgamiento es UN día: el fin es el mismo que el inicio, y el
+        // servidor lo exige. Se manda explícito en vez de dejar el campo vacío
+        // porque `fechaFin` no es opcional en el contrato.
+        fechaFin: pideOtorgamiento ? fechaInicio : fechaFin,
         comentarios: comentarios.trim() || undefined,
+        dias: pideOtorgamiento ? diasConcedidos : undefined,
         adjunto: archivo
           ? { nombreArchivo: archivo.name, mime: archivo.type, contenidoBase64: await leerComoBase64(archivo) }
           : undefined,
       });
       setExito(
-        requiereAprobacion(tipo)
-          ? `Solicitud enviada. ${aprobador} recibirá el aviso para aprobarla y te llegará un correo con el resultado.`
-          : 'Incapacidad registrada. Te hemos enviado el acuse por correo.',
+        pideOtorgamiento
+          ? `Petición enviada. ${aprobador} decidirá si te concede esos días; si los aprueba entrarán en tu bolsa de compensatorios.`
+          : requiereAprobacion(tipo)
+            ? `Solicitud enviada. ${aprobador} recibirá el aviso para aprobarla y te llegará un correo con el resultado.`
+            : 'Incapacidad registrada. Te hemos enviado el acuse por correo.',
       );
       setFechaInicio('');
       setFechaFin('');
       setComentarios('');
+      setDiasTexto('');
       limpiarArchivo();
       onCreada(creada);
     } catch (err) {
@@ -175,36 +205,76 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
         </div>
       </fieldset>
 
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor="fechaInicio" className="mb-1 block text-sm font-medium text-gray-700">
-            {etiquetas.inicio}
-          </label>
-          <input
-            id="fechaInicio"
-            type="date"
-            required
-            value={fechaInicio}
-            min={minFecha}
-            onChange={(e) => setFechaInicio(e.target.value)}
-            className={CAMPO}
-          />
+      {/* Un otorgamiento pide otra cosa: UN día trabajado y una cantidad. No es
+          un rango, así que el segundo campo de fecha no se oculta con CSS — no
+          existe, para que no pueda mandarse por accidente. Y la fecha va sin
+          `min`: se pide DESPUÉS de haber trabajado, siempre en el pasado. */}
+      {pideOtorgamiento ? (
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="fechaInicio" className="mb-1 block text-sm font-medium text-gray-700">
+              Día que trabajaste
+            </label>
+            <input
+              id="fechaInicio"
+              type="date"
+              required
+              value={fechaInicio}
+              onChange={(e) => setFechaInicio(e.target.value)}
+              className={CAMPO}
+            />
+          </div>
+          <div>
+            <label htmlFor="diasConcedidos" className="mb-1 block text-sm font-medium text-gray-700">
+              Días que pides
+            </label>
+            {/* type="text" y no "number", como el panel de saldos: hace falta
+                para admitir la coma decimal, que un `type="number"` rechaza en
+                casi todos los locales del navegador. */}
+            <input
+              id="diasConcedidos"
+              type="text"
+              inputMode="decimal"
+              required
+              value={diasTexto}
+              onChange={(e) => setDiasTexto(e.target.value)}
+              placeholder="1"
+              className={CAMPO}
+            />
+          </div>
         </div>
-        <div>
-          <label htmlFor="fechaFin" className="mb-1 block text-sm font-medium text-gray-700">
-            {etiquetas.fin}
-          </label>
-          <input
-            id="fechaFin"
-            type="date"
-            required
-            value={fechaFin}
-            min={fechaInicio || minFecha}
-            onChange={(e) => setFechaFin(e.target.value)}
-            className={CAMPO}
-          />
+      ) : (
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="fechaInicio" className="mb-1 block text-sm font-medium text-gray-700">
+              {etiquetas.inicio}
+            </label>
+            <input
+              id="fechaInicio"
+              type="date"
+              required
+              value={fechaInicio}
+              min={minFecha}
+              onChange={(e) => setFechaInicio(e.target.value)}
+              className={CAMPO}
+            />
+          </div>
+          <div>
+            <label htmlFor="fechaFin" className="mb-1 block text-sm font-medium text-gray-700">
+              {etiquetas.fin}
+            </label>
+            <input
+              id="fechaFin"
+              type="date"
+              required
+              value={fechaFin}
+              min={fechaInicio || minFecha}
+              onChange={(e) => setFechaFin(e.target.value)}
+              className={CAMPO}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {rangoInvertido && (
         <p className="mb-4 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
@@ -246,9 +316,21 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
         </div>
       )}
 
+      {/* La bolsa a la que van a parar los días, para que quien pide vea el
+          antes y el después. Sin `diasPedidos`: aquí no se gasta nada, se suma,
+          y la tarjeta pintaría en rojo «te faltan N» sobre una petición que hace
+          justo lo contrario. */}
+      {pideOtorgamiento && compensatorios && (
+        <div className="mb-4">
+          <TarjetaCompensatorios saldo={compensatorios} titulo="Tu bolsa ahora mismo" />
+        </div>
+      )}
+
       {/* El contador en vivo evita la sorpresa de pedir «una semana» y que el
-          aprobador vea 4 días porque había un festivo en medio. */}
-      {dias > 0 && !rangoInvertido && (
+          aprobador vea 4 días porque había un festivo en medio. No aplica a un
+          otorgamiento: sus días se teclean, no se cuentan — y el día por el que
+          se gana suele ser justo uno que NO es hábil. */}
+      {!pideOtorgamiento && dias > 0 && !rangoInvertido && (
         <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
           Son <b className="tabular-nums">{dias}</b> {dias === 1 ? 'día hábil' : 'días hábiles'}, descontando fines de
           semana y festivos de Colombia.
@@ -257,7 +339,17 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
 
       <div className="mb-4">
         <label htmlFor="comentarios" className="mb-1 block text-sm font-medium text-gray-700">
-          Comentarios <span className="font-normal text-gray-400">(opcional)</span>
+          {pideOtorgamiento ? (
+            // Obligatorio, y con otro nombre: es lo que el jefe juzga, y lo único
+            // que dentro de seis meses dirá por qué esa persona tiene esos días.
+            <>
+              Por qué pides esos días <span className="font-normal text-red-500">*</span>
+            </>
+          ) : (
+            <>
+              Comentarios <span className="font-normal text-gray-400">(opcional)</span>
+            </>
+          )}
         </label>
         <textarea
           id="comentarios"
