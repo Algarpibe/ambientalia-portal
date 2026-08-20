@@ -373,7 +373,8 @@ vi.mock('./repo.js', () => ({
     estado.solicitudes
       .filter(
         (s: any) =>
-          (s.tipo === 'vacaciones' || s.tipo === 'compensatorio') && ids.includes(s.empleadoId as string),
+          (s.tipo === 'vacaciones' || s.tipo === 'compensatorio' || s.tipo === 'otorgamiento') &&
+          ids.includes(s.empleadoId as string),
       )
       .map((s: any) => ({
         empleadoId: s.empleadoId,
@@ -381,6 +382,12 @@ vi.mock('./repo.js', () => ({
         fechaInicio: s.fechaInicio,
         diasHabiles: s.diasHabiles,
         estado: s.estado,
+        // El SELECT real recorta `created_at` a fecha (`::date::text`) porque el
+        // módulo del saldo lo compara contra `fecha_corte`, que es YYYY-MM-DD.
+        // El doble tiene que recortarlo igual: dejarlo como instante ISO rompería
+        // el orden lexicográfico, y devolverlo `undefined` hace que la validación
+        // lance un 500 en cualquier test que toque el saldo.
+        createdAt: String(s.createdAt ?? s.fechaInicio).slice(0, 10),
       })),
   fijarSaldo: async (
     _db: unknown,

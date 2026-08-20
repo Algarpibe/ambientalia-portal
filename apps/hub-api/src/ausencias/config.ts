@@ -64,13 +64,41 @@ export const CALENDARIO_STAFF =
 /** Libro de Google Sheets `consulta_vacaciones`. */
 export const HOJA_ID = '10vStWIghTjmsCar8n6wJySYDBhrV5UXsdcoQZEW-Jao';
 
-/** Pestaña de destino por tipo. Nómina las sigue consultando tal cual. */
-export const PESTANA: Record<TipoSolicitud, string> = {
+/**
+ * Pestaña de destino por tipo. Nómina las sigue consultando tal cual.
+ *
+ * `null` significa «este tipo no va a la hoja», y hoy es el caso del
+ * otorgamiento: no es una ausencia, así que una fila suya en la pestaña de
+ * compensatorios sería un día fuera que nadie se tomó — en el fichero que nómina
+ * usa para pagar.
+ *
+ * Es la SEGUNDA cerradura de esa exclusión, a propósito. La primera está en
+ * `construirPayload`, que no le construye `hoja` a un otorgamiento; ésta hace
+ * que, aunque alguien deshiciera aquélla, no haya pestaña a la que escribir.
+ */
+export const PESTANA: Record<TipoSolicitud, string | null> = {
   vacaciones: 'vacaciones_solicitadas',
   compensatorio: 'compensatorios_solicitados',
   permiso: 'permisos_solicitados',
   incapacidad: 'incapacidades_informadas',
+  otorgamiento: null,
 };
+
+/**
+ * Quién firma cuando el organigrama se acaba: la raíz es su propio jefe, y sin
+ * esto su solicitud aterriza en su propia bandeja.
+ *
+ * Hasta el 2026-08-20 eso significaba que se la firmaba ella misma —`puedeDecidir`
+ * no comprobaba que quien firma no fuera el solicitante—, y valía para todos los
+ * tipos, no solo para los otorgamientos.
+ *
+ * Va aquí y no incrustado en `jerarquia.ts` para que cambiarlo el día que esta
+ * persona cambie de puesto sea una línea. ⚠️ Tiene que ser el correo con el que
+ * esa persona INICIA SESIÓN, no un buzón de reparto: `puedeDecidir` lo compara
+ * contra el correo de la sesión, y un buzón con el que nadie entra dejaría esas
+ * solicitudes sin poder firmar.
+ */
+export const APROBADOR_DE_RESERVA = 'administrativo@ambientalia.com.co';
 
 /** Base pública del portal, para el enlace «ver en el portal» de los correos. */
 export function urlPortal(): string {

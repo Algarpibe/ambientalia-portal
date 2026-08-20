@@ -3,14 +3,35 @@ import { calcularSaldo, calcularSaldoCompensatorios, hoyEnColombia, pedible, typ
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
+/**
+ * En las ausencias `createdAt` da igual —solo lo miran los otorgamientos— pero
+ * tiene que ser una fecha válida: se valida para TODAS las filas, a propósito.
+ * Se pone igual que el inicio, que es lo más parecido a la realidad.
+ */
 /** Una vacación aprobada de `dias` días que empieza el `inicio`. */
 function vac(inicio: string, dias: number, estado: AusenciaParaElSaldo['estado'] = 'aprobada'): AusenciaParaElSaldo {
-  return { tipo: 'vacaciones', fechaInicio: inicio, diasHabiles: dias, estado };
+  return { tipo: 'vacaciones', fechaInicio: inicio, diasHabiles: dias, estado, createdAt: inicio };
 }
 
 /** Un compensatorio aprobado de `dias` días que empieza el `inicio`. */
 function comp(inicio: string, dias: number, estado: AusenciaParaElSaldo['estado'] = 'aprobada'): AusenciaParaElSaldo {
-  return { tipo: 'compensatorio', fechaInicio: inicio, diasHabiles: dias, estado };
+  return { tipo: 'compensatorio', fechaInicio: inicio, diasHabiles: dias, estado, createdAt: inicio };
+}
+
+/**
+ * Un otorgamiento aprobado de `dias` días concedidos.
+ *
+ * Las dos fechas van SEPARADAS a propósito y son lo que este tipo tiene de
+ * particular: `trabajo` es el día que se trabajó de más —en el pasado— y `pedido`
+ * es cuándo se solicitó, que es lo único que el saldo mira.
+ */
+function otorg(
+  trabajo: string,
+  pedido: string,
+  dias: number,
+  estado: AusenciaParaElSaldo['estado'] = 'aprobada',
+): AusenciaParaElSaldo {
+  return { tipo: 'otorgamiento', fechaInicio: trabajo, diasHabiles: dias, estado, createdAt: pedido };
 }
 
 describe('calcularSaldo', () => {
@@ -86,11 +107,14 @@ describe('calcularSaldo', () => {
     expect(s.enTramite).toBe(0);
   });
 
-  it('ignora permisos, compensatorios e incapacidades', () => {
+  it('ignora permisos, compensatorios, incapacidades y otorgamientos', () => {
     const otros: AusenciaParaElSaldo[] = [
-      { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada' },
-      { tipo: 'compensatorio', fechaInicio: '2026-02-01', diasHabiles: 2, estado: 'aprobada' },
-      { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada' },
+      { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada', createdAt: '2026-02-01' },
+      { tipo: 'compensatorio', fechaInicio: '2026-02-01', diasHabiles: 2, estado: 'aprobada', createdAt: '2026-02-01' },
+      { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada', createdAt: '2026-02-01' },
+      // El otorgamiento SUMA, así que si esta bolsa lo viera no daría 10 de más:
+      // daría 12, y nadie miraría dos veces un saldo que ha subido.
+      { tipo: 'otorgamiento', fechaInicio: '2026-02-01', diasHabiles: 2, estado: 'aprobada', createdAt: '2026-02-01' },
     ];
     const s = calcularSaldo(CONFIG, otros, '2026-01-01');
     expect(s.disfrutadas).toBe(0);
@@ -217,13 +241,69 @@ describe('calcularSaldoCompensatorios', () => {
     // las vacaciones de todo el mundo — y el candado viejo seguiría verde,
     // porque solo mira su bolsa.
     const otros: AusenciaParaElSaldo[] = [
-      { tipo: 'vacaciones', fechaInicio: '2026-02-01', diasHabiles: 5, estado: 'aprobada' },
-      { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada' },
-      { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada' },
+      { tipo: 'vacaciones', fechaInicio: '2026-02-01', diasHabiles: 5, estado: 'aprobada', createdAt: '2026-02-01' },
+      { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada', createdAt: '2026-02-01' },
+      { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada', createdAt: '2026-02-01' },
     ];
     const s = calcularSaldoCompensatorios(CONFIG, otros, '2026-03-02');
     expect(s.disfrutadas).toBe(0);
     expect(s.disponible).toBe(10);
+  });
+
+  it('un otorgamiento aprobado SUMA a la bolsa', () => {
+    const s = calcularSaldoCompensatorios(CONFIG, [otorg('2026-02-14', '2026-02-16', 2)], '2026-03-02');
+    expect(s.otorgados).toBe(2);
+    expect(s.disponible).toBe(12);
+  });
+
+  it('CANDADO: el otorgamiento se cuenta por cuándo se PIDIÓ, no por el día trabajado', () => {
+    // El caso que mata: se trabajó un sábado ANTERIOR al corte y se pidió
+    // DESPUÉS. Filtrando por `fechaInicio` —que es lo natural, porque es lo que
+    // hacen los otros dos términos— `'2025-12-20' >= '2026-01-01'` es false y el
+    // día concedido no contaría nunca: sin error, sin aviso, y con el empleado
+    // viendo que su bolsa no sube.
+    //
+    // Un test escrito con el trabajo POSTERIOR al corte pasaría con las dos
+    // implementaciones y no probaría nada.
+    const s = calcularSaldoCompensatorios(CONFIG, [otorg('2025-12-20', '2026-02-16', 2)], '2026-03-02');
+    expect(s.otorgados).toBe(2);
+    expect(s.disponible).toBe(12);
+  });
+
+  it('un otorgamiento PEDIDO antes del corte no se cuenta: ya estaba en el número', () => {
+    // La otra mitad de la regla. Sin ella, «no filtrar nunca» pasaría el candado
+    // de arriba, y re-sembrar el corte contaría dos veces todo lo ya concedido.
+    const s = calcularSaldoCompensatorios(CONFIG, [otorg('2025-12-20', '2025-12-22', 2)], '2026-03-02');
+    expect(s.otorgados).toBe(0);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('un otorgamiento a medio firmar no concede nada', () => {
+    // Ni siquiera a `enTramite`: sumar días que aún no existen animaría a
+    // gastarlos, y el bloqueo por bolsa insuficiente los dejaría pasar.
+    const s = calcularSaldoCompensatorios(CONFIG, [otorg('2026-02-14', '2026-02-16', 2, 'pendiente')], '2026-03-02');
+    expect(s.otorgados).toBe(0);
+    expect(s.enTramite).toBe(0);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('un otorgamiento anulado devuelve los días, y la bolsa puede quedar en negativo', () => {
+    // Anular deja la fila en `rechazada` (ver `aplicarALaSolicitud`), así que sale
+    // de `['aprobada']` sin código nuevo. Si los días ya se gastaron, el
+    // resultado es negativo — que es lo decidido, y lo que ya hace la otra bolsa.
+    const s = calcularSaldoCompensatorios(
+      { saldoCorte: 0, fechaCorte: '2026-01-01' },
+      [otorg('2026-02-14', '2026-02-16', 3, 'rechazada'), comp('2026-02-20', 3)],
+      '2026-03-02',
+    );
+    expect(s.otorgados).toBe(0);
+    expect(s.disponible).toBe(-3);
+  });
+
+  it('lanza si createdAt viene mal formado', () => {
+    // Entra en la misma comparación `>=` que `fechaInicio`, así que falla igual
+    // de silenciosamente: un Date se compara contra NaN y no cuenta jamás.
+    expect(() => calcularSaldoCompensatorios(CONFIG, [otorg('2026-02-14', '16/02/2026', 2)], '2026-03-02')).toThrow();
   });
 
   it('NO devenga con el tiempo: un año después el saldo es el mismo', () => {

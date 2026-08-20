@@ -13,6 +13,7 @@ import {
   ESTADOS_EN_TRAMITE,
   ETIQUETA_TIPO,
   cambiaElCalendario,
+  esOtorgamiento,
   estaEnElCalendario,
   type CorreoEvento,
   type EstadoSolicitud,
@@ -40,6 +41,10 @@ const PERIODO: Record<Solicitud['tipo'], string> = {
   permiso: 'de permiso',
   compensatorio: 'de compensatorio',
   incapacidad: 'de incapacidad',
+  // Un otorgamiento no cubre un periodo: nombra el día en que se trabajó de más.
+  // Las plantillas que lo tocan lo dicen a su manera y no usan esta entrada; está
+  // porque el Record es exhaustivo y no compila sin ella.
+  otorgamiento: 'de trabajo compensable',
 };
 
 /** «día» / «días», para no escribir «1 días hábiles» en un correo. */
@@ -273,8 +278,18 @@ function calendario(s: Solicitud): EventoCalendario {
   };
 }
 
-/** La fila para la pestaña correspondiente, con los encabezados de siempre. */
-function hoja(s: Solicitud): FilaHoja {
+/**
+ * La fila para la pestaña correspondiente, con los encabezados de siempre.
+ *
+ * `null` cuando el tipo no tiene pestaña —hoy solo el otorgamiento, que no es una
+ * ausencia—. Es la SEGUNDA cerradura de esa exclusión: la primera es el
+ * `tocaGoogle` de `construirPayload`, que ni siquiera llama aquí. Se duplica a
+ * propósito, porque lo que hay al otro lado es el fichero con el que nómina paga:
+ * una fila de un día que nadie se tomó es un error que se descubre en un recibo.
+ */
+function hoja(s: Solicitud): FilaHoja | null {
+  const pestana = PESTANA[s.tipo];
+  if (pestana === null) return null;
   const columnas: Record<string, string | number> = {
     'Nombre y Apellidos': s.empleadoNombre,
     'Fecha Inicio': s.fechaInicio,
@@ -290,7 +305,7 @@ function hoja(s: Solicitud): FilaHoja {
     columnas.Comentarios = s.comentarios ?? '';
     columnas['Aprobado?'] = s.estado === 'aprobada' ? 'Sí' : s.estado === 'rechazada' ? 'No' : '';
   }
-  return { documentId: HOJA_ID, pestana: PESTANA[s.tipo], columnas };
+  return { documentId: HOJA_ID, pestana, columnas };
 }
 
 // ── Ensamblado ─────────────────────────────────────────────────────────────
@@ -333,8 +348,18 @@ const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
  * o sea `true` para TODOS los eventos.
  */
 export function construirPayload(s: Solicitud, evento: EventoSolicitud): PayloadEvento {
-  const conCalendario = evento === 'aprobada' || evento === 'registrada';
-  const conHoja = evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada';
+  // ⚠️ El corte por tipo va PRIMERO y afecta a los dos efectos. Hasta que existió
+  // el otorgamiento, esta función decidía qué llega a Google mirando SOLO el
+  // evento, y eso bastaba porque los cuatro tipos eran ausencias. Un
+  // otorgamiento aprobado emite `evento: 'aprobada'` igual que unas vacaciones:
+  // sin esta línea crearía un evento en el calendario de Staff por un día que
+  // nadie se toma, y —peor— una fila en la pestaña con la que se paga la nómina.
+  //
+  // La segunda cerradura está en `hoja()`, que no tiene pestaña a la que
+  // escribir. Son dos porque el error no se vería aquí: se vería en un recibo.
+  const tocaGoogle = !esOtorgamiento(s.tipo);
+  const conCalendario = tocaGoogle && (evento === 'aprobada' || evento === 'registrada');
+  const conHoja = tocaGoogle && (evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada');
 
   return {
     tipo: s.tipo,
@@ -729,6 +754,15 @@ type SituacionCalendario = 'no_cambia' | 'a_mano' | 'actualizado' | 'borrado';
 function situacionDelCalendario(previa: Solicitud, actual: Solicitud): SituacionCalendario {
   if (!cambiaElCalendario(previa, actual)) return 'no_cambia';
   if (previa.eventoCalendarioId === null) return 'a_mano';
+  // Un otorgamiento no tiene sitio en el calendario, así que corregir una
+  // solicitud PARA convertirla en uno hay que resolverlo BORRANDO su evento, no
+  // actualizándolo. Sin esta línea, `estaEnElCalendario('aprobada')` diría que sí
+  // y Google se quedaría con un evento «Compensatorio concedido Fulano» ocupando
+  // unos días que nadie se toma.
+  //
+  // El caso contrario —otorgamiento que sigue siendo otorgamiento— ni llega
+  // aquí: `cambiaElCalendario` ya devolvió `no_cambia` en la primera línea.
+  if (esOtorgamiento(actual.tipo)) return 'borrado';
   return estaEnElCalendario(actual.estado) ? 'actualizado' : 'borrado';
 }
 

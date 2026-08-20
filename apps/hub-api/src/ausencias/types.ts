@@ -1,9 +1,32 @@
-// Tipos de la app «Vacaciones y Permisos». Los cuatro tipos de solicitud son
-// los mismos que ofrecía el formulario de n8n; los nombres se pasan a singular
-// y sin tildes para usarlos como identificadores.
+// Tipos de la app «Vacaciones y Permisos». Los cuatro primeros son los mismos
+// que ofrecía el formulario de n8n; los nombres se pasan a singular y sin tildes
+// para usarlos como identificadores.
 
-export const TIPOS = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad'] as const;
+export const TIPOS = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad', 'otorgamiento'] as const;
 export type TipoSolicitud = (typeof TIPOS)[number];
+
+/**
+ * El otorgamiento NO es una ausencia, y es el único de la lista que no lo es.
+ *
+ * Los otros cuatro dicen «no voy a estar»; este dice «trabajé el sábado,
+ * concédeme un día». Sus columnas se leen distinto —`dias_habiles` son días
+ * CONCEDIDOS y `fecha_inicio` es el día del trabajo extra, en el pasado— y de
+ * ahí salen sus cuatro diferencias, cada una impuesta a mano porque el código
+ * anterior no las deduce:
+ *
+ *  - No ocupa agenda (`ocupaAgenda`, en repo.ts).
+ *  - No va al Google Calendar ni a la hoja de nómina (`construirPayload`).
+ *  - No sale en el calendario del portal (`ausenciasEntre`).
+ *  - Suma al saldo en vez de restar (`sumarDesdeElCorte`).
+ *
+ * Este predicado existe para que esas cuatro no se escriban como cuatro
+ * comparaciones sueltas contra el literal: cada una que se responda a mano se
+ * puede desviar sin que nada avise, que es exactamente lo que le pasó a
+ * `ocupaAgenda` cuando el PATCH copió media regla.
+ */
+export function esOtorgamiento(tipo: TipoSolicitud): boolean {
+  return tipo === 'otorgamiento';
+}
 
 /**
  * Las incapacidades se INFORMAN (terminan en `registrada`); el resto se aprueban.
@@ -150,6 +173,14 @@ export function estaEnElCalendario(estado: EstadoSolicitud): boolean {
  * persona es justo lo que hay que detectar.
  */
 export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolean {
+  // Un otorgamiento no tiene evento que mover: nunca llegó al calendario.
+  //
+  // ⚠️ La guarda mira los DOS lados, y no solo `actual`. Si un admin cambia por
+  // PATCH una vacación aprobada a otorgamiento, el evento viejo SIGUE en Google
+  // y hay que borrarlo — mirar solo `actual` devolvería `false` y lo dejaría ahí
+  // para siempre, sin avisar a nadie. Es la misma forma de fallo que documenta
+  // el orden de ramas de `cambiaLaHoja`, un poco más abajo.
+  if (esOtorgamiento(previa.tipo) && esOtorgamiento(actual.tipo)) return false;
   return (
     estaEnElCalendario(previa.estado) !== estaEnElCalendario(actual.estado) ||
     previa.fechaInicio !== actual.fechaInicio ||
@@ -193,6 +224,14 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
  * quita un campo, hay que comprobar que ese caso lo sigue cazando.
  */
 export function cambiaLaHoja(previa: Solicitud, actual: Solicitud): boolean {
+  // Un otorgamiento no tiene fila en ninguna pestaña: nunca llegó a la hoja.
+  //
+  // Va ANTES de la delegación y eso NO rompe la contención, que es lo que el ⚠️
+  // de arriba protege: `cambiaElCalendario` devuelve `false` sobre exactamente
+  // el mismo par de tipos —su guarda es la misma y también mira los dos lados—,
+  // así que aquí `false` sigue conteniendo a `false`. La guarda de la
+  // incapacidad, que sí rompería la contención si subiera, sigue donde estaba.
+  if (esOtorgamiento(previa.tipo) && esOtorgamiento(actual.tipo)) return false;
   // Esta delegación va PRIMERA a propósito: es lo único que hace que esta
   // función CONTENGA a `cambiaElCalendario` (ver el ⚠️ del JSDoc). Moverla
   // después del corte de incapacidad de abajo rompe esa garantía en silencio.
@@ -323,6 +362,10 @@ export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
   permiso: 'Permisos',
   compensatorio: 'Compensatorios',
   incapacidad: 'Incapacidades',
+  // En singular y no en plural como los otros cuatro: esos nombran una pestaña
+  // de la hoja —que es de donde salen esas etiquetas— y este no tiene pestaña
+  // ninguna, así que aquí solo nombra la cosa.
+  otorgamiento: 'Compensatorio concedido',
 };
 
 export interface Empleado {

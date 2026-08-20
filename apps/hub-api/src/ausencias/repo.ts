@@ -1,7 +1,7 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
-import { cambiaLaHoja, estaEnElCalendario } from './types.js';
+import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario } from './types.js';
 import type {
   Adjunto,
   ClaseModificacion,
@@ -353,6 +353,8 @@ export interface AusenciaDeEmpleado {
   fechaInicio: string;
   diasHabiles: number;
   estado: Solicitud['estado'];
+  /** Solo lo miran los otorgamientos. El porqué, en `AusenciaParaElSaldo`. */
+  createdAt: string;
 }
 
 interface FilaAusenciaDb {
@@ -361,6 +363,7 @@ interface FilaAusenciaDb {
   fecha_inicio: string;
   dias_habiles: number;
   estado: Solicitud['estado'];
+  created_at: string;
 }
 
 function aAusenciaDeEmpleado(r: FilaAusenciaDb): AusenciaDeEmpleado {
@@ -370,6 +373,7 @@ function aAusenciaDeEmpleado(r: FilaAusenciaDb): AusenciaDeEmpleado {
     fechaInicio: r.fecha_inicio,
     diasHabiles: r.dias_habiles,
     estado: r.estado,
+    createdAt: r.created_at,
   };
 }
 
@@ -387,10 +391,17 @@ function aAusenciaDeEmpleado(r: FilaAusenciaDb): AusenciaDeEmpleado {
 export async function ausenciasQueTocanElSaldo(db: Pool, ids: string[]): Promise<AusenciaDeEmpleado[]> {
   if (ids.length === 0) return [];
   const { rows } = await db.query(
+    // `created_at` es TIMESTAMPTZ y se recorta a fecha AQUÍ, no en el módulo
+    // puro: allí se compara con `>=` contra `fecha_corte`, que es un
+    // YYYY-MM-DD, y un timestamp entero rompería el orden lexicográfico. El
+    // `::text` va por lo mismo que en las otras dos fechas — sin él llega un
+    // objeto Date y la comparación se resuelve contra NaN, siempre false.
     `SELECT empleado_id, tipo, fecha_inicio::text AS fecha_inicio,
-            dias_habiles::float8 AS dias_habiles, estado
+            dias_habiles::float8 AS dias_habiles, estado,
+            created_at::date::text AS created_at
        FROM portal.solicitudes_ausencia
-      WHERE tipo IN ('vacaciones', 'compensatorio') AND empleado_id = ANY($1::uuid[])`,
+      WHERE tipo IN ('vacaciones', 'compensatorio', 'otorgamiento')
+        AND empleado_id = ANY($1::uuid[])`,
     [ids],
   );
   return (rows as FilaAusenciaDb[]).map(aAusenciaDeEmpleado);
@@ -2071,6 +2082,12 @@ export async function ausenciasEntre(
        JOIN portal.empleados e ON e.id = s.empleado_id
       WHERE e.activo
         AND s.estado <> 'rechazada'
+        -- Un otorgamiento no es una ausencia: su fecha es el dia que se trabajo
+        -- de mas, y pintarlo aqui diria que esa persona NO estuvo justo el dia
+        -- que si estuvo. El filtro va en el SQL y no en el frontend porque el
+        -- calendario del portal no filtra nada por su cuenta: pinta lo que le
+        -- llega, ya expandido por dia.
+        AND s.tipo <> 'otorgamiento'
         AND ($3::uuid IS NULL OR s.empleado_id = $3::uuid)
         AND s.fecha_inicio <= $2::date
         AND s.fecha_fin    >= $1::date
@@ -2145,7 +2162,14 @@ export interface Solape {
  * incapacidades SÍ cuentan. Casi las mismas filas, dos respuestas distintas.
  */
 export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
-  return tipo !== 'incapacidad' && estado !== 'rechazada';
+  // El otorgamiento se excluye por una razón distinta de la incapacidad: aquélla
+  // sí es una ausencia y se deja fuera porque no se puede negar; éste no es una
+  // ausencia en absoluto — su fecha es la del día que se TRABAJÓ de más.
+  //
+  // Sin este corte, la regla de solapes bloquearía justo el caso más típico:
+  // pedir el compensatorio por un sábado trabajado DURANTE las propias
+  // vacaciones chocaría contra esas mismas vacaciones.
+  return tipo !== 'incapacidad' && !esOtorgamiento(tipo) && estado !== 'rechazada';
 }
 
 /**
@@ -2207,6 +2231,10 @@ export async function solapeDe(
         AND estado <> 'rechazada'
         -- La incapacidad no se pide, se informa: no ocupa ni se le puede negar.
         AND tipo   <> 'incapacidad'
+        -- El otorgamiento no es una ausencia: su fecha es el dia trabajado. Sin
+        -- esta linea, pedir el compensatorio por un sabado trabajado DURANTE las
+        -- propias vacaciones chocaria contra esas mismas vacaciones.
+        AND tipo   <> 'otorgamiento'
         AND ($4::uuid IS NULL OR id <> $4)
         AND fecha_inicio <= $3::date
         AND fecha_fin    >= $2::date
