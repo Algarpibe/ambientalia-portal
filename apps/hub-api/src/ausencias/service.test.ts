@@ -89,18 +89,39 @@ describe('validarNuevaSolicitud — el otorgamiento', () => {
   it('CANDADO: su fecha SÍ puede estar en el pasado', () => {
     // Es la regla que lo hace posible. Se pide DESPUÉS de haber trabajado, así
     // que con la regla de las ausencias todo otorgamiento seria rechazado.
-    expect(validar(otorg({ fechaInicio: '2026-01-05', fechaFin: '2026-01-05' })).dias).toBe(1);
+    expect(validar(otorg({ fechaInicio: '2026-05-05', fechaFin: '2026-05-05' })).dias).toBe(1);
     // Y el control: unas vacaciones en esa misma fecha SÍ se rechazan.
-    expect(() => validar(nueva({ fechaInicio: '2026-01-05', fechaFin: '2026-01-08' }))).toThrow(
+    expect(() => validar(nueva({ fechaInicio: '2026-05-05', fechaFin: '2026-05-08' }))).toThrow(
       expect.objectContaining({ code: 'fecha_en_pasado' }),
     );
   });
 
-  it('rechaza un trabajo de hace más de un año', () => {
+  it('rechaza un trabajo de hace más de tres meses', () => {
     // Sin tope, alguien reclama hoy un sábado de hace seis años — y encima
     // caeria por debajo de su fecha de corte, donde no sumaría nada.
     expect(() => validar(otorg({ fechaInicio: '2025-06-01', fechaFin: '2025-06-01' }))).toThrow(
       expect.objectContaining({ code: 'trabajo_demasiado_antiguo', field: 'fechaInicio' }),
+    );
+  });
+
+  it('CANDADO: la ventana son tres meses de CALENDARIO, y el borde entra', () => {
+    // Con `hoy` = 2026-07-01, el día más antiguo válido es el 2026-04-01. El
+    // borde SE ADMITE —«tres meses» incluye el propio día— y el anterior no. Los
+    // dos casos juntos son lo que fija dónde está la raya: con solo uno, mover
+    // el límite un día en cualquier sentido seguiría en verde.
+    const enElBorde = (f: string) => validar(otorg({ fechaInicio: f, fechaFin: f })).dias;
+    expect(enElBorde('2026-04-01')).toBe(1);
+    expect(() => enElBorde('2026-03-31')).toThrow(
+      expect.objectContaining({ code: 'trabajo_demasiado_antiguo' }),
+    );
+  });
+
+  it('CANDADO: tampoco hacia adelante — se pide por un día YA trabajado', () => {
+    // La ventana es «de hoy hacia atrás». Hoy vale; mañana no: un compensatorio
+    // se gana por haber trabajado, no por ir a trabajar.
+    expect(validar(otorg({ fechaInicio: HOY, fechaFin: HOY })).dias).toBe(1);
+    expect(() => validar(otorg({ fechaInicio: '2026-07-02', fechaFin: '2026-07-02' }))).toThrow(
+      expect.objectContaining({ code: 'trabajo_en_el_futuro', field: 'fechaInicio' }),
     );
   });
 

@@ -138,8 +138,29 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
 /** Tope de UNA concesión. El del saldo entero es otro (`MAX_SALDO`, 999). */
 const MAX_DIAS_CONCEDIDOS = 30;
 
-/** Hasta cuándo hacia atrás se puede reclamar un trabajo extra. */
-const MAX_DIAS_HACIA_ATRAS = 365;
+/** Hasta cuántos meses hacia atrás se puede reclamar un trabajo extra. */
+const MESES_HACIA_ATRAS = 3;
+
+/**
+ * El día más antiguo por el que hoy se puede pedir un compensatorio.
+ *
+ * Meses de calendario y no un número de días: la regla se le dice al empleado
+ * como «tres meses», y noventa días no coinciden con eso en la mitad del año.
+ *
+ * ⚠️ Espejo EXACTO de `limiteDelTrabajo` en `apps/ausencias/src/dominio.ts`, que
+ * es lo que el formulario le pone al `min` del calendario. Si las dos se
+ * separan, el selector deja elegir un día que el servidor rechaza —o al revés,
+ * bloquea uno que aceptaría—, y las dos formas son igual de desconcertantes.
+ *
+ * `Date.UTC` normaliza el desbordamiento de día: desde un 31 de mayo, tres meses
+ * atrás no es «31 de febrero» sino el 3 de marzo. Eso hace la ventana un par de
+ * días más CORTA en esas fechas, nunca más larga, así que el límite nunca deja
+ * pasar algo que la regla no quería.
+ */
+export function limiteDelTrabajo(hoy: string): string {
+  const [anio, mes, dia] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1 - MESES_HACIA_ATRAS, dia)).toISOString().slice(0, 10);
+}
 
 /**
  * Los días de un otorgamiento, y las cuatro reglas que solo él tiene.
@@ -171,8 +192,14 @@ function validarDiasConcedidos(
   // año es además lo que evita que la concesión caiga antes de la fecha de corte
   // de casi nadie — y por debajo del corte no sumaría nada, que es peor que
   // negarla, porque el empleado no vería ningún error.
-  const diasAtras = (Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000;
-  if (diasAtras > MAX_DIAS_HACIA_ATRAS) throw new AusenciaError('trabajo_demasiado_antiguo', 400, 'fechaInicio');
+  if (fechaInicio < limiteDelTrabajo(hoy)) {
+    throw new AusenciaError('trabajo_demasiado_antiguo', 400, 'fechaInicio');
+  }
+  // Y tampoco hacia adelante: un compensatorio se gana por haber trabajado, no
+  // por ir a trabajar. La ventana es «desde hoy hacia atrás», y el `max` del
+  // calendario dice lo mismo — el servidor lo repite porque el `max` de un input
+  // se salta tecleando.
+  if (fechaInicio > hoy) throw new AusenciaError('trabajo_en_el_futuro', 400, 'fechaInicio');
 
   // El motivo es lo único que deja auditable la concesión: sin él, dentro de seis
   // meses nadie sabrá por qué esa persona tiene esos días.

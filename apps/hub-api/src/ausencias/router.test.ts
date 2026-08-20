@@ -4377,12 +4377,12 @@ describe('otorgar compensatorios', () => {
     // El caso mas tipico de todos: trabajar un sabado estando de vacaciones. Sin
     // excluirlo de `ocupaAgenda`, la peticion chocaria contra esas vacaciones.
     //
-    // Las vacaciones van de hoy en adelante porque el alta no admite fechas
-    // pasadas, y el sabado 17 cae dentro. Que el dia trabajado sea futuro es
-    // inusual pero no lo prohibe ninguna regla, y aqui da igual: lo que se
-    // prueba es el solape, no la fecha.
+    // Las vacaciones empiezan HOY porque el alta no admite fechas pasadas, y el
+    // otorgamiento es por HOY tambien: es el unico dia que cae a la vez dentro
+    // de esas vacaciones y dentro de la ventana del compensatorio, que va de hoy
+    // hacia atras. Lo que se prueba es el solape, no las fechas.
     await pedir(nueva({ fechaInicio: '2026-01-15', fechaFin: '2026-01-23' })).expect(201);
-    await pedir(otorgamiento({ fechaInicio: '2026-01-17', fechaFin: '2026-01-17' })).expect(201);
+    await pedir(otorgamiento({ fechaInicio: '2026-01-15', fechaFin: '2026-01-15' })).expect(201);
   });
 
   it('al aprobarlo, la bolsa sube', async () => {
@@ -4420,7 +4420,8 @@ describe('otorgar compensatorios', () => {
     await pedir(otorgamiento({ dias: 31 })).expect(400);
   });
 
-  it('400 si el trabajo es de hace mas de un año', async () => {
+  it('400 si el trabajo cae fuera de la ventana de tres meses, por delante o por detras', async () => {
     await pedir(otorgamiento({ fechaInicio: '2024-06-01', fechaFin: '2024-06-01' })).expect(400);
+    await pedir(otorgamiento({ fechaInicio: '2026-02-01', fechaFin: '2026-02-01' })).expect(400);
   });
 });

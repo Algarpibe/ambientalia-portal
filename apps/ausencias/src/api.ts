@@ -407,7 +407,8 @@ async function errorDeAusencia(res: Response): Promise<Error> {
     otorgamiento_un_solo_dia:
       'Un compensatorio se pide por UN día trabajado, no por un rango. Si trabajaste varios días, manda una petición por cada uno.',
     trabajo_demasiado_antiguo:
-      'Ese trabajo es de hace más de un año. Si crees que te quedaron días por reconocer, habla con administración.',
+      'Ese trabajo es de hace más de tres meses. Los compensatorios hay que pedirlos dentro de ese plazo; si se te pasó, habla con administración.',
+    trabajo_en_el_futuro: 'Un compensatorio se pide por un día ya trabajado, no por uno que todavía no ha llegado.',
     motivo_requerido: 'Cuéntale a quien aprueba por qué pides esos días: sin motivo no se puede valorar.',
     dias_invalidos: 'Los días a conceder tienen que ser un número mayor que cero, con una décima como mucho (por ejemplo 0,5 o 1).',
     dias_demasiados: 'Como máximo se pueden pedir 30 días en una sola petición.',

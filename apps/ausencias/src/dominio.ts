@@ -799,3 +799,24 @@ export function fechasDeLaFila(s: ParaLaTabla): { desde: string; hasta: string }
   if (esOtorgamiento(s.tipo)) return { desde: formatFecha(s.fechaInicio), hasta: '' };
   return { desde: formatFecha(s.fechaInicio), hasta: formatFecha(s.fechaFin) };
 }
+
+/** Hasta cuántos meses hacia atrás se puede reclamar un trabajo extra. */
+const MESES_HACIA_ATRAS = 3;
+
+/**
+ * El día más antiguo por el que hoy se puede pedir un compensatorio. Espejo
+ * EXACTO de `limiteDelTrabajo` en `apps/hub-api/src/ausencias/service.ts`.
+ *
+ * Es lo que el formulario le pone al `min` del calendario, así que si las dos se
+ * separan el selector deja elegir un día que el servidor rechaza —o bloquea uno
+ * que aceptaría—, y las dos formas desconciertan igual.
+ *
+ * Meses de calendario y no noventa días: la regla se le dice al empleado como
+ * «tres meses». `Date.UTC` normaliza el desbordamiento de día —desde un 31 de
+ * mayo, tres meses atrás cae el 3 de marzo y no el «31 de febrero»—, lo que hace
+ * la ventana un par de días más corta en esas fechas, nunca más larga.
+ */
+export function limiteDelTrabajo(hoy: string): string {
+  const [anio, mes, dia] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1 - MESES_HACIA_ATRAS, dia)).toISOString().slice(0, 10);
+}

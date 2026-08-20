@@ -13,6 +13,7 @@ import {
   esOtorgamiento,
   etiquetasFecha,
   hoyEnColombia,
+  limiteDelTrabajo,
   pedible,
   requiereAprobacion,
   TIPOS,
@@ -76,7 +77,15 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   // El `min` del input es solo la barrera cómoda —se puede teclear por encima, y
   // algunos navegadores lo permiten—, por eso se comprueba también aquí y, sobre
   // todo, en el servidor: `validarNuevaSolicitud` responde `fecha_en_pasado`.
-  const minFecha = requiereAprobacion(tipo) ? hoyEnColombia() : undefined;
+  //
+  // ⚠️ El otorgamiento queda fuera, y no basta con quitarle el `min` del input:
+  // este booleano pinta un párrafo rojo diciendo «no puedes pedir días que ya
+  // pasaron» debajo del campo. Sobre un compensatorio eso es exactamente al
+  // revés —su fecha SIEMPRE está en el pasado, porque se pide después de haber
+  // trabajado— y el mensaje salía aunque el botón sí dejara enviar. Su ventana
+  // es otra: de hoy hacia atrás, tres meses.
+  const hoyCol = hoyEnColombia();
+  const minFecha = requiereAprobacion(tipo) && !pideOtorgamiento ? hoyCol : undefined;
   const fechaEnPasado = Boolean(minFecha && fechaInicio && fechaInicio < minFecha);
 
   // El servidor rechaza el compensatorio que no cabe en la bolsa, así que aquí se
@@ -99,7 +108,7 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
 
   // Un otorgamiento tiene otros requisitos: no hay fecha fin que rellenar, pero
   // sí una cantidad y un motivo, los dos obligatorios. Lo que no se comprueba
-  // aquí es el tope de 30 días ni el año hacia atrás: esas dos las redacta el
+  // aquí es el tope de 30 días ni la ventana de tres meses: esas las redacta el
   // servidor con su mensaje, y duplicarlas aquí sería tener la regla dos veces.
   const puedeEnviar = pideOtorgamiento
     ? Boolean(fechaInicio) && diasConcedidosValidos && Boolean(comentarios.trim()) && !enviando
@@ -215,14 +224,23 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
             <label htmlFor="fechaInicio" className="mb-1 block text-sm font-medium text-gray-700">
               Día que trabajaste
             </label>
+            {/* La ventana entera va en el propio calendario: de hoy hacia atrás,
+                tres meses. Así el selector no deja ni elegir un día fuera de
+                plazo, en vez de aceptarlo y devolver un error después.
+
+                Los dos límites se repiten en el servidor a propósito: el `min` y
+                el `max` de un input se saltan tecleando la fecha a mano. */}
             <input
               id="fechaInicio"
               type="date"
               required
               value={fechaInicio}
+              min={limiteDelTrabajo(hoyCol)}
+              max={hoyCol}
               onChange={(e) => setFechaInicio(e.target.value)}
               className={CAMPO}
             />
+            <p className="mt-1 text-xs text-gray-500">Hasta tres meses hacia atrás.</p>
           </div>
           <div>
             <label htmlFor="diasConcedidos" className="mb-1 block text-sm font-medium text-gray-700">
