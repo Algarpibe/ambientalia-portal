@@ -1,6 +1,6 @@
 # 🚀 SaaS Authentication Page - Complete Documentation Index
 
-Welcome! This is your comprehensive guide to the premium SaaS authentication page created for antigravity-suite.
+Welcome! This is your comprehensive guide to the premium SaaS authentication page created for Portal Ambientalia.
 
 ---
 
@@ -487,5 +487,5 @@ Everything is ready to use. Choose your starting point:
 
 **Happy Coding! 🚀**
 
-*Created with ❤️ for antigravity-suite*  
+*Created with ❤️ for Portal Ambientalia*  
 *January 26, 2026*

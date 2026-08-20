@@ -1,7 +1,7 @@
 # Diseño — App `contabilidad` (Facturación 2026)
 
 **Fecha:** 2026-07-18
-**Objetivo:** Sustituir el Excel `Contabilidad_muestra.xlsx` (hoja *Fact 2026*) por una app dentro del portal Antigravity. Misma vista que el Excel, pero **viva** (se actualiza sola desde Zoho) y con **Cartera editable** en línea.
+**Objetivo:** Sustituir el Excel `Contabilidad_muestra.xlsx` (hoja *Fact 2026*) por una app dentro del Portal Ambientalia. Misma vista que el Excel, pero **viva** (se actualiza sola desde Zoho) y con **Cartera editable** en línea.
 
 ---
 

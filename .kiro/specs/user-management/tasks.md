@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implementación incremental del sistema de gestión de usuarios para Antigravity Suite. El orden sigue la cadena de dependencias natural: primero la base de datos, luego el backend (Hub_API), y finalmente el frontend (Portal). Cada tarea produce código integrable en el paso siguiente, sin código huérfano.
+Implementación incremental del sistema de gestión de usuarios para el Portal Ambientalia. El orden sigue la cadena de dependencias natural: primero la base de datos, luego el backend (Hub_API), y finalmente el frontend (Portal). Cada tarea produce código integrable en el paso siguiente, sin código huérfano.
 
 El lenguaje de implementación es **TypeScript** para ambas capas (hub-api y portal).
 

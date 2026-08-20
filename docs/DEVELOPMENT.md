@@ -1,4 +1,4 @@
-# Desarrollo — antigravity-suite
+# Desarrollo — ambientalia-suite
 
 [![CI](https://github.com/Algarpibe/ambientalia-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/Algarpibe/ambientalia-portal/actions/workflows/ci.yml)
 

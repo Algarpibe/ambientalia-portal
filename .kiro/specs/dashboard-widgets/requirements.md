@@ -2,7 +2,7 @@
 
 ## Introduction
 
-El Dashboard del Portal Antigravity Suite actualmente es un directorio estático de enlaces a las apps del monorepo. Esta feature lo convierte en un panel de control operativo con widgets configurables: cada app del monorepo puede exportar sus propios componentes React como widgets, el usuario elige cuáles anclar en el dashboard, en qué posición y con qué tamaño, y la configuración se persiste por usuario. El sistema respeta el modelo de permisos existente basado en el campo `apps` del JWT, de modo que solo se pueden anclar widgets de apps asignadas al usuario.
+El Dashboard del Portal Ambientalia actualmente es un directorio estático de enlaces a las apps del monorepo. Esta feature lo convierte en un panel de control operativo con widgets configurables: cada app del monorepo puede exportar sus propios componentes React como widgets, el usuario elige cuáles anclar en el dashboard, en qué posición y con qué tamaño, y la configuración se persiste por usuario. El sistema respeta el modelo de permisos existente basado en el campo `apps` del JWT, de modo que solo se pueden anclar widgets de apps asignadas al usuario.
 
 ## Glosario
 

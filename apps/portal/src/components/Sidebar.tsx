@@ -4,13 +4,14 @@ import {
   LayoutDashboard,
   Settings,
   Users,
-  ShieldCheck,
   Box,
   Wrench,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen
 } from 'lucide-react';
+import logotipo from '../assets/ambientalia-logo.png';
+import isotipo from '../assets/ambientalia-isotipo.png';
 import { clearToken } from '../auth';
 import { useAuth } from '../hooks/useAuth';
 import { hasAssignedInCategory } from '../lib/apps';
@@ -53,13 +54,16 @@ export default function Sidebar() {
       }`}
     >
       <div className={`flex items-center mb-10 ${collapsed ? 'flex-col gap-3' : 'justify-between px-2'}`}>
-        <Link to="/" className="flex items-center gap-3 overflow-hidden">
-          <div className="w-10 h-10 bg-blue-500 rounded-2xl flex items-center justify-center shadow-soft shrink-0">
-            <ShieldCheck className="text-white" size={24} />
-          </div>
-          {!collapsed && (
-            <span className="text-xl font-bold tracking-tight text-gray-900 whitespace-nowrap">Antigravity</span>
-          )}
+        {/* El logotipo ya lleva la palabra «Ambientalia» dentro, así que no se
+            acompaña de texto: duplicarlo se leería dos veces. Plegada solo cabe
+            el isotipo (las barras), que es el mismo logo recortado sin la palabra.
+            El `alt` da nombre accesible al enlace en ambos estados. */}
+        <Link to="/" className="flex items-center overflow-hidden">
+          <img
+            src={collapsed ? isotipo : logotipo}
+            alt="Portal Ambientalia"
+            className={collapsed ? 'w-14 shrink-0' : 'h-12 w-auto shrink-0'}
+          />
         </Link>
         <button
           onClick={() => setCollapsed((v) => !v)}

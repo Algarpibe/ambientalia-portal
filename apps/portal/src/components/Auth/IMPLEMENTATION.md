@@ -2,7 +2,7 @@
 
 ## ✅ Project Completion Status
 
-Successfully created a **premium SaaS authentication page** for the antigravity-suite portal with full responsive design, animations, and modern UX patterns.
+Successfully created a **premium SaaS authentication page** for the Portal Ambientalia with full responsive design, animations, and modern UX patterns.
 
 ---
 

@@ -36,7 +36,7 @@ export default function Dashboard() {
       {/* Top Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
         <div>
-          <h1 className="text-4xl font-bold mb-2 tracking-tight text-gray-900">Bienvenido, Portal Maestro</h1>
+          <h1 className="text-4xl font-bold mb-2 tracking-tight text-gray-900">Bienvenido, Portal Ambientalia</h1>
           <p className="text-gray-500">Gestiona todas tus herramientas operativas desde un solo lugar.</p>
         </div>
 

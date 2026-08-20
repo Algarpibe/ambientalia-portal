@@ -1,4 +1,4 @@
-# Privacidad, retención y borrado — antigravity-suite
+# Privacidad, retención y borrado — ambientalia-suite
 
 > Cierra **PRIV-002** de la auditoría (retención/supresión). Ámbito: la réplica
 > **zoho-hub** y las apps del portal que la leen. La política de tratamiento a

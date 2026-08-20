@@ -2,7 +2,7 @@
 
 ## Introduction
 
-El portal Antigravity Suite necesita un área de gestión de usuarios que reemplace el modelo actual basado en variables de entorno. La funcionalidad abarca el registro por autoservicio (self-registration), la aprobación administrativa del acceso, la asignación de roles y el control granular sobre qué aplicaciones puede usar cada usuario aprobado.
+El Portal Ambientalia necesita un área de gestión de usuarios que reemplace el modelo actual basado en variables de entorno. La funcionalidad abarca el registro por autoservicio (self-registration), la aprobación administrativa del acceso, la asignación de roles y el control granular sobre qué aplicaciones puede usar cada usuario aprobado.
 
 El sistema interactúa con dos capas: el frontend (`portal`, React/TypeScript) y el backend (`hub-api`, Express/Node.js). Los usuarios se almacenan en la base de datos del hub (PostgreSQL), y el flujo de autenticación existente (JWT vía `/api/login`) se extiende para soportar el nuevo modelo.
 

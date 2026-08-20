@@ -32,9 +32,13 @@ describe('Sidebar — plegado', () => {
     );
   };
 
+  // El nombre de la marca vive dentro del logotipo, no en un <span>: lo que se
+  // comprueba es CUÁL de los dos recortes se muestra, no si hay texto.
+  const logo = () => screen.getByAltText('Portal Ambientalia').getAttribute('src') ?? '';
+
   it('arranca desplegada, con las etiquetas visibles', () => {
     renderAdmin();
-    expect(screen.getByText('Antigravity')).toBeTruthy();
+    expect(logo()).toContain('ambientalia-logo');
     expect(screen.getByText('Dashboard')).toBeTruthy();
     expect(screen.getByText('Cerrar sesión')).toBeTruthy();
   });
@@ -42,7 +46,8 @@ describe('Sidebar — plegado', () => {
   it('al contraer oculta las etiquetas (deja el ancho para las tablas)', () => {
     renderAdmin();
     fireEvent.click(screen.getByLabelText('Contraer menú'));
-    expect(screen.queryByText('Antigravity')).toBeNull();
+    // El logotipo no desaparece: se cambia por el isotipo, que sí cabe en 80px.
+    expect(logo()).toContain('ambientalia-isotipo');
     expect(screen.queryByText('Dashboard')).toBeNull();
     // Los enlaces siguen identificables al pasar el ratón, y salir sigue accesible.
     expect(screen.getByTitle('Dashboard')).toBeTruthy();
@@ -65,7 +70,7 @@ describe('Sidebar — plegado', () => {
     fireEvent.click(screen.getByLabelText('Contraer menú'));
     fireEvent.click(screen.getByLabelText('Expandir menú'));
     expect(screen.getByText('Dashboard')).toBeTruthy();
-    expect(screen.getByText('Antigravity')).toBeTruthy();
+    expect(logo()).toContain('ambientalia-logo');
   });
 });
 

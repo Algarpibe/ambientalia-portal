@@ -2,7 +2,7 @@
 
 ## Overview
 
-El Dashboard del Portal Antigravity Suite evoluciona de un directorio estático de enlaces a un panel de control operativo con widgets configurables. El Portal actúa como **host/grid**: orquesta el montaje de componentes React exportados por cada app del monorepo, permite al usuario moverlos, redimensionarlos y persistir su configuración en `localStorage`, y respeta el modelo de permisos JWT existente.
+El Dashboard del Portal Ambientalia evoluciona de un directorio estático de enlaces a un panel de control operativo con widgets configurables. El Portal actúa como **host/grid**: orquesta el montaje de componentes React exportados por cada app del monorepo, permite al usuario moverlos, redimensionarlos y persistir su configuración en `localStorage`, y respeta el modelo de permisos JWT existente.
 
 ### Principios de diseño
 
