@@ -309,16 +309,26 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
  * FIRMA: con la cascada le tocan también las de sus nietos. Un subárbol
  * completo le enseñaría gente cuyas solicitudes no decide nunca.
  *
+ * `$1` fijo, sin placeholder configurable: la correspondencia entre un número
+ * que se pasa como argumento y la posición real en el array de bindings de
+ * `db.query` es una invariante que no comprueba nadie. Si una consulta futura
+ * pusiera `soloDe` en otra posición y alguien copiara `ramaDeDosNiveles(1)`
+ * por costumbre, el filtro de privacidad quedaría atado al parámetro
+ * equivocado EN SILENCIO — ni TypeScript ni Postgres lo cazan. Por eso la
+ * regla es al revés: `soloDe` va SIEMPRE como primer parámetro (`$1`) de la
+ * consulta que incrusta este fragmento. Lo que hay que sincronizar pasa de
+ * dos sitios (el número aquí y la posición allá) a uno solo.
+ *
  * Asume que la tabla `portal.empleados` está aliasada como `e` en la consulta
  * que lo incrusta. Lo cumplen las dos que lo usan.
  */
-export function ramaDeDosNiveles(placeholder: number): string {
-  return `($${placeholder}::text IS NULL
-           OR lower(e.aprobador_correo) = lower($${placeholder})
+export function ramaDeDosNiveles(): string {
+  return `($1::text IS NULL
+           OR lower(e.aprobador_correo) = lower($1)
            OR EXISTS (SELECT 1 FROM portal.empleados j
                        WHERE j.activo
                          AND lower(j.correo) = lower(e.aprobador_correo)
-                         AND lower(j.aprobador_correo) = lower($${placeholder})))`;
+                         AND lower(j.aprobador_correo) = lower($1)))`;
 }
 
 /**
@@ -359,7 +369,7 @@ export async function empleadosConSaldo(
             e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte
        FROM portal.empleados e
       WHERE e.activo
-        AND ${ramaDeDosNiveles(1)}
+        AND ${ramaDeDosNiveles()}
         AND ($2::uuid IS NULL OR e.id = $2::uuid)
       ORDER BY e.nombre_completo`,
     [soloDe, empleadoId],
