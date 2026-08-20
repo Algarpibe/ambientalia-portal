@@ -45,8 +45,10 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   resultado (`solicitudes_ausencia.informado_correo`), `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`),
   `025` el ancho de `evento` que la 024 se dejó, `026` el id del evento de
   calendario (`solicitudes_ausencia.evento_calendario_id`), `027` el evento
-  `correccion_admin` y `028` el outbox con huérfanos (`solicitud_id` nulable y
-  `ON DELETE SET NULL`) más el evento `borrado_admin`.
+  `correccion_admin`, `028` el outbox con huérfanos (`solicitud_id` nulable y
+  `ON DELETE SET NULL`) más el evento `borrado_admin`, y `029` la segunda bolsa
+  (`empleados.compensatorios_saldo_corte` y `compensatorios_fecha_corte`, con su
+  CHECK de «las dos o ninguna»).
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
@@ -328,13 +330,56 @@ alta. La app lo dice con esas palabras; nunca enseña un 0 disfrazado de saldo
 real. Los saldos iniciales del consolidado se teclean a mano en la pestaña
 *Saldos* (solo admin).
 
-**Qué cuenta como disfrutado.** Solo `tipo = 'vacaciones'` en
-`estado = 'aprobada'`. Las `pendiente` van a un contador aparte (`enTramite`,
-"en trámite") que NO resta del saldo firme (`disponible`), pero el aviso del
-formulario sí compara contra `disponible − enTramite`, para que nadie agote
-el saldo real mandando varias solicitudes seguidas antes de que se decida la
-primera. Permisos, compensatorios e incapacidades no tocan el saldo en
-absoluto.
+**Qué cuenta como disfrutado.** En la bolsa de vacaciones, solo
+`tipo = 'vacaciones'` en `estado = 'aprobada'`; en la de compensatorios, solo
+`tipo = 'compensatorio'` en `estado = 'aprobada'`. Las `pendiente` van a un
+contador aparte (`enTramite`, "en trámite") que NO resta del saldo firme
+(`disponible`), pero el aviso del formulario sí compara contra
+`disponible − enTramite`, para que nadie agote el saldo real mandando varias
+solicitudes seguidas antes de que se decida la primera. Permisos e
+incapacidades no tocan ninguna de las dos bolsas.
+
+## Saldo de compensatorios
+
+Segunda bolsa, independiente de la de vacaciones, en columnas propias de
+`portal.empleados` (`compensatorios_saldo_corte`, `compensatorios_fecha_corte`,
+migración `029_saldo_compensatorios.sql`, con el CHECK gemelo de «las dos o
+ninguna»).
+
+**La diferencia estructural es que no devenga.** Un compensatorio se gana por
+horas extra, días extras o un viaje que se alargó, y hay que otorgarlo: no
+aparece solo con el paso del tiempo.
+
+```
+saldo(hoy) = compensatorios_saldo_corte − aprobados con inicio >= compensatorios_fecha_corte
+```
+
+Por eso su fecha de corte significa **solo frontera de descuento**, y no además
+origen de devengo como la de vacaciones. Y por eso las dos bolsas comparten el
+recuento (`sumarDesdeElCorte`) pero no la fórmula.
+
+**Fecha de corte propia y no compartida.** Las dos bolsas se cuadran contra
+recuentos distintos y en momentos distintos; compartirla obligaría a moverlas a
+la vez, y corregir el corte de vacaciones movería en silencio el conteo de
+compensatorios.
+
+⚠️ **`SaldoCompensatorios` no tiene `devengadas`, y esa ausencia es el diseño.**
+Sería falso —diría «has ganado cero» en vez de «esta bolsa no se gana con el
+tiempo»— y es además lo único que impide en compilación enchufar esta bolsa a
+algo escrito para la otra: TypeScript compara por forma, así que dos tipos con
+los mismos campos serían intercambiables.
+
+⚠️ **En el `PUT` de saldo, las dos parejas NO se validan igual.** La de
+vacaciones se exige siempre; la de compensatorios, si falta, significa «no toques
+esa bolsa». La asimetría existe porque la ausencia de las claves nuevas tiene una
+causa legítima —un bundle del portal anterior a esta función— y leerla como
+«vacíala» borraría la bolsa de cualquiera a quien un admin le corrigiera las
+vacaciones durante la ventana de despliegue. En el SQL eso es un `CASE WHEN` con
+bandera, no un `COALESCE`: aquí NULL es un valor con significado.
+
+**Otorgar días es una fase posterior.** Hoy la bolsa solo se siembra a mano desde
+la pestaña *Saldos*. El hueco está preparado: `calcularSaldoCompensatorios` deja
+sitio a un `otorgados` sin cambiar de firma.
 
 **Los cuatro endpoints:**
 
