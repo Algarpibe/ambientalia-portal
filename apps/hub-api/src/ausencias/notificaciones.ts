@@ -13,6 +13,7 @@ import {
   ESTADOS_EN_TRAMITE,
   ETIQUETA_TIPO,
   cambiaElCalendario,
+  esOtorgamiento,
   estaEnElCalendario,
   type CorreoEvento,
   type EstadoSolicitud,
@@ -40,6 +41,11 @@ const PERIODO: Record<Solicitud['tipo'], string> = {
   permiso: 'de permiso',
   compensatorio: 'de compensatorio',
   incapacidad: 'de incapacidad',
+  // No es un periodo de ausencia sino lo que se pide: días para la bolsa. Con
+  // esta redacción las cuatro frases que la interpolan siguen siendo correctas
+  // —«Tu solicitud de días de compensatorio ha sido aprobada»— y solo hay que
+  // ramificar el bloque de resumen y el cierre.
+  otorgamiento: 'de días de compensatorio',
 };
 
 /** «día» / «días», para no escribir «1 días hábiles» en un correo. */
@@ -55,6 +61,24 @@ function bloqueFechas(s: Solicitud): string {
     '',
     `📊 Total solicitado: ${dias(s.diasHabiles)}`,
   ].join('\n');
+}
+
+/**
+ * El resumen de un OTORGAMIENTO, que no es el de una ausencia.
+ *
+ * `bloqueFechas` sería falso aquí por tres lados a la vez: repetiría dos veces
+ * el mismo día —inicio y fin son el mismo—, llamaría «días hábiles» a unos días
+ * que precisamente no lo son (el sábado por el que se ganan) y diría
+ * «solicitado» de unos días que se CONCEDEN.
+ */
+function bloqueOtorgamiento(s: Solicitud): string {
+  const n = `${s.diasHabiles} ${s.diasHabiles === 1 ? 'día' : 'días'}`;
+  return [`📅 Día trabajado: ${s.fechaInicio}`, '', `📊 Días de compensatorio que se piden: ${n}`].join('\n');
+}
+
+/** El resumen que le toca a esta solicitud. Un solo sitio decide cuál. */
+function bloqueResumen(s: Solicitud): string {
+  return esOtorgamiento(s.tipo) ? bloqueOtorgamiento(s) : bloqueFechas(s);
 }
 
 function bloqueComentarios(s: Solicitud): string {
@@ -90,7 +114,7 @@ function acuseSolicitante(s: Solicitud) {
         ? 'Tu reporte de incapacidad ha quedado registrado. Este es el resumen:'
         : `Tu solicitud ${PERIODO[s.tipo]} ha sido registrada. Este es el resumen:`,
       '',
-      bloqueFechas(s),
+      bloqueResumen(s),
       bloqueComentarios(s) + bloqueAdjunto(s),
       cierre,
       '',
@@ -109,7 +133,7 @@ function avisoAprobador(s: Solicitud) {
       '',
       `Has recibido una solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}${s.empleadoCargo ? ` (${s.empleadoCargo})` : ''}.`,
       '',
-      bloqueFechas(s),
+      bloqueResumen(s),
       bloqueComentarios(s) + bloqueAdjunto(s),
       // El cambio de fondo frente al flujo viejo: en vez de un formulario
       // incrustado en el correo que dejaba la ejecución de n8n colgada
@@ -144,7 +168,7 @@ function avisoSegundoAprobador(s: Solicitud) {
       '',
       'Esta solicitud ya cuenta con el visto bueno de su jefe inmediato. Falta tu aprobación para que quede en firme.',
       '',
-      bloqueFechas(s),
+      bloqueResumen(s),
       bloqueComentarios(s) + bloqueAdjunto(s),
       `Puedes aprobarla o rechazarla aquí: ${urlPortal()}/ausencias`,
       '',
@@ -203,7 +227,14 @@ const cadenaDeDecision = (s: Solicitud) =>
   );
 
 function correoAprobada(s: Solicitud) {
-  const disfruta = s.tipo === 'vacaciones' ? '\n¡Disfrútalas!\n' : '';
+  // Lo que le importa a quien lee un otorgamiento aprobado no es el día que
+  // trabajó —eso ya lo sabe— sino que los días ya están donde los va a gastar.
+  // Es además lo que distingue este correo del de unas vacaciones: allí se
+  // reservan días, aquí se entregan.
+  const cierre = esOtorgamiento(s.tipo)
+    ? `\nEsos ${s.diasHabiles} ${s.diasHabiles === 1 ? 'día ya está' : 'días ya están'} en tu bolsa de compensatorios.\n`
+    : '';
+  const disfruta = s.tipo === 'vacaciones' ? '\n¡Disfrútalas!\n' : cierre;
   return {
     para: cadenaDeDecision(s),
     asunto: `✅ Tu solicitud ${PERIODO[s.tipo]} ha sido aprobada`,
@@ -212,7 +243,7 @@ function correoAprobada(s: Solicitud) {
       '',
       `Tu solicitud ${PERIODO[s.tipo]} ha sido ✅ *aprobada*.`,
       '',
-      bloqueFechas(s),
+      bloqueResumen(s),
       disfruta,
       'Saludos,',
       FIRMA_GERENCIA,
@@ -230,7 +261,11 @@ function correoRechazada(s: Solicitud) {
     cuerpo: [
       `Hola ${s.empleadoNombre}:`,
       '',
-      `Tu solicitud ${PERIODO[s.tipo]} (${s.fechaInicio} a ${s.fechaFin}) ha sido ❌ *rechazada*.`,
+      // El paréntesis dice el rango en una ausencia y el día trabajado en un
+      // otorgamiento: «(2026-01-10 a 2026-01-10)» se lee como una errata.
+      esOtorgamiento(s.tipo)
+        ? `Tu solicitud ${PERIODO[s.tipo]} por el trabajo del ${s.fechaInicio} ha sido ❌ *rechazada*.`
+        : `Tu solicitud ${PERIODO[s.tipo]} (${s.fechaInicio} a ${s.fechaFin}) ha sido ❌ *rechazada*.`,
       // El motivo es la mejora que pedía el flujo viejo: antes el correo de
       // rechazo no decía por qué y obligaba a preguntar.
       s.motivoRechazo ? `\nMotivo: ${s.motivoRechazo}\n` : '',
@@ -273,8 +308,18 @@ function calendario(s: Solicitud): EventoCalendario {
   };
 }
 
-/** La fila para la pestaña correspondiente, con los encabezados de siempre. */
-function hoja(s: Solicitud): FilaHoja {
+/**
+ * La fila para la pestaña correspondiente, con los encabezados de siempre.
+ *
+ * `null` cuando el tipo no tiene pestaña —hoy solo el otorgamiento, que no es una
+ * ausencia—. Es la SEGUNDA cerradura de esa exclusión: la primera es el
+ * `tocaGoogle` de `construirPayload`, que ni siquiera llama aquí. Se duplica a
+ * propósito, porque lo que hay al otro lado es el fichero con el que nómina paga:
+ * una fila de un día que nadie se tomó es un error que se descubre en un recibo.
+ */
+function hoja(s: Solicitud): FilaHoja | null {
+  const pestana = PESTANA[s.tipo];
+  if (pestana === null) return null;
   const columnas: Record<string, string | number> = {
     'Nombre y Apellidos': s.empleadoNombre,
     'Fecha Inicio': s.fechaInicio,
@@ -290,7 +335,7 @@ function hoja(s: Solicitud): FilaHoja {
     columnas.Comentarios = s.comentarios ?? '';
     columnas['Aprobado?'] = s.estado === 'aprobada' ? 'Sí' : s.estado === 'rechazada' ? 'No' : '';
   }
-  return { documentId: HOJA_ID, pestana: PESTANA[s.tipo], columnas };
+  return { documentId: HOJA_ID, pestana, columnas };
 }
 
 // ── Ensamblado ─────────────────────────────────────────────────────────────
@@ -333,8 +378,18 @@ const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
  * o sea `true` para TODOS los eventos.
  */
 export function construirPayload(s: Solicitud, evento: EventoSolicitud): PayloadEvento {
-  const conCalendario = evento === 'aprobada' || evento === 'registrada';
-  const conHoja = evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada';
+  // ⚠️ El corte por tipo va PRIMERO y afecta a los dos efectos. Hasta que existió
+  // el otorgamiento, esta función decidía qué llega a Google mirando SOLO el
+  // evento, y eso bastaba porque los cuatro tipos eran ausencias. Un
+  // otorgamiento aprobado emite `evento: 'aprobada'` igual que unas vacaciones:
+  // sin esta línea crearía un evento en el calendario de Staff por un día que
+  // nadie se toma, y —peor— una fila en la pestaña con la que se paga la nómina.
+  //
+  // La segunda cerradura está en `hoja()`, que no tiene pestaña a la que
+  // escribir. Son dos porque el error no se vería aquí: se vería en un recibo.
+  const tocaGoogle = !esOtorgamiento(s.tipo);
+  const conCalendario = tocaGoogle && (evento === 'aprobada' || evento === 'registrada');
+  const conHoja = tocaGoogle && (evento === 'aprobada' || evento === 'rechazada' || evento === 'registrada');
 
   return {
     tipo: s.tipo,
@@ -729,6 +784,15 @@ type SituacionCalendario = 'no_cambia' | 'a_mano' | 'actualizado' | 'borrado';
 function situacionDelCalendario(previa: Solicitud, actual: Solicitud): SituacionCalendario {
   if (!cambiaElCalendario(previa, actual)) return 'no_cambia';
   if (previa.eventoCalendarioId === null) return 'a_mano';
+  // Un otorgamiento no tiene sitio en el calendario, así que corregir una
+  // solicitud PARA convertirla en uno hay que resolverlo BORRANDO su evento, no
+  // actualizándolo. Sin esta línea, `estaEnElCalendario('aprobada')` diría que sí
+  // y Google se quedaría con un evento «Compensatorio concedido Fulano» ocupando
+  // unos días que nadie se toma.
+  //
+  // El caso contrario —otorgamiento que sigue siendo otorgamiento— ni llega
+  // aquí: `cambiaElCalendario` ya devolvió `no_cambia` en la primera línea.
+  if (esOtorgamiento(actual.tipo)) return 'borrado';
   return estaEnElCalendario(actual.estado) ? 'actualizado' : 'borrado';
 }
 

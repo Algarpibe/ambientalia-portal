@@ -48,7 +48,8 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   `correccion_admin`, `028` el outbox con huérfanos (`solicitud_id` nulable y
   `ON DELETE SET NULL`) más el evento `borrado_admin`, y `029` la segunda bolsa
   (`empleados.compensatorios_saldo_corte` y `compensatorios_fecha_corte`, con su
-  CHECK de «las dos o ninguna»).
+  CHECK de «las dos o ninguna»), y `030` el tipo `otorgamiento`, con el que esa
+  bolsa se llena.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
@@ -377,9 +378,78 @@ causa legítima —un bundle del portal anterior a esta función— y leerla com
 vacaciones durante la ventana de despliegue. En el SQL eso es un `CASE WHEN` con
 bandera, no un `COALESCE`: aquí NULL es un valor con significado.
 
-**Otorgar días es una fase posterior.** Hoy la bolsa solo se siembra a mano desde
-la pestaña *Saldos*. El hueco está preparado: `calcularSaldoCompensatorios` deja
-sitio a un `otorgados` sin cambiar de firma.
+**Cómo se llena la bolsa:** sembrando el corte a mano desde *Saldos*, o con un
+**otorgamiento** — ver la sección siguiente.
+
+## Otorgar compensatorios
+
+El trabajador pide desde su panel que le concedan N días por un trabajo extra, y
+su jefe directo lo aprueba. Al aprobarse, esos días SUMAN a su bolsa. Es una
+solicitud más —misma cascada, mismo outbox, mismos correos— con un tipo propio,
+`otorgamiento` (migración 030).
+
+⚠️ **Y es el único tipo que NO es una ausencia.** De ahí salen sus cuatro
+exclusiones, cada una impuesta a mano porque el código anterior no las deduce: los
+cuatro tipos que había eran todos ausencias. `esOtorgamiento` (`types.ts`) existe
+para que no se escriban como comparaciones sueltas contra el literal.
+
+**Qué se guarda dónde**, reutilizando columnas y sin estrenar ninguna:
+
+| Columna | Qué significa aquí |
+|---|---|
+| `dias_habiles` | Días **concedidos**, siempre positivo |
+| `fecha_inicio` = `fecha_fin` | El día que se trabajó de más. **En el pasado** |
+| `comentarios` | El motivo. Obligatorio |
+
+Nunca con `dias_habiles` negativos: envenenaría los totales del registro general y
+el CSV que sustituye al Excel de nómina, que no tienen columna de signo. El signo
+lo pone el cálculo del saldo, sumando este tipo aparte.
+
+**Las reglas que solo tiene él:** su fecha puede estar en el pasado —se pide
+después de haber trabajado— pero no más de un año atrás; un solo día de trabajo,
+no un rango; motivo obligatorio; tope de **30 días** por petición (el del saldo
+entero sigue en 999); y los días se **teclean**, no se cuentan —`contarDiasHabiles`
+daría 0 justo en el caso normal, porque el sábado por el que se gana no es hábil—.
+
+**Una sola firma**, sea cual sea `requiereSegundaFirma` de la ficha: se llama a
+`aprobadoresDe` con la casilla apagada, que es exactamente lo que ya hacía una
+ficha sin segunda firma.
+
+⚠️ **Que no llegue a Google es lo más delicado de la feature.** Hasta que existió
+este tipo, `construirPayload` decidía qué llega a Google mirando SOLO el evento, y
+bastaba porque todo eran ausencias. Un otorgamiento aprobado emite `aprobada`
+igual que unas vacaciones: sin el corte por tipo crearía un evento en el
+calendario de Staff y **una fila en la pestaña que consulta nómina**. Lleva
+**dos** cerraduras a propósito —el guard de `construirPayload` y `PESTANA` en
+`null`, que deja a `hoja()` sin pestaña a la que escribir— porque el error no se
+vería en el código: se vería en un recibo.
+
+⚠️ **El saldo NO filtra los otorgamientos por `fechaInicio`** como hace con los
+otros dos términos, y ésta es la trampa más sutil de todo esto. Esa fecha es la
+del trabajo extra y está en el pasado casi siempre: con el corte en agosto y un
+sábado trabajado en julio, `'2026-07-15' >= '2026-08-20'` es `false` y el día
+concedido **no contaría nunca**, sin error y sin aviso. Se filtran por
+`createdAt`, que es cuándo entró en juego (`sumarOtorgados` en `saldo.ts`).
+
+⚠️ **La anulación estaba rota antes de existir.** `sigueVigente` exige
+`fechaFin >= hoy` y `noHaEmpezado` exige `fechaInicio >= hoy`: las dos daban
+`false` siempre sobre un otorgamiento, así que ninguno habría sido anulable. Las
+dos ramifican. Anularlo devuelve los días —queda en `rechazada`, que sale de
+`['aprobada']` sin código nuevo— y **la bolsa puede quedar en negativo** si ya se
+gastaron. Solo admite la clase `anulacion`: no hay rango que mover.
+
+**Si el árbol se acaba, firma `APROBADOR_DE_RESERVA`** (`administrativo@`). Va con
+esto porque la raíz del organigrama es su propio jefe, y hasta el 2026-08-20
+`puedeDecidir` no comprobaba que quien firma no fuera quien pide: **se aprobaba
+sus propias solicitudes**, de cualquier tipo. El arreglo son dos mitades —
+`jefeEfectivo` desvía y la guarda de `puedeDecidir` impide— y **vale para todos
+los tipos**, no solo para los otorgamientos.
+
+**En la interfaz** no entra en el calendario ni en los totales del registro
+general, y **no se exporta al CSV**; en las tablas su columna «Días» lleva `+`.
+
+**n8n no se toca**: sus dos `IF` miran `payload.calendario` y `payload.hoja`
+contra `null`, y un otorgamiento llega con las dos en `null`.
 
 **Pedir más de lo que hay se BLOQUEA**, al contrario que en vacaciones, donde
 solo se avisa y decide quien firma. El motivo es que esta bolsa no se devenga: un

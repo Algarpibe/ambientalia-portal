@@ -71,6 +71,78 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
   };
 }
 
+describe('validarNuevaSolicitud — el otorgamiento', () => {
+  /** Un otorgamiento correcto: un día trabajado en el pasado, días y motivo. */
+  const otorg = (over: Record<string, unknown> = {}) => ({
+    tipo: 'otorgamiento',
+    fechaInicio: '2026-06-20',
+    fechaFin: '2026-06-20',
+    dias: 1,
+    comentarios: 'Trabajé el sábado en el montaje de Cartagena',
+    ...over,
+  });
+
+  it('acepta uno correcto y devuelve los días concedidos', () => {
+    expect(validar(otorg())).toMatchObject({ tipo: 'otorgamiento', dias: 1 });
+  });
+
+  it('CANDADO: su fecha SÍ puede estar en el pasado', () => {
+    // Es la regla que lo hace posible. Se pide DESPUÉS de haber trabajado, así
+    // que con la regla de las ausencias todo otorgamiento seria rechazado.
+    expect(validar(otorg({ fechaInicio: '2026-01-05', fechaFin: '2026-01-05' })).dias).toBe(1);
+    // Y el control: unas vacaciones en esa misma fecha SÍ se rechazan.
+    expect(() => validar(nueva({ fechaInicio: '2026-01-05', fechaFin: '2026-01-08' }))).toThrow(
+      expect.objectContaining({ code: 'fecha_en_pasado' }),
+    );
+  });
+
+  it('rechaza un trabajo de hace más de un año', () => {
+    // Sin tope, alguien reclama hoy un sábado de hace seis años — y encima
+    // caeria por debajo de su fecha de corte, donde no sumaría nada.
+    expect(() => validar(otorg({ fechaInicio: '2025-06-01', fechaFin: '2025-06-01' }))).toThrow(
+      expect.objectContaining({ code: 'trabajo_demasiado_antiguo', field: 'fechaInicio' }),
+    );
+  });
+
+  it('exige UN SOLO día de trabajo, no un rango', () => {
+    // El formulario manda una sola fecha, pero el servidor no puede fiarse: sin
+    // esto se colaría un trimestre entero como «el día que trabajé».
+    expect(() => validar(otorg({ fechaFin: '2026-06-25' }))).toThrow(
+      expect.objectContaining({ code: 'otorgamiento_un_solo_dia', field: 'fechaFin' }),
+    );
+  });
+
+  it('exige el motivo', () => {
+    expect(() => validar(otorg({ comentarios: '   ' }))).toThrow(
+      expect.objectContaining({ code: 'motivo_requerido', field: 'comentarios' }),
+    );
+  });
+
+  it('rechaza cantidades imposibles', () => {
+    for (const dias of [0, -1, 1.25, 31, Number.NaN]) {
+      expect(() => validar(otorg({ dias })), String(dias)).toThrow(expect.objectContaining({ status: 400 }));
+    }
+    // Y admite el medio día, que es la precisión de la columna.
+    expect(validar(otorg({ dias: 0.5 })).dias).toBe(0.5);
+    // Justo en el tope, que es lo que separa «30 sí» de «30 no».
+    expect(validar(otorg({ dias: 30 })).dias).toBe(30);
+  });
+
+  it('CANDADO: `dias` en cualquier OTRO tipo es un 400, no se ignora', () => {
+    // Aceptarlo e ignorarlo dejaría creer que se puede fijar desde el cliente el
+    // recuento de unas vacaciones, que es justo lo que no se puede.
+    expect(() => validar(nueva({ dias: 3 }))).toThrow(
+      expect.objectContaining({ code: 'dias_no_aplica', field: 'dias' }),
+    );
+  });
+
+  it('y sin `dias` un otorgamiento no pasa', () => {
+    expect(() => validar(otorg({ dias: undefined }))).toThrow(
+      expect.objectContaining({ code: 'dias_invalidos', field: 'dias' }),
+    );
+  });
+});
+
 describe('validarNuevaSolicitud', () => {
   it('acepta una solicitud correcta y limpia los comentarios', () => {
     const r = validar(nueva({ comentarios: '  Viaje  ' }));
@@ -674,7 +746,7 @@ describe('el informado no hereda ningún permiso del segundo firmante', () => {
 
 describe('validarNuevaModificacion', () => {
   /** Las fechas que la solicitud tiene AHORA, contra las que se compara. */
-  const ACTUAL = { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' };
+  const ACTUAL = { tipo: 'vacaciones', fechaInicio: '2026-07-06', fechaFin: '2026-07-10' } as const;
   /**
    * Un «hoy» a mitad de la ausencia (empezó el 6, acaba el 10): es el único
    * escenario donde recortar y retroceder se distinguen, que es lo que la regla
@@ -1010,5 +1082,62 @@ describe('puedeDecidirModificacion', () => {
 
   it('compara sin distinguir mayúsculas, como el resto de los guards', () => {
     expect(puedeDecidirModificacion(sesion('Jefa.Directa@Ambientalia.com.co'), propuesta, suya)).toBe(true);
+  });
+});
+
+describe('anular un otorgamiento', () => {
+  const HOY_OT = '2026-08-20';
+  /** Un otorgamiento aprobado por un trabajo del pasado, que es lo normal. */
+  const otorgAprobado = () =>
+    solicitud({
+      tipo: 'otorgamiento',
+      estado: 'aprobada',
+      fechaInicio: '2026-06-20',
+      fechaFin: '2026-06-20',
+      diasHabiles: 1,
+      aprobadorCorreo: 'jefa.directa@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
+    });
+
+  it('CANDADO: se puede anular aunque su fecha este en el pasado', () => {
+    // Las dos reglas que lo gobiernan miran fechas de AUSENCIA: `sigueVigente`
+    // exige `fechaFin >= hoy` y `noHaEmpezado` exige `fechaInicio >= hoy`. La
+    // fecha de un otorgamiento es el dia que se TRABAJO y esta en el pasado
+    // siempre, asi que sin las dos ramas NINGUNO seria anulable — que es lo
+    // contrario de lo decidido.
+    expect(puedePedirModificacion(otorgAprobado(), HOY_OT)).toBe(true);
+    expect(puedePedirAnulacion(otorgAprobado(), HOY_OT)).toBe(true);
+  });
+
+  it('y el control: unas vacaciones ya pasadas siguen sin poder anularse', () => {
+    // Sin esto, hacer que las dos reglas devuelvan siempre `true` dejaria el
+    // candado de arriba verde y abriria de par en par la puerta que
+    // `noHaEmpezado` documenta: anular devuelve TODOS los dias, tambien los ya
+    // disfrutados.
+    const vacacionesPasadas = solicitud({ estado: 'aprobada', fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
+    expect(puedePedirModificacion(vacacionesPasadas, HOY_OT)).toBe(false);
+    expect(puedePedirAnulacion(vacacionesPasadas, HOY_OT)).toBe(false);
+  });
+
+  it('un otorgamiento ya rechazado no admite nada, como el resto', () => {
+    // La vigencia se la sigue dando el ESTADO, que es lo que no cambia.
+    expect(puedePedirModificacion(solicitud({ tipo: 'otorgamiento', estado: 'rechazada' }), HOY_OT)).toBe(false);
+  });
+});
+
+describe('validarNuevaModificacion sobre un otorgamiento', () => {
+  const OTORG = { tipo: 'otorgamiento', fechaInicio: '2026-06-20', fechaFin: '2026-06-20' } as const;
+
+  it('CANDADO: solo se le puede pedir la anulacion', () => {
+    // No tiene rango que mover: es un dia de trabajo y una cantidad concedida.
+    expect(() => validarNuevaModificacion({ clase: 'fechas', fechaInicio: '2026-07-01', fechaFin: '2026-07-02' }, OTORG, '2026-08-20')).toThrow(
+      expect.objectContaining({ code: 'otorgamiento_solo_anulable', status: 409, field: 'clase' }),
+    );
+  });
+
+  it('la anulacion si', () => {
+    expect(validarNuevaModificacion({ clase: 'anulacion', motivo: 'Me equivoque' }, OTORG, '2026-08-20')).toMatchObject({
+      clase: 'anulacion',
+    });
   });
 });

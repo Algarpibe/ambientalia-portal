@@ -10,7 +10,13 @@ const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
 // Espejo de apps/hub-api/src/ausencias/types.ts. Si cambia allí, cambia aquí.
 
-export type TipoSolicitud = 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad';
+/**
+ * ⚠️ `otorgamiento` NO es una ausencia: es la petición de que te CONCEDAN días de
+ * compensatorio por un trabajo extra. Sus columnas se leen distinto —`diasHabiles`
+ * son días concedidos y `fechaInicio` es el día que se trabajó— y por eso hay un
+ * predicado, `esOtorgamiento` en `dominio.ts`, en vez de comparaciones sueltas.
+ */
+export type TipoSolicitud = 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad' | 'otorgamiento';
 /** `pendiente_2` = el jefe inmediato ya firmó y falta su superior. */
 export type EstadoSolicitud = 'pendiente' | 'pendiente_2' | 'aprobada' | 'rechazada' | 'registrada';
 
@@ -263,6 +269,15 @@ export interface NuevaSolicitud {
   fechaFin: string;
   comentarios?: string;
   adjunto?: { nombreArchivo: string; mime: string; contenidoBase64: string };
+  /**
+   * Días a conceder. SOLO en un otorgamiento, y ahí obligatorio.
+   *
+   * En los demás tipos los cuenta el servidor, y mandarlo es un 400: aceptarlo e
+   * ignorarlo dejaría creer que se puede fijar desde aquí el recuento de unas
+   * vacaciones. Aquí no se puede calcular — un compensatorio se gana por
+   * trabajar un sábado, y un sábado da cero días hábiles.
+   */
+  dias?: number;
 }
 
 // ── El 409 del solapamiento ────────────────────────────────────────────────
@@ -385,6 +400,20 @@ async function errorDeAusencia(res: Response): Promise<Error> {
   }
   // Sin estas dos ramas el usuario leería literalmente `compensatorios_insuficientes`
   // en la caja roja: `mensajeDeError` devuelve el código crudo en los 400 y 409.
+  // Los códigos del otorgamiento. Sin estas ramas el usuario leería
+  // `trabajo_demasiado_antiguo` tal cual en la caja roja: `mensajeDeError`
+  // devuelve el código crudo en los 400 y 409.
+  const DEL_OTORGAMIENTO: Record<string, string> = {
+    otorgamiento_un_solo_dia:
+      'Un compensatorio se pide por UN día trabajado, no por un rango. Si trabajaste varios días, manda una petición por cada uno.',
+    trabajo_demasiado_antiguo:
+      'Ese trabajo es de hace más de un año. Si crees que te quedaron días por reconocer, habla con administración.',
+    motivo_requerido: 'Cuéntale a quien aprueba por qué pides esos días: sin motivo no se puede valorar.',
+    dias_invalidos: 'Los días a conceder tienen que ser un número mayor que cero, con una décima como mucho (por ejemplo 0,5 o 1).',
+    dias_demasiados: 'Como máximo se pueden pedir 30 días en una sola petición.',
+    otorgamiento_solo_anulable: 'Un compensatorio concedido no tiene fechas que cambiar: solo se puede anular.',
+  };
+  if (cuerpo?.error && DEL_OTORGAMIENTO[cuerpo.error]) return new Error(DEL_OTORGAMIENTO[cuerpo.error]);
   if (cuerpo?.error === 'compensatorios_sin_saldo') {
     return new Error(
       'Todavía no tienes bolsa de compensatorios configurada, así que no se puede descontar de ella. ' +

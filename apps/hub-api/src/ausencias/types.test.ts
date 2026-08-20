@@ -158,3 +158,31 @@ describe('cambiaLaHoja', () => {
     }
   });
 });
+
+describe('el otorgamiento y los predicados de correccion', () => {
+  const otorg = (over: Partial<Solicitud> = {}) => solicitud({ tipo: 'otorgamiento', estado: 'aprobada', ...over });
+
+  it('corregir un otorgamiento no mueve ni el calendario ni la hoja', () => {
+    // No tiene evento ni fila: nunca llego a ninguno de los dos.
+    const previa = otorg();
+    const actual = otorg({ fechaInicio: '2026-07-07', diasHabiles: 3, comentarios: 'otro motivo' });
+    expect(cambiaElCalendario(previa, actual)).toBe(false);
+    expect(cambiaLaHoja(previa, actual)).toBe(false);
+  });
+
+  it('CANDADO: convertir una vacacion aprobada en otorgamiento SI mueve los dos', () => {
+    // El caso que caza la guarda de un solo lado. Esa vacacion tiene evento vivo
+    // en Google y fila en la hoja: al dejar de ser una ausencia hay que BORRAR
+    // los dos. Una guarda escrita como `actual.tipo === 'otorgamiento'` a secas
+    // devolveria `false` aqui y los dejaria ahi para siempre, sin avisar.
+    const previa = solicitud({ estado: 'aprobada' });
+    const actual = otorg();
+    expect(cambiaElCalendario(previa, actual)).toBe(true);
+    expect(cambiaLaHoja(previa, actual)).toBe(true);
+  });
+
+  it('CANDADO: y al reves tambien, por si la guarda se escribe sobre `previa`', () => {
+    expect(cambiaElCalendario(otorg(), solicitud({ estado: 'aprobada' }))).toBe(true);
+    expect(cambiaLaHoja(otorg(), solicitud({ estado: 'aprobada' }))).toBe(true);
+  });
+});

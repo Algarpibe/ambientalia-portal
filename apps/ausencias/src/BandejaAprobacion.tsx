@@ -12,6 +12,7 @@ import {
 } from './api';
 import {
   correoDelTurno,
+  esOtorgamiento,
   mensajeDeModificacion,
   motivoNoDecidible,
   propuestaDesfasada,
@@ -46,6 +47,14 @@ function TarjetaDelSolicitante({
   diasPedidos: number;
 }) {
   if (!fila) return null;
+  // ⚠️ Un otorgamiento SUMA. Pasarle `diasPedidos` haría que la tarjeta pintara
+  // en rojo «Estás pidiendo 3 días y te faltan 3… No puedes enviarla» sobre una
+  // petición que hace justo lo contrario: llenar la bolsa, no vaciarla. Se
+  // enseña el estado actual y ya — que es lo que quien firma necesita para
+  // decidir si concede más.
+  if (esOtorgamiento(tipo) && fila.compensatorios) {
+    return <TarjetaCompensatorios saldo={fila.compensatorios} titulo={`Bolsa de ${nombre} ahora mismo`} />;
+  }
   if (tipo === 'vacaciones') {
     return <TarjetaSaldo saldo={fila.saldo} diasPedidos={diasPedidos} titulo={`Saldo de ${nombre}`} />;
   }

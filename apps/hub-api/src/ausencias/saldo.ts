@@ -1,5 +1,5 @@
 import { esFechaValida } from './dias-habiles.js';
-import { ESTADOS_EN_TRAMITE, type EstadoSolicitud, type TipoSolicitud } from './types.js';
+import { ESTADOS_EN_TRAMITE, esOtorgamiento, type EstadoSolicitud, type TipoSolicitud } from './types.js';
 
 // Las dos bolsas de días. Puro a propósito: sin Pool, sin fechas del sistema
 // (el «hoy» se inyecta), para que todas las reglas se puedan probar sin BD.
@@ -55,6 +55,16 @@ export interface AusenciaParaElSaldo {
   fechaInicio: string;
   diasHabiles: number;
   estado: EstadoSolicitud;
+  /**
+   * YYYY-MM-DD. Solo lo miran los OTORGAMIENTOS, y por eso existe este campo.
+   *
+   * Los otros tipos se cuentan desde el corte por `fechaInicio`, que en ellos es
+   * cuándo empieza la ausencia. En un otorgamiento esa fecha es la del TRABAJO
+   * EXTRA, y está en el pasado casi siempre: filtrarlo por ahí dejaría fuera del
+   * saldo casi todos los días concedidos, en silencio. Lo que decide si un
+   * otorgamiento ya estaba dentro del número del corte es cuándo se PIDIÓ.
+   */
+  createdAt: string;
 }
 
 export interface SaldoVacaciones {
@@ -95,11 +105,13 @@ export interface SaldoCompensatorios {
   configurado: boolean;
   saldoCorte: number;
   fechaCorte: string;
+  /** Concedidos y ya firmes, PEDIDOS desde el corte. Ver `sumarOtorgados`. */
+  otorgados: number;
   /** Aprobados con inicio >= corte. */
   disfrutadas: number;
   /** Pendientes de aprobar con inicio >= corte. No bajan el saldo firme. */
   enTramite: number;
-  /** saldoCorte − disfrutadas. Sin término de crecimiento: ver arriba. */
+  /** saldoCorte + otorgados − disfrutadas. */
   disponible: number;
 }
 
@@ -127,6 +139,7 @@ function sinConfigurarCompensatorios(): SaldoCompensatorios {
     configurado: false,
     saldoCorte: 0,
     fechaCorte: '',
+    otorgados: 0,
     disfrutadas: 0,
     enTramite: 0,
     disponible: 0,
@@ -213,6 +226,11 @@ function sumarDesdeElCorte(
   // cualquier sentido: podría contar como posterior a un corte muy posterior.
   for (const a of ausencias) {
     if (!esFechaValida(a.fechaInicio)) throw errorFechaInvalida('fechaInicio', a.fechaInicio);
+    // `createdAt` entra en la misma comparación `>=` cuando el tipo es un
+    // otorgamiento (ver `sumarOtorgados`), así que se valida con el mismo rasero
+    // y aquí, junto a la otra: separarlas es como una de las dos se queda sin
+    // validar el día que alguien añada un tercer término.
+    if (!esFechaValida(a.createdAt)) throw errorFechaInvalida('createdAt', a.createdAt);
   }
 
   // Toma una LISTA de estados, no uno: desde la aprobación en cascada, «en
@@ -231,6 +249,31 @@ function sumarDesdeElCorte(
     disfrutadas: redondear(sumar(['aprobada'])),
     enTramite: redondear(sumar(ESTADOS_EN_TRAMITE)),
   };
+}
+
+/**
+ * Los días de compensatorio CONCEDIDOS y ya firmes desde el corte.
+ *
+ * ⚠️ Filtra por `createdAt` y NO por `fechaInicio`, y ésa es la diferencia que
+ * hace que la función exista en vez de ser una llamada más a `sumarDesdeElCorte`.
+ * La `fechaInicio` de un otorgamiento es el día del TRABAJO EXTRA, y está en el
+ * pasado casi siempre: con el corte en agosto y un sábado trabajado en julio,
+ * `'2026-07-15' >= '2026-08-20'` es `false` y el día concedido no contaría nunca
+ * — sin error, sin aviso, y con el empleado viendo que su bolsa no sube.
+ *
+ * Lo que decide si un otorgamiento ya estaba dentro del número del corte es
+ * cuándo se PIDIÓ, que es lo que compara esta función.
+ *
+ * Solo `aprobada`: un otorgamiento a medio firmar no ha concedido nada. Y no
+ * tiene contador «en trámite» propio a propósito — sumar días que aún no
+ * existen animaría a gastarlos.
+ */
+function sumarOtorgados(ausencias: AusenciaParaElSaldo[], fechaCorte: string): number {
+  return redondear(
+    ausencias
+      .filter((a) => esOtorgamiento(a.tipo) && a.estado === 'aprobada' && a.createdAt >= fechaCorte)
+      .reduce((total, a) => total + a.diasHabiles, 0),
+  );
 }
 
 /**
@@ -299,16 +342,18 @@ export function calcularSaldoCompensatorios(
   if (!esFechaValida(config.fechaCorte)) throw errorFechaInvalida('fechaCorte', config.fechaCorte);
 
   const { disfrutadas, enTramite } = sumarDesdeElCorte(ausencias, 'compensatorio', config.fechaCorte);
+  const otorgados = sumarOtorgados(ausencias, config.fechaCorte);
 
   return {
     configurado: true,
     saldoCorte: config.saldoCorte,
     fechaCorte: config.fechaCorte,
+    otorgados,
     disfrutadas,
     enTramite,
-    // Sin término de devengo que redondear aparte, así que el cuadre de décimas
-    // sale solo: `disfrutadas` ya viene redondeado del recuento y esta resta es
-    // la única operación que queda.
-    disponible: redondear(config.saldoCorte - disfrutadas),
+    // Los dos sumandos entran YA redondeados, por lo mismo que el devengo en la
+    // otra bolsa: así las tres cifras que se enseñan son las décimas exactas y
+    // su cuenta cuadra con `disponible` sin arrastrar el ruido de la resta.
+    disponible: redondear(config.saldoCorte + otorgados - disfrutadas),
   };
 }

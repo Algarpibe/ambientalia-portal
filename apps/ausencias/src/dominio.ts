@@ -8,13 +8,18 @@ import type {
   TipoSolicitud,
 } from './api';
 
-/** Los cuatro tipos, en el orden en que se ofrecen en el formulario. */
+/** Los cinco tipos, en el orden en que se ofrecen en el formulario. */
 export const TIPOS: { id: TipoSolicitud; label: string; ayuda: string }[] = [
   { id: 'vacaciones', label: 'Vacaciones', ayuda: 'Requiere aprobación.' },
   {
     id: 'compensatorio',
     label: 'Compensatorio',
     ayuda: 'Requiere aprobación. Descuenta de tu bolsa de compensatorios.',
+  },
+  {
+    id: 'otorgamiento',
+    label: 'Pedir compensatorios',
+    ayuda: 'Trabajaste un día extra y pides que te lo compensen. Si tu jefe lo aprueba, esos días entran en tu bolsa.',
   },
   { id: 'permiso', label: 'Permiso', ayuda: 'Requiere aprobación. Puedes adjuntar un soporte en PDF.' },
   { id: 'incapacidad', label: 'Incapacidad', ayuda: 'No se aprueba: se informa. El soporte médico en PDF es obligatorio.' },
@@ -25,6 +30,7 @@ export const ETIQUETA_TIPO: Record<TipoSolicitud, string> = {
   permiso: 'Permiso',
   compensatorio: 'Compensatorio',
   incapacidad: 'Incapacidad',
+  otorgamiento: 'Compensatorio concedido',
 };
 
 /** Solo la incapacidad se informa; el resto pasa por el visto bueno de alguien. */
@@ -137,6 +143,7 @@ export function etiquetasFecha(tipo: TipoSolicitud): { inicio: string; fin: stri
     permiso: 'de permiso',
     compensatorio: 'de compensatorio',
     incapacidad: 'de incapacidad',
+    otorgamiento: 'de trabajo extra',
   };
   return { inicio: `Fecha primer día ${n[tipo]}`, fin: `Fecha último día ${n[tipo]}` };
 }
@@ -190,6 +197,21 @@ export function hoyEnColombia(ahora: Date = new Date()): string {
  */
 export function consumeSaldo(tipo: TipoSolicitud): boolean {
   return tipo === 'vacaciones' || tipo === 'compensatorio';
+}
+
+/**
+ * El único tipo que NO es una ausencia. Espejo de `esOtorgamiento` en
+ * `apps/hub-api/src/ausencias/types.ts`.
+ *
+ * Los otros cuatro dicen «no voy a estar»; éste dice «trabajé el sábado,
+ * concédeme un día». Sus columnas se leen distinto —`diasHabiles` son días
+ * CONCEDIDOS y `fechaInicio` es el día del trabajo extra, en el pasado— y de ahí
+ * salen todas las ramas de la interfaz. En un predicado y no en comparaciones
+ * sueltas porque son nueve pantallas: cada una que se responda a mano se puede
+ * desviar sin que nada avise.
+ */
+export function esOtorgamiento(tipo: TipoSolicitud): boolean {
+  return tipo === 'otorgamiento';
 }
 
 /**
@@ -259,7 +281,7 @@ const ESTADOS_MODIFICABLES: readonly EstadoSolicitud[] = ['pendiente', 'pendient
 /** Lo mínimo de una solicitud para saber si admite una enmienda. */
 type Enmendable = Pick<
   Solicitud,
-  'estado' | 'fechaInicio' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
+  'tipo' | 'estado' | 'fechaInicio' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
 >;
 
 /**
@@ -288,7 +310,12 @@ export function decisorDeModificacion(s: ConTurno): string | null {
  * pasa es un 409 al pulsar, nunca un cambio que no debía poder pedirse.
  */
 export function puedePedirModificacion(s: Enmendable, hoy: string): boolean {
-  return ESTADOS_MODIFICABLES.includes(s.estado) && decisorDeModificacion(s) !== null && s.fechaFin >= hoy;
+  // Un otorgamiento no caduca: su fecha es la del día que se TRABAJÓ y está en el
+  // pasado siempre, así que la regla de las ausencias lo dejaría fuera SIEMPRE —
+  // ni siquiera se podría anular. Lo que le da o le quita vigencia es su estado.
+  // Espejo de `sigueVigente` en el servidor.
+  const vigente = esOtorgamiento(s.tipo) || s.fechaFin >= hoy;
+  return ESTADOS_MODIFICABLES.includes(s.estado) && decisorDeModificacion(s) !== null && vigente;
 }
 
 /**
@@ -312,7 +339,10 @@ export function puedePedirModificacion(s: Enmendable, hoy: string): boolean {
  * verdad.
  */
 export function puedePedirAnulacion(s: Enmendable, hoy: string): boolean {
-  return puedePedirModificacion(s, hoy) && s.fechaInicio >= hoy;
+  // Un otorgamiento no «empieza»: no hay días fuera consumiéndose. Anularlo quita
+  // los días concedidos, y si ya se gastaron la bolsa queda en negativo — que es
+  // lo decidido. Espejo de `noHaEmpezado` en el servidor.
+  return puedePedirModificacion(s, hoy) && (esOtorgamiento(s.tipo) || s.fechaInicio >= hoy);
 }
 
 /**
@@ -732,3 +762,40 @@ const MENSAJE_MODIFICACION: Record<string, string> = {
 
 /** Traduce el código de hub-api a algo legible; si no lo conoce, lo deja pasar. */
 export const mensajeDeModificacion = (mensaje: string): string => MENSAJE_MODIFICACION[mensaje] ?? mensaje;
+
+/**
+ * Los tipos que de verdad se pintan en el calendario.
+ *
+ * Deja fuera al otorgamiento, que no es una ausencia y que el servidor ni
+ * siquiera manda (`ausenciasEntre` lo excluye en el SQL). Ofrecerlo como filtro
+ * o en la leyenda sería prometer un color que no va a aparecer nunca, y quien lo
+ * eligiera vería el mes entero en blanco sin entender por qué.
+ */
+export const TIPOS_DE_AUSENCIA = TIPOS.filter((t) => !esOtorgamiento(t.id));
+
+/** Lo mínimo para pintar una fila en cualquiera de las dos tablas. */
+type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles'>;
+
+/**
+ * La celda «Días», con su signo cuando lo tiene.
+ *
+ * Las nueve pantallas que pintan `diasHabiles` lo hacen bajo una cabecera fija
+ * que dice «Días», y en ocho de ellas eso significa «días fuera». En un
+ * otorgamiento significa lo contrario: días que ENTRAN en la bolsa. Sin el `+`,
+ * las dos cosas se leen igual en la misma columna.
+ */
+export function diasDeLaFila(s: ParaLaTabla): string {
+  return esOtorgamiento(s.tipo) ? `+${formatDias(s.diasHabiles)}` : formatDias(s.diasHabiles);
+}
+
+/**
+ * Las celdas «Desde» y «Hasta» de una fila.
+ *
+ * Un otorgamiento tiene una sola fecha —el día trabajado— repetida en las dos
+ * columnas, y «6 jun – 6 jun» se lee como una errata. Se enseña una vez y la
+ * segunda queda vacía.
+ */
+export function fechasDeLaFila(s: ParaLaTabla): { desde: string; hasta: string } {
+  if (esOtorgamiento(s.tipo)) return { desde: formatFecha(s.fechaInicio), hasta: '' };
+  return { desde: formatFecha(s.fechaInicio), hasta: formatFecha(s.fechaFin) };
+}

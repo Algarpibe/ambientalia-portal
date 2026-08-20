@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { fetchCalendario, type CalendarioDelMes, type MarcaCalendario, type TipoSolicitud } from './api';
-import { enTramite, ETIQUETA_TIPO, TIPOS } from './dominio';
+import { enTramite, ETIQUETA_TIPO, TIPOS_DE_AUSENCIA } from './dominio';
 
 // La rejilla de persona × día. Los datos llegan YA expandidos por día desde
 // hub-api: aquí no se calcula ninguna fecha de ausencia, solo se pinta lo que
@@ -39,6 +39,12 @@ const COLOR: Record<TipoSolicitud, string> = {
   compensatorio: 'bg-emerald-500',
   permiso: 'bg-amber-500',
   incapacidad: 'bg-rose-500',
+  // Un otorgamiento NUNCA llega aquí: `ausenciasEntre` lo excluye en el SQL,
+  // porque no es una ausencia —su fecha es el día que se trabajó, y pintarlo
+  // diría que esa persona no estuvo justo el día que sí estuvo—. La entrada
+  // existe porque el Record es exhaustivo, y es una red: sin ella el objeto
+  // compilaría con `string` y una marca sin color se pintaría invisible.
+  otorgamiento: 'bg-slate-400',
 };
 
 /** El mes en curso como `YYYY-MM`, en hora de Colombia (UTC−5, sin horario de verano). */
@@ -135,7 +141,7 @@ export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
 
         <select className={selCls} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo">
           <option value="">Todos los tipos</option>
-          {TIPOS.map((t) => (
+          {TIPOS_DE_AUSENCIA.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label}
             </option>
@@ -260,7 +266,7 @@ export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-600">
-            {TIPOS.map((t) => (
+            {TIPOS_DE_AUSENCIA.map((t) => (
               <span key={t.id} className="flex items-center gap-1.5">
                 <span className={`inline-block h-3 w-3 rounded-sm ${COLOR[t.id]}`} /> {t.label}
               </span>

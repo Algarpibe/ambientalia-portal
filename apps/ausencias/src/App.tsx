@@ -20,6 +20,7 @@ import {
 import {
   contarPorAtender,
   enTramite,
+  esOtorgamiento,
   esTurnoDe,
   hoyEnColombia,
   mensajeDeModificacion,
@@ -375,13 +376,20 @@ export default function App() {
     if (!puedePedirModificacion(s, hoy)) return null;
     return (
       <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setModificando({ solicitud: s, clase: 'fechas' })}
-          className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Cambiar fechas
-        </button>
+        {/* Un otorgamiento no tiene fechas que cambiar: es un día trabajado y una
+            cantidad concedida. Aquí el botón SÍ desaparece, al revés que la
+            opción dentro del modal —que se queda deshabilitada con su porqué—,
+            porque una fila con dos botones de los que uno abre un formulario ya
+            resuelto es peor que una fila con un solo botón. */}
+        {!esOtorgamiento(s.tipo) && (
+          <button
+            type="button"
+            onClick={() => setModificando({ solicitud: s, clase: 'fechas' })}
+            className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cambiar fechas
+          </button>
+        )}
         {/* Sin botón cuando la ausencia ya empezó: anularla devolvería también
             los días ya disfrutados. El porqué —y la salida, que es acortar las
             fechas— se lo cuenta el modal al entrar por «Cambiar fechas». */}

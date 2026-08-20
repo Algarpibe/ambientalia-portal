@@ -174,7 +174,13 @@ class SolapeAlAplicar extends Error {
  * `as` en los cuatro sitios que la llaman.
  */
 const ocupaAgenda = (tipo: unknown, estado: unknown): boolean =>
-  tipo !== 'incapacidad' && estado !== 'rechazada';
+  // El otorgamiento no es una ausencia: su fecha es el dia que se TRABAJO de
+  // mas. Esta copia se desvio de la real en cuanto el tipo existio, y el
+  // sintoma fue el previsible — un 409 `rango_solapado` al pedir el
+  // compensatorio por un sabado trabajado durante las propias vacaciones, con
+  // el repo real diciendo que no ocupa nada. Es el desvio que el comentario de
+  // arriba anuncia, y paso.
+  tipo !== 'incapacidad' && tipo !== 'otorgamiento' && estado !== 'rechazada';
 
 /**
  * El predicado del solapamiento, fuera del doble porque lo necesitan TRES de sus
@@ -373,7 +379,8 @@ vi.mock('./repo.js', () => ({
     estado.solicitudes
       .filter(
         (s: any) =>
-          (s.tipo === 'vacaciones' || s.tipo === 'compensatorio') && ids.includes(s.empleadoId as string),
+          (s.tipo === 'vacaciones' || s.tipo === 'compensatorio' || s.tipo === 'otorgamiento') &&
+          ids.includes(s.empleadoId as string),
       )
       .map((s: any) => ({
         empleadoId: s.empleadoId,
@@ -381,6 +388,12 @@ vi.mock('./repo.js', () => ({
         fechaInicio: s.fechaInicio,
         diasHabiles: s.diasHabiles,
         estado: s.estado,
+        // El SELECT real recorta `created_at` a fecha (`::date::text`) porque el
+        // módulo del saldo lo compara contra `fecha_corte`, que es YYYY-MM-DD.
+        // El doble tiene que recortarlo igual: dejarlo como instante ISO rompería
+        // el orden lexicográfico, y devolverlo `undefined` hace que la validación
+        // lance un 500 en cualquier test que toque el saldo.
+        createdAt: String(s.createdAt ?? s.fechaInicio).slice(0, 10),
       })),
   fijarSaldo: async (
     _db: unknown,
@@ -4165,5 +4178,249 @@ describe('la forma de los errores del router', () => {
       .send(nueva({ fechaInicio: 'no-es-fecha' }))
       .expect(400);
     expect(r.body).toEqual({ error: 'fecha_invalida', field: 'fechaInicio' });
+  });
+});
+
+describe('nadie firma su propia solicitud', () => {
+  // La raiz del organigrama se declara siendo su propio jefe. Hasta el
+  // 2026-08-20 eso significaba que su solicitud aterrizaba en su propia bandeja
+  // y se la firmaba ella, porque `puedeDecidir` no comprobaba que quien firma no
+  // fuera quien pide. El arreglo tiene DOS mitades y hacen falta las dos: la
+  // guarda de `puedeDecidir`, y `jefeEfectivo`, que manda esas solicitudes al
+  // aprobador de reserva. Sin la segunda, la guarda sola las dejaria en un
+  // callejon sin salida.
+  const RESERVA = 'administrativo@ambientalia.com.co';
+
+  /** La sesion es la raiz: su ficha se apunta a si misma como jefe. */
+  function comoRaiz() {
+    estado.empleado = { ...(estado.empleado as Record<string, unknown>), aprobadorCorreo: 'ana.ruiz@ambientalia.com.co' };
+  }
+
+  it('CANDADO: la solicitud de la raiz aterriza en el aprobador de reserva', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    expect(r.body.aprobadorCorreo).toBe(RESERVA);
+    expect(r.body.aprobadorCorreo).not.toBe('ana.ruiz@ambientalia.com.co');
+  });
+
+  it('CANDADO: y no puede decidirla ella misma', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it('CANDADO: una solicitud VIEJA congelada con la raiz de aprobador tampoco se autofirma', async () => {
+    // Este es el caso que la guarda de `puedeDecidir` protege de verdad, y el
+    // unico que la alcanza. Las filas creadas ANTES de esta correccion llevan
+    // congelada a la propia raiz como aprobador, y `jefeEfectivo` ya no las toca:
+    // solo actua en el alta. Sin la guarda, esas siguen siendo autofirmables, y
+    // en produccion las hay.
+    //
+    // Se comprobo quitando la guarda del servicio: los otros cinco tests de este
+    // bloque seguian verdes, porque en ellos `jefeEfectivo` habia desviado la
+    // solicitud antes de que la guarda entrara en juego. Este es el que muerde.
+    estado.solicitudes.push({
+      id: 'vieja',
+      tipo: 'vacaciones',
+      empleadoId: 'e1',
+      empleadoNombre: 'Ana Ruiz',
+      empleadoCargo: 'Analista',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      fechaInicio: '2026-09-07',
+      fechaFin: '2026-09-11',
+      diasHabiles: 5,
+      comentarios: null,
+      observaciones: null,
+      origen: 'portal',
+      estado: 'pendiente',
+      // Lo que hace vieja a esta fila: se aprueba a si misma.
+      aprobadorCorreo: 'ana.ruiz@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
+      informadoCorreo: null,
+      copiaCorreo: null,
+      primeraFirmaAt: null,
+      decididaAt: null,
+      motivoRechazo: null,
+      createdAt: '2026-06-01T10:00:00Z',
+      adjunto: null,
+      modificacionPendiente: null,
+      anuladaAt: null,
+      eventoCalendarioId: null,
+    } as never);
+    await request(app())
+      .post('/api/ausencias/solicitudes/vieja/decision')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it('el aprobador de reserva SI puede', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: RESERVA })}`)
+      .send({ aprueba: true })
+      .expect(200);
+  });
+
+  it('CANDADO: vale para TODOS los tipos, no solo para el otorgamiento', async () => {
+    // El alcance es general a proposito: el agujero llevaba meses abierto para
+    // vacaciones, permisos y compensatorios.
+    //
+    // La bolsa se siembra porque si no el compensatorio choca contra SU PROPIO
+    // bloqueo —`compensatorios_sin_saldo`— y el 409 se leeria como si el candado
+    // de los aprobadores hubiera fallado. Se siembra una sola vez y fuera del
+    // bucle: `comoRaiz` corre en cada vuelta y duplicaria la ficha.
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      compensatoriosSaldoCorte: 10,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+    for (const [tipo, inicio, fin] of [
+      ['vacaciones', '2026-07-06', '2026-07-08'],
+      ['permiso', '2026-07-13', '2026-07-15'],
+      ['compensatorio', '2026-07-20', '2026-07-22'],
+    ] as const) {
+      comoRaiz();
+      const r = await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send({ ...nueva(), tipo, fechaInicio: inicio, fechaFin: fin })
+        .expect(201);
+      expect(r.body.aprobadorCorreo, tipo).toBe(RESERVA);
+    }
+  });
+
+  it('a quien SI tiene jefe no le cambia nada', async () => {
+    // El control del candado de arriba: sin esto, `jefeEfectivo` podria mandar a
+    // la reserva a todo el mundo y los cuatro tests anteriores seguirian verdes.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    expect(r.body.aprobadorCorreo).toBe('comercial@ambientalia.com.co');
+  });
+});
+
+describe('otorgar compensatorios', () => {
+  // El reloj de este fichero esta congelado en 2026-01-15, asi que el sabado
+  // 2026-01-10 es un dia trabajado del pasado reciente: el caso normal.
+  const SABADO = '2026-01-10';
+
+  const otorgamiento = (over: Record<string, unknown> = {}) => ({
+    tipo: 'otorgamiento',
+    fechaInicio: SABADO,
+    fechaFin: SABADO,
+    dias: 1,
+    comentarios: 'Montaje de Cartagena',
+    ...over,
+  });
+
+  const pedir = (body: Record<string, unknown>) =>
+    request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(body);
+
+  it('CANDADO: los dias concedidos son los que se pidieron, NO los habiles', () => {
+    // El sabado por el que se gana un compensatorio da CERO dias habiles. Si
+    // `crearSolicitud` los contara en vez de tomarlos del cuerpo, la concesion
+    // quedaria en nada — 201, sin error, y con la bolsa sin subir.
+    return pedir(otorgamiento({ dias: 2 }))
+      .expect(201)
+      .then((r) => {
+        expect(r.body.diasHabiles).toBe(2);
+        expect(r.body.diasHabiles).not.toBe(0);
+      });
+  });
+
+  it('CANDADO: una sola firma, aunque la ficha exija dos', async () => {
+    // Hace falta montar la cascada entera —Ana → Jefa → Gerencia— porque con el
+    // organigrama por defecto el arbol se corta en el primer escalon y TODO
+    // llevaria una firma: el candado pasaria por construccion.
+    const JEFA = 'jefa.directa@ambientalia.com.co';
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '44444444-4444-4444-8444-444444444444',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      activo: true,
+      requiereSegundaFirma: true,
+    });
+
+    // El control primero: con esa cascada, unas vacaciones SI llevan dos firmas.
+    const v = await pedir(nueva()).expect(201);
+    expect(v.body.segundoAprobadorCorreo).not.toBeNull();
+
+    // Y el otorgamiento, no. Conceder dias lo decide el jefe inmediato y ya.
+    const r = await pedir(otorgamiento()).expect(201);
+    expect(r.body.segundoAprobadorCorreo).toBeNull();
+  });
+
+  it('CANDADO: no ocupa agenda, asi que cabe DENTRO de las propias vacaciones', async () => {
+    // El caso mas tipico de todos: trabajar un sabado estando de vacaciones. Sin
+    // excluirlo de `ocupaAgenda`, la peticion chocaria contra esas vacaciones.
+    //
+    // Las vacaciones van de hoy en adelante porque el alta no admite fechas
+    // pasadas, y el sabado 17 cae dentro. Que el dia trabajado sea futuro es
+    // inusual pero no lo prohibe ninguna regla, y aqui da igual: lo que se
+    // prueba es el solape, no la fecha.
+    await pedir(nueva({ fechaInicio: '2026-01-15', fechaFin: '2026-01-23' })).expect(201);
+    await pedir(otorgamiento({ fechaInicio: '2026-01-17', fechaFin: '2026-01-17' })).expect(201);
+  });
+
+  it('al aprobarlo, la bolsa sube', async () => {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      compensatoriosSaldoCorte: 0,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+    const r = await pedir(otorgamiento({ dias: 2 })).expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .send({ aprueba: true })
+      .expect(200);
+
+    const saldo = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(saldo.body.compensatorios).toMatchObject({ otorgados: 2, disponible: 2 });
+  });
+
+  it('y hasta que no se firma no concede nada', async () => {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      compensatoriosSaldoCorte: 0,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+    await pedir(otorgamiento({ dias: 2 })).expect(201);
+    const saldo = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(saldo.body.compensatorios).toMatchObject({ otorgados: 0, disponible: 0 });
+  });
+
+  it('400 si le falta el motivo, los dias o si trae un rango', async () => {
+    await pedir(otorgamiento({ comentarios: '' })).expect(400);
+    await pedir(otorgamiento({ dias: undefined })).expect(400);
+    await pedir(otorgamiento({ fechaFin: '2026-01-12' })).expect(400);
+    await pedir(otorgamiento({ dias: 31 })).expect(400);
+  });
+
+  it('400 si el trabajo es de hace mas de un año', async () => {
+    await pedir(otorgamiento({ fechaInicio: '2024-06-01', fechaFin: '2024-06-01' })).expect(400);
   });
 });
