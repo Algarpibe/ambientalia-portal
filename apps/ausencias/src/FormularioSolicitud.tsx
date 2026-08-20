@@ -8,7 +8,7 @@ import {
   type Solicitud,
   type TipoSolicitud,
 } from './api';
-import { contarDiasHabiles, etiquetasFecha, hoyEnColombia, requiereAprobacion, TIPOS } from './dominio';
+import { contarDiasHabiles, etiquetasFecha, hoyEnColombia, pedible, requiereAprobacion, TIPOS } from './dominio';
 import TarjetaSaldo from './TarjetaSaldo';
 import TarjetaCompensatorios from './TarjetaCompensatorios';
 
@@ -61,8 +61,31 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   const minFecha = requiereAprobacion(tipo) ? hoyEnColombia() : undefined;
   const fechaEnPasado = Boolean(minFecha && fechaInicio && fechaInicio < minFecha);
 
+  // El servidor rechaza el compensatorio que no cabe en la bolsa, así que aquí se
+  // apaga el botón: dejar pulsar para recibir un 409 es hacer perder el viaje.
+  //
+  // `configurado === true` y no truthy: contra un hub-api que todavía no manda la
+  // clave, `compensatorios` llega `undefined` y esto NO debe activarse — dejaría
+  // el botón muerto mientras el servidor aceptaría la solicitud sin problema.
+  // Mismo criterio que el `!== false` de `esMiTurno`.
+  //
+  // El cliente es la cortesía; la regla vive en el servidor. Por eso solo se
+  // bloquea el caso que se puede calcular con certeza: sin bolsa configurada el
+  // botón sigue activo y el 409 explica qué hacer, que es hablar con
+  // administración — un botón apagado sin más no lo diría.
+  const excedeCompensatorios =
+    tipo === 'compensatorio' &&
+    compensatorios?.configurado === true &&
+    dias > 0 &&
+    dias > pedible(compensatorios);
+
   const puedeEnviar =
-    Boolean(fechaInicio && fechaFin) && !rangoInvertido && !fechaEnPasado && !faltaAdjunto && !enviando;
+    Boolean(fechaInicio && fechaFin) &&
+    !rangoInvertido &&
+    !fechaEnPasado &&
+    !faltaAdjunto &&
+    !excedeCompensatorios &&
+    !enviando;
 
   function cambiarTipo(nuevo: TipoSolicitud) {
     setTipo(nuevo);

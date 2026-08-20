@@ -18,6 +18,7 @@ import {
   calcularSaldo,
   calcularSaldoCompensatorios,
   hoyEnColombia,
+  pedible,
   type SaldoCompensatorios,
   type SaldoVacaciones,
 } from './saldo.js';
@@ -359,6 +360,71 @@ async function exigirSinSolape(
   throw errorDeSolape(choque);
 }
 
+/**
+ * Corta si esta persona no tiene compensatorios suficientes.
+ *
+ * Al contrario que las vacaciones —que solo avisan en el cliente y dejan la
+ * decisión a quien firma— el compensatorio se BLOQUEA aquí. La razón es que no
+ * se devenga con el tiempo: un descubierto no se cura esperando, y nadie puede
+ * autorizarlo tampoco, porque los días o se han ganado o no.
+ *
+ * ⚠️ SIN CONFIGURAR CUENTA COMO CERO Y BLOQUEA. Es decisión de producto, y tiene
+ * una consecuencia operativa que no se puede olvidar: las migraciones tienen
+ * prohibido sembrar datos, así que el día que esto entra en producción la bolsa
+ * está vacía para TODA la plantilla. Por eso esta función viaja en un despliegue
+ * posterior al de la pestaña que permite sembrarla, y no en el mismo — si no,
+ * nadie podría pedir un compensatorio durante el hueco. El contador de «sin
+ * bolsa de compensatorios» del panel de Saldos es el que dice cuándo se puede
+ * activar: mientras no esté en cero, esto corta a gente que no tiene forma de
+ * arreglarlo por su cuenta.
+ *
+ * Se compara contra `pedible` (disponible − enTramite) y NO contra `disponible`:
+ * con el firme a secas, tres solicitudes de un día con un día de bolsa pasarían
+ * las tres, porque ninguna de las anteriores ha bajado el firme todavía (media
+ * firma no descuenta, ver `calcularSaldo`).
+ *
+ * Solo al CREAR, nunca al aprobar. Bloquear en la firma dejaría solicitudes
+ * pendientes imposibles de decidir si la bolsa baja entre medias, y al jefe con
+ * una bandeja que no puede vaciar. Tampoco en el `PATCH` de admin: ahí no se
+ * decide nada, se corrige el registro.
+ *
+ * ⚠️ NO cierra la carrera de dos altas simultáneas: son dos SELECT sin `FOR
+ * UPDATE`, igual que `solapeDe` y por la misma razón que aquella documenta. Dos
+ * pestañas mandando a la vez pueden colar un día de más.
+ */
+async function exigirCompensatoriosSuficientes(
+  db: Pool,
+  empleado: Empleado,
+  tipo: TipoSolicitud,
+  dias: number,
+): Promise<void> {
+  if (tipo !== 'compensatorio') return;
+  // Un rango entero de fines de semana da 0 días hábiles y no consume nada. Sin
+  // este corte, con la bolsa en negativo —alcanzable: basta que un admin baje el
+  // corte después de aprobar— `0 > -2` bloquearía una solicitud que no gasta un
+  // solo día. `TarjetaCompensatorios` ya esquiva lo mismo con su `diasPedidos > 0`.
+  if (dias <= 0) return;
+
+  const { compensatorios } = await saldosDeSesion(db, empleado);
+  // Se distingue de «no te alcanza» porque la acción es otra: aquí no hay nada
+  // que el empleado pueda hacer salvo avisar a administración, y un mensaje
+  // único lo dejaría dando vueltas.
+  if (!compensatorios.configurado) {
+    throw new AusenciaError('compensatorios_sin_saldo', 409, 'tipo');
+  }
+
+  const puedePedir = pedible(compensatorios);
+  if (dias <= puedePedir) return;
+  // El detalle es obligatorio, no decorativo: «no puedes» sin los números es
+  // inaccionable. No hay riesgo de fuga — es el saldo de quien pregunta.
+  throw new AusenciaError('compensatorios_insuficientes', 409, 'fechaFin', {
+    pedidos: dias,
+    pedible: puedePedir,
+    disponible: compensatorios.disponible,
+    enTramite: compensatorios.enTramite,
+  });
+}
+
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
@@ -374,6 +440,10 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // esta comprobación necesita, así que tiene que ir antes por fuerza.
   await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
   const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
+  // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
+  // y de decodificar el base64 del adjunto para no procesar 8 MB de una solicitud
+  // que se va a rechazar.
+  await exigirCompensatoriosSuficientes(db, empleado, datos.tipo, diasHabiles);
 
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
