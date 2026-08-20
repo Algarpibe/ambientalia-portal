@@ -406,7 +406,8 @@ el CSV que sustituye al Excel de nómina, que no tienen columna de signo. El sig
 lo pone el cálculo del saldo, sumando este tipo aparte.
 
 **Las reglas que solo tiene él:** su fecha puede estar en el pasado —se pide
-después de haber trabajado— pero no más de un año atrás; un solo día de trabajo,
+después de haber trabajado— pero solo dentro de una ventana de TRES MESES hacia atrás —y nunca hacia
+adelante: se gana por haber trabajado, no por ir a trabajar—; un solo día,
 no un rango; motivo obligatorio; tope de **30 días** por petición (el del saldo
 entero sigue en 999); y los días se **teclean**, no se cuentan —`contarDiasHabiles`
 daría 0 justo en el caso normal, porque el sábado por el que se gana no es hábil—.
