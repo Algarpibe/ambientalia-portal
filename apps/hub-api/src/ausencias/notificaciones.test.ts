@@ -1091,3 +1091,44 @@ describe('el payload del borrado de una solicitud', () => {
     expect(cuerpo).toContain('Ana Ruiz');
   });
 });
+
+describe('el otorgamiento no llega a Google', () => {
+  // EL CANDADO DE LA NOMINA. `construirPayload` decidia que llega a Google
+  // mirando SOLO el evento, y bastaba porque los cuatro tipos eran ausencias. Un
+  // otorgamiento aprobado emite `aprobada` igual que unas vacaciones: sin el
+  // corte por tipo crearia un evento en el calendario de Staff por unos dias que
+  // nadie se toma, y una fila en la pestaña con la que se paga la nomina.
+  //
+  // Va sobre los CUATRO eventos y no solo sobre `aprobada`: `rechazada` tambien
+  // escribe en la hoja, y es el que se olvida.
+  const otorgamiento = (over: Partial<Solicitud> = {}) =>
+    solicitud({ tipo: 'otorgamiento', fechaInicio: '2026-07-11', fechaFin: '2026-07-11', diasHabiles: 1, ...over });
+
+  it('CANDADO: ninguno de sus eventos produce calendario ni hoja', () => {
+    for (const evento of ['creada', 'aprobacion', 'aprobada', 'rechazada'] as const) {
+      const p = construirPayload(otorgamiento({ estado: evento === 'aprobada' ? 'aprobada' : 'pendiente' }), evento);
+      expect(p.calendario, `evento ${evento}`).toBeNull();
+      expect(p.hoja, `evento ${evento}`).toBeNull();
+    }
+  });
+
+  it('CANDADO: y una vacacion aprobada SI las produce, para que el de arriba pruebe algo', () => {
+    const p = construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada');
+    expect(p.calendario).not.toBeNull();
+    expect(p.hoja).not.toBeNull();
+  });
+
+  it('CANDADO de la segunda cerradura: no tiene pestaña a la que escribir', () => {
+    // Independiente del guard de `construirPayload`, a proposito: si alguien
+    // deshiciera aquel, esto sigue impidiendo la fila. Se comprueba sobre la
+    // configuracion y no sobre el payload, que es lo que lo hace independiente.
+    expect(PESTANA.otorgamiento).toBeNull();
+    expect(PESTANA.compensatorio).not.toBeNull();
+  });
+
+  it('el correo si sale: lo que se excluye es Google, no el aviso', () => {
+    const p = construirPayload(otorgamiento(), 'creada');
+    expect(p.correo.para).not.toBe('');
+    expect(p.correo.asunto).not.toBe('');
+  });
+});
