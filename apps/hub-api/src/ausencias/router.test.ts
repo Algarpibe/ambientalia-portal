@@ -4215,6 +4215,51 @@ describe('nadie firma su propia solicitud', () => {
       .expect(403);
   });
 
+  it('CANDADO: una solicitud VIEJA congelada con la raiz de aprobador tampoco se autofirma', async () => {
+    // Este es el caso que la guarda de `puedeDecidir` protege de verdad, y el
+    // unico que la alcanza. Las filas creadas ANTES de esta correccion llevan
+    // congelada a la propia raiz como aprobador, y `jefeEfectivo` ya no las toca:
+    // solo actua en el alta. Sin la guarda, esas siguen siendo autofirmables, y
+    // en produccion las hay.
+    //
+    // Se comprobo quitando la guarda del servicio: los otros cinco tests de este
+    // bloque seguian verdes, porque en ellos `jefeEfectivo` habia desviado la
+    // solicitud antes de que la guarda entrara en juego. Este es el que muerde.
+    estado.solicitudes.push({
+      id: 'vieja',
+      tipo: 'vacaciones',
+      empleadoId: 'e1',
+      empleadoNombre: 'Ana Ruiz',
+      empleadoCargo: 'Analista',
+      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      fechaInicio: '2026-09-07',
+      fechaFin: '2026-09-11',
+      diasHabiles: 5,
+      comentarios: null,
+      observaciones: null,
+      origen: 'portal',
+      estado: 'pendiente',
+      // Lo que hace vieja a esta fila: se aprueba a si misma.
+      aprobadorCorreo: 'ana.ruiz@ambientalia.com.co',
+      segundoAprobadorCorreo: null,
+      informadoCorreo: null,
+      copiaCorreo: null,
+      primeraFirmaAt: null,
+      decididaAt: null,
+      motivoRechazo: null,
+      createdAt: '2026-06-01T10:00:00Z',
+      adjunto: null,
+      modificacionPendiente: null,
+      anuladaAt: null,
+      eventoCalendarioId: null,
+    } as never);
+    await request(app())
+      .post('/api/ausencias/solicitudes/vieja/decision')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
   it('el aprobador de reserva SI puede', async () => {
     comoRaiz();
     const r = await request(app())
