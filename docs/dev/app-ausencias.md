@@ -48,8 +48,8 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   `correccion_admin`, `028` el outbox con huérfanos (`solicitud_id` nulable y
   `ON DELETE SET NULL`) más el evento `borrado_admin`, y `029` la segunda bolsa
   (`empleados.compensatorios_saldo_corte` y `compensatorios_fecha_corte`, con su
-  CHECK de «las dos o ninguna»). La  añade el tipo
-  , con el que esa bolsa se llena.
+  CHECK de «las dos o ninguna»), y `030` el tipo `otorgamiento`, con el que esa
+  bolsa se llena.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
