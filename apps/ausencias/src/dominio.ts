@@ -772,3 +772,30 @@ export const mensajeDeModificacion = (mensaje: string): string => MENSAJE_MODIFI
  * eligiera vería el mes entero en blanco sin entender por qué.
  */
 export const TIPOS_DE_AUSENCIA = TIPOS.filter((t) => !esOtorgamiento(t.id));
+
+/** Lo mínimo para pintar una fila en cualquiera de las dos tablas. */
+type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles'>;
+
+/**
+ * La celda «Días», con su signo cuando lo tiene.
+ *
+ * Las nueve pantallas que pintan `diasHabiles` lo hacen bajo una cabecera fija
+ * que dice «Días», y en ocho de ellas eso significa «días fuera». En un
+ * otorgamiento significa lo contrario: días que ENTRAN en la bolsa. Sin el `+`,
+ * las dos cosas se leen igual en la misma columna.
+ */
+export function diasDeLaFila(s: ParaLaTabla): string {
+  return esOtorgamiento(s.tipo) ? `+${formatDias(s.diasHabiles)}` : formatDias(s.diasHabiles);
+}
+
+/**
+ * Las celdas «Desde» y «Hasta» de una fila.
+ *
+ * Un otorgamiento tiene una sola fecha —el día trabajado— repetida en las dos
+ * columnas, y «6 jun – 6 jun» se lee como una errata. Se enseña una vez y la
+ * segunda queda vacía.
+ */
+export function fechasDeLaFila(s: ParaLaTabla): { desde: string; hasta: string } {
+  if (esOtorgamiento(s.tipo)) return { desde: formatFecha(s.fechaInicio), hasta: '' };
+  return { desde: formatFecha(s.fechaInicio), hasta: formatFecha(s.fechaFin) };
+}

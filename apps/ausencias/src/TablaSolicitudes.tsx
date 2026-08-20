@@ -1,11 +1,12 @@
 import { Paperclip } from 'lucide-react';
 import { descargarAdjunto, type Solicitud } from './api';
 import {
+  diasDeLaFila,
+  fechasDeLaFila,
   CHIP_CAMBIO_PENDIENTE,
   chipDeSolicitud,
   ETIQUETA_TIPO,
   etiquetaMotivo,
-  formatFecha,
   formatInstante,
   resumenPropuesta,
 } from './dominio';
@@ -68,9 +69,15 @@ export default function TablaSolicitudes({
                   </td>
                 )}
                 <td className="px-4 py-3 text-gray-700">{ETIQUETA_TIPO[s.tipo]}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatFecha(s.fechaInicio)}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{formatFecha(s.fechaFin)}</td>
-                <td className="px-4 py-3 text-right tabular-nums text-gray-900">{s.diasHabiles}</td>
+                {/* Un otorgamiento no tiene rango ni días fuera: su fecha es el
+                    día que se trabajó y sus días SUMAN a la bolsa. Las dos
+                    reglas viven en `dominio.ts` porque esta tabla y la del
+                    registro general las necesitan iguales. */}
+                <td className="whitespace-nowrap px-4 py-3 text-gray-700">{fechasDeLaFila(s).desde}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                  {fechasDeLaFila(s).hasta || <span className="text-gray-300">—</span>}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-gray-900">{diasDeLaFila(s)}</td>
                 <td className="max-w-xs px-4 py-3 text-gray-600">
                   {s.comentarios || <span className="text-gray-300">—</span>}
                   {s.adjunto && (

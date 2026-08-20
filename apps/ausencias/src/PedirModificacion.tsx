@@ -5,6 +5,7 @@ import {
   decisorDeModificacion,
   ETIQUETA_TIPO,
   excedeRangoMaximo,
+  esOtorgamiento,
   hoyEnColombia,
   mensajeDeModificacion,
   minimoInicioPropuesto,
@@ -58,7 +59,13 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
   // Se cae a «fechas» si llega marcada la anulación sobre algo que no la admite.
   // Hoy no puede pasar —quien abre el modal ya comprueba lo mismo—, pero un
   // formulario que arranca en una opción deshabilitada no tendría salida.
-  const [clase, setClase] = useState<ClaseModificacion>(anulable ? claseInicial : 'fechas');
+  // Un otorgamiento no tiene rango que mover: es un día trabajado y una cantidad
+  // concedida. Solo se puede anular, y el servidor lo rechaza con
+  // `otorgamiento_solo_anulable` si llega otra cosa.
+  const soloAnulable = esOtorgamiento(solicitud.tipo);
+  const [clase, setClase] = useState<ClaseModificacion>(
+    soloAnulable ? 'anulacion' : anulable ? claseInicial : 'fechas',
+  );
   // Se arranca con las fechas que la solicitud tiene AHORA, no en blanco: casi
   // siempre se mueve un extremo, y así el antes/después se puede leer desde el
   // primer momento.
@@ -171,20 +178,28 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
         <fieldset className="mb-4">
           <legend className="mb-2 text-sm font-medium text-gray-700">Qué quieres pedir</legend>
           <div className="flex flex-col gap-2">
-            <label className={opcion(!anula, false)}>
+            {/* Deshabilitada y con el porqué al lado, no ausente: es el mismo
+                criterio que la opción de anular más abajo. Quien abre este modal
+                sobre un compensatorio concedido tiene que entender que la única
+                salida es anularlo y volver a pedirlo, no quedarse mirando una
+                lista de una sola opción sin saber si falta algo. */}
+            <label className={opcion(!anula, soloAnulable)}>
               <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
                 <input
                   type="radio"
                   name="clase"
                   value="fechas"
                   checked={!anula}
+                  disabled={soloAnulable}
                   onChange={() => setClase('fechas')}
                   className="accent-blue-600"
                 />
                 Cambiar las fechas
               </span>
               <span className="pl-6 text-xs text-gray-500">
-                Propón otras fechas. Sirve también para acortar una ausencia que ya empezó.
+                {soloAnulable
+                  ? 'Un compensatorio concedido no tiene fechas que mover: si te equivocaste, anúlalo y pídelo otra vez.'
+                  : 'Propón otras fechas. Sirve también para acortar una ausencia que ya empezó.'}
               </span>
             </label>
 
@@ -206,9 +221,11 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
                 Anular la solicitud
               </span>
               <span className="pl-6 text-xs text-gray-500">
-                {anulable
-                  ? 'Esos días dejarían de estar reservados.'
-                  : 'Esta ausencia ya empezó: no se puede anular, pero puedes acortar las fechas.'}
+                {soloAnulable
+                  ? 'Los días concedidos saldrían de tu bolsa de compensatorios. Si ya los gastaste, la bolsa quedará en negativo.'
+                  : anulable
+                    ? 'Esos días dejarían de estar reservados.'
+                    : 'Esta ausencia ya empezó: no se puede anular, pero puedes acortar las fechas.'}
               </span>
             </label>
           </div>
@@ -278,7 +295,9 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
             <p className="text-gray-700">
               {resumen.quedaria
                 ? `Quedaría: ${resumen.quedaria}`
-                : 'Quedaría: nada reservado, la ausencia desaparece del calendario.'}
+                : soloAnulable
+                  ? 'Quedaría: esos días salen de tu bolsa de compensatorios.'
+                  : 'Quedaría: nada reservado, la ausencia desaparece del calendario.'}
             </p>
             <p className="mt-1 font-medium text-gray-900">{resumen.efecto}</p>
           </div>

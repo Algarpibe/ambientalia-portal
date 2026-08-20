@@ -9,10 +9,12 @@ import {
   type Solicitud,
 } from './api';
 import {
+  diasDeLaFila,
+  esOtorgamiento,
+  fechasDeLaFila,
   CHIP_CAMBIO_PENDIENTE,
   chipDeSolicitud,
   ETIQUETA_TIPO,
-  formatFecha,
   resumenPropuesta,
   TIPOS,
 } from './dominio';
@@ -82,13 +84,21 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
     [solicitudes, tipo, persona, anio],
   );
 
-  const totalDias = useMemo(() => filtradas.reduce((a, s) => a + Number(s.diasHabiles), 0), [filtradas]);
+  // ⚠️ Los otorgamientos NO entran en estos dos totales. Sus días SUMAN a una
+  // bolsa; los de todos los demás tipos son días fuera. Mezclarlos daría un
+  // número sin significado, y el chip por persona es exactamente el número que
+  // alguien usaría para nómina.
+  const ausencias = useMemo(() => filtradas.filter((s) => !esOtorgamiento(s.tipo)), [filtradas]);
+  const concedidos = useMemo(() => filtradas.filter((s) => esOtorgamiento(s.tipo)), [filtradas]);
+
+  const totalDias = useMemo(() => ausencias.reduce((a, s) => a + Number(s.diasHabiles), 0), [ausencias]);
+  const totalConcedido = useMemo(() => concedidos.reduce((a, s) => a + Number(s.diasHabiles), 0), [concedidos]);
 
   const porPersona = useMemo(() => {
     const m = new Map<string, number>();
-    for (const s of filtradas) m.set(s.empleadoNombre, (m.get(s.empleadoNombre) ?? 0) + Number(s.diasHabiles));
+    for (const s of ausencias) m.set(s.empleadoNombre, (m.get(s.empleadoNombre) ?? 0) + Number(s.diasHabiles));
     return [...m].sort((a, b) => b[1] - a[1]);
-  }, [filtradas]);
+  }, [ausencias]);
 
   async function borrar(s: Solicitud) {
     setBorrando(s.id);
@@ -106,9 +116,17 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
 
   function exportarCsv() {
     const cab = ['Nombre y Apellidos', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Estado', 'Comentarios', 'Observaciones'];
+    // ⚠️ Los otorgamientos NO se exportan. Este fichero es el que sustituye al
+    // Excel de nómina y su columna «Días» significa días fuera en las ocho
+    // columnas que tiene; no hay ninguna que diga el signo. Una fila de días
+    // CONCEDIDOS ahí dentro es un error que se descubre en un recibo.
+    //
+    // Se quedan visibles en la tabla, que sí los marca con un `+`. Quien
+    // necesite el detalle de las concesiones lo tiene ahí y en el chip del
+    // total.
     const lineas = [
       cab.join(';'),
-      ...filtradas.map((s) =>
+      ...ausencias.map((s) =>
         [
           s.empleadoNombre,
           ETIQUETA_TIPO[s.tipo],
@@ -198,8 +216,15 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
           <div className="mb-3 flex flex-wrap gap-4 text-sm">
             <span className="text-gray-500">{filtradas.length} solicitudes</span>
             <span className="text-gray-700">
-              Total: <b className="tabular-nums">{totalDias}</b> días
+              Días de ausencia: <b className="tabular-nums">{totalDias}</b>
             </span>
+            {/* Aparte y solo si los hay: es la otra cara de la moneda, y sumarlo
+                al de arriba daría un número que no significa nada. */}
+            {totalConcedido > 0 && (
+              <span className="text-emerald-700">
+                Compensatorios concedidos: <b className="tabular-nums">+{totalConcedido}</b>
+              </span>
+            )}
           </div>
 
           {porPersona.length > 1 && (
@@ -241,9 +266,11 @@ export default function RegistroGeneral({ recargarToken, festivos }: Props) {
                   <tr key={s.id} className="align-top hover:bg-gray-50">
                     <td className="px-4 py-2.5 text-gray-900">{s.empleadoNombre}</td>
                     <td className="px-4 py-2.5 text-gray-700">{ETIQUETA_TIPO[s.tipo]}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{formatFecha(s.fechaInicio)}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{formatFecha(s.fechaFin)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{s.diasHabiles}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">{fechasDeLaFila(s).desde}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-gray-700">
+                      {fechasDeLaFila(s).hasta || <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{diasDeLaFila(s)}</td>
                     <td className="px-4 py-2.5">
                       <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-medium ${chip.clase}`}>
                         {chip.label}
