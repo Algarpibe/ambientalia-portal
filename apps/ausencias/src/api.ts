@@ -376,9 +376,57 @@ async function errorDeAusencia(res: Response): Promise<Error> {
   const cuerpo = (await res
     .clone()
     .json()
-    .catch(() => null)) as { error?: string; detalle?: SolapeDetalle } | null;
-  if (cuerpo?.error === 'rango_solapado' && cuerpo.detalle) return new Error(mensajeDeSolape(cuerpo.detalle));
+    // `detalle` es la MISMA clave para todos los errores que la llevan; lo que
+    // cambia de forma según el `error` es su contenido, así que se estrecha con
+    // el código antes de usarlo y no al revés.
+    .catch(() => null)) as { error?: string; detalle?: SolapeDetalle | CompensatoriosDetalle } | null;
+  if (cuerpo?.error === 'rango_solapado' && cuerpo.detalle) {
+    return new Error(mensajeDeSolape(cuerpo.detalle as SolapeDetalle));
+  }
+  // Sin estas dos ramas el usuario leería literalmente `compensatorios_insuficientes`
+  // en la caja roja: `mensajeDeError` devuelve el código crudo en los 400 y 409.
+  if (cuerpo?.error === 'compensatorios_sin_saldo') {
+    return new Error(
+      'Todavía no tienes bolsa de compensatorios configurada, así que no se puede descontar de ella. ' +
+        'Habla con administración para que fije tu punto de partida.',
+    );
+  }
+  if (cuerpo?.error === 'compensatorios_insuficientes' && cuerpo.detalle) {
+    return new Error(mensajeDeCompensatorios(cuerpo.detalle as CompensatoriosDetalle));
+  }
   return errorGenerico(res);
+}
+
+/** Lo que manda el servidor con un `compensatorios_insuficientes`. */
+export interface CompensatoriosDetalle {
+  pedidos: number;
+  pedible: number;
+  disponible: number;
+  enTramite: number;
+}
+
+/**
+ * El mensaje del bloqueo por bolsa insuficiente.
+ *
+ * Dice el déficit SIN `Math.max(0, …)`, por lo mismo que las tarjetas: redondear
+ * el rojo a cero borra el dato por el que existe el aviso. Y explica de dónde
+ * sale el número cuando hay días esperando firma, porque si no la cifra de aquí
+ * y la de la tarjeta de arriba parecen contradecirse.
+ */
+function mensajeDeCompensatorios(d: CompensatoriosDetalle): string {
+  const dias = (n: number) => `${n.toLocaleString('es-CO', { maximumFractionDigits: 1 })}`;
+  const base =
+    `Pides ${dias(d.pedidos)} días de compensatorio y solo puedes pedir ${dias(d.pedible)}: ` +
+    `te faltan ${dias(d.pedidos - d.pedible)}.`;
+  const tramite =
+    d.enTramite > 0
+      ? ` En la cuenta entran los ${dias(d.enTramite)} días que ya tienes pendientes de aprobar.`
+      : '';
+  return (
+    `${base}${tramite} Los compensatorios no se devengan con el tiempo: se ganan por horas o días ` +
+    'extra y hay que otorgarlos, así que esperar no los aumenta. Si crees que te faltan días por ' +
+    'reconocer, habla con administración.'
+  );
 }
 
 async function get<T>(path: string): Promise<T> {

@@ -82,13 +82,15 @@ export default function TarjetaCompensatorios({
               aprobar: se descontarán en cuanto alguien los firme.
             </>
           )}{' '}
-          {/* Deliberadamente NO dice «puedes enviarla igualmente», como sí hace la
-              tarjeta de vacaciones: aquí esperar no arregla nada, porque un
-              compensatorio no se devenga con el tiempo. Tampoco dice todavía que
-              no se pueda enviar — eso solo será cierto cuando entre el bloqueo del
-              servidor, y esta frase se completa entonces. */}
-          Los compensatorios no se devengan con el tiempo: se ganan por horas o días extra y hay que
-          otorgarlos. Si crees que te faltan días por reconocer, habla con administración.
+          {/* Lo contrario de lo que dice la tarjeta de vacaciones —«puedes enviarla
+              igualmente: lo decide quien aprueba»—, y por una razón de fondo: allí
+              el saldo sigue creciendo solo y quien firma puede asumir el adelanto;
+              aquí no crece nada y no hay nada que nadie pueda autorizar. El
+              servidor lo rechaza con un 409, así que decir otra cosa sería mandar
+              a la persona a un botón que no funciona. */}
+          No puedes enviarla: los compensatorios no se devengan con el tiempo, se ganan por horas o
+          días extra y hay que otorgarlos. Si crees que te faltan días por reconocer, habla con
+          administración.
         </p>
       )}
     </div>
