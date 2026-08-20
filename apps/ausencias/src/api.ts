@@ -183,6 +183,8 @@ export interface Contexto {
   festivos: string[];
   /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
   saldo: SaldoVacaciones | null;
+  /** La bolsa de compensatorios. Ver por qué es opcional en `SaldoCompensatorios`. */
+  compensatorios?: SaldoCompensatorios | null;
 }
 
 /** El saldo de vacaciones de una persona, ya calculado por hub-api. */
@@ -198,11 +200,41 @@ export interface SaldoVacaciones {
   disponible: number;
 }
 
+/**
+ * La bolsa de compensatorios, ya calculada por hub-api.
+ *
+ * NO tiene `devengadas`, y no es un olvido: un compensatorio se gana por horas o
+ * días extra y hay que otorgarlo, no crece con el tiempo. Además es lo único que
+ * impide en compilación pasarle esta bolsa a algo escrito para la de vacaciones
+ * —TypeScript compara por forma, así que dos tipos idénticos serían
+ * intercambiables—.
+ *
+ * Los campos que se declaren aquí tienen que existir en
+ * `apps/hub-api/src/ausencias/saldo.ts`.
+ */
+export interface SaldoCompensatorios {
+  configurado: boolean;
+  saldoCorte: number;
+  fechaCorte: string;
+  disfrutadas: number;
+  enTramite: number;
+  disponible: number;
+}
+
 export interface SaldoDeEmpleado {
   empleadoId: string;
   nombreCompleto: string;
   correo: string;
   saldo: SaldoVacaciones;
+  /**
+   * Opcional a propósito, y no `| null`. Hub-api y el portal son dos servicios
+   * que se despliegan por separado, así que hay una ventana en la que este
+   * bundle habla con un hub-api que todavía no manda la clave. Declararlo
+   * obligatorio haría que `tsc` diera por buenos accesos que revientan en
+   * ejecución; opcional obliga a poner el guard en cada punto de lectura. Mismo
+   * criterio que el `esMiTurno` de `SolicitudPendiente`.
+   */
+  compensatorios?: SaldoCompensatorios | null;
 }
 
 /** Un día del mes, con lo que hace falta para sombrearlo. */
@@ -385,13 +417,22 @@ const patchSolapable = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH'
 
 export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
 
+/** Las dos bolsas de quien pregunta, tal como vienen: claves hermanas. */
+export interface MisSaldos {
+  saldo: SaldoVacaciones | null;
+  compensatorios?: SaldoCompensatorios | null;
+}
+
 /**
- * Solo el saldo de quien pregunta. Lo usa el widget del dashboard, que no
+ * Solo los saldos de quien pregunta. Lo usa el widget del dashboard, que no
  * necesita el resto del contexto —festivos de tres años incluidos— y lo cargaría
  * en cada visita a la home del portal.
+ *
+ * Se llama `fetchMisSaldos` y no `fetchMiSaldo` a propósito: cambia la forma de
+ * lo que devuelve, y el rename obliga a `tsc` a señalar a sus dos llamantes en
+ * vez de dejar que alguien siga creyendo que sale el saldo pelado.
  */
-export const fetchMiSaldo = () =>
-  get<{ saldo: SaldoVacaciones | null }>('/api/ausencias/mi-saldo').then((d) => d.saldo);
+export const fetchMisSaldos = () => get<MisSaldos>('/api/ausencias/mi-saldo');
 
 export const fetchMisSolicitudes = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/mis-solicitudes').then((d) => d.solicitudes);
@@ -621,8 +662,14 @@ export const fetchDecididas = () =>
 export const fetchSaldos = () =>
   get<{ saldos: SaldoDeEmpleado[] }>('/api/ausencias/saldos').then((d) => d.saldos);
 
+/** Un punto de corte a mandar. Los dos a null vacían esa bolsa. */
+export interface CorteAFijar {
+  saldoCorte: number | string | null;
+  fechaCorte: string | null;
+}
+
 /**
- * Fija el punto de corte de un empleado (solo admin). Las dos a null lo vacía.
+ * Fija los puntos de corte de un empleado (solo admin).
  *
  * `saldoCorte` admite `string` a propósito, además de `number`: si el panel
  * convirtiera con `Number()` antes de mandarlo, un `'abc'` tecleado por error
@@ -631,11 +678,19 @@ export const fetchSaldos = () =>
  * número», y respondería un 400 confuso o, peor, borraría un saldo ya puesto.
  * Mandando la cadena tal cual, la validación de forma vive en un solo sitio
  * (el backend, con su regex) y el mensaje de error que llega es el correcto.
+ *
+ * Las CUATRO claves van siempre, incluso si el admin no tocó los compensatorios.
+ * El backend lee «clave ausente» como «no toques esa bolsa», y esa lectura está
+ * ahí para el bundle viejo, no para éste: mandarlas siempre deja esa rama como
+ * lo que es, una red para la ventana de despliegue, y no como algo que dependa
+ * de qué campos rellenó el admin.
  */
-export const fijarSaldo = (empleadoId: string, saldoCorte: number | string | null, fechaCorte: string | null) =>
+export const fijarSaldo = (empleadoId: string, vacaciones: CorteAFijar, compensatorios: CorteAFijar) =>
   put<SaldoDeEmpleado>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/saldo`, {
-    saldoCorte,
-    fechaCorte,
+    saldoCorte: vacaciones.saldoCorte,
+    fechaCorte: vacaciones.fechaCorte,
+    compensatoriosSaldoCorte: compensatorios.saldoCorte,
+    compensatoriosFechaCorte: compensatorios.fechaCorte,
   });
 
 /** El calendario de un mes `YYYY-MM`. Lo ve cualquiera que tenga la app. */

@@ -66,8 +66,8 @@ export function createAusenciasRouter(db: Pool): Router {
       const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
       const anio = new Date().getUTCFullYear();
       const festivos = [anio, anio + 1, anio + 2].flatMap((a) => [...festivosColombia(a)]).sort();
-      // El saldo es un campo accesorio de un payload que la app necesita para
-      // arrancar: si `saldoDeSesion` lanza, se registra el error pero NO se deja
+      // Los saldos son campos accesorios de un payload que la app necesita para
+      // arrancar: si `saldosDeSesion` lanza, se registra el error pero NO se deja
       // que tumbe el contexto entero, o nadie podría ni abrir la app (sin
       // `empleado`, sin `festivos`, sin `esAprobador`). `null` ya es un valor
       // legítimo del contrato («no hay saldo que enseñar»), así que la app
@@ -76,10 +76,15 @@ export function createAusenciasRouter(db: Pool): Router {
       // propósito: allí el saldo ES la respuesta entera, así que camuflar un
       // fallo con una lista incompleta sería mentir por omisión; aquí es un
       // extra dentro de un contexto que tiene que arrancar de todos modos.
-      let saldo: Awaited<ReturnType<typeof service.saldoDeSesion>> | null = null;
+      //
+      // Las dos bolsas degradan JUNTAS, y no es pereza: se calculan en la misma
+      // llamada a partir de la misma fila, así que lo que tumbe a una casi
+      // siempre tumba a la otra, y enseñar media verdad sería peor que no
+      // enseñar ninguna.
+      let saldos: Awaited<ReturnType<typeof service.saldosDeSesion>> | null = null;
       if (empleado) {
         try {
-          saldo = await service.saldoDeSesion(db, empleado);
+          saldos = await service.saldosDeSesion(db, empleado);
         } catch (e) {
           console.error('ausencias_contexto_saldo error', e);
           captureError(e, { endpoint: 'ausencias_contexto_saldo' });
@@ -103,9 +108,14 @@ export function createAusenciasRouter(db: Pool): Router {
         // pestaña con un solo booleano y no replica la regla en el navegador.
         esVisorAdjuntos: sesion.esAdmin || (await repo.esVisorDeAdjuntos(db, sesion.email)),
         festivos,
-        // Viaja aquí y no en un endpoint aparte para que el formulario pueda
-        // enseñar el saldo sin una segunda llamada al abrir la app.
-        saldo,
+        // Viajan aquí y no en un endpoint aparte para que el formulario pueda
+        // enseñar los saldos sin una segunda llamada al abrir la app.
+        //
+        // `compensatorios` es una clave HERMANA de `saldo`, no una anidación ni
+        // un renombrado: un bundle del portal anterior a esta función sigue
+        // leyendo `saldo` y se limita a ignorar la nueva.
+        saldo: saldos?.saldo ?? null,
+        compensatorios: saldos?.compensatorios ?? null,
       });
     } catch (e) {
       sendError(res, e, 'ausencias_contexto');
@@ -485,7 +495,10 @@ export function createAusenciasRouter(db: Pool): Router {
     try {
       const sesion = sesionDe(req);
       const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
-      res.json({ saldo: empleado ? await service.saldoDeSesion(db, empleado) : null });
+      const saldos = empleado ? await service.saldosDeSesion(db, empleado) : null;
+      // Claves hermanas y no un objeto anidado: así el widget viejo, que lee
+      // `saldo`, sigue funcionando durante la ventana de despliegue.
+      res.json({ saldo: saldos?.saldo ?? null, compensatorios: saldos?.compensatorios ?? null });
     } catch (e) {
       sendError(res, e, 'ausencias_mi_saldo');
     }

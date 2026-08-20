@@ -409,20 +409,108 @@ describe('puedeDecidir con dos firmas', () => {
 describe('validarSaldo', () => {
   it('acepta un saldo con decimal y su fecha', () => {
     expect(validarSaldo({ saldoCorte: 12.5, fechaCorte: '2026-08-12' })).toEqual({
-      saldoCorte: 12.5,
-      fechaCorte: '2026-08-12',
+      vacaciones: { saldoCorte: 12.5, fechaCorte: '2026-08-12' },
+      // Null y no una pareja vacía: el body no traía la de compensatorios, así
+      // que esa bolsa no se toca. Ver el candado del despliegue más abajo.
+      compensatorios: null,
     });
   });
 
   it('acepta la coma decimal que teclea la gente', () => {
-    expect(validarSaldo({ saldoCorte: '12,5', fechaCorte: '2026-08-12' }).saldoCorte).toBe(12.5);
+    expect(validarSaldo({ saldoCorte: '12,5', fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(12.5);
   });
 
   it('acepta vaciar la configuración con las dos a null', () => {
     expect(validarSaldo({ saldoCorte: null, fechaCorte: null })).toEqual({
-      saldoCorte: null,
-      fechaCorte: null,
+      vacaciones: { saldoCorte: null, fechaCorte: null },
+      compensatorios: null,
     });
+  });
+
+  it('CANDADO del despliegue: sin las claves de compensatorios, esa bolsa NO se toca', () => {
+    // Es exactamente lo que manda un PanelSaldos anterior a esta función. Si su
+    // ausencia se leyera como «vaciar», la primera vez que un admin corrigiera
+    // las vacaciones de alguien durante la ventana de despliegue le borraría la
+    // bolsa de compensatorios, sin error y sin rastro.
+    expect(validarSaldo({ saldoCorte: 12.5, fechaCorte: '2026-08-12' }).compensatorios).toBeNull();
+  });
+
+  it('acepta las dos parejas a la vez, cada una con su fecha', () => {
+    // Fechas distintas a propósito: las dos bolsas se cuadran contra recuentos
+    // distintos, y que puedan separarse es la razón de que sean columnas propias.
+    expect(
+      validarSaldo({
+        saldoCorte: 12.5,
+        fechaCorte: '2026-08-12',
+        compensatoriosSaldoCorte: '3,5',
+        compensatoriosFechaCorte: '2026-01-31',
+      }),
+    ).toEqual({
+      vacaciones: { saldoCorte: 12.5, fechaCorte: '2026-08-12' },
+      compensatorios: { saldoCorte: 3.5, fechaCorte: '2026-01-31' },
+    });
+  });
+
+  it('acepta vaciar solo la bolsa de compensatorios', () => {
+    expect(
+      validarSaldo({
+        saldoCorte: 12.5,
+        fechaCorte: '2026-08-12',
+        compensatoriosSaldoCorte: null,
+        compensatoriosFechaCorte: null,
+      }).compensatorios,
+    ).toEqual({ saldoCorte: null, fechaCorte: null });
+  });
+
+  it('rechaza media pareja de compensatorios, señalando la que falta', () => {
+    // Basta con que asome UNA de las dos claves para exigir la otra: así un
+    // front que sí las conoce pero manda media pareja recibe su 400, sin que eso
+    // estropee el caso legítimo de que no venga ninguna.
+    const soloSaldo = () =>
+      validarSaldo({ saldoCorte: 1, fechaCorte: '2026-08-12', compensatoriosSaldoCorte: 3 });
+    expect(soloSaldo).toThrow(AusenciaError);
+    try {
+      soloSaldo();
+    } catch (e) {
+      expect((e as AusenciaError).field).toBe('compensatoriosFechaCorte');
+    }
+  });
+
+  it('valida la bolsa de compensatorios con el mismo rasero que la de vacaciones', () => {
+    const con = (v: unknown) =>
+      validarSaldo({ saldoCorte: 1, fechaCorte: '2026-08-12', compensatoriosSaldoCorte: v, compensatoriosFechaCorte: '2026-08-12' });
+    // Es OTRA ruta de código aunque comparta la regex: compartirla no garantiza
+    // compartir el orden de comprobaciones.
+    expect(() => con('0x10')).toThrow(AusenciaError);
+    expect(() => con('1e2')).toThrow(AusenciaError);
+    expect(() => con('  ')).toThrow(AusenciaError);
+    expect(() => con([5])).toThrow(AusenciaError);
+    expect(() => con(true)).toThrow(AusenciaError);
+    expect(() => con(-1000)).toThrow(AusenciaError);
+    expect(con(-2.8).compensatorios?.saldoCorte).toBe(-2.8);
+  });
+
+  it('CANDADO cruzado: tocar una bolsa no altera lo que sale de la otra', () => {
+    const soloVacaciones = validarSaldo({ saldoCorte: 7, fechaCorte: '2026-08-12' }).vacaciones;
+    const conAmbas = validarSaldo({
+      saldoCorte: 7,
+      fechaCorte: '2026-08-12',
+      compensatoriosSaldoCorte: 99,
+      compensatoriosFechaCorte: '2020-01-01',
+    }).vacaciones;
+    expect(conAmbas).toEqual(soloVacaciones);
+  });
+
+  it('rechaza una fecha mágica de Postgres también en compensatorios', () => {
+    // 'infinity' y 'today' los aceptaría la columna DATE sin rechistar.
+    expect(() =>
+      validarSaldo({
+        saldoCorte: 1,
+        fechaCorte: '2026-08-12',
+        compensatoriosSaldoCorte: 1,
+        compensatoriosFechaCorte: 'infinity',
+      }),
+    ).toThrow(AusenciaError);
   });
 
   it('acepta un saldo negativo, que es quien ha adelantado vacaciones', () => {
@@ -430,9 +518,9 @@ describe('validarSaldo', () => {
     // persona ha disfrutado más días de los que lleva devengados. Rechazarlos
     // era una suposición equivocada, y además contradecía al resto de la app,
     // que sí calcula y pinta un disponible negativo.
-    expect(validarSaldo({ saldoCorte: -2.8, fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
-    expect(validarSaldo({ saldoCorte: '-2,8', fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
-    expect(validarSaldo({ saldoCorte: '-2.8333', fechaCorte: '2026-08-12' }).saldoCorte).toBe(-2.8);
+    expect(validarSaldo({ saldoCorte: -2.8, fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(-2.8);
+    expect(validarSaldo({ saldoCorte: '-2,8', fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(-2.8);
+    expect(validarSaldo({ saldoCorte: '-2.8333', fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(-2.8);
   });
 
   it('rechaza un saldo absurdamente negativo, que es un tecleo', () => {
@@ -502,10 +590,10 @@ describe('validarSaldo', () => {
   });
 
   it('sigue aceptando lo que ya funcionaba bien', () => {
-    expect(validarSaldo({ saldoCorte: '12,5', fechaCorte: '2026-08-12' }).saldoCorte).toBe(12.5);
-    expect(validarSaldo({ saldoCorte: 0, fechaCorte: '2026-08-12' }).saldoCorte).toBe(0);
-    expect(validarSaldo({ saldoCorte: '0', fechaCorte: '2026-08-12' }).saldoCorte).toBe(0);
-    expect(validarSaldo({ saldoCorte: 999, fechaCorte: '2026-08-12' }).saldoCorte).toBe(999);
+    expect(validarSaldo({ saldoCorte: '12,5', fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(12.5);
+    expect(validarSaldo({ saldoCorte: 0, fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(0);
+    expect(validarSaldo({ saldoCorte: '0', fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(0);
+    expect(validarSaldo({ saldoCorte: 999, fechaCorte: '2026-08-12' }).vacaciones.saldoCorte).toBe(999);
   });
 
   it('sigue rechazando lo que ya rechazaba bien', () => {

@@ -258,9 +258,9 @@ export async function listarEmpleados(db: Pool): Promise<Empleado[]> {
   return (rows as FilaEmpleadoDb[]).map(aEmpleado);
 }
 
-// ── Saldo de vacaciones ────────────────────────────────────────────────────
+// ── Saldos: vacaciones y compensatorios ────────────────────────────────────
 
-/** Un empleado con su configuración de saldo, tal como sale de la BD. */
+/** Un empleado con sus dos configuraciones de saldo, tal como salen de la BD. */
 export interface EmpleadoConSaldo {
   empleadoId: string;
   nombreCompleto: string;
@@ -268,6 +268,9 @@ export interface EmpleadoConSaldo {
   /** Null mientras nadie lo haya configurado. Va siempre en pareja con la fecha. */
   saldoCorte: number | null;
   fechaCorte: string | null;
+  /** La bolsa de compensatorios, independiente de la de vacaciones. */
+  compensatoriosSaldoCorte: number | null;
+  compensatoriosFechaCorte: string | null;
 }
 
 interface FilaEmpleadoSaldoDb {
@@ -276,6 +279,8 @@ interface FilaEmpleadoSaldoDb {
   correo: string;
   saldo_corte: number | null;
   fecha_corte: string | null;
+  compensatorios_saldo_corte: number | null;
+  compensatorios_fecha_corte: string | null;
 }
 
 function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
@@ -285,6 +290,8 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
     correo: r.correo,
     saldoCorte: r.saldo_corte,
     fechaCorte: r.fecha_corte,
+    compensatoriosSaldoCorte: r.compensatorios_saldo_corte,
+    compensatoriosFechaCorte: r.compensatorios_fecha_corte,
   };
 }
 
@@ -314,9 +321,16 @@ export async function empleadosConSaldo(
   empleadoId: string | null,
 ): Promise<EmpleadoConSaldo[]> {
   const { rows } = await db.query(
+    // Los casts NO son estilo. Sin `::float8` un NUMERIC llega como string y
+    // cualquier aritmética posterior lo concatena; sin `::text` un DATE llega
+    // como objeto Date, y ahí `fechaInicio >= fechaCorte` se compara vía
+    // ToPrimitive numérico contra NaN: SIEMPRE false, así que no se descontaría
+    // nada nunca y en silencio. Es el gotcha por el que `calcularSaldo` lanza.
     `SELECT e.id, e.nombre_completo, e.correo,
             e.saldo_corte::float8 AS saldo_corte,
-            e.fecha_corte::text   AS fecha_corte
+            e.fecha_corte::text   AS fecha_corte,
+            e.compensatorios_saldo_corte::float8 AS compensatorios_saldo_corte,
+            e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte
        FROM portal.empleados e
       WHERE e.activo
         AND ($1::text IS NULL
@@ -332,8 +346,8 @@ export async function empleadosConSaldo(
   return (rows as FilaEmpleadoSaldoDb[]).map(aEmpleadoConSaldo);
 }
 
-/** Una solicitud reducida a lo que el cálculo del saldo necesita. */
-export interface VacacionDeEmpleado {
+/** Una solicitud reducida a lo que el cálculo de los saldos necesita. */
+export interface AusenciaDeEmpleado {
   empleadoId: string;
   tipo: TipoSolicitud;
   fechaInicio: string;
@@ -341,7 +355,7 @@ export interface VacacionDeEmpleado {
   estado: Solicitud['estado'];
 }
 
-interface FilaVacacionDb {
+interface FilaAusenciaDb {
   empleado_id: string;
   tipo: TipoSolicitud;
   fecha_inicio: string;
@@ -349,7 +363,7 @@ interface FilaVacacionDb {
   estado: Solicitud['estado'];
 }
 
-function aVacacionDeEmpleado(r: FilaVacacionDb): VacacionDeEmpleado {
+function aAusenciaDeEmpleado(r: FilaAusenciaDb): AusenciaDeEmpleado {
   return {
     empleadoId: r.empleado_id,
     tipo: r.tipo,
@@ -360,27 +374,43 @@ function aVacacionDeEmpleado(r: FilaVacacionDb): VacacionDeEmpleado {
 }
 
 /**
- * Las solicitudes de esos empleados que pueden tocar el saldo.
+ * Las solicitudes de esos empleados que pueden tocar alguna de las dos bolsas.
  *
- * Se filtra por tipo aquí además de en `calcularSaldo` porque traer permisos e
+ * Los dos tipos en una sola consulta: son dos contabilidades independientes, pero
+ * viven en la misma tabla y quien pregunta por una casi siempre quiere la otra.
+ *
+ * Se filtra por tipo aquí además de en el módulo del saldo porque traer permisos e
  * incapacidades para descartarlos después es tráfico gratis; el filtro del módulo
- * puro se queda igualmente como red de seguridad.
+ * puro se queda igualmente como red de seguridad — y ahora es doble red, porque
+ * cada bolsa tiene que descartar además los tipos de la otra.
  */
-export async function vacacionesDeEmpleados(db: Pool, ids: string[]): Promise<VacacionDeEmpleado[]> {
+export async function ausenciasQueTocanElSaldo(db: Pool, ids: string[]): Promise<AusenciaDeEmpleado[]> {
   if (ids.length === 0) return [];
   const { rows } = await db.query(
     `SELECT empleado_id, tipo, fecha_inicio::text AS fecha_inicio,
             dias_habiles::float8 AS dias_habiles, estado
        FROM portal.solicitudes_ausencia
-      WHERE tipo = 'vacaciones' AND empleado_id = ANY($1::uuid[])`,
+      WHERE tipo IN ('vacaciones', 'compensatorio') AND empleado_id = ANY($1::uuid[])`,
     [ids],
   );
-  return (rows as FilaVacacionDb[]).map(aVacacionDeEmpleado);
+  return (rows as FilaAusenciaDb[]).map(aAusenciaDeEmpleado);
+}
+
+/** Un punto de corte a escribir: los dos campos, o los dos a null para vaciarlo. */
+export interface CorteAFijar {
+  saldoCorte: number | null;
+  fechaCorte: string | null;
 }
 
 /**
- * Fija (o vacía) el punto de corte de un empleado. Devuelve false si no existía
+ * Fija (o vacía) los puntos de corte de un empleado. Devuelve false si no existía
  * (o estaba inactivo: ver más abajo).
+ *
+ * `compensatorios` en `null` significa «el cliente no mandó esa pareja: NO la
+ * toques», que es distinto de mandarla con los dos campos a null («vacíala»).
+ * Esa distinción es lo único que impide que un panel viejo —que solo conoce la
+ * pareja de vacaciones— borre la bolsa de compensatorios de alguien la primera
+ * vez que un admin le corrija el saldo durante la ventana de despliegue.
  *
  * No encola nada en el outbox, igual que la edición del registro general: ajustar
  * un saldo es corregir el registro, no tomar una decisión que haya que comunicar.
@@ -395,14 +425,32 @@ export async function vacacionesDeEmpleados(db: Pool, ids: string[]): Promise<Va
 export async function fijarSaldo(
   db: Pool,
   empleadoId: string,
-  saldoCorte: number | null,
-  fechaCorte: string | null,
+  vacaciones: CorteAFijar,
+  compensatorios: CorteAFijar | null,
 ): Promise<boolean> {
   const { rowCount } = await db.query(
+    // Un solo UPDATE y no dos sentencias: sin una transacción que las una, un
+    // fallo entre medias dejaría media fila escrita.
+    //
+    // `CASE` y no `COALESCE` porque aquí NULL es un valor CON significado
+    // («vaciar la bolsa»), así que la nulidad del parámetro no puede servir a la
+    // vez para decir «no tocar». Lo dice la bandera aparte. El `::boolean` va
+    // explícito porque pg manda el booleano como texto y dentro de un `CASE`
+    // Postgres no tiene de dónde inferir el tipo.
     `UPDATE portal.empleados
-        SET saldo_corte = $2, fecha_corte = $3::date
+        SET saldo_corte = $2,
+            fecha_corte = $3::date,
+            compensatorios_saldo_corte = CASE WHEN $4::boolean THEN $5::numeric ELSE compensatorios_saldo_corte END,
+            compensatorios_fecha_corte = CASE WHEN $4::boolean THEN $6::date    ELSE compensatorios_fecha_corte END
       WHERE id = $1 AND activo`,
-    [empleadoId, saldoCorte, fechaCorte],
+    [
+      empleadoId,
+      vacaciones.saldoCorte,
+      vacaciones.fechaCorte,
+      compensatorios !== null,
+      compensatorios?.saldoCorte ?? null,
+      compensatorios?.fechaCorte ?? null,
+    ],
   );
   return (rowCount ?? 0) > 0;
 }

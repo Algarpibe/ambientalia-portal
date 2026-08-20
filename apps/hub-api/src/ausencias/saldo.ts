@@ -1,11 +1,11 @@
 import { esFechaValida } from './dias-habiles.js';
 import { ESTADOS_EN_TRAMITE, type EstadoSolicitud, type TipoSolicitud } from './types.js';
 
-// El saldo de vacaciones. Puro a propósito: sin Pool, sin fechas del sistema
+// Las dos bolsas de días. Puro a propósito: sin Pool, sin fechas del sistema
 // (el «hoy» se inyecta), para que todas las reglas se puedan probar sin BD.
 //
-// No se recalcula desde la fecha de ingreso. Se parte del saldo que hoy vive en
-// la hoja `Total` del Excel y se sigue desde ahí:
+// VACACIONES. No se recalcula desde la fecha de ingreso. Se parte del saldo que
+// hoy vive en la hoja `Total` del Excel y se sigue desde ahí:
 //
 //   saldo(hoy) = saldo_corte
 //              + (días desde el corte / 30) × 1,25
@@ -13,6 +13,15 @@ import { ESTADOS_EN_TRAMITE, type EstadoSolicitud, type TipoSolicitud } from './
 //
 // Es idéntico a recalcular desde el ingreso porque el devengo es proporcional al
 // tiempo y a la misma tasa para todos, sin tramos por antigüedad.
+//
+// COMPENSATORIOS. La misma forma menos el término del medio:
+//
+//   saldo(hoy) = saldo_corte − compensatorios aprobados con inicio >= corte
+//
+// Un compensatorio NO devenga con el tiempo: se gana por horas o días extra y hay
+// que otorgarlo. Por eso su fecha de corte es solo una frontera de descuento, y
+// por eso las dos bolsas comparten el recuento (`sumarDesdeElCorte`) pero no la
+// fórmula.
 
 /** Días de vacaciones al año que reconoce la empresa. */
 const DIAS_AL_ANIO = 15;
@@ -32,12 +41,16 @@ const DEVENGO_MENSUAL = DIAS_AL_ANIO / 12;
 /** El punto de partida de un empleado. Null mientras nadie lo haya configurado. */
 export interface ConfigSaldo {
   saldoCorte: number;
-  /** YYYY-MM-DD. Frontera: desde aquí se devenga y se descuenta. */
+  /**
+   * YYYY-MM-DD. Frontera desde la que se descuenta — y, SOLO en la bolsa de
+   * vacaciones, desde la que además se devenga. En compensatorios no hay devengo
+   * que originar: la fecha únicamente decide qué solicitudes cuentan.
+   */
   fechaCorte: string;
 }
 
-/** Una solicitud, reducida a lo que el saldo necesita mirar. */
-export interface VacacionTomada {
+/** Una solicitud, reducida a lo que los saldos necesitan mirar. */
+export interface AusenciaParaElSaldo {
   tipo: TipoSolicitud;
   fechaInicio: string;
   diasHabiles: number;
@@ -65,6 +78,32 @@ export interface SaldoVacaciones {
 }
 
 /**
+ * El saldo de compensatorios de un empleado.
+ *
+ * NO tiene `devengadas`, y esa ausencia es el diseño. Por un lado sería falso:
+ * diría «este mes has ganado cero» cuando lo que pasa es que esta bolsa no se
+ * gana con el tiempo. Por otro es lo único que impide, en tiempo de compilación,
+ * enchufar esta bolsa a algo escrito para la otra — con los mismos campos,
+ * TypeScript las daría por intercambiables, porque compara por forma y no por
+ * nombre.
+ *
+ * Sitio reservado para la fase del otorgamiento: entra aquí `otorgados: number` y
+ * `disponible` pasa a `saldoCorte + otorgados − disfrutadas`. La firma de
+ * `calcularSaldoCompensatorios` no cambia por ello.
+ */
+export interface SaldoCompensatorios {
+  configurado: boolean;
+  saldoCorte: number;
+  fechaCorte: string;
+  /** Aprobados con inicio >= corte. */
+  disfrutadas: number;
+  /** Pendientes de aprobar con inicio >= corte. No bajan el saldo firme. */
+  enTramite: number;
+  /** saldoCorte − disfrutadas. Sin término de crecimiento: ver arriba. */
+  disponible: number;
+}
+
+/**
  * Un objeto NUEVO en cada llamada, no una constante compartida: hub-api es un
  * proceso de larga vida, y si esto fuera un único objeto reusado, mutar la
  * respuesta de un empleado (a propósito o por un bug aguas abajo) contaminaría
@@ -82,9 +121,37 @@ function sinConfigurar(): SaldoVacaciones {
   };
 }
 
+/** Objeto nuevo en cada llamada, por lo mismo que `sinConfigurar`. */
+function sinConfigurarCompensatorios(): SaldoCompensatorios {
+  return {
+    configurado: false,
+    saldoCorte: 0,
+    fechaCorte: '',
+    disfrutadas: 0,
+    enTramite: 0,
+    disponible: 0,
+  };
+}
+
 /** Un decimal, que es la precisión con la que se enseña y la de NUMERIC(5,1). */
 function redondear(n: number): number {
   return Math.round(n * 10) / 10;
+}
+
+/**
+ * Lo que se puede pedir sin descubrirse: el saldo firme menos lo que espera firma.
+ *
+ * Redondea, y no es cosmético. `disponible − enTramite` sobre floats produce
+ * cosas como 3.9000000000000004 —el mismo ruido binario que documenta el test
+ * del cuadre de décimas—, y comparado contra los días de una solicitud eso
+ * decide bloqueos justo en el borde exacto en el que la pantalla dice «te falta
+ * 0». El servidor y el cliente tienen que redondear IGUAL o discreparán ahí;
+ * por eso `dominio.ts` lleva el espejo de esta función.
+ *
+ * El parámetro va estructural a propósito: sirve para las dos bolsas.
+ */
+export function pedible(saldo: { disponible: number; enTramite: number }): number {
+  return redondear(saldo.disponible - saldo.enTramite);
 }
 
 /**
@@ -118,14 +185,63 @@ export function hoyEnColombia(ahora: Date = new Date()): string {
 }
 
 /**
- * El saldo de un empleado a fecha `hoy`.
+ * Lo que las dos bolsas comparten: validar las fechas de TODAS las ausencias y
+ * sumar los días de UN tipo, por lista de estados, desde el corte.
+ *
+ * Extraído y no copiado por lo mismo que `ocupaAgenda` dejó de estar escrita dos
+ * veces (ver su JSDoc en repo.ts). Aquí la trampa sería peor: cada bolsa se
+ * prueba en su propio `describe`, así que desviar una de las dos copias dejaría
+ * verde el bloque de la otra y el fallo saldría en producción, en el saldo de
+ * alguien.
+ *
+ * Se llama SIEMPRE con la `fechaCorte` ya validada: la validación de `hoy` y del
+ * corte se queda arriba, en cada bolsa, porque cada una decide qué devolver
+ * cuando no hay configuración.
+ */
+function sumarDesdeElCorte(
+  ausencias: AusenciaParaElSaldo[],
+  tipo: TipoSolicitud,
+  fechaCorte: string,
+): { disfrutadas: number; enTramite: number } {
+  // Se valida ANTES del filtro y para TODAS las solicitudes, no solo dentro
+  // del callback de `sumar`: `fechaInicio` entra en una comparación `>=`
+  // contra `fechaCorte`, y una fecha malformada ahí falla en silencio de dos
+  // formas distintas. Si es un Date, `>=` lo compara vía ToPrimitive numérico
+  // —el timestamp contra Number('YYYY-MM-DD'), que es NaN— y la comparación
+  // es SIEMPRE false: la ausencia no se descontaría jamás. Si es una fecha
+  // sin cero de relleno («2026-2-1»), rompe el orden lexicográfico en
+  // cualquier sentido: podría contar como posterior a un corte muy posterior.
+  for (const a of ausencias) {
+    if (!esFechaValida(a.fechaInicio)) throw errorFechaInvalida('fechaInicio', a.fechaInicio);
+  }
+
+  // Toma una LISTA de estados, no uno: desde la aprobación en cascada, «en
+  // trámite» son dos estados —`pendiente` y `pendiente_2`— y con un solo estado
+  // exacto la media firma desaparecería del saldo sin sumar en ningún sitio.
+  const sumar = (estados: readonly EstadoSolicitud[]) =>
+    ausencias
+      // El filtro es por fecha de INICIO, no por si ya ocurrió respecto a
+      // `hoy`: una aprobada con inicio futuro se descuenta igual, porque el
+      // saldo de partida del Excel todavía no la trae descontada.
+      .filter((a) => a.tipo === tipo && estados.includes(a.estado) && a.fechaInicio >= fechaCorte)
+      .reduce((total, a) => total + a.diasHabiles, 0);
+
+  return {
+    // Media firma NO descuenta: sigue en trámite hasta que la solicitud queda firme.
+    disfrutadas: redondear(sumar(['aprobada'])),
+    enTramite: redondear(sumar(ESTADOS_EN_TRAMITE)),
+  };
+}
+
+/**
+ * El saldo de vacaciones de un empleado a fecha `hoy`.
  *
  * `vacaciones` puede traer solicitudes de cualquier tipo y estado: el filtrado es
  * cosa de esta función, para que ninguna llamada pueda olvidarse una regla.
  */
 export function calcularSaldo(
   config: ConfigSaldo | null,
-  vacaciones: VacacionTomada[],
+  vacaciones: AusenciaParaElSaldo[],
   hoy: string,
 ): SaldoVacaciones {
   // Una fecha malformada es un error de programación de quien llama, no una
@@ -138,18 +254,6 @@ export function calcularSaldo(
   if (!config) return sinConfigurar();
   if (!esFechaValida(config.fechaCorte)) throw errorFechaInvalida('fechaCorte', config.fechaCorte);
 
-  // Se valida ANTES del filtro y para TODAS las solicitudes, no solo dentro
-  // del callback de `sumar`: `fechaInicio` entra en una comparación `>=`
-  // contra `fechaCorte`, y una fecha malformada ahí falla en silencio de dos
-  // formas distintas. Si es un Date, `>=` lo compara vía ToPrimitive numérico
-  // —el timestamp contra Number('YYYY-MM-DD'), que es NaN— y la comparación
-  // es SIEMPRE false: la vacación no se descontaría jamás. Si es una fecha
-  // sin cero de relleno («2026-2-1»), rompe el orden lexicográfico en
-  // cualquier sentido: podría contar como posterior a un corte muy posterior.
-  for (const v of vacaciones) {
-    if (!esFechaValida(v.fechaInicio)) throw errorFechaInvalida('fechaInicio', v.fechaInicio);
-  }
-
   // Nunca negativo: una fecha de corte futura significa «aún no empieza a
   // devengar», no un descuento.
   const dias = Math.max(0, diasEntre(config.fechaCorte, hoy));
@@ -157,19 +261,7 @@ export function calcularSaldo(
   // `disponible` más abajo.
   const devengadas = redondear((dias / DIAS_POR_MES) * DEVENGO_MENSUAL);
 
-  // Toma una LISTA de estados, no uno: desde la aprobación en cascada, «en
-  // trámite» son dos estados —`pendiente` y `pendiente_2`— y con un solo estado
-  // exacto la media firma desaparecería del saldo sin sumar en ningún sitio.
-  const sumar = (estados: readonly EstadoSolicitud[]) =>
-    vacaciones
-      // El filtro es por fecha de INICIO, no por si ya ocurrió respecto a
-      // `hoy`: una aprobada con inicio futuro se descuenta igual, porque el
-      // saldo de partida del Excel todavía no la trae descontada.
-      .filter((v) => v.tipo === 'vacaciones' && estados.includes(v.estado) && v.fechaInicio >= config.fechaCorte)
-      .reduce((total, v) => total + v.diasHabiles, 0);
-
-  // Media firma NO descuenta: sigue en trámite hasta que la solicitud queda firme.
-  const disfrutadas = redondear(sumar(['aprobada']));
+  const { disfrutadas, enTramite } = sumarDesdeElCorte(vacaciones, 'vacaciones', config.fechaCorte);
 
   return {
     configurado: true,
@@ -177,7 +269,7 @@ export function calcularSaldo(
     fechaCorte: config.fechaCorte,
     devengadas,
     disfrutadas,
-    enTramite: redondear(sumar(ESTADOS_EN_TRAMITE)),
+    enTramite,
     // Se suma el devengo YA redondeado (no el crudo): saldoCorte, devengadas y
     // disfrutadas son entonces las tres décimas exactas que se enseñan en
     // pantalla, y su suma cuadra exactamente con disponible. Sumar el devengo
@@ -185,5 +277,38 @@ export function calcularSaldo(
     // la resta empuja hacia abajo, restando 0,1 días de más siempre en
     // perjuicio del empleado (ver test del caso 10,4 + 5,8 − 6,5).
     disponible: redondear(config.saldoCorte + devengadas - disfrutadas),
+  };
+}
+
+/**
+ * El saldo de compensatorios de un empleado a fecha `hoy`.
+ *
+ * `hoy` entra aunque no intervenga en el cálculo, y es deliberado: es lo que
+ * permite validarlo igual que en la otra bolsa —lanzar en vez de devolver un
+ * saldo en blanco— y lo que deja la firma quieta cuando el otorgamiento traiga
+ * un término que sí dependa de la fecha. Cobrar ese parámetro ahora sale más
+ * barato que cambiar a todos los llamantes después.
+ */
+export function calcularSaldoCompensatorios(
+  config: ConfigSaldo | null,
+  ausencias: AusenciaParaElSaldo[],
+  hoy: string,
+): SaldoCompensatorios {
+  if (!esFechaValida(hoy)) throw errorFechaInvalida('hoy', hoy);
+  if (!config) return sinConfigurarCompensatorios();
+  if (!esFechaValida(config.fechaCorte)) throw errorFechaInvalida('fechaCorte', config.fechaCorte);
+
+  const { disfrutadas, enTramite } = sumarDesdeElCorte(ausencias, 'compensatorio', config.fechaCorte);
+
+  return {
+    configurado: true,
+    saldoCorte: config.saldoCorte,
+    fechaCorte: config.fechaCorte,
+    disfrutadas,
+    enTramite,
+    // Sin término de devengo que redondear aparte, así que el cuadre de décimas
+    // sale solo: `disfrutadas` ya viene redondeado del recuento y esta resta es
+    // la única operación que queda.
+    disponible: redondear(config.saldoCorte - disfrutadas),
   };
 }

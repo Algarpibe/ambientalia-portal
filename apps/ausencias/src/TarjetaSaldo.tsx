@@ -1,6 +1,6 @@
 import { CalendarClock } from 'lucide-react';
 import type { SaldoVacaciones } from './api';
-import { formatDias, formatFecha } from './dominio';
+import { formatDias, formatFecha, pedible } from './dominio';
 
 // La tarjeta del saldo. Se usa en dos sitios (formulario y bandeja), por eso
 // vive aparte y no dentro del formulario.
@@ -54,8 +54,13 @@ export default function TarjetaSaldo({
   // descuenta»). Son dos preguntas distintas —cuánto tengo y cuánto puedo pedir
   // sin descubrirme— y por eso el aviso de abajo explica la diferencia en vez de
   // soltar dos cifras que parecen contradecirse.
-  const pedible = saldo.disponible - saldo.enTramite;
-  const seExcede = diasPedidos > 0 && diasPedidos > pedible;
+  //
+  // Se usa la función compartida de `dominio.ts` en vez de la resta a pelo: es
+  // espejo de la del servidor y redondea, porque `disponible − enTramite` sobre
+  // floats da cosas como 3.9000000000000004 y sin redondear las dos mitades
+  // discreparían justo en el borde en el que la pantalla dice «te falta 0».
+  const puedePedir = pedible(saldo);
+  const seExcede = diasPedidos > 0 && diasPedidos > puedePedir;
 
   // Con `soloSiAvisa`, sin exceso no hay nada que esta tarjeta cuente que no
   // cuente ya el indicador de la cabecera. La comprobación va DESPUÉS de la de
@@ -89,7 +94,7 @@ export default function TarjetaSaldo({
               faltan casi cinco días redondea el rojo a cero y borra justo el
               dato por el que este aviso existe. */}
           Estás pidiendo {formatDias(diasPedidos)} {diasPedidos === 1 ? 'día' : 'días'} y te faltan{' '}
-          {formatDias(diasPedidos - pedible)}.
+          {formatDias(diasPedidos - puedePedir)}.
           {/* De dónde sale el número. Sin esta frase la tarjeta enseña un saldo
               arriba y otro distinto abajo, y parece que se contradice: lo que
               cambia entre los dos es lo que está esperando firma. */}
