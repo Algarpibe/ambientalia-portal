@@ -370,6 +370,11 @@ vi.mock('./repo.js', () => ({
         compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
         compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
       })),
+  // Solo existe para que el CANDADO de más abajo compare superficies iguales.
+  // El recorte por rama que modela ya está escrito a mano, en JS, dentro del
+  // `empleadosConSaldo` de aquí arriba (sobre `estado.plantilla`); reproducir
+  // aquí el SQL de verdad sería abrir una tercera copia de la misma regla.
+  ramaDeDosNiveles: (placeholder: number) => `$${placeholder}::text IS NULL`,
   // ⚠️ El filtro por tipo tiene que seguir a la consulta real. El CANDADO de la
   // superficie de abajo compara NOMBRES de export, así que caza un renombre pero
   // no esto: si el repo ampliara los tipos y este doble se quedara en

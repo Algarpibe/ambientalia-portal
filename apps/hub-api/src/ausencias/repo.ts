@@ -296,6 +296,32 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
 }
 
 /**
+ * El recorte por rama: quien pregunta ve a sus subordinados directos y a los de
+ * ellos —los «nietos»—, y a nadie más. Con el parámetro a NULL no acota nada,
+ * que es lo que necesita un administrador.
+ *
+ * Existe una sola vez a propósito: lo usan la consulta de saldos y la de
+ * movimientos, y tienen que decir EXACTAMENTE lo mismo. Una copia divergente no
+ * lanza ni se pone roja — simplemente enseña filas de más, que aquí significa
+ * enseñar ausencias de gente que no es de quien mira.
+ *
+ * Dos niveles y no un CTE recursivo porque es el alcance de lo que ese jefe
+ * FIRMA: con la cascada le tocan también las de sus nietos. Un subárbol
+ * completo le enseñaría gente cuyas solicitudes no decide nunca.
+ *
+ * Asume que la tabla `portal.empleados` está aliasada como `e` en la consulta
+ * que lo incrusta. Lo cumplen las dos que lo usan.
+ */
+export function ramaDeDosNiveles(placeholder: number): string {
+  return `($${placeholder}::text IS NULL
+           OR lower(e.aprobador_correo) = lower($${placeholder})
+           OR EXISTS (SELECT 1 FROM portal.empleados j
+                       WHERE j.activo
+                         AND lower(j.correo) = lower(e.aprobador_correo)
+                         AND lower(j.aprobador_correo) = lower($${placeholder})))`;
+}
+
+/**
  * Empleados activos con su configuración de saldo.
  *
  * Dos filtros independientes, cada uno null = sin acotar:
@@ -333,12 +359,7 @@ export async function empleadosConSaldo(
             e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte
        FROM portal.empleados e
       WHERE e.activo
-        AND ($1::text IS NULL
-             OR lower(e.aprobador_correo) = lower($1)
-             OR EXISTS (SELECT 1 FROM portal.empleados j
-                         WHERE j.activo
-                           AND lower(j.correo) = lower(e.aprobador_correo)
-                           AND lower(j.aprobador_correo) = lower($1)))
+        AND ${ramaDeDosNiveles(1)}
         AND ($2::uuid IS NULL OR e.id = $2::uuid)
       ORDER BY e.nombre_completo`,
     [soloDe, empleadoId],
