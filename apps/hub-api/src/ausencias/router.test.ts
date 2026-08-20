@@ -347,9 +347,9 @@ vi.mock('./repo.js', () => ({
           String(s.segundoAprobadorCorreo ?? '').toLowerCase() === correo.toLowerCase()),
     ),
   solicitudPorId: async (_db: unknown, id: string) => estado.solicitudes.find((s) => s.id === id) ?? null,
-  // Saldo: se lee de `estado.plantilla`, con `saldoCorte`/`fechaCorte` colgados
-  // ahí mismo (empiezan `undefined` = "sin configurar"). `vacacionesDeEmpleados`
-  // se deriva de `estado.solicitudes`, que ya trae `empleadoId`/`tipo`/etc. desde
+  // Saldos: se leen de `estado.plantilla`, con las dos parejas colgadas ahí mismo
+  // (empiezan `undefined` = "sin configurar"). `ausenciasQueTocanElSaldo` se
+  // deriva de `estado.solicitudes`, que ya trae `empleadoId`/`tipo`/etc. desde
   // el mock de `crearSolicitud`.
   empleadosConSaldo: async (_db: unknown, soloDe: string | null, empleadoId: string | null) =>
     estado.plantilla
@@ -361,10 +361,20 @@ vi.mock('./repo.js', () => ({
         correo: e.correo,
         saldoCorte: e.saldoCorte ?? null,
         fechaCorte: e.fechaCorte ?? null,
+        compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
+        compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
       })),
-  vacacionesDeEmpleados: async (_db: unknown, ids: string[]) =>
+  // ⚠️ El filtro por tipo tiene que seguir a la consulta real. El CANDADO de la
+  // superficie de abajo compara NOMBRES de export, así que caza un renombre pero
+  // no esto: si el repo ampliara los tipos y este doble se quedara en
+  // `'vacaciones'`, todos los tests de compensatorios calcularían `disfrutadas: 0`
+  // y seguirían verdes.
+  ausenciasQueTocanElSaldo: async (_db: unknown, ids: string[]) =>
     estado.solicitudes
-      .filter((s: any) => s.tipo === 'vacaciones' && ids.includes(s.empleadoId as string))
+      .filter(
+        (s: any) =>
+          (s.tipo === 'vacaciones' || s.tipo === 'compensatorio') && ids.includes(s.empleadoId as string),
+      )
       .map((s: any) => ({
         empleadoId: s.empleadoId,
         tipo: s.tipo,
@@ -372,11 +382,23 @@ vi.mock('./repo.js', () => ({
         diasHabiles: s.diasHabiles,
         estado: s.estado,
       })),
-  fijarSaldo: async (_db: unknown, empleadoId: string, saldoCorte: number | null, fechaCorte: string | null) => {
+  fijarSaldo: async (
+    _db: unknown,
+    empleadoId: string,
+    vacaciones: { saldoCorte: number | null; fechaCorte: string | null },
+    compensatorios: { saldoCorte: number | null; fechaCorte: string | null } | null,
+  ) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
-    e.saldoCorte = saldoCorte;
-    e.fechaCorte = fechaCorte;
+    e.saldoCorte = vacaciones.saldoCorte;
+    e.fechaCorte = vacaciones.fechaCorte;
+    // `null` = el body no traía la pareja: la bolsa NO se toca. Reproducir aquí
+    // el `CASE WHEN` del UPDATE real es lo que hace que el test del despliegue
+    // —guardar solo vacaciones deja intactos los compensatorios— pruebe algo.
+    if (compensatorios !== null) {
+      e.compensatoriosSaldoCorte = compensatorios.saldoCorte;
+      e.compensatoriosFechaCorte = compensatorios.fechaCorte;
+    }
     return true;
   },
   empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
@@ -2451,6 +2473,44 @@ describe('GET /ausencias/mi-saldo', () => {
     expect(r.body.saldo.disponible).toBeGreaterThanOrEqual(10);
   });
 
+  it('las dos bolsas viajan como claves HERMANAS, no anidadas ni renombradas', async () => {
+    // La forma es contrato de despliegue: `hub-api` y el portal suben por
+    // separado, así que un bundle viejo tiene que poder seguir leyendo `saldo`
+    // tal cual y limitarse a ignorar la clave nueva.
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: 10,
+      fechaCorte: '2026-01-01',
+      compensatoriosSaldoCorte: 3,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: true, saldoCorte: 10 });
+    // Aquí SÍ se puede fijar el disponible exacto, al revés que en el saldo de
+    // vacaciones de más arriba: los compensatorios no devengan, así que este
+    // número no se mueve por mucho tiempo que pase.
+    expect(r.body.compensatorios).toMatchObject({ configurado: true, saldoCorte: 3, disponible: 3 });
+  });
+
+  it('las dos bolsas son independientes: una configurada y la otra no', async () => {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: 10,
+      fechaCorte: '2026-01-01',
+    });
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: true });
+    expect(r.body.compensatorios).toMatchObject({ configurado: false });
+  });
+
+  it('sin ficha de empleado las DOS bolsas van a null explícito', async () => {
+    estado.empleado = null;
+    estado.usuarioEnPortal = false;
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(r.body).toHaveProperty('saldo', null);
+    expect(r.body).toHaveProperty('compensatorios', null);
+  });
+
   it('sin ficha de empleado responde `saldo: null` explícito, no una clave ausente', async () => {
     // `undefined` desaparece al serializar a JSON, y el widget distingue "sin
     // ficha" de "sin configurar" mirando el valor: si aquí se colara un
@@ -2534,6 +2594,51 @@ describe('PUT /ausencias/empleados/:id/saldo', () => {
       .put(`/api/ausencias/empleados/${E1}/saldo`)
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .send({ saldoCorte: 10 })
+      .expect(400);
+  });
+
+  it('CANDADO del despliegue: guardar solo la pareja vieja NO borra los compensatorios', async () => {
+    // Es literalmente lo que manda un PanelSaldos anterior a esta función. Si el
+    // UPDATE tratara la ausencia de esas claves como «vacíalas», al admin le
+    // bastaría con corregir unas vacaciones para borrarle a alguien la bolsa de
+    // compensatorios, sin error y sin rastro. Aquí se prueba desde HTTP; la otra
+    // mitad —que el `CASE WHEN` del SQL real se comporte igual— vive en el
+    // .db.test.ts, porque el doble no ejecuta SQL.
+    // Se MUTA la ficha que el beforeEach ya dejó en la plantilla; añadir otra con
+    // el mismo id crearía un duplicado y el doble resuelve por el primero, así
+    // que el test acabaría midiendo una fila distinta de la que escribe.
+    const ficha = estado.plantilla.find((e: any) => e.id === E1) as Record<string, unknown>;
+    ficha.compensatoriosSaldoCorte = 4;
+    ficha.compensatoriosFechaCorte = '2026-01-01';
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ saldoCorte: 10, fechaCorte: '2026-01-01' })
+      .expect(200);
+    expect(r.body.saldo).toMatchObject({ configurado: true, saldoCorte: 10 });
+    expect(r.body.compensatorios).toMatchObject({ configurado: true, saldoCorte: 4 });
+  });
+
+  it('guarda las dos parejas, cada una con su propia fecha de corte', async () => {
+    const r = await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({
+        saldoCorte: 10,
+        fechaCorte: '2026-08-12',
+        compensatoriosSaldoCorte: '2,5',
+        compensatoriosFechaCorte: '2026-01-31',
+      })
+      .expect(200);
+    expect(r.body.saldo).toMatchObject({ saldoCorte: 10, fechaCorte: '2026-08-12' });
+    expect(r.body.compensatorios).toMatchObject({ saldoCorte: 2.5, fechaCorte: '2026-01-31' });
+  });
+
+  it('400 si la pareja de compensatorios va a medias', async () => {
+    await request(app())
+      .put(`/api/ausencias/empleados/${E1}/saldo`)
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .send({ saldoCorte: 10, fechaCorte: '2026-01-01', compensatoriosSaldoCorte: 3 })
       .expect(400);
   });
 });

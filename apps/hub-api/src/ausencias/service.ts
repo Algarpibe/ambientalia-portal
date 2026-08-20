@@ -14,7 +14,13 @@ import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos } from './jerarquia.js';
 import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
-import { calcularSaldo, hoyEnColombia, type SaldoVacaciones } from './saldo.js';
+import {
+  calcularSaldo,
+  calcularSaldoCompensatorios,
+  hoyEnColombia,
+  type SaldoCompensatorios,
+  type SaldoVacaciones,
+} from './saldo.js';
 import {
   CLASES_MODIFICACION,
   ETIQUETA_TIPO,
@@ -1053,24 +1059,37 @@ export interface SaldoAFijar {
  */
 const RE_SALDO = /^-?\d{1,3}([.,]\d+)?$/;
 
-/** Valida a mano lo que llega del cliente; en este repo no hay zod. */
-export function validarSaldo(body: unknown): SaldoAFijar {
-  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+/** Las dos bolsas que puede traer el body del panel de admin. */
+export interface SaldosAFijar {
+  vacaciones: SaldoAFijar;
+  /**
+   * Null cuando el body NO traía la pareja de compensatorios: entonces la bolsa
+   * no se toca. Es distinto de traerla con los dos campos vacíos, que sí la vacía.
+   */
+  compensatorios: SaldoAFijar | null;
+}
 
-  // El operador `in` mira la CLAVE, no el valor: así se distingue «vaciar a
-  // propósito» (las dos claves presentes y en null) de «el body no trae las
-  // claves que se esperan» (un `{}`, o un renombrado en el front como
-  // `{saldo: 20, fecha: '...'}`). Mirando solo el valor, los dos casos
-  // colapsarían en el mismo `undefined` y un renombrado borraría en silencio
-  // un saldo ya configurado.
-  const saldoPresente = 'saldoCorte' in b;
-  const fechaPresente = 'fechaCorte' in b;
+/**
+ * Valida una pareja saldo+fecha. Exige las dos claves, o ninguna cosa a medias.
+ *
+ * El operador `in` mira la CLAVE, no el valor: así se distingue «vaciar a
+ * propósito» (las dos claves presentes y en null) de «el body no trae las
+ * claves que se esperan» (un `{}`, o un renombrado en el front como
+ * `{saldo: 20, fecha: '...'}`). Mirando solo el valor, los dos casos
+ * colapsarían en el mismo `undefined` y un renombrado borraría en silencio
+ * un saldo ya configurado.
+ */
+function validarPareja(b: Record<string, unknown>, claveSaldo: string, claveFecha: string): SaldoAFijar {
+  const saldoPresente = claveSaldo in b;
+  const fechaPresente = claveFecha in b;
   if (!saldoPresente || !fechaPresente) {
-    throw new AusenciaError('saldo_incompleto', 400, !saldoPresente ? 'saldoCorte' : 'fechaCorte');
+    throw new AusenciaError('saldo_incompleto', 400, !saldoPresente ? claveSaldo : claveFecha);
   }
 
-  const saldoVacio = b.saldoCorte === null || b.saldoCorte === '';
-  const fechaVacia = b.fechaCorte === null || b.fechaCorte === '';
+  const valorSaldo = b[claveSaldo];
+  const valorFecha = b[claveFecha];
+  const saldoVacio = valorSaldo === null || valorSaldo === '';
+  const fechaVacia = valorFecha === null || valorFecha === '';
 
   // Vaciar la configuración es legítimo: devuelve al empleado a «sin configurar».
   if (saldoVacio && fechaVacia) return { saldoCorte: null, fechaCorte: null };
@@ -1078,24 +1097,24 @@ export function validarSaldo(body: unknown): SaldoAFijar {
   // se puede explicar. El campo señalado es el que FALTA, no el que sí llegó
   // (si no, la interfaz resaltaría el campo que el admin rellenó bien).
   if (saldoVacio || fechaVacia) {
-    throw new AusenciaError('saldo_incompleto', 400, saldoVacio ? 'saldoCorte' : 'fechaCorte');
+    throw new AusenciaError('saldo_incompleto', 400, saldoVacio ? claveSaldo : claveFecha);
   }
 
   // Se exige el tipo ANTES de convertir: un array no debe llegar siquiera a
   // `String()` (que lo aplanaría a su primer elemento, o a "", y las dos
   // formas parecen un número válido para lo que sigue).
-  if (typeof b.saldoCorte !== 'number' && typeof b.saldoCorte !== 'string') {
-    throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
+  if (typeof valorSaldo !== 'number' && typeof valorSaldo !== 'string') {
+    throw new AusenciaError('saldo_invalido', 400, claveSaldo);
   }
   let saldo: number;
-  if (typeof b.saldoCorte === 'number') {
-    saldo = b.saldoCorte;
+  if (typeof valorSaldo === 'number') {
+    saldo = valorSaldo;
   } else {
-    if (!RE_SALDO.test(b.saldoCorte)) throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
-    saldo = Number(b.saldoCorte.replace(',', '.'));
+    if (!RE_SALDO.test(valorSaldo)) throw new AusenciaError('saldo_invalido', 400, claveSaldo);
+    saldo = Number(valorSaldo.replace(',', '.'));
   }
   if (!Number.isFinite(saldo) || Math.abs(saldo) > MAX_SALDO) {
-    throw new AusenciaError('saldo_invalido', 400, 'saldoCorte');
+    throw new AusenciaError('saldo_invalido', 400, claveSaldo);
   }
 
   // Mismo defecto de rebote que en el saldo: un array como `['2026-08-12']`
@@ -1103,10 +1122,35 @@ export function validarSaldo(body: unknown): SaldoAFijar {
   // contenido. `esFechaValida` descarta de paso los valores mágicos de
   // Postgres (`'infinity'`, `'today'`), que la columna DATE aceptaría sin
   // rechistar.
-  if (typeof b.fechaCorte !== 'string') throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
-  if (!esFechaValida(b.fechaCorte)) throw new AusenciaError('fecha_invalida', 400, 'fechaCorte');
+  if (typeof valorFecha !== 'string') throw new AusenciaError('fecha_invalida', 400, claveFecha);
+  if (!esFechaValida(valorFecha)) throw new AusenciaError('fecha_invalida', 400, claveFecha);
 
-  return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: b.fechaCorte };
+  return { saldoCorte: Math.round(saldo * 10) / 10, fechaCorte: valorFecha };
+}
+
+/**
+ * Valida a mano lo que llega del cliente; en este repo no hay zod.
+ *
+ * ⚠️ Las dos parejas NO se tratan igual, y la asimetría es deliberada. La de
+ * vacaciones se EXIGE: lleva ahí desde el principio, así que si falta solo puede
+ * ser un front renombrado, y dar eso por bueno borraría un saldo configurado. La
+ * de compensatorios, en cambio, puede faltar por una razón legítima —un bundle
+ * del portal anterior a esta función, que no la conoce— y tratar su ausencia
+ * como «vacíala» borraría la bolsa de todo aquel a quien un admin le corrigiera
+ * las vacaciones durante la ventana de despliegue. Ausente = no se toca.
+ *
+ * Basta con que asome UNA de las dos claves para exigir la otra: así un front que
+ * sí las conoce pero manda media pareja sigue recibiendo su 400.
+ */
+export function validarSaldo(body: unknown): SaldosAFijar {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const traeCompensatorios = 'compensatoriosSaldoCorte' in b || 'compensatoriosFechaCorte' in b;
+  return {
+    vacaciones: validarPareja(b, 'saldoCorte', 'fechaCorte'),
+    compensatorios: traeCompensatorios
+      ? validarPareja(b, 'compensatoriosSaldoCorte', 'compensatoriosFechaCorte')
+      : null,
+  };
 }
 
 // ── Organigrama ────────────────────────────────────────────────────────────
@@ -1298,41 +1342,59 @@ export async function fijarVisor(
   return actualizado;
 }
 
-/** El saldo de un empleado, listo para enseñar. */
+/** Las dos bolsas de un empleado, listas para enseñar. */
 export interface SaldoDeEmpleado {
   empleadoId: string;
   nombreCompleto: string;
   correo: string;
   saldo: SaldoVacaciones;
+  compensatorios: SaldoCompensatorios;
 }
 
 /**
- * Calcula el saldo de cada empleado a partir de sus vacaciones.
+ * Reetiqueta con el correo Y con la bolsa el error de una fila corrupta.
  *
- * `calcularSaldo` lanza si alguna fecha viniera corrupta. Se reetiqueta el error
- * con el correo porque esto recorre a toda la plantilla: sin eso, una sola fila
- * mala dejaría la lista del admin a oscuras sin decir de quién es el problema.
+ * El cálculo lanza si alguna fecha viniera mal. Esto recorre a toda la plantilla,
+ * así que sin el correo una sola fila mala dejaría la lista del admin a oscuras
+ * sin decir de quién es el problema. Y ahora hay dos bolsas con dos fechas de
+ * corte distintas: sin decir CUÁL de las dos envenenó la fila, el admin sabría a
+ * quién mirar pero no qué columna arreglar.
  */
+function conEtiqueta<T>(correo: string, bolsa: string, calcular: () => T): T {
+  try {
+    return calcular();
+  } catch (err) {
+    throw new Error(`saldo de ${bolsa} de ${correo}: ${(err as Error).message}`);
+  }
+}
+
+/** Calcula las dos bolsas de cada empleado a partir de sus ausencias. */
 function combinar(
   empleados: repo.EmpleadoConSaldo[],
-  vacaciones: repo.VacacionDeEmpleado[],
+  ausencias: repo.AusenciaDeEmpleado[],
   hoy: string,
 ): SaldoDeEmpleado[] {
   return empleados.map((e) => {
-    const config =
+    // Una sola pasada por empleado: las dos bolsas miran la misma lista y cada
+    // una descarta los tipos de la otra.
+    const suyas = ausencias.filter((a) => a.empleadoId === e.empleadoId);
+    const configVacaciones =
       e.saldoCorte !== null && e.fechaCorte !== null
         ? { saldoCorte: e.saldoCorte, fechaCorte: e.fechaCorte }
         : null;
-    try {
-      return {
-        empleadoId: e.empleadoId,
-        nombreCompleto: e.nombreCompleto,
-        correo: e.correo,
-        saldo: calcularSaldo(config, vacaciones.filter((v) => v.empleadoId === e.empleadoId), hoy),
-      };
-    } catch (err) {
-      throw new Error(`saldo de ${e.correo}: ${(err as Error).message}`);
-    }
+    const configCompensatorios =
+      e.compensatoriosSaldoCorte !== null && e.compensatoriosFechaCorte !== null
+        ? { saldoCorte: e.compensatoriosSaldoCorte, fechaCorte: e.compensatoriosFechaCorte }
+        : null;
+    return {
+      empleadoId: e.empleadoId,
+      nombreCompleto: e.nombreCompleto,
+      correo: e.correo,
+      saldo: conEtiqueta(e.correo, 'vacaciones', () => calcularSaldo(configVacaciones, suyas, hoy)),
+      compensatorios: conEtiqueta(e.correo, 'compensatorios', () =>
+        calcularSaldoCompensatorios(configCompensatorios, suyas, hoy),
+      ),
+    };
   });
 }
 
@@ -1347,15 +1409,21 @@ export async function saldosVisibles(db: Pool, sesion: Sesion): Promise<SaldoDeE
   // Para quien no es admin, no aprobar a nadie es un 403. Para un admin, una
   // lista vacía es solo una lista vacía: la BD sin empleados todavía.
   if (!sesion.esAdmin && empleados.length === 0) throw new AusenciaError('no_es_aprobador', 403);
-  const vacaciones = await repo.vacacionesDeEmpleados(
+  const ausencias = await repo.ausenciasQueTocanElSaldo(
     db,
     empleados.map((e) => e.empleadoId),
   );
-  return combinar(empleados, vacaciones, hoyEnColombia());
+  return combinar(empleados, ausencias, hoyEnColombia());
+}
+
+/** Las dos bolsas de quien pregunta. Viajan juntas: la app siempre quiere las dos. */
+export interface SaldosDeSesion {
+  saldo: SaldoVacaciones;
+  compensatorios: SaldoCompensatorios;
 }
 
 /**
- * El saldo del usuario logueado. Va dentro del contexto que carga la app.
+ * Las bolsas del usuario logueado. Van dentro del contexto que carga la app.
  *
  * No comprueba que `empleado` sea el de la sesión que llama —no tiene con qué:
  * solo recibe la ficha, no la sesión—, así que esa garantía de privacidad vive
@@ -1363,22 +1431,26 @@ export async function saldosVisibles(db: Pool, sesion: Sesion): Promise<SaldoDeE
  * id que decida el cliente). Pasarle la ficha de otro devuelve el saldo de ese
  * otro sin rechistar.
  */
-export async function saldoDeSesion(db: Pool, empleado: Empleado): Promise<SaldoVacaciones> {
+export async function saldosDeSesion(db: Pool, empleado: Empleado): Promise<SaldosDeSesion> {
+  const hoy = hoyEnColombia();
   const [fila] = await repo.empleadosConSaldo(db, null, empleado.id);
   // Sin fila —la ficha se desactivó después de que la sesión ya estuviera
   // abierta, por ejemplo— se devuelve un saldo en blanco en vez de lanzar:
   // esto viaja dentro del contexto que carga la app entera, y un 500 aquí
   // tumbaría toda la sesión por un dato que ni siquiera es crítico para poder
   // navegar.
-  if (!fila) return calcularSaldo(null, [], hoyEnColombia());
-  const vacaciones = await repo.vacacionesDeEmpleados(db, [empleado.id]);
-  return combinar([fila], vacaciones, hoyEnColombia())[0].saldo;
+  if (!fila) {
+    return { saldo: calcularSaldo(null, [], hoy), compensatorios: calcularSaldoCompensatorios(null, [], hoy) };
+  }
+  const ausencias = await repo.ausenciasQueTocanElSaldo(db, [empleado.id]);
+  const fusionada = combinar([fila], ausencias, hoy)[0];
+  return { saldo: fusionada.saldo, compensatorios: fusionada.compensatorios };
 }
 
-/** Fija el punto de corte de un empleado. Solo admin (lo exige el router). */
+/** Fija los puntos de corte de un empleado. Solo admin (lo exige el router). */
 export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): Promise<SaldoDeEmpleado> {
-  const { saldoCorte, fechaCorte } = validarSaldo(body);
-  const existe = await repo.fijarSaldo(db, empleadoId, saldoCorte, fechaCorte);
+  const { vacaciones, compensatorios } = validarSaldo(body);
+  const existe = await repo.fijarSaldo(db, empleadoId, vacaciones, compensatorios);
   if (!existe) throw new AusenciaError('empleado_no_encontrado', 404);
 
   const empleados = await repo.empleadosConSaldo(db, null, empleadoId);
@@ -1389,8 +1461,8 @@ export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): P
   // `combinar([], ...)[0]` sería `undefined` y el 404 correcto degradaría en
   // un 500 al intentar leer `.saldo` aguas arriba.
   if (empleados.length === 0) throw new AusenciaError('empleado_no_encontrado', 404);
-  const vacaciones = await repo.vacacionesDeEmpleados(db, [empleadoId]);
-  return combinar(empleados, vacaciones, hoyEnColombia())[0];
+  const ausencias = await repo.ausenciasQueTocanElSaldo(db, [empleadoId]);
+  return combinar(empleados, ausencias, hoyEnColombia())[0];
 }
 
 // ── Calendario ─────────────────────────────────────────────────────────────
