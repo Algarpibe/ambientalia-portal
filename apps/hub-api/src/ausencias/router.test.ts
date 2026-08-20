@@ -1182,6 +1182,114 @@ describe('POST /ausencias/solicitudes', () => {
 
 // ── El candado del solapamiento ────────────────────────────────────────────
 
+describe('el compensatorio no se puede gastar por encima de la bolsa', () => {
+  /** Pone bolsa de compensatorios a la ficha de la sesión, sin duplicar la fila. */
+  function conBolsa(dias: number) {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      compensatoriosSaldoCorte: dias,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+  }
+
+  const compensatorio = (inicio: string, fin: string) => ({
+    tipo: 'compensatorio',
+    fechaInicio: inicio,
+    fechaFin: fin,
+    comentarios: 'x',
+  });
+
+  // Lunes 4 a viernes 8 de mayo de 2026: CINCO días hábiles de verdad. La semana
+  // del 30 de marzo parece igual de buena y no lo es —Jueves y Viernes Santo caen
+  // el 2 y el 3 de abril de 2026, así que son tres— y con tres días el fixture
+  // pasaba por casualidad la comprobación que pretendía romper.
+  const LUNES = '2026-05-04';
+  const VIERNES = '2026-05-08';
+
+  it('deja pedir lo que cabe justo en la bolsa', async () => {
+    conBolsa(5);
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(compensatorio(LUNES, VIERNES))
+      .expect(201);
+  });
+
+  it('409 con los números cuando se pasa', async () => {
+    conBolsa(3);
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(compensatorio(LUNES, VIERNES))
+      .expect(409);
+    expect(r.body.error).toBe('compensatorios_insuficientes');
+    // Las claves exactas: sin números el mensaje es inaccionable, y el cliente
+    // redacta la frase a partir de ellas.
+    expect(r.body.detalle).toEqual({ pedidos: 5, pedible: 3, disponible: 3, enTramite: 0 });
+  });
+
+  it('CANDADO: tres solicitudes de un día con un día de bolsa — solo pasa la primera', async () => {
+    // Es el test que fija que se compare contra `pedible` y NO contra
+    // `disponible`. Con el firme a secas las tres pasarían, porque media firma no
+    // descuenta y ninguna de las anteriores habría bajado el disponible todavía.
+    conBolsa(1);
+    const pedir = (inicio: string, fin: string) =>
+      request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(compensatorio(inicio, fin));
+    await pedir('2026-03-30', '2026-03-30').expect(201);
+    await pedir('2026-04-06', '2026-04-06').expect(409);
+    await pedir('2026-04-13', '2026-04-13').expect(409);
+  });
+
+  it('CANDADO: sin bolsa configurada bloquea, con su propio código', async () => {
+    // «Sin sembrar cuenta como cero». El código es distinto del de «no te
+    // alcanza» porque la acción del empleado también lo es: aquí no hay nada que
+    // pueda hacer salvo avisar a administración.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(compensatorio(LUNES, VIERNES))
+      .expect(409);
+    expect(r.body.error).toBe('compensatorios_sin_saldo');
+  });
+
+  it('CANDADO: el bloqueo NO se contagia a las vacaciones', async () => {
+    // Pedir más vacaciones de las que quedan sigue entrando: allí solo se avisa
+    // y decide quien firma. Si alguien "unificara" las dos reglas, cae aquí.
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: 1,
+      fechaCorte: '2026-01-01',
+    });
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ tipo: 'vacaciones', fechaInicio: '2026-03-30', fechaFin: '2026-04-03', comentarios: 'x' })
+      .expect(201);
+  });
+
+  it('un permiso no mira ninguna bolsa', async () => {
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ tipo: 'permiso', fechaInicio: '2026-03-30', fechaFin: '2026-04-03', comentarios: 'x' })
+      .expect(201);
+  });
+
+  it('un rango de solo fin de semana no gasta nada y pasa aunque la bolsa esté a cero', async () => {
+    // 0 días hábiles. Sin el corte de `dias <= 0`, con la bolsa en negativo
+    // `0 > -2` bloquearía algo que no consume un solo día.
+    conBolsa(0);
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(compensatorio('2026-04-04', '2026-04-05'))
+      .expect(201);
+  });
+});
+
 describe('no se puede estar ausente dos veces a la vez', () => {
   /** La fila tal como está guardada, para poder moverla por debajo. */
   const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
