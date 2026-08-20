@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { calcularSaldo, hoyEnColombia, type VacacionTomada } from './saldo.js';
+import { calcularSaldo, hoyEnColombia, type AusenciaParaElSaldo } from './saldo.js';
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
 /** Una vacación aprobada de `dias` días que empieza el `inicio`. */
-function vac(inicio: string, dias: number, estado: VacacionTomada['estado'] = 'aprobada'): VacacionTomada {
+function vac(inicio: string, dias: number, estado: AusenciaParaElSaldo['estado'] = 'aprobada'): AusenciaParaElSaldo {
   return { tipo: 'vacaciones', fechaInicio: inicio, diasHabiles: dias, estado };
 }
 
@@ -82,7 +82,7 @@ describe('calcularSaldo', () => {
   });
 
   it('ignora permisos, compensatorios e incapacidades', () => {
-    const otros: VacacionTomada[] = [
+    const otros: AusenciaParaElSaldo[] = [
       { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada' },
       { tipo: 'compensatorio', fechaInicio: '2026-02-01', diasHabiles: 2, estado: 'aprobada' },
       { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada' },
