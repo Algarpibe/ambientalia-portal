@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { calcularSaldo, hoyEnColombia, type AusenciaParaElSaldo } from './saldo.js';
+import { calcularSaldo, calcularSaldoCompensatorios, hoyEnColombia, pedible, type AusenciaParaElSaldo } from './saldo.js';
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
 /** Una vacación aprobada de `dias` días que empieza el `inicio`. */
 function vac(inicio: string, dias: number, estado: AusenciaParaElSaldo['estado'] = 'aprobada'): AusenciaParaElSaldo {
   return { tipo: 'vacaciones', fechaInicio: inicio, diasHabiles: dias, estado };
+}
+
+/** Un compensatorio aprobado de `dias` días que empieza el `inicio`. */
+function comp(inicio: string, dias: number, estado: AusenciaParaElSaldo['estado'] = 'aprobada'): AusenciaParaElSaldo {
+  return { tipo: 'compensatorio', fechaInicio: inicio, diasHabiles: dias, estado };
 }
 
 describe('calcularSaldo', () => {
@@ -194,6 +199,135 @@ describe('calcularSaldo', () => {
       { ...vac('2026-02-01', 5), fechaInicio: new Date('2026-02-01T00:00:00Z') as unknown as string },
     ];
     expect(() => calcularSaldo(CONFIG, conFechaDate, '2026-03-02')).toThrow();
+  });
+});
+
+describe('calcularSaldoCompensatorios', () => {
+  it('descuenta los aprobados desde el corte', () => {
+    const s = calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 3)], '2026-03-02');
+    expect(s.disfrutadas).toBe(3);
+    expect(s.disponible).toBe(7);
+  });
+
+  it('ignora vacaciones, permisos e incapacidades', () => {
+    // El ESPEJO del candado de `calcularSaldo`, y hace falta que estén los dos.
+    // Aquel fija que la bolsa de vacaciones no ve los compensatorios; éste, que
+    // la de compensatorios no ve las vacaciones. Ahora que el repo se trae los
+    // dos tipos en la MISMA consulta, un filtro de tipo olvidado aquí se comería
+    // las vacaciones de todo el mundo — y el candado viejo seguiría verde,
+    // porque solo mira su bolsa.
+    const otros: AusenciaParaElSaldo[] = [
+      { tipo: 'vacaciones', fechaInicio: '2026-02-01', diasHabiles: 5, estado: 'aprobada' },
+      { tipo: 'permiso', fechaInicio: '2026-02-01', diasHabiles: 3, estado: 'aprobada' },
+      { tipo: 'incapacidad', fechaInicio: '2026-02-01', diasHabiles: 4, estado: 'registrada' },
+    ];
+    const s = calcularSaldoCompensatorios(CONFIG, otros, '2026-03-02');
+    expect(s.disfrutadas).toBe(0);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('NO devenga con el tiempo: un año después el saldo es el mismo', () => {
+    // La decisión de negocio que separa esta bolsa de la otra. Un compensatorio
+    // se gana por horas o días extra y hay que otorgarlo; no aparece solo. Sin
+    // este candado, un refactor que unificara las dos fórmulas parametrizando la
+    // tasa podría encender el devengo aquí sin que nada se pusiera rojo.
+    const alDia = calcularSaldoCompensatorios(CONFIG, [], '2026-01-01');
+    const unAnioDespues = calcularSaldoCompensatorios(CONFIG, [], '2027-01-01');
+    expect(alDia.disponible).toBe(10);
+    expect(unAnioDespues.disponible).toBe(10);
+  });
+
+  it('el que empieza el día del corte cuenta; el de la víspera, no', () => {
+    const enElCorte = calcularSaldoCompensatorios(CONFIG, [comp('2026-01-01', 2)], '2026-03-02');
+    expect(enElCorte.disfrutadas).toBe(2);
+    const antes = calcularSaldoCompensatorios(CONFIG, [comp('2025-12-31', 2)], '2026-03-02');
+    expect(antes.disfrutadas).toBe(0);
+  });
+
+  it('pendiente y pendiente_2 van a enTramite y NO bajan el disponible', () => {
+    // Media firma no descuenta, igual que en vacaciones: son días que todavía no
+    // han ocurrido y que quien firma aún puede rechazar.
+    const s = calcularSaldoCompensatorios(
+      CONFIG,
+      [comp('2026-02-01', 2, 'pendiente'), comp('2026-02-10', 3, 'pendiente_2')],
+      '2026-03-02',
+    );
+    expect(s.enTramite).toBe(5);
+    expect(s.disfrutadas).toBe(0);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('una rechazada no descuenta ni suma a enTramite', () => {
+    const s = calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 3, 'rechazada')], '2026-03-02');
+    expect(s.disfrutadas).toBe(0);
+    expect(s.enTramite).toBe(0);
+    expect(s.disponible).toBe(10);
+  });
+
+  it('admite medios días', () => {
+    const s = calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 0.5)], '2026-03-02');
+    expect(s.disponible).toBe(9.5);
+  });
+
+  it('el disponible puede quedar en negativo y NO se recorta a cero', () => {
+    // Alcanzable de verdad: basta que un admin baje el saldo de corte después de
+    // haber aprobado días. Enseñar un 0 donde hay un −2 escondería justo el caso
+    // que administración necesita ver.
+    const s = calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 12)], '2026-03-02');
+    expect(s.disponible).toBe(-2);
+  });
+
+  it('devuelve configurado:false y ceros si al empleado le falta la configuración', () => {
+    const s = calcularSaldoCompensatorios(null, [comp('2026-02-01', 5)], '2026-03-02');
+    expect(s.configurado).toBe(false);
+    expect(s.disponible).toBe(0);
+  });
+
+  it('SIN_CONFIGURAR no es un objeto compartido: mutar una respuesta no afecta a la siguiente', () => {
+    const s1 = calcularSaldoCompensatorios(null, [], '2026-03-02');
+    (s1 as { disponible: number }).disponible = 999;
+    const s2 = calcularSaldoCompensatorios(null, [], '2026-03-02');
+    expect(s2.disponible).toBe(0);
+  });
+
+  it('lanza con "hoy" o fechaCorte mal formados, en vez de devolver un saldo en blanco', () => {
+    expect(() => calcularSaldoCompensatorios(CONFIG, [], '01-01-2026')).toThrow();
+    expect(() => calcularSaldoCompensatorios({ saldoCorte: 10, fechaCorte: '2026/01/01' }, [], '2026-01-01')).toThrow();
+  });
+
+  it('lanza si fechaInicio viene en dd/mm/aaaa o como objeto Date', () => {
+    // Repetido a propósito respecto a la bolsa de vacaciones: estos cuatro casos
+    // son el candado de que `sumarDesdeElCorte` sigue COMPARTIDO. Si alguien
+    // deshace la extracción y copia el recuento en las dos funciones, esta mitad
+    // es la que caza que a la copia le falte la validación.
+    expect(() => calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 3), comp('01/02/2026', 5)], '2026-03-02')).toThrow();
+    const conFechaDate = [
+      comp('2026-02-01', 3),
+      { ...comp('2026-02-01', 5), fechaInicio: new Date('2026-02-01T00:00:00Z') as unknown as string },
+    ];
+    expect(() => calcularSaldoCompensatorios(CONFIG, conFechaDate, '2026-03-02')).toThrow();
+  });
+});
+
+describe('pedible', () => {
+  it('redondea la resta a la décima que se enseña', () => {
+    // 10,4 − 6,5 en binario da 3.9000000000000004. Comparado contra los días de
+    // una solicitud, ese ruido decide bloqueos justo en el borde en el que la
+    // pantalla dice «te falta 0». Servidor y cliente tienen que redondear igual.
+    expect(pedible({ disponible: 10.4, enTramite: 6.5 })).toBe(3.9);
+  });
+
+  it('sirve igual para las dos bolsas', () => {
+    // Toma la forma y no el tipo a propósito: una sola regla para vacaciones y
+    // compensatorios, que es lo que impide que las dos discrepen.
+    const vacaciones = calcularSaldo(CONFIG, [vac('2026-02-01', 2, 'pendiente')], '2026-01-01');
+    const compensatorios = calcularSaldoCompensatorios(CONFIG, [comp('2026-02-01', 2, 'pendiente')], '2026-01-01');
+    expect(pedible(vacaciones)).toBe(8);
+    expect(pedible(compensatorios)).toBe(8);
+  });
+
+  it('puede quedar en negativo: no hay suelo', () => {
+    expect(pedible({ disponible: 1, enTramite: 4 })).toBe(-3);
   });
 });
 
