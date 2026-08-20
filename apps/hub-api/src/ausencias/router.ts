@@ -5,7 +5,7 @@ import { captureError } from '../sentry.js';
 import { festivosColombia } from './festivos.js';
 import { contarDiasHabiles } from './dias-habiles.js';
 import { validarEdicionSolicitud } from './historico.js';
-import { construirPayloadCorreccion } from './notificaciones.js';
+import { construirPayloadBorrado, construirPayloadCorreccion } from './notificaciones.js';
 import * as repo from './repo.js';
 import * as service from './service.js';
 import { AusenciaError, type Sesion } from './service.js';
@@ -419,10 +419,22 @@ export function createAusenciasRouter(db: Pool): Router {
    * Borra una solicitud. Es irreversible y toca el registro de la compañía, así
    * que queda constancia de quién la borró y de qué era: no hay tabla de
    * auditoría en el proyecto, pero el log de hub-api sí se conserva.
+   *
+   * Cuando la solicitud estaba en el calendario, el borrado no se queda aquí:
+   * `repo.borrarSolicitud` encola el borrado de su evento de Google y un aviso a
+   * administración diciendo quién la borró. Hasta el 2026-08-19 esta ruta hacía
+   * un `DELETE` pelado y abandonaba el evento en el calendario de Staff.
    */
   router.delete('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
     try {
-      const borrada = await repo.borrarSolicitud(db, req.params.id);
+      const borrada = await repo.borrarSolicitud(
+        db,
+        req.params.id,
+        // Quién lo borró, para que el correo lo diga. El log de abajo ya lo
+        // tenía; el aviso a administración sin nombre vale mucho menos.
+        sesionDe(req).email,
+        construirPayloadBorrado,
+      );
       if (!borrada) return void res.status(404).json({ error: 'no_encontrada' });
       console.log(
         JSON.stringify({
