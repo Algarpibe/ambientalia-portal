@@ -1853,7 +1853,17 @@ export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPe
       RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
     [limite, RESERVA],
   );
-  return (rows as { id: string; evento: EventoOutbox; solicitud_id: string; intentos: number; payload: PayloadEvento }[])
+  // `solicitud_id` nulable desde la 028: la clave ajena es `ON DELETE SET NULL`
+  // para que el borrado de un evento de Google sobreviva a la solicitud que lo
+  // pidio. El cast tiene que decirlo o `tsc` se cree un `string` que puede no
+  // serlo, y eso convierte un null real en un fallo en tiempo de ejecucion.
+  return (rows as {
+    id: string;
+    evento: EventoOutbox;
+    solicitud_id: string | null;
+    intentos: number;
+    payload: PayloadEvento;
+  }[])
     .map((r) => ({
       id: Number(r.id),
       evento: r.evento,
