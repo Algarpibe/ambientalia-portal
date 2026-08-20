@@ -1132,3 +1132,52 @@ describe('el otorgamiento no llega a Google', () => {
     expect(p.correo.asunto).not.toBe('');
   });
 });
+
+describe('los correos del otorgamiento', () => {
+  const otorg = (over: Partial<Solicitud> = {}) =>
+    solicitud({
+      tipo: 'otorgamiento',
+      fechaInicio: '2026-01-10',
+      fechaFin: '2026-01-10',
+      diasHabiles: 2,
+      comentarios: 'Montaje de Cartagena',
+      ...over,
+    });
+
+  it('el resumen no habla de dias habiles ni repite el dia', () => {
+    // `bloqueFechas` seria falso por tres lados: repetiria el mismo dia dos
+    // veces, llamaria «dias habiles» a unos dias que no lo son —el sabado por el
+    // que se ganan— y diria «solicitado» de unos dias que se conceden.
+    const cuerpo = construirPayload(otorg(), 'creada').correo.cuerpo;
+    expect(cuerpo).toContain('Día trabajado: 2026-01-10');
+    expect(cuerpo).toContain('Días de compensatorio que se piden: 2 días');
+    expect(cuerpo).not.toContain('días hábiles');
+    expect(cuerpo).not.toContain('Fecha último día');
+  });
+
+  it('el aprobado dice donde quedaron los dias, no «disfrutalas»', () => {
+    const cuerpo = construirPayload(otorg({ estado: 'aprobada' }), 'aprobada').correo.cuerpo;
+    expect(cuerpo).toContain('en tu bolsa de compensatorios');
+    expect(cuerpo).not.toContain('Disfrútalas');
+  });
+
+  it('el rechazo nombra el dia trabajado y no un rango de un solo dia', () => {
+    const p = construirPayload(otorg({ estado: 'rechazada' }), 'rechazada').correo;
+    expect(p.cuerpo).toContain('por el trabajo del 2026-01-10');
+    expect(p.cuerpo).not.toContain('2026-01-10 a 2026-01-10');
+  });
+
+  it('el aviso al jefe lleva el motivo, que es lo que tiene que juzgar', () => {
+    const cuerpo = construirPayload(otorg(), 'aprobacion').correo.cuerpo;
+    expect(cuerpo).toContain('Montaje de Cartagena');
+    expect(cuerpo).toContain('Día trabajado');
+  });
+
+  it('y las ausencias siguen con su bloque de siempre', () => {
+    // El control: sin esto, hacer que `bloqueResumen` devuelva siempre el del
+    // otorgamiento dejaria los cuatro de arriba verdes.
+    const cuerpo = construirPayload(solicitud(), 'creada').correo.cuerpo;
+    expect(cuerpo).toContain('Fecha último día de vacaciones');
+    expect(cuerpo).toContain('días hábiles');
+  });
+});
