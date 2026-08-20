@@ -148,22 +148,24 @@ En `apps/hub-api/src/ausencias/repo.ts`, justo encima de `empleadosConSaldo`:
  * Asume que la tabla `portal.empleados` está aliasada como `e` en la consulta
  * que lo incrusta. Lo cumplen las dos que lo usan.
  */
-export function ramaDeDosNiveles(placeholder: number): string {
-  return `($${placeholder}::text IS NULL
-           OR lower(e.aprobador_correo) = lower($${placeholder})
+export function ramaDeDosNiveles(): string {
+  return `($1::text IS NULL
+           OR lower(e.aprobador_correo) = lower($1)
            OR EXISTS (SELECT 1 FROM portal.empleados j
                        WHERE j.activo
                          AND lower(j.correo) = lower(e.aprobador_correo)
-                         AND lower(j.aprobador_correo) = lower($${placeholder})))`;
+                         AND lower(j.aprobador_correo) = lower($1)))`;
 }
 ```
+
+> **Corrección decidida durante la ejecución.** La firma nació como `ramaDeDosNiveles(placeholder: number)`, y la revisión de calidad señaló —con razón— que la correspondencia entre ese número y la posición real en el array de bindings de `db.query` es una invariante que no comprueba nadie: si una consulta futura pusiera `soloDe` en otra posición y alguien copiara `ramaDeDosNiveles(1)` por costumbre, el filtro de privacidad quedaría atado al parámetro equivocado **en silencio**. Con `$1` fijo, lo que hay que sincronizar pasa de dos sitios a uno, y el JSDoc deja dicho que **`soloDe` va siempre como primer parámetro**. Las dos consultas que lo usan lo cumplen.
 
 - [ ] **Step 2: Usarlo en `empleadosConSaldo`**
 
 Sustituir el bloque `AND ($1::text IS NULL OR lower(e.aprobador_correo) = ... )` de `empleadosConSaldo` por:
 
 ```ts
-        AND ${ramaDeDosNiveles(1)}
+        AND ${ramaDeDosNiveles()}
 ```
 
 - [ ] **Step 3: Verificar que no se ha roto nada**
@@ -276,6 +278,10 @@ git commit -m "feat(ausencias): el tipo Movimiento del registro"
 
 Este es **el test que importa** de todo el plan. Va antes que la implementación (TDD) y contra Postgres de verdad, no contra el doble: el doble de `router.test.ts` reimplementa el repo y su candado de superficie caza **renombres, no filtros**, así que un recorte mal escrito lo pasaría sin despeinarse. Es exactamente la desviación que ya mordió con `ausenciasQueTocanElSaldo` y `ocupaAgenda`.
 
+> **Ampliación decidida durante la ejecución de la Task 2.** Al falsar el recorte —mutando la condición de los nietos a `AND TRUE`— **no se puso rojo ni un solo test**. La causa, verificada por dos agentes de forma independiente: `repo.saldos.db.test.ts` solo llama a `empleadosConSaldo` con `soloDe = null`, y los únicos casos con `soloDe` no nulo viven en `router.test.ts`, que mockea el repo entero y por tanto nunca ejecuta ese SQL. O sea: **el recorte por rama no se ha validado nunca contra Postgres real**, ni siquiera en el primer nivel, pese a que producción sí lo usa en la ruta de no-admin (`service.ts:1633`).
+>
+> Es un hueco preexistente, no introducido por este trabajo, y es el caso literal de «cuando una mutación no muerde, escribe el test que la haga morder». Por eso esta tarea añade **también** un caso que ejercita `empleadosConSaldo` con `soloDe` no nulo sobre la misma jerarquía sembrada. Al ser ya una sola función compartida, un único test deja cerrados los dos sitios que la usan — que es exactamente lo que compró la extracción de la Task 2.
+
 **Files:**
 - Modify: `apps/hub-api/src/test-db/harness.ts:47`
 - Create: `apps/hub-api/src/ausencias/repo.movimientos.db.test.ts`
@@ -309,7 +315,7 @@ Crear `apps/hub-api/src/ausencias/repo.movimientos.db.test.ts` (**sin tildes**, 
 ```ts
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { movimientos } from './repo.js';
+import { movimientos, empleadosConSaldo } from './repo.js';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 
 // El recorte por rama del registro de movimientos, contra Postgres de verdad.
@@ -373,6 +379,22 @@ async function vistosPor(correo: string | null): Promise<string[]> {
 describe('CANDADO: el recorte por rama del registro', () => {
   it('un jefe ve a su hijo y a su nieto', async () => {
     expect(await vistosPor(JEFE)).toEqual([HIJO, NIETO].sort());
+  });
+
+  // El OTRO sitio que usa `ramaDeDosNiveles`. Va aqui y no en
+  // repo.saldos.db.test.ts porque la jerarquia de tres niveles ya esta sembrada
+  // en este fichero, y porque lo que se prueba es la funcion compartida.
+  //
+  // Existe por una falsacion que NO mordio: hasta ahora ningun test contra
+  // Postgres real llamaba a `empleadosConSaldo` con `soloDe` no nulo, asi que
+  // el recorte se podia romper entero sin que nada se pusiera rojo. Produccion
+  // si lo usa, en la ruta de no-admin.
+  it('CANDADO: el mismo recorte acota tambien los saldos', async () => {
+    const conSaldo = await empleadosConSaldo(db, JEFE, null);
+    const correos = conSaldo.map((e) => e.correo).sort();
+    expect(correos).toEqual([HIJO, NIETO].sort());
+    expect(correos).not.toContain(BISNIETO);
+    expect(correos).not.toContain(PRIMO);
   });
 
   it('un jefe NO ve al bisnieto: la rama son dos niveles', async () => {
@@ -486,7 +508,7 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
        FROM portal.solicitudes_ausencia s
        JOIN portal.empleados e ON e.id = s.empleado_id
        LEFT JOIN portal.users u ON u.id = s.aprobador_user_id
-      WHERE ${ramaDeDosNiveles(1)}`,
+      WHERE ${ramaDeDosNiveles()}`,
     [soloDe],
   );
   return (rows as FilaMovimientoDb[]).map(aMovimiento);
@@ -513,11 +535,11 @@ export async function movimientos(db: Pool, soloDe: string | null): Promise<Movi
 - [ ] **Step 3: Correr el candado de la rama**
 
 Run: `cd apps/hub-api; npm run test:db -- src/ausencias/repo.movimientos.db.test.ts`
-Expected: **PASS**, los cuatro.
+Expected: **PASS**, los cinco.
 
 - [ ] **Step 4: Falsar el candado**
 
-Sustituir `WHERE ${ramaDeDosNiveles(1)}` por `WHERE TRUE` y volver a correr.
+Sustituir `WHERE ${ramaDeDosNiveles()}` por `WHERE TRUE` y volver a correr.
 Expected: **FAIL** en los tres primeros tests. Revertir después.
 
 - [ ] **Step 5: Commit**
@@ -633,7 +655,7 @@ async function movimientosDeModificaciones(db: Pool, soloDe: string | null): Pro
        JOIN portal.empleados e ON e.id = s.empleado_id
        LEFT JOIN portal.users u ON u.id = m.aprobador_user_id
       WHERE m.estado <> 'pendiente'
-        AND ${ramaDeDosNiveles(1)}`,
+        AND ${ramaDeDosNiveles()}`,
     [soloDe],
   );
   return (rows as FilaMovimientoDb[]).map(aMovimiento);
@@ -667,7 +689,7 @@ export async function movimientos(db: Pool, soloDe: string | null): Promise<Movi
 - [ ] **Step 5: Correr los tests**
 
 Run: `cd apps/hub-api; npm run test:db -- src/ausencias/repo.movimientos.db.test.ts`
-Expected: **PASS**, los seis.
+Expected: **PASS**, los siete.
 
 - [ ] **Step 6: Commit**
 
