@@ -1278,10 +1278,19 @@ describe('el compensatorio no se puede gastar por encima de la bolsa', () => {
       .expect(201);
   });
 
-  it('un rango de solo fin de semana no gasta nada y pasa aunque la bolsa esté a cero', async () => {
-    // 0 días hábiles. Sin el corte de `dias <= 0`, con la bolsa en negativo
-    // `0 > -2` bloquearía algo que no consume un solo día.
-    conBolsa(0);
+  it('CANDADO: un rango de solo fin de semana pasa aunque la bolsa esté en NEGATIVO', async () => {
+    // 0 días hábiles contra una bolsa de −2. Sin el corte de `dias <= 0`, la
+    // comparación es `0 > −2` y bloquearía una solicitud que no consume un solo
+    // día.
+    //
+    // La bolsa tiene que estar en negativo y no en cero: con cero, `0 > 0` es
+    // false y el corte no hace falta para nada, así que el test pasaría igual sin
+    // él y no probaría nada. Se comprobó quitando la guarda: con `conBolsa(0)`
+    // los 235 tests seguían verdes.
+    //
+    // Un negativo es alcanzable de verdad: basta que un admin baje el saldo de
+    // corte después de haber aprobado días.
+    conBolsa(-2);
     await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
