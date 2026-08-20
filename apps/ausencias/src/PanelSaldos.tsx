@@ -7,10 +7,17 @@ import { formatDias } from './dominio';
 // vía por la que entran los saldos que hoy viven en un Excel, y la que
 // permite dar de alta a quien entre nuevo o corregir un número mal puesto sin
 // pasar por psql.
+//
+// Desde que hay dos bolsas es UNA sola tabla con las columnas agrupadas, y no
+// dos pantallas: las dos se cuadran contra el mismo consolidado y en la misma
+// sesión de tecleo, así que separarlas obligaría a recorrer la plantilla dos
+// veces. El botón Guardar sigue siendo uno por fila y manda las dos parejas.
 
 interface Fila {
   saldoCorte: string;
   fechaCorte: string;
+  compSaldoCorte: string;
+  compFechaCorte: string;
   guardando: boolean;
   error: string | null;
   /** Se apaga solo a los dos segundos: un tick permanente en una tabla de
@@ -25,6 +32,11 @@ function filaInicial(s: SaldoDeEmpleado): Fila {
     // sugerir que ese cero es un valor real que alguien puso a propósito.
     saldoCorte: s.saldo.configurado ? String(s.saldo.saldoCorte) : '',
     fechaCorte: s.saldo.fechaCorte || '',
+    // El `?.` no es defensivo por si acaso: hub-api y el portal se despliegan
+    // por separado, así que hay una ventana en la que este bundle habla con un
+    // hub-api que todavía no manda la bolsa nueva.
+    compSaldoCorte: s.compensatorios?.configurado ? String(s.compensatorios.saldoCorte) : '',
+    compFechaCorte: s.compensatorios?.fechaCorte || '',
     guardando: false,
     error: null,
     exito: false,
@@ -93,7 +105,8 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
     };
   }, []);
 
-  const sinConfigurar = saldos.filter((s) => !s.saldo.configurado).length;
+  const sinVacaciones = saldos.filter((s) => !s.saldo.configurado).length;
+  const sinCompensatorios = saldos.filter((s) => !s.compensatorios?.configurado).length;
 
   function actualizar(empleadoId: string, campos: Partial<Fila>) {
     setFilas((fs) => ({ ...fs, [empleadoId]: { ...fs[empleadoId], ...campos } }));
@@ -107,28 +120,36 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
     // PUT que no cambia nada y pintaría un tick de «guardado» que no significa
     // nada.
     const guardado = saldos.find((s) => s.empleadoId === empleadoId);
-    if (guardado) {
-      const original = filaInicial(guardado);
-      if (fila.saldoCorte === original.saldoCorte && fila.fechaCorte === original.fechaCorte) return;
-    }
+    if (guardado && !hayCambios(fila, filaInicial(guardado))) return;
     actualizar(empleadoId, { guardando: true, error: null, exito: false });
     try {
       // Se manda la cadena tal cual (recortada), NO Number(): la validación de
       // forma vive entera en el backend (ver el comentario de fijarSaldo en
-      // api.ts). Vacío en los dos campos es «vaciar la configuración», una
-      // operación legítima que devuelve a esa persona a «sin configurar».
-      const saldoTexto = fila.saldoCorte.trim();
-      const fechaTexto = fila.fechaCorte.trim();
+      // api.ts). Vacío en los dos campos de una pareja es «vaciar esa bolsa»,
+      // una operación legítima que devuelve a esa persona a «sin configurar».
+      const texto = (v: string) => (v.trim() === '' ? null : v.trim());
       const actualizado = await fijarSaldo(
         empleadoId,
-        saldoTexto === '' ? null : saldoTexto,
-        fechaTexto === '' ? null : fechaTexto,
+        { saldoCorte: texto(fila.saldoCorte), fechaCorte: texto(fila.fechaCorte) },
+        { saldoCorte: texto(fila.compSaldoCorte), fechaCorte: texto(fila.compFechaCorte) },
       );
       setSaldos((ss) => ss.map((s) => (s.empleadoId === empleadoId ? actualizado : s)));
       onSaldoFijado?.();
       // Se resincroniza el borrador con lo que quedó guardado (la BD redondea
       // a un decimal), no con lo que se tecleó.
-      actualizar(empleadoId, { ...filaInicial(actualizado), exito: true });
+      actualizar(empleadoId, {
+        ...filaInicial(actualizado),
+        exito: true,
+        // Un hub-api anterior a esta función ignora las dos claves nuevas y
+        // devuelve la fila sin ellas. Sin este aviso, el admin vería el tick
+        // verde y a la vez el campo de compensatorios vaciándose solo delante de
+        // él, sin ninguna explicación: el panel se resincroniza con la respuesta
+        // del servidor, y en esa respuesta la bolsa no existe.
+        error:
+          actualizado.compensatorios === undefined
+            ? 'Este servidor todavía no guarda compensatorios. Las vacaciones sí se guardaron; vuelve a intentarlo en unos minutos.'
+            : null,
+      });
       clearTimeout(timeoutsExito.current[empleadoId]);
       timeoutsExito.current[empleadoId] = setTimeout(() => {
         actualizar(empleadoId, { exito: false });
@@ -151,14 +172,21 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
 
   return (
     <div>
-      <h3 className="mb-1 text-sm font-semibold text-gray-900">Saldos de vacaciones</h3>
-      <p className="mb-4 max-w-3xl text-sm text-gray-600">
+      <h3 className="mb-1 text-sm font-semibold text-gray-900">Saldos</h3>
+      <p className="mb-2 max-w-3xl text-sm text-gray-600">
         El <b>saldo en el corte</b> es el número de días que esa persona tenía disponibles EN la
         fecha de corte, tal como quedó cuadrado en el Excel. A partir de ahí la app hace el resto:
         suma 1,25 días por cada mes que pasa y resta las vacaciones que se van aprobando. Todo lo
         anterior al corte ya está incluido en ese número, así que <b>la fecha de corte no tiene que
         ser hoy</b>: tiene que ser el día en el que el Excel estaba cuadrado. Ponerle la fecha de
         hoy al saldo de un Excel de hace tres meses sumaría de más los días de esos tres meses.
+      </p>
+      <p className="mb-4 max-w-3xl text-sm text-gray-600">
+        Los <b>compensatorios</b> funcionan distinto: <b>no se devengan con el tiempo</b>. Se ganan
+        por horas o días extra y hay que otorgarlos, así que el saldo en el corte es todo lo que hay
+        hasta que alguien añada más. Su fecha de corte solo marca desde cuándo se descuentan los
+        compensatorios aprobados; no suma nada. Las dos bolsas son independientes y cada una lleva su
+        propia fecha.
       </p>
 
       {error && (
@@ -179,22 +207,51 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
         error ? null : <p className="text-sm text-gray-500">No hay empleados activos.</p>
       ) : (
         <>
-          {sinConfigurar > 0 && (
+          {/* Cuenta las dos bolsas por separado y no una suma: son dos trabajos
+              distintos, y el de compensatorios es además el que decide cuándo se
+              puede activar el bloqueo por saldo insuficiente. Mientras este
+              número no esté en cero, bloquear dejaría a esa gente sin poder pedir
+              un compensatorio. */}
+          {(sinVacaciones > 0 || sinCompensatorios > 0) && (
             <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              {sinConfigurar} persona{sinConfigurar === 1 ? '' : 's'} sin configurar todavía.
+              <span>
+                {sinVacaciones > 0 && (
+                  <>
+                    {sinVacaciones} sin saldo de vacaciones.
+                    {sinCompensatorios > 0 && ' '}
+                  </>
+                )}
+                {sinCompensatorios > 0 && <>{sinCompensatorios} sin bolsa de compensatorios.</>}
+              </span>
             </div>
           )}
 
           <div className="overflow-x-auto rounded-2xl border border-gray-200">
             <table className="min-w-full text-sm">
+              {/* Cabecera de dos filas con las columnas agrupadas: ocho columnas
+                  planas —dos saldos, dos fechas, dos disponibles— son ilegibles,
+                  porque nada dice a qué bolsa pertenece cada una. */}
               <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Nombre</th>
-                  <th className="px-4 py-3 font-medium">Saldo en el corte</th>
-                  <th className="px-4 py-3 font-medium">Fecha de corte</th>
-                  <th className="px-4 py-3 text-right font-medium">Disponible hoy</th>
-                  <th className="px-4 py-3 font-medium" />
+                  <th rowSpan={2} className="px-4 py-3 font-medium align-bottom">
+                    Nombre
+                  </th>
+                  <th colSpan={3} className="border-l border-gray-200 px-4 py-2 text-center font-semibold text-gray-600">
+                    Vacaciones
+                  </th>
+                  <th colSpan={3} className="border-l border-gray-200 px-4 py-2 text-center font-semibold text-gray-600">
+                    Compensatorios
+                  </th>
+                  <th rowSpan={2} className="px-4 py-3 font-medium" />
+                </tr>
+                <tr>
+                  <th className="border-l border-gray-200 px-4 py-2 font-medium">Saldo en el corte</th>
+                  <th className="px-4 py-2 font-medium">Fecha de corte</th>
+                  <th className="px-4 py-2 text-right font-medium">Disponible hoy</th>
+                  <th className="border-l border-gray-200 px-4 py-2 font-medium">Saldo en el corte</th>
+                  <th className="px-4 py-2 font-medium">Fecha de corte</th>
+                  <th className="px-4 py-2 text-right font-medium">Disponible hoy</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -209,13 +266,11 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
                   // texto, y guardarlo es idempotente. Es el lado seguro del error
                   // — apagar el botón sobre algo que el usuario cree haber
                   // cambiado sería mucho peor.
-                  const guardado = filaInicial(s);
-                  const haCambiado =
-                    fila.saldoCorte !== guardado.saldoCorte || fila.fechaCorte !== guardado.fechaCorte;
+                  const haCambiado = hayCambios(fila, filaInicial(s));
                   return (
                     <tr key={s.empleadoId} className="align-top hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-900">{s.nombreCompleto}</td>
-                      <td className="px-4 py-2.5">
+                      <td className="border-l border-gray-200 px-4 py-2.5">
                         <input
                           // type="text", no "number": hace falta para admitir la coma
                           // decimal, que un type="number" rechaza en casi todos los
@@ -226,7 +281,11 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
                           onChange={(e) => actualizar(s.empleadoId, { saldoCorte: e.target.value, error: null })}
                           onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
                           placeholder="Sin configurar"
-                          aria-label={`Saldo en el corte de ${s.nombreCompleto}`}
+                          // El aria-label nombra la BOLSA además de la persona: con
+                          // dos cajas de número por fila, «Saldo en el corte de Ana
+                          // Ruiz» repetido no distingue una de otra para quien usa
+                          // lector de pantalla.
+                          aria-label={`Saldo de vacaciones en el corte de ${s.nombreCompleto}`}
                           className="w-28 rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                         />
                       </td>
@@ -236,12 +295,41 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
                           value={fila.fechaCorte}
                           onChange={(e) => actualizar(s.empleadoId, { fechaCorte: e.target.value, error: null })}
                           onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
-                          aria-label={`Fecha de corte de ${s.nombreCompleto}`}
+                          aria-label={`Fecha de corte de vacaciones de ${s.nombreCompleto}`}
                           className="rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
                         />
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">
                         {s.saldo.configurado ? formatDias(s.saldo.disponible) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="border-l border-gray-200 px-4 py-2.5">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={fila.compSaldoCorte}
+                          onChange={(e) => actualizar(s.empleadoId, { compSaldoCorte: e.target.value, error: null })}
+                          onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
+                          placeholder="Sin configurar"
+                          aria-label={`Saldo de compensatorios en el corte de ${s.nombreCompleto}`}
+                          className="w-28 rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <input
+                          type="date"
+                          value={fila.compFechaCorte}
+                          onChange={(e) => actualizar(s.empleadoId, { compFechaCorte: e.target.value, error: null })}
+                          onKeyDown={(e) => alPulsarEnter(e, s.empleadoId)}
+                          aria-label={`Fecha de corte de compensatorios de ${s.nombreCompleto}`}
+                          className="rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">
+                        {s.compensatorios?.configurado ? (
+                          formatDias(s.compensatorios.disponible)
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
                         <div className="flex flex-col items-end gap-1">
@@ -253,7 +341,7 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
                             // aquí el de al lado es el saldo de otro.
                             disabled={fila.guardando || !haCambiado}
                             onClick={() => void guardar(s.empleadoId)}
-                            aria-label={`Guardar el saldo de ${s.nombreCompleto}`}
+                            aria-label={`Guardar los saldos de ${s.nombreCompleto}`}
                             className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                           >
                             {fila.guardando ? (
@@ -270,7 +358,7 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
                               el guardado con éxito pasaría inadvertido para esa persona. */}
                           {fila.exito && (
                             <span role="status" className="sr-only">
-                              Saldo de {s.nombreCompleto} guardado.
+                              Saldos de {s.nombreCompleto} guardados.
                             </span>
                           )}
                           {fila.error && (
@@ -289,5 +377,21 @@ export default function PanelSaldos({ activo, onSaldoFijado }: Props) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Si el borrador difiere de lo guardado, en cualquiera de las dos bolsas.
+ *
+ * En una función y no repetido en el `disabled` y en el corte de `guardar`: son
+ * los dos sitios que ya tenían que decir lo mismo, y con cuatro campos en vez de
+ * dos la copia se desvía en cuanto alguien añada un quinto.
+ */
+function hayCambios(borrador: Fila, guardado: Fila): boolean {
+  return (
+    borrador.saldoCorte !== guardado.saldoCorte ||
+    borrador.fechaCorte !== guardado.fechaCorte ||
+    borrador.compSaldoCorte !== guardado.compSaldoCorte ||
+    borrador.compFechaCorte !== guardado.compFechaCorte
   );
 }

@@ -1,8 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Send } from 'lucide-react';
-import { crearSolicitud, leerComoBase64, type SaldoVacaciones, type Solicitud, type TipoSolicitud } from './api';
+import {
+  crearSolicitud,
+  leerComoBase64,
+  type SaldoCompensatorios,
+  type SaldoVacaciones,
+  type Solicitud,
+  type TipoSolicitud,
+} from './api';
 import { contarDiasHabiles, etiquetasFecha, hoyEnColombia, requiereAprobacion, TIPOS } from './dominio';
 import TarjetaSaldo from './TarjetaSaldo';
+import TarjetaCompensatorios from './TarjetaCompensatorios';
 
 /** Mismo tope que el servidor (MAX_ADJUNTO_BYTES). Se avisa antes de subir. */
 const MAX_PDF_BYTES = 8 * 1024 * 1024;
@@ -17,12 +25,14 @@ interface Props {
   aprobador: string;
   /** Null si el usuario no tiene ficha de empleado, o si el cálculo del saldo falló. */
   saldo: SaldoVacaciones | null;
+  /** Opcional: puede faltar si hub-api todavía no manda la clave. Ver `api.ts`. */
+  compensatorios?: SaldoCompensatorios | null;
   onCreada: (s: Solicitud) => void;
 }
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
-export default function FormularioSolicitud({ festivos, aprobador, saldo, onCreada }: Props) {
+export default function FormularioSolicitud({ festivos, aprobador, saldo, compensatorios, onCreada }: Props) {
   const [tipo, setTipo] = useState<TipoSolicitud>('vacaciones');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -186,15 +196,30 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, onCrea
         </p>
       )}
 
-      {/* Solo en vacaciones: los permisos y compensatorios no tocan el saldo.
-          Con `soloSiAvisa` la tarjeta se calla mientras no tenga nada que añadir
-          al indicador de la cabecera, que está a un palmo de aquí: aparece para
-          decir que falta configurar el saldo, o que los días que se están
-          pidiendo no caben. El contenedor lleva `empty:hidden` porque, cuando la
-          tarjeta se calla, su `mb-4` dejaría un hueco de 16px sin nada dentro. */}
+      {/* Cada tipo enseña SU bolsa, y solo los dos que consumen alguna: permisos
+          e incapacidades no tocan ninguna.
+
+          En vacaciones va con `soloSiAvisa`, así que la tarjeta se calla mientras
+          no tenga nada que añadir al indicador de la cabecera, que está a un
+          palmo de aquí: aparece para decir que falta configurar el saldo, o que
+          los días que se están pidiendo no caben. El contenedor lleva
+          `empty:hidden` porque, cuando la tarjeta se calla, su `mb-4` dejaría un
+          hueco de 16px sin nada dentro. */}
       {tipo === 'vacaciones' && saldo && (
         <div className="mb-4 empty:hidden">
           <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} soloSiAvisa />
+        </div>
+      )}
+
+      {/* En compensatorios va SIN `soloSiAvisa`, y es deliberado: de dónde salen
+          esos días —cuántos se otorgaron, desde cuándo y cuántos se han gastado—
+          no aparece en ninguna otra parte de la app, así que callarlo dejaría al
+          empleado sin forma de cuadrar su propia bolsa. En vacaciones el desglose
+          se puede callar porque el número grande ya está en la cabecera y la
+          fórmula es conocida; aquí no. */}
+      {tipo === 'compensatorio' && compensatorios && (
+        <div className="mb-4">
+          <TarjetaCompensatorios saldo={compensatorios} diasPedidos={rangoInvertido ? 0 : dias} />
         </div>
       )}
 

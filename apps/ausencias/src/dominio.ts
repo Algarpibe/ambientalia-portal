@@ -11,7 +11,11 @@ import type {
 /** Los cuatro tipos, en el orden en que se ofrecen en el formulario. */
 export const TIPOS: { id: TipoSolicitud; label: string; ayuda: string }[] = [
   { id: 'vacaciones', label: 'Vacaciones', ayuda: 'Requiere aprobación.' },
-  { id: 'compensatorio', label: 'Compensatorio', ayuda: 'Requiere aprobación.' },
+  {
+    id: 'compensatorio',
+    label: 'Compensatorio',
+    ayuda: 'Requiere aprobación. Descuenta de tu bolsa de compensatorios.',
+  },
   { id: 'permiso', label: 'Permiso', ayuda: 'Requiere aprobación. Puedes adjuntar un soporte en PDF.' },
   { id: 'incapacidad', label: 'Incapacidad', ayuda: 'No se aprueba: se informa. El soporte médico en PDF es obligatorio.' },
 ];
@@ -175,6 +179,32 @@ export function contarDiasHabiles(desde: string, hasta: string, festivos: Set<st
  */
 export function hoyEnColombia(ahora: Date = new Date()): string {
   return new Date(ahora.getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Qué tipos descuentan de una bolsa. En un solo sitio porque cada vez que se
+ * responde a mano —«¿enseño el saldo aquí?», «¿digo que devuelve días?»— la
+ * respuesta se puede desviar sin que nada avise.
+ *
+ * `permiso` e `incapacidad` no consumen nada: se piden y ya.
+ */
+export function consumeSaldo(tipo: TipoSolicitud): boolean {
+  return tipo === 'vacaciones' || tipo === 'compensatorio';
+}
+
+/**
+ * Lo que se puede pedir sin descubrirse. Espejo de `pedible` en
+ * `apps/hub-api/src/ausencias/saldo.ts`.
+ *
+ * Redondea, y tiene que redondear IGUAL que el servidor. `disponible − enTramite`
+ * sobre floats da cosas como 3.9000000000000004; sin redondear, el formulario y
+ * el backend discreparían justo en el borde en el que la pantalla dice «te falta
+ * 0» — uno dejaría enviar y el otro rechazaría.
+ *
+ * Toma la forma y no el tipo, así que sirve para las dos bolsas.
+ */
+export function pedible(saldo: { disponible: number; enTramite: number }): number {
+  return Math.round((saldo.disponible - saldo.enTramite) * 10) / 10;
 }
 
 /** Un decimal, y sin el «,0» cuando es entero. El formato de los días en toda la app. */
@@ -351,16 +381,16 @@ function rangoConDias(inicio: string, fin: string, dias: number): string {
 /**
  * Qué le pasa al recuento de días, en una frase.
  *
- * Se distingue por tipo porque «devuelves días» solo es cierto en vacaciones:
- * son las únicas que consumen saldo. Decírselo a quien acorta un permiso sería
- * prometerle unos días que no existen.
+ * Se distingue por tipo porque «devuelves días» solo es cierto en los tipos que
+ * consumen bolsa: vacaciones y compensatorios. Decírselo a quien acorta un
+ * permiso o una incapacidad sería prometerle unos días que no existen.
  *
  * `delta > 0` = la solicitud encoge (se liberan días); `< 0` = crece.
  */
 function efectoEnDias(tipo: TipoSolicitud, delta: number): string {
   if (delta === 0) return 'Los mismos días, en otras fechas.';
   const n = `${formatDias(Math.abs(delta))} ${Math.abs(delta) === 1 ? 'día' : 'días'}`;
-  if (tipo === 'vacaciones') return delta > 0 ? `Devuelves ${n} a tu saldo.` : `Pides ${n} más de tu saldo.`;
+  if (consumeSaldo(tipo)) return delta > 0 ? `Devuelves ${n} a tu saldo.` : `Pides ${n} más de tu saldo.`;
   return delta > 0 ? `Son ${n} menos.` : `Son ${n} más.`;
 }
 

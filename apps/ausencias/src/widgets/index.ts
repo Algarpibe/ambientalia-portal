@@ -7,10 +7,14 @@ import WidgetPendientes from './WidgetPendientes';
 
 const widgets: WidgetDescriptor[] = [
   {
+    // ⚠️ El `id` NO se toca aunque el widget cambie de nombre. Vive en el
+    // localStorage de cada usuario como `LayoutItem.widgetId`, y `WidgetGrid`
+    // filtra con `byId.has(...)`: renombrarlo haría desaparecer el widget del
+    // panel de todo el que ya lo tenga anclado, sin error y sin aviso.
     id: 'ausencias-mi-saldo',
     appId: 'ausencias',
-    name: 'Mi saldo de vacaciones',
-    description: 'Días de vacaciones disponibles a día de hoy.',
+    name: 'Mis saldos',
+    description: 'Días de vacaciones y de compensatorios disponibles a día de hoy.',
     defaultSize: { w: 4, h: 3 },
     component: WidgetSaldo,
   },

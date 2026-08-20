@@ -8,6 +8,7 @@ import {
   type Solicitud,
   type SolicitudConPropuesta,
   type SolicitudPendiente,
+  type TipoSolicitud,
 } from './api';
 import {
   correoDelTurno,
@@ -18,6 +19,49 @@ import {
 } from './dominio';
 import TablaSolicitudes from './TablaSolicitudes';
 import TarjetaSaldo from './TarjetaSaldo';
+import TarjetaCompensatorios from './TarjetaCompensatorios';
+
+/**
+ * La bolsa del solicitante que le corresponde a ESTA solicitud, si la hay.
+ *
+ * En un solo sitio y no repetida en las dos celdas de la bandeja —la de los
+ * cambios y la de las decisiones—, que es donde la regla anterior ya estaba
+ * escrita dos veces. Con dos bolsas, mantener las dos copias sincronizadas a
+ * mano es justo la forma en que se desvían.
+ *
+ * Devuelve `null` cuando el tipo no consume nada (permiso, incapacidad), cuando
+ * el aprobador no tiene acceso a la fila de esa persona, o cuando hub-api todavía
+ * no manda la bolsa nueva. Ninguno de los tres casos es un error: es que no hay
+ * nada que enseñar.
+ */
+function TarjetaDelSolicitante({
+  fila,
+  tipo,
+  nombre,
+  diasPedidos,
+}: {
+  fila: SaldoDeEmpleado | undefined;
+  tipo: TipoSolicitud;
+  nombre: string;
+  diasPedidos: number;
+}) {
+  if (!fila) return null;
+  if (tipo === 'vacaciones') {
+    return <TarjetaSaldo saldo={fila.saldo} diasPedidos={diasPedidos} titulo={`Saldo de ${nombre}`} />;
+  }
+  // Aquí es donde más falta hace de las dos: quien firma un compensatorio decide
+  // contra una bolsa que sí se agota y que nadie repone sola.
+  if (tipo === 'compensatorio' && fila.compensatorios) {
+    return (
+      <TarjetaCompensatorios
+        saldo={fila.compensatorios}
+        diasPedidos={diasPedidos}
+        titulo={`Compensatorios de ${nombre}`}
+      />
+    );
+  }
+  return null;
+}
 
 /**
  * Los dos códigos que el endpoint de decisión sabe devolver, dichos a quien
@@ -136,8 +180,8 @@ export default function BandejaAprobacion({
     // `!== false` y no `=== true`: un hub-api sin el campo degrada a «ofrécele
     // los botones» (y, como mucho, un 403 explicado) y no a una fila muerta.
     const puedo = s.puedoDecidirla !== false;
-    const saldoSolicitante =
-      s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
+    // La fila entera; qué bolsa de ella se pinta lo decide `TarjetaDelSolicitante`.
+    const filaDeSaldos = saldos.find((sd) => sd.empleadoId === s.empleadoId);
     const ocupado = ocupadoCambio === m.id;
     // El id del párrafo que explica el bloqueo, para poder apuntarle desde los
     // botones. Lleva el id de la propuesta porque hay una celda de estas por
@@ -228,13 +272,12 @@ export default function BandejaAprobacion({
             Aprobarlo va a fallar: pídele que lo retire.
           </p>
         )}
-        {saldoSolicitante && (
-          <TarjetaSaldo
-            saldo={saldoSolicitante.saldo}
-            diasPedidos={vista.diasDeMas}
-            titulo={`Saldo de ${s.empleadoNombre}`}
-          />
-        )}
+        <TarjetaDelSolicitante
+          fila={filaDeSaldos}
+          tipo={s.tipo}
+          nombre={s.empleadoNombre}
+          diasPedidos={vista.diasDeMas}
+        />
         {/* Apagados CON el porqué debajo, nunca ausentes: unos botones que
             desaparecen sin explicación se leen como un fallo de la app. Es el
             caso de quien es su propio jefe —la raíz del organigrama— viendo su
@@ -296,10 +339,11 @@ export default function BandejaAprobacion({
    * ataría esta función a la bandeja sin ganar nada.
    */
   function acciones(s: Solicitud): ReactNode {
-    // Solo vacaciones consume saldo; y solo se pinta si el aprobador tiene
-    // acceso al saldo de ese empleado (podría faltar y no pasa nada, se omite).
-    const saldoSolicitante =
-      s.tipo === 'vacaciones' ? saldos.find((sd) => sd.empleadoId === s.empleadoId) : undefined;
+    // La fila entera de esa persona; qué bolsa se pinta —o si no se pinta
+    // ninguna, porque el tipo no consume nada o el aprobador no tiene acceso a
+    // esa fila— lo decide `TarjetaDelSolicitante`, que es el único sitio donde
+    // vive esa regla.
+    const filaDeSaldos = saldos.find((sd) => sd.empleadoId === s.empleadoId);
     // Qué firma es esta. Sin segundo aprobador no se dice nada: es el caso de
     // siempre y no hay ningún matiz que explicar.
     const primeraDeDos = s.estado === 'pendiente' && !!s.segundoAprobadorCorreo;
@@ -320,13 +364,12 @@ export default function BandejaAprobacion({
           </p>
         )}
         {segundaFirma && <p className="text-xs text-gray-500">2ª firma · con esta queda aprobada</p>}
-        {saldoSolicitante && (
-          <TarjetaSaldo
-            saldo={saldoSolicitante.saldo}
-            diasPedidos={s.diasHabiles}
-            titulo={`Saldo de ${s.empleadoNombre}`}
-          />
-        )}
+        <TarjetaDelSolicitante
+          fila={filaDeSaldos}
+          tipo={s.tipo}
+          nombre={s.empleadoNombre}
+          diasPedidos={s.diasHabiles}
+        />
         {rechazando === s.id ? (
           <div className="flex flex-col gap-2">
             <input

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarDays, Loader2 } from 'lucide-react';
 import {
   fetchContexto,
-  fetchMiSaldo,
+  fetchMisSaldos,
   fetchMisSolicitudes,
   fetchModificacionesPendientes,
   fetchPendientes,
@@ -191,13 +191,20 @@ export default function App() {
     if (pestanas.length && !pestanas.some(([id]) => id === tab)) setTab(pestanas[0][0]);
   }, [pestanas, tab]);
 
-  // Relee solo el saldo, no el contexto entero: es lo que existe
+  // Relee solo los saldos, no el contexto entero: es lo que existe
   // `GET /ausencias/mi-saldo` para evitar. No se espera ni se propaga el error —
   // la acción que lo dispara ya se completó, y esto solo mejora la frescura. Si
-  // falla, se queda el número anterior, que es mejor que vaciar la cabecera.
-  function refrescarSaldoPropio() {
-    fetchMiSaldo()
-      .then((saldo) => setContexto((actual) => (actual ? { ...actual, saldo } : actual)))
+  // falla, se quedan los números anteriores, que es mejor que vaciar la cabecera.
+  //
+  // Las dos bolsas se refrescan juntas porque vienen en la misma respuesta y
+  // cualquiera de las dos puede haber cambiado: crear o decidir un compensatorio
+  // mueve una, unas vacaciones mueven la otra, y quien dispara esto no siempre
+  // sabe de qué tipo era.
+  function refrescarSaldosPropios() {
+    fetchMisSaldos()
+      .then(({ saldo, compensatorios }) =>
+        setContexto((actual) => (actual ? { ...actual, saldo, compensatorios } : actual)),
+      )
       .catch(() => {});
   }
 
@@ -208,7 +215,7 @@ export default function App() {
     // esta solicitud y no avisaría de una segunda petición sobre los mismos
     // días (el bug que se reportó: pedir 10, luego otros 10, y que siga
     // diciendo que hay 12).
-    refrescarSaldoPropio();
+    refrescarSaldosPropios();
   }
 
   function onDecidida(s: Solicitud) {
@@ -251,7 +258,7 @@ export default function App() {
     // Y el propio, no solo los de la bandeja: un admin puede aprobar sus propias
     // vacaciones, y sin esto su indicador de cabecera seguiría enseñando el
     // número de antes de la decisión hasta recargar la página.
-    refrescarSaldoPropio();
+    refrescarSaldosPropios();
   }
 
   /**
@@ -298,7 +305,7 @@ export default function App() {
         .catch(() => {});
       // Y el propio, por lo mismo que en `onDecidida`: quien decide puede ser
       // administrador y estar decidiendo sobre sus propios días.
-      refrescarSaldoPropio();
+      refrescarSaldosPropios();
     }
   }
 
@@ -415,15 +422,19 @@ export default function App() {
             </p>
           </div>
         </div>
-        {/* Sin saldo configurado no se enseña NADA aquí, ni un cartel de aviso:
-            sería permanente y en todas las pestañas, y hoy todavía le falta el
-            saldo inicial a una decena de personas. Ese aviso ya lo da
-            TarjetaSaldo en «Nueva solicitud», que es donde importa. `null` (sin
+        {/* Sin ninguna bolsa configurada no se enseña NADA aquí, ni un cartel de
+            aviso: sería permanente y en todas las pestañas, y hoy todavía le
+            falta el saldo inicial a una decena de personas —y la bolsa de
+            compensatorios, a la plantilla entera—. Ese aviso ya lo dan las
+            tarjetas en «Nueva solicitud», que es donde importa. `null` (sin
             ficha, o el cálculo falló) cae en la misma rama: ninguna de las dos
-            cosas se arregla poniendo un número en la cabecera. */}
-        {contexto?.saldo?.configurado && (
+            cosas se arregla poniendo un número en la cabecera.
+
+            Basta con UNA configurada para pintar el marco; cuántas cifras van
+            dentro lo decide IndicadorSaldo, que es donde vive esa regla. */}
+        {(contexto?.saldo?.configurado || contexto?.compensatorios?.configurado) && (
           <div className="rounded-xl border border-gray-200 px-3 py-1.5">
-            <IndicadorSaldo saldo={contexto.saldo} variante="cabecera" />
+            <IndicadorSaldo saldo={contexto.saldo} compensatorios={contexto.compensatorios} variante="cabecera" />
           </div>
         )}
       </header>
@@ -487,6 +498,7 @@ export default function App() {
                   // manda una solicitud no tiene por qué reconocer un buzón.
                   aprobador={contexto.aprobadorNombre ?? contexto.empleado.aprobadorCorreo}
                   saldo={contexto.saldo}
+                  compensatorios={contexto.compensatorios}
                   onCreada={onCreada}
                 />
               </div>
@@ -544,7 +556,7 @@ export default function App() {
                 <PanelOrganigrama activo={tab === 'organigrama'} />
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
-                <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldoPropio} />
+                <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldosPropios} />
               </div>
               <div className={tab === 'historico' ? '' : 'hidden'}>
                 <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
