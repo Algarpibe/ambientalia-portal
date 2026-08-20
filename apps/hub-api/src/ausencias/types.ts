@@ -78,7 +78,25 @@ export type EventoModificacion = (typeof EVENTOS_MODIFICACION)[number];
 export const EVENTOS_CORRECCION = ['correccion_admin'] as const;
 export type EventoCorreccion = (typeof EVENTOS_CORRECCION)[number];
 
-export const EVENTOS = [...EVENTOS_SOLICITUD, ...EVENTOS_MODIFICACION, ...EVENTOS_CORRECCION] as const;
+/**
+ * El borrado de una solicitud desde *Registro general*.
+ *
+ * Grupo propio y no un `EVENTO_CORRECCION` más, por el mismo criterio que separa
+ * a los de modificación de los de solicitud: su constructor de payload recibe UNA
+ * solicitud —la que se va a borrar—, mientras que el de corrección recibe dos, la
+ * de antes y la de después. Firmas distintas, grupos distintos.
+ *
+ * ⚠️ El valor viaja al CHECK `outbox_evento_check`, que amplía la migración 028.
+ */
+export const EVENTOS_BORRADO = ['borrado_admin'] as const;
+export type EventoBorrado = (typeof EVENTOS_BORRADO)[number];
+
+export const EVENTOS = [
+  ...EVENTOS_SOLICITUD,
+  ...EVENTOS_MODIFICACION,
+  ...EVENTOS_CORRECCION,
+  ...EVENTOS_BORRADO,
+] as const;
 export type EventoOutbox = (typeof EVENTOS)[number];
 
 /** True si el tipo necesita aprobación de alguien. Solo las incapacidades no. */
@@ -452,7 +470,16 @@ export interface NuevaSolicitud {
 export interface EventoPendiente {
   id: number;
   evento: EventoOutbox;
-  solicitudId: string;
+  /**
+   * `null` cuando su solicitud ya se borró: desde la migración 028 la clave
+   * ajena es `ON DELETE SET NULL`, para que el borrado de un evento del
+   * calendario pueda sobrevivir a la solicitud que lo pidió.
+   *
+   * Es informativo y nada más. n8n no lo usa: entrega leyendo `payload`, que es
+   * autocontenido —`eventosPendientes` ni siquiera hace `JOIN` con
+   * `solicitudes_ausencia`— y confirma por el `id` de esta fila.
+   */
+  solicitudId: string | null;
   intentos: number;
   payload: PayloadEvento;
 }

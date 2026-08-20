@@ -42,7 +42,11 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable,
   `022` los visores configurables y `023` la segunda firma opcional por ficha
   (`empleados.requiere_segunda_firma`) con el correo de quien solo se entera del
-  resultado (`solicitudes_ausencia.informado_correo`) y `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`).
+  resultado (`solicitudes_ausencia.informado_correo`), `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`),
+  `025` el ancho de `evento` que la 024 se dejó, `026` el id del evento de
+  calendario (`solicitudes_ausencia.evento_calendario_id`), `027` el evento
+  `correccion_admin` y `028` el outbox con huérfanos (`solicitud_id` nulable y
+  `ON DELETE SET NULL`) más el evento `borrado_admin`.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
@@ -221,7 +225,7 @@ la propiedad de arriba se mantiene intacta.
 | `GET` | `/api/ausencias/modificaciones/pendientes` | idem — los cambios que le toca decidir; cada fila trae `puedoDecidirla` ya calculado. Lista vacía, no **403** |
 | `POST` | `/api/ausencias/modificaciones/:id/decision` | idem — **409** si ya estaba decidida, o si la solicitud cambió por debajo |
 | `PATCH` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — corrige el registro. No avisa a la cadena de firmas ni al trabajador: corregir no es decidir. Desde el 2026-08-19 sí avisa a **administración** cuando la corrección desajusta un evento que ya estaba en Google — ver «Corregir desde el registro no deja Google desincronizado» |
-| `DELETE` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — borra la fila; el adjunto y sus eventos se van por cascada |
+| `DELETE` | `/api/ausencias/solicitudes/:id` | `requireAdmin` — borra la fila (el adjunto se va por cascada). Si estaba en el calendario, encola el borrado de su evento de Google y un aviso a administración antes de borrarla — ver «Borrar una solicitud limpia su calendario» |
 | `GET` | `/api/ausencias/dias-habiles?desde&hasta` | idem |
 | `GET` | `/api/ausencias/adjuntos` | idem — solo admin o quien tenga la llave de los adjuntos (`ve_adjuntos`); **403** al resto |
 | `GET` | `/api/ausencias/adjuntos/:id` | idem — dueño, **quien la firma** (uno o dos, según la ficha; **nunca el informado**), admin o quien tenga la llave de los adjuntos |
@@ -1846,6 +1850,148 @@ sacando el `UPDATE` de la transacción—. Una corrección guardada cuyo aviso n
 salió dejaría el registro movido, Google en las fechas viejas y a nadie
 enterado: exactamente el agujero que esta feature cierra, reabierto por una
 excepción.
+
+## Borrar una solicitud limpia su calendario
+
+Hasta el 2026-08-19, `DELETE /api/ausencias/solicitudes/:id` hacía un `DELETE`
+pelado sobre `solicitudes_ausencia` y **nunca había avisado a Google**. No era
+una regresión: era el único de los cuatro caminos que tocan esa fila que nunca
+llegó a usar la maquinaria del outbox. Borrar una ausencia aprobada dejaba su
+evento huérfano en el calendario de Ambientalia Staff, donde nadie iba a
+relacionarlo con nada — se descubrió preparando la limpieza de las solicitudes
+de prueba: tres de ellas tenían evento vivo en Google y el borrado se las
+habría dejado puestas. El diseño completo, con lo que se probó y se descartó,
+está en
+[el spec del 2026-08-19](../superpowers/specs/2026-08-19-borrado-limpia-calendario-design.md).
+
+### Qué gana el borrado, y qué sigue sin hacer
+
+Ahora, dentro de la MISMA transacción que borra la fila, `repo.borrarSolicitud`
+puede encolar un evento nuevo, `borrado_admin`, que borra el evento de Google
+cuando se puede y avisa a administración de lo que queda a mano.
+
+Dos cosas que sigue sin hacer, y es decisión tomada, no olvido:
+
+- **No toca la hoja, nunca.** Por la razón de siempre: n8n hace `append` y no
+  queda constancia de en qué fila cayó, así que a esa fila no se puede volver.
+- **Sigue siendo irreversible y sigue sin pedir confirmación.** Esta feature no
+  cambia ninguna de las dos cosas — la red de seguridad sigue siendo la
+  confirmación de la interfaz, no una regla en el SQL.
+
+### Los tres pasos, y por qué en ese orden
+
+`borrarSolicitud` pasa a `withTransaction`. Lee la fila entera primero —después
+del `DELETE` ya no existe en ningún sitio— y luego:
+
+1. `DELETE` de las filas del outbox de esa solicitud que sigan **sin
+   servirse** (`enviado_at IS NULL`).
+2. Si `estaEnElCalendario(previa.estado)`, `INSERT` del `borrado_admin`.
+3. `DELETE` de la solicitud.
+
+El orden de los dos primeros **no es indiferente**: invertidos, el paso 1 se
+lleva por delante el borrado que el paso 2 acaba de encolar, y el evento se
+queda en Google — exactamente el fallo que esta feature viene a arreglar,
+reintroducido por dentro. El paso 2 va antes del 3 por una razón distinta: la
+clave ajena valida en el `INSERT`, y con la solicitud ya borrada ese `INSERT`
+fallaría.
+
+`enviado_at IS NULL` y no `servido_at IS NULL`: una fila que n8n ya tiene en la
+mano pero todavía no ha confirmado también muere en el paso 1, igual que moría
+con la cascada. n8n la procesará igualmente y su confirmación no encontrará
+fila — un no-op, no un error.
+
+### El paso 1 es lo que hacía la cascada, ahora escrito a propósito
+
+Hasta la migración 028, `ausencias_outbox.solicitud_id` era `ON DELETE
+CASCADE`, y esa clave ajena hacía dos trabajos a la vez sin que nadie lo
+hubiera decidido así: impedía por completo encolar el borrado de un evento —el
+`DELETE` de la solicitud se llevaba por delante la fila que acababa de
+encolarlo, así que las dos operaciones se anulaban— y, de paso, suprimía los
+correos que esa solicitud tuviera todavía sin servir. Que esto último estuviera
+bien era casualidad, no una decisión: borrar una solicitud recién creada mataba
+su acuse antes de que saliera, y eso hay que seguir haciéndolo.
+
+Al relajar la clave ajena para poder escribir el paso 2, esa supresión habría
+desaparecido sola. Sin el paso 1 explícito, empezarían a entregarse correos
+anunciando una solicitud que ya no existe — el acuse de una recién creada, el
+aviso al aprobador, cualquier evento que siguiera en la cola en el momento del
+borrado. El paso 1 es exactamente lo que la cascada hacía de gratis; ahora es
+una línea con su propio motivo escrito al lado.
+
+### La clave ajena pasa a `ON DELETE SET NULL` (migración 028)
+
+`solicitud_id` deja de ser `NOT NULL` y la clave ajena de
+`ausencias_outbox` pasa de `CASCADE` a `SET NULL`. La fila que el paso 2 acaba
+de encolar sobrevive al `DELETE` del paso 3 con `solicitud_id = NULL`, y ese
+`NULL` significa algo legible en el dato: «su solicitud ya no existe». La
+clave ajena sigue validando en el `INSERT` — un id inventado se sigue
+rechazando —, lo único que se relaja es qué pasa al borrar.
+
+Eso no rompe a n8n, y no por suerte: `eventosPendientes` **no hace `JOIN`**
+con `solicitudes_ausencia` — lee solo del outbox y devuelve `payload`, que es
+autocontenido —, y `/ausencias/n8n/confirmado` confirma por el `id` del
+outbox, nunca por `solicitud_id`. Esa columna es puramente informativa en lo
+que ve n8n, así que `EventoPendiente.solicitudId` pase a `string | null` no le
+quita nada a nadie que lo estuviera usando.
+
+### La condición del paso 2 es `estaEnElCalendario`, NO «hay `eventoCalendarioId`»
+
+Son dos preguntas distintas y aquí importa no confundirlas, porque cada fila
+del outbox **es exactamente un correo**: `estaEnElCalendario(previa.estado)`
+decide si hay que avisar; `eventoCalendarioId !== null` decide si esa fila,
+además, lleva una acción de calendario que Google pueda ejecutar.
+
+Una aprobada **anterior a la migración 026** cae justo en medio de las dos:
+sí hay que avisar —su evento y su fila de la hoja siguen ahí—, pero su
+`calendario` va a `null` en el payload y el ⚠️ del correo pide borrarlo a
+mano, porque ese evento existe en Google con un id que nadie apuntó. Es el
+caso donde nadie más va a darse cuenta si no se avisa. Guardar el paso 2
+detrás de `eventoCalendarioId` en vez de `estaEnElCalendario` dejaría sin
+aviso justo esa fila, la que más lo necesita — y la mutación pasa en verde si
+no hay un candado dedicado a separar las dos condiciones: es lo que prueba
+«CANDADO: una aprobada SIN id encola el aviso igual, sin accion de
+calendario» en `repo.borrado.db.test.ts`.
+
+### El caso límite: aprobar y borrar dentro de los diez minutos
+
+Decisión tomada, no descuido. El paso 1 se lleva el evento `aprobada` que
+todavía no se había servido —el que iba a **crear** el evento en Google— y el
+paso 2 encola el borrado de algo que Google nunca llegó a crear. Google
+contesta **404**, uno de los tres códigos que el `IF` «¿El fallo es
+esperable?» del workflow ya tolera a propósito: sale ruido en el historial de
+n8n, no un fallo.
+
+La alternativa —conservar el `aprobada` pendiente para que se cree y se borre
+en orden— entregaría un correo anunciando la aprobación de una solicitud ya
+borrada, que es peor que el ruido.
+
+### Riesgo aceptado
+
+Las filas del outbox de solicitudes borradas **ya no se limpian solas**: se
+quedan con `solicitud_id = NULL`, que es lo que se pidió —son el registro de
+algo que ocurrió—, pero conviene decirlo sin rodeos: esa tabla deja de
+vaciarse por sí sola cada vez que se borra una solicitud, y crece de forma
+monótona.
+
+No se añade purga en esta feature. Si algún día la tabla molesta, el criterio
+natural es borrar por `enviado_at` antiguo, **no** por `solicitud_id IS
+NULL`: lo huérfano no es lo viejo.
+
+### Lo que no cubre ningún test
+
+`repo.borrado.db.test.ts` va contra Postgres real, no contra el doble en
+memoria de `router.test.ts` —que no tiene ni transacción ni claves ajenas, así
+que ninguno de estos candados sería cazable ahí—, y cubre las seis mutaciones
+que importan: devolver la clave ajena a `CASCADE`, invertir los pasos 1 y 2,
+quitar el paso 1, quitar la guarda de `estaEnElCalendario`, guardar el paso 2
+detrás de `eventoCalendarioId` en vez de `estaEnElCalendario`, y sacar el
+`INSERT` del outbox fuera de la transacción.
+
+Lo que **no** cubre ningún test es el caso límite de arriba —aprobar y borrar
+dentro de los diez minutos—: haría falta Google de verdad para observar que el
+404 cae en la rama que el `IF` de n8n ya tolera. Se ha razonado, no se ha
+verificado contra el workflow publicado. Escrito en el JSDoc de
+`repo.borrarSolicitud` para que nadie lo dé por cubierto.
 
 ## Calendario
 

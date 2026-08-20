@@ -302,7 +302,12 @@ vi.mock('./repo.js', () => ({
     });
     return s;
   },
-  borrarSolicitud: async (_db: unknown, id: string) => {
+  // Acepta el `adminEmail` y el constructor del payload y los IGNORA a propósito.
+  // Los tres pasos del borrado real —limpiar el outbox sin servir, encolar el
+  // `borrado_admin` y borrar la fila— van de una CLAVE AJENA y de una TRANSACCIÓN,
+  // y aquí no hay ninguna de las dos: reimplementarlos sería fingir que se prueban.
+  // Quien los prueba es `repo.borrado.db.test.ts`, contra Postgres de verdad.
+  borrarSolicitud: async (_db: unknown, id: string, _adminEmail?: string, _construirPayload?: unknown) => {
     const i = estado.solicitudes.findIndex((s) => s.id === id);
     if (i < 0) return null;
     return estado.solicitudes.splice(i, 1)[0];

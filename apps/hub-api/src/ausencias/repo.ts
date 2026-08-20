@@ -7,6 +7,7 @@ import type {
   ClaseModificacion,
   Empleado,
   EstadoModificacion,
+  EventoBorrado,
   EventoCorreccion,
   EventoModificacion,
   EventoOutbox,
@@ -793,15 +794,74 @@ export async function actualizarSolicitud(
  * importada se recupera reimportando el Excel; una del portal, no. La red de
  * seguridad es la confirmación de la interfaz, no una regla en el SQL.
  *
- * El adjunto y los eventos de cola se van por clave foránea. Si quedaba algún
- * evento sin enviar, desaparece con la solicitud — que es lo correcto: no tiene
- * sentido avisar de algo que ya no existe.
+ * Es irreversible y toca el registro de la compañía, así que **encola el borrado
+ * de su evento del Google Calendar** antes de irse: hasta el 2026-08-19 hacía un
+ * `DELETE` pelado y dejaba el evento huérfano en el calendario de Staff, donde
+ * nadie iba a relacionarlo con nada.
+ *
+ * Tres pasos, y el orden de los dos primeros NO es indiferente:
+ *
+ *  1. Se lleva las filas del outbox de esa solicitud que sigan **sin servirse**.
+ *     Es lo que hacía la cascada de la clave ajena hasta la migración 028, ahora
+ *     escrito a propósito: sin esto se entregarían correos anunciando una
+ *     solicitud que ya no existe.
+ *  2. Encola el `borrado_admin` **si la fila estaba en Google**. Va DESPUÉS del
+ *     paso 1 —invertidos, el paso 1 se lleva por delante lo que el 2 acaba de
+ *     encolar— y ANTES del paso 3, porque la clave ajena valida en el `INSERT`.
+ *  3. Borra la solicitud. La clave ajena, ya `ON DELETE SET NULL`, deja la fila
+ *     del paso 2 viva con su `solicitud_id` a `null`.
+ *
+ * La condición del paso 2 es `estaEnElCalendario`, NO «hay `eventoCalendarioId`»:
+ * cada fila del outbox es exactamente un correo, así que esa condición decide si
+ * se avisa. Una aprobada anterior a la 026 no tiene id —su `calendario` irá a
+ * `null` y el ⚠️ pedirá hacerlo a mano— pero sí hay que avisar de ella, que es
+ * justo el caso donde nadie más va a darse cuenta.
+ *
+ * La transacción da que un fallo del payload no deje ni la solicitud borrada ni
+ * el correo dicho. Lo que **no** da es cerrar ninguna ventana de carrera: `BEGIN`
+ * pelado, READ COMMITTED, como el resto del fichero.
+ *
+ * ⚠️ **Aprobar y borrar dentro de los diez minutos es un caso decidido, no un
+ * descuido.** El paso 1 se lleva el evento `aprobada` que todavía no se había
+ * servido —el que iba a CREAR el evento en Google— y el paso 2 encola el borrado
+ * de algo que Google nunca llegó a crear, así que contesta 404. Es uno de los
+ * tres códigos que el IF «¿El fallo es esperable?» del workflow ya tolera a
+ * propósito, así que sale ruido en el historial de n8n y nada más. La
+ * alternativa —conservar el `aprobada` pendiente para que se cree y se borre en
+ * orden— entregaría un correo anunciando la aprobación de una solicitud ya
+ * borrada, que es peor. Ningún test lo cubre: haría falta Google de verdad.
  */
-export async function borrarSolicitud(db: Pool, id: string): Promise<Solicitud | null> {
-  const previa = await solicitudPorId(db, id);
-  if (!previa) return null;
-  await db.query('DELETE FROM portal.solicitudes_ausencia WHERE id = $1', [id]);
-  return previa;
+export async function borrarSolicitud(
+  db: Pool,
+  id: string,
+  adminEmail: string,
+  construirPayload: (borrada: Solicitud, adminEmail: string) => PayloadEvento,
+): Promise<Solicitud | null> {
+  return withTransaction(db, async (client) => {
+    const previa = await solicitudPorId(client, id);
+    if (previa === null) return null;
+
+    // PASO 1. `enviado_at IS NULL` y no `servido_at IS NULL`: una fila que n8n ya
+    // tiene en la mano pero no ha confirmado tambien muere aqui, igual que moria
+    // con la cascada. n8n la procesara y su confirmacion no encontrara fila, que
+    // es un no-op.
+    await client.query(`DELETE FROM portal.ausencias_outbox WHERE solicitud_id = $1 AND enviado_at IS NULL`, [id]);
+
+    // PASO 2.
+    if (estaEnElCalendario(previa.estado)) {
+      // Anotado y no un literal suelto: el valor viaja al CHECK de la 028, y una
+      // errata compilaria y reventaria DENTRO de esta transaccion.
+      const evento: EventoBorrado = 'borrado_admin';
+      await client.query(
+        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+        [id, evento, JSON.stringify(construirPayload(previa, adminEmail))],
+      );
+    }
+
+    // PASO 3.
+    await client.query('DELETE FROM portal.solicitudes_ausencia WHERE id = $1', [id]);
+    return previa;
+  });
 }
 
 /** Todas las solicitudes de la compañía, para la vista que sustituye a la hoja. */
@@ -1853,7 +1913,17 @@ export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPe
       RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
     [limite, RESERVA],
   );
-  return (rows as { id: string; evento: EventoOutbox; solicitud_id: string; intentos: number; payload: PayloadEvento }[])
+  // `solicitud_id` nulable desde la 028: la clave ajena es `ON DELETE SET NULL`
+  // para que el borrado de un evento de Google sobreviva a la solicitud que lo
+  // pidio. El cast tiene que decirlo o `tsc` se cree un `string` que puede no
+  // serlo, y eso convierte un null real en un fallo en tiempo de ejecucion.
+  return (rows as {
+    id: string;
+    evento: EventoOutbox;
+    solicitud_id: string | null;
+    intentos: number;
+    payload: PayloadEvento;
+  }[])
     .map((r) => ({
       id: Number(r.id),
       evento: r.evento,

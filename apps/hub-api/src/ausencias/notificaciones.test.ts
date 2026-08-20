@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   construirPayload,
+  construirPayloadBorrado,
   construirPayloadCorreccion,
   construirPayloadModificacion,
   eventosDeAlta,
@@ -1015,5 +1016,78 @@ describe('el payload de una corrección del registro', () => {
       // cuando el correo dice que ya se arregló solo.
       expect(p.calendario !== null).toBe(diceQueSeArregloSolo);
     }
+  });
+});
+
+describe('el payload del borrado de una solicitud', () => {
+  const ADMIN = 'comercial@ambientalia.com.co';
+  const EVENT_ID = '2993c29668a94bf38708574110cde669';
+
+  it('borra el evento cuando la solicitud tiene uno localizable', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID });
+    const p = construirPayloadBorrado(borrada, ADMIN);
+
+    expect(p.calendario).toMatchObject({
+      calendarId: CALENDARIO_STAFF,
+      eventId: EVENT_ID,
+      accion: 'borrar',
+    });
+    expect(p.correo.asunto).toContain('⚠️ Ajustar la hoja —');
+    expect(p.correo.cuerpo).toContain('ya se ha borrado solo');
+  });
+
+  // CANDADO. Las aprobadas anteriores a la migración 026 llevan en Google un id
+  // que inventó Google y que nadie apuntó: existen, pero no se pueden localizar.
+  it('CANDADO: sin id no se borra nada y el aviso pide las dos cosas a mano', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: null });
+    const p = construirPayloadBorrado(borrada, ADMIN);
+
+    expect(p.calendario).toBeNull();
+    expect(p.correo.asunto).toContain('⚠️ Ajustar calendario y hoja —');
+    expect(p.correo.cuerpo).not.toContain('ya se ha borrado solo');
+  });
+
+  // CANDADO. El verbo importa: en una corrección la fila de la hoja se AJUSTA, y
+  // aquí hay que BORRARLA. Reutilizar el texto de la corrección mandaría a
+  // administración a ajustar a unas fechas nuevas una fila que ya no existe.
+  it('CANDADO: el aviso dice borrar la fila de la hoja, no ajustarla', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID });
+    const cuerpo = construirPayloadBorrado(borrada, ADMIN).correo.cuerpo;
+
+    expect(cuerpo).toContain('borrarla a mano');
+    expect(cuerpo).not.toContain('ajustarla a mano');
+  });
+
+  it('la hoja va a null SIEMPRE: n8n hace append y a esa fila no se puede volver', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID });
+    expect(construirPayloadBorrado(borrada, ADMIN).hoja).toBeNull();
+  });
+
+  it('el correo va a la copia de la ficha y nombra al admin que lo borró', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID });
+    const p = construirPayloadBorrado(borrada, ADMIN);
+
+    expect(p.correo.para).toBe('administrativo@ambientalia.com.co');
+    expect(p.correo.cuerpo).toContain(ADMIN);
+  });
+
+  // CANDADO. Único correo de la app con una sola fuente de destinatario: en los
+  // demás la cadena de firmas rellena la lista. Un `para` vacío no degrada el
+  // aviso, deja una fila que n8n reintenta cada diez minutos para siempre.
+  it('CANDADO: una ficha sin copia cae en el valor por defecto, nunca en vacío', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID, copiaCorreo: null });
+    const p = construirPayloadBorrado(borrada, ADMIN).correo;
+
+    expect(p.para).toBe(COPIA_POR_DEFECTO);
+    expect(p.para).not.toBe('');
+  });
+
+  it('el cuerpo enseña qué se borró: tipo, fechas, recuento y estado', () => {
+    const borrada = solicitud({ estado: 'aprobada', eventoCalendarioId: EVENT_ID });
+    const cuerpo = construirPayloadBorrado(borrada, ADMIN).correo.cuerpo;
+
+    expect(cuerpo).toContain('2026-07-06 a 2026-07-10');
+    expect(cuerpo).toContain('aprobada');
+    expect(cuerpo).toContain('Ana Ruiz');
   });
 });
