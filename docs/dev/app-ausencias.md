@@ -42,7 +42,11 @@ Lo que **no** cambió, a propósito: los textos de los correos, el calendario
   la reserva del outbox, `020` la retirada de Drive, `021` la copia configurable,
   `022` los visores configurables y `023` la segunda firma opcional por ficha
   (`empleados.requiere_segunda_firma`) con el correo de quien solo se entera del
-  resultado (`solicitudes_ausencia.informado_correo`) y `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`).
+  resultado (`solicitudes_ausencia.informado_correo`), `024` la modificación de solicitudes ya enviadas (`portal.solicitud_modificaciones` + `solicitudes_ausencia.anulada_at`),
+  `025` el ancho de `evento` que la 024 se dejó, `026` el id del evento de
+  calendario (`solicitudes_ausencia.evento_calendario_id`), `027` el evento
+  `correccion_admin` y `028` el outbox con huérfanos (`solicitud_id` nulable y
+  `ON DELETE SET NULL`) más el evento `borrado_admin`.
 - **n8n**: workflow **«Ausencias — Portal»** (`dh0xjWCHsGj9raYH`), 18 nodos.
 
 ## No se piden días que ya pasaron
