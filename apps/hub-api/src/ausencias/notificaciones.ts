@@ -885,6 +885,112 @@ export function construirPayloadCorreccion(
   };
 }
 
+// ── El borrado de una solicitud desde Registro general ─────────────────────
+
+/**
+ * En qué queda el evento del calendario al borrar la solicitud.
+ *
+ * Dos situaciones y no las cuatro de la corrección: un borrado siempre cambia
+ * algo, así que no existe el caso «el calendario no cambia».
+ *
+ * Tiene nombre propio por la misma razón que `situacionDelCalendario`: el
+ * payload y los dos textos del correo necesitan la misma respuesta, y la primera
+ * versión de aquel diseño la calculaba tres veces en paralelo con un JSDoc que
+ * afirmaba ser fuente única. Aquí se decide una vez.
+ */
+type SituacionDelBorrado = 'borrado' | 'a_mano';
+
+const situacionDelBorrado = (borrada: Solicitud): SituacionDelBorrado =>
+  // Sin id, el evento existe pero lleva el que inventó Google y nadie apuntó:
+  // no se puede localizar, así que hay que ir a buscarlo a mano.
+  borrada.eventoCalendarioId === null ? 'a_mano' : 'borrado';
+
+/** El borrado del evento, o `null` si no sabemos dónde está. */
+function borradoDelCalendario(borrada: Solicitud, situacion: SituacionDelBorrado): EventoCalendario | null {
+  const eventId = borrada.eventoCalendarioId;
+  // Se vuelve a preguntar por el id en vez de darlo por bueno con un `!`: la
+  // garantía vive en `situacionDelBorrado`, y un `!` la convertiría en un
+  // `eventId: null` que n8n mandaría a Google el día que alguien la relaje.
+  if (situacion === 'a_mano' || eventId === null) return null;
+  // Las fechas describen el evento tal como está justo antes de desaparecer.
+  return { ...calendario(borrada), eventId, accion: 'borrar' };
+}
+
+/**
+ * El párrafo de qué queda por hacer a mano.
+ *
+ * ⚠️ Textos NUEVOS, no los de la corrección con otra situación. El verbo cambia:
+ * allí la fila de la hoja se **ajusta** a unas fechas nuevas; aquí hay que
+ * **borrarla**, porque la solicitud ya no existe. Reutilizar aquellos mandaría a
+ * administración a ajustar una fila a unas fechas que ya no son de nadie.
+ */
+const AVISO_DEL_BORRADO: Record<SituacionDelBorrado, string> = {
+  borrado:
+    '⚠️ Administración: el evento del calendario ya se ha borrado solo. La fila de la hoja no: hay que borrarla a mano.',
+  a_mano:
+    '⚠️ Administración: esta ausencia estaba en el calendario y en la hoja, y no se borran solas: hay que borrar a mano el evento del calendario y la fila de la hoja.',
+};
+
+const prefijoDelBorrado = (situacion: SituacionDelBorrado): string =>
+  situacion === 'a_mano' ? '⚠️ Ajustar calendario y hoja — ' : '⚠️ Ajustar la hoja — ';
+
+/**
+ * El aviso de que un admin borró una solicitud del registro.
+ *
+ * Va SOLO a la copia de la ficha —administración—, nunca al trabajador ni a la
+ * cadena de firmas: el borrado es una vía de mantener el registro, no de decidir
+ * sobre la ausencia de nadie. Mismo criterio que la corrección.
+ *
+ * ⚠️ El `??` no es paranoia: es el único correo de la app con una sola fuente de
+ * destinatario. `copiaCorreo` es nulable y `destinatarios` salta los nulos, así
+ * que una ficha con la copia vaciada daría un `sendTo` vacío — una fila que Gmail
+ * rechaza y n8n reintenta cada diez minutos para siempre.
+ */
+function correoBorrado(borrada: Solicitud, adminEmail: string, situacion: SituacionDelBorrado): CorreoEvento {
+  return {
+    para: destinatarios(borrada.copiaCorreo ?? COPIA_POR_DEFECTO),
+    asunto: `${prefijoDelBorrado(situacion)}Borrada del registro: solicitud ${PERIODO[borrada.tipo]} de ${borrada.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `${adminEmail} ha borrado desde *Registro general* una solicitud ${PERIODO[borrada.tipo]} de ${borrada.empleadoNombre} que ya estaba en el calendario y en la hoja.`,
+      '',
+      `📅 Borrada: ${fotoDe(borrada)}`,
+      '',
+      AVISO_DEL_BORRADO[situacion],
+      '',
+      'Saludos,',
+      FIRMA_GERENCIA,
+    ].join('\n'),
+  };
+}
+
+/**
+ * El payload del borrado de una solicitud.
+ *
+ * `hoja` va a `null` SIEMPRE, por lo mismo que en la corrección: n8n hace
+ * `append` y no queda constancia de en qué fila cayó, así que a esa fila no se
+ * puede volver. Por eso el ⚠️ la nombra en los dos textos.
+ *
+ * **Precondición:** solo debe llamarse cuando `estaEnElCalendario(borrada.estado)`
+ * es `true`. El cuerpo afirma «que ya estaba en el calendario y en la hoja» como
+ * un hecho, así que llamarla sobre una `pendiente` mandaría a administración un
+ * aviso falso. Quien lo garantiza es `repo.borrarSolicitud`; no se duplica aquí
+ * como comprobación defensiva, porque serían dos sitios decidiendo lo mismo.
+ */
+export function construirPayloadBorrado(borrada: Solicitud, adminEmail: string): PayloadEvento {
+  const situacion = situacionDelBorrado(borrada);
+  return {
+    tipo: borrada.tipo,
+    tipoEtiqueta: ETIQUETA_TIPO[borrada.tipo],
+    estado: borrada.estado,
+    empleadoNombre: borrada.empleadoNombre,
+    correo: correoBorrado(borrada, adminEmail, situacion),
+    calendario: borradoDelCalendario(borrada, situacion),
+    hoja: null,
+  };
+}
+
 /** Los eventos que dispara el alta de una solicitud, en orden de envío. */
 export function eventosDeAlta(tipo: Solicitud['tipo']): EventoSolicitud[] {
   // La incapacidad se informa y ya: no hay a quién avisar para que apruebe.
