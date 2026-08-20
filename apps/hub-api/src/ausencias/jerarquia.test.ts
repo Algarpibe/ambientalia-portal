@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos } from './jerarquia.js';
+import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos, jefeEfectivo } from './jerarquia.js';
+import { APROBADOR_DE_RESERVA } from './config.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
 
 const ANA = 'ana.ruiz@ambientalia.com.co';
@@ -183,5 +184,34 @@ describe('detectarCiclos', () => {
     expect(ciclos).toHaveLength(1);
     expect([...ciclos[0]].sort()).toEqual(['b@x.com', 'c@x.com']);
     expect(ciclos[0]).not.toContain(ANA);
+  });
+});
+
+describe('jefeEfectivo', () => {
+  it('quien tiene jefe firma con su jefe', () => {
+    expect(jefeEfectivo({ correo: ANA, aprobadorCorreo: XIOMARA })).toBe(XIOMARA);
+  });
+
+  it('CANDADO: la raiz del organigrama NO se firma a si misma', () => {
+    // La raiz se declara autoasignandose —`creariaCiclo` deja pasar ese caso a
+    // proposito— y hasta hoy eso significaba que su solicitud aterrizaba en su
+    // propia bandeja y se la firmaba ella. Vale para TODOS los tipos.
+    expect(jefeEfectivo({ correo: ALFONSO, aprobadorCorreo: ALFONSO })).toBe(APROBADOR_DE_RESERVA);
+    expect(jefeEfectivo({ correo: ALFONSO, aprobadorCorreo: ALFONSO })).not.toBe(ALFONSO);
+  });
+
+  it('no le importan las mayusculas, como al resto del modulo', () => {
+    expect(jefeEfectivo({ correo: ALFONSO.toUpperCase(), aprobadorCorreo: ALFONSO })).toBe(APROBADOR_DE_RESERVA);
+  });
+
+  it('el segundo nivel se sube desde el arbol del jefe EFECTIVO, no del propio', () => {
+    // Es la razon de que esta funcion viva fuera de `aprobadoresDe` y se aplique
+    // ANTES de resolver el enlace: si se sustituyera dentro, el abuelo vendria
+    // del arbol equivocado —el de quien pide, que es su propio jefe— y la cadena
+    // se cerraria en una sola firma cuando la reserva si tiene superior.
+    const jefe = jefeEfectivo({ correo: ALFONSO, aprobadorCorreo: ALFONSO });
+    const r = aprobadoresDe(solicitante(ALFONSO, jefe), enlace(APROBADOR_DE_RESERVA, XIOMARA));
+    expect(r.primero).toBe(APROBADOR_DE_RESERVA);
+    expect(r.segundo).toBe(XIOMARA);
   });
 });

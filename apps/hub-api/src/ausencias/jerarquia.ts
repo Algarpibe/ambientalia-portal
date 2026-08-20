@@ -1,3 +1,5 @@
+import { APROBADOR_DE_RESERVA } from './config.js';
+
 // El organigrama y las dos firmas que salen de él.
 //
 // `portal.empleados.aprobador_correo` significa «el correo de mi jefe
@@ -33,6 +35,34 @@ export interface Aprobadores {
    * significaba.
    */
   informado: string | null;
+}
+
+/**
+ * El correo que de verdad va a firmar: el jefe de la ficha, salvo que la ficha se
+ * apunte a sí misma.
+ *
+ * La raíz del organigrama se declara autoasignándose —lo dice `creariaCiclo`, que
+ * deja pasar ese caso a propósito—, y hasta el 2026-08-20 eso significaba que su
+ * solicitud aterrizaba en su propia bandeja y **se la firmaba ella misma**:
+ * `puedeDecidir` no comprobaba que quien firma no fuera quien pide. Aquí se
+ * sustituye por el aprobador de reserva, y la guarda que lo cierra por el otro
+ * lado está en `puedeDecidir`.
+ *
+ * Vive AQUÍ y no dentro de `aprobadoresDe` por dos razones. Una, no tocar el
+ * contrato de aquella, cuyo JSDoc declara que `primero` es literalmente lo que
+ * dice la ficha y tiene que seguir funcionando igual —el correo puede ser un
+ * buzón sin ficha de empleado, y hoy lo es para toda la plantilla—. Y dos, porque
+ * quien llama necesita este correo ANTES, para resolver con él el `enlaceDe` del
+ * segundo nivel: si se sustituyera dentro, el jefe que se sube ya vendría del
+ * árbol equivocado.
+ *
+ * No mira si la reserva tiene ficha activa, igual que `APROBADOR_POR_DEFECTO`: si
+ * se desactivara, exigirlo dejaría a la raíz sin nadie a quien mandar nada.
+ */
+export function jefeEfectivo(e: { correo: string; aprobadorCorreo: string }): string {
+  const yo = e.correo.toLowerCase();
+  const jefe = e.aprobadorCorreo.toLowerCase();
+  return jefe === yo ? APROBADOR_DE_RESERVA.toLowerCase() : jefe;
 }
 
 /**

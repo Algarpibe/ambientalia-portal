@@ -11,7 +11,7 @@ import {
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
-import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos } from './jerarquia.js';
+import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos, jefeEfectivo } from './jerarquia.js';
 import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
 import * as repo from './repo.js';
 import {
@@ -28,6 +28,7 @@ import {
   TIPOS,
   correoDelTurno,
   decisorDeModificacion,
+  esOtorgamiento,
   requiereAprobacion,
   transicionAlDecidir,
   type ClaseModificacion,
@@ -448,8 +449,26 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
   // trámite no mueva una solicitud que ya está en vuelo.
+  //
+  // El correo del jefe pasa por `jefeEfectivo` ANTES de resolver su enlace: quien
+  // es su propio jefe firma con el aprobador de reserva, y el segundo nivel tiene
+  // que subirse desde el árbol de ÉSE y no del suyo propio.
+  //
+  // Un otorgamiento se firma con UNA sola firma, sea cual sea la casilla de la
+  // ficha: conceder días es una decisión del jefe inmediato y no hay nada que un
+  // segundo escalón añada. No se inventa nada — es exactamente lo que ya hace una
+  // ficha con `requiereSegundaFirma` apagada, y el de segundo nivel queda en
+  // `informado`, enterándose del resultado.
+  const correoDelJefe = jefeEfectivo(empleado);
   const firmantes = aprueba
-    ? aprobadoresDe(empleado, await repo.enlaceDe(db, empleado.aprobadorCorreo))
+    ? aprobadoresDe(
+        {
+          ...empleado,
+          aprobadorCorreo: correoDelJefe,
+          requiereSegundaFirma: empleado.requiereSegundaFirma && !esOtorgamiento(datos.tipo),
+        },
+        await repo.enlaceDe(db, correoDelJefe),
+      )
     : null;
 
   const adjunto = datos.adjunto
@@ -602,6 +621,23 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
 export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
   if (sesion.esAdmin) return true;
   const yo = sesion.email.toLowerCase();
+  // **El propio solicitante no, aunque él mismo sea el aprobador congelado.**
+  // Faltaba, y era el agujero: la raíz del organigrama se declara siendo su
+  // propio jefe, así que su solicitud aterrizaba en su propia bandeja y se la
+  // firmaba ella. Valía para TODOS los tipos, no solo para los otorgamientos.
+  //
+  // Gemela de la que `puedeDecidirModificacion` ya tenía, y con el mismo orden:
+  // el admin va PRIMERO y queda fuera del candado, a sabiendas —ya puede
+  // reescribir la fila entera con el PATCH, que no manda ningún correo, así que
+  // cerrarle esta puerta solo lo empujaría a la silenciosa—.
+  //
+  // Se compara contra `solicitanteEmail`, el de la fila que el PATCH mantiene al
+  // día, y no contra el congelado en ningún satélite.
+  //
+  // La otra mitad de la regla está en `jefeEfectivo` (jerarquia.ts), que manda
+  // esas solicitudes al aprobador de reserva: sin ella esto no cerraría el
+  // agujero, lo convertiría en un callejón sin salida.
+  if (s.solicitanteEmail.toLowerCase() === yo) return false;
   if (s.estado === 'pendiente') return (s.aprobadorCorreo ?? '').toLowerCase() === yo;
   if (s.estado === 'pendiente_2') return (s.segundoAprobadorCorreo ?? '').toLowerCase() === yo;
   return (
@@ -1255,7 +1291,11 @@ export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatur
   const enCiclo = new Set(detectarCiclos(construirIndice(enlaces)).flat());
 
   return empleados.map((e) => {
-    const arriba = aprobadoresDe(e, porCorreo.get(e.aprobadorCorreo.toLowerCase()) ?? null);
+    // Por `jefeEfectivo` también, y no solo el alta: si no, el panel enseñaría a
+    // la raíz del organigrama que se aprueba a sí misma mientras el alta la manda
+    // a otro sitio. La derivación tiene que decir lo que de verdad va a pasar.
+    const jefe = jefeEfectivo(e);
+    const arriba = aprobadoresDe({ ...e, aprobadorCorreo: jefe }, porCorreo.get(jefe) ?? null);
     return {
       ...e,
       segundoAprobadorCorreo: arriba.segundo,

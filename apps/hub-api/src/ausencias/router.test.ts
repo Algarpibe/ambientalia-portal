@@ -4174,3 +4174,97 @@ describe('la forma de los errores del router', () => {
     expect(r.body).toEqual({ error: 'fecha_invalida', field: 'fechaInicio' });
   });
 });
+
+describe('nadie firma su propia solicitud', () => {
+  // La raiz del organigrama se declara siendo su propio jefe. Hasta el
+  // 2026-08-20 eso significaba que su solicitud aterrizaba en su propia bandeja
+  // y se la firmaba ella, porque `puedeDecidir` no comprobaba que quien firma no
+  // fuera quien pide. El arreglo tiene DOS mitades y hacen falta las dos: la
+  // guarda de `puedeDecidir`, y `jefeEfectivo`, que manda esas solicitudes al
+  // aprobador de reserva. Sin la segunda, la guarda sola las dejaria en un
+  // callejon sin salida.
+  const RESERVA = 'administrativo@ambientalia.com.co';
+
+  /** La sesion es la raiz: su ficha se apunta a si misma como jefe. */
+  function comoRaiz() {
+    estado.empleado = { ...(estado.empleado as Record<string, unknown>), aprobadorCorreo: 'ana.ruiz@ambientalia.com.co' };
+  }
+
+  it('CANDADO: la solicitud de la raiz aterriza en el aprobador de reserva', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    expect(r.body.aprobadorCorreo).toBe(RESERVA);
+    expect(r.body.aprobadorCorreo).not.toBe('ana.ruiz@ambientalia.com.co');
+  });
+
+  it('CANDADO: y no puede decidirla ella misma', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ aprueba: true })
+      .expect(403);
+  });
+
+  it('el aprobador de reserva SI puede', async () => {
+    comoRaiz();
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: RESERVA })}`)
+      .send({ aprueba: true })
+      .expect(200);
+  });
+
+  it('CANDADO: vale para TODOS los tipos, no solo para el otorgamiento', async () => {
+    // El alcance es general a proposito: el agujero llevaba meses abierto para
+    // vacaciones, permisos y compensatorios.
+    //
+    // La bolsa se siembra porque si no el compensatorio choca contra SU PROPIO
+    // bloqueo —`compensatorios_sin_saldo`— y el 409 se leeria como si el candado
+    // de los aprobadores hubiera fallado. Se siembra una sola vez y fuera del
+    // bucle: `comoRaiz` corre en cada vuelta y duplicaria la ficha.
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      compensatoriosSaldoCorte: 10,
+      compensatoriosFechaCorte: '2026-01-01',
+    });
+    for (const [tipo, inicio, fin] of [
+      ['vacaciones', '2026-07-06', '2026-07-08'],
+      ['permiso', '2026-07-13', '2026-07-15'],
+      ['compensatorio', '2026-07-20', '2026-07-22'],
+    ] as const) {
+      comoRaiz();
+      const r = await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send({ ...nueva(), tipo, fechaInicio: inicio, fechaFin: fin })
+        .expect(201);
+      expect(r.body.aprobadorCorreo, tipo).toBe(RESERVA);
+    }
+  });
+
+  it('a quien SI tiene jefe no le cambia nada', async () => {
+    // El control del candado de arriba: sin esto, `jefeEfectivo` podria mandar a
+    // la reserva a todo el mundo y los cuatro tests anteriores seguirian verdes.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    expect(r.body.aprobadorCorreo).toBe('comercial@ambientalia.com.co');
+  });
+});
