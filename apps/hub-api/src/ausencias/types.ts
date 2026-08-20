@@ -505,6 +505,15 @@ export interface NuevaSolicitud {
   fechaFin: string;
   comentarios?: string;
   adjunto?: { nombreArchivo: string; mime: string; contenidoBase64: string };
+  /**
+   * Días a conceder. SOLO en un otorgamiento, y ahí es obligatorio.
+   *
+   * En los demás tipos los cuenta el servidor con `contarDiasHabiles` y este
+   * campo se rechaza: aceptarlo e ignorarlo dejaría creer que sirve para algo.
+   * Aquí no se puede calcular — un compensatorio se gana por trabajar un sábado,
+   * y un sábado da CERO días hábiles.
+   */
+  dias?: number;
 }
 
 

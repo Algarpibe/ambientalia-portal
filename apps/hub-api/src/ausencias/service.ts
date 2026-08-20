@@ -111,7 +111,11 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
   // UTC−5 ANTES de tomar la fecha — sin eso, entre las 19:00 y medianoche hora
   // local el servidor ya estaría en el día siguiente y rechazaría por «pasada»
   // una solicitud para mañana.
-  if (requiereAprobacion(tipo) && fechaInicio < hoy) {
+  //
+  // El otorgamiento queda fuera por una razón distinta de la incapacidad: no es
+  // una ausencia. Su fecha es el día que se TRABAJÓ de más, así que siempre está
+  // en el pasado — se pide después de haber trabajado, no antes.
+  if (requiereAprobacion(tipo) && !esOtorgamiento(tipo) && fechaInicio < hoy) {
     throw new AusenciaError('fecha_en_pasado', 400, 'fechaInicio');
   }
 
@@ -126,7 +130,63 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
   // único que la respalda, así que sin él no se registra.
   if (tipo === 'incapacidad' && !adjunto) throw new AusenciaError('adjunto_requerido', 400, 'adjunto');
 
-  return { tipo, fechaInicio, fechaFin, comentarios: comentarios || undefined, adjunto };
+  const dias = validarDiasConcedidos(b.dias, tipo, fechaInicio, fechaFin, hoy, comentarios);
+
+  return { tipo, fechaInicio, fechaFin, comentarios: comentarios || undefined, adjunto, dias };
+}
+
+/** Tope de UNA concesión. El del saldo entero es otro (`MAX_SALDO`, 999). */
+const MAX_DIAS_CONCEDIDOS = 30;
+
+/** Hasta cuándo hacia atrás se puede reclamar un trabajo extra. */
+const MAX_DIAS_HACIA_ATRAS = 365;
+
+/**
+ * Los días de un otorgamiento, y las cuatro reglas que solo él tiene.
+ *
+ * Devuelve `undefined` para los otros cuatro tipos, cuyos días los cuenta el
+ * servidor con `contarDiasHabiles`. Y RECHAZA el campo si viene en uno de ellos:
+ * aceptarlo e ignorarlo en silencio dejaría creer que se puede fijar desde el
+ * cliente el recuento de unas vacaciones, que es justo lo que no se puede.
+ */
+function validarDiasConcedidos(
+  valor: unknown,
+  tipo: TipoSolicitud,
+  fechaInicio: string,
+  fechaFin: string,
+  hoy: string,
+  comentarios: string,
+): number | undefined {
+  if (!esOtorgamiento(tipo)) {
+    if (valor !== undefined) throw new AusenciaError('dias_no_aplica', 400, 'dias');
+    return undefined;
+  }
+
+  // Un solo día de trabajo, no un rango. El formulario manda una sola fecha,
+  // pero el servidor no puede fiarse de eso: sin esta regla se podría colar un
+  // trimestre entero como «el día que trabajé».
+  if (fechaInicio !== fechaFin) throw new AusenciaError('otorgamiento_un_solo_dia', 400, 'fechaFin');
+
+  // Sin tope hacia atrás, alguien reclamaría hoy un sábado de hace seis años. Un
+  // año es además lo que evita que la concesión caiga antes de la fecha de corte
+  // de casi nadie — y por debajo del corte no sumaría nada, que es peor que
+  // negarla, porque el empleado no vería ningún error.
+  const diasAtras = (Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000;
+  if (diasAtras > MAX_DIAS_HACIA_ATRAS) throw new AusenciaError('trabajo_demasiado_antiguo', 400, 'fechaInicio');
+
+  // El motivo es lo único que deja auditable la concesión: sin él, dentro de seis
+  // meses nadie sabrá por qué esa persona tiene esos días.
+  if (!comentarios) throw new AusenciaError('motivo_requerido', 400, 'comentarios');
+
+  if (typeof valor !== 'number' || !Number.isFinite(valor)) {
+    throw new AusenciaError('dias_invalidos', 400, 'dias');
+  }
+  // Una décima, que es la precisión de NUMERIC(4,1) y la del medio día.
+  if (Math.round(valor * 10) !== valor * 10) throw new AusenciaError('dias_invalidos', 400, 'dias');
+  if (valor <= 0) throw new AusenciaError('dias_invalidos', 400, 'dias');
+  if (valor > MAX_DIAS_CONCEDIDOS) throw new AusenciaError('dias_demasiados', 400, 'dias');
+
+  return valor;
 }
 
 function validarAdjunto(v: unknown): NuevaSolicitud['adjunto'] {
@@ -171,13 +231,22 @@ function llegaConValor(v: unknown): boolean {
  */
 export function validarNuevaModificacion(
   body: unknown,
-  actual: Pick<Solicitud, 'fechaInicio' | 'fechaFin'>,
+  actual: Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin'>,
   hoy: string,
 ): NuevaModificacion {
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (!esClase(b.clase)) throw new AusenciaError('clase_invalida', 400, 'clase');
   const clase = b.clase;
+
+  // A un otorgamiento solo se le puede pedir la anulación: no tiene rango que
+  // mover —es un día de trabajo y una cantidad concedida—, así que «cambiar las
+  // fechas» no significa nada sobre él. Con nombre propio y no `clase_invalida`,
+  // por lo mismo que la contradicción de más abajo: esa clase existe, lo que no
+  // encaja es con ESTA solicitud.
+  if (clase === 'fechas' && esOtorgamiento(actual.tipo)) {
+    throw new AusenciaError('otorgamiento_solo_anulable', 409, 'clase');
+  }
 
   const motivo = typeof b.motivo === 'string' ? b.motivo.trim() : '';
   if (motivo.length > MAX_MOTIVO_MODIFICACION) throw new AusenciaError('motivo_demasiado_largo', 400, 'motivo');
@@ -440,7 +509,12 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
   // esta comprobación necesita, así que tiene que ir antes por fuerza.
   await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
-  const diasHabiles = contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
+  // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
+  // daría 0 justo en el caso normal —el sábado por el que se gana el
+  // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
+  // viene validado, y `validarNuevaSolicitud` garantiza que existe si y solo si
+  // el tipo es otorgamiento.
+  const diasHabiles = datos.dias ?? contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
   // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
   // y de decodificar el base64 del adjunto para no procesar 8 MB de una solicitud
   // que se va a rechazar.
@@ -661,7 +735,7 @@ const ESTADOS_MODIFICABLES: readonly EstadoSolicitud[] = ['pendiente', 'pendient
 /** Lo mínimo de una solicitud para saber si admite un cambio. */
 type SolicitudEnmendable = Pick<
   Solicitud,
-  'estado' | 'fechaInicio' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
+  'tipo' | 'estado' | 'fechaInicio' | 'fechaFin' | 'aprobadorCorreo' | 'segundoAprobadorCorreo'
 >;
 
 function estadoAdmiteModificacion(s: SolicitudEnmendable): boolean {
@@ -673,7 +747,15 @@ function estadoAdmiteModificacion(s: SolicitudEnmendable): boolean {
  * justo el caso donde «córtala, tengo que volver» es legítimo; una ya terminada
  * es corrección de nómina, no una aprobación que nadie pueda ya conceder.
  */
-function sigueVigente(s: Pick<Solicitud, 'fechaFin'>, hoy: string): boolean {
+function sigueVigente(s: Pick<Solicitud, 'tipo' | 'fechaFin'>, hoy: string): boolean {
+  // Un otorgamiento no caduca: su fecha es el día que se TRABAJÓ y está en el
+  // pasado siempre, así que con la regla de las ausencias no se podría enmendar
+  // ninguno — ni anularlo, que es lo que se decidió que tenía que poderse.
+  //
+  // Lo que le da o le quita vigencia es su ESTADO, y de eso ya se encarga
+  // `estadoAdmiteModificacion`: los días concedidos siguen ahí mientras la
+  // solicitud esté viva, se pidieran cuando se pidieran.
+  if (esOtorgamiento(s.tipo)) return true;
   return s.fechaFin >= hoy;
 }
 
@@ -698,7 +780,13 @@ function sigueVigente(s: Pick<Solicitud, 'fechaFin'>, hoy: string): boolean {
  * además esa persona se quedaría sin salida: una ausencia que empieza hoy no se
  * puede «acortar» a menos de un día. No cambiar a `>` sin releer esto.
  */
-function noHaEmpezado(s: Pick<Solicitud, 'fechaInicio'>, hoy: string): boolean {
+function noHaEmpezado(s: Pick<Solicitud, 'tipo' | 'fechaInicio'>, hoy: string): boolean {
+  // Un otorgamiento no «empieza»: no hay días fuera que se estén consumiendo.
+  // Toda la razón de esta regla —que anular devuelve TODOS los días, incluidos
+  // los ya disfrutados— no le aplica: anularlo quita los días concedidos, y si la
+  // persona ya se los gastó la bolsa queda en negativo, que es lo decidido y lo
+  // que la app ya hace con el saldo de vacaciones.
+  if (esOtorgamiento(s.tipo)) return true;
   return s.fechaInicio >= hoy;
 }
 
