@@ -50,7 +50,8 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
-  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos, exporta_registro, requiere_segunda_firma`;
+  aprobador_correo, copia_correo, user_id, activo, ve_adjuntos, exporta_registro, ve_toda_la_empresa,
+  requiere_segunda_firma`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -64,6 +65,7 @@ interface FilaEmpleadoDb {
   activo: boolean;
   ve_adjuntos: boolean;
   exporta_registro: boolean;
+  ve_toda_la_empresa: boolean;
   requiere_segunda_firma: boolean;
 }
 
@@ -78,6 +80,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     copiaCorreo: r.copia_correo,
     veAdjuntos: r.ve_adjuntos,
     exportaRegistro: r.exporta_registro,
+    veTodaLaEmpresa: r.ve_toda_la_empresa,
     requiereSegundaFirma: r.requiere_segunda_firma,
     userId: r.user_id,
     activo: r.activo,
@@ -649,6 +652,68 @@ export async function fijarExportador(
 
     await client.query(
       `INSERT INTO portal.exportadores_registro_log
+         (admin_email, empleado_id, empleado_correo, concedido)
+       VALUES (lower($1), $2, lower($3), $4)`,
+      [adminEmail, empleadoId, (rows[0] as { correo: string }).correo, concedido],
+    );
+    return true;
+  });
+}
+
+/**
+ * Si ese correo ve el calendario y el registro de TODA la compañía sin ser
+ * administrador.
+ *
+ * Consulta por correo y no por id, por lo mismo que `esVisorDeAdjuntos` y
+ * `puedeExportarRegistro`: quien pregunta es una sesión, y una sesión puede no
+ * tener ficha de empleado — en ese caso no es visor, que es la respuesta
+ * correcta.
+ *
+ * ⚠️ El `AND activo` no es decorativo: sin él, a un ex-empleado cuya ficha
+ * siguiera en la tabla se le quedaría abierto el registro de la plantilla
+ * entera. Es la misma trampa que el JSDoc de `esVisorDeAdjuntos` señala para su
+ * consulta gemela, y aquí sí la vigila un test contra Postgres
+ * (`repo.visor-empresa.db.test.ts`).
+ */
+export async function esVisorDeTodaLaEmpresa(db: Pool, email: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados WHERE lower(correo) = lower($1) AND activo AND ve_toda_la_empresa`,
+    [email],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Da o quita la vista de toda la empresa, y lo DEJA REGISTRADO, en la MISMA
+ * transacción — mismo motivo que `fijarVisorConRegistro` y `fijarExportador`
+ * (ver arriba): si el UPDATE cuajara y el INSERT fallara, el permiso quedaría
+ * concedido sin una sola línea de auditoría, y un reintento posterior no
+ * tendría forma de notar el hueco (el estado ya coincidiría con lo pedido) para
+ * repararlo.
+ *
+ * El correo que se registra sale del propio UPDATE (`RETURNING correo`) y no de
+ * quien llama, igual que en `fijarExportador`: así el log refleja el correo que
+ * la fila tenía en el instante del cambio, sin depender de que el llamador
+ * hubiera cargado la ficha de antemano.
+ *
+ * Devuelve false si la ficha no existía o estaba inactiva, y entonces no se
+ * escribe registro: un intento fallido no puede ensuciar la auditoría.
+ */
+export async function fijarVisorDeEmpresa(
+  db: Pool,
+  adminEmail: string,
+  empleadoId: string,
+  concedido: boolean,
+): Promise<boolean> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(
+      `UPDATE portal.empleados SET ve_toda_la_empresa = $2 WHERE id = $1 AND activo RETURNING correo`,
+      [empleadoId, concedido],
+    );
+    if (!rows.length) return false;
+
+    await client.query(
+      `INSERT INTO portal.visores_empresa_log
          (admin_email, empleado_id, empleado_correo, concedido)
        VALUES (lower($1), $2, lower($3), $4)`,
       [adminEmail, empleadoId, (rows[0] as { correo: string }).correo, concedido],

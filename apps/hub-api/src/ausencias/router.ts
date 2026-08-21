@@ -112,6 +112,14 @@ export function createAusenciasRouter(db: Pool): Router {
         // el botón — quien de verdad decide qué se puede sacar es el recorte por
         // rama de `movimientosVisibles`, que no consulta esta bandera.
         esExportadorRegistro: sesion.esAdmin || (await repo.puedeExportarRegistro(db, sesion.email)),
+        // El cuarto de la familia, y pliega admin dentro como los otros tres.
+        // La app lo usa para DOS cosas —abrir la pestaña del registro a quien no
+        // aprueba a nadie, y pintar los filtros de persona del calendario—, pero
+        // en ninguna de las dos decide qué datos se ven: eso lo recortan
+        // `movimientosVisibles` y `calendarioDelMes` en el SQL, cada uno
+        // preguntando otra vez por su cuenta. Mentir aquí abriría una pestaña
+        // vacía, no una fuga.
+        esVisorDeTodaLaEmpresa: sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email)),
         festivos,
         // Viajan aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar los saldos sin una segunda llamada al abrir la app.
@@ -372,6 +380,24 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Da o quita la vista de toda la empresa —el calendario y el registro
+   * completos, sin ser admin—. Solo admin, y **queda registrado**, por lo mismo
+   * que las otras dos llaves: lo que abre son las incapacidades y los permisos
+   * de la plantilla entera, con sus motivos.
+   *
+   * `requireAdmin` por el mismo reparto que en `/exportador`: quién VE su rama
+   * es una regla de negocio que depende del organigrama, pero quién REPARTE
+   * permisos es el rol del portal.
+   */
+  router.put('/ausencias/empleados/:id/visor-empresa', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarVisorDeEmpresa(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_visor_empresa');
+    }
+  });
+
   // ── El registro y el histórico de la hoja ────────────────────────────────
   //
   // La importación, la corrección y el borrado SÍ son de admin. El registro de
@@ -393,6 +419,8 @@ export function createAusenciasRouter(db: Pool): Router {
   /**
    * El registro de movimientos. Sin `requireAdmin`: el recorte por rama lo hace
    * el servicio a partir de la sesión, y un jefe tiene derecho a ver la suya.
+   * Desde la 032 entra también quien tenga `ve_toda_la_empresa`, y ese sí sin
+   * recorte — el servicio lo resuelve, no esta ruta.
    *
    * ⚠️ No acepta NINGÚN parámetro. Sustituyó al `GET /ausencias/historico`, que
    * era de admin y devolvía la compañía entera; si algún día se le añade un
@@ -610,8 +638,9 @@ export function createAusenciasRouter(db: Pool): Router {
   /**
    * El calendario de un mes. Sigue bajo `...gated` y no `requireAdmin` porque la
    * pestaña la abre cualquiera, pero **el contenido sí va acotado por rol**: un
-   * admin ve a toda la plantilla y el resto solo su propia fila. El recorte lo
-   * hace el servicio, en el SQL — ver `calendarioDelMes`.
+   * admin —o quien tenga `ve_toda_la_empresa`, migración 032— ve a toda la
+   * plantilla, y el resto solo su propia fila. El recorte lo hace el servicio,
+   * en el SQL — ver `calendarioDelMes`.
    */
   router.get('/ausencias/calendario', ...gated, async (req: Request, res: Response) => {
     try {

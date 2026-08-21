@@ -728,12 +728,24 @@ export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<Sol
  * —con sus motivos— de su rama. Por eso el 403 explícito: quien no es aprobador
  * no tiene registro que ver, y decírselo es mejor que enseñarle un vacío que
  * parece un fallo.
+ *
+ * Hay una TERCERA vía además de admin y aprobador: la ficha marcada con
+ * `ve_toda_la_empresa` (migración 032), que entra sin aprobar a nadie y sin
+ * recorte por rama. Existe para el puesto de administración que lleva la
+ * nómina, que necesita la compañía entera y no una rama, y a quien darle el rol
+ * de admin le regalaría además editar, borrar e importar.
  */
 export async function movimientosVisibles(db: Pool, sesion: Sesion): Promise<Movimiento[]> {
-  if (!sesion.esAdmin && !(await repo.esAprobadorDeAlguien(db, sesion.email))) {
+  // Se resuelve UNA vez y antes del guard porque decide las DOS cosas: si pasa
+  // y qué ve. Preguntarlo por separado en cada sitio dejaría abierta la puerta a
+  // que un día solo se cambiara uno de los dos, y esa discrepancia no falla: o
+  // deja fuera a quien tiene el permiso, o —lo grave— deja pasar el recorte por
+  // rama sobre alguien a quien ya se le abrió el 403.
+  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
+  if (!veTodo && !(await repo.esAprobadorDeAlguien(db, sesion.email))) {
     throw new AusenciaError('no_es_aprobador', 403);
   }
-  return repo.movimientos(db, sesion.esAdmin ? null : sesion.email);
+  return repo.movimientos(db, veTodo ? null : sesion.email);
 }
 
 /**
@@ -1702,6 +1714,43 @@ export async function fijarExportador(
   return { ok: true };
 }
 
+/**
+ * Da o quita la vista de toda la empresa —el calendario y el registro—, dejando
+ * constancia.
+ *
+ * Copia la forma de `fijarExportador` punto por punto, y no la de `fijarVisor`:
+ * recibe la `Sesion` porque el registro tiene que decir QUIÉN lo concedió, exige
+ * el booleano en vez de interpretarlo —`'no'` es una cadena con valor de verdad,
+ * y aceptarla concedería el permiso que alguien quiso quitar— y devuelve
+ * `{ ok: true }` en vez de la ficha, porque quien lo cambia solo necesita saber
+ * que cuajó.
+ *
+ * Sin el «si no cambia, no se escribe» de `fijarVisor`, por lo mismo que su
+ * gemelo de exportación: este interruptor no comparte endpoint con el resto de
+ * la fila, así que cada llamada ya es una decisión de cambiar el permiso y no un
+ * efecto colateral de guardar otra cosa. El panel llama solo si el valor cambió.
+ */
+export async function fijarVisorDeEmpresa(
+  db: Pool,
+  sesion: Sesion,
+  empleadoId: string,
+  body: { concedido?: unknown },
+): Promise<{ ok: boolean }> {
+  const concedido = (body ?? {}).concedido;
+  if (typeof concedido !== 'boolean') {
+    throw new AusenciaError('visor_empresa_invalido', 400, 'concedido');
+  }
+
+  // Una sola llamada que cambia el permiso Y lo registra en la misma
+  // transacción: el porqué está en `repo.fijarVisorDeEmpresa`.
+  if (!(await repo.fijarVisorDeEmpresa(db, sesion.email, empleadoId, concedido))) {
+    // Ficha inexistente o inactiva. Las dos son un 404 para quien llama, y en
+    // las dos el repo se ha guardado de escribir nada en la auditoría.
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+  return { ok: true };
+}
+
 /** Las dos bolsas de un empleado, listas para enseñar. */
 export interface SaldoDeEmpleado {
   empleadoId: string;
@@ -1844,6 +1893,13 @@ export interface CalendarioDelMes {
  * nació visible para todos, para poder coordinarse— y se cambió a petición
  * expresa: la rejilla enseñaba a cualquiera cuándo falta cada compañero.
  *
+ * La excepción, desde la migración 032, es la ficha marcada con
+ * `ve_toda_la_empresa`: ve la plantilla entera igual que un admin, sin serlo.
+ * No es un agujero en la regla de arriba sino su válvula, y una que se concede
+ * ficha a ficha y queda registrada — mirar el calendario de todos era antes
+ * indistinguible de poder borrar solicitudes, porque las dos cosas venían en el
+ * mismo rol.
+ *
  * El recorte se hace en el SQL, no filtrando la respuesta: si las marcas ajenas
  * llegaran al navegador ya estarían expuestas, por mucho que no se pinten. Es la
  * misma lección del enmascarado de incapacidades que se retiró en su día.
@@ -1859,7 +1915,12 @@ export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): P
   // fichas, y sobre todo no debe lanzar 403 a quien no tenga una. Sin ficha no
   // hay nada que enseñar, y una rejilla vacía se entiende sola; un error dejaría
   // la pestaña rota por un caso que no es un fallo.
-  const soloEmpleadoId = sesion.esAdmin
+  //
+  // El mismo `veTodo` que decide en `movimientosVisibles`, y escrito igual a
+  // propósito: son las dos caras del mismo permiso, y quien lo tenga tiene que
+  // ver la compañía entera en las dos pantallas o en ninguna.
+  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
+  const soloEmpleadoId = veTodo
     ? null
     : ((await repo.empleadoDeUsuario(db, sesion.userId, sesion.email))?.id ?? ID_INEXISTENTE);
 

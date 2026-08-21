@@ -28,6 +28,13 @@ export function poolDePrueba(): Pool {
  * el TRUNCATE las filas de un test se cuelan en el conteo del siguiente. Ese
  * dia le llego tambien a `visores_adjuntos_log`, y sigue sin haberle llegado.
  *
+ * `portal.visores_empresa_log` (032, el tercero del mismo patron) entra por lo
+ * mismo y con el mismo sintoma: `repo.visor-empresa.db.test.ts` cuenta las filas
+ * del log, y sin el TRUNCATE su `toHaveLength(1)` empieza a ver las del test
+ * anterior. Es la trampa que este parrafo lleva anunciando desde la 031 — la
+ * auditoria de este esquema no tiene FK a proposito, asi que el CASCADE de
+ * `empleados` no se la lleva y hay que anadirla A MANO.
+ *
  * No sirve envolver cada test en una transaccion: el codigo bajo prueba abre las
  * suyas con `withTransaction`, y anidarlas exigiria savepoints — justo lo que no
  * se quiere simular, porque el ROLLBACK real es una de las cosas que se prueban.
@@ -35,7 +42,8 @@ export function poolDePrueba(): Pool {
 export async function limpiar(db: Pool): Promise<void> {
   await db.query(
     `TRUNCATE portal.solicitud_modificaciones, portal.solicitudes_ausencia,
-              portal.ausencias_outbox, portal.empleados, portal.exportadores_registro_log
+              portal.ausencias_outbox, portal.empleados, portal.exportadores_registro_log,
+              portal.visores_empresa_log
      RESTART IDENTITY CASCADE`,
   );
 }

@@ -139,6 +139,13 @@ const estado = {
    */
   registroExportadores: [] as Record<string, unknown>[],
   /**
+   * La tabla `portal.visores_empresa_log`. La lee el candado de
+   * `PUT /ausencias/empleados/:id/visor-empresa`: es lo unico que dice quien
+   * abrio el calendario y el registro de la plantilla entera a alguien que no
+   * es administrador.
+   */
+  registroVisoresEmpresa: [] as Record<string, unknown>[],
+  /**
    * El `soloDe` con el que el servicio llamó a `repo.movimientos`, una entrada
    * por llamada.
    *
@@ -611,6 +618,28 @@ vi.mock('./repo.js', async () => ({
     if (!e) return false;
     e.exportaRegistro = concedido;
     estado.registroExportadores.push({ adminEmail, empleadoId, empleadoCorreo: e.correo, concedido });
+    return true;
+  },
+  // El tercero de la familia (migracion 032), con la misma forma que los otros
+  // dos: `activo !== false` en la lectura y en la escritura, el correo del log
+  // salido de la FICHA y no de quien llama, y el log creciendo con cada cambio.
+  //
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+  // `AND activo AND ve_toda_la_empresa` de `repo.esVisorDeTodaLaEmpresa`. A
+  // diferencia de su gemela `esVisorDeAdjuntos` —cuyo `AND activo` no lo vigila
+  // ningun test de BD, ver el aviso de arriba—, esta SI la cubre el cuarto
+  // porton: `repo.visor-empresa.db.test.ts` > «CANDADO: un ex-empleado con el
+  // permiso puesto ya no ve nada».
+  esVisorDeTodaLaEmpresa: async (_db: unknown, email: string) =>
+    estado.plantilla.some(
+      (e: any) =>
+        String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veTodaLaEmpresa === true,
+    ),
+  fijarVisorDeEmpresa: async (_db: unknown, adminEmail: string, empleadoId: string, concedido: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId && x.activo !== false);
+    if (!e) return false;
+    e.veTodaLaEmpresa = concedido;
+    estado.registroVisoresEmpresa.push({ adminEmail, empleadoId, empleadoCorreo: e.correo, concedido });
     return true;
   },
   crearSolicitud: async (
@@ -1203,6 +1232,7 @@ beforeEach(() => {
   estado.registroVisores = [];
   estado.fallarRegistroVisor = false;
   estado.registroExportadores = [];
+  estado.registroVisoresEmpresa = [];
   estado.soloDeDeMovimientos = [];
 });
 
@@ -2286,6 +2316,54 @@ describe('GET /ausencias/movimientos', () => {
     expect(estado.soloDeDeMovimientos).toEqual([]);
   });
 
+  it('un visor de toda la empresa entra SIN aprobar a nadie, y con `soloDe = null`', async () => {
+    // La tercera vía de la migración 032, y la razón de que exista: el puesto de
+    // administración que lleva la nómina no aprueba a nadie en el organigrama
+    // —así que hoy se comía el 403— y necesita la compañía entera, no una rama.
+    // Darle el rol de admin habría sido la salida fácil y le habría regalado
+    // además editar, borrar e importar.
+    //
+    // `ana.ruiz@` no aprueba a nadie en el fixture (todos cuelgan de
+    // `comercial@`), así que este 200 solo puede venir del permiso nuevo.
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    await pedir(token()).expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([null]);
+  });
+
+  it('CANDADO: un visor de toda la empresa SIN la app asignada NO entra', async () => {
+    // La vía nueva se suma al guard del servicio, no lo sustituye ni se salta
+    // `requireApp`: son los mismos dos permisos de siempre —organigrama y panel
+    // de usuarios—, y quien pierda el acceso a la app tiene que perder también
+    // esto. Sin este candado, la 032 sería una puerta de atrás al control de
+    // acceso del portal, que es justo lo que se cerró al poner `...gated` aquí.
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    const r = await pedir(token({ apps: [] })).expect(403);
+    expect(r.body.error).toBe('forbidden');
+    expect(estado.soloDeDeMovimientos).toEqual([]);
+  });
+
+  it('CANDADO: la marca se lee de la FICHA, no del token', async () => {
+    // El permiso vive en `portal.empleados`, así que nada de lo que mande el
+    // cliente puede concedérselo. Se prueban los nombres que tendría el campo si
+    // alguien lo cableara a la sesión por comodidad.
+    const r = await pedir(
+      token({ veTodaLaEmpresa: true, esVisorDeTodaLaEmpresa: true, ve_toda_la_empresa: true }),
+    ).expect(403);
+    expect(r.body.error).toBe('no_es_aprobador');
+    expect(estado.soloDeDeMovimientos).toEqual([]);
+  });
+
+  it('CANDADO: un aprobador que NO es visor sigue acotado a su rama', async () => {
+    // La pareja del test de arriba, y la que muere si alguien resuelve el
+    // permiso nuevo con un `true` constante: el recorte por rama tiene que
+    // seguir en pie para todos los demás.
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    await pedir(token({ sub: APROBADOR })).expect(200);
+    // `comercial@` no es la correo de `plantilla[0]` —lo es `ana.ruiz@`—, así que
+    // la marca de arriba no le toca y le queda su propio correo.
+    expect(estado.soloDeDeMovimientos).toEqual([APROBADOR]);
+  });
+
   it('CANDADO: un `?soloDe=` del cliente NO cambia el recorte', async () => {
     // Este es el candado que impide que un jefe se haga pasar por otro. El
     // recorte sale de la SESIÓN y de nada más; lo que llegue por la URL es, como
@@ -2941,6 +3019,33 @@ describe('GET /ausencias/contexto', () => {
     expect(r.body.esVisorAdjuntos).toBe(false);
   });
 
+  it('esVisorDeTodaLaEmpresa pliega admin dentro, y va suelto de las otras dos llaves', async () => {
+    // Como los otros dos booleanos, este es para PINTAR —abrir la pestaña del
+    // registro a quien no aprueba a nadie, y los filtros de persona del
+    // calendario— y no para autorizar: quien decide qué datos salen son
+    // `movimientosVisibles` y `calendarioDelMes`, que vuelven a preguntar por su
+    // cuenta. Un `true` de más aquí abre una pestaña vacía, no una fuga.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    const flag = async (over: Record<string, unknown>) =>
+      (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
+        .body.esVisorDeTodaLaEmpresa;
+
+    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(true);
+    expect(await flag({ sub: 'administrativo@ambientalia.com.co' })).toBe(true);
+    expect(await flag({ sub: 'ana.ruiz@ambientalia.com.co' })).toBe(false);
+
+    // Las tres llaves son independientes: tener esta no arrastra las otras dos.
+    // Sin esta comprobación, cablear las tres al mismo campo pasaría inadvertido
+    // —y eso sí abriría los PDF médicos a quien solo pidió ver el calendario—.
+    const r = await request(app())
+      .get('/api/ausencias/contexto')
+      .set('Authorization', `Bearer ${token({ sub: 'administrativo@ambientalia.com.co' })}`)
+      .expect(200);
+    expect(r.body.esVisorAdjuntos).toBe(false);
+    expect(r.body.esExportadorRegistro).toBe(false);
+  });
+
   it('trae el nombre de quien aprueba, para no enseñar un buzón al solicitante', async () => {
     estado.empleado.aprobadorCorreo = 'jefa.directa@ambientalia.com.co';
     estado.plantilla.push({
@@ -3260,6 +3365,37 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.empleados).toHaveLength(1);
   });
 
+  it('un visor de toda la empresa ve la plantilla entera sin ser admin', async () => {
+    // La otra cara del mismo permiso de la 032. Va con su pareja de
+    // `GET /ausencias/movimientos`: quien lo tenga tiene que ver la compañía en
+    // las DOS pantallas, y este test es lo único que caza que se implemente solo
+    // una — el registro no se pone rojo si el calendario se queda como estaba.
+    //
+    // El doble de `empleadosActivos` devuelve `e1` y `e2` cuando `soloEmpleadoId`
+    // es `null`, así que las dos filas son la señal de que no hubo recorte.
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.empleados).toHaveLength(2);
+    expect(new Set(r.body.marcas.map((m: { empleadoId: string }) => m.empleadoId))).toEqual(new Set(['e1', 'e2']));
+  });
+
+  it('CANDADO: sin la marca puesta, la misma sesión sigue viéndose solo a sí misma', async () => {
+    // El mutante que muere aquí es resolver el permiso con un `true` constante,
+    // que abriría el calendario de la plantilla a toda la empresa —justo la
+    // decisión de producto que se revirtió a petición expresa—. El test de
+    // «quien no es admin solo se ve a sí mismo» de arriba ya lo cazaría; este lo
+    // deja escrito al lado del permiso nuevo, que es donde se buscará.
+    estado.plantilla[0].veTodaLaEmpresa = false;
+    const r = await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(200);
+    expect(r.body.empleados).toEqual([{ id: 'e1', nombreCompleto: 'Ana Ruiz' }]);
+  });
+
   it('sin ficha de empleado devuelve una rejilla vacía, no la plantilla entera', async () => {
     // El fallo que evita: `null` significa «sin acotar» en el repo, así que caer
     // en esa rama por no tener ficha enseñaría justo lo contrario de lo que toca.
@@ -3522,6 +3658,90 @@ describe('PUT /ausencias/empleados/:id/exportador', () => {
     await fijar(E_FANTASMA, { concedido: true }, token({ role: 'admin' })).expect(404);
     // Un intento fallido no puede ensuciar la auditoría.
     expect(estado.registroExportadores).toHaveLength(0);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/visor-empresa', () => {
+  const fijar = (id: string, body: Record<string, unknown>, quien: string) =>
+    request(app())
+      .put(`/api/ausencias/empleados/${id}/visor-empresa`)
+      .set('Authorization', `Bearer ${quien}`)
+      .send(body);
+
+  it('CANDADO: 403 a quien no es admin, y el permiso no se mueve', async () => {
+    // Este endpoint reparte la llave del calendario y del registro de la
+    // compañía entera. Si `requireAdmin` se cayera, cualquiera con la app podría
+    // concedérsela a sí mismo y salir con las incapacidades y los permisos
+    // —motivos incluidos— de toda la plantilla.
+    await fijar(E1, { concedido: true }, token()).expect(403);
+    expect(estado.plantilla[0].veTodaLaEmpresa).not.toBe(true);
+    expect(estado.registroVisoresEmpresa).toHaveLength(0);
+  });
+
+  it('CANDADO: tampoco pasa quien ya es visor de empresa él mismo', async () => {
+    // Tener la llave no es repartirla. Sin el `requireAdmin`, este es el camino
+    // por el que el permiso se propagaría solo de una ficha a la siguiente.
+    estado.plantilla[0].correo = 'comercial@ambientalia.com.co';
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    await fijar(E2, { concedido: true }, token({ sub: 'comercial@ambientalia.com.co' })).expect(403);
+    expect(estado.plantilla[1].veTodaLaEmpresa).not.toBe(true);
+  });
+
+  it('un admin lo concede, y el registro dice quién lo dio y a quién', async () => {
+    // El `sub` del admin es DISTINTO del correo del empleado afectado a
+    // propósito, igual que en sus dos gemelos: en el fixture por defecto
+    // coinciden, y con esa coincidencia un swap de `adminEmail` por
+    // `empleadoCorreo` pasaría el test sin inmutarse.
+    const r = await fijar(
+      E1,
+      { concedido: true },
+      token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' }),
+    ).expect(200);
+    expect(r.body).toEqual({ ok: true });
+    expect(estado.plantilla[0].veTodaLaEmpresa).toBe(true);
+    expect(estado.registroVisoresEmpresa).toHaveLength(1);
+    expect(estado.registroVisoresEmpresa[0]).toMatchObject({
+      adminEmail: 'gerencia@ambientalia.com.co',
+      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
+      empleadoId: E1,
+      concedido: true,
+    });
+  });
+
+  it('quitarlo también se registra', async () => {
+    // Un registro que solo apunta las concesiones no sirve para reconstruir
+    // quién veía la compañía entera el día que se filtró algo.
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    await fijar(E1, { concedido: false }, token({ role: 'admin' })).expect(200);
+    expect(estado.plantilla[0].veTodaLaEmpresa).toBe(false);
+    expect(estado.registroVisoresEmpresa[0]).toMatchObject({ concedido: false });
+  });
+
+  it('400 si `concedido` no es booleano', async () => {
+    // `'si'` es una cadena con valor de verdad: interpretarla en vez de exigir el
+    // tipo dejaría concedido un permiso que alguien quiso quitar.
+    const r = await fijar(E1, { concedido: 'si' }, token({ role: 'admin' })).expect(400);
+    expect(r.body.error).toBe('visor_empresa_invalido');
+    expect(r.body.field).toBe('concedido');
+    expect(estado.registroVisoresEmpresa).toHaveLength(0);
+  });
+
+  it('404 si el empleado no existe, y no deja rastro', async () => {
+    await fijar(E_FANTASMA, { concedido: true }, token({ role: 'admin' })).expect(404);
+    // Un intento fallido no puede ensuciar la auditoría.
+    expect(estado.registroVisoresEmpresa).toHaveLength(0);
+  });
+
+  it('CANDADO: no toca las otras dos llaves de la ficha', async () => {
+    // Las tres viven en la misma fila de `portal.empleados`. Un UPDATE que se
+    // llevara por delante `ve_adjuntos` daría los PDF médicos a quien solo pidió
+    // el calendario, o —al revés— se los quitaría a administración sin que nadie
+    // se enterara hasta el día que hiciera falta abrir uno.
+    estado.plantilla[0].veAdjuntos = true;
+    estado.plantilla[0].exportaRegistro = true;
+    await fijar(E1, { concedido: true }, token({ role: 'admin' })).expect(200);
+    expect(estado.plantilla[0].veAdjuntos).toBe(true);
+    expect(estado.plantilla[0].exportaRegistro).toBe(true);
   });
 });
 
