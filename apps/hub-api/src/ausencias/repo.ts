@@ -2320,50 +2320,74 @@ interface FilaMovimientoDb {
   aprobador_correo: string | null;
   /** El SEGUNDO firmante congelado. `null` = la cadena tenía una sola firma. */
   segundo_aprobador_correo: string | null;
-  /** Cuándo firmó el jefe inmediato. Ver `correoDelQueCerro`. */
+  /** Cuándo firmó el jefe inmediato. NULA con la solicitud ya cerrada NO es un
+   *  hueco: significa que cerró el segundo. Ver `correoDelQueCerro`. */
   primera_firma_at: string | null;
   created_at: string;
   motivo: string | null;
 }
 
 /**
- * Cuál de los DOS firmantes congelados tomó la decisión final.
+ * Cuál de los DOS firmantes congelados tomó la decisión final. Se llama solo
+ * con `decidida_at` puesta: lo garantiza el respaldo de `quienDecidio`.
  *
- * Solo la usa el respaldo `aproximado` de `quienDecidio`: cuando hay decisor de
- * verdad no hay nada que deducir. Hasta el 2026-08-20 ese respaldo devolvía
- * siempre `aprobador_correo`, y en una solicitud con cascada cerrada en
- * `pendiente_2` eso nombraba al jefe inmediato por un acto del segundo — una
- * persona real, con nombre y apellidos, que no fue. Un hueco es peor de leer
- * que un nombre, pero mucho menos grave que un nombre equivocado.
+ * Solo la usa ese respaldo, el `aproximado`: cuando hay decisor de verdad no
+ * hay nada que deducir. Hasta el 2026-08-20 devolvía siempre `aprobador_correo`,
+ * y en una solicitud con cascada cerrada en el segundo nivel eso nombraba al
+ * jefe inmediato por un acto del segundo — una persona real, con nombre y
+ * apellidos, que no fue. Un hueco es peor de leer que un nombre, pero mucho
+ * menos grave que un nombre equivocado.
  *
  * ⚠️ **No vale `correoDelTurno` (types.ts), aunque parezca la misma pregunta.**
  * Aquella contesta a quién le toca firmar AHORA y devuelve `null` en todos los
- * estados terminales — y aquí toda fila que llega está cerrada, porque el
- * respaldo exige `decidida_at`. Con su `?? aprobadorCorreo` de
- * `decisorDeModificacion` colapsaría al primer firmante SIEMPRE, que es
- * exactamente el fallo que esto arregla. Las dos preguntas se parecen y no son
- * la misma: una mira el turno VIVO, esta mira un turno que ya se cerró.
+ * estados terminales — y aquí toda fila que llega está cerrada. Con el
+ * `?? aprobadorCorreo` de `decisorDeModificacion` colapsaría al primer firmante
+ * SIEMPRE, que es exactamente el fallo que esto arregla. Las dos preguntas se
+ * parecen y no son la misma: una mira el turno VIVO, esta un turno ya cerrado.
  *
- * La condición son TRES cosas y no dos, y la tercera es la que menos se ve:
- * que la primera firma sea un acto SEPARADO de la decisión final. Las dos
- * marcas se sellan en el MISMO `UPDATE` —el mismo `now()`, así que salen
- * idénticas— cuando una sola firma cierra la solicitud, y eso incluye el caso
- * que se escapa a simple vista: el jefe inmediato RECHAZANDO una solicitud que
- * sí llevaba cascada (`transicionAlDecidir`, rama `pendiente` + rechazo:
- * `esPrimeraFirma` y `esDecisionFinal` a la vez). Ahí hay segundo firmante y
- * hay primera firma, y la decisión no fue suya: la vio y la cortó el primero.
- * Sin este tercer término, ese rechazo se le colgaría al segundo.
+ * La condición es «hay segundo firmante Y la primera firma NO es el mismo acto
+ * que la decisión final». Los dos valores de `primera_firma_at` que la cumplen
+ * llegan por caminos distintos, y ninguno de los dos se ve a simple vista:
  *
- * Comparar los dos `::text` es exacto y no una heurística: los dos salen del
- * mismo cast en la misma consulta, así que o son la misma cadena o el sello
- * ocurrió en dos transacciones distintas.
+ *  - **Distinta de `decidida_at`**: dos actos, dos transacciones, dos `now()`.
+ *    Firmó el jefe y cerró el segundo. Lo contrario —las dos marcas IGUALES—
+ *    es una sola firma cerrándolo todo en la misma sentencia, y ahí entra el
+ *    caso traicionero: el jefe inmediato RECHAZANDO una solicitud que sí
+ *    llevaba cascada (`transicionAlDecidir`, rama `pendiente` + rechazo, con
+ *    `esPrimeraFirma` y `esDecisionFinal` a la vez). Decidió el primero.
+ *  - **NULA**: eso NO es un dato que falte, es un cierre en `pendiente_2` sin
+ *    primera firma, y solo puede significar que decidió el segundo.
+ *    `decidirSolicitud` es el ÚNICO escritor de `decidida_at` sobre
+ *    `portal.solicitudes_ausencia` —ni `crearSolicitud`, ni
+ *    `importarHistorico`, ni `actualizarSolicitud`, ni `aplicarALaSolicitud`
+ *    la tocan—, y todo cierre que sale de `pendiente` lleva `esPrimeraFirma`,
+ *    que sella la otra marca en el mismo UPDATE. Así que la combinación
+ *    «cerrada y sin primera firma» solo la produce un camino: un admin que
+ *    corrige el estado a `pendiente_2` para destrabar la solicitud
+ *    —`validarEdicionSolicitud` admite la lista `ESTADOS` entera a propósito—
+ *    y un segundo firmante que la cierra. Exigir aquí `primera_firma_at`
+ *    no nula le colgaba esa decisión al jefe inmediato, que no la vio nunca.
+ *
+ * Comparar los dos `::text` es exacto y no una heurística: salen del mismo cast
+ * en la misma consulta, así que o son la misma cadena o el sello ocurrió en dos
+ * transacciones distintas (`now()` es `transaction_timestamp()`, constante
+ * dentro de una).
+ *
+ * ⚠️ Los dos campos se leen con `?? null` y no directamente, y eso es una
+ * trampa desarmada, no una manía. Las filas llegan aquí por un `as` desde el
+ * driver, y la consulta de las modificaciones —otra clase de movimiento, otra
+ * tabla, y ninguna de estas dos columnas— dejaría `undefined` en ellas. Como
+ * `undefined !== null` es `true`, sin normalizar una modificación decidida sin
+ * sesión entraría por la rama del segundo firmante, devolvería `undefined`, y
+ * el `if (correo)` de `quienDecidio` lo convertiría en un hueco: perdería su
+ * decisor EN SILENCIO. Es la misma forma de fallo contra la que avisa
+ * `PayloadEvento` a cuenta de los campos ausentes.
  */
 function correoDelQueCerro(r: FilaMovimientoDb): string | null {
-  const cerroElSegundo =
-    r.segundo_aprobador_correo !== null &&
-    r.primera_firma_at !== null &&
-    r.primera_firma_at !== r.decidida_at;
-  return cerroElSegundo ? r.segundo_aprobador_correo : r.aprobador_correo;
+  const segundoFirmante = r.segundo_aprobador_correo ?? null;
+  const primeraFirmaAt = r.primera_firma_at ?? null;
+  const cerroElSegundo = segundoFirmante !== null && primeraFirmaAt !== r.decidida_at;
+  return cerroElSegundo ? segundoFirmante : r.aprobador_correo;
 }
 
 /**

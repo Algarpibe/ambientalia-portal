@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { movimientos, empleadosConSaldo } from './repo.js';
-import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
+import { movimientos, empleadosConSaldo, decidirSolicitud, actualizarSolicitud } from './repo.js';
+import { transicionAlDecidir, type Solicitud } from './types.js';
+import { poolDePrueba, limpiar, payloadStub, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 
 // El recorte por rama del registro de movimientos, contra Postgres de verdad.
 //
@@ -102,52 +103,49 @@ describe('CANDADO: el recorte por rama del registro', () => {
 // remedio que deducir el decisor de los firmantes congelados en el alta, y ahi
 // hay dos, no uno. Deducirlo mal no da un rojo ni un hueco: pone en pantalla el
 // nombre de una persona real que no tomo esa decision.
+//
+// Los tres caminos se recorren con `decidirSolicitud` y `actualizarSolicitud`,
+// que es lo que corre en produccion, y NO con un UPDATE a pelo. La diferencia
+// no es de estilo: la regla entera descansa en QUE marcas de firma deja cada
+// camino -si `primera_firma_at` queda nula, igual a `decidida_at`, o distinta-
+// y un fixture que las escribe a mano AFIRMA esa premisa en vez de
+// ejercitarla. Comprobado: con las marcas puestas a mano, cambiar
+// `primera_firma_at = now()` por `date_trunc('second', now())` en el UPDATE de
+// `decidirSolicitud` rompia la atribucion en produccion y estos tests seguian
+// verdes. Es la misma convencion, y por el mismo motivo, que anota
+// `repo.testigos.db.test.ts`.
 
-/** El segundo firmante de la cascada. Lo eligen los tests, no el harness. */
 const SEGUNDO_FIRMANTE = 'segundo@ambientalia.com.co';
 /** El primero lo congela `sembrarSolicitud`, y no es negociable desde aqui. */
 const PRIMER_FIRMANTE = 'jefe1@ambientalia.com.co';
 const LEGACY = 'legacy@ambientalia.com.co';
 
-const FIRMA = '2026-04-01T09:00:00Z';
-const CIERRE = '2026-04-02T15:30:00Z';
-
 /**
- * Una solicitud con cascada de dos firmas, ya cerrada y SIN sesion del portal.
+ * Una solicitud `pendiente` con cascada de dos firmas, sin decidir todavia.
  *
- * `aprobador_user_id` se queda a NULL sin tocarlo: un alta nunca lo escribe
- * -lo sella `decidirSolicitud`, y este test no pasa por ahi-, que es
- * exactamente el caso legacy. Si algun dia el alta lo rellenara, estos dos
- * tests se pondrian rojos en vez de dejar de probar lo suyo en silencio: el
- * `LEFT JOIN` con `portal.users` no encontraria usuario y `decididaPor`
- * seguiria siendo el respaldo, pero un id que no resuelve es una siembra que
- * produccion no puede producir y habria que revisarla.
- *
- * `enDosActos` es lo que distingue los dos finales posibles:
- *  - `true`:  el jefe firmo y DESPUES el segundo cerro. Dos instantes.
- *  - `false`: una sola sentencia sello las dos marcas con el mismo `now()`,
- *    que es lo que hace el rechazo del jefe inmediato (`transicionAlDecidir`
- *    marca `esPrimeraFirma` y `esDecisionFinal` a la vez).
+ * `aprobador_user_id` se queda a NULL sin tocarlo: lo sella `decidirSolicitud`
+ * con el `userId` de la sesion, y las decisiones de aqui abajo pasan `null`
+ * -que su firma admite a proposito- porque eso es justo lo que dejaban las
+ * sesiones con token legacy.
  */
-async function sembrarCerradaConCascada(estado: 'aprobada' | 'rechazada', enDosActos: boolean): Promise<void> {
+async function sembrarConCascada(): Promise<Solicitud> {
   const empleadoId = await sembrarEmpleado(db, LEGACY, JEFE);
-  const s = await sembrarSolicitud(db, {
+  return sembrarSolicitud(db, {
     empleadoId,
     correo: LEGACY,
-    estado,
+    estado: 'pendiente',
     fechaInicio: '2026-04-06',
     fechaFin: '2026-04-08',
     segundoAprobadorCorreo: SEGUNDO_FIRMANTE,
   });
-  // A mano y no por `decidirSolicitud`: esa funcion exige el `userId` de la
-  // sesion, y lo que hay que reproducir aqui es justo la fila que dejaban las
-  // sesiones que no lo tenian.
-  await db.query(
-    `UPDATE portal.solicitudes_ausencia
-        SET primera_firma_at = $2::timestamptz, decidida_at = $3::timestamptz
-      WHERE id = $1`,
-    [s.id, FIRMA, enDosActos ? CIERRE : FIRMA],
-  );
+}
+
+/** Firma o rechaza como lo hace la bandeja, pero sin sesion: el caso legacy. */
+async function firmarSinSesion(s: Solicitud, desde: Solicitud['estado'], aprueba: boolean): Promise<void> {
+  const transicion = transicionAlDecidir({ ...s, estado: desde }, aprueba);
+  if (!transicion) throw new Error(`el estado ${desde} no admite firma`);
+  const r = await decidirSolicitud(db, s.id, desde, transicion, null, null, payloadStub);
+  if (!r) throw new Error(`la decision desde ${desde} no escribio ninguna fila`);
 }
 
 /** El unico movimiento del solicitante legacy. */
@@ -159,7 +157,12 @@ async function movimientoLegacy() {
 
 describe('CANDADO: a quien atribuye el registro una decision sin sesion', () => {
   it('cerrada en el SEGUNDO nivel: nombra al segundo firmante, no al jefe inmediato', async () => {
-    await sembrarCerradaConCascada('aprobada', true);
+    const s = await sembrarConCascada();
+    // Las dos firmas de verdad, cada una en su transaccion: la primera sella
+    // `primera_firma_at` y la segunda `decidida_at`, en instantes distintos.
+    await firmarSinSesion(s, 'pendiente', true);
+    await firmarSinSesion(s, 'pendiente_2', true);
+
     expect((await movimientoLegacy()).decididaPor).toEqual({
       nombre: null,
       correo: SEGUNDO_FIRMANTE,
@@ -169,12 +172,54 @@ describe('CANDADO: a quien atribuye el registro una decision sin sesion', () => 
 
   // El caso que se escapa a simple vista, y por eso tiene test propio: hay
   // segundo firmante y hay primera firma, y aun asi decidio el PRIMERO. El
-  // rechazo del jefe inmediato corta la cadena y sella las dos marcas de golpe.
+  // rechazo del jefe inmediato corta la cadena y sella las dos marcas de golpe,
+  // en la misma sentencia y con el mismo now().
   it('rechazada en el PRIMER nivel: la cascada existe pero decidio el jefe inmediato', async () => {
-    await sembrarCerradaConCascada('rechazada', false);
+    const s = await sembrarConCascada();
+    await firmarSinSesion(s, 'pendiente', false);
+
     expect((await movimientoLegacy()).decididaPor).toEqual({
       nombre: null,
       correo: PRIMER_FIRMANTE,
+      aproximado: true,
+    });
+  });
+
+  // El tercer camino, y el unico que deja `primera_firma_at` NULA con la
+  // solicitud ya cerrada: en el primer nivel no firmo nadie porque la destrabo
+  // un admin desde el registro general. `validarEdicionSolicitud` admite la
+  // lista ESTADOS entera a proposito -es el caso de destrabar- y
+  // `actualizarSolicitud` no toca las marcas de firma. Quien decidio fue el
+  // segundo; una condicion que exigiera `primera_firma_at` no nula se lo
+  // colgaria al jefe inmediato, y esa condicion estuvo puesta.
+  it('destrabada por un admin a pendiente_2: decide el segundo aunque no haya primera firma', async () => {
+    const s = await sembrarConCascada();
+    const corregida = await actualizarSolicitud(
+      db,
+      s.id,
+      {
+        empleadoId: s.empleadoId,
+        tipo: s.tipo,
+        fechaInicio: s.fechaInicio,
+        fechaFin: s.fechaFin,
+        dias: s.diasHabiles,
+        estado: 'pendiente_2',
+        comentarios: s.comentarios,
+        observaciones: s.observaciones,
+      },
+      'admin@ambientalia.com.co',
+      payloadStub,
+    );
+    // La premisa del caso, comprobada y no supuesta: corregir el estado NO
+    // sella la primera firma.
+    expect(corregida?.estado).toBe('pendiente_2');
+    expect(corregida?.primeraFirmaAt).toBeNull();
+
+    await firmarSinSesion(s, 'pendiente_2', true);
+
+    expect((await movimientoLegacy()).decididaPor).toEqual({
+      nombre: null,
+      correo: SEGUNDO_FIRMANTE,
       aproximado: true,
     });
   });
