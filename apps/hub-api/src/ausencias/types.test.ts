@@ -62,13 +62,17 @@ describe('cambiaElCalendario', () => {
     expect(cambiaElCalendario(previa, solicitud({ estado: 'rechazada' }))).toBe(true);
   });
 
-  // CANDADO. `ocupaAgenda` excluye las incapacidades porque contesta a la regla
-  // de solapamiento; esta las incluye porque contesta a qué hay en Google. Una
-  // incapacidad `registrada` que deja de estarlo también sale del calendario, y
-  // si alguien "unifica" las dos funciones, este test cae. (Antes esta misma
-  // aserción vivía duplicada en `estaEnElCalendario`, contra el propio `estado`
-  // en vez de contra un par `previa`/`actual`; se movió aquí para que pruebe
-  // algo que la aserción de arriba no prueba ya.)
+  // CANDADO. Esta pregunta contesta a qué hay en Google y `ocupaAgenda` a la
+  // regla de solapamiento: dos preguntas distintas sobre la misma fila, y por eso
+  // dos funciones. Desde el 2026-08-21 aquélla ya no exime a las incapacidades,
+  // así que sobre una baja las dos dicen lo mismo — que es justo cuando
+  // «unificarlas» parece razonable y es cuando más caro sale. Siguen discrepando
+  // sobre una `pendiente` y sobre un otorgamiento, y lo que este test fija es la
+  // mitad que se ve desde aquí: una incapacidad `registrada` que deja de estarlo
+  // también sale del calendario. (Antes esta misma aserción vivía duplicada en
+  // `estaEnElCalendario`, contra el propio `estado` en vez de contra un par
+  // `previa`/`actual`; se movió aquí para que pruebe algo que la aserción de
+  // arriba no prueba ya.)
   it('CANDADO: una incapacidad también sale del calendario si deja de estar registrada', () => {
     const previaIncapacidad = solicitud({ tipo: 'incapacidad', estado: 'registrada' });
     const actualIncapacidad = solicitud({ tipo: 'incapacidad', estado: 'rechazada' });

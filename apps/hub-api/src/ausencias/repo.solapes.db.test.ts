@@ -106,7 +106,13 @@ describe('solapeDe', () => {
     expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).toBeNull();
   });
 
-  it('CANDADO: una incapacidad no ocupa, porque no se pide sino que se informa', async () => {
+  it('CANDADO: una incapacidad SI ocupa, como cualquier otra ausencia', async () => {
+    // Hasta el 2026-08-21 este candado decia lo contrario: una incapacidad no se
+    // pide, se informa despues de haber estado enfermo, y por eso el `WHERE` de
+    // `solapeDe` la dejaba fuera. Se quito esa exencion —el porque, entero en
+    // `repo.ocupaAgenda`— y este es el test que lo ejecuta contra Postgres: aqui
+    // la baja es la fila que ya ESTA en la tabla, asi que lo que se acredita es
+    // que la consulta la devuelve y por tanto frena a quien venga despues.
     await sembrarSolicitud(db, {
       empleadoId,
       correo: CORREO,
@@ -116,7 +122,10 @@ describe('solapeDe', () => {
       fechaFin: '2026-07-14',
       segundoAprobadorCorreo: null,
     });
-    expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).toBeNull();
+    expect(await solapeDe(db, empleadoId, '2026-07-12', '2026-07-12', null)).toMatchObject({
+      tipo: 'incapacidad',
+      estado: 'registrada',
+    });
   });
 
   it('CANDADO: excluir por id evita que una solicitud choque consigo misma', async () => {
@@ -305,13 +314,16 @@ describe('decidirModificacion frente al solape', () => {
       fechaFin: '2026-07-22',
     });
   });
-  it('CANDADO: a una incapacidad no la frena el solape, igual que en las otras puertas', async () => {
-    // Una incapacidad no se pide, se informa despues de haber estado enfermo: no
-    // se le puede negar, y por eso `exigirSinSolape` la exime. Esta puerta corre
-    // dentro de la transaccion del repo y no puede llamar a aquel helper, asi que
-    // repite la exencion a mano. Si divergen, la puerta de PROPONER deja pasar el
-    // cambio por la exencion y la de FIRMAR lo niega con un 409: una autoriza lo
-    // que la siguiente prohibe, y la propuesta se queda atascada para siempre.
+
+  it('CANDADO: a una incapacidad SI la frena el solape, igual que en las otras puertas', async () => {
+    // Hasta el 2026-08-21 este candado fijaba lo contrario: la incapacidad se
+    // informa, no se pide, y ninguna de las cuatro puertas la frenaba. Ya no es
+    // asi —el porque, entero en `repo.ocupaAgenda`—, pero la razon de que este
+    // test exista no ha cambiado: esta puerta corre dentro de la transaccion del
+    // repo y no puede llamar a `exigirSinSolape`, asi que llama a `ocupaAgenda`
+    // por su cuenta. Si las dos divergen, la puerta de PROPONER deja pasar el
+    // cambio y la de FIRMAR lo niega —una autoriza lo que la siguiente prohibe, y
+    // la propuesta se queda atascada para siempre— o al reves.
     //
     // `incapacidad` + `aprobada` no es un fixture imposible: el PATCH de admin
     // acepta cualquier tipo con cualquier estado.
@@ -330,13 +342,22 @@ describe('decidirModificacion frente al solape', () => {
     const propuesta = await proponerFechas(baja.id, '2026-07-20', '2026-07-22', 3);
     const decidida = await decidirModificacion(db, propuesta.id, true, null, null, payloadStub);
 
-    expect(decidida.ok).toBe(true);
-    // Y el cambio se aplico de verdad: `solapeDe` no sirve para verlo —una
-    // incapacidad nunca sale de esa consulta—, asi que se mira la fila.
-    expect(await solicitudPorId(db, baja.id)).toMatchObject({
-      fechaInicio: '2026-07-20',
-      fechaFin: '2026-07-22',
+    // Y nombra CON QUE choca, igual que para cualquier otro tipo: el jefe que
+    // firma tiene que saber que mirar.
+    expect(decidida).toMatchObject({
+      ok: false,
+      razon: 'solape',
+      solape: { fechaInicio: '2026-07-21', fechaFin: '2026-07-21' },
     });
+    // Y el ROLLBACK se lleva las dos escrituras: la baja conserva sus fechas
+    // —antes este test comprobaba justo lo contrario, que se habian aplicado— y
+    // la propuesta sigue viva, que es lo que deja al jefe volver a intentarlo
+    // cuando el destino se libere.
+    expect(await solicitudPorId(db, baja.id)).toMatchObject({
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+    });
+    expect((await modificacionPorId(db, propuesta.id))?.estado).toBe('pendiente');
   });
 });
 
@@ -355,12 +376,14 @@ describe('actualizarSolicitud frente al solape', () => {
    * la puerta del solape; que el aviso se emita —y cuando no— lo prueba contra
    * Postgres `repo.correccion-admin.db.test.ts`.
    *
-   * Dos de los cinco casos de abajo SI encolan un `correccion_admin` de paso —los
-   * dos que corrigen con exito una `aprobada`: «corregir sin mover las fechas» y
-   * el de la incapacidad—. Se deja asi y no se asierta: este bloque no mira el
-   * outbox en ninguno de sus cinco tests, comprobado con una sonda. Si algun dia
-   * se le anade una asercion de outbox, hay que contar con esas dos filas o el
-   * test dira menos de lo que su nombre promete.
+   * UNO de los cinco casos de abajo SI encola un `correccion_admin` de paso: el
+   * unico que corrige con exito una `aprobada`, «corregir sin mover las fechas».
+   * Eran dos hasta el 2026-08-21 —el de la incapacidad tambien corregia con
+   * exito— y desde que la incapacidad ocupa agenda ese sale por el solape sin
+   * escribir nada. Se deja asi y no se asierta: este bloque no mira el outbox en
+   * ninguno de sus cinco tests, comprobado con una sonda. Si algun dia se le
+   * anade una asercion de outbox, hay que contar con esa fila o el test dira
+   * menos de lo que su nombre promete.
    */
   const ADMIN = 'comercial@ambientalia.com.co';
 
@@ -490,23 +513,36 @@ describe('actualizarSolicitud frente al solape', () => {
     expect(r).toMatchObject({ estado: 'rechazada', comentarios: 'Arreglando una errata' });
   });
 
-  it('CANDADO: a una incapacidad no la frena el solape al corregirla a mano', async () => {
-    // Misma exencion y mismo motivo que en las otras tres: una incapacidad no se
-    // pide, se informa despues de haber estado enfermo, y con las fechas ya
-    // pasadas no hay nada que anular ni acortar para hacerle sitio. Aqui ademas
-    // es donde MAS falta hace: corregir a mano una baja mal registrada es
-    // exactamente para lo que existe este endpoint.
+  it('CANDADO: a una incapacidad SI la frena el solape al corregirla a mano', async () => {
+    // Misma regla y mismo motivo que en las otras tres puertas, y desde el
+    // 2026-08-21 sin la exencion que este candado fijaba antes: una incapacidad
+    // ocupa agenda como cualquier otra ausencia (el porque, en
+    // `repo.ocupaAgenda`).
+    //
+    // Aqui es donde mas se nota, y conviene dejarlo escrito: este endpoint es con
+    // el que administracion corrige a mano una baja mal registrada, y corregirla
+    // HACIA unos dias ya ocupados pasa a ser imposible. Una pareja ya solapada
+    // —de cuando la exencion existia— no se desatasca por aqui moviendo fechas:
+    // hay que rechazar o borrar una de las dos filas primero, que son los dos
+    // caminos que no pasan por esta comprobacion.
     const a = await sembrarBase();
     await ocuparElVeintiuno();
 
-    const r = await actualizarSolicitud(
+    const err = await actualizarSolicitud(
       db,
       a.id,
       edicion({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-20', fechaFin: '2026-07-22', dias: 3 }),
       ADMIN,
       payloadStub,
-    );
+    ).catch((e: unknown) => e);
 
-    expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: '2026-07-20', fechaFin: '2026-07-22' });
+    expect(err).toBeInstanceOf(SolapeAlAplicar);
+    // Y la fila sigue donde estaba: la comprobacion va DELANTE del UPDATE, asi
+    // que cuando lanza todavia no se ha escrito nada.
+    expect(await solicitudPorId(db, a.id)).toMatchObject({
+      tipo: 'vacaciones',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+    });
   });
 });

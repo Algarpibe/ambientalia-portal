@@ -244,7 +244,15 @@ const ocupaAgenda = (tipo: unknown, estado: unknown): boolean =>
   // compensatorio por un sabado trabajado durante las propias vacaciones, con
   // el repo real diciendo que no ocupa nada. Es el desvio que el comentario de
   // arriba anuncia, y paso.
-  tipo !== 'incapacidad' && tipo !== 'otorgamiento' && estado !== 'rechazada';
+  //
+  // La incapacidad estuvo en esta lista hasta el 2026-08-21 y ya no: pasa a
+  // ocupar agenda como cualquier otra ausencia, y el porque esta en
+  // `repo.ocupaAgenda`. Esta linea es la que decide de verdad si los tests de la
+  // incapacidad de este fichero ven bloqueo —el servicio bajo prueba ejecuta
+  // ESTA copia y no la real—, asi que devolverla aqui sin tocar aquella deja el
+  // porton rapido verde sobre una regla que ya no existe, y al reves: cambiar
+  // solo la real no pone rojo nada de aqui.
+  tipo !== 'otorgamiento' && estado !== 'rechazada';
 
 /**
  * El predicado del solapamiento, fuera del doble porque lo necesitan TRES de sus
@@ -1522,30 +1530,6 @@ describe('no se puede estar ausente dos veces a la vez', () => {
     await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
   });
 
-  it('CANDADO: una incapacidad se puede informar SIEMPRE, encima de lo que sea', async () => {
-    // Quien cae malo de vacaciones no puede anularlas —las fechas ya pasaron— ni
-    // acortarlas. Bloquear la incapacidad la dejaría sin poder registrarla.
-    await conAusencia();
-    await request(app())
-      .post('/api/ausencias/solicitudes')
-      .set('Authorization', `Bearer ${token()}`)
-      .send(
-        nueva({
-          tipo: 'incapacidad',
-          fechaInicio: '2026-07-12',
-          fechaFin: '2026-07-13',
-          adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
-        }),
-      )
-      .expect(201);
-  });
-
-  // ── Atravesar la regla no es no enterarse ────────────────────────────────
-  //
-  // Los cuatro de aquí abajo son la otra mitad del candado de arriba. Aquél fija
-  // que la incapacidad SE REGISTRA; éstos, que además se AVISA — y que el aviso
-  // no se ha comido ninguna de las otras ramas por el camino.
-
   /** Informa una baja del 12 al 13 de julio, con su PDF. */
   const informarBaja = () =>
     request(app())
@@ -1560,78 +1544,51 @@ describe('no se puede estar ausente dos veces a la vez', () => {
         }),
       );
 
-  it('CANDADO: informar la incapacidad encima AVISA del choque, sin negarla', async () => {
-    // La razón de que el aviso exista: la baja se registra —eso no se toca—,
-    // pero esos días quedan contados dos veces y quien puede arreglar la otra
-    // mitad es justo quien acaba de informarla. Antes de esto, se lo callaba.
+  it('CANDADO: una incapacidad encima de una ausencia viva se BLOQUEA', async () => {
+    // Este candado decía lo contrario hasta el 2026-08-21: la incapacidad se
+    // informaba SIEMPRE, encima de lo que fuera, porque no se pide sino que se
+    // informa después de haber estado enfermo. Ese mismo día se probó la versión
+    // intermedia —registrarla avisando del choque— y se decidió bloquear. El
+    // motivo no es la enfermedad: es que una baja sobre unas vacaciones
+    // aprobadas deja los mismos días contados dos veces, y de ese recuento salen
+    // el saldo, la nómina y el calendario. Quien informa la baja es justo quien
+    // puede ajustar la otra solicitud, así que el 409 le llega a la única
+    // persona que puede deshacer la contradicción.
     await conAusencia();
-    const r = await informarBaja().expect(201);
+    const r = await informarBaja().expect(409);
 
-    // Se registró de verdad: el aviso no es un 409 con otro nombre.
-    expect(r.body.estado).toBe('registrada');
-    expect(estado.solicitudes).toHaveLength(2);
-
-    // Y dice CONTRA QUÉ, que es lo único que lo hace accionable. `toEqual` y no
-    // `toMatchObject` a propósito: el aviso sale del mismo `detalleDelSolape`
-    // que el `detalle` del 409, así que hereda su promesa de no filtrar el `id`
-    // del choque — y esa promesa la tiene que atar cada salida por su cuenta.
-    expect(r.body.avisoDeSolape).toEqual({
-      tipo: 'vacaciones',
-      estado: 'aprobada',
-      fechaInicio: '2026-07-10',
-      fechaFin: '2026-07-14',
+    // El mismo 409 que las otras tres puertas y no uno propio de la incapacidad:
+    // sale de `errorDeSolape`, que es lo que garantiza que los cuatro digan lo
+    // mismo. Si esto se volviera un código aparte, la interfaz tendría que
+    // aprender dos formas de contar el mismo choque.
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-07-10', fechaFin: '2026-07-14' },
     });
-  });
-
-  it('CANDADO: una incapacidad sin nada debajo no avisa de nada', async () => {
-    // El control del de arriba: sin él, un aviso cableado a un objeto fijo
-    // pasaría igual, y todo el que informara una baja vería una alarma
-    // hablándole de una ausencia que no existe.
-    const r = await informarBaja().expect(201);
-    expect(r.body.avisoDeSolape).toBeNull();
-  });
-
-  it('CANDADO: unas vacaciones encima siguen dando 409 y NO un aviso', async () => {
-    // La rama que el aviso no debe tocar. Si alguien «unificara» las dos
-    // —avisar en vez de negar, que suena razonable dicho así— cualquiera podría
-    // pedir dos veces los mismos días y el 409 se quedaría sin usuarios.
-    await conAusencia();
-    const r = await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-16' }).expect(409);
-    expect(r.body.avisoDeSolape).toBeUndefined();
-    // Y no se escribió nada: un 201 con aviso habría dejado la segunda fila.
+    // Y no se escribió nada: un bloqueo no es un aviso con otro código de estado.
     expect(estado.solicitudes).toHaveLength(1);
   });
 
-  it('CANDADO: un otorgamiento encima de las propias vacaciones NO avisa', async () => {
-    // El otorgamiento también atraviesa la regla de solapes, pero ahí el aviso
-    // sería ruido: su fecha es la del día que se TRABAJÓ de más, así que caer
-    // dentro de las propias vacaciones es su caso NORMAL —el sábado trabajado
-    // estando de vacaciones— y no una anomalía. Avisar le pondría una alarma
-    // delante justo al caso que la exención existe para permitir, y es lo que
-    // pasa en cuanto alguien escriba la condición como «todo lo que no ocupa
-    // agenda» en vez de como «la incapacidad».
+  it('CANDADO: y también frena ella a las demás, que es la otra mitad', async () => {
+    // La simetría: la baja no sólo se frena, también frena. En el repo real son
+    // DOS líneas en dos ficheros —`ocupaAgenda`, sobre la fila que se escribe, y
+    // el `WHERE` de `solapeDe`, sobre la que ya estaba debajo— y la exención se
+    // quitó de las dos a la vez: con media, cuál de las dos ausencias se puede
+    // registrar dependería del orden en que se hubieran pedido, y el mismo par
+    // de fechas sería legal o ilegal según el día. Que las dos digan lo mismo lo
+    // vigila `repo.solapes.db.test.ts`; aquí salen de la misma copia, así que lo
+    // que este candado fija es la RESPUESTA: un 409 que nombra la incapacidad
+    // con su tipo y su estado, que es de lo que el navegador redacta la frase.
     //
-    // Las fechas no son las de `conAusencia`: un otorgamiento se pide por un día
-    // ya TRABAJADO y el reloj de este fichero está congelado el 2026-01-15, que
-    // es el único día que cae a la vez dentro de unas vacaciones que empiezan hoy
-    // —el alta no admite fechas pasadas— y dentro de la ventana del
-    // compensatorio, que va de hoy hacia atrás. Mismo apaño que el candado
-    // gemelo de «otorgar compensatorios».
-    const v = await pedir({ fechaInicio: '2026-01-15', fechaFin: '2026-01-23' }).expect(201);
-    fila(v.body.id as string).estado = 'aprobada';
+    // De paso, el control que hace falta para leer el candado de arriba: la baja
+    // va PRIMERA y sin nada debajo, así que se registra. Lo que se niega no es
+    // informar una incapacidad, es hacerlo sobre días ya ocupados.
+    await informarBaja().expect(201);
 
-    const r = await request(app())
-      .post('/api/ausencias/solicitudes')
-      .set('Authorization', `Bearer ${token()}`)
-      .send({
-        tipo: 'otorgamiento',
-        fechaInicio: '2026-01-15',
-        fechaFin: '2026-01-15',
-        dias: 1,
-        comentarios: 'Montaje de Cartagena',
-      })
-      .expect(201);
-    expect(r.body.avisoDeSolape).toBeNull();
+    const r = await pedir({ fechaInicio: '2026-07-13', fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body.detalle).toMatchObject({ tipo: 'incapacidad', estado: 'registrada' });
+    expect(estado.solicitudes).toHaveLength(1);
   });
 });
 
@@ -2103,7 +2060,16 @@ describe('GET /ausencias/adjuntos', () => {
     estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
     estado.plantilla[0].veAdjuntos = true;
     await crearConPdf();
-    await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+    // Fechas distintas de las de la incapacidad, y a propósito: desde que una
+    // incapacidad OCUPA agenda, pedir vacaciones encima devuelve 409. Lo que
+    // este test mira es que solo vuelva la fila CON PDF, y para eso las dos
+    // ausencias no necesitan pisarse — separarlas prueba lo mismo sin depender
+    // de una exención que ya no existe.
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ fechaInicio: '2026-08-03', fechaFin: '2026-08-07' }))
+      .expect(201);
 
     const r = await lista(visor());
     expect(r).toHaveLength(1);
@@ -2602,8 +2568,8 @@ describe('edición de solicitudes', () => {
     // La comprobación excluye a la propia solicitud por su id. Sin esa
     // exclusión, la fila chocaría SIEMPRE contra ella misma y no habría forma de
     // tocar una solicitud VIVA: ni un comentario, ni un estado, ni un día mal
-    // contado. (Las rechazadas y las incapacidades seguirían editándose: esas ni
-    // llegan a la comprobación.)
+    // contado. (Una rechazada sí: esa ni llega a la comprobación. Una
+    // incapacidad ya no — desde el 2026-08-21 ocupa agenda como las demás.)
     const a = await crearDeE1('2026-07-06', '2026-07-10');
     const r = await editar(
       a,
@@ -2630,13 +2596,45 @@ describe('edición de solicitudes', () => {
     ).expect(200);
   });
 
-  it('CANDADO: una incapacidad se puede editar encima de lo que sea', async () => {
-    // La misma exención que en el alta y en la firma: una incapacidad no se
-    // pide, se informa después de haber estado enfermo, y con las fechas ya
-    // pasadas no hay nada que anular ni acortar para hacerle sitio.
+  it('CANDADO: corregir una incapacidad ENCIMA de otra ausencia ya no se puede', async () => {
+    // Este candado decía lo contrario hasta el 2026-08-21, cuando la incapacidad
+    // estaba exenta de la regla en las cuatro puertas. Ya no lo está, y esta es
+    // la puerta donde más se nota: el registro general es donde administración
+    // arregla una baja mal anotada, y ahora arreglarla contra unos días ya
+    // ocupados sale 409 en vez de guardarse. Es deliberado — el porqué, en
+    // `repo.ocupaAgenda`— y tiene una consecuencia que conviene ver: la pareja
+    // solapada que ya exista en la tabla queda sin poder corregirse por aquí
+    // mientras las dos filas sigan vivas.
     const a = await crearDeE1('2026-07-06', '2026-07-10');
     await crearDeE1('2026-07-20', '2026-07-24');
-    await editar(a, edicion({ tipo: 'incapacidad', fechaInicio: '2026-07-22', fechaFin: '2026-07-24' })).expect(200);
+
+    const r = await editar(
+      a,
+      edicion({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-22', fechaFin: '2026-07-24' }),
+    ).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { fechaInicio: '2026-07-20', fechaFin: '2026-07-24' },
+    });
+  });
+
+  it('CANDADO: y una incapacidad que ya estaba DEBAJO frena la corrección de otra', async () => {
+    // La otra mitad de la simetría, por esta puerta: la baja que ya estaba
+    // debajo frena la corrección de otra fila. En el repo real eso lo decide el
+    // `WHERE` de `solapeDe` y no `ocupaAgenda` —son dos líneas en dos ficheros y
+    // tienen que decir lo mismo—, y quien las separa de verdad es
+    // `repo.solapes.db.test.ts`: este doble contesta las dos con la misma copia.
+    // Lo que se ata aquí es que el 409 salga nombrando la incapacidad.
+    const a = await crearDeE1('2026-07-06', '2026-07-10');
+    const baja = await crearDeE1('2026-07-20', '2026-07-24');
+    await editar(
+      baja,
+      edicion({ tipo: 'incapacidad', estado: 'registrada', fechaInicio: '2026-07-20', fechaFin: '2026-07-24' }),
+    ).expect(200);
+
+    const r = await editar(a, edicion({ fechaInicio: '2026-07-22', fechaFin: '2026-07-24' })).expect(409);
+    expect(r.body.detalle).toMatchObject({ tipo: 'incapacidad', estado: 'registrada' });
   });
 });
 

@@ -129,19 +129,8 @@ export function createAusenciasRouter(db: Pool): Router {
 
   router.post('/ausencias/solicitudes', ...gated, async (req: Request, res: Response) => {
     try {
-      const { solicitud, avisoDeSolape } = await service.crearSolicitud(db, sesionDe(req), req.body);
-      // El aviso viaja como clave HERMANA de las de la solicitud, y NO envolviendo
-      // la solicitud en `{ solicitud, avisoDeSolape }`. Es la misma decisión que
-      // `compensatorios` junto a `saldo` en `/contexto`, y por el mismo motivo:
-      // hub-api se despliega ANTES que el portal, así que durante ese hueco este
-      // 201 lo lee un bundle que todavía cree que el cuerpo ES la solicitud.
-      // Envolverlo le dejaría un `undefined` en la lista de «mis solicitudes» en
-      // cada alta, y el bundle nuevo no gana nada a cambio.
-      //
-      // Por eso el servicio devuelve un par y esto lo aplana: la forma del par es
-      // la que quiere el código —el aviso no es un campo de la fila— y la forma
-      // plana es la que quiere el contrato ya publicado.
-      res.status(201).json({ ...solicitud, avisoDeSolape });
+      const solicitud = await service.crearSolicitud(db, sesionDe(req), req.body);
+      res.status(201).json(solicitud);
     } catch (e) {
       sendError(res, e, 'ausencias_crear');
     }

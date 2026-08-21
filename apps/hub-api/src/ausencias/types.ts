@@ -131,10 +131,12 @@ export function requiereAprobacion(tipo: TipoSolicitud): boolean {
  * Si una fila con este estado tiene un evento en el calendario de Google.
  *
  * ⚠️ **NO es `ocupaAgenda`** (`repo.ts`), aunque las dos digan «sí» sobre casi
- * las mismas filas. `ocupaAgenda` contesta a la regla de solapamiento y
- * **excluye las incapacidades**; esta contesta a qué hay en Google, y una
- * incapacidad `registrada` **sí** tiene evento —`construirPayload` le da
- * `calendario` y `hoja`—. Son dos preguntas distintas sobre la misma fila, y
+ * las mismas filas. `ocupaAgenda` contesta a la regla de solapamiento; esta
+ * contesta a qué hay en Google. Desde el 2026-08-21 las dos cuentan la
+ * incapacidad —aquélla dejó de eximirla, y el porqué está allí—, y eso NO las ha
+ * acercado: siguen discrepando en las dos direcciones, porque una `pendiente`
+ * ocupa agenda y todavía no tiene evento, y un otorgamiento `aprobada` tiene
+ * evento y no ocupa agenda. Son dos preguntas distintas sobre la misma fila, y
  * contestar una con la otra es la forma exacta que tuvo el bug de la cuarta
  * puerta del solapamiento. La advertencia va repetida en `ocupaAgenda` porque
  * las dos funciones no son vecinas: nadie las va a ver juntas por casualidad.
