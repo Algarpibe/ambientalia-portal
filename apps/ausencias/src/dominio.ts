@@ -820,3 +820,24 @@ export function limiteDelTrabajo(hoy: string): string {
   const [anio, mes, dia] = hoy.split('-').map(Number);
   return new Date(Date.UTC(anio, mes - 1 - MESES_HACIA_ATRAS, dia)).toISOString().slice(0, 10);
 }
+
+/** Cuántos días hacia atrás se puede informar una incapacidad. */
+const DIAS_DE_LA_INCAPACIDAD = 2;
+
+/**
+ * El día más antiguo por el que hoy se puede informar una incapacidad. Espejo
+ * EXACTO de `limiteDeLaIncapacidad` en `apps/hub-api/src/ausencias/service.ts`.
+ *
+ * Mismo motivo que su vecina de arriba: es lo que el formulario le pone al `min`
+ * del calendario, y si las dos se separan el selector deja elegir un día que el
+ * servidor rechaza —o bloquea uno que aceptaría—.
+ *
+ * Días y no meses, al revés que el otorgamiento, porque la regla se le dice al
+ * empleado como «dos días». Y constante propia aunque la forma sea la misma: son
+ * dos políticas distintas, y compartir el número haría que mover una moviera la
+ * otra sin querer.
+ */
+export function limiteDeLaIncapacidad(hoy: string): string {
+  const [anio, mes, dia] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1, dia - DIAS_DE_LA_INCAPACIDAD)).toISOString().slice(0, 10);
+}

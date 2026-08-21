@@ -13,6 +13,7 @@ import {
   esOtorgamiento,
   etiquetasFecha,
   hoyEnColombia,
+  limiteDeLaIncapacidad,
   limiteDelTrabajo,
   pedible,
   requiereAprobacion,
@@ -71,8 +72,13 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   const faltaAdjunto = adjuntoObligatorio && !archivo;
 
   // Lo que requiere aprobación no puede empezar en el pasado. La incapacidad sí:
-  // se informa después de haber estado enfermo, así que `minFecha` queda
-  // `undefined` y el calendario abre entero.
+  // se informa después de haber estado enfermo, así que `minFecha` le queda
+  // `undefined`.
+  //
+  // ⚠️ Eso NO significa ya que su calendario abra entero: desde el 2026-08-21
+  // tiene ventana propia, y quien la acota es `minInicio`/`maxInicio` unas
+  // líneas más abajo. `minFecha` sigue existiendo aparte porque de él cuelga
+  // `fechaEnPasado`, que pinta un párrafo rojo que a una baja no le aplica.
   //
   // El `min` del input es solo la barrera cómoda —se puede teclear por encima, y
   // algunos navegadores lo permiten—, por eso se comprueba también aquí y, sobre
@@ -86,6 +92,19 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   // es otra: de hoy hacia atrás, tres meses.
   const hoyCol = hoyEnColombia();
   const minFecha = requiereAprobacion(tipo) && !pideOtorgamiento ? hoyCol : undefined;
+
+  // La incapacidad tiene ventana propia: dos días hacia atrás y nada hacia
+  // adelante. Va aparte de `minFecha` porque aquella nace de «no se piden días
+  // pasados», que es justo la regla de la que la incapacidad está exenta — y
+  // mezclarlas dejaría el booleano `fechaEnPasado` de abajo pintando el párrafo
+  // rojo equivocado, el de «no puedes pedir días que ya pasaron», a alguien que
+  // lo que está haciendo es informar una baja.
+  //
+  // El `max` solo acota la fecha de INICIO: el médico firma hoy una baja que
+  // cubre los próximos días, y esa sí tiene el fin en el futuro.
+  const esIncapacidad = tipo === 'incapacidad';
+  const minInicio = esIncapacidad ? limiteDeLaIncapacidad(hoyCol) : minFecha;
+  const maxInicio = esIncapacidad ? hoyCol : undefined;
   const fechaEnPasado = Boolean(minFecha && fechaInicio && fechaInicio < minFecha);
 
   // El servidor rechaza el compensatorio que no cabe en la bolsa, así que aquí se
@@ -272,7 +291,8 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
               type="date"
               required
               value={fechaInicio}
-              min={minFecha}
+              min={minInicio}
+              max={maxInicio}
               onChange={(e) => setFechaInicio(e.target.value)}
               className={CAMPO}
             />
@@ -286,7 +306,7 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
               type="date"
               required
               value={fechaFin}
-              min={fechaInicio || minFecha}
+              min={fechaInicio || minInicio}
               onChange={(e) => setFechaFin(e.target.value)}
               className={CAMPO}
             />

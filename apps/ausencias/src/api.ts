@@ -430,6 +430,23 @@ async function errorDeAusencia(res: Response): Promise<Error> {
       'esos días ya están contados; si te lo rechazaron, puedes volver a pedirlo.',
   };
   if (cuerpo?.error && DEL_OTORGAMIENTO[cuerpo.error]) return new Error(DEL_OTORGAMIENTO[cuerpo.error]);
+
+  // Los de la incapacidad. Mapa aparte del de arriba y no una entrada más: son
+  // de otro tipo de solicitud, y juntarlos haría que un vistazo al nombre del
+  // mapa dijera algo falso sobre la mitad de sus claves.
+  const DE_LA_INCAPACIDAD: Record<string, string> = {
+    incapacidad_en_el_futuro:
+      'Una incapacidad se informa por días que ya empezaron, no por unos que todavía no han llegado. ' +
+      'Si el médico te firmó una baja que arranca más adelante, infórmala el primer día.',
+    // No promete que administración pueda crearla: NO hay vía para que un admin
+    // dé de alta una incapacidad en nombre de otro —solo puede corregir una fila
+    // que ya exista, o importarla del histórico—. Decir «que te la registren»
+    // mandaría a la gente a pedir algo que hoy no se puede hacer de un clic.
+    incapacidad_demasiado_antigua:
+      'Esa baja empieza hace más de dos días, que es todo lo que se puede informar por aquí. ' +
+      'Habla con administración para que la registren ellos.',
+  };
+  if (cuerpo?.error && DE_LA_INCAPACIDAD[cuerpo.error]) return new Error(DE_LA_INCAPACIDAD[cuerpo.error]);
   if (cuerpo?.error === 'compensatorios_sin_saldo') {
     return new Error(
       'Todavía no tienes bolsa de compensatorios configurada, así que no se puede descontar de ella. ' +
