@@ -384,9 +384,9 @@ export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Emplea
  * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
  * uuid que no necesita.
  *
- * Tiene nombre desde que el choque sale por DOS puertas y no por una: el 409 que
- * niega y el aviso que no niega. Con `Record<string, unknown>` a secas, el
- * segundo llegaba al router y al bundle sin forma ninguna.
+ * Tiene nombre y no `Record<string, unknown>` a secas porque el `detalle` de un
+ * `AusenciaError` no lo tiene: sin este alias, quien redacta el 409 en el
+ * navegador se lo inventa campo a campo y nada compara las dos listas.
  *
  * ⚠️ `type` y NO `interface`, y la diferencia es de compilación: TypeScript le
  * da index signature implícita a un alias de tipo, pero no a una interface. En
@@ -404,8 +404,7 @@ export type SolapeDetalle = {
 
 /**
  * El choque recortado a eso. Privada a propósito: quien lo necesita desde fuera
- * necesita en realidad el error entero o el aviso entero, y para eso están
- * `errorDeSolape` y `avisoDeSolape`.
+ * necesita en realidad el error entero, y para eso está `errorDeSolape`.
  */
 function detalleDelSolape(choque: repo.Solape): SolapeDetalle {
   return {
@@ -481,47 +480,6 @@ async function exigirSinSolape(
 }
 
 /**
- * El choque que una incapacidad ATRAVIESA, dicho para avisar y no para negar.
- *
- * `exigirSinSolape` la deja pasar en silencio, y eso NO se toca: una incapacidad
- * no se pide, se informa después de haber estado enfermo, y no se le puede
- * negar — quien cae malo estando de vacaciones no puede anularlas, porque esas
- * fechas ya pasaron. Lo que se añade aquí no es una puerta, es un cartel: el
- * registro se queda contando dos cosas a la vez —de vacaciones y de baja los
- * mismos días— y quien informa la baja es el único que puede arreglar la otra
- * mitad. Callárselo lo dejaba sin enterarse.
- *
- * ⚠️ SOLO la incapacidad, y no «todo lo que no ocupa agenda». Por esta puerta
- * pasan sin ocupar exactamente dos tipos —la incapacidad y el otorgamiento; por
- * estado no pasa ninguno, que el alta nace `pendiente` o `registrada`— y en el
- * otorgamiento el aviso sería ruido puro: su fecha es la del día que se TRABAJÓ
- * de más, así que solapar con las propias vacaciones es su caso NORMAL y no una
- * anomalía (está escrito entero en `repo.ocupaAgenda`). Avisar ahí le pondría
- * una alarma delante a todo el que pida el compensatorio por un sábado
- * trabajado durante sus vacaciones, que es justo el caso que la exención existe
- * para permitir.
- *
- * De ahí que el corte por tipo vaya ANTES de la consulta y no después: en
- * cualquier otro tipo esto no llega ni a preguntarle a la base, y el alta no
- * paga un SELECT que no iba a decir nada.
- *
- * `excluirSolicitudId` va en `null` como en el alta, y por lo mismo: se pregunta
- * antes de escribir, así que todavía no hay fila propia contra la que chocar. Y
- * aunque la hubiera, el `WHERE` de `solapeDe` no devuelve incapacidades.
- */
-async function avisoDeSolape(
-  db: Pool,
-  empleadoId: string,
-  tipo: TipoSolicitud,
-  fechaInicio: string,
-  fechaFin: string,
-): Promise<SolapeDetalle | null> {
-  if (tipo !== 'incapacidad') return null;
-  const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, null);
-  return choque ? detalleDelSolape(choque) : null;
-}
-
-/**
  * Corta si esta persona no tiene compensatorios suficientes.
  *
  * Al contrario que las vacaciones —que solo avisan en el cliente y dejan la
@@ -586,32 +544,7 @@ async function exigirCompensatoriosSuficientes(
   });
 }
 
-/**
- * Lo que el alta devuelve: la solicitud, y lo que hay que contarle a quien la
- * mandó y no cabe dentro de ella.
- *
- * Es un par y no una solicitud con un campo de más porque `Solicitud` es la
- * FILA: lo que se lee del registro, lo que pintan las tablas y lo que devuelven
- * el `GET` y la decisión. El aviso no es un dato de la fila —depende de qué
- * había alrededor en el instante del alta y no se vuelve a poder calcular
- * igual—, así que meterlo dentro obligaría a las otras cinco puertas que
- * devuelven `Solicitud` a explicar por qué ellas lo dejan vacío.
- *
- * Que la forma del par no es la forma del JSON es a propósito, y el porqué está
- * en el `POST` de `router.ts`.
- */
-export interface SolicitudCreada {
-  solicitud: Solicitud;
-  /**
-   * La ausencia concedida que estas fechas pisan, cuando el tipo pasó por
-   * encima de la regla de solapes en vez de chocar con ella. `null` siempre que
-   * no haya nada que avisar — y siempre, sin consultar nada, en todo lo que no
-   * sea una incapacidad. Ver `avisoDeSolape`.
-   */
-  avisoDeSolape: SolapeDetalle | null;
-}
-
-export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<SolicitudCreada> {
+export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
   // Los dos suben aquí porque la comprobación de solape pregunta por la fila que
@@ -625,14 +558,6 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
   // esta comprobación necesita, así que tiene que ir antes por fuerza.
   await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
-  // Pegado a la línea de arriba porque son la misma pregunta con dos respuestas:
-  // la de arriba niega a quien ocupa agenda, y ésta avisa a quien la atraviesa.
-  // Si la de arriba no lanzó puede ser por dos motivos —que no había choque, o
-  // que este tipo no choca nunca—, y sólo el segundo tiene algo que contar.
-  //
-  // Va aquí y no después del INSERT para no preguntar por un estado que ya
-  // cambió: entre las dos hay una decodificación de base64 de hasta 8 MB.
-  const aviso = await avisoDeSolape(db, empleado.id, datos.tipo, datos.fechaInicio, datos.fechaFin);
   // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
   // daría 0 justo en el caso normal —el sábado por el que se gana el
   // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
@@ -709,7 +634,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // de en unos minutos. La solicitud ya está guardada y encolada, así que esto no
   // puede fallar de forma que importe. Ver avisar.ts.
   void avisarN8n();
-  return { solicitud, avisoDeSolape: aviso };
+  return solicitud;
 }
 
 export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {

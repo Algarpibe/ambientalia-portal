@@ -364,53 +364,18 @@ const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salid
  * lista. Con el `es-CO` de hoy `formatFecha` escribe «10 de jul de 2026», así que
  * un «…, 10 de jul de 2026 – 14 de jul de 2026, aprobada.» se lee un instante
  * como si «aprobada» calificara a la fecha de fin.
- *
- * `cierre` sustituye a la ÚLTIMA frase y a nada más. Existe porque las `salida`
- * de `SOLAPE_POR_ESTADO` están escritas para un bloqueo —«no se liberan hasta
- * que…» explica por qué NO se pudo— y el aviso de la incapacidad dice lo
- * contrario: sí se pudo. Lo que las dos comparten es justo lo que no cambia
- * —contra qué se choca, con qué estado y en qué fechas—, que es todo el trabajo
- * de armar la frase; con un segundo constructor, el día que aparezca un tipo o
- * un estado nuevo se enteraría sólo uno de los dos.
  */
-function mensajeDeSolape(d: SolapeDetalle, cierre?: string): string {
+function mensajeDeSolape(d: SolapeDetalle): string {
   const cuando = rangoFechas(d.fechaInicio, d.fechaFin);
   // Un tipo que este bundle no conozca cae en su propio código —feo, pero dice
   // algo— en vez de en un «undefined» a mitad de frase. Misma ventana de
   // despliegue que cubre la rama sin estado de aquí abajo.
   const tipo = ETIQUETA_TIPO[d.tipo] ?? d.tipo;
   const como = SOLAPE_POR_ESTADO[d.estado];
-  // Un estado que este bundle no conozca se queda sin el paréntesis y sin su
-  // `salida`; la de reserva dice lo único que vale para cualquier estado. Es la
-  // misma rama de antes, escrita como dos huecos en vez de como una frase
-  // aparte, para que el `cierre` no tuviera que repetirse en las dos.
-  const conEstado = como ? ` (${como.estado})` : '';
-  const salida = cierre ?? como?.salida ?? 'Esos días no se liberan hasta que esa solicitud se cambie o se anule.';
-  return `Esas fechas chocan con otra ausencia: ${tipo}${conEstado}, ${cuando}. ${salida}`;
-}
-
-/**
- * El mismo choque, contado como advertencia en vez de como negativa.
- *
- * Lo usa el camino de ÉXITO del formulario, no el de error: informar una
- * incapacidad encima de una ausencia ya concedida se registra igualmente —no se
- * pide, se informa después de haber estado enfermo, y no se le puede negar—, así
- * que quien la manda ve la solicitud creada y, al lado, esto. El servidor no
- * lanza nada; manda el choque en `avisoDeSolape` (ver `SolicitudCreada`).
- *
- * El cierre sí nombra las dos acciones, al revés que las `salida` de
- * `SOLAPE_POR_ESTADO`. Puede permitírselo porque aquí el lector es UNO y se sabe
- * cuál: el servidor busca el choque acotado al `empleado_id` de quien informa,
- * así que la ausencia que se pisa es siempre suya y tiene los dos botones. Los
- * cuatro 409 no podían decir esto porque los leen tres personas distintas —el
- * dueño, el admin y el jefe que firma—, y dos de ellas no pueden tocar esa
- * ausencia.
- */
-export function mensajeDeAvisoDeSolape(d: SolapeDetalle): string {
-  return mensajeDeSolape(
-    d,
-    'La incapacidad quedó registrada igualmente; la que hay que ajustar es esa otra: cámbiale las fechas o pide su anulación.',
-  );
+  if (!como) {
+    return `Esas fechas chocan con otra ausencia: ${tipo}, ${cuando}. Esos días no se liberan hasta que esa solicitud se cambie o se anule.`;
+  }
+  return `Esas fechas chocan con otra ausencia: ${tipo} (${como.estado}), ${cuando}. ${como.salida}`;
 }
 
 /** El error de un endpoint corriente: el texto de `mensajeDeError` y nada más. */
@@ -562,26 +527,7 @@ export const fetchMisSolicitudes = () =>
 export const fetchPendientes = () =>
   get<{ solicitudes: SolicitudPendiente[] }>('/api/ausencias/pendientes').then((d) => d.solicitudes);
 
-/**
- * Lo que devuelve el alta: la solicitud creada y, pegada a ella, la advertencia
- * de que esas fechas ya tenían algo.
- *
- * `avisoDeSolape` es una clave HERMANA de las de la solicitud y no una
- * envoltura, igual que `compensatorios` lo es de `saldo`: el cuerpo del 201
- * sigue SIENDO una solicitud, así que un bundle anterior a esto la sigue leyendo
- * como siempre. Importa porque hub-api se despliega antes que el portal y ese
- * hueco existe de verdad; el porqué entero está en el `POST` de `router.ts`.
- *
- * Y es opcional por el mismo hueco visto del otro lado: este bundle puede acabar
- * hablando con un hub-api que todavía no manda la clave, y ahí no hay nada que
- * avisar en vez de un aviso vacío.
- */
-export interface SolicitudCreada extends Solicitud {
-  avisoDeSolape?: SolapeDetalle | null;
-}
-
-export const crearSolicitud = (s: NuevaSolicitud) =>
-  postSolapable<SolicitudCreada>('/api/ausencias/solicitudes', s);
+export const crearSolicitud = (s: NuevaSolicitud) => postSolapable<Solicitud>('/api/ausencias/solicitudes', s);
 
 export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) =>
   post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/decision`, { aprueba, motivo });

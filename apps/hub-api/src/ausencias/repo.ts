@@ -850,7 +850,15 @@ export async function actualizarSolicitud(
         // Excluida por su id, o una corrección que no mueva las fechas —el
         // estado, un comentario, un día mal contado— chocaría contra la propia
         // fila que corrige, y ninguna solicitud VIVA se podría ya tocar (las
-        // rechazadas y las incapacidades sí: no llegan hasta aquí).
+        // rechazadas sí: no llegan hasta aquí).
+        //
+        // ⚠️ Las incapacidades SÍ llegan desde el 2026-08-21, cuando dejaron de
+        // estar exentas. Y eso tiene una consecuencia operativa con los datos
+        // que ya existían: una incapacidad informada encima de otra ausencia
+        // mientras la exención vivía sigue en la tabla, y ahora esa pareja es
+        // un estado que la regla prohíbe. Corregirla SIN mover las fechas da
+        // 409; lo que sí se puede es moverla a fechas libres —la comprobación
+        // mira las NUEVAS— o borrarla, que no pasa por esta puerta.
         id,
       );
       if (choque) throw new SolapeAlAplicar(choque);
@@ -2184,13 +2192,31 @@ export interface Solape {
 /**
  * Qué cuenta como ausencia VIVA, escrito una sola vez.
  *
- * Son dos mitades de la misma regla y ninguna se sostiene sin la otra: una
- * incapacidad no se pide, se informa después de haber estado enfermo, y no se le
- * puede negar; una rechazada no concedió ni un día, así que no ocupa nada. La
- * del estado es la que se escapa con facilidad —en el `WHERE` de `solapeDe` va
- * tres líneas por debajo de la del tipo—, y escaparse le costó a la puerta del
- * `PATCH` dejar INMODIFICABLE cualquier rechazada con una ausencia viva encima,
- * que es el caso corriente de a quien le rechazan unos días y los vuelve a pedir.
+ * Quedan dos exclusiones y ninguna es la incapacidad. La del ESTADO: una
+ * rechazada no concedió ni un día, así que no ocupa nada. La del TIPO: un
+ * otorgamiento no es una ausencia, y el porqué está en el cuerpo. La del estado
+ * es la que se escapa con facilidad —se lee como una condición de tipo y no lo
+ * es, y en el `WHERE` de `solapeDe` va suelta entre las otras—, y escaparse le
+ * costó a la puerta del `PATCH` dejar INMODIFICABLE cualquier rechazada con una
+ * ausencia viva encima, que es el caso corriente de a quien le rechazan unos
+ * días y los vuelve a pedir.
+ *
+ * ⚠️ La incapacidad SÍ ocupa agenda desde el 2026-08-21, y antes NO. Estuvo
+ * exenta a propósito —«una incapacidad no se pide, se informa después de haber
+ * estado enfermo»—: se registraba encima de lo que fuera y tampoco frenaba a
+ * nadie. Ese mismo día se probó la versión intermedia, dejarla pasar avisando
+ * del choque, y se decidió lo contrario. El motivo del bloqueo no es la
+ * enfermedad, es el REGISTRO: una baja encima de unas vacaciones aprobadas deja
+ * los mismos días contados dos veces, y de ese recuento salen el saldo, la
+ * nómina y el calendario. El aviso dejaba la contradicción escrita y confiaba en
+ * que alguien la arreglara después; negar el alta obliga a arreglarla antes, que
+ * es el único momento en que quien informa la baja tiene las dos solicitudes
+ * delante.
+ *
+ * La exención se quitó SIMÉTRICA a propósito: ni la frenan las demás ni frena
+ * ella a las demás. Bloquearla sólo cuando es la fila que se escribe, y seguir
+ * ignorándola cuando es la que ya estaba debajo, sería una regla que contesta
+ * distinto según cuál de las dos ausencias se registre primero.
  *
  * La llaman los tres sitios que comprueban un solape antes de dejar la fila
  * escrita —`exigirSinSolape` en el servicio (el alta y la propuesta),
@@ -2199,23 +2225,19 @@ export interface Solape {
  * comprobarla igualmente niega correcciones legítimas.
  *
  * Quedan DOS reescrituras que el compilador no puede atar a esta, y no están en
- * la misma situación, por más que las dos digan lo mismo:
+ * la misma situación, por más que las tres tengan que decir lo mismo:
  *
  *  - El `WHERE` de `solapeDe` dice esto en SQL, y **lo vigila** el cuarto
  *    portón: ejecuta contra Postgres de verdad en `repo.solapes.db.test.ts`,
- *    con un test para la mitad del tipo (la incapacidad) y dos para la del
- *    estado (la rechazada y la anulada, que es una rechazada con marca).
+ *    con un test que fija que una incapacidad SÍ sale de esa consulta y dos para
+ *    la mitad del estado (la rechazada y la anulada, que es una rechazada con
+ *    marca).
  *  - El doble in-memory de `router.test.ts` **no vigila: replica**. Ese fichero
  *    hace `vi.mock('./repo.js')` y reimplementa esta función, así que el
  *    servicio bajo prueba nunca llega a ejecutar ESTA.
  *
  * De donde sale la consecuencia que hay que tener delante antes de tocar la
  * línea de abajo: **romper esta regla no pone rojo el portón rápido.**
- * Comprobado el 2026-08-18 rompiéndola de verdad, una mitad cada vez: quitar la
- * del tipo pone rojos DOS tests y quitar la del estado, otros DOS, los cuatro en
- * el cuarto portón y todos de `decidirModificacion` y `actualizarSolicitud`; los
- * unitarios —531 en `src/ausencias`, 222 de ellos de `router.test.ts`— siguen
- * verdes en los dos casos.
  *
  * Que no lo vigile el portón rápido NO significa que no lo vigile nada: el cuarto
  * portón es un step BLOQUEANTE del CI (`ci.yml`, «Tests contra Postgres real»).
@@ -2228,19 +2250,22 @@ export interface Solape {
  * exporte, no que diga lo mismo.
  *
  * ⚠️ NO confundir con `estaEnElCalendario` (`types.ts`). Esta pregunta si la fila
- * RESERVA días —y por eso excluye las incapacidades, que se informan y no se
- * conceden—; aquella pregunta si la fila tiene evento en Google, y ahí las
- * incapacidades SÍ cuentan. Casi las mismas filas, dos respuestas distintas.
+ * RESERVA días; aquella, si la fila tiene evento en Google. Que desde el
+ * 2026-08-21 las dos digan «sí» sobre una incapacidad no las ha unificado:
+ * siguen discrepando en las dos direcciones —una `pendiente` ocupa agenda y no
+ * está en Google, y un otorgamiento `aprobada` está en Google y no ocupa
+ * agenda—, y contestar una con la otra es la forma exacta que tuvo el bug de la
+ * cuarta puerta del solapamiento.
  */
 export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): boolean {
-  // El otorgamiento se excluye por una razón distinta de la incapacidad: aquélla
-  // sí es una ausencia y se deja fuera porque no se puede negar; éste no es una
-  // ausencia en absoluto — su fecha es la del día que se TRABAJÓ de más.
+  // El otorgamiento es la única exclusión por tipo que queda, y se sostiene por
+  // una razón que a la incapacidad nunca le valió: no es una ausencia en
+  // absoluto — su fecha es la del día que se TRABAJÓ de más.
   //
   // Sin este corte, la regla de solapes bloquearía justo el caso más típico:
   // pedir el compensatorio por un sábado trabajado DURANTE las propias
   // vacaciones chocaría contra esas mismas vacaciones.
-  return tipo !== 'incapacidad' && !esOtorgamiento(tipo) && estado !== 'rechazada';
+  return !esOtorgamiento(tipo) && estado !== 'rechazada';
 }
 
 /**
@@ -2257,9 +2282,20 @@ export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): b
  * sería trabajo que nadie lee.
  *
  * Las dos condiciones de «viva» de su `WHERE` —`estado <> 'rechazada'` y
- * `tipo <> 'incapacidad'`— son `ocupaAgenda` escrito en SQL. Quien tenga que
- * hacerse la misma pregunta desde TypeScript llama a aquella función; aquí no se
- * puede.
+ * `tipo <> 'otorgamiento'`— son `ocupaAgenda` escrito en SQL, y su porqué está
+ * allí y no aquí. Quien tenga que hacerse la misma pregunta desde TypeScript
+ * llama a aquella función; aquí no se puede.
+ *
+ * ⚠️ Las dos definiciones tienen que decir LO MISMO, y ninguna vigila a la otra:
+ * el compilador no las relaciona, y un filtro que sobre o que falte de este lado
+ * sólo se nota por las puertas que pasan por el SQL. De ahí que este `WHERE` ya
+ * NO lleve `tipo <> 'incapacidad'`: lo llevó hasta el 2026-08-21, cuando una
+ * incapacidad ni ocupaba ni la frenaba nadie, y se quitó A LA VEZ de aquí y de
+ * `ocupaAgenda` —el porqué del cambio, entero allí—. Devolverlo a un solo sitio
+ * deja la regla contestando distinto según por dónde se entre: quitarlo sólo de
+ * la función deja el alta pasando y la consulta sin encontrar nada, y quitarlo
+ * sólo del `WHERE` deja el alta comprobando una condición que la consulta ya no
+ * puede satisfacer.
  *
  * ⚠️ El filtro de estado —`estado <> 'rechazada'`— es el mismo filtro que en
  * `ausenciasEntre`; lo que se invierte no es el filtro sino la
@@ -2284,7 +2320,10 @@ export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): b
  * hace con las propuestas. Se decidió no ponerlo: la restricción falla al
  * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
  * 2026-08-18 contra producción, un empleado tiene vacaciones aprobadas del 10
- * al 14 de agosto de 2026 y un permiso aprobado el 14.
+ * al 14 de agosto de 2026 y un permiso aprobado el 14. Y desde el 2026-08-21 hay
+ * más, por construcción: toda incapacidad informada encima de otra ausencia
+ * mientras la exención existía sigue en la tabla, y es justo lo que la regla
+ * nueva prohíbe.
  */
 export async function solapeDe(
   db: Pool | PoolClient,
@@ -2300,8 +2339,6 @@ export async function solapeDe(
        FROM portal.solicitudes_ausencia
       WHERE empleado_id = $1
         AND estado <> 'rechazada'
-        -- La incapacidad no se pide, se informa: no ocupa ni se le puede negar.
-        AND tipo   <> 'incapacidad'
         -- El otorgamiento no es una ausencia: su fecha es el dia trabajado. Sin
         -- esta linea, pedir el compensatorio por un sabado trabajado DURANTE las
         -- propias vacaciones chocaria contra esas mismas vacaciones.

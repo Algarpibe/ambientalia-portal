@@ -3,7 +3,6 @@ import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Send } from 'lucide-re
 import {
   crearSolicitud,
   leerComoBase64,
-  mensajeDeAvisoDeSolape,
   type SaldoCompensatorios,
   type SaldoVacaciones,
   type Solicitud,
@@ -53,15 +52,6 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
-  /**
-   * El choque que la incapacidad ATRAVESÓ, ya redactado.
-   *
-   * Estado propio y no un tercer texto dentro de `exito`: la solicitud se creó
-   * —eso es verde y no se discute— y a la vez queda algo por hacer, que es
-   * ámbar. Dicho en una sola caja, cualquiera de los dos colores miente sobre la
-   * mitad de la frase.
-   */
-  const [aviso, setAviso] = useState<string | null>(null);
   const inputArchivo = useRef<HTMLInputElement>(null);
 
   const pideOtorgamiento = esOtorgamiento(tipo);
@@ -161,12 +151,8 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
     setEnviando(true);
     setError(null);
     setExito(null);
-    setAviso(null);
     try {
-      // El aviso se separa aquí mismo: es de ESTE envío y no de la fila, y lo que
-      // sale por `onCreada` va derecho a la lista de «mis solicitudes», donde una
-      // clave de más no pinta nada.
-      const { avisoDeSolape, ...creada } = await crearSolicitud({
+      const creada = await crearSolicitud({
         tipo,
         fechaInicio,
         // Un otorgamiento es UN día: el fin es el mismo que el inicio, y el
@@ -186,12 +172,6 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
             ? `Solicitud enviada. ${aprobador} recibirá el aviso para aprobarla y te llegará un correo con el resultado.`
             : 'Incapacidad registrada. Te hemos enviado el acuse por correo.',
       );
-      // Sólo llega con algo cuando el servidor tenía algo que advertir, y hoy eso
-      // es únicamente la incapacidad informada encima de una ausencia ya
-      // concedida: se registra igual —no se pide, se informa— pero deja esos días
-      // contados dos veces, y la otra solicitud hay que ajustarla. La frase la
-      // arma `api.ts`, que es donde vive la única redacción de un solape.
-      if (avisoDeSolape) setAviso(mensajeDeAvisoDeSolape(avisoDeSolape));
       setFechaInicio('');
       setFechaFin('');
       setComentarios('');
@@ -431,22 +411,6 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
       {exito && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {exito}
-        </div>
-      )}
-
-      {/*
-        Debajo del acuse verde y no encima: primero se lee que sí se registró, y
-        luego lo que queda pendiente. Ámbar y no rojo porque no ha fallado nada
-        —el rojo de arriba es el de un envío que NO se guardó—, pero con el mismo
-        `role="alert"` que los avisos del organigrama: es lo único de esta
-        pantalla que pide una segunda acción.
-      */}
-      {aviso && (
-        <div
-          role="alert"
-          className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {aviso}
         </div>
       )}
 
