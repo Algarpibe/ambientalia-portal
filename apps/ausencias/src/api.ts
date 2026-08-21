@@ -32,6 +32,8 @@ export interface Empleado {
   copiaCorreo: string | null;
   /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
   veAdjuntos: boolean;
+  /** Puede exportar a CSV el registro de movimientos de TODA la plantilla. */
+  exportaRegistro: boolean;
   /** Si sus solicitudes necesitan la firma del jefe de su jefe, o basta una. */
   requiereSegundaFirma: boolean;
   userId: string | null;
