@@ -388,6 +388,18 @@ export interface Empleado {
    */
   exportaRegistro: boolean;
   /**
+   * Ve el calendario y el registro de movimientos de TODA la compañía, sin ser
+   * administrador: los dos recortes por privacidad que separan a un admin del
+   * resto —la fila propia en el calendario y la rama de dos niveles en el
+   * registro— dejan de aplicarle.
+   *
+   * NO abre nada más: editar, borrar e importar siguen detrás de `requireAdmin`
+   * ruta por ruta, así que quien tiene esto mira, y solo mira. Se concede ficha
+   * a ficha desde la pestaña Organigrama, igual que `veAdjuntos` y
+   * `exportaRegistro`.
+   */
+  veTodaLaEmpresa: boolean;
+  /**
    * Si sus solicitudes necesitan también la firma del jefe de su jefe, o basta
    * con la del jefe inmediato.
    *

@@ -34,6 +34,11 @@ export interface Empleado {
   veAdjuntos: boolean;
   /** Puede exportar a CSV el registro de movimientos de TODA la plantilla. */
   exportaRegistro: boolean;
+  /**
+   * Ve el calendario y el registro de TODA la compañía sin ser administrador.
+   * No abre nada más: editar, borrar e importar siguen siendo solo de admin.
+   */
+  veTodaLaEmpresa: boolean;
   /** Si sus solicitudes necesitan la firma del jefe de su jefe, o basta una. */
   requiereSegundaFirma: boolean;
   userId: string | null;
@@ -190,6 +195,23 @@ export interface Contexto {
    * `GET /ausencias/movimientos`, que no consulta esta bandera.
    */
   esExportadorRegistro: boolean;
+  /**
+   * Ve el calendario y el registro de toda la compañía: admin, o tener el
+   * permiso concedido ficha a ficha.
+   *
+   * Aquí sí abre pantalla —es lo que le da la pestaña «Registro general» a quien
+   * no aprueba a nadie—, pero no decide QUÉ datos salen: eso lo recorta el
+   * servidor en el SQL de `GET /ausencias/movimientos` y `GET
+   * /ausencias/calendario`, que vuelven a preguntarlo por su cuenta. Un `true`
+   * inventado aquí abriría una pestaña vacía, no una fuga.
+   *
+   * Puede llegar `undefined` en runtime pese al tipo, por la ventana de
+   * despliegue en la que el portal va por delante de hub-api. Se lee siempre
+   * como `!!ctx.esVisorDeTodaLaEmpresa`, que degrada a «no lo tiene» — el lado
+   * seguro: la pestaña tarda un despliegue en aparecer, en vez de aparecer
+   * rota.
+   */
+  esVisorDeTodaLaEmpresa: boolean;
   /** El correo de la sesión, para poder decir cuál hay que dar de alta. */
   email: string;
   esAdmin: boolean;
@@ -864,6 +886,17 @@ export const fijarVisor = (id: string, veAdjuntos: boolean) =>
  */
 export const fijarExportador = (id: string, concedido: boolean) =>
   put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/exportador`, { concedido });
+
+/**
+ * Da o quita la vista del calendario y el registro de toda la empresa. Solo
+ * admin, y queda registrado en el servidor igual que las otras dos llaves.
+ *
+ * Devuelve `{ ok: boolean }` y no la ficha, por lo mismo que `fijarExportador`:
+ * quien lo cambia solo necesita saber que cuajó, y la fila la resincroniza la
+ * recarga del maestro.
+ */
+export const fijarVisorDeEmpresa = (id: string, concedido: boolean) =>
+  put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor-empresa`, { concedido });
 
 /** Enciende o apaga la segunda firma de alguien. No mueve lo que ya está en vuelo. */
 export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>

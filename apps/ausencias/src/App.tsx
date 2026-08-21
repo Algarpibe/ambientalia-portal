@@ -143,12 +143,24 @@ export default function App() {
   // decidir con dos «hoy» distintos.
   const hoy = hoyEnColombia();
 
+  // Ve el calendario y el registro de toda la compañía. El servidor ya pliega
+  // admin dentro de este booleano, así que aquí NO se vuelve a sumar
+  // `esAdmin`: hacerlo dejaría la regla escrita en dos sitios, y el día que
+  // cambiara en hub-api este seguiría contestando lo de antes.
+  //
+  // `!!` y no el valor tal cual: hub-api y el portal se despliegan por
+  // separado, y en la ventana en que el portal va por delante el campo llega
+  // `undefined`. Degrada a «no lo tiene», que es el lado seguro — la pestaña
+  // tarda un despliegue en aparecer, en vez de aparecer sin datos detrás.
+  const veTodaLaEmpresa = !!contexto?.esVisorDeTodaLaEmpresa;
+
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
     // El calendario va aquí y no en el bloque de esAdmin más abajo: la pestaña
-    // la abre cualquiera con ficha, pero lo que ENSEÑA va acotado por rol —solo
-    // un admin ve a la plantilla entera, el resto su propia fila— y ese recorte
-    // lo hace hub-api en el SQL, no esta lista.
+    // la abre cualquiera con ficha, pero lo que ENSEÑA va acotado por rol —un
+    // admin (o quien tenga la vista de toda la empresa) ve a la plantilla
+    // entera, el resto su propia fila— y ese recorte lo hace hub-api en el SQL,
+    // no esta lista.
     if (contexto?.empleado) p.push(['nueva', 'Nueva solicitud'], ['mias', 'Mis solicitudes'], ['calendario', 'Calendario']);
     if (contexto?.esAprobador) {
       // Las dos cosas que hay que atender —firmar solicitudes y decidir los
@@ -164,15 +176,21 @@ export default function App() {
       // nunca puede alcanzar.
       const { total } = contarPorAtender(pendientes, cambios);
       p.push(['bandeja', `Pendientes de aprobar${total ? ` (${total})` : ''}`]);
-      // Mismo reparto de responsabilidad que el calendario de arriba: la abre
-      // cualquier aprobador y no solo un admin, pero lo que ENSEÑA lo recorta
-      // hub-api por rama del organigrama —dos niveles hacia abajo— para quien
-      // no lo es. Antes hacía falta una pestaña de admin aparte, «Historial de
-      // aprobaciones», porque no había otro sitio donde un aprobador viera lo
-      // que él mismo ya había cerrado; con ese recorte por rama ya sobra, así
-      // que desaparece y esta pantalla hace su trabajo además del suyo.
-      p.push(['historico', 'Registro general']);
     }
+    // El registro va FUERA del bloque de la bandeja, y no es cosmética: la
+    // vista de toda la empresa la tiene gente que no aprueba a nada ni a nadie
+    // —administración, la nómina—, y meterla en aquel `if` le habría dado
+    // además una pestaña «Pendientes de aprobar» permanentemente vacía. Son dos
+    // permisos distintos que hasta ahora coincidían en la misma persona.
+    //
+    // Mismo reparto de responsabilidad que el calendario de arriba: la abre
+    // cualquier aprobador y no solo un admin, pero lo que ENSEÑA lo recorta
+    // hub-api por rama del organigrama —dos niveles hacia abajo— para quien no
+    // lo es. Antes hacía falta una pestaña de admin aparte, «Historial de
+    // aprobaciones», porque no había otro sitio donde un aprobador viera lo que
+    // él mismo ya había cerrado; con ese recorte por rama ya sobra, así que
+    // desaparece y esta pantalla hace su trabajo además del suyo.
+    if (contexto?.esAprobador || veTodaLaEmpresa) p.push(['historico', 'Registro general']);
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre
     // también quien tenga la llave maestra de adjuntos sin ser administrador,
     // y esa pestaña no puede editar ni borrar nada. Quién la tiene se decide
@@ -188,7 +206,7 @@ export default function App() {
       p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos']);
     }
     return p;
-  }, [contexto, pendientes.length, cambios.length]);
+  }, [contexto, veTodaLaEmpresa, pendientes.length, cambios.length]);
 
   // Si la pestaña activa no está disponible para este usuario (p. ej. un admin
   // sin ficha de empleado, que no puede crear solicitudes), caemos a la primera.
@@ -525,9 +543,13 @@ export default function App() {
               </div>
 
               <div className={tab === 'calendario' ? '' : 'hidden'}>
+                {/* Aquí sí va el permiso nuevo, al revés que en el registro: lo
+                    que esta prop decide es cuánta gente trae la rejilla —y eso
+                    es exactamente lo que el permiso abre—, no si se puede
+                    tocar nada. El calendario no edita. */}
                 <Calendario
                   miEmpleadoId={contexto.empleado.id}
-                  esAdmin={contexto.esAdmin}
+                  veTodaLaPlantilla={contexto.esAdmin || veTodaLaEmpresa}
                   activo={tab === 'calendario'}
                 />
               </div>
@@ -535,37 +557,51 @@ export default function App() {
           )}
 
           {contexto.esAprobador && (
-            <>
-              <div className={tab === 'bandeja' ? '' : 'hidden'}>
-                <BandejaAprobacion
-                  solicitudes={pendientes}
-                  cambios={cambios}
-                  saldos={saldos}
-                  email={contexto.email}
-                  onDecidida={onDecidida}
-                  onCambioDecidido={onCambioDecidido}
-                  onError={setError}
-                />
-              </div>
-              <div className={tab === 'historico' ? '' : 'hidden'}>
-                {/* La importación del histórico legado sigue siendo cosa de
-                    admin: `/ausencias/historico/import` sigue detrás de
-                    `requireAdmin` en hub-api, así que un aprobador que no lo
-                    sea nunca podría usarla — dejar el botón visible solo le
-                    daría un 403. El registro de abajo sí es de cualquier
-                    aprobador: son dos permisos distintos que comparten
-                    pestaña. */}
-                {contexto.esAdmin && (
-                  <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
-                )}
-                <RegistroGeneral
-                  recargarToken={recargarRegistro}
-                  festivos={festivos}
-                  esAdmin={contexto.esAdmin}
-                  puedeExportar={contexto.esExportadorRegistro}
-                />
-              </div>
-            </>
+            <div className={tab === 'bandeja' ? '' : 'hidden'}>
+              <BandejaAprobacion
+                solicitudes={pendientes}
+                cambios={cambios}
+                saldos={saldos}
+                email={contexto.email}
+                onDecidida={onDecidida}
+                onCambioDecidido={onCambioDecidido}
+                onError={setError}
+              />
+            </div>
+          )}
+
+          {/* Separado de la bandeja por lo mismo que su pestaña: quien tiene la
+              vista de toda la empresa puede no aprobar a nadie. Anidarlo dentro
+              del `esAprobador` de arriba dejaría la pestaña en la lista y su
+              contenido sin renderizar — una pestaña que se puede pulsar y no
+              enseña nada, que es peor que no tenerla. */}
+          {(contexto.esAprobador || veTodaLaEmpresa) && (
+            <div className={tab === 'historico' ? '' : 'hidden'}>
+              {/* La importación del histórico legado sigue siendo cosa de
+                  admin: `/ausencias/historico/import` sigue detrás de
+                  `requireAdmin` en hub-api, así que un aprobador que no lo
+                  sea nunca podría usarla — dejar el botón visible solo le
+                  daría un 403. El registro de abajo sí es de cualquier
+                  aprobador: son dos permisos distintos que comparten
+                  pestaña. */}
+              {contexto.esAdmin && (
+                <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
+              )}
+              {/* ⚠️ `esAdmin` a secas, y NO `esAdmin || veTodaLaEmpresa`: esta
+                  prop no decide cuánto se ve —de eso se encarga el servidor—
+                  sino si salen los botones de EDITAR y BORRAR, que siguen
+                  siendo solo de admin (`PATCH` y `DELETE` van detrás de
+                  `requireAdmin`). Sumarle aquí el permiso nuevo le pintaría a
+                  administración unos botones que solo le devolverían un 403, y
+                  convertiría un permiso de lectura en uno de escritura a los
+                  ojos de quien lo usa. */}
+              <RegistroGeneral
+                recargarToken={recargarRegistro}
+                festivos={festivos}
+                esAdmin={contexto.esAdmin}
+                puedeExportar={contexto.esExportadorRegistro}
+              />
+            </div>
           )}
 
           {contexto.esVisorAdjuntos && (
