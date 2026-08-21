@@ -574,12 +574,25 @@ describe('existeOtorgamientoDelDia', () => {
     expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, null)).toBe(true);
   });
 
-  it('CANDADO: unas vacaciones ese dia NO cuentan, la regla es estrecha a proposito', async () => {
+  it('CANDADO: unas vacaciones ese MISMO dia NO cuentan, la regla es estrecha a proposito', async () => {
     // Si contaran, esto seria `solapeDe` otra vez y se llevaria por delante la
     // exencion: trabajar un sabado DURANTE las propias vacaciones es el caso
     // mas tipico que tiene este tipo de solicitud.
-    await sembrarBase();
-    expect(await existeOtorgamientoDelDia(db, empleadoId, '2026-07-11', null)).toBe(false);
+    //
+    // ⚠️ Las vacaciones EMPIEZAN el mismo dia que se consulta, y no es un
+    // detalle: la consulta compara `fecha_inicio = $2`, asi que unas vacaciones
+    // que solo CONTUVIERAN al sabado no la tocarian y este test pasaria sin
+    // ejercitar el filtro del tipo. Comprobado quitandolo: con el rango 10-14 y
+    // preguntando por el 11 seguia verde.
+    await sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'aprobada',
+      fechaInicio: SABADO,
+      fechaFin: '2026-07-15',
+      segundoAprobadorCorreo: null,
+    });
+    expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, null)).toBe(false);
   });
 
   it('CANDADO: uno RECHAZADO libera el dia', async () => {
