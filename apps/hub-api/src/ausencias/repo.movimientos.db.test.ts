@@ -379,4 +379,49 @@ describe('CANDADO: las modificaciones en el registro', () => {
     expect(m.decididaAt).not.toBeNull();
     expect(m.decididaPor).toBeNull();
   });
+
+  // Este NO estaba en el plan, y esta aqui por una falsacion que NO mordio:
+  // borrar entero el `.sort(porFechaDeCierre)` de `movimientos` dejaba los 81
+  // tests en verde. La mezcla es lo unico del registro que no puede comprobar
+  // ninguna de las dos consultas por separado -cada una sale ordenada consigo
+  // misma haga lo que haga la otra-, y sin orden la pantalla ensena primero
+  // todas las solicitudes y luego todas las modificaciones, que no es una
+  // linea de tiempo de nada. Es la misma razon por la que existe el candado de
+  // `empleadosConSaldo` de mas arriba.
+  it('CANDADO: el orden mezcla las dos listas, y lo que nunca se decidio va al final', async () => {
+    // Una decision de verdad, con `decidirSolicitud`: es el UNICO escritor de
+    // `decidida_at` sobre la solicitud, asi que las cuatro del beforeEach -que
+    // nacen ya `aprobada`- la tienen NULA.
+    const empleadoId = await sembrarEmpleado(db, LEGACY, JEFE);
+    const decidida = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: LEGACY,
+      estado: 'pendiente',
+      fechaInicio: '2026-06-01',
+      fechaFin: '2026-06-05',
+      segundoAprobadorCorreo: null,
+    });
+    await firmarSinSesion(decidida, 'pendiente', true);
+
+    // Y DESPUES la anulacion: es el movimiento mas reciente de los dos, y viene
+    // de la OTRA consulta. Si la mezcla no ordena, se queda detras de las seis
+    // solicitudes por el simple hecho de estar en la segunda lista.
+    const { modificacion } = await sembrarConPropuesta('anulacion');
+    expect((await decidirModificacion(db, modificacion.id, true, null, null, payloadStub)).ok).toBe(true);
+
+    const ms = await movimientos(db, null);
+    expect(ms[0]?.id).toBe(modificacion.id);
+    expect(ms[1]?.id).toBe(decidida.id);
+
+    // El NULLS LAST, y no es decorativo: la solicitud de CAMBIANTE acaba de
+    // quedarse `rechazada` por la anulacion -un estado terminal- y sigue SIN
+    // `decidida_at`, porque nadie decidio la solicitud, solo el cambio. Sin
+    // NULLS LAST encabezaria la lista por delante de las dos decisiones de
+    // verdad de aqui arriba.
+    const sinCierre = ms.slice(2);
+    expect(sinCierre.map((m) => m.decididaAt)).toEqual(sinCierre.map(() => null));
+    // El desempate por `created_at DESC` dentro de ese grupo: la de CAMBIANTE
+    // es la ultima sembrada, asi que va la primera de las cinco.
+    expect(sinCierre.map((m) => m.solicitanteEmail)).toEqual([CAMBIANTE, PRIMO, BISNIETO, NIETO, HIJO]);
+  });
 });
