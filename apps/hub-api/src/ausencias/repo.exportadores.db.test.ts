@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { puedeExportarRegistro, fijarExportador } from './repo.js';
+import { puedeExportarRegistro, fijarExportador, empleadoPorId } from './repo.js';
 import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
 
 // El permiso de exportar el registro general (migracion 031), contra Postgres
@@ -101,5 +101,26 @@ describe('puedeExportarRegistro', () => {
     await fijarExportador(db, ADMIN, empleadoId, true);
     await db.query(`UPDATE portal.empleados SET activo = FALSE WHERE id = $1`, [empleadoId]);
     expect(await puedeExportarRegistro(db, CORREO)).toBe(false);
+  });
+});
+
+describe('empleadoPorId: exportaRegistro viaja en la ficha', () => {
+  // Candado del cableado de `COLS_EMPLEADO` / `aEmpleado()`: la pestana
+  // Organigrama no puede pintar la casilla si la ficha que lee el repo no
+  // trae el campo, aunque la columna SQL exista y `puedeExportarRegistro`
+  // (arriba) la lea bien. Por eso el escritor real es `fijarExportador` y el
+  // lector real es `empleadoPorId`, y no un SELECT a pelo: lo que se prueba
+  // es exactamente el camino que recorre la ficha entera, no la columna suelta.
+  it('trae exportaRegistro en true justo despues de concederlo', async () => {
+    await fijarExportador(db, ADMIN, empleadoId, true);
+    const ficha = await empleadoPorId(db, empleadoId);
+    expect(ficha?.exportaRegistro).toBe(true);
+  });
+
+  it('trae exportaRegistro en false justo despues de quitarlo', async () => {
+    await fijarExportador(db, ADMIN, empleadoId, true);
+    await fijarExportador(db, ADMIN, empleadoId, false);
+    const ficha = await empleadoPorId(db, empleadoId);
+    expect(ficha?.exportaRegistro).toBe(false);
   });
 });

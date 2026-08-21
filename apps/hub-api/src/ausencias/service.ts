@@ -1594,11 +1594,14 @@ export async function fijarVisor(
  *
  * Sin el «si no cambia, no se escribe» de `fijarVisor`, y no por descuido: aquel
  * lo necesita porque su botón guarda la fila entera del panel y llegaría aquí
- * también al tocar el jefe o la copia, y porque `repo.empleadoPorId` ya devuelve
- * `veAdjuntos` con el que comparar. `exportaRegistro` no viaja en `Empleado`, así
- * que el guard costaría una consulta más para ahorrar una línea de un registro
- * que casi nadie va a escribir; si el panel acaba guardando la fila entera, este
- * es el sitio donde añadirlo.
+ * también al tocar el jefe o la copia. Este interruptor es propio y no
+ * comparte botón con nada más, así que cada llamada ya es una decisión de
+ * cambiar el permiso, no un efecto colateral de guardar otra cosa —no hace
+ * falta el guard para evitar ruido. `exportaRegistro` ya viaja en `Empleado`
+ * (ver `repo.ts`), así que si el panel acabara fusionando este botón con el
+ * del resto de la fila, añadir el guard sería tan barato como en `fijarVisor`:
+ * una comparación contra la ficha que ya trae `repo.empleadoPorId`, sin
+ * consulta extra.
  *
  * Devuelve `{ ok: true }` y nada más —no la ficha, al contrario que `fijarVisor`—
  * porque el permiso no se pinta en la fila del maestro: quien lo cambia solo

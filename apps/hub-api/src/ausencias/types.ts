@@ -380,6 +380,12 @@ export interface Empleado {
   /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
   veAdjuntos: boolean;
   /**
+   * Puede exportar el CSV del registro general: las incapacidades y los
+   * permisos de la plantilla, con sus motivos —datos personales—. Se concede
+   * ficha a ficha desde la pestaña Organigrama, igual que `veAdjuntos`.
+   */
+  exportaRegistro: boolean;
+  /**
    * Si sus solicitudes necesitan también la firma del jefe de su jefe, o basta
    * con la del jefe inmediato.
    *
