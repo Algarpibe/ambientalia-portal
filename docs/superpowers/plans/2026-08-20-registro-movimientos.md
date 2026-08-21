@@ -477,11 +477,17 @@ function aMovimiento(r: FilaMovimientoDb): Movimiento {
   // equivocada, que no es aproximar: es mentir con nombre y apellidos, la misma
   // clase de fallo que evita la guarda de `retirada` de aquí arriba.
   //
-  // La regla lleva TRES términos, y el tercero no es paranoia:
+  // La regla final, tras dos correcciones que costaron sendos candados:
   //
   //   segundo_aprobador_correo != null
-  //   && primera_firma_at != null
   //   && primera_firma_at != decidida_at
+  //
+  // NO lleva un `primera_firma_at != null`. Ese término parecía obvio y era
+  // incorrecto: cuando un admin destraba una solicitud a `pendiente_2` desde el
+  // registro general, `primera_firma_at` no se sella nunca, así que una fila
+  // cerrada con esa marca NULA es precisamente un cierre del segundo. Vale
+  // porque `decidirSolicitud` es el ÚNICO escritor de `decidida_at`, y todo
+  // cierre que sale de `pendiente` sella las dos marcas a la vez.
   //
   // Sin el tercero, el caso simétrico se misatribuye igual de mal. Cuando el
   // jefe inmediato RECHAZA una solicitud que sí llevaba cascada,
