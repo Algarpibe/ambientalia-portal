@@ -1141,6 +1141,18 @@ const nueva = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * Fechas de una incapacidad que caen DENTRO de su ventana.
+ *
+ * Con el reloj congelado en 2026-01-15 y la ventana en dos dias, el 13 es el dia
+ * mas antiguo que entra. Las de `nueva()` no valen para este tipo: son de julio,
+ * o sea futuras respecto al reloj, y una incapacidad no se puede informar por
+ * adelantado. Con nombre y no como literales sueltos porque las usan una docena
+ * de tests, y moverlas de una en una es como se desincronizan.
+ */
+const INCAP_DESDE = '2026-01-13';
+const INCAP_HASTA = '2026-01-14';
+
 beforeEach(() => {
   // El reloj se congela en enero de 2026, antes que la más temprana de las
   // fechas que este fichero manda por POST (2026-03-30).
@@ -1300,29 +1312,56 @@ describe('POST /ausencias/solicitudes', () => {
     expect(estado.eventos).toHaveLength(0);
   });
 
-  it('una incapacidad SÍ puede ser de días pasados', async () => {
-    // La excepción, por HTTP y no solo en la función pura: si alguien "unificara"
-    // la regla para todos los tipos, el flujo normal de informar una incapacidad
-    // —volver del médico y subir el soporte— dejaría de funcionar.
-    await request(app())
+  /** Una incapacidad con su soporte, que es obligatorio. */
+  const incapacidad = (fechaInicio: string, fechaFin: string) =>
+    request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
       .send(
         nueva({
           tipo: 'incapacidad',
-          fechaInicio: '2026-01-08',
-          fechaFin: '2026-01-09',
+          fechaInicio,
+          fechaFin,
           adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
         }),
-      )
-      .expect(201);
+      );
+
+  it('una incapacidad SÍ puede ser de días pasados, dentro de su ventana', async () => {
+    // La excepción, por HTTP y no solo en la función pura: si alguien "unificara"
+    // la regla para todos los tipos, el flujo normal de informar una incapacidad
+    // —volver del médico y subir el soporte— dejaría de funcionar.
+    //
+    // El reloj está en el 15, y la ventana son dos días: el 13 es el día más
+    // antiguo que entra, y por eso se prueba justo ese y no uno cualquiera.
+    await incapacidad('2026-01-13', '2026-01-14').expect(201);
+  });
+
+  it('CANDADO: pero no de antes de su ventana', async () => {
+    // Un día más atrás que el de arriba. Si esta pareja se separa —moviendo uno
+    // sin el otro— la ventana deja de estar acotada por ningún test.
+    const r = await incapacidad('2026-01-12', '2026-01-13').expect(400);
+    expect(r.body).toMatchObject({ error: 'incapacidad_demasiado_antigua', field: 'fechaInicio' });
+    expect(estado.eventos).toHaveLength(0);
+  });
+
+  it('CANDADO: ni del futuro, porque nadie sabe que va a enfermar', async () => {
+    const r = await incapacidad('2026-01-16', '2026-01-17').expect(400);
+    expect(r.body).toMatchObject({ error: 'incapacidad_en_el_futuro', field: 'fechaInicio' });
+    expect(estado.eventos).toHaveLength(0);
+  });
+
+  it('CANDADO: empezar HOY y terminar más adelante sí vale', async () => {
+    // El caso corriente que la regla del futuro no puede llevarse por delante:
+    // el médico firma hoy una baja que cubre los próximos días. Por eso la
+    // comprobación mira `fechaInicio` y no `fechaFin`.
+    await incapacidad('2026-01-15', '2026-01-20').expect(201);
   });
 
   it('la incapacidad se registra sin pasar por aprobación', async () => {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
       .expect(201);
     expect(r.body.estado).toBe('registrada');
     // Sin aprobador: si lo tuviera, aparecería en su bandeja de pendientes.
@@ -1334,16 +1373,16 @@ describe('POST /ausencias/solicitudes', () => {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva({ tipo: 'incapacidad', fechaInicio: '2026-07-06', adjunto: { nombreArchivo: 'escaneo (1).pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'escaneo (1).pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
       .expect(201);
-    expect(r.body.adjunto.nombreArchivo).toBe('Incapacidades_Ana_Ruiz_2026-07-06_1.pdf');
+    expect(r.body.adjunto.nombreArchivo).toBe(`Incapacidades_Ana_Ruiz_${INCAP_DESDE}_1.pdf`);
   });
 
   it('400 con su código de error cuando el cuerpo no es válido', async () => {
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva({ tipo: 'incapacidad' }))
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA }))
       .expect(400);
     expect(r.body).toMatchObject({ error: 'adjunto_requerido', field: 'adjunto' });
   });
@@ -1355,7 +1394,7 @@ describe('POST /ausencias/solicitudes', () => {
     await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send(nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: grande } }))
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: grande } }))
       .expect(201);
   });
 });
@@ -1491,12 +1530,15 @@ describe('no se puede estar ausente dos veces a la vez', () => {
    * todos los tests de aquí abajo leen o mutan— y darle el mismo nombre a un
    * parámetro lo taparía dentro de esta función sin que nada avisara.
    */
-  async function conAusencia(estadoFila = 'aprobada') {
+  // Las fechas son parametros con el valor de siempre por defecto: los tests de
+  // la incapacidad necesitan una ausencia de ENERO —la ventana de la baja son
+  // dos dias desde el reloj congelado— y los demas siguen con las de julio.
+  async function conAusencia(estadoFila = 'aprobada', desde = '2026-07-10', hasta = '2026-07-14') {
     const s = (
       await request(app())
         .post('/api/ausencias/solicitudes')
         .set('Authorization', `Bearer ${token()}`)
-        .send(nueva({ fechaInicio: '2026-07-10', fechaFin: '2026-07-14' }))
+        .send(nueva({ fechaInicio: desde, fechaFin: hasta }))
         .expect(201)
     ).body as Record<string, unknown>;
     fila(s.id as string).estado = estadoFila;
@@ -1554,7 +1596,15 @@ describe('no se puede estar ausente dos veces a la vez', () => {
     await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-12' }).expect(201);
   });
 
-  /** Informa una baja del 12 al 13 de julio, con su PDF. */
+  /**
+   * Informa una baja del 15 al 16 de enero, con su PDF.
+   *
+   * En ENERO y no en julio como el resto del bloque: desde el 2026-08-21 una
+   * incapacidad solo se puede informar dentro de su ventana —dos dias hacia
+   * atras y nada hacia adelante—, y el reloj de este fichero esta en el 15. La
+   * baja EMPIEZA hoy, que es el unico dia que cae a la vez dentro de su ventana
+   * y dentro de lo que unas vacaciones pueden reservar.
+   */
   const informarBaja = () =>
     request(app())
       .post('/api/ausencias/solicitudes')
@@ -1562,8 +1612,8 @@ describe('no se puede estar ausente dos veces a la vez', () => {
       .send(
         nueva({
           tipo: 'incapacidad',
-          fechaInicio: '2026-07-12',
-          fechaFin: '2026-07-13',
+          fechaInicio: '2026-01-15',
+          fechaFin: '2026-01-16',
           adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
         }),
       );
@@ -1578,7 +1628,7 @@ describe('no se puede estar ausente dos veces a la vez', () => {
     // el saldo, la nómina y el calendario. Quien informa la baja es justo quien
     // puede ajustar la otra solicitud, así que el 409 le llega a la única
     // persona que puede deshacer la contradicción.
-    await conAusencia();
+    await conAusencia('aprobada', '2026-01-15', '2026-01-20');
     const r = await informarBaja().expect(409);
 
     // El mismo 409 que las otras tres puertas y no uno propio de la incapacidad:
@@ -1588,7 +1638,7 @@ describe('no se puede estar ausente dos veces a la vez', () => {
     expect(r.body).toMatchObject({
       error: 'rango_solapado',
       field: 'fechaInicio',
-      detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-07-10', fechaFin: '2026-07-14' },
+      detalle: { tipo: 'vacaciones', estado: 'aprobada', fechaInicio: '2026-01-15', fechaFin: '2026-01-20' },
     });
     // Y no se escribió nada: un bloqueo no es un aviso con otro código de estado.
     expect(estado.solicitudes).toHaveLength(1);
@@ -1610,7 +1660,7 @@ describe('no se puede estar ausente dos veces a la vez', () => {
     // informar una incapacidad, es hacerlo sobre días ya ocupados.
     await informarBaja().expect(201);
 
-    const r = await pedir({ fechaInicio: '2026-07-13', fechaFin: '2026-07-16' }).expect(409);
+    const r = await pedir({ fechaInicio: '2026-01-16', fechaFin: '2026-01-20' }).expect(409);
     expect(r.body.detalle).toMatchObject({ tipo: 'incapacidad', estado: 'registrada' });
     expect(estado.solicitudes).toHaveLength(1);
   });
@@ -2030,6 +2080,8 @@ describe('la segunda firma se puede apagar por ficha', () => {
           .send(
             nueva({
               tipo: 'incapacidad',
+              fechaInicio: INCAP_DESDE,
+              fechaFin: INCAP_HASTA,
               adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
             }),
           )
@@ -2068,7 +2120,7 @@ describe('GET /ausencias/adjuntos', () => {
       await request(app())
         .post('/api/ausencias/solicitudes')
         .set('Authorization', `Bearer ${token()}`)
-        .send(nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+        .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
         .expect(201)
     ).body;
   }
@@ -3625,6 +3677,8 @@ describe('POST /ausencias/solicitudes/:id/modificaciones', () => {
   it('una incapacidad no admite cambio: no hay a quién mandárselo', async () => {
     const s = await crear({
       tipo: 'incapacidad',
+      fechaInicio: INCAP_DESDE,
+      fechaFin: INCAP_HASTA,
       adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
     });
     expect(s.aprobadorCorreo).toBeNull();

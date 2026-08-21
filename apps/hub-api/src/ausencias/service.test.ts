@@ -34,6 +34,14 @@ function nueva(over: Record<string, unknown> = {}) {
  */
 const HOY = '2026-07-01';
 
+/**
+ * Fechas de una incapacidad DENTRO de su ventana: dos dias hacia atras desde
+ * HOY. Con nombre porque las usan varios tests, y moverlas de una en una es
+ * como se desincronizan de la constante del servicio.
+ */
+const INCAP_DESDE = '2026-06-29';
+const INCAP_HASTA = '2026-06-30';
+
 /** `validarNuevaSolicitud` con el «hoy» fijo, que es lo que quiere casi todo el fichero. */
 const validar = (body: unknown, hoy: string = HOY) => validarNuevaSolicitud(body, hoy);
 
@@ -196,19 +204,66 @@ describe('validarNuevaSolicitud', () => {
     expect(validar(nueva({ fechaInicio: HOY, fechaFin: '2026-07-10' }))).toMatchObject({ fechaInicio: HOY });
   });
 
-  it('acepta una incapacidad con fechas ya pasadas', () => {
+  it('CANDADO: una incapacidad de antes de su ventana se rechaza', () => {
+    // Un día más atrás que `INCAP_DESDE`. Esta pareja —este test y el de abajo—
+    // acota la ventana por sus dos lados; separarlos la deja sin borde.
+    expect(() =>
+      validar(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-06-28',
+          fechaFin: '2026-06-29',
+          adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 },
+        }),
+      ),
+    ).toThrow(expect.objectContaining({ code: 'incapacidad_demasiado_antigua', field: 'fechaInicio' }));
+  });
+
+  it('CANDADO: y una que empieza en el futuro tampoco: nadie sabe que va a enfermar', () => {
+    expect(() =>
+      validar(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-07-02',
+          fechaFin: '2026-07-03',
+          adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 },
+        }),
+      ),
+    ).toThrow(expect.objectContaining({ code: 'incapacidad_en_el_futuro', field: 'fechaInicio' }));
+  });
+
+  it('CANDADO: pero una que empieza HOY y termina despues si vale', () => {
+    // El caso corriente que la regla del futuro no puede llevarse por delante:
+    // el medico firma hoy una baja que cubre los proximos dias. Por eso la
+    // comprobacion mira `fechaInicio` y no `fechaFin`.
+    expect(
+      validar(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: HOY,
+          fechaFin: '2026-07-06',
+          adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 },
+        }),
+      ),
+    ).toMatchObject({ fechaInicio: HOY });
+  });
+
+  it('acepta una incapacidad con fechas ya pasadas, dentro de su ventana', () => {
     // La excepción que justifica que la regla mire el tipo. Una incapacidad se
     // INFORMA después de haber estado enfermo: uno va al médico, vuelve y sube el
     // soporte. Exigirle fecha de hoy en adelante haría imposible el caso normal.
+    //
+    // La ventana la acotan los tres candados de aquí arriba; este fija que
+    // dentro de ella el caso normal sigue pasando.
     const r = validar(
       nueva({
         tipo: 'incapacidad',
-        fechaInicio: '2026-06-01',
-        fechaFin: '2026-06-03',
+        fechaInicio: INCAP_DESDE,
+        fechaFin: INCAP_HASTA,
         adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 },
       }),
     );
-    expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: '2026-06-01' });
+    expect(r).toMatchObject({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE });
   });
 
   it('la regla del pasado también tapa permisos y compensatorios', () => {
@@ -236,14 +291,14 @@ describe('validarNuevaSolicitud', () => {
   it('exige adjunto en las incapacidades', () => {
     // Es el único tipo que nadie aprueba: el soporte médico es lo único que lo
     // respalda, así que sin él no se registra.
-    expect(() => validar(nueva({ tipo: 'incapacidad' }))).toThrow(
+    expect(() => validar(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA }))).toThrow(
       expect.objectContaining({ code: 'adjunto_requerido' }),
     );
   });
 
   it('acepta la incapacidad con su PDF', () => {
     const r = validar(
-      nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 } }),
+      nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'inc.pdf', mime: 'application/pdf', contenidoBase64: PDF_BASE64 } }),
     );
     expect(r.adjunto?.nombreArchivo).toBe('inc.pdf');
   });
@@ -260,7 +315,7 @@ describe('validarNuevaSolicitud', () => {
     const enorme = 'A'.repeat(12 * 1024 * 1024); // ~9 MB una vez decodificado
     expect(() =>
       validar(
-        nueva({ tipo: 'incapacidad', adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: enorme } }),
+        nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: enorme } }),
       ),
     ).toThrow(expect.objectContaining({ code: 'adjunto_demasiado_grande' }));
   });

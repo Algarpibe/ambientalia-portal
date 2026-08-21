@@ -120,6 +120,22 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
     throw new AusenciaError('fecha_en_pasado', 400, 'fechaInicio');
   }
 
+  // La incapacidad se queda fuera de la regla de arriba, y con motivo, pero eso
+  // la dejaba sin límite en NINGUNA dirección: se podía informar una de hace
+  // cinco años o una de dentro de un mes. Ventana propia y estrecha.
+  if (tipo === 'incapacidad') {
+    // Hacia adelante no: nadie sabe que va a enfermar. Se mira `fechaInicio` y
+    // NO `fechaFin` a propósito — el médico firma hoy una baja que cubre los
+    // próximos días, y ese caso, que es el corriente, tiene que seguir pasando.
+    if (fechaInicio > hoy) throw new AusenciaError('incapacidad_en_el_futuro', 400, 'fechaInicio');
+    // Y hacia atrás, poco: informarla es cosa de días, no de meses. Con la
+    // ventana en dos días, una baja de la semana pasada ya no entra sola y hay
+    // que pedírsela a administración, que sí puede corregir el registro.
+    if (fechaInicio < limiteDeLaIncapacidad(hoy)) {
+      throw new AusenciaError('incapacidad_demasiado_antigua', 400, 'fechaInicio');
+    }
+  }
+
   const diasNaturales = (Date.parse(`${fechaFin}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000 + 1;
   if (diasNaturales > MAX_DIAS_RANGO) throw new AusenciaError('rango_demasiado_largo', 400, 'fechaFin');
 
@@ -161,6 +177,25 @@ const MESES_HACIA_ATRAS = 3;
 export function limiteDelTrabajo(hoy: string): string {
   const [anio, mes, dia] = hoy.split('-').map(Number);
   return new Date(Date.UTC(anio, mes - 1 - MESES_HACIA_ATRAS, dia)).toISOString().slice(0, 10);
+}
+
+/** Cuántos días hacia atrás se puede informar una incapacidad. */
+const DIAS_DE_LA_INCAPACIDAD = 2;
+
+/**
+ * El día más antiguo por el que hoy se puede informar una incapacidad.
+ *
+ * Constante y función PROPIAS, y no las del otorgamiento aunque las dos acoten
+ * hacia atrás: son dos políticas distintas que hoy coinciden en la forma y no en
+ * el número, y compartirlas haría que tocar una moviera la otra en silencio.
+ *
+ * `Date.UTC` con el día restado hace el arrastre de mes y de año él solo: el 1
+ * de marzo menos dos días es el 27 o el 28 de febrero según el año, y esa cuenta
+ * no hay que escribirla.
+ */
+export function limiteDeLaIncapacidad(hoy: string): string {
+  const [anio, mes, dia] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1, dia - DIAS_DE_LA_INCAPACIDAD)).toISOString().slice(0, 10);
 }
 
 /**
