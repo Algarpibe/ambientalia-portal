@@ -388,6 +388,16 @@ describe('CANDADO: las modificaciones en el registro', () => {
   // todas las solicitudes y luego todas las modificaciones, que no es una
   // linea de tiempo de nada. Es la misma razon por la que existe el candado de
   // `empleadosConSaldo` de mas arriba.
+  //
+  // ⚠️ Cubre DOS de las tres reglas del orden: que la fila de la otra lista se
+  // cuele arriba, y el NULLS LAST. El desempate por `created_at DESC` NO se
+  // puede probar aqui, y conviene no creer que si: las cinco filas sin cerrar
+  // salen todas de `movimientosDeSolicitudes`, que no lleva `ORDER BY`, asi que
+  // el orden en que llegan lo elige el plan de ejecucion de Postgres y para un
+  // dataset de test cabe que coincida con el esperado por casualidad. Se
+  // comprobo: sustituyendo el desempate por `return 0`, este fichero seguia
+  // entero en verde. Esa regla la fija `repo.test.ts`, sin Postgres y con el
+  // orden de entrada al reves del de salida.
   it('CANDADO: el orden mezcla las dos listas, y lo que nunca se decidio va al final', async () => {
     // Una decision de verdad, con `decidirSolicitud`: es el UNICO escritor de
     // `decidida_at` sobre la solicitud, asi que las cuatro del beforeEach -que
@@ -420,8 +430,13 @@ describe('CANDADO: las modificaciones en el registro', () => {
     // verdad de aqui arriba.
     const sinCierre = ms.slice(2);
     expect(sinCierre.map((m) => m.decididaAt)).toEqual(sinCierre.map(() => null));
-    // El desempate por `created_at DESC` dentro de ese grupo: la de CAMBIANTE
-    // es la ultima sembrada, asi que va la primera de las cinco.
-    expect(sinCierre.map((m) => m.solicitanteEmail)).toEqual([CAMBIANTE, PRIMO, BISNIETO, NIETO, HIJO]);
+    // Ordenado antes de comparar, a proposito: lo que se afirma es QUIENES
+    // forman ese grupo -las cinco, sin perder ni duplicar ninguna-, no en que
+    // orden llegan. Compararlas en orden seria afirmar el capricho del plan de
+    // ejecucion, y este test se pondria rojo el dia que Postgres cambiara de
+    // opinion sin que nada estuviera mal.
+    expect([...sinCierre.map((m) => m.solicitanteEmail)].sort()).toEqual(
+      [CAMBIANTE, PRIMO, BISNIETO, NIETO, HIJO].sort(),
+    );
   });
 });

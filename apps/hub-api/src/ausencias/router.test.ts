@@ -223,7 +223,19 @@ const buscarSolape = (
     : null;
 };
 
-vi.mock('./repo.js', () => ({
+vi.mock('./repo.js', async () => ({
+  // `porFechaDeCierre` es la UNICA funcion que exporta el repo y que no toca la
+  // base: compara dos movimientos ya cargados y nada mas. Por eso aqui se
+  // RE-EXPORTA la de verdad en vez de copiarla — no hay SQL que imitar, y una
+  // copia en memoria seria una segunda version de la misma regla, que es
+  // justamente el coste que este doble paga por todo lo demas y que el candado
+  // de mas abajo existe para acotar. Quien la prueba suelta es `repo.test.ts`,
+  // sin Postgres.
+  //
+  // Va con `vi.importActual` y no con un import de arriba porque `vi.mock` se
+  // iza por encima de los imports del fichero: una referencia al modulo real
+  // desde aqui reventaria con un «cannot access before initialization».
+  porFechaDeCierre: (await vi.importActual<typeof import('./repo.js')>('./repo.js')).porFechaDeCierre,
   empleadoDeUsuario: async () => estado.empleado,
   // Modela el alta automática: si no hay ficha pero el usuario existe en el
   // portal, se crea sola. `usuarioEnPortal: false` simula el token legacy.

@@ -2632,12 +2632,41 @@ async function movimientosDeModificaciones(db: Pool, soloDe: string | null): Pro
  * definición. Sin el `NULLS LAST` todas ellas encabezarían la lista por delante
  * de las decisiones de esta semana.
  *
+ * Se exporta SOLO para poder probarla suelta. Ninguna de las dos consultas
+ * lleva `ORDER BY`, así que el desempate por `createdAt` es invisible desde
+ * fuera: contra Postgres, el orden en que llegan las filas sin cerrar es el que
+ * elige el plan de ejecución, y para un dataset de test cabe que coincida con
+ * el esperado por casualidad. Se comprobó: con el desempate sustituido por
+ * `return 0`, la batería contra Postgres seguía entera en verde. La regla se
+ * fija en `repo.test.ts`, con movimientos inventados y en un orden de entrada
+ * distinto del de salida —`Array.prototype.sort` es estable, así que un
+ * comparador que no desempata deja la entrada tal cual—.
+ *
  * Se compara con `<`/`>` sobre las cadenas y no parseando fechas: los dos
- * valores salen del MISMO `::text` sobre un `timestamptz` en la misma sesión,
- * así que comparten formato exacto y el orden lexicográfico es el cronológico.
- * Es la misma propiedad en la que ya se apoya `correoDelQueCerro`.
+ * valores salen del MISMO `::text` sobre un `timestamptz`, y el texto de un
+ * `timestamptz` no lo fija la consulta sino dos GUC del SERVIDOR, `DateStyle` y
+ * `TimeZone`. Mientras nadie los cambie, todas las filas comparten formato y
+ * offset y el orden lexicográfico es el cronológico. Es la misma propiedad en
+ * la que ya se apoya `correoDelQueCerro`.
+ *
+ * ⚠️ La invariante es «mismo GUC de servidor», y NO «misma sesión», que es lo
+ * que parecería a simple vista. `movimientos` lanza las dos consultas con
+ * `Promise.all` sobre un `Pool`, así que con concurrencia real salen por DOS
+ * conexiones físicas distintas — y comparar una fila de una lista contra una de
+ * la otra, que es exactamente lo que hace esta función, cruza esas dos
+ * conexiones. Hoy se sostiene porque en todo el repo no hay un solo
+ * `SET TimeZone`, ni un `options=-c` en la cadena de conexión, ni un `PGTZ`:
+ * `createPoolFromUrl` es un `new Pool({ connectionString })` pelado y toda
+ * conexión hereda el GUC del servidor. El día que alguien fije la zona por
+ * sesión, esto se desordenaría EN SILENCIO.
+ *
+ * No se parsea a epoch a propósito, y no es pereza: el texto que devuelve
+ * Postgres (`2026-08-20 18:39:20.12+00`) no es ISO 8601 —espacio en vez de `T`,
+ * offset de dos dígitos—, así que `Date.parse` cae en su rama definida por la
+ * implementación. Cambiaría una invariante documentada, que un `grep` basta
+ * para vigilar, por otra que depende del motor de JS y que no vigila nadie.
  */
-function porFechaDeCierre(a: Movimiento, b: Movimiento): number {
+export function porFechaDeCierre(a: Movimiento, b: Movimiento): number {
   if (a.decididaAt !== b.decididaAt) {
     if (a.decididaAt === null) return 1;
     if (b.decididaAt === null) return -1;
