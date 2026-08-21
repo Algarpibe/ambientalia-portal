@@ -1539,6 +1539,100 @@ describe('no se puede estar ausente dos veces a la vez', () => {
       )
       .expect(201);
   });
+
+  // ── Atravesar la regla no es no enterarse ────────────────────────────────
+  //
+  // Los cuatro de aquí abajo son la otra mitad del candado de arriba. Aquél fija
+  // que la incapacidad SE REGISTRA; éstos, que además se AVISA — y que el aviso
+  // no se ha comido ninguna de las otras ramas por el camino.
+
+  /** Informa una baja del 12 al 13 de julio, con su PDF. */
+  const informarBaja = () =>
+    request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(
+        nueva({
+          tipo: 'incapacidad',
+          fechaInicio: '2026-07-12',
+          fechaFin: '2026-07-13',
+          adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+        }),
+      );
+
+  it('CANDADO: informar la incapacidad encima AVISA del choque, sin negarla', async () => {
+    // La razón de que el aviso exista: la baja se registra —eso no se toca—,
+    // pero esos días quedan contados dos veces y quien puede arreglar la otra
+    // mitad es justo quien acaba de informarla. Antes de esto, se lo callaba.
+    await conAusencia();
+    const r = await informarBaja().expect(201);
+
+    // Se registró de verdad: el aviso no es un 409 con otro nombre.
+    expect(r.body.estado).toBe('registrada');
+    expect(estado.solicitudes).toHaveLength(2);
+
+    // Y dice CONTRA QUÉ, que es lo único que lo hace accionable. `toEqual` y no
+    // `toMatchObject` a propósito: el aviso sale del mismo `detalleDelSolape`
+    // que el `detalle` del 409, así que hereda su promesa de no filtrar el `id`
+    // del choque — y esa promesa la tiene que atar cada salida por su cuenta.
+    expect(r.body.avisoDeSolape).toEqual({
+      tipo: 'vacaciones',
+      estado: 'aprobada',
+      fechaInicio: '2026-07-10',
+      fechaFin: '2026-07-14',
+    });
+  });
+
+  it('CANDADO: una incapacidad sin nada debajo no avisa de nada', async () => {
+    // El control del de arriba: sin él, un aviso cableado a un objeto fijo
+    // pasaría igual, y todo el que informara una baja vería una alarma
+    // hablándole de una ausencia que no existe.
+    const r = await informarBaja().expect(201);
+    expect(r.body.avisoDeSolape).toBeNull();
+  });
+
+  it('CANDADO: unas vacaciones encima siguen dando 409 y NO un aviso', async () => {
+    // La rama que el aviso no debe tocar. Si alguien «unificara» las dos
+    // —avisar en vez de negar, que suena razonable dicho así— cualquiera podría
+    // pedir dos veces los mismos días y el 409 se quedaría sin usuarios.
+    await conAusencia();
+    const r = await pedir({ fechaInicio: '2026-07-12', fechaFin: '2026-07-16' }).expect(409);
+    expect(r.body.avisoDeSolape).toBeUndefined();
+    // Y no se escribió nada: un 201 con aviso habría dejado la segunda fila.
+    expect(estado.solicitudes).toHaveLength(1);
+  });
+
+  it('CANDADO: un otorgamiento encima de las propias vacaciones NO avisa', async () => {
+    // El otorgamiento también atraviesa la regla de solapes, pero ahí el aviso
+    // sería ruido: su fecha es la del día que se TRABAJÓ de más, así que caer
+    // dentro de las propias vacaciones es su caso NORMAL —el sábado trabajado
+    // estando de vacaciones— y no una anomalía. Avisar le pondría una alarma
+    // delante justo al caso que la exención existe para permitir, y es lo que
+    // pasa en cuanto alguien escriba la condición como «todo lo que no ocupa
+    // agenda» en vez de como «la incapacidad».
+    //
+    // Las fechas no son las de `conAusencia`: un otorgamiento se pide por un día
+    // ya TRABAJADO y el reloj de este fichero está congelado el 2026-01-15, que
+    // es el único día que cae a la vez dentro de unas vacaciones que empiezan hoy
+    // —el alta no admite fechas pasadas— y dentro de la ventana del
+    // compensatorio, que va de hoy hacia atrás. Mismo apaño que el candado
+    // gemelo de «otorgar compensatorios».
+    const v = await pedir({ fechaInicio: '2026-01-15', fechaFin: '2026-01-23' }).expect(201);
+    fila(v.body.id as string).estado = 'aprobada';
+
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({
+        tipo: 'otorgamiento',
+        fechaInicio: '2026-01-15',
+        fechaFin: '2026-01-15',
+        dias: 1,
+        comentarios: 'Montaje de Cartagena',
+      })
+      .expect(201);
+    expect(r.body.avisoDeSolape).toBeNull();
+  });
 });
 
 // ── Aprobación ─────────────────────────────────────────────────────────────
