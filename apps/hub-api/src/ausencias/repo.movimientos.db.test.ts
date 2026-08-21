@@ -1,7 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { movimientos, empleadosConSaldo, decidirSolicitud, actualizarSolicitud } from './repo.js';
-import { transicionAlDecidir, type Solicitud } from './types.js';
+import {
+  movimientos,
+  empleadosConSaldo,
+  decidirSolicitud,
+  actualizarSolicitud,
+  crearModificacion,
+  decidirModificacion,
+  retirarModificacion,
+  solicitudPorId,
+} from './repo.js';
+import { transicionAlDecidir, type ClaseModificacion, type Modificacion, type Solicitud } from './types.js';
 import { poolDePrueba, limpiar, payloadStub, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 
 // El recorte por rama del registro de movimientos, contra Postgres de verdad.
@@ -222,5 +231,152 @@ describe('CANDADO: a quien atribuye el registro una decision sin sesion', () => 
       correo: SEGUNDO_FIRMANTE,
       aproximado: true,
     });
+  });
+});
+
+// La otra mitad del registro: las MODIFICACIONES -anulaciones y cambios de
+// fecha- como movimientos propios, y la linea que separa las que entran de las
+// que no.
+//
+// Va contra Postgres de verdad y no contra el doble porque lo que se prueba es
+// el `WHERE m.estado <> 'pendiente'` y el `COALESCE` de las fechas: dos trozos
+// de SQL que ningun doble ejecuta. Y ninguno de los dos falla en rojo si se
+// escribe mal -uno cuenta las propuestas vivas DOS veces en pantalla, el otro
+// deja una anulacion sin fechas-, que es exactamente el tipo de fallo por el
+// que existe este fichero.
+//
+// Las tres filas se escriben con `crearModificacion`, `decidirModificacion` y
+// `retirarModificacion`, que es lo que corre en produccion, y NO con un UPDATE
+// a pelo: es la misma leccion que anota el bloque de aqui arriba. Un fixture
+// que escribe la invariante a mano AFIRMA la premisa en vez de ejercitarla -y
+// aqui las premisas son justo lo que sostiene cada candado: que una anulacion
+// deja las tres columnas nuevas a NULL, que retirar sella `decidida_at` sin que
+// nadie decida, y que la propuesta viva cuelga del LEFT JOIN de
+// `SELECT_SOLICITUD`.
+
+const CAMBIANTE = 'cambiante@ambientalia.com.co';
+
+/**
+ * Una solicitud `aprobada` del CAMBIANTE con una propuesta VIVA colgando, las
+ * dos por los escritores reales.
+ *
+ * En la anulacion los tres campos nuevos van a `null` porque lo exige el CHECK
+ * `modificaciones_campos_por_clase` de la 024 - y esa obligacion es justo la
+ * premisa del COALESCE que se prueba: sus fechas efectivas solo pueden ser las
+ * previas.
+ */
+async function sembrarConPropuesta(clase: ClaseModificacion): Promise<{
+  solicitud: Solicitud;
+  modificacion: Modificacion;
+}> {
+  const empleadoId = await sembrarEmpleado(db, CAMBIANTE, JEFE);
+  const solicitud = await sembrarSolicitud(db, {
+    empleadoId,
+    correo: CAMBIANTE,
+    estado: 'aprobada',
+    fechaInicio: '2026-05-04',
+    fechaFin: '2026-05-08',
+    segundoAprobadorCorreo: null,
+  });
+  const esAnulacion = clase === 'anulacion';
+  const alta = await crearModificacion(
+    db,
+    {
+      solicitudId: solicitud.id,
+      clase,
+      estadoEsperado: 'aprobada',
+      fechaInicioNueva: esAnulacion ? null : '2026-05-11',
+      fechaFinNueva: esAnulacion ? null : '2026-05-15',
+      diasHabilesNuevos: esAnulacion ? null : 5,
+      motivo: esAnulacion ? 'Se cancelo el viaje' : 'Me cambiaron el turno',
+      // El congelado en el alta de la solicitud, que es lo que copia el
+      // servicio. `sembrarSolicitud` lo fija y no es negociable desde aqui.
+      aprobadorCorreo: PRIMER_FIRMANTE,
+    },
+    payloadStub,
+  );
+  if (!alta.ok) throw new Error(`el alta de la propuesta fallo con razon ${alta.razon}`);
+  return { solicitud, modificacion: alta.modificacion };
+}
+
+/** El movimiento de una propuesta, si el registro llega a traerlo. */
+async function movimientoDe(id: string) {
+  return (await movimientos(db, null)).find((m) => m.id === id);
+}
+
+describe('CANDADO: las modificaciones en el registro', () => {
+  it('una anulacion ya decidida es un movimiento propio, con las fechas PREVIAS', async () => {
+    const { solicitud, modificacion } = await sembrarConPropuesta('anulacion');
+    const r = await decidirModificacion(db, modificacion.id, true, null, null, payloadStub);
+    expect(r.ok).toBe(true);
+
+    const m = await movimientoDe(modificacion.id);
+    if (!m) throw new Error('la anulacion aprobada no llego al registro');
+
+    expect(m.clase).toBe('anulacion');
+    expect(m.estado).toBe('aprobada');
+    // El id es el de la PROPUESTA y `solicitudId` el de la solicitud afectada:
+    // es lo que permite que la pantalla enlace el movimiento con su ausencia.
+    expect(m.solicitudId).toBe(solicitud.id);
+    expect(m.solicitanteEmail).toBe(CAMBIANTE);
+    expect(m.empleadoNombre).toBe('Ana Ruiz');
+    // El tipo sale de la SOLICITUD afectada: sin el, el filtro por tipo de la
+    // pantalla esconderia las anulaciones de vacaciones al filtrar vacaciones.
+    expect(m.tipo).toBe('vacaciones');
+    // `motivo` es el de la propuesta -por que se anula-, no los comentarios de
+    // la solicitud.
+    expect(m.motivo).toBe('Se cancelo el viaje');
+
+    // El nucleo del candado: las tres columnas nuevas son NULL por el CHECK de
+    // la 024, asi que las fechas EFECTIVAS de una anulacion solo pueden ser las
+    // previas. Sin el COALESCE, este movimiento saldria sin fechas y la
+    // pantalla pintaria una anulacion de dias que no dice cuales.
+    expect(m.fechaInicio).toBe('2026-05-04');
+    expect(m.fechaFin).toBe('2026-05-08');
+    expect(m.diasHabiles).toBe(5);
+
+    expect(m.decididaAt).not.toBeNull();
+    // Sin sesion del portal -`userId` a null, como las de token legacy-: el
+    // decisor se deduce del correo congelado, y con la marca de aproximado.
+    expect(m.decididaPor).toEqual({ nombre: null, correo: PRIMER_FIRMANTE, aproximado: true });
+  });
+
+  it('una propuesta VIVA no entra como fila propia: ya viaja con su solicitud', async () => {
+    const { solicitud, modificacion } = await sembrarConPropuesta('fechas');
+
+    // La premisa del caso, comprobada y no supuesta: el LEFT JOIN de
+    // `SELECT_SOLICITUD` ya cuelga la propuesta viva de su solicitud. Es lo que
+    // hace que meterla ademas como movimiento la cuente DOS veces en pantalla.
+    const conPropuesta = await solicitudPorId(db, solicitud.id);
+    expect(conPropuesta?.modificacionPendiente?.id).toBe(modificacion.id);
+
+    expect(await movimientoDe(modificacion.id)).toBeUndefined();
+    // Y una sola fila para esa solicitud, la suya: el recuento es lo que caza
+    // el doble conteo, porque la fila de mas no rompe nada, solo suma.
+    const suyos = (await movimientos(db, null)).filter((m) => m.solicitudId === solicitud.id);
+    expect(suyos.map((m) => m.clase)).toEqual(['solicitud']);
+  });
+
+  it('una retirada no la decide nadie, aunque tenga aprobador congelado y decidida_at', async () => {
+    const { modificacion } = await sembrarConPropuesta('fechas');
+    const retirada = await retirarModificacion(db, modificacion.id);
+    if (!retirada) throw new Error('una propuesta viva se tiene que poder retirar');
+
+    // Las DOS premisas que hacen que este candado muerda, y por eso se
+    // comprueban: la fila retirada conserva el `aprobador_correo` congelado en
+    // el alta Y lleva `decidida_at` sellada -retirar marca el instante en que
+    // la propuesta dejo de estar viva-. Es la combinacion exacta que haria
+    // entrar al respaldo de `quienDecidio` y atribuirle el acto al jefe, que no
+    // lo hizo: la quito el propio solicitante.
+    expect(retirada.estado).toBe('retirada');
+    expect(retirada.aprobadorCorreo).toBe(PRIMER_FIRMANTE);
+    expect(retirada.decididaAt).not.toBeNull();
+
+    const m = await movimientoDe(modificacion.id);
+    // Entra: la echo atras el solicitante, pero forma parte del rastro.
+    if (!m) throw new Error('la retirada no llego al registro, y forma parte del rastro');
+    expect(m.estado).toBe('retirada');
+    expect(m.decididaAt).not.toBeNull();
+    expect(m.decididaPor).toBeNull();
   });
 });

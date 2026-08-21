@@ -2531,13 +2531,137 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
   return (rows as FilaMovimientoSolicitudDb[]).map(comoMovimientoDeSolicitud);
 }
 
+/** Una fila de la consulta de modificaciones: lo común, SU estado y SU clase. */
+interface FilaMovimientoModificacionDb extends FilaMovimientoDb {
+  clase: ClaseModificacion;
+  estado: EstadoModificacion;
+}
+
+/**
+ * Una modificación, ya como fila del registro.
+ *
+ * Aquí `clase` SÍ se lee de la fila, al revés que en
+ * `comoMovimientoDeSolicitud`, y no es una incoherencia: esta consulta trae dos
+ * clases —`fechas` y `anulacion`— y un literal solo puede nombrar una. Lo que
+ * sostiene el tipo es que `ClaseModificacion` son exactamente esos dos
+ * literales, los mismos que la rama de modificación de `Movimiento`, y que el
+ * CHECK `clase IN ('fechas','anulacion')` de la 024 impide que la columna
+ * contenga otra cosa. Sin ese CHECK, el `as` de abajo sería una promesa sobre
+ * Postgres que no verifica nadie.
+ */
+function comoMovimientoDeModificacion(r: FilaMovimientoModificacionDb): Movimiento {
+  return { ...camposComunesDelMovimiento(r, r.estado), clase: r.clase, estado: r.estado };
+}
+
+/**
+ * Las modificaciones como movimientos: solo las YA CERRADAS.
+ *
+ * `m.estado <> 'pendiente'` y no una lista de estados: `retirada` entra, aunque
+ * no la decidiera ningún jefe —la echó atrás el solicitante—, porque forma
+ * parte del rastro de la solicitud. Su decisor va a `null`, y de eso se encarga
+ * la primera guarda de `quienDecidio`.
+ *
+ * La viva se queda FUERA a propósito, y no por ahorrarse una fila: el `LEFT
+ * JOIN` de `SELECT_SOLICITUD` ya la cuelga de su solicitud
+ * (`modificacionPendiente`), así que meterla además como movimiento propio la
+ * contaría dos veces en pantalla. Y esa duplicidad no rompe nada: solo suma.
+ *
+ * Sin `ORDER BY`, por lo mismo que la consulta de las solicitudes: el orden lo
+ * pone la mezcla de `movimientos`, y ordenar aquí sería un orden que ella
+ * deshace.
+ */
+async function movimientosDeModificaciones(db: Pool, soloDe: string | null): Promise<Movimiento[]> {
+  const { rows } = await db.query(
+    // Los mismos casts, y por los mismos motivos, que la consulta de las
+    // solicitudes: `::float8` para que un NUMERIC no llegue como STRING, y
+    // `::text` para que un DATE o un timestamptz no llegue como objeto Date.
+    `SELECT m.id, m.clase::text AS clase, m.solicitud_id,
+            e.nombre_completo AS empleado_nombre, e.cargo AS empleado_cargo,
+            -- El congelado en la PROPUESTA: quien pidio el cambio. Puede no ser
+            -- el de la solicitud si la ficha cambio de correo entre medias.
+            m.solicitante_email, s.tipo,
+            -- ⚠️ El COALESCE no es cosmetico. En una anulacion las tres columnas
+            -- "nuevas" van a NULL -lo exige el CHECK modificaciones_campos_por_clase
+            -- de la 024-, asi que sus fechas EFECTIVAS son las previas. Leyendo
+            -- solo las nuevas, toda anulacion saldria sin fechas ni dias: una
+            -- fila que dice que se anularon unos dias pero no cuales.
+            COALESCE(m.fecha_inicio_nueva, m.fecha_inicio_previa)::text AS fecha_inicio,
+            COALESCE(m.fecha_fin_nueva, m.fecha_fin_previa)::text       AS fecha_fin,
+            COALESCE(m.dias_habiles_nuevos, m.dias_habiles_previos)::float8 AS dias_habiles,
+            m.estado, m.decidida_at::text AS decidida_at,
+            u.full_name AS decisor_nombre, u.email AS decisor_correo,
+            -- ⚠️ El aprobador congelado va SOLO, sin segundo_aprobador_correo ni
+            -- primera_firma_at: una modificacion la decide UNA sola persona, no
+            -- hay cascada que deducir. Los dos campos ausentes los lee
+            -- correoDelQueCerro con "?? null" justo para esto, y esa
+            -- normalizacion es lo unico que impide que la rama del segundo
+            -- firmante se dispare aqui con undefined y pierda el decisor EN
+            -- SILENCIO. No anadirlos: traerlos reactivaria la regla de la
+            -- cascada donde no aplica.
+            m.aprobador_correo,
+            m.created_at::text AS created_at,
+            -- El motivo del CAMBIO, no los comentarios de la solicitud.
+            m.motivo
+       FROM portal.solicitud_modificaciones m
+       -- La solicitud hace falta para el tipo y para llegar al empleado: la
+       -- propuesta no guarda ninguno de los dos.
+       JOIN portal.solicitudes_ausencia s ON s.id = m.solicitud_id
+       JOIN portal.empleados e ON e.id = s.empleado_id
+       -- LEFT por lo mismo que en las solicitudes: con token legacy
+       -- aprobador_user_id es NULL, y un JOIN normal borraria del registro justo
+       -- las filas cuya autoria peor consta.
+       LEFT JOIN portal.users u ON u.id = m.aprobador_user_id
+      WHERE m.estado <> 'pendiente'
+        AND ${ramaDeDosNiveles()}`,
+    // `soloDe` como PRIMER parámetro, igual que en la otra consulta: es la regla
+    // que impone `ramaDeDosNiveles`.
+    [soloDe],
+  );
+  return (rows as FilaMovimientoModificacionDb[]).map(comoMovimientoDeModificacion);
+}
+
+/**
+ * El orden del registro: lo último decidido arriba.
+ *
+ * Es el mismo `decidida_at DESC NULLS LAST, created_at DESC` que ya escribe
+ * `solicitudesDecididas` en SQL, y el `NULLS LAST` está aquí por el mismo
+ * motivo que allí: hay dos formas de llegar a estado terminal sin `decidida_at`
+ * —el PATCH de admin, que corrige la fila sin decidir nada, y aprobar una
+ * ANULACIÓN sobre una solicitud aún pendiente— y encima el registro trae
+ * también las que siguen en trámite, que no tienen fecha de cierre por
+ * definición. Sin el `NULLS LAST` todas ellas encabezarían la lista por delante
+ * de las decisiones de esta semana.
+ *
+ * Se compara con `<`/`>` sobre las cadenas y no parseando fechas: los dos
+ * valores salen del MISMO `::text` sobre un `timestamptz` en la misma sesión,
+ * así que comparten formato exacto y el orden lexicográfico es el cronológico.
+ * Es la misma propiedad en la que ya se apoya `correoDelQueCerro`.
+ */
+function porFechaDeCierre(a: Movimiento, b: Movimiento): number {
+  if (a.decididaAt !== b.decididaAt) {
+    if (a.decididaAt === null) return 1;
+    if (b.decididaAt === null) return -1;
+    return a.decididaAt < b.decididaAt ? 1 : -1;
+  }
+  if (a.createdAt === b.createdAt) return 0;
+  return a.createdAt < b.createdAt ? 1 : -1;
+}
+
 /**
  * El registro de movimientos. `soloDe = null` = la compañía entera (admin).
  *
  * Dos consultas y mezcla en TypeScript, no un `UNION ALL`: las formas de columna
  * de las dos tablas son muy distintas, la vista carga todo de una sola vez, y
  * separadas se pueden probar sin Postgres.
+ *
+ * `Promise.all` y no dos `await` seguidos: son independientes —ninguna necesita
+ * el resultado de la otra— y encadenarlas pagaría dos veces la latencia de la
+ * red por nada.
  */
 export async function movimientos(db: Pool, soloDe: string | null): Promise<Movimiento[]> {
-  return movimientosDeSolicitudes(db, soloDe);
+  const [deSolicitudes, deModificaciones] = await Promise.all([
+    movimientosDeSolicitudes(db, soloDe),
+    movimientosDeModificaciones(db, soloDe),
+  ]);
+  return [...deSolicitudes, ...deModificaciones].sort(porFechaDeCierre);
 }
