@@ -77,6 +77,7 @@ interface EmpleadoFalso {
   /** Los que el doble cuelga de la ficha para modelar otras columnas. */
   copiaCorreo?: string | null;
   veAdjuntos?: boolean;
+  exportaRegistro?: boolean;
   saldoCorte?: number | null;
   fechaCorte?: string | null;
 }
@@ -131,6 +132,14 @@ const estado = {
   registroVisores: [] as Record<string, unknown>[],
   /** Para simular que la escritura del registro (dentro de la transacción) falla. */
   fallarRegistroVisor: false,
+  /**
+   * La tabla `portal.exportadores_registro_log`. Ningún test de ESTE fichero
+   * la lee todavía — no hay endpoint del router que llame a `fijarExportador`
+   * en esta tarea (Task 7 del plan solo toca el repo) — pero vive aquí desde
+   * ya para que el día que ese endpoint exista el doble no tenga que tocarse
+   * dos veces.
+   */
+  registroExportadores: [] as Record<string, unknown>[],
 };
 
 /**
@@ -510,6 +519,30 @@ vi.mock('./repo.js', async () => ({
       empleadoCorreo: cambio.empleadoCorreo,
       concedido: cambio.veAdjuntos,
     });
+    return true;
+  },
+  // Par gemelo de `esVisorDeAdjuntos`/`fijarVisorConRegistro`, con la misma
+  // forma: `activo !== false` en la lectura y en la escritura, y el log
+  // creciendo con cada cambio. Modela el `AND activo` de las dos consultas
+  // reales y el hecho de que el correo del log sale de la FICHA, no de quien
+  // llama (igual que `RETURNING correo` en el repo real).
+  //
+  // NO modela un fallo a medio camino entre el UPDATE y el INSERT: no hay una
+  // bandera `fallarRegistroExportador` como `fallarRegistroVisor`, porque
+  // ningún test de este fichero ejercita esa rama todavía — no hay endpoint
+  // que llame a `fijarExportador` en esta tarea. Quien cablee el botón de
+  // exportar y quiera probar esa atomicidad tendrá que añadirla, igual que
+  // aquí se añadió para el visor.
+  puedeExportarRegistro: async (_db: unknown, email: string) =>
+    estado.plantilla.some(
+      (e: any) =>
+        String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.exportaRegistro === true,
+    ),
+  fijarExportador: async (_db: unknown, adminEmail: string, empleadoId: string, concedido: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId && x.activo !== false);
+    if (!e) return false;
+    e.exportaRegistro = concedido;
+    estado.registroExportadores.push({ adminEmail, empleadoId, empleadoCorreo: e.correo, concedido });
     return true;
   },
   crearSolicitud: async (
@@ -1057,6 +1090,7 @@ beforeEach(() => {
   estado.seq = 0;
   estado.registroVisores = [];
   estado.fallarRegistroVisor = false;
+  estado.registroExportadores = [];
 });
 
 // Sin esto, el reloj falso se filtraría a los ficheros de test que corran

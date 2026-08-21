@@ -597,6 +597,64 @@ export async function fijarVisorConRegistro(db: Pool, cambio: CambioVisor): Prom
   });
 }
 
+/**
+ * Si ese correo tiene marcado el permiso de exportar el registro.
+ *
+ * Consulta por correo y no por id, por el mismo motivo que `esVisorDeAdjuntos`:
+ * quien pregunta es una sesión, y una sesión puede no tener ficha de empleado —
+ * en ese caso no puede exportar, que es la respuesta correcta.
+ */
+export async function puedeExportarRegistro(db: Pool, email: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados WHERE lower(correo) = lower($1) AND activo AND exporta_registro`,
+    [email],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Da o quita el permiso de exportar, y lo DEJA REGISTRADO, en la MISMA
+ * transacción — mismo motivo que `fijarVisorConRegistro` (ver arriba): si el
+ * UPDATE cuajara y el INSERT fallara, el permiso quedaría concedido sin una
+ * sola línea de auditoría, y un reintento posterior no tendría forma de
+ * notar el hueco (el estado ya coincidiría con lo pedido) para repararlo.
+ *
+ * El log guarda el correo además del id y sin clave foránea, por lo mismo que
+ * `visores_adjuntos_log`: si la ficha se borra, el registro tiene que seguir
+ * diciendo a quién se le dio. Un registro que desaparece con su sujeto no es
+ * un registro de auditoría.
+ *
+ * El correo que se registra es el que devuelve el propio UPDATE (`RETURNING
+ * correo`) y no uno que traiga quien llama: así la función no depende de que
+ * el llamador haya cargado la ficha de antemano, y el log siempre refleja el
+ * correo que la fila tenía en el instante del cambio.
+ *
+ * Devuelve false si la ficha no existía o estaba inactiva, y entonces no se
+ * escribe registro: un intento fallido no puede ensuciar la auditoría.
+ */
+export async function fijarExportador(
+  db: Pool,
+  adminEmail: string,
+  empleadoId: string,
+  concedido: boolean,
+): Promise<boolean> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(
+      `UPDATE portal.empleados SET exporta_registro = $2 WHERE id = $1 AND activo RETURNING correo`,
+      [empleadoId, concedido],
+    );
+    if (!rows.length) return false;
+
+    await client.query(
+      `INSERT INTO portal.exportadores_registro_log
+         (admin_email, empleado_id, empleado_correo, concedido)
+       VALUES (lower($1), $2, lower($3), $4)`,
+      [adminEmail, empleadoId, (rows[0] as { correo: string }).correo, concedido],
+    );
+    return true;
+  });
+}
+
 // ── Histórico importado de la hoja ─────────────────────────────────────────
 
 /** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
