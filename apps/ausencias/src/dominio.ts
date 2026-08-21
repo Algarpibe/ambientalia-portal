@@ -484,8 +484,8 @@ export function resumenCambio(
  * En tercera persona («Pide…») y no en segunda. Como texto visible solo aparece
  * en «Mis solicitudes», donde un «Pediste» sería correcto; pero es además el
  * `title` del chip «Cambio pendiente», y ese chip lo pintan también la bandeja,
- * el historial del aprobador, los soportes adjuntos y el Registro general, donde
- * quien lee no es quien pidió nada.
+ * los soportes adjuntos y el Registro general, donde quien lee no es quien
+ * pidió nada.
  */
 export function resumenPropuesta(m: Modificacion): string {
   if (m.clase === 'anulacion') return 'Pide anular la solicitud.';

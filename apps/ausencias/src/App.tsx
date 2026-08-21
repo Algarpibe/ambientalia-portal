@@ -32,7 +32,6 @@ import FormularioSolicitud from './FormularioSolicitud';
 import PedirModificacion from './PedirModificacion';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
-import HistorialAprobador from './HistorialAprobador';
 import PanelAdjuntos from './PanelAdjuntos';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
@@ -46,7 +45,6 @@ const PESTANAS_VALIDAS = [
   'nueva',
   'mias',
   'bandeja',
-  'historial',
   'adjuntos',
   'empleados',
   'organigrama',
@@ -82,12 +80,12 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Pestana>(pestanaInicial);
-  // Se incrementa al importar para que el registro general se recargue sin
-  // desmontarlo (y sin perder los filtros que tuviera puestos).
+  // Se incrementa al importar, y también al decidir algo —aprobar, rechazar o
+  // cerrar un cambio—, para que el registro general se recargue sin
+  // desmontarlo (y sin perder los filtros que tuviera puestos). Antes esto
+  // último lo cubría un token aparte para el historial del aprobador; al
+  // fusionarse esa pestaña dentro de esta, el token se fusiona con ella.
   const [recargarRegistro, setRecargarRegistro] = useState(0);
-  // Lo mismo para el historial del aprobador: acabar de decidir algo tiene que
-  // hacer que aparezca ahí, no en la siguiente recarga de la app.
-  const [recargarHistorial, setRecargarHistorial] = useState(0);
   // Qué solicitud tiene abierto el modal de «pedir un cambio», y con qué opción
   // marcada de entrada: los dos botones de la fila abren el mismo formulario.
   const [modificando, setModificando] = useState<{ solicitud: Solicitud; clase: ClaseModificacion } | null>(null);
@@ -166,7 +164,14 @@ export default function App() {
       // nunca puede alcanzar.
       const { total } = contarPorAtender(pendientes, cambios);
       p.push(['bandeja', `Pendientes de aprobar${total ? ` (${total})` : ''}`]);
-      p.push(['historial', 'Historial de aprobaciones']);
+      // Mismo reparto de responsabilidad que el calendario de arriba: la abre
+      // cualquier aprobador y no solo un admin, pero lo que ENSEÑA lo recorta
+      // hub-api por rama del organigrama —dos niveles hacia abajo— para quien
+      // no lo es. Antes hacía falta una pestaña de admin aparte, «Historial de
+      // aprobaciones», porque no había otro sitio donde un aprobador viera lo
+      // que él mismo ya había cerrado; con ese recorte por rama ya sobra, así
+      // que desaparece y esta pantalla hace su trabajo además del suyo.
+      p.push(['historico', 'Registro general']);
     }
     // Va antes del bloque de admin porque no es una pestaña de admin: la abre
     // también quien tenga la llave maestra de adjuntos sin ser administrador,
@@ -181,7 +186,6 @@ export default function App() {
       // revisa cada vez que alguien cambia de jefe. Juntos, el segundo quedaba
       // enterrado bajo el primero.
       p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos']);
-      p.push(['historico', 'Registro general']);
     }
     return p;
   }, [contexto, pendientes.length, cambios.length]);
@@ -246,8 +250,8 @@ export default function App() {
     setCambios((cs) =>
       cs.map((c) => (c.id === s.id ? { ...c, ...s, modificacionPendiente: c.modificacionPendiente } : c)),
     );
-    // Si con esta firma la solicitud queda cerrada, pasa a estar en el historial.
-    if (!enTramite(s.estado)) setRecargarHistorial((n) => n + 1);
+    // Si con esta firma la solicitud queda cerrada, pasa a estar en el registro general.
+    if (!enTramite(s.estado)) setRecargarRegistro((n) => n + 1);
     // Misma razón que en onCreada: aprobar o rechazar vacaciones cambia el
     // disponible de esa persona, y otra fila suya en la bandeja seguiría
     // mostrando el número de antes de esta decisión. Se llega aquí solo desde
@@ -288,11 +292,11 @@ export default function App() {
     );
     // También en «Mis solicitudes»: un admin puede decidir un cambio suyo.
     setMias((ms) => ms.map((m) => (m.id === solicitud.id ? solicitud : m)));
-    // Cerrada = está en el historial del aprobador, y con las fechas de ahora.
-    // Se llega aquí con `false` solo desde una solicitud todavía en trámite; el
+    // Cerrada = está en el registro general, y con las fechas de ahora. Se
+    // llega aquí con `false` solo desde una solicitud todavía en trámite; el
     // caso principal —una `aprobada` a la que le cambian las fechas— entra, y
-    // debe entrar: la fila que el historial tiene pintada acaba de envejecer.
-    if (!enTramite(solicitud.estado)) setRecargarHistorial((n) => n + 1);
+    // debe entrar: la fila que el registro tiene pintada acaba de envejecer.
+    if (!enTramite(solicitud.estado)) setRecargarRegistro((n) => n + 1);
     // Al revés que al PEDIRLO (`fijarPropuesta` no toca el saldo a propósito:
     // una propuesta pendiente no mueve ni un día), aprobar SÍ lo mueve: anular
     // unas vacaciones devuelve todos sus días y acortarlas devuelve parte.
@@ -543,8 +547,23 @@ export default function App() {
                   onError={setError}
                 />
               </div>
-              <div className={tab === 'historial' ? '' : 'hidden'}>
-                <HistorialAprobador activo={tab === 'historial'} recargarToken={recargarHistorial} />
+              <div className={tab === 'historico' ? '' : 'hidden'}>
+                {/* La importación del histórico legado sigue siendo cosa de
+                    admin: `/ausencias/historico/import` sigue detrás de
+                    `requireAdmin` en hub-api, así que un aprobador que no lo
+                    sea nunca podría usarla — dejar el botón visible solo le
+                    daría un 403. El registro de abajo sí es de cualquier
+                    aprobador: son dos permisos distintos que comparten
+                    pestaña. */}
+                {contexto.esAdmin && (
+                  <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
+                )}
+                <RegistroGeneral
+                  recargarToken={recargarRegistro}
+                  festivos={festivos}
+                  esAdmin={contexto.esAdmin}
+                  puedeExportar={contexto.esExportadorRegistro}
+                />
               </div>
             </>
           )}
@@ -565,10 +584,6 @@ export default function App() {
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
                 <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldosPropios} />
-              </div>
-              <div className={tab === 'historico' ? '' : 'hidden'}>
-                <ImportarHistorico onImportado={() => setRecargarRegistro((n) => n + 1)} />
-                <RegistroGeneral recargarToken={recargarRegistro} festivos={festivos} />
               </div>
             </>
           )}
