@@ -422,6 +422,12 @@ async function errorDeAusencia(res: Response): Promise<Error> {
     dias_invalidos: 'Los días a conceder tienen que ser un número mayor que cero, con una décima como mucho (por ejemplo 0,5 o 1).',
     dias_demasiados: 'Como máximo se pueden pedir 30 días en una sola petición.',
     otorgamiento_solo_anulable: 'Un compensatorio concedido no tiene fechas que cambiar: solo se puede anular.',
+    // Nombra el día porque el error llega sin detalle: quien lo lee acaba de
+    // teclear esa fecha y no siempre recuerda haberla pedido ya —justo lo que
+    // hacía que se reclamara dos veces—.
+    otorgamiento_duplicado:
+      'Ya pediste un compensatorio por ese mismo día trabajado. Si el anterior sigue pendiente o te lo concedieron, ' +
+      'esos días ya están contados; si te lo rechazaron, puedes volver a pedirlo.',
   };
   if (cuerpo?.error && DEL_OTORGAMIENTO[cuerpo.error]) return new Error(DEL_OTORGAMIENTO[cuerpo.error]);
   if (cuerpo?.error === 'compensatorios_sin_saldo') {

@@ -2361,6 +2361,49 @@ export async function solapeDe(
   return { id: r.id, tipo: r.tipo, estado: r.estado, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin };
 }
 
+/**
+ * Si esta persona ya tiene VIVO un otorgamiento por ese mismo día trabajado.
+ *
+ * Pregunta aparte, y no una condición más dentro de `solapeDe`, porque son dos
+ * reglas que no se pueden fundir sin romper una de las dos. Un otorgamiento SÍ
+ * puede caer encima de unas vacaciones —su fecha es el día que se TRABAJÓ, y
+ * trabajar un sábado durante las propias vacaciones es el caso más típico que
+ * hay—, y por eso está exento de `ocupaAgenda`. Pero esa exención dejaba abierto
+ * reclamar DOS veces la misma jornada, que concede el doble de días por un solo
+ * día de trabajo. De ahí una regla propia y estrecha: solo contra otro
+ * otorgamiento, solo del mismo día.
+ *
+ * `estado <> 'rechazada'` por lo mismo que en `solapeDe`: a quien le nieguen la
+ * concesión tiene que poder volver a pedirla. Y una anulación aprobada deja la
+ * fila `rechazada`, así que también libera el día.
+ *
+ * Compara `fecha_inicio` a secas y no un rango porque un otorgamiento es SIEMPRE
+ * de un solo día: lo garantiza `otorgamiento_un_solo_dia` en el servicio, que es
+ * quien valida antes de llegar aquí.
+ *
+ * `excluirSolicitudId` existe por lo mismo que en `solapeDe`: al corregir una
+ * fila, sin él chocaría contra ella misma.
+ */
+export async function existeOtorgamientoDelDia(
+  db: Pool | PoolClient,
+  empleadoId: string,
+  fecha: string,
+  excluirSolicitudId: string | null,
+): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1
+       FROM portal.solicitudes_ausencia
+      WHERE empleado_id = $1
+        AND tipo   = 'otorgamiento'
+        AND estado <> 'rechazada'
+        AND fecha_inicio = $2::date
+        AND ($3::uuid IS NULL OR id <> $3)
+      LIMIT 1`,
+    [empleadoId, fecha, excluirSolicitudId],
+  );
+  return rows.length > 0;
+}
+
 // ── El registro de movimientos ─────────────────────────────────────────────
 
 /**

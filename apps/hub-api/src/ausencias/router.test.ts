@@ -1017,6 +1017,30 @@ vi.mock('./repo.js', async () => ({
     }
     return buscarSolape(empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
   },
+
+  // REGLA DE SQL REIMPLEMENTADA AQUI. Es la del duplicado del otorgamiento, y es
+  // deliberadamente MAS ESTRECHA que `buscarSolape`: mira solo otro
+  // otorgamiento, solo del mismo dia, y NO llama a `ocupaAgenda` — un
+  // otorgamiento nunca ocupa agenda, asi que preguntarselo daria siempre que no
+  // y esta regla no existiria.
+  //
+  // El candado que la vigila contra Postgres de verdad vive en
+  // `repo.solapes.db.test.ts`; aqui solo se replica para que los tests del alta
+  // puedan correr sin base de datos.
+  existeOtorgamientoDelDia: async (
+    _db: unknown,
+    empleadoId: string,
+    fecha: string,
+    excluirSolicitudId: string | null,
+  ) =>
+    estado.solicitudes.some(
+      (s: any) =>
+        s.empleadoId === empleadoId &&
+        s.tipo === 'otorgamiento' &&
+        s.estado !== 'rechazada' &&
+        s.fechaInicio === fecha &&
+        (excluirSolicitudId === null || s.id !== excluirSolicitudId),
+    ),
 }));
 
 // ── El candado del doble ───────────────────────────────────────────────────
@@ -4776,6 +4800,41 @@ describe('otorgar compensatorios', () => {
 
   const pedir = (body: Record<string, unknown>) =>
     request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(body);
+
+  it('CANDADO: el mismo dia trabajado no se puede reclamar dos veces', async () => {
+    // El otorgamiento esta exento de la regla de solapes, y con motivo: su fecha
+    // es el dia que se TRABAJO, asi que tiene que poder caer dentro de las
+    // propias vacaciones. Pero esa exencion se llevaba por delante lo unico que
+    // si hacia falta — reclamar DOS veces el mismo sabado concede el doble de
+    // dias por un solo dia de trabajo, y ninguna de sus cuatro reglas propias
+    // (un solo dia, no muy antiguo, no futuro, motivo obligatorio) lo miraba.
+    //
+    // La regla nueva es SOLO contra otro otorgamiento del mismo dia: la exencion
+    // frente a las ausencias sigue intacta, y hay un candado aparte que la fija.
+    await pedir(otorgamiento()).expect(201);
+    await pedir(otorgamiento()).expect(409);
+  });
+
+  it('CANDADO: y sigue pudiendose reclamar un sabado que cae dentro de las vacaciones', async () => {
+    // La otra mitad, y la que impide arreglar lo de arriba de la forma facil:
+    // meter el otorgamiento en `ocupaAgenda` cerraria el duplicado y de paso
+    // romperia el caso mas tipico que hay — trabajar un sabado DURANTE las
+    // propias vacaciones. Hasta hoy esa exencion no tenia ni un test.
+    //
+    // Las vacaciones se siembran en el estado y no se piden por la API a
+    // proposito: para contener al sabado tendrian que empezar antes del reloj
+    // congelado de este fichero, y ahi las frenaria la regla de no pedir dias
+    // pasados. Lo que se prueba aqui es el solape, no aquella.
+    estado.solicitudes.push({
+      id: '55555555-5555-4555-8555-555555555555',
+      empleadoId: estado.empleado.id,
+      tipo: 'vacaciones',
+      estado: 'aprobada',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-16',
+    });
+    await pedir(otorgamiento()).expect(201);
+  });
 
   it('CANDADO: los dias concedidos son los que se pidieron, NO los habiles', () => {
     // El sabado por el que se gana un compensatorio da CERO dias habiles. Si
