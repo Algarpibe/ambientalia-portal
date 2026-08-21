@@ -64,17 +64,11 @@ export function createUsersRouter(pool: Pool): Router {
     }
   });
 
-  // PATCH /api/users/me/profile { fullName } — el usuario edita su propio nombre.
-  router.patch('/users/me/profile', requireAuth, async (req: Request, res: Response) => {
-    const payload = getPayload(req);
-    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
-    try {
-      const profile = await service.updateName(payload.user_id, (req.body ?? {}).fullName);
-      res.json({ message: 'profile_updated', profile });
-    } catch (e) {
-      sendError(res, e, 'update_profile');
-    }
-  });
+  // No hay PATCH /users/me/profile: el nombre completo queda fijado con lo que se
+  // escribió en el registro. Es el nombre con el que la persona firma las
+  // aprobaciones de ausencias (se guarda como `decisor_nombre`), así que dejar
+  // que cada cual se renombre reescribiría a posteriori quién aparece en
+  // decisiones ya tomadas. Mismo trato que el correo, que tampoco se edita.
 
   // PATCH /api/users/me/avatar { avatar } — data URL de imagen (thumbnail).
   router.patch('/users/me/avatar', requireAuth, async (req: Request, res: Response) => {

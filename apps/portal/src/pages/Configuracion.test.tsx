@@ -35,6 +35,20 @@ describe('Configuración', () => {
     expect(screen.getByText(/marzo de 2026/i)).toBeTruthy();
   });
 
+  // El nombre se fija en el registro: es con el que se firman las aprobaciones.
+  it('el nombre completo se muestra pero no se edita', () => {
+    render(<Configuracion />);
+    expect((screen.getByDisplayValue('Alfonso García') as HTMLInputElement).readOnly).toBe(true);
+    // Se fue el botón que lo guardaba; el de contraseña sigue en su sitio.
+    expect(screen.queryByText('Guardar')).toBeNull();
+    expect(screen.getByText('Actualizar Contraseña')).toBeTruthy();
+  });
+
+  it('no llama a PATCH /me/profile en ningún caso', () => {
+    render(<Configuracion />);
+    expect(mockFetch).not.toHaveBeenCalledWith('/api/users/me/profile', expect.anything());
+  });
+
   it('contraseñas que no coinciden → notifica error y no llama al endpoint', () => {
     render(<Configuracion />);
     fireEvent.change(screen.getByPlaceholderText('Tu contraseña actual'), { target: { value: 'actual123' } });

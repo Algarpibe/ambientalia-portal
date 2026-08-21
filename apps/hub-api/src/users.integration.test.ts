@@ -338,13 +338,19 @@ describe('perfil propio (/api/users/me)', () => {
     expect(res.body).not.toHaveProperty('password_hash');
   });
 
-  it('PATCH /me/profile actualiza el nombre; vacío → 400', async () => {
-    const ok = await request(app).patch('/api/users/me/profile').set(bearer(readerToken)).send({ fullName: 'Nuevo Nombre' });
-    expect(ok.status).toBe(200);
-    expect(ok.body.profile.full_name).toBe('Nuevo Nombre');
+  // El nombre queda fijado en el registro. Esconderlo en la UI no bastaba: con
+  // el endpoint vivo, cualquiera con el token podía renombrarse por API y
+  // reescribir cómo aparece en las aprobaciones que ya firmó.
+  it('el nombre no se puede cambiar: ya no existe PATCH /me/profile', async () => {
+    const res = await request(app)
+      .patch('/api/users/me/profile')
+      .set(bearer(readerToken))
+      .send({ fullName: 'Nombre Suplantado' });
+    expect(res.status).toBe(404);
 
-    const bad = await request(app).patch('/api/users/me/profile').set(bearer(readerToken)).send({ fullName: '   ' });
-    expect(bad.status).toBe(400);
+    // Y sigue siendo el del registro.
+    const perfil = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(perfil.body.full_name).not.toBe('Nombre Suplantado');
   });
 
   it('PATCH /me/avatar: data URL válida → 200, basura → 400', async () => {

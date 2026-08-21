@@ -160,16 +160,8 @@ export class UserService {
     return profile;
   }
 
-  /** Actualiza el nombre propio (1–100 chars). 404 si no existe. */
-  async updateName(id: string, fullName: string): Promise<SelfProfile> {
-    const name = String(fullName ?? '').trim();
-    if (name.length < 1 || name.length > MAX_FULL_NAME_LENGTH) {
-      throw new UserError('invalid_full_name', 400, 'fullName');
-    }
-    const updated = await this.repo.updateName(id, name);
-    if (!updated) throw new UserError('user_not_found', 404);
-    return updated;
-  }
+  // No hay updateName: el nombre se valida y se graba una sola vez, al
+  // registrarse (ver `register`, que sigue usando MAX_FULL_NAME_LENGTH).
 
   /** Actualiza el avatar propio (data URL de imagen, tamaño acotado). */
   async updateAvatar(id: string, avatar: string): Promise<void> {
