@@ -470,6 +470,16 @@ function aMovimiento(r: FilaMovimientoDb): Movimiento {
   //
   // Por lo demás: el decisor REAL manda; si no consta —token legacy—, se cae al
   // aprobador congelado y se MARCA. Ver `DecididaPor.aproximado`.
+  //
+  // ⚠️ Y el respaldo NO es el primer aprobador sin mirar. Si la solicitud
+  // llevaba cascada de dos firmas y se cerró estando en `pendiente_2`, quien
+  // debía firmar era el SEGUNDO. Caer al primero nombraría a una persona real y
+  // equivocada, que no es aproximar: es mentir con nombre y apellidos, la misma
+  // clase de fallo que evita la guarda de `retirada` de aquí arriba.
+  //
+  // La regla: con `segundo_aprobador_correo` y `primera_firma_at` no nulos, el
+  // respaldo es el segundo; si no, el primero. Con candado propio en
+  // `repo.movimientos.db.test.ts`, porque una regla sin test es un comentario.
   const decididaPor: DecididaPor | null =
     r.estado === 'retirada'
       ? null
@@ -553,8 +563,11 @@ Expected: **PASS**, los cinco.
 
 - [ ] **Step 4: Falsar el candado**
 
-Sustituir `WHERE ${ramaDeDosNiveles()}` por `WHERE TRUE` y volver a correr.
-Expected: **FAIL** en los tres primeros tests. Revertir después.
+⚠️ **`WHERE TRUE` a secas NO sirve como falsación.** Al quitar el `$1` del SQL, la consulta pasa a requerir cero parámetros mientras el código sigue pasando uno, y Postgres corta con `bind message supplies 1 parameters, but prepared statement "" requires 0`. Los tests mueren de error de binding, no de dato mal filtrado: un rojo que no distingue nada y que da una falsa sensación de candado.
+
+La mutación honesta **conserva la aridad y anula el recorte**: sustituir el cuerpo de `ramaDeDosNiveles()` por `($1::text IS NULL OR TRUE)`. Volver a correr.
+
+Expected: **FAIL** en el test del bisnieto, en el del primo y en el de «ve a su hijo y a su nieto». Sigue verde el del admin, y es correcto: con `soloDe = null` la rama no acota de todos modos. Revertir después.
 
 - [ ] **Step 5: Commit**
 
