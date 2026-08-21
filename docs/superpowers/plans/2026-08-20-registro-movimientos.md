@@ -477,9 +477,26 @@ function aMovimiento(r: FilaMovimientoDb): Movimiento {
   // equivocada, que no es aproximar: es mentir con nombre y apellidos, la misma
   // clase de fallo que evita la guarda de `retirada` de aquí arriba.
   //
-  // La regla: con `segundo_aprobador_correo` y `primera_firma_at` no nulos, el
-  // respaldo es el segundo; si no, el primero. Con candado propio en
-  // `repo.movimientos.db.test.ts`, porque una regla sin test es un comentario.
+  // La regla lleva TRES términos, y el tercero no es paranoia:
+  //
+  //   segundo_aprobador_correo != null
+  //   && primera_firma_at != null
+  //   && primera_firma_at != decidida_at
+  //
+  // Sin el tercero, el caso simétrico se misatribuye igual de mal. Cuando el
+  // jefe inmediato RECHAZA una solicitud que sí llevaba cascada,
+  // `transicionAlDecidir` devuelve `esPrimeraFirma` y `esDecisionFinal` a la
+  // vez, y `decidirSolicitud` sella las dos marcas con el mismo `now()` en la
+  // misma sentencia: queda segundo firmante no nulo y primera firma no nula, y
+  // sin embargo decidió el primero. Comparar los dos instantes distingue «un
+  // solo acto» de «dos transacciones», y es exacto —no aproximado— porque las
+  // dos cadenas salen del mismo cast en la misma consulta.
+  //
+  // `correoDelTurno` NO sirve aquí: contesta a quién le toca firmar AHORA y
+  // devuelve null en todo estado terminal, y aquí toda fila está cerrada.
+  //
+  // Con candado propio en `repo.movimientos.db.test.ts` —uno por cada final
+  // posible—, porque una regla sin test es un comentario.
   const decididaPor: DecididaPor | null =
     r.estado === 'retirada'
       ? null
@@ -675,6 +692,12 @@ describe('CANDADO: que filas entran', () => {
 
 Run: `cd apps/hub-api; npm run test:db -- src/ausencias/repo.movimientos.db.test.ts`
 Expected: **FAIL** en «una modificacion CERRADA entra» — todavía no se consultan.
+
+> ⚠️ **Al compartir `quienDecidio` con las modificaciones**, pasarle
+> `primera_firma_at` y `segundo_aprobador_correo` **a `null` explícitamente**. Una
+> modificación no tiene ninguna de las dos —la decide una sola persona, y su
+> `aprobador_correo` se copia de la solicitud—, así que dejar que la fila las
+> traiga por casualidad reactivaría la regla de la cascada donde no aplica.
 
 - [ ] **Step 3: Escribir la consulta de modificaciones**
 
