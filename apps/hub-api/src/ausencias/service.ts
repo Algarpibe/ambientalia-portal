@@ -36,6 +36,7 @@ import {
   type EstadoModificacion,
   type EstadoSolicitud,
   type Modificacion,
+  type Movimiento,
   type NuevaModificacion,
   type NuevaSolicitud,
   type Solicitud,
@@ -644,16 +645,26 @@ export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<Sol
 }
 
 /**
- * El historial de decisiones de quien pregunta: lo que le tocaba firmar y ya
- * está cerrado.
+ * El registro de movimientos que le corresponde a quien pregunta.
  *
- * Siempre acotado al propio correo, también para un admin. Un admin que quiera
- * verlo todo tiene *Registro general*; que esta pestaña le enseñara la empresa
- * entera la convertiría en un duplicado peor de aquella, y en una sorpresa para
- * quien la abra esperando lo suyo.
+ * ⚠️ El recorte lo decide AQUÍ el servidor a partir de la sesión, y NUNCA un
+ * parámetro que mande el cliente: es la única barrera entre un jefe y el
+ * historial de toda la empresa.
+ *
+ * Sustituye a `decididasPorMi` —que iba acotada al correo y sin guard porque
+ * una lista vacía ya era la respuesta correcta—. Aquí no vale ese criterio: el
+ * `soloDe` de `repo.movimientos` recorta por RAMA del organigrama, así que a
+ * quien no aprueba a nadie no le saldría una lista vacía sino su propia rama
+ * vacía... y a quien sí aprueba le saldrían las incapacidades y los permisos
+ * —con sus motivos— de su rama. Por eso el 403 explícito: quien no es aprobador
+ * no tiene registro que ver, y decírselo es mejor que enseñarle un vacío que
+ * parece un fallo.
  */
-export async function decididasPorMi(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
-  return repo.solicitudesDecididas(db, sesion.email);
+export async function movimientosVisibles(db: Pool, sesion: Sesion): Promise<Movimiento[]> {
+  if (!sesion.esAdmin && !(await repo.esAprobadorDeAlguien(db, sesion.email))) {
+    throw new AusenciaError('no_es_aprobador', 403);
+  }
+  return repo.movimientos(db, sesion.esAdmin ? null : sesion.email);
 }
 
 /**
@@ -1051,8 +1062,13 @@ const tienePropuesta = (s: Solicitud): s is Solicitud & { modificacionPendiente:
  * Las solicitudes con una propuesta viva que le toca decidir a quien pregunta.
  *
  * Sin guard de aprobador: quien no tenga ninguna recibe lista vacía, no un 403.
- * Mismo criterio que `decididasPorMi` — un 403 no aportaría nada y obligaría a
- * la app a saber de antemano si alguien es decisor.
+ * Mismo criterio que `pendientesDeAprobar` — un 403 no aportaría nada y
+ * obligaría a la app a saber de antemano si alguien es decisor.
+ *
+ * Es el criterio CONTRARIO al de `movimientosVisibles`, y a propósito: esta
+ * bandeja acota por el decisor congelado en cada propuesta, así que quien no
+ * decide nada recibe de verdad una lista vacía. Aquella acota por RAMA del
+ * organigrama, y ahí no ponerle guard sería dejar la puerta abierta.
  *
  * ⚠️ La fila puede venir con `puedoDecidirla: false`, y no es un caso raro: la
  * RAÍZ del organigrama es su propio jefe (`aprobadoresDe` lo trata así a
@@ -1565,6 +1581,53 @@ export async function fijarVisor(
   const actualizado = actualizados.find((e) => e.id === empleadoId);
   if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
   return actualizado;
+}
+
+/**
+ * Da o quita el permiso de exportar el registro, dejando constancia.
+ *
+ * Recibe la `Sesion` por lo mismo que `fijarVisor`: el registro tiene que decir
+ * QUIÉN lo concedió. Exportar es sacar de la aplicación las incapacidades y los
+ * permisos de la plantilla —con sus motivos— a un fichero que ya nadie
+ * controla, así que quién dio esa llave es tan auditable como quién dio la de
+ * los adjuntos.
+ *
+ * Sin el «si no cambia, no se escribe» de `fijarVisor`, y no por descuido: aquel
+ * lo necesita porque su botón guarda la fila entera del panel y llegaría aquí
+ * también al tocar el jefe o la copia, y porque `repo.empleadoPorId` ya devuelve
+ * `veAdjuntos` con el que comparar. `exportaRegistro` no viaja en `Empleado`, así
+ * que el guard costaría una consulta más para ahorrar una línea de un registro
+ * que casi nadie va a escribir; si el panel acaba guardando la fila entera, este
+ * es el sitio donde añadirlo.
+ *
+ * Devuelve `{ ok: true }` y nada más —no la ficha, al contrario que `fijarVisor`—
+ * porque el permiso no se pinta en la fila del maestro: quien lo cambia solo
+ * necesita saber que cuajó. Los caminos que no cuajan salen por `AusenciaError`,
+ * así que el `ok` nunca llega a ser `false`; el tipo lo admite para que añadir un
+ * «no se pudo» no cambie el contrato del cliente.
+ */
+export async function fijarExportador(
+  db: Pool,
+  sesion: Sesion,
+  empleadoId: string,
+  body: { concedido?: unknown },
+): Promise<{ ok: boolean }> {
+  // El tipo se exige, no se interpreta, igual que en `fijarSegundaFirma`: `'no'`
+  // es una cadena con valor de verdad, y aceptarla concedería el permiso que
+  // alguien quiso quitar.
+  const concedido = (body ?? {}).concedido;
+  if (typeof concedido !== 'boolean') {
+    throw new AusenciaError('exportador_invalido', 400, 'concedido');
+  }
+
+  // Una sola llamada que cambia el permiso Y lo registra en la misma
+  // transacción: el porqué está en `repo.fijarExportador`.
+  if (!(await repo.fijarExportador(db, sesion.email, empleadoId, concedido))) {
+    // Ficha inexistente o inactiva. Las dos son un 404 para quien llama, y en
+    // las dos el repo se ha guardado de escribir nada en la auditoría.
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+  return { ok: true };
 }
 
 /** Las dos bolsas de un empleado, listas para enseñar. */

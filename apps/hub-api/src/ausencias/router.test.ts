@@ -133,14 +133,69 @@ const estado = {
   /** Para simular que la escritura del registro (dentro de la transacción) falla. */
   fallarRegistroVisor: false,
   /**
-   * La tabla `portal.exportadores_registro_log`. Ningún test de ESTE fichero
-   * la lee todavía — no hay endpoint del router que llame a `fijarExportador`
-   * en esta tarea (Task 7 del plan solo toca el repo) — pero vive aquí desde
-   * ya para que el día que ese endpoint exista el doble no tenga que tocarse
-   * dos veces.
+   * La tabla `portal.exportadores_registro_log`. La leen los candados de
+   * `PUT /ausencias/empleados/:id/exportador`: es lo único que dice quién dio
+   * permiso para sacar el registro de la aplicación.
    */
   registroExportadores: [] as Record<string, unknown>[],
+  /**
+   * El `soloDe` con el que el servicio llamó a `repo.movimientos`, una entrada
+   * por llamada.
+   *
+   * Es una LISTA y no un `ultimoSoloDe` suelto porque hacen falta las dos cosas
+   * a la vez: el valor (¿el correo de la sesión o `null`?) y si hubo llamada
+   * siquiera — un 403 que llegara DESPUÉS de haber consultado el registro habría
+   * leído igualmente lo que no debía. Con una variable suelta, «no se llamó» y
+   * «se llamó con null» serían indistinguibles.
+   */
+  soloDeDeMovimientos: [] as (string | null)[],
 };
+
+/**
+ * Lo que el doble devuelve SIEMPRE por `movimientos`, sea quien sea quien
+ * pregunte. Dos filas, una de cada rama de la unión `Movimiento` (una solicitud
+ * y una anulación cerrada), para que la ruta tenga forma que devolver y se vea
+ * que las dos clases viajan enteras hasta el JSON.
+ *
+ * Que sea FIJA es la mitad del argumento: ver el comentario de `movimientos` en
+ * el doble.
+ */
+const MOVIMIENTOS_FALSOS = [
+  {
+    id: 'mov-s1',
+    solicitudId: 'mov-s1',
+    clase: 'solicitud',
+    estado: 'aprobada',
+    empleadoNombre: 'Ana Ruiz Molina',
+    empleadoCargo: 'Analista',
+    solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+    tipo: 'vacaciones',
+    fechaInicio: '2026-07-06',
+    fechaFin: '2026-07-10',
+    diasHabiles: 5,
+    decididaAt: '2026-06-02T10:00:00Z',
+    decididaPor: { nombre: 'Jefa Directa', correo: 'comercial@ambientalia.com.co', aproximado: false },
+    createdAt: '2026-06-01T10:00:00Z',
+    motivo: null,
+  },
+  {
+    id: 'mov-m1',
+    solicitudId: 'mov-s2',
+    clase: 'anulacion',
+    estado: 'aprobada',
+    empleadoNombre: 'Luis Prieto Cano',
+    empleadoCargo: null,
+    solicitanteEmail: 'luis.prieto@ambientalia.com.co',
+    tipo: 'permiso',
+    fechaInicio: '2026-08-03',
+    fechaFin: '2026-08-03',
+    diasHabiles: 1,
+    decididaAt: '2026-07-30T10:00:00Z',
+    decididaPor: { nombre: null, correo: 'comercial@ambientalia.com.co', aproximado: true },
+    createdAt: '2026-07-29T10:00:00Z',
+    motivo: 'ya no hace falta',
+  },
+];
 
 /**
  * Modela `repo.anotarEventoDeCalendario`.
@@ -275,18 +330,31 @@ vi.mock('./repo.js', async () => ({
     if (!dryRun) estado.historicoInsertado += nuevas;
     return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
   },
-  todasLasSolicitudes: async () => estado.solicitudes,
-  // Modela SOLO la superficie, y a propósito. Lo que hace el repo de verdad
-  // —el recorte por rama de `ramaDeDosNiveles` y el mapeo a la unión
-  // discriminada— no se puede imitar aquí sin abrir una segunda copia de la
-  // regla de privacidad, que es justo lo que dejó el SQL del solapamiento roto
-  // con los unitarios en verde. Quien lo ejercita contra Postgres real es
-  // `repo.movimientos.db.test.ts`.
+  // Modela la LLAMADA, no el recorte: apunta el `soloDe` que le llega y
+  // devuelve SIEMPRE `MOVIMIENTOS_FALSOS`, sin filtrarlo por nada.
   //
-  // Devuelve la lista vacía porque hoy no hay ninguna ruta que lo llame: el día
-  // que la haya, un `[]` pondrá roja esa ruta —y hará que quien la escriba
-  // decida aquí qué modelar— en vez de contestarle con filas inventadas.
-  movimientos: async (_db: unknown, _soloDe: string | null) => [],
+  // QUÉ MODELA: que el servicio llame, y con qué `soloDe`. Ese argumento ES la
+  // barrera entera de `GET /ausencias/movimientos` —`null` es la compañía, un
+  // correo es una rama— y es lo único de ella que se puede observar sin una base
+  // de datos. Por eso los candados del guard afirman `estado.soloDeDeMovimientos`
+  // y NUNCA el cuerpo de la respuesta: si leyeran el cuerpo, estarían afirmando
+  // este `filter` de mentira en vez del SQL que de verdad protege el dato.
+  //
+  // QUÉ NO MODELA, a propósito: el recorte por rama (`ramaDeDosNiveles`, dos
+  // niveles de organigrama) ni el mapeo a la unión discriminada por `clase`.
+  // Imitar aquí el recorte sería abrir una SEGUNDA copia de la regla de
+  // privacidad —el error exacto que dejó el SQL del solapamiento roto con los
+  // unitarios en verde— y, peor, haría que un test que la afirmara siguiera en
+  // verde con el SQL real roto. Quien lo ejecuta contra Postgres es
+  // `repo.movimientos.db.test.ts` («un jefe ve a su hijo y a su nieto», «NO ve al
+  // bisnieto», «NO ve a un primo de otra rama», «sin acotar, la compañía entera»).
+  //
+  // Tampoco modela un fallo: no hay bandera para hacerlo lanzar, porque ningún
+  // test necesita hoy el 500 de esta ruta.
+  movimientos: async (_db: unknown, soloDe: string | null) => {
+    estado.soloDeDeMovimientos.push(soloDe);
+    return MOVIMIENTOS_FALSOS;
+  },
   SolapeAlAplicar,
   ocupaAgenda,
   // `_adminEmail` y `_construirPayload` se aceptan y se IGNORAN a proposito. El
@@ -375,15 +443,6 @@ vi.mock('./repo.js', async () => ({
       const turno = s.estado === 'pendiente' ? s.aprobadorCorreo : s.segundoAprobadorCorreo;
       return String(turno ?? '').toLowerCase() === correo.toLowerCase();
     }),
-  // Modela el WHERE real: estado terminal Y aparecer como firmante en cualquiera
-  // de los dos niveles.
-  solicitudesDecididas: async (_db: unknown, correo: string) =>
-    estado.solicitudes.filter(
-      (s) =>
-        (s.estado === 'aprobada' || s.estado === 'rechazada') &&
-        (String(s.aprobadorCorreo ?? '').toLowerCase() === correo.toLowerCase() ||
-          String(s.segundoAprobadorCorreo ?? '').toLowerCase() === correo.toLowerCase()),
-    ),
   solicitudPorId: async (_db: unknown, id: string) => estado.solicitudes.find((s) => s.id === id) ?? null,
   // Saldos: se leen de `estado.plantilla`, con las dos parejas colgadas ahí mismo
   // (empiezan `undefined` = "sin configurar"). `ausenciasQueTocanElSaldo` se
@@ -529,10 +588,11 @@ vi.mock('./repo.js', async () => ({
   //
   // NO modela un fallo a medio camino entre el UPDATE y el INSERT: no hay una
   // bandera `fallarRegistroExportador` como `fallarRegistroVisor`, porque
-  // ningún test de este fichero ejercita esa rama todavía — no hay endpoint
-  // que llame a `fijarExportador` en esta tarea. Quien cablee el botón de
-  // exportar y quiera probar esa atomicidad tendrá que añadirla, igual que
-  // aquí se añadió para el visor.
+  // ningún test de este fichero ejercita esa rama. Aquí no cambia nada: el repo
+  // real ya las mete a las dos en una transacción y el servicio hace UNA sola
+  // llamada, así que no hay dos escrituras que puedan cuajar por separado —lo
+  // que el `fallarRegistroVisor` del visor comprueba es justo eso, y allí se
+  // añadió porque el servicio SÍ había llegado a tenerlas partidas—.
   puedeExportarRegistro: async (_db: unknown, email: string) =>
     estado.plantilla.some(
       (e: any) =>
@@ -1091,6 +1151,7 @@ beforeEach(() => {
   estado.registroVisores = [];
   estado.fallarRegistroVisor = false;
   estado.registroExportadores = [];
+  estado.soloDeDeMovimientos = [];
 });
 
 // Sin esto, el reloj falso se filtraría a los ficheros de test que corran
@@ -1989,70 +2050,112 @@ describe('GET /ausencias/adjuntos', () => {
   });
 });
 
-// ── Historial del aprobador ────────────────────────────────────────────────
+// ── El registro de movimientos ─────────────────────────────────────────────
+//
+// Aquí estaban los tests de `GET /ausencias/decididas`, el historial que un
+// aprobador veía de sus propias decisiones. Lo sustituye este registro, que
+// enseña además la rama entera de quien pregunta — y por eso lo que se prueba
+// aquí ya no es qué filas salen, sino QUIÉN puede pedirlas y CON QUÉ RECORTE.
+//
+// ⚠️ TODOS los candados de este bloque afirman `estado.soloDeDeMovimientos` —el
+// argumento que el servicio le pasa al repo— y NINGUNO lee el cuerpo de la
+// respuesta para deducir el recorte. El doble devuelve siempre las mismas dos
+// filas, así que un test que afirmara «solo salen las de su rama» estaría
+// afirmando un `filter` de mentira escrito diez metros más arriba, y seguiría
+// verde con el SQL real abierto de par en par. El recorte de verdad lo ejecuta
+// contra Postgres `repo.movimientos.db.test.ts`; lo que se puede fijar desde
+// aquí, y es justo lo que un guard mal puesto rompe, es el argumento.
 
-describe('GET /ausencias/decididas', () => {
-  const aprobador = () => token({ sub: 'comercial@ambientalia.com.co' });
+describe('GET /ausencias/movimientos', () => {
+  const APROBADOR = 'comercial@ambientalia.com.co';
+  const OTRO = 'otro.jefe@ambientalia.com.co';
 
-  async function crearYDecidir(aprueba: boolean, over: Record<string, unknown> = {}) {
-    const r = await request(app())
-      .post('/api/ausencias/solicitudes')
-      .set('Authorization', `Bearer ${token()}`)
-      .send(nueva(over))
-      .expect(201);
+  const pedir = (quien: string, cola = '') =>
+    request(app()).get(`/api/ausencias/movimientos${cola}`).set('Authorization', `Bearer ${quien}`);
+
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  it('un admin recibe 200 y se le pasa `soloDe = null`: la compañía entera', async () => {
+    // El `sub` del admin NO aprueba a nadie en el fixture (todos cuelgan de
+    // `comercial@`), así que si el `sesion.esAdmin ||` del guard desapareciera,
+    // este 200 se volvería 403. Es a la vez el candado del admin y el de que su
+    // rol basta sin ficha en el organigrama.
+    const r = await pedir(admin()).expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([null]);
+    expect(r.body.movimientos).toHaveLength(2);
+  });
+
+  it('un aprobador que no es admin recibe 200 y se le pasa SU PROPIO correo', async () => {
+    // El mutante que muere aquí es el peor de todos: cambiar el `soloDe` por un
+    // `null` a secas le entrega a cualquier jefe el historial de la plantilla
+    // completa —incapacidades y permisos, con sus motivos— sin que nada más de
+    // esta batería se inmute.
+    await pedir(token({ sub: APROBADOR })).expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([APROBADOR]);
+  });
+
+  it('CANDADO: quien no es ni admin ni aprobador recibe 403, y el registro NI SE CONSULTA', async () => {
+    // La lista vacía no vale de guard: `soloDe` recorta por RAMA, así que un
+    // 200 aquí no significaría «no hay nada tuyo» sino que la consulta llegó a
+    // ejecutarse. Por eso se afirman las dos cosas: el 403 y que no hubo lectura.
+    const r = await pedir(token()).expect(403);
+    expect(r.body.error).toBe('no_es_aprobador');
+    expect(estado.soloDeDeMovimientos).toEqual([]);
+  });
+
+  it('CANDADO: un `?soloDe=` del cliente NO cambia el recorte', async () => {
+    // Este es el candado que impide que un jefe se haga pasar por otro. El
+    // recorte sale de la SESIÓN y de nada más; lo que llegue por la URL es, como
+    // mucho, ruido en el log de acceso.
+    await pedir(token({ sub: APROBADOR }), `?soloDe=${encodeURIComponent(OTRO)}`).expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([APROBADOR]);
+  });
+
+  it('CANDADO: tampoco lo cambia el cuerpo ni una cabecera', async () => {
+    // Las otras dos puertas por las que entraría un parámetro. Van juntas y con
+    // `esAdmin`/`role` de propina: si alguien cablease el recorte a algo que se
+    // lee de `req`, cualquiera de estos nombres sería el candidato.
     await request(app())
-      .post(`/api/ausencias/solicitudes/${r.body.id}/decision`)
-      .set('Authorization', `Bearer ${aprobador()}`)
-      .send({ aprueba, motivo: aprueba ? undefined : 'no toca' })
+      .get('/api/ausencias/movimientos')
+      .set('Authorization', `Bearer ${token({ sub: APROBADOR })}`)
+      .set('X-Solo-De', OTRO)
+      .send({ soloDe: OTRO, esAdmin: true, role: 'admin' })
       .expect(200);
-    return r.body.id as string;
-  }
-
-  const decididas = async (quien: string) =>
-    (await request(app()).get('/api/ausencias/decididas').set('Authorization', `Bearer ${quien}`).expect(200)).body
-      .solicitudes;
-
-  it('lista lo aprobado y lo rechazado, no lo que sigue pendiente', async () => {
-    // Tres rangos que no se tocan: la primera queda `aprobada` y sigue viva
-    // después de decidida, así que con el candado de solapes ya en marcha
-    // reutilizar las mismas fechas por defecto para las otras dos chocaría con
-    // ella antes de llegar a lo que este test quiere comprobar.
-    await crearYDecidir(true, { fechaInicio: '2026-07-06', fechaFin: '2026-07-10' });
-    await crearYDecidir(false, { fechaInicio: '2026-07-13', fechaFin: '2026-07-17' });
-    await request(app())
-      .post('/api/ausencias/solicitudes')
-      .set('Authorization', `Bearer ${token()}`)
-      .send(nueva({ fechaInicio: '2026-07-20', fechaFin: '2026-07-24' }))
-      .expect(201);
-
-    const r = await decididas(aprobador());
-    expect(r).toHaveLength(2);
-    expect(r.map((s: { estado: string }) => s.estado).sort()).toEqual(['aprobada', 'rechazada']);
+    expect(estado.soloDeDeMovimientos).toEqual([APROBADOR]);
   });
 
-  it('el rechazo conserva su motivo, que es media razón de existir del historial', async () => {
-    await crearYDecidir(false);
-    const r = await decididas(aprobador());
-    expect(r[0].motivoRechazo).toBe('no toca');
+  it('CANDADO: un aprobador no consigue la compañía entera vaciando el parámetro', async () => {
+    // La otra mitad de la suplantación: no hace falta el correo de otro para
+    // hacer daño, basta con colar un `null` y quedarse con todo. Las tres formas
+    // en que un `String(req.query.soloDe) || null` mal escrito lo concedería.
+    const yo = token({ sub: APROBADOR });
+    await pedir(yo, '?soloDe=').expect(200);
+    await pedir(yo, '?soloDe=null').expect(200);
+    await pedir(yo, '?todos=1&soloDe').expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([APROBADOR, APROBADOR, APROBADOR]);
   });
 
-  it('no enseña las decisiones de otro aprobador', async () => {
-    await crearYDecidir(true);
-    expect(await decididas(token({ sub: 'otro@ambientalia.com.co' }))).toHaveLength(0);
+  it('CANDADO: quien no aprueba a nadie no se cuela mandando el correo de quien sí', async () => {
+    // El guard va ANTES que el recorte, y mira la sesión: pedir la rama de un
+    // aprobador de verdad no convierte a nadie en aprobador.
+    const r = await pedir(token(), `?soloDe=${encodeURIComponent(APROBADOR)}`).expect(403);
+    expect(r.body.error).toBe('no_es_aprobador');
+    expect(estado.soloDeDeMovimientos).toEqual([]);
   });
 
-  it('a un admin le enseña lo suyo, no la empresa entera', async () => {
-    // Para verlo todo está «Registro general»: duplicarlo aquí sería un peor
-    // registro general y una sorpresa para quien abra la pestaña.
-    await crearYDecidir(true);
-    expect(await decididas(token({ sub: 'admin@ambientalia.com.co', role: 'admin' }))).toHaveLength(0);
+  it('401 sin token, y sin llegar a consultar nada', async () => {
+    await request(app()).get('/api/ausencias/movimientos').expect(401);
+    expect(estado.soloDeDeMovimientos).toEqual([]);
   });
 
-  it('403 a quien tiene token válido pero no la app asignada', async () => {
-    await request(app())
-      .get('/api/ausencias/decididas')
-      .set('Authorization', `Bearer ${token({ apps: [] })}`)
-      .expect(403);
+  it('las filas viajan bajo la clave `movimientos`, con su `clase` intacta', async () => {
+    // La forma del payload es contrato con el front. `movimientos` y no
+    // `solicitudes`, que es la clave del resto de listas de este router: la
+    // diferencia importa porque estas filas NO son solicitudes —hay anulaciones
+    // y cambios entre ellas— y el front discrimina por `clase`.
+    const r = await pedir(admin()).expect(200);
+    expect(r.body.movimientos.map((m: { clase: string }) => m.clase)).toEqual(['solicitud', 'anulacion']);
+    expect(r.body.solicitudes).toBeUndefined();
   });
 });
 
@@ -2181,10 +2284,12 @@ describe('importación del histórico', () => {
     expect(r.body.field).toBe('solicitudes[1].fechaInicio');
   });
 
-  it('la vista global es solo para admin', async () => {
-    await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token()}`).expect(403);
-    await request(app()).get('/api/ausencias/historico').set('Authorization', `Bearer ${token({ role: 'admin' })}`).expect(200);
-  });
+  // Aquí estaba «la vista global es solo para admin», el guard del
+  // `GET /ausencias/historico` que devolvía la compañía entera. Esa ruta ya no
+  // existe: la sustituye `GET /ausencias/movimientos`, cuyos candados —bastante
+  // más exigentes, porque ya no basta con un rol— viven en su propio bloque más
+  // arriba. La IMPORTACIÓN, que es lo que este bloque prueba, sigue siendo de
+  // admin y no ha cambiado.
 });
 
 describe('edición de solicitudes', () => {
@@ -2554,6 +2659,29 @@ describe('GET /ausencias/contexto', () => {
     expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(true);
     expect(await flag({ sub: 'administrativo@ambientalia.com.co' })).toBe(true);
     expect(await flag({ sub: 'ana.ruiz@ambientalia.com.co' })).toBe(false);
+  });
+
+  it('esExportadorRegistro pliega admin dentro, igual que el visor', async () => {
+    // Ojo con lo que este booleano NO es: sirve para PINTAR el botón de
+    // exportar, no para autorizar nada. Quien decide qué se puede sacar es el
+    // recorte por rama de `movimientosVisibles`, que ni lo consulta — un `true`
+    // de más aquí enseña un botón, no abre el registro de nadie.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].exportaRegistro = true;
+    const flag = async (over: Record<string, unknown>) =>
+      (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
+        .body.esExportadorRegistro;
+
+    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(true);
+    expect(await flag({ sub: 'administrativo@ambientalia.com.co' })).toBe(true);
+    // Y va suelto del de los adjuntos: son dos llaves distintas, y quien tiene
+    // una no tiene la otra por arrastre.
+    expect(await flag({ sub: 'ana.ruiz@ambientalia.com.co' })).toBe(false);
+    const r = await request(app())
+      .get('/api/ausencias/contexto')
+      .set('Authorization', `Bearer ${token({ sub: 'administrativo@ambientalia.com.co' })}`)
+      .expect(200);
+    expect(r.body.esVisorAdjuntos).toBe(false);
   });
 
   it('trae el nombre de quien aprueba, para no enseñar un buzón al solicitante', async () => {
@@ -3072,6 +3200,71 @@ describe('PUT /ausencias/empleados/:id/visor', () => {
       .set('Authorization', `Bearer ${token()}`)
       .send({ veAdjuntos: true })
       .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/exportador', () => {
+  const fijar = (id: string, body: Record<string, unknown>, quien: string) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/exportador`).set('Authorization', `Bearer ${quien}`).send(body);
+
+  it('CANDADO: 403 a quien no es admin, y el permiso no se mueve', async () => {
+    // Repartir el permiso de exportar es repartir la llave con la que se saca de
+    // la aplicación el registro de una rama entera. Si esto se cayera, un
+    // aprobador cualquiera podría concedérselo a sí mismo — y este endpoint es
+    // justo el que decide quién puede.
+    await fijar(E1, { concedido: true }, token()).expect(403);
+    expect(estado.plantilla[0].exportaRegistro).not.toBe(true);
+    expect(estado.registroExportadores).toHaveLength(0);
+  });
+
+  it('CANDADO: tampoco pasa un aprobador, aunque ya sea exportador él mismo', async () => {
+    // Que alguien tenga la llave no le convierte en quien la reparte. Sin el
+    // `requireAdmin`, este es el camino por el que el permiso se propagaría solo.
+    estado.plantilla[0].correo = 'comercial@ambientalia.com.co';
+    estado.plantilla[0].exportaRegistro = true;
+    await fijar(E2, { concedido: true }, token({ sub: 'comercial@ambientalia.com.co' })).expect(403);
+    expect(estado.plantilla[1].exportaRegistro).not.toBe(true);
+  });
+
+  it('un admin lo concede, y el registro dice quién lo dio y a quién', async () => {
+    // El `sub` del admin es DISTINTO del correo del empleado afectado a
+    // propósito, por lo mismo que en el visor: en el fixture por defecto
+    // coinciden, y con esa coincidencia un swap de `adminEmail` por
+    // `empleadoCorreo` pasaría el test sin inmutarse.
+    const r = await fijar(E1, { concedido: true }, token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' })).expect(200);
+    expect(r.body).toEqual({ ok: true });
+    expect(estado.plantilla[0].exportaRegistro).toBe(true);
+    expect(estado.registroExportadores).toHaveLength(1);
+    expect(estado.registroExportadores[0]).toMatchObject({
+      adminEmail: 'gerencia@ambientalia.com.co',
+      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
+      empleadoId: E1,
+      concedido: true,
+    });
+  });
+
+  it('quitarlo también se registra', async () => {
+    // Un registro que solo apunta las concesiones no sirve para reconstruir
+    // quién tenía la llave el día que se filtró algo.
+    estado.plantilla[0].exportaRegistro = true;
+    await fijar(E1, { concedido: false }, token({ role: 'admin' })).expect(200);
+    expect(estado.plantilla[0].exportaRegistro).toBe(false);
+    expect(estado.registroExportadores[0]).toMatchObject({ concedido: false });
+  });
+
+  it('400 si `concedido` no es booleano', async () => {
+    // `'si'` es una cadena con valor de verdad: interpretarla en vez de exigir el
+    // tipo dejaría concedido un permiso que alguien quiso quitar.
+    const r = await fijar(E1, { concedido: 'si' }, token({ role: 'admin' })).expect(400);
+    expect(r.body.error).toBe('exportador_invalido');
+    expect(r.body.field).toBe('concedido');
+    expect(estado.registroExportadores).toHaveLength(0);
+  });
+
+  it('404 si el empleado no existe, y no deja rastro', async () => {
+    await fijar(E_FANTASMA, { concedido: true }, token({ role: 'admin' })).expect(404);
+    // Un intento fallido no puede ensuciar la auditoría.
+    expect(estado.registroExportadores).toHaveLength(0);
   });
 });
 

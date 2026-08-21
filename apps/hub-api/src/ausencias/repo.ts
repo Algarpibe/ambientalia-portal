@@ -1014,11 +1014,12 @@ export async function borrarSolicitud(
   });
 }
 
-/** Todas las solicitudes de la compañía, para la vista que sustituye a la hoja. */
-export async function todasLasSolicitudes(db: Pool): Promise<Solicitud[]> {
-  const { rows } = await db.query(`${SELECT_SOLICITUD} ORDER BY s.fecha_inicio DESC`);
-  return (rows as FilaSolicitudDb[]).map(aSolicitud);
-}
+// Aquí estaba `todasLasSolicitudes`, la compañía entera sin acotar por nadie,
+// que servía al `GET /ausencias/historico` de admin. La sustituye `movimientos`
+// (al final del fichero): trae también las anulaciones y los cambios, y sobre
+// todo acepta un `soloDe` con el que el servicio recorta por rama. Una consulta
+// sin recorte que no llama nadie es una que alguien acaba llamando desde una
+// ruta sin guard.
 
 // ── Modificaciones ─────────────────────────────────────────────────────────
 
@@ -1352,34 +1353,11 @@ export async function solicitudesPendientes(db: Pool, aprobadorCorreo: string, t
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
 }
 
-/**
- * Lo que ya se cerró y le tocaba firmar a este correo, en cualquiera de los dos
- * niveles. Es el rastro que un aprobador no tenía: al decidir, la solicitud sale
- * de su bandeja y hasta ahora no volvía a aparecer en ningún sitio.
- *
- * Filtra por el correo que quedó CONGELADO en la solicitud, no por quién pulsó
- * el botón (`aprobador_user_id`). Dos razones: ese campo es NULL en las sesiones
- * con token legacy, así que filtrar por él dejaría el historial vacío sin decir
- * por qué; y una solicitud que un admin destrabó en su lugar sigue siendo suya
- * —estuvo en su bandeja— y esconderla haría el historial incompleto.
- */
-export async function solicitudesDecididas(db: Pool, aprobadorCorreo: string): Promise<Solicitud[]> {
-  const { rows } = await db.query(
-    `${SELECT_SOLICITUD}
-      WHERE s.estado IN ('aprobada', 'rechazada')
-        AND (lower(s.aprobador_correo) = lower($1) OR lower(s.segundo_aprobador_correo) = lower($1))
-      -- NULLS LAST no es decorativo: hay DOS formas de llegar a estado terminal
-      -- sin decidida_at. El PATCH de admin, que corrige la fila sin decidir
-      -- nada; y desde la 024, aprobar una ANULACION sobre una solicitud que
-      -- seguia pendiente —la deja rechazada + anulada_at, y decidida_at sigue
-      -- nula porque nadie decidio la solicitud, solo el cambio—. Sin esto, esas
-      -- filas encabezarian la lista por delante de las decisiones reales de esta
-      -- semana.
-      ORDER BY s.decidida_at DESC NULLS LAST, s.created_at DESC`,
-    [aprobadorCorreo],
-  );
-  return (rows as FilaSolicitudDb[]).map(aSolicitud);
-}
+// Aquí estaba `solicitudesDecididas`, el historial del aprobador: lo ya cerrado
+// que le tocaba firmar a un correo. Lo sustituye `movimientos` (al final del
+// fichero), que enseña ese mismo rastro y el de toda su rama, con las
+// anulaciones y los cambios que esta consulta no alcanzaba. Su `ORDER BY`
+// sobrevive en `porFechaDeCierre`, con el porqué del `NULLS LAST` intacto.
 
 /**
  * Las solicitudes que llevan un PDF, de cualquiera y en cualquier estado.
@@ -2681,9 +2659,10 @@ async function movimientosDeModificaciones(db: Pool, soloDe: string | null): Pro
 /**
  * El orden del registro: lo último decidido arriba.
  *
- * Es el mismo `decidida_at DESC NULLS LAST, created_at DESC` que ya escribe
- * `solicitudesDecididas` en SQL, y el `NULLS LAST` está aquí por el mismo
- * motivo que allí: hay dos formas de llegar a estado terminal sin `decidida_at`
+ * Es el mismo `decidida_at DESC NULLS LAST, created_at DESC` que escribía en SQL
+ * `solicitudesDecididas`, la consulta del historial del aprobador a la que este
+ * registro sustituyó, y el `NULLS LAST` sigue aquí por el mismo motivo que había
+ * allí: hay dos formas de llegar a estado terminal sin `decidida_at`
  * —el PATCH de admin, que corrige la fila sin decidir nada, y aprobar una
  * ANULACIÓN sobre una solicitud aún pendiente— y encima el registro trae
  * también las que siguen en trámite, que no tienen fecha de cierre por
