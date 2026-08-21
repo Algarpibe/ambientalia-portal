@@ -10,10 +10,16 @@ import { enTramite, ETIQUETA_TIPO, TIPOS_DE_AUSENCIA } from './dominio';
 interface Props {
   /** Id del empleado de la sesión, para el filtro «solo yo». Null si no tiene ficha. */
   miEmpleadoId: string | null;
-  /** Solo un admin recibe la plantilla entera; el resto, su propia fila. El
-   *  recorte real lo hace hub-api en el SQL — esto solo decide si tiene sentido
-   *  ofrecer los filtros de persona. */
-  esAdmin: boolean;
+  /** Si esta sesión recibe la plantilla entera o solo su propia fila. La tienen
+   *  los admin y quien lleve marcada la vista de toda la empresa (migración
+   *  032). El recorte real lo hace hub-api en el SQL — esto solo decide si
+   *  tiene sentido ofrecer los filtros de persona y qué dice el subtítulo.
+   *
+   *  Se llamaba `esAdmin`, y el renombre no es cosmético: el permiso dejó de
+   *  ser el rol, y una prop que sigue diciendo «admin» invita a colgar de ella
+   *  lo que sí es de admin —editar, borrar— el día que alguien añada un botón
+   *  a esta pantalla. */
+  veTodaLaPlantilla: boolean;
   /** Si la pestaña «Calendario» es la que se ve ahora mismo. Mismo motivo que
    *  `activo` en PanelSaldos: las pestañas quedan montadas y ocultas con
    *  `hidden`, así que sin este freno TODA la plantilla pagaría esta llamada
@@ -66,7 +72,7 @@ const nombreMes = (mes: string) =>
     timeZone: 'UTC',
   });
 
-export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
+export default function Calendario({ miEmpleadoId, veTodaLaPlantilla, activo }: Props) {
   const [mes, setMes] = useState(mesActual);
   const [datos, setDatos] = useState<CalendarioDelMes | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -119,7 +125,7 @@ export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
     <div>
       <h3 className="mb-1 text-sm font-semibold text-gray-900">Calendario de ausencias</h3>
       <p className="mb-3 text-sm text-gray-600">
-        {esAdmin
+        {veTodaLaPlantilla
           ? 'Quién está fuera y cuándo. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'
           : 'Tus ausencias del mes. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'}
       </p>
@@ -149,9 +155,10 @@ export default function Calendario({ miEmpleadoId, esAdmin, activo }: Props) {
         </select>
 
         {/* Los dos filtros de persona solo tienen sentido cuando hay más de una:
-            quien no es admin recibe únicamente su propia fila, así que aquí
-            serían un desplegable de un elemento y una casilla que no cambia nada. */}
-        {esAdmin && (
+            quien no ve la plantilla entera recibe únicamente su propia fila, así
+            que aquí serían un desplegable de un elemento y una casilla que no
+            cambia nada. */}
+        {veTodaLaPlantilla && (
           <>
             <select
               className={selCls}

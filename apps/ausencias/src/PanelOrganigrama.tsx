@@ -6,6 +6,7 @@ import {
   fijarCopia,
   fijarVisor,
   fijarExportador,
+  fijarVisorDeEmpresa,
   fijarSegundaFirma,
   type EmpleadoConJefatura,
 } from './api';
@@ -22,6 +23,7 @@ interface Fila {
   copiaCorreo: string | null;
   veAdjuntos: boolean;
   exportaRegistro: boolean;
+  veTodaLaEmpresa: boolean;
   requiereSegundaFirma: boolean;
   guardando: boolean;
   error: string | null;
@@ -33,6 +35,7 @@ const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   copiaCorreo: e.copiaCorreo,
   veAdjuntos: e.veAdjuntos,
   exportaRegistro: e.exportaRegistro,
+  veTodaLaEmpresa: e.veTodaLaEmpresa,
   requiereSegundaFirma: e.requiereSegundaFirma,
   guardando: false,
   error: null,
@@ -115,11 +118,11 @@ export default function PanelOrganigrama({ activo }: Props) {
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
     try {
-      // Un solo botón por fila, como hasta ahora, pero CINCO endpoints detrás: se
+      // Un solo botón por fila, como hasta ahora, pero SEIS endpoints detrás: se
       // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
-      // porque los cinco responden el maestro entero y cada uno tiene que ver ya
-      // escrito lo del anterior — con `Promise.all`, la respuesta que llegara
-      // última podría ser la construida ANTES de los otros cambios.
+      // porque los que responden el maestro entero tienen que ver ya escrito lo
+      // del anterior — con `Promise.all`, la respuesta que llegara última podría
+      // ser la construida ANTES de los otros cambios.
       const empleado = empleados.find((x) => x.id === id);
       if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
       if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
@@ -128,6 +131,9 @@ export default function PanelOrganigrama({ activo }: Props) {
       // otros cuatro): no importa, porque igual que ellos su respuesta no se usa
       // aquí. Quien de verdad resincroniza la fila es el `cargar(id)` de abajo.
       if (fila.exportaRegistro !== empleado?.exportaRegistro) await fijarExportador(id, fila.exportaRegistro);
+      // Igual que `fijarExportador`: devuelve `{ ok }` y no el maestro, y da lo
+      // mismo porque la fila la resincroniza el `cargar(id)` de abajo.
+      if (fila.veTodaLaEmpresa !== empleado?.veTodaLaEmpresa) await fijarVisorDeEmpresa(id, fila.veTodaLaEmpresa);
       if (fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma)
         await fijarSegundaFirma(id, fila.requiereSegundaFirma);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
@@ -229,6 +235,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                 <th className="px-4 py-3 font-medium">Copia</th>
                 <th className="px-4 py-3 font-medium">Soportes</th>
                 <th className="px-4 py-3 font-medium">Exporta</th>
+                <th className="px-4 py-3 font-medium">Vista</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -244,6 +251,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                   fila.copiaCorreo !== e.copiaCorreo ||
                   fila.veAdjuntos !== e.veAdjuntos ||
                   fila.exportaRegistro !== e.exportaRegistro ||
+                  fila.veTodaLaEmpresa !== e.veTodaLaEmpresa ||
                   fila.requiereSegundaFirma !== e.requiereSegundaFirma;
                 const arriba = e.segundoAprobadorCorreo ?? e.informadoCorreo;
                 return (
@@ -407,6 +415,27 @@ export default function PanelOrganigrama({ activo }: Props) {
                         Registro
                       </label>
                     </td>
+                    <td className="px-4 py-2.5">
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          // `!!` por lo mismo que las otras dos casillas: en la
+                          // ventana en que el portal va por delante de hub-api,
+                          // una fila sin `veTodaLaEmpresa` volvería este checkbox
+                          // «no controlado» a medio render.
+                          checked={!!fila.veTodaLaEmpresa}
+                          onChange={(ev) => actualizar(e.id, { veTodaLaEmpresa: ev.target.checked, error: null })}
+                          // Mismo criterio WCAG 2.5.3 que las otras dos: el texto
+                          // visible («Empresa») al principio y detrás de quién.
+                          // Dice las DOS pantallas que abre, porque la casilla
+                          // sola no lo insinúa y quien la marca tiene que saber
+                          // que está dando también los motivos del registro.
+                          aria-label={`Empresa: ${e.nombreCompleto} ve el calendario y el registro de toda la plantilla, sin poder editarlos`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
+                        />
+                        Empresa
+                      </label>
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button
@@ -417,10 +446,10 @@ export default function PanelOrganigrama({ activo }: Props) {
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           // «La fila», no «el jefe»: este botón guarda también la
-                          // copia, la llave de los soportes, la del registro y la
-                          // segunda firma, y un rótulo que nombre solo uno de los
-                          // cinco campos engaña justo a quien no puede ver cuál ha
-                          // cambiado.
+                          // copia, la llave de los soportes, la del registro, la
+                          // vista de toda la empresa y la segunda firma, y un
+                          // rótulo que nombre solo uno de los seis campos engaña
+                          // justo a quien no puede ver cuál ha cambiado.
                           aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >
