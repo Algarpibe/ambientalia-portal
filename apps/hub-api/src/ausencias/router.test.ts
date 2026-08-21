@@ -370,6 +370,15 @@ vi.mock('./repo.js', () => ({
         compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
         compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
       })),
+  // Solo existe para que el CANDADO de más abajo compare superficies iguales.
+  // El filtro de `empleadosConSaldo` de aquí arriba (sobre `estado.plantilla`,
+  // línea 362) SOLO modela el nivel directo (`e.aprobadorCorreo === soloDe`);
+  // el nivel de los nietos NO tiene ninguna réplica en este doble — no hay
+  // cobertura de comportamiento de ese nivel en los tests que usan este mock.
+  // Reproducir aquí el SQL de verdad sería abrir una tercera copia de la
+  // misma regla, y tampoco cerraría ese hueco: este doble sigue sin base de
+  // datos real contra la que ejecutarlo.
+  ramaDeDosNiveles: () => `$1::text IS NULL`,
   // ⚠️ El filtro por tipo tiene que seguir a la consulta real. El CANDADO de la
   // superficie de abajo compara NOMBRES de export, así que caza un renombre pero
   // no esto: si el repo ampliara los tipos y este doble se quedara en
