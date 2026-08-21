@@ -2495,9 +2495,17 @@ function camposComunesDelMovimiento(r: FilaMovimientoDb, estado: Solicitud['esta
   };
 }
 
-/** Una fila de la consulta de solicitudes: lo común más SU estado. */
+/**
+ * Una fila de la consulta de solicitudes: lo común más SU estado y SU
+ * `anulada_at`.
+ *
+ * `anulada_at` va aquí y no en `FilaMovimientoDb`: solo la consulta de
+ * solicitudes la selecciona (ver `movimientosDeSolicitudes`), y la de
+ * modificaciones no tiene nada parecido que mapear.
+ */
 interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
   estado: Solicitud['estado'];
+  anulada_at: string | null;
 }
 
 /**
@@ -2508,9 +2516,13 @@ interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
  * de `Movimiento` —la que lleva `EstadoSolicitud`— y por eso no hace falta
  * ningún cast. Leerlo de la fila movería esa comprobación a una promesa sobre
  * lo que devuelve Postgres, que no verifica nadie.
+ *
+ * `anuladaAt` se mapea AQUÍ y no en `camposComunesDelMovimiento`, por la misma
+ * razón que vive en esta única rama de `Movimiento`: no es un campo común, es
+ * de la solicitud.
  */
 function comoMovimientoDeSolicitud(r: FilaMovimientoSolicitudDb): Movimiento {
-  return { ...camposComunesDelMovimiento(r, r.estado), clase: 'solicitud', estado: r.estado };
+  return { ...camposComunesDelMovimiento(r, r.estado), clase: 'solicitud', estado: r.estado, anuladaAt: r.anulada_at };
 }
 
 /**
@@ -2544,6 +2556,14 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
             s.fecha_inicio::text AS fecha_inicio, s.fecha_fin::text AS fecha_fin,
             s.dias_habiles::float8 AS dias_habiles,
             s.estado, s.decidida_at::text AS decidida_at,
+            -- ::text por lo mismo que las fechas de arriba: sin el, un
+            -- timestamptz llega como objeto Date y chipDeSolicitud (dominio.ts
+            -- del portal) compararia contra el de una anulada en falso.
+            --
+            -- Sin comillas invertidas a proposito: esta linea vive DENTRO del
+            -- template literal de la consulta, y una comilla invertida sin
+            -- escapar lo cerraria a mitad de frase.
+            s.anulada_at::text AS anulada_at,
             -- full_name y email son los nombres reales de las columnas de
             -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
             u.full_name AS decisor_nombre, u.email AS decisor_correo,

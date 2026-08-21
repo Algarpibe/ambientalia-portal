@@ -617,6 +617,14 @@ vi.mock('./repo.js', async () => ({
       ...datos,
       empleadoNombre: 'Ana Ruiz',
       empleadoCargo: 'Analista',
+      // `NuevaSolicitud` no lleva `observaciones` — solo la escribe el
+      // histórico importado o el PATCH de admin—, así que el INSERT real
+      // tampoco la toca y la columna se queda en su default NULL. El SELECT
+      // que sigue a ese INSERT la trae de todos modos: `aSolicitud` mapea la
+      // columna siempre, nula o no. Sin esta línea el doble respondería una
+      // solicitud recién creada SIN la clave `observaciones`, que es
+      // justamente lo que reventó el candado de `GET /ausencias/solicitudes/:id`.
+      observaciones: null,
       decididaAt: null,
       motivoRechazo: null,
       createdAt: '2026-06-01T10:00:00Z',
@@ -2329,6 +2337,48 @@ describe('importación del histórico', () => {
   // más exigentes, porque ya no basta con un rol— viven en su propio bloque más
   // arriba. La IMPORTACIÓN, que es lo que este bloque prueba, sigue siendo de
   // admin y no ha cambiado.
+});
+
+describe('GET /ausencias/solicitudes/:id', () => {
+  const admin = () => token({ role: 'admin' });
+
+  async function crear() {
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+    return r.body.id as string;
+  }
+
+  it('200 al admin, con la solicitud entera', async () => {
+    const id = await crear();
+    const r = await request(app())
+      .get(`/api/ausencias/solicitudes/${id}`)
+      .set('Authorization', `Bearer ${admin()}`)
+      .expect(200);
+    expect(r.body.id).toBe(id);
+    // Los dos campos que un `Movimiento` no trae, y por los que existe esta
+    // ruta: sin ellos el modal de edición no podría reconstruir la solicitud
+    // sin perder las observaciones ni arriesgar el empleadoId.
+    expect(r.body).toHaveProperty('empleadoId');
+    expect(r.body).toHaveProperty('observaciones');
+  });
+
+  it('rechaza a quien no es admin', async () => {
+    const id = await crear();
+    await request(app())
+      .get(`/api/ausencias/solicitudes/${id}`)
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(403);
+  });
+
+  it('404 si no existe', async () => {
+    await request(app())
+      .get('/api/ausencias/solicitudes/no-existe')
+      .set('Authorization', `Bearer ${admin()}`)
+      .expect(404);
+  });
 });
 
 describe('edición de solicitudes', () => {

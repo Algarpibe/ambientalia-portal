@@ -421,6 +421,32 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
+   * Una solicitud entera, con todos sus campos, para el modal de edición del
+   * registro.
+   *
+   * `requireAdmin`, la misma puerta que el `PATCH` y el `DELETE` de aquí abajo:
+   * es el mismo modal el que la pide, para poder editar.
+   *
+   * Hace falta porque un `Movimiento` del registro no trae `empleadoId` ni
+   * `observaciones`, y el `PATCH` de abajo SOBREESCRIBE la fila entera
+   * (`SET empleado_id = …, observaciones = …`). Reconstruir la solicitud a
+   * partir del movimiento tendría dos efectos silenciosos: `observaciones`
+   * —notas al margen del histórico importado, irrecuperables— se borraría en
+   * cada edición, y `empleadoId` derivado de `solicitanteEmail` devolvería la
+   * fila a la persona equivocada si un admin ya la había reasignado, porque
+   * `solicitanteEmail` sigue siendo el del solicitante original.
+   */
+  router.get('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const solicitud = await repo.solicitudPorId(db, req.params.id);
+      if (!solicitud) return void res.status(404).json({ error: 'no_encontrada' });
+      res.json(solicitud);
+    } catch (e) {
+      sendError(res, e, 'ausencias_solicitud_por_id');
+    }
+  });
+
+  /**
    * Corrige una solicitud del registro. No avisa a la cadena de firmas ni al
    * trabajador: para aprobar o rechazar está la bandeja, que es donde sí se
    * avisa. Lo que sí hace, cuando la corrección desajusta el calendario o la

@@ -726,13 +726,42 @@ interface MovimientoBase {
  * quejara.
  */
 export type Movimiento =
-  | (MovimientoBase & { clase: 'solicitud'; estado: EstadoSolicitud })
+  | (MovimientoBase & {
+      clase: 'solicitud';
+      estado: EstadoSolicitud;
+      /**
+       * Cuándo se anuló la solicitud, o `null` si no se anuló.
+       *
+       * Va SOLO en esta rama y no en `MovimientoBase`: una unión discriminada
+       * sirve justo para esto, y colgar aquí un campo que solo significa algo en
+       * la clase `solicitud` ensuciaría la forma común de las tres —una
+       * `fechas` o una `anulacion` no tienen un «¿se anuló ESTA fila?» que
+       * contestar, son ellas mismas el movimiento de la anulación—.
+       *
+       * Hace falta porque una solicitud anulada y una rechazada por el jefe
+       * comparten `estado: 'rechazada'`, y son cosas distintas: `chipDeSolicitud`
+       * (`dominio.ts`) usa este campo para no rotular «Rechazada» una fila que
+       * el propio dueño anuló, con el motivo que ESE dueño escribió al pedirlo
+       * — leído junto a «Rechazada» ese motivo se entendería como la razón que
+       * dio el jefe para negarla.
+       */
+      anuladaAt: string | null;
+    })
   | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });
 
 /** El registro de movimientos que le toca ver a quien pregunta, ya recortado
  *  por rama en el servidor. */
 export const fetchMovimientos = () =>
   get<{ movimientos: Movimiento[] }>('/api/ausencias/movimientos').then((d) => d.movimientos);
+
+/**
+ * Una solicitud entera por su id (solo admin). La usa el modal de edición del
+ * registro: de un `Movimiento` faltan `empleadoId` y `observaciones`, y el
+ * `PATCH` de abajo sobreescribe la fila entera, así que reconstruirla a partir
+ * del movimiento borraría las observaciones y podría reasignarla a la persona
+ * equivocada. Ver el fetcher de más abajo, `editarSolicitud`.
+ */
+export const fetchSolicitud = (id: string) => get<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`);
 
 /** Los campos que un admin puede corregir desde el registro general. */
 export interface EdicionSolicitud {

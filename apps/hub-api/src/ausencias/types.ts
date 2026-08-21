@@ -687,5 +687,25 @@ interface MovimientoBase {
  * quejara.
  */
 export type Movimiento =
-  | (MovimientoBase & { clase: 'solicitud'; estado: EstadoSolicitud })
+  | (MovimientoBase & {
+      clase: 'solicitud';
+      estado: EstadoSolicitud;
+      /**
+       * Cuándo se anuló la solicitud, o `null` si no se anuló.
+       *
+       * Va SOLO en esta rama y no en `MovimientoBase`: una unión discriminada
+       * sirve justo para esto, y colgar aquí un campo que solo significa algo en
+       * la clase `solicitud` ensuciaría la forma común de las tres —una
+       * `fechas` o una `anulacion` no tienen un «¿se anuló ESTA fila?» que
+       * contestar, son ellas mismas el movimiento de la anulación—.
+       *
+       * Hace falta porque una solicitud anulada y una rechazada por el jefe
+       * comparten `estado: 'rechazada'`, y son cosas distintas: `chipDeSolicitud`
+       * (`dominio.ts` del portal) usa este campo para no rotular «Rechazada» una
+       * fila que el propio dueño anuló, con el motivo que ESE dueño escribió al
+       * pedirlo — leído junto a «Rechazada» ese motivo se entendería como la
+       * razón que dio el jefe para negarla.
+       */
+      anuladaAt: string | null;
+    })
   | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });

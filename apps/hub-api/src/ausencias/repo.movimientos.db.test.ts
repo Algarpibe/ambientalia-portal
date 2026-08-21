@@ -341,6 +341,38 @@ describe('CANDADO: las modificaciones en el registro', () => {
     expect(m.decididaPor).toEqual({ nombre: null, correo: PRIMER_FIRMANTE, aproximado: true });
   });
 
+  // `anuladaAt` NO vive en el movimiento de la anulacion -ese es el de arriba,
+  // clase 'anulacion'-: vive en el movimiento de LA SOLICITUD afectada, clase
+  // 'solicitud', que es el que pinta la tabla del registro con su chip. El
+  // candado usa el flujo real -crearModificacion + decidirModificacion- y no
+  // un UPDATE a pelo, por la misma razon que el resto del fichero: lo que se
+  // prueba es que decidirModificacion sella `anulada_at` en la SOLICITUD al
+  // aprobar una anulacion, no que una fila con la columna puesta a mano
+  // se mapee bien.
+  it('CANDADO: una solicitud anulada trae anuladaAt en su propio movimiento; una normal, null', async () => {
+    const { solicitud, modificacion } = await sembrarConPropuesta('anulacion');
+    expect((await decidirModificacion(db, modificacion.id, true, null, null, payloadStub)).ok).toBe(true);
+
+    const propia = (await movimientos(db, null)).find(
+      (m) => m.solicitudId === solicitud.id && m.clase === 'solicitud',
+    );
+    if (!propia) throw new Error('la solicitud anulada no aparece con su propio movimiento');
+    if (propia.clase !== 'solicitud') throw new Error('el find de arriba ya filtro por clase');
+    // El nucleo del candado: sin el `s.anulada_at::text` del SELECT esta
+    // columna llega undefined, y `chipDeSolicitud` (dominio.ts del portal)
+    // rotularia "Rechazada" una fila que el propio dueno anulo.
+    expect(propia.anuladaAt).not.toBeNull();
+
+    // Una solicitud normal -ninguna anulacion de por medio- no lleva la marca:
+    // las cuatro que siembra el beforeEach nacen `aprobada` sin anular.
+    const normal = (await movimientos(db, null)).find(
+      (m) => m.solicitanteEmail === HIJO && m.clase === 'solicitud',
+    );
+    if (!normal) throw new Error('la siembra del beforeEach no dejo movimiento de HIJO');
+    if (normal.clase !== 'solicitud') throw new Error('el find de arriba ya filtro por clase');
+    expect(normal.anuladaAt).toBeNull();
+  });
+
   it('una propuesta VIVA no entra como fila propia: ya viaja con su solicitud', async () => {
     const { solicitud, modificacion } = await sembrarConPropuesta('fechas');
 
