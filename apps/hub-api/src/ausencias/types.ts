@@ -380,6 +380,12 @@ export interface Empleado {
   /** Puede abrir CUALQUIER adjunto de CUALQUIER persona. Llave maestra. */
   veAdjuntos: boolean;
   /**
+   * Puede exportar el CSV del registro general: las incapacidades y los
+   * permisos de la plantilla, con sus motivos —datos personales—. Se concede
+   * ficha a ficha desde la pestaña Organigrama, igual que `veAdjuntos`.
+   */
+  exportaRegistro: boolean;
+  /**
    * Si sus solicitudes necesitan también la firma del jefe de su jefe, o basta
    * con la del jefe inmediato.
    *
@@ -681,5 +687,43 @@ interface MovimientoBase {
  * quejara.
  */
 export type Movimiento =
-  | (MovimientoBase & { clase: 'solicitud'; estado: EstadoSolicitud })
+  | (MovimientoBase & {
+      clase: 'solicitud';
+      estado: EstadoSolicitud;
+      /**
+       * Cuándo se anuló la solicitud, o `null` si no se anuló.
+       *
+       * Va SOLO en esta rama y no en `MovimientoBase`: una unión discriminada
+       * sirve justo para esto, y colgar aquí un campo que solo significa algo en
+       * la clase `solicitud` ensuciaría la forma común de las tres —una
+       * `fechas` o una `anulacion` no tienen un «¿se anuló ESTA fila?» que
+       * contestar, son ellas mismas el movimiento de la anulación—.
+       *
+       * Hace falta porque una solicitud anulada y una rechazada por el jefe
+       * comparten `estado: 'rechazada'`, y son cosas distintas: `chipDeSolicitud`
+       * (`dominio.ts` del portal) usa este campo para no rotular «Rechazada» una
+       * fila que el propio dueño anuló, con el motivo que ESE dueño escribió al
+       * pedirlo — leído junto a «Rechazada» ese motivo se entendería como la
+       * razón que dio el jefe para negarla.
+       */
+      anuladaAt: string | null;
+      /**
+       * Notas al margen del histórico importado de la hoja, o `null` si no
+       * hay ninguna.
+       *
+       * Va SOLO en esta rama, por la misma razón que `anuladaAt`: es un dato
+       * DE LA SOLICITUD, no del movimiento en general —una `fechas` o una
+       * `anulacion` no tienen observaciones propias, son ellas mismas el
+       * cambio que se anota—, y colgarlo en `MovimientoBase` ensuciaría la
+       * forma común de las tres ramas con un campo que dos de ellas no usan.
+       *
+       * Hace falta porque el CSV que sustituye al Excel de nómina lleva esta
+       * columna desde siempre —era la octava—, y perderla al pasar de
+       * `Solicitud` a `Movimiento` cambia la forma de un fichero del que
+       * depende nómina. Mantenerla fuera de `MovimientoBase` es además lo que
+       * hace que exportar una `fechas` o una `anulacion` no compile: ninguna
+       * de las dos ramas tiene `observaciones` que leer.
+       */
+      observaciones: string | null;
+    })
   | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });

@@ -107,6 +107,11 @@ export function createAusenciasRouter(db: Pool): Router {
         // Pliega admin dentro, igual que `esAprobador`: así la app decide la
         // pestaña con un solo booleano y no replica la regla en el navegador.
         esVisorAdjuntos: sesion.esAdmin || (await repo.esVisorDeAdjuntos(db, sesion.email)),
+        // Igual que los dos de arriba: pliega admin dentro para que la app
+        // decida el botón de exportar con un solo booleano. Es solo para PINTAR
+        // el botón — quien de verdad decide qué se puede sacar es el recorte por
+        // rama de `movimientosVisibles`, que no consulta esta bandera.
+        esExportadorRegistro: sesion.esAdmin || (await repo.puedeExportarRegistro(db, sesion.email)),
         festivos,
         // Viajan aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar los saldos sin una segunda llamada al abrir la app.
@@ -147,18 +152,11 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
-  /**
-   * El historial de decisiones de quien pregunta. Sin `requireAdmin` y sin guard
-   * de aprobador: va acotado a su propio correo, así que quien no apruebe a nadie
-   * recibe una lista vacía en vez de un 403 que no aportaría nada.
-   */
-  router.get('/ausencias/decididas', ...gated, async (req: Request, res: Response) => {
-    try {
-      res.json({ solicitudes: await service.decididasPorMi(db, sesionDe(req)) });
-    } catch (e) {
-      sendError(res, e, 'ausencias_decididas');
-    }
-  });
+  // Aquí estaba `GET /ausencias/decididas`, el historial del aprobador acotado a
+  // su propio correo. Lo sustituye `GET /ausencias/movimientos`, más abajo: el
+  // mismo rastro y el de su rama, con las anulaciones y los cambios que aquel no
+  // enseñaba. No se deja vivo por compatibilidad — dos vistas del mismo dato es
+  // como se llega a que una se quede sin arreglar.
 
   router.post('/ausencias/solicitudes/:id/decision', ...gated, async (req: Request, res: Response) => {
     try {
@@ -202,9 +200,11 @@ export function createAusenciasRouter(db: Pool): Router {
   /**
    * La bandeja de cambios del jefe.
    *
-   * Sin `requireAdmin` y sin guard de aprobador, igual que `/ausencias/decididas`:
-   * va acotada al propio correo, así que quien no tenga ninguna propuesta que
-   * decidir recibe una lista vacía en vez de un 403 que no aportaría nada.
+   * Sin `requireAdmin` y sin guard de aprobador, igual que `/ausencias/pendientes`:
+   * va acotada al decisor congelado en cada propuesta, así que quien no tenga
+   * ninguna que decidir recibe una lista vacía en vez de un 403 que no aportaría
+   * nada. Nótese que `/ausencias/movimientos` hace lo contrario y sí lleva guard:
+   * aquello acota por rama del organigrama, no por propuesta.
    *
    * Devuelve `solicitudes`, cada una con su `modificacionPendiente` colgada por
    * el `LEFT JOIN`: la propuesta sola no dice de quién es ni de qué tipo, y una
@@ -353,7 +353,30 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
-  // ── Histórico de la hoja (solo admin) ───────────────────────────────────
+  /**
+   * Da o quita el permiso de exportar el registro. Solo admin, y **queda
+   * registrado**, por lo mismo que la llave de los adjuntos: exportar saca de la
+   * aplicación las incapacidades y los permisos de una rama entera —con sus
+   * motivos— a un fichero que ya no controla nadie.
+   *
+   * `requireAdmin` aquí y no un guard en el servicio, al contrario que
+   * `/ausencias/movimientos`: quién ve su rama es una regla de negocio que
+   * depende del organigrama, pero quién REPARTE permisos es el rol del portal, y
+   * ese sitio es el mismo que para el resto del maestro.
+   */
+  router.put('/ausencias/empleados/:id/exportador', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarExportador(db, sesionDe(req), req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_exportador');
+    }
+  });
+
+  // ── El registro y el histórico de la hoja ────────────────────────────────
+  //
+  // La importación, la corrección y el borrado SÍ son de admin. El registro de
+  // movimientos NO: es la única ruta de este bloque que no lleva `requireAdmin`,
+  // y su JSDoc explica por qué.
 
   /**
    * Importa el histórico leído del Excel en el navegador. Con `dryRun: true` no
@@ -367,12 +390,59 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
-  /** Todas las solicitudes de la compañía: la vista que sustituye a la hoja. */
-  router.get('/ausencias/historico', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+  /**
+   * El registro de movimientos. Sin `requireAdmin`: el recorte por rama lo hace
+   * el servicio a partir de la sesión, y un jefe tiene derecho a ver la suya.
+   *
+   * ⚠️ No acepta NINGÚN parámetro. Sustituyó al `GET /ausencias/historico`, que
+   * era de admin y devolvía la compañía entera; si algún día se le añade un
+   * filtro, que no sea el «de quién»: eso lo decide `movimientosVisibles` con la
+   * sesión, y un `?soloDe=` sería un jefe leyendo la rama de otro.
+   *
+   * Lleva `...gated` —y no `requireAuth` a secas— porque hacen falta LOS DOS
+   * permisos, y son dos cosas distintas que se conceden en sitios distintos:
+   * figurar como aprobador en el ORGANIGRAMA (maestro de empleados, lo mira el
+   * servicio) no es lo mismo que tener acceso a la APP (panel de usuarios del
+   * portal, lo mira `requireApp`). A quien le quiten la app en el panel se le
+   * tiene que cerrar el registro aunque siga siendo el jefe de media empresa;
+   * si esta ruta solo mirase el organigrama, ese despido se quedaría a medias.
+   *
+   * Un admin entra aunque no tenga la app asignada: `requireApp` le da bypass
+   * por su rol —lo dice su propio JSDoc— y es el caso real del admin sin apps
+   * del panel de usuarios. Sin ese bypass, `...gated` habría dejado fuera del
+   * registro a un administrador legítimo.
+   */
+  router.get('/ausencias/movimientos', ...gated, async (req: Request, res: Response) => {
     try {
-      res.json({ solicitudes: await repo.todasLasSolicitudes(db) });
+      res.json({ movimientos: await service.movimientosVisibles(db, sesionDe(req)) });
     } catch (e) {
-      sendError(res, e, 'ausencias_historico');
+      sendError(res, e, 'ausencias_movimientos');
+    }
+  });
+
+  /**
+   * Una solicitud entera, con todos sus campos, para el modal de edición del
+   * registro.
+   *
+   * `requireAdmin`, la misma puerta que el `PATCH` y el `DELETE` de aquí abajo:
+   * es el mismo modal el que la pide, para poder editar.
+   *
+   * Hace falta porque un `Movimiento` del registro no trae `empleadoId` ni
+   * `observaciones`, y el `PATCH` de abajo SOBREESCRIBE la fila entera
+   * (`SET empleado_id = …, observaciones = …`). Reconstruir la solicitud a
+   * partir del movimiento tendría dos efectos silenciosos: `observaciones`
+   * —notas al margen del histórico importado, irrecuperables— se borraría en
+   * cada edición, y `empleadoId` derivado de `solicitanteEmail` devolvería la
+   * fila a la persona equivocada si un admin ya la había reasignado, porque
+   * `solicitanteEmail` sigue siendo el del solicitante original.
+   */
+  router.get('/ausencias/solicitudes/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const solicitud = await repo.solicitudPorId(db, req.params.id);
+      if (!solicitud) return void res.status(404).json({ error: 'no_encontrada' });
+      res.json(solicitud);
+    } catch (e) {
+      sendError(res, e, 'ausencias_solicitud_por_id');
     }
   });
 

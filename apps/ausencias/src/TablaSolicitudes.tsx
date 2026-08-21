@@ -15,7 +15,12 @@ interface Props {
   solicitudes: Solicitud[];
   /** Muestra la columna de quién solicita (la bandeja del aprobador la necesita). */
   mostrarSolicitante?: boolean;
-  /** Muestra cuándo se cerró la solicitud (el historial del aprobador la necesita). */
+  /**
+   * Muestra cuándo se cerró la solicitud. Sin consumidor hoy: la usaba el
+   * historial del aprobador, fusionado ya dentro de «Registro general» —que
+   * no reutiliza esta tabla, tiene la suya propia—. Se deja lista por si
+   * alguna otra pantalla la necesita.
+   */
   mostrarDecidida?: boolean;
   /** Contenido de la última columna: los botones de decisión, si los hay. */
   acciones?: (s: Solicitud) => React.ReactNode;

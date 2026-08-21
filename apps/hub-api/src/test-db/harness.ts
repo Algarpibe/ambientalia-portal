@@ -23,6 +23,11 @@ export function poolDePrueba(): Pool {
  * (`visores_adjuntos_log`, ver la 022), y esa habria que anadirla a mano el dia
  * que un test la toque.
  *
+ * `portal.exportadores_registro_log` (022 → 031, mismo patron) SI esta en la
+ * lista: `repo.exportadores.db.test.ts` es el primer fichero que la toca, y sin
+ * el TRUNCATE las filas de un test se cuelan en el conteo del siguiente. Ese
+ * dia le llego tambien a `visores_adjuntos_log`, y sigue sin haberle llegado.
+ *
  * No sirve envolver cada test en una transaccion: el codigo bajo prueba abre las
  * suyas con `withTransaction`, y anidarlas exigiria savepoints — justo lo que no
  * se quiere simular, porque el ROLLBACK real es una de las cosas que se prueban.
@@ -30,7 +35,7 @@ export function poolDePrueba(): Pool {
 export async function limpiar(db: Pool): Promise<void> {
   await db.query(
     `TRUNCATE portal.solicitud_modificaciones, portal.solicitudes_ausencia,
-              portal.ausencias_outbox, portal.empleados
+              portal.ausencias_outbox, portal.empleados, portal.exportadores_registro_log
      RESTART IDENTITY CASCADE`,
   );
 }
@@ -43,13 +48,22 @@ export const payloadStub = () => ({ correo: { para: '', asunto: '', cuerpo: '' }
  * una fila en `portal.users` con su hash de contrasena, y estos tests no van de
  * altas de usuario. La SOLICITUD si se crea con la funcion real del repo, que es
  * la que importa.
+ *
+ * `aprobadorCorreo` es opcional, con el valor de siempre por defecto: hace
+ * falta poder elegirlo para sembrar una jerarquia de varios niveles (el
+ * recorte por rama), y el default retrocompatible evita tocar a los ficheros
+ * que ya llaman a esta funcion con un solo argumento.
  */
-export async function sembrarEmpleado(db: Pool, correo: string): Promise<string> {
+export async function sembrarEmpleado(
+  db: Pool,
+  correo: string,
+  aprobadorCorreo = 'jefe1@ambientalia.com.co',
+): Promise<string> {
   const { rows } = await db.query(
     `INSERT INTO portal.empleados (nombre_completo, correo, cargo, aprobador_correo)
-     VALUES ('Ana Ruiz', $1, 'Analista', 'jefe1@ambientalia.com.co')
+     VALUES ('Ana Ruiz', $1, 'Analista', $2)
      RETURNING id`,
-    [correo],
+    [correo, aprobadorCorreo],
   );
   return (rows[0] as { id: string }).id;
 }

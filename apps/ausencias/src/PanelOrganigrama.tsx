@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Save } from 'lucide-react';
-import { fetchEmpleados, fijarJefe, fijarCopia, fijarVisor, fijarSegundaFirma, type EmpleadoConJefatura } from './api';
+import {
+  fetchEmpleados,
+  fijarJefe,
+  fijarCopia,
+  fijarVisor,
+  fijarExportador,
+  fijarSegundaFirma,
+  type EmpleadoConJefatura,
+} from './api';
 
 // El organigrama de la empresa. Cada persona tiene un jefe inmediato y ese único
 // dato basta: el segundo aprobador se deriva subiendo un escalón, así que el
@@ -13,6 +21,7 @@ interface Fila {
   aprobadorCorreo: string;
   copiaCorreo: string | null;
   veAdjuntos: boolean;
+  exportaRegistro: boolean;
   requiereSegundaFirma: boolean;
   guardando: boolean;
   error: string | null;
@@ -23,6 +32,7 @@ const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   aprobadorCorreo: e.aprobadorCorreo,
   copiaCorreo: e.copiaCorreo,
   veAdjuntos: e.veAdjuntos,
+  exportaRegistro: e.exportaRegistro,
   requiereSegundaFirma: e.requiereSegundaFirma,
   guardando: false,
   error: null,
@@ -105,15 +115,19 @@ export default function PanelOrganigrama({ activo }: Props) {
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
     try {
-      // Un solo botón por fila, como hasta ahora, pero CUATRO endpoints detrás: se
+      // Un solo botón por fila, como hasta ahora, pero CINCO endpoints detrás: se
       // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
-      // porque los cuatro responden el maestro entero y cada uno tiene que ver ya
+      // porque los cinco responden el maestro entero y cada uno tiene que ver ya
       // escrito lo del anterior — con `Promise.all`, la respuesta que llegara
       // última podría ser la construida ANTES de los otros cambios.
       const empleado = empleados.find((x) => x.id === id);
       if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
       if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
       if (fila.veAdjuntos !== empleado?.veAdjuntos) await fijarVisor(id, fila.veAdjuntos);
+      // `fijarExportador` devuelve `{ ok }` y no el maestro (a diferencia de los
+      // otros cuatro): no importa, porque igual que ellos su respuesta no se usa
+      // aquí. Quien de verdad resincroniza la fila es el `cargar(id)` de abajo.
+      if (fila.exportaRegistro !== empleado?.exportaRegistro) await fijarExportador(id, fila.exportaRegistro);
       if (fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma)
         await fijarSegundaFirma(id, fila.requiereSegundaFirma);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
@@ -173,8 +187,11 @@ export default function PanelOrganigrama({ activo }: Props) {
         <span>
           Quien esté en <b>copia</b> recibirá también los acuses de <b>incapacidad</b> de esa persona, que son
           información de salud. Y la casilla <b>Soportes</b> es una llave maestra: quien la tenga puede abrir el PDF de
-          cualquier incapacidad de cualquier persona, no solo de su equipo. Esa lista debe quedarse corta y cada
-          persona tener un motivo. Quién la da o la quita queda registrado.
+          cualquier incapacidad de cualquier persona, no solo de su equipo. La casilla <b>Exporta</b> abre otra
+          puerta distinta: quien la tenga puede descargar a CSV el registro de movimientos de toda la plantilla, con
+          las ausencias de cada persona y sus motivos —son datos personales, no solo los de su equipo—. Estas dos
+          listas deben quedarse cortas y cada persona tener un motivo. Quién da o quita cualquiera de las dos queda
+          registrado.
         </span>
       </p>
 
@@ -211,6 +228,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                 <th className="px-4 py-3 font-medium">2ª firma</th>
                 <th className="px-4 py-3 font-medium">Copia</th>
                 <th className="px-4 py-3 font-medium">Soportes</th>
+                <th className="px-4 py-3 font-medium">Exporta</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -225,6 +243,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                   fila.aprobadorCorreo !== e.aprobadorCorreo ||
                   fila.copiaCorreo !== e.copiaCorreo ||
                   fila.veAdjuntos !== e.veAdjuntos ||
+                  fila.exportaRegistro !== e.exportaRegistro ||
                   fila.requiereSegundaFirma !== e.requiereSegundaFirma;
                 const arriba = e.segundoAprobadorCorreo ?? e.informadoCorreo;
                 return (
@@ -368,6 +387,26 @@ export default function PanelOrganigrama({ activo }: Props) {
                         Todos
                       </label>
                     </td>
+                    <td className="px-4 py-2.5">
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          // `!!` por lo mismo que en la casilla de soportes: hub-api
+                          // y el portal se despliegan por separado, y hay una
+                          // ventana en que el portal va por delante. Una fila de un
+                          // backend que aún no mande `exportaRegistro` volvería este
+                          // checkbox «no controlado» a medio render.
+                          checked={!!fila.exportaRegistro}
+                          onChange={(ev) => actualizar(e.id, { exportaRegistro: ev.target.checked, error: null })}
+                          // Mismo criterio WCAG 2.5.3 que las otras dos casillas de
+                          // la fila: el texto visible («Registro») al principio y
+                          // detrás de quién, porque hay una por persona.
+                          aria-label={`Registro: ${e.nombreCompleto} puede exportar a CSV el registro de movimientos de toda la plantilla`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
+                        />
+                        Registro
+                      </label>
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button
@@ -378,9 +417,10 @@ export default function PanelOrganigrama({ activo }: Props) {
                           disabled={fila.guardando || !haCambiado}
                           onClick={() => void guardar(e.id)}
                           // «La fila», no «el jefe»: este botón guarda también la
-                          // copia, la llave de los soportes y la segunda firma, y
-                          // un rótulo que nombre solo uno de los cuatro campos
-                          // engaña justo a quien no puede ver cuál ha cambiado.
+                          // copia, la llave de los soportes, la del registro y la
+                          // segunda firma, y un rótulo que nombre solo uno de los
+                          // cinco campos engaña justo a quien no puede ver cuál ha
+                          // cambiado.
                           aria-label={`Guardar la fila de ${e.nombreCompleto}`}
                           className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                         >

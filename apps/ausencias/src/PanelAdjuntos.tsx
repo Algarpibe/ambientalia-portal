@@ -7,10 +7,12 @@ import TablaSolicitudes from './TablaSolicitudes';
 // Los soportes de toda la plantilla, para administración.
 //
 // Hace falta una pantalla propia porque las incapacidades —que son justo las que
-// siempre traen soporte médico— no aparecen en ninguna otra: nacen `registrada` y
-// sin aprobador, así que ni la bandeja ni el historial del aprobador las
-// alcanzan, y «Registro general» es solo de admin. Hasta ahora el PDF de una
-// incapacidad ajena solo se podía abrir desde Google Drive.
+// siempre traen soporte médico— nacen `registrada` y sin aprobador, así que la
+// bandeja nunca las alcanza. Y aunque el «Registro general» sí las enseña, un
+// jefe cualquiera solo ve su propia rama del organigrama: quien tiene la llave
+// de adjuntos no siempre es aprobador de esa persona, y a veces ni de nadie.
+// Hasta ahora el PDF de una incapacidad ajena solo se podía abrir desde Google
+// Drive.
 //
 // El PDF vive en `portal.solicitud_adjuntos.contenido` desde el alta; esto no lo
 // copia a ningún sitio, solo lo sirve con permisos de verdad.

@@ -470,6 +470,39 @@ function aMovimiento(r: FilaMovimientoDb): Movimiento {
   //
   // Por lo demás: el decisor REAL manda; si no consta —token legacy—, se cae al
   // aprobador congelado y se MARCA. Ver `DecididaPor.aproximado`.
+  //
+  // ⚠️ Y el respaldo NO es el primer aprobador sin mirar. Si la solicitud
+  // llevaba cascada de dos firmas y se cerró estando en `pendiente_2`, quien
+  // debía firmar era el SEGUNDO. Caer al primero nombraría a una persona real y
+  // equivocada, que no es aproximar: es mentir con nombre y apellidos, la misma
+  // clase de fallo que evita la guarda de `retirada` de aquí arriba.
+  //
+  // La regla final, tras dos correcciones que costaron sendos candados:
+  //
+  //   segundo_aprobador_correo != null
+  //   && primera_firma_at != decidida_at
+  //
+  // NO lleva un `primera_firma_at != null`. Ese término parecía obvio y era
+  // incorrecto: cuando un admin destraba una solicitud a `pendiente_2` desde el
+  // registro general, `primera_firma_at` no se sella nunca, así que una fila
+  // cerrada con esa marca NULA es precisamente un cierre del segundo. Vale
+  // porque `decidirSolicitud` es el ÚNICO escritor de `decidida_at`, y todo
+  // cierre que sale de `pendiente` sella las dos marcas a la vez.
+  //
+  // Sin el tercero, el caso simétrico se misatribuye igual de mal. Cuando el
+  // jefe inmediato RECHAZA una solicitud que sí llevaba cascada,
+  // `transicionAlDecidir` devuelve `esPrimeraFirma` y `esDecisionFinal` a la
+  // vez, y `decidirSolicitud` sella las dos marcas con el mismo `now()` en la
+  // misma sentencia: queda segundo firmante no nulo y primera firma no nula, y
+  // sin embargo decidió el primero. Comparar los dos instantes distingue «un
+  // solo acto» de «dos transacciones», y es exacto —no aproximado— porque las
+  // dos cadenas salen del mismo cast en la misma consulta.
+  //
+  // `correoDelTurno` NO sirve aquí: contesta a quién le toca firmar AHORA y
+  // devuelve null en todo estado terminal, y aquí toda fila está cerrada.
+  //
+  // Con candado propio en `repo.movimientos.db.test.ts` —uno por cada final
+  // posible—, porque una regla sin test es un comentario.
   const decididaPor: DecididaPor | null =
     r.estado === 'retirada'
       ? null
@@ -553,8 +586,11 @@ Expected: **PASS**, los cinco.
 
 - [ ] **Step 4: Falsar el candado**
 
-Sustituir `WHERE ${ramaDeDosNiveles()}` por `WHERE TRUE` y volver a correr.
-Expected: **FAIL** en los tres primeros tests. Revertir después.
+⚠️ **`WHERE TRUE` a secas NO sirve como falsación.** Al quitar el `$1` del SQL, la consulta pasa a requerir cero parámetros mientras el código sigue pasando uno, y Postgres corta con `bind message supplies 1 parameters, but prepared statement "" requires 0`. Los tests mueren de error de binding, no de dato mal filtrado: un rojo que no distingue nada y que da una falsa sensación de candado.
+
+La mutación honesta **conserva la aridad y anula el recorte**: sustituir el cuerpo de `ramaDeDosNiveles()` por `($1::text IS NULL OR TRUE)`. Volver a correr.
+
+Expected: **FAIL** en el test del bisnieto, en el del primo y en el de «ve a su hijo y a su nieto». Sigue verde el del admin, y es correcto: con `soloDe = null` la rama no acota de todos modos. Revertir después.
 
 - [ ] **Step 5: Commit**
 
@@ -662,6 +698,12 @@ describe('CANDADO: que filas entran', () => {
 
 Run: `cd apps/hub-api; npm run test:db -- src/ausencias/repo.movimientos.db.test.ts`
 Expected: **FAIL** en «una modificacion CERRADA entra» — todavía no se consultan.
+
+> ⚠️ **Al compartir `quienDecidio` con las modificaciones**, pasarle
+> `primera_firma_at` y `segundo_aprobador_correo` **a `null` explícitamente**. Una
+> modificación no tiene ninguna de las dos —la decide una sola persona, y su
+> `aprobador_correo` se copia de la solicitud—, así que dejar que la fila las
+> traiga por casualidad reactivaría la regla de la cascada donde no aplica.
 
 - [ ] **Step 3: Escribir la consulta de modificaciones**
 
