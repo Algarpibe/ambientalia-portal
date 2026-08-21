@@ -255,6 +255,17 @@ vi.mock('./repo.js', () => ({
     return { total: filas.length, importadas: nuevas, yaExistian: filas.length - nuevas };
   },
   todasLasSolicitudes: async () => estado.solicitudes,
+  // Modela SOLO la superficie, y a propósito. Lo que hace el repo de verdad
+  // —el recorte por rama de `ramaDeDosNiveles` y el mapeo a la unión
+  // discriminada— no se puede imitar aquí sin abrir una segunda copia de la
+  // regla de privacidad, que es justo lo que dejó el SQL del solapamiento roto
+  // con los unitarios en verde. Quien lo ejercita contra Postgres real es
+  // `repo.movimientos.db.test.ts`.
+  //
+  // Devuelve la lista vacía porque hoy no hay ninguna ruta que lo llame: el día
+  // que la haya, un `[]` pondrá roja esa ruta —y hará que quien la escriba
+  // decida aquí qué modelar— en vez de contestarle con filas inventadas.
+  movimientos: async (_db: unknown, _soloDe: string | null) => [],
   SolapeAlAplicar,
   ocupaAgenda,
   // `_adminEmail` y `_construirPayload` se aceptan y se IGNORAN a proposito. El

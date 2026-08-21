@@ -5,6 +5,7 @@ import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario } from './types.js';
 import type {
   Adjunto,
   ClaseModificacion,
+  DecididaPor,
   Empleado,
   EstadoModificacion,
   EventoBorrado,
@@ -14,6 +15,7 @@ import type {
   EventoPendiente,
   EventoSolicitud,
   Modificacion,
+  Movimiento,
   PayloadEvento,
   Solicitud,
   TipoSolicitud,
@@ -2282,4 +2284,179 @@ export async function solapeDe(
     fecha_fin: string;
   };
   return { id: r.id, tipo: r.tipo, estado: r.estado, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin };
+}
+
+// ── El registro de movimientos ─────────────────────────────────────────────
+
+/**
+ * Las columnas que TODA fila del registro trae, con los mismos alias venga de
+ * la tabla que venga.
+ *
+ * Alias comunes y no los nombres nativos de cada tabla, por lo mismo que el
+ * prefijo `mod_` de `COLS_MODIFICACION`: con un solo juego de nombres un único
+ * mapa sirve para las dos consultas, y la segunda no se puede desviar de la
+ * primera sin que el compilador lo vea.
+ *
+ * `estado` NO está aquí, y es la única ausencia deliberada: es justo lo que
+ * distingue a las dos clases —en una solicitud es `EstadoSolicitud`, en una
+ * modificación `EstadoModificacion`— y meterlo aquí con la unión de los dos
+ * anularía la garantía que `Movimiento` compra al discriminar por `clase`.
+ */
+interface FilaMovimientoDb {
+  id: string;
+  solicitud_id: string;
+  empleado_nombre: string;
+  empleado_cargo: string | null;
+  solicitante_email: string;
+  tipo: TipoSolicitud;
+  fecha_inicio: string;
+  fecha_fin: string;
+  dias_habiles: number;
+  decidida_at: string | null;
+  /** Del `LEFT JOIN` con `portal.users`: null si no hubo decisor de verdad. */
+  decisor_nombre: string | null;
+  decisor_correo: string | null;
+  /** El congelado en el alta: quién DEBÍA firmar, que no es quién firmó. */
+  aprobador_correo: string | null;
+  created_at: string;
+  motivo: string | null;
+}
+
+/**
+ * Quién tomó la decisión, con la marca de si consta o se deduce.
+ *
+ * Las tres ramas son las que documenta `DecididaPor` (types.ts); aquí van sus
+ * porqués operativos. Vive suelta porque es la única parte del mapeo que las
+ * dos clases de movimiento comparten palabra por palabra.
+ */
+function quienDecidio(r: FilaMovimientoDb, estado: Solicitud['estado'] | EstadoModificacion): DecididaPor | null {
+  // ⚠️ Con `retirada`, SIEMPRE null, y la guarda va la PRIMERA para que ninguna
+  // rama de abajo se le adelante: una retirada la quita el propio solicitante
+  // —quién fue ya consta en `solicitanteEmail`—, así que rellenar esto con el
+  // `aprobador_correo` congelado en el alta atribuiría el acto a alguien que no
+  // lo hizo. Desde aquí hoy es inalcanzable: una SOLICITUD nunca está
+  // `retirada`, ese estado es de las modificaciones. Se deja puesta igual
+  // porque esta función es la que van a compartir las dos clases, y añadir la
+  // guarda después —cuando ya haya filas que la necesiten— es exactamente cómo
+  // se cuela una atribución falsa sin que nada se ponga rojo.
+  if (estado === 'retirada') return null;
+  // Decisor REAL: `aprobador_user_id` resolvió a una fila de `portal.users`.
+  // Basta con mirar el correo: `email` es NOT NULL en esa tabla, así que solo
+  // llega null cuando el LEFT JOIN no encontró a nadie.
+  if (r.decisor_correo) return { nombre: r.decisor_nombre, correo: r.decisor_correo, aproximado: false };
+  // Sin usuario pero con la decisión sellada: sesión con token legacy. Lo único
+  // que queda es el correo de quien DEBÍA firmar —un admin pudo destrabarla en
+  // su lugar—, y `aproximado` es lo que impide que la pantalla lo enseñe como
+  // una autoría probada.
+  if (r.decidida_at && r.aprobador_correo) return { nombre: null, correo: r.aprobador_correo, aproximado: true };
+  // En trámite: no ha decidido nadie todavía, y así hay que enseñarlo.
+  return null;
+}
+
+/**
+ * Los campos que las dos clases rellenan igual. Sin `clase` ni `estado`: esos
+ * los pone cada clase con sus propios literales, y es lo que permite construir
+ * la unión discriminada sin un `as Movimiento` que anularía la garantía.
+ *
+ * El tipo de retorno se deja INFERIR a propósito: `MovimientoBase` no se
+ * exporta (types.ts), así que anotarlo aquí obligaría a exportarla o a escribir
+ * un `Omit<>` sobre la unión que se lee peor que el objeto que hay debajo.
+ */
+function camposComunesDelMovimiento(r: FilaMovimientoDb, estado: Solicitud['estado'] | EstadoModificacion) {
+  return {
+    id: r.id,
+    solicitudId: r.solicitud_id,
+    empleadoNombre: r.empleado_nombre,
+    empleadoCargo: r.empleado_cargo,
+    solicitanteEmail: r.solicitante_email,
+    tipo: r.tipo,
+    fechaInicio: r.fecha_inicio,
+    fechaFin: r.fecha_fin,
+    diasHabiles: r.dias_habiles,
+    decididaAt: r.decidida_at,
+    decididaPor: quienDecidio(r, estado),
+    createdAt: r.created_at,
+    motivo: r.motivo,
+  };
+}
+
+/** Una fila de la consulta de solicitudes: lo común más SU estado. */
+interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
+  estado: Solicitud['estado'];
+}
+
+/**
+ * Una solicitud, ya como fila del registro.
+ *
+ * `clase: 'solicitud'` es un literal de TypeScript y no `r.clase`: es AQUÍ
+ * donde el compilador comprueba que este objeto encaja en una de las dos ramas
+ * de `Movimiento` —la que lleva `EstadoSolicitud`— y por eso no hace falta
+ * ningún cast. Leerlo de la fila movería esa comprobación a una promesa sobre
+ * lo que devuelve Postgres, que no verifica nadie.
+ */
+function comoMovimientoDeSolicitud(r: FilaMovimientoSolicitudDb): Movimiento {
+  return { ...camposComunesDelMovimiento(r, r.estado), clase: 'solicitud', estado: r.estado };
+}
+
+/**
+ * Las solicitudes como movimientos: TODAS, en cualquier estado.
+ *
+ * Sin filtro por estado a propósito. El registro es un registro y no un archivo
+ * de cerradas: una en trámite tiene que verse, con la decisión vacía —
+ * `quienDecidio` devuelve `null` y la pantalla la pinta como pendiente—.
+ *
+ * Tampoco lleva `ORDER BY`: el orden lo pone `movimientos`, que mezcla esta
+ * lista con la de las modificaciones. Ordenar aquí sería un orden que la mezcla
+ * deshace.
+ */
+async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promise<Movimiento[]> {
+  const { rows } = await db.query(
+    // Los casts NO son estilo, y son los mismos que explica `SELECT_SOLICITUD`:
+    // sin `::float8` un NUMERIC llega como STRING —y "5.0" rompe la aritmética
+    // de los contadores y del CSV—, y sin `::text` un DATE o un timestamptz
+    // llega como objeto Date, con lo que cualquier comparación lexicográfica
+    // contra una cadena falla EN SILENCIO.
+    //
+    // `clase` viaja en la fila aunque el mapeo no la lea: hace que la consulta
+    // se pueda ejecutar suelta en un psql y se entienda sin el TypeScript al
+    // lado. Quien discrimina la unión es el literal de
+    // `comoMovimientoDeSolicitud`, y está allí y no aquí a propósito: si esta
+    // constante y ese literal se desviaran, mapear desde la fila daría una
+    // unión mentirosa que el compilador no podría cazar.
+    `SELECT s.id, 'solicitud'::text AS clase, s.id AS solicitud_id,
+            e.nombre_completo AS empleado_nombre, e.cargo AS empleado_cargo,
+            s.solicitante_email, s.tipo,
+            s.fecha_inicio::text AS fecha_inicio, s.fecha_fin::text AS fecha_fin,
+            s.dias_habiles::float8 AS dias_habiles,
+            s.estado, s.decidida_at::text AS decidida_at,
+            -- full_name y email son los nombres reales de las columnas de
+            -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
+            u.full_name AS decisor_nombre, u.email AS decisor_correo,
+            s.aprobador_correo,
+            s.created_at::text AS created_at,
+            s.comentarios AS motivo
+       FROM portal.solicitudes_ausencia s
+       JOIN portal.empleados e ON e.id = s.empleado_id
+       -- LEFT: en las sesiones con token legacy aprobador_user_id es NULL, y un
+       -- JOIN normal borraria del registro justo las solicitudes cuya autoria
+       -- peor consta.
+       LEFT JOIN portal.users u ON u.id = s.aprobador_user_id
+      WHERE ${ramaDeDosNiveles()}`,
+    // `soloDe` como PRIMER parámetro, siempre: es la regla que impone
+    // `ramaDeDosNiveles` para no tener que sincronizar un número con una
+    // posición.
+    [soloDe],
+  );
+  return (rows as FilaMovimientoSolicitudDb[]).map(comoMovimientoDeSolicitud);
+}
+
+/**
+ * El registro de movimientos. `soloDe = null` = la compañía entera (admin).
+ *
+ * Dos consultas y mezcla en TypeScript, no un `UNION ALL`: las formas de columna
+ * de las dos tablas son muy distintas, la vista carga todo de una sola vez, y
+ * separadas se pueden probar sin Postgres.
+ */
+export async function movimientos(db: Pool, soloDe: string | null): Promise<Movimiento[]> {
+  return movimientosDeSolicitudes(db, soloDe);
 }
