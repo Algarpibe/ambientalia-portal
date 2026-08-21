@@ -96,15 +96,7 @@ export class UserRepository {
     return { ...toPublic(rows[0]), avatar: rows[0].avatar ?? null };
   }
 
-  /** Actualiza el nombre completo. Devuelve el perfil o null si no existe. */
-  async updateName(id: string, fullName: string): Promise<SelfProfile | null> {
-    const { rows } = await this.pool.query(
-      `UPDATE portal.users SET full_name = $2 WHERE id = $1 RETURNING ${PUBLIC_COLUMNS}, avatar`,
-      [id, fullName.trim()],
-    );
-    if (!rows[0]) return null;
-    return { ...toPublic(rows[0]), avatar: rows[0].avatar ?? null };
-  }
+  // No hay updateName: full_name se escribe una sola vez, al registrarse.
 
   /** Actualiza el avatar (data URL). Devuelve true si el usuario existía. */
   async updateAvatar(id: string, avatar: string): Promise<boolean> {

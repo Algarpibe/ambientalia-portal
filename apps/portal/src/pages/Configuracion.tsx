@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { User, Mail, Lock, KeyRound, Shield, Camera, Save, Clock, Eye, EyeOff } from 'lucide-react';
 import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
@@ -18,8 +18,6 @@ function formatDate(iso: string): string {
 export default function Configuracion() {
   const { profile, reload } = useProfile();
 
-  const [name, setName] = useState('');
-  const [savingName, setSavingName] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -28,33 +26,6 @@ export default function Configuracion() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [savingPwd, setSavingPwd] = useState(false);
-
-  useEffect(() => {
-    if (profile) setName(profile.full_name);
-  }, [profile]);
-
-  const nameChanged = profile != null && name.trim() !== profile.full_name && name.trim().length > 0;
-
-  const saveName = async () => {
-    setSavingName(true);
-    try {
-      const res = await authFetch('/api/users/me/profile', {
-        method: 'PATCH',
-        body: JSON.stringify({ fullName: name.trim() }),
-      });
-      if (!res.ok) {
-        notify('No se pudo actualizar el nombre.', 'error');
-        return;
-      }
-      notify('Nombre actualizado.', 'info');
-      notifyProfileUpdated();
-      reload();
-    } catch {
-      notify('No se pudo conectar con el servidor.', 'error');
-    } finally {
-      setSavingName(false);
-    }
-  };
 
   const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -168,25 +139,20 @@ export default function Configuracion() {
               <p className="text-xs text-gray-500">{uploading ? 'Subiendo…' : 'Recomendado: JPG o PNG, máx. 2MB'}</p>
             </div>
 
-            {/* Nombre */}
+            {/* Nombre (solo lectura). Queda fijado con lo que se escribió en el
+                registro: es el nombre con el que la persona firma las
+                aprobaciones, y renombrarse reescribiría a posteriori quién
+                aparece en decisiones ya tomadas. Mismo trato que el correo. */}
             <label className="block text-sm font-medium text-gray-600 mb-1">Nombre Completo</label>
-            <div className="flex gap-2 mb-4">
-              <div className="relative flex-1">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  maxLength={100}
-                  className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-200 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                />
-              </div>
-              <button
-                onClick={saveName}
-                disabled={!nameChanged || savingName}
-                className="px-3 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5">
-                <Save className="w-4 h-4" /> Guardar
-              </button>
+            <div className="relative">
+              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                value={profile?.full_name ?? ''}
+                readOnly
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
+              />
             </div>
+            <p className="text-xs text-gray-500 mt-1 mb-4">Se fijó al crear tu cuenta y no puede editarse.</p>
 
             {/* Email (solo lectura) */}
             <label className="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
