@@ -43,13 +43,22 @@ export const payloadStub = () => ({ correo: { para: '', asunto: '', cuerpo: '' }
  * una fila en `portal.users` con su hash de contrasena, y estos tests no van de
  * altas de usuario. La SOLICITUD si se crea con la funcion real del repo, que es
  * la que importa.
+ *
+ * `aprobadorCorreo` es opcional, con el valor de siempre por defecto: hace
+ * falta poder elegirlo para sembrar una jerarquia de varios niveles (el
+ * recorte por rama), y el default retrocompatible evita tocar a los ficheros
+ * que ya llaman a esta funcion con un solo argumento.
  */
-export async function sembrarEmpleado(db: Pool, correo: string): Promise<string> {
+export async function sembrarEmpleado(
+  db: Pool,
+  correo: string,
+  aprobadorCorreo = 'jefe1@ambientalia.com.co',
+): Promise<string> {
   const { rows } = await db.query(
     `INSERT INTO portal.empleados (nombre_completo, correo, cargo, aprobador_correo)
-     VALUES ('Ana Ruiz', $1, 'Analista', 'jefe1@ambientalia.com.co')
+     VALUES ('Ana Ruiz', $1, 'Analista', $2)
      RETURNING id`,
-    [correo],
+    [correo, aprobadorCorreo],
   );
   return (rows[0] as { id: string }).id;
 }
