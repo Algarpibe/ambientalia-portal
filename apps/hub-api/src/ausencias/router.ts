@@ -399,13 +399,20 @@ export function createAusenciasRouter(db: Pool): Router {
    * filtro, que no sea el «de quién»: eso lo decide `movimientosVisibles` con la
    * sesión, y un `?soloDe=` sería un jefe leyendo la rama de otro.
    *
-   * Lleva `requireAuth` a secas y no `...gated` (que añade `requireApp`), al
-   * contrario que las demás rutas de datos de este router. Lo que eso significa,
-   * dicho sin rodeos: quien tenga cuenta en el portal SIN la app «ausencias»
-   * asignada, pero que figure como aprobador de alguien en el organigrama, puede
-   * leer su rama. El guard de verdad es el del servicio, no la asignación.
+   * Lleva `...gated` —y no `requireAuth` a secas— porque hacen falta LOS DOS
+   * permisos, y son dos cosas distintas que se conceden en sitios distintos:
+   * figurar como aprobador en el ORGANIGRAMA (maestro de empleados, lo mira el
+   * servicio) no es lo mismo que tener acceso a la APP (panel de usuarios del
+   * portal, lo mira `requireApp`). A quien le quiten la app en el panel se le
+   * tiene que cerrar el registro aunque siga siendo el jefe de media empresa;
+   * si esta ruta solo mirase el organigrama, ese despido se quedaría a medias.
+   *
+   * Un admin entra aunque no tenga la app asignada: `requireApp` le da bypass
+   * por su rol —lo dice su propio JSDoc— y es el caso real del admin sin apps
+   * del panel de usuarios. Sin ese bypass, `...gated` habría dejado fuera del
+   * registro a un administrador legítimo.
    */
-  router.get('/ausencias/movimientos', requireAuth, async (req, res) => {
+  router.get('/ausencias/movimientos', ...gated, async (req: Request, res: Response) => {
     try {
       res.json({ movimientos: await service.movimientosVisibles(db, sesionDe(req)) });
     } catch (e) {

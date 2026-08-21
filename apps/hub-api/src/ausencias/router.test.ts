@@ -2085,19 +2085,58 @@ describe('GET /ausencias/movimientos', () => {
     expect(r.body.movimientos).toHaveLength(2);
   });
 
-  it('un aprobador que no es admin recibe 200 y se le pasa SU PROPIO correo', async () => {
+  it('un aprobador CON la app asignada recibe 200 y se le pasa SU PROPIO correo', async () => {
     // El mutante que muere aquí es el peor de todos: cambiar el `soloDe` por un
     // `null` a secas le entrega a cualquier jefe el historial de la plantilla
     // completa —incapacidades y permisos, con sus motivos— sin que nada más de
     // esta batería se inmute.
-    await pedir(token({ sub: APROBADOR })).expect(200);
+    //
+    // El `apps` va explícito aunque sea el valor por defecto de `token()`: este
+    // test y el de «SIN la app asignada» son una pareja, y se leen mal si hay
+    // que ir a buscar a otro sitio en qué se diferencian.
+    await pedir(token({ sub: APROBADOR, apps: ['ausencias'] })).expect(200);
     expect(estado.soloDeDeMovimientos).toEqual([APROBADOR]);
+  });
+
+  it('CANDADO: un aprobador SIN la app asignada NO entra, aunque el organigrama diga que aprueba', async () => {
+    // Aquí se cruzan DOS permisos que se conceden en sitios distintos: figurar
+    // como aprobador en el ORGANIGRAMA (maestro de empleados) y tener acceso a
+    // la APP (panel de usuarios del portal). Hacen falta los dos. A quien le
+    // quiten la app tiene que cerrársele el registro aunque siga siendo jefe de
+    // media empresa; sin este candado, el registro se saltaría el control de
+    // acceso del portal por la puerta de atrás, que es justo lo que pasaba
+    // cuando esta ruta llevaba `requireAuth` a secas.
+    const sinApp = await pedir(token({ sub: APROBADOR, apps: [] })).expect(403);
+    const otraApp = await pedir(token({ sub: APROBADOR, apps: ['contabilidad'] })).expect(403);
+    // `forbidden` y NO `no_es_aprobador`: es lo que distingue cuál de los dos
+    // guards ha cortado. Si esto dijera `no_es_aprobador`, el 403 vendría del
+    // servicio y `requireApp` no estaría puesto — verde por el motivo
+    // equivocado, que es como se cuelan estas cosas.
+    expect(sinApp.body.error).toBe('forbidden');
+    expect(otraApp.body.error).toBe('forbidden');
+    expect(estado.soloDeDeMovimientos).toEqual([]);
+  });
+
+  it('un admin SIN la app asignada SÍ entra: `requireApp` le da bypass por el rol', async () => {
+    // Es el caso real del admin sin apps del panel de usuarios. `requireApp`
+    // exime al admin a propósito (ver su JSDoc en `auth.ts`): un admin gestiona
+    // el acceso de todas las apps y no depende de tenérselas asignadas a sí
+    // mismo. Sin ese bypass, poner `...gated` en esta ruta habría dejado fuera
+    // del registro a un administrador legítimo — por eso se comprobó antes de
+    // cambiarlo, y por eso queda escrito aquí.
+    await pedir(token({ sub: 'admin@ambientalia.com.co', role: 'admin', apps: [] })).expect(200);
+    expect(estado.soloDeDeMovimientos).toEqual([null]);
   });
 
   it('CANDADO: quien no es ni admin ni aprobador recibe 403, y el registro NI SE CONSULTA', async () => {
     // La lista vacía no vale de guard: `soloDe` recorta por RAMA, así que un
     // 200 aquí no significaría «no hay nada tuyo» sino que la consulta llegó a
     // ejecutarse. Por eso se afirman las dos cosas: el 403 y que no hubo lectura.
+    //
+    // `token()` trae la app asignada, así que `requireApp` deja pasar y el 403
+    // solo puede venir del guard del servicio. Es la pareja simétrica del
+    // candado de la app: allí el organigrama dice que sí y corta el portal;
+    // aquí el portal dice que sí y corta el organigrama.
     const r = await pedir(token()).expect(403);
     expect(r.body.error).toBe('no_es_aprobador');
     expect(estado.soloDeDeMovimientos).toEqual([]);
