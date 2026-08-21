@@ -850,7 +850,15 @@ export async function actualizarSolicitud(
         // Excluida por su id, o una corrección que no mueva las fechas —el
         // estado, un comentario, un día mal contado— chocaría contra la propia
         // fila que corrige, y ninguna solicitud VIVA se podría ya tocar (las
-        // rechazadas y las incapacidades sí: no llegan hasta aquí).
+        // rechazadas sí: no llegan hasta aquí).
+        //
+        // ⚠️ Las incapacidades SÍ llegan desde el 2026-08-21, cuando dejaron de
+        // estar exentas. Y eso tiene una consecuencia operativa con los datos
+        // que ya existían: una incapacidad informada encima de otra ausencia
+        // mientras la exención vivía sigue en la tabla, y ahora esa pareja es
+        // un estado que la regla prohíbe. Corregirla SIN mover las fechas da
+        // 409; lo que sí se puede es moverla a fechas libres —la comprobación
+        // mira las NUEVAS— o borrarla, que no pasa por esta puerta.
         id,
       );
       if (choque) throw new SolapeAlAplicar(choque);
