@@ -629,17 +629,16 @@ export interface DecididaPor {
 }
 
 /**
- * Una fila del registro: una solicitud, o una anulación o cambio de fecha ya
- * cerrados.
+ * Los campos comunes a toda fila del registro. `clase` y `estado` quedan
+ * fuera: van en `Movimiento`, que los une para poder discriminar por `clase`.
  *
  * Plana y no una unión con objetos anidados, porque los filtros por tipo,
  * persona y año, los contadores y el CSV ya operan sobre una lista plana de
  * solicitudes y así siguen valiendo casi sin tocarlos.
  */
-export interface Movimiento {
+interface MovimientoBase {
   /** El de la solicitud o el de la modificación, según la clase. */
   id: string;
-  clase: ClaseMovimiento;
   /** Siempre el de la solicitud afectada, también en anulaciones y cambios. */
   solicitudId: string;
   empleadoNombre: string;
@@ -654,12 +653,33 @@ export interface Movimiento {
    */
   fechaInicio: string;
   fechaFin: string;
+  /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
-  /** El estado del MOVIMIENTO, no el de la solicitud que lo recibe. */
-  estado: EstadoSolicitud | EstadoModificacion;
   decididaAt: string | null;
+  /**
+   * Regla para quien escriba la consulta de una tarea posterior: con
+   * `estado === 'retirada'` esto va SIEMPRE a `null`. Una `retirada` la quita
+   * el propio solicitante, no un aprobador —quién fue ya consta en
+   * `solicitanteEmail`—, así que rellenarla con el `aprobador_correo`
+   * congelado en el alta atribuiría el acto a alguien que nunca lo hizo.
+   */
   decididaPor: DecididaPor | null;
   createdAt: string;
   /** `comentarios` en una solicitud; `motivo` en una anulación o un cambio. */
   motivo: string | null;
 }
+
+/**
+ * Una fila del registro: una solicitud, o una anulación o cambio de fecha ya
+ * cerrados.
+ *
+ * Unión discriminada por `clase`, y no un `estado: EstadoSolicitud |
+ * EstadoModificacion` suelto: los dos enums comparten los literales
+ * `'pendiente'`, `'aprobada'` y `'rechazada'`, así que sin el discriminante
+ * TypeScript no puede afinar cuál de los dos describe la fila, y un `switch`
+ * sobre `estado` en el front quedaría incompleto sin que el compilador se
+ * quejara.
+ */
+export type Movimiento =
+  | (MovimientoBase & { clase: 'solicitud'; estado: EstadoSolicitud })
+  | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });
