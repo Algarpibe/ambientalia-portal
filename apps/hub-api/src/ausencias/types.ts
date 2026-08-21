@@ -603,3 +603,63 @@ export interface PayloadEvento {
   calendario: EventoCalendario | null;
   hoja: FilaHoja | null;
 }
+
+/**
+ * Las clases de movimiento del registro. Las dos de modificación se llaman
+ * EXACTAMENTE igual que en la base de datos (`CLASES_MODIFICACION`), y no con
+ * sinónimos como `cambio`: una traducción de vocabulario entre la tabla y la
+ * pantalla es una capa más que puede derivar en silencio, y no compra nada.
+ */
+export const CLASES_MOVIMIENTO = ['solicitud', 'fechas', 'anulacion'] as const;
+export type ClaseMovimiento = (typeof CLASES_MOVIMIENTO)[number];
+
+/**
+ * Quién tomó la decisión.
+ *
+ * `aproximado` no es decorativo: en las sesiones con token legacy
+ * `aprobador_user_id` es NULL, y entonces esto sale del `aprobador_correo`
+ * congelado en el alta, que es *quién debía firmar* y no necesariamente quién
+ * firmó —un admin pudo destrabarla en su lugar—. Enseñarlo sin marca sería
+ * afirmar una autoría que no consta.
+ */
+export interface DecididaPor {
+  nombre: string | null;
+  correo: string;
+  aproximado: boolean;
+}
+
+/**
+ * Una fila del registro: una solicitud, o una anulación o cambio de fecha ya
+ * cerrados.
+ *
+ * Plana y no una unión con objetos anidados, porque los filtros por tipo,
+ * persona y año, los contadores y el CSV ya operan sobre una lista plana de
+ * solicitudes y así siguen valiendo casi sin tocarlos.
+ */
+export interface Movimiento {
+  /** El de la solicitud o el de la modificación, según la clase. */
+  id: string;
+  clase: ClaseMovimiento;
+  /** Siempre el de la solicitud afectada, también en anulaciones y cambios. */
+  solicitudId: string;
+  empleadoNombre: string;
+  empleadoCargo: string | null;
+  solicitanteEmail: string;
+  /** El tipo de la SOLICITUD afectada, para que el filtro por tipo siga valiendo. */
+  tipo: TipoSolicitud;
+  /**
+   * Las fechas y días EFECTIVOS del movimiento. En una `anulacion` son las
+   * PREVIAS: un CHECK de la 024 garantiza que las nuevas van a null. En un
+   * `fechas` son las nuevas, que es lo que se propuso.
+   */
+  fechaInicio: string;
+  fechaFin: string;
+  diasHabiles: number;
+  /** El estado del MOVIMIENTO, no el de la solicitud que lo recibe. */
+  estado: EstadoSolicitud | EstadoModificacion;
+  decididaAt: string | null;
+  decididaPor: DecididaPor | null;
+  createdAt: string;
+  /** `comentarios` en una solicitud; `motivo` en una anulación o un cambio. */
+  motivo: string | null;
+}
