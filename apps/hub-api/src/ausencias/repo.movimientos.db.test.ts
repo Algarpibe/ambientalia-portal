@@ -472,3 +472,73 @@ describe('CANDADO: las modificaciones en el registro', () => {
     );
   });
 });
+
+// `observaciones` en el registro: la columna que el CSV de nomina perdio al
+// pasar de `Solicitud` a `Movimiento`.
+//
+// El escritor real de la columna es `actualizarSolicitud` -el PATCH del
+// registro-, no `crearSolicitud`: `NuevaSolicitud` no lleva `observaciones`
+// (es el mismo hecho que anota el comentario de router.test.ts sobre el doble
+// de `POST /solicitudes`), asi que la fila nace con la columna NULL y solo una
+// correccion de admin la rellena. El candado usa ese escritor real para la
+// mitad que SI la lleva -la misma leccion que el resto del fichero: un UPDATE
+// a pelo afirmaria la premisa en vez de ejercitarla-, y una de las cuatro
+// solicitudes del beforeEach, sin tocar, para la mitad que no: asi es
+// exactamente como nace la columna en produccion.
+const OBSERVANTE = 'observante@ambientalia.com.co';
+
+describe('CANDADO: observaciones en el registro', () => {
+  it('CANDADO: una solicitud con observaciones las trae en su movimiento; una sin ellas, null', async () => {
+    const empleadoId = await sembrarEmpleado(db, OBSERVANTE, JEFE);
+    const solicitud = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: OBSERVANTE,
+      estado: 'aprobada',
+      fechaInicio: '2026-07-01',
+      fechaFin: '2026-07-03',
+      segundoAprobadorCorreo: null,
+    });
+    const corregida = await actualizarSolicitud(
+      db,
+      solicitud.id,
+      {
+        empleadoId: solicitud.empleadoId,
+        tipo: solicitud.tipo,
+        fechaInicio: solicitud.fechaInicio,
+        fechaFin: solicitud.fechaFin,
+        dias: solicitud.diasHabiles,
+        estado: solicitud.estado,
+        comentarios: solicitud.comentarios,
+        observaciones: 'Nota al margen del historico importado',
+      },
+      'admin@ambientalia.com.co',
+      payloadStub,
+    );
+    if (!corregida) throw new Error('la correccion no encontro la solicitud sembrada');
+
+    const conNota = (await movimientos(db, null)).find(
+      (m) => m.solicitudId === solicitud.id && m.clase === 'solicitud',
+    );
+    if (!conNota) throw new Error('la solicitud corregida no aparece en el registro');
+    if (conNota.clase !== 'solicitud') throw new Error('el find de arriba ya filtro por clase');
+    // El nucleo del candado: sin `s.observaciones` en el SELECT esta columna
+    // llega undefined, y el CSV de nomina se queda sin su octava columna otra
+    // vez sin que nada se ponga rojo.
+    expect(conNota.observaciones).toBe('Nota al margen del historico importado');
+
+    // Una solicitud SIN corregir -una de las cuatro que siembra el beforeEach,
+    // sin tocar- no lleva observaciones: la columna nace NULL porque
+    // `crearSolicitud` no la escribe (`NuevaSolicitud` no la lleva).
+    //
+    // La mitad que de verdad caza una columna ausente: si el SELECT pierde
+    // `s.observaciones`, esta fila tambien llega undefined, y
+    // `undefined !== null` dejaria pasar un `.not.toBeNull()` de la mitad de
+    // arriba sin que el candado mordiera.
+    const sinNota = (await movimientos(db, null)).find(
+      (m) => m.solicitanteEmail === HIJO && m.clase === 'solicitud',
+    );
+    if (!sinNota) throw new Error('la siembra del beforeEach no dejo movimiento de HIJO');
+    if (sinNota.clase !== 'solicitud') throw new Error('el find de arriba ya filtro por clase');
+    expect(sinNota.observaciones).toBeNull();
+  });
+});

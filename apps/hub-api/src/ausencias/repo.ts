@@ -2496,16 +2496,17 @@ function camposComunesDelMovimiento(r: FilaMovimientoDb, estado: Solicitud['esta
 }
 
 /**
- * Una fila de la consulta de solicitudes: lo común más SU estado y SU
- * `anulada_at`.
+ * Una fila de la consulta de solicitudes: lo común más SU estado, SU
+ * `anulada_at` y SUS `observaciones`.
  *
- * `anulada_at` va aquí y no en `FilaMovimientoDb`: solo la consulta de
- * solicitudes la selecciona (ver `movimientosDeSolicitudes`), y la de
+ * Las dos últimas van aquí y no en `FilaMovimientoDb`: solo la consulta de
+ * solicitudes las selecciona (ver `movimientosDeSolicitudes`), y la de
  * modificaciones no tiene nada parecido que mapear.
  */
 interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
   estado: Solicitud['estado'];
   anulada_at: string | null;
+  observaciones: string | null;
 }
 
 /**
@@ -2517,12 +2518,18 @@ interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
  * ningún cast. Leerlo de la fila movería esa comprobación a una promesa sobre
  * lo que devuelve Postgres, que no verifica nadie.
  *
- * `anuladaAt` se mapea AQUÍ y no en `camposComunesDelMovimiento`, por la misma
- * razón que vive en esta única rama de `Movimiento`: no es un campo común, es
- * de la solicitud.
+ * `anuladaAt` y `observaciones` se mapean AQUÍ y no en
+ * `camposComunesDelMovimiento`, por la misma razón que viven en esta única
+ * rama de `Movimiento`: no son campos comunes, son de la solicitud.
  */
 function comoMovimientoDeSolicitud(r: FilaMovimientoSolicitudDb): Movimiento {
-  return { ...camposComunesDelMovimiento(r, r.estado), clase: 'solicitud', estado: r.estado, anuladaAt: r.anulada_at };
+  return {
+    ...camposComunesDelMovimiento(r, r.estado),
+    clase: 'solicitud',
+    estado: r.estado,
+    anuladaAt: r.anulada_at,
+    observaciones: r.observaciones,
+  };
 }
 
 /**
@@ -2564,6 +2571,9 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
             -- template literal de la consulta, y una comilla invertida sin
             -- escapar lo cerraria a mitad de frase.
             s.anulada_at::text AS anulada_at,
+            -- Sin cast: observaciones ya es TEXT en la tabla, no timestamptz
+            -- ni NUMERIC como las columnas de arriba que si lo llevan.
+            s.observaciones,
             -- full_name y email son los nombres reales de las columnas de
             -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
             u.full_name AS decisor_nombre, u.email AS decisor_correo,

@@ -707,5 +707,23 @@ export type Movimiento =
        * razón que dio el jefe para negarla.
        */
       anuladaAt: string | null;
+      /**
+       * Notas al margen del histórico importado de la hoja, o `null` si no
+       * hay ninguna.
+       *
+       * Va SOLO en esta rama, por la misma razón que `anuladaAt`: es un dato
+       * DE LA SOLICITUD, no del movimiento en general —una `fechas` o una
+       * `anulacion` no tienen observaciones propias, son ellas mismas el
+       * cambio que se anota—, y colgarlo en `MovimientoBase` ensuciaría la
+       * forma común de las tres ramas con un campo que dos de ellas no usan.
+       *
+       * Hace falta porque el CSV que sustituye al Excel de nómina lleva esta
+       * columna desde siempre —era la octava—, y perderla al pasar de
+       * `Solicitud` a `Movimiento` cambia la forma de un fichero del que
+       * depende nómina. Mantenerla fuera de `MovimientoBase` es además lo que
+       * hace que exportar una `fechas` o una `anulacion` no compile: ninguna
+       * de las dos ramas tiene `observaciones` que leer.
+       */
+      observaciones: string | null;
     })
   | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });

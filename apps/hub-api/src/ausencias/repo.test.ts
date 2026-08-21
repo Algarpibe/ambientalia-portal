@@ -228,9 +228,11 @@ function movimiento(id: string, decididaAt: string | null, createdAt: string): M
     decididaPor: null,
     createdAt,
     motivo: null,
-    // Ninguno de estos tests mira la anulación: solo ordenan por fecha de
-    // cierre. Relleno inerte, igual que el resto de la fila.
+    // Ninguno de estos tests mira la anulación ni las observaciones: solo
+    // ordenan por fecha de cierre. Relleno inerte, igual que el resto de la
+    // fila.
     anuladaAt: null,
+    observaciones: null,
   };
 }
 

@@ -208,7 +208,7 @@ function contarPorPersona(filas: MovimientoDeSolicitud[]): [string, number][] {
  * más cosas.
  */
 function exportarCsv(filas: MovimientoDeSolicitud[]) {
-  const cab = ['Nombre y Apellidos', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Estado', 'Comentarios'];
+  const cab = ['Nombre y Apellidos', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Estado', 'Comentarios', 'Observaciones'];
   const lineas = [
     cab.join(';'),
     ...filas.map((s) =>
@@ -229,6 +229,12 @@ function exportarCsv(filas: MovimientoDeSolicitud[]) {
         // `Movimiento[]` para «exportarlo todo».
         chipDeSolicitud(s).label,
         s.motivo ?? '',
+        // Última columna, en la misma posición que tenía antes de que el
+        // registro pasara a ser de movimientos: `observaciones` vive solo en
+        // la rama `solicitud` de la unión, así que esta línea es la TERCERA
+        // cerradura del candado de más arriba y sale gratis por la misma
+        // razón que `anuladaAt`.
+        s.observaciones ?? '',
       ]
         .map(celdaCsv)
         .join(';'),
