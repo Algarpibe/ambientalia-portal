@@ -260,6 +260,12 @@ export interface Movimiento {
 }
 ```
 
+> **Tres correcciones decididas durante la ejecución**, a raíz de la revisión de calidad. El código real de `types.ts` manda sobre este bloque:
+>
+> 1. **`Movimiento` pasa a ser una unión discriminada por `clase`**, manteniendo la planitud (los campos comunes viven en una `MovimientoBase` compartida). Sin el discriminante, combinaciones imposibles compilan —`{ clase: 'solicitud', estado: 'retirada' }`— y, como `EstadoSolicitud` y `EstadoModificacion` comparten tres literales (`pendiente`, `aprobada`, `rechazada`), un `switch` sobre `estado` no recibe ninguna exhaustividad del compilador. Importa el doble aquí porque el front copia el tipo a mano y sin test de contrato.
+> 2. **`diasHabiles` recupera la nota de que es decimal** (medios días, 6,5), que `Solicitud` ya lleva para la misma columna. Sin ella, quien copie el tipo al front puede asumir entero y romperlo con un redondeo o una pluralización.
+> 3. **Regla nueva: con `estado === 'retirada'`, `decididaPor` va a `null`.** Una retirada la echa atrás el propio solicitante, no la decide un aprobador; rellenarla con el aprobador congelado atribuiría el acto a alguien que no lo hizo. Quien la retiró ya consta en `solicitanteEmail`, así que no se pierde nada. La Task 6 la implementa y **la prueba**.
+
 - [ ] **Step 2: Verificar que compila**
 
 Run: `cd apps/hub-api; npx tsc -b`
@@ -457,13 +463,21 @@ interface FilaMovimientoDb {
 }
 
 function aMovimiento(r: FilaMovimientoDb): Movimiento {
-  // El decisor REAL manda; si no consta —token legacy—, se cae al aprobador
-  // congelado y se marca. Ver `DecididaPor.aproximado`.
-  const decididaPor: DecididaPor | null = r.decisor_correo
-    ? { nombre: r.decisor_nombre, correo: r.decisor_correo, aproximado: false }
-    : r.decidida_at && r.aprobador_correo
-      ? { nombre: null, correo: r.aprobador_correo, aproximado: true }
-      : null;
+  // Una RETIRADA no la decide nadie: la echa atrás el propio solicitante, que
+  // ya consta en `solicitanteEmail`. Caer aquí al aprobador congelado
+  // atribuiría el acto a alguien que no lo hizo, y eso es peor que dejarlo
+  // vacío. La regla está escrita en el JSDoc de `DecididaPor`.
+  //
+  // Por lo demás: el decisor REAL manda; si no consta —token legacy—, se cae al
+  // aprobador congelado y se MARCA. Ver `DecididaPor.aproximado`.
+  const decididaPor: DecididaPor | null =
+    r.estado === 'retirada'
+      ? null
+      : r.decisor_correo
+        ? { nombre: r.decisor_nombre, correo: r.decisor_correo, aproximado: false }
+        : r.decidida_at && r.aprobador_correo
+          ? { nombre: null, correo: r.aprobador_correo, aproximado: true }
+          : null;
   return {
     id: r.id,
     clase: r.clase,
@@ -612,6 +626,35 @@ describe('CANDADO: que filas entran', () => {
     const ms = await movimientos(db, JEFE);
     expect(ms.filter((m) => m.clase === 'anulacion')).toHaveLength(0);
   });
+
+  // La regla del JSDoc de `DecididaPor`, con candado propio: sin esto es solo un
+  // comentario, y lo que impide es una ATRIBUCION FALSA — decir que un jefe
+  // decidio algo que en realidad echo atras el solicitante.
+  it('CANDADO: una RETIRADA no la decide nadie, asi que decididaPor va vacio', async () => {
+    const id = await sembrarEmpleado(db, 'retira@ambientalia.com.co', JEFE);
+    const s = await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'retira@ambientalia.com.co',
+      estado: 'aprobada',
+      fechaInicio: '2026-06-01',
+      fechaFin: '2026-06-02',
+      segundoAprobadorCorreo: null,
+    });
+    await db.query(
+      `INSERT INTO portal.solicitud_modificaciones
+         (solicitud_id, clase, estado_previo, fecha_inicio_previa, fecha_fin_previa,
+          dias_habiles_previos, estado, aprobador_correo, solicitante_email, decidida_at)
+       VALUES ($1, 'anulacion', 'aprobada', '2026-06-01', '2026-06-02', 2,
+               'retirada', $2, 'retira@ambientalia.com.co', now())`,
+      [s.id, JEFE],
+    );
+
+    const retirada = (await movimientos(db, JEFE)).find((m) => m.estado === 'retirada');
+    expect(retirada).toBeDefined();
+    // Aunque la fila TIENE aprobador_correo y TIENE decidida_at, que es
+    // justamente lo que haria caer al aprobador congelado si no hubiera guarda.
+    expect(retirada?.decididaPor).toBeNull();
+  });
 });
 ```
 
@@ -689,7 +732,7 @@ export async function movimientos(db: Pool, soloDe: string | null): Promise<Movi
 - [ ] **Step 5: Correr los tests**
 
 Run: `cd apps/hub-api; npm run test:db -- src/ausencias/repo.movimientos.db.test.ts`
-Expected: **PASS**, los siete.
+Expected: **PASS**, los ocho.
 
 - [ ] **Step 6: Commit**
 
