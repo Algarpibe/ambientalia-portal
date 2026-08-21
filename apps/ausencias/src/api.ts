@@ -181,6 +181,13 @@ export interface Contexto {
   aprobadorNombre: string | null;
   /** Puede abrir cualquier adjunto: admin, o estar en la lista de administración. */
   esVisorAdjuntos: boolean;
+  /**
+   * Puede exportar el registro de movimientos: admin, o tener el permiso
+   * concedido. Solo sirve para PINTAR el botón — quien de verdad decide qué se
+   * puede sacar es el recorte por rama que hace el servidor en
+   * `GET /ausencias/movimientos`, que no consulta esta bandera.
+   */
+  esExportadorRegistro: boolean;
   /** El correo de la sesión, para poder decir cuál hay que dar de alta. */
   email: string;
   esAdmin: boolean;
@@ -638,9 +645,94 @@ export interface ResumenImportacion {
 export const importarHistorico = (solicitudes: FilaHistorico[], dryRun: boolean) =>
   post<ResumenImportacion>('/api/ausencias/historico/import', { solicitudes, dryRun });
 
-/** Todas las solicitudes de la compañía (solo admin). */
-export const fetchHistorico = () =>
-  get<{ solicitudes: Solicitud[] }>('/api/ausencias/historico').then((d) => d.solicitudes);
+// ── El registro de movimientos ─────────────────────────────────────────────
+// Espejo de `apps/hub-api/src/ausencias/types.ts`, a partir de `CLASES_MOVIMIENTO`.
+// Sustituye a `GET /ausencias/historico`, que ya no existe.
+
+/**
+ * Las clases de movimiento del registro. Las dos de modificación se llaman
+ * EXACTAMENTE igual que en la base de datos (`ClaseModificacion`), y no con
+ * sinónimos como `cambio`: una traducción de vocabulario entre la tabla y la
+ * pantalla es una capa más que puede derivar en silencio, y no compra nada.
+ */
+export const CLASES_MOVIMIENTO = ['solicitud', 'fechas', 'anulacion'] as const;
+export type ClaseMovimiento = (typeof CLASES_MOVIMIENTO)[number];
+
+/**
+ * Quién tomó la decisión.
+ *
+ * `aproximado` no es decorativo: en las sesiones con token legacy
+ * `aprobador_user_id` es NULL, y entonces esto sale del `aprobador_correo`
+ * congelado en el alta, que es *quién debía firmar* y no necesariamente quién
+ * firmó —un admin pudo destrabarla en su lugar—. Enseñarlo sin marca sería
+ * afirmar una autoría que no consta.
+ */
+export interface DecididaPor {
+  nombre: string | null;
+  correo: string;
+  aproximado: boolean;
+}
+
+/**
+ * Los campos comunes a toda fila del registro. `clase` y `estado` quedan
+ * fuera: van en `Movimiento`, que los une para poder discriminar por `clase`.
+ *
+ * Plana y no una unión con objetos anidados, porque los filtros por tipo,
+ * persona y año, los contadores y el CSV ya operan sobre una lista plana de
+ * solicitudes y así siguen valiendo casi sin tocarlos.
+ */
+interface MovimientoBase {
+  /** El de la solicitud o el de la modificación, según la clase. */
+  id: string;
+  /** Siempre el de la solicitud afectada, también en anulaciones y cambios. */
+  solicitudId: string;
+  empleadoNombre: string;
+  empleadoCargo: string | null;
+  solicitanteEmail: string;
+  /** El tipo de la SOLICITUD afectada, para que el filtro por tipo siga valiendo. */
+  tipo: TipoSolicitud;
+  /**
+   * Las fechas y días EFECTIVOS del movimiento. En una `anulacion` son las
+   * PREVIAS: un CHECK en la BD garantiza que las nuevas van a null. En un
+   * `fechas` son las nuevas, que es lo que se propuso.
+   */
+  fechaInicio: string;
+  fechaFin: string;
+  /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
+  diasHabiles: number;
+  decididaAt: string | null;
+  /**
+   * Regla para quien escriba una consulta sobre esto: con
+   * `estado === 'retirada'` esto va SIEMPRE a `null`. Una `retirada` la quita
+   * el propio solicitante, no un aprobador —quién fue ya consta en
+   * `solicitanteEmail`—, así que rellenarla con el `aprobadorCorreo`
+   * congelado en el alta atribuiría el acto a alguien que nunca lo hizo.
+   */
+  decididaPor: DecididaPor | null;
+  createdAt: string;
+  /** `comentarios` en una solicitud; `motivo` en una anulación o un cambio. */
+  motivo: string | null;
+}
+
+/**
+ * Una fila del registro: una solicitud, o una anulación o cambio de fecha ya
+ * cerrados.
+ *
+ * Unión discriminada por `clase`, y no un `estado: EstadoSolicitud |
+ * EstadoModificacion` suelto: los dos enums comparten los literales
+ * `'pendiente'`, `'aprobada'` y `'rechazada'`, así que sin el discriminante
+ * TypeScript no puede afinar cuál de los dos describe la fila, y un `switch`
+ * sobre `estado` en el front quedaría incompleto sin que el compilador se
+ * quejara.
+ */
+export type Movimiento =
+  | (MovimientoBase & { clase: 'solicitud'; estado: EstadoSolicitud })
+  | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });
+
+/** El registro de movimientos que le toca ver a quien pregunta, ya recortado
+ *  por rama en el servidor. */
+export const fetchMovimientos = () =>
+  get<{ movimientos: Movimiento[] }>('/api/ausencias/movimientos').then((d) => d.movimientos);
 
 /** Los campos que un admin puede corregir desde el registro general. */
 export interface EdicionSolicitud {
@@ -691,6 +783,16 @@ export const fijarCopia = (id: string, copiaCorreo: string | null) =>
 export const fijarVisor = (id: string, veAdjuntos: boolean) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor`, { veAdjuntos });
 
+/**
+ * Da o quita el permiso de exportar el registro. Solo admin. Queda registrado
+ * en el servidor, igual que `fijarVisor`.
+ *
+ * Devuelve `{ ok: boolean }` y no la ficha: el permiso no se pinta en la fila
+ * del maestro, así que quien lo cambia solo necesita saber que cuajó.
+ */
+export const fijarExportador = (id: string, concedido: boolean) =>
+  put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/exportador`, { concedido });
+
 /** Enciende o apaga la segunda firma de alguien. No mueve lo que ya está en vuelo. */
 export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/segunda-firma`, {
@@ -731,10 +833,6 @@ export function leerComoBase64(file: File): Promise<string> {
 /** Las solicitudes con PDF. Solo para admin y la lista de administración. */
 export const fetchConAdjunto = () =>
   get<{ solicitudes: Solicitud[] }>('/api/ausencias/adjuntos').then((d) => d.solicitudes);
-
-/** Lo que a quien pregunta le tocaba firmar y ya está cerrado. */
-export const fetchDecididas = () =>
-  get<{ solicitudes: Solicitud[] }>('/api/ausencias/decididas').then((d) => d.solicitudes);
 
 /** Los saldos que puede ver quien pregunta: todos si es admin, si no los suyos. */
 export const fetchSaldos = () =>
