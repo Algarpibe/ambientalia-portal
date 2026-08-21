@@ -558,6 +558,19 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
   // esta comprobación necesita, así que tiene que ir antes por fuerza.
   await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
+  // El otorgamiento no pasa por la comprobación de arriba —está exento de
+  // `ocupaAgenda` a propósito, porque su fecha es el día que se TRABAJÓ y tiene
+  // que poder caer dentro de las propias vacaciones—, y esa exención dejaba
+  // abierto reclamar DOS veces la misma jornada: dos peticiones por el mismo
+  // sábado conceden el doble de días por un solo día de trabajo, y ninguna de
+  // sus cuatro reglas propias lo miraba.
+  //
+  // Por eso una regla suya y estrecha, en vez de meterlo en `ocupaAgenda`:
+  // aquello cerraría el duplicado y de paso rompería el caso más típico que
+  // tiene este tipo.
+  if (esOtorgamiento(datos.tipo) && (await repo.existeOtorgamientoDelDia(db, empleado.id, datos.fechaInicio, null))) {
+    throw new AusenciaError('otorgamiento_duplicado', 409, 'fechaInicio');
+  }
   // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
   // daría 0 justo en el caso normal —el sábado por el que se gana el
   // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya

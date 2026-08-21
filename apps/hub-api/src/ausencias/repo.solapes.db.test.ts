@@ -4,6 +4,7 @@ import {
   actualizarSolicitud,
   crearModificacion,
   decidirModificacion,
+  existeOtorgamientoDelDia,
   modificacionPorId,
   solapeDe,
   solicitudPorId,
@@ -544,5 +545,59 @@ describe('actualizarSolicitud frente al solape', () => {
       fechaInicio: '2026-07-10',
       fechaFin: '2026-07-14',
     });
+  });
+});
+
+describe('existeOtorgamientoDelDia', () => {
+  const SABADO = '2026-07-11';
+
+  /** Un otorgamiento vivo de esta persona por ese dia trabajado. */
+  const sembrarOtorgamiento = (fecha = SABADO, estado: EstadoSolicitud = 'pendiente') =>
+    sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado,
+      fechaInicio: fecha,
+      fechaFin: fecha,
+      segundoAprobadorCorreo: null,
+      tipo: 'otorgamiento',
+    });
+
+  it('sin nada sembrado, el dia esta libre', async () => {
+    expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, null)).toBe(false);
+  });
+
+  it('CANDADO: el mismo dia ya reclamado da true', async () => {
+    // El agujero que cierra esta funcion: reclamar dos veces el mismo sabado
+    // concedia el doble de dias por una sola jornada de trabajo.
+    await sembrarOtorgamiento();
+    expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, null)).toBe(true);
+  });
+
+  it('CANDADO: unas vacaciones ese dia NO cuentan, la regla es estrecha a proposito', async () => {
+    // Si contaran, esto seria `solapeDe` otra vez y se llevaria por delante la
+    // exencion: trabajar un sabado DURANTE las propias vacaciones es el caso
+    // mas tipico que tiene este tipo de solicitud.
+    await sembrarBase();
+    expect(await existeOtorgamientoDelDia(db, empleadoId, '2026-07-11', null)).toBe(false);
+  });
+
+  it('CANDADO: uno RECHAZADO libera el dia', async () => {
+    // A quien le nieguen la concesion tiene que poder volver a pedirla. Una
+    // anulacion aprobada tambien deja la fila rechazada, asi que libera igual.
+    await sembrarOtorgamiento(SABADO, 'rechazada');
+    expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, null)).toBe(false);
+  });
+
+  it('otro dia no cuenta, y otra persona tampoco', async () => {
+    await sembrarOtorgamiento();
+    expect(await existeOtorgamientoDelDia(db, empleadoId, '2026-07-18', null)).toBe(false);
+    const otroId = await sembrarEmpleado(db, OTRO);
+    expect(await existeOtorgamientoDelDia(db, otroId, SABADO, null)).toBe(false);
+  });
+
+  it('CANDADO: excluida por su id, o una correccion chocaria contra si misma', async () => {
+    const s = await sembrarOtorgamiento();
+    expect(await existeOtorgamientoDelDia(db, empleadoId, SABADO, s.id)).toBe(false);
   });
 });
