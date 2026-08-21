@@ -2318,8 +2318,52 @@ interface FilaMovimientoDb {
   decisor_correo: string | null;
   /** El congelado en el alta: quién DEBÍA firmar, que no es quién firmó. */
   aprobador_correo: string | null;
+  /** El SEGUNDO firmante congelado. `null` = la cadena tenía una sola firma. */
+  segundo_aprobador_correo: string | null;
+  /** Cuándo firmó el jefe inmediato. Ver `correoDelQueCerro`. */
+  primera_firma_at: string | null;
   created_at: string;
   motivo: string | null;
+}
+
+/**
+ * Cuál de los DOS firmantes congelados tomó la decisión final.
+ *
+ * Solo la usa el respaldo `aproximado` de `quienDecidio`: cuando hay decisor de
+ * verdad no hay nada que deducir. Hasta el 2026-08-20 ese respaldo devolvía
+ * siempre `aprobador_correo`, y en una solicitud con cascada cerrada en
+ * `pendiente_2` eso nombraba al jefe inmediato por un acto del segundo — una
+ * persona real, con nombre y apellidos, que no fue. Un hueco es peor de leer
+ * que un nombre, pero mucho menos grave que un nombre equivocado.
+ *
+ * ⚠️ **No vale `correoDelTurno` (types.ts), aunque parezca la misma pregunta.**
+ * Aquella contesta a quién le toca firmar AHORA y devuelve `null` en todos los
+ * estados terminales — y aquí toda fila que llega está cerrada, porque el
+ * respaldo exige `decidida_at`. Con su `?? aprobadorCorreo` de
+ * `decisorDeModificacion` colapsaría al primer firmante SIEMPRE, que es
+ * exactamente el fallo que esto arregla. Las dos preguntas se parecen y no son
+ * la misma: una mira el turno VIVO, esta mira un turno que ya se cerró.
+ *
+ * La condición son TRES cosas y no dos, y la tercera es la que menos se ve:
+ * que la primera firma sea un acto SEPARADO de la decisión final. Las dos
+ * marcas se sellan en el MISMO `UPDATE` —el mismo `now()`, así que salen
+ * idénticas— cuando una sola firma cierra la solicitud, y eso incluye el caso
+ * que se escapa a simple vista: el jefe inmediato RECHAZANDO una solicitud que
+ * sí llevaba cascada (`transicionAlDecidir`, rama `pendiente` + rechazo:
+ * `esPrimeraFirma` y `esDecisionFinal` a la vez). Ahí hay segundo firmante y
+ * hay primera firma, y la decisión no fue suya: la vio y la cortó el primero.
+ * Sin este tercer término, ese rechazo se le colgaría al segundo.
+ *
+ * Comparar los dos `::text` es exacto y no una heurística: los dos salen del
+ * mismo cast en la misma consulta, así que o son la misma cadena o el sello
+ * ocurrió en dos transacciones distintas.
+ */
+function correoDelQueCerro(r: FilaMovimientoDb): string | null {
+  const cerroElSegundo =
+    r.segundo_aprobador_correo !== null &&
+    r.primera_firma_at !== null &&
+    r.primera_firma_at !== r.decidida_at;
+  return cerroElSegundo ? r.segundo_aprobador_correo : r.aprobador_correo;
 }
 
 /**
@@ -2348,7 +2392,16 @@ function quienDecidio(r: FilaMovimientoDb, estado: Solicitud['estado'] | EstadoM
   // que queda es el correo de quien DEBÍA firmar —un admin pudo destrabarla en
   // su lugar—, y `aproximado` es lo que impide que la pantalla lo enseñe como
   // una autoría probada.
-  if (r.decidida_at && r.aprobador_correo) return { nombre: null, correo: r.aprobador_correo, aproximado: true };
+  //
+  // CUÁL de los dos firmantes lo decide `correoDelQueCerro`, y no una lectura
+  // directa de `aprobador_correo`: en una cascada cerrada en el segundo nivel
+  // ese campo es el jefe inmediato, que no fue. Es la misma clase de mentira
+  // que evita la guarda de `retirada` de aquí arriba —nombrar a quien no fue—,
+  // solo que por el otro camino.
+  if (r.decidida_at) {
+    const correo = correoDelQueCerro(r);
+    if (correo) return { nombre: null, correo, aproximado: true };
+  }
   // En trámite: no ha decidido nadie todavía, y así hay que enseñarlo.
   return null;
 }
@@ -2432,7 +2485,11 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
             -- full_name y email son los nombres reales de las columnas de
             -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
             u.full_name AS decisor_nombre, u.email AS decisor_correo,
-            s.aprobador_correo,
+            -- Los tres los lee el respaldo de quienDecidio, y hacen falta los
+            -- tres: con cascada, quien cerro en el segundo nivel NO es el
+            -- aprobador_correo congelado en el alta. Ver correoDelQueCerro.
+            s.aprobador_correo, s.segundo_aprobador_correo,
+            s.primera_firma_at::text AS primera_firma_at,
             s.created_at::text AS created_at,
             s.comentarios AS motivo
        FROM portal.solicitudes_ausencia s
