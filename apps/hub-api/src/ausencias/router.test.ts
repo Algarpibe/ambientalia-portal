@@ -702,6 +702,12 @@ vi.mock('./repo.js', async () => ({
       // solicitud recién creada SIN la clave `observaciones`, que es
       // justamente lo que reventó el candado de `GET /ausencias/solicitudes/:id`.
       observaciones: null,
+      // Igual que `observaciones` y por el mismo motivo: el INSERT real no la
+      // toca, la columna se queda en su default NULL y el SELECT que sigue la
+      // trae igual. Sin esta linea el doble devolvia `undefined`, y una regla
+      // que compara `=== null` —`puedeRetirarla`, sin ir mas lejos— contestaba
+      // que no sobre una solicitud recien creada que SI se puede retirar.
+      primeraFirmaAt: null,
       decididaAt: null,
       motivoRechazo: null,
       createdAt: '2026-06-01T10:00:00Z',
@@ -736,6 +742,7 @@ vi.mock('./repo.js', async () => ({
     motivo: string | null,
     _userId: string | null,
     construirPayload: (s: unknown, evento: string) => unknown,
+    construirPayloadCaducada: (s: unknown, m: unknown, evento: string) => unknown,
   ) => {
     estado.ultimaDecision = { estadoEsperado, transicion };
     const s = estado.solicitudes.find((x) => x.id === id);
@@ -766,6 +773,55 @@ vi.mock('./repo.js', async () => ({
       enviado: false,
     });
     anotarEventoDeCalendario(s, payload);
+
+    // La propuesta viva CADUCA en la misma transaccion que la firma, porque la
+    // firma acaba de dejarla inaplicable: el testigo triple del repo compara el
+    // estado de la solicitud, y firmarla lo mueve SIEMPRE —incluso el paso de
+    // `pendiente` a `pendiente_2`—.
+    //
+    // Se modela aqui, y no solo en el cuarto porton, porque lo que este fichero
+    // puede probar es lo que el repo real hace con el resultado: que sale del
+    // indice unico y que se emite el aviso al trabajador.
+    const viva = estado.modificaciones.find((m) => m.solicitudId === id && m.estado === 'pendiente');
+    if (viva) {
+      viva.estado = 'caducada';
+      s.modificacionPendiente = null;
+      estado.eventos.push({
+        id: estado.eventos.length + 1,
+        evento: 'modificacion_caducada',
+        solicitudId: id,
+        intentos: 0,
+        payload: construirPayloadCaducada(s, viva, 'modificacion_caducada'),
+        enviado: false,
+      });
+    }
+    return s;
+  },
+  /**
+   * El dueno retira su propia solicitud. Modela las DOS condiciones del WHERE
+   * real —`pendiente` y sin `primeraFirmaAt`— porque son las que deciden si la
+   * carrera contra la firma la gana el jefe, y son lo unico que este doble puede
+   * sostener sobre esa funcion.
+   *
+   * No toca `decididaAt` ni el decisor: no ha decidido nadie.
+   */
+  retirarSolicitud: async (
+    _db: unknown,
+    id: string,
+    construirPayload: (s: unknown, evento: string) => unknown,
+  ) => {
+    const s = estado.solicitudes.find((x) => x.id === id);
+    if (!s || s.estado !== 'pendiente' || s.primeraFirmaAt) return null;
+    s.estado = 'rechazada';
+    s.anuladaAt = '2026-01-15T12:00:00Z';
+    estado.eventos.push({
+      id: estado.eventos.length + 1,
+      evento: 'retirada',
+      solicitudId: id,
+      intentos: 0,
+      payload: construirPayload(s, 'retirada'),
+      enviado: false,
+    });
     return s;
   },
   // Modela las TRES garantías que el SQL real pone en una sola sentencia (ver
@@ -5872,6 +5928,203 @@ describe('PATCH y DELETE /ausencias/modificaciones/:id', () => {
     const { modificacionId } = await conMovimientoCerrado(ANULACION);
     await request(app()).delete(`/api/ausencias/modificaciones/${modificacionId}`).expect(401);
     expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
+  });
+});
+
+// ── Retirar la propia solicitud, y la propuesta que caduca ─────────────────
+//
+// Los dos huecos que salieron al verificar que pasa cuando alguien toca una
+// solicitud que sigue pendiente de firma.
+
+describe('POST /ausencias/solicitudes/:id/retirar', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+
+  async function crear() {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    return s.id as string;
+  }
+
+  const retirar = (id: string, tok = token()) =>
+    request(app()).post(`/api/ausencias/solicitudes/${id}/retirar`).set('Authorization', `Bearer ${tok}`).send({});
+
+  it('el dueno retira su solicitud pendiente y queda anulada, sin decisor', async () => {
+    const id = await crear();
+    const r = await retirar(id).expect(200);
+
+    // El mismo estado terminal que una anulacion aprobada: es lo que hace que el
+    // resto del sistema —el calendario, el solape, el saldo— la trate bien sin
+    // aprender un estado nuevo.
+    expect(r.body).toMatchObject({ estado: 'rechazada' });
+    expect(r.body.anuladaAt).not.toBeNull();
+    // Y sin decisor: no la decidio nadie. Es lo que distingue en el registro una
+    // retirada de una anulacion que firmo un jefe.
+    expect(fila(id).decididaAt ?? null).toBeNull();
+  });
+
+  it('CANDADO: avisa a QUIEN LA TENIA EN LA BANDEJA', async () => {
+    // Sin esto, al jefe le desaparece una fila de la bandeja sin explicacion. El
+    // solicitante no necesita correo: acaba de pulsar el boton.
+    estado.empleado.aprobadorCorreo = JEFA;
+    const id = await crear();
+    await retirar(id).expect(200);
+
+    const aviso = estado.eventos.find((e) => e.evento === 'retirada');
+    expect(aviso).toBeDefined();
+    const correo = (aviso?.payload as { correo: { para: string; cuerpo: string } }).correo;
+    expect(correo.para).toBe(JEFA);
+    expect(correo.cuerpo).toContain('ha retirado su solicitud');
+  });
+
+  it('CANDADO: NO se puede retirar una que ya tiene la primera firma', async () => {
+    // En `pendiente_2` el jefe inmediato YA firmo. Hacerla desaparecer sin
+    // decirselo seria borrarle una decision; para eso esta pedir la anulacion,
+    // que el decide.
+    const id = await crear();
+    fila(id).estado = 'pendiente_2';
+    fila(id).primeraFirmaAt = '2026-01-15T10:00:00Z';
+
+    const r = await retirar(id).expect(409);
+    expect(r.body.error).toBe('ya_no_se_puede_retirar');
+    expect(fila(id).estado).toBe('pendiente_2');
+  });
+
+  it('CANDADO: ni una `pendiente` que arrastre una firma ya dada', async () => {
+    // El caso que hace falta la SEGUNDA condicion y no basta el estado: un admin
+    // puede devolver una solicitud a `pendiente` desde el PATCH del registro sin
+    // limpiar `primeraFirmaAt`. Mirando solo el estado, esa firma se borraria.
+    const id = await crear();
+    fila(id).primeraFirmaAt = '2026-01-15T10:00:00Z';
+
+    await retirar(id).expect(409);
+    expect(fila(id).estado).toBe('pendiente');
+  });
+
+  it('CANDADO: 403 a quien no es el dueno, ni siquiera a un admin', async () => {
+    // Se compara contra el empleado de la SESION. Para tocar la fila de un
+    // tercero esta el DELETE del registro, que ademas deja rastro de quien fue.
+    const id = await crear();
+    estado.empleado = { ...estado.empleado, id: 'otro-empleado' };
+
+    await retirar(id, token({ sub: JEFA })).expect(403);
+    await retirar(id, token({ role: 'admin' })).expect(403);
+    expect(fila(id).estado).toBe('pendiente');
+  });
+
+  it('404 si no existe, y 401 sin token', async () => {
+    await retirar('44444444-4444-4444-8444-444444444444').expect(404);
+    const id = await crear();
+    await request(app()).post(`/api/ausencias/solicitudes/${id}/retirar`).send({}).expect(401);
+    expect(fila(id).estado).toBe('pendiente');
+  });
+});
+
+describe('la peticion de cambio caduca cuando la solicitud se decide', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+
+  beforeEach(() => {
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.empleado.requiereSegundaFirma = false;
+    estado.plantilla.push({
+      id: '55555555-5555-4555-8555-555555555556',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 904,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: false,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+  });
+
+  /** Una solicitud pendiente con una peticion de cambio viva encima. */
+  async function conPeticionViva() {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send({ clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-15', motivo: 'Cita' })
+        .expect(201)
+    ).body as Record<string, unknown>;
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const firmar = (id: string) =>
+    request(app())
+      .post(`/api/ausencias/solicitudes/${id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba: true });
+
+  it('CANDADO: al firmar la solicitud, la peticion viva pasa a `caducada`', async () => {
+    // No es una decision de producto discutible: esa peticion YA estaba muerta.
+    // El testigo triple compara el estado de la solicitud, asi que firmarla la
+    // deja inaplicable. Lo unico que cambia es que ahora el sistema lo reconoce
+    // en vez de dejarla `pendiente` para siempre.
+    const { solicitudId, modificacionId } = await conPeticionViva();
+    await firmar(solicitudId).expect(200);
+
+    const m = estado.modificaciones.find((x) => x.id === modificacionId);
+    expect(m?.estado).toBe('caducada');
+  });
+
+  it('CANDADO: y eso DESBLOQUEA pedir otro cambio sobre la misma solicitud', async () => {
+    // El hueco funcional, no el informativo. El indice unico parcial solo admite
+    // UNA propuesta viva por solicitud, asi que la fila muerta dejaba al
+    // trabajador sin poder pedir otra — con un 409 que hablaba de una peticion
+    // que el daba por perdida.
+    const { solicitudId } = await conPeticionViva();
+    await firmar(solicitudId).expect(200);
+
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${solicitudId}/modificaciones`)
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ clase: 'anulacion', motivo: 'Ya no las necesito' })
+      .expect(201);
+  });
+
+  it('CANDADO: se le avisa al TRABAJADOR, que es el unico que no se entera por otro lado', async () => {
+    // El jefe ya lo sabe: fue su firma la que la dejo sin efecto, y su bandeja
+    // deja de enfrentarla. El trabajador veia «Cambio pendiente» para siempre.
+    const { solicitudId } = await conPeticionViva();
+    await firmar(solicitudId).expect(200);
+
+    const aviso = estado.eventos.find((e) => e.evento === 'modificacion_caducada');
+    expect(aviso).toBeDefined();
+    const correo = (aviso?.payload as { correo: { para: string; cuerpo: string } }).correo;
+    expect(correo.para).toBe('ana.ruiz@ambientalia.com.co');
+    // Lo unico accionable: la peticion no se recupera, se rehace.
+    expect(correo.cuerpo).toContain('vuelve a pedirlo');
+  });
+
+  it('sin peticion viva no caduca nada ni se manda ningun aviso de mas', async () => {
+    // El caso normal, y el que muere si alguien deja el UPDATE sin el
+    // `AND estado = 'pendiente'`: caducaria propuestas ya cerradas y mandaria un
+    // correo por cada solicitud que se firma.
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    await firmar(s.id as string).expect(200);
+
+    expect(estado.eventos.filter((e) => e.evento === 'modificacion_caducada')).toHaveLength(0);
   });
 });
 

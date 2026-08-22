@@ -75,7 +75,8 @@ export interface Adjunto {
 export type ClaseModificacion = 'fechas' | 'anulacion';
 
 /** `retirada` = la quitó su propio autor antes de que nadie la decidiera. */
-export type EstadoModificacion = 'pendiente' | 'aprobada' | 'rechazada' | 'retirada';
+/** `caducada` la cierra el sistema al decidirse la solicitud. Ver `types.ts`. */
+export type EstadoModificacion = 'pendiente' | 'aprobada' | 'rechazada' | 'retirada' | 'caducada';
 
 /**
  * Una propuesta de cambio sobre una solicitud ya enviada.
@@ -697,6 +698,18 @@ export const pedirModificacion = (solicitudId: string, m: NuevaModificacion) =>
  */
 export const retirarModificacion = (id: string) =>
   post<Modificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/retirar`, {});
+
+/**
+ * El dueño retira su propia SOLICITUD, antes de que nadie la firme.
+ *
+ * No la borra: la deja en `rechazada` con su `anuladaAt`, igual que una anulación
+ * aprobada, y sigue en el registro. Por eso es un POST y no un DELETE — y además
+ * el DELETE de esa ruta ya existe, es de admin y hace otra cosa.
+ *
+ * Avisa al jefe, que la tenía en la bandeja y va a verla desaparecer.
+ */
+export const retirarSolicitud = (id: string) =>
+  post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/retirar`, {});
 
 /**
  * Una solicitud con la propuesta de cambio que espera decisión. Espejo de

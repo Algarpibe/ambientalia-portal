@@ -153,7 +153,7 @@ async function sembrarConCascada(): Promise<Solicitud> {
 async function firmarSinSesion(s: Solicitud, desde: Solicitud['estado'], aprueba: boolean): Promise<void> {
   const transicion = transicionAlDecidir({ ...s, estado: desde }, aprueba);
   if (!transicion) throw new Error(`el estado ${desde} no admite firma`);
-  const r = await decidirSolicitud(db, s.id, desde, transicion, null, null, payloadStub);
+  const r = await decidirSolicitud(db, s.id, desde, transicion, null, null, payloadStub, payloadStub);
   if (!r) throw new Error(`la decision desde ${desde} no escribio ninguna fila`);
 }
 

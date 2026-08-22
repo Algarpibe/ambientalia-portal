@@ -8,6 +8,7 @@ import {
   fetchPendientes,
   fetchSaldos,
   retirarModificacion,
+  retirarSolicitud,
   type ClaseModificacion,
   type Contexto,
   type DecisionModificacion,
@@ -26,6 +27,7 @@ import {
   mensajeDeModificacion,
   puedePedirAnulacion,
   puedePedirModificacion,
+  puedeRetirarla,
   resumenPropuesta,
 } from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
@@ -91,6 +93,11 @@ export default function App() {
   const [modificando, setModificando] = useState<{ solicitud: Solicitud; clase: ClaseModificacion } | null>(null);
   // Qué propuesta se está retirando ahora mismo, por id, para apagar su enlace.
   const [retirando, setRetirando] = useState<string | null>(null);
+  // Que solicitud tiene el boton de retirar esperando confirmacion. Aparte de
+  // `retirando`, que es de las PROPUESTAS: son dos acciones distintas sobre dos
+  // objetos distintos, y compartir la variable haria que confirmar una apagara
+  // el boton de la otra.
+  const [retirandoSolicitud, setRetirandoSolicitud] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -366,6 +373,28 @@ export default function App() {
   }
 
   /**
+   * El dueño retira su propia solicitud.
+   *
+   * La fila NO se quita de la tabla: se sustituye por la que devuelve el
+   * servidor, que viene ya en `rechazada` con su `anuladaAt`. Es lo que hace que
+   * la persona vea qué pasó en vez de que su solicitud desaparezca sin más — y
+   * es además la verdad: la fila sigue existiendo en el registro.
+   */
+  async function retirarLaSolicitud(s: Solicitud) {
+    try {
+      const retirada = await retirarSolicitud(s.id);
+      setMias((ms) => ms.map((m) => (m.id === retirada.id ? retirada : m)));
+      setError(null);
+    } catch (e) {
+      // Un 409 aquí significa que el jefe firmó mientras tanto y su firma gana.
+      // La fila se queda como está y el mensaje lo explica.
+      setError(mensajeDeModificacion((e as Error).message));
+    } finally {
+      setRetirandoSolicitud(null);
+    }
+  }
+
+  /**
    * La última columna de «Mis solicitudes», que hasta ahora iba vacía.
    *
    * Tres casos y ninguno más: si hay una propuesta viva, lo que se puede hacer
@@ -392,6 +421,48 @@ export default function App() {
           >
             {retirando === propuesta.id ? 'Retirando…' : 'Retirar'}
           </button>
+        </div>
+      );
+    }
+    // Retirar gana sobre los otros dos y no convive con ellos: mientras nadie
+    // haya firmado, «pídele a tu jefe que la anule» sería un rodeo absurdo para
+    // algo que el dueño puede deshacer solo. En cuanto hay una firma —o ya está
+    // aprobada— este botón desaparece y quedan los de siempre.
+    if (puedeRetirarla(s)) {
+      const confirmando = retirandoSolicitud === s.id;
+      return (
+        <div className="flex items-center gap-2">
+          {confirmando ? (
+            <>
+              <span className="text-xs text-gray-600">¿Retirarla?</span>
+              <button
+                type="button"
+                onClick={() => void retirarLaSolicitud(s)}
+                className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+              >
+                Sí, retirar
+              </button>
+              <button
+                type="button"
+                onClick={() => setRetirandoSolicitud(null)}
+                className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                No
+              </button>
+            </>
+          ) : (
+            // Dos pasos, como el borrado del registro: es irreversible —la
+            // solicitud queda anulada y hay que volver a pedirla— y un clic
+            // suelto en una tabla de filas parecidas es fácil de dar por error.
+            <button
+              type="button"
+              onClick={() => setRetirandoSolicitud(s.id)}
+              className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              title="Quitarla tú, sin que tenga que aprobarlo nadie"
+            >
+              Retirar
+            </button>
+          )}
         </div>
       );
     }

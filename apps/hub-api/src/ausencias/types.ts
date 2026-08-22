@@ -63,6 +63,17 @@ export const EVENTOS_SOLICITUD = [
   'aprobada',
   'rechazada',
   'registrada',
+  /**
+   * El dueño retira su propia solicitud antes de que nadie la firme. Avisa al
+   * jefe, que la tenía en la bandeja y va a verla desaparecer.
+   *
+   * NO produce efectos en Google, y no hay que añadirle ninguno: una solicitud
+   * `pendiente` nunca llegó al calendario ni a la hoja —solo escriben `aprobada`,
+   * `rechazada` y `registrada`—, así que `construirPayload` la deja fuera de los
+   * dos por omisión. Si algún día se permitiera retirar una ya aprobada, esto
+   * habría que mirarlo: ahí sí habría un evento que borrar.
+   */
+  'retirada',
 ] as const;
 export type EventoSolicitud = (typeof EVENTOS_SOLICITUD)[number];
 
@@ -80,6 +91,13 @@ export const EVENTOS_MODIFICACION = [
   'modificacion_solicitada',
   'modificacion_aprobada',
   'modificacion_rechazada',
+  /**
+   * Su petición de cambio se quedó sin efecto porque la solicitud se decidió
+   * antes. Va al TRABAJADOR: es el único que no se entera por ningún otro lado
+   * —el jefe ya ve el aviso ámbar en su bandeja— y sin esto su petición
+   * desaparecía de la pantalla sin explicación.
+   */
+  'modificacion_caducada',
 ] as const;
 export type EventoModificacion = (typeof EVENTOS_MODIFICACION)[number];
 
@@ -269,7 +287,22 @@ export type ClaseModificacion = (typeof CLASES_MODIFICACION)[number];
  * No se borra la fila: la propuesta desaparece de la bandeja del jefe pero
  * queda el rastro de que se pidió y se echó atrás.
  */
-export const ESTADOS_MODIFICACION = ['pendiente', 'aprobada', 'rechazada', 'retirada'] as const;
+/**
+ * `caducada` la cierra el SISTEMA, no una persona: cuando el jefe decide la
+ * solicitud, cualquier propuesta viva sobre ella deja de poder aplicarse —el
+ * testigo triple de `decidirModificacion` compara el estado y ya no casa—, así
+ * que se cierra en la misma transacción.
+ *
+ * Estado propio y no reutilizar `retirada` ni `rechazada`: la primera diría que
+ * se echó atrás el trabajador y la segunda que la tumbó el jefe, y ninguno de
+ * los dos hizo nada. Es la misma clase de mentira que costó cuatro intentos en
+ * la columna «Decidida por» del registro, y por eso aquí se paga una migración
+ * en vez de reciclar un literal que casi encaja.
+ *
+ * Sale del índice único parcial —que solo cuenta las `pendiente`—, y eso es lo
+ * que desbloquea a quien quiera pedir otro cambio sobre esa misma solicitud.
+ */
+export const ESTADOS_MODIFICACION = ['pendiente', 'aprobada', 'rechazada', 'retirada', 'caducada'] as const;
 export type EstadoModificacion = (typeof ESTADOS_MODIFICACION)[number];
 
 /**

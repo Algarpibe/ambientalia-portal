@@ -113,6 +113,11 @@ const CHIP_ESTADO_MODIFICACION: Record<EstadoModificacion, Chip> = {
   // Gris y no rojo, por lo mismo que `CHIP_ANULADA` en `dominio.ts`: retirarla no
   // es un castigo, la quitó su propio autor antes de que nadie la decidiera.
   retirada: { label: 'Retirada', clase: 'bg-gray-100 text-gray-700 border-gray-200' },
+  // Gris también, y por un motivo aún más fuerte que el de arriba: a esta no la
+  // cerró NADIE. La solicitud se decidió antes de que a la petición le llegara
+  // el turno, y el sistema la cerró porque ya no se podía aplicar. La columna
+  // «Decidida por» sale vacía a propósito.
+  caducada: { label: 'Caducada', clase: 'bg-gray-100 text-gray-700 border-gray-200' },
 };
 
 /**

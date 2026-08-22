@@ -3,7 +3,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { actualizarSolicitud, decidirSolicitud, type EdicionSolicitud } from './repo.js';
 import { construirPayload, construirPayloadCorreccion } from './notificaciones.js';
 import { transicionAlDecidir, type Solicitud } from './types.js';
-import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from '../test-db/harness.js';
+import { poolDePrueba, limpiar, payloadStub, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from '../test-db/harness.js';
 
 // Que un admin corrija el registro deje de dejar Google contando otra historia,
 // contra Postgres de verdad.
@@ -49,7 +49,7 @@ async function aprobadaConEvento(): Promise<Solicitud> {
   });
   const t = transicionAlDecidir(s, true);
   if (!t) throw new Error('una pendiente siempre tiene transicion');
-  const aprobada = await decidirSolicitud(db, s.id, s.estado, t, null, null, construirPayload);
+  const aprobada = await decidirSolicitud(db, s.id, s.estado, t, null, null, construirPayload, payloadStub);
   if (!aprobada) throw new Error('no se pudo aprobar');
   return aprobada;
 }

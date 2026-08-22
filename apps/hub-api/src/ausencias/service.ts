@@ -911,6 +911,9 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
     // no cambia y `construirPayload` sigue siendo pura: quien consulta la ficha
     // es el servicio, que es quien tiene el `Pool` y la sesión.
     (s, evento) => construirPayload(s, evento, firmante),
+    // El aviso de la propuesta que caduca. Va SIN firmante y no es un olvido: no
+    // la cierra nadie, la cierra el sistema porque la firma la dejó inaplicable.
+    construirPayloadModificacion,
   );
   // El UPDATE lleva `AND estado = <el que se leyó>`: si no devolvió fila es que
   // otro (o un doble clic) se adelantó. Es un conflicto, no un fallo del servidor.
@@ -970,6 +973,29 @@ export function puedeDecidir(sesion: Sesion, s: Solicitud): boolean {
  * comprobación que de verdad lo cierra).
  */
 const ESTADOS_MODIFICABLES: readonly EstadoSolicitud[] = ['pendiente', 'pendiente_2', 'aprobada'];
+
+/**
+ * Si su dueño puede RETIRARLA él mismo, sin pedirle permiso a nadie.
+ *
+ * Mucho más estrecho que `puedePedirModificacion`: solo mientras esté
+ * `pendiente` y **sin ninguna firma dada**. En `pendiente_2` el jefe inmediato ya
+ * dio su visto bueno, y hacerlo desaparecer sin decírselo sería borrarle una
+ * decisión; para eso está pedir la anulación, que él firma.
+ *
+ * Las dos condiciones y no solo el estado: un admin puede devolver una solicitud
+ * a `pendiente` desde el PATCH del registro sin limpiar `primeraFirmaAt`, y en
+ * esa fila «pendiente» convive con una firma ya dada. Es el mismo par que
+ * defiende el WHERE de `repo.retirarSolicitud`, y están en los dos sitios a
+ * propósito: aquí decide el 409 con su mensaje, allí cierra la carrera.
+ *
+ * No mira la fecha, al revés que `puedePedirAnulacion`. No hace falta: una
+ * solicitud sin firmar no ha reservado nada ni ha llegado al calendario, así que
+ * retirar una que ya empezó no regala días de nadie — simplemente deja de pedir
+ * unos que nunca se concedieron.
+ */
+export function puedeRetirarla(s: Pick<Solicitud, 'estado' | 'primeraFirmaAt'>): boolean {
+  return s.estado === 'pendiente' && s.primeraFirmaAt === null;
+}
 
 /** Lo mínimo de una solicitud para saber si admite un cambio. */
 type SolicitudEnmendable = Pick<
@@ -1200,6 +1226,36 @@ export async function retirarModificacion(db: Pool, sesion: Sesion, id: string):
     const actual = await repo.modificacionPorId(db, id);
     throw new AusenciaError(actual ? codigoNoPendiente(actual.estado) : 'no_encontrada', actual ? 409 : 404);
   }
+  return retirada;
+}
+
+/**
+ * El dueño retira su propia solicitud. No la decide nadie: la quita él.
+ *
+ * Los tres guards van en este orden y no es indiferente:
+ *  1. Existe. 404 si no.
+ *  2. Es SUYA. 403 — y se compara contra el empleado de la sesión, nunca contra
+ *     nada que venga en la petición. Ni un admin puede retirar la de otro: para
+ *     tocar la fila de un tercero está el `DELETE` del registro, que además deja
+ *     rastro de quién lo hizo.
+ *  3. Está retirable. 409 con el porqué.
+ *
+ * El 403 va ANTES que el 409 a propósito: a quien no es el dueño no se le dice
+ * en qué estado está la solicitud de otro, ni siquiera para negarle la acción.
+ */
+export async function retirarSolicitud(db: Pool, sesion: Sesion, id: string): Promise<Solicitud> {
+  const empleado = await empleadoDeSesion(db, sesion);
+  const solicitud = await repo.solicitudPorId(db, id);
+  if (!solicitud) throw new AusenciaError('no_encontrada', 404);
+  if (solicitud.empleadoId !== empleado.id) throw new AusenciaError('no_es_su_solicitud', 403);
+  if (!puedeRetirarla(solicitud)) throw new AusenciaError('ya_no_se_puede_retirar', 409, 'estado');
+
+  const retirada = await repo.retirarSolicitud(db, id, construirPayload);
+  // Sin fila: el jefe firmó entre la lectura y el UPDATE, y su firma gana. Es un
+  // conflicto, no un fallo — el mismo 409 que da el doble clic en la bandeja.
+  if (!retirada) throw new AusenciaError('ya_no_se_puede_retirar', 409, 'estado');
+
+  void avisarN8n();
   return retirada;
 }
 

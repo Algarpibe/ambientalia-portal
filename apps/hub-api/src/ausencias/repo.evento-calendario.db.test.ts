@@ -57,7 +57,7 @@ function transicionDe(s: Solicitud, aprueba: boolean) {
 }
 
 const aprobar = (s: Solicitud) =>
-  decidirSolicitud(db, s.id, s.estado, transicionDe(s, true), null, null, construirPayload);
+  decidirSolicitud(db, s.id, s.estado, transicionDe(s, true), null, null, construirPayload, construirPayloadModificacion);
 
 /** Pide una anulacion y la aprueba, que es como se borra un evento de verdad. */
 async function anularPorModificacion(s: Solicitud): Promise<void> {
@@ -112,7 +112,7 @@ describe('la marca del evento de calendario', () => {
 
   it('CANDADO: rechazar NO anota nada, porque no crea evento', async () => {
     const s = await sembrarCaso('pendiente');
-    await decidirSolicitud(db, s.id, s.estado, transicionDe(s, false), 'No procede', null, construirPayload);
+    await decidirSolicitud(db, s.id, s.estado, transicionDe(s, false), 'No procede', null, construirPayload, construirPayloadModificacion);
 
     expect(await eventosDelOutbox(db)).toEqual(['rechazada']);
     // Un rechazo lleva `hoja` pero no `calendario`: no hay ausencia que pintar,
@@ -155,8 +155,8 @@ describe('la marca del evento de calendario', () => {
     // Las dos con el MISMO estado esperado, que es lo que manda el servicio
     // cuando dos peticiones leen la solicitud antes de que ninguna escriba.
     const [a, b] = await Promise.all([
-      decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, construirPayload),
-      decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, construirPayload),
+      decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, construirPayload, construirPayloadModificacion),
+      decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, construirPayload, construirPayloadModificacion),
     ]);
 
     // Una gana y la otra se va de vacio por el testigo `AND estado = $7`.

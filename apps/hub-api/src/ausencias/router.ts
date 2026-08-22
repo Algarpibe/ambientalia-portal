@@ -191,6 +191,25 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
+   * El dueño retira su propia solicitud, antes de que nadie la firme.
+   *
+   * `POST .../retirar` y no `DELETE /solicitudes/:id`, por dos motivos. Uno, el
+   * mismo que en la ruta gemela de aquí abajo: la fila no se borra, pasa a
+   * `rechazada` con su `anulada_at` y se queda en el registro. Y dos, porque el
+   * `DELETE` de ese camino YA EXISTE y es otra cosa — es de admin, borra de
+   * verdad y avisa a administración. Dos verbos sobre la misma ruta con dos
+   * semánticas y dos permisos habría sido la forma más rápida de que alguien
+   * llamara al que no era.
+   */
+  router.post('/ausencias/solicitudes/:id/retirar', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.retirarSolicitud(db, sesionDe(req), req.params.id));
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirar_solicitud');
+    }
+  });
+
+  /**
    * El autor se echa atrás.
    *
    * `POST .../retirar` y NO `DELETE /modificaciones/:id`: la fila no se borra,

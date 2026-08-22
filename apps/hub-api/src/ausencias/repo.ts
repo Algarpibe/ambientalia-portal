@@ -1517,6 +1517,13 @@ export async function decidirSolicitud(
   motivo: string | null,
   userId: string | null,
   construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
+  /**
+   * El segundo constructor, para el aviso de la propuesta que caduca. Va aparte
+   * del de arriba y no fundido en uno polimórfico porque son dos payloads con
+   * dos formas distintas — uno habla de la solicitud y el otro de la propuesta—,
+   * y fundirlos obligaría a discriminar por el nombre del evento dentro.
+   */
+  construirPayloadCaducada: (s: Solicitud, m: Modificacion, evento: EventoModificacion) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
     const { rows } = await client.query(
@@ -1552,6 +1559,116 @@ export async function decidirSolicitud(
       [id, transicion.evento, JSON.stringify(payload)],
     );
     await anotarEventoDeCalendario(client, solicitud, payload);
+
+    await caducarPropuestaViva(client, id, solicitud, construirPayloadCaducada);
+
+    return solicitud;
+  });
+}
+
+/**
+ * Cierra la petición de cambio que estuviera viva sobre esta solicitud, porque
+ * acaba de dejar de poder aplicarse.
+ *
+ * ⚠️ Esto NO es una decisión de producto que se pueda discutir aparte: la
+ * propuesta ya estaba muerta antes de existir esta función. El `TESTIGO_SOLICITUD`
+ * de `decidirModificacion` compara el ESTADO de la solicitud, así que en cuanto
+ * la solicitud se mueve —y firmarla la mueve SIEMPRE, incluso el paso de
+ * `pendiente` a `pendiente_2`— aprobarla contesta 409 y nada la revive. Lo único
+ * que cambia aquí es que el sistema lo reconoce en vez de dejarla `pendiente`
+ * para siempre.
+ *
+ * Y lo que arregla no es cosmético. El índice único parcial de la 024 solo admite
+ * UNA propuesta viva por solicitud, así que esa fila muerta dejaba al trabajador
+ * sin poder pedir otro cambio sobre esa misma solicitud, con un 409 que hablaba
+ * de una petición que él daba por perdida.
+ *
+ * Va DENTRO de la transacción de la firma, y con su aviso en el outbox, por lo
+ * mismo que el resto: si se hiciera después y el proceso se cayera entre medias,
+ * la propuesta quedaría caducada sin que nadie se lo hubiera dicho a nadie.
+ */
+async function caducarPropuestaViva(
+  client: PoolClient,
+  solicitudId: string,
+  solicitud: Solicitud,
+  construirPayload: (s: Solicitud, m: Modificacion, evento: EventoModificacion) => PayloadEvento,
+): Promise<void> {
+  const { rows } = await client.query(
+    `UPDATE portal.solicitud_modificaciones
+        SET estado = 'caducada'
+      WHERE solicitud_id = $1 AND estado = 'pendiente'
+      RETURNING id`,
+    [solicitudId],
+  );
+  // Lo normal: no había ninguna viva y no hay nada que avisar.
+  if (rows.length === 0) return;
+
+  // Se relee con el SELECT común en vez de construirla desde el RETURNING: es lo
+  // que garantiza que el correo hable de la MISMA forma de propuesta que el
+  // resto del módulo, con sus `::text` incluidos.
+  const { rows: cerrada } = await client.query(`${SELECT_MODIFICACION} WHERE m.id = $1`, [
+    (rows[0] as { id: string }).id,
+  ]);
+  const modificacion = aModificacion(cerrada[0] as FilaModificacionDb);
+
+  await client.query(
+    `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+    [
+      solicitudId,
+      'modificacion_caducada',
+      JSON.stringify(construirPayload(solicitud, modificacion, 'modificacion_caducada')),
+    ],
+  );
+}
+
+/**
+ * El dueño retira su propia solicitud, antes de que nadie la haya firmado.
+ *
+ * La deja en `rechazada` + `anulada_at`, que es el MISMO estado terminal en el
+ * que la dejaría una anulación aprobada. Reutilizarlo y no estrenar un
+ * `'retirada'` es deliberado: `estado <> 'rechazada'` está repartido por media
+ * docena de consultas —el calendario, el solape, el saldo— y un estado nuevo
+ * tendría que añadirse a todas ellas, con el fallo cayendo del lado de contar
+ * como ausencia unos días que ya nadie disfruta.
+ *
+ * ⚠️ El testigo del WHERE es lo único que impide la carrera contra la firma. Las
+ * dos condiciones hacen falta y no sobra ninguna:
+ *  - `estado = 'pendiente'`: si el jefe firma entre el SELECT del servicio y
+ *    este UPDATE, aquí ya no hay fila y gana él. Cero filas → 409, igual que en
+ *    `decidirSolicitud`.
+ *  - `primera_firma_at IS NULL`: cinturón sobre lo mismo por otra vía. Un admin
+ *    puede devolver una solicitud a `pendiente` con el PATCH del registro sin
+ *    borrar esa marca, y entonces «pendiente» convive con una firma YA DADA.
+ *    Retirarla ahí borraría el visto bueno del jefe inmediato sin decírselo.
+ *
+ * NO se toca `decidida_at` ni `aprobador_user_id`: no ha decidido nadie. El
+ * registro lo enseña como anulada y sin decisor, que es exactamente lo que pasó
+ * — y es lo que distingue una retirada de una anulación firmada por un jefe.
+ */
+export async function retirarSolicitud(
+  db: Pool,
+  id: string,
+  construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
+): Promise<Solicitud | null> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(
+      `UPDATE portal.solicitudes_ausencia
+          SET estado = 'rechazada', anulada_at = now()
+        WHERE id = $1 AND estado = 'pendiente' AND primera_firma_at IS NULL
+        RETURNING id`,
+      [id],
+    );
+    if (rows.length === 0) return null;
+
+    const { rows: actualizada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
+    const solicitud = aSolicitud(actualizada[0] as FilaSolicitudDb);
+
+    // Sin `anotarEventoDeCalendario`: una `pendiente` nunca creó evento, así que
+    // no hay id que apuntar ni nada que borrar en Google.
+    await client.query(
+      `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+      [id, 'retirada', JSON.stringify(construirPayload(solicitud, 'retirada'))],
+    );
 
     return solicitud;
   });
