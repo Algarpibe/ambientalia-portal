@@ -125,3 +125,133 @@ export function marcasDelMes(mes: string, ausencias: AusenciaRango[]): MarcaCale
 
   return marcas;
 }
+
+// ── La vista anual ─────────────────────────────────────────────────────────
+//
+// El año NO reutiliza `marcasDelMes`, y no es por pereza: la rejilla del mes
+// necesita una marca POR DÍA porque rellena celdas, y el año necesita FRANJAS
+// porque dibuja barras. Expandir 365 días × plantilla para volver a agruparlos
+// en el navegador serían ~14.600 objetos en la respuesta y otros tantos nodos en
+// el DOM, cuando lo que se pinta de verdad son unas trescientas barras.
+//
+// Y lo que se manda son OFFSETS en días, no fechas que el navegador tenga que
+// restar. Es el mismo principio que abre este fichero: la aritmética de fechas
+// vive donde hay tests. El frontend solo divide enteros para sacar porcentajes.
+
+/** El primer dígito no puede ser 0, por lo mismo que en `MES`. */
+const ANIO = /^[1-9]\d{3}$/;
+
+export function esAnioValido(v: string): boolean {
+  return ANIO.test(v);
+}
+
+/** Primer y último día de un año. */
+export function rangoDelAnio(anio: string): { desde: string; hasta: string } {
+  if (!esAnioValido(anio)) throw new Error(`año inválido: ${JSON.stringify(anio)}`);
+  return { desde: `${anio}-01-01`, hasta: `${anio}-12-31` };
+}
+
+/** Cuántos días tiene ese año: 365, o 366 si es bisiesto. */
+export function diasDelAnio(anio: string): number {
+  const n = Number(anio);
+  // La regla completa, no el `% 4` a secas: 1900 no fue bisiesto y 2000 sí. Da
+  // igual para los años que esta app va a ver, pero un 365 donde toca 366
+  // desplazaría TODAS las barras a partir de marzo, y ese fallo se ve como un
+  // calendario ligeramente torcido que nadie sabe explicar.
+  const bisiesto = (n % 4 === 0 && n % 100 !== 0) || n % 400 === 0;
+  return bisiesto ? 366 : 365;
+}
+
+/** Un mes dentro de la franja anual: dónde empieza y cuánto ocupa. */
+export interface MesDelAnio {
+  /** `YYYY-MM`, para poder saltar a la vista mensual desde su etiqueta. */
+  mes: string;
+  /** Ordinal del día 1 de ese mes dentro del año, empezando en 1. */
+  desdeDia: number;
+  dias: number;
+}
+
+/**
+ * Los doce meses con su posición en el año.
+ *
+ * Existe para que el navegador pueda pintar las separaciones y las etiquetas sin
+ * hacer una sola cuenta de fechas: los anchos salen de dividir `dias` entre el
+ * total, y la posición de `desdeDia`. Sin esto, el frontend tendría que saber
+ * cuántos días tiene febrero — justo lo que este módulo existe para evitar.
+ */
+export function mesesDelAnio(anio: string): MesDelAnio[] {
+  if (!esAnioValido(anio)) throw new Error(`año inválido: ${JSON.stringify(anio)}`);
+  const meses: MesDelAnio[] = [];
+  let desdeDia = 1;
+  for (let m = 1; m <= 12; m++) {
+    const mes = `${anio}-${String(m).padStart(2, '0')}`;
+    // El día 0 del mes siguiente es el último del actual, igual que en
+    // `rangoDelMes`: resuelve solo los de 30 y el febrero bisiesto.
+    const dias = new Date(Date.UTC(Number(anio), m, 0)).getUTCDate();
+    meses.push({ mes, desdeDia, dias });
+    desdeDia += dias;
+  }
+  return meses;
+}
+
+/** Una ausencia como barra: dónde empieza y dónde acaba dentro del año. */
+export interface FranjaCalendario {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  estado: EstadoSolicitud;
+  /** Ya RECORTADAS al año: una ausencia a caballo entre dos años se parte. */
+  fechaInicio: string;
+  fechaFin: string;
+  /** Ordinales dentro del año, ambos inclusive y empezando en 1. */
+  desdeDia: number;
+  hastaDia: number;
+}
+
+/** El ordinal de una fecha dentro de su año, empezando en 1. */
+function diaDelAnio(fecha: string): number {
+  const anio = fecha.slice(0, 4);
+  const ms = Date.parse(`${fecha}T00:00:00Z`) - Date.parse(`${anio}-01-01T00:00:00Z`);
+  return ms / 86_400_000 + 1;
+}
+
+/**
+ * Las ausencias como franjas del año, ya recortadas.
+ *
+ * Mismo contrato que `marcasDelMes` en las tres cosas que importan: valida TODAS
+ * las fechas antes de filtrar nada (una rechazada con la fecha corrupta tiene que
+ * dar el mismo error, aunque no se fuera a pintar), descarta las rechazadas
+ * —nunca llegaron a ocurrir— y recorta al rango en vez de descartar lo que se
+ * sale, para que una ausencia a caballo entre dos años se pinte entera en los
+ * dos, cada uno con su trozo.
+ */
+export function franjasDelAnio(anio: string, ausencias: AusenciaRango[]): FranjaCalendario[] {
+  const { desde, hasta } = rangoDelAnio(anio);
+  const franjas: FranjaCalendario[] = [];
+
+  for (const a of ausencias) {
+    if (!esFechaValida(a.fechaInicio)) throw errorFechaInvalida('fechaInicio', a.fechaInicio);
+    if (!esFechaValida(a.fechaFin)) throw errorFechaInvalida('fechaFin', a.fechaFin);
+  }
+
+  for (const a of ausencias) {
+    if (a.estado === 'rechazada') continue;
+
+    // Comparación de cadenas: con YYYY-MM-DD el orden lexicográfico ES el
+    // cronológico, y no hay zona horaria que pueda desplazar nada.
+    const ini = a.fechaInicio > desde ? a.fechaInicio : desde;
+    const fin = a.fechaFin < hasta ? a.fechaFin : hasta;
+    if (ini > fin) continue;
+
+    franjas.push({
+      empleadoId: a.empleadoId,
+      tipo: a.tipo,
+      estado: a.estado,
+      fechaInicio: ini,
+      fechaFin: fin,
+      desdeDia: diaDelAnio(ini),
+      hastaDia: diaDelAnio(fin),
+    });
+  }
+
+  return franjas;
+}

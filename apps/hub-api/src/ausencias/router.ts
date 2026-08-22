@@ -729,6 +729,25 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El mismo calendario, pero de un año entero y en forma de FRANJAS.
+   *
+   * Ruta aparte y no un `?anio=` en la de arriba a propósito: la respuesta tiene
+   * otra forma —barras en vez de marcas por día— y meter las dos bajo la misma
+   * URL obligaría a todo el que la consuma a discriminar qué le ha llegado.
+   *
+   * Mismo `...gated` y **mismo alcance**: las dos pasan por `alcanceDeSesion`,
+   * así que ver el año no enseña a nadie que no se viera ya en el mes. Es la
+   * comprobación que hay que repetir si algún día se añade una tercera vista.
+   */
+  router.get('/ausencias/calendario-anual', ...gated, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.calendarioDelAnio(db, sesionDe(req), String(req.query.anio ?? '')));
+    } catch (e) {
+      sendError(res, e, 'ausencias_calendario_anual');
+    }
+  });
+
   // ── Para n8n (auth por token de cron, no JWT) ────────────────────────────
   //
   // Mismo contrato que WO-sales: /pendiente entrega el trabajo SIN darlo por

@@ -305,6 +305,43 @@ export interface CalendarioDelMes {
   marcas: MarcaCalendario[];
 }
 
+/** Un mes dentro de la franja anual: dónde empieza y cuánto ocupa. */
+export interface MesDelAnio {
+  /** `YYYY-MM`, para poder saltar a la vista mensual desde su etiqueta. */
+  mes: string;
+  /** Ordinal del día 1 de ese mes dentro del año, empezando en 1. */
+  desdeDia: number;
+  dias: number;
+}
+
+/**
+ * Una ausencia como barra de la franja anual.
+ *
+ * Los ordinales vienen calculados del servidor a propósito: aquí solo se
+ * dividen entre `diasDelAnio` para sacar el porcentaje. La aritmética de fechas
+ * vive donde hay tests, y esta app no tiene ninguno.
+ */
+export interface FranjaCalendario {
+  empleadoId: string;
+  tipo: TipoSolicitud;
+  estado: EstadoSolicitud;
+  /** Ya recortadas al año: una ausencia a caballo entre dos años se parte. */
+  fechaInicio: string;
+  fechaFin: string;
+  /** Ambos inclusive y empezando en 1. */
+  desdeDia: number;
+  hastaDia: number;
+}
+
+export interface CalendarioDelAnio {
+  empleados: { id: string; nombreCompleto: string }[];
+  anio: string;
+  /** 365, o 366 si es bisiesto. Es el denominador de todos los anchos. */
+  diasDelAnio: number;
+  meses: MesDelAnio[];
+  franjas: FranjaCalendario[];
+}
+
 export interface NuevaSolicitud {
   tipo: TipoSolicitud;
   fechaInicio: string;
@@ -1038,3 +1075,11 @@ export const fijarSaldo = (empleadoId: string, vacaciones: CorteAFijar, compensa
 /** El calendario de un mes `YYYY-MM`. Lo ve cualquiera que tenga la app. */
 export const fetchCalendario = (mes: string) =>
   get<CalendarioDelMes>(`/api/ausencias/calendario?mes=${encodeURIComponent(mes)}`);
+
+/**
+ * El año entero en franjas. Ruta aparte de la mensual porque la respuesta tiene
+ * otra forma —barras en vez de marcas por día—, no porque cambie el permiso: el
+ * alcance que aplica es el mismo, y lo resuelve el servidor.
+ */
+export const fetchCalendarioAnual = (anio: string) =>
+  get<CalendarioDelAnio>(`/api/ausencias/calendario-anual?anio=${encodeURIComponent(anio)}`);
