@@ -1490,6 +1490,20 @@ export interface EmpleadoConJefatura extends Empleado {
   informadoCorreo: string | null;
   /** Su rama del organigrama forma un círculo. Se avisa, no se bloquea. */
   enCiclo: boolean;
+  /**
+   * Tiene rol de administrador en el portal.
+   *
+   * Existe para UNA cosa: que el panel no pinte las tres casillas de permisos
+   * —soportes, exporta, empresa— en su fila. El rol ya se las da todas, plegadas
+   * dentro de los booleanos del contexto, así que una casilla sin marcar ahí
+   * afirmaba lo contrario de lo que pasa de verdad.
+   *
+   * NO es un permiso ni se guarda en `portal.empleados`: se deriva en cada
+   * consulta del rol que tenga esa persona en `portal.users`. Si deja de ser
+   * admin, sus casillas vuelven a aparecer con el valor que la columna tuviera
+   * guardado — que es justo el que pasaría a aplicarle.
+   */
+  esAdminDelPortal: boolean;
 }
 
 /**
@@ -1498,7 +1512,11 @@ export interface EmpleadoConJefatura extends Empleado {
  * que se congelaría en una solicitud nueva, no una aproximación.
  */
 export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatura[]> {
-  const [empleados, enlaces] = await Promise.all([repo.listarEmpleados(db), repo.enlacesActivos(db)]);
+  const [empleados, enlaces, admins] = await Promise.all([
+    repo.listarEmpleados(db),
+    repo.enlacesActivos(db),
+    repo.correosDeAdmin(db),
+  ]);
   const porCorreo = new Map(enlaces.map((e) => [e.correo, e]));
   const enCiclo = new Set(detectarCiclos(construirIndice(enlaces)).flat());
 
@@ -1513,6 +1531,12 @@ export async function empleadosConJefatura(db: Pool): Promise<EmpleadoConJefatur
       segundoAprobadorCorreo: arriba.segundo,
       informadoCorreo: arriba.informado,
       enCiclo: enCiclo.has(e.correo.toLowerCase()),
+      // En minúsculas por los dos lados: el Set ya viene con `lower()` del SQL,
+      // y el correo de la ficha lo escribe la hoja de Google sin garantía de
+      // caja. Comparar en crudo dejaría a un admin con el correo en mayúsculas
+      // fuera del conjunto y con sus tres casillas puestas otra vez — un fallo
+      // que no rompe nada y que solo se nota mirando la fila de esa persona.
+      esAdminDelPortal: admins.has(e.correo.toLowerCase()),
     };
   });
 }

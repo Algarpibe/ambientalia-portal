@@ -373,6 +373,23 @@ export default function PanelOrganigrama({ activo }: Props) {
                         )}
                       </select>
                     </td>
+                    {/* Las tres casillas de permisos NO se pintan en la fila de un
+                        administrador: el rol ya se las da las tres —hub-api pliega
+                        `esAdmin` dentro de `esVisorAdjuntos`, `esExportadorRegistro`
+                        y `esVisorDeTodaLaEmpresa`—, así que una casilla sin marcar
+                        ahí afirmaba lo contrario de lo que pasa. Era el caso de la
+                        raíz del organigrama, que aparecía con «Empresa» apagada y
+                        veía la empresa entera igual.
+                        En su lugar va una celda que ocupa las tres columnas y lo
+                        dice. Los valores guardados NO se tocan: si esa persona deja
+                        de ser admin, sus casillas vuelven con lo que la columna
+                        tuviera, que es justo lo que pasaría a aplicarle. */}
+                    {e.esAdminDelPortal ? (
+                      <td colSpan={3} className="px-4 py-2.5 text-xs italic text-gray-500">
+                        Los tres permisos, por su rol de administrador
+                      </td>
+                    ) : (
+                      <>
                     <td className="px-4 py-2.5">
                       <label className="flex items-center gap-2 text-xs text-gray-600">
                         <input
@@ -436,6 +453,8 @@ export default function PanelOrganigrama({ activo }: Props) {
                         Empresa
                       </label>
                     </td>
+                      </>
+                    )}
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button

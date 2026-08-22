@@ -265,6 +265,33 @@ export async function listarEmpleados(db: Pool): Promise<Empleado[]> {
   return (rows as FilaEmpleadoDb[]).map(aEmpleado);
 }
 
+/**
+ * Los correos con rol de administrador en el portal, en minúsculas.
+ *
+ * Existe para que la pestaña Organigrama pueda callar las tres casillas de
+ * permisos en las filas de un admin: el rol ya se las da todas plegadas
+ * (`esAdmin || …` en los tres booleanos del contexto), así que una casilla sin
+ * marcar en esa fila afirma lo contrario de lo que pasa.
+ *
+ * Cruza por CORREO y no por `user_id`, aunque la columna exista: las fichas se
+ * importan de la hoja de Google antes de que existan las cuentas, así que
+ * `user_id` puede estar sin rellenar y ese cruce dejaría fuera precisamente a
+ * los admin cuya ficha nadie ha vinculado todavía. Es el mismo criterio de
+ * `esVisorDeAdjuntos` y compañía, que también preguntan por correo.
+ *
+ * ⚠️ Mira SOLO el rol, sin filtrar por `status`. Es a propósito: quien decide el
+ * bypass en hub-api es `requireAdmin`, que lee `role` del JWT y nada más. Añadir
+ * aquí un `AND status = 'active'` haría que el panel contestara una pregunta
+ * distinta de la que contesta el servidor, y esa clase de discrepancia no falla
+ * — solo enseña una casilla de más o de menos, y nadie la relaciona con esto.
+ *
+ * Devuelve un Set porque quien llama lo consulta una vez por empleado.
+ */
+export async function correosDeAdmin(db: Pool): Promise<Set<string>> {
+  const { rows } = await db.query(`SELECT lower(email) AS email FROM portal.users WHERE role = 'admin'`);
+  return new Set((rows as { email: string }[]).map((r) => r.email));
+}
+
 // ── Saldos: vacaciones y compensatorios ────────────────────────────────────
 
 /** Un empleado con sus dos configuraciones de saldo, tal como salen de la BD. */
