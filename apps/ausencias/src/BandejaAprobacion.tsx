@@ -56,7 +56,18 @@ function TarjetaDelSolicitante({
     return <TarjetaCompensatorios saldo={fila.compensatorios} titulo={`Bolsa de ${nombre} ahora mismo`} />;
   }
   if (tipo === 'vacaciones') {
-    return <TarjetaSaldo saldo={fila.saldo} diasPedidos={diasPedidos} titulo={`Saldo de ${nombre}`} />;
+    // `saldo_ajeno`: aquí la tarjeta no le habla a quien pide, sino a quien
+    // firma, y la solicitud ya está enviada. Los números del exceso sí importan
+    // —son parte de lo que hay que decidir—, pero cualquier consejo sobre el
+    // envío iría dirigido a alguien que no está en esta pantalla.
+    return (
+      <TarjetaSaldo
+        saldo={fila.saldo}
+        diasPedidos={diasPedidos}
+        titulo={`Saldo de ${nombre}`}
+        cierre="saldo_ajeno"
+      />
+    );
   }
   // Aquí es donde más falta hace de las dos: quien firma un compensatorio decide
   // contra una bolsa que sí se agota y que nadie repone sola.

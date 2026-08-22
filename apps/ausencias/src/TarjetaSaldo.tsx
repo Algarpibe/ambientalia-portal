@@ -5,8 +5,33 @@ import { formatDias, formatFecha, pedible } from './dominio';
 // La tarjeta del saldo. Se usa en dos sitios (formulario y bandeja), por eso
 // vive aparte y no dentro del formulario.
 
+/**
+ * Qué se puede hacer con el aviso de exceso, que es lo único que cambia entre
+ * los sitios donde esta tarjeta se pinta:
+ *
+ * - `puede_sobregirarse`: quien lee es quien pide y está exento del tope (admin).
+ *   Puede mandarla y que decida quien firma.
+ * - `no_puede_sobregirarse`: quien lee es quien pide y NO está exento. El botón
+ *   está apagado y el servidor contestaría 409.
+ * - `saldo_ajeno`: quien lee es quien firma, mirando el saldo de otra persona.
+ *   No se le pide nada: la solicitud ya está enviada.
+ */
+export type CierreDelAviso = 'puede_sobregirarse' | 'no_puede_sobregirarse' | 'saldo_ajeno';
+
 interface Props {
   saldo: SaldoVacaciones;
+  /**
+   * Quién lee el aviso de exceso y qué puede hacer al respecto.
+   *
+   * Obligatorio y SIN valor por defecto a propósito: es el candado. Esta app no
+   * tiene tests, así que lo único que impide que un tercer sitio herede una
+   * frase que allí sea mentira es que no compile sin elegir. Un defecto —el que
+   * fuera— reabriría justo el fallo que este prop vino a cerrar: la tarjeta
+   * decía «puedes enviarla igualmente» a todo el mundo desde que las vacaciones
+   * dejaron de poder pedirse por encima del saldo, y quien no era admin veía esa
+   * frase junto a un botón gris.
+   */
+  cierre: CierreDelAviso;
   /** Días que se están pidiendo ahora mismo, para avisar si no caben. */
   diasPedidos?: number;
   /** Encabezado alternativo, para cuando el saldo es de otra persona. */
@@ -25,6 +50,7 @@ interface Props {
 
 export default function TarjetaSaldo({
   saldo,
+  cierre,
   diasPedidos = 0,
   titulo = 'Tu saldo de vacaciones',
   soloSiAvisa = false,
@@ -105,7 +131,28 @@ export default function TarjetaSaldo({
               aprobar: se descontarán en cuanto alguien los firme.
             </>
           )}{' '}
-          Puedes enviar la solicitud igualmente: lo decide quien aprueba.
+          {/* La última frase es la única que depende de quién esté leyendo, y
+              tiene que decir la verdad sobre el botón que hay debajo. Las tres
+              ramas están escritas enteras y no compuestas por trozos: son tres
+              consejos distintos, no un texto con huecos.
+
+              `saldo_ajeno` no dice NADA. Quien firma no tiene ninguna acción que
+              tomar sobre el envío —ya está enviado— y las dos frases de arriba,
+              con los números, son justo lo que necesita para decidir. Cualquier
+              cierre en segunda persona ahí le hablaría de un botón que no está
+              mirando. */}
+          {cierre === 'puede_sobregirarse' && <>Puedes enviar la solicitud igualmente: lo decide quien aprueba.</>}
+          {cierre === 'no_puede_sobregirarse' && (
+            <>
+              {/* No promete que esperar una firma libere días, porque no lo hace:
+                  aprobar lo pendiente baja el disponible y lo pedible se queda
+                  igual. Lo que sí crece solo es el devengo — la diferencia de
+                  fondo con los compensatorios, que no se devengan y por eso su
+                  tarjeta remata mandando a administración y ya. */}
+              No puedes enviarla: ajusta las fechas o espera a devengar los días que faltan. Si crees
+              que tu saldo no está bien, habla con administración.
+            </>
+          )}
         </p>
       )}
     </div>
