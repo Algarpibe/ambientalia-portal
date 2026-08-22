@@ -543,15 +543,14 @@ export default function App() {
               </div>
 
               <div className={tab === 'calendario' ? '' : 'hidden'}>
-                {/* Aquí sí va el permiso nuevo, al revés que en el registro: lo
-                    que esta prop decide es cuánta gente trae la rejilla —y eso
-                    es exactamente lo que el permiso abre—, no si se puede
-                    tocar nada. El calendario no edita. */}
-                <Calendario
-                  miEmpleadoId={contexto.empleado.id}
-                  veTodaLaPlantilla={contexto.esAdmin || veTodaLaEmpresa}
-                  activo={tab === 'calendario'}
-                />
+                {/* Sin prop de alcance: la decide entera hub-api en el SQL —la
+                    plantilla para un admin o un visor de empresa, la rama de dos
+                    niveles para un jefe, la fila propia para el resto— y el
+                    calendario se limita a pintar lo que le llega. Aquí hubo una
+                    `veTodaLaPlantilla` y antes una `esAdmin`; las dos obligaban
+                    a repetir en el navegador una regla que ya vive en el
+                    servidor, y con tres escalones ninguna acertaba. */}
+                <Calendario miEmpleadoId={contexto.empleado.id} activo={tab === 'calendario'} />
               </div>
             </>
           )}

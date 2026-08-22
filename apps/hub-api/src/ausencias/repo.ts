@@ -2060,6 +2060,88 @@ export async function modificacionPorId(db: Pool, id: string): Promise<Modificac
   return rows.length ? aModificacion(rows[0] as FilaModificacionDb) : null;
 }
 
+/** Los campos de una modificación que un admin puede corregir desde el registro. */
+export interface CorreccionModificacion {
+  /** Los tres van NULL en una anulación; lo exige el CHECK de la 024. */
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: EstadoModificacion;
+}
+
+/**
+ * Corrige a mano una fila del registro de movimientos. Solo la usa el admin
+ * desde «Registro general».
+ *
+ * ⚠️ Corrige el ASIENTO, no la solicitud. Cambiar aquí el estado de una
+ * anulación de `aprobada` a `rechazada` NO desanula la solicitud: eso ya pasó, y
+ * su fila propia es la que dice en qué estado quedó. Las dos son editables por
+ * separado desde el mismo registro a propósito — un admin que quiera deshacer
+ * de verdad una anulación tiene que tocar las dos, y este comentario existe para
+ * que nadie le añada aquí un efecto lateral sobre la solicitud creyendo que
+ * arregla una incoherencia. Ese efecto lateral ES la bandeja, y allí ya vive.
+ *
+ * `clase` NO se puede cambiar, y no es un olvido: es lo que decide qué columnas
+ * pueden ir a NULL (el CHECK `modificaciones_campos_por_clase`), así que
+ * convertir una anulación en un cambio de fechas exigiría inventarse unas fechas
+ * nuevas. Quien se equivocó de clase borra la fila y la vuelve a pedir.
+ *
+ * `decidida_at` y `aprobador_user_id` tampoco: son el testigo de QUIÉN decidió y
+ * CUÁNDO, y el registro existe justo para conservarlos. Editar lo que se decidió
+ * es corregir un dato; editar quién lo decidió es falsificarlo.
+ */
+export async function corregirModificacion(
+  db: Pool,
+  id: string,
+  campos: CorreccionModificacion,
+): Promise<Modificacion | null> {
+  const { rows } = await db.query(
+    `UPDATE portal.solicitud_modificaciones
+        SET fecha_inicio_nueva  = $2::date,
+            fecha_fin_nueva     = $3::date,
+            dias_habiles_nuevos = $4::numeric,
+            motivo              = $5,
+            estado              = $6
+      WHERE id = $1
+      RETURNING id`,
+    [
+      id,
+      campos.fechaInicioNueva,
+      campos.fechaFinNueva,
+      campos.diasHabilesNuevos,
+      campos.motivo,
+      campos.estado,
+    ],
+  );
+  if (!rows.length) return null;
+  // Se relee con el SELECT común en vez de devolver el RETURNING entero: es lo
+  // que garantiza que la forma sea EXACTAMENTE la misma que la del resto de
+  // lecturas de modificaciones —los casts de `::text` incluidos—, y no una
+  // segunda proyección que haya que mantener en paralelo.
+  return modificacionPorId(db, id);
+}
+
+/**
+ * Borra una fila del registro de movimientos. Irreversible.
+ *
+ * NO toca la solicitud. Borrar la anulación que dejó unas vacaciones anuladas
+ * las deja anuladas, y sin nada que explique por qué: es lo que hace que esto
+ * sea de admin y quede en el log de hub-api.
+ *
+ * Devuelve la fila borrada —leída ANTES del DELETE— para que quien llama pueda
+ * decir en el log qué era. Después ya no hay a quién preguntárselo.
+ */
+export async function borrarModificacion(db: Pool, id: string): Promise<Modificacion | null> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(`${SELECT_MODIFICACION} WHERE m.id = $1`, [id]);
+    if (!rows.length) return null;
+    const borrada = aModificacion(rows[0] as FilaModificacionDb);
+    await client.query(`DELETE FROM portal.solicitud_modificaciones WHERE id = $1`, [id]);
+    return borrada;
+  });
+}
+
 // ── Adjuntos ───────────────────────────────────────────────────────────────
 
 export interface AdjuntoCompleto {
@@ -2204,12 +2286,39 @@ function aEmpleadoActivo(r: FilaEmpleadoActivoDb): EmpleadoActivo {
  * `empleadosConSaldo`—, para que acotar o no acotar sea siempre una decisión
  * escrita en el llamante y no un olvido que enseñe la plantilla entera.
  */
-export async function empleadosActivos(db: Pool, soloEmpleadoId: string | null): Promise<EmpleadoActivo[]> {
+/**
+ * A quién alcanza el calendario de quien pregunta: SU propia fila y la de su
+ * rama de dos niveles. Con el parámetro a NULL no acota nada, que es lo que
+ * necesitan un administrador y quien tenga `ve_toda_la_empresa`.
+ *
+ * Envuelve `ramaDeDosNiveles()` en vez de reescribirla: la definición de «mi
+ * rama» tiene que seguir siendo la MISMA que la del registro de movimientos y
+ * la de los saldos, y una copia divergente no lanza — solo enseña las ausencias
+ * de gente que no es de quien mira. Lo único que añade es el «y yo», que el
+ * recorte por rama no incluye: `aprobador_correo` de uno apunta a su jefe, no a
+ * uno mismo, así que sin este OR un jefe vería el calendario de su equipo y no
+ * el suyo.
+ *
+ * ⚠️ Lo usan DOS consultas —las filas y las marcas— y tienen que decir
+ * exactamente lo mismo. Si discreparan no fallaría nada: saldría una persona sin
+ * marcas, o marcas de alguien que no tiene fila y que por tanto no se pintan.
+ * Por eso está aquí y no copiado en cada una.
+ *
+ * Hereda de `ramaDeDosNiveles` las dos condiciones de uso: `$1` es SIEMPRE el
+ * primer parámetro de la consulta que lo incrusta, y la tabla `portal.empleados`
+ * va aliasada como `e`.
+ */
+export function alcanceDelCalendario(): string {
+  return `(${ramaDeDosNiveles()} OR lower(e.correo) = lower($1))`;
+}
+
+export async function empleadosActivos(db: Pool, soloDe: string | null): Promise<EmpleadoActivo[]> {
   const { rows } = await db.query(
-    `SELECT id, nombre_completo FROM portal.empleados
-      WHERE activo AND ($1::uuid IS NULL OR id = $1::uuid)
-      ORDER BY nombre_completo`,
-    [soloEmpleadoId],
+    // Aliasada como `e` porque lo exige el fragmento que se incrusta debajo.
+    `SELECT e.id, e.nombre_completo FROM portal.empleados e
+      WHERE e.activo AND ${alcanceDelCalendario()}
+      ORDER BY e.nombre_completo`,
+    [soloDe],
   );
   return (rows as FilaEmpleadoActivoDb[]).map(aEmpleadoActivo);
 }
@@ -2241,9 +2350,9 @@ function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
  */
 export async function ausenciasEntre(
   db: Pool,
+  soloDe: string | null,
   desde: string,
   hasta: string,
-  soloEmpleadoId: string | null,
 ): Promise<AusenciaRango[]> {
   const { rows } = await db.query(
     `SELECT s.empleado_id, s.tipo, s.estado,
@@ -2259,15 +2368,25 @@ export async function ausenciasEntre(
         -- calendario del portal no filtra nada por su cuenta: pinta lo que le
         -- llega, ya expandido por dia.
         AND s.tipo <> 'otorgamiento'
-        AND ($3::uuid IS NULL OR s.empleado_id = $3::uuid)
-        AND s.fecha_inicio <= $2::date
-        AND s.fecha_fin    >= $1::date
+        -- El MISMO alcance que empleadosActivos, y por eso compartido: si los
+        -- dos discreparan saldrian marcas de gente sin fila (invisibles) o
+        -- filas sin marcas, y ninguna de las dos cosas falla.
+        --
+        -- Sin comillas invertidas en este comentario a proposito: vive DENTRO
+        -- del template literal de la consulta y una sin escapar lo cierra a
+        -- mitad de frase. Ya paso una vez, en la consulta de movimientos.
+        AND ${alcanceDelCalendario()}
+        AND s.fecha_inicio <= $3::date
+        AND s.fecha_fin    >= $2::date
       -- Determinismo del pintado, no estética: dos ausencias solapadas del
       -- mismo empleado producen dos marcas para el mismo (empleadoId, fecha), y
       -- el frontend arma un Map con esa clave, así que gana la última. Sin este
       -- ORDER BY, cuál de las dos "gana" podría cambiar entre peticiones.
       ORDER BY s.fecha_inicio, s.id`,
-    [desde, hasta, soloEmpleadoId],
+    // `soloDe` como PRIMER parámetro, siempre: es la regla que imponen
+    // `ramaDeDosNiveles` y el fragmento que lo envuelve. Las fechas se corrieron
+    // a $2 y $3 por eso, no por gusto.
+    [soloDe, desde, hasta],
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
 }

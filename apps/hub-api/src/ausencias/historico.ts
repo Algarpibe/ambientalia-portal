@@ -1,6 +1,16 @@
 import { esFechaValida } from './dias-habiles.js';
 import { AusenciaError } from './service.js';
-import { ESTADOS, ETIQUETA_TIPO, TIPOS, type Empleado, type EstadoSolicitud, type TipoSolicitud } from './types.js';
+import {
+  ESTADOS,
+  ESTADOS_MODIFICACION,
+  ETIQUETA_TIPO,
+  TIPOS,
+  type ClaseModificacion,
+  type Empleado,
+  type EstadoModificacion,
+  type EstadoSolicitud,
+  type TipoSolicitud,
+} from './types.js';
 
 // Importación del histórico que hasta ahora solo vivía en las cuatro pestañas de
 // la hoja `consulta_vacaciones`.
@@ -130,6 +140,81 @@ export function validarEdicionSolicitud(body: unknown): {
     estado,
     comentarios: texto(b.comentarios),
     observaciones: texto(b.observaciones),
+  };
+}
+
+/** Tope del motivo de una modificación. El mismo `MAX_MOTIVO_MODIFICACION` que
+ *  aplica al pedirla: corregirla a mano no puede colar un texto que el camino
+ *  normal habría rechazado. */
+const MAX_MOTIVO_CORRECCION = 2000;
+
+/**
+ * Valida la corrección a mano de una fila del registro de movimientos.
+ *
+ * `clase` NO viene del cuerpo sino de la fila que ya está en la base, y por eso
+ * es un parámetro: es lo que decide qué campos son obligatorios y cuáles tienen
+ * que ir a NULL. Dejar que la mandara el cliente permitiría pedir una corrección
+ * «de clase fechas» sobre una anulación y estrellarse contra el CHECK
+ * `modificaciones_campos_por_clase` con un 500 en vez de un 400.
+ *
+ * En una ANULACIÓN los tres campos de fechas se fuerzan a `null` sin mirar lo
+ * que llegue. No es indulgencia con un cuerpo mal formado: el CHECK de la 024 no
+ * admite otra cosa, así que lo único que puede hacer aquí un valor es reventar
+ * la escritura, y rechazarlo con un 400 obligaría al cliente a saber una regla
+ * de la base de datos para poder editar un motivo.
+ */
+export function validarCorreccionModificacion(
+  body: unknown,
+  clase: ClaseModificacion,
+): {
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: EstadoModificacion;
+} {
+  const b = (body ?? {}) as Record<string, unknown>;
+
+  // La lista sale de `types.ts` y no se reescribe aquí, por lo mismo que en
+  // `validarEdicionSolicitud`: una copia dejó fuera en su día un estado legítimo
+  // y nadie pudo corregir a mano las filas atascadas en él.
+  const estado = b.estado as EstadoModificacion;
+  if (!(ESTADOS_MODIFICACION as readonly string[]).includes(estado)) {
+    throw new AusenciaError('estado_invalido', 400, 'estado');
+  }
+
+  const motivoBruto = typeof b.motivo === 'string' ? b.motivo.trim() : '';
+  if (motivoBruto.length > MAX_MOTIVO_CORRECCION) {
+    throw new AusenciaError('motivo_demasiado_largo', 400, 'motivo');
+  }
+  const motivo = motivoBruto || null;
+
+  if (clase === 'anulacion') {
+    return { fechaInicioNueva: null, fechaFinNueva: null, diasHabilesNuevos: null, motivo, estado };
+  }
+
+  const fechaInicioNueva = String(b.fechaInicioNueva ?? '');
+  const fechaFinNueva = String(b.fechaFinNueva ?? '');
+  if (!esFechaValida(fechaInicioNueva)) throw new AusenciaError('fecha_invalida', 400, 'fechaInicioNueva');
+  if (!esFechaValida(fechaFinNueva)) throw new AusenciaError('fecha_invalida', 400, 'fechaFinNueva');
+  // El mismo orden que exige el CHECK `modificaciones_rango_valido`. Sin esto la
+  // base lo rechazaría igual, pero con un 500 en vez de un 400 con su campo.
+  if (fechaInicioNueva > fechaFinNueva) throw new AusenciaError('rango_invertido', 400, 'fechaFinNueva');
+
+  const dias = Number(b.diasHabilesNuevos);
+  if (!Number.isFinite(dias) || dias < 0 || dias > MAX_DIAS) {
+    throw new AusenciaError('dias_invalidos', 400, 'diasHabilesNuevos');
+  }
+
+  return {
+    fechaInicioNueva,
+    fechaFinNueva,
+    // Un decimal, como la columna NUMERIC(4,1), y por el mismo motivo que en
+    // `validarEdicionSolicitud`: sin redondear aquí, Postgres lo haría por
+    // detrás y el valor guardado no sería el que se tecleó.
+    diasHabilesNuevos: Math.round(dias * 10) / 10,
+    motivo,
+    estado,
   };
 }
 

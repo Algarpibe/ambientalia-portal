@@ -152,6 +152,23 @@ const estado = {
    */
   adminsDelPortal: [] as string[],
   /**
+   * Las fichas que el CALENDARIO puede pintar. Lista propia y no
+   * `estado.plantilla`, porque aquella nace esparciendo `estado.empleado` y sus
+   * dos filas comparten correo — inservible para probar un recorte que compara
+   * justo por correo.
+   */
+  fichasDelCalendario: [] as { id: string; nombreCompleto: string; correo: string }[],
+  /**
+   * El `soloDe` con el que el servicio llamo a las dos consultas del
+   * calendario, una entrada por llamada.
+   *
+   * Misma razon que `soloDeDeMovimientos`: es una LISTA para poder afirmar a la
+   * vez el valor (el correo de la sesion o `null`) y que hubo llamada. Y son dos
+   * entradas por peticion a proposito — las dos consultas tienen que recibir el
+   * MISMO alcance, y una lista lo deja a la vista.
+   */
+  soloDeDelCalendario: [] as (string | null)[],
+  /**
    * El `soloDe` con el que el servicio llamó a `repo.movimientos`, una entrada
    * por llamada.
    *
@@ -491,6 +508,11 @@ vi.mock('./repo.js', async () => ({
   // misma regla, y tampoco cerraría ese hueco: este doble sigue sin base de
   // datos real contra la que ejecutarlo.
   ramaDeDosNiveles: () => `$1::text IS NULL`,
+  // Igual que el de arriba: existe SOLO para que el CANDADO de la superficie
+  // compare superficies iguales. Ninguna funcion de este doble lo llama —los
+  // dobles de `empleadosActivos` y `ausenciasEntre` filtran en JavaScript, no
+  // ejecutan SQL—, asi que lo que devuelva no lo lee nadie.
+  alcanceDelCalendario: () => `$1::text IS NULL`,
   // ⚠️ El filtro por tipo tiene que seguir a la consulta real. El CANDADO de la
   // superficie de abajo compara NOMBRES de export, así que caza un renombre pero
   // no esto: si el repo ampliara los tipos y este doble se quedara en
@@ -850,6 +872,64 @@ vi.mock('./repo.js', async () => ({
   },
   modificacionPorId: async (_db: unknown, id: string) => estado.modificaciones.find((m) => m.id === id) ?? null,
   /**
+   * La correccion a mano de un admin. Escribe SOLO los cinco campos que el
+   * UPDATE real toca, y eso es lo que este doble aporta: si alguien le anadiera
+   * `decidida_at` o `clase` a la consulta de verdad, aqui no aparecerian y los
+   * candados de «no toca el testigo» seguirian en verde por casualidad. Por eso
+   * no es un `Object.assign(m, campos)`.
+   *
+   * NO toca la solicitud, como el repo real: cambiar el estado de una anulacion
+   * no la desanula. Es la mitad del contrato que un `assign` generico habria
+   * dejado sin modelar.
+   */
+  corregirModificacion: async (
+    _db: unknown,
+    id: string,
+    campos: {
+      fechaInicioNueva: string | null;
+      fechaFinNueva: string | null;
+      diasHabilesNuevos: number | null;
+      motivo: string | null;
+      estado: string;
+    },
+  ) => {
+    const m = estado.modificaciones.find((x) => x.id === id);
+    if (!m) return null;
+    m.fechaInicioNueva = campos.fechaInicioNueva;
+    m.fechaFinNueva = campos.fechaFinNueva;
+    m.diasHabilesNuevos = campos.diasHabilesNuevos;
+    m.motivo = campos.motivo;
+    m.estado = campos.estado;
+    return m;
+  },
+  /**
+   * Borra SOLO la fila del movimiento. La solicitud y sus demas movimientos se
+   * quedan: es la diferencia con `borrarSolicitud`, que arrastra los suyos por
+   * el ON DELETE CASCADE de la 024, y modelarla es lo que hace que el candado
+   * de «no se lleva la solicitud por delante» pruebe algo.
+   *
+   * Devuelve la fila LEIDA ANTES de borrar, igual que el repo real: quien llama
+   * la necesita para el log, y despues ya no hay a quien preguntarsela.
+   */
+  borrarModificacion: async (_db: unknown, id: string) => {
+    const i = estado.modificaciones.findIndex((x) => x.id === id);
+    if (i === -1) return null;
+    const [borrada] = estado.modificaciones.splice(i, 1);
+    // Si era la propuesta VIVA, deja de colgar del LEFT JOIN de la solicitud: la
+    // fila ya no existe. Se mira el estado y no el id de `modificacionPendiente`
+    // porque como mucho hay una viva por solicitud —lo garantiza el indice unico
+    // parcial de la 024—, asi que borrar una pendiente solo puede ser esa.
+    //
+    // El registro NO ofrece este boton sobre una pendiente (solo lista las
+    // cerradas), pero el DELETE del repo acepta cualquier id y el doble tiene
+    // que modelar el repo, no la pantalla.
+    if (borrada.estado === 'pendiente') {
+      const s = estado.solicitudes.find((x) => x.id === borrada.solicitudId);
+      if (s) s.modificacionPendiente = null;
+    }
+    return borrada;
+  },
+  /**
    * Modela la transacción entera de `repo.decidirModificacion`, y el ORDEN
    * importa tanto como el resultado:
    *
@@ -1009,14 +1089,37 @@ vi.mock('./repo.js', async () => ({
     }
     return n;
   },
-  // Los dos modelan el `($N::uuid IS NULL OR ...)` del SQL: null = sin acotar.
-  empleadosActivos: async (_db: unknown, soloEmpleadoId: string | null) =>
-    [
-      { id: 'e1', nombreCompleto: 'Ana Ruiz' },
-      { id: 'e2', nombreCompleto: 'Beto Díaz' },
-    ].filter((e) => soloEmpleadoId === null || e.id === soloEmpleadoId),
-  ausenciasEntre: async (_db: unknown, _desde: string, _hasta: string, soloEmpleadoId: string | null) =>
-    [
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y SOLO A MEDIAS.
+  //
+  // Las dos consultas del calendario comparten `alcanceDelCalendario()`, que es
+  // «mi rama de dos niveles O yo mismo». Este doble modela UNICAMENTE el «o yo
+  // mismo» y el «null = sin acotar»; el nivel de la RAMA no tiene aqui ninguna
+  // replica, igual que pasa con `empleadosConSaldo` mas arriba y por el mismo
+  // motivo: reproducirlo seria abrir una tercera copia de la regla, y tampoco
+  // cerraria el hueco, porque este fichero no tiene base de datos contra la que
+  // ejecutarla.
+  //
+  // Lo que SI se puede fijar desde aqui, y es lo que rompe un guard mal puesto,
+  // es el ARGUMENTO: por eso las dos lo apuntan en `estado.soloDeDelCalendario`.
+  // El recorte de verdad lo ejecuta contra Postgres `repo.calendario.db.test.ts`
+  // > «el alcance del calendario: la plantilla, mi rama y yo».
+  empleadosActivos: async (_db: unknown, soloDe: string | null) => {
+    estado.soloDeDelCalendario.push(soloDe);
+    // Proyecta a `EmpleadoActivo` —id y nombre— y NO devuelve el correo: el
+    // SELECT real tampoco lo trae, y colarlo aqui dejaria pasar un dia el envio
+    // al navegador de un dato que la rejilla no necesita.
+    return estado.fichasDelCalendario
+      .filter((e) => soloDe === null || e.correo.toLowerCase() === soloDe.toLowerCase())
+      .map((e) => ({ id: e.id, nombreCompleto: e.nombreCompleto }));
+  },
+  ausenciasEntre: async (_db: unknown, soloDe: string | null, _desde: string, _hasta: string) => {
+    estado.soloDeDelCalendario.push(soloDe);
+    const visibles = new Set(
+      estado.fichasDelCalendario
+        .filter((e) => soloDe === null || e.correo.toLowerCase() === soloDe.toLowerCase())
+        .map((e) => e.id),
+    );
+    return [
       {
         empleadoId: 'e1',
         tipo: 'vacaciones',
@@ -1031,7 +1134,8 @@ vi.mock('./repo.js', async () => ({
         fechaInicio: '2026-08-11',
         fechaFin: '2026-08-11',
       },
-    ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
+    ].filter((a) => visibles.has(a.empleadoId));
+  },
   // El predicado vive en `buscarSolape`, arriba, con su aviso de REGLA DE SQL
   // REIMPLEMENTADA: aqui solo queda la guarda del `::uuid`, que es de esta
   // funcion y no de la regla —`decidirModificacion` no la necesita, porque el id
@@ -1250,6 +1354,13 @@ beforeEach(() => {
   estado.registroExportadores = [];
   estado.registroVisoresEmpresa = [];
   estado.adminsDelPortal = [];
+  // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
+  // veo a mi» de «los veo a todos» en un recorte que compara por correo.
+  estado.fichasDelCalendario = [
+    { id: 'e1', nombreCompleto: 'Ana Ruiz', correo: 'ana.ruiz@ambientalia.com.co' },
+    { id: 'e2', nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co' },
+  ];
+  estado.soloDeDelCalendario = [];
   estado.soloDeDeMovimientos = [];
 });
 
@@ -3409,9 +3520,13 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.marcas).toHaveLength(4);
   });
 
-  it('quien no es admin solo se ve a sí mismo', async () => {
+  it('quien no es admin recibe su alcance acotado, y las marcas ajenas NO viajan', async () => {
     // El recorte lo hace el SQL: las marcas ajenas no llegan al navegador, no es
     // que no se pinten. Si viajaran, estarían expuestas igual.
+    //
+    // El doble solo modela el escalón «yo mismo» del alcance (ver su aviso de
+    // REGLA DE SQL REIMPLEMENTADA), así que aquí Ana sale sola. Que un jefe se
+    // lleve además su rama lo ejecuta contra Postgres `repo.calendario.db.test.ts`.
     const r = await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token()}`)
@@ -3421,12 +3536,39 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.marcas.every((m: { empleadoId: string }) => m.empleadoId === 'e1')).toBe(true);
   });
 
-  it('un aprobador tampoco ve a su equipo: solo admin ve a los demás', async () => {
-    const r = await request(app())
-      .get('/api/ausencias/calendario?mes=2026-08')
+  it('CANDADO: el alcance sale de la SESIÓN, y las dos consultas reciben el MISMO', async () => {
+    // Los dos candados que este fichero sí puede sostener sobre el alcance.
+    //
+    // El primero: el correo con el que se acota es el `sub` del token y nada
+    // más. Se mandan por la URL, por el cuerpo y por una cabecera los nombres
+    // que tendría el parámetro si alguien lo cableara a `req`, incluido un
+    // intento de vaciarlo para quedarse con la compañía entera.
+    //
+    // El segundo, y es el que justifica que `soloDeDelCalendario` sea una lista:
+    // `empleadosActivos` y `ausenciasEntre` comparten el fragmento del alcance,
+    // así que tienen que recibir EL MISMO valor. Si divergieran no fallaría
+    // nada —saldría una persona sin marcas, o marcas sin fila que nadie pinta—,
+    // y ninguna aserción de contenido lo notaría.
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08&soloDe=&todos=1')
       .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .set('X-Solo-De', 'otro.jefe@ambientalia.com.co')
+      .send({ soloDe: null, esAdmin: true, role: 'admin' })
       .expect(200);
-    expect(r.body.empleados).toHaveLength(1);
+    expect(estado.soloDeDelCalendario).toEqual([
+      'comercial@ambientalia.com.co',
+      'comercial@ambientalia.com.co',
+    ]);
+  });
+
+  it('a un admin se le pasa `null` en las dos: la plantilla entera', async () => {
+    // La pareja del anterior. `null` significa «sin acotar» en las dos
+    // consultas, así que este es el único caso en que puede aparecer.
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(estado.soloDeDelCalendario).toEqual([null, null]);
   });
 
   it('un visor de toda la empresa ve la plantilla entera sin ser admin', async () => {
@@ -3460,17 +3602,31 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.empleados).toEqual([{ id: 'e1', nombreCompleto: 'Ana Ruiz' }]);
   });
 
-  it('sin ficha de empleado devuelve una rejilla vacía, no la plantilla entera', async () => {
-    // El fallo que evita: `null` significa «sin acotar» en el repo, así que caer
-    // en esa rama por no tener ficha enseñaría justo lo contrario de lo que toca.
-    estado.empleado = null;
-    estado.usuarioEnPortal = false;
+  it('CANDADO: quien no casa con ninguna ficha recibe la rejilla VACÍA, no la plantilla entera', async () => {
+    // El fallo que evita: `null` significa «sin acotar» en las dos consultas,
+    // así que confundir «no encontrado» con «sin filtro» entregaría la compañía
+    // entera a quien no debería ver ni su propia fila.
+    //
+    // Antes esto se montaba dejando `estado.empleado = null`, porque el servicio
+    // resolvía la ficha con `empleadoDeUsuario` y caía a un uuid centinela. Ya no
+    // la resuelve: acota por el correo de la sesión directamente, así que la
+    // forma de expresar «no tengo ficha» es que ninguna lleve mi correo.
+    estado.fichasDelCalendario = [
+      { id: 'e2', nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co' },
+    ];
     const r = await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token()}`)
       .expect(200);
     expect(r.body.empleados).toEqual([]);
     expect(r.body.marcas).toEqual([]);
+    // Y sobre todo: se acotó, no se pidió todo. Sin esto, un `?? null` mal
+    // puesto daría una rejilla vacía por casualidad del fixture y no por el
+    // recorte.
+    expect(estado.soloDeDelCalendario).toEqual([
+      'ana.ruiz@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co',
+    ]);
   });
 
   it('400 si el mes viene mal formado', async () => {
@@ -5260,5 +5416,255 @@ describe('otorgar compensatorios', () => {
   it('400 si el trabajo cae fuera de la ventana de tres meses, por delante o por detras', async () => {
     await pedir(otorgamiento({ fechaInicio: '2024-06-01', fechaFin: '2024-06-01' })).expect(400);
     await pedir(otorgamiento({ fechaInicio: '2026-02-01', fechaFin: '2026-02-01' })).expect(400);
+  });
+});
+
+// ── Corregir y borrar un MOVIMIENTO del registro ───────────────────────────
+//
+// Las dos rutas que abrieron a un admin las filas que hasta el 2026-08-21 eran
+// intocables: una anulacion o un cambio de fechas ya cerrados.
+//
+// ⚠️ Lo que estos candados vigilan por encima de todo es que corregir el ASIENTO
+// no toque la SOLICITUD. Es la confusion que la feature invita a cometer: pasar
+// una anulacion de `aprobada` a `rechazada` NO desanula nada, y el dia que
+// alguien le anada aqui ese efecto lateral creyendo que arregla una
+// incoherencia, estos tests son lo unico que se pondra rojo.
+
+describe('PATCH y DELETE /ausencias/modificaciones/:id', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+
+  beforeEach(() => {
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '99999999-9999-4999-8999-999999999999',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 901,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: false,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+  });
+
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+  const mod = (id: string) => estado.modificaciones.find((m) => m.id === id) as ModificacionFalsa;
+
+  /**
+   * Una solicitud aprobada con una modificacion YA DECIDIDA colgando: el estado
+   * exacto en el que el registro la ensena como fila propia.
+   *
+   * La decide la jefa por la bandeja en vez de forzar el estado a mano: asi la
+   * fila de partida es la que produce produccion, con su `decididaAt` y su
+   * decisor puestos, que es justo lo que estos candados afirman que NO se mueve.
+   */
+  async function conMovimientoCerrado(cuerpo: Record<string, unknown>, aprueba = true) {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    fila(s.id as string).estado = 'aprobada';
+
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(cuerpo)
+        .expect(201)
+    ).body as Record<string, unknown>;
+
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${m.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba })
+      .expect(200);
+
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const ANULACION = { clase: 'anulacion', motivo: 'Me la piden en el trabajo' };
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-15', motivo: 'Cita medica' };
+
+  const corregir = (id: string, body: Record<string, unknown>, tok = token({ role: 'admin' })) =>
+    request(app()).patch(`/api/ausencias/modificaciones/${id}`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  const borrar = (id: string, tok = token({ role: 'admin' })) =>
+    request(app()).delete(`/api/ausencias/modificaciones/${id}`).set('Authorization', `Bearer ${tok}`);
+
+  // ── Corregir ─────────────────────────────────────────────────────────────
+
+  it('un admin corrige el motivo y el estado de una anulacion', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await corregir(modificacionId, { estado: 'rechazada', motivo: 'Motivo corregido' }).expect(200);
+    expect(r.body).toMatchObject({ id: modificacionId, estado: 'rechazada', motivo: 'Motivo corregido' });
+  });
+
+  it('CANDADO: corregir la anulacion NO desanula la solicitud', async () => {
+    // El candado central de esta feature. Aprobar la anulacion dejo la solicitud
+    // `rechazada` con su `anuladaAt`; pasar el ASIENTO a `rechazada` no revierte
+    // ninguna de las dos cosas, porque eso ya ocurrio. Si alguien le anade aqui
+    // un efecto sobre la solicitud, este test es lo que se pone rojo.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...fila(solicitudId) };
+
+    await corregir(modificacionId, { estado: 'rechazada', motivo: null }).expect(200);
+
+    expect(fila(solicitudId).estado).toBe(antes.estado);
+    expect(fila(solicitudId).anuladaAt).toBe(antes.anuladaAt);
+    expect(fila(solicitudId).anuladaAt).not.toBeNull();
+  });
+
+  it('CANDADO: corregir las fechas del asiento NO reescribe las de la solicitud', async () => {
+    // La pareja del anterior para la otra clase. Aprobar el cambio movio las
+    // fechas de la solicitud al 13-15; corregir el asiento al 20-21 deja la
+    // solicitud donde estaba. Quien quiera moverla de verdad tiene el boton de
+    // editar de SU fila, que es otro endpoint.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(CAMBIO);
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15' });
+
+    await corregir(modificacionId, {
+      estado: 'aprobada',
+      motivo: 'Cita medica',
+      fechaInicioNueva: '2026-07-20',
+      fechaFinNueva: '2026-07-21',
+      diasHabilesNuevos: 2,
+    }).expect(200);
+
+    expect(mod(modificacionId)).toMatchObject({ fechaInicioNueva: '2026-07-20', diasHabilesNuevos: 2 });
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15', diasHabiles: 3 });
+  });
+
+  it('CANDADO: no toca el testigo de QUIEN decidio ni CUANDO', async () => {
+    // Corregir lo que se decidio es arreglar un dato; corregir quien lo decidio
+    // es falsificarlo. El UPDATE real no lleva esas columnas y el doble solo
+    // escribe las cinco que lleva, asi que anadirselas alla pondria esto rojo.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...mod(modificacionId) };
+
+    await corregir(modificacionId, {
+      estado: 'retirada',
+      motivo: 'otro',
+      // Se cuelan a proposito en el cuerpo: si el validador los dejara pasar al
+      // repo, aqui se veria.
+      decididaAt: '2020-01-01T00:00:00Z',
+      aprobadorCorreo: 'quien.no.fue@ambientalia.com.co',
+      clase: 'fechas',
+      solicitudId: 'otra',
+    }).expect(200);
+
+    expect(mod(modificacionId).decididaAt).toBe(antes.decididaAt);
+    expect(mod(modificacionId).aprobadorCorreo).toBe(antes.aprobadorCorreo);
+    expect(mod(modificacionId).clase).toBe(antes.clase);
+    expect(mod(modificacionId).solicitudId).toBe(antes.solicitudId);
+  });
+
+  it('CANDADO: en una anulacion las fechas nuevas se fuerzan a null, vengan como vengan', async () => {
+    // El CHECK `modificaciones_campos_por_clase` de la 024 no admite otra cosa,
+    // asi que dejarlas pasar solo podria reventar la escritura con un 500. La
+    // clase se lee de la BD y no del cuerpo justamente para poder decidir esto
+    // sin fiarse de quien llama.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await corregir(modificacionId, {
+      estado: 'aprobada',
+      motivo: null,
+      fechaInicioNueva: '2026-07-20',
+      fechaFinNueva: '2026-07-21',
+      diasHabilesNuevos: 2,
+    }).expect(200);
+
+    expect(mod(modificacionId).fechaInicioNueva).toBeNull();
+    expect(mod(modificacionId).fechaFinNueva).toBeNull();
+    expect(mod(modificacionId).diasHabilesNuevos).toBeNull();
+  });
+
+  it('CANDADO: 403 a quien no es admin, y el asiento no se mueve', async () => {
+    // Incluida la jefa que la decidio: haberla firmado no da derecho a
+    // reescribir el registro despues.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...mod(modificacionId) };
+
+    await corregir(modificacionId, { estado: 'rechazada' }, token()).expect(403);
+    await corregir(modificacionId, { estado: 'rechazada' }, token({ sub: JEFA })).expect(403);
+
+    expect(mod(modificacionId).estado).toBe(antes.estado);
+    expect(mod(modificacionId).motivo).toBe(antes.motivo);
+  });
+
+  it('400 si el estado no es uno de los cuatro, y el asiento no se mueve', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await corregir(modificacionId, { estado: 'inventado', motivo: 'x' }).expect(400);
+    expect(r.body.error).toBe('estado_invalido');
+    expect(r.body.field).toBe('estado');
+    expect(mod(modificacionId).estado).toBe('aprobada');
+  });
+
+  it('400 si un cambio de fechas llega sin fechas o con el rango invertido', async () => {
+    // Estos NO se fuerzan como en la anulacion: en un `fechas` el CHECK los
+    // exige NOT NULL, asi que rechazar es lo unico honesto.
+    const { modificacionId } = await conMovimientoCerrado(CAMBIO);
+    const sinFechas = await corregir(modificacionId, { estado: 'aprobada' }).expect(400);
+    expect(sinFechas.body.field).toBe('fechaInicioNueva');
+
+    const invertido = await corregir(modificacionId, {
+      estado: 'aprobada',
+      fechaInicioNueva: '2026-07-21',
+      fechaFinNueva: '2026-07-20',
+      diasHabilesNuevos: 1,
+    }).expect(400);
+    expect(invertido.body.error).toBe('rango_invertido');
+    expect(invertido.body.field).toBe('fechaFinNueva');
+  });
+
+  it('404 si el movimiento no existe, y sin llegar a mirar el cuerpo', async () => {
+    // El 404 va ANTES del validador porque la clase se lee de la fila: sin fila
+    // no hay clase con la que decidir que campos exigir. Un cuerpo vacio lo
+    // demuestra — si validara primero, esto seria un 400.
+    await corregir('44444444-4444-4444-8444-444444444444', {}).expect(404);
+  });
+
+  // ── Borrar ───────────────────────────────────────────────────────────────
+
+  it('un admin borra el asiento, y la SOLICITUD se queda', async () => {
+    // La diferencia con borrar la solicitud, que arrastra sus movimientos por el
+    // ON DELETE CASCADE de la 024. Aqui se va una fila y solo una.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await borrar(modificacionId).expect(200);
+
+    expect(r.body).toMatchObject({ ok: true, borrada: { id: modificacionId, clase: 'anulacion' } });
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeUndefined();
+    expect(fila(solicitudId)).toBeDefined();
+  });
+
+  it('CANDADO: borrar la anulacion NO devuelve la solicitud a la vida', async () => {
+    // Lo que hace que esto sea de admin y quede en el log: la solicitud sigue
+    // anulada y ya no queda nada en el registro que explique por que.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...fila(solicitudId) };
+
+    await borrar(modificacionId).expect(200);
+
+    expect(fila(solicitudId).estado).toBe(antes.estado);
+    expect(fila(solicitudId).anuladaAt).toBe(antes.anuladaAt);
+  });
+
+  it('CANDADO: 403 a quien no es admin, y el asiento sigue ahi', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await borrar(modificacionId, token()).expect(403);
+    await borrar(modificacionId, token({ sub: JEFA })).expect(403);
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
+  });
+
+  it('404 si el movimiento no existe', async () => {
+    await borrar('44444444-4444-4444-8444-444444444444').expect(404);
+  });
+
+  it('401 sin token, y sin borrar nada', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await request(app()).delete(`/api/ausencias/modificaciones/${modificacionId}`).expect(401);
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
   });
 });

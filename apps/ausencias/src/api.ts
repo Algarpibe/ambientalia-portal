@@ -547,13 +547,22 @@ async function conCuerpo<T>(
 
 const post = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body);
 const put = <T,>(path: string, body: unknown) => conCuerpo<T>('PUT', path, body);
+/**
+ * `PATCH` sin el decodificador de solapes. Lo usa la corrección de un MOVIMIENTO
+ * del registro, que no puede contestar `rango_solapado`: una modificación cerrada
+ * no ocupa agenda —lo que la ocupa es la solicitud—, así que corregir sus fechas
+ * no choca con nada. Darle `patchSolapable` insinuaría una quinta puerta del
+ * solapamiento que no existe.
+ */
+const patch = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body);
 
 /**
  * Los verbos de las CUATRO puertas del solapamiento —el alta, pedir un cambio de
  * fechas, firmarlo y el `PATCH` del registro—, que son las cuatro que pueden
  * contestar `rango_solapado`. El resto de endpoints sigue con `post`/`put`.
  *
- * `patch` a secas ya no existe: el `PATCH` del registro era su único usuario.
+ * `patch` a secas volvió a existir arriba, para la corrección de un movimiento:
+ * ese `PATCH` no es una de las cuatro puertas y no puede dar `rango_solapado`.
  */
 const postSolapable = <T,>(path: string, body: unknown) => conCuerpo<T>('POST', path, body, errorDeAusencia);
 const patchSolapable = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body, errorDeAusencia);
@@ -862,6 +871,47 @@ export const editarSolicitud = (id: string, campos: EdicionSolicitud) =>
 /** Borra una solicitud del registro (solo admin). Es irreversible. */
 export async function borrarSolicitud(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/ausencias/solicitudes/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+}
+
+/**
+ * Los campos de un MOVIMIENTO —una anulación o un cambio de fechas ya cerrado—
+ * que un admin puede corregir desde el registro.
+ *
+ * Los tres de fechas son opcionales porque en una anulación no existen: un CHECK
+ * de la BD los obliga a ir NULL. El servidor lee la clase de la fila y los
+ * ignora en ese caso, así que mandarlos no rompe nada — pero omitirlos es lo que
+ * dice la verdad sobre lo que se está guardando.
+ */
+export interface CorreccionModificacion {
+  estado: EstadoModificacion;
+  motivo: string | null;
+  fechaInicioNueva?: string;
+  fechaFinNueva?: string;
+  diasHabilesNuevos?: number;
+}
+
+/**
+ * Corrige un movimiento del registro (solo admin).
+ *
+ * ⚠️ Corrige el ASIENTO, no la solicitud: pasar una anulación de `aprobada` a
+ * `rechazada` NO la desanula. La solicitud tiene su propia fila y su propio
+ * `editarSolicitud`.
+ */
+export const corregirModificacion = (id: string, campos: CorreccionModificacion) =>
+  patch<Modificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}`, campos);
+
+/**
+ * Borra un movimiento del registro (solo admin). Es irreversible.
+ *
+ * No toca la solicitud ni deshace lo que ese movimiento hizo: borrar la
+ * anulación que dejó unas vacaciones anuladas las deja anuladas.
+ */
+export async function borrarModificacion(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/ausencias/modificaciones/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

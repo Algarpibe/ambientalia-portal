@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { ausenciasEntre } from './repo.js';
+import { ausenciasEntre, empleadosActivos } from './repo.js';
 import type { AusenciaRango } from './calendario.js';
 import type { Solicitud, TipoSolicitud } from './types.js';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
@@ -82,7 +82,7 @@ describe('ausenciasEntre: el solape contra Postgres real', () => {
     await sembrar(empleadoId, CORREO, '2026-06-01', '2026-06-30');
     await sembrar(empleadoId, CORREO, '2026-08-10', '2026-08-20');
 
-    expect(rangos(await ausenciasEntre(db, JULIO.desde, JULIO.hasta, null))).toEqual([
+    expect(rangos(await ausenciasEntre(db, null, JULIO.desde, JULIO.hasta))).toEqual([
       '2026-06-25..2026-07-01',
       '2026-07-10..2026-07-15',
       '2026-07-28..2026-08-03',
@@ -92,7 +92,7 @@ describe('ausenciasEntre: el solape contra Postgres real', () => {
     // Las mismas dos que cruzan, vistas desde el otro lado del cambio de mes:
     // una ausencia a caballo entre julio y agosto pertenece a los DOS meses, no
     // al de su fecha de inicio.
-    expect(rangos(await ausenciasEntre(db, AGOSTO.desde, AGOSTO.hasta, null))).toEqual([
+    expect(rangos(await ausenciasEntre(db, null, AGOSTO.desde, AGOSTO.hasta))).toEqual([
       '2026-07-28..2026-08-03',
       '2026-07-31..2026-08-04',
       '2026-08-10..2026-08-20',
@@ -132,7 +132,7 @@ describe('ausenciasEntre: que estados se pintan', () => {
       anulada.id,
     ]);
 
-    const salen = await ausenciasEntre(db, JULIO.desde, JULIO.hasta, null);
+    const salen = await ausenciasEntre(db, null, JULIO.desde, JULIO.hasta);
 
     // Los cinco estados estan sembrados y las dos rechazadas se distinguen por
     // su fecha, asi que esta lista dice a la vez cuales entran y cuales no.
@@ -165,30 +165,120 @@ describe('ausenciasEntre: las fichas dadas de baja', () => {
     // la ficha en el momento de pintar, no que el alta rechace a quien no esta.
     await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [deBaja]);
 
-    const salen = await ausenciasEntre(db, JULIO.desde, JULIO.hasta, null);
+    const salen = await ausenciasEntre(db, null, JULIO.desde, JULIO.hasta);
     expect(rangos(salen)).toEqual(['2026-07-06..2026-07-10']);
     expect(salen.map((x) => x.empleadoId)).toEqual([activo]);
   });
 });
 
-describe('ausenciasEntre: el calendario de todos y el mio', () => {
-  it('CANDADO: con `soloEmpleadoId` sale una sola persona; con null, la plantilla entera', async () => {
-    // Es la diferencia entre lo que ve un admin y lo que ve quien no lo es. El
-    // servicio nunca pasa null por descuido: a quien no es admin le pasa su
-    // ficha, o un uuid inexistente si todavia no tiene ninguna.
-    const ana = await sembrarEmpleado(db, CORREO);
-    const luis = await sembrarEmpleado(db, OTRO_CORREO);
+describe('el alcance del calendario: la plantilla, mi rama y yo', () => {
+  // Los tres escalones que decide `alcanceDelCalendario()`, contra Postgres.
+  //
+  // ⚠️ Cada caso afirma las DOS consultas —`empleadosActivos`, que pone las
+  // FILAS, y `ausenciasEntre`, que pone las MARCAS— porque comparten el
+  // fragmento y tienen que decir exactamente lo mismo. Si divergieran no
+  // fallaria nada: saldria una persona sin marcas, o marcas colgando de alguien
+  // que no tiene fila y que por tanto no se pintan. Probar solo una dejaria esa
+  // divergencia en verde, que es justo por lo que el fragmento se extrajo.
 
-    await sembrar(ana, CORREO, '2026-07-06', '2026-07-10');
-    await sembrar(luis, OTRO_CORREO, '2026-07-13', '2026-07-17');
+  /** Una jerarquia de tres niveles: JEFA → MANDO → BASE, y AJENA fuera. */
+  const JEFA = 'jefa@ambientalia.com.co';
+  const MANDO = 'mando@ambientalia.com.co';
+  const BASE = 'base@ambientalia.com.co';
+  const AJENA = 'ajena@ambientalia.com.co';
 
-    expect(rangos(await ausenciasEntre(db, JULIO.desde, JULIO.hasta, null))).toEqual([
-      '2026-07-06..2026-07-10',
-      '2026-07-13..2026-07-17',
+  async function sembrarJerarquia() {
+    // La jefa cuelga de si misma: asi se declara la raiz del organigrama.
+    const jefa = await sembrarEmpleado(db, JEFA, JEFA);
+    const mando = await sembrarEmpleado(db, MANDO, JEFA);
+    const base = await sembrarEmpleado(db, BASE, MANDO);
+    const ajena = await sembrarEmpleado(db, AJENA, AJENA);
+
+    await sembrar(jefa, JEFA, '2026-07-06', '2026-07-06');
+    await sembrar(mando, MANDO, '2026-07-07', '2026-07-07');
+    await sembrar(base, BASE, '2026-07-08', '2026-07-08');
+    await sembrar(ajena, AJENA, '2026-07-09', '2026-07-09');
+    return { jefa, mando, base, ajena };
+  }
+
+  /** Las dos consultas del calendario para un mismo alcance, ya normalizadas. */
+  async function calendarioDe(soloDe: string | null) {
+    const [filas, marcas] = await Promise.all([
+      empleadosActivos(db, soloDe),
+      ausenciasEntre(db, soloDe, JULIO.desde, JULIO.hasta),
     ]);
+    return {
+      filas: filas.map((f) => f.id).sort(),
+      marcas: [...new Set(marcas.map((m) => m.empleadoId))].sort(),
+    };
+  }
 
-    const soloLuis = await ausenciasEntre(db, JULIO.desde, JULIO.hasta, luis);
-    expect(rangos(soloLuis)).toEqual(['2026-07-13..2026-07-17']);
-    expect(soloLuis.map((x) => x.empleadoId)).toEqual([luis]);
+  it('con null sale la plantilla entera: es lo que ve un admin', async () => {
+    const { jefa, mando, base, ajena } = await sembrarJerarquia();
+    const todo = [jefa, mando, base, ajena].sort();
+    expect(await calendarioDe(null)).toEqual({ filas: todo, marcas: todo });
+  });
+
+  it('CANDADO: un jefe se ve a SI MISMO y a sus dos niveles, y a nadie mas', async () => {
+    // Lo que esta funcion existe para dar: coordinar un equipo exige ver cuando
+    // falta ese equipo. Dos niveles y no un subarbol entero porque es el alcance
+    // de lo que ese jefe FIRMA — la misma regla que el registro de movimientos.
+    const { jefa, mando, base, ajena } = await sembrarJerarquia();
+    const suRama = [jefa, mando, base].sort();
+
+    const visto = await calendarioDe(JEFA);
+    expect(visto).toEqual({ filas: suRama, marcas: suRama });
+    // Dicho por separado, porque es la mitad que importa: el mutante que
+    // convierte esto en `WHERE TRUE` deja la primera asercion casi igual de
+    // verde en una plantilla pequena, y esta no.
+    expect(visto.filas).not.toContain(ajena);
+    expect(visto.marcas).not.toContain(ajena);
+  });
+
+  it('CANDADO: el jefe intermedio ve su rama, NO la de su jefa', async () => {
+    // El recorte mira hacia ABAJO. Si mirara hacia arriba, o si el fragmento
+    // perdiera el `lower(e.aprobador_correo) = lower($1)`, un mando intermedio
+    // se llevaria el calendario de toda la cadena por encima de el.
+    const { mando, base, jefa, ajena } = await sembrarJerarquia();
+    const suRama = [mando, base].sort();
+
+    const visto = await calendarioDe(MANDO);
+    expect(visto).toEqual({ filas: suRama, marcas: suRama });
+    expect(visto.filas).not.toContain(jefa);
+    expect(visto.filas).not.toContain(ajena);
+  });
+
+  it('CANDADO: quien no aprueba a nadie sigue viendo SOLO su propia fila', async () => {
+    // El escalon de abajo, que es el que no cambio. El mutante que muere aqui es
+    // el peor de todos: si el `OR lower(e.correo) = lower($1)` se escribiera mal
+    // y acabara dejando pasar de mas, la rejilla volveria a ensenar a cualquiera
+    // cuando falta cada companero — la decision de producto que se revirtio en
+    // su dia a peticion expresa.
+    const { base } = await sembrarJerarquia();
+    expect(await calendarioDe(BASE)).toEqual({ filas: [base], marcas: [base] });
+  });
+
+  it('CANDADO: un correo que no es de nadie devuelve la rejilla VACIA, no la plantilla', async () => {
+    // Quien no tiene ficha ni aprueba a nadie. Es la rama que antes cubria el
+    // `ID_INEXISTENTE` del servicio y que ahora sostiene el propio SQL: `null`
+    // sigue significando «sin acotar», asi que confundir «no encontrado» con
+    // «sin filtro» aqui entregaria la compania entera.
+    await sembrarJerarquia();
+    expect(await calendarioDe('nadie@ambientalia.com.co')).toEqual({ filas: [], marcas: [] });
+  });
+
+  it('el correo se compara sin distinguir mayusculas, en las dos consultas', async () => {
+    // El correo entra por el `sub` del JWT, que no garantiza la caja.
+    const { jefa, mando, base } = await sembrarJerarquia();
+    const suRama = [jefa, mando, base].sort();
+    expect(await calendarioDe(JEFA.toUpperCase())).toEqual({ filas: suRama, marcas: suRama });
+  });
+
+  it('CANDADO: una ficha de la rama dada de baja desaparece de las DOS consultas', async () => {
+    // `e.activo` vive en las dos, y el alcance no lo sustituye: sin el, un ex
+    // empleado seguiria ocupando una fila del calendario de su antiguo jefe.
+    const { jefa, mando, base } = await sembrarJerarquia();
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [base]);
+    expect(await calendarioDe(JEFA)).toEqual({ filas: [jefa, mando].sort(), marcas: [jefa, mando].sort() });
   });
 });

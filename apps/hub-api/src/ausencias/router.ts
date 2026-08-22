@@ -4,7 +4,7 @@ import { requireAuth, requireApp, requireAdmin, requireCronToken, getPayload } f
 import { captureError } from '../sentry.js';
 import { festivosColombia } from './festivos.js';
 import { contarDiasHabiles } from './dias-habiles.js';
-import { validarEdicionSolicitud } from './historico.js';
+import { validarCorreccionModificacion, validarEdicionSolicitud } from './historico.js';
 import { construirPayloadBorrado, construirPayloadCorreccion } from './notificaciones.js';
 import * as repo from './repo.js';
 import * as service from './service.js';
@@ -559,6 +559,85 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json({ ok: true, borrada });
     } catch (e) {
       sendError(res, e, 'ausencias_borrar_solicitud');
+    }
+  });
+
+  /**
+   * Corrige a mano una fila de MODIFICACIÓN del registro (una anulación o un
+   * cambio de fechas ya cerrado). Solo admin, igual que el `PATCH` de las
+   * solicitudes.
+   *
+   * ⚠️ Corrige el ASIENTO, no la solicitud: pasar aquí una anulación de
+   * `aprobada` a `rechazada` NO desanula nada. La solicitud tiene su propia fila
+   * en el mismo registro y su propio `PATCH`. Ver `repo.corregirModificacion`.
+   *
+   * La `clase` se lee de la BD y no del cuerpo: es lo que decide qué campos son
+   * obligatorios, y dejar que la mandara el cliente convertiría un cuerpo mal
+   * formado en un 500 contra el CHECK de la 024 en vez de un 400.
+   */
+  router.patch('/ausencias/modificaciones/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const actual = await repo.modificacionPorId(db, req.params.id);
+      if (!actual) return void res.status(404).json({ error: 'no_encontrada' });
+
+      const campos = validarCorreccionModificacion(req.body, actual.clase);
+      const corregida = await repo.corregirModificacion(db, req.params.id, campos);
+      // Solo si desapareció entre la lectura y la escritura. El 404 es correcto
+      // igual, y este camino no puede confundirse con «no existía»: ya se sabe
+      // que existía hace un instante.
+      if (!corregida) return void res.status(404).json({ error: 'no_encontrada' });
+
+      console.log(
+        JSON.stringify({
+          event: 'ausencias_modificacion_corregida',
+          timestamp: new Date().toISOString(),
+          adminEmail: sesionDe(req).email,
+          modificacionId: corregida.id,
+          solicitudId: corregida.solicitudId,
+          clase: corregida.clase,
+          // Antes y después del estado: es el campo cuya corrección más cuesta
+          // reconstruir después, porque no deja rastro en ningún otro sitio.
+          estadoAntes: actual.estado,
+          estado: corregida.estado,
+        }),
+      );
+      res.json(corregida);
+    } catch (e) {
+      sendError(res, e, 'ausencias_corregir_modificacion');
+    }
+  });
+
+  /**
+   * Borra una fila de MODIFICACIÓN del registro. Solo admin, e irreversible.
+   *
+   * NO toca la solicitud, ni deshace lo que esa modificación hizo: borrar la
+   * anulación que dejó unas vacaciones anuladas las deja anuladas y sin nada que
+   * explique por qué. Por eso queda constancia de quién lo hizo y de qué era —no
+   * hay tabla de auditoría en este proyecto, pero el log de hub-api se conserva—.
+   *
+   * El camino contrario ya existía y sigue: borrar la SOLICITUD se lleva por
+   * delante sus modificaciones, vía el `ON DELETE CASCADE` de la 024. Esta ruta
+   * es para quitar un asiento suelto sin tocar la solicitud.
+   */
+  router.delete('/ausencias/modificaciones/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const borrada = await repo.borrarModificacion(db, req.params.id);
+      if (!borrada) return void res.status(404).json({ error: 'no_encontrada' });
+      console.log(
+        JSON.stringify({
+          event: 'ausencias_modificacion_borrada',
+          timestamp: new Date().toISOString(),
+          adminEmail: sesionDe(req).email,
+          modificacionId: borrada.id,
+          solicitudId: borrada.solicitudId,
+          clase: borrada.clase,
+          estado: borrada.estado,
+          solicitante: borrada.solicitanteEmail,
+        }),
+      );
+      res.json({ ok: true, borrada });
+    } catch (e) {
+      sendError(res, e, 'ausencias_borrar_modificacion');
     }
   });
 
