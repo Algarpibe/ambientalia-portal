@@ -152,8 +152,21 @@ export default function FormularioSolicitud({
   // `TarjetaSaldo` ya avisa por su cuenta cuando se pasa —«te faltan X días»— y
   // lo sigue haciendo también para un admin: la advertencia es cierta para él,
   // lo único que cambia es que puede seguir adelante.
+  //
+  // La exención se nombra UNA vez y de ahí salen las dos mitades —el botón de
+  // aquí abajo y la última frase de la tarjeta—, porque son la misma regla vista
+  // desde dos sitios. Tenerla escrita dos veces es exactamente cómo se
+  // desviaron: la tarjeta siguió diciendo «puedes enviarla igualmente» a todo el
+  // mundo cuando el `!esAdmin` de esta línea empezó a apagarle el botón a casi
+  // todo el mundo. Un `esAdmin` suelto en el JSX volvería a poder desviarse; el
+  // nombre compartido, no.
+  const sobregiroPermitido = esAdmin;
   const excedeVacaciones =
-    tipo === 'vacaciones' && !esAdmin && saldo?.configurado === true && dias > 0 && dias > pedible(saldo);
+    tipo === 'vacaciones' &&
+    !sobregiroPermitido &&
+    saldo?.configurado === true &&
+    dias > 0 &&
+    dias > pedible(saldo);
 
   // Un otorgamiento tiene otros requisitos: no hay fecha fin que rellenar, pero
   // sí una cantidad y un motivo, los dos obligatorios. Lo que no se comprueba
@@ -369,7 +382,12 @@ export default function FormularioSolicitud({
           hueco de 16px sin nada dentro. */}
       {tipo === 'vacaciones' && saldo && (
         <div className="mb-4 empty:hidden">
-          <TarjetaSaldo saldo={saldo} diasPedidos={rangoInvertido ? 0 : dias} soloSiAvisa />
+          <TarjetaSaldo
+            saldo={saldo}
+            diasPedidos={rangoInvertido ? 0 : dias}
+            cierre={sobregiroPermitido ? 'puede_sobregirarse' : 'no_puede_sobregirarse'}
+            soloSiAvisa
+          />
         </div>
       )}
 
