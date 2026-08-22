@@ -19,7 +19,12 @@ import {
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos, jefeEfectivo } from './jerarquia.js';
-import { construirPayload, construirPayloadModificacion, eventosDeAlta } from './notificaciones.js';
+import {
+  construirPayload,
+  construirPayloadModificacion,
+  eventosDeAlta,
+  type Firmante,
+} from './notificaciones.js';
 import * as repo from './repo.js';
 import {
   calcularSaldo,
@@ -775,6 +780,34 @@ export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<S
   return repo.solicitudesConAdjunto(db);
 }
 
+/**
+ * Quién firma los correos que salen de esta decisión: la persona de la sesión.
+ *
+ * La sesión y NO el `aprobadorCorreo` congelado en la solicitud, y la diferencia
+ * importa en el caso que se da de verdad: un admin destrabando una aprobación
+ * firma con su nombre, porque es quien decidió. Es el mismo criterio que la
+ * columna «Decidida por» del registro, donde ya costó cuatro formas distintas de
+ * atribuirle a alguien un acto que no hizo.
+ *
+ * `null` si no tiene ficha —se es aprobador por figurar en la columna de otro, y
+ * un admin puede no tenerla—, y entonces `firmaDe` cae a la firma de la empresa.
+ *
+ * ⚠️ Si la consulta falla NO se tumba la decisión: la firma es un adorno del
+ * correo y la aprobación es lo que el usuario vino a hacer. Perder la firma es
+ * un correo menos personal; perder la decisión por no poder firmarla sería
+ * cambiar un fallo cosmético por uno de negocio. Mismo criterio que los saldos
+ * en `/ausencias/contexto`.
+ */
+async function firmanteDeSesion(db: Pool, sesion: Sesion): Promise<Firmante | null> {
+  try {
+    const ficha = await repo.empleadoDeUsuario(db, sesion.userId, sesion.email);
+    return ficha ? { nombreCompleto: ficha.nombreCompleto, cargo: ficha.cargo } : null;
+  } catch (e) {
+    console.error('ausencias_firmante error', e);
+    return null;
+  }
+}
+
 export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknown): Promise<Solicitud> {
   const b = (body ?? {}) as Record<string, unknown>;
   if (typeof b.aprueba !== 'boolean') throw new AusenciaError('aprueba_requerido', 400, 'aprueba');
@@ -790,6 +823,7 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
   // para llegar aquí, porque «ya decidida» describe mejor lo ocurrido que un 403.
   if (!transicion) throw new AusenciaError('ya_decidida', 409);
 
+  const firmante = await firmanteDeSesion(db, sesion);
   const actualizada = await repo.decidirSolicitud(
     db,
     id,
@@ -797,7 +831,11 @@ export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknow
     transicion,
     b.aprueba ? null : motivo || null,
     sesion.userId,
-    construirPayload,
+    // Una clausura con el firmante ya dentro, en vez de pasar la función a pelo.
+    // Así el contrato que el repo pide —`(solicitud, evento) => PayloadEvento`—
+    // no cambia y `construirPayload` sigue siendo pura: quien consulta la ficha
+    // es el servicio, que es quien tiene el `Pool` y la sesión.
+    (s, evento) => construirPayload(s, evento, firmante),
   );
   // El UPDATE lleva `AND estado = <el que se leyó>`: si no devolvió fila es que
   // otro (o un doble clic) se adelantó. Es un conflicto, no un fallo del servidor.
@@ -1218,13 +1256,15 @@ export async function decidirModificacion(
   // tercero no tiene ningún derecho a saber si la propuesta ya se decidió.
   if (modificacion.estado !== 'pendiente') throw new AusenciaError('ya_decidida', 409);
 
+  const firmante = await firmanteDeSesion(db, sesion);
   const resultado = await repo.decidirModificacion(
     db,
     id,
     b.aprueba,
     b.aprueba ? null : motivo || null,
     sesion.userId,
-    construirPayloadModificacion,
+    // Clausura con el firmante dentro, por lo mismo que en `decidir`.
+    (s, m, evento) => construirPayloadModificacion(s, m, evento, firmante),
   );
   if (!resultado.ok) {
     // Los tres son 409 y cuentan cosas distintas: `ya_decidida` es el doble clic
