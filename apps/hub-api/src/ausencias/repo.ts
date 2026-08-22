@@ -2204,12 +2204,39 @@ function aEmpleadoActivo(r: FilaEmpleadoActivoDb): EmpleadoActivo {
  * `empleadosConSaldo`—, para que acotar o no acotar sea siempre una decisión
  * escrita en el llamante y no un olvido que enseñe la plantilla entera.
  */
-export async function empleadosActivos(db: Pool, soloEmpleadoId: string | null): Promise<EmpleadoActivo[]> {
+/**
+ * A quién alcanza el calendario de quien pregunta: SU propia fila y la de su
+ * rama de dos niveles. Con el parámetro a NULL no acota nada, que es lo que
+ * necesitan un administrador y quien tenga `ve_toda_la_empresa`.
+ *
+ * Envuelve `ramaDeDosNiveles()` en vez de reescribirla: la definición de «mi
+ * rama» tiene que seguir siendo la MISMA que la del registro de movimientos y
+ * la de los saldos, y una copia divergente no lanza — solo enseña las ausencias
+ * de gente que no es de quien mira. Lo único que añade es el «y yo», que el
+ * recorte por rama no incluye: `aprobador_correo` de uno apunta a su jefe, no a
+ * uno mismo, así que sin este OR un jefe vería el calendario de su equipo y no
+ * el suyo.
+ *
+ * ⚠️ Lo usan DOS consultas —las filas y las marcas— y tienen que decir
+ * exactamente lo mismo. Si discreparan no fallaría nada: saldría una persona sin
+ * marcas, o marcas de alguien que no tiene fila y que por tanto no se pintan.
+ * Por eso está aquí y no copiado en cada una.
+ *
+ * Hereda de `ramaDeDosNiveles` las dos condiciones de uso: `$1` es SIEMPRE el
+ * primer parámetro de la consulta que lo incrusta, y la tabla `portal.empleados`
+ * va aliasada como `e`.
+ */
+export function alcanceDelCalendario(): string {
+  return `(${ramaDeDosNiveles()} OR lower(e.correo) = lower($1))`;
+}
+
+export async function empleadosActivos(db: Pool, soloDe: string | null): Promise<EmpleadoActivo[]> {
   const { rows } = await db.query(
-    `SELECT id, nombre_completo FROM portal.empleados
-      WHERE activo AND ($1::uuid IS NULL OR id = $1::uuid)
-      ORDER BY nombre_completo`,
-    [soloEmpleadoId],
+    // Aliasada como `e` porque lo exige el fragmento que se incrusta debajo.
+    `SELECT e.id, e.nombre_completo FROM portal.empleados e
+      WHERE e.activo AND ${alcanceDelCalendario()}
+      ORDER BY e.nombre_completo`,
+    [soloDe],
   );
   return (rows as FilaEmpleadoActivoDb[]).map(aEmpleadoActivo);
 }
@@ -2241,9 +2268,9 @@ function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
  */
 export async function ausenciasEntre(
   db: Pool,
+  soloDe: string | null,
   desde: string,
   hasta: string,
-  soloEmpleadoId: string | null,
 ): Promise<AusenciaRango[]> {
   const { rows } = await db.query(
     `SELECT s.empleado_id, s.tipo, s.estado,
@@ -2259,15 +2286,25 @@ export async function ausenciasEntre(
         -- calendario del portal no filtra nada por su cuenta: pinta lo que le
         -- llega, ya expandido por dia.
         AND s.tipo <> 'otorgamiento'
-        AND ($3::uuid IS NULL OR s.empleado_id = $3::uuid)
-        AND s.fecha_inicio <= $2::date
-        AND s.fecha_fin    >= $1::date
+        -- El MISMO alcance que empleadosActivos, y por eso compartido: si los
+        -- dos discreparan saldrian marcas de gente sin fila (invisibles) o
+        -- filas sin marcas, y ninguna de las dos cosas falla.
+        --
+        -- Sin comillas invertidas en este comentario a proposito: vive DENTRO
+        -- del template literal de la consulta y una sin escapar lo cierra a
+        -- mitad de frase. Ya paso una vez, en la consulta de movimientos.
+        AND ${alcanceDelCalendario()}
+        AND s.fecha_inicio <= $3::date
+        AND s.fecha_fin    >= $2::date
       -- Determinismo del pintado, no estética: dos ausencias solapadas del
       -- mismo empleado producen dos marcas para el mismo (empleadoId, fecha), y
       -- el frontend arma un Map con esa clave, así que gana la última. Sin este
       -- ORDER BY, cuál de las dos "gana" podría cambiar entre peticiones.
       ORDER BY s.fecha_inicio, s.id`,
-    [desde, hasta, soloEmpleadoId],
+    // `soloDe` como PRIMER parámetro, siempre: es la regla que imponen
+    // `ramaDeDosNiveles` y el fragmento que lo envuelve. Las fechas se corrieron
+    // a $2 y $3 por eso, no por gusto.
+    [soloDe, desde, hasta],
   );
   return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
 }

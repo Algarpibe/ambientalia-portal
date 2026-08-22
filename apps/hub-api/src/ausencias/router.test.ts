@@ -152,6 +152,23 @@ const estado = {
    */
   adminsDelPortal: [] as string[],
   /**
+   * Las fichas que el CALENDARIO puede pintar. Lista propia y no
+   * `estado.plantilla`, porque aquella nace esparciendo `estado.empleado` y sus
+   * dos filas comparten correo — inservible para probar un recorte que compara
+   * justo por correo.
+   */
+  fichasDelCalendario: [] as { id: string; nombreCompleto: string; correo: string }[],
+  /**
+   * El `soloDe` con el que el servicio llamo a las dos consultas del
+   * calendario, una entrada por llamada.
+   *
+   * Misma razon que `soloDeDeMovimientos`: es una LISTA para poder afirmar a la
+   * vez el valor (el correo de la sesion o `null`) y que hubo llamada. Y son dos
+   * entradas por peticion a proposito — las dos consultas tienen que recibir el
+   * MISMO alcance, y una lista lo deja a la vista.
+   */
+  soloDeDelCalendario: [] as (string | null)[],
+  /**
    * El `soloDe` con el que el servicio llamó a `repo.movimientos`, una entrada
    * por llamada.
    *
@@ -491,6 +508,11 @@ vi.mock('./repo.js', async () => ({
   // misma regla, y tampoco cerraría ese hueco: este doble sigue sin base de
   // datos real contra la que ejecutarlo.
   ramaDeDosNiveles: () => `$1::text IS NULL`,
+  // Igual que el de arriba: existe SOLO para que el CANDADO de la superficie
+  // compare superficies iguales. Ninguna funcion de este doble lo llama —los
+  // dobles de `empleadosActivos` y `ausenciasEntre` filtran en JavaScript, no
+  // ejecutan SQL—, asi que lo que devuelva no lo lee nadie.
+  alcanceDelCalendario: () => `$1::text IS NULL`,
   // ⚠️ El filtro por tipo tiene que seguir a la consulta real. El CANDADO de la
   // superficie de abajo compara NOMBRES de export, así que caza un renombre pero
   // no esto: si el repo ampliara los tipos y este doble se quedara en
@@ -1009,14 +1031,37 @@ vi.mock('./repo.js', async () => ({
     }
     return n;
   },
-  // Los dos modelan el `($N::uuid IS NULL OR ...)` del SQL: null = sin acotar.
-  empleadosActivos: async (_db: unknown, soloEmpleadoId: string | null) =>
-    [
-      { id: 'e1', nombreCompleto: 'Ana Ruiz' },
-      { id: 'e2', nombreCompleto: 'Beto Díaz' },
-    ].filter((e) => soloEmpleadoId === null || e.id === soloEmpleadoId),
-  ausenciasEntre: async (_db: unknown, _desde: string, _hasta: string, soloEmpleadoId: string | null) =>
-    [
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI, Y SOLO A MEDIAS.
+  //
+  // Las dos consultas del calendario comparten `alcanceDelCalendario()`, que es
+  // «mi rama de dos niveles O yo mismo». Este doble modela UNICAMENTE el «o yo
+  // mismo» y el «null = sin acotar»; el nivel de la RAMA no tiene aqui ninguna
+  // replica, igual que pasa con `empleadosConSaldo` mas arriba y por el mismo
+  // motivo: reproducirlo seria abrir una tercera copia de la regla, y tampoco
+  // cerraria el hueco, porque este fichero no tiene base de datos contra la que
+  // ejecutarla.
+  //
+  // Lo que SI se puede fijar desde aqui, y es lo que rompe un guard mal puesto,
+  // es el ARGUMENTO: por eso las dos lo apuntan en `estado.soloDeDelCalendario`.
+  // El recorte de verdad lo ejecuta contra Postgres `repo.calendario.db.test.ts`
+  // > «el alcance del calendario: la plantilla, mi rama y yo».
+  empleadosActivos: async (_db: unknown, soloDe: string | null) => {
+    estado.soloDeDelCalendario.push(soloDe);
+    // Proyecta a `EmpleadoActivo` —id y nombre— y NO devuelve el correo: el
+    // SELECT real tampoco lo trae, y colarlo aqui dejaria pasar un dia el envio
+    // al navegador de un dato que la rejilla no necesita.
+    return estado.fichasDelCalendario
+      .filter((e) => soloDe === null || e.correo.toLowerCase() === soloDe.toLowerCase())
+      .map((e) => ({ id: e.id, nombreCompleto: e.nombreCompleto }));
+  },
+  ausenciasEntre: async (_db: unknown, soloDe: string | null, _desde: string, _hasta: string) => {
+    estado.soloDeDelCalendario.push(soloDe);
+    const visibles = new Set(
+      estado.fichasDelCalendario
+        .filter((e) => soloDe === null || e.correo.toLowerCase() === soloDe.toLowerCase())
+        .map((e) => e.id),
+    );
+    return [
       {
         empleadoId: 'e1',
         tipo: 'vacaciones',
@@ -1031,7 +1076,8 @@ vi.mock('./repo.js', async () => ({
         fechaInicio: '2026-08-11',
         fechaFin: '2026-08-11',
       },
-    ].filter((a) => soloEmpleadoId === null || a.empleadoId === soloEmpleadoId),
+    ].filter((a) => visibles.has(a.empleadoId));
+  },
   // El predicado vive en `buscarSolape`, arriba, con su aviso de REGLA DE SQL
   // REIMPLEMENTADA: aqui solo queda la guarda del `::uuid`, que es de esta
   // funcion y no de la regla —`decidirModificacion` no la necesita, porque el id
@@ -1250,6 +1296,13 @@ beforeEach(() => {
   estado.registroExportadores = [];
   estado.registroVisoresEmpresa = [];
   estado.adminsDelPortal = [];
+  // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
+  // veo a mi» de «los veo a todos» en un recorte que compara por correo.
+  estado.fichasDelCalendario = [
+    { id: 'e1', nombreCompleto: 'Ana Ruiz', correo: 'ana.ruiz@ambientalia.com.co' },
+    { id: 'e2', nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co' },
+  ];
+  estado.soloDeDelCalendario = [];
   estado.soloDeDeMovimientos = [];
 });
 
@@ -3409,9 +3462,13 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.marcas).toHaveLength(4);
   });
 
-  it('quien no es admin solo se ve a sí mismo', async () => {
+  it('quien no es admin recibe su alcance acotado, y las marcas ajenas NO viajan', async () => {
     // El recorte lo hace el SQL: las marcas ajenas no llegan al navegador, no es
     // que no se pinten. Si viajaran, estarían expuestas igual.
+    //
+    // El doble solo modela el escalón «yo mismo» del alcance (ver su aviso de
+    // REGLA DE SQL REIMPLEMENTADA), así que aquí Ana sale sola. Que un jefe se
+    // lleve además su rama lo ejecuta contra Postgres `repo.calendario.db.test.ts`.
     const r = await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token()}`)
@@ -3421,12 +3478,39 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.marcas.every((m: { empleadoId: string }) => m.empleadoId === 'e1')).toBe(true);
   });
 
-  it('un aprobador tampoco ve a su equipo: solo admin ve a los demás', async () => {
-    const r = await request(app())
-      .get('/api/ausencias/calendario?mes=2026-08')
+  it('CANDADO: el alcance sale de la SESIÓN, y las dos consultas reciben el MISMO', async () => {
+    // Los dos candados que este fichero sí puede sostener sobre el alcance.
+    //
+    // El primero: el correo con el que se acota es el `sub` del token y nada
+    // más. Se mandan por la URL, por el cuerpo y por una cabecera los nombres
+    // que tendría el parámetro si alguien lo cableara a `req`, incluido un
+    // intento de vaciarlo para quedarse con la compañía entera.
+    //
+    // El segundo, y es el que justifica que `soloDeDelCalendario` sea una lista:
+    // `empleadosActivos` y `ausenciasEntre` comparten el fragmento del alcance,
+    // así que tienen que recibir EL MISMO valor. Si divergieran no fallaría
+    // nada —saldría una persona sin marcas, o marcas sin fila que nadie pinta—,
+    // y ninguna aserción de contenido lo notaría.
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08&soloDe=&todos=1')
       .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .set('X-Solo-De', 'otro.jefe@ambientalia.com.co')
+      .send({ soloDe: null, esAdmin: true, role: 'admin' })
       .expect(200);
-    expect(r.body.empleados).toHaveLength(1);
+    expect(estado.soloDeDelCalendario).toEqual([
+      'comercial@ambientalia.com.co',
+      'comercial@ambientalia.com.co',
+    ]);
+  });
+
+  it('a un admin se le pasa `null` en las dos: la plantilla entera', async () => {
+    // La pareja del anterior. `null` significa «sin acotar» en las dos
+    // consultas, así que este es el único caso en que puede aparecer.
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(estado.soloDeDelCalendario).toEqual([null, null]);
   });
 
   it('un visor de toda la empresa ve la plantilla entera sin ser admin', async () => {
@@ -3460,17 +3544,31 @@ describe('GET /ausencias/calendario', () => {
     expect(r.body.empleados).toEqual([{ id: 'e1', nombreCompleto: 'Ana Ruiz' }]);
   });
 
-  it('sin ficha de empleado devuelve una rejilla vacía, no la plantilla entera', async () => {
-    // El fallo que evita: `null` significa «sin acotar» en el repo, así que caer
-    // en esa rama por no tener ficha enseñaría justo lo contrario de lo que toca.
-    estado.empleado = null;
-    estado.usuarioEnPortal = false;
+  it('CANDADO: quien no casa con ninguna ficha recibe la rejilla VACÍA, no la plantilla entera', async () => {
+    // El fallo que evita: `null` significa «sin acotar» en las dos consultas,
+    // así que confundir «no encontrado» con «sin filtro» entregaría la compañía
+    // entera a quien no debería ver ni su propia fila.
+    //
+    // Antes esto se montaba dejando `estado.empleado = null`, porque el servicio
+    // resolvía la ficha con `empleadoDeUsuario` y caía a un uuid centinela. Ya no
+    // la resuelve: acota por el correo de la sesión directamente, así que la
+    // forma de expresar «no tengo ficha» es que ninguna lleve mi correo.
+    estado.fichasDelCalendario = [
+      { id: 'e2', nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co' },
+    ];
     const r = await request(app())
       .get('/api/ausencias/calendario?mes=2026-08')
       .set('Authorization', `Bearer ${token()}`)
       .expect(200);
     expect(r.body.empleados).toEqual([]);
     expect(r.body.marcas).toEqual([]);
+    // Y sobre todo: se acotó, no se pidió todo. Sin esto, un `?? null` mal
+    // puesto daría una rejilla vacía por casualidad del fixture y no por el
+    // recorte.
+    expect(estado.soloDeDelCalendario).toEqual([
+      'ana.ruiz@ambientalia.com.co',
+      'ana.ruiz@ambientalia.com.co',
+    ]);
   });
 
   it('400 si el mes viene mal formado', async () => {

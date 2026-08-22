@@ -1912,17 +1912,21 @@ export interface CalendarioDelMes {
  * El parámetro es un mes y no un rango libre: acotarlo así impide que una
  * petición pida cinco años de golpe, y la interfaz solo navega mes a mes.
  *
- * **Solo un admin ve a toda la plantilla.** Quien no lo es recibe únicamente su
- * propia fila. Esto revierte la decisión de producto original —el calendario
- * nació visible para todos, para poder coordinarse— y se cambió a petición
- * expresa: la rejilla enseñaba a cualquiera cuándo falta cada compañero.
+ * **Tres alcances, y el del medio es el normal.** Un admin —o quien tenga
+ * `ve_toda_la_empresa`, migración 032— ve la plantilla entera. **Un jefe ve su
+ * propia fila y la de su rama de dos niveles**, que es exactamente la gente
+ * cuyas ausencias firma. Quien no aprueba a nadie sigue viendo solo la suya.
  *
- * La excepción, desde la migración 032, es la ficha marcada con
- * `ve_toda_la_empresa`: ve la plantilla entera igual que un admin, sin serlo.
- * No es un agujero en la regla de arriba sino su válvula, y una que se concede
- * ficha a ficha y queda registrada — mirar el calendario de todos era antes
- * indistinguible de poder borrar solicitudes, porque las dos cosas venían en el
- * mismo rol.
+ * El escalón del medio se añadió el 2026-08-21 a petición expresa, y es el que
+ * hace útil la pantalla para un jefe: coordinar un equipo exige ver cuándo falta
+ * ese equipo. No reabre lo que se cerró en su día —la rejilla no vuelve a
+ * enseñar a cualquiera cuándo falta cada compañero—, porque el alcance está
+ * atado al organigrama y no al hecho de tener la app.
+ *
+ * El recorte lo hace el SQL, no un filtro sobre la respuesta: si las marcas
+ * ajenas llegaran al navegador ya estarían expuestas, por mucho que no se
+ * pinten. Y la definición de «mi rama» NO se reescribe aquí: el repo la comparte
+ * con el registro de movimientos y con los saldos (ver `alcanceDelCalendario`).
  *
  * El recorte se hace en el SQL, no filtrando la respuesta: si las marcas ajenas
  * llegaran al navegador ya estarían expuestas, por mucho que no se pinten. Es la
@@ -1935,23 +1939,30 @@ export interface CalendarioDelMes {
 export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): Promise<CalendarioDelMes> {
   if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
 
-  // `empleadoDeUsuario` y no `empleadoDeSesion`: este es un GET y no debe crear
-  // fichas, y sobre todo no debe lanzar 403 a quien no tenga una. Sin ficha no
-  // hay nada que enseñar, y una rejilla vacía se entiende sola; un error dejaría
-  // la pestaña rota por un caso que no es un fallo.
-  //
   // El mismo `veTodo` que decide en `movimientosVisibles`, y escrito igual a
   // propósito: son las dos caras del mismo permiso, y quien lo tenga tiene que
   // ver la compañía entera en las dos pantallas o en ninguna.
   const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
-  const soloEmpleadoId = veTodo
-    ? null
-    : ((await repo.empleadoDeUsuario(db, sesion.userId, sesion.email))?.id ?? ID_INEXISTENTE);
+
+  // El CORREO de la sesión, no el id de su ficha. Es la misma clave con la que
+  // este módulo resuelve todo lo demás —`esAprobadorDeAlguien`,
+  // `esVisorDeAdjuntos`, `puedeExportarRegistro`— y la única con la que se puede
+  // expresar «mi rama», porque el organigrama son correos (`aprobador_correo`) y
+  // no ids.
+  //
+  // Esto retiró el `empleadoDeUsuario` + `ID_INEXISTENTE` que había aquí. Aquel
+  // centinela existía porque `null` significa «sin acotar» en los dos repos y
+  // quien no tuviera ficha habría caído en esa rama viendo la plantilla entera.
+  // Con el correo ya no hace falta: quien no tenga ficha no casa con ninguna
+  // fila y recibe una rejilla vacía, que es justo lo que toca. Y un jefe SIN
+  // ficha —que puede darse, porque se es aprobador por figurar en la columna de
+  // otro— ahora ve a su equipo en vez de nada, que es lo correcto.
+  const soloDe = veTodo ? null : sesion.email;
 
   const { desde, hasta } = rangoDelMes(mes);
   const [empleados, ausencias] = await Promise.all([
-    repo.empleadosActivos(db, soloEmpleadoId),
-    repo.ausenciasEntre(db, desde, hasta, soloEmpleadoId),
+    repo.empleadosActivos(db, soloDe),
+    repo.ausenciasEntre(db, soloDe, desde, hasta),
   ]);
 
   return {
@@ -1960,13 +1971,3 @@ export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): P
     marcas: marcasDelMes(mes, ausencias),
   };
 }
-
-/**
- * Un uuid que no puede existir, para acotar a «nadie».
- *
- * Hace falta porque `null` significa «sin acotar» en los dos repos: un usuario
- * sin ficha que cayera en esa rama vería la plantilla entera, que es justo lo
- * contrario de lo que toca. Un uuid con forma válida y sin dueño devuelve cero
- * filas sin que el `::uuid` del SQL reviente.
- */
-const ID_INEXISTENTE = '00000000-0000-4000-8000-000000000000';

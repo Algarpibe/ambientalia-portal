@@ -10,16 +10,16 @@ import { enTramite, ETIQUETA_TIPO, TIPOS_DE_AUSENCIA } from './dominio';
 interface Props {
   /** Id del empleado de la sesión, para el filtro «solo yo». Null si no tiene ficha. */
   miEmpleadoId: string | null;
-  /** Si esta sesión recibe la plantilla entera o solo su propia fila. La tienen
-   *  los admin y quien lleve marcada la vista de toda la empresa (migración
-   *  032). El recorte real lo hace hub-api en el SQL — esto solo decide si
-   *  tiene sentido ofrecer los filtros de persona y qué dice el subtítulo.
-   *
-   *  Se llamaba `esAdmin`, y el renombre no es cosmético: el permiso dejó de
-   *  ser el rol, y una prop que sigue diciendo «admin» invita a colgar de ella
-   *  lo que sí es de admin —editar, borrar— el día que alguien añada un botón
-   *  a esta pantalla. */
-  veTodaLaPlantilla: boolean;
+  // Aquí había una prop `veTodaLaPlantilla` (y antes `esAdmin`) que decidía si
+  // se ofrecían los filtros de persona y qué decía el subtítulo. Se retiró: el
+  // alcance dejó de tener dos escalones y pasó a tener tres —la plantilla, la
+  // rama de un jefe, y la fila propia—, así que ningún booleano de permiso
+  // volvía a responder la única pregunta que esta pantalla necesita, que es
+  // «¿hay más de una persona en la rejilla?». Eso lo dice la respuesta del
+  // servidor y no hace falta deducirlo: se mira `datos.empleados.length`.
+  //
+  // Además cierra un sitio donde el navegador podía discrepar del SQL. Con la
+  // prop, un jefe habría recibido varias filas y un desplegable escondido.
   /** Si la pestaña «Calendario» es la que se ve ahora mismo. Mismo motivo que
    *  `activo` en PanelSaldos: las pestañas quedan montadas y ocultas con
    *  `hidden`, así que sin este freno TODA la plantilla pagaría esta llamada
@@ -72,7 +72,7 @@ const nombreMes = (mes: string) =>
     timeZone: 'UTC',
   });
 
-export default function Calendario({ miEmpleadoId, veTodaLaPlantilla, activo }: Props) {
+export default function Calendario({ miEmpleadoId, activo }: Props) {
   const [mes, setMes] = useState(mesActual);
   const [datos, setDatos] = useState<CalendarioDelMes | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -118,6 +118,13 @@ export default function Calendario({ miEmpleadoId, veTodaLaPlantilla, activo }: 
     [datos, soloYo, persona, miEmpleadoId],
   );
 
+  // Si la rejilla trae a más de una persona. Sale del DATO y no de un permiso:
+  // el alcance lo decide el servidor —la plantilla entera, la rama de dos
+  // niveles de un jefe, o la fila propia— y esta pantalla solo necesita saber si
+  // hay a quién filtrar. Sin `datos` todavía es `false`, y los filtros aparecen
+  // con la rejilla; no antes que ella, que es lo natural.
+  const hayVariasPersonas = (datos?.empleados.length ?? 0) > 1;
+
   const selCls = 'rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none';
   const navCls = 'rounded-lg border border-gray-300 p-1.5 text-gray-600 hover:bg-gray-50';
 
@@ -125,7 +132,7 @@ export default function Calendario({ miEmpleadoId, veTodaLaPlantilla, activo }: 
     <div>
       <h3 className="mb-1 text-sm font-semibold text-gray-900">Calendario de ausencias</h3>
       <p className="mb-3 text-sm text-gray-600">
-        {veTodaLaPlantilla
+        {hayVariasPersonas
           ? 'Quién está fuera y cuándo. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'
           : 'Tus ausencias del mes. Las solicitudes pendientes de aprobar salen atenuadas y con borde.'}
       </p>
@@ -155,10 +162,10 @@ export default function Calendario({ miEmpleadoId, veTodaLaPlantilla, activo }: 
         </select>
 
         {/* Los dos filtros de persona solo tienen sentido cuando hay más de una:
-            quien no ve la plantilla entera recibe únicamente su propia fila, así
-            que aquí serían un desplegable de un elemento y una casilla que no
-            cambia nada. */}
-        {veTodaLaPlantilla && (
+            a quien recibe únicamente su propia fila le serían un desplegable de
+            un elemento y una casilla que no cambia nada. La condición mira la
+            rejilla y no un permiso — ver `hayVariasPersonas`. */}
+        {hayVariasPersonas && (
           <>
             <select
               className={selCls}
