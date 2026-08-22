@@ -316,6 +316,46 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     expect(await eventosDelOutbox(db)).toContain('modificacion_caducada');
   });
 
+  it('CANDADO: caducar toca SOLO la viva, no las que ya estaban cerradas', async () => {
+    // El mutante que muere aqui es quitarle el `AND estado = 'pendiente'` al
+    // UPDATE que caduca. Sin ese filtro, firmar una solicitud reescribiria el
+    // historial entero de sus peticiones: una que el jefe habia RECHAZADO en su
+    // dia pasaria a «caducada», y el registro dejaria de decir que hubo un
+    // rechazo. Y ademas mandaria un aviso por cada firma.
+    //
+    // No lo cazaba nada: el test de aqui arriba solo tiene una propuesta y esta
+    // viva, y el candado equivalente del router corre contra el doble, que trae
+    // su propio filtro en JavaScript.
+    const s = await sembrarCaso('pendiente', 'jefe2@ambientalia.com.co');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'La primera, que le rechazaron',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error('el alta deberia haber funcionado');
+    // Cerrada como RECHAZADA: sale del indice unico y deja sitio para otra.
+    await decidirModificacion(db, alta.modificacion.id, false, 'No procede', null, payloadStub);
+
+    const transicion = transicionAlDecidir(s, true);
+    if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
+    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
+
+    // Sigue rechazada, no caducada: la firma no reescribe lo que ya se decidio.
+    expect((await modificacionPorId(db, alta.modificacion.id))?.estado).toBe('rechazada');
+    // Y no se mando ningun aviso de caducidad, porque no caduco nada.
+    expect(await eventosDelOutbox(db)).not.toContain('modificacion_caducada');
+  });
+
   it('CANDADO: la rama de ANULACION lleva el mismo testigo que la de fechas', async () => {
     // Las dos clases comparten `TESTIGO_SOLICITUD` pero tienen `SET` distintos, y
     // hasta este test TODOS los del testigo corrian por la rama de `fechas`:
