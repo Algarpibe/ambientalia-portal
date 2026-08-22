@@ -1644,12 +1644,19 @@ describe('el compensatorio no se puede gastar por encima de la bolsa', () => {
     expect(r.body.error).toBe('compensatorios_sin_saldo');
   });
 
-  it('CANDADO: el bloqueo NO se contagia a las vacaciones', async () => {
-    // Pedir más vacaciones de las que quedan sigue entrando: allí solo se avisa
-    // y decide quien firma. Si alguien "unificara" las dos reglas, cae aquí.
+  it('CANDADO: una bolsa de compensatorios vacía NO bloquea unas vacaciones', async () => {
+    // Este test decía antes que las vacaciones no tenían tope: «pedir más
+    // vacaciones de las que quedan sigue entrando». Dejó de ser cierto el
+    // 2026-08-21, cuando las vacaciones estrenaron su propia puerta.
+    //
+    // Lo que sigue vigilando, y por eso no se borra, es que las DOS BOLSAS son
+    // independientes: quien no tiene compensatorios puede irse de vacaciones. El
+    // corte se siembra generoso a propósito para que la puerta nueva no sea la
+    // que deja pasar esta solicitud — si lo fuera, este candado estaría verde
+    // por el motivo equivocado y no diría nada de los compensatorios.
     estado.plantilla.push({
       ...(estado.empleado as Record<string, unknown>),
-      saldoCorte: 1,
+      saldoCorte: 30,
       fechaCorte: '2026-01-01',
     });
     await request(app())
@@ -1685,6 +1692,116 @@ describe('el compensatorio no se puede gastar por encima de la bolsa', () => {
       .set('Authorization', `Bearer ${token()}`)
       .send(compensatorio('2026-04-04', '2026-04-05'))
       .expect(201);
+  });
+});
+
+describe('las vacaciones tampoco se piden por encima del saldo', () => {
+  /**
+   * Pone saldo de vacaciones a la ficha de la sesión, sin duplicar la fila.
+   *
+   * `fechaCorte` es EL DÍA del reloj congelado, no el 1 de enero, y no es
+   * cosmético: el devengo es `(dias desde el corte / 30) × 1,25`, así que un
+   * corte en enero acumularía medio día largo para el 15 y `disponible` dejaría
+   * de ser exactamente lo que pide el test. Con el corte en hoy, `devengadas` es
+   * 0 y `disponible === saldoCorte` clavado.
+   */
+  function conSaldo(dias: number) {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: dias,
+      fechaCorte: '2026-01-15',
+    });
+  }
+
+  const vacaciones = (inicio: string, fin: string) => ({
+    tipo: 'vacaciones',
+    fechaInicio: inicio,
+    fechaFin: fin,
+    comentarios: 'x',
+  });
+
+  // La misma semana limpia que usa el bloque de los compensatorios: lunes 4 a
+  // viernes 8 de mayo de 2026, CINCO hábiles de verdad. La del 30 de marzo tiene
+  // dentro el Jueves y el Viernes Santo.
+  const LUNES = '2026-05-04';
+  const VIERNES = '2026-05-08';
+
+  const pedir = (cuerpo: Record<string, unknown>, tok = token()) =>
+    request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${tok}`).send(cuerpo);
+
+  it('deja pedir lo que cabe justo en el saldo', async () => {
+    conSaldo(5);
+    await pedir(vacaciones(LUNES, VIERNES)).expect(201);
+  });
+
+  it('409 con los números cuando se pasa', async () => {
+    conSaldo(3);
+    const r = await pedir(vacaciones(LUNES, VIERNES)).expect(409);
+    expect(r.body.error).toBe('vacaciones_insuficientes');
+    // Las claves exactas, igual que en la puerta gemela: el cliente redacta la
+    // frase a partir de ellas, y sin números el mensaje es inaccionable.
+    expect(r.body.detalle).toEqual({ pedidos: 5, pedible: 3, disponible: 3, enTramite: 0 });
+  });
+
+  it('CANDADO: tres solicitudes de un día con un día de saldo — solo pasa la primera', async () => {
+    // Fija que se compare contra `pedible` y NO contra `disponible`. Con el
+    // firme a secas las tres pasarían: media firma no descuenta, así que ninguna
+    // de las anteriores habría bajado el disponible todavía. Es el agujero por
+    // el que alguien se pide el año entero en solicitudes de un día.
+    conSaldo(1);
+    await pedir(vacaciones('2026-03-30', '2026-03-30')).expect(201);
+    await pedir(vacaciones('2026-04-06', '2026-04-06')).expect(409);
+    await pedir(vacaciones('2026-04-13', '2026-04-13')).expect(409);
+  });
+
+  it('CANDADO: un ADMIN sí puede pasarse y entrar en negativo', async () => {
+    // La excepción que se pidió. Sale de la SESIÓN y no de la ficha, así que lo
+    // que la concede es el rol del portal de quien pulsa el botón.
+    conSaldo(1);
+    await pedir(vacaciones(LUNES, VIERNES), token({ role: 'admin' })).expect(201);
+  });
+
+  it('CANDADO: y el resto NO se cuela mandando `esAdmin` en el cuerpo', async () => {
+    // La exención se lee del token, nunca de lo que llegue en la petición. Se
+    // prueban los nombres que tendría el campo si alguien lo cableara a `req`.
+    conSaldo(1);
+    const r = await pedir({ ...vacaciones(LUNES, VIERNES), esAdmin: true, role: 'admin' }).expect(409);
+    expect(r.body.error).toBe('vacaciones_insuficientes');
+  });
+
+  it('CANDADO: sin saldo configurado NO bloquea, al revés que los compensatorios', async () => {
+    // La asimetría deliberada. Una bolsa de compensatorios sin sembrar significa
+    // «no tienes»; un saldo de vacaciones sin sembrar significa «administración
+    // no ha puesto el corte todavía», o sea DESCONOCIDO. Como `sinConfigurar()`
+    // devuelve `disponible: 0`, bloquear aquí le cerraría las vacaciones a quien
+    // no puede arreglarlo por su cuenta — y de golpe el día del despliegue.
+    //
+    // Sin `conSaldo`: la ficha de la sesión no lleva corte.
+    await pedir(vacaciones(LUNES, VIERNES)).expect(201);
+  });
+
+  it('CANDADO: un rango de solo fin de semana pasa aunque el saldo esté en NEGATIVO', async () => {
+    // 0 días hábiles contra un saldo de −2. Sin el corte de `dias <= 0` la
+    // comparación es `0 > −2` y bloquearía una solicitud que no consume nada.
+    // En negativo y no en cero por lo mismo que en la gemela: con cero, `0 > 0`
+    // es false y el test pasaría sin la guarda, sin probar nada.
+    conSaldo(-2);
+    await pedir(vacaciones('2026-04-04', '2026-04-05')).expect(201);
+  });
+
+  it('un permiso o una incapacidad no miran el saldo de vacaciones', async () => {
+    // La puerta sale por `tipo` antes de consultar nada. Si mirara el saldo para
+    // todos, un saldo agotado cerraría también los permisos — que no se
+    // descuentan de ninguna bolsa.
+    conSaldo(0);
+    await pedir({ tipo: 'permiso', fechaInicio: LUNES, fechaFin: VIERNES, comentarios: 'x' }).expect(201);
+    await pedir({
+      tipo: 'incapacidad',
+      fechaInicio: INCAP_DESDE,
+      fechaFin: INCAP_HASTA,
+      comentarios: 'x',
+      adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+    }).expect(201);
   });
 });
 

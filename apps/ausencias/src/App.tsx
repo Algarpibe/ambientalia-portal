@@ -529,6 +529,7 @@ export default function App() {
                   aprobador={contexto.aprobadorNombre ?? contexto.empleado.aprobadorCorreo}
                   saldo={contexto.saldo}
                   compensatorios={contexto.compensatorios}
+                  esAdmin={contexto.esAdmin}
                   onCreada={onCreada}
                 />
               </div>

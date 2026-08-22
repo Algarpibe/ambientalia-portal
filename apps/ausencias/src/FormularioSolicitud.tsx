@@ -37,12 +37,25 @@ interface Props {
   saldo: SaldoVacaciones | null;
   /** Opcional: puede faltar si hub-api todavía no manda la clave. Ver `api.ts`. */
   compensatorios?: SaldoCompensatorios | null;
+  /**
+   * Un admin puede pedir vacaciones por encima de su saldo y quedarse en
+   * negativo; el resto, no. Aquí solo apaga o no el botón — quien de verdad lo
+   * impide es la puerta del servidor, que lee el rol del token y no esto.
+   */
+  esAdmin: boolean;
   onCreada: (s: Solicitud) => void;
 }
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
-export default function FormularioSolicitud({ festivos, aprobador, saldo, compensatorios, onCreada }: Props) {
+export default function FormularioSolicitud({
+  festivos,
+  aprobador,
+  saldo,
+  compensatorios,
+  esAdmin,
+  onCreada,
+}: Props) {
   const [tipo, setTipo] = useState<TipoSolicitud>('vacaciones');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -125,6 +138,23 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
     dias > 0 &&
     dias > pedible(compensatorios);
 
+  // Lo mismo para las vacaciones, con las MISMAS tres cautelas que el de arriba
+  // —`configurado === true` y no truthy, `dias > 0`, y `pedible` en vez del
+  // firme— y una cuarta propia: un ADMIN queda exento y su botón no se apaga
+  // nunca por esto.
+  //
+  // Sin saldo configurado tampoco se bloquea, y aquí no es solo prudencia del
+  // cliente: es que el SERVIDOR tampoco bloquea ese caso. Un corte sin sembrar
+  // significa «administración no lo ha puesto todavía», no «tienes cero», y
+  // apagar el botón dejaría a esa persona sin vacaciones y sin nada que hacer al
+  // respecto. Las dos mitades tienen que decir lo mismo o el botón mentiría.
+  //
+  // `TarjetaSaldo` ya avisa por su cuenta cuando se pasa —«te faltan X días»— y
+  // lo sigue haciendo también para un admin: la advertencia es cierta para él,
+  // lo único que cambia es que puede seguir adelante.
+  const excedeVacaciones =
+    tipo === 'vacaciones' && !esAdmin && saldo?.configurado === true && dias > 0 && dias > pedible(saldo);
+
   // Un otorgamiento tiene otros requisitos: no hay fecha fin que rellenar, pero
   // sí una cantidad y un motivo, los dos obligatorios. Lo que no se comprueba
   // aquí es el tope de 30 días ni la ventana de tres meses: esas las redacta el
@@ -136,6 +166,7 @@ export default function FormularioSolicitud({ festivos, aprobador, saldo, compen
       !fechaEnPasado &&
       !faltaAdjunto &&
       !excedeCompensatorios &&
+      !excedeVacaciones &&
       !enviando;
 
   function cambiarTipo(nuevo: TipoSolicitud) {
