@@ -51,6 +51,17 @@ export interface EmpleadoConJefatura extends Empleado {
   /** El de segundo nivel cuando NO firma. Excluyente con el de arriba. */
   informadoCorreo: string | null;
   enCiclo: boolean;
+  /**
+   * Tiene rol de administrador en el portal, así que las tres llaves de permisos
+   * ya las tiene todas por el rol. El panel usa esto para no pintarle unas
+   * casillas que no deciden nada en su fila.
+   *
+   * Se deriva en el servidor a partir de `portal.users`; no se guarda en la
+   * ficha. Puede llegar `undefined` en la ventana de despliegue en que el portal
+   * va por delante de hub-api, y se lee con `!!` — degrada a «no es admin», que
+   * enseña las casillas de siempre en vez de esconder una fila entera.
+   */
+  esAdminDelPortal: boolean;
 }
 
 export interface Adjunto {

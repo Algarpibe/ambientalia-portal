@@ -146,6 +146,12 @@ const estado = {
    */
   registroVisoresEmpresa: [] as Record<string, unknown>[],
   /**
+   * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
+   * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
+   * cuenta y una cuenta sin ficha.
+   */
+  adminsDelPortal: [] as string[],
+  /**
    * El `soloDe` con el que el servicio llamó a `repo.movimientos`, una entrada
    * por llamada.
    *
@@ -966,6 +972,16 @@ vi.mock('./repo.js', async () => ({
       correo: String(e.correo).toLowerCase(),
       aprobadorCorreo: String(e.aprobadorCorreo).toLowerCase(),
     })),
+  // Los admin del PORTAL, que no salen de `portal.empleados` sino de
+  // `portal.users`. Por eso el doble los guarda en su propia lista y no como un
+  // campo de la ficha: modelar el rol dentro de `estado.plantilla` daria a
+  // entender que vive en el maestro de empleados, y es justo la confusion que
+  // este dato existe para deshacer.
+  //
+  // En minusculas, como el `lower(email)` de la consulta real: el servicio
+  // compara contra el correo de la ficha ya bajado a minusculas, y un doble que
+  // devolviera la caja original dejaria ese cruce sin probar.
+  correosDeAdmin: async () => new Set(estado.adminsDelPortal.map((c) => c.toLowerCase())),
   adjuntoPorId: async (_db: unknown, id: string) => estado.adjuntos.get(id) ?? null,
   // Modela el `WHERE a.id IS NOT NULL`: solo las solicitudes que llevan PDF.
   solicitudesConAdjunto: async () => estado.solicitudes.filter((s) => s.adjunto !== null),
@@ -1233,6 +1249,7 @@ beforeEach(() => {
   estado.fallarRegistroVisor = false;
   estado.registroExportadores = [];
   estado.registroVisoresEmpresa = [];
+  estado.adminsDelPortal = [];
   estado.soloDeDeMovimientos = [];
 });
 
@@ -2137,6 +2154,53 @@ describe('la segunda firma se puede apagar por ficha', () => {
     expect(ana.segundoAprobadorCorreo).toBeNull();
     expect(ana.informadoCorreo).toBe(GERENCIA);
     expect(ana.requiereSegundaFirma).toBe(false);
+  });
+
+  it('el maestro marca quién es admin del portal, para que el panel no le pinte las casillas', async () => {
+    // El rol ya le da los tres permisos plegados (`esAdmin || …` en los tres
+    // booleanos del contexto), así que la pestaña Organigrama no puede
+    // enseñarle una casilla apagada: afirmaría lo contrario de lo que pasa.
+    // Este campo es lo único que le permite saberlo — el rol vive en
+    // `portal.users` y el maestro sale de `portal.empleados`.
+    estado.plantilla[0].correo = 'gerencia@ambientalia.com.co';
+    estado.adminsDelPortal = ['gerencia@ambientalia.com.co'];
+
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(r.body.empleados.find((e: any) => e.id === E1).esAdminDelPortal).toBe(true);
+    // El otro no, y es lo que muere si alguien resuelve esto con un `true`
+    // constante: escondería las casillas de TODA la plantilla y el permiso
+    // dejaría de poder concederse desde el panel.
+    expect(r.body.empleados.find((e: any) => e.id === E2).esAdminDelPortal).toBe(false);
+  });
+
+  it('CANDADO: el rol se cruza por correo sin distinguir mayúsculas', async () => {
+    // Los correos entran por la hoja de Google (la ficha) y por el alta de
+    // usuarios (la cuenta), y ninguno de los dos garantiza la caja. Si el cruce
+    // se hiciera en crudo, un admin con el correo en mayúsculas se quedaría
+    // fuera del conjunto y volvería a ver sus tres casillas — un fallo que no
+    // rompe nada y que solo se nota mirando la fila de esa persona.
+    estado.plantilla[0].correo = 'Gerencia@Ambientalia.com.co';
+    estado.adminsDelPortal = ['gerencia@ambientalia.com.co'];
+
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(r.body.empleados.find((e: any) => e.id === E1).esAdminDelPortal).toBe(true);
+  });
+
+  it('CANDADO: sin ningún admin en el portal, nadie sale marcado', async () => {
+    // La otra mitad: `estado.adminsDelPortal` arranca vacío en cada test, así
+    // que este fija que el campo no se inventa nada cuando no hay a quién
+    // marcar. Es lo que separa «no es admin» de «no se consultó».
+    const r = await request(app())
+      .get('/api/ausencias/empleados')
+      .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
+      .expect(200);
+    expect(r.body.empleados.every((e: any) => e.esAdminDelPortal === false)).toBe(true);
   });
 });
 
