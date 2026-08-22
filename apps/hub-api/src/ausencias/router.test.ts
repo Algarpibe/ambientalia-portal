@@ -872,6 +872,64 @@ vi.mock('./repo.js', async () => ({
   },
   modificacionPorId: async (_db: unknown, id: string) => estado.modificaciones.find((m) => m.id === id) ?? null,
   /**
+   * La correccion a mano de un admin. Escribe SOLO los cinco campos que el
+   * UPDATE real toca, y eso es lo que este doble aporta: si alguien le anadiera
+   * `decidida_at` o `clase` a la consulta de verdad, aqui no aparecerian y los
+   * candados de «no toca el testigo» seguirian en verde por casualidad. Por eso
+   * no es un `Object.assign(m, campos)`.
+   *
+   * NO toca la solicitud, como el repo real: cambiar el estado de una anulacion
+   * no la desanula. Es la mitad del contrato que un `assign` generico habria
+   * dejado sin modelar.
+   */
+  corregirModificacion: async (
+    _db: unknown,
+    id: string,
+    campos: {
+      fechaInicioNueva: string | null;
+      fechaFinNueva: string | null;
+      diasHabilesNuevos: number | null;
+      motivo: string | null;
+      estado: string;
+    },
+  ) => {
+    const m = estado.modificaciones.find((x) => x.id === id);
+    if (!m) return null;
+    m.fechaInicioNueva = campos.fechaInicioNueva;
+    m.fechaFinNueva = campos.fechaFinNueva;
+    m.diasHabilesNuevos = campos.diasHabilesNuevos;
+    m.motivo = campos.motivo;
+    m.estado = campos.estado;
+    return m;
+  },
+  /**
+   * Borra SOLO la fila del movimiento. La solicitud y sus demas movimientos se
+   * quedan: es la diferencia con `borrarSolicitud`, que arrastra los suyos por
+   * el ON DELETE CASCADE de la 024, y modelarla es lo que hace que el candado
+   * de «no se lleva la solicitud por delante» pruebe algo.
+   *
+   * Devuelve la fila LEIDA ANTES de borrar, igual que el repo real: quien llama
+   * la necesita para el log, y despues ya no hay a quien preguntarsela.
+   */
+  borrarModificacion: async (_db: unknown, id: string) => {
+    const i = estado.modificaciones.findIndex((x) => x.id === id);
+    if (i === -1) return null;
+    const [borrada] = estado.modificaciones.splice(i, 1);
+    // Si era la propuesta VIVA, deja de colgar del LEFT JOIN de la solicitud: la
+    // fila ya no existe. Se mira el estado y no el id de `modificacionPendiente`
+    // porque como mucho hay una viva por solicitud —lo garantiza el indice unico
+    // parcial de la 024—, asi que borrar una pendiente solo puede ser esa.
+    //
+    // El registro NO ofrece este boton sobre una pendiente (solo lista las
+    // cerradas), pero el DELETE del repo acepta cualquier id y el doble tiene
+    // que modelar el repo, no la pantalla.
+    if (borrada.estado === 'pendiente') {
+      const s = estado.solicitudes.find((x) => x.id === borrada.solicitudId);
+      if (s) s.modificacionPendiente = null;
+    }
+    return borrada;
+  },
+  /**
    * Modela la transacción entera de `repo.decidirModificacion`, y el ORDEN
    * importa tanto como el resultado:
    *
@@ -5358,5 +5416,255 @@ describe('otorgar compensatorios', () => {
   it('400 si el trabajo cae fuera de la ventana de tres meses, por delante o por detras', async () => {
     await pedir(otorgamiento({ fechaInicio: '2024-06-01', fechaFin: '2024-06-01' })).expect(400);
     await pedir(otorgamiento({ fechaInicio: '2026-02-01', fechaFin: '2026-02-01' })).expect(400);
+  });
+});
+
+// ── Corregir y borrar un MOVIMIENTO del registro ───────────────────────────
+//
+// Las dos rutas que abrieron a un admin las filas que hasta el 2026-08-21 eran
+// intocables: una anulacion o un cambio de fechas ya cerrados.
+//
+// ⚠️ Lo que estos candados vigilan por encima de todo es que corregir el ASIENTO
+// no toque la SOLICITUD. Es la confusion que la feature invita a cometer: pasar
+// una anulacion de `aprobada` a `rechazada` NO desanula nada, y el dia que
+// alguien le anada aqui ese efecto lateral creyendo que arregla una
+// incoherencia, estos tests son lo unico que se pondra rojo.
+
+describe('PATCH y DELETE /ausencias/modificaciones/:id', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+
+  beforeEach(() => {
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.plantilla.push({
+      id: '99999999-9999-4999-8999-999999999999',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 901,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: false,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+  });
+
+  const fila = (id: string) => estado.solicitudes.find((s) => s.id === id) as Record<string, unknown>;
+  const mod = (id: string) => estado.modificaciones.find((m) => m.id === id) as ModificacionFalsa;
+
+  /**
+   * Una solicitud aprobada con una modificacion YA DECIDIDA colgando: el estado
+   * exacto en el que el registro la ensena como fila propia.
+   *
+   * La decide la jefa por la bandeja en vez de forzar el estado a mano: asi la
+   * fila de partida es la que produce produccion, con su `decididaAt` y su
+   * decisor puestos, que es justo lo que estos candados afirman que NO se mueve.
+   */
+  async function conMovimientoCerrado(cuerpo: Record<string, unknown>, aprueba = true) {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+    fila(s.id as string).estado = 'aprobada';
+
+    const m = (
+      await request(app())
+        .post(`/api/ausencias/solicitudes/${s.id}/modificaciones`)
+        .set('Authorization', `Bearer ${token()}`)
+        .send(cuerpo)
+        .expect(201)
+    ).body as Record<string, unknown>;
+
+    await request(app())
+      .post(`/api/ausencias/modificaciones/${m.id}/decision`)
+      .set('Authorization', `Bearer ${token({ sub: JEFA })}`)
+      .send({ aprueba })
+      .expect(200);
+
+    return { solicitudId: s.id as string, modificacionId: m.id as string };
+  }
+
+  const ANULACION = { clase: 'anulacion', motivo: 'Me la piden en el trabajo' };
+  const CAMBIO = { clase: 'fechas', fechaInicio: '2026-07-13', fechaFin: '2026-07-15', motivo: 'Cita medica' };
+
+  const corregir = (id: string, body: Record<string, unknown>, tok = token({ role: 'admin' })) =>
+    request(app()).patch(`/api/ausencias/modificaciones/${id}`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  const borrar = (id: string, tok = token({ role: 'admin' })) =>
+    request(app()).delete(`/api/ausencias/modificaciones/${id}`).set('Authorization', `Bearer ${tok}`);
+
+  // ── Corregir ─────────────────────────────────────────────────────────────
+
+  it('un admin corrige el motivo y el estado de una anulacion', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await corregir(modificacionId, { estado: 'rechazada', motivo: 'Motivo corregido' }).expect(200);
+    expect(r.body).toMatchObject({ id: modificacionId, estado: 'rechazada', motivo: 'Motivo corregido' });
+  });
+
+  it('CANDADO: corregir la anulacion NO desanula la solicitud', async () => {
+    // El candado central de esta feature. Aprobar la anulacion dejo la solicitud
+    // `rechazada` con su `anuladaAt`; pasar el ASIENTO a `rechazada` no revierte
+    // ninguna de las dos cosas, porque eso ya ocurrio. Si alguien le anade aqui
+    // un efecto sobre la solicitud, este test es lo que se pone rojo.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...fila(solicitudId) };
+
+    await corregir(modificacionId, { estado: 'rechazada', motivo: null }).expect(200);
+
+    expect(fila(solicitudId).estado).toBe(antes.estado);
+    expect(fila(solicitudId).anuladaAt).toBe(antes.anuladaAt);
+    expect(fila(solicitudId).anuladaAt).not.toBeNull();
+  });
+
+  it('CANDADO: corregir las fechas del asiento NO reescribe las de la solicitud', async () => {
+    // La pareja del anterior para la otra clase. Aprobar el cambio movio las
+    // fechas de la solicitud al 13-15; corregir el asiento al 20-21 deja la
+    // solicitud donde estaba. Quien quiera moverla de verdad tiene el boton de
+    // editar de SU fila, que es otro endpoint.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(CAMBIO);
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15' });
+
+    await corregir(modificacionId, {
+      estado: 'aprobada',
+      motivo: 'Cita medica',
+      fechaInicioNueva: '2026-07-20',
+      fechaFinNueva: '2026-07-21',
+      diasHabilesNuevos: 2,
+    }).expect(200);
+
+    expect(mod(modificacionId)).toMatchObject({ fechaInicioNueva: '2026-07-20', diasHabilesNuevos: 2 });
+    expect(fila(solicitudId)).toMatchObject({ fechaInicio: '2026-07-13', fechaFin: '2026-07-15', diasHabiles: 3 });
+  });
+
+  it('CANDADO: no toca el testigo de QUIEN decidio ni CUANDO', async () => {
+    // Corregir lo que se decidio es arreglar un dato; corregir quien lo decidio
+    // es falsificarlo. El UPDATE real no lleva esas columnas y el doble solo
+    // escribe las cinco que lleva, asi que anadirselas alla pondria esto rojo.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...mod(modificacionId) };
+
+    await corregir(modificacionId, {
+      estado: 'retirada',
+      motivo: 'otro',
+      // Se cuelan a proposito en el cuerpo: si el validador los dejara pasar al
+      // repo, aqui se veria.
+      decididaAt: '2020-01-01T00:00:00Z',
+      aprobadorCorreo: 'quien.no.fue@ambientalia.com.co',
+      clase: 'fechas',
+      solicitudId: 'otra',
+    }).expect(200);
+
+    expect(mod(modificacionId).decididaAt).toBe(antes.decididaAt);
+    expect(mod(modificacionId).aprobadorCorreo).toBe(antes.aprobadorCorreo);
+    expect(mod(modificacionId).clase).toBe(antes.clase);
+    expect(mod(modificacionId).solicitudId).toBe(antes.solicitudId);
+  });
+
+  it('CANDADO: en una anulacion las fechas nuevas se fuerzan a null, vengan como vengan', async () => {
+    // El CHECK `modificaciones_campos_por_clase` de la 024 no admite otra cosa,
+    // asi que dejarlas pasar solo podria reventar la escritura con un 500. La
+    // clase se lee de la BD y no del cuerpo justamente para poder decidir esto
+    // sin fiarse de quien llama.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await corregir(modificacionId, {
+      estado: 'aprobada',
+      motivo: null,
+      fechaInicioNueva: '2026-07-20',
+      fechaFinNueva: '2026-07-21',
+      diasHabilesNuevos: 2,
+    }).expect(200);
+
+    expect(mod(modificacionId).fechaInicioNueva).toBeNull();
+    expect(mod(modificacionId).fechaFinNueva).toBeNull();
+    expect(mod(modificacionId).diasHabilesNuevos).toBeNull();
+  });
+
+  it('CANDADO: 403 a quien no es admin, y el asiento no se mueve', async () => {
+    // Incluida la jefa que la decidio: haberla firmado no da derecho a
+    // reescribir el registro despues.
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...mod(modificacionId) };
+
+    await corregir(modificacionId, { estado: 'rechazada' }, token()).expect(403);
+    await corregir(modificacionId, { estado: 'rechazada' }, token({ sub: JEFA })).expect(403);
+
+    expect(mod(modificacionId).estado).toBe(antes.estado);
+    expect(mod(modificacionId).motivo).toBe(antes.motivo);
+  });
+
+  it('400 si el estado no es uno de los cuatro, y el asiento no se mueve', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await corregir(modificacionId, { estado: 'inventado', motivo: 'x' }).expect(400);
+    expect(r.body.error).toBe('estado_invalido');
+    expect(r.body.field).toBe('estado');
+    expect(mod(modificacionId).estado).toBe('aprobada');
+  });
+
+  it('400 si un cambio de fechas llega sin fechas o con el rango invertido', async () => {
+    // Estos NO se fuerzan como en la anulacion: en un `fechas` el CHECK los
+    // exige NOT NULL, asi que rechazar es lo unico honesto.
+    const { modificacionId } = await conMovimientoCerrado(CAMBIO);
+    const sinFechas = await corregir(modificacionId, { estado: 'aprobada' }).expect(400);
+    expect(sinFechas.body.field).toBe('fechaInicioNueva');
+
+    const invertido = await corregir(modificacionId, {
+      estado: 'aprobada',
+      fechaInicioNueva: '2026-07-21',
+      fechaFinNueva: '2026-07-20',
+      diasHabilesNuevos: 1,
+    }).expect(400);
+    expect(invertido.body.error).toBe('rango_invertido');
+    expect(invertido.body.field).toBe('fechaFinNueva');
+  });
+
+  it('404 si el movimiento no existe, y sin llegar a mirar el cuerpo', async () => {
+    // El 404 va ANTES del validador porque la clase se lee de la fila: sin fila
+    // no hay clase con la que decidir que campos exigir. Un cuerpo vacio lo
+    // demuestra — si validara primero, esto seria un 400.
+    await corregir('44444444-4444-4444-8444-444444444444', {}).expect(404);
+  });
+
+  // ── Borrar ───────────────────────────────────────────────────────────────
+
+  it('un admin borra el asiento, y la SOLICITUD se queda', async () => {
+    // La diferencia con borrar la solicitud, que arrastra sus movimientos por el
+    // ON DELETE CASCADE de la 024. Aqui se va una fila y solo una.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const r = await borrar(modificacionId).expect(200);
+
+    expect(r.body).toMatchObject({ ok: true, borrada: { id: modificacionId, clase: 'anulacion' } });
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeUndefined();
+    expect(fila(solicitudId)).toBeDefined();
+  });
+
+  it('CANDADO: borrar la anulacion NO devuelve la solicitud a la vida', async () => {
+    // Lo que hace que esto sea de admin y quede en el log: la solicitud sigue
+    // anulada y ya no queda nada en el registro que explique por que.
+    const { solicitudId, modificacionId } = await conMovimientoCerrado(ANULACION);
+    const antes = { ...fila(solicitudId) };
+
+    await borrar(modificacionId).expect(200);
+
+    expect(fila(solicitudId).estado).toBe(antes.estado);
+    expect(fila(solicitudId).anuladaAt).toBe(antes.anuladaAt);
+  });
+
+  it('CANDADO: 403 a quien no es admin, y el asiento sigue ahi', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await borrar(modificacionId, token()).expect(403);
+    await borrar(modificacionId, token({ sub: JEFA })).expect(403);
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
+  });
+
+  it('404 si el movimiento no existe', async () => {
+    await borrar('44444444-4444-4444-8444-444444444444').expect(404);
+  });
+
+  it('401 sin token, y sin borrar nada', async () => {
+    const { modificacionId } = await conMovimientoCerrado(ANULACION);
+    await request(app()).delete(`/api/ausencias/modificaciones/${modificacionId}`).expect(401);
+    expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
   });
 });

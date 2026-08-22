@@ -2060,6 +2060,88 @@ export async function modificacionPorId(db: Pool, id: string): Promise<Modificac
   return rows.length ? aModificacion(rows[0] as FilaModificacionDb) : null;
 }
 
+/** Los campos de una modificación que un admin puede corregir desde el registro. */
+export interface CorreccionModificacion {
+  /** Los tres van NULL en una anulación; lo exige el CHECK de la 024. */
+  fechaInicioNueva: string | null;
+  fechaFinNueva: string | null;
+  diasHabilesNuevos: number | null;
+  motivo: string | null;
+  estado: EstadoModificacion;
+}
+
+/**
+ * Corrige a mano una fila del registro de movimientos. Solo la usa el admin
+ * desde «Registro general».
+ *
+ * ⚠️ Corrige el ASIENTO, no la solicitud. Cambiar aquí el estado de una
+ * anulación de `aprobada` a `rechazada` NO desanula la solicitud: eso ya pasó, y
+ * su fila propia es la que dice en qué estado quedó. Las dos son editables por
+ * separado desde el mismo registro a propósito — un admin que quiera deshacer
+ * de verdad una anulación tiene que tocar las dos, y este comentario existe para
+ * que nadie le añada aquí un efecto lateral sobre la solicitud creyendo que
+ * arregla una incoherencia. Ese efecto lateral ES la bandeja, y allí ya vive.
+ *
+ * `clase` NO se puede cambiar, y no es un olvido: es lo que decide qué columnas
+ * pueden ir a NULL (el CHECK `modificaciones_campos_por_clase`), así que
+ * convertir una anulación en un cambio de fechas exigiría inventarse unas fechas
+ * nuevas. Quien se equivocó de clase borra la fila y la vuelve a pedir.
+ *
+ * `decidida_at` y `aprobador_user_id` tampoco: son el testigo de QUIÉN decidió y
+ * CUÁNDO, y el registro existe justo para conservarlos. Editar lo que se decidió
+ * es corregir un dato; editar quién lo decidió es falsificarlo.
+ */
+export async function corregirModificacion(
+  db: Pool,
+  id: string,
+  campos: CorreccionModificacion,
+): Promise<Modificacion | null> {
+  const { rows } = await db.query(
+    `UPDATE portal.solicitud_modificaciones
+        SET fecha_inicio_nueva  = $2::date,
+            fecha_fin_nueva     = $3::date,
+            dias_habiles_nuevos = $4::numeric,
+            motivo              = $5,
+            estado              = $6
+      WHERE id = $1
+      RETURNING id`,
+    [
+      id,
+      campos.fechaInicioNueva,
+      campos.fechaFinNueva,
+      campos.diasHabilesNuevos,
+      campos.motivo,
+      campos.estado,
+    ],
+  );
+  if (!rows.length) return null;
+  // Se relee con el SELECT común en vez de devolver el RETURNING entero: es lo
+  // que garantiza que la forma sea EXACTAMENTE la misma que la del resto de
+  // lecturas de modificaciones —los casts de `::text` incluidos—, y no una
+  // segunda proyección que haya que mantener en paralelo.
+  return modificacionPorId(db, id);
+}
+
+/**
+ * Borra una fila del registro de movimientos. Irreversible.
+ *
+ * NO toca la solicitud. Borrar la anulación que dejó unas vacaciones anuladas
+ * las deja anuladas, y sin nada que explique por qué: es lo que hace que esto
+ * sea de admin y quede en el log de hub-api.
+ *
+ * Devuelve la fila borrada —leída ANTES del DELETE— para que quien llama pueda
+ * decir en el log qué era. Después ya no hay a quién preguntárselo.
+ */
+export async function borrarModificacion(db: Pool, id: string): Promise<Modificacion | null> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(`${SELECT_MODIFICACION} WHERE m.id = $1`, [id]);
+    if (!rows.length) return null;
+    const borrada = aModificacion(rows[0] as FilaModificacionDb);
+    await client.query(`DELETE FROM portal.solicitud_modificaciones WHERE id = $1`, [id]);
+    return borrada;
+  });
+}
+
 // ── Adjuntos ───────────────────────────────────────────────────────────────
 
 export interface AdjuntoCompleto {

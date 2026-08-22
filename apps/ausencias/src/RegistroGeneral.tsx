@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Pencil, Trash2 } from 'lucide-react';
 import {
+  borrarModificacion,
   borrarSolicitud,
   CLASES_MOVIMIENTO,
   fetchEmpleados,
@@ -24,6 +25,7 @@ import {
   TIPOS,
 } from './dominio';
 import EditarSolicitud from './EditarSolicitud';
+import EditarModificacion from './EditarModificacion';
 
 // El registro general: lo que antes había que ir a mirar a la hoja. Cada fila ya
 // no es una solicitud, sino un MOVIMIENTO —o una solicitud, o una modificación
@@ -55,6 +57,29 @@ type MovimientoDeSolicitud = Extract<Movimiento, { clase: 'solicitud' }>;
  * `MovimientoDeSolicitud[]`, que es justo lo que exigen las funciones candado.
  */
 const esDeSolicitud = (m: Movimiento): m is MovimientoDeSolicitud => m.clase === 'solicitud';
+
+/** La otra rama de la unión: una anulación o un cambio de fechas ya cerrado. */
+type MovimientoDeModificacion = Exclude<Movimiento, { clase: 'solicitud' }>;
+
+/**
+ * Cómo se llama esta fila cuando hay que nombrarla en un botón o en un aviso.
+ *
+ * Existe porque desde que las tres clases son editables, un `aria-label` que
+ * dijera «la solicitud» en las tres mentiría en dos: quien navega con lector de
+ * pantalla oiría «borrar la solicitud de Fulano» estando sobre la anulación, y
+ * borraría lo que no era. El `switch` es exhaustivo sobre `clase`, así que una
+ * cuarta clase futura no compila hasta que se le ponga nombre aquí.
+ */
+function etiquetaDeFila(m: Movimiento): string {
+  switch (m.clase) {
+    case 'solicitud':
+      return 'la solicitud';
+    case 'anulacion':
+      return 'la anulación';
+    case 'fechas':
+      return 'el cambio de fechas';
+  }
+}
 
 interface Chip {
   label: string;
@@ -254,6 +279,11 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
   const [movimientos, setMovimientos] = useState<Movimiento[]>([]);
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [editando, setEditando] = useState<Solicitud | null>(null);
+  // La fila de MOVIMIENTO que se está corrigiendo. Estado aparte de `editando` y
+  // no una unión: son dos modales con dos formularios y dos endpoints distintos,
+  // y compartir la variable obligaría a discriminar en cada uso justo donde
+  // equivocarse manda un PATCH contra el id de la otra tabla.
+  const [corrigiendo, setCorrigiendo] = useState<MovimientoDeModificacion | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tipo, setTipo] = useState('');
@@ -360,14 +390,30 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
     }
   }
 
-  async function borrar(m: MovimientoDeSolicitud) {
+  /**
+   * Borra una fila del registro, sea de la clase que sea.
+   *
+   * Las dos ramas NO son intercambiables y por eso no hay un solo endpoint:
+   * borrar la SOLICITUD se lleva por delante sus movimientos —el `ON DELETE
+   * CASCADE` de la 024—, y borrar un MOVIMIENTO deja la solicitud intacta, con
+   * lo que ese movimiento le hizo ya hecho. Se quita solo su fila.
+   */
+  async function borrar(m: Movimiento) {
     setBorrando(m.id);
     setError(null);
     try {
-      await borrarSolicitud(m.solicitudId);
-      // Se van también sus modificaciones: colgaban de esa solicitud y sin ella son
-      // filas huérfanas que hablan de algo que ya no existe.
-      setMovimientos((ms) => ms.filter((x) => x.solicitudId !== m.solicitudId));
+      if (esDeSolicitud(m)) {
+        await borrarSolicitud(m.solicitudId);
+        // Se van también sus modificaciones: colgaban de esa solicitud y sin ella son
+        // filas huérfanas que hablan de algo que ya no existe.
+        setMovimientos((ms) => ms.filter((x) => x.solicitudId !== m.solicitudId));
+      } else {
+        await borrarModificacion(m.id);
+        // Solo esta fila. La solicitud y el resto de sus movimientos siguen ahí:
+        // filtrar por `solicitudId` como en la rama de arriba se llevaría la
+        // solicitud entera de la pantalla sin haberla borrado del servidor.
+        setMovimientos((ms) => ms.filter((x) => x.id !== m.id));
+      }
       setConfirmando(null);
     } catch (e) {
       setError((e as Error).message);
@@ -599,17 +645,34 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                         {m.motivo || <span className="text-gray-300">—</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                        {/* ⚠️ Editar y borrar, solo sobre SOLICITUDES y solo para un
-                            admin. Una modificación ya cerrada es un asiento del
-                            registro: no se corrige ni se borra, porque lo que
-                            cuenta es que ocurrió. El candado lo sostiene el tipo —
-                            `pedirEdicion` y `borrar` piden `MovimientoDeSolicitud`,
-                            así que llamarlas con una fila de modificación no
-                            compila. */}
-                        {esAdmin && esDeSolicitud(m) ? (
+                        {/* ⚠️ Editar y borrar, en TODAS las filas y solo para un
+                            admin. Hasta el 2026-08-21 las modificaciones cerradas
+                            no se tocaban —«es un asiento, lo que cuenta es que
+                            ocurrió»—, y se abrió a petición expresa: una anulación
+                            mal pedida se quedaba en el registro para siempre.
+                            Lo que NO se movió es a quién: sigue siendo cosa de
+                            admin, porque el `PATCH` y el `DELETE` de las dos clases
+                            van detrás de `requireAdmin`.
+                            El reparto por clase lo sostiene el tipo: `pedirEdicion`
+                            exige `MovimientoDeSolicitud` y el modal de movimientos
+                            exige lo contrario, así que cruzarlos no compila —y
+                            cruzarlos mandaría un PATCH de modificación contra el id
+                            de una solicitud, que en esta app sin tests no lo
+                            cazaría nadie más. */}
+                        {esAdmin ? (
                           confirmando === m.id ? (
                             <span className="flex items-center justify-end gap-2">
-                              <span className="text-xs text-gray-600">¿Borrar?</span>
+                              {/* Lo que se lleva por delante no es lo mismo según
+                                  la fila, y es justo lo que hay que saber antes de
+                                  pulsar: borrar la solicitud arrastra sus
+                                  movimientos, y borrar un movimiento deja la
+                                  solicitud como esté —anulada sigue anulada, y sin
+                                  nada que explique por qué—. */}
+                              <span className="text-xs text-gray-600">
+                                {esDeSolicitud(m)
+                                  ? '¿Borrar? Se va con sus movimientos'
+                                  : '¿Borrar? La solicitud no cambia'}
+                              </span>
                               <button
                                 type="button"
                                 disabled={borrando === m.id}
@@ -631,8 +694,13 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                               <button
                                 type="button"
                                 disabled={abriendo === m.id}
-                                onClick={() => void pedirEdicion(m)}
-                                aria-label={`Editar la solicitud de ${m.empleadoNombre} del ${m.fechaInicio}`}
+                                // Cada clase a su modal. La de solicitud pasa por
+                                // `pedirEdicion`, que antes va a buscar la
+                                // solicitud entera al servidor; la de movimiento
+                                // no lo necesita —la fila ya trae todo lo que su
+                                // formulario edita— y abre en el acto.
+                                onClick={() => (esDeSolicitud(m) ? void pedirEdicion(m) : setCorrigiendo(m))}
+                                aria-label={`Editar ${etiquetaDeFila(m)} de ${m.empleadoNombre} del ${m.fechaInicio}`}
                                 title="Editar"
                                 className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"
                               >
@@ -645,7 +713,7 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                               <button
                                 type="button"
                                 onClick={() => setConfirmando(m.id)}
-                                aria-label={`Borrar la solicitud de ${m.empleadoNombre} del ${m.fechaInicio}`}
+                                aria-label={`Borrar ${etiquetaDeFila(m)} de ${m.empleadoNombre} del ${m.fechaInicio}`}
                                 title="Borrar del registro"
                                 className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
                               >
@@ -672,6 +740,22 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
           onCerrar={() => setEditando(null)}
           onGuardada={() => {
             setEditando(null);
+            setRecargaLocal((n) => n + 1);
+          }}
+        />
+      )}
+
+      {corrigiendo && (
+        <EditarModificacion
+          movimiento={corrigiendo}
+          festivos={festivos}
+          onCerrar={() => setCorrigiendo(null)}
+          onGuardada={() => {
+            setCorrigiendo(null);
+            // Recarga entera por el mismo camino que la carga inicial, igual que
+            // tras corregir una solicitud: el movimiento tiene campos que la
+            // respuesta del PATCH no trae (`decididaPor`), y reconstruirlo aquí
+            // sería otro mapeo capaz de desviarse en silencio.
             setRecargaLocal((n) => n + 1);
           }}
         />
