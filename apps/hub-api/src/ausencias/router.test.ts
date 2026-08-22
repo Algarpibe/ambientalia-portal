@@ -338,7 +338,19 @@ vi.mock('./repo.js', async () => ({
   // iza por encima de los imports del fichero: una referencia al modulo real
   // desde aqui reventaria con un «cannot access before initialization».
   porFechaDeCierre: (await vi.importActual<typeof import('./repo.js')>('./repo.js')).porFechaDeCierre,
-  empleadoDeUsuario: async () => estado.empleado,
+  // Devolvia `estado.empleado` a secas, ignorando el correo, y bastaba mientras
+  // su unico llamante era el calendario —que solo preguntaba por la sesion—. Con
+  // la firma de los correos ya no: `firmanteDeSesion` la usa para saber QUIEN
+  // decide, y un doble que devuelve siempre la misma ficha firmaria todos los
+  // correos con el mismo nombre y dejaria ese candado sin probar nada.
+  //
+  // Busca en la plantilla por correo y cae a `estado.empleado` para la sesion
+  // por defecto, que no siempre esta en la plantilla. El repo real busca primero
+  // por `user_id` y luego por correo; aqui el correo basta, porque ningun test
+  // de este fichero distingue las dos vias.
+  empleadoDeUsuario: async (_db: unknown, _userId: string | null, email: string) =>
+    estado.plantilla.find((e: any) => String(e.correo).toLowerCase() === email.toLowerCase()) ??
+    (String(estado.empleado?.correo ?? '').toLowerCase() === email.toLowerCase() ? estado.empleado : null),
   // Modela el alta automática: si no hay ficha pero el usuario existe en el
   // portal, se crea sola. `usuarioEnPortal: false` simula el token legacy.
   asegurarEmpleado: async (_db: unknown, userId: string | null, email: string) => {
@@ -5743,5 +5755,119 @@ describe('PATCH y DELETE /ausencias/modificaciones/:id', () => {
     const { modificacionId } = await conMovimientoCerrado(ANULACION);
     await request(app()).delete(`/api/ausencias/modificaciones/${modificacionId}`).expect(401);
     expect(estado.modificaciones.find((m) => m.id === modificacionId)).toBeDefined();
+  });
+});
+
+// ── La firma de los correos de decision ────────────────────────────────────
+//
+// ⚠️ Estos candados NO son un duplicado de los de `notificaciones.test.ts`.
+// Aquellos prueban que `construirPayload` firma con quien se le pase; estos, que
+// el SERVICIO le pasa a alguien. Sin ellos, el dia que la clausura de `decidir`
+// se sustituya por `construirPayload` a pelo —que es lo que habia antes y lo que
+// pide el cuerpo al leerlo— la bateria de notificaciones seguiria entera en
+// verde y todos los correos de produccion volverian a firmarse como la empresa.
+
+describe('quien firma los correos de decision', () => {
+  const JEFA = 'jefa.directa@ambientalia.com.co';
+
+  beforeEach(() => {
+    // Una sola firma, para que aprobar una vez cierre la solicitud y emita el
+    // evento `aprobada`. Con la cascada puesta, la primera firma solo produce
+    // `aprobacion_2`, que es tramite y no lleva firma de persona.
+    estado.empleado.aprobadorCorreo = JEFA;
+    estado.empleado.requiereSegundaFirma = false;
+    estado.plantilla.push({
+      id: '77777777-7777-4777-8777-777777777777',
+      nombreCompleto: 'Jefa Directa',
+      correo: JEFA,
+      cargo: 'Coordinadora',
+      credencial: 902,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: false,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+  });
+
+  /** Crea una solicitud y la decide con el token que se le pase. */
+  async function decidirCon(tok: string, aprueba: boolean) {
+    const s = (
+      await request(app())
+        .post('/api/ausencias/solicitudes')
+        .set('Authorization', `Bearer ${token()}`)
+        .send(nueva())
+        .expect(201)
+    ).body as Record<string, unknown>;
+
+    await request(app())
+      .post(`/api/ausencias/solicitudes/${s.id}/decision`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send({ aprueba, motivo: aprueba ? undefined : 'No cuadra con el cierre' })
+      .expect(200);
+
+    const evento = estado.eventos.find((e) => e.evento === (aprueba ? 'aprobada' : 'rechazada'));
+    return (evento?.payload as { correo: { cuerpo: string } }).correo.cuerpo;
+  }
+
+  it('CANDADO: el correo de aprobacion lo firma la JEFA que aprobo, con su cargo', async () => {
+    const cuerpo = await decidirCon(token({ sub: JEFA }), true);
+    expect(cuerpo).toContain('Saludos,\nJefa Directa\nCoordinadora\nAmbientalia S.A.S.');
+  });
+
+  it('CANDADO: el de rechazo tambien, que es donde mas se notaba', async () => {
+    // Es el correo que dice «si tienes dudas, comunicate conmigo». Mientras la
+    // firma fue una constante, esa frase mandaba al trabajador a preguntarle al
+    // gerente general por una decision que no habia tomado.
+    const cuerpo = await decidirCon(token({ sub: JEFA }), false);
+    expect(cuerpo).toContain('Si tienes dudas, por favor comunícate conmigo.');
+    expect(cuerpo).toContain('Saludos,\nJefa Directa\nCoordinadora\nAmbientalia S.A.S.');
+  });
+
+  it('CANDADO: un admin destrabando firma con SU nombre, no con el del jefe congelado', async () => {
+    // Es el caso que hace que el firmante salga de la SESION y no de
+    // `aprobadorCorreo`. Un admin puede decidir cualquier solicitud para
+    // destrabarla, y el correo tiene que decir quien lo hizo de verdad — mismo
+    // criterio que la columna «Decidida por» del registro.
+    estado.plantilla.push({
+      id: '66666666-6666-4666-8666-666666666666',
+      nombreCompleto: 'Gerencia Admin',
+      correo: 'gerencia@ambientalia.com.co',
+      cargo: 'Gerencia',
+      credencial: 903,
+      aprobadorCorreo: 'comercial@ambientalia.com.co',
+      requiereSegundaFirma: false,
+      userId: null,
+      activo: true,
+    } satisfies EmpleadoFalso);
+
+    const cuerpo = await decidirCon(token({ sub: 'gerencia@ambientalia.com.co', role: 'admin' }), true);
+    expect(cuerpo).toContain('Gerencia Admin');
+    expect(cuerpo).not.toContain('Jefa Directa');
+  });
+
+  it('CANDADO: sin ficha, el correo cae a la firma de empresa y NO se queda sin pie', async () => {
+    // Se es aprobador por figurar en la columna `aprobador_correo` de otra
+    // ficha, asi que este jefe decide sin tener ficha propia. Es la rama que
+    // `firmaDe(null)` cubre, vista desde HTTP.
+    estado.plantilla = estado.plantilla.filter((e: any) => String(e.correo).toLowerCase() !== JEFA);
+    const cuerpo = await decidirCon(token({ sub: JEFA }), true);
+    expect(cuerpo).toContain('Saludos,\nAmbientalia S.A.S.');
+    expect(cuerpo).not.toContain('Jefa Directa');
+  });
+
+  it('CANDADO: el aviso a quien tiene que aprobar NO va firmado por nadie', async () => {
+    // Sale del ALTA, donde todavia no ha decidido nadie. Si el servicio colara
+    // ahi un firmante, el correo le diria al jefe que ya decidio lo que aun
+    // tiene que decidir.
+    await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva())
+      .expect(201);
+
+    const aviso = estado.eventos.find((e) => e.evento === 'aprobacion');
+    const cuerpo = (aviso?.payload as { correo: { cuerpo: string } }).correo.cuerpo;
+    expect(cuerpo).toContain('Saludos,\nAmbientalia S.A.S.');
+    expect(cuerpo).not.toContain('Ana Ruiz\nAnalista');
   });
 });

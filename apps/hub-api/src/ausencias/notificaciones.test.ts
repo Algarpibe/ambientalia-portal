@@ -5,9 +5,10 @@ import {
   construirPayloadCorreccion,
   construirPayloadModificacion,
   eventosDeAlta,
+  firmaDe,
   idDeEventoCalendario,
 } from './notificaciones.js';
-import { CALENDARIO_STAFF, COPIA_POR_DEFECTO, HOJA_ID, PESTANA } from './config.js';
+import { CALENDARIO_STAFF, COPIA_POR_DEFECTO, FIRMA_EMPRESA, HOJA_ID, PESTANA } from './config.js';
 import type { Modificacion, Solicitud } from './types.js';
 
 function solicitud(over: Partial<Solicitud> = {}): Solicitud {
@@ -1179,5 +1180,122 @@ describe('los correos del otorgamiento', () => {
     const cuerpo = construirPayload(solicitud(), 'creada').correo.cuerpo;
     expect(cuerpo).toContain('Fecha último día de vacaciones');
     expect(cuerpo).toContain('días hábiles');
+  });
+});
+
+// ── La firma ───────────────────────────────────────────────────────────────
+//
+// ⚠️ Antes del 2026-08-21 la firma era una constante con el nombre del gerente
+// general y NO LA VIGILABA NI UN SOLO TEST: se pudo quitar de los seis correos
+// que la llevaban con la bateria entera en verde. Estos candados existen para
+// que eso no se repita, y sobre todo para que no se pueda volver a cablear un
+// nombre propio sin que se ponga rojo.
+
+/** Quien decide, tal como lo arma el servicio a partir de su ficha. */
+const JEFA = { nombreCompleto: 'Marcela Norena Vargas', cargo: 'Coordinadora Administrativa' };
+
+describe('firmaDe', () => {
+  it('nombre, cargo y empresa, en ese orden', () => {
+    expect(firmaDe(JEFA)).toBe('Marcela Norena Vargas\nCoordinadora Administrativa\nAmbientalia S.A.S.');
+  });
+
+  it('sin cargo se salta la linea, no la deja en blanco', () => {
+    // Una ficha sin cargo es normal en el maestro. Interpolarlo a pelo dejaria
+    // un renglon vacio en mitad de la firma, que es de esos detalles que solo se
+    // ven cuando ya salio el correo.
+    expect(firmaDe({ nombreCompleto: 'Beto Diaz', cargo: null })).toBe('Beto Diaz\nAmbientalia S.A.S.');
+  });
+
+  it('CANDADO: sin firmante cae a la empresa, y NUNCA a un nombre propio', () => {
+    // El caso real: se es aprobador por figurar en la columna `aprobador_correo`
+    // de otra ficha, asi que un jefe puede decidir sin tener ficha propia, y un
+    // admin destrabando tambien. Lo que no puede pasar es que ese hueco lo
+    // rellene el nombre de alguien que no decidio.
+    expect(firmaDe(null)).toBe(FIRMA_EMPRESA);
+    expect(firmaDe(null)).not.toContain('Gerente');
+  });
+});
+
+describe('los correos de DECISION los firma quien decide', () => {
+  const cuerpoDe = (evento: 'aprobada' | 'rechazada', firmante = JEFA) =>
+    construirPayload(solicitud({ estado: evento }), evento, firmante).correo.cuerpo;
+
+  it('la aprobacion lleva el nombre y el cargo de quien aprobo', () => {
+    const cuerpo = cuerpoDe('aprobada');
+    expect(cuerpo).toContain('Saludos,\nMarcela Norena Vargas\nCoordinadora Administrativa\nAmbientalia S.A.S.');
+  });
+
+  it('CANDADO: el rechazo dice «comunicate conmigo» JUNTO a la firma de quien rechazo', () => {
+    // Las dos cosas en el mismo test porque es una sola afirmacion: esa frase
+    // era falsa mientras la firma fuera del gerente general —mandaba al
+    // trabajador a preguntarle a quien no habia decidido nada—, y solo se
+    // sostiene si van pegadas. Separar las aserciones dejaria pasar el dia que
+    // alguien mueva la frase a otro correo.
+    const cuerpo = cuerpoDe('rechazada');
+    expect(cuerpo).toContain('Si tienes dudas, por favor comunícate conmigo.');
+    expect(cuerpo.indexOf('comunícate conmigo')).toBeLessThan(cuerpo.indexOf('Marcela Norena Vargas'));
+  });
+
+  it('CANDADO: los cuatro de decision, sin un solo nombre cableado', () => {
+    // La mutacion que muere aqui es la que habia hasta ahora: una constante con
+    // un nombre propio al pie. Se comprueba por AUSENCIA de la firma vieja y por
+    // PRESENCIA de la nueva, porque solo lo segundo dejaria pasar un correo que
+    // no firma a nadie.
+    const m = modificacion();
+    const cuerpos = [
+      cuerpoDe('aprobada'),
+      cuerpoDe('rechazada'),
+      construirPayloadModificacion(solicitud(), m, 'modificacion_aprobada', JEFA).correo.cuerpo,
+      construirPayloadModificacion(solicitud(), m, 'modificacion_rechazada', JEFA).correo.cuerpo,
+    ];
+    for (const cuerpo of cuerpos) {
+      expect(cuerpo).toContain('Marcela Norena Vargas');
+      expect(cuerpo).not.toContain('Gerente General');
+    }
+  });
+
+  it('sin firmante, los cuatro caen a la firma de empresa en vez de quedarse sin pie', () => {
+    const m = modificacion();
+    const cuerpos = [
+      construirPayload(solicitud({ estado: 'aprobada' }), 'aprobada').correo.cuerpo,
+      construirPayload(solicitud({ estado: 'rechazada' }), 'rechazada').correo.cuerpo,
+      construirPayloadModificacion(solicitud(), m, 'modificacion_aprobada').correo.cuerpo,
+      construirPayloadModificacion(solicitud(), m, 'modificacion_rechazada').correo.cuerpo,
+    ];
+    for (const cuerpo of cuerpos) {
+      expect(cuerpo).toContain(`Saludos,\n${FIRMA_EMPRESA}`);
+    }
+  });
+});
+
+describe('los correos que NO son una decision no firman a nadie', () => {
+  it('CANDADO: el acuse y los dos avisos ignoran el firmante, aunque se les pase', () => {
+    // Son tramite: todavia no ha decidido nadie. Que la tabla de despacho les
+    // pase el firmante es una necesidad de tipos, no una invitacion a usarlo —y
+    // este candado es lo que separa las dos cosas. Si alguien firmara el aviso a
+    // quien tiene que aprobar, el correo le diria que la decision que aun tiene
+    // que tomar ya la tomo el.
+    for (const evento of ['creada', 'aprobacion', 'aprobacion_2', 'registrada'] as const) {
+      const cuerpo = construirPayload(solicitud({ segundoAprobadorCorreo: 'jefe2@x.test' }), evento, JEFA).correo
+        .cuerpo;
+      expect(cuerpo).not.toContain('Marcela Norena Vargas');
+      expect(cuerpo).toContain(`Saludos,\n${FIRMA_EMPRESA}`);
+    }
+  });
+
+  it('CANDADO: los avisos de correccion y borrado van con firma de EMPRESA', () => {
+    // Van a administracion y ya nombran al actor en la primera linea del cuerpo.
+    // Se afirman las dos cosas —que nombran y que no firman— porque quitar lo
+    // primero para «no repetirse» dejaria un aviso que no dice quien lo hizo.
+    const previa = solicitud({ estado: 'aprobada', eventoCalendarioId: 'abc' });
+    const actual = solicitud({ estado: 'aprobada', fechaFin: '2026-07-13', eventoCalendarioId: 'abc' });
+    const correccion = construirPayloadCorreccion(previa, actual, 'gerencia@ambientalia.com.co').correo.cuerpo;
+    const borrado = construirPayloadBorrado(previa, 'gerencia@ambientalia.com.co').correo.cuerpo;
+
+    for (const cuerpo of [correccion, borrado]) {
+      expect(cuerpo).toContain('gerencia@ambientalia.com.co');
+      expect(cuerpo).toContain(`Saludos,\n${FIRMA_EMPRESA}`);
+      expect(cuerpo).not.toContain('Gerente General');
+    }
   });
 });

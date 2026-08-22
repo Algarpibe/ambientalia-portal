@@ -4,7 +4,6 @@ import {
   COPIA_INCAPACIDADES,
   COPIA_POR_DEFECTO,
   FIRMA_EMPRESA,
-  FIRMA_GERENCIA,
   HOJA_ID,
   PESTANA,
   urlPortal,
@@ -51,6 +50,40 @@ const PERIODO: Record<Solicitud['tipo'], string> = {
 /** «día» / «días», para no escribir «1 días hábiles» en un correo. */
 function dias(n: number): string {
   return `${n} ${n === 1 ? 'día hábil' : 'días hábiles'}`;
+}
+
+/**
+ * Quien firma un correo de decisión: la persona que aprobó o rechazó.
+ *
+ * Es un trozo de `Empleado` y no el `Empleado` entero para que quien lo
+ * construya no tenga que cargar una ficha completa, y sobre todo para que se vea
+ * de un vistazo que aquí no entra nada más: ni el correo, ni el id, ni el saldo.
+ */
+export interface Firmante {
+  nombreCompleto: string;
+  /** Null si su ficha no lo tiene. La firma se queda en nombre y empresa. */
+  cargo: string | null;
+}
+
+/**
+ * El pie de firma de un correo de decisión.
+ *
+ * Hasta el 2026-08-21 esto era una constante con el nombre del gerente general,
+ * y firmaba como suyas decisiones que tomaba otra persona. En el correo de
+ * rechazo llegaba a ser una instrucción falsa: «si tienes dudas, comunícate
+ * conmigo», firmado por quien no había decidido nada.
+ *
+ * `null` cae a la firma de la empresa, y no es un caso raro de laboratorio: se
+ * es aprobador por figurar en la columna `aprobador_correo` de otra ficha, así
+ * que un jefe puede decidir sin tener ficha propia — y un admin destrabando,
+ * también. Antes que enseñar un buzón crudo al pie de una mala noticia, el
+ * correo se firma como la empresa.
+ */
+export function firmaDe(firmante: Firmante | null): string {
+  if (!firmante) return FIRMA_EMPRESA;
+  // El cargo se salta si la ficha no lo tiene, en vez de dejar una línea en
+  // blanco en mitad de la firma.
+  return [firmante.nombreCompleto, firmante.cargo, FIRMA_EMPRESA].filter(Boolean).join('\n');
 }
 
 function bloqueFechas(s: Solicitud): string {
@@ -153,9 +186,16 @@ function avisoAprobador(s: Solicitud) {
  * sutil y evitable.
  *
  * Sin copia a administración, a diferencia de los correos de decisión: esto es un
- * trámite interno, no un veredicto. Y no se nombra al primer firmante — los
- * correos de esta app no nombran a nadie, y un campo que puede faltar acaba
- * escribiendo «undefined» en el buzón de alguien.
+ * trámite interno, no un veredicto. Y no se nombra al primer firmante.
+ *
+ * Ese «no se nombra» decía antes que los correos de esta app no nombran a nadie,
+ * y desde el 2026-08-21 ya no es verdad: los cuatro de decisión los FIRMA quien
+ * decide. Pero la razón de fondo sigue en pie aquí, y es la que importa — un
+ * campo que puede faltar acaba escribiendo «undefined» en el buzón de alguien—.
+ * La diferencia es que la firma pasa por `firmaDe`, que tiene una salida
+ * explícita para cuando no hay persona; nombrar aquí al primer firmante volvería
+ * a interpolar un campo nulable a pelo. Si algún día se quiere, que sea con el
+ * mismo cuidado y no con un `${}` suelto.
  */
 function avisoSegundoAprobador(s: Solicitud) {
   return {
@@ -226,7 +266,7 @@ const cadenaDeDecision = (s: Solicitud) =>
     s.copiaCorreo,
   );
 
-function correoAprobada(s: Solicitud) {
+function correoAprobada(s: Solicitud, firmante: Firmante | null) {
   // Lo que le importa a quien lee un otorgamiento aprobado no es el día que
   // trabajó —eso ya lo sabe— sino que los días ya están donde los va a gastar.
   // Es además lo que distingue este correo del de unas vacaciones: allí se
@@ -246,12 +286,12 @@ function correoAprobada(s: Solicitud) {
       bloqueResumen(s),
       disfruta,
       'Saludos,',
-      FIRMA_GERENCIA,
+      firmaDe(firmante),
     ].join('\n'),
   };
 }
 
-function correoRechazada(s: Solicitud) {
+function correoRechazada(s: Solicitud, firmante: Firmante | null) {
   return {
     // Misma cadena que en la aprobación, y aquí importa más: si el segundo
     // superior tumba algo que el jefe inmediato ya había avalado, el jefe tiene
@@ -269,10 +309,13 @@ function correoRechazada(s: Solicitud) {
       // El motivo es la mejora que pedía el flujo viejo: antes el correo de
       // rechazo no decía por qué y obligaba a preguntar.
       s.motivoRechazo ? `\nMotivo: ${s.motivoRechazo}\n` : '',
+      // «Conmigo» empezó a ser cierto el día que la firma dejó de ser una
+      // constante: hasta entonces esta línea mandaba al trabajador a preguntarle
+      // al gerente general por una decisión que no había tomado.
       'Si tienes dudas, por favor comunícate conmigo.',
       '',
       'Saludos,',
-      FIRMA_GERENCIA,
+      firmaDe(firmante),
     ].join('\n'),
   };
 }
@@ -340,7 +383,16 @@ function hoja(s: Solicitud): FilaHoja | null {
 
 // ── Ensamblado ─────────────────────────────────────────────────────────────
 
-const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
+/**
+ * ⚠️ Las seis reciben `firmante` aunque solo dos lo usen, y la firma es una sola
+ * a propósito: si las que no firman lo omitieran, el `Record` dejaría de poder
+ * tiparlas juntas y habría que discriminar por evento en la llamada — que es
+ * exactamente lo que esta tabla existe para no hacer.
+ *
+ * Los cuatro eventos que NO firman con persona son trámite: el acuse y los dos
+ * avisos a quien tiene que decidir. Todavía no hay decisión que firmar.
+ */
+const CORREO_DE: Record<EventoSolicitud, (s: Solicitud, firmante: Firmante | null) => CorreoEvento> = {
   creada: acuseSolicitante,
   aprobacion: avisoAprobador,
   aprobacion_2: avisoSegundoAprobador,
@@ -377,7 +429,20 @@ const CORREO_DE: Record<EventoSolicitud, (s: Solicitud) => CorreoEvento> = {
  * `payload.drive !== null`, y con el campo ausente eso es `undefined !== null`,
  * o sea `true` para TODOS los eventos.
  */
-export function construirPayload(s: Solicitud, evento: EventoSolicitud): PayloadEvento {
+export function construirPayload(
+  s: Solicitud,
+  evento: EventoSolicitud,
+  // Quien firma, cuando el evento es una decisión. Va con valor por defecto para
+  // que el ALTA —que emite `creada` y `aprobacion`, y donde todavía no ha
+  // decidido nadie— siga llamando a esta función tal cual, sin inventarse un
+  // firmante que no existe.
+  //
+  // Lo resuelve el SERVICIO y no esta función: aquí no hay `Pool` a propósito
+  // (ver la cabecera del fichero), y el nombre y el cargo salen de la ficha de
+  // quien pulsó el botón. El repo recibe una clausura con el firmante ya dentro,
+  // así que su contrato `(solicitud, evento) => PayloadEvento` no cambia.
+  firmante: Firmante | null = null,
+): PayloadEvento {
   // ⚠️ El corte por tipo va PRIMERO y afecta a los dos efectos. Hasta que existió
   // el otorgamiento, esta función decidía qué llega a Google mirando SOLO el
   // evento, y eso bastaba porque los cuatro tipos eran ausencias. Un
@@ -396,7 +461,7 @@ export function construirPayload(s: Solicitud, evento: EventoSolicitud): Payload
     tipoEtiqueta: ETIQUETA_TIPO[s.tipo],
     estado: s.estado,
     empleadoNombre: s.empleadoNombre,
-    correo: CORREO_DE[evento](s),
+    correo: CORREO_DE[evento](s, firmante),
     calendario: conCalendario ? calendario(s) : null,
     hoja: conHoja ? hoja(s) : null,
   };
@@ -585,7 +650,7 @@ const siHay = (condicion: boolean, ...lineas: string[]): string[] => (condicion 
  * no son esas — es quien reorganiza el trabajo. Mismo argumento que
  * `correoRechazada`.
  */
-function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento {
+function correoModificacionAprobada(s: Solicitud, m: Modificacion, firmante: Firmante | null): CorreoEvento {
   const anula = m.clase === 'anulacion';
   // ⚠️ La solicitud sigue SIN conceder: el ✅ es del cambio, no de las
   // vacaciones. Sin esta línea, quien viene del acuse del alta —que le prometió
@@ -621,7 +686,7 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
       ...siHay(estaEnElCalendario(m.estadoPrevio), avisoDeAjustarGoogle(s, m)),
       '',
       'Saludos,',
-      FIRMA_GERENCIA,
+      firmaDe(firmante),
     ].join('\n'),
   };
 }
@@ -634,7 +699,7 @@ function correoModificacionAprobada(s: Solicitud, m: Modificacion): CorreoEvento
  * aquí no se ha tocado nada, así que no hay nada que ajustar. Un ⚠️ que no pide
  * ninguna acción es exactamente lo que enseña a no leerlos.
  */
-function correoModificacionRechazada(s: Solicitud, m: Modificacion): CorreoEvento {
+function correoModificacionRechazada(s: Solicitud, m: Modificacion, firmante: Firmante | null): CorreoEvento {
   const que = m.clase === 'anulacion' ? 'anular tu solicitud' : 'cambiar las fechas de tu solicitud';
   return {
     para: cadenaDeDecision(s),
@@ -669,7 +734,7 @@ function correoModificacionRechazada(s: Solicitud, m: Modificacion): CorreoEvent
       'Si tienes dudas, por favor comunícate conmigo.',
       '',
       'Saludos,',
-      FIRMA_GERENCIA,
+      firmaDe(firmante),
     ].join('\n'),
   };
 }
@@ -688,7 +753,10 @@ const CORREO_MODIFICACION_DE = {
   modificacion_solicitada: avisoModificacion,
   modificacion_aprobada: correoModificacionAprobada,
   modificacion_rechazada: correoModificacionRechazada,
-} satisfies Record<EventoModificacion, (s: Solicitud, m: Modificacion) => CorreoEvento>;
+  // El aviso de que se PIDE un cambio recibe el firmante y lo ignora, por lo
+  // mismo que en `CORREO_DE`: la tabla tiene que poder tipar las tres juntas.
+  // Ahí todavía no hay decisión que firmar.
+} satisfies Record<EventoModificacion, (s: Solicitud, m: Modificacion, firmante: Firmante | null) => CorreoEvento>;
 
 /**
  * El payload de un aviso de modificación.
@@ -710,6 +778,8 @@ export function construirPayloadModificacion(
   s: Solicitud,
   m: Modificacion,
   evento: keyof typeof CORREO_MODIFICACION_DE,
+  /** Quien decide el cambio. Null en el alta de la propuesta — ver `construirPayload`. */
+  firmante: Firmante | null = null,
 ): PayloadEvento {
   return {
     tipo: s.tipo,
@@ -717,7 +787,7 @@ export function construirPayloadModificacion(
     // El estado de la SOLICITUD, que no ha cambiado: la propuesta vive aparte.
     estado: s.estado,
     empleadoNombre: s.empleadoNombre,
-    correo: CORREO_MODIFICACION_DE[evento](s, m),
+    correo: CORREO_MODIFICACION_DE[evento](s, m, firmante),
     // Solo la aprobación toca Google. Pedir el cambio no cambia nada todavía, y
     // rechazarlo deja la solicitud exactamente como estaba.
     calendario: evento === 'modificacion_aprobada' ? correccionDeCalendario(s, m) : null,
@@ -904,7 +974,10 @@ function correoCorreccion(
       AVISO_DE[situacion],
       '',
       'Saludos,',
-      FIRMA_GERENCIA,
+      // Firma de EMPRESA y no la del admin que corrigió: este es un aviso del
+      // sistema a administración, y el actor ya va nombrado en la primera línea
+      // del cuerpo. Repetirlo al pie no añadiría nada.
+      FIRMA_EMPRESA,
     ].join('\n'),
   };
 }
@@ -1024,7 +1097,8 @@ function correoBorrado(borrada: Solicitud, adminEmail: string, situacion: Situac
       AVISO_DEL_BORRADO[situacion],
       '',
       'Saludos,',
-      FIRMA_GERENCIA,
+      // Firma de empresa, por lo mismo que en el aviso de corrección.
+      FIRMA_EMPRESA,
     ].join('\n'),
   };
 }

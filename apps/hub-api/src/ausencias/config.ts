@@ -49,7 +49,19 @@ export const COPIA_INCAPACIDADES = 'comercial@ambientalia.com.co';
 // abre incluye el soporte médico de las incapacidades ajenas. El aviso que lo
 // dice ahora vive en el panel, que es donde se toma la decisión.
 
-export const FIRMA_GERENCIA = 'Alfonso García del Pino Beneitez\nGerente General\nAmbientalia S.A.S.';
+// Aquí vivía `FIRMA_GERENCIA`, con el nombre y el cargo del gerente general
+// pegados al pie de los seis correos que llevan firma. Se retiró el 2026-08-21:
+// firmaba como gerencia decisiones que había tomado otra persona, y en el correo
+// de rechazo eso llegaba a ser una instrucción falsa — «si tienes dudas,
+// comunícate conmigo», firmado por quien no decidió nada.
+//
+// Ahora los cuatro correos de DECISIÓN los firma quien decide, con el nombre y
+// el cargo de su ficha (ver `firmaDe` en notificaciones.ts), y los dos avisos a
+// administración van con `FIRMA_EMPRESA`: son del sistema y ya nombran al actor
+// en el cuerpo.
+//
+// ⚠️ No reintroducir un nombre propio aquí. Que la firma salga de la ficha es lo
+// que hace que siga siendo cierta cuando cambie quien ocupa el puesto.
 export const FIRMA_EMPRESA = 'Ambientalia S.A.S.';
 
 /** Calendario compartido «Ambientalia Staff». */
