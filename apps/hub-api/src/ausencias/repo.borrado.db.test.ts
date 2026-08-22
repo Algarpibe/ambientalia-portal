@@ -3,7 +3,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { borrarSolicitud, decidirSolicitud, solicitudPorId } from './repo.js';
 import { construirPayload, construirPayloadBorrado } from './notificaciones.js';
 import { transicionAlDecidir, type Solicitud } from './types.js';
-import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from '../test-db/harness.js';
+import { poolDePrueba, limpiar, payloadStub, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from '../test-db/harness.js';
 
 // Que borrar una solicitud deje de abandonar su evento en el Google Calendar.
 //
@@ -43,7 +43,7 @@ async function aprobadaConEvento(): Promise<Solicitud> {
   const s = await sembrarPendiente();
   const t = transicionAlDecidir(s, true);
   if (!t) throw new Error('una pendiente siempre tiene transicion');
-  const aprobada = await decidirSolicitud(db, s.id, s.estado, t, null, null, construirPayload);
+  const aprobada = await decidirSolicitud(db, s.id, s.estado, t, null, null, construirPayload, payloadStub);
   if (!aprobada) throw new Error('no se pudo aprobar');
   return aprobada;
 }

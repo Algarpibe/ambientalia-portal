@@ -338,6 +338,26 @@ export function puedePedirModificacion(s: Enmendable, hoy: string): boolean {
  * `noHaEmpezado` en `apps/hub-api/src/ausencias/service.ts`, que es la regla de
  * verdad.
  */
+/**
+ * Si su dueño puede RETIRARLA él mismo, sin pedirle permiso a nadie. Espejo de
+ * `puedeRetirarla` en `service.ts`.
+ *
+ * Mucho más estrecho que pedir un cambio: solo `pendiente` y sin ninguna firma
+ * dada. En `pendiente_2` el jefe inmediato YA firmó, y hacer desaparecer eso sin
+ * decírselo sería borrarle una decisión — para ese caso está pedir la anulación,
+ * que él decide.
+ *
+ * Las dos condiciones, no solo el estado: un admin puede devolver una solicitud
+ * a `pendiente` desde el registro sin limpiar `primeraFirmaAt`, y ahí «pendiente»
+ * convive con una firma ya dada.
+ *
+ * Existe aquí solo para decidir si se enseña el botón; la regla de verdad la
+ * vuelve a comprobar el servidor. Si divergieran, lo peor es un 409 al pulsar.
+ */
+export function puedeRetirarla(s: Pick<Solicitud, 'estado' | 'primeraFirmaAt'>): boolean {
+  return s.estado === 'pendiente' && s.primeraFirmaAt === null;
+}
+
 export function puedePedirAnulacion(s: Enmendable, hoy: string): boolean {
   // Un otorgamiento no «empieza»: no hay días fuera consumiéndose. Anularlo quita
   // los días concedidos, y si ya se gastaron la bolsa queda en negativo — que es

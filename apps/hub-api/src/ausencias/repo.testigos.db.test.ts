@@ -70,8 +70,8 @@ describe('decidirSolicitud contra Postgres real', () => {
     const transicion = transicionAlDecidir(s, true);
     if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
 
-    const primera = await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub);
-    const segunda = await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub);
+    const primera = await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
+    const segunda = await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
 
     expect(primera?.estado).toBe('pendiente_2');
     // El servicio traduce este null a 409. Es un conflicto, no un fallo.
@@ -104,7 +104,7 @@ describe('crearModificacion contra Postgres real', () => {
     // produccion, con sus marcas de firma y su evento.
     const transicion = transicionAlDecidir(s, true);
     if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
-    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub);
+    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
 
     const r = await crearModificacion(
       db,
@@ -223,13 +223,24 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     );
     if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
 
-    // El jefe inmediato firma entre medias. Con `decidirSolicitud` y no con un
-    // UPDATE a pelo: es la transicion que produce produccion. Las fechas NO
-    // cambian, asi que los otros dos campos del testigo siguen casando y este
-    // choque solo lo puede ver el campo `estado`.
-    const transicion = transicionAlDecidir(s, true);
-    if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
-    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub);
+    // La solicitud avanza de nivel entre medias. Con un UPDATE a pelo y NO con
+    // `decidirSolicitud`, y el cambio es del 2026-08-22: desde que firmar caduca
+    // la propuesta viva en la misma transaccion, pasar por `decidirSolicitud`
+    // dejaria la propuesta en `caducada` y `decidirModificacion` contestaria
+    // `ya_decidida` — o sea que este test probaria el cierre automatico y no el
+    // testigo, que es lo que dice su nombre.
+    //
+    // El UPDATE directo no es un atajo: modela EXACTAMENTE lo que el testigo
+    // existe para cazar, que es la CARRERA. `decidirModificacion` lee la
+    // propuesta y escribe sobre la solicitud dentro de una transaccion, y entre
+    // esas dos cosas la fila puede haberse movido por una via que no caduca nada
+    // —el PATCH de admin, o una firma concurrente que todavia no ha hecho
+    // commit—. Las fechas NO se tocan, asi que los otros dos campos del testigo
+    // siguen casando y este choque solo lo puede ver el campo `estado`.
+    await db.query(
+      `UPDATE portal.solicitudes_ausencia SET estado = 'pendiente_2', primera_firma_at = now() WHERE id = $1`,
+      [s.id],
+    );
 
     const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
     expect(r).toEqual({ ok: false, razon: 'solicitud_cambio_de_estado' });
@@ -244,6 +255,105 @@ describe('el testigo TRIPLE de aplicarALaSolicitud', () => {
     expect(final?.estado).toBe('pendiente_2');
     expect(final?.fechaInicio).toBe('2026-07-06');
     expect(final?.fechaFin).toBe('2026-07-10');
+  });
+
+  it('CANDADO: firmar la solicitud CADUCA la propuesta viva, antes de que el testigo tenga que actuar', async () => {
+    // La pareja del de arriba, y la razon por la que aquel tuvo que dejar de
+    // usar `decidirSolicitud`. Son dos defensas distintas sobre el mismo choque:
+    //
+    //  · El testigo es la de dentro de la transaccion, contra la carrera.
+    //  · Esta es la de fuera: cuando la solicitud se decide POR LA VIA NORMAL, la
+    //    propuesta se cierra en el acto en vez de quedarse `pendiente` para
+    //    siempre esperando un 409 que nadie iba a resolver.
+    //
+    // Y lo que de verdad arregla es que sale del indice unico parcial: mientras
+    // estuvo `pendiente`, esa fila muerta impedia pedir otro cambio.
+    const s = await sembrarCaso('pendiente', 'jefe2@ambientalia.com.co');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'Cita medica',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta deberia haber funcionado, y dio ${alta.razon}`);
+
+    const transicion = transicionAlDecidir(s, true);
+    if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
+    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
+
+    const m = await modificacionPorId(db, alta.modificacion.id);
+    expect(m?.estado).toBe('caducada');
+
+    // Y el hueco queda libre: se puede pedir otro cambio sobre la misma
+    // solicitud. Es la mitad funcional, y la que se pierde si alguien cambia el
+    // estado nuevo por uno que el indice unico siga contando.
+    const otra = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'anulacion',
+        estadoEsperado: 'pendiente_2',
+        fechaInicioNueva: null,
+        fechaFinNueva: null,
+        diasHabilesNuevos: null,
+        motivo: 'Ya no las necesito',
+        aprobadorCorreo: 'jefe2@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    expect(otra.ok).toBe(true);
+
+    // Y se le avisa al trabajador, que es el unico que no se entera por otra via.
+    expect(await eventosDelOutbox(db)).toContain('modificacion_caducada');
+  });
+
+  it('CANDADO: caducar toca SOLO la viva, no las que ya estaban cerradas', async () => {
+    // El mutante que muere aqui es quitarle el `AND estado = 'pendiente'` al
+    // UPDATE que caduca. Sin ese filtro, firmar una solicitud reescribiria el
+    // historial entero de sus peticiones: una que el jefe habia RECHAZADO en su
+    // dia pasaria a «caducada», y el registro dejaria de decir que hubo un
+    // rechazo. Y ademas mandaria un aviso por cada firma.
+    //
+    // No lo cazaba nada: el test de aqui arriba solo tiene una propuesta y esta
+    // viva, y el candado equivalente del router corre contra el doble, que trae
+    // su propio filtro en JavaScript.
+    const s = await sembrarCaso('pendiente', 'jefe2@ambientalia.com.co');
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: s.id,
+        clase: 'fechas',
+        estadoEsperado: 'pendiente',
+        fechaInicioNueva: '2026-07-13',
+        fechaFinNueva: '2026-07-17',
+        diasHabilesNuevos: 5,
+        motivo: 'La primera, que le rechazaron',
+        aprobadorCorreo: 'jefe1@ambientalia.com.co',
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error('el alta deberia haber funcionado');
+    // Cerrada como RECHAZADA: sale del indice unico y deja sitio para otra.
+    await decidirModificacion(db, alta.modificacion.id, false, 'No procede', null, payloadStub);
+
+    const transicion = transicionAlDecidir(s, true);
+    if (!transicion) throw new Error('una solicitud pendiente siempre tiene transicion');
+    await decidirSolicitud(db, s.id, 'pendiente', transicion, null, null, payloadStub, payloadStub);
+
+    // Sigue rechazada, no caducada: la firma no reescribe lo que ya se decidio.
+    expect((await modificacionPorId(db, alta.modificacion.id))?.estado).toBe('rechazada');
+    // Y no se mando ningun aviso de caducidad, porque no caduco nada.
+    expect(await eventosDelOutbox(db)).not.toContain('modificacion_caducada');
   });
 
   it('CANDADO: la rama de ANULACION lleva el mismo testigo que la de fechas', async () => {

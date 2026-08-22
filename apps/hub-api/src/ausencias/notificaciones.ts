@@ -157,6 +157,41 @@ function acuseSolicitante(s: Solicitud) {
   };
 }
 
+/**
+ * El dueño ha retirado su solicitud antes de que nadie la firmara.
+ *
+ * Va a QUIEN LA TENÍA EN LA BANDEJA y no al solicitante: el solicitante acaba de
+ * pulsar el botón y ya lo sabe. El jefe no, y su bandeja tiene una fila menos
+ * sin explicación — es el mismo motivo por el que existe el aviso de borrado a
+ * administración.
+ *
+ * Sin copia a nadie más, y sin firma de persona: no es una decisión, es un aviso
+ * de que ya no hay nada que decidir.
+ */
+function avisoRetirada(s: Solicitud) {
+  return {
+    // El aprobador congelado, que es a quien se le mandó el aviso de que había
+    // algo que firmar. `?? ''` como en `avisoAprobador`: es nulable en el tipo
+    // —una incapacidad nace sin aprobador— aunque por aquí no pueda entrar una.
+    para: s.aprobadorCorreo ?? '',
+    asunto: `Retirada: solicitud ${PERIODO[s.tipo]} de ${s.empleadoNombre}`,
+    cuerpo: [
+      '¡Hola!',
+      '',
+      `${s.empleadoNombre} ha retirado su solicitud ${PERIODO[s.tipo]}, así que ya no tienes que decidirla.`,
+      '',
+      bloqueResumen(s),
+      '',
+      // Lo importante para quien lee: que no tiene que hacer nada, y que si la
+      // persona la vuelve a necesitar llegará como una solicitud nueva.
+      'La ha retirado antes de que nadie la firmara. Si vuelve a pedir esos días, te llegará como una solicitud nueva.',
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
 function avisoAprobador(s: Solicitud) {
   return {
     para: s.aprobadorCorreo ?? '',
@@ -399,6 +434,7 @@ const CORREO_DE: Record<EventoSolicitud, (s: Solicitud, firmante: Firmante | nul
   aprobada: correoAprobada,
   rechazada: correoRechazada,
   registrada: acuseSolicitante,
+  retirada: avisoRetirada,
 };
 
 /**
@@ -749,10 +785,50 @@ function correoModificacionRechazada(s: Solicitud, m: Modificacion, firmante: Fi
  * inferido conserve las claves literales, que es lo que hace que el `evento` de
  * `construirPayloadModificacion` admita exactamente lo que hay redactado.
  */
+/**
+ * Su petición de cambio se quedó sin efecto porque la solicitud se decidió antes
+ * de firmarla.
+ *
+ * Va al SOLICITANTE y a nadie más. El jefe no lo necesita: fue su firma la que
+ * la dejó sin efecto, y su bandeja ya no la enseña. Quien se quedaba sin
+ * enterarse era el trabajador, que veía «Cambio pendiente» en su fila
+ * indefinidamente y —peor— no podía pedir otro cambio, porque el índice único
+ * parcial solo admite una propuesta viva por solicitud.
+ *
+ * Dice explícitamente que puede volver a pedirlo, porque es lo único accionable:
+ * la petición no se recupera, se rehace.
+ *
+ * Sin firma de persona: no lo decidió nadie, lo cerró el sistema.
+ */
+function correoModificacionCaducada(s: Solicitud, m: Modificacion): CorreoEvento {
+  const anula = m.clase === 'anulacion';
+  return {
+    para: s.solicitanteEmail,
+    asunto: `Sin efecto: tu petición sobre la solicitud ${PERIODO[s.tipo]}`,
+    cuerpo: [
+      `Hola ${s.empleadoNombre}:`,
+      '',
+      anula
+        ? `Habías pedido anular tu solicitud ${PERIODO[s.tipo]}, pero se decidió antes de que a esa petición le llegara el turno, así que se ha quedado sin efecto.`
+        : `Habías pedido cambiar las fechas de tu solicitud ${PERIODO[s.tipo]}, pero se decidió antes de que a esa petición le llegara el turno, así que se ha quedado sin efecto.`,
+      '',
+      // Cómo quedó la solicitud DE VERDAD, que es lo primero que va a querer
+      // saber: se le acaba de decir que lo que pidió no se aplicó.
+      `📅 La solicitud ha quedado así: ${s.fechaInicio} a ${s.fechaFin} (${dias(s.diasHabiles)}) — ${ETIQUETA_ESTADO[s.estado]}.`,
+      '',
+      'Si sigues necesitando ese cambio, vuelve a pedirlo desde el portal: ya no hay nada que te lo impida.',
+      '',
+      'Saludos,',
+      FIRMA_EMPRESA,
+    ].join('\n'),
+  };
+}
+
 const CORREO_MODIFICACION_DE = {
   modificacion_solicitada: avisoModificacion,
   modificacion_aprobada: correoModificacionAprobada,
   modificacion_rechazada: correoModificacionRechazada,
+  modificacion_caducada: correoModificacionCaducada,
   // El aviso de que se PIDE un cambio recibe el firmante y lo ignora, por lo
   // mismo que en `CORREO_DE`: la tabla tiene que poder tipar las tres juntas.
   // Ahí todavía no hay decisión que firmar.
