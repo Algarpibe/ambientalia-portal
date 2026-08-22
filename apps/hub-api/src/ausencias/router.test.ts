@@ -3646,6 +3646,83 @@ describe('GET /ausencias/calendario', () => {
   });
 });
 
+describe('GET /ausencias/calendario-anual', () => {
+  const pedir = (quien: string, cola = '?anio=2026') =>
+    request(app()).get(`/api/ausencias/calendario-anual${cola}`).set('Authorization', `Bearer ${quien}`);
+
+  it('devuelve el año en FRANJAS, no en marcas por día', async () => {
+    // La forma del payload es contrato con el front, y es la razón de que esta
+    // ruta exista aparte: una barra por ausencia, con sus ordinales dentro del
+    // año, en vez de 365 objetos por persona.
+    const r = await pedir(token({ role: 'admin' })).expect(200);
+    expect(r.body).toMatchObject({ anio: '2026', diasDelAnio: 365 });
+    expect(r.body.meses).toHaveLength(12);
+    expect(r.body.marcas).toBeUndefined();
+    expect(r.body.dias).toBeUndefined();
+    // El doble siembra dos ausencias de agosto de 2026, una por persona.
+    expect(r.body.franjas).toHaveLength(2);
+    expect(r.body.franjas[0]).toMatchObject({ empleadoId: 'e1', desdeDia: 222, hastaDia: 224 });
+  });
+
+  it('CANDADO: el alcance es EXACTAMENTE el mismo que el de la vista mensual', async () => {
+    // El candado que de verdad importa de esta feature. Una vista nueva sobre
+    // los mismos datos es la forma más fácil de abrir una fuga: basta con
+    // resolver el recorte por su cuenta y olvidarse de una de las tres ramas.
+    // Las dos rutas pasan por `alcanceDeSesion`, y esto lo fija comparando lo
+    // que cada una le pide al repo para la MISMA sesión.
+    await request(app())
+      .get('/api/ausencias/calendario?mes=2026-08')
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .expect(200);
+    const delMes = [...estado.soloDeDelCalendario];
+    estado.soloDeDelCalendario = [];
+
+    await pedir(token({ sub: 'comercial@ambientalia.com.co' })).expect(200);
+    expect(estado.soloDeDelCalendario).toEqual(delMes);
+    expect(estado.soloDeDelCalendario).toEqual([
+      'comercial@ambientalia.com.co',
+      'comercial@ambientalia.com.co',
+    ]);
+  });
+
+  it('a un admin se le pasa `null` en las dos consultas', async () => {
+    await pedir(token({ role: 'admin' })).expect(200);
+    expect(estado.soloDeDelCalendario).toEqual([null, null]);
+  });
+
+  it('CANDADO: el alcance sale de la SESIÓN, no de la URL ni del cuerpo', async () => {
+    // Los mismos nombres que se prueban en la ruta mensual. Una ruta nueva no
+    // hereda los candados de su hermana, hay que volver a ponérselos.
+    await request(app())
+      .get('/api/ausencias/calendario-anual?anio=2026&soloDe=&todos=1')
+      .set('Authorization', `Bearer ${token({ sub: 'comercial@ambientalia.com.co' })}`)
+      .set('X-Solo-De', 'otro.jefe@ambientalia.com.co')
+      .send({ soloDe: null, esAdmin: true, role: 'admin' })
+      .expect(200);
+    expect(estado.soloDeDelCalendario).toEqual([
+      'comercial@ambientalia.com.co',
+      'comercial@ambientalia.com.co',
+    ]);
+  });
+
+  it('400 si el año viene mal formado, y sin consultar nada', async () => {
+    for (const anio of ['0099', '20260', '2026-01', '', 'dos mil']) {
+      await pedir(token(), `?anio=${encodeURIComponent(anio)}`).expect(400);
+    }
+    expect(estado.soloDeDelCalendario).toEqual([]);
+  });
+
+  it('403 a quien tiene token válido pero no la app asignada', async () => {
+    await pedir(token({ apps: [] })).expect(403);
+    expect(estado.soloDeDelCalendario).toEqual([]);
+  });
+
+  it('401 sin token', async () => {
+    await request(app()).get('/api/ausencias/calendario-anual?anio=2026').expect(401);
+    expect(estado.soloDeDelCalendario).toEqual([]);
+  });
+});
+
 describe('PUT /ausencias/empleados/:id/copia', () => {
   it('un admin fija la copia de alguien', async () => {
     const r = await request(app())

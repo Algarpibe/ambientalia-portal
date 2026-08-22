@@ -2,12 +2,19 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
 import { APROBADOR_POR_DEFECTO, COPIA_POR_DEFECTO } from './config.js';
 import {
+  diasDelAnio,
   diasDelMes,
+  esAnioValido,
   esMesValido,
+  franjasDelAnio,
   marcasDelMes,
+  mesesDelAnio,
+  rangoDelAnio,
   rangoDelMes,
   type DiaCalendario,
+  type FranjaCalendario,
   type MarcaCalendario,
+  type MesDelAnio,
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
@@ -1900,6 +1907,38 @@ export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): P
 
 // ── Calendario ─────────────────────────────────────────────────────────────
 
+/**
+ * A quién ve esta sesión en el calendario: `null` es «sin acotar» y un correo es
+ * «su rama de dos niveles y él mismo» (ver `repo.alcanceDelCalendario`).
+ *
+ * ⚠️ Existe una sola vez y la comparten la vista MENSUAL y la ANUAL. No es
+ * comodidad: son la misma pantalla con dos formas, y si el alcance se resolviera
+ * por separado en cada una, cambiar la regla en una dejaría a la otra
+ * contestando lo de antes — sin fallar, y enseñando de más justo en la vista que
+ * nadie volvió a revisar.
+ *
+ * El CORREO de la sesión, no el id de su ficha. Es la misma clave con la que
+ * este módulo resuelve todo lo demás —`esAprobadorDeAlguien`,
+ * `esVisorDeAdjuntos`, `puedeExportarRegistro`— y la única con la que se puede
+ * expresar «mi rama», porque el organigrama son correos (`aprobador_correo`) y
+ * no ids.
+ *
+ * Aquí hubo un `empleadoDeUsuario` + un centinela `ID_INEXISTENTE`. Aquel
+ * centinela existía porque `null` significa «sin acotar» en los dos repos y
+ * quien no tuviera ficha habría caído en esa rama viendo la plantilla entera.
+ * Con el correo ya no hace falta: quien no tenga ficha no casa con ninguna fila
+ * y recibe una rejilla vacía, que es justo lo que toca. Y un jefe SIN ficha
+ * —que puede darse, porque se es aprobador por figurar en la columna de otro—
+ * ve a su equipo en vez de nada.
+ */
+async function alcanceDeSesion(db: Pool, sesion: Sesion): Promise<string | null> {
+  // El mismo `veTodo` que decide en `movimientosVisibles`, y escrito igual a
+  // propósito: son las dos caras del mismo permiso, y quien lo tenga tiene que
+  // ver la compañía entera en las dos pantallas o en ninguna.
+  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
+  return veTodo ? null : sesion.email;
+}
+
 export interface CalendarioDelMes {
   empleados: repo.EmpleadoActivo[];
   dias: DiaCalendario[];
@@ -1939,25 +1978,7 @@ export interface CalendarioDelMes {
 export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): Promise<CalendarioDelMes> {
   if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
 
-  // El mismo `veTodo` que decide en `movimientosVisibles`, y escrito igual a
-  // propósito: son las dos caras del mismo permiso, y quien lo tenga tiene que
-  // ver la compañía entera en las dos pantallas o en ninguna.
-  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
-
-  // El CORREO de la sesión, no el id de su ficha. Es la misma clave con la que
-  // este módulo resuelve todo lo demás —`esAprobadorDeAlguien`,
-  // `esVisorDeAdjuntos`, `puedeExportarRegistro`— y la única con la que se puede
-  // expresar «mi rama», porque el organigrama son correos (`aprobador_correo`) y
-  // no ids.
-  //
-  // Esto retiró el `empleadoDeUsuario` + `ID_INEXISTENTE` que había aquí. Aquel
-  // centinela existía porque `null` significa «sin acotar» en los dos repos y
-  // quien no tuviera ficha habría caído en esa rama viendo la plantilla entera.
-  // Con el correo ya no hace falta: quien no tenga ficha no casa con ninguna
-  // fila y recibe una rejilla vacía, que es justo lo que toca. Y un jefe SIN
-  // ficha —que puede darse, porque se es aprobador por figurar en la columna de
-  // otro— ahora ve a su equipo en vez de nada, que es lo correcto.
-  const soloDe = veTodo ? null : sesion.email;
+  const soloDe = await alcanceDeSesion(db, sesion);
 
   const { desde, hasta } = rangoDelMes(mes);
   const [empleados, ausencias] = await Promise.all([
@@ -1969,5 +1990,52 @@ export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): P
     empleados,
     dias: diasDelMes(mes),
     marcas: marcasDelMes(mes, ausencias),
+  };
+}
+
+export interface CalendarioDelAnio {
+  empleados: repo.EmpleadoActivo[];
+  anio: string;
+  /** 365, o 366 si es bisiesto. Es el denominador de todos los anchos. */
+  diasDelAnio: number;
+  meses: MesDelAnio[];
+  franjas: FranjaCalendario[];
+}
+
+/**
+ * El año entero, para la vista de franjas.
+ *
+ * Devuelve FRANJAS y no marcas por día, y ahí está el porqué de que exista una
+ * función aparte en vez de un parámetro de `calendarioDelMes`: la rejilla
+ * mensual rellena celdas y necesita un objeto por día; la anual dibuja barras y
+ * necesita uno por ausencia. Expandir el año a días serían ~14.600 objetos en la
+ * respuesta y otros tantos nodos en el DOM para pintar unas trescientas barras.
+ *
+ * **El alcance es EXACTAMENTE el de la vista mensual**, y no por copia: las dos
+ * llaman a `alcanceDeSesion`. Un admin o un visor de empresa ven la plantilla
+ * entera, un jefe su rama de dos niveles y su propia fila, y el resto solo la
+ * suya. Ampliar el rango de un mes a un año no puede ampliar de paso a quién se
+ * ve, que es la forma más fácil de convertir una vista nueva en una fuga.
+ *
+ * El parámetro es un año y no un rango libre, por lo mismo que allí es un mes:
+ * acotarlo así impide que una petición pida cinco años de golpe.
+ */
+export async function calendarioDelAnio(db: Pool, sesion: Sesion, anio: string): Promise<CalendarioDelAnio> {
+  if (!esAnioValido(anio)) throw new AusenciaError('anio_invalido', 400, 'anio');
+
+  const soloDe = await alcanceDeSesion(db, sesion);
+
+  const { desde, hasta } = rangoDelAnio(anio);
+  const [empleados, ausencias] = await Promise.all([
+    repo.empleadosActivos(db, soloDe),
+    repo.ausenciasEntre(db, soloDe, desde, hasta),
+  ]);
+
+  return {
+    empleados,
+    anio,
+    diasDelAnio: diasDelAnio(anio),
+    meses: mesesDelAnio(anio),
+    franjas: franjasDelAnio(anio, ausencias),
   };
 }

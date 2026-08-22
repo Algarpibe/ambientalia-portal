@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  diasDelAnio,
   diasDelMes,
+  esAnioValido,
   esMesValido,
+  franjasDelAnio,
   marcasDelMes,
+  mesesDelAnio,
   rangoDelMes,
   type AusenciaRango,
 } from './calendario.js';
@@ -175,5 +179,136 @@ describe('marcasDelMes — incapacidades', () => {
     const m = marcasDelMes('2026-08', [aus({ tipo: 'incapacidad', estado: 'registrada' })]);
     expect(m).toHaveLength(3);
     expect(m.every((x) => x.tipo === 'incapacidad')).toBe(true);
+  });
+});
+
+// ── La vista anual ─────────────────────────────────────────────────────────
+
+describe('esAnioValido', () => {
+  it('acepta cuatro dígitos', () => {
+    expect(esAnioValido('2026')).toBe(true);
+    expect(esAnioValido('1999')).toBe(true);
+  });
+
+  it('rechaza lo que no lo es, incluido el año con cero delante', () => {
+    // El cero delante por lo mismo que en `esMesValido`: `Date.UTC(99, ...)`
+    // mapea el 99 a 1999, y `mesesDelAnio('0099')` devolvería los meses de otro
+    // año sin que nada fallara.
+    for (const v of ['0099', '20260', '202', '2026-01', '', 'dos mil', ' 2026']) {
+      expect(esAnioValido(v)).toBe(false);
+    }
+  });
+});
+
+describe('diasDelAnio', () => {
+  it('365 en un año normal y 366 en uno bisiesto', () => {
+    expect(diasDelAnio('2026')).toBe(365);
+    expect(diasDelAnio('2028')).toBe(366);
+  });
+
+  it('CANDADO: la regla del siglo, no el `% 4` a secas', () => {
+    // 1900 NO fue bisiesto y 2000 SÍ. Con `n % 4 === 0` pelado, 1900 daría 366 y
+    // todas las barras a partir de marzo saldrían desplazadas un día — un
+    // calendario ligeramente torcido que nadie sabe explicar. No son años que
+    // esta app vaya a ver, y por eso mismo el candado: es la clase de rama que
+    // nadie prueba a mano.
+    expect(diasDelAnio('1900')).toBe(365);
+    expect(diasDelAnio('2000')).toBe(366);
+  });
+});
+
+describe('mesesDelAnio', () => {
+  it('los doce, con sus días y su posición acumulada', () => {
+    const m = mesesDelAnio('2026');
+    expect(m).toHaveLength(12);
+    expect(m[0]).toEqual({ mes: '2026-01', desdeDia: 1, dias: 31 });
+    expect(m[1]).toEqual({ mes: '2026-02', desdeDia: 32, dias: 28 });
+    expect(m[11]).toEqual({ mes: '2026-12', desdeDia: 335, dias: 31 });
+  });
+
+  it('febrero de un bisiesto corre todo lo que viene detrás', () => {
+    // Marzo arranca el 61 (31 de enero + 29 de febrero + 1) y no el 60 de un año
+    // normal: es el desplazamiento que se lleva por delante las diez barras
+    // siguientes si el bisiesto se cuenta mal.
+    const m = mesesDelAnio('2028');
+    expect(m[1]).toMatchObject({ desdeDia: 32, dias: 29 });
+    expect(m[2].desdeDia).toBe(61);
+    expect(mesesDelAnio('2026')[2].desdeDia).toBe(60);
+  });
+
+  it('CANDADO: los días suman exactamente el año, y no hay huecos entre meses', () => {
+    // Las dos formas de que la franja quede torcida sin que nada falle: que los
+    // anchos no sumen el 100% (la barra de diciembre se sale o se queda corta) y
+    // que un mes no empiece donde acaba el anterior (todo lo posterior se
+    // desplaza). Se comprueban en los dos años, normal y bisiesto.
+    for (const anio of ['2026', '2028']) {
+      const m = mesesDelAnio(anio);
+      expect(m.reduce((n, x) => n + x.dias, 0)).toBe(diasDelAnio(anio));
+      for (let i = 1; i < m.length; i++) {
+        expect(m[i].desdeDia).toBe(m[i - 1].desdeDia + m[i - 1].dias);
+      }
+      expect(m[11].desdeDia + m[11].dias - 1).toBe(diasDelAnio(anio));
+    }
+  });
+});
+
+describe('franjasDelAnio', () => {
+  it('convierte una ausencia en una barra con sus ordinales', () => {
+    const [f] = franjasDelAnio('2026', [aus({ fechaInicio: '2026-01-01', fechaFin: '2026-01-03' })]);
+    expect(f).toMatchObject({ desdeDia: 1, hastaDia: 3, fechaInicio: '2026-01-01', fechaFin: '2026-01-03' });
+  });
+
+  it('CANDADO: el ordinal cuenta desde el 1 de enero, no desde el 1 del mes', () => {
+    // El 10 de agosto de 2026 es el día 222 del año. Con el offset calculado
+    // desde el mes darían 10, y la barra se pintaría en enero.
+    const [f] = franjasDelAnio('2026', [aus({ fechaInicio: '2026-08-10', fechaFin: '2026-08-12' })]);
+    expect(f).toMatchObject({ desdeDia: 222, hastaDia: 224 });
+  });
+
+  it('CANDADO: el último día del año es el 365, no el 366', () => {
+    // El error de un día en el borde: si `diaDelAnio` empezara en 0, la barra
+    // del 31 de diciembre se saldría de la pista.
+    const [f] = franjasDelAnio('2026', [aus({ fechaInicio: '2026-12-31', fechaFin: '2026-12-31' })]);
+    expect(f).toMatchObject({ desdeDia: 365, hastaDia: 365 });
+    expect(f.hastaDia).toBe(diasDelAnio('2026'));
+  });
+
+  it('CANDADO: una ausencia a caballo entre dos años se RECORTA, no se descarta', () => {
+    // Mismo criterio que `marcasDelMes` con los meses: se pinta entera en los
+    // dos años, cada uno con su trozo. Descartarla dejaría a alguien sin marcar
+    // unas vacaciones de Navidad en ninguna de las dos vistas.
+    const aCaballo = aus({ fechaInicio: '2025-12-28', fechaFin: '2026-01-05' });
+
+    const [en2026] = franjasDelAnio('2026', [aCaballo]);
+    expect(en2026).toMatchObject({ fechaInicio: '2026-01-01', fechaFin: '2026-01-05', desdeDia: 1, hastaDia: 5 });
+
+    const [en2025] = franjasDelAnio('2025', [aCaballo]);
+    expect(en2025).toMatchObject({ fechaInicio: '2025-12-28', fechaFin: '2025-12-31' });
+    expect(en2025.hastaDia).toBe(diasDelAnio('2025'));
+  });
+
+  it('la que no toca el año pedido no sale', () => {
+    expect(franjasDelAnio('2026', [aus({ fechaInicio: '2025-03-01', fechaFin: '2025-03-05' })])).toEqual([]);
+  });
+
+  it('CANDADO: la rechazada no se pinta; la registrada sí', () => {
+    // Mismo par que en `marcasDelMes`. Una rechazada nunca llegó a ocurrir; una
+    // incapacidad `registrada` es su estado terminal y esa persona está fuera.
+    expect(franjasDelAnio('2026', [aus({ estado: 'rechazada' })])).toEqual([]);
+    expect(franjasDelAnio('2026', [aus({ tipo: 'incapacidad', estado: 'registrada' })])).toHaveLength(1);
+  });
+
+  it('CANDADO: valida las fechas de TODAS, incluida la rechazada que no se iba a pintar', () => {
+    // Mismo criterio que `marcasDelMes`: si el `continue` de la rechazada fuera
+    // antes de validar, una fila con la fecha corrupta pasaría sin ruido. No
+    // pintaría nada mal, pero se perdería el diagnóstico.
+    expect(() => franjasDelAnio('2026', [aus({ estado: 'rechazada', fechaFin: 'no-es-fecha' })])).toThrow(
+      /fechaFin inválida/,
+    );
+  });
+
+  it('conserva el tipo y el estado, que es lo que decide el color y la opacidad', () => {
+    const [f] = franjasDelAnio('2026', [aus({ tipo: 'permiso', estado: 'pendiente_2' })]);
+    expect(f).toMatchObject({ tipo: 'permiso', estado: 'pendiente_2' });
   });
 });
