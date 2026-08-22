@@ -526,6 +526,14 @@ async function errorDeAusencia(res: Response): Promise<Error> {
   if (cuerpo?.error === 'compensatorios_insuficientes' && cuerpo.detalle) {
     return new Error(mensajeDeCompensatorios(cuerpo.detalle as CompensatoriosDetalle));
   }
+  // El detalle tiene la MISMA forma que el de los compensatorios —lo emiten dos
+  // funciones gemelas—, pero la frase no puede serlo: aquellos no se devengan y
+  // estos sí, así que «esperar no los aumenta» sería falso aquí y le ahorraría a
+  // alguien la única salida que de verdad tiene, que es pedir menos días o
+  // esperar a devengar.
+  if (cuerpo?.error === 'vacaciones_insuficientes' && cuerpo.detalle) {
+    return new Error(mensajeDeVacaciones(cuerpo.detalle as CompensatoriosDetalle));
+  }
   return errorGenerico(res);
 }
 
@@ -558,6 +566,33 @@ function mensajeDeCompensatorios(d: CompensatoriosDetalle): string {
     `${base}${tramite} Los compensatorios no se devengan con el tiempo: se ganan por horas o días ` +
     'extra y hay que otorgarlos, así que esperar no los aumenta. Si crees que te faltan días por ' +
     'reconocer, habla con administración.'
+  );
+}
+
+/**
+ * El mismo bloqueo, para la bolsa de vacaciones.
+ *
+ * Comparte el detalle con su gemela y también el `sin Math.max(0, …)`: redondear
+ * el déficit a cero borraría el dato por el que existe el aviso.
+ *
+ * Lo que NO comparte es el cierre, y es la razón de que sean dos funciones y no
+ * una con un parámetro. Los compensatorios no se devengan y las vacaciones sí,
+ * así que aquí la salida real del trabajador es otra —pedir menos días, o
+ * esperar a acumular— y decirle «esperar no los aumenta» sería mentirle sobre lo
+ * único que puede hacer por su cuenta.
+ */
+function mensajeDeVacaciones(d: CompensatoriosDetalle): string {
+  const dias = (n: number) => `${n.toLocaleString('es-CO', { maximumFractionDigits: 1 })}`;
+  const base =
+    `Pides ${dias(d.pedidos)} días de vacaciones y solo puedes pedir ${dias(d.pedible)}: ` +
+    `te faltan ${dias(d.pedidos - d.pedible)}.`;
+  const tramite =
+    d.enTramite > 0
+      ? ` En la cuenta entran los ${dias(d.enTramite)} días que ya tienes pendientes de aprobar.`
+      : '';
+  return (
+    `${base}${tramite} Puedes pedir menos días, o esperar: las vacaciones se devengan a razón de ` +
+    '1,25 días por mes trabajado. Si no te cuadra el saldo, habla con administración.'
   );
 }
 

@@ -591,6 +591,76 @@ async function exigirCompensatoriosSuficientes(
   });
 }
 
+/**
+ * Nadie pide más vacaciones de las que tiene. Salvo un admin.
+ *
+ * Gemela de `exigirCompensatoriosSuficientes` y con las mismas tres decisiones,
+ * que ya están razonadas allí y no se repiten: se compara contra `pedible`
+ * (disponible − enTramite) y no contra el firme —si no, tres solicitudes que
+ * quepan por separado pasarían las tres, porque media firma no descuenta—; el
+ * corte por `dias <= 0` deja pasar un rango de solo fin de semana, que no gasta
+ * nada; y solo actúa al CREAR, nunca al aprobar ni en el `PATCH` de admin.
+ *
+ * ⚠️ **Dos diferencias con su gemela, y las dos son deliberadas.**
+ *
+ * La primera: un ADMIN queda exento y puede meterse en negativo. Es lo que se
+ * pidió, y la exención sale de la SESIÓN, así que cubre exactamente a quien
+ * pulsa el botón — un admin sobre su propia solicitud. No existe hoy un alta en
+ * nombre de otro, así que no hay forma de que un admin meta en negativo a nadie
+ * más; si algún día se añade, esta línea hay que volver a mirarla.
+ *
+ * La segunda: sin saldo configurado **NO se bloquea**, al revés que los
+ * compensatorios. La asimetría no es un descuido. Una bolsa de compensatorios
+ * sin configurar significa «no tienes compensatorios», que es el estado normal
+ * de casi toda la plantilla. Un saldo de vacaciones sin configurar significa
+ * «administración todavía no ha puesto el punto de corte» — o sea DESCONOCIDO, no
+ * cero—, y `sinConfigurar()` devuelve `disponible: 0`. Bloquear sobre eso le
+ * cerraría las vacaciones a quien no puede arreglarlo por su cuenta, y encima el
+ * día del despliegue y de golpe. Se deja pasar y se registra, que es lo que hace
+ * visible a quién le falta el corte sin castigar a nadie por ello.
+ */
+async function exigirVacacionesSuficientes(
+  db: Pool,
+  empleado: Empleado,
+  tipo: TipoSolicitud,
+  dias: number,
+  esAdmin: boolean,
+): Promise<void> {
+  if (tipo !== 'vacaciones') return;
+  if (esAdmin) return;
+  if (dias <= 0) return;
+
+  const { saldo } = await saldosDeSesion(db, empleado);
+
+  if (!saldo.configurado) {
+    // Una línea por solicitud, no un contador: lo que hace falta saber es a QUIÉN
+    // le falta el corte, y eso es justo lo que administración necesita para
+    // sembrarlo desde el panel de Saldos.
+    console.log(
+      JSON.stringify({
+        event: 'ausencias_vacaciones_sin_saldo_configurado',
+        timestamp: new Date().toISOString(),
+        empleadoId: empleado.id,
+        correo: empleado.correo,
+        diasPedidos: dias,
+      }),
+    );
+    return;
+  }
+
+  const puedePedir = pedible(saldo);
+  if (dias <= puedePedir) return;
+  // El detalle es obligatorio, no decorativo, por lo mismo que en la gemela: «no
+  // puedes» sin los números es inaccionable. Y no hay fuga: es el saldo de quien
+  // pregunta.
+  throw new AusenciaError('vacaciones_insuficientes', 409, 'fechaFin', {
+    pedidos: dias,
+    pedible: puedePedir,
+    disponible: saldo.disponible,
+    enTramite: saldo.enTramite,
+  });
+}
+
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
@@ -628,6 +698,11 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // y de decodificar el base64 del adjunto para no procesar 8 MB de una solicitud
   // que se va a rechazar.
   await exigirCompensatoriosSuficientes(db, empleado, datos.tipo, diasHabiles);
+  // Las dos puertas van seguidas y ninguna se solapa con la otra: cada una mira
+  // su `tipo` y sale enseguida si no es el suyo, así que solo una llega a
+  // consultar el saldo. Se llaman las dos, y no un `if/else` sobre el tipo,
+  // porque el día que haya una tercera bolsa la lista crece sin tocar el flujo.
+  await exigirVacacionesSuficientes(db, empleado, datos.tipo, diasHabiles, sesion.esAdmin);
 
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
