@@ -137,10 +137,13 @@ class FakeDb {
       return { rows: u ? [u] : [], rowCount: u ? 1 : 0 };
     }
     // SEC-224 — requireAuth ya no pide solo la fila del usuario: pide rol,
-    // estado y apps en una sola consulta con LEFT JOIN sobre user_apps. Va
+    // estado, token_version y las apps por subconsulta ARRAY(...). Va
     // ANTES del `WHERE id = $1` genérico, que devuelve la fila entera y no
-    // sabría montar el array de apps.
-    if (/LEFT JOIN portal\.user_apps/i.test(sql)) {
+    // sabría montar el array de apps. AVISO: este fake casa por REGEX y NO valida
+    // el SQL — que pase aquí no significa que Postgres lo acepte. Eso solo lo
+    // dice auth.requireauth.db.test.ts, y hasta que existió una consulta
+    // inválida tumbó la autenticación en producción.
+    if (sql.includes("ARRAY(") && sql.includes("ua.app_id")) {
       const [id] = params as string[];
       const u = this.users.find((x) => x.id === id);
       if (!u) return { rows: [], rowCount: 0 };

@@ -187,17 +187,28 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   // (user_id, app_id), así que el LEFT JOIN entra por índice y no añade viaje.
   try {
     const { rows } = await getHubPool().query(
+      // Las apps salen de una subconsulta ARRAY(...) y NO de un
+      // array_agg + LEFT JOIN + GROUP BY, que es como se escribió primero y
+      // tumbó la autenticación entera en produccion el 2026-08-23: al añadir
+      // `u.token_version` al SELECT sin añadirla al GROUP BY, PostgreSQL
+      // rechazó la consulta, `requireAuth` cayó a su rama de error y devolvió
+      // 401 a todo el mundo. Los mocks de los tests ignoran el SQL, así que
+      // 1011 tests en verde no vieron nada.
+      //
+      // Sin GROUP BY no hay forma de repetirlo: añadir una columna al SELECT
+      // ya no puede invalidar la consulta. `ARRAY(subconsulta)` devuelve `{}`
+      // cuando no hay filas, así que tampoco hace falta COALESCE.
       `SELECT u.role,
               u.status,
               u.token_version,
-              COALESCE(
-                array_agg(ua.app_id ORDER BY ua.app_id) FILTER (WHERE ua.app_id IS NOT NULL),
-                '{}'::text[]
+              ARRAY(
+                SELECT ua.app_id
+                  FROM portal.user_apps ua
+                 WHERE ua.user_id = u.id
+                 ORDER BY ua.app_id
               ) AS apps
          FROM portal.users u
-         LEFT JOIN portal.user_apps ua ON ua.user_id = u.id
-        WHERE u.id = $1
-        GROUP BY u.role, u.status`,
+        WHERE u.id = $1`,
       [String(payload.user_id)],
     );
     const user = rows[0] as
