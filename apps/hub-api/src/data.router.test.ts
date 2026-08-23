@@ -16,6 +16,18 @@ const SECRET = 'test-secret-data-router';
 process.env.JWT_SECRET = SECRET;
 process.env.AUTH_USERS = '';
 
+// Estado que comparten `token()` y el mock de la BD, para que digan lo mismo.
+const estadoAuth = vi.hoisted(() => ({ role: 'reader', apps: [] as string[] }));
+vi.mock('./db.js', () => ({
+  getHubPool: () => ({
+    query: async () => ({
+      rows: [{ role: estadoAuth.role, status: 'active', apps: estadoAuth.apps, token_version: 0 }],
+      rowCount: 1,
+    }),
+    on: () => {},
+  }),
+}));
+
 // Los handlers no son el objeto del test (lo es el guard): mockeamos las fuentes de
 // datos para respuestas deterministas y sin BD.
 vi.mock('./reconciliation.js', () => ({ getReconciliationData: vi.fn().mockResolvedValue({ pagos: [] }) }));
@@ -33,9 +45,15 @@ beforeAll(async () => {
   ({ createDataRouter } = await import('./data.router.js'));
 });
 
-// Token legacy (sin user_id) → requireAuth pasa por la rama que NO toca BD.
+// El fallback AUTH_USERS se retiró (2026-08-23) y con él la rama que dejaba
+// pasar tokens sin `user_id` sin tocar la BD. requireAuth consulta siempre y
+// PISA `role` y `apps` con la fila (SEC-224), así que el mock devuelve lo mismo
+// que acuña `token()` y las aserciones siguen midiendo lo mismo.
+const USER_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 function token(apps: string[], role = 'reader'): string {
-  return jwt.sign({ sub: 'u@t.co', role, apps }, SECRET);
+  estadoAuth.role = role;
+  estadoAuth.apps = apps;
+  return jwt.sign({ sub: 'u@t.co', user_id: USER_ID, role, apps, token_version: 0 }, SECRET);
 }
 
 function app(): express.Express {

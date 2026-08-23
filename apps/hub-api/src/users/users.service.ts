@@ -214,6 +214,23 @@ export class UserService {
       throw new UserError('password_too_short', 400, 'newPassword');
     }
     const hash = await bcrypt.hash(newPwd, BCRYPT_COST);
+    // `updatePassword` incrementa `token_version` en la MISMA sentencia
+    // (SEC-220): cambiar la contraseña invalida las sesiones vivas, que es
+    // justo lo que espera quien la cambia porque sospecha que se la robaron.
     await this.repo.updatePassword(id, hash);
+  }
+
+  /**
+   * Cierra la sesión invalidando TODOS los tokens vivos del usuario (SEC-220).
+   *
+   * Es global a propósito, no por-dispositivo: quien pulsa «cerrar sesión» en
+   * una herramienta interna espera dejar de estar dentro, no dejar de estarlo
+   * solo en la pestaña que tiene delante. Distinguir dispositivos exigiría un
+   * identificador por sesión y una tabla donde llevarlas, y el caso que de
+   * verdad importa —«me he dejado la sesión abierta en otro sitio»— es
+   * precisamente el que el logout global resuelve y el por-dispositivo no.
+   */
+  async logout(id: string): Promise<void> {
+    if (!(await this.repo.bumpTokenVersion(id))) throw new UserError('user_not_found', 404);
   }
 }

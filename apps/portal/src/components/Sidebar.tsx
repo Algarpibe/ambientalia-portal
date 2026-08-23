@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import logotipo from '../assets/ambientalia-logo.png';
 import isotipo from '../assets/ambientalia-isotipo.png';
-import { clearToken } from '../auth';
+import { logout } from '../auth';
 import { useAuth } from '../hooks/useAuth';
 import { hasAssignedInCategory } from '../lib/apps';
 
@@ -37,8 +37,8 @@ export default function Sidebar() {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const handleLogOut = () => {
-    clearToken();
+  const handleLogOut = async () => {
+    await logout();
     navigate('/auth');
   };
 
