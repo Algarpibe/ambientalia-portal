@@ -11,6 +11,28 @@ import { CALENDARIO_STAFF } from './config.js';
 
 const SECRET = 'test-secret-ausencias';
 process.env.JWT_SECRET = SECRET;
+
+// Registro de identidades para el mock de la BD. NO vale un "ultimo que acuño
+// gana": `decidirCon` acuña el token del decisor, luego acuña otro por defecto
+// para crear la solicitud, y solo despues manda la peticion con el primero. La
+// fila tiene que salir del user_id que viene en CADA peticion, no del orden.
+interface FilaAuth { role: string; apps: string[] }
+const estadoAuth = vi.hoisted(() => ({
+  porUsuario: new Map<string, { role: string; apps: string[] }>(),
+  ids: new Map<string, string>(),
+}));
+vi.mock("../db.js", () => ({
+  getHubPool: () => ({
+    query: async (_sql: string, params: unknown[] = []) => {
+      const fila = estadoAuth.porUsuario.get(String(params[0] ?? "")) ?? { role: "reader", apps: ["ausencias"] };
+      return {
+        rows: [{ role: fila.role, status: "active", apps: fila.apps, token_version: 0 }],
+        rowCount: 1,
+      };
+    },
+    on: () => {},
+  }),
+}));
 process.env.AUSENCIAS_CRON_TOKEN = 'cron-ausencias';
 process.env.WO_SALES_CRON_TOKEN = 'cron-wo-sales';
 
@@ -1328,10 +1350,37 @@ const { createAusenciasRouter } = await import('./router.js');
 
 // ── Utilidades ─────────────────────────────────────────────────────────────
 
+// `user_id` fijo: el fallback AUTH_USERS se retiró (2026-08-23) y con él la rama
+// que dejaba pasar tokens sin `user_id` sin consultar la BD, que era el atajo de
+// este fichero. requireAuth consulta siempre y, desde SEC-224, PISA `role` y
+// `apps` con lo que dice la fila — por eso `estadoAuth` se siembra aquí con lo
+// mismo que se firma: así los 332 tests de abajo siguen midiendo lo que medían.
+/** user_id estable por correo: el mock busca la fila por el id de la peticion. */
+function idDe(sub: string): string {
+  if (!estadoAuth.ids.has(sub)) {
+    const n = estadoAuth.ids.size + 1;
+    estadoAuth.ids.set(sub, `eeeeeeee-eeee-4eee-8eee-${String(n).padStart(12, "0")}`);
+  }
+  return estadoAuth.ids.get(sub) as string;
+}
 function token(over: Record<string, unknown> = {}): string {
-  // Sin `user_id`: requireAuth acepta los tokens legacy sin consultar la BD, lo
-  // que nos deja probar el router sin montar un pool de usuarios.
-  return jwt.sign({ sub: 'ana.ruiz@ambientalia.com.co', role: 'reader', apps: ['ausencias'], ...over }, SECRET);
+  const payload = {
+    sub: "ana.ruiz@ambientalia.com.co",
+    role: "reader",
+    apps: ["ausencias"],
+    token_version: 0,
+    ...over,
+  } as Record<string, unknown>;
+  // El fallback AUTH_USERS se retiro (2026-08-23) y con el la rama que dejaba
+  // pasar tokens sin user_id sin tocar la BD, que era el atajo de este fichero.
+  // requireAuth consulta siempre y, desde SEC-224, PISA role y apps con la fila:
+  // por eso cada identidad se registra con lo mismo que se firma.
+  payload.user_id = idDe(String(payload.sub));
+  estadoAuth.porUsuario.set(String(payload.user_id), {
+    role: String(payload.role ?? "reader"),
+    apps: (payload.apps as string[]) ?? [],
+  });
+  return jwt.sign(payload, SECRET);
 }
 
 function app() {

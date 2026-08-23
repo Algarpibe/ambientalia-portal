@@ -125,6 +125,25 @@ export function createUsersRouter(pool: Pool): Router {
     }
   });
 
+  // POST /api/auth/logout — cierra la sesión de verdad (SEC-220). Incrementa
+  // token_version, así que TODOS los tokens vivos de esa persona dejan de valer
+  // en su siguiente petición, no solo el de la pestaña actual. El frontend
+  // borra además el token de localStorage; esto es lo que hace que borrarlo
+  // signifique algo.
+  //
+  // No se audita: no es una acción de gestión administrativa (no hay adminEmail),
+  // igual que el cambio de contraseña propio.
+  router.post('/auth/logout', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      await service.logout(payload.user_id);
+      res.json({ message: 'logged_out' });
+    } catch (e) {
+      sendError(res, e, 'logout');
+    }
+  });
+
   // GET /api/users?page=N — lista paginada (50/página).
   router.get('/users', requireAdmin, async (req: Request, res: Response) => {
     try {

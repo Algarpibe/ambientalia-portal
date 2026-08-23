@@ -17,6 +17,8 @@ export interface UserRow {
   role: UserRole;
   status: UserStatus;
   created_at: string; // ISO 8601 (TIMESTAMPTZ)
+  /** SEC-220 — se incrementa al cambiar contraseña o cerrar sesión. */
+  token_version: number;
 }
 
 /**
@@ -64,6 +66,12 @@ export interface JwtPayload {
   user_id: string; // UUID
   role: UserRole;
   apps: string[];
+  /**
+   * SEC-220 — versión de sesión. Opcional porque los tokens emitidos ANTES de
+   * la migración 034 no la llevan; ausente se lee como 0, que es el valor que
+   * la columna tiene para todos hasta el primer cambio de contraseña o logout.
+   */
+  token_version?: number;
   iat?: number;
   exp?: number;
 }

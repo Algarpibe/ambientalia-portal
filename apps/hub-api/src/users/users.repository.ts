@@ -37,7 +37,7 @@ export class UserRepository {
   /** Busca por email (incluye password_hash para el login). null si no existe. */
   async findByEmail(email: string): Promise<UserRow | null> {
     const { rows } = await this.pool.query(
-      `SELECT id, full_name, email, password_hash, role, status, created_at
+      `SELECT id, full_name, email, password_hash, role, status, created_at, token_version
          FROM portal.users WHERE email = $1`,
       [email.toLowerCase().trim()],
     );
@@ -47,7 +47,7 @@ export class UserRepository {
   /** Busca por id (UUID). Incluye password_hash. null si no existe. */
   async findById(id: string): Promise<UserRow | null> {
     const { rows } = await this.pool.query(
-      `SELECT id, full_name, email, password_hash, role, status, created_at
+      `SELECT id, full_name, email, password_hash, role, status, created_at, token_version
          FROM portal.users WHERE id = $1`,
       [id],
     );
@@ -132,10 +132,30 @@ export class UserRepository {
   }
 
   /** Actualiza el hash de contraseña. Devuelve true si el usuario existía. */
+  /**
+   * Cambia la contraseña e invalida las sesiones vivas EN LA MISMA sentencia
+   * (SEC-220). Van juntas a propósito: si el incremento de `token_version`
+   * fuera una segunda consulta, un fallo entre ambas dejaría la contraseña
+   * cambiada y los tokens robados todavía sirviendo, que es exactamente el
+   * escenario del que la víctima intenta salir.
+   */
   async updatePassword(id: string, passwordHash: string): Promise<boolean> {
     const res = await this.pool.query(
-      'UPDATE portal.users SET password_hash = $2 WHERE id = $1',
+      'UPDATE portal.users SET password_hash = $2, token_version = token_version + 1 WHERE id = $1',
       [id, passwordHash],
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Invalida todas las sesiones vivas del usuario (SEC-220). La usa el logout;
+   * el cambio de contraseña no la necesita porque `updatePassword` ya lo hace
+   * en su propia sentencia.
+   */
+  async bumpTokenVersion(id: string): Promise<boolean> {
+    const res = await this.pool.query(
+      'UPDATE portal.users SET token_version = token_version + 1 WHERE id = $1',
+      [id],
     );
     return (res.rowCount ?? 0) > 0;
   }

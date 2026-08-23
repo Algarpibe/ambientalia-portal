@@ -12,6 +12,18 @@ const SECRET = 'test-secret-contabilidad';
 process.env.JWT_SECRET = SECRET;
 process.env.AUTH_USERS = '';
 
+// Estado que comparten `token()` y el mock de la BD, para que digan lo mismo.
+const estadoAuth = vi.hoisted(() => ({ role: 'reader', apps: [] as string[] }));
+vi.mock('../db.js', () => ({
+  getHubPool: () => ({
+    query: async () => ({
+      rows: [{ role: estadoAuth.role, status: 'active', apps: estadoAuth.apps, token_version: 0 }],
+      rowCount: 1,
+    }),
+    on: () => {},
+  }),
+}));
+
 let createContabilidadRouter: typeof import('./router.js')['createContabilidadRouter'];
 beforeAll(async () => {
   ({ createContabilidadRouter } = await import('./router.js'));
@@ -19,8 +31,16 @@ beforeAll(async () => {
 
 // requireAuth de auth.ts consulta la BD para usuarios con user_id. Usamos un
 // token legacy (sin user_id) para que pase por la rama que no toca BD.
+// El fallback AUTH_USERS se retiró (2026-08-23) y con él la rama que dejaba
+// pasar tokens sin `user_id` sin tocar la BD, que era el atajo que usaba este
+// fichero. Ahora requireAuth consulta SIEMPRE, y además PISA `role` y `apps`
+// con lo que dice la fila (SEC-224). Así que el mock devuelve exactamente lo
+// que acuña `token()`: las aserciones de abajo siguen midiendo lo mismo.
+const USER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 function token(apps: string[], role = 'reader'): string {
-  return jwt.sign({ sub: 'u@t.co', role, apps }, SECRET); // sin user_id -> rama legacy
+  estadoAuth.role = role;
+  estadoAuth.apps = apps;
+  return jwt.sign({ sub: 'u@t.co', user_id: USER_ID, role, apps, token_version: 0 }, SECRET);
 }
 
 function appConPool(pool: Partial<Pool>): express.Express {

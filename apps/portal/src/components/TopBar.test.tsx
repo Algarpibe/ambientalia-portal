@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import TopBar from './TopBar';
-import { clearToken } from '../auth';
+import { logout } from '../auth';
 
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => navigateMock }));
-vi.mock('../auth', () => ({ clearToken: vi.fn() }));
+// SEC-220 — el botón ya no borra el token y se queda tan ancho: llama a
+// `logout()`, que avisa al backend para invalidar TODOS los tokens vivos del
+// usuario y solo entonces borra el local.
+vi.mock('../auth', () => ({ logout: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../hooks/useProfile', () => ({
   useProfile: () => ({
     profile: { id: 'u', full_name: 'Alfonso García', email: 'comercial@x.com', role: 'admin', status: 'active', created_at: '2026-03-12T00:00:00.000Z', avatar: null },
@@ -31,11 +34,13 @@ describe('TopBar', () => {
     expect(screen.getByText('Cerrar sesión')).toBeTruthy();
   });
 
-  it('Cerrar sesión limpia el token y navega a /auth', () => {
+  it('Cerrar sesión invalida la sesión en el backend y navega a /auth', async () => {
     render(<MemoryRouter><TopBar /></MemoryRouter>);
     fireEvent.click(screen.getByLabelText('Menú de usuario'));
     fireEvent.click(screen.getByText('Cerrar sesión'));
-    expect(clearToken).toHaveBeenCalled();
-    expect(navigateMock).toHaveBeenCalledWith('/auth');
+    // `logout()` es asíncrono: la navegación ocurre DESPUÉS de avisar al
+    // backend, así que hay que dejar correr el microtask antes de mirar.
+    await waitFor(() => expect(logout).toHaveBeenCalled());
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth'));
   });
 });

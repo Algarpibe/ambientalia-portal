@@ -205,3 +205,58 @@ describe('SEC-224 — el rol y las apps mandan desde la BD, no desde el JWT', ()
     expect(passed).toBe(true);
   });
 });
+
+describe('SEC-220 — una sesión se puede invalidar antes de que expire el token', () => {
+  // Hasta aquí nada podía matar un JWT: cambiar la contraseña no tocaba las
+  // sesiones y el logout solo borraba localStorage, así que un token robado
+  // sobrevivía a la reacción de la víctima durante todo el TTL. `token_version`
+  // viaja firmada y se compara contra la fila que requireAuth ya lee.
+  const USER_ID = '22222222-2222-4222-8222-222222222222';
+
+  function tokenCon(token_version?: number) {
+    const payload: Record<string, unknown> = { sub: 'x@x.com', user_id: USER_ID, role: 'reader', apps: [] };
+    if (token_version !== undefined) payload.token_version = token_version;
+    return mockReq({ authorization: `Bearer ${jwt.sign(payload, SECRET, { expiresIn: '7d' })}` });
+  }
+
+  it('CANDADO: un token con token_version antigua recibe 401', async () => {
+    // La víctima cambió la contraseña (o cerró sesión): la fila va por la 1.
+    state.findByIdResult = { ...activeUser(USER_ID), token_version: 1 };
+    const { passed, status } = await run(auth.requireAuth, tokenCon(0));
+    expect(passed).toBe(false);
+    expect(status).toBe(401);
+  });
+
+  it('el token emitido DESPUÉS del cambio sigue funcionando', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID), token_version: 1 };
+    const { passed, status } = await run(auth.requireAuth, tokenCon(1));
+    expect(passed).toBe(true);
+    expect(status).toBe(200);
+  });
+
+  // Compatibilidad hacia atrás: desplegar la migración 034 no puede desloguear
+  // a nadie. Los tokens anteriores no llevan el campo y la columna vale 0 para
+  // todo el mundo hasta el primer cambio de contraseña o logout.
+  it('CANDADO: un token SIN token_version (anterior a la 034) sigue valiendo si la fila está en 0', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID), token_version: 0 };
+    const { passed, status } = await run(auth.requireAuth, tokenCon(undefined));
+    expect(passed).toBe(true);
+    expect(status).toBe(200);
+  });
+
+  it('CANDADO: pero ese token viejo deja de valer en cuanto la fila avanza', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID), token_version: 1 };
+    const { passed, status } = await run(auth.requireAuth, tokenCon(undefined));
+    expect(passed).toBe(false);
+    expect(status).toBe(401);
+  });
+
+  it('CANDADO: la comprobación es de igualdad, no de "mayor o igual" — una versión FUTURA tampoco pasa', async () => {
+    // Un atacante que pudiera firmar tokens no debe poder saltarse la
+    // invalidación futura poniendo un número alto.
+    state.findByIdResult = { ...activeUser(USER_ID), token_version: 1 };
+    const { passed, status } = await run(auth.requireAuth, tokenCon(99));
+    expect(passed).toBe(false);
+    expect(status).toBe(401);
+  });
+});

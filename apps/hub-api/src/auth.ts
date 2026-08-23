@@ -17,70 +17,57 @@ declare global {
 }
 
 // Auth real server-side (SEC-001/SEC-003). Login por credenciales → JWT firmado.
-// Usuarios en el entorno: AUTH_USERS = "email1:hashBcrypt1,email2:hashBcrypt2"
-// (los hashes bcrypt no contienen ',' ni ':', así que el parseo es seguro).
+//
+// La ÚNICA fuente de usuarios es `portal.users`. El fallback por AUTH_USERS que
+// vivió aquí durante la migración se retiró el 2026-08-23: no quedaban usuarios
+// que dependieran de él, emitía tokens sin `user_id` que se saltaban el chequeo
+// de BD entero (el agujero irrevocable de SEC-220), y su hash bcrypt de coste 10
+// era un secreto más que rotar.
+//
+// AUTH_USERS SIGUE existiendo, pero solo como provisioning: `seed-from-env.ts`
+// la lee al arrancar para poder crear el primer admin de una base nueva. Es
+// necesaria porque `/api/auth/register` crea usuarios `pending` y hace falta un
+// admin para aprobarlos: sin seed, una BD recreada desde cero se queda sin nadie
+// que pueda entrar. Procedimiento: ponerla, arrancar una vez, vaciarla.
 
 const JWT_SECRET = process.env.JWT_SECRET || '';
-// Sesión de 30 días por defecto: es una herramienta interna y molestaba tener que
-// reloguear a diario (el token vivía 8h). Como cada petición revalida que el usuario
-// siga `active` en la BD —y desde SEC-224 relee también su rol y sus apps—, un
-// token largo NO impide cortar ni recortar el acceso al instante: desactivar,
-// degradar o retirar una app surten efecto en la petición siguiente. Lo que un
-// TTL largo sí alarga es la vida de un token ROBADO (ver SEC-220: no hay
-// invalidación). Sobrescribible con JWT_TTL (formato de
-// jsonwebtoken: '8h', '7d', '30d'…).
-const TOKEN_TTL = process.env.JWT_TTL || '30d';
+// Sesión de 7 días. Era de 30 —herramienta interna, molestaba reloguear a
+// diario— y se bajó con SEC-220, cuando dejó de ser gratis: cada petición
+// revalida contra la BD el estado, el rol, las apps y ahora la `token_version`,
+// así que desactivar, degradar, retirar una app, cambiar la contraseña o cerrar
+// sesión surten efecto en la petición siguiente. Lo único que el TTL sigue
+// gobernando es cuánto vive un token que nadie ha invalidado; 7 días es un
+// compromiso entre no reloguear a diario y no dejar suelto un mes un token del
+// que nadie sospecha. Sobrescribible con JWT_TTL ('8h', '7d', '30d'…).
+const TOKEN_TTL = process.env.JWT_TTL || '7d';
 
 if (!JWT_SECRET) {
   console.warn('WARNING: JWT_SECRET no configurado — el login JWT está deshabilitado.');
 }
 
-function loadUsers(): Map<string, string> {
-  const users = new Map<string, string>();
-  (process.env.AUTH_USERS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .forEach((pair) => {
-      const idx = pair.indexOf(':');
-      if (idx > 0) {
-        users.set(pair.slice(0, idx).toLowerCase().trim(), pair.slice(idx + 1).trim());
-      }
-    });
-  return users;
-}
-const USERS = loadUsers();
-
-// SEC-214 — hash bcrypt fijo para ejecutar SIEMPRE un compare (también cuando el
-// email no existe en AUTH_USERS), igualando el tiempo de respuesta y evitando la
-// enumeración de usuarios por timing.
+// SEC-214 — hash bcrypt fijo contra el que comparar cuando el email NO existe,
+// para que el coste de la respuesta no delate si la cuenta es real. Vivía en
+// `verifyCredentials`, que se retiró con el fallback; se queda aquí porque la
+// defensa era de `loginUser`, no del fallback: sin ella, un correo inexistente
+// respondería al instante y uno real costaría un bcrypt.compare.
 const DUMMY_HASH = bcrypt.hashSync('sec214-timing-safe-dummy', 10);
-
-export async function verifyCredentials(email: string, password: string): Promise<boolean> {
-  const hash = USERS.get(String(email || '').toLowerCase().trim());
-  try {
-    // Comparamos siempre (contra DUMMY_HASH si el usuario no existe): el coste del
-    // bcrypt.compare no debe depender de si el email está o no en AUTH_USERS.
-    const ok = await bcrypt.compare(String(password || ''), hash ?? DUMMY_HASH);
-    return hash ? ok : false;
-  } catch {
-    return false;
-  }
-}
 
 function signToken(payload: Record<string, unknown>): string {
   const options: jwt.SignOptions = { expiresIn: TOKEN_TTL as jwt.SignOptions['expiresIn'] };
   return jwt.sign(payload, JWT_SECRET, options);
 }
 
-/** Token legacy con solo `sub` (retrocompatibilidad; sigue usándose en tests). */
-export function issueToken(email: string): string {
-  return signToken({ sub: String(email).toLowerCase().trim() });
-}
-
-/** Token extendido para un usuario de BD: `{ sub, user_id, role, apps }` (Req 3.3, 4.3). */
+/**
+ * Token de un usuario de BD: `{ sub, user_id, role, apps, token_version }`.
+ *
+ * `role` y `apps` viajan solo para que el navegador pinte la interfaz sin una
+ * segunda llamada: la autorización REAL los relee de la BD en cada petición
+ * (SEC-224). `token_version` es lo contrario — es la copia firmada que
+ * `requireAuth` compara contra la fila para saber si esta sesión sigue siendo
+ * válida (SEC-220).
+ */
 export function issueTokenForUser(
-  user: { id: string; email: string; role: UserRole },
+  user: { id: string; email: string; role: UserRole; token_version?: number },
   apps: string[],
 ): string {
   return signToken({
@@ -88,6 +75,7 @@ export function issueTokenForUser(
     user_id: user.id,
     role: user.role,
     apps,
+    token_version: user.token_version ?? 0,
   });
 }
 
@@ -99,16 +87,17 @@ export interface LoginResult {
 }
 
 /**
- * Autentica un login (Req 2.8, 3.3, 4.3, 6.2). Intenta primero el modelo de BD;
- * si el email no existe en `users`, cae al fallback `AUTH_USERS`.
- *  - Usuario de BD no `active`         → 403 "account not approved".
- *  - Credenciales incorrectas          → 401 "invalid credentials".
- *  - OK (BD)   → JWT extendido con user_id/role/apps (apps desde user_apps).
- *  - OK (fallback) → JWT con role 'reader' y apps [] (sin user_id).
+ * Autentica un login (Req 2.8, 3.3, 4.3, 6.2) contra `portal.users`, que es la
+ * única fuente de usuarios.
+ *  - Usuario no `active`      → 403 "account not approved".
+ *  - Credenciales incorrectas → 401 "invalid credentials".
+ *  - Email inexistente        → 401 "invalid credentials", pero DESPUÉS de un
+ *    bcrypt.compare contra DUMMY_HASH (SEC-214): sin él, la respuesta llegaría
+ *    al instante y el tiempo delataría qué correos existen.
+ *  - OK → JWT con user_id, role, apps y token_version.
  *
- * Un error de BD se propaga (el handler responde 500): el fallback es solo para
- * usuarios ausentes de la BD, no para suplantar el chequeo de estado si la BD
- * está caída (evita que un usuario desactivado entre por AUTH_USERS).
+ * Un error de BD se propaga y el handler responde 500. Es deliberado: sin BD no
+ * hay forma de saber si alguien sigue activo, y adivinar sería peor que fallar.
  */
 export async function loginUser(email: string, password: string): Promise<LoginResult> {
   const em = String(email || '').toLowerCase().trim();
@@ -128,11 +117,9 @@ export async function loginUser(email: string, password: string): Promise<LoginR
     return { ok: true, token: issueTokenForUser(dbUser, apps) };
   }
 
-  // Fallback AUTH_USERS: usuarios aún no migrados a BD → rol reader, sin apps.
-  if (await verifyCredentials(em, pw)) {
-    return { ok: true, token: signToken({ sub: em, role: 'reader', apps: [] }) };
-  }
-
+  // SEC-214 — el email no existe, pero se paga igualmente un bcrypt.compare
+  // antes de responder. El resultado se descarta: lo que importa es el tiempo.
+  await bcrypt.compare(pw, DUMMY_HASH);
   return { ok: false, status: 401, error: 'invalid credentials' };
 }
 
@@ -147,12 +134,16 @@ export async function loginUser(email: string, password: string): Promise<LoginR
  *     que `requireAdmin`/`requireApp` decidan sobre el estado de hoy y no sobre
  *     el que se firmó al entrar.
  *
- * Los tokens legacy del fallback `AUTH_USERS` (sin `user_id`) pasan directo,
- * preservando la migración. No es un agujero de SEC-224: se firman con
- * `role: 'reader'` y `apps: []` (o sin rol alguno), así que `requireAdmin` y
- * `requireApp` los rechazan igual. Su problema es otro, y es SEC-220.
+ *   - compara la `token_version` firmada con la de la fila (SEC-220): si no
+ *     coinciden, la sesión fue invalidada por un cambio de contraseña o un
+ *     logout y se responde 401.
  *
- * Nota: las rutas sin token / token inválido / legacy resuelven en el prefijo
+ * Ya NO hay excepciones: todo token que llegue aquí pasa por la BD. La rama que
+ * dejaba pasar a los tokens sin `user_id` (fallback AUTH_USERS) se retiró con el
+ * propio fallback — era el único camino que se saltaba estas comprobaciones, y
+ * por tanto el único imposible de revocar.
+ *
+ * Nota: las rutas sin token o con token inválido resuelven en el prefijo
  * síncrono (antes de cualquier `await`); solo el chequeo de BD es asíncrono.
  */
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -174,10 +165,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
   req.user = payload;
 
-  // Token legacy (fallback AUTH_USERS): sin user_id → no hay fila en BD que
-  // consultar. Se acepta tal cual para no romper el fallback durante la migración.
+  // Sin `user_id` no hay fila que consultar y, por tanto, nada que verificar:
+  // ni estado, ni rol, ni versión de sesión. Antes esto era la puerta del
+  // fallback AUTH_USERS; retirado aquél, un token así solo puede venir de un
+  // secreto viejo o de una firma manipulada. Se rechaza.
   if (!payload.user_id) {
-    next();
+    res.status(401).json({ error: 'unauthorized' });
     return;
   }
 
@@ -196,6 +189,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const { rows } = await getHubPool().query(
       `SELECT u.role,
               u.status,
+              u.token_version,
               COALESCE(
                 array_agg(ua.app_id ORDER BY ua.app_id) FILTER (WHERE ua.app_id IS NOT NULL),
                 '{}'::text[]
@@ -206,8 +200,18 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         GROUP BY u.role, u.status`,
       [String(payload.user_id)],
     );
-    const user = rows[0] as { role?: UserRole; status?: string; apps?: string[] } | undefined;
+    const user = rows[0] as
+      | { role?: UserRole; status?: string; apps?: string[]; token_version?: number }
+      | undefined;
     if (!user || user.status !== 'active') {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    // SEC-220 — la sesión vale mientras su versión firmada siga siendo la de la
+    // fila. Un token anterior a la migración 034 no trae el campo y se lee como
+    // 0, que es lo que la columna vale hasta el primer cambio de contraseña o
+    // logout: por eso desplegar esto no desloguea a nadie.
+    if ((payload.token_version ?? 0) !== (user.token_version ?? 0)) {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }

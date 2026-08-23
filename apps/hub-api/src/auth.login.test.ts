@@ -81,7 +81,13 @@ describe('loginUser — JWT extendido (task 8.5)', () => {
     );
   });
 
-  it('la sesión dura 30 días por defecto (no vuelve a 8h por descuido)', async () => {
+  // Fue de 8h, luego 30 días, y desde SEC-220 son 7. El candado no defiende un
+  // número concreto por capricho: defiende que nadie lo mueva sin pensarlo. 30
+  // días eran demasiados cuando NADA podía invalidar un token antes de tiempo;
+  // ahora que cambiar la contraseña y cerrar sesión sí lo hacen, 7 es el
+  // compromiso entre no reloguear a diario y no dejar suelto un mes un token
+  // del que nadie sospecha.
+  it('la sesión dura 7 días por defecto (SEC-220; ni 8h ni 30 días por descuido)', async () => {
     state.user = {
       id: 'u1', full_name: 'X', email: 'ttl@empresa.com', password_hash: PASSWORD_HASH,
       role: 'reader', status: 'active', created_at: '2025-01-01T00:00:00.000Z',
@@ -90,7 +96,7 @@ describe('loginUser — JWT extendido (task 8.5)', () => {
     const result = await auth.loginUser('ttl@empresa.com', PASSWORD);
     const payload = jwt.verify(result.token as string, SECRET) as { iat: number; exp: number };
     const days = (payload.exp - payload.iat) / 86400;
-    expect(days).toBeCloseTo(30, 0);
+    expect(days).toBeCloseTo(7, 0);
   });
 
   it('usuario no activo → 403 sin emitir token', async () => {

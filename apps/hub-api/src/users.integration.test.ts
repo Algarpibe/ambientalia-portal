@@ -21,6 +21,8 @@ interface Row {
   status: string;
   created_at: string;
   avatar?: string | null;
+  /** SEC-220 — se incrementa al cambiar contraseña o cerrar sesión. */
+  token_version: number;
   _seq: number;
 }
 
@@ -41,6 +43,7 @@ class FakeDb {
       role: u.role ?? 'reader',
       status: u.status ?? 'active',
       created_at: u.created_at ?? new Date(1_700_000_000_000 + n * 1000).toISOString(),
+      token_version: u.token_version ?? 0,
       _seq: n,
     };
     this.users.push(row);
@@ -107,7 +110,10 @@ class FakeDb {
     if (/^UPDATE portal.users SET password_hash/i.test(sql)) {
       const [id, hash] = params as string[];
       const u = this.users.find((x) => x.id === id);
-      if (u) u.password_hash = hash;
+      // SEC-220 — la sentencia real cambia la contraseña Y sube token_version
+      // en un solo UPDATE. El fake tiene que hacer lo mismo, o el test de que
+      // cambiar la contraseña invalida las sesiones pasaría por casualidad.
+      if (u) { u.password_hash = hash; u.token_version += 1; }
       return { rows: [], rowCount: u ? 1 : 0 };
     }
     if (/^UPDATE portal.users SET full_name/i.test(sql)) {
@@ -142,7 +148,14 @@ class FakeDb {
         .filter((a) => a.user_id === id)
         .map((a) => a.app_id)
         .sort();
-      return { rows: [{ role: u.role, status: u.status, apps }], rowCount: 1 };
+      return { rows: [{ role: u.role, status: u.status, apps, token_version: u.token_version }], rowCount: 1 };
+    }
+    // SEC-220 — el logout invalida las sesiones incrementando token_version.
+    if (/SET token_version = token_version \+ 1/i.test(sql)) {
+      const [id] = params as string[];
+      const u = this.users.find((x) => x.id === id);
+      if (u) u.token_version += 1;
+      return { rows: [], rowCount: u ? 1 : 0 };
     }
     if (/FROM portal.users WHERE id = \$1/i.test(sql)) {
       const [id] = params as string[];
@@ -184,8 +197,8 @@ const READER_ID = 'reader-000';
 let db: FakeDb;
 let app: express.Express;
 
-function tokenFor(userId: string, role: 'admin' | 'reader', email: string) {
-  return jwt.sign({ sub: email, user_id: userId, role, apps: [] }, SECRET, { expiresIn: '1h' });
+function tokenFor(userId: string, role: 'admin' | 'reader', email: string, token_version = 0) {
+  return jwt.sign({ sub: email, user_id: userId, role, apps: [], token_version }, SECRET, { expiresIn: '1h' });
 }
 let adminToken: string;
 let readerToken: string;
@@ -397,5 +410,62 @@ describe('rate limiting', () => {
       }
     }
     expect(sawTooMany).toBe(true);
+  });
+});
+
+describe('SEC-220 — cerrar sesión y cambiar la contraseña invalidan de verdad', () => {
+  // La prueba de punta a punta, por el router real. Hasta aquí nada podía matar
+  // un JWT antes de que expirase, así que un token robado sobrevivía a la
+  // reacción de la víctima.
+
+  it('POST /api/auth/logout responde 200 y el MISMO token deja de valer', async () => {
+    const u = db.seedUser({ email: 'sale@x.com', role: 'reader', status: 'active' });
+    const tok = tokenFor(u.id, 'reader', u.email, 0);
+
+    // Antes: sirve.
+    expect((await request(app).get('/api/users/me').set(bearer(tok))).status).toBe(200);
+
+    expect((await request(app).post('/api/auth/logout').set(bearer(tok))).status).toBe(200);
+
+    // Después: el mismo token, firma intacta y sin expirar, ya no vale.
+    expect((await request(app).get('/api/users/me').set(bearer(tok))).status).toBe(401);
+  });
+
+  it('CANDADO: el logout invalida TODAS las sesiones, no solo la que lo pidió', async () => {
+    // Es la razón de ser del logout global: el caso que de verdad importa es
+    // «me dejé la sesión abierta en otro sitio», y ese no lo resuelve un logout
+    // por dispositivo.
+    const u = db.seedUser({ email: 'dos-sesiones@x.com', role: 'reader', status: 'active' });
+    const portatil = tokenFor(u.id, 'reader', u.email, 0);
+    const movil = tokenFor(u.id, 'reader', u.email, 0);
+
+    expect((await request(app).post('/api/auth/logout').set(bearer(portatil))).status).toBe(200);
+    expect((await request(app).get('/api/users/me').set(bearer(movil))).status).toBe(401);
+  });
+
+  it('CANDADO: cambiar la contraseña también invalida las sesiones vivas', async () => {
+    const pw = 'contrasena-vieja-1';
+    const u = db.seedUser({ email: 'cambia@x.com', role: 'reader', status: 'active', password_hash: bcrypt.hashSync(pw, 4) });
+    const tok = tokenFor(u.id, 'reader', u.email, 0);
+
+    const cambio = await request(app)
+      .patch('/api/users/me/password')
+      .set(bearer(tok))
+      .send({ currentPassword: pw, newPassword: 'contrasena-nueva-1' });
+    expect(cambio.status).toBe(200);
+
+    // El escenario entero: te roban el token, cambias la contraseña, y el
+    // ladrón se queda fuera. Antes seguía dentro hasta que el token expirase.
+    expect((await request(app).get('/api/users/me').set(bearer(tok))).status).toBe(401);
+  });
+
+  it('el token emitido DESPUÉS del logout sí funciona', async () => {
+    const u = db.seedUser({ email: 'vuelve@x.com', role: 'reader', status: 'active' });
+    expect((await request(app).post('/api/auth/logout').set(bearer(tokenFor(u.id, 'reader', u.email, 0)))).status).toBe(200);
+    expect((await request(app).get('/api/users/me').set(bearer(tokenFor(u.id, 'reader', u.email, 1)))).status).toBe(200);
+  });
+
+  it('logout sin token → 401', async () => {
+    expect((await request(app).post('/api/auth/logout')).status).toBe(401);
   });
 });

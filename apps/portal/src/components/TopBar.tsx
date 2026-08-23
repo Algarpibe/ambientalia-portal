@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, LogOut } from 'lucide-react';
-import { clearToken } from '../auth';
+import { logout as cerrarSesion } from '../auth';
 import { useProfile } from '../hooks/useProfile';
 import Avatar from './Avatar';
 
@@ -12,8 +12,8 @@ export default function TopBar() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
 
-  const logout = () => {
-    clearToken();
+  const logout = async () => {
+    await cerrarSesion();
     navigate('/auth');
   };
 
