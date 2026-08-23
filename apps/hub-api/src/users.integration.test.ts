@@ -130,6 +130,20 @@ class FakeDb {
       const u = this.users.find((x) => x.email === String(email).toLowerCase());
       return { rows: u ? [u] : [], rowCount: u ? 1 : 0 };
     }
+    // SEC-224 — requireAuth ya no pide solo la fila del usuario: pide rol,
+    // estado y apps en una sola consulta con LEFT JOIN sobre user_apps. Va
+    // ANTES del `WHERE id = $1` genérico, que devuelve la fila entera y no
+    // sabría montar el array de apps.
+    if (/LEFT JOIN portal\.user_apps/i.test(sql)) {
+      const [id] = params as string[];
+      const u = this.users.find((x) => x.id === id);
+      if (!u) return { rows: [], rowCount: 0 };
+      const apps = this.apps
+        .filter((a) => a.user_id === id)
+        .map((a) => a.app_id)
+        .sort();
+      return { rows: [{ role: u.role, status: u.status, apps }], rowCount: 1 };
+    }
     if (/FROM portal.users WHERE id = \$1/i.test(sql)) {
       const [id] = params as string[];
       const u = this.users.find((x) => x.id === id);

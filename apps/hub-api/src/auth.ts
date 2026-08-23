@@ -23,8 +23,11 @@ declare global {
 const JWT_SECRET = process.env.JWT_SECRET || '';
 // Sesión de 30 días por defecto: es una herramienta interna y molestaba tener que
 // reloguear a diario (el token vivía 8h). Como cada petición revalida que el usuario
-// siga `active` en la BD (ver requireAuth), un token largo NO impide cortar el acceso
-// al instante desactivando al usuario. Sobrescribible con JWT_TTL (formato de
+// siga `active` en la BD —y desde SEC-224 relee también su rol y sus apps—, un
+// token largo NO impide cortar ni recortar el acceso al instante: desactivar,
+// degradar o retirar una app surten efecto en la petición siguiente. Lo que un
+// TTL largo sí alarga es la vida de un token ROBADO (ver SEC-220: no hay
+// invalidación). Sobrescribible con JWT_TTL (formato de
 // jsonwebtoken: '8h', '7d', '30d'…).
 const TOKEN_TTL = process.env.JWT_TTL || '30d';
 
@@ -137,10 +140,17 @@ export async function loginUser(email: string, password: string): Promise<LoginR
  * Auth de los endpoints de datos. Requiere `Authorization: Bearer <jwt>` válido.
  *
  * Además de verificar la firma, adjunta el payload a `req.user`. Si el token
- * corresponde a un usuario de BD (payload con `user_id`), verifica que siga
- * `active` — así un usuario desactivado es rechazado con 401 en su siguiente
- * petición (Req 2.4/2.8) sin esperar a que expire el JWT. Los tokens legacy del
- * fallback `AUTH_USERS` (sin `user_id`) pasan directo, preservando la migración.
+ * corresponde a un usuario de BD (payload con `user_id`), lee su fila y:
+ *   - exige que siga `active` (Req 2.4/2.8): si no, 401 en la petición
+ *     siguiente, sin esperar a que expire el JWT;
+ *   - **sobrescribe `role` y `apps` con lo que dice la BD** (SEC-224), de modo
+ *     que `requireAdmin`/`requireApp` decidan sobre el estado de hoy y no sobre
+ *     el que se firmó al entrar.
+ *
+ * Los tokens legacy del fallback `AUTH_USERS` (sin `user_id`) pasan directo,
+ * preservando la migración. No es un agujero de SEC-224: se firman con
+ * `role: 'reader'` y `apps: []` (o sin rol alguno), así que `requireAdmin` y
+ * `requireApp` los rechazan igual. Su problema es otro, y es SEC-220.
  *
  * Nota: las rutas sin token / token inválido / legacy resuelven en el prefijo
  * síncrono (antes de cualquier `await`); solo el chequeo de BD es asíncrono.
@@ -171,14 +181,40 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // Token de usuario de BD: exigir que el usuario siga existiendo y esté activo.
+  // Token de usuario de BD. De la fila sale lo que decide QUÉ puede hacer, no
+  // solo si sigue activo: el JWT dice quién eres, la BD dice qué puedes.
+  //
+  // SEC-224 — hasta aquí el rol y las apps salían del payload firmado en el
+  // login, y como el token no se reemite nunca, degradar a alguien o retirarle
+  // una app no surtía efecto hasta que expiraba (30 días). La consulta ya se
+  // hacía para comprobar `status`; solo hubo que ampliarla con las apps y usar
+  // el `role` que `findById` ya traía y se tiraba.
+  //
+  // Va en UNA consulta y no en dos: `portal.user_apps` tiene PRIMARY KEY
+  // (user_id, app_id), así que el LEFT JOIN entra por índice y no añade viaje.
   try {
-    const repo = new UserRepository(getHubPool());
-    const user = await repo.findById(String(payload.user_id));
+    const { rows } = await getHubPool().query(
+      `SELECT u.role,
+              u.status,
+              COALESCE(
+                array_agg(ua.app_id ORDER BY ua.app_id) FILTER (WHERE ua.app_id IS NOT NULL),
+                '{}'::text[]
+              ) AS apps
+         FROM portal.users u
+         LEFT JOIN portal.user_apps ua ON ua.user_id = u.id
+        WHERE u.id = $1
+        GROUP BY u.role, u.status`,
+      [String(payload.user_id)],
+    );
+    const user = rows[0] as { role?: UserRole; status?: string; apps?: string[] } | undefined;
     if (!user || user.status !== 'active') {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
+    // Se PISA lo que venía firmado. Si la fila llegara incompleta se cae del
+    // lado seguro: sin rol no eres admin, sin apps no tienes ninguna.
+    req.user.role = user.role as UserRole;
+    req.user.apps = user.apps ?? [];
     next();
   } catch (err) {
     // Fail-closed: si no podemos verificar el estado, denegamos (y logueamos).
@@ -212,11 +248,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
  * Exige que el JWT tenga `appId` en `apps[]`. Se usa detrás de `requireAuth`
  * (este middleware asume que `req.user` ya fue adjuntado).
  *
- * El resto de endpoints de datos solo comprueban `requireAuth`: la autorización
- * por app era solo UX en el frontend (ver `AppGuard`, cuyo propio comentario
- * dice que la verificación real vive en el backend — pero no existía). WO-sales
- * expone el NIT de cada cliente (dato personal, Ley 1581), así que aquí sí se
- * comprueba en el servidor. Ver docs/PRIVACY-RETENTION.md.
+ * La autorización por app nació siendo solo UX en el frontend (ver `AppGuard`,
+ * cuyo propio comentario dice que la verificación real vive en el backend). Ya
+ * vive: desde SEC-210/211 la comprueban en el servidor TODOS los endpoints de
+ * datos —los 7 de `data.router.ts`, los 6 de contabilidad, los 5 de WO-sales y
+ * los de ausencias—, cada uno con su `requireApp` o con `requireAdmin`. WO-sales
+ * fue el primero porque expone el NIT de cada cliente (dato personal, Ley 1581).
+ * Ver docs/PRIVACY-RETENTION.md.
  *
  * `admin` tiene bypass (igual que `requireAdmin`/`requireOwnerOrAdmin`): un
  * admin gestiona el acceso de todas las apps y no depende de tener la app
