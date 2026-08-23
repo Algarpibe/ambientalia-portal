@@ -66,6 +66,10 @@ function activeUser(id: string, role: 'admin' | 'reader' = 'reader') {
     role,
     status: 'active',
     created_at: '2025-01-01T00:00:00.000Z',
+    // SEC-224: requireAuth lee las apps de la BD, no del token. El mock de
+    // ./db.js devuelve esta fila tal cual, así que sin este campo todo
+    // requireApp daría 403 (que es el lado seguro, pero no lo que se prueba).
+    apps: [] as string[],
   };
 }
 function tokenFor(userId: string, role: 'admin' | 'reader' = 'reader') {
@@ -145,5 +149,59 @@ describe('requireOwnerOrAdmin — límite propio/ajeno (task 7.5)', () => {
       }),
       { numRuns: 100 },
     );
+  });
+});
+
+describe('SEC-224 — el rol y las apps mandan desde la BD, no desde el JWT', () => {
+  // El JWT dice QUIÉN eres y se firma una sola vez, en el login, con 30 días de
+  // vida. Lo que puedes HACER tiene que salir de la fila de `portal.users` en
+  // cada petición: si no, degradar a alguien o retirarle una app no surte
+  // efecto hasta que el token expira. Los tres casos cubren las dos
+  // direcciones del cambio, no solo la restrictiva.
+  const USER_ID = '11111111-1111-1111-1111-111111111111';
+
+  /** Token firmado con lo que el usuario ERA; la BD dirá lo que ES. */
+  function tokenViejo(role: 'admin' | 'reader', apps: string[]) {
+    return jwt.sign({ sub: 'x@x.com', user_id: USER_ID, role, apps }, SECRET, { expiresIn: '30d' });
+  }
+
+  it('CANDADO: un JWT con role admin cuyo usuario ya es reader recibe 403', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID, 'reader'), apps: [] };
+    const req = mockReq({ authorization: `Bearer ${tokenViejo('admin', [])}` });
+    const { passed, status } = await run(auth.requireAdmin, req);
+    expect(passed).toBe(false);
+    expect(status).toBe(403);
+  });
+
+  it('CANDADO: un JWT con la app contabilidad cuyo usuario ya no la tiene recibe 403', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID, 'reader'), apps: [] };
+    const req = mockReq({ authorization: `Bearer ${tokenViejo('reader', ['contabilidad'])}` });
+
+    // requireApp asume que requireAuth ya adjuntó req.user (así se montan las rutas).
+    const previo = await run(auth.requireAuth, req);
+    expect(previo.passed).toBe(true);
+
+    const { passed, status } = await run(auth.requireApp('contabilidad'), req);
+    expect(passed).toBe(false);
+    expect(status).toBe(403);
+  });
+
+  it('CANDADO: un usuario ASCENDIDO a admin pasa requireAdmin con su token viejo', async () => {
+    // La otra dirección: leer de la BD no puede significar "denegar más".
+    state.findByIdResult = { ...activeUser(USER_ID, 'admin'), apps: [] };
+    const req = mockReq({ authorization: `Bearer ${tokenViejo('reader', [])}` });
+    const { passed } = await run(auth.requireAdmin, req);
+    expect(passed).toBe(true);
+  });
+
+  it('CANDADO: una app CONCEDIDA después del login funciona con el token viejo', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID, 'reader'), apps: ['contabilidad'] };
+    const req = mockReq({ authorization: `Bearer ${tokenViejo('reader', [])}` });
+
+    const previo = await run(auth.requireAuth, req);
+    expect(previo.passed).toBe(true);
+
+    const { passed } = await run(auth.requireApp('contabilidad'), req);
+    expect(passed).toBe(true);
   });
 });
