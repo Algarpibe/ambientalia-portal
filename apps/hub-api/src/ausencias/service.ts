@@ -29,6 +29,7 @@ import * as repo from './repo.js';
 import {
   calcularSaldo,
   calcularSaldoCompensatorios,
+  hoyCongelado,
   hoyEnColombia,
   pedible,
   type SaldoCompensatorios,
@@ -1977,29 +1978,6 @@ function conEtiqueta<T>(correo: string, bolsa: string, calcular: () => T): T {
   } catch (err) {
     throw new Error(`saldo de ${bolsa} de ${correo}: ${(err as Error).message}`);
   }
-}
-
-/**
- * El «hoy» con el que se calcula el saldo de UNA ficha.
- *
- * Para quien se fue, el devengo tiene que pararse en su último día: si no,
- * `calcularSaldo` sigue haciendo `diasEntre(fechaCorte, hoy)` con un `hoy` que
- * no deja de avanzar, y alguien que se fue en marzo aparece en agosto con cinco
- * meses de vacaciones que no ganó.
- *
- * ⚠️ `<` y no `<=`: `fechaRetiro` es el último día que TRABAJA, así que ese día
- * todavía devenga entero. Con `<=` se le restaría un día — y este número es el
- * que se le paga en la liquidación.
- *
- * Una fecha futura no congela nada: quien tiene la salida prevista sigue
- * devengando hasta que llegue.
- *
- * Exportada solo para poder probarla suelta: es la clase de aritmética de
- * fechas en la que un signo mal puesto no se ve leyendo el código.
- */
-export function hoyCongelado(fechaRetiro: string | null, hoy: string): string {
-  if (fechaRetiro !== null && fechaRetiro < hoy) return fechaRetiro;
-  return hoy;
 }
 
 /** Calcula las dos bolsas de cada empleado a partir de sus ausencias. */

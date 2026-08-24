@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { calcularSaldo, calcularSaldoCompensatorios, hoyEnColombia, pedible, type AusenciaParaElSaldo } from './saldo.js';
-import { hoyCongelado } from './service.js';
+import {
+  calcularSaldo,
+  calcularSaldoCompensatorios,
+  hoyCongelado,
+  hoyEnColombia,
+  pedible,
+  type AusenciaParaElSaldo,
+} from './saldo.js';
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
@@ -443,12 +449,16 @@ describe('hoyCongelado — el devengo se para en el último día trabajado', () 
     expect(hoyCongelado('2026-03-15', '2026-08-24')).toBe('2026-03-15');
   });
 
-  it('CANDADO: el DÍA del retiro todavía cuenta entero', () => {
-    // La fecha es el ÚLTIMO DÍA QUE TRABAJA. Devolver la fecha aquí en vez de
-    // hoy da el mismo número, pero el candado importa por su gemelo del
-    // barrido: si alguien cambia esto a `<=` para "simplificar", le recorta un
-    // día de devengo a alguien sobre un número que se paga.
-    expect(hoyCongelado('2026-08-24', '2026-08-24')).toBe('2026-08-24');
+  it('CANDADO: el día del retiro devenga lo MISMO que si siguiera en plantilla', () => {
+    // `hoyCongelado('2026-08-24', '2026-08-24')` y `'2026-08-24'` a secas son la
+    // misma cadena, así que comparar el resultado de `hoyCongelado` contra un
+    // literal (como hacía la versión anterior de este test) pasa con cualquier
+    // implementación, incluida una que ya no distinga retirado de activo. Esta
+    // versión pasa la salida por `calcularSaldo` y compara devengos: es la
+    // garantía real que le importa a quien liquida, no un detalle de la firma.
+    const retirado = calcularSaldo(CONFIG, [], hoyCongelado('2026-08-24', '2026-08-24'));
+    const activo = calcularSaldo(CONFIG, [], '2026-08-24');
+    expect(retirado.devengadas).toBe(activo.devengadas);
   });
 
   it('con la fecha en el futuro, sigue devengando: devuelve hoy', () => {

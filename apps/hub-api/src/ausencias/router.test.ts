@@ -532,6 +532,7 @@ vi.mock('./repo.js', async () => ({
         fechaCorte: e.fechaCorte ?? null,
         compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
         compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
+        fechaRetiro: e.fechaRetiro ?? null,
       })),
   // Solo existe para que el CANDADO de más abajo compare superficies iguales.
   // El filtro de `empleadosConSaldo` de aquí arriba (sobre `estado.plantilla`,
@@ -3661,6 +3662,19 @@ describe('GET /ausencias/mi-saldo', () => {
       .set('Authorization', `Bearer ${token()}`)
       .expect(200);
     expect(r.body.saldo).toMatchObject({ saldoCorte: 10 });
+  });
+
+  it('CANDADO: a un retirado el devengo se le para en su último día', async () => {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: 10,
+      fechaCorte: '2026-01-01',
+      fechaRetiro: '2026-01-10',
+    });
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    // Reloj congelado en 2026-01-15 (ver el beforeEach). Del corte al último día
+    // trabajado van 9 días: 9/30 × 1,25 = 0,4. Sin congelar serían 14 días = 0,6.
+    expect(r.body.saldo).toMatchObject({ devengadas: 0.4, disponible: 10.4 });
   });
 });
 
