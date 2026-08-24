@@ -314,6 +314,8 @@ export interface EmpleadoConSaldo {
   /** La bolsa de compensatorios, independiente de la de vacaciones. */
   compensatoriosSaldoCorte: number | null;
   compensatoriosFechaCorte: string | null;
+  /** Para congelar el devengo de quien ya se fue. Ver `hoyCongelado`. */
+  fechaRetiro: string | null;
 }
 
 interface FilaEmpleadoSaldoDb {
@@ -324,6 +326,7 @@ interface FilaEmpleadoSaldoDb {
   fecha_corte: string | null;
   compensatorios_saldo_corte: number | null;
   compensatorios_fecha_corte: string | null;
+  fecha_retiro: string | null;
 }
 
 function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
@@ -335,6 +338,7 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
     fechaCorte: r.fecha_corte,
     compensatoriosSaldoCorte: r.compensatorios_saldo_corte,
     compensatoriosFechaCorte: r.compensatorios_fecha_corte,
+    fechaRetiro: r.fecha_retiro,
   };
 }
 
@@ -409,7 +413,8 @@ export async function empleadosConSaldo(
             e.saldo_corte::float8 AS saldo_corte,
             e.fecha_corte::text   AS fecha_corte,
             e.compensatorios_saldo_corte::float8 AS compensatorios_saldo_corte,
-            e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte
+            e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte,
+            e.fecha_retiro::text   AS fecha_retiro
        FROM portal.empleados e
       WHERE e.activo
         AND ${ramaDeDosNiveles()}

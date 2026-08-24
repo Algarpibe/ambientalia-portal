@@ -1979,6 +1979,29 @@ function conEtiqueta<T>(correo: string, bolsa: string, calcular: () => T): T {
   }
 }
 
+/**
+ * El «hoy» con el que se calcula el saldo de UNA ficha.
+ *
+ * Para quien se fue, el devengo tiene que pararse en su último día: si no,
+ * `calcularSaldo` sigue haciendo `diasEntre(fechaCorte, hoy)` con un `hoy` que
+ * no deja de avanzar, y alguien que se fue en marzo aparece en agosto con cinco
+ * meses de vacaciones que no ganó.
+ *
+ * ⚠️ `<` y no `<=`: `fechaRetiro` es el último día que TRABAJA, así que ese día
+ * todavía devenga entero. Con `<=` se le restaría un día — y este número es el
+ * que se le paga en la liquidación.
+ *
+ * Una fecha futura no congela nada: quien tiene la salida prevista sigue
+ * devengando hasta que llegue.
+ *
+ * Exportada solo para poder probarla suelta: es la clase de aritmética de
+ * fechas en la que un signo mal puesto no se ve leyendo el código.
+ */
+export function hoyCongelado(fechaRetiro: string | null, hoy: string): string {
+  if (fechaRetiro !== null && fechaRetiro < hoy) return fechaRetiro;
+  return hoy;
+}
+
 /** Calcula las dos bolsas de cada empleado a partir de sus ausencias. */
 function combinar(
   empleados: repo.EmpleadoConSaldo[],
@@ -1989,6 +2012,10 @@ function combinar(
     // Una sola pasada por empleado: las dos bolsas miran la misma lista y cada
     // una descarta los tipos de la otra.
     const suyas = ausencias.filter((a) => a.empleadoId === e.empleadoId);
+    // El «hoy» de ESTA ficha, no el de la pantalla: un retirado dejó de devengar
+    // en su último día. Va aquí y no dentro de `calcularSaldo` porque el corte
+    // es una propiedad del empleado, no del cálculo.
+    const suHoy = hoyCongelado(e.fechaRetiro, hoy);
     const configVacaciones =
       e.saldoCorte !== null && e.fechaCorte !== null
         ? { saldoCorte: e.saldoCorte, fechaCorte: e.fechaCorte }
@@ -2001,9 +2028,9 @@ function combinar(
       empleadoId: e.empleadoId,
       nombreCompleto: e.nombreCompleto,
       correo: e.correo,
-      saldo: conEtiqueta(e.correo, 'vacaciones', () => calcularSaldo(configVacaciones, suyas, hoy)),
+      saldo: conEtiqueta(e.correo, 'vacaciones', () => calcularSaldo(configVacaciones, suyas, suHoy)),
       compensatorios: conEtiqueta(e.correo, 'compensatorios', () =>
-        calcularSaldoCompensatorios(configCompensatorios, suyas, hoy),
+        calcularSaldoCompensatorios(configCompensatorios, suyas, suHoy),
       ),
     };
   });

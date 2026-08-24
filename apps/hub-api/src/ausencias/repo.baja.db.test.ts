@@ -56,7 +56,7 @@ describe('migracion 035', () => {
 });
 
 describe('el repo lee la fecha de retiro', () => {
-  it('devuelve fechaRetiro, retiradoPor y retiradoAt', async () => {
+  it('CANDADO: devuelve fechaRetiro, retiradoPor y retiradoAt como strings, no como Date', async () => {
     const id = await sembrarEmpleado(db, 'ana@baja.test');
     await db.query(
       `UPDATE portal.empleados

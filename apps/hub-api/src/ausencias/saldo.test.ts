@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { calcularSaldo, calcularSaldoCompensatorios, hoyEnColombia, pedible, type AusenciaParaElSaldo } from './saldo.js';
+import { hoyCongelado } from './service.js';
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
@@ -430,5 +431,27 @@ describe('hoyEnColombia', () => {
 
   it('en la frontera exacta, en el segundo exacto ya es el día nuevo', () => {
     expect(hoyEnColombia(new Date('2026-08-13T05:00:00Z'))).toBe('2026-08-13');
+  });
+});
+
+describe('hoyCongelado — el devengo se para en el último día trabajado', () => {
+  it('sin fecha de retiro, devuelve hoy tal cual', () => {
+    expect(hoyCongelado(null, '2026-08-24')).toBe('2026-08-24');
+  });
+
+  it('con la fecha ya pasada, devuelve la fecha de retiro', () => {
+    expect(hoyCongelado('2026-03-15', '2026-08-24')).toBe('2026-03-15');
+  });
+
+  it('CANDADO: el DÍA del retiro todavía cuenta entero', () => {
+    // La fecha es el ÚLTIMO DÍA QUE TRABAJA. Devolver la fecha aquí en vez de
+    // hoy da el mismo número, pero el candado importa por su gemelo del
+    // barrido: si alguien cambia esto a `<=` para "simplificar", le recorta un
+    // día de devengo a alguien sobre un número que se paga.
+    expect(hoyCongelado('2026-08-24', '2026-08-24')).toBe('2026-08-24');
+  });
+
+  it('con la fecha en el futuro, sigue devengando: devuelve hoy', () => {
+    expect(hoyCongelado('2026-12-31', '2026-08-24')).toBe('2026-08-24');
   });
 });
