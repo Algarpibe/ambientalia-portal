@@ -132,6 +132,10 @@ const estado = {
   /** Si el usuario de la sesión existe en portal.users (falso = token legacy). */
   usuarioEnPortal: true,
   altasAutomaticas: 0,
+  /** Los `hoy` con los que se llamó a `aplicarRetirosVencidos`, en orden. */
+  barridosDeRetiro: [] as string[],
+  /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
+  orden: [] as string[],
   plantilla: [] as any[],
   yaEnBd: 0,
   historicoInsertado: 0,
@@ -392,14 +396,24 @@ vi.mock('./repo.js', async () => ({
       activo: true,
     };
     estado.altasAutomaticas += 1;
+    // Solo se apunta en la rama que de verdad DA de alta: es lo que el
+    // candado de orden del barrido necesita para poder afirmar
+    // ['barrido', 'alta'] sin que la reutilización de una ficha ya cargada
+    // (la rama de arriba, `if (estado.empleado) return`) cuente como alta.
+    estado.orden.push('alta');
     return estado.empleado;
   },
   // El barrido de bajas vencidas: el handler de `/ausencias/contexto` lo llama
-  // siempre, antes de `asegurarEmpleado`. Aquí no hay SQL que imitar —ningún
-  // test de este fichero prueba la baja en sí, eso vive en
-  // `repo.baja.db.test.ts` contra Postgres real— así que el doble se limita a
-  // no reventar el handler y devolver "no se aplicó ninguna".
-  aplicarRetirosVencidos: async () => 0,
+  // siempre, antes de `asegurarEmpleado`. No hay SQL que imitar —ningún test de
+  // este fichero prueba la baja en sí, eso vive en `repo.baja.db.test.ts`
+  // contra Postgres real— así que el doble se limita a registrar la LLAMADA:
+  // con qué `hoy` (para el candado de la zona horaria) y en qué ORDEN respecto
+  // al alta automática (para el candado de que va antes de `asegurarEmpleado`).
+  aplicarRetirosVencidos: async (_db: unknown, hoy: string) => {
+    estado.barridosDeRetiro.push(hoy);
+    estado.orden.push('barrido');
+    return 0;
+  },
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
   // creadas por el propio portal).
@@ -1458,6 +1472,8 @@ beforeEach(() => {
   };
   estado.usuarioEnPortal = true;
   estado.altasAutomaticas = 0;
+  estado.barridosDeRetiro = [];
+  estado.orden = [];
   estado.plantilla = [
     { ...(estado.empleado as Record<string, unknown>), id: E1, nombreCompleto: 'Ana Ruiz Molina' },
     { ...(estado.empleado as Record<string, unknown>), id: E2, nombreCompleto: 'Luis Prieto Cano' },
@@ -3528,6 +3544,37 @@ describe('GET /ausencias/contexto', () => {
     expect(r.body.empleado).not.toBeNull();
     expect(r.body.festivos.length).toBeGreaterThan(0);
     expect(r.body).toHaveProperty('saldo', null);
+  });
+
+  it('CANDADO: el contexto aplica el barrido de bajas vencidas', async () => {
+    // Sin esta llamada la baja programada es solo un dato: nadie la convierte
+    // en `activo = false`. El doble no ejecuta SQL —quien vigila la consulta de
+    // verdad es `repo.baja.db.test.ts`—, así que esto solo puede afirmar que el
+    // handler HACE la llamada, ni una vez de menos ni de más.
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.barridosDeRetiro).toHaveLength(1);
+  });
+
+  it('CANDADO: el barrido va con el HOY de Colombia, no con el de UTC', async () => {
+    // 2026-08-25T02:00:00Z son las 21:00 del 24 en Colombia (UTC-5). Con
+    // `new Date().toISOString()` a secas —el bug que este candado impide—
+    // saldría '2026-08-25', y alguien cuya `fecha_retiro` fuera el 24 quedaría
+    // retirado esa misma noche, DURANTE su último día de trabajo: justo lo que
+    // el `<` de `aplicarRetirosVencidos` existe para impedir.
+    vi.setSystemTime(new Date('2026-08-25T02:00:00Z'));
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.barridosDeRetiro[0]).toBe('2026-08-24');
+  });
+
+  it('CANDADO: el barrido corre ANTES del alta automática, o el upsert devuelve una ficha que ya no toca', async () => {
+    // Si quien entra es justo el que se retiró ayer, su ficha tiene que
+    // apagarse ANTES de que `asegurarEmpleado` la toque: con el orden
+    // invertido, el upsert encontraría (o crearía) una ficha activa y el
+    // contexto abriría todas las pestañas a alguien que ya no debería tenerlas.
+    estado.empleado = null;
+    estado.usuarioEnPortal = true;
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.orden).toEqual(['barrido', 'alta']);
   });
 });
 

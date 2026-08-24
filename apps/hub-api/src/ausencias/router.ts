@@ -64,12 +64,18 @@ export function createAusenciasRouter(db: Pool): Router {
       // que abra la app, así que la primera visita del día aplica las que
       // tocaban. Va ANTES de `asegurarEmpleado` a propósito — si quien entra es
       // justo el que se retiró ayer, su ficha se apaga primero y el upsert la
-      // respeta (su `ON CONFLICT DO NOTHING` no revive una ficha inactiva), que
-      // es exactamente lo que debe pasar.
+      // respeta (su `ON CONFLICT DO NOTHING` no revive una ficha inactiva,
+      // siempre que la ficha esté en minúsculas, que es lo único que este repo
+      // inserta), que es exactamente lo que debe pasar.
       //
-      // El error se traga: una baja sin aplicar no puede impedir que la app
-      // arranque. Volverá a intentarse en la siguiente visita.
-      await repo.aplicarRetirosVencidos(db, hoyEnColombia()).catch(() => {});
+      // El error NO tumba el contexto —una baja sin aplicar se reintenta en la
+      // siguiente visita—, pero tampoco se traga mudo: si esto falla siempre, el
+      // único síntoma visible sería gente retirada que sigue en las listas, y
+      // nadie lo ataría a un error si no quedara registrado en ningún sitio.
+      await repo.aplicarRetirosVencidos(db, hoyEnColombia()).catch((e) => {
+        console.error('ausencias_barrido_retiros error', e);
+        captureError(e, { endpoint: 'ausencias_barrido_retiros' });
+      });
 
       const sesion = sesionDe(req);
       // Escribe en un GET, a sabiendas: si la ficha no se creara aquí, la app

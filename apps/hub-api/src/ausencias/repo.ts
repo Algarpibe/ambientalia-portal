@@ -3191,10 +3191,13 @@ export async function movimientos(db: Pool, soloDe: string | null): Promise<Movi
 /**
  * Apaga las fichas cuya baja programada ya venció. Devuelve cuántas.
  *
- * Es lo que hace que una fecha futura signifique algo sin necesidad de un cron:
- * se llama desde la carga del contexto, así que la aplica el primero que abra la
- * app ese día. Si no la abre nadie, tampoco hay nadie mirando las listas que
- * esta baja debería limpiar.
+ * Es lo que hace que una fecha futura signifique algo. Este router YA tiene un
+ * cron —`/ausencias/n8n/pendiente`, que n8n sondea cada diez minutos—, así que
+ * enganchar el barrido ahí también era una opción; se descartó a propósito.
+ * Colgarlo de la carga del contexto en vez de eso hace que lo aplique el
+ * primero que abra la app ese día, y esa es la garantía que importa: si no la
+ * abre nadie, tampoco hay nadie mirando las listas que esta baja debería
+ * limpiar, así que no hace falta que corra sola de fondo.
  *
  * Idempotente: el `AND activo` hace que la segunda pasada no encuentre filas, y
  * por eso dos peticiones concurrentes pueden ejecutarla a la vez sin estorbarse.
