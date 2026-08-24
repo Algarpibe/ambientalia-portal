@@ -3290,3 +3290,41 @@ export async function personasACargoDe(db: Pool, correo: string): Promise<Person
     correo: r.correo,
   }));
 }
+
+/**
+ * Registra la baja: la fecha y quién la puso. Devuelve false si no existía.
+ *
+ * ⚠️ SIN `AND activo`, al revés que `fijarSaldo` y `fijarJefe`. Aquí ese filtro
+ * sería un error: una ficha desactivada a mano —como las dos cuentas de prueba
+ * del 2026-08-24— tiene que poder recibir su fecha después, y con el `AND
+ * activo` se quedaría para siempre sin vía de arreglo desde la app.
+ *
+ * NO toca `activo`. Una baja con fecha futura deja a la persona trabajando; de
+ * apagarla se encarga `aplicarRetirosVencidos` cuando llegue el día. Separarlo
+ * es lo que permite que una baja programada sea solo un dato hasta que vence.
+ */
+export async function fijarRetiro(
+  db: Pool,
+  empleadoId: string,
+  fechaRetiro: string,
+  adminEmail: string,
+): Promise<boolean> {
+  const res = await db.query(
+    `UPDATE portal.empleados
+        SET fecha_retiro = $2::date, retirado_por = $3, retirado_at = NOW()
+      WHERE id = $1`,
+    [empleadoId, fechaRetiro, adminEmail.toLowerCase()],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/** Deshace una baja: limpia las tres columnas y reactiva. False si no existía. */
+export async function limpiarRetiro(db: Pool, empleadoId: string): Promise<boolean> {
+  const res = await db.query(
+    `UPDATE portal.empleados
+        SET fecha_retiro = NULL, retirado_por = NULL, retirado_at = NULL, activo = true
+      WHERE id = $1`,
+    [empleadoId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}

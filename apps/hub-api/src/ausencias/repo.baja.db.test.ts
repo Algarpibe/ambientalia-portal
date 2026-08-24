@@ -1,7 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
-import { empleadoPorId, aplicarRetirosVencidos, diasPosterioresA, personasACargoDe } from './repo.js';
+import {
+  empleadoPorId,
+  aplicarRetirosVencidos,
+  diasPosterioresA,
+  personasACargoDe,
+  fijarRetiro,
+  limpiarRetiro,
+} from './repo.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -202,5 +209,52 @@ describe('personasACargoDe', () => {
     const sub = await sembrarEmpleado(db, 'exsub@baja.test', 'jefe2@baja.test');
     await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [sub]);
     expect(await personasACargoDe(db, 'jefe2@baja.test')).toEqual([]);
+  });
+});
+
+describe('fijarRetiro / limpiarRetiro', () => {
+  it('guarda la fecha y la constancia, sin desactivar todavia', async () => {
+    const id = await sembrarEmpleado(db, 'fijar@baja.test');
+    expect(await fijarRetiro(db, id, '2026-12-31', 'admin@ambientalia.com.co')).toBe(true);
+    const { rows } = await db.query(
+      `SELECT fecha_retiro::text AS fecha_retiro, retirado_por, retirado_at, activo
+         FROM portal.empleados WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0].fecha_retiro).toBe('2026-12-31');
+    expect(rows[0].retirado_por).toBe('admin@ambientalia.com.co');
+    expect(rows[0].retirado_at).not.toBeNull();
+    // Fecha futura: sigue trabajando. Lo apaga el barrido cuando venza.
+    expect(rows[0].activo).toBe(true);
+  });
+
+  it('limpiarRetiro deshace la baja y reactiva', async () => {
+    const id = await sembrarEmpleado(db, 'volver@baja.test');
+    await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co');
+    await aplicarRetirosVencidos(db, '2026-08-24');
+    expect(await limpiarRetiro(db, id)).toBe(true);
+    const { rows } = await db.query(
+      `SELECT fecha_retiro, retirado_por, retirado_at, activo
+         FROM portal.empleados WHERE id = $1`,
+      [id],
+    );
+    expect(rows[0]).toEqual({
+      fecha_retiro: null, retirado_por: null, retirado_at: null, activo: true,
+    });
+  });
+
+  it('CANDADO: fijarRetiro SI alcanza a una ficha ya inactiva', async () => {
+    // Al reves que fijarSaldo y fijarJefe, que llevan `AND activo`. Aqui seria
+    // un error: una ficha desactivada a mano —las cuentas de prueba— tiene que
+    // poder recibir su fecha despues. Sin esto quedarian sin via de arreglo.
+    const id = await sembrarEmpleado(db, 'inactiva@baja.test');
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
+    expect(await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co')).toBe(true);
+  });
+
+  it('devuelve false si el empleado no existe', async () => {
+    const inventado = '00000000-0000-4000-8000-000000000000';
+    expect(await fijarRetiro(db, inventado, '2026-08-20', 'admin@ambientalia.com.co')).toBe(false);
+    expect(await limpiarRetiro(db, inventado)).toBe(false);
   });
 });

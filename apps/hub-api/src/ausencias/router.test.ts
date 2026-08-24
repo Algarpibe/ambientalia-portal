@@ -421,6 +421,12 @@ vi.mock('./repo.js', async () => ({
   // en verde sin fingir un comportamiento que nadie prueba aquí.
   diasPosterioresA: async () => [],
   personasACargoDe: async () => [],
+  // Las dos escrituras de la baja: mismo motivo que las dos consultas de
+  // arriba, ningún test de este fichero ejercita todavía el servicio que las
+  // usa —eso llega en la tarea siguiente—, así que basta con un stub que
+  // devuelva éxito y mantenga en verde el candado de paridad de más abajo.
+  fijarRetiro: async () => true,
+  limpiarRetiro: async () => true,
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
   // creadas por el propio portal).
