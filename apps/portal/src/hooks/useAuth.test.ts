@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, waitFor, cleanup } from '@testing-library/react';
+import { renderHook, act, cleanup } from '@testing-library/react';
 import { getToken } from '../auth';
 import { authFetch } from '../lib/api';
 
@@ -32,6 +32,26 @@ async function cargarUseAuth() {
   return modulo.useAuth;
 }
 
+/**
+ * Deja que la respuesta del servidor se procese ENTERA antes de mirar.
+ *
+ * Un `waitFor(() => expect(mockFetch).toHaveBeenCalled())` no sirve, y esto no es
+ * teoría: la primera versión de estos tests lo usaba y dejó pasar una mutación
+ * que borraba la comprobación de identidad del perfil. `authFetch` se llama de
+ * forma síncrona dentro del efecto, así que esa espera se cumple de inmediato —
+ * antes del `await res.json()` y antes de que la cache avise a los suscriptores.
+ * Las aserciones en negativo pasaban por llegar temprano, no por ser ciertas.
+ *
+ * Un `setTimeout(0)` es un macrotask: vacía toda la cola de microtasks pendientes
+ * primero. Que los tests en POSITIVO usen esta misma espera es lo que demuestra
+ * que basta — si se quedara corta, serían ellos los que fallarían.
+ */
+async function dejarQueRespondaElServidor() {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
 beforeEach(() => {
   vi.resetModules();
   mockToken.mockReturnValue(
@@ -57,7 +77,8 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
   it('sustituye por las de la BD en cuanto llegan', async () => {
     const useAuth = await cargarUseAuth();
     const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(result.current.apps).toEqual(['ausencias', 'wo-sales']));
+    await dejarQueRespondaElServidor();
+    expect(result.current.apps).toEqual(['ausencias', 'wo-sales']);
   });
 
   it('una app RETIRADA en la BD desaparece aunque el token siga trayéndola', async () => {
@@ -66,7 +87,8 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'u1', apps: [] }) });
     const useAuth = await cargarUseAuth();
     const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(result.current.apps).toEqual([]));
+    await dejarQueRespondaElServidor();
+    expect(result.current.apps).toEqual([]);
   });
 
   it('ignora un perfil que no es de quien preguntó', async () => {
@@ -75,7 +97,7 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'OTRO', apps: ['contabilidad'] }) });
     const useAuth = await cargarUseAuth();
     const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await dejarQueRespondaElServidor();
     expect(result.current.apps).toEqual(['ausencias']);
   });
 
@@ -85,7 +107,7 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'u1' }) });
     const useAuth = await cargarUseAuth();
     const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await dejarQueRespondaElServidor();
     expect(result.current.apps).toEqual(['ausencias']);
   });
 
@@ -93,7 +115,7 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     mockFetch.mockRejectedValue(new Error('sin red'));
     const useAuth = await cargarUseAuth();
     const { result } = renderHook(() => useAuth());
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await dejarQueRespondaElServidor();
     expect(result.current.apps).toEqual(['ausencias']);
   });
 
@@ -102,7 +124,7 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     renderHook(() => useAuth());
     renderHook(() => useAuth());
     renderHook(() => useAuth());
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+    await dejarQueRespondaElServidor();
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
