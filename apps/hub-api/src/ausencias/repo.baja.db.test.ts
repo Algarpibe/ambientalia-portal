@@ -9,6 +9,7 @@ import {
   fijarRetiro,
   limpiarRetiro,
 } from './repo.js';
+import { retirarEmpleado, reactivarEmpleado } from './service.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -282,5 +283,60 @@ describe('fijarRetiro / limpiarRetiro', () => {
       'SELECT fecha_retiro::text AS fecha_retiro FROM portal.empleados WHERE id = $1', [idB],
     );
     expect(trasLimpiar[0].fecha_retiro).toBe('2026-11-30');
+  });
+});
+
+describe('retirarEmpleado', () => {
+  const ADMIN = 'admin@ambientalia.com.co';
+
+  it('registra la baja cuando no hay nada que estorbe', async () => {
+    const id = await sembrarEmpleado(db, 'ok@baja.test');
+    const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
+    expect(e.fechaRetiro).toBe('2026-09-30');
+    expect(e.retiradoPor).toBe(ADMIN);
+  });
+
+  it('409 si tiene dias posteriores a la fecha', async () => {
+    const id = await sembrarEmpleado(db, 'choca@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'choca@baja.test', estado: 'aprobada',
+      fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
+    });
+    await expect(retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN)).rejects.toMatchObject({
+      code: 'retiro_con_dias_posteriores', status: 409,
+    });
+  });
+
+  it('409 si alguien lo tiene de jefe', async () => {
+    await sembrarEmpleado(db, 'jefe3@baja.test');
+    await sembrarEmpleado(db, 'sub3@baja.test', 'jefe3@baja.test');
+    const { rows } = await db.query('SELECT id FROM portal.empleados WHERE correo = $1', ['jefe3@baja.test']);
+    await expect(
+      retirarEmpleado(db, (rows[0] as { id: string }).id, { fechaRetiro: '2026-09-30' }, ADMIN),
+    ).rejects.toMatchObject({ code: 'retiro_con_personas_a_cargo', status: 409 });
+  });
+
+  it('400 si la fecha no es una fecha', async () => {
+    const id = await sembrarEmpleado(db, 'malafecha@baja.test');
+    await expect(retirarEmpleado(db, id, { fechaRetiro: '30/09/2026' }, ADMIN)).rejects.toMatchObject({
+      code: 'fecha_retiro_invalida', status: 400,
+    });
+  });
+
+  it('404 si el empleado no existe', async () => {
+    await expect(
+      retirarEmpleado(db, '00000000-0000-4000-8000-000000000000', { fechaRetiro: '2026-09-30' }, ADMIN),
+    ).rejects.toMatchObject({ code: 'empleado_no_encontrado', status: 404 });
+  });
+
+  it('reactivarEmpleado deshace la baja', async () => {
+    const id = await sembrarEmpleado(db, 'reac@baja.test');
+    await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
+    // Cuarto dato obligatorio (AJUSTE 2): quien deshace la baja tambien queda
+    // registrado, en el evento estructurado que sustituye a las columnas que
+    // limpiarRetiro borra.
+    const e = await reactivarEmpleado(db, id, ADMIN);
+    expect(e.fechaRetiro).toBeNull();
+    expect(e.activo).toBe(true);
   });
 });
