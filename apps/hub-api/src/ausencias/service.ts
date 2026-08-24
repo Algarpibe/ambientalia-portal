@@ -2215,3 +2215,104 @@ export async function calendarioDelAnio(db: Pool, sesion: Sesion, anio: string):
     franjas: franjasDelAnio(anio, ausencias),
   };
 }
+
+// ── Baja de un empleado ─────────────────────────────────────────────────────
+
+/**
+ * Registra la baja de un empleado: fija `fecha_retiro` tras comprobar que
+ * nada la contradice. Solo admin.
+ *
+ * **Bloquea en vez de arreglar por su cuenta.** El saldo que `hoyCongelado`
+ * calcula a partir de `fechaRetiro` es literalmente lo que se le paga a esa
+ * persona en la liquidación, así que este servicio no puede tomar decisiones
+ * sobre ausencias de otro: no cierra solicitudes ajenas ni recorta días para
+ * que la fecha "encaje". Si algo choca, se lo dice al admin con el detalle
+ * necesario para que lo resuelva a mano (rechazando o retirando la
+ * solicitud, cambiando de jefe a quien la tiene a cargo) y vuelva a intentar
+ * el retiro. El único que sí escribe es el barrido (`aplicarRetirosVencidos`),
+ * que solo APAGA el acceso cuando la fecha ya fijada vence.
+ *
+ * Los días POSTERIORES a la fecha bloquean; los ANTERIORES no, y no es un
+ * descuido: son legítimos. Quien se va el 30 de septiembre puede tener unas
+ * vacaciones pendientes de firma para la semana anterior a esa fecha, y su
+ * jefe tiene que poder firmarlas con normalidad — la bandeja de aprobación no
+ * filtra por `activo`, así que nada se lo impide, y bloquear el retiro por
+ * ellas sería inventar un problema donde no lo hay. La frontera exacta entre
+ * "antes" y "después" la traza `repo.diasPosterioresA`.
+ */
+export async function retirarEmpleado(
+  db: Pool,
+  empleadoId: string,
+  body: unknown,
+  adminEmail: string,
+): Promise<Empleado> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const fecha = typeof b.fechaRetiro === 'string' ? b.fechaRetiro.trim() : '';
+  // `esFechaValida` y no un parseo laxo: 'YYYY-MM-DD' es el formato con el que
+  // esta fecha se compara lexicográficamente contra otras (el barrido, el
+  // congelado). Una '30/09/2026' compilaría y rompería esas comparaciones en
+  // silencio, que es el gotcha que documenta `sumarDesdeElCorte`.
+  if (!esFechaValida(fecha)) throw new AusenciaError('fecha_retiro_invalida', 400, 'fechaRetiro');
+
+  const empleado = await repo.empleadoPorIdIncluyendoInactivos(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const posteriores = await repo.diasPosterioresA(db, empleadoId, fecha);
+  if (posteriores.length > 0) {
+    // El detalle es obligatorio, no decorativo: «no puedes» sin decir cuáles es
+    // inaccionable, y el admin tendría que buscarlas a mano en el registro.
+    throw new AusenciaError('retiro_con_dias_posteriores', 409, 'fechaRetiro', { solicitudes: posteriores });
+  }
+
+  const aCargo = await repo.personasACargoDe(db, empleado.correo);
+  if (aCargo.length > 0) {
+    throw new AusenciaError('retiro_con_personas_a_cargo', 409, 'fechaRetiro', { personas: aCargo });
+  }
+
+  if (!(await repo.fijarRetiro(db, empleadoId, fecha, adminEmail))) {
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+  // Se relee en vez de construir la respuesta a mano: `retirado_at` lo pone la
+  // BD con NOW(), así que el único sitio donde está el valor real es la fila.
+  const actualizado = await repo.empleadoPorIdIncluyendoInactivos(db, empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
+/**
+ * Deshace una baja y devuelve la ficha a la lista de activos. Solo admin.
+ *
+ * `limpiarRetiro` borra `retirado_por`/`retirado_at` en la propia fila —así
+ * es como "deshacer" tiene que funcionar, la ficha vuelve a nacer sin
+ * retiro—, y eso deja la reactivación sin ningún rastro: la migración 035
+ * documenta esas dos columnas como «la constancia de quién fijó ese número»,
+ * y borrarlas sin dejar nada en su lugar convertiría a `reactivarEmpleado` en
+ * la única operación de esta funcionalidad que BORRA auditoría en vez de
+ * crearla. Por eso la ficha se lee ANTES de limpiar —después ya no queda
+ * dónde consultar qué fecha tenía ni quién la había puesto— y se deja un
+ * evento estructurado con esos datos, mismo patrón que
+ * `ausencias_vacaciones_sin_saldo_configurado` más arriba.
+ */
+export async function reactivarEmpleado(db: Pool, empleadoId: string, adminEmail: string): Promise<Empleado> {
+  const antes = await repo.empleadoPorIdIncluyendoInactivos(db, empleadoId);
+  if (!antes) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  console.log(
+    JSON.stringify({
+      event: 'ausencias_baja_deshecha',
+      timestamp: new Date().toISOString(),
+      empleadoId,
+      correo: antes.correo,
+      fechaRetiroQueTenia: antes.fechaRetiro,
+      retiradoPor: antes.retiradoPor,
+      deshechoPor: adminEmail,
+    }),
+  );
+
+  if (!(await repo.limpiarRetiro(db, empleadoId))) {
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+  const actualizado = await repo.empleadoPorIdIncluyendoInactivos(db, empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}

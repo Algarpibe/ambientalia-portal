@@ -626,6 +626,15 @@ vi.mock('./repo.js', async () => ({
     return true;
   },
   empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
+  // Idéntico al de arriba en este doble: `empleadoPorId` ya no filtra por
+  // `activo` aquí (la fila inactiva no se borra de `estado.plantilla`, solo
+  // lleva `activo: false`), así que no hay diferencia que modelar entre las
+  // dos funciones EN ESTE FICHERO. Existe solo para que el CANDADO de
+  // paridad de más abajo compare superficies iguales — ningún test de este
+  // fichero ejercita `retirarEmpleado`/`reactivarEmpleado`, eso vive en
+  // `repo.baja.db.test.ts` contra Postgres real.
+  empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
+    estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
   // `veAdjuntos`: por defecto nadie es visor, igual que en el SQL real (la
   // columna nace en `false`). `e.activo !== false` y no `=== true`: ninguna otra
