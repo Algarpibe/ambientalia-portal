@@ -646,11 +646,23 @@ export default function App() {
               <div className={tab === 'mias' ? '' : 'hidden'}>
                 {/* Sin tarjeta de saldo: el número vive en la cabecera, visible desde aquí. */}
 
-                {/* El filtro se calla con menos de dos tipos: un desplegable con
-                    una sola opción no filtra nada y solo añade un trasto encima
-                    de la tabla. Mismo criterio que `soloSiAvisa` en la tarjeta
-                    del saldo. */}
-                {tiposEnMias.length > 1 && (
+                {/* Se pinta en cuanto hay UNA solicitud, no a partir de dos
+                    tipos.
+
+                    Nació con la condición `tiposEnMias.length > 1` —un
+                    desplegable de una sola opción no filtra nada— y se reportó
+                    como si fuera un fallo de permisos: «el admin y los jefes no
+                    tienen el filtro». No lo era; era esto. Un admin o un jefe
+                    usa la app sobre todo para aprobar lo de otros, así que desde
+                    su propia cuenta suele haber pedido de un solo tipo, y la
+                    condición escondía el filtro justo a quien más se fija en que
+                    a los demás sí les sale.
+
+                    Un control que aparece y desaparece según los datos de cada
+                    uno no se lee como «aquí no hace falta», se lee como «a mí me
+                    falta algo». Con la tabla vacía sí se calla: ahí no hay nada
+                    que filtrar y lo dice el mensaje de la propia tabla. */}
+                {mias.length > 0 && (
                   <div className="mb-3 flex flex-wrap items-center gap-3">
                     <select
                       className="rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none"
