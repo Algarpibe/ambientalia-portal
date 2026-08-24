@@ -306,7 +306,14 @@ describe('retirarEmpleado', () => {
       code: 'retiro_bloqueado', status: 409,
       // El detalle es obligatorio, no decorativo: sin afirmarlo, quitarlo del
       // throw deja este mismo test en verde y nadie se entera.
-      detalle: { solicitudes: [{ fechaFin: '2026-10-09', estado: 'aprobada' }] },
+      //
+      // La mitad vacia (`personas: []`) tambien se afirma, y no es relleno:
+      // `toMatchObject` empareja por SUBCONJUNTO, asi que sin esta linea el
+      // test no dice nada sobre `personas` y un `personas: undefined` en el
+      // throw (en vez de `[]`) seguiria pasando. El cliente hace `.length`
+      // sobre las dos listas, y un `undefined` ahi revienta la pantalla en
+      // vez de no mostrar nada.
+      detalle: { solicitudes: [{ fechaFin: '2026-10-09', estado: 'aprobada' }], personas: [] },
     });
   });
 
@@ -322,7 +329,11 @@ describe('retirarEmpleado', () => {
       // `personasACargoDe` por el correo del JEFE en vez de por el del retirado,
       // este test seguiria verde por casualidad del fixture si solo mirara la
       // longitud del array.
-      detalle: { personas: [{ correo: 'sub3@baja.test' }] },
+      //
+      // `solicitudes: []` es la mitad vacia, gemela de la del test de arriba:
+      // sin ella el test no afirma nada sobre `solicitudes` y un `undefined`
+      // ahi (en vez de `[]`) pasaria igual.
+      detalle: { solicitudes: [], personas: [{ correo: 'sub3@baja.test' }] },
     });
   });
 
@@ -409,6 +420,10 @@ describe('retirarEmpleado', () => {
       expect(e.fechaRetiro).toBeNull();
       expect(e.activo).toBe(true);
 
+      // Mensaje legible si esto muere (en vez del TypeError de leer `.at(-1)`
+      // de una lista vacia), y de paso ata que la reactivacion registre UNA
+      // vez y no dos. Mismo patron que `audit.logger.test.ts`.
+      expect(spy).toHaveBeenCalledTimes(1);
       const log = JSON.parse(spy.mock.calls.at(-1)![0] as string);
       expect(log).toMatchObject({
         event: 'ausencias_baja_deshecha',
