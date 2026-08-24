@@ -3215,3 +3215,63 @@ export async function aplicarRetirosVencidos(db: Pool, hoy: string): Promise<num
   );
   return res.rowCount ?? 0;
 }
+
+/** Una solicitud que estorba a una baja, reducida a lo que el mensaje necesita. */
+export interface DiaPosterior {
+  tipo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  estado: string;
+}
+
+/**
+ * Las solicitudes de alguien que TERMINAN después de una fecha y que consumen
+ * días: las vivas y las ya aprobadas.
+ *
+ * Es lo que bloquea una baja. Las anteriores a la fecha no se miran a propósito:
+ * quien se va el 30 de septiembre puede tener vacaciones pendientes de firma
+ * para la semana que viene, y son perfectamente legítimas.
+ *
+ * `fecha_fin > $2` y no `>=`: la fecha de retiro es su último día trabajado, así
+ * que unas vacaciones que acaban justo ese día caben.
+ *
+ * Las rechazadas quedan fuera: no consumen nada, y bloquear por ellas obligaría
+ * a limpiar historia para poder dar de baja a alguien. `pendiente_2` entra junto
+ * a `pendiente`: es el mismo trámite en su segundo nivel de firma, no un estado
+ * distinto que vaya a dejar de consumir agenda.
+ */
+export async function diasPosterioresA(db: Pool, empleadoId: string, fecha: string): Promise<DiaPosterior[]> {
+  const { rows } = await db.query(
+    `SELECT tipo, fecha_inicio::text AS fecha_inicio, fecha_fin::text AS fecha_fin, estado
+       FROM portal.solicitudes_ausencia
+      WHERE empleado_id = $1
+        AND fecha_fin > $2::date
+        AND estado IN ('pendiente', 'pendiente_2', 'aprobada', 'registrada')
+      ORDER BY fecha_inicio`,
+    [empleadoId, fecha],
+  );
+  return (rows as { tipo: string; fecha_inicio: string; fecha_fin: string; estado: string }[]).map((r) => ({
+    tipo: r.tipo,
+    fechaInicio: r.fecha_inicio,
+    fechaFin: r.fecha_fin,
+    estado: r.estado,
+  }));
+}
+
+/**
+ * Los nombres de quienes tienen a este correo como jefe o en copia.
+ *
+ * `WHERE activo` porque una ficha ya inactiva no necesita que nadie le firme
+ * nada: sin eso, no se podría dar de baja a un jefe cuyo equipo ya se fue.
+ */
+export async function personasACargoDe(db: Pool, correo: string): Promise<string[]> {
+  const { rows } = await db.query(
+    `SELECT nombre_completo
+       FROM portal.empleados
+      WHERE activo
+        AND (lower(aprobador_correo) = lower($1) OR lower(copia_correo) = lower($1))
+      ORDER BY nombre_completo`,
+    [correo],
+  );
+  return (rows as { nombre_completo: string }[]).map((r) => r.nombre_completo);
+}

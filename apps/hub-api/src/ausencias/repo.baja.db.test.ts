@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
-import { empleadoPorId, aplicarRetirosVencidos } from './repo.js';
+import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
+import { empleadoPorId, aplicarRetirosVencidos, diasPosterioresA, personasACargoDe } from './repo.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -120,5 +120,73 @@ describe('aplicarRetirosVencidos', () => {
     expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(1);
     expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(0);
     expect(await sigueActivo(id)).toBe(false);
+  });
+});
+
+describe('diasPosterioresA', () => {
+  it('encuentra las vacaciones vivas o aprobadas que pasan de la fecha', async () => {
+    const id = await sembrarEmpleado(db, 'pos@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'pos@baja.test', estado: 'aprobada',
+      fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
+    });
+    const chocan = await diasPosterioresA(db, id, '2026-09-30');
+    expect(chocan).toHaveLength(1);
+    expect(chocan[0].fechaFin).toBe('2026-10-09');
+  });
+
+  it('CANDADO: lo ANTERIOR a la fecha no estorba', async () => {
+    // Es legitimo y corriente: quien se va el 30 de septiembre puede tener
+    // vacaciones pendientes de firma para la semana que viene.
+    const id = await sembrarEmpleado(db, 'ant@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'ant@baja.test', estado: 'pendiente',
+      fechaInicio: '2026-09-07', fechaFin: '2026-09-11', segundoAprobadorCorreo: null,
+    });
+    expect(await diasPosterioresA(db, id, '2026-09-30')).toHaveLength(0);
+  });
+
+  it('CANDADO: una rechazada posterior tampoco estorba', async () => {
+    // Solo cuentan las que consumen dias. Bloquear por una rechazada obligaria
+    // a limpiar historia para poder dar de baja a alguien.
+    const id = await sembrarEmpleado(db, 'rech@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'rech@baja.test', estado: 'rechazada',
+      fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
+    });
+    expect(await diasPosterioresA(db, id, '2026-09-30')).toHaveLength(0);
+  });
+
+  it('el dia exacto de la fecha NO estorba: es su ultimo dia', async () => {
+    const id = await sembrarEmpleado(db, 'exacto@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'exacto@baja.test', estado: 'aprobada',
+      fechaInicio: '2026-09-28', fechaFin: '2026-09-30', segundoAprobadorCorreo: null,
+    });
+    expect(await diasPosterioresA(db, id, '2026-09-30')).toHaveLength(0);
+  });
+});
+
+describe('personasACargoDe', () => {
+  it('encuentra a quien lo tiene de jefe', async () => {
+    await sembrarEmpleado(db, 'jefe@baja.test');
+    await sembrarEmpleado(db, 'subordinado@baja.test', 'jefe@baja.test');
+    const gente = await personasACargoDe(db, 'jefe@baja.test');
+    expect(gente).toEqual(['Ana Ruiz']);
+  });
+
+  it('encuentra a quien lo tiene en copia', async () => {
+    await sembrarEmpleado(db, 'copia@baja.test');
+    const otro = await sembrarEmpleado(db, 'otro@baja.test');
+    await db.query('UPDATE portal.empleados SET copia_correo = $2 WHERE id = $1', [otro, 'copia@baja.test']);
+    expect(await personasACargoDe(db, 'copia@baja.test')).toEqual(['Ana Ruiz']);
+  });
+
+  it('CANDADO: una ficha ya inactiva no cuenta', async () => {
+    // Si contara, no se podria dar de baja a un jefe cuyo equipo ya se fue.
+    await sembrarEmpleado(db, 'jefe2@baja.test');
+    const sub = await sembrarEmpleado(db, 'exsub@baja.test', 'jefe2@baja.test');
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [sub]);
+    expect(await personasACargoDe(db, 'jefe2@baja.test')).toEqual([]);
   });
 });

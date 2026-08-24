@@ -414,6 +414,13 @@ vi.mock('./repo.js', async () => ({
     estado.orden.push('barrido');
     return 0;
   },
+  // Las dos consultas de bloqueo de una baja incoherente. Ningún test de este
+  // fichero ejercita todavía el servicio que las usa —eso llega en la tarea
+  // siguiente, con su propio doble o su propio test:db—, así que aquí bastan
+  // los defaults «no hay nada que bloquee»: mantienen el candado de más abajo
+  // en verde sin fingir un comportamiento que nadie prueba aquí.
+  diasPosterioresA: async () => [],
+  personasACargoDe: async () => [],
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
   // creadas por el propio portal).
