@@ -32,14 +32,16 @@ describe('migracion 035', () => {
           AND column_name IN ('fecha_retiro', 'retirado_por', 'retirado_at')
         ORDER BY column_name`,
     );
-    expect(rows).toHaveLength(3);
-    expect(rows.map((r: { column_name: string }) => r.column_name)).toEqual([
-      'fecha_retiro',
-      'retirado_at',
-      'retirado_por',
+    // Se fija el tipo entero y no solo el nombre: un `data_type` que cambiara
+    // sin que este test se enterara pasaria desapercibido hasta que un WHERE
+    // de una tarea futura (`fecha_retiro < $1::date`) comparara contra el tipo
+    // equivocado. Mismo patron que el candado de la 034 en
+    // auth.requireauth.db.test.ts, nacido del incidente SEC-220.
+    expect(rows).toEqual([
+      { column_name: 'fecha_retiro', data_type: 'date', is_nullable: 'YES' },
+      { column_name: 'retirado_at', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+      { column_name: 'retirado_por', data_type: 'character varying', is_nullable: 'YES' },
     ]);
-    // Nullable las tres: una ficha activa no tiene retiro.
-    expect(rows.every((r: { is_nullable: string }) => r.is_nullable === 'YES')).toBe(true);
   });
 
   it('una ficha recien sembrada nace sin retiro', async () => {
