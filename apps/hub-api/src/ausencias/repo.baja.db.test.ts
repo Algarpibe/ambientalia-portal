@@ -215,7 +215,10 @@ describe('personasACargoDe', () => {
 describe('fijarRetiro / limpiarRetiro', () => {
   it('guarda la fecha y la constancia, sin desactivar todavia', async () => {
     const id = await sembrarEmpleado(db, 'fijar@baja.test');
-    expect(await fijarRetiro(db, id, '2026-12-31', 'admin@ambientalia.com.co')).toBe(true);
+    // Correo con mayusculas: si alguien quita el `.toLowerCase()` de
+    // `fijarRetiro`, este test caza que `retirado_por` quede escrito tal cual
+    // llego en vez de normalizado, que es lo que rompe la comparacion de abajo.
+    expect(await fijarRetiro(db, id, '2026-12-31', 'Admin@Ambientalia.com.co')).toBe(true);
     const { rows } = await db.query(
       `SELECT fecha_retiro::text AS fecha_retiro, retirado_por, retirado_at, activo
          FROM portal.empleados WHERE id = $1`,
@@ -256,5 +259,28 @@ describe('fijarRetiro / limpiarRetiro', () => {
     const inventado = '00000000-0000-4000-8000-000000000000';
     expect(await fijarRetiro(db, inventado, '2026-08-20', 'admin@ambientalia.com.co')).toBe(false);
     expect(await limpiarRetiro(db, inventado)).toBe(false);
+  });
+
+  it('CANDADO: fijarRetiro y limpiarRetiro tocan SOLO a ese empleado', async () => {
+    // Cada test de arriba siembra una sola fila, asi que un WHERE que perdiera
+    // el filtro por id seguiria en verde igual: con una sola fila en la tabla
+    // da lo mismo que el UPDATE filtre o no. Con dos empleados a la vez, la
+    // fila de B tiene que quedar intacta pase lo que pase con la de A. Mismo
+    // patron que el candado gemelo de `diasPosterioresA` y `personasACargoDe`.
+    const idA = await sembrarEmpleado(db, 'a-baja@baja.test');
+    const idB = await sembrarEmpleado(db, 'b-intacto@baja.test');
+
+    await fijarRetiro(db, idA, '2026-12-31', 'admin@ambientalia.com.co');
+    const { rows: trasFijar } = await db.query(
+      'SELECT fecha_retiro, retirado_por FROM portal.empleados WHERE id = $1', [idB],
+    );
+    expect(trasFijar[0]).toEqual({ fecha_retiro: null, retirado_por: null });
+
+    await fijarRetiro(db, idB, '2026-11-30', 'admin@ambientalia.com.co');
+    await limpiarRetiro(db, idA);
+    const { rows: trasLimpiar } = await db.query(
+      'SELECT fecha_retiro::text AS fecha_retiro FROM portal.empleados WHERE id = $1', [idB],
+    );
+    expect(trasLimpiar[0].fecha_retiro).toBe('2026-11-30');
   });
 });
