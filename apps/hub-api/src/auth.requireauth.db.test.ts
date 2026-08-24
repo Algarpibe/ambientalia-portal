@@ -27,6 +27,20 @@ const SQL_REQUIRE_AUTH = `SELECT u.role,
          FROM portal.users u
         WHERE u.id = $1`;
 
+// La consulta de `getSelfProfile` (GET /api/users/me), copiada aqui por el mismo
+// motivo que la de arriba: es la que da las apps con las que el portal decide
+// que iconos pinta, y ningun test unitario la ejecuta de verdad.
+const SQL_PERFIL_PROPIO = `SELECT id, full_name, email, role, status, created_at,
+              avatar,
+              ARRAY(
+                SELECT ua.app_id
+                  FROM portal.user_apps ua
+                 WHERE ua.user_id = u.id
+                 ORDER BY ua.app_id
+              ) AS apps
+         FROM portal.users u
+        WHERE u.id = $1`;
+
 let db: Pool;
 
 beforeAll(() => {
@@ -93,6 +107,25 @@ describe('la consulta de requireAuth contra una base de verdad', () => {
   it('un usuario inexistente no devuelve filas (→ 401 en requireAuth)', async () => {
     const { rows } = await db.query(SQL_REQUIRE_AUTH, ['00000000-0000-4000-8000-000000000000']);
     expect(rows).toHaveLength(0);
+  });
+
+  it('CANDADO: la consulta del perfil propio tambien la ACEPTA Postgres', async () => {
+    // `getSelfProfile` estrena el mismo ARRAY(subconsulta) desde que el portal
+    // dejo de sacar las apps del token, y corre el mismo riesgo: el doble de
+    // `users.integration.test.ts` casa por REGEX y no valida el SQL, asi que una
+    // consulta invalida ahi pasaria con los 1011 en verde y solo se veria en
+    // produccion — que es literalmente lo que paso el 2026-08-23.
+    const id = await sembrarUsuario('perfil' + DOMINIO, { apps: ['wo-sales', 'ausencias'] });
+    const { rows } = await db.query(SQL_PERFIL_PROPIO, [id]);
+    expect(rows[0]).toMatchObject({ role: 'reader', status: 'active' });
+    expect((rows[0] as { apps: string[] }).apps).toEqual(['ausencias', 'wo-sales']);
+  });
+
+  it('CANDADO: el perfil sin apps devuelve un array VACIO, no null', async () => {
+    // Los guardias del portal hacen `.includes` sobre esto.
+    const id = await sembrarUsuario('perfilsinapps' + DOMINIO);
+    const { rows } = await db.query(SQL_PERFIL_PROPIO, [id]);
+    expect((rows[0] as { apps: string[] }).apps).toEqual([]);
   });
 
   it('CANDADO: la migración 034 dejó token_version NOT NULL DEFAULT 0', async () => {

@@ -143,6 +143,21 @@ class FakeDb {
     // el SQL — que pase aquí no significa que Postgres lo acepte. Eso solo lo
     // dice auth.requireauth.db.test.ts, y hasta que existió una consulta
     // inválida tumbó la autenticación en producción.
+    // El perfil propio TAMBIÉN pide las apps con ARRAY(...) desde que el portal
+    // dejó de sacarlas del token. Va ANTES de la rama de requireAuth porque las
+    // dos casan con `ARRAY(` + `ua.app_id`: sin esta, el perfil se resolvía por
+    // aquella y volvía sin id, sin nombre y sin avatar. Lo que las separa es
+    // que solo el perfil pide `avatar`.
+    if (sql.includes('ARRAY(') && /\bavatar\b/i.test(sql)) {
+      const [id] = params as string[];
+      const u = this.users.find((x) => x.id === id);
+      if (!u) return { rows: [], rowCount: 0 };
+      const apps = this.apps
+        .filter((a) => a.user_id === id)
+        .map((a) => a.app_id)
+        .sort();
+      return { rows: [{ ...this.pub(u), avatar: u.avatar ?? null, apps }], rowCount: 1 };
+    }
     if (sql.includes("ARRAY(") && sql.includes("ua.app_id")) {
       const [id] = params as string[];
       const u = this.users.find((x) => x.id === id);
@@ -366,6 +381,29 @@ describe('perfil propio (/api/users/me)', () => {
     expect(res.body).toMatchObject({ id: READER_ID, email: 'reader@x.com', role: 'reader' });
     expect(res.body).toHaveProperty('avatar');
     expect(res.body).not.toHaveProperty('password_hash');
+  });
+
+  // El portal pinta los iconos con esto. Antes los sacaba del `apps` del JWT,
+  // que se emite en el login y no se refresca nunca: a quien le asignaban una
+  // app con la sesión abierta no la veía hasta cerrar sesión o agotar el TTL.
+  //
+  // El token de `bearer()` viaja con `apps: []` a propósito, así que este test
+  // solo puede pasar si la respuesta las lee de la BD y no del token.
+  it('GET /me trae las apps asignadas, aunque el token venga sin ellas', async () => {
+    db.apps.push({ user_id: READER_ID, app_id: 'ausencias' });
+    db.apps.push({ user_id: READER_ID, app_id: 'wo-sales' });
+
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.status).toBe(200);
+    expect(res.body.apps).toEqual(['ausencias', 'wo-sales']);
+  });
+
+  it('GET /me devuelve apps vacías para quien no tiene ninguna', async () => {
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.status).toBe(200);
+    // `[]` y no `undefined`: los guardias del portal hacen `.includes` sobre
+    // esto, y un `undefined` reventaría la pantalla en vez de negar el acceso.
+    expect(res.body.apps).toEqual([]);
   });
 
   // El nombre queda fijado en el registro. Esconderlo en la UI no bastaba: con
