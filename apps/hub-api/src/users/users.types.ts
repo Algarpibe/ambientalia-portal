@@ -38,6 +38,19 @@ export interface UserPublic {
 /** Perfil propio del usuario autenticado (incluye avatar). */
 export interface SelfProfile extends UserPublic {
   avatar: string | null;
+  /**
+   * Las apps asignadas, leídas de `portal.user_apps` en el momento de preguntar.
+   *
+   * Viajan aquí porque el JWT también las lleva, pero congeladas en el instante
+   * del login y sin ninguna vía de refresco: `issueTokenForUser` solo se llama
+   * desde `loginUser`. Quien recibía una app con la sesión abierta seguía sin
+   * verla en el portal —el icono se pinta desde el token— hasta cerrar sesión o
+   * agotar el TTL, aunque el servidor ya la dejara entrar porque SEC-224 relee
+   * las apps de la BD en cada petición.
+   *
+   * Con esto el navegador puede leer la MISMA fuente que la autorización.
+   */
+  apps: string[];
 }
 
 /** Payload de entrada del registro por autoservicio (`POST /api/auth/register`). */
