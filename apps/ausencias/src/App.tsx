@@ -17,18 +17,21 @@ import {
   type Solicitud,
   type SolicitudConPropuesta,
   type SolicitudPendiente,
+  type TipoSolicitud,
 } from './api';
 import {
   contarPorAtender,
   enTramite,
   esOtorgamiento,
   esTurnoDe,
+  ETIQUETA_TIPO,
   hoyEnColombia,
   mensajeDeModificacion,
   puedePedirAnulacion,
   puedePedirModificacion,
   puedeRetirarla,
   resumenPropuesta,
+  TIPOS,
 } from './dominio';
 import FormularioSolicitud from './FormularioSolicitud';
 import PedirModificacion from './PedirModificacion';
@@ -82,6 +85,14 @@ export default function App() {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Pestana>(pestanaInicial);
+  // El filtro por tipo de «Mis solicitudes». `''` es «todos», igual que en los
+  // cuatro del registro general, para no estrenar aquí un convenio distinto.
+  //
+  // Se tipa `TipoSolicitud | ''` y no `string`: así una comparación contra un
+  // tipo mal escrito no compila. Importa porque el filtro se compara contra
+  // `s.tipo`, y un literal desviado no vaciaría la tabla con un error, sino en
+  // silencio.
+  const [filtroMias, setFiltroMias] = useState<TipoSolicitud | ''>('');
   // Se incrementa al importar, y también al decidir algo —aprobar, rechazar o
   // cerrar un cambio—, para que el registro general se recargue sin
   // desmontarlo (y sin perder los filtros que tuviera puestos). Antes esto
@@ -160,6 +171,33 @@ export default function App() {
   // `undefined`. Degrada a «no lo tiene», que es el lado seguro — la pestaña
   // tarda un despliegue en aparecer, en vez de aparecer sin datos detrás.
   const veTodaLaEmpresa = !!contexto?.esVisorDeTodaLaEmpresa;
+
+  // Los tipos que ofrecer en el filtro de «Mis solicitudes»: los que ESTA
+  // persona tiene, no los cinco.
+  //
+  // Derivarlos de los datos —como el registro general hace con las personas y
+  // los años, aunque no con su propio filtro de tipo— es lo que evita la opción
+  // muerta: quien no ha pedido nunca un compensatorio no debe poder elegir
+  // «Compensatorio» y quedarse mirando una tabla vacía preguntándose si se ha
+  // roto algo.
+  //
+  // El orden sale de `TIPOS` y no del orden de llegada de las solicitudes: es
+  // el orden canónico de la app —el mismo del formulario— y así el desplegable
+  // no se reordena solo cuando alguien pide un tipo nuevo.
+  const tiposEnMias = useMemo(
+    () => TIPOS.map((t) => t.id).filter((id) => mias.some((s) => s.tipo === id)),
+    [mias],
+  );
+
+  // Derivado, y no un `setMias` que recorte el estado: filtrar es una decisión
+  // de la vista y tiene que poder deshacerse. Recortando el estado, «Todos los
+  // tipos» ya no tendría de dónde recuperar lo escondido, y `onCreada` y
+  // `onRetirada` —que escriben sobre `mias` por id— acabarían operando sobre una
+  // lista a la que le faltan filas.
+  const miasFiltradas = useMemo(
+    () => (filtroMias ? mias.filter((s) => s.tipo === filtroMias) : mias),
+    [mias, filtroMias],
+  );
 
   const pestanas = useMemo(() => {
     const p: [Pestana, string][] = [];
@@ -607,9 +645,59 @@ export default function App() {
 
               <div className={tab === 'mias' ? '' : 'hidden'}>
                 {/* Sin tarjeta de saldo: el número vive en la cabecera, visible desde aquí. */}
+
+                {/* El filtro se calla con menos de dos tipos: un desplegable con
+                    una sola opción no filtra nada y solo añade un trasto encima
+                    de la tabla. Mismo criterio que `soloSiAvisa` en la tarjeta
+                    del saldo. */}
+                {tiposEnMias.length > 1 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-3">
+                    <select
+                      className="rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none"
+                      value={filtroMias}
+                      // El `as` es sano por construcción: los únicos valores que
+                      // este `select` puede producir son los `value` de sus
+                      // `option`, y salen todos de `TipoSolicitud`.
+                      onChange={(e) => setFiltroMias(e.target.value as TipoSolicitud | '')}
+                      aria-label="Filtrar por tipo"
+                    >
+                      <option value="">Todos los tipos</option>
+                      {tiposEnMias.map((id) => (
+                        // `ETIQUETA_TIPO` y NO `TIPOS[].label`: el desplegable
+                        // tiene que nombrar los tipos igual que la columna que
+                        // filtra. Para el otorgamiento no coinciden —la columna
+                        // dice «Compensatorio concedido» y `TIPOS` dice «Pedir
+                        // compensatorios», que es el texto del formulario— y
+                        // elegir el del formulario haría que el filtro y la
+                        // tabla llamaran de dos formas distintas a lo mismo.
+                        <option key={id} value={id}>
+                          {ETIQUETA_TIPO[id]}
+                        </option>
+                      ))}
+                    </select>
+                    {/* Solo con filtro puesto, y con el total al lado: sin el
+                        «de N» la tabla recortada se lee como si fuera todo lo que
+                        hay. */}
+                    {filtroMias && (
+                      <span className="text-sm text-gray-500">
+                        {miasFiltradas.length} de {mias.length} solicitudes
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <TablaSolicitudes
-                  solicitudes={mias}
-                  vacio="Todavía no has enviado ninguna solicitud."
+                  solicitudes={miasFiltradas}
+                  // Con filtro puesto el mensaje de siempre sería mentira: sí ha
+                  // enviado solicitudes, solo que ninguna de ese tipo. Hoy no se
+                  // llega aquí —las opciones salen de los datos, así que la que
+                  // se elija tiene al menos una fila—, pero esa garantía vive en
+                  // `tiposEnMias`, arriba, y este componente no la ve.
+                  vacio={
+                    filtroMias
+                      ? `No tienes solicitudes de tipo ${ETIQUETA_TIPO[filtroMias].toLowerCase()}.`
+                      : 'Todavía no has enviado ninguna solicitud.'
+                  }
                   acciones={accionesMias}
                 />
               </div>
