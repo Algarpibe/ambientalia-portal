@@ -329,6 +329,18 @@ describe('retirarEmpleado', () => {
     ).rejects.toMatchObject({ code: 'empleado_no_encontrado', status: 404 });
   });
 
+  it('CANDADO: retirar a una ficha YA inactiva devuelve la ficha, no un 404 espurio', async () => {
+    // Es el caso de las cuentas desactivadas a mano antes de que esta feature
+    // existiera: tienen que poder recibir su fecha despues. Si la relectura
+    // filtrara por `activo`, la baja se escribiria bien y el servicio contestaria
+    // 404 igualmente. Hermano del candado de fijarRetiro en la tarea anterior.
+    const id = await sembrarEmpleado(db, 'yainactiva@baja.test');
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
+    const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
+    expect(e.fechaRetiro).toBe('2026-09-30');
+    expect(e.activo).toBe(false);
+  });
+
   it('reactivarEmpleado deshace la baja', async () => {
     const id = await sembrarEmpleado(db, 'reac@baja.test');
     await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
@@ -338,5 +350,34 @@ describe('retirarEmpleado', () => {
     const e = await reactivarEmpleado(db, id, ADMIN);
     expect(e.fechaRetiro).toBeNull();
     expect(e.activo).toBe(true);
+  });
+
+  it('CANDADO: reactivarEmpleado alcanza una ficha YA inactiva (la lectura de ANTES de limpiar)', async () => {
+    // Gemelo del candado de arriba, pero en la lectura que se hace ANTES de
+    // `limpiarRetiro`. Es el caso real: alguien con `fecha_retiro` ya vencida,
+    // a quien el barrido (`aplicarRetirosVencidos`) ya desactivo. Deshacer esa
+    // baja exige poder LEER una ficha inactiva antes de limpiarla; si esa
+    // lectura filtrara por `activo`, el servicio devolveria 404 justo antes de
+    // poder arreglar la baja que dejo la ficha inactiva.
+    //
+    // La lectura de DESPUES de `limpiarRetiro` (la que arma la respuesta) no
+    // necesita este candado: el UPDATE de `limpiarRetiro` deja `activo = true`
+    // SIN CONDICION (no lleva `WHERE activo`), asi que un filtro `AND activo`
+    // ahi encontraria la fila de todos modos. Se comprobo mutando esa segunda
+    // lectura a `empleadoPorId`: ningun test de este fichero se pone rojo.
+    const id = await sembrarEmpleado(db, 'yadesactivada@baja.test');
+    await fijarRetiro(db, id, '2026-08-20', ADMIN);
+    await aplicarRetirosVencidos(db, '2026-08-24');
+    const e = await reactivarEmpleado(db, id, ADMIN);
+    expect(e.activo).toBe(true);
+    expect(e.fechaRetiro).toBeNull();
+  });
+
+  it('reactivarEmpleado: 404 si el empleado no existe', async () => {
+    // Vigila el guard `if (!antes) throw ...` que la lectura previa al evento
+    // necesita (AJUSTE 2): sin este test ese guard no lo comprueba nadie.
+    await expect(
+      reactivarEmpleado(db, '00000000-0000-4000-8000-000000000000', ADMIN),
+    ).rejects.toMatchObject({ code: 'empleado_no_encontrado', status: 404 });
   });
 });
