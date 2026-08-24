@@ -625,14 +625,18 @@ vi.mock('./repo.js', async () => ({
     }
     return true;
   },
-  empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
-  // Idéntico al de arriba en este doble: `empleadoPorId` ya no filtra por
-  // `activo` aquí (la fila inactiva no se borra de `estado.plantilla`, solo
-  // lleva `activo: false`), así que no hay diferencia que modelar entre las
-  // dos funciones EN ESTE FICHERO. Existe solo para que el CANDADO de
-  // paridad de más abajo compare superficies iguales — ningún test de este
-  // fichero ejercita `retirarEmpleado`/`reactivarEmpleado`, eso vive en
-  // `repo.baja.db.test.ts` contra Postgres real.
+  // Reproduce el `AND activo` del SQL real: sin este filtro, `empleadoPorId`
+  // seria indistinguible de `empleadoPorIdIncluyendoInactivos` aqui abajo, y
+  // un servicio que llamara a la funcion equivocada pasaria en verde — justo
+  // la clase de bug para la que nacio la hermana.
+  empleadoPorId: async (_db: unknown, id: string) =>
+    estado.plantilla.find((e: any) => e.id === id && e.activo !== false) ?? null,
+  // Gemela SIN el filtro de arriba: alcanza tambien a una ficha inactiva
+  // (la fila no se borra de `estado.plantilla`, solo lleva `activo: false`).
+  // Existe ademas para que el CANDADO de paridad de mas abajo compare
+  // superficies iguales — ningun test de este fichero ejercita
+  // `retirarEmpleado`/`reactivarEmpleado`, eso vive en `repo.baja.db.test.ts`
+  // contra Postgres real.
   empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
     estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define

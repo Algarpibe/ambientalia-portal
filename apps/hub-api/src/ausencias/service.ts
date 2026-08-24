@@ -2239,6 +2239,24 @@ export async function calendarioDelAnio(db: Pool, sesion: Sesion, anio: string):
  * filtra por `activo`, así que nada se lo impide, y bloquear el retiro por
  * ellas sería inventar un problema donde no lo hay. La frontera exacta entre
  * "antes" y "después" la traza `repo.diasPosterioresA`.
+ *
+ * **Los dos bloqueos —días posteriores y personas a cargo— se informan
+ * JUNTOS, en un solo 409, y nunca el primero que salte.** Cortocircuitar
+ * dejaría a quien se topa con los dos enterarse de uno, arreglarlo, reintentar
+ * y toparse con el otro. Y esa población no es rara: es el jefe que se va, que
+ * tiene equipo por definición y suele tener vacaciones pendientes. Los dos
+ * remedios además los ejecutan personas y pantallas distintas —rechazar o
+ * retirar la solicitud vs. reasignar el equipo en Organigrama—, así que
+ * descubrirlos de uno en uno puede costar días.
+ *
+ * ⚠️ No es transaccional: entre las dos comprobaciones y `fijarRetiro` puede
+ * colarse una solicitud nueva o un cambio de jefe (dos `SELECT` sin `FOR
+ * UPDATE`, ni las dos ni la escritura comparten conexión). Se acepta a
+ * propósito, mismo criterio que `solapeDe`: el daño es leve porque aquí no se
+ * congela nada en columnas —`hoyCongelado` deriva el saldo en cada cálculo, no
+ * en el instante del retiro—, así que colarse solo caduca la comprobación de
+ * este momento, no corrompe ningún dato, y la baja se puede deshacer con
+ * `reactivarEmpleado` si hiciera falta.
  */
 export async function retirarEmpleado(
   db: Pool,
@@ -2258,15 +2276,16 @@ export async function retirarEmpleado(
   if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404);
 
   const posteriores = await repo.diasPosterioresA(db, empleadoId, fecha);
-  if (posteriores.length > 0) {
-    // El detalle es obligatorio, no decorativo: «no puedes» sin decir cuáles es
-    // inaccionable, y el admin tendría que buscarlas a mano en el registro.
-    throw new AusenciaError('retiro_con_dias_posteriores', 409, 'fechaRetiro', { solicitudes: posteriores });
-  }
-
   const aCargo = await repo.personasACargoDe(db, empleado.correo);
-  if (aCargo.length > 0) {
-    throw new AusenciaError('retiro_con_personas_a_cargo', 409, 'fechaRetiro', { personas: aCargo });
+  if (posteriores.length > 0 || aCargo.length > 0) {
+    // Los DOS de una vez, y no el primero que salte: quien se topa con ambos es
+    // el jefe que se va —tiene equipo por definicion y suele tener vacaciones
+    // pendientes—, y los dos remedios se ejecutan en pantallas distintas. Decirle
+    // solo uno le hace descubrir el otro despues de haberlo arreglado.
+    throw new AusenciaError('retiro_bloqueado', 409, 'fechaRetiro', {
+      solicitudes: posteriores,
+      personas: aCargo,
+    });
   }
 
   if (!(await repo.fijarRetiro(db, empleadoId, fecha, adminEmail))) {

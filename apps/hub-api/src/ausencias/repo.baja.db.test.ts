@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 import {
@@ -303,7 +303,10 @@ describe('retirarEmpleado', () => {
       fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
     });
     await expect(retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN)).rejects.toMatchObject({
-      code: 'retiro_con_dias_posteriores', status: 409,
+      code: 'retiro_bloqueado', status: 409,
+      // El detalle es obligatorio, no decorativo: sin afirmarlo, quitarlo del
+      // throw deja este mismo test en verde y nadie se entera.
+      detalle: { solicitudes: [{ fechaFin: '2026-10-09', estado: 'aprobada' }] },
     });
   });
 
@@ -313,7 +316,50 @@ describe('retirarEmpleado', () => {
     const { rows } = await db.query('SELECT id FROM portal.empleados WHERE correo = $1', ['jefe3@baja.test']);
     await expect(
       retirarEmpleado(db, (rows[0] as { id: string }).id, { fechaRetiro: '2026-09-30' }, ADMIN),
-    ).rejects.toMatchObject({ code: 'retiro_con_personas_a_cargo', status: 409 });
+    ).rejects.toMatchObject({
+      code: 'retiro_bloqueado', status: 409,
+      // Nombra a `sub3` y no solo cuenta cuantos hay: si el servicio preguntara
+      // `personasACargoDe` por el correo del JEFE en vez de por el del retirado,
+      // este test seguiria verde por casualidad del fixture si solo mirara la
+      // longitud del array.
+      detalle: { personas: [{ correo: 'sub3@baja.test' }] },
+    });
+  });
+
+  it('CANDADO: si tiene los dos problemas, el detalle trae los dos juntos', async () => {
+    // El punto central del cambio: antes esto cortocircuitaba (solo se conocia
+    // el primer bloqueo que saltara). La poblacion que se topa con los dos no
+    // es rara: es el jefe que se va, que tiene equipo por definicion y suele
+    // tener vacaciones pendientes. Los dos remedios se ejecutan en pantallas
+    // distintas -rechazar la solicitud vs. reasignar el equipo en Organigrama-,
+    // asi que descubrirlos de uno en uno puede costar dias.
+    const id = await sembrarEmpleado(db, 'jefe4@baja.test');
+    await sembrarEmpleado(db, 'sub4@baja.test', 'jefe4@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'jefe4@baja.test', estado: 'aprobada',
+      fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
+    });
+    await expect(retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN)).rejects.toMatchObject({
+      code: 'retiro_bloqueado', status: 409,
+      detalle: {
+        solicitudes: [{ fechaFin: '2026-10-09' }],
+        personas: [{ correo: 'sub4@baja.test' }],
+      },
+    });
+  });
+
+  it('CANDADO: una solicitud ANTERIOR a la fecha no impide la baja', async () => {
+    // Gemelo de servicio del candado de `diasPosterioresA`: sin el, la fecha que
+    // este servicio le pasa al repo puede ser cualquiera -comprobado mutandola a
+    // '1900-01-01': los tests de este fichero siguen verdes- y la promesa del
+    // JSDoc de que lo anterior no estorba no la vigila nadie.
+    const id = await sembrarEmpleado(db, 'anterior@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id, correo: 'anterior@baja.test', estado: 'pendiente',
+      fechaInicio: '2026-09-07', fechaFin: '2026-09-11', segundoAprobadorCorreo: null,
+    });
+    const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
+    expect(e.fechaRetiro).toBe('2026-09-30');
   });
 
   it('400 si la fecha no es una fecha', async () => {
@@ -347,9 +393,33 @@ describe('retirarEmpleado', () => {
     // Cuarto dato obligatorio (AJUSTE 2): quien deshace la baja tambien queda
     // registrado, en el evento estructurado que sustituye a las columnas que
     // limpiarRetiro borra.
-    const e = await reactivarEmpleado(db, id, ADMIN);
-    expect(e.fechaRetiro).toBeNull();
-    expect(e.activo).toBe(true);
+    //
+    // Se espia console.log porque es el UNICO rastro que queda de la baja
+    // deshecha (limpiarRetiro borra retirado_por/retirado_at de la fila): sin
+    // este test, borrar el console.log entero de reactivarEmpleado deja la
+    // suite en verde, que es justo el sintoma que el JSDoc de la funcion
+    // advierte. fechaRetiroQueTenia y retiradoPor importan en particular
+    // porque son EXACTAMENTE lo que la fila deja de tener, y son la razon
+    // entera de que la lectura de "antes" vaya ANTES de limpiar: sin afirmar
+    // estos dos campos, mover el console.log dos lineas mas abajo lo
+    // convertiria en `null, null` sin que nadie se entere.
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const e = await reactivarEmpleado(db, id, ADMIN);
+      expect(e.fechaRetiro).toBeNull();
+      expect(e.activo).toBe(true);
+
+      const log = JSON.parse(spy.mock.calls.at(-1)![0] as string);
+      expect(log).toMatchObject({
+        event: 'ausencias_baja_deshecha',
+        correo: 'reac@baja.test',
+        fechaRetiroQueTenia: '2026-09-30',
+        retiradoPor: ADMIN,
+        deshechoPor: ADMIN,
+      });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('CANDADO: reactivarEmpleado alcanza una ficha YA inactiva (la lectura de ANTES de limpiar)', async () => {
