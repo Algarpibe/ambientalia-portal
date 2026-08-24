@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
-import { empleadoPorId } from './repo.js';
+import { empleadoPorId, aplicarRetirosVencidos } from './repo.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -71,5 +71,54 @@ describe('el repo lee la fecha de retiro', () => {
     expect(e?.fechaRetiro).toBe('2026-09-30');
     expect(e?.retiradoPor).toBe('admin@ambientalia.com.co');
     expect(typeof e?.retiradoAt).toBe('string');
+  });
+});
+
+describe('aplicarRetirosVencidos', () => {
+  async function fechaRetiroDe(id: string, fecha: string): Promise<void> {
+    await db.query('UPDATE portal.empleados SET fecha_retiro = $2 WHERE id = $1', [id, fecha]);
+  }
+  async function sigueActivo(id: string): Promise<boolean> {
+    const { rows } = await db.query('SELECT activo FROM portal.empleados WHERE id = $1', [id]);
+    return (rows[0] as { activo: boolean }).activo;
+  }
+
+  it('desactiva a quien tiene la fecha ya pasada', async () => {
+    const id = await sembrarEmpleado(db, 'ida@baja.test');
+    await fechaRetiroDe(id, '2026-08-20');
+    const cuantos = await aplicarRetirosVencidos(db, '2026-08-24');
+    expect(cuantos).toBe(1);
+    expect(await sigueActivo(id)).toBe(false);
+  });
+
+  it('CANDADO: el DIA del retiro sigue activo, que es su ultimo dia de trabajo', async () => {
+    // Con `<=` en vez de `<` este test muere. Es el gemelo del candado de
+    // hoyCongelado, y el motivo por el que los dos existen: la fecha es el
+    // ultimo dia TRABAJADO.
+    const id = await sembrarEmpleado(db, 'hoy@baja.test');
+    await fechaRetiroDe(id, '2026-08-24');
+    expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(0);
+    expect(await sigueActivo(id)).toBe(true);
+  });
+
+  it('no toca a quien tiene la fecha en el futuro', async () => {
+    const id = await sembrarEmpleado(db, 'futuro@baja.test');
+    await fechaRetiroDe(id, '2026-12-31');
+    expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(0);
+    expect(await sigueActivo(id)).toBe(true);
+  });
+
+  it('no toca a quien no tiene fecha', async () => {
+    const id = await sembrarEmpleado(db, 'normal@baja.test');
+    expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(0);
+    expect(await sigueActivo(id)).toBe(true);
+  });
+
+  it('es idempotente: la segunda pasada no encuentra nada', async () => {
+    const id = await sembrarEmpleado(db, 'dos@baja.test');
+    await fechaRetiroDe(id, '2026-08-20');
+    expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(1);
+    expect(await aplicarRetirosVencidos(db, '2026-08-24')).toBe(0);
+    expect(await sigueActivo(id)).toBe(false);
   });
 });

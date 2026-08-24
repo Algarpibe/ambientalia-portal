@@ -3185,3 +3185,30 @@ export async function movimientos(db: Pool, soloDe: string | null): Promise<Movi
   ]);
   return [...deSolicitudes, ...deModificaciones].sort(porFechaDeCierre);
 }
+
+// ── Baja de empleados ──────────────────────────────────────────────────────
+
+/**
+ * Apaga las fichas cuya baja programada ya venció. Devuelve cuántas.
+ *
+ * Es lo que hace que una fecha futura signifique algo sin necesidad de un cron:
+ * se llama desde la carga del contexto, así que la aplica el primero que abra la
+ * app ese día. Si no la abre nadie, tampoco hay nadie mirando las listas que
+ * esta baja debería limpiar.
+ *
+ * Idempotente: el `AND activo` hace que la segunda pasada no encuentre filas, y
+ * por eso dos peticiones concurrentes pueden ejecutarla a la vez sin estorbarse.
+ *
+ * ⚠️ `<` y no `<=`: `fecha_retiro` es el último día que TRABAJA. Con `<=` se le
+ * apagaría el acceso en su último día y perdería un día de devengo. Su candado
+ * vive en `repo.baja.db.test.ts` y su gemelo en `hoyCongelado`.
+ */
+export async function aplicarRetirosVencidos(db: Pool, hoy: string): Promise<number> {
+  const res = await db.query(
+    `UPDATE portal.empleados
+        SET activo = false
+      WHERE activo AND fecha_retiro IS NOT NULL AND fecha_retiro < $1::date`,
+    [hoy],
+  );
+  return res.rowCount ?? 0;
+}

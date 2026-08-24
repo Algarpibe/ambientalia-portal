@@ -7,6 +7,7 @@ import { contarDiasHabiles } from './dias-habiles.js';
 import { validarCorreccionModificacion, validarEdicionSolicitud } from './historico.js';
 import { construirPayloadBorrado, construirPayloadCorreccion } from './notificaciones.js';
 import * as repo from './repo.js';
+import { hoyEnColombia } from './saldo.js';
 import * as service from './service.js';
 import { AusenciaError, type Sesion } from './service.js';
 
@@ -59,6 +60,17 @@ export function createAusenciasRouter(db: Pool): Router {
    */
   router.get('/ausencias/contexto', ...gated, async (req: Request, res: Response) => {
     try {
+      // El barrido de bajas vencidas va aquí: el contexto lo carga cualquiera
+      // que abra la app, así que la primera visita del día aplica las que
+      // tocaban. Va ANTES de `asegurarEmpleado` a propósito — si quien entra es
+      // justo el que se retiró ayer, su ficha se apaga primero y el upsert la
+      // respeta (su `ON CONFLICT DO NOTHING` no revive una ficha inactiva), que
+      // es exactamente lo que debe pasar.
+      //
+      // El error se traga: una baja sin aplicar no puede impedir que la app
+      // arranque. Volverá a intentarse en la siguiente visita.
+      await repo.aplicarRetirosVencidos(db, hoyEnColombia()).catch(() => {});
+
       const sesion = sesionDe(req);
       // Escribe en un GET, a sabiendas: si la ficha no se creara aquí, la app
       // cargaría sin las pestañas de solicitud y el usuario no tendría forma de

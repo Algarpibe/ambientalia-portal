@@ -394,6 +394,12 @@ vi.mock('./repo.js', async () => ({
     estado.altasAutomaticas += 1;
     return estado.empleado;
   },
+  // El barrido de bajas vencidas: el handler de `/ausencias/contexto` lo llama
+  // siempre, antes de `asegurarEmpleado`. Aquí no hay SQL que imitar —ningún
+  // test de este fichero prueba la baja en sí, eso vive en
+  // `repo.baja.db.test.ts` contra Postgres real— así que el doble se limita a
+  // no reventar el handler y devolver "no se aplicó ninguna".
+  aplicarRetirosVencidos: async () => 0,
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
   // creadas por el propio portal).
