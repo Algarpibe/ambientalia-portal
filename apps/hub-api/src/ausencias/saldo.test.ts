@@ -456,8 +456,16 @@ describe('hoyCongelado — el devengo se para en el último día trabajado', () 
     // implementación, incluida una que ya no distinga retirado de activo. Esta
     // versión pasa la salida por `calcularSaldo` y compara devengos: es la
     // garantía real que le importa a quien liquida, no un detalle de la firma.
-    const retirado = calcularSaldo(CONFIG, [], hoyCongelado('2026-08-24', '2026-08-24'));
-    const activo = calcularSaldo(CONFIG, [], '2026-08-24');
+    //
+    // La fecha NO es arbitraria: con el corte en 2026-01-01, `redondear` deja
+    // una décima y un día vale 0,042, así que del 2026-08-23 al 2026-08-25 los
+    // tres días caen en la MISMA décima (9,8) y un off-by-one de un día pasaría
+    // por debajo del test sin que nada se note. 2026-08-26 es el primer día
+    // siguiente que sube a 9,9: fuera de esa meseta, un solo día de diferencia
+    // SÍ mueve el número. Si se toca esta fecha, hay que comprobar a mano que
+    // sigue fuera de una meseta de redondeo, o el candado vuelve a ser ciego.
+    const retirado = calcularSaldo(CONFIG, [], hoyCongelado('2026-08-26', '2026-08-26'));
+    const activo = calcularSaldo(CONFIG, [], '2026-08-26');
     expect(retirado.devengadas).toBe(activo.devengadas);
   });
 
