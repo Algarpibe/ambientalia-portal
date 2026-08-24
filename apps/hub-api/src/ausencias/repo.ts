@@ -3258,20 +3258,35 @@ export async function diasPosterioresA(db: Pool, empleadoId: string, fecha: stri
   }));
 }
 
+/** Una persona a cargo de alguien, reducida a lo que el mensaje al admin necesita. */
+export interface PersonaACargo {
+  nombre: string;
+  correo: string;
+}
+
 /**
- * Los nombres de quienes tienen a este correo como jefe o en copia.
+ * Quienes tienen a este correo como jefe o en copia.
  *
  * `WHERE activo` porque una ficha ya inactiva no necesita que nadie le firme
  * nada: sin eso, no se podría dar de baja a un jefe cuyo equipo ya se fue.
+ *
+ * Devuelve el correo junto al nombre, y no solo el nombre: `nombre_completo` NO
+ * tiene restricción de unicidad (solo `correo` la tiene, ver la 015), así que
+ * dos personas homónimas darían un mensaje al admin —«lo tienen de jefe: Ana
+ * Ruiz, Ana Ruiz»— indistinguible de un fallo que hubiera duplicado una fila.
+ * El correo es lo único de esta fila que sí identifica a alguien sin ambigüedad.
  */
-export async function personasACargoDe(db: Pool, correo: string): Promise<string[]> {
+export async function personasACargoDe(db: Pool, correo: string): Promise<PersonaACargo[]> {
   const { rows } = await db.query(
-    `SELECT nombre_completo
+    `SELECT nombre_completo, correo
        FROM portal.empleados
       WHERE activo
         AND (lower(aprobador_correo) = lower($1) OR lower(copia_correo) = lower($1))
       ORDER BY nombre_completo`,
     [correo],
   );
-  return (rows as { nombre_completo: string }[]).map((r) => r.nombre_completo);
+  return (rows as { nombre_completo: string; correo: string }[]).map((r) => ({
+    nombre: r.nombre_completo,
+    correo: r.correo,
+  }));
 }

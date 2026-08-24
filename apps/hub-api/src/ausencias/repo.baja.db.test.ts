@@ -165,6 +165,20 @@ describe('diasPosterioresA', () => {
     });
     expect(await diasPosterioresA(db, id, '2026-09-30')).toHaveLength(0);
   });
+
+  it('CANDADO: solo mira las solicitudes de ESE empleado', async () => {
+    // Cada test de este fichero limpia la tabla y siembra un solo empleado, asi
+    // que sin este candado un WHERE que perdiera el filtro por empleado seguiria
+    // en verde: da igual de quien sea la unica fila que hay. Con dos empleados a
+    // la vez, la fila de B no puede colarse en la respuesta de A.
+    const idA = await sembrarEmpleado(db, 'a@baja.test');
+    const idB = await sembrarEmpleado(db, 'b@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: idB, correo: 'b@baja.test', estado: 'aprobada',
+      fechaInicio: '2026-10-05', fechaFin: '2026-10-09', segundoAprobadorCorreo: null,
+    });
+    expect(await diasPosterioresA(db, idA, '2026-09-30')).toHaveLength(0);
+  });
 });
 
 describe('personasACargoDe', () => {
@@ -172,14 +186,14 @@ describe('personasACargoDe', () => {
     await sembrarEmpleado(db, 'jefe@baja.test');
     await sembrarEmpleado(db, 'subordinado@baja.test', 'jefe@baja.test');
     const gente = await personasACargoDe(db, 'jefe@baja.test');
-    expect(gente).toEqual(['Ana Ruiz']);
+    expect(gente).toEqual([{ nombre: 'Ana Ruiz', correo: 'subordinado@baja.test' }]);
   });
 
   it('encuentra a quien lo tiene en copia', async () => {
     await sembrarEmpleado(db, 'copia@baja.test');
     const otro = await sembrarEmpleado(db, 'otro@baja.test');
     await db.query('UPDATE portal.empleados SET copia_correo = $2 WHERE id = $1', [otro, 'copia@baja.test']);
-    expect(await personasACargoDe(db, 'copia@baja.test')).toEqual(['Ana Ruiz']);
+    expect(await personasACargoDe(db, 'copia@baja.test')).toEqual([{ nombre: 'Ana Ruiz', correo: 'otro@baja.test' }]);
   });
 
   it('CANDADO: una ficha ya inactiva no cuenta', async () => {
