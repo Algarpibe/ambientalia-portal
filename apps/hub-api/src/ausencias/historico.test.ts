@@ -19,6 +19,9 @@ function empleado(nombreCompleto: string, correo: string): Empleado {
     requiereSegundaFirma: true,
     userId: null,
     activo: true,
+    fechaRetiro: null,
+    retiradoPor: null,
+    retiradoAt: null,
   };
 }
 

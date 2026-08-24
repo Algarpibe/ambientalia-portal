@@ -51,7 +51,10 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
   aprobador_correo, copia_correo, user_id, activo, ve_adjuntos, exporta_registro, ve_toda_la_empresa,
-  requiere_segunda_firma`;
+  requiere_segunda_firma,
+  fecha_retiro::text AS fecha_retiro,
+  retirado_por,
+  retirado_at::text AS retirado_at`;
 
 interface FilaEmpleadoDb {
   id: string;
@@ -67,6 +70,9 @@ interface FilaEmpleadoDb {
   exporta_registro: boolean;
   ve_toda_la_empresa: boolean;
   requiere_segunda_firma: boolean;
+  fecha_retiro: string | null;
+  retirado_por: string | null;
+  retirado_at: string | null;
 }
 
 function aEmpleado(r: FilaEmpleadoDb): Empleado {
@@ -84,6 +90,9 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     requiereSegundaFirma: r.requiere_segunda_firma,
     userId: r.user_id,
     activo: r.activo,
+    fechaRetiro: r.fecha_retiro,
+    retiradoPor: r.retirado_por,
+    retiradoAt: r.retirado_at,
   };
 }
 

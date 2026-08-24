@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
+import { empleadoPorId } from './repo.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -51,5 +52,24 @@ describe('migracion 035', () => {
       [id],
     );
     expect(rows[0]).toEqual({ fecha_retiro: null, retirado_por: null, retirado_at: null });
+  });
+});
+
+describe('el repo lee la fecha de retiro', () => {
+  it('devuelve fechaRetiro, retiradoPor y retiradoAt', async () => {
+    const id = await sembrarEmpleado(db, 'ana@baja.test');
+    await db.query(
+      `UPDATE portal.empleados
+          SET fecha_retiro = '2026-09-30', retirado_por = 'admin@ambientalia.com.co',
+              retirado_at = NOW()
+        WHERE id = $1`,
+      [id],
+    );
+    const e = await empleadoPorId(db, id);
+    // ::text en la consulta: sin el, un DATE llega como objeto Date y cualquier
+    // comparacion lexicografica contra 'YYYY-MM-DD' falla EN SILENCIO.
+    expect(e?.fechaRetiro).toBe('2026-09-30');
+    expect(e?.retiradoPor).toBe('admin@ambientalia.com.co');
+    expect(typeof e?.retiradoAt).toBe('string');
   });
 });
