@@ -89,11 +89,33 @@ export class UserRepository {
   /** Perfil propio (incluye avatar). null si no existe. */
   async getSelfProfile(id: string): Promise<SelfProfile | null> {
     const { rows } = await this.pool.query(
-      `SELECT ${PUBLIC_COLUMNS}, avatar FROM portal.users WHERE id = $1`,
+      // Las apps con `ARRAY(subconsulta)` y NO con array_agg + LEFT JOIN +
+      // GROUP BY, por lo mismo que en `requireAuth`: allí el GROUP BY tumbó la
+      // autenticación entera en producción el 2026-08-23 en cuanto alguien
+      // añadió una columna al SELECT sin añadirla al GROUP BY. Sin GROUP BY,
+      // añadir una columna ya no puede invalidar la consulta. `ARRAY(...)`
+      // devuelve `{}` cuando no hay filas, así que no hace falta COALESCE.
+      `SELECT ${PUBLIC_COLUMNS},
+              avatar,
+              ARRAY(
+                SELECT ua.app_id
+                  FROM portal.user_apps ua
+                 WHERE ua.user_id = u.id
+                 ORDER BY ua.app_id
+              ) AS apps
+         FROM portal.users u
+        WHERE u.id = $1`,
       [id],
     );
     if (!rows[0]) return null;
-    return { ...toPublic(rows[0]), avatar: rows[0].avatar ?? null };
+    return {
+      ...toPublic(rows[0]),
+      avatar: rows[0].avatar ?? null,
+      // `?? []` y no el valor tal cual: si algún día esta consulta deja de
+      // traer la columna, el portal debe quedarse sin apps (lado seguro) en vez
+      // de recibir `undefined` y romper el `.includes` de los guardias.
+      apps: rows[0].apps ?? [],
+    };
   }
 
   // No hay updateName: full_name se escribe una sola vez, al registrarse.
