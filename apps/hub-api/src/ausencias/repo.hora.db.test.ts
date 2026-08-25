@@ -287,6 +287,45 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     expect(actual?.horaFin).toBe('11:00');
   });
 
+  it('CANDADO: MOVER el permiso a otro dia, siendo de uno solo, CONSERVA las horas', async () => {
+    // Espejo del test de la modificacion, y no un duplicado del de aqui arriba:
+    // aquel deja las fechas EXACTAMENTE donde estaban, asi que la fila vieja y
+    // los parametros nuevos dicen la misma fecha y el CASE no puede distinguir
+    // de cual de los dos lee. Aqui la fila vieja es del 01 y la nueva del 03.
+    //
+    // Lo que caza es la familia de despistes de «el RHS de un UPDATE ve la fila
+    // PRE-update»: escribir «s.fecha_inicio = $5::date», mezclando la columna
+    // vieja con el parametro nuevo. Falsado: con esa version el test se pone
+    // rojo con «expected null to be '09:00'», y es el UNICO de los 19 que lo
+    // hace -los otros cuatro de este describe siguen verdes-.
+    //
+    // La otra forma del despiste, «s.fecha_inicio = s.fecha_fin» (los dos lados
+    // de la fila vieja), NO la caza este test, y no es un fallo suyo: ninguna
+    // prueba de «conserva» puede cazarla. Una fila CON horas es forzosamente de
+    // un solo dia -lo exige el CHECK de la 036-, asi que esa comparacion es
+    // siempre cierta justo cuando hay horas que conservar. Solo se separa del
+    // codigo bueno cuando el rango NUEVO pasa a varios dias, y de eso ya se
+    // ocupa el primer candado de este describe: comprobado mutandolo, muere el
+    // de «estirando a dos dias» y ningun otro.
+    const { empleadoId, solicitudId } = await permisoConHoras();
+
+    const actual = await corregir(solicitudId, {
+      empleadoId,
+      tipo: 'permiso',
+      fechaInicio: '2026-09-03',
+      fechaFin: '2026-09-03',
+      dias: 1,
+      estado: 'pendiente',
+      comentarios: null,
+      observaciones: null,
+    });
+
+    expect(actual?.fechaInicio).toBe('2026-09-03');
+    expect(actual?.fechaFin).toBe('2026-09-03');
+    expect(actual?.horaInicio).toBe('09:00');
+    expect(actual?.horaFin).toBe('11:00');
+  });
+
   it('CANDADO: cambiar el TIPO a uno que no admite hora tambien las borra', async () => {
     // El PATCH del registro es la unica via que puede cambiar el tipo, y el
     // CHECK de la BD no mira el tipo: sin esta mitad, unas vacaciones acabarian
