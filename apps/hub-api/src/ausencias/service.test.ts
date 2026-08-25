@@ -373,10 +373,10 @@ describe('validarNuevaSolicitud — la hora del permiso', () => {
 
   it('CANDADO: la hora de fin tiene que ser posterior a la de inicio', () => {
     expect(() => validar({ ...base, horaInicio: '11:00', horaFin: '09:00' })).toThrow(
-      expect.objectContaining({ code: 'hora_invalida', status: 400 }),
+      expect.objectContaining({ code: 'hora_invalida', status: 400, field: 'horaFin' }),
     );
     expect(() => validar({ ...base, horaInicio: '09:00', horaFin: '09:00' })).toThrow(
-      expect.objectContaining({ code: 'hora_invalida', status: 400 }),
+      expect.objectContaining({ code: 'hora_invalida', status: 400, field: 'horaFin' }),
     );
   });
 
@@ -389,7 +389,7 @@ describe('validarNuevaSolicitud — la hora del permiso', () => {
   it('CANDADO: con horas, el rango tiene que ser de un solo día', () => {
     expect(() =>
       validar({ ...base, fechaFin: '2026-07-03', horaInicio: '09:00', horaFin: '11:00' }),
-    ).toThrow(expect.objectContaining({ code: 'hora_no_permitida', status: 400 }));
+    ).toThrow(expect.objectContaining({ code: 'hora_no_permitida', status: 400, field: 'fechaFin' }));
   });
 });
 

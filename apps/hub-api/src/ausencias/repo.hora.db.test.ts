@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 import { solicitudesDeEmpleado } from './repo.js';
+import { crearSolicitud } from './service.js';
 
 // La hora opcional de los permisos contra Postgres de verdad.
 //
@@ -175,5 +176,32 @@ describe('el repo lee y escribe las horas', () => {
     const [s] = await solicitudesDeEmpleado(db, id);
     expect(s.horaInicio).toBe('00:00');
     expect(s.horaFin).toBe('23:59');
+  });
+});
+
+describe('el alta de punta a punta, a traves del SERVICIO', () => {
+  it('CANDADO: crearSolicitud del servicio valida la hora y la deja llegar al INSERT', async () => {
+    // Las pruebas de arriba -incluida «crearSolicitud guarda las horas que le
+    // pasan»- llaman a `sembrarSolicitud`, que importa `crearSolicitud` de
+    // `./repo.js`: construye el `DatosInsercion` ella misma y salta el
+    // validador. Por eso ninguna cazaria que se borrara el paso que copia
+    // `datos.horaInicio`/`datos.horaFin` al alta en `service.ts` -se
+    // comprobo revirtiendolo a mano: los 1039 unitarios y los otros tests de
+    // este fichero seguian en verde-.
+    //
+    // Aqui se importa `crearSolicitud` de `./service.js` (mismo patron que
+    // `repo.baja.db.test.ts`), asi que el camino es el real de punta a punta:
+    // el servicio valida el body, arma el `DatosInsercion` con las horas ya
+    // validadas, el repo inserta, y el CHECK `solicitudes_horas_coherentes` de
+    // la 036 tiene la ultima palabra contra Postgres de verdad.
+    const id = await sembrarEmpleado(db, 'permiso@hora.test');
+    await crearSolicitud(
+      db,
+      { email: 'permiso@hora.test', userId: null, esAdmin: false },
+      { tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-01', horaInicio: '09:00', horaFin: '11:00' },
+    );
+    const [s] = await solicitudesDeEmpleado(db, id);
+    expect(s.horaInicio).toBe('09:00');
+    expect(s.horaFin).toBe('11:00');
   });
 });
