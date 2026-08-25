@@ -436,6 +436,13 @@ describe('bloqueFechas — la hora del permiso', () => {
       'aprobacion',
       null,
     );
+    // El `\d\d:\d\d` solo no basta de candado: `solicitud()` da horaInicio y
+    // horaFin en `null` por defecto, y sin el guardia de `bloqueFechas` eso
+    // interpola «de null a null» — que no tiene ningún dígito junto a los dos
+    // puntos, así que el mutante (quitar el `if`) pasaba este test de mentira.
+    // Lo que de verdad prueba que no se inventa la franja es que la etiqueta
+    // ni aparezca.
+    expect(p.correo.cuerpo).not.toContain('🕘 Horario');
     expect(p.correo.cuerpo).not.toMatch(/\d\d:\d\d/);
   });
 });
