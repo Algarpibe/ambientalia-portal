@@ -210,15 +210,24 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
   // bloque horario con el desfase de Colombia en vez del evento de día completo.
   //
   // Hoy eso no es explotable, y por eso se deja así en lugar de añadir una regla
-  // que ningún test podría matar: las horas solo se escriben en el ALTA
-  // —`validarHoras`, en service.ts—, el PATCH del Registro general no las
-  // acepta, y el único camino que las cambia después es el `CASE` que las BORRA
-  // cuando el permiso deja de ser de un día. Ese `CASE` va SIEMPRE acompañado de
-  // un cambio de fechas, y el cambio de fechas sí lo detecta la comparación de
-  // aquí abajo.
+  // que ningún test podría matar. Las horas solo se escriben en el ALTA
+  // —`validarHoras`, en service.ts—, y el PATCH del Registro general no las
+  // acepta. Lo único que las toca después son los dos `CASE` de repo.ts, y solo
+  // para BORRARLAS: mantienen la franja mientras el estado NUEVO siga cumpliendo
+  // `tipo = 'permiso' AND fechaInicio = fechaFin`, y la anulan en cuanto deja de
+  // cumplirse.
   //
-  // El día que alguien abra la edición de la hora SIN tocar las fechas, esta
-  // comparación hay que ampliarla EN EL MISMO COMMIT. Sin eso,
+  // Y ahí está el porqué: si la solicitud tenía horas, ese predicado se cumplía
+  // ANTES, así que para que un `CASE` las borre tiene que haber cambiado el tipo
+  // o alguna de las dos fechas — y esta función compara las tres. Ojo: no basta
+  // con mirar las fechas. El `CASE` de `actualizarSolicitud` mira TAMBIÉN el
+  // tipo (su propio comentario lo explica), así que un PATCH de `permiso` a
+  // `vacaciones` con las fechas intactas borra las horas sin tocar ni una fecha;
+  // ese camino lo detecta `previa.tipo !== actual.tipo`, no la comparación de
+  // fechas.
+  //
+  // El día que alguien abra la edición de la hora SIN cambiar el tipo ni las
+  // fechas, esta comparación hay que ampliarla EN EL MISMO COMMIT. Sin eso,
   // `situacionDelCalendario` (notificaciones.ts) devolvería `no_cambia`: no se
   // emitiría ningún `actualizar`, el evento se quedaría en Google con la franja
   // vieja, y encima el correo afirmaría que «el evento del calendario no cambia
@@ -675,22 +684,22 @@ export interface EventoCalendario {
    */
   eventId: string;
   accion: AccionCalendario;
-  /**
-   * Los tres de abajo viajan SIEMPRE, también en un `borrar`, donde describen
-   * el evento tal como está justo antes de desaparecer. Dejarlos fuera cuando
-   * no hacen falta sería reintroducir por la puerta de atrás el problema que
-   * avisa `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y
-   * este contrato no distingue eso de un valor.
-   */
-  /**
-   * Si el evento ocupa el día entero o una franja horaria.
-   *
-   * ⚠️ Viaja SIEMPRE, también en un `borrar`, por lo mismo que los tres de
-   * arriba: al otro lado un campo ausente es `undefined`, y este contrato no
-   * distingue eso de un valor. Y aquí importa más que en ninguno — la expresión
-   * que lo lee en n8n exige el `false` explícito justo por eso.
-   */
+  // ⚠️ Los CUATRO campos de abajo —`todoElDia`, `resumen`, `inicio` y `fin`—
+  // viajan SIEMPRE, también en un `borrar`, donde describen el evento tal como
+  // está justo antes de desaparecer. Dejar alguno fuera cuando «no hace falta»
+  // sería reintroducir por la puerta de atrás el problema que avisa
+  // `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y este
+  // contrato no distingue eso de un valor.
+  //
+  // En `todoElDia` eso importa más que en ninguno, porque no es solo
+  // descriptivo: la expresión que lo lee en n8n compara contra `false` y no por
+  // veracidad, así que el `false` tiene que llegar EXPLÍCITO.
+  //
+  // Va en comentario de línea y no en JSDoc porque describe al GRUPO: como
+  // bloque `/** */` se apilaría sobre el hover de `todoElDia` y parecería suyo.
+  /** Si el evento ocupa el día entero o una franja horaria. */
   todoElDia: boolean;
+  /** El título que se ve en Google: `${ETIQUETA_TIPO[tipo]} ${empleadoNombre}`. */
   resumen: string;
   /** `YYYY-MM-DD` si `todoElDia`; ISO con desfase (`...T09:00:00-05:00`) si no. */
   inicio: string;

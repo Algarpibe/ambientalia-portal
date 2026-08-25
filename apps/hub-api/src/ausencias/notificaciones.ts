@@ -399,6 +399,14 @@ function calendario(s: Solicitud): EventoCalendario {
       // Sin el +1: ese solo es correcto para un evento de día completo, donde
       // Google trata el `end` como EXCLUSIVO. Con hora, el fin es el fin —
       // sumarle un día haría un evento de 26 horas.
+      //
+      // Las DOS líneas usan `s.fechaInicio` a propósito. Con `s.fechaFin` serían
+      // equivalentes, pero solo HOY y solo porque el CHECK de la 036 obliga a
+      // que las dos fechas sean iguales siempre que hay horas. Que quede dicho:
+      // NINGÚN test distingue las dos formas —el contraejemplo exigiría una
+      // `Solicitud` en un estado que la base no admite—, así que el día que se
+      // admita hora en un permiso de varios días, esta elección hay que
+      // decidirla a mano: aquí no se va a poner nada rojo.
       inicio: `${s.fechaInicio}T${s.horaInicio}:00${OFFSET_COLOMBIA}`,
       fin: `${s.fechaInicio}T${s.horaFin}:00${OFFSET_COLOMBIA}`,
     };
