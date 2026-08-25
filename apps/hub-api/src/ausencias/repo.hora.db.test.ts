@@ -164,4 +164,16 @@ describe('el repo lee y escribe las horas', () => {
     expect(s.horaInicio).toBe('14:00');
     expect(s.horaFin).toBe('16:30');
   });
+
+  it('los extremos del dia van y vuelven sin recortarse', async () => {
+    // 00:00 y 23:59 son los bordes del rango: un formateo de 12 horas
+    // convertiria 00:00 en 12:00 (o en nada), y un recorte mal puesto en el
+    // to_char podria comerse el 23:59 o devolverlo como '24:00'. Los tests de
+    // arriba usan horas de mitad de jornada y no cazarian ninguno de los dos.
+    const id = await sembrarEmpleado(db, 'ana@hora.test');
+    await insertar(id, '2026-09-01', '2026-09-01', '00:00', '23:59');
+    const [s] = await solicitudesDeEmpleado(db, id);
+    expect(s.horaInicio).toBe('00:00');
+    expect(s.horaFin).toBe('23:59');
+  });
 });

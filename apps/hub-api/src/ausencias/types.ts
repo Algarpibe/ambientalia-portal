@@ -478,9 +478,14 @@ export interface Solicitud {
    * La franja del día, solo en un PERMISO de un solo día. `null` = día completo,
    * que es lo que era todo antes de esto.
    *
-   * `HH:MM`, sin segundos y sin zona: es la hora local de Colombia, y el desfase
-   * se lo pone `calendario()` al construir el ISO para Google. Las dos van
+   * `HH:MM`, sin segundos y sin zona: es la hora local de Colombia. Las dos van
    * siempre juntas — lo garantiza el CHECK `solicitudes_horas_coherentes`.
+   *
+   * HOY nadie los lee todavía: `calendario()` (notificaciones.ts) sigue armando
+   * el evento *all-day* solo con `fechaInicio`/`fechaFin`, así que un permiso con
+   * hora se pinta igual que uno de día completo. Ponerle a `calendario()` el
+   * desfase de Colombia y construir el ISO que ve Google es lo que hace la
+   * tarea 5, que todavía no existe.
    */
   horaInicio: string | null;
   horaFin: string | null;
