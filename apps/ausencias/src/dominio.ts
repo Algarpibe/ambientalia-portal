@@ -418,9 +418,15 @@ export function excedeRangoMaximo(inicio: string, fin: string): boolean {
   return naturales > 366;
 }
 
-/** «6 jul 2026 – 10 jul 2026», y un solo día no se repite. */
-export function rangoFechas(inicio: string, fin: string): string {
-  return inicio === fin ? formatFecha(inicio) : `${formatFecha(inicio)} – ${formatFecha(fin)}`;
+/** «6 jul 2026 – 10 jul 2026», o «6 jul 2026 · 9:00–11:00» si lleva franja. */
+export function rangoFechas(
+  inicio: string,
+  fin: string,
+  horaInicio?: string | null,
+  horaFin?: string | null,
+): string {
+  const base = inicio === fin ? formatFecha(inicio) : `${formatFecha(inicio)} – ${formatFecha(fin)}`;
+  return horaInicio && horaFin ? `${base} · ${horaInicio}–${horaFin}` : base;
 }
 
 /** «6 jul 2026 – 10 jul 2026 · 5 días hábiles». */
@@ -793,8 +799,20 @@ export const mensajeDeModificacion = (mensaje: string): string => MENSAJE_MODIFI
  */
 export const TIPOS_DE_AUSENCIA = TIPOS.filter((t) => !esOtorgamiento(t.id));
 
-/** Lo mínimo para pintar una fila en cualquiera de las dos tablas. */
-type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles'>;
+/**
+ * Lo mínimo para pintar una fila en cualquiera de las dos tablas.
+ *
+ * Las horas van OPCIONALES y el resto no, aunque en `Solicitud` sean
+ * obligatorias: `RegistroGeneral` pinta `Movimiento`, que es otro tipo y no las
+ * tiene. La franja se queda deliberadamente fuera del registro general, así que
+ * la alternativa —añadírselas al `Movimiento`— sería inventarle al backend un
+ * campo que no manda con tal de contentar al compilador.
+ *
+ * `Partial<Pick<…>>` y no dos campos escritos a mano: así siguen atadas a
+ * `Solicitud`, y si allí cambian de forma esto se entera.
+ */
+type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles'> &
+  Partial<Pick<Solicitud, 'horaInicio' | 'horaFin'>>;
 
 /**
  * La celda «Días», con su signo cuando lo tiene.
@@ -814,9 +832,17 @@ export function diasDeLaFila(s: ParaLaTabla): string {
  * Un otorgamiento tiene una sola fecha —el día trabajado— repetida en las dos
  * columnas, y «6 jun – 6 jun» se lee como una errata. Se enseña una vez y la
  * segunda queda vacía.
+ *
+ * Un permiso con hora es de un solo día por definición (lo garantiza el CHECK de
+ * la 036), así que se reparte igual: el día con su hora de inicio en «Desde», y
+ * solo la de fin en «Hasta». Repetir ahí la fecha se leería como la misma
+ * errata.
  */
 export function fechasDeLaFila(s: ParaLaTabla): { desde: string; hasta: string } {
   if (esOtorgamiento(s.tipo)) return { desde: formatFecha(s.fechaInicio), hasta: '' };
+  if (s.horaInicio && s.horaFin) {
+    return { desde: `${formatFecha(s.fechaInicio)} · ${s.horaInicio}`, hasta: s.horaFin };
+  }
   return { desde: formatFecha(s.fechaInicio), hasta: formatFecha(s.fechaFin) };
 }
 
