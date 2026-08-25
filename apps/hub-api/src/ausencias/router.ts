@@ -435,6 +435,32 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Registra la baja de un empleado que se va de la compañía.
+   *
+   * `sesionDe(req).email` y no un campo del body: quién retira a alguien es un
+   * dato de la sesión, no algo que el cliente pueda decir. El saldo que queda
+   * congelado es lo que se le paga a esa persona, y la constancia de quién lo
+   * fijó tiene que ser fiable — la misma razón por la que la firma de los
+   * correos de decisión sale de la sesión.
+   */
+  router.put('/ausencias/empleados/:id/retiro', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.retirarEmpleado(db, req.params.id, req.body, sesionDe(req).email));
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirar_empleado');
+    }
+  });
+
+  /** Deshace una baja. DELETE del recurso «retiro», no de la ficha. */
+  router.delete('/ausencias/empleados/:id/retiro', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.reactivarEmpleado(db, req.params.id, sesionDe(req).email));
+    } catch (e) {
+      sendError(res, e, 'ausencias_reactivar_empleado');
+    }
+  });
+
   // ── El registro y el histórico de la hoja ────────────────────────────────
   //
   // La importación, la corrección y el borrado SÍ son de admin. El registro de

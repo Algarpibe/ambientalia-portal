@@ -134,6 +134,15 @@ const estado = {
   altasAutomaticas: 0,
   /** Los `hoy` con los que se llamó a `aplicarRetirosVencidos`, en orden. */
   barridosDeRetiro: [] as string[],
+  /**
+   * Los `adminEmail` con los que se llamó a `fijarRetiro`, en orden.
+   *
+   * Es el CANDADO de `PUT /ausencias/empleados/:id/retiro`: quien retira a
+   * alguien tiene que salir de la sesión, nunca del `body`. Igual que
+   * `soloDeDeMovimientos`, es una lista y no un valor suelto: hace falta poder
+   * afirmar el valor Y que hubo llamada siquiera.
+   */
+  adminEmailDeRetiro: [] as string[],
   /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
   orden: [] as string[],
   plantilla: [] as any[],
@@ -414,19 +423,47 @@ vi.mock('./repo.js', async () => ({
     estado.orden.push('barrido');
     return 0;
   },
-  // Las dos consultas de bloqueo de una baja incoherente. Ningún test de este
-  // fichero ejercita todavía el servicio que las usa —eso llega en la tarea
-  // siguiente, con su propio doble o su propio test:db—, así que aquí bastan
-  // los defaults «no hay nada que bloquee»: mantienen el candado de más abajo
-  // en verde sin fingir un comportamiento que nadie prueba aquí.
+  // Las dos consultas de bloqueo de una baja incoherente. Los tests de
+  // `PUT .../retiro` de este fichero SÍ ejercitan ya el servicio que las usa,
+  // pero ninguno prueba el propio bloqueo —eso exige encadenar una solicitud
+  // futura o un subordinado, y esa regla la vigila `repo.baja.db.test.ts`
+  // contra Postgres real—, así que aquí bastan los defaults «no hay nada que
+  // bloquee»: mantienen el candado de más abajo en verde sin fingir un
+  // comportamiento que nadie prueba aquí.
   diasPosterioresA: async () => [],
   personasACargoDe: async () => [],
-  // Las dos escrituras de la baja: mismo motivo que las dos consultas de
-  // arriba, ningún test de este fichero ejercita todavía el servicio que las
-  // usa —eso llega en la tarea siguiente—, así que basta con un stub que
-  // devuelva éxito y mantenga en verde el candado de paridad de más abajo.
-  fijarRetiro: async () => true,
-  limpiarRetiro: async () => true,
+  /**
+   * Las dos escrituras de la baja. A diferencia de las consultas de arriba, SÍ
+   * hace falta que muten `estado.plantilla`: la respuesta HTTP de
+   * `retirarEmpleado`/`reactivarEmpleado` sale de RELEER la ficha
+   * (`empleadoPorIdIncluyendoInactivos`, más abajo), no de lo que devuelve
+   * esta función.
+   *
+   * `fijarRetiro` además apunta el `adminEmail` recibido en
+   * `estado.adminEmailDeRetiro` — es lo que sostiene el CANDADO de que quien
+   * retira sale de la sesión, no del `body`. `limpiarRetiro` no lleva ese
+   * registro porque su firma no recibe admin: quién deshace la baja lo audita
+   * el propio servicio con un `console.log`, no el repo.
+   */
+  fijarRetiro: async (_db: unknown, empleadoId: string, fechaRetiro: string, adminEmail: string) => {
+    estado.adminEmailDeRetiro.push(adminEmail);
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.fechaRetiro = fechaRetiro;
+    e.retiradoPor = adminEmail;
+    e.retiradoAt = '2026-01-15T12:00:00.000Z';
+    return true;
+  },
+  /** Deshace la baja: limpia las tres columnas y reactiva, igual que el SQL real. */
+  limpiarRetiro: async (_db: unknown, empleadoId: string) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.fechaRetiro = null;
+    e.retiradoPor = null;
+    e.retiradoAt = null;
+    e.activo = true;
+    return true;
+  },
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
   // creadas por el propio portal).
@@ -634,9 +671,11 @@ vi.mock('./repo.js', async () => ({
   // Gemela SIN el filtro de arriba: alcanza tambien a una ficha inactiva
   // (la fila no se borra de `estado.plantilla`, solo lleva `activo: false`).
   // Existe ademas para que el CANDADO de paridad de mas abajo compare
-  // superficies iguales — ningun test de este fichero ejercita
-  // `retirarEmpleado`/`reactivarEmpleado`, eso vive en `repo.baja.db.test.ts`
-  // contra Postgres real.
+  // superficies iguales. Los tests de `PUT`/`DELETE .../retiro` de este
+  // fichero SI ejercitan `retirarEmpleado`/`reactivarEmpleado` a traves de
+  // ella, pero solo prueban el CABLEADO; la regla SQL de fondo —que el UPDATE
+  // real no lleve el `AND activo`— vive en `repo.baja.db.test.ts` contra
+  // Postgres real.
   empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
     estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
@@ -1499,6 +1538,7 @@ beforeEach(() => {
   estado.usuarioEnPortal = true;
   estado.altasAutomaticas = 0;
   estado.barridosDeRetiro = [];
+  estado.adminEmailDeRetiro = [];
   estado.orden = [];
   estado.plantilla = [
     { ...(estado.empleado as Record<string, unknown>), id: E1, nombreCompleto: 'Ana Ruiz Molina' },
@@ -2950,6 +2990,60 @@ describe('PUT /ausencias/empleados/:id/jefe', () => {
       .expect(200);
     expect(r.body.empleados.every((e: any) => e.enCiclo)).toBe(true);
     expect(r.body.empleados).toHaveLength(2);
+  });
+});
+
+// ── Baja de empleados ─────────────────────────────────────────────────────
+
+describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  const retirar = (id: string, body: Record<string, unknown>, tok = admin()) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  const reactivar = (id: string, tok = admin()) =>
+    request(app()).delete(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`);
+
+  it('PUT /empleados/:id/retiro sin ser admin → 403', async () => {
+    await retirar(E1, { fechaRetiro: '2026-01-20' }, token()).expect(403);
+  });
+
+  it('DELETE /empleados/:id/retiro sin ser admin → 403', async () => {
+    await reactivar(E1, token()).expect(403);
+  });
+
+  it('PUT /empleados/:id/retiro siendo admin registra la baja', async () => {
+    // Con el doble en memoria; lo que se comprueba es el CABLEADO, no la regla
+    // (esa vive en repo.baja.db.test.ts contra Postgres de verdad).
+    const r = await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+    expect(r.body).toMatchObject({
+      id: E1,
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'admin@ambientalia.com.co',
+    });
+  });
+
+  it('CANDADO: quien retira sale de la SESIÓN, no del body', async () => {
+    // Mandar `retiradoPor` en el body no debe cambiar nada: el correo tiene
+    // que ser el del token. Es la constancia de quien fijó el número que se
+    // paga.
+    const r = await retirar(E1, {
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'otro@ambientalia.com.co',
+    }).expect(200);
+    expect(r.body.retiradoPor).toBe('admin@ambientalia.com.co');
+    expect(estado.adminEmailDeRetiro).toEqual(['admin@ambientalia.com.co']);
+  });
+
+  it('DELETE /empleados/:id/retiro siendo admin deshace la baja', async () => {
+    await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+    const r = await reactivar(E1).expect(200);
+    expect(r.body).toMatchObject({
+      id: E1,
+      fechaRetiro: null,
+      retiradoPor: null,
+      activo: true,
+    });
   });
 });
 
