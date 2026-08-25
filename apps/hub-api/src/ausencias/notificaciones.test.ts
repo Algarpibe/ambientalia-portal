@@ -412,6 +412,34 @@ describe('efectos en Google, repartidos sin duplicar', () => {
   });
 });
 
+describe('bloqueFechas — la hora del permiso', () => {
+  it('un permiso con hora la dice en el correo', () => {
+    // Quien firma tiene que poder decidir leyendo el correo: si la hora solo
+    // estuviera en el portal, el aviso diría menos de lo que hay que aprobar.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobacion',
+      null,
+    );
+    expect(p.correo.cuerpo).toContain('09:00 a 11:00');
+  });
+
+  it('CANDADO: sin hora, el correo no inventa ninguna franja', () => {
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-03' }),
+      'aprobacion',
+      null,
+    );
+    expect(p.correo.cuerpo).not.toMatch(/\d\d:\d\d/);
+  });
+});
+
 describe('calendario — el permiso con hora', () => {
   it('sin horas, el evento sigue siendo de día completo y con el +1', () => {
     const p = construirPayload(

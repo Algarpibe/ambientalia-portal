@@ -88,12 +88,17 @@ export function firmaDe(firmante: Firmante | null): string {
 
 function bloqueFechas(s: Solicitud): string {
   const p = PERIODO[s.tipo];
-  return [
+  const lineas = [
     `📅 Fecha primer día ${p}: ${s.fechaInicio}`,
     `📅 Fecha último día ${p}: ${s.fechaFin}`,
-    '',
-    `📊 Total solicitado: ${dias(s.diasHabiles)}`,
-  ].join('\n');
+  ];
+  // Solo cuando existe: una línea «🕘 Horario: —» en todos los demás correos
+  // afirmaría que ahí falta un dato, y en unas vacaciones no falta nada.
+  if (s.horaInicio !== null && s.horaFin !== null) {
+    lineas.push(`🕘 Horario: de ${s.horaInicio} a ${s.horaFin}`);
+  }
+  lineas.push('', `📊 Total solicitado: ${dias(s.diasHabiles)}`);
+  return lineas.join('\n');
 }
 
 /**
