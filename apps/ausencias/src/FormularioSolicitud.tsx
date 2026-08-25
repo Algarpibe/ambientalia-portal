@@ -411,21 +411,39 @@ export default function FormularioSolicitud({
           <p className="mb-2 text-xs text-gray-500">
             Si el permiso es de unas horas y no del día entero, dilo aquí: así se ve en el calendario del equipo.
           </p>
+          {/* Sin `step`, y no por olvido: con el paso por defecto —60 segundos—
+              el `value` sale como `HH:MM`, que es justo lo que esperan el regex
+              del servidor y la comparación lexicográfica de `horaMalPuesta`.
+              Poner `step={1}` lo convertiría en `HH:MM:SS` y el alta se caería
+              con `hora_invalida` sin que nada de aquí lo delatara. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <input
-              type="time"
-              value={horaInicio}
-              onChange={(e) => setHoraInicio(e.target.value)}
-              aria-label="Hora de inicio del permiso"
-              className={CAMPO}
-            />
-            <input
-              type="time"
-              value={horaFin}
-              onChange={(e) => setHoraFin(e.target.value)}
-              aria-label="Hora de fin del permiso"
-              className={CAMPO}
-            />
+            <div>
+              {/* Etiqueta visible, no solo `aria-label`: en móvil el grid es de
+                  una columna y los dos campos se apilan como dos cajas `--:--`
+                  idénticas, sin nada que diga cuál es cuál. */}
+              <label htmlFor="horaInicio" className="mb-1 block text-sm font-medium text-gray-700">
+                Desde
+              </label>
+              <input
+                id="horaInicio"
+                type="time"
+                value={horaInicio}
+                onChange={(e) => setHoraInicio(e.target.value)}
+                className={CAMPO}
+              />
+            </div>
+            <div>
+              <label htmlFor="horaFin" className="mb-1 block text-sm font-medium text-gray-700">
+                Hasta
+              </label>
+              <input
+                id="horaFin"
+                type="time"
+                value={horaFin}
+                onChange={(e) => setHoraFin(e.target.value)}
+                className={CAMPO}
+              />
+            </div>
           </div>
           {horaInicio !== '' && horaFin !== '' && horaFin <= horaInicio && (
             <p className="mt-1 text-sm text-red-600">La hora de fin tiene que ser posterior a la de inicio.</p>
@@ -499,6 +517,17 @@ export default function FormularioSolicitud({
         <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
           Son <b className="tabular-nums">{dias}</b> {dias === 1 ? 'día hábil' : 'días hábiles'}, descontando fines de
           semana y festivos de Colombia.
+          {/* Solo cuando hay franja, que es el único momento en que la pantalla
+              dice a la vez «09:00 – 11:00» y «1 día hábil». Quien lee eso se
+              pregunta si le van a descontar el día entero, y sin esta línea la
+              duda se resuelve escribiéndole a administración — justo el tráfico
+              que esta app existe para quitar. */}
+          {conHoras && (
+            <span className="text-gray-500">
+              {' '}
+              El horario es informativo: no cambia el conteo ni lo que se reporta a nómina.
+            </span>
+          )}
         </p>
       )}
 
