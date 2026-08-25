@@ -3001,8 +3001,8 @@ describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
   const retirar = (id: string, body: Record<string, unknown>, tok = admin()) =>
     request(app()).put(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`).send(body);
 
-  const reactivar = (id: string, tok = admin()) =>
-    request(app()).delete(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`);
+  const reactivar = (id: string, tok = admin(), body: Record<string, unknown> = {}) =>
+    request(app()).delete(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`).send(body);
 
   it('PUT /empleados/:id/retiro sin ser admin → 403', async () => {
     await retirar(E1, { fechaRetiro: '2026-01-20' }, token()).expect(403);
@@ -3044,6 +3044,32 @@ describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
       retiradoPor: null,
       activo: true,
     });
+  });
+
+  it('CANDADO: quien deshace la baja también sale de la SESIÓN, no del body', async () => {
+    // `reactivarEmpleado` no lee `req.body` en absoluto —el body de abajo
+    // MIENTE a propósito—, pero eso no basta para dar el candado por bueno: el
+    // correo de quien deshace no viaja en la respuesta HTTP (el `Empleado` que
+    // devuelve no tiene un campo para eso), así que el único sitio donde se
+    // puede comprobar es el evento `ausencias_baja_deshecha`, que es el ÚNICO
+    // rastro que queda de la reactivación —`limpiarRetiro` borra
+    // `retirado_por`/`retirado_at` de la fila—. Mismo patrón que su gemelo en
+    // `repo.baja.db.test.ts`.
+    await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await reactivar(E1, admin(), { deshechoPor: 'otro@ambientalia.com.co' }).expect(200);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const log = JSON.parse(spy.mock.calls.at(-1)![0] as string);
+      expect(log).toMatchObject({
+        event: 'ausencias_baja_deshecha',
+        deshechoPor: 'admin@ambientalia.com.co',
+      });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
