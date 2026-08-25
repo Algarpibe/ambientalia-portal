@@ -136,6 +136,10 @@ describe('empleadosConSaldo', () => {
     // como Date, y entonces `fechaInicio >= fechaCorte` compara contra NaN y da
     // false para siempre: no se descontaria un solo dia, sin error ninguno.
     await fijarSaldo(db, empleadoId, VACACIONES, COMPENSATORIOS);
+    // fecha_retiro entra en la misma trampa: sin `::text` llegaria como objeto
+    // Date, `hoyCongelado` la compararia contra `hoy` (string) y la comparacion
+    // seria siempre false — nadie se congelaria nunca, en silencio.
+    await db.query(`UPDATE portal.empleados SET fecha_retiro = '2026-03-15' WHERE id = $1`, [empleadoId]);
     const [fila] = await empleadosConSaldo(db, null, empleadoId);
     expect(typeof fila.compensatoriosSaldoCorte).toBe('number');
     expect(typeof fila.compensatoriosFechaCorte).toBe('string');
@@ -143,6 +147,8 @@ describe('empleadosConSaldo', () => {
     // La pareja vieja, por si alguien tocara el SELECT y solo arreglara la nueva.
     expect(typeof fila.saldoCorte).toBe('number');
     expect(typeof fila.fechaCorte).toBe('string');
+    expect(typeof fila.fechaRetiro).toBe('string');
+    expect(fila.fechaRetiro).toBe('2026-03-15');
   });
 
   it('sin configurar, las dos parejas llegan a null y no a cero', async () => {

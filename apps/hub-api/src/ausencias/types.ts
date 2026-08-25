@@ -444,6 +444,16 @@ export interface Empleado {
   requiereSegundaFirma: boolean;
   userId: string | null;
   activo: boolean;
+  /**
+   * El último día que trabaja. `null` mientras no haya baja registrada.
+   *
+   * Puede estar en el futuro: una baja se puede dejar programada y la persona
+   * sigue trabajando, pidiendo y firmando hasta ese día incluido.
+   */
+  fechaRetiro: string | null;
+  /** Quién registró la baja. Constancia: el saldo congelado es lo que se paga. */
+  retiradoPor: string | null;
+  retiradoAt: string | null;
 }
 
 export interface Adjunto {

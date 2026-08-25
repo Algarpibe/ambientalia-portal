@@ -132,6 +132,19 @@ const estado = {
   /** Si el usuario de la sesión existe en portal.users (falso = token legacy). */
   usuarioEnPortal: true,
   altasAutomaticas: 0,
+  /** Los `hoy` con los que se llamó a `aplicarRetirosVencidos`, en orden. */
+  barridosDeRetiro: [] as string[],
+  /**
+   * Los `adminEmail` con los que se llamó a `fijarRetiro`, en orden.
+   *
+   * Es el CANDADO de `PUT /ausencias/empleados/:id/retiro`: quien retira a
+   * alguien tiene que salir de la sesión, nunca del `body`. Igual que
+   * `soloDeDeMovimientos`, es una lista y no un valor suelto: hace falta poder
+   * afirmar el valor Y que hubo llamada siquiera.
+   */
+  adminEmailDeRetiro: [] as string[],
+  /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
+  orden: [] as string[],
   plantilla: [] as any[],
   yaEnBd: 0,
   historicoInsertado: 0,
@@ -392,7 +405,64 @@ vi.mock('./repo.js', async () => ({
       activo: true,
     };
     estado.altasAutomaticas += 1;
+    // Solo se apunta en la rama que de verdad DA de alta: es lo que el
+    // candado de orden del barrido necesita para poder afirmar
+    // ['barrido', 'alta'] sin que la reutilización de una ficha ya cargada
+    // (la rama de arriba, `if (estado.empleado) return`) cuente como alta.
+    estado.orden.push('alta');
     return estado.empleado;
+  },
+  // El barrido de bajas vencidas: el handler de `/ausencias/contexto` lo llama
+  // siempre, antes de `asegurarEmpleado`. No hay SQL que imitar —ningún test de
+  // este fichero prueba la baja en sí, eso vive en `repo.baja.db.test.ts`
+  // contra Postgres real— así que el doble se limita a registrar la LLAMADA:
+  // con qué `hoy` (para el candado de la zona horaria) y en qué ORDEN respecto
+  // al alta automática (para el candado de que va antes de `asegurarEmpleado`).
+  aplicarRetirosVencidos: async (_db: unknown, hoy: string) => {
+    estado.barridosDeRetiro.push(hoy);
+    estado.orden.push('barrido');
+    return 0;
+  },
+  // Las dos consultas de bloqueo de una baja incoherente. Los tests de
+  // `PUT .../retiro` de este fichero SÍ ejercitan ya el servicio que las usa,
+  // pero ninguno prueba el propio bloqueo —eso exige encadenar una solicitud
+  // futura o un subordinado, y esa regla la vigila `repo.baja.db.test.ts`
+  // contra Postgres real—, así que aquí bastan los defaults «no hay nada que
+  // bloquee»: mantienen el candado de más abajo en verde sin fingir un
+  // comportamiento que nadie prueba aquí.
+  diasPosterioresA: async () => [],
+  personasACargoDe: async () => [],
+  /**
+   * Las dos escrituras de la baja. A diferencia de las consultas de arriba, SÍ
+   * hace falta que muten `estado.plantilla`: la respuesta HTTP de
+   * `retirarEmpleado`/`reactivarEmpleado` sale de RELEER la ficha
+   * (`empleadoPorIdIncluyendoInactivos`, más abajo), no de lo que devuelve
+   * esta función.
+   *
+   * `fijarRetiro` además apunta el `adminEmail` recibido en
+   * `estado.adminEmailDeRetiro` — es lo que sostiene el CANDADO de que quien
+   * retira sale de la sesión, no del `body`. `limpiarRetiro` no lleva ese
+   * registro porque su firma no recibe admin: quién deshace la baja lo audita
+   * el propio servicio con un `console.log`, no el repo.
+   */
+  fijarRetiro: async (_db: unknown, empleadoId: string, fechaRetiro: string, adminEmail: string) => {
+    estado.adminEmailDeRetiro.push(adminEmail);
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.fechaRetiro = fechaRetiro;
+    e.retiradoPor = adminEmail;
+    e.retiradoAt = '2026-01-15T12:00:00.000Z';
+    return true;
+  },
+  /** Deshace la baja: limpia las tres columnas y reactiva, igual que el SQL real. */
+  limpiarRetiro: async (_db: unknown, empleadoId: string) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId);
+    if (!e) return false;
+    e.fechaRetiro = null;
+    e.retiradoPor = null;
+    e.retiradoAt = null;
+    e.activo = true;
+    return true;
   },
   sincronizarDesdeUsuarios: async () => ({ creados: 3, vinculados: 1 }),
   // El histórico: `yaEnBd` simula filas que ya estaban (importadas antes o
@@ -532,7 +602,58 @@ vi.mock('./repo.js', async () => ({
         fechaCorte: e.fechaCorte ?? null,
         compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
         compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
+        fechaRetiro: e.fechaRetiro ?? null,
+        retiradoPor: e.retiradoPor ?? null,
       })),
+  // La hermana de la de arriba con el filtro AL REVES: `NOT activo`. Casi todo
+  // este doble modela «inactivo» sacando la ficha entera de `estado.plantilla`,
+  // pero los tests de `PUT/DELETE .../retiro` la dejan dentro con `activo:
+  // false`, que es lo que mira este filtro.
+  //
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+  // `WHERE NOT e.activo` de `repo.retiradosConSaldo` -y su ORDER BY, que aqui
+  // se reproduce a mano-, y quien de verdad los ejecuta es
+  // `repo.baja.db.test.ts` contra Postgres real.
+  retiradosConSaldo: async (_db: unknown) =>
+    estado.plantilla
+      .filter((e: any) => e.activo === false)
+      .map((e: any) => ({
+        empleadoId: e.id,
+        nombreCompleto: e.nombreCompleto,
+        correo: e.correo,
+        saldoCorte: e.saldoCorte ?? null,
+        fechaCorte: e.fechaCorte ?? null,
+        compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
+        compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
+        fechaRetiro: e.fechaRetiro ?? null,
+        retiradoPor: e.retiradoPor ?? null,
+      }))
+      // `DESC NULLS LAST` y luego el nombre, igual que el SQL.
+      .sort((a: any, b: any) => {
+        if (a.fechaRetiro !== b.fechaRetiro) {
+          if (a.fechaRetiro === null) return 1;
+          if (b.fechaRetiro === null) return -1;
+          return a.fechaRetiro < b.fechaRetiro ? 1 : -1;
+        }
+        return String(a.nombreCompleto).localeCompare(String(b.nombreCompleto));
+      }),
+  // El `GROUP BY` real no devuelve fila para quien tiene cero, asi que las
+  // entradas en cero tampoco entran en este Map: quien lee hace `?? 0`.
+  solicitudesVivasDe: async (_db: unknown, ids: string[]) =>
+    new Map(
+      ids
+        .map(
+          (id) =>
+            [
+              id,
+              estado.solicitudes.filter(
+                (s: any) =>
+                  s.empleadoId === id && (s.estado === 'pendiente' || s.estado === 'pendiente_2'),
+              ).length,
+            ] as [string, number],
+        )
+        .filter(([, vivas]) => vivas > 0),
+    ),
   // Solo existe para que el CANDADO de más abajo compare superficies iguales.
   // El filtro de `empleadosConSaldo` de aquí arriba (sobre `estado.plantilla`,
   // línea 362) SOLO modela el nivel directo (`e.aprobadorCorreo === soloDe`);
@@ -591,7 +712,22 @@ vi.mock('./repo.js', async () => ({
     }
     return true;
   },
-  empleadoPorId: async (_db: unknown, id: string) => estado.plantilla.find((e: any) => e.id === id) ?? null,
+  // Reproduce el `AND activo` del SQL real: sin este filtro, `empleadoPorId`
+  // seria indistinguible de `empleadoPorIdIncluyendoInactivos` aqui abajo, y
+  // un servicio que llamara a la funcion equivocada pasaria en verde — justo
+  // la clase de bug para la que nacio la hermana.
+  empleadoPorId: async (_db: unknown, id: string) =>
+    estado.plantilla.find((e: any) => e.id === id && e.activo !== false) ?? null,
+  // Gemela SIN el filtro de arriba: alcanza tambien a una ficha inactiva
+  // (la fila no se borra de `estado.plantilla`, solo lleva `activo: false`).
+  // Existe ademas para que el CANDADO de paridad de mas abajo compare
+  // superficies iguales. Los tests de `PUT`/`DELETE .../retiro` de este
+  // fichero SI ejercitan `retirarEmpleado`/`reactivarEmpleado` a traves de
+  // ella, pero solo prueban el CABLEADO; la regla SQL de fondo —que el UPDATE
+  // real no lleve el `AND activo`— vive en `repo.baja.db.test.ts` contra
+  // Postgres real.
+  empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
+    estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
   // `veAdjuntos`: por defecto nadie es visor, igual que en el SQL real (la
   // columna nace en `false`). `e.activo !== false` y no `=== true`: ninguna otra
@@ -1464,6 +1600,9 @@ beforeEach(() => {
   };
   estado.usuarioEnPortal = true;
   estado.altasAutomaticas = 0;
+  estado.barridosDeRetiro = [];
+  estado.adminEmailDeRetiro = [];
+  estado.orden = [];
   estado.plantilla = [
     { ...(estado.empleado as Record<string, unknown>), id: E1, nombreCompleto: 'Ana Ruiz Molina' },
     { ...(estado.empleado as Record<string, unknown>), id: E2, nombreCompleto: 'Luis Prieto Cano' },
@@ -2917,6 +3056,145 @@ describe('PUT /ausencias/empleados/:id/jefe', () => {
   });
 });
 
+// ── Baja de empleados ─────────────────────────────────────────────────────
+
+describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  const retirar = (id: string, body: Record<string, unknown>, tok = admin()) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  const reactivar = (id: string, tok = admin(), body: Record<string, unknown> = {}) =>
+    request(app()).delete(`/api/ausencias/empleados/${id}/retiro`).set('Authorization', `Bearer ${tok}`).send(body);
+
+  it('PUT /empleados/:id/retiro sin ser admin → 403', async () => {
+    await retirar(E1, { fechaRetiro: '2026-01-20' }, token()).expect(403);
+  });
+
+  it('DELETE /empleados/:id/retiro sin ser admin → 403', async () => {
+    await reactivar(E1, token()).expect(403);
+  });
+
+  it('PUT /empleados/:id/retiro siendo admin registra la baja', async () => {
+    // Con el doble en memoria; lo que se comprueba es el CABLEADO, no la regla
+    // (esa vive en repo.baja.db.test.ts contra Postgres de verdad).
+    const r = await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+    expect(r.body).toMatchObject({
+      id: E1,
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'admin@ambientalia.com.co',
+    });
+  });
+
+  it('CANDADO: quien retira sale de la SESIÓN, no del body', async () => {
+    // Mandar `retiradoPor` en el body no debe cambiar nada: el correo tiene
+    // que ser el del token. Es la constancia de quien fijó el número que se
+    // paga.
+    const r = await retirar(E1, {
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'otro@ambientalia.com.co',
+    }).expect(200);
+    expect(r.body.retiradoPor).toBe('admin@ambientalia.com.co');
+    expect(estado.adminEmailDeRetiro).toEqual(['admin@ambientalia.com.co']);
+  });
+
+  it('DELETE /empleados/:id/retiro siendo admin deshace la baja', async () => {
+    await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+    const r = await reactivar(E1).expect(200);
+    expect(r.body).toMatchObject({
+      id: E1,
+      fechaRetiro: null,
+      retiradoPor: null,
+      activo: true,
+    });
+  });
+
+  it('CANDADO: quien deshace la baja también sale de la SESIÓN, no del body', async () => {
+    // `reactivarEmpleado` no lee `req.body` en absoluto —el body de abajo
+    // MIENTE a propósito—, pero eso no basta para dar el candado por bueno: el
+    // correo de quien deshace no viaja en la respuesta HTTP (el `Empleado` que
+    // devuelve no tiene un campo para eso), así que el único sitio donde se
+    // puede comprobar es el evento `ausencias_baja_deshecha`, que es el ÚNICO
+    // rastro que queda de la reactivación —`limpiarRetiro` borra
+    // `retirado_por`/`retirado_at` de la fila—. Mismo patrón que su gemelo en
+    // `repo.baja.db.test.ts`.
+    await retirar(E1, { fechaRetiro: '2026-01-20' }).expect(200);
+
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await reactivar(E1, admin(), { deshechoPor: 'otro@ambientalia.com.co' }).expect(200);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const log = JSON.parse(spy.mock.calls.at(-1)![0] as string);
+      expect(log).toMatchObject({
+        event: 'ausencias_baja_deshecha',
+        deshechoPor: 'admin@ambientalia.com.co',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('GET /ausencias/empleados/retirados', () => {
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  const pedir = (tok = admin()) =>
+    request(app()).get('/api/ausencias/empleados/retirados').set('Authorization', `Bearer ${tok}`);
+
+  /** Apaga la ficha de Luis (E2) y le pone la constancia de su baja. */
+  function apagarE2(): void {
+    const e = estado.plantilla[1] as any;
+    e.activo = false;
+    e.fechaRetiro = '2026-01-20';
+    e.retiradoPor = 'admin@ambientalia.com.co';
+  }
+
+  it('sin ser admin → 403', async () => {
+    // Es la vista de liquidación: el saldo que enseña es lo que se le paga a
+    // esa persona, y el correo de quien lo fijó va al lado.
+    await pedir(token()).expect(403);
+  });
+
+  it('siendo admin devuelve SOLO las fichas apagadas, con su constancia', async () => {
+    // Con el doble en memoria: lo que se comprueba es el CABLEADO, no la regla
+    // (esa vive en repo.baja.db.test.ts contra Postgres de verdad). Ana (E1)
+    // sigue activa y por eso no puede salir aquí.
+    apagarE2();
+
+    const r = await pedir().expect(200);
+    expect(r.body.retirados).toHaveLength(1);
+    expect(r.body.retirados[0]).toMatchObject({
+      empleadoId: E2,
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'admin@ambientalia.com.co',
+      solicitudesVivas: 0,
+      retiroAntesDelCorte: false,
+    });
+  });
+
+  it('CANDADO: el recuento de solicitudes vivas llega a la respuesta', async () => {
+    // Sin esto, un `solicitudesVivas: 0` fijo pasaría el test de arriba, y la
+    // pantalla enseñaría como definitivo un saldo que todavía puede moverse:
+    // la bandeja del jefe no filtra por `activo`, así que una pendiente se
+    // puede firmar después del retiro.
+    apagarE2();
+    estado.solicitudes.push({
+      id: 's-viva',
+      empleadoId: E2,
+      tipo: 'vacaciones',
+      estado: 'pendiente',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-07',
+      diasHabiles: 3,
+      createdAt: '2026-01-02',
+    } as any);
+
+    const r = await pedir().expect(200);
+    expect(r.body.retirados[0].solicitudesVivas).toBe(1);
+  });
+});
+
 // ── Histórico ──────────────────────────────────────────────────────────────
 
 describe('importación del histórico', () => {
@@ -3592,6 +3870,37 @@ describe('GET /ausencias/contexto', () => {
     expect(r.body.festivos.length).toBeGreaterThan(0);
     expect(r.body).toHaveProperty('saldo', null);
   });
+
+  it('CANDADO: el contexto aplica el barrido de bajas vencidas', async () => {
+    // Sin esta llamada la baja programada es solo un dato: nadie la convierte
+    // en `activo = false`. El doble no ejecuta SQL —quien vigila la consulta de
+    // verdad es `repo.baja.db.test.ts`—, así que esto solo puede afirmar que el
+    // handler HACE la llamada, ni una vez de menos ni de más.
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.barridosDeRetiro).toHaveLength(1);
+  });
+
+  it('CANDADO: el barrido va con el HOY de Colombia, no con el de UTC', async () => {
+    // 2026-08-25T02:00:00Z son las 21:00 del 24 en Colombia (UTC-5). Con
+    // `new Date().toISOString()` a secas —el bug que este candado impide—
+    // saldría '2026-08-25', y alguien cuya `fecha_retiro` fuera el 24 quedaría
+    // retirado esa misma noche, DURANTE su último día de trabajo: justo lo que
+    // el `<` de `aplicarRetirosVencidos` existe para impedir.
+    vi.setSystemTime(new Date('2026-08-25T02:00:00Z'));
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.barridosDeRetiro[0]).toBe('2026-08-24');
+  });
+
+  it('CANDADO: el barrido corre ANTES del alta automática, o el upsert devuelve una ficha que ya no toca', async () => {
+    // Si quien entra es justo el que se retiró ayer, su ficha tiene que
+    // apagarse ANTES de que `asegurarEmpleado` la toque: con el orden
+    // invertido, el upsert encontraría (o crearía) una ficha activa y el
+    // contexto abriría todas las pestañas a alguien que ya no debería tenerlas.
+    estado.empleado = null;
+    estado.usuarioEnPortal = true;
+    await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token()}`).expect(200);
+    expect(estado.orden).toEqual(['barrido', 'alta']);
+  });
 });
 
 // ── Saldo de vacaciones ────────────────────────────────────────────────────
@@ -3731,6 +4040,19 @@ describe('GET /ausencias/mi-saldo', () => {
       .set('Authorization', `Bearer ${token()}`)
       .expect(200);
     expect(r.body.saldo).toMatchObject({ saldoCorte: 10 });
+  });
+
+  it('CANDADO: a un retirado el devengo se le para en su último día', async () => {
+    estado.plantilla.push({
+      ...(estado.empleado as Record<string, unknown>),
+      saldoCorte: 10,
+      fechaCorte: '2026-01-01',
+      fechaRetiro: '2026-01-10',
+    });
+    const r = await request(app()).get('/api/ausencias/mi-saldo').set('Authorization', `Bearer ${token()}`).expect(200);
+    // Reloj congelado en 2026-01-15 (ver el beforeEach). Del corte al último día
+    // trabajado van 9 días: 9/30 × 1,25 = 0,4. Sin congelar serían 14 días = 0,6.
+    expect(r.body.saldo).toMatchObject({ devengadas: 0.4, disponible: 10.4 });
   });
 });
 

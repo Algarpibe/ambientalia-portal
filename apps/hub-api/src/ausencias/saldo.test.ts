@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { calcularSaldo, calcularSaldoCompensatorios, hoyEnColombia, pedible, type AusenciaParaElSaldo } from './saldo.js';
+import {
+  calcularSaldo,
+  calcularSaldoCompensatorios,
+  hoyCongelado,
+  hoyEnColombia,
+  pedible,
+  type AusenciaParaElSaldo,
+} from './saldo.js';
 
 const CONFIG = { saldoCorte: 10, fechaCorte: '2026-01-01' };
 
@@ -430,5 +437,39 @@ describe('hoyEnColombia', () => {
 
   it('en la frontera exacta, en el segundo exacto ya es el día nuevo', () => {
     expect(hoyEnColombia(new Date('2026-08-13T05:00:00Z'))).toBe('2026-08-13');
+  });
+});
+
+describe('hoyCongelado — el devengo se para en el último día trabajado', () => {
+  it('sin fecha de retiro, devuelve hoy tal cual', () => {
+    expect(hoyCongelado(null, '2026-08-24')).toBe('2026-08-24');
+  });
+
+  it('con la fecha ya pasada, devuelve la fecha de retiro', () => {
+    expect(hoyCongelado('2026-03-15', '2026-08-24')).toBe('2026-03-15');
+  });
+
+  it('CANDADO: el día del retiro devenga lo MISMO que si siguiera en plantilla', () => {
+    // `hoyCongelado('2026-08-24', '2026-08-24')` y `'2026-08-24'` a secas son la
+    // misma cadena, así que comparar el resultado de `hoyCongelado` contra un
+    // literal (como hacía la versión anterior de este test) pasa con cualquier
+    // implementación, incluida una que ya no distinga retirado de activo. Esta
+    // versión pasa la salida por `calcularSaldo` y compara devengos: es la
+    // garantía real que le importa a quien liquida, no un detalle de la firma.
+    //
+    // La fecha NO es arbitraria: con el corte en 2026-01-01, `redondear` deja
+    // una décima y un día vale 0,042, así que del 2026-08-23 al 2026-08-25 los
+    // tres días caen en la MISMA décima (9,8) y un off-by-one de un día pasaría
+    // por debajo del test sin que nada se note. 2026-08-26 es el primer día
+    // siguiente que sube a 9,9: fuera de esa meseta, un solo día de diferencia
+    // SÍ mueve el número. Si se toca esta fecha, hay que comprobar a mano que
+    // sigue fuera de una meseta de redondeo, o el candado vuelve a ser ciego.
+    const retirado = calcularSaldo(CONFIG, [], hoyCongelado('2026-08-26', '2026-08-26'));
+    const activo = calcularSaldo(CONFIG, [], '2026-08-26');
+    expect(retirado.devengadas).toBe(activo.devengadas);
+  });
+
+  it('con la fecha en el futuro, sigue devengando: devuelve hoy', () => {
+    expect(hoyCongelado('2026-12-31', '2026-08-24')).toBe('2026-08-24');
   });
 });

@@ -119,6 +119,15 @@ qué falta— si:
 - Alguien lo tiene como `aprobador_correo` o `copia_correo`. El mensaje dice
   cuántas personas y quiénes. Hay que reasignarlas antes.
 
+**Las dos comprobaciones se informan JUNTAS**, en un único error
+`retiro_bloqueado` cuyo detalle trae las dos listas (vacía la que no aplique).
+No se cortocircuita en la primera: quien se topa con ambos problemas es
+justamente *el jefe que se va* —tiene equipo por definición y suele tener
+vacaciones pendientes—, y los dos remedios se ejecutan en pantallas distintas
+(rechazar una solicitud vs. reasignar el equipo en Organigrama), así que
+decirle solo uno le hace descubrir el otro después de haber arreglado el
+primero, tal vez días más tarde.
+
 Los pendientes anteriores a la fecha **no** bloquean.
 
 Y desde que una ficha tiene fecha de retiro, la validación de alta de solicitudes

@@ -198,6 +198,28 @@ export function hoyEnColombia(ahora: Date = new Date()): string {
 }
 
 /**
+ * El «hoy» con el que se calcula el saldo de UNA ficha.
+ *
+ * Para quien se fue, el devengo tiene que pararse en su último día: si no,
+ * `calcularSaldo` sigue haciendo `diasEntre(fechaCorte, hoy)` con un `hoy` que
+ * no deja de avanzar, y alguien que se fue en marzo aparece en agosto con cinco
+ * meses de vacaciones que no ganó.
+ *
+ * `<` y no `<=` por intención, no por efecto: aquí los dos dan el mismo
+ * número (si `fechaRetiro === hoy`, devolver cualquiera de los dos es la
+ * misma cadena). Se escribe `<` para que el signo diga lo mismo que el
+ * barrido, donde sí decide: `fecha_retiro < hoy` deja activo el último día
+ * que trabaja.
+ *
+ * Una fecha futura no congela nada: quien tiene la salida prevista sigue
+ * devengando hasta que llegue.
+ */
+export function hoyCongelado(fechaRetiro: string | null, hoy: string): string {
+  if (fechaRetiro !== null && fechaRetiro < hoy) return fechaRetiro;
+  return hoy;
+}
+
+/**
  * Lo que las dos bolsas comparten: validar las fechas de TODAS las ausencias y
  * sumar los días de UN tipo, por lista de estados, desde el corte.
  *

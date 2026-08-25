@@ -835,6 +835,26 @@ git commit -m "feat(ausencias): registrar y deshacer la baja en el repo"
 
 ## Task 7: El servicio con los bloqueos
 
+> ⚠️ **SUPERSEDED durante la ejecución.** Esta tarea se escribió con **dos**
+> códigos de error (`retiro_con_dias_posteriores` y `retiro_con_personas_a_cargo`)
+> y un cortocircuito: se comprobaban los días posteriores y, si fallaba, ni
+> siquiera se miraba lo de las personas a cargo.
+>
+> Eso no era lo decidido: la opción aprobada decía «dice exactamente qué falta:
+> "tiene 2 solicitudes esperando firma" **y** "3 personas lo tienen de jefe"». Y
+> quien se topa con los dos problemas no es un caso raro — es el jefe que se va,
+> que tiene equipo por definición y suele tener vacaciones pendientes, con los
+> dos remedios en pantallas distintas.
+>
+> **Lo implementado es un único `AusenciaError('retiro_bloqueado', 409,
+> 'fechaRetiro', { solicitudes, personas })`**, con las dos consultas lanzándose
+> siempre y las dos listas en el detalle (vacías cuando esa mitad no aplica —
+> hay candado que lo exige, porque el cliente hace `.length` sobre ellas).
+>
+> Los bloques de código de abajo conservan los dos códigos viejos: léelos como
+> historia, no como contrato. El contrato vivo está en el JSDoc de
+> `retirarEmpleado`. **Las tareas 8 y 11 deben usar `retiro_bloqueado`.**
+
 **Files:**
 - Modify: `apps/hub-api/src/ausencias/service.ts` (`retirarEmpleado`, `reactivarEmpleado`)
 - Test: `apps/hub-api/src/ausencias/repo.baja.db.test.ts` (sección de servicio)

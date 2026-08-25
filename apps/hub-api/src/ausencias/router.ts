@@ -7,6 +7,7 @@ import { contarDiasHabiles } from './dias-habiles.js';
 import { validarCorreccionModificacion, validarEdicionSolicitud } from './historico.js';
 import { construirPayloadBorrado, construirPayloadCorreccion } from './notificaciones.js';
 import * as repo from './repo.js';
+import { hoyEnColombia } from './saldo.js';
 import * as service from './service.js';
 import { AusenciaError, type Sesion } from './service.js';
 
@@ -59,6 +60,23 @@ export function createAusenciasRouter(db: Pool): Router {
    */
   router.get('/ausencias/contexto', ...gated, async (req: Request, res: Response) => {
     try {
+      // El barrido de bajas vencidas va aquí: el contexto lo carga cualquiera
+      // que abra la app, así que la primera visita del día aplica las que
+      // tocaban. Va ANTES de `asegurarEmpleado` a propósito — si quien entra es
+      // justo el que se retiró ayer, su ficha se apaga primero y el upsert la
+      // respeta (su `ON CONFLICT DO NOTHING` no revive una ficha inactiva,
+      // siempre que la ficha esté en minúsculas, que es lo único que este repo
+      // inserta), que es exactamente lo que debe pasar.
+      //
+      // El error NO tumba el contexto —una baja sin aplicar se reintenta en la
+      // siguiente visita—, pero tampoco se traga mudo: si esto falla siempre, el
+      // único síntoma visible sería gente retirada que sigue en las listas, y
+      // nadie lo ataría a un error si no quedara registrado en ningún sitio.
+      await repo.aplicarRetirosVencidos(db, hoyEnColombia()).catch((e) => {
+        console.error('ausencias_barrido_retiros error', e);
+        captureError(e, { endpoint: 'ausencias_barrido_retiros' });
+      });
+
       const sesion = sesionDe(req);
       // Escribe en un GET, a sabiendas: si la ficha no se creara aquí, la app
       // cargaría sin las pestañas de solicitud y el usuario no tendría forma de
@@ -414,6 +432,47 @@ export function createAusenciasRouter(db: Pool): Router {
       res.json(await service.fijarVisorDeEmpresa(db, sesionDe(req), req.params.id, req.body));
     } catch (e) {
       sendError(res, e, 'ausencias_fijar_visor_empresa');
+    }
+  });
+
+  /**
+   * Registra la baja de un empleado que se va de la compañía.
+   *
+   * `sesionDe(req).email` y no un campo del body: quién retira a alguien es un
+   * dato de la sesión, no algo que el cliente pueda decir. El saldo que queda
+   * congelado es lo que se le paga a esa persona, y la constancia de quién lo
+   * fijó tiene que ser fiable — la misma razón por la que la firma de los
+   * correos de decisión sale de la sesión.
+   */
+  router.put('/ausencias/empleados/:id/retiro', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.retirarEmpleado(db, req.params.id, req.body, sesionDe(req).email));
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirar_empleado');
+    }
+  });
+
+  /** Deshace una baja. DELETE del recurso «retiro», no de la ficha. */
+  router.delete('/ausencias/empleados/:id/retiro', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.reactivarEmpleado(db, req.params.id, sesionDe(req).email));
+    } catch (e) {
+      sendError(res, e, 'ausencias_reactivar_empleado');
+    }
+  });
+
+  /**
+   * Las fichas retiradas con su saldo congelado. Es la vista de liquidación.
+   *
+   * Ruta literal y no `/:id`: este router no define ningún `GET
+   * /ausencias/empleados/:id`, así que «retirados» no puede colarse como un id.
+   * El día que exista, tiene que declararse DESPUÉS de esta.
+   */
+  router.get('/ausencias/empleados/retirados', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json({ retirados: await service.listaDeRetirados(db) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirados');
     }
   });
 
