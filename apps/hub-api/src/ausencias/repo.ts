@@ -2312,6 +2312,32 @@ export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoComplet
 const RESERVA = '5 minutes';
 
 /**
+ * Cuántas veces se sirve un evento antes de aparcarlo.
+ *
+ * ⚠️ Nació de un incidente, y conviene saber cuál antes de tocarlo. El
+ * 2026-08-24 se borraron unas solicitudes desde el Registro general; sus seis
+ * eventos `borrado_admin` fallaban al borrar el evento de Google —ya no estaba—
+ * y el workflow de n8n no llegaba nunca al paso de confirmar. Como el correo se
+ * manda ANTES de tocar el calendario, cada ciclo de diez minutos reenviaba los
+ * seis. Se descubrió al día siguiente, con 119 intentos y unos setecientos
+ * correos.
+ *
+ * El fallo de n8n se arregló aparte. Esto es el respaldo: **un evento que no se
+ * confirma deja de servirse**, pase lo que pase aguas abajo. Con este tope aquel
+ * incidente habrían sido treinta correos en vez de setecientos.
+ *
+ * Cinco y no más: el reintento existe para cubrir un fallo pasajero (Gmail que
+ * no responde, un timeout), y eso se resuelve en el segundo o el tercero. Lo que
+ * falla cinco veces seguidas está roto, y seguir insistiendo no lo arregla; solo
+ * multiplica el daño.
+ *
+ * Aparcado NO es enviado: la fila conserva `enviado_at` a null a propósito, para
+ * que siga saliendo en una consulta de diagnóstico como lo que es — un aviso que
+ * NO se entregó y que hay que mirar a mano.
+ */
+export const MAX_INTENTOS = 5;
+
+/**
  * Los eventos aún no ejecutados, del más antiguo al más nuevo.
  *
  * Sirve el evento **sin marcarlo como enviado**: el estado solo avanza en
@@ -2328,7 +2354,8 @@ const RESERVA = '5 minutes';
  * hoja por duplicado.
  *
  * `intentos` se incrementa aquí para poder detectar en la BD un evento que lleva
- * reintentándose sin éxito.
+ * reintentándose sin éxito — y, desde el incidente del 2026-08-24, para dejar de
+ * servirlo pasado `MAX_INTENTOS`.
  */
 export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPendiente[]> {
   const { rows } = await db.query(
@@ -2337,10 +2364,11 @@ export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPe
       WHERE o.id IN (
               SELECT id FROM portal.ausencias_outbox
                WHERE enviado_at IS NULL
+                 AND intentos < $3
                  AND (servido_at IS NULL OR servido_at < now() - $2::interval)
                ORDER BY id LIMIT $1)
       RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
-    [limite, RESERVA],
+    [limite, RESERVA, MAX_INTENTOS],
   );
   // `solicitud_id` nulable desde la 028: la clave ajena es `ON DELETE SET NULL`
   // para que el borrado de un evento de Google sobreviva a la solicitud que lo

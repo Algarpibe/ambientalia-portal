@@ -776,6 +776,28 @@ export function createAusenciasRouter(db: Pool): Router {
   router.get('/ausencias/n8n/pendiente', cronAuth, async (_req: Request, res: Response) => {
     try {
       const eventos = await repo.eventosPendientes(db);
+      // Los que acaban de agotar su último intento, una línea por evento y UNA
+      // SOLA VEZ en su vida: al ciclo siguiente ya no salen de
+      // `eventosPendientes`, así que esto no puede convertirse en su propio
+      // ruido repetido — que es justo el problema del que viene el tope.
+      //
+      // Se registra porque aparcar en silencio es peor que no aparcar: un aviso
+      // que no se entrega y del que nadie se entera desaparece sin dejar rastro.
+      // `console.error` y no `console.log`, al revés que los eventos
+      // informativos de `service.ts`: esto no es una nota, es trabajo que se ha
+      // quedado sin hacer y que alguien tiene que mirar a mano.
+      for (const e of eventos.filter((x) => x.intentos >= repo.MAX_INTENTOS)) {
+        console.error(
+          JSON.stringify({
+            event: 'ausencias_outbox_aparcado',
+            timestamp: new Date().toISOString(),
+            outboxId: e.id,
+            evento: e.evento,
+            solicitudId: e.solicitudId,
+            intentos: e.intentos,
+          }),
+        );
+      }
       res.json({ hay: eventos.length > 0, eventos });
     } catch (e) {
       sendError(res, e, 'ausencias_n8n_pendiente');
