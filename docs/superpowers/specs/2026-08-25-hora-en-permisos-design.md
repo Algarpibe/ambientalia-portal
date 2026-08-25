@@ -242,19 +242,28 @@ fecha de fin a otro día, **se borran solas y se avisa en línea** («un permiso
 varios días no lleva hora»). Así el usuario no llega nunca al 400: los dos
 códigos de arriba quedan de red.
 
-**Donde ya se pinta el rango.** `rangoFechas` y `rangoConDias` (`dominio.ts`) son
-el sitio único por el que pasan Mis solicitudes, la bandeja del jefe, el registro
-general y el detalle. Añadir ahí la hora —«1 sep 2026 · 9:00–11:00»— la pone en
-las cuatro pantallas de una vez, que es también la razón de no escribirla en cada
-una.
+**Donde ya se pinta el rango — y no hay un sitio único, conviene saberlo antes de
+tocar.** Las columnas «Desde» y «Hasta» salen de `fechasDeLaFila` (`dominio.ts`),
+que es la que usa `TablaSolicitudes`, y esa tabla la comparten **Mis solicitudes
+y la bandeja del jefe**: con tocar ahí, la hora sale en las dos pantallas donde la
+solicitud se lee, que son las que importan. Un permiso con hora se pinta
+`desde: «1 sep 2026 · 9:00»`, `hasta: «11:00»` — repetir la fecha en la segunda
+celda se leería como una errata, igual que ya pasa con el otorgamiento.
+
+`rangoFechas` es OTRA función y no la tocan las tablas: la usan el encabezado de
+`PedirModificacion` y los mensajes de error de `api.ts`. Se le añaden dos
+parámetros opcionales de hora para que el encabezado de la modificación no mienta
+sobre lo que se está cambiando; al ser opcionales, ningún llamante actual cambia.
 
 **El correo a quien firma.** El bloque de fechas de `notificaciones.ts` usa su
 propio formato; se le añade la hora por el mismo criterio: quien recibe el correo
 tiene que poder decidir sin abrir el portal.
 
-**El calendario del portal.** La rejilla sigue pintando celdas de día: un bloque
-horario dentro de una celda mensual no cabe y no aporta. La hora sale en el
-detalle de la marca.
+**El calendario del portal se queda como está.** Su rejilla pinta celdas de día, y
+un bloque horario dentro de una celda mensual no cabe ni aporta. Llevar la hora
+siquiera al detalle de la marca obligaría a ampliar `ausenciasEntre` y el tipo
+`MarcaCalendario`, que es otra consulta y otra proyección: no entra. El
+calendario donde la hora sí importa —y donde se pidió— es el de Google.
 
 **El espejo manual.** `apps/ausencias/src/api.ts` replica el backend sin
 generación ni test de contrato, así que `horaInicio`/`horaFin` hay que copiarlas a
@@ -276,6 +285,11 @@ mano —con el mismo nombre— en `Solicitud` y en `NuevaSolicitud`.
   rango deja de ser de un día, y por obligación del CHECK.
 - **Solo Permiso.** Compensatorio de media jornada es la ampliación evidente y el
   CHECK está escrito para no estorbarla, pero no entra hoy.
+- **El Registro general no enseña la hora.** Su tabla no comparte componente ni
+  tipo con las otras dos: se pinta desde `Movimiento`, una proyección propia que
+  une solicitudes con modificaciones y trae las fechas EFECTIVAS del movimiento.
+  Llevar la hora ahí es ampliar esa unión, y es un registro de auditoría que
+  razona por días. La hora se ve donde se lee la solicitud.
 - **Ningún cambio en el histórico importado.** Las filas del Excel no traen hora
   y se quedan como están.
 
