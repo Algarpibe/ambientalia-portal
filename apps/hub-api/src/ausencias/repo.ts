@@ -1019,7 +1019,30 @@ export async function actualizarSolicitud(
               dias_habiles      = $6,
               estado            = $7,
               comentarios       = $8,
-              observaciones     = $9
+              observaciones     = $9,
+              -- ⚠️ Las horas se BORRAN cuando dejan de caber. Sin esto, estirar
+              -- a dos dias un permiso con horas viola el CHECK de la 036, y como
+              -- este UPDATE vive dentro de la transaccion que ademas encola el
+              -- evento del outbox, el ROLLBACK se lleva la escritura buena y el
+              -- admin recibe un 500 sin ninguna pista. Mismo patron que el CHECK
+              -- sobre "evento" de la 027.
+              --
+              -- Mira TAMBIEN el tipo, al reves que su gemelo de
+              -- aplicarALaSolicitud: esta es la unica via que puede cambiarlo, y
+              -- el CHECK de la BD no lo vigila -a proposito, para no atarse a
+              -- que solo "permiso" admita hora-.
+              --
+              -- El ::varchar no es adorno, y tiene que ser ESE tipo: el
+              -- "tipo = $3" de arriba le fija a $3 el tipo de la columna
+              -- -VARCHAR(20)-, y comparar aqui contra un literal pelado -o
+              -- contra ::text- se lo deduciria como text. Postgres rechaza
+              -- entonces la consulta ENTERA con "inconsistent types deduced for
+              -- parameter $3", que en esta transaccion es exactamente el 500 sin
+              -- pista que este CASE viene a evitar.
+              hora_inicio       = CASE WHEN $3::varchar = 'permiso' AND $4::date = $5::date
+                                       THEN s.hora_inicio ELSE NULL END,
+              hora_fin          = CASE WHEN $3::varchar = 'permiso' AND $4::date = $5::date
+                                       THEN s.hora_fin ELSE NULL END
          FROM portal.empleados e
         WHERE s.id = $1 AND e.id = $2
         RETURNING s.id`,
@@ -2007,7 +2030,16 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
           `UPDATE portal.solicitudes_ausencia
               -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
               -- una decision sobre la solicitud, es una enmienda de sus fechas.
-              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7
+              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7,
+                  -- Gemelo del CASE de actualizarSolicitud, y por lo mismo: sin
+                  -- el, aprobar un cambio que estira el permiso a dos dias viola
+                  -- el CHECK de la 036 DENTRO de la transaccion y el ROLLBACK se
+                  -- lleva la decision del jefe.
+                  --
+                  -- Aqui NO se mira el tipo: una modificacion solo cambia
+                  -- fechas, nunca el tipo de la solicitud.
+                  hora_inicio = CASE WHEN $5::date = $6::date THEN hora_inicio ELSE NULL END,
+                  hora_fin    = CASE WHEN $5::date = $6::date THEN hora_fin    ELSE NULL END
             ${TESTIGO_SOLICITUD}
            RETURNING id`,
           [...testigo, m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos],

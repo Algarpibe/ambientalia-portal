@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
-import { solicitudesDeEmpleado } from './repo.js';
+import { solicitudesDeEmpleado, actualizarSolicitud, type EdicionSolicitud } from './repo.js';
+import { construirPayloadCorreccion } from './notificaciones.js';
 import { crearSolicitud } from './service.js';
 import { hoyEnColombia } from './saldo.js';
 import { sumarDias } from './festivos.js';
@@ -213,5 +214,92 @@ describe('el alta de punta a punta, a traves del SERVICIO', () => {
     const [s] = await solicitudesDeEmpleado(db, id);
     expect(s.horaInicio).toBe('09:00');
     expect(s.horaFin).toBe('11:00');
+  });
+});
+
+describe('las horas no sobreviven a un rango de varios dias', () => {
+  const ADMIN = 'comercial@ambientalia.com.co';
+
+  /** Un permiso de un dia con horas, listo para que se lo estiren. */
+  async function permisoConHoras(): Promise<{ empleadoId: string; solicitudId: string }> {
+    const empleadoId = await sembrarEmpleado(db, 'ana@hora.test');
+    await insertar(empleadoId, '2026-09-01', '2026-09-01', '09:00', '11:00');
+    const [s] = await solicitudesDeEmpleado(db, empleadoId);
+    return { empleadoId, solicitudId: s.id };
+  }
+
+  /**
+   * La correccion del registro general por la via real. El constructor de
+   * payload es el de verdad y no un stub, aunque en estos tres casos ni se
+   * llegue a llamar —la solicitud esta `pendiente`, o sea nunca estuvo en
+   * Google—: pasarle el real es lo que hace `repo.correccion-admin.db.test.ts`
+   * y lo que deja el camino exacto del router.
+   */
+  const corregir = (solicitudId: string, campos: EdicionSolicitud) =>
+    actualizarSolicitud(db, solicitudId, campos, ADMIN, construirPayloadCorreccion);
+
+  it('CANDADO: actualizarSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
+    // Sin el CASE, el UPDATE viola el CHECK, la transaccion entera hace ROLLBACK
+    // -con su evento de outbox dentro- y el admin recibe un 500 sin ninguna
+    // pista. Es el motivo entero de esta tarea.
+    const { empleadoId, solicitudId } = await permisoConHoras();
+
+    const actual = await corregir(solicitudId, {
+      empleadoId,
+      tipo: 'permiso',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-03',
+      dias: 3,
+      estado: 'pendiente',
+      comentarios: null,
+      observaciones: null,
+    });
+
+    expect(actual).not.toBeNull();
+    expect(actual?.fechaFin).toBe('2026-09-03');
+    expect(actual?.horaInicio).toBeNull();
+    expect(actual?.horaFin).toBeNull();
+  });
+
+  it('actualizarSolicitud sin mover las fechas CONSERVA las horas', async () => {
+    // La otra mitad del CASE. Sin ella, corregir un comentario borraria una hora
+    // que nadie pidio cambiar.
+    const { empleadoId, solicitudId } = await permisoConHoras();
+
+    const actual = await corregir(solicitudId, {
+      empleadoId,
+      tipo: 'permiso',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      dias: 1,
+      estado: 'pendiente',
+      comentarios: 'una nota nueva',
+      observaciones: null,
+    });
+
+    expect(actual?.horaInicio).toBe('09:00');
+    expect(actual?.horaFin).toBe('11:00');
+  });
+
+  it('CANDADO: cambiar el TIPO a uno que no admite hora tambien las borra', async () => {
+    // El PATCH del registro es la unica via que puede cambiar el tipo, y el
+    // CHECK de la BD no mira el tipo: sin esta mitad, unas vacaciones acabarian
+    // con una franja horaria pegada que la app pintaria tal cual.
+    const { empleadoId, solicitudId } = await permisoConHoras();
+
+    const actual = await corregir(solicitudId, {
+      empleadoId,
+      tipo: 'vacaciones',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      dias: 1,
+      estado: 'pendiente',
+      comentarios: null,
+      observaciones: null,
+    });
+
+    expect(actual?.tipo).toBe('vacaciones');
+    expect(actual?.horaInicio).toBeNull();
+    expect(actual?.horaFin).toBeNull();
   });
 });
