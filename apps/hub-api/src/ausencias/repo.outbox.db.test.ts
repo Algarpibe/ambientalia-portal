@@ -49,6 +49,22 @@ async function sembrarEvento(intentos = 0): Promise<number> {
   return Number((rows[0] as { id: string }).id);
 }
 
+/**
+ * Empuja `servido_at` al pasado para que la reserva deje de esconder la fila.
+ *
+ * ⚠️ Hace falta de verdad, y lo se porque el primer intento de este fichero no la
+ * tenia: el test del tope pasaba igualmente, pero POR EL MOTIVO EQUIVOCADO —era
+ * la reserva de cinco minutos la que devolvia la lista vacia, no el tope—. Se
+ * descubrio mutando el WHERE del tope: el test seguia verde. Sin esto, los
+ * candados de este fichero prueban la reserva dos veces y el tope ninguna.
+ */
+async function vencerLaReserva(id: number): Promise<void> {
+  await db.query(
+    "UPDATE portal.ausencias_outbox SET servido_at = now() - interval '1 hour' WHERE id = $1",
+    [id],
+  );
+}
+
 /** Lo que la BD dice de un evento, sin pasar por el mapeo del repo. */
 async function filaDe(id: number): Promise<{ intentos: number; enviado: boolean }> {
   const { rows } = await db.query(
@@ -78,8 +94,11 @@ describe('eventosPendientes: el tope de intentos', () => {
     expect(ultima.map((e) => e.id)).toEqual([id]);
     expect((await filaDe(id)).intentos).toBe(MAX_INTENTOS);
 
-    // Y a partir de aqui, nunca mas.
+    // Y a partir de aqui, nunca mas — venciendo la reserva cada vez, o seria
+    // ella la que devuelve la lista vacia y este candado no probaria el tope.
+    await vencerLaReserva(id);
     expect(await eventosPendientes(db)).toEqual([]);
+    await vencerLaReserva(id);
     expect(await eventosPendientes(db)).toEqual([]);
   });
 
