@@ -133,6 +133,8 @@ describe('la marca del evento de calendario', () => {
         fechaInicio: '2026-07-06',
         fechaFin: '2026-07-10',
         diasHabiles: 5,
+        horaInicio: null,
+        horaFin: null,
         comentarios: null,
         estado: 'registrada',
         aprobadorCorreo: 'jefe1@ambientalia.com.co',

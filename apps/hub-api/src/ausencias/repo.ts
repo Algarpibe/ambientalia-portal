@@ -1250,6 +1250,12 @@ const SELECT_SOLICITUD = `
          -- de la UI y de los correos. Cuatro digitos con un decimal caben de
          -- sobra en un double sin error de representacion observable.
          s.dias_habiles::float8 AS dias_habiles,
+         -- to_char y no ::text: el driver devuelve un TIME como '09:00:00', y
+         -- esos segundos se cuelan tal cual en el ISO que se le manda a Google
+         -- y en el value de un <input type="time">, que solo entiende HH:MM.
+         -- Es el mismo gotcha que el ::text de las fechas, con otra cara.
+         to_char(s.hora_inicio, 'HH24:MI') AS hora_inicio,
+         to_char(s.hora_fin,    'HH24:MI') AS hora_fin,
          s.observaciones, s.origen,
          s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo, s.informado_correo,
          -- ::text por lo mismo que las fechas de mas arriba: el driver devuelve
@@ -1286,6 +1292,8 @@ interface FilaSolicitudDb extends FilaModificacionJoinDb {
   fecha_inicio: string;
   fecha_fin: string;
   dias_habiles: number;
+  hora_inicio: string | null;
+  hora_fin: string | null;
   observaciones: string | null;
   origen: Solicitud['origen'];
   comentarios: string | null;
@@ -1325,6 +1333,8 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
     diasHabiles: r.dias_habiles,
+    horaInicio: r.hora_inicio,
+    horaFin: r.hora_fin,
     observaciones: r.observaciones,
     origen: r.origen,
     comentarios: r.comentarios,
@@ -1353,6 +1363,9 @@ export interface DatosInsercion {
   fechaInicio: string;
   fechaFin: string;
   diasHabiles: number;
+  /** Solo en un permiso de un día. Las dos o ninguna: lo exige el CHECK. */
+  horaInicio: string | null;
+  horaFin: string | null;
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobadorCorreo: string | null;
@@ -1419,8 +1432,8 @@ export async function crearSolicitud(
       `INSERT INTO portal.solicitudes_ausencia
          (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
           dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
-          informado_correo)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11)
+          informado_correo, hora_inicio, hora_fin)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time)
        RETURNING id`,
       [
         datos.tipo,
@@ -1434,6 +1447,8 @@ export async function crearSolicitud(
         datos.aprobadorCorreo,
         datos.segundoAprobadorCorreo,
         datos.informadoCorreo,
+        datos.horaInicio,
+        datos.horaFin,
       ],
     );
     const id = (rows[0] as { id: string }).id;

@@ -22,6 +22,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     fechaInicio: '2026-07-06',
     fechaFin: '2026-07-10',
     diasHabiles: 5,
+    horaInicio: null,
+    horaFin: null,
     comentarios: 'Viaje familiar',
     observaciones: null,
     origen: 'portal',

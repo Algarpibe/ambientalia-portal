@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
+import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
+import { solicitudesDeEmpleado } from './repo.js';
 
 // La hora opcional de los permisos contra Postgres de verdad.
 //
@@ -122,5 +123,45 @@ describe('migracion 036', () => {
     await expect(insertar(id, '2026-09-01', '2026-09-02', '09:00', '11:00')).rejects.toThrow(
       /solicitudes_horas_coherentes/,
     );
+  });
+});
+
+describe('el repo lee y escribe las horas', () => {
+  it('CANDADO: devuelve HH:MM, no HH:MM:SS ni un objeto', async () => {
+    // Sin el to_char, el driver devuelve un TIME como la cadena '09:00:00', y
+    // esa cadena se concatena tal cual dentro del ISO que se le manda a Google
+    // -«...T09:00:00:00-05:00»- y en el value de un <input type="time">, que
+    // solo entiende HH:MM. Las dos roturas son silenciosas.
+    const id = await sembrarEmpleado(db, 'ana@hora.test');
+    await insertar(id, '2026-09-01', '2026-09-01', '09:00', '11:00');
+    const [s] = await solicitudesDeEmpleado(db, id);
+    expect(s.horaInicio).toBe('09:00');
+    expect(s.horaFin).toBe('11:00');
+  });
+
+  it('una solicitud sin horas las devuelve en null', async () => {
+    const id = await sembrarEmpleado(db, 'ana@hora.test');
+    await insertar(id, '2026-09-01', '2026-09-03', null, null);
+    const [s] = await solicitudesDeEmpleado(db, id);
+    expect(s.horaInicio).toBeNull();
+    expect(s.horaFin).toBeNull();
+  });
+
+  it('crearSolicitud guarda las horas que le pasan', async () => {
+    const id = await sembrarEmpleado(db, 'ana@hora.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'ana@hora.test',
+      estado: 'pendiente',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      segundoAprobadorCorreo: null,
+      tipo: 'permiso',
+      horaInicio: '14:00',
+      horaFin: '16:30',
+    });
+    const [s] = await solicitudesDeEmpleado(db, id);
+    expect(s.horaInicio).toBe('14:00');
+    expect(s.horaFin).toBe('16:30');
   });
 });

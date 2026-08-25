@@ -84,6 +84,9 @@ export interface DatosSiembra {
   fechaFin: string;
   /** Con correo, la solicitud lleva cascada de dos firmas; con null, una sola. */
   segundoAprobadorCorreo: string | null;
+  /** Opcionales porque a casi ningun test le importan. Solo en permisos de un dia. */
+  horaInicio?: string | null;
+  horaFin?: string | null;
   /**
    * Opcional porque a casi ningun test le importa. Hace falta en cuanto uno
    * siembre una `registrada`: ese estado es el terminal de las INCAPACIDADES, y
@@ -104,6 +107,8 @@ export async function sembrarSolicitud(db: Pool, d: DatosSiembra): Promise<Solic
       fechaInicio: d.fechaInicio,
       fechaFin: d.fechaFin,
       diasHabiles: 5,
+      horaInicio: d.horaInicio ?? null,
+      horaFin: d.horaFin ?? null,
       comentarios: null,
       estado: d.estado,
       aprobadorCorreo: 'jefe1@ambientalia.com.co',

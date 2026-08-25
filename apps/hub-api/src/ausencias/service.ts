@@ -783,6 +783,9 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       fechaInicio: datos.fechaInicio,
       fechaFin: datos.fechaFin,
       diasHabiles,
+      // De momento siempre null: la tarea 3 valida y rellena la hora real.
+      horaInicio: null,
+      horaFin: null,
       comentarios: datos.comentarios ?? null,
       estado,
       // Una incapacidad no la aprueba nadie: dejar aquí un aprobador la haría

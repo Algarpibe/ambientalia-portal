@@ -474,6 +474,16 @@ export interface Solicitud {
   fechaFin: string;
   /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
+  /**
+   * La franja del día, solo en un PERMISO de un solo día. `null` = día completo,
+   * que es lo que era todo antes de esto.
+   *
+   * `HH:MM`, sin segundos y sin zona: es la hora local de Colombia, y el desfase
+   * se lo pone `calendario()` al construir el ISO para Google. Las dos van
+   * siempre juntas — lo garantiza el CHECK `solicitudes_horas_coherentes`.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
   comentarios: string | null;
   /** Notas al margen que traía la hoja, y el PDF de las incapacidades antiguas. */
   observaciones: string | null;
