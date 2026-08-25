@@ -3403,6 +3403,13 @@ export async function retiradosConSaldo(db: Pool): Promise<EmpleadoConSaldo[]> {
  * `pendiente_2` entra junto a `pendiente` por lo mismo que en `diasPosterioresA`:
  * es el mismo trámite en su segundo nivel de firma. Las aprobadas quedan fuera
  * porque ya están descontadas, y las rechazadas porque no consumen nada.
+ *
+ * ⚠️ De las dos condiciones, SOLO el filtro de estados lo vigila un test. El
+ * `= ANY($1)` no lo caza ninguno y no puede cazarlo: con el `GROUP BY` los
+ * conteos salen separados por empleado, así que quitarlo solo hace que la
+ * consulta lea filas de más. Es un recorte de ALCANCE —no traer a la memoria de
+ * hub-api las solicitudes de toda la plantilla—, no de corrección, y quien lo
+ * borre no verá ningún rojo. Comprobado mutándolo (tarea 12 del plan).
  */
 export async function solicitudesVivasDe(db: Pool, ids: string[]): Promise<Map<string, number>> {
   // Sin esto, `= ANY('{}')` haría un escaneo para no devolver nada.

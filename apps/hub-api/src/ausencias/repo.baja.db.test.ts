@@ -598,9 +598,18 @@ describe('listaDeRetirados', () => {
       segundoAprobadorCorreo: null,
     });
 
-    // Un SEGUNDO retirado con UNA sola pendiente. Sin el, quitar el
-    // `WHERE empleado_id = ANY($1)` del recuento dejaria este test en verde:
-    // con una sola ficha sembrada, el total y el suyo son el mismo numero.
+    // Un SEGUNDO retirado con una sola pendiente, o sea con un numero DISTINTO
+    // del de arriba. Es lo que hace que leer el recuento de la fila equivocada
+    // -`vivas.values().next()` en vez de `vivas.get(id)`- se ponga rojo; con
+    // una sola ficha sembrada las dos lecturas dan lo mismo. Falsado: la
+    // mutacion muere aqui con «expected 2 to be 1».
+    //
+    // Y lo que este test NO vigila, para que nadie se fie de mas: quitar el
+    // `WHERE empleado_id = ANY($1)` del recuento sobrevive a este test y a
+    // todos. El `GROUP BY empleado_id` mantiene los conteos separados, asi que
+    // sin ese filtro la consulta solo lee filas de mas -es un recorte de
+    // ALCANCE, no de correccion- y nada observable desde aqui cambia.
+    // Comprobado mutandolo.
     const otro = await sembrarEmpleado(db, 'otro@baja.test');
     await sembrarSolicitud(db, {
       empleadoId: otro,
