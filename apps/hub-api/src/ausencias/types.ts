@@ -179,14 +179,18 @@ export function estaEnElCalendario(estado: EstadoSolicitud): boolean {
 /**
  * Si una corrección cambia algo que el EVENTO del calendario enseña.
  *
- * El evento solo enseña tres cosas: que existe, sus fechas y su `resumen`
+ * El evento enseña que existe, sus fechas, su `resumen`
  * —`${ETIQUETA_TIPO[tipo]} ${empleadoNombre}`, ver `calendario()` en
- * `notificaciones.ts`—. Por eso `dias`, `comentarios` y `observaciones` quedan
- * fuera, y no por descuido: corregir el recuento de días de una aprobada —el
- * caso más corriente del histórico importado, donde el Excel anotó recuentos
- * que no cuadran— mandaría a Google un `actualizar` idéntico al evento que ya
- * hay, y con él un correo diciendo que algo se corrigió solo. Un ⚠️ que avisa
- * de lo que no ha pasado es cómo se enseña a la gente a no leerlos.
+ * `notificaciones.ts`— y, desde que un permiso de un día puede llevar hora, su
+ * franja horaria. Esa última NO se compara aquí: el porqué, y qué hay que hacer
+ * el día que deje de ser inofensivo, en el ⚠️ de dentro de la función.
+ *
+ * `dias`, `comentarios` y `observaciones` quedan fuera, y no por descuido:
+ * corregir el recuento de días de una aprobada —el caso más corriente del
+ * histórico importado, donde el Excel anotó recuentos que no cuadran— mandaría a
+ * Google un `actualizar` idéntico al evento que ya hay, y con él un correo
+ * diciendo que algo se corrigió solo. Un ⚠️ que avisa de lo que no ha pasado es
+ * cómo se enseña a la gente a no leerlos.
  *
  * El empleado va por `empleadoId` y no por `empleadoNombre`: el nombre es un
  * campo desnormalizado que viene del JOIN, y reasignar la solicitud a otra
@@ -201,6 +205,35 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
   // para siempre, sin avisar a nadie. Es la misma forma de fallo que documenta
   // el orden de ramas de `cambiaLaHoja`, un poco más abajo.
   if (esOtorgamiento(previa.tipo) && esOtorgamiento(actual.tipo)) return false;
+  // ⚠️ Las HORAS no se comparan, y el evento SÍ las enseña: desde la 036 un
+  // permiso de un día puede llevar franja, y `calendario()` la convierte en un
+  // bloque horario con el desfase de Colombia en vez del evento de día completo.
+  //
+  // Hoy eso no es explotable, y por eso se deja así en lugar de añadir una regla
+  // que ningún test podría matar. Las horas solo se escriben en el ALTA
+  // —`validarHoras`, en service.ts—, y el PATCH del Registro general no las
+  // acepta. Lo único que las toca después son los dos `CASE` de repo.ts, y solo
+  // para BORRARLAS: mantienen la franja mientras el estado NUEVO siga cumpliendo
+  // `tipo = 'permiso' AND fechaInicio = fechaFin`, y la anulan en cuanto deja de
+  // cumplirse.
+  //
+  // Y ahí está el porqué: si la solicitud tenía horas, ese predicado se cumplía
+  // ANTES, así que para que un `CASE` las borre tiene que haber cambiado el tipo
+  // o alguna de las dos fechas — y esta función compara las tres. Ojo: no basta
+  // con mirar las fechas. El `CASE` de `actualizarSolicitud` mira TAMBIÉN el
+  // tipo (su propio comentario lo explica), así que un PATCH de `permiso` a
+  // `vacaciones` con las fechas intactas borra las horas sin tocar ni una fecha;
+  // ese camino lo detecta `previa.tipo !== actual.tipo`, no la comparación de
+  // fechas.
+  //
+  // El día que alguien abra la edición de la hora SIN cambiar el tipo ni las
+  // fechas, esta comparación hay que ampliarla EN EL MISMO COMMIT. Sin eso,
+  // `situacionDelCalendario` (notificaciones.ts) devolvería `no_cambia`: no se
+  // emitiría ningún `actualizar`, el evento se quedaría en Google con la franja
+  // vieja, y encima el correo afirmaría que «el evento del calendario no cambia
+  // con esta corrección». Un ⚠️ que NIEGA lo que sí ha pasado es la misma forma
+  // de fallo que el `Record` de avisos —`AVISO_DE`— existe para evitar, y la
+  // misma que documenta el párrafo de `dias` de aquí arriba.
   return (
     estaEnElCalendario(previa.estado) !== estaEnElCalendario(actual.estado) ||
     previa.fechaInicio !== actual.fechaInicio ||
@@ -474,6 +507,19 @@ export interface Solicitud {
   fechaFin: string;
   /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
+  /**
+   * La franja del día, solo en un PERMISO de un solo día. `null` = día completo,
+   * que es lo que era todo antes de esto.
+   *
+   * `HH:MM`, sin segundos y sin zona: es la hora local de Colombia. Las dos van
+   * siempre juntas — lo garantiza el CHECK `solicitudes_horas_coherentes`.
+   *
+   * Quien las traduce a lo que ve Google es `calendario()` (notificaciones.ts):
+   * con hora arma un bloque horario con el desfase de Colombia explícito, y sin
+   * ella el evento *all-day* de siempre.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
   comentarios: string | null;
   /** Notas al margen que traía la hoja, y el PDF de las incapacidades antiguas. */
   observaciones: string | null;
@@ -577,6 +623,15 @@ export interface NuevaSolicitud {
    * y un sábado da CERO días hábiles.
    */
   dias?: number;
+  /**
+   * La franja del día. SOLO en un permiso de un solo día, y las dos o ninguna.
+   *
+   * No es opcional con `?` sino `string | null`, al revés que `comentarios`: el
+   * validador siempre las resuelve a un valor, y dejarlas opcionales obligaría a
+   * cada llamante a decidir otra vez qué significa que falten.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
 }
 
 
@@ -617,7 +672,10 @@ export interface CorreoEvento {
  */
 export type AccionCalendario = 'crear' | 'actualizar' | 'borrar';
 
-/** Evento *all-day* de Google Calendar. `fin` ya viene sumado un día. */
+/**
+ * Un evento de Google Calendar. `todoElDia` decide de cuál de las dos formas se
+ * leen `inicio` y `fin`, así que se lee ANTES que ellos.
+ */
 export interface EventoCalendario {
   calendarId: string;
   /**
@@ -626,16 +684,29 @@ export interface EventoCalendario {
    */
   eventId: string;
   accion: AccionCalendario;
-  /**
-   * Los tres de abajo viajan SIEMPRE, también en un `borrar`, donde describen
-   * el evento tal como está justo antes de desaparecer. Dejarlos fuera cuando
-   * no hacen falta sería reintroducir por la puerta de atrás el problema que
-   * avisa `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y
-   * este contrato no distingue eso de un valor.
-   */
+  // ⚠️ Los CUATRO campos de abajo —`todoElDia`, `resumen`, `inicio` y `fin`—
+  // viajan SIEMPRE, también en un `borrar`, donde describen el evento tal como
+  // está justo antes de desaparecer. Dejar alguno fuera cuando «no hace falta»
+  // sería reintroducir por la puerta de atrás el problema que avisa
+  // `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y este
+  // contrato no distingue eso de un valor.
+  //
+  // En `todoElDia` eso importa más que en ninguno, porque no es solo
+  // descriptivo: la expresión que lo lee en n8n compara contra `false` y no por
+  // veracidad, así que el `false` tiene que llegar EXPLÍCITO.
+  //
+  // Va en comentario de línea y no en JSDoc porque describe al GRUPO: como
+  // bloque `/** */` se apilaría sobre el hover de `todoElDia` y parecería suyo.
+  /** Si el evento ocupa el día entero o una franja horaria. */
+  todoElDia: boolean;
+  /** El título que se ve en Google: `${ETIQUETA_TIPO[tipo]} ${empleadoNombre}`. */
   resumen: string;
+  /** `YYYY-MM-DD` si `todoElDia`; ISO con desfase (`...T09:00:00-05:00`) si no. */
   inicio: string;
-  /** Fin EXCLUSIVO: Google no pinta el último día si no se le suma uno. */
+  /**
+   * Con `todoElDia`, fin EXCLUSIVO: Google no pinta el último día si no se le
+   * suma uno. Con hora, el fin es el fin de verdad y NO se le suma nada.
+   */
   fin: string;
 }
 

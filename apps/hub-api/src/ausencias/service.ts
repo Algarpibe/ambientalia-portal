@@ -96,6 +96,53 @@ function esTipo(v: unknown): v is TipoSolicitud {
 }
 
 /**
+ * `HH:MM` de 24 horas, y nada más.
+ *
+ * Estricto por lo mismo que `esFechaValida` con las fechas: esta cadena se
+ * concatena dentro del ISO que se le manda a Google y se le pone de `value` a un
+ * `<input type="time">`. Un `9:5` no lanzaría en ninguno de los dos sitios —
+ * produciría un instante equivocado en uno y un campo vacío en el otro.
+ */
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Resuelve la pareja de horas de una solicitud nueva.
+ *
+ * Dos códigos y no uno: cada uno se traduce a una frase distinta en la caja roja
+ * de la app, y un código que significa dos cosas obliga a escribir un mensaje
+ * que no dice ninguna.
+ *
+ *  - `hora_invalida`     → la pareja está mal (media, mal escrita, o del revés).
+ *  - `hora_no_permitida` → la pareja está bien, pero no cabe en esta solicitud.
+ */
+function validarHoras(
+  b: Record<string, unknown>,
+  tipo: TipoSolicitud,
+  fechaInicio: string,
+  fechaFin: string,
+): { horaInicio: string | null; horaFin: string | null } {
+  const ini = typeof b.horaInicio === 'string' ? b.horaInicio.trim() : '';
+  const fin = typeof b.horaFin === 'string' ? b.horaFin.trim() : '';
+  if (ini === '' && fin === '') return { horaInicio: null, horaFin: null };
+
+  // Media pareja no significa nada: «desde las 9:00» no dice cuánto dura, y un
+  // rango a medias en el calendario es peor que no tener rango.
+  if (!HORA.test(ini)) throw new AusenciaError('hora_invalida', 400, 'horaInicio');
+  if (!HORA.test(fin)) throw new AusenciaError('hora_invalida', 400, 'horaFin');
+  // Lexicográfico y no aritmético: con HH:MM de ancho fijo las dos comparaciones
+  // dan lo mismo, y esta no necesita parsear nada.
+  if (fin <= ini) throw new AusenciaError('hora_invalida', 400, 'horaFin');
+
+  if (tipo !== 'permiso') throw new AusenciaError('hora_no_permitida', 400, 'tipo');
+  // «Del lunes al viernes de 9:00 a 11:00» no tiene lectura única. El CHECK de
+  // la 036 lo repite en la BD; aquí sale como un 400 y no como un 500 desde
+  // dentro de una transacción.
+  if (fechaInicio !== fechaFin) throw new AusenciaError('hora_no_permitida', 400, 'fechaFin');
+
+  return { horaInicio: ini, horaFin: fin };
+}
+
+/**
  * Valida y normaliza lo que llega del cliente. Nada de `empleadoId` ni de
  * `diasHabiles`: el primero sale de la sesión y el segundo se calcula aquí, así
  * que ni suplantar a otro ni inflar los días es posible desde el navegador.
@@ -162,7 +209,9 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
 
   const dias = validarDiasConcedidos(b.dias, tipo, fechaInicio, fechaFin, hoy, comentarios);
 
-  return { tipo, fechaInicio, fechaFin, comentarios: comentarios || undefined, adjunto, dias };
+  const { horaInicio, horaFin } = validarHoras(b, tipo, fechaInicio, fechaFin);
+
+  return { tipo, fechaInicio, fechaFin, comentarios: comentarios || undefined, adjunto, dias, horaInicio, horaFin };
 }
 
 /** Tope de UNA concesión. El del saldo entero es otro (`MAX_SALDO`, 999). */
@@ -783,6 +832,8 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
       fechaInicio: datos.fechaInicio,
       fechaFin: datos.fechaFin,
       diasHabiles,
+      horaInicio: datos.horaInicio,
+      horaFin: datos.horaFin,
       comentarios: datos.comentarios ?? null,
       estado,
       // Una incapacidad no la aprueba nadie: dejar aquí un aprobador la haría

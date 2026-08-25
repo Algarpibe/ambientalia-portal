@@ -56,6 +56,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     fechaInicio: '2026-07-06',
     fechaFin: '2026-07-10',
     diasHabiles: 5,
+    horaInicio: null,
+    horaFin: null,
     comentarios: 'Viaje familiar',
     observaciones: null,
     origen: 'portal',
@@ -331,6 +333,63 @@ describe('validarNuevaSolicitud', () => {
     const r = validar(nueva({ empleadoId: 'otro', diasHabiles: 99 })) as unknown as Record<string, unknown>;
     expect(r.empleadoId).toBeUndefined();
     expect(r.diasHabiles).toBeUndefined();
+  });
+});
+
+describe('validarNuevaSolicitud — la hora del permiso', () => {
+  const base = { tipo: 'permiso', fechaInicio: '2026-07-02', fechaFin: '2026-07-02' };
+
+  it('sin horas, un permiso sigue siendo de día completo', () => {
+    const r = validar(base);
+    expect(r.horaInicio).toBeNull();
+    expect(r.horaFin).toBeNull();
+  });
+
+  it('acepta la pareja completa', () => {
+    const r = validar({ ...base, horaInicio: '09:00', horaFin: '11:00' });
+    expect(r.horaInicio).toBe('09:00');
+    expect(r.horaFin).toBe('11:00');
+  });
+
+  it('CANDADO: media pareja es un 400', () => {
+    // La BD ya lo rechaza, pero ahí llega como un 500 opaco desde dentro de una
+    // transacción. Aquí sale como un 400 con el campo señalado.
+    expect(() => validar({ ...base, horaInicio: '09:00' })).toThrow(
+      expect.objectContaining({ code: 'hora_invalida', status: 400 }),
+    );
+    expect(() => validar({ ...base, horaFin: '11:00' })).toThrow(
+      expect.objectContaining({ code: 'hora_invalida', status: 400 }),
+    );
+  });
+
+  it('CANDADO: un formato que no sea HH:MM es un 400', () => {
+    // '9:5' compilaría y se concatenaría al ISO de Google sin que nadie avise.
+    for (const mala of ['9:00', '09:0', '25:00', '09:60', 'mañana', '09:00:00']) {
+      expect(() => validar({ ...base, horaInicio: mala, horaFin: '18:00' })).toThrow(
+        expect.objectContaining({ code: 'hora_invalida' }),
+      );
+    }
+  });
+
+  it('CANDADO: la hora de fin tiene que ser posterior a la de inicio', () => {
+    expect(() => validar({ ...base, horaInicio: '11:00', horaFin: '09:00' })).toThrow(
+      expect.objectContaining({ code: 'hora_invalida', status: 400, field: 'horaFin' }),
+    );
+    expect(() => validar({ ...base, horaInicio: '09:00', horaFin: '09:00' })).toThrow(
+      expect.objectContaining({ code: 'hora_invalida', status: 400, field: 'horaFin' }),
+    );
+  });
+
+  it('CANDADO: solo un PERMISO admite hora', () => {
+    expect(() =>
+      validar({ ...base, tipo: 'vacaciones', horaInicio: '09:00', horaFin: '11:00' }),
+    ).toThrow(expect.objectContaining({ code: 'hora_no_permitida', status: 400 }));
+  });
+
+  it('CANDADO: con horas, el rango tiene que ser de un solo día', () => {
+    expect(() =>
+      validar({ ...base, fechaFin: '2026-07-03', horaInicio: '09:00', horaFin: '11:00' }),
+    ).toThrow(expect.objectContaining({ code: 'hora_no_permitida', status: 400, field: 'fechaFin' }));
   });
 });
 

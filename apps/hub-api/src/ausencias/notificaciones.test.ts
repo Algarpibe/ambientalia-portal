@@ -22,6 +22,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     fechaInicio: '2026-07-06',
     fechaFin: '2026-07-10',
     diasHabiles: 5,
+    horaInicio: null,
+    horaFin: null,
     comentarios: 'Viaje familiar',
     observaciones: null,
     origen: 'portal',
@@ -336,6 +338,10 @@ describe('efectos en Google, repartidos sin duplicar', () => {
       // para corregirlo o borrarlo cuando la ausencia cambie.
       eventId: 's1',
       accion: 'crear',
+      // `toEqual` y no `toMatchObject`: este es el sitio donde se ve el payload
+      // ENTERO, así que aquí se nota si `todoElDia` dejara de viajar. Al otro
+      // lado un campo ausente es `undefined`, que no es `true` ni `false`.
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       inicio: '2026-07-06',
       fin: '2026-07-11',
@@ -403,6 +409,117 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     );
     expect(p.hoja!.columnas.Tipo).toBe('Vacaciones');
     expect(p.hoja!.columnas['Días']).toBe(5);
+  });
+});
+
+describe('bloqueFechas — la hora del permiso', () => {
+  it('un permiso con hora la dice en el correo', () => {
+    // Quien firma tiene que poder decidir leyendo el correo: si la hora solo
+    // estuviera en el portal, el aviso diría menos de lo que hay que aprobar.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobacion',
+      null,
+    );
+    expect(p.correo.cuerpo).toContain('09:00 a 11:00');
+  });
+
+  it('CANDADO: sin hora, el correo no inventa ninguna franja', () => {
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-03' }),
+      'aprobacion',
+      null,
+    );
+    // El `\d\d:\d\d` solo no basta de candado: `solicitud()` da horaInicio y
+    // horaFin en `null` por defecto, y sin el guardia de `bloqueFechas` eso
+    // interpola «de null a null» — que no tiene ningún dígito junto a los dos
+    // puntos, así que el mutante (quitar el `if`) pasaba este test de mentira.
+    // Lo que de verdad prueba que no se inventa la franja es que la etiqueta
+    // ni aparezca.
+    expect(p.correo.cuerpo).not.toContain('🕘 Horario');
+    expect(p.correo.cuerpo).not.toMatch(/\d\d:\d\d/);
+  });
+});
+
+describe('calendario — el permiso con hora', () => {
+  it('sin horas, el evento sigue siendo de día completo y con el +1', () => {
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-01', estado: 'aprobada' }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario).toMatchObject({
+      todoElDia: true,
+      inicio: '2026-09-01',
+      // Google trata el `end` de un all-day como EXCLUSIVO: sin el +1 no se
+      // pinta el último día.
+      fin: '2026-09-02',
+    });
+  });
+
+  it('con horas, emite ISO con desfase de Colombia', () => {
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario).toMatchObject({
+      todoElDia: false,
+      inicio: '2026-09-01T09:00:00-05:00',
+      fin: '2026-09-01T11:00:00-05:00',
+    });
+  });
+
+  it('CANDADO: con horas NO se le suma el día al fin', () => {
+    // El +1 solo es correcto para un evento de día completo. Aplicado a uno con
+    // hora, un permiso de 9:00 a 11:00 del martes acabaría el miércoles a las
+    // 11:00 — un evento de 26 horas en el calendario del equipo.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario?.fin.startsWith('2026-09-01')).toBe(true);
+  });
+
+  it('CANDADO: el desfase va explícito, no se deja a la zona del calendario', () => {
+    // Un `dateTime` sin offset lo interpreta Google en la zona por defecto del
+    // calendario, que no la controla esta app: el día que alguien la cambie, se
+    // moverían todos los permisos y nada se pondría rojo.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario?.inicio).toMatch(/-05:00$/);
+    expect(p.calendario?.fin).toMatch(/-05:00$/);
   });
 });
 
@@ -766,12 +883,60 @@ describe('la decisión del cambio', () => {
       calendarId: CALENDARIO_STAFF,
       eventId: EV,
       accion: 'actualizar',
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       inicio: '2026-07-13',
       fin: '2026-07-16',
     });
     // La hoja NO: n8n hace `append` y no queda constancia de en qué fila cayó.
     expect(p.hoja).toBeNull();
+  });
+
+  // CANDADO. El `actualizar` de producción: la solicitud llega aquí YA aplicada,
+  // así que sus horas son las que el evento tiene que enseñar. `correccionDeCalendario`
+  // hereda el bloque horario con el spread y nadie lo comprobaba.
+  it('CANDADO: aprobar un cambio de fechas de un permiso CON HORA mueve el bloque horario', () => {
+    const s = conCadena({
+      tipo: 'permiso',
+      eventoCalendarioId: EV,
+      fechaInicio: '2026-09-02',
+      fechaFin: '2026-09-02',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadModificacion(s, modificacion(), 'modificacion_aprobada');
+    expect(p.calendario).toEqual({
+      calendarId: CALENDARIO_STAFF,
+      eventId: EV,
+      accion: 'actualizar',
+      todoElDia: false,
+      resumen: 'Permisos Ana Ruiz',
+      inicio: '2026-09-02T09:00:00-05:00',
+      // Sin el +1, que solo vale para un evento de día completo.
+      fin: '2026-09-02T11:00:00-05:00',
+    });
+  });
+
+  // CANDADO. El `borrar` también lleva el campo: al otro lado un `todoElDia`
+  // ausente es `undefined`, y la expresión de n8n que lo lee exige el `false`
+  // explícito. Es el mismo problema que tuvo en su día el campo `drive`.
+  it('CANDADO: anular un permiso CON HORA borra el evento y el payload sigue llevando la franja', () => {
+    const s = conCadena({
+      tipo: 'permiso',
+      eventoCalendarioId: EV,
+      fechaInicio: '2026-09-02',
+      fechaFin: '2026-09-02',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadModificacion(s, anulacion(), 'modificacion_aprobada');
+    expect(p.calendario).toMatchObject({
+      eventId: EV,
+      accion: 'borrar',
+      todoElDia: false,
+      inicio: '2026-09-02T09:00:00-05:00',
+      fin: '2026-09-02T11:00:00-05:00',
+    });
   });
 
   it('CANDADO: aprobar una anulación manda BORRAR el evento', () => {
@@ -919,6 +1084,39 @@ describe('el payload de una corrección del registro', () => {
     expect(p.correo.cuerpo).toContain('ya se ha corregido solo');
   });
 
+  // CANDADO. Los otros tres constructores de evento —este, el de la decisión de
+  // una modificación y el del borrado— hacen `...calendario(s)` y solo pisan
+  // `eventId` y `accion`, así que el bloque horario les llega heredado. Nadie lo
+  // comprobaba: una rama de `calendario()` que solo valiera para el `crear`
+  // dejaría los `actualizar` de los permisos con hora como eventos de día
+  // completo, y el correo diría igualmente que el calendario ya está corregido.
+  it('CANDADO: corregir un permiso CON HORA lo mueve como bloque horario, no como día completo', () => {
+    const conHora = (over: Partial<Solicitud> = {}) =>
+      aprobadaConEvento({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+        ...over,
+      });
+    const p = construirPayloadCorreccion(
+      conHora(),
+      conHora({ fechaInicio: '2026-09-02', fechaFin: '2026-09-02' }),
+      ADMIN,
+    );
+
+    expect(p.calendario).toMatchObject({
+      eventId: EVENT_ID,
+      accion: 'actualizar',
+      todoElDia: false,
+      inicio: '2026-09-02T09:00:00-05:00',
+      // Sin el +1: con hora, el fin es el fin. Sumárselo dejaría en el
+      // calendario del equipo un permiso de dos horas que dura veintiséis.
+      fin: '2026-09-02T11:00:00-05:00',
+    });
+  });
+
   it('borra el evento cuando la solicitud sale del calendario', () => {
     const previa = aprobadaConEvento();
     const actual = aprobadaConEvento({ estado: 'rechazada' });
@@ -1035,6 +1233,30 @@ describe('el payload del borrado de una solicitud', () => {
     });
     expect(p.correo.asunto).toContain('⚠️ Ajustar la hoja —');
     expect(p.correo.cuerpo).toContain('ya se ha borrado solo');
+  });
+
+  // CANDADO. El evento se describe tal como está justo antes de desaparecer, y
+  // eso incluye la franja. `todoElDia` viaja también aquí: un campo ausente al
+  // otro lado es `undefined`, que no es ni `true` ni `false`.
+  it('CANDADO: borrar un permiso CON HORA sigue describiendo el bloque horario', () => {
+    const borrada = solicitud({
+      tipo: 'permiso',
+      estado: 'aprobada',
+      eventoCalendarioId: EVENT_ID,
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadBorrado(borrada, ADMIN);
+
+    expect(p.calendario).toMatchObject({
+      eventId: EVENT_ID,
+      accion: 'borrar',
+      todoElDia: false,
+      inicio: '2026-09-01T09:00:00-05:00',
+      fin: '2026-09-01T11:00:00-05:00',
+    });
   });
 
   // CANDADO. Las aprobadas anteriores a la migración 026 llevan en Google un id

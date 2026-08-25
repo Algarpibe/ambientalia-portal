@@ -1824,6 +1824,20 @@ describe('POST /ausencias/solicitudes', () => {
       .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: grande } }))
       .expect(201);
   });
+
+  it('el alta guarda la hora del permiso', async () => {
+    // Cubre el cableado entero —router → servicio → `DatosInsercion`—, que es
+    // justo lo que un test unitario de `validarNuevaSolicitud` no alcanza a ver:
+    // aquella solo comprueba lo que el validador DEVUELVE, no que el alta use ese
+    // valor al construir la fila para el repo.
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ tipo: 'permiso', fechaInicio: '2026-07-06', fechaFin: '2026-07-06', horaInicio: '09:00', horaFin: '11:00' }))
+      .expect(201);
+    expect(r.body.horaInicio).toBe('09:00');
+    expect(r.body.horaFin).toBe('11:00');
+  });
 });
 
 // ── El candado del solapamiento ────────────────────────────────────────────
@@ -5608,6 +5622,9 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
       calendarId: CALENDARIO_STAFF,
       eventId: idDeEventoCalendario(solicitudId),
       accion: 'actualizar',
+      // Unas vacaciones no llevan hora: el evento sigue siendo de día completo.
+      // Va en el `toEqual` porque este es el contrato tal y como sale por HTTP.
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       // Las fechas NUEVAS, y el fin sumado un día como al crearlo.
       inicio: '2026-07-13',

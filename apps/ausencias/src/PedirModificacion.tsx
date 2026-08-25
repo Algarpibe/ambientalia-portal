@@ -162,7 +162,12 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
             {/* Toda la línea en una plantilla: pegar los trozos con etiquetas
                 JSX separadas por saltos de línea se come los espacios. */}
             <p className="text-sm text-gray-500">
-              {`${ETIQUETA_TIPO[solicitud.tipo]} · ${rangoFechas(solicitud.fechaInicio, solicitud.fechaFin)}`}
+              {`${ETIQUETA_TIPO[solicitud.tipo]} · ${rangoFechas(
+                solicitud.fechaInicio,
+                solicitud.fechaFin,
+                solicitud.horaInicio,
+                solicitud.horaFin,
+              )}`}
             </p>
           </div>
           <button

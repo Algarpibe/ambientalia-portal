@@ -664,13 +664,13 @@ CHECK, el `ROLLBACK` se lleva por delante la escritura buena. Es el mismo patró
 del CHECK sobre `evento` del outbox, que ya mordió una vez.
 
 **Files:**
-- Modify: `apps/hub-api/src/ausencias/repo.ts` (`aplicarALaSolicitud` y `corregirSolicitud`)
+- Modify: `apps/hub-api/src/ausencias/repo.ts` (`aplicarALaSolicitud` y `actualizarSolicitud`)
 - Test: `apps/hub-api/src/ausencias/repo.hora.db.test.ts`
 
 - [ ] **Step 1: Escribir el test que falla**
 
 Añadir al final de `repo.hora.db.test.ts`. Ampliar el import de `./repo.js` a
-`import { solicitudesDeEmpleado, corregirSolicitud } from './repo.js';`:
+`import { solicitudesDeEmpleado, actualizarSolicitud } from './repo.js';`:
 
 ```ts
 describe('las horas no sobreviven a un rango de varios dias', () => {
@@ -682,13 +682,13 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     return { empleadoId, solicitudId: s.id };
   }
 
-  it('CANDADO: corregirSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
+  it('CANDADO: actualizarSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
     // Sin el CASE, el UPDATE viola el CHECK, la transaccion entera hace ROLLBACK
     // -con su evento de outbox dentro- y el admin recibe un 500 sin ninguna
     // pista. Es el motivo entero de esta tarea.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'permiso',
       fechaInicio: '2026-09-01',
@@ -705,12 +705,12 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     expect(actual?.horaFin).toBeNull();
   });
 
-  it('corregirSolicitud sin mover las fechas CONSERVA las horas', async () => {
+  it('actualizarSolicitud sin mover las fechas CONSERVA las horas', async () => {
     // La otra mitad del CASE. Sin ella, corregir un comentario borraria una hora
     // que nadie pidio cambiar.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'permiso',
       fechaInicio: '2026-09-01',
@@ -731,7 +731,7 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     // con una franja horaria pegada que la app pintaria tal cual.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'vacaciones',
       fechaInicio: '2026-09-01',
@@ -756,10 +756,10 @@ Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts src/ausenci
 Expected: FAIL en el primer y el tercer test con
 `new row for relation "solicitudes_ausencia" violates check constraint "solicitudes_horas_coherentes"`.
 
-- [ ] **Step 3: El CASE en `corregirSolicitud`**
+- [ ] **Step 3: El CASE en `actualizarSolicitud`**
 
 En `apps/hub-api/src/ausencias/repo.ts`, dentro del `UPDATE` de
-`corregirSolicitud`, después de `observaciones = $9`:
+`actualizarSolicitud`, después de `observaciones = $9`:
 
 ```sql
               -- ⚠️ Las horas se BORRAN cuando dejan de caber. Sin esto, estirar
@@ -791,7 +791,7 @@ En la rama que no es `anulacion` del `UPDATE` de `aplicarALaSolicitud`:
               -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
               -- una decision sobre la solicitud, es una enmienda de sus fechas.
               SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7,
-                  -- Gemelo del CASE de `corregirSolicitud`, y por lo mismo: sin
+                  -- Gemelo del CASE de `actualizarSolicitud`, y por lo mismo: sin
                   -- el, aprobar un cambio que estira el permiso a dos dias viola
                   -- el CHECK de la 036 DENTRO de la transaccion y el ROLLBACK se
                   -- lleva la decision del jefe.
@@ -1334,8 +1334,19 @@ no traiga la clave —los que estén esperando en el outbox durante la ventana d
 despliegue— `undefined` no es `false`, y con la versión corta todos ellos
 pasarían a tratarse como eventos con hora a partir de una fecha suelta. Es el
 mismo bug que tuvo el campo `drive`, documentado en `notificaciones.ts`. Con el
-`=== false`, todo lo que no diga explícitamente «con hora» es de día completo, y
-por eso **el orden de despliegue de hub-api y n8n deja de importar**.
+`=== false`, todo lo que no diga explícitamente «con hora» es de día completo.
+
+⚠️ **Eso hace este cambio reversible, pero NO hace que el orden dé igual.** Esta
+tarea 8 tiene que estar hecha y comprobada **antes** de empujar hub-api: con n8n
+viejo y hub-api nuevo, el nodo mete un ISO completo en el campo `date` de Google
+y contesta 400. El detalle está en el paso 2 de la tarea 10.
+
+⚠️ **Y comprueba si el nodo necesita algo más que el `allday`.** Con `allday: no`,
+el nodo de Google Calendar espera `start`/`end` como `dateTime`. Hoy los dos
+campos se alimentan de `payload.calendario.inicio`/`fin`, que ya traen el ISO
+correcto en cada caso, así que en principio basta con el `allday` — **pero eso
+hay que verlo en el nodo, no darlo por hecho**. Si el nodo tuviera campos
+separados para `date` y `dateTime`, hay que ramificarlos igual.
 
 - [ ] **Step 3: Validar el workflow**
 
@@ -1404,12 +1415,26 @@ Expected: FAIL en el CANDADO de las dos columnas (y en casi todo lo demás).
 
 Revertir: `git checkout -- apps/hub-api/src/db.ts`
 
-- [ ] **Step 5: Quitar el CASE de `corregirSolicitud`**
+- [ ] **Step 5: Quitar el CASE de `actualizarSolicitud`**
+
+⚠️ Al implementar la tarea 4 salieron **tres cosas que este plan tenía mal**, y
+quedan anotadas aquí para que la falsación no tropiece con ellas:
+
+1. La función se llama **`actualizarSolicitud`**, no `corregirSolicitud`, y tiene
+   cinco argumentos: `(db, id, campos, adminEmail, construirPayload)`.
+2. Los comentarios de ese `CASE` van **dentro de un template literal**, así que
+   no pueden llevar backticks: `esbuild` revienta el fichero entero antes de
+   correr un solo test. Van con comillas dobles, como los comentarios SQL
+   vecinos.
+3. La comparación tiene que ser **`$3::varchar = 'permiso'`**, no `$3` a secas ni
+   `$3::text`: el `tipo = $3` del mismo SET le fija a `$3` el tipo de la columna
+   (`VARCHAR(20)`), y sin el cast Postgres deduce `text` y contesta
+   `inconsistent types deduced for parameter $3`.
 
 Dejar el `UPDATE` sin las dos líneas de `hora_inicio`/`hora_fin`.
 
 Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts src/ausencias/repo.hora.db.test.ts`
-Expected: FAIL en «corregirSolicitud estirando a dos dias NO revienta» **con el
+Expected: FAIL en «actualizarSolicitud estirando a dos dias NO revienta» **con el
 error del CHECK**, que es exactamente el 500 que la tarea 4 existe para evitar.
 
 Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
@@ -1427,9 +1452,16 @@ Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
 - [ ] **Step 7: Quitar el CASE de `aplicarALaSolicitud`**
 
 Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts`
-Expected: FAIL. ⚠️ **Si NO falla nada, el candado del gemelo NO existe**: hay que
-escribirlo antes de seguir, porque es el mismo 500 por el otro camino. Anotarlo
-y añadir el test a `repo.hora.db.test.ts`.
+Expected: FAIL en el describe «las horas tampoco sobreviven a una MODIFICACION
+aprobada», con el error del CHECK.
+
+⚠️ **Ese candado NO estaba en la versión original de este plan.** Al implementar
+la tarea 4 se comprobó que quitar este `CASE` no ponía roja **ni una sola** de las
+212 pruebas de BD: los tres tests que el plan escribía iban todos por
+`actualizarSolicitud`, y el gemelo se quedaba sin vigilancia. Se cerró con un test
+que recorre el camino real —`crearModificacion` + `decidirModificacion`, que es
+quien llama a `aplicarALaSolicitud`— y se falsó en las dos direcciones. Si esta
+mutación vuelve a no matar nada, el candado se ha perdido por el camino.
 
 Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
 
@@ -1502,9 +1534,21 @@ git push origin main
 ```
 
 ⚠️ **El push ES el despliegue.** EasyPanel reconstruye hub-api primero y el
-portal después, ~11 min cada uno. Aquí el orden **no** importa: el `=== false` de
-n8n hace que todo lo que no traiga `todoElDia` siga siendo de día completo, así
-que durante la ventana los permisos simplemente no llevan hora.
+portal después, ~11 min cada uno.
+
+⚠️⚠️ **ANTES de empujar, la tarea 8 (n8n) tiene que estar hecha y comprobada.**
+La primera versión de este plan decía que el orden daba igual. **Era falso**, y lo
+cazó la tarea 5: el `=== false` protege *n8n nuevo con hub-api viejo*, pero no al
+revés. Con hub-api nuevo y n8n viejo, hub-api emite `todoElDia: false` y un ISO
+completo mientras el nodo sigue con `allday` fijo a `"yes"` — y meterle un
+`...T09:00:00-05:00` al campo `date` de Google es un **400**. El primer permiso
+con hora que alguien aprobara rebotaría.
+
+Con n8n ya cambiado no hay ventana: hasta que hub-api despliegue, todo lo que
+llega sigue sin la clave y sigue siendo de día completo.
+
+Durante la ventana entre hub-api y el portal, los permisos simplemente no llevan
+hora, que es la de siempre y se cierra sola.
 
 - [ ] **Step 3: Comprobar en producción**
 
@@ -1516,3 +1560,27 @@ Con la cuenta de pruebas, y mirando el Google Calendar del equipo:
    día pintado (o sea, el `+1` sigue vivo donde tocaba).
 4. Pedir un permiso de dos días con el formulario: las horas deben desaparecer
    solas al mover la fecha de fin.
+
+⚠️ **Y las DOS TRANSICIONES, que son el caso que nadie ha probado y el que más
+puede doler.** Las levantó la verificación de la tarea 8:
+
+5. Un permiso aprobado **sin** hora, al que después se le **añade** una.
+6. Un permiso aprobado **con** hora, al que después se le **quita**.
+
+El motivo: `Actualizar evento del calendario` hace un `PATCH` contra Google, y la
+API de Google exige que `start`/`end` lleven **exactamente uno** de `date` o
+`dateTime`. Si Google **fusiona** el objeto anidado en vez de reemplazarlo, el
+evento acaba con los dos y contesta **400** — el nodo de n8n no manda `date: null`
+para limpiar el otro campo. No se ha podido confirmar de qué lado cae Google sin
+ejecutarlo, y por eso hay que probarlo a mano antes de fiarse.
+
+⚠️ **El radio de daño de que falle es el del incidente del 2026-08-24.** `Enviar
+correo` va **antes** de la rama de calendario, y el IF «¿El fallo es esperable?»
+solo tolera los fallos de `borrar`. Así que un `actualizar` que dé 400 no
+confirma el evento, hub-api lo vuelve a servir, y **el correo se reenvía cada
+diez minutos**. Es exactamente la tormenta de los ~700 correos, ahora acotada por
+el tope de cinco intentos — ruidosa, pero no infinita.
+
+Si alguna de las dos transiciones da 400, la salida es tratarla como un `borrar`
+seguido de un `crear` en vez de un `actualizar`, y eso es trabajo de otra tanda:
+no lo improvises con la gente dentro.

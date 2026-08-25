@@ -88,12 +88,17 @@ export function firmaDe(firmante: Firmante | null): string {
 
 function bloqueFechas(s: Solicitud): string {
   const p = PERIODO[s.tipo];
-  return [
+  const lineas = [
     `📅 Fecha primer día ${p}: ${s.fechaInicio}`,
     `📅 Fecha último día ${p}: ${s.fechaFin}`,
-    '',
-    `📊 Total solicitado: ${dias(s.diasHabiles)}`,
-  ].join('\n');
+  ];
+  // Solo cuando existe: una línea «🕘 Horario: —» en todos los demás correos
+  // afirmaría que ahí falta un dato, y en unas vacaciones no falta nada.
+  if (s.horaInicio !== null && s.horaFin !== null) {
+    lineas.push(`🕘 Horario: de ${s.horaInicio} a ${s.horaFin}`);
+  }
+  lineas.push('', `📊 Total solicitado: ${dias(s.diasHabiles)}`);
+  return lineas.join('\n');
 }
 
 /**
@@ -372,13 +377,48 @@ function correoRechazada(s: Solicitud, firmante: Firmante | null) {
  */
 export const idDeEventoCalendario = (solicitudId: string): string => solicitudId.replaceAll('-', '');
 
-/** El evento *all-day* del calendario «Ambientalia Staff», recién creado. */
+/**
+ * UTC−5 fijo: Colombia no tiene horario de verano, así que no hay casuística.
+ *
+ * Va explícito en el ISO y no se deja a Google: un `dateTime` sin desfase se
+ * interpreta en la zona por defecto DEL CALENDARIO, que no la controla esta app.
+ * El día que alguien la cambiara, todos los permisos con hora se moverían y no
+ * habría nada que se pusiera rojo.
+ */
+const OFFSET_COLOMBIA = '-05:00';
+
+/** El evento del calendario «Ambientalia Staff», recién creado. */
 function calendario(s: Solicitud): EventoCalendario {
-  return {
+  const base = {
     calendarId: CALENDARIO_STAFF,
     eventId: idDeEventoCalendario(s.id),
-    accion: 'crear',
+    accion: 'crear' as const,
     resumen: `${ETIQUETA_TIPO[s.tipo]} ${s.empleadoNombre}`,
+  };
+  // Las dos horas van siempre juntas —lo garantiza el CHECK de la 036—, pero se
+  // comprueban las dos: es lo que estrecha el tipo para el ISO de abajo.
+  if (s.horaInicio !== null && s.horaFin !== null) {
+    return {
+      ...base,
+      todoElDia: false,
+      // Sin el +1: ese solo es correcto para un evento de día completo, donde
+      // Google trata el `end` como EXCLUSIVO. Con hora, el fin es el fin —
+      // sumarle un día haría un evento de 26 horas.
+      //
+      // Las DOS líneas usan `s.fechaInicio` a propósito. Con `s.fechaFin` serían
+      // equivalentes, pero solo HOY y solo porque el CHECK de la 036 obliga a
+      // que las dos fechas sean iguales siempre que hay horas. Que quede dicho:
+      // NINGÚN test distingue las dos formas —el contraejemplo exigiría una
+      // `Solicitud` en un estado que la base no admite—, así que el día que se
+      // admita hora en un permiso de varios días, esta elección hay que
+      // decidirla a mano: aquí no se va a poner nada rojo.
+      inicio: `${s.fechaInicio}T${s.horaInicio}:00${OFFSET_COLOMBIA}`,
+      fin: `${s.fechaInicio}T${s.horaFin}:00${OFFSET_COLOMBIA}`,
+    };
+  }
+  return {
+    ...base,
+    todoElDia: true,
     inicio: s.fechaInicio,
     // Google trata el `end` de un evento all-day como EXCLUSIVO: sin este +1 el
     // último día de la ausencia no se pinta.

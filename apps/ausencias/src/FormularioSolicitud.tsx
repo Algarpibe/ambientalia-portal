@@ -66,6 +66,9 @@ export default function FormularioSolicitud({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
+  /** La franja horaria del permiso, `HH:MM`. Vacías = día completo. */
+  const [horaInicio, setHoraInicio] = useState('');
+  const [horaFin, setHoraFin] = useState('');
   const inputArchivo = useRef<HTMLInputElement>(null);
 
   const pideOtorgamiento = esOtorgamiento(tipo);
@@ -83,6 +86,31 @@ export default function FormularioSolicitud({
 
   const rangoInvertido = Boolean(fechaInicio && fechaFin && fechaInicio > fechaFin);
   const faltaAdjunto = adjuntoObligatorio && !archivo;
+
+  // La franja solo cabe en un permiso de un solo día. DERIVADO y no un estado
+  // más: un estado tendría que sincronizarse a mano cada vez que cambian el tipo
+  // o las fechas, y el día que una de esas rutas se olvidara, el formulario
+  // mandaría una hora que el servidor rechaza con un 400.
+  //
+  // El `fechaInicio !== ''` no sobra: al abrir el formulario las dos fechas están
+  // vacías, y sin él `'' === ''` haría aparecer la franja sobre un permiso que
+  // todavía no tiene ningún día elegido.
+  const admiteHora = tipo === 'permiso' && fechaInicio !== '' && fechaInicio === fechaFin;
+
+  // Y por lo mismo NO se borran con un efecto al dejar de caber: basta con que
+  // solo viajen cuando caben. Así no hay estado que pueda quedarse caducado, y
+  // si el usuario vuelve a poner un solo día recupera lo que había tecleado.
+  const conHoras = admiteHora && horaInicio !== '' && horaFin !== '';
+
+  // La pareja a medias, o del revés, apaga el botón. Las dos mitades van
+  // guardadas por `admiteHora`: si la franja ni siquiera se está pintando —
+  // porque cambiaron a vacaciones, o alargaron a un rango—, unas horas tecleadas
+  // antes no pueden bloquear el envío de algo que ya no las lleva.
+  //
+  // Se nombra en negativo porque `puedeEnviar` es afirmativo y esto entra ahí
+  // como `&& !horaMalPuesta`.
+  const horaMalPuesta =
+    (admiteHora && (horaInicio !== '') !== (horaFin !== '')) || (conHoras && horaFin <= horaInicio);
 
   // Lo que requiere aprobación no puede empezar en el pasado. La incapacidad sí:
   // se informa después de haber estado enfermo, así que `minFecha` le queda
@@ -180,6 +208,9 @@ export default function FormularioSolicitud({
       !faltaAdjunto &&
       !excedeCompensatorios &&
       !excedeVacaciones &&
+      // Solo en esta rama: `horaMalPuesta` cuelga de `admiteHora`, que exige
+      // `tipo === 'permiso'`, y un permiso nunca entra por la del otorgamiento.
+      !horaMalPuesta &&
       !enviando;
 
   function cambiarTipo(nuevo: TipoSolicitud) {
@@ -227,6 +258,12 @@ export default function FormularioSolicitud({
         adjunto: archivo
           ? { nombreArchivo: archivo.name, mime: archivo.type, contenidoBase64: await leerComoBase64(archivo) }
           : undefined,
+        // Solo cuando la pareja está completa Y cabe: `conHoras` cuelga de
+        // `admiteHora`, así que unas horas tecleadas para un permiso de un día y
+        // luego abandonadas —cambiando a vacaciones, o alargando el rango— no
+        // viajan en el cuerpo, que es justo lo que el servidor devolvería como
+        // `hora_no_permitida`.
+        ...(conHoras ? { horaInicio, horaFin } : {}),
       });
       setExito(
         pideOtorgamiento
@@ -239,6 +276,11 @@ export default function FormularioSolicitud({
       setFechaFin('');
       setComentarios('');
       setDiasTexto('');
+      // También las horas, por lo mismo que el adjunto: el formulario queda
+      // listo para otra solicitud, y una franja superviviente volvería a viajar
+      // sola en cuanto la siguiente fuera otro permiso de un solo día.
+      setHoraInicio('');
+      setHoraFin('');
       limpiarArchivo();
       onCreada(creada);
     } catch (err) {
@@ -358,6 +400,60 @@ export default function FormularioSolicitud({
         </div>
       )}
 
+      {/* La franja horaria del permiso de un solo día. Fuera de la rama del
+          otorgamiento a propósito: `admiteHora` ya exige `tipo === 'permiso'`,
+          así que anidarlo ahí dentro solo lo escondería dos veces. */}
+      {admiteHora && (
+        <div className="mb-4">
+          <p className="mb-1 block text-sm font-medium text-gray-700">
+            Horario <span className="font-normal text-gray-500">(opcional)</span>
+          </p>
+          <p className="mb-2 text-xs text-gray-500">
+            Si el permiso es de unas horas y no del día entero, dilo aquí: así se ve en el calendario del equipo.
+          </p>
+          {/* Sin `step`, y no por olvido: con el paso por defecto —60 segundos—
+              el `value` sale como `HH:MM`, que es justo lo que esperan el regex
+              del servidor y la comparación lexicográfica de `horaMalPuesta`.
+              Poner `step={1}` lo convertiría en `HH:MM:SS` y el alta se caería
+              con `hora_invalida` sin que nada de aquí lo delatara. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              {/* Etiqueta visible, no solo `aria-label`: en móvil el grid es de
+                  una columna y los dos campos se apilan como dos cajas `--:--`
+                  idénticas, sin nada que diga cuál es cuál. */}
+              <label htmlFor="horaInicio" className="mb-1 block text-sm font-medium text-gray-700">
+                Desde
+              </label>
+              <input
+                id="horaInicio"
+                type="time"
+                value={horaInicio}
+                onChange={(e) => setHoraInicio(e.target.value)}
+                className={CAMPO}
+              />
+            </div>
+            <div>
+              <label htmlFor="horaFin" className="mb-1 block text-sm font-medium text-gray-700">
+                Hasta
+              </label>
+              <input
+                id="horaFin"
+                type="time"
+                value={horaFin}
+                onChange={(e) => setHoraFin(e.target.value)}
+                className={CAMPO}
+              />
+            </div>
+          </div>
+          {horaInicio !== '' && horaFin !== '' && horaFin <= horaInicio && (
+            <p className="mt-1 text-sm text-red-600">La hora de fin tiene que ser posterior a la de inicio.</p>
+          )}
+          {(horaInicio === '') !== (horaFin === '') && (
+            <p className="mt-1 text-sm text-amber-700">Pon las dos horas, o ninguna.</p>
+          )}
+        </div>
+      )}
+
       {rangoInvertido && (
         <p className="mb-4 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
       )}
@@ -421,6 +517,17 @@ export default function FormularioSolicitud({
         <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
           Son <b className="tabular-nums">{dias}</b> {dias === 1 ? 'día hábil' : 'días hábiles'}, descontando fines de
           semana y festivos de Colombia.
+          {/* Solo cuando hay franja, que es el único momento en que la pantalla
+              dice a la vez «09:00 – 11:00» y «1 día hábil». Quien lee eso se
+              pregunta si le van a descontar el día entero, y sin esta línea la
+              duda se resuelve escribiéndole a administración — justo el tráfico
+              que esta app existe para quitar. */}
+          {conHoras && (
+            <span className="text-gray-500">
+              {' '}
+              El horario es informativo: no cambia el conteo ni lo que se reporta a nómina.
+            </span>
+          )}
         </p>
       )}
 

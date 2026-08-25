@@ -99,7 +99,7 @@ las fechas de una solicitud ya creada**:
 
 - `aplicarALaSolicitud` (`repo.ts`), cuando el jefe aprueba una modificación de
   fechas.
-- `corregirSolicitud` (`repo.ts`), el `PATCH` del registro general — la cuarta
+- `actualizarSolicitud` (`repo.ts`), el `PATCH` del registro general — la cuarta
   puerta del solapamiento.
 
 Los dos escriben **dentro de una transacción que también encola el evento del
@@ -206,11 +206,23 @@ La expresión va al revés, exigiendo el `false` explícito:
 ```
 
 Todo lo que no diga explícitamente «con hora» es de día completo, que es el
-comportamiento de siempre. **Efecto secundario deliberado: el orden de despliegue
-deja de importar.** n8n puede ir antes o después de hub-api, porque el n8n nuevo
-sigue tratando como día completo todo lo que emite el hub-api viejo. Es lo que
-convierte un cambio en un workflow de producción que no se puede probar de punta
-a punta en un cambio reversible y sin ventana de riesgo.
+comportamiento de siempre. Eso convierte un cambio en un workflow de producción
+que no se puede probar de punta a punta en un cambio **reversible**: lo peor que
+puede pasar si la expresión queda mal es que todo siga siendo de día completo,
+que es el comportamiento de hoy.
+
+⚠️ **Pero el orden de despliegue SÍ importa, y en un solo sentido: n8n va
+PRIMERO.** El `=== false` solo protege una de las dos direcciones:
+
+| | Resultado |
+|---|---|
+| n8n nuevo + hub-api viejo | **Bien.** El payload viejo no trae `todoElDia`, así que la expresión resuelve `'yes'` y el evento sigue siendo de día completo. |
+| n8n viejo + hub-api nuevo | **Roto.** hub-api emite `todoElDia: false` y un ISO completo, pero el nodo sigue con `allday` fijo a `"yes"` y le mete un `...T09:00:00-05:00` al campo `date` de Google, que es un 400. |
+
+Así que la secuencia es: **cambiar los dos campos de n8n, comprobar que los
+eventos de día completo siguen saliendo, y solo entonces empujar hub-api.** Con
+n8n ya cambiado no hay ventana de riesgo: hasta que hub-api despliegue, todo lo
+que llega sigue sin la clave y sigue siendo de día completo.
 
 ## El cambio en n8n
 
@@ -283,6 +295,14 @@ mano —con el mismo nombre— en `Solicitud` y en `NuevaSolicitud`.
 - **Las modificaciones de fechas no cambian las horas.** Para cambiar la hora se
   retira la solicitud y se pide otra. Lo único que hacen es borrarlas cuando el
   rango deja de ser de un día, y por obligación del CHECK.
+- **Y cuando se borran, el correo NO lo dice.** Si el jefe aprueba un cambio que
+  estira a dos días un permiso de 9:00 a 11:00, la franja desaparece y a la
+  persona no se le avisa. Se miró y se dejó fuera a propósito: el correo de
+  `modificacion_aprobada` se redacta desde la solicitud **ya aplicada**, que a esas
+  alturas tiene las horas en `NULL`, y la `Modificacion` guarda las fechas previas
+  pero no las horas previas. Avisar exigiría arrastrar el estado anterior hasta el
+  constructor del correo o ampliar la tabla de modificaciones — bastante más de lo
+  que justifica un campo informativo. Queda dicho para quien se lo encuentre.
 - **Solo Permiso.** Compensatorio de media jornada es la ampliación evidente y el
   CHECK está escrito para no estorbarla, pero no entra hoy.
 - **El Registro general no enseña la hora.** Su tabla no comparte componente ni
@@ -304,7 +324,7 @@ mano —con el mismo nombre— en `Solicitud` y en `NuevaSolicitud`.
   CHECK que pasa con `NULL`, y quitar los `IS NOT NULL` tiene que ponerlas rojas.
 - `aplicarALaSolicitud` extendiendo a dos días un permiso con horas: **no
   revienta**, las horas quedan en `NULL` y el evento del outbox sigue encolado.
-  El mismo caso por `corregirSolicitud`. Son los dos candados del ROLLBACK.
+  El mismo caso por `actualizarSolicitud`. Son los dos candados del ROLLBACK.
 - El candado de `information_schema`: las dos columnas existen con `data_type`
   `time without time zone`, o sea que la 036 está en el array `MIGRATIONS`.
 

@@ -1019,7 +1019,30 @@ export async function actualizarSolicitud(
               dias_habiles      = $6,
               estado            = $7,
               comentarios       = $8,
-              observaciones     = $9
+              observaciones     = $9,
+              -- ⚠️ Las horas se BORRAN cuando dejan de caber. Sin esto, estirar
+              -- a dos dias un permiso con horas viola el CHECK de la 036, y como
+              -- este UPDATE vive dentro de la transaccion que ademas encola el
+              -- evento del outbox, el ROLLBACK se lleva la escritura buena y el
+              -- admin recibe un 500 sin ninguna pista. Mismo patron que el CHECK
+              -- sobre "evento" de la 027.
+              --
+              -- Mira TAMBIEN el tipo, al reves que su gemelo de
+              -- aplicarALaSolicitud: esta es la unica via que puede cambiarlo, y
+              -- el CHECK de la BD no lo vigila -a proposito, para no atarse a
+              -- que solo "permiso" admita hora-.
+              --
+              -- El ::varchar no es adorno, y tiene que ser ESE tipo: el
+              -- "tipo = $3" de arriba le fija a $3 el tipo de la columna
+              -- -VARCHAR(20)-, y comparar aqui contra un literal pelado -o
+              -- contra ::text- se lo deduciria como text. Postgres rechaza
+              -- entonces la consulta ENTERA con "inconsistent types deduced for
+              -- parameter $3", que en esta transaccion es exactamente el 500 sin
+              -- pista que este CASE viene a evitar.
+              hora_inicio       = CASE WHEN $3::varchar = 'permiso' AND $4::date = $5::date
+                                       THEN s.hora_inicio ELSE NULL END,
+              hora_fin          = CASE WHEN $3::varchar = 'permiso' AND $4::date = $5::date
+                                       THEN s.hora_fin ELSE NULL END
          FROM portal.empleados e
         WHERE s.id = $1 AND e.id = $2
         RETURNING s.id`,
@@ -1250,6 +1273,12 @@ const SELECT_SOLICITUD = `
          -- de la UI y de los correos. Cuatro digitos con un decimal caben de
          -- sobra en un double sin error de representacion observable.
          s.dias_habiles::float8 AS dias_habiles,
+         -- to_char y no ::text: el driver devuelve un TIME como '09:00:00', y
+         -- esos segundos se cuelan tal cual en el ISO que se le manda a Google
+         -- y en el value de un <input type="time">, que solo entiende HH:MM.
+         -- Es el mismo gotcha que el ::text de las fechas, con otra cara.
+         to_char(s.hora_inicio, 'HH24:MI') AS hora_inicio,
+         to_char(s.hora_fin,    'HH24:MI') AS hora_fin,
          s.observaciones, s.origen,
          s.comentarios, s.estado, s.aprobador_correo, s.segundo_aprobador_correo, s.informado_correo,
          -- ::text por lo mismo que las fechas de mas arriba: el driver devuelve
@@ -1286,6 +1315,8 @@ interface FilaSolicitudDb extends FilaModificacionJoinDb {
   fecha_inicio: string;
   fecha_fin: string;
   dias_habiles: number;
+  hora_inicio: string | null;
+  hora_fin: string | null;
   observaciones: string | null;
   origen: Solicitud['origen'];
   comentarios: string | null;
@@ -1325,6 +1356,8 @@ function aSolicitud(r: FilaSolicitudDb): Solicitud {
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
     diasHabiles: r.dias_habiles,
+    horaInicio: r.hora_inicio,
+    horaFin: r.hora_fin,
     observaciones: r.observaciones,
     origen: r.origen,
     comentarios: r.comentarios,
@@ -1353,6 +1386,9 @@ export interface DatosInsercion {
   fechaInicio: string;
   fechaFin: string;
   diasHabiles: number;
+  /** Solo en un permiso de un día. Las dos o ninguna: lo exige el CHECK. */
+  horaInicio: string | null;
+  horaFin: string | null;
   comentarios: string | null;
   estado: Solicitud['estado'];
   aprobadorCorreo: string | null;
@@ -1419,8 +1455,8 @@ export async function crearSolicitud(
       `INSERT INTO portal.solicitudes_ausencia
          (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
           dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
-          informado_correo)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11)
+          informado_correo, hora_inicio, hora_fin)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time)
        RETURNING id`,
       [
         datos.tipo,
@@ -1434,6 +1470,8 @@ export async function crearSolicitud(
         datos.aprobadorCorreo,
         datos.segundoAprobadorCorreo,
         datos.informadoCorreo,
+        datos.horaInicio,
+        datos.horaFin,
       ],
     );
     const id = (rows[0] as { id: string }).id;
@@ -1992,7 +2030,16 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
           `UPDATE portal.solicitudes_ausencia
               -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
               -- una decision sobre la solicitud, es una enmienda de sus fechas.
-              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7
+              SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7,
+                  -- Gemelo del CASE de actualizarSolicitud, y por lo mismo: sin
+                  -- el, aprobar un cambio que estira el permiso a dos dias viola
+                  -- el CHECK de la 036 DENTRO de la transaccion y el ROLLBACK se
+                  -- lleva la decision del jefe.
+                  --
+                  -- Aqui NO se mira el tipo: una modificacion solo cambia
+                  -- fechas, nunca el tipo de la solicitud.
+                  hora_inicio = CASE WHEN $5::date = $6::date THEN hora_inicio ELSE NULL END,
+                  hora_fin    = CASE WHEN $5::date = $6::date THEN hora_fin    ELSE NULL END
             ${TESTIGO_SOLICITUD}
            RETURNING id`,
           [...testigo, m.fechaInicioNueva, m.fechaFinNueva, m.diasHabilesNuevos],

@@ -131,6 +131,12 @@ export interface Solicitud {
   fechaFin: string;
   /** Decimal: el histórico de la hoja trae medios días (6,5). */
   diasHabiles: number;
+  /**
+   * La franja del día, solo en un permiso de un solo día. `null` = día completo.
+   * Espejo manual de `Solicitud` en hub-api: mismo nombre, obligatorio.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
   comentarios: string | null;
   /** Notas al margen de la hoja, y el PDF de las incapacidades antiguas. */
   observaciones: string | null;
@@ -371,6 +377,9 @@ export interface NuevaSolicitud {
    * trabajar un sábado, y un sábado da cero días hábiles.
    */
   dias?: number;
+  /** Solo en un permiso de un solo día, y las dos o ninguna. `HH:MM`. */
+  horaInicio?: string;
+  horaFin?: string;
 }
 
 // ── El 409 del solapamiento ────────────────────────────────────────────────
@@ -544,6 +553,18 @@ async function errorDeAusencia(res: Response): Promise<Error> {
       'Habla con administración para que la registren ellos.',
   };
   if (cuerpo?.error && DE_LA_INCAPACIDAD[cuerpo.error]) return new Error(DE_LA_INCAPACIDAD[cuerpo.error]);
+
+  // Los de la hora del permiso. Ninguno debería verlos un usuario normal —el
+  // formulario no deja llegar ahí—, pero `mensajeDeError` devuelve el código
+  // crudo en los 400, así que sin esto la caja roja diría `hora_invalida`.
+  const DE_LA_HORA: Record<string, string> = {
+    hora_invalida:
+      'Revisa el horario: hacen falta las dos horas, en formato HH:MM, y la de fin tiene que ser posterior a la de inicio.',
+    hora_no_permitida:
+      'El horario solo se puede poner en un permiso de un único día. Si son varios días, quita las horas.',
+  };
+  if (cuerpo?.error && DE_LA_HORA[cuerpo.error]) return new Error(DE_LA_HORA[cuerpo.error]);
+
   if (cuerpo?.error === 'compensatorios_sin_saldo') {
     return new Error(
       'Todavía no tienes bolsa de compensatorios configurada, así que no se puede descontar de ella. ' +
