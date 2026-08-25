@@ -592,6 +592,15 @@ export interface NuevaSolicitud {
    * y un sábado da CERO días hábiles.
    */
   dias?: number;
+  /**
+   * La franja del día. SOLO en un permiso de un solo día, y las dos o ninguna.
+   *
+   * No es opcional con `?` sino `string | null`, al revés que `comentarios`: el
+   * validador siempre las resuelve a un valor, y dejarlas opcionales obligaría a
+   * cada llamante a decidir otra vez qué significa que falten.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
 }
 
 
