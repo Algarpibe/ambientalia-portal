@@ -295,6 +295,14 @@ mano —con el mismo nombre— en `Solicitud` y en `NuevaSolicitud`.
 - **Las modificaciones de fechas no cambian las horas.** Para cambiar la hora se
   retira la solicitud y se pide otra. Lo único que hacen es borrarlas cuando el
   rango deja de ser de un día, y por obligación del CHECK.
+- **Y cuando se borran, el correo NO lo dice.** Si el jefe aprueba un cambio que
+  estira a dos días un permiso de 9:00 a 11:00, la franja desaparece y a la
+  persona no se le avisa. Se miró y se dejó fuera a propósito: el correo de
+  `modificacion_aprobada` se redacta desde la solicitud **ya aplicada**, que a esas
+  alturas tiene las horas en `NULL`, y la `Modificacion` guarda las fechas previas
+  pero no las horas previas. Avisar exigiría arrastrar el estado anterior hasta el
+  constructor del correo o ampliar la tabla de modificaciones — bastante más de lo
+  que justifica un campo informativo. Queda dicho para quien se lo encuentre.
 - **Solo Permiso.** Compensatorio de media jornada es la ampliación evidente y el
   CHECK está escrito para no estorbarla, pero no entra hoy.
 - **El Registro general no enseña la hora.** Su tabla no comparte componente ni
