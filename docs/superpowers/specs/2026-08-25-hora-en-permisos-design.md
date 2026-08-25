@@ -99,7 +99,7 @@ las fechas de una solicitud ya creada**:
 
 - `aplicarALaSolicitud` (`repo.ts`), cuando el jefe aprueba una modificación de
   fechas.
-- `corregirSolicitud` (`repo.ts`), el `PATCH` del registro general — la cuarta
+- `actualizarSolicitud` (`repo.ts`), el `PATCH` del registro general — la cuarta
   puerta del solapamiento.
 
 Los dos escriben **dentro de una transacción que también encola el evento del
@@ -304,7 +304,7 @@ mano —con el mismo nombre— en `Solicitud` y en `NuevaSolicitud`.
   CHECK que pasa con `NULL`, y quitar los `IS NOT NULL` tiene que ponerlas rojas.
 - `aplicarALaSolicitud` extendiendo a dos días un permiso con horas: **no
   revienta**, las horas quedan en `NULL` y el evento del outbox sigue encolado.
-  El mismo caso por `corregirSolicitud`. Son los dos candados del ROLLBACK.
+  El mismo caso por `actualizarSolicitud`. Son los dos candados del ROLLBACK.
 - El candado de `information_schema`: las dos columnas existen con `data_type`
   `time without time zone`, o sea que la 036 está en el array `MIGRATIONS`.
 

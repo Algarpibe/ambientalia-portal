@@ -664,13 +664,13 @@ CHECK, el `ROLLBACK` se lleva por delante la escritura buena. Es el mismo patró
 del CHECK sobre `evento` del outbox, que ya mordió una vez.
 
 **Files:**
-- Modify: `apps/hub-api/src/ausencias/repo.ts` (`aplicarALaSolicitud` y `corregirSolicitud`)
+- Modify: `apps/hub-api/src/ausencias/repo.ts` (`aplicarALaSolicitud` y `actualizarSolicitud`)
 - Test: `apps/hub-api/src/ausencias/repo.hora.db.test.ts`
 
 - [ ] **Step 1: Escribir el test que falla**
 
 Añadir al final de `repo.hora.db.test.ts`. Ampliar el import de `./repo.js` a
-`import { solicitudesDeEmpleado, corregirSolicitud } from './repo.js';`:
+`import { solicitudesDeEmpleado, actualizarSolicitud } from './repo.js';`:
 
 ```ts
 describe('las horas no sobreviven a un rango de varios dias', () => {
@@ -682,13 +682,13 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     return { empleadoId, solicitudId: s.id };
   }
 
-  it('CANDADO: corregirSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
+  it('CANDADO: actualizarSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
     // Sin el CASE, el UPDATE viola el CHECK, la transaccion entera hace ROLLBACK
     // -con su evento de outbox dentro- y el admin recibe un 500 sin ninguna
     // pista. Es el motivo entero de esta tarea.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'permiso',
       fechaInicio: '2026-09-01',
@@ -705,12 +705,12 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     expect(actual?.horaFin).toBeNull();
   });
 
-  it('corregirSolicitud sin mover las fechas CONSERVA las horas', async () => {
+  it('actualizarSolicitud sin mover las fechas CONSERVA las horas', async () => {
     // La otra mitad del CASE. Sin ella, corregir un comentario borraria una hora
     // que nadie pidio cambiar.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'permiso',
       fechaInicio: '2026-09-01',
@@ -731,7 +731,7 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     // con una franja horaria pegada que la app pintaria tal cual.
     const { empleadoId, solicitudId } = await permisoConHoras();
 
-    const actual = await corregirSolicitud(db, solicitudId, {
+    const actual = await actualizarSolicitud(db, solicitudId, {
       empleadoId,
       tipo: 'vacaciones',
       fechaInicio: '2026-09-01',
@@ -756,10 +756,10 @@ Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts src/ausenci
 Expected: FAIL en el primer y el tercer test con
 `new row for relation "solicitudes_ausencia" violates check constraint "solicitudes_horas_coherentes"`.
 
-- [ ] **Step 3: El CASE en `corregirSolicitud`**
+- [ ] **Step 3: El CASE en `actualizarSolicitud`**
 
 En `apps/hub-api/src/ausencias/repo.ts`, dentro del `UPDATE` de
-`corregirSolicitud`, después de `observaciones = $9`:
+`actualizarSolicitud`, después de `observaciones = $9`:
 
 ```sql
               -- ⚠️ Las horas se BORRAN cuando dejan de caber. Sin esto, estirar
@@ -791,7 +791,7 @@ En la rama que no es `anulacion` del `UPDATE` de `aplicarALaSolicitud`:
               -- Ni el estado, ni decidida_at, ni aprobador_user_id: esto no es
               -- una decision sobre la solicitud, es una enmienda de sus fechas.
               SET fecha_inicio = $5::date, fecha_fin = $6::date, dias_habiles = $7,
-                  -- Gemelo del CASE de `corregirSolicitud`, y por lo mismo: sin
+                  -- Gemelo del CASE de `actualizarSolicitud`, y por lo mismo: sin
                   -- el, aprobar un cambio que estira el permiso a dos dias viola
                   -- el CHECK de la 036 DENTRO de la transaccion y el ROLLBACK se
                   -- lleva la decision del jefe.
@@ -1404,12 +1404,26 @@ Expected: FAIL en el CANDADO de las dos columnas (y en casi todo lo demás).
 
 Revertir: `git checkout -- apps/hub-api/src/db.ts`
 
-- [ ] **Step 5: Quitar el CASE de `corregirSolicitud`**
+- [ ] **Step 5: Quitar el CASE de `actualizarSolicitud`**
+
+⚠️ Al implementar la tarea 4 salieron **tres cosas que este plan tenía mal**, y
+quedan anotadas aquí para que la falsación no tropiece con ellas:
+
+1. La función se llama **`actualizarSolicitud`**, no `corregirSolicitud`, y tiene
+   cinco argumentos: `(db, id, campos, adminEmail, construirPayload)`.
+2. Los comentarios de ese `CASE` van **dentro de un template literal**, así que
+   no pueden llevar backticks: `esbuild` revienta el fichero entero antes de
+   correr un solo test. Van con comillas dobles, como los comentarios SQL
+   vecinos.
+3. La comparación tiene que ser **`$3::varchar = 'permiso'`**, no `$3` a secas ni
+   `$3::text`: el `tipo = $3` del mismo SET le fija a `$3` el tipo de la columna
+   (`VARCHAR(20)`), y sin el cast Postgres deduce `text` y contesta
+   `inconsistent types deduced for parameter $3`.
 
 Dejar el `UPDATE` sin las dos líneas de `hora_inicio`/`hora_fin`.
 
 Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts src/ausencias/repo.hora.db.test.ts`
-Expected: FAIL en «corregirSolicitud estirando a dos dias NO revienta» **con el
+Expected: FAIL en «actualizarSolicitud estirando a dos dias NO revienta» **con el
 error del CHECK**, que es exactamente el 500 que la tarea 4 existe para evitar.
 
 Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
@@ -1427,9 +1441,16 @@ Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
 - [ ] **Step 7: Quitar el CASE de `aplicarALaSolicitud`**
 
 Run: `cd apps/hub-api && npx vitest run --config vitest.db.config.ts`
-Expected: FAIL. ⚠️ **Si NO falla nada, el candado del gemelo NO existe**: hay que
-escribirlo antes de seguir, porque es el mismo 500 por el otro camino. Anotarlo
-y añadir el test a `repo.hora.db.test.ts`.
+Expected: FAIL en el describe «las horas tampoco sobreviven a una MODIFICACION
+aprobada», con el error del CHECK.
+
+⚠️ **Ese candado NO estaba en la versión original de este plan.** Al implementar
+la tarea 4 se comprobó que quitar este `CASE` no ponía roja **ni una sola** de las
+212 pruebas de BD: los tres tests que el plan escribía iban todos por
+`actualizarSolicitud`, y el gemelo se quedaba sin vigilancia. Se cerró con un test
+que recorre el camino real —`crearModificacion` + `decidirModificacion`, que es
+quien llama a `aplicarALaSolicitud`— y se falsó en las dos direcciones. Si esta
+mutación vuelve a no matar nada, el candado se ha perdido por el camino.
 
 Revertir: `git checkout -- apps/hub-api/src/ausencias/repo.ts`
 
