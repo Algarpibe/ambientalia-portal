@@ -4,6 +4,7 @@ import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../tes
 import { solicitudesDeEmpleado } from './repo.js';
 import { crearSolicitud } from './service.js';
 import { hoyEnColombia } from './saldo.js';
+import { sumarDias } from './festivos.js';
 
 // La hora opcional de los permisos contra Postgres de verdad.
 //
@@ -180,12 +181,6 @@ describe('el repo lee y escribe las horas', () => {
   });
 });
 
-/** El dia siguiente a `hoy` (YYYY-MM-DD). Mismo patron que `limiteDelTrabajo` en service.ts. */
-function manana(hoy: string): string {
-  const [anio, mes, dia] = hoy.split('-').map(Number);
-  return new Date(Date.UTC(anio, mes - 1, dia + 1)).toISOString().slice(0, 10);
-}
-
 describe('el alta de punta a punta, a traves del SERVICIO', () => {
   it('CANDADO: crearSolicitud del servicio valida la hora y la deja llegar al INSERT', async () => {
     // Las pruebas de arriba -incluida «crearSolicitud guarda las horas que le
@@ -208,7 +203,7 @@ describe('el alta de punta a punta, a traves del SERVICIO', () => {
     // fecha fija seria una cuenta atras: en cuanto el calendario la alcanzara,
     // el test se pondria rojo por `fecha_en_pasado`, un motivo que no tiene
     // nada que ver con lo que este test vigila.
-    const fecha = manana(hoyEnColombia());
+    const fecha = sumarDias(hoyEnColombia(), 1);
     const id = await sembrarEmpleado(db, 'permiso@hora.test');
     await crearSolicitud(
       db,
