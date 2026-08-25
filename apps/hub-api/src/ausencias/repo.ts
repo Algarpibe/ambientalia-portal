@@ -316,6 +316,12 @@ export interface EmpleadoConSaldo {
   compensatoriosFechaCorte: string | null;
   /** Para congelar el devengo de quien ya se fue. Ver `hoyCongelado`. */
   fechaRetiro: string | null;
+  /**
+   * Quién registró la baja. Viaja con el saldo y no con la ficha porque la vista
+   * de retirados enseña las dos cosas juntas, y el número de ahí es el que se
+   * paga: sin la constancia al lado, nadie sabe a quién preguntarle por él.
+   */
+  retiradoPor: string | null;
 }
 
 interface FilaEmpleadoSaldoDb {
@@ -327,6 +333,7 @@ interface FilaEmpleadoSaldoDb {
   compensatorios_saldo_corte: number | null;
   compensatorios_fecha_corte: string | null;
   fecha_retiro: string | null;
+  retirado_por: string | null;
 }
 
 function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
@@ -339,6 +346,7 @@ function aEmpleadoConSaldo(r: FilaEmpleadoSaldoDb): EmpleadoConSaldo {
     compensatoriosSaldoCorte: r.compensatorios_saldo_corte,
     compensatoriosFechaCorte: r.compensatorios_fecha_corte,
     fechaRetiro: r.fecha_retiro,
+    retiradoPor: r.retirado_por,
   };
 }
 
@@ -414,7 +422,8 @@ export async function empleadosConSaldo(
             e.fecha_corte::text   AS fecha_corte,
             e.compensatorios_saldo_corte::float8 AS compensatorios_saldo_corte,
             e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte,
-            e.fecha_retiro::text   AS fecha_retiro
+            e.fecha_retiro::text   AS fecha_retiro,
+            e.retirado_por
        FROM portal.empleados e
       WHERE e.activo
         AND ${ramaDeDosNiveles()}
@@ -3342,4 +3351,71 @@ export async function limpiarRetiro(db: Pool, empleadoId: string): Promise<boole
     [empleadoId],
   );
   return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Las fichas INACTIVAS con su configuración de saldo.
+ *
+ * Hermana de `empleadosConSaldo`, que lleva `WHERE e.activo` y por eso no puede
+ * servir a esta pantalla: un retirado no sale de aquella consulta, así que la
+ * vista de Retirados no tendría de dónde sacar el saldo congelado — que es justo
+ * a lo que se viene.
+ *
+ * No se unificaron con una bandera: aquella la comparten el panel de Saldos y
+ * `ramaDeDosNiveles()`, y un parámetro mal pasado colaría retirados en la
+ * pantalla de todo el mundo. Dos consultas separadas no pueden equivocarse de
+ * público.
+ *
+ * `NOT e.activo` y no `fecha_retiro IS NOT NULL`: las fichas que se desactivaron
+ * a mano antes de esta funcionalidad —las dos cuentas de prueba del 2026-08-24—
+ * no tienen fecha, y filtrar por ella las dejaría fuera de las DOS vistas, sin
+ * ningún sitio donde aparecer. Es la misma razón por la que `activo` sigue
+ * siendo la única bandera que apagan las consultas y la fecha solo decide
+ * cuándo se apaga.
+ *
+ * Sin `ramaDeDosNiveles()`: esto solo lo sirve un endpoint de admin. Los casts
+ * `::float8` y `::text` son los mismos de `empleadosConSaldo` y por lo mismo.
+ */
+export async function retiradosConSaldo(db: Pool): Promise<EmpleadoConSaldo[]> {
+  const { rows } = await db.query(
+    `SELECT e.id, e.nombre_completo, e.correo,
+            e.saldo_corte::float8 AS saldo_corte,
+            e.fecha_corte::text   AS fecha_corte,
+            e.compensatorios_saldo_corte::float8 AS compensatorios_saldo_corte,
+            e.compensatorios_fecha_corte::text   AS compensatorios_fecha_corte,
+            e.fecha_retiro::text  AS fecha_retiro,
+            e.retirado_por
+       FROM portal.empleados e
+      WHERE NOT e.activo
+      ORDER BY e.fecha_retiro DESC NULLS LAST, e.nombre_completo`,
+  );
+  return (rows as FilaEmpleadoSaldoDb[]).map(aEmpleadoConSaldo);
+}
+
+/**
+ * Cuántas solicitudes vivas tiene cada uno de estos empleados.
+ *
+ * «Vivas» es esperando firma, no «posteriores a una fecha»: mientras quede una,
+ * su saldo todavía puede moverse, porque la bandeja del jefe NO filtra por
+ * `activo` y puede firmarla después del retiro. Es la diferencia entre un número
+ * provisional y el que se paga en la liquidación.
+ *
+ * `pendiente_2` entra junto a `pendiente` por lo mismo que en `diasPosterioresA`:
+ * es el mismo trámite en su segundo nivel de firma. Las aprobadas quedan fuera
+ * porque ya están descontadas, y las rechazadas porque no consumen nada.
+ */
+export async function solicitudesVivasDe(db: Pool, ids: string[]): Promise<Map<string, number>> {
+  // Sin esto, `= ANY('{}')` haría un escaneo para no devolver nada.
+  if (ids.length === 0) return new Map();
+  const { rows } = await db.query(
+    `SELECT empleado_id, COUNT(*)::int AS vivas
+       FROM portal.solicitudes_ausencia
+      WHERE empleado_id = ANY($1::uuid[])
+        AND estado IN ('pendiente', 'pendiente_2')
+      GROUP BY empleado_id`,
+    [ids],
+  );
+  return new Map(
+    (rows as { empleado_id: string; vivas: number }[]).map((r) => [r.empleado_id, r.vivas]),
+  );
 }

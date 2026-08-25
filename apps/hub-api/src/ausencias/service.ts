@@ -2365,3 +2365,54 @@ export async function reactivarEmpleado(db: Pool, empleadoId: string, adminEmail
   if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
   return actualizado;
 }
+
+/** Una ficha retirada, con lo que hace falta para liquidarla. */
+export interface Retirado extends SaldoDeEmpleado {
+  /** El último día que trabajó. `null` en las fichas apagadas a mano. */
+  fechaRetiro: string | null;
+  retiradoPor: string | null;
+  /** Mientras sea > 0, el saldo de arriba todavía puede moverse. */
+  solicitudesVivas: number;
+  /**
+   * True cuando la fecha de retiro es ANTERIOR al corte del saldo.
+   * Aritméticamente da un devengo de cero y no revienta, pero casi siempre
+   * significa que alguien se equivocó de año al teclear. Se avisa, no se
+   * bloquea: puede ser legítimo, y no es esta pantalla quien debe decidirlo.
+   */
+  retiroAntesDelCorte: boolean;
+}
+
+/**
+ * Las fichas retiradas con su saldo ya congelado. Solo admin (lo exige el router).
+ *
+ * Es la vista de liquidación: el `disponible` de cada fila es el número que se
+ * le paga a esa persona. Por eso viaja acompañado de la constancia de quién
+ * registró la baja y del recuento de solicitudes vivas — un número sin esas dos
+ * cosas al lado se lee como definitivo cuando puede no serlo.
+ */
+export async function listaDeRetirados(db: Pool): Promise<Retirado[]> {
+  const fichas = await repo.retiradosConSaldo(db);
+  if (fichas.length === 0) return [];
+  const ids = fichas.map((f) => f.empleadoId);
+  const ausencias = await repo.ausenciasQueTocanElSaldo(db, ids);
+  const vivas = await repo.solicitudesVivasDe(db, ids);
+  // `combinar` ya congela ficha a ficha vía `hoyCongelado`: se le pasa el mismo
+  // `hoy` a todas y cada una decide el suyo. No hay que congelar nada aquí.
+  const conSaldo = combinar(fichas, ausencias, hoyEnColombia());
+  // Por `empleadoId` y no por posición: que `combinar` devuelva la lista en el
+  // mismo orden que la recibe es cierto hoy, pero es una invariante que no
+  // comprueba nadie, y equivocarse de fila aquí le pondría a alguien la fecha
+  // de retiro de otro justo en la pantalla desde la que se paga.
+  const porId = new Map(fichas.map((f) => [f.empleadoId, f]));
+  return conSaldo.map((s) => {
+    const ficha = porId.get(s.empleadoId)!;
+    return {
+      ...s,
+      fechaRetiro: ficha.fechaRetiro,
+      retiradoPor: ficha.retiradoPor,
+      solicitudesVivas: vivas.get(s.empleadoId) ?? 0,
+      retiroAntesDelCorte:
+        ficha.fechaRetiro !== null && s.saldo.configurado && ficha.fechaRetiro < s.saldo.fechaCorte,
+    };
+  });
+}

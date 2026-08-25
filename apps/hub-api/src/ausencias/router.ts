@@ -461,6 +461,21 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * Las fichas retiradas con su saldo congelado. Es la vista de liquidación.
+   *
+   * Ruta literal y no `/:id`: este router no define ningún `GET
+   * /ausencias/empleados/:id`, así que «retirados» no puede colarse como un id.
+   * El día que exista, tiene que declararse DESPUÉS de esta.
+   */
+  router.get('/ausencias/empleados/retirados', requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json({ retirados: await service.listaDeRetirados(db) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_retirados');
+    }
+  });
+
   // ── El registro y el histórico de la hoja ────────────────────────────────
   //
   // La importación, la corrección y el borrado SÍ son de admin. El registro de

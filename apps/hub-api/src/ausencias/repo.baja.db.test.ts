@@ -9,7 +9,7 @@ import {
   fijarRetiro,
   limpiarRetiro,
 } from './repo.js';
-import { retirarEmpleado, reactivarEmpleado, crearSolicitud } from './service.js';
+import { retirarEmpleado, reactivarEmpleado, crearSolicitud, listaDeRetirados } from './service.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -517,5 +517,163 @@ describe('no se piden dias mas alla del retiro', () => {
         comentarios: 'trabaje este dia',
       }),
     ).rejects.toMatchObject({ code: 'fecha_posterior_al_retiro', status: 409 });
+  });
+});
+
+describe('listaDeRetirados', () => {
+  const ADMIN = 'admin@ambientalia.com.co';
+
+  /** El saldo de una ficha de la lista, buscada por correo. */
+  function porCorreo(lista: Awaited<ReturnType<typeof listaDeRetirados>>, correo: string) {
+    const r = lista.find((x) => x.correo === correo);
+    if (!r) throw new Error(`la lista no trae a ${correo}`);
+    return r;
+  }
+
+  it('devuelve al retirado con su saldo CONGELADO en la fecha de retiro', async () => {
+    const id = await sembrarEmpleado(db, 'liq@baja.test');
+    await db.query(
+      `UPDATE portal.empleados SET saldo_corte = 10, fecha_corte = '2026-01-01' WHERE id = $1`,
+      [id],
+    );
+    // Un activo sembrado a la vez, y no solo en el test de mas abajo: con una
+    // sola ficha en la tabla, una consulta SIN filtro ninguno seguiria dando
+    // `toHaveLength(1)` y este candado no vigilaria nada.
+    await sembrarEmpleado(db, 'sigue@baja.test');
+    await fijarRetiro(db, id, '2026-03-01', ADMIN);
+    await aplicarRetirosVencidos(db, '2026-08-24');
+
+    const lista = await listaDeRetirados(db);
+    expect(lista).toHaveLength(1);
+    expect(lista[0].correo).toBe('liq@baja.test');
+    // Enero y febrero: 59 dias / 30 x 1,25 = 2,5. Si esto trajera el devengo
+    // hasta HOY serian siete meses, no dos: la congelacion no estaria llegando
+    // a esta consulta y el numero que se paga en la liquidacion saldria
+    // inflado. Es el motivo entero por el que esta pantalla existe.
+    expect(lista[0].saldo.devengadas).toBeCloseTo(2.5, 5);
+    expect(lista[0].saldo.disponible).toBeCloseTo(12.5, 5);
+    expect(lista[0].fechaRetiro).toBe('2026-03-01');
+    expect(lista[0].retiradoPor).toBe(ADMIN);
+    expect(lista[0].retiroAntesDelCorte).toBe(false);
+    expect(lista[0].solicitudesVivas).toBe(0);
+  });
+
+  it('cuenta las solicitudes vivas, que son las que todavia pueden mover el numero', async () => {
+    const id = await sembrarEmpleado(db, 'viva@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'viva@baja.test',
+      estado: 'pendiente',
+      fechaInicio: '2026-02-02',
+      fechaFin: '2026-02-04',
+      segundoAprobadorCorreo: null,
+    });
+    // `pendiente_2` es el mismo tramite en su segundo nivel de firma: si no
+    // contara, una solicitud a punto de firmarse pasaria por definitiva.
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'viva@baja.test',
+      estado: 'pendiente_2',
+      fechaInicio: '2026-02-09',
+      fechaFin: '2026-02-11',
+      segundoAprobadorCorreo: 'jefe2@ambientalia.com.co',
+    });
+    // Estas dos ya NO mueven el numero: la aprobada ya esta descontada y la
+    // rechazada no consume nada. Sin ellas, un filtro de estados borrado
+    // entero sobreviviria a este test.
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'viva@baja.test',
+      estado: 'aprobada',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-07',
+      segundoAprobadorCorreo: null,
+    });
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: 'viva@baja.test',
+      estado: 'rechazada',
+      fechaInicio: '2026-01-12',
+      fechaFin: '2026-01-14',
+      segundoAprobadorCorreo: null,
+    });
+
+    // Un SEGUNDO retirado con UNA sola pendiente. Sin el, quitar el
+    // `WHERE empleado_id = ANY($1)` del recuento dejaria este test en verde:
+    // con una sola ficha sembrada, el total y el suyo son el mismo numero.
+    const otro = await sembrarEmpleado(db, 'otro@baja.test');
+    await sembrarSolicitud(db, {
+      empleadoId: otro,
+      correo: 'otro@baja.test',
+      estado: 'pendiente',
+      fechaInicio: '2026-02-16',
+      fechaFin: '2026-02-18',
+      segundoAprobadorCorreo: null,
+    });
+
+    await fijarRetiro(db, id, '2026-03-01', ADMIN);
+    await fijarRetiro(db, otro, '2026-03-01', ADMIN);
+    await aplicarRetirosVencidos(db, '2026-08-24');
+
+    const lista = await listaDeRetirados(db);
+    expect(porCorreo(lista, 'viva@baja.test').solicitudesVivas).toBe(2);
+    expect(porCorreo(lista, 'otro@baja.test').solicitudesVivas).toBe(1);
+  });
+
+  it('avisa cuando la fecha de retiro es ANTERIOR al corte del saldo', async () => {
+    const id = await sembrarEmpleado(db, 'corte@baja.test');
+    await db.query(
+      `UPDATE portal.empleados SET saldo_corte = 4, fecha_corte = '2026-06-01' WHERE id = $1`,
+      [id],
+    );
+    await fijarRetiro(db, id, '2026-03-01', ADMIN);
+    await aplicarRetirosVencidos(db, '2026-08-24');
+
+    const [r] = await listaDeRetirados(db);
+    expect(r.retiroAntesDelCorte).toBe(true);
+    // Aritmeticamente no revienta -devenga cero-, y por eso se AVISA y no se
+    // bloquea: casi siempre es un ano mal tecleado, pero puede ser legitimo.
+    expect(r.saldo.devengadas).toBe(0);
+  });
+
+  it('CANDADO: una ficha desactivada a mano, sin fecha, tambien sale', async () => {
+    // Son las dos cuentas de prueba del 2026-08-24. Si no salieran aqui no
+    // apareceririan en NINGUNA de las dos vistas, y se quedarian sin sitio.
+    const id = await sembrarEmpleado(db, 'prueba@baja.test');
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
+
+    const lista = await listaDeRetirados(db);
+    expect(lista).toHaveLength(1);
+    expect(lista[0].fechaRetiro).toBeNull();
+    expect(lista[0].retiradoPor).toBeNull();
+  });
+
+  it('no devuelve a nadie activo, ni siquiera con la baja ya programada', async () => {
+    await sembrarEmpleado(db, 'sigue@baja.test');
+    // Con fecha futura sigue trabajando: la baja programada es solo un dato
+    // hasta que vence, asi que su sitio es Activos.
+    const futuro = await sembrarEmpleado(db, 'futuro@baja.test');
+    await fijarRetiro(db, futuro, '2026-12-31', ADMIN);
+
+    expect(await listaDeRetirados(db)).toHaveLength(0);
+  });
+
+  it('ordena por fecha de retiro descendente, y los que no tienen van al final', async () => {
+    // La vista es de liquidacion: lo ultimo que ha pasado es lo que se esta
+    // pagando ahora. Los sin fecha son fichas viejas que no se liquidan.
+    const viejo = await sembrarEmpleado(db, 'viejo@baja.test');
+    const reciente = await sembrarEmpleado(db, 'reciente@baja.test');
+    const sinFecha = await sembrarEmpleado(db, 'sinfecha@baja.test');
+    await fijarRetiro(db, viejo, '2026-02-01', ADMIN);
+    await fijarRetiro(db, reciente, '2026-07-01', ADMIN);
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [sinFecha]);
+    await aplicarRetirosVencidos(db, '2026-08-24');
+
+    const lista = await listaDeRetirados(db);
+    expect(lista.map((r) => r.correo)).toEqual([
+      'reciente@baja.test',
+      'viejo@baja.test',
+      'sinfecha@baja.test',
+    ]);
   });
 });

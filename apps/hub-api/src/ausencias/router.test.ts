@@ -603,7 +603,57 @@ vi.mock('./repo.js', async () => ({
         compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
         compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
         fechaRetiro: e.fechaRetiro ?? null,
+        retiradoPor: e.retiradoPor ?? null,
       })),
+  // La hermana de la de arriba con el filtro AL REVES: `NOT activo`. Casi todo
+  // este doble modela «inactivo» sacando la ficha entera de `estado.plantilla`,
+  // pero los tests de `PUT/DELETE .../retiro` la dejan dentro con `activo:
+  // false`, que es lo que mira este filtro.
+  //
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+  // `WHERE NOT e.activo` de `repo.retiradosConSaldo` -y su ORDER BY, que aqui
+  // se reproduce a mano-, y quien de verdad los ejecuta es
+  // `repo.baja.db.test.ts` contra Postgres real.
+  retiradosConSaldo: async (_db: unknown) =>
+    estado.plantilla
+      .filter((e: any) => e.activo === false)
+      .map((e: any) => ({
+        empleadoId: e.id,
+        nombreCompleto: e.nombreCompleto,
+        correo: e.correo,
+        saldoCorte: e.saldoCorte ?? null,
+        fechaCorte: e.fechaCorte ?? null,
+        compensatoriosSaldoCorte: e.compensatoriosSaldoCorte ?? null,
+        compensatoriosFechaCorte: e.compensatoriosFechaCorte ?? null,
+        fechaRetiro: e.fechaRetiro ?? null,
+        retiradoPor: e.retiradoPor ?? null,
+      }))
+      // `DESC NULLS LAST` y luego el nombre, igual que el SQL.
+      .sort((a: any, b: any) => {
+        if (a.fechaRetiro !== b.fechaRetiro) {
+          if (a.fechaRetiro === null) return 1;
+          if (b.fechaRetiro === null) return -1;
+          return a.fechaRetiro < b.fechaRetiro ? 1 : -1;
+        }
+        return String(a.nombreCompleto).localeCompare(String(b.nombreCompleto));
+      }),
+  // El `GROUP BY` real no devuelve fila para quien tiene cero, asi que las
+  // entradas en cero tampoco entran en este Map: quien lee hace `?? 0`.
+  solicitudesVivasDe: async (_db: unknown, ids: string[]) =>
+    new Map(
+      ids
+        .map(
+          (id) =>
+            [
+              id,
+              estado.solicitudes.filter(
+                (s: any) =>
+                  s.empleadoId === id && (s.estado === 'pendiente' || s.estado === 'pendiente_2'),
+              ).length,
+            ] as [string, number],
+        )
+        .filter(([, vivas]) => vivas > 0),
+    ),
   // Solo existe para que el CANDADO de más abajo compare superficies iguales.
   // El filtro de `empleadosConSaldo` de aquí arriba (sobre `estado.plantilla`,
   // línea 362) SOLO modela el nivel directo (`e.aprobadorCorreo === soloDe`);
@@ -3070,6 +3120,65 @@ describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('GET /ausencias/empleados/retirados', () => {
+  const admin = () => token({ sub: 'admin@ambientalia.com.co', role: 'admin' });
+
+  const pedir = (tok = admin()) =>
+    request(app()).get('/api/ausencias/empleados/retirados').set('Authorization', `Bearer ${tok}`);
+
+  /** Apaga la ficha de Luis (E2) y le pone la constancia de su baja. */
+  function apagarE2(): void {
+    const e = estado.plantilla[1] as any;
+    e.activo = false;
+    e.fechaRetiro = '2026-01-20';
+    e.retiradoPor = 'admin@ambientalia.com.co';
+  }
+
+  it('sin ser admin → 403', async () => {
+    // Es la vista de liquidación: el saldo que enseña es lo que se le paga a
+    // esa persona, y el correo de quien lo fijó va al lado.
+    await pedir(token()).expect(403);
+  });
+
+  it('siendo admin devuelve SOLO las fichas apagadas, con su constancia', async () => {
+    // Con el doble en memoria: lo que se comprueba es el CABLEADO, no la regla
+    // (esa vive en repo.baja.db.test.ts contra Postgres de verdad). Ana (E1)
+    // sigue activa y por eso no puede salir aquí.
+    apagarE2();
+
+    const r = await pedir().expect(200);
+    expect(r.body.retirados).toHaveLength(1);
+    expect(r.body.retirados[0]).toMatchObject({
+      empleadoId: E2,
+      fechaRetiro: '2026-01-20',
+      retiradoPor: 'admin@ambientalia.com.co',
+      solicitudesVivas: 0,
+      retiroAntesDelCorte: false,
+    });
+  });
+
+  it('CANDADO: el recuento de solicitudes vivas llega a la respuesta', async () => {
+    // Sin esto, un `solicitudesVivas: 0` fijo pasaría el test de arriba, y la
+    // pantalla enseñaría como definitivo un saldo que todavía puede moverse:
+    // la bandeja del jefe no filtra por `activo`, así que una pendiente se
+    // puede firmar después del retiro.
+    apagarE2();
+    estado.solicitudes.push({
+      id: 's-viva',
+      empleadoId: E2,
+      tipo: 'vacaciones',
+      estado: 'pendiente',
+      fechaInicio: '2026-01-05',
+      fechaFin: '2026-01-07',
+      diasHabiles: 3,
+      createdAt: '2026-01-02',
+    } as any);
+
+    const r = await pedir().expect(200);
+    expect(r.body.retirados[0].solicitudesVivas).toBe(1);
   });
 });
 
