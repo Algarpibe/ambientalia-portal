@@ -5622,6 +5622,9 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
       calendarId: CALENDARIO_STAFF,
       eventId: idDeEventoCalendario(solicitudId),
       accion: 'actualizar',
+      // Unas vacaciones no llevan hora: el evento sigue siendo de día completo.
+      // Va en el `toEqual` porque este es el contrato tal y como sale por HTTP.
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       // Las fechas NUEVAS, y el fin sumado un día como al crearlo.
       inicio: '2026-07-13',

@@ -481,11 +481,9 @@ export interface Solicitud {
    * `HH:MM`, sin segundos y sin zona: es la hora local de Colombia. Las dos van
    * siempre juntas — lo garantiza el CHECK `solicitudes_horas_coherentes`.
    *
-   * HOY nadie los lee todavía: `calendario()` (notificaciones.ts) sigue armando
-   * el evento *all-day* solo con `fechaInicio`/`fechaFin`, así que un permiso con
-   * hora se pinta igual que uno de día completo. Ponerle a `calendario()` el
-   * desfase de Colombia y construir el ISO que ve Google es lo que hace la
-   * tarea 5, que todavía no existe.
+   * Quien las traduce a lo que ve Google es `calendario()` (notificaciones.ts):
+   * con hora arma un bloque horario con el desfase de Colombia explícito, y sin
+   * ella el evento *all-day* de siempre.
    */
   horaInicio: string | null;
   horaFin: string | null;
@@ -641,7 +639,10 @@ export interface CorreoEvento {
  */
 export type AccionCalendario = 'crear' | 'actualizar' | 'borrar';
 
-/** Evento *all-day* de Google Calendar. `fin` ya viene sumado un día. */
+/**
+ * Un evento de Google Calendar. `todoElDia` decide de cuál de las dos formas se
+ * leen `inicio` y `fin`, así que se lee ANTES que ellos.
+ */
 export interface EventoCalendario {
   calendarId: string;
   /**
@@ -657,9 +658,22 @@ export interface EventoCalendario {
    * avisa `PayloadEvento`: al otro lado, un campo ausente es `undefined`, y
    * este contrato no distingue eso de un valor.
    */
+  /**
+   * Si el evento ocupa el día entero o una franja horaria.
+   *
+   * ⚠️ Viaja SIEMPRE, también en un `borrar`, por lo mismo que los tres de
+   * arriba: al otro lado un campo ausente es `undefined`, y este contrato no
+   * distingue eso de un valor. Y aquí importa más que en ninguno — la expresión
+   * que lo lee en n8n exige el `false` explícito justo por eso.
+   */
+  todoElDia: boolean;
   resumen: string;
+  /** `YYYY-MM-DD` si `todoElDia`; ISO con desfase (`...T09:00:00-05:00`) si no. */
   inicio: string;
-  /** Fin EXCLUSIVO: Google no pinta el último día si no se le suma uno. */
+  /**
+   * Con `todoElDia`, fin EXCLUSIVO: Google no pinta el último día si no se le
+   * suma uno. Con hora, el fin es el fin de verdad y NO se le suma nada.
+   */
   fin: string;
 }
 

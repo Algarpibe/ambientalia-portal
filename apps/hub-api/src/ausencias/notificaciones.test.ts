@@ -338,6 +338,10 @@ describe('efectos en Google, repartidos sin duplicar', () => {
       // para corregirlo o borrarlo cuando la ausencia cambie.
       eventId: 's1',
       accion: 'crear',
+      // `toEqual` y no `toMatchObject`: este es el sitio donde se ve el payload
+      // ENTERO, así que aquí se nota si `todoElDia` dejara de viajar. Al otro
+      // lado un campo ausente es `undefined`, que no es `true` ni `false`.
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       inicio: '2026-07-06',
       fin: '2026-07-11',
@@ -405,6 +409,82 @@ describe('efectos en Google, repartidos sin duplicar', () => {
     );
     expect(p.hoja!.columnas.Tipo).toBe('Vacaciones');
     expect(p.hoja!.columnas['Días']).toBe(5);
+  });
+});
+
+describe('calendario — el permiso con hora', () => {
+  it('sin horas, el evento sigue siendo de día completo y con el +1', () => {
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-01', estado: 'aprobada' }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario).toMatchObject({
+      todoElDia: true,
+      inicio: '2026-09-01',
+      // Google trata el `end` de un all-day como EXCLUSIVO: sin el +1 no se
+      // pinta el último día.
+      fin: '2026-09-02',
+    });
+  });
+
+  it('con horas, emite ISO con desfase de Colombia', () => {
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario).toMatchObject({
+      todoElDia: false,
+      inicio: '2026-09-01T09:00:00-05:00',
+      fin: '2026-09-01T11:00:00-05:00',
+    });
+  });
+
+  it('CANDADO: con horas NO se le suma el día al fin', () => {
+    // El +1 solo es correcto para un evento de día completo. Aplicado a uno con
+    // hora, un permiso de 9:00 a 11:00 del martes acabaría el miércoles a las
+    // 11:00 — un evento de 26 horas en el calendario del equipo.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario?.fin.startsWith('2026-09-01')).toBe(true);
+  });
+
+  it('CANDADO: el desfase va explícito, no se deja a la zona del calendario', () => {
+    // Un `dateTime` sin offset lo interpreta Google en la zona por defecto del
+    // calendario, que no la controla esta app: el día que alguien la cambie, se
+    // moverían todos los permisos y nada se pondría rojo.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        estado: 'aprobada',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+      }),
+      'aprobada',
+      null,
+    );
+    expect(p.calendario?.inicio).toMatch(/-05:00$/);
+    expect(p.calendario?.fin).toMatch(/-05:00$/);
   });
 });
 
@@ -768,6 +848,7 @@ describe('la decisión del cambio', () => {
       calendarId: CALENDARIO_STAFF,
       eventId: EV,
       accion: 'actualizar',
+      todoElDia: true,
       resumen: 'Vacaciones Ana Ruiz',
       inicio: '2026-07-13',
       fin: '2026-07-16',
