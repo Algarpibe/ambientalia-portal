@@ -1560,3 +1560,27 @@ Con la cuenta de pruebas, y mirando el Google Calendar del equipo:
    día pintado (o sea, el `+1` sigue vivo donde tocaba).
 4. Pedir un permiso de dos días con el formulario: las horas deben desaparecer
    solas al mover la fecha de fin.
+
+⚠️ **Y las DOS TRANSICIONES, que son el caso que nadie ha probado y el que más
+puede doler.** Las levantó la verificación de la tarea 8:
+
+5. Un permiso aprobado **sin** hora, al que después se le **añade** una.
+6. Un permiso aprobado **con** hora, al que después se le **quita**.
+
+El motivo: `Actualizar evento del calendario` hace un `PATCH` contra Google, y la
+API de Google exige que `start`/`end` lleven **exactamente uno** de `date` o
+`dateTime`. Si Google **fusiona** el objeto anidado en vez de reemplazarlo, el
+evento acaba con los dos y contesta **400** — el nodo de n8n no manda `date: null`
+para limpiar el otro campo. No se ha podido confirmar de qué lado cae Google sin
+ejecutarlo, y por eso hay que probarlo a mano antes de fiarse.
+
+⚠️ **El radio de daño de que falle es el del incidente del 2026-08-24.** `Enviar
+correo` va **antes** de la rama de calendario, y el IF «¿El fallo es esperable?»
+solo tolera los fallos de `borrar`. Así que un `actualizar` que dé 400 no
+confirma el evento, hub-api lo vuelve a servir, y **el correo se reenvía cada
+diez minutos**. Es exactamente la tormenta de los ~700 correos, ahora acotada por
+el tope de cinco intentos — ruidosa, pero no infinita.
+
+Si alguna de las dos transiciones da 400, la salida es tratarla como un `borrar`
+seguido de un `crear` en vez de un `actualizar`, y eso es trabajo de otra tanda:
+no lo improvises con la gente dentro.
