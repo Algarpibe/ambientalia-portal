@@ -1159,9 +1159,22 @@ vi.mock('./repo.js', async () => ({
   // solo avanza al confirmar, para que un fallo se recupere solo), pero SÍ
   // reserva la fila unos minutos, o dos disparadores casi simultáneos se
   // llevarían el mismo evento y el correo saldría dos veces.
+  // ⚠️ Esta constante también viaja en el doble, y no por gusto: el router hace
+  // `repo.MAX_INTENTOS` en runtime, así que sin ella valdría `undefined`, la
+  // comparación sería siempre falsa y el aviso de evento aparcado no saldría
+  // nunca — en los tests. El CANDADO de paridad de más abajo NO lo habría
+  // cazado: compara `typeof === 'function'`, así que una constante exportada se
+  // le escapa entera.
+  MAX_INTENTOS: 5,
   eventosPendientes: async () => {
     const pend = estado.eventos.filter(
-      (e) => !e.enviado && (e.servidoEn === undefined || estado.ahora - e.servidoEn >= RESERVA_MS),
+      (e) =>
+        !e.enviado &&
+        // La tercera mitad, desde el incidente del 2026-08-24: pasado el tope el
+        // evento deja de servirse, o un fallo aguas abajo lo reintenta para
+        // siempre y con el se reenvia el correo.
+        e.intentos < 5 &&
+        (e.servidoEn === undefined || estado.ahora - e.servidoEn >= RESERVA_MS),
     );
     pend.forEach((e) => {
       e.intentos += 1;
@@ -3306,6 +3319,63 @@ describe('endpoints de n8n', () => {
     const otra = await pedirPendiente();
     expect(otra.body.eventos).toHaveLength(2);
     expect(otra.body.eventos[0].intentos).toBe(2);
+  });
+
+  it('CANDADO: un evento que nadie confirma deja de servirse al llegar al tope', async () => {
+    // El incidente del 2026-08-24: seis eventos `borrado_admin` que n8n no
+    // llegaba nunca a confirmar —fallaba antes, al borrar el evento de Google—
+    // y que el ciclo volvía a servir cada diez minutos. Como el correo se manda
+    // ANTES de tocar el calendario, cada reintento reenviaba los seis. Se
+    // descubrió con 119 intentos y unos setecientos correos.
+    //
+    // Aquí se simula justo eso: se pide sin confirmar nunca, avanzando el reloj
+    // para saltarse la reserva. Sin el tope, este bucle no termina.
+    await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+
+    for (let i = 0; i < 5; i++) {
+      const r = await pedirPendiente();
+      expect(r.body.eventos).toHaveLength(2);
+      expect(r.body.eventos[0].intentos).toBe(i + 1);
+      estado.ahora += RESERVA_MS;
+    }
+
+    // Sexta vuelta: la reserva ha expirado igual que en las cinco anteriores, y
+    // aun asi no sale nada. Lo unico que ha cambiado es el numero de intentos.
+    const sexta = await pedirPendiente();
+    expect(sexta.body.hay).toBe(false);
+    expect(sexta.body.eventos).toHaveLength(0);
+  });
+
+  it('CANDADO: aparcar un evento deja rastro en el log, una vez por evento', async () => {
+    // Aparcar en silencio seria peor que no aparcar: el aviso no se entrega y
+    // ademas nadie se entera. Y tiene que ser UNA vez, no una por ciclo, o el
+    // arreglo del ruido se convierte en su propia fuente de ruido.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await request(app()).post('/api/ausencias/solicitudes').set('Authorization', `Bearer ${token()}`).send(nueva()).expect(201);
+
+      for (let i = 0; i < 5; i++) {
+        await pedirPendiente();
+        estado.ahora += RESERVA_MS;
+      }
+
+      const aparcados = spy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((linea) => linea.includes('ausencias_outbox_aparcado'))
+        .map((linea) => JSON.parse(linea) as { evento: string; intentos: number });
+
+      // Dos eventos (el acuse y el aviso a quien aprueba), una linea cada uno.
+      expect(aparcados).toHaveLength(2);
+      expect(aparcados.map((a) => a.evento)).toEqual(['creada', 'aprobacion']);
+      expect(aparcados.every((a) => a.intentos === 5)).toBe(true);
+
+      // Y en el ciclo siguiente ya no se repite: el evento ni siquiera se sirve.
+      spy.mockClear();
+      await pedirPendiente();
+      expect(spy.mock.calls.filter((c) => String(c[0]).includes('ausencias_outbox_aparcado'))).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('dos disparadores casi a la vez NO se llevan el mismo evento', async () => {
