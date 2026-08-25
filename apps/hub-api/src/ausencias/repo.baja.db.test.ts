@@ -9,7 +9,7 @@ import {
   fijarRetiro,
   limpiarRetiro,
 } from './repo.js';
-import { retirarEmpleado, reactivarEmpleado } from './service.js';
+import { retirarEmpleado, reactivarEmpleado, crearSolicitud } from './service.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -464,5 +464,58 @@ describe('retirarEmpleado', () => {
     await expect(
       reactivarEmpleado(db, '00000000-0000-4000-8000-000000000000', ADMIN),
     ).rejects.toMatchObject({ code: 'empleado_no_encontrado', status: 404 });
+  });
+});
+
+describe('no se piden dias mas alla del retiro', () => {
+  it('409 al pedir vacaciones que terminan despues de la fecha de retiro', async () => {
+    const id = await sembrarEmpleado(db, 'limite@baja.test');
+    await fijarRetiro(db, id, '2026-09-30', 'admin@ambientalia.com.co');
+    await expect(
+      crearSolicitud(db, { email: 'limite@baja.test', userId: null, esAdmin: false },
+        { tipo: 'vacaciones', fechaInicio: '2026-10-05', fechaFin: '2026-10-09', comentarios: '' }),
+    ).rejects.toMatchObject({ code: 'fecha_posterior_al_retiro', status: 409 });
+  });
+
+  it('CANDADO: hasta su ultimo dia SI puede pedir', async () => {
+    const id = await sembrarEmpleado(db, 'hasta@baja.test');
+    await fijarRetiro(db, id, '2026-09-30', 'admin@ambientalia.com.co');
+    const s = await crearSolicitud(db, { email: 'hasta@baja.test', userId: null, esAdmin: false },
+      { tipo: 'vacaciones', fechaInicio: '2026-09-28', fechaFin: '2026-09-30', comentarios: '' });
+    expect(s.estado).toBe('pendiente');
+  });
+
+  it('CANDADO: un otorgamiento tambien queda bloqueado si su fecha cae despues del retiro', async () => {
+    // Decision (tarea 9): el otorgamiento NO se exceptua de esta guarda.
+    //
+    // `diasPosterioresA` -la otra mitad de este mismo candado, la que bloquea
+    // FIJAR el retiro cuando quedan dias por detras- tampoco lo exceptua por
+    // tipo: su WHERE (repo.ts) solo mira `fecha_fin > fecha` y el estado, sin
+    // `tipo <> 'otorgamiento'`. Si esta guarda lo exceptuara, las dos mitades
+    // dejarian de ser simetricas: un otorgamiento posterior bloquearia fijar
+    // el retiro, pero crear ese mismo otorgamiento DESPUES de fijarlo pasaria
+    // libre.
+    //
+    // Ademas tiene sentido por si solo, sin apelar a la simetria: la fecha de
+    // un otorgamiento es el dia que se TRABAJO, y reclamar uno posterior al
+    // ultimo dia trabajado es la misma contradiccion que agendar una ausencia
+    // despues de haberse ido -aunque uno sume dias y la otra los gaste-.
+    //
+    // El caso solo se da con la fecha de retiro ya en el pasado: un
+    // otorgamiento nunca se puede pedir para el futuro (`trabajo_en_el_futuro`
+    // en service.ts), asi que con un retiro todavia futuro esta comparacion
+    // nunca da `>`. Aqui se fuerza sembrando un retiro ya vencido, antes de
+    // que el barrido desactive la ficha.
+    const id = await sembrarEmpleado(db, 'trabajo@baja.test');
+    await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co');
+    await expect(
+      crearSolicitud(db, { email: 'trabajo@baja.test', userId: null, esAdmin: false }, {
+        tipo: 'otorgamiento',
+        fechaInicio: '2026-08-22',
+        fechaFin: '2026-08-22',
+        dias: 1,
+        comentarios: 'trabaje este dia',
+      }),
+    ).rejects.toMatchObject({ code: 'fecha_posterior_al_retiro', status: 409 });
   });
 });

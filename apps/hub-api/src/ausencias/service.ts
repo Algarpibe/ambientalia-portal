@@ -665,6 +665,36 @@ async function exigirVacacionesSuficientes(
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
+  // La otra mitad del bloqueo de la baja: allí se impide fijar una fecha que
+  // deje días huérfanos detrás, y aquí se impide crear esos días después. Sin
+  // las dos, la regla se puede saltar por el otro extremo.
+  //
+  // Va aquí y no en `validarNuevaSolicitud` porque esa función es pura y no
+  // conoce la ficha; mismo criterio que `exigirSinSolape` y
+  // `exigirVacacionesSuficientes`.
+  //
+  // `>` y no `>=`: la fecha de retiro es su último día trabajado, así que unas
+  // vacaciones que acaban justo ese día caben.
+  //
+  // El otorgamiento NO queda exento, aunque sí lo está de `ocupaAgenda` y del
+  // solape. La mitad gemela de este candado —`repo.diasPosterioresA`, la que
+  // bloquea FIJAR el retiro— tampoco lo excluye por tipo: su WHERE solo mira
+  // `fecha_fin > fecha` y el estado, sin `tipo <> 'otorgamiento'`. Exceptuarlo
+  // aquí rompería esa simetría: un otorgamiento posterior bloquearía fijar el
+  // retiro, pero crear ese mismo otorgamiento DESPUÉS de fijarlo no chocaría
+  // con nada. Y tiene sentido por sí solo: la fecha de un otorgamiento es el
+  // día que se TRABAJÓ, y reclamar uno posterior al último día trabajado es la
+  // misma contradicción que agendar una ausencia después de haberse ido —
+  // aunque uno sume días y la otra los gaste. En la práctica esta guarda casi
+  // nunca la alcanza un otorgamiento: no se puede pedir para el futuro
+  // (`trabajo_en_el_futuro`), así que si el retiro sigue siendo futuro la
+  // comparación nunca da `>`. Solo se dispara si `fechaRetiro` ya quedó en el
+  // pasado antes de que el barrido desactivara la ficha.
+  if (empleado.fechaRetiro !== null && datos.fechaFin > empleado.fechaRetiro) {
+    throw new AusenciaError('fecha_posterior_al_retiro', 409, 'fechaFin', {
+      fechaRetiro: empleado.fechaRetiro,
+    });
+  }
   // Los dos suben aquí porque la comprobación de solape pregunta por la fila que
   // se va a crear, y eso incluye con qué estado nace. Son derivaciones puras de
   // `datos.tipo`, así que adelantarlas no cambia nada más.
