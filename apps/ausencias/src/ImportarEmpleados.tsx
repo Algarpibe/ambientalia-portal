@@ -133,9 +133,13 @@ export default function ImportarEmpleados() {
     }
   }
 
+  // Sin tope de ancho, igual que PanelSaldos, PanelOrganigrama y RegistroGeneral:
+  // la tabla ocupa lo que haya y la PROSA se capa a `max-w-3xl` para que siga
+  // siendo legible. Con el tope puesto arriba, las seis columnas de Activos no
+  // caben y aparece un scroll horizontal aunque sobre media pantalla al lado.
   return (
-    <div className="max-w-5xl">
-      <section className="mb-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+    <div>
+      <section className="mb-6 max-w-3xl rounded-2xl border border-gray-200 bg-gray-50 p-4">
         <h3 className="mb-1 text-sm font-semibold text-gray-900">Dar de alta desde el portal</h3>
         <p className="mb-3 text-sm text-gray-600">
           Crea la ficha de cada usuario del portal que ya tenga esta app asignada. No hace falta hacerlo: quien entre
@@ -156,12 +160,12 @@ export default function ImportarEmpleados() {
           —solicitudes y personas a cargo— en líneas separadas, y sin esto se
           leerían pegadas en un párrafo. */}
       {error && (
-        <div className="mt-4 flex items-start gap-2 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="mt-4 flex max-w-3xl items-start gap-2 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
         </div>
       )}
       {exito && (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+        <div className="mt-4 flex max-w-3xl items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {exito}
         </div>
       )}
@@ -188,7 +192,7 @@ export default function ImportarEmpleados() {
           {/* Un empleado sin cuenta del portal no puede entrar a pedir nada: la
               identidad viene de la sesión. Conviene verlo de un vistazo. */}
           {sinCuenta > 0 && (
-            <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <p className="mb-3 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {sinCuenta} {sinCuenta === 1 ? 'empleado no tiene' : 'empleados no tienen'} cuenta en el portal todavía.
               Hasta que se registren y se les asigne la app, no podrán enviar solicitudes. El vínculo se crea solo
               cuando el correo coincide.
@@ -287,7 +291,7 @@ export default function ImportarEmpleados() {
         </>
       ) : (
         <>
-          <p className="mb-3 text-sm text-gray-600">
+          <p className="mb-3 max-w-3xl text-sm text-gray-600">
             El saldo de esta lista está <b>congelado en el último día trabajado</b>: es el número que se liquida. Deja
             de crecer aunque pasen los meses.
           </p>
