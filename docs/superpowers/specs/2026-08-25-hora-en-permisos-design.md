@@ -206,11 +206,23 @@ La expresión va al revés, exigiendo el `false` explícito:
 ```
 
 Todo lo que no diga explícitamente «con hora» es de día completo, que es el
-comportamiento de siempre. **Efecto secundario deliberado: el orden de despliegue
-deja de importar.** n8n puede ir antes o después de hub-api, porque el n8n nuevo
-sigue tratando como día completo todo lo que emite el hub-api viejo. Es lo que
-convierte un cambio en un workflow de producción que no se puede probar de punta
-a punta en un cambio reversible y sin ventana de riesgo.
+comportamiento de siempre. Eso convierte un cambio en un workflow de producción
+que no se puede probar de punta a punta en un cambio **reversible**: lo peor que
+puede pasar si la expresión queda mal es que todo siga siendo de día completo,
+que es el comportamiento de hoy.
+
+⚠️ **Pero el orden de despliegue SÍ importa, y en un solo sentido: n8n va
+PRIMERO.** El `=== false` solo protege una de las dos direcciones:
+
+| | Resultado |
+|---|---|
+| n8n nuevo + hub-api viejo | **Bien.** El payload viejo no trae `todoElDia`, así que la expresión resuelve `'yes'` y el evento sigue siendo de día completo. |
+| n8n viejo + hub-api nuevo | **Roto.** hub-api emite `todoElDia: false` y un ISO completo, pero el nodo sigue con `allday` fijo a `"yes"` y le mete un `...T09:00:00-05:00` al campo `date` de Google, que es un 400. |
+
+Así que la secuencia es: **cambiar los dos campos de n8n, comprobar que los
+eventos de día completo siguen saliendo, y solo entonces empujar hub-api.** Con
+n8n ya cambiado no hay ventana de riesgo: hasta que hub-api despliegue, todo lo
+que llega sigue sin la clave y sigue siendo de día completo.
 
 ## El cambio en n8n
 

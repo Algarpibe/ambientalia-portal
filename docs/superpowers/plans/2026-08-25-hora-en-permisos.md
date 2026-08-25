@@ -1334,8 +1334,19 @@ no traiga la clave —los que estén esperando en el outbox durante la ventana d
 despliegue— `undefined` no es `false`, y con la versión corta todos ellos
 pasarían a tratarse como eventos con hora a partir de una fecha suelta. Es el
 mismo bug que tuvo el campo `drive`, documentado en `notificaciones.ts`. Con el
-`=== false`, todo lo que no diga explícitamente «con hora» es de día completo, y
-por eso **el orden de despliegue de hub-api y n8n deja de importar**.
+`=== false`, todo lo que no diga explícitamente «con hora» es de día completo.
+
+⚠️ **Eso hace este cambio reversible, pero NO hace que el orden dé igual.** Esta
+tarea 8 tiene que estar hecha y comprobada **antes** de empujar hub-api: con n8n
+viejo y hub-api nuevo, el nodo mete un ISO completo en el campo `date` de Google
+y contesta 400. El detalle está en el paso 2 de la tarea 10.
+
+⚠️ **Y comprueba si el nodo necesita algo más que el `allday`.** Con `allday: no`,
+el nodo de Google Calendar espera `start`/`end` como `dateTime`. Hoy los dos
+campos se alimentan de `payload.calendario.inicio`/`fin`, que ya traen el ISO
+correcto en cada caso, así que en principio basta con el `allday` — **pero eso
+hay que verlo en el nodo, no darlo por hecho**. Si el nodo tuviera campos
+separados para `date` y `dateTime`, hay que ramificarlos igual.
 
 - [ ] **Step 3: Validar el workflow**
 
@@ -1523,9 +1534,21 @@ git push origin main
 ```
 
 ⚠️ **El push ES el despliegue.** EasyPanel reconstruye hub-api primero y el
-portal después, ~11 min cada uno. Aquí el orden **no** importa: el `=== false` de
-n8n hace que todo lo que no traiga `todoElDia` siga siendo de día completo, así
-que durante la ventana los permisos simplemente no llevan hora.
+portal después, ~11 min cada uno.
+
+⚠️⚠️ **ANTES de empujar, la tarea 8 (n8n) tiene que estar hecha y comprobada.**
+La primera versión de este plan decía que el orden daba igual. **Era falso**, y lo
+cazó la tarea 5: el `=== false` protege *n8n nuevo con hub-api viejo*, pero no al
+revés. Con hub-api nuevo y n8n viejo, hub-api emite `todoElDia: false` y un ISO
+completo mientras el nodo sigue con `allday` fijo a `"yes"` — y meterle un
+`...T09:00:00-05:00` al campo `date` de Google es un **400**. El primer permiso
+con hora que alguien aprobara rebotaría.
+
+Con n8n ya cambiado no hay ventana: hasta que hub-api despliegue, todo lo que
+llega sigue sin la clave y sigue siendo de día completo.
+
+Durante la ventana entre hub-api y el portal, los permisos simplemente no llevan
+hora, que es la de siempre y se cierra sola.
 
 - [ ] **Step 3: Comprobar en producción**
 
