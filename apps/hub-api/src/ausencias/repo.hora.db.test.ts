@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
-import { solicitudesDeEmpleado, actualizarSolicitud, type EdicionSolicitud } from './repo.js';
+import { poolDePrueba, limpiar, payloadStub, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
+import {
+  solicitudesDeEmpleado,
+  actualizarSolicitud,
+  crearModificacion,
+  decidirModificacion,
+  type EdicionSolicitud,
+} from './repo.js';
 import { construirPayloadCorreccion } from './notificaciones.js';
 import { crearSolicitud } from './service.js';
 import { hoyEnColombia } from './saldo.js';
@@ -301,5 +307,107 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
     expect(actual?.tipo).toBe('vacaciones');
     expect(actual?.horaInicio).toBeNull();
     expect(actual?.horaFin).toBeNull();
+  });
+});
+
+describe('las horas tampoco sobreviven a una MODIFICACION aprobada', () => {
+  // El otro camino que estira las fechas de una solicitud ya creada, y el que se
+  // habia quedado sin candado: los tres tests de aqui arriba van todos por
+  // `actualizarSolicitud`, asi que el CASE gemelo de `aplicarALaSolicitud` se
+  // podia borrar entero sin que se pusiera roja ni una de las 210 pruebas de
+  // test:db. Se comprobo mutandolo -quitando el CASE y dejando el SET como
+  // estaba-: 18 ficheros y 210 tests seguian en verde. Esto lo cierra.
+  //
+  // El flujo es el REAL -`crearModificacion` + `decidirModificacion`, que es
+  // quien llama a `aplicarALaSolicitud`- y no un UPDATE a pelo, por lo mismo que
+  // anota `repo.movimientos.db.test.ts`: un fixture que escribe el resultado a
+  // mano afirma la premisa en vez de ejercitarla.
+
+  const PRIMER_FIRMANTE = 'jefe1@ambientalia.com.co';
+
+  it('CANDADO: aprobar un cambio que estira a dos dias NO revienta, y borra las horas', async () => {
+    const empleadoId = await sembrarEmpleado(db, 'ana@hora.test');
+    const solicitud = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: 'ana@hora.test',
+      estado: 'aprobada',
+      tipo: 'permiso',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      segundoAprobadorCorreo: null,
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: solicitud.id,
+        clase: 'fechas',
+        estadoEsperado: 'aprobada',
+        fechaInicioNueva: '2026-09-01',
+        fechaFinNueva: '2026-09-03',
+        diasHabilesNuevos: 3,
+        motivo: 'Se alarga el tramite',
+        aprobadorCorreo: PRIMER_FIRMANTE,
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta de la propuesta fallo con razon ${alta.razon}`);
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+
+    // Sin el CASE esto ni siquiera llega a fallar por el `ok`: el UPDATE viola
+    // el CHECK de la 036 y la excepcion sale disparada desde `decidirModificacion`
+    // -no es ni ChoqueConLaSolicitud ni SolapeAlAplicar, asi que su catch la
+    // relanza-, tumbando con el ROLLBACK la decision del jefe y su evento.
+    if (!r.ok) throw new Error(`la decision fallo con razon ${r.razon}`);
+    expect(r.solicitud.fechaFin).toBe('2026-09-03');
+    expect(r.solicitud.horaInicio).toBeNull();
+    expect(r.solicitud.horaFin).toBeNull();
+
+    // Y releida de la tabla, no solo en lo que devolvio la funcion.
+    const [guardada] = await solicitudesDeEmpleado(db, empleadoId);
+    expect(guardada.horaInicio).toBeNull();
+    expect(guardada.horaFin).toBeNull();
+  });
+
+  it('aprobar un cambio que sigue siendo de UN dia CONSERVA las horas', async () => {
+    // La otra mitad del CASE, igual que en su gemelo: mover un permiso con hora
+    // del martes al jueves no es motivo para perder la franja.
+    const empleadoId = await sembrarEmpleado(db, 'ana@hora.test');
+    const solicitud = await sembrarSolicitud(db, {
+      empleadoId,
+      correo: 'ana@hora.test',
+      estado: 'aprobada',
+      tipo: 'permiso',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      segundoAprobadorCorreo: null,
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+
+    const alta = await crearModificacion(
+      db,
+      {
+        solicitudId: solicitud.id,
+        clase: 'fechas',
+        estadoEsperado: 'aprobada',
+        fechaInicioNueva: '2026-09-03',
+        fechaFinNueva: '2026-09-03',
+        diasHabilesNuevos: 1,
+        motivo: 'Me cambiaron la cita',
+        aprobadorCorreo: PRIMER_FIRMANTE,
+      },
+      payloadStub,
+    );
+    if (!alta.ok) throw new Error(`el alta de la propuesta fallo con razon ${alta.razon}`);
+
+    const r = await decidirModificacion(db, alta.modificacion.id, true, null, null, payloadStub);
+    if (!r.ok) throw new Error(`la decision fallo con razon ${r.razon}`);
+    expect(r.solicitud.fechaInicio).toBe('2026-09-03');
+    expect(r.solicitud.horaInicio).toBe('09:00');
+    expect(r.solicitud.horaFin).toBe('11:00');
   });
 });
