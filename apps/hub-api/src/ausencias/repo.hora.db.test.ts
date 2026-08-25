@@ -3,6 +3,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud } from '../test-db/harness.js';
 import { solicitudesDeEmpleado } from './repo.js';
 import { crearSolicitud } from './service.js';
+import { hoyEnColombia } from './saldo.js';
 
 // La hora opcional de los permisos contra Postgres de verdad.
 //
@@ -179,6 +180,12 @@ describe('el repo lee y escribe las horas', () => {
   });
 });
 
+/** El dia siguiente a `hoy` (YYYY-MM-DD). Mismo patron que `limiteDelTrabajo` en service.ts. */
+function manana(hoy: string): string {
+  const [anio, mes, dia] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1, dia + 1)).toISOString().slice(0, 10);
+}
+
 describe('el alta de punta a punta, a traves del SERVICIO', () => {
   it('CANDADO: crearSolicitud del servicio valida la hora y la deja llegar al INSERT', async () => {
     // Las pruebas de arriba -incluida «crearSolicitud guarda las horas que le
@@ -194,11 +201,19 @@ describe('el alta de punta a punta, a traves del SERVICIO', () => {
     // el servicio valida el body, arma el `DatosInsercion` con las horas ya
     // validadas, el repo inserta, y el CHECK `solicitudes_horas_coherentes` de
     // la 036 tiene la ultima palabra contra Postgres de verdad.
+    //
+    // La fecha se CALCULA y no se escribe fija: este test, al contrario que
+    // los de arriba, pasa por la validacion del servicio, que compara contra
+    // `hoyEnColombia()` de verdad -este fichero no monta reloj falso-. Una
+    // fecha fija seria una cuenta atras: en cuanto el calendario la alcanzara,
+    // el test se pondria rojo por `fecha_en_pasado`, un motivo que no tiene
+    // nada que ver con lo que este test vigila.
+    const fecha = manana(hoyEnColombia());
     const id = await sembrarEmpleado(db, 'permiso@hora.test');
     await crearSolicitud(
       db,
       { email: 'permiso@hora.test', userId: null, esAdmin: false },
-      { tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-01', horaInicio: '09:00', horaFin: '11:00' },
+      { tipo: 'permiso', fechaInicio: fecha, fechaFin: fecha, horaInicio: '09:00', horaFin: '11:00' },
     );
     const [s] = await solicitudesDeEmpleado(db, id);
     expect(s.horaInicio).toBe('09:00');
