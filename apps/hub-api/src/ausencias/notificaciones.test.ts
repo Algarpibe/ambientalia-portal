@@ -857,6 +857,53 @@ describe('la decisión del cambio', () => {
     expect(p.hoja).toBeNull();
   });
 
+  // CANDADO. El `actualizar` de producción: la solicitud llega aquí YA aplicada,
+  // así que sus horas son las que el evento tiene que enseñar. `correccionDeCalendario`
+  // hereda el bloque horario con el spread y nadie lo comprobaba.
+  it('CANDADO: aprobar un cambio de fechas de un permiso CON HORA mueve el bloque horario', () => {
+    const s = conCadena({
+      tipo: 'permiso',
+      eventoCalendarioId: EV,
+      fechaInicio: '2026-09-02',
+      fechaFin: '2026-09-02',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadModificacion(s, modificacion(), 'modificacion_aprobada');
+    expect(p.calendario).toEqual({
+      calendarId: CALENDARIO_STAFF,
+      eventId: EV,
+      accion: 'actualizar',
+      todoElDia: false,
+      resumen: 'Permisos Ana Ruiz',
+      inicio: '2026-09-02T09:00:00-05:00',
+      // Sin el +1, que solo vale para un evento de día completo.
+      fin: '2026-09-02T11:00:00-05:00',
+    });
+  });
+
+  // CANDADO. El `borrar` también lleva el campo: al otro lado un `todoElDia`
+  // ausente es `undefined`, y la expresión de n8n que lo lee exige el `false`
+  // explícito. Es el mismo problema que tuvo en su día el campo `drive`.
+  it('CANDADO: anular un permiso CON HORA borra el evento y el payload sigue llevando la franja', () => {
+    const s = conCadena({
+      tipo: 'permiso',
+      eventoCalendarioId: EV,
+      fechaInicio: '2026-09-02',
+      fechaFin: '2026-09-02',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadModificacion(s, anulacion(), 'modificacion_aprobada');
+    expect(p.calendario).toMatchObject({
+      eventId: EV,
+      accion: 'borrar',
+      todoElDia: false,
+      inicio: '2026-09-02T09:00:00-05:00',
+      fin: '2026-09-02T11:00:00-05:00',
+    });
+  });
+
   it('CANDADO: aprobar una anulación manda BORRAR el evento', () => {
     // Aquí las fechas de la solicitud NO se tocaron —anular no las cambia—, así
     // que describen el evento que está a punto de desaparecer.
@@ -1002,6 +1049,39 @@ describe('el payload de una corrección del registro', () => {
     expect(p.correo.cuerpo).toContain('ya se ha corregido solo');
   });
 
+  // CANDADO. Los otros tres constructores de evento —este, el de la decisión de
+  // una modificación y el del borrado— hacen `...calendario(s)` y solo pisan
+  // `eventId` y `accion`, así que el bloque horario les llega heredado. Nadie lo
+  // comprobaba: una rama de `calendario()` que solo valiera para el `crear`
+  // dejaría los `actualizar` de los permisos con hora como eventos de día
+  // completo, y el correo diría igualmente que el calendario ya está corregido.
+  it('CANDADO: corregir un permiso CON HORA lo mueve como bloque horario, no como día completo', () => {
+    const conHora = (over: Partial<Solicitud> = {}) =>
+      aprobadaConEvento({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-01',
+        fechaFin: '2026-09-01',
+        horaInicio: '09:00',
+        horaFin: '11:00',
+        ...over,
+      });
+    const p = construirPayloadCorreccion(
+      conHora(),
+      conHora({ fechaInicio: '2026-09-02', fechaFin: '2026-09-02' }),
+      ADMIN,
+    );
+
+    expect(p.calendario).toMatchObject({
+      eventId: EVENT_ID,
+      accion: 'actualizar',
+      todoElDia: false,
+      inicio: '2026-09-02T09:00:00-05:00',
+      // Sin el +1: con hora, el fin es el fin. Sumárselo dejaría en el
+      // calendario del equipo un permiso de dos horas que dura veintiséis.
+      fin: '2026-09-02T11:00:00-05:00',
+    });
+  });
+
   it('borra el evento cuando la solicitud sale del calendario', () => {
     const previa = aprobadaConEvento();
     const actual = aprobadaConEvento({ estado: 'rechazada' });
@@ -1118,6 +1198,30 @@ describe('el payload del borrado de una solicitud', () => {
     });
     expect(p.correo.asunto).toContain('⚠️ Ajustar la hoja —');
     expect(p.correo.cuerpo).toContain('ya se ha borrado solo');
+  });
+
+  // CANDADO. El evento se describe tal como está justo antes de desaparecer, y
+  // eso incluye la franja. `todoElDia` viaja también aquí: un campo ausente al
+  // otro lado es `undefined`, que no es ni `true` ni `false`.
+  it('CANDADO: borrar un permiso CON HORA sigue describiendo el bloque horario', () => {
+    const borrada = solicitud({
+      tipo: 'permiso',
+      estado: 'aprobada',
+      eventoCalendarioId: EVENT_ID,
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      horaInicio: '09:00',
+      horaFin: '11:00',
+    });
+    const p = construirPayloadBorrado(borrada, ADMIN);
+
+    expect(p.calendario).toMatchObject({
+      eventId: EVENT_ID,
+      accion: 'borrar',
+      todoElDia: false,
+      inicio: '2026-09-01T09:00:00-05:00',
+      fin: '2026-09-01T11:00:00-05:00',
+    });
   });
 
   // CANDADO. Las aprobadas anteriores a la migración 026 llevan en Google un id
