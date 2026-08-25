@@ -179,14 +179,18 @@ export function estaEnElCalendario(estado: EstadoSolicitud): boolean {
 /**
  * Si una corrección cambia algo que el EVENTO del calendario enseña.
  *
- * El evento solo enseña tres cosas: que existe, sus fechas y su `resumen`
+ * El evento enseña que existe, sus fechas, su `resumen`
  * —`${ETIQUETA_TIPO[tipo]} ${empleadoNombre}`, ver `calendario()` en
- * `notificaciones.ts`—. Por eso `dias`, `comentarios` y `observaciones` quedan
- * fuera, y no por descuido: corregir el recuento de días de una aprobada —el
- * caso más corriente del histórico importado, donde el Excel anotó recuentos
- * que no cuadran— mandaría a Google un `actualizar` idéntico al evento que ya
- * hay, y con él un correo diciendo que algo se corrigió solo. Un ⚠️ que avisa
- * de lo que no ha pasado es cómo se enseña a la gente a no leerlos.
+ * `notificaciones.ts`— y, desde que un permiso de un día puede llevar hora, su
+ * franja horaria. Esa última NO se compara aquí: el porqué, y qué hay que hacer
+ * el día que deje de ser inofensivo, en el ⚠️ de dentro de la función.
+ *
+ * `dias`, `comentarios` y `observaciones` quedan fuera, y no por descuido:
+ * corregir el recuento de días de una aprobada —el caso más corriente del
+ * histórico importado, donde el Excel anotó recuentos que no cuadran— mandaría a
+ * Google un `actualizar` idéntico al evento que ya hay, y con él un correo
+ * diciendo que algo se corrigió solo. Un ⚠️ que avisa de lo que no ha pasado es
+ * cómo se enseña a la gente a no leerlos.
  *
  * El empleado va por `empleadoId` y no por `empleadoNombre`: el nombre es un
  * campo desnormalizado que viene del JOIN, y reasignar la solicitud a otra
@@ -201,6 +205,26 @@ export function cambiaElCalendario(previa: Solicitud, actual: Solicitud): boolea
   // para siempre, sin avisar a nadie. Es la misma forma de fallo que documenta
   // el orden de ramas de `cambiaLaHoja`, un poco más abajo.
   if (esOtorgamiento(previa.tipo) && esOtorgamiento(actual.tipo)) return false;
+  // ⚠️ Las HORAS no se comparan, y el evento SÍ las enseña: desde la 036 un
+  // permiso de un día puede llevar franja, y `calendario()` la convierte en un
+  // bloque horario con el desfase de Colombia en vez del evento de día completo.
+  //
+  // Hoy eso no es explotable, y por eso se deja así en lugar de añadir una regla
+  // que ningún test podría matar: las horas solo se escriben en el ALTA
+  // —`validarHoras`, en service.ts—, el PATCH del Registro general no las
+  // acepta, y el único camino que las cambia después es el `CASE` que las BORRA
+  // cuando el permiso deja de ser de un día. Ese `CASE` va SIEMPRE acompañado de
+  // un cambio de fechas, y el cambio de fechas sí lo detecta la comparación de
+  // aquí abajo.
+  //
+  // El día que alguien abra la edición de la hora SIN tocar las fechas, esta
+  // comparación hay que ampliarla EN EL MISMO COMMIT. Sin eso,
+  // `situacionDelCalendario` (notificaciones.ts) devolvería `no_cambia`: no se
+  // emitiría ningún `actualizar`, el evento se quedaría en Google con la franja
+  // vieja, y encima el correo afirmaría que «el evento del calendario no cambia
+  // con esta corrección». Un ⚠️ que NIEGA lo que sí ha pasado es la misma forma
+  // de fallo que el `Record` de avisos —`AVISO_DE`— existe para evitar, y la
+  // misma que documenta el párrafo de `dias` de aquí arriba.
   return (
     estaEnElCalendario(previa.estado) !== estaEnElCalendario(actual.estado) ||
     previa.fechaInicio !== actual.fechaInicio ||
