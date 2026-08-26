@@ -48,6 +48,64 @@ interface Props {
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
+/**
+ * Cuántas horas puede durar un permiso, de media en media.
+ *
+ * De media en media **hasta el final**, y no solo al principio: «me voy de 8:00 a
+ * 12:30» son cuatro horas y media, y es un caso tan corriente como los cortos.
+ * Cortar los medios a partir de las cuatro obligaría a redondear a mano.
+ *
+ * Media hora y no cuartos porque es la granularidad del «desde»: ofrecer cuartos
+ * aquí dejaría elegir finales que el selector de la hora no sabe empezar.
+ *
+ * Se corta en 8 —una jornada— a propósito: un permiso más largo que eso ya es el
+ * día entero, y el día entero se pide dejando el horario en blanco. Es una lista
+ * y no un campo numérico libre para no tener que pelearse con el separador
+ * decimal, que en español es la coma y en un `input[type=number]` no siempre.
+ */
+const HORAS_POSIBLES = [
+  '0.5', '1', '1.5', '2', '2.5', '3', '3.5', '4',
+  '4.5', '5', '5.5', '6', '6.5', '7', '7.5', '8',
+];
+
+/**
+ * «0.5» → «media hora», «1.5» → «hora y media», «2.5» → «2 horas y media».
+ *
+ * Los tres casos con nombre propio no son un capricho: «0,5 horas» y «1,5 horas»
+ * son correctos pero nadie los dice así, y este desplegable lo rellena quien
+ * está pidiendo permiso para ir al médico, no quien lleva la nómina. El `value`
+ * sigue siendo el número con punto, que es lo que la aritmética espera.
+ */
+function etiquetaHoras(h: string): string {
+  if (h === '0.5') return 'media hora';
+  if (h === '1.5') return 'hora y media';
+  if (h === '1') return '1 hora';
+  const [enteras, mitad] = h.split('.');
+  return mitad ? `${enteras} horas y media` : `${enteras} horas`;
+}
+
+/**
+ * La hora a la que acaba el permiso, o `null` si no hay franja que calcular.
+ *
+ * El servidor sigue guardando principio y fin —un evento de Google necesita los
+ * dos, y el CHECK de la migración 036 exige `hora_fin > hora_inicio`—, así que
+ * esto es solo la resta que el formulario le ahorra a quien pide.
+ *
+ * ⚠️ Devuelve `null` cuando la suma llega o pasa la medianoche, y NO la recorta a
+ * las 23:59. Un permiso que cruza el día no cabe en este modelo: las dos horas
+ * viven en la MISMA fecha, así que un fin «anterior» al inicio rebotaría contra
+ * el CHECK con un 500 desde dentro de una transacción. Recortarlo en silencio
+ * sería peor todavía — guardaría algo distinto de lo que la persona pidió.
+ */
+function finDelPermiso(desde: string, horas: string): string | null {
+  if (desde === '' || horas === '') return null;
+  const [h, m] = desde.split(':').map(Number);
+  const total = h * 60 + m + Math.round(Number(horas) * 60);
+  if (!Number.isFinite(total) || total >= 24 * 60) return null;
+  const dosDigitos = (n: number) => String(n).padStart(2, '0');
+  return `${dosDigitos(Math.floor(total / 60))}:${dosDigitos(total % 60)}`;
+}
+
 export default function FormularioSolicitud({
   festivos,
   aprobador,
@@ -66,9 +124,13 @@ export default function FormularioSolicitud({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exito, setExito] = useState<string | null>(null);
-  /** La franja horaria del permiso, `HH:MM`. Vacías = día completo. */
+  /** A qué hora empieza el permiso, `HH:MM`. Vacía = día completo. */
   const [horaInicio, setHoraInicio] = useState('');
-  const [horaFin, setHoraFin] = useState('');
+  // Cuántas horas dura, no a qué hora acaba: es la forma en que la gente piensa
+  // un permiso («me voy dos horas»), y ahorra la resta mental. El servidor sigue
+  // recibiendo un principio y un FIN —un evento de calendario necesita los dos—,
+  // así que el final se deriva aquí abajo en `horaFin`.
+  const [horas, setHoras] = useState('');
   const inputArchivo = useRef<HTMLInputElement>(null);
 
   const pideOtorgamiento = esOtorgamiento(tipo);
@@ -97,20 +159,58 @@ export default function FormularioSolicitud({
   // todavía no tiene ningún día elegido.
   const admiteHora = tipo === 'permiso' && fechaInicio !== '' && fechaInicio === fechaFin;
 
+  // La hora a la que acaba, derivada. `null` significa «esta solicitud no lleva
+  // franja», y engloba los tres casos en que no la lleva: falta el «desde»,
+  // faltan las horas, o la suma se pasa de medianoche.
+  const horaFin = finDelPermiso(horaInicio, horas);
+
+  // Los TRES motivos por los que una franja a medio poner apaga el botón. Van
+  // guardados por `admiteHora` en `horaMalPuesta`: si la franja ni siquiera se
+  // está pintando —porque cambiaron a vacaciones, o alargaron a un rango—, unas
+  // horas tecleadas antes no pueden bloquear el envío de algo que ya no las
+  // lleva.
+  //
+  // Ya NO hace falta comprobar que el fin sea posterior al inicio: con una
+  // duración siempre positiva, eso no se puede dar. Es la mitad del motivo por el
+  // que este campo dejó de ser una hora.
+  const mediaPareja = (horaInicio !== '') !== (horas !== '');
+  const seSaleDelDia = horaInicio !== '' && horas !== '' && horaFin === null;
+  // ⚠️ El navegador NO recorta a la rejilla del `step`: se queda con el 10:15
+  // tecleado a mano y marca el campo `:invalid` por `stepMismatch`. Y como este
+  // formulario no lleva `noValidate`, la validación nativa aborta el submit
+  // ANTES de llegar al `onSubmit` — o sea, botón con pinta de activo, la
+  // pantalla diciendo «Termina a las 12:15», y al pulsar no pasa nada, ni con el
+  // ratón ni con Enter, salvo un globo del navegador en su propio idioma.
+  // Comprobado en Chrome con teclado real.
+  //
+  // Se detecta aquí para apagar el botón CON SU MOTIVO al lado, que es lo que
+  // hace el resto del formulario. Recortarlo en silencio sería el otro camino, y
+  // se descarta por lo mismo que en `finDelPermiso`: cambiaría lo que la persona
+  // escribió.
+  //
+  // Anclada por los dos extremos, y no solo por el final: sin el `^` se colarían
+  // un `10:15:00` y un `9:30`, que además el servidor rechazaría con
+  // `hora_invalida`. Escrita en positivo —lo que se ACEPTA— espeja el `HORA` de
+  // `service.ts`, que es la otra mitad de esta misma regla.
+  const EN_REJILLA = /^([01]\d|2[0-3]):(00|30)$/;
+  const horaFueraDeRejilla = horaInicio !== '' && !EN_REJILLA.test(horaInicio);
+
   // Y por lo mismo NO se borran con un efecto al dejar de caber: basta con que
   // solo viajen cuando caben. Así no hay estado que pueda quedarse caducado, y
   // si el usuario vuelve a poner un solo día recupera lo que había tecleado.
-  const conHoras = admiteHora && horaInicio !== '' && horaFin !== '';
-
-  // La pareja a medias, o del revés, apaga el botón. Las dos mitades van
-  // guardadas por `admiteHora`: si la franja ni siquiera se está pintando —
-  // porque cambiaron a vacaciones, o alargaron a un rango—, unas horas tecleadas
-  // antes no pueden bloquear el envío de algo que ya no las lleva.
   //
+  // ⚠️ El `!horaFueraDeRejilla` no sobra, aunque `horaFin` sí se pueda calcular
+  // con un 10:15: sin él, `conHoras` diría «esta solicitud lleva franja» sobre
+  // una hora que la propia pantalla está rechazando en rojo. Las dos
+  // consecuencias eran reales — la nota de abajo contradecía al aviso, y el
+  // cuerpo de la petición se habría llevado el `10:15`, protegido solo por el
+  // `if (!puedeEnviar) return` que vive treinta líneas más abajo. Esta constante
+  // tiene que significar exactamente «estas horas viajan», o no significa nada.
+  const conHoras = admiteHora && horaFin !== null && !horaFueraDeRejilla;
+
   // Se nombra en negativo porque `puedeEnviar` es afirmativo y esto entra ahí
   // como `&& !horaMalPuesta`.
-  const horaMalPuesta =
-    (admiteHora && (horaInicio !== '') !== (horaFin !== '')) || (conHoras && horaFin <= horaInicio);
+  const horaMalPuesta = admiteHora && (mediaPareja || seSaleDelDia || horaFueraDeRejilla);
 
   // Lo que requiere aprobación no puede empezar en el pasado. La incapacidad sí:
   // se informa después de haber estado enfermo, así que `minFecha` le queda
@@ -263,6 +363,12 @@ export default function FormularioSolicitud({
         // luego abandonadas —cambiando a vacaciones, o alargando el rango— no
         // viajan en el cuerpo, que es justo lo que el servidor devolvería como
         // `hora_no_permitida`.
+        //
+        // El alias basta para que TypeScript estreche `horaFin` a `string` aquí
+        // dentro: siendo los dos `const`, el análisis de flujo atraviesa una
+        // condición con nombre desde TS 4.4. Repetir la condición a mano dejaría
+        // dos sitios que mantener sincronizados, que es justo lo que documenta
+        // `sobregiroPermitido` más arriba que no se debe hacer.
         ...(conHoras ? { horaInicio, horaFin } : {}),
       });
       setExito(
@@ -280,7 +386,7 @@ export default function FormularioSolicitud({
       // listo para otra solicitud, y una franja superviviente volvería a viajar
       // sola en cuanto la siguiente fuera otro permiso de un solo día.
       setHoraInicio('');
-      setHoraFin('');
+      setHoras('');
       limpiarArchivo();
       onCreada(creada);
     } catch (err) {
@@ -405,51 +511,83 @@ export default function FormularioSolicitud({
           así que anidarlo ahí dentro solo lo escondería dos veces. */}
       {admiteHora && (
         <div className="mb-4">
-          <p className="mb-1 block text-sm font-medium text-gray-700">
-            Horario <span className="font-normal text-gray-500">(opcional)</span>
-          </p>
+          {/* El «(opcional)» va en la frase y no colgando de una etiqueta: la
+              regla es que los dos campos van juntos o ninguno, así que ponerlo
+              sobre uno solo dejaría al otro con pinta de obligatorio. */}
           <p className="mb-2 text-xs text-gray-500">
-            Si el permiso es de unas horas y no del día entero, dilo aquí: así se ve en el calendario del equipo.
+            <b className="font-medium">Opcional.</b> Si el permiso es de unas horas y no del día entero, dilo aquí: así
+            se ve en el calendario del equipo.
           </p>
-          {/* Sin `step`, y no por olvido: con el paso por defecto —60 segundos—
-              el `value` sale como `HH:MM`, que es justo lo que esperan el regex
-              del servidor y la comparación lexicográfica de `horaMalPuesta`.
-              Poner `step={1}` lo convertiría en `HH:MM:SS` y el alta se caería
-              con `hora_invalida` sin que nada de aquí lo delatara. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               {/* Etiqueta visible, no solo `aria-label`: en móvil el grid es de
-                  una columna y los dos campos se apilan como dos cajas `--:--`
-                  idénticas, sin nada que diga cuál es cuál. */}
+                  una columna y los dos campos se apilan sin nada que diga cuál
+                  es cuál. */}
               <label htmlFor="horaInicio" className="mb-1 block text-sm font-medium text-gray-700">
-                Desde
+                Horario desde
               </label>
+              {/* `step` de media hora: es la granularidad con la que se piden
+                  estos permisos, y hace que el selector salte de :00 a :30 en
+                  vez de minuto a minuto.
+                  ⚠️ 1800 es múltiplo de 60, así que el `value` sigue saliendo
+                  como `HH:MM`. Un `step` POR DEBAJO de 60 lo convertiría en
+                  `HH:MM:SS` y el alta se caería con `hora_invalida` sin que nada
+                  de aquí lo delatara. */}
               <input
                 id="horaInicio"
                 type="time"
+                step={1800}
                 value={horaInicio}
                 onChange={(e) => setHoraInicio(e.target.value)}
                 className={CAMPO}
               />
             </div>
             <div>
-              <label htmlFor="horaFin" className="mb-1 block text-sm font-medium text-gray-700">
-                Hasta
+              <label htmlFor="horas" className="mb-1 block text-sm font-medium text-gray-700">
+                Número de horas
               </label>
-              <input
-                id="horaFin"
-                type="time"
-                value={horaFin}
-                onChange={(e) => setHoraFin(e.target.value)}
-                className={CAMPO}
-              />
+              <select id="horas" value={horas} onChange={(e) => setHoras(e.target.value)} className={CAMPO}>
+                {/* «Día completo» y no un guion: es la respuesta a la pregunta
+                    que se hace quien abre el desplegable, y es además el único
+                    sitio de la pantalla donde se dice cómo se pide el día
+                    entero —dejando el horario en blanco—. */}
+                <option value="">Día completo</option>
+                {HORAS_POSIBLES.map((h) => (
+                  <option key={h} value={h}>
+                    {etiquetaHoras(h)}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          {horaInicio !== '' && horaFin !== '' && horaFin <= horaInicio && (
-            <p className="mt-1 text-sm text-red-600">La hora de fin tiene que ser posterior a la de inicio.</p>
+          {/* El final, de vuelta: se pidió la duración para no hacer restar a
+              nadie, pero quien lo lee necesita ver en qué acaba lo que ha
+              elegido. Derivado, no un campo más. */}
+          {/* `conHoras` y no `horaFin !== null`: con un 10:15 tecleado a mano la
+              cuenta sale igual, y enseñar «Termina a las 12:15» junto al aviso de
+              que esa hora no vale sería darle la razón a lo que se está
+              rechazando. Ese matiz vive ya dentro de `conHoras`, que es donde
+              tiene que vivir. */}
+          {conHoras && (
+            <p className="mt-1 text-sm text-gray-600">
+              Termina a las <b className="tabular-nums">{horaFin}</b>.
+            </p>
           )}
-          {(horaInicio === '') !== (horaFin === '') && (
-            <p className="mt-1 text-sm text-amber-700">Pon las dos horas, o ninguna.</p>
+          {horaFueraDeRejilla && (
+            <p className="mt-1 text-sm text-red-600">
+              El horario va de media en media hora: pon los minutos en <b>:00</b> o en <b>:30</b>.
+            </p>
+          )}
+          {seSaleDelDia && (
+            <p className="mt-1 text-sm text-red-600">
+              Esas horas no caben antes de medianoche. Empieza antes, o pide menos horas.
+            </p>
+          )}
+          {/* Sin nombrar los campos: la etiqueta dice «Horario desde» y llamarlo
+              aquí «la hora de inicio» sería darle dos nombres al mismo campo en
+              la misma pantalla. Solo hay dos, así que «los dos» no es ambiguo. */}
+          {mediaPareja && (
+            <p className="mt-1 text-sm text-amber-700">Rellena los dos campos, o deja los dos en blanco.</p>
           )}
         </div>
       )}
@@ -517,15 +655,16 @@ export default function FormularioSolicitud({
         <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
           Son <b className="tabular-nums">{dias}</b> {dias === 1 ? 'día hábil' : 'días hábiles'}, descontando fines de
           semana y festivos de Colombia.
-          {/* Solo cuando hay franja, que es el único momento en que la pantalla
-              dice a la vez «09:00 – 11:00» y «1 día hábil». Quien lee eso se
-              pregunta si le van a descontar el día entero, y sin esta línea la
-              duda se resuelve escribiéndole a administración — justo el tráfico
-              que esta app existe para quitar. */}
-          {conHoras && (
+          {/* En TODOS los permisos, no solo en los que llevan franja: la frase
+              habla del permiso entero, y quien pide uno de día completo es
+              precisamente quien más miedo tiene a que le descuenten. Sin esto,
+              la duda se resuelve escribiéndole a administración — justo el
+              tráfico que esta app existe para quitar. */}
+          {tipo === 'permiso' && (
             <span className="text-gray-500">
               {' '}
-              El horario es informativo: no cambia el conteo ni lo que se reporta a nómina.
+              Un permiso no descuenta de vacaciones ni de compensatorios
+              {conHoras ? ': el horario es solo para el calendario del equipo' : ''}.
             </span>
           )}
         </p>
