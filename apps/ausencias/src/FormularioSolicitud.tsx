@@ -10,6 +10,7 @@ import {
 } from './api';
 import {
   contarDiasHabiles,
+  esDeUnSoloDia,
   esOtorgamiento,
   etiquetasFecha,
   hoyEnColombia,
@@ -49,40 +50,21 @@ interface Props {
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
 /**
- * Cuántas horas puede durar un permiso, de media en media.
+ * Cuántas horas puede durar un permiso.
  *
- * De media en media **hasta el final**, y no solo al principio: «me voy de 8:00 a
- * 12:30» son cuatro horas y media, y es un caso tan corriente como los cortos.
- * Cortar los medios a partir de las cuatro obligaría a redondear a mano.
- *
- * Media hora y no cuartos porque es la granularidad del «desde»: ofrecer cuartos
- * aquí dejaría elegir finales que el selector de la hora no sabe empezar.
+ * Horas ENTERAS. La media hora sigue siendo alcanzable por el otro lado —el
+ * «desde» va de :00 en :30—, así que un permiso de 10:30 a 12:30 se pide igual;
+ * lo que ya no se puede es pedir media hora suelta.
  *
  * Se corta en 8 —una jornada— a propósito: un permiso más largo que eso ya es el
  * día entero, y el día entero se pide dejando el horario en blanco. Es una lista
- * y no un campo numérico libre para no tener que pelearse con el separador
- * decimal, que en español es la coma y en un `input[type=number]` no siempre.
+ * y no un campo numérico libre porque un desplegable de ocho opciones se rellena
+ * de un toque, también en el móvil.
  */
-const HORAS_POSIBLES = [
-  '0.5', '1', '1.5', '2', '2.5', '3', '3.5', '4',
-  '4.5', '5', '5.5', '6', '6.5', '7', '7.5', '8',
-];
+const HORAS_POSIBLES = ['1', '2', '3', '4', '5', '6', '7', '8'];
 
-/**
- * «0.5» → «media hora», «1.5» → «hora y media», «2.5» → «2 horas y media».
- *
- * Los tres casos con nombre propio no son un capricho: «0,5 horas» y «1,5 horas»
- * son correctos pero nadie los dice así, y este desplegable lo rellena quien
- * está pidiendo permiso para ir al médico, no quien lleva la nómina. El `value`
- * sigue siendo el número con punto, que es lo que la aritmética espera.
- */
-function etiquetaHoras(h: string): string {
-  if (h === '0.5') return 'media hora';
-  if (h === '1.5') return 'hora y media';
-  if (h === '1') return '1 hora';
-  const [enteras, mitad] = h.split('.');
-  return mitad ? `${enteras} horas y media` : `${enteras} horas`;
-}
+/** «1 hora», «2 horas». */
+const etiquetaHoras = (h: string): string => `${h} ${h === '1' ? 'hora' : 'horas'}`;
 
 /**
  * La hora a la que acaba el permiso, o `null` si no hay franja que calcular.
@@ -142,22 +124,42 @@ export default function FormularioSolicitud({
   const diasConcedidosValidos = /^\d{1,2}([.,]\d)?$/.test(diasTexto.trim()) && diasConcedidos > 0;
 
   const etiquetas = etiquetasFecha(tipo);
-  const dias = useMemo(() => contarDiasHabiles(fechaInicio, fechaFin, festivos), [fechaInicio, fechaFin, festivos]);
+
+  /**
+   * Un permiso y un otorgamiento ocupan UN día, así que no tienen segunda
+   * casilla y su fecha de fin es la de inicio.
+   *
+   * Derivada y no un `setFechaFin` colgado del `onChange` de la primera: así no
+   * hay un estado que pueda quedarse desincronizado si alguien cambia de tipo
+   * con las fechas ya puestas. Y el `fechaFin` de verdad se conserva intacto
+   * mientras tanto, de modo que volver a vacaciones recupera el rango que se
+   * había tecleado — el mismo criterio que las horas.
+   */
+  const unSoloDia = esDeUnSoloDia(tipo);
+  const fechaFinEfectiva = unSoloDia ? fechaInicio : fechaFin;
+
+  const dias = useMemo(
+    () => contarDiasHabiles(fechaInicio, fechaFinEfectiva, festivos),
+    [fechaInicio, fechaFinEfectiva, festivos],
+  );
   const adjuntoObligatorio = tipo === 'incapacidad';
   const aceptaAdjunto = tipo === 'incapacidad' || tipo === 'permiso';
 
-  const rangoInvertido = Boolean(fechaInicio && fechaFin && fechaInicio > fechaFin);
+  // Sobre la fecha EFECTIVA: en los de un solo día las dos son la misma, así que
+  // este aviso no puede saltar ahí — y es correcto que no salte, porque no hay
+  // ninguna segunda casilla que el usuario pueda poner del revés.
+  const rangoInvertido = Boolean(fechaInicio && fechaFinEfectiva && fechaInicio > fechaFinEfectiva);
   const faltaAdjunto = adjuntoObligatorio && !archivo;
 
-  // La franja solo cabe en un permiso de un solo día. DERIVADO y no un estado
-  // más: un estado tendría que sincronizarse a mano cada vez que cambian el tipo
-  // o las fechas, y el día que una de esas rutas se olvidara, el formulario
-  // mandaría una hora que el servidor rechaza con un 400.
+  // La franja solo cabe en un permiso, que desde el 2026-08-25 es siempre de un
+  // solo día. Ya no hace falta comparar las dos fechas: `esDeUnSoloDia` garantiza
+  // que coinciden, y comprobarlo aquí sería repetir esa regla en un segundo
+  // sitio que puede desviarse.
   //
-  // El `fechaInicio !== ''` no sobra: al abrir el formulario las dos fechas están
-  // vacías, y sin él `'' === ''` haría aparecer la franja sobre un permiso que
-  // todavía no tiene ningún día elegido.
-  const admiteHora = tipo === 'permiso' && fechaInicio !== '' && fechaInicio === fechaFin;
+  // El `fechaInicio !== ''` sí sigue haciendo falta: al abrir el formulario está
+  // vacía, y sin él la franja aparecería sobre un permiso que todavía no tiene
+  // ningún día elegido.
+  const admiteHora = tipo === 'permiso' && fechaInicio !== '';
 
   // La hora a la que acaba, derivada. `null` significa «esta solicitud no lleva
   // franja», y engloba los tres casos en que no la lleva: falta el «desde»,
@@ -166,9 +168,8 @@ export default function FormularioSolicitud({
 
   // Los TRES motivos por los que una franja a medio poner apaga el botón. Van
   // guardados por `admiteHora` en `horaMalPuesta`: si la franja ni siquiera se
-  // está pintando —porque cambiaron a vacaciones, o alargaron a un rango—, unas
-  // horas tecleadas antes no pueden bloquear el envío de algo que ya no las
-  // lleva.
+  // está pintando —porque cambiaron el tipo—, unas horas tecleadas antes no
+  // pueden bloquear el envío de algo que ya no las lleva.
   //
   // Ya NO hace falta comprobar que el fin sea posterior al inicio: con una
   // duración siempre positiva, eso no se puede dar. Es la mitad del motivo por el
@@ -302,7 +303,9 @@ export default function FormularioSolicitud({
   // servidor con su mensaje, y duplicarlas aquí sería tener la regla dos veces.
   const puedeEnviar = pideOtorgamiento
     ? Boolean(fechaInicio) && diasConcedidosValidos && Boolean(comentarios.trim()) && !enviando
-    : Boolean(fechaInicio && fechaFin) &&
+    : // La EFECTIVA: en un permiso no hay segunda casilla que rellenar, así que
+      // exigir el `fechaFin` de verdad dejaría el botón apagado para siempre.
+      Boolean(fechaInicio && fechaFinEfectiva) &&
       !rangoInvertido &&
       !fechaEnPasado &&
       !faltaAdjunto &&
@@ -349,20 +352,19 @@ export default function FormularioSolicitud({
       const creada = await crearSolicitud({
         tipo,
         fechaInicio,
-        // Un otorgamiento es UN día: el fin es el mismo que el inicio, y el
-        // servidor lo exige. Se manda explícito en vez de dejar el campo vacío
-        // porque `fechaFin` no es opcional en el contrato.
-        fechaFin: pideOtorgamiento ? fechaInicio : fechaFin,
+        // La efectiva, que resuelve de una vez el otorgamiento y el permiso: los
+        // dos son de UN día y ninguno tiene segunda casilla. Se manda explícita
+        // y no se deja vacía porque `fechaFin` no es opcional en el contrato.
+        fechaFin: fechaFinEfectiva,
         comentarios: comentarios.trim() || undefined,
         dias: pideOtorgamiento ? diasConcedidos : undefined,
         adjunto: archivo
           ? { nombreArchivo: archivo.name, mime: archivo.type, contenidoBase64: await leerComoBase64(archivo) }
           : undefined,
         // Solo cuando la pareja está completa Y cabe: `conHoras` cuelga de
-        // `admiteHora`, así que unas horas tecleadas para un permiso de un día y
-        // luego abandonadas —cambiando a vacaciones, o alargando el rango— no
-        // viajan en el cuerpo, que es justo lo que el servidor devolvería como
-        // `hora_no_permitida`.
+        // `admiteHora`, así que unas horas tecleadas para un permiso y luego
+        // abandonadas —cambiando el tipo a otra cosa— no viajan en el cuerpo, que
+        // es justo lo que el servidor devolvería como `hora_no_permitida`.
         //
         // El alias basta para que TypeScript estreche `horaFin` a `string` aquí
         // dentro: siendo los dos `const`, el análisis de flujo atraviesa una
@@ -489,20 +491,27 @@ export default function FormularioSolicitud({
               className={CAMPO}
             />
           </div>
-          <div>
-            <label htmlFor="fechaFin" className="mb-1 block text-sm font-medium text-gray-700">
-              {etiquetas.fin}
-            </label>
-            <input
-              id="fechaFin"
-              type="date"
-              required
-              value={fechaFin}
-              min={fechaInicio || minInicio}
-              onChange={(e) => setFechaFin(e.target.value)}
-              className={CAMPO}
-            />
-          </div>
+          {/* En un permiso no se pinta: ocupa un solo día y su fecha de fin es la
+              de inicio. Se esconde el campo entero y no solo la etiqueta, porque
+              un `<input required>` invisible bloquearía el envío desde la
+              validación nativa sin que la app pudiera decir por qué — el mismo
+              callejón sin salida que abría el `step` del horario. */}
+          {!unSoloDia && (
+            <div>
+              <label htmlFor="fechaFin" className="mb-1 block text-sm font-medium text-gray-700">
+                {etiquetas.fin}
+              </label>
+              <input
+                id="fechaFin"
+                type="date"
+                required
+                value={fechaFin}
+                min={fechaInicio || minInicio}
+                onChange={(e) => setFechaFin(e.target.value)}
+                className={CAMPO}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -655,9 +664,12 @@ export default function FormularioSolicitud({
         <p className="mb-4 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-700">
           Son <b className="tabular-nums">{dias}</b> {dias === 1 ? 'día hábil' : 'días hábiles'}, descontando fines de
           semana y festivos de Colombia.
-          {/* En TODOS los permisos, no solo en los que llevan franja: la frase
-              habla del permiso entero, y quien pide uno de día completo es
-              precisamente quien más miedo tiene a que le descuenten. Sin esto,
+          {/* En todo permiso que llegue hasta aquí, y no solo en los que llevan
+              franja: la frase habla del permiso entero, y quien pide uno de día
+              completo es precisamente quien más miedo tiene a que le descuenten.
+              (El párrafo cuelga de `dias > 0`, así que un permiso en sábado o
+              festivo se queda sin ella — es el mismo hueco preexistente que ya
+              deja el contador mudo ahí, no uno nuevo.) Sin esto,
               la duda se resuelve escribiéndole a administración — justo el
               tráfico que esta app existe para quitar. */}
           {tipo === 'permiso' && (

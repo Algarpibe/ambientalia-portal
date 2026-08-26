@@ -136,7 +136,30 @@ export function correoDelTurno(s: ConTurno): string | null {
   return null;
 }
 
-/** Etiqueta del campo de fecha según el tipo, como en los formularios de n8n. */
+/**
+ * Los tipos que ocupan UN solo día, y por eso piden una fecha y no un rango.
+ *
+ * El otorgamiento lo fue siempre: su fecha es el día que se trabajó de más. El
+ * permiso se sumó el 2026-08-25 — un permiso es «me voy dos horas al médico» o
+ * «me tomo el jueves», no una temporada, y pedirlo con dos casillas obligaba a
+ * repetir el mismo día en las dos.
+ *
+ * ⚠️ Acota lo que se puede PEDIR, no lo que existe. Los permisos de varios días
+ * que ya están en la base siguen ahí y se siguen pintando con su rango, así que
+ * ninguna pantalla que los lea puede dar por hecho que inicio y fin coinciden.
+ */
+export function esDeUnSoloDia(tipo: TipoSolicitud): boolean {
+  return esOtorgamiento(tipo) || tipo === 'permiso';
+}
+
+/**
+ * Etiqueta del campo de fecha según el tipo, como en los formularios de n8n.
+ *
+ * `fin` sale vacío en los de un solo día: no hay segunda casilla que etiquetar.
+ * Se devuelve igual —y no se cambia la forma del objeto— para que quien llama no
+ * tenga que discriminar por tipo, que es justo lo que esta función existe para
+ * evitar.
+ */
 export function etiquetasFecha(tipo: TipoSolicitud): { inicio: string; fin: string } {
   const n: Record<TipoSolicitud, string> = {
     vacaciones: 'de vacaciones',
@@ -145,6 +168,7 @@ export function etiquetasFecha(tipo: TipoSolicitud): { inicio: string; fin: stri
     incapacidad: 'de incapacidad',
     otorgamiento: 'de trabajo extra',
   };
+  if (esDeUnSoloDia(tipo)) return { inicio: `Fecha ${n[tipo]}`, fin: '' };
   return { inicio: `Fecha primer día ${n[tipo]}`, fin: `Fecha último día ${n[tipo]}` };
 }
 
