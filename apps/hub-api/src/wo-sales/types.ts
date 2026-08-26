@@ -1,6 +1,8 @@
 /** Una línea de producto de una orden de venta, ya normalizada desde el hub. */
 export interface SalesOrderLine {
   sku: string | null;
+  /** Nombre del artículo en Zoho. Ya NO va al archivo (la columna "Nota Detalle" va
+   *  vacía en el modelo de World Office); se conserva para diagnóstico y advertencias. */
   descripcion: string | null;
   /** Cantidad PENDIENTE de facturar (pedida − facturada − cancelada), no la pedida.
    *  World Office solo debe crear el pedido de lo que aún no se facturó. Las líneas
@@ -25,8 +27,13 @@ export interface SalesOrder {
   clienteNombre: string | null;
   nit: string | null;
   formaPagoZoho: string | null;
-  /** ISO YYYY-MM-DD, o null si Zoho no la tiene. */
+  /** ISO YYYY-MM-DD, o null si Zoho no la tiene. Ya NO va al archivo (la columna
+   *  "FechaEntrega" va vacía en el modelo); se conserva por si vuelve a usarse. */
   fechaEntrega: string | null;
+  /** Plazo de pago en días (Zoho `payment_terms`). null = ausente en Zoho (se usa el
+   *  plazo por defecto y se avisa); 0 = contado (Vencimiento = Fecha). Alimenta el
+   *  cálculo de "Vencimiento" = Fecha + plazoPago (ver builder + config.vencimiento). */
+  plazoPago: number | null;
   moneda: string | null;
   /** Descuento a nivel de documento (raw->>'discount_total'). Esta organización
    *  descuenta con discount_type "entity_level", así que el descuento NO está en las
@@ -44,18 +51,22 @@ export type WarningTipo =
   | 'sin_centro_costos'
   | 'centro_costos_invalido'
   | 'varios_centros_costos'
-  | 'sin_fecha_entrega'
   | 'sin_nit'
   | 'sin_sku'
-  | 'sin_empresa'
+  // §5: el SKU/centro de costos existe pero World Office no lo tiene en su lista maestra.
+  | 'sku_no_en_wo'
+  | 'centro_costos_no_en_wo'
   | 'moneda_no_cop'
   | 'descuento_cabecera_ignorado'
   | 'ov_parcialmente_facturada'
-  | 'forma_pago_desconocida'
   | 'ov_antigua'
   | 'ov_sin_lineas'
   | 'valor_no_numerico'
-  | 'valor_saneado';
+  | 'valor_saneado'
+  // El modelo de WO no lleva forma de pago homologada ni fecha de entrega, y la
+  // empresa es fija: por eso ya no existen 'forma_pago_desconocida', 'sin_fecha_entrega'
+  // ni 'sin_empresa'. En su lugar, el plazo de pago alimenta el vencimiento:
+  | 'plazo_pago_ausente';
 
 export interface Warning {
   tipo: WarningTipo;
