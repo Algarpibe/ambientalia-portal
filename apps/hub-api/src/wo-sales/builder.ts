@@ -33,6 +33,12 @@ export function derivarPrefijo(fechaIso: string, config: WoSalesConfig): string 
   return /^\d{4}$/.test(anio) ? `OV_${anio}` : '';
 }
 
+/** Normaliza un SKU para compararlo con el listado de World Office. `\s` incluye el
+ *  NBSP, así que colapsa cualquier espacio raro; trim al final. El SKU es un token. */
+export function normSku(sku: string): string {
+  return sku.replace(/\s+/g, ' ').trim();
+}
+
 /**
  * El formato no usa comillas: ni el separador (;) ni el terminador de registro
  * (CR/LF) pueden aparecer dentro de un valor sin romper la fila. Zoho permite
@@ -58,22 +64,6 @@ export function partirCentroCostos(valor: string | null): {
   const [codigo, ...resto] = valor.trim().split(/\s+/);
   if (!/^\d+$/.test(codigo)) return { codigo: '', descripcion: '', valido: false };
   return { codigo, descripcion: resto.join(' '), valido: true };
-}
-
-/**
- * Nombre del centro de costos EXACTO como lo espera World Office (§5.2). WO exige el
- * nombre, no el código: se parte "código descripción" de Zoho y se traduce el código
- * con el override de config (las discrepancias conocidas); para un código sin override
- * se usa la descripción de Zoho tal cual (coincide con WO). Cadena vacía si no hay un
- * centro de costos válido (ya se avisó).
- *
- * PENDIENTE (§5): con la hoja `ceco` completa del modelo, aquí se validará además que
- * el código EXISTA en WO y se avisará si no; hoy solo se traducen las 5 excepciones.
- */
-export function nombreCentroCostosWO(valor: string | null, config: WoSalesConfig): string {
-  const { codigo, descripcion, valido } = partirCentroCostos(valor);
-  if (!valido) return '';
-  return config.centrosCostosWO[codigo] ?? descripcion;
 }
 
 export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig): BuildResult {
@@ -136,9 +126,45 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     return toWoDate(sumarDias(ov.fecha, plazo));
   };
 
+  /** Nombre del centro de costos EXACTO de World Office (§5.2). Traduce el código con la
+   *  homologación de config; si el código no está en WO, avisa y deja la columna vacía
+   *  (nunca se escribe un nombre que WO no reconozca). */
+  const centroCostosWO = (ov: SalesOrder, l: SalesOrderLine): string => {
+    const cc = partirCentroCostos(l.centroCostos);
+    if (l.centroCostos && !cc.valido) {
+      avisar({
+        tipo: 'centro_costos_invalido',
+        orden: ov.numero,
+        sku: l.sku ?? undefined,
+        mensaje: `El centro de costos no tiene el formato "código descripción": ${JSON.stringify(l.centroCostos)}. Se dejó la columna vacía.`,
+      });
+      return '';
+    }
+    if (!cc.valido) return '';
+    const nombre = config.centrosCostosWO[cc.codigo];
+    if (nombre === undefined) {
+      avisar({
+        tipo: 'centro_costos_no_en_wo',
+        orden: ov.numero,
+        sku: l.sku ?? undefined,
+        mensaje: `El centro de costos ${cc.codigo} (${JSON.stringify(cc.descripcion)}) no está en la lista de World Office. Se dejó la columna vacía.`,
+      });
+      return '';
+    }
+    return nombre;
+  };
+
   function detalle(ov: SalesOrder, l: SalesOrderLine, vencimiento: string): string[] {
+    // SKU: null → sin_sku; presente pero fuera del listado de WO → sku_no_en_wo (§5.1).
     if (!l.sku) {
       avisar({ tipo: 'sin_sku', orden: ov.numero, mensaje: 'Línea sin SKU: World Office la rechazará.' });
+    } else if (config.skusWO.size > 0 && !config.skusWO.has(normSku(l.sku))) {
+      avisar({
+        tipo: 'sku_no_en_wo',
+        orden: ov.numero,
+        sku: l.sku,
+        mensaje: `El SKU "${l.sku}" no existe en World Office: rechazaría esta línea. Créalo en WO o corrige el artículo antes de subir.`,
+      });
     }
     if (!l.centroCostos) {
       avisar({
@@ -156,15 +182,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `El artículo tiene ${l.centrosCostosCount} centros de costo; se usó el primero.`,
       });
     }
-    const cc = partirCentroCostos(l.centroCostos);
-    if (l.centroCostos && !cc.valido) {
-      avisar({
-        tipo: 'centro_costos_invalido',
-        orden: ov.numero,
-        sku: l.sku ?? undefined,
-        mensaje: `El centro de costos no tiene el formato "código descripción": ${JSON.stringify(l.centroCostos)}. Se dejó la columna vacía.`,
-      });
-    }
 
     // 27 campos (posiciones 30–56): 12 nombrados + Moneda Det + TRM Det + 15 personalizados.
     return [
@@ -177,7 +194,7 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       config.descuento, //                         36 Descuento (fijo 0)
       vencimiento, //                              37 Vencimiento (fecha de pago)
       '', //                                       38 Nota Detalle (vacía)
-      campo(ov.numero, nombreCentroCostosWO(l.centroCostos, config)), // 39 Centro Costos (nombre WO)
+      campo(ov.numero, centroCostosWO(ov, l)), //  39 Centro Costos (nombre WO)
       '', //                                       40 Moneda Det
       '', //                                       41 TRM Det
       ...Array(15).fill(''), //                    42–56 Personalizado1..15Det

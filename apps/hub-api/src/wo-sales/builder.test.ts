@@ -8,6 +8,8 @@ function decodificar(buf: Buffer): string[] {
   return new TextDecoder('windows-1252').decode(buf).split('\r\n');
 }
 
+// SKU real de World Office (3011026485) y centro de costos real (330801 → CALIBRACION
+// ENVIRO) para que OV_BASE valide limpio contra las listas maestras de DEFAULT_CONFIG.
 const OV_BASE: SalesOrder = {
   numero: 'OV-2026-138',
   fecha: '2026-07-14',
@@ -21,8 +23,8 @@ const OV_BASE: SalesOrder = {
   cantidadFacturada: 0,
   lineas: [
     {
-      sku: 'AMB-STCALENVIRO-01',
-      descripcion: 'Calibración Enviro',
+      sku: '3011026485',
+      descripcion: 'O-Ring, P4',
       cantidad: 2,
       valorUnitario: 4315000,
       descuento: 0,
@@ -66,7 +68,7 @@ describe('buildWorldOfficeCsv', () => {
     expect(valor('FormaDePago')).toBe('Credito');
     expect(valor('Verificado')).toBe('0');
     expect(valor('Anulado')).toBe('0');
-    expect(valor('Producto')).toBe('AMB-STCALENVIRO-01'); // SKU
+    expect(valor('Producto')).toBe('3011026485'); // SKU
     expect(valor('Bodega')).toBe('Principal');
     expect(valor('UnidadDeMedida')).toBe('Und.');
     expect(valor('Cantidad')).toBe('2');
@@ -103,7 +105,7 @@ describe('buildWorldOfficeCsv', () => {
     const INICIO_DETALLE = COLUMNS.indexOf('Producto'); // 30
     const encabezado = (f: string) => f.split(';').slice(0, INICIO_DETALLE).join(';');
     expect(encabezado(filas[0])).toBe(encabezado(filas[1]));
-    expect(filas[0].split(';')[COLUMNS.indexOf('Producto')]).toBe('AMB-STCALENVIRO-01');
+    expect(filas[0].split(';')[COLUMNS.indexOf('Producto')]).toBe('3011026485');
     expect(filas[1].split(';')[COLUMNS.indexOf('Producto')]).toBe('SKU-2');
   });
 
@@ -138,8 +140,15 @@ describe('centro de costos (nombre de World Office)', () => {
     expect(centroDe(ov)).toBe('ALQUILERES AMB');
   });
 
-  it('usa el nombre de Zoho cuando el código no tiene override (coincide con WO)', () => {
-    expect(centroDe(OV_BASE)).toBe('CALIBRACION ENVIRO');
+  it('traduce el código que sí está en la lista al nombre de WO', () => {
+    expect(centroDe(OV_BASE)).toBe('CALIBRACION ENVIRO'); // 330801 → CALIBRACION ENVIRO
+  });
+
+  it('deja la columna vacía y avisa cuando el código no está en la lista de WO', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], centroCostos: '999999 INEXISTENTE' }] };
+    const { csv, warnings } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Centro Costos')]).toBe('');
+    expect(warnings.find((w) => w.tipo === 'centro_costos_no_en_wo')?.mensaje).toContain('999999');
   });
 
   it('tolera espacios múltiples y NBSP en el centro de costos', () => {
@@ -193,6 +202,29 @@ describe('derivarPrefijo', () => {
   });
   it('usa el literal de config si se fijó', () => {
     expect(derivarPrefijo('2026-07-14', { ...DEFAULT_CONFIG, prefijo: 'OV_FIJO' })).toBe('OV_FIJO');
+  });
+});
+
+describe('validación de SKU contra World Office (§5.1)', () => {
+  it('avisa sku_no_en_wo cuando el SKU no existe en la lista de World Office', () => {
+    // AMB-STCALENVIRO-01 es uno de los que el prompt midió como ausentes en WO.
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], sku: 'AMB-STCALENVIRO-01' }] };
+    const aviso = buildWorldOfficeCsv([ov], DEFAULT_CONFIG).warnings.find((w) => w.tipo === 'sku_no_en_wo');
+    expect(aviso?.sku).toBe('AMB-STCALENVIRO-01');
+    expect(aviso?.orden).toBe('OV-2026-138');
+  });
+
+  it('el SKU inválido se REPORTA pero la línea sigue en el archivo (no se borra en silencio)', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], sku: 'AMB-STCALENVIRO-01' }] };
+    const { filas, csv } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(filas).toBe(1);
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Producto')]).toBe('AMB-STCALENVIRO-01');
+  });
+
+  it('no valida el SKU si la lista maestra está vacía (skusWO vacío = validación off)', () => {
+    const conf = { ...DEFAULT_CONFIG, skusWO: new Set<string>() };
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], sku: 'INVENTADO-99' }] };
+    expect(buildWorldOfficeCsv([ov], conf).warnings.map((w) => w.tipo)).not.toContain('sku_no_en_wo');
   });
 });
 

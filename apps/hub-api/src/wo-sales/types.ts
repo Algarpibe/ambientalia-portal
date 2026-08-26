@@ -53,6 +53,9 @@ export type WarningTipo =
   | 'varios_centros_costos'
   | 'sin_nit'
   | 'sin_sku'
+  // §5: el SKU/centro de costos existe pero World Office no lo tiene en su lista maestra.
+  | 'sku_no_en_wo'
+  | 'centro_costos_no_en_wo'
   | 'moneda_no_cop'
   | 'descuento_cabecera_ignorado'
   | 'ov_parcialmente_facturada'

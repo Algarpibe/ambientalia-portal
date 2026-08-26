@@ -1,4 +1,5 @@
 import { ESTADOS_OV_POR_FACTURAR } from '../salesOrderStatus.js';
+import { SKUS_WO, CECOS_WO } from './wo-master-lists.js';
 
 /**
  * Regla de cálculo de la columna "Vencimiento" (§10). Xiomara la definió como la
@@ -44,13 +45,18 @@ export interface WoSalesConfig {
   /** Estados de OV que se consideran vivas. */
   estadosVivos: string[];
   /**
-   * Centro de costos: World Office exige el NOMBRE, no el código. El nombre de Zoho
-   * coincide con el de WO salvo estas excepciones (código → nombre EXACTO en WO). Es
-   * un override: para un código que no esté aquí se usa el nombre que trae Zoho.
-   * INCOMPLETO: son solo las 5 discrepancias conocidas; la homologación completa sale
-   * de la hoja `ceco` del modelo (74 centros), que aún no se ha aportado (ver §5).
+   * SKUs válidos en World Office (§5.1). Un SKU de una línea que no esté aquí se
+   * reporta ('sku_no_en_wo'): World Office lo rechazaría. Vacío = validación de SKU
+   * desactivada (útil en tests). En producción sale de la hoja `listado de inventario WO`.
    */
-  centrosCostosWO: Record<string, string>;
+  skusWO: ReadonlySet<string>;
+  /**
+   * Homologación código de centro de costos → NOMBRE exacto en World Office (§5.2): WO
+   * exige el nombre, no el código. Homologación COMPLETA (74 centros) de la hoja `ceco`
+   * del modelo. Un código que no esté aquí se reporta ('centro_costos_no_en_wo') y la
+   * columna sale vacía; nunca se escribe un nombre que WO no reconozca.
+   */
+  centrosCostosWO: Readonly<Record<string, string>>;
   /** Asunto (y encabezado del cuerpo) del correo automático. */
   emailAsunto: string;
 }
@@ -89,14 +95,9 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   // hub.source.ts). Una OV totalmente facturada sale por su status ('invoiced').
   estadosVivos: [...ESTADOS_OV_POR_FACTURAR],
 
-  // Las 5 discrepancias conocidas nombre-Zoho → nombre-WO (§5). El resto de códigos
-  // usan el nombre de Zoho tal cual (coincide con WO). Completar con la hoja `ceco`.
-  centrosCostosWO: {
-    '330501': 'EDM 180 C C&R',
-    '5505': 'BOTELLAS DE GASES',
-    '550301': 'Shelter M,L,XL, E.S. Opcionales y Repuestos, Botellas',
-    '550303': 'ALQUILERES AMB',
-    '3305': 'CONSUMIBLES MONITOR Y REPARACION DE PARTICULAS',
-  },
+  // Listas maestras de World Office, generadas del modelo (ver wo-master-lists.ts):
+  // 883 SKU y 74 centros de costo. Regenerar si WO cambia sus listas.
+  skusWO: SKUS_WO,
+  centrosCostosWO: CECOS_WO,
   emailAsunto: 'Nueva actualización de MovimientoInventarioWO',
 };

@@ -19,8 +19,8 @@ const OV_BASE: SalesOrder = {
   cantidadFacturada: 0,
   lineas: [
     {
-      sku: 'AMB-STCALENVIRO-01',
-      descripcion: 'Calibración Enviro',
+      sku: '3011026485',
+      descripcion: 'O-Ring, P4',
       cantidad: 2,
       valorUnitario: 4315000,
       descuento: 0,
@@ -114,7 +114,7 @@ describe('buildWorldOfficeXlsx', () => {
     expect(celda(buf(), 1, 'Tercero Externo')?.t).toBe('s');
     expect(celda(buf(), 1, 'Tercero Externo')?.v).toBe('899999107');
     expect(celda(buf(), 1, 'Producto')?.t).toBe('s');
-    expect(celda(buf(), 1, 'Producto')?.v).toBe('AMB-STCALENVIRO-01');
+    expect(celda(buf(), 1, 'Producto')?.v).toBe('3011026485');
   });
 
   it('el mismo contenido que el CSV: una fila de datos por línea', () => {
