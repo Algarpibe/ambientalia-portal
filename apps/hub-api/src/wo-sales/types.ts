@@ -66,7 +66,10 @@ export type WarningTipo =
   // El modelo de WO no lleva forma de pago homologada ni fecha de entrega, y la
   // empresa es fija: por eso ya no existen 'forma_pago_desconocida', 'sin_fecha_entrega'
   // ni 'sin_empresa'. En su lugar, el plazo de pago alimenta el vencimiento:
-  | 'plazo_pago_ausente';
+  | 'plazo_pago_ausente'
+  // §9: mientras 'un_archivo_por_pedido' no esté cableado, el archivo consolidado lleva
+  // varias OV bajo la misma llave de documento y World Office las fusionaría.
+  | 'archivo_consolidado';
 
 export interface Warning {
   tipo: WarningTipo;

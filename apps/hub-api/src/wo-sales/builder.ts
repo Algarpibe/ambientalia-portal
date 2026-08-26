@@ -75,6 +75,10 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
 
   const avisar = (w: Warning) => warnings.push(w);
 
+  // Cuántas OV aportan al menos una fila al archivo. No es ordenes.length: una OV sin
+  // líneas no escribe nada, así que World Office no puede fusionarla con nada (§9).
+  let ordenesEnArchivo = 0;
+
   const campo = (orden: string, valor: string): string => {
     const { valor: v, saneado } = sanear(valor);
     if (saneado) {
@@ -257,9 +261,30 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       '', //                              29 Importacion (vacía)
     ];
 
+    let filasDeLaOv = 0;
     for (const linea of ov.lineas) {
       matriz.push([...encabezado, ...detalle(ov, linea, vencimiento)]);
+      filasDeLaOv++;
     }
+    if (filasDeLaOv > 0) ordenesEnArchivo++;
+  }
+
+  // §9 (pendiente de cerrar con contabilidad): 'DocumentoNúmero' es fijo, igual que
+  // Empresa, Tipo Documento y prefijo. Todas las líneas del archivo comparten entonces
+  // la MISMA llave de documento, y World Office agrupa las líneas en documentos por esa
+  // llave: un archivo con varias OV se le fusionaría en un solo pedido, con NIT de
+  // clientes distintos en la misma cabecera. Hasta cablear 'un_archivo_por_pedido', el
+  // archivo consolidado avisa en vez de salir en silencio hacia el ERP.
+  if (ordenesEnArchivo > 1) {
+    avisar({
+      tipo: 'archivo_consolidado',
+      orden: '',
+      mensaje:
+        `Este archivo lleva ${ordenesEnArchivo} órdenes de venta con el mismo número de ` +
+        `documento (${config.documentoNumero}), y World Office las fusionaría en un solo ` +
+        `pedido. No lo subas tal cual: está pendiente de confirmar con contabilidad si el ` +
+        `archivo debe llevar una sola orden de venta.`,
+    });
   }
 
   return {
