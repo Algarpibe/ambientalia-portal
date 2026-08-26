@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { fetchConAdjunto, type Solicitud } from './api';
-import { TIPOS } from './dominio';
+import { ETIQUETA_TIPO, TIPOS } from './dominio';
 import TablaSolicitudes from './TablaSolicitudes';
 
 // Los soportes de toda la plantilla, para administración.
@@ -94,9 +94,12 @@ export default function PanelAdjuntos({ activo }: Props) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <select className={selCls} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo">
             <option value="">Todos los tipos</option>
+            {/* La categoría, no la acción: un filtro nombra qué se busca, y
+                `t.label` es lo que se elige hacer en el formulario. Mismo
+                criterio que los filtros del calendario y del registro. */}
             {TIPOS.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.label}
+                {ETIQUETA_TIPO[t.id]}
               </option>
             ))}
           </select>

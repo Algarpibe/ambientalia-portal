@@ -49,17 +49,55 @@ interface Props {
 
 const CAMPO = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
 
+/** La jornada, en horas. Solo entre estas dos se puede empezar un permiso. */
+const JORNADA_DESDE = 8;
+const JORNADA_HASTA = 17;
+
 /**
- * Cuántas horas puede durar un permiso.
+ * Las horas a las que puede empezar un permiso: de media en media, de 8:00 a
+ * 17:00.
  *
- * Horas ENTERAS. La media hora sigue siendo alcanzable por el otro lado —el
- * «desde» va de :00 en :30—, así que un permiso de 10:30 a 12:30 se pide igual;
- * lo que ya no se puede es pedir media hora suelta.
+ * Un `<select>` y no el `<input type="time" step={1800}>` que había antes. El
+ * `step` restringe la VALIDEZ del valor, pero **el desplegable nativo de Chrome
+ * lo ignora y sigue ofreciendo los sesenta minutos**, así que la rejilla no se
+ * veía por ninguna parte. Con una lista, las franjas son lo único que existe —en
+ * todos los navegadores y también en el móvil—, que es lo que se pidió.
+ *
+ * Y de regalo desaparece el callejón sin salida que abría el `step`: ya no hay
+ * forma de teclear un 10:15 que dejara el campo `:invalid` y el envío abortado
+ * por la validación nativa sin que la app pudiera decir por qué.
+ *
+ * ⚠️ La ventana 8-17 es una convención de ESTA pantalla, no una regla del
+ * sistema: el servidor acepta cualquier `HH:MM`, y las solicitudes que ya
+ * existen pueden empezar a cualquier hora. O sea que quien necesite un permiso
+ * que arranque a las 7:00 no lo puede pedir por aquí y tiene que hablar con
+ * administración, que sí puede corregir el registro.
+ *
+ * ⚠️ Y acota el ARRANQUE, no el final: `17:00 + 6 horas` da un permiso que
+ * termina a las 23:00 y nada lo objeta —la pantalla lo confirma en gris—. Se
+ * deja así porque lo que se pidió fue acotar el «desde»; el único tope por el
+ * otro extremo es la medianoche, que sí bloquea (`seSaleDelDia`).
+ */
+const HORAS_DE_INICIO = Array.from({ length: (JORNADA_HASTA - JORNADA_DESDE) * 2 + 1 }, (_, i) => {
+  const hora = String(JORNADA_DESDE + Math.floor(i / 2)).padStart(2, '0');
+  return `${hora}:${i % 2 === 0 ? '00' : '30'}`;
+});
+
+/**
+ * Cuántas horas puede durar un permiso. ENTERAS.
+ *
+ * La media hora se sigue alcanzando por el otro lado —el «desde» va de :00 en
+ * :30—, así que un permiso de 10:30 a 12:30 se pide igual; lo que no se puede es
+ * pedir media hora suelta.
  *
  * Se corta en 8 —una jornada— a propósito: un permiso más largo que eso ya es el
- * día entero, y el día entero se pide dejando el horario en blanco. Es una lista
- * y no un campo numérico libre porque un desplegable de ocho opciones se rellena
- * de un toque, también en el móvil.
+ * día entero, y el día entero se pide dejando el «desde» en blanco.
+ *
+ * ⚠️ **Sin opción vacía**, al revés que el «desde». Por eso este desplegable solo
+ * se pinta cuando ya hay una hora de inicio elegida: mientras no la haya no hay
+ * nada que durar, y en cuanto la hay siempre hay una duración. Eso elimina de
+ * raíz el estado de «media pareja», que era uno de los tres motivos por los que
+ * el botón se apagaba.
  */
 const HORAS_POSIBLES = ['1', '2', '3', '4', '5', '6', '7', '8'];
 
@@ -80,6 +118,10 @@ const etiquetaHoras = (h: string): string => `${h} ${h === '1' ? 'hora' : 'horas
  * sería peor todavía — guardaría algo distinto de lo que la persona pidió.
  */
 function finDelPermiso(desde: string, horas: string): string | null {
+  // El `horas === ''` no es alcanzable hoy —ese desplegable no tiene opción
+  // vacía y su estado arranca en '1'—, pero se queda: es la única defensa si
+  // alguien le añade una, y sin él `Number('')` daría 0 y esto devolvería la
+  // hora de inicio como si el permiso durase nada.
   if (desde === '' || horas === '') return null;
   const [h, m] = desde.split(':').map(Number);
   const total = h * 60 + m + Math.round(Number(horas) * 60);
@@ -112,7 +154,11 @@ export default function FormularioSolicitud({
   // un permiso («me voy dos horas»), y ahorra la resta mental. El servidor sigue
   // recibiendo un principio y un FIN —un evento de calendario necesita los dos—,
   // así que el final se deriva aquí abajo en `horaFin`.
-  const [horas, setHoras] = useState('');
+  //
+  // Arranca en '1' y NUNCA se queda vacío: su desplegable solo se pinta cuando ya
+  // hay hora de inicio, y ahí siempre hay una duración elegida. Ver el ⚠️ de
+  // `HORAS_POSIBLES`.
+  const [horas, setHoras] = useState('1');
   const inputArchivo = useRef<HTMLInputElement>(null);
 
   const pideOtorgamiento = esOtorgamiento(tipo);
@@ -162,56 +208,36 @@ export default function FormularioSolicitud({
   const admiteHora = tipo === 'permiso' && fechaInicio !== '';
 
   // La hora a la que acaba, derivada. `null` significa «esta solicitud no lleva
-  // franja», y engloba los tres casos en que no la lleva: falta el «desde»,
-  // faltan las horas, o la suma se pasa de medianoche.
+  // franja», y con los dos campos convertidos en desplegables solo quedan dos
+  // formas de llegar ahí: no haber elegido hora de inicio, o que la suma se pase
+  // de medianoche.
   const horaFin = finDelPermiso(horaInicio, horas);
 
-  // Los TRES motivos por los que una franja a medio poner apaga el botón. Van
-  // guardados por `admiteHora` en `horaMalPuesta`: si la franja ni siquiera se
-  // está pintando —porque cambiaron el tipo—, unas horas tecleadas antes no
-  // pueden bloquear el envío de algo que ya no las lleva.
+  // El ÚNICO motivo que queda por el que una franja apaga el botón. Los otros dos
+  // se extinguieron solos al cambiar los campos:
   //
-  // Ya NO hace falta comprobar que el fin sea posterior al inicio: con una
-  // duración siempre positiva, eso no se puede dar. Es la mitad del motivo por el
-  // que este campo dejó de ser una hora.
-  const mediaPareja = (horaInicio !== '') !== (horas !== '');
-  const seSaleDelDia = horaInicio !== '' && horas !== '' && horaFin === null;
-  // ⚠️ El navegador NO recorta a la rejilla del `step`: se queda con el 10:15
-  // tecleado a mano y marca el campo `:invalid` por `stepMismatch`. Y como este
-  // formulario no lleva `noValidate`, la validación nativa aborta el submit
-  // ANTES de llegar al `onSubmit` — o sea, botón con pinta de activo, la
-  // pantalla diciendo «Termina a las 12:15», y al pulsar no pasa nada, ni con el
-  // ratón ni con Enter, salvo un globo del navegador en su propio idioma.
-  // Comprobado en Chrome con teclado real.
-  //
-  // Se detecta aquí para apagar el botón CON SU MOTIVO al lado, que es lo que
-  // hace el resto del formulario. Recortarlo en silencio sería el otro camino, y
-  // se descarta por lo mismo que en `finDelPermiso`: cambiaría lo que la persona
-  // escribió.
-  //
-  // Anclada por los dos extremos, y no solo por el final: sin el `^` se colarían
-  // un `10:15:00` y un `9:30`, que además el servidor rechazaría con
-  // `hora_invalida`. Escrita en positivo —lo que se ACEPTA— espeja el `HORA` de
-  // `service.ts`, que es la otra mitad de esta misma regla.
-  const EN_REJILLA = /^([01]\d|2[0-3]):(00|30)$/;
-  const horaFueraDeRejilla = horaInicio !== '' && !EN_REJILLA.test(horaInicio);
+  //  - «el fin es anterior al inicio» no puede darse con una duración positiva.
+  //  - «la pareja a medias» no puede darse porque el desplegable de las horas
+  //    solo existe cuando ya hay hora de inicio, y nunca está vacío.
+  //  - «la hora está fuera de la rejilla» no puede darse porque ya no se teclea:
+  //    se elige de una lista de 48 franjas. Eso además cierra el callejón que
+  //    abría el `step`, donde un 10:15 dejaba el campo `:invalid` y la validación
+  //    nativa abortaba el envío sin que la app pudiera decir por qué.
+  const seSaleDelDia = horaInicio !== '' && horaFin === null;
 
   // Y por lo mismo NO se borran con un efecto al dejar de caber: basta con que
   // solo viajen cuando caben. Así no hay estado que pueda quedarse caducado, y
-  // si el usuario vuelve a poner un solo día recupera lo que había tecleado.
+  // si el usuario vuelve al permiso recupera lo que había elegido.
   //
-  // ⚠️ El `!horaFueraDeRejilla` no sobra, aunque `horaFin` sí se pueda calcular
-  // con un 10:15: sin él, `conHoras` diría «esta solicitud lleva franja» sobre
-  // una hora que la propia pantalla está rechazando en rojo. Las dos
-  // consecuencias eran reales — la nota de abajo contradecía al aviso, y el
-  // cuerpo de la petición se habría llevado el `10:15`, protegido solo por el
-  // `if (!puedeEnviar) return` que vive treinta líneas más abajo. Esta constante
-  // tiene que significar exactamente «estas horas viajan», o no significa nada.
-  const conHoras = admiteHora && horaFin !== null && !horaFueraDeRejilla;
+  // Esta constante significa exactamente «estas horas viajan», y tiene que seguir
+  // significando eso: la usan el cuerpo de la petición y los dos textos de abajo.
+  const conHoras = admiteHora && horaFin !== null;
 
   // Se nombra en negativo porque `puedeEnviar` es afirmativo y esto entra ahí
-  // como `&& !horaMalPuesta`.
-  const horaMalPuesta = admiteHora && (mediaPareja || seSaleDelDia || horaFueraDeRejilla);
+  // como `&& !horaMalPuesta`. Va guardado por `admiteHora`: si la franja ni
+  // siquiera se está pintando —porque cambiaron el tipo—, una hora elegida antes
+  // no puede bloquear el envío de algo que ya no la lleva.
+  const horaMalPuesta = admiteHora && seSaleDelDia;
 
   // Lo que requiere aprobación no puede empezar en el pasado. La incapacidad sí:
   // se informa después de haber estado enfermo, así que `minFecha` le queda
@@ -388,7 +414,8 @@ export default function FormularioSolicitud({
       // listo para otra solicitud, y una franja superviviente volvería a viajar
       // sola en cuanto la siguiente fuera otro permiso de un solo día.
       setHoraInicio('');
-      setHoras('');
+      // A '1', que es su estado inicial: este desplegable nunca está vacío.
+      setHoras('1');
       limpiarArchivo();
       onCreada(creada);
     } catch (err) {
@@ -521,11 +548,10 @@ export default function FormularioSolicitud({
       {admiteHora && (
         <div className="mb-4">
           {/* El «(opcional)» va en la frase y no colgando de una etiqueta: la
-              regla es que los dos campos van juntos o ninguno, así que ponerlo
-              sobre uno solo dejaría al otro con pinta de obligatorio. */}
+              «Día completo» del desplegable ya es la salida por defecto, así que
+              colgar un «(opcional)» de una etiqueta suelta sobraba. */}
           <p className="mb-2 text-xs text-gray-500">
-            <b className="font-medium">Opcional.</b> Si el permiso es de unas horas y no del día entero, dilo aquí: así
-            se ve en el calendario del equipo.
+            Si el permiso es de unas horas y no del día entero, dilo aquí: así se ve en el calendario del equipo.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -535,68 +561,54 @@ export default function FormularioSolicitud({
               <label htmlFor="horaInicio" className="mb-1 block text-sm font-medium text-gray-700">
                 Horario desde
               </label>
-              {/* `step` de media hora: es la granularidad con la que se piden
-                  estos permisos, y hace que el selector salte de :00 a :30 en
-                  vez de minuto a minuto.
-                  ⚠️ 1800 es múltiplo de 60, así que el `value` sigue saliendo
-                  como `HH:MM`. Un `step` POR DEBAJO de 60 lo convertiría en
-                  `HH:MM:SS` y el alta se caería con `hora_invalida` sin que nada
-                  de aquí lo delatara. */}
-              <input
+              <select
                 id="horaInicio"
-                type="time"
-                step={1800}
                 value={horaInicio}
                 onChange={(e) => setHoraInicio(e.target.value)}
                 className={CAMPO}
-              />
-            </div>
-            <div>
-              <label htmlFor="horas" className="mb-1 block text-sm font-medium text-gray-700">
-                Número de horas
-              </label>
-              <select id="horas" value={horas} onChange={(e) => setHoras(e.target.value)} className={CAMPO}>
-                {/* «Día completo» y no un guion: es la respuesta a la pregunta
-                    que se hace quien abre el desplegable, y es además el único
-                    sitio de la pantalla donde se dice cómo se pide el día
-                    entero —dejando el horario en blanco—. */}
+              >
+                {/* La opción vacía es la que dice «día completo», y por eso vive
+                    aquí y no en el desplegable de las horas: es la ausencia de
+                    hora de INICIO lo que significa que el permiso dura todo el
+                    día. Puesto en el otro, obligaba a elegir entre una duración
+                    y una no-duración en la misma lista. */}
                 <option value="">Día completo</option>
-                {HORAS_POSIBLES.map((h) => (
+                {HORAS_DE_INICIO.map((h) => (
                   <option key={h} value={h}>
-                    {etiquetaHoras(h)}
+                    {h}
                   </option>
                 ))}
               </select>
             </div>
+            {/* Solo cuando ya hay hora de inicio: mientras no la haya no hay nada
+                que durar, y así este desplegable no necesita opción vacía. */}
+            {horaInicio !== '' && (
+              <div>
+                <label htmlFor="horas" className="mb-1 block text-sm font-medium text-gray-700">
+                  Número de horas
+                </label>
+                <select id="horas" value={horas} onChange={(e) => setHoras(e.target.value)} className={CAMPO}>
+                  {HORAS_POSIBLES.map((h) => (
+                    <option key={h} value={h}>
+                      {etiquetaHoras(h)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           {/* El final, de vuelta: se pidió la duración para no hacer restar a
               nadie, pero quien lo lee necesita ver en qué acaba lo que ha
               elegido. Derivado, no un campo más. */}
-          {/* `conHoras` y no `horaFin !== null`: con un 10:15 tecleado a mano la
-              cuenta sale igual, y enseñar «Termina a las 12:15» junto al aviso de
-              que esa hora no vale sería darle la razón a lo que se está
-              rechazando. Ese matiz vive ya dentro de `conHoras`, que es donde
-              tiene que vivir. */}
           {conHoras && (
             <p className="mt-1 text-sm text-gray-600">
               Termina a las <b className="tabular-nums">{horaFin}</b>.
-            </p>
-          )}
-          {horaFueraDeRejilla && (
-            <p className="mt-1 text-sm text-red-600">
-              El horario va de media en media hora: pon los minutos en <b>:00</b> o en <b>:30</b>.
             </p>
           )}
           {seSaleDelDia && (
             <p className="mt-1 text-sm text-red-600">
               Esas horas no caben antes de medianoche. Empieza antes, o pide menos horas.
             </p>
-          )}
-          {/* Sin nombrar los campos: la etiqueta dice «Horario desde» y llamarlo
-              aquí «la hora de inicio» sería darle dos nombres al mismo campo en
-              la misma pantalla. Solo hay dos, así que «los dos» no es ambiguo. */}
-          {mediaPareja && (
-            <p className="mt-1 text-sm text-amber-700">Rellena los dos campos, o deja los dos en blanco.</p>
           )}
         </div>
       )}

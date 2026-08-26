@@ -8,20 +8,39 @@ import type {
   TipoSolicitud,
 } from './api';
 
-/** Los cinco tipos, en el orden en que se ofrecen en el formulario. */
+/**
+ * Los botones de «Tipo de solicitud», en el orden en que se pintan.
+ *
+ * ⚠️ `label` es lo que se ELIGE HACER, no cómo se llama la cosa. Por eso dice
+ * «Solicitar compensatorio» y «Legalizar compensatorios»: el que elige está
+ * decidiendo entre gastar de su bolsa y pedir que le metan días en ella, y
+ * llamar «Compensatorio» a las dos hacía que la diferencia se leyera solo en la
+ * letra pequeña.
+ *
+ * Para nombrar la cosa —en una tabla, en un filtro, en una leyenda, en un correo
+ * o en el título del evento de Google— está `ETIQUETA_TIPO`, que es un sustantivo
+ * y no un verbo. Son dos mapas a propósito: un filtro que dijera «Solicitar
+ * compensatorio» estaría nombrando una acción donde hace falta una categoría.
+ *
+ * El ORDEN importa y es el que se pidió: vacaciones y permiso arriba —lo
+ * corriente—, las dos caras del compensatorio juntas en la segunda fila para que
+ * se comparen de un vistazo, y la incapacidad sola al final, que es la única que
+ * no se aprueba. La rejilla es de dos columnas, así que el orden del array es
+ * literalmente la disposición en pantalla.
+ */
 export const TIPOS: { id: TipoSolicitud; label: string; ayuda: string }[] = [
   { id: 'vacaciones', label: 'Vacaciones', ayuda: 'Requiere aprobación.' },
+  { id: 'permiso', label: 'Permiso', ayuda: 'Requiere aprobación. Puedes adjuntar un soporte en PDF.' },
   {
     id: 'compensatorio',
-    label: 'Compensatorio',
+    label: 'Solicitar compensatorio',
     ayuda: 'Requiere aprobación. Descuenta de tu bolsa de compensatorios.',
   },
   {
     id: 'otorgamiento',
-    label: 'Pedir compensatorios',
+    label: 'Legalizar compensatorios',
     ayuda: 'Trabajaste un día extra y pides que te lo compensen. Si tu jefe lo aprueba, esos días entran en tu bolsa.',
   },
-  { id: 'permiso', label: 'Permiso', ayuda: 'Requiere aprobación. Puedes adjuntar un soporte en PDF.' },
   { id: 'incapacidad', label: 'Incapacidad', ayuda: 'No se aprueba: se informa. El soporte médico en PDF es obligatorio.' },
 ];
 
