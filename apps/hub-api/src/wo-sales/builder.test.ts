@@ -298,3 +298,31 @@ describe('advertencias', () => {
     expect(aviso?.orden).toBe('OV-2026-138');
   });
 });
+
+// §9: con `DocumentoNúmero` fijo, todas las líneas de un archivo comparten la llave de
+// documento (Empresa + Tipo Documento + prefijo + número). World Office agrupa por esa
+// llave, así que un archivo con varias OV se le fusionaría en un solo pedido. Mientras
+// el modo `un_archivo_por_pedido` no esté cableado, el archivo consolidado tiene que
+// avisar de que no se puede subir tal cual.
+describe('archivo consolidado (§9 sin cablear)', () => {
+  it('avisa una sola vez cuando el archivo lleva más de una orden', () => {
+    const otra: SalesOrder = { ...OV_BASE, numero: 'OV-2026-139' };
+    const { warnings } = buildWorldOfficeCsv([OV_BASE, otra], DEFAULT_CONFIG);
+    const avisos = warnings.filter((w) => w.tipo === 'archivo_consolidado');
+    expect(avisos).toHaveLength(1);
+  });
+
+  it('el aviso dice cuántas órdenes se fusionarían y con qué número de documento', () => {
+    const otra: SalesOrder = { ...OV_BASE, numero: 'OV-2026-139' };
+    const tercera: SalesOrder = { ...OV_BASE, numero: 'OV-2026-140' };
+    const { warnings } = buildWorldOfficeCsv([OV_BASE, otra, tercera], DEFAULT_CONFIG);
+    const aviso = warnings.find((w) => w.tipo === 'archivo_consolidado');
+    expect(aviso?.mensaje).toContain('3');
+    expect(aviso?.mensaje).toContain(DEFAULT_CONFIG.documentoNumero);
+  });
+
+  it('no avisa cuando el archivo lleva una sola orden', () => {
+    const { warnings } = buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG);
+    expect(warnings.some((w) => w.tipo === 'archivo_consolidado')).toBe(false);
+  });
+});

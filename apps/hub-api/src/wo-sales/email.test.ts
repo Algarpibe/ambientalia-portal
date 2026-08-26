@@ -85,3 +85,21 @@ describe('construirCuerpo', () => {
     expect(sin.toLowerCase()).not.toContain('advertencia');
   });
 });
+
+// §9: el correo automático adjunta el archivo consolidado. Es la puerta por la que el
+// archivo llega a contabilidad sin pasar por el panel de advertencias de la app, así
+// que el aviso de no subirlo tal cual tiene que ir en el cuerpo del mensaje.
+describe('construirCuerpo — aviso del archivo consolidado (§9)', () => {
+  const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0 });
+
+  it('avisa de no subir el archivo cuando lleva varias órdenes', () => {
+    const cuerpo = construirCuerpo(resumen(25), DEFAULT_CONFIG);
+    expect(cuerpo).toMatch(/no lo subas/i);
+    expect(cuerpo).toContain('25');
+  });
+
+  it('no avisa cuando el archivo lleva una sola orden', () => {
+    const cuerpo = construirCuerpo(resumen(1), DEFAULT_CONFIG);
+    expect(cuerpo).not.toMatch(/no lo subas/i);
+  });
+});

@@ -24,18 +24,19 @@ type WarningTipo =
   | 'sin_centro_costos'
   | 'centro_costos_invalido'
   | 'varios_centros_costos'
-  | 'sin_fecha_entrega'
   | 'sin_nit'
   | 'sin_sku'
-  | 'sin_empresa'
+  | 'sku_no_en_wo'
+  | 'centro_costos_no_en_wo'
   | 'moneda_no_cop'
   | 'descuento_cabecera_ignorado'
   | 'ov_parcialmente_facturada'
-  | 'forma_pago_desconocida'
   | 'ov_antigua'
   | 'ov_sin_lineas'
   | 'valor_no_numerico'
-  | 'valor_saneado';
+  | 'valor_saneado'
+  | 'plazo_pago_ausente'
+  | 'archivo_consolidado';
 
 interface Warning {
   tipo: WarningTipo;
@@ -81,28 +82,33 @@ interface PreviewResponse {
 // cuando son 3 órdenes, o al revés, da una idea falsa del tamaño del problema.
 // ---------------------------------------------------------------------------
 
-const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'orden' }> = {
+const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'orden' | 'archivo' }> = {
   sin_centro_costos: { titulo: 'Sin centro de costos', unidad: 'linea' },
   centro_costos_invalido: { titulo: 'Centro de costos no reconocido', unidad: 'linea' },
+  centro_costos_no_en_wo: { titulo: 'Centro de costos que no existe en World Office', unidad: 'linea' },
   varios_centros_costos: { titulo: 'El artículo tiene varios centros de costos', unidad: 'linea' },
   sin_sku: { titulo: 'Línea sin código de artículo', unidad: 'linea' },
+  sku_no_en_wo: { titulo: 'Artículo que no existe en World Office', unidad: 'linea' },
   valor_no_numerico: { titulo: 'Valor que no es un número', unidad: 'linea' },
   valor_saneado: { titulo: 'Valor corregido automáticamente', unidad: 'linea' },
-  sin_fecha_entrega: { titulo: 'Sin fecha de entrega', unidad: 'orden' },
   sin_nit: { titulo: 'Cliente sin NIT', unidad: 'orden' },
-  sin_empresa: { titulo: 'Sin empresa asignada', unidad: 'orden' },
   moneda_no_cop: { titulo: 'Moneda distinta de pesos', unidad: 'orden' },
   descuento_cabecera_ignorado: { titulo: 'Descuento de la OV que no llega al archivo', unidad: 'orden' },
   ov_parcialmente_facturada: { titulo: 'OV parcialmente facturada (solo va lo pendiente)', unidad: 'orden' },
-  forma_pago_desconocida: { titulo: 'Forma de pago desconocida', unidad: 'orden' },
+  plazo_pago_ausente: { titulo: 'OV sin plazo de pago (se usó el de por defecto)', unidad: 'orden' },
   ov_sin_lineas: { titulo: 'Orden sin líneas de producto', unidad: 'orden' },
   ov_antigua: { titulo: 'Orden antigua que sigue abierta', unidad: 'orden' },
+  archivo_consolidado: {
+    titulo: 'Todas las órdenes van con el mismo número de documento',
+    unidad: 'archivo',
+  },
 };
 
 const metaDe = (tipo: WarningTipo) =>
   WARNING_META[tipo] ?? { titulo: tipo, unidad: 'linea' as const };
 
-function contar(n: number, unidad: 'linea' | 'orden'): string {
+function contar(n: number, unidad: 'linea' | 'orden' | 'archivo'): string {
+  if (unidad === 'archivo') return 'todo el archivo';
   if (unidad === 'orden') return n === 1 ? '1 orden' : `${n} órdenes`;
   return n === 1 ? '1 línea' : `${n} líneas`;
 }
@@ -507,7 +513,7 @@ function App() {
                               {avisos.map((w, i) => (
                                 <tr key={i} className="border-b border-gray-50 last:border-0">
                                   <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap align-top w-px">
-                                    {w.orden}
+                                    {w.orden || '—'}
                                   </td>
                                   <td className="px-2 py-2 text-gray-500 whitespace-nowrap align-top w-px">
                                     {w.sku ?? '—'}

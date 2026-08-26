@@ -19,6 +19,19 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
     'Se adjunta el archivo actualizado de pedidos para World Office.',
     `Órdenes de venta: ${resumen.ordenes} · Líneas de producto: ${resumen.filas}`,
   ];
+  // §9: este correo es la puerta por la que el archivo llega a contabilidad SIN pasar
+  // por el panel de advertencias de la app. Si lleva varias OV, el aviso tiene que ir
+  // aquí o nadie lo ve antes de subirlo a World Office.
+  if (resumen.ordenes > 1) {
+    lineas.push(
+      '',
+      `ATENCIÓN: el archivo lleva ${resumen.ordenes} órdenes de venta bajo el mismo número de ` +
+        'documento, y World Office las fusionaría en un solo pedido. No lo subas tal cual ' +
+        'al ERP: está pendiente de confirmar con contabilidad si el archivo debe llevar ' +
+        'una sola orden de venta.',
+      ''
+    );
+  }
   if (resumen.cambiadas.length) lineas.push(`OV con cambios: ${resumen.cambiadas.join(', ')}`);
   if (resumen.advertencias > 0) {
     lineas.push(`Advertencias: ${resumen.advertencias}. Revísalas en la app antes de subir el archivo.`);
