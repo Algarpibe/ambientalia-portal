@@ -67,3 +67,8 @@ reference/
 
 # Maquetas del acompanante visual de brainstorming (superpowers)
 .superpowers/
+
+# Indice de CodeGraph. Es local a cada checkout: la ruta raiz y los bytes
+# indexados son los de ESTA copia, asi que compartirlo daria respuestas de otro
+# arbol. Cada worktree se reinicializa el suyo.
+.codegraph/
