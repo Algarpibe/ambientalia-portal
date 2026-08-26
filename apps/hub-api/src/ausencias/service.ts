@@ -137,6 +137,14 @@ function validarHoras(
   // «Del lunes al viernes de 9:00 a 11:00» no tiene lectura única. El CHECK de
   // la 036 lo repite en la BD; aquí sale como un 400 y no como un 500 desde
   // dentro de una transacción.
+  //
+  // ⚠️ INALCANZABLE desde el 2026-08-25: llegados aquí el tipo ya es `permiso`, y
+  // un permiso de varios días rebota antes con `permiso_de_un_solo_dia`, que va
+  // mucho más arriba en `validarNuevaSolicitud`. Se conserva por si algún día
+  // vuelven los permisos de varios días —sería la única red que le queda a la
+  // franja horaria— y porque `validarHoras` se puede llamar desde otro sitio sin
+  // que nadie se acuerde de esto. Cuesta una línea; el CHECK de la 036 dando un
+  // 500 desde dentro de una transacción cuesta bastante más.
   if (fechaInicio !== fechaFin) throw new AusenciaError('hora_no_permitida', 400, 'fechaFin');
 
   return { horaInicio: ini, horaFin: fin };
@@ -158,6 +166,29 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
   if (!esFechaValida(fechaInicio)) throw new AusenciaError('fecha_invalida', 400, 'fechaInicio');
   if (!esFechaValida(fechaFin)) throw new AusenciaError('fecha_invalida', 400, 'fechaFin');
   if (fechaInicio > fechaFin) throw new AusenciaError('rango_invertido', 400, 'fechaFin');
+
+  // Un permiso ocupa UN día desde el 2026-08-25. Gemela exacta de la regla del
+  // otorgamiento en `validarDiasConcedidos`, y por el mismo motivo que dice su
+  // comentario: el formulario manda una sola fecha, pero **el servidor no puede
+  // fiarse de eso** — `POST /solicitudes` está abierto y sin esto se cuela una
+  // semana entera como «permiso».
+  //
+  // No es una precaución teórica. Sin esta línea, la API podía FABRICAR
+  // registros que su propia API de modificación declara inválidos: un permiso de
+  // cinco días creado por aquí recibe `permiso_de_un_solo_dia` en cuanto alguien
+  // intenta tocarlo, y no hay forma de arreglarlo salvo encogerlo o anularlo.
+  //
+  // 400 aquí y 409 en la modificación, igual que el otorgamiento reparte sus dos
+  // mitades (`otorgamiento_un_solo_dia` 400 en el alta,
+  // `otorgamiento_solo_anulable` 409 al modificar): al crear, lo que llega está
+  // MAL FORMADO para su tipo; al modificar, lo que llega es correcto y lo que no
+  // encaja es con ESA solicitud.
+  //
+  // Mismo código en los dos sitios a propósito: es una sola regla, con una sola
+  // frase que explicarle a quien la topa.
+  if (tipo === 'permiso' && fechaInicio !== fechaFin) {
+    throw new AusenciaError('permiso_de_un_solo_dia', 400, 'fechaFin');
+  }
 
   // Nada que requiera aprobación puede empezar en el pasado: cuando llegara la
   // firma, los días ya se habrían disfrutado (o no) y el saldo ya no se podría
@@ -398,6 +429,28 @@ export function validarNuevaModificacion(
   if (!esFechaValida(fechaInicio)) throw new AusenciaError('fecha_invalida', 400, 'fechaInicio');
   if (!esFechaValida(fechaFin)) throw new AusenciaError('fecha_invalida', 400, 'fechaFin');
   if (fechaInicio > fechaFin) throw new AusenciaError('rango_invertido', 400, 'fechaFin');
+
+  // Un permiso es de UN día desde el 2026-08-25, y esta es la SEGUNDA puerta.
+  // El formulario ya solo pide una fecha, pero sin esto se pedía de un día y se
+  // estiraba a cinco por aquí: con la firma del jefe, sí, pero contra la regla
+  // que el alta acaba de imponer, y con la app diciendo dos cosas distintas
+  // según por dónde se entre.
+  //
+  // Va DESPUÉS de validar el formato y el orden —para que una fecha mal escrita
+  // dé su propio error y no este— y con código propio en vez de reutilizar
+  // `rango_invertido`, por lo mismo que `otorgamiento_solo_anulable` unas líneas
+  // más arriba: el rango que mandó es correcto, lo que no encaja es con ESTA
+  // solicitud. Se señala `fechaFin`, que es el campo que hay que igualar.
+  //
+  // ⚠️ Mira el TIPO y no el rango a secas: para unas vacaciones, estirar el
+  // rango es justamente el caso normal.
+  //
+  // NO alcanza al `PATCH` del registro general (`actualizarSolicitud`), y es a
+  // propósito: allí un admin corrige el histórico, y existen permisos de varios
+  // días anteriores a esta regla que tienen que poder tocarse.
+  if (actual.tipo === 'permiso' && fechaInicio !== fechaFin) {
+    throw new AusenciaError('permiso_de_un_solo_dia', 409, 'fechaFin');
+  }
 
   const diasNaturales = (Date.parse(`${fechaFin}T00:00:00Z`) - Date.parse(`${fechaInicio}T00:00:00Z`)) / 86_400_000 + 1;
   if (diasNaturales > MAX_DIAS_RANGO) throw new AusenciaError('rango_demasiado_largo', 400, 'fechaFin');

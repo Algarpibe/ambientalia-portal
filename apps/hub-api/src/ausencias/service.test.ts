@@ -271,8 +271,12 @@ describe('validarNuevaSolicitud', () => {
   it('la regla del pasado también tapa permisos y compensatorios', () => {
     // Los tres tipos que requieren aprobación van juntos: si la regla mirara solo
     // `vacaciones`, quedaría abierta la misma puerta por otro lado.
+    // Un solo día en los dos: desde el 2026-08-25 un permiso de varios rebota
+    // antes con `permiso_de_un_solo_dia` y este test dejaría de probar la regla
+    // del pasado, que es la suya. Al compensatorio el día suelto no le cambia
+    // nada.
     for (const tipo of ['permiso', 'compensatorio'] as const) {
-      expect(() => validar(nueva({ tipo, fechaInicio: '2026-06-30' }))).toThrow(
+      expect(() => validar(nueva({ tipo, fechaInicio: '2026-06-30', fechaFin: '2026-06-30' }))).toThrow(
         expect.objectContaining({ code: 'fecha_en_pasado', field: 'fechaInicio' }),
       );
     }
@@ -308,7 +312,10 @@ describe('validarNuevaSolicitud', () => {
   it('no permite adjuntar algo que no sea un PDF', () => {
     expect(() =>
       validar(
-        nueva({ tipo: 'permiso', adjunto: { nombreArchivo: 'x.exe', mime: 'application/x-msdownload', contenidoBase64: PDF_BASE64 } }),
+        // `fechaFin` explícita: un permiso es de un solo día, y con el rango por
+        // defecto de `nueva()` este test rebotaría por eso en vez de por el
+        // adjunto, que es lo que viene a probar.
+        nueva({ tipo: 'permiso', fechaFin: '2026-07-06', adjunto: { nombreArchivo: 'x.exe', mime: 'application/x-msdownload', contenidoBase64: PDF_BASE64 } }),
       ),
     ).toThrow(expect.objectContaining({ code: 'adjunto_no_es_pdf' }));
   });
@@ -323,7 +330,8 @@ describe('validarNuevaSolicitud', () => {
   });
 
   it('el permiso puede ir sin adjunto', () => {
-    expect(validar(nueva({ tipo: 'permiso' })).adjunto).toBeUndefined();
+    // De un solo día, por lo mismo que los dos de arriba.
+    expect(validar(nueva({ tipo: 'permiso', fechaFin: '2026-07-06' })).adjunto).toBeUndefined();
   });
 
   it('ignora cualquier empleadoId o diasHabiles que mande el cliente', () => {
@@ -387,9 +395,18 @@ describe('validarNuevaSolicitud — la hora del permiso', () => {
   });
 
   it('CANDADO: con horas, el rango tiene que ser de un solo día', () => {
+    // ⚠️ Desde el 2026-08-25 esto lo caza `permiso_de_un_solo_dia` y no
+    // `hora_no_permitida`: la regla de que un permiso ocupa UN día va antes en la
+    // validación, y es la más básica de las dos — ese rango ya está mal lleve o
+    // no horas.
+    //
+    // El enunciado que este test defiende sigue siendo cierto y sigue mereciendo
+    // candado; lo que cambió es quién lo dice. Por eso la rama
+    // `fechaInicio !== fechaFin` de `validarHoras` quedó INALCANZABLE, y allí se
+    // anota: se conserva por si algún día vuelve a haber permisos de varios días.
     expect(() =>
       validar({ ...base, fechaFin: '2026-07-03', horaInicio: '09:00', horaFin: '11:00' }),
-    ).toThrow(expect.objectContaining({ code: 'hora_no_permitida', status: 400, field: 'fechaFin' }));
+    ).toThrow(expect.objectContaining({ code: 'permiso_de_un_solo_dia', status: 400, field: 'fechaFin' }));
   });
 });
 
@@ -1274,5 +1291,88 @@ describe('validarNuevaModificacion sobre un otorgamiento', () => {
     expect(validarNuevaModificacion({ clase: 'anulacion', motivo: 'Me equivoque' }, OTORG, '2026-08-20')).toMatchObject({
       clase: 'anulacion',
     });
+  });
+});
+
+describe('validarNuevaSolicitud — un permiso es de un solo día', () => {
+  it('CANDADO: el ALTA rechaza un permiso de varios días', () => {
+    // El formulario ya solo manda una fecha, pero el servidor no puede fiarse de
+    // eso: `POST /solicitudes` está abierto y sin esta regla se cuela una semana
+    // entera como «permiso». Es el mismo razonamiento —y el mismo sitio— que la
+    // regla gemela del otorgamiento, cuatro líneas más arriba.
+    //
+    // Sin él, la API podía FABRICAR registros que su propia API de modificación
+    // declara inválidos: un permiso de cinco días creado por aquí recibe
+    // `permiso_de_un_solo_dia` en cuanto alguien intenta tocarlo.
+    expect(() => validar({ tipo: 'permiso', fechaInicio: '2026-07-02', fechaFin: '2026-07-06' })).toThrow(
+      expect.objectContaining({ code: 'permiso_de_un_solo_dia', status: 400, field: 'fechaFin' }),
+    );
+  });
+
+  it('de un solo día SÍ', () => {
+    expect(validar({ tipo: 'permiso', fechaInicio: '2026-07-02', fechaFin: '2026-07-02' })).toMatchObject({
+      tipo: 'permiso',
+      fechaFin: '2026-07-02',
+    });
+  });
+
+  it('CANDADO: a unas vacaciones de varios días no le afecta', () => {
+    // La regla es del permiso. Un `fechaInicio !== fechaFin` suelto en la
+    // validación se llevaría por delante el caso normal de las vacaciones.
+    expect(validar({ tipo: 'vacaciones', fechaInicio: '2026-07-02', fechaFin: '2026-07-06' })).toMatchObject({
+      fechaFin: '2026-07-06',
+    });
+  });
+});
+
+describe('validarNuevaModificacion sobre un permiso', () => {
+  const PERMISO = { tipo: 'permiso', fechaInicio: '2026-09-03', fechaFin: '2026-09-03' } as const;
+
+  it('CANDADO: no se le puede estirar a varios días', () => {
+    // Desde el 2026-08-25 un permiso es de UN día, y esta es la OTRA puerta:
+    // el formulario ya solo pide una fecha, pero sin este candado se pedía de un
+    // día y se estiraba a cinco por aquí. Con la firma del jefe, sí, pero contra
+    // la regla que el alta acaba de imponer — y la app diría dos cosas distintas
+    // según por dónde se entre.
+    expect(() =>
+      validarNuevaModificacion(
+        { clase: 'fechas', fechaInicio: '2026-09-03', fechaFin: '2026-09-07' },
+        PERMISO,
+        '2026-08-25',
+      ),
+    ).toThrow(expect.objectContaining({ code: 'permiso_de_un_solo_dia', status: 409, field: 'fechaFin' }));
+  });
+
+  it('moverlo a otro día SÍ, que es el caso corriente', () => {
+    // «No puedo el jueves, que sea el viernes». Sigue siendo de un solo día, así
+    // que pasa. Prohibirlo también habría sido tratarlo como al otorgamiento, y
+    // mover un permiso de un día es legítimo.
+    expect(
+      validarNuevaModificacion(
+        { clase: 'fechas', fechaInicio: '2026-09-04', fechaFin: '2026-09-04' },
+        PERMISO,
+        '2026-08-25',
+      ),
+    ).toMatchObject({ clase: 'fechas', fechaInicio: '2026-09-04', fechaFin: '2026-09-04' });
+  });
+
+  it('la anulación no la toca', () => {
+    expect(
+      validarNuevaModificacion({ clase: 'anulacion', motivo: 'Ya no me hace falta' }, PERMISO, '2026-08-25'),
+    ).toMatchObject({ clase: 'anulacion' });
+  });
+
+  it('CANDADO: la regla es del PERMISO, no de todos los tipos', () => {
+    // Sin este, un `fechaInicio !== fechaFin` suelto en la validación se llevaría
+    // por delante las vacaciones, para las que estirar el rango es justamente el
+    // caso normal.
+    const VACACIONES = { tipo: 'vacaciones', fechaInicio: '2026-09-03', fechaFin: '2026-09-03' } as const;
+    expect(
+      validarNuevaModificacion(
+        { clase: 'fechas', fechaInicio: '2026-09-03', fechaFin: '2026-09-07' },
+        VACACIONES,
+        '2026-08-25',
+      ),
+    ).toMatchObject({ fechaFin: '2026-09-07' });
   });
 });

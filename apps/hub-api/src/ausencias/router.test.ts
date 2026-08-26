@@ -1941,7 +1941,10 @@ describe('el compensatorio no se puede gastar por encima de la bolsa', () => {
     await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token()}`)
-      .send({ tipo: 'permiso', fechaInicio: '2026-03-30', fechaFin: '2026-04-03', comentarios: 'x' })
+      // De un solo día: desde el 2026-08-25 un permiso de varios rebota con
+      // `permiso_de_un_solo_dia` y este test dejaría de probar lo suyo, que es
+      // que un permiso no consulta ninguna bolsa.
+      .send({ tipo: 'permiso', fechaInicio: '2026-03-30', fechaFin: '2026-03-30', comentarios: 'x' })
       .expect(201);
   });
 
@@ -2065,7 +2068,9 @@ describe('las vacaciones tampoco se piden por encima del saldo', () => {
     // todos, un saldo agotado cerraría también los permisos — que no se
     // descuentan de ninguna bolsa.
     conSaldo(0);
-    await pedir({ tipo: 'permiso', fechaInicio: LUNES, fechaFin: VIERNES, comentarios: 'x' }).expect(201);
+    // El permiso, de un solo día: uno de varios rebota antes con
+    // `permiso_de_un_solo_dia` y no llegaría a probar lo de la bolsa.
+    await pedir({ tipo: 'permiso', fechaInicio: LUNES, fechaFin: LUNES, comentarios: 'x' }).expect(201);
     await pedir({
       tipo: 'incapacidad',
       fechaInicio: INCAP_DESDE,
@@ -2379,7 +2384,14 @@ describe('aprobación en cascada', () => {
   });
 
   it('la segunda firma no toca calendario ni hoja: la solicitud aún no es firme', async () => {
-    const s = await crear({ tipo: 'permiso', adjunto: { nombreArchivo: 'x.pdf', mime: 'application/pdf', contenidoBase64: PDF } });
+    // El permiso, de un solo día —`nueva()` trae un rango por defecto y desde el
+    // 2026-08-25 un permiso de varios rebota con `permiso_de_un_solo_dia`—. Lo
+    // que este test prueba es la cascada, no el rango.
+    const s = await crear({
+      tipo: 'permiso',
+      fechaFin: '2026-07-06',
+      adjunto: { nombreArchivo: 'x.pdf', mime: 'application/pdf', contenidoBase64: PDF },
+    });
     await decidir(s.id as string, jefa(), { aprueba: true }).expect(200);
     const p = estado.eventos.find((e) => e.evento === 'aprobacion_2')!.payload as any;
     expect(p.calendario).toBeNull();
@@ -5971,9 +5983,13 @@ describe('nadie firma su propia solicitud', () => {
       compensatoriosSaldoCorte: 10,
       compensatoriosFechaCorte: '2026-01-01',
     });
+    // El permiso va de un solo día: desde el 2026-08-25 uno de varios rebota con
+    // `permiso_de_un_solo_dia` y esa vuelta del bucle dejaría de probar el
+    // candado de los aprobadores, que es lo suyo. Los otros dos conservan su
+    // rango, que es justo lo que hace de este un test de TODOS los tipos.
     for (const [tipo, inicio, fin] of [
       ['vacaciones', '2026-07-06', '2026-07-08'],
-      ['permiso', '2026-07-13', '2026-07-15'],
+      ['permiso', '2026-07-13', '2026-07-13'],
       ['compensatorio', '2026-07-20', '2026-07-22'],
     ] as const) {
       comoRaiz();

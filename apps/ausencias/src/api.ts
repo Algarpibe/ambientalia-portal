@@ -564,6 +564,20 @@ async function errorDeAusencia(res: Response): Promise<Error> {
       'El horario solo se puede poner en un permiso de un único día. Si son varios días, quita las horas.',
   };
   if (cuerpo?.error && DE_LA_HORA[cuerpo.error]) return new Error(DE_LA_HORA[cuerpo.error]);
+  // El mismo código llega por las DOS puertas —el alta con 400 y la petición de
+  // cambio con 409—, así que la frase tiene que servir para las dos: ni «elige
+  // otra fecha» a secas, que no diría nada al que ya la envió, ni «anula esta»,
+  // que no diría nada al que todavía no la ha creado.
+  //
+  // Ninguna de las dos pantallas deja llegar hasta aquí: las dos ofrecen una
+  // sola fecha. Llegar significa que la petición se mandó por otra vía — pero
+  // `mensajeDeError` devolvería el código crudo en la caja roja, y ese no le
+  // dice nada a nadie.
+  if (cuerpo?.error === 'permiso_de_un_solo_dia') {
+    return new Error(
+      'Un permiso es de un solo día: elige una sola fecha. Si necesitas varios días seguidos, habla con administración.',
+    );
+  }
 
   if (cuerpo?.error === 'compensatorios_sin_saldo') {
     return new Error(
