@@ -260,9 +260,14 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
 
         <select className={selCls} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo">
           <option value="">Todos los tipos</option>
+          {/* `ETIQUETA_TIPO` y no `t.label`: aquí se nombra una CATEGORÍA por la
+              que filtrar, y `label` es lo que se elige hacer en el formulario
+              («Solicitar compensatorio»), que como opción de filtro no
+              significa nada. Hasta el 2026-08-25 los dos decían lo mismo y daba
+              igual cuál se usara. */}
           {TIPOS_DE_AUSENCIA.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.label}
+              {ETIQUETA_TIPO[t.id]}
             </option>
           ))}
         </select>
@@ -395,7 +400,8 @@ export default function Calendario({ miEmpleadoId, activo }: Props) {
           <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-600">
             {TIPOS_DE_AUSENCIA.map((t) => (
               <span key={t.id} className="flex items-center gap-1.5">
-                <span className={`inline-block h-3 w-3 rounded-sm ${COLOR[t.id]}`} /> {t.label}
+                {/* La categoría, no la acción. Ver el filtro de más arriba. */}
+                <span className={`inline-block h-3 w-3 rounded-sm ${COLOR[t.id]}`} /> {ETIQUETA_TIPO[t.id]}
               </span>
             ))}
             <span className="flex items-center gap-1.5">

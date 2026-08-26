@@ -677,11 +677,15 @@ export default function App() {
                       {tiposEnMias.map((id) => (
                         // `ETIQUETA_TIPO` y NO `TIPOS[].label`: el desplegable
                         // tiene que nombrar los tipos igual que la columna que
-                        // filtra. Para el otorgamiento no coinciden —la columna
-                        // dice «Compensatorio concedido» y `TIPOS` dice «Pedir
-                        // compensatorios», que es el texto del formulario— y
-                        // elegir el del formulario haría que el filtro y la
-                        // tabla llamaran de dos formas distintas a lo mismo.
+                        // filtra. `TIPOS[].label` es lo que se elige HACER en el
+                        // formulario —«Legalizar compensatorios», «Solicitar
+                        // compensatorio»— y `ETIQUETA_TIPO` es cómo se LLAMA la
+                        // cosa; elegir el del formulario haría que el filtro y
+                        // la tabla llamaran de dos formas distintas a lo mismo.
+                        //
+                        // Desde el 2026-08-25 discrepan en dos tipos, no en uno,
+                        // y este criterio se aplica ya en los cuatro filtros de
+                        // la app y en el selector de tipo de la corrección.
                         <option key={id} value={id}>
                           {ETIQUETA_TIPO[id]}
                         </option>

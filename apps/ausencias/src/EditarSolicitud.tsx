@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Loader2, Save, X } from 'lucide-react';
 import { editarSolicitud, type Empleado, type EstadoSolicitud, type Solicitud, type TipoSolicitud } from './api';
-import { contarDiasHabiles, TIPOS } from './dominio';
+import { contarDiasHabiles, ETIQUETA_TIPO, TIPOS } from './dominio';
 import { useFocoDeModal } from './focoDeModal';
 
 // Corrección de una fila del registro, para el admin. Sirve sobre todo para dos
@@ -133,9 +133,14 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
               Tipo
             </label>
             <select id="ed-tipo" className={CAMPO} value={tipo} onChange={(e) => setTipo(e.target.value as TipoSolicitud)}>
+              {/* `ETIQUETA_TIPO` y no `t.label`: aquí el tipo no se elige para
+                  HACER algo, se ASIGNA como valor del registro. `t.label` dice
+                  «Solicitar compensatorio», que es un verbo, y ofrecer un verbo
+                  como valor de una categoría no significa nada en una pantalla
+                  de corrección. */}
               {TIPOS.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.label}
+                  {ETIQUETA_TIPO[t.id]}
                 </option>
               ))}
             </select>

@@ -491,9 +491,16 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <select className={selCls} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo">
               <option value="">Todos los tipos</option>
+              {/* `ETIQUETA_TIPO` y no `t.label`, por lo mismo que avisa el
+                  comentario del filtro de App.tsx: este desplegable filtra la
+                  columna «Tipo» de la tabla de abajo, que se pinta con
+                  `ETIQUETA_TIPO`. Con `t.label` —que desde el 2026-08-25 dice
+                  «Solicitar compensatorio», o sea lo que se elige HACER en el
+                  formulario— el filtro y la columna que filtra llamarían de dos
+                  formas distintas a lo mismo. */}
               {TIPOS.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.label}
+                  {ETIQUETA_TIPO[t.id]}
                 </option>
               ))}
             </select>
