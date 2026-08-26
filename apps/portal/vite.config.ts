@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -17,5 +17,12 @@ export default defineConfig({
   },
   server: {
     port: 5175,
+  },
+  test: {
+    // El entorno lo sigue declarando cada archivo con su docblock
+    // `// @vitest-environment jsdom`: hay tests de logica pura que no lo
+    // necesitan y no tiene sentido pagarles un DOM. Esto solo aporta la
+    // preparacion comun. Ver src/vitest.setup.ts para el porque.
+    setupFiles: ['./src/vitest.setup.ts'],
   },
 })
