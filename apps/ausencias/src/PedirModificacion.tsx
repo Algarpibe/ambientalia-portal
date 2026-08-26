@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, Send, X } from 'lucide-react';
 import { pedirModificacion, type ClaseModificacion, type Modificacion, type Solicitud } from './api';
 import {
   decisorDeModificacion,
+  esDeUnSoloDia,
   ETIQUETA_TIPO,
   excedeRangoMaximo,
   esOtorgamiento,
@@ -81,10 +82,44 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
   const dialogo = useFocoDeModal<HTMLFormElement>(onCerrar);
 
   const anula = clase === 'anulacion';
-  const faltaFecha = !fechaInicio || !fechaFin;
-  const rangoInvertido = Boolean(fechaInicio && fechaFin && fechaInicio > fechaFin);
-  const rangoLargo = excedeRangoMaximo(fechaInicio, fechaFin);
-  const sinCambios = sinCambiosDeFechas(solicitud, fechaInicio, fechaFin);
+
+  /**
+   * Un permiso es de UN día, así que aquí tampoco tiene segunda casilla: se
+   * puede MOVER a otro día, no alargar. Es la misma regla que impone el
+   * formulario de alta, y esta es la otra puerta — sin ella se pedía de un día y
+   * se estiraba a cinco por aquí, con la firma del jefe pero contra la regla.
+   *
+   * Derivada y no un `setFechaFin` en el `onChange`, igual que en el alta: así
+   * no hay estado que se desincronice, y el `fechaFin` con el que arrancó el
+   * modal se queda quieto sin viajar.
+   *
+   * El servidor lo repite con `permiso_de_un_solo_dia`, que es el cerrojo que de
+   * verdad manda: esta pantalla se puede saltar, aquella no.
+   */
+  const unSoloDia = esDeUnSoloDia(solicitud.tipo);
+  const fechaFinEfectiva = unSoloDia ? fechaInicio : fechaFin;
+
+  /**
+   * Un permiso ANTERIOR a la regla de «un solo día», que todavía ocupa un rango.
+   *
+   * ⚠️ Es el único caso del modal que abre **ya armado**: con una sola casilla,
+   * la propuesta efectiva es el primer día suelto, así que `sinCambios` sale
+   * `false` sin que nadie haya tocado nada y el botón nace encendido. Un clic
+   * distraído encoge un permiso de cinco días a uno, y los otros cuatro se
+   * pierden.
+   *
+   * El resto del modal cumple la invariante contraria —abrir sin tocar deja el
+   * botón apagado, porque «pedir exactamente lo que ya tiene no es un cambio»—,
+   * y aquí no se puede cumplir: sin segunda casilla no hay forma de proponer
+   * «déjalo como está». Así que en vez de apagar el botón se AVISA, con el
+   * número de días que se van y la alternativa al lado.
+   */
+  const permisoViejoDeVariosDias = unSoloDia && solicitud.fechaInicio !== solicitud.fechaFin;
+
+  const faltaFecha = !fechaInicio || !fechaFinEfectiva;
+  const rangoInvertido = Boolean(fechaInicio && fechaFinEfectiva && fechaInicio > fechaFinEfectiva);
+  const rangoLargo = excedeRangoMaximo(fechaInicio, fechaFinEfectiva);
+  const sinCambios = sinCambiosDeFechas(solicitud, fechaInicio, fechaFinEfectiva);
   // Las dos salen de `dominio.ts` y no de aquí: son el espejo de la regla
   // `fecha_en_pasado` del servidor, y una regla enterrada en el JSX es la única
   // de las seis que no se podría cubrir el día que esta app tenga runner.
@@ -92,8 +127,8 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
   const haciaAtras = retrocedeAlPasado(solicitud, fechaInicio, hoy);
 
   const resumen = useMemo(
-    () => resumenCambio(solicitud, { clase, fechaInicio, fechaFin }, festivos),
-    [solicitud, clase, fechaInicio, fechaFin, festivos],
+    () => resumenCambio(solicitud, { clase, fechaInicio, fechaFin: fechaFinEfectiva }, festivos),
+    [solicitud, clase, fechaInicio, fechaFinEfectiva, festivos],
   );
   // Con una fecha a medio teclear —o con un rango imposible— el conteo da 0 y el
   // resumen diría que se devuelven todos los días. Mejor no enseñar nada que
@@ -116,7 +151,10 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
           // servidor contesta 400 (`anulacion_con_fechas`) si llegan con valor,
           // a propósito, para que un cliente con un bug no crea haber pedido un
           // cambio de fechas habiendo pedido que le anulen las vacaciones.
-          ...(anula ? {} : { fechaInicio, fechaFin }),
+          // La EFECTIVA: en un permiso no hay segunda casilla, así que mandar el
+          // `fechaFin` crudo enviaría el rango con el que se abrió el modal y el
+          // servidor lo rechazaría con `permiso_de_un_solo_dia`.
+          ...(anula ? {} : { fechaInicio, fechaFin: fechaFinEfectiva }),
           motivo: motivo.trim() || undefined,
         }),
       );
@@ -199,12 +237,14 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
                   onChange={() => setClase('fechas')}
                   className="accent-blue-600"
                 />
-                Cambiar las fechas
+                {unSoloDia && !soloAnulable ? 'Cambiar la fecha' : 'Cambiar las fechas'}
               </span>
               <span className="pl-6 text-xs text-gray-500">
                 {soloAnulable
                   ? 'Un compensatorio concedido no tiene fechas que mover: si te equivocaste, anúlalo y pídelo otra vez.'
-                  : 'Propón otras fechas. Sirve también para acortar una ausencia que ya empezó.'}
+                  : unSoloDia
+                    ? 'Un permiso es de un solo día: puedes moverlo a otro, no alargarlo.'
+                    : 'Propón otras fechas. Sirve también para acortar una ausencia que ya empezó.'}
               </span>
             </label>
 
@@ -241,10 +281,21 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
             lleva. */}
         {!anula && (
           <>
+            {/* Va ARRIBA de los campos y del botón, no dentro del panel del
+                resumen: el resumen ya lo cuenta bien («Son 4 días menos»), pero
+                es un panel que hay que leer mientras el botón ya está encendido.
+                Ver el porqué entero en `permisoViejoDeVariosDias`. */}
+            {permisoViejoDeVariosDias && (
+              <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Este permiso ocupa {rangoFechas(solicitud.fechaInicio, solicitud.fechaFin)}, pero los permisos ahora son
+                de un solo día. <b>Si pides el cambio, se quedará solo en el día que elijas</b> y el resto se pierde. Si
+                lo que quieres es quitarlo entero, pide la anulación.
+              </p>
+            )}
             <div className="mb-2 grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="pm-desde" className="mb-1 block text-sm font-medium text-gray-700">
-                  Nuevo primer día
+                  {unSoloDia ? 'Nueva fecha' : 'Nuevo primer día'}
                 </label>
                 <input
                   id="pm-desde"
@@ -255,19 +306,27 @@ export default function PedirModificacion({ solicitud, claseInicial, festivos, o
                   onChange={(e) => setFechaInicio(e.target.value)}
                 />
               </div>
-              <div>
-                <label htmlFor="pm-hasta" className="mb-1 block text-sm font-medium text-gray-700">
-                  Nuevo último día
-                </label>
-                <input
-                  id="pm-hasta"
-                  type="date"
-                  className={CAMPO}
-                  value={fechaFin}
-                  min={fechaInicio || minInicio}
-                  onChange={(e) => setFechaFin(e.target.value)}
-                />
-              </div>
+              {/* En un permiso no se pinta: es de un solo día y se puede mover,
+                  no alargar. Se saca del DOM y no se esconde con CSS — aquí el
+                  input no lleva `required`, así que no habría callejón de
+                  validación nativa, pero un campo invisible que sigue mandando
+                  su valor es peor todavía: enviaría el rango con el que se abrió
+                  el modal sin que nadie lo viera. */}
+              {!unSoloDia && (
+                <div>
+                  <label htmlFor="pm-hasta" className="mb-1 block text-sm font-medium text-gray-700">
+                    Nuevo último día
+                  </label>
+                  <input
+                    id="pm-hasta"
+                    type="date"
+                    className={CAMPO}
+                    value={fechaFin}
+                    min={fechaInicio || minInicio}
+                    onChange={(e) => setFechaFin(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
             {rangoInvertido && (
               <p className="mb-2 text-sm text-red-600">La fecha final no puede ser anterior a la inicial.</p>
