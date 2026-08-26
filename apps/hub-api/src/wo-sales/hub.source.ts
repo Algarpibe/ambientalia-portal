@@ -53,6 +53,10 @@ const ORDENES_VIVAS_SQL = `
            c.nit,
            NULLIF(so.raw ->> 'shipment_date', '')    AS fecha_entrega,
            NULLIF(so.raw ->> 'payment_terms_label', '') AS forma_pago,
+           -- Plazo de pago en días (§10): alimenta "Vencimiento" = Fecha + plazo. El
+           -- objeto de la OV NO trae due_date calculado (eso vive en la factura), pero
+           -- sí payment_terms. Texto, no ::numeric: '' se vuelve NULL = ausente.
+           NULLIF(so.raw ->> 'payment_terms', '')    AS plazo_pago,
            -- Descuento a nivel de documento. Texto, no ::numeric: un valor con % de
            -- Zoho abortaría la consulta entera (ver el bloque de descuento de línea).
            NULLIF(so.raw ->> 'discount_total', '')   AS descuento_cabecera
@@ -69,7 +73,7 @@ const ORDENES_VIVAS_SQL = `
   -- ('invoiced' no está en estadosVivos). Esto reemplaza la antigua exclusión por
   -- factura, que hacía desaparecer enteras las OV parcialmente facturadas.
   SELECT v.salesorder_id, v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
-         v.fecha_entrega, v.forma_pago, v.descuento_cabecera,
+         v.fecha_entrega, v.forma_pago, v.plazo_pago, v.descuento_cabecera,
          li.line_item_id,
          li.quantity,
          li.rate,
@@ -109,6 +113,8 @@ interface Fila {
   nit: string | null;
   fecha_entrega: string | null;
   forma_pago: string | null;
+  /** Plazo de pago en días (Zoho payment_terms), texto crudo: ver `aPlazo`. */
+  plazo_pago: string | null;
   /** Texto crudo del descuento de documento, sin castear: ver `aNumero`. */
   descuento_cabecera: string | null;
   /** NULL cuando la OV no tiene ninguna línea (el LEFT JOIN la trae igual). */
@@ -162,6 +168,17 @@ function aNumeroObligatorio(valor: unknown): number {
 }
 
 /**
+ * Plazo de pago (§10). Distingue tres casos que el vencimiento trata distinto:
+ * ausente (null → el builder usa el plazo por defecto y avisa), 0 (contado →
+ * Vencimiento = Fecha) y N días. Un valor no numérico se trata como ausente.
+ */
+function aPlazo(valor: string | null): number | null {
+  if (valor === null || valor === '') return null;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Cantidad pendiente de facturar de una línea = pedida − facturada − cancelada, y si
  * la línea debe entrar al archivo. Entra si queda algo pendiente (> 0). Una línea ya
  * facturada del todo (pendiente 0, o negativo por descuadre) NO entra. Un cálculo NaN
@@ -203,6 +220,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
             nit: f.nit,
             formaPagoZoho: f.forma_pago,
             fechaEntrega: f.fecha_entrega,
+            plazoPago: aPlazo(f.plazo_pago),
             moneda: f.currency_code,
             // aNumero (no aNumeroObligatorio): un descuento ausente ES 0, no un dato
             // que falta. Un "12.5%" se vuelve NaN; el builder solo avisa si es > 0,

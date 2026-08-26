@@ -26,6 +26,7 @@ describe('computarPendiente', () => {
     nit: '900123',
     formaPagoZoho: '100% Anticipado',
     fechaEntrega: '2026-07-20',
+    plazoPago: 30,
     moneda: 'COP',
     descuentoCabecera: 0,
     cantidadFacturada: 0,

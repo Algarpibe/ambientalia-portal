@@ -13,6 +13,26 @@ export function toWoDate(iso: string | null): string {
   return a && m && d ? `${d}/${m}/${a}` : '';
 }
 
+/** ISO YYYY-MM-DD + n días calendario → ISO YYYY-MM-DD. En UTC para que ningún
+ *  desfase de zona reste un día. Cadena vacía si la fecha base no es válida. */
+export function sumarDias(iso: string | null, dias: number): string {
+  if (!iso) return '';
+  const [a, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!a || !m || !d) return '';
+  const dt = new Date(Date.UTC(a, m - 1, d) + dias * 86_400_000);
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${mm}-${dd}`;
+}
+
+/** Prefijo del documento: el literal de config si se fijó, o `OV_{año}` derivado del
+ *  año de la fecha del documento (para que en enero no haya que tocar nada). */
+export function derivarPrefijo(fechaIso: string, config: WoSalesConfig): string {
+  if (config.prefijo) return config.prefijo;
+  const anio = fechaIso.slice(0, 4);
+  return /^\d{4}$/.test(anio) ? `OV_${anio}` : '';
+}
+
 /**
  * El formato no usa comillas: ni el separador (;) ni el terminador de registro
  * (CR/LF) pueden aparecer dentro de un valor sin romper la fila. Zoho permite
@@ -26,8 +46,7 @@ export function sanear(valor: string): { valor: string; saneado: boolean } {
 /**
  * "330801 CALIBRACION ENVIRO" → { codigo: '330801', descripcion: 'CALIBRACION ENVIRO' }
  * Si el primer tramo no es numérico, el valor no cumple el formato esperado y se
- * descarta entero: es preferible dejar las dos columnas vacías (y avisar) a escribir
- * texto en la columna del código contable.
+ * descarta entero: es preferible dejar la columna vacía (y avisar) a escribir basura.
  */
 export function partirCentroCostos(valor: string | null): {
   codigo: string;
@@ -39,6 +58,22 @@ export function partirCentroCostos(valor: string | null): {
   const [codigo, ...resto] = valor.trim().split(/\s+/);
   if (!/^\d+$/.test(codigo)) return { codigo: '', descripcion: '', valido: false };
   return { codigo, descripcion: resto.join(' '), valido: true };
+}
+
+/**
+ * Nombre del centro de costos EXACTO como lo espera World Office (§5.2). WO exige el
+ * nombre, no el código: se parte "código descripción" de Zoho y se traduce el código
+ * con el override de config (las discrepancias conocidas); para un código sin override
+ * se usa la descripción de Zoho tal cual (coincide con WO). Cadena vacía si no hay un
+ * centro de costos válido (ya se avisó).
+ *
+ * PENDIENTE (§5): con la hoja `ceco` completa del modelo, aquí se validará además que
+ * el código EXISTA en WO y se avisará si no; hoy solo se traducen las 5 excepciones.
+ */
+export function nombreCentroCostosWO(valor: string | null, config: WoSalesConfig): string {
+  const { codigo, descripcion, valido } = partirCentroCostos(valor);
+  if (!valido) return '';
+  return config.centrosCostosWO[codigo] ?? descripcion;
 }
 
 export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig): BuildResult {
@@ -53,7 +88,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
   const campo = (orden: string, valor: string): string => {
     const { valor: v, saneado } = sanear(valor);
     if (saneado) {
-      // El mensaje nombra los dos vectores: sanear() ya no toca solo el ";".
       avisar({
         tipo: 'valor_saneado',
         orden,
@@ -71,9 +105,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
    */
   const num = (ov: string, campoNombre: string, n: number): string => {
     if (typeof n !== 'number' || !Number.isFinite(n)) {
-      // String() y no JSON.stringify() para los números: JSON.stringify(NaN) e
-      // (Infinity) dan los dos "null", y el aviso mandaría a buscar en Zoho un campo
-      // vacío en vez del valor corrupto que hay de verdad.
       const visible = typeof n === 'number' ? String(n) : JSON.stringify(n);
       avisar({
         tipo: 'valor_no_numerico',
@@ -85,7 +116,27 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     return String(n);
   };
 
-  function detalle(ov: SalesOrder, l: SalesOrderLine): string[] {
+  /** Vencimiento (§10) = fecha de pago. Se calcula una vez por OV; avisa (una vez) si
+   *  falta el plazo de pago y se cae al plazo por defecto. */
+  const vencimientoDeLaOv = (ov: SalesOrder): string => {
+    const v = config.vencimiento;
+    if (v.regla === 'igual_a_fecha') return toWoDate(ov.fecha);
+    if (v.regla === 'fecha_fija') return toWoDate(v.fechaFija ?? null);
+    // fecha_documento_mas_plazo
+    let plazo = ov.plazoPago;
+    if (plazo === null || plazo === undefined || !Number.isFinite(plazo)) {
+      plazo = v.plazoPorDefectoDias;
+      avisar({
+        tipo: 'plazo_pago_ausente',
+        orden: ov.numero,
+        mensaje: `La OV no trae plazo de pago (payment_terms) en Zoho; se usó el plazo por defecto de ${v.plazoPorDefectoDias} días para el vencimiento.`,
+      });
+    }
+    if (plazo === 0) return toWoDate(ov.fecha);
+    return toWoDate(sumarDias(ov.fecha, plazo));
+  };
+
+  function detalle(ov: SalesOrder, l: SalesOrderLine, vencimiento: string): string[] {
     if (!l.sku) {
       avisar({ tipo: 'sin_sku', orden: ov.numero, mensaje: 'Línea sin SKU: World Office la rechazará.' });
     }
@@ -105,31 +156,31 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `El artículo tiene ${l.centrosCostosCount} centros de costo; se usó el primero.`,
       });
     }
-
     const cc = partirCentroCostos(l.centroCostos);
     if (l.centroCostos && !cc.valido) {
       avisar({
         tipo: 'centro_costos_invalido',
         orden: ov.numero,
         sku: l.sku ?? undefined,
-        mensaje: `El centro de costos no tiene el formato "código descripción": ${JSON.stringify(l.centroCostos)}. Se dejaron ambas columnas vacías.`,
+        mensaje: `El centro de costos no tiene el formato "código descripción": ${JSON.stringify(l.centroCostos)}. Se dejó la columna vacía.`,
       });
     }
 
-    // 26 campos: 10 nombrados + 15 personalizados + Código Centro Costos.
+    // 27 campos (posiciones 30–56): 12 nombrados + Moneda Det + TRM Det + 15 personalizados.
     return [
-      campo(ov.numero, l.sku ?? ''),
-      config.bodega,
-      config.unidadDeMedida,
-      num(ov.numero, 'Cantidad', l.cantidad),
-      config.iva,
-      num(ov.numero, 'Valor Unitario', l.valorUnitario),
-      num(ov.numero, 'Descuento', l.descuento),
-      config.vencimiento,
-      campo(ov.numero, l.descripcion ?? ''),
-      campo(ov.numero, cc.descripcion),
-      ...Array(15).fill(''),
-      campo(ov.numero, cc.codigo),
+      campo(ov.numero, l.sku ?? ''), //            30 Producto (texto, aunque sea numérico)
+      config.bodega, //                            31 Bodega
+      config.unidadDeMedida, //                    32 UnidadDeMedida
+      num(ov.numero, 'Cantidad', l.cantidad), //   33 Cantidad
+      config.iva, //                               34 Iva
+      num(ov.numero, 'Valor', l.valorUnitario), // 35 Valor
+      config.descuento, //                         36 Descuento (fijo 0)
+      vencimiento, //                              37 Vencimiento (fecha de pago)
+      '', //                                       38 Nota Detalle (vacía)
+      campo(ov.numero, nombreCentroCostosWO(l.centroCostos, config)), // 39 Centro Costos (nombre WO)
+      '', //                                       40 Moneda Det
+      '', //                                       41 TRM Det
+      ...Array(15).fill(''), //                    42–56 Personalizado1..15Det
     ];
   }
 
@@ -144,9 +195,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     if (!ov.nit) {
       avisar({ tipo: 'sin_nit', orden: ov.numero, mensaje: 'El cliente no tiene NIT en Zoho.' });
     }
-    if (!ov.fechaEntrega) {
-      avisar({ tipo: 'sin_fecha_entrega', orden: ov.numero, mensaje: 'La OV no tiene fecha de envío esperada.' });
-    }
     if (ov.moneda && ov.moneda !== 'COP') {
       avisar({
         tipo: 'moneda_no_cop',
@@ -155,9 +203,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       });
     }
     if (ov.cantidadFacturada > 0) {
-      // Informativo, no un fallo: la OV está parcialmente facturada y el archivo trae
-      // solo lo pendiente (las líneas ya facturadas del todo se quedaron fuera). Se
-      // avisa para que Xiomara pueda cuadrar el archivo contra lo ya facturado en Zoho.
       avisar({
         tipo: 'ov_parcialmente_facturada',
         orden: ov.numero,
@@ -165,11 +210,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       });
     }
     if (ov.descuentoCabecera > 0) {
-      // El descuento de esta OV está a nivel de documento (discount_type "entity_level"
-      // en Zoho), y el CSV solo tiene columna de descuento por línea. No se reparte
-      // automáticamente porque cómo prorratearlo es una decisión contable, no técnica
-      // (VALIDAR con Xiomara). Lo que NO se puede es callarlo: el pedido entraría a
-      // World Office a precio completo.
       avisar({
         tipo: 'descuento_cabecera_ignorado',
         orden: ov.numero,
@@ -177,48 +217,31 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       });
     }
 
-    const formaPago = ov.formaPagoZoho ? config.formasPago[ov.formaPagoZoho] : undefined;
-    if (ov.formaPagoZoho && !formaPago) {
-      avisar({
-        tipo: 'forma_pago_desconocida',
-        orden: ov.numero,
-        mensaje: `Término de pago sin homologar: "${ov.formaPagoZoho}". Se usó "${config.formaPagoPorDefecto}".`,
-      });
-    }
+    const vencimiento = vencimientoDeLaOv(ov);
 
-    const empresa = config.empresa === 'cliente' ? (ov.clienteNombre ?? '') : config.empresa;
-    if (config.empresa === 'cliente' && !ov.clienteNombre) {
-      avisar({
-        tipo: 'sin_empresa',
-        orden: ov.numero,
-        mensaje: 'El cliente no tiene nombre en Zoho y la empresa sale del cliente: la columna va vacía.',
-      });
-    }
-
-    // 31 campos: 14 nombrados + 15 personalizados + Sucursal + Clasificación.
+    // 30 campos (posiciones 0–29): 14 nombrados + 15 personalizados + Importacion.
     // Se calcula una vez por OV y se repite idéntico en cada línea.
     const encabezado: string[] = [
-      campo(ov.numero, empresa),
-      config.tipoDocumento,
-      '',
-      campo(ov.numero, ov.numero),
-      toWoDate(ov.fecha),
-      config.terceroInterno,
-      campo(ov.numero, ov.nit ?? ''),
-      config.nota,
-      formaPago ?? config.formaPagoPorDefecto,
-      toWoDate(ov.fechaEntrega),
-      '',
-      '',
-      config.verificado,
-      config.anulado,
-      ...Array(15).fill(''),
-      '',
-      '',
+      config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
+      config.tipoDocumento, //            1  Tipo Documento (PED)
+      derivarPrefijo(ov.fecha, config), //2  prefijo (OV_{año})
+      config.documentoNumero, //          3  DocumentoNúmero (número, fijo 1)
+      toWoDate(ov.fecha), //              4  Fecha
+      config.terceroInterno, //           5  Tercero Interno (texto, fijo)
+      campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)
+      config.nota, //                     7  Nota (PEDIDO)
+      config.formaPago, //                8  FormaDePago (Credito)
+      '', //                              9  FechaEntrega (vacía)
+      '', //                              10 Moneda (vacía)
+      '', //                              11 TRM (vacía)
+      config.verificado, //               12 Verificado (número, 0)
+      config.anulado, //                  13 Anulado (número, 0)
+      ...Array(15).fill(''), //           14–28 Personalizado1..15
+      '', //                              29 Importacion (vacía)
     ];
 
     for (const linea of ov.lineas) {
-      matriz.push([...encabezado, ...detalle(ov, linea)]);
+      matriz.push([...encabezado, ...detalle(ov, linea, vencimiento)]);
     }
   }
 

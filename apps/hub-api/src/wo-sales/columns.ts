@@ -1,76 +1,76 @@
 /**
- * Las 57 columnas del formato "DocumentosVentasEncabezadosMovimientoInventarioWO",
- * en el orden exacto del CSV de muestra que envió Xiomara.
+ * Las 57 columnas del archivo de World Office, en el orden EXACTO del modelo
+ * (hoja QueryDef_Exportar del .xls que envió Xiomara): 30 de encabezado (0–29) + 27
+ * de detalle (30–56). World Office lee por POSICIÓN, así que no se añade, quita ni
+ * reordena. Nombres literales del modelo (ojo: `prefijo` en minúscula; sin los
+ * prefijos "Encab:/Detalle:" que usaba la versión anterior).
  *
- * OJO: el acta y Descripcion_campos.docx dicen 56. Están mal: la cabecera real y
- * todas las filas de la muestra tienen 57 (31 de encabezado + 26 de detalle).
- * Manda el archivo. No añadir, quitar ni reordenar: World Office lee por posición.
+ * Cambios frente al layout anterior (que iba corrido +1 a partir de la posición 29):
+ * - 10–11 pasan a ser `Moneda`/`TRM` (antes `Prefijo/Número_Documento_Externo`).
+ * - 29 es UNA sola columna `Importacion` (antes `Sucursal` + `Clasificación`).
+ * - desaparece la columna extra `Código Centro Costos` del final: el modelo solo lleva
+ *   el NOMBRE del centro de costos (posición 39), no el código.
  */
-const PERSONALIZADOS_ENCAB = Array.from({ length: 15 }, (_, i) => `Encab: Personalizado ${i + 1}`);
-const PERSONALIZADOS_DETALLE = Array.from({ length: 15 }, (_, i) => `Detalle: Personalizado${i + 1}`);
+const PERSONALIZADOS_ENCAB = Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}`);
+const PERSONALIZADOS_DETALLE = Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}Det`);
 
 export const COLUMNS: readonly string[] = [
-  'Encab: Empresa',
-  'Encab: Tipo Documento',
-  'Encab: Prefijo',
-  'Encab: Documento Número',
-  'Encab: Fecha',
-  'Encab: Tercero Interno',
-  'Encab: Tercero Externo',
-  'Encab: Nota',
-  'Encab: FormaPago',
-  'Encab: Fecha Entrega',
-  'Encab: Prefijo Documento Externo',
-  'Encab: Número_Documento_Externo',
-  'Encab: Verificado',
-  'Encab: Anulado',
+  // — Encabezado (0–29): se repite idéntico en cada línea de la misma OV —
+  'Empresa',
+  'Tipo Documento',
+  'prefijo',
+  'DocumentoNúmero',
+  'Fecha',
+  'Tercero Interno',
+  'Tercero Externo',
+  'Nota',
+  'FormaDePago',
+  'FechaEntrega',
+  'Moneda',
+  'TRM',
+  'Verificado',
+  'Anulado',
   ...PERSONALIZADOS_ENCAB,
-  'Encab: Sucursal',
-  'Encab: Clasificación',
-  'Detalle: Producto',
-  'Detalle: Bodega',
-  'Detalle: UnidadDeMedida',
-  'Detalle: Cantidad',
-  'Detalle: IVA',
-  'Detalle: Valor Unitario',
-  'Detalle: Descuento',
-  'Detalle: Vencimiento',
-  'Detalle: Nota',
-  // OJO: existen dos columnas de centro de costos, casi homónimas y en extremos
-  // opuestos del array: esta (descripción, índice 40) y 'Detalle: Código Centro
-  // Costos' (código, índice 56). Zoho da ambos valores en un solo campo,
-  // "330801 CALIBRACION ENVIRO", que el builder parte en dos.
-  'Detalle: Centro costos',
+  'Importacion',
+  // — Detalle (30–56): una fila por línea de producto —
+  'Producto',
+  'Bodega',
+  'UnidadDeMedida',
+  'Cantidad',
+  'Iva',
+  'Valor',
+  'Descuento',
+  'Vencimiento',
+  'Nota Detalle',
+  'Centro Costos',
+  'Moneda Det',
+  'TRM Det',
   ...PERSONALIZADOS_DETALLE,
-  'Detalle: Código Centro Costos',
 ];
 
 /**
  * Tipo de cada columna en el .xls de World Office. El CSV es todo texto, pero el .xls
- * de la muestra tiene celdas TIPADAS: fechas como serial de Excel (43466 = 01/01/2019),
- * importes y NIT como número, y el resto texto. Un .xls con todo texto (o un CSV
- * renombrado) no importaría bien. Verificado celda a celda contra la muestra .xls.
+ * tipa cada celda: `Fecha` y `Vencimiento` como fecha (serial con formato m/d/yy),
+ * unos pocos campos como número y el resto texto. Verificado celda a celda contra el
+ * modelo.
  *
- * Dos desviaciones deliberadas respecto de la muestra:
- * - 'Documento Número' va como TEXTO, no número: usamos el consecutivo alfanumérico
- *   'OV-2026-138'. // VALIDAR con Xiomara: la muestra usa un consecutivo numérico
- *   (1, 2, 3); pendiente confirmar cuál acepta World Office.
- * - 'Tercero Externo' (NIT) es 'numero', pero el serializador cae a texto si el NIT
- *   trae guion o letra, para no corromperlo.
+ * OJO, cambios de tipo frente a la versión anterior (el modelo manda):
+ * - `DocumentoNúmero` es NÚMERO (fijo 1), ya no texto.
+ * - `Tercero Interno` y `Tercero Externo` (NIT) son TEXTO, ya no número.
+ * - `Producto` (SKU) es TEXTO aunque parezca numérico (p. ej. "3011026485").
  */
 export type TipoColumna = 'texto' | 'numero' | 'fecha';
 
 const NUMERO = new Set<string>([
-  'Encab: Tercero Interno',
-  'Encab: Tercero Externo',
-  'Encab: Verificado',
-  'Encab: Anulado',
-  'Detalle: Cantidad',
-  'Detalle: IVA',
-  'Detalle: Valor Unitario',
-  'Detalle: Descuento',
+  'DocumentoNúmero',
+  'Verificado',
+  'Anulado',
+  'Cantidad',
+  'Iva',
+  'Valor',
+  'Descuento',
 ]);
-const FECHA = new Set<string>(['Encab: Fecha', 'Encab: Fecha Entrega', 'Detalle: Vencimiento']);
+const FECHA = new Set<string>(['Fecha', 'Vencimiento']);
 
 export const TIPO_COLUMNA: readonly TipoColumna[] = COLUMNS.map((c) =>
   FECHA.has(c) ? 'fecha' : NUMERO.has(c) ? 'numero' : 'texto'
