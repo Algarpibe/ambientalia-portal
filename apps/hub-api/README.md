@@ -14,7 +14,6 @@ Auth = `Authorization: Bearer <jwt>` (el JWT se obtiene en `/api/login`).
 | GET | `/health` | none | `{ ok, deals, invoices, tickets }` (hub counts) |
 | POST | `/api/login` | none | `{ token }` — valida credenciales (`AUTH_USERS`) y emite un JWT |
 | GET | `/api/reconciliation/data?from=&to=` | Bearer JWT | `{ invoices, payments }` |
-| GET | `/api/profitability/data` | Bearer JWT | datos de rentabilidad por cliente |
 | GET | `/api/inventory/data` | Bearer JWT | datos de inventario/reposición |
 | GET | `/api/customer-valuation/data` | Bearer JWT | valoración de clientes |
 

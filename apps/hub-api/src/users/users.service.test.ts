@@ -163,7 +163,7 @@ const validPassArb = fc.array(passChar, { minLength: 8, maxLength: 30 }).map((a)
 
 const registerInputArb = fc.record({ fullName: validNameArb, email: emailArb, password: validPassArb });
 
-const APP_IDS = ['customer-profitability', 'payment-reconciliation', 'inventory', 'customer-valuation'];
+const APP_IDS = ['payment-reconciliation', 'inventory', 'customer-valuation'];
 const appListArb = fc.subarray(APP_IDS);
 
 // bcrypt coste 12 × 100 iteraciones es intrínsecamente lento (~20-50 s/test), y

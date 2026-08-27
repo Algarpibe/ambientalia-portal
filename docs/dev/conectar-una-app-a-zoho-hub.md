@@ -22,7 +22,7 @@ Ninguna app tiene credenciales de BD. `HUB_DB_URL` vive solo en el servicio hub-
 ## Parte 1 — Backend: exponer un endpoint nuevo en hub-api
 
 Todo ocurre en `apps/hub-api/src/`. Ejemplos canónicos ya en el repo:
-`reconciliation.ts`, `salesOrders.ts`, `inventory.ts`, `profitability.ts`,
+`reconciliation.ts`, `salesOrders.ts`, `inventory.ts`,
 `customerValuation.ts`.
 
 ### 1. Crear el módulo de datos
@@ -100,7 +100,7 @@ const data = await res.json();
 ```
 
 Ejemplos de hooks self-fetch listos para copiar:
-`apps/customer-profitability/src/widgets/useProfitabilityData.ts`,
+`apps/inventory-optimization/src/widgets/useInventoryData.ts`,
 `apps/payment-reconciliation/src/widgets/useReconciliationData.ts`.
 
 > Si el dato es para un **widget del dashboard**, además hay que registrar el widget:

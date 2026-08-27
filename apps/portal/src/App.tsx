@@ -20,7 +20,6 @@ import AdminUsers from './pages/admin/AdminUsers';
 const ConciliadorPagos = lazyConReintento(() => import('../../payment-reconciliation/src/App'));
 const AnalisisInventario = lazyConReintento(() => import('../../inventory-optimization/src/App'));
 const ConsolidadorInventario = lazyConReintento(() => import('../../inventory-consolidation'));
-const RentabilidadClientes = lazyConReintento(() => import('../../customer-profitability/src/App'));
 const VentasArticulos = lazyConReintento(() => import('../../product-sales/src/App'));
 const LaboratoriosAmbientales = lazyConReintento(() => import('../../laboratorios-ambientales/src/App.tsx'));
 const ValoracionClientes = lazyConReintento(() => import('../../customer-valuation/src/App'));
@@ -107,7 +106,6 @@ function App() {
                     <Route path="/conciliador-pagos/*" element={<AppGuard appId="payment-reconciliation"><ConciliadorPagos /></AppGuard>} />
                     <Route path="/analisis-inventario/*" element={<AppGuard appId="inventory-optimization"><AnalisisInventario /></AppGuard>} />
                     <Route path="/consolidador-inventario/*" element={<AppGuard appId="inventory-consolidation"><ConsolidadorInventario /></AppGuard>} />
-                    <Route path="/rentabilidad-clientes/*" element={<AppGuard appId="customer-profitability"><RentabilidadClientes /></AppGuard>} />
                     <Route path="/ventas-articulos/*" element={<AppGuard appId="product-sales"><VentasArticulos /></AppGuard>} />
                     <Route path="/laboratorios-ambientales/*" element={<AppGuard appId="laboratorios-ambientales"><LaboratoriosAmbientales /></AppGuard>} />
                     <Route path="/valoracion-clientes/*" element={<AppGuard appId="customer-valuation"><ValoracionClientes /></AppGuard>} />

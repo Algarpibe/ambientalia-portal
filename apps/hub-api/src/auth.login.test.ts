@@ -37,7 +37,7 @@ beforeAll(async () => {
   auth = await import('./auth.js');
 });
 
-const APP_IDS = ['customer-profitability', 'payment-reconciliation', 'inventory', 'customer-valuation'];
+const APP_IDS = ['payment-reconciliation', 'inventory', 'customer-valuation'];
 const emailArb = fc
   .tuple(
     fc.array(fc.constantFrom(...'abcdefghijklmnopqrstuvwxyz0123456789'.split('')), { minLength: 1, maxLength: 12 }).map((a) => a.join('')),

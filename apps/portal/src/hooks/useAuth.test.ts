@@ -37,7 +37,7 @@ describe('readAuthState', () => {
       sub: 'user@x.com',
       user_id: 'uuid-1',
       role: 'admin',
-      apps: ['customer-profitability', 'inventory'],
+      apps: ['customer-valuation', 'inventory'],
       exp: futureExp(),
     });
     expect(readAuthState()).toEqual({
@@ -45,7 +45,7 @@ describe('readAuthState', () => {
       user_id: 'uuid-1',
       email: 'user@x.com',
       role: 'admin',
-      apps: ['customer-profitability', 'inventory'],
+      apps: ['customer-valuation', 'inventory'],
     });
   });
 
@@ -93,7 +93,7 @@ describe('readAuthState', () => {
       ['undefined', undefined],
       ['número', 42],
       ['objeto', { a: 1 }],
-      ['string', 'customer-profitability'],
+      ['string', 'customer-valuation'],
       ['array con no-strings', ['ok', 3, null, { x: 1 }]],
     ] as const) {
       it(label, () => {

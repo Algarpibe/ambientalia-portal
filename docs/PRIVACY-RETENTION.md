@@ -50,7 +50,7 @@ Medidas asociadas:
 - **Acceso restringido por app en el servidor** (`requireApp`, no solo en el
   frontend): `/api/wo-sales/*` → `requireApp('WO-sales')`; `/api/contabilidad/*` →
   `requireApp('contabilidad')`; y los endpoints de datos/detalle de las demás apps
-  (`payment-reconciliation`, `customer-profitability`, `inventory-optimization`,
+  (`payment-reconciliation`, `inventory-optimization`,
   `customer-valuation`) exigen su `requireApp` correspondiente. Así, solo los
   usuarios con la app asignada acceden al NIT/dirección; un usuario sin la app
   recibe 403 (cierre de **SEC-210 / SEC-211 / PRIV-810**).

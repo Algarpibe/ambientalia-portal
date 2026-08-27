@@ -3,7 +3,6 @@ import {
   type LucideIcon,
   BarChart3,
   Wallet,
-  TrendingUp,
   ChevronRight,
   Beaker,
   Users,
@@ -30,13 +29,6 @@ const aplicaciones: AppConfig[] = [
     path: "/conciliador-pagos",
     icon: Wallet,
     color: "from-blue-400 to-blue-600"
-  },
-  {
-    name: "Rentabilidad Clientes",
-    description: "Identifica tus cuentas más valiosas con análisis de margen profundo.",
-    path: "/rentabilidad-clientes",
-    icon: TrendingUp,
-    color: "from-orange-400 to-rose-500"
   },
   {
     name: "Análisis de Inventario",

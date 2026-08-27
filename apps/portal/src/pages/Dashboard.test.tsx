@@ -36,7 +36,7 @@ function renderDashboard(apps: string[], registry: RegistryState = { status: 're
 
 const fakeWidget = (id: string): WidgetDescriptor => ({
   id,
-  appId: 'customer-profitability',
+  appId: 'customer-valuation',
   name: `Widget ${id}`,
   description: 'desc',
   defaultSize: { w: 4, h: 3 },
@@ -47,7 +47,7 @@ afterEach(cleanup);
 
 describe('Dashboard — panel de widgets', () => {
   it('muestra los controles del panel (Mi Panel, Editar panel)', () => {
-    renderDashboard(['customer-profitability']);
+    renderDashboard(['customer-valuation']);
     expect(screen.getByText('Mi Panel')).toBeTruthy();
     expect(screen.getByText(/Editar panel/i)).toBeTruthy();
   });
@@ -58,23 +58,23 @@ describe('Dashboard — panel de widgets', () => {
   });
 
   it('con apps pero sin widgets anclados ni disponibles → panel vacío', () => {
-    renderDashboard(['customer-profitability'], { status: 'ready', widgets: [] });
+    renderDashboard(['customer-valuation'], { status: 'ready', widgets: [] });
     expect(screen.getByText(/Tu panel está vacío/i)).toBeTruthy();
     expect(screen.getByText(/Aún no hay widgets disponibles/i)).toBeTruthy();
   });
 
   it('con widgets disponibles no anclados → invita a añadir', () => {
-    renderDashboard(['customer-profitability'], { status: 'ready', widgets: [fakeWidget('w1')] });
+    renderDashboard(['customer-valuation'], { status: 'ready', widgets: [fakeWidget('w1')] });
     expect(screen.getByText(/Añade widgets de tus aplicaciones/i)).toBeTruthy();
   });
 
   it('registry cargando → muestra spinner de carga', () => {
-    renderDashboard(['customer-profitability'], { status: 'loading' });
+    renderDashboard(['customer-valuation'], { status: 'loading' });
     expect(screen.getByText(/Cargando widgets/i)).toBeTruthy();
   });
 
   it('el directorio de apps ya no se renderiza en el dashboard', () => {
-    renderDashboard(['payment-reconciliation', 'customer-profitability']);
+    renderDashboard(['payment-reconciliation', 'customer-valuation']);
     expect(screen.queryByText('Conciliador de Pagos')).toBeNull();
     expect(screen.queryByText('Todas mis aplicaciones')).toBeNull();
   });

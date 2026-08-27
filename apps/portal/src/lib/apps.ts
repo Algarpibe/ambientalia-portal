@@ -17,7 +17,6 @@ export interface AppInfo {
 
 export const APPS: AppInfo[] = [
   { id: 'payment-reconciliation', label: 'Conciliador de Pagos', route: '/conciliador-pagos', category: 'aplicacion' },
-  { id: 'customer-profitability', label: 'Rentabilidad de Clientes', route: '/rentabilidad-clientes', category: 'aplicacion' },
   { id: 'inventory-optimization', label: 'Análisis de Inventario', route: '/analisis-inventario', category: 'aplicacion' },
   { id: 'inventory-consolidation', label: 'Consolidador de Inventario', route: '/consolidador-inventario', category: 'herramienta' },
   { id: 'product-sales', label: 'Ventas por Artículos', route: '/ventas-articulos', category: 'herramienta' },

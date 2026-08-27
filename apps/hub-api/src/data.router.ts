@@ -4,7 +4,6 @@ import { requireAuth, requireApp } from './auth.js';
 import { captureError } from './sentry.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
-import { getProfitabilityData } from './profitability.js';
 import { getInventoryData } from './inventory.js';
 import { getCustomerValuationData } from './customerValuation.js';
 import { getPendingSalesOrders } from './salesOrders.js';
@@ -19,7 +18,6 @@ import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
 // la autorización por-app se valida en el servidor, no solo en el
 // AppGuard del frontend. Los appId coinciden con portal/src/lib/apps.ts.
 const APP_PAGOS = 'payment-reconciliation';
-const APP_RENTABILIDAD = 'customer-profitability';
 const APP_INVENTARIO = 'inventory-optimization';
 const APP_VALORACION = 'customer-valuation';
 
@@ -41,15 +39,6 @@ export function createDataRouter(db: Pool): Router {
       res.json(data);
     } catch (e) {
       sendError(res, e, 'reconciliation');
-    }
-  });
-
-  router.get('/profitability/data', requireAuth, requireApp(APP_RENTABILIDAD), async (_req: Request, res: Response) => {
-    try {
-      const data = await cached('profitability', () => getProfitabilityData(db));
-      res.json(data);
-    } catch (e) {
-      sendError(res, e, 'profitability');
     }
   });
 

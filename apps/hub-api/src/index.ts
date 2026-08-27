@@ -105,7 +105,7 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-// Los endpoints de datos (/api/reconciliation, /profitability, /inventory,
+// Los endpoints de datos (/api/reconciliation, /inventory,
 // /customer-valuation, /sales-orders/pending, /invoices/:n/detail,
 // /sales-orders/:n/detail) viven ahora en createDataRouter, con guard por-app
 // (requireApp). Se monta tras initDb junto a los demás routers.

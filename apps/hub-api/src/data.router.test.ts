@@ -31,7 +31,6 @@ vi.mock('./db.js', () => ({
 // Los handlers no son el objeto del test (lo es el guard): mockeamos las fuentes de
 // datos para respuestas deterministas y sin BD.
 vi.mock('./reconciliation.js', () => ({ getReconciliationData: vi.fn().mockResolvedValue({ pagos: [] }) }));
-vi.mock('./profitability.js', () => ({ getProfitabilityData: vi.fn().mockResolvedValue({ clientes: [] }) }));
 vi.mock('./inventory.js', () => ({ getInventoryData: vi.fn().mockResolvedValue({ items: [] }) }));
 vi.mock('./customerValuation.js', () => ({ getCustomerValuationData: vi.fn().mockResolvedValue({ clientes: [] }) }));
 vi.mock('./salesOrders.js', () => ({ getPendingSalesOrders: vi.fn().mockResolvedValue([]) }));
@@ -70,7 +69,6 @@ const ENDPOINTS: { path: string; app: string }[] = [
   { path: '/api/sales-orders/pending', app: 'payment-reconciliation' },
   { path: '/api/invoices/FV-1/detail', app: 'payment-reconciliation' },
   { path: '/api/sales-orders/OV-1/detail', app: 'payment-reconciliation' },
-  { path: '/api/profitability/data', app: 'customer-profitability' },
   { path: '/api/inventory/data', app: 'inventory-optimization' },
   { path: '/api/customer-valuation/data', app: 'customer-valuation' },
 ];
@@ -108,7 +106,7 @@ describe('createDataRouter — autorización por-app (SEC-210/211, PRIV-810)', (
   it('el detalle de factura NO es accesible sin la app payment-reconciliation (no filtra NIT+dirección)', async () => {
     const res = await request(app())
       .get('/api/invoices/FV-1/detail')
-      .set('Authorization', `Bearer ${token(['customer-profitability'])}`);
+      .set('Authorization', `Bearer ${token(['customer-valuation'])}`);
     expect(res.status).toBe(403);
     expect(res.body.nit).toBeUndefined();
     expect(res.body.direccion).toBeUndefined();

@@ -328,7 +328,7 @@ describe('PATCH /api/users/:id/role', () => {
 describe('PUT /api/users/:id/apps', () => {
   it('asigna apps → 200 y round-trip', async () => {
     const u = db.seedUser({ email: 'apps@x.com', status: 'active' });
-    const apps = ['customer-profitability', 'inventory'];
+    const apps = ['customer-valuation', 'inventory'];
     const res = await request(app).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps });
     expect(res.status).toBe(200);
     expect([...res.body.apps].sort()).toEqual([...apps].sort());
@@ -340,10 +340,10 @@ describe('PUT /api/users/:id/apps', () => {
 
   it('GET apps devuelve las asignadas', async () => {
     const u = db.seedUser({ email: 'getapps@x.com', status: 'active' });
-    await request(app).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['inventory', 'customer-profitability'] });
+    await request(app).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['inventory', 'customer-valuation'] });
     const res = await request(app).get(`/api/users/${u.id}/apps`).set(bearer(adminToken));
     expect(res.status).toBe(200);
-    expect([...res.body.apps].sort()).toEqual(['customer-profitability', 'inventory']);
+    expect([...res.body.apps].sort()).toEqual(['customer-valuation', 'inventory']);
   });
 
   it('GET apps de usuario inexistente → 404', async () => {

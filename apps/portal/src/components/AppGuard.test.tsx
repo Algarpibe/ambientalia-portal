@@ -40,16 +40,16 @@ describe('AppGuard', () => {
       user_id: 'u',
       email: 'r@x.com',
       role: 'reader',
-      apps: ['customer-profitability', 'inventory'],
+      apps: ['customer-valuation', 'inventory'],
     };
-    renderGuard('customer-profitability');
+    renderGuard('customer-valuation');
     expect(screen.getByText('APP CONTENT')).toBeTruthy();
     expect(notify).not.toHaveBeenCalled();
   });
 
   it('app no asignada → redirige a / y notifica', () => {
     state.value = { isAuthenticated: true, user_id: 'u', email: 'r@x.com', role: 'reader', apps: ['inventory'] };
-    renderGuard('customer-profitability');
+    renderGuard('customer-valuation');
     expect(screen.getByText('HOME PAGE')).toBeTruthy();
     expect(screen.queryByText('APP CONTENT')).toBeNull();
     expect(notify).toHaveBeenCalledTimes(1);
