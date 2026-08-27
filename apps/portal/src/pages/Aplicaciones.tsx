@@ -9,6 +9,7 @@ import {
   Users,
   FileSpreadsheet,
   Landmark,
+  PackageOpen,
   CalendarDays
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -71,6 +72,13 @@ const aplicaciones: AppConfig[] = [
     path: "/contabilidad",
     icon: Landmark,
     color: "from-teal-400 to-emerald-600"
+  },
+  {
+    name: "OV pendientes de facturar",
+    description: "Órdenes de venta por facturar con indicios de despacho, paquete y ticket, para que ninguna entrega se quede atrás.",
+    path: "/ov-pendientes",
+    icon: PackageOpen,
+    color: "from-rose-400 to-pink-600"
   },
   {
     name: "Vacaciones y Permisos",

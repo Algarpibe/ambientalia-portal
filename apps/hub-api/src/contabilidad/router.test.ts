@@ -134,6 +134,29 @@ describe('PUT /api/contabilidad/budget/:year', () => {
   });
 });
 
+describe('app ov-pendientes (acceso acotado)', () => {
+  it('con SOLO ov-pendientes puede ver el listado de OV', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/ov-pendientes')
+      .set('Authorization', `Bearer ${token(['ov-pendientes'])}`);
+    expect(res.status).toBe(200);
+  });
+
+  it('con SOLO ov-pendientes NO puede ver la facturación', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/facturas')
+      .set('Authorization', `Bearer ${token(['ov-pendientes'])}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('con contabilidad sigue viendo el listado de OV', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/ov-pendientes')
+      .set('Authorization', `Bearer ${token(['contabilidad'])}`);
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('detalle', () => {
   it('GET /api/contabilidad/factura/:numero → 404 si no existe (fakePool vacío)', async () => {
     const res = await request(appConPool(fakePool()))

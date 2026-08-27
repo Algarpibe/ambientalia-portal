@@ -275,10 +275,13 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
  * admin gestiona el acceso de todas las apps y no depende de tener la app
  * asignada en su propio JWT.
  */
-export function requireApp(appId: string) {
+// Acepta VARIOS ids: basta con tener una de las apps indicadas. Sirve para recursos
+// compartidos por dos apps — p. ej. las OV pendientes, visibles tanto desde Contabilidad
+// como desde la app `ov-pendientes`, que se asigna a quien no debe ver la facturación.
+export function requireApp(...appIds: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const user = getPayload(req);
-    if (user?.role === 'admin' || user?.apps?.includes(appId)) {
+    if (user?.role === 'admin' || appIds.some((id) => user?.apps?.includes(id))) {
       next();
       return;
     }

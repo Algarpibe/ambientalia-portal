@@ -10,6 +10,7 @@ import { getDetalleFactura, getDetalleOV } from './detalle.js';
 const APP_ID = 'contabilidad';
 const CACHE_KEY = 'contabilidad:facturas';
 const CARTERA_MAX = 1000; // tope defensivo para una nota de texto libre
+const APP_ID_OV = 'ov-pendientes'; // app que solo ve el listado de OV pendientes
 const ANIO_DEFECTO = 2026;
 
 // El año se acota por abajo a ANIO_MINIMO: los datos anteriores están incompletos en la
@@ -75,7 +76,7 @@ export function createContabilidadRouter(db: Pool): Router {
     }
   });
 
-  router.get('/contabilidad/ov-pendientes', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+  router.get('/contabilidad/ov-pendientes', requireAuth, requireApp(APP_ID, APP_ID_OV), async (_req: Request, res: Response) => {
     try {
       const orders = await cached('contabilidad:ov-pendientes', () => getOVPendientesFacturables(db));
       res.json({ orders });
@@ -94,7 +95,7 @@ export function createContabilidadRouter(db: Pool): Router {
     }
   });
 
-  router.get('/contabilidad/ov/:numero', requireAuth, requireApp(APP_ID), async (req: Request, res: Response) => {
+  router.get('/contabilidad/ov/:numero', requireAuth, requireApp(APP_ID, APP_ID_OV), async (req: Request, res: Response) => {
     try {
       const d = await getDetalleOV(db, req.params.numero);
       if (!d) return void res.status(404).json({ error: 'ov no encontrada' });
