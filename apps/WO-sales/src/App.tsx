@@ -36,7 +36,8 @@ type WarningTipo =
   | 'valor_no_numerico'
   | 'valor_saneado'
   | 'plazo_pago_ausente'
-  | 'archivo_consolidado';
+  | 'valor_cero'
+  | 'vencimiento_antes_de_fecha';
 
 interface Warning {
   tipo: WarningTipo;
@@ -98,10 +99,8 @@ const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'ord
   plazo_pago_ausente: { titulo: 'OV sin plazo de pago (se usó el de por defecto)', unidad: 'orden' },
   ov_sin_lineas: { titulo: 'Orden sin líneas de producto', unidad: 'orden' },
   ov_antigua: { titulo: 'Orden antigua que sigue abierta', unidad: 'orden' },
-  archivo_consolidado: {
-    titulo: 'Todas las órdenes van con el mismo número de documento',
-    unidad: 'archivo',
-  },
+  valor_cero: { titulo: 'Valor unitario en 0 (revisar antes de facturar)', unidad: 'linea' },
+  vencimiento_antes_de_fecha: { titulo: 'Vencimiento anterior a la fecha (se usó la fecha)', unidad: 'orden' },
 };
 
 const metaDe = (tipo: WarningTipo) =>
