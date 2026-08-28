@@ -5,6 +5,8 @@ import type { InvoiceDetails, PaymentRecord, ReconciledRow, DateRangeOption } fr
 import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
+import { sortReconciledRows, nextSortConfig } from './reconciliationSort';
+import type { ReconciliationSortConfig, ReconciliationSortKey } from './reconciliationSort';
 import { authHeaders } from '@suite/auth-client';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 import DetalleModal from './DetalleModal';
@@ -19,7 +21,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string>('all');
   // Orden por defecto: fecha de factura descendente (de la más nueva a la más antigua).
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({ key: 'invoiceDate', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState<ReconciliationSortConfig | null>({ key: 'invoiceDate', direction: 'desc' });
   const [activeView, setActiveView] = useState<ActiveView>('reconciliation');
   const [dateRange, setDateRange] = useState<DateRangeOption>('all');
   const [customStartDate, setCustomStartDate] = useState<string>('');
@@ -154,36 +156,32 @@ function App() {
       });
     }
 
-    if (sortConfig !== null && sortConfig.key === 'invoiceDate') {
-      data = [...data].sort((a, b) => {
-        // Safe date parsing for comparison
-        const dateA = a.invoiceDate instanceof Date ? a.invoiceDate : parseExcelDate(a.invoiceDate);
-        const dateB = b.invoiceDate instanceof Date ? b.invoiceDate : parseExcelDate(b.invoiceDate);
-
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-
-        if (dateA < dateB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (dateA > dateB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return data;
+    return sortReconciledRows(data, sortConfig);
   }, [reconciledData, selectedClient, sortConfig, dateRange, customStartDate, customEndDate, selectedPaymentStatus, minAmount, maxAmount]);
 
-  const handleSort = () => {
-    setSortConfig(current => {
-      if (!current || current.key !== 'invoiceDate') {
-        return { key: 'invoiceDate', direction: 'asc' };
-      }
-      if (current.direction === 'asc') {
-        return { key: 'invoiceDate', direction: 'desc' };
-      }
-      // Toggle back to asc
-      return { key: 'invoiceDate', direction: 'asc' };
-    });
+  const handleSort = (key: ReconciliationSortKey) => {
+    setSortConfig(current => nextSortConfig(current, key));
+  };
+
+  // Encabezado ordenable: la flecha marca la columna activa y su dirección.
+  const sortableHeader = (column: ReconciliationSortKey, label: string, title: string) => {
+    const active = sortConfig?.key === column;
+    return (
+      <th
+        key={column}
+        className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none"
+        onClick={() => handleSort(column)}
+        title={title}
+      >
+        <div className="flex items-center gap-1">
+          {label}
+          <ArrowUpDown size={14} className={`transition-colors ${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`} />
+          {active && (
+            <span className="text-indigo-600 text-xs font-bold">{sortConfig?.direction === 'asc' ? '↑' : '↓'}</span>
+          )}
+        </div>
+      </th>
+    );
   };
 
   const toggleColumnVisibility = (column: string) => {
@@ -685,25 +683,13 @@ function App() {
                                 return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Cliente</th>;
                               }
                               if (column === 'invoiceDate') {
-                                return (
-                                  <th
-                                    key={column}
-                                    className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none"
-                                    onClick={handleSort}
-                                    title="Ordenar por fecha"
-                                  >
-                                    <div className="flex items-center gap-1">
-                                      Fecha Factura
-                                      <ArrowUpDown size={14} className={`transition-colors ${sortConfig?.key === 'invoiceDate' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`} />
-                                    </div>
-                                  </th>
-                                );
+                                return sortableHeader('invoiceDate', 'Fecha Factura', 'Ordenar por fecha');
                               }
                               if (column === 'dueDate') {
                                 return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap">Vencimiento</th>;
                               }
                               if (column === 'total') {
-                                return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Total</th>;
+                                return sortableHeader('total', 'Total', 'Ordenar por valor de la factura');
                               }
                               if (column === 'balance') {
                                 return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Saldo</th>;
@@ -712,7 +698,7 @@ function App() {
                                 return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Estado de Pago</th>;
                               }
                               if (column === 'paymentDetails') {
-                                return <th key={column} className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider">Pagos / Mora</th>;
+                                return sortableHeader('paymentDetails', 'Pagos / Mora', 'Ordenar por días de mora');
                               }
                               return null;
                             })}
