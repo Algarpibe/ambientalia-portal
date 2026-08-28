@@ -67,9 +67,9 @@ export type WarningTipo =
   // empresa es fija: por eso ya no existen 'forma_pago_desconocida', 'sin_fecha_entrega'
   // ni 'sin_empresa'. En su lugar, el plazo de pago alimenta el vencimiento:
   | 'plazo_pago_ausente'
-  // §9: mientras 'un_archivo_por_pedido' no esté cableado, el archivo consolidado lleva
-  // varias OV bajo la misma llave de documento y World Office las fusionaría.
-  | 'archivo_consolidado';
+  // §6 (v2): World Office los TOLERA en la carga, pero se avisa para revisión humana.
+  | 'valor_cero'
+  | 'vencimiento_antes_de_fecha';
 
 export interface Warning {
   tipo: WarningTipo;

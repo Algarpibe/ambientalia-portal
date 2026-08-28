@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { COLUMNS, TIPO_COLUMNA } from './columns.js';
 
-// El modelo (hoja QueryDef_Exportar) es la fuente de verdad: 57 columnas, 30 de
-// encabezado + 27 de detalle, en este orden EXACTO. World Office lee por posición.
+// El archivo que Xiomara CARGÓ con éxito en WO (26/08/2026) es la fuente de verdad: 58
+// columnas, 31 de encabezado + 27 de detalle, en este orden EXACTO. Lee por posición.
 const ESPERADAS = [
   'Empresa',
   'Tipo Documento',
@@ -21,7 +21,8 @@ const ESPERADAS = [
   'Personalizado1', 'Personalizado2', 'Personalizado3', 'Personalizado4', 'Personalizado5',
   'Personalizado6', 'Personalizado7', 'Personalizado8', 'Personalizado9', 'Personalizado10',
   'Personalizado11', 'Personalizado12', 'Personalizado13', 'Personalizado14', 'Personalizado15',
-  'Importacion',
+  'Sucursal',
+  'Clasificación',
   'Producto',
   'Bodega',
   'UnidadDeMedida',
@@ -40,17 +41,23 @@ const ESPERADAS = [
 ];
 
 describe('COLUMNS', () => {
-  it('son 57 columnas, con los nombres del modelo, en ese orden', () => {
-    expect(COLUMNS).toHaveLength(57);
+  it('son 58 columnas, con los nombres del archivo cargado, en ese orden', () => {
+    expect(COLUMNS).toHaveLength(58);
     expect(COLUMNS).toEqual(ESPERADAS);
   });
 
-  it('el encabezado son 30 columnas (0–29) y el detalle 27 (30–56)', () => {
-    expect(COLUMNS.indexOf('Importacion')).toBe(29); // última del encabezado
-    expect(COLUMNS.indexOf('Producto')).toBe(30); // primera del detalle
+  it('el encabezado son 31 columnas (0–30) y el detalle 27 (31–57)', () => {
+    expect(COLUMNS.indexOf('Sucursal')).toBe(29);
+    expect(COLUMNS.indexOf('Clasificación')).toBe(30); // última del encabezado
+    expect(COLUMNS.indexOf('Producto')).toBe(31); // primera del detalle
+    expect(COLUMNS.indexOf('Vencimiento')).toBe(38);
+    expect(COLUMNS.indexOf('Centro Costos')).toBe(40);
   });
 
-  it('no arrastra la columna extra "Código Centro Costos" ni los prefijos Encab:/Detalle:', () => {
+  it('lleva Sucursal y Clasificación, no Importacion ni Código Centro Costos', () => {
+    expect(COLUMNS).toContain('Sucursal');
+    expect(COLUMNS).toContain('Clasificación');
+    expect(COLUMNS).not.toContain('Importacion');
     expect(COLUMNS).not.toContain('Código Centro Costos');
     expect(COLUMNS.some((c) => /^(Encab|Detalle):/.test(c))).toBe(false);
   });
@@ -64,7 +71,6 @@ describe('COLUMNS', () => {
     for (const c of ['Fecha', 'Vencimiento']) expect(tipoDe(c)).toBe('fecha');
     for (const c of ['DocumentoNúmero', 'Verificado', 'Anulado', 'Cantidad', 'Iva', 'Valor', 'Descuento'])
       expect(tipoDe(c)).toBe('numero');
-    // El modelo manda: Tercero Interno/Externo (NIT) y Producto (SKU) son TEXTO.
     for (const c of ['Tercero Interno', 'Tercero Externo', 'Producto']) expect(tipoDe(c)).toBe('texto');
   });
 });

@@ -42,9 +42,9 @@ describe('buildWorldOfficeCsv', () => {
     expect(filas).toBe(1);
   });
 
-  it('cada fila tiene 57 campos', () => {
+  it('cada fila tiene 58 campos', () => {
     const { csv } = buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG);
-    expect(decodificar(csv)[1].split(';')).toHaveLength(57);
+    expect(decodificar(csv)[1].split(';')).toHaveLength(58);
   });
 
   it('termina en CRLF, como la muestra', () => {
@@ -59,8 +59,10 @@ describe('buildWorldOfficeCsv', () => {
 
     expect(valor('Empresa')).toBe('AMBIENTALIA SAS'); // fijo, no el cliente
     expect(valor('Tipo Documento')).toBe('PED');
-    expect(valor('prefijo')).toBe('OV_2026'); // derivado del año del documento
-    expect(valor('DocumentoNúmero')).toBe('1'); // fijo
+    expect(valor('prefijo')).toBe('OV_26'); // año de 2 dígitos (WO no acepta 4)
+    expect(valor('DocumentoNúmero')).toBe('1'); // 1er grupo, consecutivoInicial 1
+    expect(valor('Sucursal')).toBe(''); // vacía pero presente (58 columnas)
+    expect(valor('Clasificación')).toBe('');
     expect(valor('Fecha')).toBe('14/07/2026');
     expect(valor('Tercero Interno')).toBe('416544');
     expect(valor('Tercero Externo')).toBe('899999107'); // NIT
@@ -79,10 +81,10 @@ describe('buildWorldOfficeCsv', () => {
     expect(valor('Centro Costos')).toBe('CALIBRACION ENVIRO'); // nombre, no "código nombre"
   });
 
-  it('todas las columnas que el modelo deja vacías salen vacías (son 37)', () => {
+  it('todas las columnas que el archivo cargado deja vacías salen vacías (son 38)', () => {
     const campos = decodificar(buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG).csv)[1].split(';');
     const debenIrVacias = [
-      'FechaEntrega', 'Moneda', 'TRM', 'Importacion', 'Nota Detalle', 'Moneda Det', 'TRM Det',
+      'FechaEntrega', 'Moneda', 'TRM', 'Sucursal', 'Clasificación', 'Nota Detalle', 'Moneda Det', 'TRM Det',
       ...Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}`),
       ...Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}Det`),
     ];
@@ -90,7 +92,7 @@ describe('buildWorldOfficeCsv', () => {
       // Un objeto por columna para que el fallo diga CUÁL, no solo que algo falló.
       expect({ [c]: campos[COLUMNS.indexOf(c)] }).toEqual({ [c]: '' });
     }
-    expect(debenIrVacias.length).toBe(37);
+    expect(debenIrVacias.length).toBe(38);
   });
 
   it('repite las 30 columnas de encabezado idénticas en cada línea de la misma OV', () => {
@@ -121,7 +123,7 @@ describe('buildWorldOfficeCsv', () => {
     const { csv, warnings, filas } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
     const lineas = new TextDecoder('windows-1252').decode(csv).split(/\r\n|\r|\n/);
     expect(filas).toBe(1);
-    expect(lineas[1].split(';')).toHaveLength(57);
+    expect(lineas[1].split(';')).toHaveLength(58);
     expect(warnings.map((w) => w.tipo)).toContain('valor_saneado');
   });
 
@@ -196,9 +198,9 @@ describe('vencimiento (§10 — fecha de pago)', () => {
 });
 
 describe('derivarPrefijo', () => {
-  it('deriva OV_{año} de la fecha del documento', () => {
-    expect(derivarPrefijo('2026-07-14', DEFAULT_CONFIG)).toBe('OV_2026');
-    expect(derivarPrefijo('2027-01-02', DEFAULT_CONFIG)).toBe('OV_2027');
+  it('deriva OV_{AA} (2 dígitos) de la fecha del documento', () => {
+    expect(derivarPrefijo('2026-07-14', DEFAULT_CONFIG)).toBe('OV_26');
+    expect(derivarPrefijo('2027-01-02', DEFAULT_CONFIG)).toBe('OV_27');
   });
   it('usa el literal de config si se fijó', () => {
     expect(derivarPrefijo('2026-07-14', { ...DEFAULT_CONFIG, prefijo: 'OV_FIJO' })).toBe('OV_FIJO');
@@ -235,7 +237,7 @@ describe('advertencias', () => {
     expect(warnings.map((w) => w.tipo)).toContain('sin_centro_costos');
     const campos = decodificar(csv)[1].split(';');
     expect(campos[COLUMNS.indexOf('Centro Costos')]).toBe('');
-    expect(campos).toHaveLength(57);
+    expect(campos).toHaveLength(58);
   });
 
   it('avisa desde el primer centro de costos de más (exactamente 2)', () => {
@@ -299,30 +301,71 @@ describe('advertencias', () => {
   });
 });
 
-// §9: con `DocumentoNúmero` fijo, todas las líneas de un archivo comparten la llave de
-// documento (Empresa + Tipo Documento + prefijo + número). World Office agrupa por esa
-// llave, así que un archivo con varias OV se le fusionaría en un solo pedido. Mientras
-// el modo `un_archivo_por_pedido` no esté cableado, el archivo consolidado tiene que
-// avisar de que no se puede subir tal cual.
-describe('archivo consolidado (§9 sin cablear)', () => {
-  it('avisa una sola vez cuando el archivo lleva más de una orden', () => {
-    const otra: SalesOrder = { ...OV_BASE, numero: 'OV-2026-139' };
-    const { warnings } = buildWorldOfficeCsv([OV_BASE, otra], DEFAULT_CONFIG);
-    const avisos = warnings.filter((w) => w.tipo === 'archivo_consolidado');
-    expect(avisos).toHaveLength(1);
+// §3/§7.4: World Office exige que un mismo DocumentoNúmero tenga una sola Fecha y un solo
+// NIT. El consecutivo se asigna por grupo (Fecha, Tercero Externo). El consolidado es
+// válido siempre que la llave de documento sea coherente.
+describe('DocumentoNúmero: consecutivo por grupo (Fecha, Tercero Externo)', () => {
+  const con = (fecha: string, nit: string): SalesOrder => ({ ...OV_BASE, fecha, nit });
+
+  function filasDoc(csv: Buffer) {
+    const filas = decodificar(csv).filter((l) => l !== '').slice(1);
+    const iDoc = COLUMNS.indexOf('DocumentoNúmero');
+    const iFecha = COLUMNS.indexOf('Fecha');
+    const iNit = COLUMNS.indexOf('Tercero Externo');
+    return filas.map((f) => {
+      const c = f.split(';');
+      return { doc: c[iDoc], fecha: c[iFecha], nit: c[iNit] };
+    });
+  }
+
+  it('cada número de documento tiene exactamente una fecha y un NIT (§7.4)', () => {
+    const ordenes = [
+      con('2026-05-26', '800070853'),
+      con('2026-05-26', '800070853'), // mismo grupo
+      con('2026-05-27', '901229003'),
+      con('2026-05-26', '901229003'), // misma fecha, otro NIT → otro grupo
+    ];
+    const porDoc = new Map<string, Set<string>>();
+    for (const r of filasDoc(buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG).csv)) {
+      if (!porDoc.has(r.doc)) porDoc.set(r.doc, new Set());
+      porDoc.get(r.doc)!.add(`${r.fecha}|${r.nit}`);
+    }
+    for (const [doc, claves] of porDoc) expect({ doc, n: claves.size }).toEqual({ doc, n: 1 });
   });
 
-  it('el aviso dice cuántas órdenes se fusionarían y con qué número de documento', () => {
-    const otra: SalesOrder = { ...OV_BASE, numero: 'OV-2026-139' };
-    const tercera: SalesOrder = { ...OV_BASE, numero: 'OV-2026-140' };
-    const { warnings } = buildWorldOfficeCsv([OV_BASE, otra, tercera], DEFAULT_CONFIG);
-    const aviso = warnings.find((w) => w.tipo === 'archivo_consolidado');
-    expect(aviso?.mensaje).toContain('3');
-    expect(aviso?.mensaje).toContain(DEFAULT_CONFIG.documentoNumero);
+  it('mismo (fecha, NIT) comparte número; otro grupo, número distinto', () => {
+    const filas = filasDoc(
+      buildWorldOfficeCsv(
+        [con('2026-05-26', '800070853'), con('2026-05-26', '800070853'), con('2026-05-27', '901229003')],
+        DEFAULT_CONFIG
+      ).csv
+    );
+    expect(filas[0].doc).toBe(filas[1].doc);
+    expect(filas[0].doc).not.toBe(filas[2].doc);
   });
 
-  it('no avisa cuando el archivo lleva una sola orden', () => {
-    const { warnings } = buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG);
-    expect(warnings.some((w) => w.tipo === 'archivo_consolidado')).toBe(false);
+  it('numera desde consecutivoInicial, por fecha ascendente', () => {
+    const conf = { ...DEFAULT_CONFIG, consecutivoInicial: 24 };
+    const filas = filasDoc(
+      buildWorldOfficeCsv([con('2026-05-27', '901229003'), con('2026-05-26', '800070853')], conf).csv
+    );
+    expect(filas[0]).toMatchObject({ fecha: '26/05/2026', doc: '24' });
+    expect(filas[1]).toMatchObject({ fecha: '27/05/2026', doc: '25' });
+  });
+});
+
+describe('avisos del §6 (World Office los tolera, pero se revisan)', () => {
+  it('avisa valor_cero cuando el valor unitario es 0, sin abortar', () => {
+    const ov: SalesOrder = { ...OV_BASE, lineas: [{ ...OV_BASE.lineas[0], valorUnitario: 0 }] };
+    const { warnings, csv } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('valor_cero');
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Valor')]).toBe('0');
+  });
+
+  it('clampa el vencimiento a la fecha del documento si sale anterior, y avisa', () => {
+    const ov: SalesOrder = { ...OV_BASE, fecha: '2026-07-14', plazoPago: -7 };
+    const { warnings, csv } = buildWorldOfficeCsv([ov], DEFAULT_CONFIG);
+    expect(warnings.map((w) => w.tipo)).toContain('vencimiento_antes_de_fecha');
+    expect(decodificar(csv)[1].split(';')[COLUMNS.indexOf('Vencimiento')]).toBe('14/07/2026');
   });
 });

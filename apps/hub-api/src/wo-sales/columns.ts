@@ -1,21 +1,18 @@
 /**
- * Las 57 columnas del archivo de World Office, en el orden EXACTO del modelo
- * (hoja QueryDef_Exportar del .xls que envió Xiomara): 30 de encabezado (0–29) + 27
- * de detalle (30–56). World Office lee por POSICIÓN, así que no se añade, quita ni
- * reordena. Nombres literales del modelo (ojo: `prefijo` en minúscula; sin los
- * prefijos "Encab:/Detalle:" que usaba la versión anterior).
+ * Las 58 columnas del archivo de World Office, en el orden EXACTO del archivo que Xiomara
+ * CARGÓ con éxito en WO el 26/08/2026: 31 de encabezado (0–30) + 27 de detalle (31–57).
+ * World Office lee por POSICIÓN, así que no se añade, quita ni reordena.
  *
- * Cambios frente al layout anterior (que iba corrido +1 a partir de la posición 29):
- * - 10–11 pasan a ser `Moneda`/`TRM` (antes `Prefijo/Número_Documento_Externo`).
- * - 29 es UNA sola columna `Importacion` (antes `Sucursal` + `Clasificación`).
- * - desaparece la columna extra `Código Centro Costos` del final: el modelo solo lleva
- *   el NOMBRE del centro de costos (posición 39), no el código.
+ * Cambio clave frente al modelo teórico (que tenía 57 con `Importacion` en la 29): la
+ * carga real exigió UNA columna adicional antes de `Producto`. En su lugar van DOS,
+ * `Sucursal` (29) y `Clasificación` (30) —ambas vacías en todas las filas, pero deben
+ * existir—, y `Producto` arranca en la 31 (observación 4 de Xiomara).
  */
 const PERSONALIZADOS_ENCAB = Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}`);
 const PERSONALIZADOS_DETALLE = Array.from({ length: 15 }, (_, i) => `Personalizado${i + 1}Det`);
 
 export const COLUMNS: readonly string[] = [
-  // — Encabezado (0–29): se repite idéntico en cada línea de la misma OV —
+  // — Encabezado (0–30): se repite idéntico en cada línea del mismo pedido —
   'Empresa',
   'Tipo Documento',
   'prefijo',
@@ -31,8 +28,9 @@ export const COLUMNS: readonly string[] = [
   'Verificado',
   'Anulado',
   ...PERSONALIZADOS_ENCAB,
-  'Importacion',
-  // — Detalle (30–56): una fila por línea de producto —
+  'Sucursal',
+  'Clasificación',
+  // — Detalle (31–57): una fila por línea de producto —
   'Producto',
   'Bodega',
   'UnidadDeMedida',
@@ -51,11 +49,10 @@ export const COLUMNS: readonly string[] = [
 /**
  * Tipo de cada columna en el .xls de World Office. El CSV es todo texto, pero el .xls
  * tipa cada celda: `Fecha` y `Vencimiento` como fecha (serial con formato m/d/yy),
- * unos pocos campos como número y el resto texto. Verificado celda a celda contra el
- * modelo.
+ * unos pocos campos como número y el resto texto. Verificado contra el archivo cargado.
  *
- * OJO, cambios de tipo frente a la versión anterior (el modelo manda):
- * - `DocumentoNúmero` es NÚMERO (fijo 1), ya no texto.
+ * OJO (el archivo cargado manda):
+ * - `DocumentoNúmero` es NÚMERO (consecutivo por pedido, ver builder), ya no texto.
  * - `Tercero Interno` y `Tercero Externo` (NIT) son TEXTO, ya no número.
  * - `Producto` (SKU) es TEXTO aunque parezca numérico (p. ej. "3011026485").
  */

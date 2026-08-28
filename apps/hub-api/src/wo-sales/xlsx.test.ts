@@ -83,10 +83,10 @@ describe('buildWorldOfficeXlsx', () => {
     expect(XLSX.read(buf(), { type: 'buffer' }).SheetNames[0]).toBe('QueryDef_Exportar');
   });
 
-  it('la cabecera son las 57 columnas, como texto', () => {
+  it('la cabecera son las 58 columnas, como texto', () => {
     const wb = XLSX.read(buf(), { type: 'buffer' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    expect(XLSX.utils.decode_range(ws['!ref']!).e.c + 1).toBe(57);
+    expect(XLSX.utils.decode_range(ws['!ref']!).e.c + 1).toBe(58);
     expect(XLSX.utils.sheet_to_json(ws, { header: 1 })[0]).toEqual(COLUMNS);
   });
 

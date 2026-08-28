@@ -25,12 +25,12 @@ export function sumarDias(iso: string | null, dias: number): string {
   return `${dt.getUTCFullYear()}-${mm}-${dd}`;
 }
 
-/** Prefijo del documento: el literal de config si se fijó, o `OV_{año}` derivado del
- *  año de la fecha del documento (para que en enero no haya que tocar nada). */
+/** Prefijo del documento: el literal de config si se fijó, o `OV_{AA}` con los 2 últimos
+ *  dígitos del año (World Office NO acepta el año de 4 dígitos → OV_26, no OV_2026). */
 export function derivarPrefijo(fechaIso: string, config: WoSalesConfig): string {
   if (config.prefijo) return config.prefijo;
   const anio = fechaIso.slice(0, 4);
-  return /^\d{4}$/.test(anio) ? `OV_${anio}` : '';
+  return /^\d{4}$/.test(anio) ? `OV_${anio.slice(2)}` : '';
 }
 
 /** Normaliza un SKU para compararlo con el listado de World Office. `\s` incluye el
@@ -75,10 +75,6 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
 
   const avisar = (w: Warning) => warnings.push(w);
 
-  // Cuántas OV aportan al menos una fila al archivo. No es ordenes.length: una OV sin
-  // líneas no escribe nada, así que World Office no puede fusionarla con nada (§9).
-  let ordenesEnArchivo = 0;
-
   const campo = (orden: string, valor: string): string => {
     const { valor: v, saneado } = sanear(valor);
     if (saneado) {
@@ -110,12 +106,13 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     return String(n);
   };
 
-  /** Vencimiento (§10) = fecha de pago. Se calcula una vez por OV; avisa (una vez) si
-   *  falta el plazo de pago y se cae al plazo por defecto. */
-  const vencimientoDeLaOv = (ov: SalesOrder): string => {
+  /** Vencimiento (§10) = fecha de pago, en ISO. Se calcula una vez por OV; avisa (una vez)
+   *  si falta el plazo de pago y se cae al plazo por defecto. El clamp Vencimiento >= Fecha
+   *  (§6) se aplica en el bucle, con su propio aviso. */
+  const vencimientoIso = (ov: SalesOrder): string => {
     const v = config.vencimiento;
-    if (v.regla === 'igual_a_fecha') return toWoDate(ov.fecha);
-    if (v.regla === 'fecha_fija') return toWoDate(v.fechaFija ?? null);
+    if (v.regla === 'igual_a_fecha') return ov.fecha.slice(0, 10);
+    if (v.regla === 'fecha_fija') return (v.fechaFija ?? '').slice(0, 10);
     // fecha_documento_mas_plazo
     let plazo = ov.plazoPago;
     if (plazo === null || plazo === undefined || !Number.isFinite(plazo)) {
@@ -126,8 +123,8 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `La OV no trae plazo de pago (payment_terms) en Zoho; se usó el plazo por defecto de ${v.plazoPorDefectoDias} días para el vencimiento.`,
       });
     }
-    if (plazo === 0) return toWoDate(ov.fecha);
-    return toWoDate(sumarDias(ov.fecha, plazo));
+    if (plazo === 0) return ov.fecha.slice(0, 10);
+    return sumarDias(ov.fecha, plazo);
   };
 
   /** Nombre del centro de costos EXACTO de World Office (§5.2). Traduce el código con la
@@ -186,8 +183,17 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
         mensaje: `El artículo tiene ${l.centrosCostosCount} centros de costo; se usó el primero.`,
       });
     }
+    // §6: WO tolera el valor 0 en la carga, pero Marcela debe revisarlo antes de facturar.
+    if (Number.isFinite(l.valorUnitario) && l.valorUnitario === 0) {
+      avisar({
+        tipo: 'valor_cero',
+        orden: ov.numero,
+        sku: l.sku ?? undefined,
+        mensaje: 'El valor unitario es 0. World Office lo acepta, pero revísalo antes de facturar.',
+      });
+    }
 
-    // 27 campos (posiciones 30–56): 12 nombrados + Moneda Det + TRM Det + 15 personalizados.
+    // 27 campos (posiciones 31–57): 12 nombrados + Moneda Det + TRM Det + 15 personalizados.
     return [
       campo(ov.numero, l.sku ?? ''), //            30 Producto (texto, aunque sea numérico)
       config.bodega, //                            31 Bodega
@@ -205,7 +211,23 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     ];
   }
 
-  for (const ov of ordenes) {
+  // DocumentoNúmero (§3): un consecutivo por grupo (Fecha, Tercero Externo). World Office
+  // exige que la llave de documento sea coherente — un mismo número NO puede tener dos
+  // fechas ni dos NIT (§7.4). Se agrupa por (fecha, nit), se numera por fecha ascendente
+  // desde consecutivoInicial, y se emite en ese orden para que las líneas de un mismo
+  // pedido queden contiguas: así el archivo consolidado es válido para WO.
+  const claveGrupo = (ov: SalesOrder) => `${ov.fecha.slice(0, 10)}|${ov.nit ?? ''}`;
+  const ordenadas = [...ordenes].sort(
+    (a, b) => a.fecha.localeCompare(b.fecha) || (a.nit ?? '').localeCompare(b.nit ?? '')
+  );
+  const numeroPorGrupo = new Map<string, number>();
+  let siguienteNumero = config.consecutivoInicial;
+  for (const ov of ordenadas) {
+    const k = claveGrupo(ov);
+    if (!numeroPorGrupo.has(k)) numeroPorGrupo.set(k, siguienteNumero++);
+  }
+
+  for (const ov of ordenadas) {
     if (ov.lineas.length === 0) {
       avisar({
         tipo: 'ov_sin_lineas',
@@ -238,15 +260,27 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       });
     }
 
-    const vencimiento = vencimientoDeLaOv(ov);
+    // Vencimiento (§10) + clamp Vencimiento >= Fecha (§6): si el cálculo cae antes de la
+    // fecha del documento (dato raro), se usa la fecha y se avisa.
+    let vencIso = vencimientoIso(ov);
+    const fechaIso = ov.fecha.slice(0, 10);
+    if (vencIso && fechaIso && vencIso < fechaIso) {
+      avisar({
+        tipo: 'vencimiento_antes_de_fecha',
+        orden: ov.numero,
+        mensaje: `El vencimiento calculado (${toWoDate(vencIso)}) es anterior a la fecha del documento (${toWoDate(fechaIso)}); se usó la fecha del documento.`,
+      });
+      vencIso = fechaIso;
+    }
+    const vencimiento = toWoDate(vencIso);
 
-    // 30 campos (posiciones 0–29): 14 nombrados + 15 personalizados + Importacion.
-    // Se calcula una vez por OV y se repite idéntico en cada línea.
+    // 31 campos (posiciones 0–30): 14 nombrados + 15 personalizados + Sucursal + Clasificación.
+    // Se calcula una vez por OV y se repite idéntico en cada línea del pedido.
     const encabezado: string[] = [
       config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
       config.tipoDocumento, //            1  Tipo Documento (PED)
-      derivarPrefijo(ov.fecha, config), //2  prefijo (OV_{año})
-      config.documentoNumero, //          3  DocumentoNúmero (número, fijo 1)
+      derivarPrefijo(ov.fecha, config), //2  prefijo (OV_AA)
+      String(numeroPorGrupo.get(claveGrupo(ov))), // 3 DocumentoNúmero (consecutivo por grupo)
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)
@@ -258,33 +292,13 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       config.verificado, //               12 Verificado (número, 0)
       config.anulado, //                  13 Anulado (número, 0)
       ...Array(15).fill(''), //           14–28 Personalizado1..15
-      '', //                              29 Importacion (vacía)
+      '', //                              29 Sucursal (vacía)
+      '', //                              30 Clasificación (vacía)
     ];
 
-    let filasDeLaOv = 0;
     for (const linea of ov.lineas) {
       matriz.push([...encabezado, ...detalle(ov, linea, vencimiento)]);
-      filasDeLaOv++;
     }
-    if (filasDeLaOv > 0) ordenesEnArchivo++;
-  }
-
-  // §9 (pendiente de cerrar con contabilidad): 'DocumentoNúmero' es fijo, igual que
-  // Empresa, Tipo Documento y prefijo. Todas las líneas del archivo comparten entonces
-  // la MISMA llave de documento, y World Office agrupa las líneas en documentos por esa
-  // llave: un archivo con varias OV se le fusionaría en un solo pedido, con NIT de
-  // clientes distintos en la misma cabecera. Hasta cablear 'un_archivo_por_pedido', el
-  // archivo consolidado avisa en vez de salir en silencio hacia el ERP.
-  if (ordenesEnArchivo > 1) {
-    avisar({
-      tipo: 'archivo_consolidado',
-      orden: '',
-      mensaje:
-        `Este archivo lleva ${ordenesEnArchivo} órdenes de venta con el mismo número de ` +
-        `documento (${config.documentoNumero}), y World Office las fusionaría en un solo ` +
-        `pedido. No lo subas tal cual: está pendiente de confirmar con contabilidad si el ` +
-        `archivo debe llevar una sola orden de venta.`,
-    });
   }
 
   return {

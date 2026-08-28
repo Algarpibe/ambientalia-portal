@@ -27,9 +27,17 @@ export interface WoSalesConfig {
   /** Fijo en el modelo: 'AMBIENTALIA SAS' (no el nombre del cliente). */
   empresa: string;
   tipoDocumento: string;
-  /** Vacío = derivar del año del documento (OV_2026); si no, se usa literal. */
+  /** Vacío = derivar del año del documento como `OV_{AA}` (2 dígitos: OV_26). World
+   *  Office NO acepta el año de 4 dígitos. Si se fija, se usa el literal. */
   prefijo: string;
-  documentoNumero: string;
+  /**
+   * Primer número de documento (§3). `DocumentoNúmero` ya NO es fijo: es un consecutivo
+   * por grupo (Fecha, Tercero Externo). Este es el número del PRIMER grupo; los demás
+   * siguen en orden de fecha. OJO (§8.1): el par (prefijo, DocumentoNúmero) debe ser
+   * único en WO para todo el año — hay que persistir el último usado entre archivos y
+   * arrancar desde ahí, NO desde 1. Pendiente de cablear la persistencia.
+   */
+  consecutivoInicial: number;
   terceroInterno: string;
   nota: string;
   formaPago: string;
@@ -64,13 +72,11 @@ export interface WoSalesConfig {
 export const DEFAULT_CONFIG: WoSalesConfig = {
   empresa: 'AMBIENTALIA SAS',
   tipoDocumento: 'PED',
-  // Vacío = OV_{año del documento}. El '_' y el año salen del modelo (OV_2026). Se
-  // deriva del año para que en enero no haya que tocar nada.
+  // Vacío = OV_{AA} (2 dígitos del año). WO no acepta el año de 4 dígitos → OV_26.
   prefijo: '',
-  // Fijo '1' (confirmado por Alfonso). OJO §9: con un número fijo, todas las líneas de
-  // un archivo comparten la llave de documento; el archivo debe llevar UNA sola OV
-  // (modo un_archivo_por_pedido) o World Office fusionaría pedidos. Pendiente de cablear.
-  documentoNumero: '1',
+  // Primer consecutivo. Default 1 SOLO para arrancar; en producción debe venir del
+  // último número ya cargado en WO (§8.1), no hardcodearse en 1.
+  consecutivoInicial: 1,
   terceroInterno: '416544',
   nota: 'PEDIDO',
   formaPago: 'Credito',
