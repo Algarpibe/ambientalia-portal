@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, LogOut } from 'lucide-react';
+import { User, LogOut, Menu } from 'lucide-react';
 import { logout as cerrarSesion } from '../auth';
 import { useProfile } from '../hooks/useProfile';
 import Avatar from './Avatar';
 
+interface Props {
+  /** Abre la navegación en móvil, donde la barra lateral fija está oculta. */
+  onOpenMenu?: () => void;
+  menuOpen?: boolean;
+}
+
 // Barra superior con el avatar del usuario y su menú desplegable (nombre, email,
-// Perfil → /configuracion, Cerrar sesión).
-export default function TopBar() {
+// Perfil → /configuracion, Cerrar sesión). Por debajo de `lg` es además el único
+// sitio desde donde se alcanza la navegación, vía el botón de menú.
+export default function TopBar({ onOpenMenu, menuOpen = false }: Props) {
   const { profile } = useProfile();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -19,6 +26,16 @@ export default function TopBar() {
 
   return (
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 shrink-0">
+      {/* `mr-auto` empuja el avatar a la derecha sin tocar el `justify-end`: en
+          escritorio este botón no existe y el avatar sigue donde estaba. */}
+      <button
+        onClick={onOpenMenu}
+        aria-label="Abrir menú de navegación"
+        aria-expanded={menuOpen}
+        className="lg:hidden mr-auto -ml-2 p-2 rounded-xl text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors">
+        <Menu size={22} />
+      </button>
+
       <div className="relative">
         <button
           onClick={() => setOpen((o) => !o)}

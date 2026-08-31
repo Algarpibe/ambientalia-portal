@@ -40,10 +40,13 @@ export default function Dashboard() {
           <p className="text-gray-500">Gestiona todas tus herramientas operativas desde un solo lugar.</p>
         </div>
 
+        {/* El buscador se estira en movil y solo se fija a 256px a partir de md:
+            a 256px fijos, junto al boton de la campana, se salia del ancho util
+            de un telefono de 360px. */}
         <div className="flex items-center gap-4">
-          <div className="relative">
+          <div className="relative flex-1 md:flex-none">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input type="text" placeholder="Buscar app..." className="input-field pl-10 pr-4 w-64" />
+            <input type="text" placeholder="Buscar app..." className="input-field pl-10 pr-4 w-full md:w-64" />
           </div>
           <button className="p-2.5 bg-white rounded-2xl border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors shadow-soft">
             <Bell size={20} />

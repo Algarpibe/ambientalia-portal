@@ -44,3 +44,29 @@ describe('TopBar', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth'));
   });
 });
+
+// En móvil la TopBar es el único sitio desde el que se alcanza la navegación:
+// la barra lateral fija está oculta por debajo de lg.
+describe('TopBar — botón de menú móvil', () => {
+  it('el botón avisa al ancestro para que abra la navegación', () => {
+    const abrir = vi.fn();
+    render(
+      <MemoryRouter>
+        <TopBar onOpenMenu={abrir} menuOpen={false} />
+      </MemoryRouter>,
+    );
+    const boton = screen.getByLabelText('Abrir menú de navegación');
+    expect(boton.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(boton);
+    expect(abrir).toHaveBeenCalled();
+  });
+
+  it('refleja en aria-expanded que la navegación está abierta', () => {
+    render(
+      <MemoryRouter>
+        <TopBar onOpenMenu={vi.fn()} menuOpen />
+      </MemoryRouter>,
+    );
+    expect(screen.getByLabelText('Abrir menú de navegación').getAttribute('aria-expanded')).toBe('true');
+  });
+});

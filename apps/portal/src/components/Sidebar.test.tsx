@@ -19,7 +19,10 @@ const setAuth = (partial: Partial<AuthState>) => {
   state.value = { isAuthenticated: false, user_id: null, email: null, role: null, apps: [], ...partial };
 };
 
-beforeEach(() => localStorage.clear());
+// Solo la clave que este componente escribe, no `clear()`: arrasar el almacén
+// entero pisa el de otras suites cuando comparten backend (p. ej. bajo
+// --localstorage-file), y este fichero no es dueño de esas claves.
+beforeEach(() => localStorage.removeItem('sidebar_collapsed'));
 afterEach(cleanup);
 
 describe('Sidebar — plegado', () => {
@@ -93,5 +96,62 @@ describe('Sidebar — enlace Usuarios', () => {
     setAuth({ isAuthenticated: false, role: null });
     renderSidebar();
     expect(screen.queryByText('Usuarios')).toBeNull();
+  });
+});
+
+// Por debajo de lg la barra fija se oculta y el panel deslizante es la ÚNICA
+// navegación: sin él, Aplicaciones y Herramientas eran inalcanzables desde el
+// móvil. Estos tests cubren esa vía, no la fija.
+describe('Sidebar — navegación móvil (panel deslizante)', () => {
+  const renderMovil = (abierto: boolean, onClose = vi.fn()) => {
+    setAuth({ isAuthenticated: true, role: 'admin', user_id: 'a', apps: ['contabilidad'] });
+    render(
+      <MemoryRouter>
+        <Sidebar mobileOpen={abierto} onMobileClose={onClose} />
+      </MemoryRouter>,
+    );
+    return onClose;
+  };
+
+  it('cerrado no monta el panel: los enlaces no salen dos veces en el DOM', () => {
+    renderMovil(false);
+    // Uno solo: el de la barra fija. Si el panel se montara siempre, habría dos
+    // nodos «Dashboard» y dos paradas de tabulación para el mismo destino.
+    expect(screen.getAllByText('Dashboard')).toHaveLength(1);
+    expect(screen.queryByLabelText('Cerrar menú')).toBeNull();
+  });
+
+  it('abierto monta el panel con los mismos destinos y su botón de cerrar', () => {
+    renderMovil(true);
+    expect(screen.getByLabelText('Cerrar menú')).toBeTruthy();
+    const panel = screen.getByRole('dialog', { name: 'Menú de navegación' });
+    expect(panel).toBeTruthy();
+    // Los destinos se pintan dentro del panel, no solo en la barra fija.
+    expect(panel.querySelector('a[href="/aplicaciones"]')).toBeTruthy();
+    expect(panel.querySelector('a[href="/admin/users"]')).toBeTruthy();
+  });
+
+  it('tocar un enlace cierra el panel (si no, taparía la página recién abierta)', () => {
+    const onClose = renderMovil(true);
+    const panel = screen.getByRole('dialog', { name: 'Menú de navegación' });
+    fireEvent.click(panel.querySelector('a[href="/aplicaciones"]')!);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('Escape cierra el panel', () => {
+    const onClose = renderMovil(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('el panel respeta el rol: sin admin no aparece Usuarios', () => {
+    setAuth({ isAuthenticated: true, role: 'reader', user_id: 'b', apps: ['contabilidad'] });
+    render(
+      <MemoryRouter>
+        <Sidebar mobileOpen onMobileClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+    const panel = screen.getByRole('dialog', { name: 'Menú de navegación' });
+    expect(panel.querySelector('a[href="/admin/users"]')).toBeNull();
   });
 });

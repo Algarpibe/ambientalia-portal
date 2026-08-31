@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Suspense, Component } from 'react';
+import { Suspense, Component, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { lazyConReintento } from './lib/lazyConReintento';
 import Sidebar from './components/Sidebar';
@@ -76,6 +76,10 @@ function LoadingFallback() {
 }
 
 function App() {
+  // La navegación móvil vive aquí porque la abre la TopBar y la pinta el
+  // Sidebar, que son hermanos: este es su ancestro común más cercano.
+  const [menuMovil, setMenuMovil] = useState(false);
+
   return (
     <BrowserRouter>
       {/* Host global de notificaciones (toasts) — visible en toda la app. */}
@@ -90,9 +94,9 @@ function App() {
           element={
             <RequireAuth>
             <div className="flex min-h-screen bg-[#F7F8FA] text-gray-900">
-              <Sidebar />
+              <Sidebar mobileOpen={menuMovil} onMobileClose={() => setMenuMovil(false)} />
               <div className="flex-1 flex flex-col min-w-0">
-                <TopBar />
+                <TopBar onOpenMenu={() => setMenuMovil(true)} menuOpen={menuMovil} />
                 <ErrorBoundary>
                   <Suspense fallback={<LoadingFallback />}>
                     <Routes>
