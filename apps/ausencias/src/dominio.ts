@@ -843,19 +843,20 @@ export const mensajeDeModificacion = (mensaje: string): string => MENSAJE_MODIFI
 export const TIPOS_DE_AUSENCIA = TIPOS.filter((t) => !esOtorgamiento(t.id));
 
 /**
- * Lo mínimo para pintar una fila en cualquiera de las dos tablas.
+ * Lo mínimo para pintar una fila en cualquiera de las TRES tablas: «Mis
+ * solicitudes», la bandeja del jefe y el Registro general.
  *
- * Las horas van OPCIONALES y el resto no, aunque en `Solicitud` sean
- * obligatorias: `RegistroGeneral` pinta `Movimiento`, que es otro tipo y no las
- * tiene. La franja se queda deliberadamente fuera del registro general, así que
- * la alternativa —añadírselas al `Movimiento`— sería inventarle al backend un
- * campo que no manda con tal de contentar al compilador.
+ * Las horas van OBLIGATORIAS desde el 2026-08-31, cuando `Movimiento` —el tipo
+ * que pinta el Registro general— empezó a traerlas. Antes iban en un
+ * `Partial<…>` porque aquel no las tenía, y la consecuencia era visible: una
+ * fila de permiso repetía la fecha en «Desde» y en «Hasta» y no enseñaba la
+ * franja, porque `fechasDeLaFila` recibía `undefined` y caía a la rama de
+ * siempre.
  *
- * `Partial<Pick<…>>` y no dos campos escritos a mano: así siguen atadas a
- * `Solicitud`, y si allí cambian de forma esto se entera.
+ * `Pick<…>` de `Solicitud` y no seis campos escritos a mano: así siguen atadas
+ * al tipo de verdad, y si allí cambian de forma esto se entera.
  */
-type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles'> &
-  Partial<Pick<Solicitud, 'horaInicio' | 'horaFin'>>;
+type ParaLaTabla = Pick<Solicitud, 'tipo' | 'fechaInicio' | 'fechaFin' | 'diasHabiles' | 'horaInicio' | 'horaFin'>;
 
 /**
  * La celda «Días», con su signo cuando lo tiene.

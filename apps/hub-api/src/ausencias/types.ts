@@ -787,6 +787,19 @@ interface MovimientoBase {
    */
   fechaInicio: string;
   fechaFin: string;
+  /**
+   * La franja del día, `HH:MM`. `null` en todo lo que no sea un permiso con
+   * horario, y `null` SIEMPRE en una modificación: una anulación o un cambio de
+   * fechas no tiene franja propia, así que su consulta ni siquiera selecciona
+   * esas columnas y su mapeador las pone a `null` a mano.
+   *
+   * Van aquí y no solo en la rama de solicitud porque quien las pinta
+   * —`fechasDeLaFila`, la misma función de las otras dos tablas— recibe la unión
+   * entera, y una propiedad que existiera en una rama y no en la otra la
+   * obligaría a discriminar por clase para algo que no lo necesita.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
   /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
   decididaAt: string | null;

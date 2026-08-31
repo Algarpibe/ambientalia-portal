@@ -542,3 +542,61 @@ describe('CANDADO: observaciones en el registro', () => {
     expect(sinNota.observaciones).toBeNull();
   });
 });
+
+describe('la franja horaria llega al registro', () => {
+  const CON_HORA = 'conhora@ambientalia.com.co';
+
+  it('CANDADO: un permiso con franja la trae, en HH:MM', async () => {
+    // El registro pinta `Movimiento`, que es OTRA proyeccion —une solicitudes
+    // con modificaciones— y hasta hoy no traia las horas. Por eso la fila salia
+    // con la fecha repetida en DESDE y en HASTA: `fechasDeLaFila` sabe pintar la
+    // franja, pero recibia undefined y caia a la rama de siempre.
+    //
+    // `to_char` y no ::text, por lo mismo que en SELECT_SOLICITUD: un TIME llega
+    // como '14:00:00' y esos segundos se cuelan tal cual en la celda.
+    const id = await sembrarEmpleado(db, CON_HORA, JEFE);
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: CON_HORA,
+      estado: 'aprobada',
+      fechaInicio: '2026-09-04',
+      fechaFin: '2026-09-04',
+      segundoAprobadorCorreo: null,
+      tipo: 'permiso',
+      horaInicio: '14:00',
+      horaFin: '16:00',
+    });
+
+    const m = (await movimientos(db, null)).find((x) => x.solicitanteEmail === CON_HORA);
+    if (!m) throw new Error('la siembra no dejo movimiento');
+    expect(m.horaInicio).toBe('14:00');
+    expect(m.horaFin).toBe('16:00');
+  });
+
+  it('CANDADO: una solicitud SIN franja las trae en null, no undefined', async () => {
+    // La mitad que de verdad caza una columna ausente del SELECT: sin ella, esta
+    // fila tambien llegaria undefined y el `toBe('14:00')` de arriba seria lo
+    // unico rojo, con lo que alguien podria "arreglarlo" mirando solo esa mitad.
+    const sinFranja = (await movimientos(db, null)).find((x) => x.solicitanteEmail === HIJO);
+    if (!sinFranja) throw new Error('la siembra del beforeEach no dejo movimiento de HIJO');
+    expect(sinFranja.horaInicio).toBeNull();
+    expect(sinFranja.horaFin).toBeNull();
+  });
+
+  it('CANDADO: una MODIFICACION las trae en null', async () => {
+    // Una anulacion o un cambio de fechas no tiene franja propia: su consulta ni
+    // siquiera selecciona esas columnas. Sin el `null` EXPLICITO en su mapeador
+    // llegarian undefined, y `fechasDeLaFila` -que recibe la union entera- se
+    // comportaria igual hoy pero por accidente, no por contrato.
+    //
+    // Con los helpers de este fichero y no con un montaje propio: duplicar el
+    // alta de una propuesta es duplicar una regla que ya vive arriba.
+    const { modificacion } = await sembrarConPropuesta('anulacion');
+    await decidirModificacion(db, modificacion.id, true, null, null, payloadStub);
+
+    const m = await movimientoDe(modificacion.id);
+    if (!m) throw new Error('la anulacion aprobada no llego al registro');
+    expect(m.horaInicio).toBeNull();
+    expect(m.horaFin).toBeNull();
+  });
+});
