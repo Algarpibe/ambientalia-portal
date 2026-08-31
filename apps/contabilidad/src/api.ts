@@ -135,3 +135,25 @@ export async function fetchOVDetalle(numero: string): Promise<DetalleOV> {
 
 /** True si el JWT en localStorage tiene rol admin (solo para gating de UX). */
 // esAdmin se importa y re-exporta desde @suite/auth-client (ver arriba, AI-612).
+
+/** Espejo de apps/hub-api/src/contabilidad/entregasPendientes.ts */
+export interface FacturaPorEntregar {
+  invoiceNumber: string;
+  cliente: string;
+  fecha: string;
+  ov: string;
+  unidadesPorDespachar: number;
+}
+
+/**
+ * Facturas con mercancía ya facturada pero aún sin empaquetar (parte de trabajo de bodega).
+ * Endpoint propio y acotado: NO devuelve importes ni cartera, y lo pueden consumir tanto
+ * `contabilidad` como la app `ov-pendientes`.
+ */
+export async function fetchFacturasPorEntregar(): Promise<FacturaPorEntregar[]> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/facturas-por-entregar`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { facturas?: FacturaPorEntregar[] };
+  if (!Array.isArray(data.facturas)) throw new Error('Formato inesperado del hub (facturas por entregar).');
+  return data.facturas;
+}

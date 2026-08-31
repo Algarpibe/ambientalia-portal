@@ -142,6 +142,20 @@ describe('app ov-pendientes (acceso acotado)', () => {
     expect(res.status).toBe(200);
   });
 
+  it('con SOLO ov-pendientes puede ver las facturas por entregar', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/facturas-por-entregar')
+      .set('Authorization', `Bearer ${token(['ov-pendientes'])}`);
+    expect(res.status).toBe(200);
+  });
+
+  it('sin ninguna de las dos apps NO puede ver las facturas por entregar', async () => {
+    const res = await request(appConPool(fakePool()))
+      .get('/api/contabilidad/facturas-por-entregar')
+      .set('Authorization', `Bearer ${token(['otra-app'])}`);
+    expect(res.status).toBe(403);
+  });
+
   it('con SOLO ov-pendientes NO puede ver la facturación', async () => {
     const res = await request(appConPool(fakePool()))
       .get('/api/contabilidad/facturas')

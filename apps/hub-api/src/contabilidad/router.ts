@@ -5,6 +5,7 @@ import { captureError } from '../sentry.js';
 import { cached, clearCache, clearCacheKey } from '../cache.js';
 import { getContabilidadData, upsertCartera, upsertBudget, ANIO_MINIMO } from './source.js';
 import { getOVPendientesFacturables } from './ovPendientes.js';
+import { getFacturasPorEntregar } from './entregasPendientes.js';
 import { getDetalleFactura, getDetalleOV } from './detalle.js';
 
 const APP_ID = 'contabilidad';
@@ -82,6 +83,18 @@ export function createContabilidadRouter(db: Pool): Router {
       res.json({ orders });
     } catch (e) {
       sendError(res, e, 'contabilidad_ov_pendientes');
+    }
+  });
+
+  // Parte de trabajo para bodega: SOLO las facturas con mercancía sin empaquetar. Sin
+  // importes ni cartera, porque lo consume también la app `ov-pendientes`, asignada a
+  // quien no debe ver la facturación.
+  router.get('/contabilidad/facturas-por-entregar', requireAuth, requireApp(APP_ID, APP_ID_OV), async (_req: Request, res: Response) => {
+    try {
+      const facturas = await cached('contabilidad:facturas-por-entregar', () => getFacturasPorEntregar(db));
+      res.json({ facturas });
+    } catch (e) {
+      sendError(res, e, 'contabilidad_facturas_por_entregar');
     }
   });
 
