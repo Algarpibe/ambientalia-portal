@@ -430,6 +430,74 @@ describe('bloqueFechas — la hora del permiso', () => {
     expect(p.correo.cuerpo).toContain('09:00 a 11:00');
   });
 
+  it('CANDADO: con franja, el total se dice en HORAS y no en días hábiles', () => {
+    // El correo decía «Horario: de 14:00 a 16:00» y justo debajo «Total
+    // solicitado: 1 día hábil». Son dos líneas seguidas que se contradicen, y
+    // quien lo lee para aprobarlo se queda sin saber qué está aprobando.
+    //
+    // El `diasHabiles` de la fila SIGUE siendo 1 —es lo que va a la hoja de
+    // nómina y no se toca—, pero «Total solicitado» contesta a «cuánto pides», y
+    // en un permiso por horas la respuesta son las horas.
+    const p = construirPayload(
+      solicitud({
+        tipo: 'permiso',
+        fechaInicio: '2026-09-04',
+        fechaFin: '2026-09-04',
+        diasHabiles: 1,
+        horaInicio: '14:00',
+        horaFin: '16:00',
+      }),
+      'aprobacion',
+      null,
+    );
+    expect(p.correo.cuerpo).toContain('Total solicitado: 2 horas');
+    expect(p.correo.cuerpo).not.toContain('1 día hábil');
+  });
+
+  it('media hora y las fracciones se dicen en minutos', () => {
+    // El formulario ya solo ofrece horas enteras, pero la API acepta cualquier
+    // `HH:MM` y las solicitudes viejas pueden traer lo que sea.
+    const franja = (horaInicio: string, horaFin: string) =>
+      construirPayload(
+        solicitud({ tipo: 'permiso', fechaInicio: '2026-09-04', fechaFin: '2026-09-04', horaInicio, horaFin }),
+        'aprobacion',
+        null,
+      ).correo.cuerpo;
+
+    expect(franja('09:00', '09:30')).toContain('Total solicitado: 30 minutos');
+    expect(franja('09:00', '10:00')).toContain('Total solicitado: 1 hora');
+    expect(franja('09:00', '10:30')).toContain('Total solicitado: 1 hora y 30 minutos');
+  });
+
+  it('CANDADO: de un solo día, la fecha se dice UNA vez', () => {
+    // «Fecha primer día: 2026-09-04» y debajo «Fecha último día: 2026-09-04» se
+    // lee como una errata, que es lo que ya documenta el bloque del otorgamiento
+    // sobre este mismo `bloqueFechas`.
+    const p = construirPayload(
+      solicitud({ tipo: 'permiso', fechaInicio: '2026-09-04', fechaFin: '2026-09-04' }),
+      'aprobacion',
+      null,
+    );
+    // «Fecha de permiso» y no «del permiso»: el sufijo sale de `PERIODO`, que es
+    // el mismo mapa que compone «Fecha primer día de permiso» en un rango.
+    expect(p.correo.cuerpo).toContain('Fecha de permiso: 2026-09-04');
+    expect(p.correo.cuerpo).not.toContain('Fecha último día');
+  });
+
+  it('CANDADO: un rango de verdad sigue diciendo las dos fechas', () => {
+    // La regla es «no repetir el mismo día», no «no enseñar el rango». Unas
+    // vacaciones de una semana tienen que seguir diciendo dónde empiezan y dónde
+    // acaban.
+    const p = construirPayload(
+      solicitud({ tipo: 'vacaciones', fechaInicio: '2026-09-07', fechaFin: '2026-09-11', diasHabiles: 5 }),
+      'aprobacion',
+      null,
+    );
+    expect(p.correo.cuerpo).toContain('Fecha primer día de vacaciones: 2026-09-07');
+    expect(p.correo.cuerpo).toContain('Fecha último día de vacaciones: 2026-09-11');
+    expect(p.correo.cuerpo).toContain('Total solicitado: 5 días hábiles');
+  });
+
   it('CANDADO: sin hora, el correo no inventa ninguna franja', () => {
     const p = construirPayload(
       solicitud({ tipo: 'permiso', fechaInicio: '2026-09-01', fechaFin: '2026-09-03' }),
