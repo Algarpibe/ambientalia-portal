@@ -86,18 +86,70 @@ export function firmaDe(firmante: Firmante | null): string {
   return [firmante.nombreCompleto, firmante.cargo, FIRMA_EMPRESA].filter(Boolean).join('\n');
 }
 
+/** `'14:30'` → 870. Ancho fijo `HH:MM`, garantizado por `validarHoras`. */
+function enMinutos(hora: string): number {
+  const [h, m] = hora.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/**
+ * Cuánto dura la franja, dicho como lo diría una persona.
+ *
+ * Se CALCULA a partir de las dos horas en vez de guardarse: una tercera columna
+ * con la duración podría desviarse de la franja que dice describir, y entonces
+ * el correo y el calendario contarían cosas distintas del mismo permiso.
+ *
+ * Contempla los minutos sueltos aunque el formulario ya solo ofrezca horas
+ * enteras: la API acepta cualquier `HH:MM` y las solicitudes anteriores al
+ * 2026-08-25 pueden traer lo que sea.
+ */
+function duracionDeLaFranja(horaInicio: string, horaFin: string): string {
+  const total = enMinutos(horaFin) - enMinutos(horaInicio);
+  const horas = Math.floor(total / 60);
+  const minutos = total % 60;
+  const enHoras = `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+  const enMin = `${minutos} minutos`;
+  if (horas === 0) return enMin;
+  if (minutos === 0) return enHoras;
+  return `${enHoras} y ${enMin}`;
+}
+
 function bloqueFechas(s: Solicitud): string {
   const p = PERIODO[s.tipo];
-  const lineas = [
-    `📅 Fecha primer día ${p}: ${s.fechaInicio}`,
-    `📅 Fecha último día ${p}: ${s.fechaFin}`,
-  ];
+  // Una sola línea cuando empieza y acaba el mismo día. Repetir la fecha en dos
+  // renglones seguidos se lee como una errata — es el mismo motivo por el que el
+  // bloque del otorgamiento existe aparte, y por el que la tabla del portal deja
+  // vacía la celda «Hasta» en esas filas.
+  const lineas =
+    s.fechaInicio === s.fechaFin
+      ? [`📅 Fecha ${p}: ${s.fechaInicio}`]
+      : [`📅 Fecha primer día ${p}: ${s.fechaInicio}`, `📅 Fecha último día ${p}: ${s.fechaFin}`];
+
   // Solo cuando existe: una línea «🕘 Horario: —» en todos los demás correos
   // afirmaría que ahí falta un dato, y en unas vacaciones no falta nada.
-  if (s.horaInicio !== null && s.horaFin !== null) {
+  const conFranja = s.horaInicio !== null && s.horaFin !== null;
+  if (conFranja) {
     lineas.push(`🕘 Horario: de ${s.horaInicio} a ${s.horaFin}`);
   }
-  lineas.push('', `📊 Total solicitado: ${dias(s.diasHabiles)}`);
+
+  // ⚠️ Con franja, el total va en HORAS. Decir «1 día hábil» justo debajo de
+  // «Horario: de 14:00 a 16:00» son dos renglones seguidos que se contradicen, y
+  // quien abre este correo lo abre para decidir: necesita saber cuánto se pide,
+  // no cuánto ocupa la fila en una hoja de cálculo.
+  //
+  // `diasHabiles` NO cambia —sigue valiendo 1 y sigue siendo lo que viaja a la
+  // hoja de nómina—; lo que cambia es qué contesta este renglón, que es «cuánto
+  // pides» y no «cuántas casillas ocupas».
+  //
+  // Se repite la condición en vez de reusar `conFranja` con un `!`: el alias
+  // estrecha una variable, pero aquí lo que hay que estrechar son dos
+  // PROPIEDADES de `s`, y un `!` sería prometerle al compilador algo que deja de
+  // ser cierto en cuanto alguien mueva la comprobación.
+  const total =
+    s.horaInicio !== null && s.horaFin !== null
+      ? duracionDeLaFranja(s.horaInicio, s.horaFin)
+      : dias(s.diasHabiles);
+  lineas.push('', `📊 Total solicitado: ${total}`);
   return lineas.join('\n');
 }
 
