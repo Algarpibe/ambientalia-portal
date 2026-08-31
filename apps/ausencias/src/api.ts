@@ -911,6 +911,15 @@ interface MovimientoBase {
    */
   fechaInicio: string;
   fechaFin: string;
+  /**
+   * La franja del día, `HH:MM`. `null` en todo lo que no sea un permiso con
+   * horario, y `null` SIEMPRE en una modificación: una anulación o un cambio de
+   * fechas no tiene franja propia.
+   *
+   * Espejo manual de `MovimientoBase` en hub-api: mismos nombres, obligatorios.
+   */
+  horaInicio: string | null;
+  horaFin: string | null;
   /** Decimal: el histórico de la hoja trae medios días (6,5) y son dato real. */
   diasHabiles: number;
   decididaAt: string | null;

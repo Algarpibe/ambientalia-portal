@@ -3028,6 +3028,9 @@ interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
   estado: Solicitud['estado'];
   anulada_at: string | null;
   observaciones: string | null;
+  /** Ya en `HH:MM`: el SELECT las saca con `to_char`, no con `::text`. */
+  hora_inicio: string | null;
+  hora_fin: string | null;
 }
 
 /**
@@ -3050,6 +3053,11 @@ function comoMovimientoDeSolicitud(r: FilaMovimientoSolicitudDb): Movimiento {
     estado: r.estado,
     anuladaAt: r.anulada_at,
     observaciones: r.observaciones,
+    // Aquí y no en `camposComunesDelMovimiento`, por lo mismo que las dos de
+    // arriba: solo ESTA consulta las selecciona. Una modificación no tiene
+    // franja propia y su mapeador las pone a `null` a mano.
+    horaInicio: r.hora_inicio,
+    horaFin: r.hora_fin,
   };
 }
 
@@ -3095,6 +3103,11 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
             -- Sin cast: observaciones ya es TEXT en la tabla, no timestamptz
             -- ni NUMERIC como las columnas de arriba que si lo llevan.
             s.observaciones,
+            -- to_char y NO ::text, por lo mismo que en SELECT_SOLICITUD: el
+            -- driver devuelve un TIME como '14:00:00', y esos segundos se
+            -- colarian tal cual en la celda del registro.
+            to_char(s.hora_inicio, 'HH24:MI') AS hora_inicio,
+            to_char(s.hora_fin,    'HH24:MI') AS hora_fin,
             -- full_name y email son los nombres reales de las columnas de
             -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
             u.full_name AS decisor_nombre, u.email AS decisor_correo,
@@ -3139,7 +3152,18 @@ interface FilaMovimientoModificacionDb extends FilaMovimientoDb {
  * Postgres que no verifica nadie.
  */
 function comoMovimientoDeModificacion(r: FilaMovimientoModificacionDb): Movimiento {
-  return { ...camposComunesDelMovimiento(r, r.estado), clase: r.clase, estado: r.estado };
+  return {
+    ...camposComunesDelMovimiento(r, r.estado),
+    clase: r.clase,
+    estado: r.estado,
+    // `null` EXPLÍCITO, no una propiedad ausente: una anulación o un cambio de
+    // fechas no tiene franja propia y esta consulta ni siquiera selecciona esas
+    // columnas. Omitirlas dejaría `undefined` en la fila, y `fechasDeLaFila`
+    // —que recibe la unión entera— se comportaría igual hoy pero por accidente,
+    // no por contrato.
+    horaInicio: null,
+    horaFin: null,
+  };
 }
 
 /**
