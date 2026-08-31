@@ -91,7 +91,15 @@ const FACTURA_HEADER_SQL = `
 // se queda en 0 aunque bodega ya lo tenga listo). Los servicios van a 0 — ver source.ts.
 const FACTURA_LINEAS_SQL = `
   SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio,
-         CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service' THEN 0
+         CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service'
+                -- Orden cerrada o ya entregada → nada pendiente, aunque sus líneas digan
+                -- lo contrario (en los registros antiguos el packed de línea es 0 aunque
+                -- la orden esté entregada). Mismo guard que UNIDADES_POR_DESPACHAR.
+                OR EXISTS (SELECT 1 FROM books.sales_orders so
+                            WHERE so.salesorder_id = i.salesorder_id
+                              AND (COALESCE(so.raw ->> 'order_status', '') = 'closed'
+                                OR COALESCE(so.raw ->> 'shipped_status', '') = 'fulfilled'))
+              THEN 0
               ELSE COALESCE((
                 SELECT SUM(GREATEST(COALESCE(NULLIF(sol.raw ->> 'quantity_invoiced', '')::numeric, 0)
                        - COALESCE(NULLIF(sol.raw ->> 'quantity_packed', '')::numeric, 0), 0))
@@ -124,7 +132,11 @@ const OV_HEADER_SQL = `
 // se ha perdido, sigue vivo en el listado de OV pendientes).
 const OV_LINEAS_SQL = `
   SELECT it.sku, it.name AS nombre, li.quantity AS cantidad, li.rate AS precio,
-         CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service' THEN 0
+         CASE WHEN COALESCE(NULLIF(it.raw ->> 'product_type', ''), 'goods') = 'service'
+                -- Igual que arriba: si la orden está cerrada o entregada, no hay pendiente.
+                OR COALESCE(so.raw ->> 'order_status', '') = 'closed'
+                OR COALESCE(so.raw ->> 'shipped_status', '') = 'fulfilled'
+              THEN 0
               ELSE GREATEST(COALESCE(li.quantity, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0)
                    - COALESCE(NULLIF(li.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)

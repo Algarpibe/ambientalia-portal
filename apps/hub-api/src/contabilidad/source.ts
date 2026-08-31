@@ -37,6 +37,12 @@ export interface ContabilidadData {
  *     en 0 de por vida y saldrían como pendientes para siempre (gotcha ya visto en inventory.ts).
  * (4) UNA SOLA ALERTA POR OV, en su factura más reciente: una OV facturada en varias parciales
  *     repetía el mismo número en todas (OV-2026-033 salía 5 veces con 20).
+ * (5) NADA de órdenes CERRADAS o ya ENVIADAS del todo. En las órdenes antiguas el
+ *     `quantity_packed` de las LÍNEAS es 0 aunque la orden esté entregada y cerrada — el dato
+ *     de línea solo es fiable en los registros recientes. Sin este guard, FP-454/OV-2021-072
+ *     (cerrada y pagada en 2022, 16/16 enviadas) salía con 16 pendientes, y AM1464/OV-2026-128
+ *     (`fulfilled`) con 3. Si la orden está cerrada o entregada, no hay nada que preparar:
+ *     manda el estado de la orden, no sus líneas.
  */
 export const UNIDADES_POR_DESPACHAR = `
          CASE WHEN i.invoice_id = (
@@ -44,6 +50,11 @@ export const UNIDADES_POR_DESPACHAR = `
                  WHERE i2.salesorder_id = i.salesorder_id
                  ORDER BY i2.date DESC, i2.invoice_id DESC
                  LIMIT 1)
+              AND NOT EXISTS (
+                SELECT 1 FROM books.sales_orders so
+                 WHERE so.salesorder_id = i.salesorder_id
+                   AND (COALESCE(so.raw ->> 'order_status', '') = 'closed'
+                     OR COALESCE(so.raw ->> 'shipped_status', '') = 'fulfilled'))
               THEN (SELECT COALESCE(SUM(GREATEST(
                       COALESCE(NULLIF(li.raw ->> 'quantity_invoiced', '')::numeric, 0)
                       - COALESCE(NULLIF(li.raw ->> 'quantity_packed', '')::numeric, 0), 0)), 0)
