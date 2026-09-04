@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { FacturaContable } from './api';
 import { formatCOP, formatPct } from './format';
+import ResizeHandle from './ResizeHandle';
 
 type SortKey = keyof FacturaContable;
 
@@ -114,31 +115,6 @@ export default function FacturasTable({
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: 1 }));
 
-  // Redimensionado: se escuchan los eventos en `document` (y no en el tirador) para
-  // que el arrastre siga funcionando aunque el cursor se salga de la celda.
-  const iniciarArrastre = (e: React.MouseEvent, c: ColDef) => {
-    e.preventDefault();
-    e.stopPropagation(); // no dispares la ordenación al agarrar el borde
-    const xInicial = e.clientX;
-    const anchoInicial = anchoActual(c);
-    const calcular = (ev: MouseEvent) => Math.max(ANCHO_MINIMO, anchoInicial + (ev.clientX - xInicial));
-
-    const alMover = (ev: MouseEvent) => setArrastre({ key: c.key, ancho: calcular(ev) });
-    const alSoltar = (ev: MouseEvent) => {
-      document.removeEventListener('mousemove', alMover);
-      document.removeEventListener('mouseup', alSoltar);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      setArrastre(null);
-      onRedimensionar(c.key, calcular(ev));
-    };
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none'; // sin esto el arrastre selecciona texto
-    document.addEventListener('mousemove', alMover);
-    document.addEventListener('mouseup', alSoltar);
-  };
-
   return (
     <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
       {/* table-fixed + colgroup: sin esto el navegador trata el ancho como una simple
@@ -166,17 +142,12 @@ export default function FacturasTable({
                   {c.label}
                   {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
                 </span>
-                {/* Tirador de ancho: doble clic devuelve la columna a su ancho original. */}
-                <span
-                  onMouseDown={(e) => iniciarArrastre(e, c)}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onRestablecerAncho(c.key);
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  title="Arrastra para cambiar el ancho · doble clic para restablecer"
-                  className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/60 group-hover:bg-gray-300"
+                <ResizeHandle
+                  ancho={anchoActual(c)}
+                  minimo={ANCHO_MINIMO}
+                  onPreview={(a) => setArrastre(a === null ? null : { key: c.key, ancho: a })}
+                  onFin={(a) => onRedimensionar(c.key, a)}
+                  onRestablecer={() => onRestablecerAncho(c.key)}
                 />
               </th>
             ))}

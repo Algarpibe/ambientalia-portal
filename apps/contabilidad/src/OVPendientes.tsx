@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, PackageOpen } from 'lucide-react';
+import { getUserId } from '@suite/auth-client';
 import { fetchOVPendientes, type OVPendienteFacturable } from './api';
 import { formatCOP } from './format';
 import DetalleModal from './DetalleModal';
+import ColumnasMenu from './ColumnasMenu';
+import ResizeHandle from './ResizeHandle';
+import { useColumnPrefs, clavePrefs } from './useColumnPrefs';
 
 type SortKey = keyof OVPendienteFacturable;
 
@@ -13,16 +17,43 @@ const ESTADO: Record<string, { texto: string; cls: string }> = {
 };
 const estadoDe = (s: string) => ESTADO[s] ?? { texto: s, cls: 'bg-gray-100 text-gray-600' };
 
-const COLS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text' | 'money' | 'estado' }[] = [
-  { key: 'salesorder_number', label: 'OV', align: 'left', kind: 'text' },
-  { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text' },
-  { key: 'customer_name', label: 'CLIENTE', align: 'left', kind: 'text' },
-  { key: 'date', label: 'FECHA OV', align: 'left', kind: 'text' },
-  { key: 'shipment_date', label: 'ENTREGA', align: 'left', kind: 'text' },
-  { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money' },
-  { key: 'pending', label: 'POR FACTURAR ($)', align: 'right', kind: 'money' },
-  { key: 'status', label: 'ESTADO', align: 'left', kind: 'estado' },
+/**
+ * Definición ÚNICA de las columnas: de aquí salen la cabecera, las celdas, el orden
+ * por defecto, las etiquetas del menú "Columnas" y el ancho inicial.
+ *
+ * `indicio` (las luces) y `estado` (la etiqueta de color) no son texto plano, por eso
+ * llevan su propio `kind`. Se listan como columnas normales para que también se puedan
+ * reordenar, ocultar y redimensionar.
+ */
+interface ColDef {
+  key: ColKey;
+  label: string;
+  align: 'left' | 'right';
+  kind: 'text' | 'money' | 'estado' | 'indicio';
+  ancho: number;
+}
+
+const CLAVES = [
+  'indicio', 'salesorder_number', 'ticket', 'customer_name', 'date', 'shipment_date',
+  'total', 'pending', 'status',
+] as const;
+export type ColKey = (typeof CLAVES)[number];
+
+const COLUMNAS: ColDef[] = [
+  { key: 'indicio', label: 'INDICIO', align: 'left', kind: 'indicio', ancho: 95 },
+  { key: 'salesorder_number', label: 'OV', align: 'left', kind: 'text', ancho: 115 },
+  { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text', ancho: 80 },
+  { key: 'customer_name', label: 'CLIENTE', align: 'left', kind: 'text', ancho: 300 },
+  { key: 'date', label: 'FECHA OV', align: 'left', kind: 'text', ancho: 105 },
+  { key: 'shipment_date', label: 'ENTREGA', align: 'left', kind: 'text', ancho: 105 },
+  { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money', ancho: 130 },
+  { key: 'pending', label: 'POR FACTURAR ($)', align: 'right', kind: 'money', ancho: 145 },
+  { key: 'status', label: 'ESTADO', align: 'left', kind: 'estado', ancho: 100 },
 ];
+
+const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
+const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
+const DEF = new Map<ColKey, ColDef>(COLUMNAS.map((c) => [c.key, c]));
 
 const LUZ = 'inline-block h-2.5 w-2.5 rounded-full';
 
@@ -57,6 +88,12 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
   const [luces, setLuces] = useState<LuzKey[]>([]); // vacío = sin filtro por indicio
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'pending', dir: -1 });
   const [detalleOV, setDetalleOV] = useState<string | null>(null);
+  // Ancho en curso mientras se arrastra, para verlo en vivo sin persistir cada píxel.
+  const [arrastre, setArrastre] = useState<{ key: ColKey; ancho: number } | null>(null);
+
+  // Configuración de columnas del usuario: la clave lleva su user_id, así dos personas
+  // que compartan el mismo navegador no se pisan la vista.
+  const cols = useColumnPrefs<ColKey>(clavePrefs('ov-pendientes', getUserId()), ORDEN_POR_DEFECTO);
 
   useEffect(() => {
     let vivo = true;
@@ -66,6 +103,14 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
       .finally(() => vivo && setCargando(false));
     return () => { vivo = false; };
   }, []);
+
+  const visibles = useMemo(
+    () => cols.orden.map((k) => DEF.get(k)).filter((c): c is ColDef => !!c && cols.esVisible(c.key)),
+    [cols],
+  );
+
+  const anchoActual = (c: ColDef): number =>
+    arrastre?.key === c.key ? arrastre.ancho : (cols.anchoDe(c.key) ?? c.ancho);
 
   const filtradas = useMemo(() => {
     if (!ordenes) return [];
@@ -128,6 +173,17 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
               <span className="text-gray-700">Total: <b className="tabular-nums">{formatCOP(totales.total)}</b></span>
               <span className="text-gray-700">Por facturar: <b className="tabular-nums">{formatCOP(totales.pending)}</b></span>
             </div>
+            <div className="ml-auto">
+              <ColumnasMenu
+                orden={cols.orden}
+                etiquetas={ETIQUETAS}
+                esVisible={cols.esVisible}
+                onMover={cols.mover}
+                onAlternar={cols.alternar}
+                onRestablecer={cols.restablecer}
+                personalizado={cols.personalizado}
+              />
+            </div>
           </div>
 
           {/* Luces = filtro multiselección. Sin ninguna marcada no filtra; con varias, OR
@@ -162,13 +218,35 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
           </div>
 
           <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
-            <table className="min-w-full text-xs">
+            {/* table-fixed + colgroup: sin esto el navegador trata el ancho como una simple
+                sugerencia y el contenido vuelve a estirar la columna al soltarla. */}
+            <table className="min-w-full table-fixed text-xs">
+              <colgroup>
+                {visibles.map((c) => (
+                  <col key={c.key} style={{ width: anchoActual(c) }} />
+                ))}
+              </colgroup>
               <thead className="bg-gray-50 text-gray-600">
                 <tr>
-                  <th className="px-2 py-2 text-left font-semibold whitespace-nowrap">INDICIO</th>
-                  {COLS.map((c) => (
-                    <th key={c.key} onClick={() => toggleSort(c.key)} className={`cursor-pointer select-none px-2 py-2 font-semibold whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'} hover:text-gray-900`}>
-                      {c.label}{sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+                  {visibles.map((c) => (
+                    <th
+                      key={c.key}
+                      onClick={c.kind === 'indicio' ? undefined : () => toggleSort(c.key as SortKey)}
+                      title={c.label}
+                      className={`group relative select-none px-2 py-2 font-semibold ${
+                        c.align === 'right' ? 'text-right' : 'text-left'
+                      } ${c.kind === 'indicio' ? '' : 'cursor-pointer hover:text-gray-900'}`}
+                    >
+                      <span className="block truncate">
+                        {c.label}
+                        {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+                      </span>
+                      <ResizeHandle
+                        ancho={anchoActual(c)}
+                        onPreview={(a) => setArrastre(a === null ? null : { key: c.key, ancho: a })}
+                        onFin={(a) => cols.redimensionar(c.key, a)}
+                        onRestablecer={() => cols.restablecerAncho(c.key)}
+                      />
                     </th>
                   ))}
                 </tr>
@@ -176,20 +254,30 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
               <tbody className="divide-y divide-gray-100">
                 {filtradas.map((o) => (
                   <tr key={o.salesorder_number} onClick={() => setDetalleOV(o.salesorder_number)} className="cursor-pointer hover:bg-amber-50/40">
-                    <td className="px-2 py-1"><Luces o={o} /></td>
-                    {COLS.map((c) => {
-                      const v = o[c.key];
-                      if (c.kind === 'money') return <td key={c.key} className="px-2 py-1 text-right tabular-nums">{formatCOP(v as number)}</td>;
+                    {visibles.map((c) => {
+                      if (c.kind === 'indicio') {
+                        return <td key={c.key} className="px-2 py-1"><Luces o={o} /></td>;
+                      }
                       if (c.kind === 'estado') {
                         const e = estadoDe(o.status);
-                        return <td key={c.key} className="px-2 py-1"><span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${e.cls}`}>{e.texto}</span></td>;
+                        return (
+                          <td key={c.key} className="px-2 py-1">
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${e.cls}`}>{e.texto}</span>
+                          </td>
+                        );
                       }
-                      return <td key={c.key} className="px-2 py-1 whitespace-nowrap">{String(v ?? '') || '—'}</td>;
+                      const v = o[c.key as SortKey];
+                      if (c.kind === 'money') {
+                        return <td key={c.key} className="truncate px-2 py-1 text-right tabular-nums">{formatCOP(v as number)}</td>;
+                      }
+                      const txt = String(v ?? '') || '—';
+                      // El title deja leer entero lo que la columna recorte al estrecharse.
+                      return <td key={c.key} title={txt} className="truncate px-2 py-1">{txt}</td>;
                     })}
                   </tr>
                 ))}
                 {filtradas.length === 0 && (
-                  <tr><td colSpan={COLS.length + 1} className="px-2 py-4 text-center text-gray-400">Sin OV pendientes con estos filtros.</td></tr>
+                  <tr><td colSpan={visibles.length} className="px-2 py-4 text-center text-gray-400">Sin OV pendientes con estos filtros.</td></tr>
                 )}
               </tbody>
             </table>
