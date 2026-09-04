@@ -13,6 +13,8 @@ const line = (over: Partial<LineRow>): LineRow => ({
   tiene_paquete: false,
   ticket_por_facturar: false,
   puede_armarse: false,
+  trato: null,
+  qt: null,
   ticket: null,
   quantity: 2,
   rate: 100,
@@ -56,6 +58,20 @@ describe('aggregateFacturables', () => {
       line({ salesorder_id: 'b', salesorder_number: 'B', quantity: 1, rate: 90 }),
     ]);
     expect(r.map((o) => o.salesorder_number)).toEqual(['B', 'A']);
+  });
+});
+
+describe('trato y qt', () => {
+  it('mapea el trato y la cotizacion del deal, vacios si no hay', () => {
+    const r = aggregateFacturables([line({ trato: 'Chemilab - 0726 - Cilindros', qt: '2026-041' })]);
+    expect(r[0].trato).toBe('Chemilab - 0726 - Cilindros');
+    expect(r[0].qt).toBe('2026-041');
+  });
+
+  it('sin deal ni cotizacion quedan como cadena vacia', () => {
+    const r = aggregateFacturables([line({ trato: null, qt: null })]);
+    expect(r[0].trato).toBe('');
+    expect(r[0].qt).toBe('');
   });
 });
 

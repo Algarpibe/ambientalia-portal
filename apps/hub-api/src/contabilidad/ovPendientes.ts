@@ -20,6 +20,8 @@ export interface OVPendienteFacturable {
   paquetePorCrear: boolean;   // hay stock disponible para armar el paquete (y aún no hay despacho ni paquete)
   facturable: boolean;        // cualquiera de los indicios anteriores
   ticket: string | null;      // nº de ticket de la OV (crm.deals.numero_ticket vía deal)
+  trato: string;              // crm.deals.deal_name del deal enlazado
+  qt: string;                 // nº de la última cotización del deal (crm.quotes.no_cotizacion)
 }
 
 // Una fila por LÍNEA de OV (mismo motivo que salesOrders.ts: cantidades en texto).
@@ -38,6 +40,8 @@ export interface LineRow {
   ticket_por_facturar: boolean;
   puede_armarse: boolean;
   ticket: string | null;
+  trato: string | null;
+  qt: string | null;
   quantity: number | null;
   rate: number | null;
   cantidad_facturada: string | null;
@@ -100,10 +104,9 @@ const SQL = `
             WHERE d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
               AND t.status = 'Por Facturar'
          )                                          AS ticket_por_facturar,
-         (SELECT d.numero_ticket::text
-            FROM crm.deals d
-           WHERE d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
-           LIMIT 1)                                  AS ticket,
+         d.numero_ticket::text                       AS ticket,
+         d.deal_name                                 AS trato,
+         qt.no_cotizacion                            AS qt,
          COALESCE(arm.puede_armarse, false)          AS puede_armarse,
          li.quantity,
          li.rate,
@@ -112,6 +115,17 @@ const SQL = `
     FROM books.sales_orders so
     LEFT JOIN books.salesorder_line_items li ON li.salesorder_id = so.salesorder_id
     LEFT JOIN armable arm ON arm.salesorder_id = so.salesorder_id
+    -- Trato y ticket salen del deal de CRM enlazado por raw->>'zcrm_potential_id'
+    -- (crm.deals.id es PK, así que este join no multiplica filas).
+    LEFT JOIN crm.deals d ON d.id = NULLIF(so.raw ->> 'zcrm_potential_id', '')
+    -- QT = nº de la última cotización del deal, misma regla que la tabla de facturación.
+    LEFT JOIN LATERAL (
+           SELECT q.no_cotizacion
+             FROM crm.quotes q
+            WHERE q.deal_id = d.id
+            ORDER BY q.fecha_cotizacion DESC NULLS LAST, q.created_time DESC
+            LIMIT 1
+         ) qt ON TRUE
    WHERE so.status = ANY($1::text[])
    ORDER BY so.date, so.salesorder_number`;
 
@@ -154,6 +168,8 @@ export function aggregateFacturables(rows: LineRow[]): OVPendienteFacturable[] {
         paquetePorCrear,
         facturable: despachada || despachoParcial || soloPaquete || r.ticket_por_facturar || paquetePorCrear,
         ticket: r.ticket,
+        trato: r.trato ?? '',
+        qt: r.qt ?? '',
       };
       byId.set(r.salesorder_id, o);
     }

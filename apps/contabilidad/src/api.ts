@@ -68,6 +68,8 @@ export interface OVPendienteFacturable extends PendingSalesOrder {
   paquetePorCrear: boolean;
   facturable: boolean;
   ticket: string | null;
+  trato: string;
+  qt: string;
 }
 
 import { mensajeDeError } from '@suite/http';

@@ -34,8 +34,8 @@ interface ColDef {
 }
 
 const CLAVES = [
-  'indicio', 'salesorder_number', 'ticket', 'customer_name', 'date', 'shipment_date',
-  'total', 'pending', 'status',
+  'indicio', 'salesorder_number', 'ticket', 'customer_name', 'trato', 'qt', 'date',
+  'shipment_date', 'total', 'pending', 'status',
 ] as const;
 export type ColKey = (typeof CLAVES)[number];
 
@@ -44,6 +44,8 @@ const COLUMNAS: ColDef[] = [
   { key: 'salesorder_number', label: 'OV', align: 'left', kind: 'text', ancho: 115 },
   { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text', ancho: 80 },
   { key: 'customer_name', label: 'CLIENTE', align: 'left', kind: 'text', ancho: 300 },
+  { key: 'trato', label: 'TRATO', align: 'left', kind: 'text', ancho: 240 },
+  { key: 'qt', label: 'QT', align: 'left', kind: 'text', ancho: 90 },
   { key: 'date', label: 'FECHA OV', align: 'left', kind: 'text', ancho: 105 },
   { key: 'shipment_date', label: 'ENTREGA', align: 'left', kind: 'text', ancho: 105 },
   { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money', ancho: 130 },
