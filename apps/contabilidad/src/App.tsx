@@ -222,6 +222,9 @@ export default function App() {
             onAbrirDetalle={setDetalleFactura}
             orden={cols.orden}
             esVisible={cols.esVisible}
+            anchoDe={cols.anchoDe}
+            onRedimensionar={cols.redimensionar}
+            onRestablecerAncho={cols.restablecerAncho}
           />
           <ResumenMensual
             resumen={data.resumen}

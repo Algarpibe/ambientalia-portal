@@ -6,18 +6,20 @@ type SortKey = keyof FacturaContable;
 
 /**
  * Definición ÚNICA de las columnas: de aquí salen la cabecera, las celdas, el orden
- * por defecto y las etiquetas del menú "Columnas". Añadir una columna es añadir una
- * entrada aquí; el selector la recoge sola (y aparece visible, ver useColumnPrefs).
+ * por defecto, las etiquetas del menú "Columnas" y el ancho inicial. Añadir una
+ * columna es añadir una entrada aquí; el selector la recoge sola.
  *
  * `entrega` y `cartera` no son texto plano —una es la luz de entrega pendiente y la
  * otra un input editable—, por eso llevan su propio `kind`. Se listan como columnas
- * normales para que también se puedan reordenar y ocultar.
+ * normales para que también se puedan reordenar, ocultar y redimensionar.
  */
 interface ColDef {
   key: ColKey;
   label: string;
   align: 'left' | 'right';
   kind: 'text' | 'money' | 'pct' | 'luz' | 'cartera';
+  /** Ancho inicial en px. El usuario lo cambia arrastrando el borde de la cabecera. */
+  ancho: number;
 }
 
 const CLAVES = [
@@ -28,29 +30,32 @@ const CLAVES = [
 export type ColKey = (typeof CLAVES)[number];
 
 const COLUMNAS: ColDef[] = [
-  { key: 'entrega', label: 'ENTREGA', align: 'left', kind: 'luz' },
-  { key: 'razonSocial', label: 'RAZÓN SOCIAL', align: 'left', kind: 'text' },
-  { key: 'qt', label: 'QT', align: 'left', kind: 'text' },
-  { key: 'fechaFactura', label: 'FECHA FACTURA', align: 'left', kind: 'text' },
-  { key: 'fechaVencimiento', label: 'FECHA VENC.', align: 'left', kind: 'text' },
-  { key: 'ov', label: 'OV', align: 'left', kind: 'text' },
-  { key: 'trato', label: 'TRATO', align: 'left', kind: 'text' },
-  { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text' },
-  { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money' },
-  { key: 'iva', label: 'IVA (19%)', align: 'right', kind: 'money' },
-  { key: 'totalConIva', label: 'TOTAL + IVA', align: 'right', kind: 'money' },
-  { key: 'cobradoPct', label: 'COBRADO (%)', align: 'right', kind: 'pct' },
-  { key: 'cobrado', label: 'COBRADO ($)', align: 'right', kind: 'money' },
-  { key: 'porCobrar', label: 'POR COBRAR ($)', align: 'right', kind: 'money' },
-  { key: 'retenciones', label: 'RETENCIONES', align: 'right', kind: 'money' },
-  { key: 'participacion', label: '% PART.', align: 'right', kind: 'pct' },
-  { key: 'invoiceNumber', label: 'FACTURA', align: 'left', kind: 'text' },
-  { key: 'cartera', label: 'CARTERA', align: 'left', kind: 'cartera' },
+  { key: 'entrega', label: 'ENTREGA', align: 'left', kind: 'luz', ancho: 70 },
+  { key: 'razonSocial', label: 'RAZÓN SOCIAL', align: 'left', kind: 'text', ancho: 260 },
+  { key: 'qt', label: 'QT', align: 'left', kind: 'text', ancho: 85 },
+  { key: 'fechaFactura', label: 'FECHA FACTURA', align: 'left', kind: 'text', ancho: 110 },
+  { key: 'fechaVencimiento', label: 'FECHA VENC.', align: 'left', kind: 'text', ancho: 110 },
+  { key: 'ov', label: 'OV', align: 'left', kind: 'text', ancho: 110 },
+  { key: 'trato', label: 'TRATO', align: 'left', kind: 'text', ancho: 240 },
+  { key: 'ticket', label: 'TICKET', align: 'left', kind: 'text', ancho: 80 },
+  { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money', ancho: 120 },
+  { key: 'iva', label: 'IVA (19%)', align: 'right', kind: 'money', ancho: 110 },
+  { key: 'totalConIva', label: 'TOTAL + IVA', align: 'right', kind: 'money', ancho: 120 },
+  { key: 'cobradoPct', label: 'COBRADO (%)', align: 'right', kind: 'pct', ancho: 105 },
+  { key: 'cobrado', label: 'COBRADO ($)', align: 'right', kind: 'money', ancho: 120 },
+  { key: 'porCobrar', label: 'POR COBRAR ($)', align: 'right', kind: 'money', ancho: 125 },
+  { key: 'retenciones', label: 'RETENCIONES', align: 'right', kind: 'money', ancho: 110 },
+  { key: 'participacion', label: '% PART.', align: 'right', kind: 'pct', ancho: 85 },
+  { key: 'invoiceNumber', label: 'FACTURA', align: 'left', kind: 'text', ancho: 95 },
+  { key: 'cartera', label: 'CARTERA', align: 'left', kind: 'cartera', ancho: 160 },
 ];
 
 export const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
 export const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
 const DEF = new Map<ColKey, ColDef>(COLUMNAS.map((c) => [c.key, c]));
+
+const ANCHO_MINIMO = 48; // por debajo de esto la columna deja de ser legible
+const ANCHO_NUMERO_FILA = 44;
 
 interface Props {
   facturas: FacturaContable[];
@@ -59,6 +64,9 @@ interface Props {
   onAbrirDetalle?: (invoiceNumber: string) => void;
   orden: ColKey[];
   esVisible: (key: ColKey) => boolean;
+  anchoDe: (key: ColKey) => number | undefined;
+  onRedimensionar: (key: ColKey, ancho: number) => void;
+  onRestablecerAncho: (key: ColKey) => void;
 }
 
 function texto(f: FacturaContable, kind: ColDef['kind'], key: ColKey): string {
@@ -68,13 +76,29 @@ function texto(f: FacturaContable, kind: ColDef['kind'], key: ColKey): string {
   return String(v ?? '');
 }
 
-export default function FacturasTable({ facturas, onEditarCartera, guardando, onAbrirDetalle, orden, esVisible }: Props) {
+export default function FacturasTable({
+  facturas,
+  onEditarCartera,
+  guardando,
+  onAbrirDetalle,
+  orden,
+  esVisible,
+  anchoDe,
+  onRedimensionar,
+  onRestablecerAncho,
+}: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'fechaFactura', dir: 1 });
+  // Ancho en curso mientras se arrastra, para ver el cambio en vivo sin escribir
+  // en localStorage en cada píxel (eso solo pasa al soltar).
+  const [arrastre, setArrastre] = useState<{ key: ColKey; ancho: number } | null>(null);
 
   const visibles = useMemo(
     () => orden.map((k) => DEF.get(k)).filter((c): c is ColDef => !!c && esVisible(c.key)),
     [orden, esVisible],
   );
+
+  const anchoActual = (c: ColDef): number =>
+    arrastre?.key === c.key ? arrastre.ancho : (anchoDe(c.key) ?? c.ancho);
 
   const ordenadas = useMemo(() => {
     const arr = [...facturas];
@@ -90,34 +114,72 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: 1 }));
 
+  // Redimensionado: se escuchan los eventos en `document` (y no en el tirador) para
+  // que el arrastre siga funcionando aunque el cursor se salga de la celda.
+  const iniciarArrastre = (e: React.MouseEvent, c: ColDef) => {
+    e.preventDefault();
+    e.stopPropagation(); // no dispares la ordenación al agarrar el borde
+    const xInicial = e.clientX;
+    const anchoInicial = anchoActual(c);
+    const calcular = (ev: MouseEvent) => Math.max(ANCHO_MINIMO, anchoInicial + (ev.clientX - xInicial));
+
+    const alMover = (ev: MouseEvent) => setArrastre({ key: c.key, ancho: calcular(ev) });
+    const alSoltar = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', alMover);
+      document.removeEventListener('mouseup', alSoltar);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      setArrastre(null);
+      onRedimensionar(c.key, calcular(ev));
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none'; // sin esto el arrastre selecciona texto
+    document.addEventListener('mousemove', alMover);
+    document.addEventListener('mouseup', alSoltar);
+  };
+
   return (
     <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-soft">
-      <table className="min-w-full text-xs">
+      {/* table-fixed + colgroup: sin esto el navegador trata el ancho como una simple
+          sugerencia y el contenido vuelve a estirar la columna al soltarla. */}
+      <table className="min-w-full table-fixed text-xs">
+        <colgroup>
+          <col style={{ width: ANCHO_NUMERO_FILA }} />
+          {visibles.map((c) => (
+            <col key={c.key} style={{ width: anchoActual(c) }} />
+          ))}
+        </colgroup>
         <thead className="bg-gray-50 text-gray-600">
           <tr>
             <th className="px-2 py-2 text-left font-semibold">#</th>
-            {visibles.map((c) =>
-              c.kind === 'luz' ? (
-                <th
-                  key={c.key}
-                  title="Entrega pendiente: hay artículos de la factura sin empaquetar"
-                  className="px-2 py-2 text-left font-semibold whitespace-nowrap"
-                >
-                  {c.label}
-                </th>
-              ) : (
-                <th
-                  key={c.key}
-                  onClick={() => toggleSort(c.key as SortKey)}
-                  className={`cursor-pointer select-none px-2 py-2 font-semibold whitespace-nowrap ${
-                    c.align === 'right' ? 'text-right' : 'text-left'
-                  } hover:text-gray-900`}
-                >
+            {visibles.map((c) => (
+              <th
+                key={c.key}
+                onClick={c.kind === 'luz' ? undefined : () => toggleSort(c.key as SortKey)}
+                title={c.kind === 'luz' ? 'Entrega pendiente: hay artículos de la factura sin empaquetar' : c.label}
+                className={`group relative select-none px-2 py-2 font-semibold ${
+                  c.align === 'right' ? 'text-right' : 'text-left'
+                } ${c.kind === 'luz' ? '' : 'cursor-pointer hover:text-gray-900'}`}
+              >
+                <span className="block truncate">
                   {c.label}
                   {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
-                </th>
-              ),
-            )}
+                </span>
+                {/* Tirador de ancho: doble clic devuelve la columna a su ancho original. */}
+                <span
+                  onMouseDown={(e) => iniciarArrastre(e, c)}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onRestablecerAncho(c.key);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  title="Arrastra para cambiar el ancho · doble clic para restablecer"
+                  className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/60 group-hover:bg-gray-300"
+                />
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -156,17 +218,20 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
                           if (e.target.value !== f.cartera) onEditarCartera(f.invoiceNumber, e.target.value);
                         }}
                         placeholder="—"
-                        className="w-36 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none"
+                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none"
                       />
                     </td>
                   );
                 }
+                const v = texto(f, c.kind, c.key);
                 return (
                   <td
                     key={c.key}
-                    className={`px-2 py-1 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}
+                    // El title deja leer entero lo que la columna recorte al estrecharse.
+                    title={v}
+                    className={`truncate px-2 py-1 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}
                   >
-                    {texto(f, c.kind, c.key)}
+                    {v}
                   </td>
                 );
               })}
