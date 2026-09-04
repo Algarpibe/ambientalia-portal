@@ -11,6 +11,11 @@ import type React from 'react';
  */
 interface Props {
   ancho: number;
+  /**
+   * Ancho mínimo. Deliberadamente pequeño: la columna puede quedar como una franja
+   * estrecha —tapando su texto— pero nunca desaparecer, que es lo que se pide al
+   * querer apartar una columna sin ocultarla del todo.
+   */
   minimo?: number;
   /** Ancho en curso mientras se arrastra; null al terminar. */
   onPreview: (ancho: number | null) => void;
@@ -18,7 +23,7 @@ interface Props {
   onRestablecer: () => void;
 }
 
-export default function ResizeHandle({ ancho, minimo = 48, onPreview, onFin, onRestablecer }: Props) {
+export default function ResizeHandle({ ancho, minimo = 24, onPreview, onFin, onRestablecer }: Props) {
   const iniciar = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation(); // no dispares la ordenación al agarrar el borde
@@ -33,6 +38,17 @@ export default function ResizeHandle({ ancho, minimo = 48, onPreview, onFin, onR
       document.body.style.userSelect = '';
       onPreview(null);
       onFin(calcular(ev));
+
+      // Tras el mouseup el navegador dispara un `click` que burbujea hasta el <th> y
+      // acababa ordenando la columna sin querer. Se traga ese único click en fase de
+      // captura; el temporizador retira el oyente si por lo que sea no llega a haberlo
+      // (el click se despacha antes que los timers, así que nunca se cuela otro).
+      const tragarClick = (ev2: MouseEvent) => {
+        ev2.stopPropagation();
+        ev2.preventDefault();
+      };
+      document.addEventListener('click', tragarClick, true);
+      setTimeout(() => document.removeEventListener('click', tragarClick, true), 0);
     };
 
     document.body.style.cursor = 'col-resize';
@@ -51,7 +67,10 @@ export default function ResizeHandle({ ancho, minimo = 48, onPreview, onFin, onR
       }}
       onClick={(e) => e.stopPropagation()}
       title="Arrastra para cambiar el ancho · doble clic para restablecer"
-      className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent hover:bg-blue-400/60 group-hover:bg-gray-300"
+      // Zona de agarre ancha (12px) y a caballo del borde: con 6px dentro de la celda
+      // era muy fácil fallar y acabar ordenando. La barrita visible se pinta con un
+      // pseudo-elemento fino, así el objetivo del ratón es grande pero se ve discreto.
+      className="absolute -right-1.5 top-0 z-10 h-full w-3 cursor-col-resize before:absolute before:right-1.5 before:top-0 before:h-full before:w-0.5 before:bg-transparent hover:before:bg-blue-500 group-hover:before:bg-gray-300"
     />
   );
 }

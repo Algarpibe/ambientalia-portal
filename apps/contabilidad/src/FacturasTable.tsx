@@ -55,7 +55,7 @@ export const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
 export const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
 const DEF = new Map<ColKey, ColDef>(COLUMNAS.map((c) => [c.key, c]));
 
-const ANCHO_MINIMO = 48; // por debajo de esto la columna deja de ser legible
+const ANCHO_MINIMO = 24; // deja la columna como una franja visible, sin llegar a ocultarla
 const ANCHO_NUMERO_FILA = 44;
 
 interface Props {
