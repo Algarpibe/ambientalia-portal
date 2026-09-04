@@ -31,3 +31,20 @@ export function esAdmin(): boolean {
     return false;
   }
 }
+
+/**
+ * `user_id` del JWT actual, o null si no hay sesión. Decodifica el payload SIN
+ * verificar la firma: sirve para acotar preferencias de UI por usuario (p. ej. la
+ * clave de localStorage donde cada uno guarda su configuración de columnas), NO
+ * para autorizar nada — eso lo impone el backend.
+ */
+export function getUserId(): string | null {
+  const t = getToken();
+  if (!t) return null;
+  try {
+    const p = JSON.parse(atob(t.split('.')[1] || '')) as { user_id?: unknown };
+    return p.user_id != null ? String(p.user_id) : null;
+  } catch {
+    return null;
+  }
+}

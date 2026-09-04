@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, Search, Landmark } from 'lucide-react';
 import { fetchContabilidad, guardarCartera, guardarPresupuesto, esAdmin, type ContabilidadData, type FacturaContable } from './api';
 import { formatCOP } from './format';
-import FacturasTable from './FacturasTable';
+import FacturasTable, { ORDEN_POR_DEFECTO, ETIQUETAS, type ColKey } from './FacturasTable';
+import ColumnasMenu from './ColumnasMenu';
+import { useColumnPrefs, clavePrefs } from './useColumnPrefs';
+import { getUserId } from '@suite/auth-client';
 import ResumenMensual from './ResumenMensual';
 import OVPendientes from './OVPendientes';
 import DetalleModal from './DetalleModal';
@@ -31,6 +34,9 @@ export default function App() {
   const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
 
   const puedeEditar = esAdmin();
+  // Configuración de columnas del usuario: la clave lleva su user_id, así dos personas
+  // que compartan el mismo navegador no se pisan la vista.
+  const cols = useColumnPrefs<ColKey>(clavePrefs('facturas', getUserId()), ORDEN_POR_DEFECTO);
   const hoy = new Date().toISOString().slice(0, 10);
 
   useEffect(() => {
@@ -190,15 +196,33 @@ export default function App() {
 
       {data && !cargando && (
         <>
-          {/* Totales de la vista filtrada */}
-          <div className="mb-3 flex flex-wrap gap-4 text-sm">
+          {/* Totales de la vista filtrada + selector de columnas */}
+          <div className="mb-3 flex flex-wrap items-center gap-4 text-sm">
             <span className="text-gray-500">{totales.n} facturas</span>
             <span className="text-gray-700">Total: <b className="tabular-nums">{formatCOP(totales.total)}</b></span>
             <span className="text-gray-700">Cobrado: <b className="tabular-nums">{formatCOP(totales.cobrado)}</b></span>
             <span className="text-gray-700">Por cobrar: <b className="tabular-nums">{formatCOP(totales.porCobrar)}</b></span>
+            <div className="ml-auto">
+              <ColumnasMenu
+                orden={cols.orden}
+                etiquetas={ETIQUETAS}
+                esVisible={cols.esVisible}
+                onMover={cols.mover}
+                onAlternar={cols.alternar}
+                onRestablecer={cols.restablecer}
+                personalizado={cols.personalizado}
+              />
+            </div>
           </div>
 
-          <FacturasTable facturas={facturasFiltradas} onEditarCartera={onEditarCartera} guardando={guardando} onAbrirDetalle={setDetalleFactura} />
+          <FacturasTable
+            facturas={facturasFiltradas}
+            onEditarCartera={onEditarCartera}
+            guardando={guardando}
+            onAbrirDetalle={setDetalleFactura}
+            orden={cols.orden}
+            esVisible={cols.esVisible}
+          />
           <ResumenMensual
             resumen={data.resumen}
             anio={data.anioActual}

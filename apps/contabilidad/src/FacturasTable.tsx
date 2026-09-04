@@ -3,14 +3,32 @@ import type { FacturaContable } from './api';
 import { formatCOP, formatPct } from './format';
 
 type SortKey = keyof FacturaContable;
-interface Props {
-  facturas: FacturaContable[];
-  onEditarCartera: (invoiceNumber: string, cartera: string) => void;
-  guardando: string | null; // invoiceNumber que se está guardando, o null
-  onAbrirDetalle?: (invoiceNumber: string) => void;
+
+/**
+ * Definición ÚNICA de las columnas: de aquí salen la cabecera, las celdas, el orden
+ * por defecto y las etiquetas del menú "Columnas". Añadir una columna es añadir una
+ * entrada aquí; el selector la recoge sola (y aparece visible, ver useColumnPrefs).
+ *
+ * `entrega` y `cartera` no son texto plano —una es la luz de entrega pendiente y la
+ * otra un input editable—, por eso llevan su propio `kind`. Se listan como columnas
+ * normales para que también se puedan reordenar y ocultar.
+ */
+interface ColDef {
+  key: ColKey;
+  label: string;
+  align: 'left' | 'right';
+  kind: 'text' | 'money' | 'pct' | 'luz' | 'cartera';
 }
 
-const COLUMNS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'text' | 'money' | 'pct' }[] = [
+const CLAVES = [
+  'entrega', 'razonSocial', 'qt', 'fechaFactura', 'fechaVencimiento', 'ov', 'trato', 'ticket',
+  'total', 'iva', 'totalConIva', 'cobradoPct', 'cobrado', 'porCobrar', 'retenciones',
+  'participacion', 'invoiceNumber', 'cartera',
+] as const;
+export type ColKey = (typeof CLAVES)[number];
+
+const COLUMNAS: ColDef[] = [
+  { key: 'entrega', label: 'ENTREGA', align: 'left', kind: 'luz' },
   { key: 'razonSocial', label: 'RAZÓN SOCIAL', align: 'left', kind: 'text' },
   { key: 'qt', label: 'QT', align: 'left', kind: 'text' },
   { key: 'fechaFactura', label: 'FECHA FACTURA', align: 'left', kind: 'text' },
@@ -27,17 +45,36 @@ const COLUMNS: { key: SortKey; label: string; align: 'left' | 'right'; kind: 'te
   { key: 'retenciones', label: 'RETENCIONES', align: 'right', kind: 'money' },
   { key: 'participacion', label: '% PART.', align: 'right', kind: 'pct' },
   { key: 'invoiceNumber', label: 'FACTURA', align: 'left', kind: 'text' },
+  { key: 'cartera', label: 'CARTERA', align: 'left', kind: 'cartera' },
 ];
 
-function cell(f: FacturaContable, kind: 'text' | 'money' | 'pct', key: SortKey): string {
-  const v = f[key];
+export const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
+export const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
+const DEF = new Map<ColKey, ColDef>(COLUMNAS.map((c) => [c.key, c]));
+
+interface Props {
+  facturas: FacturaContable[];
+  onEditarCartera: (invoiceNumber: string, cartera: string) => void;
+  guardando: string | null; // invoiceNumber que se está guardando, o null
+  onAbrirDetalle?: (invoiceNumber: string) => void;
+  orden: ColKey[];
+  esVisible: (key: ColKey) => boolean;
+}
+
+function texto(f: FacturaContable, kind: ColDef['kind'], key: ColKey): string {
+  const v = f[key as SortKey];
   if (kind === 'money') return formatCOP(v as number);
   if (kind === 'pct') return formatPct(v as number);
   return String(v ?? '');
 }
 
-export default function FacturasTable({ facturas, onEditarCartera, guardando, onAbrirDetalle }: Props) {
+export default function FacturasTable({ facturas, onEditarCartera, guardando, onAbrirDetalle, orden, esVisible }: Props) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'fechaFactura', dir: 1 });
+
+  const visibles = useMemo(
+    () => orden.map((k) => DEF.get(k)).filter((c): c is ColDef => !!c && esVisible(c.key)),
+    [orden, esVisible],
+  );
 
   const ordenadas = useMemo(() => {
     const arr = [...facturas];
@@ -59,22 +96,28 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
         <thead className="bg-gray-50 text-gray-600">
           <tr>
             <th className="px-2 py-2 text-left font-semibold">#</th>
-            <th className="px-2 py-2 text-left font-semibold whitespace-nowrap" title="Entrega pendiente: hay artículos de la factura sin empaquetar">
-              ENTREGA
-            </th>
-            {COLUMNS.map((c) => (
-              <th
-                key={c.key}
-                onClick={() => toggleSort(c.key)}
-                className={`cursor-pointer select-none px-2 py-2 font-semibold whitespace-nowrap ${
-                  c.align === 'right' ? 'text-right' : 'text-left'
-                } hover:text-gray-900`}
-              >
-                {c.label}
-                {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
-              </th>
-            ))}
-            <th className="px-2 py-2 text-left font-semibold">CARTERA</th>
+            {visibles.map((c) =>
+              c.kind === 'luz' ? (
+                <th
+                  key={c.key}
+                  title="Entrega pendiente: hay artículos de la factura sin empaquetar"
+                  className="px-2 py-2 text-left font-semibold whitespace-nowrap"
+                >
+                  {c.label}
+                </th>
+              ) : (
+                <th
+                  key={c.key}
+                  onClick={() => toggleSort(c.key as SortKey)}
+                  className={`cursor-pointer select-none px-2 py-2 font-semibold whitespace-nowrap ${
+                    c.align === 'right' ? 'text-right' : 'text-left'
+                  } hover:text-gray-900`}
+                >
+                  {c.label}
+                  {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+                </th>
+              ),
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -85,38 +128,48 @@ export default function FacturasTable({ facturas, onEditarCartera, guardando, on
               className="cursor-pointer hover:bg-blue-50/40"
             >
               <td className="px-2 py-1 text-gray-400">{i + 1}</td>
-              <td className="px-2 py-1">
-                {f.unidadesPorDespachar > 0 && (
-                  <span
-                    title={`Entrega pendiente: ${f.unidadesPorDespachar} unidad(es) sin empaquetar de ${f.ov || 'su OV'}`}
-                    className="inline-block h-2.5 w-2.5 rounded-full bg-violet-500"
-                  />
-                )}
-              </td>
-              {COLUMNS.map((c) => (
-                <td
-                  key={c.key}
-                  className={`px-2 py-1 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}
-                >
-                  {cell(f, c.kind, c.key)}
-                </td>
-              ))}
-              <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
-                <input
-                  // key incluye la cartera: si un guardado falla y App revierte el
-                  // valor en estado, el input se remonta y muestra el valor revertido
-                  // (un input no controlado con defaultValue no se actualizaría solo).
-                  key={`${f.invoiceNumber}:${f.cartera}`}
-                  type="text"
-                  defaultValue={f.cartera}
-                  disabled={guardando === f.invoiceNumber}
-                  onBlur={(e) => {
-                    if (e.target.value !== f.cartera) onEditarCartera(f.invoiceNumber, e.target.value);
-                  }}
-                  placeholder="—"
-                  className="w-36 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none"
-                />
-              </td>
+              {visibles.map((c) => {
+                if (c.kind === 'luz') {
+                  return (
+                    <td key={c.key} className="px-2 py-1">
+                      {f.unidadesPorDespachar > 0 && (
+                        <span
+                          title={`Entrega pendiente: ${f.unidadesPorDespachar} unidad(es) sin empaquetar de ${f.ov || 'su OV'}`}
+                          className="inline-block h-2.5 w-2.5 rounded-full bg-violet-500"
+                        />
+                      )}
+                    </td>
+                  );
+                }
+                if (c.kind === 'cartera') {
+                  return (
+                    <td key={c.key} className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        // key incluye la cartera: si un guardado falla y App revierte el
+                        // valor en estado, el input se remonta y muestra el valor revertido
+                        // (un input no controlado con defaultValue no se actualizaría solo).
+                        key={`${f.invoiceNumber}:${f.cartera}`}
+                        type="text"
+                        defaultValue={f.cartera}
+                        disabled={guardando === f.invoiceNumber}
+                        onBlur={(e) => {
+                          if (e.target.value !== f.cartera) onEditarCartera(f.invoiceNumber, e.target.value);
+                        }}
+                        placeholder="—"
+                        className="w-36 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none"
+                      />
+                    </td>
+                  );
+                }
+                return (
+                  <td
+                    key={c.key}
+                    className={`px-2 py-1 whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}
+                  >
+                    {texto(f, c.kind, c.key)}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
