@@ -199,6 +199,9 @@ const estado = {
    */
   decisionesKpi: [] as { aprobadorCorreo: string; createdAt: string; decididaAt: string | null }[],
   pendientesKpi: [] as { createdAt: string }[],
+  /** Lo que `repo.incapacidadesParaKpi` devuelve. Lista plana por lo mismo que
+   *  las dos de arriba: el WHERE lo ejercita `repo.absentismo.db.test.ts`. */
+  incapacidadesKpi: [] as { empleadoId: string; fechaInicio: string; fechaFin: string }[],
   /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
@@ -883,6 +886,7 @@ vi.mock('./repo.js', async () => ({
   },
   decisionesParaKpi: async (_db: unknown, _desdeIso: string) => estado.decisionesKpi,
   pendientesParaKpi: async (_db: unknown) => estado.pendientesKpi,
+  incapacidadesParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.incapacidadesKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1668,6 +1672,7 @@ beforeEach(() => {
   estado.registroVisoresKpis = [];
   estado.decisionesKpi = [];
   estado.pendientesKpi = [];
+  estado.incapacidadesKpi = [];
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -4944,6 +4949,17 @@ describe('GET /ausencias/kpis', () => {
    * una fecha vieja el devengo movería la cifra y el caso de borde dejaría de
    * ser un caso de borde.
    */
+  /** El primer lunes de un `YYYY-MM`, para sembrar rangos sin depender del día
+   *  en que se ejecute el test. */
+  const primerLunesDe = (mes: string): string => {
+    const d = new Date(`${mes}-01T00:00:00Z`);
+    while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const sumaDias = (fecha: string, n: number): string =>
+    new Date(Date.parse(`${fecha}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
   const conSaldo = (i: number, dias: number) => {
     estado.plantilla[i].saldoCorte = dias;
     estado.plantilla[i].fechaCorte = new Date().toISOString().slice(0, 10);
@@ -4984,6 +5000,40 @@ describe('GET /ausencias/kpis', () => {
     const r = await pedir(token({ sub: correo })).expect(200);
     expect(r.body.acumulacion.aviso).toEqual([]);
     expect(r.body.acumulacion.alarma).toEqual([]);
+  });
+
+  it('el absentismo llega como serie mensual y termina en el mes en curso', async () => {
+    // La serie tiene que llegar hasta HOY: cortarla en el mes pasado dejaría la
+    // gráfica terminando siempre un mes antes de lo que la gente está viviendo.
+    const correo = conLlave();
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const meses = r.body.absentismo.meses as { mes: string }[];
+
+    expect(meses.length).toBeGreaterThan(0);
+    expect(meses[meses.length - 1].mes).toBe(new Date().toISOString().slice(0, 7));
+    // Y ningún mes se salta: la serie es continua o la gráfica miente.
+    expect(new Set(meses.map((m) => m.mes)).size).toBe(meses.length);
+  });
+
+  it('los días perdidos de una incapacidad llegan contados y en su mes', async () => {
+    const correo = conLlave();
+    const mesActual = new Date().toISOString().slice(0, 7);
+    // Un rango de lunes a viernes dentro del mes en curso, calculado para no
+    // depender de qué día se ejecute el test.
+    const lunes = primerLunesDe(mesActual);
+    estado.incapacidadesKpi = [
+      { empleadoId: E1, fechaInicio: lunes, fechaFin: sumaDias(lunes, 4) },
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const mes = (r.body.absentismo.meses as { mes: string; diasHabiles: number; episodios: number }[]).find(
+      (m) => m.mes === mesActual,
+    );
+    expect(mes?.episodios).toBe(1);
+    // 5 hábiles si no cae ningún festivo dentro; nunca más de 5 ni menos de 3.
+    expect(mes!.diasHabiles).toBeGreaterThanOrEqual(3);
+    expect(mes!.diasHabiles).toBeLessThanOrEqual(5);
+    expect(r.body.absentismo.totalEpisodios).toBe(1);
   });
 
   it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {

@@ -1305,6 +1305,27 @@ export interface AcumulacionExcesiva {
   umbralAlarma: number;
 }
 
+/** Un mes de la serie de absentismo. */
+export interface MesDeAbsentismo {
+  /** `YYYY-MM`. */
+  mes: string;
+  /** Días de TRABAJO perdidos, no de calendario. */
+  diasHabiles: number;
+  episodios: number;
+  /** Personas distintas. Dos incapacidades de la misma persona son dos
+   *  episodios y una persona. */
+  personas: number;
+}
+
+export interface Absentismo {
+  /** Un elemento por mes, incluidos los que están a cero: si faltaran, la
+   *  gráfica uniría dos meses separados y pintaría una tendencia inventada. */
+  meses: MesDeAbsentismo[];
+  totalDiasHabiles: number;
+  /** Una incapacidad partida entre dos meses cuenta UNA vez aquí. */
+  totalEpisodios: number;
+}
+
 /** Los KPIs del panel. */
 export interface Kpis {
   pasivo: {
@@ -1319,6 +1340,9 @@ export interface Kpis {
    * dice a quién, que es lo único con lo que se puede hacer algo.
    */
   acumulacion: AcumulacionExcesiva;
+  /** Días perdidos por incapacidad, mes a mes. La tendencia se lee de la serie:
+   *  el servidor no calcula ninguna pendiente ni media móvil. */
+  absentismo: Absentismo;
   /** De más lento a más rápido: el atasco va arriba. */
   tiempos: TiempoDeAprobador[];
   pendientes: {

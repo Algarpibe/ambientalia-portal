@@ -1,3 +1,5 @@
+import { contarDiasHabiles } from './dias-habiles.js';
+
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express.
 //
 // Vive aparte de `service.ts` a propósito. Lo que hay aquí son números que
@@ -198,6 +200,134 @@ export function acumulacionExcesiva(
     umbralAlarma,
   };
 }
+
+// ── Absentismo por incapacidad ─────────────────────────────────────────────
+
+/** Una incapacidad reducida a lo que el KPI de absentismo necesita. */
+export interface IncapacidadParaKpi {
+  /** Para contar personas distintas, que no es lo mismo que episodios. */
+  empleadoId: string;
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+export interface MesDeAbsentismo {
+  /** `YYYY-MM`. */
+  mes: string;
+  /** Días de trabajo perdidos ese mes. */
+  diasHabiles: number;
+  /** Cuántas incapacidades tocaron ese mes. */
+  episodios: number;
+  /** Cuántas PERSONAS distintas. Dos incapacidades de la misma persona son dos
+   *  episodios y una persona. */
+  personas: number;
+}
+
+export interface Absentismo {
+  /** Un elemento por mes de la ventana, incluidos los que están a cero. */
+  meses: MesDeAbsentismo[];
+  totalDiasHabiles: number;
+  /** Episodios DISTINTOS: una incapacidad partida entre dos meses cuenta una
+   *  vez aquí, aunque aparezca en los dos meses de la serie. */
+  totalEpisodios: number;
+}
+
+/**
+ * Días de trabajo perdidos por incapacidad, mes a mes.
+ *
+ * ⚠️ DÍAS HÁBILES, no de calendario. Esto mide absentismo laboral —días de
+ * trabajo que se pierden—, así que un viernes-a-lunes son 2 días y no 4.
+ * Contar calendario inflaría la cifra de toda la compañía en torno a un 40%.
+ * (Ojo: NO es la cuenta que usa la EPS para pagar, que sí va en calendario. Si
+ * algún día hace falta el coste, es otro KPI y otra unidad.)
+ *
+ * ⚠️ UNA INCAPACIDAD A CABALLO ENTRE DOS MESES SE REPARTE. Imputarla entera al
+ * mes de inicio es más simple, pero carga a un mes días que se perdieron en el
+ * otro, y esta serie existe justo para mirar la evolución mes a mes.
+ *
+ * ⚠️ Los meses SIN incapacidades salen igualmente, con cero. Si desaparecieran,
+ * la gráfica uniría agosto con octubre y pintaría una línea continua donde hubo
+ * un mes limpio: la forma más fácil de leer una tendencia que no existe.
+ *
+ * Los dos extremos son `YYYY-MM` inclusive.
+ */
+export function absentismoPorMes(
+  incapacidades: IncapacidadParaKpi[],
+  desdeMes: string,
+  hastaMes: string,
+): Absentismo {
+  // La serie completa primero, para que los meses vacíos existan desde el
+  // principio en vez de depender de que algún dato caiga en ellos.
+  const serie = new Map<string, { diasHabiles: number; episodios: number; personas: Set<string> }>();
+  for (const mes of mesesEntre(desdeMes, hastaMes)) {
+    serie.set(mes, { diasHabiles: 0, episodios: 0, personas: new Set() });
+  }
+
+  let totalEpisodios = 0;
+
+  for (const inc of incapacidades) {
+    // `tocaAlgunMes` decide si el episodio cuenta para el total, y se calcula
+    // sobre los tramos que caen DENTRO de la ventana: una incapacidad de hace
+    // tres años no puede sumar al total de una serie que no la enseña.
+    let tocaAlgunMes = false;
+
+    for (const [mes, casilla] of serie) {
+      const desde = mayor(inc.fechaInicio, `${mes}-01`);
+      const hasta = menor(inc.fechaFin, ultimoDiaDe(mes));
+      if (desde > hasta) continue; // el episodio no toca este mes
+
+      tocaAlgunMes = true;
+      casilla.diasHabiles += contarDiasHabiles(desde, hasta);
+      casilla.episodios += 1;
+      casilla.personas.add(inc.empleadoId);
+    }
+
+    // Fuera del bucle de meses: una incapacidad partida entre septiembre y
+    // octubre aparece en los dos meses de la serie pero es UN episodio.
+    if (tocaAlgunMes) totalEpisodios += 1;
+  }
+
+  const meses = [...serie.entries()].map(([mes, c]) => ({
+    mes,
+    diasHabiles: c.diasHabiles,
+    episodios: c.episodios,
+    personas: c.personas.size,
+  }));
+
+  return {
+    meses,
+    totalDiasHabiles: meses.reduce((t, m) => t + m.diasHabiles, 0),
+    totalEpisodios,
+  };
+}
+
+/** Los `YYYY-MM` entre dos extremos, ambos incluidos. */
+function mesesEntre(desdeMes: string, hastaMes: string): string[] {
+  const meses: string[] = [];
+  let [anio, mes] = desdeMes.split('-').map(Number);
+  while (`${anio}-${String(mes).padStart(2, '0')}` <= hastaMes) {
+    meses.push(`${anio}-${String(mes).padStart(2, '0')}`);
+    mes += 1;
+    if (mes > 12) {
+      mes = 1;
+      anio += 1;
+    }
+  }
+  return meses;
+}
+
+/**
+ * El último día de un `YYYY-MM`. `Date.UTC(anio, mes, 0)` es el día cero del mes
+ * SIGUIENTE, que es el último del pedido: así no hay que escribir la tabla de
+ * los treinta días trae noviembre ni acordarse de los bisiestos.
+ */
+function ultimoDiaDe(mes: string): string {
+  const [anio, m] = mes.split('-').map(Number);
+  return new Date(Date.UTC(anio, m, 0)).toISOString().slice(0, 10);
+}
+
+const mayor = (a: string, b: string) => (a > b ? a : b);
+const menor = (a: string, b: string) => (a < b ? a : b);
 
 /**
  * Un decimal. Los tiempos se pintan como «3,5 h» y arrastrar la cola binaria de

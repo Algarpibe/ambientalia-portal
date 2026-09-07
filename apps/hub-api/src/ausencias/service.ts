@@ -18,9 +18,11 @@ import {
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import {
+  absentismoPorMes,
   acumulacionExcesiva,
   pendientesPorAntiguedad,
   tiemposPorAprobador,
+  type Absentismo,
   type AcumulacionExcesiva,
   type PendientesPorAntiguedad,
   type TiempoDeAprobador,
@@ -2162,6 +2164,12 @@ export interface Kpis {
    * dice a quién, que es lo único con lo que se puede hacer algo.
    */
   acumulacion: AcumulacionExcesiva;
+  /**
+   * Días de trabajo perdidos por incapacidad, mes a mes. La tendencia se lee de
+   * la serie: aquí no se calcula ninguna pendiente ni media móvil, porque con
+   * el histórico que hay una línea así invita a ver señal donde hay ruido.
+   */
+  absentismo: Absentismo;
   tiempos: TiempoDeAprobador[];
   pendientes: PendientesPorAntiguedad;
   /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
@@ -2192,14 +2200,21 @@ export async function kpis(db: Pool): Promise<Kpis> {
 
   // El `null` explícito de `soloDe` es obligatorio (ver `empleadosConSaldo`), y
   // aquí además es lo que hace que sea la plantilla ENTERA y no una rama.
+  // El primer día de la ventana y hoy, en `YYYY-MM-DD`: la consulta de
+  // incapacidades trabaja con fechas de calendario (`DATE`), no con instantes,
+  // así que se le pasa el día y no el ISO completo de arriba.
+  const hoy = hoyEnColombia();
+  const desdeDia = `${desdeIso.slice(0, 7)}-01`;
+
   const empleados = await repo.empleadosConSaldo(db, null, null);
-  const [ausencias, decisiones, pendientes] = await Promise.all([
+  const [ausencias, decisiones, pendientes, incapacidades] = await Promise.all([
     repo.ausenciasQueTocanElSaldo(
       db,
       empleados.map((e) => e.empleadoId),
     ),
     repo.decisionesParaKpi(db, desdeIso),
     repo.pendientesParaKpi(db),
+    repo.incapacidadesParaKpi(db, desdeDia, hoy),
   ]);
 
   const saldos = combinar(empleados, ausencias, hoyEnColombia());
@@ -2222,6 +2237,10 @@ export async function kpis(db: Pool): Promise<Kpis> {
       UMBRAL_ACUMULACION_AVISO,
       UMBRAL_ACUMULACION_ALARMA,
     ),
+    // La serie va del primer mes de la ventana al mes en curso, incluido: el
+    // mes actual sale a medias por definición, y esconderlo dejaría la gráfica
+    // terminando siempre en el mes pasado.
+    absentismo: absentismoPorMes(incapacidades, desdeDia.slice(0, 7), hoy.slice(0, 7)),
     tiempos: tiemposPorAprobador(decisiones),
     pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
     desde: desdeIso,
