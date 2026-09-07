@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Clock, Loader2, TrendingUp, Users, Wallet } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  CalendarRange,
+  Clock,
+  Loader2,
+  TrendingUp,
+  Users,
+  Wallet,
+} from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
 import { formatDias } from './dominio';
 
@@ -11,6 +20,7 @@ import { formatDias } from './dominio';
 //  3. ¿Quién está atascado? → mediana y p90 por aprobador.
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //  5. ¿Cómo va la salud?    → los días perdidos por incapacidad, mes a mes.
+//  6. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -86,6 +96,7 @@ export default function PanelKpis({ activo }: Props) {
       <PendientesAhora pendientes={datos.pendientes} />
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
       <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
+      <Estacionalidad estacionalidad={datos.estacionalidad} />
     </div>
   );
 }
@@ -353,6 +364,114 @@ function tituloDelMes(m: Kpis['absentismo']['meses'][number]): string {
   const personas = m.personas === 1 ? '1 persona' : `${m.personas} personas`;
   const episodios = m.episodios === 1 ? '1 incapacidad' : `${m.episodios} incapacidades`;
   return `${m.mes}: ${m.diasHabiles} días perdidos · ${episodios} · ${personas}`;
+}
+
+// ── Estacionalidad ─────────────────────────────────────────────────────────
+
+/** Los cuatro tipos, con el color de su tramo en la barra apilada. */
+const TIPOS_ESTACIONALIDAD = [
+  { clave: 'vacaciones', etiqueta: 'Vacaciones', color: 'bg-blue-500' },
+  { clave: 'compensatorio', etiqueta: 'Compensatorios', color: 'bg-emerald-500' },
+  { clave: 'permiso', etiqueta: 'Permisos', color: 'bg-violet-500' },
+  { clave: 'incapacidad', etiqueta: 'Incapacidades', color: 'bg-amber-500' },
+] as const;
+
+function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalidad'] }) {
+  const { meses, totalPorTipo, total, mesPico } = estacionalidad;
+  const maximo = Math.max(...meses.map((m) => m.total), 0) || 1;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <CalendarRange className="h-4 w-4 text-gray-400" />
+        Cuándo se concentran las ausencias
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        Días de ausencia por mes y tipo, en los últimos dos años. La ventana es más larga que la del resto
+        del panel a propósito: con un solo año cada mes sale una vez y no hay con qué compararlo.
+      </p>
+
+      {total === 0 ? (
+        <p className="mt-4 text-sm text-gray-500">Todavía no hay ausencias registradas en esta ventana.</p>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Cifra
+              etiqueta="Mes más cargado"
+              valor={mesPico === null ? '—' : nombreDelMes(mesPico)}
+              detalle={mesPico === null ? undefined : `${mesDe(meses, mesPico)} días de ausencia`}
+            />
+            <Cifra etiqueta="Días en total" valor={String(total)} detalle="sumando los cuatro tipos" />
+          </div>
+
+          {/* Barras apiladas: cada mes es una columna con los cuatro tipos
+              uno encima de otro. Sin librería, por lo mismo que en absentismo. */}
+          <div className="mt-5 flex items-end gap-px" style={{ height: '112px' }}>
+            {meses.map((m) => (
+              <div key={m.mes} className="flex flex-1 flex-col justify-end" title={tituloEstacional(m)}>
+                <div
+                  className="flex w-full flex-col-reverse overflow-hidden rounded-t"
+                  style={{ height: `${(m.total / maximo) * 100}%`, minHeight: m.total > 0 ? '2px' : '0' }}
+                >
+                  {TIPOS_ESTACIONALIDAD.map((t) => (
+                    <div
+                      key={t.clave}
+                      className={t.color}
+                      // El tramo se mide contra el TOTAL DEL MES, no contra el
+                      // máximo: la columna ya tiene la altura correcta y aquí
+                      // solo se reparte por dentro.
+                      style={{ height: m.total > 0 ? `${(m[t.clave] / m.total) * 100}%` : '0' }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex gap-px">
+            {meses.map((m) => (
+              <div key={m.mes} className="flex-1 text-center text-[9px] text-gray-400">
+                {/* Solo enero lleva año: con veinticinco columnas no cabe más,
+                    y el cambio de año es lo único que hay que poder situar. */}
+                {m.mes.endsWith('-01') ? m.mes.slice(2, 4) : m.mes.slice(5)}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1">
+            {TIPOS_ESTACIONALIDAD.map((t) => (
+              <span key={t.clave} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className={`h-2.5 w-2.5 rounded-sm ${t.color}`} />
+                {t.etiqueta}
+                <span className="tabular-nums text-gray-400">{totalPorTipo[t.clave]}</span>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function mesDe(meses: Kpis['estacionalidad']['meses'], mes: string): number {
+  return meses.find((m) => m.mes === mes)?.total ?? 0;
+}
+
+/** «2026-08» → «ago 2026». Con el año, porque la ventana cruza dos. */
+function nombreDelMes(mes: string): string {
+  const [anio, m] = mes.split('-');
+  const nombre = new Date(Date.UTC(Number(anio), Number(m) - 1, 1)).toLocaleDateString('es-CO', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  return `${nombre} ${anio}`;
+}
+
+function tituloEstacional(m: Kpis['estacionalidad']['meses'][number]): string {
+  if (m.total === 0) return `${m.mes}: sin ausencias`;
+  const partes = TIPOS_ESTACIONALIDAD.filter((t) => m[t.clave] > 0).map(
+    (t) => `${t.etiqueta.toLowerCase()} ${m[t.clave]}`,
+  );
+  return `${m.mes}: ${m.total} días · ${partes.join(', ')}`;
 }
 
 // ── Piezas ─────────────────────────────────────────────────────────────────

@@ -1,8 +1,15 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
-import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario, ESTADOS_EN_TRAMITE } from './types.js';
-import type { DecisionParaKpi, IncapacidadParaKpi, PendienteParaKpi } from './kpis.js';
+import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario, ESTADOS, ESTADOS_EN_TRAMITE } from './types.js';
+import { TIPOS_DE_AUSENCIA } from './kpis.js';
+import type {
+  AusenciaParaKpi,
+  DecisionParaKpi,
+  IncapacidadParaKpi,
+  PendienteParaKpi,
+  TipoDeAusencia,
+} from './kpis.js';
 import type {
   Adjunto,
   ClaseModificacion,
@@ -955,6 +962,48 @@ export async function incapacidadesParaKpi(
   );
   return (rows as { empleado_id: string; fecha_inicio: string; fecha_fin: string }[]).map((r) => ({
     empleadoId: r.empleado_id,
+    fechaInicio: r.fecha_inicio,
+    fechaFin: r.fecha_fin,
+  }));
+}
+
+/**
+ * Las ausencias que ROZAN la ventana, para el KPI de estacionalidad. La
+ * aritmética la hace `kpis.estacionalidadPorMes`.
+ *
+ * · `tipo = ANY(TIPOS_DE_AUSENCIA)` — los CUATRO que son una ausencia. El
+ *   quinto, `otorgamiento`, queda fuera y ése es el error trampa de este KPI:
+ *   dice «trabajé el sábado, concédeme un día», así que sus `dias_habiles` son
+ *   días CONCEDIDOS y su `fecha_inicio` es la del trabajo extra. Sumarlo aquí
+ *   metería días TRABAJADOS en una serie de días AUSENTE, y subiría en los
+ *   meses de más faena. Se pasa la lista de `kpis.ts` en vez de escribir el
+ *   `<> 'otorgamiento'` para que exista UNA definición de «esto es una
+ *   ausencia» y no dos que puedan separarse.
+ *
+ * · `estado = ANY(...)` con los de `estaEnElCalendario` — lo que OCUPA AGENDA.
+ *   Deja fuera las pendientes (que pueden acabar rechazadas: contarlas
+ *   inflaría el mes con días que quizá nadie tome) y las anuladas, que siguen
+ *   en la tabla como `rechazada` con su rango intacto.
+ *
+ * · El mismo solape con la ventana que `incapacidadesParaKpi`, y por lo mismo:
+ *   las filas viajan con sus fechas originales porque recortar es trabajo del
+ *   motor, que es quien sabe repartir por mes.
+ */
+export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): Promise<AusenciaParaKpi[]> {
+  const { rows } = await db.query(
+    `SELECT tipo,
+            fecha_inicio::text AS fecha_inicio,
+            fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia
+      WHERE tipo   = ANY($3::varchar[])
+        AND estado = ANY($4::varchar[])
+        AND fecha_fin   >= $1::date
+        AND fecha_inicio <= $2::date
+      ORDER BY fecha_inicio`,
+    [desde, hasta, [...TIPOS_DE_AUSENCIA], ESTADOS.filter(estaEnElCalendario)],
+  );
+  return (rows as { tipo: TipoDeAusencia; fecha_inicio: string; fecha_fin: string }[]).map((r) => ({
+    tipo: r.tipo,
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
   }));

@@ -20,10 +20,12 @@ import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles
 import {
   absentismoPorMes,
   acumulacionExcesiva,
+  estacionalidadPorMes,
   pendientesPorAntiguedad,
   tiemposPorAprobador,
   type Absentismo,
   type AcumulacionExcesiva,
+  type Estacionalidad,
   type PendientesPorAntiguedad,
   type TiempoDeAprobador,
 } from './kpis.js';
@@ -2133,6 +2135,17 @@ export async function fijarVisorDeKpis(
 const MESES_DE_VENTANA = 12;
 
 /**
+ * La ventana de la ESTACIONALIDAD, más larga que la de los demás a propósito.
+ *
+ * Con doce meses cada mes aparece una sola vez, y una serie así es descriptiva
+ * —«esto pasó»— pero no estacional: no hay con qué comparar agosto. Con
+ * veinticuatro se ve el mismo mes dos veces, que es el mínimo para empezar a
+ * distinguir un patrón de una casualidad. Aprovecha además el histórico
+ * importado de la hoja, que llega más atrás que el uso de la app.
+ */
+const MESES_DE_ESTACIONALIDAD = 24;
+
+/**
  * Los dos umbrales de acumulación de vacaciones, EN DÍAS.
  *
  * No son números redondos por casualidad: esta app devenga 1,25 días al mes
@@ -2170,6 +2183,12 @@ export interface Kpis {
    * el histórico que hay una línea así invita a ver señal donde hay ruido.
    */
   absentismo: Absentismo;
+  /**
+   * Días de ausencia por mes y tipo, para ver cuándo se concentran. Su ventana
+   * es MÁS LARGA que la del resto (ver `MESES_DE_ESTACIONALIDAD`), así que su
+   * serie no se puede comparar mes a mes con la de `absentismo`.
+   */
+  estacionalidad: Estacionalidad;
   tiempos: TiempoDeAprobador[];
   pendientes: PendientesPorAntiguedad;
   /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
@@ -2206,8 +2225,13 @@ export async function kpis(db: Pool): Promise<Kpis> {
   const hoy = hoyEnColombia();
   const desdeDia = `${desdeIso.slice(0, 7)}-01`;
 
+  // La estacionalidad mira más atrás que el resto, así que tiene su propio
+  // primer día. Se calcula sobre `hoy` y no restando meses a `desdeDia`, para
+  // que las dos ventanas no queden encadenadas: mover una no debe mover la otra.
+  const desdeDiaEstacional = primerDiaMesesAtras(hoy, MESES_DE_ESTACIONALIDAD);
+
   const empleados = await repo.empleadosConSaldo(db, null, null);
-  const [ausencias, decisiones, pendientes, incapacidades] = await Promise.all([
+  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias] = await Promise.all([
     repo.ausenciasQueTocanElSaldo(
       db,
       empleados.map((e) => e.empleadoId),
@@ -2215,9 +2239,10 @@ export async function kpis(db: Pool): Promise<Kpis> {
     repo.decisionesParaKpi(db, desdeIso),
     repo.pendientesParaKpi(db),
     repo.incapacidadesParaKpi(db, desdeDia, hoy),
+    repo.ausenciasParaKpi(db, desdeDiaEstacional, hoy),
   ]);
 
-  const saldos = combinar(empleados, ausencias, hoyEnColombia());
+  const saldos = combinar(empleados, ausenciasDelSaldo, hoy);
 
   return {
     pasivo: {
@@ -2241,10 +2266,24 @@ export async function kpis(db: Pool): Promise<Kpis> {
     // mes actual sale a medias por definición, y esconderlo dejaría la gráfica
     // terminando siempre en el mes pasado.
     absentismo: absentismoPorMes(incapacidades, desdeDia.slice(0, 7), hoy.slice(0, 7)),
+    estacionalidad: estacionalidadPorMes(ausencias, desdeDiaEstacional.slice(0, 7), hoy.slice(0, 7)),
     tiempos: tiemposPorAprobador(decisiones),
     pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
     desde: desdeIso,
   };
+}
+
+/**
+ * El día 1 del mes que queda `meses` hacia atrás desde `hoy`.
+ *
+ * Va por `Date.UTC` con el día fijado en 1 y no restando meses a la fecha
+ * completa: `setUTCMonth` sobre un día 31 desborda al mes siguiente —el 31 de
+ * marzo menos un mes daría el 3 de marzo—, y aquí eso desplazaría el primer mes
+ * de la serie sin más síntoma que una barra de menos.
+ */
+function primerDiaMesesAtras(hoy: string, meses: number): string {
+  const [anio, mes] = hoy.split('-').map(Number);
+  return new Date(Date.UTC(anio, mes - 1 - meses, 1)).toISOString().slice(0, 10);
 }
 
 /**
