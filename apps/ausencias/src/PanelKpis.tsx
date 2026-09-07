@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, Loader2, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, Clock, Loader2, TrendingUp, Users, Wallet } from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
 import { formatDias } from './dominio';
 
-// El panel de análisis. Tres cifras que hoy no se pueden mirar en ninguna otra
-// pantalla de la app, y que responden tres preguntas distintas:
+// El panel de análisis. Cifras que hoy no se pueden mirar en ninguna otra
+// pantalla de la app, y que responden preguntas distintas:
 //
-//  1. ¿Cuánto debemos?    → el pasivo de vacaciones de la plantilla activa.
-//  2. ¿Quién está atascado? → mediana y p90 por aprobador.
-//  3. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
+//  1. ¿Cuánto debemos?      → el pasivo de vacaciones de la plantilla activa.
+//  2. ¿Quién lo concentra?  → las dos listas de acumulación excesiva.
+//  3. ¿Quién está atascado? → mediana y p90 por aprobador.
+//  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -80,6 +81,7 @@ export default function PanelKpis({ activo }: Props) {
   return (
     <div className="space-y-6">
       <PasivoDeVacaciones pasivo={datos.pasivo} />
+      <AcumulacionExcesiva acumulacion={datos.acumulacion} />
       <PendientesAhora pendientes={datos.pendientes} />
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
     </div>
@@ -114,6 +116,87 @@ function PasivoDeVacaciones({ pasivo }: { pasivo: Kpis['pasivo'] }) {
         />
       </div>
     </section>
+  );
+}
+
+// ── Acumulación ────────────────────────────────────────────────────────────
+
+function AcumulacionExcesiva({ acumulacion }: { acumulacion: Kpis['acumulacion'] }) {
+  const { aviso, alarma, umbralAviso, umbralAlarma } = acumulacion;
+  const nadie = aviso.length === 0 && alarma.length === 0;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Users className="h-4 w-4 text-gray-400" />
+        Quién acumula de más
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        La cifra de arriba dice cuánto se debe; ésta, a quién. Con un devengo de 1,25 días al mes, cada{' '}
+        {umbralAviso} días son aproximadamente un año sin disfrutar vacaciones.
+      </p>
+
+      {nadie ? (
+        <p className="mt-4 text-sm text-gray-500">
+          Nadie pasa de {umbralAviso} días acumulados.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-5 sm:grid-cols-2">
+          {/* La alarma va primero y a la izquierda: es la lista corta y la que
+              hay que mirar con prisa. */}
+          <ListaDeFichas
+            titulo={`Más de ${umbralAlarma} días`}
+            explicacion="Unos dos años acumulados. Ya no se corrige solo."
+            fichas={alarma}
+            alarma
+          />
+          <ListaDeFichas
+            titulo={`Entre ${umbralAviso} y ${umbralAlarma} días`}
+            explicacion="Un año largo. Todavía se corrige planificando."
+            fichas={aviso}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ListaDeFichas({
+  titulo,
+  explicacion,
+  fichas,
+  alarma = false,
+}: {
+  titulo: string;
+  explicacion: string;
+  fichas: Kpis['acumulacion']['aviso'];
+  alarma?: boolean;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-xs uppercase tracking-wide text-gray-500">{titulo}</span>
+        <span className={`text-lg font-semibold ${alarma && fichas.length > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
+          {fichas.length}
+        </span>
+      </div>
+      <p className="mt-0.5 text-xs text-gray-500">{explicacion}</p>
+
+      {fichas.length === 0 ? (
+        <p className="mt-2 text-sm text-gray-400">Nadie.</p>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {/* Con nombre y no solo el recuento: «hay 4 personas» no se puede
+              accionar, y «Fulana, 42 días» sí. */}
+          {fichas.map((f) => (
+            <li key={f.empleadoId} className="flex justify-between gap-3 text-sm">
+              <span className="truncate text-gray-900">{f.nombreCompleto}</span>
+              <span className="shrink-0 tabular-nums text-gray-500">{formatDias(f.dias)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

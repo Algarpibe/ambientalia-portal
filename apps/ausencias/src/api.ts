@@ -1284,7 +1284,28 @@ export interface TiempoDeAprobador {
   p90Horas: number;
 }
 
-/** Los tres KPIs del panel. */
+/** Una ficha con demasiadas vacaciones sin disfrutar. */
+export interface FichaAcumulada {
+  empleadoId: string;
+  nombreCompleto: string;
+  /** Días de vacaciones disponibles. */
+  dias: number;
+}
+
+/**
+ * Quién concentra el pasivo, en dos grupos EXCLUYENTES: nadie aparece en los
+ * dos. Los umbrales los manda el servidor para que la pantalla no los
+ * reinvente — si el 15 y el 30 vivieran aquí, cambiarlos allí dejaría el
+ * rótulo mintiendo.
+ */
+export interface AcumulacionExcesiva {
+  aviso: FichaAcumulada[];
+  alarma: FichaAcumulada[];
+  umbralAviso: number;
+  umbralAlarma: number;
+}
+
+/** Los KPIs del panel. */
 export interface Kpis {
   pasivo: {
     /** Días de vacaciones acumulados por la plantilla activa. Deuda real. */
@@ -1293,6 +1314,11 @@ export interface Kpis {
     /** El denominador: sobre cuántas fichas activas se ha sumado. */
     empleados: number;
   };
+  /**
+   * Quién concentra ese pasivo. El total de arriba dice cuánto se debe; esto
+   * dice a quién, que es lo único con lo que se puede hacer algo.
+   */
+  acumulacion: AcumulacionExcesiva;
   /** De más lento a más rápido: el atasco va arriba. */
   tiempos: TiempoDeAprobador[];
   pendientes: {

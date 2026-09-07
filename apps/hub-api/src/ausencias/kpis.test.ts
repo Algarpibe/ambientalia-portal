@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { percentil, horasEntre, tiemposPorAprobador, pendientesPorAntiguedad } from './kpis.js';
+import {
+  percentil,
+  horasEntre,
+  tiemposPorAprobador,
+  pendientesPorAntiguedad,
+  acumulacionExcesiva,
+} from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
 // prueba aquí es lo que un número mal calculado costaría en la pantalla que ve
@@ -174,5 +180,70 @@ describe('pendientesPorAntiguedad', () => {
       de2a5Dias: 0,
       masDe5Dias: 0,
     });
+  });
+});
+
+describe('acumulacionExcesiva', () => {
+  const f = (nombreCompleto: string, dias: number) => ({
+    empleadoId: `id-${nombreCompleto}`,
+    nombreCompleto,
+    dias,
+  });
+
+  it('reparte en dos grupos EXCLUYENTES: aviso entre los umbrales, alarma por encima', () => {
+    const r = acumulacionExcesiva(
+      [f('Ana', 5), f('Beto', 18), f('Caro', 42), f('Dani', 31)],
+      15,
+      30,
+    );
+    // Ana no aparece en ninguno: no supera ni el aviso.
+    expect(r.aviso.map((x) => x.nombreCompleto)).toEqual(['Beto']);
+    expect(r.alarma.map((x) => x.nombreCompleto)).toEqual(['Caro', 'Dani']);
+  });
+
+  it('CANDADO: quien está en alarma NO se repite en aviso', () => {
+    // Si los grupos no fueran excluyentes, el mismo nombre saldría en las dos
+    // listas y la pantalla contaría dos veces a la misma persona. Es el mismo
+    // error de tramos que vigila `pendientesPorAntiguedad`.
+    const r = acumulacionExcesiva([f('Caro', 42)], 15, 30);
+    expect(r.alarma).toHaveLength(1);
+    expect(r.aviso).toEqual([]);
+  });
+
+  it('ordena de más a menos días: el peor caso va arriba', () => {
+    const r = acumulacionExcesiva([f('Dani', 31), f('Caro', 42), f('Eva', 35)], 15, 30);
+    expect(r.alarma.map((x) => x.nombreCompleto)).toEqual(['Caro', 'Eva', 'Dani']);
+  });
+
+  it('CANDADO: los bordes cuentan como alcanzados, no como fuera', () => {
+    // Exactamente 15 y exactamente 30. Un `>` donde va un `>=` deja al de 30,0
+    // clavados en el grupo suave, que es justo el que no hay que mirar con
+    // prisa; y al de 15,0 fuera de todo. El devengo produce decimales (1,25 al
+    // mes), así que caer clavado en el umbral es raro pero no imposible.
+    const r = acumulacionExcesiva([f('Justo15', 15), f('Justo30', 30)], 15, 30);
+    expect(r.aviso.map((x) => x.nombreCompleto)).toEqual(['Justo15']);
+    expect(r.alarma.map((x) => x.nombreCompleto)).toEqual(['Justo30']);
+  });
+
+  it('devuelve los umbrales usados, para que la pantalla no los reinvente', () => {
+    // La pantalla dice «más de 30 días» en el título. Si el número viviera
+    // también en el front, cambiarlo aquí dejaría el rótulo mintiendo.
+    const r = acumulacionExcesiva([], 15, 30);
+    expect(r).toMatchObject({ umbralAviso: 15, umbralAlarma: 30 });
+  });
+
+  it('CANDADO: un saldo negativo no entra en ningún grupo', () => {
+    // Pasa de verdad: quien pide más días de los que tiene queda en negativo
+    // hasta que devenga. Es lo contrario de acumular, y colarlo aquí sería
+    // señalar por acumulación excesiva justo a quien no acumula nada.
+    const r = acumulacionExcesiva([f('Ana', -3)], 15, 30);
+    expect(r.aviso).toEqual([]);
+    expect(r.alarma).toEqual([]);
+  });
+
+  it('sin fichas, los dos grupos vacíos', () => {
+    const r = acumulacionExcesiva([], 15, 30);
+    expect(r.aviso).toEqual([]);
+    expect(r.alarma).toEqual([]);
   });
 });
