@@ -151,6 +151,37 @@ export interface FichaAcumulada {
   nombreCompleto: string;
   /** Días disponibles de vacaciones. Puede ser negativo (ver el JSDoc). */
   dias: number;
+  /**
+   * Días de calendario desde que terminó sus últimas vacaciones. `null` si no
+   * ha disfrutado ninguna: alguien recién entrado, o alguien que lleva años sin
+   * tomarlas. NO es cero — ver `diasDesde`.
+   */
+  diasSinVacaciones: number | null;
+  /**
+   * Días hábiles de vacaciones que ya tiene pedidos hacia adelante.
+   *
+   * Es la señal que separa dos casos que el saldo solo no distingue: quien
+   * acumula porque no planifica, y quien acumula pero ya tiene el viaje
+   * reservado para enero. Sin esto la pantalla los pinta idénticos y la mitad
+   * de la lista son falsos positivos.
+   */
+  diasProgramados: number;
+}
+
+/**
+ * Días de CALENDARIO entre una fecha y hoy, o `null` si no hay fecha.
+ *
+ * Calendario y no hábiles a propósito: la pregunta que responde es «cuánto
+ * lleva sin desconectar», y el descanso no se mide en jornadas laborables. Del
+ * viernes al lunes han pasado tres días de vida, no uno de trabajo.
+ *
+ * ⚠️ El `null` NO es un cero disfrazado. Significa «nunca ha disfrutado
+ * vacaciones»; devolver 0 diría «acaba de volver», que es lo contrario, y en la
+ * lista de acumulación excesiva pintaría de tranquilo justo el peor caso.
+ */
+export function diasDesde(fecha: string | null, hoy: string): number | null {
+  if (fecha === null) return null;
+  return Math.round((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${fecha}T00:00:00Z`)) / 86_400_000);
 }
 
 export interface AcumulacionExcesiva {

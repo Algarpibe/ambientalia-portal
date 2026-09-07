@@ -206,6 +206,8 @@ const estado = {
   ausenciasKpi: [] as { tipo: string; fechaInicio: string; fechaFin: string }[],
   /** Lo que `repo.solicitudesParaFriccion` devuelve. */
   friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
+  /** Lo que `repo.planificacionDeVacaciones` devuelve, por empleado. */
+  planificacionKpi: [] as { empleadoId: string; ultimasVacaciones: string | null; diasProgramados: number }[],
   /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
@@ -893,6 +895,7 @@ vi.mock('./repo.js', async () => ({
   incapacidadesParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.incapacidadesKpi,
   ausenciasParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.ausenciasKpi,
   solicitudesParaFriccion: async (_db: unknown, _desdeIso: string) => estado.friccionKpi,
+  planificacionDeVacaciones: async (_db: unknown, _hoy: string) => estado.planificacionKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1681,6 +1684,7 @@ beforeEach(() => {
   estado.incapacidadesKpi = [];
   estado.ausenciasKpi = [];
   estado.friccionKpi = [];
+  estado.planificacionKpi = [];
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -5000,6 +5004,43 @@ describe('GET /ausencias/kpis', () => {
     const r = await pedir(token({ sub: correo })).expect(200);
     expect(r.body.acumulacion.alarma).toHaveLength(1);
     expect(r.body.acumulacion.aviso.map((f: { empleadoId: string }) => f.empleadoId)).not.toContain(E1);
+  });
+
+  it('CANDADO: las señales se cruzan por empleadoId, no por posición', async () => {
+    // Las dos listas salen de consultas distintas. Que vengan en el mismo orden
+    // es cierto hoy y no lo comprueba nadie, así que se siembra la
+    // planificación EN ORDEN INVERSO a la plantilla: si el cruce fuera por
+    // posición, cada quien saldría con el historial del otro y nada avisaría.
+    const correo = conLlave();
+    conSaldo(0, 42);
+    conSaldo(1, 33);
+    estado.planificacionKpi = [
+      { empleadoId: E2, ultimasVacaciones: '2020-01-10', diasProgramados: 0 },
+      { empleadoId: E1, ultimasVacaciones: null, diasProgramados: 15 },
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const alarma = r.body.acumulacion.alarma as {
+      empleadoId: string;
+      diasSinVacaciones: number | null;
+      diasProgramados: number;
+    }[];
+
+    expect(alarma.find((f) => f.empleadoId === E1)).toMatchObject({
+      diasSinVacaciones: null,
+      diasProgramados: 15,
+    });
+    expect(alarma.find((f) => f.empleadoId === E2)?.diasProgramados).toBe(0);
+  });
+
+  it('CANDADO: sin fila de planificación, «sin vacaciones» llega null y no cero', async () => {
+    // Cero diría «acaba de volver de vacaciones». No saberlo es otra cosa, y en
+    // esta lista la diferencia es entre tranquilizar y avisar.
+    const correo = conLlave();
+    conSaldo(0, 42);
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.acumulacion.alarma[0].diasSinVacaciones).toBeNull();
+    expect(r.body.acumulacion.alarma[0].diasProgramados).toBe(0);
   });
 
   it('quien no acumula de más no sale en ninguna lista', async () => {

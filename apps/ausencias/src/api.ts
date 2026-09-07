@@ -1290,6 +1290,17 @@ export interface FichaAcumulada {
   nombreCompleto: string;
   /** Días de vacaciones disponibles. */
   dias: number;
+  /**
+   * Días de calendario desde que terminaron sus últimas vacaciones. `null` si
+   * no ha disfrutado ninguna, que NO es cero: cero diría «acaba de volver».
+   */
+  diasSinVacaciones: number | null;
+  /**
+   * Días de vacaciones que ya tiene pedidos hacia adelante (incluidas las que
+   * esperan firma). Separa a quien acumula porque no planifica de quien
+   * acumula pero ya tiene el viaje reservado.
+   */
+  diasProgramados: number;
 }
 
 /**

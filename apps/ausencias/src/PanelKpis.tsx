@@ -211,19 +211,49 @@ function ListaDeFichas({
       {fichas.length === 0 ? (
         <p className="mt-2 text-sm text-gray-400">Nadie.</p>
       ) : (
-        <ul className="mt-2 space-y-1">
+        <ul className="mt-2 space-y-2">
           {/* Con nombre y no solo el recuento: «hay 4 personas» no se puede
               accionar, y «Fulana, 42 días» sí. */}
           {fichas.map((f) => (
-            <li key={f.empleadoId} className="flex justify-between gap-3 text-sm">
-              <span className="truncate text-gray-900">{f.nombreCompleto}</span>
-              <span className="shrink-0 tabular-nums text-gray-500">{formatDias(f.dias)}</span>
+            <li key={f.empleadoId} className="text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="truncate text-gray-900">{f.nombreCompleto}</span>
+                <span className="shrink-0 tabular-nums text-gray-500">{formatDias(f.dias)}</span>
+              </div>
+              {/* Las dos señales van JUNTAS y debajo del nombre porque juntas
+                  son la frase entera: «lleva dos años sin descansar y no tiene
+                  nada previsto» es un caso sobre el que actuar; «lleva dos años
+                  pero ya tiene 15 días pedidos» no lo es. Enseñar una sin la
+                  otra devuelve la lista al falso positivo que vienen a matar. */}
+              <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
+                <span>{textoSinVacaciones(f.diasSinVacaciones)}</span>
+                {f.diasProgramados > 0 ? (
+                  <span className="text-emerald-600">{formatDias(f.diasProgramados)} ya pedidos</span>
+                ) : (
+                  <span className="text-amber-600">sin nada previsto</span>
+                )}
+              </div>
             </li>
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+/**
+ * Cuánto lleva sin vacaciones, en la unidad que se entiende de un vistazo.
+ *
+ * `null` es «nunca», no «hoy»: quien no ha disfrutado vacaciones desde que
+ * entró es el caso más grave de la lista, y decir «hace 0 días» lo pintaría
+ * como el más tranquilo.
+ */
+function textoSinVacaciones(dias: number | null): string {
+  if (dias === null) return 'sin vacaciones registradas';
+  if (dias < 60) return `descansó hace ${dias} ${dias === 1 ? 'día' : 'días'}`;
+  const meses = Math.round(dias / 30);
+  if (meses < 24) return `descansó hace ${meses} meses`;
+  return `descansó hace ${Math.floor(meses / 12)} años`;
 }
 
 // ── Pendientes ─────────────────────────────────────────────────────────────

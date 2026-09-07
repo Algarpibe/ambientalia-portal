@@ -8,6 +8,7 @@ import {
   absentismoPorMes,
   estacionalidadPorMes,
   friccion,
+  diasDesde,
 } from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
@@ -187,10 +188,15 @@ describe('pendientesPorAntiguedad', () => {
 });
 
 describe('acumulacionExcesiva', () => {
+  // Este bloque prueba el REPARTO en grupos, así que las dos señales de
+  // planificación van en su valor neutro: aquí no deciden nada. Quien las
+  // ejercita es «acumulacionExcesiva: las señales de planificación», más abajo.
   const f = (nombreCompleto: string, dias: number) => ({
     empleadoId: `id-${nombreCompleto}`,
     nombreCompleto,
     dias,
+    diasSinVacaciones: null,
+    diasProgramados: 0,
   });
 
   it('reparte en dos grupos EXCLUYENTES: aviso entre los umbrales, alarma por encima', () => {
@@ -544,5 +550,81 @@ describe('friccion', () => {
     // decimales que no significan nada con esta muestra.
     const r = friccion([s('rechazada'), s('aprobada'), s('aprobada')]);
     expect(r.pctRechazo).toBe(33.3);
+  });
+});
+
+describe('diasDesde', () => {
+  it('cuenta los días naturales entre una fecha y hoy', () => {
+    expect(diasDesde('2026-08-08', '2026-09-07')).toBe(30);
+  });
+
+  it('el mismo día es cero, no uno', () => {
+    expect(diasDesde('2026-09-07', '2026-09-07')).toBe(0);
+  });
+
+  it('CANDADO: `null` cuando no hay fecha, y eso NO es cero', () => {
+    // `null` significa «no ha disfrutado vacaciones NUNCA» —alguien que acaba
+    // de entrar, o alguien que lleva años sin tomarlas—. Devolver 0 diría
+    // «acaba de volver de vacaciones», que es exactamente lo contrario, y en
+    // la lista de acumulación excesiva pintaría de tranquilo el peor caso.
+    expect(diasDesde(null, '2026-09-07')).toBeNull();
+  });
+
+  it('son días de CALENDARIO, no hábiles', () => {
+    // Aquí sí: la pregunta es «cuánto tiempo lleva sin desconectar», y el
+    // descanso no se mide en jornadas laborables. Del viernes al lunes han
+    // pasado 3 días de vida, no 1 de trabajo.
+    expect(diasDesde('2026-09-04', '2026-09-07')).toBe(3);
+  });
+});
+
+describe('acumulacionExcesiva: las señales de planificación', () => {
+  const f = (
+    nombreCompleto: string,
+    dias: number,
+    extra: { diasSinVacaciones?: number | null; diasProgramados?: number } = {},
+  ) => ({
+    empleadoId: `id-${nombreCompleto}`,
+    nombreCompleto,
+    dias,
+    diasSinVacaciones: extra.diasSinVacaciones ?? null,
+    diasProgramados: extra.diasProgramados ?? 0,
+  });
+
+  it('las dos señales viajan con la ficha hasta la pantalla', () => {
+    const r = acumulacionExcesiva([f('Caro', 42, { diasSinVacaciones: 500, diasProgramados: 10 })], 15, 30);
+    expect(r.alarma[0]).toMatchObject({
+      nombreCompleto: 'Caro',
+      dias: 42,
+      diasSinVacaciones: 500,
+      diasProgramados: 10,
+    });
+  });
+
+  it('CANDADO: acumular mucho con un viaje ya reservado NO es lo mismo que acumular sin plan', () => {
+    // El falso positivo que esta pareja de señales viene a matar. Los dos
+    // acumulan 42 días y hoy la pantalla los pintaba idénticos, pero uno ya
+    // tiene tres semanas pedidas y el otro no tiene nada: solo el segundo es
+    // un caso sobre el que haya que hacer algo.
+    const r = acumulacionExcesiva(
+      [f('ConPlan', 42, { diasProgramados: 15 }), f('SinPlan', 42, { diasProgramados: 0 })],
+      15,
+      30,
+    );
+    expect(r.alarma).toHaveLength(2);
+    expect(r.alarma.find((x) => x.nombreCompleto === 'ConPlan')?.diasProgramados).toBe(15);
+    expect(r.alarma.find((x) => x.nombreCompleto === 'SinPlan')?.diasProgramados).toBe(0);
+  });
+
+  it('el orden sigue siendo por días acumulados, no por planificación', () => {
+    // Las señales se pintan, no reordenan. Quien tiene más días sigue arriba:
+    // cambiar el criterio de orden movería a la gente de sitio entre dos
+    // visitas a la pantalla sin que nada lo explicara.
+    const r = acumulacionExcesiva(
+      [f('Menos', 31, { diasProgramados: 0 }), f('Mas', 42, { diasProgramados: 20 })],
+      15,
+      30,
+    );
+    expect(r.alarma.map((x) => x.nombreCompleto)).toEqual(['Mas', 'Menos']);
   });
 });
