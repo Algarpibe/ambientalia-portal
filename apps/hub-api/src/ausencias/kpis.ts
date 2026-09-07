@@ -1,4 +1,5 @@
 import { contarDiasHabiles } from './dias-habiles.js';
+import { ESTADOS_EN_TRAMITE, type EstadoSolicitud } from './types.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express.
 //
@@ -390,6 +391,78 @@ export function estacionalidadPorMes(
     totalPorTipo,
     total: meses.reduce((s, m) => s + m.total, 0),
     mesPico: pico?.mes ?? null,
+  };
+}
+
+// ── Fricción ───────────────────────────────────────────────────────────────
+
+/** Una solicitud reducida a las tres señales de fricción que el KPI mira. */
+export interface SolicitudParaFriccion {
+  estado: EstadoSolicitud;
+  /**
+   * Tiene `anulada_at`. **Es lo ÚNICO que separa una anulación de un rechazo**:
+   * las dos dejan la solicitud en `rechazada`.
+   */
+  anulada: boolean;
+  /** Le aprobaron al menos un cambio de fechas. */
+  cambioDeFechas: boolean;
+}
+
+export interface Friccion {
+  /** El denominador: solicitudes ya resueltas. Las pendientes no entran. */
+  decididas: number;
+  /** El aprobador dijo que no. */
+  rechazadas: number;
+  /** El solicitante la retiró. */
+  anuladas: number;
+  /** Solicitudes con al menos un cambio de fechas aprobado. */
+  cambiosDeFecha: number;
+  /** `null` cuando no hay decididas: un 0% se leería como «no se rechaza nada,
+   *  todo va bien», y con cero solicitudes eso no se sabe. */
+  pctRechazo: number | null;
+  pctAnulacion: number | null;
+  pctCambioDeFecha: number | null;
+}
+
+/**
+ * Cuánto roce genera el proceso: rechazos, anulaciones y cambios de fecha.
+ *
+ * ⚠️ RECHAZO Y ANULACIÓN NO SON LO MISMO, aunque compartan estado. Las dos
+ * dejan la solicitud en `rechazada` y solo las separa `anulada_at` (ver
+ * `repo.aplicarALaSolicitud`). Un rechazo es «el jefe dijo que no»; una
+ * anulación es «el solicitante cambió de idea». Sumarlas daría un número que no
+ * significa nada, porque una subida podría ser cualquiera de las dos y las dos
+ * piden acciones distintas.
+ *
+ * ⚠️ Las PENDIENTES no entran ni en el numerador ni en el denominador. Una
+ * pedida ayer y aún sin firmar no puede haber sido rechazada: contarla abajo
+ * hundiría el porcentaje por el mero hecho de que alguien acabe de mandar una
+ * solicitud.
+ *
+ * Las `registrada` SÍ cuentan como decididas: una incapacidad se informa y no
+ * necesita firma de nadie, así que es una solicitud resuelta.
+ *
+ * Las tres categorías NO son excluyentes a propósito: una solicitud puede haber
+ * cambiado de fechas y acabar anulada, y son dos fricciones distintas sobre el
+ * mismo caso.
+ */
+export function friccion(solicitudes: SolicitudParaFriccion[]): Friccion {
+  const decididas = solicitudes.filter((s) => !ESTADOS_EN_TRAMITE.includes(s.estado));
+
+  const rechazadas = decididas.filter((s) => s.estado === 'rechazada' && !s.anulada).length;
+  const anuladas = decididas.filter((s) => s.estado === 'rechazada' && s.anulada).length;
+  const cambiosDeFecha = decididas.filter((s) => s.cambioDeFechas).length;
+
+  const pct = (n: number) => (decididas.length === 0 ? null : redondear((n / decididas.length) * 100));
+
+  return {
+    decididas: decididas.length,
+    rechazadas,
+    anuladas,
+    cambiosDeFecha,
+    pctRechazo: pct(rechazadas),
+    pctAnulacion: pct(anuladas),
+    pctCambioDeFecha: pct(cambiosDeFecha),
   };
 }
 

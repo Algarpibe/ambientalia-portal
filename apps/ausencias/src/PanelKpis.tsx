@@ -5,6 +5,7 @@ import {
   CalendarRange,
   Clock,
   Loader2,
+  RefreshCw,
   TrendingUp,
   Users,
   Wallet,
@@ -21,6 +22,7 @@ import { formatDias } from './dominio';
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //  5. ¿Cómo va la salud?    → los días perdidos por incapacidad, mes a mes.
 //  6. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
+//  7. ¿Cuánto roza?         → rechazos, anulaciones y cambios de fecha.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -97,6 +99,7 @@ export default function PanelKpis({ activo }: Props) {
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
       <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
+      <FriccionDelProceso friccion={datos.friccion} desde={datos.desde} />
     </div>
   );
 }
@@ -472,6 +475,85 @@ function tituloEstacional(m: Kpis['estacionalidad']['meses'][number]): string {
     (t) => `${t.etiqueta.toLowerCase()} ${m[t.clave]}`,
   );
   return `${m.mes}: ${m.total} días · ${partes.join(', ')}`;
+}
+
+// ── Fricción ───────────────────────────────────────────────────────────────
+
+function FriccionDelProceso({ friccion, desde }: { friccion: Kpis['friccion']; desde: string }) {
+  const { decididas, rechazadas, anuladas, cambiosDeFecha } = friccion;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <RefreshCw className="h-4 w-4 text-gray-400" />
+        Roce del proceso
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        Sobre {decididas} {decididas === 1 ? 'solicitud ya resuelta' : 'solicitudes ya resueltas'} desde{' '}
+        {new Date(desde).toLocaleDateString('es-CO')}. Las que siguen esperando firma no cuentan: todavía no
+        han podido salir mal.
+      </p>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        {/* Rechazo y anulación van separados y NUNCA sumados: en la base los dos
+            son `rechazada` y solo los distingue `anulada_at`, pero uno es «el
+            jefe dijo que no» y el otro «el solicitante cambió de idea». Piden
+            acciones distintas, así que juntarlos daría un número que sube y baja
+            sin decir qué hacer. */}
+        <Porcentaje
+          etiqueta="Rechazadas"
+          pct={friccion.pctRechazo}
+          n={rechazadas}
+          explicacion="El aprobador dijo que no."
+        />
+        <Porcentaje
+          etiqueta="Anuladas"
+          pct={friccion.pctAnulacion}
+          n={anuladas}
+          explicacion="El solicitante la retiró."
+        />
+        <Porcentaje
+          etiqueta="Cambiaron de fechas"
+          pct={friccion.pctCambioDeFecha}
+          n={cambiosDeFecha}
+          explicacion="Con el cambio ya aprobado."
+        />
+      </div>
+
+      <p className="mt-3 text-xs italic text-gray-400">
+        Ninguno de los tres es malo por sí solo — que la gente pueda rectificar es una virtud del sistema. Lo
+        que hay que mirar es si suben con el tiempo: ahí suele haber un problema de planificación o de
+        comunicación, no de personas.
+      </p>
+    </section>
+  );
+}
+
+function Porcentaje({
+  etiqueta,
+  pct,
+  n,
+  explicacion,
+}: {
+  etiqueta: string;
+  pct: number | null;
+  n: number;
+  explicacion: string;
+}) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-gray-500">{etiqueta}</div>
+      <div className="mt-1 text-2xl font-semibold text-gray-900">
+        {/* «—» y no «0 %» cuando no hay denominador: un cero se lee como «no
+            pasa nunca», y sin datos eso no se sabe. */}
+        {pct === null ? '—' : `${pct.toLocaleString('es-CO', { maximumFractionDigits: 1 })} %`}
+      </div>
+      <div className="mt-0.5 text-xs text-gray-500">
+        {pct === null ? 'sin datos todavía' : `${n} ${n === 1 ? 'solicitud' : 'solicitudes'}`}
+      </div>
+      <div className="mt-1 text-xs text-gray-400">{explicacion}</div>
+    </div>
+  );
 }
 
 // ── Piezas ─────────────────────────────────────────────────────────────────

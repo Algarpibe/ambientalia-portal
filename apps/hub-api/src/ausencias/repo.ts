@@ -8,6 +8,7 @@ import type {
   DecisionParaKpi,
   IncapacidadParaKpi,
   PendienteParaKpi,
+  SolicitudParaFriccion,
   TipoDeAusencia,
 } from './kpis.js';
 import type {
@@ -16,6 +17,7 @@ import type {
   DecididaPor,
   Empleado,
   EstadoModificacion,
+  EstadoSolicitud,
   EventoBorrado,
   EventoCorreccion,
   EventoModificacion,
@@ -1006,6 +1008,55 @@ export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): 
     tipo: r.tipo,
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
+  }));
+}
+
+/**
+ * Las solicitudes creadas desde `desdeIso`, con sus tres señales de fricción.
+ * El reparto en porcentajes lo hace `kpis.friccion`.
+ *
+ * ⚠️ `anulada_at IS NOT NULL` es lo ÚNICO que separa una anulación de un
+ * rechazo: las dos dejan la solicitud en `rechazada` (ver
+ * `aplicarALaSolicitud`). Sin ese campo aquí, el motor no podría distinguir «el
+ * jefe dijo que no» de «el solicitante cambió de idea» por mucho que quisiera,
+ * y el KPI sumaría dos cosas opuestas.
+ *
+ * ⚠️ El cambio de fechas se resuelve con un `EXISTS` y no con un JOIN, y eso
+ * NO es estilo: un JOIN contra `solicitud_modificaciones` duplicaría la fila de
+ * una solicitud con dos cambios aprobados, y el denominador del porcentaje se
+ * inflaría solo. El `EXISTS` contesta sí o no una vez por solicitud.
+ *
+ * Solo cuentan las modificaciones de clase `fechas` y estado `aprobada`:
+ * pedirlo no es cambiarlo, y una de clase `anulacion` ya se cuenta por
+ * `anulada_at` —sumarla aquí sería contar el mismo hecho dos veces bajo dos
+ * etiquetas—.
+ *
+ * NO recorta las pendientes: el repo trae lo que hay y el motor decide qué
+ * entra en el denominador. Repartir esa regla entre los dos sitios es como se
+ * desincronizan.
+ */
+export async function solicitudesParaFriccion(
+  db: Pool,
+  desdeIso: string,
+): Promise<SolicitudParaFriccion[]> {
+  const { rows } = await db.query(
+    `SELECT s.estado,
+            (s.anulada_at IS NOT NULL) AS anulada,
+            EXISTS (
+              SELECT 1 FROM portal.solicitud_modificaciones m
+               WHERE m.solicitud_id = s.id
+                 AND m.clase  = 'fechas'
+                 AND m.estado = 'aprobada'
+            ) AS cambio_de_fechas
+       FROM portal.solicitudes_ausencia s
+      WHERE s.created_at >= $1::timestamptz
+      ORDER BY s.created_at`,
+    [desdeIso],
+  );
+  return (rows as { estado: EstadoSolicitud; anulada: boolean; cambio_de_fechas: boolean }[]).map((r) => ({
+    estado: r.estado,
+    anulada: r.anulada,
+    cambioDeFechas: r.cambio_de_fechas,
   }));
 }
 
