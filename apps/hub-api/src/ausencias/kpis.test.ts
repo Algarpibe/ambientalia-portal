@@ -5,6 +5,7 @@ import {
   tiemposPorAprobador,
   pendientesPorAntiguedad,
   acumulacionExcesiva,
+  absentismoPorMes,
 } from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
@@ -245,5 +246,106 @@ describe('acumulacionExcesiva', () => {
     const r = acumulacionExcesiva([], 15, 30);
     expect(r.aviso).toEqual([]);
     expect(r.alarma).toEqual([]);
+  });
+});
+
+describe('absentismoPorMes', () => {
+  const i = (empleadoId: string, fechaInicio: string, fechaFin: string) => ({
+    empleadoId,
+    fechaInicio,
+    fechaFin,
+  });
+
+  it('cuenta los días hábiles perdidos, los episodios y las personas de cada mes', () => {
+    // Del lunes 7 al viernes 11 de septiembre de 2026: 5 hábiles.
+    const r = absentismoPorMes([i('e1', '2026-09-07', '2026-09-11')], '2026-09', '2026-09');
+    expect(r.meses).toEqual([{ mes: '2026-09', diasHabiles: 5, episodios: 1, personas: 1 }]);
+    expect(r.totalDiasHabiles).toBe(5);
+    expect(r.totalEpisodios).toBe(1);
+  });
+
+  it('CANDADO: descuenta el fin de semana, no cuenta días de calendario', () => {
+    // Del viernes 4 al lunes 7 de septiembre de 2026 son 4 días de calendario
+    // pero solo 2 hábiles. Contar calendario inflaría el absentismo de toda la
+    // compañía en torno a un 40%, que es la diferencia entre 7 y 5 días.
+    const r = absentismoPorMes([i('e1', '2026-09-04', '2026-09-07')], '2026-09', '2026-09');
+    expect(r.totalDiasHabiles).toBe(2);
+  });
+
+  it('CANDADO: una incapacidad a caballo entre dos meses se REPARTE', () => {
+    // Del lunes 28 de septiembre al viernes 2 de octubre de 2026. Imputarla
+    // entera al mes de inicio dejaría a octubre en cero y cargaría a septiembre
+    // días que nadie perdió en septiembre, justo en la serie que se mira para
+    // ver tendencia.
+    //   septiembre: 28, 29, 30 → 3 hábiles
+    //   octubre:     1, 2      → 2 hábiles
+    const r = absentismoPorMes([i('e1', '2026-09-28', '2026-10-02')], '2026-09', '2026-10');
+    expect(r.meses).toEqual([
+      { mes: '2026-09', diasHabiles: 3, episodios: 1, personas: 1 },
+      { mes: '2026-10', diasHabiles: 2, episodios: 1, personas: 1 },
+    ]);
+    // El total NO duplica el episodio aunque aparezca en los dos meses: una
+    // incapacidad partida sigue siendo UNA.
+    expect(r.totalEpisodios).toBe(1);
+    expect(r.totalDiasHabiles).toBe(5);
+  });
+
+  it('CANDADO: los meses sin ninguna incapacidad salen con cero, no se saltan', () => {
+    // Si el mes vacío desapareciera de la serie, la gráfica uniría agosto con
+    // octubre y pintaría una línea continua donde hubo un mes limpio. Es la
+    // forma más fácil de leer una tendencia que no existe.
+    const r = absentismoPorMes([i('e1', '2026-10-05', '2026-10-06')], '2026-08', '2026-10');
+    expect(r.meses.map((m) => m.mes)).toEqual(['2026-08', '2026-09', '2026-10']);
+    expect(r.meses[0]).toMatchObject({ diasHabiles: 0, episodios: 0, personas: 0 });
+    expect(r.meses[1]).toMatchObject({ diasHabiles: 0, episodios: 0, personas: 0 });
+  });
+
+  it('cuenta PERSONAS DISTINTAS, no episodios, dentro de un mismo mes', () => {
+    // Alguien con dos incapacidades en el mismo mes es una persona afectada y
+    // dos episodios. Confundirlos haría parecer que hay el doble de gente
+    // enferma de la que hay.
+    const r = absentismoPorMes(
+      [i('e1', '2026-09-07', '2026-09-08'), i('e1', '2026-09-21', '2026-09-22')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0]).toMatchObject({ episodios: 2, personas: 1 });
+  });
+
+  it('dos personas distintas en el mismo mes suman dos', () => {
+    const r = absentismoPorMes(
+      [i('e1', '2026-09-07', '2026-09-08'), i('e2', '2026-09-07', '2026-09-08')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0]).toMatchObject({ episodios: 2, personas: 2 });
+  });
+
+  it('CANDADO: lo que cae fuera de la ventana no se cuela', () => {
+    // La ventana es la que la pantalla dice estar enseñando. Una incapacidad de
+    // hace tres años sumada al total haría que el número no cuadrara con la
+    // serie que se ve justo debajo.
+    const r = absentismoPorMes(
+      [i('e1', '2024-05-06', '2024-05-10'), i('e2', '2026-09-07', '2026-09-11')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.totalDiasHabiles).toBe(5);
+    expect(r.totalEpisodios).toBe(1);
+  });
+
+  it('una incapacidad que solo cae en fin de semana no suma días pero sí es un episodio', () => {
+    // Sábado 5 y domingo 6 de septiembre de 2026. Pasó de verdad —alguien se
+    // puso enfermo un sábado— y no costó ni un día de trabajo, pero borrarla
+    // del recuento de episodios escondería que hubo una incapacidad.
+    const r = absentismoPorMes([i('e1', '2026-09-05', '2026-09-06')], '2026-09', '2026-09');
+    expect(r.meses[0]).toMatchObject({ diasHabiles: 0, episodios: 1, personas: 1 });
+  });
+
+  it('sin incapacidades, la serie sigue teniendo sus meses a cero', () => {
+    const r = absentismoPorMes([], '2026-08', '2026-09');
+    expect(r.meses).toHaveLength(2);
+    expect(r.totalDiasHabiles).toBe(0);
+    expect(r.totalEpisodios).toBe(0);
   });
 });

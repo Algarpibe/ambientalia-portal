@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Clock, Loader2, TrendingUp, Users, Wallet } from 'lucide-react';
+import { Activity, AlertTriangle, Clock, Loader2, TrendingUp, Users, Wallet } from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
 import { formatDias } from './dominio';
 
@@ -10,6 +10,7 @@ import { formatDias } from './dominio';
 //  2. ¿Quién lo concentra?  → las dos listas de acumulación excesiva.
 //  3. ¿Quién está atascado? → mediana y p90 por aprobador.
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
+//  5. ¿Cómo va la salud?    → los días perdidos por incapacidad, mes a mes.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -84,6 +85,7 @@ export default function PanelKpis({ activo }: Props) {
       <AcumulacionExcesiva acumulacion={datos.acumulacion} />
       <PendientesAhora pendientes={datos.pendientes} />
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
+      <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
     </div>
   );
 }
@@ -280,6 +282,77 @@ function TiemposDeAprobacion({ tiempos, desde }: { tiempos: Kpis['tiempos']; des
       </p>
     </section>
   );
+}
+
+// ── Absentismo ─────────────────────────────────────────────────────────────
+
+function AbsentismoPorIncapacidad({ absentismo }: { absentismo: Kpis['absentismo'] }) {
+  const { meses, totalDiasHabiles, totalEpisodios } = absentismo;
+  // El máximo manda la altura de las barras. Con todo a cero sería una división
+  // por cero, y `|| 1` deja la serie plana en el suelo, que es lo correcto.
+  const maximo = Math.max(...meses.map((m) => m.diasHabiles), 0) || 1;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Activity className="h-4 w-4 text-gray-400" />
+        Absentismo por incapacidad
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        Días de <strong>trabajo</strong> perdidos, no de calendario: un viernes a lunes son 2 días, no 4. Una
+        incapacidad que cruza dos meses se reparte entre los dos.
+      </p>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <Cifra etiqueta="Días perdidos" valor={String(totalDiasHabiles)} detalle="en toda la ventana" />
+        <Cifra etiqueta="Incapacidades" valor={String(totalEpisodios)} />
+        <Cifra
+          etiqueta="Media por mes"
+          valor={meses.length > 0 ? (totalDiasHabiles / meses.length).toLocaleString('es-CO', { maximumFractionDigits: 1 }) : '—'}
+        />
+      </div>
+
+      {/* Barras en CSS, sin librería de gráficas: son doce valores y una
+          dependencia nueva costaría más que esto. */}
+      <div className="mt-5 flex items-end gap-1" style={{ height: '96px' }}>
+        {meses.map((m) => (
+          <div key={m.mes} className="flex flex-1 flex-col items-center justify-end gap-1" title={tituloDelMes(m)}>
+            <span className="text-[10px] tabular-nums text-gray-400">{m.diasHabiles || ''}</span>
+            <div
+              className="w-full rounded-t bg-blue-500/70"
+              // `minHeight` de 2px para que un mes con datos pero poco valor no
+              // se vea igual que uno vacío: una barra invisible y un cero se
+              // leen igual, y no son lo mismo.
+              style={{
+                height: `${(m.diasHabiles / maximo) * 100}%`,
+                minHeight: m.diasHabiles > 0 ? '2px' : '0',
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 flex gap-1">
+        {meses.map((m) => (
+          <div key={m.mes} className="flex-1 text-center text-[10px] text-gray-400">
+            {/* Solo el mes; el año iría repetido doce veces y no cabe. */}
+            {m.mes.slice(5)}
+          </div>
+        ))}
+      </div>
+
+      <p className="mt-3 text-xs italic text-gray-400">
+        El último mes va a medias: aún no ha terminado. Y con pocos meses de histórico, una subida puede ser
+        una gripe que pasó por la oficina y no una tendencia.
+      </p>
+    </section>
+  );
+}
+
+function tituloDelMes(m: Kpis['absentismo']['meses'][number]): string {
+  if (m.episodios === 0) return `${m.mes}: sin incapacidades`;
+  const personas = m.personas === 1 ? '1 persona' : `${m.personas} personas`;
+  const episodios = m.episodios === 1 ? '1 incapacidad' : `${m.episodios} incapacidades`;
+  return `${m.mes}: ${m.diasHabiles} días perdidos · ${episodios} · ${personas}`;
 }
 
 // ── Piezas ─────────────────────────────────────────────────────────────────

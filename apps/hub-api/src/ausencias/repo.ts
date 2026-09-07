@@ -2,7 +2,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
 import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario, ESTADOS_EN_TRAMITE } from './types.js';
-import type { DecisionParaKpi, PendienteParaKpi } from './kpis.js';
+import type { DecisionParaKpi, IncapacidadParaKpi, PendienteParaKpi } from './kpis.js';
 import type {
   Adjunto,
   ClaseModificacion,
@@ -910,6 +910,54 @@ export async function pendientesParaKpi(db: Pool): Promise<PendienteParaKpi[]> {
     [[...ESTADOS_EN_TRAMITE]],
   );
   return (rows as { created_at: string }[]).map((r) => ({ createdAt: r.created_at }));
+}
+
+/**
+ * Las incapacidades que ROZAN la ventana `[desde, hasta]`, para el KPI de
+ * absentismo. La aritmética la hace `kpis.absentismoPorMes`.
+ *
+ * Tres recortes:
+ *
+ * · `tipo = 'incapacidad'` — este KPI mide salud laboral, no ausencia a secas.
+ *   Colar las vacaciones lo convertiría en «días que la gente no vino», que es
+ *   otra cosa y además sube en agosto por motivos alegres.
+ *
+ * · `estado <> 'rechazada'` — anular una solicitud la deja en `rechazada` con
+ *   `anulada_at` y NO la borra (ver `aplicarALaSolicitud`), así que sigue en la
+ *   tabla con su rango intacto. Sin este recorte, unos días que nadie llegó a
+ *   perder entrarían en la serie. Se escribe por exclusión y no listando los
+ *   estados válidos a propósito: una incapacidad vive en `registrada`, pero el
+ *   histórico importado y las correcciones de administración pueden dejar
+ *   otros, y lo que de verdad hay que dejar fuera es lo anulado.
+ *
+ * · El solape con la ventana, que NO es `fecha_inicio BETWEEN ...`: una
+ *   incapacidad que empieza en agosto y acaba en septiembre pierde sus días de
+ *   septiembre si se descarta por dónde empieza. Por eso viaja con sus fechas
+ *   ORIGINALES, sin recortar: recortar es trabajo del motor, que es quien sabe
+ *   repartir por mes.
+ */
+export async function incapacidadesParaKpi(
+  db: Pool,
+  desde: string,
+  hasta: string,
+): Promise<IncapacidadParaKpi[]> {
+  const { rows } = await db.query(
+    `SELECT empleado_id,
+            fecha_inicio::text AS fecha_inicio,
+            fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia
+      WHERE tipo = 'incapacidad'
+        AND estado <> 'rechazada'
+        AND fecha_fin   >= $1::date
+        AND fecha_inicio <= $2::date
+      ORDER BY fecha_inicio`,
+    [desde, hasta],
+  );
+  return (rows as { empleado_id: string; fecha_inicio: string; fecha_fin: string }[]).map((r) => ({
+    empleadoId: r.empleado_id,
+    fechaInicio: r.fecha_inicio,
+    fechaFin: r.fecha_fin,
+  }));
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────
