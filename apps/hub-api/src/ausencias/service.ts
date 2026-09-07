@@ -21,11 +21,13 @@ import {
   absentismoPorMes,
   acumulacionExcesiva,
   estacionalidadPorMes,
+  friccion,
   pendientesPorAntiguedad,
   tiemposPorAprobador,
   type Absentismo,
   type AcumulacionExcesiva,
   type Estacionalidad,
+  type Friccion,
   type PendientesPorAntiguedad,
   type TiempoDeAprobador,
 } from './kpis.js';
@@ -2189,6 +2191,11 @@ export interface Kpis {
    * serie no se puede comparar mes a mes con la de `absentismo`.
    */
   estacionalidad: Estacionalidad;
+  /**
+   * Cuánto roce genera el proceso: rechazos, anulaciones y cambios de fecha.
+   * Comparte ventana con `tiempos` —los dos miden el proceso de aprobación—.
+   */
+  friccion: Friccion;
   tiempos: TiempoDeAprobador[];
   pendientes: PendientesPorAntiguedad;
   /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
@@ -2231,16 +2238,18 @@ export async function kpis(db: Pool): Promise<Kpis> {
   const desdeDiaEstacional = primerDiaMesesAtras(hoy, MESES_DE_ESTACIONALIDAD);
 
   const empleados = await repo.empleadosConSaldo(db, null, null);
-  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias] = await Promise.all([
-    repo.ausenciasQueTocanElSaldo(
-      db,
-      empleados.map((e) => e.empleadoId),
-    ),
-    repo.decisionesParaKpi(db, desdeIso),
-    repo.pendientesParaKpi(db),
-    repo.incapacidadesParaKpi(db, desdeDia, hoy),
-    repo.ausenciasParaKpi(db, desdeDiaEstacional, hoy),
-  ]);
+  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias, paraFriccion] =
+    await Promise.all([
+      repo.ausenciasQueTocanElSaldo(
+        db,
+        empleados.map((e) => e.empleadoId),
+      ),
+      repo.decisionesParaKpi(db, desdeIso),
+      repo.pendientesParaKpi(db),
+      repo.incapacidadesParaKpi(db, desdeDia, hoy),
+      repo.ausenciasParaKpi(db, desdeDiaEstacional, hoy),
+      repo.solicitudesParaFriccion(db, desdeIso),
+    ]);
 
   const saldos = combinar(empleados, ausenciasDelSaldo, hoy);
 
@@ -2267,6 +2276,7 @@ export async function kpis(db: Pool): Promise<Kpis> {
     // terminando siempre en el mes pasado.
     absentismo: absentismoPorMes(incapacidades, desdeDia.slice(0, 7), hoy.slice(0, 7)),
     estacionalidad: estacionalidadPorMes(ausencias, desdeDiaEstacional.slice(0, 7), hoy.slice(0, 7)),
+    friccion: friccion(paraFriccion),
     tiempos: tiemposPorAprobador(decisiones),
     pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
     desde: desdeIso,

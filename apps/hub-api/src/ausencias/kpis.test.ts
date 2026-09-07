@@ -7,6 +7,7 @@ import {
   acumulacionExcesiva,
   absentismoPorMes,
   estacionalidadPorMes,
+  friccion,
 } from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
@@ -455,5 +456,93 @@ describe('estacionalidadPorMes', () => {
       '2026-09',
     );
     expect(r.total).toBe(5);
+  });
+});
+
+describe('friccion', () => {
+  const s = (
+    estado: 'pendiente' | 'pendiente_2' | 'aprobada' | 'rechazada' | 'registrada',
+    extra: { anulada?: boolean; cambioDeFechas?: boolean } = {},
+  ) => ({
+    estado,
+    anulada: extra.anulada ?? false,
+    cambioDeFechas: extra.cambioDeFechas ?? false,
+  });
+
+  it('CANDADO: distingue un RECHAZO de una ANULACIÓN, que comparten estado', () => {
+    // Las dos viven en la base como `rechazada`; solo las separa `anulada_at`.
+    // Y son cosas opuestas: una es «el jefe dijo que no» y la otra «el
+    // solicitante cambió de idea». Sumarlas daría un indicador que no significa
+    // nada, porque subir podría ser cualquiera de las dos.
+    const r = friccion([
+      s('rechazada'),
+      s('rechazada', { anulada: true }),
+      s('aprobada'),
+      s('aprobada'),
+    ]);
+    expect(r.rechazadas).toBe(1);
+    expect(r.anuladas).toBe(1);
+    expect(r.decididas).toBe(4);
+    expect(r.pctRechazo).toBe(25);
+    expect(r.pctAnulacion).toBe(25);
+  });
+
+  it('CANDADO: las que siguen pendientes no entran ni arriba ni abajo', () => {
+    // Una pedida ayer y aún sin firmar no puede haber sido rechazada: meterla
+    // en el denominador hundiría el porcentaje por el simple hecho de que
+    // alguien acabe de mandar una solicitud.
+    const r = friccion([s('pendiente'), s('pendiente_2'), s('rechazada'), s('aprobada')]);
+    expect(r.decididas).toBe(2);
+    expect(r.pctRechazo).toBe(50);
+  });
+
+  it('cuenta las solicitudes con cambio de fechas, no los cambios', () => {
+    // Una solicitud que cambió de fechas dos veces sigue siendo UNA solicitud
+    // con fricción. Contar modificaciones daría porcentajes por encima de 100.
+    const r = friccion([s('aprobada', { cambioDeFechas: true }), s('aprobada'), s('aprobada'), s('aprobada')]);
+    expect(r.cambiosDeFecha).toBe(1);
+    expect(r.pctCambioDeFecha).toBe(25);
+  });
+
+  it('una anulada que además había cambiado de fechas cuenta en las dos', () => {
+    // No son categorías excluyentes y no deben serlo: son tres formas
+    // distintas de fricción sobre la misma solicitud, y esconder una detrás de
+    // la otra perdería información.
+    const r = friccion([s('rechazada', { anulada: true, cambioDeFechas: true }), s('aprobada')]);
+    expect(r.anuladas).toBe(1);
+    expect(r.cambiosDeFecha).toBe(1);
+  });
+
+  it('las registradas cuentan como decididas: nadie tenía que firmarlas', () => {
+    // Una incapacidad se informa y queda `registrada`. Es una solicitud
+    // resuelta, así que pertenece al denominador; dejarla fuera inflaría el
+    // porcentaje de rechazo de la compañía.
+    const r = friccion([s('registrada'), s('registrada'), s('rechazada'), s('registrada')]);
+    expect(r.decididas).toBe(4);
+    expect(r.pctRechazo).toBe(25);
+  });
+
+  it('CANDADO: sin solicitudes decididas los porcentajes son null, no cero', () => {
+    // Un 0% se lee como «no se rechaza nada, todo va bien». Con cero
+    // solicitudes eso es mentira: no se sabe. Mismo criterio que `percentil`.
+    const r = friccion([s('pendiente')]);
+    expect(r.decididas).toBe(0);
+    expect(r.pctRechazo).toBeNull();
+    expect(r.pctAnulacion).toBeNull();
+    expect(r.pctCambioDeFecha).toBeNull();
+  });
+
+  it('sin nada, todo a cero y los porcentajes en null', () => {
+    const r = friccion([]);
+    expect(r.decididas).toBe(0);
+    expect(r.rechazadas).toBe(0);
+    expect(r.pctRechazo).toBeNull();
+  });
+
+  it('redondea los porcentajes a un decimal', () => {
+    // Un tercio da 33,333…%: arrastrarlo entero llenaría la pantalla de
+    // decimales que no significan nada con esta muestra.
+    const r = friccion([s('rechazada'), s('aprobada'), s('aprobada')]);
+    expect(r.pctRechazo).toBe(33.3);
   });
 });

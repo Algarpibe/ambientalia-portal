@@ -204,6 +204,8 @@ const estado = {
   incapacidadesKpi: [] as { empleadoId: string; fechaInicio: string; fechaFin: string }[],
   /** Lo que `repo.ausenciasParaKpi` devuelve, para el KPI de estacionalidad. */
   ausenciasKpi: [] as { tipo: string; fechaInicio: string; fechaFin: string }[],
+  /** Lo que `repo.solicitudesParaFriccion` devuelve. */
+  friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
   /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
@@ -890,6 +892,7 @@ vi.mock('./repo.js', async () => ({
   pendientesParaKpi: async (_db: unknown) => estado.pendientesKpi,
   incapacidadesParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.incapacidadesKpi,
   ausenciasParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.ausenciasKpi,
+  solicitudesParaFriccion: async (_db: unknown, _desdeIso: string) => estado.friccionKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1677,6 +1680,7 @@ beforeEach(() => {
   estado.pendientesKpi = [];
   estado.incapacidadesKpi = [];
   estado.ausenciasKpi = [];
+  estado.friccionKpi = [];
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -5070,6 +5074,41 @@ describe('GET /ausencias/kpis', () => {
     expect(m.incapacidad).toBe(1);
     expect(m.total).toBe(3);
     expect(r.body.estacionalidad.mesPico).toBe(mesActual);
+  });
+
+  it('la fricción llega con rechazos y anulaciones SEPARADOS', async () => {
+    // Las dos son `rechazada` en la base y solo las separa `anulada_at`. Que
+    // lleguen mezcladas es el único modo en que este KPI puede ser inútil sin
+    // que se note: el número seguiría subiendo y bajando, pero no diría nada.
+    const correo = conLlave();
+    estado.friccionKpi = [
+      { estado: 'rechazada', anulada: false, cambioDeFechas: false },
+      { estado: 'rechazada', anulada: true, cambioDeFechas: false },
+      { estado: 'aprobada', anulada: false, cambioDeFechas: true },
+      { estado: 'aprobada', anulada: false, cambioDeFechas: false },
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.friccion).toMatchObject({
+      decididas: 4,
+      rechazadas: 1,
+      anuladas: 1,
+      cambiosDeFecha: 1,
+      pctRechazo: 25,
+      pctAnulacion: 25,
+      pctCambioDeFecha: 25,
+    });
+  });
+
+  it('CANDADO: sin solicitudes decididas los porcentajes llegan null, no cero', async () => {
+    // Un 0% en la pantalla se lee como «no se rechaza nada»; con cero
+    // solicitudes eso no se sabe, y las dos cosas no son iguales.
+    const correo = conLlave();
+    estado.friccionKpi = [{ estado: 'pendiente', anulada: false, cambioDeFechas: false }];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.friccion.decididas).toBe(0);
+    expect(r.body.friccion.pctRechazo).toBeNull();
   });
 
   it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {

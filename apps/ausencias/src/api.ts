@@ -1347,6 +1347,27 @@ export interface Estacionalidad {
   mesPico: string | null;
 }
 
+/**
+ * Cuánto roce genera el proceso.
+ *
+ * ⚠️ `rechazadas` y `anuladas` NO son lo mismo aunque en la base compartan el
+ * estado `rechazada`: un rechazo es «el jefe dijo que no» y una anulación es
+ * «el solicitante cambió de idea». Piden acciones distintas y por eso viajan
+ * separadas; no sumarlas en la pantalla.
+ */
+export interface Friccion {
+  /** El denominador: solicitudes ya resueltas. Las pendientes no entran. */
+  decididas: number;
+  rechazadas: number;
+  anuladas: number;
+  cambiosDeFecha: number;
+  /** `null` cuando no hay decididas. Un 0% se leería como «no se rechaza
+   *  nada», y sin datos eso no se sabe: hay que pintar «—», no «0%». */
+  pctRechazo: number | null;
+  pctAnulacion: number | null;
+  pctCambioDeFecha: number | null;
+}
+
 /** Los KPIs del panel. */
 export interface Kpis {
   pasivo: {
@@ -1370,6 +1391,9 @@ export interface Kpis {
    * comparar mes a mes con la de `absentismo`.
    */
   estacionalidad: Estacionalidad;
+  /** Rechazos, anulaciones y cambios de fecha. Comparte ventana con `tiempos`:
+   *  los dos miden el proceso de aprobación. */
+  friccion: Friccion;
   /** De más lento a más rápido: el atasco va arriba. */
   tiempos: TiempoDeAprobador[];
   pendientes: {
