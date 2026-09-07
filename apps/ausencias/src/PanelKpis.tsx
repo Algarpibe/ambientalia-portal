@@ -43,6 +43,71 @@ import { formatDias } from './dominio';
  */
 const ALTO_BARRA = 96;
 
+/**
+ * El techo del eje Y y sus marcas, a partir del valor más alto de la serie.
+ *
+ * ⚠️ Las barras se escalan contra el TECHO, no contra el máximo crudo. Si se
+ * escalaran contra el máximo, la barra más alta llegaría siempre arriba del
+ * todo y quedaría por encima de la última marca —diciendo 26 donde la etiqueta
+ * pone 30—, que es peor que no tener eje.
+ *
+ * El techo se redondea a un número que se lee bien: el paso sube a 1, 2, 5 o 10
+ * por su magnitud, así que salen escalas como 0-5-10 o 0-10-20-30 y nunca
+ * 0-6,5-13. Con series de días de ausencia, que van de 3 a 40, es lo que
+ * separa un eje que se entiende de uno que hay que descifrar.
+ */
+function escalaDeGrafica(maximo: number, divisiones = 4): { techo: number; marcas: number[] } {
+  // Una serie entera a cero sigue necesitando eje: con techo 0 la división de
+  // las barras sería entre cero y saldría `Infinity` o `NaN` como altura.
+  if (maximo <= 0) return { techo: 1, marcas: [0, 1] };
+
+  const bruto = maximo / divisiones;
+  const magnitud = 10 ** Math.floor(Math.log10(bruto));
+  const normalizado = bruto / magnitud;
+  const paso = (normalizado <= 1 ? 1 : normalizado <= 2 ? 2 : normalizado <= 5 ? 5 : 10) * magnitud;
+
+  const techo = Math.ceil(maximo / paso) * paso;
+  const marcas: number[] = [];
+  // El `+ paso / 2` cierra la puerta a que el último valor se quede fuera por
+  // la cola binaria de una suma repetida de decimales.
+  for (let v = 0; v <= techo + paso / 2; v += paso) marcas.push(Math.round(v * 100) / 100);
+  return { techo, marcas };
+}
+
+/** La columna de etiquetas del eje Y, alineada con las líneas guía. */
+function EjeY({ marcas, techo }: { marcas: number[]; techo: number }) {
+  return (
+    <div className="relative w-6 shrink-0" style={{ height: `${ALTO_BARRA}px` }}>
+      {marcas.map((v) => (
+        <span
+          key={v}
+          className="absolute right-1 text-[9px] text-gray-400"
+          // `translateY(50%)` centra la etiqueta EN la línea; sin él quedaría
+          // colgando por encima y el cero se saldría del área de la gráfica.
+          style={{ bottom: `${(v / techo) * ALTO_BARRA}px`, transform: 'translateY(50%)' }}
+        >
+          {v}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Las líneas horizontales de fondo. Van detrás de las barras (`-z-10`). */
+function LineasGuia({ marcas, techo }: { marcas: number[]; techo: number }) {
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ height: `${ALTO_BARRA}px` }}>
+      {marcas.map((v) => (
+        <div
+          key={v}
+          className={`absolute inset-x-0 border-t ${v === 0 ? 'border-gray-300' : 'border-gray-100'}`}
+          style={{ bottom: `${(v / techo) * ALTO_BARRA}px` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 interface Props {
   /** Si la pestaña es la que se ve ahora mismo. Igual que en PanelSaldos: el
    *  panel se monta siempre, pero los datos se piden la primera vez que se
@@ -405,9 +470,7 @@ function TiemposDeAprobacion({ tiempos, desde }: { tiempos: Kpis['tiempos']; des
 
 function AbsentismoPorIncapacidad({ absentismo }: { absentismo: Kpis['absentismo'] }) {
   const { meses, totalDiasHabiles, totalEpisodios } = absentismo;
-  // El máximo manda la altura de las barras. Con todo a cero sería una división
-  // por cero, y `|| 1` deja la serie plana en el suelo, que es lo correcto.
-  const maximo = Math.max(...meses.map((m) => m.diasHabiles), 0) || 1;
+  const { techo, marcas } = escalaDeGrafica(Math.max(...meses.map((m) => m.diasHabiles), 0));
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5">
@@ -438,30 +501,49 @@ function AbsentismoPorIncapacidad({ absentismo }: { absentismo: Kpis['absentismo
           `height: X%` dentro resolvería contra un padre de altura `auto` —es
           decir, contra nada— y saldría cero. Con la altura calculada aquí en px
           la barra no depende de cómo el navegador resuelva ese porcentaje. */}
-      <div className="mt-5 flex items-end gap-1">
-        {meses.map((m) => (
-          <div key={m.mes} className="flex flex-1 flex-col items-center gap-1" title={tituloDelMes(m)}>
-            <span className="text-[10px] tabular-nums text-gray-400">{m.diasHabiles || ''}</span>
-            <div
-              className="w-full rounded-t bg-blue-500/70"
-              // El `minHeight` es para que un mes con datos pero poco valor no
-              // se vea igual que uno vacío: una barra invisible y un cero se
-              // leen igual, y no son lo mismo.
-              style={{
-                height: `${(m.diasHabiles / maximo) * ALTO_BARRA}px`,
-                minHeight: m.diasHabiles > 0 ? '2px' : '0',
-              }}
-            />
+      <div className="mt-5 flex">
+        <EjeY marcas={marcas} techo={techo} />
+        <div className="relative flex-1">
+          <LineasGuia marcas={marcas} techo={techo} />
+          <div className="relative flex items-end gap-1" style={{ height: `${ALTO_BARRA}px` }}>
+            {meses.map((m) => (
+              <div key={m.mes} className="relative h-full flex-1" title={tituloDelMes(m)}>
+                <div
+                  className="absolute inset-x-0 bottom-0 rounded-t bg-blue-500/70"
+                  // El `minHeight` es para que un mes con datos pero poco valor
+                  // no se vea igual que uno vacío: una barra invisible y un cero
+                  // se leen igual, y no son lo mismo.
+                  //
+                  // Contra `techo` y no contra el máximo: si no, la barra más
+                  // alta llegaría arriba del todo y no coincidiría con su marca.
+                  style={{
+                    height: `${(m.diasHabiles / techo) * ALTO_BARRA}px`,
+                    minHeight: m.diasHabiles > 0 ? '2px' : '0',
+                  }}
+                />
+                {/* El número va DENTRO de la columna y en absoluto sobre su
+                    barra: con el eje de altura fija, ponerlo en el flujo lo
+                    empujaría fuera del área o encogería la barra. */}
+                {m.diasHabiles > 0 && (
+                  <span
+                    className="absolute inset-x-0 text-center text-[10px] tabular-nums text-gray-400"
+                    style={{ bottom: `${(m.diasHabiles / techo) * ALTO_BARRA + 2}px` }}
+                  >
+                    {m.diasHabiles}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="mt-1 flex gap-1">
-        {meses.map((m) => (
-          <div key={m.mes} className="flex-1 text-center text-[10px] text-gray-400">
-            {/* Solo el mes; el año iría repetido doce veces y no cabe. */}
-            {m.mes.slice(5)}
+          <div className="mt-1 flex gap-1">
+            {meses.map((m) => (
+              <div key={m.mes} className="flex-1 text-center text-[10px] text-gray-400">
+                {/* Solo el mes; el año iría repetido doce veces y no cabe. */}
+                {m.mes.slice(5)}
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
       </div>
 
       <p className="mt-3 text-xs italic text-gray-400">
@@ -561,7 +643,10 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
   };
 
   const { meses, total, mesPico } = conTiposActivos(estacionalidad.meses, activos);
-  const maximo = Math.max(...meses.map((m) => m.total), 0) || 1;
+  // La escala se recalcula con el filtro puesto: aislar permisos baja el máximo
+  // de 26 a 8, y mantener el eje en 30 dejaría todas las barras aplastadas
+  // contra el suelo, que es la forma de que un filtro parezca no hacer nada.
+  const { techo, marcas } = escalaDeGrafica(Math.max(...meses.map((m) => m.total), 0));
   const tiposVisibles = TIPOS_ESTACIONALIDAD.filter((t) => activos.has(t.clave));
 
   return (
@@ -657,36 +742,43 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
               Los TRAMOS de dentro sí van en %, y ahí sí es correcto: su padre
               es la barra, que ya tiene una altura en px, de modo que el
               porcentaje resuelve contra un número real. */}
-          <div className="mt-5 flex items-end gap-px">
-            {meses.map((m) => (
-              <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m, tiposVisibles)}>
-                <div
-                  className="flex w-full flex-col-reverse overflow-hidden rounded-t"
-                  style={{
-                    height: `${(m.total / maximo) * ALTO_BARRA}px`,
-                    minHeight: m.total > 0 ? '2px' : '0',
-                  }}
-                >
-                  {/* Solo los tipos ACTIVOS: si se pintaran los cuatro, sus
-                      porcentajes se repartirían sobre un total que ya no los
-                      incluye a todos y la columna sumaría más del 100%. */}
-                  {tiposVisibles.map((t) => (
+          <div className="mt-5 flex">
+            <EjeY marcas={marcas} techo={techo} />
+            <div className="relative flex-1">
+              <LineasGuia marcas={marcas} techo={techo} />
+              <div className="relative flex items-end gap-px" style={{ height: `${ALTO_BARRA}px` }}>
+                {meses.map((m) => (
+                  <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m, tiposVisibles)}>
                     <div
-                      key={t.clave}
-                      className={t.color}
-                      // El tramo se mide contra el TOTAL DEL MES, no contra el
-                      // máximo: la columna ya tiene la altura correcta y aquí
-                      // solo se reparte por dentro.
-                      style={{ height: m.total > 0 ? `${(m[t.clave] / m.total) * 100}%` : '0' }}
-                    />
-                  ))}
-                </div>
+                      className="flex w-full flex-col-reverse overflow-hidden rounded-t"
+                      // Contra `techo` y no contra el máximo, por lo mismo que
+                      // en absentismo: la barra más alta tiene que coincidir con
+                      // una marca del eje y no pasarse de la última.
+                      style={{
+                        height: `${(m.total / techo) * ALTO_BARRA}px`,
+                        minHeight: m.total > 0 ? '2px' : '0',
+                      }}
+                    >
+                      {/* Solo los tipos ACTIVOS: si se pintaran los cuatro, sus
+                          porcentajes se repartirían sobre un total que ya no los
+                          incluye a todos y la columna sumaría más del 100%. */}
+                      {tiposVisibles.map((t) => (
+                        <div
+                          key={t.clave}
+                          className={t.color}
+                          // El tramo se mide contra el TOTAL DEL MES, no contra
+                          // el techo: la columna ya tiene la altura correcta y
+                          // aquí solo se reparte por dentro.
+                          style={{ height: m.total > 0 ? `${(m[t.clave] / m.total) * 100}%` : '0' }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="mt-1 flex gap-px">
-            {meses.map((m, i) => (
-              <div key={m.mes} className="flex-1 text-center text-[9px] leading-tight text-gray-400">
+              <div className="mt-1 flex gap-px">
+                {meses.map((m, i) => (
+                  <div key={m.mes} className="flex-1 text-center text-[9px] leading-tight text-gray-400">
                 {/* ⚠️ El MES, siempre, en todas las columnas. Antes enero
                     imprimía aquí los dos dígitos del año para marcar el cambio,
                     y el resultado era una columna rotulada «26» en una fila de
@@ -699,10 +791,11 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
                 {(i === 0 || m.mes.endsWith('-01')) && (
                   <div className="text-gray-300">{m.mes.slice(0, 4)}</div>
                 )}
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
-
         </>
       )}
     </section>
