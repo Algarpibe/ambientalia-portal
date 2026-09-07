@@ -33,6 +33,16 @@ import { formatDias } from './dominio';
 // 403 por su cuenta a todos los demás: esconder la pestaña no es lo que protege
 // estos datos, es solo lo que evita enseñar una que daría error.
 
+/**
+ * Alto máximo de una barra, en PÍXELES.
+ *
+ * Las dos gráficas del panel calculan su altura contra este número en vez de
+ * usar porcentajes. El motivo está explicado donde se usa: sus contenedores
+ * llevan `items-end`, así que las columnas no se estiran y un porcentaje
+ * dentro no tendría contra qué resolver.
+ */
+const ALTO_BARRA = 96;
+
 interface Props {
   /** Si la pestaña es la que se ve ahora mismo. Igual que en PanelSaldos: el
    *  panel se monta siempre, pero los datos se piden la primera vez que se
@@ -327,18 +337,25 @@ function AbsentismoPorIncapacidad({ absentismo }: { absentismo: Kpis['absentismo
       </div>
 
       {/* Barras en CSS, sin librería de gráficas: son doce valores y una
-          dependencia nueva costaría más que esto. */}
-      <div className="mt-5 flex items-end gap-1" style={{ height: '96px' }}>
+          dependencia nueva costaría más que esto.
+
+          ⚠️ LA ALTURA VA EN PÍXELES, NO EN PORCENTAJE, y no es una cuestión de
+          gusto: el contenedor lleva `items-end` (align-items: flex-end), así que
+          las columnas NO se estiran y toman la altura de su contenido. Un
+          `height: X%` dentro resolvería contra un padre de altura `auto` —es
+          decir, contra nada— y saldría cero. Con la altura calculada aquí en px
+          la barra no depende de cómo el navegador resuelva ese porcentaje. */}
+      <div className="mt-5 flex items-end gap-1">
         {meses.map((m) => (
-          <div key={m.mes} className="flex flex-1 flex-col items-center justify-end gap-1" title={tituloDelMes(m)}>
+          <div key={m.mes} className="flex flex-1 flex-col items-center gap-1" title={tituloDelMes(m)}>
             <span className="text-[10px] tabular-nums text-gray-400">{m.diasHabiles || ''}</span>
             <div
               className="w-full rounded-t bg-blue-500/70"
-              // `minHeight` de 2px para que un mes con datos pero poco valor no
+              // El `minHeight` es para que un mes con datos pero poco valor no
               // se vea igual que uno vacío: una barra invisible y un cero se
               // leen igual, y no son lo mismo.
               style={{
-                height: `${(m.diasHabiles / maximo) * 100}%`,
+                height: `${(m.diasHabiles / maximo) * ALTO_BARRA}px`,
                 minHeight: m.diasHabiles > 0 ? '2px' : '0',
               }}
             />
@@ -409,12 +426,24 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
 
           {/* Barras apiladas: cada mes es una columna con los cuatro tipos
               uno encima de otro. Sin librería, por lo mismo que en absentismo. */}
-          <div className="mt-5 flex items-end gap-px" style={{ height: '112px' }}>
+          {/* ⚠️ Misma regla que en la gráfica de absentismo: la altura de la
+              columna se calcula en PÍXELES. Con `items-end`, la columna no se
+              estira y mide lo que su contenido, así que un `height: %` dentro
+              resolvería contra `auto` y daría cero — que es exactamente lo que
+              pasaba: la sección salía con el hueco vacío y ni una barra.
+
+              Los TRAMOS de dentro sí van en %, y ahí sí es correcto: su padre
+              es la barra, que ya tiene una altura en px, de modo que el
+              porcentaje resuelve contra un número real. */}
+          <div className="mt-5 flex items-end gap-px">
             {meses.map((m) => (
-              <div key={m.mes} className="flex flex-1 flex-col justify-end" title={tituloEstacional(m)}>
+              <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m)}>
                 <div
                   className="flex w-full flex-col-reverse overflow-hidden rounded-t"
-                  style={{ height: `${(m.total / maximo) * 100}%`, minHeight: m.total > 0 ? '2px' : '0' }}
+                  style={{
+                    height: `${(m.total / maximo) * ALTO_BARRA}px`,
+                    minHeight: m.total > 0 ? '2px' : '0',
+                  }}
                 >
                   {TIPOS_ESTACIONALIDAD.map((t) => (
                     <div
