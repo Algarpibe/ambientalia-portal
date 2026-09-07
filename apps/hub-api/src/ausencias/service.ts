@@ -20,6 +20,7 @@ import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles
 import {
   absentismoPorMes,
   acumulacionExcesiva,
+  diasDesde,
   estacionalidadPorMes,
   friccion,
   pendientesPorAntiguedad,
@@ -2238,7 +2239,7 @@ export async function kpis(db: Pool): Promise<Kpis> {
   const desdeDiaEstacional = primerDiaMesesAtras(hoy, MESES_DE_ESTACIONALIDAD);
 
   const empleados = await repo.empleadosConSaldo(db, null, null);
-  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias, paraFriccion] =
+  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias, paraFriccion, planificacion] =
     await Promise.all([
       repo.ausenciasQueTocanElSaldo(
         db,
@@ -2249,9 +2250,11 @@ export async function kpis(db: Pool): Promise<Kpis> {
       repo.incapacidadesParaKpi(db, desdeDia, hoy),
       repo.ausenciasParaKpi(db, desdeDiaEstacional, hoy),
       repo.solicitudesParaFriccion(db, desdeIso),
+      repo.planificacionDeVacaciones(db, hoy),
     ]);
 
   const saldos = combinar(empleados, ausenciasDelSaldo, hoy);
+  const porEmpleado = new Map(planificacion.map((p) => [p.empleadoId, p]));
 
   return {
     pasivo: {
@@ -2263,11 +2266,22 @@ export async function kpis(db: Pool): Promise<Kpis> {
     // el mismo número desglosado por persona en vez de sumado, así que el
     // total de arriba y estas listas no pueden discrepar.
     acumulacion: acumulacionExcesiva(
-      saldos.map((s) => ({
-        empleadoId: s.empleadoId,
-        nombreCompleto: s.nombreCompleto,
-        dias: s.saldo.disponible,
-      })),
+      saldos.map((s) => {
+        // Por `empleadoId` y no por posición: las dos listas salen de consultas
+        // distintas y que vengan en el mismo orden es cierto hoy pero no lo
+        // comprueba nadie. Equivocarse de fila aquí le atribuiría a alguien el
+        // «lleva dos años sin vacaciones» de otro.
+        const plan = porEmpleado.get(s.empleadoId);
+        return {
+          empleadoId: s.empleadoId,
+          nombreCompleto: s.nombreCompleto,
+          dias: s.saldo.disponible,
+          // `?? null` y no `?? 0`: sin fila de planificación no sabemos cuándo
+          // descansó, que no es lo mismo que saber que fue hoy.
+          diasSinVacaciones: diasDesde(plan?.ultimasVacaciones ?? null, hoy),
+          diasProgramados: plan?.diasProgramados ?? 0,
+        };
+      }),
       UMBRAL_ACUMULACION_AVISO,
       UMBRAL_ACUMULACION_ALARMA,
     ),

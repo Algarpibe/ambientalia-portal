@@ -1060,6 +1060,76 @@ export async function solicitudesParaFriccion(
   }));
 }
 
+/** Las dos señales de planificación de un empleado. */
+export interface PlanificacionDeEmpleado {
+  empleadoId: string;
+  /** Fin de sus últimas vacaciones YA disfrutadas, o `null` si no hay. */
+  ultimasVacaciones: string | null;
+  /** Días hábiles de vacaciones pedidos hacia adelante. */
+  diasProgramados: number;
+}
+
+/**
+ * Cuándo descansó por última vez cada empleado activo y cuánto tiene ya pedido.
+ *
+ * Las dos señales miran la MISMA tabla con recortes opuestos —pasado contra
+ * futuro— y por eso van en una sola consulta: separarlas daría dos recorridos
+ * de lo mismo y dos sitios donde equivocarse con el `hoy`.
+ *
+ * ⚠️ Parte de `portal.empleados` con LEFT JOIN y no de las solicitudes: la
+ * lista de acumulación recorre la plantilla entera, y si esto devolviera solo a
+ * quien tiene solicitudes, el resto se quedaría sin señales y la pantalla no
+ * podría distinguir «no tiene plan» de «no tengo el dato».
+ *
+ * Los tres recortes de `ultimas_vacaciones`:
+ * · `tipo = 'vacaciones'` — estar de incapacidad no es haber descansado, y es
+ *   la confusión más cara de esta pantalla: dejaría de señalar a quien lleva
+ *   dos años sin vacaciones justo porque estuvo enfermo.
+ * · `fecha_fin <= hoy` — unas vacaciones futuras no son las últimas
+ *   disfrutadas. Contarlas pintaría de «acaba de descansar» a quien tiene el
+ *   viaje reservado pero aún no se ha ido, que es justo a quien hay que
+ *   distinguir del que ya volvió.
+ * · el estado, que aquí exige haberlas disfrutado de verdad (`aprobada` o
+ *   `registrada`): una anulada quedó en `rechazada` con su rango intacto.
+ *
+ * En `dias_programados` el recorte de estado es MÁS ANCHO a propósito e incluye
+ * las pendientes de firma: quien ya las pidió ha planificado, aunque su jefe no
+ * haya firmado todavía. Para la pregunta que responde la señal —«¿tiene algo
+ * previsto?»— una pendiente vale igual que una aprobada.
+ */
+export async function planificacionDeVacaciones(
+  db: Pool,
+  hoy: string,
+): Promise<PlanificacionDeEmpleado[]> {
+  const { rows } = await db.query(
+    `SELECT e.id AS empleado_id,
+            (SELECT MAX(v.fecha_fin)::text
+               FROM portal.solicitudes_ausencia v
+              WHERE v.empleado_id = e.id
+                AND v.tipo    = 'vacaciones'
+                AND v.estado  = ANY($2::varchar[])
+                AND v.fecha_fin <= $1::date
+            ) AS ultimas_vacaciones,
+            COALESCE((SELECT SUM(p.dias_habiles)
+               FROM portal.solicitudes_ausencia p
+              WHERE p.empleado_id = e.id
+                AND p.tipo    = 'vacaciones'
+                AND p.estado  = ANY($3::varchar[])
+                AND p.fecha_inicio > $1::date
+            ), 0)::float8 AS dias_programados
+       FROM portal.empleados e
+      WHERE e.activo`,
+    [hoy, ESTADOS.filter(estaEnElCalendario), [...ESTADOS.filter(estaEnElCalendario), ...ESTADOS_EN_TRAMITE]],
+  );
+  return (
+    rows as { empleado_id: string; ultimas_vacaciones: string | null; dias_programados: number }[]
+  ).map((r) => ({
+    empleadoId: r.empleado_id,
+    ultimasVacaciones: r.ultimas_vacaciones,
+    diasProgramados: r.dias_programados,
+  }));
+}
+
 // ── Histórico importado de la hoja ─────────────────────────────────────────
 
 /** Una fila lista para insertar: el empleado ya viene resuelto por el servicio. */
