@@ -239,6 +239,7 @@ export function acumulacionExcesiva(
 export interface IncapacidadParaKpi {
   /** Para contar personas distintas, que no es lo mismo que episodios. */
   empleadoId: string;
+  nombreCompleto: string;
   fechaInicio: string;
   fechaFin: string;
 }
@@ -253,6 +254,16 @@ export interface MesDeAbsentismo {
   /** Cuántas PERSONAS distintas. Dos incapacidades de la misma persona son dos
    *  episodios y una persona. */
   personas: number;
+  /**
+   * Quiénes, por nombre y en orden alfabético. Es `personas` con nombres, así
+   * que sale de la misma cuenta: si `nombres.length` y `personas` discreparan,
+   * uno de los dos estaría mal.
+   *
+   * ⚠️ Son datos de salud. La pantalla los enseña porque se pidió a propósito
+   * (ver el tooltip de absentismo); no se propaguen a un CSV ni a un correo sin
+   * volver a pensarlo.
+   */
+  nombres: string[];
 }
 
 export interface Absentismo {
@@ -290,9 +301,14 @@ export function absentismoPorMes(
 ): Absentismo {
   // La serie completa primero, para que los meses vacíos existan desde el
   // principio en vez de depender de que algún dato caiga en ellos.
-  const serie = new Map<string, { diasHabiles: number; episodios: number; personas: Set<string> }>();
+  // `personas` es un Map de id → nombre y no un Set de nombres: dos personas
+  // distintas pueden llamarse igual, y un Set las fundiría en una sola.
+  const serie = new Map<
+    string,
+    { diasHabiles: number; episodios: number; personas: Map<string, string> }
+  >();
   for (const mes of mesesEntre(desdeMes, hastaMes)) {
-    serie.set(mes, { diasHabiles: 0, episodios: 0, personas: new Set() });
+    serie.set(mes, { diasHabiles: 0, episodios: 0, personas: new Map() });
   }
 
   let totalEpisodios = 0;
@@ -308,7 +324,7 @@ export function absentismoPorMes(
       tocaAlgunMes = true;
       casilla.diasHabiles += dias;
       casilla.episodios += 1;
-      casilla.personas.add(inc.empleadoId);
+      casilla.personas.set(inc.empleadoId, inc.nombreCompleto);
     }
 
     // Fuera del bucle de meses: una incapacidad partida entre septiembre y
@@ -321,6 +337,10 @@ export function absentismoPorMes(
     diasHabiles: c.diasHabiles,
     episodios: c.episodios,
     personas: c.personas.size,
+    // Alfabético: las filas llegan de la BD por fecha, y sin ordenar el mismo
+    // mes cambiaría el orden de los nombres en cuanto alguien registrara una
+    // ausencia vieja.
+    nombres: ordenarNombres([...c.personas.values()]),
   }));
 
   return {
@@ -348,6 +368,8 @@ export type TipoDeAusencia = (typeof TIPOS_DE_AUSENCIA)[number];
 /** Una ausencia reducida a lo que el KPI de estacionalidad necesita. */
 export interface AusenciaParaKpi {
   tipo: TipoDeAusencia;
+  empleadoId: string;
+  nombreCompleto: string;
   fechaInicio: string;
   fechaFin: string;
 }
@@ -362,6 +384,15 @@ export interface MesDeEstacionalidad {
   /** La suma de los cuatro. Viaja calculado para que la barra y su etiqueta no
    *  puedan discrepar por sumar en dos sitios distintos. */
   total: number;
+  /**
+   * Quiénes, POR TIPO y en orden alfabético. Va por tipo y no como una lista
+   * plana del mes porque el tooltip ya se lee así —«vacaciones 21, permisos
+   * 1»—: con una sola lista no se sabría quién es de cuál.
+   *
+   * La misma persona puede salir en dos tipos —vacaciones y un permiso el mismo
+   * mes son dos hechos distintos—, pero nunca dos veces dentro del mismo.
+   */
+  nombres: Record<TipoDeAusencia, string[]>;
 }
 
 export interface Estacionalidad {
@@ -391,8 +422,26 @@ export function estacionalidadPorMes(
   hastaMes: string,
 ): Estacionalidad {
   const serie = new Map<string, MesDeEstacionalidad>();
+  // Map de id → nombre por tipo, por lo mismo que en absentismo: dos personas
+  // distintas pueden llamarse igual y un Set de nombres las fundiría.
+  const gente = new Map<string, Record<TipoDeAusencia, Map<string, string>>>();
+
   for (const mes of mesesEntre(desdeMes, hastaMes)) {
-    serie.set(mes, { mes, vacaciones: 0, permiso: 0, compensatorio: 0, incapacidad: 0, total: 0 });
+    serie.set(mes, {
+      mes,
+      vacaciones: 0,
+      permiso: 0,
+      compensatorio: 0,
+      incapacidad: 0,
+      total: 0,
+      nombres: { vacaciones: [], permiso: [], compensatorio: [], incapacidad: [] },
+    });
+    gente.set(mes, {
+      vacaciones: new Map(),
+      permiso: new Map(),
+      compensatorio: new Map(),
+      incapacidad: new Map(),
+    });
   }
 
   for (const au of ausencias) {
@@ -400,10 +449,19 @@ export function estacionalidadPorMes(
       const casilla = serie.get(mes)!;
       casilla[au.tipo] += dias;
       casilla.total += dias;
+      gente.get(mes)![au.tipo].set(au.empleadoId, au.nombreCompleto);
     }
   }
 
-  const meses = [...serie.values()];
+  const meses = [...serie.values()].map((m) => ({
+    ...m,
+    nombres: {
+      vacaciones: ordenarNombres([...gente.get(m.mes)!.vacaciones.values()]),
+      permiso: ordenarNombres([...gente.get(m.mes)!.permiso.values()]),
+      compensatorio: ordenarNombres([...gente.get(m.mes)!.compensatorio.values()]),
+      incapacidad: ordenarNombres([...gente.get(m.mes)!.incapacidad.values()]),
+    },
+  }));
   const totalPorTipo = Object.fromEntries(
     TIPOS_DE_AUSENCIA.map((t) => [t, meses.reduce((s, m) => s + m[t], 0)]),
   ) as Record<TipoDeAusencia, number>;
@@ -522,6 +580,45 @@ function tramosPorMes(
   return tramos;
 }
 
+// ── Ventanas ───────────────────────────────────────────────────────────────
+
+/** El tramo de fechas que mira un KPI, en `YYYY-MM-DD` y ambos incluidos. */
+export interface VentanaDeKpis {
+  desde: string;
+  hasta: string;
+}
+
+/**
+ * La ventana de un KPI: un año natural concreto, o los últimos N meses.
+ *
+ * Con `anio`, el año manda y `mesesPorDefecto` se IGNORA. Si se sumaran, pedir
+ * 2025 en la estacionalidad —que por defecto mira 24 meses— devolvería dos años
+ * mientras el rótulo de la pantalla dijera «2025».
+ *
+ * ⚠️ El año EN CURSO se corta en hoy, no en diciembre. Con diciembre la serie
+ * arrastraría los meses que aún no han pasado como barras a cero, y una gráfica
+ * que se desploma al final se lee como una caída, no como «esto todavía no ha
+ * ocurrido».
+ *
+ * Sin año, el comienzo es el DÍA 1 del mes, no el día suelto de hace N meses:
+ * las series se agrupan por mes, y empezar a mitad dejaría el primer mes
+ * incompleto y su barra más baja que la realidad.
+ */
+export function ventanaDeKpis(
+  anio: number | null,
+  hoy: string,
+  mesesPorDefecto: number,
+): VentanaDeKpis {
+  if (anio === null) {
+    const [a, m] = hoy.split('-').map(Number);
+    const inicio = new Date(Date.UTC(a, m - 1 - mesesPorDefecto, 1));
+    return { desde: inicio.toISOString().slice(0, 10), hasta: hoy };
+  }
+
+  const finDeAnio = `${anio}-12-31`;
+  return { desde: `${anio}-01-01`, hasta: menor(finDeAnio, hoy) };
+}
+
 /** Los `YYYY-MM` entre dos extremos, ambos incluidos. */
 function mesesEntre(desdeMes: string, hastaMes: string): string[] {
   const meses: string[] = [];
@@ -545,6 +642,14 @@ function mesesEntre(desdeMes: string, hastaMes: string): string[] {
 function ultimoDiaDe(mes: string): string {
   const [anio, m] = mes.split('-').map(Number);
   return new Date(Date.UTC(anio, m, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * Nombres en orden alfabético español: `localeCompare` con `es` para que la Ñ
+ * caiga entre la N y la O y los acentos no manden a nadie al final de la lista.
+ */
+function ordenarNombres(nombres: string[]): string[] {
+  return [...nombres].sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 const mayor = (a: string, b: string) => (a > b ? a : b);

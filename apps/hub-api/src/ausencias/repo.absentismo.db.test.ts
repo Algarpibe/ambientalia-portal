@@ -53,6 +53,9 @@ describe('incapacidadesParaKpi', () => {
     expect(filas).toHaveLength(1);
     expect(filas[0]).toMatchObject({
       empleadoId,
+      // El nombre sale del JOIN con `portal.empleados` y lo pinta el tooltip:
+      // sin el, la lista de quienes estuvieron incapacitados llegaria con ids.
+      nombreCompleto: 'Ana Ruiz',
       fechaInicio: '2026-09-07',
       fechaFin: '2026-09-11',
     });

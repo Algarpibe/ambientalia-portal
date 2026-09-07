@@ -54,6 +54,8 @@ interface Props {
 
 export default function PanelKpis({ activo }: Props) {
   const [datos, setDatos] = useState<Kpis | null>(null);
+  /** `null` = la ventana móvil por defecto. Un año concreto la sustituye. */
+  const [anio, setAnio] = useState<number | null>(null);
   // Arranca en true por lo mismo que PanelSaldos: con false, «aún no he pedido
   // nada» y «no hay datos» renderizan lo mismo y al abrir la pestaña se vería
   // un fotograma en blanco antes de que corra el efecto.
@@ -61,10 +63,11 @@ export default function PanelKpis({ activo }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!activo || datos !== null) return;
+    if (!activo) return;
     let vigente = true;
     setCargando(true);
-    fetchKpis()
+    setError(null);
+    fetchKpis(anio)
       .then((d) => {
         if (vigente) setDatos(d);
       })
@@ -75,11 +78,15 @@ export default function PanelKpis({ activo }: Props) {
         if (vigente) setCargando(false);
       });
     // El flag evita el `setState` sobre un panel ya desmontado si alguien
-    // cambia de pestaña mientras la consulta viaja.
+    // cambia de pestaña mientras la consulta viaja. Y hace algo más ahora que
+    // el año se puede cambiar: si alguien pasa rápido de 2024 a 2025, la
+    // respuesta de 2024 llega tarde y este flag impide que pise a la de 2025.
     return () => {
       vigente = false;
     };
-  }, [activo, datos]);
+    // `datos` NO está en las dependencias, al revés que antes: con él, cambiar
+    // de año dispararía la carga otra vez al llegar los datos nuevos, en bucle.
+  }, [activo, anio]);
 
   if (cargando && datos === null) {
     return (
@@ -103,6 +110,12 @@ export default function PanelKpis({ activo }: Props) {
 
   return (
     <div className="space-y-6">
+      <SelectorDeAnio
+        anio={datos.anio}
+        disponibles={datos.aniosDisponibles}
+        cargando={cargando}
+        onCambio={setAnio}
+      />
       <PasivoDeVacaciones pasivo={datos.pasivo} />
       <AcumulacionExcesiva acumulacion={datos.acumulacion} />
       <PendientesAhora pendientes={datos.pendientes} />
@@ -110,6 +123,56 @@ export default function PanelKpis({ activo }: Props) {
       <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
       <FriccionDelProceso friccion={datos.friccion} desde={datos.desde} />
+    </div>
+  );
+}
+
+// ── Selector de año ────────────────────────────────────────────────────────
+
+function SelectorDeAnio({
+  anio,
+  disponibles,
+  cargando,
+  onCambio,
+}: {
+  anio: number | null;
+  disponibles: number[];
+  cargando: boolean;
+  onCambio: (a: number | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-5 py-3">
+      <label htmlFor="kpis-anio" className="text-xs uppercase tracking-wide text-gray-500">
+        Periodo
+      </label>
+      <select
+        id="kpis-anio"
+        // El valor viene del SERVIDOR (`datos.anio`) y no del estado local: así
+        // el desplegable no puede quedarse enseñando un año cuyos datos aún no
+        // han llegado, ni discrepar de lo que hay pintado debajo.
+        value={anio === null ? '' : String(anio)}
+        onChange={(e) => onCambio(e.target.value === '' ? null : Number(e.target.value))}
+        disabled={cargando}
+        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-100 disabled:opacity-50"
+      >
+        <option value="">Últimos 12 meses</option>
+        {disponibles.map((a) => (
+          <option key={a} value={a}>
+            {a}
+          </option>
+        ))}
+      </select>
+
+      {cargando && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+
+      {/* ⚠️ Lo que el filtro NO toca, dicho en la propia pantalla. El pasivo,
+          quién acumula y las pendientes son el estado de HOY: no existe una
+          versión «de 2024» de cuánto se debe ahora mismo. Sin este aviso,
+          elegir un año pasado y ver el mismo pasivo se lee como un fallo. */}
+      <span className="text-xs text-gray-500">
+        Afecta a las gráficas y a los tiempos de aprobación. El pasivo, quién acumula y lo que espera firma
+        son siempre de hoy.
+      </span>
     </div>
   );
 }
@@ -413,7 +476,23 @@ function tituloDelMes(m: Kpis['absentismo']['meses'][number]): string {
   if (m.episodios === 0) return `${m.mes}: sin incapacidades`;
   const personas = m.personas === 1 ? '1 persona' : `${m.personas} personas`;
   const episodios = m.episodios === 1 ? '1 incapacidad' : `${m.episodios} incapacidades`;
-  return `${m.mes}: ${m.diasHabiles} días perdidos · ${episodios} · ${personas}`;
+  // Los nombres en su propia línea: en una sola, con seis o siete personas, la
+  // cifra que encabeza el tooltip queda empujada fuera de la vista.
+  return `${m.mes}: ${m.diasHabiles} días perdidos · ${episodios} · ${personas}\n${listaDeNombres(m.nombres)}`;
+}
+
+/**
+ * Los nombres de un tooltip, recortados.
+ *
+ * ⚠️ El corte NO es cosmético: un mes con veinte personas produce un tooltip
+ * más alto que la pantalla, y el navegador lo recorta por donde le parece —que
+ * suele ser justo donde estaba el dato—. Con el tope, lo que se pierde se dice
+ * en voz alta («y 8 más») en vez de desaparecer sin avisar.
+ */
+function listaDeNombres(nombres: string[]): string {
+  const TOPE = 12;
+  if (nombres.length <= TOPE) return nombres.join(', ');
+  return `${nombres.slice(0, TOPE).join(', ')} y ${nombres.length - TOPE} más`;
 }
 
 // ── Estacionalidad ─────────────────────────────────────────────────────────
@@ -530,10 +609,12 @@ function nombreDelMes(mes: string): string {
 
 function tituloEstacional(m: Kpis['estacionalidad']['meses'][number]): string {
   if (m.total === 0) return `${m.mes}: sin ausencias`;
-  const partes = TIPOS_ESTACIONALIDAD.filter((t) => m[t.clave] > 0).map(
-    (t) => `${t.etiqueta.toLowerCase()} ${m[t.clave]}`,
+  // Una línea por tipo, con sus días y sus nombres. En una sola línea no se
+  // sabría de qué tipo es cada persona, que es justo lo que el tooltip añade.
+  const lineas = TIPOS_ESTACIONALIDAD.filter((t) => m[t.clave] > 0).map(
+    (t) => `${t.etiqueta} (${m[t.clave]}): ${listaDeNombres(m.nombres[t.clave])}`,
   );
-  return `${m.mes}: ${m.total} días · ${partes.join(', ')}`;
+  return `${m.mes}: ${m.total} días\n${lineas.join('\n')}`;
 }
 
 // ── Fricción ───────────────────────────────────────────────────────────────

@@ -1326,6 +1326,9 @@ export interface MesDeAbsentismo {
   /** Personas distintas. Dos incapacidades de la misma persona son dos
    *  episodios y una persona. */
   personas: number;
+  /** Quiénes, en orden alfabético. ⚠️ Son datos de salud: se enseñan en el
+   *  tooltip a propósito, pero no se propaguen a un CSV sin pensarlo. */
+  nombres: string[];
 }
 
 export interface Absentismo {
@@ -1348,6 +1351,9 @@ export interface MesDeEstacionalidad {
   /** La suma de los cuatro, calculada en el servidor para que la barra y su
    *  etiqueta no puedan discrepar por sumar en dos sitios. */
   total: number;
+  /** Quiénes, por tipo y en orden alfabético. La misma persona puede salir en
+   *  dos tipos, pero nunca dos veces dentro del mismo. */
+  nombres: { vacaciones: string[]; permiso: string[]; compensatorio: string[]; incapacidad: string[] };
 }
 
 export interface Estacionalidad {
@@ -1415,6 +1421,11 @@ export interface Kpis {
   };
   /** Inicio de la ventana de `tiempos`, en ISO. La pantalla lo dice en voz alta. */
   desde: string;
+  /** El año seleccionado, o `null` si es la ventana móvil. Lo manda el servidor
+   *  para que el rótulo y los datos no puedan discrepar. */
+  anio: number | null;
+  /** Los años que el selector puede ofrecer, del más reciente al más antiguo. */
+  aniosDisponibles: number[];
 }
 
 /**
@@ -1422,7 +1433,8 @@ export interface Kpis {
  * 403 es el candado de verdad: la respuesta lleva dentro el agregado de la
  * plantilla entera, así que esconder la pestaña no bastaría.
  */
-export const kpis = () => get<Kpis>('/api/ausencias/kpis');
+export const kpis = (anio: number | null = null) =>
+  get<Kpis>(anio === null ? '/api/ausencias/kpis' : `/api/ausencias/kpis?year=${anio}`);
 
 /** Enciende o apaga la segunda firma de alguien. No mueve lo que ya está en vuelo. */
 export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>

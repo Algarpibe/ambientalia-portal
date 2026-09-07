@@ -23,6 +23,7 @@ import {
   diasDesde,
   estacionalidadPorMes,
   friccion,
+  ventanaDeKpis,
   pendientesPorAntiguedad,
   tiemposPorAprobador,
   type Absentismo,
@@ -2202,6 +2203,14 @@ export interface Kpis {
   /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
    *  pantalla en vez de que el lector tenga que suponerlo. */
   desde: string;
+  /**
+   * El año que se está mirando, o `null` si es la ventana móvil por defecto.
+   * Viaja de vuelta para que la pantalla sepa qué tiene seleccionado sin
+   * guardarlo por su cuenta y arriesgarse a que discrepen.
+   */
+  anio: number | null;
+  /** Los años que el selector puede ofrecer, del más reciente al más antiguo. */
+  aniosDisponibles: number[];
 }
 
 /**
@@ -2220,37 +2229,45 @@ export interface Kpis {
  * (ver `saldo.ts`). Reescribir esa cuenta en SQL crearía una segunda verdad, y
  * el día que las dos pantallas discreparan nadie sabría cuál creer.
  */
-export async function kpis(db: Pool): Promise<Kpis> {
-  const desde = new Date();
-  desde.setUTCMonth(desde.getUTCMonth() - MESES_DE_VENTANA);
-  const desdeIso = desde.toISOString();
-
-  // El `null` explícito de `soloDe` es obligatorio (ver `empleadosConSaldo`), y
-  // aquí además es lo que hace que sea la plantilla ENTERA y no una rama.
-  // El primer día de la ventana y hoy, en `YYYY-MM-DD`: la consulta de
-  // incapacidades trabaja con fechas de calendario (`DATE`), no con instantes,
-  // así que se le pasa el día y no el ISO completo de arriba.
+export async function kpis(db: Pool, anio: number | null = null): Promise<Kpis> {
   const hoy = hoyEnColombia();
-  const desdeDia = `${desdeIso.slice(0, 7)}-01`;
 
-  // La estacionalidad mira más atrás que el resto, así que tiene su propio
-  // primer día. Se calcula sobre `hoy` y no restando meses a `desdeDia`, para
-  // que las dos ventanas no queden encadenadas: mover una no debe mover la otra.
-  const desdeDiaEstacional = primerDiaMesesAtras(hoy, MESES_DE_ESTACIONALIDAD);
+  // Las dos ventanas. Con `anio` las dos son ese año natural; sin él, cada una
+  // mira sus meses (12 el general, 24 la estacionalidad — ver por qué en
+  // `MESES_DE_ESTACIONALIDAD`).
+  const general = ventanaDeKpis(anio, hoy, MESES_DE_VENTANA);
+  const estacional = ventanaDeKpis(anio, hoy, MESES_DE_ESTACIONALIDAD);
+
+  // `decisionesParaKpi` y `solicitudesParaFriccion` comparan contra
+  // `created_at`, que es TIMESTAMPTZ: se les pasa el instante y no el día.
+  const desdeIso = `${general.desde}T00:00:00Z`;
 
   const empleados = await repo.empleadosConSaldo(db, null, null);
-  const [ausenciasDelSaldo, decisiones, pendientes, incapacidades, ausencias, paraFriccion, planificacion] =
-    await Promise.all([
+  const [
+    ausenciasDelSaldo,
+    decisiones,
+    pendientes,
+    incapacidades,
+    ausencias,
+    paraFriccion,
+    planificacion,
+    aniosDisponibles,
+  ] = await Promise.all([
       repo.ausenciasQueTocanElSaldo(
         db,
         empleados.map((e) => e.empleadoId),
       ),
       repo.decisionesParaKpi(db, desdeIso),
       repo.pendientesParaKpi(db),
-      repo.incapacidadesParaKpi(db, desdeDia, hoy),
-      repo.ausenciasParaKpi(db, desdeDiaEstacional, hoy),
+      repo.incapacidadesParaKpi(db, general.desde, general.hasta),
+      repo.ausenciasParaKpi(db, estacional.desde, estacional.hasta),
       repo.solicitudesParaFriccion(db, desdeIso),
+      // La planificación NO se filtra por año: son las señales de HOY —cuánto
+      // lleva sin descansar, qué tiene pedido—, igual que el pasivo y las
+      // pendientes. Pasarle la ventana convertiría «no tiene nada previsto» en
+      // «no tenía nada previsto en 2024», que no significa lo mismo.
       repo.planificacionDeVacaciones(db, hoy),
+      repo.aniosConAusencias(db),
     ]);
 
   const saldos = combinar(empleados, ausenciasDelSaldo, hoy);
@@ -2288,12 +2305,18 @@ export async function kpis(db: Pool): Promise<Kpis> {
     // La serie va del primer mes de la ventana al mes en curso, incluido: el
     // mes actual sale a medias por definición, y esconderlo dejaría la gráfica
     // terminando siempre en el mes pasado.
-    absentismo: absentismoPorMes(incapacidades, desdeDia.slice(0, 7), hoy.slice(0, 7)),
-    estacionalidad: estacionalidadPorMes(ausencias, desdeDiaEstacional.slice(0, 7), hoy.slice(0, 7)),
+    absentismo: absentismoPorMes(incapacidades, general.desde.slice(0, 7), general.hasta.slice(0, 7)),
+    estacionalidad: estacionalidadPorMes(
+      ausencias,
+      estacional.desde.slice(0, 7),
+      estacional.hasta.slice(0, 7),
+    ),
     friccion: friccion(paraFriccion),
     tiempos: tiemposPorAprobador(decisiones),
     pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
     desde: desdeIso,
+    anio,
+    aniosDisponibles,
   };
 }
 

@@ -57,6 +57,9 @@ describe('ausenciasParaKpi', () => {
     expect(new Set(filas.map((f) => f.tipo))).toEqual(
       new Set(['vacaciones', 'permiso', 'compensatorio', 'incapacidad']),
     );
+    // El nombre sale del JOIN con `portal.empleados` y lo pinta el tooltip; el
+    // id viaja con el porque dos personas distintas pueden llamarse igual.
+    expect(filas.every((f) => f.nombreCompleto === 'Ana Ruiz' && f.empleadoId === empleadoId)).toBe(true);
   });
 
   it('CANDADO: el OTORGAMIENTO no es una ausencia y no entra', async () => {

@@ -201,13 +201,34 @@ const estado = {
   pendientesKpi: [] as { createdAt: string }[],
   /** Lo que `repo.incapacidadesParaKpi` devuelve. Lista plana por lo mismo que
    *  las dos de arriba: el WHERE lo ejercita `repo.absentismo.db.test.ts`. */
-  incapacidadesKpi: [] as { empleadoId: string; fechaInicio: string; fechaFin: string }[],
+  incapacidadesKpi: [] as {
+    empleadoId: string;
+    nombreCompleto: string;
+    fechaInicio: string;
+    fechaFin: string;
+  }[],
   /** Lo que `repo.ausenciasParaKpi` devuelve, para el KPI de estacionalidad. */
-  ausenciasKpi: [] as { tipo: string; fechaInicio: string; fechaFin: string }[],
+  ausenciasKpi: [] as {
+    tipo: string;
+    empleadoId: string;
+    nombreCompleto: string;
+    fechaInicio: string;
+    fechaFin: string;
+  }[],
   /** Lo que `repo.solicitudesParaFriccion` devuelve. */
   friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
   /** Lo que `repo.planificacionDeVacaciones` devuelve, por empleado. */
   planificacionKpi: [] as { empleadoId: string; ultimasVacaciones: string | null; diasProgramados: number }[],
+  /** Lo que `repo.aniosConAusencias` devuelve, para el selector del panel. */
+  aniosKpi: [] as number[],
+  /**
+   * Las ventanas con las que el servicio llamo a cada consulta.
+   *
+   * Es lo unico que permite comprobar desde fuera que el `?year=` mueve de
+   * verdad el recorte: con un doble sin datos, la respuesta sale identica con
+   * filtro y sin el, asi que mirar el cuerpo no probaria nada.
+   */
+  ventanas: {} as Record<string, { desde: string; hasta: string }>,
   /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
@@ -892,10 +913,17 @@ vi.mock('./repo.js', async () => ({
   },
   decisionesParaKpi: async (_db: unknown, _desdeIso: string) => estado.decisionesKpi,
   pendientesParaKpi: async (_db: unknown) => estado.pendientesKpi,
-  incapacidadesParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.incapacidadesKpi,
-  ausenciasParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.ausenciasKpi,
+  incapacidadesParaKpi: async (_db: unknown, desde: string, hasta: string) => {
+    estado.ventanas.absentismo = { desde, hasta };
+    return estado.incapacidadesKpi;
+  },
+  ausenciasParaKpi: async (_db: unknown, desde: string, hasta: string) => {
+    estado.ventanas.estacionalidad = { desde, hasta };
+    return estado.ausenciasKpi;
+  },
   solicitudesParaFriccion: async (_db: unknown, _desdeIso: string) => estado.friccionKpi,
   planificacionDeVacaciones: async (_db: unknown, _hoy: string) => estado.planificacionKpi,
+  aniosConAusencias: async (_db: unknown) => estado.aniosKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1685,6 +1713,8 @@ beforeEach(() => {
   estado.ausenciasKpi = [];
   estado.friccionKpi = [];
   estado.planificacionKpi = [];
+  estado.aniosKpi = [];
+  estado.ventanas = {};
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -5071,7 +5101,7 @@ describe('GET /ausencias/kpis', () => {
     // depender de qué día se ejecute el test.
     const lunes = primerLunesDe(mesActual);
     estado.incapacidadesKpi = [
-      { empleadoId: E1, fechaInicio: lunes, fechaFin: sumaDias(lunes, 4) },
+      { empleadoId: E1, nombreCompleto: 'Ana Ruiz', fechaInicio: lunes, fechaFin: sumaDias(lunes, 4) },
     ];
 
     const r = await pedir(token({ sub: correo })).expect(200);
@@ -5103,8 +5133,20 @@ describe('GET /ausencias/kpis', () => {
     const mesActual = new Date().toISOString().slice(0, 7);
     const lunes = primerLunesDe(mesActual);
     estado.ausenciasKpi = [
-      { tipo: 'vacaciones', fechaInicio: lunes, fechaFin: sumaDias(lunes, 1) },
-      { tipo: 'incapacidad', fechaInicio: sumaDias(lunes, 2), fechaFin: sumaDias(lunes, 2) },
+      {
+        tipo: 'vacaciones',
+        empleadoId: E1,
+        nombreCompleto: 'Ana Ruiz',
+        fechaInicio: lunes,
+        fechaFin: sumaDias(lunes, 1),
+      },
+      {
+        tipo: 'incapacidad',
+        empleadoId: E2,
+        nombreCompleto: 'Beto Paz',
+        fechaInicio: sumaDias(lunes, 2),
+        fechaFin: sumaDias(lunes, 2),
+      },
     ];
 
     const r = await pedir(token({ sub: correo })).expect(200);
@@ -5150,6 +5192,75 @@ describe('GET /ausencias/kpis', () => {
     const r = await pedir(token({ sub: correo })).expect(200);
     expect(r.body.friccion.decididas).toBe(0);
     expect(r.body.friccion.pctRechazo).toBeNull();
+  });
+
+  it('sin `year` mira la ventana móvil y lo dice en la respuesta', async () => {
+    const correo = conLlave();
+    const r = await pedir(token({ sub: correo })).expect(200);
+
+    expect(r.body.anio).toBeNull();
+    // 12 meses el general, 24 la estacionalidad: las dos ventanas siguen
+    // siendo distintas cuando no hay filtro.
+    expect(estado.ventanas.absentismo.desde).not.toBe(estado.ventanas.estacionalidad.desde);
+  });
+
+  it('CANDADO: con `year` las DOS ventanas se ciñen a ese año natural', async () => {
+    // Es lo único que prueba que el filtro llega hasta el SQL: con un doble
+    // sin datos, el cuerpo de la respuesta sale idéntico con filtro y sin él.
+    //
+    // Y las dos tienen que moverse: la estacionalidad mira 24 meses por
+    // defecto, así que si el año no la alcanzara devolvería 2024 y 2025 con el
+    // rótulo diciendo «2025».
+    const correo = conLlave();
+    await request(app())
+      .get('/api/ausencias/kpis?year=2025')
+      .set('Authorization', `Bearer ${token({ sub: correo })}`)
+      .expect(200);
+
+    expect(estado.ventanas.absentismo).toEqual({ desde: '2025-01-01', hasta: '2025-12-31' });
+    expect(estado.ventanas.estacionalidad).toEqual({ desde: '2025-01-01', hasta: '2025-12-31' });
+  });
+
+  it('el año elegido y los disponibles viajan de vuelta', async () => {
+    // La pantalla no guarda por su cuenta qué tiene seleccionado: lo lee de
+    // aquí, para que el rótulo y los datos no puedan discrepar.
+    const correo = conLlave();
+    estado.aniosKpi = [2026, 2025, 2024];
+    const r = await request(app())
+      .get('/api/ausencias/kpis?year=2025')
+      .set('Authorization', `Bearer ${token({ sub: correo })}`)
+      .expect(200);
+
+    expect(r.body.anio).toBe(2025);
+    expect(r.body.aniosDisponibles).toEqual([2026, 2025, 2024]);
+  });
+
+  it('CANDADO: un `year` que no es un año da 400, no datos de otra ventana', async () => {
+    // Ignorarlo en silencio devolvería la ventana móvil con la pantalla
+    // rotulada como si fuera el año pedido, que es peor que un error.
+    const correo = conLlave();
+    for (const malo of ['abc', '25', '20255', '-2025', '2025.5']) {
+      const r = await request(app())
+        .get(`/api/ausencias/kpis?year=${encodeURIComponent(malo)}`)
+        .set('Authorization', `Bearer ${token({ sub: correo })}`)
+        .expect(400);
+      expect(r.body.error).toBe('year_invalido');
+    }
+  });
+
+  it('CANDADO: el filtro NO toca las señales de planificación', async () => {
+    // «Sin nada previsto» es una foto de HOY. Filtrarla por 2024 la convertiría
+    // en «no tenía nada previsto en 2024», que no significa lo mismo y encima
+    // sonaría igual en la pantalla.
+    const correo = conLlave();
+    conSaldo(0, 42);
+    estado.planificacionKpi = [{ empleadoId: E1, ultimasVacaciones: null, diasProgramados: 15 }];
+
+    const r = await request(app())
+      .get('/api/ausencias/kpis?year=2024')
+      .set('Authorization', `Bearer ${token({ sub: correo })}`)
+      .expect(200);
+    expect(r.body.acumulacion.alarma[0].diasProgramados).toBe(15);
   });
 
   it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {

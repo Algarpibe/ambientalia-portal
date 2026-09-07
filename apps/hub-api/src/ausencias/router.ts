@@ -485,7 +485,19 @@ export function createAusenciasRouter(db: Pool): Router {
       if (!sesion.esAdmin && !(await repo.esVisorDeKpis(db, sesion.email))) {
         return void res.status(403).json({ error: 'no_ve_kpis' });
       }
-      res.json(await service.kpis(db));
+      // `year` y no `anio` en la query, por coherencia con los otros endpoints
+      // del portal (contabilidad usa `year`). Ausente = ventana móvil; un valor
+      // que no sea un año de cuatro cifras es un 400 y no un silencio, porque
+      // ignorarlo devolvería datos de otra ventana con el rótulo equivocado.
+      const bruto = req.query.year;
+      let anio: number | null = null;
+      if (bruto !== undefined) {
+        anio = Number(bruto);
+        if (!/^\d{4}$/.test(String(bruto)) || !Number.isInteger(anio)) {
+          return void res.status(400).json({ error: 'year_invalido', field: 'year' });
+        }
+      }
+      res.json(await service.kpis(db, anio));
     } catch (e) {
       sendError(res, e, 'ausencias_kpis');
     }
