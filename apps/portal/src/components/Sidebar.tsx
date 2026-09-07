@@ -160,22 +160,12 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
         </button>
       </nav>
 
-      {!plegada && (
-        <div className="mt-auto p-4 bg-gray-50 rounded-2xl border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wider font-bold mb-2">Suscripción</p>
-          <p className="text-sm font-semibold text-gray-900">Enterprise Plan</p>
-          <div className="mt-3 w-full bg-gray-200 h-2 rounded-full overflow-hidden">
-            <div className="bg-blue-500 h-full w-3/4 rounded-full"></div>
-          </div>
-        </div>
-      )}
-
       <button
         onClick={handleLogOut}
         title={plegada ? 'Cerrar sesión' : undefined}
         aria-label="Cerrar sesión"
         className={`mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-semibold transition-all duration-200 border border-red-200 hover:border-red-300 ${
-          plegada ? 'mt-auto px-0' : 'px-4'
+          plegada ? 'px-0' : 'px-4'
         }`}
       >
         <LogOut size={20} className="shrink-0" />
