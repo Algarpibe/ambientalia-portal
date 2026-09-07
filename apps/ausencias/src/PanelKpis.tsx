@@ -505,9 +505,64 @@ const TIPOS_ESTACIONALIDAD = [
   { clave: 'incapacidad', etiqueta: 'Incapacidades', color: 'bg-amber-500' },
 ] as const;
 
+/** Las claves de los cuatro tipos, para el estado del filtro. */
+type ClaveDeTipo = (typeof TIPOS_ESTACIONALIDAD)[number]['clave'];
+
+/**
+ * Recalcula la serie con solo los tipos activos.
+ *
+ * ⚠️ Recalcula SIEMPRE, también con los cuatro encendidos, en vez de usar el
+ * `total`, el `mesPico` y el `totalPorTipo` que manda el servidor cuando no hay
+ * filtro. Es a propósito: con dos caminos —el del servidor sin filtro y el del
+ * front con él— cualquier discrepancia entre ambos aparecería solo al filtrar,
+ * que es justo cuando nadie la buscaría. Con uno solo, si el número está mal
+ * está mal siempre y se ve enseguida.
+ *
+ * El pico se busca solo entre los meses con algo: apagar todos los tipos deja
+ * la serie a cero, y devolver el primer mes lo señalaría como el más cargado.
+ */
+function conTiposActivos(meses: Kpis['estacionalidad']['meses'], activos: Set<ClaveDeTipo>) {
+  const recalculados = meses.map((m) => ({
+    ...m,
+    total: TIPOS_ESTACIONALIDAD.filter((t) => activos.has(t.clave)).reduce((s, t) => s + m[t.clave], 0),
+  }));
+
+  const pico = recalculados
+    .filter((m) => m.total > 0)
+    .reduce<(typeof recalculados)[number] | null>(
+      (mejor, m) => (mejor === null || m.total > mejor.total ? m : mejor),
+      null,
+    );
+
+  return {
+    meses: recalculados,
+    total: recalculados.reduce((s, m) => s + m.total, 0),
+    mesPico: pico?.mes ?? null,
+  };
+}
+
 function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalidad'] }) {
-  const { meses, totalPorTipo, total, mesPico } = estacionalidad;
+  const { totalPorTipo } = estacionalidad;
+  // Los cuatro encendidos al abrir: el filtro sirve para AISLAR un tipo, así
+  // que el estado de partida tiene que ser la vista completa.
+  const [activos, setActivos] = useState<Set<ClaveDeTipo>>(
+    () => new Set(TIPOS_ESTACIONALIDAD.map((t) => t.clave)),
+  );
+
+  const alternar = (clave: ClaveDeTipo) => {
+    setActivos((previos) => {
+      const siguiente = new Set(previos);
+      // Un Set NUEVO y no `previos` mutado: React compara por identidad, y
+      // mutando el mismo Set el componente no se volvería a pintar.
+      if (siguiente.has(clave)) siguiente.delete(clave);
+      else siguiente.add(clave);
+      return siguiente;
+    });
+  };
+
+  const { meses, total, mesPico } = conTiposActivos(estacionalidad.meses, activos);
   const maximo = Math.max(...meses.map((m) => m.total), 0) || 1;
+  const tiposVisibles = TIPOS_ESTACIONALIDAD.filter((t) => activos.has(t.clave));
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5">
@@ -520,8 +575,56 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
         del panel a propósito: con un solo año cada mes sale una vez y no hay con qué compararlo.
       </p>
 
-      {total === 0 ? (
-        <p className="mt-4 text-sm text-gray-500">Todavía no hay ausencias registradas en esta ventana.</p>
+      {/* El filtro va ARRIBA de las cifras y no debajo de la gráfica: es lo que
+          decide qué dicen esas cifras, y ponerlo al final obligaría a leerlas
+          dos veces. Es la leyenda de siempre, ahora clicable. */}
+      <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2">
+        {TIPOS_ESTACIONALIDAD.map((t) => {
+          const encendido = activos.has(t.clave);
+          return (
+            <button
+              key={t.clave}
+              type="button"
+              onClick={() => alternar(t.clave)}
+              aria-pressed={encendido}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                encendido
+                  ? 'border-gray-300 bg-white text-gray-700'
+                  : 'border-gray-200 bg-gray-50 text-gray-400'
+              }`}
+            >
+              {/* El cuadro de color se apaga a gris con el tipo: si mantuviera
+                  su color, un tipo desactivado se seguiría leyendo como
+                  presente en la gráfica. */}
+              <span className={`h-2.5 w-2.5 rounded-sm ${encendido ? t.color : 'bg-gray-300'}`} />
+              {t.etiqueta}
+              <span className="tabular-nums text-gray-400">{totalPorTipo[t.clave]}</span>
+            </button>
+          );
+        })}
+        {activos.size < TIPOS_ESTACIONALIDAD.length && (
+          <button
+            type="button"
+            onClick={() => setActivos(new Set(TIPOS_ESTACIONALIDAD.map((t) => t.clave)))}
+            className="text-xs text-blue-600 underline underline-offset-2"
+          >
+            ver todos
+          </button>
+        )}
+      </div>
+
+      {activos.size === 0 ? (
+        // Con los cuatro apagados la gráfica no tiene nada que decir, pero eso
+        // NO es «no hay datos»: se distingue a propósito del mensaje de abajo.
+        <p className="mt-4 text-sm text-gray-500">
+          No hay ningún tipo seleccionado. Enciende alguno para ver la gráfica.
+        </p>
+      ) : total === 0 ? (
+        <p className="mt-4 text-sm text-gray-500">
+          {activos.size === TIPOS_ESTACIONALIDAD.length
+            ? 'Todavía no hay ausencias registradas en esta ventana.'
+            : 'No hay ausencias de ese tipo en esta ventana.'}
+        </p>
       ) : (
         <>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -530,7 +633,17 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
               valor={mesPico === null ? '—' : nombreDelMes(mesPico)}
               detalle={mesPico === null ? undefined : `${mesDe(meses, mesPico)} días de ausencia`}
             />
-            <Cifra etiqueta="Días en total" valor={String(total)} detalle="sumando los cuatro tipos" />
+            <Cifra
+              etiqueta="Días en total"
+              valor={String(total)}
+              // El detalle dice QUÉ se está sumando: con un filtro puesto,
+              // «sumando los cuatro tipos» sería mentira.
+              detalle={
+                activos.size === TIPOS_ESTACIONALIDAD.length
+                  ? 'sumando los cuatro tipos'
+                  : `solo ${tiposVisibles.map((t) => t.etiqueta.toLowerCase()).join(' y ')}`
+              }
+            />
           </div>
 
           {/* Barras apiladas: cada mes es una columna con los cuatro tipos
@@ -546,7 +659,7 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
               porcentaje resuelve contra un número real. */}
           <div className="mt-5 flex items-end gap-px">
             {meses.map((m) => (
-              <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m)}>
+              <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m, tiposVisibles)}>
                 <div
                   className="flex w-full flex-col-reverse overflow-hidden rounded-t"
                   style={{
@@ -554,7 +667,10 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
                     minHeight: m.total > 0 ? '2px' : '0',
                   }}
                 >
-                  {TIPOS_ESTACIONALIDAD.map((t) => (
+                  {/* Solo los tipos ACTIVOS: si se pintaran los cuatro, sus
+                      porcentajes se repartirían sobre un total que ya no los
+                      incluye a todos y la columna sumaría más del 100%. */}
+                  {tiposVisibles.map((t) => (
                     <div
                       key={t.clave}
                       className={t.color}
@@ -569,24 +685,24 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
             ))}
           </div>
           <div className="mt-1 flex gap-px">
-            {meses.map((m) => (
-              <div key={m.mes} className="flex-1 text-center text-[9px] text-gray-400">
-                {/* Solo enero lleva año: con veinticinco columnas no cabe más,
-                    y el cambio de año es lo único que hay que poder situar. */}
-                {m.mes.endsWith('-01') ? m.mes.slice(2, 4) : m.mes.slice(5)}
+            {meses.map((m, i) => (
+              <div key={m.mes} className="flex-1 text-center text-[9px] leading-tight text-gray-400">
+                {/* ⚠️ El MES, siempre, en todas las columnas. Antes enero
+                    imprimía aquí los dos dígitos del año para marcar el cambio,
+                    y el resultado era una columna rotulada «26» en una fila de
+                    meses: se leía como un mes veintiséis. Si una etiqueta ocupa
+                    el sitio del mes, tiene que ser el mes. */}
+                <div>{m.mes.slice(5)}</div>
+                {/* El año va DEBAJO y solo donde hace falta situarse: en enero
+                    y en la primera columna de la serie. En su propia línea no
+                    compite con el mes y no se puede confundir con él. */}
+                {(i === 0 || m.mes.endsWith('-01')) && (
+                  <div className="text-gray-300">{m.mes.slice(0, 4)}</div>
+                )}
               </div>
             ))}
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1">
-            {TIPOS_ESTACIONALIDAD.map((t) => (
-              <span key={t.clave} className="flex items-center gap-1.5 text-xs text-gray-600">
-                <span className={`h-2.5 w-2.5 rounded-sm ${t.color}`} />
-                {t.etiqueta}
-                <span className="tabular-nums text-gray-400">{totalPorTipo[t.clave]}</span>
-              </span>
-            ))}
-          </div>
         </>
       )}
     </section>
@@ -607,13 +723,19 @@ function nombreDelMes(mes: string): string {
   return `${nombre} ${anio}`;
 }
 
-function tituloEstacional(m: Kpis['estacionalidad']['meses'][number]): string {
+function tituloEstacional(
+  m: Kpis['estacionalidad']['meses'][number],
+  // Los tipos que la gráfica está pintando. El tooltip tiene que decir lo
+  // mismo que la barra: enseñar un tipo apagado explicaría días que la columna
+  // no incluye, y el total no cuadraría con el desglose.
+  visibles: readonly (typeof TIPOS_ESTACIONALIDAD)[number][],
+): string {
   if (m.total === 0) return `${m.mes}: sin ausencias`;
   // Una línea por tipo, con sus días y sus nombres. En una sola línea no se
   // sabría de qué tipo es cada persona, que es justo lo que el tooltip añade.
-  const lineas = TIPOS_ESTACIONALIDAD.filter((t) => m[t.clave] > 0).map(
-    (t) => `${t.etiqueta} (${m[t.clave]}): ${listaDeNombres(m.nombres[t.clave])}`,
-  );
+  const lineas = visibles
+    .filter((t) => m[t.clave] > 0)
+    .map((t) => `${t.etiqueta} (${m[t.clave]}): ${listaDeNombres(m.nombres[t.clave])}`);
   return `${m.mes}: ${m.total} días\n${lineas.join('\n')}`;
 }
 
