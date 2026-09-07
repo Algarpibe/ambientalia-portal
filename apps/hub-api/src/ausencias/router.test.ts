@@ -202,6 +202,8 @@ const estado = {
   /** Lo que `repo.incapacidadesParaKpi` devuelve. Lista plana por lo mismo que
    *  las dos de arriba: el WHERE lo ejercita `repo.absentismo.db.test.ts`. */
   incapacidadesKpi: [] as { empleadoId: string; fechaInicio: string; fechaFin: string }[],
+  /** Lo que `repo.ausenciasParaKpi` devuelve, para el KPI de estacionalidad. */
+  ausenciasKpi: [] as { tipo: string; fechaInicio: string; fechaFin: string }[],
   /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
@@ -887,6 +889,7 @@ vi.mock('./repo.js', async () => ({
   decisionesParaKpi: async (_db: unknown, _desdeIso: string) => estado.decisionesKpi,
   pendientesParaKpi: async (_db: unknown) => estado.pendientesKpi,
   incapacidadesParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.incapacidadesKpi,
+  ausenciasParaKpi: async (_db: unknown, _desde: string, _hasta: string) => estado.ausenciasKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1673,6 +1676,7 @@ beforeEach(() => {
   estado.decisionesKpi = [];
   estado.pendientesKpi = [];
   estado.incapacidadesKpi = [];
+  estado.ausenciasKpi = [];
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -5034,6 +5038,38 @@ describe('GET /ausencias/kpis', () => {
     expect(mes!.diasHabiles).toBeGreaterThanOrEqual(3);
     expect(mes!.diasHabiles).toBeLessThanOrEqual(5);
     expect(r.body.absentismo.totalEpisodios).toBe(1);
+  });
+
+  it('CANDADO: la estacionalidad mira MÁS ATRÁS que el resto del panel', async () => {
+    // Las dos ventanas son distintas a propósito —12 meses el resto, 24 la
+    // estacionalidad— porque con un solo año cada mes sale una vez y no hay con
+    // qué compararlo. Si alguien las unificara «por coherencia», la serie
+    // dejaría de poder enseñar un patrón y nadie lo notaría mirando la
+    // pantalla.
+    const correo = conLlave();
+    const r = await pedir(token({ sub: correo })).expect(200);
+
+    expect(r.body.estacionalidad.meses.length).toBeGreaterThan(r.body.absentismo.meses.length);
+    expect(r.body.estacionalidad.meses).toHaveLength(25); // 24 atrás + el actual
+  });
+
+  it('los días de ausencia llegan desglosados por tipo y el total cuadra', async () => {
+    const correo = conLlave();
+    const mesActual = new Date().toISOString().slice(0, 7);
+    const lunes = primerLunesDe(mesActual);
+    estado.ausenciasKpi = [
+      { tipo: 'vacaciones', fechaInicio: lunes, fechaFin: sumaDias(lunes, 1) },
+      { tipo: 'incapacidad', fechaInicio: sumaDias(lunes, 2), fechaFin: sumaDias(lunes, 2) },
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const m = (r.body.estacionalidad.meses as Record<string, number & string>[]).find(
+      (x) => x.mes === mesActual,
+    )!;
+    expect(m.vacaciones).toBe(2);
+    expect(m.incapacidad).toBe(1);
+    expect(m.total).toBe(3);
+    expect(r.body.estacionalidad.mesPico).toBe(mesActual);
   });
 
   it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {

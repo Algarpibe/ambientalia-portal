@@ -6,6 +6,7 @@ import {
   pendientesPorAntiguedad,
   acumulacionExcesiva,
   absentismoPorMes,
+  estacionalidadPorMes,
 } from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
@@ -347,5 +348,112 @@ describe('absentismoPorMes', () => {
     expect(r.meses).toHaveLength(2);
     expect(r.totalDiasHabiles).toBe(0);
     expect(r.totalEpisodios).toBe(0);
+  });
+});
+
+describe('estacionalidadPorMes', () => {
+  const a = (tipo: 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad', fechaInicio: string, fechaFin: string) => ({
+    tipo,
+    fechaInicio,
+    fechaFin,
+  });
+
+  it('desglosa los días de ausencia por mes y por tipo', () => {
+    // Lunes 7 a viernes 11 de septiembre de 2026: 5 hábiles.
+    const r = estacionalidadPorMes(
+      [a('vacaciones', '2026-09-07', '2026-09-11'), a('incapacidad', '2026-09-14', '2026-09-15')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses).toHaveLength(1);
+    expect(r.meses[0]).toMatchObject({
+      mes: '2026-09',
+      vacaciones: 5,
+      permiso: 0,
+      compensatorio: 0,
+      incapacidad: 2,
+      total: 7,
+    });
+  });
+
+  it('CANDADO: el total de cada mes es la suma de sus cuatro tipos', () => {
+    // La pantalla enseña las dos cosas —el total y el desglose apilado— y si no
+    // cuadraran, la barra diría una cosa y la etiqueta otra.
+    const r = estacionalidadPorMes(
+      [
+        a('vacaciones', '2026-09-07', '2026-09-08'),
+        a('permiso', '2026-09-09', '2026-09-09'),
+        a('compensatorio', '2026-09-10', '2026-09-10'),
+        a('incapacidad', '2026-09-11', '2026-09-11'),
+      ],
+      '2026-09',
+      '2026-09',
+    );
+    const m = r.meses[0];
+    expect(m.vacaciones + m.permiso + m.compensatorio + m.incapacidad).toBe(m.total);
+    expect(m.total).toBe(5);
+  });
+
+  it('CANDADO: una ausencia a caballo entre dos meses se REPARTE, igual que en absentismo', () => {
+    // Lunes 28 de septiembre a viernes 2 de octubre de 2026:
+    //   septiembre: 28, 29, 30 → 3 hábiles
+    //   octubre:     1, 2      → 2 hábiles
+    const r = estacionalidadPorMes([a('vacaciones', '2026-09-28', '2026-10-02')], '2026-09', '2026-10');
+    expect(r.meses[0]).toMatchObject({ mes: '2026-09', vacaciones: 3 });
+    expect(r.meses[1]).toMatchObject({ mes: '2026-10', vacaciones: 2 });
+  });
+
+  it('CANDADO: los meses sin ausencias salen con cero, no se saltan', () => {
+    const r = estacionalidadPorMes([a('vacaciones', '2026-10-05', '2026-10-06')], '2026-08', '2026-10');
+    expect(r.meses.map((m) => m.mes)).toEqual(['2026-08', '2026-09', '2026-10']);
+    expect(r.meses[0]).toMatchObject({ total: 0, vacaciones: 0 });
+  });
+
+  it('CANDADO: los festivos colombianos no cuentan como días de ausencia', () => {
+    // Del lunes 3 al viernes 7 de agosto de 2026 hay CUATRO hábiles, no cinco:
+    // el viernes 7 es la Batalla de Boyacá (festivo fijo, ver `festivos.ts`).
+    // La semana del 7 al 11 de septiembre sí tiene los cinco.
+    //
+    // Este caso entró aquí por equivocarse al escribirlo —se esperaban 10 y el
+    // motor devolvió 9— y se queda porque el error es justo el que este KPI
+    // tiene que evitar: cargar a la compañía un día de ausencia por una fecha
+    // en la que nadie trabajaba.
+    const r = estacionalidadPorMes(
+      [a('vacaciones', '2026-08-03', '2026-08-07'), a('vacaciones', '2026-09-07', '2026-09-11')],
+      '2026-08',
+      '2026-09',
+    );
+    expect(r.meses[0].vacaciones).toBe(4); // agosto, con el festivo descontado
+    expect(r.meses[1].vacaciones).toBe(5); // septiembre, semana completa
+    expect(r.totalPorTipo.vacaciones).toBe(9);
+    expect(r.total).toBe(9);
+  });
+
+  it('señala el mes más cargado, que es la pregunta que responde el KPI', () => {
+    // «¿Cuándo se va todo el mundo?» se contesta mirando el pico. Dejar que lo
+    // busque el ojo en doce barras es justo lo que el panel debería ahorrar.
+    const r = estacionalidadPorMes(
+      [a('vacaciones', '2026-08-03', '2026-08-07'), a('permiso', '2026-09-07', '2026-09-07')],
+      '2026-08',
+      '2026-09',
+    );
+    expect(r.mesPico).toBe('2026-08');
+  });
+
+  it('sin ausencias no hay mes pico: es null, no el primer mes', () => {
+    // Devolver el primer mes de la serie señalaría un pico de cero días como si
+    // fuera el momento de más ausencias del año.
+    const r = estacionalidadPorMes([], '2026-08', '2026-09');
+    expect(r.mesPico).toBeNull();
+    expect(r.total).toBe(0);
+  });
+
+  it('lo que cae fuera de la ventana no suma al total', () => {
+    const r = estacionalidadPorMes(
+      [a('vacaciones', '2024-05-06', '2024-05-10'), a('vacaciones', '2026-09-07', '2026-09-11')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.total).toBe(5);
   });
 });

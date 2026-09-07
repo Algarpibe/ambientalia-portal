@@ -1326,6 +1326,27 @@ export interface Absentismo {
   totalEpisodios: number;
 }
 
+/** Un mes de la serie de estacionalidad, con su desglose por tipo. */
+export interface MesDeEstacionalidad {
+  /** `YYYY-MM`. */
+  mes: string;
+  vacaciones: number;
+  permiso: number;
+  compensatorio: number;
+  incapacidad: number;
+  /** La suma de los cuatro, calculada en el servidor para que la barra y su
+   *  etiqueta no puedan discrepar por sumar en dos sitios. */
+  total: number;
+}
+
+export interface Estacionalidad {
+  meses: MesDeEstacionalidad[];
+  totalPorTipo: { vacaciones: number; permiso: number; compensatorio: number; incapacidad: number };
+  total: number;
+  /** El mes con más días de ausencia, o `null` si no hubo ninguna. */
+  mesPico: string | null;
+}
+
 /** Los KPIs del panel. */
 export interface Kpis {
   pasivo: {
@@ -1343,6 +1364,12 @@ export interface Kpis {
   /** Días perdidos por incapacidad, mes a mes. La tendencia se lee de la serie:
    *  el servidor no calcula ninguna pendiente ni media móvil. */
   absentismo: Absentismo;
+  /**
+   * Días de ausencia por mes y tipo. ⚠️ Su ventana es MÁS LARGA que la del
+   * resto del panel (24 meses frente a 12), así que su serie NO se puede
+   * comparar mes a mes con la de `absentismo`.
+   */
+  estacionalidad: Estacionalidad;
   /** De más lento a más rápido: el atasco va arriba. */
   tiempos: TiempoDeAprobador[];
   pendientes: {

@@ -271,13 +271,10 @@ export function absentismoPorMes(
     // tres años no puede sumar al total de una serie que no la enseña.
     let tocaAlgunMes = false;
 
-    for (const [mes, casilla] of serie) {
-      const desde = mayor(inc.fechaInicio, `${mes}-01`);
-      const hasta = menor(inc.fechaFin, ultimoDiaDe(mes));
-      if (desde > hasta) continue; // el episodio no toca este mes
-
+    for (const [mes, dias] of tramosPorMes(inc.fechaInicio, inc.fechaFin, serie.keys())) {
+      const casilla = serie.get(mes)!;
       tocaAlgunMes = true;
-      casilla.diasHabiles += contarDiasHabiles(desde, hasta);
+      casilla.diasHabiles += dias;
       casilla.episodios += 1;
       casilla.personas.add(inc.empleadoId);
     }
@@ -299,6 +296,126 @@ export function absentismoPorMes(
     totalDiasHabiles: meses.reduce((t, m) => t + m.diasHabiles, 0),
     totalEpisodios,
   };
+}
+
+// ── Estacionalidad ─────────────────────────────────────────────────────────
+
+/**
+ * Los cuatro tipos que SON una ausencia.
+ *
+ * ⚠️ `otorgamiento` NO está, y no es un olvido. Lo dice el propio `types.ts`:
+ * «el otorgamiento NO es una ausencia, y es el único de la lista que no lo es».
+ * Sus `dias_habiles` son días CONCEDIDOS por trabajar un sábado, y su
+ * `fecha_inicio` es el día de ese trabajo extra. Colarlo aquí sumaría días
+ * TRABAJADOS a una serie de días AUSENTE, y encima subiría justo en los meses
+ * de más faena, que es lo contrario de lo que el KPI quiere enseñar.
+ */
+export const TIPOS_DE_AUSENCIA = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad'] as const;
+export type TipoDeAusencia = (typeof TIPOS_DE_AUSENCIA)[number];
+
+/** Una ausencia reducida a lo que el KPI de estacionalidad necesita. */
+export interface AusenciaParaKpi {
+  tipo: TipoDeAusencia;
+  fechaInicio: string;
+  fechaFin: string;
+}
+
+export interface MesDeEstacionalidad {
+  /** `YYYY-MM`. */
+  mes: string;
+  vacaciones: number;
+  permiso: number;
+  compensatorio: number;
+  incapacidad: number;
+  /** La suma de los cuatro. Viaja calculado para que la barra y su etiqueta no
+   *  puedan discrepar por sumar en dos sitios distintos. */
+  total: number;
+}
+
+export interface Estacionalidad {
+  meses: MesDeEstacionalidad[];
+  totalPorTipo: Record<TipoDeAusencia, number>;
+  total: number;
+  /** El mes con más días de ausencia, o `null` si no hubo ninguna. `null` y no
+   *  el primer mes: señalar un pico de cero días diría que ese fue el momento
+   *  de más ausencias del año. */
+  mesPico: string | null;
+}
+
+/**
+ * Días de ausencia por mes y por tipo, para ver cuándo se concentran.
+ *
+ * Reparte igual que `absentismoPorMes` —comparten `tramosPorMes`— y por lo
+ * mismo: una ausencia a caballo entre dos meses pertenece a los dos.
+ *
+ * ⚠️ Con una ventana de un solo año esto es DESCRIPTIVO, no estacional: cada
+ * mes aparece una vez y no hay con qué compararlo. La estacionalidad de verdad
+ * necesita ver el mismo mes repetido, y por eso la ventana de este KPI es más
+ * larga que la de los demás (ver `MESES_DE_ESTACIONALIDAD` en `service.ts`).
+ */
+export function estacionalidadPorMes(
+  ausencias: AusenciaParaKpi[],
+  desdeMes: string,
+  hastaMes: string,
+): Estacionalidad {
+  const serie = new Map<string, MesDeEstacionalidad>();
+  for (const mes of mesesEntre(desdeMes, hastaMes)) {
+    serie.set(mes, { mes, vacaciones: 0, permiso: 0, compensatorio: 0, incapacidad: 0, total: 0 });
+  }
+
+  for (const au of ausencias) {
+    for (const [mes, dias] of tramosPorMes(au.fechaInicio, au.fechaFin, serie.keys())) {
+      const casilla = serie.get(mes)!;
+      casilla[au.tipo] += dias;
+      casilla.total += dias;
+    }
+  }
+
+  const meses = [...serie.values()];
+  const totalPorTipo = Object.fromEntries(
+    TIPOS_DE_AUSENCIA.map((t) => [t, meses.reduce((s, m) => s + m[t], 0)]),
+  ) as Record<TipoDeAusencia, number>;
+
+  // El pico se busca solo entre los meses con algo: sin este filtro, una
+  // ventana entera a cero devolvería el primer mes como si fuera el más
+  // cargado del año.
+  const conAusencias = meses.filter((m) => m.total > 0);
+  const pico = conAusencias.reduce<MesDeEstacionalidad | null>(
+    (mejor, m) => (mejor === null || m.total > mejor.total ? m : mejor),
+    null,
+  );
+
+  return {
+    meses,
+    totalPorTipo,
+    total: meses.reduce((s, m) => s + m.total, 0),
+    mesPico: pico?.mes ?? null,
+  };
+}
+
+/**
+ * Reparte un rango de fechas entre los meses de la serie que toca, devolviendo
+ * los DÍAS HÁBILES que le corresponden a cada uno.
+ *
+ * Es el corazón compartido de `absentismoPorMes` y `estacionalidadPorMes`: los
+ * dos tienen que repartir igual, y escribirlo dos veces es la forma segura de
+ * que un día dejen de coincidir. Omite los meses que el rango no toca, así que
+ * quien llame puede usar el propio bucle para saber si la ausencia entró en la
+ * ventana o se quedó fuera entera.
+ */
+function tramosPorMes(
+  fechaInicio: string,
+  fechaFin: string,
+  meses: Iterable<string>,
+): [string, number][] {
+  const tramos: [string, number][] = [];
+  for (const mes of meses) {
+    const desde = mayor(fechaInicio, `${mes}-01`);
+    const hasta = menor(fechaFin, ultimoDiaDe(mes));
+    if (desde > hasta) continue; // el rango no toca este mes
+    tramos.push([mes, contarDiasHabiles(desde, hasta)]);
+  }
+  return tramos;
 }
 
 /** Los `YYYY-MM` entre dos extremos, ambos incluidos. */
