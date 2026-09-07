@@ -140,6 +140,65 @@ export function pendientesPorAntiguedad(
   return r;
 }
 
+// ── Acumulación excesiva ───────────────────────────────────────────────────
+
+/** Una ficha reducida a lo que el KPI de acumulación necesita. */
+export interface FichaAcumulada {
+  empleadoId: string;
+  nombreCompleto: string;
+  /** Días disponibles de vacaciones. Puede ser negativo (ver el JSDoc). */
+  dias: number;
+}
+
+export interface AcumulacionExcesiva {
+  /** Quienes están entre los dos umbrales. Corregible planificando. */
+  aviso: FichaAcumulada[];
+  /** Quienes pasan del umbral alto. Ya no se corrige solo. */
+  alarma: FichaAcumulada[];
+  /** Los umbrales aplicados, para que la pantalla los diga en vez de
+   *  reinventarlos: si el número viviera también en el front, cambiarlo aquí
+   *  dejaría el rótulo mintiendo. */
+  umbralAviso: number;
+  umbralAlarma: number;
+}
+
+/**
+ * Quién lleva demasiadas vacaciones sin disfrutar, en dos grupos.
+ *
+ * ⚠️ La escala no es arbitraria: esta app devenga 1,25 días al mes
+ * (`DEVENGO_MENSUAL` en `saldo.ts`), o sea unos 15 al año. Así que cada 15 días
+ * de saldo son UN AÑO sin disfrutar vacaciones, y 30 son dos. Quien cambie los
+ * umbrales debería pensarlos en años, no en días sueltos.
+ *
+ * Los dos grupos son EXCLUYENTES: quien está en `alarma` no vuelve a salir en
+ * `aviso`. Si se solaparan, la pantalla contaría dos veces a la misma persona y
+ * las dos listas dejarían de sumar la plantilla afectada.
+ *
+ * Los bordes cuentan como ALCANZADOS (`>=`): quien está clavado en 30,0 va a
+ * alarma, no al grupo suave. Un `>` ahí dejaría el caso más grave en la lista
+ * que no se mira con prisa.
+ *
+ * ⚠️ Los saldos NEGATIVOS no entran en ningún grupo. Pasan de verdad —quien
+ * disfruta más días de los que ha devengado queda en negativo hasta que
+ * recupera—, y son exactamente lo contrario de acumular: colarlos aquí
+ * señalaría por acumulación excesiva a quien no acumula nada.
+ */
+export function acumulacionExcesiva(
+  fichas: FichaAcumulada[],
+  umbralAviso: number,
+  umbralAlarma: number,
+): AcumulacionExcesiva {
+  // De más a menos: el peor caso arriba, igual que la tabla de tiempos.
+  const porDiasDesc = (a: FichaAcumulada, b: FichaAcumulada) => b.dias - a.dias;
+
+  return {
+    aviso: fichas.filter((f) => f.dias >= umbralAviso && f.dias < umbralAlarma).sort(porDiasDesc),
+    alarma: fichas.filter((f) => f.dias >= umbralAlarma).sort(porDiasDesc),
+    umbralAviso,
+    umbralAlarma,
+  };
+}
+
 /**
  * Un decimal. Los tiempos se pintan como «3,5 h» y arrastrar la cola binaria de
  * la división daría «3,4999999999999996» en cuanto alguien los formatee mal.

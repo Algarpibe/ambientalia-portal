@@ -4935,6 +4935,57 @@ describe('GET /ausencias/kpis', () => {
     expect(p.hasta2Dias + p.de2a5Dias + p.masDe5Dias).toBe(p.total);
   });
 
+  /**
+   * Le pone a una ficha un saldo de vacaciones exacto.
+   *
+   * La `fechaCorte` es HOY a propósito: el devengo va desde el corte hasta hoy
+   * (1,25 días al mes), así que con cero días transcurridos el disponible es
+   * exactamente el `saldoCorte` y el test puede afirmar en qué grupo cae. Con
+   * una fecha vieja el devengo movería la cifra y el caso de borde dejaría de
+   * ser un caso de borde.
+   */
+  const conSaldo = (i: number, dias: number) => {
+    estado.plantilla[i].saldoCorte = dias;
+    estado.plantilla[i].fechaCorte = new Date().toISOString().slice(0, 10);
+  };
+
+  it('la acumulación reparte a la plantilla en los dos grupos, con sus umbrales', async () => {
+    // Los umbrales los manda el servidor: si el 15 y el 30 vivieran también en
+    // el front, cambiarlos aquí dejaría el rótulo mintiendo.
+    const correo = conLlave();
+    conSaldo(0, 42); // dos años y pico sin disfrutar → alarma
+    conSaldo(1, 18); // poco más de un año → aviso
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.acumulacion).toMatchObject({ umbralAviso: 15, umbralAlarma: 30 });
+    expect(r.body.acumulacion.alarma.map((f: { empleadoId: string }) => f.empleadoId)).toEqual([E1]);
+    expect(r.body.acumulacion.aviso.map((f: { empleadoId: string }) => f.empleadoId)).toEqual([E2]);
+  });
+
+  it('CANDADO: quien está en alarma NO aparece además en aviso', async () => {
+    // Con datos de verdad, no con dos listas vacías: si los grupos se
+    // solaparan, la pantalla contaría dos veces a la misma persona y el
+    // recuento de «cuánta gente acumula de más» saldría inflado.
+    //
+    // Este test EXIGE que la ficha sembrada pase de los dos umbrales; con la
+    // plantilla por defecto (sin saldo configurado, disponible 0) las dos
+    // listas salen vacías y el candado no podría fallar nunca.
+    const correo = conLlave();
+    conSaldo(0, 42);
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.acumulacion.alarma).toHaveLength(1);
+    expect(r.body.acumulacion.aviso.map((f: { empleadoId: string }) => f.empleadoId)).not.toContain(E1);
+  });
+
+  it('quien no acumula de más no sale en ninguna lista', async () => {
+    const correo = conLlave();
+    conSaldo(0, 3);
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.acumulacion.aviso).toEqual([]);
+    expect(r.body.acumulacion.alarma).toEqual([]);
+  });
+
   it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {
     // Una compañía sin decisiones aún es un estado legítimo —el primer día—, y
     // un 500 ahí mandaría a alguien a buscar un fallo que no existe.

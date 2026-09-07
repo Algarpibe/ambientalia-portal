@@ -18,8 +18,10 @@ import {
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import {
+  acumulacionExcesiva,
   pendientesPorAntiguedad,
   tiemposPorAprobador,
+  type AcumulacionExcesiva,
   type PendientesPorAntiguedad,
   type TiempoDeAprobador,
 } from './kpis.js';
@@ -2128,6 +2130,20 @@ export async function fijarVisorDeKpis(
 /** Cuántos meses hacia atrás mira el KPI de tiempos de aprobación. */
 const MESES_DE_VENTANA = 12;
 
+/**
+ * Los dos umbrales de acumulación de vacaciones, EN DÍAS.
+ *
+ * No son números redondos por casualidad: esta app devenga 1,25 días al mes
+ * (`DEVENGO_MENSUAL` en `saldo.ts`), o sea unos 15 al año. Así que 15 días de
+ * saldo son UN AÑO sin disfrutar vacaciones —todavía corregible planificando— y
+ * 30 son DOS, que ya es un problema que hay que gestionar.
+ *
+ * Quien los cambie debería pensarlos en años y mover los dos a la vez: el par
+ * es el que separa «hay que hablarlo» de «hay que actuar».
+ */
+const UMBRAL_ACUMULACION_AVISO = 15;
+const UMBRAL_ACUMULACION_ALARMA = 30;
+
 export interface Kpis {
   /**
    * La deuda: cuántos días de vacaciones y de compensatorios tiene acumulados
@@ -2141,6 +2157,11 @@ export interface Kpis {
      *  no se puede comparar con el del mes que viene. */
     empleados: number;
   };
+  /**
+   * Quién concentra ese pasivo. El total de arriba dice cuánto se debe; esto
+   * dice a quién, que es lo único con lo que se puede hacer algo.
+   */
+  acumulacion: AcumulacionExcesiva;
   tiempos: TiempoDeAprobador[];
   pendientes: PendientesPorAntiguedad;
   /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
@@ -2189,6 +2210,18 @@ export async function kpis(db: Pool): Promise<Kpis> {
       diasCompensatorios: redondearDias(saldos.reduce((t, s) => t + s.compensatorios.disponible, 0)),
       empleados: saldos.length,
     },
+    // Sale de la MISMA lista `saldos` que el pasivo, sin consulta añadida: es
+    // el mismo número desglosado por persona en vez de sumado, así que el
+    // total de arriba y estas listas no pueden discrepar.
+    acumulacion: acumulacionExcesiva(
+      saldos.map((s) => ({
+        empleadoId: s.empleadoId,
+        nombreCompleto: s.nombreCompleto,
+        dias: s.saldo.disponible,
+      })),
+      UMBRAL_ACUMULACION_AVISO,
+      UMBRAL_ACUMULACION_ALARMA,
+    ),
     tiempos: tiemposPorAprobador(decisiones),
     pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
     desde: desdeIso,
