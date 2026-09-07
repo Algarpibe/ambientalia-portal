@@ -16,6 +16,7 @@ function empleado(nombreCompleto: string, correo: string): Empleado {
     veAdjuntos: false,
     exportaRegistro: false,
     veTodaLaEmpresa: false,
+    veKpis: false,
     requiereSegundaFirma: true,
     userId: null,
     activo: true,

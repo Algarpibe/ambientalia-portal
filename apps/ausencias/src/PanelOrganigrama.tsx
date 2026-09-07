@@ -7,6 +7,7 @@ import {
   fijarVisor,
   fijarExportador,
   fijarVisorDeEmpresa,
+  fijarVisorDeKpis,
   fijarSegundaFirma,
   type EmpleadoConJefatura,
 } from './api';
@@ -24,6 +25,7 @@ interface Fila {
   veAdjuntos: boolean;
   exportaRegistro: boolean;
   veTodaLaEmpresa: boolean;
+  veKpis: boolean;
   requiereSegundaFirma: boolean;
   guardando: boolean;
   error: string | null;
@@ -36,6 +38,7 @@ const filaInicial = (e: EmpleadoConJefatura): Fila => ({
   veAdjuntos: e.veAdjuntos,
   exportaRegistro: e.exportaRegistro,
   veTodaLaEmpresa: e.veTodaLaEmpresa,
+  veKpis: e.veKpis,
   requiereSegundaFirma: e.requiereSegundaFirma,
   guardando: false,
   error: null,
@@ -134,6 +137,9 @@ export default function PanelOrganigrama({ activo }: Props) {
       // Igual que `fijarExportador`: devuelve `{ ok }` y no el maestro, y da lo
       // mismo porque la fila la resincroniza el `cargar(id)` de abajo.
       if (fila.veTodaLaEmpresa !== empleado?.veTodaLaEmpresa) await fijarVisorDeEmpresa(id, fila.veTodaLaEmpresa);
+      // La cuarta llave, igual que las dos de arriba: `{ ok }` y la fila la
+      // resincroniza el `cargar(id)`.
+      if (fila.veKpis !== empleado?.veKpis) await fijarVisorDeKpis(id, fila.veKpis);
       if (fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma)
         await fijarSegundaFirma(id, fila.requiereSegundaFirma);
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
@@ -236,6 +242,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                 <th className="px-4 py-3 font-medium">Soportes</th>
                 <th className="px-4 py-3 font-medium">Exporta</th>
                 <th className="px-4 py-3 font-medium">Vista</th>
+                <th className="px-4 py-3 font-medium">KPIs</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -252,6 +259,7 @@ export default function PanelOrganigrama({ activo }: Props) {
                   fila.veAdjuntos !== e.veAdjuntos ||
                   fila.exportaRegistro !== e.exportaRegistro ||
                   fila.veTodaLaEmpresa !== e.veTodaLaEmpresa ||
+                  fila.veKpis !== e.veKpis ||
                   fila.requiereSegundaFirma !== e.requiereSegundaFirma;
                 const arriba = e.segundoAprobadorCorreo ?? e.informadoCorreo;
                 return (
@@ -455,6 +463,34 @@ export default function PanelOrganigrama({ activo }: Props) {
                     </td>
                       </>
                     )}
+                    {/* ⚠️ LA CUARTA CASILLA VA FUERA DEL CONDICIONAL DE ARRIBA, y
+                        es lo único de esta tabla que se pinta también en la fila
+                        de un administrador. No es una excepción caprichosa: las
+                        otras tres se las da el rol —hub-api pliega `esAdmin`
+                        dentro de sus tres booleanos—, y ésta NO. Aquí la columna
+                        `ve_kpis` es la única fuente, así que en la fila de un
+                        admin esta casilla sigue decidiendo, y esconderla dejaría
+                        el panel de KPIs sin forma de concederse a la persona
+                        para la que se hizo, que es administradora. */}
+                    <td className="px-4 py-2.5">
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input
+                          type="checkbox"
+                          // `!!` por lo mismo que las otras tres: en la ventana en
+                          // que el portal va por delante de hub-api, una fila sin
+                          // `veKpis` volvería este checkbox «no controlado».
+                          checked={!!fila.veKpis}
+                          onChange={(ev) => actualizar(e.id, { veKpis: ev.target.checked, error: null })}
+                          // Mismo criterio WCAG 2.5.3 que las otras tres: el texto
+                          // visible («KPIs») al principio y detrás de quién. Dice
+                          // lo que abre —cifras de toda la plantilla y tiempos por
+                          // aprobador— porque la casilla sola no lo insinúa.
+                          aria-label={`KPIs: ${e.nombreCompleto} ve el panel de análisis con el pasivo de vacaciones de toda la plantilla y los tiempos de aprobación por aprobador`}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-100"
+                        />
+                        KPIs
+                      </label>
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <button

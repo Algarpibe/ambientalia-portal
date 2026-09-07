@@ -43,7 +43,7 @@ export async function limpiar(db: Pool): Promise<void> {
   await db.query(
     `TRUNCATE portal.solicitud_modificaciones, portal.solicitudes_ausencia,
               portal.ausencias_outbox, portal.empleados, portal.exportadores_registro_log,
-              portal.visores_empresa_log
+              portal.visores_empresa_log, portal.visores_kpis_log
      RESTART IDENTITY CASCADE`,
   );
 }

@@ -17,6 +17,12 @@ import {
   type MesDelAnio,
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
+import {
+  pendientesPorAntiguedad,
+  tiemposPorAprobador,
+  type PendientesPorAntiguedad,
+  type TiempoDeAprobador,
+} from './kpis.js';
 import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos, jefeEfectivo } from './jerarquia.js';
 import {
@@ -2086,6 +2092,116 @@ export async function fijarVisorDeEmpresa(
     throw new AusenciaError('empleado_no_encontrado', 404);
   }
   return { ok: true };
+}
+
+/**
+ * Da o quita la llave del panel de KPIs (migración 038).
+ *
+ * Copia exacta de `fijarVisorDeEmpresa` de aquí arriba, y por los mismos
+ * motivos: exige el booleano en vez de interpretarlo —`'no'` es una cadena con
+ * valor de verdad, y aceptarla concedería el permiso que alguien quiso quitar—,
+ * devuelve `{ ok: true }` porque quien lo cambia solo necesita saber que cuajó,
+ * y delega en el repo el UPDATE y el registro en una sola transacción.
+ *
+ * La diferencia con sus hermanas NO está aquí sino en la LECTURA: el contexto
+ * no envuelve `esVisorDeKpis` en un `sesion.esAdmin || ...`. Ver el JSDoc de
+ * `repo.esVisorDeKpis`.
+ */
+export async function fijarVisorDeKpis(
+  db: Pool,
+  sesion: Sesion,
+  empleadoId: string,
+  body: { concedido?: unknown },
+): Promise<{ ok: boolean }> {
+  const concedido = (body ?? {}).concedido;
+  if (typeof concedido !== 'boolean') {
+    throw new AusenciaError('visor_kpis_invalido', 400, 'concedido');
+  }
+
+  if (!(await repo.fijarVisorDeKpis(db, sesion.email, empleadoId, concedido))) {
+    throw new AusenciaError('empleado_no_encontrado', 404);
+  }
+  return { ok: true };
+}
+
+// ── Panel de KPIs ──────────────────────────────────────────────────────────
+
+/** Cuántos meses hacia atrás mira el KPI de tiempos de aprobación. */
+const MESES_DE_VENTANA = 12;
+
+export interface Kpis {
+  /**
+   * La deuda: cuántos días de vacaciones y de compensatorios tiene acumulados
+   * la plantilla activa, sumados. Es la cifra que hoy no ve nadie —Saldos la
+   * enseña persona a persona y nunca sumada—.
+   */
+  pasivo: {
+    diasVacaciones: number;
+    diasCompensatorios: number;
+    /** Sobre cuántas fichas activas se ha sumado. Un total sin su denominador
+     *  no se puede comparar con el del mes que viene. */
+    empleados: number;
+  };
+  tiempos: TiempoDeAprobador[];
+  pendientes: PendientesPorAntiguedad;
+  /** El inicio de la ventana de `tiempos`, en ISO, para poder decirlo en la
+   *  pantalla en vez de que el lector tenga que suponerlo. */
+  desde: string;
+}
+
+/**
+ * Los tres KPIs del panel.
+ *
+ * ⚠️ NO recibe `Sesion`, y es deliberado: esto es un agregado de la compañía
+ * entera, no una vista recortada por quien pregunta. Quién puede pedirlo lo
+ * decide el router con `repo.esVisorDeKpis` ANTES de llamar aquí, y ese sí es
+ * un candado de verdad —la respuesta lleva los datos dentro, así que no basta
+ * con no pintar el botón—.
+ *
+ * ⚠️ EL PASIVO SE REUTILIZA, NO SE RECALCULA. Sale del mismo `combinar()` que
+ * alimenta la pestaña Saldos, y no de un `SUM()` en SQL, aunque un SUM sería
+ * más corto. El motivo: `disponible` no es una columna, es el resultado de
+ * `saldoCorte + devengado − disfrutado` con el devengo congelado ficha a ficha
+ * (ver `saldo.ts`). Reescribir esa cuenta en SQL crearía una segunda verdad, y
+ * el día que las dos pantallas discreparan nadie sabría cuál creer.
+ */
+export async function kpis(db: Pool): Promise<Kpis> {
+  const desde = new Date();
+  desde.setUTCMonth(desde.getUTCMonth() - MESES_DE_VENTANA);
+  const desdeIso = desde.toISOString();
+
+  // El `null` explícito de `soloDe` es obligatorio (ver `empleadosConSaldo`), y
+  // aquí además es lo que hace que sea la plantilla ENTERA y no una rama.
+  const empleados = await repo.empleadosConSaldo(db, null, null);
+  const [ausencias, decisiones, pendientes] = await Promise.all([
+    repo.ausenciasQueTocanElSaldo(
+      db,
+      empleados.map((e) => e.empleadoId),
+    ),
+    repo.decisionesParaKpi(db, desdeIso),
+    repo.pendientesParaKpi(db),
+  ]);
+
+  const saldos = combinar(empleados, ausencias, hoyEnColombia());
+
+  return {
+    pasivo: {
+      diasVacaciones: redondearDias(saldos.reduce((t, s) => t + s.saldo.disponible, 0)),
+      diasCompensatorios: redondearDias(saldos.reduce((t, s) => t + s.compensatorios.disponible, 0)),
+      empleados: saldos.length,
+    },
+    tiempos: tiemposPorAprobador(decisiones),
+    pendientes: pendientesPorAntiguedad(pendientes, new Date().toISOString()),
+    desde: desdeIso,
+  };
+}
+
+/**
+ * Un decimal. Sumar cien `disponible` en coma flotante produce colas del tipo
+ * `1234.5999999999999`, y esta cifra se lee como si fuera contable.
+ */
+function redondearDias(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 /** Las dos bolsas de un empleado, listas para enseñar. */
