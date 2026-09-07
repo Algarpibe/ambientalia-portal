@@ -40,9 +40,9 @@ export interface Empleado {
    */
   veTodaLaEmpresa: boolean;
   /**
-   * Abre la pestaña de KPIs. A diferencia de las tres de arriba, esta llave NO
-   * se la da el rol de administrador: la columna es la única fuente, y por eso
-   * su casilla se pinta también en las filas de los admins.
+   * Abre la pestaña de KPIs: el pasivo de vacaciones de toda la plantilla, los
+   * tiempos de aprobación por aprobador y las pendientes por antigüedad. Como
+   * las tres de arriba, el rol de administrador ya la concede.
    */
   veKpis: boolean;
   /** Si sus solicitudes necesitan la firma del jefe de su jefe, o basta una. */
@@ -250,17 +250,14 @@ export interface Contexto {
    */
   esVisorDeTodaLaEmpresa: boolean;
   /**
-   * Abre la pestaña de KPIs.
+   * Abre la pestaña de KPIs: admin, o tener la llave concedida ficha a ficha.
+   * Como los tres de arriba, pliega `esAdmin` dentro, así que NO hace falta
+   * añadirle un `|| ctx.esAdmin` en el navegador.
    *
-   * ⚠️ ESTE NO PLIEGA `esAdmin` DENTRO, al revés que los tres de arriba. Ser
-   * administrador del portal NO lo enciende: la llave se concede ficha a ficha
-   * desde Organigrama, y esa es su razón de ser (quien pidió el panel ya es
-   * admin, así que plegarlo lo abriría a todos los administradores). No añadir
-   * aquí un `|| ctx.esAdmin` «por simetría»: rompería el permiso entero.
-   *
-   * Y aquí, a diferencia de los otros, esconder la pestaña NO es lo único que
-   * protege los datos: `GET /ausencias/kpis` contesta 403 por su cuenta. Esto
-   * solo evita enseñar una pestaña que daría error.
+   * A diferencia de los otros, esconder la pestaña no es lo único que protege
+   * estos datos: `GET /ausencias/kpis` aplica la MISMA regla por su cuenta y
+   * contesta 403, porque su respuesta lleva dentro el agregado de la plantilla
+   * entera. Este booleano solo evita enseñar una pestaña que daría error.
    *
    * Puede llegar `undefined` en la ventana de despliegue en que el portal va
    * por delante de hub-api. Se lee como `!!ctx.esVisorDeKpis`, que degrada a
@@ -1271,8 +1268,8 @@ export const fijarVisorDeEmpresa = (id: string, concedido: boolean) =>
  * Da o quita la llave del panel de KPIs. Solo admin, y queda registrado en el
  * servidor igual que las otras tres.
  *
- * A diferencia de sus hermanas, esta casilla SÍ se pinta en las filas de los
- * administradores: el rol no se la da, así que ahí decide de verdad.
+ * Sirve para dárselo a quien NO es administrador: a los que lo son se lo da ya
+ * el rol, y por eso su casilla tampoco se pinta en esas filas.
  */
 export const fijarVisorDeKpis = (id: string, concedido: boolean) =>
   put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor-kpis`, { concedido });

@@ -11,16 +11,13 @@ import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
 //  2. El `AND activo` de las dos consultas, ejecutado por Postgres.
 //  3. Que el log es HISTORIAL: conceder y quitar dejan DOS filas.
 //
-// ⚠️ LA DIFERENCIA CON SUS TRES HERMANAS, y es el motivo de que esta llave
-// exista: `ve_kpis` NO se pliega dentro de `esAdmin`. Las otras tres se
-// conceden solas a cualquier administrador, y aqui eso vaciaria el permiso de
-// contenido —quien lo pidio YA es admin, luego plegarlo abriria el panel a
-// todos los administradores—. La columna es la unica fuente, y por eso el
-// candado de abajo comprueba que un admin sin la casilla marcada da false.
+// El rol de administrador tambien abre el panel, plegado en el router igual que
+// en las otras tres llaves. Eso NO se prueba aqui y no puede: el repo solo ve
+// `portal.empleados` y no sabe nada de `portal.users`. Lo fijan los tests de
+// «esVisorDeKpis: el rol de admin, o la llave ficha a ficha» en router.test.ts.
 //
-// Ese candado no puede vivir en este fichero (el rol del portal no lo conoce el
-// repo, que solo ve `portal.empleados`), asi que lo que aqui se fija es la
-// mitad que si le corresponde: la columna manda, y nadie la esquiva.
+// Lo que aqui se fija es la otra mitad: la columna, que es la via para dar el
+// panel a quien NO es administrador.
 
 const ADMIN = 'gerencia@ambientalia.com.co';
 const CORREO = 'ana.ruiz@ambientalia.com.co';
@@ -151,10 +148,9 @@ describe('empleadoPorId: veKpis viaja en la ficha', () => {
   });
 
   it('CANDADO: las otras tres llaves no encienden esta', async () => {
-    // El reverso del anterior, y el que de verdad protege la decision de que
-    // `ve_kpis` sea independiente: si un dia alguien la metiera dentro del
-    // UPDATE de otra llave -o dentro del `esAdmin ||` del contexto-, el panel
-    // se abriria solo para gente que nunca lo pidio.
+    // El reverso del anterior: si un dia alguien metiera `ve_kpis` dentro del
+    // UPDATE de otra llave, el panel se abriria para gente que solo pidio
+    // exportar el registro o ver el calendario de la empresa.
     await db.query(
       `UPDATE portal.empleados
           SET ve_adjuntos = TRUE, exporta_registro = TRUE, ve_toda_la_empresa = TRUE

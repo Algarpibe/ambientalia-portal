@@ -792,13 +792,11 @@ export async function fijarVisorDeEmpresa(
 }
 
 /**
- * ¿Puede esta persona abrir el panel de KPIs? (migración 038)
+ * ¿Tiene esta persona la llave del panel de KPIs? (migración 038)
  *
- * ⚠️ SIN `esAdmin` PLEGADO, y es la diferencia que justifica la llave. Sus tres
- * hermanas se leen como `sesion.esAdmin || repo.esVisorDeX(...)`, porque son
- * recortes de privacidad que el rol de administrador ya levanta. Aquí no: quien
- * pidió el panel ya es administrador, así que plegarlo lo abriría a todos los
- * administradores y la llave no distinguiría a nadie. La columna manda sola.
+ * Se lee como sus tres hermanas —`sesion.esAdmin || repo.esVisorDeKpis(...)`—,
+ * así que esta consulta responde solo por la COLUMNA: quién entra por el rol lo
+ * decide quien llama. Es la vía para dar el panel a quien no es administrador.
  *
  * El `AND activo` no es decorativo, igual que en `esVisorDeTodaLaEmpresa`: sin
  * él, a un ex-empleado cuya ficha siguiera en la tabla se le quedaría abierto
