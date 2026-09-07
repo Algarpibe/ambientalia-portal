@@ -9,6 +9,7 @@ import {
   estacionalidadPorMes,
   friccion,
   diasDesde,
+  ventanaDeKpis,
 } from './kpis.js';
 
 // El motor del panel de KPIs: aritmética pura, sin BD y sin Express. Lo que se
@@ -258,8 +259,14 @@ describe('acumulacionExcesiva', () => {
 });
 
 describe('absentismoPorMes', () => {
+  // Los nombres salen de una tabla y no de una plantilla tipo `nombre-e1`:
+  // este bloque prueba los DÍAS y los recuentos, pero varios de sus casos
+  // afirman la lista de nombres entera, y un nombre de persona real se lee
+  // mucho mejor ahí que un identificador.
+  const NOMBRES: Record<string, string> = { e1: 'Ana Ruiz', e2: 'Beto Paz' };
   const i = (empleadoId: string, fechaInicio: string, fechaFin: string) => ({
     empleadoId,
+    nombreCompleto: NOMBRES[empleadoId] ?? empleadoId,
     fechaInicio,
     fechaFin,
   });
@@ -267,7 +274,11 @@ describe('absentismoPorMes', () => {
   it('cuenta los días hábiles perdidos, los episodios y las personas de cada mes', () => {
     // Del lunes 7 al viernes 11 de septiembre de 2026: 5 hábiles.
     const r = absentismoPorMes([i('e1', '2026-09-07', '2026-09-11')], '2026-09', '2026-09');
-    expect(r.meses).toEqual([{ mes: '2026-09', diasHabiles: 5, episodios: 1, personas: 1 }]);
+    // `toEqual` con el objeto ENTERO y no `toMatchObject`: así un campo nuevo
+    // que se colara sin querer pone el test rojo en vez de pasar inadvertido.
+    expect(r.meses).toEqual([
+      { mes: '2026-09', diasHabiles: 5, episodios: 1, personas: 1, nombres: ['Ana Ruiz'] },
+    ]);
     expect(r.totalDiasHabiles).toBe(5);
     expect(r.totalEpisodios).toBe(1);
   });
@@ -289,8 +300,8 @@ describe('absentismoPorMes', () => {
     //   octubre:     1, 2      → 2 hábiles
     const r = absentismoPorMes([i('e1', '2026-09-28', '2026-10-02')], '2026-09', '2026-10');
     expect(r.meses).toEqual([
-      { mes: '2026-09', diasHabiles: 3, episodios: 1, personas: 1 },
-      { mes: '2026-10', diasHabiles: 2, episodios: 1, personas: 1 },
+      { mes: '2026-09', diasHabiles: 3, episodios: 1, personas: 1, nombres: ['Ana Ruiz'] },
+      { mes: '2026-10', diasHabiles: 2, episodios: 1, personas: 1, nombres: ['Ana Ruiz'] },
     ]);
     // El total NO duplica el episodio aunque aparezca en los dos meses: una
     // incapacidad partida sigue siendo UNA.
@@ -359,8 +370,13 @@ describe('absentismoPorMes', () => {
 });
 
 describe('estacionalidadPorMes', () => {
+  // Este bloque prueba el reparto de DÍAS por mes y tipo, así que todas sus
+  // ausencias son de la misma persona: los nombres los ejercita «los nombres
+  // que viajan a los tooltips», más abajo.
   const a = (tipo: 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad', fechaInicio: string, fechaFin: string) => ({
     tipo,
+    empleadoId: 'e1',
+    nombreCompleto: 'Ana Ruiz',
     fechaInicio,
     fechaFin,
   });
@@ -626,5 +642,157 @@ describe('acumulacionExcesiva: las señales de planificación', () => {
       30,
     );
     expect(r.alarma.map((x) => x.nombreCompleto)).toEqual(['Mas', 'Menos']);
+  });
+});
+
+describe('ventanaDeKpis', () => {
+  const HOY = '2026-09-07';
+
+  it('sin año, mira los N meses hacia atrás desde hoy', () => {
+    expect(ventanaDeKpis(null, HOY, 12)).toEqual({ desde: '2025-09-01', hasta: '2026-09-07' });
+  });
+
+  it('con un año pasado, es el año natural completo', () => {
+    expect(ventanaDeKpis(2025, HOY, 12)).toEqual({ desde: '2025-01-01', hasta: '2025-12-31' });
+  });
+
+  it('CANDADO: el año EN CURSO se corta en hoy, no en diciembre', () => {
+    // Con diciembre, la serie del año actual arrastraría cuatro meses vacíos
+    // detrás del último con datos, y una gráfica que baja a cero al final se
+    // lee como un desplome, no como «esto todavía no ha pasado».
+    expect(ventanaDeKpis(2026, HOY, 12)).toEqual({ desde: '2026-01-01', hasta: '2026-09-07' });
+  });
+
+  it('la ventana por defecto respeta los meses que se le pidan', () => {
+    // La estacionalidad usa 24 y el resto 12: si este parámetro se ignorara,
+    // las dos series pasarían a medir lo mismo sin que nada avisara.
+    expect(ventanaDeKpis(null, HOY, 24)).toEqual({ desde: '2024-09-01', hasta: '2026-09-07' });
+  });
+
+  it('CANDADO: con año, los meses por defecto NO se aplican', () => {
+    // El año manda sobre la ventana. Si se sumaran, pedir 2025 en la
+    // estacionalidad devolvería dos años y el rótulo diría «2025».
+    expect(ventanaDeKpis(2025, HOY, 24)).toEqual({ desde: '2025-01-01', hasta: '2025-12-31' });
+  });
+
+  it('el primer día del mes de la ventana por defecto, no el día suelto', () => {
+    // Las series se agrupan por mes: empezar el día 7 dejaría el primer mes a
+    // medias y su barra saldría más baja que la realidad.
+    expect(ventanaDeKpis(null, '2026-03-15', 6).desde).toBe('2025-09-01');
+  });
+});
+
+describe('los nombres que viajan a los tooltips', () => {
+  const inc = (empleadoId: string, nombreCompleto: string, fechaInicio: string, fechaFin: string) => ({
+    empleadoId,
+    nombreCompleto,
+    fechaInicio,
+    fechaFin,
+  });
+  const au = (
+    tipo: 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad',
+    empleadoId: string,
+    nombreCompleto: string,
+    fechaInicio: string,
+    fechaFin: string,
+  ) => ({ tipo, empleadoId, nombreCompleto, fechaInicio, fechaFin });
+
+  it('el absentismo lleva los nombres de quienes estuvieron incapacitados ese mes', () => {
+    const r = absentismoPorMes(
+      [inc('e1', 'Ana Ruiz', '2026-09-07', '2026-09-08'), inc('e2', 'Beto Paz', '2026-09-14', '2026-09-15')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].nombres).toEqual(['Ana Ruiz', 'Beto Paz']);
+  });
+
+  it('CANDADO: quien tiene DOS incapacidades en el mes sale UNA vez en la lista', () => {
+    // La lista responde «quiénes», no «cuántos episodios». Repetir el nombre
+    // haría parecer que hay el doble de gente enferma justo en el tooltip que
+    // se abre para saber de quién se trata.
+    const r = absentismoPorMes(
+      [inc('e1', 'Ana Ruiz', '2026-09-07', '2026-09-08'), inc('e1', 'Ana Ruiz', '2026-09-21', '2026-09-22')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].nombres).toEqual(['Ana Ruiz']);
+    // Y los dos recuentos siguen contando cada cosa: dos episodios, una persona.
+    expect(r.meses[0]).toMatchObject({ episodios: 2, personas: 1 });
+  });
+
+  it('los nombres van ordenados alfabéticamente, no por orden de llegada', () => {
+    // Las filas salen de la BD por fecha. Sin ordenar, el mismo mes cambiaría
+    // el orden de los nombres en cuanto alguien registrara una ausencia vieja.
+    const r = absentismoPorMes(
+      [inc('e2', 'Zoe Vera', '2026-09-07', '2026-09-08'), inc('e1', 'Ana Ruiz', '2026-09-14', '2026-09-15')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].nombres).toEqual(['Ana Ruiz', 'Zoe Vera']);
+  });
+
+  it('CANDADO: dos personas DISTINTAS que se llaman igual salen las dos', () => {
+    // Pasa en cualquier plantilla con dos «Juan Pérez». Agrupar por nombre en
+    // vez de por id las fundiría en una sola, y el recuento de personas del mes
+    // diría 1 donde hay 2 — con un nombre real detrás para dar credibilidad.
+    const r = absentismoPorMes(
+      [inc('e1', 'Juan Pérez', '2026-09-07', '2026-09-08'), inc('e2', 'Juan Pérez', '2026-09-14', '2026-09-15')],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].personas).toBe(2);
+    expect(r.meses[0].nombres).toEqual(['Juan Pérez', 'Juan Pérez']);
+  });
+
+  it('un mes sin incapacidades tiene la lista vacía, no ausente', () => {
+    const r = absentismoPorMes([], '2026-09', '2026-09');
+    expect(r.meses[0].nombres).toEqual([]);
+  });
+
+  it('la estacionalidad lleva los nombres por TIPO, que es como se lee el tooltip', () => {
+    // El tooltip ya dice «vacaciones 21, permisos 1»: los nombres tienen que
+    // poder colgar de cada tipo o no se sabría quién es de cuál.
+    const r = estacionalidadPorMes(
+      [
+        au('vacaciones', 'e1', 'Ana Ruiz', '2026-09-07', '2026-09-08'),
+        au('permiso', 'e2', 'Beto Paz', '2026-09-14', '2026-09-14'),
+      ],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].nombres).toEqual({
+      vacaciones: ['Ana Ruiz'],
+      permiso: ['Beto Paz'],
+      compensatorio: [],
+      incapacidad: [],
+    });
+  });
+
+  it('CANDADO: la misma persona en dos tipos sale en los dos, sin repetirse dentro', () => {
+    // Alguien que en septiembre tuvo vacaciones y además un permiso pertenece
+    // a las dos listas: son dos hechos distintos, no un duplicado.
+    const r = estacionalidadPorMes(
+      [
+        au('vacaciones', 'e1', 'Ana Ruiz', '2026-09-07', '2026-09-08'),
+        au('vacaciones', 'e1', 'Ana Ruiz', '2026-09-21', '2026-09-22'),
+        au('permiso', 'e1', 'Ana Ruiz', '2026-09-14', '2026-09-14'),
+      ],
+      '2026-09',
+      '2026-09',
+    );
+    expect(r.meses[0].nombres.vacaciones).toEqual(['Ana Ruiz']);
+    expect(r.meses[0].nombres.permiso).toEqual(['Ana Ruiz']);
+  });
+
+  it('CANDADO: una ausencia partida entre meses pone el nombre en LOS DOS', () => {
+    // Estuvo fuera en septiembre y en octubre, así que en los dos tooltips
+    // tiene que aparecer: es la misma regla que ya reparte sus días.
+    const r = estacionalidadPorMes(
+      [au('vacaciones', 'e1', 'Ana Ruiz', '2026-09-28', '2026-10-02')],
+      '2026-09',
+      '2026-10',
+    );
+    expect(r.meses[0].nombres.vacaciones).toEqual(['Ana Ruiz']);
+    expect(r.meses[1].nombres.vacaciones).toEqual(['Ana Ruiz']);
   });
 });

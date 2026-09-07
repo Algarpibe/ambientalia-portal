@@ -951,19 +951,24 @@ export async function incapacidadesParaKpi(
   hasta: string,
 ): Promise<IncapacidadParaKpi[]> {
   const { rows } = await db.query(
-    `SELECT empleado_id,
-            fecha_inicio::text AS fecha_inicio,
-            fecha_fin::text    AS fecha_fin
-       FROM portal.solicitudes_ausencia
-      WHERE tipo = 'incapacidad'
-        AND estado <> 'rechazada'
-        AND fecha_fin   >= $1::date
-        AND fecha_inicio <= $2::date
-      ORDER BY fecha_inicio`,
+    `SELECT s.empleado_id,
+            e.nombre_completo,
+            s.fecha_inicio::text AS fecha_inicio,
+            s.fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia s
+       JOIN portal.empleados e ON e.id = s.empleado_id
+      WHERE s.tipo = 'incapacidad'
+        AND s.estado <> 'rechazada'
+        AND s.fecha_fin   >= $1::date
+        AND s.fecha_inicio <= $2::date
+      ORDER BY s.fecha_inicio`,
     [desde, hasta],
   );
-  return (rows as { empleado_id: string; fecha_inicio: string; fecha_fin: string }[]).map((r) => ({
+  return (
+    rows as { empleado_id: string; nombre_completo: string; fecha_inicio: string; fecha_fin: string }[]
+  ).map((r) => ({
     empleadoId: r.empleado_id,
+    nombreCompleto: r.nombre_completo,
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
   }));
@@ -993,19 +998,32 @@ export async function incapacidadesParaKpi(
  */
 export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): Promise<AusenciaParaKpi[]> {
   const { rows } = await db.query(
-    `SELECT tipo,
-            fecha_inicio::text AS fecha_inicio,
-            fecha_fin::text    AS fecha_fin
-       FROM portal.solicitudes_ausencia
-      WHERE tipo   = ANY($3::varchar[])
-        AND estado = ANY($4::varchar[])
-        AND fecha_fin   >= $1::date
-        AND fecha_inicio <= $2::date
-      ORDER BY fecha_inicio`,
+    `SELECT s.tipo,
+            s.empleado_id,
+            e.nombre_completo,
+            s.fecha_inicio::text AS fecha_inicio,
+            s.fecha_fin::text    AS fecha_fin
+       FROM portal.solicitudes_ausencia s
+       JOIN portal.empleados e ON e.id = s.empleado_id
+      WHERE s.tipo   = ANY($3::varchar[])
+        AND s.estado = ANY($4::varchar[])
+        AND s.fecha_fin   >= $1::date
+        AND s.fecha_inicio <= $2::date
+      ORDER BY s.fecha_inicio`,
     [desde, hasta, [...TIPOS_DE_AUSENCIA], ESTADOS.filter(estaEnElCalendario)],
   );
-  return (rows as { tipo: TipoDeAusencia; fecha_inicio: string; fecha_fin: string }[]).map((r) => ({
+  return (
+    rows as {
+      tipo: TipoDeAusencia;
+      empleado_id: string;
+      nombre_completo: string;
+      fecha_inicio: string;
+      fecha_fin: string;
+    }[]
+  ).map((r) => ({
     tipo: r.tipo,
+    empleadoId: r.empleado_id,
+    nombreCompleto: r.nombre_completo,
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
   }));
@@ -1128,6 +1146,35 @@ export async function planificacionDeVacaciones(
     ultimasVacaciones: r.ultimas_vacaciones,
     diasProgramados: r.dias_programados,
   }));
+}
+
+/**
+ * Los años que tienen alguna solicitud, del más reciente al más antiguo. Es lo
+ * que el selector del panel de KPIs puede ofrecer.
+ *
+ * Salen de los DATOS y no de un rango fijo: un desplegable con años vacíos
+ * invita a mirar pantallas en blanco, y uno que se queda corto esconde el
+ * histórico importado de la hoja.
+ *
+ * ⚠️ Une los años de `fecha_inicio` Y de `fecha_fin`, no solo el primero: una
+ * ausencia del 28 de diciembre al 4 de enero pertenece a los dos años, y
+ * mirando solo dónde empieza el año siguiente no aparecería en la lista aunque
+ * tuviera días de ausencia dentro.
+ *
+ * NO recorta por estado: este selector solo decide qué ventana se puede pedir,
+ * y filtrar aquí dejaría fuera un año que la gráfica de fricción sí sabe
+ * pintar. Cada KPI aplica sus propios recortes después.
+ */
+export async function aniosConAusencias(db: Pool): Promise<number[]> {
+  const { rows } = await db.query(
+    `SELECT DISTINCT anio FROM (
+       SELECT EXTRACT(YEAR FROM fecha_inicio)::int AS anio FROM portal.solicitudes_ausencia
+       UNION ALL
+       SELECT EXTRACT(YEAR FROM fecha_fin)::int    AS anio FROM portal.solicitudes_ausencia
+     ) t
+     ORDER BY anio DESC`,
+  );
+  return (rows as { anio: number }[]).map((r) => r.anio);
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────
