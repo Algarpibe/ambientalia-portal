@@ -133,15 +133,6 @@ export default function Aplicaciones() {
             </div>
           </Link>
         ))}
-
-        {/* Add Application Card */}
-        <button className="app-card p-8 flex flex-col items-center justify-center border-dashed border-gray-300 hover:border-blue-500 bg-white group">
-          <div className="w-16 h-16 rounded-full border-2 border-gray-200 flex items-center justify-center group-hover:bg-blue-50 group-hover:border-blue-500 transition-all mb-4">
-            <span className="text-3xl text-gray-400 group-hover:text-blue-500 transition-colors">+</span>
-          </div>
-          <span className="font-semibold text-gray-700 group-hover:text-gray-900">Expandir Ecosistema</span>
-          <p className="text-xs text-gray-500 mt-2">Añadir nueva aplicación local</p>
-        </button>
       </div>
     </main>
   );
