@@ -2103,9 +2103,8 @@ export async function fijarVisorDeEmpresa(
  * devuelve `{ ok: true }` porque quien lo cambia solo necesita saber que cuajó,
  * y delega en el repo el UPDATE y el registro en una sola transacción.
  *
- * La diferencia con sus hermanas NO está aquí sino en la LECTURA: el contexto
- * no envuelve `esVisorDeKpis` en un `sesion.esAdmin || ...`. Ver el JSDoc de
- * `repo.esVisorDeKpis`.
+ * Sirve para dar el panel a quien NO es administrador: a los que lo son se lo
+ * da ya el rol, plegado en el contexto igual que las otras tres llaves.
  */
 export async function fijarVisorDeKpis(
   db: Pool,
@@ -2154,9 +2153,9 @@ export interface Kpis {
  *
  * ⚠️ NO recibe `Sesion`, y es deliberado: esto es un agregado de la compañía
  * entera, no una vista recortada por quien pregunta. Quién puede pedirlo lo
- * decide el router con `repo.esVisorDeKpis` ANTES de llamar aquí, y ese sí es
- * un candado de verdad —la respuesta lleva los datos dentro, así que no basta
- * con no pintar el botón—.
+ * decide el router ANTES de llamar aquí —rol de admin, o la llave `ve_kpis`—,
+ * y ese sí es un candado de verdad: la respuesta lleva los datos dentro, así
+ * que no basta con no pintar el botón.
  *
  * ⚠️ EL PASIVO SE REUTILIZA, NO SE RECALCULA. Sale del mismo `combinar()` que
  * alimenta la pestaña Saldos, y no de un `SUM()` en SQL, aunque un SUM sería

@@ -176,13 +176,10 @@ export default function App() {
 
   // La llave del panel de KPIs. `!!` por lo mismo que la de arriba.
   //
-  // ⚠️ SIN `|| contexto?.esAdmin`, y no es un olvido: ser administrador del
-  // portal NO abre esta pestaña. Es la única de las cuatro llaves que el rol no
-  // concede —la columna `ve_kpis` es la única fuente—, porque el panel se pidió
-  // para una persona que ya es administradora y plegarlo lo abriría a todos.
-  // Añadir aquí un `|| esAdmin` «por simetría» con las demás vaciaría el
-  // permiso de contenido; y además no serviría de nada, porque el endpoint
-  // contesta 403 por su cuenta y la pestaña se vería rota.
+  // No lleva `|| contexto?.esAdmin` porque no le hace falta: hub-api ya pliega
+  // el rol dentro de `esVisorDeKpis`, igual que en los otros cuatro booleanos.
+  // Añadirlo aquí duplicaría la regla en el navegador, que es justo lo que ese
+  // plegado del servidor viene a evitar.
   const veKpis = !!contexto?.esVisorDeKpis;
 
   // Los tipos que ofrecer en el filtro de «Mis solicitudes»: los que ESTA
@@ -257,10 +254,9 @@ export default function App() {
     // para que esta app no tenga que replicarla.
     if (contexto?.esVisorAdjuntos) p.push(['adjuntos', 'Soportes adjuntos']);
     // Va antes del bloque de admin y fuera de él, igual que «Soportes
-    // adjuntos» y por un motivo más fuerte: esta llave NO la da el rol, así
-    // que meterla dentro del `if (esAdmin)` la escondería a quien la tuviera
-    // sin ser administrador y —peor— se la enseñaría a todos los admins que no
-    // la tienen, que verían una pestaña con un 403 detrás.
+    // adjuntos» y por lo mismo: la abre también quien tenga la llave sin ser
+    // administrador. Meterla dentro del `if (esAdmin)` se la escondería a esa
+    // persona, que es justo para quien la llave existe.
     if (veKpis) p.push(['kpis', 'KPIs']);
     if (contexto?.esAdmin) {
       // El organigrama va aparte de «Empleados» y no debajo: son dos trabajos

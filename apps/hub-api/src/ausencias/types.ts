@@ -470,12 +470,14 @@ export interface Empleado {
    * los tiempos de aprobación por aprobador y las pendientes por antigüedad.
    * Se concede ficha a ficha desde la pestaña Organigrama (migración 038).
    *
-   * ⚠️ A DIFERENCIA de las tres de arriba, esta llave NO se pliega dentro de
-   * `esAdmin`. Las otras se las da el rol de administrador; esta no, porque
-   * quien la pidió ya es administrador y plegarla abriría el panel a todos los
-   * administradores, que es exactamente lo que la llave viene a evitar. La
-   * columna `ve_kpis` es la única fuente, y por eso la casilla del panel
-   * Organigrama se pinta también en las filas de los administradores.
+   * Como las tres de arriba, el rol de administrador la concede plegada, así
+   * que esta columna es la vía para dársela a quien NO es administrador.
+   *
+   * ⚠️ Lo que la separa de sus tres hermanas no es quién la tiene sino qué
+   * protege: las otras solo deciden si se PINTA un botón —los datos los
+   * recorta el SQL de cada consulta—, mientras que `GET /ausencias/kpis`
+   * devuelve el agregado de la plantilla entera y aplica esta misma regla como
+   * autorización de verdad. Los dos sitios tienen que decir lo mismo.
    */
   veKpis: boolean;
   /**

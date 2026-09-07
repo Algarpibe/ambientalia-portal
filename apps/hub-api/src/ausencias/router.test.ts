@@ -866,10 +866,9 @@ vi.mock('./repo.js', async () => ({
   // `repo.visor-kpis.db.test.ts` > «CANDADO: un ex-empleado con el permiso
   // puesto ya no ve nada».
   //
-  // ⚠️ Y LA DIFERENCIA QUE IMPORTA: el router NO la envuelve en un
-  // `sesion.esAdmin || ...` como a sus tres hermanas. El doble no puede
-  // recordarlo por si solo -aqui solo mira la plantilla-, asi que lo fija el
-  // test «esVisorDeKpis NO pliega admin dentro» de mas abajo.
+  // Como sus tres hermanas, el router la envuelve en un `sesion.esAdmin || ...`.
+  // Este doble solo mira la plantilla, asi que el plegado lo fijan los tests de
+  // «esVisorDeKpis: el rol de admin, o la llave ficha a ficha» de mas abajo.
   esVisorDeKpis: async (_db: unknown, email: string) =>
     estado.plantilla.some(
       (e: any) =>
@@ -4742,22 +4741,21 @@ describe('PUT /ausencias/empleados/:id/visor-empresa', () => {
   });
 });
 
-describe('esVisorDeKpis: la llave que NO pliega admin dentro', () => {
+describe('esVisorDeKpis: el rol de admin, o la llave ficha a ficha', () => {
   const flag = async (over: Record<string, unknown>) =>
     (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
       .body.esVisorDeKpis;
 
-  it('CANDADO: un admin SIN la casilla marcada no abre el panel', async () => {
-    // ESTE es el test que sostiene la decisión entera de que la llave exista.
+  it('el rol de administrador abre el panel por sí solo, sin casilla', async () => {
+    // Pliega `esAdmin` dentro, igual que sus tres hermanas y por lo mismo: un
+    // administrador del portal tiene TODOS los permisos de la app, y una
+    // casilla apagada en su fila afirmaba lo contrario de lo que pasa.
     //
-    // Sus tres hermanas se leen como `sesion.esAdmin || repo.esVisorDeX(...)`, y
-    // copiar ese patrón aquí es el error natural —lo tiene al lado, en la misma
-    // función—. Pero quien pidió el panel YA es administrador: plegar `esAdmin`
-    // dentro abriría el pasivo de vacaciones de la plantilla y el desglose de
-    // tiempos por aprobador a TODOS los administradores del portal, y la llave
-    // no distinguiría a nadie. Es decir: el permiso seguiría «funcionando» y
-    // no serviría para nada, que es la clase de fallo que nadie nota.
-    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(false);
+    // Es una decisión de alcance, no de seguridad: el panel enseña el pasivo de
+    // vacaciones de la plantilla y los tiempos por aprobador a cualquiera con
+    // rol admin. Lo que la llave sigue permitiendo es dárselo a quien NO es
+    // admin, que es exactamente para lo que sirven las otras tres.
+    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(true);
   });
 
   it('con la casilla marcada sí, aunque no sea admin', async () => {
@@ -4877,17 +4875,13 @@ describe('GET /ausencias/kpis', () => {
     return correo;
   };
 
-  it('CANDADO: 403 a un admin SIN la llave', async () => {
-    // ⚠️ EL CANDADO QUE DE VERDAD PROTEGE LOS DATOS. Los otros tres booleanos
-    // del contexto son «para pintar»: mentir en ellos abre una pestaña vacía,
-    // porque quien recorta los datos es el SQL de cada consulta. Éste NO: la
-    // respuesta de este endpoint es el agregado de la plantilla entera —el
-    // pasivo de vacaciones y los tiempos por aprobador—, así que si la puerta
-    // se cae, se cae con los datos dentro.
-    //
-    // Y `requireAdmin` NO sirve aquí, que es justo por lo que la llave existe:
-    // dejaría entrar a todos los administradores del portal.
-    await pedir(token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(403);
+  it('un admin entra sin necesitar la llave', async () => {
+    // El rol da todos los permisos de la app, este incluido. El guard sigue
+    // existiendo —y sigue siendo de autorización real, no «para pintar»: la
+    // respuesta lleva dentro el agregado de la plantilla entera— pero su
+    // trabajo es dejar pasar a los dos: al admin por el rol, y al que tenga la
+    // llave sin serlo.
+    await pedir(token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(200);
   });
 
   it('CANDADO: 403 a quien no tiene nada', async () => {

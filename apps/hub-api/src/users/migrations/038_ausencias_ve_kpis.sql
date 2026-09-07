@@ -14,16 +14,19 @@
 --     desglosados POR APROBADOR, que señalan qué bandeja está atascada;
 --   · las solicitudes PENDIENTES por antigüedad.
 --
--- ⚠️ ESTA LLAVE NO SE PLIEGA DENTRO DE `esAdmin`, y ahí se separa de sus tres
--- hermanas. Las otras se conceden solas a cualquier administrador del portal
--- (`sesion.esAdmin || repo.esVisorDeX(...)`), porque son recortes de privacidad
--- que el rol ya levanta. Aquí eso vaciaría el permiso de contenido: quien pidió
--- el panel YA es administrador, luego plegarlo lo abriría a TODOS los
--- administradores y no distinguiría a nadie. La columna es la ÚNICA fuente.
+-- Se pliega dentro de `esAdmin` igual que sus tres hermanas
+-- (`sesion.esAdmin || repo.esVisorDeKpis(...)`): un administrador del portal
+-- tiene todos los permisos de la app, y una casilla apagada en su fila del
+-- Organigrama afirmaba lo contrario de lo que pasa. Esta columna es, por tanto,
+-- la vía para dar el panel a quien NO es administrador.
 --
--- Consecuencia deliberada: la casilla se pinta también en las filas de los
--- administradores del panel Organigrama —al revés que las otras tres, que ahí
--- se ocultan porque el rol ya las da—, porque en esta sí decide.
+-- ⚠️ Lo que sí separa a esta llave de las otras tres no es quién la tiene sino
+-- QUÉ PROTEGE. Las otras solo deciden si se pinta un botón —los datos los
+-- recorta el SQL de cada consulta, que vuelve a preguntar por su cuenta—,
+-- mientras que `GET /ausencias/kpis` devuelve el agregado de la plantilla
+-- entera y aplica esta misma regla como autorización de verdad. Si el contexto
+-- y el endpoint divergieran, alguien vería la pestaña y se comería un 403 al
+-- abrirla.
 --
 -- ⚠️ Lo que enseña son datos agregados de la plantilla entera, incluido el
 -- desglose de tiempos por aprobador, que es una medida del desempeño de

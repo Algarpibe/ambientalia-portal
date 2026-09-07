@@ -138,17 +138,15 @@ export function createAusenciasRouter(db: Pool): Router {
         // preguntando otra vez por su cuenta. Mentir aquí abriría una pestaña
         // vacía, no una fuga.
         esVisorDeTodaLaEmpresa: sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email)),
-        // ⚠️ EL QUINTO, Y EL ÚNICO SIN `sesion.esAdmin ||` DELANTE. No es un
-        // olvido: es la razón de ser de la llave. Las cuatro líneas de arriba
-        // pliegan admin dentro porque son recortes de privacidad que el rol ya
-        // levanta; ésta abre un panel que se pidió para UNA persona, y esa
-        // persona ya es administradora. Plegar admin aquí lo abriría a todos
-        // los administradores del portal y la llave no distinguiría a nadie.
+        // El quinto de la familia, y pliega admin dentro como los otros cuatro:
+        // el rol de administrador da todos los permisos de la app, y una
+        // casilla apagada en su fila afirmaba lo contrario de lo que pasa.
         //
-        // Lo vigila `router.test.ts` > «CANDADO: un admin SIN la casilla
-        // marcada no abre el panel». Si alguien añade el `esAdmin ||` por
-        // simetría con las de arriba, ese test se pone rojo.
-        esVisorDeKpis: await repo.esVisorDeKpis(db, sesion.email),
+        // A diferencia de los otros cuatro, este NO es solo «para pintar»: el
+        // endpoint `GET /ausencias/kpis` aplica la misma regla por su cuenta,
+        // porque su respuesta lleva dentro el agregado de la plantilla entera.
+        // Los dos sitios tienen que decir lo mismo.
+        esVisorDeKpis: sesion.esAdmin || (await repo.esVisorDeKpis(db, sesion.email)),
         festivos,
         // Viajan aquí y no en un endpoint aparte para que el formulario pueda
         // enseñar los saldos sin una segunda llamada al abrir la app.
@@ -469,19 +467,22 @@ export function createAusenciasRouter(db: Pool): Router {
    * El panel de KPIs: pasivo de vacaciones, tiempos de aprobación y pendientes
    * por antigüedad.
    *
-   * ⚠️ ESTE GUARD ES DE VERDAD, no para pintar. Los otros tres booleanos del
+   * ⚠️ ESTE GUARD ES DE VERDAD, no para pintar. Los otros cuatro booleanos del
    * contexto solo deciden si se dibuja un botón —quien recorta los datos es el
    * SQL de cada consulta, que vuelve a preguntar por su cuenta—. Aquí la
    * respuesta ES el agregado de la plantilla entera, así que si esta línea se
    * cae, se cae con los datos dentro.
    *
-   * Y `requireAdmin` NO sirve, que es exactamente por lo que la llave existe:
-   * dejaría pasar a todos los administradores del portal.
+   * Entran por dos vías, y `requireAdmin` no vale porque solo cubre una: el rol
+   * de administrador, o la llave `ve_kpis` concedida ficha a ficha a quien no
+   * lo es. Es la MISMA regla que el `esVisorDeKpis` del contexto de arriba, y
+   * los dos sitios tienen que decir lo mismo: si divergen, alguien vería la
+   * pestaña y se comería un 403 al abrirla.
    */
   router.get('/ausencias/kpis', ...gated, async (req: Request, res: Response) => {
     try {
       const sesion = sesionDe(req);
-      if (!(await repo.esVisorDeKpis(db, sesion.email))) {
+      if (!sesion.esAdmin && !(await repo.esVisorDeKpis(db, sesion.email))) {
         return void res.status(403).json({ error: 'no_ve_kpis' });
       }
       res.json(await service.kpis(db));
