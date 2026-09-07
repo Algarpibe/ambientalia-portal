@@ -466,6 +466,19 @@ export interface Empleado {
    */
   veTodaLaEmpresa: boolean;
   /**
+   * Abre la pestaña de KPIs: el pasivo de vacaciones de la plantilla activa,
+   * los tiempos de aprobación por aprobador y las pendientes por antigüedad.
+   * Se concede ficha a ficha desde la pestaña Organigrama (migración 038).
+   *
+   * ⚠️ A DIFERENCIA de las tres de arriba, esta llave NO se pliega dentro de
+   * `esAdmin`. Las otras se las da el rol de administrador; esta no, porque
+   * quien la pidió ya es administrador y plegarla abriría el panel a todos los
+   * administradores, que es exactamente lo que la llave viene a evitar. La
+   * columna `ve_kpis` es la única fuente, y por eso la casilla del panel
+   * Organigrama se pinta también en las filas de los administradores.
+   */
+  veKpis: boolean;
+  /**
    * Si sus solicitudes necesitan también la firma del jefe de su jefe, o basta
    * con la del jefe inmediato.
    *

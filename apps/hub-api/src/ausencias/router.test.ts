@@ -181,6 +181,25 @@ const estado = {
    */
   registroVisoresEmpresa: [] as Record<string, unknown>[],
   /**
+   * La tabla `portal.visores_kpis_log`. La lee el candado de
+   * `PUT /ausencias/empleados/:id/visor-kpis`: es lo unico que dice quien abrio
+   * el panel de KPIs -pasivo de vacaciones de la plantilla y tiempos de
+   * aprobacion por aprobador- a alguien.
+   */
+  registroVisoresKpis: [] as Record<string, unknown>[],
+  /**
+   * Lo que `repo.decisionesParaKpi` y `repo.pendientesParaKpi` devuelven.
+   *
+   * Listas planas que cada test rellena, y NO una derivacion de
+   * `estado.solicitudes`: el SQL de esas dos consultas -sus recortes por estado
+   * y la ventana temporal- ya lo ejercita `repo.kpis.db.test.ts` contra
+   * Postgres. Lo que este fichero prueba es el CABLEADO y el CANDADO del
+   * endpoint, y reimplementar aqui el WHERE solo crearia una segunda version de
+   * la regla que podria divergir de la de verdad.
+   */
+  decisionesKpi: [] as { aprobadorCorreo: string; createdAt: string; decididaAt: string | null }[],
+  pendientesKpi: [] as { createdAt: string }[],
+  /**
    * Los correos con rol `admin` en `portal.users`. Tabla distinta de la del
    * maestro de empleados, y por eso lista aparte: una ficha puede existir sin
    * cuenta y una cuenta sin ficha.
@@ -840,6 +859,31 @@ vi.mock('./repo.js', async () => ({
     estado.registroVisoresEmpresa.push({ adminEmail, empleadoId, empleadoCorreo: e.correo, concedido });
     return true;
   },
+  // La cuarta llave (migracion 038), con la misma forma que las otras tres.
+  //
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+  // `AND activo AND ve_kpis` de `repo.esVisorDeKpis`, y lo cubre contra Postgres
+  // `repo.visor-kpis.db.test.ts` > «CANDADO: un ex-empleado con el permiso
+  // puesto ya no ve nada».
+  //
+  // ⚠️ Y LA DIFERENCIA QUE IMPORTA: el router NO la envuelve en un
+  // `sesion.esAdmin || ...` como a sus tres hermanas. El doble no puede
+  // recordarlo por si solo -aqui solo mira la plantilla-, asi que lo fija el
+  // test «esVisorDeKpis NO pliega admin dentro» de mas abajo.
+  esVisorDeKpis: async (_db: unknown, email: string) =>
+    estado.plantilla.some(
+      (e: any) =>
+        String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veKpis === true,
+    ),
+  fijarVisorDeKpis: async (_db: unknown, adminEmail: string, empleadoId: string, concedido: boolean) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId && x.activo !== false);
+    if (!e) return false;
+    e.veKpis = concedido;
+    estado.registroVisoresKpis.push({ adminEmail, empleadoId, empleadoCorreo: e.correo, concedido });
+    return true;
+  },
+  decisionesParaKpi: async (_db: unknown, _desdeIso: string) => estado.decisionesKpi,
+  pendientesParaKpi: async (_db: unknown) => estado.pendientesKpi,
   crearSolicitud: async (
     _db: unknown,
     datos: Record<string, unknown>,
@@ -1622,6 +1666,9 @@ beforeEach(() => {
   estado.fallarRegistroVisor = false;
   estado.registroExportadores = [];
   estado.registroVisoresEmpresa = [];
+  estado.registroVisoresKpis = [];
+  estado.decisionesKpi = [];
+  estado.pendientesKpi = [];
   estado.adminsDelPortal = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
@@ -3827,6 +3874,7 @@ describe('GET /ausencias/contexto', () => {
       .expect(200);
     expect(r.body.esVisorAdjuntos).toBe(false);
     expect(r.body.esExportadorRegistro).toBe(false);
+    expect(r.body.esVisorDeKpis).toBe(false);
   });
 
   it('trae el nombre de quien aprueba, para no enseñar un buzón al solicitante', async () => {
@@ -4691,6 +4739,215 @@ describe('PUT /ausencias/empleados/:id/visor-empresa', () => {
     await fijar(E1, { concedido: true }, token({ role: 'admin' })).expect(200);
     expect(estado.plantilla[0].veAdjuntos).toBe(true);
     expect(estado.plantilla[0].exportaRegistro).toBe(true);
+  });
+});
+
+describe('esVisorDeKpis: la llave que NO pliega admin dentro', () => {
+  const flag = async (over: Record<string, unknown>) =>
+    (await request(app()).get('/api/ausencias/contexto').set('Authorization', `Bearer ${token(over)}`).expect(200))
+      .body.esVisorDeKpis;
+
+  it('CANDADO: un admin SIN la casilla marcada no abre el panel', async () => {
+    // ESTE es el test que sostiene la decisión entera de que la llave exista.
+    //
+    // Sus tres hermanas se leen como `sesion.esAdmin || repo.esVisorDeX(...)`, y
+    // copiar ese patrón aquí es el error natural —lo tiene al lado, en la misma
+    // función—. Pero quien pidió el panel YA es administrador: plegar `esAdmin`
+    // dentro abriría el pasivo de vacaciones de la plantilla y el desglose de
+    // tiempos por aprobador a TODOS los administradores del portal, y la llave
+    // no distinguiría a nadie. Es decir: el permiso seguiría «funcionando» y
+    // no serviría para nada, que es la clase de fallo que nadie nota.
+    expect(await flag({ sub: 'admin@ambientalia.com.co', role: 'admin' })).toBe(false);
+  });
+
+  it('con la casilla marcada sí, aunque no sea admin', async () => {
+    estado.plantilla[0].correo = 'gerencia@ambientalia.com.co';
+    estado.plantilla[0].veKpis = true;
+    expect(await flag({ sub: 'gerencia@ambientalia.com.co' })).toBe(true);
+  });
+
+  it('y un admin CON la casilla marcada también', async () => {
+    // El caso real: la persona para la que se hizo el panel es administradora.
+    // Que `esAdmin` no la abra no puede significar que se la cierre.
+    estado.plantilla[0].correo = 'gerencia@ambientalia.com.co';
+    estado.plantilla[0].veKpis = true;
+    expect(await flag({ sub: 'gerencia@ambientalia.com.co', role: 'admin' })).toBe(true);
+  });
+
+  it('false para quien no tiene nada', async () => {
+    expect(await flag({ sub: 'ana.ruiz@ambientalia.com.co' })).toBe(false);
+  });
+
+  it('CANDADO: tener las otras tres llaves no abre esta', async () => {
+    // El reverso: si un día alguien cableara las cuatro al mismo campo, el
+    // panel se abriría para todo el que ya exporta el registro o ve la empresa.
+    estado.plantilla[0].correo = 'gerencia@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
+    estado.plantilla[0].exportaRegistro = true;
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    expect(await flag({ sub: 'gerencia@ambientalia.com.co' })).toBe(false);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/visor-kpis', () => {
+  const fijar = (id: string, body: Record<string, unknown>, quien: string) =>
+    request(app())
+      .put(`/api/ausencias/empleados/${id}/visor-kpis`)
+      .set('Authorization', `Bearer ${quien}`)
+      .send(body);
+
+  it('CANDADO: 403 a quien no es admin, y el permiso no se mueve', async () => {
+    // Sin `requireAdmin`, cualquiera con la app se concedería a sí mismo el
+    // panel con el pasivo de vacaciones y los tiempos por aprobador.
+    await fijar(E1, { concedido: true }, token()).expect(403);
+    expect(estado.plantilla[0].veKpis).not.toBe(true);
+    expect(estado.registroVisoresKpis).toHaveLength(0);
+  });
+
+  it('CANDADO: tampoco pasa quien ya tiene la llave él mismo', async () => {
+    // Tener la llave no es repartirla. Sin el `requireAdmin`, este es el camino
+    // por el que el permiso se propagaría solo de una ficha a la siguiente.
+    estado.plantilla[0].correo = 'comercial@ambientalia.com.co';
+    estado.plantilla[0].veKpis = true;
+    await fijar(E2, { concedido: true }, token({ sub: 'comercial@ambientalia.com.co' })).expect(403);
+    expect(estado.plantilla[1].veKpis).not.toBe(true);
+  });
+
+  it('un admin lo concede, y el registro dice quién lo dio y a quién', async () => {
+    // El `sub` del admin es DISTINTO del correo del empleado afectado a
+    // propósito, igual que en sus tres gemelos: en el fixture por defecto
+    // coinciden, y con esa coincidencia un swap de `adminEmail` por
+    // `empleadoCorreo` pasaría el test sin inmutarse.
+    const r = await fijar(
+      E1,
+      { concedido: true },
+      token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' }),
+    ).expect(200);
+    expect(r.body).toEqual({ ok: true });
+    expect(estado.plantilla[0].veKpis).toBe(true);
+    expect(estado.registroVisoresKpis).toHaveLength(1);
+    expect(estado.registroVisoresKpis[0]).toMatchObject({
+      adminEmail: 'gerencia@ambientalia.com.co',
+      empleadoCorreo: 'ana.ruiz@ambientalia.com.co',
+      empleadoId: E1,
+      concedido: true,
+    });
+  });
+
+  it('quitarlo también se registra', async () => {
+    estado.plantilla[0].veKpis = true;
+    await fijar(E1, { concedido: false }, token({ role: 'admin' })).expect(200);
+    expect(estado.plantilla[0].veKpis).toBe(false);
+    expect(estado.registroVisoresKpis[0]).toMatchObject({ concedido: false });
+  });
+
+  it('400 si `concedido` no es booleano', async () => {
+    // `'si'` es una cadena con valor de verdad: interpretarla en vez de exigir
+    // el tipo dejaría concedido un permiso que alguien quiso quitar.
+    const r = await fijar(E1, { concedido: 'si' }, token({ role: 'admin' })).expect(400);
+    expect(r.body.error).toBe('visor_kpis_invalido');
+    expect(r.body.field).toBe('concedido');
+    expect(estado.registroVisoresKpis).toHaveLength(0);
+  });
+
+  it('404 si el empleado no existe, y no deja rastro', async () => {
+    await fijar(E_FANTASMA, { concedido: true }, token({ role: 'admin' })).expect(404);
+    expect(estado.registroVisoresKpis).toHaveLength(0);
+  });
+
+  it('CANDADO: no toca las otras tres llaves de la ficha', async () => {
+    estado.plantilla[0].veAdjuntos = true;
+    estado.plantilla[0].exportaRegistro = true;
+    estado.plantilla[0].veTodaLaEmpresa = true;
+    await fijar(E1, { concedido: true }, token({ role: 'admin' })).expect(200);
+    expect(estado.plantilla[0].veAdjuntos).toBe(true);
+    expect(estado.plantilla[0].exportaRegistro).toBe(true);
+    expect(estado.plantilla[0].veTodaLaEmpresa).toBe(true);
+  });
+});
+
+describe('GET /ausencias/kpis', () => {
+  const pedir = (quien: string) =>
+    request(app()).get('/api/ausencias/kpis').set('Authorization', `Bearer ${quien}`);
+
+  /** Le da la llave a la ficha 0 y devuelve el correo con el que entrar. */
+  const conLlave = (correo = 'gerencia@ambientalia.com.co') => {
+    estado.plantilla[0].correo = correo;
+    estado.plantilla[0].veKpis = true;
+    return correo;
+  };
+
+  it('CANDADO: 403 a un admin SIN la llave', async () => {
+    // ⚠️ EL CANDADO QUE DE VERDAD PROTEGE LOS DATOS. Los otros tres booleanos
+    // del contexto son «para pintar»: mentir en ellos abre una pestaña vacía,
+    // porque quien recorta los datos es el SQL de cada consulta. Éste NO: la
+    // respuesta de este endpoint es el agregado de la plantilla entera —el
+    // pasivo de vacaciones y los tiempos por aprobador—, así que si la puerta
+    // se cae, se cae con los datos dentro.
+    //
+    // Y `requireAdmin` NO sirve aquí, que es justo por lo que la llave existe:
+    // dejaría entrar a todos los administradores del portal.
+    await pedir(token({ sub: 'admin@ambientalia.com.co', role: 'admin' })).expect(403);
+  });
+
+  it('CANDADO: 403 a quien no tiene nada', async () => {
+    await pedir(token({ sub: 'ana.ruiz@ambientalia.com.co' })).expect(403);
+  });
+
+  it('200 a quien tiene la llave, aunque no sea admin', async () => {
+    const correo = conLlave();
+    await pedir(token({ sub: correo })).expect(200);
+  });
+
+  it('200 a quien tiene la llave Y es admin: el caso real', async () => {
+    const correo = conLlave();
+    await pedir(token({ sub: correo, role: 'admin' })).expect(200);
+  });
+
+  it('el pasivo suma el disponible de la plantilla, no el de una ficha', async () => {
+    // La cifra que nadie ve hoy: Saldos la enseña persona a persona y nunca
+    // sumada. Se calcula reutilizando el mismo motor que esa pantalla —no un
+    // SUM() aparte— para que las dos no puedan divergir.
+    const correo = conLlave();
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(typeof r.body.pasivo.diasVacaciones).toBe('number');
+    expect(r.body.pasivo.empleados).toBe(estado.plantilla.length);
+  });
+
+  it('los tiempos salen agrupados por aprobador y ordenados de más lento a más rápido', async () => {
+    const correo = conLlave();
+    estado.decisionesKpi = [
+      { aprobadorCorreo: 'rapido@x.com', createdAt: '2026-09-01T00:00:00Z', decididaAt: '2026-09-01T01:00:00Z' },
+      { aprobadorCorreo: 'lento@x.com', createdAt: '2026-09-01T00:00:00Z', decididaAt: '2026-09-03T00:00:00Z' },
+    ];
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.tiempos.map((t: { aprobadorCorreo: string }) => t.aprobadorCorreo)).toEqual([
+      'lento@x.com',
+      'rapido@x.com',
+    ]);
+    expect(r.body.tiempos[0]).toMatchObject({ n: 1, medianaHoras: 48 });
+  });
+
+  it('las pendientes llegan repartidas por antigüedad y cuadran con el total', async () => {
+    const correo = conLlave();
+    estado.pendientesKpi = [
+      { createdAt: new Date(Date.now() - 1 * 86_400_000).toISOString() },
+      { createdAt: new Date(Date.now() - 3 * 86_400_000).toISOString() },
+      { createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString() },
+    ];
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const p = r.body.pendientes;
+    expect(p).toMatchObject({ total: 3, hasta2Dias: 1, de2a5Dias: 1, masDe5Dias: 1 });
+    expect(p.hasta2Dias + p.de2a5Dias + p.masDe5Dias).toBe(p.total);
+  });
+
+  it('sin datos contesta 200 con la pantalla vacía, no un error', async () => {
+    // Una compañía sin decisiones aún es un estado legítimo —el primer día—, y
+    // un 500 ahí mandaría a alguien a buscar un fallo que no existe.
+    const correo = conLlave();
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.tiempos).toEqual([]);
+    expect(r.body.pendientes.total).toBe(0);
   });
 });
 

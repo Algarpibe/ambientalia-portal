@@ -1,7 +1,8 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
-import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario } from './types.js';
+import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario, ESTADOS_EN_TRAMITE } from './types.js';
+import type { DecisionParaKpi, PendienteParaKpi } from './kpis.js';
 import type {
   Adjunto,
   ClaseModificacion,
@@ -51,6 +52,7 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
 const COLS_EMPLEADO = `
   id, nombre_completo, correo, cargo, credencial,
   aprobador_correo, copia_correo, user_id, activo, ve_adjuntos, exporta_registro, ve_toda_la_empresa,
+  ve_kpis,
   requiere_segunda_firma,
   fecha_retiro::text AS fecha_retiro,
   retirado_por,
@@ -69,6 +71,7 @@ interface FilaEmpleadoDb {
   ve_adjuntos: boolean;
   exporta_registro: boolean;
   ve_toda_la_empresa: boolean;
+  ve_kpis: boolean;
   requiere_segunda_firma: boolean;
   fecha_retiro: string | null;
   retirado_por: string | null;
@@ -87,6 +90,7 @@ function aEmpleado(r: FilaEmpleadoDb): Empleado {
     veAdjuntos: r.ve_adjuntos,
     exportaRegistro: r.exporta_registro,
     veTodaLaEmpresa: r.ve_toda_la_empresa,
+    veKpis: r.ve_kpis,
     requiereSegundaFirma: r.requiere_segunda_firma,
     userId: r.user_id,
     activo: r.activo,
@@ -785,6 +789,129 @@ export async function fijarVisorDeEmpresa(
     );
     return true;
   });
+}
+
+/**
+ * ¿Puede esta persona abrir el panel de KPIs? (migración 038)
+ *
+ * ⚠️ SIN `esAdmin` PLEGADO, y es la diferencia que justifica la llave. Sus tres
+ * hermanas se leen como `sesion.esAdmin || repo.esVisorDeX(...)`, porque son
+ * recortes de privacidad que el rol de administrador ya levanta. Aquí no: quien
+ * pidió el panel ya es administrador, así que plegarlo lo abriría a todos los
+ * administradores y la llave no distinguiría a nadie. La columna manda sola.
+ *
+ * El `AND activo` no es decorativo, igual que en `esVisorDeTodaLaEmpresa`: sin
+ * él, a un ex-empleado cuya ficha siguiera en la tabla se le quedaría abierto
+ * el pasivo de vacaciones de la plantilla y el desglose de tiempos por
+ * aprobador. Lo vigila un test contra Postgres (`repo.visor-kpis.db.test.ts`).
+ */
+export async function esVisorDeKpis(db: Pool, email: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados WHERE lower(correo) = lower($1) AND activo AND ve_kpis`,
+    [email],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Da o quita el panel de KPIs, y lo DEJA REGISTRADO, en la MISMA transacción
+ * —mismo motivo que `fijarVisorDeEmpresa` y `fijarExportador`—: si el UPDATE
+ * cuajara y el INSERT fallara, el permiso quedaría concedido sin una sola línea
+ * de auditoría, y un reintento posterior no tendría forma de notar el hueco (el
+ * estado ya coincidiría con lo pedido) para repararlo.
+ *
+ * El correo que se registra sale del propio UPDATE (`RETURNING correo`) y no de
+ * quien llama: así el log refleja el correo que la fila tenía en el instante
+ * del cambio, sin depender de que el llamador hubiera cargado la ficha antes.
+ *
+ * Devuelve false si la ficha no existía o estaba inactiva, y entonces no se
+ * escribe registro: un intento fallido no puede ensuciar la auditoría.
+ */
+export async function fijarVisorDeKpis(
+  db: Pool,
+  adminEmail: string,
+  empleadoId: string,
+  concedido: boolean,
+): Promise<boolean> {
+  return withTransaction(db, async (client) => {
+    const { rows } = await client.query(
+      `UPDATE portal.empleados SET ve_kpis = $2 WHERE id = $1 AND activo RETURNING correo`,
+      [empleadoId, concedido],
+    );
+    if (!rows.length) return false;
+
+    await client.query(
+      `INSERT INTO portal.visores_kpis_log
+         (admin_email, empleado_id, empleado_correo, concedido)
+       VALUES (lower($1), $2, lower($3), $4)`,
+      [adminEmail, empleadoId, (rows[0] as { correo: string }).correo, concedido],
+    );
+    return true;
+  });
+}
+
+// ── Panel de KPIs ──────────────────────────────────────────────────────────
+
+/**
+ * Las solicitudes YA DECIDIDAS desde `desdeIso`, para medir cuánto se tarda en
+ * firmar. La aritmética la hace `kpis.tiemposPorAprobador`.
+ *
+ * Tres recortes, y los tres importan:
+ *
+ * · `decidida_at IS NOT NULL` — lo que no se ha firmado no mide un tiempo de
+ *   firma. Las pendientes las cuenta `pendientesParaKpi`.
+ *
+ * · `estado <> 'registrada'` — son las filas que trajo la hoja de Google al
+ *   importar el histórico. Nadie las decidió en esta app, así que atribuirle su
+ *   duración a un aprobador sería inventarle un tiempo por una solicitud que
+ *   jamás vio.
+ *
+ * · `aprobador_correo IS NOT NULL` — sin aprobador no hay a quién atribuirlo, y
+ *   agruparlas bajo una clave vacía crearía una fila fantasma en la tabla.
+ *
+ * `created_at` y `decidida_at` salen como `::text` (ISO) y no como Date: el
+ * motor de KPIs solo resta instantes, y un Date por medio arrastra la zona
+ * horaria del proceso a un número que no la necesita.
+ */
+export async function decisionesParaKpi(db: Pool, desdeIso: string): Promise<DecisionParaKpi[]> {
+  const { rows } = await db.query(
+    `SELECT aprobador_correo,
+            created_at::text  AS created_at,
+            decidida_at::text AS decidida_at
+       FROM portal.solicitudes_ausencia
+      WHERE decidida_at IS NOT NULL
+        AND estado <> 'registrada'
+        AND aprobador_correo IS NOT NULL
+        AND created_at >= $1::timestamptz
+      ORDER BY created_at`,
+    [desdeIso],
+  );
+  return (rows as { aprobador_correo: string; created_at: string; decidida_at: string }[]).map((r) => ({
+    aprobadorCorreo: r.aprobador_correo,
+    createdAt: r.created_at,
+    decididaAt: r.decidida_at,
+  }));
+}
+
+/**
+ * Las solicitudes que esperan firma AHORA MISMO, sin ventana temporal: una que
+ * lleve dos años parada es exactamente la que hay que ver.
+ *
+ * ⚠️ El recorte va por ESTADO y no por `decidida_at IS NULL`, y esa es la
+ * trampa que esta consulta evita: una `registrada` del histórico importado
+ * tampoco tiene `decidida_at`, así que el filtro «natural» se tragaría el
+ * histórico entero y el panel diría que hay cientos de solicitudes esperando
+ * firma. Lo vigila `repo.kpis.db.test.ts`.
+ */
+export async function pendientesParaKpi(db: Pool): Promise<PendienteParaKpi[]> {
+  const { rows } = await db.query(
+    `SELECT created_at::text AS created_at
+       FROM portal.solicitudes_ausencia
+      WHERE estado = ANY($1::varchar[])
+      ORDER BY created_at`,
+    [[...ESTADOS_EN_TRAMITE]],
+  );
+  return (rows as { created_at: string }[]).map((r) => ({ createdAt: r.created_at }));
 }
 
 // ── Histórico importado de la hoja ─────────────────────────────────────────

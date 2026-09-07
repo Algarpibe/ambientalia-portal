@@ -39,6 +39,12 @@ export interface Empleado {
    * No abre nada más: editar, borrar e importar siguen siendo solo de admin.
    */
   veTodaLaEmpresa: boolean;
+  /**
+   * Abre la pestaña de KPIs. A diferencia de las tres de arriba, esta llave NO
+   * se la da el rol de administrador: la columna es la única fuente, y por eso
+   * su casilla se pinta también en las filas de los admins.
+   */
+  veKpis: boolean;
   /** Si sus solicitudes necesitan la firma del jefe de su jefe, o basta una. */
   requiereSegundaFirma: boolean;
   userId: string | null;
@@ -243,6 +249,25 @@ export interface Contexto {
    * rota.
    */
   esVisorDeTodaLaEmpresa: boolean;
+  /**
+   * Abre la pestaña de KPIs.
+   *
+   * ⚠️ ESTE NO PLIEGA `esAdmin` DENTRO, al revés que los tres de arriba. Ser
+   * administrador del portal NO lo enciende: la llave se concede ficha a ficha
+   * desde Organigrama, y esa es su razón de ser (quien pidió el panel ya es
+   * admin, así que plegarlo lo abriría a todos los administradores). No añadir
+   * aquí un `|| ctx.esAdmin` «por simetría»: rompería el permiso entero.
+   *
+   * Y aquí, a diferencia de los otros, esconder la pestaña NO es lo único que
+   * protege los datos: `GET /ausencias/kpis` contesta 403 por su cuenta. Esto
+   * solo evita enseñar una pestaña que daría error.
+   *
+   * Puede llegar `undefined` en la ventana de despliegue en que el portal va
+   * por delante de hub-api. Se lee como `!!ctx.esVisorDeKpis`, que degrada a
+   * «no la tiene»: la pestaña tarda un despliegue en aparecer, en vez de
+   * aparecer rota.
+   */
+  esVisorDeKpis: boolean;
   /** El correo de la sesión, para poder decir cuál hay que dar de alta. */
   email: string;
   esAdmin: boolean;
@@ -1241,6 +1266,54 @@ export const fijarExportador = (id: string, concedido: boolean) =>
  */
 export const fijarVisorDeEmpresa = (id: string, concedido: boolean) =>
   put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor-empresa`, { concedido });
+
+/**
+ * Da o quita la llave del panel de KPIs. Solo admin, y queda registrado en el
+ * servidor igual que las otras tres.
+ *
+ * A diferencia de sus hermanas, esta casilla SÍ se pinta en las filas de los
+ * administradores: el rol no se la da, así que ahí decide de verdad.
+ */
+export const fijarVisorDeKpis = (id: string, concedido: boolean) =>
+  put<{ ok: boolean }>(`/api/ausencias/empleados/${encodeURIComponent(id)}/visor-kpis`, { concedido });
+
+/** El tiempo que tarda un aprobador en firmar, ya agregado por hub-api. */
+export interface TiempoDeAprobador {
+  aprobadorCorreo: string;
+  /** Cuántas decisiones sostienen la cifra: un p90 de una muestra no vale lo
+   *  mismo que uno de cincuenta, y la pantalla tiene que poder decirlo. */
+  n: number;
+  medianaHoras: number;
+  p90Horas: number;
+}
+
+/** Los tres KPIs del panel. */
+export interface Kpis {
+  pasivo: {
+    /** Días de vacaciones acumulados por la plantilla activa. Deuda real. */
+    diasVacaciones: number;
+    diasCompensatorios: number;
+    /** El denominador: sobre cuántas fichas activas se ha sumado. */
+    empleados: number;
+  };
+  /** De más lento a más rápido: el atasco va arriba. */
+  tiempos: TiempoDeAprobador[];
+  pendientes: {
+    total: number;
+    hasta2Dias: number;
+    de2a5Dias: number;
+    masDe5Dias: number;
+  };
+  /** Inicio de la ventana de `tiempos`, en ISO. La pantalla lo dice en voz alta. */
+  desde: string;
+}
+
+/**
+ * El panel de KPIs. Contesta 403 a quien no tenga la llave `ve_kpis`, y ese
+ * 403 es el candado de verdad: la respuesta lleva dentro el agregado de la
+ * plantilla entera, así que esconder la pestaña no bastaría.
+ */
+export const kpis = () => get<Kpis>('/api/ausencias/kpis');
 
 /** Enciende o apaga la segunda firma de alguien. No mueve lo que ya está en vuelo. */
 export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>

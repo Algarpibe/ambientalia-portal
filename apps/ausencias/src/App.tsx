@@ -38,6 +38,7 @@ import PedirModificacion from './PedirModificacion';
 import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import PanelAdjuntos from './PanelAdjuntos';
+import PanelKpis from './PanelKpis';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
@@ -56,6 +57,7 @@ const PESTANAS_VALIDAS = [
   'saldos',
   'historico',
   'calendario',
+  'kpis',
 ] as const;
 
 type Pestana = (typeof PESTANAS_VALIDAS)[number];
@@ -172,6 +174,17 @@ export default function App() {
   // tarda un despliegue en aparecer, en vez de aparecer sin datos detrás.
   const veTodaLaEmpresa = !!contexto?.esVisorDeTodaLaEmpresa;
 
+  // La llave del panel de KPIs. `!!` por lo mismo que la de arriba.
+  //
+  // ⚠️ SIN `|| contexto?.esAdmin`, y no es un olvido: ser administrador del
+  // portal NO abre esta pestaña. Es la única de las cuatro llaves que el rol no
+  // concede —la columna `ve_kpis` es la única fuente—, porque el panel se pidió
+  // para una persona que ya es administradora y plegarlo lo abriría a todos.
+  // Añadir aquí un `|| esAdmin` «por simetría» con las demás vaciaría el
+  // permiso de contenido; y además no serviría de nada, porque el endpoint
+  // contesta 403 por su cuenta y la pestaña se vería rota.
+  const veKpis = !!contexto?.esVisorDeKpis;
+
   // Los tipos que ofrecer en el filtro de «Mis solicitudes»: los que ESTA
   // persona tiene, no los cinco.
   //
@@ -243,6 +256,12 @@ export default function App() {
     // servidor ya resuelve la regla en un solo booleano (`esVisorAdjuntos`)
     // para que esta app no tenga que replicarla.
     if (contexto?.esVisorAdjuntos) p.push(['adjuntos', 'Soportes adjuntos']);
+    // Va antes del bloque de admin y fuera de él, igual que «Soportes
+    // adjuntos» y por un motivo más fuerte: esta llave NO la da el rol, así
+    // que meterla dentro del `if (esAdmin)` la escondería a quien la tuviera
+    // sin ser administrador y —peor— se la enseñaría a todos los admins que no
+    // la tienen, que verían una pestaña con un 403 detrás.
+    if (veKpis) p.push(['kpis', 'KPIs']);
     if (contexto?.esAdmin) {
       // El organigrama va aparte de «Empleados» y no debajo: son dos trabajos
       // distintos. Empleados es el alta —se hace una vez—, y el organigrama se
@@ -251,7 +270,7 @@ export default function App() {
       p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos']);
     }
     return p;
-  }, [contexto, veTodaLaEmpresa, pendientes.length, cambios.length]);
+  }, [contexto, veTodaLaEmpresa, veKpis, pendientes.length, cambios.length]);
 
   // Si la pestaña activa no está disponible para este usuario (p. ej. un admin
   // sin ficha de empleado, que no puede crear solicitudes), caemos a la primera.
@@ -782,6 +801,12 @@ export default function App() {
           {contexto.esVisorAdjuntos && (
             <div className={tab === 'adjuntos' ? '' : 'hidden'}>
               <PanelAdjuntos activo={tab === 'adjuntos'} />
+            </div>
+          )}
+
+          {veKpis && (
+            <div className={tab === 'kpis' ? '' : 'hidden'}>
+              <PanelKpis activo={tab === 'kpis'} />
             </div>
           )}
 
