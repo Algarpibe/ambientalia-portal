@@ -12,7 +12,12 @@ const line = (over: Partial<LineRow>): LineRow => ({
   shipped_status: 'pending',
   tiene_paquete: false,
   ticket_por_facturar: false,
-  puede_armarse: false,
+  seguimiento_stock: true,
+  es_mercancia: true,
+  stock_fisico: '0',
+  comprometido: '0',
+  por_recibir: '0',
+  falta: '0',
   trato: null,
   qt: null,
   ticket: null,
@@ -22,6 +27,20 @@ const line = (over: Partial<LineRow>): LineRow => ({
   cantidad_cancelada: '0',
   ...over,
 });
+
+// Línea de mercancía con estante de sobra: 10 físicas, 1 comprometida en total
+// (la de esta misma línea), así que se puede armar.
+const CON_STOCK: Partial<LineRow> = {
+  es_mercancia: true,
+  seguimiento_stock: true,
+  stock_fisico: '10',
+  comprometido: '1',
+  por_recibir: '0',
+  falta: '1',
+};
+
+// La misma línea, pero sin nada en el estante.
+const SIN_STOCK: Partial<LineRow> = { ...CON_STOCK, stock_fisico: '0' };
 
 describe('aggregateFacturables', () => {
   it('suma total y pendiente por orden (una fila por orden)', () => {
@@ -91,7 +110,7 @@ describe('despachoParcial', () => {
 
   it('con despacho parcial no se muestran soloPaquete ni paquetePorCrear', () => {
     const r = aggregateFacturables([
-      line({ shipped_status: 'partially_shipped', tiene_paquete: true, puede_armarse: true }),
+      line({ ...CON_STOCK, shipped_status: 'partially_shipped', tiene_paquete: true }),
     ]);
     expect(r[0].despachoParcial).toBe(true);
     expect(r[0].soloPaquete).toBe(false);
@@ -101,26 +120,77 @@ describe('despachoParcial', () => {
 
 describe('paquetePorCrear', () => {
   it('true si puede armarse y NO está despachada ni tiene paquete', () => {
-    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'pending', tiene_paquete: false })]);
+    const r = aggregateFacturables([line({ ...CON_STOCK, shipped_status: 'pending', tiene_paquete: false })]);
     expect(r[0].paquetePorCrear).toBe(true);
     expect(r[0].facturable).toBe(true); // entra en "solo facturables"
   });
 
   it('false si ya está despachada (no tiene sentido "por crear")', () => {
-    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'fulfilled' })]);
+    const r = aggregateFacturables([line({ ...CON_STOCK, shipped_status: 'fulfilled' })]);
     expect(r[0].paquetePorCrear).toBe(false);
     expect(r[0].despachada).toBe(true);
   });
 
   it('false si ya tiene paquete', () => {
-    const r = aggregateFacturables([line({ puede_armarse: true, shipped_status: 'pending', tiene_paquete: true })]);
+    const r = aggregateFacturables([line({ ...CON_STOCK, shipped_status: 'pending', tiene_paquete: true })]);
     expect(r[0].paquetePorCrear).toBe(false);
     expect(r[0].soloPaquete).toBe(true);
   });
 
   it('false si no hay stock suficiente', () => {
-    const r = aggregateFacturables([line({ puede_armarse: false, shipped_status: 'pending', tiene_paquete: false })]);
+    const r = aggregateFacturables([line({ ...SIN_STOCK, shipped_status: 'pending', tiene_paquete: false })]);
     expect(r[0].paquetePorCrear).toBe(false);
     expect(r[0].facturable).toBe(false);
+  });
+});
+
+describe('regla de stock: qué comprometido bloquea de verdad', () => {
+  // Caso real OV-2026-163 / SKU 1142.A4 (tarjeta PCMCIA que acompaña al Grimm EDM 180C):
+  // 2 unidades en el estante y 7 comprometidas entre todas las OV vivas — 1 de esta OV y
+  // 6 de OV-2026-153 y OV-2026-156, que esperan las OC-2026-049 y OC-2026-057 (3+3, sin
+  // recibir). Esas 6 llegan compradas, no salen del estante, así que no deben bloquearlo.
+  it('las OV que esperan una orden de compra no bloquean el estante', () => {
+    const r = aggregateFacturables([
+      line({
+        es_mercancia: true,
+        seguimiento_stock: true,
+        stock_fisico: '2',
+        comprometido: '7',
+        por_recibir: '6',
+        falta: '1',
+      }),
+    ]);
+    expect(r[0].paquetePorCrear).toBe(true);
+  });
+
+  it('sin OC en camino, lo comprometido por otras OV sigue bloqueando', () => {
+    // Mismos números, pero sin nada comprado: esas 6 SÍ saldrían del estante.
+    const r = aggregateFacturables([
+      line({ stock_fisico: '2', comprometido: '7', por_recibir: '0', falta: '1' }),
+    ]);
+    expect(r[0].paquetePorCrear).toBe(false);
+  });
+
+  it('las OC no inventan stock: con el estante vacío no se puede armar', () => {
+    // 6 compradas y ninguna recibida. Llegarán, pero hoy no hay con qué empaquetar.
+    const r = aggregateFacturables([
+      line({ stock_fisico: '0', comprometido: '1', por_recibir: '6', falta: '1' }),
+    ]);
+    expect(r[0].paquetePorCrear).toBe(false);
+  });
+
+  it('un artículo sin seguimiento de inventario bloquea (OV-2026-146)', () => {
+    const r = aggregateFacturables([line({ ...CON_STOCK, seguimiento_stock: false })]);
+    expect(r[0].paquetePorCrear).toBe(false);
+  });
+
+  it('sin líneas de mercancía pendientes no hay paquete que armar', () => {
+    const r = aggregateFacturables([line({ ...CON_STOCK, es_mercancia: false })]);
+    expect(r[0].paquetePorCrear).toBe(false);
+  });
+
+  it('basta con que UNA línea no alcance para no marcar la orden', () => {
+    const r = aggregateFacturables([line({ ...CON_STOCK }), line({ ...SIN_STOCK })]);
+    expect(r[0].paquetePorCrear).toBe(false);
   });
 });
