@@ -328,7 +328,7 @@ export function createAusenciasRouter(db: Pool): Router {
       // corta— para no pagarla con cada descarga de quien solo baja la suya.
       const esVisor = await repo.esVisorDeAdjuntos(db, sesion.email);
       const visorEnSuRama =
-        esVisor && (await repo.estaEnLaRamaDe(db, sesion.email, adjunto.solicitanteEmail));
+        esVisor && (await repo.esDeSuEquipoDirecto(db, sesion.email, adjunto.solicitanteEmail));
       if (!service.puedeVerAdjunto(sesion, adjunto, visorEnSuRama)) {
         // 404 y no 403: quien no tiene nada que ver con la solicitud tampoco
         // debería poder confirmar que ese adjunto existe.
