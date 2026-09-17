@@ -1003,7 +1003,18 @@ export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<S
   if (!sesion.esAdmin && !(await repo.esVisorDeAdjuntos(db, sesion.email))) {
     throw new AusenciaError('no_es_visor_de_adjuntos', 403);
   }
-  return repo.solicitudesConAdjunto(db);
+  // ⚠️ LA LLAVE `ve_adjuntos` YA NO ABRE LA COMPAÑÍA ENTERA. Abre la rama de dos
+  // niveles de quien la tiene, que es el mismo alcance que el Calendario y el
+  // Registro general. Solo un administrador sigue viendo todo.
+  //
+  // Antes daba acceso a los soportes de cualquiera —incluidos los PDF médicos
+  // de gente con la que quien miraba no tiene ninguna relación—, y eso no era
+  // lo que la casilla prometía a quien la marcaba.
+  //
+  // El `null` explícito de admin es obligatorio: sin él, `ramaDeDosNiveles` no
+  // recorta solo cuando recibe NULL, y pasar `undefined` lo dejaría en un
+  // parámetro sin valor en vez de en «sin recorte».
+  return repo.solicitudesConAdjunto(db, sesion.esAdmin ? null : sesion.email);
 }
 
 /**
@@ -1588,9 +1599,22 @@ export async function decidirModificacion(
  * no como una condición del `return` final. Quitársela a alguien no puede
  * dejarle sin ver sus propias solicitudes.
  */
-export function puedeVerAdjunto(sesion: Sesion, a: repo.AdjuntoCompleto, esVisor: boolean): boolean {
+export function puedeVerAdjunto(
+  sesion: Sesion,
+  a: repo.AdjuntoCompleto,
+  /**
+   * Tiene la llave `ve_adjuntos` **y** el solicitante está en su rama de dos
+   * niveles. Las dos cosas, y por eso el nombre cambió: la llave sola dejó de
+   * ser un pase libre cuando la pestaña pasó a recortar por rama.
+   *
+   * Si aquí bastara con tener la llave, esconder filas en la lista no serviría
+   * de nada: quien conociera la URL de un adjunto lo abriría igual. La lista y
+   * esta puerta tienen que decir lo mismo.
+   */
+  visorEnSuRama: boolean,
+): boolean {
   if (sesion.esAdmin) return true;
-  if (esVisor) return true;
+  if (visorEnSuRama) return true;
   const yo = sesion.email.toLowerCase();
   // El segundo aprobador entra aquí aunque todavía no sea su turno: la ruta del
   // adjunto devuelve 404 y no 403, así que sin esto tendría que firmar un permiso
