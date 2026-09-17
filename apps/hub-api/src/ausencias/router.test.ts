@@ -712,6 +712,10 @@ vi.mock('./repo.js', async () => ({
   // misma regla, y tampoco cerraría ese hueco: este doble sigue sin base de
   // datos real contra la que ejecutarlo.
   ramaDeDosNiveles: () => `$1::text IS NULL`,
+  // El hermano estrecho, para los soportes. Se dobla igual que el de arriba -un
+  // trozo de SQL que este doble no ejecuta- porque el candado de «modela
+  // exactamente lo que exporta repo.ts» cuenta tambien los helpers.
+  equipoDirecto: () => `$1::text IS NULL`,
   // Igual que el de arriba: existe SOLO para que el CANDADO de la superficie
   // compare superficies iguales. Ninguna funcion de este doble lo llama —los
   // dobles de `empleadosActivos` y `ausenciasEntre` filtran en JavaScript, no
@@ -804,26 +808,19 @@ vi.mock('./repo.js', async () => ({
         String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veAdjuntos === true,
     ),
   // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
-  // `ramaDeDosNiveles()` que incrusta `repo.estaEnLaRamaDe`, y quien lo ejecuta
-  // de verdad es `repo.adjuntos-rama.db.test.ts` -incluidos sus dos candados de
-  // que el tercer nivel NO entra-. Aqui solo se modela la SUPERFICIE para poder
+  // `equipoDirecto()` que incrusta `repo.esDeSuEquipoDirecto`, y quien lo
+  // ejecuta de verdad es `repo.adjuntos-rama.db.test.ts` -incluido su candado de
+  // que el SEGUNDO nivel no entra-. Aqui solo se modela la SUPERFICIE para
   // probar el cableado del router: que la llave sola ya no basta.
-  estaEnLaRamaDe: async (_db: unknown, correoJefe: string, correoEmpleado: string) => {
-    const jefe = correoJefe.toLowerCase();
+  //
+  // UN nivel, no dos: los soportes son mas estrictos que el calendario a
+  // proposito, porque lo que hay debajo son PDF medicos.
+  esDeSuEquipoDirecto: async (_db: unknown, correoJefe: string, correoEmpleado: string) => {
     const suyo = estado.plantilla.find(
       (e: any) => String(e.correo).toLowerCase() === correoEmpleado.toLowerCase(),
     );
     if (!suyo) return false;
-    const suJefe = String(suyo.aprobadorCorreo ?? '').toLowerCase();
-    if (suJefe === jefe) return true;
-    // El segundo nivel: el jefe de su jefe. Se exige que el intermedio siga
-    // activo, igual que el predicado real.
-    return estado.plantilla.some(
-      (j: any) =>
-        String(j.correo).toLowerCase() === suJefe &&
-        j.activo !== false &&
-        String(j.aprobadorCorreo ?? '').toLowerCase() === jefe,
-    );
+    return String(suyo.aprobadorCorreo ?? '').toLowerCase() === correoJefe.toLowerCase();
   },
   fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);

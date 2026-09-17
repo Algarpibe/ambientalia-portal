@@ -1938,11 +1938,30 @@ export async function solicitudesPendientes(db: Pool, aprobadorCorreo: string, t
  * haber dos, porque el alta inserta uno como mucho, pero si algún día los
  * hubiera, esta consulta duplicaría la fila y sería aquí donde se vería.
  */
+/**
+ * Quienes tienen a `$1` como JEFE INMEDIATO —la primera firma—, y nadie más.
+ *
+ * ⚠️ UN SOLO NIVEL, más estrecho que `ramaDeDosNiveles`, y la diferencia es
+ * deliberada. Aquel sirve al Calendario y al Registro general, donde el dato es
+ * «fulano no está»; este sirve a los SOPORTES, que son PDF médicos. Quien firma
+ * una solicitud necesita abrir su soporte; el jefe de su jefe no ha necesitado
+ * abrirlo para nada, y con dos niveles vería los informes médicos de una
+ * organización entera sin haber firmado una sola de esas solicitudes.
+ *
+ * Que un permiso sea MÁS estrecho que el del calendario no es una incoherencia:
+ * es que el dato de debajo es más sensible.
+ *
+ * Asume que `portal.empleados` va aliasada como `e`, igual que su hermana.
+ */
+export function equipoDirecto(): string {
+  return `($1::text IS NULL OR lower(e.aprobador_correo) = lower($1))`;
+}
+
 export async function solicitudesConAdjunto(db: Pool, soloDe: string | null): Promise<Solicitud[]> {
   const { rows } = await db.query(
     `${SELECT_SOLICITUD}
       WHERE a.id IS NOT NULL
-        AND ${ramaDeDosNiveles()}
+        AND ${equipoDirecto()}
       ORDER BY s.fecha_inicio DESC`,
     [soloDe],
   );
@@ -1950,7 +1969,7 @@ export async function solicitudesConAdjunto(db: Pool, soloDe: string | null): Pr
 }
 
 /**
- * ¿Está `correoEmpleado` en la rama de dos niveles de `correoJefe`?
+ * ¿Tiene `correoEmpleado` a `correoJefe` como jefe inmediato?
  *
  * ⚠️ Existe para que `GET /ausencias/adjuntos/:id` aplique EL MISMO recorte que
  * la lista. Sin ella, acotar la pestaña no serviría de nada: la ruta del adjunto
@@ -1959,12 +1978,10 @@ export async function solicitudesConAdjunto(db: Pool, soloDe: string | null): Pr
  * nada; es la versión incómoda del mismo acceso.
  *
  * NO exige que el empleado esté activo, al contrario que las listas que usan
- * `ramaDeDosNiveles` para pintar plantilla: los soportes de quien se fue siguen
- * existiendo y su jefe sigue necesitando abrirlos. Lo que sí se exige —dentro
- * del predicado— es que el jefe INTERMEDIO lo esté, o una ficha vieja
- * reabriría una rama que ya no existe.
+ * estos predicados para pintar plantilla: los soportes de quien se fue siguen
+ * existiendo y su jefe sigue necesitando abrirlos.
  */
-export async function estaEnLaRamaDe(
+export async function esDeSuEquipoDirecto(
   db: Pool,
   correoJefe: string,
   correoEmpleado: string,
@@ -1972,7 +1989,7 @@ export async function estaEnLaRamaDe(
   const { rows } = await db.query(
     `SELECT 1 FROM portal.empleados e
       WHERE lower(e.correo) = lower($2)
-        AND ${ramaDeDosNiveles()}`,
+        AND ${equipoDirecto()}`,
     [correoJefe, correoEmpleado],
   );
   return rows.length > 0;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { solicitudesConAdjunto, estaEnLaRamaDe } from './repo.js';
+import { solicitudesConAdjunto, esDeSuEquipoDirecto } from './repo.js';
 import { poolDePrueba, limpiar, sembrarSolicitud } from '../test-db/harness.js';
 
 // El recorte por rama de la pestana «Soportes adjuntos», contra Postgres.
@@ -77,29 +77,23 @@ describe('solicitudesConAdjunto: el recorte por rama', () => {
     expect(filas[0].empleadoNombre).toBe('Ana Ruiz');
   });
 
-  it('el alcance llega DOS niveles: la gente de mis jefes intermedios tambien', async () => {
-    // La misma rama que el Calendario y el Registro general, ni mas ancha ni mas
-    // estrecha: un jefe de jefes tiene que ver a su organizacion, o la pestana
-    // seria inutil justo para quien mas la necesita.
+  it('CANDADO: el alcance es UN nivel; el equipo de mi jefe intermedio NO entra', async () => {
+    // ⚠️ MAS ESTRECHO QUE EL CALENDARIO Y EL REGISTRO, que llegan a dos niveles,
+    // y es deliberado: alli el dato es «fulano no esta», y aqui es su PDF
+    // medico. Quien firma la solicitud necesita abrir su soporte; el jefe de su
+    // jefe no ha necesitado abrirlo para nada.
+    //
+    // Sin este limite, un jefe de jefes veria los soportes medicos de una
+    // organizacion entera sin haber firmado ninguna de esas solicitudes.
     const intermedio = await empleado('Beto Paz', 'beto@x.com', JEFE);
     const nieto = await empleado('Ana Ruiz', 'ana@x.com', 'beto@x.com');
     await conAdjunto(intermedio, 'beto@x.com', '2026-09-07');
     await conAdjunto(nieto, 'ana@x.com', '2026-09-08');
 
-    expect(await solicitudesConAdjunto(db, JEFE)).toHaveLength(2);
-  });
-
-  it('CANDADO: el tercer nivel ya NO entra', async () => {
-    // Dos niveles es dos niveles. Sin este limite el recorte se iria comiendo
-    // el organigrama hacia abajo hasta ser «toda la empresa» por otra via.
-    const intermedio = await empleado('Beto Paz', 'beto@x.com', JEFE);
-    const nieto = await empleado('Ana Ruiz', 'ana@x.com', 'beto@x.com');
-    const bisnieto = await empleado('Zoe Vera', 'zoe@x.com', 'ana@x.com');
-    await conAdjunto(bisnieto, 'zoe@x.com', '2026-09-09');
-    void intermedio;
-    void nieto;
-
-    expect(await solicitudesConAdjunto(db, JEFE)).toEqual([]);
+    const filas = await solicitudesConAdjunto(db, JEFE);
+    expect(filas).toHaveLength(1);
+    // Beto si: cuelga de JEFE. Ana no: cuelga de Beto.
+    expect(filas[0].empleadoNombre).toBe('Beto Paz');
   });
 
   it('el correo del jefe se compara sin distinguir mayusculas', async () => {
@@ -125,40 +119,36 @@ describe('solicitudesConAdjunto: el recorte por rama', () => {
   });
 });
 
-describe('estaEnLaRamaDe: el mismo recorte, para UN adjunto suelto', () => {
+describe('esDeSuEquipoDirecto: el mismo recorte, para UN adjunto suelto', () => {
   // Sin esto, recortar la lista no serviria de nada: `GET /adjuntos/:id`
   // seguiria sirviendo cualquier PDF a quien tuviera la llave, y bastaria con
-  // conocer la URL. La lista y la puerta tienen que decir lo mismo.
+  // conocer la URL. La lista y la puerta tienen que decir lo mismo, incluido
+  // este limite de UN nivel.
 
-  it('true para alguien de mi rama directa', async () => {
+  it('true para quien me tiene como jefe inmediato', async () => {
     await empleado('Ana Ruiz', 'ana@x.com', JEFE);
-    expect(await estaEnLaRamaDe(db, JEFE, 'ana@x.com')).toBe(true);
+    expect(await esDeSuEquipoDirecto(db, JEFE, 'ana@x.com')).toBe(true);
   });
 
-  it('true para el segundo nivel', async () => {
+  it('CANDADO: false para el segundo nivel, igual que la lista', async () => {
+    // La puerta del adjunto suelto no puede ser mas ancha que la lista, o el
+    // recorte de la pantalla seria decorativo.
     await empleado('Beto Paz', 'beto@x.com', JEFE);
     await empleado('Ana Ruiz', 'ana@x.com', 'beto@x.com');
-    expect(await estaEnLaRamaDe(db, JEFE, 'ana@x.com')).toBe(true);
+    expect(await esDeSuEquipoDirecto(db, JEFE, 'ana@x.com')).toBe(false);
   });
 
   it('CANDADO: false para otra rama', async () => {
     await empleado('Zoe Vera', 'zoe@x.com', OTRO_JEFE);
-    expect(await estaEnLaRamaDe(db, JEFE, 'zoe@x.com')).toBe(false);
-  });
-
-  it('CANDADO: false para el tercer nivel, igual que la lista', async () => {
-    await empleado('Beto Paz', 'beto@x.com', JEFE);
-    await empleado('Ana Ruiz', 'ana@x.com', 'beto@x.com');
-    await empleado('Zoe Vera', 'zoe@x.com', 'ana@x.com');
-    expect(await estaEnLaRamaDe(db, JEFE, 'zoe@x.com')).toBe(false);
+    expect(await esDeSuEquipoDirecto(db, JEFE, 'zoe@x.com')).toBe(false);
   });
 
   it('false para un correo que no es de nadie', async () => {
-    expect(await estaEnLaRamaDe(db, JEFE, 'nadie@x.com')).toBe(false);
+    expect(await esDeSuEquipoDirecto(db, JEFE, 'nadie@x.com')).toBe(false);
   });
 
   it('sin distinguir mayusculas por los dos lados', async () => {
     await empleado('Ana Ruiz', 'ana@x.com', JEFE);
-    expect(await estaEnLaRamaDe(db, JEFE.toUpperCase(), 'ANA@X.COM')).toBe(true);
+    expect(await esDeSuEquipoDirecto(db, JEFE.toUpperCase(), 'ANA@X.COM')).toBe(true);
   });
 });
