@@ -1938,9 +1938,44 @@ export async function solicitudesPendientes(db: Pool, aprobadorCorreo: string, t
  * haber dos, porque el alta inserta uno como mucho, pero si algún día los
  * hubiera, esta consulta duplicaría la fila y sería aquí donde se vería.
  */
-export async function solicitudesConAdjunto(db: Pool): Promise<Solicitud[]> {
-  const { rows } = await db.query(`${SELECT_SOLICITUD} WHERE a.id IS NOT NULL ORDER BY s.fecha_inicio DESC`);
+export async function solicitudesConAdjunto(db: Pool, soloDe: string | null): Promise<Solicitud[]> {
+  const { rows } = await db.query(
+    `${SELECT_SOLICITUD}
+      WHERE a.id IS NOT NULL
+        AND ${ramaDeDosNiveles()}
+      ORDER BY s.fecha_inicio DESC`,
+    [soloDe],
+  );
   return (rows as FilaSolicitudDb[]).map(aSolicitud);
+}
+
+/**
+ * ¿Está `correoEmpleado` en la rama de dos niveles de `correoJefe`?
+ *
+ * ⚠️ Existe para que `GET /ausencias/adjuntos/:id` aplique EL MISMO recorte que
+ * la lista. Sin ella, acotar la pestaña no serviría de nada: la ruta del adjunto
+ * suelto seguiría sirviendo cualquier PDF a quien tuviera la llave, y bastaría
+ * con conocer la URL. Una pantalla que esconde lo que la API entrega no protege
+ * nada; es la versión incómoda del mismo acceso.
+ *
+ * NO exige que el empleado esté activo, al contrario que las listas que usan
+ * `ramaDeDosNiveles` para pintar plantilla: los soportes de quien se fue siguen
+ * existiendo y su jefe sigue necesitando abrirlos. Lo que sí se exige —dentro
+ * del predicado— es que el jefe INTERMEDIO lo esté, o una ficha vieja
+ * reabriría una rama que ya no existe.
+ */
+export async function estaEnLaRamaDe(
+  db: Pool,
+  correoJefe: string,
+  correoEmpleado: string,
+): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM portal.empleados e
+      WHERE lower(e.correo) = lower($2)
+        AND ${ramaDeDosNiveles()}`,
+    [correoJefe, correoEmpleado],
+  );
+  return rows.length > 0;
 }
 
 /**

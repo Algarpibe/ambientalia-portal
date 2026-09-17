@@ -803,6 +803,28 @@ vi.mock('./repo.js', async () => ({
       (e: any) =>
         String(e.correo).toLowerCase() === email.toLowerCase() && e.activo !== false && e.veAdjuntos === true,
     ),
+  // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+  // `ramaDeDosNiveles()` que incrusta `repo.estaEnLaRamaDe`, y quien lo ejecuta
+  // de verdad es `repo.adjuntos-rama.db.test.ts` -incluidos sus dos candados de
+  // que el tercer nivel NO entra-. Aqui solo se modela la SUPERFICIE para poder
+  // probar el cableado del router: que la llave sola ya no basta.
+  estaEnLaRamaDe: async (_db: unknown, correoJefe: string, correoEmpleado: string) => {
+    const jefe = correoJefe.toLowerCase();
+    const suyo = estado.plantilla.find(
+      (e: any) => String(e.correo).toLowerCase() === correoEmpleado.toLowerCase(),
+    );
+    if (!suyo) return false;
+    const suJefe = String(suyo.aprobadorCorreo ?? '').toLowerCase();
+    if (suJefe === jefe) return true;
+    // El segundo nivel: el jefe de su jefe. Se exige que el intermedio siga
+    // activo, igual que el predicado real.
+    return estado.plantilla.some(
+      (j: any) =>
+        String(j.correo).toLowerCase() === suJefe &&
+        j.activo !== false &&
+        String(j.aprobadorCorreo ?? '').toLowerCase() === jefe,
+    );
+  },
   fijarJefe: async (_db: unknown, empleadoId: string, aprobadorCorreo: string) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
@@ -2885,22 +2907,64 @@ describe('GET /ausencias/adjuntos', () => {
       .expect(403);
   });
 
-  it('el visor descarga el PDF de una incapacidad ajena', async () => {
-    // La feature entera: una incapacidad no pasa por ninguna bandeja ni por el
-    // historial, así que sin esto administración no tenía dónde abrirla.
-    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
-    estado.plantilla[0].veAdjuntos = true;
+  /** Le cuelga un adjunto a `solicitanteEmail`, para las dos pruebas de abajo. */
+  const adjuntoDe = (solicitanteEmail: string) => {
     estado.adjuntos.set('a1', {
       solicitudId: 's1',
-      solicitanteEmail: 'ana.ruiz@ambientalia.com.co',
+      solicitanteEmail,
       aprobadorCorreo: null,
       segundoAprobadorCorreo: null,
-      nombreArchivo: 'Incapacidades_Ana_Ruiz_2026-07-06_1.pdf',
+      nombreArchivo: 'Incapacidades_2026-07-06_1.pdf',
       mime: 'application/pdf',
       contenido: Buffer.from('%PDF-1.4 fake'),
     });
+  };
+
+  it('el visor descarga el PDF de una incapacidad DE SU RAMA', async () => {
+    // La feature entera: una incapacidad no pasa por ninguna bandeja ni por el
+    // historial, así que sin esto un jefe no tenía dónde abrir la de su gente.
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
+    // Ana cuelga del visor: por eso puede abrir su soporte.
+    estado.plantilla[1].correo = 'ana.ruiz@ambientalia.com.co';
+    estado.plantilla[1].aprobadorCorreo = 'administrativo@ambientalia.com.co';
+    adjuntoDe('ana.ruiz@ambientalia.com.co');
+
     const r = await request(app()).get('/api/ausencias/adjuntos/a1').set('Authorization', `Bearer ${visor()}`).expect(200);
     expect(r.headers['content-type']).toContain('application/pdf');
+  });
+
+  it('CANDADO: la llave NO abre el PDF de otra rama, ni conociendo la URL', async () => {
+    // ⚠️ LA PUERTA DE ATRÁS. Recortar la LISTA por rama no sirve de nada si esta
+    // ruta sigue sirviendo cualquier PDF a quien tenga la llave: bastaría con
+    // conocer el id del adjunto. Una pantalla que esconde lo que la API entrega
+    // no protege nada, solo hace el mismo acceso más incómodo.
+    //
+    // Y lo que hay detrás de estos PDF son soportes médicos, así que el fallo no
+    // sería «ver una fila de más».
+    estado.plantilla[0].correo = 'administrativo@ambientalia.com.co';
+    estado.plantilla[0].veAdjuntos = true;
+    // Zoe cuelga de OTRO jefe.
+    estado.plantilla[1].correo = 'zoe.vera@ambientalia.com.co';
+    estado.plantilla[1].aprobadorCorreo = 'otrojefe@ambientalia.com.co';
+    adjuntoDe('zoe.vera@ambientalia.com.co');
+
+    // 404 y no 403, como el resto de esta ruta: quien no tiene nada que ver con
+    // la solicitud tampoco debería poder confirmar que ese adjunto existe.
+    await request(app()).get('/api/ausencias/adjuntos/a1').set('Authorization', `Bearer ${visor()}`).expect(404);
+  });
+
+  it('un admin sí abre el de cualquier rama', async () => {
+    // El recorte es para la llave, no para el rol: un administrador sigue
+    // viéndolo todo, que es la regla del repo.
+    estado.plantilla[1].correo = 'zoe.vera@ambientalia.com.co';
+    estado.plantilla[1].aprobadorCorreo = 'otrojefe@ambientalia.com.co';
+    adjuntoDe('zoe.vera@ambientalia.com.co');
+
+    await request(app())
+      .get('/api/ausencias/adjuntos/a1')
+      .set('Authorization', `Bearer ${token({ role: 'admin', sub: 'gerencia@ambientalia.com.co' })}`)
+      .expect(200);
   });
 });
 

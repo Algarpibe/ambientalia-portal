@@ -322,7 +322,14 @@ export function createAusenciasRouter(db: Pool): Router {
       const adjunto = await repo.adjuntoPorId(db, req.params.id);
       if (!adjunto) return void res.status(404).json({ error: 'no_encontrado' });
       const sesion = sesionDe(req);
-      if (!service.puedeVerAdjunto(sesion, adjunto, await repo.esVisorDeAdjuntos(db, sesion.email))) {
+      // La llave Y la rama, las dos: desde que la pestaña recorta por rama, la
+      // llave sola aquí sería la puerta de atrás que deja sin efecto el
+      // recorte. La consulta de rama solo se hace si hay llave —un `&&` que
+      // corta— para no pagarla con cada descarga de quien solo baja la suya.
+      const esVisor = await repo.esVisorDeAdjuntos(db, sesion.email);
+      const visorEnSuRama =
+        esVisor && (await repo.estaEnLaRamaDe(db, sesion.email, adjunto.solicitanteEmail));
+      if (!service.puedeVerAdjunto(sesion, adjunto, visorEnSuRama)) {
         // 404 y no 403: quien no tiene nada que ver con la solicitud tampoco
         // debería poder confirmar que ese adjunto existe.
         return void res.status(404).json({ error: 'no_encontrado' });
