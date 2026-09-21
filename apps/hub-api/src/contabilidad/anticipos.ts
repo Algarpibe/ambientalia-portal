@@ -78,3 +78,68 @@ export function extraerOV(texto: string): string[] {
   }
   return [...vistas];
 }
+
+// Una OV ya no pendiente de facturar. Si le queda anticipo sin aplicar, hay algo que hacer:
+// facturada → se le cobró el total sin descontar lo pagado; anulada → hay que devolverlo.
+const ESTADOS_CERRADOS = new Set(['invoiced', 'void']);
+
+function num(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Texto donde se busca la OV: todas las descripciones de línea más la referencia. Pura. */
+export function textoDe(a: AnticipoRow): string {
+  return [...a.descripciones, a.referencia ?? ''].filter(Boolean).join(' | ');
+}
+
+/**
+ * Clasifica cada anticipo: o suma en su OV, o va a la lista de atención con UN motivo.
+ * Los motivos se evalúan en este orden y gana el primero que cumple: sin referencia, varias
+ * OV, OV inexistente, moneda distinta, sin aplicar en OV cerrada. Uno en otra moneda sobre
+ * una OV facturada sale como `moneda_distinta`: hasta aclarar la moneda no se puede afirmar
+ * nada de su saldo. Pura.
+ */
+export function enlazarAnticipos(anticipos: AnticipoRow[], ovs: OVRef[]): AnticiposEnlazados {
+  const ovPorNumero = new Map(ovs.map((o) => [o.numero, o]));
+  const porOV = new Map<string, ImportesAnticipo>();
+  const atencion: AnticipoAtencion[] = [];
+
+  for (const a of anticipos) {
+    const cobrado = num(a.cobrado);
+    const sinAplicar = Math.max(0, cobrado - num(a.aplicado));
+    const texto = textoDe(a);
+    const refs = extraerOV(texto);
+    const avisar = (motivo: MotivoAtencion, ov: string | null, estadoOV: string | null) =>
+      atencion.push({ numero: a.numero, cliente: a.cliente, fecha: a.fecha, cobrado, sinAplicar, motivo, ov, estadoOV, texto });
+
+    if (refs.length === 0) { avisar('sin_referencia', null, null); continue; }
+    if (refs.length > 1) { avisar('varias_ov', refs.join(', '), null); continue; }
+    const ov = ovPorNumero.get(refs[0]);
+    if (!ov) { avisar('ov_inexistente', refs[0], null); continue; }
+    if ((a.moneda ?? '') !== (ov.moneda ?? '')) { avisar('moneda_distinta', ov.numero, ov.estado); continue; }
+    if (ESTADOS_CERRADOS.has(ov.estado) && sinAplicar > 0) { avisar('sin_aplicar_ov_cerrada', ov.numero, ov.estado); continue; }
+
+    const acum = porOV.get(ov.numero) ?? { cobrado: 0, sinAplicar: 0, anticipos: [] };
+    acum.cobrado += cobrado;
+    acum.sinAplicar += sinAplicar;
+    acum.anticipos.push({ numero: a.numero, fecha: a.fecha, estado: a.estado, cobrado, sinAplicar });
+    porOV.set(ov.numero, acum);
+  }
+
+  atencion.sort((x, y) => (y.fecha ?? '').localeCompare(x.fecha ?? ''));
+  return { porOV, atencion };
+}
+
+/**
+ * Devuelve una COPIA de la OV con los importes de anticipo; `null` = la OV no tiene ninguno.
+ * Nunca muta: la lista de OV está cacheada y la comparten las dos apps.
+ */
+export function conAnticipo<T extends { salesorder_number: string }>(
+  o: T,
+  enl: AnticiposEnlazados,
+): T & { anticipoCobrado: number | null; anticipoSinAplicar: number | null } {
+  const a = enl.porOV.get(o.salesorder_number);
+  return { ...o, anticipoCobrado: a ? a.cobrado : null, anticipoSinAplicar: a ? a.sinAplicar : null };
+}
