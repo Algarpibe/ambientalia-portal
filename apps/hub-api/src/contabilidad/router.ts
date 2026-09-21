@@ -7,6 +7,7 @@ import { getContabilidadData, upsertCartera, upsertBudget, ANIO_MINIMO } from '.
 import { getOVPendientesFacturables } from './ovPendientes.js';
 import { getFacturasPorEntregar } from './entregasPendientes.js';
 import { getDetalleFactura, getDetalleOV } from './detalle.js';
+import { getAnticiposEnlazados, conAnticipo, type AnticiposEnlazados } from './anticipos.js';
 
 const APP_ID = 'contabilidad';
 const CACHE_KEY = 'contabilidad:facturas';
@@ -26,6 +27,28 @@ function sendError(res: Response, e: unknown, ctx: string): void {
   console.error(`${ctx} error`, e);
   captureError(e, { endpoint: ctx });
   res.status(500).json({ error: 'internal error' });
+}
+
+const CACHE_ANTICIPOS = 'contabilidad:anticipos';
+
+// Los anticipos son información de cobro: solo los ve quien tiene Contabilidad, o un admin
+// (misma regla que requireApp). La app `ov-pendientes` existe precisamente para quien no debe
+// ver la facturación, así que a ella ni siquiera se le envían.
+function veAnticipos(req: Request): boolean {
+  const u = getPayload(req);
+  return u?.role === 'admin' || !!u?.apps?.includes(APP_ID);
+}
+
+// Los anticipos NUNCA pueden tumbar la tabla de OV. Si su lectura falla (p. ej. porque el
+// worker aún no creó books.retainer_invoices), se responde sin ellos y se registra.
+async function anticiposSeguros(db: Pool): Promise<AnticiposEnlazados | null> {
+  try {
+    return await cached(CACHE_ANTICIPOS, () => getAnticiposEnlazados(db));
+  } catch (e) {
+    console.error('contabilidad_anticipos error', e);
+    captureError(e, { endpoint: 'contabilidad_anticipos' });
+    return null;
+  }
 }
 
 export function createContabilidadRouter(db: Pool): Router {
@@ -77,10 +100,12 @@ export function createContabilidadRouter(db: Pool): Router {
     }
   });
 
-  router.get('/contabilidad/ov-pendientes', requireAuth, requireApp(APP_ID, APP_ID_OV), async (_req: Request, res: Response) => {
+  router.get('/contabilidad/ov-pendientes', requireAuth, requireApp(APP_ID, APP_ID_OV), async (req: Request, res: Response) => {
     try {
       const orders = await cached('contabilidad:ov-pendientes', () => getOVPendientesFacturables(db));
-      res.json({ orders });
+      const enl = veAnticipos(req) ? await anticiposSeguros(db) : null;
+      // conAnticipo devuelve copias: `orders` es el array cacheado que comparten las dos apps.
+      res.json({ orders: enl ? orders.map((o) => conAnticipo(o, enl)) : orders });
     } catch (e) {
       sendError(res, e, 'contabilidad_ov_pendientes');
     }
@@ -112,9 +137,21 @@ export function createContabilidadRouter(db: Pool): Router {
     try {
       const d = await getDetalleOV(db, req.params.numero);
       if (!d) return void res.status(404).json({ error: 'ov no encontrada' });
-      res.json(d);
+      const enl = veAnticipos(req) ? await anticiposSeguros(db) : null;
+      res.json(enl ? { ...d, anticipos: enl.porOV.get(d.numero)?.anticipos ?? [] } : d);
     } catch (e) {
       sendError(res, e, 'contabilidad_detalle_ov');
+    }
+  });
+
+  // Anticipos que no se pudieron enlazar con una OV, o con saldo sin aplicar en una OV ya
+  // cerrada. Solo Contabilidad: es información de cobro.
+  router.get('/contabilidad/anticipos-atencion', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+    try {
+      const enl = await cached(CACHE_ANTICIPOS, () => getAnticiposEnlazados(db));
+      res.json({ anticipos: enl.atencion });
+    } catch (e) {
+      sendError(res, e, 'contabilidad_anticipos_atencion');
     }
   });
 
