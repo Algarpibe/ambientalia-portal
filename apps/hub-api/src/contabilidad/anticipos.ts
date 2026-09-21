@@ -143,3 +143,47 @@ export function conAnticipo<T extends { salesorder_number: string }>(
   const a = enl.porOV.get(o.salesorder_number);
   return { ...o, anticipoCobrado: a ? a.cobrado : null, anticipoSinAplicar: a ? a.sinAplicar : null };
 }
+
+// Borradores y anulados no cuentan: ni se han emitido ni se van a cobrar.
+const ANTICIPOS_SQL = `
+  SELECT ri.retainerinvoice_number AS numero,
+         ri.date::text              AS fecha,
+         ri.status                  AS estado,
+         ri.customer_name           AS cliente,
+         ri.currency_code           AS moneda,
+         ri.payment_made            AS cobrado,
+         ri.payment_drawn           AS aplicado,
+         ri.reference_number        AS referencia,
+         ri.raw -> 'line_items'     AS lineas
+    FROM books.retainer_invoices ri
+   WHERE COALESCE(ri.status, '') NOT IN ('draft', 'void')`;
+
+// Solo las OV que algún anticipo nombra, en CUALQUIER estado: hace falta saber también de las
+// ya facturadas o anuladas para avisar de su anticipo sin aplicar.
+const OVS_SQL = `
+  SELECT salesorder_number AS numero, status AS estado, currency_code AS moneda
+    FROM books.sales_orders
+   WHERE salesorder_number = ANY($1::text[])`;
+
+interface FilaAnticipo extends Omit<AnticipoRow, 'descripciones'> {
+  lineas: unknown;
+}
+
+function descripcionesDe(lineas: unknown): string[] {
+  if (!Array.isArray(lineas)) return [];
+  return lineas
+    .map((l) => (l && typeof l === 'object' ? (l as { description?: unknown }).description : null))
+    .filter((d): d is string => typeof d === 'string' && d.trim() !== '');
+}
+
+/** Lee los anticipos y las OV que nombran, y los enlaza. */
+export async function getAnticiposEnlazados(db: Pool): Promise<AnticiposEnlazados> {
+  const { rows } = await db.query(ANTICIPOS_SQL);
+  const anticipos: AnticipoRow[] = (rows as FilaAnticipo[]).map(({ lineas, ...r }) => ({
+    ...r,
+    descripciones: descripcionesDe(lineas),
+  }));
+  const numeros = [...new Set(anticipos.flatMap((a) => extraerOV(textoDe(a))))];
+  const ovs = numeros.length ? ((await db.query(OVS_SQL, [numeros])).rows as OVRef[]) : [];
+  return enlazarAnticipos(anticipos, ovs);
+}

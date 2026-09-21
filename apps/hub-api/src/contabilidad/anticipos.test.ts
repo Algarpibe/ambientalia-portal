@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { extraerOV, enlazarAnticipos, conAnticipo, type AnticipoRow, type OVRef } from './anticipos.js';
+import { describe, it, expect, vi } from 'vitest';
+import type { Pool } from '@algarpibe/zoho-sync';
+import { extraerOV, enlazarAnticipos, conAnticipo, getAnticiposEnlazados, type AnticipoRow, type OVRef } from './anticipos.js';
 
 describe('extraerOV', () => {
   // Esta tabla ES la especificación de cómo se escribe un anticipo en Zoho. Una forma nueva
@@ -130,5 +131,38 @@ describe('conAnticipo', () => {
     expect(conAnticipo(original, enl)).toEqual({ salesorder_number: 'OV-2026-167', anticipoCobrado: 9505784, anticipoSinAplicar: 9505784 });
     expect(original).toEqual({ salesorder_number: 'OV-2026-167' });
     expect(conAnticipo({ salesorder_number: 'OV-2026-999' }, enl)).toMatchObject({ anticipoCobrado: null, anticipoSinAplicar: null });
+  });
+});
+
+describe('getAnticiposEnlazados', () => {
+  it('saca las descripciones de raw, consulta solo las OV nombradas y enlaza', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{
+        numero: 'ANT-2026-063', fecha: '2026-09-15', estado: 'paid', cliente: 'SGS Colombia S.A.S.', moneda: 'COP',
+        cobrado: '9505784', aplicado: '0', referencia: null,
+        lineas: [{ description: 'Anticipo OV-2026-167' }, { description: '' }, { otra: 1 }],
+      }] })
+      .mockResolvedValueOnce({ rows: [{ numero: 'OV-2026-167', estado: 'open', moneda: 'COP' }] });
+    const r = await getAnticiposEnlazados({ query } as unknown as Pool);
+    expect(query.mock.calls[1][1]).toEqual([['OV-2026-167']]);
+    expect(r.porOV.get('OV-2026-167')).toMatchObject({ cobrado: 9505784, sinAplicar: 9505784 });
+    expect(r.atencion).toEqual([]);
+  });
+
+  it('sin anticipos no consulta las OV', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [] });
+    const r = await getAnticiposEnlazados({ query } as unknown as Pool);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(r.porOV.size).toBe(0);
+    expect(r.atencion).toEqual([]);
+  });
+
+  it('lineas que no son una lista no rompen: el anticipo va al aviso', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [{
+      numero: 'ANT-X', fecha: null, estado: 'paid', cliente: null, moneda: 'COP',
+      cobrado: 1, aplicado: 0, referencia: null, lineas: null,
+    }] });
+    const r = await getAnticiposEnlazados({ query } as unknown as Pool);
+    expect(r.atencion).toMatchObject([{ numero: 'ANT-X', motivo: 'sin_referencia' }]);
   });
 });
