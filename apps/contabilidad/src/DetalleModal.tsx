@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, AlertTriangle, X } from 'lucide-react';
 import { fetchFacturaDetalle, fetchOVDetalle, type DetalleFactura, type DetalleOV } from './api';
 import { formatCOP } from './format';
+import { estadoAnticipo } from './ovTabla';
 
 type Detalle = (DetalleFactura & { _tipo: 'factura' }) | (DetalleOV & { _tipo: 'ov' });
 
@@ -136,6 +137,36 @@ export default function DetalleModal({ tipo, numero, onClose, indicios }: Props)
                 </div>
               )}
             </div>
+
+            {/* Anticipos de la OV. Solo llegan a quien tiene Contabilidad, y el bloque solo
+                aparece si hay alguno. */}
+            {detalle._tipo === 'ov' && detalle.anticipos && detalle.anticipos.length > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 text-xs">
+                <div className="mb-1.5 font-semibold text-emerald-800">Anticipos</div>
+                <table className="min-w-full">
+                  <thead className="text-emerald-700">
+                    <tr>
+                      <th className="py-1 text-left font-medium">Anticipo</th>
+                      <th className="py-1 text-left font-medium">Fecha</th>
+                      <th className="py-1 text-left font-medium">Estado</th>
+                      <th className="py-1 text-right font-medium">Cobrado</th>
+                      <th className="py-1 text-right font-medium">Sin aplicar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detalle.anticipos.map((a) => (
+                      <tr key={a.numero}>
+                        <td className="py-0.5 font-medium">{a.numero}</td>
+                        <td className="py-0.5">{a.fecha ?? '—'}</td>
+                        <td className="py-0.5">{estadoAnticipo(a.estado)}</td>
+                        <td className="py-0.5 text-right tabular-nums">{formatCOP(a.cobrado)}</td>
+                        <td className="py-0.5 text-right tabular-nums">{formatCOP(a.sinAplicar)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* Totales */}
             <div className="ml-auto w-full max-w-xs space-y-1 text-sm">
