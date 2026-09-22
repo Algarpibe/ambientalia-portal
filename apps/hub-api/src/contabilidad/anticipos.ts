@@ -195,6 +195,19 @@ function descripcionesDe(lineas: unknown): string[] {
  * Sin tasa de cambio fiable no se puede saber cuánto se aplicó de verdad: se trata como 0. Es
  * la salida conservadora — mejor un aviso de más que esconder un anticipo sin aplicar.
  */
+/**
+ * Si lo aplicado queda a un paso de lo cobrado, es el redondeo de la conversión de moneda, no
+ * saldo real: `exchange_rate` solo guarda 6 decimales, así que la vuelta a la moneda del
+ * documento nunca cae en el peso exacto. Verificado contra la base real (2026-09-22): entre
+ * los anticipos con `drawn>0`, el residuo de redondeo nunca pasa de $635 y el saldo genuino
+ * más pequeño empieza en $285.725 — casi 450 veces de diferencia, así que 1000 tiene margen de
+ * sobra en los dos sentidos.
+ */
+const UMBRAL_RUIDO_MONEDA = 1000;
+export function sinRuidoDeRedondeo(cobrado: number, aplicado: number): number {
+  return cobrado - aplicado <= UMBRAL_RUIDO_MONEDA ? cobrado : aplicado;
+}
+
 export function aplicadoEnMonedaDoc(aplicadoBcy: unknown, tasaCambio: unknown): number {
   const tasa = num(tasaCambio);
   if (tasa <= 0) return 0;
@@ -206,7 +219,7 @@ export async function getAnticiposEnlazados(db: Pool): Promise<AnticiposEnlazado
   const { rows } = await db.query(ANTICIPOS_SQL);
   const anticipos: AnticipoRow[] = (rows as FilaAnticipo[]).map(({ lineas, aplicado_bcy, tasa_cambio, ...r }) => ({
     ...r,
-    aplicado: aplicadoEnMonedaDoc(aplicado_bcy, tasa_cambio),
+    aplicado: sinRuidoDeRedondeo(num(r.cobrado), aplicadoEnMonedaDoc(aplicado_bcy, tasa_cambio)),
     descripciones: descripcionesDe(lineas),
   }));
   const numeros = [...new Set(anticipos.flatMap((a) => extraerOV(textoDe(a))))];

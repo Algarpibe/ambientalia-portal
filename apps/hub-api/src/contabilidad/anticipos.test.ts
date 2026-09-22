@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { extraerOV, enlazarAnticipos, conAnticipo, getAnticiposEnlazados, aplicadoEnMonedaDoc, type AnticipoRow, type OVRef } from './anticipos.js';
+import { extraerOV, enlazarAnticipos, conAnticipo, getAnticiposEnlazados, aplicadoEnMonedaDoc, sinRuidoDeRedondeo, type AnticipoRow, type OVRef } from './anticipos.js';
 
 describe('extraerOV', () => {
   // Esta tabla ES la especificación de cómo se escribe un anticipo en Zoho. Una forma nueva
@@ -154,6 +154,21 @@ describe('aplicadoEnMonedaDoc', () => {
   });
 });
 
+describe('sinRuidoDeRedondeo', () => {
+  // Verificado contra producción el 2026-09-22: entre los anticipos con drawn>0, el residuo de
+  // redondeo nunca pasa de $635 y el saldo genuino más pequeño empieza en $285.725 — casi 450
+  // veces de diferencia. El umbral de 1000 tiene margen de sobra en los dos sentidos.
+  it('un residuo de hasta 1000 es ruido de redondeo: se trata como aplicado del todo', () => {
+    expect(sinRuidoDeRedondeo(1714798, 1714791)).toBe(1714798); // caso real: ANT-2026-054, $7 de residuo
+    expect(sinRuidoDeRedondeo(1000000, 999000)).toBe(1000000); // borde: residuo exacto de 1000
+  });
+
+  it('por encima de 1000 ya es saldo real: no se toca', () => {
+    expect(sinRuidoDeRedondeo(1000000, 998999)).toBe(998999); // residuo 1001
+    expect(sinRuidoDeRedondeo(9505784, 0)).toBe(0); // nunca se aplicó nada: no hay ruido que perdonar
+  });
+});
+
 describe('getAnticiposEnlazados', () => {
   it('saca las descripciones de raw, consulta solo las OV nombradas y enlaza', async () => {
     const query = vi.fn()
@@ -179,6 +194,18 @@ describe('getAnticiposEnlazados', () => {
       .mockResolvedValueOnce({ rows: [{ numero: 'OV-2026-162', estado: 'invoiced', moneda: 'COP' }] });
     const r = await getAnticiposEnlazados({ query } as unknown as Pool);
     // Ya está aplicado del todo (sin_aplicar_ov_cerrada exige sinAplicar > 0): no debe avisar.
+    expect(r.atencion).toEqual([]);
+  });
+
+  it('un residuo de redondeo en una OV ya facturada no genera aviso (caso real, unos pesos de diferencia)', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{
+        numero: 'ANT-2026-054', fecha: '2026-07-27', estado: 'paid', cliente: 'Amspec MCS Colombia S.A.S.', moneda: 'COP',
+        cobrado: '1714798', aplicado_bcy: '555.59', tasa_cambio: '0.000324', referencia: null,
+        lineas: [{ description: 'Anticipo OV-2026-135' }],
+      }] })
+      .mockResolvedValueOnce({ rows: [{ numero: 'OV-2026-135', estado: 'invoiced', moneda: 'COP' }] });
+    const r = await getAnticiposEnlazados({ query } as unknown as Pool);
     expect(r.atencion).toEqual([]);
   });
 

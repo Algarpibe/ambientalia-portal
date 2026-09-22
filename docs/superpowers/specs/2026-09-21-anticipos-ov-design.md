@@ -131,6 +131,18 @@ borrador/anulados, 203 quedan totalmente aplicados y solo 17 con saldo real
 pendiente — todos con `payment_drawn = 0` genuino o un `drawn` parcial real,
 no un artefacto de moneda.
 
+**Segunda vuelta, mismo día:** desplegado el primer arreglo, el aviso bajó de
+205 a 102 — mejor, pero seguía muy por encima de los 17 esperados. La causa:
+`exchange_rate` solo guarda 6 decimales, así que la vuelta a la moneda del
+documento nunca cae en el peso exacto; quedaba un residuo de unos pocos a unos
+pocos miles de pesos que `sinAplicar > 0` seguía marcando como pendiente.
+Verificado contra la base real: entre los anticipos con `drawn>0`, el residuo
+de redondeo nunca pasa de $635 y el saldo genuino más pequeño empieza en
+$285.725 — casi 450 veces de diferencia. `sinRuidoDeRedondeo(cobrado,
+aplicado)` trata cualquier residuo de hasta $1.000 como aplicado del todo;
+vive en `getAnticiposEnlazados`, junto a `aplicadoEnMonedaDoc`, así que
+`enlazarAnticipos` sigue sin cambiar.
+
 ### `enlazarAnticipos(anticipos, ovs)`
 
 Función pura. Recibe los anticipos (ya sin borradores ni anulados, y con
