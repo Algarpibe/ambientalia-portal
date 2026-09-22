@@ -63,6 +63,10 @@ const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
 const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
 const DEF = new Map<ColKey, ColDef>(COLUMNAS.map((c) => [c.key, c]));
 
+// Columnas cuyo orden por defecto al cambiar de criterio es descendente (el importe más
+// alto primero), en vez de ascendente/alfabético.
+const IMPORTES: SortKey[] = ['pending', 'total', 'anticipoCobrado', 'anticipoSinAplicar'];
+
 const LUZ = 'inline-block h-2.5 w-2.5 rounded-full';
 
 type LuzKey = 'despachada' | 'despachoParcial' | 'soloPaquete' | 'ticketPorFacturar' | 'paquetePorCrear';
@@ -144,7 +148,6 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
     [filtradas],
   );
 
-  const IMPORTES: SortKey[] = ['pending', 'total', 'anticipoCobrado', 'anticipoSinAplicar'];
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: IMPORTES.includes(key) ? -1 : 1 }));
 
