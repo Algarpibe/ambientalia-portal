@@ -6,6 +6,7 @@ import { formatCOP } from './format';
 import DetalleModal from './DetalleModal';
 import ColumnasMenu from './ColumnasMenu';
 import ResizeHandle from './ResizeHandle';
+import { compararValores, traeAnticipos, columnasDisponibles, celdaAnticipo } from './ovTabla';
 import { useColumnPrefs, clavePrefs } from './useColumnPrefs';
 
 type SortKey = keyof OVPendienteFacturable;
@@ -29,13 +30,16 @@ interface ColDef {
   key: ColKey;
   label: string;
   align: 'left' | 'right';
-  kind: 'text' | 'money' | 'estado' | 'indicio';
+  kind: 'text' | 'money' | 'estado' | 'indicio' | 'anticipo';
   ancho: number;
 }
 
+// Las de anticipo van AL FINAL a propósito: useColumnPrefs añade las claves nuevas al final
+// para quien ya tiene la tabla personalizada, así que en cualquier otra posición un usuario
+// nuevo y uno antiguo las verían en sitios distintos.
 const CLAVES = [
   'indicio', 'salesorder_number', 'ticket', 'customer_name', 'trato', 'qt', 'date',
-  'shipment_date', 'total', 'pending', 'status',
+  'shipment_date', 'total', 'pending', 'status', 'anticipoCobrado', 'anticipoSinAplicar',
 ] as const;
 export type ColKey = (typeof CLAVES)[number];
 
@@ -51,6 +55,8 @@ const COLUMNAS: ColDef[] = [
   { key: 'total', label: 'TOTAL ($)', align: 'right', kind: 'money', ancho: 130 },
   { key: 'pending', label: 'POR FACTURAR ($)', align: 'right', kind: 'money', ancho: 145 },
   { key: 'status', label: 'ESTADO', align: 'left', kind: 'estado', ancho: 100 },
+  { key: 'anticipoCobrado', label: 'ANTICIPO COBRADO ($)', align: 'right', kind: 'anticipo', ancho: 160 },
+  { key: 'anticipoSinAplicar', label: 'ANTICIPO SIN APLICAR ($)', align: 'right', kind: 'anticipo', ancho: 180 },
 ];
 
 const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
@@ -106,9 +112,14 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
     return () => { vivo = false; };
   }, []);
 
+  // Las columnas de anticipo solo existen si el servidor manda los campos (solo lo hace a
+  // quien tiene Contabilidad); para el resto se quitan del orden, del menú y de la tabla.
+  const conAnticipos = useMemo(() => traeAnticipos(ordenes), [ordenes]);
+  const ordenDisponible = useMemo(() => columnasDisponibles(cols.orden, conAnticipos), [cols.orden, conAnticipos]);
+
   const visibles = useMemo(
-    () => cols.orden.map((k) => DEF.get(k)).filter((c): c is ColDef => !!c && cols.esVisible(c.key)),
-    [cols],
+    () => ordenDisponible.map((k) => DEF.get(k)).filter((c): c is ColDef => !!c && cols.esVisible(c.key)),
+    [ordenDisponible, cols],
   );
 
   const anchoActual = (c: ColDef): number =>
@@ -124,12 +135,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
       if (q && !(o.salesorder_number.toLowerCase().includes(q) || (o.customer_name ?? '').toLowerCase().includes(q))) return false;
       return true;
     });
-    arr.sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sort.dir;
-      return String(av ?? '').localeCompare(String(bv ?? ''), 'es') * sort.dir;
-    });
+    arr.sort((a, b) => compararValores(a[sort.key], b[sort.key]) * sort.dir);
     return arr;
   }, [ordenes, estado, filtro, luces, sort]);
 
@@ -138,8 +144,9 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
     [filtradas],
   );
 
+  const IMPORTES: SortKey[] = ['pending', 'total', 'anticipoCobrado', 'anticipoSinAplicar'];
   const toggleSort = (key: SortKey) =>
-    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === 'pending' || key === 'total' ? -1 : 1 }));
+    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: IMPORTES.includes(key) ? -1 : 1 }));
 
   return (
     <section className={`${bare ? '' : 'mt-10 '}space-y-3`}>
@@ -177,7 +184,7 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
             </div>
             <div className="ml-auto">
               <ColumnasMenu
-                orden={cols.orden}
+                orden={ordenDisponible}
                 etiquetas={ETIQUETAS}
                 esVisible={cols.esVisible}
                 onMover={cols.mover}
@@ -269,6 +276,9 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
                         );
                       }
                       const v = o[c.key as SortKey];
+                      if (c.kind === 'anticipo') {
+                        return <td key={c.key} className="truncate px-2 py-1 text-right tabular-nums">{celdaAnticipo(v as number | null | undefined)}</td>;
+                      }
                       if (c.kind === 'money') {
                         return <td key={c.key} className="truncate px-2 py-1 text-right tabular-nums">{formatCOP(v as number)}</td>;
                       }
