@@ -99,6 +99,7 @@ si nombran OV distintas, el resultado tiene varias y el anticipo es ambiguo.
 | `Anticipo OV 2026-167` | `[OV-2026-167]` |
 | `Anticipo OV2026-167` | `[OV-2026-167]` |
 | `Anticipo OV-2026-0167` | `[OV-2026-167]` |
+| `Anticipo OV–2026–167` | `[OV-2026-167]` — raya o guion largo, como sale al copiar de Word |
 | `Anticipo OV-2026-5` | `[OV-2026-005]` |
 | `Anticipo OV-2026-1000` | `[OV-2026-1000]` |
 | `Anticipo OV-2026-150 y OV-2026-151` | `[OV-2026-150, OV-2026-151]` |
@@ -147,6 +148,9 @@ motivo, la OV cuando la hay, su estado, y el texto tal cual se escribió.
 | `GET /contabilidad/ov/:numero` | Contabilidad u ov-pendientes | Igual, con la lista `anticipos` (número, fecha, estado, cobrado, sin aplicar) |
 | `GET /contabilidad/anticipos-atencion` | **solo Contabilidad** | Nuevo. La lista de atención, de más reciente a más antigua |
 
+«Tiene Contabilidad» significa ser `admin` o tener la app asignada: la misma regla de
+`requireApp`, que ya deja pasar a los admin. Un admin ve los anticipos aunque no tenga la app.
+
 **Resiliencia.** La lectura de anticipos va envuelta: si falla (por ejemplo,
 porque la tabla aún no existe), `ov-pendientes` y `ov/:numero` responden sin
 los campos de anticipo y el error se registra en el log. Los anticipos pueden
@@ -158,9 +162,12 @@ memoria en cada petición. Se revisará cuando haya miles.
 ## 3. Portal (app Contabilidad)
 
 **Columnas.** Dos entradas nuevas en la configuración de columnas de
-`OVPendientes.tsx`, después de «POR FACTURAR ($)»: «ANTICIPO COBRADO ($)» y
+`OVPendientes.tsx`, **al final, después de «ESTADO»**: «ANTICIPO COBRADO ($)» y
 «ANTICIPO SIN APLICAR ($)». Visibles por defecto, ocultables, ordenables y
-redimensionables como las demás.
+redimensionables como las demás. Van al final porque `useColumnPrefs` añade las claves
+nuevas al final para quien ya tiene la tabla personalizada: en cualquier otra posición, un
+usuario nuevo y uno antiguo las verían en sitios distintos, y a todos los antiguos se les
+marcaría la tabla como personalizada.
 
 Las columnas **solo existen si los datos traen los campos**. El componente es
 el mismo en Contabilidad, en la app `ov-pendientes` y en el widget; decide el
@@ -196,6 +203,9 @@ visibles, sin romper ni descartar el resto.
   respondiendo.
 - **Portal**: columnas ausentes si faltan los campos, aviso oculto con la lista
   vacía, configuración guardada antigua más columnas nuevas.
+
+`apps/contabilidad` no tenía tests: estrena vitest con jsdom, React Testing Library y el
+arreglo de `localStorage` para Node 22+ (el mismo del portal).
 
 ## 5. Verificación contra la base real
 
