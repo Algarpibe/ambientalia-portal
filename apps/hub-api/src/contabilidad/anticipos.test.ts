@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { extraerOV, enlazarAnticipos, conAnticipo, getAnticiposEnlazados, type AnticipoRow, type OVRef } from './anticipos.js';
+import { extraerOV, enlazarAnticipos, conAnticipo, getAnticiposEnlazados, aplicadoEnMonedaDoc, type AnticipoRow, type OVRef } from './anticipos.js';
 
 describe('extraerOV', () => {
   // Esta tabla ES la especificación de cómo se escribe un anticipo en Zoho. Una forma nueva
@@ -134,18 +134,51 @@ describe('conAnticipo', () => {
   });
 });
 
+describe('aplicadoEnMonedaDoc', () => {
+  // Caso real, destapado el 2026-09-22 contra producción: ANT-2026-061 cobró 11.150.331 COP y
+  // los aplicó del todo, pero payment_drawn llega en USD (moneda base de la organización, no
+  // la del documento) — 3.612,71 es exactamente el bcy_total de esa factura. Sin convertir,
+  // 205 de 221 anticipos salían con un "sin aplicar" falso; con la conversión, 17.
+  it('convierte payment_drawn de la moneda base a la del documento', () => {
+    expect(aplicadoEnMonedaDoc(3612.71, 0.000324)).toBeCloseTo(11150340, -2);
+  });
+
+  it('sin tasa de cambio fiable, se trata como nada aplicado (no se inventa un aplicado)', () => {
+    expect(aplicadoEnMonedaDoc(500, 0)).toBe(0);
+    expect(aplicadoEnMonedaDoc(500, null)).toBe(0);
+    expect(aplicadoEnMonedaDoc(500, undefined)).toBe(0);
+  });
+
+  it('nada aplicado da 0 aunque la tasa exista', () => {
+    expect(aplicadoEnMonedaDoc(0, 0.000324)).toBe(0);
+  });
+});
+
 describe('getAnticiposEnlazados', () => {
   it('saca las descripciones de raw, consulta solo las OV nombradas y enlaza', async () => {
     const query = vi.fn()
       .mockResolvedValueOnce({ rows: [{
         numero: 'ANT-2026-063', fecha: '2026-09-15', estado: 'paid', cliente: 'SGS Colombia S.A.S.', moneda: 'COP',
-        cobrado: '9505784', aplicado: '0', referencia: null,
+        cobrado: '9505784', aplicado_bcy: '0', tasa_cambio: '0.000324', referencia: null,
         lineas: [{ description: 'Anticipo OV-2026-167' }, { description: '' }, { otra: 1 }],
       }] })
       .mockResolvedValueOnce({ rows: [{ numero: 'OV-2026-167', estado: 'open', moneda: 'COP' }] });
     const r = await getAnticiposEnlazados({ query } as unknown as Pool);
     expect(query.mock.calls[1][1]).toEqual([['OV-2026-167']]);
     expect(r.porOV.get('OV-2026-167')).toMatchObject({ cobrado: 9505784, sinAplicar: 9505784 });
+    expect(r.atencion).toEqual([]);
+  });
+
+  it('convierte el aplicado de bcy a la moneda del documento antes de enlazar (caso real ANT-2026-061)', async () => {
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [{
+        numero: 'ANT-2026-061', fecha: '2026-09-11', estado: 'paid', cliente: 'SHI', moneda: 'COP',
+        cobrado: '11150331', aplicado_bcy: '3612.71', tasa_cambio: '0.000324', referencia: null,
+        lineas: [{ description: 'Anticipo OV-2026-162' }],
+      }] })
+      .mockResolvedValueOnce({ rows: [{ numero: 'OV-2026-162', estado: 'invoiced', moneda: 'COP' }] });
+    const r = await getAnticiposEnlazados({ query } as unknown as Pool);
+    // Ya está aplicado del todo (sin_aplicar_ov_cerrada exige sinAplicar > 0): no debe avisar.
     expect(r.atencion).toEqual([]);
   });
 
@@ -160,7 +193,7 @@ describe('getAnticiposEnlazados', () => {
   it('lineas que no son una lista no rompen: el anticipo va al aviso', async () => {
     const query = vi.fn().mockResolvedValueOnce({ rows: [{
       numero: 'ANT-X', fecha: null, estado: 'paid', cliente: null, moneda: 'COP',
-      cobrado: 1, aplicado: 0, referencia: null, lineas: null,
+      cobrado: 1, aplicado_bcy: 0, tasa_cambio: 0.000324, referencia: null, lineas: null,
     }] });
     const r = await getAnticiposEnlazados({ query } as unknown as Pool);
     expect(r.atencion).toMatchObject([{ numero: 'ANT-X', motivo: 'sin_referencia' }]);

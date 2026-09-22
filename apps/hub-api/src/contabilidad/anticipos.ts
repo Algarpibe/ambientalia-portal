@@ -145,6 +145,11 @@ export function conAnticipo<T extends { salesorder_number: string }>(
 }
 
 // Borradores y anulados no cuentan: ni se han emitido ni se van a cobrar.
+//
+// payment_drawn viene en la moneda BASE de la organización (bcy), no en la del documento —
+// a diferencia de payment_made, que sí viene en la moneda del documento. tasa_cambio
+// (exchange_rate, solo vive en raw) es lo que hace falta para convertirlo antes de compararlo
+// con cobrado. Ver aplicadoEnMonedaDoc().
 const ANTICIPOS_SQL = `
   SELECT ri.retainerinvoice_number AS numero,
          ri.date::text              AS fecha,
@@ -152,7 +157,8 @@ const ANTICIPOS_SQL = `
          ri.customer_name           AS cliente,
          ri.currency_code           AS moneda,
          ri.payment_made            AS cobrado,
-         ri.payment_drawn           AS aplicado,
+         ri.payment_drawn           AS aplicado_bcy,
+         ri.raw ->> 'exchange_rate' AS tasa_cambio,
          ri.reference_number        AS referencia,
          ri.raw -> 'line_items'     AS lineas
     FROM books.retainer_invoices ri
@@ -165,8 +171,10 @@ const OVS_SQL = `
     FROM books.sales_orders
    WHERE salesorder_number = ANY($1::text[])`;
 
-interface FilaAnticipo extends Omit<AnticipoRow, 'descripciones'> {
+interface FilaAnticipo extends Omit<AnticipoRow, 'descripciones' | 'aplicado'> {
   lineas: unknown;
+  aplicado_bcy: number | string | null;
+  tasa_cambio: number | string | null;
 }
 
 function descripcionesDe(lineas: unknown): string[] {
@@ -176,11 +184,29 @@ function descripcionesDe(lineas: unknown): string[] {
     .filter((d): d is string => typeof d === 'string' && d.trim() !== '');
 }
 
+/**
+ * `payment_drawn` de Zoho llega en la moneda BASE de la organización (bcy), no en la del
+ * documento — a diferencia de `payment_made`, que sí viene en la moneda del documento. Sin
+ * esta conversión, comparar los dos como si fueran la misma unidad producía un «sin aplicar»
+ * falso en casi todos los anticipos en pesos: 205 de 221 el 2026-09-22, verificado contra la
+ * base real (caso ANT-2026-061: cobrado 11.150.331 COP, payment_drawn 3.612,71 — exactamente
+ * el bcy_total de esa factura, no COP).
+ *
+ * Sin tasa de cambio fiable no se puede saber cuánto se aplicó de verdad: se trata como 0. Es
+ * la salida conservadora — mejor un aviso de más que esconder un anticipo sin aplicar.
+ */
+export function aplicadoEnMonedaDoc(aplicadoBcy: unknown, tasaCambio: unknown): number {
+  const tasa = num(tasaCambio);
+  if (tasa <= 0) return 0;
+  return num(aplicadoBcy) / tasa;
+}
+
 /** Lee los anticipos y las OV que nombran, y los enlaza. */
 export async function getAnticiposEnlazados(db: Pool): Promise<AnticiposEnlazados> {
   const { rows } = await db.query(ANTICIPOS_SQL);
-  const anticipos: AnticipoRow[] = (rows as FilaAnticipo[]).map(({ lineas, ...r }) => ({
+  const anticipos: AnticipoRow[] = (rows as FilaAnticipo[]).map(({ lineas, aplicado_bcy, tasa_cambio, ...r }) => ({
     ...r,
+    aplicado: aplicadoEnMonedaDoc(aplicado_bcy, tasa_cambio),
     descripciones: descripcionesDe(lineas),
   }));
   const numeros = [...new Set(anticipos.flatMap((a) => extraerOV(textoDe(a))))];

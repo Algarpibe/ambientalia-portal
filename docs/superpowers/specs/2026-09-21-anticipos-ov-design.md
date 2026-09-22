@@ -107,13 +107,38 @@ si nombran OV distintas, el resultado tiene varias y el anticipo es ambiguo.
 | `Anticipo OV-26-167` | `[]` — un año de dos cifras no se adivina, va al aviso |
 | `MOV-2026-167` | `[]` — «OV» debe empezar palabra |
 
+### `aplicadoEnMonedaDoc(aplicadoBcy, tasaCambio)` — corrección del 2026-09-22
+
+**Hallazgo contra producción, no anticipado al diseñar.** `payment_drawn` de
+Zoho llega en la moneda BASE de la organización (bcy), no en la del
+documento — a diferencia de `payment_made`, que sí viene en la del documento.
+Restar los dos como si fueran la misma unidad producía un «sin aplicar» falso
+en casi todos los anticipos en pesos: **205 de 221** el día del primer
+despliegue. Caso que lo destapó: ANT-2026-061 cobró 11.150.331 COP y los
+aplicó del todo, pero `payment_drawn` valía 3.612,71 — exactamente el
+`bcy_total` de esa factura (11.150.331 × `exchange_rate` 0,000324), no COP.
+
+Corrección: antes de que el anticipo llegue a `enlazarAnticipos`,
+`aplicadoEnMonedaDoc` divide `payment_drawn` entre `exchange_rate` (leído de
+`raw->>'exchange_rate'`, la única tabla que la trae). Sin tasa de cambio
+fiable (0, `null` o ausente) se trata como 0 aplicado — conservador: mejor un
+aviso de más que esconder un anticipo de verdad sin aplicar.
+`enlazarAnticipos` no cambió: sigue recibiendo `aplicado` ya en la moneda del
+documento, exactamente como asumía desde el principio.
+
+Verificado contra la base real tras la corrección: de 220 anticipos no
+borrador/anulados, 203 quedan totalmente aplicados y solo 17 con saldo real
+pendiente — todos con `payment_drawn = 0` genuino o un `drawn` parcial real,
+no un artefacto de moneda.
+
 ### `enlazarAnticipos(anticipos, ovs)`
 
-Función pura. Recibe los anticipos (ya sin borradores ni anulados) y las OV
-referenciadas con su `status` y su `currency_code`. Devuelve:
+Función pura. Recibe los anticipos (ya sin borradores ni anulados, y con
+`aplicado` ya convertido a la moneda del documento) y las OV referenciadas
+con su `status` y su `currency_code`. Devuelve:
 
 - **Importes por OV**: `cobrado = Σ payment_made` y
-  `sinAplicar = Σ max(0, payment_made − payment_drawn)`, sumando todos los
+  `sinAplicar = Σ max(0, payment_made − aplicado)`, sumando todos los
   anticipos de esa OV.
 - **Lista de atención**, una fila por anticipo con uno de estos motivos:
 
