@@ -278,15 +278,29 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 // Acepta VARIOS ids: basta con tener una de las apps indicadas. Sirve para recursos
 // compartidos por dos apps — p. ej. las OV pendientes, visibles tanto desde Contabilidad
 // como desde la app `ov-pendientes`, que se asigna a quien no debe ver la facturación.
+//
+// La regla vive en `userHasApp`, no aquí: es la ÚNICA fuente de "tiene esta app, o es
+// admin", para que un gate más fino dentro de un handler (p. ej. `veAnticipos` en
+// contabilidad) no pueda quedarse con una copia que diverja de esta si la regla cambia.
 export function requireApp(...appIds: string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const user = getPayload(req);
-    if (user?.role === 'admin' || appIds.some((id) => user?.apps?.includes(id))) {
+    if (userHasApp(user, ...appIds)) {
       next();
       return;
     }
     res.status(403).json({ error: 'forbidden' });
   };
+}
+
+/**
+ * ¿Tiene el usuario alguna de las apps indicadas, o es admin? Única fuente de esta regla:
+ * la usan `requireApp` (para bloquear la petición entera) y cualquier gate más fino dentro
+ * de un handler (p. ej. `veAnticipos` en contabilidad, que decide solo si se añaden unos
+ * campos a una respuesta que de todas formas se envía).
+ */
+export function userHasApp(user: JwtPayload | null, ...appIds: string[]): boolean {
+  return user?.role === 'admin' || appIds.some((id) => user?.apps?.includes(id));
 }
 
 /**

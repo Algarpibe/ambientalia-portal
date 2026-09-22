@@ -3,6 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import type { Pool } from '@algarpibe/zoho-sync';
+import type { AnticiposEnlazados } from './anticipos.js';
 import { clearCache } from '../cache.js';
 
 // Mismo arranque que router.test.ts: auth.ts lee JWT_SECRET AL CARGAR, así que el env se fija
@@ -25,8 +26,10 @@ vi.mock('../db.js', () => ({
 }));
 
 // Los anticipos se simulan con la lógica REAL de enlace sobre un caso fijo; `falla` imita que
-// books.retainer_invoices aún no exista (el worker sin desplegar).
-const anticiposMock = vi.hoisted(() => ({ falla: false }));
+// books.retainer_invoices aún no exista (el worker sin desplegar); `fallaFusion` imita que la
+// LECTURA vaya bien pero la fusión posterior (conAnticipo, o el acceso al Map de resultados)
+// reviente por algo inesperado — el otro tramo que la resiliencia debe cubrir.
+const anticiposMock = vi.hoisted(() => ({ falla: false, fallaFusion: false }));
 vi.mock('./anticipos.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('./anticipos.js')>();
   return {
@@ -37,6 +40,10 @@ vi.mock('./anticipos.js', async (importOriginal) => {
         [{ numero: 'ANT-2026-063', fecha: '2026-09-15', estado: 'paid', cliente: 'SGS', moneda: 'COP', cobrado: 1000, aplicado: 0, referencia: null, descripciones: ['Anticipo OV-2026-167'] }],
         [{ numero: 'OV-2026-167', estado: 'open', moneda: 'COP' }],
       );
+    }),
+    conAnticipo: vi.fn((o: { salesorder_number: string }, enl: AnticiposEnlazados) => {
+      if (anticiposMock.fallaFusion) throw new Error('fusión rota');
+      return real.conAnticipo(o, enl);
     }),
   };
 });
@@ -67,6 +74,7 @@ beforeAll(async () => {
 beforeEach(() => {
   clearCache();
   anticiposMock.falla = false;
+  anticiposMock.fallaFusion = false;
 });
 
 const USER_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
@@ -107,6 +115,16 @@ describe('anticipos en GET /contabilidad/ov-pendientes', () => {
 
   it('si leer los anticipos falla, la tabla responde igual, sin ellos', async () => {
     anticiposMock.falla = true;
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await get('/api/contabilidad/ov-pendientes', ['contabilidad']);
+    spy.mockRestore();
+    expect(res.status).toBe(200);
+    expect(res.body.orders).toHaveLength(1);
+    expect(res.body.orders[0]).not.toHaveProperty('anticipoCobrado');
+  });
+
+  it('si la fusión de anticipos falla (no solo la lectura), la tabla sigue respondiendo sin ellos', async () => {
+    anticiposMock.fallaFusion = true;
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const res = await get('/api/contabilidad/ov-pendientes', ['contabilidad']);
     spy.mockRestore();
