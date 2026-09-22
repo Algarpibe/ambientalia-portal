@@ -8,6 +8,7 @@ import { useColumnPrefs, clavePrefs } from './useColumnPrefs';
 import { getUserId } from '@suite/auth-client';
 import ResumenMensual from './ResumenMensual';
 import OVPendientes from './OVPendientes';
+import AnticiposAtencion from './AnticiposAtencion';
 import DetalleModal from './DetalleModal';
 
 type Estado = 'todas' | 'pagada' | 'saldo' | 'vencida';
@@ -238,8 +239,10 @@ export default function App() {
 
       </div>
 
-      {/* `bare`: la cabecera propia de la sección sobra, ya la da la pestaña. */}
+      {/* `bare`: la cabecera propia de la sección sobra, ya la da la pestaña. El aviso de
+          anticipos va solo aquí: ni la app ov-pendientes ni el widget lo montan. */}
       <div className={tab === 'ov' ? '' : 'hidden'}>
+        <AnticiposAtencion />
         <OVPendientes bare />
       </div>
 
