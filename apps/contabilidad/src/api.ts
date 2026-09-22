@@ -70,6 +70,9 @@ export interface OVPendienteFacturable extends PendingSalesOrder {
   ticket: string | null;
   trato: string;
   qt: string;
+  /** Solo llegan si el usuario tiene Contabilidad. `null` = la OV no tiene anticipos. */
+  anticipoCobrado?: number | null;
+  anticipoSinAplicar?: number | null;
 }
 
 import { mensajeDeError } from '@suite/http';
@@ -117,10 +120,14 @@ export interface DetalleFactura {
   fecha: string; vencimiento: string | null; terminos: string | null; ov: string | null;
   saldo: number; lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
 }
+/** Espejo de AnticipoDeOV en apps/hub-api/src/contabilidad/anticipos.ts */
+export interface AnticipoDeOV { numero: string; fecha: string | null; estado: string | null; cobrado: number; sinAplicar: number; }
 export interface DetalleOV {
   numero: string; cliente: string; nit: string | null; direccion: string | null;
   fecha: string; entrega: string | null; terminos: string | null;
   lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
+  /** Solo llega si el usuario tiene Contabilidad. */
+  anticipos?: AnticipoDeOV[];
 }
 
 export async function fetchFacturaDetalle(numero: string): Promise<DetalleFactura> {
@@ -158,4 +165,33 @@ export async function fetchFacturasPorEntregar(): Promise<FacturaPorEntregar[]> 
   const data = (await res.json()) as { facturas?: FacturaPorEntregar[] };
   if (!Array.isArray(data.facturas)) throw new Error('Formato inesperado del hub (facturas por entregar).');
   return data.facturas;
+}
+
+/** Espejo de apps/hub-api/src/contabilidad/anticipos.ts */
+export type MotivoAtencion =
+  | 'sin_referencia'
+  | 'varias_ov'
+  | 'ov_inexistente'
+  | 'moneda_distinta'
+  | 'sin_aplicar_ov_cerrada';
+
+export interface AnticipoAtencion {
+  numero: string;
+  cliente: string | null;
+  fecha: string | null;
+  cobrado: number;
+  sinAplicar: number;
+  motivo: MotivoAtencion;
+  ov: string | null;
+  estadoOV: string | null;
+  texto: string;
+}
+
+/** Anticipos que requieren atención. Solo Contabilidad; lanza si falla, como las demás. */
+export async function fetchAnticiposAtencion(): Promise<AnticipoAtencion[]> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/anticipos-atencion`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { anticipos?: AnticipoAtencion[] };
+  if (!Array.isArray(data.anticipos)) throw new Error('Formato inesperado del hub (anticipos).');
+  return data.anticipos;
 }
