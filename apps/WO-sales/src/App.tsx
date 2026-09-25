@@ -160,7 +160,9 @@ function nombreDesdeCabecera(cd: string | null): string | null {
 }
 
 function App() {
-  const [desde, setDesde] = useState(`${anioActual}-01-01`);
+  // Vacío = todas las OV abiertas sin importar el año (el estado "vivo" es lo que
+  // restringe, no la fecha). El usuario puede acotar poniendo un "Desde".
+  const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState(`${anioActual}-12-31`);
   const [cliente, setCliente] = useState('');
 
@@ -184,7 +186,9 @@ function App() {
     };
 
   const queryString = () => {
-    const p = new URLSearchParams({ from: desde, to: hasta });
+    const p = new URLSearchParams({ to: hasta });
+    // "Desde" vacío = sin piso: el backend cae a su rango por defecto (todas las abiertas).
+    if (desde) p.set('from', desde);
     if (cliente.trim()) p.set('cliente', cliente.trim());
     return p.toString();
   };
@@ -305,7 +309,7 @@ function App() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
           <div>
             <label htmlFor="wo-desde" className="block text-sm font-medium text-gray-700 mb-1.5">
-              Desde
+              Desde <span className="font-normal text-gray-400">(vacío = todas las abiertas)</span>
             </label>
             <input
               id="wo-desde"

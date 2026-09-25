@@ -50,12 +50,14 @@ function hoyEnBogota(ahora: Date): string {
   return `${parte('year')}-${parte('month')}-${parte('day')}`;
 }
 
-/** Por defecto, el año actual: las OV de 2021/2025 que siguen "open" son casi seguro
- *  abandonadas, y un pedido obsoleto cargado en WO reserva inventario y puede
- *  bloquear una facturación urgente. Se pueden incluir ampliando el rango. */
-function rangoPorDefecto(hoyIso: string): { desde: string; hasta: string } {
+/** Por defecto, TODAS las OV abiertas sin importar el año: el filtro de estado
+ *  (estadosVivos) ya restringe a las vivas, así que el rango por defecto no debe excluir
+ *  por fecha. El piso 2000-01-01 cubre cualquier OV histórica del hub (la más antigua es
+ *  de 2021). Se puede acotar pasando `from`. Este default lo usan la descarga y el correo
+ *  automático (que no tiene UI para elegir rango). */
+export function rangoPorDefecto(hoyIso: string): { desde: string; hasta: string } {
   const anio = hoyIso.slice(0, 4);
-  return { desde: `${anio}-01-01`, hasta: `${anio}-12-31` };
+  return { desde: '2000-01-01', hasta: `${anio}-12-31` };
 }
 
 /**
