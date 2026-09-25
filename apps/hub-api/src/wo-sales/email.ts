@@ -5,7 +5,15 @@ import type { EmailPendiente, ResumenEmail } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 import { buildWorldOfficeCsv } from './builder.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
-import { cambiadasDesde, guardarEstado, leerEstado, marcarEnviados, recipientesPendientes } from './email.repo.js';
+import {
+  cambiadasDesde,
+  destinatariosConEstado,
+  guardarEstado,
+  leerEstado,
+  marcarCortes,
+  marcarEnviados,
+} from './email.repo.js';
+import { decidirEnvioDestinatario, ultimaFranja } from './frecuencia.js';
 
 /** Huella estable del contenido del archivo. Cubre OV nueva, modificada y la que sale. */
 export function hashMatriz(matriz: string[][]): string {
@@ -40,27 +48,37 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
 }
 
 /**
- * Decide si hay que enviar y arma el payload para n8n. Envía a los destinatarios que aún
- * no tienen el archivo actual (su último hash recibido ≠ el de ahora): todos cuando el
- * contenido cambió, o solo el usuario recién añadido si el contenido es el mismo. NO
- * marca nada como enviado aquí (eso lo hace confirmarEnvio): si n8n no confirma, el
- * próximo ciclo reintenta a los mismos.
+ * Decide si hay que enviar y arma el payload para n8n. Cada destinatario se decide por
+ * separado con su frecuencia (ver frecuencia.ts): 'inmediato' recibe en cuanto su último
+ * archivo recibido difiere del actual; diario/semanal/fin de mes solo en una franja nueva
+ * y si hubo cambios; 'nunca' no recibe. Las franjas nuevas SIN cambios se cierran aquí
+ * mismo (un cambio posterior espera a la franja siguiente); las que llevan envío se sellan
+ * en confirmarEnvio, así un envío que n8n no confirma se reintenta en el próximo ciclo.
  */
 export async function computarPendiente(
   db: Pool,
   source: SalesOrderSource,
   config: WoSalesConfig,
   filtro: SalesOrderFiltro,
-  nombreArchivo: string
+  nombreArchivo: string,
+  ahora: Date = new Date()
 ): Promise<EmailPendiente> {
   const ordenes = await source.ordenesVivas(filtro);
   const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config);
   const token = hashMatriz(matriz);
 
   const estado = await leerEstado(db);
-  const destinatarios = await recipientesPendientes(db, token);
+  const decisiones = (await destinatariosConEstado(db)).map((d) => ({
+    d,
+    ...decidirEnvioDestinatario(d.estado, token, ahora),
+  }));
+  await marcarCortes(
+    db,
+    decisiones.filter((x) => !x.enviar && x.franja).map((x) => ({ email: x.d.email, corte: x.franja as Date }))
+  );
+  const destinatarios = decisiones.filter((x) => x.enviar).map((x) => x.d);
   if (destinatarios.length === 0) {
-    // Nadie pendiente: o no hay destinatarios, o todos ya tienen el archivo actual.
+    // Nadie pendiente: sin destinatarios, todos al día, o no les toca todavía.
     return { enviar: false };
   }
 
@@ -101,8 +119,22 @@ export async function computarPendiente(
  * Además sella la fecha global de último envío, que alimenta la lista "OV con cambios"
  * del cuerpo del correo (cambiadasDesde).
  */
-export async function confirmarEnvio(db: Pool, token: string, emails?: string[]): Promise<void> {
-  const destinatarios = emails ?? (await recipientesPendientes(db, token)).map((d) => d.email);
+export async function confirmarEnvio(
+  db: Pool,
+  token: string,
+  emails?: string[],
+  ahora: Date = new Date()
+): Promise<void> {
+  const todos = await destinatariosConEstado(db);
+  const destinatarios =
+    emails ?? todos.filter((d) => decidirEnvioDestinatario(d.estado, token, ahora).enviar).map((d) => d.email);
   await marcarEnviados(db, token, destinatarios);
+  // Sella la franja de quienes la usan (diario / semanal / fin de mes).
+  const enviados = new Set(destinatarios);
+  const cortes = todos
+    .filter((d) => enviados.has(d.email))
+    .map((d) => ({ email: d.email, corte: ultimaFranja(d.estado.preferencia, ahora) }))
+    .filter((c): c is { email: string; corte: Date } => c.corte !== null);
+  await marcarCortes(db, cortes);
   await guardarEstado(db, token);
 }

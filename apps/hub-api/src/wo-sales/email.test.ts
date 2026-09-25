@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { hashMatriz, construirCuerpo, computarPendiente } from './email.js';
 import { DEFAULT_CONFIG } from './config.js';
+import { buildWorldOfficeCsv } from './builder.js';
 import type { SalesOrder } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 
@@ -40,17 +41,55 @@ describe('computarPendiente', () => {
   } as unknown as SalesOrderSource;
   const filtro: SalesOrderFiltro = { desde: '2026-01-01', hasta: '2026-12-31' };
 
-  /** Fake db: `pendientes` son los destinatarios que devuelve recipientesPendientes. */
-  function fakeDb(pendientes: { email: string; nombre: string }[]) {
-    return {
-      query: async (sql: string) => {
+  /** Fake db: `filas` son los destinatarios que devuelve destinatariosConEstado (sin
+   *  hash_recibido ni frecuencia = usuario nuevo en 'inmediato'). `cortes` captura los
+   *  parámetros de cada sellado de franja. */
+  function fakeDb(filas: Record<string, unknown>[]) {
+    const cortes: unknown[][] = [];
+    const db = {
+      query: async (sql: string, params: unknown[]) => {
+        if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
+          cortes.push(params);
+          return { rows: [] };
+        }
         if (sql.includes('wo_sales_email_estado')) return { rows: [] };
-        if (sql.includes('wo_sales_email_sent')) return { rows: pendientes };
+        if (sql.includes('wo_sales_email_sent')) return { rows: filas };
         if (sql.includes('books.sales_orders')) return { rows: [{ salesorder_number: 'OV-1' }] };
         return { rows: [] };
       },
-    } as any;
+    };
+    return Object.assign(db, { cortes }) as any;
   }
+
+  // Hora de Colombia → instante; diario a las 8 con la franja de hoy ya pasada.
+  const ahora = new Date('2026-09-25T10:00-05:00');
+  const hoy8 = new Date('2026-09-25T08:00-05:00');
+  const ayer8 = new Date('2026-09-24T08:00-05:00');
+  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG).matriz);
+  const diario = { frecuencia: 'diario', hora: 8, dia_semana: null };
+
+  it('diario: franja nueva con cambios → se envía, y la franja NO se sella hasta confirmar', async () => {
+    const db = fakeDb([{ email: 'x@x.co', nombre: 'X', hash_recibido: 'viejo', ...diario, ultimo_corte: ayer8 }]);
+    const r = await computarPendiente(db, source, DEFAULT_CONFIG, filtro, 'a.xls', ahora);
+    expect(r.enviar).toBe(true);
+    expect(db.cortes).toEqual([]);
+  });
+
+  it('diario: franja ya procesada → no se envía aunque haya cambios', async () => {
+    const db = fakeDb([{ email: 'x@x.co', nombre: 'X', hash_recibido: 'viejo', ...diario, ultimo_corte: hoy8 }]);
+    expect((await computarPendiente(db, source, DEFAULT_CONFIG, filtro, 'a.xls', ahora)).enviar).toBe(false);
+  });
+
+  it('diario: franja nueva SIN cambios → no se envía y la franja se cierra ya', async () => {
+    const db = fakeDb([{ email: 'x@x.co', nombre: 'X', hash_recibido: tokenActual(), ...diario, ultimo_corte: ayer8 }]);
+    expect((await computarPendiente(db, source, DEFAULT_CONFIG, filtro, 'a.xls', ahora)).enviar).toBe(false);
+    expect(db.cortes).toEqual([[['x@x.co'], [hoy8.toISOString()]]]);
+  });
+
+  it('nunca: no se envía aunque haya cambios', async () => {
+    const db = fakeDb([{ email: 'x@x.co', nombre: 'X', hash_recibido: 'viejo', frecuencia: 'nunca', hora: null, dia_semana: null, ultimo_corte: null }]);
+    expect((await computarPendiente(db, source, DEFAULT_CONFIG, filtro, 'a.xls', ahora)).enviar).toBe(false);
+  });
 
   it('envía solo a los destinatarios pendientes de ese hash', async () => {
     const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), source, DEFAULT_CONFIG, filtro, 'a.xls');

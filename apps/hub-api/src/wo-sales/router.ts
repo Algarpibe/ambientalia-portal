@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { requireAuth, requireApp, requireCronToken } from '../auth.js';
+import { requireAuth, requireApp, requireCronToken, requireAdmin } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { buildWorldOfficeCsv } from './builder.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
@@ -9,6 +9,8 @@ import { DEFAULT_CONFIG } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
 import type { Warning } from './types.js';
 import { computarPendiente, confirmarEnvio } from './email.js';
+import { destinatariosConEstado, guardarFrecuencia } from './email.repo.js';
+import { validarPreferencia } from './frecuencia.js';
 
 // Router de WO-sales, montado bajo `/api` (ver index.ts). Expone la vista previa y
 // la descarga del CSV que World Office importa como pedidos.
@@ -236,8 +238,42 @@ export function createWoSalesRouter(db: Pool): Router {
   });
 
   // Los destinatarios del correo NO se gestionan aquí: son los usuarios del portal con
-  // la app WO-sales asignada (ver email.repo.ts → listarActivos). Se administran desde
-  // "Gestión de Usuarios → Asignar apps", así que no hay CRUD de destinatarios.
+  // la app WO-sales asignada (ver email.repo.ts → destinatariosConEstado). Se administran
+  // desde "Gestión de Usuarios → Asignar apps". Lo que SÍ se gestiona aquí (solo admin) es
+  // la frecuencia con que le llega el correo a cada uno.
+
+  router.get('/wo-sales/email/frecuencias', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const destinatarios = await destinatariosConEstado(db);
+      res.json(
+        destinatarios.map((d) => ({
+          email: d.email,
+          nombre: d.nombre,
+          frecuencia: d.estado.preferencia.frecuencia,
+          hora: d.estado.preferencia.hora,
+          diaSemana: d.estado.preferencia.diaSemana,
+        }))
+      );
+    } catch (e) {
+      sendError(res, e, 'wo_sales_email_frecuencias');
+    }
+  });
+
+  router.put('/wo-sales/email/frecuencias', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const email = (req.body as { email?: unknown } | undefined)?.email;
+      if (typeof email !== 'string' || !email) return void res.status(400).json({ error: 'missing email' });
+      const v = validarPreferencia(req.body);
+      if (!v.ok) return void res.status(400).json({ error: v.error });
+      // Solo se configura a quien de verdad es destinatario (activo y con la app).
+      const existe = (await destinatariosConEstado(db)).some((d) => d.email === email);
+      if (!existe) return void res.status(404).json({ error: 'not_a_recipient' });
+      await guardarFrecuencia(db, email, v.preferencia);
+      res.json({ ok: true });
+    } catch (e) {
+      sendError(res, e, 'wo_sales_email_frecuencia_guardar');
+    }
+  });
 
   return router;
 }
