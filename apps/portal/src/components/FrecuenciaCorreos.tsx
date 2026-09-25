@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Mail, Save, Check } from 'lucide-react';
-import { authHeaders } from '@suite/auth-client';
-
-const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
+import { Mail, Save } from 'lucide-react';
+import { authFetch } from '../lib/api';
+import { notify } from '../lib/notify';
 
 type Frecuencia = 'inmediato' | 'diario' | 'semanal' | 'fin_de_mes' | 'nunca';
 
@@ -13,6 +12,8 @@ interface Destinatario {
   hora: number | null;
   diaSemana: number | null;
 }
+
+const RUTA = '/api/wo-sales/email/frecuencias';
 
 const ETIQUETA: Record<Frecuencia, string> = {
   inmediato: 'Inmediato (con cada cambio)',
@@ -32,30 +33,32 @@ const mismo = (a: Destinatario, b: Destinatario) =>
   a.frecuencia === b.frecuencia && a.hora === b.hora && a.diaSemana === b.diaSemana;
 
 const selectCls =
-  'rounded-lg border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none';
+  'rounded-lg border border-gray-200 px-2.5 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-200';
 
 /**
- * Panel de administración: frecuencia con la que le llega el correo automático a cada
- * destinatario (usuarios activos con la app asignada). Solo se monta para admins; el
- * backend lo exige igualmente (requireAdmin).
+ * Ajustes (solo administradores): frecuencia con la que le llega a cada destinatario el
+ * correo automático de pedidos de World Office (app WO-sales). Los destinatarios son los
+ * usuarios activos con esa app asignada. El backend exige admin igualmente.
  */
 export default function FrecuenciaCorreos() {
   const [guardados, setGuardados] = useState<Destinatario[]>([]);
   const [borradores, setBorradores] = useState<Destinatario[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState<string | null>(null);
-  const [recienGuardado, setRecienGuardado] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/wo-sales/email/frecuencias`, { headers: authHeaders() });
-        if (!res.ok) throw new Error(`No se pudo cargar la configuración (${res.status})`);
-        const data = (await res.json()) as Destinatario[];
-        setGuardados(data);
-        setBorradores(data);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Error al cargar la configuración');
+        const res = await authFetch(RUTA);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        const lista = Array.isArray(data) ? (data as Destinatario[]) : [];
+        setGuardados(lista);
+        setBorradores(lista);
+      } catch {
+        notify('No se pudo cargar la frecuencia de correos.', 'error');
+      } finally {
+        setCargando(false);
       }
     })();
   }, []);
@@ -74,48 +77,40 @@ export default function FrecuenciaCorreos() {
 
   const guardar = async (d: Destinatario) => {
     setGuardando(d.email);
-    setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/wo-sales/email/frecuencias`, {
+      const res = await authFetch(RUTA, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ email: d.email, frecuencia: d.frecuencia, hora: d.hora, diaSemana: d.diaSemana }),
       });
-      if (!res.ok) throw new Error(`No se pudo guardar (${res.status})`);
+      if (!res.ok) throw new Error(String(res.status));
       setGuardados((gs) => gs.map((g) => (g.email === d.email ? d : g)));
-      setRecienGuardado(d.email);
-      setTimeout(() => setRecienGuardado((e) => (e === d.email ? null : e)), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al guardar');
+      notify(`Frecuencia de ${d.nombre} guardada.`, 'info');
+    } catch {
+      notify(`No se pudo guardar la frecuencia de ${d.nombre}.`, 'error');
     } finally {
       setGuardando(null);
     }
   };
 
   return (
-    <section className="bg-white rounded-3xl border border-gray-200 shadow-soft p-6 mt-6">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
       <div className="flex items-center gap-2 mb-1">
-        <Mail size={18} className="text-gray-500" />
-        <h2 className="text-base font-semibold text-gray-900">Frecuencia de correos</h2>
-        <span className="text-xs text-gray-400">(solo administradores)</span>
+        <Mail className="w-5 h-5 text-blue-500" />
+        <h2 className="text-lg font-semibold text-gray-900">Frecuencia de correos · Carga de Pedidos WO</h2>
       </div>
-      <p className="text-sm text-gray-500 mb-4">
-        Cada cuánto le llega a cada usuario el archivo por correo. Diario, semanal y fin de mes se envían a la hora
-        elegida (hora de Colombia) y solo si hubo cambios desde su último correo.
+      <p className="text-sm text-gray-500 mb-6">
+        Cada cuánto le llega a cada usuario el archivo de pedidos por correo. Diario, semanal y último día del mes
+        se envían a la hora elegida (hora de Colombia) y solo si hubo cambios desde su último correo.
       </p>
 
-      {error && (
-        <p role="alert" className="text-sm text-red-600 mb-3">
-          {error}
-        </p>
-      )}
-
-      {borradores.length === 0 && !error ? (
-        <p className="text-sm text-gray-500">No hay usuarios activos con la app asignada.</p>
+      {cargando ? (
+        <p className="text-sm text-gray-400">Cargando…</p>
+      ) : borradores.length === 0 ? (
+        <p className="text-sm text-gray-500">No hay usuarios activos con la app Carga de Pedidos WO asignada.</p>
       ) : (
         <div className="divide-y divide-gray-100">
           {borradores.map((d) => {
-            const original = guardados.find((g) => g.email === d.email)!;
+            const original = guardados.find((g) => g.email === d.email) ?? d;
             const cambiado = !mismo(d, original);
             return (
               <div key={d.email} className="flex flex-wrap items-center gap-3 py-3">
@@ -127,8 +122,7 @@ export default function FrecuenciaCorreos() {
                   aria-label={`Frecuencia de ${d.nombre}`}
                   className={selectCls}
                   value={d.frecuencia}
-                  onChange={(e) => cambiar(d.email, { frecuencia: e.target.value as Frecuencia })}
-                >
+                  onChange={(e) => cambiar(d.email, { frecuencia: e.target.value as Frecuencia })}>
                   {(Object.keys(ETIQUETA) as Frecuencia[]).map((f) => (
                     <option key={f} value={f}>
                       {ETIQUETA[f]}
@@ -140,8 +134,7 @@ export default function FrecuenciaCorreos() {
                     aria-label={`Día de ${d.nombre}`}
                     className={selectCls}
                     value={d.diaSemana ?? ''}
-                    onChange={(e) => cambiar(d.email, { diaSemana: e.target.value ? Number(e.target.value) : null })}
-                  >
+                    onChange={(e) => cambiar(d.email, { diaSemana: e.target.value ? Number(e.target.value) : null })}>
                     <option value="">Día…</option>
                     {DIAS.map((dia, i) => (
                       <option key={dia} value={i + 1}>
@@ -155,8 +148,7 @@ export default function FrecuenciaCorreos() {
                     aria-label={`Hora de ${d.nombre}`}
                     className={selectCls}
                     value={d.hora ?? ''}
-                    onChange={(e) => cambiar(d.email, { hora: e.target.value ? Number(e.target.value) : null })}
-                  >
+                    onChange={(e) => cambiar(d.email, { hora: e.target.value ? Number(e.target.value) : null })}>
                     <option value="">Hora…</option>
                     {HORAS.map((h) => (
                       <option key={h} value={h}>
@@ -169,16 +161,14 @@ export default function FrecuenciaCorreos() {
                   type="button"
                   disabled={!cambiado || !esValido(d) || guardando === d.email}
                   onClick={() => guardar(d)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-                >
-                  {recienGuardado === d.email ? <Check size={14} /> : <Save size={14} />}
-                  {recienGuardado === d.email ? 'Guardado' : 'Guardar'}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                  <Save className="w-4 h-4" /> Guardar
                 </button>
               </div>
             );
           })}
         </div>
       )}
-    </section>
+    </div>
   );
 }

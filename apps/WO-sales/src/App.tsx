@@ -14,8 +14,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 // Auth: JWT emitido por hub-api /api/login (guardado por el portal en localStorage).
-import { authHeaders, esAdmin } from '@suite/auth-client';
-import FrecuenciaCorreos from './FrecuenciaCorreos';
+import { authHeaders } from '@suite/auth-client';
 
 // ---------------------------------------------------------------------------
 // Tipos (espejo de apps/hub-api/src/wo-sales/types.ts)
@@ -621,7 +620,6 @@ function App() {
           </section>
         </>
       )}
-      {esAdmin() && <FrecuenciaCorreos />}
     </main>
   );
 }

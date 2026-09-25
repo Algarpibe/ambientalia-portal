@@ -5,6 +5,7 @@ import { notify } from '../lib/notify';
 import { fileToResizedDataUrl } from '../lib/image';
 import { useProfile, notifyProfileUpdated } from '../hooks/useProfile';
 import Avatar from '../components/Avatar';
+import FrecuenciaCorreos from '../components/FrecuenciaCorreos';
 
 const MIN_PASSWORD = 8; // coincide con el backend (Req 1.6)
 
@@ -226,6 +227,9 @@ export default function Configuracion() {
             )}
           </div>
         </div>
+
+        {/* Solo administradores: frecuencia del correo automático de Carga de Pedidos WO */}
+        {isAdmin && <FrecuenciaCorreos />}
       </div>
     </div>
   );

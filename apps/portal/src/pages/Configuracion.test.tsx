@@ -35,6 +35,12 @@ describe('Configuración', () => {
     expect(screen.getByText(/marzo de 2026/i)).toBeTruthy();
   });
 
+  it('un administrador ve la sección de frecuencia de correos de Carga de Pedidos WO', async () => {
+    render(<Configuracion />);
+    expect(screen.getByText(/Frecuencia de correos/i)).toBeTruthy();
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/api/wo-sales/email/frecuencias'));
+  });
+
   // El nombre se fija en el registro: es con el que se firman las aprobaciones.
   it('el nombre completo se muestra pero no se edita', () => {
     render(<Configuracion />);
