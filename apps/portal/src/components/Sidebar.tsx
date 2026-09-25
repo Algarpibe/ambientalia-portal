@@ -151,13 +151,15 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             {!plegada && 'Usuarios'}
           </Link>
         )}
-        <button
-          className={`nav-item w-full ${plegada ? 'justify-center px-0' : ''}`}
+        <Link
+          to="/configuracion"
+          onClick={alNavegar}
+          className={itemClass('/configuracion', plegada)}
           title={plegada ? 'Ajustes' : undefined}
         >
           <Settings size={20} className="shrink-0" />
           {!plegada && 'Ajustes'}
-        </button>
+        </Link>
       </nav>
 
       <button

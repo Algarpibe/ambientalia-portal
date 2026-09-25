@@ -77,6 +77,20 @@ describe('Sidebar — plegado', () => {
   });
 });
 
+describe('Sidebar — enlace Ajustes', () => {
+  // Era un <button> sin destino: no navegaba a ningún sitio.
+  it('"Ajustes" es un enlace a /configuracion, para cualquier rol', () => {
+    for (const role of ['admin', 'reader'] as const) {
+      cleanup();
+      setAuth({ isAuthenticated: true, role, user_id: 'u' });
+      renderSidebar();
+      const link = screen.getByText('Ajustes').closest('a');
+      expect(link).toBeTruthy();
+      expect(link!.getAttribute('href')).toBe('/configuracion');
+    }
+  });
+});
+
 describe('Sidebar — enlace Usuarios', () => {
   it('rol admin → enlace "Usuarios" visible y apunta a /admin/users', () => {
     setAuth({ isAuthenticated: true, role: 'admin', user_id: 'a' });
