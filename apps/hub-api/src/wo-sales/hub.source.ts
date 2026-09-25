@@ -66,6 +66,7 @@ const ORDENES_VIVAS_SQL = `
        AND so.date >= $2::date
        AND so.date <= $3::date
        AND ($4::text IS NULL OR so.customer_name ILIKE '%' || $4 || '%')
+       AND NOT (so.salesorder_number = ANY($5::text[]))
   )
   -- No se excluye la OV por tener factura: la facturación se descuenta POR LÍNEA con
   -- quantity_invoiced (más abajo, en TS). Una OV parcialmente facturada aparece con
@@ -101,6 +102,7 @@ const ORDENES_ANTIGUAS_SQL = `
    WHERE so.status = ANY($1::text[])
      AND so.date < $2::date
      AND ($3::text IS NULL OR so.customer_name ILIKE '%' || $3 || '%')
+     AND NOT (so.salesorder_number = ANY($4::text[]))
    ORDER BY so.date`;
 
 interface Fila {
@@ -204,6 +206,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         filtro.desde,
         filtro.hasta,
         filtro.cliente ?? null,
+        config.ordenesExcluidas,
       ]);
 
       // Clave = salesorder_id (la PK), no el número: si dos OV compartieran número,
@@ -266,6 +269,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         config.estadosVivos,
         filtro.desde,
         filtro.cliente ?? null,
+        config.ordenesExcluidas,
       ]);
       return (rows as { salesorder_number: string; fecha: string; customer_name: string | null }[]).map(
         (r) => ({ numero: r.salesorder_number, fecha: r.fecha, clienteNombre: r.customer_name })

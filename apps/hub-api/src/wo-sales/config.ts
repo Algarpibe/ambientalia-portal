@@ -51,6 +51,8 @@ export interface WoSalesConfig {
   vencimiento: VencimientoConfig;
   /** Estados de OV que se consideran vivas. */
   estadosVivos: string[];
+  /** Números de OV que nunca entran (tabla, archivo ni correo): p. ej. OV de prueba. */
+  ordenesExcluidas: string[];
   /**
    * SKUs válidos en World Office (§5.1). Un SKU de una línea que no esté aquí se
    * reporta ('sku_no_en_wo'): World Office lo rechazaría. Vacío = validación de SKU
@@ -99,6 +101,8 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   // pendientes: lo ya facturado se descuenta por línea con quantity_invoiced (ver
   // hub.source.ts). Una OV totalmente facturada sale por su status ('invoiced').
   estadosVivos: [...ESTADOS_OV_POR_FACTURAR],
+  // OV de prueba creada desde otro software (Ambientalia S.A.S., 06/08/2026).
+  ordenesExcluidas: ['OV-2026-1000-01'],
 
   // Listas maestras de World Office, generadas del modelo (ver wo-master-lists.ts):
   // 883 SKU y 74 centros de costo. Regenerar si WO cambia sus listas.

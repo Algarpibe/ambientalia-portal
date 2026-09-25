@@ -74,8 +74,9 @@ export async function cambiadasDesde(
     `SELECT salesorder_number FROM books.sales_orders
       WHERE status = ANY($1::text[]) AND date >= $2::date AND date <= $3::date
         AND ($4::timestamptz IS NULL OR zoho_last_modified > $4::timestamptz)
+        AND NOT (salesorder_number = ANY($5::text[]))
       ORDER BY salesorder_number`,
-    [config.estadosVivos, filtro.desde, filtro.hasta, desde]
+    [config.estadosVivos, filtro.desde, filtro.hasta, desde, config.ordenesExcluidas]
   );
   return (rows as { salesorder_number: string }[]).map((r) => r.salesorder_number);
 }
