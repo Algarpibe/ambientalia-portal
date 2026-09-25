@@ -39,7 +39,6 @@ export interface WoSalesConfig {
    */
   consecutivoInicial: number;
   terceroInterno: string;
-  nota: string;
   formaPago: string;
   verificado: string;
   anulado: string;
@@ -78,7 +77,7 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   // último número ya cargado en WO (§8.1), no hardcodearse en 1.
   consecutivoInicial: 1,
   terceroInterno: '416544',
-  nota: 'PEDIDO',
+  // "Nota" ya no es fija: lleva el consecutivo XXX de la OV (ver builder, consecutivoOV).
   formaPago: 'Credito',
   verificado: '0',
   anulado: '0',

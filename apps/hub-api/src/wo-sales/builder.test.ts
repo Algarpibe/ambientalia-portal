@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildWorldOfficeCsv, sumarDias, derivarPrefijo } from './builder.js';
+import { buildWorldOfficeCsv, sumarDias, derivarPrefijo, consecutivoOV } from './builder.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { COLUMNS } from './columns.js';
 import type { SalesOrder } from './types.js';
@@ -66,7 +66,7 @@ describe('buildWorldOfficeCsv', () => {
     expect(valor('Fecha')).toBe('14/07/2026');
     expect(valor('Tercero Interno')).toBe('416544');
     expect(valor('Tercero Externo')).toBe('899999107'); // NIT
-    expect(valor('Nota')).toBe('PEDIDO');
+    expect(valor('Nota')).toBe('138'); // consecutivo XXX de OV-2026-138
     expect(valor('FormaDePago')).toBe('Credito');
     expect(valor('Verificado')).toBe('0');
     expect(valor('Anulado')).toBe('0');
@@ -204,6 +204,29 @@ describe('derivarPrefijo', () => {
   });
   it('usa el literal de config si se fijó', () => {
     expect(derivarPrefijo('2026-07-14', { ...DEFAULT_CONFIG, prefijo: 'OV_FIJO' })).toBe('OV_FIJO');
+  });
+});
+
+describe('Nota = consecutivo (XXX) de la OV', () => {
+  it('consecutivoOV toma lo que va después de "OV-AAAA-"', () => {
+    expect(consecutivoOV('OV-2026-021')).toBe('021');
+    expect(consecutivoOV('OV-2025-1000-01')).toBe('1000-01');
+    expect(consecutivoOV('RARO-9')).toBe('RARO-9'); // fuera de patrón: tal cual
+  });
+
+  it('una OV de otro año lleva su propio prefijo y su XXX en Nota', () => {
+    const ov: SalesOrder = { ...OV_BASE, numero: 'OV-2025-311', fecha: '2025-11-03' };
+    const campos = decodificar(buildWorldOfficeCsv([ov], DEFAULT_CONFIG).csv)[1].split(';');
+    expect(campos[COLUMNS.indexOf('prefijo')]).toBe('OV_25');
+    expect(campos[COLUMNS.indexOf('Nota')]).toBe('311');
+  });
+
+  it('dentro de un mismo DocumentoNúmero la Nota es constante (la de la primera OV)', () => {
+    const a: SalesOrder = { ...OV_BASE, numero: 'OV-2026-150' };
+    const b: SalesOrder = { ...OV_BASE, numero: 'OV-2026-151' }; // mismo (fecha, NIT)
+    const filas = decodificar(buildWorldOfficeCsv([a, b], DEFAULT_CONFIG).csv).filter(Boolean).slice(1);
+    const notas = new Set(filas.map((f) => f.split(';')[COLUMNS.indexOf('Nota')]));
+    expect([...notas]).toEqual(['150']);
   });
 });
 

@@ -33,6 +33,13 @@ export function derivarPrefijo(fechaIso: string, config: WoSalesConfig): string 
   return /^\d{4}$/.test(anio) ? `OV_${anio.slice(2)}` : '';
 }
 
+/** Consecutivo (XXX) del número de OV "OV-AAAA-XXX": todo lo que va después de
+ *  "OV-<año>-". Si el número no cumple ese patrón, se devuelve tal cual. */
+export function consecutivoOV(numero: string): string {
+  const m = /^OV-\d{4}-(.+)$/i.exec(numero.trim());
+  return m ? m[1] : numero.trim();
+}
+
 /** Normaliza un SKU para compararlo con el listado de World Office. `\s` incluye el
  *  NBSP, así que colapsa cualquier espacio raro; trim al final. El SKU es un token. */
 export function normSku(sku: string): string {
@@ -221,10 +228,16 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     (a, b) => a.fecha.localeCompare(b.fecha) || (a.nit ?? '').localeCompare(b.nit ?? '')
   );
   const numeroPorGrupo = new Map<string, number>();
+  // Nota = consecutivo (XXX) de la OV. Si un grupo (fecha, NIT) junta varias OV, se usa
+  // el de la primera para que las 31 columnas de encabezado sigan idénticas en el pedido.
+  const notaPorGrupo = new Map<string, string>();
   let siguienteNumero = config.consecutivoInicial;
   for (const ov of ordenadas) {
     const k = claveGrupo(ov);
-    if (!numeroPorGrupo.has(k)) numeroPorGrupo.set(k, siguienteNumero++);
+    if (!numeroPorGrupo.has(k)) {
+      numeroPorGrupo.set(k, siguienteNumero++);
+      notaPorGrupo.set(k, consecutivoOV(ov.numero));
+    }
   }
 
   for (const ov of ordenadas) {
@@ -284,7 +297,7 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)
-      config.nota, //                     7  Nota (PEDIDO)
+      campo(ov.numero, notaPorGrupo.get(claveGrupo(ov)) ?? ''), // 7 Nota (XXX de OV-AAAA-XXX)
       config.formaPago, //                8  FormaDePago (Credito)
       '', //                              9  FechaEntrega (vacía)
       '', //                              10 Moneda (vacía)
