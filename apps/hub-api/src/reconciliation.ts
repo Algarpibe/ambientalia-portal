@@ -28,6 +28,7 @@ export async function getInvoices(db: Pool, from?: string, to?: string): Promise
            i.due_date::text       AS due_date,
            i.status,
            i.total,
+           i.raw ->> 'currency_code' AS currency_code,
            COALESCE(NULLIF((i.raw::jsonb) ->> 'balance', '')::numeric, i.total, 0) AS balance
       FROM books.invoices i
       ${hasRange ? 'WHERE i.date BETWEEN $1 AND $2' : ''}

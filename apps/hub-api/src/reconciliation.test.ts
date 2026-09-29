@@ -31,13 +31,20 @@ describe('reconciliation — getInvoices', () => {
   it('mapea filas a InvoiceDetails con total/balance numéricos', async () => {
     const { pool } = poolReturning(() => [{
       invoice_number: 'FV-1', reference_number: 'OV-1', customer_name: 'ACME',
-      date: '2026-01-05', due_date: '2026-02-05', status: 'sent', total: 100, balance: '40',
+      date: '2026-01-05', due_date: '2026-02-05', status: 'sent', total: 100, balance: '40', currency_code: 'usd',
     }]);
     const inv = await getInvoices(pool);
     expect(inv[0]).toEqual({
       invoiceNumber: 'FV-1', orderNumber: 'OV-1', clientName: 'ACME',
       invoiceDate: '2026-01-05', dueDate: '2026-02-05', status: 'sent', total: 100, balance: 40,
+      currencyCode: 'USD',
     });
+  });
+
+  it('el SQL selecciona la moneda de la factura desde raw', async () => {
+    const { pool, query } = poolReturning(() => []);
+    await getInvoices(pool);
+    expect(query.mock.calls[0][0]).toMatch(/i\.raw ->> 'currency_code' AS currency_code/);
   });
 });
 

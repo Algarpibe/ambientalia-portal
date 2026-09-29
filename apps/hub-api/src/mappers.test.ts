@@ -22,7 +22,15 @@ describe('mapInvoiceRow', () => {
       status: 'overdue',
       total: 1190000,
       balance: 500000,
+      currencyCode: 'COP',
     });
+  });
+
+  it('maps currency_code upper-cased and defaults to COP when null/blank', () => {
+    const base = { invoice_number: 'I', customer_name: 'X', date: '2026-01-01' };
+    expect(mapInvoiceRow({ ...base, currency_code: 'usd' }).currencyCode).toBe('USD');
+    expect(mapInvoiceRow({ ...base, currency_code: null }).currencyCode).toBe('COP');
+    expect(mapInvoiceRow({ ...base, currency_code: '  ' }).currencyCode).toBe('COP');
   });
 
   it('coerces null money/reference to safe defaults', () => {

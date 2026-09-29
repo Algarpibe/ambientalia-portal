@@ -20,6 +20,7 @@ export interface InvoiceDetails {
   status: string;
   total: number;
   balance: number;
+  currencyCode: string;
 }
 
 export interface PaymentRecord {
@@ -43,6 +44,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceDetails {
     status: str(row.status),
     total: num(row.total),
     balance: num(row.balance),
+    currencyCode: str(row.currency_code).trim().toUpperCase() || 'COP',
   };
 }
 
