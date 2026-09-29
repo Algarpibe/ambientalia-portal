@@ -12,7 +12,7 @@ const BAR_RADIUS: [number, number, number, number] = [4, 4, 0, 0];
 
 const BAND_SERIES: Record<BandKey, { name: string; color: string }> = {
   onTime: { name: 'A tiempo', color: '#059669' },
-  d1_15: { name: '1–15 días', color: '#facc15' },
+  d1_15: { name: '1–15 días', color: '#ca8a04' },
   d16_30: { name: '16–30 días', color: '#f97316' },
   d31_60: { name: '31–60 días', color: '#dc2626' },
   over60: { name: 'Más de 60 días', color: '#7f1d1d' },
@@ -67,7 +67,8 @@ export default function YearlyTrendCharts({ rows, bands }: { rows: YearlyTrendRo
           <BarChart data={bandData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
             <XAxis dataKey="label" stroke="#64748b" />
-            <YAxis stroke="#64748b" domain={[0, 100]} unit="%" />
+            {/* Stacked shares can add up to 100.00000000000001; without allowDataOverflow Recharts stretches the axis past 100 %. */}
+            <YAxis stroke="#64748b" domain={[0, 100]} unit="%" allowDataOverflow />
             <Tooltip
               cursor={{ fill: '#f1f5f9' }}
               formatter={(v, _name, item) => {
