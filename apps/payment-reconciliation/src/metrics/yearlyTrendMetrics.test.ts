@@ -1,0 +1,91 @@
+import { describe, it, expect } from 'vitest';
+import type { ReconciledRow } from '../types';
+import { computeYearlyTrend } from './yearlyTrendMetrics';
+
+function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
+  return {
+    invoiceNumber: 'INV', orderNumber: 'OC', clientName: 'ACME',
+    invoiceDate: '1 ene 2025', dueDate: '1 ene 2025', status: 'paid',
+    total: 0, balance: 0,
+    paymentDates: [], paymentAmounts: [], totalPaid: 0,
+    isOverdue: false, maxDelayDays: 0, paymentDetails: [],
+    ...over,
+  };
+}
+
+const paidWithDelay = (delay: number) => [{ date: '01/01/2025', delay }];
+const TODAY = new Date(2026, 8, 29); // 29 Sep 2026
+
+const DATASET: ReconciledRow[] = [
+  row({ invoiceNumber: 'A', dueDate: '10 mar 2025', total: 100, paymentDetails: paidWithDelay(10) }),
+  row({ invoiceNumber: 'B', dueDate: '20 jun 2025', total: 300, paymentDetails: paidWithDelay(0) }),
+  row({ invoiceNumber: 'G', invoiceDate: '20 dic 2024', dueDate: '19 ene 2025', total: 100, paymentDetails: paidWithDelay(0) }),
+  row({ invoiceNumber: 'C', dueDate: '5 ene 2026', total: 200, paymentDetails: paidWithDelay(30) }),
+  row({ invoiceNumber: 'D', dueDate: '15 sep 2026', total: 50, balance: 50 }),
+  row({ invoiceNumber: 'E', dueDate: '15 oct 2026', total: 999, balance: 999 }),
+  row({ invoiceNumber: 'F', dueDate: null, total: 999 }),
+];
+
+describe('computeYearlyTrend', () => {
+  const result = computeYearlyTrend(DATASET, TODAY);
+  const byYear = (y: number) => result.find((r) => r.year === y)!;
+
+  it('groups by due-date year and sorts years ascending', () => {
+    expect(result.map((r) => r.year)).toEqual([2025, 2026]);
+  });
+
+  it('uses the due-date year, not the invoice-date year', () => {
+    expect(result.find((r) => r.year === 2024)).toBeUndefined();
+    expect(byYear(2025).invoiceCount).toBe(3);
+  });
+
+  it('excludes invoices not yet due and unreadable due dates', () => {
+    expect(byYear(2026).invoiceCount).toBe(2);
+  });
+
+  it('computes the simple average DPD', () => {
+    expect(byYear(2025).averageDPD).toBeCloseTo(10 / 3, 5);
+    expect(byYear(2026).averageDPD).toBeCloseTo(22, 5);
+  });
+
+  it('computes the value-weighted average DPD over all due invoices', () => {
+    expect(byYear(2025).weightedDPD).toBeCloseTo(2, 5);
+    expect(byYear(2026).weightedDPD).toBeCloseTo(26.8, 5);
+  });
+
+  it('computes the on-time percentage', () => {
+    expect(byYear(2025).onTimePercentage).toBeCloseTo(200 / 3, 5);
+    expect(byYear(2026).onTimePercentage).toBe(0);
+  });
+
+  it('flags only the current year as partial', () => {
+    expect(byYear(2025).isPartialYear).toBe(false);
+    expect(byYear(2026).isPartialYear).toBe(true);
+  });
+
+  it('treats a negative DPD as 0 days and on time', () => {
+    const [only] = computeYearlyTrend(
+      [row({ dueDate: '1 feb 2025', total: 100, paymentDetails: paidWithDelay(-3) })],
+      TODAY,
+    );
+    expect(only.averageDPD).toBe(0);
+    expect(only.onTimePercentage).toBe(100);
+  });
+
+  it('returns a weighted DPD of 0 when the year has no invoice value', () => {
+    const [only] = computeYearlyTrend(
+      [row({ dueDate: '1 feb 2025', total: 0, paymentDetails: paidWithDelay(12) })],
+      TODAY,
+    );
+    expect(only.weightedDPD).toBe(0);
+    expect(only.averageDPD).toBe(12);
+  });
+
+  it('excludes an invoice due today (not yet overdue)', () => {
+    expect(computeYearlyTrend([row({ dueDate: '29 sep 2026', total: 10, balance: 10 })], TODAY)).toEqual([]);
+  });
+
+  it('returns an empty list for no data', () => {
+    expect(computeYearlyTrend([], TODAY)).toEqual([]);
+  });
+});
