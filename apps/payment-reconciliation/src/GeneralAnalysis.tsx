@@ -1,14 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import type { ReconciledRow, DateRangeOption } from './types';
 import { analyzeCustomerPayments, getUniqueCustomers, getFilteredDataByDate, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
-import {
-  applyExtraFilters, filterAndSortMetrics, computeTotalReconciled, computePreviousPeriodAmount,
-  computeRevenueVariation, computeRecoveryRate, computeAverageDSO, computeOverdueMetrics,
-  computeTopCustomersByVolume, computeCustomerRetention,
-} from './metrics/generalAnalysisMetrics';
-import { ArrowUpDown, FileDown, Filter, DollarSign, TrendingUp, TrendingDown, AlertTriangle, Eye, X, GripVertical } from 'lucide-react';
+import { applyExtraFilters, filterAndSortMetrics } from './metrics/generalAnalysisMetrics';
+import { ArrowUpDown, FileDown, Filter, Eye, X, GripVertical } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
-import { InfoTooltip } from './components/InfoTooltip';
 
 interface GeneralAnalysisProps {
   reconciledData: ReconciledRow[];
@@ -20,7 +15,6 @@ interface GeneralAnalysisProps {
   onCustomEndDateChange?: (date: string) => void;
   onCustomerClick?: (customerName: string) => void;
   loading?: boolean;
-  mode?: 'analysis' | 'kpis';
 }
 
 const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
@@ -33,7 +27,6 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
   onCustomEndDateChange,
   onCustomerClick,
   loading = false,
-  mode = 'analysis',
 }) => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({
     key: 'customerName',
@@ -107,37 +100,6 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
       selectedCustomer, searchTerm, dpdMin, dpdMax, onTimeMin, onTimeMax, sortConfig,
     }),
     [customersMetrics, selectedCustomer, searchTerm, dpdMin, dpdMax, onTimeMin, onTimeMax, sortConfig],
-  );
-
-  const totalReconciledAmount = useMemo(
-    () => computeTotalReconciled(filteredDataByDate),
-    [filteredDataByDate],
-  );
-
-  const previousPeriodAmount = useMemo(
-    () => computePreviousPeriodAmount(reconciledData, dateRange, customStartDate, customEndDate),
-    [reconciledData, dateRange, customStartDate, customEndDate],
-  );
-
-  const revenueVariation = useMemo(
-    () => computeRevenueVariation(totalReconciledAmount, previousPeriodAmount),
-    [totalReconciledAmount, previousPeriodAmount],
-  );
-
-  const recoveryRate = useMemo(() => computeRecoveryRate(filteredDataByDate), [filteredDataByDate]);
-
-  const averageDSO = useMemo(() => computeAverageDSO(filteredDataByDate), [filteredDataByDate]);
-
-  const overdueMetrics = useMemo(() => computeOverdueMetrics(filteredDataByDate), [filteredDataByDate]);
-
-  const topCustomersByVolume = useMemo(
-    () => computeTopCustomersByVolume(filteredDataByDate),
-    [filteredDataByDate],
-  );
-
-  const customerRetention = useMemo(
-    () => computeCustomerRetention(reconciledData, filteredDataByDate, dateRange, customStartDate, customEndDate),
-    [filteredDataByDate, reconciledData, dateRange, customStartDate, customEndDate],
   );
 
   const handleSort = (key: string) => {
@@ -511,335 +473,6 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
         <SkeletonAnalytics cards={9} />
       ) : (
         <>
-          {mode === 'kpis' && (
-            <>
-              {/* KPIs Financieros */}
-              <div>
-                <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
-                  <DollarSign size={24} className="text-emerald-600" />
-                  KPIs Financieros
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-                  <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 rounded-xl shadow-md shadow-emerald-200/20 border border-emerald-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-emerald-600 text-xs font-semibold uppercase tracking-wide">Monto Total</p>
-                          <InfoTooltip
-                            title="Monto Total Reconciliado"
-                            description="Suma de todas las facturas emitidas en el período seleccionado, independientemente de su estado de pago."
-                            formula="Σ(Total de cada factura)"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-emerald-700 leading-tight">
-                          COP {formatNumber(totalReconciledAmount, 0)}
-                        </p>
-                        <p className="text-emerald-600 text-xs mt-1">{filteredDataByDate.length} facturas</p>
-                      </div>
-                      <div className="bg-emerald-600/10 p-2 rounded-lg flex-shrink-0">
-                        <DollarSign size={24} className="text-emerald-600" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl shadow-md shadow-blue-200/20 border border-blue-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-blue-600 text-xs font-semibold uppercase tracking-wide">Clientes</p>
-                          <InfoTooltip
-                            title="Clientes Activos"
-                            description="Número de clientes únicos que tienen al menos una factura registrada en el período seleccionado."
-                            formula="COUNT(DISTINCT clientes con facturas)"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-blue-700 leading-tight">
-                          {uniqueCustomers.length}
-                        </p>
-                        <p className="text-blue-600 text-xs mt-1">Activos</p>
-                      </div>
-                      <div className="bg-blue-600/10 p-2 rounded-lg flex-shrink-0">
-                        <span className="text-xl">👥</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 rounded-xl shadow-md shadow-purple-200/20 border border-purple-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-purple-600 text-xs font-semibold uppercase tracking-wide">Promedio</p>
-                          <InfoTooltip
-                            title="Promedio por Cliente"
-                            description="Monto promedio de facturación por cliente en el período seleccionado."
-                            formula="Monto Total / Número de Clientes Activos"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-purple-700 leading-tight">
-                          COP {formatNumber(totalReconciledAmount / (uniqueCustomers.length || 1), 0)}
-                        </p>
-                        <p className="text-purple-600 text-xs mt-1">Por cliente</p>
-                      </div>
-                      <div className="bg-purple-600/10 p-2 rounded-lg flex-shrink-0">
-                        <span className="text-xl">📊</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div
-                    className={`bg-gradient-to-br rounded-xl shadow-md border p-4 ${
-                      revenueVariation === null
-                        ? 'from-slate-50 to-slate-100/50 shadow-slate-200/20 border-slate-200'
-                        : revenueVariation >= 0
-                        ? 'from-green-50 to-green-100/50 shadow-green-200/20 border-green-200'
-                        : 'from-red-50 to-red-100/50 shadow-red-200/20 border-red-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p
-                            className={`text-xs font-semibold uppercase tracking-wide ${
-                              revenueVariation === null
-                                ? 'text-slate-600'
-                                : revenueVariation >= 0
-                                ? 'text-green-600'
-                                : 'text-red-600'
-                            }`}
-                          >
-                            Variación
-                          </p>
-                          <InfoTooltip
-                            title="Variación vs. Período Anterior"
-                            description="Cambio porcentual en el monto total reconciliado comparado con el período inmediatamente anterior de igual duración."
-                            formula="((Monto Actual - Monto Anterior) / Monto Anterior) × 100%"
-                          />
-                        </div>
-                        {revenueVariation !== null ? (
-                          <>
-                            <p
-                              className={`text-2xl font-bold leading-tight ${
-                                revenueVariation >= 0 ? 'text-green-700' : 'text-red-700'
-                              }`}
-                            >
-                              {revenueVariation >= 0 ? '+' : ''}
-                              {formatNumber(revenueVariation, 1)}%
-                            </p>
-                            <p
-                              className={`text-xs mt-1 ${
-                                revenueVariation >= 0 ? 'text-green-600' : 'text-red-600'
-                              }`}
-                            >
-                              COP {formatNumber(Math.abs(totalReconciledAmount - previousPeriodAmount), 0)}
-                            </p>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-2xl font-bold text-slate-700 leading-tight">—</p>
-                            <p className="text-slate-600 text-xs mt-1">No disponible</p>
-                          </>
-                        )}
-                      </div>
-                      <div
-                        className={`p-2 rounded-lg flex-shrink-0 ${
-                          revenueVariation === null
-                            ? 'bg-slate-600/10'
-                            : revenueVariation >= 0
-                            ? 'bg-green-600/10'
-                            : 'bg-red-600/10'
-                        }`}
-                      >
-                        {revenueVariation === null ? (
-                          <span className="text-xl">—</span>
-                        ) : revenueVariation >= 0 ? (
-                          <TrendingUp size={24} className="text-green-600" />
-                        ) : (
-                          <TrendingDown size={24} className="text-red-600" />
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-cyan-50 to-cyan-100/50 rounded-xl shadow-md shadow-cyan-200/20 border border-cyan-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-cyan-600 text-xs font-semibold uppercase tracking-wide">Recuperación</p>
-                          <InfoTooltip
-                            title="Tasa de Recuperación"
-                            description="Porcentaje de facturas que han recibido al menos un pago, respecto al total de facturas emitidas en el período."
-                            formula="(Facturas con Pagos / Total de Facturas) × 100%"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-cyan-700 leading-tight">
-                          {formatNumber(recoveryRate, 1)}%
-                        </p>
-                        <p className="text-cyan-600 text-xs mt-1">% pagadas</p>
-                      </div>
-                      <div className="bg-cyan-600/10 p-2 rounded-lg flex-shrink-0">
-                        <span className="text-xl">✓</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-orange-50 to-orange-100/50 rounded-xl shadow-md shadow-orange-200/20 border border-orange-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-orange-600 text-xs font-semibold uppercase tracking-wide">DSO</p>
-                          <InfoTooltip
-                            title="DSO Promedio (Days Sales Outstanding)"
-                            description="Promedio de días transcurridos desde la fecha de vencimiento hasta que se recibe el último pago de una factura, es decir, cuando se completa la cobranza. Valores positivos indican atraso, negativos indican pago anticipado. Este valor es equivalente al DPD Promedio."
-                            formula="AVG(Fecha Último Pago - Fecha Vencimiento)"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-orange-700 leading-tight">
-                          {averageDSO} días
-                        </p>
-                        <p className="text-orange-600 text-xs mt-1">Desde vencimiento</p>
-                      </div>
-                      <div className="bg-orange-600/10 p-2 rounded-lg flex-shrink-0">
-                        <span className="text-xl">📅</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* KPIs de Performance */}
-              <div>
-                <h3 className="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
-                  <AlertTriangle size={24} className="text-orange-600" />
-                  KPIs de Performance
-                </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="bg-gradient-to-br from-red-50 to-red-100/50 rounded-xl shadow-md shadow-red-200/20 border border-red-200 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1 mb-1">
-                          <p className="text-red-600 text-xs font-semibold uppercase tracking-wide">Atrasos</p>
-                          <InfoTooltip
-                            title="Clientes con Pagos Atrasados"
-                            description="Número de clientes únicos que tienen al menos una factura vencida con saldo pendiente en el período seleccionado."
-                            formula="COUNT(DISTINCT clientes con facturas vencidas y balance > 0)"
-                          />
-                        </div>
-                        <p className="text-2xl font-bold text-red-700 leading-tight">
-                          {overdueMetrics.customerCount}
-                        </p>
-                        <p className="text-red-600 text-xs mt-1">
-                          {overdueMetrics.invoiceCount} facturas
-                        </p>
-                        <p className="text-red-600 text-xs text-sm font-medium">
-                          COP {formatNumber(overdueMetrics.totalAmount, 0)}
-                        </p>
-                      </div>
-                      <div className="bg-red-600/10 p-2 rounded-lg flex-shrink-0">
-                        <AlertTriangle size={24} className="text-red-600" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 rounded-xl shadow-md shadow-indigo-200/20 border border-indigo-200 p-4">
-                    <div className="flex flex-col h-full">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-1">
-                          <p className="text-indigo-600 text-xs font-semibold uppercase tracking-wide">Top 10</p>
-                          <InfoTooltip
-                            title="Top 10 Clientes por Volumen"
-                            description="Ranking de los 10 clientes con mayor monto total de facturación en el período seleccionado, ordenados de mayor a menor."
-                            formula="ORDER BY Σ(Total facturas por cliente) DESC LIMIT 10"
-                          />
-                        </div>
-                        <div className="bg-indigo-600/10 p-1 rounded-lg">
-                          <span className="text-lg">🏆</span>
-                        </div>
-                      </div>
-                      <div className="flex-1 overflow-y-auto max-h-48">
-                        {topCustomersByVolume.length > 0 ? (
-                          <div className="space-y-2">
-                            {topCustomersByVolume.map((customer, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between bg-white/50 rounded-lg p-2 hover:bg-white/80 transition-colors"
-                              >
-                                <div className="flex items-center gap-2 flex-1">
-                                  <span
-                                    className={`text-xs font-bold px-2 py-1 rounded ${
-                                      idx === 0
-                                        ? 'bg-yellow-500 text-white'
-                                        : idx === 1
-                                        ? 'bg-slate-400 text-white'
-                                        : idx === 2
-                                        ? 'bg-amber-700 text-white'
-                                        : 'bg-indigo-100 text-indigo-700'
-                                    }`}
-                                  >
-                                    {idx + 1}
-                                  </span>
-                                  <button
-                                    onClick={() => onCustomerClick?.(customer.name)}
-                                    className="text-sm font-medium text-slate-700 hover:text-indigo-600 truncate max-w-[200px] text-left transition-colors cursor-pointer underline decoration-dotted"
-                                    title={`Ver análisis de ${customer.name}`}
-                                  >
-                                    {customer.name}
-                                  </button>
-                                </div>
-                                <span className="text-sm font-bold text-indigo-700">
-                                  COP {formatNumber(customer.total, 0)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-slate-500 text-sm text-center py-8">No hay datos disponibles</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Retención */}
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100/50 rounded-xl shadow-md shadow-purple-200/20 border border-purple-200 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1 mb-1">
-                      <p className="text-purple-600 text-xs font-semibold uppercase tracking-wide">Retención</p>
-                      <InfoTooltip
-                        title="Análisis de Retención de Clientes"
-                        description="Comparación entre clientes nuevos (primera factura en el período) y recurrentes (con historial anterior). La tasa de retención indica el porcentaje de clientes recurrentes sobre el total."
-                        formula="Tasa Retención = (Clientes Recurrentes / Total Clientes Período) × 100%"
-                      />
-                    </div>
-                    <div className="flex items-baseline gap-2 mb-2">
-                      <div>
-                        <p className="text-2xl font-bold text-purple-700 leading-tight">
-                          {customerRetention.retentionRate.toFixed(1)}%
-                        </p>
-                        <p className="text-purple-600 text-xs mt-0.5">Tasa</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 text-xs">
-                      <div className="bg-emerald-100 px-2 py-1 rounded text-center min-w-fit">
-                        <p className="text-emerald-700 font-bold">{customerRetention.recurringCustomers}</p>
-                        <p className="text-emerald-600 text-xs">Recurrentes</p>
-                      </div>
-                      <div className="bg-blue-100 px-2 py-1 rounded text-center min-w-fit">
-                        <p className="text-blue-700 font-bold">{customerRetention.newCustomers}</p>
-                        <p className="text-blue-600 text-xs">Nuevos</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-purple-600/10 p-2 rounded-lg flex-shrink-0">
-                    <span className="text-xl">🔄</span>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {mode !== 'kpis' && (
           <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-slate-50/50">
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 flex-1">
@@ -1115,7 +748,6 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
               </table>
             </div>
           </div>
-          )}
         </>
       )}
     </div>

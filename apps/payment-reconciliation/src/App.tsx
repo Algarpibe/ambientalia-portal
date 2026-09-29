@@ -877,7 +877,6 @@ function App() {
               setActiveView('analysis');
             }}
             loading={loading}
-            mode="analysis"
           />
         )}
 
