@@ -56,7 +56,8 @@ Rules:
 ## UI
 
 - New tab **KPIs** in `App.tsx`, after "Análisis General".
-- New component `src/KpisTab.tsx`, lazy-loaded with `React.lazy`, receiving `reconciledData` and `loading`.
+- New component `src/KpisTab.tsx` (table and states), receiving `reconciledData` and `loading`.
+- The charts live in `src/YearlyTrendCharts.tsx`, lazy-loaded with `React.lazy` from `KpisTab`, so Recharts is downloaded only when the tab opens and the table stays testable without it.
 - Chart 1: line chart, X = year, Y = days. Two lines: "DPD promedio" and "DPD ponderado por valor".
 - Chart 2: line chart, X = year, Y = % on time (0–100).
 - Table below: Year · Invoices · DPD promedio · DPD ponderado · % a tiempo. The current year is labeled "(parcial)".
