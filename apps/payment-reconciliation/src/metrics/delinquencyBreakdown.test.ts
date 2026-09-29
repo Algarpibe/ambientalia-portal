@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ReconciledRow } from '../types';
-import { computeDelinquencyBands, bandShares, BAND_KEYS } from './delinquencyBreakdown';
+import { computeDelinquencyBands, computeDelinquencyConcentration, bandShares, BAND_KEYS } from './delinquencyBreakdown';
 
 function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
   return {
@@ -66,5 +66,51 @@ describe('bandShares', () => {
   it('returns zeros for an empty year', () => {
     expect(bandShares({ year: 2025, total: 0, onTime: 0, d1_15: 0, d16_30: 0, d31_60: 0, over60: 0, isPartialYear: false }))
       .toEqual({ onTime: 0, d1_15: 0, d16_30: 0, d31_60: 0, over60: 0 });
+  });
+});
+
+describe('computeDelinquencyConcentration', () => {
+  const inv = (clientName: string, total: number, delay: number, over: Partial<ReconciledRow> = {}) =>
+    late(delay, { clientName, total, ...over });
+
+  it('finds the fewest clients that add up to 80% of the weighted delinquency', () => {
+    const [y] = computeDelinquencyConcentration(
+      [inv('D', 1000, 5), inv('C', 100, 0), inv('B', 500, 10), inv('A', 1000, 30)],
+      TODAY,
+    );
+    expect(y.year).toBe(2025);
+    expect(y.totalClients).toBe(4);
+    expect(y.clientsWithDelinquency).toBe(3);
+    expect(y.clientsFor80).toBe(2);
+    expect(y.topClients.map((c) => c.name)).toEqual(['A', 'B', 'D']);
+    expect(y.topClients[0].share).toBeCloseTo(75, 5);
+    expect(y.topClients[1].share).toBeCloseTo(12.5, 5);
+  });
+
+  it('adds up all invoices of the same client', () => {
+    const [y] = computeDelinquencyConcentration(
+      [inv('A', 100, 10), inv('A', 100, 10), inv('B', 100, 10)],
+      TODAY,
+    );
+    expect(y.totalClients).toBe(2);
+    expect(y.topClients[0]).toEqual({ name: 'A', share: expect.closeTo(200 / 3, 5) });
+  });
+
+  it('reports no concentration for a year without delinquency', () => {
+    const [y] = computeDelinquencyConcentration([inv('A', 100, 0), inv('B', 100, 0)], TODAY);
+    expect(y).toMatchObject({ totalClients: 2, clientsWithDelinquency: 0, clientsFor80: 0, topClients: [] });
+  });
+
+  it('names a blank client "Sin cliente"', () => {
+    const [y] = computeDelinquencyConcentration([inv('  ', 100, 10)], TODAY);
+    expect(y.topClients[0].name).toBe('Sin cliente');
+  });
+
+  it('flags the current year and sorts years ascending', () => {
+    const result = computeDelinquencyConcentration(
+      [inv('A', 100, 10, { dueDate: '5 ene 2026' }), inv('A', 100, 10)],
+      TODAY,
+    );
+    expect(result.map((r) => [r.year, r.isPartialYear])).toEqual([[2025, false], [2026, true]]);
   });
 });

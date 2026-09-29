@@ -47,3 +47,61 @@ export function bandShares(row: DelinquencyBandRow): Record<BandKey, number> {
     over60: share(row.over60),
   };
 }
+
+export interface ClientShare {
+  name: string;
+  share: number; // % of the year's weighted delinquency
+}
+
+export interface ConcentrationRow {
+  year: number;
+  isPartialYear: boolean;
+  totalClients: number;
+  clientsWithDelinquency: number;
+  /** Fewest clients whose weighted delinquency reaches 80% of the year's total. */
+  clientsFor80: number;
+  topClients: ClientShare[];
+}
+
+const CONCENTRATION_THRESHOLD = 0.8;
+const TOP_CLIENTS = 3;
+
+/**
+ * How concentrated each year's delinquency is. A client's weight is
+ * Σ (DPD × value) of its due invoices in that year.
+ */
+export function computeDelinquencyConcentration(rows: ReconciledRow[], today: Date): ConcentrationRow[] {
+  const byYear = new Map<number, Map<string, number>>();
+  for (const { row, year, dpd, value } of collectDueInvoices(rows, today)) {
+    const name = (row.clientName ?? '').trim() || 'Sin cliente';
+    const clients = byYear.get(year) ?? new Map<string, number>();
+    clients.set(name, (clients.get(name) ?? 0) + dpd * value);
+    byYear.set(year, clients);
+  }
+
+  return [...byYear.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([year, clients]) => {
+      const ranked = [...clients.entries()]
+        .filter(([, weight]) => weight > 0)
+        .sort(([nameA, a], [nameB, b]) => b - a || nameA.localeCompare(nameB, 'es'));
+      const total = ranked.reduce((sum, [, weight]) => sum + weight, 0);
+
+      let clientsFor80 = 0;
+      let cumulative = 0;
+      for (const [, weight] of ranked) {
+        if (total === 0 || cumulative >= total * CONCENTRATION_THRESHOLD) break;
+        cumulative += weight;
+        clientsFor80 += 1;
+      }
+
+      return {
+        year,
+        isPartialYear: year === today.getFullYear(),
+        totalClients: clients.size,
+        clientsWithDelinquency: ranked.length,
+        clientsFor80,
+        topClients: ranked.slice(0, TOP_CLIENTS).map(([name, weight]) => ({ name, share: (weight / total) * 100 })),
+      };
+    });
+}
