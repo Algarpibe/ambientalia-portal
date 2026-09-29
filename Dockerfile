@@ -20,6 +20,7 @@ COPY apps/contabilidad/package*.json ./apps/contabilidad/
 # `npm install` en cada cambio de código. Se añade junto con la app nueva.
 COPY apps/WO-sales/package*.json ./apps/WO-sales/
 COPY apps/ausencias/package*.json ./apps/ausencias/
+COPY apps/calibraciones/package*.json ./apps/calibraciones/
 
 # Instalar dependencias globales del monorepo
 RUN npm install

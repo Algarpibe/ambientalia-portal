@@ -15,6 +15,7 @@ export default {
     "../WO-sales/src/**/*.{js,ts,jsx,tsx}",
     "../contabilidad/src/**/*.{js,ts,jsx,tsx}",
     "../ausencias/src/**/*.{js,ts,jsx,tsx}",
+    "../calibraciones/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {

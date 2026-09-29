@@ -9,7 +9,8 @@ import {
   FileSpreadsheet,
   Landmark,
   PackageOpen,
-  CalendarDays
+  CalendarDays,
+  Gauge
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -78,6 +79,13 @@ const aplicaciones: AppConfig[] = [
     path: "/ausencias",
     icon: CalendarDays,
     color: "from-sky-400 to-indigo-600"
+  },
+  {
+    name: "Calibraciones",
+    description: "Verificación de patrones de transferencia de ozono: cálculo TAD 2023 y App. D, trazabilidad, aprobación y vencimientos.",
+    path: "/calibraciones",
+    icon: Gauge,
+    color: "from-slate-500 to-blue-700"
   }
 ];
 
