@@ -6,6 +6,7 @@ import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
 import KpisTab from './KpisTab';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
+import { reconcileInvoices, formatExcelDate } from './reconcile';
 import { sortReconciledRows, nextSortConfig } from './reconciliationSort';
 import type { ReconciliationSortConfig, ReconciliationSortKey } from './reconciliationSort';
 import { authHeaders } from '@suite/auth-client';
@@ -203,88 +204,9 @@ function App() {
     paymentDetails: 'Pagos / Mora',
   };
 
-  const formatExcelDate = (date: Date | null | any) => {
-    if (!date) return '';
-    if (!(date instanceof Date)) {
-      date = parseExcelDate(date);
-    }
-    if (!date || isNaN(date.getTime())) return '';
-
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
-
-  const reconcile = React.useCallback(() => {
-    if (invoices.length === 0) {
-      return;
-    }
-
-    const reconciled = invoices
-      .filter(invoice => invoice.clientName !== 'Ambientalia S.A.S.')
-      .map(invoice => {
-        // Find payments where invoice number matches. 
-        const matchingPayments = payments.filter(p =>
-          p.invoiceNumber.trim().toUpperCase() === invoice.invoiceNumber.trim().toUpperCase()
-        );
-
-        const dueDate = invoice.dueDate instanceof Date ? invoice.dueDate : parseExcelDate(invoice.dueDate);
-        const now = new Date(); // Use current date for unpaid calculations
-
-        let isOverdue = false;
-        let maxDelayDays = 0;
-
-        const paymentDetails = matchingPayments.map(p => {
-          const pDate = p.paymentDate instanceof Date ? p.paymentDate : parseExcelDate(p.paymentDate);
-          let delay = 0;
-
-          if (pDate && dueDate && pDate > dueDate) {
-            isOverdue = true;
-            const diffTime = Math.abs(pDate.getTime() - dueDate.getTime());
-            delay = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            if (delay > maxDelayDays) maxDelayDays = delay;
-          }
-
-          return {
-            date: formatExcelDate(pDate),
-            delay: delay
-          };
-        });
-
-        // Check for unpaid overdue status
-        // If no payments (or partial payments leaving a balance) and current date > due date
-        // Note: We use the calculated totalPaid to check properly, though the prompt specifically emphasized "Sin pagos".
-        // We'll stick to the logic: if there is a balance > 0 AND now > dueDate, it contributes to overdue status.
-        // However, for the "Sin pagos" specific display, checking paymentDetails.length === 0 is the key for the specific UI request.
-
-        if (dueDate && now > dueDate && invoice.balance > 0) {
-          // It is overdue properly regardless of payments if there is still a balance.
-          // But we specifically need to track the days of delay for the "unpaid" portion.
-          isOverdue = true;
-          const diffTime = Math.abs(now.getTime() - dueDate.getTime());
-          const currentDelay = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          // If this "current delay" is greater than any payment delay (which is likely if it's unpaid), update max.
-          if (currentDelay > maxDelayDays) maxDelayDays = currentDelay;
-        }
-
-        return {
-          ...invoice,
-          paymentDates: paymentDetails.map(pd => pd.date),
-          paymentAmounts: matchingPayments.map(p => p.amountFCY),
-          totalPaid: matchingPayments.reduce((sum, p) => sum + p.amountFCY, 0),
-          isOverdue,
-          maxDelayDays,
-          paymentDetails
-        };
-      });
-
-    setReconciledData(reconciled);
-  }, [invoices, payments]);
-
   React.useEffect(() => {
-    if (invoices.length > 0) reconcile();
-  }, [reconcile]);
+    if (invoices.length > 0) setReconciledData(reconcileInvoices(invoices, payments));
+  }, [invoices, payments]);
 
   const downloadExcel = async () => {
     const XLSX = await import('xlsx');
