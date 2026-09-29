@@ -118,6 +118,17 @@ describe('KpisTab', () => {
     expect(aging).toHaveTextContent('1 facturas con saldo en otra moneda no están incluidas en estos montos.');
   });
 
+  it('keeps the aging section when the only open balances are in another currency', () => {
+    render(
+      <KpisTab
+        reconciledData={[row({ dueDate: '15 oct 2026', total: 90, balance: 90, currencyCode: 'USD', paymentDetails: [] })]}
+        today={TODAY}
+      />,
+    );
+    const aging = screen.getByRole('region', { name: 'Cartera por antigüedad (hoy)' });
+    expect(aging).toHaveTextContent('1 facturas con saldo en otra moneda');
+  });
+
   it('does not show the other-currency warning when every invoice is in COP', () => {
     render(<KpisTab reconciledData={[row({ dueDate: '19 sep 2026', total: 200, balance: 200, paymentDetails: [] })]} today={TODAY} />);
     expect(screen.queryByText(/en otra moneda/)).not.toBeInTheDocument();

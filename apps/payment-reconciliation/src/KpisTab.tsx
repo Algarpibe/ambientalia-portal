@@ -267,7 +267,7 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
 
   if (loading) return <SkeletonAnalytics cards={3} />;
 
-  const hasAging = aging.buckets.some((b) => b.invoiceCount > 0);
+  const hasAging = aging.buckets.some((b) => b.invoiceCount > 0) || aging.otherCurrencyInvoiceCount > 0;
   const emptyTrend = (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-soft p-10 text-center text-slate-500">
       No hay facturas vencidas para calcular la tendencia.
