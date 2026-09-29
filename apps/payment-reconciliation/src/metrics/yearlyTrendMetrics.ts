@@ -1,5 +1,6 @@
 import type { ReconciledRow } from '../types';
 import { calculateInvoiceDPD, parseExcelDate } from '../customerAnalysisUtils';
+import { isCop } from '../currency';
 
 /**
  * Yearly delinquency trend for the KPIs tab.
@@ -45,6 +46,9 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 /**
  * The invoices every KPI is computed on: due strictly before `today`, not void
  * or draft, not in an excluded year. DPD is measured at the start of `today`.
+ * Non-COP invoices keep their DPD, on-time flag and collection days (count-based
+ * metrics include them) but carry value 0: amounts are not converted, so they
+ * must not weigh in value-weighted metrics.
  */
 export function collectDueInvoices(rows: ReconciledRow[], today: Date): DueInvoice[] {
   const cutoff = startOfDay(today);
@@ -62,7 +66,7 @@ export function collectDueInvoices(rows: ReconciledRow[], today: Date): DueInvoi
 
     const raw = calculateInvoiceDPD(row, cutoff);
     const dpd = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-    const value = Number.isFinite(row.total) && row.total > 0 ? row.total : 0;
+    const value = isCop(row) && Number.isFinite(row.total) && row.total > 0 ? row.total : 0;
     const issued = row.invoiceDate instanceof Date ? row.invoiceDate : parseExcelDate(row.invoiceDate);
     const collectedAt = row.balance > 0 ? cutoff : row.lastPaymentDate ?? null;
     const collectionDays =

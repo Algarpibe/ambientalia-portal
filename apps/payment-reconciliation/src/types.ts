@@ -11,6 +11,8 @@ export interface InvoiceDetails {
   status: string;
   total: number;
   balance: number;
+  /** ISO code of total/balance (own currency); absent in older hub responses, meaning COP. */
+  currencyCode?: string;
 }
 
 export interface PaymentRecord {

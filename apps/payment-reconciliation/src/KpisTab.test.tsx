@@ -104,6 +104,30 @@ describe('KpisTab', () => {
     expect(aging).toHaveTextContent('1 facturas');
   });
 
+  it('warns about open invoices in another currency below the aging cards', () => {
+    render(
+      <KpisTab
+        reconciledData={[
+          row({ dueDate: '19 sep 2026', total: 200, balance: 200, paymentDetails: [] }),
+          row({ dueDate: '19 sep 2026', total: 90, balance: 90, currencyCode: 'USD', paymentDetails: [] }),
+        ]}
+        today={TODAY}
+      />,
+    );
+    const aging = screen.getByRole('region', { name: 'Cartera por antigüedad (hoy)' });
+    expect(aging).toHaveTextContent('1 facturas con saldo en otra moneda no están incluidas en estos montos.');
+  });
+
+  it('does not show the other-currency warning when every invoice is in COP', () => {
+    render(<KpisTab reconciledData={[row({ dueDate: '19 sep 2026', total: 200, balance: 200, paymentDetails: [] })]} today={TODAY} />);
+    expect(screen.queryByText(/en otra moneda/)).not.toBeInTheDocument();
+  });
+
+  it('explains in the notes that other currencies only count by invoice number', () => {
+    render(<KpisTab reconciledData={[row({ dueDate: '10 mar 2025' })]} today={TODAY} />);
+    expect(screen.getByText(/las facturas en otras monedas \(dólares, euros\) cuentan en los indicadores por número de facturas/)).toBeInTheDocument();
+  });
+
   it('keeps the aging snapshot when no invoice is due yet for the trend', () => {
     render(<KpisTab reconciledData={[row({ dueDate: '15 oct 2026', total: 50, balance: 50, paymentDetails: [] })]} today={TODAY} />);
     expect(screen.getByRole('region', { name: 'Cartera por antigüedad (hoy)' })).toBeInTheDocument();

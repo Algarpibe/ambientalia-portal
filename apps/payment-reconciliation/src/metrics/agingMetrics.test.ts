@@ -75,3 +75,29 @@ describe('overdueBalanceByClient', () => {
     expect(map.size).toBe(1);
   });
 });
+
+describe('non-COP invoices', () => {
+  it('excludes them from buckets and overdue totals and counts them apart', () => {
+    const usd = (dueDate: string, balance: number) => row({ dueDate, balance, total: balance, currencyCode: 'USD' });
+    const aging = computeReceivablesAging(
+      [owed('19 sep 2026', 100), usd('19 sep 2026', 5000), usd('15 oct 2026', 7)],
+      TODAY,
+    );
+    expect(aging.overdueBalance).toBe(100);
+    expect(aging.overdueInvoiceCount).toBe(1);
+    expect(aging.buckets.reduce((s, b) => s + b.balance, 0)).toBe(100);
+    expect(aging.otherCurrencyInvoiceCount).toBe(2);
+  });
+
+  it('is 0 when every open invoice is in COP', () => {
+    expect(computeReceivablesAging([owed('19 sep 2026', 100)], TODAY).otherCurrencyInvoiceCount).toBe(0);
+  });
+
+  it('overdueBalanceByClient ignores non-COP balances', () => {
+    const map = overdueBalanceByClient(
+      [owed('19 sep 2026', 100), row({ dueDate: '19 sep 2026', balance: 9000, total: 9000, currencyCode: 'USD' })],
+      TODAY,
+    );
+    expect(map.get('ACME')).toBe(100);
+  });
+});

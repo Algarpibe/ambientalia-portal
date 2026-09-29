@@ -242,3 +242,25 @@ describe('collection days (DSO)', () => {
     expect(y.weightedCollectionDays).toBeNull();
   });
 });
+
+describe('non-COP invoices', () => {
+  const rows = [
+    row({ invoiceNumber: 'COP1', dueDate: '10 mar 2025', total: 1000, paymentDetails: paidWithDelay(10) }),
+    row({ invoiceNumber: 'USD1', dueDate: '10 abr 2025', total: 500, currencyCode: 'USD', paymentDetails: paidWithDelay(30) }),
+  ];
+
+  it('collectDueInvoices keeps DPD but gives them value 0', () => {
+    const due = collectDueInvoices(rows, TODAY);
+    const usd = due.find((d) => d.row.invoiceNumber === 'USD1')!;
+    expect(usd.dpd).toBe(30);
+    expect(usd.value).toBe(0);
+    expect(due.find((d) => d.row.invoiceNumber === 'COP1')!.value).toBe(1000);
+  });
+
+  it('counts them in count-based metrics but not in value-weighted ones', () => {
+    const [y] = computeYearlyTrend(rows, TODAY);
+    expect(y.invoiceCount).toBe(2);
+    expect(y.averageDPD).toBe(20);
+    expect(y.weightedDPD).toBe(10);
+  });
+});

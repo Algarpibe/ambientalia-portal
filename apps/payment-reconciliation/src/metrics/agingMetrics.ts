@@ -1,6 +1,7 @@
 import type { ReconciledRow } from '../types';
 import { parseExcelDate } from '../customerAnalysisUtils';
 import { clientIdentity } from './clientIdentity';
+import { isCop } from '../currency';
 
 // Receivables aging: a snapshot of what is owed TODAY, by days past due.
 // Unlike the yearly KPIs it includes every year (an unpaid 2020 invoice is the
@@ -21,6 +22,8 @@ export interface ReceivablesAging {
   /** Balance past due (every bucket except notDue). */
   overdueBalance: number;
   overdueInvoiceCount: number;
+  /** Open invoices in a currency other than COP: not converted, so left out of every amount. */
+  otherCurrencyInvoiceCount: number;
 }
 
 interface OpenInvoice {
@@ -56,8 +59,13 @@ const bucketOf = (daysPastDue: number): AgingKey => {
 };
 
 export function computeReceivablesAging(rows: ReconciledRow[], today: Date): ReceivablesAging {
+  let otherCurrencyInvoiceCount = 0;
   const acc = new Map(AGING_KEYS.map((key) => [key, { balance: 0, invoiceCount: 0, clients: new Set<string>() }]));
   for (const { row, daysPastDue, balance } of openInvoices(rows, today)) {
+    if (!isCop(row)) {
+      otherCurrencyInvoiceCount += 1;
+      continue;
+    }
     const bucket = acc.get(bucketOf(daysPastDue))!;
     bucket.balance += balance;
     bucket.invoiceCount += 1;
@@ -72,6 +80,7 @@ export function computeReceivablesAging(rows: ReconciledRow[], today: Date): Rec
     buckets,
     overdueBalance: overdue.reduce((s, b) => s + b.balance, 0),
     overdueInvoiceCount: overdue.reduce((s, b) => s + b.invoiceCount, 0),
+    otherCurrencyInvoiceCount,
   };
 }
 
@@ -79,6 +88,7 @@ export function computeReceivablesAging(rows: ReconciledRow[], today: Date): Rec
 export function overdueBalanceByClient(rows: ReconciledRow[], today: Date): Map<string, number> {
   const result = new Map<string, number>();
   for (const { row, daysPastDue, balance } of openInvoices(rows, today)) {
+    if (!isCop(row)) continue;
     if (daysPastDue <= 0) continue;
     const { key } = clientIdentity(row.clientName);
     result.set(key, (result.get(key) ?? 0) + balance);

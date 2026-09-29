@@ -122,6 +122,11 @@ function AgingSection({ aging }: { aging: ReceivablesAging }) {
           </div>
         ))}
       </div>
+      {aging.otherCurrencyInvoiceCount > 0 && (
+        <p className="mt-3 text-xs text-slate-500">
+          {aging.otherCurrencyInvoiceCount} facturas con saldo en otra moneda no están incluidas en estos montos.
+        </p>
+      )}
     </section>
   );
 }
@@ -228,7 +233,8 @@ function CalculationNotes() {
         <p className="text-slate-500">
           Cada factura cuenta en el año de su vencimiento. Solo entran las ya vencidas; se excluyen las anuladas,
           los borradores y el año 2020, que tiene historial incompleto. El % a tiempo es la parte de las facturas
-          con 0 días de mora.
+          con 0 días de mora. Los montos están en pesos: las facturas en otras monedas (dólares, euros) cuentan en
+          los indicadores por número de facturas, pero no en los que se miden en dinero.
         </p>
       </div>
     </section>
