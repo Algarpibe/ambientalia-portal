@@ -280,7 +280,7 @@ export const calculateDPD = (dueDate: Date | null, paymentDate: Date | null): nu
 /**
  * Calculate DPD for an invoice (considering all payments or current date if unpaid)
  */
-export const calculateInvoiceDPD = (invoice: ReconciledRow): number => {
+export const calculateInvoiceDPD = (invoice: ReconciledRow, now: Date = new Date()): number => {
     const dueDate = parseExcelDate(invoice.dueDate);
     if (!dueDate) return 0;
 
@@ -291,9 +291,8 @@ export const calculateInvoiceDPD = (invoice: ReconciledRow): number => {
         return maxDelay;
     }
 
-    // If no payments and there's a balance, calculate DPD from current date
+    // If no payments and there's a balance, calculate DPD from the reference date
     if (invoice.balance > 0) {
-        const now = new Date();
         return calculateDPD(dueDate, now);
     }
 

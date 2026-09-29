@@ -3,7 +3,8 @@
 process.env.TZ = 'America/Bogota';
 
 import { describe, it, expect } from 'vitest';
-import { parseExcelDate } from './customerAnalysisUtils';
+import { parseExcelDate, calculateInvoiceDPD } from './customerAnalysisUtils';
+import type { ReconciledRow } from './types';
 
 describe('parseExcelDate', () => {
   it('parsea YYYY-MM-DD como fecha LOCAL (no corre un día en UTC-5)', () => {
@@ -35,5 +36,18 @@ describe('parseExcelDate', () => {
   it('devuelve null para vacío/nulo', () => {
     expect(parseExcelDate('')).toBeNull();
     expect(parseExcelDate(null)).toBeNull();
+  });
+});
+
+describe('calculateInvoiceDPD with a reference date', () => {
+  it('measures an unpaid invoice against the given date', () => {
+    const invoice = {
+      invoiceNumber: 'X', orderNumber: '', clientName: 'ACME',
+      invoiceDate: '1 sep 2026', dueDate: '15 sep 2026', status: 'open',
+      total: 50, balance: 50,
+      paymentDates: [], paymentAmounts: [], totalPaid: 0,
+      isOverdue: true, maxDelayDays: 0, paymentDetails: [],
+    } as ReconciledRow;
+    expect(calculateInvoiceDPD(invoice, new Date(2026, 8, 29))).toBe(14);
   });
 });
