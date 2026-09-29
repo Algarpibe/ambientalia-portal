@@ -113,4 +113,32 @@ describe('computeDelinquencyConcentration', () => {
     );
     expect(result.map((r) => [r.year, r.isPartialYear])).toEqual([[2025, false], [2026, true]]);
   });
+
+  it('groups spelling variants of the same client and shows the first spelling', () => {
+    const [y] = computeDelinquencyConcentration(
+      [inv('ACME S.A.S', 100, 10), inv(' acme  s.a.s ', 100, 10), inv('Otro', 100, 10)],
+      TODAY,
+    );
+    expect(y.totalClients).toBe(2);
+    expect(y.topClients[0]).toEqual({ name: 'ACME S.A.S', share: expect.closeTo(200 / 3, 3) });
+  });
+
+  it('counts a client at exactly 80% despite float error', () => {
+    const [y] = computeDelinquencyConcentration([inv('A', 80.1, 1), inv('B', 20.025, 1)], TODAY);
+    expect(y.clientsFor80).toBe(1);
+  });
+
+  it('counts one client with 100% as one client', () => {
+    const [y] = computeDelinquencyConcentration([inv('A', 100, 10)], TODAY);
+    expect(y.clientsFor80).toBe(1);
+  });
+
+  it('keeps only the top 3 clients, in order', () => {
+    const [y] = computeDelinquencyConcentration(
+      [inv('E', 10, 1), inv('C', 30, 1), inv('A', 50, 1), inv('D', 20, 1), inv('B', 40, 1)],
+      TODAY,
+    );
+    expect(y.clientsWithDelinquency).toBe(5);
+    expect(y.topClients.map((c) => c.name)).toEqual(['A', 'B', 'C']);
+  });
 });

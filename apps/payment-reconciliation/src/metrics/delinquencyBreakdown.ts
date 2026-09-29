@@ -63,7 +63,9 @@ export interface ConcentrationRow {
   topClients: ClientShare[];
 }
 
-const CONCENTRATION_THRESHOLD = 0.8;
+// Ratio as integers (4/5) so the comparison is exact: 0.8 * total drifts in floats.
+const THRESHOLD_NUM = 4;
+const THRESHOLD_DEN = 5;
 const TOP_CLIENTS = 3;
 
 /**
@@ -71,26 +73,30 @@ const TOP_CLIENTS = 3;
  * Σ (DPD × value) of its due invoices in that year.
  */
 export function computeDelinquencyConcentration(rows: ReconciledRow[], today: Date): ConcentrationRow[] {
-  const byYear = new Map<number, Map<string, number>>();
+  // Clients are keyed by a normalized name so spelling variants merge; the first spelling seen is displayed.
+  const byYear = new Map<number, Map<string, { name: string; weight: number }>>();
   for (const { row, year, dpd, value } of collectDueInvoices(rows, today)) {
-    const name = (row.clientName ?? '').trim() || 'Sin cliente';
-    const clients = byYear.get(year) ?? new Map<string, number>();
-    clients.set(name, (clients.get(name) ?? 0) + dpd * value);
+    const name = (row.clientName ?? '').trim().replace(/\s+/g, ' ') || 'Sin cliente';
+    const key = name.toLocaleUpperCase('es');
+    const clients = byYear.get(year) ?? new Map<string, { name: string; weight: number }>();
+    const entry = clients.get(key) ?? { name, weight: 0 };
+    entry.weight += dpd * value;
+    clients.set(key, entry);
     byYear.set(year, clients);
   }
 
   return [...byYear.entries()]
     .sort(([a], [b]) => a - b)
     .map(([year, clients]) => {
-      const ranked = [...clients.entries()]
-        .filter(([, weight]) => weight > 0)
-        .sort(([nameA, a], [nameB, b]) => b - a || nameA.localeCompare(nameB, 'es'));
-      const total = ranked.reduce((sum, [, weight]) => sum + weight, 0);
+      const ranked = [...clients.values()]
+        .filter(({ weight }) => weight > 0)
+        .sort((a, b) => b.weight - a.weight || a.name.localeCompare(b.name, 'es'));
+      const total = ranked.reduce((sum, { weight }) => sum + weight, 0);
 
       let clientsFor80 = 0;
       let cumulative = 0;
-      for (const [, weight] of ranked) {
-        if (total === 0 || cumulative >= total * CONCENTRATION_THRESHOLD) break;
+      for (const { weight } of ranked) {
+        if (total === 0 || cumulative * THRESHOLD_DEN >= total * THRESHOLD_NUM) break;
         cumulative += weight;
         clientsFor80 += 1;
       }
@@ -101,7 +107,7 @@ export function computeDelinquencyConcentration(rows: ReconciledRow[], today: Da
         totalClients: clients.size,
         clientsWithDelinquency: ranked.length,
         clientsFor80,
-        topClients: ranked.slice(0, TOP_CLIENTS).map(([name, weight]) => ({ name, share: (weight / total) * 100 })),
+        topClients: ranked.slice(0, TOP_CLIENTS).map(({ name, weight }) => ({ name, share: (weight / total) * 100 })),
       };
     });
 }
