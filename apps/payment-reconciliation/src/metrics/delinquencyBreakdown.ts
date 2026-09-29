@@ -1,5 +1,6 @@
 import type { ReconciledRow } from '../types';
 import { collectDueInvoices } from './yearlyTrendMetrics';
+import { clientIdentity } from './clientIdentity';
 
 // Breakdowns that explain the yearly DPD trend. Both use the shared universe of
 // collectDueInvoices, so they always agree with the trend itself.
@@ -73,11 +74,10 @@ const TOP_CLIENTS = 3;
  * Σ (DPD × value) of its due invoices in that year.
  */
 export function computeDelinquencyConcentration(rows: ReconciledRow[], today: Date): ConcentrationRow[] {
-  // Clients are keyed by a normalized name so spelling variants merge; the first spelling seen is displayed.
+  // Clients are keyed by clientIdentity; the first spelling seen is displayed.
   const byYear = new Map<number, Map<string, { name: string; weight: number }>>();
   for (const { row, year, dpd, value } of collectDueInvoices(rows, today)) {
-    const name = (row.clientName ?? '').trim().replace(/\s+/g, ' ') || 'Sin cliente';
-    const key = name.toLocaleUpperCase('es');
+    const { key, name } = clientIdentity(row.clientName);
     const clients = byYear.get(year) ?? new Map<string, { name: string; weight: number }>();
     const entry = clients.get(key) ?? { name, weight: 0 };
     entry.weight += dpd * value;
