@@ -41,9 +41,53 @@ class ChartsErrorBoundary extends Component<{ children: ReactNode }, { failed: b
 const oneDecimal = (n: number) =>
   n.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
+// Years with incomplete invoice history: comparing them with full years would
+// distort the trend. 2020 is when the invoice data starts.
+const EXCLUDED_YEARS = [2020];
+
+function CalculationNotes() {
+  return (
+    <section
+      aria-labelledby="kpis-calculation-title"
+      className="bg-white rounded-2xl border border-slate-100 shadow-soft p-6 text-sm text-slate-600"
+    >
+      <h3 id="kpis-calculation-title" className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">
+        ¿Cómo se calculan estos indicadores?
+      </h3>
+      <div className="flex flex-col gap-3">
+        <p>
+          <strong className="text-slate-800">DPD de una factura</strong> (días de mora): los días entre el
+          vencimiento y el pago más tardío. Si la factura todavía tiene saldo, cuenta los días que ese saldo lleva
+          vencido hasta hoy. Una factura pagada a tiempo tiene 0 días.
+        </p>
+        <p>
+          <strong className="text-slate-800">DPD promedio</strong> = Σ DPD de cada factura ÷ número de facturas.
+          Cada factura pesa igual, sin importar su valor.
+        </p>
+        <p>
+          <strong className="text-slate-800">DPD ponderado por valor</strong> = Σ (DPD × valor de la factura) ÷ Σ
+          valor de las facturas. Las facturas grandes pesan más. Si el ponderado supera al promedio, la mora se
+          concentra en las facturas de mayor valor.
+        </p>
+        <p className="text-slate-500">
+          Ejemplo: una factura de $1.000.000 pagada a tiempo (0 días) y otra de $9.000.000 con 30 días de mora dan
+          un DPD promedio de (0 + 30) ÷ 2 = 15 días y un DPD ponderado de (0 × 1.000.000 + 30 × 9.000.000) ÷
+          10.000.000 = 27 días.
+        </p>
+        <p className="text-slate-500">
+          Cada factura cuenta en el año de su vencimiento. Solo entran las ya vencidas; se excluyen las anuladas,
+          los borradores y el año 2020, que tiene historial incompleto. El % a tiempo es la parte de las facturas
+          con 0 días de mora.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function KpisTab({ reconciledData, loading = false, today }: KpisTabProps) {
   const rows = useMemo(
-    () => computeYearlyTrend(reconciledData, today ?? new Date()),
+    () =>
+      computeYearlyTrend(reconciledData, today ?? new Date()).filter((r) => !EXCLUDED_YEARS.includes(r.year)),
     [reconciledData, today],
   );
 
@@ -99,6 +143,8 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
           </tbody>
         </table>
       </div>
+
+      <CalculationNotes />
     </div>
   );
 }

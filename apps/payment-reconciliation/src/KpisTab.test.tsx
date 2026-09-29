@@ -37,6 +37,30 @@ describe('KpisTab', () => {
     expect(screen.getByText(/No hay facturas vencidas/)).toBeInTheDocument();
   });
 
+  it('leaves out 2020, an incomplete year', () => {
+    render(
+      <KpisTab
+        reconciledData={[row({ dueDate: '10 mar 2020' }), row({ dueDate: '10 mar 2021' })]}
+        today={TODAY}
+      />,
+    );
+    expect(screen.queryByText('2020')).not.toBeInTheDocument();
+    expect(screen.getByText('2021')).toBeInTheDocument();
+  });
+
+  it('shows the empty state when the only due invoices are from 2020', () => {
+    render(<KpisTab reconciledData={[row({ dueDate: '10 mar 2020' })]} today={TODAY} />);
+    expect(screen.getByText(/No hay facturas vencidas/)).toBeInTheDocument();
+  });
+
+  it('explains how the simple and the weighted average DPD are calculated', () => {
+    render(<KpisTab reconciledData={[row({ dueDate: '10 mar 2025' })]} today={TODAY} />);
+    const help = screen.getByRole('region', { name: '¿Cómo se calculan estos indicadores?' });
+    expect(help).toHaveTextContent('DPD promedio');
+    expect(help).toHaveTextContent('DPD ponderado por valor');
+    expect(help).toHaveTextContent('Σ');
+  });
+
   it('shows no table while loading', () => {
     render(<KpisTab reconciledData={[row()]} loading today={TODAY} />);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
