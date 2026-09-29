@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildLineas, type LineaRow } from './detalle.js';
+import type { Pool } from '@algarpibe/zoho-sync';
+import { buildLineas, getDetalleFactura, getDetalleOV, type LineaRow } from './detalle.js';
 
 describe('buildLineas — por despachar', () => {
   it('mapea las unidades pendientes de la línea (0 si no hay)', () => {
@@ -26,5 +27,35 @@ describe('buildLineas', () => {
   it('valores no numéricos → 0 (no rompe)', () => {
     const r = buildLineas([{ sku: 'X', nombre: 'Y', cantidad: 'n/a' as unknown as number, precio: '' as unknown as number, por_despachar: null }]);
     expect(r[0].total).toBe(0);
+  });
+});
+
+describe('detalle — moneda del documento', () => {
+  const fakeDb = (head: Record<string, unknown>) => {
+    const queries: string[] = [];
+    const db = {
+      query: async (sql: string) => {
+        queries.push(sql);
+        return { rows: queries.length === 1 ? [head] : [] };
+      },
+    } as unknown as Pool;
+    return { db, queries };
+  };
+
+  it('la factura selecciona currency_code y lo normaliza a mayúsculas', async () => {
+    const { db, queries } = fakeDb({ invoice_number: 'F1', moneda: ' usd ' });
+    expect((await getDetalleFactura(db, 'F1'))?.moneda).toBe('USD');
+    expect(queries[0]).toContain("i.raw ->> 'currency_code'");
+  });
+
+  it('la OV selecciona currency_code y lo normaliza a mayúsculas', async () => {
+    const { db, queries } = fakeDb({ salesorder_number: 'OV1', moneda: 'eur' });
+    expect((await getDetalleOV(db, 'OV1'))?.moneda).toBe('EUR');
+    expect(queries[0]).toContain("so.raw ->> 'currency_code'");
+  });
+
+  it('sin moneda (null o vacía) → COP', async () => {
+    expect((await getDetalleFactura(fakeDb({ invoice_number: 'F1', moneda: null }).db, 'F1'))?.moneda).toBe('COP');
+    expect((await getDetalleOV(fakeDb({ salesorder_number: 'OV1', moneda: '  ' }).db, 'OV1'))?.moneda).toBe('COP');
   });
 });

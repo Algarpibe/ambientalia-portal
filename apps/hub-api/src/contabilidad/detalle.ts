@@ -23,6 +23,7 @@ export interface DetalleFactura {
   vencimiento: string | null;
   terminos: string | null;
   ov: string | null;
+  moneda: string; // ISO de los montos del documento (COP si Zoho no la trae)
   saldo: number;
   lineas: DetalleLinea[];
   subtotal: number;
@@ -38,6 +39,7 @@ export interface DetalleOV {
   fecha: string;
   entrega: string | null;
   terminos: string | null;
+  moneda: string; // ISO de los montos del documento (COP si Zoho no la trae)
   lineas: DetalleLinea[];
   subtotal: number;
   iva: number;
@@ -77,6 +79,7 @@ const FACTURA_HEADER_SQL = `
          NULLIF(i.raw ->> 'balance', '')              AS saldo,
          NULLIF(i.raw ->> 'payment_terms_label', '')  AS terminos,
          i.reference_number                           AS ov,
+         i.raw ->> 'currency_code'                AS moneda,
          c.nit,
          ${DIRECCION('i.raw')}                        AS direccion
     FROM books.invoices i
@@ -119,6 +122,7 @@ const OV_HEADER_SQL = `
          so.sub_total, so.total,
          NULLIF(so.raw ->> 'tax_total', '')           AS iva,
          NULLIF(so.raw ->> 'payment_terms_label', '') AS terminos,
+         so.raw ->> 'currency_code'               AS moneda,
          c.nit,
          ${DIRECCION('so.raw')}                       AS direccion
     FROM books.sales_orders so
@@ -147,6 +151,8 @@ const OV_LINEAS_SQL = `
    WHERE so.salesorder_number = $1
    ORDER BY li.line_item_id`;
 
+const monedaOf = (v: unknown): string => String(v ?? '').trim().toUpperCase() || 'COP';
+
 export async function getDetalleFactura(db: Pool, numero: string): Promise<DetalleFactura | null> {
   const { rows: h } = await db.query(FACTURA_HEADER_SQL, [numero]);
   if (!h.length) return null;
@@ -161,6 +167,7 @@ export async function getDetalleFactura(db: Pool, numero: string): Promise<Detal
     vencimiento: (head.vencimiento as string) ?? null,
     terminos: (head.terminos as string) ?? null,
     ov: (head.ov as string) ?? null,
+    moneda: monedaOf(head.moneda),
     saldo: n(head.saldo),
     lineas: buildLineas(l as LineaRow[]),
     subtotal: n(head.sub_total),
@@ -182,6 +189,7 @@ export async function getDetalleOV(db: Pool, numero: string): Promise<DetalleOV 
     fecha: head.fecha as string,
     entrega: (head.entrega as string) ?? null,
     terminos: (head.terminos as string) ?? null,
+    moneda: monedaOf(head.moneda),
     lineas: buildLineas(l as LineaRow[]),
     subtotal: n(head.sub_total),
     iva: n(head.iva),
