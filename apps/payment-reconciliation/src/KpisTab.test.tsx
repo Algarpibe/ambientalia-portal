@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import type { ReconciledRow } from './types';
 import KpisTab from './KpisTab';
 
@@ -27,8 +27,9 @@ describe('KpisTab', () => {
         today={TODAY}
       />,
     );
-    expect(screen.getByText('2025')).toBeInTheDocument();
-    expect(screen.getByText('2026 (parcial)')).toBeInTheDocument();
+    const yearly = within(screen.getByRole('table', { name: 'Tendencia anual de mora por año de vencimiento' }));
+    expect(yearly.getByText('2025')).toBeInTheDocument();
+    expect(yearly.getByText('2026 (parcial)')).toBeInTheDocument();
     expect(await screen.findByTestId('yearly-charts')).toBeInTheDocument();
   });
 
@@ -44,8 +45,11 @@ describe('KpisTab', () => {
         today={TODAY}
       />,
     );
-    expect(screen.queryByText('2020')).not.toBeInTheDocument();
-    expect(screen.getByText('2021')).toBeInTheDocument();
+    const yearly = within(screen.getByRole('table', { name: 'Tendencia anual de mora por año de vencimiento' }));
+    const concentration = within(screen.getByRole('table', { name: 'Concentración de la mora por año' }));
+    expect(yearly.queryByText('2020')).not.toBeInTheDocument();
+    expect(concentration.queryByText('2020')).not.toBeInTheDocument();
+    expect(yearly.getByText('2021')).toBeInTheDocument();
   });
 
   it('shows the empty state when the only due invoices are from 2020', () => {
@@ -59,6 +63,28 @@ describe('KpisTab', () => {
     expect(help).toHaveTextContent('DPD promedio');
     expect(help).toHaveTextContent('DPD ponderado por valor');
     expect(help).toHaveTextContent('Σ');
+  });
+
+  it('shows the concentration of delinquency per year', () => {
+    render(
+      <KpisTab
+        reconciledData={[
+          row({ clientName: 'Cliente A', dueDate: '10 mar 2025', total: 1000, paymentDetails: [{ date: 'x', delay: 30 }] }),
+          row({ clientName: 'Cliente B', dueDate: '10 mar 2025', total: 100, paymentDetails: [{ date: 'x', delay: 0 }] }),
+        ]}
+        today={TODAY}
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Concentración de la mora por año' });
+    expect(table).toHaveTextContent('Cliente A (100,0 %)');
+    expect(table).toHaveTextContent('2025');
+  });
+
+  it('explains the bands and the concentration in the notes', () => {
+    render(<KpisTab reconciledData={[row({ dueDate: '10 mar 2025' })]} today={TODAY} />);
+    const help = screen.getByRole('region', { name: '¿Cómo se calculan estos indicadores?' });
+    expect(help).toHaveTextContent('Tramos de mora');
+    expect(help).toHaveTextContent('80 %');
   });
 
   it('shows no table while loading', () => {

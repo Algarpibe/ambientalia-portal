@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import type { ReconciledRow } from './types';
 import KpisTab from './KpisTab';
 
@@ -34,6 +34,7 @@ describe('KpisTab when the charts fail to load', () => {
 
     expect(await screen.findByText('No se pudieron cargar los gráficos.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Recargar' })).toBeInTheDocument();
-    expect(screen.getByText('2025')).toBeInTheDocument();
+    const yearly = within(screen.getByRole('table', { name: 'Tendencia anual de mora por año de vencimiento' }));
+    expect(yearly.getByText('2025')).toBeInTheDocument();
   });
 });

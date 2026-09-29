@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { ReconciledRow } from './types';
 import { computeYearlyTrend } from './metrics/yearlyTrendMetrics';
+import { computeDelinquencyBands, computeDelinquencyConcentration } from './metrics/delinquencyBreakdown';
+import type { ConcentrationRow } from './metrics/delinquencyBreakdown';
 import { SkeletonAnalytics } from './SkeletonLoader';
 
 const YearlyTrendCharts = lazy(() => import('./YearlyTrendCharts'));
@@ -41,6 +43,42 @@ class ChartsErrorBoundary extends Component<{ children: ReactNode }, { failed: b
 const oneDecimal = (n: number) =>
   n.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
+function ConcentrationTable({ rows }: { rows: ConcentrationRow[] }) {
+  const th = 'px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider';
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-soft overflow-x-auto">
+      <h3 className="px-6 pt-6 text-sm font-bold text-slate-600 uppercase tracking-wider">Concentración de la mora</h3>
+      <table className="w-full text-left border-collapse mt-4">
+        <caption className="sr-only">Concentración de la mora por año</caption>
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th scope="col" className={th}>Año</th>
+            <th scope="col" className={`${th} text-right`}>Clientes</th>
+            <th scope="col" className={`${th} text-right`}>Con mora</th>
+            <th scope="col" className={`${th} text-right`}>Suman el 80 %</th>
+            <th scope="col" className={th}>Principales</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((r) => (
+            <tr key={r.year}>
+              <td className="px-6 py-4 font-medium text-slate-900">{r.isPartialYear ? `${r.year} (parcial)` : r.year}</td>
+              <td className="px-6 py-4 text-right text-slate-600">{r.totalClients}</td>
+              <td className="px-6 py-4 text-right text-slate-600">{r.clientsWithDelinquency}</td>
+              <td className="px-6 py-4 text-right text-slate-900 font-semibold">{r.clientsFor80 || '—'}</td>
+              <td className="px-6 py-4 text-slate-600">
+                {r.topClients.length === 0
+                  ? '—'
+                  : r.topClients.map((c) => `${c.name} (${oneDecimal(c.share)} %)`).join(', ')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function CalculationNotes() {
   return (
     <section
@@ -65,6 +103,16 @@ function CalculationNotes() {
           valor de las facturas. Las facturas grandes pesan más. Si el ponderado supera al promedio, la mora se
           concentra en las facturas de mayor valor.
         </p>
+        <p>
+          <strong className="text-slate-800">Tramos de mora</strong>: qué parte de las facturas de cada año se pagó
+          a tiempo, con 1–15, 16–30, 31–60 o más de 60 días de mora. Muestra si la mora sube por muchos retrasos
+          pequeños o por pocos retrasos graves.
+        </p>
+        <p>
+          <strong className="text-slate-800">Concentración de la mora</strong>: la mora de un cliente es Σ (DPD ×
+          valor) de sus facturas del año. «Suman el 80 %» es el menor número de clientes cuya mora llega al 80 % de
+          la mora total del año; si son pocos, la tendencia la arrastran unos pocos clientes.
+        </p>
         <p className="text-slate-500">
           Ejemplo: una factura de $1.000.000 pagada a tiempo (0 días) y otra de $9.000.000 con 30 días de mora dan
           un DPD promedio de (0 + 30) ÷ 2 = 15 días y un DPD ponderado de (0 × 1.000.000 + 30 × 9.000.000) ÷
@@ -83,6 +131,15 @@ function CalculationNotes() {
 export default function KpisTab({ reconciledData, loading = false, today }: KpisTabProps) {
   const rows = useMemo(
     () => computeYearlyTrend(reconciledData, today ?? new Date()),
+    [reconciledData, today],
+  );
+
+  const bands = useMemo(
+    () => computeDelinquencyBands(reconciledData, today ?? new Date()),
+    [reconciledData, today],
+  );
+  const concentration = useMemo(
+    () => computeDelinquencyConcentration(reconciledData, today ?? new Date()),
     [reconciledData, today],
   );
 
@@ -107,7 +164,7 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
 
       <ChartsErrorBoundary>
         <Suspense fallback={<SkeletonAnalytics cards={2} />}>
-          <YearlyTrendCharts rows={rows} />
+          <YearlyTrendCharts rows={rows} bands={bands} />
         </Suspense>
       </ChartsErrorBoundary>
 
@@ -138,6 +195,8 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
           </tbody>
         </table>
       </div>
+
+      <ConcentrationTable rows={concentration} />
 
       <CalculationNotes />
     </div>
