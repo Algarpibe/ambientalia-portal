@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
+import { FileDown, Table as TableIcon, AlertCircle, Filter, ArrowUpDown, BarChart3, LayoutGrid, Eye, X, GripVertical } from 'lucide-react';
 import './App.css';
 import type { InvoiceDetails, PaymentRecord, ReconciledRow, DateRangeOption } from './types';
 import CustomerAnalysis from './CustomerAnalysis';
 import GeneralAnalysis from './GeneralAnalysis';
+import KpisTab from './KpisTab';
 import { getDateRangeBounds, parseExcelDate } from './customerAnalysisUtils';
 import { sortReconciledRows, nextSortConfig } from './reconciliationSort';
 import type { ReconciliationSortConfig, ReconciliationSortKey } from './reconciliationSort';
@@ -11,7 +12,7 @@ import { authHeaders } from '@suite/auth-client';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 import DetalleModal from './DetalleModal';
 
-type ActiveView = 'reconciliation' | 'analysis' | 'general';
+type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis';
 
 function App() {
   const [invoices, setInvoices] = useState<InvoiceDetails[]>([]);
@@ -354,6 +355,17 @@ function App() {
           >
             <LayoutGrid size={18} />
             Análisis General
+          </button>
+
+          <button
+            onClick={() => setActiveView('kpis')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${activeView === 'kpis'
+              ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-600'
+              : 'text-slate-500 hover:bg-slate-50 border-b-2 border-transparent'
+              }`}
+          >
+            <BarChart3 size={18} />
+            KPIs
           </button>
         </div>
       </header>
@@ -868,6 +880,9 @@ function App() {
             mode="analysis"
           />
         )}
+
+        {/* KPIs View — yearly DPD trend; ignores the period filter by design */}
+        {activeView === 'kpis' && <KpisTab reconciledData={reconciledData} loading={loading} />}
 
       </main>
       {detalleFactura && <DetalleModal tipo="factura" numero={detalleFactura} onClose={() => setDetalleFactura(null)} />}
