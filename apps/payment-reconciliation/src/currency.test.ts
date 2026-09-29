@@ -37,6 +37,16 @@ describe('formatMoney', () => {
     expect(formatMoney(1000, 'XXXX')).toContain('XXXX');
   });
 
+  it('keeps the cents of currencies that have them', () => {
+    expect(formatMoney(1234.5, 'USD')).toContain('1.234,50');
+    expect(formatMoney(99.9, 'EUR')).toContain('99,90');
+  });
+
+  it('does not dress an unknown code as pesos', () => {
+    expect(formatMoney(1000, 'XXXX')).not.toContain('$');
+    expect(formatMoney(1000, 'XXXX')).toBe('1.000 XXXX');
+  });
+
   it('treats nullish/NaN amounts as zero', () => {
     expect(formatMoney(NaN)).toContain('0');
   });

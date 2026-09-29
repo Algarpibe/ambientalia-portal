@@ -11,14 +11,22 @@ export function currencyOf(row: { currencyCode?: string }): string {
 
 export const isCop = (row: { currencyCode?: string }): boolean => currencyOf(row) === BASE_REPORTING_CURRENCY;
 
-const copFormat = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+const plainNumber = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 2 });
 
-/** Formats ONE amount with its own currency. A bad code from data never throws. */
+/**
+ * Formats ONE amount with its own currency. Pesos without decimals (as everywhere
+ * in the app); other currencies keep their cents. A bad code from data never
+ * throws, and is not dressed as pesos: it prints the number and the code.
+ */
 export function formatMoney(amount: number, currency: string = BASE_REPORTING_CURRENCY): string {
   const value = Number.isFinite(amount) ? amount : 0;
   try {
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency,
+      ...(currency === BASE_REPORTING_CURRENCY ? { maximumFractionDigits: 0 } : {}),
+    }).format(value);
   } catch {
-    return `${copFormat.format(value)} ${currency}`;
+    return `${plainNumber.format(value)} ${currency}`;
   }
 }
