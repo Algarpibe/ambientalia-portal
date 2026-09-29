@@ -88,4 +88,34 @@ describe('computeYearlyTrend', () => {
   it('returns an empty list for no data', () => {
     expect(computeYearlyTrend([], TODAY)).toEqual([]);
   });
+
+  it('ignores a non-numeric total in the weighting but still counts the invoice', () => {
+    const [only] = computeYearlyTrend(
+      [
+        row({ invoiceNumber: 'P', dueDate: '1 feb 2025', total: 100, paymentDetails: paidWithDelay(10) }),
+        row({ invoiceNumber: 'Q', dueDate: '2 feb 2025', total: NaN, paymentDetails: paidWithDelay(20) }),
+      ],
+      TODAY,
+    );
+    expect(only.weightedDPD).toBe(10);
+    expect(only.averageDPD).toBe(15);
+    expect(only.invoiceCount).toBe(2);
+  });
+
+  it('treats a NaN payment delay as 0 days', () => {
+    const [only] = computeYearlyTrend(
+      [row({ dueDate: '1 feb 2025', total: 100, paymentDetails: paidWithDelay(NaN) })],
+      TODAY,
+    );
+    expect(only.averageDPD).toBe(0);
+  });
+
+  it('ignores the time of day of today', () => {
+    const late = new Date(2026, 8, 29, 23, 59);
+    const res = computeYearlyTrend(DATASET, late);
+    expect(res).toEqual(result);
+    expect(res.find((r) => r.year === 2026)!.invoiceCount).toBe(2);
+    expect(res.find((r) => r.year === 2026)!.averageDPD).toBeCloseTo(22, 5);
+    expect(computeYearlyTrend([row({ dueDate: '29 sep 2026', total: 10, balance: 10 })], late)).toEqual([]);
+  });
 });

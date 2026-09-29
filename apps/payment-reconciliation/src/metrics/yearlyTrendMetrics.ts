@@ -38,12 +38,14 @@ export function computeYearlyTrend(rows: ReconciledRow[], today: Date): YearlyTr
     const due = row.dueDate instanceof Date ? row.dueDate : parseExcelDate(row.dueDate);
     if (!due || startOfDay(due) >= cutoff) continue;
 
-    const dpd = Math.max(0, calculateInvoiceDPD(row, cutoff));
+    const raw = calculateInvoiceDPD(row, cutoff);
+    const dpd = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+    const value = Number.isFinite(row.total) && row.total > 0 ? row.total : 0;
     const acc = byYear.get(due.getFullYear()) ?? { count: 0, dpdSum: 0, weightedSum: 0, valueSum: 0, onTime: 0 };
     acc.count += 1;
     acc.dpdSum += dpd;
-    acc.weightedSum += dpd * row.total;
-    acc.valueSum += row.total;
+    acc.weightedSum += dpd * value;
+    acc.valueSum += value;
     if (dpd === 0) acc.onTime += 1;
     byYear.set(due.getFullYear(), acc);
   }
