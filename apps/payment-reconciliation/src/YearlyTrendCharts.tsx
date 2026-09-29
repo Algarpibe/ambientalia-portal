@@ -49,7 +49,7 @@ export default function YearlyTrendCharts({ rows, bands }: { rows: YearlyTrendRo
         <DpdByYearChart rows={rows} />
       </ChartCard>
 
-      <ChartCard title="% de facturas pagadas a tiempo">
+      <ChartCard title="% pagado a tiempo">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={onTimeData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -57,12 +57,27 @@ export default function YearlyTrendCharts({ rows, bands }: { rows: YearlyTrendRo
             <YAxis stroke="#64748b" domain={[0, 100]} unit="%" />
             <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => `${oneDecimal(Number(v))} %`} />
             <Legend />
-            <Bar dataKey="onTimePercentage" name="% a tiempo" fill="#059669" radius={BAR_RADIUS} maxBarSize={48} />
+            <Bar dataKey="onTimePercentage" name="% de facturas a tiempo" fill="#059669" radius={BAR_RADIUS} maxBarSize={48} />
+            <Bar dataKey="onTimeValuePercentage" name="% del valor a tiempo" fill="#0d9488" radius={BAR_RADIUS} maxBarSize={48} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Facturas por tramo de mora (%)" className="xl:col-span-2">
+      <ChartCard title="Días de cobro (DSO) por año">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={onTimeData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }} barGap={4}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+            <XAxis dataKey="label" stroke="#64748b" />
+            <YAxis stroke="#64748b" allowDecimals={false} />
+            <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => `${oneDecimal(Number(v))} días`} />
+            <Legend />
+            <Bar dataKey="averageCollectionDays" name="DSO promedio" fill="#0284c7" radius={BAR_RADIUS} maxBarSize={48} />
+            <Bar dataKey="weightedCollectionDays" name="DSO ponderado por valor" fill="#7c3aed" radius={BAR_RADIUS} maxBarSize={48} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <ChartCard title="Facturas por tramo de mora (%)">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={bandData} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
