@@ -3,6 +3,7 @@ import SummaryWidget from './SummaryWidget';
 import TopPendingWidget from './TopPendingWidget';
 import OpenInvoicesWidget from './OpenInvoicesWidget';
 import PendingSalesOrdersWidget from './PendingSalesOrdersWidget';
+import DpdTrendWidget from './DpdTrendWidget';
 
 // Widgets que esta app expone al Dashboard del Portal. El Portal los descubre
 // vía import dinámico (portal/src/widgets/registry.ts).
@@ -39,6 +40,14 @@ const widgets: WidgetDescriptor[] = [
     description: 'Órdenes de venta sin facturar o parciales, con el valor pendiente por facturar.',
     defaultSize: { w: 8, h: 5 },
     component: PendingSalesOrdersWidget,
+  },
+  {
+    id: 'payment-reconciliation-dpd-trend',
+    appId: 'payment-reconciliation',
+    name: 'Tendencia de Mora (DPD por año)',
+    description: 'DPD promedio y ponderado por valor de las facturas vencidas, por año de vencimiento.',
+    defaultSize: { w: 6, h: 4 },
+    component: DpdTrendWidget,
   },
 ];
 
