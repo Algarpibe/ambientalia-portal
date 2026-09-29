@@ -40,5 +40,6 @@ describe('KpisTab', () => {
   it('shows no table while loading', () => {
     render(<KpisTab reconciledData={[row()]} loading today={TODAY} />);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('yearly-charts')).not.toBeInTheDocument();
   });
 });
