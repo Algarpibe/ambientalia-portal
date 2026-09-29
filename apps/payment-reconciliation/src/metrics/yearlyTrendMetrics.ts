@@ -5,6 +5,7 @@ import { calculateInvoiceDPD, parseExcelDate } from '../customerAnalysisUtils';
  * Yearly delinquency trend for the KPIs tab.
  *
  * - An invoice belongs to the year of its DUE date (delinquency starts there).
+ * - Void and draft invoices are excluded: they are not real receivables.
  * - Only invoices already due before `today` count. Invoices not yet due would
  *   count as 0 days and make the current year look artificially better.
  * - The weighted average covers ALL due invoices (on-time ones weigh 0 days).
@@ -35,6 +36,9 @@ export function computeYearlyTrend(rows: ReconciledRow[], today: Date): YearlyTr
   const byYear = new Map<number, YearAccumulator>();
 
   for (const row of rows) {
+    const status = (row.status ?? '').trim().toLowerCase();
+    if (status === 'void' || status === 'draft') continue;
+
     const due = row.dueDate instanceof Date ? row.dueDate : parseExcelDate(row.dueDate);
     if (!due || startOfDay(due) >= cutoff) continue;
 

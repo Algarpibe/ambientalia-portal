@@ -131,3 +131,23 @@ describe('computeYearlyTrend with partial payments', () => {
     expect(result[0].onTimePercentage).toBe(0);
   });
 });
+
+describe('computeYearlyTrend excludes void and draft invoices', () => {
+  const normal = row({ invoiceNumber: 'N', dueDate: '10 mar 2025', total: 100, paymentDetails: paidWithDelay(0) });
+
+  it('ignores a void invoice', () => {
+    const result = computeYearlyTrend([normal, row({ invoiceNumber: 'V', dueDate: '10 mar 2025', status: 'void', total: 100 })], TODAY);
+    expect(result[0].invoiceCount).toBe(1);
+  });
+
+  it('ignores a draft invoice with a balance', () => {
+    const result = computeYearlyTrend([normal, row({ invoiceNumber: 'D', dueDate: '10 mar 2025', status: 'draft', total: 100, balance: 100 })], TODAY);
+    expect(result[0].invoiceCount).toBe(1);
+    expect(result[0].averageDPD).toBe(0);
+  });
+
+  it('matches the status ignoring case and surrounding spaces', () => {
+    const result = computeYearlyTrend([normal, row({ invoiceNumber: 'V2', dueDate: '10 mar 2025', status: 'VOID ', total: 100 })], TODAY);
+    expect(result[0].invoiceCount).toBe(1);
+  });
+});
