@@ -115,7 +115,7 @@ function AgingSection({ aging }: { aging: ReceivablesAging }) {
             className={`rounded-xl border px-4 py-3 ${b.key === 'notDue' ? 'bg-slate-50 border-slate-100' : 'bg-red-50/40 border-red-100'}`}
           >
             <p className="text-xs font-semibold text-slate-500">{AGING_LABELS[b.key]}</p>
-            <p className="text-lg font-bold text-slate-900 truncate">{money(b.balance)}</p>
+            <p className="text-lg font-bold text-slate-900 truncate" title={money(b.balance)}>{money(b.balance)}</p>
             <p className="text-xs text-slate-500">
               {b.invoiceCount} facturas · {b.clientCount} clientes
             </p>

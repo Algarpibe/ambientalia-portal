@@ -58,7 +58,7 @@ export default function YearlyTrendCharts({ rows, bands }: { rows: YearlyTrendRo
             <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => `${oneDecimal(Number(v))} %`} />
             <Legend />
             <Bar dataKey="onTimePercentage" name="% de facturas a tiempo" fill="#059669" radius={BAR_RADIUS} maxBarSize={48} />
-            <Bar dataKey="onTimeValuePercentage" name="% del valor a tiempo" fill="#0d9488" radius={BAR_RADIUS} maxBarSize={48} />
+            <Bar dataKey="onTimeValuePercentage" name="% del valor a tiempo" fill="#5eead4" radius={BAR_RADIUS} maxBarSize={48} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
