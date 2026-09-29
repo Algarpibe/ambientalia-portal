@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ReconciledRow } from '../types';
-import { computeYearlyTrend } from './yearlyTrendMetrics';
+import { computeYearlyTrend, collectDueInvoices, EXCLUDED_YEARS } from './yearlyTrendMetrics';
 
 function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
   return {
@@ -149,5 +149,42 @@ describe('computeYearlyTrend excludes void and draft invoices', () => {
   it('matches the status ignoring case and surrounding spaces', () => {
     const result = computeYearlyTrend([normal, row({ invoiceNumber: 'V2', dueDate: '10 mar 2025', status: 'VOID ', total: 100 })], TODAY);
     expect(result[0].invoiceCount).toBe(1);
+  });
+});
+
+describe('collectDueInvoices', () => {
+  it('returns year, DPD and value for each due invoice', () => {
+    const due = collectDueInvoices(
+      [row({ invoiceNumber: 'A', dueDate: '10 mar 2025', total: 100, paymentDetails: paidWithDelay(10) })],
+      TODAY,
+    );
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ year: 2025, dpd: 10, value: 100 });
+    expect(due[0].row.invoiceNumber).toBe('A');
+  });
+
+  it('applies the same exclusions as the yearly trend', () => {
+    const due = collectDueInvoices(
+      [
+        row({ dueDate: '15 oct 2026', total: 1, balance: 1 }), // not due yet
+        row({ dueDate: null }), // unreadable
+        row({ dueDate: '1 feb 2025', status: 'void' }),
+        row({ dueDate: '1 feb 2025', status: 'draft' }),
+        row({ dueDate: '10 mar 2020', paymentDetails: paidWithDelay(3) }), // excluded year
+      ],
+      TODAY,
+    );
+    expect(due).toEqual([]);
+  });
+});
+
+describe('excluded years', () => {
+  it('leaves 2020 out of the yearly trend', () => {
+    expect(EXCLUDED_YEARS).toContain(2020);
+    const result = computeYearlyTrend(
+      [row({ dueDate: '10 mar 2020', total: 10 }), row({ dueDate: '10 mar 2021', total: 10 })],
+      TODAY,
+    );
+    expect(result.map((r) => r.year)).toEqual([2021]);
   });
 });

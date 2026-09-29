@@ -41,10 +41,6 @@ class ChartsErrorBoundary extends Component<{ children: ReactNode }, { failed: b
 const oneDecimal = (n: number) =>
   n.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-// Years with incomplete invoice history: comparing them with full years would
-// distort the trend. 2020 is when the invoice data starts.
-const EXCLUDED_YEARS = [2020];
-
 function CalculationNotes() {
   return (
     <section
@@ -86,8 +82,7 @@ function CalculationNotes() {
 
 export default function KpisTab({ reconciledData, loading = false, today }: KpisTabProps) {
   const rows = useMemo(
-    () =>
-      computeYearlyTrend(reconciledData, today ?? new Date()).filter((r) => !EXCLUDED_YEARS.includes(r.year)),
+    () => computeYearlyTrend(reconciledData, today ?? new Date()),
     [reconciledData, today],
   );
 
