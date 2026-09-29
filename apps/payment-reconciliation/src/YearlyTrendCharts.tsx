@@ -1,9 +1,12 @@
 import type React from 'react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import type { YearlyTrendRow } from './metrics/yearlyTrendMetrics';
 
 const oneDecimal = (n: number) =>
   n.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+// Rounded top corners only, so bars sit flat on the X axis.
+const BAR_RADIUS: [number, number, number, number] = [4, 4, 0, 0];
 
 function ChartCard({ title, children }: { title: string; children: React.ReactElement }) {
   return (
@@ -23,26 +26,26 @@ export default function YearlyTrendCharts({ rows }: { rows: YearlyTrendRow[] }) 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
       <ChartCard title="DPD promedio por año (días)">
-        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }} barGap={4}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
           <XAxis dataKey="label" stroke="#64748b" />
           <YAxis stroke="#64748b" allowDecimals={false} />
-          <Tooltip formatter={(v) => `${oneDecimal(Number(v))} días`} />
+          <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => `${oneDecimal(Number(v))} días`} />
           <Legend />
-          <Line type="monotone" dataKey="averageDPD" name="DPD promedio" stroke="#4f46e5" strokeWidth={2} dot={{ r: 4 }} />
-          <Line type="monotone" dataKey="weightedDPD" name="DPD ponderado por valor" stroke="#dc2626" strokeWidth={2} dot={{ r: 4 }} />
-        </LineChart>
+          <Bar dataKey="averageDPD" name="DPD promedio" fill="#4f46e5" radius={BAR_RADIUS} maxBarSize={48} />
+          <Bar dataKey="weightedDPD" name="DPD ponderado por valor" fill="#dc2626" radius={BAR_RADIUS} maxBarSize={48} />
+        </BarChart>
       </ChartCard>
 
       <ChartCard title="% de facturas pagadas a tiempo">
-        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
           <XAxis dataKey="label" stroke="#64748b" />
           <YAxis stroke="#64748b" domain={[0, 100]} unit="%" />
-          <Tooltip formatter={(v) => `${oneDecimal(Number(v))} %`} />
+          <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => `${oneDecimal(Number(v))} %`} />
           <Legend />
-          <Line type="monotone" dataKey="onTimePercentage" name="% a tiempo" stroke="#059669" strokeWidth={2} dot={{ r: 4 }} />
-        </LineChart>
+          <Bar dataKey="onTimePercentage" name="% a tiempo" fill="#059669" radius={BAR_RADIUS} maxBarSize={48} />
+        </BarChart>
       </ChartCard>
     </div>
   );
