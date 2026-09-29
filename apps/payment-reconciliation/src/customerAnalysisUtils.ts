@@ -278,16 +278,21 @@ export const calculateDPD = (dueDate: Date | null, paymentDate: Date | null): nu
 };
 
 /**
- * Calculate DPD for an invoice (considering all payments or current date if unpaid)
+ * Calculate DPD for an invoice: max payment delay, plus days overdue up to
+ * `now` when a balance is still owed (partial payments do not hide delinquency)
  */
 export const calculateInvoiceDPD = (invoice: ReconciledRow, now: Date = new Date()): number => {
     const dueDate = parseExcelDate(invoice.dueDate);
     if (!dueDate) return 0;
 
-    // If invoice has payments, use the latest payment date
+    // With payments: the largest payment delay. If a balance is still owed, the
+    // unpaid remainder keeps aging, so days overdue up to `now` also count.
     if (invoice.paymentDetails && invoice.paymentDetails.length > 0) {
-        // Find the maximum delay from all payments
         const maxDelay = Math.max(...invoice.paymentDetails.map(pd => pd.delay));
+        if (invoice.balance > 0) {
+            // Not yet due -> calculateDPD is negative and maxDelay wins
+            return Math.max(maxDelay, calculateDPD(dueDate, now));
+        }
         return maxDelay;
     }
 

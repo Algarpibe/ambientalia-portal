@@ -119,3 +119,15 @@ describe('computeYearlyTrend', () => {
     expect(computeYearlyTrend([row({ dueDate: '29 sep 2026', total: 10, balance: 10 })], late)).toEqual([]);
   });
 });
+
+describe('computeYearlyTrend with partial payments', () => {
+  it('counts an invoice with an overdue balance as late even if the payment was on time', () => {
+    const result = computeYearlyTrend(
+      [row({ dueDate: '15 sep 2026', total: 1000, balance: 900, paymentDetails: [{ date: '01/09/2026', delay: 0 }] })],
+      TODAY,
+    );
+    expect(result[0].year).toBe(2026);
+    expect(result[0].averageDPD).toBe(14);
+    expect(result[0].onTimePercentage).toBe(0);
+  });
+});

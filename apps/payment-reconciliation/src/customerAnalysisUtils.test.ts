@@ -51,3 +51,32 @@ describe('calculateInvoiceDPD with a reference date', () => {
     expect(calculateInvoiceDPD(invoice, new Date(2026, 8, 29))).toBe(14);
   });
 });
+
+describe('calculateInvoiceDPD with payments and an outstanding balance', () => {
+  const NOW = new Date(2026, 8, 29);
+  const make = (over: Partial<ReconciledRow>) => ({
+    invoiceNumber: 'X', orderNumber: '', clientName: 'ACME',
+    invoiceDate: '1 sep 2026', dueDate: '15 sep 2026', status: 'partially_paid',
+    total: 1000, balance: 900,
+    paymentDates: [], paymentAmounts: [], totalPaid: 100,
+    isOverdue: true, maxDelayDays: 0,
+    paymentDetails: [{ date: '01/09/2026', delay: 0 }],
+    ...over,
+  }) as ReconciledRow;
+
+  it('counts the overdue balance when the partial payment was on time', () => {
+    expect(calculateInvoiceDPD(make({}), NOW)).toBe(14);
+  });
+
+  it('keeps the payment delay when it exceeds the days to the reference date', () => {
+    expect(calculateInvoiceDPD(make({ paymentDetails: [{ date: 'x', delay: 30 }] }), NOW)).toBe(30);
+  });
+
+  it('uses only the payment delay when the invoice is fully paid', () => {
+    expect(calculateInvoiceDPD(make({ balance: 0, paymentDetails: [{ date: 'x', delay: 5 }] }), NOW)).toBe(5);
+  });
+
+  it('does not penalise a partially paid invoice that is not yet due', () => {
+    expect(calculateInvoiceDPD(make({ dueDate: '15 oct 2026', paymentDetails: [{ date: 'x', delay: 0 }] }), NOW)).toBe(0);
+  });
+});
