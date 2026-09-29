@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Loader2, AlertCircle } from 'lucide-react';
+import { formatMoney } from './currency';
 import { fetchFacturaDetalle, fetchOVDetalle, type DetalleFactura, type DetalleOV } from './detalleApi';
 
 type Detalle = (DetalleFactura & { _t: 'factura' }) | (DetalleOV & { _t: 'ov' });
 interface Props { tipo: 'factura' | 'ov'; numero: string; onClose: () => void; }
 
-const money = (v: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v || 0);
 
 export default function DetalleModal({ tipo, numero, onClose }: Props) {
   const [d, setD] = useState<Detalle | null>(null);
@@ -63,7 +62,7 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
               {d._t === 'ov' && <Dato k="Entrega" v={d.entrega} />}
               <Dato k="Términos" v={d.terminos} />
               {d._t === 'factura' && <Dato k="Orden de venta" v={d.ov} />}
-              {d._t === 'factura' && <Dato k="Saldo" v={money(d.saldo)} />}
+              {d._t === 'factura' && <Dato k="Saldo" v={formatMoney(d.saldo, d.moneda ?? 'COP')} />}
             </div>
 
             <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -83,8 +82,8 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
                       <td className="px-2 py-1 whitespace-nowrap font-medium text-slate-700">{l.sku || '—'}</td>
                       <td className="px-2 py-1 text-slate-600">{l.nombre || '—'}</td>
                       <td className="px-2 py-1 text-right tabular-nums">{l.cantidad}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(l.precio)}</td>
-                      <td className="px-2 py-1 text-right tabular-nums">{money(l.total)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatMoney(l.precio, d.moneda ?? 'COP')}</td>
+                      <td className="px-2 py-1 text-right tabular-nums">{formatMoney(l.total, d.moneda ?? 'COP')}</td>
                     </tr>
                   ))}
                   {d.lineas.length === 0 && <tr><td colSpan={5} className="px-2 py-4 text-center text-slate-400">Sin líneas.</td></tr>}
@@ -93,9 +92,9 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
             </div>
 
             <div className="ml-auto w-full max-w-xs space-y-1 text-sm">
-              <Total k="Subtotal" v={money(d.subtotal)} />
-              <Total k="IVA (19%)" v={money(d.iva)} />
-              <Total k="Total" v={money(d.total)} fuerte />
+              <Total k="Subtotal" v={formatMoney(d.subtotal, d.moneda ?? 'COP')} />
+              <Total k="IVA (19%)" v={formatMoney(d.iva, d.moneda ?? 'COP')} />
+              <Total k="Total" v={formatMoney(d.total, d.moneda ?? 'COP')} fuerte />
             </div>
           </div>
         )}

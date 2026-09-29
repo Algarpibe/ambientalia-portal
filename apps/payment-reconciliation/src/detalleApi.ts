@@ -5,11 +5,11 @@ export interface DetalleLinea { sku: string; nombre: string; cantidad: number; p
 export interface DetalleFactura {
   numero: string; cliente: string; nit: string | null; direccion: string | null;
   fecha: string; vencimiento: string | null; terminos: string | null; ov: string | null;
-  saldo: number; lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
+  moneda?: string; saldo: number; lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
 }
 export interface DetalleOV {
   numero: string; cliente: string; nit: string | null; direccion: string | null;
-  fecha: string; entrega: string | null; terminos: string | null;
+  fecha: string; entrega: string | null; terminos: string | null; moneda?: string;
   lineas: DetalleLinea[]; subtotal: number; iva: number; total: number;
 }
 
