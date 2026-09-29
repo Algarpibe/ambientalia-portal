@@ -76,4 +76,20 @@ describe('reconcileInvoices', () => {
     expect(row.status).toBe('partially_paid');
     expect(row.invoiceNumber).toBe('AM100');
   });
+
+  it('keeps the latest real payment date, whatever the payment order', () => {
+    const [row] = reconcileInvoices(
+      [invoice()],
+      [payment({ paymentDate: '2026-09-20' }), payment({ paymentNumber: 'P2', paymentDate: '2026-09-05' })],
+      NOW,
+    );
+    expect(row.lastPaymentDate).toEqual(new Date(2026, 8, 20));
+  });
+
+  it('has no last payment date without readable payments', () => {
+    const [none] = reconcileInvoices([invoice()], [], NOW);
+    expect(none.lastPaymentDate).toBeNull();
+    const [unreadable] = reconcileInvoices([invoice()], [payment({ paymentDate: 'sin fecha' })], NOW);
+    expect(unreadable.lastPaymentDate).toBeNull();
+  });
 });

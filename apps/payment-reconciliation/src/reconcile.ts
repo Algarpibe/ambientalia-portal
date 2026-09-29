@@ -42,9 +42,13 @@ export function reconcileInvoices(
 
       let isOverdue = false;
       let maxDelayDays = 0;
+      let lastPaymentDate: Date | null = null;
 
       const paymentDetails = matchingPayments.map((p) => {
         const pDate = p.paymentDate instanceof Date ? p.paymentDate : parseExcelDate(p.paymentDate);
+        if (pDate && !isNaN(pDate.getTime()) && (!lastPaymentDate || pDate > lastPaymentDate)) {
+          lastPaymentDate = pDate;
+        }
         let delay = 0;
         if (pDate && dueDate && pDate > dueDate) {
           isOverdue = true;
@@ -69,6 +73,7 @@ export function reconcileInvoices(
         isOverdue,
         maxDelayDays,
         paymentDetails,
+        lastPaymentDate,
       };
     });
 }

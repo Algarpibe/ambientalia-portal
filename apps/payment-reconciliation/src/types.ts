@@ -31,6 +31,8 @@ export interface ReconciledRow extends InvoiceDetails {
   isOverdue: boolean;
   maxDelayDays: number;
   paymentDetails: { date: string; delay: number }[];
+  /** Latest real payment date (set by reconcileInvoices); used for DSO. */
+  lastPaymentDate?: Date | null;
 }
 
 export interface PaymentBand {
