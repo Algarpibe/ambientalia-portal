@@ -188,3 +188,57 @@ describe('excluded years', () => {
     expect(result.map((r) => r.year)).toEqual([2021]);
   });
 });
+
+describe('value collected on time', () => {
+  it('weighs the on-time share by invoice value', () => {
+    const [y] = computeYearlyTrend(
+      [
+        row({ dueDate: '10 mar 2025', total: 100, paymentDetails: paidWithDelay(0) }),
+        row({ dueDate: '10 abr 2025', total: 300, paymentDetails: paidWithDelay(10) }),
+      ],
+      TODAY,
+    );
+    expect(y.onTimePercentage).toBe(50);
+    expect(y.onTimeValuePercentage).toBe(25);
+  });
+
+  it('is 0 when the year has no invoice value', () => {
+    const [y] = computeYearlyTrend([row({ dueDate: '10 mar 2025', total: 0, paymentDetails: paidWithDelay(0) })], TODAY);
+    expect(y.onTimeValuePercentage).toBe(0);
+  });
+});
+
+describe('collection days (DSO)', () => {
+  const DSO_DATA = [
+    row({ invoiceNumber: 'A', invoiceDate: '1 mar 2025', dueDate: '10 mar 2025', total: 100, balance: 0,
+      paymentDetails: paidWithDelay(11), lastPaymentDate: new Date(2025, 2, 21) }),
+    row({ invoiceNumber: 'B', invoiceDate: '1 jun 2025', dueDate: '20 jun 2025', total: 300, balance: 300 }),
+    row({ invoiceNumber: 'C', invoiceDate: '1 jul 2025', dueDate: '10 jul 2025', total: 999, balance: 0 }),
+  ];
+
+  it('measures invoice date → last payment, or → today while a balance is owed', () => {
+    const due = collectDueInvoices(DSO_DATA, TODAY);
+    expect(due.map((d) => d.collectionDays)).toEqual([20, 485, null]);
+  });
+
+  it('averages collection days, simple and weighted by value, over invoices with a known date', () => {
+    const [y] = computeYearlyTrend(DSO_DATA, TODAY);
+    expect(y.invoiceCount).toBe(3);
+    expect(y.averageCollectionDays).toBeCloseTo(252.5, 5);
+    expect(y.weightedCollectionDays).toBeCloseTo(368.75, 5);
+  });
+
+  it('clamps collection days at 0 (paid before the invoice date)', () => {
+    const [d] = collectDueInvoices(
+      [row({ invoiceDate: '10 mar 2025', dueDate: '20 mar 2025', paymentDetails: paidWithDelay(0), lastPaymentDate: new Date(2025, 2, 1) })],
+      TODAY,
+    );
+    expect(d.collectionDays).toBe(0);
+  });
+
+  it('reports no DSO for a year without any known collection date', () => {
+    const [y] = computeYearlyTrend([row({ invoiceDate: '1 jul 2025', dueDate: '10 jul 2025', balance: 0 })], TODAY);
+    expect(y.averageCollectionDays).toBeNull();
+    expect(y.weightedCollectionDays).toBeNull();
+  });
+});
