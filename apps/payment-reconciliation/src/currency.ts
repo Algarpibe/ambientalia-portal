@@ -10,3 +10,15 @@ export function currencyOf(row: { currencyCode?: string }): string {
 }
 
 export const isCop = (row: { currencyCode?: string }): boolean => currencyOf(row) === BASE_REPORTING_CURRENCY;
+
+const copFormat = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+
+/** Formats ONE amount with its own currency. A bad code from data never throws. */
+export function formatMoney(amount: number, currency: string = BASE_REPORTING_CURRENCY): string {
+  const value = Number.isFinite(amount) ? amount : 0;
+  try {
+    return new Intl.NumberFormat('es-CO', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
+  } catch {
+    return `${copFormat.format(value)} ${currency}`;
+  }
+}

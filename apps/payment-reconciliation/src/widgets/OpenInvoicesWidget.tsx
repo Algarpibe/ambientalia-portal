@@ -38,8 +38,8 @@ const COLUMNS: Col[] = [
   { key: 'clientName', label: 'Cliente', align: 'left', cellClass: 'text-gray-700 max-w-[180px] truncate', render: (r) => r.clientName, title: (r) => r.clientName },
   { key: 'invoiceTime', label: 'Fecha', align: 'left', cellClass: 'text-gray-500', render: (r) => r.invoiceDate },
   { key: 'dueTime', label: 'Vencimiento', align: 'left', cellClass: 'text-gray-500', render: (r) => r.dueDate },
-  { key: 'total', label: 'Total', align: 'right', cellClass: 'tabular-nums text-gray-700', render: (r) => formatMoney(r.total) },
-  { key: 'balance', label: 'Saldo', align: 'right', cellClass: 'tabular-nums font-semibold text-red-600', render: (r) => formatMoney(r.balance) },
+  { key: 'total', label: 'Total', align: 'right', cellClass: 'tabular-nums text-gray-700', render: (r) => formatMoney(r.total, r.currency) },
+  { key: 'balance', label: 'Saldo', align: 'right', cellClass: 'tabular-nums font-semibold text-red-600', render: (r) => formatMoney(r.balance, r.currency) },
   {
     key: 'status', label: 'Estado', align: 'left',
     render: (r) => (
@@ -75,7 +75,8 @@ export default function OpenInvoicesWidget() {
     });
   }, [allRows, client, from, to]);
 
-  const totalPending = useMemo(() => rows.reduce((s, r) => s + r.balance, 0), [rows]);
+  const totalPending = useMemo(() => rows.reduce((s, r) => (r.currency === 'COP' ? s + r.balance : s), 0), [rows]);
+  const foreignCount = useMemo(() => rows.filter((r) => r.currency !== 'COP').length, [rows]);
 
   // Orden por defecto: vencimiento ascendente (lo más vencido primero).
   const { sorted, sortKey, sortDir, toggle } = useSortable<OpenInvoiceRow>(rows, 'dueTime', 'asc');
@@ -124,6 +125,7 @@ export default function OpenInvoicesWidget() {
         </span>
         <span className="text-gray-500">
           Pendiente: <strong className="text-red-600">{formatMoney(totalPending)}</strong>
+          {foreignCount > 0 && <span className="text-gray-400"> (sin incluir {foreignCount} en otra moneda)</span>}
         </span>
       </div>
 

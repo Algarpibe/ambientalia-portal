@@ -1,3 +1,4 @@
+import { isCop } from './currency';
 import type { ReconciledRow, CustomerMetrics, CustomerAnalysisResult, DateRangeOption } from './types';
 
 /**
@@ -391,7 +392,9 @@ export const analyzeCustomerPayments = (
             MoraDPDValues.push(dpd);
         }
 
-        totalInvoiceValue += invoice.total;
+        // Money sums and severity weights cover COP only (never mix currencies).
+        const copValue = isCop(invoice) ? invoice.total : 0;
+        totalInvoiceValue += copValue;
 
         if (invoice.paymentDetails && invoice.paymentDetails.length > 0) {
             invoicesWithPayments++;
@@ -399,7 +402,7 @@ export const analyzeCustomerPayments = (
 
         // Track weighted DPD (severity) - only for invoices in arrears (DPD > 0)
         if (dpd > 0) {
-            weightedDPDValues.push({ dpd, value: invoice.total });
+            weightedDPDValues.push({ dpd, value: copValue });
         }
 
         // Count on-time payments (DPD <= 0)
@@ -409,16 +412,16 @@ export const analyzeCustomerPayments = (
             // Categorize into bands
             if (dpd >= 1 && dpd <= 15) {
                 bands.band1_15.count++;
-                bands.band1_15.totalValue += invoice.total;
+                bands.band1_15.totalValue += copValue;
             } else if (dpd >= 16 && dpd <= 30) {
                 bands.band16_30.count++;
-                bands.band16_30.totalValue += invoice.total;
+                bands.band16_30.totalValue += copValue;
             } else if (dpd >= 31 && dpd <= 60) {
                 bands.band31_60.count++;
-                bands.band31_60.totalValue += invoice.total;
+                bands.band31_60.totalValue += copValue;
             } else if (dpd > 60) {
                 bands.bandOver60.count++;
-                bands.bandOver60.totalValue += invoice.total;
+                bands.bandOver60.totalValue += copValue;
             }
         }
     });

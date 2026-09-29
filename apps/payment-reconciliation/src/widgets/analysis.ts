@@ -4,6 +4,7 @@
 // independiente y sin estado.
 
 import { parseExcelDate } from '../customerAnalysisUtils';
+import { currencyOf, isCop, formatMoney as formatMoneyIn } from '../currency';
 
 export interface ReconciliationSummary {
   totalInvoiced: number;   // suma de total de facturas
@@ -47,9 +48,11 @@ export function summarize(invoices: any[]): ReconciliationSummary {
 
   for (const inv of invoices) {
     if (inv?.clientName === INTERNAL_CLIENT) continue;
+    invoiceCount += 1;
+    // Money sums cover COP only: never add amounts of different currencies.
+    if (!isCop(inv ?? {})) continue;
     totalInvoiced += parseNumber(inv?.total);
     totalPending += parseNumber(inv?.balance);
-    invoiceCount += 1;
   }
 
   const totalReconciled = totalInvoiced - totalPending;
@@ -72,8 +75,9 @@ export function pendingByCustomer(invoices: any[]): CustomerPending[] {
   for (const inv of invoices) {
     const name = inv?.clientName || 'Cliente General';
     if (name === INTERNAL_CLIENT) continue;
-    const balance = parseNumber(inv?.balance);
-    const total = parseNumber(inv?.total);
+    const cop = isCop(inv ?? {});
+    const balance = cop ? parseNumber(inv?.balance) : 0;
+    const total = cop ? parseNumber(inv?.total) : 0;
 
     const c = (byCustomer[name] ??= { name, pending: 0, invoiced: 0, count: 0 });
     c.pending += balance;
@@ -118,6 +122,7 @@ export interface OpenInvoiceRow {
   dueDate: string;      // ya formateada dd/mm/aaaa
   total: number;
   balance: number;
+  currency: string;     // ISO de total/balance (moneda propia de la factura)
   paidPercent: number;  // fracción pagada [0, 1]
   status: PaymentStatus;
   dueTime: number;      // vencimiento en ms para ordenar; Infinity si no hay fecha
@@ -148,6 +153,7 @@ export function openInvoices(invoices: any[], statuses: PaymentStatus[]): OpenIn
         dueDate: formatDate(inv?.dueDate),
         total,
         balance,
+        currency: currencyOf(inv ?? {}),
         paidPercent: total > 0 ? Math.min(1, Math.max(0, (total - balance) / total)) : 0,
         status: paymentStatusOf(inv),
         dueTime: due ? due.getTime() : Infinity,
@@ -175,7 +181,6 @@ export function formatDate(value: unknown): string {
   return `${day}/${month}/${d.getFullYear()}`;
 }
 
-export const formatMoney = (value: number): string =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value || 0);
+export const formatMoney = (value: number, currency: string = 'COP'): string => formatMoneyIn(value, currency);
 
 export const formatPercent = (value: number): string => `${((value || 0) * 100).toFixed(1)}%`;

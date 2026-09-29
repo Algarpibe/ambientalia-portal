@@ -5,6 +5,8 @@ import { useSortable, sortArrow } from './useSortable';
 import { useColumnOrder } from './useColumnOrder';
 import ColumnOrderMenu from './ColumnOrderMenu';
 import DetalleModal from './DetalleModal';
+import { currencyOf, formatMoney } from './currency';
+import { pendingTotals } from './salesOrdersPendingTotals';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -26,8 +28,7 @@ interface PendingOrder {
 
 type StatusFilter = 'all' | 'unbilled' | 'partial';
 
-const money = (v: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v || 0);
+const orderCurrency = (o: PendingOrder) => currencyOf({ currencyCode: o.currency_code ?? undefined });
 
 const fmtDate = (iso: string | null) => {
   if (!iso) return '';
@@ -65,8 +66,8 @@ const COLUMNS: Col[] = [
       );
     },
   },
-  { key: 'total', label: 'Total', align: 'right', cellClass: 'tabular-nums text-slate-700', render: (o) => money(o.total) },
-  { key: 'pending', label: 'Pendiente por Facturar', align: 'right', cellClass: 'tabular-nums font-semibold text-indigo-700', render: (o) => money(o.pending) },
+  { key: 'total', label: 'Total', align: 'right', cellClass: 'tabular-nums text-slate-700', render: (o) => formatMoney(o.total, orderCurrency(o)) },
+  { key: 'pending', label: 'Pendiente por Facturar', align: 'right', cellClass: 'tabular-nums font-semibold text-indigo-700', render: (o) => formatMoney(o.pending, orderCurrency(o)) },
   { key: 'shipment_date', label: 'Entrega', align: 'left', cellClass: 'text-slate-500', render: (o) => fmtDate(o.shipment_date) },
 ];
 
@@ -120,7 +121,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
     });
   }, [orders, client, status]);
 
-  const totalPending = useMemo(() => filtered.reduce((s, o) => s + o.pending, 0), [filtered]);
+  const { copPending: totalPending, foreignCount } = useMemo(() => pendingTotals(filtered), [filtered]);
 
   // Orden por defecto: pendiente por facturar descendente (como llega del endpoint).
   const { sorted, sortKey, sortDir, toggle } = useSortable<PendingOrder>(filtered, 'pending', 'desc');
@@ -186,7 +187,8 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
             <strong className="text-slate-800">{filtered.length}</strong> órdenes
           </span>
           <span className="text-slate-500">
-            Pendiente por facturar: <strong className="text-indigo-700">{money(totalPending)}</strong>
+            Pendiente por facturar: <strong className="text-indigo-700">{formatMoney(totalPending)}</strong>
+            {foreignCount > 0 && <span className="text-slate-400 text-xs"> (sin incluir {foreignCount} {foreignCount === 1 ? 'orden' : 'órdenes'} en otra moneda)</span>}
           </span>
           <ColumnOrderMenu columns={orderedCols.map((c) => ({ key: String(c.key), label: c.label }))} onMove={move} />
           <button onClick={load} title="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50">

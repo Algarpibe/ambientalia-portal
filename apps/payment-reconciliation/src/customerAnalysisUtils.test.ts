@@ -3,7 +3,7 @@
 process.env.TZ = 'America/Bogota';
 
 import { describe, it, expect } from 'vitest';
-import { parseExcelDate, calculateInvoiceDPD } from './customerAnalysisUtils';
+import { parseExcelDate, calculateInvoiceDPD, analyzeCustomerPayments } from './customerAnalysisUtils';
 import type { ReconciledRow } from './types';
 
 describe('parseExcelDate', () => {
@@ -78,5 +78,35 @@ describe('calculateInvoiceDPD with payments and an outstanding balance', () => {
 
   it('does not penalise a partially paid invoice that is not yet due', () => {
     expect(calculateInvoiceDPD(make({ dueDate: '15 oct 2026', paymentDetails: [{ date: 'x', delay: 0 }] }), NOW)).toBe(0);
+  });
+});
+
+describe('analyzeCustomerPayments with mixed currencies', () => {
+  const mk = (over: Partial<ReconciledRow>) => ({
+    invoiceNumber: 'X', orderNumber: '', clientName: 'ACME',
+    invoiceDate: '1 ene 2020', dueDate: '15 ene 2020', status: 'open',
+    total: 1000, balance: 1000, currencyCode: 'COP',
+    paymentDates: [], paymentAmounts: [], totalPaid: 0,
+    isOverdue: true, maxDelayDays: 0, paymentDetails: [],
+    ...over,
+  }) as ReconciledRow;
+
+  it('excludes non-COP invoices from money sums and weights but not from counts', () => {
+    const m = analyzeCustomerPayments(
+      [mk({}), mk({ invoiceNumber: 'Y', total: 5_000_000, currencyCode: 'USD' })],
+      'ACME',
+    );
+    expect(m.totalInvoices).toBe(2);
+    expect(m.totalInvoiceValue).toBe(1000);
+    const bands = m.latePaymentBands;
+    const bandSum = bands.band1_15.totalValue + bands.band16_30.totalValue + bands.band31_60.totalValue + bands.bandOver60.totalValue;
+    expect(bandSum).toBe(1000);
+  });
+
+  it('weights severity with COP invoices only', () => {
+    const cop = mk({ dueDate: '15 ene 2020' });
+    const usd = mk({ invoiceNumber: 'Y', total: 9_000_000, currencyCode: 'USD', dueDate: '15 ene 2021' });
+    const onlyCop = analyzeCustomerPayments([cop], 'ACME').weightedDPD;
+    expect(analyzeCustomerPayments([cop, usd], 'ACME').weightedDPD).toBeCloseTo(onlyCop);
   });
 });

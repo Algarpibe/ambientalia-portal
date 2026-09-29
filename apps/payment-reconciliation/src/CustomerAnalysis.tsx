@@ -1,3 +1,4 @@
+import { currencyOf, formatMoney } from './currency';
 import React, { useState, useMemo } from 'react';
 import type { ReconciledRow, CustomerAnalysisResult, DateRangeOption } from './types';
 import { performCustomerAnalysis, getUniqueCustomers, parseExcelDate, getDateRangeBounds, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
@@ -74,7 +75,9 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
         return num.toFixed(decimals);
     };
 
-    const formatCurrency = (num: number): string => {
+    // Sums are COP-only (see customerAnalysisUtils); a single invoice passes its own currency.
+    const formatCurrency = (num: number, currency: string = 'COP'): string => {
+        if (currency !== 'COP') return formatMoney(num, currency);
         return num.toLocaleString('en-US', {
             style: 'currency',
             currency: 'COP',
@@ -307,10 +310,10 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                         </td>
                                         <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatExcelDate(row.invoiceDate)}</td>
                                         <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatExcelDate(row.dueDate)}</td>
-                                        <td className="px-6 py-4 text-slate-900 font-semibold text-sm">{formatCurrency(row.total)}</td>
+                                        <td className="px-6 py-4 text-slate-900 font-semibold text-sm">{formatCurrency(row.total, currencyOf(row))}</td>
                                         <td className="px-6 py-4">
                                             <span className={`text-xs px-2 py-1 rounded-full font-medium ${row.balance === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                                {formatCurrency(row.balance)}
+                                                {formatCurrency(row.balance, currencyOf(row))}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4">
