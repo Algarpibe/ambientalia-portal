@@ -53,11 +53,13 @@ export const EQUIPMENT_MAP: Record<string, Equipo> = {
   'EQPM-0715-266': { brand: 'Met One Instruments, Inc.', model: 'BAM-1022', pollutant: 'Partículas' },
 };
 
+// De más largo a más corto: evita que un código que es prefijo de otro gane el
+// match. Se ordena una sola vez: extractEquipment corre por cada registro.
+const CODES_BY_LENGTH = Object.keys(EQUIPMENT_MAP).sort((a, b) => b.length - a.length);
+
 export function extractEquipment(metodo: string): EquipoIdentificado | null {
   if (!metodo) return null;
-  // De más largo a más corto: evita que un código que es prefijo de otro gane el match.
-  const codes = Object.keys(EQUIPMENT_MAP).sort((a, b) => b.length - a.length);
-  for (const code of codes) {
+  for (const code of CODES_BY_LENGTH) {
     if (metodo.includes(code)) return { code, ...EQUIPMENT_MAP[code] };
   }
   return null;

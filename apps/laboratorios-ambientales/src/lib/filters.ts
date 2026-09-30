@@ -8,8 +8,10 @@ import { EMPTY_FILTERS } from '../types';
 export type CascadeField = 'matriz' | 'componente' | 'actividad' | 'variable' | 'metodo';
 
 // Los filtros que pueden invalidar a los de aguas abajo al cambiar. 'metodo' es
-// el último de la cascada: no tiene nada debajo, así que no entra aquí.
-export type ChangedField = Exclude<CascadeField, 'metodo'>;
+// el último de la cascada: no tiene nada debajo, así que no entra aquí. 'estado'
+// no está en la cascada pero acota todos sus desplegables (ver scopeFor), así
+// que al cambiarlo invalida la cascada entera.
+export type ChangedField = 'estado' | Exclude<CascadeField, 'metodo'>;
 
 // El orden de la cascada. Manda tanto en el ámbito de cada desplegable
 // (scopeFor) como en la limpieza al cambiar un filtro (clearDownstream).
@@ -28,6 +30,21 @@ const compare = (a: string, b: string): number => a.localeCompare(b, 'es');
 // applyFilters y optionsFor DEBEN usar esta misma clave: si difirieran, elegir
 // la opción canónica dejaría fuera los registros de las demás grafías.
 const variableKey = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+// La casilla de una variable debe comparar con la misma clave que applyFilters:
+// la grafía que se ofrece puede cambiar al mover otro filtro (cambia la más
+// frecuente del recorte) y la elegida seguiría filtrando aunque se viera vacía.
+export function isVariableSelected(selected: string[], variable: string): boolean {
+  const clave = variableKey(variable);
+  return selected.some((v) => variableKey(v) === clave);
+}
+
+// Desmarcar quita todas las grafías equivalentes; marcar añade la mostrada.
+export function toggleVariable(selected: string[], variable: string): string[] {
+  if (!isVariableSelected(selected, variable)) return [...selected, variable];
+  const clave = variableKey(variable);
+  return selected.filter((v) => variableKey(v) !== clave);
+}
 
 export function applyFilters(data: Laboratorio[], filters: FilterState): Laboratorio[] {
   const busqueda = filters.busqueda.trim().toLowerCase();
@@ -111,12 +128,13 @@ function canonicalVariables(valores: string[]): string[] {
 }
 
 // Al cambiar un filtro hay que limpiar los de aguas abajo: su valor pudo dejar
-// de existir dentro del nuevo recorte. `busqueda` y `estado` quedan fuera de la
-// cascada y nunca se tocan.
+// de existir dentro del nuevo recorte. `busqueda` y `estado` nunca se limpian;
+// `estado` cuenta como si estuviera por encima de 'matriz'.
 export function clearDownstream(filters: FilterState, changed: ChangedField): FilterState {
-  const posicion = posicionEn(changed);
+  const posicion = changed === 'estado' ? -1 : posicionEn(changed);
   return {
     ...filters,
+    matriz: posicion < posicionEn('matriz') ? '' : filters.matriz,
     componente: posicion < posicionEn('componente') ? '' : filters.componente,
     actividad: posicion < posicionEn('actividad') ? '' : filters.actividad,
     variables: posicion < posicionEn('variable') ? [] : filters.variables,

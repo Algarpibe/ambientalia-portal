@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { FilterState, Laboratorio } from '../types';
 import { EMPTY_FILTERS } from '../types';
 import type { ChangedField } from '../lib/filters';
-import { applyFilters, clearDownstream, optionsFor } from '../lib/filters';
+import { applyFilters, clearDownstream, isVariableSelected, optionsFor, toggleVariable } from '../lib/filters';
 import { pageRange, pageSlice, totalPages } from '../lib/pagination';
 
 type Props = {
@@ -32,11 +32,20 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
   // pulsación de tecla del campo de búsqueda.
   const resultados = useMemo(() => applyFilters(data, filters), [data, filters]);
 
-  const matrices = useMemo(() => optionsFor(data, 'matriz', filters), [data, filters]);
-  const componentes = useMemo(() => optionsFor(data, 'componente', filters), [data, filters]);
-  const actividades = useMemo(() => optionsFor(data, 'actividad', filters), [data, filters]);
-  const variables = useMemo(() => optionsFor(data, 'variable', filters), [data, filters]);
-  const metodos = useMemo(() => optionsFor(data, 'metodo', filters), [data, filters]);
+  // Los desplegables no dependen de `busqueda` ni de `metodo`: se memoizan sobre
+  // un recorte sin ellos para no recorrer los ~19 000 registros cinco veces más
+  // en cada pulsación de tecla.
+  const { estado, matriz, componente, actividad, variables: elegidas } = filters;
+  const alcance = useMemo(
+    () => ({ ...EMPTY_FILTERS, estado, matriz, componente, actividad, variables: elegidas }),
+    [estado, matriz, componente, actividad, elegidas],
+  );
+
+  const matrices = useMemo(() => optionsFor(data, 'matriz', alcance), [data, alcance]);
+  const componentes = useMemo(() => optionsFor(data, 'componente', alcance), [data, alcance]);
+  const actividades = useMemo(() => optionsFor(data, 'actividad', alcance), [data, alcance]);
+  const variables = useMemo(() => optionsFor(data, 'variable', alcance), [data, alcance]);
+  const metodos = useMemo(() => optionsFor(data, 'metodo', alcance), [data, alcance]);
 
   // Al mover un filtro de la cascada, los de aguas abajo pueden haber quedado con
   // un valor que ya no existe en el nuevo recorte: clearDownstream los limpia.
@@ -47,9 +56,7 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
   };
 
   const alternarVariable = (variable: string) => {
-    const seleccionadas = filters.variables.includes(variable)
-      ? filters.variables.filter((v) => v !== variable)
-      : [...filters.variables, variable];
+    const seleccionadas = toggleVariable(filters.variables, variable);
     onFiltersChange(clearDownstream({ ...filters, variables: seleccionadas }, 'variable'));
   };
 
@@ -89,7 +96,7 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
 
       <div className="bg-white p-6 rounded-xl shadow-md mb-8 ring-1 ring-slate-200">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Búsqueda y Estado quedan fuera de la cascada: no limpian nada. */}
+          {/* Búsqueda queda fuera de la cascada: no limpia nada. Estado sí la limpia entera. */}
           <div className="md:col-span-2">
             <label htmlFor="busqueda" className="block text-sm font-semibold text-gray-700 mb-1">
               Buscar Parámetro o Laboratorio
@@ -111,7 +118,7 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
             <select
               id="estado"
               value={filters.estado}
-              onChange={(e) => onFiltersChange({ ...filters, estado: e.target.value })}
+              onChange={(e) => cambiarCascada('estado', e.target.value)}
               className={SELECT_CLASS}
             >
               <option value="">Cualquier Estado</option>
@@ -218,7 +225,7 @@ export default function Buscador({ data, filters, onFiltersChange, onBack }: Pro
                 >
                   <input
                     type="checkbox"
-                    checked={filters.variables.includes(variable)}
+                    checked={isVariableSelected(filters.variables, variable)}
                     onChange={() => alternarVariable(variable)}
                     className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                   />

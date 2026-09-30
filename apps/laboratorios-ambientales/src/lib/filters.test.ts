@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Laboratorio } from '../types';
 import { EMPTY_FILTERS } from '../types';
-import { applyFilters, optionsFor, clearDownstream } from './filters';
+import { applyFilters, optionsFor, clearDownstream, isVariableSelected, toggleVariable } from './filters';
 
 const lab = (over: Partial<Laboratorio>): Laboratorio => ({
   codigo: '1', estado: 'Activa', matriz: 'Agua', componente: 'Continental',
@@ -169,5 +169,31 @@ describe('clearDownstream', () => {
     const next = clearDownstream(full, 'matriz');
     expect(next.busqueda).toBe('x');
     expect(next.estado).toBe('Activa');
+  });
+});
+
+describe('clearDownstream al cambiar el estado', () => {
+  it('limpia toda la cascada: la matriz elegida pudo dejar de existir en el nuevo estado', () => {
+    const full = {
+      ...EMPTY_FILTERS, busqueda: 'x', estado: 'Suspendida', matriz: 'Aire', componente: 'Fuentes Fijas',
+      actividad: 'Análisis', variables: ['SO2'], metodo: 'M6',
+    };
+    expect(clearDownstream(full, 'estado')).toEqual({ ...EMPTY_FILTERS, busqueda: 'x', estado: 'Suspendida' });
+  });
+});
+
+describe('selección de variables por grafía', () => {
+  it('una variable cuenta como elegida aunque se eligiera con otra grafía', () => {
+    expect(isVariableSelected(['plomo'], 'Plomo')).toBe(true);
+    expect(isVariableSelected(['Coliformes  Fecales'], 'coliformes fecales')).toBe(true);
+    expect(isVariableSelected(['pH'], 'Plomo')).toBe(false);
+  });
+
+  it('desmarcar quita todas las grafías equivalentes', () => {
+    expect(toggleVariable(['plomo', 'pH'], 'Plomo')).toEqual(['pH']);
+  });
+
+  it('marcar añade la grafía mostrada', () => {
+    expect(toggleVariable(['pH'], 'Plomo')).toEqual(['pH', 'Plomo']);
   });
 });

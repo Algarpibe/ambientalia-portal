@@ -40,7 +40,7 @@ const aplicaciones: AppConfig[] = [
   },
   {
     name: "Buscador de Laboratorios Ambientales",
-    description: "Búsqueda y análisis de laboratorios acreditados por IDEAM con datos en tiempo real.",
+    description: "Búsqueda y análisis de laboratorios acreditados por IDEAM con datos abiertos de datos.gov.co que se refrescan cada 24 horas.",
     path: "/laboratorios-ambientales",
     icon: Beaker,
     color: "from-green-400 to-emerald-600"
