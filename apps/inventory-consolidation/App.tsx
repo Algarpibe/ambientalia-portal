@@ -1,132 +1,27 @@
 
 /// <reference types="vite/client" />
-import { useState, useCallback, useEffect } from 'react';
-import FileDropzone from './components/FileDropzone';
+import { useState } from 'react';
 import PreviewTable from './components/PreviewTable';
-import { readFileData, processInventoryData, downloadExcelFile } from './services/fileProcessor';
+import { processInventoryData, downloadExcelFile } from './services/fileProcessor';
 import { cargarDesdeHub, hubARawRows, nombreArchivoDesglosado } from './services/hubData';
-import type { FileData, ProcessedItem, RawRowData, FileInputConfig } from './types';
+import type { ProcessedItem } from './types';
 // Auth: JWT emitido por hub-api /api/login (guardado por el portal en localStorage).
 import { authHeaders } from '@suite/auth-client';
 
 const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
-const initialFileStates: [FileData, FileData, FileData] = [
-  { file: null, name: '', error: null },
-  { file: null, name: '', error: null },
-  { file: null, name: '', error: null },
-];
-
-const fileInputConfigs: FileInputConfig[] = [
-  { id: 'file-input-1', label: '1. Resumen de Inventario', description: 'Arrastra o haz clic para subir', colorClass: 'text-sky-600' },
-  { id: 'file-input-2', label: '2. Comprometido (FACT)', description: 'Arrastra o haz clic para subir', colorClass: 'text-amber-600' },
-  { id: 'file-input-3', label: '3. Comprometido (ENV)', description: 'Arrastra o haz clic para subir', colorClass: 'text-teal-600' },
-];
-
 const App: React.FC = () => {
-  const [filesData, setFilesData] = useState<[FileData, FileData, FileData]>(initialFileStates);
   const [processedData, setProcessedData] = useState<ProcessedItem[] | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [statusType, setStatusType] = useState<'info' | 'success' | 'error'>('info');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isProcessButtonEnabled, setIsProcessButtonEnabled] = useState<boolean>(false);
-  const [isLoadingHub, setIsLoadingHub] = useState<boolean>(false);
-  const ocupado = isLoading || isLoadingHub;
 
-  useEffect(() => {
-    const allFilesPresent = filesData.every(fd => fd.file !== null && fd.error === null);
-    setIsProcessButtonEnabled(allFilesPresent);
-  }, [filesData]);
-
-  const handleFileChange = useCallback((index: number, file: File | null) => {
-    setFilesData(prev => {
-      const newFilesData = [...prev] as [FileData, FileData, FileData];
-      newFilesData[index] = {
-        file: file,
-        name: file ? file.name : '',
-        error: null, 
-      };
-      return newFilesData;
-    });
-    setProcessedData(null); // Clear previous results on new file upload
-    setStatusMessage(''); // Clear status message
-  }, []);
-
-  const handleProcessFiles = async () => {
-    if (!isProcessButtonEnabled) return;
-
-    setIsLoading(true);
-    setStatusMessage('Procesando archivos...');
-    setStatusType('info');
-    setProcessedData(null); // Clear previous results before processing
-
-    // Reset errors for all files before starting
-    setFilesData(prev => prev.map(fd => ({ ...fd, error: null })) as [FileData, FileData, FileData]);
-
-    try {
-      const rawDataPromises = filesData.map((fd, index) => {
-        if (!fd.file) {
-          // This case should ideally be prevented by button disable logic
-          const errorMsg = `Archivo ${index + 1} no seleccionado.`;
-           setFilesData(prev => {
-            const newFilesData = [...prev] as [FileData, FileData, FileData];
-            newFilesData[index].error = errorMsg;
-            return newFilesData;
-          });
-          throw new Error(errorMsg);
-        }
-        return readFileData(fd.file).catch(err => {
-          setFilesData(prev => {
-            const newFilesData = [...prev] as [FileData, FileData, FileData];
-            newFilesData[index].error = err.message || `Error al leer archivo ${index + 1}`;
-            return newFilesData;
-          });
-          throw err; // Re-throw to be caught by Promise.all
-        });
-      });
-
-      const [invRawData, factRawData, envRawData] = await Promise.all(rawDataPromises) as [RawRowData[], RawRowData[], RawRowData[]];
-      
-      const finalData = processInventoryData(invRawData, factRawData, envRawData);
-      setProcessedData(finalData);
-
-      if (finalData.length > 0) {
-        // Deriva el token de fecha (ej. "300626") del nombre del archivo de origen
-        // para nombrar la salida como Resumen_Inventario_<fecha>_Desglosado.xlsx
-        const dateToken = filesData
-          .map(fd => fd.name.match(/(\d{6})/)?.[1])
-          .find(Boolean);
-        const outputFilename = dateToken
-          ? `Resumen_Inventario_${dateToken}_Desglosado.xlsx`
-          : 'Resumen_Inventario_Desglosado.xlsx';
-        downloadExcelFile(finalData, outputFilename);
-        setStatusMessage('¡Éxito! El archivo ha sido generado y descargado.');
-        setStatusType('success');
-      } else {
-        setStatusMessage('Procesamiento completado, pero no se generaron datos. Verifica los archivos.');
-        setStatusType('info');
-      }
-
-    } catch (error: any) {
-      console.error("Processing error:", error);
-      // Specific file errors are set by readFileData's catch block.
-      // General processing errors or if a file wasn't selected correctly (should be rare)
-      if (!filesData.some(fd => fd.error)) {
-        setStatusMessage(`Error en el procesamiento: ${error.message}`);
-      } else {
-        setStatusMessage('Error en uno o más archivos. Por favor, revisa los mensajes individuales.');
-      }
-      setStatusType('error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Mismo xlsx que con los 3 archivos, pero con los listados que sirve el hub desde
-  // la réplica de Zoho. processInventoryData es el mismo: las fórmulas no cambian.
+  // Mismo xlsx que antes se obtenía subiendo las 3 exportaciones de Zoho, pero con
+  // los listados que sirve el hub desde la réplica. processInventoryData aplica las
+  // mismas fórmulas.
   const handleGenerarDesdeBD = async () => {
-    if (ocupado) return;
-    setIsLoadingHub(true);
+    if (isLoading) return;
+    setIsLoading(true);
     setStatusMessage('Consultando la base de datos...');
     setStatusType('info');
     setProcessedData(null);
@@ -148,7 +43,7 @@ const App: React.FC = () => {
       setStatusMessage(`Error al generar desde la base de datos: ${error.message}`);
       setStatusType('error');
     } finally {
-      setIsLoadingHub(false);
+      setIsLoading(false);
     }
   };
 
@@ -164,50 +59,22 @@ const App: React.FC = () => {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="w-full px-6 py-4">
           <h1 className="text-2xl font-bold text-slate-900">Consolidador de Inventario</h1>
-          <p className="text-slate-500 mt-1">Carga los 3 archivos o genera el reporte consolidado desde la base de datos</p>
+          <p className="text-slate-500 mt-1">Genera el reporte consolidado desde la base de datos</p>
         </div>
       </header>
       <main className="w-full px-6 py-6">
       <div className="w-full bg-white rounded-2xl shadow-lg p-6 space-y-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-slate-900">Carga de Archivos</h2>
-          <p className="text-slate-500 mt-2">Selecciona los 3 archivos requeridos para procesar</p>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-6">
-          {fileInputConfigs.map((config, index) => (
-            <FileDropzone
-              key={config.id}
-              config={config}
-              fileName={filesData[index].name}
-              fileError={filesData[index].error}
-              onFileChange={(file) => handleFileChange(index, file)}
-            />
-          ))}
-        </div>
-        
         <div className="text-center space-y-4">
-          <button
-            onClick={handleProcessFiles}
-            disabled={!isProcessButtonEnabled || ocupado}
-            className="w-full max-w-xs bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
-          >
-            {isLoading ? spinner : null}
-            {isLoading ? 'Procesando...' : 'Procesar y Descargar'}
-          </button>
-          <div className="flex items-center justify-center gap-3 text-slate-400 text-sm">
-            <span className="h-px w-16 bg-slate-200" />o<span className="h-px w-16 bg-slate-200" />
-          </div>
           <div>
             <button
               onClick={handleGenerarDesdeBD}
-              disabled={ocupado}
+              disabled={isLoading}
               className="w-full max-w-xs bg-emerald-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-opacity-50"
             >
-              {isLoadingHub ? spinner : null}
-              {isLoadingHub ? 'Generando...' : 'Generar desde la base de datos'}
+              {isLoading ? spinner : null}
+              {isLoading ? 'Generando...' : 'Generar desde la base de datos'}
             </button>
-            <p className="text-slate-500 text-xs mt-2">Sin subir archivos: usa los datos de Zoho sincronizados en el hub.</p>
+            <p className="text-slate-500 text-xs mt-2">Usa los datos de Zoho sincronizados en el hub.</p>
           </div>
           {statusMessage && (
             <div className={`h-6 text-sm ${
@@ -228,4 +95,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-    

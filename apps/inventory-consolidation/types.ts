@@ -1,10 +1,4 @@
 
-export interface FileData {
-  file: File | null;
-  name: string;
-  error: string | null;
-}
-
 export interface RawRowData {
   [key: string]: any;
 }
@@ -21,12 +15,5 @@ export interface ProcessedItem {
   'Por Facturar': string;
   'Cantidad Por Entregar': number | string;
   'Por Entregar': string;
-}
-
-export interface FileInputConfig {
-  id: string;
-  label: string;
-  description: string;
-  colorClass: string;
 }
     

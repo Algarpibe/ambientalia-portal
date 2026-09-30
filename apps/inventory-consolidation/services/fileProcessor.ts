@@ -9,63 +9,6 @@ export const findColumnKey = (columns: string[], aliases: string[]): string | nu
   return null;
 };
 
-export const readFileData = (file: File): Promise<RawRowData[]> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        if (!e.target?.result) {
-            reject(new Error(`Error al leer el archivo ${file.name}: No hay contenido.`));
-            return;
-        }
-        const data = new Uint8Array(e.target.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-
-        if (rawData.length === 0) {
-          resolve([]);
-          return;
-        }
-
-        let headerIndex = -1;
-        for (let i = 0; i < rawData.length; i++) {
-            const lowercasedRow = rawData[i].map(cell => String(cell).toLowerCase().trim());
-            if (lowercasedRow.includes('sku')) {
-                headerIndex = i;
-                break;
-            }
-        }
-
-        if (headerIndex === -1) {
-            throw new Error(`En '${file.name}', no se pudo encontrar la fila de encabezado con la columna 'sku'.`);
-        }
-
-        const headers = rawData[headerIndex].map(h => String(h).trim()); // Keep original case for keys, but trim
-        const jsonData: RawRowData[] = [];
-
-        for (let i = headerIndex + 1; i < rawData.length; i++) {
-            const row = rawData[i];
-            if (row.every(cell => String(cell).trim() === '')) continue; 
-            let rowObject: RawRowData = {};
-            headers.forEach((header, index) => {
-                if (header) { // Only add if header is not empty
-                    rowObject[header] = row[index];
-                }
-            });
-            jsonData.push(rowObject);
-        }
-        resolve(jsonData);
-      } catch (err: any) {
-        reject(new Error(`No se pudo procesar ${file.name}. Detalles: ${err.message}`));
-      }
-    };
-    reader.onerror = (err) => reject(new Error(`No se pudo leer ${file.name}. Error: ${err}`));
-    reader.readAsArrayBuffer(file);
-  });
-};
-
 export const processInventoryData = (
     invData: RawRowData[], 
     factData: RawRowData[], 
