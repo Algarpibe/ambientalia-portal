@@ -32,6 +32,9 @@ vi.mock('./db.js', () => ({
 // datos para respuestas deterministas y sin BD.
 vi.mock('./reconciliation.js', () => ({ getReconciliationData: vi.fn().mockResolvedValue({ pagos: [] }) }));
 vi.mock('./inventory.js', () => ({ getInventoryData: vi.fn().mockResolvedValue({ items: [] }) }));
+vi.mock('./inventoryConsolidation.js', () => ({
+  getInventoryConsolidationData: vi.fn().mockResolvedValue({ inventory: [], fact: [], env: [], generatedAt: '2026-09-30T00:00:00.000Z' }),
+}));
 vi.mock('./customerValuation.js', () => ({ getCustomerValuationData: vi.fn().mockResolvedValue({ clientes: [] }) }));
 vi.mock('./salesOrders.js', () => ({ getPendingSalesOrders: vi.fn().mockResolvedValue([]) }));
 vi.mock('./contabilidad/detalle.js', () => ({
@@ -70,6 +73,7 @@ const ENDPOINTS: { path: string; app: string }[] = [
   { path: '/api/invoices/FV-1/detail', app: 'payment-reconciliation' },
   { path: '/api/sales-orders/OV-1/detail', app: 'payment-reconciliation' },
   { path: '/api/inventory/data', app: 'inventory-optimization' },
+  { path: '/api/inventory-consolidation/data', app: 'inventory-consolidation' },
   { path: '/api/customer-valuation/data', app: 'customer-valuation' },
 ];
 

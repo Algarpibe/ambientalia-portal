@@ -5,6 +5,7 @@ import { captureError } from './sentry.js';
 import { cached } from './cache.js';
 import { getReconciliationData } from './reconciliation.js';
 import { getInventoryData } from './inventory.js';
+import { getInventoryConsolidationData } from './inventoryConsolidation.js';
 import { getCustomerValuationData } from './customerValuation.js';
 import { getPendingSalesOrders } from './salesOrders.js';
 import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
@@ -20,6 +21,7 @@ import { getDetalleFactura, getDetalleOV } from './contabilidad/detalle.js';
 const APP_PAGOS = 'payment-reconciliation';
 const APP_INVENTARIO = 'inventory-optimization';
 const APP_VALORACION = 'customer-valuation';
+const APP_CONSOLIDADOR = 'inventory-consolidation';
 
 function sendError(res: Response, e: unknown, ctx: string): void {
   console.error(`${ctx} error`, e);
@@ -48,6 +50,17 @@ export function createDataRouter(db: Pool): Router {
       res.json(data);
     } catch (e) {
       sendError(res, e, 'inventory');
+    }
+  });
+
+  // Consolidador de Inventario: los 3 listados (inventario + comprometido FACT/ENV)
+  // que antes se exportaban de Zoho a mano.
+  router.get('/inventory-consolidation/data', requireAuth, requireApp(APP_CONSOLIDADOR), async (_req: Request, res: Response) => {
+    try {
+      const data = await cached('inventory-consolidation', () => getInventoryConsolidationData(db));
+      res.json(data);
+    } catch (e) {
+      sendError(res, e, 'inventory-consolidation');
     }
   });
 
