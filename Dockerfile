@@ -13,7 +13,6 @@ COPY apps/customer-valuation/package*.json ./apps/customer-valuation/
 COPY apps/inventory-consolidation/package*.json ./apps/inventory-consolidation/
 COPY apps/inventory-optimization/package*.json ./apps/inventory-optimization/
 COPY apps/payment-reconciliation/package*.json ./apps/payment-reconciliation/
-COPY apps/product-sales/package*.json ./apps/product-sales/
 COPY apps/contabilidad/package*.json ./apps/contabilidad/
 # WO-sales faltaba en esta lista: el build no se rompía porque el `COPY . .` de
 # más abajo acaba trayendo su package.json, pero eso invalida la capa de

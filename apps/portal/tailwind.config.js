@@ -5,7 +5,6 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
     "../payment-reconciliation/src/**/*.{js,ts,jsx,tsx}",
     "../inventory-consolidation/src/**/*.{js,ts,jsx,tsx}",
-    "../product-sales/src/**/*.{js,ts,jsx,tsx}",
     "../inventory-optimization/src/**/*.{js,ts,jsx,tsx}",
     "../laboratorios-ambientales/src/**/*.{js,ts,jsx,tsx}",
     // Cuarto punto de registro de una mini app, ademas de apps.ts, App.tsx y la

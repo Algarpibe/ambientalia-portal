@@ -19,7 +19,6 @@ export const APPS: AppInfo[] = [
   { id: 'payment-reconciliation', label: 'Conciliador de Pagos', route: '/conciliador-pagos', category: 'aplicacion' },
   { id: 'inventory-optimization', label: 'Análisis de Inventario', route: '/analisis-inventario', category: 'aplicacion' },
   { id: 'inventory-consolidation', label: 'Consolidador de Inventario', route: '/consolidador-inventario', category: 'herramienta' },
-  { id: 'product-sales', label: 'Ventas por Artículos', route: '/ventas-articulos', category: 'herramienta' },
   { id: 'laboratorios-ambientales', label: 'Laboratorios Ambientales', route: '/laboratorios-ambientales', category: 'aplicacion' },
   { id: 'customer-valuation', label: 'Valoración de Clientes', route: '/valoracion-clientes', category: 'aplicacion' },
   { id: 'WO-sales', label: 'Carga de Pedidos WO', route: '/carga-pedidos-wo', category: 'aplicacion' },

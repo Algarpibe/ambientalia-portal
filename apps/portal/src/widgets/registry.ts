@@ -9,8 +9,8 @@ import type { WidgetDescriptor } from './types';
 // implemente su `src/widgets/index.ts`.
 //
 // Apps SIN widgets todavía (no tienen endpoint de datos en hub-api o son de
-// acción, no de datos): inventory-consolidation, product-sales,
-// laboratorios-ambientales, WO-sales.
+// acción, no de datos): inventory-consolidation, laboratorios-ambientales,
+// WO-sales.
 
 export type WidgetModule = { default: WidgetDescriptor[] };
 

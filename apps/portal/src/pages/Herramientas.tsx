@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom';
 import {
   type LucideIcon,
   Package,
-  Users,
   ChevronRight,
   Wrench
 } from 'lucide-react';
@@ -24,13 +23,6 @@ const herramientas: AppConfig[] = [
     path: "/consolidador-inventario",
     icon: Package,
     color: "from-emerald-400 to-teal-500"
-  },
-  {
-    name: "Ventas Artículos",
-    description: "Explora tendencias de consumo y rendimiento por categoría de producto.",
-    path: "/ventas-articulos",
-    icon: Users,
-    color: "from-purple-400 to-pink-500"
   }
 ];
 
@@ -86,24 +78,6 @@ export default function Herramientas() {
             </div>
           </Link>
         ))}
-      </div>
-
-      {/* Stats */}
-      <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Total Herramientas</h3>
-          <p className="text-3xl font-bold text-gray-900">{visibles.length}</p>
-        </div>
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Uso Mensual</h3>
-          <p className="text-3xl font-bold text-gray-900">156</p>
-          <p className="text-xs text-green-600 mt-1">↑ 24% vs mes anterior</p>
-        </div>
-        <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-soft">
-          <h3 className="text-sm font-medium text-gray-600 mb-2">Tiempo Ahorrado</h3>
-          <p className="text-3xl font-bold text-gray-900">42h</p>
-          <p className="text-xs text-gray-500 mt-1">Este mes</p>
-        </div>
       </div>
     </main>
   );
