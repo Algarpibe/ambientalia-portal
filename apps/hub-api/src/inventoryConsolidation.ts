@@ -48,9 +48,9 @@ export interface InventoryConsolidationData {
 
 // Solo artículos CON seguimiento de inventario: el "Resumen de inventario" de Zoho
 // es un informe de stock y un servicio/alquiler no tiene existencias.
-// Activos solamente: mismo criterio que INVENTORY_SQL (inventory.ts), que excluye
-// los 'inactive' (dados de baja/sustituidos). Un inactivo con OV viva quedaría
-// fuera del xlsx — validar contra una exportación de Zoho del mismo día.
+// Activos E inactivos: el informe de Zoho lista también los inactivos (comparado el
+// 30/09/26: 76 inactivos, uno con stock — GRM-SPK-01 con 4). A diferencia de
+// INVENTORY_SQL (inventory.ts), que sí los excluye porque allí se decide reorden.
 // NULLIF(...,'') porque Zoho manda "" en vez de número en algunos campos de stock.
 const INVENTARIO_SQL = `
   SELECT it.sku                                                 AS sku,
@@ -59,7 +59,6 @@ const INVENTARIO_SQL = `
     FROM books.items it
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND COALESCE(it.raw ->> 'track_inventory', 'false') = 'true'
-     AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'
    ORDER BY it.sku`;
 
 // Saldos pendientes por artículo×OV. GREATEST por LÍNEA antes de sumar (una línea
@@ -73,7 +72,12 @@ const INVENTARIO_SQL = `
 // Se agrupa por sku+nombre+OV porque el Consolidador toma UNA cantidad por OV y
 // artículo (con dos líneas del mismo artículo en la OV se quedaría con la última).
 // status/order_status/shipped_status son por ORDEN: entran al GROUP BY sin
-// multiplicar filas, y los usa mapConsolidacion() para el guard de órdenes cerradas.
+// multiplicar filas; se reportan como contexto (no deciden nada, ver mapConsolidacion).
+// Facturas en 'approved' (aprobadas pero sin enviar): la línea ya las cuenta en
+// quantity_invoiced, pero Zoho no descuenta el stock contable hasta que la factura
+// se envía, así que su informe las sigue mostrando como comprometidas (casos
+// AMI-2026-001/005/015/016, comparado el 30/09/26). Se devuelven a "por facturar",
+// con tope en lo pedido menos lo cancelado.
 const LINEAS_SQL = `
   SELECT it.sku                                  AS sku,
          it.name                                 AS item_name,
@@ -81,9 +85,18 @@ const LINEAS_SQL = `
          so.status                               AS status,
          so.raw ->> 'order_status'               AS order_status,
          so.raw ->> 'shipped_status'             AS shipped_status,
-         SUM(GREATEST(COALESCE(soli.quantity, 0)
+         SUM(GREATEST(LEAST(
+                      COALESCE(soli.quantity, 0)
+                      - COALESCE(NULLIF(soli.raw ->> 'quantity_cancelled', '')::numeric, 0),
+                      COALESCE(soli.quantity, 0)
                       - COALESCE(NULLIF(soli.raw ->> 'quantity_invoiced', '')::numeric, 0)
-                      - COALESCE(NULLIF(soli.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)) AS por_facturar,
+                      - COALESCE(NULLIF(soli.raw ->> 'quantity_cancelled', '')::numeric, 0)
+                      + COALESCE((SELECT SUM(li.quantity)
+                                    FROM books.invoice_line_items li
+                                    JOIN books.invoices i ON i.invoice_id = li.invoice_id
+                                   WHERE i.salesorder_id = so.salesorder_id
+                                     AND li.item_id = soli.item_id
+                                     AND i.status = 'approved'), 0)), 0)) AS por_facturar,
          SUM(GREATEST(COALESCE(soli.quantity, 0)
                       - COALESCE(NULLIF(soli.raw ->> 'quantity_delivered', '')::numeric, 0)
                       - COALESCE(NULLIF(soli.raw ->> 'quantity_cancelled', '')::numeric, 0), 0)) AS por_enviar
@@ -103,16 +116,13 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-// Manda el estado de la ORDEN sobre sus líneas: en órdenes viejas los contadores de
-// línea no son fiables (contabilidad/source.ts, UNIDADES_POR_DESPACHAR, caso
-// FP-454/OV-2021-072: cerrada en 2022 y con las líneas a 0). Una OV cerrada no tiene
-// nada pendiente; una OV 'invoiced' no tiene nada por facturar; una 'fulfilled' no
-// tiene nada por enviar.
-const cerrada = (r: LineaComprometidaRow) => r.order_status === 'closed';
-const porFacturar = (r: LineaComprometidaRow) =>
-  cerrada(r) || r.status === 'invoiced' ? 0 : num(r.por_facturar);
-const porEnviar = (r: LineaComprometidaRow) =>
-  cerrada(r) || r.shipped_status === 'fulfilled' ? 0 : num(r.por_enviar);
+// Mandan las LÍNEAS, no el estado de la orden, igual que el informe de Zoho. Un guard
+// por estado (closed/invoiced/fulfilled) escondía justo los casos de facturas
+// 'approved' (OVI-2026-005 está closed+invoiced y Zoho la cuenta), y verificado en la
+// réplica el 30/09/26 no había ninguna orden vieja con contadores de línea erróneos
+// que ese guard estuviera tapando.
+const porFacturar = (r: LineaComprometidaRow) => num(r.por_facturar);
+const porEnviar = (r: LineaComprometidaRow) => num(r.por_enviar);
 
 /** Filas SQL → las tres listas que consume el Consolidador. Pura (testeable). */
 export function mapConsolidacion(

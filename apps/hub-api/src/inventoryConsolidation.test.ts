@@ -46,19 +46,15 @@ describe('mapConsolidacion', () => {
     ]);
   });
 
-  it('una OV ya facturada (status invoiced) no aporta al FACT aunque sus líneas digan otra cosa', () => {
-    const r = mapConsolidacion([], [linea({ status: 'invoiced', por_facturar: '3', por_enviar: '0' })]);
-    expect(r.fact).toEqual([]);
-  });
-
-  it('una OV despachada del todo (fulfilled) no aporta al ENV aunque sus líneas digan otra cosa', () => {
-    const r = mapConsolidacion([], [linea({ shipped_status: 'fulfilled', por_facturar: '0', por_enviar: '4' })]);
-    expect(r.env).toEqual([]);
-  });
-
-  it('una OV cerrada no aporta ni al FACT ni al ENV (contadores de línea no fiables en órdenes viejas)', () => {
-    const r = mapConsolidacion([], [linea({ order_status: 'closed', por_facturar: '16', por_enviar: '16' })]);
-    expect(r.fact).toEqual([]);
+  // Caso real (comparación con Zoho, 30/09/26): OVI-2026-005 está invoiced + closed +
+  // fulfilled, pero su factura AMI-2026-005 sigue en 'approved' y Zoho aún la cuenta
+  // como comprometida contable. Manda lo que reporta la línea, no el estado de la orden.
+  it('una OV cerrada/facturada/despachada sigue aportando lo que reporten sus líneas', () => {
+    const r = mapConsolidacion([], [linea({
+      transaction: 'OVI-2026-005', status: 'invoiced', order_status: 'closed',
+      shipped_status: 'fulfilled', por_facturar: '1', por_enviar: '0',
+    })]);
+    expect(r.fact).toEqual([{ sku: '3200043641', item_name: 'Filtro X', quantity: 1, transaction: 'OVI-2026-005' }]);
     expect(r.env).toEqual([]);
   });
 
@@ -84,14 +80,30 @@ describe('getInventoryConsolidationData', () => {
     expect(Number.isNaN(Date.parse(d.generatedAt))).toBe(false);
   });
 
-  it('SQL: solo artículos con seguimiento de inventario, activos, OV confirmadas y saldos por línea con GREATEST', async () => {
+  it('SQL: incluye artículos inactivos (el Resumen de inventario de Zoho los lista)', async () => {
+    const sqls: string[] = [];
+    const query = vi.fn(async (sql: string) => { sqls.push(sql); return { rows: [] }; });
+    await getInventoryConsolidationData({ query } as unknown as Pool);
+    const inv = sqls.find((s) => !/salesorder_line_items/.test(s))!;
+    expect(inv).not.toMatch(/inactive/);
+  });
+
+  it('SQL: lo facturado en facturas "approved" sigue pendiente de facturar (Zoho no descuenta hasta enviarla)', async () => {
+    const sqls: string[] = [];
+    const query = vi.fn(async (sql: string) => { sqls.push(sql); return { rows: [] }; });
+    await getInventoryConsolidationData({ query } as unknown as Pool);
+    const lin = sqls.find((s) => /salesorder_line_items/.test(s))!;
+    expect(lin).toMatch(/books\.invoice_line_items/);
+    expect(lin).toMatch(/i\.status = 'approved'/);
+  });
+
+  it('SQL: solo artículos con seguimiento de inventario, OV confirmadas y saldos por línea con GREATEST', async () => {
     const sqls: string[] = [];
     const query = vi.fn(async (sql: string) => { sqls.push(sql); return { rows: [] }; });
     await getInventoryConsolidationData({ query } as unknown as Pool);
     const [inv, lin] = [sqls.find((s) => !/salesorder_line_items/.test(s))!, sqls.find((s) => /salesorder_line_items/.test(s))!];
     expect(inv).toMatch(/stock_on_hand/);
     expect(inv).toMatch(/track_inventory/);
-    expect(inv).toMatch(/IS DISTINCT FROM 'inactive'/);
     expect(lin).toMatch(/track_inventory/);
     expect(lin).toMatch(/so\.status NOT IN \('void', 'draft', 'pending_approval'\)/);
     expect(lin).toMatch(/quantity_invoiced/);
