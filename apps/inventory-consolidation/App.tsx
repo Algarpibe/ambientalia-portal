@@ -1,9 +1,15 @@
 
+/// <reference types="vite/client" />
 import { useState, useCallback, useEffect } from 'react';
 import FileDropzone from './components/FileDropzone';
 import PreviewTable from './components/PreviewTable';
 import { readFileData, processInventoryData, downloadExcelFile } from './services/fileProcessor';
+import { cargarDesdeHub, hubARawRows, nombreArchivoDesglosado } from './services/hubData';
 import type { FileData, ProcessedItem, RawRowData, FileInputConfig } from './types';
+// Auth: JWT emitido por hub-api /api/login (guardado por el portal en localStorage).
+import { authHeaders } from '@suite/auth-client';
+
+const API_BASE = import.meta.env.VITE_HUB_API_URL as string;
 
 const initialFileStates: [FileData, FileData, FileData] = [
   { file: null, name: '', error: null },
@@ -24,6 +30,8 @@ const App: React.FC = () => {
   const [statusType, setStatusType] = useState<'info' | 'success' | 'error'>('info');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProcessButtonEnabled, setIsProcessButtonEnabled] = useState<boolean>(false);
+  const [isLoadingHub, setIsLoadingHub] = useState<boolean>(false);
+  const ocupado = isLoading || isLoadingHub;
 
   useEffect(() => {
     const allFilesPresent = filesData.every(fd => fd.file !== null && fd.error === null);
@@ -114,12 +122,49 @@ const App: React.FC = () => {
     }
   };
 
+  // Mismo xlsx que con los 3 archivos, pero con los listados que sirve el hub desde
+  // la réplica de Zoho. processInventoryData es el mismo: las fórmulas no cambian.
+  const handleGenerarDesdeBD = async () => {
+    if (ocupado) return;
+    setIsLoadingHub(true);
+    setStatusMessage('Consultando la base de datos...');
+    setStatusType('info');
+    setProcessedData(null);
+    try {
+      const datos = await cargarDesdeHub({ apiBase: API_BASE, headers: authHeaders() });
+      const { invData, factData, envData } = hubARawRows(datos);
+      const finalData = processInventoryData(invData, factData, envData);
+      setProcessedData(finalData);
+      if (finalData.length > 0) {
+        downloadExcelFile(finalData, nombreArchivoDesglosado());
+        setStatusMessage('¡Éxito! El archivo ha sido generado desde la base de datos y descargado.');
+        setStatusType('success');
+      } else {
+        setStatusMessage('La base de datos no devolvió artículos de inventario.');
+        setStatusType('info');
+      }
+    } catch (error: any) {
+      console.error('Hub error:', error);
+      setStatusMessage(`Error al generar desde la base de datos: ${error.message}`);
+      setStatusType('error');
+    } finally {
+      setIsLoadingHub(false);
+    }
+  };
+
+  const spinner = (
+    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+  );
+
   return (
     <div className="flex-grow w-full bg-gradient-to-br from-slate-50 to-slate-100 text-slate-900">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="w-full px-6 py-4">
           <h1 className="text-2xl font-bold text-slate-900">Consolidador de Inventario</h1>
-          <p className="text-slate-500 mt-1">Carga los 3 archivos para generar un reporte consolidado</p>
+          <p className="text-slate-500 mt-1">Carga los 3 archivos o genera el reporte consolidado desde la base de datos</p>
         </div>
       </header>
       <main className="w-full px-6 py-6">
@@ -144,17 +189,26 @@ const App: React.FC = () => {
         <div className="text-center space-y-4">
           <button
             onClick={handleProcessFiles}
-            disabled={!isProcessButtonEnabled || isLoading}
+            disabled={!isProcessButtonEnabled || ocupado}
             className="w-full max-w-xs bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50"
           >
-            {isLoading ? (
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : null}
+            {isLoading ? spinner : null}
             {isLoading ? 'Procesando...' : 'Procesar y Descargar'}
           </button>
+          <div className="flex items-center justify-center gap-3 text-slate-400 text-sm">
+            <span className="h-px w-16 bg-slate-200" />o<span className="h-px w-16 bg-slate-200" />
+          </div>
+          <div>
+            <button
+              onClick={handleGenerarDesdeBD}
+              disabled={ocupado}
+              className="w-full max-w-xs bg-emerald-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-opacity-50"
+            >
+              {isLoadingHub ? spinner : null}
+              {isLoadingHub ? 'Generando...' : 'Generar desde la base de datos'}
+            </button>
+            <p className="text-slate-500 text-xs mt-2">Sin subir archivos: usa los datos de Zoho sincronizados en el hub.</p>
+          </div>
           {statusMessage && (
             <div className={`h-6 text-sm ${
               statusType === 'success' ? 'text-green-600' :
