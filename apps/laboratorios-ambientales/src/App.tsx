@@ -1,15 +1,39 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { MouseEvent } from 'react';
 import '../index.css';
 import type { FilterState, Laboratorio } from './types';
 import { EMPTY_FILTERS } from './types';
 import { fetchLaboratorios } from './services/api';
 import Buscador from './pages/Buscador';
 import Dashboard from './pages/Dashboard';
-
-type View = 'main' | 'buscador' | 'dashboard';
+import type { View } from './lib/view';
+import { hashFor, parseView } from './lib/view';
 
 function App() {
-  const [view, setView] = useState<View>('main');
+  // La vista sale de la URL: un enlace a #buscador abre directamente el buscador.
+  const [view, setView] = useState<View>(() => parseView(window.location.hash));
+
+  // «Atrás» / «adelante» del navegador, o un hash cambiado a mano en la barra.
+  useEffect(() => {
+    const sincronizar = () => setView(parseView(window.location.hash));
+    window.addEventListener('popstate', sincronizar);
+    window.addEventListener('hashchange', sincronizar);
+    return () => {
+      window.removeEventListener('popstate', sincronizar);
+      window.removeEventListener('hashchange', sincronizar);
+    };
+  }, []);
+
+  // pushState y no `location.hash = ...`: volver al menú dejaría un '#' colgando
+  // en la URL. pushState no dispara popstate, así que la vista se fija a mano.
+  // Se conserva history.state: el react-router del portal guarda ahí su índice.
+  const navegar = useCallback((destino: View) => {
+    const { pathname, search } = window.location;
+    window.history.pushState(window.history.state, '', `${pathname}${search}${hashFor(destino)}`);
+    setView(destino);
+    window.scrollTo(0, 0);
+  }, []);
+
   const [data, setData] = useState<Laboratorio[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [progreso, setProgreso] = useState<number>(0);
@@ -47,18 +71,31 @@ function App() {
   // 'Activa' es el literal real del dataset (18 689 registros).
   const totalActivas = useMemo(() => data.filter((registro) => registro.estado === 'Activa').length, [data]);
 
-  if (view === 'buscador') {
+  // Con un enlace directo la vista se pide antes de que lleguen los datos: hasta
+  // entonces se ve la pantalla de inicio con su carga (o su error y Reintentar),
+  // no un buscador vacío que parezca «0 resultados».
+  const listos = !loading && error === '';
+
+  // Enlaces y no botones: se pueden copiar o abrir en otra pestaña. Con Ctrl,
+  // Mayús o clic central se deja hacer al navegador.
+  const abrirVista = (e: MouseEvent<HTMLAnchorElement>, destino: View) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navegar(destino);
+  };
+
+  if (view === 'buscador' && listos) {
     return (
       <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
-        <Buscador data={data} filters={filters} onFiltersChange={setFilters} onBack={() => setView('main')} />
+        <Buscador data={data} filters={filters} onFiltersChange={setFilters} onBack={() => navegar('main')} />
       </div>
     );
   }
 
-  if (view === 'dashboard') {
+  if (view === 'dashboard' && listos) {
     return (
       <div className="w-full flex-grow bg-[#F7F8FA]" style={{ minHeight: '100vh' }}>
-        <Dashboard data={data} onBack={() => setView('main')} />
+        <Dashboard data={data} onBack={() => navegar('main')} />
       </div>
     );
   }
@@ -103,18 +140,20 @@ function App() {
           {!loading && error === '' && (
             <>
               <div className="flex flex-wrap gap-4 justify-center">
-                <button
-                  onClick={() => setView('buscador')}
+                <a
+                  href={hashFor('buscador')}
+                  onClick={(e) => abrirVista(e, 'buscador')}
                   className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
                 >
                   Buscador de Laboratorios
-                </button>
-                <button
-                  onClick={() => setView('dashboard')}
+                </a>
+                <a
+                  href={hashFor('dashboard')}
+                  onClick={(e) => abrirVista(e, 'dashboard')}
                   className="px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-lg shadow-md text-lg transition-colors"
                 >
                   Análisis de Marcas
-                </button>
+                </a>
               </div>
               <p className="mt-6 text-sm text-gray-500">
                 {totalLaboratorios.toLocaleString('es-CO')} laboratorios &middot;{' '}
