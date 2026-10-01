@@ -19,7 +19,7 @@ const semana = (over: Partial<SemanaDePagos>): SemanaDePagos => ({
   anio: 2026, mes: 9, semana: 1, etiqueta: '1-6 sep 2026', desde: '2026-09-01', hasta: '2026-09-06',
   cantidadPagos: 1, totales: [{ moneda: 'COP', total: 11150331 }],
   pagos: [{
-    numero: 'PC-2026-276', cliente: 'SHI', fecha: '2026-09-02', modo: 'Transferencia bancaria',
+    id: 'p276', numero: 'PC-2026-276', cliente: 'SHI', fecha: '2026-09-02', modo: 'Transferencia bancaria',
     referencia: null, moneda: 'COP', importe: 11150331, sinAplicar: 0,
     aplicaciones: [{ factura: 'AM1492', ov: 'OV-2026-162', importe: 11150331 }],
   }],
@@ -41,7 +41,7 @@ describe('PagosPorSemana', () => {
     mockFetch.mockResolvedValue([semana({
       totales: [{ moneda: 'COP', total: 800000 }],
       pagos: [{
-        numero: 'PC-9', cliente: 'Secolab', fecha: '2026-09-03', modo: null, referencia: null,
+        id: 'p9', numero: 'PC-9', cliente: 'Secolab', fecha: '2026-09-03', modo: null, referencia: null,
         moneda: 'COP', importe: 800000, sinAplicar: 500000, aplicaciones: [],
       }],
     })]);
@@ -63,8 +63,8 @@ describe('PagosPorSemana', () => {
 
   it('se pueden tener varias semanas abiertas a la vez', async () => {
     mockFetch.mockResolvedValue([
-      semana({ semana: 2, etiqueta: '7-13 sep 2026', pagos: [{ ...semana({}).pagos[0], numero: 'PC-A' }] }),
-      semana({ semana: 1, etiqueta: '1-6 sep 2026', pagos: [{ ...semana({}).pagos[0], numero: 'PC-B' }] }),
+      semana({ semana: 2, etiqueta: '7-13 sep 2026', pagos: [{ ...semana({}).pagos[0], id: 'pA', numero: 'PC-A' }] }),
+      semana({ semana: 1, etiqueta: '1-6 sep 2026', pagos: [{ ...semana({}).pagos[0], id: 'pB', numero: 'PC-B' }] }),
     ]);
     render(<PagosPorSemana />);
     fireEvent.click(await screen.findByRole('button', { name: /Semana 2/ }));

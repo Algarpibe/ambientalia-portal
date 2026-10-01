@@ -113,6 +113,22 @@ describe('agruparPagos', () => {
   it('un pago sin fecha se descarta: no tiene semana a la que pertenecer', () => {
     expect(agruparPagos([fila({ fecha: null })])).toEqual([]);
   });
+
+  it('cada pago lleva su payment_id: el número puede venir vacío o repetirse', () => {
+    const r = agruparPagos([
+      fila({ payment_id: 'p1', payment_number: null }),
+      fila({ payment_id: 'p2', payment_number: null }),
+    ]);
+    expect(r[0].pagos.map((p) => p.id).sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('el mismo día, el número más alto va primero, comparado como número y no como texto', () => {
+    const r = agruparPagos([
+      fila({ payment_id: 'p1', payment_number: 'PC-2026-99' }),
+      fila({ payment_id: 'p2', payment_number: 'PC-2026-100' }),
+    ]);
+    expect(r[0].pagos.map((p) => p.numero)).toEqual(['PC-2026-100', 'PC-2026-99']);
+  });
 });
 
 describe('getPagosPorSemana', () => {

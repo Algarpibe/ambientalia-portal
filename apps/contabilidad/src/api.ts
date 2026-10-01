@@ -204,6 +204,7 @@ export interface AplicacionPago {
 }
 
 export interface Pago {
+  id: string;
   numero: string;
   cliente: string;
   fecha: string;

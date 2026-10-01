@@ -96,7 +96,7 @@ export default function PagosPorSemana() {
                         </thead>
                         <tbody>
                           {s.pagos.map((p) => (
-                            <tr key={p.numero} className="align-top">
+                            <tr key={p.id} className="align-top">
                               <td className="whitespace-nowrap px-2 py-1 font-medium">{p.numero}</td>
                               <td className="px-2 py-1">{p.cliente || '—'}</td>
                               <td className="whitespace-nowrap px-2 py-1">{p.fecha}</td>
@@ -105,8 +105,8 @@ export default function PagosPorSemana() {
                               <td className="px-2 py-1">
                                 {p.aplicaciones.length === 0
                                   ? '—'
-                                  : p.aplicaciones.map((a) => (
-                                      <div key={a.factura}>
+                                  : p.aplicaciones.map((a, i) => (
+                                      <div key={`${a.factura}-${i}`}>
                                         {a.factura}{a.ov ? ` (${a.ov})` : ''}: {formatMoneda(a.importe, p.moneda)}
                                       </div>
                                     ))}

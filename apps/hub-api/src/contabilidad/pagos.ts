@@ -71,6 +71,7 @@ export interface AplicacionPago {
 }
 
 export interface Pago {
+  id: string;              // payment_id: el número puede venir vacío o repetirse en Zoho
   numero: string;
   cliente: string;
   fecha: string;
@@ -115,6 +116,7 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
     let p = pagos.get(f.payment_id);
     if (!p) {
       p = {
+        id: f.payment_id,
         numero: f.payment_number ?? '',
         cliente: f.customer_name ?? '',
         fecha: f.fecha.slice(0, 10),
@@ -153,7 +155,8 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
   }
 
   for (const [clave, s] of semanas) {
-    s.pagos.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero.localeCompare(a.numero));
+    // numeric: PC-2026-100 va antes que PC-2026-99 (como texto quedaría al revés).
+    s.pagos.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero.localeCompare(a.numero, undefined, { numeric: true }));
     s.totales = [...totales.get(clave)!]
       .map(([moneda, total]) => ({ moneda, total }))
       .sort((a, b) => (a.moneda === 'COP' ? -1 : b.moneda === 'COP' ? 1 : a.moneda.localeCompare(b.moneda)));
