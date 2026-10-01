@@ -218,29 +218,20 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     ];
   }
 
-  // DocumentoNúmero (§3): un consecutivo por grupo (Fecha, Tercero Externo). World Office
-  // exige que la llave de documento sea coherente — un mismo número NO puede tener dos
-  // fechas ni dos NIT (§7.4). Se agrupa por (fecha, nit), se numera por fecha ascendente
-  // desde consecutivoInicial, y se emite en ese orden para que las líneas de un mismo
-  // pedido queden contiguas: así el archivo consolidado es válido para WO.
-  const claveGrupo = (ov: SalesOrder) => `${ov.fecha.slice(0, 10)}|${ov.nit ?? ''}`;
+  // DocumentoNúmero (§3): un consecutivo por OV, desde consecutivoInicial. Un pedido de WO
+  // por OV para que cada pedido se convierta en la factura de su OV (en Zoho cada OV se
+  // factura por separado). Agrupar por (fecha, NIT) escondía OV dentro del pedido de otra:
+  // OV-2026-178..182 salían dentro del pedido con Nota "177". Una OV tiene una sola fecha
+  // y un solo NIT, así que la llave de documento sigue siendo coherente (§7.4). Orden:
+  // fecha ascendente y, en la misma fecha, número de OV; las líneas de una OV quedan
+  // contiguas.
   const ordenadas = [...ordenes].sort(
-    (a, b) => a.fecha.localeCompare(b.fecha) || (a.nit ?? '').localeCompare(b.nit ?? '')
+    (a, b) => a.fecha.localeCompare(b.fecha) || a.numero.localeCompare(b.numero)
   );
-  const numeroPorGrupo = new Map<string, number>();
-  // Nota = consecutivo (XXX) de la OV. Si un grupo (fecha, NIT) junta varias OV, se usa
-  // el de la primera para que las 31 columnas de encabezado sigan idénticas en el pedido.
-  const notaPorGrupo = new Map<string, string>();
   let siguienteNumero = config.consecutivoInicial;
-  for (const ov of ordenadas) {
-    const k = claveGrupo(ov);
-    if (!numeroPorGrupo.has(k)) {
-      numeroPorGrupo.set(k, siguienteNumero++);
-      notaPorGrupo.set(k, consecutivoOV(ov.numero));
-    }
-  }
 
   for (const ov of ordenadas) {
+    const documentoNumero = siguienteNumero++;
     if (ov.lineas.length === 0) {
       avisar({
         tipo: 'ov_sin_lineas',
@@ -293,11 +284,11 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
       config.tipoDocumento, //            1  Tipo Documento (PED)
       derivarPrefijo(ov.fecha, config), //2  prefijo (OV_AA)
-      String(numeroPorGrupo.get(claveGrupo(ov))), // 3 DocumentoNúmero (consecutivo por grupo)
+      String(documentoNumero), //          3  DocumentoNúmero (consecutivo por OV)
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)
-      campo(ov.numero, notaPorGrupo.get(claveGrupo(ov)) ?? ''), // 7 Nota (XXX de OV-AAAA-XXX)
+      campo(ov.numero, consecutivoOV(ov.numero)), // 7 Nota (XXX de OV-AAAA-XXX)
       config.formaPago, //                8  FormaDePago (Credito)
       '', //                              9  FechaEntrega (vacía)
       '', //                              10 Moneda (vacía)

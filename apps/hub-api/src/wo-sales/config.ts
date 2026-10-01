@@ -32,8 +32,8 @@ export interface WoSalesConfig {
   prefijo: string;
   /**
    * Primer número de documento (§3). `DocumentoNúmero` ya NO es fijo: es un consecutivo
-   * por grupo (Fecha, Tercero Externo). Este es el número del PRIMER grupo; los demás
-   * siguen en orden de fecha. OJO (§8.1): el par (prefijo, DocumentoNúmero) debe ser
+   * por OV (un pedido de WO por OV). Este es el número de la PRIMERA OV; las demás
+   * siguen en orden de fecha y número de OV. OJO (§8.1): el par (prefijo, DocumentoNúmero) debe ser
    * único en WO para todo el año — hay que persistir el último usado entre archivos y
    * arrancar desde ahí, NO desde 1. Pendiente de cablear la persistencia.
    */

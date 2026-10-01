@@ -221,12 +221,12 @@ describe('Nota = consecutivo (XXX) de la OV', () => {
     expect(campos[COLUMNS.indexOf('Nota')]).toBe('311');
   });
 
-  it('dentro de un mismo DocumentoNúmero la Nota es constante (la de la primera OV)', () => {
+  it('dos OV del mismo (fecha, NIT) llevan cada una su propia Nota', () => {
     const a: SalesOrder = { ...OV_BASE, numero: 'OV-2026-150' };
     const b: SalesOrder = { ...OV_BASE, numero: 'OV-2026-151' }; // mismo (fecha, NIT)
     const filas = decodificar(buildWorldOfficeCsv([a, b], DEFAULT_CONFIG).csv).filter(Boolean).slice(1);
-    const notas = new Set(filas.map((f) => f.split(';')[COLUMNS.indexOf('Nota')]));
-    expect([...notas]).toEqual(['150']);
+    const notas = filas.map((f) => f.split(';')[COLUMNS.indexOf('Nota')]);
+    expect(notas).toEqual(['150', '151']);
   });
 });
 
@@ -325,10 +325,12 @@ describe('advertencias', () => {
 });
 
 // §3/§7.4: World Office exige que un mismo DocumentoNúmero tenga una sola Fecha y un solo
-// NIT. El consecutivo se asigna por grupo (Fecha, Tercero Externo). El consolidado es
-// válido siempre que la llave de documento sea coherente.
-describe('DocumentoNúmero: consecutivo por grupo (Fecha, Tercero Externo)', () => {
-  const con = (fecha: string, nit: string): SalesOrder => ({ ...OV_BASE, fecha, nit });
+// NIT. Un pedido de WO por cada OV: así cada pedido se convierte en la factura de su OV
+// (en Zoho cada OV se factura por separado). Agrupar por (fecha, NIT) escondía OV dentro
+// del pedido de otra (OV-2026-178..182 metidas en el pedido "177").
+describe('DocumentoNúmero: un consecutivo por OV', () => {
+  let n = 0;
+  const con = (fecha: string, nit: string): SalesOrder => ({ ...OV_BASE, fecha, nit, numero: `OV-2026-${100 + n++}` });
 
   function filasDoc(csv: Buffer) {
     const filas = decodificar(csv).filter((l) => l !== '').slice(1);
@@ -356,15 +358,26 @@ describe('DocumentoNúmero: consecutivo por grupo (Fecha, Tercero Externo)', () 
     for (const [doc, claves] of porDoc) expect({ doc, n: claves.size }).toEqual({ doc, n: 1 });
   });
 
-  it('mismo (fecha, NIT) comparte número; otro grupo, número distinto', () => {
+  it('dos OV del mismo (fecha, NIT) llevan números distintos', () => {
     const filas = filasDoc(
       buildWorldOfficeCsv(
         [con('2026-05-26', '800070853'), con('2026-05-26', '800070853'), con('2026-05-27', '901229003')],
         DEFAULT_CONFIG
       ).csv
     );
-    expect(filas[0].doc).toBe(filas[1].doc);
-    expect(filas[0].doc).not.toBe(filas[2].doc);
+    expect(new Set(filas.map((f) => f.doc)).size).toBe(3);
+  });
+
+  it('las líneas de una OV comparten número; en la misma fecha se ordena por número de OV', () => {
+    const linea = OV_BASE.lineas[0];
+    const ovB: SalesOrder = { ...OV_BASE, numero: 'OV-2026-179', lineas: [linea, linea] };
+    const ovA: SalesOrder = { ...OV_BASE, numero: 'OV-2026-178', lineas: [linea] };
+    const filas = decodificar(buildWorldOfficeCsv([ovB, ovA], DEFAULT_CONFIG).csv).filter(Boolean).slice(1);
+    const pares = filas.map((f) => {
+      const c = f.split(';');
+      return [c[COLUMNS.indexOf('DocumentoNúmero')], c[COLUMNS.indexOf('Nota')]];
+    });
+    expect(pares).toEqual([['1', '178'], ['2', '179'], ['2', '179']]);
   });
 
   it('numera desde consecutivoInicial, por fecha ascendente', () => {
