@@ -8,6 +8,7 @@ import { getOVPendientesFacturables, type OVPendienteFacturable } from './ovPend
 import { getFacturasPorEntregar } from './entregasPendientes.js';
 import { getDetalleFactura, getDetalleOV, type DetalleOV } from './detalle.js';
 import { getAnticiposEnlazados, conAnticipo, type AnticiposEnlazados, type AnticipoDeOV } from './anticipos.js';
+import { getPagosPorSemana } from './pagos.js';
 
 const APP_ID = 'contabilidad';
 const CACHE_KEY = 'contabilidad:facturas';
@@ -185,6 +186,18 @@ export function createContabilidadRouter(db: Pool): Router {
       res.json({ anticipos: enl.atencion });
     } catch (e) {
       sendError(res, e, 'contabilidad_anticipos_atencion');
+    }
+  });
+
+  // Pagos recibidos por semana del mes, con las facturas y OV a las que se aplicaron. Solo
+  // Contabilidad: es información de cobro, igual que los anticipos. Endpoint propio, así que
+  // un fallo aquí no arrastra a ninguna otra respuesta: basta con el 500 normal.
+  router.get('/contabilidad/pagos', requireAuth, requireApp(APP_ID), async (_req: Request, res: Response) => {
+    try {
+      const semanas = await cached('contabilidad:pagos', () => getPagosPorSemana(db));
+      res.json({ semanas });
+    } catch (e) {
+      sendError(res, e, 'contabilidad_pagos');
     }
   });
 
