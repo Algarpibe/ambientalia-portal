@@ -1,11 +1,11 @@
-import { Component, lazy, Suspense, useMemo } from 'react';
+import { Component, lazy, Suspense, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ReconciledRow } from './types';
 import { computeYearlyTrend } from './metrics/yearlyTrendMetrics';
 import { computeDelinquencyBands, computeDelinquencyConcentration } from './metrics/delinquencyBreakdown';
 import type { ConcentrationRow } from './metrics/delinquencyBreakdown';
 import { computeReceivablesAging, topOverdueClients } from './metrics/agingMetrics';
-import type { AgingKey, ReceivablesAging } from './metrics/agingMetrics';
+import type { AgingBucket, AgingKey, ReceivablesAging } from './metrics/agingMetrics';
 import { computeWorseningClients } from './metrics/worseningClients';
 import type { WorseningClientsResult } from './metrics/worseningClients';
 import { SkeletonAnalytics } from './SkeletonLoader';
@@ -19,6 +19,8 @@ interface KpisTabProps {
   loading?: boolean;
   /** Reference date for "already due"; injectable for tests. */
   today?: Date;
+  /** Opens the detail of an invoice (the aging drill-down links to it). */
+  onInvoiceClick?: (invoiceNumber: string) => void;
 }
 
 // A stale chunk after a deploy (or any render failure) must not take down the whole portal.
@@ -98,7 +100,79 @@ function ConcentrationTable({ rows }: { rows: ConcentrationRow[] }) {
   );
 }
 
-function AgingSection({ aging }: { aging: ReceivablesAging }) {
+function dueText(daysPastDue: number): string {
+  if (daysPastDue === 0) return 'Vence hoy';
+  if (daysPastDue < 0) return `Vence en ${-daysPastDue} ${daysPastDue === -1 ? 'día' : 'días'}`;
+  return `${daysPastDue} ${daysPastDue === 1 ? 'día' : 'días'}`;
+}
+
+function AgingInvoicesTable({
+  bucket,
+  onInvoiceClick,
+}: {
+  bucket: AgingBucket;
+  onInvoiceClick?: (invoiceNumber: string) => void;
+}) {
+  const label = AGING_LABELS[bucket.key];
+  const th = 'px-4 py-3 text-xs font-bold text-slate-600 uppercase tracking-wider';
+  return (
+    <div className="mt-4">
+      <h4 className="text-sm font-bold text-slate-700 mb-2">
+        Facturas — {label} ({bucket.invoices.length})
+      </h4>
+      <div className="overflow-x-auto max-h-96 overflow-y-auto border border-slate-100 rounded-xl">
+        <table className="w-full text-left border-collapse">
+          <caption className="sr-only">Facturas de {label}</caption>
+          <thead className="sticky top-0">
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th scope="col" className={th}>Cliente</th>
+              <th scope="col" className={th}>Factura</th>
+              <th scope="col" className={`${th} text-right`}>Saldo</th>
+              <th scope="col" className={`${th} text-right`}>
+                {bucket.key === 'notDue' ? 'Vencimiento' : 'Días vencida'}
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {bucket.invoices.map((inv) => (
+              <tr key={inv.invoiceNumber}>
+                <td className="px-4 py-2 text-slate-900">{inv.clientName}</td>
+                <td className="px-4 py-2 text-slate-700">
+                  {onInvoiceClick ? (
+                    <button
+                      type="button"
+                      onClick={() => onInvoiceClick(inv.invoiceNumber)}
+                      className="text-indigo-700 hover:underline"
+                    >
+                      {inv.invoiceNumber}
+                    </button>
+                  ) : (
+                    inv.invoiceNumber
+                  )}
+                </td>
+                <td className="px-4 py-2 text-right text-slate-900">{money(inv.balance)}</td>
+                <td className="px-4 py-2 text-right text-slate-600">{dueText(inv.daysPastDue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AgingSection({
+  aging,
+  selected,
+  onSelect,
+  onInvoiceClick,
+}: {
+  aging: ReceivablesAging;
+  selected: AgingKey | null;
+  onSelect: (key: AgingKey) => void;
+  onInvoiceClick?: (invoiceNumber: string) => void;
+}) {
+  const selectedBucket = aging.buckets.find((b) => b.key === selected);
   return (
     <section aria-labelledby="kpis-aging-title" className="bg-white rounded-2xl border border-slate-100 shadow-soft p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
@@ -112,18 +186,23 @@ function AgingSection({ aging }: { aging: ReceivablesAging }) {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {aging.buckets.map((b) => (
-          <div
+          <button
+            type="button"
             key={b.key}
-            className={`rounded-xl border px-4 py-3 ${b.key === 'notDue' ? 'bg-slate-50 border-slate-100' : 'bg-red-50/40 border-red-100'}`}
+            aria-pressed={selected === b.key}
+            disabled={b.invoices.length === 0}
+            onClick={() => onSelect(b.key)}
+            className={`rounded-xl border px-4 py-3 text-left ${b.invoices.length === 0 ? 'opacity-60 cursor-default' : 'cursor-pointer hover:shadow-md'} ${selected === b.key ? 'ring-2 ring-indigo-500' : ''} ${b.key === 'notDue' ? 'bg-slate-50 border-slate-100' : 'bg-red-50/40 border-red-100'}`}
           >
             <p className="text-xs font-semibold text-slate-500">{AGING_LABELS[b.key]}</p>
             <p className="text-lg font-bold text-slate-900 truncate" title={money(b.balance)}>{money(b.balance)}</p>
             <p className="text-xs text-slate-500">
               {b.invoiceCount} facturas · {b.clientCount} clientes
             </p>
-          </div>
+          </button>
         ))}
       </div>
+      {selectedBucket && <AgingInvoicesTable bucket={selectedBucket} onInvoiceClick={onInvoiceClick} />}
       {aging.otherCurrencyInvoiceCount > 0 && (
         <p className="mt-3 text-xs text-slate-500">
           {aging.otherCurrencyInvoiceCount} facturas con saldo en otra moneda no están incluidas en estos montos.
@@ -265,7 +344,8 @@ function CalculationNotes() {
   );
 }
 
-export default function KpisTab({ reconciledData, loading = false, today }: KpisTabProps) {
+export default function KpisTab({ reconciledData, loading = false, today, onInvoiceClick }: KpisTabProps) {
+  const [selectedBucket, setSelectedBucket] = useState<AgingKey | null>(null);
   const rows = useMemo(
     () => computeYearlyTrend(reconciledData, today ?? new Date()),
     [reconciledData, today],
@@ -308,7 +388,14 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
 
   return (
     <div className="flex flex-col gap-6">
-      {hasAging && <AgingSection aging={aging} />}
+      {hasAging && (
+        <AgingSection
+          aging={aging}
+          selected={selectedBucket}
+          onSelect={(key) => setSelectedBucket((cur) => (cur === key ? null : key))}
+          onInvoiceClick={onInvoiceClick}
+        />
+      )}
 
       {hasAging && overdueClients.length > 0 && <OverdueByClientSection clients={overdueClients} />}
 

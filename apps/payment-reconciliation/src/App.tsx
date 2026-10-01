@@ -804,7 +804,7 @@ function App() {
         )}
 
         {/* KPIs View — yearly DPD trend; ignores the period filter by design */}
-        {activeView === 'kpis' && <KpisTab reconciledData={reconciledData} loading={loading} />}
+        {activeView === 'kpis' && <KpisTab reconciledData={reconciledData} loading={loading} onInvoiceClick={setDetalleFactura} />}
 
       </main>
       {detalleFactura && <DetalleModal tipo="factura" numero={detalleFactura} onClose={() => setDetalleFactura(null)} />}

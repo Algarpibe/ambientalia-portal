@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import type { ReconciledRow } from './types';
 import KpisTab from './KpisTab';
 
@@ -218,5 +218,66 @@ describe('KpisTab', () => {
     );
     expect(screen.queryByRole('region', { name: 'Saldo vencido por cliente (hoy)' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('overdue-chart')).not.toBeInTheDocument();
+  });
+});
+
+describe('KpisTab aging drill-down', () => {
+  const data = [
+    row({ invoiceNumber: 'F-1', clientName: 'Cliente Uno', dueDate: '19 sep 2026', total: 200, balance: 200, status: 'sent' }),
+    row({ invoiceNumber: 'F-2', clientName: 'Cliente Dos', dueDate: '20 sep 2026', total: 900, balance: 900, status: 'sent' }),
+    row({ invoiceNumber: 'F-3', clientName: 'Cliente Tres', dueDate: '15 oct 2026', total: 50, balance: 50, status: 'sent' }),
+  ];
+  const agingRegion = () => screen.getByRole('region', { name: 'Cartera por antigüedad (hoy)' });
+  const card = (label: string) => within(agingRegion()).getByRole('button', { name: new RegExp(label) });
+
+  it('shows the invoices behind a card when it is clicked, and hides them on a second click', () => {
+    render(<KpisTab reconciledData={data} today={TODAY} />);
+    const c = card('1–30 días');
+    expect(c).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(c);
+    expect(c).toHaveAttribute('aria-pressed', 'true');
+    const table = within(screen.getByRole('table', { name: 'Facturas de 1–30 días' }));
+    expect(screen.getByText('Facturas — 1–30 días (2)')).toBeInTheDocument();
+    expect(table.getByText('Cliente Dos')).toBeInTheDocument();
+    expect(table.getByText('F-2')).toBeInTheDocument();
+    expect(table.getByText(/900/)).toBeInTheDocument();
+    expect(table.getByText('Días vencida')).toBeInTheDocument();
+    expect(table.getByText('9 días')).toBeInTheDocument();
+    expect(table.queryByText('Cliente Tres')).not.toBeInTheDocument();
+    fireEvent.click(c);
+    expect(c).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('table', { name: 'Facturas de 1–30 días' })).not.toBeInTheDocument();
+  });
+
+  it('disables the cards without invoices', () => {
+    render(<KpisTab reconciledData={data} today={TODAY} />);
+    const empty = card('Más de 90 días');
+    expect(empty).toBeDisabled();
+    fireEvent.click(empty);
+    expect(screen.queryByText(/^Facturas — /)).not.toBeInTheDocument();
+  });
+
+  it('calls onInvoiceClick with the invoice number', () => {
+    const onInvoiceClick = vi.fn();
+    render(<KpisTab reconciledData={data} today={TODAY} onInvoiceClick={onInvoiceClick} />);
+    fireEvent.click(card('1–30 días'));
+    fireEvent.click(screen.getByRole('button', { name: 'F-1' }));
+    expect(onInvoiceClick).toHaveBeenCalledWith('F-1');
+  });
+
+  it('renders the invoice number as plain text without onInvoiceClick', () => {
+    render(<KpisTab reconciledData={data} today={TODAY} />);
+    fireEvent.click(card('1–30 días'));
+    expect(screen.queryByRole('button', { name: 'F-1' })).not.toBeInTheDocument();
+    expect(screen.getByText('F-1')).toBeInTheDocument();
+  });
+
+  it('shows a Vencimiento column for the not-due bucket', () => {
+    render(<KpisTab reconciledData={data} today={TODAY} />);
+    fireEvent.click(card('Por vencer'));
+    const table = within(screen.getByRole('table', { name: 'Facturas de Por vencer' }));
+    expect(table.getByText('Vencimiento')).toBeInTheDocument();
+    expect(table.queryByText('Días vencida')).not.toBeInTheDocument();
+    expect(table.getByText('Vence en 16 días')).toBeInTheDocument();
   });
 });
