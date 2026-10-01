@@ -10,11 +10,22 @@ import { isCop } from '../currency';
 export const AGING_KEYS = ['notDue', 'd1_30', 'd31_60', 'd61_90', 'over90'] as const;
 export type AgingKey = (typeof AGING_KEYS)[number];
 
+/** One open invoice behind an aging bucket. daysPastDue is <= 0 while not yet due. */
+export interface AgingInvoice {
+  invoiceNumber: string;
+  clientName: string;
+  balance: number;
+  daysPastDue: number;
+  dueDate: Date;
+}
+
 export interface AgingBucket {
   key: AgingKey;
   balance: number;
   invoiceCount: number;
   clientCount: number;
+  /** Largest balance first, then invoice number. */
+  invoices: AgingInvoice[];
 }
 
 export interface ReceivablesAging {
@@ -30,6 +41,7 @@ interface OpenInvoice {
   row: ReconciledRow;
   daysPastDue: number;
   balance: number;
+  due: Date;
 }
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -45,7 +57,7 @@ function openInvoices(rows: ReconciledRow[], today: Date): OpenInvoice[] {
     const due = row.dueDate instanceof Date ? row.dueDate : parseExcelDate(row.dueDate);
     if (!due) continue;
     const daysPastDue = Math.round((cutoff.getTime() - startOfDay(due).getTime()) / DAY_MS);
-    result.push({ row, daysPastDue, balance: row.balance });
+    result.push({ row, daysPastDue, balance: row.balance, due: startOfDay(due) });
   }
   return result;
 }
@@ -60,8 +72,8 @@ const bucketOf = (daysPastDue: number): AgingKey => {
 
 export function computeReceivablesAging(rows: ReconciledRow[], today: Date): ReceivablesAging {
   let otherCurrencyInvoiceCount = 0;
-  const acc = new Map(AGING_KEYS.map((key) => [key, { balance: 0, invoiceCount: 0, clients: new Set<string>() }]));
-  for (const { row, daysPastDue, balance } of openInvoices(rows, today)) {
+  const acc = new Map(AGING_KEYS.map((key) => [key, { balance: 0, invoiceCount: 0, clients: new Set<string>(), invoices: [] as AgingInvoice[] }]));
+  for (const { row, daysPastDue, balance, due } of openInvoices(rows, today)) {
     if (!isCop(row)) {
       otherCurrencyInvoiceCount += 1;
       continue;
@@ -69,11 +81,16 @@ export function computeReceivablesAging(rows: ReconciledRow[], today: Date): Rec
     const bucket = acc.get(bucketOf(daysPastDue))!;
     bucket.balance += balance;
     bucket.invoiceCount += 1;
-    bucket.clients.add(clientIdentity(row.clientName).key);
+    const identity = clientIdentity(row.clientName);
+    bucket.clients.add(identity.key);
+    bucket.invoices.push({ invoiceNumber: row.invoiceNumber, clientName: identity.name, balance, daysPastDue, dueDate: due });
   }
   const buckets = AGING_KEYS.map((key) => {
     const b = acc.get(key)!;
-    return { key, balance: b.balance, invoiceCount: b.invoiceCount, clientCount: b.clients.size };
+    const invoices = [...b.invoices].sort(
+      (x, y) => y.balance - x.balance || x.invoiceNumber.localeCompare(y.invoiceNumber),
+    );
+    return { key, balance: b.balance, invoiceCount: b.invoiceCount, clientCount: b.clients.size, invoices };
   });
   const overdue = buckets.filter((b) => b.key !== 'notDue');
   return {

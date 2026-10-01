@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ReconciledRow } from '../types';
 import { computeReceivablesAging, overdueBalanceByClient, topOverdueClients } from './agingMetrics';
+import { clientIdentity } from './clientIdentity';
 
 function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
   return {
@@ -150,5 +151,55 @@ describe('topOverdueClients', () => {
   it('returns an empty list when nothing is overdue', () => {
     expect(topOverdueClients([], TODAY)).toEqual([]);
     expect(topOverdueClients([owed('15 oct 2026', 100)], TODAY)).toEqual([]);
+  });
+});
+
+describe('bucket invoices', () => {
+  const inv = (invoiceNumber: string, dueDate: string, balance: number, clientName = 'ACME') =>
+    row({ invoiceNumber, dueDate, balance, total: balance, clientName });
+  const bucket = (aging: ReturnType<typeof computeReceivablesAging>, key: string) =>
+    aging.buckets.find((b) => b.key === key)!;
+
+  it('lists the invoices behind each bucket, matching its count and balance', () => {
+    const aging = computeReceivablesAging(
+      [
+        inv('A-1', '19 sep 2026', 200, 'ACME S.A.S'),
+        inv('A-2', '20 sep 2026', 300, 'Otro'),
+        inv('B-1', '15 oct 2026', 50),
+        inv('C-1', '30 jun 2026', 70),
+      ],
+      TODAY,
+    );
+    const d1_30 = bucket(aging, 'd1_30');
+    expect(d1_30.invoices).toHaveLength(d1_30.invoiceCount);
+    expect(d1_30.invoices.reduce((s, i) => s + i.balance, 0)).toBe(d1_30.balance);
+    expect(d1_30.invoices[0]).toMatchObject({ invoiceNumber: 'A-2', clientName: 'Otro', balance: 300, daysPastDue: 9 });
+    expect(d1_30.invoices[0].dueDate).toEqual(new Date(2026, 8, 20));
+    expect(bucket(aging, 'notDue').invoices).toEqual([
+      expect.objectContaining({ invoiceNumber: 'B-1', daysPastDue: -16 }),
+    ]);
+    expect(bucket(aging, 'over90').invoices.map((i) => i.invoiceNumber)).toEqual(['C-1']);
+    expect(bucket(aging, 'd31_60').invoices).toEqual([]);
+  });
+
+  it('sorts by balance descending, then invoice number ascending', () => {
+    const aging = computeReceivablesAging(
+      [inv('Z-9', '19 sep 2026', 100), inv('A-1', '19 sep 2026', 100), inv('M-5', '19 sep 2026', 500)],
+      TODAY,
+    );
+    expect(bucket(aging, 'd1_30').invoices.map((i) => i.invoiceNumber)).toEqual(['M-5', 'A-1', 'Z-9']);
+  });
+
+  it('uses the normalized client name and leaves out non-COP invoices', () => {
+    const aging = computeReceivablesAging(
+      [
+        inv('A-1', '19 sep 2026', 100, ' acme  s.a.s '),
+        row({ invoiceNumber: 'USD-1', dueDate: '19 sep 2026', balance: 9000, total: 9000, currencyCode: 'USD' }),
+      ],
+      TODAY,
+    );
+    const list = bucket(aging, 'd1_30').invoices;
+    expect(list.map((i) => i.invoiceNumber)).toEqual(['A-1']);
+    expect(list[0].clientName).toBe(clientIdentity(' acme  s.a.s ').name);
   });
 });
