@@ -84,6 +84,13 @@ Ejemplo, septiembre 2026 (el día 1 es martes, `díaISOdelDía1 = 1`):
 | 21 – 27 | 4 |
 | 28 (lunes) – 30 (miércoles) | 5 |
 
+**Semana 6.** La regla produce una sexta semana cuando un mes de 30 días
+empieza en domingo, o uno de 31 empieza en sábado o domingo — varias veces al
+año. Ejemplo, marzo 2026 (empieza en domingo): semana 1 = solo el día 1;
+2-8, 9-15, 16-22, 23-29; **semana 6 = 30-31**. Decidido el 2026-10-01: se
+permite, para que toda semana siga siendo lunes-domingo, en vez de estirar la
+semana 5 a 9 días.
+
 ### Agregación — también TypeScript puro
 
 1. Agrupar las filas SQL por `payment_id`: cada pago acumula su lista de
@@ -132,7 +139,7 @@ export interface Pago {
 export interface SemanaDePagos {
   anio: number;
   mes: number;              // 1-12
-  semana: number;            // 1-5
+  semana: number;            // 1-6 (ver «Semana 6» arriba)
   etiqueta: string;          // "1-6 sep 2026", ya formateada en el servidor
   desde: string;              // ISO
   hasta: string;               // ISO
@@ -171,7 +178,8 @@ lo necesitan.
 
 - **`semanaDelMes`**: la tabla del ejemplo de arriba, más los bordes: un mes
   que empieza en lunes (semana 1 completa desde el día 1), un mes de 28 días
-  que empieza en lunes (exactamente 4 semanas, sin semana 5).
+  que empieza en lunes (exactamente 4 semanas, sin semana 5), y un mes con
+  semana 6 (marzo 2026).
 - **La agregación** (agrupar filas SQL en pagos, agrupar pagos en semanas,
   sumar totales): con filas sintéticas que crucen un fin de semana del mes a
   fin de otro, un pago con varias aplicaciones, un pago sin ninguna.
