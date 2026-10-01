@@ -2,6 +2,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import type { DestinatarioCorreo, EmailEstado } from './types.js';
 import type { WoSalesConfig } from './config.js';
 import type { SalesOrderFiltro } from './source.js';
+import { condicionOvViva } from './hub.source.js';
 import {
   PREFERENCIA_POR_DEFECTO,
   type EstadoDestinatario,
@@ -128,12 +129,12 @@ export async function cambiadasDesde(
   desde: string | null
 ): Promise<string[]> {
   const { rows } = await db.query(
-    `SELECT salesorder_number FROM books.sales_orders
-      WHERE status = ANY($1::text[]) AND date >= $2::date AND date <= $3::date
-        AND ($4::timestamptz IS NULL OR zoho_last_modified > $4::timestamptz)
-        AND NOT (salesorder_number = ANY($5::text[]))
-      ORDER BY salesorder_number`,
-    [config.estadosVivos, filtro.desde, filtro.hasta, desde, config.ordenesExcluidas]
+    `SELECT so.salesorder_number FROM books.sales_orders so
+      WHERE ${condicionOvViva(1, 6)} AND so.date >= $2::date AND so.date <= $3::date
+        AND ($4::timestamptz IS NULL OR so.zoho_last_modified > $4::timestamptz)
+        AND NOT (so.salesorder_number = ANY($5::text[]))
+      ORDER BY so.salesorder_number`,
+    [config.estadosVivos, filtro.desde, filtro.hasta, desde, config.ordenesExcluidas, config.estadosFacturaSinEnviar]
   );
   return (rows as { salesorder_number: string }[]).map((r) => r.salesorder_number);
 }

@@ -51,6 +51,11 @@ export interface WoSalesConfig {
   vencimiento: VencimientoConfig;
   /** Estados de OV que se consideran vivas. */
   estadosVivos: string[];
+  /**
+   * Estados de factura de Zoho que aún NO se han enviado. Lo facturado así sigue
+   * pendiente para World Office: el pedido se carga en WO antes de enviar la factura.
+   */
+  estadosFacturaSinEnviar: string[];
   /** Números de OV que nunca entran (tabla, archivo ni correo): p. ej. OV de prueba. */
   ordenesExcluidas: string[];
   /**
@@ -101,6 +106,9 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   // pendientes: lo ya facturado se descuenta por línea con quantity_invoiced (ver
   // hub.source.ts). Una OV totalmente facturada sale por su status ('invoiced').
   estadosVivos: [...ESTADOS_OV_POR_FACTURAR],
+  // Una OV 'invoiced' cuya factura sigue en draft/approved todavía va al archivo: caso
+  // 01/10/26, AM1495..AM1504 (approved) sacaron 10 OV antes de cargarlas en WO.
+  estadosFacturaSinEnviar: ['draft', 'approved'],
   // OV de prueba creada desde otro software (Ambientalia S.A.S., 06/08/2026).
   ordenesExcluidas: ['OV-2026-1000-01'],
 

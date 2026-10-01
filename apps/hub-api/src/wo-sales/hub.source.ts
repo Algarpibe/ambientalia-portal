@@ -43,6 +43,22 @@ import type { WoSalesConfig } from './config.js';
  * - price_precision = 0: el COP no lleva decimales en esta organización, así que la
  *   duda del separador decimal (punto vs coma) es teórica para importes en pesos.
  */
+/**
+ * Condición de "OV viva para World Office", ÚNICA para las tres consultas (tabla/archivo,
+ * OV antiguas y cuerpo del correo). Viva = estado por facturar, O ya 'invoiced' pero con
+ * alguna factura que aún no se ha enviado (draft/approved): el pedido de WO se carga
+ * antes de enviar la factura. Caso 01/10/26: AM1495..AM1504 (approved) pasaron a
+ * 'invoiced' las OV-2026-168/173/175..182 y desaparecieron del archivo sin estar en WO.
+ * Exige la tabla aliasada como `so`; recibe los números de parámetro de cada consulta.
+ */
+export function condicionOvViva(pEstados: number, pSinEnviar: number): string {
+  return `(so.status = ANY($${pEstados}::text[])
+        OR (so.status = 'invoiced' AND EXISTS (
+              SELECT 1 FROM books.invoices i
+               WHERE i.salesorder_id = so.salesorder_id
+                 AND i.status = ANY($${pSinEnviar}::text[]))))`;
+}
+
 const ORDENES_VIVAS_SQL = `
   WITH vivas AS (
     SELECT so.salesorder_id,
@@ -62,7 +78,7 @@ const ORDENES_VIVAS_SQL = `
            NULLIF(so.raw ->> 'discount_total', '')   AS descuento_cabecera
       FROM books.sales_orders so
       LEFT JOIN books.contacts c ON c.contact_id = so.customer_id
-     WHERE so.status = ANY($1::text[])
+     WHERE ${condicionOvViva(1, 6)}
        AND so.date >= $2::date
        AND so.date <= $3::date
        AND ($4::text IS NULL OR so.customer_name ILIKE '%' || $4 || '%')
@@ -71,7 +87,7 @@ const ORDENES_VIVAS_SQL = `
   -- No se excluye la OV por tener factura: la facturación se descuenta POR LÍNEA con
   -- quantity_invoiced (más abajo, en TS). Una OV parcialmente facturada aparece con
   -- sus líneas aún pendientes; una totalmente facturada ya está fuera por su status
-  -- ('invoiced' no está en estadosVivos). Esto reemplaza la antigua exclusión por
+  -- ('invoiced'), salvo que alguna factura siga sin enviar (condicionOvViva). Esto reemplaza la antigua exclusión por
   -- factura, que hacía desaparecer enteras las OV parcialmente facturadas.
   SELECT v.salesorder_id, v.salesorder_number, v.fecha, v.customer_name, v.currency_code, v.nit,
          v.fecha_entrega, v.forma_pago, v.plazo_pago, v.descuento_cabecera,
@@ -85,6 +101,14 @@ const ORDENES_VIVAS_SQL = `
          -- lee quantity_delivered). Texto, no ::numeric: ver el bloque de descuento.
          NULLIF(li.raw ->> 'quantity_invoiced', '')                     AS cantidad_facturada,
          NULLIF(li.raw ->> 'quantity_cancelled', '')                    AS cantidad_cancelada,
+         -- Parte de quantity_invoiced que está en facturas sin enviar: vuelve a pendiente
+         -- (ver facturadaEnviada). Por item_id, como inventoryConsolidation.ts.
+         (SELECT SUM(il.quantity)::text
+            FROM books.invoice_line_items il
+            JOIN books.invoices i ON i.invoice_id = il.invoice_id
+           WHERE i.salesorder_id = v.salesorder_id
+             AND il.item_id = li.item_id
+             AND i.status = ANY($6::text[]))                            AS cantidad_sin_enviar,
          it.raw -> 'custom_field_hash' ->> 'cf_centro_de_costos'        AS centro_costos
     FROM vivas v
     LEFT JOIN books.salesorder_line_items li ON li.salesorder_id = v.salesorder_id
@@ -99,7 +123,7 @@ const ORDENES_VIVAS_SQL = `
 const ORDENES_ANTIGUAS_SQL = `
   SELECT so.salesorder_number, so.date::text AS fecha, so.customer_name
     FROM books.sales_orders so
-   WHERE so.status = ANY($1::text[])
+   WHERE ${condicionOvViva(1, 5)}
      AND so.date < $2::date
      AND ($3::text IS NULL OR so.customer_name ILIKE '%' || $3 || '%')
      AND NOT (so.salesorder_number = ANY($4::text[]))
@@ -130,6 +154,8 @@ interface Fila {
   /** Cantidad ya facturada / cancelada de esta línea (texto crudo del raw). */
   cantidad_facturada: string | null;
   cantidad_cancelada: string | null;
+  /** Cantidad de esta línea en facturas aún sin enviar (texto crudo, NULL = ninguna). */
+  cantidad_sin_enviar: string | null;
   centro_costos: string | null;
 }
 
@@ -198,6 +224,16 @@ export function pendientePorFacturar(
   return { cantidad: pendiente, incluir };
 }
 
+/**
+ * Lo facturado que cuenta para World Office = quantity_invoiced menos lo que está en
+ * facturas aún sin enviar (draft/approved): eso todavía no se ha cargado en WO. Nunca
+ * baja de 0 (el cruce por item_id puede sumar de más si el artículo se repite en la OV).
+ * NaN se propaga para que el builder lo cace.
+ */
+export function facturadaEnviada(facturada: number, sinEnviar: number): number {
+  return Math.max(0, facturada - sinEnviar);
+}
+
 export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): SalesOrderSource {
   return {
     async ordenesVivas(filtro: SalesOrderFiltro): Promise<SalesOrder[]> {
@@ -207,6 +243,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         filtro.hasta,
         filtro.cliente ?? null,
         config.ordenesExcluidas,
+        config.estadosFacturaSinEnviar,
       ]);
 
       // Clave = salesorder_id (la PK), no el número: si dos OV compartieran número,
@@ -242,7 +279,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         // solo debe crear el pedido de lo que aún no se facturó; cargar lo ya facturado
         // duplicaría inventario y facturación. Lo facturado se acumula para que el
         // builder avise (ov_parcialmente_facturada) de que el archivo trae solo lo vivo.
-        const facturada = aNumero(f.cantidad_facturada);
+        const facturada = facturadaEnviada(aNumero(f.cantidad_facturada), aNumero(f.cantidad_sin_enviar));
         const cancelada = aNumero(f.cantidad_cancelada);
         const pedida = aNumeroObligatorio(f.quantity);
         if (Number.isFinite(facturada)) ov.cantidadFacturada += facturada;
@@ -270,6 +307,7 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         filtro.desde,
         filtro.cliente ?? null,
         config.ordenesExcluidas,
+        config.estadosFacturaSinEnviar,
       ]);
       return (rows as { salesorder_number: string; fecha: string; customer_name: string | null }[]).map(
         (r) => ({ numero: r.salesorder_number, fecha: r.fecha, clienteNombre: r.customer_name })
