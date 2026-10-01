@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ReconciledRow } from '../types';
-import { computeReceivablesAging, overdueBalanceByClient } from './agingMetrics';
+import { computeReceivablesAging, overdueBalanceByClient, topOverdueClients } from './agingMetrics';
 
 function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
   return {
@@ -99,5 +99,56 @@ describe('non-COP invoices', () => {
       TODAY,
     );
     expect(map.get('ACME')).toBe(100);
+  });
+});
+
+describe('topOverdueClients', () => {
+  it('orders clients by overdue balance, largest first', () => {
+    const top = topOverdueClients(
+      [owed('19 sep 2026', 100, 'Beta'), owed('19 sep 2026', 500, 'Alfa'), owed('19 sep 2026', 300, 'Gamma')],
+      TODAY,
+    );
+    expect(top).toEqual([
+      { name: 'Alfa', overdueBalance: 500 },
+      { name: 'Gamma', overdueBalance: 300 },
+      { name: 'Beta', overdueBalance: 100 },
+    ]);
+  });
+
+  it('merges spelling variants and shows the first spelling seen', () => {
+    const top = topOverdueClients(
+      [owed('19 sep 2026', 100, 'ACME S.A.S'), owed('20 sep 2026', 50, ' acme  s.a.s ')],
+      TODAY,
+    );
+    expect(top).toEqual([{ name: 'ACME S.A.S', overdueBalance: 150 }]);
+  });
+
+  it('leaves out not-yet-due and non-COP balances', () => {
+    const top = topOverdueClients(
+      [
+        owed('15 oct 2026', 900, 'Futuro'),
+        owed('29 sep 2026', 800, 'Hoy'),
+        row({ dueDate: '19 sep 2026', balance: 700, total: 700, clientName: 'Dolares', currencyCode: 'USD' }),
+        owed('19 sep 2026', 10, 'Vencido'),
+      ],
+      TODAY,
+    );
+    expect(top).toEqual([{ name: 'Vencido', overdueBalance: 10 }]);
+  });
+
+  it('breaks ties by name', () => {
+    const top = topOverdueClients([owed('19 sep 2026', 5, 'Zeta'), owed('19 sep 2026', 5, 'Alfa')], TODAY);
+    expect(top.map((c) => c.name)).toEqual(['Alfa', 'Zeta']);
+  });
+
+  it('honors the limit (default 10)', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => owed('19 sep 2026', i + 1, `Cliente ${i}`));
+    expect(topOverdueClients(rows, TODAY)).toHaveLength(10);
+    expect(topOverdueClients(rows, TODAY, 3).map((c) => c.overdueBalance)).toEqual([12, 11, 10]);
+  });
+
+  it('returns an empty list when nothing is overdue', () => {
+    expect(topOverdueClients([], TODAY)).toEqual([]);
+    expect(topOverdueClients([owed('15 oct 2026', 100)], TODAY)).toEqual([]);
   });
 });

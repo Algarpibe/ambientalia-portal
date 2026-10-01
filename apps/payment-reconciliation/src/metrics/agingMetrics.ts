@@ -95,3 +95,23 @@ export function overdueBalanceByClient(rows: ReconciledRow[], today: Date): Map<
   }
   return result;
 }
+
+/** The clients that owe the most already-overdue COP balance today, largest first. */
+export function topOverdueClients(
+  rows: ReconciledRow[],
+  today: Date,
+  limit = 10,
+): { name: string; overdueBalance: number }[] {
+  // Map keeps insertion order, so the display name is the first spelling seen.
+  const byKey = new Map<string, { name: string; overdueBalance: number }>();
+  for (const { row, daysPastDue, balance } of openInvoices(rows, today)) {
+    if (!isCop(row) || daysPastDue <= 0) continue;
+    const { key, name } = clientIdentity(row.clientName);
+    const entry = byKey.get(key);
+    if (entry) entry.overdueBalance += balance;
+    else byKey.set(key, { name, overdueBalance: balance });
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.overdueBalance - a.overdueBalance || a.name.localeCompare(b.name, 'es'))
+    .slice(0, limit);
+}
