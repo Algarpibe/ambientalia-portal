@@ -160,3 +160,31 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
   }
   return [...semanas.values()].sort((a, b) => b.desde.localeCompare(a.desde));
 }
+
+// LEFT JOIN desde customer_payments, no JOIN: un pago con todo el saldo sin aplicar no
+// tiene filas en customer_payment_invoices y desaparecería. El salto a la OV va por
+// invoices.salesorder_id (poblado al 100%, ver source.ts), no por reference_number.
+const PAGOS_SQL = `
+  SELECT p.payment_id,
+         p.payment_number,
+         p.customer_name,
+         p.date::text          AS fecha,
+         p.payment_mode,
+         p.reference_number,
+         p.currency_code,
+         p.amount,
+         p.unused_amount,
+         cpi.invoice_number,
+         cpi.amount_applied,
+         so.salesorder_number
+    FROM books.customer_payments p
+    LEFT JOIN books.customer_payment_invoices cpi ON cpi.payment_id = p.payment_id
+    LEFT JOIN books.invoices i ON i.invoice_id = cpi.invoice_id
+    LEFT JOIN books.sales_orders so ON so.salesorder_id = i.salesorder_id
+   ORDER BY p.date, p.payment_number, cpi.invoice_number`;
+
+/** Lee todos los pagos con sus aplicaciones y los agrupa por semana del mes. */
+export async function getPagosPorSemana(db: Pool): Promise<SemanaDePagos[]> {
+  const { rows } = await db.query(PAGOS_SQL);
+  return agruparPagos(rows as FilaPago[]);
+}

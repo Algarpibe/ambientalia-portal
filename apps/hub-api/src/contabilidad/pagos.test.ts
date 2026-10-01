@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { semanaDelMes, rangoDeSemana, agruparPagos, type FilaPago } from './pagos.js';
+import { describe, it, expect, vi } from 'vitest';
+import type { Pool } from '@algarpibe/zoho-sync';
+import { semanaDelMes, rangoDeSemana, agruparPagos, getPagosPorSemana, type FilaPago } from './pagos.js';
 
 // Regla aprobada (2026-10-01): la semana empieza en lunes; la semana 1 va del día 1 al
 // primer domingo, aunque quede corta; puede haber hasta 6 semanas.
@@ -111,5 +112,20 @@ describe('agruparPagos', () => {
 
   it('un pago sin fecha se descarta: no tiene semana a la que pertenecer', () => {
     expect(agruparPagos([fila({ fecha: null })])).toEqual([]);
+  });
+});
+
+describe('getPagosPorSemana', () => {
+  it('una sola consulta, con LEFT JOIN para no perder los pagos sin aplicar', async () => {
+    const query = vi.fn().mockResolvedValueOnce({ rows: [
+      fila({}),
+      fila({ payment_id: 'p2', payment_number: 'PC-2', invoice_number: null, amount_applied: null, salesorder_number: null }),
+    ] });
+    const r = await getPagosPorSemana({ query } as unknown as Pool);
+    expect(query).toHaveBeenCalledTimes(1);
+    // La decisión de diseño que importa: un JOIN normal haría desaparecer el pago sin
+    // aplicar, que es justo lo que la pestaña tiene que enseñar.
+    expect(query.mock.calls[0][0]).toMatch(/LEFT JOIN books\.customer_payment_invoices/);
+    expect(r[0].pagos.map((p) => p.numero).sort()).toEqual(['PC-2', 'PC-2026-276']);
   });
 });
