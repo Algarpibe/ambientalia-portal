@@ -47,3 +47,116 @@ export function rangoDeSemana(anio: number, mes: number, semana: number): { desd
     etiqueta: `${dias} ${MESES[mes - 1]} ${anio}`,
   };
 }
+
+/** Una fila de la consulta: un pago × una factura aplicada (o ninguna). */
+export interface FilaPago {
+  payment_id: string;
+  payment_number: string | null;
+  customer_name: string | null;
+  fecha: string | null;
+  payment_mode: string | null;
+  reference_number: string | null;
+  currency_code: string | null;
+  amount: number | string | null;          // numeric de pg llega como texto
+  unused_amount: number | string | null;
+  invoice_number: string | null;           // null: el pago no se aplicó a ninguna factura
+  amount_applied: number | string | null;
+  salesorder_number: string | null;        // null: la factura no tiene OV enlazada
+}
+
+export interface AplicacionPago {
+  factura: string;
+  ov: string | null;
+  importe: number;
+}
+
+export interface Pago {
+  numero: string;
+  cliente: string;
+  fecha: string;
+  modo: string | null;
+  referencia: string | null;
+  moneda: string;          // Zoho solo aplica un pago a facturas de su misma moneda
+  importe: number;
+  sinAplicar: number;
+  aplicaciones: AplicacionPago[];
+}
+
+export interface TotalMoneda {
+  moneda: string;
+  total: number;
+}
+
+export interface SemanaDePagos extends SemanaDelMes {
+  etiqueta: string;
+  desde: string;
+  hasta: string;
+  cantidadPagos: number;
+  totales: TotalMoneda[];  // COP primero; nunca se suman monedas distintas
+  pagos: Pago[];
+}
+
+function num(v: unknown): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Filas SQL (pago × factura) → semanas con sus pagos. Un pago aparece UNA vez aunque se
+ * aplicara a varias facturas, y aparece aunque no se aplicara a ninguna: es justo lo que la
+ * pestaña tiene que dejar ver. La semana sale de la fecha del PAGO (pagos recibidos), no de
+ * la de cada aplicación. Más reciente primero, en las semanas y dentro de cada semana. Pura.
+ */
+export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
+  const pagos = new Map<string, Pago>();
+  for (const f of filas) {
+    if (!f.fecha) continue; // sin fecha no hay semana a la que asignarlo
+    let p = pagos.get(f.payment_id);
+    if (!p) {
+      p = {
+        numero: f.payment_number ?? '',
+        cliente: f.customer_name ?? '',
+        fecha: f.fecha.slice(0, 10),
+        modo: f.payment_mode,
+        referencia: f.reference_number,
+        moneda: f.currency_code || 'COP',
+        importe: num(f.amount),
+        sinAplicar: num(f.unused_amount),
+        aplicaciones: [],
+      };
+      pagos.set(f.payment_id, p);
+    }
+    if (f.invoice_number) {
+      p.aplicaciones.push({ factura: f.invoice_number, ov: f.salesorder_number, importe: num(f.amount_applied) });
+    }
+  }
+
+  const semanas = new Map<string, SemanaDePagos>();
+  // Totales por moneda de cada semana: hay pagos en USD y EUR, y sumarlos con los pesos
+  // daría una cifra sin sentido. Convertir tampoco es fiable: la moneda base de la
+  // organización es USD, así que bcy_amount está en dólares, no en pesos.
+  const totales = new Map<string, Map<string, number>>();
+  for (const p of pagos.values()) {
+    const { anio, mes, semana } = semanaDelMes(p.fecha);
+    const clave = `${anio}-${mes}-${semana}`;
+    let s = semanas.get(clave);
+    if (!s) {
+      s = { anio, mes, semana, ...rangoDeSemana(anio, mes, semana), cantidadPagos: 0, totales: [], pagos: [] };
+      semanas.set(clave, s);
+      totales.set(clave, new Map());
+    }
+    s.pagos.push(p);
+    s.cantidadPagos += 1;
+    const porMoneda = totales.get(clave)!;
+    porMoneda.set(p.moneda, (porMoneda.get(p.moneda) ?? 0) + p.importe);
+  }
+
+  for (const [clave, s] of semanas) {
+    s.pagos.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero.localeCompare(a.numero));
+    s.totales = [...totales.get(clave)!]
+      .map(([moneda, total]) => ({ moneda, total }))
+      .sort((a, b) => (a.moneda === 'COP' ? -1 : b.moneda === 'COP' ? 1 : a.moneda.localeCompare(b.moneda)));
+  }
+  return [...semanas.values()].sort((a, b) => b.desde.localeCompare(a.desde));
+}
