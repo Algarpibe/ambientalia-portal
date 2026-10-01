@@ -195,3 +195,48 @@ export async function fetchAnticiposAtencion(): Promise<AnticipoAtencion[]> {
   if (!Array.isArray(data.anticipos)) throw new Error('Formato inesperado del hub (anticipos).');
   return data.anticipos;
 }
+
+/** Espejo de apps/hub-api/src/contabilidad/pagos.ts */
+export interface AplicacionPago {
+  factura: string;
+  ov: string | null;
+  importe: number;
+}
+
+export interface Pago {
+  numero: string;
+  cliente: string;
+  fecha: string;
+  modo: string | null;
+  referencia: string | null;
+  moneda: string;
+  importe: number;
+  sinAplicar: number;
+  aplicaciones: AplicacionPago[];
+}
+
+export interface TotalMoneda {
+  moneda: string;
+  total: number;
+}
+
+export interface SemanaDePagos {
+  anio: number;
+  mes: number;
+  semana: number;
+  etiqueta: string;
+  desde: string;
+  hasta: string;
+  cantidadPagos: number;
+  totales: TotalMoneda[];
+  pagos: Pago[];
+}
+
+/** Pagos recibidos agrupados por semana del mes. Solo Contabilidad; lanza si falla. */
+export async function fetchPagosPorSemana(): Promise<SemanaDePagos[]> {
+  const res = await fetch(`${API_BASE}/api/contabilidad/pagos`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(await mensajeDeError(res));
+  const data = (await res.json()) as { semanas?: SemanaDePagos[] };
+  if (!Array.isArray(data.semanas)) throw new Error('Formato inesperado del hub (pagos).');
+  return data.semanas;
+}
