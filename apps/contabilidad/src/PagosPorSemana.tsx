@@ -1,9 +1,19 @@
 import { Fragment, useEffect, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
-import { fetchPagosPorSemana, type SemanaDePagos } from './api';
+import { fetchPagosPorSemana, type Pago, type SemanaDePagos } from './api';
 import { formatMoneda } from './format';
 
 const claveDe = (s: SemanaDePagos) => `${s.anio}-${s.mes}-${s.semana}`;
+
+// OV del pago, sin repetir: la del anticipo y las de las facturas suelen ser la misma.
+const ovsDe = (p: Pago) =>
+  [...new Set([p.anticipo?.ov, ...p.aplicaciones.map((a) => a.ov)].filter((ov): ov is string => !!ov))];
+
+/** Un valor por línea; «—» si no hay ninguno. */
+function Lista({ valores }: { valores: string[] }) {
+  if (valores.length === 0) return <>—</>;
+  return <>{valores.map((v, i) => <div key={`${v}-${i}`}>{v}</div>)}</>;
+}
 
 /**
  * Pagos recibidos agrupados por semana del mes, de la más reciente a la más antigua. Cada
@@ -91,7 +101,9 @@ export default function PagosPorSemana() {
                           <col className="w-24" />
                           <col className="w-40" />
                           <col className="w-28" />
-                          <col className="w-72" />
+                          <col className="w-28" />
+                          <col className="w-28" />
+                          <col className="w-20" />
                           <col className="w-28" />
                         </colgroup>
                         <thead className="text-gray-500">
@@ -101,7 +113,9 @@ export default function PagosPorSemana() {
                             <th className="px-2 py-1 text-left font-medium">FECHA</th>
                             <th className="px-2 py-1 text-left font-medium">MODO</th>
                             <th className="px-2 py-1 text-right font-medium">IMPORTE</th>
-                            <th className="px-2 py-1 text-left font-medium">APLICADO A</th>
+                            <th className="px-2 py-1 text-left font-medium">ANTICIPO</th>
+                            <th className="px-2 py-1 text-left font-medium">OV</th>
+                            <th className="px-2 py-1 text-left font-medium">FACTURA</th>
                             <th className="px-2 py-1 text-right font-medium">SIN APLICAR</th>
                           </tr>
                         </thead>
@@ -113,18 +127,9 @@ export default function PagosPorSemana() {
                               <td className="whitespace-nowrap px-2 py-1">{p.fecha}</td>
                               <td className="px-2 py-1">{p.modo ?? '—'}</td>
                               <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">{formatMoneda(p.importe, p.moneda)}</td>
-                              <td className="px-2 py-1">
-                                {p.anticipo && (
-                                  <div>Anticipo {p.anticipo.numero}{p.anticipo.ov ? ` (${p.anticipo.ov})` : ''}</div>
-                                )}
-                                {p.aplicaciones.length === 0
-                                  ? (p.anticipo ? null : '—')
-                                  : p.aplicaciones.map((a, i) => (
-                                      <div key={`${a.factura}-${i}`}>
-                                        {a.factura}{a.ov ? ` (${a.ov})` : ''}: {formatMoneda(a.importe, p.moneda)}
-                                      </div>
-                                    ))}
-                              </td>
+                              <td className="whitespace-nowrap px-2 py-1">{p.anticipo?.numero ?? '—'}</td>
+                              <td className="whitespace-nowrap px-2 py-1"><Lista valores={ovsDe(p)} /></td>
+                              <td className="whitespace-nowrap px-2 py-1"><Lista valores={p.aplicaciones.map((a) => a.factura)} /></td>
                               <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">
                                 {p.sinAplicar > 0 ? formatMoneda(p.sinAplicar, p.moneda) : '—'}
                               </td>

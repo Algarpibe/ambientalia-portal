@@ -11,6 +11,12 @@ const mockFetch = fetchPagosPorSemana as unknown as ReturnType<typeof vi.fn>;
 // los espacios del texto pintado, pero no los de la cadena que se le pasa: hay que hacerlo aquí.
 const comoSeLee = (s: string) => s.replace(/ /g, ' ');
 
+// Texto de las columnas ANTICIPO, OV y FACTURA de la fila de un pago.
+const celdas = (numero: string) => {
+  const td = screen.getByText(numero).closest('tr')!.querySelectorAll('td');
+  return { anticipo: td[5].textContent, ov: td[6].textContent, factura: td[7].textContent };
+};
+
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -34,7 +40,7 @@ describe('PagosPorSemana', () => {
     expect(screen.queryByText('PC-2026-276')).toBeNull();
     fireEvent.click(boton);
     expect(screen.getByText('PC-2026-276')).toBeInTheDocument();
-    expect(screen.getByText(/AM1492 \(OV-2026-162\)/)).toBeInTheDocument();
+    expect(celdas('PC-2026-276')).toMatchObject({ anticipo: '—', ov: 'OV-2026-162', factura: 'AM1492' });
   });
 
   it('un pago sin aplicar enseña su saldo pendiente', async () => {
@@ -50,18 +56,16 @@ describe('PagosPorSemana', () => {
     expect(screen.getByText(comoSeLee(formatCOP(500000)))).toBeInTheDocument();
   });
 
-  it('un pago anticipado ya descontado enseña el anticipo con su OV y luego la factura', async () => {
+  it('un pago anticipado ya descontado reparte anticipo, OV y factura en sus columnas, la OV una sola vez', async () => {
     mockFetch.mockResolvedValue([semana({
       pagos: [{ ...semana({}).pagos[0], anticipo: { numero: 'ANT-2026-061', ov: 'OV-2026-162' } }],
     })]);
     render(<PagosPorSemana />);
     fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
-    const anticipo = screen.getByText('Anticipo ANT-2026-061 (OV-2026-162)');
-    const factura = screen.getByText(/AM1492 \(OV-2026-162\)/);
-    expect(anticipo.compareDocumentPosition(factura) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(celdas('PC-2026-276')).toMatchObject({ anticipo: 'ANT-2026-061', ov: 'OV-2026-162', factura: 'AM1492' });
   });
 
-  it('un anticipo sin aplicar todavía enseña solo el anticipo, sin «—», y sin paréntesis si no hay OV', async () => {
+  it('un anticipo sin aplicar todavía: sin factura, y sin OV si el texto no la nombra', async () => {
     mockFetch.mockResolvedValue([semana({
       pagos: [{
         ...semana({}).pagos[0], sinAplicar: 11150331, aplicaciones: [],
@@ -70,8 +74,22 @@ describe('PagosPorSemana', () => {
     })]);
     render(<PagosPorSemana />);
     fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
-    const celda = screen.getByText('Anticipo ANT-2026-061').closest('td')!;
-    expect(celda.textContent).toBe('Anticipo ANT-2026-061');
+    expect(celdas('PC-2026-276')).toMatchObject({ anticipo: 'ANT-2026-061', ov: '—', factura: '—' });
+  });
+
+  it('un pago aplicado a dos facturas de OV distintas lista las dos en cada columna', async () => {
+    mockFetch.mockResolvedValue([semana({
+      pagos: [{
+        ...semana({}).pagos[0],
+        aplicaciones: [
+          { factura: 'AM1', ov: 'OV-1', importe: 1 },
+          { factura: 'AM2', ov: 'OV-2', importe: 2 },
+        ],
+      }],
+    })]);
+    render(<PagosPorSemana />);
+    fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
+    expect(celdas('PC-2026-276')).toMatchObject({ ov: 'OV-1OV-2', factura: 'AM1AM2' });
   });
 
   it('una semana con pagos en dos monedas muestra un total por moneda', async () => {
