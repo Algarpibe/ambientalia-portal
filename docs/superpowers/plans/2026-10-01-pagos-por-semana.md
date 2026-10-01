@@ -28,6 +28,7 @@ hub-api, jsdom + React Testing Library en `apps/contabilidad`).
 | `apps/hub-api/src/contabilidad/router.ts` | endpoint `GET /contabilidad/pagos` |
 | `apps/hub-api/src/contabilidad/router.pagos.test.ts` | **nuevo** |
 | `apps/contabilidad/src/api.ts` | tipos espejo + `fetchPagosPorSemana` |
+| `apps/contabilidad/src/format.ts` + `format.test.ts` | `formatMoneda`: hay pagos en USD y EUR |
 | `apps/contabilidad/src/PagosPorSemana.tsx` | **nuevo**: la pestaña |
 | `apps/contabilidad/src/PagosPorSemana.test.tsx` | **nuevo** |
 | `apps/contabilidad/src/App.tsx` | tercera pestaña |
@@ -60,12 +61,10 @@ SELECT currency_code, count(*) AS pagos, count(*) FILTER (WHERE date IS NULL) AS
  ORDER BY 2 DESC;
 ```
 
-- [ ] **Paso 2:** evaluar.
-  - Solo `COP` → seguir.
-  - Aparece otra moneda → **PARAR y volver al usuario**: hay que decidir si se muestra
-    la moneda por pago y se separan los totales.
-  - `sin_fecha > 0` → seguir; esos pagos se descartan (sin fecha no tienen semana) y el
-    código lo documenta.
+- [x] **Paso 2: hecho el 2026-10-01.** Resultado: 1.447 COP, 16 USD, 2 EUR; 0 sin fecha.
+  Decisión del usuario: cada pago con su moneda y el total de la semana separado por
+  moneda. Ya incorporado en las tareas siguientes (`moneda` en `Pago`, `totales` en
+  `SemanaDePagos`).
 
 ---
 
@@ -221,7 +220,7 @@ y añadir al final:
 // ANT-2026-061 / AM1492 de OV-2026-162. Los numéricos de pg llegan como texto.
 const fila = (over: Partial<FilaPago>): FilaPago => ({
   payment_id: 'p1', payment_number: 'PC-2026-276', customer_name: 'SHI', fecha: '2026-09-02',
-  payment_mode: 'Transferencia bancaria', reference_number: null,
+  payment_mode: 'Transferencia bancaria', reference_number: null, currency_code: 'COP',
   amount: '1500', unused_amount: '0',
   invoice_number: 'AM1492', amount_applied: '1000', salesorder_number: 'OV-2026-162',
   ...over,
@@ -234,7 +233,7 @@ describe('agruparPagos', () => {
       fila({ invoice_number: 'AM1500', amount_applied: '500', salesorder_number: null }),
     ]);
     expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ cantidadPagos: 1, totalCobrado: 1500 });
+    expect(r[0]).toMatchObject({ cantidadPagos: 1, totales: [{ moneda: 'COP', total: 1500 }] });
     expect(r[0].pagos[0].aplicaciones).toEqual([
       { factura: 'AM1492', ov: 'OV-2026-162', importe: 1000 },
       { factura: 'AM1500', ov: null, importe: 500 },
@@ -261,8 +260,29 @@ describe('agruparPagos', () => {
       fila({ payment_id: 'p2', payment_number: 'PC-2', fecha: '2026-09-05', amount: '200' }),
     ]);
     expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ cantidadPagos: 2, totalCobrado: 300 });
+    expect(r[0]).toMatchObject({ cantidadPagos: 2, totales: [{ moneda: 'COP', total: 300 }] });
     expect(r[0].pagos.map((p) => p.numero)).toEqual(['PC-2', 'PC-1']);
+  });
+
+  it('no mezcla monedas: un total por moneda, COP primero (hay 16 pagos en USD y 2 en EUR)', () => {
+    const r = agruparPagos([
+      fila({ payment_id: 'p1', currency_code: 'USD', amount: '5000' }),
+      fila({ payment_id: 'p2', currency_code: 'COP', amount: '1000' }),
+      fila({ payment_id: 'p3', currency_code: 'EUR', amount: '70' }),
+      fila({ payment_id: 'p4', currency_code: 'COP', amount: '500' }),
+    ]);
+    expect(r[0].totales).toEqual([
+      { moneda: 'COP', total: 1500 },
+      { moneda: 'EUR', total: 70 },
+      { moneda: 'USD', total: 5000 },
+    ]);
+    expect(r[0].pagos.find((p) => p.importe === 5000)?.moneda).toBe('USD');
+  });
+
+  it('una moneda vacía se toma como COP', () => {
+    const r = agruparPagos([fila({ currency_code: null })]);
+    expect(r[0].pagos[0].moneda).toBe('COP');
+    expect(r[0].totales).toEqual([{ moneda: 'COP', total: 1500 }]);
   });
 
   it('las semanas van de la más reciente a la más antigua, también entre meses', () => {
@@ -294,6 +314,7 @@ export interface FilaPago {
   fecha: string | null;
   payment_mode: string | null;
   reference_number: string | null;
+  currency_code: string | null;
   amount: number | string | null;          // numeric de pg llega como texto
   unused_amount: number | string | null;
   invoice_number: string | null;           // null: el pago no se aplicó a ninguna factura
@@ -313,9 +334,15 @@ export interface Pago {
   fecha: string;
   modo: string | null;
   referencia: string | null;
+  moneda: string;          // Zoho solo aplica un pago a facturas de su misma moneda
   importe: number;
   sinAplicar: number;
   aplicaciones: AplicacionPago[];
+}
+
+export interface TotalMoneda {
+  moneda: string;
+  total: number;
 }
 
 export interface SemanaDePagos extends SemanaDelMes {
@@ -323,7 +350,7 @@ export interface SemanaDePagos extends SemanaDelMes {
   desde: string;
   hasta: string;
   cantidadPagos: number;
-  totalCobrado: number;
+  totales: TotalMoneda[];  // COP primero; nunca se suman monedas distintas
   pagos: Pago[];
 }
 
@@ -335,7 +362,7 @@ export function agruparPagos(_filas: FilaPago[]): SemanaDePagos[] {
 - [ ] **Paso 3: Ejecutar y ver el fallo.**
 
 Run: `npm run test --workspace=apps/hub-api -- src/contabilidad/pagos.test.ts`
-Expected: FAIL en 5 de los 6 tests nuevos. «un pago sin fecha se descarta» pasa ya, porque
+Expected: FAIL en 7 de los 8 tests nuevos. «un pago sin fecha se descarta» pasa ya, porque
 el stub devuelve `[]` siempre; morderá con la implementación real. Los 23 de la Tarea 1
 siguen en verde.
 
@@ -366,6 +393,7 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
         fecha: f.fecha.slice(0, 10),
         modo: f.payment_mode,
         referencia: f.reference_number,
+        moneda: f.currency_code || 'COP',
         importe: num(f.amount),
         sinAplicar: num(f.unused_amount),
         aplicaciones: [],
@@ -378,21 +406,30 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
   }
 
   const semanas = new Map<string, SemanaDePagos>();
+  // Totales por moneda de cada semana: hay pagos en USD y EUR, y sumarlos con los pesos
+  // daría una cifra sin sentido. Convertir tampoco es fiable: la moneda base de la
+  // organización es USD, así que bcy_amount está en dólares, no en pesos.
+  const totales = new Map<string, Map<string, number>>();
   for (const p of pagos.values()) {
     const { anio, mes, semana } = semanaDelMes(p.fecha);
     const clave = `${anio}-${mes}-${semana}`;
     let s = semanas.get(clave);
     if (!s) {
-      s = { anio, mes, semana, ...rangoDeSemana(anio, mes, semana), cantidadPagos: 0, totalCobrado: 0, pagos: [] };
+      s = { anio, mes, semana, ...rangoDeSemana(anio, mes, semana), cantidadPagos: 0, totales: [], pagos: [] };
       semanas.set(clave, s);
+      totales.set(clave, new Map());
     }
     s.pagos.push(p);
     s.cantidadPagos += 1;
-    s.totalCobrado += p.importe;
+    const porMoneda = totales.get(clave)!;
+    porMoneda.set(p.moneda, (porMoneda.get(p.moneda) ?? 0) + p.importe);
   }
 
-  for (const s of semanas.values()) {
+  for (const [clave, s] of semanas) {
     s.pagos.sort((a, b) => b.fecha.localeCompare(a.fecha) || b.numero.localeCompare(a.numero));
+    s.totales = [...totales.get(clave)!]
+      .map(([moneda, total]) => ({ moneda, total }))
+      .sort((a, b) => (a.moneda === 'COP' ? -1 : b.moneda === 'COP' ? 1 : a.moneda.localeCompare(b.moneda)));
   }
   return [...semanas.values()].sort((a, b) => b.desde.localeCompare(a.desde));
 }
@@ -401,7 +438,7 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
 - [ ] **Paso 5: Ejecutar y ver el verde.**
 
 Run: `npm run test --workspace=apps/hub-api -- src/contabilidad/pagos.test.ts`
-Expected: PASS, 29/29.
+Expected: PASS, 31/31.
 
 - [ ] **Paso 6: Comprobar que el guarda de la fecha muerde.** Cambiar temporalmente
   `if (!f.fecha) continue;` por `if (!f.fecha) f.fecha = '2026-01-01';`, ejecutar el mismo
@@ -468,6 +505,7 @@ const PAGOS_SQL = `
          p.date::text          AS fecha,
          p.payment_mode,
          p.reference_number,
+         p.currency_code,
          p.amount,
          p.unused_amount,
          cpi.invoice_number,
@@ -489,7 +527,7 @@ export async function getPagosPorSemana(db: Pool): Promise<SemanaDePagos[]> {
 - [ ] **Paso 4: Ejecutar y ver el verde.**
 
 Run: `npm run test --workspace=apps/hub-api -- src/contabilidad/pagos.test.ts`
-Expected: PASS, 30/30.
+Expected: PASS, 32/32.
 
 - [ ] **Paso 5: Portón de tipos.**
 
@@ -544,8 +582,8 @@ vi.mock('../db.js', () => ({
 
 const SEMANA = {
   anio: 2026, mes: 9, semana: 1, etiqueta: '1-6 sep 2026', desde: '2026-09-01', hasta: '2026-09-06',
-  cantidadPagos: 1, totalCobrado: 1000,
-  pagos: [{ numero: 'PC-1', cliente: 'SHI', fecha: '2026-09-02', modo: null, referencia: null, importe: 1000, sinAplicar: 0, aplicaciones: [] }],
+  cantidadPagos: 1, totales: [{ moneda: 'COP', total: 1000 }],
+  pagos: [{ numero: 'PC-1', cliente: 'SHI', fecha: '2026-09-02', modo: null, referencia: null, moneda: 'COP', importe: 1000, sinAplicar: 0, aplicaciones: [] }],
 };
 const pagosMock = vi.hoisted(() => ({ falla: false }));
 vi.mock('./pagos.js', () => ({
@@ -691,9 +729,15 @@ export interface Pago {
   fecha: string;
   modo: string | null;
   referencia: string | null;
+  moneda: string;
   importe: number;
   sinAplicar: number;
   aplicaciones: AplicacionPago[];
+}
+
+export interface TotalMoneda {
+  moneda: string;
+  total: number;
 }
 
 export interface SemanaDePagos {
@@ -704,7 +748,7 @@ export interface SemanaDePagos {
   desde: string;
   hasta: string;
   cantidadPagos: number;
-  totalCobrado: number;
+  totales: TotalMoneda[];
   pagos: Pago[];
 }
 
@@ -735,17 +779,77 @@ git commit -m "feat(contabilidad): tipos y cliente de los pagos por semana"
 ## Tarea 6: Componente `PagosPorSemana`
 
 **Ficheros:**
+- Modificar: `apps/contabilidad/src/format.ts` (nuevo `formatMoneda`)
+- Test: crear `apps/contabilidad/src/format.test.ts`
 - Crear: `apps/contabilidad/src/PagosPorSemana.tsx`
 - Test: `apps/contabilidad/src/PagosPorSemana.test.tsx`
 
-- [ ] **Paso 1: Escribir el test.** Crear `PagosPorSemana.test.tsx`:
+Hay pagos en USD y EUR: formatearlos con `formatCOP` los pintaría como pesos. Primero un
+formateador por moneda, con su propio ciclo rojo-verde.
+
+- [ ] **Paso 0a: Test del formateador.** Crear `apps/contabilidad/src/format.test.ts`:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { formatMoneda, formatCOP } from './format';
+
+describe('formatMoneda', () => {
+  it('COP usa el formateador de siempre', () => {
+    expect(formatMoneda(1000, 'COP')).toBe(formatCOP(1000));
+  });
+
+  it('otra moneda se formatea con su código, no como pesos', () => {
+    const s = formatMoneda(5000, 'USD');
+    expect(s).not.toBe(formatCOP(5000));
+    expect(s).toMatch(/US\$|USD/);
+  });
+
+  it('un código de moneda inválido no rompe la pantalla', () => {
+    expect(formatMoneda(10, 'XX')).toBe('XX 10');
+  });
+});
+```
+
+- [ ] **Paso 0b: Ver el fallo.**
+
+Run: `npm run test --workspace=apps/contabilidad -- src/format.test.ts`
+Expected: FAIL en los 3 con `formatMoneda is not a function`.
+
+- [ ] **Paso 0c: Implementar.** Sustituir `apps/contabilidad/src/format.ts` entero por:
+
+```ts
+// Formateadores compartidos (@suite/format, cierra AI-613). Se conserva este
+// módulo como fachada para no tocar los imports `./format` de la app.
+import { formatCOP } from '@suite/format';
+export { formatCOP, formatPct } from '@suite/format';
+
+/**
+ * Importe en su moneda. Hay pagos en USD y EUR, y formatearlos con formatCOP los pintaría
+ * como pesos. Un código que Intl no reconoce no tumba la pantalla: se muestra tal cual.
+ */
+export function formatMoneda(n: number, moneda: string): string {
+  if (moneda === 'COP') return formatCOP(n);
+  try {
+    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: moneda, maximumFractionDigits: 2 }).format(n);
+  } catch {
+    return `${moneda} ${n}`;
+  }
+}
+```
+
+- [ ] **Paso 0d: Ver el verde.**
+
+Run: `npm run test --workspace=apps/contabilidad -- src/format.test.ts`
+Expected: PASS, 3/3.
+
+- [ ] **Paso 1: Escribir el test del componente.** Crear `PagosPorSemana.test.tsx`:
 
 ```tsx
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import PagosPorSemana from './PagosPorSemana';
 import { fetchPagosPorSemana, type SemanaDePagos } from './api';
-import { formatCOP } from './format';
+import { formatCOP, formatMoneda } from './format';
 
 vi.mock('./api', () => ({ fetchPagosPorSemana: vi.fn() }));
 const mockFetch = fetchPagosPorSemana as unknown as ReturnType<typeof vi.fn>;
@@ -756,10 +860,10 @@ afterEach(() => {
 
 const semana = (over: Partial<SemanaDePagos>): SemanaDePagos => ({
   anio: 2026, mes: 9, semana: 1, etiqueta: '1-6 sep 2026', desde: '2026-09-01', hasta: '2026-09-06',
-  cantidadPagos: 1, totalCobrado: 11150331,
+  cantidadPagos: 1, totales: [{ moneda: 'COP', total: 11150331 }],
   pagos: [{
     numero: 'PC-2026-276', cliente: 'SHI', fecha: '2026-09-02', modo: 'Transferencia bancaria',
-    referencia: null, importe: 11150331, sinAplicar: 0,
+    referencia: null, moneda: 'COP', importe: 11150331, sinAplicar: 0,
     aplicaciones: [{ factura: 'AM1492', ov: 'OV-2026-162', importe: 11150331 }],
   }],
   ...over,
@@ -778,15 +882,26 @@ describe('PagosPorSemana', () => {
 
   it('un pago sin aplicar enseña su saldo pendiente', async () => {
     mockFetch.mockResolvedValue([semana({
-      totalCobrado: 800000,
+      totales: [{ moneda: 'COP', total: 800000 }],
       pagos: [{
         numero: 'PC-9', cliente: 'Secolab', fecha: '2026-09-03', modo: null, referencia: null,
-        importe: 800000, sinAplicar: 500000, aplicaciones: [],
+        moneda: 'COP', importe: 800000, sinAplicar: 500000, aplicaciones: [],
       }],
     })]);
     render(<PagosPorSemana />);
     fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
     expect(screen.getByText(formatCOP(500000))).toBeInTheDocument();
+  });
+
+  it('una semana con pagos en dos monedas muestra un total por moneda', async () => {
+    mockFetch.mockResolvedValue([semana({
+      cantidadPagos: 2,
+      totales: [{ moneda: 'COP', total: 1000000 }, { moneda: 'USD', total: 5000 }],
+    })]);
+    render(<PagosPorSemana />);
+    await screen.findByRole('button', { name: /Semana 1/ });
+    expect(screen.getByText(formatMoneda(1000000, 'COP'))).toBeInTheDocument();
+    expect(screen.getByText(formatMoneda(5000, 'USD'))).toBeInTheDocument();
   });
 
   it('se pueden tener varias semanas abiertas a la vez', async () => {
@@ -827,7 +942,7 @@ export default function PagosPorSemana() {
 - [ ] **Paso 3: Ejecutar y ver el fallo.**
 
 Run: `npm run test --workspace=apps/contabilidad -- src/PagosPorSemana.test.tsx`
-Expected: FAIL en los 5 (el stub no pinta nada, así que todos los `findBy…` agotan su
+Expected: FAIL en los 6 (el stub no pinta nada, así que todos los `findBy…` agotan su
 espera).
 
 - [ ] **Paso 4: Implementar.** Sustituir `PagosPorSemana.tsx` entero por:
@@ -836,7 +951,7 @@ espera).
 import { Fragment, useEffect, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { fetchPagosPorSemana, type SemanaDePagos } from './api';
-import { formatCOP } from './format';
+import { formatMoneda } from './format';
 
 const claveDe = (s: SemanaDePagos) => `${s.anio}-${s.mes}-${s.semana}`;
 
@@ -909,7 +1024,10 @@ export default function PagosPorSemana() {
                     </button>
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{s.cantidadPagos}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{formatCOP(s.totalCobrado)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">
+                    {/* Un total por moneda: nunca se suman pesos con dólares o euros. */}
+                    {s.totales.map((t) => <div key={t.moneda}>{formatMoneda(t.total, t.moneda)}</div>)}
+                  </td>
                 </tr>
                 {abierta && (
                   <tr>
@@ -933,18 +1051,18 @@ export default function PagosPorSemana() {
                               <td className="px-2 py-1">{p.cliente || '—'}</td>
                               <td className="whitespace-nowrap px-2 py-1">{p.fecha}</td>
                               <td className="px-2 py-1">{p.modo ?? '—'}</td>
-                              <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">{formatCOP(p.importe)}</td>
+                              <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">{formatMoneda(p.importe, p.moneda)}</td>
                               <td className="px-2 py-1">
                                 {p.aplicaciones.length === 0
                                   ? '—'
                                   : p.aplicaciones.map((a) => (
                                       <div key={a.factura}>
-                                        {a.factura}{a.ov ? ` (${a.ov})` : ''}: {formatCOP(a.importe)}
+                                        {a.factura}{a.ov ? ` (${a.ov})` : ''}: {formatMoneda(a.importe, p.moneda)}
                                       </div>
                                     ))}
                               </td>
                               <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">
-                                {p.sinAplicar > 0 ? formatCOP(p.sinAplicar) : '—'}
+                                {p.sinAplicar > 0 ? formatMoneda(p.sinAplicar, p.moneda) : '—'}
                               </td>
                             </tr>
                           ))}
@@ -966,12 +1084,13 @@ export default function PagosPorSemana() {
 - [ ] **Paso 5: Ejecutar y ver el verde, con el resto de la app.**
 
 Run: `npm run test --workspace=apps/contabilidad`
-Expected: PASS en todos los ficheros, incluidos los 5 nuevos.
+Expected: PASS en todos los ficheros, incluidos los 6 nuevos del componente y los 3 del
+formateador.
 
 - [ ] **Paso 6: Commit.**
 
 ```bash
-git add apps/contabilidad/src/PagosPorSemana.tsx apps/contabilidad/src/PagosPorSemana.test.tsx
+git add apps/contabilidad/src/format.ts apps/contabilidad/src/format.test.ts apps/contabilidad/src/PagosPorSemana.tsx apps/contabilidad/src/PagosPorSemana.test.tsx
 git commit -m "feat(contabilidad): tabla de pagos recibidos por semana, plegable"
 ```
 
@@ -1066,13 +1185,14 @@ git push origin main
 
 ```sql
 SELECT ((extract(day from p.date)::int - 1 + extract(isodow from date_trunc('month', p.date))::int - 1) / 7) + 1 AS semana,
+       COALESCE(NULLIF(p.currency_code, ''), 'COP') AS moneda,
        count(*)      AS pagos,
        sum(p.amount) AS total
   FROM books.customer_payments p
  WHERE p.date >= '2026-09-01' AND p.date < '2026-10-01'
- GROUP BY 1
- ORDER BY 1;
+ GROUP BY 1, 2
+ ORDER BY 1, 2;
 ```
 
-Expected: el número de pagos y el total de cada semana coinciden con las filas «Semana N ·
-… sep 2026» de la pestaña. Si alguna no cuadra, **PARAR** y comparar antes de tocar código.
+Expected: el número de pagos y el total por moneda de cada semana coinciden con las filas
+«Semana N · … sep 2026» de la pestaña. Si alguna no cuadra, **PARAR** y comparar antes de tocar código.

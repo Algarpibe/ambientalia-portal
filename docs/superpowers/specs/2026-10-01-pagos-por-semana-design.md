@@ -39,6 +39,16 @@ ni bucketing por semana de ningún tipo. Se escribe desde cero.
 | Dónde se calcula la semana | TypeScript puro y testeado, no SQL |
 | Quién lo ve | Solo Contabilidad — es información de cobro, igual que los anticipos |
 | Columnas configurables | No. Son pocas y fijas; no amerita la maquinaria de `useColumnPrefs` |
+| Monedas | Cada pago con su moneda; el total de la semana, separado por moneda |
+
+**Monedas (verificado el 2026-10-01):** 1.447 pagos en COP, 16 en USD y 2 en
+EUR. Sumarlos juntos mezclaría monedas. Convertir a COP no es fiable: la
+moneda base de la organización en Zoho es USD, así que `bcy_amount` está en
+dólares y no hay una tasa a COP guardada por pago. Por eso cada pago muestra
+su moneda (`currency_code`) y la semana trae un total por moneda —
+«$ 12.000.000 COP · US$ 5.000». Zoho Books solo aplica un pago a facturas de
+su misma moneda, así que los importes aplicados se muestran en la moneda del
+pago.
 
 ## 1. Backend (hub-api)
 
@@ -46,7 +56,7 @@ ni bucketing por semana de ningún tipo. Se escribe desde cero.
 
 ```sql
 SELECT p.payment_id, p.payment_number, p.customer_name, p.date::text AS fecha,
-       p.payment_mode, p.reference_number, p.amount, p.unused_amount,
+       p.payment_mode, p.reference_number, p.currency_code, p.amount, p.unused_amount,
        cpi.invoice_number, cpi.amount_applied,
        so.salesorder_number
   FROM books.customer_payments p
@@ -100,7 +110,9 @@ semana 5 a 9 días.
    fecha de aplicación de cada línea: es «pagos recibidos», no «aplicaciones
    registradas».
 3. Agrupar los pagos por (año, mes, semana). Cada grupo acumula
-   `cantidadPagos`, `totalCobrado` (suma de `amount`) y la lista de pagos.
+   `cantidadPagos`, un total por moneda (suma de `amount` por
+   `currency_code`; COP primero, luego el resto por orden alfabético) y la
+   lista de pagos.
 4. Ordenar los grupos de más reciente a más antiguo.
 
 Un pago con `unused_amount > 0` queda marcado con saldo sin aplicar, conviva
@@ -131,9 +143,15 @@ export interface Pago {
   fecha: string;
   modo: string | null;     // payment_mode
   referencia: string | null;
-  importe: number;         // amount
-  sinAplicar: number;      // unused_amount
+  moneda: string;          // currency_code ('COP' si viene vacío)
+  importe: number;         // amount, en `moneda`
+  sinAplicar: number;      // unused_amount, en `moneda`
   aplicaciones: AplicacionPago[];
+}
+
+export interface TotalMoneda {
+  moneda: string;
+  total: number;
 }
 
 export interface SemanaDePagos {
@@ -144,7 +162,7 @@ export interface SemanaDePagos {
   desde: string;              // ISO
   hasta: string;               // ISO
   cantidadPagos: number;
-  totalCobrado: number;
+  totales: TotalMoneda[];     // COP primero
   pagos: Pago[];
 }
 ```
@@ -164,7 +182,8 @@ lo necesitan.
 - Una fila por semana con pagos, más reciente primero, **todas colapsadas
   por defecto** (7 años de historia — expandidas de entrada sería demasiado).
   Columnas: Periodo (`Semana {semana} · {etiqueta}`, ej. «Semana 1 · 1-6 sep
-  2026»), cantidad de pagos, total cobrado, flecha de expandir.
+  2026»), cantidad de pagos, total cobrado (una línea por moneda), flecha de
+  expandir. Los importes se formatean en la moneda de cada pago.
 - Al expandir: sub-tabla con cada pago — número, cliente, fecha, modo,
   importe, **Aplicado a** (una línea por factura, con su OV cuando lo hay,
   ej. `AM1492 (OV-2026-162): $11.150.331`), y **Sin aplicar** si
