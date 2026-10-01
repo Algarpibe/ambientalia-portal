@@ -90,7 +90,7 @@ function num(v: unknown): number {
 }
 
 /** Texto donde se busca la OV: todas las descripciones de línea más la referencia. Pura. */
-export function textoDe(a: AnticipoRow): string {
+export function textoDe(a: Pick<AnticipoRow, 'descripciones' | 'referencia'>): string {
   return [...a.descripciones, a.referencia ?? ''].filter(Boolean).join(' | ');
 }
 
@@ -177,7 +177,8 @@ interface FilaAnticipo extends Omit<AnticipoRow, 'descripciones' | 'aplicado'> {
   tasa_cambio: number | string | null;
 }
 
-function descripcionesDe(lineas: unknown): string[] {
+/** Descripciones no vacías de `raw -> 'line_items'`. Pura. */
+export function descripcionesDe(lineas: unknown): string[] {
   if (!Array.isArray(lineas)) return [];
   return lineas
     .map((l) => (l && typeof l === 'object' ? (l as { description?: unknown }).description : null))

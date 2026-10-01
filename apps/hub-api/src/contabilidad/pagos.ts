@@ -1,4 +1,5 @@
 import type { Pool } from '@algarpibe/zoho-sync';
+import { descripcionesDe, extraerOV, textoDe } from './anticipos.js';
 
 // Pagos de clientes agrupados por semana del mes, para la pestaña «Pagos recibidos» de
 // Contabilidad. Toda la lógica de semanas vive aquí, en funciones puras: SQL solo trae
@@ -62,6 +63,14 @@ export interface FilaPago {
   invoice_number: string | null;           // null: el pago no se aplicó a ninguna factura
   amount_applied: number | string | null;
   salesorder_number: string | null;        // null: la factura no tiene OV enlazada
+  anticipo_numero: string | null;          // raw.retainerinvoice: null en un pago normal
+  anticipo_referencia: string | null;      // retainer_invoices.reference_number
+  anticipo_lineas: unknown;                // retainer_invoices.raw -> 'line_items'
+}
+
+export interface AnticipoPago {
+  numero: string;
+  ov: string | null;       // null: el texto del anticipo no nombra una OV, o nombra varias
 }
 
 export interface AplicacionPago {
@@ -80,6 +89,7 @@ export interface Pago {
   moneda: string;          // Zoho solo aplica un pago a facturas de su misma moneda
   importe: number;
   sinAplicar: number;
+  anticipo: AnticipoPago | null; // null: no es un pago anticipado
   aplicaciones: AplicacionPago[];
 }
 
@@ -104,6 +114,16 @@ function num(v: unknown): number {
 }
 
 /**
+ * El anticipo de un pago anticipado y su OV. Zoho no enlaza anticipo y OV: se lee del texto
+ * a mano del anticipo con la misma regla que anticipos.ts. Ninguna OV o varias → `ov: null`.
+ */
+function anticipoDe(f: FilaPago): AnticipoPago | null {
+  if (!f.anticipo_numero) return null;
+  const refs = extraerOV(textoDe({ descripciones: descripcionesDe(f.anticipo_lineas), referencia: f.anticipo_referencia }));
+  return { numero: f.anticipo_numero, ov: refs.length === 1 ? refs[0] : null };
+}
+
+/**
  * Filas SQL (pago × factura) → semanas con sus pagos. Un pago aparece UNA vez aunque se
  * aplicara a varias facturas, y aparece aunque no se aplicara a ninguna: es justo lo que la
  * pestaña tiene que dejar ver. La semana sale de la fecha del PAGO (pagos recibidos), no de
@@ -125,6 +145,7 @@ export function agruparPagos(filas: FilaPago[]): SemanaDePagos[] {
         moneda: f.currency_code || 'COP',
         importe: num(f.amount),
         sinAplicar: num(f.unused_amount),
+        anticipo: anticipoDe(f),
         aplicaciones: [],
       };
       pagos.set(f.payment_id, p);
@@ -179,11 +200,15 @@ const PAGOS_SQL = `
          p.unused_amount,
          cpi.invoice_number,
          cpi.amount_applied,
-         so.salesorder_number
+         so.salesorder_number,
+         NULLIF(p.raw -> 'retainerinvoice' ->> 'retainerinvoice_number', '') AS anticipo_numero,
+         ri.reference_number    AS anticipo_referencia,
+         ri.raw -> 'line_items' AS anticipo_lineas
     FROM books.customer_payments p
     LEFT JOIN books.customer_payment_invoices cpi ON cpi.payment_id = p.payment_id
     LEFT JOIN books.invoices i ON i.invoice_id = cpi.invoice_id
     LEFT JOIN books.sales_orders so ON so.salesorder_id = i.salesorder_id
+    LEFT JOIN books.retainer_invoices ri ON ri.retainerinvoice_id = p.raw ->> 'retainerinvoice_id'
    ORDER BY p.date, p.payment_number, cpi.invoice_number`;
 
 /** Lee todos los pagos con sus aplicaciones y los agrupa por semana del mes. */

@@ -39,7 +39,49 @@ const fila = (over: Partial<FilaPago>): FilaPago => ({
   payment_mode: 'Transferencia bancaria', reference_number: null, currency_code: 'COP',
   amount: '1500', unused_amount: '0',
   invoice_number: 'AM1492', amount_applied: '1000', salesorder_number: 'OV-2026-162',
+  anticipo_numero: null, anticipo_referencia: null, anticipo_lineas: null,
   ...over,
+});
+
+// Pago anticipado: Zoho guarda el anticipo en raw.retainerinvoice; la OV solo se sabe por el
+// texto a mano del anticipo (descripción de línea + referencia), como en anticipos.ts.
+describe('agruparPagos: anticipo', () => {
+  it('un pago normal no lleva anticipo', () => {
+    expect(agruparPagos([fila({})])[0].pagos[0].anticipo).toBeNull();
+  });
+
+  it('un pago anticipado lleva su anticipo y la OV que nombra la línea', () => {
+    const r = agruparPagos([fila({
+      invoice_number: null, amount_applied: null, salesorder_number: null,
+      anticipo_numero: 'ANT-2026-061', anticipo_lineas: [{ description: 'Anticipo OV-2026-162' }],
+    })]);
+    expect(r[0].pagos[0].anticipo).toEqual({ numero: 'ANT-2026-061', ov: 'OV-2026-162' });
+  });
+
+  it('la OV también se lee de la referencia del anticipo, normalizada', () => {
+    const r = agruparPagos([fila({ anticipo_numero: 'ANT-1', anticipo_referencia: 'ov 2026-62' })]);
+    expect(r[0].pagos[0].anticipo).toEqual({ numero: 'ANT-1', ov: 'OV-2026-062' });
+  });
+
+  it('si el texto nombra varias OV, o ninguna, la OV queda en null', () => {
+    const r = agruparPagos([
+      fila({ payment_id: 'p1', anticipo_numero: 'ANT-1', anticipo_lineas: [{ description: 'OV-2026-1 y OV-2026-2' }] }),
+      fila({ payment_id: 'p2', anticipo_numero: 'ANT-2', anticipo_lineas: [{ description: 'Anticipo' }] }),
+      fila({ payment_id: 'p3', anticipo_numero: 'ANT-3' }), // anticipo aún no sincronizado
+    ]);
+    const porId = new Map(r[0].pagos.map((p) => [p.id, p.anticipo]));
+    expect(porId.get('p1')).toEqual({ numero: 'ANT-1', ov: null });
+    expect(porId.get('p2')).toEqual({ numero: 'ANT-2', ov: null });
+    expect(porId.get('p3')).toEqual({ numero: 'ANT-3', ov: null });
+  });
+
+  it('el anticipo convive con las aplicaciones a factura una vez descontado', () => {
+    const r = agruparPagos([fila({ anticipo_numero: 'ANT-2026-061', anticipo_lineas: [{ description: 'Anticipo OV-2026-162' }] })]);
+    expect(r[0].pagos[0]).toMatchObject({
+      anticipo: { numero: 'ANT-2026-061', ov: 'OV-2026-162' },
+      aplicaciones: [{ factura: 'AM1492', ov: 'OV-2026-162', importe: 1000 }],
+    });
+  });
 });
 
 describe('agruparPagos', () => {
@@ -142,6 +184,9 @@ describe('getPagosPorSemana', () => {
     // La decisión de diseño que importa: un JOIN normal haría desaparecer el pago sin
     // aplicar, que es justo lo que la pestaña tiene que enseñar.
     expect(query.mock.calls[0][0]).toMatch(/LEFT JOIN books\.customer_payment_invoices/);
+    // El anticipo: LEFT JOIN por su PK (no duplica filas) y el mismo texto que anticipos.ts.
+    expect(query.mock.calls[0][0]).toMatch(/LEFT JOIN books\.retainer_invoices ri ON ri\.retainerinvoice_id = p\.raw ->> 'retainerinvoice_id'/);
+    expect(query.mock.calls[0][0]).toMatch(/ri\.raw -> 'line_items'/);
     expect(r[0].pagos.map((p) => p.numero).sort()).toEqual(['PC-2', 'PC-2026-276']);
   });
 });
