@@ -9,6 +9,7 @@ import { getUserId } from '@suite/auth-client';
 import ResumenMensual from './ResumenMensual';
 import OVPendientes from './OVPendientes';
 import AnticiposAtencion from './AnticiposAtencion';
+import PagosPorSemana from './PagosPorSemana';
 import DetalleModal from './DetalleModal';
 
 type Estado = 'todas' | 'pagada' | 'saldo' | 'vencida';
@@ -29,7 +30,7 @@ export default function App() {
   const [estado, setEstado] = useState<Estado>('todas');
   const [mes, setMes] = useState(0); // 0 = todos
   const [soloEntregaPendiente, setSoloEntregaPendiente] = useState(false);
-  const [tab, setTab] = useState<'facturacion' | 'ov'>('facturacion');
+  const [tab, setTab] = useState<'facturacion' | 'ov' | 'pagos'>('facturacion');
   const [guardando, setGuardando] = useState<string | null>(null);
   const [guardandoPpto, setGuardandoPpto] = useState(false);
   const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
@@ -121,7 +122,7 @@ export default function App() {
       {/* Pestañas. Ambas se mantienen montadas (se ocultan con `hidden`) para no perder los
           filtros, el orden ni el scroll al cambiar de una a otra. */}
       <div className="mb-4 flex gap-1 border-b border-gray-200">
-        {([['facturacion', 'Facturación'], ['ov', 'OV pendientes de facturar']] as const).map(([k, label]) => (
+        {([['facturacion', 'Facturación'], ['ov', 'OV pendientes de facturar'], ['pagos', 'Pagos recibidos']] as const).map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -244,6 +245,10 @@ export default function App() {
       <div className={tab === 'ov' ? '' : 'hidden'}>
         <AnticiposAtencion />
         <OVPendientes bare />
+      </div>
+
+      <div className={tab === 'pagos' ? '' : 'hidden'}>
+        <PagosPorSemana />
       </div>
 
       {detalleFactura && (
