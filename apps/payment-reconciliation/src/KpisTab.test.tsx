@@ -5,6 +5,11 @@ import KpisTab from './KpisTab';
 
 // Recharts needs real layout; the charts are covered by the build, not here.
 vi.mock('./YearlyTrendCharts', () => ({ default: () => <div data-testid="yearly-charts" /> }));
+vi.mock('./OverdueByClientChart', () => ({
+  default: ({ rows }: { rows: { name: string }[] }) => (
+    <div data-testid="overdue-chart">{rows.map((r) => r.name).join('|')}</div>
+  ),
+}));
 
 function row(over: Partial<ReconciledRow> = {}): ReconciledRow {
   return {
@@ -186,5 +191,32 @@ describe('KpisTab', () => {
     render(<KpisTab reconciledData={[row()]} loading today={TODAY} />);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByTestId('yearly-charts')).not.toBeInTheDocument();
+  });
+
+  it('charts the clients with the most overdue balance, largest first', async () => {
+    render(
+      <KpisTab
+        reconciledData={[
+          row({ clientName: 'Chico', dueDate: '19 sep 2026', balance: 100, total: 100 }),
+          row({ clientName: 'Grande', dueDate: '19 sep 2026', balance: 900, total: 900 }),
+          row({ clientName: 'Futuro', dueDate: '15 oct 2026', balance: 5000, total: 5000 }),
+        ]}
+        today={TODAY}
+      />,
+    );
+    const region = screen.getByRole('region', { name: 'Saldo vencido por cliente (hoy)' });
+    expect(await within(region).findByTestId('overdue-chart')).toHaveTextContent('Grande|Chico');
+    expect(region).toHaveTextContent('Los 2 clientes con más saldo vencido en pesos.');
+  });
+
+  it('hides the overdue-by-client chart when only not-yet-due balances remain', () => {
+    render(
+      <KpisTab
+        reconciledData={[row({ dueDate: '15 oct 2026', balance: 500, total: 500 })]}
+        today={TODAY}
+      />,
+    );
+    expect(screen.queryByRole('region', { name: 'Saldo vencido por cliente (hoy)' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('overdue-chart')).not.toBeInTheDocument();
   });
 });

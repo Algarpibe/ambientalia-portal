@@ -4,13 +4,15 @@ import type { ReconciledRow } from './types';
 import { computeYearlyTrend } from './metrics/yearlyTrendMetrics';
 import { computeDelinquencyBands, computeDelinquencyConcentration } from './metrics/delinquencyBreakdown';
 import type { ConcentrationRow } from './metrics/delinquencyBreakdown';
-import { computeReceivablesAging } from './metrics/agingMetrics';
+import { computeReceivablesAging, topOverdueClients } from './metrics/agingMetrics';
 import type { AgingKey, ReceivablesAging } from './metrics/agingMetrics';
 import { computeWorseningClients } from './metrics/worseningClients';
 import type { WorseningClientsResult } from './metrics/worseningClients';
 import { SkeletonAnalytics } from './SkeletonLoader';
+import { chartHeight } from './overdueByClientFormat';
 
 const YearlyTrendCharts = lazy(() => import('./YearlyTrendCharts'));
+const OverdueByClientChart = lazy(() => import('./OverdueByClientChart'));
 
 interface KpisTabProps {
   reconciledData: ReconciledRow[];
@@ -131,6 +133,27 @@ function AgingSection({ aging }: { aging: ReceivablesAging }) {
   );
 }
 
+function OverdueByClientSection({ clients }: { clients: { name: string; overdueBalance: number }[] }) {
+  return (
+    <section
+      aria-labelledby="kpis-overdue-clients-title"
+      className="bg-white rounded-2xl border border-slate-100 shadow-soft p-6"
+    >
+      <h3 id="kpis-overdue-clients-title" className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">
+        Saldo vencido por cliente (hoy)
+      </h3>
+      <div style={{ height: chartHeight(clients.length) }}>
+        <ChartsErrorBoundary>
+          <Suspense fallback={<SkeletonAnalytics cards={1} />}>
+            <OverdueByClientChart rows={clients} />
+          </Suspense>
+        </ChartsErrorBoundary>
+      </div>
+      <p className="mt-2 text-xs text-slate-500">Los {clients.length} clientes con más saldo vencido en pesos.</p>
+    </section>
+  );
+}
+
 function WorseningClientsTable({ result }: { result: WorseningClientsResult }) {
   const th = 'px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider';
   return (
@@ -216,7 +239,8 @@ function CalculationNotes() {
         <p>
           <strong className="text-slate-800">Cartera por antigüedad</strong>: el saldo que se debe hoy, según los días
           que lleva vencido. «Por vencer» es el saldo que aún no vence y no suma al total vencido. Incluye todos los
-          años, también 2020.
+          años, también 2020. El gráfico de saldo vencido por cliente muestra los 10 clientes que más deben de lo ya
+          vencido.
         </p>
         <p>
           <strong className="text-slate-800">Clientes que empeoraron</strong>: compara el DPD promedio de cada cliente
@@ -260,6 +284,10 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
     () => computeReceivablesAging(reconciledData, today ?? new Date()),
     [reconciledData, today],
   );
+  const overdueClients = useMemo(
+    () => topOverdueClients(reconciledData, today ?? new Date()),
+    [reconciledData, today],
+  );
   const worsening = useMemo(
     () => computeWorseningClients(reconciledData, today ?? new Date()),
     [reconciledData, today],
@@ -281,6 +309,8 @@ export default function KpisTab({ reconciledData, loading = false, today }: Kpis
   return (
     <div className="flex flex-col gap-6">
       {hasAging && <AgingSection aging={aging} />}
+
+      {hasAging && overdueClients.length > 0 && <OverdueByClientSection clients={overdueClients} />}
 
       {rows.length === 0 ? (
         emptyTrend
