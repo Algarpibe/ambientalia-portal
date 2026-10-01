@@ -213,7 +213,13 @@ export interface Pago {
   moneda: string;
   importe: number;
   sinAplicar: number;
+  anticipo: AnticipoPago | null; // null: no es un pago anticipado
   aplicaciones: AplicacionPago[];
+}
+
+export interface AnticipoPago {
+  numero: string;
+  ov: string | null; // null: el texto del anticipo no nombra una OV, o nombra varias
 }
 
 export interface TotalMoneda {

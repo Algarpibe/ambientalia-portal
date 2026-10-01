@@ -20,7 +20,7 @@ const semana = (over: Partial<SemanaDePagos>): SemanaDePagos => ({
   cantidadPagos: 1, totales: [{ moneda: 'COP', total: 11150331 }],
   pagos: [{
     id: 'p276', numero: 'PC-2026-276', cliente: 'SHI', fecha: '2026-09-02', modo: 'Transferencia bancaria',
-    referencia: null, moneda: 'COP', importe: 11150331, sinAplicar: 0,
+    referencia: null, moneda: 'COP', importe: 11150331, sinAplicar: 0, anticipo: null,
     aplicaciones: [{ factura: 'AM1492', ov: 'OV-2026-162', importe: 11150331 }],
   }],
   ...over,
@@ -42,12 +42,36 @@ describe('PagosPorSemana', () => {
       totales: [{ moneda: 'COP', total: 800000 }],
       pagos: [{
         id: 'p9', numero: 'PC-9', cliente: 'Secolab', fecha: '2026-09-03', modo: null, referencia: null,
-        moneda: 'COP', importe: 800000, sinAplicar: 500000, aplicaciones: [],
+        moneda: 'COP', importe: 800000, sinAplicar: 500000, anticipo: null, aplicaciones: [],
       }],
     })]);
     render(<PagosPorSemana />);
     fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
     expect(screen.getByText(comoSeLee(formatCOP(500000)))).toBeInTheDocument();
+  });
+
+  it('un pago anticipado ya descontado enseña el anticipo con su OV y luego la factura', async () => {
+    mockFetch.mockResolvedValue([semana({
+      pagos: [{ ...semana({}).pagos[0], anticipo: { numero: 'ANT-2026-061', ov: 'OV-2026-162' } }],
+    })]);
+    render(<PagosPorSemana />);
+    fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
+    const anticipo = screen.getByText('Anticipo ANT-2026-061 (OV-2026-162)');
+    const factura = screen.getByText(/AM1492 \(OV-2026-162\)/);
+    expect(anticipo.compareDocumentPosition(factura) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('un anticipo sin aplicar todavía enseña solo el anticipo, sin «—», y sin paréntesis si no hay OV', async () => {
+    mockFetch.mockResolvedValue([semana({
+      pagos: [{
+        ...semana({}).pagos[0], sinAplicar: 11150331, aplicaciones: [],
+        anticipo: { numero: 'ANT-2026-061', ov: null },
+      }],
+    })]);
+    render(<PagosPorSemana />);
+    fireEvent.click(await screen.findByRole('button', { name: /Semana 1/ }));
+    const celda = screen.getByText('Anticipo ANT-2026-061').closest('td')!;
+    expect(celda.textContent).toBe('Anticipo ANT-2026-061');
   });
 
   it('una semana con pagos en dos monedas muestra un total por moneda', async () => {

@@ -114,8 +114,11 @@ export default function PagosPorSemana() {
                               <td className="px-2 py-1">{p.modo ?? '—'}</td>
                               <td className="whitespace-nowrap px-2 py-1 text-right tabular-nums">{formatMoneda(p.importe, p.moneda)}</td>
                               <td className="px-2 py-1">
+                                {p.anticipo && (
+                                  <div>Anticipo {p.anticipo.numero}{p.anticipo.ov ? ` (${p.anticipo.ov})` : ''}</div>
+                                )}
                                 {p.aplicaciones.length === 0
-                                  ? '—'
+                                  ? (p.anticipo ? null : '—')
                                   : p.aplicaciones.map((a, i) => (
                                       <div key={`${a.factura}-${i}`}>
                                         {a.factura}{a.ov ? ` (${a.ov})` : ''}: {formatMoneda(a.importe, p.moneda)}
