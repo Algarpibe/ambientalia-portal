@@ -134,8 +134,9 @@ function AgingInvoicesTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {bucket.invoices.map((inv) => (
-              <tr key={inv.invoiceNumber}>
+            {bucket.invoices.map((inv, i) => (
+              // The Zoho replica can hold duplicated invoice numbers (orphaned records), so the number alone is not a safe key.
+              <tr key={`${inv.invoiceNumber}-${i}`}>
                 <td className="px-4 py-2 text-slate-900">{inv.clientName}</td>
                 <td className="px-4 py-2 text-slate-700">
                   {onInvoiceClick ? (
