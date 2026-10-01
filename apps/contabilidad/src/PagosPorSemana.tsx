@@ -82,7 +82,18 @@ export default function PagosPorSemana() {
                 {abierta && (
                   <tr>
                     <td colSpan={3} className="bg-gray-50/60 px-3 py-2">
-                      <table className="min-w-full text-xs">
+                      {/* table-fixed + colgroup: con anchos automáticos cada semana calcula sus
+                          columnas según su contenido y las tablas plegables no quedan alineadas. */}
+                      <table className="w-full table-fixed text-xs">
+                        <colgroup>
+                          <col className="w-28" />
+                          <col />
+                          <col className="w-24" />
+                          <col className="w-40" />
+                          <col className="w-28" />
+                          <col className="w-72" />
+                          <col className="w-28" />
+                        </colgroup>
                         <thead className="text-gray-500">
                           <tr>
                             <th className="px-2 py-1 text-left font-medium">PAGO</th>
