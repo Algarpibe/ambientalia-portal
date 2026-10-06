@@ -1,0 +1,173 @@
+/**
+ * Agregados y textos que pinta la app. Puro: sin React ni red, para poder
+ * probarlo en node. El estado de cada equipo NO se calcula aquí: llega del
+ * servidor (dominio.ts) y aquí sólo se cuenta, agrupa y redacta.
+ */
+import { ESTADOS, ESTADOS_AVISO, diasEntre, sumarDias, type EquipoVista, type EstadoCalibracion } from '../dominio';
+
+export const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+export const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** AAAA-MM-DD → DD/MM/AAAA; null → «—». */
+export function fmtFecha(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/** «vencida hace 32 d» / «vence hoy» / «quedan 11 d». */
+export function textoVigencia(v: number | null): string {
+  if (v === null) return 'sin fecha de calibración';
+  if (v < 0) return `vencida hace ${-v} d`;
+  if (v === 0) return 'vence hoy';
+  return `quedan ${v} d`;
+}
+
+export function conteoPorEstado(eqs: readonly EquipoVista[]): Record<EstadoCalibracion, number> {
+  const c = Object.fromEntries(ESTADOS.map((e) => [e, 0])) as Record<EstadoCalibracion, number>;
+  for (const e of eqs) c[e.estado]++;
+  return c;
+}
+
+export interface Mes {
+  anio: number;
+  /** 0 = enero. */
+  mes: number;
+  total: number;
+}
+
+/**
+ * Vencimientos de los próximos `n` meses (el actual incluido) y el atraso: los
+ * VENCIDOS en el último año, que pueden llegar en cualquier momento. Los que
+ * llevan más de un año vencidos (FUERA_CICLO) no cuentan en ninguno de los dos.
+ */
+export function vencimientosPorMes(eqs: readonly EquipoVista[], hoy: string, n = 12): { atraso: number; meses: Mes[] } {
+  const [y0, m0] = hoy.split('-').map(Number);
+  const meses: Mes[] = Array.from({ length: n }, (_, i) => {
+    const t = m0 - 1 + i;
+    return { anio: y0 + Math.floor(t / 12), mes: t % 12, total: 0 };
+  });
+  let atraso = 0;
+  for (const e of eqs) {
+    if (e.estado === 'VENCIDA') {
+      atraso++;
+      continue;
+    }
+    if (!e.vence || e.estado === 'FUERA_CICLO') continue;
+    const [y, m] = e.vence.split('-').map(Number);
+    const hit = meses.find((x) => x.anio === y && x.mes === m - 1);
+    if (hit) hit.total++;
+  }
+  return { atraso, meses };
+}
+
+export interface FilaCliente {
+  cliente: string;
+  total: number;
+  vencidas: number;
+  proximas90: number;
+  alDia: number;
+  fueraCiclo: number;
+  enAmbientalia: number;
+}
+
+/** Resumen por cliente, con los que más piden atención primero. */
+export function porCliente(eqs: readonly EquipoVista[]): FilaCliente[] {
+  const m = new Map<string, FilaCliente>();
+  for (const e of eqs) {
+    const f = m.get(e.cliente) ?? { cliente: e.cliente, total: 0, vencidas: 0, proximas90: 0, alDia: 0, fueraCiclo: 0, enAmbientalia: 0 };
+    f.total++;
+    if (e.estado === 'VENCIDA') f.vencidas++;
+    else if (e.estado === 'VENCE_30' || e.estado === 'VENCE_60' || e.estado === 'VENCE_90') f.proximas90++;
+    else if (e.estado === 'AL_DIA') f.alDia++;
+    else if (e.estado === 'FUERA_CICLO') f.fueraCiclo++;
+    if (e.seguimiento?.enAmbientalia) f.enAmbientalia++;
+    m.set(e.cliente, f);
+  }
+  return [...m.values()].sort(
+    (a, b) => b.vencidas + b.proximas90 - (a.vencidas + a.proximas90) || b.total - a.total || a.cliente.localeCompare(b.cliente, 'es'),
+  );
+}
+
+/** Vencidos (en el último año) primero y después los que vencen antes. */
+export const porUrgencia = (a: EquipoVista, b: EquipoVista) => (a.vigenciaDias ?? 1e9) - (b.vigenciaDias ?? 1e9);
+
+/**
+ * Equipos a avisar: vencidos en el último año o que vencen dentro de `ventana`
+ * días, y que NO están ya en Ambientalia.
+ */
+export function candidatosAviso(eqs: readonly EquipoVista[], ventana: number): EquipoVista[] {
+  return eqs
+    .filter((e) => ESTADOS_AVISO.includes(e.estado) && (e.vigenciaDias ?? Infinity) <= ventana && !e.seguimiento?.enAmbientalia)
+    .sort(porUrgencia);
+}
+
+export interface GrupoAviso {
+  cliente: string;
+  equipos: EquipoVista[];
+  /** Cuántos no tienen todavía aviso registrado. */
+  sinAviso: number;
+}
+
+/** Candidatos agrupados por cliente: primero los que tienen avisos pendientes y el equipo más urgente. */
+export function avisosPorCliente(eqs: readonly EquipoVista[], ventana: number): GrupoAviso[] {
+  const m = new Map<string, EquipoVista[]>();
+  for (const e of candidatosAviso(eqs, ventana)) m.set(e.cliente, [...(m.get(e.cliente) ?? []), e]);
+  return [...m.entries()]
+    .map(([cliente, equipos]) => ({ cliente, equipos, sinAviso: equipos.filter((e) => !e.seguimiento?.avisoEnviado).length }))
+    .sort((a, b) => Number(b.sinAviso > 0) - Number(a.sinAviso > 0) || porUrgencia(a.equipos[0], b.equipos[0]));
+}
+
+/** Texto del aviso previo al cliente, listo para copiar en un correo. */
+export function mensajeAviso(cliente: string, equipos: readonly EquipoVista[]): string {
+  const lineas = equipos
+    .map((e) => {
+      const cuando = (e.vigenciaDias ?? 0) < 0 ? `vencida desde el ${fmtFecha(e.vence)}` : `vence el ${fmtFecha(e.vence)}`;
+      return `• GRIMM ${e.modelo}, serial ${e.serial}: última calibración ${fmtFecha(e.ultimaCalibracion)}, ${cuando}.`;
+    })
+    .join('\n');
+  const plural = equipos.length !== 1;
+  return [
+    `Estimado cliente ${cliente}:`,
+    '',
+    `Desde el Servicio Técnico de Ambientalia le recordamos que ${plural ? 'los siguientes monitores' : 'el siguiente monitor'} de partículas GRIMM ${plural ? 'tienen' : 'tiene'} la calibración vencida o próxima a vencer:`,
+    '',
+    lineas,
+    '',
+    'Para mantener la validez de sus mediciones y evitar paradas no previstas, le proponemos programar desde ahora el servicio de calibración y mantenimiento. Indíquenos la fecha en que podría enviarnos los equipos o, si lo prefiere, coordinamos la recogida.',
+    '',
+    'Quedamos atentos.',
+    '',
+    'Ambientalia S.A.S. · Servicio Técnico',
+  ].join('\n');
+}
+
+export interface DiaCalendario {
+  fecha: string;
+  delMes: boolean;
+  equipos: EquipoVista[];
+}
+
+/**
+ * Rejilla de un mes de lunes a domingo (semanas completas) con los equipos
+ * cuya vigencia se cumple cada día. Los FUERA_CICLO no se pintan: su fecha de
+ * vencimiento es de hace más de un año.
+ */
+export function rejillaMes(eqs: readonly EquipoVista[], anio: number, mes: number): DiaCalendario[] {
+  const primero = `${anio}-${String(mes + 1).padStart(2, '0')}-01`;
+  const dowPrimero = (new Date(Date.UTC(anio, mes, 1)).getUTCDay() + 6) % 7; // 0 = lunes
+  const inicio = sumarDias(primero, -dowPrimero);
+  const ultimo = new Date(Date.UTC(anio, mes + 1, 0)).toISOString().slice(0, 10);
+  const dowUltimo = (new Date(Date.UTC(anio, mes + 1, 0)).getUTCDay() + 6) % 7;
+  const fin = sumarDias(ultimo, 6 - dowUltimo);
+  const porDia = new Map<string, EquipoVista[]>();
+  for (const e of eqs) {
+    if (!e.vence || e.estado === 'FUERA_CICLO') continue;
+    porDia.set(e.vence, [...(porDia.get(e.vence) ?? []), e]);
+  }
+  const n = diasEntre(inicio, fin);
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const fecha = sumarDias(inicio, i);
+    return { fecha, delMes: fecha.slice(0, 7) === primero.slice(0, 7), equipos: porDia.get(fecha) ?? [] };
+  });
+}

@@ -10,6 +10,7 @@ import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
 import { createAusenciasRouter } from './ausencias/router.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
+import { createTrazabilidadRouter } from './trazabilidad/router.js';
 import { createDataRouter } from './data.router.js';
 
 const app = express();
@@ -132,6 +133,8 @@ initDb()
     app.use('/api', createAusenciasRouter(getHubPool()));
     // Router de Calibraciones (patrones de transferencia de O3, ISO/IEC 17025).
     app.use('/api', createCalibracionesRouter(getHubPool()));
+    // Router de Trazabilidad Mantenimientos Clientes (vencimientos GRIMM EDM 180).
+    app.use('/api', createTrazabilidadRouter(getHubPool()));
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));

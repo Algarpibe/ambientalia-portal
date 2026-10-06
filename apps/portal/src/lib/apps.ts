@@ -26,6 +26,7 @@ export const APPS: AppInfo[] = [
   { id: 'ov-pendientes', label: 'OV pendientes de facturar', route: '/ov-pendientes', category: 'aplicacion' },
   { id: 'ausencias', label: 'Vacaciones y Permisos', route: '/ausencias', category: 'aplicacion' },
   { id: 'calibraciones', label: 'Calibraciones', route: '/calibraciones', category: 'aplicacion' },
+  { id: 'trazabilidad-mantenimientos', label: 'Trazabilidad Mantenimientos Clientes', route: '/trazabilidad-mantenimientos', category: 'aplicacion' },
 ];
 
 /** Devuelve la info de una app por su id. */

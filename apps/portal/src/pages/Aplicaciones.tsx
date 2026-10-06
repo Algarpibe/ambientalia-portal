@@ -10,7 +10,8 @@ import {
   Landmark,
   PackageOpen,
   CalendarDays,
-  Gauge
+  Gauge,
+  CalendarClock
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -86,6 +87,13 @@ const aplicaciones: AppConfig[] = [
     path: "/calibraciones",
     icon: Gauge,
     color: "from-slate-500 to-blue-700"
+  },
+  {
+    name: "Trazabilidad Mantenimientos Clientes",
+    description: "Vencimientos de calibración de los GRIMM EDM 180 de los clientes: calendario, llegadas urgentes y avisos previos para programar el servicio.",
+    path: "/trazabilidad-mantenimientos",
+    icon: CalendarClock,
+    color: "from-cyan-500 to-teal-700"
   }
 ];
 

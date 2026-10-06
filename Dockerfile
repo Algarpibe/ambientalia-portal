@@ -20,6 +20,7 @@ COPY apps/contabilidad/package*.json ./apps/contabilidad/
 COPY apps/WO-sales/package*.json ./apps/WO-sales/
 COPY apps/ausencias/package*.json ./apps/ausencias/
 COPY apps/calibraciones/package*.json ./apps/calibraciones/
+COPY apps/trazabilidad-mantenimientos/package*.json ./apps/trazabilidad-mantenimientos/
 
 # Instalar dependencias globales del monorepo
 RUN npm install

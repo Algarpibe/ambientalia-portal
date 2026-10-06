@@ -27,6 +27,7 @@ const Contabilidad = lazyConReintento(() => import('../../contabilidad/src/App')
 const OvPendientes = lazyConReintento(() => import('../../contabilidad/src/AppOV'));
 const Ausencias = lazyConReintento(() => import('../../ausencias/src/App'));
 const Calibraciones = lazyConReintento(() => import('../../calibraciones/src/App'));
+const TrazabilidadMantenimientos = lazyConReintento(() => import('../../trazabilidad-mantenimientos/src/App'));
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -117,6 +118,7 @@ function App() {
                     <Route path="/ov-pendientes/*" element={<AppGuard appId="ov-pendientes"><OvPendientes /></AppGuard>} />
                     <Route path="/ausencias/*" element={<AppGuard appId="ausencias"><Ausencias /></AppGuard>} />
                     <Route path="/calibraciones/*" element={<AppGuard appId="calibraciones"><Calibraciones /></AppGuard>} />
+                    <Route path="/trazabilidad-mantenimientos/*" element={<AppGuard appId="trazabilidad-mantenimientos"><TrazabilidadMantenimientos /></AppGuard>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>
