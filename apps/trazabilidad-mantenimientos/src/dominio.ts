@@ -6,8 +6,10 @@ export * from '../../hub-api/src/trazabilidad/dominio';
 export type {
   EquipoVista,
   FilaImportada,
+  PlazoServicio,
   ResumenImportacion,
   Seguimiento,
   SeguimientoGuardado,
+  ServicioVista,
   TicketDesk,
 } from '../../hub-api/src/trazabilidad/types';

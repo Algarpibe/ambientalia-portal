@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { EquipoVista, FilaImportada, ResumenImportacion, Seguimiento } from './dominio';
+import type { EquipoVista, FilaImportada, PlazoServicio, ResumenImportacion, Seguimiento, ServicioVista } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -21,8 +21,19 @@ export interface Inventario {
   ultimaImportacion: ResumenImportacion | null;
 }
 
+/** Tickets de Desk sin cerrar, con su plazo calculado en el servidor. */
+export interface Servicios {
+  hoy: string;
+  servicios: ServicioVista[];
+  /** Festivos del tramo que puede pintar el calendario de barras. */
+  festivos: string[];
+}
+
 export const api = {
   inventario: () => request<Inventario>('GET', '/equipos'),
+  servicios: () => request<Servicios>('GET', '/servicios'),
+  plazos: () => request<{ plazos: PlazoServicio[] }>('GET', '/plazos'),
+  guardarPlazo: (tipo: string, dias: number | null) => request<{ plazos: PlazoServicio[] }>('PUT', '/plazos', { tipo, dias }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),

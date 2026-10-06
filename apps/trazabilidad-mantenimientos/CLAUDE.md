@@ -22,13 +22,16 @@ se registra en la app y sobrevive a las reimportaciones.
 | Pieza | Ruta |
 |---|---|
 | Dominio puro (sin imports; lo usa servidor y UI) | `apps/hub-api/src/trazabilidad/dominio.ts` |
+| Plazos en días hábiles (sólo servidor: llama al calendario de Ausencias) | `apps/hub-api/src/trazabilidad/plazos.ts` |
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`) | `apps/hub-api/src/trazabilidad/router.ts` |
-| Migración (esquema `portal`, idempotente) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Lectura del Excel en el navegador | `src/lib/importar.ts` |
 | Agregados, calendario y texto del aviso | `src/lib/vistas.ts` |
+| Eje, barras, colores y textos de «Servicios» | `src/lib/servicios.ts` |
+| Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 
 Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 `portal/src/App.tsx`, `portal/src/pages/Aplicaciones.tsx`, `portal/tailwind.config.js` y el
@@ -41,6 +44,7 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_equipos` | Un equipo por `clave` (el serial; si la hoja repite un serial, la 2.ª aparición lleva `-2`). `activo = false` cuando una importación ya no lo trae: no se borra |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
+| `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado |
 
 ## API (`/api/trazabilidad/*`)
 
@@ -50,9 +54,12 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
+| GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[]}`: tickets de Desk sin cerrar con ingreso, fecha límite, días hábiles y estado del plazo; `festivos` son los del tramo del calendario de barras |
+| GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila |
+| PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado |
 
-Permisos: cualquiera con la app asignada lee, importa y registra seguimiento; todo queda firmado
-con su correo.
+Permisos: cualquiera con la app asignada lee, importa, registra seguimiento y cambia plazos; todo
+queda firmado con su correo.
 
 ## Cruce con Zoho Desk (ticket abierto)
 
@@ -67,11 +74,44 @@ de zoho-hub; hub-api sólo la lee y no tiene migración para ella— y devuelve
 - En la UI, `enServicio(e)` (`src/lib/vistas.ts`) = «en Ambientalia» a mano **o** con ticket abierto:
   esos equipos no entran en los avisos a clientes y sí en el filtro e indicador «En Ambientalia».
   El campo manual no se toca.
-- `modelo`, `marca` y `tipo_servicio` de la réplica vienen vacíos: no usarlos.
-- En `test:db` la tabla la crea `asegurarDeskTickets` (`src/test-db/harness.ts`).
+- `modelo` y `marca` de la réplica vienen vacíos: no usarlos. `tipo_servicio` también viene vacío
+  hoy, pero «Servicios» ya lo lee (ver abajo).
+- En `test:db` la tabla la crea `asegurarDeskTickets` (`src/test-db/harness.ts`), sólo con las
+  columnas que hub-api lee.
+
+## Servicios: plazo de los tickets abiertos
+
+Pestaña «Servicios» = **todos** los tickets de `desk.tickets` con `status_type` distinto de
+`'Closed'` (cualquier marca, con o sin serial: va de tickets, no de equipos), en lista y en
+calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de servicio.
+
+- **Fecha límite = ingreso + N días hábiles**, con N el plazo del tipo de servicio del ticket. Es
+  alternativo por tipo, no acumulado. El día de ingreso no cuenta (lunes + 3 → jueves). Sin tipo, o
+  con un tipo sin plazo → `SIN_PLAZO`: sale en la lista, sin barra.
+- **Ingreso** = `fecha_creacion_ticket` o, si falta, el día en Colombia de `created_time`.
+- **El tipo casa por `claveTipoServicio`** (`dominio.ts`): sin mayúsculas, tildes ni espacios de
+  más. Se casa en JS, no en SQL (sin `unaccent`).
+- **Días hábiles** = lunes a viernes sin festivos de Colombia. `plazos.ts` no repite la regla: llama
+  a `contarDiasHabiles` y `festivosColombia` de `apps/hub-api/src/ausencias/`. Todo se calcula en el
+  servidor (`fechaLimite`, `diasHabiles` —negativo = atraso— y `estadoPlazo`: `EN_PLAZO`,
+  `VENCE_HOY`, `VENCIDO`, `SIN_PLAZO`); la UI sólo coloca columnas. El estado compara fechas de
+  calendario: un sábado tras un límite en viernes ya es `VENCIDO` con 0 días hábiles de atraso.
+- **Calendario de barras** (`src/lib/servicios.ts`): una columna por día; barra del ingreso a la
+  fecha límite (verde / ámbar si vence hoy / rojo) y, si está vencido, tramo rayado hasta hoy. El
+  eje no retrocede más de `RETROCESO_MAX_DIAS` (60) desde hoy; lo anterior se recorta con «‹‹».
+- **Modelo** = tercer tramo de `codigo_servicio`. **Cliente** =
+  `raw->'contact'->'account'->>'accountName'` y, si no viene, el asunto sin el código de servicio
+  (`clienteDeAsunto = true`, en cursiva gris). ⚠️ Esa ruta del `raw` es una suposición sin verificar
+  contra producción.
+- **Depende del worker de zoho-hub**: hoy `tipo_servicio` y `fecha_creacion_ticket` llegan NULL en
+  todas las filas (el worker no trae los campos personalizados de Zoho), así que todos los
+  servicios salen «sin tipo» y sin barra, con un aviso que lo explica. No hay que tocar nada aquí
+  cuando el worker los traiga: las barras aparecen solas.
+- Ninguna migración de hub-api crea ni altera nada en el esquema `desk`.
 
 ## Pruebas
 
-- `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso.
-- `npm test --workspace=apps/hub-api` — dominio y router (`src/trazabilidad/*.test.ts`).
+- `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso y
+  geometría del calendario de barras.
+- `npm test --workspace=apps/hub-api` — dominio, plazos y router (`src/trazabilidad/*.test.ts`).
 - `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real.

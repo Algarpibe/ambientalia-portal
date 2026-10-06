@@ -1,12 +1,24 @@
 /**
- * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migración
- * 042). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
+ * 042 y 043). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
-import { asignarClaves, estadoCalibracion } from './dominio.js';
-import { TzError, type Actor, type EquipoVista, type FilaImportada, type Importacion, type ResumenImportacion, type Seguimiento } from './types.js';
+import { asignarClaves, asuntoSinCodigo, claveTipoServicio, estadoCalibracion, modeloDeCodigo } from './dominio.js';
+import { calcularPlazo } from './plazos.js';
+import {
+  TzError,
+  type Actor,
+  type CambioPlazo,
+  type EquipoVista,
+  type FilaImportada,
+  type Importacion,
+  type PlazoServicio,
+  type ResumenImportacion,
+  type Seguimiento,
+  type ServicioVista,
+} from './types.js';
 
 type PoolClient = Awaited<ReturnType<Pool['connect']>>;
 type Db = Pick<PoolClient, 'query'>;
@@ -100,7 +112,121 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
   }));
 }
 
-const COLS_IMPORT = `id, archivo, total, nuevos, actualizados, retirados, por, en::text AS en`;
+/** Abierto en Desk: cualquier tipo de estado que no sea 'Closed' (también el vacío). */
+const TICKET_ABIERTO = `t.status_type IS DISTINCT FROM 'Closed'`;
+
+/** Plazo configurado (días hábiles) de cada tipo de servicio, por clave normalizada. */
+async function plazosPorClave(db: Db): Promise<Map<string, number>> {
+  const { rows } = await db.query(`SELECT clave, dias_habiles FROM portal.tmc_plazos WHERE dias_habiles IS NOT NULL`);
+  return new Map((rows as Row[]).map((r) => [r.clave as string, Number(r.dias_habiles)]));
+}
+
+/**
+ * Todos los tickets de Desk que no están cerrados —de cualquier marca, con o
+ * sin serial: esta vista va de tickets, no de equipos— con su fecha límite a
+ * fecha `hoy`.
+ *
+ * El plazo es alternativo por tipo de servicio, no acumulado: ingreso + los
+ * días hábiles configurados para SU tipo (portal.tmc_plazos). El tipo casa por
+ * clave normalizada, y eso se hace aquí y no en SQL para no depender de
+ * `unaccent`. Sin tipo, o con un tipo sin plazo, el servicio sale «sin plazo».
+ *
+ * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
+ * Colombia de created_time. El cliente es la cuenta de Desk que viaja en `raw`
+ * y, si no viene, el asunto sin el código de servicio.
+ */
+export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
+  const [{ rows }, plazos] = await Promise.all([
+    db.query(
+      `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
+              COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
+              (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar,
+              t.raw->'contact'->'account'->>'accountName' AS cuenta
+         FROM desk.tickets t
+        WHERE ${TICKET_ABIERTO}
+        ORDER BY t.number DESC`,
+    ),
+    plazosPorClave(db),
+  ]);
+  return (rows as Row[]).map((r) => {
+    const tipoServicio = String(r.tipo_servicio ?? '').trim();
+    const plazoDias = plazos.get(claveTipoServicio(tipoServicio)) ?? null;
+    const cuenta = String(r.cuenta ?? '').trim();
+    return {
+      numero: Number(r.number),
+      asunto: String(r.subject ?? '').trim(),
+      cliente: cuenta || asuntoSinCodigo(r.subject, r.codigo_servicio),
+      clienteDeAsunto: !cuenta,
+      serial: String(r.serial ?? '').trim(),
+      modelo: modeloDeCodigo(r.codigo_servicio),
+      tipoServicio,
+      estado: r.status,
+      ingreso: r.ingreso,
+      plazoDias,
+      ...calcularPlazo(r.ingreso, plazoDias, hoy),
+      sinConfirmar: r.sin_confirmar === true,
+    };
+  });
+}
+
+/**
+ * Los plazos configurables: las filas de portal.tmc_plazos más cualquier tipo
+ * de servicio que aparezca en un ticket abierto y todavía no tenga fila (sale
+ * sin plazo, para que se le pueda poner uno). Con plazo primero y, dentro de
+ * cada grupo, por orden alfabético.
+ */
+export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
+  const [guardados, enTickets] = await Promise.all([
+    db.query(`SELECT clave, etiqueta, dias_habiles, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_plazos`),
+    db.query(
+      `SELECT trim(t.tipo_servicio) AS tipo, count(*)::int AS n
+         FROM desk.tickets t
+        WHERE ${TICKET_ABIERTO} AND trim(t.tipo_servicio) <> ''
+        GROUP BY 1
+        ORDER BY min(t.number)`,
+    ),
+  ]);
+  const m = new Map<string, PlazoServicio>();
+  for (const r of guardados.rows as Row[]) {
+    m.set(r.clave, {
+      clave: r.clave,
+      etiqueta: r.etiqueta,
+      dias: r.dias_habiles === null ? null : Number(r.dias_habiles),
+      ticketsAbiertos: 0,
+      actualizadoPor: r.actualizado_por,
+      actualizadoEn: r.actualizado_en,
+    });
+  }
+  // Varias grafías del mismo tipo suman en una sola fila; la etiqueta de un
+  // tipo nuevo es la del ticket más antiguo que lo trae.
+  for (const r of enTickets.rows as Row[]) {
+    const clave = claveTipoServicio(r.tipo);
+    if (!clave) continue;
+    const p = m.get(clave) ?? { clave, etiqueta: r.tipo, dias: null, ticketsAbiertos: 0, actualizadoPor: null, actualizadoEn: null };
+    p.ticketsAbiertos += Number(r.n);
+    m.set(clave, p);
+  }
+  return [...m.values()].sort(
+    (a, b) => Number(a.dias === null) - Number(b.dias === null) || a.etiqueta.localeCompare(b.etiqueta, 'es'),
+  );
+}
+
+/**
+ * Fija (o vacía, con `dias` null) el plazo de un tipo de servicio y lo firma.
+ * Si el tipo ya tiene fila, su etiqueta se conserva: sólo cambia el plazo.
+ */
+export async function guardarPlazo(db: Db, c: CambioPlazo, actor: Actor): Promise<void> {
+  await db.query(
+    `INSERT INTO portal.tmc_plazos (clave, etiqueta, dias_habiles, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (clave) DO UPDATE SET
+       dias_habiles = EXCLUDED.dias_habiles, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [claveTipoServicio(c.tipo), c.tipo.trim(), c.dias, actor.userId, actor.email],
+  );
+}
+
+const COLS_IMPORT =`id, archivo, total, nuevos, actualizados, retirados, por, en::text AS en`;
 const toImport = (r: Row): ResumenImportacion => ({
   id: Number(r.id),
   archivo: r.archivo,

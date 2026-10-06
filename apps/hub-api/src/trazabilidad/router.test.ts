@@ -77,6 +77,58 @@ describe('guardas', () => {
   });
 });
 
+describe('servicios y plazos', () => {
+  it('servicios: 401 sin token y 403 sin la app', async () => {
+    expect((await request(app()).get('/api/trazabilidad/servicios')).status).toBe(401);
+    expect((await request(app()).get('/api/trazabilidad/servicios').set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect((await request(app()).get('/api/trazabilidad/plazos').set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect((await request(app()).put('/api/trazabilidad/plazos').set(auth(tokenFor(['ausencias']))).send({ tipo: 'Otro', dias: 2 })).status).toBe(403);
+  });
+
+  it('servicios: 200 con hoy, la lista y los festivos del eje', async () => {
+    const res = await request(app()).get('/api/trazabilidad/servicios?hoy=2026-10-06').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ hoy: '2026-10-06', servicios: [] });
+    expect(res.body.festivos).toContain('2026-10-12');
+  });
+
+  it('servicios: 400 con un «hoy» mal formado', async () => {
+    const res = await request(app()).get('/api/trazabilidad/servicios?hoy=ayer').set(auth());
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('hoy');
+  });
+
+  it('plazos: 200 con la lista', async () => {
+    const res = await request(app()).get('/api/trazabilidad/plazos').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ plazos: [] });
+  });
+
+  it.each([0, 366, -1, 1.5, '3', 'tres', true])('plazo no válido (%j) → 400 en «dias» y ninguna consulta', async (dias) => {
+    const res = await request(app()).put('/api/trazabilidad/plazos').set(auth()).send({ tipo: 'Diagnóstico', dias });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('dias');
+    expect(res.body.message).toMatch(/entre 1 y 365/);
+    expect(queries).toEqual([]);
+  });
+
+  it('plazo sin tipo de servicio → 400 en «tipo»', async () => {
+    const res = await request(app()).put('/api/trazabilidad/plazos').set(auth()).send({ tipo: '  ', dias: 3 });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('tipo');
+    expect(queries).toEqual([]);
+  });
+
+  it('plazo válido, o vacío para dejarlo «sin plazo» → 200', async () => {
+    for (const dias of [1, 365, null]) {
+      const res = await request(app()).put('/api/trazabilidad/plazos').set(auth()).send({ tipo: 'Diagnóstico', dias });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ plazos: [] });
+    }
+    expect(queries.some((q) => /INSERT INTO portal\.tmc_plazos/.test(q))).toBe(true);
+  });
+});
+
 describe('validación antes de escribir', () => {
   it('importación sin filas → 400 y ninguna consulta', async () => {
     const res = await request(app()).post('/api/trazabilidad/importaciones').set(auth()).send({ archivo: 'x.xlsx', filas: [] });

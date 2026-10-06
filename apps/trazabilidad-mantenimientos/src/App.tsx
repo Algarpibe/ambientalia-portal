@@ -10,20 +10,28 @@ import Calendario from './vistas/Calendario';
 import Avisos from './vistas/Avisos';
 import FichaEquipo from './vistas/FichaEquipo';
 import Importar from './vistas/Importar';
+import Servicios from './vistas/Servicios';
+import Configuracion from './vistas/Configuracion';
 
 /**
  * Trazabilidad Mantenimientos Clientes: vencimientos de calibración de los
  * GRIMM EDM 180 de los clientes (hoja F-ST-022), para avisarles antes de que
  * se les venza y programar el servicio.
  *
- * Pestañas por hash (#resumen, #equipos, #calendario, #avisos), igual que el
- * resto de apps del portal: el router del portal sólo ve /trazabilidad-mantenimientos/*.
+ * Además, «Servicios» sigue los tickets abiertos en Zoho Desk (de cualquier
+ * marca) contra el plazo de su tipo de servicio, que se fija en «Configuración».
+ *
+ * Pestañas por hash (#resumen, #equipos, #calendario, #avisos, #servicios,
+ * #configuracion), igual que el resto de apps del portal: el router del portal
+ * sólo ve /trazabilidad-mantenimientos/*.
  */
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
   { id: 'equipos', label: 'Equipos' },
   { id: 'calendario', label: 'Calendario Calibraciones' },
   { id: 'avisos', label: 'Avisos a clientes' },
+  { id: 'servicios', label: 'Servicios' },
+  { id: 'configuracion', label: 'Configuración' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
@@ -97,6 +105,8 @@ export default function App() {
   const equipos = inv?.equipos ?? [];
   const equipoFicha = ficha ? equipos.find((e) => e.clave === ficha) ?? null : null;
   const ult = inv?.ultimaImportacion;
+  /** Las cuatro primeras pestañas pintan el inventario de la F-ST-022; las otras dos, no. */
+  const deInventario = tab !== 'servicios' && tab !== 'configuracion';
 
   return (
     <main className="min-w-0 flex-grow bg-transparent p-4 sm:p-6">
@@ -117,23 +127,45 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar">
-            {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
-          </Button>
+          {deInventario && (
+            <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar">
+              {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
+            </Button>
+          )}
           <Button variant="primary" onClick={() => setImportando(true)}>
             <FileSpreadsheet className="h-4 w-4" aria-hidden /> Importar F-ST-022
           </Button>
         </div>
       </header>
 
-      {error && (
+      <nav aria-label="Secciones" className="mb-5 flex gap-1 overflow-x-auto border-b border-gray-200">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            aria-current={tab === t.id ? 'page' : undefined}
+            onClick={() => irA(t.id)}
+            className={`-mb-px min-h-[44px] whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors ${
+              tab === t.id ? 'border-blue-500 font-semibold text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Servicios y Configuración cargan lo suyo (tickets de Desk y plazos): funcionan aunque no haya inventario importado. */}
+      {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} />}
+      {tab === 'configuracion' && <Configuracion notificar={notificar} />}
+
+      {deInventario && error && (
         <div className="mb-4">
           <Alert tone="red">{error}</Alert>
         </div>
       )}
-      {!inv && !error && <Loading texto="Cargando el inventario de GRIMM EDM 180…" />}
+      {deInventario && !inv && !error && <Loading texto="Cargando el inventario de GRIMM EDM 180…" />}
 
-      {inv && equipos.length === 0 && (
+      {deInventario && inv && equipos.length === 0 && (
         <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-sm">
           <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-gray-300" aria-hidden />
           <p className="mb-1 font-semibold text-gray-800">Todavía no hay equipos cargados</p>
@@ -146,24 +178,8 @@ export default function App() {
         </div>
       )}
 
-      {inv && equipos.length > 0 && (
+      {deInventario && inv && equipos.length > 0 && (
         <>
-          <nav aria-label="Secciones" className="mb-5 flex gap-1 overflow-x-auto border-b border-gray-200">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                aria-current={tab === t.id ? 'page' : undefined}
-                onClick={() => irA(t.id)}
-                className={`-mb-px min-h-[44px] whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors ${
-                  tab === t.id ? 'border-blue-500 font-semibold text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-
           {tab === 'resumen' && (
             <Resumen equipos={equipos} hoy={inv.hoy} onEstados={verEstados} onCliente={(cliente) => verEquipos({ cliente })} onEnCasa={() => verEquipos({ enAmbientalia: true })} onMes={verMes} onAvisos={() => irA('avisos')} onFicha={setFicha} />
           )}

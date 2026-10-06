@@ -3,10 +3,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   asignarClaves,
+  asuntoSinCodigo,
   claveSerial,
+  claveTipoServicio,
   diasEntre,
   esFechaIso,
   estadoCalibracion,
+  estadoPlazo,
+  modeloDeCodigo,
   modeloEdm180,
   sumarDias,
 } from './dominio.js';
@@ -79,6 +83,42 @@ describe('modelos y claves', () => {
       '18A00004-3',
     ]);
     expect(claveSerial(' 18A 20/1 ')).toBe('18A_20_1');
+  });
+});
+
+describe('servicios: tipo, modelo, cliente y estado del plazo', () => {
+  it('el tipo de servicio casa sin mayúsculas, tildes ni espacios de más', () => {
+    expect(claveTipoServicio('Diagnóstico')).toBe('diagnostico');
+    expect(claveTipoServicio('Diagnostico')).toBe('diagnostico');
+    expect(claveTipoServicio('diagnóstico')).toBe('diagnostico');
+    expect(claveTipoServicio(' Calibración ')).toBe('calibracion');
+    expect(claveTipoServicio('No   aplica')).toBe('no aplica');
+    expect(claveTipoServicio('Garantía')).toBe('garantia');
+    expect(claveTipoServicio(null)).toBe('');
+    expect(claveTipoServicio('   ')).toBe('');
+  });
+
+  it('el modelo es el tercer tramo del código de servicio', () => {
+    expect(modeloDeCodigo('MT_18A00001_EDM180C_261002')).toBe('EDM180C');
+    expect(modeloDeCodigo('MT_18A00001')).toBe('');
+    expect(modeloDeCodigo(null)).toBe('');
+  });
+
+  it('el asunto se queda sin el código de servicio', () => {
+    expect(asuntoSinCodigo('Servicio Técnico Cliente Uno Monitor de Partículas MT_18A00001_EDM180C_260916', 'MT_18A00001_EDM180C_260916')).toBe(
+      'Servicio Técnico Cliente Uno Monitor de Partículas',
+    );
+    // Sin código en su columna, se quita lo que tenga forma de código.
+    expect(asuntoSinCodigo('Servicio Técnico Cliente Dos  MT_18A00002_EDM180D_260101 ', null)).toBe('Servicio Técnico Cliente Dos');
+    expect(asuntoSinCodigo('Consulta de Cliente Tres', '')).toBe('Consulta de Cliente Tres');
+    expect(asuntoSinCodigo(null, null)).toBe('');
+  });
+
+  it('estado del plazo: en plazo, vence hoy, vencido o sin plazo', () => {
+    expect(estadoPlazo('2026-10-08', '2026-10-06')).toBe('EN_PLAZO');
+    expect(estadoPlazo('2026-10-06', '2026-10-06')).toBe('VENCE_HOY');
+    expect(estadoPlazo('2026-10-05', '2026-10-06')).toBe('VENCIDO');
+    expect(estadoPlazo(null, '2026-10-06')).toBe('SIN_PLAZO');
   });
 });
 

@@ -134,3 +134,75 @@ export function asignarClaves(seriales: readonly string[]): string[] {
     return n === 1 ? base : `${base}-${n}`;
   });
 }
+
+// ── Servicios abiertos en Zoho Desk y su plazo ──────────────────────────────
+//
+// La pestaña «Servicios» pone a cada ticket abierto una fecha límite: ingreso +
+// N días hábiles, con N según el tipo de servicio. Aquí sólo va lo que no
+// necesita calendario de festivos (eso es de servidor: plazos.ts).
+
+export type EstadoPlazo =
+  | 'VENCIDO' // la fecha límite ya pasó
+  | 'VENCE_HOY'
+  | 'EN_PLAZO'
+  | 'SIN_PLAZO'; // sin tipo de servicio, o su tipo no tiene plazo configurado
+
+/** Orden de presentación: de lo más urgente a lo que no pide nada. */
+export const ESTADOS_PLAZO: readonly EstadoPlazo[] = ['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO'];
+
+export const ETIQUETA_PLAZO: Record<EstadoPlazo, string> = {
+  VENCIDO: 'Vencido',
+  VENCE_HOY: 'Vence hoy',
+  EN_PLAZO: 'En plazo',
+  SIN_PLAZO: 'Sin plazo',
+};
+
+/** Límites de un plazo configurable, en días hábiles. */
+export const PLAZO_MIN_DIAS = 1;
+export const PLAZO_MAX_DIAS = 365;
+
+/** Cuántos días hacia atrás desde hoy enseña como mucho el calendario de barras. */
+export const RETROCESO_MAX_DIAS = 60;
+
+/**
+ * Clave con la que casa un tipo de servicio: sin mayúsculas, sin tildes y sin
+ * espacios de más («Diagnostico», «diagnóstico» y « Diagnóstico » son la
+ * misma). Vacía si no hay tipo.
+ */
+export function claveTipoServicio(tipo: unknown): string {
+  return String(tipo ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Modelo del equipo: el tercer tramo del código de servicio
+ * («MT_18A00001_EDM180C_261002» → «EDM180C»). La réplica no lo trae en columna.
+ */
+export function modeloDeCodigo(codigo: unknown): string {
+  return String(codigo ?? '').split('_')[2]?.trim() ?? '';
+}
+
+/**
+ * El asunto del ticket sin el código de servicio: lo que se enseña como
+ * cliente cuando Desk no manda la cuenta. Si el código no viene en su columna,
+ * se quita lo que tenga su forma (tres o más tramos unidos por «_»).
+ */
+export function asuntoSinCodigo(asunto: unknown, codigo: unknown): string {
+  let a = String(asunto ?? '');
+  const c = String(codigo ?? '').trim();
+  if (c) a = a.split(c).join(' ');
+  return a
+    .replace(/\S+_\S+_\S+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Clasifica un servicio por su fecha límite, a fecha `hoy` (AAAA-MM-DD). */
+export function estadoPlazo(fechaLimite: string | null, hoy: string): EstadoPlazo {
+  if (!fechaLimite) return 'SIN_PLAZO';
+  return fechaLimite < hoy ? 'VENCIDO' : fechaLimite === hoy ? 'VENCE_HOY' : 'EN_PLAZO';
+}

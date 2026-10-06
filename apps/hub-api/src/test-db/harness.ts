@@ -25,11 +25,17 @@ export async function asegurarDeskTickets(db: Pool): Promise<void> {
   await db.query(`
     CREATE SCHEMA IF NOT EXISTS desk;
     CREATE TABLE IF NOT EXISTS desk.tickets (
-      number      integer UNIQUE,
-      status      text NOT NULL,
-      status_type text,
-      serial      text,
-      synced_at   timestamptz
+      number                integer UNIQUE,
+      subject               text,
+      status                text NOT NULL,
+      status_type           text,
+      serial                text,
+      codigo_servicio       text,
+      tipo_servicio         text,
+      created_time          timestamptz,
+      fecha_creacion_ticket date,
+      synced_at             timestamptz,
+      raw                   jsonb
     )`);
 }
 

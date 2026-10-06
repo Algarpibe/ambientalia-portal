@@ -4,7 +4,15 @@
  * TzError 400 con mensaje en español y el campo culpable.
  */
 
-import { esFechaIso, modeloEdm180, type EstadoCalibracion } from './dominio.js';
+import {
+  PLAZO_MAX_DIAS,
+  PLAZO_MIN_DIAS,
+  claveTipoServicio,
+  esFechaIso,
+  modeloEdm180,
+  type EstadoCalibracion,
+  type EstadoPlazo,
+} from './dominio.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
 // tipos) y compila con erasableSyntaxOnly.
@@ -197,4 +205,64 @@ export function parseAvisos(body: unknown): { claves: string[]; fecha: string } 
 
 export function esClave(s: string): boolean {
   return /^[A-Za-z0-9_-]{1,80}$/.test(s);
+}
+
+/** Un ticket de Zoho Desk que no está cerrado, con su plazo ya calculado (pestaña «Servicios»). */
+export interface ServicioVista {
+  numero: number;
+  /** Asunto del ticket, tal como viene de Desk. */
+  asunto: string;
+  /** La cuenta de Desk; si la réplica no la trae, el asunto sin el código de servicio. */
+  cliente: string;
+  /** True si `cliente` sale del asunto y no de la cuenta de Desk. */
+  clienteDeAsunto: boolean;
+  serial: string;
+  /** Tercer tramo del código de servicio; vacío si no lo hay. */
+  modelo: string;
+  /** Tal como lo escribe Desk; vacío mientras la réplica no lo traiga. */
+  tipoServicio: string;
+  /** Estado tal como lo nombra Desk. */
+  estado: string;
+  /** Día de ingreso en Colombia (AAAA-MM-DD). */
+  ingreso: string | null;
+  /** Plazo configurado para su tipo, en días hábiles; null = sin plazo. */
+  plazoDias: number | null;
+  fechaLimite: string | null;
+  /** Días hábiles que quedan; negativo = días hábiles de atraso. */
+  diasHabiles: number | null;
+  estadoPlazo: EstadoPlazo;
+  /** True si la réplica lleva más de un día sin refrescar el ticket: puede estar ya cerrado. */
+  sinConfirmar: boolean;
+}
+
+/** Plazo de un tipo de servicio (pestaña «Configuración»). */
+export interface PlazoServicio {
+  /** El tipo normalizado (`claveTipoServicio`): con ella casan los tickets. */
+  clave: string;
+  etiqueta: string;
+  /** Días hábiles; null = sin plazo. */
+  dias: number | null;
+  /** Tickets abiertos en Desk con este tipo. */
+  ticketsAbiertos: number;
+  /** Quién lo cambió por última vez; null si sigue como se sembró. */
+  actualizadoPor: string | null;
+  actualizadoEn: string | null;
+}
+
+export interface CambioPlazo {
+  tipo: string;
+  dias: number | null;
+}
+
+/** Valida el cuerpo de PUT /trazabilidad/plazos. Vacío (null o '') = sin plazo. */
+export function parsePlazo(body: unknown): CambioPlazo {
+  const b = obj(body, 'body');
+  const tipo = texto(b.tipo, 'tipo', 80, true)!;
+  if (!claveTipoServicio(tipo)) throw invalido('Falta «tipo».', 'tipo');
+  const d = b.dias;
+  if (d === null || d === undefined || d === '') return { tipo, dias: null };
+  if (typeof d !== 'number' || !Number.isInteger(d) || d < PLAZO_MIN_DIAS || d > PLAZO_MAX_DIAS) {
+    throw invalido(`El plazo debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o quedar vacío.`, 'dias');
+  }
+  return { tipo, dias: d };
 }
