@@ -1,16 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Search } from 'lucide-react';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type EstadoCalibracion } from '../dominio';
 import { conteoPorEstado, fmtFecha } from '../lib/vistas';
 import { EstadoBadge, TONO, Tag } from '../ui';
 
 export interface Filtro {
-  texto: string;
   estados: EstadoCalibracion[];
   cliente: string;
   enAmbientalia: boolean;
 }
-export const FILTRO_VACIO: Filtro = { texto: '', estados: [], cliente: '', enAmbientalia: false };
+export const FILTRO_VACIO: Filtro = { estados: [], cliente: '', enAmbientalia: false };
 
 type Orden = 'vigencia' | 'cliente' | 'serial' | 'ultimaCalibracion' | 'ultimaEntrada';
 
@@ -25,7 +23,6 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
   const [orden, setOrden] = useState<{ k: Orden; dir: 1 | -1 }>({ k: 'vigencia', dir: 1 });
   const clientes = useMemo(() => [...new Set(equipos.map((e) => e.cliente))].sort((a, b) => a.localeCompare(b, 'es')), [equipos]);
   const cnt = conteoPorEstado(equipos);
-  const q = filtro.texto.trim().toLowerCase();
 
   const lista = useMemo(() => {
     const val = (e: EquipoVista): string | number => {
@@ -49,20 +46,19 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
         (e) =>
           (filtro.estados.length === 0 || filtro.estados.includes(e.estado)) &&
           (!filtro.cliente || e.cliente === filtro.cliente) &&
-          (!filtro.enAmbientalia || e.seguimiento?.enAmbientalia) &&
-          (!q || `${e.cliente} ${e.serial} ${e.modelo}`.toLowerCase().includes(q)),
+          (!filtro.enAmbientalia || e.seguimiento?.enAmbientalia),
       )
       .sort((a, b) => {
         const x = val(a);
         const y = val(b);
         return (x < y ? -1 : x > y ? 1 : 0) * orden.dir;
       });
-  }, [equipos, filtro, q, orden]);
+  }, [equipos, filtro, orden]);
 
   const set = (p: Partial<Filtro>) => onFiltro({ ...filtro, ...p });
   const toggleEstado = (s: EstadoCalibracion) =>
     set({ estados: filtro.estados.includes(s) ? filtro.estados.filter((x) => x !== s) : [...filtro.estados, s] });
-  const hayFiltro = filtro.texto || filtro.estados.length || filtro.cliente || filtro.enAmbientalia;
+  const hayFiltro = filtro.estados.length || filtro.cliente || filtro.enAmbientalia;
 
   const Th = ({ k, children, right = false }: { k: Orden; children: string; right?: boolean }) => (
     <th className={`px-3 py-2 font-semibold ${right ? 'text-right' : ''}`}>
@@ -76,22 +72,11 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <label className="relative min-w-[200px] flex-1">
-          <span className="sr-only">Buscar</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
-          <input
-            type="search"
-            value={filtro.texto}
-            onChange={(e) => set({ texto: e.target.value })}
-            placeholder="Buscar cliente o serial"
-            className="block min-h-[44px] w-full rounded-xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-          />
-        </label>
         <select
           value={filtro.cliente}
           onChange={(e) => set({ cliente: e.target.value })}
           aria-label="Cliente"
-          className="min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
+          className="min-h-[44px] min-w-[200px] flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
         >
           <option value="">Todos los clientes</option>
           {clientes.map((c) => (
