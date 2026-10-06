@@ -4,7 +4,7 @@ Fase 1, solo análisis. No cambia código, migraciones ni configuración. Fecha 
 
 Convenciones de este documento:
 
-- Cada afirmación lleva ruta y línea, la referencia a una consulta (`Z1`…`Z11` en la base `zoho-hub`, `D1`…`D10` en la base `desk`, ejecutadas el 06/10/2026 en modo solo lectura) o la palabra **hipótesis**.
+- Cada afirmación lleva ruta y línea, la referencia a una consulta (`Z1`…`Z11` en la base `zoho-hub`; `D1`…`D10` y `P1`…`P7` en la base `desk`; todas ejecutadas el 06/10/2026 en modo solo lectura) o la palabra **hipótesis**.
 - Las rutas que empiezan por `Desk2:` son del repositorio de Desk 2.0 (`C:\dev\Desk_2_R1.023`, HEAD `b14cd0f`), que solo se leyó. El resto son de este repositorio.
 - No hay nombres de clientes, seriales ni correos: solo números de ticket, estados y recuentos. El repositorio es público.
 - «Desk 2.0» es la aplicación y su base `desk`; «la réplica» es `desk.tickets` de la base `zoho-hub`, la que el portal lee hoy.
@@ -147,7 +147,7 @@ La agenda lee los tickets de `desk.tickets` de la base `desk` (D4). Qué aporta 
 - **Más al día, al menos en el caso comprobado.** El ticket 884 figura «Finalizado» en Desk 2.0 (741 cerrados, D2) y sigue «Ingresado» en la réplica (740 cerrados, Z1).
 - **Es el camino hacia el relevo de Zoho.** Cuando un ticket se mueve desde la app, la sincronización con Zoho deja de reescribirlo (`managed_by_app`, `Desk2:packages/zoho-sync/src/db/repo.ts:71`), y solo Desk 2.0 conoce su estado.
 
-**Cómo se mantiene al día:** el código actual de Desk 2.0 ya no relee solo los 100 tickets con actividad más reciente. Pide a Zoho los modificados desde la última marca y relee cada uno por su detalle, con campos personalizados incluidos (`sincronizarModificados`, `Desk2:packages/zoho-sync/src/sync.ts:360-410`); si esa búsqueda falla, cae al método antiguo (`sync.ts:174`, `:404-407`). Eso explica que allí estén el cierre del 884 y la `classification`. **No verificado:** que esa versión sea la desplegada en producción, y que el trabajador del hub la use también. La antigüedad real de la sincronización se mide con las consultas pendientes (P2 y P5) y se trata con D7.
+**Cómo se mantiene al día:** el código actual de Desk 2.0 ya no relee solo los 100 tickets con actividad más reciente. Pide a Zoho los modificados desde la última marca y relee cada uno por su detalle, con campos personalizados incluidos (`sincronizarModificados`, `Desk2:packages/zoho-sync/src/sync.ts:360-410`); si esa búsqueda falla, cae al método antiguo (`sync.ts:174`, `:404-407`). Eso explica que allí estén el cierre del 884 y la `classification`. **Verificado en producción el 06/10/2026:** 33 de los 35 abiertos traen campos personalizados y la base se había sincronizado 45 segundos antes de consultarla (P2, P5). El trabajador del hub no la usa: en la réplica esos campos siguen vacíos (Z3).
 
 ### B.2 Respaldo: la réplica del portal
 
@@ -195,7 +195,7 @@ interface TicketTaller {
   flujoOrigen: 'clasificacion' | 'deducido' | 'manual';
   prioridad: number;                                             // 0 = sin prioridad fijada
   llegada: { instante: number | null; exacta: boolean };         // entrada en el estado actual
-  sinConfirmar: boolean;                                         // más de un día sin refrescar (D7)
+  sinConfirmar: boolean;                                         // más de un día sin refrescar (D7); nunca los gestionados por la app
 }
 // elegirFuente(): desk2 si hay DESK2_DB_URL y responde; si no, replica. Devuelve además el motivo del respaldo.
 ```
@@ -319,7 +319,7 @@ Lo que hay que cambiar en el historial para la agenda:
 1. **Que lea de la fuente principal** y no apunte en respaldo (B.5).
 2. **Etapa al leer.** La tabla guarda la clave del estado; la correspondencia estado → etapa se aplica al leer, igual que el papel.
 
-`desk.ticket_history` guarda el registro de eventos de Zoho (en la réplica, 42.588 eventos y 4.433 transiciones de blueprint, Z7 y Z8). El rol tendrá permiso de lectura sobre la tabla de Desk 2.0, pero por D8 no se usa en esta construcción.
+`desk.ticket_history` guarda el registro de eventos de Zoho (en la réplica, 42.588 eventos y 4.433 transiciones de blueprint, Z7 y Z8; en Desk 2.0, 41.521 y 4.304, con el último evento del 20/08/2026, P7). El rol tendrá permiso de lectura sobre la tabla de Desk 2.0, pero por D8 no se usa en esta construcción.
 
 ---
 
@@ -660,9 +660,9 @@ Las cinco primeras fechas previstas son las de los tickets 1005, 1006, 1007, 101
 
 ## I. Riesgos
 
-No quedan decisiones de negocio abiertas: las nueve de la primera versión de este documento se resolvieron el 06/10/2026 (D4 a D11).
+Las nueve decisiones abiertas de la primera versión de este documento se resolvieron el 06/10/2026 (D4 a D11). La verificación posterior de la base `desk` dejó una sola propuesta nueva pendiente de visto bueno: usar la fecha de remisión de entrada como orden de llegada (ver «Verificación de la fuente principal»). No bloquea la construcción.
 
-1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla, y no está verificado qué versión corre en producción. Se mide con las consultas pendientes y se trata con la marca «sin confirmar» (D7).
+1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla. El 06/10/2026 estaba al día (P5). Además, con esta fuente la marca «sin confirmar» señala tickets sin cambios, no datos dudosos (ver «Verificación de la fuente principal»).
 2. **El orden de llegada actual es aproximado.** 34 de los 35 abiertos no tienen llegada exacta. El reparto inicial lo corrige el jefe de taller (D6, D8).
 3. **La remisión de entrada aún no ordena nada.** No hay remisiones de la app ni posteriores al 24/07/2026 (D8).
 4. **Dos procesos sincronizan Zoho por separado.** Desk 2.0 y el trabajador del hub pueden discrepar sobre un mismo ticket. Por eso el historial del portal no apunta en respaldo (B.5).
@@ -687,12 +687,68 @@ No quedan decisiones de negocio abiertas: las nueve de la primera versión de es
 - **Los valores reales de `DATABASE_URL` y `DB_SCHEMA` de Desk 2.0 en producción:** el propio repositorio los marca como no verificados (`Desk2:DEPLOY.md:331-333`). Sí se verificó el resultado: base `desk`, tablas en el esquema `desk` (D1).
 - **Que los ids de los tickets de Zoho coincidan en las dos bases:** se comparó por número, que es la clave del cruce.
 - **Que «Equipo Nuevo» en el asunto y `HV_` en el código identifiquen siempre ese flujo:** visto en cuatro tickets. Solo afecta al respaldo, y hay marca manual (D11).
-- **Cuántos abiertos tienen tipo de servicio y fecha de ingreso en Desk 2.0, y la antigüedad de su sincronización:** pendiente de las consultas de la sección siguiente.
+- **Por qué tres tickets «Ingresado» no tienen fecha de remisión de entrada:** el dato dice que falta (P6), no por qué.
 - **El comportamiento real de la agenda:** no existe todavía; el ejemplo de H es un cálculo a mano.
 
-## Consultas pendientes (base `desk`, solo lectura)
+## Verificación de la fuente principal (base `desk`, 06/10/2026)
 
-A ejecutar en `psql` sobre la base `desk`. No devuelven clientes, seriales ni correos. El resultado se incorporará a este documento.
+Consultas `P1`…`P7`, ejecutadas en modo solo lectura sobre la base `desk` el 06/10/2026 a las 23:52 UTC. No devuelven clientes, seriales ni correos.
+
+### Resultados
+
+**P1 — Abiertos por estado.** 35 abiertos, en los mismos diez estados que D2: Rev./Diagnostico 7, Servicio externo 7, Notificación cliente 6, Por Facturar 5, En Proceso 3, Ingresado 3, y uno en cada uno de En Espera de Repuestos, En espera de SKU inventario, OV asignada y Por Entregar.
+
+**P2 — Qué traen rellenos los 35 abiertos.**
+
+| Dato | Abiertos que lo tienen |
+|---|---|
+| Tipo de servicio (`tipo_servicio`) | 34 |
+| Fecha de creación del ticket (`fecha_creacion_ticket`) | 33 |
+| Fecha de remisión de entrada (`fecha_remision_entrada`) | 30 |
+| Campos personalizados (`custom_fields`) | 33 |
+| Fecha de modificación (`modified_time`) | 34 |
+| Clasificación (`classification`) | 34 |
+| Prioridad fijada en la app (`prioridad_en_app_at`) | 0 |
+
+**P3 — Tipo de servicio de los abiertos.** Diagnostico 26, Mantenimiento 3, No aplica 3, Calibración 2 (escrita una vez con mayúscula y otra sin ella) y 1 sin tipo.
+
+**P4 — Clasificación.**
+
+| `classification` | Tickets | Abiertos |
+|---|---|---|
+| (vacía) | 707 | 1 |
+| Equipo Para Servicio | 59 | 29 |
+| Equipo Nuevo | 9 | 4 |
+| Equipo para servicio de mantenimiento | 1 | 1 |
+
+**P5 — Antigüedad de la sincronización.** Última sincronización de la base: 45 segundos antes de la consulta. De los 35 abiertos, 31 se sincronizaron el mismo día y 4 llevan más de un día: tres de Zoho (689 desde el 18/06/2026; 881 y 882 desde el 14/09/2026) y el 10005, que nació en la app y no tiene fecha de sincronización.
+
+**P7 — Historial de eventos.** 41.521 eventos de 747 tickets, 4.304 de ellos transiciones de blueprint. El último evento es del 20/08/2026.
+
+### Lo que confirman
+
+- **La sincronización por detalle está en producción.** 33 de los 35 abiertos traen campos personalizados y 34 la fecha de modificación (P2), y la base se refrescó segundos antes de consultarla (P5). En la réplica del portal esos campos están vacíos en todos los tickets.
+- **El tipo de servicio viene de Zoho.** 34 de 35 abiertos lo traen (P2), así que con Desk 2.0 la marca «sin tipo» de D9 afecta hoy a un solo ticket (968). El tipo puesto a mano en el portal sigue ganando. Las dos grafías de «calibración» caen en la misma clave (`claveTipoServicio`, `apps/hub-api/src/trazabilidad/dominio.ts:190-197`).
+- **El flujo se puede leer de `classification`** en 34 de 35 abiertos (D11). Hay una tercera grafía, «Equipo para servicio de mantenimiento», en el ticket nacido en la app; no es equipo nuevo, así que va al flujo de servicio.
+- **Ninguna prioridad fijada** (D1): FIFO puro.
+- **El historial de eventos no sirve para llegadas recientes:** se detuvo el 20/08/2026 (P7). Coherente con D8.
+
+### Dos consecuencias para el diseño
+
+1. **«Sin confirmar» no puede medirse igual con Desk 2.0.** Su sincronización solo relee los tickets que cambian en Zoho. Un ticket que nadie toca conserva una fecha de sincronización antigua aunque su estado sea correcto: es el caso del 689, el 881 y el 882, cuyo estado coincidía con Zoho Desk el 06/10/2026. Y un ticket nacido en la app no tiene fecha de sincronización nunca. Con la regla de D7 tal cual («más de un día sin refrescar») esos cuatro saldrían marcados de forma permanente. El adaptador excluye de la marca a los tickets gestionados por la app; para los de Zoho, la marca con Desk 2.0 significa «sin cambios desde hace más de un día», no «dato dudoso». Como D7 los mantiene en la agenda en cualquier caso, no altera la proyección, solo el rótulo.
+2. **Hay una fecha de remisión de entrada utilizable.** `desk.tickets.fecha_remision_entrada` viene rellena en 30 de los 35 abiertos (P2, P6). Es la fecha que el taller escribe en Zoho al recibir el equipo, con precisión de día. No es una reconstrucción del historial, sino una columna actual, y es justo el criterio de la regla 4. Los cinco que no la tienen son los tres «Ingresado» (880, 881, 882), el «OV asignada» (996) y el 968.
+
+### Propuesta que necesita el visto bueno de Gerencia
+
+**Usar `fecha_remision_entrada` como orden de llegada cuando no hay llegada exacta**, en lugar del número de ticket. Afecta al reparto inicial (D6) y a la fila mientras dure el orden aproximado (D8). Solo con la fuente Desk 2.0; en respaldo la columna está vacía.
+
+Con ese criterio, el orden de los siete tickets de Diagnóstico del ejemplo H sería 999 (31/08), 993 (18/09), 1005, 1006 y 1007 (25/09), 10005 (29/09) y 1010 (02/10), en vez de 10005, 993, 999, 1005, 1006, 1007 y 1010.
+
+Otra lectura del mismo dato: los tres tickets en «Ingresado» no tienen fecha de remisión de entrada. Puede que el equipo no haya llegado, o que la fecha no se haya escrito; conviene que el jefe de taller lo revise en el arranque.
+
+Mientras no se decida, rige D8 tal como está y el ejemplo H no cambia.
+
+### Consultas ejecutadas
 
 ```sql
 SET default_transaction_read_only = on;
@@ -726,6 +782,8 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
   - Flujo por `classification`; flujo deducido en la réplica (asunto y `HV_`).
   - Llegada exacta desde `ticket_transitions`; aproximada desde el historial del portal.
   - Prioridad: solo la fijada (`prioridad_en_app_at`); el `High` / `Low` de Zoho da 0.
+  - «Sin confirmar»: un ticket gestionado por la app, sin fecha de sincronización, no se marca.
+  - Tipo de servicio leído de Desk 2.0; el puesto a mano en el portal gana.
   - Cierres: lista de fechas con Desk 2.0, vacía en respaldo.
   - Guarda: el módulo no contiene ninguna sentencia de escritura contra Desk 2.0.
 - **Comprobación manual al desplegar:** que hub-api alcanza `desk-db` con el rol `portal_agenda_reader`.
