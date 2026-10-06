@@ -32,6 +32,7 @@ const fila = (serial: string, cliente: string, ultimaCalibracion: string | null,
 // Los plazos llevan semilla (migración 043): los tests que la editan la dejan
 // como recién migrada vaciando la tabla y volviendo a ejecutar ese fichero.
 const SQL_043 = readFileSync(fileURLToPath(new URL('../users/migrations/043_trazabilidad_plazos.sql', import.meta.url)), 'utf8');
+const SQL_044 = readFileSync(fileURLToPath(new URL('../users/migrations/044_trazabilidad_servicios_tipo.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
@@ -45,7 +46,7 @@ afterAll(async () => {
   await db?.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, desk.tickets RESTART IDENTITY');
+  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, desk.tickets RESTART IDENTITY');
 });
 
 describe('importar', () => {
@@ -285,6 +286,161 @@ describe('servicios abiertos en Desk', () => {
     expect(await servicio(1060)).toMatchObject({ modelo: 'EDM180C', cliente: 'Cliente Uno S.A.S.', clienteDeAsunto: false });
     expect(await servicio(1061)).toMatchObject({ modelo: 'EDM180C', cliente: 'Servicio Técnico Cliente Uno Monitor de Partículas', clienteDeAsunto: true });
     expect(await servicio(1062)).toMatchObject({ modelo: '', cliente: '', clienteDeAsunto: true, asunto: '' });
+  });
+
+  it('el tipo que viene de Desk se marca con su origen, y sin tipo no hay origen', async () => {
+    await ticket({ numero: 1070, tipo: ' Diagnostico ' });
+    await ticket({ numero: 1071 });
+    expect(await servicio(1070)).toMatchObject({ tipoServicio: 'Diagnostico', tipoOrigen: 'desk', tipoDesk: 'Diagnostico', tipoManual: null });
+    expect(await servicio(1071)).toMatchObject({ tipoServicio: '', tipoOrigen: null, tipoDesk: '', tipoManual: null });
+  });
+});
+
+// El tipo de servicio puesto a mano por ticket (portal.tmc_servicios_tipo):
+// manda sobre el que traiga Desk y es el que decide el plazo.
+describe('tipo de servicio puesto a mano', () => {
+  const ticket = (numero: number, tipo: string | null = null, fechaTicket = '2026-10-05', statusType = 'Open') =>
+    db.query(
+      `INSERT INTO desk.tickets (number, status, status_type, serial, tipo_servicio, fecha_creacion_ticket, synced_at)
+       VALUES ($1, 'En diagnóstico', $2, '18A00001', $3, $4::date, NOW())`,
+      [numero, statusType, tipo, fechaTicket],
+    );
+  const servicio = async (numero: number) => (await repo.listarServicios(db, hoy)).find((s) => s.numero === numero)!;
+  const filas = async () =>
+    (
+      await db.query(
+        `SELECT numero, clave, etiqueta, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en
+           FROM portal.tmc_servicios_tipo ORDER BY numero`,
+      )
+    ).rows;
+
+  beforeEach(async () => {
+    await resembrarPlazos();
+  });
+
+  it('con Desk vacío (como llega hoy), el tipo puesto a mano le da plazo y fecha límite', async () => {
+    await ticket(3001);
+    expect(await servicio(3001)).toMatchObject({ tipoServicio: '', estadoPlazo: 'SIN_PLAZO' });
+    await repo.fijarTipoServicio(db, 3001, 'Diagnóstico', actor);
+    const s = await servicio(3001);
+    expect(s).toMatchObject({
+      tipoServicio: 'Diagnóstico',
+      tipoOrigen: 'manual',
+      tipoDesk: '',
+      plazoDias: 3,
+      fechaLimite: '2026-10-08',
+      diasHabiles: 2,
+      estadoPlazo: 'EN_PLAZO',
+    });
+    expect(s.tipoManual).toMatchObject({ clave: 'diagnostico', por: actor.email });
+    expect(s.tipoManual!.en).toMatch(/^\d{4}-\d{2}-\d{2}/);
+  });
+
+  it('el puesto a mano gana a un tipo distinto de Desk, que se sigue viendo', async () => {
+    await ticket(3002, 'Diagnóstico');
+    expect(await servicio(3002)).toMatchObject({ tipoServicio: 'Diagnóstico', tipoOrigen: 'desk', plazoDias: 3, fechaLimite: '2026-10-08' });
+    await repo.fijarTipoServicio(db, 3002, 'Calibración', actor);
+    expect(await servicio(3002)).toMatchObject({
+      tipoServicio: 'Calibración',
+      tipoOrigen: 'manual',
+      tipoDesk: 'Diagnóstico',
+      plazoDias: 4,
+      fechaLimite: '2026-10-09',
+    });
+  });
+
+  it('quitarlo (null) vuelve al de Desk o, si no hay, a «sin tipo»', async () => {
+    await ticket(3003, 'Diagnóstico');
+    await ticket(3004);
+    await repo.fijarTipoServicio(db, 3003, 'Calibración', actor);
+    await repo.fijarTipoServicio(db, 3004, 'Calibración', actor);
+    await repo.fijarTipoServicio(db, 3003, null, actor);
+    await repo.fijarTipoServicio(db, 3004, null, actor);
+    expect(await servicio(3003)).toMatchObject({ tipoServicio: 'Diagnóstico', tipoOrigen: 'desk', tipoManual: null, plazoDias: 3, fechaLimite: '2026-10-08' });
+    expect(await servicio(3004)).toMatchObject({ tipoServicio: '', tipoOrigen: null, tipoManual: null, plazoDias: null, estadoPlazo: 'SIN_PLAZO' });
+    expect(await filas()).toEqual([]);
+    // Quitar lo que no estaba puesto no es un error.
+    await expect(repo.fijarTipoServicio(db, 3004, null, actor)).resolves.toBeUndefined();
+  });
+
+  it('casa por clave normalizada y guarda la etiqueta de Configuración, firmada con id y correo', async () => {
+    await ticket(3005);
+    await repo.fijarTipoServicio(db, 3005, '  CALIBRACION ', actor);
+    const f = await filas();
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ numero: 3005, clave: 'calibracion', etiqueta: 'Calibración', por_id: actor.userId, actualizado_por: actor.email });
+    expect(f[0].actualizado_en).toBeInstanceOf(Date);
+    expect(await servicio(3005)).toMatchObject({ tipoServicio: 'Calibración', plazoDias: 4 });
+  });
+
+  it('cambiarlo otra vez reemplaza el anterior y vuelve a firmar', async () => {
+    await ticket(3006);
+    await repo.fijarTipoServicio(db, 3006, 'Diagnóstico', actor);
+    await repo.fijarTipoServicio(db, 3006, 'Calibración', { userId: null, email: 'otra@ambientalia.com.co' });
+    expect(await filas()).toMatchObject([{ numero: 3006, clave: 'calibracion', por_id: null, actualizado_por: 'otra@ambientalia.com.co' }]);
+  });
+
+  it('un tipo sin plazo configurado se puede elegir y sale «sin plazo»; al ponerle plazo, lo coge', async () => {
+    await ticket(3007);
+    await repo.fijarTipoServicio(db, 3007, 'Mantenimiento', actor);
+    expect(await servicio(3007)).toMatchObject({ tipoServicio: 'Mantenimiento', tipoOrigen: 'manual', plazoDias: null, fechaLimite: null, estadoPlazo: 'SIN_PLAZO' });
+    await repo.guardarPlazo(db, { tipo: 'Mantenimiento', dias: 1 }, actor);
+    expect(await servicio(3007)).toMatchObject({ plazoDias: 1, fechaLimite: '2026-10-06', estadoPlazo: 'VENCE_HOY' });
+  });
+
+  it('un tipo que no está en Configuración → 400 y no se guarda nada', async () => {
+    await ticket(3008, 'Instalación');
+    for (const tipo of ['Instalación', 'Reparación', 'diagnostic']) {
+      await expect(repo.fijarTipoServicio(db, 3008, tipo, actor)).rejects.toMatchObject({ status: 400, field: 'tipo' });
+    }
+    expect(await filas()).toEqual([]);
+  });
+
+  it('un ticket que no existe en Desk → 404, también al quitar', async () => {
+    await expect(repo.fijarTipoServicio(db, 9999, 'Diagnóstico', actor)).rejects.toMatchObject({ status: 404 });
+    await expect(repo.fijarTipoServicio(db, 9999, null, actor)).rejects.toMatchObject({ status: 404 });
+    expect(await filas()).toEqual([]);
+  });
+
+  it('lo puesto a mano sobrevive a volver a ejecutar la migración', async () => {
+    await ticket(3009);
+    await repo.fijarTipoServicio(db, 3009, 'Diagnóstico', actor);
+    await db.query(SQL_044);
+    await aplicarMigraciones(db);
+    expect(await filas()).toMatchObject([{ numero: 3009, clave: 'diagnostico', actualizado_por: actor.email }]);
+    expect(await servicio(3009)).toMatchObject({ tipoServicio: 'Diagnóstico', tipoOrigen: 'manual' });
+  });
+
+  it('la tabla rechaza un número de ticket que no sea positivo y una clave vacía', async () => {
+    const ins = (numero: number, clave: string) =>
+      db.query(`INSERT INTO portal.tmc_servicios_tipo (numero, clave, etiqueta, actualizado_por) VALUES ($1, $2, 'x', 'st@ambientalia.com.co')`, [numero, clave]);
+    await expect(ins(0, 'diagnostico')).rejects.toThrow();
+    await expect(ins(1, '')).rejects.toThrow();
+  });
+
+  it('los tipos que se pueden elegir son las filas de Configuración, en su mismo orden', async () => {
+    await ticket(3010, 'Instalación');
+    expect(await repo.listarTiposServicio(db)).toEqual([
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+      { clave: 'garantia', etiqueta: 'Garantía', dias: null },
+      { clave: 'mantenimiento', etiqueta: 'Mantenimiento', dias: null },
+      { clave: 'no aplica', etiqueta: 'No aplica', dias: null },
+      { clave: 'otro', etiqueta: 'Otro', dias: null },
+    ]);
+  });
+
+  it('Configuración cuenta los tickets abiertos por su tipo efectivo', async () => {
+    await ticket(3011);
+    await ticket(3012, 'Diagnóstico');
+    await ticket(3013, 'Diagnóstico');
+    await ticket(3014, null, '2026-10-05', 'Closed');
+    await repo.fijarTipoServicio(db, 3011, 'Calibración', actor);
+    await repo.fijarTipoServicio(db, 3012, 'Calibración', actor);
+    await repo.fijarTipoServicio(db, 3014, 'Calibración', actor);
+    const p = await repo.listarPlazos(db);
+    expect(p.find((x) => x.clave === 'calibracion')!.ticketsAbiertos).toBe(2);
+    expect(p.find((x) => x.clave === 'diagnostico')!.ticketsAbiertos).toBe(1);
   });
 });
 

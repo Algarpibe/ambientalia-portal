@@ -4,8 +4,8 @@
  * cada servicio NO se calculan aquí: llegan del servidor, que es quien conoce
  * los festivos; aquí sólo se colocan en columnas, se cuentan y se redactan.
  */
-import { RETROCESO_MAX_DIAS, claveTipoServicio, diasEntre, sumarDias, type EstadoPlazo, type ServicioVista } from '../dominio';
-import { MESES_CORTOS } from './vistas';
+import { RETROCESO_MAX_DIAS, claveTipoServicio, diasEntre, sumarDias, type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import { MESES_CORTOS, fmtFecha } from './vistas';
 
 /** Días en blanco que se dejan tras la última fecha límite (o tras hoy). */
 export const MARGEN_EJE_DIAS = 5;
@@ -45,7 +45,7 @@ export const porUrgenciaPlazo = (a: ServicioVista, b: ServicioVista): number =>
 export interface ResumenServicios {
   total: number;
   conPlazo: number;
-  /** Tickets que Desk manda sin tipo de servicio: no pueden tener plazo. */
+  /** Tickets sin tipo de servicio (ni puesto a mano ni de Desk): no pueden tener plazo. */
   sinTipo: number;
   sinConfirmar: number;
   /** Tipos que sí vienen pero no tienen plazo en Configuración. */
@@ -71,6 +71,57 @@ export function resumenServicios(servicios: readonly ServicioVista[]): ResumenSe
     sinConfirmar,
     tiposSinPlazo: [...tipos.values()].sort((a, b) => a.localeCompare(b, 'es')),
   };
+}
+
+/**
+ * El aviso azul de arriba: Desk no manda el tipo de servicio, y se elige a
+ * mano. Null cuando ya no queda ningún servicio sin tipo (el aviso se va solo).
+ */
+export function avisoSinTipo(res: Pick<ResumenServicios, 'total' | 'sinTipo'>): { titulo: string; texto: string } | null {
+  if (res.total === 0 || res.sinTipo === 0) return null;
+  const todos = res.sinTipo === res.total;
+  const uno = res.sinTipo === 1;
+  return {
+    titulo: todos ? 'Zoho Desk todavía no envía el tipo de servicio' : `${res.sinTipo} de ${res.total} servicios ${uno ? 'sigue' : 'siguen'} sin tipo de servicio`,
+    texto: `${
+      todos ? 'Sin tipo no se puede calcular la fecha límite, y los servicios salen «sin plazo».' : 'Zoho Desk no lo envía y, mientras no lo tengan, salen «sin plazo».'
+    } Elígelo a mano en la columna «Tipo de servicio» de la lista: el plazo y la barra del calendario aparecen al momento.`,
+  };
+}
+
+export interface OpcionTipo {
+  /** La clave del tipo; vacía = sin tipo puesto a mano (vale lo que diga Desk). */
+  valor: string;
+  texto: string;
+}
+
+const textoOpcion = (etiqueta: string, dias: number | null): string =>
+  `${etiqueta} · ${dias === null ? 'sin plazo' : `${dias} día${dias === 1 ? '' : 's'} háb.`}`;
+
+/**
+ * El desplegable del tipo de servicio de un ticket. La primera opción (valor
+ * vacío) es «no hay tipo puesto a mano»: «Sin tipo» si Desk no trae ninguno, o
+ * «Según Desk: …» si lo trae. Después, los tipos de Configuración en su orden.
+ * `valor` es lo elegido ahora: la clave del puesto a mano, o vacío.
+ */
+export function selectorTipo(s: ServicioVista, tipos: readonly TipoServicioOpcion[]): { valor: string; opciones: OpcionTipo[] } {
+  const valor = s.tipoManual?.clave ?? '';
+  const opciones: OpcionTipo[] = [
+    { valor: '', texto: s.tipoDesk ? `Según Desk: ${s.tipoDesk}` : 'Sin tipo' },
+    ...tipos.map((t) => ({ valor: t.clave, texto: textoOpcion(t.etiqueta, t.dias) })),
+  ];
+  // Un tipo puesto a mano cuya fila ya no está en Configuración: se enseña igual, para que el desplegable diga la verdad.
+  if (valor && !tipos.some((t) => t.clave === valor)) opciones.push({ valor, texto: textoOpcion(s.tipoServicio, s.plazoDias) });
+  return { valor, opciones };
+}
+
+/** De dónde sale el tipo de un servicio, para el `title` de su desplegable. */
+export function notaTipo(s: ServicioVista): string {
+  if (s.tipoManual) {
+    const desk = s.tipoDesk && claveTipoServicio(s.tipoDesk) !== s.tipoManual.clave ? ` Zoho Desk dice: ${s.tipoDesk}.` : '';
+    return `Puesto a mano por ${s.tipoManual.por} el ${fmtFecha(s.tipoManual.en)}.${desk}`;
+  }
+  return s.tipoDesk ? 'Tipo de servicio según Zoho Desk.' : 'Zoho Desk no envía el tipo de servicio de este ticket: elígelo aquí.';
 }
 
 /** Eje de tiempo del calendario: una columna por día, de `inicio` a `fin` (ambos incluidos). */

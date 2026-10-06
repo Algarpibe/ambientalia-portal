@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { estadoPlazo, type ServicioVista } from '../dominio';
+import { claveTipoServicio, estadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
 import {
   TONO_PLAZO,
+  avisoSinTipo,
   barraServicio,
+  notaTipo,
+  selectorTipo,
   diasDelEje,
   ejeServicios,
   mesesDelEje,
@@ -31,7 +34,20 @@ function sv(ingreso: string | null, fechaLimite: string | null, extra: Partial<S
     diasHabiles: fechaLimite ? 0 : null,
     estadoPlazo: estadoPlazo(fechaLimite, HOY),
     sinConfirmar: false,
+    tipoOrigen: fechaLimite ? 'desk' : null,
+    tipoDesk: fechaLimite ? 'Diagnóstico' : '',
+    tipoManual: null,
     ...extra,
+  };
+}
+
+/** Los campos de un servicio con el tipo puesto a mano (y Desk sin tipo). */
+function manual(etiqueta: string): Partial<ServicioVista> {
+  return {
+    tipoServicio: etiqueta,
+    tipoOrigen: 'manual',
+    tipoDesk: '',
+    tipoManual: { clave: claveTipoServicio(etiqueta), por: 'st@ambientalia.com.co', en: '2026-10-06 09:15:00.123456-05' },
   };
 }
 
@@ -145,5 +161,72 @@ describe('colores, textos y orden', () => {
       sv('2026-10-05', null, { tipoServicio: 'Garantía' }),
     ];
     expect(resumenServicios(L)).toEqual({ total: 6, conPlazo: 1, sinTipo: 2, sinConfirmar: 1, tiposSinPlazo: ['Garantía', 'Mantenimiento'] });
+  });
+
+  it('un tipo puesto a mano deja de contar como «sin tipo»', () => {
+    const L = [sv('2026-10-05', null), sv('2026-10-05', '2026-10-08', manual('Diagnóstico')), sv('2026-10-05', null, manual('Garantía'))];
+    expect(resumenServicios(L)).toMatchObject({ total: 3, conPlazo: 1, sinTipo: 1, tiposSinPlazo: ['Garantía'] });
+  });
+});
+
+describe('desplegable del tipo de servicio', () => {
+  const TIPOS: TipoServicioOpcion[] = [
+    { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
+    { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 1 },
+    { clave: 'garantia', etiqueta: 'Garantía', dias: null },
+  ];
+
+  it('sin tipo en Desk: la primera opción es «Sin tipo» y después van los configurados, en su orden', () => {
+    expect(selectorTipo(sv('2026-10-05', null), TIPOS)).toEqual({
+      valor: '',
+      opciones: [
+        { valor: '', texto: 'Sin tipo' },
+        { valor: 'calibracion', texto: 'Calibración · 4 días háb.' },
+        { valor: 'diagnostico', texto: 'Diagnóstico · 1 día háb.' },
+        { valor: 'garantia', texto: 'Garantía · sin plazo' },
+      ],
+    });
+  });
+
+  it('con tipo en Desk: la primera opción es «Según Desk: …» y es la elegida mientras no haya uno a mano', () => {
+    const s = selectorTipo(sv('2026-10-05', '2026-10-08', { tipoServicio: 'Diagnostico', tipoDesk: 'Diagnostico', tipoOrigen: 'desk' }), TIPOS);
+    expect(s.valor).toBe('');
+    expect(s.opciones[0]).toEqual({ valor: '', texto: 'Según Desk: Diagnostico' });
+    expect(s.opciones).toHaveLength(4);
+  });
+
+  it('con un tipo puesto a mano, el elegido es su clave; el de Desk sigue en la primera opción', () => {
+    const s = selectorTipo(sv('2026-10-05', '2026-10-09', { ...manual('Calibración'), tipoDesk: 'Diagnóstico' }), TIPOS);
+    expect(s.valor).toBe('calibracion');
+    expect(s.opciones[0]).toEqual({ valor: '', texto: 'Según Desk: Diagnóstico' });
+  });
+
+  it('si el tipo puesto a mano ya no está en Configuración, se añade para que el desplegable no mienta', () => {
+    const s = selectorTipo(sv('2026-10-05', null, manual('Instalación')), TIPOS);
+    expect(s.valor).toBe('instalacion');
+    expect(s.opciones[s.opciones.length - 1]).toEqual({ valor: 'instalacion', texto: 'Instalación · sin plazo' });
+    expect(s.opciones).toHaveLength(5);
+  });
+
+  it('nota del origen: quién y cuándo lo puso a mano, y lo que dice Desk si es distinto', () => {
+    expect(notaTipo(sv('2026-10-05', null))).toBe('Zoho Desk no envía el tipo de servicio de este ticket: elígelo aquí.');
+    expect(notaTipo(sv('2026-10-05', '2026-10-08', { tipoServicio: 'Diagnóstico', tipoDesk: 'Diagnóstico', tipoOrigen: 'desk' }))).toBe('Tipo de servicio según Zoho Desk.');
+    expect(notaTipo(sv('2026-10-05', '2026-10-08', manual('Diagnóstico')))).toBe('Puesto a mano por st@ambientalia.com.co el 06/10/2026.');
+    expect(notaTipo(sv('2026-10-05', '2026-10-09', { ...manual('Calibración'), tipoDesk: 'Diagnóstico' }))).toBe(
+      'Puesto a mano por st@ambientalia.com.co el 06/10/2026. Zoho Desk dice: Diagnóstico.',
+    );
+    // La misma grafía con otra tilde no es «distinto».
+    expect(notaTipo(sv('2026-10-05', '2026-10-08', { ...manual('Diagnóstico'), tipoDesk: 'diagnostico' }))).toBe('Puesto a mano por st@ambientalia.com.co el 06/10/2026.');
+  });
+
+  it('aviso de Desk: lo que falta por elegir, y desaparece cuando todos tienen tipo', () => {
+    expect(avisoSinTipo({ total: 3, sinTipo: 3 })).toEqual({
+      titulo: 'Zoho Desk todavía no envía el tipo de servicio',
+      texto: expect.stringContaining('columna «Tipo de servicio»'),
+    });
+    expect(avisoSinTipo({ total: 3, sinTipo: 1 })?.titulo).toBe('1 de 3 servicios sigue sin tipo de servicio');
+    expect(avisoSinTipo({ total: 5, sinTipo: 2 })?.titulo).toBe('2 de 5 servicios siguen sin tipo de servicio');
+    expect(avisoSinTipo({ total: 3, sinTipo: 0 })).toBeNull();
+    expect(avisoSinTipo({ total: 0, sinTipo: 0 })).toBeNull();
   });
 });

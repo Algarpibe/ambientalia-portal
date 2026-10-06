@@ -12,4 +12,6 @@ export type {
   SeguimientoGuardado,
   ServicioVista,
   TicketDesk,
+  TipoManual,
+  TipoServicioOpcion,
 } from '../../hub-api/src/trazabilidad/types';

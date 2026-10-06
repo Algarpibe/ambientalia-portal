@@ -127,6 +127,58 @@ describe('servicios y plazos', () => {
     }
     expect(queries.some((q) => /INSERT INTO portal\.tmc_plazos/.test(q))).toBe(true);
   });
+
+  it('servicios: la respuesta trae también los tipos que se pueden elegir a mano', async () => {
+    const res = await request(app()).get('/api/trazabilidad/servicios?hoy=2026-10-06').set(auth());
+    expect(res.body.tipos).toEqual([]);
+  });
+});
+
+describe('tipo de servicio puesto a mano', () => {
+  const put = (numero: string, body: unknown, t = auth()) => request(app()).put(`/api/trazabilidad/servicios/${numero}/tipo`).set(t).send(body as object);
+
+  it('401 sin token y 403 sin la app', async () => {
+    expect((await request(app()).put('/api/trazabilidad/servicios/962/tipo').send({ tipo: 'Diagnóstico' })).status).toBe(401);
+    expect((await put('962', { tipo: 'Diagnóstico' }, auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each(['0', '-3', '1.5', 'abc', '12a', '9999999999', '%20'])('número de ticket no válido (%s) → 400 en «numero» y ninguna consulta', async (numero) => {
+    const res = await put(numero, { tipo: 'Diagnóstico' });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('numero');
+    expect(res.body.message).toMatch(/número de ticket/i);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([3, true, ['Diagnóstico'], { a: 1 }])('tipo que no es texto (%j) → 400 en «tipo» y ninguna consulta', async (tipo) => {
+    const res = await put('962', { tipo });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('tipo');
+    expect(queries).toEqual([]);
+  });
+
+  it('sin el campo «tipo», o con un cuerpo que no es un objeto → 400', async () => {
+    expect((await put('962', {})).body.field).toBe('tipo');
+    expect((await put('962', [])).status).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it('un tipo demasiado largo → 400 en «tipo»', async () => {
+    const res = await put('962', { tipo: 'x'.repeat(81) });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('tipo');
+    expect(queries).toEqual([]);
+  });
+
+  it('un ticket que no está en Desk → 404 y no se escribe nada', async () => {
+    for (const tipo of ['Diagnóstico', null, '']) {
+      const res = await put('962', { tipo });
+      expect(res.status).toBe(404);
+      expect(res.body.message).toMatch(/ticket/i);
+    }
+    expect(queries.some((q) => /INSERT|DELETE|UPDATE/.test(q))).toBe(false);
+  });
 });
 
 describe('validación antes de escribir', () => {

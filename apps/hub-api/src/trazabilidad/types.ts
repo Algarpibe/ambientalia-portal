@@ -12,6 +12,7 @@ import {
   modeloEdm180,
   type EstadoCalibracion,
   type EstadoPlazo,
+  type OrigenTipo,
 } from './dominio.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -207,6 +208,23 @@ export function esClave(s: string): boolean {
   return /^[A-Za-z0-9_-]{1,80}$/.test(s);
 }
 
+/** Tipo de servicio puesto a mano a un ticket (portal.tmc_servicios_tipo). */
+export interface TipoManual {
+  /** El tipo normalizado: la `clave` de su fila en Configuración. */
+  clave: string;
+  /** Correo de quien lo puso. */
+  por: string;
+  en: string;
+}
+
+/** Un tipo de servicio que se puede elegir a mano: una fila de portal.tmc_plazos. */
+export interface TipoServicioOpcion {
+  clave: string;
+  etiqueta: string;
+  /** Su plazo en días hábiles; null = se puede elegir, pero el servicio queda «sin plazo». */
+  dias: number | null;
+}
+
 /** Un ticket de Zoho Desk que no está cerrado, con su plazo ya calculado (pestaña «Servicios»). */
 export interface ServicioVista {
   numero: number;
@@ -219,8 +237,17 @@ export interface ServicioVista {
   serial: string;
   /** Tercer tramo del código de servicio; vacío si no lo hay. */
   modelo: string;
-  /** Tal como lo escribe Desk; vacío mientras la réplica no lo traiga. */
+  /**
+   * El tipo que vale para el plazo: el puesto a mano si lo hay (con la etiqueta
+   * de Configuración) y, si no, el de Desk tal como lo escribe. Vacío = sin tipo.
+   */
   tipoServicio: string;
+  /** De dónde sale `tipoServicio`; null si el ticket no tiene tipo. */
+  tipoOrigen: OrigenTipo | null;
+  /** Lo que trae Desk, valga o no; vacío mientras la réplica no lo traiga. */
+  tipoDesk: string;
+  /** El tipo puesto a mano, quién lo puso y cuándo; null si no hay ninguno. */
+  tipoManual: TipoManual | null;
   /** Estado tal como lo nombra Desk. */
   estado: string;
   /** Día de ingreso en Colombia (AAAA-MM-DD). */
@@ -265,4 +292,27 @@ export function parsePlazo(body: unknown): CambioPlazo {
     throw invalido(`El plazo debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o quedar vacío.`, 'dias');
   }
   return { tipo, dias: d };
+}
+
+/**
+ * El número de ticket de la ruta PUT /trazabilidad/servicios/:numero/tipo: un
+ * entero positivo escrito sólo con dígitos (cabe de sobra en el INTEGER de la tabla).
+ */
+export function parseNumeroTicket(v: unknown): number {
+  if (typeof v !== 'string' || !/^[1-9]\d{0,8}$/.test(v)) throw invalido('El número de ticket no es válido.', 'numero');
+  return Number(v);
+}
+
+/**
+ * Valida el cuerpo de PUT /trazabilidad/servicios/:numero/tipo. `tipo` null o
+ * vacío = quitar el puesto a mano (vuelve a valer el de Desk). Que el tipo esté
+ * en Configuración lo comprueba el repo, que es quien ve la tabla.
+ */
+export function parseTipoManual(body: unknown): { tipo: string | null } {
+  const b = obj(body, 'body');
+  const t = b.tipo;
+  if (t === undefined) throw invalido('Falta «tipo».', 'tipo');
+  if (t === null) return { tipo: null };
+  if (typeof t !== 'string') throw invalido('«tipo» debe ser texto, o quedar vacío para quitarlo.', 'tipo');
+  return { tipo: texto(t, 'tipo', 80, false) };
 }

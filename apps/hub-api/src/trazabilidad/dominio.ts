@@ -178,6 +178,21 @@ export function claveTipoServicio(tipo: unknown): string {
     .trim();
 }
 
+/** De dónde sale el tipo de servicio de un ticket: puesto a mano en la app, o el que trae Desk. */
+export type OrigenTipo = 'manual' | 'desk';
+
+/**
+ * El tipo de servicio que vale para un ticket. El puesto a mano en la app
+ * GANA al que traiga Desk; sin él, vale el de Desk; sin ninguno, queda vacío y
+ * sin origen («sin tipo»). Con este tipo se busca el plazo.
+ */
+export function tipoEfectivo(manual: unknown, desk: unknown): { tipo: string; origen: OrigenTipo | null } {
+  const m = String(manual ?? '').trim();
+  if (m) return { tipo: m, origen: 'manual' };
+  const d = String(desk ?? '').trim();
+  return d ? { tipo: d, origen: 'desk' } : { tipo: '', origen: null };
+}
+
 /**
  * Modelo del equipo: el tercer tramo del código de servicio
  * («MT_18A00001_EDM180C_261002» → «EDM180C»). La réplica no lo trae en columna.

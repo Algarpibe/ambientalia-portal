@@ -109,3 +109,30 @@ describe('043_trazabilidad_plazos.sql', () => {
     expect(SQL).not.toMatch(/\bdesk\./);
   });
 });
+
+describe('044_trazabilidad_servicios_tipo.sql', () => {
+  // La 044 se vuelve a ejecutar en cada arranque: sólo puede crear lo que falte.
+  // Cualquier sentencia que escriba o borre datos se llevaría por delante los
+  // tipos puestos a mano.
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/044_trazabilidad_servicios_tipo.sql', import.meta.url)), 'utf8');
+  const sentencias = SQL.replace(/--.*$/gm, '')
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('sólo crea, y siempre con IF NOT EXISTS', () => {
+    expect(sentencias.length).toBeGreaterThanOrEqual(1);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|INDEX) IF NOT EXISTS /);
+    expect(SQL).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_servicios_tipo/);
+  });
+
+  it('no toca el esquema desk ni le pone una clave foránea', () => {
+    expect(SQL).not.toMatch(/\bdesk\./);
+    expect(SQL).not.toMatch(/\bREFERENCES\b/i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 043', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'043_trazabilidad_plazos\.sql',\s*'044_trazabilidad_servicios_tipo\.sql'/);
+  });
+});

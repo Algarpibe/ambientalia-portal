@@ -13,6 +13,7 @@ import {
   modeloDeCodigo,
   modeloEdm180,
   sumarDias,
+  tipoEfectivo,
 } from './dominio.js';
 
 describe('fechas', () => {
@@ -119,6 +120,15 @@ describe('servicios: tipo, modelo, cliente y estado del plazo', () => {
     expect(estadoPlazo('2026-10-06', '2026-10-06')).toBe('VENCE_HOY');
     expect(estadoPlazo('2026-10-05', '2026-10-06')).toBe('VENCIDO');
     expect(estadoPlazo(null, '2026-10-06')).toBe('SIN_PLAZO');
+  });
+
+  it('tipo efectivo: el puesto a mano gana al de Desk; sin él, el de Desk; sin ninguno, vacío', () => {
+    expect(tipoEfectivo('Calibración', 'Diagnóstico')).toEqual({ tipo: 'Calibración', origen: 'manual' });
+    expect(tipoEfectivo('Calibración', '')).toEqual({ tipo: 'Calibración', origen: 'manual' });
+    expect(tipoEfectivo(null, '  Diagnóstico ')).toEqual({ tipo: 'Diagnóstico', origen: 'desk' });
+    expect(tipoEfectivo('   ', 'Diagnóstico')).toEqual({ tipo: 'Diagnóstico', origen: 'desk' });
+    expect(tipoEfectivo(null, null)).toEqual({ tipo: '', origen: null });
+    expect(tipoEfectivo(undefined, '  ')).toEqual({ tipo: '', origen: null });
   });
 });
 

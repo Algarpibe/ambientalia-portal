@@ -5,15 +5,26 @@ import { captureError } from '../sentry.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { festivosDelEje } from './plazos.js';
 import * as repo from './repo.js';
-import { TzError, esClave, parseAvisos, parseImportacion, parsePlazo, parseSeguimiento, type Actor } from './types.js';
+import {
+  TzError,
+  esClave,
+  parseAvisos,
+  parseImportacion,
+  parseNumeroTicket,
+  parsePlazo,
+  parseSeguimiento,
+  parseTipoManual,
+  type Actor,
+} from './types.js';
 
 // Router de «Trazabilidad Mantenimientos Clientes» (GRIMM EDM 180). Se monta
 // bajo /api. Sin cached(): el seguimiento cambia con cada aviso que se registra.
 //
-// Permisos: cualquiera con la app asignada lee, importa, registra seguimiento
-// y cambia los plazos; cada importación y cada cambio quedan firmados con el
-// correo de quien lo hizo (tmc_importaciones, tmc_seguimiento.actualizado_por,
-// tmc_plazos.actualizado_por).
+// Permisos: cualquiera con la app asignada lee, importa, registra seguimiento,
+// cambia los plazos y pone a mano el tipo de servicio de un ticket; cada
+// importación y cada cambio quedan firmados con el correo de quien lo hizo
+// (tmc_importaciones, tmc_seguimiento.actualizado_por,
+// tmc_plazos.actualizado_por, tmc_servicios_tipo.actualizado_por).
 
 export const APP_ID = 'trazabilidad-mantenimientos';
 
@@ -97,14 +108,31 @@ export function createTrazabilidadRouter(db: Pool): Router {
   );
 
   // Tickets de Desk sin cerrar con su plazo. `festivos` son los del tramo que
-  // pinta el calendario de barras, para que la app sombree los días no hábiles.
+  // pinta el calendario de barras, para que la app sombree los días no hábiles;
+  // `tipos`, los que se pueden elegir a mano para un ticket.
+  const servicios = async (hoy: string) => {
+    const [lista, tipos] = await Promise.all([repo.listarServicios(db, hoy), repo.listarTiposServicio(db)]);
+    return { hoy, servicios: lista, festivos: festivosDelEje(hoy, lista.map((s) => s.fechaLimite)), tipos };
+  };
+
   router.get(
     '/trazabilidad/servicios',
     ...gated,
-    route('tmc_servicios', async (req) => {
+    route('tmc_servicios', (req) => servicios(hoyOf(req))),
+  );
+
+  // Tipo de servicio puesto a mano a un ticket: {tipo}; null o vacío lo quita
+  // y vuelve a valer el de Desk. Devuelve lo mismo que el GET, ya actualizado:
+  // un cambio de tipo mueve fecha límite, contadores y festivos del eje.
+  router.put(
+    '/trazabilidad/servicios/:numero/tipo',
+    ...gated,
+    route('tmc_servicio_tipo', async (req) => {
+      const numero = parseNumeroTicket(req.params.numero);
+      const { tipo } = parseTipoManual(req.body);
       const hoy = hoyOf(req);
-      const servicios = await repo.listarServicios(db, hoy);
-      return { hoy, servicios, festivos: festivosDelEje(hoy, servicios.map((s) => s.fechaLimite)) };
+      await repo.fijarTipoServicio(db, numero, tipo, actorOf(req));
+      return servicios(hoy);
     }),
   );
 

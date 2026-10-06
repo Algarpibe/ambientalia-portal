@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronsLeft, RefreshCw, Search } from 'lucide-react';
 import { api, type Servicios as Datos } from '../api';
-import { ESTADOS_PLAZO, ETIQUETA_PLAZO, type EstadoPlazo, type ServicioVista } from '../dominio';
-import { TONO_PLAZO, barraServicio, columna, diasDelEje, ejeServicios, mesesDelEje, porUrgenciaPlazo, resumenServicios, textoPlazo } from '../lib/servicios';
+import { ESTADOS_PLAZO, ETIQUETA_PLAZO, type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import {
+  TONO_PLAZO,
+  avisoSinTipo,
+  barraServicio,
+  columna,
+  diasDelEje,
+  ejeServicios,
+  mesesDelEje,
+  notaTipo,
+  porUrgenciaPlazo,
+  resumenServicios,
+  selectorTipo,
+  textoPlazo,
+} from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { Alert, Button, Loading, Tag } from '../ui';
 
@@ -11,15 +24,21 @@ import { Alert, Button, Loading, Tag } from '../ui';
  * fecha límite que les da el plazo de su tipo de servicio (pestaña
  * «Configuración»). Dos vistas de lo mismo: la lista y el calendario de barras.
  * Carga sus propios datos: no dependen del inventario de la F-ST-022.
+ *
+ * El tipo de servicio se puede poner a mano desde la lista (Desk aún no lo
+ * envía) y manda sobre el de Desk. Al cambiarlo, el servidor devuelve todos
+ * los servicios recalculados y se sustituyen de una vez: fecha límite,
+ * contadores y barras salen del mismo dato, sin recargar la página.
  */
 type Vista = 'lista' | 'calendario';
 type Orden = 'plazo' | 'numero' | 'cliente' | 'serial' | 'tipo' | 'estado' | 'ingreso' | 'limite';
 
 interface Props {
   onConfigurar: () => void;
+  notificar: (msg: string) => void;
 }
 
-export default function Servicios({ onConfigurar }: Props) {
+export default function Servicios({ onConfigurar, notificar }: Props) {
   const [datos, setDatos] = useState<Datos | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -44,7 +63,29 @@ export default function Servicios({ onConfigurar }: Props) {
     void cargar();
   }, [cargar]);
 
+  /** Ticket cuyo tipo se está guardando. Mientras dura, ningún desplegable admite otro cambio: las respuestas no se pisan. */
+  const [guardando, setGuardando] = useState<number | null>(null);
+
+  /** Pone a mano el tipo de un ticket (clave vacía = quitarlo) y pinta lo que devuelve el servidor. */
+  const cambiarTipo = useCallback(
+    async (s: ServicioVista, clave: string, etiqueta: string) => {
+      setGuardando(s.numero);
+      try {
+        setDatos(await api.fijarTipoServicio(s.numero, clave || null));
+        setError(null);
+        notificar(clave ? `Ticket ${s.numero}: ${etiqueta}` : `Ticket ${s.numero}: tipo puesto a mano quitado`);
+      } catch (e) {
+        setError(`No se pudo guardar el tipo de servicio del ticket ${s.numero}: ${(e as Error).message}`);
+        notificar(`Ticket ${s.numero}: no se pudo guardar el tipo de servicio`);
+      } finally {
+        setGuardando(null);
+      }
+    },
+    [notificar],
+  );
+
   const servicios = useMemo(() => datos?.servicios ?? [], [datos]);
+  const tipos = useMemo(() => datos?.tipos ?? [], [datos]);
   const res = useMemo(() => resumenServicios(servicios), [servicios]);
   const cnt = useMemo(() => {
     const c: Record<EstadoPlazo, number> = { VENCIDO: 0, VENCE_HOY: 0, EN_PLAZO: 0, SIN_PLAZO: 0 };
@@ -91,6 +132,7 @@ export default function Servicios({ onConfigurar }: Props) {
 
   if (!datos) return error ? <Alert tone="red">{error}</Alert> : <Loading texto="Cargando los servicios abiertos en Zoho Desk…" />;
 
+  const aviso = avisoSinTipo(res);
   const toggleEstado = (e: EstadoPlazo) => setEstados((x) => (x.includes(e) ? x.filter((y) => y !== e) : [...x, e]));
 
   const Th = ({ k, children, right = false }: { k: Orden; children: string; right?: boolean }) => (
@@ -106,13 +148,10 @@ export default function Servicios({ onConfigurar }: Props) {
     <div className="flex flex-col gap-3">
       {error && <Alert tone="red">{error}</Alert>}
 
-      {/* Hoy Desk no manda el tipo de servicio: se dice claro en vez de enseñar un calendario vacío sin explicación. */}
-      {res.total > 0 && res.sinTipo > 0 && (
-        <Alert tone="blue" title={res.sinTipo === res.total ? 'Todavía no hay plazos que pintar' : `${res.sinTipo} de ${res.total} servicios llegan sin tipo de servicio`}>
-          <p>
-            {res.sinTipo === res.total ? 'Zoho Desk aún no envía el tipo de servicio de los tickets' : 'Zoho Desk no envía su tipo de servicio'}, así que no se
-            les puede calcular fecha límite y salen «sin plazo». Las barras aparecerán solas en cuanto Desk lo traiga; no hay que hacer nada aquí.
-          </p>
+      {/* Hoy Desk no manda el tipo de servicio: se dice claro, y dónde se elige a mano. Se va solo cuando todos tienen tipo. */}
+      {aviso && (
+        <Alert tone="blue" title={aviso.titulo}>
+          <p>{aviso.texto}</p>
         </Alert>
       )}
       {res.tiposSinPlazo.length > 0 && (
@@ -222,7 +261,9 @@ export default function Servicios({ onConfigurar }: Props) {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-[13px]">{s.serial || <Vacio />}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.modelo || <Vacio />}</td>
-                  <td className="whitespace-nowrap px-3 py-2">{s.tipoServicio || <span className="text-gray-400">sin tipo</span>}</td>
+                  <td className="whitespace-nowrap px-3 py-1.5">
+                    <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando} onCambio={cambiarTipo} />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.estado}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmtFecha(s.ingreso)}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmtFecha(s.fechaLimite)}</td>
@@ -259,6 +300,67 @@ function Cliente({ s }: { s: ServicioVista }) {
     </span>
   ) : (
     <span className="text-gray-900">{s.cliente}</span>
+  );
+}
+
+/**
+ * El tipo de servicio del ticket, elegible a mano. La primera opción es «no hay
+ * nada puesto a mano» (vale lo que diga Desk); las demás, los tipos de
+ * Configuración. Cambiarlo guarda al momento. Los puestos a mano llevan la
+ * marca «manual», y el `title` dice quién y cuándo.
+ */
+function TipoSelect({
+  s,
+  tipos,
+  guardando,
+  bloqueado,
+  onCambio,
+}: {
+  s: ServicioVista;
+  tipos: readonly TipoServicioOpcion[];
+  guardando: boolean;
+  bloqueado: boolean;
+  onCambio: (s: ServicioVista, clave: string, etiqueta: string) => void | Promise<void>;
+}) {
+  const { valor, opciones } = selectorTipo(s, tipos);
+  const sinTipo = !s.tipoServicio;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <select
+        value={valor}
+        disabled={bloqueado}
+        aria-busy={guardando}
+        aria-label={`Tipo de servicio del ticket ${s.numero}`}
+        title={notaTipo(s)}
+        // La fila no tiene acción propia hoy; si la gana, usar el desplegable no debe dispararla.
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const clave = e.target.value;
+          if (clave === valor) return;
+          void onCambio(s, clave, tipos.find((t) => t.clave === clave)?.etiqueta ?? '');
+        }}
+        className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+          sinTipo ? 'border-dashed border-gray-300 text-gray-500' : 'border-gray-300 text-gray-900'
+        }`}
+      >
+        {opciones.map((o) => (
+          <option key={o.valor} value={o.valor}>
+            {o.texto}
+          </option>
+        ))}
+      </select>
+      {guardando ? (
+        <span className="text-[11px] text-gray-500" role="status">
+          guardando…
+        </span>
+      ) : (
+        s.tipoManual && (
+          <span title={notaTipo(s)}>
+            <Tag tone="blue">manual</Tag>
+          </span>
+        )
+      )}
+    </span>
   );
 }
 

@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { EquipoVista, FilaImportada, PlazoServicio, ResumenImportacion, Seguimiento, ServicioVista } from './dominio';
+import type { EquipoVista, FilaImportada, PlazoServicio, ResumenImportacion, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -27,11 +27,15 @@ export interface Servicios {
   servicios: ServicioVista[];
   /** Festivos del tramo que puede pintar el calendario de barras. */
   festivos: string[];
+  /** Los tipos de servicio que se pueden elegir a mano para un ticket, en el orden de Configuracion. */
+  tipos: TipoServicioOpcion[];
 }
 
 export const api = {
   inventario: () => request<Inventario>('GET', '/equipos'),
   servicios: () => request<Servicios>('GET', '/servicios'),
+  /** Pone a mano el tipo de servicio de un ticket (null = quitarlo). Devuelve los servicios ya recalculados. */
+  fijarTipoServicio: (numero: number, tipo: string | null) => request<Servicios>('PUT', `/servicios/${numero}/tipo`, { tipo }),
   plazos: () => request<{ plazos: PlazoServicio[] }>('GET', '/plazos'),
   guardarPlazo: (tipo: string, dias: number | null) => request<{ plazos: PlazoServicio[] }>('PUT', '/plazos', { tipo, dias }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>

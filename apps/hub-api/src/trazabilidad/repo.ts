@@ -1,11 +1,11 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 y 043). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 044). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
-import { asignarClaves, asuntoSinCodigo, claveTipoServicio, estadoCalibracion, modeloDeCodigo } from './dominio.js';
+import { asignarClaves, asuntoSinCodigo, claveTipoServicio, estadoCalibracion, modeloDeCodigo, tipoEfectivo } from './dominio.js';
 import { calcularPlazo } from './plazos.js';
 import {
   TzError,
@@ -18,6 +18,7 @@ import {
   type ResumenImportacion,
   type Seguimiento,
   type ServicioVista,
+  type TipoServicioOpcion,
 } from './types.js';
 
 type PoolClient = Awaited<ReturnType<Pool['connect']>>;
@@ -115,10 +116,19 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
 /** Abierto en Desk: cualquier tipo de estado que no sea 'Closed' (también el vacío). */
 const TICKET_ABIERTO = `t.status_type IS DISTINCT FROM 'Closed'`;
 
-/** Plazo configurado (días hábiles) de cada tipo de servicio, por clave normalizada. */
-async function plazosPorClave(db: Db): Promise<Map<string, number>> {
-  const { rows } = await db.query(`SELECT clave, dias_habiles FROM portal.tmc_plazos WHERE dias_habiles IS NOT NULL`);
-  return new Map((rows as Row[]).map((r) => [r.clave as string, Number(r.dias_habiles)]));
+/** El orden de la pestaña «Configuración»: con plazo primero y, dentro de cada grupo, alfabético. */
+const porPlazoYEtiqueta = (a: { dias: number | null; etiqueta: string }, b: { dias: number | null; etiqueta: string }): number =>
+  Number(a.dias === null) - Number(b.dias === null) || a.etiqueta.localeCompare(b.etiqueta, 'es');
+
+/**
+ * Los tipos de servicio que se pueden elegir a mano para un ticket: las filas
+ * de portal.tmc_plazos (tengan plazo o no), en el orden de «Configuración».
+ */
+export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]> {
+  const { rows } = await db.query(`SELECT clave, etiqueta, dias_habiles FROM portal.tmc_plazos`);
+  return (rows as Row[])
+    .map((r) => ({ clave: r.clave as string, etiqueta: r.etiqueta as string, dias: r.dias_habiles === null ? null : Number(r.dias_habiles) }))
+    .sort(porPlazoYEtiqueta);
 }
 
 /**
@@ -131,26 +141,38 @@ async function plazosPorClave(db: Db): Promise<Map<string, number>> {
  * clave normalizada, y eso se hace aquí y no en SQL para no depender de
  * `unaccent`. Sin tipo, o con un tipo sin plazo, el servicio sale «sin plazo».
  *
+ * SU tipo es el efectivo (`tipoEfectivo`): el puesto a mano en
+ * portal.tmc_servicios_tipo gana al que traiga Desk. El puesto a mano se
+ * enseña con la etiqueta que tenga hoy en Configuración (la guardada, si su
+ * fila ya no existe).
+ *
  * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
  * Colombia de created_time. El cliente es la cuenta de Desk que viaja en `raw`
  * y, si no viene, el asunto sin el código de servicio.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
-  const [{ rows }, plazos] = await Promise.all([
+  const [{ rows }, tipos] = await Promise.all([
     db.query(
       `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
               COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
               (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar,
-              t.raw->'contact'->'account'->>'accountName' AS cuenta
+              t.raw->'contact'->'account'->>'accountName' AS cuenta,
+              m.clave AS manual_clave, m.etiqueta AS manual_etiqueta, m.actualizado_por AS manual_por,
+              m.actualizado_en::text AS manual_en
          FROM desk.tickets t
+         LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
         WHERE ${TICKET_ABIERTO}
         ORDER BY t.number DESC`,
     ),
-    plazosPorClave(db),
+    listarTiposServicio(db),
   ]);
+  const porClave = new Map(tipos.map((t) => [t.clave, t]));
   return (rows as Row[]).map((r) => {
-    const tipoServicio = String(r.tipo_servicio ?? '').trim();
-    const plazoDias = plazos.get(claveTipoServicio(tipoServicio)) ?? null;
+    const manualClave: string | null = r.manual_clave ?? null;
+    const tipoDesk = String(r.tipo_servicio ?? '').trim();
+    const manual = manualClave === null ? null : (porClave.get(manualClave)?.etiqueta ?? r.manual_etiqueta);
+    const { tipo: tipoServicio, origen: tipoOrigen } = tipoEfectivo(manual, tipoDesk);
+    const plazoDias = porClave.get(claveTipoServicio(tipoServicio))?.dias ?? null;
     const cuenta = String(r.cuenta ?? '').trim();
     return {
       numero: Number(r.number),
@@ -160,6 +182,9 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
       serial: String(r.serial ?? '').trim(),
       modelo: modeloDeCodigo(r.codigo_servicio),
       tipoServicio,
+      tipoOrigen,
+      tipoDesk,
+      tipoManual: tipoOrigen === 'manual' && manualClave !== null ? { clave: manualClave, por: r.manual_por, en: r.manual_en } : null,
       estado: r.status,
       ingreso: r.ingreso,
       plazoDias,
@@ -179,10 +204,11 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
   const [guardados, enTickets] = await Promise.all([
     db.query(`SELECT clave, etiqueta, dias_habiles, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_plazos`),
     db.query(
-      `SELECT trim(t.tipo_servicio) AS tipo, count(*)::int AS n
+      `SELECT m.clave AS manual_clave, trim(t.tipo_servicio) AS tipo, count(*)::int AS n
          FROM desk.tickets t
-        WHERE ${TICKET_ABIERTO} AND trim(t.tipo_servicio) <> ''
-        GROUP BY 1
+         LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
+        WHERE ${TICKET_ABIERTO} AND (m.clave IS NOT NULL OR trim(t.tipo_servicio) <> '')
+        GROUP BY 1, 2
         ORDER BY min(t.number)`,
     ),
   ]);
@@ -197,17 +223,51 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
       actualizadoEn: r.actualizado_en,
     });
   }
-  // Varias grafías del mismo tipo suman en una sola fila; la etiqueta de un
-  // tipo nuevo es la del ticket más antiguo que lo trae.
+  // Cada ticket cuenta en su tipo efectivo: el puesto a mano si lo hay y, si
+  // no, el de Desk. Varias grafías del mismo tipo suman en una sola fila; la
+  // etiqueta de un tipo nuevo es la del ticket más antiguo que lo trae.
   for (const r of enTickets.rows as Row[]) {
+    if (r.manual_clave !== null) {
+      // Un tipo puesto a mano siempre sale de una fila de tmc_plazos; si ya no está, no se inventa otra.
+      const p = m.get(r.manual_clave);
+      if (p) p.ticketsAbiertos += Number(r.n);
+      continue;
+    }
     const clave = claveTipoServicio(r.tipo);
     if (!clave) continue;
     const p = m.get(clave) ?? { clave, etiqueta: r.tipo, dias: null, ticketsAbiertos: 0, actualizadoPor: null, actualizadoEn: null };
     p.ticketsAbiertos += Number(r.n);
     m.set(clave, p);
   }
-  return [...m.values()].sort(
-    (a, b) => Number(a.dias === null) - Number(b.dias === null) || a.etiqueta.localeCompare(b.etiqueta, 'es'),
+  return [...m.values()].sort(porPlazoYEtiqueta);
+}
+
+/**
+ * Pone a mano (o quita, con `tipo` null) el tipo de servicio de un ticket y lo
+ * firma. El ticket tiene que existir en la réplica de Desk (404) y el tipo
+ * tiene que ser, por clave normalizada, uno de los de portal.tmc_plazos (400).
+ * Se guarda la clave y la etiqueta de esa fila, no lo que se haya tecleado.
+ * Quitar borra la fila: vuelve a valer el tipo de Desk.
+ */
+export async function fijarTipoServicio(db: Db, numero: number, tipo: string | null, actor: Actor): Promise<void> {
+  const ticket = await db.query(`SELECT 1 FROM desk.tickets t WHERE t.number = $1`, [numero]);
+  if (ticket.rows.length === 0) throw new TzError('not_found', 404, 'Ese ticket no está en Zoho Desk.');
+  if (tipo === null) {
+    await db.query(`DELETE FROM portal.tmc_servicios_tipo WHERE numero = $1`, [numero]);
+    return;
+  }
+  const clave = claveTipoServicio(tipo);
+  const { rows } = await db.query(`SELECT etiqueta FROM portal.tmc_plazos WHERE clave = $1`, [clave]);
+  if (!clave || rows.length === 0) {
+    throw new TzError('invalid_input', 400, 'Ese tipo de servicio no está en Configuración.', 'tipo');
+  }
+  await db.query(
+    `INSERT INTO portal.tmc_servicios_tipo (numero, clave, etiqueta, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (numero) DO UPDATE SET
+       clave = EXCLUDED.clave, etiqueta = EXCLUDED.etiqueta, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [numero, clave, (rows[0] as Row).etiqueta, actor.userId, actor.email],
   );
 }
 

@@ -155,7 +155,7 @@ export default function App() {
       </nav>
 
       {/* Servicios y Configuración cargan lo suyo (tickets de Desk y plazos): funcionan aunque no haya inventario importado. */}
-      {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} />}
+      {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
       {tab === 'configuracion' && <Configuracion notificar={notificar} />}
 
       {deInventario && error && (
