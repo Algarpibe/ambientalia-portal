@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 
 // Cableado HTTP del router: guardas de auth/app y validación 400 antes de
@@ -69,10 +71,10 @@ describe('guardas', () => {
     expect(res.status).toBe(403);
   });
 
-  it('200 con la app: devuelve hoy, equipos y la última importación', async () => {
+  it('200 con la app: devuelve hoy, equipos, la última importación y los contactos puestos a mano', async () => {
     const res = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null });
+    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [] });
   });
 
   it('400 con un «hoy» mal formado', async () => {
@@ -302,6 +304,120 @@ describe('servicios: apuntar los estados al leer', () => {
     await request(app()).get('/api/trazabilidad/estados').set(auth());
     await request(app()).get('/api/trazabilidad/equipos').set(auth());
     expect(conexiones.n).toBe(0);
+  });
+});
+
+// Contacto puesto a mano a un cliente (portal.tmc_contactos): a quién iría el
+// aviso. Es parte de una SIMULACIÓN: el router sólo guarda y lee, no envía nada.
+describe('contacto puesto a mano a un cliente', () => {
+  const put = (body: unknown, t = auth()) => request(app()).put('/api/trazabilidad/contactos').set(t).send(body as object);
+  const valido = { cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example'] };
+
+  it('401 sin token y 403 sin la app', async () => {
+    expect((await request(app()).put('/api/trazabilidad/contactos').send(valido)).status).toBe(401);
+    expect((await put(valido, auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([undefined, null, '', '   ', ['Cliente Uno'], { a: 1 }, true])('cliente no válido (%j) → 400 en «cliente» y ninguna consulta', async (cliente) => {
+    const res = await put({ ...valido, cliente });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_input');
+    expect(res.body.field).toBe('cliente');
+    expect(queries).toEqual([]);
+  });
+
+  it('un cliente de más de 200 caracteres → 400 en «cliente»; con 200 justos vale', async () => {
+    const largo = await put({ ...valido, cliente: 'x'.repeat(201) });
+    expect(largo.status).toBe(400);
+    expect(largo.body.field).toBe('cliente');
+    expect(largo.body.message).toMatch(/200 caracteres/);
+    expect(queries).toEqual([]);
+    expect((await put({ ...valido, cliente: 'x'.repeat(200) })).status).toBe(200);
+  });
+
+  it.each([undefined, null, 'compras@cliente-uno.example', 3, { a: 1 }])('«emails» que no es una lista (%j) → 400 en «emails» y ninguna consulta', async (emails) => {
+    const res = await put({ cliente: 'Cliente Uno', emails });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('emails');
+    expect(queries).toEqual([]);
+  });
+
+  it.each([
+    { emails: ['no-es-un-correo'], campo: 'emails[0]' },
+    { emails: ['compras@cliente-uno.example', 'a@b'], campo: 'emails[1]' },
+    { emails: [3], campo: 'emails[0]' },
+    { emails: [null], campo: 'emails[0]' },
+    { emails: [''], campo: 'emails[0]' },
+    { emails: [`${'x'.repeat(250)}@example.com`], campo: 'emails[0]' },
+  ])('un correo que no vale ($emails) → 400 en su posición y ninguna consulta', async ({ emails, campo }) => {
+    const res = await put({ cliente: 'Cliente Uno', emails });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe(campo);
+    expect(res.body.message).toMatch(/correo/i);
+    expect(queries).toEqual([]);
+  });
+
+  it('más de cinco correos distintos → 400 en «emails»; los repetidos no cuentan', async () => {
+    const seis = Array.from({ length: 6 }, (_, i) => `c${i}@example.com`);
+    const res = await put({ cliente: 'Cliente Uno', emails: seis });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('emails');
+    expect(res.body.message).toMatch(/5/);
+    expect(queries).toEqual([]);
+    const repetidos = [...seis.slice(0, 5), ' C0@Example.com '];
+    expect((await put({ cliente: 'Cliente Uno', emails: repetidos })).status).toBe(200);
+  });
+
+  it.each([3, true, ['Ana'], { a: 1 }])('nombre que no es texto (%j) → 400 en «nombre»', async (nombre) => {
+    const res = await put({ ...valido, nombre });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('nombre');
+    expect(queries).toEqual([]);
+  });
+
+  it('un nombre de más de 200 caracteres → 400 en «nombre»', async () => {
+    const res = await put({ ...valido, nombre: 'x'.repeat(201) });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('nombre');
+    expect(queries).toEqual([]);
+  });
+
+  it('un cuerpo que no es un objeto → 400', async () => {
+    expect((await put([])).status).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it('válido → 200 con el inventario entero ya actualizado; un correo interno se admite a mano', async () => {
+    const res = await request(app())
+      .put('/api/trazabilidad/contactos?hoy=2026-10-06')
+      .set(auth())
+      .send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example', 'alguien@ambientalia.com.co'], nombre: 'Ana Pérez' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [] });
+    expect(queries.some((q) => /INSERT INTO portal\.tmc_contactos/.test(q))).toBe(true);
+  });
+
+  it('con la lista vacía se quita el contacto puesto a mano: borra y no inserta', async () => {
+    const res = await put({ cliente: 'Cliente Uno', emails: [] });
+    expect(res.status).toBe(200);
+    expect(queries.some((q) => /DELETE FROM portal\.tmc_contactos/.test(q))).toBe(true);
+    expect(queries.some((q) => /INSERT INTO portal\.tmc_contactos/.test(q))).toBe(false);
+  });
+
+  it('400 con un «hoy» mal formado, antes de escribir', async () => {
+    const res = await request(app()).put('/api/trazabilidad/contactos?hoy=ayer').set(auth()).send(valido);
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('hoy');
+    expect(queries).toEqual([]);
+  });
+
+  // Simulación: ni este router ni lo que cuelga de él tienen por dónde enviar un correo.
+  it('nada de esto envía: ni el router ni el repo ni el dominio ni la validación llaman a la red', () => {
+    for (const f of ['./router.ts', './repo.ts', './dominio.ts', './types.ts']) {
+      const src = readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+      expect(src).not.toMatch(/\bfetch\s*\(|n8n|webhook|nodemailer|smtp|sendMail|outbox/i);
+    }
   });
 });
 

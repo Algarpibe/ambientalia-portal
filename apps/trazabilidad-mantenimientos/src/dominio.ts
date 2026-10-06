@@ -7,6 +7,7 @@ export type {
   EquipoVista,
   EstadoDesk,
   FilaImportada,
+  OrigenCliente,
   PartePlazo,
   PlazoServicio,
   ResumenImportacion,

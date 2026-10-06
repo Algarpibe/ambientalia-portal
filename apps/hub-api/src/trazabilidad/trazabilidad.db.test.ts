@@ -38,6 +38,7 @@ const SQL_044 = readFileSync(fileURLToPath(new URL('../users/migrations/044_traz
 const SQL_045 = readFileSync(fileURLToPath(new URL('../users/migrations/045_trazabilidad_tipo_combinado.sql', import.meta.url)), 'utf8');
 const SQL_046 = readFileSync(fileURLToPath(new URL('../users/migrations/046_trazabilidad_estados_desk.sql', import.meta.url)), 'utf8');
 const SQL_047 = readFileSync(fileURLToPath(new URL('../users/migrations/047_trazabilidad_estados_historial.sql', import.meta.url)), 'utf8');
+const SQL_048 = readFileSync(fileURLToPath(new URL('../users/migrations/048_trazabilidad_contactos.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
@@ -52,7 +53,7 @@ afterAll(async () => {
   await db?.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, portal.tmc_estados_desk, portal.tmc_estados_historial, desk.tickets RESTART IDENTITY');
+  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, portal.tmc_estados_desk, portal.tmc_estados_historial, portal.tmc_contactos, desk.tickets RESTART IDENTITY');
 });
 
 describe('importar', () => {
@@ -184,6 +185,184 @@ describe('ticket abierto en Desk', () => {
   });
 });
 
+// A quién iría el aviso de cada equipo: el contacto del ticket de Desk más
+// reciente con un correo que valga, o el puesto a mano a su cliente
+// (portal.tmc_contactos), que gana. Sólo se guarda y se lee: nada se envía.
+describe('contacto de cada equipo', () => {
+  interface C {
+    numero: number;
+    serial?: string | null;
+    email?: string | null;
+    contacto?: Record<string, unknown> | null;
+    statusType?: string;
+  }
+  const ticket = (t: C) =>
+    db.query(
+      `INSERT INTO desk.tickets (number, status, status_type, serial, synced_at, raw)
+       VALUES ($1, 'Cerrado', $2, $3, NOW(), $4::jsonb)`,
+      [t.numero, t.statusType ?? 'Closed', t.serial === undefined ? '18A00001' : t.serial, JSON.stringify({ email: t.email === undefined ? null : t.email, contact: t.contacto === undefined ? null : t.contacto })],
+    );
+  const persona = (firstName: string | null, lastName: string | null, email: string | null = null) => ({ id: '7', type: null, email, phone: null, mobile: null, account: null, lastName, firstName });
+  const equipo = async (clave: string) => (await repo.listarEquipos(db, hoy)).find((e) => e.clave === clave)!;
+  const contactoDe = async (clave: string) => (await equipo(clave)).contacto;
+  const filas = async () =>
+    (await db.query(`SELECT clave, cliente, emails, nombre, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en FROM portal.tmc_contactos ORDER BY clave`)).rows;
+
+  beforeEach(async () => {
+    await repo.importar(
+      db,
+      { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-17'), fila('18A00002', 'Cliente  Uno', '2025-10-20'), fila('18A00003', 'Cliente Dos', '2025-10-20')] },
+      actor,
+      false,
+    );
+  });
+
+  it('sin tickets, o sin ninguno con correo, el equipo no lleva contacto', async () => {
+    expect(await contactoDe('18A00001')).toBeNull();
+    await ticket({ numero: 900, email: null, contacto: persona('Ana', 'Pérez') });
+    await ticket({ numero: 901, email: '   ' });
+    expect(await contactoDe('18A00001')).toBeNull();
+  });
+
+  it('el del ticket más reciente (número más alto), abierto o cerrado, con el correo en minúsculas y el nombre completo', async () => {
+    await ticket({ numero: 900, email: 'viejo@cliente-uno.example', contacto: persona('Luis', 'Gómez') });
+    await ticket({ numero: 950, email: '  Compras@Cliente-Uno.Example ', contacto: persona(' Ana ', ' Pérez  ') });
+    await ticket({ numero: 920, email: 'medio@cliente-uno.example', statusType: 'Open' });
+    expect(await contactoDe('18A00001')).toEqual({ nombre: 'Ana Pérez', email: 'compras@cliente-uno.example', origen: 'desk', ticket: 950 });
+    expect(await contactoDe('18A00002')).toBeNull();
+  });
+
+  it('el nombre puede venir vacío, y el serial casa sin mayúsculas ni espacios', async () => {
+    await ticket({ numero: 900, serial: '  18a00001 ', email: 'compras@cliente-uno.example', contacto: persona(null, null) });
+    expect(await contactoDe('18A00001')).toEqual({ nombre: '', email: 'compras@cliente-uno.example', origen: 'desk', ticket: 900 });
+  });
+
+  it('si el ticket no trae `email` arriba, vale el de su contacto', async () => {
+    await ticket({ numero: 900, email: null, contacto: persona('Ana', 'Pérez', 'Ana@Cliente-Uno.example') });
+    expect(await contactoDe('18A00001')).toEqual({ nombre: 'Ana Pérez', email: 'ana@cliente-uno.example', origen: 'desk', ticket: 900 });
+  });
+
+  it('salta los correos internos y los mal escritos, y retrocede a un ticket más antiguo', async () => {
+    await ticket({ numero: 990, email: 'Alguien@Ambientalia.com.co', contacto: persona('Persona', 'Interna') });
+    await ticket({ numero: 980, email: 'no-es-un-correo' });
+    await ticket({ numero: 970, email: 'compras@cliente-uno' });
+    await ticket({ numero: 960, email: 'compras@cliente-uno.example', contacto: persona('Ana', 'Pérez') });
+    await ticket({ numero: 950, email: 'otro@cliente-uno.example' });
+    expect(await contactoDe('18A00001')).toEqual({ nombre: 'Ana Pérez', email: 'compras@cliente-uno.example', origen: 'desk', ticket: 960 });
+  });
+
+  it('si todos los tickets del equipo son internos o no valen → null', async () => {
+    await ticket({ numero: 990, email: 'alguien@ambientalia.com.co' });
+    await ticket({ numero: 980, email: 'otra.persona@ambientalia.com.co' });
+    await ticket({ numero: 970, email: 'roto@' });
+    expect(await contactoDe('18A00001')).toBeNull();
+  });
+
+  it('un ticket sin serial, o de otro serial, no le da contacto a nadie más', async () => {
+    await ticket({ numero: 900, serial: null, email: 'compras@cliente-uno.example' });
+    await ticket({ numero: 901, serial: '  ', email: 'compras@cliente-uno.example' });
+    await ticket({ numero: 902, serial: '18A00003', email: 'taller@example.com' });
+    expect(await contactoDe('18A00001')).toBeNull();
+    expect(await contactoDe('18A00003')).toMatchObject({ email: 'taller@example.com', ticket: 902 });
+  });
+
+  it('no multiplica filas ni toca el ticket abierto del equipo', async () => {
+    await ticket({ numero: 900, email: 'a@cliente-uno.example' });
+    await ticket({ numero: 901, email: 'b@cliente-uno.example', statusType: 'Open' });
+    const eq = await repo.listarEquipos(db, hoy);
+    expect(eq.map((e) => e.clave).sort()).toEqual(['18A00001', '18A00002', '18A00003']);
+    expect(eq.find((e) => e.clave === '18A00001')).toMatchObject({ ticket: { numero: 901 }, contacto: { email: 'b@cliente-uno.example', ticket: 901 } });
+  });
+
+  describe('puesto a mano al cliente', () => {
+    it('se guarda firmado y sustituye al de Desk en TODOS los equipos del cliente (el nombre casa normalizado)', async () => {
+      await ticket({ numero: 900, email: 'compras@cliente-uno.example', contacto: persona('Ana', 'Pérez') });
+      await ticket({ numero: 902, serial: '18A00003', email: 'taller@example.com' });
+      await repo.guardarContacto(db, { cliente: ' CLIENTE  uno ', emails: ['jefe@cliente-uno.example', 'copia@example.com'], nombre: 'Luis Gómez' }, actor);
+
+      const manual = { nombre: 'Luis Gómez', email: 'jefe@cliente-uno.example', origen: 'manual', ticket: null };
+      expect(await contactoDe('18A00001')).toEqual(manual); // «Cliente Uno», con ticket en Desk
+      expect(await contactoDe('18A00002')).toEqual(manual); // «Cliente  Uno» (dos espacios), sin ticket
+      expect(await contactoDe('18A00003')).toMatchObject({ origen: 'desk', email: 'taller@example.com' }); // otro cliente
+
+      const f = await filas();
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ clave: 'cliente uno', cliente: ' CLIENTE  uno ', emails: ['jefe@cliente-uno.example', 'copia@example.com'], nombre: 'Luis Gómez', por_id: actor.userId, actualizado_por: actor.email });
+      expect(f[0].actualizado_en).toBeInstanceOf(Date);
+    });
+
+    it('listarContactos los devuelve con sus internos señalados, y un interno puesto a mano SÍ vale como contacto', async () => {
+      await repo.guardarContacto(db, { cliente: 'Cliente Uno', emails: ['alguien@ambientalia.com.co', 'jefe@cliente-uno.example'], nombre: '' }, actor);
+      expect(await repo.listarContactos(db)).toEqual([
+        {
+          clave: 'cliente uno',
+          cliente: 'Cliente Uno',
+          nombre: '',
+          emails: ['alguien@ambientalia.com.co', 'jefe@cliente-uno.example'],
+          internos: ['alguien@ambientalia.com.co'],
+          actualizadoPor: actor.email,
+          actualizadoEn: expect.stringMatching(/^\d{4}-\d{2}-\d{2} /),
+        },
+      ]);
+      expect(await contactoDe('18A00001')).toEqual({ nombre: '', email: 'alguien@ambientalia.com.co', origen: 'manual', ticket: null });
+    });
+
+    it('guardar otra vez sustituye la fila (una por cliente) y vuelve a firmarla', async () => {
+      await repo.guardarContacto(db, { cliente: 'Cliente Uno', emails: ['a@cliente-uno.example'], nombre: 'Ana' }, actor);
+      const otro = { userId: '00000000-0000-4000-8000-000000000002', email: 'otra@example.com' };
+      await repo.guardarContacto(db, { cliente: 'cliente uno', emails: ['b@cliente-uno.example'], nombre: '' }, otro);
+      const f = await filas();
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ clave: 'cliente uno', cliente: 'cliente uno', emails: ['b@cliente-uno.example'], nombre: '', por_id: otro.userId, actualizado_por: otro.email });
+    });
+
+    it('con la lista vacía se quita: se borra la fila y vuelve a valer el de Desk (o ninguno)', async () => {
+      await ticket({ numero: 900, email: 'compras@cliente-uno.example' });
+      await repo.guardarContacto(db, { cliente: 'Cliente Uno', emails: ['jefe@cliente-uno.example'], nombre: '' }, actor);
+      await repo.guardarContacto(db, { cliente: 'CLIENTE UNO', emails: [], nombre: '' }, actor);
+      expect(await filas()).toEqual([]);
+      expect(await contactoDe('18A00001')).toMatchObject({ origen: 'desk', email: 'compras@cliente-uno.example', ticket: 900 });
+      expect(await contactoDe('18A00002')).toBeNull();
+      // Quitar lo que no existe no es un error.
+      await expect(repo.guardarContacto(db, { cliente: 'Cliente Sin Contacto', emails: [], nombre: '' }, actor)).resolves.toBeUndefined();
+    });
+
+    it('se puede poner contacto a un cliente que aún no está en el inventario', async () => {
+      await repo.guardarContacto(db, { cliente: 'Cliente Tres', emails: ['compras@example.com'], nombre: '' }, actor);
+      expect((await repo.listarContactos(db)).map((c) => c.clave)).toEqual(['cliente tres']);
+    });
+
+    it('la tabla no admite una fila sin correos ni con más de cinco', async () => {
+      const ins = (emails: string[]) => db.query(`INSERT INTO portal.tmc_contactos (clave, cliente, emails, actualizado_por) VALUES ('x', 'X', $1::text[], 'alguien@example.com')`, [emails]);
+      await expect(ins([])).rejects.toThrow(/check/i);
+      await expect(ins(Array.from({ length: 6 }, (_, i) => `c${i}@example.com`))).rejects.toThrow(/check/i);
+    });
+
+    it('volver a ejecutar la migración 048 (cada arranque) no toca lo guardado', async () => {
+      await repo.guardarContacto(db, { cliente: 'Cliente Uno', emails: ['jefe@cliente-uno.example'], nombre: 'Luis Gómez' }, actor);
+      const antes = await filas();
+      await db.query(SQL_048);
+      await db.query(SQL_048);
+      expect(await filas()).toEqual(antes);
+      expect(await contactoDe('18A00001')).toMatchObject({ origen: 'manual', email: 'jefe@cliente-uno.example' });
+    });
+
+    it('ninguna tabla del módulo guarda mensajes ni envíos: el aviso automático es sólo una simulación', async () => {
+      const { rows } = await db.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'tmc\\_%' ORDER BY 1`);
+      expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
+        'tmc_contactos',
+        'tmc_equipos',
+        'tmc_estados_desk',
+        'tmc_estados_historial',
+        'tmc_importaciones',
+        'tmc_plazos',
+        'tmc_seguimiento',
+        'tmc_servicios_tipo',
+      ]);
+    });
+  });
+});
+
 // Pestaña «Servicios»: todos los tickets de Desk que no están cerrados, con su
 // fecha límite según el plazo configurado para su tipo de servicio.
 describe('servicios abiertos en Desk', () => {
@@ -289,9 +468,68 @@ describe('servicios abiertos en Desk', () => {
     await ticket({ numero: 1060, asunto, codigo: 'MT_18A00001_EDM180C_260916', raw: { contact: { account: { accountName: 'Cliente Uno S.A.S.' } } } });
     await ticket({ numero: 1061, asunto, codigo: 'MT_18A00001_EDM180C_260916', raw: { contact: null } });
     await ticket({ numero: 1062 });
-    expect(await servicio(1060)).toMatchObject({ modelo: 'EDM180C', cliente: 'Cliente Uno S.A.S.', clienteDeAsunto: false });
-    expect(await servicio(1061)).toMatchObject({ modelo: 'EDM180C', cliente: 'Servicio Técnico Cliente Uno Monitor de Partículas', clienteDeAsunto: true });
-    expect(await servicio(1062)).toMatchObject({ modelo: '', cliente: '', clienteDeAsunto: true, asunto: '' });
+    expect(await servicio(1060)).toMatchObject({ modelo: 'EDM180C', cliente: 'Cliente Uno S.A.S.', clienteOrigen: 'cuenta', clienteDeAsunto: false });
+    expect(await servicio(1061)).toMatchObject({ modelo: 'EDM180C', cliente: 'Servicio Técnico Cliente Uno Monitor de Partículas', clienteOrigen: 'asunto', clienteDeAsunto: true });
+    expect(await servicio(1062)).toMatchObject({ modelo: '', cliente: '', clienteOrigen: 'asunto', clienteDeAsunto: true, asunto: '' });
+  });
+
+  // El cliente de un servicio, por orden: (a) el del equipo del inventario con
+  // ese serial, (b) la cuenta de Desk, (c) el nombre del contacto del ticket y
+  // (d) el asunto sin el código de servicio.
+  describe('cliente del servicio: de dónde sale', () => {
+    const asunto = 'Servicio Técnico Monitor de Partículas MT_18A00001_EDM180C_260916';
+    const codigo = 'MT_18A00001_EDM180C_260916';
+    const cuenta = { accountName: 'Cuenta de Desk S.A.S.', id: '1' };
+    const contacto = (account: unknown = null) => ({ id: '9', firstName: ' Ana ', lastName: 'Pérez', email: 'compras@cliente-uno.example', account });
+
+    it('(a) gana el cliente del equipo del inventario con ese serial, sin mayúsculas ni espacios', async () => {
+      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01')] }, actor, false);
+      await ticket({ numero: 1080, serial: ' 18a00001 ', asunto, codigo, raw: { contact: contacto(cuenta) } });
+      expect(await servicio(1080)).toMatchObject({ cliente: 'Cliente Uno', clienteOrigen: 'equipo', clienteDeAsunto: false });
+    });
+
+    it('(a) con el serial repetido en el inventario, el equipo activo gana al retirado; si no queda ninguno activo, vale el retirado', async () => {
+      // Dos filas con el mismo serial: claves «18A00001» (Cliente Viejo) y «18A00001-2» (Cliente Uno).
+      await repo.importar(db, { archivo: 'v1.xlsx', filas: [fila('18A00001', 'Cliente Viejo', '2025-10-01'), fila('18A00001', 'Cliente Uno', '2025-10-01')] }, actor, false);
+      await db.query(`UPDATE portal.tmc_equipos SET activo = FALSE WHERE clave = '18A00001'`);
+      await ticket({ numero: 1081, serial: '18A00001', asunto, codigo });
+      expect(await servicio(1081)).toMatchObject({ cliente: 'Cliente Uno', clienteOrigen: 'equipo' });
+      // Ninguno activo: vale uno retirado (el de clave más baja, para que no baile).
+      await db.query(`UPDATE portal.tmc_equipos SET activo = FALSE`);
+      expect(await servicio(1081)).toMatchObject({ cliente: 'Cliente Viejo', clienteOrigen: 'equipo', clienteDeAsunto: false });
+    });
+
+    it('(b) sin equipo con ese serial, la cuenta de Desk', async () => {
+      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00002', 'Cliente Dos', '2025-10-01')] }, actor, false);
+      await ticket({ numero: 1082, serial: '18A00001', asunto, codigo, raw: { contact: contacto(cuenta) } });
+      await ticket({ numero: 1083, serial: null, asunto, codigo, raw: { contact: contacto(cuenta) } });
+      expect(await servicio(1082)).toMatchObject({ cliente: 'Cuenta de Desk S.A.S.', clienteOrigen: 'cuenta', clienteDeAsunto: false });
+      expect(await servicio(1083)).toMatchObject({ cliente: 'Cuenta de Desk S.A.S.', clienteOrigen: 'cuenta' });
+    });
+
+    it('(c) sin equipo ni cuenta (lo habitual: `account` llega null), el nombre del contacto del ticket', async () => {
+      await ticket({ numero: 1084, serial: '18A00001', asunto, codigo, raw: { email: 'compras@cliente-uno.example', contact: contacto(null) } });
+      await ticket({ numero: 1085, asunto, codigo, raw: { contact: { firstName: null, lastName: ' Gómez ', account: { accountName: '  ' } } } });
+      expect(await servicio(1084)).toMatchObject({ cliente: 'Ana Pérez', clienteOrigen: 'contacto', clienteDeAsunto: false });
+      expect(await servicio(1085)).toMatchObject({ cliente: 'Gómez', clienteOrigen: 'contacto', clienteDeAsunto: false });
+    });
+
+    it('(d) sin nada de lo anterior, el asunto sin el código de servicio, marcado como «del asunto»', async () => {
+      await ticket({ numero: 1086, serial: '18A00001', asunto, codigo, raw: { contact: { firstName: ' ', lastName: null, account: null } } });
+      await ticket({ numero: 1087, serial: '18A00001', asunto, codigo, raw: null });
+      for (const n of [1086, 1087]) {
+        expect(await servicio(n)).toMatchObject({ cliente: 'Servicio Técnico Monitor de Partículas', clienteOrigen: 'asunto', clienteDeAsunto: true });
+      }
+    });
+
+    it('un equipo del inventario con varios tickets no multiplica los servicios', async () => {
+      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00001', 'Cliente Uno Bis', '2025-10-01')] }, actor, false);
+      await ticket({ numero: 1088, serial: '18A00001' });
+      await ticket({ numero: 1089, serial: '18A00001' });
+      const s = await repo.listarServicios(db, hoy);
+      expect(s.map((x) => x.numero)).toEqual([1089, 1088]);
+      expect(new Set(s.map((x) => x.cliente))).toEqual(new Set(['Cliente Uno']));
+    });
   });
 
   it('el tipo que viene de Desk se marca con su origen, y sin tipo no hay origen', async () => {

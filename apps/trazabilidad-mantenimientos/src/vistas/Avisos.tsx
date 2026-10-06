@@ -1,21 +1,38 @@
 import { useState } from 'react';
 import { Copy, Mail } from 'lucide-react';
-import { api } from '../api';
-import type { EquipoVista } from '../dominio';
+import { api, type Inventario } from '../api';
+import type { ContactoCliente, EquipoVista } from '../dominio';
 import { avisosPorCliente, fmtFecha, mensajeAviso, type GrupoAviso } from '../lib/vistas';
 import { Alert, Button, Modal, TONO, Tag } from '../ui';
+import SimulacionAvisos from './SimulacionAvisos';
 
 interface Props {
   equipos: EquipoVista[];
   hoy: string;
+  /** Los contactos puestos a mano a clientes (para la simulación). */
+  contactos: ContactoCliente[];
   onFicha: (clave: string) => void;
   onCambio: () => Promise<void>;
+  /** Sustituye el inventario por el que devuelve el servidor al guardar un contacto. */
+  onInventario: (inv: Inventario) => void;
   notificar: (msg: string) => void;
 }
 
 const VENTANAS = [30, 60, 90] as const;
 
-export default function Avisos({ equipos, hoy, onFicha, onCambio, notificar }: Props) {
+/**
+ * Dos vistas: «Manual» es la de siempre (redactar, copiar y marcar como
+ * avisado); «Simulación automática» enseña lo que enviaría hoy el aviso
+ * automático a 90, 60 y 30 días, sin enviar nada.
+ */
+const VISTAS = [
+  { id: 'manual', label: 'Manual' },
+  { id: 'simulacion', label: 'Simulación automática' },
+] as const;
+type Vista = (typeof VISTAS)[number]['id'];
+
+export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onInventario, notificar }: Props) {
+  const [vista, setVista] = useState<Vista>('manual');
   const [ventana, setVentana] = useState<number>(90);
   const [redactar, setRedactar] = useState<GrupoAviso | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -39,8 +56,34 @@ export default function Avisos({ equipos, hoy, onFicha, onCambio, notificar }: P
     }
   }
 
+  const selector = (
+    <div role="group" aria-label="Vista de los avisos" className="inline-flex self-start overflow-hidden rounded-xl border border-gray-300 bg-white">
+      {VISTAS.map((v) => (
+        <button
+          key={v.id}
+          type="button"
+          aria-pressed={vista === v.id}
+          onClick={() => setVista(v.id)}
+          className={`min-h-[44px] px-4 text-sm font-medium transition-colors ${vista === v.id ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (vista === 'simulacion') {
+    return (
+      <div className="flex flex-col gap-4">
+        {selector}
+        <SimulacionAvisos equipos={equipos} hoy={hoy} contactos={contactos} onFicha={onFicha} onInventario={onInventario} notificar={notificar} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {selector}
       <div className="flex flex-wrap items-center gap-2">
         <p className="mr-2 text-sm text-gray-600">Equipos vencidos o que vencen en los próximos</p>
         {VENTANAS.map((v) => (

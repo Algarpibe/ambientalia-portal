@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
-import type { EquipoVista } from '../dominio';
+import { esEmailInterno, type EquipoVista } from '../dominio';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
 import { Alert, Button, Drawer, EstadoBadge, Tag } from '../ui';
 
@@ -86,6 +86,28 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
             </div>
           ))}
         </dl>
+
+        <section aria-labelledby="ficha-contacto" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
+          <p id="ficha-contacto" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Contacto para el aviso
+          </p>
+          {e.contacto ? (
+            <>
+              <p className="break-words font-medium text-gray-900">
+                {e.contacto.nombre && <>{e.contacto.nombre} · </>}
+                <span className="break-all">{e.contacto.email}</span>
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Tag tone={e.contacto.origen === 'manual' ? 'blue' : 'gray'}>{e.contacto.origen === 'manual' ? 'Puesto a mano para el cliente' : 'De Zoho Desk'}</Tag>
+                {e.contacto.ticket !== null && <Tag>ticket {e.contacto.ticket}</Tag>}
+                {esEmailInterno(e.contacto.email) && <Tag tone="amber">interno</Tag>}
+              </div>
+            </>
+          ) : (
+            <p className="text-gray-500">Sin contacto: ningún ticket de Desk de este equipo trae un correo del cliente.</p>
+          )}
+          <p className="text-xs text-gray-500">Se cambia, para todos los equipos del cliente, en «Avisos a clientes» → «Simulación automática». Hoy no se envía ningún correo automático.</p>
+        </section>
 
         <form onSubmit={(ev) => void guardar(ev)} className="flex flex-col gap-3 border-t border-gray-200 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Seguimiento</p>

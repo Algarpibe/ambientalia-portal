@@ -185,7 +185,7 @@ export default function App() {
           )}
           {tab === 'equipos' && <Equipos equipos={equipos} filtro={filtro} onFiltro={setFiltro} onFicha={setFicha} />}
           {tab === 'calendario' && <Calendario equipos={equipos} hoy={inv.hoy} mes={calMes} onMes={setCalMes} onFicha={setFicha} />}
-          {tab === 'avisos' && <Avisos equipos={equipos} hoy={inv.hoy} onFicha={setFicha} onCambio={cargar} notificar={notificar} />}
+          {tab === 'avisos' && <Avisos equipos={equipos} hoy={inv.hoy} contactos={inv.contactos ?? []} onFicha={setFicha} onCambio={cargar} onInventario={setInv} notificar={notificar} />}
         </>
       )}
 

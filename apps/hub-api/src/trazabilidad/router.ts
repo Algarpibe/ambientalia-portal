@@ -10,6 +10,7 @@ import {
   TzError,
   esClave,
   parseAvisos,
+  parseContacto,
   parseEstadoDesk,
   parseImportacion,
   parseNumeroTicket,
@@ -23,11 +24,12 @@ import {
 // bajo /api. Sin cached(): el seguimiento cambia con cada aviso que se registra.
 //
 // Permisos: cualquiera con la app asignada lee, importa, registra seguimiento,
-// cambia los plazos, pone a mano el tipo de servicio de un ticket y elige el
-// rol de cada estado de Desk; cada importación y cada cambio quedan firmados
-// con el correo de quien lo hizo (tmc_importaciones,
-// tmc_seguimiento.actualizado_por, tmc_plazos.actualizado_por,
-// tmc_servicios_tipo.actualizado_por, tmc_estados_desk.actualizado_por).
+// cambia los plazos, pone a mano el tipo de servicio de un ticket, elige el
+// rol de cada estado de Desk y pone a mano el contacto de un cliente; cada
+// importación y cada cambio quedan firmados con el correo de quien lo hizo
+// (tmc_importaciones, tmc_seguimiento.actualizado_por,
+// tmc_plazos.actualizado_por, tmc_servicios_tipo.actualizado_por,
+// tmc_estados_desk.actualizado_por, tmc_contactos.actualizado_por).
 
 export const APP_ID = 'trazabilidad-mantenimientos';
 
@@ -70,13 +72,32 @@ export function createTrazabilidadRouter(db: Pool): Router {
       }
     };
 
+  // El inventario: equipos con su estado, su seguimiento, su ticket abierto y
+  // su contacto, más los contactos puestos a mano a clientes (`contactos`), que
+  // la app necesita enteros para simular a quién iría cada aviso.
+  const inventario = async (hoy: string) => {
+    const [equipos, ultimaImportacion, contactos] = await Promise.all([repo.listarEquipos(db, hoy), repo.ultimaImportacion(db), repo.listarContactos(db)]);
+    return { hoy, equipos, ultimaImportacion, contactos };
+  };
+
   router.get(
     '/trazabilidad/equipos',
     ...gated,
-    route('tmc_equipos', async (req) => {
+    route('tmc_equipos', async (req) => inventario(hoyOf(req))),
+  );
+
+  // Contacto puesto a mano a un cliente: {cliente, emails[], nombre?}; con
+  // `emails` vacío se quita y vuelve a valer el de Desk. Devuelve lo mismo que
+  // el GET de equipos, ya actualizado. Sólo guarda a quién se le escribiría:
+  // esta API no manda ningún correo (el aviso automático es una simulación).
+  router.put(
+    '/trazabilidad/contactos',
+    ...gated,
+    route('tmc_contacto', async (req) => {
+      const cambio = parseContacto(req.body);
       const hoy = hoyOf(req);
-      const [equipos, ultimaImportacion] = await Promise.all([repo.listarEquipos(db, hoy), repo.ultimaImportacion(db)]);
-      return { hoy, equipos, ultimaImportacion };
+      await repo.guardarContacto(db, cambio, actorOf(req));
+      return inventario(hoy);
     }),
   );
 

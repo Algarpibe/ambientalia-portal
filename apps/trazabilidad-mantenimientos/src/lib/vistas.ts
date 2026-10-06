@@ -3,7 +3,7 @@
  * probarlo en node. El estado de cada equipo NO se calcula aquí: llega del
  * servidor (dominio.ts) y aquí sólo se cuenta, agrupa y redacta.
  */
-import { ESTADOS, ESTADOS_AVISO, diasEntre, sumarDias, type EquipoVista, type EstadoCalibracion } from '../dominio';
+import { ESTADOS, ESTADOS_AVISO, diasEntre, enServicio, sumarDias, type EquipoVista, type EstadoCalibracion, type TramoAviso } from '../dominio';
 
 export const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -95,8 +95,10 @@ export const porUrgencia = (a: EquipoVista, b: EquipoVista) => (a.vigenciaDias ?
 /**
  * El equipo ya está en manos de Ambientalia: marcado a mano en su ficha o con
  * un ticket de servicio abierto en Zoho Desk (aunque esté «sin confirmar»).
+ * La regla vive en el dominio (la usa también el plan del aviso automático);
+ * aquí sólo se reexporta para que la app tenga una sola.
  */
-export const enServicio = (e: EquipoVista): boolean => Boolean(e.seguimiento?.enAmbientalia) || e.ticket !== null;
+export { enServicio };
 
 /**
  * Equipos a avisar: vencidos en el último año o que vencen dentro de `ventana`
@@ -124,8 +126,27 @@ export function avisosPorCliente(eqs: readonly EquipoVista[], ventana: number): 
     .sort((a, b) => Number(b.sinAviso > 0) - Number(a.sinAviso > 0) || porUrgencia(a.equipos[0], b.equipos[0]));
 }
 
-/** Texto del aviso previo al cliente, listo para copiar en un correo. */
-export function mensajeAviso(cliente: string, equipos: readonly EquipoVista[]): string {
+/** Lo que cambia en el texto del aviso cuando es el de un tramo del aviso automático. */
+export interface OpcionesAviso {
+  /** El tramo (90, 60 o 30 días): cambia la frase de entrada. Sin él, el texto manual de siempre. */
+  tramo?: TramoAviso;
+  /** La primera línea. Sin ella, «Estimado cliente …:». */
+  saludo?: string;
+}
+
+/** Cómo empieza la frase de entrada en cada tramo: primer aviso, recordatorio y último aviso. */
+const ENTRADA_TRAMO: Record<TramoAviso, string> = {
+  90: 'le informamos con antelación de que',
+  60: 'le recordamos que',
+  30: 'le recordamos, como último aviso, que',
+};
+
+/**
+ * Texto del aviso previo al cliente, listo para copiar en un correo. Con
+ * `opciones.tramo` es el del aviso automático de ese tramo: mismo cuerpo, con
+ * la frase de entrada propia del tramo.
+ */
+export function mensajeAviso(cliente: string, equipos: readonly EquipoVista[], opciones: OpcionesAviso = {}): string {
   const lineas = equipos
     .map((e) => {
       const cuando = (e.vigenciaDias ?? 0) < 0 ? `vencida desde el ${fmtFecha(e.vence)}` : `vence el ${fmtFecha(e.vence)}`;
@@ -133,10 +154,14 @@ export function mensajeAviso(cliente: string, equipos: readonly EquipoVista[]): 
     })
     .join('\n');
   const plural = equipos.length !== 1;
+  const entrada =
+    opciones.tramo === undefined
+      ? `le recordamos que ${plural ? 'los siguientes monitores' : 'el siguiente monitor'} de partículas GRIMM ${plural ? 'tienen' : 'tiene'} la calibración vencida o próxima a vencer:`
+      : `${ENTRADA_TRAMO[opciones.tramo]} la calibración ${plural ? 'de los siguientes monitores' : 'del siguiente monitor'} de partículas GRIMM vence en los próximos ${opciones.tramo} días:`;
   return [
-    `Estimado cliente ${cliente}:`,
+    opciones.saludo ?? `Estimado cliente ${cliente}:`,
     '',
-    `Desde el Servicio Técnico de Ambientalia le recordamos que ${plural ? 'los siguientes monitores' : 'el siguiente monitor'} de partículas GRIMM ${plural ? 'tienen' : 'tiene'} la calibración vencida o próxima a vencer:`,
+    `Desde el Servicio Técnico de Ambientalia ${entrada}`,
     '',
     lineas,
     '',

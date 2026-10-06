@@ -46,6 +46,7 @@ function sv(ingreso: string | null, fechaLimite: string | null, extra: Partial<S
     numero: ++n,
     asunto: 'Servicio Técnico Cliente Uno',
     cliente: 'Cliente Uno',
+    clienteOrigen: 'cuenta',
     clienteDeAsunto: false,
     serial: '18A00001',
     modelo: 'EDM180C',

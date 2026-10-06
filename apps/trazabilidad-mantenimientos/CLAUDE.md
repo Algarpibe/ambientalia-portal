@@ -1,5 +1,11 @@
 # Trazabilidad Mantenimientos Clientes
 
+**Meta: que lleguen menos equipos de clientes sin avisar.** Para eso se avisa a cada cliente antes
+de que se le venza la calibración de su GRIMM EDM 180 (objetivo: avisos automáticos a 90, 60 y 30 días).
+
+⚠️ **Hoy el aviso automático es una SIMULACIÓN: nada en esta app ni en su API envía correos**
+(ver «Aviso automático: simulación»). Los avisos se siguen copiando y enviando a mano.
+
 App interna del portal para seguir los vencimientos de calibración de los **GRIMM EDM 180**
 (180C y 180D) instalados en clientes y avisarles antes de que se les venza, para programar el
 servicio de calibración y mantenimiento en vez de recibir el equipo sin previo aviso.
@@ -27,10 +33,13 @@ se registra en la app y sobrevive a las reimportaciones.
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`) | `apps/hub-api/src/trazabilidad/router.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Lectura del Excel en el navegador | `src/lib/importar.ts` |
-| Agregados, calendario y texto del aviso | `src/lib/vistas.ts` |
+| Agregados, calendario y texto del aviso (`mensajeAviso`, también el de cada tramo) | `src/lib/vistas.ts` |
+| Plan del aviso automático (`planAvisos`, `evaluarAviso`), contactos (`contactoDeTickets`, `contactoEfectivo`) y correos (`esEmail`, `esEmailInterno`, `DOMINIOS_INTERNOS`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
+| Asunto y cuerpo del correo simulado, resumen y revisión de los correos tecleados | `src/lib/simulacion.ts` |
+| Sub-vista «Simulación automática» de «Avisos a clientes» | `src/vistas/SimulacionAvisos.tsx` (el selector Manual / Simulación está en `src/vistas/Avisos.tsx`) |
 | Eje, barras (sus tramos, sus pausas y la marca de fin), colores, textos, filtros (`filtrarServicios`, `GRUPOS_PLAZO`), desplegable del tipo de «Servicios» y, de «Configuración», la nota del tipo compuesto y las opciones y textos del rol de cada estado | `src/lib/servicios.ts` |
 | Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos y rol de cada estado de Desk) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 
@@ -49,12 +58,14 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
 | `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez |
 | `portal.tmc_estados_historial` | En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
+| `portal.tmc_contactos` | El **contacto puesto a mano a un cliente** (a quién iría su aviso): `clave` (el nombre del cliente normalizado con `claveCliente`, PK, sin FK), `cliente` (como se escribió), `emails` (`TEXT[]`, entre 1 y 5 por `CHECK`, en minúsculas y sin repetir), `nombre` (persona de contacto, `''` si no se puso) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los clientes a los que alguien se lo ha puesto; quitarlo borra la fila. La 048 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla. **Sólo guarda direcciones**: no hay tabla de mensajes, de envíos ni de pendientes en este módulo (`trazabilidad.db.test.ts` vigila la lista de tablas `tmc_*`) |
 
 ## API (`/api/trazabilidad/*`)
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/trazabilidad/equipos` (`?hoy=`) | Equipos activos con estado, seguimiento y `ticket` (el abierto en Zoho Desk, o `null`) + última importación |
+| GET | `/trazabilidad/equipos` (`?hoy=`) | `{hoy, equipos[], ultimaImportacion, contactos[]}`. Equipos activos con estado, seguimiento, `ticket` (el abierto en Zoho Desk, o `null`) y `contacto: {nombre, email, origen: 'desk' \| 'manual', ticket} \| null` (a quién iría su aviso). `contactos` son los puestos a mano a clientes: `{clave, cliente, nombre, emails[], internos[], actualizadoPor, actualizadoEn}` (`internos` = los de `emails` que son de un dominio propio) |
+| PUT | `/trazabilidad/contactos` (`?hoy=`) | `{cliente, emails[], nombre?}`: pone a mano el contacto de un cliente y lo firma; `emails: []` lo quita (vuelve a valer el de Desk). Devuelve lo mismo que el GET de equipos, ya actualizado. 400 en `cliente` si no es un texto no vacío de 200 caracteres como mucho; 400 en `emails` si no es una lista o trae más de 5 correos distintos; 400 en `emails[i]` si ese correo no tiene forma de correo o pasa de 254 caracteres; 400 en `nombre` si no es texto o pasa de 200. Los correos se pasan a minúsculas y se quitan los repetidos. Un correo interno **sí** vale aquí (para probar con un buzón propio) y vuelve señalado en `internos`. **No envía nada** |
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
@@ -66,8 +77,76 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente |
 
 Permisos: cualquiera con la app asignada lee, importa, registra seguimiento, cambia plazos, pone
-a mano el tipo de servicio de un ticket y elige el rol de cada estado de Desk; todo queda firmado
-con su correo. El historial de estados no lo escribe nadie a mano: lo apunta hub-api.
+a mano el tipo de servicio de un ticket, elige el rol de cada estado de Desk y pone a mano el
+contacto de un cliente; todo queda firmado con su correo. El historial de estados no lo escribe
+nadie a mano: lo apunta hub-api.
+
+## Contactos: a quién iría el aviso
+
+Cada equipo lleva `contacto` (o `null`). Sale de dos sitios, y **el puesto a mano gana**:
+
+1. **De Zoho Desk** (`contactosDeDesk` en `repo.ts` + `contactoDeTickets` en `dominio.ts`): el
+   ticket de `number` más alto —abierto **o cerrado**— con el mismo serial (sin mayúsculas ni
+   espacios, como el cruce del ticket abierto) cuyo correo no esté vacío, tenga forma de correo
+   (`esEmail`) y **no sea interno**. Si el más reciente no vale, se retrocede al anterior. El
+   correo es `raw->>'email'` y, si falta, `raw->'contact'->>'email'`; el nombre, `firstName` +
+   `lastName` de `raw->'contact'` (puede quedar vacío). El SQL sólo trae los candidatos; qué
+   correo vale se decide en JS, con la misma regla que usa la app.
+2. **A mano, por cliente** (`portal.tmc_contactos`, `PUT /trazabilidad/contactos`): vale para
+   **todos** los equipos del cliente. Casa por `claveCliente` (la misma normalización que
+   `claveTipoServicio`: sin mayúsculas, tildes ni espacios repetidos), en JS. Existe porque el
+   contacto de Desk es quien abrió el último ticket, que puede no ser quien decide. En el
+   `contacto` del equipo va el primer correo; la lista entera va en `contactos` del GET.
+
+**Dominios internos** (`DOMINIOS_INTERNOS` en `dominio.ts`, único sitio; hoy `ambientalia.com.co`,
+sin distinguir mayúsculas y contando sus subdominios): los tickets viejos llevan como contacto a
+gente de la casa, y un correo así **nunca** se usa como destinatario si viene de Desk (lo filtra
+el servidor y otra vez el plan). Puesto a mano sí se admite —para probar con un buzón propio— y
+se señala como «interno» en la respuesta y en la UI.
+
+La ficha del equipo (`FichaEquipo.tsx`) enseña su contacto en sólo lectura (nombre, correo, origen
+y ticket); se cambia en «Avisos a clientes» → «Simulación automática».
+
+## Aviso automático: simulación
+
+**Estado: ensayo en seco (dry run).** El negocio está en fase de pruebas y ha decidido que **no
+puede salir ningún correo a un cliente**. Por eso en este módulo **no hay ningún camino de código
+que envíe**: ni llamada a un servicio de correo ni a un automatizador externo, ni tabla de
+mensajes pendientes, ni programador de envíos, ni botón de enviar. Todo lo de abajo sólo
+**calcula y enseña** lo que se enviaría. `router.test.ts` y `plazos.test.ts` tienen candados que
+fallan si aparece algo así en `router.ts`, `repo.ts`, `dominio.ts`, `types.ts` o en la 048. Pasar
+a enviar de verdad es otra tarea, con su decisión de negocio; no es «activar» nada de aquí.
+
+La regla (`evaluarAviso` y `planAvisos`, `dominio.ts`; puras, con `hoy` como argumento):
+
+- **Tramos 90, 60 y 30**: el tramo de un equipo es el de su estado de hoy (`VENCE_90` → 90,
+  `VENCE_60` → 60, `VENCE_30` → 30). `AL_DIA` y `SIN_FECHA` no están en ninguno (`SIN_TRAMO`).
+- **Una vez por tramo**: se entra en un tramo el día `vence − tramo` (`entradaTramo`). Si el
+  «aviso enviado» del seguimiento (`tmc_seguimiento.aviso_enviado`, el mismo de la vista manual)
+  es de ese día o posterior, ya está avisado en este tramo (`YA_AVISADO`); si es anterior —fue el
+  del tramo de antes— o no hay, **toca** (`DEBIDO`). No hay registro propio de avisos todavía.
+- **Nunca en servicio** (`enServicio`: «en Ambientalia» a mano o ticket abierto en Desk) →
+  `EN_SERVICIO`, que manda sobre «ya avisado».
+- **`VENCIDA` y `FUERA_CICLO` quedan fuera de la regla automática** (motivos `VENCIDA` y
+  `FUERA_CICLO`): no generan correo simulado. Se enseñan aparte para que se vea a quién deja
+  fuera: «Vencidas sin aviso» = vencidas hasta un año, fuera de servicio y sin «aviso enviado»
+  del día del vencimiento o posterior; «Fuera de ciclo» = todas las de más de un año.
+- **Un correo por cliente y tramo** (agrupa por `claveCliente`), con los equipos de ese cliente a
+  los que toca. **Destinatarios**: los correos puestos a mano al cliente si los tiene; si no, los
+  correos distintos de los contactos de Desk de esos equipos. Sin ninguno → «sin destinatario».
+- **Texto** (`correoAviso` en `src/lib/simulacion.ts`, sobre `mensajeAviso`): el cuerpo del aviso
+  manual con la frase de entrada del tramo (90 = primer aviso «con antelación», 60 =
+  recordatorio, 30 = «último aviso») y un asunto por tramo. Saluda por su nombre si entre los
+  destinatarios hay exactamente uno con nombre; si no, el «Estimado cliente …» de siempre. (En el
+  contacto puesto a mano, el nombre va con el primer correo.)
+
+En la UI, «Avisos a clientes» tiene dos vistas: **«Manual»** (la de siempre: redactar, copiar,
+marcar como avisado; intacta) y **«Simulación automática»**: un aviso fijo de que es una
+simulación, el resumen (correos, clientes, equipos, grupos sin destinatario), una tarjeta por
+correo (cliente, tramo, destinatarios con su origen y la marca «interno», equipos, asunto y texto
+plegados con «Copiar texto», y «Cambiar destinatario»), los grupos «Sin destinatario» con el
+editor del contacto abierto, y cuatro secciones plegadas que explican lo que queda fuera («Ya
+avisados en este tramo», «En servicio», «Vencidas sin aviso», «Fuera de ciclo»).
 
 ## Cruce con Zoho Desk (ticket abierto)
 
@@ -79,7 +158,7 @@ de zoho-hub; hub-api sólo la lee y no tiene migración para ella— y devuelve
   espacios; con varios abiertos gana el de `number` más alto.
 - **«Sin confirmar»**: si `synced_at` tiene más de un día (o es NULL) el ticket no se oculta, se
   marca `sinConfirmar` (el worker a veces deja de refrescar tickets viejos y puede estar ya cerrado).
-- En la UI, `enServicio(e)` (`src/lib/vistas.ts`) = «en Ambientalia» a mano **o** con ticket abierto:
+- `enServicio(e)` (`dominio.ts`; `src/lib/vistas.ts` la reexporta) = «en Ambientalia» a mano **o** con ticket abierto:
   esos equipos no entran en los avisos a clientes y sí en el filtro e indicador «En Ambientalia».
   El campo manual no se toca.
 - `modelo` y `marca` de la réplica vienen vacíos: no usarlos. `tipo_servicio` también viene vacío
@@ -142,10 +221,18 @@ el tiempo en standby se descuenta y el trabajo terminado para el reloj, y eso va
 - **Calendario de barras** (`src/lib/servicios.ts`): una columna por día; barra del ingreso a la
   fecha límite (verde / ámbar si vence hoy / rojo) y, si está vencido, tramo rayado hasta hoy. El
   eje no retrocede más de `RETROCESO_MAX_DIAS` (60) desde hoy; lo anterior se recorta con «‹‹».
-- **Modelo** = tercer tramo de `codigo_servicio`. **Cliente** =
-  `raw->'contact'->'account'->>'accountName'` y, si no viene, el asunto sin el código de servicio
-  (`clienteDeAsunto = true`, en cursiva gris). ⚠️ Esa ruta del `raw` es una suposición sin verificar
-  contra producción.
+- **Modelo** = tercer tramo de `codigo_servicio`. **Cliente** (`clienteDeServicio`, `repo.ts`), por
+  este orden, con su origen en `clienteOrigen`:
+  1. `equipo` — el cliente del equipo de `portal.tmc_equipos` con el mismo serial (sin mayúsculas
+     ni espacios; con varios, el activo y, si no hay ninguno activo, uno retirado): es el nombre
+     de la F-ST-022;
+  2. `cuenta` — `raw->'contact'->'account'->>'accountName'` (en producción `account` llega casi
+     siempre `null`);
+  3. `contacto` — nombre y apellido de `raw->'contact'`;
+  4. `asunto` — el asunto sin el código de servicio (`clienteDeAsunto = true`, en cursiva gris:
+     no es un nombre fiable).
+
+  `clienteDeAsunto` sólo es `true` en el caso 4. El `title` de la celda dice de dónde sale.
 - **Depende del worker de zoho-hub**: hoy `tipo_servicio` y `fecha_creacion_ticket` llegan NULL en
   todas las filas (el worker no trae los campos personalizados de Zoho), así que un servicio sale
   «sin tipo» y sin barra hasta que alguien le pone el tipo a mano; un aviso azul lo explica y se
@@ -284,10 +371,14 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
 
 ## Pruebas
 
-- `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso y
-  geometría del calendario de barras (pausas y marca de fin incluidas).
-- `npm test --workspace=apps/hub-api` — dominio, plazos (el reloj con pausas, con `hoy` y los
-  tramos como argumentos), router y el programador con reloj de mentira
-  (`src/trazabilidad/*.test.ts`).
+- `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
+  geometría del calendario de barras (pausas y marca de fin incluidas) y la simulación (texto por
+  tramo, saludo, resumen y correos tecleados: `src/lib/simulacion.test.ts`).
+- `npm test --workspace=apps/hub-api` — dominio, el plan del aviso y los contactos
+  (`avisos.test.ts`), plazos (el reloj con pausas, con `hoy` y los tramos como argumentos), router
+  y el programador con reloj de mentira (`src/trazabilidad/*.test.ts`).
 - `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real: `registrarEstados`
-  (también con llamadas a la vez) y «Servicios» de punta a punta con un historial sembrado y `hoy` fijo.
+  (también con llamadas a la vez), «Servicios» de punta a punta con un historial sembrado y `hoy`
+  fijo, el contacto de cada equipo (Desk y puesto a mano) y el orden del cliente en «Servicios».
+- Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
+  correos en `@example.com` / `@cliente-uno.example`.

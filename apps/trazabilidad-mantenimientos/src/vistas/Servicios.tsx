@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronsLeft, RefreshCw, Search } from 'lucide-react';
 import { api, type Servicios as Datos } from '../api';
-import { type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import { type EstadoPlazo, type OrigenCliente, type ServicioVista, type TipoServicioOpcion } from '../dominio';
 import {
   GRUPOS_PLAZO,
   TITULO_STANDBY,
@@ -349,15 +349,29 @@ function RolTag({ s }: { s: ServicioVista }) {
   );
 }
 
-/** La cuenta de Desk; si no viene, el asunto del ticket en gris (no es un nombre de cliente fiable). */
+/** De dónde sale el cliente de un servicio, para su `title`. */
+const ORIGEN_CLIENTE: Record<OrigenCliente, string> = {
+  equipo: 'Cliente del equipo con este serial en el inventario (F-ST-022)',
+  cuenta: 'Cuenta del ticket en Zoho Desk',
+  contacto: 'Nombre del contacto del ticket en Zoho Desk: Desk no envía la cuenta y el serial no está en el inventario',
+  asunto: 'Ni el inventario ni Desk dan el cliente de este ticket: se muestra su asunto',
+};
+
+/**
+ * El cliente del servicio: el del inventario por serial, la cuenta de Desk o el
+ * contacto del ticket; si no hay nada, el asunto del ticket en gris (no es un
+ * nombre de cliente fiable).
+ */
 function Cliente({ s }: { s: ServicioVista }) {
   if (!s.cliente) return <Vacio />;
   return s.clienteDeAsunto ? (
-    <span className="italic text-gray-500" title="Desk no envía la cuenta de este ticket: se muestra su asunto">
+    <span className="italic text-gray-500" title={ORIGEN_CLIENTE.asunto}>
       {s.cliente}
     </span>
   ) : (
-    <span className="text-gray-900">{s.cliente}</span>
+    <span className="text-gray-900" title={ORIGEN_CLIENTE[s.clienteOrigen]}>
+      {s.cliente}
+    </span>
   );
 }
 

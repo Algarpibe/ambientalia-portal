@@ -5,14 +5,21 @@
  */
 
 import {
+  CONTACTO_MAX_EMAILS,
+  CONTACTO_MAX_TEXTO,
+  EMAIL_MAX,
   PLAZO_MAX_DIAS,
   PLAZO_MIN_DIAS,
+  claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
+  esEmail,
   esFechaIso,
   esRolEstado,
   modeloEdm180,
+  normalizarEmail,
   partesDeTipo,
+  type ContactoEquipo,
   type EstadoCalibracion,
   type EstadoPlazo,
   type OrigenTipo,
@@ -103,6 +110,12 @@ export interface EquipoVista {
   seguimiento: SeguimientoGuardado | null;
   /** El ticket abierto de número más alto, o null si no hay ninguno. */
   ticket: TicketDesk | null;
+  /**
+   * A quién iría su aviso: el contacto puesto a mano a su cliente si lo hay y,
+   * si no, el del ticket de Desk más reciente con un correo que valga (ni
+   * vacío, ni mal formado, ni interno). Null si no hay ninguno.
+   */
+  contacto: ContactoEquipo | null;
 }
 
 export interface ResumenImportacion {
@@ -243,14 +256,23 @@ export interface PartePlazo {
   dias: number | null;
 }
 
+/** De dónde sale el cliente de un servicio: el inventario (por serial), la cuenta de Desk, el contacto del ticket o su asunto. */
+export type OrigenCliente = 'equipo' | 'cuenta' | 'contacto' | 'asunto';
+
 /** Un ticket de Zoho Desk que no está cerrado, con su plazo ya calculado (pestaña «Servicios»). */
 export interface ServicioVista {
   numero: number;
   /** Asunto del ticket, tal como viene de Desk. */
   asunto: string;
-  /** La cuenta de Desk; si la réplica no la trae, el asunto sin el código de servicio. */
+  /**
+   * El cliente, por este orden: el del equipo del inventario con el mismo
+   * serial; la cuenta de Desk; el nombre del contacto del ticket; y, a falta de
+   * todo, el asunto sin el código de servicio.
+   */
   cliente: string;
-  /** True si `cliente` sale del asunto y no de la cuenta de Desk. */
+  /** De cuál de los cuatro sale `cliente`. */
+  clienteOrigen: OrigenCliente;
+  /** True si `cliente` sale del asunto (`clienteOrigen` = 'asunto'): no es un nombre de cliente fiable. */
   clienteDeAsunto: boolean;
   serial: string;
   /** Tercer tramo del código de servicio; vacío si no lo hay. */
@@ -408,6 +430,44 @@ export function parseEstadoDesk(body: unknown): CambioEstadoDesk {
   if (clave.length > ESTADO_DESK_MAX) throw invalido(`«estado» supera ${ESTADO_DESK_MAX} caracteres.`, 'estado');
   if (!esRolEstado(b.rol)) throw invalido('«rol» debe ser «cuenta», «standby» o «terminado».', 'rol');
   return { estado, rol: b.rol };
+}
+
+/** El contacto que se le pone a mano a un cliente; `emails` vacío = quitarlo (vuelve a valer el de Desk). */
+export interface CambioContacto {
+  cliente: string;
+  /** En minúsculas y sin repetir. */
+  emails: string[];
+  nombre: string;
+}
+
+/**
+ * Valida el cuerpo de PUT /trazabilidad/contactos. `emails` es una lista de
+ * entre cero y `CONTACTO_MAX_EMAILS` correos distintos (se pasan a minúsculas
+ * y se quitan los repetidos antes de contar); vacía = quitar el contacto
+ * puesto a mano. Aquí SÍ vale un correo de un dominio propio: quien lo pone
+ * puede querer probar con su buzón (la respuesta lo señala como interno).
+ */
+export function parseContacto(body: unknown): CambioContacto {
+  const b = obj(body, 'body');
+  if (typeof b.cliente !== 'string') throw invalido(b.cliente === null || b.cliente === undefined ? 'Falta «cliente».' : '«cliente» debe ser texto.', 'cliente');
+  const cliente = texto(b.cliente, 'cliente', CONTACTO_MAX_TEXTO, true)!;
+  const clave = claveCliente(cliente);
+  if (!clave) throw invalido('Falta «cliente».', 'cliente');
+  if (clave.length > CONTACTO_MAX_TEXTO) throw invalido(`«cliente» supera ${CONTACTO_MAX_TEXTO} caracteres.`, 'cliente');
+  if (!Array.isArray(b.emails)) throw invalido('«emails» debe ser una lista de correos (vacía para quitar el contacto).', 'emails');
+  if (b.emails.length > 50) throw invalido(`Como mucho ${CONTACTO_MAX_EMAILS} correos por cliente.`, 'emails');
+  const emails: string[] = [];
+  b.emails.forEach((v, i) => {
+    const e = normalizarEmail(v);
+    if (e.length > EMAIL_MAX) throw invalido(`El correo n.º ${i + 1} supera ${EMAIL_MAX} caracteres.`, `emails[${i}]`);
+    if (!esEmail(e)) throw invalido(`El correo n.º ${i + 1} no es una dirección válida.`, `emails[${i}]`);
+    if (!emails.includes(e)) emails.push(e);
+  });
+  if (emails.length > CONTACTO_MAX_EMAILS) throw invalido(`Como mucho ${CONTACTO_MAX_EMAILS} correos por cliente.`, 'emails');
+  const n = b.nombre;
+  if (n !== undefined && n !== null && typeof n !== 'string') throw invalido('«nombre» debe ser texto.', 'nombre');
+  const nombre = (texto(n, 'nombre', CONTACTO_MAX_TEXTO, false) ?? '').replace(/\s+/g, ' ');
+  return { cliente: cliente.replace(/\s+/g, ' '), emails, nombre };
 }
 
 /**

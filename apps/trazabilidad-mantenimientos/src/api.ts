@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { EquipoVista, EstadoDesk, FilaImportada, PlazoServicio, ResumenImportacion, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
+import type { ContactoCliente, EquipoVista, EstadoDesk, FilaImportada, PlazoServicio, ResumenImportacion, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -19,6 +19,8 @@ export interface Inventario {
   hoy: string;
   equipos: EquipoVista[];
   ultimaImportacion: ResumenImportacion | null;
+  /** Los contactos puestos a mano a clientes: ganan al contacto de Desk de sus equipos. */
+  contactos: ContactoCliente[];
 }
 
 /** Tickets de Desk sin cerrar, con su plazo calculado en el servidor (pausas de standby y trabajo terminado incluidos). */
@@ -33,6 +35,11 @@ export interface Servicios {
 
 export const api = {
   inventario: () => request<Inventario>('GET', '/equipos'),
+  /**
+   * Pone a mano el contacto de un cliente (`emails` vacío = quitarlo y volver al de Desk). Devuelve el inventario ya
+   * actualizado. Sólo guarda a quién se le escribiría: la app no envía correos (el aviso automático es una simulación).
+   */
+  guardarContacto: (cliente: string, emails: string[], nombre: string) => request<Inventario>('PUT', '/contactos', { cliente, emails, nombre }),
   servicios: () => request<Servicios>('GET', '/servicios'),
   /** Pone a mano el tipo de servicio de un ticket (null = quitarlo). Devuelve los servicios ya recalculados. */
   fijarTipoServicio: (numero: number, tipo: string | null) => request<Servicios>('PUT', `/servicios/${numero}/tipo`, { tipo }),

@@ -396,3 +396,304 @@ export function estadoPlazo(fechaLimite: string | null, hoy: string): EstadoPlaz
   if (!fechaLimite) return 'SIN_PLAZO';
   return fechaLimite < hoy ? 'VENCIDO' : fechaLimite === hoy ? 'VENCE_HOY' : 'EN_PLAZO';
 }
+
+// ── Contactos: a quién iría el aviso de cada equipo ─────────────────────────
+//
+// El contacto de un equipo sale del ticket más reciente de Zoho Desk con su
+// serial; como quien abrió ese ticket puede no ser quien decide, se le puede
+// poner uno a mano al CLIENTE, que gana para todos sus equipos.
+
+/**
+ * Dominios de correo propios. Un correo de Desk con uno de estos dominios (los
+ * tickets viejos llevan como contacto a gente de la casa) NUNCA se usa como
+ * destinatario de un cliente. Éste es el único sitio donde se define la lista.
+ */
+export const DOMINIOS_INTERNOS: readonly string[] = ['ambientalia.com.co'];
+
+/** Largo máximo de un correo. */
+export const EMAIL_MAX = 254;
+
+/** Cuántos correos admite como mucho el contacto puesto a mano a un cliente. */
+export const CONTACTO_MAX_EMAILS = 5;
+
+/** Largo máximo del nombre de un cliente y del nombre de su contacto. */
+export const CONTACTO_MAX_TEXTO = 200;
+
+/** Un correo tal como se guarda y se compara: sin espacios alrededor y en minúsculas. Vacío si no es texto. */
+export function normalizarEmail(v: unknown): string {
+  return typeof v === 'string' ? v.trim().toLowerCase() : '';
+}
+
+const EMAIL = /^[a-z0-9_%+'-]+(?:\.[a-z0-9_%+'-]+)*@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/;
+
+/** True si `v`, ya normalizado, tiene forma de correo (una sola dirección, sin nombre delante). */
+export function esEmail(v: unknown): boolean {
+  const e = normalizarEmail(v);
+  return e.length > 0 && e.length <= EMAIL_MAX && EMAIL.test(e);
+}
+
+/** True si el correo es de un dominio propio (`DOMINIOS_INTERNOS`) o de un subdominio suyo. */
+export function esEmailInterno(v: unknown): boolean {
+  const e = normalizarEmail(v);
+  const dominio = e.slice(e.lastIndexOf('@') + 1);
+  if (!e.includes('@') || !dominio) return false;
+  return DOMINIOS_INTERNOS.some((d) => dominio === d || dominio.endsWith(`.${d}`));
+}
+
+/**
+ * Clave con la que casa un cliente: la misma normalización que la de los tipos
+ * de servicio (sin mayúsculas, sin tildes y sin espacios repetidos ni
+ * sobrantes). Con ella se guarda el contacto puesto a mano y se agrupan los
+ * equipos de un cliente. Vacía si no hay nombre.
+ */
+export function claveCliente(cliente: unknown): string {
+  return claveTipoServicio(cliente);
+}
+
+/** Nombre y apellido del contacto de un ticket, sin espacios de más. Puede quedar vacío. */
+export function nombreContacto(nombre: unknown, apellido: unknown): string {
+  return `${String(nombre ?? '')} ${String(apellido ?? '')}`.replace(/\s+/g, ' ').trim();
+}
+
+/** De dónde sale el contacto de un equipo: del ticket de Desk o puesto a mano a su cliente. */
+export type OrigenContacto = 'desk' | 'manual';
+
+/** El contacto de un equipo: a quién iría su aviso. */
+export interface ContactoEquipo {
+  /** Puede venir vacío. */
+  nombre: string;
+  /** En minúsculas. Con origen `manual` y varios correos, el primero (todos van en `ContactoCliente.emails`). */
+  email: string;
+  origen: OrigenContacto;
+  /** El ticket de Desk del que sale; null si está puesto a mano. */
+  ticket: number | null;
+}
+
+/** El contacto puesto a mano a un cliente (portal.tmc_contactos). */
+export interface ContactoCliente {
+  /** El cliente normalizado (`claveCliente`). */
+  clave: string;
+  /** El nombre del cliente tal como se escribió al guardarlo. */
+  cliente: string;
+  /** Nombre de la persona de contacto; vacío si no se puso. */
+  nombre: string;
+  /** Entre uno y `CONTACTO_MAX_EMAILS` correos, en minúsculas y sin repetir. */
+  emails: string[];
+  /** Los de `emails` que son de un dominio propio: a mano se admiten (para probar), pero se señalan. */
+  internos: string[];
+  actualizadoPor: string;
+  actualizadoEn: string;
+}
+
+/** Lo que hace falta de un ticket de Desk para sacar de él un contacto. */
+export interface TicketContacto {
+  numero: number | null;
+  email: unknown;
+  nombre?: unknown;
+  apellido?: unknown;
+}
+
+/**
+ * El contacto que da Desk para un equipo: el del ticket de número más alto
+ * (abierto o cerrado) cuyo correo no esté vacío, tenga forma de correo y no
+ * sea interno. Si el más reciente no vale, se retrocede al anterior. Null si
+ * ninguno vale.
+ */
+export function contactoDeTickets(tickets: readonly TicketContacto[]): ContactoEquipo | null {
+  const orden = [...tickets].sort((a, b) => (b.numero ?? -Infinity) - (a.numero ?? -Infinity));
+  for (const t of orden) {
+    const email = normalizarEmail(t.email);
+    if (!esEmail(email) || esEmailInterno(email)) continue;
+    return { nombre: nombreContacto(t.nombre, t.apellido), email, origen: 'desk', ticket: t.numero };
+  }
+  return null;
+}
+
+/** El contacto que vale para un equipo: el puesto a mano a su cliente GANA al de Desk. */
+export function contactoEfectivo(manual: ContactoCliente | null | undefined, desk: ContactoEquipo | null): ContactoEquipo | null {
+  if (manual && manual.emails.length > 0) return { nombre: manual.nombre, email: manual.emails[0], origen: 'manual', ticket: null };
+  return desk;
+}
+
+// ── Aviso automático a clientes: SIMULACIÓN ─────────────────────────────────
+//
+// La meta es avisar solos a 90, 60 y 30 días del vencimiento. Hoy esto es un
+// ensayo: aquí sólo se CALCULA qué se enviaría y a quién, para enseñarlo en la
+// pestaña «Avisos a clientes». Nada de este fichero envía nada, y no hay nada
+// que lo llame para enviar.
+
+/** Los tramos del aviso, en días antes del vencimiento, del primero al último. */
+export const TRAMOS_AVISO = [90, 60, 30] as const;
+export type TramoAviso = (typeof TRAMOS_AVISO)[number];
+
+/** El tramo en el que está un equipo según su estado; null si no está en ninguno. */
+export function tramoDeEstado(estado: EstadoCalibracion): TramoAviso | null {
+  return estado === 'VENCE_90' ? 90 : estado === 'VENCE_60' ? 60 : estado === 'VENCE_30' ? 30 : null;
+}
+
+/** El día en que un equipo entra en un tramo: su vencimiento menos los días del tramo. */
+export function entradaTramo(vence: string, tramo: TramoAviso): string {
+  return sumarDias(vence, -tramo);
+}
+
+/** Lo que el plan del aviso necesita de un equipo (la `EquipoVista` del servidor lo cumple). */
+export interface EquipoAviso {
+  clave: string;
+  serial: string;
+  cliente: string;
+  modelo: string;
+  ultimaCalibracion: string | null;
+  seguimiento: { enAmbientalia: boolean; avisoEnviado: string | null } | null;
+  /** El ticket abierto en Desk, o null. Sólo importa si lo hay. */
+  ticket: object | null;
+  contacto: ContactoEquipo | null;
+}
+
+/**
+ * El equipo ya está en manos de Ambientalia: marcado a mano en su ficha o con
+ * un ticket de servicio abierto en Zoho Desk (aunque esté «sin confirmar»).
+ */
+export function enServicio(e: Pick<EquipoAviso, 'seguimiento' | 'ticket'>): boolean {
+  return Boolean(e.seguimiento?.enAmbientalia) || e.ticket !== null;
+}
+
+/** Por qué a un equipo le tocaría (o no) el aviso automático hoy. */
+export type MotivoAviso =
+  | 'DEBIDO' // está en un tramo y aún no se le ha avisado en él: entraría en un correo
+  | 'YA_AVISADO' // ya tiene un aviso desde que entró en su tramo
+  | 'EN_SERVICIO' // está en un tramo, pero en Ambientalia o con ticket abierto
+  | 'SIN_TRAMO' // al día o sin fecha: no toca nada
+  | 'VENCIDA' // vencida en el último año: fuera de la regla automática
+  | 'FUERA_CICLO'; // vencida hace más de un año: fuera de la regla automática
+
+export interface AvisoEquipo<E extends EquipoAviso = EquipoAviso> {
+  equipo: E;
+  estado: EstadoCalibracion;
+  vence: string | null;
+  motivo: MotivoAviso;
+  /** Su tramo de hoy; null fuera de los tres tramos. */
+  tramo: TramoAviso | null;
+  /** El día en que entró en ese tramo. */
+  entradaTramo: string | null;
+  /** Días hasta el vencimiento; negativo = vencida hace N días. */
+  diasParaVencer: number | null;
+}
+
+/**
+ * Decide, a fecha `hoy`, si a un equipo le tocaría el aviso automático.
+ *  - Sólo en los tramos 90 / 60 / 30 (estados VENCE_90 / VENCE_60 / VENCE_30).
+ *  - Nunca si está en servicio (`enServicio`).
+ *  - Una vez por tramo: si su «aviso enviado» es del día en que entró en el
+ *    tramo o posterior, ya está avisado; si es anterior (fue el del tramo de
+ *    antes) o no hay, toca.
+ *  - Vencida y fuera de ciclo no entran en la regla.
+ */
+export function evaluarAviso<E extends EquipoAviso>(equipo: E, hoy: string): AvisoEquipo<E> {
+  const { estado, vence, vigenciaDias } = estadoCalibracion(equipo.ultimaCalibracion, hoy);
+  const base = { equipo, estado, vence, diasParaVencer: vigenciaDias };
+  const tramo = tramoDeEstado(estado);
+  if (tramo === null || vence === null) {
+    const motivo: MotivoAviso = estado === 'FUERA_CICLO' ? 'FUERA_CICLO' : estado === 'VENCIDA' ? 'VENCIDA' : 'SIN_TRAMO';
+    return { ...base, motivo, tramo: null, entradaTramo: null };
+  }
+  const entrada = entradaTramo(vence, tramo);
+  const aviso = equipo.seguimiento?.avisoEnviado ?? null;
+  const motivo: MotivoAviso = enServicio(equipo) ? 'EN_SERVICIO' : aviso !== null && aviso >= entrada ? 'YA_AVISADO' : 'DEBIDO';
+  return { ...base, motivo, tramo, entradaTramo: entrada };
+}
+
+/** Un destinatario de un correo simulado. */
+export interface Destinatario {
+  email: string;
+  /** Puede venir vacío. */
+  nombre: string;
+  origen: OrigenContacto;
+  /** True si es de un dominio propio: sólo puede pasar con uno puesto a mano. */
+  interno: boolean;
+  /** El ticket de Desk del que sale; null si está puesto a mano. */
+  ticket: number | null;
+}
+
+/** Un correo que se enviaría: uno por cliente y tramo, con los equipos de ese cliente a los que toca. */
+export interface CorreoSimulado<E extends EquipoAviso = EquipoAviso> {
+  claveCliente: string;
+  /** El nombre del cliente como lo trae su primer equipo. */
+  cliente: string;
+  tramo: TramoAviso;
+  equipos: AvisoEquipo<E>[];
+  /** Vacío = «sin destinatario». */
+  destinatarios: Destinatario[];
+  /** De dónde salen los destinatarios; null si no hay ninguno. */
+  origen: OrigenContacto | null;
+}
+
+export interface PlanAvisos<E extends EquipoAviso = EquipoAviso> {
+  hoy: string;
+  /** Los correos que se enviarían: los que tienen al menos un destinatario. */
+  correos: CorreoSimulado<E>[];
+  /** Los grupos a los que tocaría avisar pero no tienen a quién. */
+  sinDestinatario: CorreoSimulado<E>[];
+  /** Informativos: por qué algo no está en la simulación. */
+  yaAvisados: AvisoEquipo<E>[];
+  enServicio: AvisoEquipo<E>[];
+  /** Vencidas (hasta un año) que no están en servicio y sin aviso desde que vencieron. */
+  vencidasSinAviso: AvisoEquipo<E>[];
+  fueraCiclo: AvisoEquipo<E>[];
+}
+
+function destinatariosDe(equipos: readonly AvisoEquipo[], manual: ContactoCliente | undefined): Destinatario[] {
+  if (manual && manual.emails.length > 0) {
+    // El nombre es el de la persona de contacto: va con el primer correo; los demás son copias.
+    return manual.emails.map((email, i) => ({ email, nombre: i === 0 ? manual.nombre : '', origen: 'manual', interno: esEmailInterno(email), ticket: null }));
+  }
+  const vistos = new Map<string, Destinatario>();
+  for (const { equipo } of equipos) {
+    const c = equipo.contacto;
+    const email = normalizarEmail(c?.email);
+    // Un interno que llegue de Desk no se usa nunca, aunque el servidor ya lo filtra.
+    if (!c || !esEmail(email) || esEmailInterno(email) || vistos.has(email)) continue;
+    vistos.set(email, { email, nombre: c.nombre, origen: 'desk', interno: false, ticket: c.ticket });
+  }
+  return [...vistos.values()];
+}
+
+/**
+ * El plan del aviso automático a fecha `hoy`: qué correos se enviarían y qué
+ * queda fuera y por qué. Un correo por cliente (por `claveCliente`) y tramo,
+ * con los equipos de ese cliente a los que toca. Destinatarios: los correos
+ * puestos a mano al cliente si los tiene (`manuales`) y, si no, los distintos
+ * que den los contactos de Desk de esos equipos. Es sólo un cálculo.
+ */
+export function planAvisos<E extends EquipoAviso>(equipos: readonly E[], hoy: string, manuales: readonly ContactoCliente[] = []): PlanAvisos<E> {
+  const manualDe = new Map(manuales.map((m) => [claveCliente(m.clave || m.cliente), m]));
+  const plan: PlanAvisos<E> = { hoy, correos: [], sinDestinatario: [], yaAvisados: [], enServicio: [], vencidasSinAviso: [], fueraCiclo: [] };
+  const grupos = new Map<string, CorreoSimulado<E>>();
+  for (const e of equipos) {
+    const a = evaluarAviso(e, hoy);
+    if (a.motivo === 'YA_AVISADO') plan.yaAvisados.push(a);
+    else if (a.motivo === 'EN_SERVICIO') plan.enServicio.push(a);
+    else if (a.motivo === 'FUERA_CICLO') plan.fueraCiclo.push(a);
+    else if (a.motivo === 'VENCIDA') {
+      const aviso = e.seguimiento?.avisoEnviado ?? null;
+      if (!enServicio(e) && !(aviso !== null && a.vence !== null && aviso >= a.vence)) plan.vencidasSinAviso.push(a);
+    } else if (a.motivo === 'DEBIDO' && a.tramo !== null) {
+      const clave = claveCliente(e.cliente);
+      const id = `${a.tramo}|${clave}`;
+      const g = grupos.get(id) ?? { claveCliente: clave, cliente: e.cliente.replace(/\s+/g, ' ').trim(), tramo: a.tramo, equipos: [], destinatarios: [], origen: null };
+      g.equipos.push(a);
+      grupos.set(id, g);
+    }
+  }
+  const porDias = (a: AvisoEquipo, b: AvisoEquipo) => (a.diasParaVencer ?? 0) - (b.diasParaVencer ?? 0);
+  for (const g of grupos.values()) {
+    g.equipos.sort(porDias);
+    g.destinatarios = destinatariosDe(g.equipos, manualDe.get(g.claveCliente));
+    g.origen = g.destinatarios[0]?.origen ?? null;
+    (g.destinatarios.length > 0 ? plan.correos : plan.sinDestinatario).push(g);
+  }
+  const porTramoYCliente = (a: CorreoSimulado, b: CorreoSimulado) => a.tramo - b.tramo || a.cliente.localeCompare(b.cliente, 'es');
+  plan.correos.sort(porTramoYCliente);
+  plan.sinDestinatario.sort(porTramoYCliente);
+  for (const lista of [plan.yaAvisados, plan.enServicio, plan.vencidasSinAviso, plan.fueraCiclo]) lista.sort(porDias);
+  return plan;
+}

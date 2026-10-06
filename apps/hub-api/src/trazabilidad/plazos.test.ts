@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ROLES_ESTADO, TIPOS_COMPUESTOS, claveTipoServicio, type RolEstado } from './dominio.js';
+import { CONTACTO_MAX_EMAILS, ROLES_ESTADO, TIPOS_COMPUESTOS, claveTipoServicio, type RolEstado } from './dominio.js';
 import { calcularPlazo, calcularReloj, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles, type DatosReloj, type IntervaloEstado } from './plazos.js';
 
 // Calendario de referencia (octubre de 2026): el lunes 5 es hábil, el lunes 12
@@ -563,8 +563,55 @@ describe('047_trazabilidad_estados_historial.sql', () => {
     expect(SQL).not.toMatch(/\bREFERENCES\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 046 y la última', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 046', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'046_trazabilidad_estados_desk\.sql',\s*'047_trazabilidad_estados_historial\.sql'\]/);
+    expect(db).toMatch(/'046_trazabilidad_estados_desk\.sql',\s*'047_trazabilidad_estados_historial\.sql'/);
+  });
+});
+
+describe('048_trazabilidad_contactos.sql', () => {
+  // La 048 se vuelve a ejecutar en cada arranque: sólo puede crear lo que falte.
+  // Sin semilla: ningún cliente nace con contacto puesto a mano, y una sentencia
+  // que escribiera se llevaría por delante los que la gente haya puesto.
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/048_trazabilidad_contactos.sql', import.meta.url)), 'utf8');
+  const sinComentarios = SQL.replace(/--.*$/gm, '');
+  const sentencias = sinComentarios
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('sólo crea, y siempre con IF NOT EXISTS', () => {
+    expect(sentencias.length).toBeGreaterThanOrEqual(1);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|INDEX) IF NOT EXISTS /);
+    expect(SQL).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_contactos/);
+  });
+
+  it('sin semilla ni nada que escriba, altere o borre', () => {
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i);
+  });
+
+  it('una fila por cliente (clave normalizada), con entre uno y cinco correos y firmada', () => {
+    expect(sinComentarios).toMatch(/clave\s+VARCHAR\(200\)\s+PRIMARY KEY/i);
+    expect(sinComentarios).toMatch(/emails\s+TEXT\[\]\s+NOT NULL/i);
+    const tope = /cardinality\(emails\) BETWEEN 1 AND (\d+)/i.exec(sinComentarios);
+    expect(tope).not.toBeNull();
+    expect(Number(tope![1])).toBe(CONTACTO_MAX_EMAILS);
+    expect(sinComentarios).toMatch(/actualizado_por_id\s+UUID\s+NULL/i);
+    expect(sinComentarios).toMatch(/actualizado_por\s+VARCHAR\(254\)\s+NOT NULL/i);
+    expect(sinComentarios).toMatch(/actualizado_en\s+TIMESTAMPTZ\s+NOT NULL/i);
+  });
+
+  it('no toca el esquema desk ni le pone una clave foránea', () => {
+    expect(SQL).not.toMatch(/\bdesk\./i);
+    expect(SQL).not.toMatch(/\bREFERENCES\b/i);
+  });
+
+  it('no guarda nada de envíos: ni bandeja de salida ni cola ni programación', () => {
+    expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 047 y la última', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'047_trazabilidad_estados_historial\.sql',\s*'048_trazabilidad_contactos\.sql'\]/);
   });
 });

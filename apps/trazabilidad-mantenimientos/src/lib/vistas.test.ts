@@ -36,6 +36,7 @@ function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<Segu
       ? { enAmbientalia: false, avisoEnviado: null, servicioProgramado: null, nota: '', actualizadoPor: 'x', actualizadoEn: '', ...seg }
       : null,
     ticket,
+    contacto: null,
   };
 }
 

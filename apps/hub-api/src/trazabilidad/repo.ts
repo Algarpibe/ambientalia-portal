@@ -1,6 +1,6 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 047). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 048). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
@@ -8,30 +8,41 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import {
   asignarClaves,
   asuntoSinCodigo,
+  claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
+  contactoDeTickets,
+  contactoEfectivo,
   diasDeTipo,
+  esEmailInterno,
   esRolEstado,
   estadoCalibracion,
   etiquetaEstadoDesk,
   modeloDeCodigo,
+  nombreContacto,
+  normalizarEmail,
   partesDeTipo,
   porOrdenEstadosDesk,
   ROL_POR_DEFECTO,
   tipoEfectivo,
+  type ContactoCliente,
+  type ContactoEquipo,
   type RolEstado,
+  type TicketContacto,
 } from './dominio.js';
 import { calcularReloj, type IntervaloEstado } from './plazos.js';
 import {
   TzError,
   errorPlazoDerivado,
   type Actor,
+  type CambioContacto,
   type CambioEstadoDesk,
   type CambioPlazo,
   type EquipoVista,
   type EstadoDesk,
   type FilaImportada,
   type Importacion,
+  type OrigenCliente,
   type PartePlazo,
   type PlazoServicio,
   type ResumenImportacion,
@@ -77,27 +88,8 @@ const COLS_EQUIPO = `
  * oculta: se marca «sin confirmar».
  */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
-  const { rows } = await db.query(
-    `SELECT ${COLS_EQUIPO},
-            s.clave IS NOT NULL AS tiene_seg, s.en_ambientalia, s.aviso_enviado::text AS aviso_enviado,
-            s.servicio_programado::text AS servicio_programado, s.nota, s.actualizado_por,
-            s.actualizado_en::text AS seg_en,
-            tk.number AS ticket_numero, tk.status AS ticket_estado, tk.sin_confirmar AS ticket_sin_confirmar
-       FROM portal.tmc_equipos e
-       LEFT JOIN portal.tmc_seguimiento s ON s.clave = e.clave
-       LEFT JOIN LATERAL (
-              SELECT t.number, t.status,
-                     (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar
-                FROM desk.tickets t
-               WHERE t.status_type IS DISTINCT FROM 'Closed'
-                 AND trim(t.serial) <> ''
-                 AND upper(trim(t.serial)) = upper(trim(e.serial))
-               ORDER BY t.number DESC
-               LIMIT 1
-            ) tk ON TRUE
-      WHERE e.activo
-      ORDER BY e.cliente, e.serial`,
-  );
+  const [{ rows }, deDesk, manuales] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db)]);
+  const manualDe = new Map(manuales.map((m) => [m.clave, m]));
   const porSerial = new Map<string, number>();
   for (const r of rows as Row[]) porSerial.set(r.serial, (porSerial.get(r.serial) ?? 0) + 1);
   return (rows as Row[]).map((r) => ({
@@ -129,7 +121,116 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
       r.ticket_numero === null || r.ticket_numero === undefined
         ? null
         : { numero: Number(r.ticket_numero), estado: r.ticket_estado, sinConfirmar: r.ticket_sin_confirmar === true },
+    contacto: contactoEfectivo(manualDe.get(claveCliente(r.cliente)), deDesk.get(claveSerialDesk(r.serial)) ?? null),
   }));
+}
+
+/** El serial tal como casa con Desk: sin espacios alrededor y en mayúsculas (lo mismo que `upper(trim(…))` en SQL). */
+const claveSerialDesk = (serial: unknown): string => String(serial ?? '').trim().toUpperCase();
+
+/**
+ * El contacto que da Desk para cada serial del inventario activo: el del
+ * ticket de número más alto —abierto o cerrado— con un correo que valga.
+ *
+ * El correo es `raw->>'email'` (el del contacto del ticket) y, si no viene, el
+ * de `raw->'contact'`; el nombre, `firstName` + `lastName` de ese contacto. La
+ * consulta sólo descarta los tickets sin serial o sin correo: qué correo vale
+ * (forma de correo y que no sea de un dominio propio) lo decide
+ * `contactoDeTickets` (dominio.ts), con la misma regla que usa la app, y por
+ * eso se traen todos los candidatos y no sólo el último: si el más reciente es
+ * interno o está mal escrito, se retrocede al anterior.
+ */
+async function contactosDeDesk(db: Db): Promise<Map<string, ContactoEquipo>> {
+  const { rows } = await db.query(
+    `SELECT upper(trim(t.serial)) AS serial, t.number,
+            COALESCE(NULLIF(trim(t.raw->>'email'), ''), t.raw->'contact'->>'email') AS email,
+            t.raw->'contact'->>'firstName' AS nombre, t.raw->'contact'->>'lastName' AS apellido
+       FROM desk.tickets t
+      WHERE trim(t.serial) <> ''
+        AND trim(COALESCE(NULLIF(trim(t.raw->>'email'), ''), t.raw->'contact'->>'email', '')) <> ''
+        AND upper(trim(t.serial)) IN (SELECT upper(trim(e.serial)) FROM portal.tmc_equipos e WHERE e.activo)
+      ORDER BY t.number DESC NULLS LAST`,
+  );
+  const porSerial = new Map<string, TicketContacto[]>();
+  for (const r of rows as Row[]) {
+    const lista = porSerial.get(r.serial) ?? [];
+    lista.push({ numero: r.number === null || r.number === undefined ? null : Number(r.number), email: r.email, nombre: r.nombre, apellido: r.apellido });
+    porSerial.set(r.serial, lista);
+  }
+  const out = new Map<string, ContactoEquipo>();
+  for (const [serial, tickets] of porSerial) {
+    const c = contactoDeTickets(tickets);
+    if (c) out.set(serial, c);
+  }
+  return out;
+}
+
+/** Los contactos puestos a mano a clientes (portal.tmc_contactos), por orden alfabético de cliente. */
+export async function listarContactos(db: Db): Promise<ContactoCliente[]> {
+  const { rows } = await db.query(
+    `SELECT clave, cliente, emails, nombre, actualizado_por, actualizado_en::text AS actualizado_en
+       FROM portal.tmc_contactos
+      ORDER BY cliente, clave`,
+  );
+  return (rows as Row[]).map((r) => {
+    const emails = ((r.emails ?? []) as unknown[]).map(normalizarEmail).filter(Boolean);
+    return {
+      clave: r.clave,
+      cliente: r.cliente,
+      nombre: r.nombre ?? '',
+      emails,
+      internos: emails.filter(esEmailInterno),
+      actualizadoPor: r.actualizado_por,
+      actualizadoEn: r.actualizado_en,
+    };
+  });
+}
+
+/**
+ * Pone a mano el contacto de un cliente y lo firma; con `emails` vacío lo
+ * quita (borra la fila: vuelve a valer el contacto de Desk). Casa por
+ * `claveCliente`, así que cualquier grafía del nombre toca la misma fila y
+ * vale para todos los equipos de ese cliente. Sólo guarda direcciones: de aquí
+ * no sale ningún mensaje.
+ */
+export async function guardarContacto(db: Db, c: CambioContacto, actor: Actor): Promise<void> {
+  const clave = claveCliente(c.cliente);
+  if (c.emails.length === 0) {
+    await db.query(`DELETE FROM portal.tmc_contactos WHERE clave = $1`, [clave]);
+    return;
+  }
+  await db.query(
+    `INSERT INTO portal.tmc_contactos (clave, cliente, emails, nombre, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3::text[], $4, $5, $6, NOW())
+     ON CONFLICT (clave) DO UPDATE SET
+       cliente = EXCLUDED.cliente, emails = EXCLUDED.emails, nombre = EXCLUDED.nombre,
+       actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [clave, c.cliente, c.emails, c.nombre, actor.userId, actor.email],
+  );
+}
+
+function consultarEquipos(db: Db) {
+  return db.query(
+    `SELECT ${COLS_EQUIPO},
+            s.clave IS NOT NULL AS tiene_seg, s.en_ambientalia, s.aviso_enviado::text AS aviso_enviado,
+            s.servicio_programado::text AS servicio_programado, s.nota, s.actualizado_por,
+            s.actualizado_en::text AS seg_en,
+            tk.number AS ticket_numero, tk.status AS ticket_estado, tk.sin_confirmar AS ticket_sin_confirmar
+       FROM portal.tmc_equipos e
+       LEFT JOIN portal.tmc_seguimiento s ON s.clave = e.clave
+       LEFT JOIN LATERAL (
+              SELECT t.number, t.status,
+                     (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar
+                FROM desk.tickets t
+               WHERE t.status_type IS DISTINCT FROM 'Closed'
+                 AND trim(t.serial) <> ''
+                 AND upper(trim(t.serial)) = upper(trim(e.serial))
+               ORDER BY t.number DESC
+               LIMIT 1
+            ) tk ON TRUE
+      WHERE e.activo
+      ORDER BY e.cliente, e.serial`,
+  );
 }
 
 /** Abierto en Desk: cualquier tipo de estado que no sea 'Closed' (también el vacío). */
@@ -178,6 +279,27 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
 }
 
 /**
+ * El cliente de un servicio, por este orden:
+ *  (a) el cliente del equipo de portal.tmc_equipos con el mismo serial (sin
+ *      mayúsculas ni espacios; con varios, el activo y, si no hay, uno
+ *      retirado) — es el nombre con el que se le conoce en la F-ST-022;
+ *  (b) la cuenta de Desk (`raw.contact.account.accountName`), que casi nunca viene;
+ *  (c) nombre y apellido del contacto del ticket;
+ *  (d) el asunto sin el código de servicio: no es un nombre fiable y la app lo
+ *      enseña distinto (`clienteDeAsunto`).
+ */
+function clienteDeServicio(r: Row): { cliente: string; origen: OrigenCliente } {
+  const limpio = (v: unknown) => String(v ?? '').replace(/\s+/g, ' ').trim();
+  const equipo = limpio(r.cliente_equipo);
+  if (equipo) return { cliente: equipo, origen: 'equipo' };
+  const cuenta = limpio(r.cuenta);
+  if (cuenta) return { cliente: cuenta, origen: 'cuenta' };
+  const contacto = nombreContacto(r.contacto_nombre, r.contacto_apellido);
+  if (contacto) return { cliente: contacto, origen: 'contacto' };
+  return { cliente: asuntoSinCodigo(r.subject, r.codigo_servicio), origen: 'asunto' };
+}
+
+/**
  * Todos los tickets de Desk que no están cerrados —de cualquier marca, con o
  * sin serial: esta vista va de tickets, no de equipos— con su fecha límite a
  * fecha `hoy`.
@@ -204,8 +326,8 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
  * hoy. Aquí sólo se lee: quien apunta los tramos es `registrarEstados`.
  *
  * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
- * Colombia de created_time. El cliente es la cuenta de Desk que viaja en `raw`
- * y, si no viene, el asunto sin el código de servicio.
+ * Colombia de created_time. El cliente lo resuelve `clienteDeServicio`: el del
+ * equipo del inventario con ese serial y, si no, lo que viaje en `raw`.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
   const [{ rows }, { tipos, plazos }, conRol, historial] = await Promise.all([
@@ -213,11 +335,21 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
       `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
               COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
               (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar,
+              eq.cliente AS cliente_equipo,
               t.raw->'contact'->'account'->>'accountName' AS cuenta,
+              t.raw->'contact'->>'firstName' AS contacto_nombre, t.raw->'contact'->>'lastName' AS contacto_apellido,
               m.clave AS manual_clave, m.etiqueta AS manual_etiqueta, m.actualizado_por AS manual_por,
               m.actualizado_en::text AS manual_en
          FROM desk.tickets t
          LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
+         LEFT JOIN LATERAL (
+                SELECT e.cliente
+                  FROM portal.tmc_equipos e
+                 WHERE trim(t.serial) <> ''
+                   AND upper(trim(e.serial)) = upper(trim(t.serial))
+                 ORDER BY e.activo DESC, e.clave
+                 LIMIT 1
+              ) eq ON TRUE
         WHERE ${TICKET_ABIERTO}
         ORDER BY t.number DESC`,
     ),
@@ -256,7 +388,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
     const claveTipo = claveTipoServicio(tipoServicio);
     const plazoDias = plazos.dias(claveTipo);
     const partes = plazos.partes(claveTipo);
-    const cuenta = String(r.cuenta ?? '').trim();
+    const { cliente, origen: clienteOrigen } = clienteDeServicio(r);
     const numero = Number(r.number);
     const reloj = calcularReloj({
       ingreso: r.ingreso,
@@ -270,8 +402,9 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
     return {
       numero,
       asunto: String(r.subject ?? '').trim(),
-      cliente: cuenta || asuntoSinCodigo(r.subject, r.codigo_servicio),
-      clienteDeAsunto: !cuenta,
+      cliente,
+      clienteOrigen,
+      clienteDeAsunto: clienteOrigen === 'asunto',
       serial: String(r.serial ?? '').trim(),
       modelo: modeloDeCodigo(r.codigo_servicio),
       tipoServicio,
