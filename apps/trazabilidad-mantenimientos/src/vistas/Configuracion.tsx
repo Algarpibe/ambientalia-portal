@@ -1,22 +1,164 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, type PlazoServicio } from '../dominio';
-import { notaDerivado } from '../lib/servicios';
+import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type PlazoServicio, type RolEstado } from '../dominio';
+import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { Alert, Button, Card, Loading } from '../ui';
 
 /**
- * Configuración: el plazo, en días hábiles, de cada tipo de servicio de Zoho
+ * Configuración. Primer bloque: el plazo, en días hábiles, de cada tipo de servicio de Zoho
  * Desk. Con él se calcula la fecha límite de la pestaña «Servicios» (ingreso +
  * plazo). Vacío = ese tipo no tiene plazo. Lo edita cualquiera con la app y
  * cada cambio queda firmado con su correo. Un tipo compuesto (`derivadoDe`) va
- * en sólo lectura: su plazo es la suma de los de sus partes.
+ * en sólo lectura: su plazo es la suma de los de sus partes. Segundo bloque: el
+ * rol de cada estado de Desk en el reloj de ese plazo.
  */
 interface Props {
   notificar: (msg: string) => void;
 }
 
+/**
+ * Dos bloques, cada uno con su carga y sus errores (si uno falla, el otro
+ * sigue): los plazos por tipo de servicio y el rol de cada estado de Desk en
+ * el reloj del plazo.
+ */
 export default function Configuracion({ notificar }: Props) {
+  return (
+    <div className="flex flex-col gap-4">
+      <Plazos notificar={notificar} />
+      <EstadosDesk notificar={notificar} />
+    </div>
+  );
+}
+
+/**
+ * Estados de Desk: qué le hace cada uno al reloj del plazo. Tres roles, y sólo
+ * uno por estado: «Cuenta» (el de partida: el tiempo corre), «Standby» (reloj
+ * en pausa: el ticket depende de una decisión del cliente o de un servicio
+ * externo) y «Trabajo terminado» (reloj parado: el trabajo técnico está hecho
+ * y el ticket se juzga por el día en que llegó ahí).
+ * Salen todos los estados que existen en Desk (y los ya guardados aunque ningún
+ * ticket los tenga); ninguno viene marcado: el «En espera» de Desk sólo orienta.
+ * El desplegable guarda al momento y queda firmado. El rol no se copia al
+ * historial de estados: cambiarlo reevalúa también los días ya pasados.
+ */
+function EstadosDesk({ notificar }: Props) {
+  const [estados, setEstados] = useState<EstadoDesk[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  /** Clave del estado que se está guardando. Mientras dura, ningún desplegable admite otro cambio: las respuestas no se pisan. */
+  const [guardando, setGuardando] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    try {
+      setEstados((await api.estados()).estados);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
+
+  const cambiar = async (e: EstadoDesk, rol: RolEstado) => {
+    if (rol === e.rol) return;
+    setGuardando(e.clave);
+    try {
+      setEstados((await api.guardarEstado(e.etiqueta, rol)).estados);
+      setError(null);
+      notificar(avisoRol(e.etiqueta, rol));
+    } catch (err) {
+      setError(`No se pudo guardar «${e.etiqueta}»: ${(err as Error).message}`);
+    } finally {
+      setGuardando(null);
+    }
+  };
+
+  return (
+    <Card
+      title="Estados de Desk"
+      hint="Qué le hace cada estado al reloj del plazo: «Cuenta», el tiempo corre; «Standby», en pausa a la espera del cliente o de un servicio externo (esos días hábiles no cuentan); «Trabajo terminado», parado: el ticket queda cumplido o incumplido según el día en que llegó. El portal mide el tiempo desde que vio cada ticket por primera vez."
+      className="max-w-4xl"
+    >
+      {error && (
+        <div className="mb-3">
+          <Alert tone="red">{error}</Alert>
+        </div>
+      )}
+      {!estados ? (
+        !error && <Loading texto="Cargando los estados de Desk…" />
+      ) : estados.length === 0 ? (
+        <p className="text-sm text-gray-500">Todavía no hay ningún estado: Zoho Desk no ha enviado tickets.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
+                <th className="px-3 py-2 font-semibold">Estado en Desk</th>
+                <th className="px-3 py-2 text-right font-semibold">Tickets abiertos</th>
+                <th className="px-3 py-2 font-semibold">El tiempo en este estado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {estados.map((e) => {
+                const tipo = etiquetaTipoDesk(e.tipoDesk);
+                return (
+                  <tr key={e.clave}>
+                    <td className="px-3 py-2">
+                      <span className="font-medium text-gray-900">{e.etiqueta}</span>
+                      <span className="ml-2 text-xs text-gray-400" title={tipo ? 'Tipo de estado según Zoho Desk: sólo orienta' : 'Ningún ticket tiene ahora este estado'}>
+                        {tipo || 'sin tickets'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">{e.ticketsAbiertos}</td>
+                    <td className="px-3 py-1">
+                      <span className="inline-flex min-h-[44px] items-center gap-2">
+                        <select
+                          value={e.rol}
+                          disabled={guardando !== null}
+                          aria-busy={guardando === e.clave}
+                          aria-label={`${e.etiqueta}: qué hace el tiempo en este estado`}
+                          title={notaEstadoDesk(e)}
+                          onChange={(ev) => {
+                            const rol = ev.target.value;
+                            if (esRolEstado(rol)) void cambiar(e, rol);
+                          }}
+                          className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            e.rol === 'cuenta' ? 'border-gray-300 text-gray-500' : 'border-gray-400 font-medium text-gray-900'
+                          }`}
+                        >
+                          {OPCIONES_ROL.map((o) => (
+                            <option key={o.valor} value={o.valor} title={o.ayuda}>
+                              {o.texto}
+                            </option>
+                          ))}
+                        </select>
+                        {guardando === e.clave && (
+                          <span className="text-xs text-gray-500" role="status">
+                            guardando…
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-3 text-xs text-gray-500">
+        Salen todos los estados que existen en Zoho Desk, también los cerrados; el tipo que acompaña a cada uno es el de Desk y sólo orienta: todos empiezan en «Cuenta» (un
+        estado puede estar «En espera» en Desk sin depender del cliente). El desplegable guarda al momento, y el cambio vale también hacia atrás. Lo anterior a la primera
+        vez que el portal vio un ticket no se puede saber y cuenta como tiempo normal.
+      </p>
+    </Card>
+  );
+}
+
+/** Los plazos, en días hábiles, de cada tipo de servicio. */
+function Plazos({ notificar }: Props) {
   const [plazos, setPlazos] = useState<PlazoServicio[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Lo que hay escrito en cada casilla que se ha tocado, por clave. */

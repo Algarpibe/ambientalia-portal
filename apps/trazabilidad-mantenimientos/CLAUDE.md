@@ -22,16 +22,17 @@ se registra en la app y sobrevive a las reimportaciones.
 | Pieza | Ruta |
 |---|---|
 | Dominio puro (sin imports; lo usa servidor y UI) | `apps/hub-api/src/trazabilidad/dominio.ts` |
-| Plazos en días hábiles (sólo servidor: llama al calendario de Ausencias) | `apps/hub-api/src/trazabilidad/plazos.ts` |
+| Plazos en días hábiles y reloj con pausas, `calcularReloj` (sólo servidor: llama al calendario de Ausencias) | `apps/hub-api/src/trazabilidad/plazos.ts` |
+| Cuándo se apuntan los cambios de estado: programador de 5 min + al leer «Servicios» (sólo servidor) | `apps/hub-api/src/trazabilidad/registro-estados.ts` |
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`) | `apps/hub-api/src/trazabilidad/router.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Lectura del Excel en el navegador | `src/lib/importar.ts` |
 | Agregados, calendario y texto del aviso | `src/lib/vistas.ts` |
-| Eje, barras (y sus tramos), colores, textos, desplegable del tipo de «Servicios» y nota del tipo compuesto en «Configuración» | `src/lib/servicios.ts` |
-| Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
+| Eje, barras (sus tramos, sus pausas y la marca de fin), colores, textos, filtros (`filtrarServicios`, `GRUPOS_PLAZO`), desplegable del tipo de «Servicios» y, de «Configuración», la nota del tipo compuesto y las opciones y textos del rol de cada estado | `src/lib/servicios.ts` |
+| Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos y rol de cada estado de Desk) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 
 Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 `portal/src/App.tsx`, `portal/src/pages/Aplicaciones.tsx`, `portal/tailwind.config.js` y el
@@ -46,6 +47,8 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
 | `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado. La 045 añade, igual de idempotente, la fila del tipo compuesto `diagnostico + calibracion` («Diagnóstico + Calibración») con `dias_habiles` NULL: esa columna **no se lee** para un compuesto (ver «Tipo compuesto») |
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
+| `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez |
+| `portal.tmc_estados_historial` | En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
 
 ## API (`/api/trazabilidad/*`)
 
@@ -55,13 +58,16 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
-| GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), fecha límite, días hábiles y estado del plazo, y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto) |
+| GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), el reloj con pausas (`rolEstado`: `cuenta` / `standby` / `terminado`, el del estado de ahora; `enPausa`; `diasPausados`; `pausas: [{desde, hasta}]`; `terminadoEl`; `medidoDesde`; `fechaLimiteBase` = la fecha sin pausas), `plazoDias`, `fechaLimite` (ya corrida), `diasHabiles` y `estadoPlazo` (`EN_PLAZO` / `VENCE_HOY` / `VENCIDO` / `SIN_PLAZO` en marcha; `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo terminado), y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto). Antes de leer apunta los cambios de estado (`registrarEstados`), si se puede: un fallo ahí no falla la petición |
 | PUT | `/trazabilidad/servicios/:numero/tipo` (`?hoy=`) | `{tipo}`: pone a mano el tipo de servicio del ticket; `null` o vacío lo quita. 400 si `numero` no es un entero positivo o si el tipo no está (por clave normalizada) en `tmc_plazos`; 404 si el ticket no existe en `desk.tickets`. Devuelve lo mismo que el GET, ya recalculado |
 | GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila; `ticketsAbiertos` cuenta por tipo efectivo. Cada plazo lleva `derivadoDe`: `null` en un tipo simple y, en uno compuesto, sus partes `[{clave, etiqueta, dias}]` (entonces `dias` es su suma, o `null` si a alguna le falta) |
 | PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado. 400 en `tipo` si es un tipo compuesto: su plazo se calcula, no se guarda |
+| GET | `/trazabilidad/estados` | `{estados[]}`: todos los estados que existen en `desk.tickets` (de cualquier ticket, cerrados incluidos) más los ya guardados en `tmc_estados_desk` aunque ningún ticket los tenga. Cada uno: `{clave, etiqueta, tipoDesk, ticketsAbiertos, rol, actualizadoPor, actualizadoEn}`; `rol` es `cuenta` (mientras nadie lo cambie), `standby` o `terminado`; `tipoDesk` es el `status_type` de Desk (`Open` / `On Hold` / `Closed`, o `null`) y sólo orienta. Orden: tipo abierto, en espera, cerrado y sin tipo; dentro, más tickets abiertos primero y después alfabético |
+| PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente |
 
-Permisos: cualquiera con la app asignada lee, importa, registra seguimiento, cambia plazos y pone
-a mano el tipo de servicio de un ticket; todo queda firmado con su correo.
+Permisos: cualquiera con la app asignada lee, importa, registra seguimiento, cambia plazos, pone
+a mano el tipo de servicio de un ticket y elige el rol de cada estado de Desk; todo queda firmado
+con su correo. El historial de estados no lo escribe nadie a mano: lo apunta hub-api.
 
 ## Cruce con Zoho Desk (ticket abierto)
 
@@ -85,7 +91,9 @@ de zoho-hub; hub-api sólo la lee y no tiene migración para ella— y devuelve
 
 Pestaña «Servicios» = **todos** los tickets de `desk.tickets` con `status_type` distinto de
 `'Closed'` (cualquier marca, con o sin serial: va de tickets, no de equipos), en lista y en
-calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de servicio.
+calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de servicio y, debajo, el
+rol de cada estado de Desk en el reloj (ver «Reloj del plazo»). Lo que sigue es la regla base;
+el tiempo en standby se descuenta y el trabajo terminado para el reloj, y eso va en esa sección.
 
 - **Fecha límite = ingreso + N días hábiles**, con N el plazo del tipo de servicio del ticket. Es
   alternativo por tipo, no acumulado (salvo el tipo compuesto, abajo). El día de ingreso no cuenta
@@ -128,7 +136,8 @@ calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de ser
 - **Días hábiles** = lunes a viernes sin festivos de Colombia. `plazos.ts` no repite la regla: llama
   a `contarDiasHabiles` y `festivosColombia` de `apps/hub-api/src/ausencias/`. Todo se calcula en el
   servidor (`fechaLimite`, `diasHabiles` —negativo = atraso— y `estadoPlazo`: `EN_PLAZO`,
-  `VENCE_HOY`, `VENCIDO`, `SIN_PLAZO`); la UI sólo coloca columnas. El estado compara fechas de
+  `VENCE_HOY`, `VENCIDO`, `SIN_PLAZO`, más `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo
+  terminado); la UI sólo coloca columnas. El estado compara fechas de
   calendario: un sábado tras un límite en viernes ya es `VENCIDO` con 0 días hábiles de atraso.
 - **Calendario de barras** (`src/lib/servicios.ts`): una columna por día; barra del ingreso a la
   fecha límite (verde / ámbar si vence hoy / rojo) y, si está vencido, tramo rayado hasta hoy. El
@@ -144,9 +153,141 @@ calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de ser
   tengan tipo a mano cogen el de Desk solos, y los que sí lo tengan lo conservan.
 - Ninguna migración de hub-api crea ni altera nada en el esquema `desk`.
 
+## Reloj del plazo: standby lo pausa, «trabajo terminado» lo para
+
+El plazo de un ticket ya no corre siempre. Cada **estado de Desk** (`desk.tickets.status`) tiene
+un **rol** en el reloj, y sólo uno. Se elige por estado, no por ticket, en el bloque «Estados de
+Desk» de «Configuración» (un desplegable por estado, que guarda al momento y queda firmado con
+id, correo y fecha):
+
+| Rol (`tmc_estados_desk.rol`) | Qué le hace al reloj |
+|---|---|
+| `cuenta` — «Cuenta» | El tiempo corre. Es el de partida: un estado sin fila vale `cuenta` |
+| `standby` — «Standby» | **Pausa**: el ticket depende de una decisión del cliente o de un servicio externo. Los días hábiles que pasa así no cuentan y la fecha límite se corre |
+| `terminado` — «Trabajo terminado» | **Para**: el trabajo técnico está hecho («Por Facturar», «Por Entregar»). El ticket se juzga por el día en que llegó a ese estado |
+
+- **Nada viene marcado.** El `status_type` de Desk (`Open` / `On Hold` / `Closed`, que el bloque
+  enseña como «Abierto» / «En espera» / «Cerrado») sólo orienta: «Por Facturar» es «En espera» en
+  Desk y no es una espera del cliente.
+- **El estado casa por `claveEstadoDesk`** (`dominio.ts`): la misma normalización que
+  `claveTipoServicio` (sin mayúsculas, tildes ni espacios repetidos o sobrantes), así que
+  «Notificación  Comercial» (con dos espacios, como llega de Desk) y «Notificación Comercial» son
+  el mismo estado. Se casa en JS, no en SQL. La etiqueta que se enseña es la grafía más usada en
+  los tickets, sin espacios de más (`etiquetaEstadoDesk`); si ningún ticket tiene ya ese estado,
+  la guardada.
+- Los roles y sus etiquetas viven en `dominio.ts` (`ROLES_ESTADO`, `ETIQUETA_ROL`,
+  `rolPausaReloj`); el `CHECK` de la migración 046 lleva los mismos tres valores y
+  `plazos.test.ts` vigila que coincidan.
+
+### El historial: el portal mide el tiempo él mismo
+
+La réplica `desk.tickets` sólo trae el estado **de ahora**, así que hub-api apunta los cambios
+que ve en `portal.tmc_estados_historial` (migración 047): una fila = un tramo, «el ticket
+`numero` estuvo en el estado `clave` de `desde` a `hasta`» (`hasta` NULL = sigue ahí).
+
+- **`registrarEstados(db)`** (`repo.ts`) es lo único que escribe ahí. Lee el estado de cada
+  ticket sin cerrar y los tramos abiertos, y: ticket sin tramo abierto → abre uno; ticket cuyo
+  estado (por clave normalizada) ya no es el de su tramo → lo cierra y abre otro **en el mismo
+  instante**; ticket cerrado en Desk o desaparecido de la réplica → cierra su tramo y no abre
+  otro. Otra grafía del mismo estado **no** es un cambio. Sin cambios no escribe nada.
+- **`desde_real`**: `TRUE` si `desde` es un cambio de estado que el portal vio; `FALSE` si es la
+  primera vez que vio el ticket, que ya estaba así (entonces `desde` es ese primer instante y el
+  comienzo real no se sabe). Un ticket que se cierra y se reabre vuelve a empezar con `FALSE`.
+- **Como mucho un tramo abierto por ticket**: índice único parcial
+  `tmc_estados_historial_abierto_uq (numero) WHERE hasta IS NULL`. Con llamadas a la vez es
+  seguro por partida doble: toda la pasada va en una transacción que primero se pone en fila
+  (`pg_advisory_xact_lock`), y las escrituras no pisan aunque no lo hiciera (sólo se cierra un
+  tramo que siga abierto; el alta es `ON CONFLICT … DO NOTHING` sobre ese índice). El instante
+  se toma con `clock_timestamp()` ya con el bloqueo, y el mismo valor cierra y abre.
+- **Cuándo se llama** (`registro-estados.ts`, sólo servidor), por dos caminos y una sola puerta:
+  1. un **programador** dentro de hub-api, cada 5 minutos (`INTERVALO_MS`), con la primera pasada
+     20 s después de arrancar (`PRIMERA_PASADA_MS`). Lo enciende `index.ts` tras `initDb()`
+     (`iniciarRegistroEstados`) y nadie más: importar el módulo no arranca nada, así que en los
+     tests no hay temporizadores. Un fallo se apunta (`console.error` + `captureError`) y la
+     pasada siguiente sale igual;
+  2. **`GET /trazabilidad/servicios`**, antes de leer, «si se puede» (`registrarEstadosSinFallar`):
+     si falla, la petición responde igual con lo que haya.
+
+  No hacen el trabajo dos veces: en un proceso hay **una sola pasada a la vez** (quien llega
+  durante una se cuelga de ella) y una petición no repite una pasada buena de hace menos de 30 s
+  (`FRESCURA_MS`); el programador sí pasa siempre, que para eso tiene su turno.
+- **El rol NO se copia al historial.** Los tramos guardan el estado; el rol se mira **al leer**,
+  con lo que diga `tmc_estados_desk` en ese momento. Cambiar el rol de un estado reevalúa
+  también los días ya pasados (para bien y para mal: marcar hoy «En Proceso» como standby pausa
+  todo el tiempo que cada ticket lleva apuntado en «En Proceso»).
+- ⚠️ **Lo que no se puede saber**: lo anterior al primer tramo de un ticket. Los tickets que ya
+  estaban abiertos cuando esto se desplegó no tienen pasado: ese tiempo **cuenta como activo**,
+  estuvieran como estuvieran. `medidoDesde` (el día del primer tramo) va en cada servicio para
+  que la UI lo diga. Tampoco se ve lo que pase entre dos pasadas (un estado que dura menos de
+  5 minutos puede no quedar apuntado), ni lo que ocurra con hub-api caído: al volver, el tramo
+  abierto se cierra en el momento en que se ve el estado nuevo, no cuando cambió de verdad. Y
+  todo va con el retraso del worker de zoho-hub: se apunta cuándo lo vio el portal, no cuándo
+  cambió en Desk.
+
+### La regla, por días (`calcularReloj`, `plazos.ts`)
+
+Pura y de servidor: recibe `hoy`, el rol del estado de ahora, los tramos y el rol de cada estado;
+no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y sólo cuentan los
+**hábiles**.
+
+- **Día en pausa**: un día hábil D, posterior al ingreso y no posterior a hoy, está en pausa si
+  **al acabar el día en Bogotá** (23:59:59,999) el ticket estaba en un tramo cuyo estado tiene
+  hoy rol `standby` **o `terminado`**. El día de **hoy**, que no ha acabado, lo decide el estado
+  de ahora. Consecuencias: una pausa que empieza y acaba el mismo día no pausa nada; el día en
+  que entra en standby ya no cuenta y el día en que sale sí.
+- **Fecha límite** = el día en que cae el N-ésimo día hábil **activo** después del ingreso: se
+  avanza saltando fines de semana, festivos y días en pausa. Los días que aún no han llegado se
+  dan por activos (es una proyección): mientras el ticket siga en standby, la fecha se corre un
+  día hábil por cada día hábil que pasa. Que esté en pausa **no** es un estado del plazo: va en
+  `enPausa`, y `estadoPlazo` sigue siendo `EN_PLAZO` / `VENCE_HOY` / `VENCIDO` contra la fecha ya
+  corrida. `fechaLimiteBase` es la que tendría sin pausas.
+- **`diasHabiles`**: lo que queda son los días hábiles de hoy a la fecha límite (todos futuros,
+  todos activos). El **atraso** tampoco cuenta los días en pausa posteriores al límite.
+- **Tipo compuesto**: los tramos siguen el mismo paso, así que la fecha intermedia también se corre.
+- **`pausas`**: los días en pausa en rangos `{desde, hasta}` (ambos incluidos), para pintarlos.
+  Empiezan y acaban en un día en pausa; dos días en pausa van en el mismo rango si entre ellos no
+  hay ningún día hábil activo (un fin de semana no parte el rango). `diasPausados` cuenta sólo
+  los hábiles.
+- **Trabajo terminado**: si el estado **de ahora** tiene rol `terminado`, el reloj se para en
+  `terminadoEl` = el día de Bogotá del `desde` del **primer tramo de la racha** de estados
+  `terminado` en la que el ticket sigue (hacia atrás desde el tramo abierto, mientras el anterior
+  también sea `terminado` y acabe donde empieza el siguiente: «Por Facturar» → «Por Entregar» es
+  una sola racha). La fecha límite se calcula **a ese día** (con las pausas anteriores; ese día y
+  los siguientes cuentan como activos) y ya no se mueve. `estadoPlazo` pasa a ser el veredicto
+  (`veredictoTerminado`, `dominio.ts`): **`CUMPLIDO`** si `terminadoEl` ≤ fecha límite,
+  **`INCUMPLIDO`** si no, y **`TERMINADO`** si la racha empieza en una primera observación
+  (`desde_real` FALSE) o el historial aún no tiene el tramo: se sabe que está terminado, no desde
+  cuándo. `diasHabiles` es el margen o el atraso con que llegó, congelado.
+- **Si sale de «terminado»** a un estado que cuenta, el reloj sigue: `terminadoEl` vuelve a null
+  y los días que acabó en «terminado» quedan **en pausa**, igual que los de standby (no se le
+  carga el tiempo en que el trabajo se dio por hecho).
+- **Sin tipo o sin plazo** → `SIN_PLAZO`, como siempre, pero con su rol, sus pausas, `terminadoEl`
+  y `medidoDesde`.
+
+### En «Servicios»
+
+- **Lista**: etiqueta gris «standby» junto al estado (su `title`: cuántos días hábiles lleva en
+  pausa y desde cuándo se mide) o «terminado» (cuándo se paró y con qué veredicto). El plazo dice
+  «en pausa · quedan N d háb.» mientras está en standby, y «cumplido» (verde) / «incumplido · N d
+  háb.» (rojo) / «terminado» (neutro) con el trabajo terminado. Con días en pausa, la fecha
+  límite es la corrida y su `title` da la de sin pausas y cuántos días son (`tituloFechaLimite`);
+  sin columna nueva.
+- **Filtros** (`GRUPOS_PLAZO`): Vencido, Vence hoy, En plazo, Sin plazo y uno solo, «Terminado N»,
+  que cubre `CUMPLIDO`, `INCUMPLIDO` y `TERMINADO` (el desglose, en su `title`). «Standby N» sigue
+  aparte y se suma a los del plazo. Por urgencia, los terminados van detrás de los que siguen en
+  marcha (`porUrgenciaPlazo`).
+- **Calendario de barras**: la barra acaba en la fecha límite corrida; los días en pausa van
+  encima como una banda rayada gris (`pausasBarra`), distinta del rayado rojo del atraso. Con el
+  trabajo terminado la barra acaba en `terminadoEl` con una marca oscura, en un tono más claro
+  (verde / rojo / neutro según el veredicto) y sin tramo de atraso detrás. La leyenda sólo
+  enseña lo que hay pintado (`leyendaServicios`).
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso y
-  geometría del calendario de barras.
-- `npm test --workspace=apps/hub-api` — dominio, plazos y router (`src/trazabilidad/*.test.ts`).
-- `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real.
+  geometría del calendario de barras (pausas y marca de fin incluidas).
+- `npm test --workspace=apps/hub-api` — dominio, plazos (el reloj con pausas, con `hoy` y los
+  tramos como argumentos), router y el programador con reloj de mentira
+  (`src/trazabilidad/*.test.ts`).
+- `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real: `registrarEstados`
+  (también con llamadas a la vez) y «Servicios» de punta a punta con un historial sembrado y `hoy` fijo.

@@ -1,23 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ChevronsLeft, RefreshCw, Search } from 'lucide-react';
 import { api, type Servicios as Datos } from '../api';
-import { ESTADOS_PLAZO, ETIQUETA_PLAZO, type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import { type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
 import {
+  GRUPOS_PLAZO,
+  TITULO_STANDBY,
   TONO_PLAZO,
+  alternarGrupo,
   avisoSinTipo,
   barraServicio,
   columna,
+  contarGrupo,
+  contarPlazos,
+  contarStandby,
   diasDelEje,
   ejeServicios,
+  filtrarServicios,
+  grupoElegido,
+  leyendaServicios,
   mesesDelEje,
   notaTipo,
+  pausasBarra,
   porUrgenciaPlazo,
   resumenServicios,
   segmentosBarra,
   selectorTipo,
   textoPlazo,
   textoTramos,
+  tituloFechaLimite,
+  tituloGrupo,
   tituloSegmento,
+  tituloStandby,
+  tituloTerminado,
 } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { Alert, Button, Loading, Tag } from '../ui';
@@ -32,6 +46,14 @@ import { Alert, Button, Loading, Tag } from '../ui';
  * envía) y manda sobre el de Desk. Al cambiarlo, el servidor devuelve todos
  * los servicios recalculados y se sustituyen de una vez: fecha límite,
  * contadores y barras salen del mismo dato, sin recargar la página.
+ *
+ * El estado de Desk del ticket tiene un rol en el reloj (se elige en
+ * «Configuración»). «standby» lo pone en pausa: esos días hábiles no cuentan y
+ * la fecha límite se corre; en el calendario salen como una banda rayada
+ * neutra dentro de la barra. «terminado» lo para: la barra acaba el día en que
+ * se terminó el trabajo, con una marca, en verde si cumplió, en rojo si no y
+ * en neutro si no se pudo medir. Todo llega ya calculado del servidor: aquí
+ * sólo se enseña, se cuenta y se filtra.
  */
 type Vista = 'lista' | 'calendario';
 type Orden = 'plazo' | 'numero' | 'cliente' | 'serial' | 'tipo' | 'estado' | 'ingreso' | 'limite';
@@ -47,6 +69,8 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
   const [cargando, setCargando] = useState(false);
   const [vista, setVista] = useState<Vista>('lista');
   const [estados, setEstados] = useState<EstadoPlazo[]>([]);
+  /** Filtro «Standby»: se suma a los del plazo (tiene que cumplir los dos). */
+  const [soloStandby, setSoloStandby] = useState(false);
   const [texto, setTexto] = useState('');
   const [orden, setOrden] = useState<{ k: Orden; dir: 1 | -1 }>({ k: 'plazo', dir: 1 });
 
@@ -90,13 +114,11 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
   const servicios = useMemo(() => datos?.servicios ?? [], [datos]);
   const tipos = useMemo(() => datos?.tipos ?? [], [datos]);
   const res = useMemo(() => resumenServicios(servicios), [servicios]);
-  const cnt = useMemo(() => {
-    const c: Record<EstadoPlazo, number> = { VENCIDO: 0, VENCE_HOY: 0, EN_PLAZO: 0, SIN_PLAZO: 0 };
-    for (const s of servicios) c[s.estadoPlazo]++;
-    return c;
-  }, [servicios]);
+  const cnt = useMemo(() => contarPlazos(servicios), [servicios]);
 
-  const q = texto.trim().toLowerCase();
+  const enStandby = useMemo(() => contarStandby(servicios), [servicios]);
+
+  const q = texto.trim();
   const lista = useMemo(() => {
     const val = (s: ServicioVista): string | number => {
       switch (orden.k) {
@@ -119,24 +141,17 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
           return s.fechaLimite ?? '9999';
       }
     };
-    return servicios
-      .filter(
-        (s) =>
-          (estados.length === 0 || estados.includes(s.estadoPlazo)) &&
-          (!q || String(s.numero).includes(q) || s.cliente.toLowerCase().includes(q) || s.serial.toLowerCase().includes(q)),
-      )
-      .sort((a, b) => {
-        if (orden.k === 'plazo') return porUrgenciaPlazo(a, b) * orden.dir;
-        const x = val(a);
-        const y = val(b);
-        return (x < y ? -1 : x > y ? 1 : 0) * orden.dir || porUrgenciaPlazo(a, b);
-      });
-  }, [servicios, estados, q, orden]);
+    return filtrarServicios(servicios, { estados, standby: soloStandby, texto }).sort((a, b) => {
+      if (orden.k === 'plazo') return porUrgenciaPlazo(a, b) * orden.dir;
+      const x = val(a);
+      const y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * orden.dir || porUrgenciaPlazo(a, b);
+    });
+  }, [servicios, estados, soloStandby, texto, orden]);
 
   if (!datos) return error ? <Alert tone="red">{error}</Alert> : <Loading texto="Cargando los servicios abiertos en Zoho Desk…" />;
 
   const aviso = avisoSinTipo(res);
-  const toggleEstado = (e: EstadoPlazo) => setEstados((x) => (x.includes(e) ? x.filter((y) => y !== e) : [...x, e]));
 
   const Th = ({ k, children, right = false }: { k: Orden; children: string; right?: boolean }) => (
     <th className={`px-3 py-2 font-semibold ${right ? 'text-right' : ''}`}>
@@ -200,26 +215,46 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {ESTADOS_PLAZO.map((e) => (
-          <button
-            key={e}
-            type="button"
-            aria-pressed={estados.includes(e)}
-            onClick={() => toggleEstado(e)}
-            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
-              estados.includes(e) ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <span className={`h-2 w-2 rounded-full ${TONO_PLAZO[e].dot}`} aria-hidden />
-            {ETIQUETA_PLAZO[e]}
-            <span className="tabular-nums opacity-60">{cnt[e]}</span>
-          </button>
-        ))}
-        {(estados.length > 0 || q) && (
+        {/* Un filtro por estado del plazo; los tres veredictos del trabajo terminado van en uno solo, con el desglose en su `title`. */}
+        {GRUPOS_PLAZO.map((g) => {
+          const puesto = grupoElegido(g, estados);
+          return (
+            <button
+              key={g.clave}
+              type="button"
+              aria-pressed={puesto}
+              onClick={() => setEstados((x) => alternarGrupo(g, x))}
+              title={tituloGrupo(g, cnt)}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
+                puesto ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <span className={`h-2 w-2 rounded-full ${g.dot}`} aria-hidden />
+              {g.etiqueta}
+              <span className="tabular-nums opacity-60">{contarGrupo(g, cnt)}</span>
+            </button>
+          );
+        })}
+        {/* Standby no es un estado del plazo: es el rol del estado de Desk (reloj en pausa), y se combina con los de arriba. */}
+        <button
+          type="button"
+          aria-pressed={soloStandby}
+          onClick={() => setSoloStandby((x) => !x)}
+          title={TITULO_STANDBY}
+          className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors ${
+            soloStandby ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          <span className="h-2 w-2 rounded-full border border-current" aria-hidden />
+          Standby
+          <span className="tabular-nums opacity-60">{enStandby}</span>
+        </button>
+        {(estados.length > 0 || soloStandby || q) && (
           <button
             type="button"
             onClick={() => {
               setEstados([]);
+              setSoloStandby(false);
               setTexto('');
             }}
             className="px-2 text-sm font-medium text-blue-600 hover:underline"
@@ -267,7 +302,9 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
                   <td className="whitespace-nowrap px-3 py-1.5">
                     <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando} onCambio={cambiarTipo} />
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.estado}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">
+                    {s.estado} <RolTag s={s} />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmtFecha(s.ingreso)}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">
                     <FechaLimite s={s} />
@@ -295,6 +332,22 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
 }
 
 const Vacio = () => <span className="text-gray-300">—</span>;
+
+/**
+ * La marca del rol del estado de Desk de un servicio: «standby» (reloj en
+ * pausa; el `title` dice cuántos días hábiles lleva y desde cuándo se mide) o
+ * «terminado» (reloj parado; el `title` dice cuándo y con qué veredicto). Un
+ * estado que cuenta no lleva marca. Neutra a propósito: no es una alarma; el
+ * color del plazo ya lo da su etiqueta.
+ */
+function RolTag({ s }: { s: ServicioVista }) {
+  if (s.rolEstado === 'cuenta') return null;
+  return (
+    <span title={s.rolEstado === 'standby' ? tituloStandby(s) : tituloTerminado(s)} className="shrink-0">
+      <Tag>{s.rolEstado}</Tag>
+    </span>
+  );
+}
 
 /** La cuenta de Desk; si no viene, el asunto del ticket en gris (no es un nombre de cliente fiable). */
 function Cliente({ s }: { s: ServicioVista }) {
@@ -370,14 +423,16 @@ function TipoSelect({
 }
 
 /**
- * La fecha límite. En un tipo compuesto lleva en el `title` hasta cuándo va
- * cada tramo, y un subrayado punteado que avisa de que hay algo que leer.
+ * La fecha límite, ya corrida por los días en pausa. Lleva en el `title` lo
+ * que haya que explicar —en un tipo compuesto, hasta cuándo va cada tramo; con
+ * pausas, cuál sería la fecha sin ellas y cuántos días son— y un subrayado
+ * punteado que avisa de que hay algo que leer.
  */
 function FechaLimite({ s }: { s: ServicioVista }) {
-  const tramos = textoTramos(s);
-  if (!tramos) return <>{fmtFecha(s.fechaLimite)}</>;
+  const titulo = tituloFechaLimite(s);
+  if (!titulo) return <>{fmtFecha(s.fechaLimite)}</>;
   return (
-    <span title={tramos} className="cursor-help underline decoration-gray-300 decoration-dotted underline-offset-4">
+    <span title={titulo} className="cursor-help underline decoration-gray-300 decoration-dotted underline-offset-4">
       {fmtFecha(s.fechaLimite)}
     </span>
   );
@@ -402,10 +457,21 @@ const CABECERA = 44;
 const RAYADO = 'repeating-linear-gradient(135deg, #fecaca 0 5px, #fee2e2 5px 10px)';
 /** Muestra de la leyenda para la barra de un tipo compuesto: tono lleno, raya blanca y el mismo tono aclarado. */
 const DOS_TRAMOS = 'linear-gradient(90deg, #10b981 0 45%, #ffffff 45% 55%, #70d4b3 55% 100%)';
+/** Los días en pausa: rayado gris, fino y en el otro sentido que el del atraso, para que no se confundan. Deja ver el color de la barra. */
+const PAUSA = 'repeating-linear-gradient(45deg, rgba(51, 65, 85, 0.6) 0 2px, rgba(255, 255, 255, 0.7) 2px 6px)';
+const LEYENDA_TERMINADO: Partial<Record<EstadoPlazo, string>> = {
+  CUMPLIDO: 'Terminado: cumplido',
+  INCUMPLIDO: 'Terminado: incumplido',
+  TERMINADO: 'Terminado: sin medir',
+};
 
 /**
  * Calendario de barras: una fila por servicio y una columna por día. La barra
- * va del ingreso a la fecha límite; si está vencido, sigue rayada hasta hoy.
+ * va del ingreso a la fecha límite (ya corrida por las pausas); si está
+ * vencido, sigue rayada en rojo hasta hoy. Los días en pausa van encima, como
+ * una banda rayada gris (`pausasBarra`). Con el trabajo terminado la barra
+ * acaba el día en que se terminó, con una marca oscura, y no sigue: su tono
+ * (más claro) es el del veredicto.
  * En un tipo compuesto («Diagnóstico + Calibración») la barra va partida en
  * sus tramos (`segmentosBarra`); el color sigue siendo el de la fecha final.
  * Sin librerías: cajas con posición absoluta sobre un ancho fijo por día, y
@@ -415,6 +481,7 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
   const eje = useMemo(() => ejeServicios(servicios, hoy), [servicios, hoy]);
   const dias = useMemo(() => diasDelEje(eje, festivos), [eje, festivos]);
   const meses = useMemo(() => mesesDelEje(eje), [eje]);
+  const ley = useMemo(() => leyendaServicios(servicios), [servicios]);
   const colHoy = columna(eje, hoy);
   const ancho = eje.dias * COL;
   const caja = useRef<HTMLDivElement>(null);
@@ -437,10 +504,25 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
         <Leyenda className="border border-red-300" style={{ backgroundImage: RAYADO }}>
           Atraso hasta hoy
         </Leyenda>
-        {servicios.some((s) => s.tramos) && (
+        {ley.dosTramos && (
           <Leyenda className="" style={{ backgroundImage: DOS_TRAMOS }}>
             Diagnóstico + Calibración: dos tramos
           </Leyenda>
+        )}
+        {ley.pausas && (
+          <Leyenda className="border border-slate-300 bg-emerald-500" style={{ backgroundImage: PAUSA }}>
+            En pausa: no cuenta para el plazo
+          </Leyenda>
+        )}
+        {ley.terminados.map((e) => (
+          <Leyenda key={e} className={TONO_PLAZO[e].barra}>
+            {LEYENDA_TERMINADO[e] ?? ''}
+          </Leyenda>
+        ))}
+        {ley.terminados.length > 0 && (
+          <li className="flex items-center gap-1.5">
+            <span className="h-3 w-1 rounded-sm bg-slate-700" aria-hidden /> Día en que se terminó
+          </li>
         )}
         <Leyenda className="border border-gray-200 bg-gray-100">Fin de semana o festivo</Leyenda>
         <li className="flex items-center gap-1.5">
@@ -487,17 +569,21 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
             const t = TONO_PLAZO[s.estadoPlazo];
             const fin = b ? (b.atraso ?? b.plazo)?.hasta ?? 0 : 0;
             const tramos = textoTramos(s);
-            const detalle = `Ticket ${s.numero} · ${s.tipoServicio || 'sin tipo'} · ingreso ${fmtFecha(s.ingreso)} · límite ${fmtFecha(s.fechaLimite)}${tramos ? ` (${tramos})` : ''} · ${textoPlazo(s)}`;
+            const enPausa = s.diasPausados > 0 ? ` · ${s.diasPausados} d háb. en pausa` : '';
+            const terminado = s.terminadoEl ? ` · trabajo terminado el ${fmtFecha(s.terminadoEl)}` : '';
+            const detalle = `Ticket ${s.numero} · ${s.tipoServicio || 'sin tipo'} · ingreso ${fmtFecha(s.ingreso)} · límite ${fmtFecha(s.fechaLimite)}${tramos ? ` (${tramos})` : ''}${enPausa}${terminado} · ${textoPlazo(s)}`;
             // Bordes de la barra del plazo en píxeles: los tramos de un tipo compuesto se pintan dentro de ella.
             const izq = b?.plazo ? b.plazo.desde * COL + (b.recortada ? 0 : 2) : 0;
             const der = b?.plazo ? (b.plazo.hasta + 1) * COL - (b.atraso ? 0 : 2) : 0;
             const segmentos = b?.plazo ? (segmentosBarra(s, eje) ?? []) : [];
+            const pausas = b ? pausasBarra(s, eje, hoy) : [];
             return (
               <div key={s.numero} className="flex border-b border-gray-100 last:border-b-0" style={{ height: FILA }}>
                 <div className="z-10 flex shrink-0 items-center gap-2 border-r border-gray-200 bg-white px-3 text-xs sm:sticky sm:left-0" style={{ width: ETIQ }} title={s.asunto || undefined}>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${s.sinConfirmar ? 'bg-amber-400' : t.dot}`} title={s.sinConfirmar ? 'Sin confirmar: Desk lleva más de un día sin refrescarlo' : undefined} />
                   <span className="shrink-0 font-mono font-semibold text-gray-900">{s.numero}</span>
                   <span className={`truncate ${s.clienteDeAsunto ? 'italic text-gray-500' : 'text-gray-700'}`}>{s.cliente || s.serial || '—'}</span>
+                  <RolTag s={s} />
                 </div>
                 <div className="relative flex shrink-0 items-center" style={{ width: ancho }} title={detalle}>
                   {!b && <span className="ml-2 text-[11px] text-gray-400 sm:sticky sm:left-[238px]">sin plazo</span>}
@@ -528,6 +614,23 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
                     <div
                       className={`absolute top-2 h-5 rounded-r-md border border-red-300 ${b.plazo ? 'border-l-0' : ''}`}
                       style={{ left: b.atraso.desde * COL, width: (b.atraso.hasta - b.atraso.desde + 1) * COL - 2, backgroundImage: RAYADO }}
+                    />
+                  )}
+                  {/* Días en pausa: banda rayada gris sobre la barra, del mismo alto. No cuentan para el plazo. */}
+                  {pausas.map((p) => (
+                    <div
+                      key={p.desde}
+                      title="En pausa: estos días hábiles no cuentan para el plazo"
+                      className="absolute top-2 h-5 border-x border-slate-400/70"
+                      style={{ left: p.desde * COL, width: (p.hasta - p.desde + 1) * COL, backgroundImage: PAUSA }}
+                    />
+                  ))}
+                  {/* Trabajo terminado: la barra acaba aquí. La marca dice el día; el veredicto lo da el tono de la barra. */}
+                  {b && b.terminado !== null && (
+                    <div
+                      title={`Trabajo terminado el ${fmtFecha(s.terminadoEl)}`}
+                      className="absolute top-1 h-7 w-1 rounded-sm bg-slate-700"
+                      style={{ left: (b.terminado + 1) * COL - 4 }}
                     />
                   )}
                   {/* El ingreso es anterior al tramo visible: la barra viene de más atrás. */}

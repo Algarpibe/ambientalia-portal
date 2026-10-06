@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { TIPOS_COMPUESTOS, claveTipoServicio } from './dominio.js';
-import { calcularPlazo, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles } from './plazos.js';
+import { ROLES_ESTADO, TIPOS_COMPUESTOS, claveTipoServicio, type RolEstado } from './dominio.js';
+import { calcularPlazo, calcularReloj, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles, type DatosReloj, type IntervaloEstado } from './plazos.js';
 
 // Calendario de referencia (octubre de 2026): el lunes 5 es hábil, el lunes 12
 // es festivo (Día de la Raza) y el 1 de enero de 2027 cae en viernes.
@@ -99,6 +99,283 @@ describe('calcularTramos (tipo compuesto: un tramo por parte, uno detrás de otr
     expect(calcularTramos('2026-10-05', partes(3, null))).toBeNull();
     expect(calcularTramos('2026-10-05', partes(null, 4))).toBeNull();
     expect(calcularTramos('2026-10-05', [])).toBeNull();
+  });
+});
+
+// El reloj con pausas. Calendario: lun 5, mar 6, mié 7, jue 8, vie 9 de octubre
+// de 2026; el lunes 12 es festivo; mar 13, mié 14, jue 15, vie 16.
+describe('calcularReloj (standby para el reloj; «trabajo terminado» lo detiene)', () => {
+  /** Un instante en hora de Bogotá: t('2026-10-06 10:00'). */
+  const t = (s: string): number => Date.parse(`${s.replace(' ', 'T')}:00-05:00`);
+  const ROLES: Record<string, RolEstado> = { 'notificacion cliente': 'standby', 'servicio externo': 'standby', 'por facturar': 'terminado', 'por entregar': 'terminado' };
+  const rolDe = (clave: string): RolEstado => ROLES[clave] ?? 'cuenta';
+  /** Tramos encadenados: cada uno acaba donde empieza el siguiente y el último queda abierto. El primero es la primera observación. */
+  const historia = (...pasos: [clave: string, desde: string][]): IntervaloEstado[] =>
+    pasos.map(([clave, desde], i) => ({ clave, desde: t(desde), hasta: i + 1 < pasos.length ? t(pasos[i + 1][1]) : null, desdeReal: i > 0 }));
+  const reloj = (d: Partial<DatosReloj> & { hoy: string }) => {
+    const intervalos = d.intervalos ?? [];
+    const abierto = intervalos.find((i) => i.hasta === null);
+    const rol = d.rolDe ?? rolDe;
+    return calcularReloj({ ingreso: '2026-10-05', dias: 3, partes: null, intervalos, rolActual: abierto ? rol(abierto.clave) : 'cuenta', rolDe, ...d });
+  };
+  // En proceso desde el lunes; standby del martes a las 10:00 al jueves a las 09:00; después, otra vez en proceso.
+  const PAUSA_EN_MEDIO = historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 10:00'], ['en proceso', '2026-10-08 09:00']);
+
+  it('sin historial y sin rol es el plazo de siempre', () => {
+    for (const hoy of ['2026-10-06', '2026-10-08', '2026-10-10', '2026-10-14']) {
+      const r = reloj({ hoy });
+      expect(r).toMatchObject(calcularPlazo('2026-10-05', 3, hoy));
+      expect(r).toMatchObject({ fechaLimiteBase: '2026-10-08', tramos: null, rolEstado: 'cuenta', enPausa: false, diasPausados: 0, pausas: [], terminadoEl: null, medidoDesde: null });
+    }
+  });
+
+  it('una pausa en medio corre la fecha límite exactamente los días hábiles en pausa', () => {
+    // Martes y miércoles acaban en standby: no cuentan. Activos: jue 8, vie 9 y (lun 12 festivo) mar 13.
+    expect(reloj({ hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO })).toEqual({
+      fechaLimite: '2026-10-13',
+      fechaLimiteBase: '2026-10-08',
+      diasHabiles: 1,
+      estadoPlazo: 'EN_PLAZO',
+      tramos: null,
+      rolEstado: 'cuenta',
+      enPausa: false,
+      diasPausados: 2,
+      pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }],
+      terminadoEl: null,
+      medidoDesde: '2026-10-05',
+    });
+    expect(sumarDiasHabiles('2026-10-08', 2)).toBe('2026-10-13');
+  });
+
+  it('una pausa que cruza fin de semana y festivo sólo cuenta los días hábiles', () => {
+    // Standby del viernes 9 al miércoles 14 por la mañana: de sus cinco noches, sólo vie 9 y mar 13 son hábiles.
+    const r = reloj({
+      ingreso: '2026-10-08',
+      hoy: '2026-10-14',
+      intervalos: historia(['en proceso', '2026-10-08 12:00'], ['servicio externo', '2026-10-09 08:00'], ['en proceso', '2026-10-14 08:00']),
+    });
+    expect(r).toMatchObject({ fechaLimiteBase: '2026-10-14', fechaLimite: '2026-10-16', diasPausados: 2, diasHabiles: 2, estadoPlazo: 'EN_PLAZO' });
+    // Un solo rango: entre los dos días en pausa no hay ningún día hábil activo.
+    expect(r.pausas).toEqual([{ desde: '2026-10-09', hasta: '2026-10-13' }]);
+  });
+
+  it('una pausa que empieza y acaba el mismo día no pausa ese día', () => {
+    const r = reloj({ hoy: '2026-10-07', intervalos: historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 09:00'], ['en proceso', '2026-10-06 16:00']) });
+    expect(r).toMatchObject({ ...calcularPlazo('2026-10-05', 3, '2026-10-07'), fechaLimiteBase: '2026-10-08', diasPausados: 0, pausas: [], enPausa: false });
+  });
+
+  it('un ticket que está ahora en standby: hoy no cuenta y la fecha proyectada se corre un día hábil cada día hábil', () => {
+    const enStandby = historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 10:00']);
+    expect(reloj({ hoy: '2026-10-06', intervalos: enStandby })).toMatchObject({
+      rolEstado: 'standby',
+      enPausa: true,
+      diasPausados: 1,
+      pausas: [{ desde: '2026-10-06', hasta: '2026-10-06' }],
+      fechaLimite: '2026-10-09',
+      diasHabiles: 3,
+      estadoPlazo: 'EN_PLAZO',
+    });
+    expect(reloj({ hoy: '2026-10-07', intervalos: enStandby })).toMatchObject({ enPausa: true, diasPausados: 2, fechaLimite: '2026-10-13', diasHabiles: 3 });
+    expect(reloj({ hoy: '2026-10-08', intervalos: enStandby })).toMatchObject({ enPausa: true, diasPausados: 3, fechaLimite: '2026-10-14', diasHabiles: 3 });
+    // El fin de semana no añade pausa: la fecha no se mueve del viernes al sábado.
+    expect(reloj({ hoy: '2026-10-09', intervalos: enStandby })).toMatchObject({ diasPausados: 4, fechaLimite: '2026-10-15' });
+    expect(reloj({ hoy: '2026-10-10', intervalos: enStandby })).toMatchObject({ diasPausados: 4, fechaLimite: '2026-10-15', pausas: [{ desde: '2026-10-06', hasta: '2026-10-09' }] });
+  });
+
+  it('el día de hoy lo decide el estado de ahora, no cómo acabará el día', () => {
+    // Salió de standby esta mañana: hoy ya cuenta, aunque el tramo de standby tocara el día.
+    const r = reloj({ hoy: '2026-10-08', intervalos: PAUSA_EN_MEDIO });
+    expect(r).toMatchObject({ enPausa: false, diasPausados: 2, pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }], fechaLimite: '2026-10-13' });
+  });
+
+  it('dos pausas separadas suman, cada una con su rango', () => {
+    const r = reloj({
+      hoy: '2026-10-13',
+      intervalos: historia(
+        ['en proceso', '2026-10-05 12:00'],
+        ['notificacion cliente', '2026-10-06 10:00'],
+        ['en proceso', '2026-10-07 08:00'],
+        ['servicio externo', '2026-10-08 10:00'],
+        ['en proceso', '2026-10-09 09:00'],
+      ),
+    });
+    // Activos: mié 7, vie 9 y mar 13.
+    expect(r).toMatchObject({ fechaLimite: '2026-10-13', estadoPlazo: 'VENCE_HOY', diasHabiles: 0, diasPausados: 2 });
+    expect(r.pausas).toEqual([
+      { desde: '2026-10-06', hasta: '2026-10-06' },
+      { desde: '2026-10-08', hasta: '2026-10-08' },
+    ]);
+  });
+
+  it('lo anterior a la primera observación cuenta como activo, aunque el ticket ya estuviera en standby', () => {
+    // Ingresó el lunes 28 de septiembre; el portal lo vio por primera vez, ya en standby, el martes 6.
+    const r = reloj({
+      ingreso: '2026-09-28',
+      dias: 4,
+      hoy: '2026-10-07',
+      intervalos: [{ clave: 'notificacion cliente', desde: t('2026-10-06 10:00'), hasta: null, desdeReal: false }],
+    });
+    expect(r).toMatchObject({ fechaLimiteBase: '2026-10-02', fechaLimite: '2026-10-02', estadoPlazo: 'VENCIDO', enPausa: true, medidoDesde: '2026-10-06' });
+    // El atraso tampoco cuenta los días en pausa: sólo el lunes 5.
+    expect(r).toMatchObject({ diasHabiles: -1, diasPausados: 2, pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }] });
+  });
+
+  it('tipo compuesto: los tramos siguen el mismo paso y la fecha intermedia también se corre', () => {
+    const partes = [
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
+    ];
+    const r = reloj({
+      dias: 7,
+      partes,
+      hoy: '2026-10-08',
+      intervalos: historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 10:00'], ['en proceso', '2026-10-07 08:00']),
+    });
+    // Martes en pausa. Diagnóstico: mié 7, jue 8, vie 9. Calibración: mar 13, mié 14, jue 15, vie 16.
+    expect(r.tramos).toEqual([
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-10-09' },
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: 4, hasta: '2026-10-16' },
+    ]);
+    expect(r).toMatchObject({ fechaLimite: '2026-10-16', fechaLimiteBase: '2026-10-15', diasPausados: 1 });
+    // Sin pausas son los tramos de siempre.
+    expect(reloj({ dias: 7, partes, hoy: '2026-10-08' }).tramos).toEqual(calcularTramos('2026-10-05', partes));
+    // Si a una parte le falta el plazo no hay tramos (ni plazo: `dias` llega null).
+    expect(reloj({ dias: null, partes: [partes[0], { ...partes[1], dias: null }], hoy: '2026-10-08' })).toMatchObject({ tramos: null, estadoPlazo: 'SIN_PLAZO' });
+  });
+
+  describe('trabajo terminado', () => {
+    it('a tiempo → CUMPLIDO, con el reloj parado el día en que llegó a ese estado', () => {
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-07 15:00']);
+      const esperado = { rolEstado: 'terminado', enPausa: false, terminadoEl: '2026-10-07', fechaLimite: '2026-10-08', fechaLimiteBase: '2026-10-08', estadoPlazo: 'CUMPLIDO', diasHabiles: 1, diasPausados: 0, pausas: [] };
+      expect(reloj({ hoy: '2026-10-07', intervalos: h })).toMatchObject(esperado);
+      // Pasan los días y nada se mueve: ni se vence ni acumula pausa.
+      expect(reloj({ hoy: '2026-10-09', intervalos: h })).toMatchObject(esperado);
+      expect(reloj({ hoy: '2026-11-20', intervalos: h })).toMatchObject(esperado);
+    });
+
+    it('el mismo día de la fecha límite todavía cumple', () => {
+      expect(reloj({ hoy: '2026-10-09', intervalos: historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-08 17:30']) })).toMatchObject({
+        estadoPlazo: 'CUMPLIDO',
+        terminadoEl: '2026-10-08',
+        diasHabiles: 0,
+      });
+    });
+
+    it('tarde → INCUMPLIDO, con los días hábiles de atraso congelados', () => {
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-13 10:00']);
+      // Límite el jueves 8; llegó el martes 13: vie 9 y mar 13 (el lunes 12 es festivo).
+      const esperado = { estadoPlazo: 'INCUMPLIDO', terminadoEl: '2026-10-13', fechaLimite: '2026-10-08', diasHabiles: -2 };
+      expect(reloj({ hoy: '2026-10-13', intervalos: h })).toMatchObject(esperado);
+      expect(reloj({ hoy: '2026-10-30', intervalos: h })).toMatchObject(esperado);
+    });
+
+    it('las pausas anteriores cuentan para el veredicto', () => {
+      // Sin la pausa del martes habría vencido el jueves 8; con ella, el viernes 9.
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 10:00'], ['en proceso', '2026-10-07 08:00'], ['por entregar', '2026-10-09 11:00']);
+      expect(reloj({ hoy: '2026-10-14', intervalos: h })).toMatchObject({
+        estadoPlazo: 'CUMPLIDO',
+        terminadoEl: '2026-10-09',
+        fechaLimiteBase: '2026-10-08',
+        fechaLimite: '2026-10-09',
+        diasPausados: 1,
+        pausas: [{ desde: '2026-10-06', hasta: '2026-10-06' }],
+      });
+    });
+
+    it('si el portal lo vio por primera vez ya terminado, no se puede medir → TERMINADO', () => {
+      const r = reloj({ hoy: '2026-10-09', intervalos: [{ clave: 'por facturar', desde: t('2026-10-06 10:00'), hasta: null, desdeReal: false }] });
+      expect(r).toMatchObject({ estadoPlazo: 'TERMINADO', rolEstado: 'terminado', terminadoEl: '2026-10-06', fechaLimite: '2026-10-08', medidoDesde: '2026-10-06' });
+    });
+
+    it('sin tramo abierto en el historial (aún no se ha registrado) tampoco se puede medir: terminado hoy', () => {
+      expect(reloj({ hoy: '2026-10-09', rolActual: 'terminado' })).toMatchObject({ estadoPlazo: 'TERMINADO', terminadoEl: '2026-10-09', medidoDesde: null });
+      // Ni con un historial que todavía dice otra cosa.
+      const atrasado = historia(['en proceso', '2026-10-05 12:00']);
+      expect(reloj({ hoy: '2026-10-09', rolActual: 'terminado', intervalos: atrasado })).toMatchObject({ estadoPlazo: 'TERMINADO', terminadoEl: '2026-10-09' });
+    });
+
+    it('varios estados terminados seguidos son una sola racha: manda el primero', () => {
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-07 15:00'], ['por entregar', '2026-10-13 09:00']);
+      expect(reloj({ hoy: '2026-10-14', intervalos: h })).toMatchObject({ estadoPlazo: 'CUMPLIDO', terminadoEl: '2026-10-07' });
+      // Si la racha empieza en la primera observación, no hay veredicto aunque el último cambio sí se viera.
+      const sinInicio: IntervaloEstado[] = [
+        { clave: 'por facturar', desde: t('2026-10-06 10:00'), hasta: t('2026-10-07 09:00'), desdeReal: false },
+        { clave: 'por entregar', desde: t('2026-10-07 09:00'), hasta: null, desdeReal: true },
+      ];
+      expect(reloj({ hoy: '2026-10-09', intervalos: sinInicio })).toMatchObject({ estadoPlazo: 'TERMINADO', terminadoEl: '2026-10-06' });
+    });
+
+    it('una racha anterior, interrumpida por un estado que cuenta, no es la de ahora', () => {
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-06 10:00'], ['en proceso', '2026-10-07 09:00'], ['por facturar', '2026-10-13 10:00']);
+      // El martes 6 acabó en «terminado»: en pausa. Activos: mié 7, jue 8, vie 9 → límite el viernes 9; llegó el martes 13.
+      expect(reloj({ hoy: '2026-10-14', intervalos: h })).toMatchObject({ estadoPlazo: 'INCUMPLIDO', terminadoEl: '2026-10-13', fechaLimite: '2026-10-09', diasPausados: 1, diasHabiles: -1 });
+    });
+
+    it('si sale de «terminado» a un estado que cuenta, el reloj sigue y esos días quedan en pausa', () => {
+      const h = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-06 10:00'], ['en proceso', '2026-10-08 09:00']);
+      expect(reloj({ hoy: '2026-10-09', intervalos: h })).toMatchObject({
+        rolEstado: 'cuenta',
+        terminadoEl: null,
+        estadoPlazo: 'EN_PLAZO',
+        fechaLimite: '2026-10-13',
+        diasPausados: 2,
+        pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }],
+      });
+    });
+
+    it('tipo compuesto terminado: los tramos se calculan a la fecha en que se paró', () => {
+      const partes = [
+        { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+        { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
+      ];
+      const r = reloj({ dias: 7, partes, hoy: '2026-10-20', intervalos: historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-14 10:00']) });
+      expect(r.tramos!.map((x) => x.hasta)).toEqual(['2026-10-08', '2026-10-15']);
+      expect(r).toMatchObject({ estadoPlazo: 'CUMPLIDO', fechaLimite: '2026-10-15', terminadoEl: '2026-10-14' });
+    });
+  });
+
+  it('cambiar el rol de un estado reevalúa el mismo historial', () => {
+    const todoCuenta = (): RolEstado => 'cuenta';
+    expect(reloj({ hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO, rolDe: todoCuenta })).toMatchObject({ fechaLimite: '2026-10-08', estadoPlazo: 'VENCIDO', diasHabiles: -1, diasPausados: 0, pausas: [] });
+    // Y al revés: marcar como standby un estado en el que el ticket ya estuvo pausa esos días hacia atrás.
+    const enProcesoEsStandby = (clave: string): RolEstado => (clave === 'en proceso' ? 'standby' : 'cuenta');
+    const r = reloj({ hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO, rolDe: enProcesoEsStandby });
+    // En pausa: lun 5 no cuenta (es el ingreso), jue 8 y vie 9 (hoy). Activos: mar 6, mié 7 y mar 13.
+    expect(r).toMatchObject({ enPausa: true, diasPausados: 2, pausas: [{ desde: '2026-10-08', hasta: '2026-10-09' }], fechaLimite: '2026-10-13' });
+  });
+
+  it('sin tipo o sin plazo configurado → SIN_PLAZO, pero con el rol y las pausas', () => {
+    expect(reloj({ dias: null, hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO })).toEqual({
+      fechaLimite: null,
+      fechaLimiteBase: null,
+      diasHabiles: null,
+      estadoPlazo: 'SIN_PLAZO',
+      tramos: null,
+      rolEstado: 'cuenta',
+      enPausa: false,
+      diasPausados: 2,
+      pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }],
+      terminadoEl: null,
+      medidoDesde: '2026-10-05',
+    });
+    const enStandby = historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 10:00']);
+    expect(reloj({ dias: null, hoy: '2026-10-07', intervalos: enStandby })).toMatchObject({ estadoPlazo: 'SIN_PLAZO', rolEstado: 'standby', enPausa: true, diasPausados: 2 });
+    const terminado = historia(['en proceso', '2026-10-05 12:00'], ['por facturar', '2026-10-07 15:00']);
+    expect(reloj({ dias: null, hoy: '2026-10-09', intervalos: terminado })).toMatchObject({ estadoPlazo: 'SIN_PLAZO', rolEstado: 'terminado', terminadoEl: '2026-10-07', fechaLimite: null });
+  });
+
+  it('sin ingreso no hay nada que medir', () => {
+    expect(reloj({ ingreso: null, hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO })).toMatchObject({ estadoPlazo: 'SIN_PLAZO', fechaLimite: null, diasPausados: 0, pausas: [], medidoDesde: '2026-10-05' });
+  });
+
+  it('los intervalos pueden llegar desordenados', () => {
+    expect(reloj({ hoy: '2026-10-09', intervalos: [...PAUSA_EN_MEDIO].reverse() })).toEqual(reloj({ hoy: '2026-10-09', intervalos: PAUSA_EN_MEDIO }));
+  });
+
+  it('el fin del día es el de Bogotá: un cambio a las 23:30 cuenta para ese día', () => {
+    // 23:30 del martes en Bogotá son las 04:30 UTC del miércoles.
+    const r = reloj({ hoy: '2026-10-08', intervalos: historia(['en proceso', '2026-10-05 12:00'], ['notificacion cliente', '2026-10-06 23:30'], ['en proceso', '2026-10-07 23:30']) });
+    expect(r).toMatchObject({ diasPausados: 1, pausas: [{ desde: '2026-10-06', hasta: '2026-10-06' }], fechaLimite: '2026-10-09' });
   });
 });
 
@@ -207,5 +484,87 @@ describe('045_trazabilidad_tipo_combinado.sql', () => {
   it('está apuntada en MIGRATIONS, detrás de la 044', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
     expect(db).toMatch(/'044_trazabilidad_servicios_tipo\.sql',\s*'045_trazabilidad_tipo_combinado\.sql'/);
+  });
+});
+
+describe('046_trazabilidad_estados_desk.sql', () => {
+  // La 046 se vuelve a ejecutar en cada arranque: sólo puede crear lo que falte.
+  // Sin semilla: ningún estado nace marcado como standby, y una sentencia que
+  // escribiera se llevaría por delante lo que la gente haya marcado.
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/046_trazabilidad_estados_desk.sql', import.meta.url)), 'utf8');
+  const sinComentarios = SQL.replace(/--.*$/gm, '');
+  const sentencias = sinComentarios
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('sólo crea, y siempre con IF NOT EXISTS', () => {
+    expect(sentencias.length).toBeGreaterThanOrEqual(1);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|INDEX) IF NOT EXISTS /);
+    expect(SQL).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_estados_desk/);
+  });
+
+  it('sin semilla ni nada que escriba, altere o borre', () => {
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i);
+  });
+
+  it('el rol nace en «cuenta» y sólo admite los tres del dominio; ya no hay booleano de standby', () => {
+    expect(sinComentarios).toMatch(/rol\s+VARCHAR\(\d+\)\s+NOT NULL\s+DEFAULT 'cuenta'/i);
+    const check = /CHECK \(rol IN \(([^)]*)\)\)/i.exec(sinComentarios);
+    expect(check).not.toBeNull();
+    expect(check![1].split(',').map((x) => x.trim().replace(/'/g, ''))).toEqual([...ROLES_ESTADO]);
+    expect(sinComentarios).not.toMatch(/\bBOOLEAN\b/i);
+  });
+
+  it('no toca el esquema desk ni le pone una clave foránea', () => {
+    expect(SQL).not.toMatch(/\bdesk\./);
+    expect(SQL).not.toMatch(/\bREFERENCES\b/i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 045', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'045_trazabilidad_tipo_combinado\.sql',\s*'046_trazabilidad_estados_desk\.sql'/);
+  });
+});
+
+describe('047_trazabilidad_estados_historial.sql', () => {
+  // La 047 se vuelve a ejecutar en cada arranque: sólo puede crear lo que falte.
+  // Una sentencia que escribiera o borrara se llevaría por delante el historial
+  // de estados, que no se puede reconstruir (la réplica sólo trae el de ahora).
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/047_trazabilidad_estados_historial.sql', import.meta.url)), 'utf8');
+  const sinComentarios = SQL.replace(/--.*$/gm, '');
+  const sentencias = sinComentarios
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('sólo crea, y siempre con IF NOT EXISTS', () => {
+    expect(sentencias.length).toBeGreaterThanOrEqual(2);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|(UNIQUE )?INDEX) IF NOT EXISTS /);
+    expect(SQL).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_estados_historial/);
+  });
+
+  it('sin semilla ni nada que escriba, altere o borre', () => {
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE)\b/i);
+  });
+
+  it('como mucho un tramo abierto por ticket: índice único parcial sobre los que no tienen `hasta`', () => {
+    expect(sinComentarios).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS \w+\s+ON portal\.tmc_estados_historial \(numero\)\s+WHERE hasta IS NULL/i);
+  });
+
+  it('`desde` es obligatorio, `hasta` puede faltar y hay una marca de si `desde` es un cambio visto de verdad', () => {
+    expect(sinComentarios).toMatch(/desde\s+TIMESTAMPTZ\s+NOT NULL/i);
+    expect(sinComentarios).toMatch(/hasta\s+TIMESTAMPTZ\s+NULL/i);
+    expect(sinComentarios).toMatch(/desde_real\s+BOOLEAN\s+NOT NULL/i);
+  });
+
+  it('no toca el esquema desk ni le pone una clave foránea', () => {
+    expect(SQL).not.toMatch(/\bdesk\./);
+    expect(SQL).not.toMatch(/\bREFERENCES\b/i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 046 y la última', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'046_trazabilidad_estados_desk\.sql',\s*'047_trazabilidad_estados_historial\.sql'\]/);
   });
 });

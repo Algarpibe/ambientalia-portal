@@ -11,6 +11,7 @@ import { createContabilidadRouter } from './contabilidad/router.js';
 import { createAusenciasRouter } from './ausencias/router.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
 import { createTrazabilidadRouter } from './trazabilidad/router.js';
+import { iniciarRegistroEstados } from './trazabilidad/registro-estados.js';
 import { createDataRouter } from './data.router.js';
 
 const app = express();
@@ -135,6 +136,12 @@ initDb()
     app.use('/api', createCalibracionesRouter(getHubPool()));
     // Router de Trazabilidad Mantenimientos Clientes (vencimientos GRIMM EDM 180).
     app.use('/api', createTrazabilidadRouter(getHubPool()));
+    // Programador de Trazabilidad: cada 5 minutos apunta los cambios de estado de
+    // los tickets de Desk (portal.tmc_estados_historial), que es con lo que se
+    // descuenta del plazo el tiempo en standby. Se enciende aquí, con la base ya
+    // inicializada, y en ningún otro sitio: los tests no importan este fichero.
+    // Sus fallos se apuntan y no tumban nada.
+    iniciarRegistroEstados(getHubPool());
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));

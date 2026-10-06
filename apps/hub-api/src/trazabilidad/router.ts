@@ -4,11 +4,13 @@ import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { festivosDelEje } from './plazos.js';
+import { registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
 import {
   TzError,
   esClave,
   parseAvisos,
+  parseEstadoDesk,
   parseImportacion,
   parseNumeroTicket,
   parsePlazo,
@@ -21,10 +23,11 @@ import {
 // bajo /api. Sin cached(): el seguimiento cambia con cada aviso que se registra.
 //
 // Permisos: cualquiera con la app asignada lee, importa, registra seguimiento,
-// cambia los plazos y pone a mano el tipo de servicio de un ticket; cada
-// importación y cada cambio quedan firmados con el correo de quien lo hizo
-// (tmc_importaciones, tmc_seguimiento.actualizado_por,
-// tmc_plazos.actualizado_por, tmc_servicios_tipo.actualizado_por).
+// cambia los plazos, pone a mano el tipo de servicio de un ticket y elige el
+// rol de cada estado de Desk; cada importación y cada cambio quedan firmados
+// con el correo de quien lo hizo (tmc_importaciones,
+// tmc_seguimiento.actualizado_por, tmc_plazos.actualizado_por,
+// tmc_servicios_tipo.actualizado_por, tmc_estados_desk.actualizado_por).
 
 export const APP_ID = 'trazabilidad-mantenimientos';
 
@@ -115,10 +118,19 @@ export function createTrazabilidadRouter(db: Pool): Router {
     return { hoy, servicios: lista, festivos: festivosDelEje(hoy, lista.map((s) => s.fechaLimite)), tipos };
   };
 
+  // Antes de leer se apuntan los cambios de estado de los tickets, para que las
+  // pausas estén al día sin esperar a la pasada del programador. Es «si se
+  // puede»: si falla se apunta el error y la petición sigue con lo que haya.
+  // No repite una pasada recién hecha ni se solapa con la del programador
+  // (registro-estados.ts).
   router.get(
     '/trazabilidad/servicios',
     ...gated,
-    route('tmc_servicios', (req) => servicios(hoyOf(req))),
+    route('tmc_servicios', async (req) => {
+      const hoy = hoyOf(req);
+      await registrarEstadosSinFallar(db);
+      return servicios(hoy);
+    }),
   );
 
   // Tipo de servicio puesto a mano a un ticket: {tipo}; null o vacío lo quita
@@ -150,6 +162,25 @@ export function createTrazabilidadRouter(db: Pool): Router {
     route('tmc_plazo', async (req) => {
       await repo.guardarPlazo(db, parsePlazo(req.body), actorOf(req));
       return { plazos: await repo.listarPlazos(db) };
+    }),
+  );
+
+  // Estados de Desk y su rol en el reloj del plazo: cuenta, standby (en pausa:
+  // a la espera del cliente o de un servicio externo) o terminado (parado: el
+  // trabajo técnico está hecho). «Servicios» lo aplica al calcular el plazo.
+  router.get(
+    '/trazabilidad/estados',
+    ...gated,
+    route('tmc_estados', async () => ({ estados: await repo.listarEstadosDesk(db) })),
+  );
+
+  // Un estado por petición: {estado, rol}. Devuelve la lista entera ya actualizada.
+  router.put(
+    '/trazabilidad/estados',
+    ...gated,
+    route('tmc_estado', async (req) => {
+      await repo.guardarEstadoDesk(db, parseEstadoDesk(req.body), actorOf(req));
+      return { estados: await repo.listarEstadosDesk(db) };
     }),
   );
 

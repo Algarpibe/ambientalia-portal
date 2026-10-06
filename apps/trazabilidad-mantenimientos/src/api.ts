@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { EquipoVista, FilaImportada, PlazoServicio, ResumenImportacion, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
+import type { EquipoVista, EstadoDesk, FilaImportada, PlazoServicio, ResumenImportacion, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -21,7 +21,7 @@ export interface Inventario {
   ultimaImportacion: ResumenImportacion | null;
 }
 
-/** Tickets de Desk sin cerrar, con su plazo calculado en el servidor. */
+/** Tickets de Desk sin cerrar, con su plazo calculado en el servidor (pausas de standby y trabajo terminado incluidos). */
 export interface Servicios {
   hoy: string;
   servicios: ServicioVista[];
@@ -38,6 +38,10 @@ export const api = {
   fijarTipoServicio: (numero: number, tipo: string | null) => request<Servicios>('PUT', `/servicios/${numero}/tipo`, { tipo }),
   plazos: () => request<{ plazos: PlazoServicio[] }>('GET', '/plazos'),
   guardarPlazo: (tipo: string, dias: number | null) => request<{ plazos: PlazoServicio[] }>('PUT', '/plazos', { tipo, dias }),
+  /** Los estados de Desk con su rol en el reloj del plazo (bloque «Estados de Desk» de Configuracion). */
+  estados: () => request<{ estados: EstadoDesk[] }>('GET', '/estados'),
+  /** Elige el rol de un estado de Desk: cuenta, standby (reloj en pausa) o terminado (reloj parado). Devuelve la lista entera ya actualizada. */
+  guardarEstado: (estado: string, rol: RolEstado) => request<{ estados: EstadoDesk[] }>('PUT', '/estados', { estado, rol }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),

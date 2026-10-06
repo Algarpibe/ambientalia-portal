@@ -7,13 +7,17 @@
 import {
   PLAZO_MAX_DIAS,
   PLAZO_MIN_DIAS,
+  claveEstadoDesk,
   claveTipoServicio,
   esFechaIso,
+  esRolEstado,
   modeloEdm180,
   partesDeTipo,
   type EstadoCalibracion,
   type EstadoPlazo,
   type OrigenTipo,
+  type RangoFechas,
+  type RolEstado,
   type TramoPlazo,
 } from './dominio.js';
 
@@ -264,19 +268,51 @@ export interface ServicioVista {
   tipoManual: TipoManual | null;
   /** Estado tal como lo nombra Desk. */
   estado: string;
+  /** El rol que su estado de AHORA tiene en Configuración: cuenta, standby (reloj en pausa) o terminado (reloj parado). */
+  rolEstado: RolEstado;
+  /** True si su estado de ahora es standby: el reloj del plazo está en pausa y la fecha límite se va corriendo. */
+  enPausa: boolean;
+  /** Días hábiles que lleva en pausa (los que acabó en un estado standby o terminado), desde `medidoDesde`. */
+  diasPausados: number;
+  /**
+   * Esos días en rangos de fechas (ambas incluidas), para pintarlos: todos caen
+   * después del ingreso y no más allá de hoy. Entre dos días de un mismo rango
+   * no hay ningún día hábil activo (puede haber un fin de semana).
+   */
+  pausas: RangoFechas[];
+  /** El día en que llegó a «trabajo terminado», si lo está ahora: ahí se paró el reloj. Null si sigue en marcha. */
+  terminadoEl: string | null;
+  /**
+   * El día en que el portal apuntó su estado por primera vez. Lo anterior no se
+   * puede saber y cuenta como tiempo activo. Null si aún no hay nada apuntado.
+   */
+  medidoDesde: string | null;
   /** Día de ingreso en Colombia (AAAA-MM-DD). */
   ingreso: string | null;
   /** Plazo configurado para su tipo, en días hábiles (la suma de sus partes si es compuesto); null = sin plazo. */
   plazoDias: number | null;
+  /** El día en que cae el último día hábil ACTIVO del plazo: ya corrida por las pausas. Con el trabajo terminado, la que valía el día en que se paró el reloj. */
   fechaLimite: string | null;
+  /** La que tendría sin ninguna pausa (ingreso + plazo). Igual que `fechaLimite` si no hay días en pausa. */
+  fechaLimiteBase: string | null;
   /**
    * Sólo en un tipo compuesto con plazo: un tramo por parte, en orden, con el
-   * día en que acaba cada uno (el último es `fechaLimite`). Null en los tipos
-   * simples y cuando no hay fecha límite.
+   * día en que acaba cada uno (el último es `fechaLimite`), también corridos
+   * por las pausas. Null en los tipos simples y cuando no hay fecha límite.
    */
   tramos: TramoPlazo[] | null;
-  /** Días hábiles que quedan; negativo = días hábiles de atraso. */
+  /**
+   * Días hábiles que quedan; negativo = días hábiles de atraso (sin contar los
+   * que pasó en pausa). Con el trabajo terminado, el margen o el atraso con que
+   * llegó, ya congelado.
+   */
   diasHabiles: number | null;
+  /**
+   * En marcha: EN_PLAZO / VENCE_HOY / VENCIDO contra la fecha límite ya corrida
+   * (que esté en pausa lo dice `enPausa`, no un estado aparte). Con el trabajo
+   * terminado: CUMPLIDO / INCUMPLIDO, o TERMINADO si no se vio cuándo llegó.
+   * Sin plazo, SIN_PLAZO en los dos casos.
+   */
   estadoPlazo: EstadoPlazo;
   /** True si la réplica lleva más de un día sin refrescar el ticket: puede estar ya cerrado. */
   sinConfirmar: boolean;
@@ -329,6 +365,49 @@ export function parsePlazo(body: unknown): CambioPlazo {
     throw invalido(`El plazo debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o quedar vacío.`, 'dias');
   }
   return { tipo, dias: d };
+}
+
+/** Un estado de Zoho Desk y su rol en el reloj del plazo (bloque «Estados de Desk» de «Configuración»). */
+export interface EstadoDesk {
+  /** El estado normalizado (`claveEstadoDesk`): con ella casan los tickets. */
+  clave: string;
+  /** Como lo escribe Desk; si ningún ticket lo tiene ya, como se guardó al elegir su rol. */
+  etiqueta: string;
+  /** El `status_type` que le da Desk ('Open' | 'On Hold' | 'Closed'); null si ningún ticket lo tiene o Desk no lo manda. Sólo orienta. */
+  tipoDesk: string | null;
+  /** Tickets sin cerrar que están ahora en este estado. */
+  ticketsAbiertos: number;
+  /** cuenta (el de partida, mientras nadie lo cambie), standby (reloj en pausa) o terminado (reloj parado). */
+  rol: RolEstado;
+  /** Quién eligió su rol por última vez; null si nadie lo ha tocado. */
+  actualizadoPor: string | null;
+  actualizadoEn: string | null;
+}
+
+export interface CambioEstadoDesk {
+  estado: string;
+  rol: RolEstado;
+}
+
+/** Largo máximo de un estado de Desk, y de su clave (las dos columnas de portal.tmc_estados_desk). */
+export const ESTADO_DESK_MAX = 80;
+
+/**
+ * Valida el cuerpo de PUT /trazabilidad/estados. Vale cualquier texto de
+ * estado: se puede elegir el rol de uno antes de que ningún ticket lo use.
+ * `rol` tiene que ser, tal cual, uno de los tres de `ROLES_ESTADO` (ni un
+ * booleano, ni otra grafía).
+ */
+export function parseEstadoDesk(body: unknown): CambioEstadoDesk {
+  const b = obj(body, 'body');
+  if (typeof b.estado !== 'string') throw invalido(b.estado === null || b.estado === undefined ? 'Falta «estado».' : '«estado» debe ser texto.', 'estado');
+  const estado = texto(b.estado, 'estado', ESTADO_DESK_MAX, true)!;
+  const clave = claveEstadoDesk(estado);
+  if (!clave) throw invalido('Falta «estado».', 'estado');
+  // Quitar tildes puede alargar la clave en alfabetos que se descomponen en varias letras.
+  if (clave.length > ESTADO_DESK_MAX) throw invalido(`«estado» supera ${ESTADO_DESK_MAX} caracteres.`, 'estado');
+  if (!esRolEstado(b.rol)) throw invalido('«rol» debe ser «cuenta», «standby» o «terminado».', 'rol');
+  return { estado, rol: b.rol };
 }
 
 /**

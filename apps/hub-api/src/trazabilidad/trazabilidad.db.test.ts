@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { aplicarMigraciones } from '../db.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
+import { hoyEnColombia } from '../ausencias/saldo.js';
+import { claveEstadoDesk, type RolEstado } from './dominio.js';
 import * as repo from './repo.js';
 import type { FilaImportada } from './types.js';
 
@@ -34,6 +36,8 @@ const fila = (serial: string, cliente: string, ultimaCalibracion: string | null,
 const SQL_043 = readFileSync(fileURLToPath(new URL('../users/migrations/043_trazabilidad_plazos.sql', import.meta.url)), 'utf8');
 const SQL_044 = readFileSync(fileURLToPath(new URL('../users/migrations/044_trazabilidad_servicios_tipo.sql', import.meta.url)), 'utf8');
 const SQL_045 = readFileSync(fileURLToPath(new URL('../users/migrations/045_trazabilidad_tipo_combinado.sql', import.meta.url)), 'utf8');
+const SQL_046 = readFileSync(fileURLToPath(new URL('../users/migrations/046_trazabilidad_estados_desk.sql', import.meta.url)), 'utf8');
+const SQL_047 = readFileSync(fileURLToPath(new URL('../users/migrations/047_trazabilidad_estados_historial.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
@@ -48,7 +52,7 @@ afterAll(async () => {
   await db?.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, desk.tickets RESTART IDENTITY');
+  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, portal.tmc_estados_desk, portal.tmc_estados_historial, desk.tickets RESTART IDENTITY');
 });
 
 describe('importar', () => {
@@ -444,6 +448,573 @@ describe('tipo de servicio puesto a mano', () => {
     const p = await repo.listarPlazos(db);
     expect(p.find((x) => x.clave === 'calibracion')!.ticketsAbiertos).toBe(2);
     expect(p.find((x) => x.clave === 'diagnostico')!.ticketsAbiertos).toBe(1);
+  });
+});
+
+// Bloque «Estados de Desk» de Configuración: el rol de cada estado en el reloj
+// del plazo (cuenta / standby / terminado) y lo que eso deja en cada ticket de
+// «Servicios». El cálculo con historial va más abajo.
+describe('estados de Desk y su rol', () => {
+  const ticket = (numero: number, estado: string, statusType: string | null = 'Open', tipo: string | null = null) =>
+    db.query(
+      `INSERT INTO desk.tickets (number, status, status_type, serial, tipo_servicio, fecha_creacion_ticket, synced_at)
+       VALUES ($1, $2, $3, '18A00001', $4, '2026-10-05', NOW())`,
+      [numero, estado, statusType, tipo],
+    );
+  const estado = async (clave: string) => (await repo.listarEstadosDesk(db)).find((e) => e.clave === clave);
+  const marcar = (e: string, rol: RolEstado, quien: { userId: string | null; email: string } = actor) => repo.guardarEstadoDesk(db, { estado: e, rol }, quien);
+  const servicio = async (numero: number) => (await repo.listarServicios(db, hoy)).find((s) => s.numero === numero)!;
+  const filas = async () =>
+    (
+      await db.query(
+        `SELECT clave, etiqueta, rol, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en
+           FROM portal.tmc_estados_desk ORDER BY clave`,
+      )
+    ).rows;
+
+  beforeEach(async () => {
+    await resembrarPlazos();
+  });
+
+  it('sin tickets ni nada guardado, la lista está vacía', async () => {
+    expect(await repo.listarEstadosDesk(db)).toEqual([]);
+  });
+
+  it('lista todos los estados que existen en Desk, cerrados incluidos, con su tipo y sus tickets abiertos; todos nacen en «cuenta»', async () => {
+    await ticket(5001, 'Ingresado');
+    await ticket(5002, 'Ingresado');
+    await ticket(5003, 'Por Facturar', 'On Hold');
+    await ticket(5004, 'Finalizado', 'Closed');
+    await ticket(5005, 'Finalizado', 'Closed');
+    expect(await repo.listarEstadosDesk(db)).toEqual([
+      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 2, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      { clave: 'por facturar', etiqueta: 'Por Facturar', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      { clave: 'finalizado', etiqueta: 'Finalizado', tipoDesk: 'Closed', ticketsAbiertos: 0, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+    ]);
+    // Listar no escribe: sólo hay fila para lo que alguien ha tocado.
+    expect(await filas()).toEqual([]);
+  });
+
+  it('las grafías del mismo estado (mayúsculas, tildes, espacios repetidos o sobrantes) son una sola fila', async () => {
+    await ticket(5010, 'Notificación  Comercial', 'On Hold');
+    await ticket(5011, 'Notificación  Comercial', 'On Hold');
+    await ticket(5012, ' notificacion comercial ', 'On Hold');
+    await ticket(5013, 'NOTIFICACIÓN COMERCIAL', 'Closed');
+    const e = await repo.listarEstadosDesk(db);
+    expect(e).toHaveLength(1);
+    // La etiqueta es la grafía más usada, sin espacios de más; el tipo, el de la mayoría de sus tickets.
+    expect(e[0]).toMatchObject({ clave: 'notificacion comercial', etiqueta: 'Notificación Comercial', tipoDesk: 'On Hold', ticketsAbiertos: 3 });
+  });
+
+  it('un estado vacío no sale, y uno sin tipo en Desk cuenta sus tickets como abiertos', async () => {
+    await ticket(5020, '   ');
+    await ticket(5021, 'Nuevo', null);
+    expect(await repo.listarEstadosDesk(db)).toEqual([
+      { clave: 'nuevo', etiqueta: 'Nuevo', tipoDesk: null, ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+    ]);
+  });
+
+  it('elegir «standby» persiste y queda firmado con id, correo y fecha', async () => {
+    await ticket(5030, 'Servicio externo', 'On Hold');
+    await marcar('Servicio externo', 'standby');
+    const e = (await estado('servicio externo'))!;
+    expect(e).toMatchObject({ etiqueta: 'Servicio externo', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'standby', actualizadoPor: actor.email });
+    expect(e.actualizadoEn).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    const f = await filas();
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ clave: 'servicio externo', etiqueta: 'Servicio externo', rol: 'standby', por_id: actor.userId, actualizado_por: actor.email });
+    expect(f[0].actualizado_en).toBeInstanceOf(Date);
+    expect(await servicio(5030)).toMatchObject({ rolEstado: 'standby', enPausa: true });
+  });
+
+  it('los tres roles son excluyentes: elegir otro sustituye al anterior en la misma fila', async () => {
+    await ticket(5033, 'Por Facturar', 'On Hold');
+    await marcar('Por Facturar', 'standby');
+    await marcar('Por Facturar', 'terminado');
+    expect(await filas()).toMatchObject([{ clave: 'por facturar', rol: 'terminado' }]);
+    expect(await estado('por facturar')).toMatchObject({ rol: 'terminado' });
+    expect(await servicio(5033)).toMatchObject({ rolEstado: 'terminado', enPausa: false });
+  });
+
+  it('volver a «cuenta» conserva la fila y vuelve a firmar con quien lo hizo', async () => {
+    await ticket(5031, 'Servicio externo', 'On Hold');
+    await marcar('Servicio externo', 'standby');
+    await marcar('Servicio externo', 'cuenta', { userId: null, email: 'otra@ambientalia.com.co' });
+    expect(await estado('servicio externo')).toMatchObject({ rol: 'cuenta', actualizadoPor: 'otra@ambientalia.com.co' });
+    expect(await filas()).toMatchObject([{ clave: 'servicio externo', rol: 'cuenta', por_id: null, actualizado_por: 'otra@ambientalia.com.co' }]);
+    expect(await servicio(5031)).toMatchObject({ rolEstado: 'cuenta', enPausa: false });
+  });
+
+  it('elegir con otra grafía toca el mismo estado: una sola fila, con su etiqueta limpia', async () => {
+    await ticket(5032, 'Notificación  Comercial', 'On Hold');
+    await marcar('  notificacion   COMERCIAL ', 'terminado');
+    await marcar('Notificación  Comercial', 'standby');
+    expect(await filas()).toMatchObject([{ clave: 'notificacion comercial', etiqueta: 'Notificación Comercial', rol: 'standby' }]);
+    expect(await repo.listarEstadosDesk(db)).toHaveLength(1);
+    expect((await servicio(5032)).enPausa).toBe(true);
+  });
+
+  it('un estado guardado que ningún ticket tiene sigue en la lista, con su etiqueta guardada', async () => {
+    await ticket(5040, 'Ingresado');
+    await marcar('Notificación cliente', 'standby');
+    expect(await repo.listarEstadosDesk(db)).toEqual([
+      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      {
+        clave: 'notificacion cliente',
+        etiqueta: 'Notificación cliente',
+        tipoDesk: null,
+        ticketsAbiertos: 0,
+        rol: 'standby',
+        actualizadoPor: actor.email,
+        actualizadoEn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}/),
+      },
+    ]);
+    // Cuando un ticket llega a ese estado, coge el tipo de Desk y el rol ya elegido.
+    await ticket(5041, 'Notificación Cliente', 'On Hold');
+    expect(await estado('notificacion cliente')).toMatchObject({ etiqueta: 'Notificación Cliente', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'standby' });
+    expect((await servicio(5041)).enPausa).toBe(true);
+  });
+
+  it('orden: tipo abierto, en espera y cerrado; dentro, más tickets abiertos primero y después alfabético', async () => {
+    await ticket(5050, 'Finalizado', 'Closed');
+    await ticket(5051, 'Servicio externo', 'On Hold');
+    await ticket(5052, 'Por Facturar', 'On Hold');
+    await ticket(5053, 'Por Facturar', 'On Hold');
+    await ticket(5054, 'Ingresado');
+    await ticket(5055, 'En Proceso');
+    await ticket(5056, 'Por Entregar');
+    await ticket(5057, 'Por Entregar');
+    await ticket(5058, 'OV asignada', 'On Hold');
+    await marcar('Estado sin tickets', 'cuenta');
+    expect((await repo.listarEstadosDesk(db)).map((e) => [e.etiqueta, e.ticketsAbiertos])).toEqual([
+      ['Por Entregar', 2],
+      ['En Proceso', 1],
+      ['Ingresado', 1],
+      ['Por Facturar', 2],
+      ['OV asignada', 1],
+      ['Servicio externo', 1],
+      ['Finalizado', 0],
+      ['Estado sin tickets', 0],
+    ]);
+  });
+
+  it('los tickets cerrados no cuentan como abiertos aunque su estado esté en standby', async () => {
+    await ticket(5060, 'Servicio externo', 'On Hold');
+    await ticket(5061, 'Servicio externo', 'Closed');
+    await marcar('Servicio externo', 'standby');
+    expect(await estado('servicio externo')).toMatchObject({ ticketsAbiertos: 1, rol: 'standby' });
+    expect((await repo.listarServicios(db, hoy)).map((s) => s.numero)).toEqual([5060]);
+  });
+
+  it('servicios: cada ticket lleva el rol de su estado de ahora; «en pausa» sólo los de standby', async () => {
+    await ticket(5070, 'Servicio externo', 'On Hold');
+    await ticket(5071, ' servicio  EXTERNO ', 'On Hold');
+    await ticket(5072, 'Por Facturar', 'On Hold');
+    await ticket(5073, 'En Proceso');
+    expect((await repo.listarServicios(db, hoy)).map((s) => [s.rolEstado, s.enPausa])).toEqual(Array(4).fill(['cuenta', false]));
+    await marcar('Servicio externo', 'standby');
+    await marcar('Por Facturar', 'terminado');
+    await marcar('En Proceso', 'standby');
+    await marcar('En Proceso', 'cuenta');
+    const s = await repo.listarServicios(db, hoy);
+    expect(s.map((x) => [x.numero, x.rolEstado, x.enPausa])).toEqual([
+      [5073, 'cuenta', false],
+      [5072, 'terminado', false],
+      [5071, 'standby', true],
+      [5070, 'standby', true],
+    ]);
+    // El estado se sigue enseñando tal como lo escribe Desk.
+    expect(s.find((x) => x.numero === 5071)!.estado).toBe(' servicio  EXTERNO ');
+    // El booleano de antes ya no viaja: lo dicen `rolEstado` y `enPausa`.
+    expect(s.every((x) => !('standby' in x))).toBe(true);
+  });
+
+  it('servicios: al cambiar el ticket de estado en Desk, el rol sigue al estado nuevo', async () => {
+    await ticket(5075, 'Notificación cliente', 'On Hold');
+    await marcar('Notificación cliente', 'standby');
+    expect((await servicio(5075)).enPausa).toBe(true);
+    await db.query(`UPDATE desk.tickets SET status = 'En Proceso', status_type = 'Open' WHERE number = 5075`);
+    expect(await servicio(5075)).toMatchObject({ rolEstado: 'cuenta', enPausa: false });
+  });
+
+  it('el rol no cambia los recuentos de Configuración, y sin plazo el ticket sigue «sin plazo»', async () => {
+    await ticket(5080, 'Servicio externo', 'On Hold', 'Diagnóstico');
+    await ticket(5082, 'Servicio externo', 'On Hold');
+    const plazosAntes = await repo.listarPlazos(db);
+    await marcar('Servicio externo', 'standby');
+    expect(await repo.listarPlazos(db)).toEqual(plazosAntes);
+    expect(await servicio(5082)).toMatchObject({ enPausa: true, plazoDias: null, fechaLimite: null, fechaLimiteBase: null, diasHabiles: null, estadoPlazo: 'SIN_PLAZO', tramos: null });
+    // Con plazo, el de su tipo no cambia; lo que se corre es la fecha (ver «plazo con el reloj en pausa»).
+    expect(await servicio(5080)).toMatchObject({ enPausa: true, plazoDias: 3, fechaLimiteBase: '2026-10-08' });
+  });
+
+  it('lo elegido sobrevive a volver a ejecutar la migración', async () => {
+    await ticket(5090, 'Servicio externo', 'On Hold');
+    await marcar('Servicio externo', 'standby');
+    await marcar('Por Facturar', 'terminado');
+    await marcar('Ingresado', 'cuenta');
+    await db.query(SQL_046);
+    await db.query(SQL_046);
+    await aplicarMigraciones(db);
+    expect(await filas()).toMatchObject([
+      { clave: 'ingresado', rol: 'cuenta', actualizado_por: actor.email },
+      { clave: 'por facturar', rol: 'terminado', actualizado_por: actor.email },
+      { clave: 'servicio externo', rol: 'standby', actualizado_por: actor.email },
+    ]);
+    expect((await servicio(5090)).enPausa).toBe(true);
+  });
+
+  it('la tabla nace sin filas, pone el rol en «cuenta» por defecto y rechaza una clave vacía o un rol que no sea de los tres', async () => {
+    expect(await filas()).toEqual([]);
+    await db.query(`INSERT INTO portal.tmc_estados_desk (clave, etiqueta, actualizado_por) VALUES ('en proceso', 'En Proceso', 'st@ambientalia.com.co')`);
+    expect(await filas()).toMatchObject([{ clave: 'en proceso', rol: 'cuenta' }]);
+    await expect(db.query(`INSERT INTO portal.tmc_estados_desk (clave, etiqueta, actualizado_por) VALUES ('', 'x', 'st@ambientalia.com.co')`)).rejects.toThrow();
+    for (const rol of ['pausa', 'Standby', '', 'true']) {
+      await expect(db.query(`INSERT INTO portal.tmc_estados_desk (clave, etiqueta, rol, actualizado_por) VALUES ('otro', 'Otro', $1, 'st@ambientalia.com.co')`, [rol])).rejects.toThrow();
+    }
+    // Y lo mismo si alguien se salta la validación de entrada y llega al repo.
+    await expect(repo.guardarEstadoDesk(db, { estado: 'Otro', rol: 'pausa' as RolEstado }, actor)).rejects.toThrow();
+    expect(await filas()).toHaveLength(1);
+    // La columna del booleano de antes no existe.
+    const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_estados_desk' `);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en','actualizado_por', 'actualizado_por_id', 'clave', 'etiqueta', 'rol']);
+  });
+});
+
+// El historial de estados: la réplica sólo trae el estado de ahora, así que
+// hub-api apunta los cambios que ve (`registrarEstados`) en
+// portal.tmc_estados_historial. Un tramo por estado y, como mucho, uno abierto
+// por ticket.
+describe('historial de estados: registrarEstados', () => {
+  const ticket = (numero: number | null, estado: string, statusType: string | null = 'Open') =>
+    db.query(`INSERT INTO desk.tickets (number, status, status_type, serial, fecha_creacion_ticket, synced_at) VALUES ($1, $2, $3, '18A00001', '2026-10-05', NOW())`, [numero, estado, statusType]);
+  const cambiar = (numero: number, estado: string, statusType = 'Open') => db.query(`UPDATE desk.tickets SET status = $2, status_type = $3 WHERE number = $1`, [numero, estado, statusType]);
+  interface Fila {
+    id: string;
+    numero: number;
+    clave: string;
+    etiqueta: string;
+    desde: Date;
+    hasta: Date | null;
+    desde_real: boolean;
+  }
+  const historial = async (): Promise<Fila[]> =>
+    (await db.query(`SELECT id::text AS id, numero, clave, etiqueta, desde, hasta, desde_real FROM portal.tmc_estados_historial ORDER BY numero, desde, id`)).rows as Fila[];
+  const abiertos = async () => (await historial()).filter((f) => f.hasta === null).map((f) => [f.numero, f.clave]);
+
+  it('primera observación: un tramo abierto por ticket sin cerrar, marcado como «no se vio empezar»', async () => {
+    const antes = Date.now();
+    await ticket(7001, 'En Proceso');
+    await ticket(7002, ' Notificación  Cliente ', 'On Hold');
+    await ticket(7003, 'Nuevo', null);
+    await ticket(7004, 'Finalizado', 'Closed');
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 3, cerrados: 0 });
+    const h = await historial();
+    expect(h.map((f) => [f.numero, f.clave, f.etiqueta, f.hasta, f.desde_real])).toEqual([
+      [7001, 'en proceso', 'En Proceso', null, false],
+      [7002, 'notificacion cliente', 'Notificación Cliente', null, false],
+      [7003, 'nuevo', 'Nuevo', null, false],
+    ]);
+    // `desde` es el instante en que se vio, no la creación del ticket.
+    for (const f of h) {
+      expect(f.desde.getTime()).toBeGreaterThanOrEqual(antes - 5_000);
+      expect(f.desde.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    }
+  });
+
+  it('sin cambios no hace nada: es idempotente', async () => {
+    await ticket(7010, 'En Proceso');
+    await ticket(7011, 'Por Facturar', 'On Hold');
+    await repo.registrarEstados(db);
+    const antes = await historial();
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+    expect(await historial()).toEqual(antes);
+  });
+
+  it('un cambio de estado cierra el tramo abierto y abre otro en el mismo instante, ya como cambio visto', async () => {
+    await ticket(7020, 'En Proceso');
+    await ticket(7021, 'En Proceso');
+    await repo.registrarEstados(db);
+    await cambiar(7020, 'Notificación cliente', 'On Hold');
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 1, cerrados: 1 });
+    const h = await historial();
+    expect(h.map((f) => [f.numero, f.clave, f.hasta === null, f.desde_real])).toEqual([
+      [7020, 'en proceso', false, false],
+      [7020, 'notificacion cliente', true, true],
+      [7021, 'en proceso', true, false],
+    ]);
+    // Sin hueco ni solape entre los dos tramos.
+    expect(h[0].hasta!.getTime()).toBe(h[1].desde.getTime());
+    expect(h[0].hasta!.getTime()).toBeGreaterThanOrEqual(h[0].desde.getTime());
+    // Y otro cambio más encadena igual.
+    await cambiar(7020, 'En Proceso');
+    await repo.registrarEstados(db);
+    const h2 = (await historial()).filter((f) => f.numero === 7020);
+    expect(h2.map((f) => [f.clave, f.hasta === null, f.desde_real])).toEqual([
+      ['en proceso', false, false],
+      ['notificacion cliente', false, true],
+      ['en proceso', true, true],
+    ]);
+    expect(h2[1].hasta!.getTime()).toBe(h2[2].desde.getTime());
+  });
+
+  it('otra grafía del mismo estado (espacios, mayúsculas, tildes) NO es un cambio', async () => {
+    await ticket(7030, 'Notificación  Cliente', 'On Hold');
+    await repo.registrarEstados(db);
+    const antes = await historial();
+    for (const grafia of ['Notificación Cliente', '  notificacion   cliente ', 'NOTIFICACIÓN CLIENTE', 'Notificacion\tCliente']) {
+      await cambiar(7030, grafia, 'On Hold');
+      expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+    }
+    expect(await historial()).toEqual(antes);
+    // Tampoco lo es que cambie sólo el tipo de estado de Desk.
+    await cambiar(7030, 'Notificación Cliente', 'Open');
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+  });
+
+  it('un ticket que se cierra en Desk, o que desaparece de la réplica, cierra su tramo y no abre otro', async () => {
+    await ticket(7040, 'Por Entregar');
+    await ticket(7041, 'Por Entregar');
+    await ticket(7042, 'En Proceso');
+    await repo.registrarEstados(db);
+    await cambiar(7040, 'Finalizado', 'Closed');
+    await db.query(`DELETE FROM desk.tickets WHERE number = 7041`);
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 2 });
+    const h = await historial();
+    expect(h.map((f) => [f.numero, f.clave, f.hasta === null])).toEqual([
+      [7040, 'por entregar', false],
+      [7041, 'por entregar', false],
+      [7042, 'en proceso', true],
+    ]);
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+  });
+
+  it('si un ticket cerrado se reabre, es otra primera observación: no se sabe cuándo volvió', async () => {
+    await ticket(7050, 'En Proceso');
+    await repo.registrarEstados(db);
+    await cambiar(7050, 'Finalizado', 'Closed');
+    await repo.registrarEstados(db);
+    await cambiar(7050, 'En Proceso');
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 1, cerrados: 0 });
+    expect((await historial()).map((f) => [f.clave, f.hasta === null, f.desde_real])).toEqual([
+      ['en proceso', false, false],
+      ['en proceso', true, false],
+    ]);
+  });
+
+  it('un ticket sin número no se apunta, y uno con el estado en blanco sí (con clave vacía)', async () => {
+    await ticket(null, 'En Proceso');
+    await ticket(7060, '   ');
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 1, cerrados: 0 });
+    expect((await historial()).map((f) => [f.numero, f.clave, f.etiqueta])).toEqual([[7060, '', '']]);
+  });
+
+  it('dos (o más) llamadas a la vez dejan un solo tramo abierto por ticket, sin duplicar nada', async () => {
+    for (let n = 7100; n < 7120; n++) await ticket(n, n % 2 ? 'En Proceso' : 'Notificación cliente');
+    const r1 = await Promise.all([repo.registrarEstados(db), repo.registrarEstados(db), repo.registrarEstados(db), repo.registrarEstados(db)]);
+    expect(r1.reduce((n, r) => n + r.abiertos, 0)).toBe(20);
+    expect(await historial()).toHaveLength(20);
+    expect(await abiertos()).toHaveLength(20);
+
+    // Ahora con cambios de por medio: la mitad cambia de estado y dos se cierran.
+    for (let n = 7100; n < 7110; n++) await cambiar(n, 'Por Facturar', 'On Hold');
+    await cambiar(7118, 'Finalizado', 'Closed');
+    await cambiar(7119, 'Finalizado', 'Closed');
+    const r2 = await Promise.all([repo.registrarEstados(db), repo.registrarEstados(db), repo.registrarEstados(db), repo.registrarEstados(db)]);
+    expect(r2.reduce((n, r) => n + r.abiertos, 0)).toBe(10);
+    expect(r2.reduce((n, r) => n + r.cerrados, 0)).toBe(12);
+    const h = await historial();
+    expect(h).toHaveLength(30);
+    const porTicket = new Map<number, Fila[]>();
+    for (const f of h) porTicket.set(f.numero, [...(porTicket.get(f.numero) ?? []), f]);
+    for (const [numero, fs] of porTicket) {
+      const abiertosDe = fs.filter((f) => f.hasta === null);
+      expect(abiertosDe).toHaveLength(numero >= 7118 ? 0 : 1);
+      if (numero < 7110) expect(fs.map((f) => [f.clave, f.hasta === null, f.desde_real])).toEqual([[numero % 2 ? 'en proceso' : 'notificacion cliente', false, false], ['por facturar', true, true]]);
+    }
+  });
+
+  it('la tabla no admite dos tramos abiertos del mismo ticket, ni uno que acabe antes de empezar', async () => {
+    const ins = (numero: number, desde: string, hasta: string | null) =>
+      db.query(`INSERT INTO portal.tmc_estados_historial (numero, clave, etiqueta, desde, hasta, desde_real) VALUES ($1, 'en proceso', 'En Proceso', $2::timestamptz, $3::timestamptz, TRUE)`, [numero, desde, hasta]);
+    await ins(7200, '2026-10-05 10:00:00-05', null);
+    await expect(ins(7200, '2026-10-06 10:00:00-05', null)).rejects.toThrow(/tmc_estados_historial_abierto_uq/);
+    // Cerrados puede haber los que hagan falta, y otro ticket tiene su propio abierto.
+    await ins(7200, '2026-10-01 10:00:00-05', '2026-10-02 10:00:00-05');
+    await ins(7200, '2026-10-02 10:00:00-05', '2026-10-05 10:00:00-05');
+    await ins(7201, '2026-10-06 10:00:00-05', null);
+    await expect(ins(7202, '2026-10-06 10:00:00-05', '2026-10-05 10:00:00-05')).rejects.toThrow();
+    await expect(ins(0, '2026-10-06 10:00:00-05', null)).rejects.toThrow();
+    expect(await historial()).toHaveLength(4);
+  });
+
+  it('el historial sobrevive a volver a ejecutar la migración', async () => {
+    await ticket(7300, 'En Proceso');
+    await repo.registrarEstados(db);
+    await cambiar(7300, 'Notificación cliente', 'On Hold');
+    await repo.registrarEstados(db);
+    const antes = await historial();
+    expect(antes).toHaveLength(2);
+    await db.query(SQL_047);
+    await db.query(SQL_047);
+    await aplicarMigraciones(db);
+    expect(await historial()).toEqual(antes);
+    expect(await repo.registrarEstados(db)).toEqual({ abiertos: 0, cerrados: 0 });
+  });
+
+  it('el rol no se copia al historial: la tabla sólo guarda el estado', async () => {
+    const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_estados_historial' `);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['clave','desde', 'desde_real', 'etiqueta', 'hasta', 'id', 'numero']);
+  });
+});
+
+// De punta a punta: tickets, roles y un historial sembrado con instantes
+// concretos (hora de Bogotá), leído con `hoy` fijo. Calendario: lun 5 … vie 9
+// de octubre de 2026; el lunes 12 es festivo.
+describe('servicios: plazo con el reloj en pausa y trabajo terminado', () => {
+  const HOY = '2026-10-09';
+  const ticket = (numero: number, estado: string, tipo: string | null = 'Diagnóstico', ingreso = '2026-10-05') =>
+    db.query(
+      `INSERT INTO desk.tickets (number, subject, status, status_type, serial, tipo_servicio, fecha_creacion_ticket, synced_at)
+       VALUES ($1, 'Servicio Técnico Cliente Uno', $2, 'Open', '18A00001', $3, $4::date, NOW())`,
+      [numero, estado, tipo, ingreso],
+    );
+  /** Tramos encadenados de un ticket: [estado, desde]; el último queda abierto y el primero es la primera observación. */
+  const historia = async (numero: number, ...pasos: [estado: string, desde: string][]) => {
+    for (const [i, [estado, desde]] of pasos.entries()) {
+      await db.query(
+        `INSERT INTO portal.tmc_estados_historial (numero, clave, etiqueta, desde, hasta, desde_real)
+         VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6)`,
+        [numero, claveEstadoDesk(estado), estado, `${desde}:00-05`, i + 1 < pasos.length ? `${pasos[i + 1][1]}:00-05` : null, i > 0],
+      );
+    }
+  };
+  const servicio = async (numero: number, hoyDe = HOY) => (await repo.listarServicios(db, hoyDe)).find((s) => s.numero === numero)!;
+
+  beforeEach(async () => {
+    await resembrarPlazos();
+    await repo.guardarEstadoDesk(db, { estado: 'Notificación cliente', rol: 'standby' }, actor);
+    await repo.guardarEstadoDesk(db, { estado: 'Por Facturar', rol: 'terminado' }, actor);
+    await repo.guardarEstadoDesk(db, { estado: 'Por Entregar', rol: 'terminado' }, actor);
+  });
+
+  it('sin historial todo cuenta: el plazo de siempre, sin pausas y sin fecha de medida', async () => {
+    await ticket(6000, 'En Proceso');
+    expect(await servicio(6000)).toMatchObject({
+      rolEstado: 'cuenta',
+      enPausa: false,
+      diasPausados: 0,
+      pausas: [],
+      terminadoEl: null,
+      medidoDesde: null,
+      plazoDias: 3,
+      fechaLimite: '2026-10-08',
+      fechaLimiteBase: '2026-10-08',
+      diasHabiles: -1,
+      estadoPlazo: 'VENCIDO',
+      tramos: null,
+    });
+  });
+
+  it('una pausa en medio corre la fecha límite los días hábiles que duró', async () => {
+    await ticket(6001, 'En Proceso');
+    await historia(6001, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00'], ['En Proceso', '2026-10-08 09:00']);
+    expect(await servicio(6001)).toMatchObject({
+      rolEstado: 'cuenta',
+      enPausa: false,
+      diasPausados: 2,
+      pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }],
+      medidoDesde: '2026-10-05',
+      plazoDias: 3,
+      fechaLimiteBase: '2026-10-08',
+      fechaLimite: '2026-10-13',
+      diasHabiles: 1,
+      estadoPlazo: 'EN_PLAZO',
+      terminadoEl: null,
+    });
+  });
+
+  it('en standby ahora: en pausa, y la fecha proyectada se corre con cada día hábil', async () => {
+    await ticket(6002, 'Notificación  Cliente');
+    await historia(6002, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00']);
+    expect(await servicio(6002, '2026-10-06')).toMatchObject({ enPausa: true, diasPausados: 1, fechaLimite: '2026-10-09', estadoPlazo: 'EN_PLAZO', diasHabiles: 3 });
+    expect(await servicio(6002, '2026-10-07')).toMatchObject({ enPausa: true, diasPausados: 2, fechaLimite: '2026-10-13', diasHabiles: 3 });
+    expect(await servicio(6002)).toMatchObject({ rolEstado: 'standby', enPausa: true, diasPausados: 4, pausas: [{ desde: '2026-10-06', hasta: '2026-10-09' }], fechaLimiteBase: '2026-10-08', fechaLimite: '2026-10-15' });
+  });
+
+  it('trabajo terminado a tiempo → CUMPLIDO; tarde → INCUMPLIDO; visto ya terminado → TERMINADO', async () => {
+    await ticket(6003, 'Por Facturar');
+    await historia(6003, ['En Proceso', '2026-10-05 12:00'], ['Por Facturar', '2026-10-07 15:00']);
+    await ticket(6004, 'Por Entregar');
+    await historia(6004, ['En Proceso', '2026-10-05 12:00'], ['Por Entregar', '2026-10-09 08:00']);
+    await ticket(6005, 'Por Facturar');
+    await historia(6005, ['Por Facturar', '2026-10-06 10:00']);
+    expect(await servicio(6003)).toMatchObject({ rolEstado: 'terminado', enPausa: false, terminadoEl: '2026-10-07', fechaLimite: '2026-10-08', diasHabiles: 1, estadoPlazo: 'CUMPLIDO', diasPausados: 0, pausas: [] });
+    expect(await servicio(6004)).toMatchObject({ rolEstado: 'terminado', terminadoEl: '2026-10-09', fechaLimite: '2026-10-08', diasHabiles: -1, estadoPlazo: 'INCUMPLIDO' });
+    expect(await servicio(6005)).toMatchObject({ rolEstado: 'terminado', terminadoEl: '2026-10-06', fechaLimite: '2026-10-08', estadoPlazo: 'TERMINADO', medidoDesde: '2026-10-06' });
+    // Semanas después siguen igual: el reloj está parado.
+    expect(await servicio(6003, '2026-11-20')).toMatchObject({ terminadoEl: '2026-10-07', fechaLimite: '2026-10-08', diasHabiles: 1, estadoPlazo: 'CUMPLIDO' });
+    expect(await servicio(6004, '2026-11-20')).toMatchObject({ fechaLimite: '2026-10-08', diasHabiles: -1, estadoPlazo: 'INCUMPLIDO' });
+  });
+
+  it('sin tipo de servicio: «sin plazo», pero con su rol, sus pausas y cuándo se terminó', async () => {
+    await ticket(6006, 'En Proceso', null);
+    await historia(6006, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00'], ['En Proceso', '2026-10-08 09:00']);
+    await ticket(6016, 'Por Facturar', null);
+    await historia(6016, ['En Proceso', '2026-10-05 12:00'], ['Por Facturar', '2026-10-07 15:00']);
+    expect(await servicio(6006)).toMatchObject({ estadoPlazo: 'SIN_PLAZO', fechaLimite: null, fechaLimiteBase: null, diasHabiles: null, diasPausados: 2, pausas: [{ desde: '2026-10-06', hasta: '2026-10-07' }], medidoDesde: '2026-10-05' });
+    expect(await servicio(6016)).toMatchObject({ estadoPlazo: 'SIN_PLAZO', rolEstado: 'terminado', terminadoEl: '2026-10-07', fechaLimite: null });
+  });
+
+  it('tipo compuesto: los dos tramos se corren con la pausa', async () => {
+    await ticket(6007, 'En Proceso', 'Diagnóstico + Calibración');
+    await historia(6007, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00'], ['En Proceso', '2026-10-07 08:00']);
+    const s = await servicio(6007, '2026-10-08');
+    expect(s).toMatchObject({ plazoDias: 7, diasPausados: 1, fechaLimiteBase: '2026-10-15', fechaLimite: '2026-10-16' });
+    expect(s.tramos).toEqual([
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-10-09' },
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: 4, hasta: '2026-10-16' },
+    ]);
+  });
+
+  it('cambiar el rol de un estado reevalúa el mismo historial, hacia atrás', async () => {
+    await ticket(6008, 'En Proceso');
+    await historia(6008, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00'], ['En Proceso', '2026-10-08 09:00']);
+    expect(await servicio(6008)).toMatchObject({ fechaLimite: '2026-10-13', diasPausados: 2 });
+    await repo.guardarEstadoDesk(db, { estado: 'Notificación cliente', rol: 'cuenta' }, actor);
+    expect(await servicio(6008)).toMatchObject({ fechaLimite: '2026-10-08', diasPausados: 0, pausas: [], estadoPlazo: 'VENCIDO' });
+    // El historial no ha cambiado: sólo se lee con otro rol.
+    await repo.guardarEstadoDesk(db, { estado: 'Notificación cliente', rol: 'terminado' }, actor);
+    expect(await servicio(6008)).toMatchObject({ fechaLimite: '2026-10-13', diasPausados: 2, terminadoEl: null });
+    const n = await db.query(`SELECT count(*)::int AS n FROM portal.tmc_estados_historial WHERE numero = 6008`);
+    expect(n.rows[0].n).toBe(3);
+  });
+
+  it('el historial de un ticket no se mezcla con el de otro, ni el de uno ya cerrado estorba', async () => {
+    await ticket(6009, 'En Proceso');
+    await ticket(6010, 'En Proceso');
+    await historia(6010, ['En Proceso', '2026-10-05 12:00'], ['Notificación cliente', '2026-10-06 10:00'], ['En Proceso', '2026-10-08 09:00']);
+    await historia(6999, ['Notificación cliente', '2026-10-01 10:00']);
+    expect(await servicio(6009)).toMatchObject({ diasPausados: 0, fechaLimite: '2026-10-08', medidoDesde: null });
+    expect(await servicio(6010)).toMatchObject({ diasPausados: 2, fechaLimite: '2026-10-13' });
+  });
+
+  it('con `registrarEstados` de verdad: lo que apunta es lo que lee, y lo anterior a ese momento cuenta como activo', async () => {
+    const hoyReal = hoyEnColombia();
+    await ticket(6020, 'Notificación cliente', 'Diagnóstico', '2020-01-06');
+    await ticket(6021, 'Por Facturar', 'Diagnóstico', '2020-01-06');
+    await repo.registrarEstados(db);
+    const s = await repo.listarServicios(db, hoyReal);
+    const standby = s.find((x) => x.numero === 6020)!;
+    // Ingresó en 2020 y se ve hoy por primera vez: el plazo se consumió entero antes de la primera observación.
+    expect(standby).toMatchObject({ rolEstado: 'standby', enPausa: true, medidoDesde: hoyReal, fechaLimite: '2020-01-09', fechaLimiteBase: '2020-01-09', estadoPlazo: 'VENCIDO', terminadoEl: null });
+    expect(standby.diasPausados).toBeLessThanOrEqual(1);
+    expect(s.find((x) => x.numero === 6021)).toMatchObject({ rolEstado: 'terminado', terminadoEl: hoyReal, medidoDesde: hoyReal, estadoPlazo: 'TERMINADO', fechaLimite: '2020-01-09' });
+    // Sale de standby: el cambio queda apuntado y el ticket deja de estar en pausa.
+    await db.query(`UPDATE desk.tickets SET status = 'En Proceso' WHERE number = 6020`);
+    await repo.registrarEstados(db);
+    expect((await repo.listarServicios(db, hoyReal)).find((x) => x.numero === 6020)).toMatchObject({ rolEstado: 'cuenta', enPausa: false, diasPausados: 0 });
   });
 });
 

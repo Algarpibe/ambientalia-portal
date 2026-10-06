@@ -145,16 +145,34 @@ export type EstadoPlazo =
   | 'VENCIDO' // la fecha límite ya pasó
   | 'VENCE_HOY'
   | 'EN_PLAZO'
-  | 'SIN_PLAZO'; // sin tipo de servicio, o su tipo no tiene plazo configurado
+  | 'SIN_PLAZO' // sin tipo de servicio, o su tipo no tiene plazo configurado
+  // Los tres del trabajo terminado: el reloj está parado y ya no se vence.
+  | 'INCUMPLIDO' // llegó a «trabajo terminado» después de la fecha límite
+  | 'CUMPLIDO' // llegó a «trabajo terminado» a tiempo
+  | 'TERMINADO'; // está terminado, pero el portal no vio cuándo: no se puede medir
 
-/** Orden de presentación: de lo más urgente a lo que no pide nada. */
-export const ESTADOS_PLAZO: readonly EstadoPlazo[] = ['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO'];
+/**
+ * Orden de presentación: de lo más urgente a lo que no pide nada. Primero lo
+ * que sigue en marcha; detrás, lo que ya tiene el trabajo terminado.
+ */
+export const ESTADOS_PLAZO: readonly EstadoPlazo[] = ['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO', 'INCUMPLIDO', 'CUMPLIDO', 'TERMINADO'];
+
+/** Los estados del plazo de un ticket con el trabajo terminado (reloj parado). */
+export const ESTADOS_PLAZO_TERMINADO: readonly EstadoPlazo[] = ['INCUMPLIDO', 'CUMPLIDO', 'TERMINADO'];
+
+/** True si el estado del plazo es uno de los del trabajo terminado. */
+export function esPlazoTerminado(e: EstadoPlazo): boolean {
+  return ESTADOS_PLAZO_TERMINADO.includes(e);
+}
 
 export const ETIQUETA_PLAZO: Record<EstadoPlazo, string> = {
   VENCIDO: 'Vencido',
   VENCE_HOY: 'Vence hoy',
   EN_PLAZO: 'En plazo',
   SIN_PLAZO: 'Sin plazo',
+  INCUMPLIDO: 'Incumplido',
+  CUMPLIDO: 'Cumplido',
+  TERMINADO: 'Terminado',
 };
 
 /** Límites de un plazo configurable, en días hábiles. */
@@ -272,7 +290,108 @@ export function asuntoSinCodigo(asunto: unknown, codigo: unknown): string {
     .trim();
 }
 
-/** Clasifica un servicio por su fecha límite, a fecha `hoy` (AAAA-MM-DD). */
+// ── Estados de Zoho Desk y su rol en el reloj del plazo ─────────────────────
+//
+// En «Configuración» cada estado de Desk tiene un rol, y sólo uno:
+//   · cuenta    — el tiempo en ese estado corre (el de partida);
+//   · standby   — reloj en PAUSA: el ticket depende de una decisión del cliente
+//                 o de un servicio externo; esos días hábiles no cuentan;
+//   · terminado — reloj PARADO: el trabajo técnico está hecho («Por Facturar»,
+//                 «Por Entregar»); el ticket se juzga por el día en que llegó.
+// Cuánto tiempo pasó el ticket en cada estado lo mide el propio portal, que
+// apunta los cambios que ve (portal.tmc_estados_historial); el cálculo, con el
+// calendario de festivos, es de servidor (plazos.ts).
+
+/** El rol de un estado de Desk en el reloj del plazo. */
+export type RolEstado = 'cuenta' | 'standby' | 'terminado';
+
+/** Los tres roles, en el orden en que se ofrecen. Son los valores de `portal.tmc_estados_desk.rol`. */
+export const ROLES_ESTADO: readonly RolEstado[] = ['cuenta', 'standby', 'terminado'];
+
+/** El rol de un estado que nadie ha tocado: su tiempo cuenta. */
+export const ROL_POR_DEFECTO: RolEstado = 'cuenta';
+
+export const ETIQUETA_ROL: Record<RolEstado, string> = {
+  cuenta: 'Cuenta',
+  standby: 'Standby',
+  terminado: 'Trabajo terminado',
+};
+
+/** True si `v` es, tal cual, uno de los tres roles. */
+export function esRolEstado(v: unknown): v is RolEstado {
+  return typeof v === 'string' && (ROLES_ESTADO as readonly string[]).includes(v);
+}
+
+/**
+ * True si un día que acaba en un estado con este rol no cuenta para el plazo.
+ * Standby lo pausa; «terminado» también, para el ticket que después vuelve a
+ * un estado que cuenta: el tiempo que pasó con el trabajo dado por hecho no se
+ * le carga.
+ */
+export function rolPausaReloj(rol: RolEstado): boolean {
+  return rol !== 'cuenta';
+}
+
+/** Un rango de fechas de calendario, ambas incluidas (AAAA-MM-DD). */
+export interface RangoFechas {
+  desde: string;
+  hasta: string;
+}
+
+/**
+ * El veredicto de un ticket con el trabajo terminado: cumplió si llegó a ese
+ * estado (`terminadoEl`) no más tarde que su fecha límite. Si el portal no vio
+ * el cambio (`medible` false: ya estaba terminado la primera vez que lo vio) no
+ * se sabe desde cuándo lo está, y queda en TERMINADO a secas. Sin fecha límite
+ * no hay con qué comparar.
+ */
+export function veredictoTerminado(terminadoEl: string, fechaLimite: string | null, medible: boolean): EstadoPlazo {
+  if (!fechaLimite) return 'SIN_PLAZO';
+  if (!medible) return 'TERMINADO';
+  return terminadoEl <= fechaLimite ? 'CUMPLIDO' : 'INCUMPLIDO';
+}
+
+/**
+ * Clave con la que casa un estado de Desk: la misma normalización que la de los
+ * tipos de servicio (sin mayúsculas, sin tildes y sin espacios repetidos ni
+ * sobrantes), así que «Notificación  Comercial» y «notificacion comercial» son
+ * el mismo estado. Vacía si no hay estado.
+ */
+export function claveEstadoDesk(estado: unknown): string {
+  return claveTipoServicio(estado);
+}
+
+/** El estado tal como se enseña: como lo escribe Desk, sin espacios repetidos ni sobrantes. */
+export function etiquetaEstadoDesk(estado: unknown): string {
+  return String(estado ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Los tipos de estado de Desk (`status_type`), en el orden en que se listan. Cualquier otro valor (o ninguno) va al final. */
+export const TIPOS_ESTADO_DESK: readonly string[] = ['Open', 'On Hold', 'Closed'];
+
+const rangoTipoEstado = (tipo: string | null): number => {
+  const i = tipo === null ? -1 : TIPOS_ESTADO_DESK.indexOf(tipo);
+  return i < 0 ? TIPOS_ESTADO_DESK.length : i;
+};
+
+/**
+ * El orden del bloque «Estados de Desk»: primero los de tipo abierto, después
+ * los de espera y los cerrados; dentro de cada grupo, el que más tickets
+ * abiertos tiene y, a igualdad, por orden alfabético.
+ */
+export function porOrdenEstadosDesk(
+  a: { tipoDesk: string | null; ticketsAbiertos: number; etiqueta: string },
+  b: { tipoDesk: string | null; ticketsAbiertos: number; etiqueta: string },
+): number {
+  return rangoTipoEstado(a.tipoDesk) - rangoTipoEstado(b.tipoDesk) || b.ticketsAbiertos - a.ticketsAbiertos || a.etiqueta.localeCompare(b.etiqueta, 'es');
+}
+
+/**
+ * Clasifica por su fecha límite, a fecha `hoy` (AAAA-MM-DD), un servicio que
+ * sigue en marcha. Los del trabajo terminado los decide `veredictoTerminado`.
+ */
 export function estadoPlazo(fechaLimite: string | null, hoy: string): EstadoPlazo {
   if (!fechaLimite) return 'SIN_PLAZO';
   return fechaLimite < hoy ? 'VENCIDO' : fechaLimite === hoy ? 'VENCE_HOY' : 'EN_PLAZO';

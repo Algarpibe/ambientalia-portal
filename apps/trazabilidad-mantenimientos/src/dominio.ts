@@ -5,6 +5,7 @@
 export * from '../../hub-api/src/trazabilidad/dominio';
 export type {
   EquipoVista,
+  EstadoDesk,
   FilaImportada,
   PartePlazo,
   PlazoServicio,

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   asignarClaves,
   asuntoSinCodigo,
+  claveEstadoDesk,
   claveSerial,
   claveTipoServicio,
   diasDeTipo,
@@ -11,12 +12,24 @@ import {
   esFechaIso,
   estadoCalibracion,
   estadoPlazo,
+  etiquetaEstadoDesk,
   modeloDeCodigo,
   modeloEdm180,
   partesDeTipo,
+  porOrdenEstadosDesk,
   sumarDias,
   tipoEfectivo,
   TIPOS_COMPUESTOS,
+  ESTADOS_PLAZO,
+  ESTADOS_PLAZO_TERMINADO,
+  ETIQUETA_PLAZO,
+  ETIQUETA_ROL,
+  ROLES_ESTADO,
+  ROL_POR_DEFECTO,
+  esPlazoTerminado,
+  esRolEstado,
+  rolPausaReloj,
+  veredictoTerminado,
 } from './dominio.js';
 
 describe('fechas', () => {
@@ -189,6 +202,92 @@ describe('tipo compuesto «Diagnóstico + Calibración»', () => {
     expect(diasDeTipo('garantia', dias)).toBeNull();
     expect(diasDeTipo('instalacion', dias)).toBeNull();
     expect(diasDeTipo('', dias)).toBeNull();
+  });
+});
+
+describe('estados de Zoho Desk (standby)', () => {
+  it('la clave casa sin mayúsculas, tildes ni espacios repetidos o sobrantes', () => {
+    expect(claveEstadoDesk('Notificación  Comercial')).toBe('notificacion comercial');
+    expect(claveEstadoDesk('Notificación Comercial')).toBe('notificacion comercial');
+    expect(claveEstadoDesk('  NOTIFICACION\tcomercial ')).toBe('notificacion comercial');
+    expect(claveEstadoDesk('Rev./Diagnostico')).toBe('rev./diagnostico');
+    expect(claveEstadoDesk('En Espera de Repuestos')).toBe(claveEstadoDesk('en espera de repuestos '));
+    expect(claveEstadoDesk(null)).toBe('');
+    expect(claveEstadoDesk('   ')).toBe('');
+  });
+
+  it('es la misma normalización que la de los tipos de servicio', () => {
+    for (const s of ['Notificación  Comercial', ' Por Facturar', 'OV asignada', '']) expect(claveEstadoDesk(s)).toBe(claveTipoServicio(s));
+  });
+
+  it('la etiqueta conserva mayúsculas y tildes; sólo se queda sin espacios de más', () => {
+    expect(etiquetaEstadoDesk('  Notificación  Comercial ')).toBe('Notificación Comercial');
+    expect(etiquetaEstadoDesk('Por Facturar')).toBe('Por Facturar');
+    expect(etiquetaEstadoDesk(null)).toBe('');
+  });
+
+  it('orden: abiertos, en espera, cerrados y sin tipo; dentro, más tickets abiertos primero y después alfabético', () => {
+    const e = (etiqueta: string, tipoDesk: string | null, ticketsAbiertos: number) => ({ etiqueta, tipoDesk, ticketsAbiertos });
+    const lista = [
+      e('Finalizado', 'Closed', 0),
+      e('Sin tickets', null, 0),
+      e('Servicio externo', 'On Hold', 1),
+      e('Por Facturar', 'On Hold', 4),
+      e('Ingresado', 'Open', 2),
+      e('En Proceso', 'Open', 2),
+      e('Por Entregar', 'Open', 5),
+      e('Árbol', 'Open', 2),
+    ];
+    expect([...lista].sort(porOrdenEstadosDesk).map((x) => x.etiqueta)).toEqual([
+      'Por Entregar',
+      'Árbol',
+      'En Proceso',
+      'Ingresado',
+      'Por Facturar',
+      'Servicio externo',
+      'Finalizado',
+      'Sin tickets',
+    ]);
+  });
+});
+
+describe('rol de un estado de Desk y estados del plazo', () => {
+  it('hay tres roles, excluyentes, y «cuenta» es el de partida', () => {
+    expect([...ROLES_ESTADO]).toEqual(['cuenta', 'standby', 'terminado']);
+    expect(ROL_POR_DEFECTO).toBe('cuenta');
+    expect(ETIQUETA_ROL).toEqual({ cuenta: 'Cuenta', standby: 'Standby', terminado: 'Trabajo terminado' });
+  });
+
+  it('esRolEstado sólo acepta esos tres textos, tal cual', () => {
+    for (const r of ROLES_ESTADO) expect(esRolEstado(r)).toBe(true);
+    for (const v of ['Standby', ' standby', 'pausa', '', null, undefined, true, 1, ['standby'], {}, 'constructor', 'toString']) expect(esRolEstado(v)).toBe(false);
+  });
+
+  it('pausan el reloj standby y terminado; cuenta, no', () => {
+    expect(ROLES_ESTADO.filter(rolPausaReloj)).toEqual(['standby', 'terminado']);
+  });
+
+  it('el plazo gana tres estados para el trabajo terminado, todos con etiqueta y detrás de los que siguen en marcha', () => {
+    expect([...ESTADOS_PLAZO]).toEqual(['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO', 'INCUMPLIDO', 'CUMPLIDO', 'TERMINADO']);
+    expect([...ESTADOS_PLAZO_TERMINADO]).toEqual(['INCUMPLIDO', 'CUMPLIDO', 'TERMINADO']);
+    expect(Object.keys(ETIQUETA_PLAZO).sort()).toEqual([...ESTADOS_PLAZO].sort());
+    expect(ETIQUETA_PLAZO).toMatchObject({ CUMPLIDO: 'Cumplido', INCUMPLIDO: 'Incumplido', TERMINADO: 'Terminado' });
+    for (const e of ESTADOS_PLAZO) expect(esPlazoTerminado(e)).toBe(ESTADOS_PLAZO_TERMINADO.includes(e));
+  });
+
+  it('veredicto del trabajo terminado: a tiempo, tarde o sin poder medirlo', () => {
+    expect(veredictoTerminado('2026-10-07', '2026-10-08', true)).toBe('CUMPLIDO');
+    expect(veredictoTerminado('2026-10-08', '2026-10-08', true)).toBe('CUMPLIDO');
+    expect(veredictoTerminado('2026-10-09', '2026-10-08', true)).toBe('INCUMPLIDO');
+    // No se vio el cambio: se sabe que está terminado, no desde cuándo.
+    expect(veredictoTerminado('2026-10-07', '2026-10-08', false)).toBe('TERMINADO');
+    expect(veredictoTerminado('2026-10-09', '2026-10-08', false)).toBe('TERMINADO');
+    // Sin fecha límite no hay nada con lo que comparar.
+    expect(veredictoTerminado('2026-10-07', null, true)).toBe('SIN_PLAZO');
+  });
+
+  it('estadoPlazo sigue clasificando sólo lo que está en marcha', () => {
+    expect(['VENCIDO', 'VENCE_HOY', 'EN_PLAZO', 'SIN_PLAZO']).toContain(estadoPlazo('2026-10-08', '2026-10-06'));
   });
 });
 

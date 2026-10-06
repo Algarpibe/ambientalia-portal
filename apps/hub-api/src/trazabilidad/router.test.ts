@@ -23,14 +23,18 @@ vi.mock('../db.js', () => ({
 }));
 
 const { createTrazabilidadRouter } = await import('./router.js');
+const { reiniciarRegistroEstados } = await import('./registro-estados.js');
 
 const queries: string[] = [];
+/** Veces que se ha pedido una conexión para una transacción (sólo la pide el registro de estados). */
+const conexiones = { n: 0 };
 const fakePool = {
   query: async (sql: string) => {
     queries.push(sql);
     return { rows: [], rowCount: 0 };
   },
   connect: async () => {
+    conexiones.n++;
     throw new Error('sin transacciones en este test');
   },
 } as unknown as Pool;
@@ -52,6 +56,7 @@ const auth = (t = tokenFor()) => ({ Authorization: `Bearer ${t}` });
 
 beforeEach(() => {
   queries.length = 0;
+  conexiones.n = 0;
 });
 
 describe('guardas', () => {
@@ -189,6 +194,114 @@ describe('tipo de servicio puesto a mano', () => {
       expect(res.body.message).toMatch(/ticket/i);
     }
     expect(queries.some((q) => /INSERT|DELETE|UPDATE/.test(q))).toBe(false);
+  });
+});
+
+describe('estados de Desk (rol en el reloj)', () => {
+  const put = (body: unknown, t = auth()) => request(app()).put('/api/trazabilidad/estados').set(t).send(body as object);
+
+  it('401 sin token y 403 sin la app, en el GET y en el PUT', async () => {
+    expect((await request(app()).get('/api/trazabilidad/estados')).status).toBe(401);
+    expect((await request(app()).put('/api/trazabilidad/estados').send({ estado: 'Servicio externo', rol: 'standby' })).status).toBe(401);
+    expect((await request(app()).get('/api/trazabilidad/estados').set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect((await put({ estado: 'Servicio externo', rol: 'standby' }, auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it('GET: 200 con la lista', async () => {
+    const res = await request(app()).get('/api/trazabilidad/estados').set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ estados: [] });
+  });
+
+  it.each([undefined, null, '', '   ', 3, true, ['Servicio externo'], { a: 1 }])('estado no válido (%j) → 400 en «estado» y ninguna consulta', async (estado) => {
+    const res = await put({ estado, rol: 'standby' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_input');
+    expect(res.body.field).toBe('estado');
+    expect(queries).toEqual([]);
+  });
+
+  it('un estado de más de 80 caracteres → 400 en «estado»; con 80 justos vale', async () => {
+    const largo = await put({ estado: 'x'.repeat(81), rol: 'standby' });
+    expect(largo.status).toBe(400);
+    expect(largo.body.field).toBe('estado');
+    expect(largo.body.message).toMatch(/80 caracteres/);
+    expect(queries).toEqual([]);
+    expect((await put({ estado: 'x'.repeat(80), rol: 'standby' })).status).toBe(200);
+  });
+
+  it.each([undefined, null, true, false, 1, 0, '', 'Standby', ' standby', 'STANDBY', 'pausa', 'trabajo terminado', 'constructor', ['standby'], { rol: 'standby' }])(
+    'rol que no es uno de los tres (%j) → 400 en «rol» y ninguna consulta',
+    async (rol) => {
+      const res = await put({ estado: 'Servicio externo', rol });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_input');
+      expect(res.body.field).toBe('rol');
+      expect(res.body.message).toMatch(/«cuenta», «standby» o «terminado»/);
+      expect(queries).toEqual([]);
+    },
+  );
+
+  it('el booleano de antes ya no vale: {estado, standby} → 400 en «rol»', async () => {
+    const res = await put({ estado: 'Servicio externo', standby: true });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('rol');
+    expect(queries).toEqual([]);
+  });
+
+  it('un cuerpo que no es un objeto → 400', async () => {
+    expect((await put([])).status).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it.each(['cuenta', 'standby', 'terminado'])('rol «%s» → 200 con la lista entera; vale un estado que ningún ticket usa todavía', async (rol) => {
+    const res = await put({ estado: 'Estado que aún no existe', rol });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ estados: [] });
+    expect(queries.some((q) => /INSERT INTO portal\.tmc_estados_desk/.test(q))).toBe(true);
+  });
+
+  it('servicios: sigue respondiendo 200 al leer también los roles de los estados y el historial', async () => {
+    const res = await request(app()).get('/api/trazabilidad/servicios?hoy=2026-10-06').set(auth());
+    expect(res.status).toBe(200);
+    expect(queries.some((q) => /portal\.tmc_estados_desk/.test(q))).toBe(true);
+    expect(queries.some((q) => /portal\.tmc_estados_historial/.test(q))).toBe(true);
+  });
+});
+
+// Al pedir los servicios se apuntan antes los cambios de estado, para que la
+// vista esté al día. Es «si se puede»: si falla, la petición sigue.
+describe('servicios: apuntar los estados al leer', () => {
+  beforeEach(() => {
+    reiniciarRegistroEstados();
+  });
+
+  it('lo intenta antes de leer y, si falla, responde igual y lo deja en el registro de errores', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // El doble no da conexiones: el registro (que va en una transacción) revienta.
+      const res = await request(app()).get('/api/trazabilidad/servicios?hoy=2026-10-06').set(auth());
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ hoy: '2026-10-06', servicios: [], tipos: [] });
+      expect(conexiones.n).toBe(1);
+      expect(error).toHaveBeenCalledWith(expect.stringMatching(/tmc_registrar_estados/), expect.any(Error));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('un «hoy» mal formado corta antes: 400 y ni se intenta', async () => {
+    const res = await request(app()).get('/api/trazabilidad/servicios?hoy=ayer').set(auth());
+    expect(res.status).toBe(400);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it('sólo el GET lo hace: poner un tipo a mano no apunta nada', async () => {
+    await request(app()).put('/api/trazabilidad/servicios/962/tipo').set(auth()).send({ tipo: 'Diagnóstico' });
+    await request(app()).get('/api/trazabilidad/estados').set(auth());
+    await request(app()).get('/api/trazabilidad/equipos').set(auth());
+    expect(conexiones.n).toBe(0);
   });
 });
 

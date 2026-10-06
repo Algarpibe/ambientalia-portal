@@ -1,18 +1,35 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 045). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 047). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
-import { asignarClaves, asuntoSinCodigo, claveTipoServicio, diasDeTipo, estadoCalibracion, modeloDeCodigo, partesDeTipo, tipoEfectivo } from './dominio.js';
-import { calcularPlazo, calcularTramos } from './plazos.js';
+import {
+  asignarClaves,
+  asuntoSinCodigo,
+  claveEstadoDesk,
+  claveTipoServicio,
+  diasDeTipo,
+  esRolEstado,
+  estadoCalibracion,
+  etiquetaEstadoDesk,
+  modeloDeCodigo,
+  partesDeTipo,
+  porOrdenEstadosDesk,
+  ROL_POR_DEFECTO,
+  tipoEfectivo,
+  type RolEstado,
+} from './dominio.js';
+import { calcularReloj, type IntervaloEstado } from './plazos.js';
 import {
   TzError,
   errorPlazoDerivado,
   type Actor,
+  type CambioEstadoDesk,
   type CambioPlazo,
   type EquipoVista,
+  type EstadoDesk,
   type FilaImportada,
   type Importacion,
   type PartePlazo,
@@ -179,12 +196,19 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
  * enseña con la etiqueta que tenga hoy en Configuración (la guardada, si su
  * fila ya no existe).
  *
+ * El plazo descuenta el tiempo en pausa (`calcularReloj`, plazos.ts). El rol
+ * del estado que el ticket tiene AHORA (portal.tmc_estados_desk, por
+ * `claveEstadoDesk`) dice si el reloj corre, está en pausa (standby) o está
+ * parado (trabajo terminado); cuánto estuvo en cada estado sale de sus tramos
+ * en portal.tmc_estados_historial, leídos con el rol que cada estado tiene
+ * hoy. Aquí sólo se lee: quien apunta los tramos es `registrarEstados`.
+ *
  * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
  * Colombia de created_time. El cliente es la cuenta de Desk que viaja en `raw`
  * y, si no viene, el asunto sin el código de servicio.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
-  const [{ rows }, { tipos, plazos }] = await Promise.all([
+  const [{ rows }, { tipos, plazos }, conRol, historial] = await Promise.all([
     db.query(
       `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
               COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
@@ -198,8 +222,32 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
         ORDER BY t.number DESC`,
     ),
     cargarTipos(db),
+    db.query(`SELECT clave, rol FROM portal.tmc_estados_desk`),
+    // Los instantes viajan como milisegundos desde la época: sin depender del parser de fechas del driver.
+    db.query(
+      `SELECT h.numero, h.clave, h.desde_real,
+              (extract(epoch FROM h.desde) * 1000)::float8 AS desde_ms,
+              (extract(epoch FROM h.hasta) * 1000)::float8 AS hasta_ms
+         FROM portal.tmc_estados_historial h
+        WHERE h.numero IN (SELECT t.number FROM desk.tickets t WHERE ${TICKET_ABIERTO})`,
+    ),
   ]);
   const porClave = new Map(tipos.map((t) => [t.clave, t]));
+  const roles = new Map<string, RolEstado>();
+  for (const r of conRol.rows as Row[]) if (esRolEstado(r.rol)) roles.set(r.clave, r.rol);
+  const rolDe = (clave: string): RolEstado => roles.get(clave) ?? ROL_POR_DEFECTO;
+  const tramosDe = new Map<number, IntervaloEstado[]>();
+  for (const r of historial.rows as Row[]) {
+    const numero = Number(r.numero);
+    const lista = tramosDe.get(numero) ?? [];
+    lista.push({
+      clave: r.clave,
+      desde: Math.round(Number(r.desde_ms)),
+      hasta: r.hasta_ms === null ? null : Math.round(Number(r.hasta_ms)),
+      desdeReal: r.desde_real === true,
+    });
+    tramosDe.set(numero, lista);
+  }
   return (rows as Row[]).map((r) => {
     const manualClave: string | null = r.manual_clave ?? null;
     const tipoDesk = String(r.tipo_servicio ?? '').trim();
@@ -209,8 +257,18 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
     const plazoDias = plazos.dias(claveTipo);
     const partes = plazos.partes(claveTipo);
     const cuenta = String(r.cuenta ?? '').trim();
+    const numero = Number(r.number);
+    const reloj = calcularReloj({
+      ingreso: r.ingreso,
+      dias: plazoDias,
+      partes,
+      hoy,
+      rolActual: rolDe(claveEstadoDesk(r.status)),
+      intervalos: tramosDe.get(numero) ?? [],
+      rolDe,
+    });
     return {
-      numero: Number(r.number),
+      numero,
       asunto: String(r.subject ?? '').trim(),
       cliente: cuenta || asuntoSinCodigo(r.subject, r.codigo_servicio),
       clienteDeAsunto: !cuenta,
@@ -223,8 +281,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
       estado: r.status,
       ingreso: r.ingreso,
       plazoDias,
-      ...calcularPlazo(r.ingreso, plazoDias, hoy),
-      tramos: partes ? calcularTramos(r.ingreso, partes) : null,
+      ...reloj,
       sinConfirmar: r.sin_confirmar === true,
     };
   });
@@ -334,6 +391,168 @@ export async function guardarPlazo(db: Db, c: CambioPlazo, actor: Actor): Promis
        actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [claveTipoServicio(c.tipo), c.tipo.trim(), c.dias, actor.userId, actor.email],
   );
+}
+
+/** Suma un voto a `valor` y devuelve el mapa (recuento de grafías o de tipos de un estado). */
+function votar(votos: Map<string, number>, valor: string, n: number): Map<string, number> {
+  votos.set(valor, (votos.get(valor) ?? 0) + n);
+  return votos;
+}
+
+/** El valor más votado; a igualdad, el primero por orden alfabético. Null si no hay votos. */
+function masVotado(votos: Map<string, number>): string | null {
+  let mejor: string | null = null;
+  for (const [valor, n] of votos) {
+    const m = mejor === null ? -1 : votos.get(mejor)!;
+    if (n > m || (n === m && valor.localeCompare(mejor!, 'es') < 0)) mejor = valor;
+  }
+  return mejor;
+}
+
+/**
+ * Los estados de Desk con su rol en el reloj del plazo (bloque «Estados de
+ * Desk» de «Configuración»): todos los que existen en desk.tickets —de
+ * cualquier ticket, cerrados incluidos— más los que ya estén guardados en
+ * portal.tmc_estados_desk aunque ningún ticket los tenga ahora.
+ *
+ * Casan por `claveEstadoDesk`, y eso se hace aquí y no en SQL (sin `unaccent`):
+ * varias grafías del mismo estado suman en una sola fila, que se enseña con la
+ * grafía más usada y con el tipo de Desk de la mayoría de sus tickets. Sólo
+ * cuentan como abiertos los tickets sin cerrar. Un estado sin fila guardada
+ * vale «cuenta»: nada nace en standby ni terminado. Leer no escribe.
+ */
+export async function listarEstadosDesk(db: Db): Promise<EstadoDesk[]> {
+  const [guardados, enTickets] = await Promise.all([
+    db.query(`SELECT clave, etiqueta, rol, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_estados_desk`),
+    db.query(
+      `SELECT t.status AS estado, t.status_type AS tipo, count(*)::int AS n,
+              (count(*) FILTER (WHERE ${TICKET_ABIERTO}))::int AS abiertos
+         FROM desk.tickets t
+        GROUP BY t.status, t.status_type`,
+    ),
+  ]);
+  const m = new Map<string, EstadoDesk>();
+  for (const r of guardados.rows as Row[]) {
+    m.set(r.clave, {
+      clave: r.clave,
+      etiqueta: r.etiqueta,
+      tipoDesk: null,
+      ticketsAbiertos: 0,
+      rol: esRolEstado(r.rol) ? r.rol : ROL_POR_DEFECTO,
+      actualizadoPor: r.actualizado_por,
+      actualizadoEn: r.actualizado_en,
+    });
+  }
+  const grafias = new Map<string, Map<string, number>>();
+  const tipos = new Map<string, Map<string, number>>();
+  for (const r of enTickets.rows as Row[]) {
+    const clave = claveEstadoDesk(r.estado);
+    if (!clave) continue;
+    const e = m.get(clave) ?? { clave, etiqueta: '', tipoDesk: null, ticketsAbiertos: 0, rol: ROL_POR_DEFECTO, actualizadoPor: null, actualizadoEn: null };
+    e.ticketsAbiertos += Number(r.abiertos);
+    m.set(clave, e);
+    grafias.set(clave, votar(grafias.get(clave) ?? new Map(), etiquetaEstadoDesk(r.estado), Number(r.n)));
+    const tipo = String(r.tipo ?? '').trim();
+    if (tipo) tipos.set(clave, votar(tipos.get(clave) ?? new Map(), tipo, Number(r.n)));
+  }
+  // Lo que diga Desk hoy manda sobre la etiqueta guardada; el tipo sólo lo sabe Desk.
+  for (const [clave, e] of m) {
+    e.etiqueta = masVotado(grafias.get(clave) ?? new Map()) ?? e.etiqueta;
+    e.tipoDesk = masVotado(tipos.get(clave) ?? new Map());
+  }
+  return [...m.values()].sort(porOrdenEstadosDesk);
+}
+
+/**
+ * Elige el rol de un estado de Desk (cuenta, standby o terminado) y lo firma.
+ * Casa por clave normalizada, así que cualquier grafía toca la misma fila;
+ * vale también un estado que ningún ticket use todavía. Volver a «cuenta» no
+ * borra la fila: queda quién lo hizo y cuándo. Un rol que no sea de los tres
+ * lo rechaza la tabla (y antes, `parseEstadoDesk`).
+ *
+ * No toca el historial: los tramos guardan el estado, no el rol, así que el
+ * cambio vale también hacia atrás desde la lectura siguiente.
+ */
+export async function guardarEstadoDesk(db: Db, c: CambioEstadoDesk, actor: Actor): Promise<void> {
+  await db.query(
+    `INSERT INTO portal.tmc_estados_desk (clave, etiqueta, rol, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (clave) DO UPDATE SET
+       etiqueta = EXCLUDED.etiqueta, rol = EXCLUDED.rol, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [claveEstadoDesk(c.estado), etiquetaEstadoDesk(c.estado), c.rol, actor.userId, actor.email],
+  );
+}
+
+/**
+ * Apunta en portal.tmc_estados_historial los cambios de estado de los tickets
+ * de Desk. La réplica sólo trae el estado de AHORA, así que el tiempo en cada
+ * estado lo mide el portal: esta función se llama cada pocos minutos
+ * (registro-estados.ts) y deja, por ticket sin cerrar, un tramo abierto con su
+ * estado.
+ *
+ *  - ticket sin tramo abierto → abre uno, marcado como «no se vio empezar»
+ *    (`desde_real` FALSE): es la primera vez que se ve, ya estaba así;
+ *  - ticket cuyo estado ya no es el de su tramo abierto → cierra ese tramo y
+ *    abre otro en el mismo instante, éste sí como cambio visto;
+ *  - ticket cerrado en Desk, o que ya no está en la réplica → cierra su tramo
+ *    y no abre otro.
+ *
+ * El estado casa por `claveEstadoDesk` (por eso se compara aquí y no en SQL):
+ * otra grafía del mismo estado no es un cambio. El rol del estado no se
+ * apunta: se mira al leer.
+ *
+ * Idempotente y segura con llamadas a la vez. Todo va en una transacción que
+ * primero se pone en fila con un bloqueo de la base (la segunda llamada espera
+ * a la primera y ya no encuentra nada que apuntar); y, aun sin él, las
+ * escrituras no pisan: sólo se cierra un tramo que siga abierto y el alta se
+ * apoya en el índice único parcial (un tramo abierto por ticket) con
+ * ON CONFLICT DO NOTHING. Devuelve cuántos tramos abrió y cuántos cerró.
+ */
+export async function registrarEstados(db: Pool): Promise<{ abiertos: number; cerrados: number }> {
+  return withTransaction(db, async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_estados_historial'))`);
+    // El instante de esta pasada, tomado YA con el bloqueo (NOW() es el del BEGIN, anterior a la espera: una
+    // pasada que esperó podría cerrar un tramo antes de su comienzo). Como texto, para no perder microsegundos;
+    // el mismo valor cierra el tramo viejo y abre el nuevo, así que no queda hueco entre los dos.
+    const reloj = await c.query(`SELECT clock_timestamp()::text AS ahora`);
+    const instante: string = (reloj.rows[0] as Row).ahora;
+    const tickets = await c.query(`SELECT t.number, t.status FROM desk.tickets t WHERE ${TICKET_ABIERTO} AND t.number IS NOT NULL AND t.number > 0`);
+    const abiertos = await c.query(`SELECT id::text AS id, numero, clave FROM portal.tmc_estados_historial WHERE hasta IS NULL`);
+
+    const ahora = new Map<number, string>((tickets.rows as Row[]).map((r) => [Number(r.number), String(r.status ?? '')]));
+    const cerrar: string[] = [];
+    const enSuEstado = new Set<number>();
+    const cambian = new Set<number>();
+    for (const r of abiertos.rows as Row[]) {
+      const numero = Number(r.numero);
+      const estado = ahora.get(numero);
+      if (estado !== undefined && claveEstadoDesk(estado) === r.clave) enSuEstado.add(numero);
+      else {
+        cerrar.push(r.id);
+        if (estado !== undefined) cambian.add(numero);
+      }
+    }
+    const abrir = [...ahora].filter(([numero]) => !enSuEstado.has(numero));
+
+    let cerrados = 0;
+    if (cerrar.length > 0) {
+      const r = await c.query(`UPDATE portal.tmc_estados_historial SET hasta = GREATEST($2::timestamptz, desde) WHERE id = ANY($1::bigint[]) AND hasta IS NULL`, [cerrar, instante]);
+      cerrados = r.rowCount ?? 0;
+    }
+    let nuevos = 0;
+    if (abrir.length > 0) {
+      const r = await c.query(
+        `INSERT INTO portal.tmc_estados_historial (numero, clave, etiqueta, desde, hasta, desde_real)
+         SELECT x.numero, x.clave, x.etiqueta, $5::timestamptz, NULL, x.desde_real
+           FROM unnest($1::int[], $2::text[], $3::text[], $4::boolean[]) AS x(numero, clave, etiqueta, desde_real)
+         ON CONFLICT (numero) WHERE hasta IS NULL DO NOTHING`,
+        [abrir.map(([numero]) => numero), abrir.map(([, e]) => claveEstadoDesk(e)), abrir.map(([, e]) => etiquetaEstadoDesk(e)), abrir.map(([numero]) => cambian.has(numero)), instante],
+      );
+      nuevos = r.rowCount ?? 0;
+    }
+    return { abiertos: nuevos, cerrados };
+  });
 }
 
 const COLS_IMPORT =`id, archivo, total, nuevos, actualizados, retirados, por, en::text AS en`;
