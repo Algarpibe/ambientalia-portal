@@ -22,7 +22,7 @@ import Importar from './vistas/Importar';
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
   { id: 'equipos', label: 'Equipos' },
-  { id: 'calendario', label: 'Calendario' },
+  { id: 'calendario', label: 'Calendario Calibraciones' },
   { id: 'avisos', label: 'Avisos a clientes' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
