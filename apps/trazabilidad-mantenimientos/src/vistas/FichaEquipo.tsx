@@ -71,6 +71,13 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
           {e.serialRepetido && <Tag tone="amber">Serial repetido en la F-ST-022</Tag>}
         </div>
 
+        {e.ticket && (
+          <Alert tone={e.ticket.sinConfirmar ? 'amber' : 'blue'} title={`En servicio · ticket ${e.ticket.numero}`}>
+            <p>Estado en Zoho Desk: {e.ticket.estado}</p>
+            {e.ticket.sinConfirmar && <p className="mt-1">Sin confirmar: Desk lleva más de un día sin actualizar este ticket, así que puede estar ya cerrado.</p>}
+          </Alert>
+        )}
+
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
           {datos.map(([k, v]) => (
             <div key={k} className="contents">

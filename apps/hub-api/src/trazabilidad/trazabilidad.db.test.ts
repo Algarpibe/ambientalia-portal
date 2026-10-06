@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { poolDePrueba } from '../test-db/harness.js';
+import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import * as repo from './repo.js';
 import type { FilaImportada } from './types.js';
 
@@ -26,14 +26,15 @@ const fila = (serial: string, cliente: string, ultimaCalibracion: string | null,
   ...extra,
 });
 
-beforeAll(() => {
+beforeAll(async () => {
   db = poolDePrueba();
+  await asegurarDeskTickets(db);
 });
 afterAll(async () => {
   await db?.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones RESTART IDENTITY');
+  await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, desk.tickets RESTART IDENTITY');
 });
 
 describe('importar', () => {
@@ -95,5 +96,72 @@ describe('seguimiento y avisos', () => {
     const eq = await repo.listarEquipos(db, hoy);
     expect(eq.find((e) => e.clave === 'B1')!.seguimiento).toMatchObject({ avisoEnviado: '2026-10-06', servicioProgramado: '2026-11-03', nota: 'OK' });
     expect(eq.find((e) => e.clave === 'B2')!.seguimiento).toMatchObject({ avisoEnviado: '2026-10-06', enAmbientalia: false, nota: '' });
+  });
+});
+
+// El cruce con Zoho Desk: la réplica desk.tickets la escribe el worker de
+// zoho-hub y aquí sólo se lee. `haceHoras` fija la última sincronización
+// (null = nunca sincronizado).
+describe('ticket abierto en Desk', () => {
+  const ticket = (numero: number, serial: string | null, statusType: string | null, estado = 'En diagnóstico', haceHoras: number | null = 1) =>
+    db.query(
+      `INSERT INTO desk.tickets (number, status, status_type, serial, synced_at)
+       VALUES ($1, $2, $3, $4, NOW() - make_interval(hours => $5::int))`,
+      [numero, estado, statusType, serial, haceHoras],
+    );
+  const ticketDe = async (clave: string) => (await repo.listarEquipos(db, hoy)).find((e) => e.clave === clave)!.ticket;
+
+  beforeEach(async () => {
+    await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00002', 'Cliente Dos', '2025-10-20')] }, actor, false);
+  });
+
+  it('sin tickets, el equipo no lleva ticket', async () => {
+    expect(await ticketDe('18A00001')).toBeNull();
+  });
+
+  it('un ticket abierto llega con su número y su estado de Desk', async () => {
+    await ticket(962, '18A00001', 'Open');
+    expect(await ticketDe('18A00001')).toEqual({ numero: 962, estado: 'En diagnóstico', sinConfirmar: false });
+    expect(await ticketDe('18A00002')).toBeNull();
+  });
+
+  it('«On Hold» y un tipo de estado vacío cuentan como abiertos', async () => {
+    await ticket(963, '18A00001', 'On Hold', 'Esperando repuesto');
+    await ticket(964, '18A00002', null, 'Nuevo');
+    expect(await ticketDe('18A00001')).toMatchObject({ numero: 963, estado: 'Esperando repuesto' });
+    expect(await ticketDe('18A00002')).toMatchObject({ numero: 964 });
+  });
+
+  it('un ticket cerrado se ignora, y uno sin serial no casa con nadie', async () => {
+    await ticket(965, '18A00001', 'Closed', 'Cerrado');
+    await ticket(966, null, 'Open');
+    await ticket(967, '   ', 'Open');
+    expect(await ticketDe('18A00001')).toBeNull();
+    expect(await ticketDe('18A00002')).toBeNull();
+  });
+
+  it('el serial casa sin distinguir mayúsculas ni espacios', async () => {
+    await ticket(968, '  18a00001 ', 'Open');
+    expect(await ticketDe('18A00001')).toMatchObject({ numero: 968 });
+  });
+
+  it('sincronizado hace más de un día, o nunca → sin confirmar', async () => {
+    await ticket(969, '18A00001', 'Open', 'En diagnóstico', 30);
+    await ticket(970, '18A00002', 'Open', 'En diagnóstico', null);
+    expect(await ticketDe('18A00001')).toEqual({ numero: 969, estado: 'En diagnóstico', sinConfirmar: true });
+    expect(await ticketDe('18A00002')).toMatchObject({ numero: 970, sinConfirmar: true });
+  });
+
+  it('con dos tickets abiertos gana el de número más alto; uno cerrado posterior no cuenta', async () => {
+    await ticket(971, '18A00001', 'Open', 'En diagnóstico', 30);
+    await ticket(972, '18A00001', 'On Hold', 'Esperando repuesto');
+    await ticket(973, '18A00001', 'Closed', 'Cerrado');
+    expect(await ticketDe('18A00001')).toEqual({ numero: 972, estado: 'Esperando repuesto', sinConfirmar: false });
+  });
+
+  it('no multiplica filas: un equipo con varios tickets sale una sola vez', async () => {
+    await ticket(974, '18A00001', 'Open');
+    await ticket(975, '18A00001', 'Open');
+    expect((await repo.listarEquipos(db, hoy)).map((e) => e.clave)).toEqual(['18A00002', '18A00001']);
   });
 });

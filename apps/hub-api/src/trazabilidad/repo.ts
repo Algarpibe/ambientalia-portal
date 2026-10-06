@@ -33,15 +33,36 @@ const COLS_EQUIPO = `
   e.ultima_entrada::text AS ultima_entrada, e.ultima_calibracion::text AS ultima_calibracion,
   e.entradas_st, e.calibraciones_periodo, e.correctivos_periodo, e.activo`;
 
-/** Equipos activos con su seguimiento y el estado calculado a fecha `hoy`. */
+/**
+ * Equipos activos con su seguimiento, el estado calculado a fecha `hoy` y el
+ * ticket abierto en Zoho Desk, si lo hay.
+ *
+ * El ticket sale de la réplica desk.tickets (la escribe el worker de zoho-hub;
+ * aquí sólo se lee) cruzando por serial sin mayúsculas ni espacios. Abierto =
+ * cualquier tipo de estado que no sea 'Closed'. El LATERAL con LIMIT 1 se queda
+ * con el de número más alto y no multiplica filas. Si la réplica lleva más de
+ * un día sin refrescarlo (el worker a veces deja de tocar tickets viejos) no se
+ * oculta: se marca «sin confirmar».
+ */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
   const { rows } = await db.query(
     `SELECT ${COLS_EQUIPO},
             s.clave IS NOT NULL AS tiene_seg, s.en_ambientalia, s.aviso_enviado::text AS aviso_enviado,
             s.servicio_programado::text AS servicio_programado, s.nota, s.actualizado_por,
-            s.actualizado_en::text AS seg_en
+            s.actualizado_en::text AS seg_en,
+            tk.number AS ticket_numero, tk.status AS ticket_estado, tk.sin_confirmar AS ticket_sin_confirmar
        FROM portal.tmc_equipos e
        LEFT JOIN portal.tmc_seguimiento s ON s.clave = e.clave
+       LEFT JOIN LATERAL (
+              SELECT t.number, t.status,
+                     (t.synced_at IS NULL OR t.synced_at < NOW() - INTERVAL '1 day') AS sin_confirmar
+                FROM desk.tickets t
+               WHERE t.status_type IS DISTINCT FROM 'Closed'
+                 AND trim(t.serial) <> ''
+                 AND upper(trim(t.serial)) = upper(trim(e.serial))
+               ORDER BY t.number DESC
+               LIMIT 1
+            ) tk ON TRUE
       WHERE e.activo
       ORDER BY e.cliente, e.serial`,
   );
@@ -72,6 +93,10 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
           actualizadoEn: r.seg_en,
         }
       : null,
+    ticket:
+      r.ticket_numero === null || r.ticket_numero === undefined
+        ? null
+        : { numero: Number(r.ticket_numero), estado: r.ticket_estado, sinConfirmar: r.ticket_sin_confirmar === true },
   }));
 }
 

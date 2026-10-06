@@ -58,6 +58,15 @@ export interface SeguimientoGuardado extends Seguimiento {
   actualizadoEn: string;
 }
 
+/** Ticket de servicio abierto en Zoho Desk para el serial del equipo (réplica desk.tickets). */
+export interface TicketDesk {
+  numero: number;
+  /** Estado tal como lo nombra Desk. */
+  estado: string;
+  /** True si la réplica lleva más de un día sin refrescar el ticket: puede estar ya cerrado. */
+  sinConfirmar: boolean;
+}
+
 export interface EquipoVista {
   clave: string;
   serial: string;
@@ -77,6 +86,8 @@ export interface EquipoVista {
   /** True si el serial aparece en más de una fila de la hoja. */
   serialRepetido: boolean;
   seguimiento: SeguimientoGuardado | null;
+  /** El ticket abierto de número más alto, o null si no hay ninguno. */
+  ticket: TicketDesk | null;
 }
 
 export interface ResumenImportacion {

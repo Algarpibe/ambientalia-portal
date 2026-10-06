@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type EstadoCalibracion } from '../dominio';
-import { conteoPorEstado, fmtFecha } from '../lib/vistas';
-import { EstadoBadge, TONO, Tag } from '../ui';
+import { conteoPorEstado, enServicio, fmtFecha } from '../lib/vistas';
+import { EstadoBadge, TONO, Tag, TicketTag } from '../ui';
 
 export interface Filtro {
   estados: EstadoCalibracion[];
@@ -49,7 +49,8 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
         (e) =>
           (filtro.estados.length === 0 || filtro.estados.includes(e.estado)) &&
           (!filtro.cliente || e.cliente === filtro.cliente) &&
-          (!filtro.enAmbientalia || e.seguimiento?.enAmbientalia) &&
+          // «En Ambientalia» = marcado a mano o con ticket abierto en Desk.
+          (!filtro.enAmbientalia || enServicio(e)) &&
           (!q || e.serial.toLowerCase().includes(q)),
       )
       .sort((a, b) => {
@@ -155,10 +156,11 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-gray-500">{fmtFecha(e.ultimaEntrada)}</td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-1">
+                    {e.ticket && <TicketTag ticket={e.ticket} />}
                     {e.seguimiento?.enAmbientalia && <Tag tone="blue">En Ambientalia</Tag>}
                     {e.seguimiento?.avisoEnviado && <Tag>Avisado {fmtFecha(e.seguimiento.avisoEnviado)}</Tag>}
                     {e.seguimiento?.servicioProgramado && <Tag>Prog. {fmtFecha(e.seguimiento.servicioProgramado)}</Tag>}
-                    {!e.seguimiento?.enAmbientalia && !e.seguimiento?.avisoEnviado && !e.seguimiento?.servicioProgramado && <span className="text-gray-300">—</span>}
+                    {!enServicio(e) && !e.seguimiento?.avisoEnviado && !e.seguimiento?.servicioProgramado && <span className="text-gray-300">—</span>}
                   </div>
                 </td>
               </tr>

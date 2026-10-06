@@ -9,4 +9,5 @@ export type {
   ResumenImportacion,
   Seguimiento,
   SeguimientoGuardado,
+  TicketDesk,
 } from '../../hub-api/src/trazabilidad/types';

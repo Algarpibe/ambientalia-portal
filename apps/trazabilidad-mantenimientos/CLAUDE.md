@@ -46,13 +46,29 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/trazabilidad/equipos` (`?hoy=`) | Equipos activos con estado y seguimiento + última importación |
+| GET | `/trazabilidad/equipos` (`?hoy=`) | Equipos activos con estado, seguimiento y `ticket` (el abierto en Zoho Desk, o `null`) + última importación |
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
 
 Permisos: cualquiera con la app asignada lee, importa y registra seguimiento; todo queda firmado
 con su correo.
+
+## Cruce con Zoho Desk (ticket abierto)
+
+`listarEquipos` (`repo.ts`) cruza cada equipo con la réplica `desk.tickets` —la escribe el worker
+de zoho-hub; hub-api sólo la lee y no tiene migración para ella— y devuelve
+`ticket: { numero, estado, sinConfirmar } | null`.
+
+- Abierto = `status_type` distinto de `'Closed'` y con serial. Cruce por serial sin mayúsculas ni
+  espacios; con varios abiertos gana el de `number` más alto.
+- **«Sin confirmar»**: si `synced_at` tiene más de un día (o es NULL) el ticket no se oculta, se
+  marca `sinConfirmar` (el worker a veces deja de refrescar tickets viejos y puede estar ya cerrado).
+- En la UI, `enServicio(e)` (`src/lib/vistas.ts`) = «en Ambientalia» a mano **o** con ticket abierto:
+  esos equipos no entran en los avisos a clientes y sí en el filtro e indicador «En Ambientalia».
+  El campo manual no se toca.
+- `modelo`, `marca` y `tipo_servicio` de la réplica vienen vacíos: no usarlos.
+- En `test:db` la tabla la crea `asegurarDeskTickets` (`src/test-db/harness.ts`).
 
 ## Pruebas
 

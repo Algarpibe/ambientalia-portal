@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { estadoCalibracion, type EquipoVista, type SeguimientoGuardado } from '../dominio';
+import { estadoCalibracion, type EquipoVista, type SeguimientoGuardado, type TicketDesk } from '../dominio';
 import {
   avisosPorCliente,
   candidatosAviso,
   conteoPorEstado,
+  enServicio,
   fmtFecha,
   mensajeAviso,
   porCliente,
@@ -14,7 +15,7 @@ import {
 
 const HOY = '2026-10-06';
 let n = 0;
-function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<SeguimientoGuardado> | null = null): EquipoVista {
+function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<SeguimientoGuardado> | null = null, ticket: TicketDesk | null = null): EquipoVista {
   const serial = `S${++n}`;
   return {
     clave: serial,
@@ -34,11 +35,14 @@ function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<Segu
     seguimiento: seg
       ? { enAmbientalia: false, avisoEnviado: null, servicioProgramado: null, nota: '', actualizadoPor: 'x', actualizadoEn: '', ...seg }
       : null,
+    ticket,
   };
 }
 
 const vencida = (c: string, s: Partial<SeguimientoGuardado> | null = null) => eq(c, '2025-09-03', s); // vence 2026-09-03
 const vence11 = (c: string) => eq(c, '2025-10-17'); // vence 2026-10-17
+const TICKET: TicketDesk = { numero: 962, estado: 'En diagnóstico', sinConfirmar: false };
+const conTicket = (c: string, t: Partial<TicketDesk> = {}) => eq(c, '2025-09-03', null, { ...TICKET, ...t }); // vencida y con ticket abierto
 const vence57 = (c: string) => eq(c, '2025-12-02'); // vence 2026-12-02
 const alDia = (c: string) => eq(c, '2026-08-01');
 const fuera = (c: string) => eq(c, '2024-03-26');
@@ -76,6 +80,20 @@ describe('por cliente y avisos', () => {
     const L = [vencida('A'), vence11('A'), vence57('A'), vencida('B', { enAmbientalia: true }), alDia('C'), fuera('D')];
     expect(candidatosAviso(L, 30).map((e) => e.vigenciaDias)).toEqual([-33, 11]);
     expect(candidatosAviso(L, 60)).toHaveLength(3);
+  });
+
+  it('candidatos: un ticket abierto en Desk excluye igual que «en Ambientalia», confirmado o no', () => {
+    const L = [vencida('A'), conTicket('A'), conTicket('B', { sinConfirmar: true })];
+    expect(candidatosAviso(L, 90)).toEqual([L[0]]);
+    expect(avisosPorCliente(L, 90).map((g) => [g.cliente, g.equipos.length])).toEqual([['A', 1]]);
+  });
+
+  it('en servicio: marcado a mano o con ticket abierto', () => {
+    expect(enServicio(vencida('A'))).toBe(false);
+    expect(enServicio(vencida('A', { enAmbientalia: false }))).toBe(false);
+    expect(enServicio(vencida('A', { enAmbientalia: true }))).toBe(true);
+    expect(enServicio(conTicket('A'))).toBe(true);
+    expect(porCliente([vencida('A', { enAmbientalia: true }), conTicket('A'), vencida('A')])[0].enAmbientalia).toBe(2);
   });
 
   it('agrupa por cliente y cuenta los que no tienen aviso', () => {

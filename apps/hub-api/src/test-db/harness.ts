@@ -15,6 +15,25 @@ export function poolDePrueba(): Pool {
 }
 
 /**
+ * `desk.tickets` NO la crea ninguna migracion de hub-api: es la replica de Zoho
+ * Desk que escribe el worker de zoho-hub, y aqui solo se lee. El contenedor de
+ * prueba nace sin ella, asi que el fichero que la consulte la pide en su
+ * `beforeAll`. Solo las columnas que hub-api lee de verdad (tipos copiados de
+ * produccion); es idempotente, y vaciarla entre tests es cosa de cada fichero.
+ */
+export async function asegurarDeskTickets(db: Pool): Promise<void> {
+  await db.query(`
+    CREATE SCHEMA IF NOT EXISTS desk;
+    CREATE TABLE IF NOT EXISTS desk.tickets (
+      number      integer UNIQUE,
+      status      text NOT NULL,
+      status_type text,
+      serial      text,
+      synced_at   timestamptz
+    )`);
+}
+
+/**
  * Vacia las tablas entre tests.
  *
  * `portal.solicitud_adjuntos` no esta en la lista y se vacia igual: cuelga de

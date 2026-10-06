@@ -81,7 +81,7 @@ export function porCliente(eqs: readonly EquipoVista[]): FilaCliente[] {
     else if (e.estado === 'VENCE_30' || e.estado === 'VENCE_60' || e.estado === 'VENCE_90') f.proximas90++;
     else if (e.estado === 'AL_DIA') f.alDia++;
     else if (e.estado === 'FUERA_CICLO') f.fueraCiclo++;
-    if (e.seguimiento?.enAmbientalia) f.enAmbientalia++;
+    if (enServicio(e)) f.enAmbientalia++;
     m.set(e.cliente, f);
   }
   return [...m.values()].sort(
@@ -93,12 +93,18 @@ export function porCliente(eqs: readonly EquipoVista[]): FilaCliente[] {
 export const porUrgencia = (a: EquipoVista, b: EquipoVista) => (a.vigenciaDias ?? 1e9) - (b.vigenciaDias ?? 1e9);
 
 /**
+ * El equipo ya está en manos de Ambientalia: marcado a mano en su ficha o con
+ * un ticket de servicio abierto en Zoho Desk (aunque esté «sin confirmar»).
+ */
+export const enServicio = (e: EquipoVista): boolean => Boolean(e.seguimiento?.enAmbientalia) || e.ticket !== null;
+
+/**
  * Equipos a avisar: vencidos en el último año o que vencen dentro de `ventana`
- * días, y que NO están ya en Ambientalia.
+ * días, y que NO están ya en servicio (en Ambientalia o con ticket abierto).
  */
 export function candidatosAviso(eqs: readonly EquipoVista[], ventana: number): EquipoVista[] {
   return eqs
-    .filter((e) => ESTADOS_AVISO.includes(e.estado) && (e.vigenciaDias ?? Infinity) <= ventana && !e.seguimiento?.enAmbientalia)
+    .filter((e) => ESTADOS_AVISO.includes(e.estado) && (e.vigenciaDias ?? Infinity) <= ventana && !enServicio(e))
     .sort(porUrgencia);
 }
 

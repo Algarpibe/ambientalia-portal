@@ -1,6 +1,6 @@
 import { ESTADOS, ETIQUETA_ESTADO, ESTADOS_AVISO, type EquipoVista, type EstadoCalibracion } from '../dominio';
-import { MESES, MESES_CORTOS, conteoPorEstado, porCliente, porUrgencia, vencimientosPorMes } from '../lib/vistas';
-import { Card, TONO, Tag } from '../ui';
+import { MESES, MESES_CORTOS, conteoPorEstado, enServicio, porCliente, porUrgencia, vencimientosPorMes } from '../lib/vistas';
+import { Card, TONO, Tag, TicketTag } from '../ui';
 
 const DESCRIPCION: Record<EstadoCalibracion, string> = {
   FUERA_CICLO: 'Más de 2 años sin calibrar',
@@ -26,8 +26,8 @@ interface Props {
 export default function Resumen({ equipos, hoy, onEstados, onCliente, onEnCasa, onMes, onAvisos, onFicha }: Props) {
   const cnt = conteoPorEstado(equipos);
   const total = equipos.length;
-  const enCasa = equipos.filter((e) => e.seguimiento?.enAmbientalia).length;
-  const pidenAviso = equipos.filter((e) => ESTADOS_AVISO.includes(e.estado) && !e.seguimiento?.enAmbientalia);
+  const enCasa = equipos.filter(enServicio).length;
+  const pidenAviso = equipos.filter((e) => ESTADOS_AVISO.includes(e.estado) && !enServicio(e));
   const sinAviso = pidenAviso.filter((e) => !e.seguimiento?.avisoEnviado).length;
   const { atraso, meses } = vencimientosPorMes(equipos, hoy);
   const max = Math.max(atraso, ...meses.map((m) => m.total), 1);
@@ -62,7 +62,7 @@ export default function Resumen({ equipos, hoy, onEstados, onCliente, onEnCasa, 
       </section>
 
       <section className="grid grid-cols-1 gap-2 sm:grid-cols-3" aria-label="Seguimiento">
-        <Indicador valor={enCasa} titulo="En Ambientalia ahora" nota="Marcados como ingresados en el taller" color="bg-blue-500" onClick={onEnCasa} />
+        <Indicador valor={enCasa} titulo="En Ambientalia ahora" nota="Marcados en el taller o con ticket abierto en Desk" color="bg-blue-500" onClick={onEnCasa} />
         <Indicador valor={sinAviso} titulo="Pendientes de aviso" nota="Vencidos o ≤ 90 días, sin aviso registrado" color="bg-orange-500" onClick={onAvisos} />
         <Indicador valor={pidenAviso.length - sinAviso} titulo="Ya avisados" nota="Con fecha de aviso al cliente" color="bg-emerald-500" onClick={onAvisos} />
       </section>
@@ -171,7 +171,7 @@ export function FilaUrgente({ e, onClick }: { e: EquipoVista; onClick: () => voi
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          {e.seguimiento?.enAmbientalia ? <Tag tone="blue">En Ambientalia</Tag> : e.seguimiento?.avisoEnviado ? <Tag>Avisado</Tag> : null}
+          {e.ticket ? <TicketTag ticket={e.ticket} /> : e.seguimiento?.enAmbientalia ? <Tag tone="blue">En Ambientalia</Tag> : e.seguimiento?.avisoEnviado ? <Tag>Avisado</Tag> : null}
           <span className={`text-sm font-semibold tabular-nums ${TONO[e.estado].text}`}>{v < 0 ? `${v} d` : `+${v} d`}</span>
         </span>
       </button>

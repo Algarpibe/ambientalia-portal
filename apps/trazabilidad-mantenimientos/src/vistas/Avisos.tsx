@@ -55,7 +55,7 @@ export default function Avisos({ equipos, hoy, onFicha, onCambio, notificar }: P
           </button>
         ))}
         <p className="text-xs text-gray-500">
-          · {grupos.length} clientes · {nEquipos} equipos · {nSinAviso} sin aviso · no incluye los que ya están en Ambientalia
+          · {grupos.length} clientes · {nEquipos} equipos · {nSinAviso} sin aviso · no incluye los que ya están en Ambientalia ni los que tienen ticket abierto en Desk
         </p>
       </div>
 

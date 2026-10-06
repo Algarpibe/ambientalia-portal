@@ -4,7 +4,7 @@
  */
 import { useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
-import { ETIQUETA_ESTADO, type EstadoCalibracion } from './dominio';
+import { ETIQUETA_ESTADO, type EstadoCalibracion, type TicketDesk } from './dominio';
 
 /** Clases por estado. Literales completos: Tailwind sólo genera las clases que lee tal cual. */
 export const TONO: Record<EstadoCalibracion, { badge: string; dot: string; text: string; bar: string; chip: string }> = {
@@ -29,6 +29,16 @@ export function EstadoBadge({ estado }: { estado: EstadoCalibracion }) {
 export function Tag({ children, tone = 'gray' }: { children: ReactNode; tone?: 'gray' | 'blue' | 'amber' }) {
   const t = { gray: 'bg-gray-100 text-gray-600', blue: 'bg-blue-50 text-blue-700', amber: 'bg-amber-50 text-amber-800' }[tone];
   return <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${t}`}>{children}</span>;
+}
+
+/** Ticket abierto en Zoho Desk. En ámbar si la réplica lleva más de un día sin refrescarlo. */
+export function TicketTag({ ticket }: { ticket: TicketDesk }) {
+  return (
+    <Tag tone={ticket.sinConfirmar ? 'amber' : 'blue'}>
+      En servicio · ticket {ticket.numero}
+      {ticket.sinConfirmar && ' · sin confirmar'}
+    </Tag>
+  );
 }
 
 export function Card({ title, hint, actions, children, className = '' }: { title?: ReactNode; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
