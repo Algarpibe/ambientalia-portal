@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, type PlazoServicio } from '../dominio';
+import { notaDerivado } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { Alert, Button, Card, Loading } from '../ui';
 
@@ -8,7 +9,8 @@ import { Alert, Button, Card, Loading } from '../ui';
  * Configuración: el plazo, en días hábiles, de cada tipo de servicio de Zoho
  * Desk. Con él se calcula la fecha límite de la pestaña «Servicios» (ingreso +
  * plazo). Vacío = ese tipo no tiene plazo. Lo edita cualquiera con la app y
- * cada cambio queda firmado con su correo.
+ * cada cambio queda firmado con su correo. Un tipo compuesto (`derivadoDe`) va
+ * en sólo lectura: su plazo es la suma de los de sus partes.
  */
 interface Props {
   notificar: (msg: string) => void;
@@ -90,6 +92,22 @@ export default function Configuracion({ notificar }: Props) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {plazos.map((p) => {
+              // Tipo compuesto («Diagnóstico + Calibración»): su plazo es la suma de sus partes. Se enseña, no se edita.
+              const derivado = notaDerivado(p);
+              if (derivado) {
+                return (
+                  <tr key={p.clave}>
+                    <td className="px-3 py-2 font-medium text-gray-900">{p.etiqueta}</td>
+                    <td className="px-3 py-2">
+                      <p className={`flex min-h-[44px] items-center text-sm tabular-nums ${derivado.falta ? 'text-gray-400' : 'font-semibold text-gray-900'}`}>{derivado.valor}</p>
+                      <p className={`text-xs ${derivado.falta ? 'text-amber-700' : 'text-gray-500'}`}>{derivado.nota}</p>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">{p.ticketsAbiertos}</td>
+                    <td className="px-3 py-2 text-xs text-gray-400">se calcula solo</td>
+                    <td className="px-3 py-2" />
+                  </tr>
+                );
+              }
               const txt = escrito(p);
               const v = leer(txt);
               const mal = 'error' in v;
@@ -139,7 +157,8 @@ export default function Configuracion({ notificar }: Props) {
       </div>
       <p className="mt-3 text-xs text-gray-500">
         Los tipos salen de Zoho Desk: si un ticket abierto trae uno nuevo, aparece aquí sin plazo para que se lo pongas. Los plazos no se suman entre sí: un equipo en
-        calibración tiene el plazo de «Calibración», no el de diagnóstico más el de calibración.
+        calibración tiene el plazo de «Calibración», no el de diagnóstico más el de calibración. La excepción es el tipo «Diagnóstico + Calibración», para el equipo que
+        pasa por las dos cosas: su plazo es la suma de los otros dos, se recalcula solo cuando cambias cualquiera de ellos y por eso no se edita aquí.
       </p>
     </Card>
   );

@@ -13,8 +13,11 @@ import {
   notaTipo,
   porUrgenciaPlazo,
   resumenServicios,
+  segmentosBarra,
   selectorTipo,
   textoPlazo,
+  textoTramos,
+  tituloSegmento,
 } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { Alert, Button, Loading, Tag } from '../ui';
@@ -234,7 +237,7 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
 
       {vista === 'lista' ? (
         <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <table className="w-full min-w-[1040px] text-sm">
+          <table className="w-full min-w-[1080px] text-sm">
             <thead className="bg-gray-50">
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
                 <Th k="numero">Ticket</Th>
@@ -266,7 +269,9 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.estado}</td>
                   <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmtFecha(s.ingreso)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmtFecha(s.fechaLimite)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                    <FechaLimite s={s} />
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right">
                     <PlazoBadge s={s} />
                   </td>
@@ -339,7 +344,7 @@ function TipoSelect({
           if (clave === valor) return;
           void onCambio(s, clave, tipos.find((t) => t.clave === clave)?.etiqueta ?? '');
         }}
-        className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`min-h-[36px] w-[230px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
           sinTipo ? 'border-dashed border-gray-300 text-gray-500' : 'border-gray-300 text-gray-900'
         }`}
       >
@@ -364,6 +369,20 @@ function TipoSelect({
   );
 }
 
+/**
+ * La fecha límite. En un tipo compuesto lleva en el `title` hasta cuándo va
+ * cada tramo, y un subrayado punteado que avisa de que hay algo que leer.
+ */
+function FechaLimite({ s }: { s: ServicioVista }) {
+  const tramos = textoTramos(s);
+  if (!tramos) return <>{fmtFecha(s.fechaLimite)}</>;
+  return (
+    <span title={tramos} className="cursor-help underline decoration-gray-300 decoration-dotted underline-offset-4">
+      {fmtFecha(s.fechaLimite)}
+    </span>
+  );
+}
+
 function PlazoBadge({ s }: { s: ServicioVista }) {
   const t = TONO_PLAZO[s.estadoPlazo];
   return (
@@ -381,10 +400,14 @@ const FILA = 36;
 const CABECERA = 44;
 /** El atraso: mismo rojo, más claro y rayado, para que se distinga del plazo ya consumido. */
 const RAYADO = 'repeating-linear-gradient(135deg, #fecaca 0 5px, #fee2e2 5px 10px)';
+/** Muestra de la leyenda para la barra de un tipo compuesto: tono lleno, raya blanca y el mismo tono aclarado. */
+const DOS_TRAMOS = 'linear-gradient(90deg, #10b981 0 45%, #ffffff 45% 55%, #70d4b3 55% 100%)';
 
 /**
  * Calendario de barras: una fila por servicio y una columna por día. La barra
  * va del ingreso a la fecha límite; si está vencido, sigue rayada hasta hoy.
+ * En un tipo compuesto («Diagnóstico + Calibración») la barra va partida en
+ * sus tramos (`segmentosBarra`); el color sigue siendo el de la fecha final.
  * Sin librerías: cajas con posición absoluta sobre un ancho fijo por día, y
  * desplazamiento horizontal cuando no cabe.
  */
@@ -414,6 +437,11 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
         <Leyenda className="border border-red-300" style={{ backgroundImage: RAYADO }}>
           Atraso hasta hoy
         </Leyenda>
+        {servicios.some((s) => s.tramos) && (
+          <Leyenda className="" style={{ backgroundImage: DOS_TRAMOS }}>
+            Diagnóstico + Calibración: dos tramos
+          </Leyenda>
+        )}
         <Leyenda className="border border-gray-200 bg-gray-100">Fin de semana o festivo</Leyenda>
         <li className="flex items-center gap-1.5">
           <span className="h-3 w-0.5 bg-blue-500" aria-hidden /> Hoy
@@ -458,7 +486,12 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
             const b = barraServicio(s, eje, hoy);
             const t = TONO_PLAZO[s.estadoPlazo];
             const fin = b ? (b.atraso ?? b.plazo)?.hasta ?? 0 : 0;
-            const detalle = `Ticket ${s.numero} · ${s.tipoServicio || 'sin tipo'} · ingreso ${fmtFecha(s.ingreso)} · límite ${fmtFecha(s.fechaLimite)} · ${textoPlazo(s)}`;
+            const tramos = textoTramos(s);
+            const detalle = `Ticket ${s.numero} · ${s.tipoServicio || 'sin tipo'} · ingreso ${fmtFecha(s.ingreso)} · límite ${fmtFecha(s.fechaLimite)}${tramos ? ` (${tramos})` : ''} · ${textoPlazo(s)}`;
+            // Bordes de la barra del plazo en píxeles: los tramos de un tipo compuesto se pintan dentro de ella.
+            const izq = b?.plazo ? b.plazo.desde * COL + (b.recortada ? 0 : 2) : 0;
+            const der = b?.plazo ? (b.plazo.hasta + 1) * COL - (b.atraso ? 0 : 2) : 0;
+            const segmentos = b?.plazo ? (segmentosBarra(s, eje) ?? []) : [];
             return (
               <div key={s.numero} className="flex border-b border-gray-100 last:border-b-0" style={{ height: FILA }}>
                 <div className="z-10 flex shrink-0 items-center gap-2 border-r border-gray-200 bg-white px-3 text-xs sm:sticky sm:left-0" style={{ width: ETIQ }} title={s.asunto || undefined}>
@@ -470,9 +503,26 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
                   {!b && <span className="ml-2 text-[11px] text-gray-400 sm:sticky sm:left-[238px]">sin plazo</span>}
                   {b?.plazo && (
                     <div
-                      className={`absolute top-2 h-5 ${t.barra} ${b.recortada ? '' : 'rounded-l-md'} ${b.atraso ? '' : 'rounded-r-md'}`}
-                      style={{ left: b.plazo.desde * COL + (b.recortada ? 0 : 2), width: (b.plazo.hasta - b.plazo.desde + 1) * COL - (b.recortada ? 0 : 2) - (b.atraso ? 0 : 2) }}
-                    />
+                      className={`absolute top-2 h-5 overflow-hidden ${t.barra} ${b.recortada ? '' : 'rounded-l-md'} ${b.atraso ? '' : 'rounded-r-md'}`}
+                      style={{ left: izq, width: der - izq }}
+                    >
+                      {/* Tipo compuesto: un tramo por parte. El color (estado) es el de la fecha límite final; el segundo
+                          tramo va aclarado y con una raya blanca delante, y cada uno dice en su `title` cuándo acaba. */}
+                      {segmentos.map((seg, i) => {
+                        if (!seg.tramo) return null;
+                        const desde = Math.max(seg.tramo.desde * COL, izq);
+                        const hasta = Math.min((seg.tramo.hasta + 1) * COL, der);
+                        return (
+                          <div
+                            key={seg.etiqueta}
+                            title={tituloSegmento(seg)}
+                            // La raya sólo separa dos tramos visibles: si el anterior quedó fuera del eje, no hay qué separar.
+                            className={`absolute inset-y-0 ${i > 0 ? 'bg-white/30' : ''} ${i > 0 && segmentos[i - 1].tramo ? 'border-l-2 border-white' : ''}`}
+                            style={{ left: desde - izq, width: hasta - desde }}
+                          />
+                        );
+                      })}
+                    </div>
                   )}
                   {b?.atraso && (
                     <div

@@ -119,6 +119,17 @@ describe('servicios y plazos', () => {
     expect(queries).toEqual([]);
   });
 
+  it.each(['Diagnóstico + Calibración', ' diagnostico  +  CALIBRACION '])('el plazo del tipo compuesto (%j) no se edita → 400 en «tipo» y ninguna consulta', async (tipo) => {
+    for (const dias of [7, null]) {
+      const res = await request(app()).put('/api/trazabilidad/plazos').set(auth()).send({ tipo, dias });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('invalid_input');
+      expect(res.body.field).toBe('tipo');
+      expect(res.body.message).toMatch(/se calcula sumando/);
+    }
+    expect(queries).toEqual([]);
+  });
+
   it('plazo válido, o vacío para dejarlo «sin plazo» → 200', async () => {
     for (const dias of [1, 365, null]) {
       const res = await request(app()).put('/api/trazabilidad/plazos').set(auth()).send({ tipo: 'Diagnóstico', dias });

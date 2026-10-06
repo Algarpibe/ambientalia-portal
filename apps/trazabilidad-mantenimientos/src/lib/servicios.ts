@@ -4,7 +4,16 @@
  * cada servicio NO se calculan aquí: llegan del servidor, que es quien conoce
  * los festivos; aquí sólo se colocan en columnas, se cuentan y se redactan.
  */
-import { RETROCESO_MAX_DIAS, claveTipoServicio, diasEntre, sumarDias, type EstadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import {
+  RETROCESO_MAX_DIAS,
+  claveTipoServicio,
+  diasEntre,
+  sumarDias,
+  type EstadoPlazo,
+  type PlazoServicio,
+  type ServicioVista,
+  type TipoServicioOpcion,
+} from '../dominio';
 import { MESES_CORTOS, fmtFecha } from './vistas';
 
 /** Días en blanco que se dejan tras la última fecha límite (o tras hoy). */
@@ -95,6 +104,7 @@ export interface OpcionTipo {
   texto: string;
 }
 
+/** «Diagnóstico · 3 días háb.». En un tipo compuesto los días ya vienen sumados del servidor. */
 const textoOpcion = (etiqueta: string, dias: number | null): string =>
   `${etiqueta} · ${dias === null ? 'sin plazo' : `${dias} día${dias === 1 ? '' : 's'} háb.`}`;
 
@@ -186,6 +196,76 @@ export function barraServicio(s: ServicioVista, eje: Eje, hoy: string): Barra | 
     plazo: recortar(eje, columna(eje, s.ingreso), limite),
     atraso: s.fechaLimite < hoy ? recortar(eje, limite + 1, columna(eje, hoy)) : null,
     recortada: s.ingreso < eje.inicio,
+  };
+}
+
+/** Un tramo de la barra de un servicio de tipo compuesto («Diagnóstico + Calibración»). */
+export interface SegmentoBarra {
+  /** La parte que ocupa el tramo («Diagnóstico»). */
+  etiqueta: string;
+  /** Sus días hábiles. */
+  dias: number;
+  /** Último día del tramo (AAAA-MM-DD), tal como lo manda el servidor. */
+  hasta: string;
+  /** Las columnas que ocupa; null si cae entero fuera del eje. */
+  tramo: Tramo | null;
+}
+
+/**
+ * La barra del plazo partida en los tramos de un tipo compuesto: el primero va
+ * del ingreso a su último día y cada uno de los siguientes empieza al día
+ * siguiente de donde acabó el anterior, hasta la fecha límite. Juntos ocupan
+ * exactamente `barraServicio(…).plazo`; el atraso, si lo hay, sigue detrás y no
+ * es cosa de aquí. Las fechas de fin llegan del servidor (él cuenta los días
+ * hábiles): aquí sólo se pasan a columnas y se recortan al eje.
+ * Null si el servicio no tiene barra o su tipo no es compuesto.
+ */
+export function segmentosBarra(s: ServicioVista, eje: Eje): SegmentoBarra[] | null {
+  if (!tieneBarra(s) || !s.tramos || s.tramos.length < 2) return null;
+  let desde = columna(eje, s.ingreso);
+  return s.tramos.map((t) => {
+    const hasta = columna(eje, t.hasta);
+    const tramo = recortar(eje, desde, hasta);
+    desde = hasta + 1;
+    return { etiqueta: t.etiqueta, dias: t.dias, hasta: t.hasta, tramo };
+  });
+}
+
+const diasHab = (dias: number): string => `${dias} día${dias === 1 ? '' : 's'} háb.`;
+
+/** «Diagnóstico: hasta el 06/10/2026 (3 días háb.)»: el `title` de un tramo de la barra. */
+export const tituloSegmento = (seg: Pick<SegmentoBarra, 'etiqueta' | 'dias' | 'hasta'>): string =>
+  `${seg.etiqueta}: hasta el ${fmtFecha(seg.hasta)} (${diasHab(seg.dias)})`;
+
+/**
+ * «Diagnóstico hasta el 06/10/2026 · Calibración hasta el 13/10/2026»: las
+ * fechas de cada tramo de un tipo compuesto, para el `title` de la fecha
+ * límite en la lista. Null si el servicio no los tiene.
+ */
+export function textoTramos(s: ServicioVista): string | null {
+  if (!s.tramos || s.tramos.length < 2) return null;
+  return s.tramos.map((t) => `${t.etiqueta} hasta el ${fmtFecha(t.hasta)}`).join(' · ');
+}
+
+/** «A», «A y B», «A, B y C». */
+const enumerar = (xs: readonly string[]): string => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`);
+
+/**
+ * Lo que enseña «Configuración» en la fila de un tipo compuesto, que no se
+ * edita: sus días calculados y de qué suma salen; o «sin plazo» y a qué parte
+ * le falta. Null si el tipo es simple (tiene su casilla de siempre).
+ */
+export function notaDerivado(p: PlazoServicio): { valor: string; nota: string; falta: boolean } | null {
+  if (!p.derivadoDe) return null;
+  const sinPlazo = p.derivadoDe.filter((x) => x.dias === null);
+  if (p.dias === null || sinPlazo.length > 0) {
+    const falta = sinPlazo.length > 0 ? `: falta el plazo de ${enumerar(sinPlazo.map((x) => x.etiqueta))}` : '';
+    return { valor: 'sin plazo', nota: `suma de ${enumerar(p.derivadoDe.map((x) => x.etiqueta))}${falta}`, falta: true };
+  }
+  return {
+    valor: `${p.dias} día${p.dias === 1 ? '' : 's'} hábil${p.dias === 1 ? '' : 'es'}`,
+    nota: `suma de ${enumerar(p.derivadoDe.map((x) => `${x.etiqueta} (${x.dias})`))}`,
+    falta: false,
   };
 }
 

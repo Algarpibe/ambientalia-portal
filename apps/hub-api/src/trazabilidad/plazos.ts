@@ -10,7 +10,7 @@
 
 import { MAX_DIAS_RANGO, contarDiasHabiles } from '../ausencias/dias-habiles.js';
 import { festivosColombia, sumarDias } from '../ausencias/festivos.js';
-import { RETROCESO_MAX_DIAS, esFechaIso, estadoPlazo, type EstadoPlazo } from './dominio.js';
+import { RETROCESO_MAX_DIAS, esFechaIso, estadoPlazo, type EstadoPlazo, type TramoPlazo } from './dominio.js';
 
 /** Margen de festivos que se manda más allá de la última fecha límite. */
 const MARGEN_FESTIVOS_DIAS = 31;
@@ -68,6 +68,28 @@ export function calcularPlazo(ingreso: string | null, dias: number | null, hoy: 
   if (dias === null || !esFechaIso(ingreso)) return { fechaLimite: null, diasHabiles: null, estadoPlazo: 'SIN_PLAZO' };
   const fechaLimite = sumarDiasHabiles(ingreso, dias);
   return { fechaLimite, diasHabiles: diasHabilesEntre(hoy, fechaLimite), estadoPlazo: estadoPlazo(fechaLimite, hoy) };
+}
+
+/**
+ * Los tramos del plazo de un servicio de tipo compuesto: cada parte ocupa sus
+ * días hábiles a continuación de la anterior, empezando en el ingreso. El
+ * último tramo acaba en la fecha límite (`calcularPlazo` con la suma), porque
+ * sumar días hábiles por partes da lo mismo que sumarlos de una vez. Null si
+ * no hay ingreso, no hay partes o a alguna le falta el plazo.
+ */
+export function calcularTramos(
+  ingreso: string | null,
+  partes: readonly { clave: string; etiqueta: string; dias: number | null }[],
+): TramoPlazo[] | null {
+  if (!esFechaIso(ingreso) || partes.length === 0) return null;
+  const tramos: TramoPlazo[] = [];
+  let desde: string = ingreso;
+  for (const p of partes) {
+    if (p.dias === null) return null;
+    desde = sumarDiasHabiles(desde, p.dias);
+    tramos.push({ clave: p.clave, etiqueta: p.etiqueta, dias: p.dias, hasta: desde });
+  }
+  return tramos;
 }
 
 /**

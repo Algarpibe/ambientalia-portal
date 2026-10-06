@@ -1,19 +1,21 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 044). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 045). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
-import { asignarClaves, asuntoSinCodigo, claveTipoServicio, estadoCalibracion, modeloDeCodigo, tipoEfectivo } from './dominio.js';
-import { calcularPlazo } from './plazos.js';
+import { asignarClaves, asuntoSinCodigo, claveTipoServicio, diasDeTipo, estadoCalibracion, modeloDeCodigo, partesDeTipo, tipoEfectivo } from './dominio.js';
+import { calcularPlazo, calcularTramos } from './plazos.js';
 import {
   TzError,
+  errorPlazoDerivado,
   type Actor,
   type CambioPlazo,
   type EquipoVista,
   type FilaImportada,
   type Importacion,
+  type PartePlazo,
   type PlazoServicio,
   type ResumenImportacion,
   type Seguimiento,
@@ -121,14 +123,41 @@ const porPlazoYEtiqueta = (a: { dias: number | null; etiqueta: string }, b: { di
   Number(a.dias === null) - Number(b.dias === null) || a.etiqueta.localeCompare(b.etiqueta, 'es');
 
 /**
+ * Los días de cada tipo, resueltos a partir de las filas de portal.tmc_plazos.
+ * Es el único sitio del repo que traduce «lo guardado» a «lo que vale»: un tipo
+ * simple vale lo de su fila y uno compuesto (`TIPOS_COMPUESTOS`, dominio.ts) la
+ * suma de sus partes, sin mirar su propia fila. Lista, fecha límite,
+ * Configuración y desplegable piden los días aquí, así que no pueden discrepar.
+ */
+function resolverPlazos(filas: readonly Row[]) {
+  const guardados = new Map<string, number | null>(filas.map((r) => [r.clave as string, r.dias_habiles === null ? null : Number(r.dias_habiles)]));
+  const etiquetas = new Map<string, string>(filas.map((r) => [r.clave as string, r.etiqueta as string]));
+  return {
+    /** Días hábiles que valen para el tipo; null = sin plazo. */
+    dias: (clave: string): number | null => diasDeTipo(clave, guardados),
+    /** Las partes de un tipo compuesto con su plazo de hoy; null si el tipo es simple. */
+    partes: (clave: string): PartePlazo[] | null =>
+      partesDeTipo(clave)?.map((p) => ({ clave: p, etiqueta: etiquetas.get(p) ?? p, dias: diasDeTipo(p, guardados) })) ?? null,
+  };
+}
+
+/** Las filas de portal.tmc_plazos como opciones elegibles, más el resolvedor de días de esas mismas filas. */
+async function cargarTipos(db: Db): Promise<{ tipos: TipoServicioOpcion[]; plazos: ReturnType<typeof resolverPlazos> }> {
+  const { rows } = await db.query(`SELECT clave, etiqueta, dias_habiles FROM portal.tmc_plazos`);
+  const plazos = resolverPlazos(rows as Row[]);
+  const tipos = (rows as Row[])
+    .map((r) => ({ clave: r.clave as string, etiqueta: r.etiqueta as string, dias: plazos.dias(r.clave) }))
+    .sort(porPlazoYEtiqueta);
+  return { tipos, plazos };
+}
+
+/**
  * Los tipos de servicio que se pueden elegir a mano para un ticket: las filas
  * de portal.tmc_plazos (tengan plazo o no), en el orden de «Configuración».
+ * `dias` es el plazo que vale: en un tipo compuesto, la suma de sus partes.
  */
 export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]> {
-  const { rows } = await db.query(`SELECT clave, etiqueta, dias_habiles FROM portal.tmc_plazos`);
-  return (rows as Row[])
-    .map((r) => ({ clave: r.clave as string, etiqueta: r.etiqueta as string, dias: r.dias_habiles === null ? null : Number(r.dias_habiles) }))
-    .sort(porPlazoYEtiqueta);
+  return (await cargarTipos(db)).tipos;
 }
 
 /**
@@ -141,6 +170,10 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
  * clave normalizada, y eso se hace aquí y no en SQL para no depender de
  * `unaccent`. Sin tipo, o con un tipo sin plazo, el servicio sale «sin plazo».
  *
+ * La excepción es un tipo compuesto («Diagnóstico + Calibración»): su plazo es
+ * la suma de los de sus partes y el servicio lleva además `tramos`, con el día
+ * en que acaba cada parte (el último es la fecha límite).
+ *
  * SU tipo es el efectivo (`tipoEfectivo`): el puesto a mano en
  * portal.tmc_servicios_tipo gana al que traiga Desk. El puesto a mano se
  * enseña con la etiqueta que tenga hoy en Configuración (la guardada, si su
@@ -151,7 +184,7 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
  * y, si no viene, el asunto sin el código de servicio.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
-  const [{ rows }, tipos] = await Promise.all([
+  const [{ rows }, { tipos, plazos }] = await Promise.all([
     db.query(
       `SELECT t.number, t.subject, t.status, t.serial, t.codigo_servicio, t.tipo_servicio,
               COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS ingreso,
@@ -164,7 +197,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
         WHERE ${TICKET_ABIERTO}
         ORDER BY t.number DESC`,
     ),
-    listarTiposServicio(db),
+    cargarTipos(db),
   ]);
   const porClave = new Map(tipos.map((t) => [t.clave, t]));
   return (rows as Row[]).map((r) => {
@@ -172,7 +205,9 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
     const tipoDesk = String(r.tipo_servicio ?? '').trim();
     const manual = manualClave === null ? null : (porClave.get(manualClave)?.etiqueta ?? r.manual_etiqueta);
     const { tipo: tipoServicio, origen: tipoOrigen } = tipoEfectivo(manual, tipoDesk);
-    const plazoDias = porClave.get(claveTipoServicio(tipoServicio))?.dias ?? null;
+    const claveTipo = claveTipoServicio(tipoServicio);
+    const plazoDias = plazos.dias(claveTipo);
+    const partes = plazos.partes(claveTipo);
     const cuenta = String(r.cuenta ?? '').trim();
     return {
       numero: Number(r.number),
@@ -189,6 +224,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
       ingreso: r.ingreso,
       plazoDias,
       ...calcularPlazo(r.ingreso, plazoDias, hoy),
+      tramos: partes ? calcularTramos(r.ingreso, partes) : null,
       sinConfirmar: r.sin_confirmar === true,
     };
   });
@@ -212,12 +248,14 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
         ORDER BY min(t.number)`,
     ),
   ]);
+  const plazos = resolverPlazos(guardados.rows as Row[]);
   const m = new Map<string, PlazoServicio>();
   for (const r of guardados.rows as Row[]) {
     m.set(r.clave, {
       clave: r.clave,
       etiqueta: r.etiqueta,
-      dias: r.dias_habiles === null ? null : Number(r.dias_habiles),
+      dias: plazos.dias(r.clave),
+      derivadoDe: plazos.partes(r.clave),
       ticketsAbiertos: 0,
       actualizadoPor: r.actualizado_por,
       actualizadoEn: r.actualizado_en,
@@ -235,7 +273,15 @@ export async function listarPlazos(db: Db): Promise<PlazoServicio[]> {
     }
     const clave = claveTipoServicio(r.tipo);
     if (!clave) continue;
-    const p = m.get(clave) ?? { clave, etiqueta: r.tipo, dias: null, ticketsAbiertos: 0, actualizadoPor: null, actualizadoEn: null };
+    const p = m.get(clave) ?? {
+      clave,
+      etiqueta: r.tipo,
+      dias: plazos.dias(clave),
+      derivadoDe: plazos.partes(clave),
+      ticketsAbiertos: 0,
+      actualizadoPor: null,
+      actualizadoEn: null,
+    };
     p.ticketsAbiertos += Number(r.n);
     m.set(clave, p);
   }
@@ -274,8 +320,12 @@ export async function fijarTipoServicio(db: Db, numero: number, tipo: string | n
 /**
  * Fija (o vacía, con `dias` null) el plazo de un tipo de servicio y lo firma.
  * Si el tipo ya tiene fila, su etiqueta se conserva: sólo cambia el plazo.
+ * Un tipo compuesto no tiene plazo propio (es la suma de sus partes): 400, y
+ * no se escribe nada. `parsePlazo` ya lo corta antes; aquí se repite para que
+ * ningún otro camino pueda guardarle días.
  */
 export async function guardarPlazo(db: Db, c: CambioPlazo, actor: Actor): Promise<void> {
+  if (partesDeTipo(claveTipoServicio(c.tipo))) throw errorPlazoDerivado(c.tipo);
   await db.query(
     `INSERT INTO portal.tmc_plazos (clave, etiqueta, dias_habiles, actualizado_por_id, actualizado_por, actualizado_en)
      VALUES ($1, $2, $3, $4, $5, NOW())

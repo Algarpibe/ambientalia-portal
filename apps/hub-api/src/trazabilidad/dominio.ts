@@ -178,6 +178,62 @@ export function claveTipoServicio(tipo: unknown): string {
     .trim();
 }
 
+/**
+ * Tipos de servicio COMPUESTOS: clave del tipo → claves de sus partes, en el
+ * orden en que se hacen. El plazo de un compuesto no se guarda en ningún
+ * sitio: es la suma, en vivo, de los plazos de sus partes (`diasDeTipo`), así
+ * que cambiar el de una parte en Configuración cambia el suyo sin más. Si a
+ * una parte le falta el plazo, el compuesto queda «sin plazo».
+ *
+ * Éste es el ÚNICO sitio donde se define la composición. Las claves van ya
+ * normalizadas (`claveTipoServicio`: «Diagnóstico + Calibración» →
+ * «diagnostico + calibracion») y una parte no puede ser otro compuesto;
+ * `dominio.test.ts` vigila las dos cosas. La fila del compuesto en
+ * portal.tmc_plazos la siembra la migración 045 (sólo para que se pueda elegir
+ * y salga en Configuración); su `dias_habiles` no se lee.
+ */
+export const TIPOS_COMPUESTOS: Readonly<Record<string, readonly string[]>> = {
+  'diagnostico + calibracion': ['diagnostico', 'calibracion'],
+};
+
+/** Las claves de las partes de un tipo compuesto, o null si `clave` es un tipo simple. */
+export function partesDeTipo(clave: string): readonly string[] | null {
+  return Object.prototype.hasOwnProperty.call(TIPOS_COMPUESTOS, clave) ? TIPOS_COMPUESTOS[clave] : null;
+}
+
+/**
+ * El plazo, en días hábiles, que vale para un tipo: el suyo si es simple y, si
+ * es compuesto, la suma de los de sus partes (null en cuanto a una le falte).
+ * `guardados` da el plazo configurado de cada clave (un Map vale). Todo el que
+ * necesite los días de un tipo pasa por aquí: lista, fecha límite, contadores,
+ * Configuración y el desplegable salen del mismo número.
+ */
+export function diasDeTipo(clave: string, guardados: { get(clave: string): number | null | undefined }): number | null {
+  const partes = partesDeTipo(clave);
+  if (!partes) return guardados.get(clave) ?? null;
+  let total = 0;
+  for (const p of partes) {
+    const d = guardados.get(p) ?? null;
+    if (d === null) return null;
+    total += d;
+  }
+  return total;
+}
+
+/**
+ * Un tramo del plazo de un servicio de tipo compuesto: la parte que lo ocupa,
+ * sus días hábiles y el día en que acaba. Los calcula el servidor (plazos.ts),
+ * uno detrás de otro desde el ingreso; el último acaba en la fecha límite.
+ */
+export interface TramoPlazo {
+  /** Clave de la parte («diagnostico»). */
+  clave: string;
+  etiqueta: string;
+  dias: number;
+  /** Último día del tramo (AAAA-MM-DD). */
+  hasta: string;
+}
+
 /** De dónde sale el tipo de servicio de un ticket: puesto a mano en la app, o el que trae Desk. */
 export type OrigenTipo = 'manual' | 'desk';
 

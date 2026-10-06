@@ -10,9 +10,11 @@ import {
   claveTipoServicio,
   esFechaIso,
   modeloEdm180,
+  partesDeTipo,
   type EstadoCalibracion,
   type EstadoPlazo,
   type OrigenTipo,
+  type TramoPlazo,
 } from './dominio.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -221,7 +223,19 @@ export interface TipoManual {
 export interface TipoServicioOpcion {
   clave: string;
   etiqueta: string;
-  /** Su plazo en días hábiles; null = se puede elegir, pero el servicio queda «sin plazo». */
+  /**
+   * Su plazo en días hábiles; null = se puede elegir, pero el servicio queda
+   * «sin plazo». En un tipo compuesto es la suma de sus partes, ya calculada.
+   */
+  dias: number | null;
+}
+
+/** Una parte de un tipo compuesto, con el plazo que tiene hoy en Configuración. */
+export interface PartePlazo {
+  clave: string;
+  /** La etiqueta de su fila en Configuración; si no tiene fila, su clave. */
+  etiqueta: string;
+  /** null = a esta parte le falta el plazo, y por eso el compuesto no tiene. */
   dias: number | null;
 }
 
@@ -252,9 +266,15 @@ export interface ServicioVista {
   estado: string;
   /** Día de ingreso en Colombia (AAAA-MM-DD). */
   ingreso: string | null;
-  /** Plazo configurado para su tipo, en días hábiles; null = sin plazo. */
+  /** Plazo configurado para su tipo, en días hábiles (la suma de sus partes si es compuesto); null = sin plazo. */
   plazoDias: number | null;
   fechaLimite: string | null;
+  /**
+   * Sólo en un tipo compuesto con plazo: un tramo por parte, en orden, con el
+   * día en que acaba cada uno (el último es `fechaLimite`). Null en los tipos
+   * simples y cuando no hay fecha límite.
+   */
+  tramos: TramoPlazo[] | null;
   /** Días hábiles que quedan; negativo = días hábiles de atraso. */
   diasHabiles: number | null;
   estadoPlazo: EstadoPlazo;
@@ -267,8 +287,13 @@ export interface PlazoServicio {
   /** El tipo normalizado (`claveTipoServicio`): con ella casan los tickets. */
   clave: string;
   etiqueta: string;
-  /** Días hábiles; null = sin plazo. */
+  /** Días hábiles; null = sin plazo. En un tipo compuesto, la suma de sus partes (no se guarda). */
   dias: number | null;
+  /**
+   * Null en un tipo simple. En un tipo compuesto, sus partes en orden, cada una
+   * con su plazo de hoy: `dias` es su suma y no se puede editar (PUT → 400).
+   */
+  derivadoDe: PartePlazo[] | null;
   /** Tickets abiertos en Desk con este tipo. */
   ticketsAbiertos: number;
   /** Quién lo cambió por última vez; null si sigue como se sembró. */
@@ -281,11 +306,23 @@ export interface CambioPlazo {
   dias: number | null;
 }
 
-/** Valida el cuerpo de PUT /trazabilidad/plazos. Vacío (null o '') = sin plazo. */
+/**
+ * El 400 de quien intenta ponerle (o quitarle) plazo a un tipo compuesto: no
+ * tiene plazo propio, es la suma de los de sus partes.
+ */
+export function errorPlazoDerivado(tipo: string): TzError {
+  return invalido(`El plazo de «${tipo.trim()}» no se edita: se calcula sumando los plazos de sus partes. Cambia el de cada parte.`, 'tipo');
+}
+
+/**
+ * Valida el cuerpo de PUT /trazabilidad/plazos. Vacío (null o '') = sin plazo.
+ * Un tipo compuesto (`TIPOS_COMPUESTOS`) se rechaza: su plazo es derivado.
+ */
 export function parsePlazo(body: unknown): CambioPlazo {
   const b = obj(body, 'body');
   const tipo = texto(b.tipo, 'tipo', 80, true)!;
   if (!claveTipoServicio(tipo)) throw invalido('Falta «tipo».', 'tipo');
+  if (partesDeTipo(claveTipoServicio(tipo))) throw errorPlazoDerivado(tipo);
   const d = b.dias;
   if (d === null || d === undefined || d === '') return { tipo, dias: null };
   if (typeof d !== 'number' || !Number.isInteger(d) || d < PLAZO_MIN_DIAS || d > PLAZO_MAX_DIAS) {

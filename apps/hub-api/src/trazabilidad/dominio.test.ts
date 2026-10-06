@@ -6,14 +6,17 @@ import {
   asuntoSinCodigo,
   claveSerial,
   claveTipoServicio,
+  diasDeTipo,
   diasEntre,
   esFechaIso,
   estadoCalibracion,
   estadoPlazo,
   modeloDeCodigo,
   modeloEdm180,
+  partesDeTipo,
   sumarDias,
   tipoEfectivo,
+  TIPOS_COMPUESTOS,
 } from './dominio.js';
 
 describe('fechas', () => {
@@ -129,6 +132,63 @@ describe('servicios: tipo, modelo, cliente y estado del plazo', () => {
     expect(tipoEfectivo('   ', 'Diagnóstico')).toEqual({ tipo: 'Diagnóstico', origen: 'desk' });
     expect(tipoEfectivo(null, null)).toEqual({ tipo: '', origen: null });
     expect(tipoEfectivo(undefined, '  ')).toEqual({ tipo: '', origen: null });
+  });
+});
+
+describe('tipo compuesto «Diagnóstico + Calibración»', () => {
+  const COMBINADO = claveTipoServicio('Diagnóstico + Calibración');
+
+  it('la composición vive en un solo sitio, con claves ya normalizadas', () => {
+    expect(COMBINADO).toBe('diagnostico + calibracion');
+    expect(TIPOS_COMPUESTOS).toEqual({ 'diagnostico + calibracion': ['diagnostico', 'calibracion'] });
+    for (const [clave, partes] of Object.entries(TIPOS_COMPUESTOS)) {
+      expect(clave).toBe(claveTipoServicio(clave));
+      expect(partes.length).toBeGreaterThanOrEqual(2);
+      for (const p of partes) {
+        expect(p).toBe(claveTipoServicio(p));
+        // Una parte no puede ser a su vez un compuesto: la suma es de un solo nivel.
+        expect(partesDeTipo(p)).toBeNull();
+      }
+    }
+  });
+
+  it('partesDeTipo: las partes de un compuesto, y null para un tipo simple o vacío', () => {
+    expect(partesDeTipo(COMBINADO)).toEqual(['diagnostico', 'calibracion']);
+    expect(partesDeTipo('diagnostico')).toBeNull();
+    expect(partesDeTipo('')).toBeNull();
+    // Nada heredado de Object.prototype se cuela como compuesto.
+    expect(partesDeTipo('constructor')).toBeNull();
+    expect(partesDeTipo('toString')).toBeNull();
+  });
+
+  it('sus días son la suma de los de sus partes', () => {
+    const dias = new Map<string, number | null>([['diagnostico', 3], ['calibracion', 4]]);
+    expect(diasDeTipo(COMBINADO, dias)).toBe(7);
+  });
+
+  it('cambiar una parte cambia el compuesto, sin tocar nada más', () => {
+    const dias = new Map<string, number | null>([['diagnostico', 3], ['calibracion', 4]]);
+    dias.set('diagnostico', 5);
+    expect(diasDeTipo(COMBINADO, dias)).toBe(9);
+  });
+
+  it('si a una parte le falta el plazo (o la fila), el compuesto no tiene plazo', () => {
+    expect(diasDeTipo(COMBINADO, new Map<string, number | null>([['diagnostico', 3], ['calibracion', null]]))).toBeNull();
+    expect(diasDeTipo(COMBINADO, new Map<string, number | null>([['calibracion', 4]]))).toBeNull();
+    expect(diasDeTipo(COMBINADO, new Map())).toBeNull();
+  });
+
+  it('es derivado: lo que hubiera guardado en su propia fila no cuenta', () => {
+    const dias = new Map<string, number | null>([['diagnostico', 3], ['calibracion', 4], [COMBINADO, 99]]);
+    expect(diasDeTipo(COMBINADO, dias)).toBe(7);
+  });
+
+  it('un tipo simple conserva los suyos, y uno desconocido o vacío no tiene', () => {
+    const dias = new Map<string, number | null>([['diagnostico', 3], ['garantia', null]]);
+    expect(diasDeTipo('diagnostico', dias)).toBe(3);
+    expect(diasDeTipo('garantia', dias)).toBeNull();
+    expect(diasDeTipo('instalacion', dias)).toBeNull();
+    expect(diasDeTipo('', dias)).toBeNull();
   });
 });
 

@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { claveTipoServicio, estadoPlazo, type ServicioVista, type TipoServicioOpcion } from '../dominio';
+import { claveTipoServicio, estadoPlazo, type PlazoServicio, type ServicioVista, type TipoServicioOpcion } from '../dominio';
 import {
   TONO_PLAZO,
   avisoSinTipo,
   barraServicio,
+  notaDerivado,
   notaTipo,
+  segmentosBarra,
   selectorTipo,
   diasDelEje,
   ejeServicios,
@@ -12,6 +14,8 @@ import {
   porUrgenciaPlazo,
   resumenServicios,
   textoPlazo,
+  textoTramos,
+  tituloSegmento,
 } from './servicios';
 
 const HOY = '2026-10-06';
@@ -33,6 +37,7 @@ function sv(ingreso: string | null, fechaLimite: string | null, extra: Partial<S
     fechaLimite,
     diasHabiles: fechaLimite ? 0 : null,
     estadoPlazo: estadoPlazo(fechaLimite, HOY),
+    tramos: null,
     sinConfirmar: false,
     tipoOrigen: fechaLimite ? 'desk' : null,
     tipoDesk: fechaLimite ? 'Diagnóstico' : '',
@@ -100,6 +105,135 @@ describe('barra de un servicio', () => {
 
   it('si hasta el límite cae antes del eje, sólo queda el atraso', () => {
     expect(barraServicio(sv('2025-01-10', '2025-01-15'), eje, HOY)).toEqual({ plazo: null, atraso: { desde: 0, hasta: 6 }, recortada: true });
+  });
+});
+
+describe('barra en dos tramos (tipo compuesto «Diagnóstico + Calibración»)', () => {
+  const eje = { inicio: '2026-09-30', fin: '2026-10-18', dias: 19 };
+  /** Un servicio del tipo compuesto: los tramos llegan calculados del servidor (días hábiles incluidos). */
+  const combinado = (ingreso: string, finDiagnostico: string, limite: string, extra: Partial<ServicioVista> = {}) =>
+    sv(ingreso, limite, {
+      ...manual('Diagnóstico + Calibración'),
+      plazoDias: 7,
+      tramos: [
+        { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, hasta: finDiagnostico },
+        { clave: 'calibracion', etiqueta: 'Calibración', dias: 4, hasta: limite },
+      ],
+      ...extra,
+    });
+
+  it('un tipo simple, o un servicio sin barra, no tiene segmentos', () => {
+    expect(segmentosBarra(sv('2026-10-05', '2026-10-08'), eje)).toBeNull();
+    expect(segmentosBarra(sv('2026-10-05', null), eje)).toBeNull();
+    expect(segmentosBarra(combinado('2026-10-01', '2026-10-06', '2026-10-13', { ingreso: null }), eje)).toBeNull();
+    expect(segmentosBarra(combinado('2026-10-01', '2026-10-06', '2026-10-13', { tramos: null }), eje)).toBeNull();
+  });
+
+  it('dos tramos seguidos: del ingreso al fin del diagnóstico, y del día siguiente a la fecha límite', () => {
+    const s = combinado('2026-10-01', '2026-10-06', '2026-10-13');
+    expect(segmentosBarra(s, eje)).toEqual([
+      { etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-10-06', tramo: { desde: 1, hasta: 6 } },
+      { etiqueta: 'Calibración', dias: 4, hasta: '2026-10-13', tramo: { desde: 7, hasta: 13 } },
+    ]);
+  });
+
+  it('juntos ocupan exactamente la barra del plazo, sin huecos ni solapes', () => {
+    const s = combinado('2026-10-01', '2026-10-06', '2026-10-13');
+    const [a, b] = segmentosBarra(s, eje)!;
+    const barra = barraServicio(s, eje, HOY)!;
+    expect(a.tramo!.desde).toBe(barra.plazo!.desde);
+    expect(b.tramo!.desde).toBe(a.tramo!.hasta + 1);
+    expect(b.tramo!.hasta).toBe(barra.plazo!.hasta);
+  });
+
+  it('un ingreso anterior al eje recorta el primer tramo por la izquierda', () => {
+    const s = combinado('2026-09-28', '2026-10-01', '2026-10-07');
+    expect(segmentosBarra(s, eje)!.map((x) => x.tramo)).toEqual([
+      { desde: 0, hasta: 1 },
+      { desde: 2, hasta: 7 },
+    ]);
+    expect(barraServicio(s, eje, HOY)).toMatchObject({ plazo: { desde: 0, hasta: 7 }, recortada: true });
+  });
+
+  it('si el diagnóstico entero cae antes del eje, sólo se pinta el tramo de calibración', () => {
+    const s = combinado('2026-09-21', '2026-09-24', '2026-10-01');
+    expect(segmentosBarra(s, eje)).toEqual([
+      { etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-09-24', tramo: null },
+      { etiqueta: 'Calibración', dias: 4, hasta: '2026-10-01', tramo: { desde: 0, hasta: 1 } },
+    ]);
+  });
+
+  it('el fin del diagnóstico justo en el borde izquierdo deja una sola columna', () => {
+    const s = combinado('2026-09-25', '2026-09-30', '2026-10-06');
+    expect(segmentosBarra(s, eje)!.map((x) => x.tramo)).toEqual([
+      { desde: 0, hasta: 0 },
+      { desde: 1, hasta: 6 },
+    ]);
+  });
+
+  it('vencido: los dos tramos se quedan en el plazo y el atraso rayado sigue detrás hasta hoy', () => {
+    const s = combinado('2026-09-30', '2026-10-01', '2026-10-02');
+    const seg = segmentosBarra(s, eje)!;
+    expect(seg.map((x) => x.tramo)).toEqual([
+      { desde: 0, hasta: 1 },
+      { desde: 2, hasta: 2 },
+    ]);
+    const barra = barraServicio(s, eje, HOY)!;
+    expect(barra.atraso).toEqual({ desde: 3, hasta: 6 });
+    expect(barra.atraso!.desde).toBe(seg[1].tramo!.hasta + 1);
+  });
+
+  it('si todo el plazo cae antes del eje no queda ningún tramo: sólo el atraso', () => {
+    const s = combinado('2025-01-10', '2025-01-15', '2025-01-21');
+    expect(segmentosBarra(s, eje)!.map((x) => x.tramo)).toEqual([null, null]);
+    expect(barraServicio(s, eje, HOY)).toEqual({ plazo: null, atraso: { desde: 0, hasta: 6 }, recortada: true });
+  });
+
+  it('el color lo sigue mandando la fecha límite final, no la intermedia', () => {
+    // Diagnóstico ya pasado (2 de octubre) pero límite el 13: en plazo.
+    expect(combinado('2026-09-29', '2026-10-02', '2026-10-13').estadoPlazo).toBe('EN_PLAZO');
+    expect(barraServicio(combinado('2026-09-29', '2026-10-02', '2026-10-13'), eje, HOY)!.atraso).toBeNull();
+  });
+
+  it('cada tramo se nombra con su fecha de fin, para el `title` de la barra y el de la fecha límite', () => {
+    const s = combinado('2026-10-01', '2026-10-06', '2026-10-13');
+    const [a, b] = segmentosBarra(s, eje)!;
+    expect(tituloSegmento(a)).toBe('Diagnóstico: hasta el 06/10/2026 (3 días háb.)');
+    expect(tituloSegmento(b)).toBe('Calibración: hasta el 13/10/2026 (4 días háb.)');
+    expect(tituloSegmento({ ...a, dias: 1 })).toBe('Diagnóstico: hasta el 06/10/2026 (1 día háb.)');
+    expect(textoTramos(s)).toBe('Diagnóstico hasta el 06/10/2026 · Calibración hasta el 13/10/2026');
+    expect(textoTramos(sv('2026-10-05', '2026-10-08'))).toBeNull();
+    expect(textoTramos(sv('2026-10-05', null))).toBeNull();
+  });
+});
+
+describe('Configuración: plazo de un tipo compuesto (sólo lectura)', () => {
+  const fila = (diag: number | null, cal: number | null): PlazoServicio => ({
+    clave: 'diagnostico + calibracion',
+    etiqueta: 'Diagnóstico + Calibración',
+    dias: diag === null || cal === null ? null : diag + cal,
+    derivadoDe: [
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: diag },
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: cal },
+    ],
+    ticketsAbiertos: 0,
+    actualizadoPor: null,
+    actualizadoEn: null,
+  });
+
+  it('un tipo simple no es derivado', () => {
+    expect(notaDerivado({ ...fila(3, 4), clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, derivadoDe: null })).toBeNull();
+  });
+
+  it('enseña los días calculados y de qué suma salen', () => {
+    expect(notaDerivado(fila(3, 4))).toEqual({ valor: '7 días hábiles', nota: 'suma de Diagnóstico (3) y Calibración (4)', falta: false });
+    expect(notaDerivado(fila(5, 4))).toMatchObject({ valor: '9 días hábiles', nota: 'suma de Diagnóstico (5) y Calibración (4)' });
+  });
+
+  it('sin plazo en una parte: «sin plazo», y dice cuál falta', () => {
+    expect(notaDerivado(fila(3, null))).toEqual({ valor: 'sin plazo', nota: 'suma de Diagnóstico y Calibración: falta el plazo de Calibración', falta: true });
+    expect(notaDerivado(fila(null, 4))!.nota).toBe('suma de Diagnóstico y Calibración: falta el plazo de Diagnóstico');
+    expect(notaDerivado(fila(null, null))!.nota).toBe('suma de Diagnóstico y Calibración: falta el plazo de Diagnóstico y Calibración');
   });
 });
 
@@ -186,6 +320,17 @@ describe('desplegable del tipo de servicio', () => {
         { valor: 'garantia', texto: 'Garantía · sin plazo' },
       ],
     });
+  });
+
+  it('el tipo compuesto sale como los demás, con la suma de días que manda el servidor', () => {
+    const conCombinado: TipoServicioOpcion[] = [...TIPOS, { clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', dias: 7 }];
+    const s = selectorTipo(sv('2026-10-01', '2026-10-13', manual('Diagnóstico + Calibración')), conCombinado);
+    expect(s.valor).toBe('diagnostico + calibracion');
+    expect(s.opciones[s.opciones.length - 1]).toEqual({ valor: 'diagnostico + calibracion', texto: 'Diagnóstico + Calibración · 7 días háb.' });
+    expect(s.opciones).toHaveLength(5);
+    // Con una parte sin plazo, el servidor manda null y se dice «sin plazo».
+    const sin = selectorTipo(sv('2026-10-01', null), [{ clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', dias: null }]);
+    expect(sin.opciones[1].texto).toBe('Diagnóstico + Calibración · sin plazo');
   });
 
   it('con tipo en Desk: la primera opción es «Según Desk: …» y es la elegida mientras no haya uno a mano', () => {

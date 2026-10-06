@@ -26,11 +26,11 @@ se registra en la app y sobrevive a las reimportaciones.
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`) | `apps/hub-api/src/trazabilidad/router.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Lectura del Excel en el navegador | `src/lib/importar.ts` |
 | Agregados, calendario y texto del aviso | `src/lib/vistas.ts` |
-| Eje, barras, colores, textos y desplegable del tipo de «Servicios» | `src/lib/servicios.ts` |
+| Eje, barras (y sus tramos), colores, textos, desplegable del tipo de «Servicios» y nota del tipo compuesto en «Configuración» | `src/lib/servicios.ts` |
 | Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 
 Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
@@ -44,7 +44,7 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_equipos` | Un equipo por `clave` (el serial; si la hoja repite un serial, la 2.ª aparición lleva `-2`). `activo = false` cuando una importación ya no lo trae: no se borra |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
-| `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado |
+| `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado. La 045 añade, igual de idempotente, la fila del tipo compuesto `diagnostico + calibracion` («Diagnóstico + Calibración») con `dias_habiles` NULL: esa columna **no se lee** para un compuesto (ver «Tipo compuesto») |
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
 
 ## API (`/api/trazabilidad/*`)
@@ -55,10 +55,10 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
-| GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), fecha límite, días hábiles y estado del plazo; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración |
+| GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), fecha límite, días hábiles y estado del plazo, y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto) |
 | PUT | `/trazabilidad/servicios/:numero/tipo` (`?hoy=`) | `{tipo}`: pone a mano el tipo de servicio del ticket; `null` o vacío lo quita. 400 si `numero` no es un entero positivo o si el tipo no está (por clave normalizada) en `tmc_plazos`; 404 si el ticket no existe en `desk.tickets`. Devuelve lo mismo que el GET, ya recalculado |
-| GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila; `ticketsAbiertos` cuenta por tipo efectivo |
-| PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado |
+| GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila; `ticketsAbiertos` cuenta por tipo efectivo. Cada plazo lleva `derivadoDe`: `null` en un tipo simple y, en uno compuesto, sus partes `[{clave, etiqueta, dias}]` (entonces `dias` es su suma, o `null` si a alguna le falta) |
+| PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado. 400 en `tipo` si es un tipo compuesto: su plazo se calcula, no se guarda |
 
 Permisos: cualquiera con la app asignada lee, importa, registra seguimiento, cambia plazos y pone
 a mano el tipo de servicio de un ticket; todo queda firmado con su correo.
@@ -88,8 +88,32 @@ Pestaña «Servicios» = **todos** los tickets de `desk.tickets` con `status_typ
 calendario de barras. Pestaña «Configuración» = el plazo de cada tipo de servicio.
 
 - **Fecha límite = ingreso + N días hábiles**, con N el plazo del tipo de servicio del ticket. Es
-  alternativo por tipo, no acumulado. El día de ingreso no cuenta (lunes + 3 → jueves). Sin tipo, o
-  con un tipo sin plazo → `SIN_PLAZO`: sale en la lista, sin barra.
+  alternativo por tipo, no acumulado (salvo el tipo compuesto, abajo). El día de ingreso no cuenta
+  (lunes + 3 → jueves). Sin tipo, o con un tipo sin plazo → `SIN_PLAZO`: sale en la lista, sin barra.
+- **Tipo compuesto «Diagnóstico + Calibración»** (clave `diagnostico + calibracion`): un tipo más
+  del desplegable, cuyo plazo es la **suma en vivo** de los de Diagnóstico y Calibración (3 + 4 = 7
+  por defecto). Es derivado, nunca se guarda: cambiar Diagnóstico a 5 lo deja en 9 sin tocar nada
+  más, y si a una parte le falta el plazo queda «sin plazo».
+  - La composición se define en **un solo sitio**: `TIPOS_COMPUESTOS` en `dominio.ts` (clave del
+    compuesto → claves de sus partes, ya normalizadas; una parte no puede ser otro compuesto). No
+    hay columna para esto.
+  - Se resuelve en `diasDeTipo` (`dominio.ts`), y en el servidor siempre a través de
+    `resolverPlazos` (`repo.ts`), que usan `listarServicios`, `listarTiposServicio` y
+    `listarPlazos`: lista, fecha límite, contadores, `ticketsAbiertos` y el desplegable salen del
+    mismo número. Para añadir otro compuesto: una entrada en `TIPOS_COMPUESTOS` y una migración
+    que siembre su fila (`dias_habiles` NULL).
+  - La fila de `tmc_plazos` (migración 045) existe sólo para que el tipo se pueda elegir y salga
+    en Configuración; su `dias_habiles` se ignora aunque alguien lo escriba por SQL.
+  - `PUT /trazabilidad/plazos` sobre él → 400 (`parsePlazo`, y otra vez en `guardarPlazo`). En
+    Configuración su fila es de sólo lectura: los días calculados y «suma de Diagnóstico (3) y
+    Calibración (4)», o «sin plazo» y a qué parte le falta (`notaDerivado`).
+  - **Barra en dos tramos**: el servidor manda `tramos` (`calcularTramos` en `plazos.ts`, con el
+    mismo contador de días hábiles) y `segmentosBarra` (`src/lib/servicios.ts`) los pasa a
+    columnas: Diagnóstico del ingreso a su fin, Calibración del día siguiente a la fecha límite;
+    el segundo va aclarado y con una raya blanca delante, y cada uno dice en su `title` cuándo
+    acaba. El color (en plazo / vence hoy / vencido) y el tramo rayado de atraso los sigue
+    mandando la fecha límite **final**. En la lista, la fecha intermedia va en el `title` de la
+    fecha límite (subrayado punteado), sin columna nueva.
 - **Tipo efectivo: el puesto a mano GANA al de Desk** (`tipoEfectivo` en `dominio.ts`, aplicado en
   `listarServicios` de `repo.ts`). Si el ticket tiene fila en `portal.tmc_servicios_tipo`, ese es su
   tipo y con él se busca el plazo; si no, vale `desk.tickets.tipo_servicio`; sin ninguno, «sin tipo».

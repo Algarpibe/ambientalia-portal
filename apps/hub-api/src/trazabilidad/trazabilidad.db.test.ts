@@ -29,13 +29,15 @@ const fila = (serial: string, cliente: string, ultimaCalibracion: string | null,
   ...extra,
 });
 
-// Los plazos llevan semilla (migración 043): los tests que la editan la dejan
-// como recién migrada vaciando la tabla y volviendo a ejecutar ese fichero.
+// Los plazos llevan semilla (migraciones 043 y 045): los tests que la editan la
+// dejan como recién migrada vaciando la tabla y volviendo a ejecutar esos ficheros.
 const SQL_043 = readFileSync(fileURLToPath(new URL('../users/migrations/043_trazabilidad_plazos.sql', import.meta.url)), 'utf8');
 const SQL_044 = readFileSync(fileURLToPath(new URL('../users/migrations/044_trazabilidad_servicios_tipo.sql', import.meta.url)), 'utf8');
+const SQL_045 = readFileSync(fileURLToPath(new URL('../users/migrations/045_trazabilidad_tipo_combinado.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
+  await db.query(SQL_045);
 }
 
 beforeAll(async () => {
@@ -423,6 +425,7 @@ describe('tipo de servicio puesto a mano', () => {
     expect(await repo.listarTiposServicio(db)).toEqual([
       { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
       { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+      { clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', dias: 7 },
       { clave: 'garantia', etiqueta: 'Garantía', dias: null },
       { clave: 'mantenimiento', etiqueta: 'Mantenimiento', dias: null },
       { clave: 'no aplica', etiqueta: 'No aplica', dias: null },
@@ -444,6 +447,164 @@ describe('tipo de servicio puesto a mano', () => {
   });
 });
 
+// El tipo compuesto «Diagnóstico + Calibración»: su plazo no se guarda, es la
+// suma en vivo de los de sus partes (TIPOS_COMPUESTOS en dominio.ts).
+describe('tipo compuesto «Diagnóstico + Calibración»', () => {
+  const COMBINADO = 'diagnostico + calibracion';
+  const ticket = (numero: number, tipo: string | null = null, fechaTicket = '2026-10-01', statusType = 'Open') =>
+    db.query(
+      `INSERT INTO desk.tickets (number, status, status_type, serial, tipo_servicio, fecha_creacion_ticket, synced_at)
+       VALUES ($1, 'En diagnóstico', $2, '18A00001', $3, $4::date, NOW())`,
+      [numero, statusType, tipo, fechaTicket],
+    );
+  const servicio = async (numero: number) => (await repo.listarServicios(db, hoy)).find((s) => s.numero === numero)!;
+  const plazo = async (clave: string) => (await repo.listarPlazos(db)).find((p) => p.clave === clave)!;
+  const opcion = async (clave: string) => (await repo.listarTiposServicio(db)).find((t) => t.clave === clave)!;
+  const filaCombinada = async () =>
+    (await db.query(`SELECT clave, etiqueta, dias_habiles, actualizado_por FROM portal.tmc_plazos WHERE clave LIKE '%+%' ORDER BY clave`)).rows;
+
+  beforeEach(async () => {
+    await resembrarPlazos();
+  });
+
+  it('se elige a mano como cualquier otro y su plazo es la suma de sus partes, con la fecha intermedia', async () => {
+    await ticket(4001);
+    await repo.fijarTipoServicio(db, 4001, 'Diagnóstico + Calibración', actor);
+    // jue 1 + 3 → vie 2, lun 5, mar 6; + 4 → mié 7, jue 8, vie 9, (lun 12 festivo), mar 13
+    expect(await servicio(4001)).toMatchObject({
+      tipoServicio: 'Diagnóstico + Calibración',
+      tipoOrigen: 'manual',
+      plazoDias: 7,
+      fechaLimite: '2026-10-13',
+      diasHabiles: 4,
+      estadoPlazo: 'EN_PLAZO',
+      tramos: [
+        { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-10-06' },
+        { clave: 'calibracion', etiqueta: 'Calibración', dias: 4, hasta: '2026-10-13' },
+      ],
+    });
+    expect((await servicio(4001)).tipoManual).toMatchObject({ clave: COMBINADO, por: actor.email });
+  });
+
+  it('también vale si es Desk quien lo trae, con cualquier grafía', async () => {
+    await ticket(4002, ' DIAGNOSTICO  +  calibración ');
+    expect(await servicio(4002)).toMatchObject({ tipoOrigen: 'desk', plazoDias: 7, fechaLimite: '2026-10-13' });
+    expect((await servicio(4002)).tramos).toHaveLength(2);
+  });
+
+  it('cambiar el plazo de una parte cambia el del compuesto, sin tocar su fila', async () => {
+    await ticket(4003);
+    await repo.fijarTipoServicio(db, 4003, 'Diagnóstico + Calibración', actor);
+    await repo.guardarPlazo(db, { tipo: 'Diagnóstico', dias: 5 }, actor);
+    // jue 1 + 5 → jue 8; + 4 → vie 9, mar 13, mié 14, jue 15
+    const s = await servicio(4003);
+    expect(s).toMatchObject({ plazoDias: 9, fechaLimite: '2026-10-15' });
+    expect(s.tramos!.map((t) => [t.dias, t.hasta])).toEqual([
+      [5, '2026-10-08'],
+      [4, '2026-10-15'],
+    ]);
+    expect((await opcion(COMBINADO)).dias).toBe(9);
+    expect((await plazo(COMBINADO)).dias).toBe(9);
+    expect(await filaCombinada()).toEqual([{ clave: COMBINADO, etiqueta: 'Diagnóstico + Calibración', dias_habiles: null, actualizado_por: null }]);
+  });
+
+  it('si a una parte le falta el plazo, el compuesto queda sin plazo y sin tramos', async () => {
+    await ticket(4004);
+    await repo.fijarTipoServicio(db, 4004, 'Diagnóstico + Calibración', actor);
+    await repo.guardarPlazo(db, { tipo: 'Calibración', dias: null }, actor);
+    expect(await servicio(4004)).toMatchObject({ plazoDias: null, fechaLimite: null, diasHabiles: null, estadoPlazo: 'SIN_PLAZO', tramos: null });
+    expect((await opcion(COMBINADO)).dias).toBeNull();
+    expect(await plazo(COMBINADO)).toMatchObject({
+      dias: null,
+      derivadoDe: [
+        { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+        { clave: 'calibracion', etiqueta: 'Calibración', dias: null },
+      ],
+    });
+  });
+
+  it('un tipo simple no lleva tramos', async () => {
+    await ticket(4005, 'Diagnóstico');
+    await ticket(4006);
+    expect(await servicio(4005)).toMatchObject({ plazoDias: 3, tramos: null });
+    expect(await servicio(4006)).toMatchObject({ plazoDias: null, tramos: null });
+  });
+
+  it('Configuración lo enseña con sus días calculados y de qué partes salen; los demás no son derivados', async () => {
+    const p = await repo.listarPlazos(db);
+    expect(p.find((x) => x.clave === COMBINADO)).toEqual({
+      clave: COMBINADO,
+      etiqueta: 'Diagnóstico + Calibración',
+      dias: 7,
+      derivadoDe: [
+        { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3 },
+        { clave: 'calibracion', etiqueta: 'Calibración', dias: 4 },
+      ],
+      ticketsAbiertos: 0,
+      actualizadoPor: null,
+      actualizadoEn: null,
+    });
+    expect(p.filter((x) => x.derivadoDe !== null).map((x) => x.clave)).toEqual([COMBINADO]);
+    // Con plazo, va en el grupo de los que tienen plazo, por orden alfabético.
+    expect(p.map((x) => x.clave).slice(0, 3)).toEqual(['calibracion', 'diagnostico', COMBINADO]);
+  });
+
+  it('los tickets del tipo compuesto cuentan en SU fila, no en las de sus partes', async () => {
+    await ticket(4010);
+    await ticket(4011, 'Diagnóstico');
+    await ticket(4012, 'diagnostico + calibracion');
+    await ticket(4013, 'Calibración');
+    await ticket(4014, null, '2026-10-01', 'Closed');
+    await repo.fijarTipoServicio(db, 4010, 'Diagnóstico + Calibración', actor);
+    await repo.fijarTipoServicio(db, 4011, 'Diagnóstico + Calibración', actor);
+    await repo.fijarTipoServicio(db, 4014, 'Diagnóstico + Calibración', actor);
+    const p = await repo.listarPlazos(db);
+    expect(p.find((x) => x.clave === COMBINADO)!.ticketsAbiertos).toBe(3);
+    expect(p.find((x) => x.clave === 'diagnostico')!.ticketsAbiertos).toBe(0);
+    expect(p.find((x) => x.clave === 'calibracion')!.ticketsAbiertos).toBe(1);
+  });
+
+  it('su plazo no se puede guardar: 400 y la fila queda como estaba', async () => {
+    for (const c of [
+      { tipo: 'Diagnóstico + Calibración', dias: 9 },
+      { tipo: ' DIAGNOSTICO + CALIBRACION ', dias: null },
+    ]) {
+      await expect(repo.guardarPlazo(db, c, actor)).rejects.toMatchObject({ status: 400, code: 'invalid_input', field: 'tipo' });
+    }
+    expect(await filaCombinada()).toEqual([{ clave: COMBINADO, etiqueta: 'Diagnóstico + Calibración', dias_habiles: null, actualizado_por: null }]);
+    expect((await plazo(COMBINADO)).dias).toBe(7);
+  });
+
+  it('unos días escritos en su fila por fuera de la app no cuentan: manda la suma', async () => {
+    await db.query(`UPDATE portal.tmc_plazos SET dias_habiles = 30 WHERE clave = $1`, [COMBINADO]);
+    await ticket(4020);
+    await repo.fijarTipoServicio(db, 4020, 'Diagnóstico + Calibración', actor);
+    expect(await servicio(4020)).toMatchObject({ plazoDias: 7, fechaLimite: '2026-10-13' });
+    expect((await plazo(COMBINADO)).dias).toBe(7);
+    expect((await opcion(COMBINADO)).dias).toBe(7);
+  });
+
+  it('volver a ejecutar la 045 ni duplica la fila ni pisa lo que tuviera', async () => {
+    await db.query(`UPDATE portal.tmc_plazos SET etiqueta = 'Diagnóstico + Calibración (revisada)', actualizado_por = 'st@ambientalia.com.co' WHERE clave = $1`, [COMBINADO]);
+    await db.query(SQL_045);
+    await db.query(SQL_045);
+    await aplicarMigraciones(db);
+    expect(await filaCombinada()).toEqual([
+      { clave: COMBINADO, etiqueta: 'Diagnóstico + Calibración (revisada)', dias_habiles: null, actualizado_por: 'st@ambientalia.com.co' },
+    ]);
+    expect(await repo.listarPlazos(db)).toHaveLength(7);
+  });
+
+  it('la 045 sobre una tabla sin la fila la crea, sin tocar los plazos editados de las partes', async () => {
+    await repo.guardarPlazo(db, { tipo: 'Diagnóstico', dias: 6 }, actor);
+    await db.query(`DELETE FROM portal.tmc_plazos WHERE clave = $1`, [COMBINADO]);
+    await db.query(SQL_045);
+    expect(await filaCombinada()).toEqual([{ clave: COMBINADO, etiqueta: 'Diagnóstico + Calibración', dias_habiles: null, actualizado_por: null }]);
+    expect(await plazo('diagnostico')).toMatchObject({ dias: 6, actualizadoPor: actor.email });
+    expect((await plazo(COMBINADO)).dias).toBe(10);
+  });
+});
+
 describe('plazos por tipo de servicio', () => {
   beforeEach(async () => {
     await resembrarPlazos();
@@ -455,6 +616,7 @@ describe('plazos por tipo de servicio', () => {
     expect(p.map((x) => [x.etiqueta, x.dias])).toEqual([
       ['Calibración', 4],
       ['Diagnóstico', 3],
+      ['Diagnóstico + Calibración', 7],
       ['Garantía', null],
       ['Mantenimiento', null],
       ['No aplica', null],
@@ -476,6 +638,7 @@ describe('plazos por tipo de servicio', () => {
       clave: 'instalacion',
       etiqueta: 'Instalación',
       dias: null,
+      derivadoDe: null,
       ticketsAbiertos: 2,
       actualizadoPor: null,
       actualizadoEn: null,
@@ -504,7 +667,7 @@ describe('plazos por tipo de servicio', () => {
     await aplicarMigraciones(db);
     expect(await plazo('diagnostico')).toMatchObject({ dias: 7, actualizadoPor: actor.email });
     expect(await plazo('calibracion')).toMatchObject({ dias: null });
-    expect(await repo.listarPlazos(db)).toHaveLength(6);
+    expect(await repo.listarPlazos(db)).toHaveLength(7);
   });
 
   it('el plazo editado cambia la fecha límite de los servicios', async () => {

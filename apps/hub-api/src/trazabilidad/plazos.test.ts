@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { claveTipoServicio } from './dominio.js';
-import { calcularPlazo, diasHabilesEntre, festivosDelEje, sumarDiasHabiles } from './plazos.js';
+import { TIPOS_COMPUESTOS, claveTipoServicio } from './dominio.js';
+import { calcularPlazo, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles } from './plazos.js';
 
 // Calendario de referencia (octubre de 2026): el lunes 5 es hábil, el lunes 12
 // es festivo (Día de la Raza) y el 1 de enero de 2027 cae en viernes.
@@ -64,6 +64,41 @@ describe('calcularPlazo', () => {
     expect(calcularPlazo('2026-10-05', null, hoy)).toEqual(sin);
     expect(calcularPlazo(null, 3, hoy)).toEqual(sin);
     expect(calcularPlazo('2026-02-30', 3, hoy)).toEqual(sin);
+  });
+});
+
+describe('calcularTramos (tipo compuesto: un tramo por parte, uno detrás de otro)', () => {
+  const partes = (diag: number | null, cal: number | null) => [
+    { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: diag },
+    { clave: 'calibracion', etiqueta: 'Calibración', dias: cal },
+  ];
+
+  it('cada tramo acaba donde le toca y el último coincide con la fecha límite', () => {
+    // lun 5 + 3 → jue 8; + 4 → vie 9, (sáb, dom, lun 12 festivo), mar 13, mié 14, jue 15
+    expect(calcularTramos('2026-10-05', partes(3, 4))).toEqual([
+      { clave: 'diagnostico', etiqueta: 'Diagnóstico', dias: 3, hasta: '2026-10-08' },
+      { clave: 'calibracion', etiqueta: 'Calibración', dias: 4, hasta: '2026-10-15' },
+    ]);
+    expect(sumarDiasHabiles('2026-10-05', 7)).toBe('2026-10-15');
+  });
+
+  it('la fecha intermedia cruza el fin de semana', () => {
+    // jue 1 + 3 → vie 2, (sáb, dom), lun 5, mar 6; + 4 → mié 7, jue 8, vie 9, (lun 12 festivo), mar 13
+    const t = calcularTramos('2026-10-01', partes(3, 4))!;
+    expect(t.map((x) => x.hasta)).toEqual(['2026-10-06', '2026-10-13']);
+    expect(t[1].hasta).toBe(calcularPlazo('2026-10-01', 7, '2026-10-06').fechaLimite);
+  });
+
+  it('un ingreso en fin de semana empieza a contar el lunes', () => {
+    expect(calcularTramos('2026-10-03', partes(1, 1))!.map((x) => x.hasta)).toEqual(['2026-10-05', '2026-10-06']);
+  });
+
+  it('sin ingreso, con una fecha imposible o con una parte sin plazo no hay tramos', () => {
+    expect(calcularTramos(null, partes(3, 4))).toBeNull();
+    expect(calcularTramos('2026-02-30', partes(3, 4))).toBeNull();
+    expect(calcularTramos('2026-10-05', partes(3, null))).toBeNull();
+    expect(calcularTramos('2026-10-05', partes(null, 4))).toBeNull();
+    expect(calcularTramos('2026-10-05', [])).toBeNull();
   });
 });
 
@@ -134,5 +169,43 @@ describe('044_trazabilidad_servicios_tipo.sql', () => {
   it('está apuntada en MIGRATIONS, detrás de la 043', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
     expect(db).toMatch(/'043_trazabilidad_plazos\.sql',\s*'044_trazabilidad_servicios_tipo\.sql'/);
+  });
+});
+
+describe('045_trazabilidad_tipo_combinado.sql', () => {
+  // La 045 sólo siembra la fila del tipo compuesto «Diagnóstico + Calibración»,
+  // para que se pueda elegir a mano y salga en Configuración. Su plazo NO se
+  // guarda: es la suma, en vivo, de los de sus partes (TIPOS_COMPUESTOS).
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/045_trazabilidad_tipo_combinado.sql', import.meta.url)), 'utf8');
+  const sinComentarios = SQL.replace(/--.*$/gm, '');
+  const semilla = [...SQL.matchAll(/\('([^']+)',\s*'([^']+)',\s*(NULL|\d+)\)/g)].map((m) => ({ clave: m[1], etiqueta: m[2], dias: m[3] }));
+  const sentencias = sinComentarios
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('siembra una sola fila: «Diagnóstico + Calibración», sin días guardados', () => {
+    expect(semilla).toEqual([{ clave: 'diagnostico + calibracion', etiqueta: 'Diagnóstico + Calibración', dias: 'NULL' }]);
+  });
+
+  it('la clave sembrada es la normalización de su etiqueta y es un tipo compuesto del dominio', () => {
+    expect(semilla.length).toBeGreaterThanOrEqual(1);
+    for (const s of semilla) {
+      expect(s.clave).toBe(claveTipoServicio(s.etiqueta));
+      expect(Object.keys(TIPOS_COMPUESTOS)).toContain(s.clave);
+    }
+  });
+
+  it('es una única sentencia INSERT … ON CONFLICT DO NOTHING: ni crea, ni altera, ni pisa, ni borra', () => {
+    expect(sentencias).toHaveLength(1);
+    expect(sentencias[0]).toMatch(/^INSERT INTO portal\.tmc_plazos \(clave, etiqueta, dias_habiles\) VALUES/);
+    expect(sentencias[0]).toMatch(/ON CONFLICT \(clave\) DO NOTHING$/);
+    expect(sinComentarios).not.toMatch(/\b(UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b/i);
+    expect(SQL).not.toMatch(/\bdesk\./);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 044', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'044_trazabilidad_servicios_tipo\.sql',\s*'045_trazabilidad_tipo_combinado\.sql'/);
   });
 });
