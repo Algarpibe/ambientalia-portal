@@ -7,14 +7,15 @@ Convenciones de este documento:
 - Cada afirmación lleva ruta y línea, la referencia a una consulta (`Z1`…`Z11` en la base `zoho-hub`, `D1`…`D10` en la base `desk`, ejecutadas el 06/10/2026 en modo solo lectura) o la palabra **hipótesis**.
 - Las rutas que empiezan por `Desk2:` son del repositorio de Desk 2.0 (`C:\dev\Desk_2_R1.023`, HEAD `b14cd0f`), que solo se leyó. El resto son de este repositorio.
 - No hay nombres de clientes, seriales ni correos: solo números de ticket, estados y recuentos. El repositorio es público.
+- «Desk 2.0» es la aplicación y su base `desk`; «la réplica» es `desk.tickets` de la base `zoho-hub`, la que el portal lee hoy.
 
 ## Objetivo
 
 Una **agenda del taller**: ver en calendario los tickets activos, cuándo terminará cada uno su etapa y en qué hueco entrará cada ticket que espera, para acomodar los servicios y, más adelante, permitir que el cliente reserve.
 
-## Reglas de negocio vigentes
+## Reglas de negocio
 
-Decididas por Gerencia antes de este análisis (no se rediscuten):
+Decididas por Gerencia antes de este análisis:
 
 1. Capacidad = puestos simultáneos por etapa, configurables en la app.
 2. Cada estado pertenece a una categoría: fila de entrada, etapa activa (Diagnóstico, Proceso, Verificación), standby o fin de taller. Configurable, apoyado en `tmc_estados_desk`.
@@ -28,16 +29,22 @@ Decididas por Gerencia antes de este análisis (no se rediscuten):
 
 | | Decisión |
 |---|---|
-| **D1** | **Fila = FIFO con prioridad.** Dentro de cada fila van primero los tickets con prioridad en Desk 2.0 (criterio de `Desk2:packages/shared/src/prioridad.ts`), por prioridad y después por llegada; el resto, por llegada. La prioridad solo se aplica con la conexión a Desk 2.0 encendida. |
+| **D1** | **Fila = FIFO con prioridad, y la prioridad solo sale de Desk 2.0** (criterio de `Desk2:packages/shared/src/prioridad.ts`). El `High` / `Low` que viene de Zoho no se usa. Mientras no haya prioridades fijadas en Desk 2.0, la fila es FIFO puro. |
 | **D2** | **«Notificado» sigue ocupando el puesto**: es parte de la etapa Diagnóstico (revisión interna del Director Técnico). Solo liberan los standby que dependen del cliente, de Comercial o de terceros. |
-| **D3** | **Calendario de la agenda** = días hábiles con festivos de Colombia (`apps/hub-api/src/trazabilidad/plazos.ts`) menos los cierres de empresa de Desk 2.0 (`public.calendario_cierres`). Sin conexión no se descuentan cierres y la pantalla lo avisa. No se usan horas hábiles. |
-| **D4** | **Dos fuentes detrás de un adaptador**: hoy la réplica de Zoho; al encender la conexión, Desk 2.0 (remisiones, transiciones, prioridad, cierres). La agenda funciona ya con Zoho y cambia de fuente sin rehacerse. Con fuente Zoho, fila de entrada = «Ingresado»; «OV asignada» / «Ticket creado» = «por llegar», en lista aparte y sin proyectar. |
+| **D3** | **Calendario de la agenda** = días hábiles con festivos de Colombia (`apps/hub-api/src/trazabilidad/plazos.ts`) menos los cierres de empresa de Desk 2.0 (`public.calendario_cierres`). Con la réplica de respaldo no se descuentan cierres y la pantalla lo avisa. No se usan horas hábiles. |
+| **D4** | **La agenda lee de la base `desk` de Desk 2.0** por una conexión de solo lectura: variable `DESK2_DB_URL` y rol `portal_agenda_reader`. El rol lo crea Gerencia, con `SELECT` sobre `desk.tickets`, `desk.ticket_transitions`, `desk.ticket_history`, `public.remisiones` y `public.calendario_cierres`, y `default_transaction_read_only = on`. Motivo: es una copia de Zoho más completa y al día que la réplica del portal; leerla no cambia dónde se trabaja, que sigue siendo Zoho Desk. **La réplica queda de respaldo** detrás del mismo adaptador: sin la variable, o si la conexión falla, la agenda usa la réplica y lo avisa. El cruce entre las dos es por número de ticket. |
+| **D5** | **«Por Facturar» y «Por Entregar» pasan a papel «terminado»** en `tmc_estados_desk`. Lo cambia Gerencia desde Configuración. |
+| **D6** | **Arranque con «Proponer reparto inicial».** La app reparte por orden de llegada en los puestos libres de cada etapa y el jefe de taller confirma todo de una vez o ajusta. Lo que no cabe queda en la fila. |
+| **D7** | **Un ticket sin refrescar más de un día sigue en la agenda**, marcado «sin confirmar». El jefe de taller puede liberar su puesto a mano; queda registrado quién y por qué. |
+| **D8** | **No se reconstruyen llegadas pasadas.** Se usa el orden aproximado y el reordenado del jefe de taller en el arranque. |
+| **D9** | **Sin tipo de servicio → duración por defecto de la etapa** (fila «*») y marca «sin tipo». El tipo puesto a mano (`tmc_servicios_tipo`) sigue valiendo y gana. |
+| **D10** | **«Pendiente» y «Solicitud Soporte»** (soporte remoto) quedan fuera de la agenda. |
+| **D11** | **Flujo de equipo nuevo = `classification` de Desk 2.0.** Con la réplica de respaldo se deduce del asunto («Equipo Nuevo») o del prefijo `HV_` del código, y se puede marcar a mano por ticket. |
 
 Ajustes decididos el mismo día:
 
 - **Clasificación propia de la agenda.** La categoría de un estado en la agenda es independiente de la clasificación de esperas y SLA de Desk 2.0, porque sirven para cosas distintas. «Por Entregar» es fin de taller y libera el puesto, aunque Desk 2.0 lo trate como espera externa (`Desk2:packages/shared/src/estados.ts:59-106`). Es una diferencia documentada, no un conflicto.
-- **El flujo se distingue por `classification`** (equipo nuevo frente a servicio); la etapa inicial depende del flujo.
-- **Orden aproximado con fuente Zoho.** La llegada es el `desde` de `tmc_estados_historial`; si el tramo es de primera observación (`desde_real = FALSE`) o hay empate, se ordena por número de ticket y la pantalla lo marca como «orden aproximado».
+- **Orden aproximado.** Cuando la llegada de un ticket no es exacta o hay empate, se ordena por número de ticket y la pantalla lo marca como «orden aproximado».
 
 ---
 
@@ -75,6 +82,8 @@ Dos definiciones de «remisión válida» conviven en Desk 2.0:
 
 `enEstadoDesde` es el `performed_at` de la última fila de `desk.ticket_transitions` cuyo `to_status` coincide con el estado actual del ticket (`Desk2:apps/desk/server/db/sla.ts:78-102`). Para «Remisión creada», esa fila se escribe cuando n8n confirma el documento (`Desk2:apps/desk/server/routes/remision.ts:364-374`). Anular y restaurar la remisión reinicia el turno, porque gana la última entrada.
 
+La agenda adopta esa misma definición de llegada: el instante de entrada en el estado, no la fecha de la remisión.
+
 ### A.4 Qué hay hoy en esas tablas
 
 | Dato | Valor | Consulta |
@@ -87,118 +96,153 @@ Dos definiciones de «remisión válida» conviven en Desk 2.0:
 | Tickets nacidos en la app | 1 (número 10005) | D3 |
 | Cierres de empresa cargados | 0 | D9 |
 
-**Consecuencia:** ningún ticket abierto hoy tiene remisión posterior al 24/07/2026, y solo 1 de los 35 abiertos tiene momento de entrada en su estado (D4). Con la conexión encendida hoy, la «orden de la remisión de entrada» de la regla 4 no tendría datos. Los tendrá cuando los tickets nazcan en Desk 2.0.
+**Consecuencia:** ningún ticket abierto hoy tiene remisión posterior al 24/07/2026, y solo 1 de los 35 abiertos tiene momento de entrada en su estado (D4). La regla 4 se cumplirá con datos exactos a medida que los tickets se muevan desde Desk 2.0; hasta entonces rige el orden aproximado (D8).
 
-Además, «Remisión creada» solo la alcanzan los tickets nacidos en la app: su único origen es «Ticket creado» (`estadoPorRemision.ts:32-41`). Los nacidos en Zoho se quedan en «OV asignada».
+Además, «Remisión creada» solo la alcanzan los tickets nacidos en la app: su único origen es «Ticket creado» (`estadoPorRemision.ts:32-41`). Los nacidos en Zoho pasan de «OV asignada» a «Ingresado».
 
-### A.5 Cómo leerlas desde hub-api (solo lectura)
+### A.5 Cómo se leen desde hub-api (D4)
 
 Hoy hub-api tiene una sola conexión, `HUB_DB_URL` (`apps/hub-api/src/db.ts:10-20`), y ningún precedente de segunda conexión. El patrón de la casa para algo opcional es «variable ausente = función apagada», como `AUSENCIAS_WEBHOOK_URL` (`apps/hub-api/src/ausencias/avisar.ts:29-31`) o `SENTRY_DSN` (`apps/hub-api/src/sentry.ts:5-19`).
 
-Propuesta:
-
-- **Variable nueva y opcional:** `DESK2_DB_URL`. Se documenta en `apps/hub-api/.env.example` y `apps/hub-api/README.md` y se define en el entorno del servicio en EasyPanel; no requiere tocar el Dockerfile. Ningún valor en el repositorio ni en el chat.
-- **Interruptor que nace apagado:** sin la variable, la fuente es la réplica de Zoho. La agenda funciona, la fila de entrada sale de «Ingresado», no se descuentan cierres ni se aplica prioridad, y la pantalla lo avisa en un rótulo fijo.
-- **Usuario de base de solo lectura, nuevo:** en la base `desk` solo existe el rol `postgres` (D10). Propuesta de nombre: `portal_agenda_reader`, con permisos **por tabla**, no por esquema, porque `public` contiene también la tabla de usuarios de Desk 2.0:
+- **Variable:** `DESK2_DB_URL`, opcional. Se documenta en `apps/hub-api/.env.example` y `apps/hub-api/README.md` y se define en el entorno del servicio en EasyPanel; no requiere tocar el Dockerfile. Ningún valor en el repositorio ni en el chat.
+- **Rol:** `portal_agenda_reader`. Lo crea Gerencia en `desk-db`; hoy allí solo existe el rol `postgres` (D10). Los permisos son por tabla, no por esquema, porque `public` contiene también la tabla de usuarios de Desk 2.0:
 
   ```sql
-  -- A ejecutar por quien administre desk-db. La contraseña se genera allí y no se guarda en ningún repositorio.
+  -- A ejecutar por Gerencia en desk-db. La contraseña se genera allí y no se guarda en ningún repositorio.
   CREATE ROLE portal_agenda_reader LOGIN PASSWORD '<generada fuera del repo>';
   GRANT CONNECT ON DATABASE desk TO portal_agenda_reader;
   GRANT USAGE ON SCHEMA desk, public TO portal_agenda_reader;
-  GRANT SELECT ON desk.tickets, desk.ticket_transitions TO portal_agenda_reader;
+  GRANT SELECT ON desk.tickets, desk.ticket_transitions, desk.ticket_history TO portal_agenda_reader;
   GRANT SELECT ON public.remisiones, public.calendario_cierres TO portal_agenda_reader;
   ALTER ROLE portal_agenda_reader SET default_transaction_read_only = on;
   ```
 
-- **Conexión defensiva:** pool propio, pequeño y perezoso; `statement_timeout` corto; lectura siempre dentro de `try`. Si la lectura falla, la agenda cae a la fuente Zoho con un aviso, igual que `registrarEstadosSinFallar` no rompe `GET /servicios` (`apps/hub-api/src/trazabilidad/registro-estados.ts:85-92`).
-- **Red:** falta comprobar que el servicio hub-api alcanza `desk-db` dentro de EasyPanel (**no verificado**).
+- **Sin la variable, o si la conexión falla:** la agenda usa la réplica y lo avisa en un rótulo fijo. Con la réplica no hay cierres de empresa, ni prioridad, ni llegadas exactas, y el flujo se deduce (D11).
+- **Conexión defensiva:** pool propio, pequeño y perezoso; `statement_timeout` corto; lectura siempre dentro de `try`. Mismo criterio que `registrarEstadosSinFallar`, que no deja que un fallo rompa `GET /servicios` (`apps/hub-api/src/trazabilidad/registro-estados.ts:85-92`).
+- **Red:** falta comprobar que el servicio hub-api alcanza `desk-db` dentro de EasyPanel (**no verificado**; se comprueba en el lote 1).
 
 ---
 
-## B. Tickets: cómo se casan y qué fuente manda
+## B. Tickets: fuente principal, respaldo y cruce
 
-### B.1 Identidad
+### B.1 Fuente principal: Desk 2.0
 
-- **Tickets de Zoho:** id numérico de Zoho y número correlativo. En la base `desk` hay 775, con números del 171 al 1010 (D3); son los mismos números que ve el portal en la réplica (Z5 frente a D5).
-- **Tickets nacidos en Desk 2.0:** id `app-<uuid>` (`Desk2:packages/zoho-sync/src/db/repo.ts:413`) y número tomado de una secuencia que arranca en 10.000 (`Desk2:packages/zoho-sync/src/db/migrate.ts:43-50`). Hoy hay uno, el 10005 (D3).
-- **Los rangos no se pisan:** Zoho va por el 1010 y la app empieza en 10.000.
+La agenda lee los tickets de `desk.tickets` de la base `desk` (D4). Qué aporta cada tabla:
 
-**El casamiento se hace por `number`.** Todas las tablas del portal ya usan el número (`tmc_servicios_tipo.numero`, `tmc_estados_historial.numero`), así que no hay que migrar claves. El id se guarda como dato secundario.
-
-### B.2 Qué fuente manda para el estado
-
-| Situación | Manda | Motivo |
+| Dato de la agenda | Tabla de Desk 2.0 | Nota |
 |---|---|---|
-| Conexión apagada | Réplica de Zoho | Única fuente disponible |
-| Conexión encendida, ticket en ambas | **Desk 2.0** | Es un superconjunto y está más al día (ver abajo) |
-| Conexión encendida, ticket solo en Desk 2.0 (`app-`) | Desk 2.0 | No existe en Zoho |
-| Conexión encendida, ticket solo en la réplica | Réplica, marcado «solo en Zoho» | No debería ocurrir; se muestra y se avisa |
+| Ticket, estado, tipo de estado, sincronización | `desk.tickets` | 776 tickets, 35 abiertos (D2, D3) |
+| Flujo (servicio / equipo nuevo) | `desk.tickets.classification` | Relleno en 34 de los 35 abiertos; 4 son «Equipo Nuevo» (D5) |
+| Llegada exacta a un estado | `desk.ticket_transitions` | Solo movimientos hechos en la app: 1 de 35 abiertos (D4) |
+| Prioridad fijada | `desk.tickets.priority` con `prioridad_en_app_at` | Ninguna fijada hoy (D6) |
+| Cierres de empresa | `public.calendario_cierres` | 0 filas hoy (D9) |
+| Remisiones de entrada | `public.remisiones` | Solo históricas hoy (D8) |
+| Historial de eventos de Zoho | `desk.ticket_history` | Con permiso de lectura; no se usa en esta fase (D8) |
 
-Motivos para que mande Desk 2.0:
+**Leer de Desk 2.0 no cambia dónde se trabaja.** El taller sigue moviendo los tickets en Zoho Desk; Desk 2.0 los sincroniza por su cuenta (`Desk2:apps/desk/server/index.ts:85-93`) y la agenda solo lee.
 
-- **Es un superconjunto.** Su `desk.tickets` contiene los 775 tickets de Zoho más los nacidos en la app (D3).
-- **Está más al día.** El ticket 884 figura «Finalizado» en Desk 2.0 (741 cerrados, D2) y sigue «Ingresado» en la réplica del portal (740 cerrados, Z1). El trabajador del hub solo relee los 100 tickets más recientes.
-- **Cuando la app toca un ticket, Zoho deja de mandar.** Con `managed_by_app = true` la sincronización no reescribe la fila (`Desk2:packages/zoho-sync/src/db/repo.ts:71`), así que la réplica de Zoho quedaría desfasada para ese ticket.
-- **Desk 2.0 sustituirá a Zoho Desk.** Con el adaptador, apagar Zoho es no usar más la fuente antigua.
+**Por qué es mejor fuente que la réplica:**
 
-### B.3 El adaptador
+- **Más completa.** Contiene los 775 tickets de Zoho más los nacidos en la app (D3), y trae `classification`, que en la réplica está vacío en los 775 (Z3).
+- **Más al día, al menos en el caso comprobado.** El ticket 884 figura «Finalizado» en Desk 2.0 (741 cerrados, D2) y sigue «Ingresado» en la réplica (740 cerrados, Z1).
+- **Es el camino hacia el relevo de Zoho.** Cuando un ticket se mueve desde la app, la sincronización con Zoho deja de reescribirlo (`managed_by_app`, `Desk2:packages/zoho-sync/src/db/repo.ts:71`), y solo Desk 2.0 conoce su estado.
 
-Una sola interfaz, dos implementaciones. Boceto:
+**Cómo se mantiene al día:** el código actual de Desk 2.0 ya no relee solo los 100 tickets con actividad más reciente. Pide a Zoho los modificados desde la última marca y relee cada uno por su detalle, con campos personalizados incluidos (`sincronizarModificados`, `Desk2:packages/zoho-sync/src/sync.ts:360-410`); si esa búsqueda falla, cae al método antiguo (`sync.ts:174`, `:404-407`). Eso explica que allí estén el cierre del 884 y la `classification`. **No verificado:** que esa versión sea la desplegada en producción, y que el trabajador del hub la use también. La antigüedad real de la sincronización se mide con las consultas pendientes (P2 y P5) y se trata con D7.
+
+### B.2 Respaldo: la réplica del portal
+
+Sin `DESK2_DB_URL`, o si la conexión falla, el mismo adaptador sirve los tickets de `desk.tickets` de `zoho-hub`, como hace hoy la pestaña Servicios (`apps/hub-api/src/trazabilidad/repo.ts:335-354`).
+
+| Capacidad | Con Desk 2.0 | Con la réplica (respaldo) |
+|---|---|---|
+| Estados | Sí | Sí, puede ir más atrasada |
+| Flujo | `classification` | Deducido del asunto («Equipo Nuevo») o del prefijo `HV_`; corregible a mano (D11) |
+| Llegada | Exacta si hay transición; si no, aproximada | Aproximada (historial del portal) |
+| Prioridad | La fijada en Desk 2.0 | No hay: FIFO puro |
+| Cierres de empresa | Sí | No, y se avisa |
+| Tickets nacidos en la app | Sí | No existen |
+
+La pantalla muestra siempre qué fuente está activa y qué no puede dar.
+
+### B.3 Cruce por número de ticket
+
+- **Tickets de Zoho:** números del 171 al 1010, los mismos en las dos bases (D3; Z5 frente a D5).
+- **Tickets nacidos en Desk 2.0:** id `app-<uuid>` (`Desk2:packages/zoho-sync/src/db/repo.ts:413`) y número desde 10.000 (`Desk2:packages/zoho-sync/src/db/migrate.ts:43-50`). Hoy hay uno, el 10005.
+- **No se pisan.** Y todas las tablas del portal ya usan el número (`tmc_servicios_tipo.numero`, `tmc_estados_historial.numero`), así que el tipo de servicio puesto a mano y el historial siguen valiendo con cualquiera de las dos fuentes.
+
+| Situación | Manda |
+|---|---|
+| Conexión activa, ticket en las dos | Desk 2.0 |
+| Conexión activa, ticket solo en Desk 2.0 | Desk 2.0 |
+| Conexión activa, ticket solo en la réplica | No se muestra: Desk 2.0 es la referencia. Se cuenta en un aviso de diagnóstico |
+| Sin conexión o conexión caída | La réplica, con rótulo de respaldo |
+
+### B.4 El adaptador
+
+Una sola interfaz y dos implementaciones. Todo lo demás (categorías, puestos, duraciones, asignaciones, proyección) trabaja sobre `TicketTaller` y no sabe de dónde viene.
 
 ```ts
 interface FuenteTaller {
-  nombre: 'zoho' | 'desk2';
-  ticketsAbiertos(): Promise<TicketTaller[]>;   // numero, estado, flujo, prioridad, llegada
-  cierres(desde: string, hasta: string): Promise<string[]>;   // fechas; [] con Zoho
+  nombre: 'desk2' | 'replica';
+  ticketsAbiertos(): Promise<TicketTaller[]>;
+  cierres(desde: string, hasta: string): Promise<string[]>;     // [] con la réplica
   capacidades: { prioridad: boolean; cierres: boolean; llegadaExacta: boolean; flujoPorClasificacion: boolean };
 }
 interface TicketTaller {
   numero: number;
   estado: string;
   flujo: 'servicio' | 'equipo_nuevo';
-  prioridad: number;                               // 0 con Zoho
-  llegada: { instante: number | null; exacta: boolean };   // entrada en el estado actual
-  sinConfirmar: boolean;
+  flujoOrigen: 'clasificacion' | 'deducido' | 'manual';
+  prioridad: number;                                             // 0 = sin prioridad fijada
+  llegada: { instante: number | null; exacta: boolean };         // entrada en el estado actual
+  sinConfirmar: boolean;                                         // más de un día sin refrescar (D7)
 }
+// elegirFuente(): desk2 si hay DESK2_DB_URL y responde; si no, replica. Devuelve además el motivo del respaldo.
 ```
 
-Todo lo demás (categorías, puestos, duraciones, asignaciones, proyección) trabaja sobre `TicketTaller` y no sabe de dónde viene. `capacidades` decide los rótulos de la pantalla.
+### B.5 La llegada a un estado
 
-### B.4 Prioridad (D1)
+Por orden de preferencia:
 
-- **Criterio de Desk 2.0:** rango `Urgent` 4, `High` 3, `Medium` 2, `Low` 1, desconocido 0; dentro del rango, por fecha (`Desk2:packages/shared/src/prioridad.ts:22-23`, `:95-109`).
-- **La réplica de Zoho sí tiene un campo de prioridad:** `desk.tickets.priority`, relleno en 774 de 775 tickets, con valores `High` (439), `Low` (324) y `Medium` (11); entre los abiertos, 15 `High` y 20 `Low` (Z2).
-- **Pero hoy es el mismo dato en las dos fuentes.** En Desk 2.0 ningún ticket tiene la prioridad fijada en la app (`prioridad_en_app_at` vacío en todos, D6): los 15 `High` y 19 `Low` abiertos son el valor que vino de Zoho. La prioridad por cliente «Top 5» de Desk 2.0 (`Desk2:apps/desk/server/db/prioridadCliente.ts:106-124`) aún no se ha usado.
-- **Conclusión:** técnicamente la prioridad de Zoho es utilizable sin conexión, pero D1 dice que solo se aplica con la conexión encendida. Queda como decisión abierta si el `High` / `Low` de Zoho significa lo mismo que la prioridad de Desk 2.0 (ver I.4).
+1. **Transición de Desk 2.0:** último `performed_at` de `desk.ticket_transitions` con `to_status` = estado actual. Exacta.
+2. **Historial del portal:** `desde` del tramo abierto en `tmc_estados_historial`. Exacta al minuto si `desde_real = TRUE`; aproximada si es primera observación.
+3. **Sin dato:** al final, por número de ticket.
 
-### B.5 Flujo: servicio o equipo nuevo
+**El historial del portal debe seguir a la fuente principal.** Hoy `registrarEstados` lee la réplica (`repo.ts:645-689`). Con D4 debe leer del adaptador, y **no apuntar nada mientras se esté en respaldo**: las dos bases pueden discrepar (el 884 es «Finalizado» en una e «Ingresado» en la otra), y alternar de fuente escribiría cambios de estado que nunca ocurrieron.
 
-- **En Desk 2.0** el flujo sale de `classification`: equipo nuevo si normaliza a «Equipo nuevo» y el estado pertenece a ese catálogo; si no, servicio (`Desk2:packages/shared/src/flujos.ts:51-61`). En la base `desk` el campo viene relleno en 34 de los 35 abiertos: 4 son «Equipo Nuevo» (1000, 1001, 1002, 1008) (D5).
-- **En la réplica de Zoho `classification` está vacío en los 775 tickets** (Z3). Con la fuente Zoho no se puede distinguir el flujo por ese campo.
-- **Hipótesis para la fuente Zoho:** los tickets de equipo nuevo llevan un código de servicio con prefijo `HV_` y un asunto que empieza por «Equipo Nuevo» (observado el 06/10/2026 en los cuatro tickets anteriores). Si se acepta, el adaptador de Zoho deduce el flujo de ahí y lo marca como deducido; si no, se asigna a mano (ver I.5).
+### B.6 Prioridad (D1)
+
+- **Criterio:** rango `Urgent` 4, `High` 3, `Medium` 2, `Low` 1 (`Desk2:packages/shared/src/prioridad.ts:22-23`, `:95-109`).
+- **Solo cuenta la prioridad fijada en Desk 2.0**, es decir, la de tickets con `prioridad_en_app_at` relleno (`Desk2:apps/desk/server/db/prioridadCliente.ts:106-124`). El resto se trata como «sin prioridad».
+- **Hoy no hay ninguna fijada** (D6): los `High` / `Low` que se ven en las dos bases son el valor de Zoho (Z2, D6) y no se usan. La fila es FIFO puro.
+
+### B.7 Flujo: servicio o equipo nuevo (D11)
+
+- **Con Desk 2.0:** equipo nuevo si `classification` normaliza a «equipo nuevo»; si no, servicio (`Desk2:packages/shared/src/flujos.ts:51-61`). Hoy son equipo nuevo los tickets 1000, 1001, 1002 y 1008 (D5).
+- **Con la réplica:** `classification` está vacío (Z3). Se deduce: equipo nuevo si el asunto empieza por «Equipo Nuevo» o el código de servicio empieza por `HV_`.
+- **Marca a mano por ticket:** gana siempre, con cualquier fuente. Se guarda en una tabla del portal (E.4).
 
 ---
 
-## C. Estados: réplica frente a blueprint
+## C. Estados: las dos bases frente al blueprint
 
 ### C.1 Estados que existen hoy
 
-| Estado | Tipo en Desk | Tickets (réplica) | Abiertos (réplica) | Abiertos (Desk 2.0) |
-|---|---|---|---|---|
-| Finalizado | Closed | 740 | 0 | 0 |
-| Servicio externo | On Hold | 7 | 7 | 7 |
-| Notificación cliente | On Hold | 6 | 6 | 6 |
-| Por Facturar | On Hold | 5 | 5 | 5 |
-| OV asignada | On Hold | 1 | 1 | 1 |
-| En Espera de Repuestos | On Hold | 1 | 1 | 1 |
-| En espera de SKU inventario | On Hold | 1 | 1 | 1 |
-| Rev./Diagnostico | Open | 6 | 6 | 7 |
-| Ingresado | Open | 4 | 4 | 3 |
-| En Proceso | Open | 3 | 3 | 3 |
-| Por Entregar | Open | 1 | 1 | 1 |
+| Estado | Tipo en Desk | Abiertos en Desk 2.0 | Abiertos en la réplica |
+|---|---|---|---|
+| Rev./Diagnostico | Open | 7 | 6 |
+| Servicio externo | On Hold | 7 | 7 |
+| Notificación cliente | On Hold | 6 | 6 |
+| Por Facturar | On Hold | 5 | 5 |
+| Ingresado | Open | 3 | 4 |
+| En Proceso | Open | 3 | 3 |
+| OV asignada | On Hold | 1 | 1 |
+| En Espera de Repuestos | On Hold | 1 | 1 |
+| En espera de SKU inventario | On Hold | 1 | 1 |
+| Por Entregar | Open | 1 | 1 |
+| Finalizado | Closed | 0 (741 cerrados) | 0 (740 cerrados) |
 
-Fuentes: Z1 y D2. Las dos diferencias son el ticket 884 (cerrado en Desk 2.0, «Ingresado» en la réplica) y el 10005 (solo en Desk 2.0, en «Rev./Diagnostico»).
+Fuentes: D2 y Z1. Las dos diferencias son el ticket 884 (cerrado en Desk 2.0, «Ingresado» en la réplica) y el 10005 (solo en Desk 2.0, en «Rev./Diagnostico»). Son 35 abiertos en cada base.
 
 Son 11 estados en uso. El blueprint de Desk 2.0 define 23 (`Desk2:packages/shared/src/estados.ts:59-106`).
 
@@ -206,16 +250,16 @@ Son 11 estados en uso. El blueprint de Desk 2.0 define 23 (`Desk2:packages/share
 
 - **En el blueprint y sin ningún ticket hoy en ninguna de las dos bases (12):** «Ticket creado», «Remisión creada», «Notificado», «Notificación a Compras», «Notificación Comercial», «Solicitado», «Continuación del proceso», «Liberación Comercial», «Por Entregar / Sin facturar», «Verificación», «Pendiente» y «Solicitud Soporte».
 - **En las bases y no en el blueprint:** ninguno.
-- **Aviso:** «Notificación Comercial» tuvo un ticket en la réplica durante el 06/10/2026, escrito con doble espacio («Notificación  Comercial»). La clave normalizada lo absorbe (`claveEstadoDesk`, `apps/hub-api/src/trazabilidad/dominio.ts:360-362`).
+- **Aviso:** «Notificación Comercial» tuvo un ticket durante el 06/10/2026, escrito con doble espacio. La clave normalizada lo absorbe (`claveEstadoDesk`, `apps/hub-api/src/trazabilidad/dominio.ts:360-362`).
 - **Dos nombres para la misma fase inicial:** «OV asignada» es el de Zoho y «Ticket creado» el de la app (`Desk2:packages/shared/src/transitions.ts:127-144`).
 
-### C.3 Categoría propuesta para cada estado
+### C.3 Categoría de cada estado
 
 | Estado | Categoría en la agenda | Etapa | Nota |
 |---|---|---|---|
-| OV asignada | Por llegar | — | D4. Lista aparte, sin proyectar |
-| Ticket creado | Por llegar | — | D4 |
-| Remisión creada | Fila de entrada | — | Solo con fuente Desk 2.0 |
+| OV asignada | Por llegar | — | Lista aparte, sin proyectar |
+| Ticket creado | Por llegar | — | |
+| Remisión creada | Fila de entrada | — | Solo tickets nacidos en la app |
 | Ingresado | Fila de entrada | — | En el flujo de equipo nuevo alimenta Proceso, no Diagnóstico |
 | Rev./Diagnostico | Etapa activa | Diagnóstico | |
 | Notificado | Etapa activa | Diagnóstico | D2: sigue ocupando el puesto |
@@ -234,51 +278,54 @@ Son 11 estados en uso. El blueprint de Desk 2.0 define 23 (`Desk2:packages/share
 | Por Entregar | Fin de taller | — | Espera externa en Desk 2.0; diferencia documentada |
 | Por Entregar / Sin facturar | Fin de taller | — | |
 | Finalizado | Fin de taller | — | Cerrado; no aparece en la agenda |
-| Pendiente | Sin categoría clara | — | Flujo de soporte remoto; no ocupa taller (**hipótesis**) |
-| Solicitud Soporte | Sin categoría clara | — | Flujo de soporte remoto; no ocupa taller (**hipótesis**) |
+| Pendiente | Fuera de la agenda | — | D10: soporte remoto |
+| Solicitud Soporte | Fuera de la agenda | — | D10: soporte remoto |
 
-«Notificación a Compras» no estaba en la lista de standby de la regla 2. Se propone como standby porque depende de Compras, coherente con D2.
+«Notificación a Compras» no estaba en la lista de standby de la regla 2. Va como standby porque depende de Compras, coherente con D2.
 
-### C.4 Papeles ya guardados en `tmc_estados_desk` (Z4)
+### C.4 Papeles en `tmc_estados_desk`
 
-| Estado | Papel guardado hoy | Categoría propuesta | ¿Contradicción? |
+Papel guardado el 06/10/2026 (Z4) y papel tras D5:
+
+| Estado | Papel el 06/10/2026 | Papel tras D5 | Categoría en la agenda |
 |---|---|---|---|
-| Notificación cliente | standby | Standby | No |
-| Servicio externo | standby | Standby | No |
-| Por Facturar | standby | Fin de taller | **Sí** |
-| Por Entregar | standby | Fin de taller | **Sí** |
+| Notificación cliente | standby | standby | Standby |
+| Servicio externo | standby | standby | Standby |
+| Por Facturar | standby | **terminado** | Fin de taller |
+| Por Entregar | standby | **terminado** | Fin de taller |
 
-El papel (`cuenta` / `standby` / `terminado`) gobierna el reloj del plazo de la pestaña Servicios; la categoría gobernará los puestos de la agenda. Para los puestos el efecto es el mismo (ambos liberan), pero no para la fila: un standby vuelve al final de la fila, un fin de taller no vuelve. Por eso la categoría debe ser una columna propia y no derivarse del papel. Queda abierta la decisión de si además se corrige el papel de esos dos estados a «Trabajo terminado» (ver I.3).
+El cambio de D5 lo hace Gerencia desde Configuración; este documento no modifica datos. Con él, papel y categoría quedan alineados: el plazo de Servicios se detiene con veredicto en los mismos estados en que la agenda da el trabajo por terminado.
+
+Papel y categoría siguen siendo columnas distintas. El papel (`cuenta` / `standby` / `terminado`) gobierna el reloj del plazo; la categoría gobierna puestos y filas, y distingue además «por llegar», «fila de entrada» y la etapa, que el papel no conoce.
 
 ---
 
 ## D. ¿Basta el historial de estados?
 
-**Hoy no.** Qué da y qué no da `portal.tmc_estados_historial` (`apps/hub-api/src/users/migrations/047_trazabilidad_estados_historial.sql:39-55`, `apps/hub-api/src/trazabilidad/repo.ts:645-689`):
+**Basta para lo decidido.** Con D8 no se reconstruye el pasado: se trabaja con orden aproximado y con el reparto inicial que confirma el jefe de taller (D6).
+
+Qué da y qué no da `portal.tmc_estados_historial` (`apps/hub-api/src/users/migrations/047_trazabilidad_estados_historial.sql:39-55`, `apps/hub-api/src/trazabilidad/repo.ts:645-689`):
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Cuándo entró el ticket en su estado actual? | Solo si el tramo abierto tiene `desde_real = TRUE`, con precisión de 5 minutos más el retraso del trabajador. Si es `FALSE`, `desde` es la primera vez que el portal lo vio |
+| ¿Cuándo entró el ticket en su estado actual? | Si el tramo abierto tiene `desde_real = TRUE`, con precisión de 5 minutos más el retraso de la sincronización. Si es `FALSE`, `desde` es la primera vez que el portal lo vio |
 | ¿Cuándo entró en su etapa (varios estados)? | Derivable recorriendo hacia atrás los tramos contiguos de la misma etapa, como hace `inicioDeRacha` para «terminado» (`apps/hub-api/src/trazabilidad/plazos.ts:195-204`). Es real solo si el primer tramo de la racha tiene `desde_real = TRUE` |
 | ¿En qué orden llegaron los que ya estaban? | No se sabe. Todos los vistos en la misma pasada comparten `desde` |
 
-Estado real del historial el 06/10/2026 (Z6 y Z5): 35 tramos, uno por ticket abierto, **0 con `desde_real`**, y todos con el mismo instante (06/10/2026 22:12:04 UTC, primera pasada tras el despliegue). El orden de llegada de los 35 tickets abiertos es hoy desconocido para el portal: se ordenan por número y se marcan «orden aproximado».
+Estado real el 06/10/2026 (Z6 y Z5): 35 tramos, uno por ticket abierto, **0 con `desde_real`**, todos con el mismo instante (06/10/2026 22:12:04 UTC, primera pasada tras el despliegue). A partir de ahí cada cambio de estado deja un tramo real, así que el dato mejora solo con el tiempo.
 
-A partir de ahora cada cambio de estado deja un tramo real, así que el dato mejora solo con el tiempo.
+Lo que hay que cambiar en el historial para la agenda:
 
-### Qué falta y de dónde podría salir
+1. **Que lea de la fuente principal** y no apunte en respaldo (B.5).
+2. **Etapa al leer.** La tabla guarda la clave del estado; la correspondencia estado → etapa se aplica al leer, igual que el papel.
 
-1. **`desk.ticket_transitions` de Desk 2.0** da el instante exacto de entrada en cada estado, pero solo de los movimientos hechos en la app (`Desk2:apps/desk/server/db/sla.ts:28-32`). Hoy lo tiene 1 de 35 abiertos (D4).
-2. **`desk.ticket_history` de la base `zoho-hub`** guarda el registro de eventos de Zoho: 42.588 eventos de los 775 tickets, entre ellos 4.433 `BlueprintTransitionPerformed`; los 35 abiertos tienen historial (Z7, Z8, Z9). **Hipótesis:** el campo `raw` de esos eventos contiene la transición o el estado de destino, lo que permitiría reconstruir cuándo entró cada ticket en su estado actual. No se comprobó la forma de `raw` (no se consultó para no exponer datos). Limitación conocida: el último evento es del 02/10/2026, porque el trabajador descarga el historial de cada ticket una sola vez.
-3. **Etapa sin estado propio.** La tabla guarda la clave del estado, no la etapa; la correspondencia estado → etapa se aplica al leer, igual que el papel.
-
-Recomendación: usar el historial del portal como base, completar con `ticket_transitions` cuando la conexión esté encendida, y estudiar el punto 2 como mejora para el arranque (ver I.7).
+`desk.ticket_history` guarda el registro de eventos de Zoho (en la réplica, 42.588 eventos y 4.433 transiciones de blueprint, Z7 y Z8). El rol tendrá permiso de lectura sobre la tabla de Desk 2.0, pero por D8 no se usa en esta construcción.
 
 ---
 
-## E. Modelo de datos propuesto
+## E. Modelo de datos
 
-Todo en el esquema `portal`, migraciones idempotentes desde la 049 (la última registrada es la 048, `apps/hub-api/src/db.ts:24`). Las migraciones se reejecutan en cada arranque.
+Todo en el esquema `portal`, migraciones idempotentes desde la 049 (la última registrada es la 048, `apps/hub-api/src/db.ts:24`). Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
 
 ### E.1 Migración 049 — categoría y etapa de cada estado
 
@@ -288,14 +335,14 @@ Extiende `portal.tmc_estados_desk`; sin tabla paralela. No se puede editar la 04
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria VARCHAR(12) NULL;
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS etapa     VARCHAR(12) NULL;
 -- CHECK con nombre, dentro de DO $$ … IF NOT EXISTS (pg_constraint) … $$:
---   categoria IN ('por_llegar','entrada','activa','standby','fin')
+--   categoria IN ('por_llegar','entrada','activa','standby','fin','fuera')
 --   etapa     IN ('diagnostico','proceso','verificacion')
 --   (categoria = 'activa') = (etapa IS NOT NULL)
 ```
 
-- **Valor por defecto en código, la tabla manda.** Una fila solo existe para los estados que alguien ha tocado, y `actualizado_por` es obligatorio, así que no se puede sembrar. El catálogo de C.3 vive como constante en `dominio.ts`; si la fila tiene `categoria`, gana la fila. `NULL` = «según el catálogo».
-- **Contrato del PUT.** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre (`apps/hub-api/src/trazabilidad/types.ts:423-433`, `repo.ts:609-618`). Hay que pasarlo a actualización parcial: `{ estado, rol?, categoria?, etapa? }`.
-- **Guardas que habrá que actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y «la 048 es la última» (`plazos.test.ts:613-616`).
+- **Valor por defecto en código, la tabla manda.** Una fila solo existe para los estados que alguien ha tocado y `actualizado_por` es obligatorio, así que no se siembra. El catálogo de C.3 vive como constante en `dominio.ts`; si la fila tiene `categoria`, gana la fila. `NULL` = «según el catálogo».
+- **Contrato del PUT.** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre (`apps/hub-api/src/trazabilidad/types.ts:423-433`, `repo.ts:609-618`). Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`.
+- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y «la 048 es la última» (`plazos.test.ts:613-616`).
 
 ### E.2 Migración 050 — puestos por etapa y duraciones
 
@@ -304,27 +351,29 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_etapas (
   etapa               VARCHAR(12)  PRIMARY KEY CHECK (etapa IN ('diagnostico','proceso','verificacion')),
   etiqueta            VARCHAR(40)  NOT NULL,
   orden               SMALLINT     NOT NULL,
-  puestos             INTEGER      NOT NULL DEFAULT 1 CHECK (puestos BETWEEN 0 AND 50),
-  dias_por_defecto    INTEGER      NULL CHECK (dias_por_defecto BETWEEN 1 AND 365),
+  puestos             INTEGER      NOT NULL CHECK (puestos BETWEEN 0 AND 50),
   actualizado_por_id  UUID         NULL,
   actualizado_por     VARCHAR(254) NULL,
   actualizado_en      TIMESTAMPTZ  NULL
 );
--- Semilla de las tres etapas con ON CONFLICT (etapa) DO NOTHING.
 
 CREATE TABLE IF NOT EXISTS portal.tmc_agenda_duraciones (
   etapa               VARCHAR(12)  NOT NULL,
-  tipo                VARCHAR(80)  NOT NULL,          -- clave de tipo de servicio (claveTipoServicio)
+  tipo                VARCHAR(80)  NOT NULL,     -- clave de tipo de servicio, o '*' = por defecto de la etapa
   dias_habiles        INTEGER      NOT NULL CHECK (dias_habiles BETWEEN 1 AND 365),
   actualizado_por_id  UUID         NULL,
-  actualizado_por     VARCHAR(254) NOT NULL,
-  actualizado_en      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  actualizado_por     VARCHAR(254) NULL,
+  actualizado_en      TIMESTAMPTZ  NULL,
   PRIMARY KEY (etapa, tipo)
 );
+-- Semillas con ON CONFLICT DO NOTHING (no pisan lo que se edite):
+--   etapas:     diagnostico 3 puestos · proceso 4 · verificacion 2
+--   duraciones: (diagnostico,'*') 3 · (proceso,'*') 4 · (verificacion,'*') 1
 ```
 
-- **Duración de un ticket en una etapa:** la fila `(etapa, tipo efectivo)` si existe; si no, `dias_por_defecto` de la etapa; si tampoco, «sin duración» (caso frontera F.5).
-- **El tipo efectivo** es el que ya resuelve `tipoEfectivo` (`dominio.ts:263-268`): el elegido a mano manda sobre el de Desk.
+- **Valores iniciales:** los de la configuración de partida de este análisis. Se ajustan en Configuración.
+- **Duración de un ticket en una etapa (D9):** la fila `(etapa, tipo efectivo)` si existe; si no, la fila `(etapa, '*')`.
+- **Tipo efectivo:** el que ya resuelve `tipoEfectivo` (`dominio.ts:263-268`): el puesto a mano en `tmc_servicios_tipo` gana sobre el de Desk. Si no hay ninguno, el ticket lleva la marca «sin tipo» y usa la fila «*».
 - **No se reutiliza `tmc_plazos`:** aquel es el plazo comprometido con el cliente por tipo; esto es cuánto ocupa un puesto en cada etapa.
 
 ### E.3 Migración 051 — asignaciones
@@ -336,12 +385,15 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_asignaciones (
   etapa            VARCHAR(12)  NOT NULL,
   puesto           INTEGER      NOT NULL CHECK (puesto >= 1),
   desde            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  inicio           DATE         NOT NULL,                      -- día desde el que cuenta la duración
   hasta            TIMESTAMPTZ  NULL,                          -- NULL = vigente
   sugerido         INTEGER      NULL,                          -- ticket que proponía la fila
   motivo           VARCHAR(500) NULL,                          -- obligatorio si numero <> sugerido
+  origen           VARCHAR(12)  NOT NULL CHECK (origen IN ('fila','arranque')),
   asignado_por_id  UUID         NULL,
   asignado_por     VARCHAR(254) NOT NULL,
   cierre           VARCHAR(12)  NULL CHECK (cierre IN ('estado','manual','reduccion')),
+  cierre_motivo    VARCHAR(500) NULL,                          -- obligatorio si cierre = 'manual' (D7)
   cerrado_por      VARCHAR(254) NULL,
   CHECK (hasta IS NULL OR hasta >= desde)
 );
@@ -349,97 +401,137 @@ CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_puesto_uq ON portal.tmc_agenda
 CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_ticket_uq ON portal.tmc_agenda_asignaciones (numero)        WHERE hasta IS NULL;
 ```
 
-- **Un puesto, un ticket; un ticket, un puesto:** lo garantizan los dos índices parciales, igual que `tmc_estados_historial_abierto_uq` (`047…sql:39-55`).
-- **Cierre automático:** en la misma pasada que ya apunta los estados cada 5 minutos (`registrarEstados`, `repo.ts:645-689`), si el estado del ticket ya no pertenece a la etapa de su asignación vigente, se cierra con `cierre = 'estado'`.
-- **No se escribe nada en Desk ni en Zoho.** Sin claves foráneas a `desk.*`.
+- **Un puesto, un ticket; un ticket, un puesto:** lo garantizan los dos índices parciales, como `tmc_estados_historial_abierto_uq` (`047…sql:39-55`).
+- **`inicio`:** el día desde el que cuenta la duración. Normalmente el día de la asignación; en el arranque (D6), el día de llegada a la etapa si es exacto, para que los ya pasados de fecha se vean como tales.
+- **Cierre automático (regla 5):** en la misma pasada que apunta los estados cada 5 minutos, si el estado del ticket ya no pertenece a la etapa de su asignación vigente, se cierra con `cierre = 'estado'`.
+- **Liberación a mano (D7):** `cierre = 'manual'`, con `cerrado_por` y `cierre_motivo` obligatorios.
+- **No se escribe nada en Desk 2.0 ni en Zoho.**
 
-### E.4 Endpoints previstos
+### E.4 Migración 052 — flujo marcado a mano
 
-Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`).
+```sql
+CREATE TABLE IF NOT EXISTS portal.tmc_agenda_flujo (
+  numero              INTEGER      PRIMARY KEY CHECK (numero > 0),
+  flujo               VARCHAR(12)  NOT NULL CHECK (flujo IN ('servicio','equipo_nuevo')),
+  actualizado_por_id  UUID         NULL,
+  actualizado_por     VARCHAR(254) NOT NULL,
+  actualizado_en      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+```
+
+Mismo patrón que `tmc_servicios_tipo` (`044_trazabilidad_servicios_tipo.sql:26-33`): una fila por ticket corregido; borrarla vuelve al flujo de la fuente (D11).
+
+### E.5 Endpoints
+
+Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`). Los cálculos se hacen en el servidor con «hoy» como argumento (`hoyOf`, `router.ts:52-59`).
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/agenda` (`?hoy=`) | La agenda completa: fuente activa y sus capacidades, etapas con puestos y ocupación, fila de cada etapa con fecha prevista, carril de standby, fin de taller, por llegar, proyección, saturación, primer hueco libre y avisos |
-| PUT | `/agenda/etapas` | `{ etapa, puestos, diasPorDefecto }` → puestos y duración por defecto de una etapa |
-| PUT | `/agenda/duraciones` | `{ etapa, tipo, dias }` → duración por etapa y tipo; `dias` vacío borra la fila |
+| GET | `/agenda` (`?hoy=`) | La agenda completa: fuente activa, capacidades y motivo del respaldo; etapas con puestos y ocupación; fila de cada etapa con fecha prevista y sugerido; standby; fin de taller; por llegar; proyección; saturación; primer hueco libre; festivos y cierres del eje; avisos |
+| GET | `/agenda/arranque` | La propuesta de reparto inicial (D6), sin escribir nada |
+| POST | `/agenda/arranque` | Confirma el reparto: la lista `{ numero, etapa, puesto }` tal como la deja el jefe de taller. Todo o nada |
 | POST | `/agenda/asignaciones` | `{ numero, etapa, puesto, motivo? }` → asigna; exige `motivo` si no es el sugerido |
-| DELETE | `/agenda/asignaciones/:id` | Libera a mano un puesto, con motivo |
+| DELETE | `/agenda/asignaciones/:id` | Libera un puesto a mano, con `motivo` obligatorio (D7) |
+| GET | `/agenda/config` | Etapas con sus puestos y la tabla de duraciones |
+| PUT | `/agenda/etapas` | `{ etapa, puestos }` |
+| PUT | `/agenda/duraciones` | `{ etapa, tipo, dias }`; `dias` vacío borra la fila, salvo la «*» |
+| PUT | `/agenda/flujo/:numero` | `{ flujo }`; vacío quita la marca manual (D11) |
 | PUT | `/estados` (existente) | Se amplía con `categoria` y `etapa`, en actualización parcial |
-
-Los cálculos se hacen en el servidor con «hoy» como argumento, como en Servicios (`hoyOf`, `router.ts:52-59`), para que las pruebas sean deterministas.
 
 ---
 
 ## F. Algoritmo de la proyección
 
-### F.1 Calendario
+Función pura: recibe los tickets del adaptador, la configuración, las asignaciones vigentes, «hoy» y el calendario. No lee el reloj ni la base.
+
+### F.1 Calendario (D3)
 
 ```
-esHabilAgenda(d) = esHabil(d)                 // lunes a viernes sin festivos de Colombia (plazos.ts)
-                   y d no está en cierres     // cierres de Desk 2.0; conjunto vacío con fuente Zoho (D3)
+esHabilAgenda(d) = esHabil(d)               // lunes a viernes sin festivos de Colombia (plazos.ts)
+                   y d no está en cierres   // fuente.cierres(); conjunto vacío en respaldo
 sumar(d, n)      = el n-ésimo día hábil de agenda después de d (d no cuenta), como sumarDiasHabiles
 ```
 
 ### F.2 Preparación
 
 ```
-tickets   = fuente.ticketsAbiertos()
+fuente  = elegirFuente()                                   // desk2, o replica en respaldo
+tickets = fuente.ticketsAbiertos()
 para cada ticket t:
-    cat, etapa = categoriaDe(t.estado)                       // tabla → catálogo
-    si cat = 'entrada':  etapaDestino = (t.flujo = 'equipo_nuevo') ? 'proceso' : 'diagnostico'
-    si cat = 'standby' | 'fin' | 'por_llegar': fuera de la proyección
-puestos[e] = tmc_agenda_etapas.puestos
-asignada   = asignaciones vigentes (hasta IS NULL)
+    t.flujo = marcaManual(t.numero) ?? t.flujo             // D11
+    cat, etapa = categoriaDe(t.estado)                     // tabla → catálogo de C.3
+    si cat = 'entrada':
+        etapaDestino(t) = (t.flujo = 'equipo_nuevo') ? 'proceso' : 'diagnostico'
+    si cat ∈ { standby, fin, por_llegar, fuera }:  no se proyecta
+duracion(t, e) = duraciones[e][tipoEfectivo(t)] ?? duraciones[e]['*']      // D9
 ```
 
-### F.3 Fila de una etapa
+### F.3 Fila de una etapa (D1)
 
 ```
-fila(e) = tickets en un estado de la etapa e SIN asignación vigente     // ya están en la etapa
-          seguidos de tickets de 'entrada' cuya etapaDestino = e        // aún no han entrado
-orden dentro de cada tramo de la fila (D1):
-    1. prioridad descendente          (solo si fuente.capacidades.prioridad)
-    2. llegada ascendente             (instante de entrada en el estado)
-    3. número de ticket ascendente    (desempate y llegada desconocida)
-si llegada.exacta = falso o hay empate  →  marcar «orden aproximado»
+fila(e) = tickets en un estado de la etapa e SIN asignación vigente      // «en etapa sin puesto»
+          seguidos de tickets de 'entrada' con etapaDestino = e          // fila de entrada
+orden dentro de cada tramo:
+    1. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
+    2. llegada ascendente                             // instante de entrada en el estado
+    3. número de ticket ascendente                    // desempate y llegada desconocida
+si la llegada no es exacta o hay empate  →  «orden aproximado»
+sugerido(e) = primer ticket de fila(e)
 ```
 
 ### F.4 Simulación por etapa
 
 ```
 para cada etapa e:
-    libre = []                                               // (puesto, día en que queda libre)
+    libre = []                                             // (puesto, día en que queda libre)
     para cada puesto p de 1..puestos[e]:
-        si p tiene asignación a (ticket t):
-            fin = sumar(dia(a.desde), duracion(t, e))
-            si fin < hoy:  fin = sumar(hoy, 1)               // pasado de fecha: empuja (regla 6)
-            barra(t, p, dia(a.desde), fin);  libre.añadir(p, fin)
+        si p tiene asignación vigente a (ticket t):
+            fin = sumar(a.inicio, duracion(t, e))
+            si fin < hoy:  fin = sumar(hoy, 1)             // pasado de fecha: empuja (regla 6)
+            barra(t, p, a.inicio, fin);  libre.añadir(p, fin)
         si no:
-            libre.añadir(p, hoy)                             // hueco libre ya
+            libre.añadir(p, hoy)                           // hueco libre ya
     para cada ticket t de fila(e), en orden:
-        (p, d) = el puesto de libre con el día más temprano  // empate → puesto de número menor
+        (p, d) = el puesto de libre con el día más temprano     // empate → puesto de número menor
         inicio = max(d, hoy)
         fin    = sumar(inicio, duracion(t, e))
         previsto(t) = { puesto p, inicio, fin };  libre.actualizar(p, fin)
     primerHueco(e) = el día más temprano de libre tras repartir la fila
-    saturacion(e)  = ocupados / puestos[e], y nº de tickets en fila
+    saturacion(e)  = puestos ocupados / puestos[e], más el tamaño de la fila
 ```
 
 El día en que un puesto queda libre es el mismo en que entra el siguiente, porque el día de inicio no cuenta en `sumar`.
 
-### F.5 Casos frontera
+### F.5 Reparto inicial (D6)
+
+```
+proponerArranque():
+    para cada etapa e:
+        candidatos = tickets en un estado de e sin asignación, en el orden de F.3
+        para cada puesto libre p, por número:
+            t = siguiente candidato;  si no hay, terminar
+            inicio = t.llegada.exacta ? dia(t.llegada) : hoy
+            propuesta.añadir(t, e, p, inicio)
+    devolver propuesta          // no escribe; lo que no cabe queda en la fila
+confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajustada
+    validar puestos y tickets;  insertar todas con origen = 'arranque' en una transacción
+```
+
+### F.6 Casos frontera
 
 | Caso | Tratamiento |
 |---|---|
 | **Empate de llegada** | Decide el número de ticket; se marca «orden aproximado» |
 | **Pasado de fecha que empuja** | Sigue ocupando; fin proyectado = día hábil siguiente a hoy; se pinta en rojo. Cada día que siga ahí, toda la fila se corre un día |
-| **Standby que libera y vuelve** | Al entrar en standby la asignación se cierra (`cierre = 'estado'`) y sale de la proyección. Al volver a un estado de la etapa entra al final de la fila, con la llegada del momento en que regresó (regla 4) |
+| **Standby que libera y vuelve** | Al entrar en standby la asignación se cierra (`cierre = 'estado'`) y sale de la proyección. Al volver a un estado de la etapa entra al final de la fila, con la llegada del momento en que regresó |
 | **Equipo nuevo, dos etapas seguidas** | Ingresado → Proceso → Verificación. Se proyecta en cadena: la llegada prevista a Verificación es el fin previsto en Proceso. Es el único caso en que una etapa alimenta a otra sin standby en medio |
-| **Tipo sin duración** | Se usa `dias_por_defecto` de la etapa. Si tampoco hay, el ticket ocupa su puesto pero no tiene fin estimado: se pinta «sin duración», no se proyecta nada detrás en ese puesto, y la pantalla lo avisa |
+| **Tipo sin duración** | No puede darse: la fila «*» de cada etapa es obligatoria y no se puede borrar (D9). Un ticket sin tipo usa la «*» y lleva la marca «sin tipo» |
 | **Puesto que se reduce estando ocupado** | No se desaloja a nadie. Los puestos por encima del nuevo tope quedan «a extinguir»: siguen ocupados hasta que su ticket salga y no reciben a nadie más. La saturación puede superar el 100 % y se avisa |
-| **Más tickets en la etapa que puestos** | Los que no tienen asignación encabezan la fila de esa etapa, por delante de la fila de entrada (ya están físicamente en la etapa). Se marca «en etapa sin puesto» (ver I.2) |
-| **Diagnóstico no encadena con Proceso** | Entre ambas hay siempre standby (notificación y aprobación del cliente), que no se proyecta (regla 7). La fila de Proceso solo contiene tickets que ya están en «En Proceso» o «Continuación del proceso» |
-| **Ticket «sin confirmar»** | El que la réplica lleva más de un día sin refrescar se proyecta al final de su fila y marcado; puede estar ya cerrado (caso real: 884) (ver I.6) |
+| **Más tickets en la etapa que puestos** | Los que no caben encabezan la fila de esa etapa, por delante de la fila de entrada, marcados «en etapa sin puesto» (D6) |
+| **Diagnóstico no encadena con Proceso** | Entre ambas hay siempre standby (notificación y aprobación del cliente), que no se proyecta. La fila de Proceso solo contiene tickets que ya están en «En Proceso» o «Continuación del proceso» |
+| **Ticket «sin confirmar»** | Sigue en su puesto o en su fila, marcado. El jefe de taller puede liberar el puesto a mano, con motivo (D7) |
+| **Cambio a respaldo** | Las asignaciones vigentes se conservan; no se cierra ninguna automáticamente ni se apunta historial mientras dure. Un ticket que solo existe en Desk 2.0 conserva su puesto, marcado «sin datos de la fuente» |
+| **Ticket con marca manual de flujo** | La marca gana a la fuente; cambiarla recalcula a qué etapa alimenta |
 
 ---
 
@@ -447,17 +539,19 @@ El día en que un puesto queda libre es el mismo en que entra el siguiente, porq
 
 ```
  Agenda del taller                                       hoy mar 06/10/2026
- Fuente: Zoho (réplica) · sin prioridad · sin cierres de empresa · orden aproximado
- ─────────────────────────────────────────────────────────────────────────────────────
+ Fuente: Desk 2.0 · prioridad: ninguna fijada (FIFO puro) · cierres de empresa: 0 · orden aproximado
+ [ Proponer reparto inicial ]
+ ─────────────────────────────────────────────────────────────────────────────────────────────
                     oct
-                    06  07  08  09 │ 10  11  12 │ 13  14  15  16 │ 17  18 │ 19  20
-                    ma  mi  ju  vi │ sá  do  lu*│ ma  mi  ju  vi │ sá  do │ lu  ma
- ▌DIAGNÓSTICO  3/3 puestos · fila 7 · primer hueco: vie 09/10
-   Puesto 1         [#993 ██████████]░░░░░░░░░░░[·#1006·········]
-   Puesto 2         [#999 ██████████]░░░░░░░░░░░[·#1007·········]
-   Puesto 3         [#1005 █████████]░░░░░░░░░░░[·#1010·········]
-   Fila ▸ #1006 vie 09 · #1007 vie 09 · #1010 vie 09 · #880 jue 15 · #881 jue 15 · #882 jue 15 · #884? mar 20
-          └ en etapa sin puesto ─────────────┘   └ fila de entrada (Ingresado) ───────────────┘
+                    06  07  08  09 │ 10  11  12 │ 13  14  15  16 │ 17  18 │ 19  20  21
+                    ma  mi  ju  vi │ sá  do  lu*│ ma  mi  ju  vi │ sá  do │ lu  ma  mi
+ ▌DIAGNÓSTICO  3/3 puestos · fila 7 · primer hueco: mar 20/10
+   Puesto 1    ▓▓▓▓▓[#10005 ▓▓][·#1005··············][·#1010·········]░░░░░░[·#882·········]
+   Puesto 2         [#993 █████████]░░░░░░░░░░░[·#1006·········][·#880···░░░░░░·····]
+   Puesto 3         [#999 █████████]░░░░░░░░░░░[·#1007·········][·#881···░░░░░░·····]
+   Fila ▸ #1005 mié 07 · #1006 vie 09 · #1007 vie 09 · #1010 mar 13 · #880 jue 15 · #881 jue 15 · #882 vie 16
+          └ en etapa sin puesto ─────────────────────────┘   └ fila de entrada (Ingresado) ──────┘
+          [ Asignar #1005 al Puesto 1 ]   (sugerido; elegir otro pide motivo)
 
  ▌PROCESO      3/4 puestos · fila 0 · primer hueco: hoy
    Puesto 1         [#984 ██████████████░░░░░░░░░░░██]
@@ -468,133 +562,243 @@ El día en que un puesto queda libre es el mismo en que entra el siguiente, porq
  ▌VERIFICACIÓN 0/2 puestos · fila 0 · primer hueco: hoy
    Puesto 1         ( libre )
    Puesto 2         ( libre )
- ─────────────────────────────────────────────────────────────────────────────────────
+ ─────────────────────────────────────────────────────────────────────────────────────────────
  STANDBY (15) no ocupan puesto ni se proyectan
    Servicio externo 7 · Notificación cliente 6 · En Espera de Repuestos 1 · En espera de SKU 1
  FIN DE TALLER (6)   Por Facturar 5 · Por Entregar 1
  POR LLEGAR (1)      OV asignada 1
 
- Leyenda: ██ ocupado · [·#···] previsto · ░ no hábil (lu* = festivo) · ? sin confirmar · rojo = pasado de fecha
+ Leyenda: ██ ocupado · ▓▓ pasado de fecha · [·#···] previsto · ░ no hábil (lu* = festivo)
+          ? sin confirmar · «sin tipo» = duración por defecto de la etapa
 ```
 
 Elementos:
 
 - **Gantt por puesto agrupado por etapa.** Una fila por puesto; barra llena para el ticket que lo ocupa, barra punteada para los previstos. Reutiliza el eje, los días no hábiles y los rayados de `Barras` (`apps/trazabilidad-mantenimientos/src/vistas/Servicios.tsx:494-668`) y la geometría de `apps/trazabilidad-mantenimientos/src/lib/servicios.ts` (`ejeServicios` `:335-348`, `diasDelEje` `:527-534`).
-- **Fila de cada etapa** con la fecha prevista de entrada de cada ticket. El primero es el «sugerido»: un botón «Asignar» lo confirma; elegir otro abre el campo de motivo.
+- **Fila de cada etapa** con la fecha prevista de entrada de cada ticket. El primero es el «sugerido»: un botón lo confirma; elegir otro abre el campo de motivo.
+- **«Proponer reparto inicial»** (D6): abre la propuesta completa, editable, con un único botón de confirmar.
+- **Liberar puesto** (D7): en cada barra ocupada, con motivo obligatorio. Los tickets «sin confirmar» lo destacan.
 - **Carril de standby** agrupado por estado, sin fechas.
 - **Saturación y primer hueco libre** en la cabecera de cada etapa.
-- **Rótulo de fuente** fijo arriba, con lo que la fuente activa no puede dar.
+- **Rótulo de fuente** fijo arriba. En respaldo cambia a «Fuente: réplica de Zoho (respaldo) · sin prioridad · sin cierres de empresa · flujo deducido», con el motivo.
 - **Configuración:** un bloque nuevo con puestos y duraciones, y dos columnas más (categoría y etapa) en el bloque «Estados de Desk» (`apps/trazabilidad-mantenimientos/src/vistas/Configuracion.tsx:45-158`).
 
 ---
 
 ## H. Ejemplo resuelto con los tickets abiertos de hoy
 
-**Datos:** los 35 tickets abiertos de la réplica el 06/10/2026 (Z5), fuente Zoho. **Configuración supuesta:** Diagnóstico 3 puestos / 3 días, Proceso 4 puestos / 4 días, Verificación 2 puestos / 1 día, para todos los tipos.
+**Datos:** los 35 tickets abiertos de la base `desk` el 06/10/2026 (D5), fuente Desk 2.0. **Configuración:** Diagnóstico 3 puestos / 3 días, Proceso 4 puestos / 4 días, Verificación 2 puestos / 1 día, con la fila «*» para todos los tipos.
 
-**Supuestos necesarios, porque hoy no hay asignaciones ni llegadas reales:**
+**Condiciones del día:**
 
-- El orden es por número de ticket («orden aproximado»): los 35 tramos del historial son de primera observación y comparten instante (Z6).
-- Los tres primeros de cada etapa se dan por asignados hoy, martes 06/10/2026, y su etapa empieza a contar hoy.
-- El lunes 12/10/2026 es festivo en Colombia. No hay cierres de empresa (fuente Zoho; y en Desk 2.0 la tabla está vacía, D9).
-- Sin prioridad (fuente Zoho, D1).
+- **Sin prioridad:** ninguna fijada en Desk 2.0 (D6). FIFO puro.
+- **Sin cierres de empresa:** la tabla está vacía (D9). El lunes 12/10/2026 es festivo en Colombia.
+- **Llegadas:** solo el ticket 10005 tiene llegada exacta a su estado (29/09/2026 por la noche, hora de Colombia; D5). Los otros 34 son de primera observación y van por número («orden aproximado»).
+- **Sin asignaciones previas:** se parte del reparto inicial (D6).
 
 ### Reparto por categoría
 
 | Categoría | Tickets | Números |
 |---|---|---|
-| Etapa Diagnóstico (Rev./Diagnostico) | 6 | 993, 999, 1005, 1006, 1007, 1010 |
+| Etapa Diagnóstico (Rev./Diagnostico) | 7 | 993, 999, 1005, 1006, 1007, 1010, 10005 |
 | Etapa Proceso (En Proceso) | 3 | 984, 990, 1009 |
 | Etapa Verificación | 0 | — |
-| Fila de entrada (Ingresado) | 4 | 880, 881, 882, 884 |
+| Fila de entrada (Ingresado) | 3 | 880, 881, 882 |
 | Standby | 15 | Servicio externo: 991, 1000, 1001, 1002, 1003, 1004, 1008 · Notificación cliente: 689, 948, 958, 962, 968, 975 · En Espera de Repuestos: 976 · En espera de SKU inventario: 978 |
 | Fin de taller | 6 | Por Facturar: 977, 981, 982, 983, 992 · Por Entregar: 985 |
 | Por llegar (OV asignada) | 1 | 996 |
 
-Suman 35.
+Suman 35. Los cuatro tickets de equipo nuevo (1000, 1001, 1002, 1008) están en «Servicio externo», es decir, en standby.
 
-### Puestos
+### Reparto inicial propuesto (D6)
+
+Orden de llegada en Diagnóstico: primero el 10005 (llegada exacta, 29/09); después, por número, 993, 999, 1005, 1006, 1007 y 1010.
 
 | Etapa | Puesto | Ticket | Inicio | Fin estimado |
 |---|---|---|---|---|
-| Diagnóstico | 1 | 993 | mar 06/10 | vie 09/10 |
-| Diagnóstico | 2 | 999 | mar 06/10 | vie 09/10 |
-| Diagnóstico | 3 | 1005 | mar 06/10 | vie 09/10 |
+| Diagnóstico | 1 | 10005 | mar 29/09 (llegada exacta) | vie 02/10 → **pasado de fecha**; se proyecta su salida el mié 07/10 |
+| Diagnóstico | 2 | 993 | mar 06/10 | vie 09/10 |
+| Diagnóstico | 3 | 999 | mar 06/10 | vie 09/10 |
 | Proceso | 1 | 984 | mar 06/10 | mar 13/10 |
 | Proceso | 2 | 990 | mar 06/10 | mar 13/10 |
 | Proceso | 3 | 1009 | mar 06/10 | mar 13/10 |
 | Proceso | 4 | libre | — | — |
 | Verificación | 1 y 2 | libres | — | — |
 
-Cuentas: Diagnóstico, 3 días hábiles desde el 06/10 → mié 7, jue 8, vie 9. Proceso, 4 días hábiles → mié 7, jue 8, vie 9, mar 13 (el lunes 12 es festivo).
+Cuentas:
+
+- 10005: 3 días hábiles desde el 29/09 → mié 30, jue 1, vie 2. Ya pasó; por la regla 6 sale el día hábil siguiente a hoy, mié 07/10.
+- 993 y 999: 3 días hábiles desde el 06/10 → mié 7, jue 8, vie 9.
+- Proceso: 4 días hábiles desde el 06/10 → mié 7, jue 8, vie 9, mar 13 (el lunes 12 es festivo).
 
 ### Fila de Diagnóstico y fechas previstas
 
-| Orden | Ticket | Situación | Entra | Termina |
-|---|---|---|---|---|
-| 1 | 1006 | En etapa sin puesto | vie 09/10 | jue 15/10 |
-| 2 | 1007 | En etapa sin puesto | vie 09/10 | jue 15/10 |
-| 3 | 1010 | En etapa sin puesto | vie 09/10 | jue 15/10 |
-| 4 | 880 | Fila de entrada | jue 15/10 | mar 20/10 |
-| 5 | 881 | Fila de entrada | jue 15/10 | mar 20/10 |
-| 6 | 882 | Fila de entrada | jue 15/10 | mar 20/10 |
-| 7 | 884 | Fila de entrada, sin confirmar | mar 20/10 | vie 23/10 |
+| Orden | Ticket | Situación | Puesto | Entra | Termina |
+|---|---|---|---|---|---|
+| 1 | 1005 | En etapa sin puesto | 1 | mié 07/10 | mar 13/10 |
+| 2 | 1006 | En etapa sin puesto | 2 | vie 09/10 | jue 15/10 |
+| 3 | 1007 | En etapa sin puesto | 3 | vie 09/10 | jue 15/10 |
+| 4 | 1010 | En etapa sin puesto | 1 | mar 13/10 | vie 16/10 |
+| 5 | 880 | Fila de entrada | 2 | jue 15/10 | mar 20/10 |
+| 6 | 881 | Fila de entrada | 3 | jue 15/10 | mar 20/10 |
+| 7 | 882 | Fila de entrada | 1 | vie 16/10 | mié 21/10 |
 
-Cuentas: desde el vie 09/10, 3 días hábiles → mar 13, mié 14, jue 15. Desde el jue 15/10 → vie 16, lun 19, mar 20. Desde el mar 20/10 → mié 21, jue 22, vie 23.
+Cuentas: desde el mié 07/10 → jue 8, vie 9, mar 13. Desde el vie 09/10 → mar 13, mié 14, jue 15. Desde el mar 13/10 → mié 14, jue 15, vie 16. Desde el jue 15/10 → vie 16, lun 19, mar 20. Desde el vie 16/10 → lun 19, mar 20, mié 21.
 
-Las cinco primeras fechas previstas son las de los tickets 1006, 1007, 1010, 880 y 881.
+Las cinco primeras fechas previstas son las de los tickets 1005, 1006, 1007, 1010 y 880. El primer hueco libre en Diagnóstico tras repartir la fila es el mar 20/10.
 
 ### Lo que enseña el ejemplo
 
-- **Diagnóstico está saturado desde el primer día:** 6 tickets en la etapa para 3 puestos. Los que no caben encabezan la fila.
-- **Proceso tiene un hueco libre hoy y fila vacía.** No se puede prever quién lo ocupará, porque los que saldrán de Diagnóstico pasan antes por standby.
-- **Verificación está vacía:** el estado no tiene tickets. Los cuatro de equipo nuevo están en «Servicio externo».
-- **La fila de entrada es poco fiable hoy:** tres «Ingresado» son de febrero y el cuarto (884) ya está cerrado en Desk 2.0.
-- **Con la fuente Desk 2.0** cambiarían dos cosas: el 884 desaparece (está «Finalizado», D2) y aparece el 10005 en Diagnóstico, que tiene llegada exacta (30/09/2026, D5) y por tanto iría el primero de la fila de los que no tienen puesto. La prioridad no cambiaría nada en Diagnóstico: los siete son `Low` o sin prioridad (D5).
+- **Diagnóstico está saturado desde el primer día:** 7 tickets en la etapa para 3 puestos. Cuatro quedan «en etapa sin puesto» y encabezan la fila.
+- **El único ticket con llegada exacta ya está pasado de fecha** y empuja la fila un día.
+- **Proceso tiene un hueco libre hoy y fila vacía.** No se puede prever quién lo ocupará, porque los que salgan de Diagnóstico pasan antes por standby.
+- **Verificación está vacía.**
+- **La fila de entrada son tres tickets de febrero** (880, 881, 882). Conviene que el jefe de taller los revise en el arranque.
+- **Con la réplica de respaldo** el resultado cambiaría en dos puntos: no existiría el 10005 y aparecería el 884 en la fila de entrada, que en Desk 2.0 ya está cerrado.
 
 ---
 
-## I. Riesgos y decisiones abiertas
+## I. Riesgos
 
-Solo lo que sigue abierto después de D1–D4.
+No quedan decisiones de negocio abiertas: las nueve de la primera versión de este documento se resolvieron el 06/10/2026 (D4 a D11).
 
-### Decisiones que necesita Gerencia
+1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla, y no está verificado qué versión corre en producción. Se mide con las consultas pendientes y se trata con la marca «sin confirmar» (D7).
+2. **El orden de llegada actual es aproximado.** 34 de los 35 abiertos no tienen llegada exacta. El reparto inicial lo corrige el jefe de taller (D6, D8).
+3. **La remisión de entrada aún no ordena nada.** No hay remisiones de la app ni posteriores al 24/07/2026 (D8).
+4. **Dos procesos sincronizan Zoho por separado.** Desk 2.0 y el trabajador del hub pueden discrepar sobre un mismo ticket. Por eso el historial del portal no apunta en respaldo (B.5).
+5. **Entrar y salir del respaldo.** La agenda cambia de aspecto: aparecen o desaparecen tickets (10005, 884), se pierde la prioridad y los cierres. Las asignaciones se conservan.
+6. **Precisión de 5 minutos.** Un paso muy breve por un estado puede no quedar registrado, y una asignación puede cerrarse hasta 5 minutos tarde.
+7. **La proyección no cruza el standby.** La ocupación futura de Proceso depende de aprobaciones de clientes que la agenda no puede prever.
+8. **Calendarios distintos.** Desk 2.0 mide sus alarmas en horas hábiles 08–17 (`Desk2:packages/shared/src/calendarioLaboral.ts:14`); la agenda, en días. Un mismo ticket puede estar «en plazo» en un sitio y con alarma en el otro.
+9. **Una segunda conexión en hub-api.** Es la primera; un fallo de red o de permisos no debe tumbar el resto de la app. Se cubre con el respaldo y con pruebas del lote 1.
+10. **La tabla de cierres está vacía.** D3 no tendrá efecto hasta que alguien cargue cierres en Desk 2.0.
 
-1. **Conexión de solo lectura a la base `desk`.** Propuesta: variable `DESK2_DB_URL` y rol `portal_agenda_reader` con permisos de lectura sobre cuatro tablas concretas (A.5). Falta decidir quién crea el rol y confirmar los nombres.
-2. **Arranque con más tickets en una etapa que puestos.** El día uno no hay asignaciones. ¿La app reparte sola los puestos por orden y deja el resto «en etapa sin puesto», o el jefe de taller asigna todo a mano la primera vez? El documento propone lo primero, con confirmación.
-3. **Papel de «Por Facturar» y «Por Entregar».** Hoy están como standby en `tmc_estados_desk` (Z4) y la agenda los trata como fin de taller. ¿Se cambia también su papel a «Trabajo terminado», para que el plazo de Servicios se detenga con veredicto, o se dejan como están?
-4. **Prioridad heredada de Zoho.** Hoy Desk 2.0 no tiene ninguna prioridad fijada en la app; al encender la conexión, la «prioridad» serían los `High` / `Low` de Zoho (15 y 19 de los abiertos). ¿Se aplica D1 con ese dato, o solo cuando la prioridad se haya fijado en Desk 2.0?
-5. **Equipo nuevo con la fuente Zoho.** La réplica no trae `classification`. ¿Se acepta deducir el flujo del asunto y del prefijo `HV_` del código (hipótesis), o se marca a mano en la agenda hasta que haya conexión?
-6. **Tickets «sin confirmar».** ¿Se proyectan al final y marcados, como propone el documento, o se excluyen de la agenda hasta que la réplica los refresque?
-7. **Reconstruir llegadas pasadas.** ¿Merece la pena leer el historial de eventos de Zoho (`desk.ticket_history`) para ordenar bien los tickets que ya estaban abiertos, o basta el «orden aproximado» hasta que el historial del portal se llene solo?
-8. **Duración cuando el ticket no tiene tipo de servicio.** Hoy casi ninguno lo tiene (5 de 35 con tipo manual, Z5). ¿Vale la duración por defecto de la etapa, o se exige elegir tipo antes de asignar puesto?
-9. **«Pendiente» y «Solicitud Soporte».** Son del flujo de soporte remoto. ¿Quedan fuera de la agenda?
+## Fuera de alcance
 
-### Riesgos
-
-- **La réplica de Zoho se desfasa.** El trabajador del hub solo relee los 100 tickets más recientes; un ticket antiguo puede ocupar fila estando ya cerrado (884).
-- **El orden de llegada actual es desconocido.** Los 35 abiertos comparten instante de primera observación (Z6).
-- **La remisión de entrada aún no ordena nada.** No hay remisiones de la app ni posteriores al 24/07/2026 (D8).
-- **El cambio de fuente altera la agenda de golpe.** Al encender la conexión cambian estados (884), aparecen tickets (10005) y entra la prioridad. Conviene hacerlo con el jefe de taller delante.
-- **Dos procesos escriben el estado de un ticket.** Desk 2.0 y el trabajador del hub sincronizan Zoho por separado (`Desk2:apps/desk/server/index.ts:85-93`); mientras convivan, las dos bases pueden discrepar.
-- **Precisión de 5 minutos.** Un paso muy breve por un estado puede no quedar registrado, y una asignación puede cerrarse hasta 5 minutos tarde.
-- **La proyección no cruza el standby.** La ocupación futura de Proceso depende de aprobaciones de clientes que la agenda no puede prever.
-- **Calendarios distintos.** Desk 2.0 mide sus alarmas en horas hábiles 08–17 (`Desk2:packages/shared/src/calendarioLaboral.ts:14`); la agenda, en días. Un mismo ticket puede estar «en plazo» en un sitio y con alarma en el otro.
-
----
-
-## Fuera de alcance de esta fase
-
-- Cualquier cambio de código, migración o configuración.
 - La reserva por parte del cliente.
 - Escribir en Desk 2.0 o en Zoho.
 - Cualquier envío de correo.
+- Reconstruir llegadas pasadas (D8).
+- El flujo de soporte remoto (D10).
 
 ## Lo que no se pudo verificar
 
-- **La forma del campo `raw` de `desk.ticket_history`**, de la que depende la hipótesis de D.2: no se consultó para no exponer datos de clientes.
-- **Que hub-api alcance el servicio `desk-db`** dentro de EasyPanel: no se probó ninguna conexión.
+- **Que hub-api alcance el servicio `desk-db`** dentro de EasyPanel: no se probó ninguna conexión, porque esta fase no toca configuración. Se comprueba en el lote 1.
 - **Los valores reales de `DATABASE_URL` y `DB_SCHEMA` de Desk 2.0 en producción:** el propio repositorio los marca como no verificados (`Desk2:DEPLOY.md:331-333`). Sí se verificó el resultado: base `desk`, tablas en el esquema `desk` (D1).
-- **Que los ids de los tickets de Zoho coincidan en las dos bases:** se comparó por número, no por id.
-- **Que el asunto «Equipo Nuevo» y el prefijo `HV_` identifiquen siempre el flujo de equipo nuevo:** observado en cuatro tickets, no comprobado en el histórico.
+- **Que los ids de los tickets de Zoho coincidan en las dos bases:** se comparó por número, que es la clave del cruce.
+- **Que «Equipo Nuevo» en el asunto y `HV_` en el código identifiquen siempre ese flujo:** visto en cuatro tickets. Solo afecta al respaldo, y hay marca manual (D11).
+- **Cuántos abiertos tienen tipo de servicio y fecha de ingreso en Desk 2.0, y la antigüedad de su sincronización:** pendiente de las consultas de la sección siguiente.
 - **El comportamiento real de la agenda:** no existe todavía; el ejemplo de H es un cálculo a mano.
+
+## Consultas pendientes (base `desk`, solo lectura)
+
+A ejecutar en `psql` sobre la base `desk`. No devuelven clientes, seriales ni correos. El resultado se incorporará a este documento.
+
+```sql
+SET default_transaction_read_only = on;
+SET search_path = desk, public;
+SELECT status_type, status, count(*) AS abiertos, 'P1 abiertos por estado' AS consulta FROM tickets WHERE status_type IS DISTINCT FROM 'Closed' GROUP BY 1, 2 ORDER BY 1, 3 DESC;
+SELECT count(*) AS abiertos, count(NULLIF(trim(tipo_servicio), '')) AS con_tipo_servicio, count(fecha_creacion_ticket) AS con_fecha_creacion, count(fecha_remision_entrada) AS con_fecha_remision, count(*) FILTER (WHERE custom_fields <> '{}'::jsonb) AS con_campos_personalizados, count(modified_time) AS con_fecha_modificacion, count(NULLIF(trim(classification), '')) AS con_clasificacion, count(prioridad_en_app_at) AS con_prioridad_fijada, 'P2 completitud de los abiertos' AS consulta FROM tickets WHERE status_type IS DISTINCT FROM 'Closed';
+SELECT NULLIF(trim(tipo_servicio), '') AS tipo_servicio, count(*) AS abiertos, 'P3 tipo de servicio' AS consulta FROM tickets WHERE status_type IS DISTINCT FROM 'Closed' GROUP BY 1 ORDER BY 2 DESC;
+SELECT NULLIF(trim(classification), '') AS classification, count(*) AS tickets, count(*) FILTER (WHERE status_type IS DISTINCT FROM 'Closed') AS abiertos, 'P4 clasificacion' AS consulta FROM tickets GROUP BY 1 ORDER BY 2 DESC;
+SELECT now() AS ahora, max(synced_at) AS ultima_sync_global, min(synced_at) FILTER (WHERE status_type IS DISTINCT FROM 'Closed') AS sync_mas_antigua_abiertos, max(synced_at) FILTER (WHERE status_type IS DISTINCT FROM 'Closed') AS sync_mas_reciente_abiertos, count(*) FILTER (WHERE status_type IS DISTINCT FROM 'Closed' AND (synced_at IS NULL OR synced_at < now() - interval '1 day')) AS abiertos_sin_confirmar, count(*) FILTER (WHERE status_type IS DISTINCT FROM 'Closed' AND synced_at IS NULL) AS abiertos_sin_sync, 'P5 antiguedad de la sincronizacion' AS consulta FROM tickets;
+SELECT number AS ticket, status, NULLIF(trim(classification), '') AS classification, NULLIF(trim(tipo_servicio), '') AS tipo_servicio, fecha_creacion_ticket, fecha_remision_entrada, created_time::date AS creado, synced_at::date AS sync, managed_by_app, 'P6 abiertos' AS consulta FROM tickets WHERE status_type IS DISTINCT FROM 'Closed' ORDER BY number;
+SELECT count(*) AS eventos, count(*) FILTER (WHERE event_name = 'BlueprintTransitionPerformed') AS transiciones_blueprint, count(DISTINCT ticket_id) AS tickets, max(event_time)::date AS ultimo_evento, 'P7 historial de eventos' AS consulta FROM ticket_history;
+```
+
+---
+
+## J. Plan de construcción
+
+Siete lotes pequeños, en orden. Cada uno se entrega con sus pruebas en verde, con TDD estricto, y por debajo de 800 líneas de cambio. Datos de prueba siempre ficticios. Ningún lote envía correo ni escribe en Desk 2.0 o Zoho.
+
+Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users/migrations`, `U` = `apps/trazabilidad-mantenimientos/src`.
+
+### Lote 1 — Adaptador de fuente con respaldo
+
+- **Objetivo:** que hub-api pueda leer los tickets abiertos de Desk 2.0 por `DESK2_DB_URL` y caer a la réplica sin romperse (D4).
+- **Ficheros:** `H/fuente.ts` (interfaz, `TicketTaller`, `elegirFuente`), `H/fuente-desk2.ts`, `H/fuente-replica.ts`, `apps/hub-api/src/db-desk2.ts` (pool opcional, perezoso, solo lectura, con `statement_timeout`), `apps/hub-api/.env.example`, `apps/hub-api/README.md`, `apps/hub-api/src/test-db/harness.ts` (tablas mínimas de Desk 2.0 para pruebas).
+- **Migración:** ninguna.
+- **Pruebas:**
+  - Sin variable → fuente réplica y motivo «sin configurar».
+  - Conexión que falla o consulta que caduca → respaldo, sin excepción hacia fuera.
+  - Cruce por número; ticket `app-` desde 10.000.
+  - Flujo por `classification`; flujo deducido en la réplica (asunto y `HV_`).
+  - Llegada exacta desde `ticket_transitions`; aproximada desde el historial del portal.
+  - Prioridad: solo la fijada (`prioridad_en_app_at`); el `High` / `Low` de Zoho da 0.
+  - Cierres: lista de fechas con Desk 2.0, vacía en respaldo.
+  - Guarda: el módulo no contiene ninguna sentencia de escritura contra Desk 2.0.
+- **Comprobación manual al desplegar:** que hub-api alcanza `desk-db` con el rol `portal_agenda_reader`.
+
+### Lote 2 — Configuración: modelo y reglas
+
+- **Objetivo:** categoría y etapa por estado, puestos por etapa y duraciones por etapa y tipo, con sus reglas puras.
+- **Ficheros:** `H/dominio.ts` (categorías, etapas, catálogo por defecto de C.3, `categoriaDe`), `H/types.ts` (validación de `PUT /estados` parcial, etapas, duraciones), `H/repo.ts` (lectura y escritura), `apps/hub-api/src/db.ts` (registro de migraciones) y sus pruebas.
+- **Migración:** `M/049_trazabilidad_estados_categoria.sql` y `M/050_trazabilidad_agenda_config.sql` (con semillas).
+- **Pruebas:**
+  - Guardas de migración: idempotentes, sin referencia al esquema `desk`, CHECK coherentes con las constantes.
+  - Catálogo por defecto frente a fila guardada; la fila gana.
+  - `(categoria = 'activa')` exige etapa.
+  - Actualización parcial de `PUT /estados` sin pisar el papel.
+  - La fila «*» no se puede borrar; duración por tipo y por defecto (D9).
+  - Reejecutar las migraciones no pisa lo editado.
+
+### Lote 3 — Filas y proyección (puro)
+
+- **Objetivo:** la función pura que, con tickets, configuración, asignaciones, «hoy» y calendario, devuelve puestos, filas, fechas previstas, saturación y primer hueco.
+- **Ficheros:** `H/agenda.ts` y `H/agenda.test.ts`. Reutiliza `sumarDiasHabiles` de `H/plazos.ts`, ampliado para descontar cierres.
+- **Migración:** ninguna.
+- **Pruebas:** un caso por cada fila de F.6, más:
+  - Orden de la fila: prioridad fijada, llegada, número; marca «orden aproximado».
+  - Festivo y cierre de empresa en mitad de una duración.
+  - El ejemplo de la sección H, con datos ficticios equivalentes, da las mismas fechas.
+  - Equipo nuevo encadenado Proceso → Verificación.
+  - Reducción de puestos con ocupación.
+
+### Lote 4 — Asignaciones y arranque
+
+- **Objetivo:** guardar asignaciones, cerrarlas solas, liberar a mano, marcar el flujo y proponer y confirmar el reparto inicial.
+- **Ficheros:** `H/repo.ts` (asignar, liberar, cierre automático, flujo manual), `H/agenda.ts` (`proponerArranque`), `H/registro-estados.ts` y `H/repo.ts` (`registrarEstados` lee del adaptador y no apunta en respaldo; cierra asignaciones en la misma pasada), y pruebas de Postgres.
+- **Migración:** `M/051_trazabilidad_agenda_asignaciones.sql` y `M/052_trazabilidad_agenda_flujo.sql`.
+- **Pruebas:**
+  - Un puesto, un ticket; un ticket, un puesto (índices parciales), también con dos peticiones a la vez.
+  - Asignar a otro que el sugerido exige motivo.
+  - Cierre automático al salir de la etapa; no al cambiar entre estados de la misma etapa.
+  - Liberación manual con motivo y firma (D7).
+  - Propuesta de arranque: no escribe; lo que no cabe queda en la fila; confirmar es todo o nada (D6).
+  - En respaldo no se cierra ni se apunta nada.
+
+### Lote 5 — API
+
+- **Objetivo:** exponer la agenda y su configuración.
+- **Ficheros:** `H/router.ts`, `H/types.ts` (formas de respuesta) y `H/router.test.ts`.
+- **Migración:** ninguna.
+- **Pruebas:**
+  - Todos los endpoints de E.5 tras `requireAuth` + `requireApp`.
+  - Validación con mensajes en español.
+  - `GET /agenda` responde aunque Desk 2.0 no conteste, indicando el respaldo y su motivo.
+  - `?hoy=` determinista.
+  - Guarda existente de «ningún código de envío» sigue en verde.
+
+### Lote 6 — Pantalla: Configuración
+
+- **Objetivo:** que Gerencia pueda ajustar puestos, duraciones y la categoría y etapa de cada estado.
+- **Ficheros:** `U/api.ts`, `U/dominio.ts`, `U/lib/agenda.ts` (textos y opciones) con su prueba, `U/vistas/Configuracion.tsx` (bloque «Agenda del taller» y dos columnas en «Estados de Desk»).
+- **Migración:** ninguna.
+- **Pruebas:** ayudantes puros de `lib/agenda.ts`; typecheck, build del portal y lint.
+
+### Lote 7 — Pantalla: Agenda del taller
+
+- **Objetivo:** la pestaña con el Gantt por puesto, las filas, el carril de standby, la saturación, el primer hueco, el reparto inicial y las acciones de asignar y liberar.
+- **Ficheros:** `U/App.tsx` (pestaña), `U/vistas/Agenda.tsx`, `U/lib/agenda.ts` (geometría de barras por puesto, apoyada en `U/lib/servicios.ts`) con su prueba, y `apps/trazabilidad-mantenimientos/CLAUDE.md`.
+- **Migración:** ninguna.
+- **Pruebas:**
+  - Geometría: barra ocupada, prevista, pasada de fecha, recorte en los bordes del eje.
+  - Textos del rótulo de fuente en principal y en respaldo.
+  - Typecheck, build del portal y lint.
+  - Revisión visual en navegador antes de darlo por bueno; es lo único que las pruebas no cubren.
+- **Si supera las 800 líneas:** se parte en 7a (lectura: Gantt, filas, standby) y 7b (acciones: arranque, asignar, liberar).
+
+### Orden y dependencias
+
+`1 → 2 → 3 → 4 → 5 → 6 → 7`. El 3 solo depende de los tipos del 1 y de las constantes del 2. El 6 puede desplegarse antes que el 7 para que la configuración esté lista cuando llegue la pantalla. En cada despliegue, hub-api antes que el portal.
