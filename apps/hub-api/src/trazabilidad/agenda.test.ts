@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { proyectarAgenda, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda } from './agenda.js';
+import { proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda, type TramoHistorial } from './agenda.js';
+import { esHabilAgenda } from './agenda-calendario.js';
 import { ETAPAS_AGENDA, type CategoriaEstado, type DuracionEtapa, type EtapaAgenda, type FlujoAgenda } from './dominio.js';
 import { UMBRAL_SINCRONIZACION_PARADA_MS, type EstadoFuente, type TicketTaller } from './fuente.js';
 
@@ -611,6 +612,118 @@ describe('la salida', () => {
     expect(imports).toEqual(['../ausencias/saldo.js', './agenda-calendario.js', './dominio.js', './fuente.js']);
     // De la fuente, sólo tipos: nada de su código ni de sus consultas.
     expect(src).toMatch(/import type \{[^}]+\} from '\.\/fuente\.js'/);
+  });
+});
+
+// ── Lote 4: D16, la vuelta de standby y el reparto inicial ──────────────────
+
+describe('ninguna fecha prevista cae en un día no hábil (D16)', () => {
+  const uno = config({ diagnostico: 1 });
+  const dos = [tk(900, 'Rev./Diagnostico', { remisionEntrada: '2026-09-01' }), tk(901, 'Ingresado', { remisionEntrada: '2026-09-02' })];
+
+  it('si hoy es sábado, lo primero que se proyecta es el siguiente día hábil (el lunes 12 es festivo: el martes 13)', () => {
+    const a = proyectarAgenda(entrada(dos, { hoy: '2026-10-10', config: uno }));
+    // Desde el mar 13: mié 14, jue 15, vie 16; desde el vie 16: lun 19, mar 20, mié 21.
+    expect(previstos(a, 'diagnostico')).toEqual([[900, 1, '2026-10-13', '2026-10-16'], [901, 1, '2026-10-16', '2026-10-21']]);
+    expect(etapaDe(a, 'diagnostico').primerHueco).toBe('2026-10-21');
+    // Una etapa sin fila tampoco ofrece su hueco en sábado.
+    expect(etapaDe(a, 'proceso').primerHueco).toBe('2026-10-13');
+  });
+
+  it('lo mismo en domingo, en festivo y en un cierre de empresa', () => {
+    const entra = (hoy: string, cierres: string[] = []) => previstos(proyectarAgenda(entrada(dos, { hoy, config: uno, cierres })), 'diagnostico')[0][2];
+    expect(entra('2026-10-11')).toBe('2026-10-13');
+    expect(entra('2026-10-12')).toBe('2026-10-13');
+    expect(entra('2026-10-07', ['2026-10-07'])).toBe('2026-10-08');
+    expect(entra('2026-10-09', ['2026-10-09', '2026-10-13'])).toBe('2026-10-14');
+  });
+
+  it('en un día hábil no cambia nada: se entra hoy', () => {
+    expect(previstos(proyectarAgenda(entrada(dos, { config: uno })), 'diagnostico')[0]).toEqual([900, 1, HOY, '2026-10-09']);
+  });
+
+  it('el equipo nuevo encadenado y quien espera a un puesto pasado de fecha tampoco entran en un día no hábil', () => {
+    const tickets = [nuevo(910, 'En Proceso'), tk(911, 'Rev./Diagnostico'), tk(912, 'Ingresado', { remisionEntrada: '2026-10-01' })];
+    const a = proyectarAgenda(entrada(tickets, { hoy: '2026-10-10', config: uno, asignaciones: [asig(911, 'diagnostico', 1, '2026-09-28')] }));
+    const fechas = a.etapas.flatMap((x) => [...x.fila, ...x.encadenados].flatMap((t) => [t.entradaPrevista, t.finPrevisto]).concat(x.primerHueco, ...x.puestos.map((p) => p.finEstimado)));
+    for (const f of fechas.filter((x): x is string => x !== null)) expect(esHabilAgenda(f, new Set()), f).toBe(true);
+    expect(previstos(a, 'diagnostico')).toEqual([[912, 1, '2026-10-13', '2026-10-16']]);
+  });
+});
+
+describe('vuelvenDeStandby: quién vuelve de un standby, según el historial', () => {
+  const T0 = ms('2026-10-01');
+  const T1 = ms('2026-10-02');
+  const T2 = ms('2026-10-05');
+  const tramo = (clave: string, desde: number, hasta: number | null): TramoHistorial => ({ clave, desde, hasta });
+  const sin = new Map<string, CategoriaEstado>();
+  const de = (t: TicketTaller, tramos: TramoHistorial[], categorias = sin) => vuelvenDeStandby([t], new Map([[t.numero, tramos]]), categorias);
+
+  it('estuvo en un standby y entró después en el estado de su etapa de ahora', () => {
+    expect(de(tk(950, 'Rev./Diagnostico'), [tramo('notificacion cliente', T0, T1), tramo('rev./diagnostico', T1, null)])).toEqual([950]);
+  });
+
+  it('vale aunque después haya cambiado de estado dentro de la misma etapa, y en cualquier orden de los tramos', () => {
+    expect(de(tk(951, 'Notificado'), [tramo('notificado', T2, null), tramo('servicio externo', T0, T1), tramo('rev./diagnostico', T1, T2)])).toEqual([951]);
+  });
+
+  it('no vuelve quien sólo tiene su primera observación, ni quien llegó de otra etapa o de la fila de entrada', () => {
+    expect(de(tk(952, 'Rev./Diagnostico'), [tramo('rev./diagnostico', T0, null)])).toEqual([]);
+    expect(de(tk(953, 'En Proceso'), [tramo('rev./diagnostico', T0, T1), tramo('en proceso', T1, null)])).toEqual([]);
+    expect(de(tk(954, 'Rev./Diagnostico'), [tramo('ingresado', T0, T1), tramo('rev./diagnostico', T1, null)])).toEqual([]);
+    expect(vuelvenDeStandby([tk(955, 'Rev./Diagnostico')], new Map(), sin)).toEqual([]);
+  });
+
+  it('no vuelve quien sigue en standby, ni quien no está en una etapa activa', () => {
+    expect(de(tk(956, 'Servicio externo'), [tramo('rev./diagnostico', T0, T1), tramo('servicio externo', T1, null)])).toEqual([]);
+    expect(de(tk(957, 'Por Facturar'), [tramo('servicio externo', T0, T1), tramo('por facturar', T1, null)])).toEqual([]);
+  });
+
+  it('si el historial no va con el estado que da la fuente, o hay un hueco antes de la etapa, no se afirma nada', () => {
+    expect(de(tk(958, 'Rev./Diagnostico'), [tramo('notificacion cliente', T0, T1), tramo('en proceso', T1, null)])).toEqual([]);
+    expect(de(tk(959, 'Rev./Diagnostico'), [tramo('notificacion cliente', T0, T1), tramo('rev./diagnostico', T2, null)])).toEqual([]);
+    expect(de(tk(960, 'Rev./Diagnostico'), [tramo('notificacion cliente', T0, T1), tramo('rev./diagnostico', T1, T2)])).toEqual([]);
+  });
+
+  it('la categoría guardada gana a la propuesta, y la salida va por número', () => {
+    const guardadas = new Map<string, CategoriaEstado>([['espera rara', { categoria: 'standby', etapa: null }]]);
+    const tramos = new Map([
+      [962, [tramo('espera rara', T0, T1), tramo('en proceso', T1, null)]],
+      [961, [tramo('solicitado', T0, T1), tramo('en proceso', T1, null)]],
+    ]);
+    expect(vuelvenDeStandby([tk(962, 'En Proceso'), tk(961, 'En  Proceso')], tramos, guardadas)).toEqual([961, 962]);
+    expect(vuelvenDeStandby([tk(962, 'En Proceso')], tramos, sin)).toEqual([]);
+  });
+});
+
+describe('proponerReparto: el reparto inicial (D6)', () => {
+  it('con el ejemplo H: los puestos libres de cada etapa, en el orden de su fila; lo que no cabe queda en la fila', () => {
+    expect(proponerReparto(entrada(ticketsH()))).toEqual([
+      { numero: 7099, etapa: 'diagnostico', puesto: 1, desde: HOY },
+      { numero: 7093, etapa: 'diagnostico', puesto: 2, desde: HOY },
+      { numero: 7105, etapa: 'diagnostico', puesto: 3, desde: HOY },
+      { numero: 7084, etapa: 'proceso', puesto: 1, desde: HOY },
+      { numero: 7090, etapa: 'proceso', puesto: 2, desde: HOY },
+      { numero: 7109, etapa: 'proceso', puesto: 3, desde: HOY },
+    ]);
+  });
+
+  it('sólo propone a quien ya está en un estado de la etapa: la fila de entrada espera aunque vaya delante', () => {
+    const tickets = [tk(970, 'Ingresado', { remisionEntrada: '2026-08-01' }), tk(971, 'Rev./Diagnostico', { remisionEntrada: '2026-09-01' })];
+    expect(proponerReparto(entrada(tickets))).toEqual([{ numero: 971, etapa: 'diagnostico', puesto: 1, desde: HOY }]);
+  });
+
+  it('no toca los puestos ocupados ni los que están a extinguir, y no repite a quien ya tiene puesto', () => {
+    const tickets = [980, 981, 982, 983].map((n) => tk(n, 'Rev./Diagnostico', { remisionEntrada: `2026-09-0${n - 979}` }));
+    const e = entrada(tickets, { config: config({ diagnostico: 2 }), asignaciones: [asig(982, 'diagnostico', 1), asig(983, 'diagnostico', 3)] });
+    expect(proponerReparto(e)).toEqual([{ numero: 980, etapa: 'diagnostico', puesto: 2, desde: HOY }]);
+  });
+
+  it('la duración cuenta desde la llegada exacta a la etapa, si consta; y nunca desde un día no hábil (D16)', () => {
+    const tickets = [tk(990, 'En Proceso', { llegadaEstado: ms('2026-09-30') }), tk(991, 'En Proceso', { llegadaEstado: ms('2026-10-03') }), tk(992, 'En Proceso')];
+    expect(proponerReparto(entrada(tickets)).map((x) => [x.numero, x.puesto, x.desde])).toEqual([[990, 1, '2026-09-30'], [991, 2, '2026-10-05'], [992, 3, HOY]]);
+    // En sábado, quien no tiene llegada exacta empieza el siguiente día hábil.
+    expect(proponerReparto(entrada([tk(992, 'En Proceso')], { hoy: '2026-10-10' }))).toEqual([{ numero: 992, etapa: 'proceso', puesto: 1, desde: '2026-10-13' }]);
   });
 });
 
