@@ -67,6 +67,13 @@ export interface TicketTaller {
   prioridad: string | null;
   /** Llegada exacta al estado de ahora, en milisegundos: la última transición a ese estado en Desk 2.0; `null` si no consta. */
   llegadaEstado: number | null;
+  /**
+   * El asunto y el código de servicio, SÓLO en respaldo (`null` con la principal): con ellos se deduce
+   * el flujo cuando no hay clasificación (D11, `flujoDeTicket`). ⚠️ El asunto suele llevar el nombre del
+   * cliente: es para la regla, no para enseñarlo. El diagnóstico de la fuente no lo devuelve.
+   */
+  asunto: string | null;
+  codigoServicio: string | null;
   fuente: NombreFuente;
 }
 
@@ -118,6 +125,8 @@ export function normalizarTicket(fila: FilaTicket, fuente: NombreFuente): Ticket
     fechaCreacion: textoONull(fila.fecha_creacion),
     prioridad: textoONull(fila.prioridad),
     llegadaEstado: fila.llegada_ms == null ? null : Number(fila.llegada_ms),
+    asunto: textoONull(fila.asunto),
+    codigoServicio: textoONull(fila.codigo_servicio),
     fuente,
   };
 }

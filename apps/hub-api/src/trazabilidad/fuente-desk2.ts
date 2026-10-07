@@ -43,6 +43,8 @@ import type { DbLectura, FilaTicket } from './fuente.js';
  *   es el estado de ahora, la misma regla que `entradasActuales`
  *   (Desk2:apps/desk/server/db/sla.ts:78-102), con el mismo desempate por id.
  *   NULL si el ticket no se ha movido desde la app.
+ * · `asunto` y `codigo_servicio` van siempre NULL: aquí el flujo sale de
+ *   `classification` y no hace falta leer nada más del ticket (D11).
  * · Los instantes viajan en milisegundos y las fechas como texto: sin depender
  *   del parser de fechas del driver.
  */
@@ -56,7 +58,8 @@ const SQL_TICKETS = `
                FROM desk.ticket_transitions tr
               WHERE tr.ticket_id = t.id AND tr.to_status = t.status
               ORDER BY tr.performed_at DESC, tr.id DESC
-              LIMIT 1) AS llegada_ms
+              LIMIT 1) AS llegada_ms,
+            NULL::text AS asunto, NULL::text AS codigo_servicio
        FROM desk.tickets t
       WHERE t.status_type IS DISTINCT FROM 'Closed'
       ORDER BY t.number`;

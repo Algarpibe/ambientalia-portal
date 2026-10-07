@@ -224,7 +224,7 @@ Diferencias con el boceto de la fase de análisis:
 
 - **No hay `elegirFuente()` ni un objeto por fuente.** La caída es por llamada: cada lectura prueba la principal una vez y, si falla, lee la réplica en esa misma llamada. Cada ticket dice de qué fuente vino y `estadoFuente()` dice cuál contesta y por qué.
 - **Las «capacidades» se deducen de la fuente:** con `respaldo` no hay prioridad, cierres ni llegada exacta.
-- **El adaptador entrega datos, no reglas.** Da `clasificacion`, `prioridad` y `llegadaEstado` tal como están; el flujo (D11, con su deducción en respaldo y la marca a mano), el rango de la prioridad, el tipo puesto a mano y la llegada aproximada del historial del portal se resuelven en los lotes 2 a 4, que son los que tienen esas reglas y tablas. Para deducir el flujo en respaldo habrá que añadir a la lectura de la réplica el asunto y el código de servicio.
+- **El adaptador entrega datos, no reglas.** Da `clasificacion`, `prioridad` y `llegadaEstado` tal como están; el flujo (D11, con su deducción en respaldo y la marca a mano), el rango de la prioridad, el tipo puesto a mano y la llegada aproximada del historial del portal se resuelven en los lotes 2 a 4, que son los que tienen esas reglas y tablas. Para deducir el flujo en respaldo, el lote 2 añadió a la lectura de la réplica el asunto y el código de servicio (`asunto` y `codigoServicio` en `TicketTaller`; `null` con la fuente principal). El diagnóstico de la fuente no los devuelve.
 - **La consulta de `estadoFuente()` es también una sonda:** nombra todo lo que leen las demás, para que un permiso que falte en una sola tabla no deje el rótulo en «Desk 2.0» con tickets de la réplica.
 - **Diagnóstico:** `GET /api/trazabilidad/agenda/fuente` devuelve `estadoFuente()` y el recuento de abiertos por estado.
 
@@ -383,15 +383,30 @@ Extiende `portal.tmc_estados_desk`; sin tabla paralela. No se puede editar la 04
 ```sql
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria VARCHAR(12) NULL;
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS etapa     VARCHAR(12) NULL;
+-- La firma de la categoría, aparte de la del papel (actualizado_*):
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_por_id UUID         NULL;
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_por    VARCHAR(254) NULL;
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_en     TIMESTAMPTZ  NULL;
+-- La firma del papel deja de ser obligatoria:
+ALTER TABLE portal.tmc_estados_desk ALTER COLUMN actualizado_por DROP NOT NULL, ALTER COLUMN actualizado_en DROP NOT NULL;
 -- CHECK con nombre, dentro de DO $$ … IF NOT EXISTS (pg_constraint) … $$:
 --   categoria IN ('por_llegar','entrada','activa','standby','fin','fuera')
 --   etapa     IN ('diagnostico','proceso','verificacion')
---   (categoria = 'activa') = (etapa IS NOT NULL)
+--   (categoria IS NOT DISTINCT FROM 'activa') = (etapa IS NOT NULL)
+-- Semilla: INSERT de los 23 estados de C.3 … ON CONFLICT (clave) DO UPDATE
+--   SET categoria, etapa, categoria_por, categoria_en … WHERE la fila no tiene categoría
 ```
 
-- **Valor por defecto en código, la tabla manda.** Una fila solo existe para los estados que alguien ha tocado y `actualizado_por` es obligatorio, así que no se siembra. El catálogo de C.3 vive como constante en `dominio.ts`; si la fila tiene `categoria`, gana la fila. `NULL` = «según el catálogo».
-- **Contrato del PUT.** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre (`apps/hub-api/src/trazabilidad/types.ts:423-433`, `repo.ts:609-618`). Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`.
-- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y la que comprueba cuál es la última migración registrada (hoy la de la 049, en el bloque `049_trazabilidad_roles.sql` de `plazos.test.ts`).
+**Construido en el lote 2**, con dos cambios respecto al diseño de la fase de análisis:
+
+- **La tabla se siembra** (el diseño inicial decía que no). La 050 crea una fila por cada estado de C.3 que no la tenga y, en las que ya existían, rellena la categoría solo si está vacía. La sentencia no nombra la columna del papel: no lo lee ni lo escribe.
+- **Dos firmas en la misma fila.** El papel del reloj se firma en `actualizado_por_id`, `actualizado_por` y `actualizado_en`; la categoría y la etapa, en `categoria_por_id`, `categoria_por` y `categoria_en`. Elegir una no toca la firma de la otra, en ningún sentido. La semilla firma la categoría con `categoria_por = 'semilla (migracion 050)'`. En una fila que ya existía, la firma del papel se queda como estaba. En una fila que la semilla crea, el papel es el de por defecto (`cuenta`, el mismo que vale para un estado sin fila) y su firma queda vacía: nadie lo ha elegido. Por eso `actualizado_por` y `actualizado_en` pasan a admitir `NULL`.
+- **No pisa lo elegido.** La app nunca guarda una categoría vacía, así que «categoría vacía» solo puede significar «nadie ha elegido». Reejecutar la migración en cada arranque no cambia una categoría puesta a mano.
+- **El catálogo de C.3 vive además como constante** (`CATALOGO_ESTADOS_AGENDA` en `dominio.ts`), y una prueba falla si la semilla y la constante dejan de coincidir. `categoriaDeEstado` aplica: fila guardada → catálogo → sin categoría.
+- **Un estado que no está en C.3 queda sin categoría** (`NULL`) hasta que alguien se la elija. La proyección (lote 3) debe tratarlo como caso propio y avisarlo.
+- **Efecto en Configuración:** el bloque «Estados de Desk» lista los estados guardados aunque ningún ticket los tenga, así que tras desplegar aparecen los 23 del blueprint (12 sin tickets hoy). Salen como cualquier estado que nadie ha tocado: papel «Cuenta» y sin autor ni fecha («Nadie lo ha cambiado»). La semilla no figura ahí, porque ese bloque enseña la firma del papel y la semilla solo firma la categoría. `GET /estados` no cambia.
+- **Contrato del PUT (pendiente, lote 5).** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre. Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`. El SQL ya está separado: `guardarEstadoDesk` solo escribe el papel y su firma, y `guardarCategoriaEstado`, solo la categoría, la etapa y la suya. La respuesta deberá llevar las dos firmas.
+- **Guardas:** la lista de columnas de la tabla (`trazabilidad.db.test.ts`) y la de «última migración registrada», que pasó de `plazos.test.ts` a `agenda-config.test.ts` (bloque de la 051).
 
 ### E.2 Migración 051 — puestos por etapa y duraciones
 
@@ -424,6 +439,7 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_duraciones (
 - **Duración de un ticket en una etapa (D9):** la fila `(etapa, tipo efectivo)` si existe; si no, la fila `(etapa, '*')`.
 - **Tipo efectivo:** el que ya resuelve `tipoEfectivo` (`dominio.ts:263-268`): el puesto a mano en `tmc_servicios_tipo` gana sobre el de Desk. Si no hay ninguno, el ticket lleva la marca «sin tipo» y usa la fila «*».
 - **No se reutiliza `tmc_plazos`:** aquel es el plazo comprometido con el cliente por tipo; esto es cuánto ocupa un puesto en cada etapa.
+- **Construido en el lote 2** tal cual, con dos `CHECK` más en `tmc_agenda_duraciones`: `etapa` en las tres etapas y `tipo <> ''`. Sin claves foráneas. La regla es `duracionDeEtapa` (`dominio.ts`): fila exacta → «*» → sin duración. Un tipo compuesto («Diagnóstico + Calibración») no se descompone: casa por su propia clave o usa la «*». Quitar la «*» desde la app es un error 400; borrar la fila de un tipo no la resucita el arranque.
 
 ### E.3 Migración 052 — asignaciones
 
@@ -885,21 +901,32 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 
 ### Lote 2 — Configuración: modelo y reglas
 
+**Construido.** Sin endpoints ni pantalla.
+
 - **Objetivo:** categoría y etapa por estado, puestos por etapa y duraciones por etapa y tipo, con sus reglas puras.
-- **Ficheros:** `H/dominio.ts` (categorías, etapas, catálogo por defecto de C.3, `categoriaDe`), `H/types.ts` (validación de `PUT /estados` parcial, etapas, duraciones), `H/repo.ts` (lectura y escritura), `apps/hub-api/src/db.ts` (registro de migraciones) y sus pruebas.
-- **Migración:** `M/050_trazabilidad_estados_categoria.sql` y `M/051_trazabilidad_agenda_config.sql` (con semillas).
-- **Pruebas:**
-  - Guardas de migración: idempotentes, sin referencia al esquema `desk`, CHECK coherentes con las constantes.
-  - Catálogo por defecto frente a fila guardada; la fila gana.
-  - `(categoria = 'activa')` exige etapa.
-  - Actualización parcial de `PUT /estados` sin pisar el papel.
+- **Ficheros:**
+  - `H/dominio.ts`: categorías, etapas, catálogo de C.3 (`CATALOGO_ESTADOS_AGENDA`), `categoriaDeEstado`, `flujoDeTicket` (D11), `etapaInicial` y `duracionDeEtapa` (D9).
+  - `H/agenda-calendario.ts`: `esHabilAgenda` y `sumarDiasHabilesAgenda` (D3). Usa `esHabil` de `H/plazos.ts`, que solo pasó a exportarse.
+  - `H/types.ts`: tipos y validadores (`validarCategoriaEstado`, `validarPuestosEtapa`, `validarDuracionEtapa`).
+  - `H/repo.ts`: `leerCategoriasEstados`, `guardarCategoriaEstado`, `leerConfigAgenda`, `guardarPuestosEtapa` y `guardarDuracionEtapa`.
+  - `H/fuente.ts` y `H/fuente-replica.ts`: `TicketTaller` lleva `asunto` y `codigoServicio`, leídos solo de la réplica, para deducir el flujo en respaldo.
+  - `apps/hub-api/src/db.ts`: registro de las dos migraciones.
+- **Migración:** `M/050_trazabilidad_estados_categoria.sql` y `M/051_trazabilidad_agenda_config.sql`, las dos con semilla (E.1 y E.2).
+- **Pruebas** (`H/agenda-config.test.ts` y `H/agenda-config.db.test.ts`):
+  - Guardas de migración: idempotentes, sin referencia al esquema `desk`, CHECK y semillas coherentes con las constantes.
+  - Catálogo frente a fila guardada; la fila gana; un estado desconocido queda sin categoría.
+  - `(categoria = 'activa')` exige etapa, en la validación y en la tabla.
+  - Guardar la categoría no toca el papel, y elegir el papel no toca la categoría.
+  - Flujo por `classification`; deducido en respaldo del asunto y de `HV_`.
   - La fila «*» no se puede borrar; duración por tipo y por defecto (D9).
-  - Reejecutar las migraciones no pisa lo editado.
+  - Calendario con un cierre de empresa en mitad de una duración (D3).
+  - Reejecutar las migraciones no pisa lo editado, tampoco sobre una tabla anterior a la 050 con papeles ya elegidos.
+- **Pasa al lote 5:** la actualización parcial de `PUT /estados` y la validación del cuerpo de cada `PUT`, que se monta sobre los validadores de este lote. Cada escritura va con `config.write`.
 
 ### Lote 3 — Filas y proyección (puro)
 
 - **Objetivo:** la función pura que, con tickets, configuración, asignaciones, «hoy» y calendario, devuelve puestos, filas, fechas previstas, saturación y primer hueco.
-- **Ficheros:** `H/agenda.ts` y `H/agenda.test.ts`. Reutiliza `sumarDiasHabiles` de `H/plazos.ts`, ampliado para descontar cierres.
+- **Ficheros:** `H/agenda.ts` y `H/agenda.test.ts`. Usa `sumarDiasHabilesAgenda` de `H/agenda-calendario.ts` (lote 2), que ya descuenta los cierres; `H/plazos.ts` no se toca.
 - **Migración:** ninguna.
 - **Pruebas:** un caso por cada fila de F.6, más:
   - Orden de la fila de entrada y de la primera etapa (D12): fecha de remisión; mismo día → llegada exacta primero, luego número; sin fecha → al final con «falta fecha de remisión».

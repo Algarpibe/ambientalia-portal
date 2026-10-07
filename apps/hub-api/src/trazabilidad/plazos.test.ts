@@ -659,8 +659,9 @@ describe('049_trazabilidad_roles.sql', () => {
     expect(SQL).not.toMatch(/\bdesk\./i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 048 y la última', () => {
+  // La guarda de «la última» está en agenda-config.test.ts, con la 051.
+  it('está apuntada en MIGRATIONS, detrás de la 048', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'048_trazabilidad_contactos\.sql',\s*'049_trazabilidad_roles\.sql'\]/);
+    expect(db).toMatch(/'048_trazabilidad_contactos\.sql',\s*'049_trazabilidad_roles\.sql'/);
   });
 });

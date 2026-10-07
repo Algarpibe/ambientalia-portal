@@ -5,21 +5,31 @@
  */
 
 import {
+  CATEGORIAS_AGENDA,
   CONTACTO_MAX_EMAILS,
   CONTACTO_MAX_TEXTO,
   EMAIL_MAX,
+  ETAPAS_AGENDA,
   PLAZO_MAX_DIAS,
   PLAZO_MIN_DIAS,
+  PUESTOS_MAX,
+  TIPO_POR_DEFECTO,
+  categoriaCoherente,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
+  esCategoriaAgenda,
   esEmail,
+  esEtapaAgenda,
   esFechaIso,
   esRolEstado,
   modeloEdm180,
   normalizarEmail,
   partesDeTipo,
+  type CategoriaAgenda,
   type ContactoEquipo,
+  type DuracionEtapa,
+  type EtapaAgenda,
   type EstadoCalibracion,
   type EstadoPlazo,
   type OrigenTipo,
@@ -431,6 +441,95 @@ export function parseEstadoDesk(body: unknown): CambioEstadoDesk {
   if (clave.length > ESTADO_DESK_MAX) throw invalido(`«estado» supera ${ESTADO_DESK_MAX} caracteres.`, 'estado');
   if (!esRolEstado(b.rol)) throw invalido('«rol» debe ser «cuenta», «standby» o «terminado».', 'rol');
   return { estado, rol: b.rol };
+}
+
+// ── Agenda del taller: configuración ────────────────────────────────────────
+// Todavía sin endpoints (llegan en el lote 5, con `config.write`): estos
+// validadores los llama el repo antes de escribir, y sobre ellos se montarán
+// los `parse…` del cuerpo de cada PUT.
+
+/** Los puestos de una etapa del taller, con quién los cambió (null = como los sembró la migración 051). */
+export interface EtapaAgendaConfig {
+  etapa: EtapaAgenda;
+  etiqueta: string;
+  orden: number;
+  puestos: number;
+  actualizadoPor: string | null;
+  actualizadoEn: string | null;
+}
+
+/** Una fila de duraciones: `tipo` es la clave de un tipo de servicio o «*», la de por defecto de la etapa. */
+export interface DuracionAgendaConfig extends DuracionEtapa {
+  actualizadoPor: string | null;
+  actualizadoEn: string | null;
+}
+
+export interface ConfigAgenda {
+  etapas: EtapaAgendaConfig[];
+  duraciones: DuracionAgendaConfig[];
+}
+
+export interface CambioCategoriaEstado {
+  estado: string;
+  categoria: CategoriaAgenda;
+  /** Obligatoria si la categoría es «activa»; null en las demás. */
+  etapa: EtapaAgenda | null;
+}
+
+export interface CambioPuestosEtapa {
+  etapa: EtapaAgenda;
+  puestos: number;
+}
+
+export interface CambioDuracionEtapa {
+  etapa: EtapaAgenda;
+  /** Un tipo de servicio (casa por su clave) o «*». */
+  tipo: string;
+  /** null = quitar la fila de ese tipo (vuelve a valer la «*»). La «*» no se quita. */
+  dias: number | null;
+}
+
+const lista = (valores: readonly string[]) => valores.map((v) => `«${v}»`).join(', ');
+const etapaValida = (etapa: unknown): void => {
+  if (!esEtapaAgenda(etapa)) throw invalido(`«etapa» debe ser una de: ${lista(ETAPAS_AGENDA)}.`, 'etapa');
+};
+
+/** La categoría (y la etapa) que se le elige a un estado: categoría de la lista, y etapa sólo —y siempre— en una etapa activa. */
+export function validarCategoriaEstado(c: CambioCategoriaEstado): CambioCategoriaEstado {
+  const clave = claveEstadoDesk(c.estado);
+  if (!clave) throw invalido('Falta «estado».', 'estado');
+  if (clave.length > ESTADO_DESK_MAX || c.estado.trim().length > ESTADO_DESK_MAX) throw invalido(`«estado» supera ${ESTADO_DESK_MAX} caracteres.`, 'estado');
+  if (!esCategoriaAgenda(c.categoria)) throw invalido(`«categoria» debe ser una de: ${lista(CATEGORIAS_AGENDA)}.`, 'categoria');
+  const etapa = c.etapa ?? null;
+  if (etapa !== null) etapaValida(etapa);
+  if (!categoriaCoherente(c.categoria, etapa)) {
+    throw invalido(etapa === null ? 'Una etapa activa necesita su etapa.' : 'Sólo una etapa activa lleva etapa.', 'etapa');
+  }
+  return { estado: c.estado, categoria: c.categoria, etapa };
+}
+
+export function validarPuestosEtapa(c: CambioPuestosEtapa): CambioPuestosEtapa {
+  etapaValida(c.etapa);
+  if (!Number.isInteger(c.puestos) || c.puestos < 0 || c.puestos > PUESTOS_MAX) {
+    throw invalido(`Los puestos deben ser un número entero entre 0 y ${PUESTOS_MAX}.`, 'puestos');
+  }
+  return { etapa: c.etapa, puestos: c.puestos };
+}
+
+/** Devuelve el cambio con el tipo ya como clave («*» tal cual). */
+export function validarDuracionEtapa(c: CambioDuracionEtapa): CambioDuracionEtapa {
+  etapaValida(c.etapa);
+  const tipo = String(c.tipo ?? '').trim() === TIPO_POR_DEFECTO ? TIPO_POR_DEFECTO : claveTipoServicio(c.tipo);
+  if (!tipo) throw invalido('Falta «tipo».', 'tipo');
+  if (tipo.length > 80) throw invalido('«tipo» supera 80 caracteres.', 'tipo');
+  if (c.dias === null) {
+    if (tipo === TIPO_POR_DEFECTO) throw invalido('La duración por defecto de una etapa no se puede quitar: cámbiale los días.', 'dias');
+    return { etapa: c.etapa, tipo, dias: null };
+  }
+  if (!Number.isInteger(c.dias) || c.dias < PLAZO_MIN_DIAS || c.dias > PLAZO_MAX_DIAS) {
+    throw invalido(`La duración debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}.`, 'dias');
+  }
+  return { etapa: c.etapa, tipo, dias: c.dias };
 }
 
 /** El contacto que se le pone a mano a un cliente; `emails` vacío = quitarlo (vuelve a valer el de Desk). */

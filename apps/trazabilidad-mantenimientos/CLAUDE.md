@@ -35,8 +35,10 @@ se registra en la app y sobrevive a las reimportaciones.
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`; cada escritura, además, con `escritura(permiso, …)`) | `apps/hub-api/src/trazabilidad/router.ts` |
 | Roles y matriz de permisos (puro, sin imports; **único sitio** de la matriz; lo usan servidor y UI) | `apps/hub-api/src/trazabilidad/roles.ts` |
 | Fuente de la agenda del taller: interfaz, `TicketTaller`, caída al respaldo (sólo servidor, sólo lee) | `apps/hub-api/src/trazabilidad/fuente.ts`; el SQL de cada origen en `fuente-desk2.ts` y `fuente-replica.ts` |
+| Configuración de la agenda, reglas puras: categoría y etapa de un estado (`categoriaDeEstado`, `CATALOGO_ESTADOS_AGENDA`), flujo (`flujoDeTicket`), etapa inicial (`etapaInicial`) y duración (`duracionDeEtapa`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
+| Calendario de la agenda: días hábiles menos cierres de empresa (`esHabilAgenda`, `sumarDiasHabilesAgenda`; sólo servidor) | `apps/hub-api/src/trazabilidad/agenda-calendario.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Navegación en dos niveles (grupos y secciones, `seccionDeHash`) y lo que se enseña según el rol (`tiene`, `etiquetaMiRol`, `motivoSinPermiso`) | `src/lib/navegacion.ts` |
 | Quién soy, al alcance de cualquier vista (`PermisosContext`, `usePermisos`) | `src/permisos.ts` (lo rellena `src/App.tsx` con `GET /roles/me`) |
@@ -62,7 +64,9 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
 | `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado. La 045 añade, igual de idempotente, la fila del tipo compuesto `diagnostico + calibracion` («Diagnóstico + Calibración») con `dias_habiles` NULL: esa columna **no se lee** para un compuesto (ver «Tipo compuesto») |
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
-| `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez |
+| `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez. **Desde la 050 lleva además `categoria` y `etapa`** (la categoría del estado en la agenda del taller; ver «Agenda: configuración»): `VARCHAR(12) NULL` las dos, con tres `CHECK` con nombre (`categoria` en `por_llegar` / `entrada` / `activa` / `standby` / `fin` / `fuera`; `etapa` en `diagnostico` / `proceso` / `verificacion`; y etapa sólo —y siempre— con `activa`). **Cada cosa lleva su firma**: `actualizado_por_id` / `actualizado_por` / `actualizado_en` son la del **rol del reloj**; `categoria_por_id` (`UUID NULL`) / `categoria_por` (`VARCHAR(254) NULL`) / `categoria_en` (`TIMESTAMPTZ NULL`), también de la 050, la de la **categoría y la etapa**. La 050 quita además el `NOT NULL` de `actualizado_por` y `actualizado_en`: una fila puede existir sólo por su categoría, y entonces su rol es el de por defecto y **no lo firma nadie** (las tres `actualizado_*` vacías). La 050 **sí siembra**: crea una fila por cada uno de los 23 estados de la propuesta que no la tenga (con `rol` por defecto, `cuenta`, sin firma del rol y con `categoria_por = 'semilla (migracion 050)'`), así que lo de «sólo hay fila para los estados que alguien ha tocado» ya no vale para ellos. **Ni la 050 ni `guardarCategoriaEstado` escriben `rol` ni `actualizado_*` en una fila que ya existe, y `guardarEstadoDesk` no escribe `categoria`, `etapa` ni `categoria_*`** |
+| `portal.tmc_agenda_etapas` | Los **puestos simultáneos de cada etapa** del taller: `etapa` (PK, `CHECK` a las tres etapas), `etiqueta`, `orden`, `puestos` (`INTEGER NOT NULL`, `CHECK` 0..50 = `PUESTOS_MAX`) y quién y cuándo (`actualizado_*`, NULL en lo sembrado). Semilla de la 051, `ON CONFLICT DO NOTHING`: Diagnóstico 3, Proceso 4, Verificación 2. Sin clave foránea |
+| `portal.tmc_agenda_duraciones` | Cuántos **días hábiles ocupa un puesto** de una etapa un tipo de servicio: PK `(etapa, tipo)`; `tipo` es la clave de un tipo de servicio (`claveTipoServicio`) o **`*`, la fila por defecto de la etapa** (D9); `dias_habiles` (`NOT NULL`, `CHECK` 1..365) y quién y cuándo (NULL en lo sembrado). Semilla de la 051, `ON CONFLICT DO NOTHING`: sólo las `*` (Diagnóstico 3, Proceso 4, Verificación 1). La `*` no se quita desde la app; una fila de tipo quitada no vuelve con el arranque. No es `tmc_plazos`: aquél es el plazo comprometido con el cliente; esto, lo que se ocupa un puesto |
 | `portal.tmc_estados_historial` | En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
 | `portal.tmc_contactos` | El **contacto puesto a mano a un cliente** (a quién iría su aviso): `clave` (el nombre del cliente normalizado con `claveCliente`, PK, sin FK), `cliente` (como se escribió), `emails` (`TEXT[]`, entre 1 y 5 por `CHECK`, en minúsculas y sin repetir), `nombre` (persona de contacto, `''` si no se puso) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los clientes a los que alguien se lo ha puesto; quitarlo borra la fila. La 048 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla. **Sólo guarda direcciones**: no hay tabla de mensajes, de envíos ni de pendientes en este módulo (`trazabilidad.db.test.ts` vigila la lista de tablas `tmc_*`) |
 | `portal.tmc_user_roles` | El **rol de cada persona en la app**: `user_id` (`UUID`, PK, **con** clave foránea a `portal.users(id)` y `ON DELETE CASCADE`: es la única tabla `tmc_*` que la lleva, porque un rol sin su usuario no significa nada), `role` (`VARCHAR(20) NOT NULL`, **sin valor por defecto**, con `CHECK` a `LECTOR` / `COMERCIAL` / `TECNICO` / `DIRECTOR_TECNICO`) y quién y cuándo lo repartió (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Una fila por usuario; **sin fila se es `LECTOR`**. Cambiar el rol reescribe la fila; poner `LECTOR` también la guarda (queda quién lo dejó así). La 049 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nadie nace con rol. El `CHECK` lleva los mismos valores que `ROLES_APP` de `roles.ts` y `plazos.test.ts` vigila que coincidan |
@@ -451,8 +455,8 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
 ## Fuente de la agenda
 
 Primer lote de la **agenda del taller** (`docs/trazabilidad-agenda-taller.md`, decisiones D4, D12
-y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay filas, proyección,
-tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
+y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay filas, proyección
+ni pantalla (el modelo de la configuración va en «Agenda: configuración»), y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
 (pasar el historial a esta fuente es del lote 4).
 
 - **Dos orígenes, una interfaz** (`crearFuenteAgenda` en `fuente.ts`):
@@ -465,10 +469,15 @@ tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la 
   `remisionEntrada` (`fecha_remision_entrada`), `fechaCreacion` (la de «Servicios»:
   `fecha_creacion_ticket` o el día en Colombia de `created_time`), `prioridad` (**sólo** la fijada
   en Desk 2.0, con `prioridad_en_app_at`; el `High` / `Low` de Zoho da `null`), `llegadaEstado`
-  (milisegundos del `performed_at` de la última transición al estado de ahora) y `fuente`. En
+  (milisegundos del `performed_at` de la última transición al estado de ahora), `asunto`,
+  `codigoServicio` y `fuente`. En
   respaldo, `prioridad` y `llegadaEstado` son siempre `null`, y `clasificacion` y
   `remisionEntrada` se leen sólo si la réplica trae la columna (`to_jsonb(t)->>…`: si no existe,
   `null` en vez de error). **Ningún ticket lleva marca «sin confirmar»** (D13).
+  `asunto` y `codigoServicio` (`subject` y `codigo_servicio`, columnas de siempre de la réplica)
+  vienen **sólo en respaldo** —con la principal son `null`: allí no se piden— y sirven para una
+  sola cosa: deducir el flujo (`flujoDeTicket`). ⚠️ El asunto suele llevar el nombre del cliente:
+  no se enseña, y `GET /trazabilidad/agenda/fuente` no lo devuelve (`router.test.ts` lo vigila).
 - **`cierresEmpresa(desde, hasta)`** → fechas de `public.calendario_cierres`; `[]` en respaldo.
 - **`estadoFuente()`** → cuál contesta y por qué (`motivo`: `sin_variable`, `error_conexion`,
   `timeout`, `error_consulta`), el máximo de `synced_at` de la base usada y
@@ -494,6 +503,103 @@ tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la 
   `apps/hub-api/README.md`) y reiniciar. `GET /api/trazabilidad/agenda/fuente` debe responder
   `fuente: "principal"`. Quitar la variable y reiniciar lo apaga.
 
+## Agenda: configuración
+
+Segundo lote de la agenda (`docs/trazabilidad-agenda-taller.md`, secciones C, E y J): el **modelo**
+(migraciones 050 y 051) y las **reglas**, todavía **sin endpoints ni pantalla**. Nada de esto lo
+usa aún «Servicios», el reloj del plazo ni el historial.
+
+### Categoría y etapa de cada estado
+
+Cada estado de Desk tiene una **categoría** en la agenda y, si es una etapa activa, su **etapa**
+(`CATEGORIAS_AGENDA`, `ETAPAS_AGENDA` y sus etiquetas, en `dominio.ts`):
+
+| Categoría (`tmc_estados_desk.categoria`) | Qué es |
+|---|---|
+| `por_llegar` — «Por llegar» | El equipo aún no ha llegado; lista aparte, sin proyectar |
+| `entrada` — «Fila de entrada» | Llegó y espera su primera etapa |
+| `activa` — «Etapa activa» | Ocupa un puesto. Lleva `etapa`: `diagnostico`, `proceso` o `verificacion` |
+| `standby` — «Standby» | No ocupa puesto: depende del cliente, de Comercial, de Compras o de terceros |
+| `fin` — «Fin de taller» | Trabajo hecho; libera el puesto |
+| `fuera` — «Fuera de la agenda» | Soporte remoto (D10) |
+
+- ⚠️ **Categoría y rol del reloj son dos columnas con dos usos** y ninguna cambia a la otra: el
+  `rol` (`cuenta` / `standby` / `terminado`) gobierna el plazo de «Servicios»; la categoría, los
+  puestos y las filas. Que las dos tengan un valor llamado `standby` es coincidencia: un estado
+  puede ser etapa activa en la agenda y estar en standby en el reloj.
+- **`categoriaDeEstado(estado, guardadas?)`** → `{categoria, etapa}` o `null`. Casa por
+  `claveEstadoDesk`. **Lo guardado gana** (`guardadas` = `leerCategoriasEstados(db)`); sin nada
+  guardado vale la propuesta (`CATALOGO_ESTADOS_AGENDA`); un estado que no está en ninguno de los
+  dos sitios queda **sin categoría** (`null`) hasta que alguien se la elija.
+- **La propuesta** (`CATALOGO_ESTADOS_AGENDA`, sección C.3 del análisis; los 23 estados del
+  blueprint): OV asignada y Ticket creado → por llegar; Remisión creada e Ingresado → fila de
+  entrada; Rev./Diagnostico y **Notificado** → Diagnóstico (D2: sigue ocupando el puesto); En
+  Proceso y Continuación del proceso → Proceso; Verificación → Verificación; Notificación a
+  Compras, Notificación Comercial, Notificación cliente, En espera de SKU inventario, En Espera de
+  Repuestos, Solicitado y Servicio externo → standby; Por Facturar, Liberación Comercial, Por
+  Entregar, Por Entregar / Sin facturar y Finalizado → fin de taller; **Pendiente y Solicitud
+  Soporte → fuera** (D10).
+- **La semilla (migración 050) es esa misma lista** (`agenda-config.test.ts` falla si el SQL y la
+  constante dejan de coincidir) y **sólo rellena donde no hay categoría**: es un
+  `INSERT … ON CONFLICT (clave) DO UPDATE SET categoria, etapa, categoria_por, categoria_en …
+  WHERE e.categoria IS NULL`. La app nunca guarda una categoría vacía, así que una elegida no se
+  pisa en ningún arranque. La sentencia no nombra `rol`: en una fila que ya existía se queda como
+  esté, y una fila nueva nace con el de por defecto.
+- **Dos firmas, una por cosa.** La categoría la firma quien la elige en `categoria_por_id`,
+  `categoria_por` y `categoria_en` (la semilla, con `categoria_por = 'semilla (migracion 050)'` y
+  sin id); el rol del reloj sigue firmándose en `actualizado_*`. **Cambiar una no toca la firma
+  de la otra**, en ninguno de los dos sentidos (`agenda-config.db.test.ts` lo prueba). En una
+  fila que la semilla o `guardarCategoriaEstado` **crean**, las `actualizado_*` quedan vacías: el
+  rol por defecto no lo ha elegido nadie. Por eso `actualizado_por` y `actualizado_en` ya admiten
+  NULL, y quien inserte en esa tabla sin querer firmar el rol tiene que escribir
+  `actualizado_en = NULL` (la columna conserva su `DEFAULT NOW()`).
+- **Guardar**: `guardarCategoriaEstado(db, {estado, categoria, etapa}, actor)` (`repo.ts`), con
+  `validarCategoriaEstado` (`types.ts`): 400 si la categoría o la etapa no existen, o si no
+  cuadran (etapa sólo y siempre con `activa`). Los tres `CHECK` de la tabla dicen lo mismo.
+  Todavía no hay lectura de la firma de la categoría (`leerCategoriasEstados` sólo da categoría y
+  etapa): llegará con el endpoint.
+
+### Flujo y etapa inicial (D11)
+
+- **`flujoDeTicket({fuente, clasificacion, asunto, codigoServicio})`** → `{flujo, deducido}`, con
+  `flujo` = `servicio` o `equipo_nuevo`. **Con clasificación manda ella**: equipo nuevo si
+  normaliza a «equipo nuevo», servicio con cualquier otra. Sin ella, la fuente principal da
+  servicio; **en respaldo se deduce** (`deducido: true`): equipo nuevo si el asunto empieza por
+  «Equipo Nuevo» o el código de servicio por `HV_`. La marca a mano por ticket (lote 4) ganará a
+  todo.
+- **`etapaInicial(flujo)`**: `diagnostico` para servicio, `proceso` para equipo nuevo.
+
+### Puestos y duraciones (D9)
+
+- `leerConfigAgenda(db)` → `{etapas[], duraciones[]}`: las etapas en su orden con sus puestos, y
+  las duraciones con la `*` de cada etapa delante de sus tipos.
+- **`duracionDeEtapa(duraciones, etapa, tipoManual, tipoFuente)`** →
+  `{dias, origen: 'tipo' | 'defecto' | null, tipo, sinTipo}`: la fila **exacta** del tipo; si no
+  la hay, la **`*`** de la etapa; si tampoco, **sin duración** (`dias: null`). El tipo es el
+  efectivo —el puesto a mano (`tmc_servicios_tipo`) gana al de la fuente, `tipoEfectivo`— y casa
+  por `claveTipoServicio`. Sin tipo: la `*`, con `sinTipo: true`. Un tipo compuesto
+  («Diagnóstico + Calibración») no se descompone aquí: casa por su propia clave o cae en la `*`.
+- `guardarPuestosEtapa(db, {etapa, puestos}, actor)` (entero 0..50) y
+  `guardarDuracionEtapa(db, {etapa, tipo, dias}, actor)` (entero 1..365; `dias: null` quita la
+  fila del tipo; **quitar la `*` es un 400**). No se exige que el tipo tenga fila en `tmc_plazos`.
+
+### Calendario (D3)
+
+`agenda-calendario.ts`: `esHabilAgenda(fecha, cierres)` y `sumarDiasHabilesAgenda(desde, n,
+cierres)` = los días hábiles de `plazos.ts` (su `esHabil`, sin repetir la regla) **menos** los
+cierres de empresa que da la fuente (`cierresEmpresa`; vacíos en respaldo). El día de partida no
+cuenta; sin cierres da lo mismo que `sumarDiasHabiles`.
+
+### Lo que falta
+
+Las cuatro escrituras de arriba **no tienen endpoint**: cuando lo tengan (lote 5) van tras
+`escritura('config.write', …)`, y `PUT /trazabilidad/estados` pasará a aceptar `categoria` y
+`etapa` (hoy sólo conoce `rol`). `GET /trazabilidad/estados` tampoco las devuelve todavía, pero
+**sí lista ya los 23 estados sembrados** aunque ningún ticket los tenga (son filas guardadas).
+Salen como cualquier estado que nadie ha tocado: `rol: 'cuenta'`, `actualizadoPor: null` y
+`actualizadoEn: null` («Nadie lo ha cambiado» en la pantalla); la semilla no aparece como autora
+de nada ahí, porque lo que firma es la categoría.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
@@ -503,7 +609,9 @@ tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la 
   tienen pruebas de componente: lo que ocultan o desactivan se revisa en el navegador.
 - `npm test --workspace=apps/hub-api` — dominio, el plan del aviso y los contactos
   (`avisos.test.ts`), plazos (el reloj con pausas, con `hoy` y los tramos como argumentos), la
-  matriz de roles entera (`roles.test.ts`), router (401, 403 sin la app, 403 por rol en cada
+  matriz de roles entera (`roles.test.ts`), las reglas de la configuración de la agenda y las
+  guardas de las migraciones 050 y 051 (`agenda-config.test.ts`; ahí está también la guarda de
+  cuál es la última migración apuntada en `db.ts`), router (401, 403 sin la app, 403 por rol en cada
   escritura, Lector por defecto, administrador con todo, y la API de roles) y el programador con
   reloj de mentira (`src/trazabilidad/*.test.ts`).
 - `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real: `registrarEstados`
@@ -515,6 +623,9 @@ tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la 
   mismo contenedor, con sólo las columnas que se leen y un rol de sólo lectura): el SQL de las
   dos fuentes, que una escritura por ese pool falla, que el tope de tiempo corta y la caída al
   respaldo con fallos de verdad. Lo mismo con bases de mentira, en `fuente.test.ts`, y el pool
-  opcional en `src/db-desk2.test.ts`.
+  opcional en `src/db-desk2.test.ts`. `agenda-config.db.test.ts` prueba la configuración de la
+  agenda: la 050 y la 051 ejecutadas varias veces (también sobre una tabla como la de antes de
+  la 050, con roles ya elegidos) sin pisar lo elegido ni tocar el rol del reloj, los `CHECK` y
+  el SQL de leer y guardar.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

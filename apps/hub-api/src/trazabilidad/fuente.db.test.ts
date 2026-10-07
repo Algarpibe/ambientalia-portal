@@ -54,12 +54,12 @@ describe('fuente principal: la base de Desk 2.0', () => {
     await sembrarDesk2();
     expect(await fuenteCon(lector).ticketsAbiertos()).toEqual<TicketTaller[]>([
       // La prioridad «High» viene de Zoho (no está fijada en la app): no cuenta. Sin transiciones: llegada desconocida.
-      { numero: 1001, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Para Servicio', tipoServicio: 'Diagnostico', remisionEntrada: '2026-09-25', fechaCreacion: '2026-09-21', prioridad: null, llegadaEstado: null, fuente: 'principal' },
+      { numero: 1001, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Para Servicio', tipoServicio: 'Diagnostico', remisionEntrada: '2026-09-25', fechaCreacion: '2026-09-21', prioridad: null, llegadaEstado: null, asunto: null, codigoServicio: null, fuente: 'principal' },
       // Sin tipo de estado sigue siendo «sin cerrar»; la fecha de creación sale de created_time, en el día de Colombia.
-      { numero: 1002, estado: 'Ingresado', tipoEstado: null, clasificacion: null, tipoServicio: null, remisionEntrada: null, fechaCreacion: '2026-10-01', prioridad: null, llegadaEstado: null, fuente: 'principal' },
+      { numero: 1002, estado: 'Ingresado', tipoEstado: null, clasificacion: null, tipoServicio: null, remisionEntrada: null, fechaCreacion: '2026-10-01', prioridad: null, llegadaEstado: null, asunto: null, codigoServicio: null, fuente: 'principal' },
       // Nacido en la app: prioridad fijada, y la llegada es la ÚLTIMA transición a su estado de ahora
       // (ni la primera, ni la de «Notificado»). 03:30 UTC del 29 es todavía el 28 en Colombia.
-      { numero: 10005, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Nuevo', tipoServicio: 'Calibración', remisionEntrada: '2026-09-29', fechaCreacion: '2026-09-28', prioridad: 'Urgent', llegadaEstado: Date.UTC(2026, 8, 30, 16, 0, 0), fuente: 'principal' },
+      { numero: 10005, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Nuevo', tipoServicio: 'Calibración', remisionEntrada: '2026-09-29', fechaCreacion: '2026-09-28', prioridad: 'Urgent', llegadaEstado: Date.UTC(2026, 8, 30, 16, 0, 0), asunto: null, codigoServicio: null, fuente: 'principal' },
     ]);
   });
 
@@ -150,14 +150,15 @@ describe('el pool de Desk 2.0 es de sólo lectura', () => {
 describe('respaldo: la réplica del portal', () => {
   async function sembrarReplica(): Promise<void> {
     await hub.query(`
-      INSERT INTO desk.tickets (number, subject, status, status_type, serial, tipo_servicio, created_time, fecha_creacion_ticket, synced_at) VALUES
-        (884, 'Asunto ficticio', 'Ingresado', 'Open', '18A00001', ' Calibración ', '2026-08-03T15:00:00Z', NULL, '2026-10-06T09:00:00Z'),
-        (990, 'Asunto ficticio', 'En Proceso', 'On Hold', NULL, NULL, '2026-09-01T15:00:00Z', '2026-09-02', '2026-10-06T10:00:00Z'),
-        (700, 'Asunto ficticio', 'Finalizado', 'Closed', NULL, NULL, '2026-07-01T15:00:00Z', NULL, '2026-10-06T11:00:00Z')`);
+      INSERT INTO desk.tickets (number, subject, status, status_type, serial, codigo_servicio, tipo_servicio, created_time, fecha_creacion_ticket, synced_at) VALUES
+        (884, ' Equipo Nuevo - Cliente Uno ', 'Ingresado', 'Open', '18A00001', 'HV_18A00001_EDM180C', ' Calibración ', '2026-08-03T15:00:00Z', NULL, '2026-10-06T09:00:00Z'),
+        (990, 'Asunto ficticio', 'En Proceso', 'On Hold', NULL, '  ', NULL, '2026-09-01T15:00:00Z', '2026-09-02', '2026-10-06T10:00:00Z'),
+        (700, 'Asunto ficticio', 'Finalizado', 'Closed', NULL, NULL, NULL, '2026-07-01T15:00:00Z', NULL, '2026-10-06T11:00:00Z')`);
   }
+  // El asunto y el código de servicio sólo se leen de la réplica: con ellos se deduce el flujo en respaldo (D11).
   const DE_REPLICA: TicketTaller[] = [
-    { numero: 884, estado: 'Ingresado', tipoEstado: 'Open', clasificacion: null, tipoServicio: 'Calibración', remisionEntrada: null, fechaCreacion: '2026-08-03', prioridad: null, llegadaEstado: null, fuente: 'respaldo' },
-    { numero: 990, estado: 'En Proceso', tipoEstado: 'On Hold', clasificacion: null, tipoServicio: null, remisionEntrada: null, fechaCreacion: '2026-09-02', prioridad: null, llegadaEstado: null, fuente: 'respaldo' },
+    { numero: 884, estado: 'Ingresado', tipoEstado: 'Open', clasificacion: null, tipoServicio: 'Calibración', remisionEntrada: null, fechaCreacion: '2026-08-03', prioridad: null, llegadaEstado: null, asunto: 'Equipo Nuevo - Cliente Uno', codigoServicio: 'HV_18A00001_EDM180C', fuente: 'respaldo' },
+    { numero: 990, estado: 'En Proceso', tipoEstado: 'On Hold', clasificacion: null, tipoServicio: null, remisionEntrada: null, fechaCreacion: '2026-09-02', prioridad: null, llegadaEstado: null, asunto: 'Asunto ficticio', codigoServicio: null, fuente: 'respaldo' },
   ];
 
   it('sin DESK2_DB_URL: mismos campos, con null en lo que la réplica no tiene, y cierres vacíos', async () => {
