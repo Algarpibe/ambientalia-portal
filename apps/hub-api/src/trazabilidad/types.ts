@@ -10,6 +10,7 @@ import {
   CONTACTO_MAX_TEXTO,
   EMAIL_MAX,
   ETAPAS_AGENDA,
+  FLUJOS_AGENDA,
   PLAZO_MAX_DIAS,
   PLAZO_MIN_DIAS,
   PUESTOS_MAX,
@@ -32,6 +33,7 @@ import {
   type EtapaAgenda,
   type EstadoCalibracion,
   type EstadoPlazo,
+  type FlujoAgenda,
   type OrigenTipo,
   type RangoFechas,
   type RolEstado,
@@ -530,6 +532,80 @@ export function validarDuracionEtapa(c: CambioDuracionEtapa): CambioDuracionEtap
     throw invalido(`La duración debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}.`, 'dias');
   }
   return { etapa: c.etapa, tipo, dias: c.dias };
+}
+
+// ── Agenda del taller: asignaciones, reparto inicial y flujo a mano (lote 4) ──
+
+/** De dónde sale una asignación: de la fila, una a una, o del reparto inicial (D6). */
+export const ORIGENES_ASIGNACION = ['fila', 'arranque'] as const;
+/** Cómo se cierra: sola, al salir el ticket de la etapa; liberada a mano (D7); o reemplazada por un reparto. */
+export const CIERRES_ASIGNACION = ['estado', 'manual', 'reparto'] as const;
+/** Tope del motivo de una asignación o de una liberación. */
+export const MOTIVO_MAX = 500;
+
+/** Un ticket a un puesto de una etapa. En el reparto inicial no lleva motivo. */
+export interface LineaReparto {
+  numero: number;
+  etapa: EtapaAgenda;
+  puesto: number;
+}
+
+export interface NuevaAsignacion extends LineaReparto {
+  /** Obligatorio si el ticket no es el primero de la fila. */
+  motivo?: string | null;
+}
+
+export interface Liberacion {
+  numero: number;
+  motivo: string;
+}
+
+export function validarNumeroTicket(numero: unknown): number {
+  if (typeof numero !== 'number' || !Number.isInteger(numero) || numero <= 0) throw invalido('El número de ticket debe ser un entero positivo.', 'numero');
+  return numero;
+}
+
+/** El motivo sin espacios sobrantes; vacío o ausente → null. */
+function motivoLimpio(motivo: unknown): string | null {
+  if (motivo !== null && motivo !== undefined && typeof motivo !== 'string') throw invalido('«motivo» debe ser un texto.', 'motivo');
+  const m = (motivo ?? '').trim();
+  if (m.length > MOTIVO_MAX) throw invalido(`«motivo» supera ${MOTIVO_MAX} caracteres.`, 'motivo');
+  return m === '' ? null : m;
+}
+
+function validarLinea(c: LineaReparto): LineaReparto {
+  const numero = validarNumeroTicket(c?.numero);
+  etapaValida(c.etapa);
+  if (!Number.isInteger(c.puesto) || c.puesto < 1 || c.puesto > PUESTOS_MAX) throw invalido(`El puesto debe ser un número entero entre 1 y ${PUESTOS_MAX}.`, 'puesto');
+  return { numero, etapa: c.etapa, puesto: c.puesto };
+}
+
+export function validarAsignacion(c: NuevaAsignacion): LineaReparto & { motivo: string | null } {
+  return { ...validarLinea(c), motivo: motivoLimpio(c.motivo) };
+}
+
+/** Las líneas de un reparto: cada ticket y cada puesto, una sola vez. */
+export function validarReparto(lineas: unknown): LineaReparto[] {
+  if (!Array.isArray(lineas)) throw invalido('«reparto» debe ser una lista de asignaciones.', 'reparto');
+  const out = lineas.map((l) => validarLinea(l as LineaReparto));
+  const repetido = (claves: (number | string)[]) => new Set(claves).size !== claves.length;
+  if (repetido(out.map((l) => l.numero))) throw invalido('El reparto nombra dos veces el mismo ticket.', 'reparto');
+  if (repetido(out.map((l) => `${l.etapa}/${l.puesto}`))) throw invalido('El reparto da el mismo puesto a dos tickets.', 'reparto');
+  return out;
+}
+
+export function validarLiberacion(c: Liberacion): Liberacion {
+  const numero = validarNumeroTicket(c?.numero);
+  const motivo = motivoLimpio(c.motivo);
+  if (motivo === null) throw invalido('Para liberar un puesto a mano hay que decir el motivo.', 'motivo');
+  return { numero, motivo };
+}
+
+/** El flujo que se marca a mano; null = quitar la marca. */
+export function validarFlujoManual(flujo: unknown): FlujoAgenda | null {
+  if (flujo === null) return null;
+  if (!FLUJOS_AGENDA.includes(flujo as FlujoAgenda)) throw invalido(`«flujo» debe ser uno de: ${lista(FLUJOS_AGENDA)}; o vacío para quitar la marca.`, 'flujo');
+  return flujo as FlujoAgenda;
 }
 
 /** El contacto que se le pone a mano a un cliente; `emails` vacío = quitarlo (vuelve a valer el de Desk). */

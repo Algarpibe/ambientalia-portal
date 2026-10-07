@@ -12,6 +12,9 @@ import { createAusenciasRouter } from './ausencias/router.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
 import { createTrazabilidadRouter } from './trazabilidad/router.js';
 import { iniciarRegistroEstados } from './trazabilidad/registro-estados.js';
+import { registrarEstadosAgenda } from './trazabilidad/repo.js';
+import { crearFuenteAgenda } from './trazabilidad/fuente.js';
+import { getDesk2Pool } from './db-desk2.js';
 import { createDataRouter } from './data.router.js';
 
 const app = express();
@@ -141,7 +144,12 @@ initDb()
     // descuenta del plazo el tiempo en standby. Se enciende aquí, con la base ya
     // inicializada, y en ningún otro sitio: los tests no importan este fichero.
     // Sus fallos se apuntan y no tumban nada.
-    iniciarRegistroEstados(getHubPool());
+    // En el mismo turno, y aparte, sale la pasada de la AGENDA del taller: su
+    // historial propio (portal.tmc_agenda_historial) desde Desk 2.0 y el cierre
+    // de las asignaciones cuyo ticket salió de su etapa. Si Desk 2.0 no está
+    // configurado o no contesta, esa pasada no escribe nada y la otra ni se entera.
+    const fuenteAgenda = crearFuenteAgenda({ hub: getHubPool(), desk2: getDesk2Pool });
+    iniciarRegistroEstados(getHubPool(), { agenda: (db) => registrarEstadosAgenda(db, fuenteAgenda) });
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));

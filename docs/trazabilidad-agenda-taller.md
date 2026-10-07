@@ -44,7 +44,15 @@ Decididas por Gerencia antes de este análisis:
 | **D13** | **Ningún ticket lleva la marca «sin confirmar».** En su lugar hay un aviso global en la agenda cuando la sincronización entera parece parada: cuando el máximo de `synced_at` de la base de la fuente tiene más de 1 hora. El umbral va en una constante. |
 | **D14** | **El «jefe de taller» de la agenda es el Director Técnico** (rol `DIRECTOR_TECNICO`). También configura puestos y duraciones. |
 
-Ajustes decididos el mismo día:
+### DECIDIDO el 07/10/2026
+
+| | Decisión |
+|---|---|
+| **D15** | **La prioridad (D1) adelanta al ticket por delante de TODA su fila**, no dentro de su grupo: un ticket con prioridad fijada en Desk 2.0 va delante de todos los que no la tienen, también si él vuelve de standby o viene de una etapa siguiente y los otros son de la primera etapa. Es lo que ya hacía el código del lote 3; F.3 decía otra cosa y queda corregida. |
+| **D16** | **Ninguna fecha prevista de entrada ni de inicio cae en un día no hábil** (fin de semana, festivo o cierre de empresa). Si «hoy» no es hábil, lo primero que se proyecta es el siguiente día hábil. Vale también para el día desde el que cuenta la duración de una asignación. |
+| **D17** | **Un historial de estados por fuente.** `tmc_estados_historial` sigue exactamente como estaba, alimentado desde la réplica, y es el de «Servicios». La agenda lleva el suyo (`tmc_agenda_historial`, migración 054), alimentado desde la fuente principal, que **no apunta nada mientras la agenda esté en respaldo**. En esa misma pasada se cierran solas las asignaciones cuyo ticket salió de su etapa. Las dos pasadas no se pisan: cada una con su bloqueo, y si la principal falla solo se salta la de la agenda. Sustituye a lo que B.5 pedía en un principio (un único historial pasado a la principal), que dejaba incoherente a «Servicios». Unificar los dos historiales queda para un lote posterior (sección J, lote 8). |
+
+Ajustes decididos el 06/10/2026:
 
 - **Clasificación propia de la agenda.** La categoría de un estado en la agenda es independiente de la clasificación de esperas y SLA de Desk 2.0, porque sirven para cosas distintas. «Por Entregar» es fin de taller y libera el puesto, aunque Desk 2.0 lo trate como espera externa (`Desk2:packages/shared/src/estados.ts:59-106`). Es una diferencia documentada, no un conflicto.
 - **Orden aproximado.** Cuando la llegada de un ticket no es exacta o hay empate, se ordena por número de ticket y la pantalla lo marca como «orden aproximado».
@@ -242,10 +250,17 @@ Los dos grupos se mezclan y se ordenan juntos por `fecha_remision_entrada`, asce
 **Etapas siguientes y vuelta de standby.** Manda la llegada al estado, por orden de preferencia:
 
 1. **Transición de Desk 2.0:** último `performed_at` de `desk.ticket_transitions` con `to_status` = estado actual. Exacta.
-2. **Historial del portal:** `desde` del tramo abierto en `tmc_estados_historial`. Exacta al minuto si `desde_real = TRUE`; aproximada si es primera observación.
+2. **Historial de la agenda:** `desde` del tramo abierto en `tmc_agenda_historial` (D17). Todavía no entra en el orden: hoy la llegada es solo la de la fuente. Exacta al minuto si `desde_real = TRUE`; aproximada si es primera observación.
 3. **Sin dato:** al final, por número de ticket.
 
 **El historial del portal debe seguir a la fuente principal.** Hoy `registrarEstados` lee la réplica (`repo.ts:645-689`). Con D4 debe leer del adaptador, y **no apuntar nada mientras se esté en respaldo**: las dos bases pueden discrepar (el 884 es «Finalizado» en una e «Ingresado» en la otra), y alternar de fuente escribiría cambios de estado que nunca ocurrieron.
+
+**Cómo quedó (D17, 07/10/2026): un historial por fuente.** El párrafo anterior, tal cual, dejaba incoherente a «Servicios»: seguiría leyendo sus tickets y el estado de ahora de la réplica con un historial de la principal, y sin `DESK2_DB_URL` su historial dejaría de crecer (el análisis está en la sección J, lote 4b). Por eso:
+
+- **`tmc_estados_historial` y `registrarEstados` no cambian.** Siguen leyendo la réplica y son el historial de «Servicios», que lee sus tickets de esa misma base.
+- **La agenda lleva el suyo: `tmc_agenda_historial`** (E.6), que apunta `registrarEstadosAgenda` desde la fuente principal y **nunca en respaldo** (ni sin la variable ni con la principal caída). «Respaldo» se decide por quién dio la lista de abiertos en esa llamada, no por si viene vacía: una lectura fallida no se interpreta como «todos cerrados».
+- **La «vuelta de standby» sale del historial de la agenda.** No se reconstruye nada (D8): un paso por standby anterior a la primera pasada de este historial no se conoce, y ese ticket se ordena como los demás. La primera pasada apunta cada ticket como primera observación (`desde_real = FALSE`): no inventa cambios ni vueltas.
+- **En respaldo** el historial de la agenda se queda como estaba; como «vuelve de standby» exige que el tramo abierto sea el estado que da la fuente, un desfase con la réplica solo hace que no se afirme.
 
 ### B.6 Prioridad (D1)
 
@@ -257,7 +272,7 @@ Los dos grupos se mezclan y se ordenan juntos por `fecha_remision_entrada`, asce
 
 - **Con Desk 2.0:** equipo nuevo si `classification` normaliza a «equipo nuevo»; si no, servicio (`Desk2:packages/shared/src/flujos.ts:51-61`). Hoy son equipo nuevo los tickets 1000, 1001, 1002 y 1008 (D5).
 - **Con la réplica:** `classification` está vacío (Z3). Se deduce: equipo nuevo si el asunto empieza por «Equipo Nuevo» o el código de servicio empieza por `HV_`.
-- **Marca a mano por ticket:** gana siempre, con cualquier fuente. Se guarda en una tabla del portal (E.4).
+- **Marca a mano por ticket:** solo para el ticket cuya fuente **no trae `classification`** (decidido el 07/10/2026; antes decía «gana siempre»). Con clasificación manda ella: la marca no se puede poner y, si existía de antes, deja de valer. Se guarda en una tabla del portal (E.4).
 
 ### B.8 Aviso de sincronización parada (D13)
 
@@ -374,7 +389,7 @@ Lo que hay que cambiar en el historial para la agenda:
 
 ## E. Modelo de datos
 
-Todo en el esquema `portal`, migraciones idempotentes de la 050 a la 053. La última registrada hoy es la 049 (`apps/hub-api/src/db.ts:24`), la de la fase de roles, que va antes; la 050 es la primera libre. Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
+Todo en el esquema `portal`, migraciones idempotentes de la 050 a la 054, las cinco ya construidas y registradas en `apps/hub-api/src/db.ts` (la 054 es la última): 050 categoría de cada estado (E.1), 051 puestos y duraciones (E.2), 052 asignaciones (E.3), 053 flujo a mano (E.4) y 054 historial de la agenda (E.6). Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
 
 ### E.1 Migración 050 — categoría y etapa de cada estado
 
@@ -452,24 +467,34 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_asignaciones (
   desde            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   inicio           DATE         NOT NULL,                      -- día desde el que cuenta la duración
   hasta            TIMESTAMPTZ  NULL,                          -- NULL = vigente
-  sugerido         INTEGER      NULL,                          -- ticket que proponía la fila
-  motivo           VARCHAR(500) NULL,                          -- obligatorio si numero <> sugerido
   origen           VARCHAR(12)  NOT NULL CHECK (origen IN ('fila','arranque')),
+  sugerido         INTEGER      NULL,                          -- ticket que proponía la fila
+  motivo           VARCHAR(500) NULL,                          -- obligatorio con origen 'fila' si numero <> sugerido
   asignado_por_id  UUID         NULL,
   asignado_por     VARCHAR(254) NOT NULL,
-  cierre           VARCHAR(12)  NULL CHECK (cierre IN ('estado','manual','reduccion')),
+  cierre           VARCHAR(12)  NULL CHECK (cierre IN ('estado','manual','reparto')),
   cierre_motivo    VARCHAR(500) NULL,                          -- obligatorio si cierre = 'manual' (D7)
+  cerrado_por_id   UUID         NULL,
   cerrado_por      VARCHAR(254) NULL,
-  CHECK (hasta IS NULL OR hasta >= desde)
+  CONSTRAINT tmc_agenda_asig_fechas_ck CHECK (hasta IS NULL OR hasta >= desde),
+  CONSTRAINT tmc_agenda_asig_cierre_ck CHECK ((hasta IS NULL) = (cierre IS NULL)),
+  CONSTRAINT tmc_agenda_asig_motivo_ck CHECK (origen <> 'fila' OR sugerido IS NULL OR sugerido = numero OR btrim(COALESCE(motivo, '')) <> ''),
+  CONSTRAINT tmc_agenda_asig_manual_ck CHECK (cierre IS DISTINCT FROM 'manual' OR (btrim(COALESCE(cierre_motivo, '')) <> '' AND cerrado_por IS NOT NULL))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_puesto_uq ON portal.tmc_agenda_asignaciones (etapa, puesto) WHERE hasta IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_ticket_uq ON portal.tmc_agenda_asignaciones (numero)        WHERE hasta IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_puesto_uq ON portal.tmc_agenda_asignaciones (etapa, puesto) WHERE hasta IS NULL;
+CREATE INDEX        IF NOT EXISTS tmc_agenda_asig_numero_idx ON portal.tmc_agenda_asignaciones (numero, desde);
 ```
 
-- **Un puesto, un ticket; un ticket, un puesto:** lo garantizan los dos índices parciales, como `tmc_estados_historial_abierto_uq` (`047…sql:39-55`).
-- **`inicio`:** el día desde el que cuenta la duración. Normalmente el día de la asignación; en el arranque (D6), el día de llegada a la etapa si es exacto, para que los ya pasados de fecha se vean como tales.
-- **Cierre automático (regla 5):** en la misma pasada que apunta los estados cada 5 minutos, si el estado del ticket ya no pertenece a la etapa de su asignación vigente, se cierra con `cierre = 'estado'`.
-- **Liberación a mano (D7):** `cierre = 'manual'`, con `cerrado_por` y `cierre_motivo` obligatorios.
+**Construida en el lote 4a**, sin semilla. Lo que cambió respecto al diseño: `etapa` lleva su `CHECK`; `puesto` tiene tope (1..50, `PUESTOS_MAX`); el cierre `'reduccion'` pasa a ser `'reparto'` (reemplazada por un reparto); hay `cerrado_por_id`; y los tres `CHECK` con nombre de coherencia.
+
+- **Un puesto, un ticket; un ticket, un puesto:** lo garantizan los dos índices parciales, como `tmc_estados_historial_abierto_uq` (`047…sql:39-55`). Son además lo que resuelve dos peticiones a la vez: la segunda recibe un 409.
+- **Puesto dentro de los configurados:** lo comprueba la app al asignar (`comprobarLinea`, `repo.ts`), no la tabla: reducir los puestos no desaloja a nadie.
+- **`inicio`:** el día desde el que cuenta la duración, siempre hábil (D16). El día de la asignación o, si no es hábil, el siguiente; en el arranque (D6), el día de llegada a la etapa si es exacto, para que los ya pasados de fecha se vean como tales.
+- **Motivo:** obligatorio al asignar a quien no es el primero de la fila (`sugerido`), y al liberar a mano. En el reparto inicial no se pide.
+- **Liberación a mano (D7):** `cierre = 'manual'`, con `cerrado_por` y `cierre_motivo` obligatorios. `liberar` en `repo.ts`.
+- **Cierre automático (regla 5), construido en el lote 4b:** en la pasada de la agenda (`registrarEstadosAgenda`, E.6), si el ticket ya no está en un estado de la etapa de su asignación vigente —pasó a standby, a fin de taller, a otra etapa o a un estado sin categoría, o ya no viene entre los abiertos de la principal—, se cierra con `cierre = 'estado'` y `hasta` = el instante de esa pasada, sin motivo ni firma. Cambiar de estado dentro de la etapa no cierra. Entre el cambio de estado y la pasada siguiente (hasta 5 minutos) la asignación sigue vigente en la tabla: la proyección ya no la cuenta, pero ni su puesto ni su ticket se pueden volver a asignar (409) hasta que la pasada la cierre o alguien la libere.
+- **`cierre = 'reparto'`** está admitido por la tabla y todavía no lo escribe nadie: el reparto inicial solo rellena puestos libres.
 - **No se escribe nada en Desk 2.0 ni en Zoho.**
 
 ### E.4 Migración 053 — flujo marcado a mano
@@ -486,7 +511,52 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_flujo (
 
 Mismo patrón que `tmc_servicios_tipo` (`044_trazabilidad_servicios_tipo.sql:26-33`): una fila por ticket corregido; borrarla vuelve al flujo de la fuente (D11).
 
-### E.5 Endpoints
+**Construida en el lote 4a** tal cual, sin semilla. `marcarFlujo` (`repo.ts`) solo marca un ticket que la fuente trae abierto y **sin `classification`** (409 si la trae); quitar la marca se puede siempre. Al leer, una marca de un ticket que ahora sí trae clasificación no se aplica (`leerEntradaAgenda`).
+
+### E.5 Lo que lee y escribe el lote 4 (`repo.ts`, sin endpoints)
+
+| Función | Permiso que debe pedir su endpoint | Qué hace |
+|---|---|---|
+| `leerEntradaAgenda(db, fuente, hoy)` / `leerAgenda(db, fuente, hoy)` | — (lectura) | Reúne todo lo que pide `proyectarAgenda` —fuente, configuración, categorías, tipos a mano, cierres, asignaciones vigentes, `vuelvenDeStandby` y flujos a mano— y devuelve la entrada o la agenda |
+| `asignar(db, fuente, {numero, etapa, puesto, motivo?}, actor, hoy)` | `agenda.asignar` | 409 `puesto_ocupado`, `ticket_fuera_de_etapa` o `ticket_con_puesto`; 400 en `puesto` si no existe en la etapa y en `motivo` si el ticket no es el primero de la fila |
+| `proponerRepartoInicial(db, fuente, hoy)` | — (lectura) | La propuesta de F.5; no escribe |
+| `confirmarRepartoInicial(db, fuente, lineas, actor, hoy)` | `agenda.reparto` | Las mismas comprobaciones por línea, 400 en `reparto` si repite ticket o puesto; una transacción, todo o nada |
+| `liberar(db, {numero, motivo}, actor)` | `agenda.liberar` | 400 sin motivo; 404 si el ticket no tiene puesto |
+| `marcarFlujo(db, fuente, numero, flujo \| null, actor)` | `agenda.flujo` | 400 en `flujo` o `numero`; 404 si la fuente no lo trae abierto; 409 `flujo_de_la_fuente` |
+| `registrarEstadosAgenda(db, fuente)` | — (la lanza el programador, no una persona) | La pasada de la agenda: su historial y el cierre automático de asignaciones (E.6) |
+
+### E.6 Migración 054 — historial de estados de la agenda (D17)
+
+```sql
+CREATE TABLE IF NOT EXISTS portal.tmc_agenda_historial (
+  id          BIGSERIAL    PRIMARY KEY,
+  numero      INTEGER      NOT NULL CHECK (numero > 0),
+  clave       TEXT         NOT NULL,                 -- estado normalizado (claveEstadoDesk)
+  etiqueta    TEXT         NOT NULL,
+  desde       TIMESTAMPTZ  NOT NULL,
+  hasta       TIMESTAMPTZ  NULL,                     -- NULL = tramo abierto
+  desde_real  BOOLEAN      NOT NULL,                 -- FALSE = primera observación
+  CHECK (hasta IS NULL OR hasta >= desde)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_historial_abierto_uq ON portal.tmc_agenda_historial (numero) WHERE hasta IS NULL;
+CREATE INDEX        IF NOT EXISTS tmc_agenda_historial_numero_idx ON portal.tmc_agenda_historial (numero, desde);
+```
+
+Misma forma que `tmc_estados_historial` (047; una prueba vigila que las columnas coincidan), sin semilla y **sin copiar nada de aquélla**: son historiales de bases distintas.
+
+**La pasada de la agenda** (`registrarEstadosAgenda(db, fuente)`, `repo.ts`), en una transacción:
+
+1. coge **su** bloqueo (`pg_advisory_xact_lock(hashtext('portal.tmc_agenda_historial'))`), distinto del de `registrarEstados`;
+2. lee la fuente ya con el bloqueo (`abiertosConOrigen`, que dice quién contestó). **Si no fue la principal, termina sin escribir nada**;
+3. toma el instante (`clock_timestamp()`), apunta los tramos con las reglas de `registrarEstados` y cierra las asignaciones fuera de etapa con ese mismo instante (E.3).
+
+Devuelve `{fuente, abiertos, cerrados, asignacionesCerradas}`.
+
+**Cuándo se dispara:** en el programador de 5 minutos de `registro-estados.ts`, en el mismo turno que la de «Servicios» pero por otra puerta (`registrarAgendaSinFallar`): ninguna espera a la otra, el fallo de una no toca a la otra y cada una tiene su «una sola a la vez». `GET /servicios` no la dispara. El lote 5 puede llamar a `registrarAgendaSinFallar` antes de servir `GET /agenda` (sin `forzar` no repite una pasada buena de hace menos de 30 s).
+
+**Si la principal falla o no está configurada:** la pasada de la agenda no escribe; mientras espera a la principal (hasta unos 3 s de conexión o 5 s de consulta) retiene solo su bloqueo y una conexión de la base del portal. La de «Servicios» no se entera.
+
+### E.7 Endpoints
 
 Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`). Los cálculos se hacen en el servidor con «hoy» como argumento (`hoyOf`, `router.ts:52-59`).
 
@@ -541,10 +611,13 @@ primeraEtapa(t) = (t.flujo = 'equipo_nuevo') ? 'proceso' : 'diagnostico'
 candidatos(e) = tickets de 'entrada' con etapaDestino = e                  // «Ingresado», «Remisión creada»
               ∪ tickets en un estado de la etapa e SIN asignación vigente  // «en etapa sin puesto»
 
+con prioridad (D1, D15) = candidatos con prioridad fijada en Desk 2.0, de mayor a menor
+        // por delante de TODA la fila, sean del grupo A o del B; solo con la fuente principal; hoy no hay ninguna
+        // entre dos con la misma prioridad deciden las reglas de abajo
+
 grupo A (una sola fila, D12) = candidatos t con e = primeraEtapa(t) que no vuelven de standby
         // mezcla a los de 'entrada' con los que ya están en la etapa sin puesto: no hay preferencia entre ellos
     orden:
-        0. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
         1. tiene remisionEntrada antes que no tenerla     // sin fecha → al final, «falta fecha de remisión»
         2. remisionEntrada ascendente
         3. con el mismo día: llegada exacta antes que no exacta
@@ -552,21 +625,25 @@ grupo A (una sola fila, D12) = candidatos t con e = primeraEtapa(t) que no vuelv
 
 grupo B (al final) = el resto: etapas siguientes y los que vuelven de standby
     orden:
-        0. prioridad fijada en Desk 2.0, descendente
         1. llegada ascendente                             // instante de entrada en el estado
         2. número de ticket ascendente
         si la llegada no es exacta o hay empate  →  «orden aproximado»
 
-fila(e) = grupo A seguido de grupo B
-«vuelve de standby» = el tramo anterior del historial del portal es de categoría standby
-sugerido(e) = primer ticket de fila(e)
+fila(e) = los que tienen prioridad, después el grupo A y después el grupo B
+«vuelve de standby» = el ticket está en una etapa activa y, justo antes de entrar en ella, el historial de la agenda
+                      lo tiene en un estado de categoría standby (cambiar de estado dentro de la etapa no lo borra)
+sugerido(e) = el primer ticket de fila(e) que YA está en un estado de la etapa
+              // quien espera en la fila de entrada no puede recibir puesto, aunque vaya delante
 ```
+
+«Vuelve de standby» solo se afirma con el historial en la mano (`vuelvenDeStandby`, `agenda.ts`): si el tramo abierto del ticket no es el estado que da la fuente, o hay un hueco antes de la etapa, no cuenta como vuelto.
 
 Con la réplica de respaldo `remisionEntrada` viene vacía, así que todos caerían en «sin fecha»; en ese caso no se pone la marca y se ordena por llegada y número, como en D8.
 
 ### F.4 Simulación por etapa
 
 ```
+arranque = esHabilAgenda(hoy) ? hoy : sumar(hoy, 1)        // D16: nada entra ni empieza en un día no hábil
 para cada etapa e:
     libre = []                                             // (puesto, día en que queda libre)
     para cada puesto p de 1..puestos[e]:
@@ -575,10 +652,10 @@ para cada etapa e:
             si fin < hoy:  fin = sumar(hoy, 1)             // pasado de fecha: empuja (regla 6)
             barra(t, p, a.inicio, fin);  libre.añadir(p, fin)
         si no:
-            libre.añadir(p, hoy)                           // hueco libre ya
+            libre.añadir(p, arranque)                      // hueco libre ya (o el primer día hábil)
     para cada ticket t de fila(e), en orden:
         (p, d) = el puesto de libre con el día más temprano     // empate → puesto de número menor
-        inicio = max(d, hoy)
+        inicio = max(d, arranque)
         fin    = sumar(inicio, duracion(t, e))
         previsto(t) = { puesto p, inicio, fin };  libre.actualizar(p, fin)
     primerHueco(e) = el día más temprano de libre tras repartir la fila
@@ -595,14 +672,16 @@ El día en que un puesto queda libre es el mismo en que entra el siguiente, porq
 proponerArranque():
     para cada etapa e:
         candidatos = tickets en un estado de e sin asignación, en el orden de F.3
-        para cada puesto libre p, por número:
+        para cada puesto libre p, por número:              // ni ocupado ni «a extinguir»
             t = siguiente candidato;  si no hay, terminar
-            inicio = t.llegada.exacta ? dia(t.llegada) : hoy
+            inicio = primerDiaHabil(t.llegada.exacta ? dia(t.llegada) : hoy)      // D16
             propuesta.añadir(t, e, p, inicio)
     devolver propuesta          // no escribe; lo que no cabe queda en la fila
 confirmarArranque(lista):       // la que deja el Director Técnico, igual o ajustada
     validar puestos y tickets;  insertar todas con origen = 'arranque' en una transacción
 ```
+
+**Construido en el lote 4a:** `proponerReparto` (`agenda.ts`, pura: es la misma proyección leída de otra forma) y `proponerRepartoInicial` / `confirmarRepartoInicial` (`repo.ts`). Confirmar solo rellena puestos libres con tickets que estén en esa etapa y sin puesto; no pide motivo aunque se ajuste, y guarda en `sugerido` a quién se proponía para cada puesto.
 
 ### F.6 Casos frontera
 
@@ -612,7 +691,8 @@ confirmarArranque(lista):       // la que deja el Director Técnico, igual o aju
 | **Ticket sin fecha de remisión** | Al final de la fila de entrada, con la marca «falta fecha de remisión». En cuanto se escribe en Zoho y se sincroniza, ocupa su sitio (D12) |
 | **Empate de llegada en etapas siguientes** | Decide el número de ticket; se marca «orden aproximado» |
 | **Pasado de fecha que empuja** | Sigue ocupando; fin proyectado = día hábil siguiente a hoy; se pinta en rojo. Cada día que siga ahí, toda la fila se corre un día |
-| **Standby que libera y vuelve** | Al entrar en standby la asignación se cierra (`cierre = 'estado'`) y sale de la proyección. Al volver a un estado de la etapa entra al final de la fila, con la llegada del momento en que regresó |
+| **Hoy no es hábil** | Sábado, domingo, festivo o cierre de empresa: lo primero que se proyecta es el siguiente día hábil. Ninguna entrada prevista, ningún primer hueco y ningún inicio de asignación cae en un día no hábil (D16) |
+| **Standby que libera y vuelve** | Al entrar en standby la asignación sale de la proyección (manda el estado) y se cierra sola con `cierre = 'estado'` en la siguiente pasada de la agenda (E.6). Al volver a un estado de la etapa entra al final de la fila, con la llegada del momento en que regresó |
 | **Equipo nuevo, dos etapas seguidas** | Ingresado → Proceso → Verificación. Se proyecta en cadena: la llegada prevista a Verificación es el fin previsto en Proceso. Es el único caso en que una etapa alimenta a otra sin standby en medio |
 | **Tipo sin duración** | No puede darse: la fila «*» de cada etapa es obligatoria y no se puede borrar (D9). Un ticket sin tipo usa la «*» y lleva la marca «sin tipo» |
 | **Puesto que se reduce estando ocupado** | No se desaloja a nadie. Los puestos por encima del nuevo tope quedan «a extinguir»: siguen ocupados hasta que su ticket salga y no reciben a nadie más. La saturación puede superar el 100 % y se avisa |
@@ -623,7 +703,7 @@ confirmarArranque(lista):       // la que deja el Director Técnico, igual o aju
 | **Sincronización parada** | Si el máximo de `synced_at` de la fuente tiene más de una hora, aviso global arriba de la agenda. No se marca ningún ticket ni se cambia la proyección (D13) |
 | **Ticket que ya no debería ocupar puesto** | El Director Técnico libera el puesto a mano, con motivo; queda registrado (D7) |
 | **Cambio a respaldo** | Las asignaciones vigentes se conservan; no se cierra ninguna automáticamente ni se apunta historial mientras dure. Un ticket que solo existe en Desk 2.0 conserva su puesto, marcado «sin datos de la fuente» |
-| **Ticket con marca manual de flujo** | La marca gana a la fuente; cambiarla recalcula a qué etapa alimenta |
+| **Ticket con marca manual de flujo** | Solo se marca el ticket cuya fuente no trae clasificación; cambiarla recalcula a qué etapa alimenta. Si la fuente pasa a traerla, manda la clasificación |
 
 ---
 
@@ -777,7 +857,7 @@ No quedan decisiones de negocio abiertas. Las nueve de la primera versión de es
 1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla. El 06/10/2026 estaba al día (P5). El aviso global de D13 detecta una parada completa, no un ticket suelto que se quede atrás; para eso está la liberación manual (D7).
 2. **La fecha de remisión se escribe a mano en Zoho.** Tiene precisión de día y puede faltar o estar mal: 5 de los 35 abiertos no la tienen (P2). El orden de la fila de entrada depende de que el taller la mantenga (D12).
 3. **El orden en etapas siguientes sigue siendo aproximado.** 34 de los 35 abiertos no tienen llegada exacta a su estado. El reparto inicial lo corrige el Director Técnico (D6, D8).
-4. **Dos procesos sincronizan Zoho por separado.** Desk 2.0 y el trabajador del hub pueden discrepar sobre un mismo ticket. Por eso el historial del portal no apunta en respaldo (B.5).
+4. **Dos procesos sincronizan Zoho por separado.** Desk 2.0 y el trabajador del hub pueden discrepar sobre un mismo ticket. Por eso cada pantalla lleva el historial de la base de la que lee sus tickets, y el de la agenda no apunta en respaldo (B.5, D17).
 5. **Entrar y salir del respaldo.** La agenda cambia de aspecto: aparecen o desaparecen tickets (10005, 884), se pierde la prioridad y los cierres. Las asignaciones se conservan.
 6. **Precisión de 5 minutos.** Un paso muy breve por un estado puede no quedar registrado, y una asignación puede cerrarse hasta 5 minutos tarde.
 7. **La proyección no cruza el standby.** La ocupación futura de Proceso depende de aprobaciones de clientes que la agenda no puede prever.
@@ -877,7 +957,7 @@ SELECT count(*) AS eventos, count(*) FILTER (WHERE event_name = 'BlueprintTransi
 
 ## J. Plan de construcción
 
-Siete lotes pequeños, en orden. Cada uno se entrega con sus pruebas en verde, con TDD estricto, y por debajo de 800 líneas de cambio. Datos de prueba siempre ficticios. Ningún lote envía correo ni escribe en Desk 2.0 o Zoho.
+Siete lotes pequeños, en orden, y un octavo anotado para después (unificar el historial). Cada uno se entrega con sus pruebas en verde, con TDD estricto, y por debajo de 800 líneas de cambio. Datos de prueba siempre ficticios. Ningún lote envía correo ni escribe en Desk 2.0 o Zoho.
 
 Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users/migrations`, `U` = `apps/trazabilidad-mantenimientos/src`.
 
@@ -957,16 +1037,52 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 
 ### Lote 4 — Asignaciones y arranque
 
-- **Objetivo:** guardar asignaciones, cerrarlas solas, liberar a mano, marcar el flujo y proponer y confirmar el reparto inicial.
-- **Ficheros:** `H/repo.ts` (asignar, liberar, cierre automático, flujo manual), `H/agenda.ts` (`proponerArranque`), `H/registro-estados.ts` y `H/repo.ts` (`registrarEstados` lee del adaptador y no apunta en respaldo; cierra asignaciones en la misma pasada), y pruebas de Postgres.
-- **Migración:** `M/052_trazabilidad_agenda_asignaciones.sql` y `M/053_trazabilidad_agenda_flujo.sql`.
-- **Pruebas:**
-  - Un puesto, un ticket; un ticket, un puesto (índices parciales), también con dos peticiones a la vez.
-  - Asignar a otro que el sugerido exige motivo.
-  - Cierre automático al salir de la etapa; no al cambiar entre estados de la misma etapa.
-  - Liberación manual con motivo y firma (D7).
-  - Propuesta de arranque: no escribe; lo que no cabe queda en la fila; confirmar es todo o nada (D6).
-  - En respaldo no se cierra ni se apunta nada.
+Partido en dos el 07/10/2026 y **construido entero**: el 4a primero y, tras decidirse D17, el 4b.
+
+#### Lote 4a — Construido
+
+Sin endpoints ni pantalla.
+
+- **Objetivo:** guardar asignaciones, liberar a mano, marcar el flujo, proponer y confirmar el reparto inicial, y la lectura que reúne todo lo que pide la proyección.
+- **Ficheros:**
+  - `M/052_trazabilidad_agenda_asignaciones.sql` y `M/053_trazabilidad_agenda_flujo.sql` (E.3 y E.4), sin semilla, registradas en `apps/hub-api/src/db.ts`.
+  - `H/agenda.ts`: D16 en `proyectarAgenda`, `vuelvenDeStandby`, `proponerReparto` e `inicioDeReparto` (puras). `H/agenda-calendario.ts`: `primerDiaHabilAgenda`.
+  - `H/types.ts`: `validarAsignacion`, `validarReparto`, `validarLiberacion`, `validarFlujoManual`, `validarNumeroTicket` y las constantes de origen y cierre.
+  - `H/repo.ts`: las funciones de E.5.
+- **Pruebas:** `H/agenda.test.ts` (D16, `vuelvenDeStandby`, `proponerReparto`; el ejemplo H sigue dando las mismas fechas), `H/agenda-asignaciones.test.ts` (guardas de la 052 y la 053, y la de «última migración») y `H/agenda-asignaciones.db.test.ts` (restricciones, las dos migraciones repetidas, asignar, puesto ocupado, motivo, dos peticiones a la vez, reparto todo o nada —también cuando falla la base—, liberar, flujo a mano y `leerAgenda` en principal y en respaldo).
+- **Lo que quedó distinto del plan, o decidido donde no lo estaba:**
+  - **«El primero de la fila» es el primero que ya está en un estado de la etapa.** Un ticket en la fila de entrada puede ir delante por fecha de remisión, pero no puede recibir puesto: asignar al primero que sí puede no pide motivo.
+  - **Asignar exige que el ticket esté en un estado de esa etapa** según la fuente: ni fila de entrada, ni standby, ni otra etapa, ni un ticket que la fuente no trae.
+  - **El flujo a mano solo vale sin `classification`** (B.7).
+  - **«Vuelve de standby»** leía en el 4a el historial de «Servicios»; desde el 4b lee el de la agenda.
+  - **`cierre = 'reparto'`** existe en la tabla y nadie lo escribe todavía.
+
+#### Lote 4b — Construido (opción B, D17)
+
+- **Objetivo:** el historial propio de la agenda desde la fuente principal, sin apuntar en respaldo, y el cierre automático de las asignaciones en esa misma pasada, transacción y bloqueo. «Servicios», `registrarEstados` y `tmc_estados_historial` no cambian.
+- **Ficheros:** `M/054_trazabilidad_agenda_historial.sql` (E.6); `H/fuente.ts` (`abiertosConOrigen`: los abiertos y quién los dio); `H/repo.ts` (`registrarEstadosAgenda`, y `leerEntradaAgenda` pasa a leer `tmc_agenda_historial`); `H/registro-estados.ts` (`registrarAgendaSinFallar` y la opción `agenda` del programador); `apps/hub-api/src/index.ts` (la enciende).
+- **Pruebas:** `H/agenda-historial.db.test.ts` (la 054 repetida; primer arranque; cierre al pasar a standby, a fin de taller, a otra etapa y al cerrarse o desaparecer, y no al cambiar de estado dentro de la etapa; ida y vuelta de standby; nada escrito sin la variable ni con la principal caída mientras «Servicios» sigue apuntando; varias pasadas de la agenda a la vez; la de «Servicios» y la de la agenda a la vez; y que cada bloqueo es independiente), `H/registro-agenda.test.ts` (las dos pasadas en el programador sin esperarse ni contagiarse los fallos) y la guarda de la 054 en `H/agenda-asignaciones.test.ts`. Las pruebas que ya había de `registrarEstados` y de «Servicios» siguen en verde sin tocarlas.
+- **Decidido aquí:**
+  - **La fuente se lee con el bloqueo ya cogido**, para que dos pasadas a la vez no puedan escribir una lectura vieja sobre una nueva. A cambio, mientras la principal tarda en fallar la pasada retiene una conexión de la base del portal (y solo su bloqueo).
+  - **Un estado sin categoría también saca al ticket de su etapa** y cierra la asignación: es lo mismo que ya hacía la proyección al no contarla.
+  - **La pasada solo sale del programador.** `GET /servicios` no la dispara; `GET /agenda` (lote 5) podrá pedirla antes de leer.
+  - **Sin `DESK2_DB_URL` el historial de la agenda no crece y nada se cierra solo**: queda la liberación a mano (D7).
+
+**Por qué no se hizo lo que B.5 pedía en un principio** (un único historial pasado a la principal). Se conserva el análisis:
+
+- **Qué se pedía:** que `registrarEstados` leyera de la fuente principal y no apuntara en respaldo.
+- **Por qué se paró.** «Servicios» lee sus tickets y el estado de ahora de la réplica (`H/repo.ts`, `listarServicios`), y con ese estado y los tramos de `tmc_estados_historial` calcula el reloj (`calcularReloj`, `H/plazos.ts`). Si el historial pasa a escribirse desde la principal:
+  1. **Sin `DESK2_DB_URL` el historial deja de crecer.** Sin la variable la fuente es siempre «respaldo» (`H/fuente.ts`, `leer`), así que «no apuntar en respaldo» es no apuntar nunca. Los tramos abiertos se quedan como estén: quien entre después en standby solo tiene en pausa el día de hoy, quien salga sigue en pausa para siempre, y un «trabajo terminado» nuevo queda sin fecha ni veredicto. Lo mismo, mientras dure, cada vez que Desk 2.0 no conteste.
+  2. **Estado de ahora de una base, pasado de la otra.** El día de hoy lo decide el estado de la réplica y los días anteriores, los tramos de la principal. Si discrepan, un mismo día cuenta como pausa hoy y como activo mañana, y la fecha límite cambia sola.
+  3. **Un cierre que solo ve una.** El 884 (cerrado en Desk 2.0, «Ingresado» en la réplica) perdería su tramo y «Servicios» lo seguiría listando, ya sin historial. Un ticket que solo está en la réplica no tendría historial nunca.
+  4. **El día del cambio.** La primera pasada desde la principal apuntaría como cambio visto (`desde_real`) cada discrepancia entre las dos bases, con la hora del despliegue: un «terminado» con fecha y veredicto inventados.
+- **El cierre automático depende de lo mismo:** hecho con la pasada de hoy cerraría, por el estado de la réplica, asignaciones que se dieron con el de la principal (la de un ticket nacido en la app, a los cinco minutos).
+- **Opciones:**
+  - **A. Tal como está escrito.** Exige `DESK2_DB_URL` en todo entorno y acepta los puntos 2 a 4 en «Servicios».
+  - **B. Un historial por fuente.** `tmc_estados_historial` sigue como hoy, de la réplica, para «Servicios»; la agenda lleva el suyo, de la principal y sin apuntar en respaldo, y en esa pasada se cierran las asignaciones. «Servicios» no cambia en nada. Cuesta una migración (054) y una segunda pasada.
+  - **C. Como A, pero sin la variable se sigue apuntando desde la réplica** (sin ella no hay alternancia posible); solo un fallo de una principal configurada suspende el historial. Resuelve el punto 1 a medias (no las caídas) y deja los puntos 2 a 4.
+  - **D. Pasar también «Servicios» a la fuente de la agenda**, para que tickets e historial salgan del mismo sitio. Es lo coherente a largo plazo, pero cambia «Servicios» y la fuente no trae hoy lo que esa pantalla enseña (serial, asunto, contacto).
+- **Decidido (D17):** B. La D queda anotada como lote 8.
 
 ### Lote 5 — API
 
@@ -974,8 +1090,8 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Ficheros:** `H/router.ts`, `H/types.ts` (formas de respuesta) y `H/router.test.ts`.
 - **Migración:** ninguna.
 - **Pruebas:**
-  - Todos los endpoints de E.5 tras `requireAuth` + `requireApp`.
-  - Los que escriben exigen además su permiso (`agenda.*` o `config.write`, E.5), que hoy solo tiene el rol `DIRECTOR_TECNICO`; sin él, 403 (D14). Cada ruta nueva se apunta en la lista `ESCRITURAS` de `router.test.ts`.
+  - Todos los endpoints de E.7 tras `requireAuth` + `requireApp`.
+  - Los que escriben exigen además su permiso (`agenda.*` o `config.write`, E.7), que hoy solo tiene el rol `DIRECTOR_TECNICO`; sin él, 403 (D14). Cada ruta nueva se apunta en la lista `ESCRITURAS` de `router.test.ts`.
   - Validación con mensajes en español.
   - `GET /agenda` responde aunque Desk 2.0 no conteste, indicando el respaldo y su motivo.
   - `?hoy=` determinista.
@@ -1001,8 +1117,22 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
   - Revisión visual en navegador antes de darlo por bueno; es lo único que las pruebas no cubren.
 - **Si supera las 800 líneas:** se parte en 7a (lectura: Gantt, filas, standby) y 7b (acciones: arranque, asignar, liberar).
 
+### Lote 8 (posterior) — «Servicios» lee de la fuente de la agenda y se unifica el historial
+
+Anotado el 07/10/2026; sin fecha y fuera de los siete lotes de la agenda.
+
+- **Objetivo:** que «Servicios» lea sus tickets de la misma fuente que la agenda (Desk 2.0, con la réplica de respaldo) y que haya **un solo historial de estados**, en vez de los dos de D17.
+- **Lo que le falta hoy a la fuente** (`TicketTaller`, `H/fuente-desk2.ts`) para lo que esa pantalla enseña y calcula:
+  - el **serial** del equipo (el cruce con `tmc_equipos` y el nombre del cliente);
+  - el **asunto** y el **código de servicio** con la fuente principal (hoy solo se leen en respaldo): de ahí salen el modelo y el cliente «de asunto»;
+  - el **contacto** (`raw->'contact'`: cuenta, nombre y apellido, y el correo que usan los avisos);
+  - la marca «sin confirmar» por ticket, que la agenda descartó (D13) y «Servicios» aún enseña;
+  - y el permiso de lectura del rol `portal_agenda_reader` sobre lo que haga falta de eso.
+- **Lo que hay que decidir entonces:** qué pasa con el reloj del plazo mientras se está en respaldo (los puntos 1 a 4 del análisis del lote 4b vuelven a aplicar), y cómo se funden `tmc_estados_historial` y `tmc_agenda_historial` sin inventar cambios el día del cambio.
+- **Migración:** la que toque entonces (la 055 es la primera libre).
+
 ### Orden y dependencias
 
-Antes de la agenda va la fase de roles, que usa la migración 049 y aporta el rol `DIRECTOR_TECNICO`; por eso la agenda usa de la 050 a la 053. Los lotes 1 a 4 no dependen del rol; el 5, el 6 y el 7, sí.
+Antes de la agenda va la fase de roles, que usa la migración 049 y aporta el rol `DIRECTOR_TECNICO`; por eso la agenda usa de la 050 a la 054. Los lotes 1 a 4 no dependen del rol; el 5, el 6 y el 7, sí.
 
 `1 → 2 → 3 → 4 → 5 → 6 → 7`. El 3 solo depende de los tipos del 1 y de las constantes del 2. El 6 puede desplegarse antes que el 7 para que la configuración esté lista cuando llegue la pantalla. En cada despliegue, hub-api antes que el portal.

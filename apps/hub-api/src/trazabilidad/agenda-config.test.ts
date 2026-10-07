@@ -356,8 +356,9 @@ describe('051_trazabilidad_agenda_config.sql', () => {
     expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 050 y la última', () => {
+  // La guarda de cuál es la ÚLTIMA migración apuntada está en agenda-asignaciones.test.ts (la 053).
+  it('está apuntada en MIGRATIONS, detrás de la 050', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'050_trazabilidad_estados_categoria\.sql',\s*'051_trazabilidad_agenda_config\.sql'\]/);
+    expect(db).toMatch(/'050_trazabilidad_estados_categoria\.sql',\s*'051_trazabilidad_agenda_config\.sql'/);
   });
 });

@@ -50,6 +50,12 @@ export interface OpcionesRegistro {
 
 export interface OpcionesProgramador {
   tarea?: Tarea;
+  /**
+   * La pasada de la AGENDA (`registrarEstadosAgenda`, repo.ts, con su fuente): si
+   * se da, sale en cada turno junto a la de «Servicios» y aparte de ella. Sin
+   * ella el programador es el de siempre.
+   */
+  agenda?: Tarea;
   intervaloMs?: number;
   primeraMs?: number;
 }
@@ -91,14 +97,56 @@ export async function registrarEstadosSinFallar(db: Pool, opts: OpcionesRegistro
   }
 }
 
+// ── La pasada de la agenda ──────────────────────────────────────────────────
+//
+// El historial PROPIO de la agenda del taller y el cierre de sus asignaciones
+// (`registrarEstadosAgenda`) leen la fuente principal, que puede tardar unos
+// segundos en fallar. Por eso tiene SU puerta, con su pasada en curso y su
+// última buena: no comparte nada con la de «Servicios». Ninguna espera a la
+// otra y el fallo de una no toca a la otra; en la base, cada una tiene además
+// su propio bloqueo.
+
+const CONTEXTO_AGENDA = 'tmc_registrar_agenda';
+let agendaEnCurso: Promise<void> | null = null;
+let agendaUltimaBuena = Number.NEGATIVE_INFINITY;
+
+/**
+ * Lanza la pasada de la agenda, si hace falta, y nunca rechaza: un fallo se
+ * apunta (consola y Sentry) y no pasa de aquí. Una sola a la vez en este
+ * proceso; sin `forzar` no repite una buena de hace menos de `FRESCURA_MS`
+ * (para quien la pida antes de leer la agenda; el programador fuerza).
+ */
+export async function registrarAgendaSinFallar(db: Pool, tarea: Tarea, opts: { forzar?: boolean } = {}): Promise<void> {
+  try {
+    if (!agendaEnCurso) {
+      if (!opts.forzar && Date.now() - agendaUltimaBuena < FRESCURA_MS) return;
+      const pasada: Promise<void> = (async () => {
+        await tarea(db);
+        agendaUltimaBuena = Date.now();
+      })().finally(() => {
+        if (agendaEnCurso === pasada) agendaEnCurso = null;
+      });
+      agendaEnCurso = pasada;
+    }
+    await agendaEnCurso;
+  } catch (e) {
+    console.error(`${CONTEXTO_AGENDA} error`, e);
+    captureError(e, { endpoint: CONTEXTO_AGENDA });
+  }
+}
+
 /**
  * Enciende el programador. Devuelve false, sin tocar nada, si ya estaba
  * encendido: no se arranca dos veces. Los temporizadores no retienen el
- * proceso (`unref`).
+ * proceso (`unref`). Con `agenda`, cada turno lanza las DOS pasadas, cada una
+ * por su puerta y sin esperar a la otra.
  */
 export function iniciarRegistroEstados(db: Pool, opts: OpcionesProgramador = {}): boolean {
   if (temporizadores) return false;
-  const pasada = (): void => void registrarEstadosSinFallar(db, { forzar: true, tarea: opts.tarea });
+  const pasada = (): void => {
+    void registrarEstadosSinFallar(db, { forzar: true, tarea: opts.tarea });
+    if (opts.agenda) void registrarAgendaSinFallar(db, opts.agenda, { forzar: true });
+  };
   const mios: Temporizadores = {
     primera: setTimeout(() => {
       pasada();
@@ -127,4 +175,6 @@ export function reiniciarRegistroEstados(): void {
   detenerRegistroEstados();
   enCurso = null;
   ultimaBuena = Number.NEGATIVE_INFINITY;
+  agendaEnCurso = null;
+  agendaUltimaBuena = Number.NEGATIVE_INFINITY;
 }

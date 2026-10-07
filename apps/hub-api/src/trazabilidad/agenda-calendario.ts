@@ -16,6 +16,11 @@ export function esHabilAgenda(fecha: string, cierres: ReadonlySet<string>): bool
   return esHabil(fecha) && !cierres.has(fecha);
 }
 
+/** `fecha` si es hábil de agenda; si no, el siguiente que lo sea (D16: nada se proyecta en un día no hábil). */
+export function primerDiaHabilAgenda(fecha: string, cierres: ReadonlySet<string>): string {
+  return esHabilAgenda(fecha, cierres) ? fecha : sumarDiasHabilesAgenda(fecha, 1, cierres);
+}
+
 /**
  * `desde` + `n` días hábiles de agenda. Como `sumarDiasHabiles`, el día de
  * partida no cuenta; sin cierres da exactamente lo mismo.

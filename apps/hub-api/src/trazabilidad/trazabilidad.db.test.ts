@@ -352,8 +352,11 @@ describe('contacto de cada equipo', () => {
     it('ninguna tabla del módulo guarda mensajes ni envíos: el aviso automático es sólo una simulación', async () => {
       const { rows } = await db.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'tmc\\_%' ORDER BY 1`);
       expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
+        'tmc_agenda_asignaciones',
         'tmc_agenda_duraciones',
         'tmc_agenda_etapas',
+        'tmc_agenda_flujo',
+        'tmc_agenda_historial',
         'tmc_contactos',
         'tmc_equipos',
         'tmc_estados_desk',

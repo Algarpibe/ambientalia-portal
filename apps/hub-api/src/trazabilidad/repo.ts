@@ -1,14 +1,18 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 051). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 054). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
+import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
+import { primerDiaHabilAgenda } from './agenda-calendario.js';
+import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import {
   asignarClaves,
   asuntoSinCodigo,
   categoriaCoherente,
+  categoriaDeEstado,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
@@ -29,12 +33,14 @@ import {
   partesDeTipo,
   porOrdenEstadosDesk,
   ROL_POR_DEFECTO,
+  sumarDias,
   TIPO_POR_DEFECTO,
   tipoEfectivo,
   type CategoriaEstado,
   type ContactoCliente,
   type ContactoEquipo,
   type EtapaAgenda,
+  type FlujoAgenda,
   type RolEstado,
   type TicketContacto,
 } from './dominio.js';
@@ -43,10 +49,19 @@ import { resolverRol, type RolApp } from './roles.js';
 import {
   TzError,
   errorPlazoDerivado,
+  validarAsignacion,
   validarCategoriaEstado,
   validarDuracionEtapa,
+  validarFlujoManual,
+  validarLiberacion,
+  validarNumeroTicket,
   validarPuestosEtapa,
+  validarReparto,
   type Actor,
+  type LineaReparto,
+  type Liberacion,
+  type NuevaAsignacion,
+  type ORIGENES_ASIGNACION,
   type CambioCategoriaEstado,
   type CambioContacto,
   type CambioDuracionEtapa,
@@ -739,6 +754,290 @@ export async function guardarDuracionEtapa(db: Db, cambio: CambioDuracionEtapa, 
        actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [c.etapa, c.tipo, c.dias, actor.userId, actor.email],
   );
+}
+
+// ── Agenda del taller: la lectura reunida, las asignaciones, el reparto inicial y el flujo a mano (lote 4) ──
+//
+// Sin endpoints todavía (lote 5). Aquí no se mira el rol: se firma con el actor
+// que llega. Cada escritura debe ir en router.ts tras SU permiso de roles.ts:
+// `asignar` → 'agenda.asignar', `liberar` → 'agenda.liberar',
+// `confirmarRepartoInicial` → 'agenda.reparto' y `marcarFlujo` → 'agenda.flujo'.
+
+/** Cuánto calendario de cierres de empresa se pide a la fuente alrededor de hoy, en días. */
+const CIERRES_ATRAS_DIAS = 120;
+const CIERRES_ADELANTE_DIAS = 365;
+
+/**
+ * Todo lo que necesita `proyectarAgenda`, reunido: los abiertos, el estado y
+ * los cierres de la fuente; las categorías, los puestos y las duraciones; el
+ * tipo puesto a mano; las asignaciones vigentes; quién vuelve de standby según
+ * el historial PROPIO de la agenda (tmc_agenda_historial, el de la fuente
+ * principal; no el de «Servicios»); y el flujo marcado a mano, que sólo vale para el
+ * ticket cuya fuente no trae clasificación (D11). Sólo lee.
+ */
+export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: string): Promise<EntradaAgenda> {
+  const [tickets, estadoFuente, cierres, categorias, config, tipos, vigentes, flujos] = await Promise.all([
+    fuente.ticketsAbiertos(),
+    fuente.estadoFuente(),
+    fuente.cierresEmpresa(sumarDias(hoy, -CIERRES_ATRAS_DIAS), sumarDias(hoy, CIERRES_ADELANTE_DIAS)),
+    leerCategoriasEstados(db),
+    leerConfigAgenda(db),
+    db.query(`SELECT numero, clave FROM portal.tmc_servicios_tipo`),
+    db.query(`SELECT numero, etapa, puesto, inicio::text AS desde FROM portal.tmc_agenda_asignaciones WHERE hasta IS NULL ORDER BY etapa, puesto`),
+    db.query(`SELECT numero, flujo FROM portal.tmc_agenda_flujo`),
+  ]);
+  const historial = await db.query(
+    `SELECT numero, clave, (extract(epoch FROM desde) * 1000)::float8 AS desde_ms, (extract(epoch FROM hasta) * 1000)::float8 AS hasta_ms
+       FROM portal.tmc_agenda_historial WHERE numero = ANY($1::int[])`,
+    [tickets.map((t) => t.numero)],
+  );
+  const tramos = new Map<number, TramoHistorial[]>();
+  for (const r of historial.rows as Row[]) {
+    const tramo = { clave: String(r.clave), desde: Math.round(Number(r.desde_ms)), hasta: r.hasta_ms === null ? null : Math.round(Number(r.hasta_ms)) };
+    tramos.set(Number(r.numero), [...(tramos.get(Number(r.numero)) ?? []), tramo]);
+  }
+  const sinClasificacion = new Set(tickets.filter((t) => !t.clasificacion).map((t) => t.numero));
+  return {
+    hoy,
+    tickets,
+    categorias,
+    config,
+    tiposManuales: new Map((tipos.rows as Row[]).map((r) => [Number(r.numero), String(r.clave)])),
+    cierres,
+    estadoFuente,
+    asignaciones: (vigentes.rows as Row[]).filter((r) => esEtapaAgenda(r.etapa)).map((r) => ({ numero: Number(r.numero), etapa: r.etapa, puesto: Number(r.puesto), desde: r.desde })),
+    vuelvenDeStandby: vuelvenDeStandby(tickets, tramos, categorias),
+    flujosManuales: new Map((flujos.rows as Row[]).filter((r) => sinClasificacion.has(Number(r.numero))).map((r) => [Number(r.numero), r.flujo as FlujoAgenda])),
+  };
+}
+
+/** La agenda del taller a fecha `hoy`: es lo que servirá `GET /agenda` (lote 5). */
+export async function leerAgenda(db: Db, fuente: FuenteAgenda, hoy: string): Promise<AgendaTaller> {
+  return proyectarAgenda(await leerEntradaAgenda(db, fuente, hoy));
+}
+
+const puestoOcupado = () => new TzError('puesto_ocupado', 409, 'Ese puesto ya está ocupado. Si la agenda lo da por libre, su ticket cambió de etapa: hay que liberarlo antes.');
+const ticketConPuesto = (numero: number | null) =>
+  new TzError('ticket_con_puesto', 409, `${numero === null ? 'Un ticket del reparto' : `El ticket #${numero}`} ya tiene un puesto asignado: hay que liberarlo antes de darle otro.`);
+
+/**
+ * Comprueba contra la proyección que una línea se puede asignar: el puesto
+ * existe en la etapa y está libre, y el ticket está en un estado de ESA etapa
+ * según la fuente y sin puesto. Quien espera en la fila de entrada, está en
+ * standby o no viene en la fuente no está en la etapa.
+ */
+function comprobarLinea(agenda: AgendaTaller, l: LineaReparto): void {
+  const x = agenda.etapas.find((e) => e.etapa === l.etapa)!;
+  if (l.puesto > x.saturacion.puestos) throw new TzError('invalid_input', 400, `${x.etiqueta} tiene ${x.saturacion.puestos} puestos: no existe el puesto ${l.puesto}.`, 'puesto');
+  if (x.puestos.some((p) => p.puesto === l.puesto && p.ocupante)) throw puestoOcupado();
+  if (agenda.etapas.some((e) => e.puestos.some((p) => p.ocupante?.numero === l.numero))) throw ticketConPuesto(l.numero);
+  if (!x.fila.some((t) => t.numero === l.numero && t.situacion === 'en_etapa')) {
+    throw new TzError('ticket_fuera_de_etapa', 409, `El ticket #${l.numero} no está en ${x.etiqueta} según la fuente de la agenda.`);
+  }
+}
+
+interface AltaAsignacion extends LineaReparto {
+  desde: string;
+  origen: (typeof ORIGENES_ASIGNACION)[number];
+  sugerido: number | null;
+  motivo: string | null;
+}
+
+/**
+ * Guarda las asignaciones, todas o ninguna. La última palabra la tienen los
+ * dos índices únicos parciales de la tabla (una vigente por ticket, un
+ * ocupante por etapa y puesto): si entre la lectura y el alta alguien se
+ * adelantó, o queda una asignación vigente que la proyección ya no cuenta, el
+ * choque sale como 409 y la transacción entera se deshace.
+ */
+async function insertarAsignaciones(db: Pool, altas: readonly AltaAsignacion[], actor: Actor): Promise<number> {
+  try {
+    return await withTransaction(db, async (c) => {
+      for (const a of altas) {
+        await c.query(
+          `INSERT INTO portal.tmc_agenda_asignaciones (numero, etapa, puesto, inicio, origen, sugerido, motivo, asignado_por_id, asignado_por)
+           VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $9)`,
+          [a.numero, a.etapa, a.puesto, a.desde, a.origen, a.sugerido, a.motivo, actor.userId, actor.email],
+        );
+      }
+      return altas.length;
+    });
+  } catch (e) {
+    const { code, constraint } = (e ?? {}) as { code?: string; constraint?: string };
+    if (code === '23505' && constraint === 'tmc_agenda_asig_puesto_uq') throw puestoOcupado();
+    if (code === '23505' && constraint === 'tmc_agenda_asig_ticket_uq') throw ticketConPuesto(altas.length === 1 ? altas[0].numero : null);
+    throw e;
+  }
+}
+
+/**
+ * Da a un ticket un puesto de su etapa y lo firma (permiso `agenda.asignar`).
+ * Falla si el puesto no existe o está ocupado (409 `puesto_ocupado`), si el
+ * ticket no está en esa etapa según la fuente (409 `ticket_fuera_de_etapa`) o
+ * ya tiene puesto (409 `ticket_con_puesto`). El «primero de la fila» es el
+ * primero que ya está en un estado de la etapa: a cualquier otro se le exige
+ * motivo (400), y se guarda a quién se saltó. La duración cuenta desde hoy o,
+ * si hoy no es hábil, desde el siguiente día que lo sea (D16).
+ */
+export async function asignar(db: Pool, fuente: FuenteAgenda, cambio: NuevaAsignacion, actor: Actor, hoy: string): Promise<void> {
+  const c = validarAsignacion(cambio);
+  const entrada = await leerEntradaAgenda(db, fuente, hoy);
+  const agenda = proyectarAgenda(entrada);
+  comprobarLinea(agenda, c);
+  const sugerido = agenda.etapas.find((e) => e.etapa === c.etapa)!.fila.find((t) => t.situacion === 'en_etapa')?.numero ?? null;
+  if (sugerido !== c.numero && c.motivo === null) {
+    throw new TzError('invalid_input', 400, `El primero de la fila es el ticket #${sugerido}: para asignar a otro hay que decir el motivo.`, 'motivo');
+  }
+  await insertarAsignaciones(db, [{ ...c, desde: primerDiaHabilAgenda(hoy, new Set(entrada.cierres)), origen: 'fila', sugerido }], actor);
+}
+
+/** El reparto inicial que se propone (D6): los puestos libres de cada etapa, en el orden de la proyección. No escribe. */
+export async function proponerRepartoInicial(db: Db, fuente: FuenteAgenda, hoy: string): Promise<ItemReparto[]> {
+  return proponerReparto(await leerEntradaAgenda(db, fuente, hoy));
+}
+
+/**
+ * Confirma el reparto inicial tal como lo deja el Director Técnico —la
+ * propuesta, o ajustada— y lo firma (permiso `agenda.reparto`). Sólo rellena
+ * puestos libres, con tickets que estén en esa etapa y sin puesto; no pide
+ * motivo, y en `sugerido` queda a quién se proponía para cada puesto. Todo o
+ * nada: una sola transacción. Devuelve cuántas asignaciones guardó.
+ */
+export async function confirmarRepartoInicial(db: Pool, fuente: FuenteAgenda, reparto: readonly LineaReparto[], actor: Actor, hoy: string): Promise<number> {
+  const lineas = validarReparto(reparto);
+  if (lineas.length === 0) return 0;
+  const entrada = await leerEntradaAgenda(db, fuente, hoy);
+  const agenda = proyectarAgenda(entrada);
+  for (const l of lineas) comprobarLinea(agenda, l);
+  const propuesta = proponerReparto(entrada);
+  const altas = lineas.map((l): AltaAsignacion => ({
+    ...l,
+    desde: inicioDeReparto(entrada, l.numero),
+    origen: 'arranque',
+    sugerido: propuesta.find((p) => p.etapa === l.etapa && p.puesto === l.puesto)?.numero ?? null,
+    motivo: null,
+  }));
+  return insertarAsignaciones(db, altas, actor);
+}
+
+/**
+ * Libera a mano el puesto de un ticket (D7; permiso `agenda.liberar`): cierra
+ * su asignación vigente con el motivo, que es obligatorio, y la firma de quien
+ * lo hace. 404 si el ticket no tiene ninguna vigente.
+ */
+export async function liberar(db: Db, cambio: Liberacion, actor: Actor): Promise<void> {
+  const c = validarLiberacion(cambio);
+  const r = await db.query(
+    `UPDATE portal.tmc_agenda_asignaciones
+        SET hasta = GREATEST(clock_timestamp(), desde), cierre = 'manual', cierre_motivo = $2, cerrado_por_id = $3, cerrado_por = $4
+      WHERE numero = $1 AND hasta IS NULL`,
+    [c.numero, c.motivo, actor.userId, actor.email],
+  );
+  if ((r.rowCount ?? 0) === 0) throw new TzError('not_found', 404, `El ticket #${c.numero} no tiene ningún puesto asignado.`);
+}
+
+/**
+ * Marca a mano el flujo de un ticket y lo firma (D11; permiso `agenda.flujo`);
+ * con `null` quita la marca. Sólo se marca el ticket que la fuente trae abierto
+ * (404) y SIN clasificación: con ella manda ella (409 `flujo_de_la_fuente`).
+ * Quitar la marca se puede siempre.
+ */
+export async function marcarFlujo(db: Db, fuente: FuenteAgenda, numero: number, flujo: FlujoAgenda | null, actor: Actor): Promise<void> {
+  validarNumeroTicket(numero);
+  if (validarFlujoManual(flujo) === null) {
+    await db.query(`DELETE FROM portal.tmc_agenda_flujo WHERE numero = $1`, [numero]);
+    return;
+  }
+  const ticket = (await fuente.ticketsAbiertos()).find((t) => t.numero === numero);
+  if (!ticket) throw new TzError('not_found', 404, 'Ese ticket no está abierto en la fuente de la agenda.');
+  if (ticket.clasificacion) {
+    throw new TzError('flujo_de_la_fuente', 409, `El ticket #${numero} ya trae su clasificación de Desk («${ticket.clasificacion}»): su flujo no se marca a mano.`);
+  }
+  await db.query(
+    `INSERT INTO portal.tmc_agenda_flujo (numero, flujo, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (numero) DO UPDATE SET
+       flujo = EXCLUDED.flujo, actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [numero, flujo, actor.userId, actor.email],
+  );
+}
+
+/**
+ * La pasada de la AGENDA: apunta en portal.tmc_agenda_historial los cambios de
+ * estado que da la FUENTE PRINCIPAL y, en la misma transacción y con el mismo
+ * bloqueo, cierra solas las asignaciones cuyo ticket ya no está en la etapa
+ * de su puesto (pasó a standby, a fin de taller, a otra etapa o a un estado
+ * sin categoría, o ya no viene entre los abiertos). Cambiar de estado dentro
+ * de la etapa no cierra nada.
+ *
+ * Es otra tabla, otra base y OTRO bloqueo que `registrarEstados` (abajo), que
+ * sigue apuntando el historial de «Servicios» desde la réplica: ninguna de las
+ * dos espera a la otra, y si la principal falla sólo se salta ésta.
+ *
+ * En respaldo —sin `DESK2_DB_URL`, o con la principal sin contestar— NO
+ * escribe nada: la réplica puede discrepar, y su lectura no significa que los
+ * tickets de la principal se hayan cerrado. Por eso se pregunta quién dio la
+ * lista (`abiertosConOrigen`) en vez de mirar si viene vacía. La fuente se lee
+ * ya con el bloqueo cogido: así dos pasadas a la vez no pueden apuntar una
+ * lectura más vieja encima de una más nueva.
+ *
+ * Los tramos siguen las reglas de `registrarEstados`: sin tramo abierto → uno
+ * nuevo como primera observación (`desde_real` FALSE; es lo que hace la
+ * primera pasada con todos, sin inventar cambios); estado distinto por clave →
+ * cierra y abre en el mismo instante; ya no abierto → cierra. Ese mismo
+ * instante es el `hasta` de las asignaciones que cierra (`cierre = 'estado'`).
+ */
+export async function registrarEstadosAgenda(db: Pool, fuente: FuenteAgenda): Promise<{ fuente: NombreFuente; abiertos: number; cerrados: number; asignacionesCerradas: number }> {
+  return withTransaction(db, async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_agenda_historial'))`);
+    const leido = await fuente.abiertosConOrigen();
+    if (leido.fuente !== 'principal') return { fuente: leido.fuente, abiertos: 0, cerrados: 0, asignacionesCerradas: 0 };
+    const instante: string = ((await c.query(`SELECT clock_timestamp()::text AS ahora`)).rows[0] as Row).ahora;
+    const ahora = new Map<number, string>(leido.tickets.filter((t) => t.numero > 0).map((t) => [t.numero, t.estado]));
+    const [abiertos, vigentes, categorias] = [
+      await c.query(`SELECT id::text AS id, numero, clave FROM portal.tmc_agenda_historial WHERE hasta IS NULL`),
+      await c.query(`SELECT id::text AS id, numero, etapa FROM portal.tmc_agenda_asignaciones WHERE hasta IS NULL`),
+      await leerCategoriasEstados(c),
+    ];
+
+    const cerrar: string[] = [];
+    const enSuEstado = new Set<number>();
+    const cambian = new Set<number>();
+    for (const r of abiertos.rows as Row[]) {
+      const numero = Number(r.numero);
+      const estado = ahora.get(numero);
+      if (estado !== undefined && claveEstadoDesk(estado) === r.clave) enSuEstado.add(numero);
+      else {
+        cerrar.push(r.id);
+        if (estado !== undefined) cambian.add(numero);
+      }
+    }
+    const abrir = [...ahora].filter(([numero]) => !enSuEstado.has(numero));
+    const fueraDeEtapa = (vigentes.rows as Row[])
+      .filter((r) => {
+        const estado = ahora.get(Number(r.numero));
+        return estado === undefined || categoriaDeEstado(estado, categorias)?.etapa !== r.etapa;
+      })
+      .map((r) => r.id as string);
+
+    const afectadas = async (sql: string, params: unknown[]) => (await c.query(sql, params)).rowCount ?? 0;
+    const cerrados = cerrar.length === 0 ? 0 : await afectadas(`UPDATE portal.tmc_agenda_historial SET hasta = GREATEST($2::timestamptz, desde) WHERE id = ANY($1::bigint[]) AND hasta IS NULL`, [cerrar, instante]);
+    const nuevos =
+      abrir.length === 0
+        ? 0
+        : await afectadas(
+            `INSERT INTO portal.tmc_agenda_historial (numero, clave, etiqueta, desde, hasta, desde_real)
+             SELECT x.numero, x.clave, x.etiqueta, $5::timestamptz, NULL, x.desde_real
+               FROM unnest($1::int[], $2::text[], $3::text[], $4::boolean[]) AS x(numero, clave, etiqueta, desde_real)
+             ON CONFLICT (numero) WHERE hasta IS NULL DO NOTHING`,
+            [abrir.map(([numero]) => numero), abrir.map(([, e]) => claveEstadoDesk(e)), abrir.map(([, e]) => etiquetaEstadoDesk(e)), abrir.map(([numero]) => cambian.has(numero)), instante],
+          );
+    const asignacionesCerradas =
+      fueraDeEtapa.length === 0
+        ? 0
+        : await afectadas(`UPDATE portal.tmc_agenda_asignaciones SET hasta = GREATEST($2::timestamptz, desde), cierre = 'estado' WHERE id = ANY($1::bigint[]) AND hasta IS NULL`, [fueraDeEtapa, instante]);
+    return { fuente: leido.fuente, abiertos: nuevos, cerrados, asignacionesCerradas };
+  });
 }
 
 /**

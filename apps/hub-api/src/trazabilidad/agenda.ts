@@ -19,7 +19,7 @@
  */
 
 import { hoyEnColombia } from '../ausencias/saldo.js';
-import { sumarDiasHabilesAgenda } from './agenda-calendario.js';
+import { primerDiaHabilAgenda, sumarDiasHabilesAgenda } from './agenda-calendario.js';
 import {
   ETAPAS_AGENDA,
   ETIQUETA_ETAPA,
@@ -41,9 +41,9 @@ import type { EstadoFuente, MotivoRespaldo, NombreFuente, TicketTaller } from '.
 // ── Entrada ─────────────────────────────────────────────────────────────────
 
 /**
- * Un puesto ocupado: la asignación vigente de un ticket (las crea y las cierra
- * el lote 4, tabla tmc_agenda_asignaciones; hasta entonces la lista llega
- * vacía). `desde` es el DÍA (AAAA-MM-DD) desde el que cuenta la duración.
+ * Un puesto ocupado: la asignación vigente de un ticket (tabla
+ * tmc_agenda_asignaciones; las lee `leerEntradaAgenda`, repo.ts). `desde` es el
+ * DÍA (AAAA-MM-DD) desde el que cuenta la duración: su columna `inicio`.
  */
 export interface AsignacionAgenda {
   /** Número del ticket. */
@@ -75,10 +75,10 @@ export interface EntradaAgenda {
   asignaciones: readonly AsignacionAgenda[];
   /**
    * Tickets que el historial del portal muestra VOLVIENDO de un standby a su
-   * estado de ahora (los calculará el lote 4). Sin él nadie cuenta como vuelto.
+   * etapa de ahora (`vuelvenDeStandby`, abajo). Sin él nadie cuenta como vuelto.
    */
   vuelvenDeStandby?: readonly number[];
-  /** Flujo marcado a mano por ticket (lote 4, tmc_agenda_flujo): gana a la fuente (D11). */
+  /** Flujo marcado a mano por ticket (tmc_agenda_flujo): gana al de la fuente (D11). Quien lo rellena sólo pasa los de tickets sin clasificación. */
   flujosManuales?: { get(numero: number): FlujoAgenda | null | undefined };
 }
 
@@ -220,7 +220,8 @@ function comparar(a: Clave, b: Clave): number {
 
 /**
  * El sitio de un ticket en la fila de `etapa` (F.3). Por este orden:
- *   0. prioridad fijada, de mayor a menor (sólo la de la fuente principal);
+ *   0. prioridad fijada, de mayor a menor (sólo la de la fuente principal):
+ *      por delante de TODA la fila, no dentro de su grupo (D15);
  *   1. grupo A —la primera etapa de su flujo, si no vuelve de standby— antes
  *      que el B —etapas siguientes y vueltas de standby—;
  *   A. con fecha de remisión antes que sin ella; la fecha; con el mismo día,
@@ -289,6 +290,8 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
   const { hoy } = e;
   const cierres = new Set(e.cierres);
   const sumar = (desde: string, n: number) => sumarDiasHabilesAgenda(desde, n, cierres);
+  // D16: nada entra ni empieza en un día no hábil. Si hoy no lo es, se proyecta desde el siguiente que sí.
+  const arranque = primerDiaHabilAgenda(hoy, cierres);
   const duracion = (numero: number, etapa: EtapaAgenda, t: TicketTaller | null) => duracionDeEtapa(e.config.duraciones, etapa, e.tiposManuales.get(numero), t?.tipoServicio);
   const tickets = [...e.tickets].sort((a, b) => a.numero - b.numero);
   const abiertos = new Set(tickets.map((t) => t.numero));
@@ -340,7 +343,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     };
 
     // Asignaciones vigentes de la etapa. Manda el estado del ticket: si la fuente lo trae y ya no está en
-    // esta etapa, la asignación no cuenta (el lote 4 la cerrará). Si la fuente no lo trae, conserva el puesto.
+    // esta etapa, la asignación no cuenta (la cerrará la siguiente pasada de la agenda, `registrarEstadosAgenda`). Si la fuente no lo trae, conserva el puesto.
     const ocupados = new Map<number, AsignacionAgenda>();
     for (const a of e.asignaciones) {
       if (a.etapa !== etapa || ocupados.has(a.puesto) || conPuesto.has(a.numero)) continue;
@@ -354,7 +357,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
       const a = ocupados.get(puesto);
       const aExtinguir = puesto > cfg.puestos;
       if (!a) {
-        libres.push({ puesto, dia: hoy });
+        libres.push({ puesto, dia: arranque });
         return { puesto, ocupante: null, inicio: null, finEstimado: null, pasadoDeFecha: false, aExtinguir };
       }
       const c = porNumero.get(a.numero);
@@ -383,7 +386,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     for (const o of ordenados) empatados.set(o.empate, (empatados.get(o.empate) ?? 0) + 1);
     const fila = ordenados.map((o, i): TicketEnFila => {
       const d = duracion(o.c.t.numero, etapa, o.c.t);
-      const previsto = tomarPuesto(libres, hoy, d.dias, sumar);
+      const previsto = tomarPuesto(libres, arranque, d.dias, sumar);
       sale(o.c, previsto.finPrevisto);
       return {
         numero: o.c.t.numero,
@@ -439,4 +442,68 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     avisos,
     totalAbiertos: tickets.length,
   };
+}
+
+// ── Lote 4: la vuelta de standby y el reparto inicial ───────────────────────
+
+/** Un tramo del historial de la agenda (portal.tmc_agenda_historial): estado normalizado e instantes en milisegundos. */
+export interface TramoHistorial {
+  clave: string;
+  desde: number;
+  /** Null = sigue en ese estado. */
+  hasta: number | null;
+}
+
+/**
+ * Los tickets que VUELVEN de un standby (B.5): están en una etapa activa y, justo
+ * antes de entrar en ella, el historial los tiene en un estado de categoría
+ * standby. Un cambio de estado dentro de la misma etapa («Rev./Diagnostico» →
+ * «Notificado») no borra la vuelta. Sólo se afirma con el historial en la
+ * mano: si su tramo abierto no es el estado que da la fuente, o hay un hueco
+ * antes de la etapa, el ticket no cuenta como vuelto. Por número.
+ */
+export function vuelvenDeStandby(tickets: readonly TicketTaller[], historial: { get(numero: number): readonly TramoHistorial[] | undefined }, categorias: EntradaAgenda['categorias']): number[] {
+  const vuelven: number[] = [];
+  for (const t of tickets) {
+    const etapa = categoriaDeEstado(t.estado, categorias)?.etapa ?? null;
+    const tramos = [...(historial.get(t.numero) ?? [])].sort((a, b) => a.desde - b.desde);
+    let i = tramos.length - 1;
+    if (etapa === null || i < 1 || tramos[i].hasta !== null || tramos[i].clave !== claveEstadoDesk(t.estado)) continue;
+    const pegado = () => tramos[i - 1].hasta === tramos[i].desde;
+    while (i > 0 && pegado() && categoriaDeEstado(tramos[i - 1].clave, categorias)?.etapa === etapa) i--;
+    if (i > 0 && pegado() && categoriaDeEstado(tramos[i - 1].clave, categorias)?.categoria === 'standby') vuelven.push(t.numero);
+  }
+  return vuelven.sort((a, b) => a - b);
+}
+
+/** Una línea del reparto inicial: qué ticket va a qué puesto y desde qué día cuenta su duración. */
+export interface ItemReparto {
+  numero: number;
+  etapa: EtapaAgenda;
+  puesto: number;
+  desde: string;
+}
+
+/**
+ * El reparto inicial que se propone (D6, F.5): en cada etapa, los puestos
+ * libres por número para los tickets que YA están en un estado de la etapa,
+ * en el orden de su fila. Quien espera en la fila de entrada no se propone, y
+ * lo que no cabe queda en la fila. La duración cuenta desde la llegada exacta
+ * a la etapa si consta y, si no, desde hoy; nunca desde un día no hábil (D16).
+ * No escribe nada: es la misma proyección, leída de otra forma.
+ */
+export function proponerReparto(e: EntradaAgenda): ItemReparto[] {
+  return proyectarAgenda(e).etapas.flatMap((x) => {
+    const libres = x.puestos.filter((p) => p.ocupante === null && !p.aExtinguir);
+    return x.fila
+      .filter((t) => t.situacion === 'en_etapa')
+      .slice(0, libres.length)
+      .map((t, i) => ({ numero: t.numero, etapa: x.etapa, puesto: libres[i].puesto, desde: inicioDeReparto(e, t.numero) }));
+  });
+}
+
+/** El día desde el que cuenta la duración de un ticket en el reparto inicial: su llegada exacta al estado, o hoy; siempre hábil. */
+export function inicioDeReparto(e: EntradaAgenda, numero: number): string {
+  const ms = e.tickets.find((t) => t.numero === numero)?.llegadaEstado ?? null;
+  return primerDiaHabilAgenda(ms === null ? e.hoy : hoyEnColombia(new Date(ms)), new Set(e.cierres));
 }
