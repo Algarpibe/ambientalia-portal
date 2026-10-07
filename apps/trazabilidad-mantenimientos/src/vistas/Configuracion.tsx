@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type PlazoServicio, type RolEstado } from '../dominio';
+import { firma } from '../lib/agenda';
 import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
-import { Alert, Button, Card, Loading } from '../ui';
+import { Alert, Button, Card, DESACTIVADO, Loading } from '../ui';
+import { CategoriasAgenda, DuracionesAgenda, PuestosAgenda, useAgendaConfig } from './ConfiguracionAgenda';
 
 /**
  * Configuración. Primer bloque: el plazo, en días hábiles, de cada tipo de servicio de Zoho
@@ -20,12 +22,14 @@ interface Props {
 }
 
 /**
- * Dos bloques, cada uno con su carga y sus errores (si uno falla, el otro
- * sigue): los plazos por tipo de servicio y el rol de cada estado de Desk en
- * el reloj del plazo.
+ * Cada bloque con su carga y sus errores (si uno falla, los demás siguen): los
+ * plazos por tipo de servicio; la agenda del taller (puestos y duraciones,
+ * `ConfiguracionAgenda.tsx`); y, uno junto al otro, lo que cada estado de Desk
+ * es para el reloj del plazo y para la agenda, que son dos ajustes distintos.
  */
 export default function Configuracion({ notificar }: Props) {
   const { puede, motivo } = usePermisos();
+  const agenda = useAgendaConfig(notificar);
   return (
     <div className="flex flex-col gap-4">
       {!puede('config.write') && (
@@ -36,7 +40,18 @@ export default function Configuracion({ notificar }: Props) {
         </div>
       )}
       <Plazos notificar={notificar} />
-      <EstadosDesk notificar={notificar} />
+      <PuestosAgenda agenda={agenda} />
+      <DuracionesAgenda agenda={agenda} />
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Estados de Desk</h2>
+        <p className="mt-0.5 text-sm text-gray-600">
+          El reloj mide el plazo del ticket; la categoría decide si ocupa un puesto en la agenda. Son dos ajustes distintos, cada uno con su firma: cambiar uno no toca el otro.
+        </p>
+      </div>
+      <div className="grid items-start gap-4 xl:grid-cols-[9fr_11fr]">
+        <EstadosDesk notificar={notificar} />
+        <CategoriasAgenda agenda={agenda} />
+      </div>
     </div>
   );
 }
@@ -88,9 +103,8 @@ function EstadosDesk({ notificar }: Props) {
 
   return (
     <Card
-      title="Estados de Desk"
+      title="Estados de Desk → reloj del plazo"
       hint="Qué le hace cada estado al reloj del plazo: «Cuenta», el tiempo corre; «Standby», en pausa a la espera del cliente o de un servicio externo (esos días hábiles no cuentan); «Trabajo terminado», parado: el ticket queda cumplido o incumplido según el día en que llegó. El portal mide el tiempo desde que vio cada ticket por primera vez."
-      className="max-w-4xl"
     >
       {error && (
         <div className="mb-3">
@@ -103,11 +117,13 @@ function EstadosDesk({ notificar }: Props) {
         <p className="text-sm text-gray-500">Todavía no hay ningún estado: Zoho Desk no ha enviado tickets.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[420px] text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="px-3 py-2 font-semibold">Estado en Desk</th>
-                <th className="px-3 py-2 text-right font-semibold">Tickets abiertos</th>
+                <th className="px-3 py-2 text-right font-semibold" title="Tickets abiertos que están ahora en este estado">
+                  Tickets
+                </th>
                 <th className="px-3 py-2 font-semibold">El tiempo en este estado</th>
               </tr>
             </thead>
@@ -135,7 +151,7 @@ function EstadosDesk({ notificar }: Props) {
                             const rol = ev.target.value;
                             if (esRolEstado(rol)) void cambiar(e, rol);
                           }}
-                          className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+                          className={`min-h-[36px] w-[172px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO} ${
                             e.rol === 'cuenta' ? 'border-gray-300 text-gray-500' : 'border-gray-400 font-medium text-gray-900'
                           }`}
                         >
@@ -151,6 +167,8 @@ function EstadosDesk({ notificar }: Props) {
                           </span>
                         )}
                       </span>
+                      {/* La firma del ROL (la de la categoría va en el bloque de al lado y es otra). */}
+                      <span className="mb-1 block text-xs text-gray-500">{firma(e.actualizadoPor, e.actualizadoEn, 'nadie lo ha cambiado')}</span>
                     </td>
                   </tr>
                 );
@@ -283,7 +301,7 @@ function Plazos({ notificar }: Props) {
                       placeholder="sin plazo"
                       aria-label={`Plazo de ${p.etiqueta} en días hábiles`}
                       aria-invalid={mal}
-                      className={`block min-h-[44px] w-32 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600 ${
+                      className={`block min-h-[44px] w-32 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 ${DESACTIVADO} ${
                         mal ? 'border-red-400 focus:ring-red-100' : 'border-gray-300 focus:border-blue-400 focus:ring-blue-100'
                       }`}
                     />

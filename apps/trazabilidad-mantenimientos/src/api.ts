@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { ContactoCliente, EquipoVista, EstadoDesk, FilaImportada, MiRol, PlazoServicio, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, MiRol, PlazoServicio, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -55,6 +55,15 @@ export const api = {
   estados: () => request<{ estados: EstadoDesk[] }>('GET', '/estados'),
   /** Elige el rol de un estado de Desk: cuenta, standby (reloj en pausa) o terminado (reloj parado). Devuelve la lista entera ya actualizada. */
   guardarEstado: (estado: string, rol: RolEstado) => request<{ estados: EstadoDesk[] }>('PUT', '/estados', { estado, rol }),
+  /** La configuración de la agenda del taller: puestos, duraciones, la categoría de cada estado y los tipos que traen sus tickets abiertos. */
+  configuracionAgenda: () => request<ConfiguracionAgenda>('GET', '/agenda/configuracion'),
+  // Los tres cambios devuelven la configuración entera ya actualizada, y quedan firmados.
+  guardarPuestos: (etapa: EtapaAgenda, puestos: number) => request<ConfiguracionAgenda>('PUT', '/agenda/configuracion/puestos', { etapa, puestos }),
+  /** `dias` null quita la fila del tipo (vuelve a valer la «*» de la etapa); la «*» no se puede quitar. */
+  guardarDuracion: (etapa: EtapaAgenda, tipo: string, dias: number | null) => request<ConfiguracionAgenda>('PUT', '/agenda/configuracion/duraciones', { etapa, tipo, dias }),
+  /** Sólo la categoría (y la etapa, si es una etapa activa): no toca el rol del reloj ni su firma. */
+  guardarCategoria: (estado: string, categoria: CategoriaAgenda, etapa: EtapaAgenda | null) =>
+    request<ConfiguracionAgenda>('PUT', '/agenda/configuracion/estados', { estado, categoria, etapa }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),
