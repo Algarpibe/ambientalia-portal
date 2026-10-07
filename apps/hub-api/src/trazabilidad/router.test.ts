@@ -42,8 +42,19 @@ const usuarios = { add: (id: string, role: 'admin' | 'reader' = 'reader') => usu
 const queries: string[] = [];
 /** Veces que se ha mirado el rol de alguien. */
 const consultasRol = { n: 0 };
-/** Veces que se ha pedido una conexión para una transacción (sólo la pide el registro de estados). */
-const conexiones = { n: 0 };
+/**
+ * Veces que se ha pedido una conexión para una transacción (las piden el registro de estados, la pasada
+ * de la agenda y el alta de asignaciones). Sólo se da si `cliente` es true: por defecto revienta.
+ */
+const conexiones = { n: 0, cliente: false };
+type Filas = Record<string, unknown>[];
+/** Lo que el doble contesta a las consultas que casan (filas, o un número = filas afectadas). La primera que casa gana. */
+let respuestas: [RegExp, Filas | number][] = [];
+/** La configuración de la agenda tal como la siembra la 051: 3 / 4 / 2 puestos y sólo las «*». */
+const CONFIG_AGENDA: [RegExp, Filas][] = [
+  [/^SELECT[^]*FROM portal\.tmc_agenda_etapas/, [['diagnostico', 'Diagnóstico', 3], ['proceso', 'Proceso', 4], ['verificacion', 'Verificación', 2]].map(([etapa, etiqueta, puestos], i) => ({ etapa, etiqueta, orden: i + 1, puestos, actualizado_por: null, actualizado_en: null }))],
+  [/^SELECT[^]*FROM portal\.tmc_agenda_duraciones/, [['diagnostico', 3], ['proceso', 4], ['verificacion', 1]].map(([etapa, dias_habiles]) => ({ etapa, tipo: '*', dias_habiles, actualizado_por: null, actualizado_en: null }))],
+];
 const fakePool = {
   query: async (sql: string, params: unknown[] = []) => {
     if (sql.includes('FROM portal.tmc_user_roles') && sql.includes('WHERE user_id')) {
@@ -56,13 +67,31 @@ const fakePool = {
       const role = usuariosPortal.get(String(params[0]));
       return { rows: role ? [{ role }] : [], rowCount: role ? 1 : 0 };
     }
-    return { rows: [], rowCount: 0 };
+    const r = respuestas.find(([patron]) => patron.test(sql))?.[1] ?? [];
+    return typeof r === 'number' ? { rows: [], rowCount: r } : { rows: r, rowCount: r.length };
   },
   connect: async () => {
     conexiones.n++;
-    throw new Error('sin transacciones en este test');
+    if (!conexiones.cliente) throw new Error('sin transacciones en este test');
+    return { query: fakePool.query, release: () => {} };
   },
 } as unknown as Pool;
+
+// La fuente de la agenda de estas pruebas: sin Desk 2.0, es decir, la réplica (respaldo), con tres
+// tickets abiertos. Su asunto y su código (que suelen llevar cliente y serial) no deben salir nunca.
+const SINC = Date.UTC(2026, 9, 6, 12, 0, 0);
+const filaTicket = (numero: number, estado: string, extra: Filas[number] = {}) => ({ numero, estado, tipo_estado: 'Open', clasificacion: null, tipo_servicio: null, remision_entrada: null, fecha_creacion: '2026-10-01', prioridad: null, llegada_ms: null, asunto: `Asunto reservado ${numero}`, codigo_servicio: `MT_18A0${numero}_EDM180C`, ...extra });
+let ticketsFuente: Filas = [];
+const baseTickets: DbLectura = { query: async (sql) => ({ rows: sql.includes('max(synced_at)') ? [{ ms: SINC }] : sql.includes('calendario_cierres') ? [] : ticketsFuente }) };
+/** La app con esa fuente; `desk2` le pone delante una «Desk 2.0» (la misma base, o una rota). Da conexiones al doble (transacciones). */
+function appAgenda(desk2: DbLectura | null = null) {
+  conexiones.cliente = true;
+  const a = express();
+  a.use(express.json());
+  a.use('/api', createTrazabilidadRouter(fakePool, crearFuenteAgenda({ hub: baseTickets, desk2: () => desk2, ahora: () => SINC + 60_000 })));
+  return a;
+}
+const HOY = '2026-10-06';
 
 function app() {
   const a = express();
@@ -93,8 +122,12 @@ const comoAdmin = () => auth(tokenFor([], { rol: null, portal: 'admin' }));
 beforeEach(() => {
   queries.length = 0;
   conexiones.n = 0;
+  conexiones.cliente = false;
   consultasRol.n = 0;
   usuarios.clear();
+  respuestas = [...CONFIG_AGENDA];
+  ticketsFuente = [filaTicket(880, 'Ingresado'), filaTicket(984, 'En Proceso'), filaTicket(990, 'En Proceso')];
+  reiniciarRegistroEstados();
 });
 
 describe('guardas', () => {
@@ -135,18 +168,38 @@ describe('permisos por rol', () => {
     { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
     { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
     { ruta: 'PUT /trazabilidad/estados', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/estados').set(c).send({ estado: 'Servicio externo', rol: 'standby' }) },
+    // La agenda del taller (lote 5): sus cuatro escrituras y las tres de su configuración.
+    { ruta: 'POST /trazabilidad/agenda/reparto', permiso: 'agenda.reparto', pedir: (c) => request(appAgenda()).post('/api/trazabilidad/agenda/reparto').set(c).send({ reparto: [{ numero: 984, etapa: 'proceso', puesto: 1 }] }) },
+    { ruta: 'POST /trazabilidad/agenda/asignaciones', permiso: 'agenda.asignar', pedir: (c) => request(appAgenda()).post('/api/trazabilidad/agenda/asignaciones').set(c).send({ numero: 984, etapa: 'proceso', puesto: 1 }) },
+    { ruta: 'POST /trazabilidad/agenda/liberar', permiso: 'agenda.liberar', pedir: (c) => request(appAgenda()).post('/api/trazabilidad/agenda/liberar').set(c).send({ numero: 984, motivo: 'El equipo ya salió' }) },
+    { ruta: 'PUT /trazabilidad/agenda/flujo/:numero', permiso: 'agenda.flujo', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/flujo/880').set(c).send({ flujo: 'equipo_nuevo' }) },
+    { ruta: 'PUT /trazabilidad/agenda/configuracion/puestos', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/puestos').set(c).send({ etapa: 'proceso', puestos: 5 }) },
+    { ruta: 'PUT /trazabilidad/agenda/configuracion/duraciones', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/duraciones').set(c).send({ etapa: 'proceso', tipo: '*', dias: 4 }) },
+    { ruta: 'PUT /trazabilidad/agenda/configuracion/estados', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/estados').set(c).send({ estado: 'Ingresado', categoria: 'entrada' }) },
   ];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las siete escrituras del router, y ninguna queda sin permiso: toda ruta que escribe pasa por escritura() o soloAdmin()', () => {
+  it('son las catorce escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin()', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const escriben = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
     expect(escriben).toHaveLength(ESCRITURAS.length + 1); // + PUT /trazabilidad/roles/:userId
     for (const r of escriben) expect(r).toMatch(/\.\.\.gated,\s*(escritura\('[a-z.]+',|soloAdmin\()/);
-    const pedidos = escriben.map((r) => /escritura\('([a-z.]+)'/.exec(r)?.[1]).filter(Boolean);
-    expect(pedidos.sort()).toEqual(ESCRITURAS.map((e) => e.permiso).sort());
-    for (const r of rutas.filter((x) => /^get\(/.test(x))) expect(r).not.toMatch(/escritura\(/);
+    // Ruta a ruta: el permiso que pide el código es el de la lista (y el de la tabla de permisos del CLAUDE.md).
+    const pedidos = escriben.flatMap((r) => {
+      const [, metodo, ruta] = /^(\w+)\(\s*'([^']+)'/.exec(r)!;
+      const permiso = /escritura\('([a-z.]+)'/.exec(r)?.[1];
+      return permiso ? [`${metodo.toUpperCase()} ${ruta} → ${permiso}`] : [];
+    });
+    expect(pedidos.sort()).toEqual(ESCRITURAS.map((e) => `${e.ruta.split('?')[0]} → ${e.permiso}`).sort());
+    // Las de la agenda, además, sólo con permisos de la agenda o el de configuración.
+    const deAgenda = escriben.filter((r) => /^\w+\(\s*'\/trazabilidad\/agenda\//.test(r));
+    expect(deAgenda).toHaveLength(7);
+    for (const r of deAgenda) expect(r).toMatch(/escritura\('(agenda\.(reparto|asignar|liberar|flujo)|config\.write)',/);
+    // Ninguna lectura lleva guarda de escritura; la única que pide permiso es la propuesta de reparto.
+    const lecturas = rutas.filter((x) => /^get\(/.test(x));
+    for (const r of lecturas) expect(r).not.toMatch(/escritura\(/);
+    expect(lecturas.filter((r) => /conPermiso\(/.test(r)).map((r) => /^get\(\s*'([^']+)'[^]*?conPermiso\('([a-z.]+)'/.exec(r)!.slice(1))).toEqual([['/trazabilidad/agenda/reparto', 'agenda.reparto']]);
   });
 
   it.each(casos.filter((c) => !c.pasa))('$rol no puede $ruta → 403 en español y ninguna consulta de negocio', async ({ rol, pedir }) => {
@@ -543,6 +596,39 @@ describe('estados de Desk (rol en el reloj)', () => {
     expect(queries.some((q) => /INSERT INTO portal\.tmc_estados_desk/.test(q))).toBe(true);
   });
 
+  // Lo aplazado del lote 2: la pantalla de hoy envía {estado, rol} y así debe seguir valiendo.
+  it('el cuerpo que envía hoy la pantalla ({estado, rol}) basta, y guardar el rol no nombra la categoría ni su firma, venga lo que venga de más', async () => {
+    for (const cuerpo of [{ estado: 'Por Facturar', rol: 'terminado' }, { estado: 'Por Facturar', rol: 'terminado', categoria: 'fuera', etapa: 'proceso' }]) {
+      queries.length = 0;
+      expect((await put(cuerpo)).status).toBe(200);
+      const escrituras = queries.filter((q) => /\b(INSERT|UPDATE|DELETE)\b/.test(q));
+      expect(escrituras).toHaveLength(1);
+      expect(escrituras[0]).toMatch(/INSERT INTO portal\.tmc_estados_desk \(clave, etiqueta, rol, actualizado_por_id, actualizado_por, actualizado_en\)/);
+      expect(escrituras[0]).not.toMatch(/categoria|etapa/);
+    }
+  });
+
+  it('GET: cada estado lleva además su categoría en la agenda y la firma de la categoría, sin quitar ni renombrar lo que ya había', async () => {
+    respuestas.unshift([
+      /^SELECT clave, etiqueta, rol[^]*FROM portal\.tmc_estados_desk/,
+      [
+        { clave: 'por facturar', etiqueta: 'Por Facturar', rol: 'terminado', actualizado_por: 'gerencia@ambientalia.com.co', actualizado_en: '2026-10-06 10:00:00+00', categoria: 'fin', etapa: null, categoria_por: 'semilla (migracion 050)', categoria_en: '2026-10-05 09:00:00+00' },
+        { clave: 'notificado', etiqueta: 'Notificado', rol: 'cuenta', actualizado_por: null, actualizado_en: null, categoria: 'activa', etapa: 'diagnostico', categoria_por: 'director@ambientalia.com.co', categoria_en: '2026-10-06 11:00:00+00' },
+        { clave: 'estado raro', etiqueta: 'Estado raro', rol: 'standby', actualizado_por: 'gerencia@ambientalia.com.co', actualizado_en: '2026-10-06 10:00:00+00', categoria: null, etapa: null, categoria_por: null, categoria_en: null },
+      ],
+    ]);
+    const res = await request(app()).get('/api/trazabilidad/estados').set(conRol(null));
+    expect(res.status).toBe(200);
+    const porClave = Object.fromEntries((res.body.estados as { clave: string }[]).map((e) => [e.clave, e]));
+    expect(porClave['por facturar']).toEqual({
+      clave: 'por facturar', etiqueta: 'Por Facturar', tipoDesk: null, ticketsAbiertos: 0, rol: 'terminado', actualizadoPor: 'gerencia@ambientalia.com.co', actualizadoEn: '2026-10-06 10:00:00+00',
+      categoria: 'fin', etapa: null, categoriaPor: 'semilla (migracion 050)', categoriaEn: '2026-10-05 09:00:00+00',
+    });
+    expect(porClave.notificado).toMatchObject({ rol: 'cuenta', actualizadoPor: null, categoria: 'activa', etapa: 'diagnostico', categoriaPor: 'director@ambientalia.com.co' });
+    // Sin categoría guardada ni en la propuesta: sin categoría y sin firma.
+    expect(porClave['estado raro']).toMatchObject({ rol: 'standby', categoria: null, etapa: null, categoriaPor: null, categoriaEn: null });
+  });
+
   it('servicios: sigue respondiendo 200 al leer también los roles de los estados y el historial', async () => {
     const res = await request(app()).get('/api/trazabilidad/servicios?hoy=2026-10-06').set(auth());
     expect(res.status).toBe(200);
@@ -833,5 +919,491 @@ describe('agenda: diagnóstico de la fuente', () => {
     await request(app()).get(RUTA).set(auth());
     expect(queries.length).toBeGreaterThan(0);
     for (const sql of queries) expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/i);
+  });
+});
+
+// ── Lote 5: los endpoints de la agenda y de su configuración ────────────────
+// Sin base: el doble contesta la configuración sembrada (3 / 4 / 2 puestos) y la
+// fuente trae tres tickets (880 «Ingresado», 984 y 990 «En Proceso»). El SQL y
+// el recorrido entero, en agenda-api.db.test.ts.
+
+const A = '/api/trazabilidad/agenda';
+const escriben = (sqls: string[]) => sqls.filter((q) => /\b(INSERT|UPDATE|DELETE)\b/.test(q));
+/** Una asignación vigente en el doble: ese ticket ocupa ese puesto. */
+const ocupar = (numero: number, etapa: string, puesto: number) => respuestas.unshift([/inicio::text AS desde FROM portal\.tmc_agenda_asignaciones/, [{ numero, etapa, puesto, desde: HOY }]]);
+const SIN_DATOS_DE_CLIENTE = /Asunto reservado|MT_18A0|asunto|codigo_?servicio|serial|cliente|email|@/i;
+
+describe('agenda: lecturas', () => {
+  const LECTURAS = [`${A}?hoy=${HOY}`, `${A}/configuracion`, `${A}/huecos?etapa=proceso&hoy=${HOY}`];
+
+  it.each([...LECTURAS, `${A}/reparto`])('GET %s: 401 sin token y 403 sin la app, sin consultar nada', async (ruta) => {
+    expect((await request(appAgenda()).get(ruta)).status).toBe(401);
+    const res = await request(appAgenda()).get(ruta).set(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })));
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('forbidden');
+    expect([queries, conexiones.n, consultasRol.n]).toEqual([[], 0, 0]);
+  });
+
+  it.each(LECTURAS)('GET %s: abierta a un Lector, sin mirar su rol, sin escribir y sin datos de cliente', async (ruta) => {
+    const res = await request(appAgenda()).get(ruta).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(consultasRol.n).toBe(0);
+    expect(escriben(queries)).toEqual([]);
+    expect(JSON.stringify(res.body)).not.toMatch(SIN_DATOS_DE_CLIENTE);
+  });
+
+  it('GET /agenda: la agenda proyectada a «hoy», con el estado de la fuente y los avisos', async () => {
+    const res = await request(appAgenda()).get(`${A}?hoy=${HOY}`).set(conRol(null));
+    expect(Object.keys(res.body).sort()).toEqual(['avisos', 'estadoFuente', 'etapas', 'finTaller', 'fuente', 'fueraAgenda', 'hoy', 'porLlegar', 'sinCategoria', 'standby', 'totalAbiertos']);
+    expect(res.body).toMatchObject({
+      hoy: HOY,
+      totalAbiertos: 3,
+      fuente: { fuente: 'respaldo', motivo: 'sin_variable' },
+      estadoFuente: { fuente: 'respaldo', motivo: 'sin_variable', sincronizacionParada: false, cortacircuitosHasta: null, ultimaSincronizacion: '2026-10-06T12:00:00.000Z' },
+      avisos: [{ codigo: 'fuente_respaldo', mensaje: expect.stringContaining('DESK2_DB_URL') }],
+    });
+    const etapas = res.body.etapas as { etapa: string; fila: { numero: number }[]; saturacion: unknown; primerHueco: string }[];
+    expect(etapas.map((e) => [e.etapa, e.fila.map((t) => t.numero), e.saturacion])).toEqual([
+      ['diagnostico', [880], { ocupados: 0, puestos: 3 }],
+      ['proceso', [984, 990], { ocupados: 0, puestos: 4 }],
+      ['verificacion', [], { ocupados: 0, puestos: 2 }],
+    ]);
+  });
+
+  it.each(['ayer', '06-10-2026', '2026-02-30', '2026-13-01'])('GET /agenda?hoy=%s → 400 en «hoy», antes de la pasada y de leer', async (hoy) => {
+    for (const ruta of [A, `${A}/huecos?etapa=proceso`, `${A}/reparto`]) {
+      const res = await request(appAgenda()).get(`${ruta}${ruta.includes('?') ? '&' : '?'}hoy=${hoy}`).set(auth());
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('hoy');
+    }
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('tal como lo monta el servidor, sin DESK2_DB_URL, responde con el respaldo', async () => {
+    vi.stubEnv('DESK2_DB_URL', '');
+    conexiones.cliente = true;
+    const res = await request(app()).get(A).set(auth());
+    vi.unstubAllEnvs();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ totalAbiertos: 0, fuente: { fuente: 'respaldo', motivo: 'sin_variable' } });
+    expect(res.body.hoy).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('si Desk 2.0 no contesta responde igual, con el respaldo, el motivo y el cortacircuitos abierto, y no filtra la URL ni el error', async () => {
+    const URL_FICTICIA = 'postgres://lector_ficticio:clave-ficticia@desk-ficticio.invalid:5432/desk';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const veces = { n: 0 };
+    const caida: DbLectura = { query: async () => (veces.n++, Promise.reject(Object.assign(new Error(`connect ECONNREFUSED ${URL_FICTICIA}`), { code: 'ECONNREFUSED' }))) };
+    const servidor = appAgenda(caida);
+    const res = await request(servidor).get(`${A}?hoy=${HOY}`).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ totalAbiertos: 3, fuente: { fuente: 'respaldo', motivo: 'error_conexion' }, estadoFuente: { cortacircuitosHasta: new Date(SINC + 120_000).toISOString() } });
+    expect((res.body.avisos as { codigo: string }[]).map((a) => a.codigo)).toEqual(['fuente_respaldo']);
+    // La pasada lo intentó una vez; con el cortacircuitos abierto, ni la lectura ni la petición siguiente vuelven a esperar a la principal.
+    expect(veces.n).toBe(1);
+    await request(servidor).get(`${A}?hoy=${HOY}`).set(auth());
+    expect(veces.n).toBe(1);
+    // En respaldo la pasada no apunta historial ni cierra nada.
+    expect(escriben(queries)).toEqual([]);
+    const visto = JSON.stringify([res.body, res.headers, warn.mock.calls, error.mock.calls]);
+    for (const secreto of ['postgres://', 'lector_ficticio', 'clave-ficticia', 'desk-ficticio']) expect(visto).not.toContain(secreto);
+    vi.restoreAllMocks();
+  });
+
+  it('GET /agenda/huecos: las próximas entradas de un equipo que llegara hoy a esa etapa', async () => {
+    const res = await request(appAgenda()).get(`${A}/huecos?etapa=proceso&hoy=${HOY}`).set(conRol(null));
+    expect(res.body).toEqual({
+      hoy: HOY,
+      etapa: 'proceso',
+      tipo: null,
+      duracionDias: 4,
+      sinTipo: true,
+      fuente: 'respaldo',
+      huecos: [
+        { puesto: 3, entrada: '2026-10-06', fin: '2026-10-13' },
+        { puesto: 4, entrada: '2026-10-06', fin: '2026-10-13' },
+        { puesto: 1, entrada: '2026-10-13', fin: '2026-10-19' },
+        { puesto: 2, entrada: '2026-10-13', fin: '2026-10-19' },
+        { puesto: 3, entrada: '2026-10-13', fin: '2026-10-19' },
+      ],
+    });
+    expect((await request(appAgenda()).get(`${A}/huecos?etapa=diagnostico&tipo=Calibraci%C3%B3n&hoy=${HOY}`).set(auth())).body).toMatchObject({ tipo: 'Calibración', duracionDias: 3, sinTipo: false });
+    // Es una lectura sin más: no lanza la pasada.
+    expect(conexiones.n).toBe(0);
+  });
+
+  it.each([
+    ['', 'etapa'],
+    ['etapa=taller', 'etapa'],
+    ['etapa=proceso&etapa=diagnostico', 'etapa'],
+    [`etapa=proceso&tipo=${'x'.repeat(81)}`, 'tipo'],
+    ['etapa=proceso&tipo=a&tipo=b', 'tipo'],
+  ])('GET /agenda/huecos?%s → 400 en «%s» y ninguna consulta', async (consulta, campo) => {
+    const res = await request(appAgenda()).get(`${A}/huecos?${consulta}`).set(auth());
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect(queries).toEqual([]);
+  });
+
+  it('GET /agenda/configuracion: puestos, duraciones y cada estado con su categoría, sus dos firmas y sus tickets abiertos según la fuente de la agenda', async () => {
+    respuestas.unshift([
+      /^SELECT clave, etiqueta, rol[^]*FROM portal\.tmc_estados_desk/,
+      [{ clave: 'en proceso', etiqueta: 'En Proceso', rol: 'standby', actualizado_por: 'gerencia@ambientalia.com.co', actualizado_en: '2026-10-06 10:00:00+00', categoria: 'activa', etapa: 'proceso', categoria_por: 'director@ambientalia.com.co', categoria_en: '2026-10-06 11:00:00+00' }],
+    ]);
+    const res = await request(appAgenda()).get(`${A}/configuracion`).set(conRol(null));
+    expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+    expect(res.body.etapas).toEqual([
+      { etapa: 'diagnostico', etiqueta: 'Diagnóstico', orden: 1, puestos: 3, actualizadoPor: null, actualizadoEn: null },
+      { etapa: 'proceso', etiqueta: 'Proceso', orden: 2, puestos: 4, actualizadoPor: null, actualizadoEn: null },
+      { etapa: 'verificacion', etiqueta: 'Verificación', orden: 3, puestos: 2, actualizadoPor: null, actualizadoEn: null },
+    ]);
+    expect(res.body.duraciones).toContainEqual({ etapa: 'proceso', tipo: '*', dias: 4, actualizadoPor: null, actualizadoEn: null });
+    const estados = Object.fromEntries((res.body.estados as { clave: string }[]).map((e) => [e.clave, e]));
+    // Guardado: la firma de la categoría y la del rol del reloj, cada una la suya. Los abiertos, los de la fuente.
+    expect(estados['en proceso']).toEqual({
+      clave: 'en proceso', etiqueta: 'En Proceso', tipoDesk: null, ticketsAbiertos: 2,
+      rol: 'standby', actualizadoPor: 'gerencia@ambientalia.com.co', actualizadoEn: '2026-10-06 10:00:00+00',
+      categoria: 'activa', etapa: 'proceso', categoriaPor: 'director@ambientalia.com.co', categoriaEn: '2026-10-06 11:00:00+00',
+    });
+    // Sin fila: sale igual porque la fuente lo trae, con la categoría de la propuesta y sin firmas.
+    expect(estados.ingresado).toMatchObject({ etiqueta: 'Ingresado', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, categoria: 'entrada', etapa: null, categoriaPor: null, categoriaEn: null });
+    expect(conexiones.n).toBe(0);
+  });
+});
+
+// D20: antes de servir la agenda se lanza su pasada (historial y cierre de asignaciones), si se puede.
+describe('agenda: la pasada a demanda', () => {
+  const reloj: [RegExp, Filas] = [/clock_timestamp/, [{ ahora: '2026-10-06 12:01:00+00' }]];
+  const posicion = (patron: RegExp) => queries.findIndex((q) => patron.test(q));
+
+  it('GET /agenda la lanza ANTES de leer, y con la principal apunta el historial', async () => {
+    respuestas.unshift(reloj);
+    const res = await request(appAgenda(baseTickets)).get(`${A}?hoy=${HOY}`).set(auth());
+    expect(res.body).toMatchObject({ fuente: { fuente: 'principal', motivo: null }, avisos: [] });
+    expect(conexiones.n).toBe(1);
+    expect(posicion(/INSERT INTO portal\.tmc_agenda_historial/)).toBeGreaterThan(posicion(/pg_advisory_xact_lock/));
+    expect(posicion(/COMMIT/)).toBeLessThan(posicion(/FROM portal\.tmc_servicios_tipo/));
+  });
+
+  it('no repite una buena de hace menos de 30 s', async () => {
+    const servidor = appAgenda();
+    await request(servidor).get(A).set(auth());
+    await request(servidor).get(A).set(auth());
+    await request(servidor).get(`${A}?hoy=${HOY}`).set(auth());
+    expect(conexiones.n).toBe(1);
+  });
+
+  it('si la pasada falla la petición responde igual, con lo que haya, y lo avisa', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const servidor = appAgenda();
+    conexiones.cliente = false; // el doble no da conexiones: la pasada revienta
+    const res = await request(servidor).get(`${A}?hoy=${HOY}`).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body.totalAbiertos).toBe(3);
+    expect(res.body.avisos).toContainEqual({ codigo: 'pasada_fallida', mensaje: expect.stringMatching(/no se pudo.*puede no estar al día/i) });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/tmc_registrar_agenda/), expect.any(Error));
+    expect(JSON.stringify(res.body)).not.toMatch(/sin transacciones/);
+    error.mockRestore();
+  });
+
+  it('también va antes de asignar, de confirmar el reparto y de liberar; no antes de marcar el flujo ni de configurar', async () => {
+    const pedir: [string, object][] = [
+      ['/asignaciones', { numero: 984, etapa: 'proceso', puesto: 1 }],
+      ['/reparto', { reparto: [{ numero: 984, etapa: 'proceso', puesto: 1 }] }],
+      ['/liberar', { numero: 984, motivo: 'El equipo ya salió' }],
+    ];
+    for (const [ruta, cuerpo] of pedir) {
+      reiniciarRegistroEstados();
+      queries.length = 0;
+      conexiones.n = 0;
+      await request(appAgenda()).post(`${A}${ruta}`).set(auth()).send(cuerpo);
+      expect(posicion(/pg_advisory_xact_lock/), ruta).toBeGreaterThanOrEqual(0);
+      expect(posicion(/pg_advisory_xact_lock/), ruta).toBeLessThan(posicion(/(INSERT INTO|UPDATE) portal\.tmc_agenda_asignaciones/));
+    }
+    reiniciarRegistroEstados();
+    queries.length = 0;
+    conexiones.n = 0;
+    await request(appAgenda()).put(`${A}/flujo/880`).set(auth()).send({ flujo: 'equipo_nuevo' });
+    await request(appAgenda()).put(`${A}/configuracion/puestos`).set(auth()).send({ etapa: 'proceso', puestos: 5 });
+    expect([conexiones.n, posicion(/pg_advisory_xact_lock/)]).toEqual([0, -1]);
+  });
+
+  it('una escritura con la pasada fallida sigue adelante: no es motivo para no asignar', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    respuestas.unshift([/pg_advisory_xact_lock/, 0]);
+    const servidor = appAgenda();
+    const original = fakePool.query;
+    fakePool.query = (async (sql: string, params: unknown[]) => (/pg_advisory_xact_lock/.test(sql) ? Promise.reject(new Error('la base no contesta')) : original(sql, params))) as typeof fakePool.query;
+    try {
+      const res = await request(servidor).post(`${A}/asignaciones`).set(auth()).send({ numero: 984, etapa: 'proceso', puesto: 1 });
+      expect(res.status).toBe(200);
+      expect(res.body.avisos).toContainEqual(expect.objectContaining({ codigo: 'pasada_fallida' }));
+    } finally {
+      fakePool.query = original;
+      error.mockRestore();
+    }
+  });
+});
+
+describe('agenda: reparto inicial', () => {
+  const proponer = (c = auth()) => request(appAgenda()).get(`${A}/reparto?hoy=${HOY}`).set(c);
+  const confirmar = (cuerpo: unknown, c = auth()) => request(appAgenda()).post(`${A}/reparto`).set(c).send(cuerpo as object);
+
+  it.each(ROLES_APP.filter((r) => !puede(r, 'agenda.reparto')))('la propuesta es una lectura, pero pide el permiso del reparto: %s → 403 sin consultar nada', async (rol) => {
+    const res = await proponer(conRol(rol === 'LECTOR' ? null : rol));
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('forbidden_role');
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('con el permiso (o siendo administrador del portal): los puestos libres para quien ya está en la etapa, sin escribir', async () => {
+    for (const c of [conRol('DIRECTOR_TECNICO'), comoAdmin()]) {
+      const res = await proponer(c);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ hoy: HOY, reparto: [{ numero: 984, etapa: 'proceso', puesto: 1, desde: HOY }, { numero: 990, etapa: 'proceso', puesto: 2, desde: HOY }] });
+    }
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it.each([
+    [[], 'body'],
+    [{}, 'reparto'],
+    [{ reparto: 'todo' }, 'reparto'],
+    [{ reparto: [null] }, 'numero'],
+    [{ reparto: [{ numero: '984', etapa: 'proceso', puesto: 1 }] }, 'numero'],
+    [{ reparto: [{ numero: 984, etapa: 'taller', puesto: 1 }] }, 'etapa'],
+    [{ reparto: [{ numero: 984, etapa: 'proceso', puesto: 0 }] }, 'puesto'],
+    [{ reparto: [{ numero: 984, etapa: 'proceso', puesto: 1 }, { numero: 984, etapa: 'proceso', puesto: 2 }] }, 'reparto'],
+    [{ reparto: [{ numero: 984, etapa: 'proceso', puesto: 1 }, { numero: 990, etapa: 'proceso', puesto: 1 }] }, 'reparto'],
+  ])('confirmar %j → 400 en «%s», sin pasada ni consultas', async (cuerpo, campo) => {
+    const res = await confirmar(cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('un puesto que ya no está libre → 409 que dice cuál, y no se guarda ninguna línea (D19: el reparto no reemplaza)', async () => {
+    ocupar(990, 'proceso', 2);
+    const res = await confirmar({ reparto: [{ numero: 984, etapa: 'proceso', puesto: 2 }] });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('puesto_ocupado');
+    expect(res.body.message).toMatch(/puesto 2 de Proceso/);
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it('un ticket que no está en esa etapa → 409; un puesto que la etapa no tiene → 400', async () => {
+    expect((await confirmar({ reparto: [{ numero: 880, etapa: 'diagnostico', puesto: 1 }] })).body.error).toBe('ticket_fuera_de_etapa');
+    const res = await confirmar({ reparto: [{ numero: 984, etapa: 'proceso', puesto: 5 }] });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('puesto');
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it('válido (la propuesta tal cual, o ajustada) → 200 con la agenda, y guarda cada línea como «arranque»', async () => {
+    const res = await confirmar({ reparto: [{ numero: 990, etapa: 'proceso', puesto: 1 }, { numero: 984, etapa: 'proceso', puesto: 4 }] });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ totalAbiertos: 3, estadoFuente: { fuente: 'respaldo' } });
+    expect(escriben(queries)).toHaveLength(2);
+    for (const q of escriben(queries)) expect(q).toMatch(/INSERT INTO portal\.tmc_agenda_asignaciones/);
+  });
+});
+
+describe('agenda: asignar, liberar y marcar el flujo', () => {
+  const asignar = (cuerpo: unknown) => request(appAgenda()).post(`${A}/asignaciones`).set(auth()).send(cuerpo as object);
+  const liberar = (cuerpo: unknown) => request(appAgenda()).post(`${A}/liberar`).set(auth()).send(cuerpo as object);
+  const flujo = (numero: string, cuerpo: unknown) => request(appAgenda()).put(`${A}/flujo/${numero}`).set(auth()).send(cuerpo as object);
+  const linea = { numero: 984, etapa: 'proceso', puesto: 1 };
+
+  it.each([
+    [[], 'body'],
+    [{ ...linea, numero: undefined }, 'numero'],
+    [{ ...linea, numero: 1.5 }, 'numero'],
+    [{ ...linea, etapa: 'Proceso' }, 'etapa'],
+    [{ ...linea, puesto: 51 }, 'puesto'],
+    [{ ...linea, puesto: '1' }, 'puesto'],
+    [{ ...linea, motivo: 3 }, 'motivo'],
+    [{ ...linea, motivo: 'x'.repeat(501) }, 'motivo'],
+  ])('asignar %j → 400 en «%s», sin pasada ni consultas', async (cuerpo, campo) => {
+    const res = await asignar(cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('asignar a quien no es el primero de la fila sin decir el motivo → 400 en «motivo»; con motivo, 200', async () => {
+    const sin = await asignar({ numero: 990, etapa: 'proceso', puesto: 1 });
+    expect(sin.status).toBe(400);
+    expect(sin.body.field).toBe('motivo');
+    expect(sin.body.message).toMatch(/#984/);
+    expect(escriben(queries)).toEqual([]);
+    expect((await asignar({ numero: 990, etapa: 'proceso', puesto: 1, motivo: 'Urgencia acordada con el cliente' })).status).toBe(200);
+  });
+
+  it('asignar un puesto ocupado → 409 que dice cuál; un ticket que no está en esa etapa → 409; un puesto que no existe → 400', async () => {
+    ocupar(990, 'proceso', 1);
+    const ocupado = await asignar(linea);
+    expect(ocupado.status).toBe(409);
+    expect(ocupado.body.error).toBe('puesto_ocupado');
+    expect(ocupado.body.message).toMatch(/puesto 1 de Proceso/);
+    const fuera = await asignar({ numero: 880, etapa: 'diagnostico', puesto: 1 });
+    expect(fuera.status).toBe(409);
+    expect(fuera.body.error).toBe('ticket_fuera_de_etapa');
+    expect((await asignar({ numero: 990, etapa: 'proceso', puesto: 2 })).body.error).toBe('ticket_con_puesto');
+    expect((await asignar({ ...linea, puesto: 5 })).body).toMatchObject({ error: 'invalid_input', field: 'puesto' });
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it('asignar al primero de la fila → 200 con la agenda ya leída otra vez, y lo guarda', async () => {
+    const res = await asignar(linea);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body)).toContain('etapas');
+    expect(escriben(queries)).toHaveLength(1);
+    expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_agenda_asignaciones/);
+  });
+
+  // D18: se libera por número de ticket (como mucho hay una asignación vigente por ticket).
+  it.each([
+    [[], 'body'],
+    [{ motivo: 'El equipo ya salió' }, 'numero'],
+    [{ numero: '984', motivo: 'El equipo ya salió' }, 'numero'],
+    [{ numero: 984 }, 'motivo'],
+    [{ numero: 984, motivo: '   ' }, 'motivo'],
+    [{ numero: 984, motivo: ['x'] }, 'motivo'],
+  ])('liberar %j → 400 en «%s», sin pasada ni consultas', async (cuerpo, campo) => {
+    const res = await liberar(cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('liberar un ticket sin puesto → 404; con puesto → 200 con la agenda, cerrándola a mano con el motivo y la firma', async () => {
+    const sin = await liberar({ numero: 984, motivo: 'El equipo ya salió' });
+    expect(sin.status).toBe(404);
+    expect(sin.body.message).toMatch(/#984 no tiene ningún puesto/);
+    respuestas.unshift([/UPDATE portal\.tmc_agenda_asignaciones/, 1]);
+    const res = await liberar({ numero: 984, motivo: 'El equipo ya salió' });
+    expect(res.status).toBe(200);
+    expect(res.body.totalAbiertos).toBe(3);
+    expect(escriben(queries).at(-1)).toMatch(/cierre = 'manual'/);
+  });
+
+  it.each(['0', 'abc', '1.5', '-3'])('flujo de un ticket con número no válido (%s) → 400 en «numero»', async (numero) => {
+    const res = await flujo(numero, { flujo: 'equipo_nuevo' });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('numero');
+    expect(queries).toEqual([]);
+  });
+
+  it.each([[[]], [{}], [{ flujo: 'nuevo' }], [{ flujo: 3 }], [{ flujo: ['servicio'] }]])('flujo %j → 400 y ninguna consulta', async (cuerpo) => {
+    const res = await flujo('880', cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_input');
+    expect(queries).toEqual([]);
+  });
+
+  it('flujo: 404 si la fuente no trae abierto el ticket; 409 si la fuente ya trae su clasificación', async () => {
+    const noEsta = await flujo('999', { flujo: 'equipo_nuevo' });
+    expect(noEsta.status).toBe(404);
+    ticketsFuente = [filaTicket(880, 'Ingresado', { clasificacion: 'Equipo Para Servicio' })];
+    const clasificado = await flujo('880', { flujo: 'equipo_nuevo' });
+    expect(clasificado.status).toBe(409);
+    expect(clasificado.body.error).toBe('flujo_de_la_fuente');
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it('flujo: marcarlo → 200 con la agenda y el ticket en la fila de su nueva primera etapa; con null se quita la marca', async () => {
+    respuestas.unshift([/SELECT numero, flujo FROM portal\.tmc_agenda_flujo/, [{ numero: 880, flujo: 'equipo_nuevo' }]]);
+    const res = await flujo('880', { flujo: 'equipo_nuevo' });
+    expect(res.status).toBe(200);
+    expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_agenda_flujo/);
+    const proceso = (res.body.etapas as { etapa: string; fila: { numero: number }[] }[]).find((e) => e.etapa === 'proceso')!;
+    expect(proceso.fila.map((t) => t.numero)).toContain(880);
+    queries.length = 0;
+    expect((await flujo('999', { flujo: null })).status).toBe(200);
+    expect(escriben(queries)).toEqual([expect.stringMatching(/DELETE FROM portal\.tmc_agenda_flujo/)]);
+  });
+
+  it('el permiso va antes que la validación y que la pasada: un cuerpo no válido de un Lector es 403, no 400', async () => {
+    const c = conRol(null);
+    for (const ruta of ['/asignaciones', '/liberar', '/reparto']) expect((await request(appAgenda()).post(`${A}${ruta}`).set(c).send([])).status).toBe(403);
+    for (const ruta of ['/flujo/abc', '/configuracion/puestos', '/configuracion/duraciones', '/configuracion/estados']) expect((await request(appAgenda()).put(`${A}${ruta}`).set(c).send([])).status).toBe(403);
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+});
+
+describe('agenda: configuración (config.write)', () => {
+  const put = (ruta: string, cuerpo: unknown) => request(appAgenda()).put(`${A}/configuracion/${ruta}`).set(auth()).send(cuerpo as object);
+
+  it.each([
+    ['puestos', [], 'body'],
+    ['puestos', { puestos: 3 }, 'etapa'],
+    ['puestos', { etapa: 'taller', puestos: 3 }, 'etapa'],
+    ['puestos', { etapa: 'proceso' }, 'puestos'],
+    ['puestos', { etapa: 'proceso', puestos: -1 }, 'puestos'],
+    ['puestos', { etapa: 'proceso', puestos: 51 }, 'puestos'],
+    ['puestos', { etapa: 'proceso', puestos: 1.5 }, 'puestos'],
+    ['puestos', { etapa: 'proceso', puestos: '3' }, 'puestos'],
+    ['duraciones', [], 'body'],
+    ['duraciones', { etapa: 'taller', tipo: '*', dias: 3 }, 'etapa'],
+    ['duraciones', { etapa: 'proceso', dias: 3 }, 'tipo'],
+    ['duraciones', { etapa: 'proceso', tipo: 3, dias: 3 }, 'tipo'],
+    ['duraciones', { etapa: 'proceso', tipo: '  ', dias: 3 }, 'tipo'],
+    ['duraciones', { etapa: 'proceso', tipo: 'x'.repeat(81), dias: 3 }, 'tipo'],
+    ['duraciones', { etapa: 'proceso', tipo: '*' }, 'dias'],
+    ['duraciones', { etapa: 'proceso', tipo: '*', dias: 0 }, 'dias'],
+    ['duraciones', { etapa: 'proceso', tipo: '*', dias: 366 }, 'dias'],
+    ['duraciones', { etapa: 'proceso', tipo: '*', dias: '3' }, 'dias'],
+    ['estados', [], 'body'],
+    ['estados', { categoria: 'fin' }, 'estado'],
+    ['estados', { estado: 3, categoria: 'fin' }, 'estado'],
+    ['estados', { estado: 'x'.repeat(81), categoria: 'fin' }, 'estado'],
+    ['estados', { estado: 'Por Facturar' }, 'categoria'],
+    ['estados', { estado: 'Por Facturar', categoria: 'terminado' }, 'categoria'],
+    ['estados', { estado: 'Por Facturar', categoria: 'activa' }, 'etapa'],
+    ['estados', { estado: 'Por Facturar', categoria: 'activa', etapa: 'taller' }, 'etapa'],
+    ['estados', { estado: 'Por Facturar', categoria: 'fin', etapa: 'proceso' }, 'etapa'],
+  ])('PUT /agenda/configuracion/%s %j → 400 en «%s» y ninguna consulta', async (ruta, cuerpo, campo) => {
+    const res = await put(ruta, cuerpo);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: 'invalid_input', field: campo });
+    expect(queries).toEqual([]);
+  });
+
+  it('puestos: 0 y 50 valen → 200 con la configuración entera ya leída', async () => {
+    for (const puestos of [0, 50]) {
+      const res = await put('puestos', { etapa: 'verificacion', puestos });
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+    }
+    expect(escriben(queries)).toHaveLength(2);
+    expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_agenda_etapas/);
+  });
+
+  it('duraciones: guardar la de un tipo o la «*»; con dias null se quita la fila del tipo; la «*» no se puede quitar → 400', async () => {
+    expect((await put('duraciones', { etapa: 'proceso', tipo: '*', dias: 5 })).status).toBe(200);
+    expect((await put('duraciones', { etapa: 'proceso', tipo: 'Calibración', dias: 2 })).status).toBe(200);
+    expect(escriben(queries)).toEqual([expect.stringMatching(/INSERT INTO portal\.tmc_agenda_duraciones/), expect.stringMatching(/INSERT INTO portal\.tmc_agenda_duraciones/)]);
+    queries.length = 0;
+    expect((await put('duraciones', { etapa: 'proceso', tipo: 'Calibración', dias: null })).status).toBe(200);
+    expect(escriben(queries)).toEqual([expect.stringMatching(/DELETE FROM portal\.tmc_agenda_duraciones/)]);
+    queries.length = 0;
+    const res = await put('duraciones', { etapa: 'proceso', tipo: ' * ', dias: null });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('dias');
+    expect(res.body.message).toMatch(/no se puede quitar/);
+    expect(queries).toEqual([]);
+  });
+
+  it('estados: guarda la categoría (y la etapa, si es activa) con SU firma, y no nombra el rol del reloj ni su firma', async () => {
+    for (const cuerpo of [{ estado: 'Notificado', categoria: 'activa', etapa: 'diagnostico' }, { estado: 'Estado nuevo', categoria: 'standby' }, { estado: 'Por Entregar', categoria: 'fin', etapa: null, rol: 'cuenta' }]) {
+      queries.length = 0;
+      const res = await put('estados', cuerpo);
+      expect(res.status).toBe(200);
+      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+      expect(escriben(queries)).toHaveLength(1);
+      expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_estados_desk \(clave, etiqueta, categoria, etapa, categoria_por_id, categoria_por, categoria_en, actualizado_en\)/);
+      expect(escriben(queries)[0]).not.toMatch(/\brol\b|actualizado_por|actualizado_en = /);
+    }
   });
 });

@@ -69,6 +69,7 @@ import {
   type CambioPlazo,
   type CambioPuestosEtapa,
   type ConfigAgenda,
+  type ConfiguracionAgenda,
   type EquipoVista,
   type EstadoDesk,
   type FilaImportada,
@@ -574,6 +575,12 @@ function masVotado(votos: Map<string, number>): string | null {
   return mejor;
 }
 
+/** Un estado que nadie ha tocado: rol «cuenta» sin firma y la categoría de la propuesta (C.3), si está en ella, también sin firma. */
+function estadoSinFila(clave: string, etiqueta: string): EstadoDesk {
+  const propuesta = categoriaDeEstado(clave);
+  return { clave, etiqueta, tipoDesk: null, ticketsAbiertos: 0, rol: ROL_POR_DEFECTO, actualizadoPor: null, actualizadoEn: null, categoria: propuesta?.categoria ?? null, etapa: propuesta?.etapa ?? null, categoriaPor: null, categoriaEn: null };
+}
+
 /**
  * Los estados de Desk con su rol en el reloj del plazo (bloque «Estados de
  * Desk» de «Configuración»): todos los que existen en desk.tickets —de
@@ -585,10 +592,18 @@ function masVotado(votos: Map<string, number>): string | null {
  * grafía más usada y con el tipo de Desk de la mayoría de sus tickets. Sólo
  * cuentan como abiertos los tickets sin cerrar. Un estado sin fila guardada
  * vale «cuenta»: nada nace en standby ni terminado. Leer no escribe.
+ *
+ * Cada uno lleva además su categoría en la agenda del taller (la guardada o,
+ * sin ella, la de la propuesta) y la firma de la categoría, que es otra que la
+ * del rol.
  */
 export async function listarEstadosDesk(db: Db): Promise<EstadoDesk[]> {
   const [guardados, enTickets] = await Promise.all([
-    db.query(`SELECT clave, etiqueta, rol, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_estados_desk`),
+    db.query(
+      `SELECT clave, etiqueta, rol, actualizado_por, actualizado_en::text AS actualizado_en,
+              categoria, etapa, categoria_por, categoria_en::text AS categoria_en
+         FROM portal.tmc_estados_desk`,
+    ),
     db.query(
       `SELECT t.status AS estado, t.status_type AS tipo, count(*)::int AS n,
               (count(*) FILTER (WHERE ${TICKET_ABIERTO}))::int AS abiertos
@@ -598,14 +613,14 @@ export async function listarEstadosDesk(db: Db): Promise<EstadoDesk[]> {
   ]);
   const m = new Map<string, EstadoDesk>();
   for (const r of guardados.rows as Row[]) {
+    const etapa = esEtapaAgenda(r.etapa) ? r.etapa : null;
+    const guardada = esCategoriaAgenda(r.categoria) && categoriaCoherente(r.categoria, etapa);
     m.set(r.clave, {
-      clave: r.clave,
-      etiqueta: r.etiqueta,
-      tipoDesk: null,
-      ticketsAbiertos: 0,
+      ...estadoSinFila(r.clave, r.etiqueta),
       rol: esRolEstado(r.rol) ? r.rol : ROL_POR_DEFECTO,
       actualizadoPor: r.actualizado_por,
       actualizadoEn: r.actualizado_en,
+      ...(guardada ? { categoria: r.categoria, etapa, categoriaPor: r.categoria_por ?? null, categoriaEn: r.categoria_en ?? null } : {}),
     });
   }
   const grafias = new Map<string, Map<string, number>>();
@@ -613,7 +628,7 @@ export async function listarEstadosDesk(db: Db): Promise<EstadoDesk[]> {
   for (const r of enTickets.rows as Row[]) {
     const clave = claveEstadoDesk(r.estado);
     if (!clave) continue;
-    const e = m.get(clave) ?? { clave, etiqueta: '', tipoDesk: null, ticketsAbiertos: 0, rol: ROL_POR_DEFECTO, actualizadoPor: null, actualizadoEn: null };
+    const e = m.get(clave) ?? estadoSinFila(clave, '');
     e.ticketsAbiertos += Number(r.abiertos);
     m.set(clave, e);
     grafias.set(clave, votar(grafias.get(clave) ?? new Map(), etiquetaEstadoDesk(r.estado), Number(r.n)));
@@ -651,8 +666,8 @@ export async function guardarEstadoDesk(db: Db, c: CambioEstadoDesk, actor: Acto
 
 // ── Agenda del taller: configuración (migraciones 050 y 051) ────────────────
 // Lectura y escritura de la categoría de cada estado, los puestos de cada
-// etapa y las duraciones. Aún sin endpoint: cuando lo tengan (lote 5), cada
-// escritura debe ir tras `escritura('config.write', …)` en router.ts.
+// etapa y las duraciones. Cada escritura va tras `escritura('config.write', …)`
+// en router.ts (rutas de /agenda/configuracion).
 
 /**
  * La categoría (y la etapa) guardada de cada estado, por su clave: lo que
@@ -756,12 +771,32 @@ export async function guardarDuracionEtapa(db: Db, cambio: CambioDuracionEtapa, 
   );
 }
 
+/**
+ * La configuración entera de la agenda (GET /agenda/configuracion): puestos,
+ * duraciones y cada estado con su categoría, sus dos firmas y sus tickets
+ * abiertos. Los abiertos son los de la FUENTE de la agenda, no los de la
+ * réplica de «Servicios»: es con ellos con los que se proyecta. Un estado que
+ * sólo traiga la fuente también sale, como cualquiera que nadie ha tocado.
+ */
+export async function leerConfiguracionAgenda(db: Db, fuente: FuenteAgenda): Promise<ConfiguracionAgenda> {
+  const [config, estados, tickets] = await Promise.all([leerConfigAgenda(db), listarEstadosDesk(db), fuente.ticketsAbiertos()]);
+  const porClave = new Map(estados.map((e) => [e.clave, { ...e, ticketsAbiertos: 0 }]));
+  for (const t of tickets) {
+    const clave = claveEstadoDesk(t.estado);
+    if (!clave) continue;
+    const e = porClave.get(clave) ?? estadoSinFila(clave, etiquetaEstadoDesk(t.estado));
+    e.ticketsAbiertos++;
+    porClave.set(clave, e);
+  }
+  return { ...config, estados: [...porClave.values()].sort(porOrdenEstadosDesk) };
+}
+
 // ── Agenda del taller: la lectura reunida, las asignaciones, el reparto inicial y el flujo a mano (lote 4) ──
 //
-// Sin endpoints todavía (lote 5). Aquí no se mira el rol: se firma con el actor
-// que llega. Cada escritura debe ir en router.ts tras SU permiso de roles.ts:
-// `asignar` → 'agenda.asignar', `liberar` → 'agenda.liberar',
-// `confirmarRepartoInicial` → 'agenda.reparto' y `marcarFlujo` → 'agenda.flujo'.
+// Aquí no se mira el rol: se firma con el actor que llega. Cada escritura va
+// en router.ts tras SU permiso de roles.ts: `asignar` → 'agenda.asignar',
+// `liberar` → 'agenda.liberar', `confirmarRepartoInicial` → 'agenda.reparto'
+// y `marcarFlujo` → 'agenda.flujo'.
 
 /** Cuánto calendario de cierres de empresa se pide a la fuente alrededor de hoy, en días. */
 const CIERRES_ATRAS_DIAS = 120;
@@ -811,12 +846,16 @@ export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: strin
   };
 }
 
-/** La agenda del taller a fecha `hoy`: es lo que servirá `GET /agenda` (lote 5). */
+/** La agenda del taller a fecha `hoy`: la proyección de lo que reúne `leerEntradaAgenda`. */
 export async function leerAgenda(db: Db, fuente: FuenteAgenda, hoy: string): Promise<AgendaTaller> {
   return proyectarAgenda(await leerEntradaAgenda(db, fuente, hoy));
 }
 
-const puestoOcupado = () => new TzError('puesto_ocupado', 409, 'Ese puesto ya está ocupado. Si la agenda lo da por libre, su ticket cambió de etapa: hay que liberarlo antes.');
+/** 409 que dice CUÁL es el puesto, si se sabe (`etapa` es la clave o ya su etiqueta). */
+const puestoOcupado = (etapa?: string, puesto?: number | string) => {
+  const cual = etapa === undefined ? 'Ese puesto' : `El puesto ${puesto} de ${esEtapaAgenda(etapa) ? ETIQUETA_ETAPA[etapa] : etapa}`;
+  return new TzError('puesto_ocupado', 409, `${cual} ya está ocupado. Si la agenda lo da por libre, su ticket cambió de etapa: hay que liberarlo antes.`);
+};
 const ticketConPuesto = (numero: number | null) =>
   new TzError('ticket_con_puesto', 409, `${numero === null ? 'Un ticket del reparto' : `El ticket #${numero}`} ya tiene un puesto asignado: hay que liberarlo antes de darle otro.`);
 
@@ -829,7 +868,7 @@ const ticketConPuesto = (numero: number | null) =>
 function comprobarLinea(agenda: AgendaTaller, l: LineaReparto): void {
   const x = agenda.etapas.find((e) => e.etapa === l.etapa)!;
   if (l.puesto > x.saturacion.puestos) throw new TzError('invalid_input', 400, `${x.etiqueta} tiene ${x.saturacion.puestos} puestos: no existe el puesto ${l.puesto}.`, 'puesto');
-  if (x.puestos.some((p) => p.puesto === l.puesto && p.ocupante)) throw puestoOcupado();
+  if (x.puestos.some((p) => p.puesto === l.puesto && p.ocupante)) throw puestoOcupado(l.etapa, l.puesto);
   if (agenda.etapas.some((e) => e.puestos.some((p) => p.ocupante?.numero === l.numero))) throw ticketConPuesto(l.numero);
   if (!x.fila.some((t) => t.numero === l.numero && t.situacion === 'en_etapa')) {
     throw new TzError('ticket_fuera_de_etapa', 409, `El ticket #${l.numero} no está en ${x.etiqueta} según la fuente de la agenda.`);
@@ -863,8 +902,10 @@ async function insertarAsignaciones(db: Pool, altas: readonly AltaAsignacion[], 
       return altas.length;
     });
   } catch (e) {
-    const { code, constraint } = (e ?? {}) as { code?: string; constraint?: string };
-    if (code === '23505' && constraint === 'tmc_agenda_asig_puesto_uq') throw puestoOcupado();
+    const { code, constraint, detail } = (e ?? {}) as { code?: string; constraint?: string; detail?: string };
+    // El detalle de Postgres nombra la clave que chocó: «Key (etapa, puesto)=(diagnostico, 1) already exists.»
+    const [, etapa, puesto] = /=\((\w+), (\d+)\)/.exec(detail ?? '') ?? [];
+    if (code === '23505' && constraint === 'tmc_agenda_asig_puesto_uq') throw puestoOcupado(etapa, puesto);
     if (code === '23505' && constraint === 'tmc_agenda_asig_ticket_uq') throw ticketConPuesto(altas.length === 1 ? altas[0].numero : null);
     throw e;
   }

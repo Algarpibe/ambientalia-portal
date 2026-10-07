@@ -4,20 +4,30 @@ import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { getDesk2Pool } from '../db-desk2.js';
-import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
+import { huecosDeEtapa, proyectarAgenda, type AgendaTaller } from './agenda.js';
+import { esFechaIso } from './dominio.js';
+import { crearFuenteAgenda, recuentoPorEstado, type EstadoFuente, type FuenteAgenda } from './fuente.js';
 import { festivosDelEje } from './plazos.js';
-import { registrarEstadosSinFallar } from './registro-estados.js';
+import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
 import { ETIQUETA_ROL_APP, permisosDe, puede, resolverRol, type Permiso, type RolApp } from './roles.js';
 import {
   TzError,
   esClave,
+  parseAsignacion,
   parseAvisos,
+  parseCategoriaEstado,
   parseContacto,
+  parseDuracionEtapa,
   parseEstadoDesk,
+  parseFlujoManual,
+  parseHuecos,
   parseImportacion,
+  parseLiberacion,
   parseNumeroTicket,
   parsePlazo,
+  parsePuestosEtapa,
+  parseReparto,
   parseRolApp,
   parseSeguimiento,
   parseTipoManual,
@@ -75,6 +85,27 @@ function hoyOf(req: Request): string {
 }
 
 /**
+ * El «hoy» de la agenda: como `hoyOf`, y además tiene que ser un día que
+ * exista (un 30 de febrero haría proyectar sobre una fecha imposible).
+ */
+function hoyAgenda(req: Request): string {
+  const hoy = hoyOf(req);
+  if (!esFechaIso(hoy)) throw new TzError('invalid_input', 400, 'La fecha «hoy» no es válida (AAAA-MM-DD).', 'hoy');
+  return hoy;
+}
+
+/** Cuántas entradas próximas da GET /agenda/huecos. */
+export const HUECOS_PROXIMOS = 5;
+
+/** Lo que devuelven GET /agenda y las escrituras de la agenda: la proyección y el estado entero de la fuente. */
+export type RespuestaAgenda = AgendaTaller & { estadoFuente: EstadoFuente };
+
+const AVISO_PASADA_FALLIDA = {
+  codigo: 'pasada_fallida',
+  mensaje: 'No se pudo comprobar si algún ticket ha cambiado de estado: la agenda puede no estar al día (una asignación de un ticket que ya salió de su etapa puede seguir vigente). Se reintenta sola.',
+} as const;
+
+/**
  * `fuente` es de dónde lee la agenda del taller (fuente.ts). Por defecto, la
  * base de Desk 2.0 si hay `DESK2_DB_URL` y, si no (o si falla), la réplica de
  * `db`; las pruebas pasan la suya.
@@ -100,11 +131,13 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
   };
 
   /**
-   * Una ruta que escribe: antes de nada —de validar y de cualquier consulta de
-   * negocio— comprueba que quien pide tiene ese permiso. Un administrador del
-   * portal pasa sin que haga falta mirar su rol.
+   * Una ruta que pide un permiso: antes de nada —de validar y de cualquier
+   * consulta de negocio— comprueba que quien pide lo tiene. Un administrador
+   * del portal pasa sin que haga falta mirar su rol. Toda ruta que escribe se
+   * registra con su alias `escritura`; `conPermiso`, con ese nombre, es para
+   * la única lectura que lo pide (la propuesta de reparto).
    */
-  const escritura = (permiso: Permiso, ctx: string, fn: (req: Request) => Promise<unknown>) =>
+  const conPermiso = (permiso: Permiso, ctx: string, fn: (req: Request) => Promise<unknown>) =>
     route(ctx, async (req) => {
       if (!esAdminPortal(req)) {
         const rol = await rolDe(req);
@@ -114,6 +147,7 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
       }
       return fn(req);
     });
+  const escritura = conPermiso;
 
   /** Una ruta de reparto de roles: sólo para administradores del portal, tenga quien pide el rol que tenga. */
   const soloAdmin = (ctx: string, fn: (req: Request) => Promise<unknown>) =>
@@ -312,6 +346,148 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
       const tickets = await fuente.ticketsAbiertos();
       const estado = await fuente.estadoFuente();
       return { ...estado, abiertos: { total: tickets.length, porEstado: recuentoPorEstado(tickets) } };
+    }),
+  );
+
+  // ── Agenda del taller: la agenda, sus asignaciones y su configuración (lote 5) ──
+  //
+  // Las respuestas llevan números de ticket, estados, fechas y marcas: ni
+  // clientes, ni seriales, ni correos. Lo que cambia la agenda devuelve la
+  // agenda ya leída otra vez, como hace «Servicios» con su lista.
+
+  // D20: antes de servir la agenda, y antes de asignar, repartir o liberar, se
+  // lanza la pasada de la agenda (su historial y el cierre de las asignaciones
+  // cuyo ticket salió de su etapa), salvo que haya una buena de hace menos de
+  // 30 s. Es «si se puede»: si falla, la petición sigue con lo que haya y la
+  // respuesta lo avisa (`pasada_fallida`).
+  const ponerAlDia = (): Promise<boolean> => agendaAlDia(db, (d) => repo.registrarEstadosAgenda(d, fuente));
+
+  const agenda = async (hoy: string, alDia: boolean): Promise<RespuestaAgenda> => {
+    const entrada = await repo.leerEntradaAgenda(db, fuente, hoy);
+    const a = proyectarAgenda(entrada);
+    return { ...a, avisos: alDia ? a.avisos : [...a.avisos, AVISO_PASADA_FALLIDA], estadoFuente: entrada.estadoFuente };
+  };
+
+  // Un cambio en la agenda: valida el cuerpo, se pone al día (si toca), escribe
+  // y devuelve la agenda. El día es SIEMPRE el de hoy en Colombia: de él sale el
+  // día desde el que cuenta la duración que se guarda, así que no se acepta por parámetro.
+  const cambio =
+    <T>(leer: (req: Request) => T, escribir: (dato: T, actor: Actor, hoy: string) => Promise<unknown>, conPasada = true) =>
+    async (req: Request): Promise<RespuestaAgenda> => {
+      const dato = leer(req);
+      const alDia = !conPasada || (await ponerAlDia());
+      const hoy = hoyEnColombia();
+      await escribir(dato, actorOf(req), hoy);
+      return agenda(hoy, alDia);
+    };
+
+  const configuracion = () => repo.leerConfiguracionAgenda(db, fuente);
+
+  // La agenda completa a «hoy»: etapas con sus puestos y su fila, standby, por
+  // llegar, recuentos, avisos y el estado de la fuente. Si Desk 2.0 no contesta
+  // responde igual, con el respaldo y su motivo.
+  router.get(
+    '/trazabilidad/agenda',
+    ...gated,
+    route('tmc_agenda', async (req) => {
+      const hoy = hoyAgenda(req);
+      return agenda(hoy, await ponerAlDia());
+    }),
+  );
+
+  // El reparto inicial que se propone (D6). No escribe, pero es el borrador de
+  // una decisión del Director Técnico: pide el mismo permiso que confirmarlo.
+  router.get(
+    '/trazabilidad/agenda/reparto',
+    ...gated,
+    conPermiso('agenda.reparto', 'tmc_agenda_reparto', async (req) => {
+      const hoy = hoyAgenda(req);
+      return { hoy, reparto: await repo.proponerRepartoInicial(db, fuente, hoy) };
+    }),
+  );
+
+  // Confirma el reparto: {reparto: [{numero, etapa, puesto}]}, la propuesta tal
+  // cual o ajustada. Todo o nada. Sólo rellena puestos libres (D19): con uno
+  // ocupado, 409 que dice cuál; para mover a alguien, liberar y asignar.
+  router.post(
+    '/trazabilidad/agenda/reparto',
+    ...gated,
+    escritura('agenda.reparto', 'tmc_agenda_repartir', cambio((req) => parseReparto(req.body), (lineas, actor, hoy) => repo.confirmarRepartoInicial(db, fuente, lineas, actor, hoy))),
+  );
+
+  // Da un puesto a un ticket: {numero, etapa, puesto, motivo?}. 409 si el puesto
+  // está ocupado o el ticket no está en esa etapa; 400 si no es el primero de la
+  // fila y no se dice el motivo.
+  router.post(
+    '/trazabilidad/agenda/asignaciones',
+    ...gated,
+    escritura('agenda.asignar', 'tmc_agenda_asignar', cambio((req) => parseAsignacion(req.body), (linea, actor, hoy) => repo.asignar(db, fuente, linea, actor, hoy))),
+  );
+
+  // Libera a mano el puesto de un ticket: {numero, motivo}. Va por número de
+  // ticket (D18): como mucho hay una asignación vigente por ticket. 404 si no la tiene.
+  router.post(
+    '/trazabilidad/agenda/liberar',
+    ...gated,
+    escritura('agenda.liberar', 'tmc_agenda_liberar', cambio((req) => parseLiberacion(req.body), (liberacion, actor) => repo.liberar(db, liberacion, actor))),
+  );
+
+  // Marca a mano el flujo de un ticket: {flujo}; null quita la marca. 404 si la
+  // fuente no lo trae abierto y 409 si ya trae su clasificación (manda ella).
+  router.put(
+    '/trazabilidad/agenda/flujo/:numero',
+    ...gated,
+    escritura('agenda.flujo', 'tmc_agenda_flujo', cambio((req) => ({ numero: parseNumeroTicket(req.params.numero), flujo: parseFlujoManual(req.body) }), ({ numero, flujo }, actor) => repo.marcarFlujo(db, fuente, numero, flujo, actor), false)),
+  );
+
+  // Cuándo entraría un equipo que llegara hoy a esa etapa (?etapa=, y ?tipo=
+  // para la duración de ese tipo de servicio): las próximas entradas, una tras
+  // otra. Sólo lectura; pensado para la futura reserva del cliente.
+  router.get(
+    '/trazabilidad/agenda/huecos',
+    ...gated,
+    route('tmc_agenda_huecos', async (req) => {
+      const { etapa, tipo } = parseHuecos(req.query);
+      const hoy = hoyAgenda(req);
+      const entrada = await repo.leerEntradaAgenda(db, fuente, hoy);
+      return { hoy, etapa, tipo, ...huecosDeEtapa(entrada, etapa, tipo, HUECOS_PROXIMOS), fuente: entrada.estadoFuente.fuente };
+    }),
+  );
+
+  // La configuración de la agenda: puestos de cada etapa, duraciones y cada
+  // estado con su categoría, sus dos firmas (la de la categoría y la del rol
+  // del reloj) y sus tickets abiertos según la fuente de la agenda.
+  router.get('/trazabilidad/agenda/configuracion', ...gated, route('tmc_agenda_config', configuracion));
+
+  // Los tres cambios devuelven la configuración entera ya leída otra vez.
+  // {etapa, puestos}: reducirlos no desaloja a nadie (los de más quedan «a extinguir»).
+  router.put(
+    '/trazabilidad/agenda/configuracion/puestos',
+    ...gated,
+    escritura('config.write', 'tmc_agenda_puestos', async (req) => {
+      await repo.guardarPuestosEtapa(db, parsePuestosEtapa(req.body), actorOf(req));
+      return configuracion();
+    }),
+  );
+
+  // {etapa, tipo, dias}: con dias null se quita la fila de ese tipo; la «*» no se quita (400).
+  router.put(
+    '/trazabilidad/agenda/configuracion/duraciones',
+    ...gated,
+    escritura('config.write', 'tmc_agenda_duracion', async (req) => {
+      await repo.guardarDuracionEtapa(db, parseDuracionEtapa(req.body), actorOf(req));
+      return configuracion();
+    }),
+  );
+
+  // {estado, categoria, etapa?}: la categoría del estado en la agenda, con su
+  // firma. No toca el rol del reloj ni la suya: ése sigue en PUT /trazabilidad/estados.
+  router.put(
+    '/trazabilidad/agenda/configuracion/estados',
+    ...gated,
+    escritura('config.write', 'tmc_agenda_categoria', async (req) => {
+      await repo.guardarCategoriaEstado(db, parseCategoriaEstado(req.body), actorOf(req));
+      return configuracion();
     }),
   );
 

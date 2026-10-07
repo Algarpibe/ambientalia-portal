@@ -417,6 +417,12 @@ export interface EstadoDesk {
   /** Quién eligió su rol por última vez; null si nadie lo ha tocado. */
   actualizadoPor: string | null;
   actualizadoEn: string | null;
+  /** Su categoría en la agenda del taller (y la etapa, si es una etapa activa): la guardada o, sin ella, la de la propuesta; null = sin categoría. */
+  categoria: CategoriaAgenda | null;
+  etapa: EtapaAgenda | null;
+  /** La firma de la CATEGORÍA, aparte de la del rol: quién la guardó (la semilla de la 050 también firma); null si sale de la propuesta o no tiene. */
+  categoriaPor: string | null;
+  categoriaEn: string | null;
 }
 
 export interface CambioEstadoDesk {
@@ -446,9 +452,8 @@ export function parseEstadoDesk(body: unknown): CambioEstadoDesk {
 }
 
 // ── Agenda del taller: configuración ────────────────────────────────────────
-// Todavía sin endpoints (llegan en el lote 5, con `config.write`): estos
-// validadores los llama el repo antes de escribir, y sobre ellos se montarán
-// los `parse…` del cuerpo de cada PUT.
+// Estos validadores los llama el repo antes de escribir; el cuerpo de cada
+// petición lo leen los `parse…` de más abajo, que se apoyan en ellos.
 
 /** Los puestos de una etapa del taller, con quién los cambió (null = como los sembró la migración 051). */
 export interface EtapaAgendaConfig {
@@ -469,6 +474,11 @@ export interface DuracionAgendaConfig extends DuracionEtapa {
 export interface ConfigAgenda {
   etapas: EtapaAgendaConfig[];
   duraciones: DuracionAgendaConfig[];
+}
+
+/** Lo que devuelve GET /trazabilidad/agenda/configuracion: en `estados`, `ticketsAbiertos` son los de la FUENTE de la agenda. */
+export interface ConfiguracionAgenda extends ConfigAgenda {
+  estados: EstadoDesk[];
 }
 
 export interface CambioCategoriaEstado {
@@ -606,6 +616,65 @@ export function validarFlujoManual(flujo: unknown): FlujoAgenda | null {
   if (flujo === null) return null;
   if (!FLUJOS_AGENDA.includes(flujo as FlujoAgenda)) throw invalido(`«flujo» debe ser uno de: ${lista(FLUJOS_AGENDA)}; o vacío para quitar la marca.`, 'flujo');
   return flujo as FlujoAgenda;
+}
+
+// ── Agenda del taller: el cuerpo de cada petición (lote 5) ──────────────────
+// Lo que llega por HTTP no tiene tipo: aquí se comprueba que el cuerpo es un
+// objeto y que cada campo es del tipo que toca antes de pasarlo al validador.
+
+const textoDe = (v: unknown, field: string): string => {
+  if (typeof v !== 'string') throw invalido(v === null || v === undefined ? `Falta «${field}».` : `«${field}» debe ser texto.`, field);
+  return v;
+};
+
+/** POST /agenda/asignaciones: {numero, etapa, puesto, motivo?}. */
+export function parseAsignacion(body: unknown): LineaReparto & { motivo: string | null } {
+  return validarAsignacion(obj(body, 'body') as unknown as NuevaAsignacion);
+}
+
+/** POST /agenda/reparto: {reparto: [{numero, etapa, puesto}]}. */
+export function parseReparto(body: unknown): LineaReparto[] {
+  return validarReparto(obj(body, 'body').reparto);
+}
+
+/** POST /agenda/liberar: {numero, motivo}. Se libera por número de ticket (D18). */
+export function parseLiberacion(body: unknown): Liberacion {
+  return validarLiberacion(obj(body, 'body') as unknown as Liberacion);
+}
+
+/** PUT /agenda/flujo/:numero: {flujo}; null (o vacío) quita la marca. */
+export function parseFlujoManual(body: unknown): FlujoAgenda | null {
+  const { flujo } = obj(body, 'body');
+  return validarFlujoManual(flujo === '' ? null : flujo);
+}
+
+/** PUT /agenda/configuracion/puestos: {etapa, puestos}. */
+export function parsePuestosEtapa(body: unknown): CambioPuestosEtapa {
+  return validarPuestosEtapa(obj(body, 'body') as unknown as CambioPuestosEtapa);
+}
+
+/** PUT /agenda/configuracion/duraciones: {etapa, tipo, dias}; `dias: null`, dicho así, quita la fila del tipo. */
+export function parseDuracionEtapa(body: unknown): CambioDuracionEtapa {
+  const b = obj(body, 'body');
+  etapaValida(b.etapa);
+  const tipo = textoDe(b.tipo, 'tipo');
+  if (b.dias !== null && typeof b.dias !== 'number') throw invalido(`La duración debe ser un número entero de días hábiles entre ${PLAZO_MIN_DIAS} y ${PLAZO_MAX_DIAS}, o null para quitarla.`, 'dias');
+  return validarDuracionEtapa({ etapa: b.etapa as EtapaAgenda, tipo, dias: b.dias });
+}
+
+/** PUT /agenda/configuracion/estados: {estado, categoria, etapa?}. Sólo la categoría: el rol del reloj no viaja aquí. */
+export function parseCategoriaEstado(body: unknown): CambioCategoriaEstado {
+  const b = obj(body, 'body');
+  return validarCategoriaEstado({ estado: textoDe(b.estado, 'estado'), categoria: b.categoria as CategoriaAgenda, etapa: (b.etapa ?? null) as EtapaAgenda | null });
+}
+
+/** GET /agenda/huecos?etapa=&tipo=: la etapa es obligatoria; el tipo, opcional (sin él vale la «*»). */
+export function parseHuecos(query: Record<string, unknown>): { etapa: EtapaAgenda; tipo: string | null } {
+  etapaValida(query.etapa);
+  if (query.tipo !== undefined && typeof query.tipo !== 'string') throw invalido('«tipo» debe ser un solo texto.', 'tipo');
+  const tipo = String(query.tipo ?? '').trim();
+  if (tipo.length > 80) throw invalido('«tipo» supera 80 caracteres.', 'tipo');
+  return { etapa: query.etapa as EtapaAgenda, tipo: tipo === '' ? null : tipo };
 }
 
 /** El contacto que se le pone a mano a un cliente; `emails` vacío = quitarlo (vuelve a valer el de Desk). */

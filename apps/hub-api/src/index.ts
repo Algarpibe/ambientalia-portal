@@ -138,7 +138,11 @@ initDb()
     // Router de Calibraciones (patrones de transferencia de O3, ISO/IEC 17025).
     app.use('/api', createCalibracionesRouter(getHubPool()));
     // Router de Trazabilidad Mantenimientos Clientes (vencimientos GRIMM EDM 180).
-    app.use('/api', createTrazabilidadRouter(getHubPool()));
+    // La fuente de la agenda del taller es UNA para las rutas y para el
+    // programador: comparten su cortacircuitos (si Desk 2.0 cae, ni unas ni otro
+    // vuelven a esperarla durante un minuto).
+    const fuenteAgenda = crearFuenteAgenda({ hub: getHubPool(), desk2: getDesk2Pool });
+    app.use('/api', createTrazabilidadRouter(getHubPool(), fuenteAgenda));
     // Programador de Trazabilidad: cada 5 minutos apunta los cambios de estado de
     // los tickets de Desk (portal.tmc_estados_historial), que es con lo que se
     // descuenta del plazo el tiempo en standby. Se enciende aquí, con la base ya
@@ -148,7 +152,6 @@ initDb()
     // historial propio (portal.tmc_agenda_historial) desde Desk 2.0 y el cierre
     // de las asignaciones cuyo ticket salió de su etapa. Si Desk 2.0 no está
     // configurado o no contesta, esa pasada no escribe nada y la otra ni se entera.
-    const fuenteAgenda = crearFuenteAgenda({ hub: getHubPool(), desk2: getDesk2Pool });
     iniciarRegistroEstados(getHubPool(), { agenda: (db) => registrarEstadosAgenda(db, fuenteAgenda) });
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
