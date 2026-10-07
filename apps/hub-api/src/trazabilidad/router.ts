@@ -3,6 +3,8 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
+import { getDesk2Pool } from '../db-desk2.js';
+import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { festivosDelEje } from './plazos.js';
 import { registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
@@ -72,7 +74,12 @@ function hoyOf(req: Request): string {
   return h;
 }
 
-export function createTrazabilidadRouter(db: Pool): Router {
+/**
+ * `fuente` es de dónde lee la agenda del taller (fuente.ts). Por defecto, la
+ * base de Desk 2.0 si hay `DESK2_DB_URL` y, si no (o si falla), la réplica de
+ * `db`; las pruebas pasan la suya.
+ */
+export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool })): Router {
   const router = Router();
   const gated = [requireAuth, requireApp(APP_ID)] as const;
 
@@ -288,6 +295,23 @@ export function createTrazabilidadRouter(db: Pool): Router {
     escritura('config.write', 'tmc_estado', async (req) => {
       await repo.guardarEstadoDesk(db, parseEstadoDesk(req.body), actorOf(req));
       return { estados: await repo.listarEstadosDesk(db) };
+    }),
+  );
+
+  // ── Agenda del taller ────────────────────────────────────────────────────
+
+  // Diagnóstico de la fuente: cuál contesta (Desk 2.0 o la réplica de
+  // respaldo) y por qué, su última sincronización y cuántos tickets abiertos
+  // hay en cada estado. Sólo recuentos: ni clientes, ni seriales, ni correos.
+  // Si Desk 2.0 no contesta responde igual, con el respaldo y su motivo; del
+  // error sólo sale el motivo, nunca su texto ni la URL de la conexión.
+  router.get(
+    '/trazabilidad/agenda/fuente',
+    ...gated,
+    route('tmc_agenda_fuente', async () => {
+      const tickets = await fuente.ticketsAbiertos();
+      const estado = await fuente.estadoFuente();
+      return { ...estado, abiertos: { total: tickets.length, porEstado: recuentoPorEstado(tickets) } };
     }),
   );
 
