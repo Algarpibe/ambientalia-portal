@@ -115,11 +115,15 @@ let agendaUltimaBuena = Number.NEGATIVE_INFINITY;
  * apunta (consola y Sentry) y no pasa de aquí. Una sola a la vez en este
  * proceso; sin `forzar` no repite una buena de hace menos de `FRESCURA_MS`
  * (para quien la pida antes de leer la agenda; el programador fuerza).
+ *
+ * Devuelve cómo fue: true si salió bien (o había una buena reciente) y false
+ * si falló. Lo usan las rutas de la agenda (D20), que la piden antes de servir
+ * y antes de asignar o liberar, y avisan si no se pudo.
  */
-export async function registrarAgendaSinFallar(db: Pool, tarea: Tarea, opts: { forzar?: boolean } = {}): Promise<void> {
+export async function agendaAlDia(db: Pool, tarea: Tarea, opts: { forzar?: boolean } = {}): Promise<boolean> {
   try {
     if (!agendaEnCurso) {
-      if (!opts.forzar && Date.now() - agendaUltimaBuena < FRESCURA_MS) return;
+      if (!opts.forzar && Date.now() - agendaUltimaBuena < FRESCURA_MS) return true;
       const pasada: Promise<void> = (async () => {
         await tarea(db);
         agendaUltimaBuena = Date.now();
@@ -129,10 +133,17 @@ export async function registrarAgendaSinFallar(db: Pool, tarea: Tarea, opts: { f
       agendaEnCurso = pasada;
     }
     await agendaEnCurso;
+    return true;
   } catch (e) {
     console.error(`${CONTEXTO_AGENDA} error`, e);
     captureError(e, { endpoint: CONTEXTO_AGENDA });
+    return false;
   }
+}
+
+/** Lo mismo sin decir cómo fue: la del programador, al que le da igual. */
+export async function registrarAgendaSinFallar(db: Pool, tarea: Tarea, opts: { forzar?: boolean } = {}): Promise<void> {
+  await agendaAlDia(db, tarea, opts);
 }
 
 /**

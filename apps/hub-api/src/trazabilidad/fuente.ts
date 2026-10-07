@@ -14,10 +14,16 @@
  * Cuándo se usa el respaldo:
  *   · sin `DESK2_DB_URL` → siempre (`sin_variable`); no es un error;
  *   · si la principal falla EN UNA LLAMADA (no conecta, la consulta caduca, al
- *     rol le falta un permiso…) → el respaldo en esa llamada. No se reintenta
- *     en bucle ni se recuerda la caída: la llamada siguiente prueba la
- *     principal otra vez, una sola vez.
+ *     rol le falta un permiso…) → el respaldo en esa llamada, sin reintentar;
+ *   · y, tras ese fallo, durante `CORTACIRCUITOS_MS` (cortacircuitos abierto):
+ *     las lecturas van derechas al respaldo, sin esperar otra vez el tope de
+ *     tiempo de la principal. Pasado ese rato, la llamada siguiente la prueba
+ *     una vez: si contesta vuelve a mandar ella; si no, otro rato.
  * Si lo que falla es la réplica, eso sí sale como error: no queda otra fuente.
+ *
+ * Una lectura servida con el cortacircuitos abierto ES de respaldo y lo dice
+ * (`fuente: 'respaldo'`): la pasada de la agenda no apunta historial ni cierra
+ * asignaciones con ella, ni la toma por «todos cerrados» (D17).
  *
  * Ningún ticket lleva marca de dato dudoso (D13): lo que hay es un aviso
  * global, `sincronizacionParada`, en `estadoFuente()`.
@@ -33,6 +39,8 @@ import { leerTicketsReplica, ultimaSincronizacionReplica } from './fuente-replic
 
 /** D13: con el máximo de `synced_at` de la base usada más viejo que esto, la sincronización se da por parada. */
 export const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;
+/** Cortacircuitos: tras un fallo de la principal, cuánto tiempo se lee el respaldo sin volver a probarla. */
+export const CORTACIRCUITOS_MS = 60_000;
 
 export type NombreFuente = 'principal' | 'respaldo';
 
@@ -91,6 +99,8 @@ export interface EstadoFuente {
   umbralSincronizacionMs: number;
   /** El último fallo de la principal visto por este proceso, aunque ya haya vuelto; `null` si no ha fallado. */
   ultimoFalloPrincipal: { motivo: MotivoFallo; en: string } | null;
+  /** Cortacircuitos abierto: hasta cuándo (ISO) no se vuelve a probar la principal; `null` si está cerrado. */
+  cortacircuitosHasta: string | null;
 }
 
 export interface FuenteAgenda {
@@ -179,24 +189,31 @@ export function crearFuenteAgenda({ hub, desk2, ahora = Date.now }: DepsFuente):
   let ultimoFallo: { motivo: MotivoFallo; en: string } | null = null;
   /** El motivo del último aviso escrito en el registro, para no repetirlo en cada llamada. */
   let avisado: MotivoFallo | null = null;
+  /** Cortacircuitos: el instante (ms) hasta el que no se prueba la principal; `null` = cerrado. */
+  let abiertoHasta: number | null = null;
+  const cortado = () => abiertoHasta !== null && ahora() < abiertoHasta;
 
   /**
    * Una lectura: la principal si está y contesta; si no, el respaldo, en esta
-   * misma llamada. Un intento a la principal por llamada.
+   * misma llamada. Un intento a la principal por llamada, y ninguno mientras
+   * el cortacircuitos esté abierto.
    */
   async function leer<T>(dePrincipal: (db: DbLectura) => Promise<T>, deRespaldo: () => Promise<T>): Promise<{ valor: T; fuente: NombreFuente; motivo: MotivoRespaldo | null }> {
     let db: DbLectura | null;
     let motivo: MotivoRespaldo = 'sin_variable';
     try {
       db = desk2();
-      if (db) {
+      if (db && cortado() && ultimoFallo) motivo = ultimoFallo.motivo;
+      else if (db) {
         const valor = await dePrincipal(db);
         avisado = null;
+        abiertoHasta = null;
         return { valor, fuente: 'principal', motivo: null };
       }
     } catch (e) {
       const fallo = clasificarFallo(e);
       motivo = fallo;
+      abiertoHasta = ahora() + CORTACIRCUITOS_MS;
       ultimoFallo = { motivo: fallo, en: new Date(ahora()).toISOString() };
       if (avisado !== fallo) {
         avisado = fallo;
@@ -239,6 +256,7 @@ export function crearFuenteAgenda({ hub, desk2, ahora = Date.now }: DepsFuente):
         sincronizacionParada: ms === null || ahora() - ms > UMBRAL_SINCRONIZACION_PARADA_MS,
         umbralSincronizacionMs: UMBRAL_SINCRONIZACION_PARADA_MS,
         ultimoFalloPrincipal: ultimoFallo,
+        cortacircuitosHasta: cortado() ? new Date(abiertoHasta!).toISOString() : null,
       };
     },
   };

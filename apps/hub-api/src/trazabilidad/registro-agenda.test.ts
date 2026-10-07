@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { FRESCURA_MS, INTERVALO_MS, PRIMERA_PASADA_MS, iniciarRegistroEstados, registrarAgendaSinFallar, reiniciarRegistroEstados } from './registro-estados.js';
+import { FRESCURA_MS, INTERVALO_MS, PRIMERA_PASADA_MS, agendaAlDia, iniciarRegistroEstados, registrarAgendaSinFallar, reiniciarRegistroEstados } from './registro-estados.js';
 
 // La pasada de la AGENDA (su historial y el cierre de asignaciones) dentro del
 // mismo programador que la de «Servicios», pero sin pisarse: ni una espera a
@@ -127,6 +127,29 @@ describe('registrarAgendaSinFallar: la puerta de la pasada de la agenda', () => 
     expect(tarea).toHaveBeenCalledTimes(1);
     await registrarAgendaSinFallar(db, tarea, { forzar: true });
     expect(tarea).toHaveBeenCalledTimes(2);
+  });
+
+  // D20: quien la pide antes de servir la agenda necesita saber si salió bien, para avisarlo.
+  it('agendaAlDia dice cómo fue: true si salió bien o había una buena reciente, false si falló; y tampoco rechaza', async () => {
+    const tarea = vi.fn(async () => {});
+    expect(await agendaAlDia(db, tarea)).toBe(true);
+    expect(await agendaAlDia(db, tarea)).toBe(true);
+    expect(tarea).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(FRESCURA_MS);
+    tarea.mockRejectedValueOnce(new Error('sin conexión'));
+    expect(await agendaAlDia(db, tarea)).toBe(false);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/tmc_registrar_agenda/), expect.any(Error));
+    expect(await agendaAlDia(db, tarea)).toBe(true);
+    expect(tarea).toHaveBeenCalledTimes(3);
+  });
+
+  it('quien se cuelga de una pasada en curso que falla también recibe false', async () => {
+    let fallar: (e: Error) => void = () => {};
+    const tarea = vi.fn(() => new Promise<void>((_, ko) => (fallar = ko)));
+    const [a, b] = [agendaAlDia(db, tarea), agendaAlDia(db, tarea)];
+    fallar(new Error('la base no contesta'));
+    expect(await Promise.all([a, b])).toEqual([false, false]);
+    expect(tarea).toHaveBeenCalledTimes(1);
   });
 
   it('una pasada fallida no cuenta como reciente', async () => {

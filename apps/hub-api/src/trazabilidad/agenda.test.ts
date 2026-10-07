@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda, type TramoHistorial } from './agenda.js';
+import { huecosDeEtapa, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda, type TramoHistorial } from './agenda.js';
 import { esHabilAgenda } from './agenda-calendario.js';
 import { ETAPAS_AGENDA, type CategoriaEstado, type DuracionEtapa, type EtapaAgenda, type FlujoAgenda } from './dominio.js';
 import { UMBRAL_SINCRONIZACION_PARADA_MS, type EstadoFuente, type TicketTaller } from './fuente.js';
@@ -34,6 +34,7 @@ const fuente = (extra: Partial<EstadoFuente> = {}): EstadoFuente => ({
   sincronizacionParada: false,
   umbralSincronizacionMs: UMBRAL_SINCRONIZACION_PARADA_MS,
   ultimoFalloPrincipal: null,
+  cortacircuitosHasta: null,
   ...extra,
 });
 
@@ -612,6 +613,61 @@ describe('la salida', () => {
     expect(imports).toEqual(['../ausencias/saldo.js', './agenda-calendario.js', './dominio.js', './fuente.js']);
     // De la fuente, sólo tipos: nada de su código ni de sus consultas.
     expect(src).toMatch(/import type \{[^}]+\} from '\.\/fuente\.js'/);
+  });
+});
+
+// ── Lote 5: los huecos (GET /agenda/huecos) ─────────────────────────────────
+describe('huecosDeEtapa: cuándo entraría un equipo que llegara hoy', () => {
+  it('ejemplo H, Diagnóstico: detrás de toda la fila, en el puesto que antes queda libre, uno tras otro', () => {
+    expect(huecosDeEtapa(entrada(ticketsH()), 'diagnostico', null, 4)).toEqual({
+      duracionDias: 3,
+      sinTipo: true,
+      huecos: [
+        { puesto: 2, entrada: '2026-10-20', fin: '2026-10-23' },
+        { puesto: 3, entrada: '2026-10-20', fin: '2026-10-23' },
+        { puesto: 1, entrada: '2026-10-23', fin: '2026-10-28' },
+        { puesto: 2, entrada: '2026-10-23', fin: '2026-10-28' },
+      ],
+    });
+  });
+
+  it('el primero es el primer hueco de la etapa; con un puesto libre hoy, hoy', () => {
+    const e = entrada(ticketsH());
+    const a = proyectarAgenda(e);
+    for (const etapa of ETAPAS_AGENDA) expect(huecosDeEtapa(e, etapa, null, 1).huecos[0].entrada).toBe(etapaDe(a, etapa).primerHueco);
+    // Proceso (4 puestos / 4 días) tiene a tres en la fila desde hoy: el cuarto puesto está libre.
+    expect(huecosDeEtapa(e, 'proceso', null, 2).huecos).toEqual([
+      { puesto: 4, entrada: '2026-10-06', fin: '2026-10-13' },
+      { puesto: 1, entrada: '2026-10-13', fin: '2026-10-19' },
+    ]);
+  });
+
+  it('la duración es la del tipo que se pide; sin fila propia, la «*»', () => {
+    const cfg = config({}, [
+      { etapa: 'diagnostico', tipo: '*', dias: 3 },
+      { etapa: 'diagnostico', tipo: 'calibracion', dias: 1 },
+    ]);
+    const e = entrada([], { config: cfg });
+    expect(huecosDeEtapa(e, 'diagnostico', ' Calibración ', 1)).toEqual({ duracionDias: 1, sinTipo: false, huecos: [{ puesto: 1, entrada: '2026-10-06', fin: '2026-10-07' }] });
+    expect(huecosDeEtapa(e, 'diagnostico', 'Garantía', 1)).toMatchObject({ duracionDias: 3, sinTipo: false, huecos: [{ fin: '2026-10-09' }] });
+    // Sin duración (ni la «*»): no se puede prever nada.
+    expect(huecosDeEtapa(e, 'proceso', null, 3)).toEqual({ duracionDias: null, sinTipo: true, huecos: [] });
+  });
+
+  it('va detrás también de los equipos nuevos que llegarán encadenados, y nunca en un día no hábil (D16)', () => {
+    // Un equipo nuevo en Proceso desde hoy (4 días → 13/10) llegará a Verificación (1 puesto, 1 día) ese día.
+    const e = entrada([nuevo(900, 'En Proceso')], { config: config({ verificacion: 1 }), asignaciones: [asig(900, 'proceso', 1)] });
+    expect(huecosDeEtapa(e, 'verificacion', null, 1).huecos).toEqual([{ puesto: 1, entrada: '2026-10-14', fin: '2026-10-15' }]);
+    const sabado = huecosDeEtapa(entrada([], { hoy: '2026-10-10' }), 'diagnostico', null, 5);
+    for (const h of sabado.huecos) expect(esHabilAgenda(h.entrada, new Set())).toBe(true);
+    expect(sabado.huecos[0].entrada).toBe('2026-10-13');
+  });
+
+  it('sin puestos no hay huecos; y pedirlos no cambia la proyección', () => {
+    const e = entrada(ticketsH(), { config: config({ diagnostico: 0 }) });
+    const antes = JSON.stringify(proyectarAgenda(e));
+    expect(huecosDeEtapa(e, 'diagnostico', null, 3).huecos).toEqual([]);
+    expect(JSON.stringify(proyectarAgenda(e))).toBe(antes);
   });
 });
 

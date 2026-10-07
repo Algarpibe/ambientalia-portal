@@ -51,6 +51,9 @@ Decididas por Gerencia antes de este análisis:
 | **D15** | **La prioridad (D1) adelanta al ticket por delante de TODA su fila**, no dentro de su grupo: un ticket con prioridad fijada en Desk 2.0 va delante de todos los que no la tienen, también si él vuelve de standby o viene de una etapa siguiente y los otros son de la primera etapa. Es lo que ya hacía el código del lote 3; F.3 decía otra cosa y queda corregida. |
 | **D16** | **Ninguna fecha prevista de entrada ni de inicio cae en un día no hábil** (fin de semana, festivo o cierre de empresa). Si «hoy» no es hábil, lo primero que se proyecta es el siguiente día hábil. Vale también para el día desde el que cuenta la duración de una asignación. |
 | **D17** | **Un historial de estados por fuente.** `tmc_estados_historial` sigue exactamente como estaba, alimentado desde la réplica, y es el de «Servicios». La agenda lleva el suyo (`tmc_agenda_historial`, migración 054), alimentado desde la fuente principal, que **no apunta nada mientras la agenda esté en respaldo**. En esa misma pasada se cierran solas las asignaciones cuyo ticket salió de su etapa. Las dos pasadas no se pisan: cada una con su bloqueo, y si la principal falla solo se salta la de la agenda. Sustituye a lo que B.5 pedía en un principio (un único historial pasado a la principal), que dejaba incoherente a «Servicios». Unificar los dos historiales queda para un lote posterior (sección J, lote 8). |
+| **D18** | **Liberar un puesto va por NÚMERO DE TICKET**, no por el identificador de la asignación: como mucho hay una asignación vigente por ticket (índice único de E.3), así que el número basta y es lo que la pantalla tiene a mano. Corrige la sección E.7, que decía `DELETE /agenda/asignaciones/:id`. |
+| **D19** | **El reparto inicial solo rellena puestos libres; nunca reemplaza una asignación.** Para mover a alguien: liberar y asignar. El cierre `'reparto'` («reemplazada por un reparto») queda en el `CHECK` de la 052 **reservado y sin uso**: ningún código lo escribe. |
+| **D20** | **Pasada de la agenda a demanda.** Antes de servir la agenda y antes de cualquier escritura de asignación (asignar, confirmar el reparto, liberar) se lanza la pasada de la agenda (`registrarEstadosAgenda`), salvo que haya habido una buena hace menos de 30 s. Mismo patrón que «Servicios»: un fallo de la pasada no hace fallar la petición; se sirve lo que haya y se avisa (`pasada_fallida`). |
 
 Ajustes decididos el 06/10/2026:
 
@@ -224,13 +227,16 @@ interface EstadoFuente {
   sincronizacionParada: boolean;
   umbralSincronizacionMs: number;
   ultimoFalloPrincipal: { motivo: string; en: string } | null;
+  cortacircuitosHasta: string | null;    // lote 5: hasta cuándo no se prueba la principal; null = cerrado
 }
 const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;   // D13: una hora
+const CORTACIRCUITOS_MS = 60_000;                         // lote 5: un minuto
 ```
 
 Diferencias con el boceto de la fase de análisis:
 
 - **No hay `elegirFuente()` ni un objeto por fuente.** La caída es por llamada: cada lectura prueba la principal una vez y, si falla, lee la réplica en esa misma llamada. Cada ticket dice de qué fuente vino y `estadoFuente()` dice cuál contesta y por qué.
+- **Cortacircuitos (lote 5).** Tras un fallo de la principal, durante `CORTACIRCUITOS_MS` (60 s) las lecturas van derechas al respaldo, sin esperar otra vez su tope de tiempo; pasado ese rato, la llamada siguiente la prueba una vez y, si sigue caída, se abre otro minuto. `estadoFuente()` lo cuenta en `cortacircuitosHasta`. Una lectura servida así es de respaldo y lo dice (`abiertosConOrigen`), de modo que la pasada de la agenda sigue sin apuntar historial ni cerrar asignaciones con ella (D17). hub-api crea una sola fuente para las rutas y para el programador, que comparten el cortacircuitos.
 - **Las «capacidades» se deducen de la fuente:** con `respaldo` no hay prioridad, cierres ni llegada exacta.
 - **El adaptador entrega datos, no reglas.** Da `clasificacion`, `prioridad` y `llegadaEstado` tal como están; el flujo (D11, con su deducción en respaldo y la marca a mano), el rango de la prioridad, el tipo puesto a mano y la llegada aproximada del historial del portal se resuelven en los lotes 2 a 4, que son los que tienen esas reglas y tablas. Para deducir el flujo en respaldo, el lote 2 añadió a la lectura de la réplica el asunto y el código de servicio (`asunto` y `codigoServicio` en `TicketTaller`; `null` con la fuente principal). El diagnóstico de la fuente no los devuelve.
 - **La consulta de `estadoFuente()` es también una sonda:** nombra todo lo que leen las demás, para que un permiso que falte en una sola tabla no deje el rótulo en «Desk 2.0» con tickets de la réplica.
@@ -420,7 +426,7 @@ ALTER TABLE portal.tmc_estados_desk ALTER COLUMN actualizado_por DROP NOT NULL, 
 - **El catálogo de C.3 vive además como constante** (`CATALOGO_ESTADOS_AGENDA` en `dominio.ts`), y una prueba falla si la semilla y la constante dejan de coincidir. `categoriaDeEstado` aplica: fila guardada → catálogo → sin categoría.
 - **Un estado que no está en C.3 queda sin categoría** (`NULL`) hasta que alguien se la elija. La proyección (lote 3) debe tratarlo como caso propio y avisarlo.
 - **Efecto en Configuración:** el bloque «Estados de Desk» lista los estados guardados aunque ningún ticket los tenga, así que tras desplegar aparecen los 23 del blueprint (12 sin tickets hoy). Salen como cualquier estado que nadie ha tocado: papel «Cuenta» y sin autor ni fecha («Nadie lo ha cambiado»). La semilla no figura ahí, porque ese bloque enseña la firma del papel y la semilla solo firma la categoría. `GET /estados` no cambia.
-- **Contrato del PUT (pendiente, lote 5).** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre. Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`. El SQL ya está separado: `guardarEstadoDesk` solo escribe el papel y su firma, y `guardarCategoriaEstado`, solo la categoría, la etapa y la suya. La respuesta deberá llevar las dos firmas.
+- **Contrato del PUT (resuelto en el lote 5, distinto de lo previsto).** Se preveía hacer de `PUT /estados` una actualización parcial `{ estado, rol?, categoria?, etapa? }`. No se hizo: **`PUT /estados` sigue siendo solo del papel**, con el cuerpo `{ estado, rol }` que envía la pantalla de hoy (`guardarEstadoDesk` no nombra la categoría; lo que venga de más se ignora), y **la categoría tiene su ruta**, `PUT /agenda/configuracion/estados` con `{ estado, categoria, etapa? }` (`guardarCategoriaEstado`, que no nombra el papel). Así ninguna puede pisar a la otra por un campo que falte y la pantalla actual no cambia. `GET /estados` y `GET /agenda/configuracion` devuelven las dos firmas.
 - **Guardas:** la lista de columnas de la tabla (`trazabilidad.db.test.ts`) y la de «última migración registrada», que pasó de `plazos.test.ts` a `agenda-config.test.ts` (bloque de la 051).
 
 ### E.2 Migración 051 — puestos por etapa y duraciones
@@ -493,8 +499,8 @@ CREATE INDEX        IF NOT EXISTS tmc_agenda_asig_numero_idx ON portal.tmc_agend
 - **`inicio`:** el día desde el que cuenta la duración, siempre hábil (D16). El día de la asignación o, si no es hábil, el siguiente; en el arranque (D6), el día de llegada a la etapa si es exacto, para que los ya pasados de fecha se vean como tales.
 - **Motivo:** obligatorio al asignar a quien no es el primero de la fila (`sugerido`), y al liberar a mano. En el reparto inicial no se pide.
 - **Liberación a mano (D7):** `cierre = 'manual'`, con `cerrado_por` y `cierre_motivo` obligatorios. `liberar` en `repo.ts`.
-- **Cierre automático (regla 5), construido en el lote 4b:** en la pasada de la agenda (`registrarEstadosAgenda`, E.6), si el ticket ya no está en un estado de la etapa de su asignación vigente —pasó a standby, a fin de taller, a otra etapa o a un estado sin categoría, o ya no viene entre los abiertos de la principal—, se cierra con `cierre = 'estado'` y `hasta` = el instante de esa pasada, sin motivo ni firma. Cambiar de estado dentro de la etapa no cierra. Entre el cambio de estado y la pasada siguiente (hasta 5 minutos) la asignación sigue vigente en la tabla: la proyección ya no la cuenta, pero ni su puesto ni su ticket se pueden volver a asignar (409) hasta que la pasada la cierre o alguien la libere.
-- **`cierre = 'reparto'`** está admitido por la tabla y todavía no lo escribe nadie: el reparto inicial solo rellena puestos libres.
+- **Cierre automático (regla 5), construido en el lote 4b:** en la pasada de la agenda (`registrarEstadosAgenda`, E.6), si el ticket ya no está en un estado de la etapa de su asignación vigente —pasó a standby, a fin de taller, a otra etapa o a un estado sin categoría, o ya no viene entre los abiertos de la principal—, se cierra con `cierre = 'estado'` y `hasta` = el instante de esa pasada, sin motivo ni firma. Cambiar de estado dentro de la etapa no cierra. Entre el cambio de estado y la pasada siguiente (hasta 5 minutos) la asignación sigue vigente en la tabla: la proyección ya no la cuenta, pero ni su puesto ni su ticket se pueden volver a asignar (409) hasta que la pasada la cierre o alguien la libere. Con la pasada a demanda (D20) ese desfase baja a los 30 s de frescura, salvo que la pasada falle o la agenda esté en respaldo.
+- **`cierre = 'reparto'`** está admitido por la tabla, **reservado y sin uso** (D19): el reparto inicial solo rellena puestos libres y nunca reemplaza una asignación. Para mover a alguien: liberar y asignar.
 - **No se escribe nada en Desk 2.0 ni en Zoho.**
 
 ### E.4 Migración 053 — flujo marcado a mano
@@ -513,9 +519,9 @@ Mismo patrón que `tmc_servicios_tipo` (`044_trazabilidad_servicios_tipo.sql:26-
 
 **Construida en el lote 4a** tal cual, sin semilla. `marcarFlujo` (`repo.ts`) solo marca un ticket que la fuente trae abierto y **sin `classification`** (409 si la trae); quitar la marca se puede siempre. Al leer, una marca de un ticket que ahora sí trae clasificación no se aplica (`leerEntradaAgenda`).
 
-### E.5 Lo que lee y escribe el lote 4 (`repo.ts`, sin endpoints)
+### E.5 Lo que lee y escribe el lote 4 (`repo.ts`; sus endpoints, en E.7)
 
-| Función | Permiso que debe pedir su endpoint | Qué hace |
+| Función | Permiso que pide su endpoint | Qué hace |
 |---|---|---|
 | `leerEntradaAgenda(db, fuente, hoy)` / `leerAgenda(db, fuente, hoy)` | — (lectura) | Reúne todo lo que pide `proyectarAgenda` —fuente, configuración, categorías, tipos a mano, cierres, asignaciones vigentes, `vuelvenDeStandby` y flujos a mano— y devuelve la entrada o la agenda |
 | `asignar(db, fuente, {numero, etapa, puesto, motivo?}, actor, hoy)` | `agenda.asignar` | 409 `puesto_ocupado`, `ticket_fuera_de_etapa` o `ticket_con_puesto`; 400 en `puesto` si no existe en la etapa y en `motivo` si el ticket no es el primero de la fila |
@@ -552,28 +558,40 @@ Misma forma que `tmc_estados_historial` (047; una prueba vigila que las columnas
 
 Devuelve `{fuente, abiertos, cerrados, asignacionesCerradas}`.
 
-**Cuándo se dispara:** en el programador de 5 minutos de `registro-estados.ts`, en el mismo turno que la de «Servicios» pero por otra puerta (`registrarAgendaSinFallar`): ninguna espera a la otra, el fallo de una no toca a la otra y cada una tiene su «una sola a la vez». `GET /servicios` no la dispara. El lote 5 puede llamar a `registrarAgendaSinFallar` antes de servir `GET /agenda` (sin `forzar` no repite una pasada buena de hace menos de 30 s).
+**Cuándo se dispara:** en el programador de 5 minutos de `registro-estados.ts`, en el mismo turno que la de «Servicios» pero por otra puerta (`registrarAgendaSinFallar`): ninguna espera a la otra, el fallo de una no toca a la otra y cada una tiene su «una sola a la vez». `GET /servicios` no la dispara. **A demanda (D20, lote 5):** `GET /agenda` y las escrituras de asignación (asignar, confirmar el reparto, liberar) la piden antes, por la misma puerta (`agendaAlDia`, que además dice si salió bien); sin `forzar` no repite una pasada buena de hace menos de 30 s. Si falla, la petición sigue y la respuesta lleva el aviso `pasada_fallida`.
 
 **Si la principal falla o no está configurada:** la pasada de la agenda no escribe; mientras espera a la principal (hasta unos 3 s de conexión o 5 s de consulta) retiene solo su bloqueo y una conexión de la base del portal. La de «Servicios» no se entera.
 
 ### E.7 Endpoints
 
-Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`). Los cálculos se hacen en el servidor con «hoy» como argumento (`hoyOf`, `router.ts:52-59`).
+**Construidos en el lote 5** (`apps/hub-api/src/trazabilidad/router.ts`). Todos bajo `/api/trazabilidad/agenda`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')`. Los cálculos se hacen en el servidor con «hoy» como argumento.
 
-Las lecturas (`GET`) están abiertas a quien tenga la app. Todo lo que escribe exige además un permiso de la matriz de `roles.ts`, que hoy solo tiene el rol `DIRECTOR_TECNICO` (D14) y los administradores del portal: `agenda.reparto` en `POST /agenda/arranque`, `agenda.asignar` en `POST /agenda/asignaciones`, `agenda.liberar` en `DELETE /agenda/asignaciones/:id`, `agenda.flujo` en `PUT /agenda/flujo/:numero` y `config.write` en `PUT /agenda/etapas`, `PUT /agenda/duraciones` y `PUT /estados`. Cada ruta se registra con `escritura('<permiso>', …)` en `router.ts`; una prueba falla si una ruta que escribe se queda sin permiso.
+Las lecturas (`GET`) están abiertas a quien tenga la app, con una excepción: la propuesta de reparto pide `agenda.reparto` (es el borrador de una decisión del Director Técnico). Todo lo que escribe exige además su permiso de la matriz de `roles.ts`, que hoy solo tiene el rol `DIRECTOR_TECNICO` (D14) y los administradores del portal. Cada ruta se registra con `escritura('<permiso>', …)` (la lectura con permiso, con `conPermiso`), que lo comprueba antes de validar y antes de consultar; una prueba lee `router.ts` y falla si una ruta que escribe se queda sin guarda o pide un permiso que no es el suyo.
 
-| Método | Ruta | Qué hace |
-|---|---|---|
-| GET | `/agenda` (`?hoy=`) | La agenda completa: fuente activa, capacidades y motivo del respaldo; etapas con puestos y ocupación; fila de cada etapa con fecha prevista y sugerido; standby; fin de taller; por llegar; proyección; saturación; primer hueco libre; festivos y cierres del eje; aviso de sincronización parada (D13) y demás avisos |
-| GET | `/agenda/arranque` | La propuesta de reparto inicial (D6), sin escribir nada |
-| POST | `/agenda/arranque` | Confirma el reparto: la lista `{ numero, etapa, puesto }` tal como la deja el Director Técnico. Todo o nada |
-| POST | `/agenda/asignaciones` | `{ numero, etapa, puesto, motivo? }` → asigna; exige `motivo` si no es el sugerido |
-| DELETE | `/agenda/asignaciones/:id` | Libera un puesto a mano, con `motivo` obligatorio (D7) |
-| GET | `/agenda/config` | Etapas con sus puestos y la tabla de duraciones |
-| PUT | `/agenda/etapas` | `{ etapa, puestos }` |
-| PUT | `/agenda/duraciones` | `{ etapa, tipo, dias }`; `dias` vacío borra la fila, salvo la «*» |
-| PUT | `/agenda/flujo/:numero` | `{ flujo }`; vacío quita la marca manual (D11) |
-| PUT | `/estados` (existente) | Se amplía con `categoria` y `etapa`, en actualización parcial |
+| Método | Ruta | Permiso | Qué hace |
+|---|---|---|---|
+| GET | `/agenda` (`?hoy=`) | — | La agenda completa: la proyección (`proyectarAgenda` sobre `leerEntradaAgenda`) con sus avisos, más el estado entero de la fuente (`estadoFuente`, con el cortacircuitos). Antes lanza la pasada a demanda (D20) |
+| GET | `/agenda/reparto` (`?hoy=`) | `agenda.reparto` | La propuesta de reparto inicial (D6), sin escribir nada |
+| POST | `/agenda/reparto` | `agenda.reparto` | `{ reparto: [{ numero, etapa, puesto }] }`, la propuesta tal cual o ajustada. Una transacción, todo o nada. 409 si algún puesto ya no está libre, diciendo cuál (D19) |
+| POST | `/agenda/asignaciones` | `agenda.asignar` | `{ numero, etapa, puesto, motivo? }`. 409 si el puesto está ocupado o el ticket no está en esa etapa; 400 si falta el motivo y no es el primero de la fila |
+| POST | `/agenda/liberar` | `agenda.liberar` | `{ numero, motivo }`: libera a mano el puesto de ese ticket (D7, D18). 404 si no lo tiene |
+| PUT | `/agenda/flujo/:numero` | `agenda.flujo` | `{ flujo }`; `null` quita la marca (D11). 404 si la fuente no lo trae abierto; 409 si ya trae `classification` |
+| GET | `/agenda/huecos` (`?etapa=&tipo=&hoy=`) | — | Las próximas fechas en que entraría un equipo que llegara hoy a esa etapa, según la proyección. Solo lectura, pensado para la futura reserva del cliente |
+| GET | `/agenda/configuracion` | — | Etapas con sus puestos, duraciones y la categoría y etapa de cada estado, con las dos firmas (categoría y papel del reloj) y los tickets abiertos por estado en la fuente de la agenda |
+| PUT | `/agenda/configuracion/puestos` | `config.write` | `{ etapa, puestos }` |
+| PUT | `/agenda/configuracion/duraciones` | `config.write` | `{ etapa, tipo, dias }`; `dias: null` quita la fila, salvo la «*», que no se puede quitar (400) |
+| PUT | `/agenda/configuracion/estados` | `config.write` | `{ estado, categoria, etapa? }`: solo la categoría; no toca el papel del reloj |
+| GET | `/agenda/fuente` | — | El diagnóstico del lote 1, como estaba (su respuesta gana el campo `cortacircuitosHasta`) |
+
+**Lo que quedó distinto del diseño de la fase de análisis:**
+
+- **Nombres de ruta:** `/agenda/reparto` (antes «arranque»), `/agenda/configuracion` con sus tres escrituras debajo (antes `/agenda/config`, `/agenda/etapas` y `/agenda/duraciones`).
+- **Liberar es `POST /agenda/liberar` por número de ticket** (D18), no `DELETE /agenda/asignaciones/:id`.
+- **`PUT /estados` no se amplió** (E.1): la categoría va por `PUT /agenda/configuracion/estados`.
+- **`GET /agenda/huecos` es nuevo.** Los huecos son sucesivos: cada uno supone ocupados los anteriores durante lo que dura ese tipo de servicio en la etapa.
+- **Las escrituras de la agenda devuelven la agenda** ya leída otra vez, y las de configuración, la configuración: una petición menos por acción.
+- **`hoy` solo en las lecturas.** Además del formato se exige que el día exista. Las escrituras usan siempre el día de hoy en Colombia: de él sale el `inicio` que se guarda, y no debe poder elegirse.
+- **El eje (festivos y cierres) no va todavía en `GET /agenda`:** el diseño lo preveía y no se ha construido. Se añadirá con la pantalla (lote 7), que es la que sabe qué tramo pinta; las fechas previstas ya vienen calculadas con festivos y cierres.
 
 ---
 
@@ -1085,6 +1103,15 @@ Sin endpoints ni pantalla.
 - **Decidido (D17):** B. La D queda anotada como lote 8.
 
 ### Lote 5 — API
+
+**Construido** el 07/10/2026, entero y sin partir (D18, D19 y D20; endpoints en E.7). Sin pantalla.
+
+- **Ficheros, además de los previstos:** `H/fuente.ts` (cortacircuitos de la principal, pendiente desde el lote 1), `H/registro-estados.ts` (`agendaAlDia`: la puerta de la pasada dice si salió bien), `H/agenda.ts` (`huecosDeEtapa`), `H/repo.ts` (`leerConfiguracionAgenda`, la firma de la categoría en `listarEstadosDesk` y el 409 que nombra el puesto) y `apps/hub-api/src/index.ts` (una sola fuente para las rutas y el programador).
+- **Pruebas:** `H/router.test.ts` (cada ruta: 401, 403 sin la app, 403 por rol, 400, 404 y 409; la pasada a demanda; la guarda de permisos ruta a ruta), `H/agenda-api.db.test.ts` (de punta a punta con la imitación de Desk 2.0: leer → repartir → asignar → cambio de estado → pasada a demanda → cierre → la agenda lo refleja; y el cortacircuitos con una principal caída de verdad), `H/fuente.test.ts` (cortacircuitos con reloj inyectado), `H/agenda.test.ts` (huecos) y `H/registro-agenda.test.ts` (`agendaAlDia`).
+- **Lo aplazado del lote 2, cerrado:** `PUT /estados` se queda como está y la categoría va por su ruta (E.1); `GET /estados` devuelve además la firma de la categoría.
+- **Lo que queda de la API para el lote 7:** los festivos y cierres del eje del Gantt en `GET /agenda` (E.7).
+
+Plan original:
 
 - **Objetivo:** exponer la agenda y su configuración.
 - **Ficheros:** `H/router.ts`, `H/types.ts` (formas de respuesta) y `H/router.test.ts`.

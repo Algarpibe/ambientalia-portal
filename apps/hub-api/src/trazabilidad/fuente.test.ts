@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { UMBRAL_SINCRONIZACION_PARADA_MS, clasificarFallo, crearFuenteAgenda, normalizarTicket, recuentoPorEstado, type DbLectura, type TicketTaller } from './fuente.js';
+import { CORTACIRCUITOS_MS, UMBRAL_SINCRONIZACION_PARADA_MS, clasificarFallo, crearFuenteAgenda, normalizarTicket, recuentoPorEstado, type DbLectura, type TicketTaller } from './fuente.js';
 
 // La fuente de la agenda con bases de mentira: la normalización de las dos
 // fuentes y la caída al respaldo (sin variable, error, timeout). El SQL de
@@ -137,6 +137,7 @@ describe('sin DESK2_DB_URL', () => {
       sincronizacionParada: false,
       umbralSincronizacionMs: UMBRAL_SINCRONIZACION_PARADA_MS,
       ultimoFalloPrincipal: null,
+      cortacircuitosHasta: null,
     });
   });
 
@@ -188,7 +189,7 @@ describe('caída al respaldo', () => {
     expect(desk2.veces()).toBe(1);
 
     const estado = await fuente.estadoFuente();
-    expect(desk2.veces()).toBe(2); // una vez por llamada, no en bucle
+    expect(desk2.veces()).toBe(1); // ni en bucle ni en la llamada siguiente: el cortacircuitos está abierto
     expect(estado).toMatchObject({ fuente: 'respaldo', motivo, ultimaSincronizacion: new Date(SINC_REPLICA).toISOString() });
     expect(estado.mensaje).toBeTruthy();
     expect(estado.ultimoFalloPrincipal?.motivo).toBe(motivo);
@@ -201,10 +202,12 @@ describe('caída al respaldo', () => {
     let rota = true;
     const sana = desk2Sana();
     const desk2: DbLectura = { query: async (sql, params) => (rota ? Promise.reject(errorPg('ECONNREFUSED')) : sana.db.query(sql, params)) };
-    const fuente = crearFuenteAgenda({ hub: replicaSana().db, desk2: () => desk2, ahora: () => SINC_DESK2 + 5_000 });
+    let ahora = SINC_DESK2 + 5_000;
+    const fuente = crearFuenteAgenda({ hub: replicaSana().db, desk2: () => desk2, ahora: () => ahora });
 
     expect((await fuente.ticketsAbiertos())[0].fuente).toBe('respaldo');
     rota = false;
+    ahora += CORTACIRCUITOS_MS;
     expect((await fuente.ticketsAbiertos())[0].fuente).toBe('principal');
     const estado = await fuente.estadoFuente();
     expect(estado).toMatchObject({ fuente: 'principal', motivo: null });
@@ -234,6 +237,96 @@ describe('caída al respaldo', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fuente = crearFuenteAgenda({ hub: baseRota(new Error('hub caído')).db, desk2: () => baseRota(errorPg('ECONNREFUSED')).db });
     await expect(fuente.ticketsAbiertos()).rejects.toThrow('hub caído');
+  });
+});
+
+// Cortacircuitos: tras un fallo de la principal, durante CORTACIRCUITOS_MS las
+// lecturas van derechas al respaldo, sin volver a esperar su tope de tiempo.
+describe('cortacircuitos de la principal', () => {
+  const T0 = SINC_DESK2 + 5_000;
+  /** Una principal que se puede romper y arreglar, con el reloj en la mano. */
+  function montar(rotaAlEmpezar = true) {
+    const estado = { rota: rotaAlEmpezar, ahora: T0, veces: 0 };
+    const sana = desk2Sana();
+    const desk2: DbLectura = {
+      query: async (sql, params) => {
+        estado.veces++;
+        return estado.rota ? Promise.reject(errorPg('ECONNREFUSED')) : sana.db.query(sql, params);
+      },
+    };
+    const replica = replicaSana();
+    return { estado, replica, fuente: crearFuenteAgenda({ hub: replica.db, desk2: () => desk2, ahora: () => estado.ahora }) };
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('dura 60 segundos', () => {
+    expect(CORTACIRCUITOS_MS).toBe(60_000);
+  });
+
+  it('se abre con el primer fallo: las lecturas siguientes van directas al respaldo, sin tocar la principal', async () => {
+    const { estado, fuente } = montar();
+    await fuente.ticketsAbiertos();
+    expect(estado.veces).toBe(1);
+    estado.rota = false; // aunque ya haya vuelto: no se prueba hasta que pase el tiempo
+    estado.ahora = T0 + CORTACIRCUITOS_MS - 1;
+    expect((await fuente.abiertosConOrigen()).fuente).toBe('respaldo');
+    expect(await fuente.cierresEmpresa('2026-12-01', '2026-12-31')).toEqual([]);
+    expect((await fuente.ticketsAbiertos())[0].fuente).toBe('respaldo');
+    expect(estado.veces).toBe(1);
+  });
+
+  it('estadoFuente lo cuenta: respaldo, el motivo del fallo que lo abrió y hasta cuándo', async () => {
+    const { estado, fuente } = montar();
+    await fuente.ticketsAbiertos();
+    estado.ahora = T0 + 10_000;
+    expect(await fuente.estadoFuente()).toMatchObject({
+      fuente: 'respaldo',
+      motivo: 'error_conexion',
+      mensaje: expect.stringContaining('réplica'),
+      cortacircuitosHasta: new Date(T0 + CORTACIRCUITOS_MS).toISOString(),
+      ultimoFalloPrincipal: { motivo: 'error_conexion', en: new Date(T0).toISOString() },
+    });
+    expect(estado.veces).toBe(1);
+  });
+
+  it('pasados los 60 s se cierra: se prueba la principal otra vez y, si contesta, vuelve a mandar ella', async () => {
+    const { estado, fuente } = montar();
+    await fuente.ticketsAbiertos();
+    estado.rota = false;
+    estado.ahora = T0 + CORTACIRCUITOS_MS;
+    expect((await fuente.abiertosConOrigen()).fuente).toBe('principal');
+    expect(await fuente.estadoFuente()).toMatchObject({ fuente: 'principal', motivo: null, cortacircuitosHasta: null });
+    expect(estado.veces).toBe(3);
+  });
+
+  it('si al probar sigue caída, se vuelve a abrir otros 60 s desde ese intento', async () => {
+    const { estado, fuente } = montar();
+    await fuente.ticketsAbiertos();
+    estado.ahora = T0 + CORTACIRCUITOS_MS + 5_000;
+    await fuente.ticketsAbiertos();
+    expect(estado.veces).toBe(2);
+    estado.ahora += CORTACIRCUITOS_MS - 1;
+    expect((await fuente.estadoFuente()).cortacircuitosHasta).toBe(new Date(T0 + 2 * CORTACIRCUITOS_MS + 5_000).toISOString());
+    expect(estado.veces).toBe(2);
+  });
+
+  it('con la principal sana, o sin la variable, está cerrado', async () => {
+    expect((await montar(false).fuente.estadoFuente()).cortacircuitosHasta).toBeNull();
+    expect((await crearFuenteAgenda({ hub: replicaSana().db, desk2: () => null }).estadoFuente()).cortacircuitosHasta).toBeNull();
+  });
+
+  // La regla del lote 4b: quien decide si se escribe el historial de la agenda pregunta quién dio la lista.
+  it('abierto, la lista de abiertos dice «respaldo»: nadie puede tomarla por la de la principal', async () => {
+    const { estado, replica, fuente } = montar();
+    await fuente.ticketsAbiertos();
+    estado.rota = false;
+    const leido = await fuente.abiertosConOrigen();
+    expect(leido.fuente).toBe('respaldo');
+    expect(leido.tickets.every((t) => t.fuente === 'respaldo')).toBe(true);
+    expect(replica.consultas.length).toBeGreaterThan(0);
   });
 });
 
