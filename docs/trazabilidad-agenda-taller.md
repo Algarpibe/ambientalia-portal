@@ -692,6 +692,8 @@ Elementos:
 - **Orden de la primera etapa por fecha de remisión de entrada** (D12, P6).
 - **Sin asignaciones previas:** se parte del reparto inicial (D6).
 
+Desde el lote 3 este ejemplo es la prueba dorada de `apps/hub-api/src/trazabilidad/agenda.test.ts`, con números de ticket ficticios: la función da estas mismas fechas, tanto antes del reparto inicial (los diez de Diagnóstico en la fila) como con él confirmado.
+
 ### Reparto por categoría
 
 | Categoría | Tickets | Números |
@@ -924,6 +926,20 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Pasa al lote 5:** la actualización parcial de `PUT /estados` y la validación del cuerpo de cada `PUT`, que se monta sobre los validadores de este lote. Cada escritura va con `config.write`.
 
 ### Lote 3 — Filas y proyección (puro)
+
+**Construido** (`H/agenda.ts`, `proyectarAgenda`; pruebas en `H/agenda.test.ts`). Sin endpoints ni pantalla. Lo que quedó distinto de lo previsto, o decidido donde este documento no decidía:
+
+- **Dos entradas más, opcionales**, que rellenará el lote 4: `vuelvenDeStandby` (los tickets que el historial muestra volviendo de un standby; la función no lee el historial) y `flujosManuales` (D11). Sin ellas nadie cuenta como vuelto y el flujo es el de la fuente.
+- **La llegada a un estado es solo la de la fuente** (`llegadaEstado`). La del historial del portal (B.5, punto 2) no entra todavía: sin llegada exacta el orden es por número, con «orden aproximado».
+- **La prioridad (D1) va por delante de toda la fila**, también del corte entre el grupo A y el B de F.3.
+- **«Orden aproximado» también en la primera etapa** cuando dos tickets comparten día de remisión y los separa el número. Quien no tiene fecha lleva solo «falta fecha de remisión».
+- **La asignación lleva `desde` como día** (el `inicio` de E.3), no como instante.
+- **Sin asignaciones, la saturación es 0 / puestos** y todos los de la etapa están en la fila: las fechas son las mismas que da H tras el reparto inicial.
+- **El aviso de sincronización parada lee `estadoFuente.sincronizacionParada`.** El umbral de una hora lo aplica la fuente (lote 1), que es quien tiene el reloj.
+- **Cadena de equipo nuevo:** los que llegarán de Proceso a Verificación van en una lista aparte de la etapa (`encadenados`), detrás de su fila; el primer hueco de la etapa es el de la fila propia.
+- **Sin duración** (ni la del tipo ni la «*», que por SQL sí puede faltar): marca, sin fechas y sin reservar puesto. Un puesto ocupado por un ticket sin duración no se promete a nadie.
+- **Una asignación cuyo ticket está en la fuente pero ya no en esa etapa no cuenta:** manda el estado, hasta que el lote 4 la cierre.
+- **No cubierto aquí, porque es una acción del lote 4:** liberar un puesto a mano (D7).
 
 - **Objetivo:** la función pura que, con tickets, configuración, asignaciones, «hoy» y calendario, devuelve puestos, filas, fechas previstas, saturación y primer hueco.
 - **Ficheros:** `H/agenda.ts` y `H/agenda.test.ts`. Usa `sumarDiasHabilesAgenda` de `H/agenda-calendario.ts` (lote 2), que ya descuenta los cierres; `H/plazos.ts` no se toca.
