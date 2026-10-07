@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -26,6 +26,8 @@ vi.mock('../db.js', () => ({
 
 const { createTrazabilidadRouter } = await import('./router.js');
 const { reiniciarRegistroEstados } = await import('./registro-estados.js');
+const { crearFuenteAgenda } = await import('./fuente.js');
+type DbLectura = import('./fuente.js').DbLectura;
 
 const { PERMISOS, ROLES_APP, permisosDe, puede } = await import('./roles.js');
 type Permiso = (typeof PERMISOS)[number];
@@ -741,5 +743,92 @@ describe('validación antes de escribir', () => {
     const res = await request(app()).post('/api/trazabilidad/avisos').set(auth()).send({ claves: [], fecha: '2026-10-06' });
     expect(res.status).toBe(400);
     expect(queries).toEqual([]);
+  });
+});
+
+// Diagnóstico de la fuente de la agenda (lote 1): de dónde se leen los tickets
+// y cuántos hay abiertos por estado. Lectura, abierta a quien tenga la app.
+describe('agenda: diagnóstico de la fuente', () => {
+  const RUTA = '/api/trazabilidad/agenda/fuente';
+  const URL_FICTICIA = 'postgres://lector_ficticio:clave-ficticia@desk-ficticio.invalid:5432/desk';
+  const SINC = Date.UTC(2026, 9, 6, 12, 0, 0);
+  const fila = (numero: number, estado: string) => ({ numero, estado, tipo_estado: 'Open', clasificacion: null, tipo_servicio: null, remision_entrada: null, fecha_creacion: '2026-10-01', prioridad: null, llegada_ms: null });
+  /** La réplica con tres tickets abiertos, sincronizada hace un minuto. */
+  const replica: DbLectura = {
+    query: async (sql) => ({ rows: sql.includes('max(synced_at)') ? [{ ms: SINC }] : [fila(880, 'Ingresado'), fila(984, 'En Proceso'), fila(990, 'En Proceso')] }),
+  };
+  const appCon = (desk2: () => DbLectura | null) => {
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(fakePool, crearFuenteAgenda({ hub: replica, desk2, ahora: () => SINC + 60_000 })));
+    return a;
+  };
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('401 sin token', async () => {
+    expect((await request(appCon(() => null)).get(RUTA)).status).toBe(401);
+  });
+
+  it('403 sin la app asignada', async () => {
+    expect((await request(appCon(() => null)).get(RUTA).set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+  });
+
+  it('200 con la app, también para un Lector: el estado de la fuente y el recuento por estado, y nada más', async () => {
+    const res = await request(appCon(() => null)).get(RUTA).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      fuente: 'respaldo',
+      motivo: 'sin_variable',
+      mensaje: expect.stringContaining('DESK2_DB_URL'),
+      ultimaSincronizacion: '2026-10-06T12:00:00.000Z',
+      sincronizacionParada: false,
+      umbralSincronizacionMs: 3_600_000,
+      ultimoFalloPrincipal: null,
+      abiertos: {
+        total: 3,
+        porEstado: [
+          { estado: 'En Proceso', tickets: 2 },
+          { estado: 'Ingresado', tickets: 1 },
+        ],
+      },
+    });
+  });
+
+  it('tal como lo monta el servidor, sin DESK2_DB_URL responde con el respaldo y sin error', async () => {
+    vi.stubEnv('DESK2_DB_URL', '');
+    const res = await request(app()).get(RUTA).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ fuente: 'respaldo', motivo: 'sin_variable', abiertos: { total: 0, porEstado: [] } });
+  });
+
+  it('si Desk 2.0 no contesta responde igual, con el motivo, y no filtra la URL ni el error crudo (ni en la respuesta ni en el registro)', async () => {
+    vi.stubEnv('DESK2_DB_URL', URL_FICTICIA);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const caida: DbLectura = { query: async () => Promise.reject(Object.assign(new Error(`connect ECONNREFUSED ${URL_FICTICIA}`), { code: 'ECONNREFUSED' })) };
+    const res = await request(appCon(() => caida)).get(RUTA).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ fuente: 'respaldo', motivo: 'error_conexion', abiertos: { total: 3 } });
+    expect(res.body.ultimoFalloPrincipal.motivo).toBe('error_conexion');
+    const visto = JSON.stringify([res.body, res.headers, warn.mock.calls, error.mock.calls]);
+    for (const secreto of ['postgres://', 'lector_ficticio', 'clave-ficticia', 'desk-ficticio']) expect(visto).not.toContain(secreto);
+  });
+
+  it('no lleva clientes, seriales ni correos: sólo las claves del diagnóstico', async () => {
+    const res = await request(appCon(() => null)).get(RUTA).set(auth());
+    expect(Object.keys(res.body).sort()).toEqual(['abiertos', 'fuente', 'mensaje', 'motivo', 'sincronizacionParada', 'ultimaSincronizacion', 'ultimoFalloPrincipal', 'umbralSincronizacionMs']);
+    expect(Object.keys(res.body.abiertos).sort()).toEqual(['porEstado', 'total']);
+    expect(JSON.stringify(res.body)).not.toMatch(/@|serial|cliente|email|subject/i);
+  });
+
+  it('no escribe nada', async () => {
+    vi.stubEnv('DESK2_DB_URL', '');
+    await request(app()).get(RUTA).set(auth());
+    expect(queries.length).toBeGreaterThan(0);
+    for (const sql of queries) expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/i);
   });
 });
