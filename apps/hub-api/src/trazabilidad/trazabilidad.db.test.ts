@@ -899,11 +899,14 @@ describe('estados de Desk y su rol', () => {
     await db.query(SQL_046);
     await db.query(SQL_046);
     await aplicarMigraciones(db);
-    // La 050 siembra además la categoría de agenda de los estados de la propuesta (filas firmadas
-    // por la semilla, con el rol por defecto): a las tres elegidas no les cambia ni el rol ni la firma.
+    // La 050 siembra además la categoría de agenda de los estados de la propuesta: las filas que crea
+    // llevan el rol por defecto y NADIE firma ese rol (la semilla firma la categoría, en sus columnas).
+    // A las tres elegidas no les cambia ni el rol ni la firma.
     const todas = await filas();
-    expect(todas.filter((f: { actualizado_por: string }) => f.actualizado_por !== actor.email).every((f: { rol: string }) => f.rol === 'cuenta')).toBe(true);
-    expect(todas.filter((f: { actualizado_por: string }) => f.actualizado_por === actor.email)).toMatchObject([
+    const sembradas = todas.filter((f: { actualizado_por: string | null }) => f.actualizado_por !== actor.email);
+    expect(sembradas.length).toBeGreaterThan(0);
+    for (const f of sembradas) expect(f).toMatchObject({ rol: 'cuenta', por_id: null, actualizado_por: null, actualizado_en: null });
+    expect(todas.filter((f: { actualizado_por: string | null }) => f.actualizado_por === actor.email)).toMatchObject([
       { clave: 'ingresado', rol: 'cuenta', actualizado_por: actor.email },
       { clave: 'por facturar', rol: 'terminado', actualizado_por: actor.email },
       { clave: 'servicio externo', rol: 'standby', actualizado_por: actor.email },
@@ -922,9 +925,9 @@ describe('estados de Desk y su rol', () => {
     // Y lo mismo si alguien se salta la validación de entrada y llega al repo.
     await expect(repo.guardarEstadoDesk(db, { estado: 'Otro', rol: 'pausa' as RolEstado }, actor)).rejects.toThrow();
     expect(await filas()).toHaveLength(1);
-    // La columna del booleano de antes no existe. `categoria` y `etapa` son de la agenda (migración 050).
+    // La columna del booleano de antes no existe. `categoria`, `etapa` y la firma de la categoría son de la agenda (migración 050).
     const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_estados_desk' `);
-    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en','actualizado_por', 'actualizado_por_id', 'categoria', 'clave', 'etapa', 'etiqueta', 'rol']);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en','actualizado_por', 'actualizado_por_id', 'categoria', 'categoria_en', 'categoria_por', 'categoria_por_id', 'clave', 'etapa', 'etiqueta', 'rol']);
   });
 });
 

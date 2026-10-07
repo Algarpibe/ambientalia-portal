@@ -232,7 +232,7 @@ const lista = (s: string) => s.split(',').map((x) => x.trim().replace(/'/g, ''))
 describe('050_trazabilidad_estados_categoria.sql', () => {
   const SQL = leer('050_trazabilidad_estados_categoria.sql');
   const sinComentarios = SQL.replace(/--.*$/gm, '');
-  const semilla = [...sinComentarios.matchAll(/\('([^']+)',\s*'([^']+)',\s*'([a-z_]+)',\s*(NULL|'[a-z]+'),\s*'[^']+'\)/g)].map((m) => ({
+  const semilla = [...sinComentarios.matchAll(/\('([^']+)',\s*'([^']+)',\s*'([a-z_]+)',\s*(NULL|'[a-z]+')\)/g)].map((m) => ({
     clave: m[1],
     estado: m[2],
     categoria: m[3],
@@ -244,6 +244,24 @@ describe('050_trazabilidad_estados_categoria.sql', () => {
     expect(sinComentarios).toMatch(/ALTER TABLE portal\.tmc_estados_desk\s+ADD COLUMN IF NOT EXISTS etapa\s+VARCHAR\(\d+\)\s+NULL/i);
     expect(sinComentarios).not.toMatch(/CREATE TABLE/i);
     for (const m of sinComentarios.matchAll(/ADD COLUMN\b(?! IF NOT EXISTS)/gi)) expect(m).toBeNull();
+  });
+
+  it('la categoría lleva su propia firma, aparte de la del papel del reloj: tres columnas más, que admiten NULL', () => {
+    expect(sinComentarios).toMatch(/ADD COLUMN IF NOT EXISTS categoria_por_id\s+UUID\s+NULL/i);
+    expect(sinComentarios).toMatch(/ADD COLUMN IF NOT EXISTS categoria_por\s+VARCHAR\(254\)\s+NULL/i);
+    expect(sinComentarios).toMatch(/ADD COLUMN IF NOT EXISTS categoria_en\s+TIMESTAMPTZ\s+NULL/i);
+    expect(sinComentarios.match(/ADD COLUMN IF NOT EXISTS/gi)).toHaveLength(5);
+  });
+
+  it('la firma del papel deja de ser obligatoria (una fila sembrada no la tiene), y es lo único que se le hace a esas columnas', () => {
+    expect(sinComentarios).toMatch(/ALTER COLUMN actualizado_por DROP NOT NULL/i);
+    expect(sinComentarios).toMatch(/ALTER COLUMN actualizado_en DROP NOT NULL/i);
+    expect(sinComentarios.match(/ALTER COLUMN/gi)).toHaveLength(2);
+    // Fuera de eso sólo salen en la lista de columnas del INSERT (para dejarlas vacías en una fila nueva): nunca en un SET.
+    const set = /DO UPDATE\s+SET([\s\S]*?)WHERE/i.exec(sinComentarios)![1];
+    expect(set).not.toMatch(/actualizado_/);
+    expect(sinComentarios.match(/actualizado_\w+/g)).toEqual(['actualizado_por', 'actualizado_en', 'actualizado_por', 'actualizado_en']);
+    expect(sinComentarios).toMatch(/'semilla \(migracion 050\)', NOW\(\), NULL::varchar, NULL::timestamptz/);
   });
 
   it('los CHECK llevan los valores del dominio y sólo se añaden si faltan', () => {
@@ -263,12 +281,14 @@ describe('050_trazabilidad_estados_categoria.sql', () => {
   });
 
   it('la semilla sólo rellena donde no hay categoría, y nunca nombra el papel del reloj', () => {
-    expect(sinComentarios).toMatch(/INSERT INTO portal\.tmc_estados_desk AS e \(clave, etiqueta, categoria, etapa, actualizado_por\) VALUES/);
-    expect(sinComentarios).toMatch(/ON CONFLICT \(clave\) DO UPDATE\s+SET categoria = EXCLUDED\.categoria, etapa = EXCLUDED\.etapa\s+WHERE e\.categoria IS NULL;\s*$/i);
+    expect(sinComentarios).toMatch(/INSERT INTO portal\.tmc_estados_desk AS e \(clave, etiqueta, categoria, etapa, categoria_por, categoria_en, actualizado_por, actualizado_en\)\s+SELECT/);
+    expect(sinComentarios).toMatch(
+      /ON CONFLICT \(clave\) DO UPDATE\s+SET categoria = EXCLUDED\.categoria, etapa = EXCLUDED\.etapa,\s+categoria_por = EXCLUDED\.categoria_por, categoria_en = EXCLUDED\.categoria_en\s+WHERE e\.categoria IS NULL;\s*$/i,
+    );
     // «standby» es también una categoría: lo que no puede salir es la columna del papel.
     expect(sinComentarios).not.toMatch(/\brol\b/i);
     expect(sinComentarios.match(/\bUPDATE\b/gi)).toHaveLength(1);
-    expect(sinComentarios).not.toMatch(/\b(DELETE|DROP|TRUNCATE)\b/i);
+    expect(sinComentarios.replace(/DROP NOT NULL/gi, '')).not.toMatch(/\b(DELETE|DROP|TRUNCATE)\b/i);
   });
 
   it('no toca el esquema desk ni le pone una clave foránea', () => {

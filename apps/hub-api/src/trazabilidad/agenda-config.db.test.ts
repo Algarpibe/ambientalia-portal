@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { aplicarMigraciones } from '../db.js';
-import { poolDePrueba } from '../test-db/harness.js';
+import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import { CATALOGO_ESTADOS_AGENDA, categoriaDeEstado, claveEstadoDesk, duracionDeEtapa, type CategoriaAgenda, type EtapaAgenda } from './dominio.js';
 import * as repo from './repo.js';
 import { TzError } from './types.js';
@@ -24,10 +24,27 @@ const SQL_051 = leer('051_trazabilidad_agenda_config.sql');
 const estados = async () =>
   (
     await db.query(
-      `SELECT clave, etiqueta, rol, categoria, etapa, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en::text AS en
+      `SELECT clave, etiqueta, rol, categoria, etapa, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en::text AS en,
+              categoria_por_id::text AS cat_por_id, categoria_por, categoria_en::text AS cat_en
          FROM portal.tmc_estados_desk ORDER BY clave`,
     )
-  ).rows as { clave: string; etiqueta: string; rol: string; categoria: string | null; etapa: string | null; por_id: string | null; actualizado_por: string; en: string }[];
+  ).rows as {
+    clave: string;
+    etiqueta: string;
+    rol: string;
+    categoria: string | null;
+    etapa: string | null;
+    por_id: string | null;
+    actualizado_por: string | null;
+    en: string | null;
+    cat_por_id: string | null;
+    categoria_por: string | null;
+    cat_en: string | null;
+  }[];
+/** La firma del papel del reloj de una fila, y la de su categoría: cada una en sus columnas. */
+const firmaReloj = (e: Awaited<ReturnType<typeof estados>>[number]) => ({ por_id: e.por_id, actualizado_por: e.actualizado_por, en: e.en });
+const firmaCategoria = (e: Awaited<ReturnType<typeof estados>>[number]) => ({ cat_por_id: e.cat_por_id, categoria_por: e.categoria_por, cat_en: e.cat_en });
+const SIN_FIRMA_RELOJ = { por_id: null, actualizado_por: null, en: null };
 const estado = async (clave: string) => (await estados()).find((e) => e.clave === clave);
 const etapas = async () => (await db.query(`SELECT etapa, etiqueta, orden, puestos, actualizado_por FROM portal.tmc_agenda_etapas ORDER BY orden`)).rows;
 const duraciones = async () => (await db.query(`SELECT etapa, tipo, dias_habiles AS dias, actualizado_por FROM portal.tmc_agenda_duraciones ORDER BY etapa, tipo`)).rows;
@@ -47,12 +64,26 @@ beforeEach(async () => {
 });
 
 describe('migración 050: categoría y etapa de cada estado', () => {
-  it('sobre una tabla vacía siembra los 23 estados de la propuesta, todos con el papel «cuenta» y firmados por la semilla', async () => {
+  it('sobre una tabla vacía siembra los 23 estados de la propuesta: la categoría, firmada por la semilla; el papel, «cuenta» y sin firmar por nadie', async () => {
     const filas = await estados();
     expect(filas).toHaveLength(23);
     const esperado = CATALOGO_ESTADOS_AGENDA.map((e) => ({ clave: claveEstadoDesk(e.estado), etiqueta: e.estado, categoria: e.categoria, etapa: e.etapa })).sort((a, b) => (a.clave < b.clave ? -1 : 1));
     expect(filas.map(({ clave, etiqueta, categoria, etapa }) => ({ clave, etiqueta, categoria, etapa }))).toEqual(esperado);
-    for (const f of filas) expect(f).toMatchObject({ rol: 'cuenta', por_id: null, actualizado_por: SEMILLA });
+    for (const f of filas) {
+      expect(f).toMatchObject({ rol: 'cuenta', ...SIN_FIRMA_RELOJ, cat_por_id: null, categoria_por: SEMILLA });
+      expect(f.cat_en).toEqual(expect.any(String));
+    }
+  });
+
+  it('en «Estados de Desk» un estado sembrado sale como uno que nadie ha tocado: «cuenta», sin quién ni cuándo', async () => {
+    await asegurarDeskTickets(db);
+    await db.query('TRUNCATE desk.tickets');
+    const lista = await repo.listarEstadosDesk(db);
+    expect(lista).toHaveLength(23);
+    for (const e of lista) expect(e).toMatchObject({ rol: 'cuenta', ticketsAbiertos: 0, actualizadoPor: null, actualizadoEn: null });
+    // Y al elegirle el papel, la firma que sale es la de quien lo eligió, no la de la semilla.
+    await repo.guardarEstadoDesk(db, { estado: 'Por Facturar', rol: 'terminado' }, otro);
+    expect((await repo.listarEstadosDesk(db)).find((e) => e.clave === 'por facturar')).toMatchObject({ rol: 'terminado', actualizadoPor: otro.email, actualizadoEn: expect.any(String) });
   });
 
   it('ejecutarla otra vez, y otra con todas las migraciones, no cambia ni una fila', async () => {
@@ -66,24 +97,33 @@ describe('migración 050: categoría y etapa de cada estado', () => {
   it('al llegar a una base que ya tenía papeles elegidos (sin las columnas): rellena la categoría y NO toca el papel ni su firma', async () => {
     // Como producción antes de este lote: la tabla de la 046, con los cuatro papeles elegidos a mano.
     await db.query('TRUNCATE portal.tmc_estados_desk');
-    await db.query('ALTER TABLE portal.tmc_estados_desk DROP COLUMN categoria, DROP COLUMN etapa');
+    await db.query(`ALTER TABLE portal.tmc_estados_desk
+      DROP COLUMN categoria, DROP COLUMN etapa, DROP COLUMN categoria_por_id, DROP COLUMN categoria_por, DROP COLUMN categoria_en,
+      ALTER COLUMN actualizado_por SET NOT NULL, ALTER COLUMN actualizado_en SET NOT NULL`);
     await repo.guardarEstadoDesk(db, { estado: 'Notificación cliente', rol: 'standby' }, actor);
     await repo.guardarEstadoDesk(db, { estado: 'Por Facturar', rol: 'terminado' }, actor);
     await repo.guardarEstadoDesk(db, { estado: 'Rev./Diagnostico', rol: 'standby' }, otro);
     await repo.guardarEstadoDesk(db, { estado: 'Estado inventado', rol: 'terminado' }, actor);
-    const previas = (await db.query(`SELECT clave, rol, actualizado_por, actualizado_en::text AS en FROM portal.tmc_estados_desk ORDER BY clave`)).rows;
+    const previas = (await db.query(`SELECT clave, rol, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en::text AS en FROM portal.tmc_estados_desk ORDER BY clave`)).rows;
 
     await db.query(SQL_050);
     await db.query(SQL_050);
 
-    expect(await estados()).toHaveLength(24);
-    for (const p of previas) expect(await estado(p.clave)).toMatchObject({ rol: p.rol, actualizado_por: p.actualizado_por, en: p.en });
-    expect(await estado('notificacion cliente')).toMatchObject({ categoria: 'standby', etapa: null, rol: 'standby' });
-    expect(await estado('por facturar')).toMatchObject({ categoria: 'fin', etapa: null, rol: 'terminado' });
+    const despues = await estados();
+    expect(despues).toHaveLength(24);
+    // Las cuatro que ya estaban: el papel y SU firma (quién, id y cuándo), intactos.
+    for (const p of previas) expect(await estado(p.clave)).toMatchObject({ rol: p.rol, por_id: p.por_id, actualizado_por: p.actualizado_por, en: p.en });
+    // Su categoría la firma la semilla, en las columnas de la categoría.
+    expect(await estado('notificacion cliente')).toMatchObject({ categoria: 'standby', etapa: null, rol: 'standby', categoria_por: SEMILLA, cat_por_id: null });
+    expect(await estado('por facturar')).toMatchObject({ categoria: 'fin', etapa: null, rol: 'terminado', categoria_por: SEMILLA });
     // El papel «standby» de Rev./Diagnostico se queda aunque su categoría sea de etapa activa: son dos cosas.
-    expect(await estado('rev./diagnostico')).toMatchObject({ categoria: 'activa', etapa: 'diagnostico', rol: 'standby', actualizado_por: otro.email });
-    // Un estado que no está en la propuesta se queda sin categoría.
-    expect(await estado('estado inventado')).toMatchObject({ categoria: null, etapa: null, rol: 'terminado' });
+    expect(await estado('rev./diagnostico')).toMatchObject({ categoria: 'activa', etapa: 'diagnostico', rol: 'standby', actualizado_por: otro.email, categoria_por: SEMILLA });
+    // Un estado que no está en la propuesta se queda sin categoría, y sin firma de categoría.
+    expect(await estado('estado inventado')).toMatchObject({ categoria: null, etapa: null, rol: 'terminado', cat_por_id: null, categoria_por: null, cat_en: null });
+    // Las veinte que crea la semilla: papel por defecto y sin firma del reloj.
+    const nuevas = despues.filter((e) => !previas.some((p: { clave: string }) => p.clave === e.clave));
+    expect(nuevas).toHaveLength(20);
+    for (const n of nuevas) expect(n).toMatchObject({ rol: 'cuenta', ...SIN_FIRMA_RELOJ, categoria_por: SEMILLA });
   });
 
   it('una categoría ya elegida no se pisa, se ejecute las veces que se ejecute', async () => {
@@ -95,14 +135,14 @@ describe('migración 050: categoría y etapa de cada estado', () => {
     await aplicarMigraciones(db);
     await db.query(SQL_050);
     expect(await estados()).toEqual(antes);
-    expect(await estado('ingresado')).toMatchObject({ categoria: 'fuera', actualizado_por: actor.email });
+    expect(await estado('ingresado')).toMatchObject({ categoria: 'fuera', categoria_por: actor.email, cat_por_id: actor.userId, ...SIN_FIRMA_RELOJ });
     expect(await estado('notificado')).toMatchObject({ categoria: 'standby', etapa: null });
     expect(await estado('por entregar')).toMatchObject({ categoria: 'activa', etapa: 'verificacion' });
   });
 
-  it('las columnas son las de la 046 más las dos nuevas, y la tabla rechaza una categoría o una etapa que no cuadren', async () => {
+  it('las columnas son las de la 046 más la categoría, la etapa y su firma, y la tabla rechaza una categoría o una etapa que no cuadren', async () => {
     const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_estados_desk'`);
-    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en', 'actualizado_por', 'actualizado_por_id', 'categoria', 'clave', 'etapa', 'etiqueta', 'rol']);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en', 'actualizado_por', 'actualizado_por_id', 'categoria', 'categoria_en', 'categoria_por', 'categoria_por_id', 'clave', 'etapa', 'etiqueta', 'rol']);
     const poner = (categoria: string | null, etapa: string | null) => db.query(`UPDATE portal.tmc_estados_desk SET categoria = $1, etapa = $2 WHERE clave = 'ingresado'`, [categoria, etapa]);
     await expect(poner('otra', null)).rejects.toThrow();
     await expect(poner('activa', 'pintura')).rejects.toThrow();
@@ -134,24 +174,37 @@ describe('categoría y etapa de un estado: leer y guardar', () => {
     expect(categoriaDeEstado('En Proceso', guardadas)).toEqual({ categoria: 'activa', etapa: 'proceso' });
   });
 
-  it('guardar la categoría firma el cambio y NO toca el papel del reloj', async () => {
+  it('cambiar la categoría la firma en SUS columnas y no altera el papel del reloj ni su firma', async () => {
     await repo.guardarEstadoDesk(db, { estado: 'Por Facturar', rol: 'terminado' }, otro);
+    const antes = (await estado('por facturar'))!;
+    expect(firmaReloj(antes)).toMatchObject({ por_id: otro.userId, actualizado_por: otro.email, en: expect.any(String) });
+
     await repo.guardarCategoriaEstado(db, { estado: ' por  FACTURAR ', categoria: 'standby', etapa: null }, actor);
-    expect(await estado('por facturar')).toMatchObject({ rol: 'terminado', categoria: 'standby', etapa: null, por_id: actor.userId, actualizado_por: actor.email });
+    const despues = (await estado('por facturar'))!;
+    expect(despues).toMatchObject({ rol: 'terminado', categoria: 'standby', etapa: null });
+    expect(firmaReloj(despues)).toEqual(firmaReloj(antes));
+    expect(firmaCategoria(despues)).toEqual({ cat_por_id: actor.userId, categoria_por: actor.email, cat_en: expect.any(String) });
+    expect(despues.cat_en).not.toBe(antes.cat_en);
     expect(await estados()).toHaveLength(23);
   });
 
-  it('y elegir el papel no toca la categoría', async () => {
+  it('y al revés: elegir el papel del reloj lo firma en las suyas y no altera la categoría ni su firma', async () => {
     await repo.guardarCategoriaEstado(db, { estado: 'Ingresado', categoria: 'activa', etapa: 'proceso' }, actor);
+    const antes = (await estado('ingresado'))!;
+    expect(firmaCategoria(antes)).toMatchObject({ cat_por_id: actor.userId, categoria_por: actor.email });
+    expect(firmaReloj(antes)).toEqual(SIN_FIRMA_RELOJ);
+
     await repo.guardarEstadoDesk(db, { estado: 'Ingresado', rol: 'standby' }, otro);
-    expect(await estado('ingresado')).toMatchObject({ rol: 'standby', categoria: 'activa', etapa: 'proceso', actualizado_por: otro.email });
+    const despues = (await estado('ingresado'))!;
+    expect(despues).toMatchObject({ rol: 'standby', categoria: 'activa', etapa: 'proceso' });
+    expect(firmaCategoria(despues)).toEqual(firmaCategoria(antes));
+    expect(firmaReloj(despues)).toEqual({ por_id: otro.userId, actualizado_por: otro.email, en: expect.any(String) });
   });
 
-  it('vale un estado que aún no tiene fila: nace con el papel «cuenta»', async () => {
+  it('vale un estado que aún no tiene fila: nace con el papel «cuenta», sin firma del reloj y con la de la categoría', async () => {
     await repo.guardarCategoriaEstado(db, { estado: 'Estado  Inventado', categoria: 'activa', etapa: 'verificacion' }, actor);
-    expect(await estado('estado inventado')).toMatchObject({ etiqueta: 'Estado Inventado', rol: 'cuenta', categoria: 'activa', etapa: 'verificacion', actualizado_por: actor.email });
+    expect(await estado('estado inventado')).toMatchObject({ etiqueta: 'Estado Inventado', rol: 'cuenta', categoria: 'activa', etapa: 'verificacion', ...SIN_FIRMA_RELOJ, cat_por_id: actor.userId, categoria_por: actor.email });
   });
-
   it('400 y nada escrito con una categoría o una etapa que no existen, que no cuadran, o sin estado', async () => {
     const antes = await estados();
     const guardar = (estadoDesk: string, categoria: string, etapa: string | null) =>

@@ -660,17 +660,23 @@ export async function leerCategoriasEstados(db: Db): Promise<Map<string, Categor
  * activa) y lo firma. Casa por clave normalizada y vale un estado que aún no
  * tenga fila. NO toca el papel del reloj (`rol`): en una fila que ya existe se
  * queda como esté, y una fila nueva nace con el de por defecto, «cuenta», que
- * es el mismo que vale sin fila. La firma de la fila es la del último cambio,
- * sea del papel o de la categoría.
+ * es el mismo que vale sin fila.
+ *
+ * La categoría tiene SU firma (`categoria_por_id`, `categoria_por`,
+ * `categoria_en`) y es la única que se escribe aquí: la del papel
+ * (`actualizado_*`) no se toca en una fila que ya existe y queda vacía en una
+ * nueva (por eso `actualizado_en` va con NULL escrito: sin nombrarla cogería su
+ * valor por defecto y el papel parecería elegido por alguien). Y al revés,
+ * `guardarEstadoDesk` no nombra ninguna columna de la categoría.
  */
 export async function guardarCategoriaEstado(db: Db, cambio: CambioCategoriaEstado, actor: Actor): Promise<void> {
   const c = validarCategoriaEstado(cambio);
   await db.query(
-    `INSERT INTO portal.tmc_estados_desk (clave, etiqueta, categoria, etapa, actualizado_por_id, actualizado_por, actualizado_en)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `INSERT INTO portal.tmc_estados_desk (clave, etiqueta, categoria, etapa, categoria_por_id, categoria_por, categoria_en, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NULL)
      ON CONFLICT (clave) DO UPDATE SET
        etiqueta = EXCLUDED.etiqueta, categoria = EXCLUDED.categoria, etapa = EXCLUDED.etapa,
-       actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+       categoria_por_id = EXCLUDED.categoria_por_id, categoria_por = EXCLUDED.categoria_por, categoria_en = NOW()`,
     [claveEstadoDesk(c.estado), etiquetaEstadoDesk(c.estado), c.categoria, c.etapa, actor.userId, actor.email],
   );
 }
