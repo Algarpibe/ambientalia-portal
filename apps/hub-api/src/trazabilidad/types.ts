@@ -27,6 +27,7 @@ import {
   type RolEstado,
   type TramoPlazo,
 } from './dominio.js';
+import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
 // tipos) y compila con erasableSyntaxOnly.
@@ -491,4 +492,46 @@ export function parseTipoManual(body: unknown): { tipo: string | null } {
   if (t === null) return { tipo: null };
   if (typeof t !== 'string') throw invalido('«tipo» debe ser texto, o quedar vacío para quitarlo.', 'tipo');
   return { tipo: texto(t, 'tipo', 80, false) };
+}
+
+// ── Roles de la app ─────────────────────────────────────────────────────────
+
+/** Lo que devuelve GET /trazabilidad/roles/me: con `permissions` decide la app qué enseña y qué desactiva. */
+export interface MiRol {
+  userId: string;
+  email: string;
+  /** El rol guardado, o LECTOR si no tiene fila. */
+  role: RolApp;
+  /** Administrador del portal: tiene todos los permisos, tenga el rol que tenga. */
+  admin: boolean;
+  permissions: Permiso[];
+  /** Si puede repartir roles (sólo los administradores del portal). */
+  canManageRoles: boolean;
+}
+
+/** Una fila de la sección «Roles». */
+export interface UsuarioRol {
+  userId: string;
+  fullName: string;
+  email: string;
+  /** El estado del usuario en el portal (`active`, `pending`, `inactive`). */
+  status: string;
+  /** Administrador del portal: lo puede todo, tenga el rol que tenga. */
+  admin: boolean;
+  role: RolApp;
+}
+
+/** El id de usuario de la ruta PUT /trazabilidad/roles/:userId: un UUID. */
+export function parseUserId(v: unknown): string {
+  if (typeof v !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
+    throw invalido('El usuario no es válido.', 'userId');
+  }
+  return v.toLowerCase();
+}
+
+/** Valida el cuerpo de PUT /trazabilidad/roles/:userId: `{role}`, uno de los cuatro de la matriz, tal cual. */
+export function parseRolApp(body: unknown): { role: RolApp } {
+  const b = obj(body, 'body');
+  if (!esRolApp(b.role)) throw invalido(`El rol no es válido. Opciones: ${ROLES_APP.join(', ')}.`, 'role');
+  return { role: b.role };
 }

@@ -1,6 +1,6 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 048). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 049). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
@@ -31,6 +31,7 @@ import {
   type TicketContacto,
 } from './dominio.js';
 import { calcularReloj, type IntervaloEstado } from './plazos.js';
+import { resolverRol, type RolApp } from './roles.js';
 import {
   TzError,
   errorPlazoDerivado,
@@ -49,6 +50,7 @@ import {
   type Seguimiento,
   type ServicioVista,
   type TipoServicioOpcion,
+  type UsuarioRol,
 } from './types.js';
 
 type PoolClient = Awaited<ReturnType<Pool['connect']>>;
@@ -836,4 +838,59 @@ export async function registrarAvisos(db: Db, claves: string[], fecha: string, a
     [claves, fecha, actor.userId, actor.email],
   );
   return rowCount ?? 0;
+}
+
+// ── Roles de la app (portal.tmc_user_roles, migración 049) ──────────────────
+// Aquí sólo el SQL: qué puede cada rol lo decide roles.ts, y quién puede
+// repartirlos (los administradores del portal), el router.
+
+/** El rol guardado de un usuario, tal cual; `null` si no tiene fila (el dominio lo resuelve a LECTOR). */
+export async function rolDeUsuario(db: Db, userId: string): Promise<string | null> {
+  const { rows } = await db.query('SELECT role FROM portal.tmc_user_roles WHERE user_id = $1', [userId]);
+  return rows[0]?.role ?? null;
+}
+
+/** Pone (o cambia) el rol de un usuario y lo firma. Una fila por usuario. */
+export async function guardarRol(db: Db, userId: string, rol: RolApp, actor: Actor): Promise<void> {
+  await db.query(
+    `INSERT INTO portal.tmc_user_roles (user_id, role, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+       role = EXCLUDED.role, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [userId, rol, actor.userId, actor.email],
+  );
+}
+
+export async function existeUsuario(db: Db, userId: string): Promise<boolean> {
+  const { rows } = await db.query('SELECT 1 FROM portal.users WHERE id = $1', [userId]);
+  return rows.length > 0;
+}
+
+/**
+ * La gente a la que se le puede ver o repartir rol: quien tiene la app
+ * asignada, quien ya tiene un rol guardado (aunque le hayan quitado la app) y
+ * los administradores del portal, que entran en todas las apps sin tenerla
+ * asignada. Por nombre. `admin` avisa de que esa persona lo puede todo tenga
+ * el rol que tenga.
+ */
+export async function listarUsuariosRol(db: Db, appId: string): Promise<UsuarioRol[]> {
+  const { rows } = await db.query(
+    `SELECT u.id, u.full_name, u.email, u.status, u.role AS portal_role, r.role
+       FROM portal.users u
+       LEFT JOIN portal.tmc_user_roles r ON r.user_id = u.id
+      WHERE r.user_id IS NOT NULL
+         OR u.role = 'admin'
+         OR EXISTS (SELECT 1 FROM portal.user_apps a WHERE a.user_id = u.id AND a.app_id = $1)
+      ORDER BY u.full_name, u.email`,
+    [appId],
+  );
+  return (rows as Row[]).map((r) => ({
+    userId: r.id,
+    fullName: r.full_name,
+    email: r.email,
+    status: r.status,
+    admin: r.portal_role === 'admin',
+    role: resolverRol(r.role),
+  }));
 }
