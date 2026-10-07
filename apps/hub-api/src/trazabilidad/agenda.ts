@@ -492,16 +492,17 @@ export interface ItemReparto {
  * No escribe nada: es la misma proyección, leída de otra forma.
  */
 export function proponerReparto(e: EntradaAgenda): ItemReparto[] {
-  const cierres = new Set(e.cierres);
-  const llegada = new Map(e.tickets.map((t) => [t.numero, t.llegadaEstado]));
   return proyectarAgenda(e).etapas.flatMap((x) => {
     const libres = x.puestos.filter((p) => p.ocupante === null && !p.aExtinguir);
     return x.fila
       .filter((t) => t.situacion === 'en_etapa')
       .slice(0, libres.length)
-      .map((t, i) => {
-        const ms = llegada.get(t.numero) ?? null;
-        return { numero: t.numero, etapa: x.etapa, puesto: libres[i].puesto, desde: primerDiaHabilAgenda(ms === null ? e.hoy : hoyEnColombia(new Date(ms)), cierres) };
-      });
+      .map((t, i) => ({ numero: t.numero, etapa: x.etapa, puesto: libres[i].puesto, desde: inicioDeReparto(e, t.numero) }));
   });
+}
+
+/** El día desde el que cuenta la duración de un ticket en el reparto inicial: su llegada exacta al estado, o hoy; siempre hábil. */
+export function inicioDeReparto(e: EntradaAgenda, numero: number): string {
+  const ms = e.tickets.find((t) => t.numero === numero)?.llegadaEstado ?? null;
+  return primerDiaHabilAgenda(ms === null ? e.hoy : hoyEnColombia(new Date(ms)), new Set(e.cierres));
 }
