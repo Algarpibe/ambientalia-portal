@@ -134,7 +134,7 @@ export default function Agenda({ onConfigurar, notificar }: Props) {
         <div className="hidden min-w-0 sm:block">
           <GanttAgenda agenda={datos} onTicket={setFicha} accionPuesto={acciones.dePuesto} />
         </div>
-        <div className="sm:hidden">
+        <div className="min-w-0 sm:hidden">
           <ListaDias agenda={datos} onTicket={setFicha} />
         </div>
         <Card title="Filas" hint="Quién espera en cada etapa, en su orden, y cuándo se prevé que entre y termine. La fecha de remisión ordena la primera etapa.">
