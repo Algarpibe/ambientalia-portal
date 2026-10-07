@@ -383,22 +383,29 @@ Extiende `portal.tmc_estados_desk`; sin tabla paralela. No se puede editar la 04
 ```sql
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria VARCHAR(12) NULL;
 ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS etapa     VARCHAR(12) NULL;
+-- La firma de la categoría, aparte de la del papel (actualizado_*):
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_por_id UUID         NULL;
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_por    VARCHAR(254) NULL;
+ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS categoria_en     TIMESTAMPTZ  NULL;
+-- La firma del papel deja de ser obligatoria:
+ALTER TABLE portal.tmc_estados_desk ALTER COLUMN actualizado_por DROP NOT NULL, ALTER COLUMN actualizado_en DROP NOT NULL;
 -- CHECK con nombre, dentro de DO $$ … IF NOT EXISTS (pg_constraint) … $$:
 --   categoria IN ('por_llegar','entrada','activa','standby','fin','fuera')
 --   etapa     IN ('diagnostico','proceso','verificacion')
 --   (categoria IS NOT DISTINCT FROM 'activa') = (etapa IS NOT NULL)
 -- Semilla: INSERT de los 23 estados de C.3 … ON CONFLICT (clave) DO UPDATE
---   SET categoria, etapa … WHERE la fila no tiene categoría
+--   SET categoria, etapa, categoria_por, categoria_en … WHERE la fila no tiene categoría
 ```
 
-**Construido en el lote 2**, con un cambio respecto al diseño de la fase de análisis:
+**Construido en el lote 2**, con dos cambios respecto al diseño de la fase de análisis:
 
-- **La tabla se siembra** (el diseño inicial decía que no). La 050 crea una fila por cada estado de C.3 que no la tenga y, en las que ya existían, rellena la categoría solo si está vacía. Las filas que crea van firmadas con `actualizado_por = 'semilla (migracion 050)'` y con el papel por defecto (`cuenta`), que es el mismo que vale para un estado sin fila. La sentencia no nombra la columna del papel: no lo lee ni lo escribe, y tampoco cambia la firma de una fila existente.
+- **La tabla se siembra** (el diseño inicial decía que no). La 050 crea una fila por cada estado de C.3 que no la tenga y, en las que ya existían, rellena la categoría solo si está vacía. La sentencia no nombra la columna del papel: no lo lee ni lo escribe.
+- **Dos firmas en la misma fila.** El papel del reloj se firma en `actualizado_por_id`, `actualizado_por` y `actualizado_en`; la categoría y la etapa, en `categoria_por_id`, `categoria_por` y `categoria_en`. Elegir una no toca la firma de la otra, en ningún sentido. La semilla firma la categoría con `categoria_por = 'semilla (migracion 050)'`. En una fila que ya existía, la firma del papel se queda como estaba. En una fila que la semilla crea, el papel es el de por defecto (`cuenta`, el mismo que vale para un estado sin fila) y su firma queda vacía: nadie lo ha elegido. Por eso `actualizado_por` y `actualizado_en` pasan a admitir `NULL`.
 - **No pisa lo elegido.** La app nunca guarda una categoría vacía, así que «categoría vacía» solo puede significar «nadie ha elegido». Reejecutar la migración en cada arranque no cambia una categoría puesta a mano.
 - **El catálogo de C.3 vive además como constante** (`CATALOGO_ESTADOS_AGENDA` en `dominio.ts`), y una prueba falla si la semilla y la constante dejan de coincidir. `categoriaDeEstado` aplica: fila guardada → catálogo → sin categoría.
 - **Un estado que no está en C.3 queda sin categoría** (`NULL`) hasta que alguien se la elija. La proyección (lote 3) debe tratarlo como caso propio y avisarlo.
-- **Efecto en Configuración:** el bloque «Estados de Desk» lista los estados guardados aunque ningún ticket los tenga, así que tras desplegar aparecen los 23 del blueprint (12 sin tickets hoy), con «semilla (migracion 050)» como autor.
-- **Contrato del PUT (pendiente, lote 5).** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre. Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`. El SQL ya está separado: `guardarEstadoDesk` solo escribe el papel y `guardarCategoriaEstado`, solo la categoría y la etapa.
+- **Efecto en Configuración:** el bloque «Estados de Desk» lista los estados guardados aunque ningún ticket los tenga, así que tras desplegar aparecen los 23 del blueprint (12 sin tickets hoy). Salen como cualquier estado que nadie ha tocado: papel «Cuenta» y sin autor ni fecha («Nadie lo ha cambiado»). La semilla no figura ahí, porque ese bloque enseña la firma del papel y la semilla solo firma la categoría. `GET /estados` no cambia.
+- **Contrato del PUT (pendiente, lote 5).** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre. Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`. El SQL ya está separado: `guardarEstadoDesk` solo escribe el papel y su firma, y `guardarCategoriaEstado`, solo la categoría, la etapa y la suya. La respuesta deberá llevar las dos firmas.
 - **Guardas:** la lista de columnas de la tabla (`trazabilidad.db.test.ts`) y la de «última migración registrada», que pasó de `plazos.test.ts` a `agenda-config.test.ts` (bloque de la 051).
 
 ### E.2 Migración 051 — puestos por etapa y duraciones

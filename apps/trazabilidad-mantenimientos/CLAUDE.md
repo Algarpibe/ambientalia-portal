@@ -64,7 +64,7 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
 | `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado. La 045 añade, igual de idempotente, la fila del tipo compuesto `diagnostico + calibracion` («Diagnóstico + Calibración») con `dias_habiles` NULL: esa columna **no se lee** para un compuesto (ver «Tipo compuesto») |
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
-| `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez. **Desde la 050 lleva además `categoria` y `etapa`** (la categoría del estado en la agenda del taller; ver «Agenda: configuración»): `VARCHAR(12) NULL` las dos, con tres `CHECK` con nombre (`categoria` en `por_llegar` / `entrada` / `activa` / `standby` / `fin` / `fuera`; `etapa` en `diagnostico` / `proceso` / `verificacion`; y etapa sólo —y siempre— con `activa`). La 050 **sí siembra**: crea una fila por cada uno de los 23 estados de la propuesta que no la tenga (con `rol` por defecto, `cuenta`, y `actualizado_por = 'semilla (migracion 050)'`), así que lo de «sólo hay fila para los estados que alguien ha tocado» ya no vale para ellos. **Ni la 050 ni `guardarCategoriaEstado` escriben `rol`, y `guardarEstadoDesk` no escribe `categoria` ni `etapa`.** La firma de la fila es la del último cambio, sea del rol o de la categoría |
+| `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez. **Desde la 050 lleva además `categoria` y `etapa`** (la categoría del estado en la agenda del taller; ver «Agenda: configuración»): `VARCHAR(12) NULL` las dos, con tres `CHECK` con nombre (`categoria` en `por_llegar` / `entrada` / `activa` / `standby` / `fin` / `fuera`; `etapa` en `diagnostico` / `proceso` / `verificacion`; y etapa sólo —y siempre— con `activa`). **Cada cosa lleva su firma**: `actualizado_por_id` / `actualizado_por` / `actualizado_en` son la del **rol del reloj**; `categoria_por_id` (`UUID NULL`) / `categoria_por` (`VARCHAR(254) NULL`) / `categoria_en` (`TIMESTAMPTZ NULL`), también de la 050, la de la **categoría y la etapa**. La 050 quita además el `NOT NULL` de `actualizado_por` y `actualizado_en`: una fila puede existir sólo por su categoría, y entonces su rol es el de por defecto y **no lo firma nadie** (las tres `actualizado_*` vacías). La 050 **sí siembra**: crea una fila por cada uno de los 23 estados de la propuesta que no la tenga (con `rol` por defecto, `cuenta`, sin firma del rol y con `categoria_por = 'semilla (migracion 050)'`), así que lo de «sólo hay fila para los estados que alguien ha tocado» ya no vale para ellos. **Ni la 050 ni `guardarCategoriaEstado` escriben `rol` ni `actualizado_*` en una fila que ya existe, y `guardarEstadoDesk` no escribe `categoria`, `etapa` ni `categoria_*`** |
 | `portal.tmc_agenda_etapas` | Los **puestos simultáneos de cada etapa** del taller: `etapa` (PK, `CHECK` a las tres etapas), `etiqueta`, `orden`, `puestos` (`INTEGER NOT NULL`, `CHECK` 0..50 = `PUESTOS_MAX`) y quién y cuándo (`actualizado_*`, NULL en lo sembrado). Semilla de la 051, `ON CONFLICT DO NOTHING`: Diagnóstico 3, Proceso 4, Verificación 2. Sin clave foránea |
 | `portal.tmc_agenda_duraciones` | Cuántos **días hábiles ocupa un puesto** de una etapa un tipo de servicio: PK `(etapa, tipo)`; `tipo` es la clave de un tipo de servicio (`claveTipoServicio`) o **`*`, la fila por defecto de la etapa** (D9); `dias_habiles` (`NOT NULL`, `CHECK` 1..365) y quién y cuándo (NULL en lo sembrado). Semilla de la 051, `ON CONFLICT DO NOTHING`: sólo las `*` (Diagnóstico 3, Proceso 4, Verificación 1). La `*` no se quita desde la app; una fila de tipo quitada no vuelve con el arranque. No es `tmc_plazos`: aquél es el plazo comprometido con el cliente; esto, lo que se ocupa un puesto |
 | `portal.tmc_estados_historial` | En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
@@ -541,13 +541,23 @@ Cada estado de Desk tiene una **categoría** en la agenda y, si es una etapa act
   Soporte → fuera** (D10).
 - **La semilla (migración 050) es esa misma lista** (`agenda-config.test.ts` falla si el SQL y la
   constante dejan de coincidir) y **sólo rellena donde no hay categoría**: es un
-  `INSERT … ON CONFLICT (clave) DO UPDATE SET categoria, etapa … WHERE e.categoria IS NULL`. La
-  app nunca guarda una categoría vacía, así que una elegida no se pisa en ningún arranque. La
-  sentencia no nombra `rol`: en una fila que ya existía se queda como esté (y con su firma), y
-  una fila nueva nace con el de por defecto.
+  `INSERT … ON CONFLICT (clave) DO UPDATE SET categoria, etapa, categoria_por, categoria_en …
+  WHERE e.categoria IS NULL`. La app nunca guarda una categoría vacía, así que una elegida no se
+  pisa en ningún arranque. La sentencia no nombra `rol`: en una fila que ya existía se queda como
+  esté, y una fila nueva nace con el de por defecto.
+- **Dos firmas, una por cosa.** La categoría la firma quien la elige en `categoria_por_id`,
+  `categoria_por` y `categoria_en` (la semilla, con `categoria_por = 'semilla (migracion 050)'` y
+  sin id); el rol del reloj sigue firmándose en `actualizado_*`. **Cambiar una no toca la firma
+  de la otra**, en ninguno de los dos sentidos (`agenda-config.db.test.ts` lo prueba). En una
+  fila que la semilla o `guardarCategoriaEstado` **crean**, las `actualizado_*` quedan vacías: el
+  rol por defecto no lo ha elegido nadie. Por eso `actualizado_por` y `actualizado_en` ya admiten
+  NULL, y quien inserte en esa tabla sin querer firmar el rol tiene que escribir
+  `actualizado_en = NULL` (la columna conserva su `DEFAULT NOW()`).
 - **Guardar**: `guardarCategoriaEstado(db, {estado, categoria, etapa}, actor)` (`repo.ts`), con
   `validarCategoriaEstado` (`types.ts`): 400 si la categoría o la etapa no existen, o si no
   cuadran (etapa sólo y siempre con `activa`). Los tres `CHECK` de la tabla dicen lo mismo.
+  Todavía no hay lectura de la firma de la categoría (`leerCategoriasEstados` sólo da categoría y
+  etapa): llegará con el endpoint.
 
 ### Flujo y etapa inicial (D11)
 
@@ -585,8 +595,10 @@ cuenta; sin cierres da lo mismo que `sumarDiasHabiles`.
 Las cuatro escrituras de arriba **no tienen endpoint**: cuando lo tengan (lote 5) van tras
 `escritura('config.write', …)`, y `PUT /trazabilidad/estados` pasará a aceptar `categoria` y
 `etapa` (hoy sólo conoce `rol`). `GET /trazabilidad/estados` tampoco las devuelve todavía, pero
-**sí lista ya los 23 estados sembrados** aunque ningún ticket los tenga (son filas guardadas), con
-«semilla (migracion 050)» como quien los cambió.
+**sí lista ya los 23 estados sembrados** aunque ningún ticket los tenga (son filas guardadas).
+Salen como cualquier estado que nadie ha tocado: `rol: 'cuenta'`, `actualizadoPor: null` y
+`actualizadoEn: null` («Nadie lo ha cambiado» en la pantalla); la semilla no aparece como autora
+de nada ahí, porque lo que firma es la categoría.
 
 ## Pruebas
 
