@@ -352,6 +352,8 @@ describe('contacto de cada equipo', () => {
     it('ninguna tabla del módulo guarda mensajes ni envíos: el aviso automático es sólo una simulación', async () => {
       const { rows } = await db.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'tmc\\_%' ORDER BY 1`);
       expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
+        'tmc_agenda_duraciones',
+        'tmc_agenda_etapas',
         'tmc_contactos',
         'tmc_equipos',
         'tmc_estados_desk',
@@ -897,7 +899,11 @@ describe('estados de Desk y su rol', () => {
     await db.query(SQL_046);
     await db.query(SQL_046);
     await aplicarMigraciones(db);
-    expect(await filas()).toMatchObject([
+    // La 050 siembra además la categoría de agenda de los estados de la propuesta (filas firmadas
+    // por la semilla, con el rol por defecto): a las tres elegidas no les cambia ni el rol ni la firma.
+    const todas = await filas();
+    expect(todas.filter((f: { actualizado_por: string }) => f.actualizado_por !== actor.email).every((f: { rol: string }) => f.rol === 'cuenta')).toBe(true);
+    expect(todas.filter((f: { actualizado_por: string }) => f.actualizado_por === actor.email)).toMatchObject([
       { clave: 'ingresado', rol: 'cuenta', actualizado_por: actor.email },
       { clave: 'por facturar', rol: 'terminado', actualizado_por: actor.email },
       { clave: 'servicio externo', rol: 'standby', actualizado_por: actor.email },
@@ -916,9 +922,9 @@ describe('estados de Desk y su rol', () => {
     // Y lo mismo si alguien se salta la validación de entrada y llega al repo.
     await expect(repo.guardarEstadoDesk(db, { estado: 'Otro', rol: 'pausa' as RolEstado }, actor)).rejects.toThrow();
     expect(await filas()).toHaveLength(1);
-    // La columna del booleano de antes no existe.
+    // La columna del booleano de antes no existe. `categoria` y `etapa` son de la agenda (migración 050).
     const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_estados_desk' `);
-    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en','actualizado_por', 'actualizado_por_id', 'clave', 'etiqueta', 'rol']);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en','actualizado_por', 'actualizado_por_id', 'categoria', 'clave', 'etapa', 'etiqueta', 'rol']);
   });
 });
 

@@ -1,6 +1,6 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 049). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 051). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
@@ -8,15 +8,20 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import {
   asignarClaves,
   asuntoSinCodigo,
+  categoriaCoherente,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
   contactoDeTickets,
   contactoEfectivo,
   diasDeTipo,
+  esCategoriaAgenda,
   esEmailInterno,
+  esEtapaAgenda,
   esRolEstado,
   estadoCalibracion,
+  ETAPAS_AGENDA,
+  ETIQUETA_ETAPA,
   etiquetaEstadoDesk,
   modeloDeCodigo,
   nombreContacto,
@@ -24,9 +29,12 @@ import {
   partesDeTipo,
   porOrdenEstadosDesk,
   ROL_POR_DEFECTO,
+  TIPO_POR_DEFECTO,
   tipoEfectivo,
+  type CategoriaEstado,
   type ContactoCliente,
   type ContactoEquipo,
+  type EtapaAgenda,
   type RolEstado,
   type TicketContacto,
 } from './dominio.js';
@@ -35,10 +43,17 @@ import { resolverRol, type RolApp } from './roles.js';
 import {
   TzError,
   errorPlazoDerivado,
+  validarCategoriaEstado,
+  validarDuracionEtapa,
+  validarPuestosEtapa,
   type Actor,
+  type CambioCategoriaEstado,
   type CambioContacto,
+  type CambioDuracionEtapa,
   type CambioEstadoDesk,
   type CambioPlazo,
+  type CambioPuestosEtapa,
+  type ConfigAgenda,
   type EquipoVista,
   type EstadoDesk,
   type FilaImportada,
@@ -616,6 +631,107 @@ export async function guardarEstadoDesk(db: Db, c: CambioEstadoDesk, actor: Acto
        etiqueta = EXCLUDED.etiqueta, rol = EXCLUDED.rol, actualizado_por_id = EXCLUDED.actualizado_por_id,
        actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [claveEstadoDesk(c.estado), etiquetaEstadoDesk(c.estado), c.rol, actor.userId, actor.email],
+  );
+}
+
+// ── Agenda del taller: configuración (migraciones 050 y 051) ────────────────
+// Lectura y escritura de la categoría de cada estado, los puestos de cada
+// etapa y las duraciones. Aún sin endpoint: cuando lo tengan (lote 5), cada
+// escritura debe ir tras `escritura('config.write', …)` en router.ts.
+
+/**
+ * La categoría (y la etapa) guardada de cada estado, por su clave: lo que
+ * espera `categoriaDeEstado`. Sólo los estados que la tienen; uno con fila
+ * pero sin categoría (alguien le eligió el papel y no está en la propuesta de
+ * la 050) no sale. Un valor que el dominio no conozca se ignora.
+ */
+export async function leerCategoriasEstados(db: Db): Promise<Map<string, CategoriaEstado>> {
+  const { rows } = await db.query(`SELECT clave, categoria, etapa FROM portal.tmc_estados_desk WHERE categoria IS NOT NULL`);
+  const m = new Map<string, CategoriaEstado>();
+  for (const r of rows as Row[]) {
+    const etapa = esEtapaAgenda(r.etapa) ? r.etapa : null;
+    if (esCategoriaAgenda(r.categoria) && categoriaCoherente(r.categoria, etapa)) m.set(r.clave, { categoria: r.categoria, etapa });
+  }
+  return m;
+}
+
+/**
+ * Elige la categoría de un estado en la agenda (y su etapa, si es una etapa
+ * activa) y lo firma. Casa por clave normalizada y vale un estado que aún no
+ * tenga fila. NO toca el papel del reloj (`rol`): en una fila que ya existe se
+ * queda como esté, y una fila nueva nace con el de por defecto, «cuenta», que
+ * es el mismo que vale sin fila. La firma de la fila es la del último cambio,
+ * sea del papel o de la categoría.
+ */
+export async function guardarCategoriaEstado(db: Db, cambio: CambioCategoriaEstado, actor: Actor): Promise<void> {
+  const c = validarCategoriaEstado(cambio);
+  await db.query(
+    `INSERT INTO portal.tmc_estados_desk (clave, etiqueta, categoria, etapa, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (clave) DO UPDATE SET
+       etiqueta = EXCLUDED.etiqueta, categoria = EXCLUDED.categoria, etapa = EXCLUDED.etapa,
+       actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [claveEstadoDesk(c.estado), etiquetaEstadoDesk(c.estado), c.categoria, c.etapa, actor.userId, actor.email],
+  );
+}
+
+/**
+ * Puestos de cada etapa (en su orden) y duraciones por etapa y tipo, con la
+ * «*» de cada etapa delante de sus tipos. Las duraciones valen tal cual para
+ * `duracionDeEtapa`. Leer no escribe.
+ */
+export async function leerConfigAgenda(db: Db): Promise<ConfigAgenda> {
+  const [etapas, duraciones] = await Promise.all([
+    db.query(`SELECT etapa, etiqueta, orden, puestos, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_agenda_etapas ORDER BY orden, etapa`),
+    db.query(`SELECT etapa, tipo, dias_habiles, actualizado_por, actualizado_en::text AS actualizado_en FROM portal.tmc_agenda_duraciones`),
+  ]);
+  const rango = (d: { etapa: string; tipo: string }) => ETAPAS_AGENDA.indexOf(d.etapa as EtapaAgenda) * 2 + (d.tipo === TIPO_POR_DEFECTO ? 0 : 1);
+  return {
+    etapas: (etapas.rows as Row[])
+      .filter((r) => esEtapaAgenda(r.etapa))
+      .map((r) => ({ etapa: r.etapa, etiqueta: r.etiqueta, orden: Number(r.orden), puestos: Number(r.puestos), actualizadoPor: r.actualizado_por, actualizadoEn: r.actualizado_en })),
+    duraciones: (duraciones.rows as Row[])
+      .filter((r) => esEtapaAgenda(r.etapa))
+      .map((r) => ({ etapa: r.etapa as EtapaAgenda, tipo: String(r.tipo), dias: Number(r.dias_habiles), actualizadoPor: r.actualizado_por, actualizadoEn: r.actualizado_en }))
+      .sort((a, b) => rango(a) - rango(b) || a.tipo.localeCompare(b.tipo, 'es')),
+  };
+}
+
+/**
+ * Cambia los puestos simultáneos de una etapa y lo firma. Si a la tabla le
+ * faltara la fila de esa etapa, la crea con la etiqueta y el orden del dominio.
+ */
+export async function guardarPuestosEtapa(db: Db, cambio: CambioPuestosEtapa, actor: Actor): Promise<void> {
+  const c = validarPuestosEtapa(cambio);
+  await db.query(
+    `INSERT INTO portal.tmc_agenda_etapas (etapa, etiqueta, orden, puestos, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (etapa) DO UPDATE SET
+       puestos = EXCLUDED.puestos, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [c.etapa, ETIQUETA_ETAPA[c.etapa], ETAPAS_AGENDA.indexOf(c.etapa) + 1, c.puestos, actor.userId, actor.email],
+  );
+}
+
+/**
+ * Fija cuántos días hábiles ocupa un puesto de una etapa un tipo de servicio
+ * (o «*», la de por defecto) y lo firma; con `dias` null quita la fila de ese
+ * tipo, que vuelve a la «*». La «*» no se quita (D9): 400. El tipo casa por
+ * su clave; no se exige que tenga fila en tmc_plazos.
+ */
+export async function guardarDuracionEtapa(db: Db, cambio: CambioDuracionEtapa, actor: Actor): Promise<void> {
+  const c = validarDuracionEtapa(cambio);
+  if (c.dias === null) {
+    await db.query(`DELETE FROM portal.tmc_agenda_duraciones WHERE etapa = $1 AND tipo = $2 AND tipo <> $3`, [c.etapa, c.tipo, TIPO_POR_DEFECTO]);
+    return;
+  }
+  await db.query(
+    `INSERT INTO portal.tmc_agenda_duraciones (etapa, tipo, dias_habiles, actualizado_por_id, actualizado_por, actualizado_en)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (etapa, tipo) DO UPDATE SET
+       dias_habiles = EXCLUDED.dias_habiles, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+    [c.etapa, c.tipo, c.dias, actor.userId, actor.email],
   );
 }
 
