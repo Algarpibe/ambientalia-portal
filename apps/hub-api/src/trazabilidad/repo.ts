@@ -36,6 +36,7 @@ import {
   sumarDias,
   TIPO_POR_DEFECTO,
   tipoEfectivo,
+  tiposDeTickets,
   type CategoriaEstado,
   type ContactoCliente,
   type ContactoEquipo,
@@ -788,7 +789,7 @@ export async function leerConfiguracionAgenda(db: Db, fuente: FuenteAgenda): Pro
     e.ticketsAbiertos++;
     porClave.set(clave, e);
   }
-  return { ...config, estados: [...porClave.values()].sort(porOrdenEstadosDesk) };
+  return { ...config, estados: [...porClave.values()].sort(porOrdenEstadosDesk), tiposAbiertos: tiposDeTickets(tickets) };
 }
 
 // ── Agenda del taller: la lectura reunida, las asignaciones, el reparto inicial y el flujo a mano (lote 4) ──

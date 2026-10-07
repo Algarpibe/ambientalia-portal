@@ -282,6 +282,8 @@ describe('configuración de la agenda', () => {
     expect(res.body.estados).toHaveLength(23);
     expect(estado(res.body, 'rev./diagnostico')).toMatchObject({ ticketsAbiertos: 2, rol: 'cuenta', actualizadoPor: null, categoria: 'activa', etapa: 'diagnostico', categoriaPor: 'semilla (migracion 050)' });
     expect(estado(res.body, 'ingresado')).toMatchObject({ ticketsAbiertos: 1, categoria: 'entrada' });
+    // Los tipos de servicio también son los de la fuente de la agenda: en la réplica esos tickets no traen ninguno.
+    expect(res.body.tiposAbiertos).toEqual([{ clave: 'diagnostico', etiqueta: 'Diagnostico', tickets: res.body.estados.reduce((n: number, e: Estado) => n + e.ticketsAbiertos, 0) }]);
   });
 
   it('puestos y duraciones: se guardan firmados y la agenda los usa; la «*» no se quita', async () => {

@@ -35,7 +35,7 @@ import {
 } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
-import { Alert, Button, Loading, Tag } from '../ui';
+import { Alert, Button, DESACTIVADO, Loading, Tag } from '../ui';
 
 /**
  * Servicios: todos los tickets de Zoho Desk que no están cerrados, con la
@@ -414,7 +414,7 @@ function TipoSelect({
           if (clave === valor) return;
           void onCambio(s, clave, tipos.find((t) => t.clave === clave)?.etiqueta ?? '');
         }}
-        className={`min-h-[36px] w-[230px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`min-h-[36px] w-[230px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO} ${
           sinTipo ? 'border-dashed border-gray-300 text-gray-500' : 'border-gray-300 text-gray-900'
         }`}
       >

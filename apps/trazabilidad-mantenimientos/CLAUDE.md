@@ -52,6 +52,9 @@ se registra en la app y sobrevive a las reimportaciones.
 | Sub-vista «Simulación automática» de «Avisos a clientes» | `src/vistas/SimulacionAvisos.tsx` (el selector Manual / Simulación está en `src/vistas/Avisos.tsx`) |
 | Eje, barras (sus tramos, sus pausas y la marca de fin), colores, textos, filtros (`filtrarServicios`, `GRUPOS_PLAZO`), desplegable del tipo de «Servicios» y, de «Configuración», la nota del tipo compuesto y las opciones y textos del rol de cada estado | `src/lib/servicios.ts` |
 | Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos y rol de cada estado de Desk) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
+| Configuración de la agenda del taller (lote 6): puestos, duraciones y categoría de cada estado | `src/vistas/ConfiguracionAgenda.tsx` (los tres bloques y `useAgendaConfig`); lo que calculan —columnas y casillas de la tabla de duraciones, filtro y orden de los estados, firmas— en `src/lib/agenda.ts` (ver «Agenda: pantalla de configuración») |
+| Fechas: `fmtFecha` y `fmtFechaHora` (un instante se enseña en hora de **Colombia**; único sitio) | `src/lib/vistas.ts` |
+| Aspecto de un control desactivado (`DESACTIVADO`: fondo gris y cursor de «no permitido»; único sitio) | `src/ui.tsx` |
 
 Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 `portal/src/App.tsx`, `portal/src/pages/Aplicaciones.tsx`, `portal/tailwind.config.js` y el
@@ -115,7 +118,7 @@ configuración, la configuración entera. Errores como en el resto: `{error, mes
 | POST | `/trazabilidad/agenda/liberar` | `agenda.liberar` | `{numero, motivo}`: **por número de ticket** (D18). 400 en `numero` o en `motivo` (obligatorio); 404 si el ticket no tiene puesto |
 | PUT | `/trazabilidad/agenda/flujo/:numero` | `agenda.flujo` | `{flujo}`: `servicio` / `equipo_nuevo`, o `null` para quitar la marca. 400 en `numero` o `flujo`; 404 si la fuente no trae abierto el ticket; 409 `flujo_de_la_fuente` si ya trae su clasificación |
 | GET | `/trazabilidad/agenda/huecos` (`?etapa=&tipo=&hoy=`) | — | Cuándo entraría un equipo que llegara hoy a esa etapa: `{hoy, etapa, tipo, duracionDias, sinTipo, fuente, huecos: [{puesto, entrada, fin}]}`, las 5 próximas entradas (`HUECOS_PROXIMOS`), una tras otra. `tipo` es opcional (sin él, la «*»). 400 en `etapa`, `tipo` u `hoy`. Sólo lectura: para la futura reserva del cliente |
-| GET | `/trazabilidad/agenda/configuracion` | — | `{etapas[], duraciones[], estados[]}`: `etapas` = `{etapa, etiqueta, orden, puestos, actualizadoPor, actualizadoEn}`; `duraciones` = `{etapa, tipo, dias, actualizadoPor, actualizadoEn}` (la «*» de cada etapa delante); `estados` = lo mismo que `GET /estados` (rol y categoría con **sus dos firmas**), pero con `ticketsAbiertos` contados en la **fuente de la agenda** |
+| GET | `/trazabilidad/agenda/configuracion` | — | `{etapas[], duraciones[], estados[], tiposAbiertos[]}`: `etapas` = `{etapa, etiqueta, orden, puestos, actualizadoPor, actualizadoEn}`; `duraciones` = `{etapa, tipo, dias, actualizadoPor, actualizadoEn}` (la «*» de cada etapa delante); `estados` = lo mismo que `GET /estados` (rol y categoría con **sus dos firmas**), pero con `ticketsAbiertos` contados en la **fuente de la agenda**; `tiposAbiertos` (lote 6) = `{clave, etiqueta, tickets}`, los tipos de servicio que traen los tickets abiertos de esa misma fuente (`tiposDeTickets`, `dominio.ts`): sólo tipos y recuentos |
 | PUT | `/trazabilidad/agenda/configuracion/puestos` | `config.write` | `{etapa, puestos}` (entero 0..50). 400 en `etapa` o `puestos` |
 | PUT | `/trazabilidad/agenda/configuracion/duraciones` | `config.write` | `{etapa, tipo, dias}` (entero 1..365); `dias: null` quita la fila del tipo; **la «*» no se quita: 400 en `dias`**. 400 en `etapa`, `tipo` o `dias` (que falte también) |
 | PUT | `/trazabilidad/agenda/configuracion/estados` | `config.write` | `{estado, categoria, etapa?}`: sólo la categoría (y la etapa, si es `activa`), con su firma; **no toca el rol del reloj ni la suya**. 400 en `estado`, `categoria` o `etapa` (etapa sólo y siempre con `activa`) |
@@ -172,8 +175,10 @@ preguntan con `usePermisos().puede('<permiso>')`. Mientras no llega (o si falla)
 es decir, modo de consulta. Sin el permiso: no sale «Importar F-ST-022»; el seguimiento de la
 ficha va desactivado y sin «Guardar»; en «Avisos a clientes» no sale «Marcar como avisado» (sí
 «Redactar aviso» y copiar) ni, en la simulación, «Cambiar destinatario» ni el editor de contacto;
-el desplegable del tipo en «Servicios» va desactivado; y en «Configuración» los plazos y los
-estados se ven pero no se editan, con un aviso arriba. La cabecera enseña «Tu rol: …»
+el desplegable del tipo en «Servicios» va desactivado; y en «Configuración» los plazos, la agenda y
+los estados se ven pero no se editan, con un aviso arriba. **Lo desactivado se nota**: todo
+`<input>`, `<select>` y `<textarea>` lleva `DESACTIVADO` (`src/ui.tsx`: fondo gris y cursor de «no
+permitido»); un control nuevo que se pueda desactivar tiene que llevarlo. La cabecera enseña «Tu rol: …»
 (`etiquetaMiRol`; a un administrador, «Administrador del portal»). Ocultar es comodidad: **la
 guarda de verdad es la del servidor**.
 
@@ -543,7 +548,8 @@ de la configuración va en «Agenda: configuración», el cálculo en «Agenda: 
 
 Segundo lote de la agenda (`docs/trazabilidad-agenda-taller.md`, secciones C, E y J): el **modelo**
 (migraciones 050 y 051) y las **reglas**. Sus endpoints (lote 5) están en la tabla de la API,
-bajo `/trazabilidad/agenda/configuracion`; **todavía sin pantalla**. Nada de esto lo usa
+bajo `/trazabilidad/agenda/configuracion`, y su pantalla (lote 6) en «Agenda: pantalla de
+configuración». Nada de esto lo usa
 «Servicios» ni el reloj del plazo.
 
 ### Categoría y etapa de cada estado
@@ -794,9 +800,38 @@ Lote 5 (`docs/trazabilidad-agenda-taller.md`, D18 a D20 y sección E.7): las rut
 - ⚠️ **Nada de esto lleva clientes, seriales ni correos**, y de un fallo de Desk 2.0 sólo sale
   el motivo: `router.test.ts` vigila las dos cosas.
 
+## Agenda: pantalla de configuración
+
+Lote 6 (`docs/trazabilidad-agenda-taller.md`, sección J). En «Administración» → «Configuración»,
+debajo de los plazos. La **pantalla de la agenda** (lote 7) sigue sin existir. Todo pide
+`config.write`; sin él se ve igual, en consulta.
+
+- **«Agenda del taller · Puestos»**: una fila por etapa con sus puestos (0 a 50), los **tickets
+  que están hoy en un estado de esa etapa** (tengan puesto o no; `ticketsPorEtapa` sobre
+  `estados`, en ámbar si pasan de los puestos) y la firma. Guarda al salir de la casilla o con
+  Intro; Escape deshace lo escrito.
+- **«Duraciones (días hábiles)»**: etapas × tipos. Columnas (`columnasDuraciones`): la «*», los
+  tipos de `GET /plazos`, los de `tiposAbiertos` y los de duraciones ya guardadas que no estén en
+  ninguno (para poder quitarlas). Casilla vacía = hereda la «*» de su etapa, que se ve en gris
+  (`celdaDuracion`); escribir crea la fila, vaciar la quita, y la «*» no se puede vaciar (no se
+  envía: la casilla queda en rojo). La firma de cada casilla va en su `title`.
+- **«Estados de Desk → agenda»**, junto a **«Estados de Desk → reloj del plazo»** (el bloque de
+  siempre, con otro título y ya con su firma a la vista): categoría, etapa (sólo si es activa),
+  tickets abiertos en la fuente de la agenda y la firma de la categoría («semilla» si la puso la
+  050). Filtro «Sólo estados con tickets», encendido de partida; los estados **sin categoría
+  salen siempre y arriba**, con un aviso ámbar. Elegir «Etapa activa» **no guarda hasta elegir
+  la etapa** (una sin la otra es un 400). Cada bloque guarda por su ruta y no recarga al otro.
+- **Los cambios van en fila** (`useAgendaConfig`): cada respuesta trae la configuración entera y
+  dos a la vez podrían pisarse.
+- **Fechas**: las firmas son instantes (`…::text`, «2026-10-07 01:10:00+00»). `fmtFecha` da su
+  día y `fmtFechaHora` su día y hora **en Colombia** (UTC−5 fijo), con aritmética sobre UTC: no
+  dependen de la zona del navegador. Un día suelto («2026-10-07») no se mueve.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
+  las fechas en hora de Colombia (`src/lib/vistas.test.ts`), lo que calcula la configuración de
+  la agenda (`src/lib/agenda.test.ts`),
   geometría del calendario de barras (pausas y marca de fin incluidas) y la simulación (texto por
   tramo, saludo, resumen y correos tecleados: `src/lib/simulacion.test.ts`), y la navegación en
   dos niveles con lo que se enseña según el rol (`src/lib/navegacion.test.ts`). Las vistas no

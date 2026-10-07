@@ -1052,7 +1052,7 @@ describe('agenda: lecturas', () => {
       [{ clave: 'en proceso', etiqueta: 'En Proceso', rol: 'standby', actualizado_por: 'gerencia@ambientalia.com.co', actualizado_en: '2026-10-06 10:00:00+00', categoria: 'activa', etapa: 'proceso', categoria_por: 'director@ambientalia.com.co', categoria_en: '2026-10-06 11:00:00+00' }],
     ]);
     const res = await request(appAgenda()).get(`${A}/configuracion`).set(conRol(null));
-    expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+    expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas', 'tiposAbiertos']);
     expect(res.body.etapas).toEqual([
       { etapa: 'diagnostico', etiqueta: 'Diagnóstico', orden: 1, puestos: 3, actualizadoPor: null, actualizadoEn: null },
       { etapa: 'proceso', etiqueta: 'Proceso', orden: 2, puestos: 4, actualizadoPor: null, actualizadoEn: null },
@@ -1068,6 +1068,9 @@ describe('agenda: lecturas', () => {
     });
     // Sin fila: sale igual porque la fuente lo trae, con la categoría de la propuesta y sin firmas.
     expect(estados.ingresado).toMatchObject({ etiqueta: 'Ingresado', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, categoria: 'entrada', etapa: null, categoriaPor: null, categoriaEn: null });
+    // Los tipos de servicio que traen esos mismos tickets: sólo el tipo y cuántos (ni clientes, ni seriales, ni correos).
+    expect(Array.isArray(res.body.tiposAbiertos)).toBe(true);
+    for (const t of res.body.tiposAbiertos as object[]) expect(Object.keys(t).sort()).toEqual(['clave', 'etiqueta', 'tickets']);
     expect(conexiones.n).toBe(0);
   });
 });
@@ -1374,7 +1377,7 @@ describe('agenda: configuración (config.write)', () => {
     for (const puestos of [0, 50]) {
       const res = await put('puestos', { etapa: 'verificacion', puestos });
       expect(res.status).toBe(200);
-      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas', 'tiposAbiertos']);
     }
     expect(escriben(queries)).toHaveLength(2);
     expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_agenda_etapas/);
@@ -1400,7 +1403,7 @@ describe('agenda: configuración (config.write)', () => {
       queries.length = 0;
       const res = await put('estados', cuerpo);
       expect(res.status).toBe(200);
-      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas']);
+      expect(Object.keys(res.body).sort()).toEqual(['duraciones', 'estados', 'etapas', 'tiposAbiertos']);
       expect(escriben(queries)).toHaveLength(1);
       expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_estados_desk \(clave, etiqueta, categoria, etapa, categoria_por_id, categoria_por, categoria_en, actualizado_en\)/);
       expect(escriben(queries)[0]).not.toMatch(/\brol\b|actualizado_por|actualizado_en = /);

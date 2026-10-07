@@ -37,6 +37,7 @@ import {
   type OrigenTipo,
   type RangoFechas,
   type RolEstado,
+  type TipoAbierto,
   type TramoPlazo,
 } from './dominio.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
@@ -479,6 +480,8 @@ export interface ConfigAgenda {
 /** Lo que devuelve GET /trazabilidad/agenda/configuracion: en `estados`, `ticketsAbiertos` son los de la FUENTE de la agenda. */
 export interface ConfiguracionAgenda extends ConfigAgenda {
   estados: EstadoDesk[];
+  /** Los tipos de servicio que traen los tickets abiertos de esa misma fuente (`tiposDeTickets`): sólo tipos y recuentos. */
+  tiposAbiertos: TipoAbierto[];
 }
 
 export interface CambioCategoriaEstado {

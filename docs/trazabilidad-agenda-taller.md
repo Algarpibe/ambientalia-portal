@@ -577,7 +577,7 @@ Las lecturas (`GET`) están abiertas a quien tenga la app, con una excepción: l
 | POST | `/agenda/liberar` | `agenda.liberar` | `{ numero, motivo }`: libera a mano el puesto de ese ticket (D7, D18). 404 si no lo tiene |
 | PUT | `/agenda/flujo/:numero` | `agenda.flujo` | `{ flujo }`; `null` quita la marca (D11). 404 si la fuente no lo trae abierto; 409 si ya trae `classification` |
 | GET | `/agenda/huecos` (`?etapa=&tipo=&hoy=`) | — | Las próximas fechas en que entraría un equipo que llegara hoy a esa etapa, según la proyección. Solo lectura, pensado para la futura reserva del cliente |
-| GET | `/agenda/configuracion` | — | Etapas con sus puestos, duraciones y la categoría y etapa de cada estado, con las dos firmas (categoría y papel del reloj) y los tickets abiertos por estado en la fuente de la agenda |
+| GET | `/agenda/configuracion` | — | Etapas con sus puestos, duraciones y la categoría y etapa de cada estado, con las dos firmas (categoría y papel del reloj) y los tickets abiertos por estado en la fuente de la agenda. Desde el lote 6, también `tiposAbiertos`: los tipos de servicio que traen esos tickets, con su recuento |
 | PUT | `/agenda/configuracion/puestos` | `config.write` | `{ etapa, puestos }` |
 | PUT | `/agenda/configuracion/duraciones` | `config.write` | `{ etapa, tipo, dias }`; `dias: null` quita la fila, salvo la «*», que no se puede quitar (400) |
 | PUT | `/agenda/configuracion/estados` | `config.write` | `{ estado, categoria, etapa? }`: solo la categoría; no toca el papel del reloj |
@@ -1125,6 +1125,16 @@ Plan original:
   - Guarda existente de «ningún código de envío» sigue en verde.
 
 ### Lote 6 — Pantalla: Configuración
+
+**Construido** el 07/10/2026, entero y sin partir. Lo que quedó distinto del plan de abajo y del boceto de G:
+
+- **La categoría no son «dos columnas más» en el bloque «Estados de Desk»** (G): es un bloque propio, «Estados de Desk → agenda», puesto junto al del reloj («Estados de Desk → reloj del plazo»), con una línea encima que dice la diferencia. Así el papel y la categoría no se mezclan ni en la pantalla: cada uno guarda por su ruta y enseña su firma.
+- **Un cambio de backend, aditivo y de solo lectura:** `GET /agenda/configuracion` devuelve además `tiposAbiertos` (`{clave, etiqueta, tickets}`), los tipos de servicio que traen los tickets abiertos de la fuente de la agenda. Hacía falta para las columnas de la tabla de duraciones: `GET /plazos` solo conoce los tipos de `tmc_plazos` y los de la réplica, que hoy no trae ninguno. Sale de los tickets que esa lectura ya pedía (`tiposDeTickets`, `H/dominio.ts`); no hay consulta nueva.
+- **«Tickets de la etapa» son los que están en un estado de esa etapa**, tengan puesto o no (se suman de `estados`): es lo que hay que comparar con los puestos, y antes del reparto inicial nadie tiene puesto.
+- **Ficheros:** `U/vistas/ConfiguracionAgenda.tsx` (nuevo: los tres bloques), `U/vistas/Configuracion.tsx`, `U/lib/agenda.ts` con su prueba, `U/api.ts`, `U/dominio.ts`; y, de los pendientes de la fase de roles, `U/lib/vistas.ts` (las firmas en hora de Colombia) y `U/ui.tsx` (`DESACTIVADO`: un control desactivado se ve gris y con cursor de «no permitido» en toda la app).
+- **Comprobado en navegador** (entorno local, imitación de Desk 2.0 como fuente principal): puestos, duraciones y categoría guardan, se ven al recargar y `GET /agenda` los usa.
+
+Plan original:
 
 - **Objetivo:** que el Director Técnico pueda ajustar puestos, duraciones y la categoría y etapa de cada estado (D14). Quien no tiene el rol ve la configuración sin poder editarla.
 - **Ficheros:** `U/api.ts`, `U/dominio.ts`, `U/lib/agenda.ts` (textos y opciones) con su prueba, `U/vistas/Configuracion.tsx` (bloque «Agenda del taller» y dos columnas en «Estados de Desk»).

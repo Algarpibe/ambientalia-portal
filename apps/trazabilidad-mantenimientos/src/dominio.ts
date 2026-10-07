@@ -6,8 +6,11 @@ export * from '../../hub-api/src/trazabilidad/dominio';
 // Roles y permisos de la app: la misma matriz que comprueba el servidor.
 export * from '../../hub-api/src/trazabilidad/roles';
 export type {
+  ConfiguracionAgenda,
+  DuracionAgendaConfig,
   EquipoVista,
   EstadoDesk,
+  EtapaAgendaConfig,
   FilaImportada,
   MiRol,
   OrigenCliente,

@@ -8,11 +8,43 @@ import { ESTADOS, ESTADOS_AVISO, diasEntre, enServicio, sumarDias, type EquipoVi
 export const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
-/** AAAA-MM-DD → DD/MM/AAAA; null → «—». */
+/** Colombia va cinco horas por detrás de UTC todo el año (no tiene horario de verano). */
+const COLOMBIA_MS = -5 * 3_600_000;
+/** Un instante con su zona, como lo manda el servidor («2026-10-07 01:10:00.5+00») o en ISO («…T01:10:00Z»). */
+const INSTANTE = /^(\d{4})-(\d\d)-(\d\d)[T ](\d\d):(\d\d)(?::(\d\d)(?:\.\d+)?)?\s*(Z|[+-]\d\d(?::?\d\d)?)$/i;
+
+/**
+ * Día y hora de Colombia de un instante con zona («AAAA-MM-DD» y «HH:MM»);
+ * null si es un día suelto o no trae zona (entonces no hay nada que convertir).
+ * Es aritmética sobre UTC: no depende del reloj ni de la zona de la máquina.
+ */
+function enColombia(iso: string): { dia: string; hora: string } | null {
+  const m = INSTANTE.exec(iso.trim());
+  if (!m) return null;
+  // La zona en minutos: «Z», «+00», «-05», «-05:00» o «+0530».
+  const z = m[7].replace(':', '');
+  const zona = /z/i.test(z) ? 0 : (z[0] === '-' ? -1 : 1) * (Number(z.slice(1, 3)) * 60 + Number(z.slice(3) || 0));
+  const utc = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)) - zona * 60_000;
+  const local = new Date(utc + COLOMBIA_MS).toISOString();
+  return { dia: local.slice(0, 10), hora: local.slice(11, 16) };
+}
+
+const diaMesAnio = (dia: string): string => dia.split('-').reverse().join('/');
+
+/**
+ * AAAA-MM-DD → DD/MM/AAAA; null → «—». Un instante (la firma de un cambio) se
+ * enseña con su día en COLOMBIA, no con el de UTC: lo guardado a las 20:10 de
+ * allí es ya el día siguiente en UTC.
+ */
 export function fmtFecha(iso: string | null | undefined): string {
   if (!iso) return '—';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return `${d}/${m}/${y}`;
+  return diaMesAnio(enColombia(iso)?.dia ?? iso.slice(0, 10));
+}
+
+/** Como `fmtFecha`, con la hora de Colombia detrás si es un instante: «06/10/2026 20:10». */
+export function fmtFechaHora(iso: string | null | undefined): string {
+  const c = iso ? enColombia(iso) : null;
+  return c ? `${diaMesAnio(c.dia)} ${c.hora}` : fmtFecha(iso);
 }
 
 /** «vencida hace 32 d» / «vence hoy» / «quedan 11 d». */

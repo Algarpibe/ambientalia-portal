@@ -19,6 +19,7 @@ import {
   esEtapaAgenda,
   etapaInicial,
   flujoDeTicket,
+  tiposDeTickets,
   type CategoriaEstado,
   type DuracionEtapa,
 } from './dominio.js';
@@ -186,6 +187,22 @@ describe('duración de una etapa para un tipo (D9)', () => {
 
   it('un tipo llamado «*» no existe: nadie se cuela en la fila por defecto como si fuera exacta', () => {
     expect(duracionDeEtapa(duraciones, 'diagnostico', null, '*')).toEqual({ dias: 3, origen: 'defecto', tipo: '*', sinTipo: false });
+  });
+});
+
+describe('tipos de servicio que traen los tickets abiertos (columnas de la tabla de duraciones)', () => {
+  const t = (numero: number, tipoServicio: string | null) => ({ numero, tipoServicio });
+
+  it('uno por clave, con la grafía del ticket más antiguo y cuántos lo traen, por orden alfabético', () => {
+    expect(tiposDeTickets([t(2030, 'mantenimiento'), t(2010, ' Diagnostico '), t(2020, 'Mantenimiento'), t(2040, 'diagnóstico'), t(2050, 'Diagnostico')])).toEqual([
+      { clave: 'diagnostico', etiqueta: 'Diagnostico', tickets: 3 },
+      { clave: 'mantenimiento', etiqueta: 'Mantenimiento', tickets: 2 },
+    ]);
+  });
+
+  it('sin tipo no cuenta, y un tipo llamado «*» tampoco: es la fila por defecto', () => {
+    expect(tiposDeTickets([t(1, null), t(2, '   '), t(3, '*')])).toEqual([]);
+    expect(tiposDeTickets([])).toEqual([]);
   });
 });
 
