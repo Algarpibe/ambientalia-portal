@@ -170,7 +170,8 @@ export interface EtapaProyectada {
   primerHueco: string | null;
 }
 
-export type CodigoAviso = 'sincronizacion_parada' | 'fuente_respaldo' | 'estados_sin_categoria';
+/** `pasada_fallida` no sale de la proyección: lo añade la ruta cuando no pudo ponerse al día antes de servir (D20). */
+export type CodigoAviso = 'sincronizacion_parada' | 'fuente_respaldo' | 'estados_sin_categoria' | 'pasada_fallida';
 
 export interface AgendaTaller {
   hoy: string;
@@ -287,6 +288,11 @@ const primerDia = (libres: readonly Libre[]): string | null => (libres.length ? 
  * previsión y repite tickets que ya están contados en su etapa de ahora.
  */
 export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
+  return proyectar(e).agenda;
+}
+
+/** La proyección y, para `huecosDeEtapa`, cómo quedan los puestos de cada etapa una vez repartida su fila. */
+function proyectar(e: EntradaAgenda) {
   const { hoy } = e;
   const cierres = new Set(e.cierres);
   const sumar = (desde: string, n: number) => sumarDiasHabilesAgenda(desde, n, cierres);
@@ -430,7 +436,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     avisos.push({ codigo: 'estados_sin_categoria', mensaje: `Hay ${sinCat.length} ${sinCat.length === 1 ? 'estado' : 'estados'} sin categoría en la agenda (${n} ${n === 1 ? 'ticket' : 'tickets'}): hay que clasificarlos en Configuración.` });
   }
 
-  return {
+  const agenda: AgendaTaller = {
     hoy,
     fuente: { fuente: respaldo ? 'respaldo' : 'principal', motivo: f.motivo, ultimaSincronizacion: f.ultimaSincronizacion },
     etapas,
@@ -442,6 +448,36 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     avisos,
     totalAbiertos: tickets.length,
   };
+  return { agenda, libresDe, arranque, sumar };
+}
+
+// ── Lote 5: los huecos ──────────────────────────────────────────────────────
+
+/** Una entrada posible: en qué puesto, qué día y hasta cuándo lo ocuparía. */
+export interface HuecoAgenda {
+  puesto: number;
+  entrada: string;
+  fin: string;
+}
+
+/**
+ * Cuándo entraría en `etapa` un equipo que llegara hoy, según la proyección:
+ * detrás de TODA la fila de la etapa y de los equipos nuevos que llegarán
+ * encadenados, en el puesto que antes quede libre. Los `n` huecos van uno tras
+ * otro: cada uno supone ocupados los anteriores durante lo que dura ese tipo
+ * de servicio en la etapa (su fila, o la «*»; sin `tipo`, la «*»). Sin
+ * duración o sin puestos no hay huecos. Sólo lee: es para la futura reserva.
+ */
+export function huecosDeEtapa(e: EntradaAgenda, etapa: EtapaAgenda, tipo: string | null, n: number): { duracionDias: number | null; sinTipo: boolean; huecos: HuecoAgenda[] } {
+  const { libresDe, arranque, sumar } = proyectar(e);
+  const { dias, sinTipo } = duracionDeEtapa(e.config.duraciones, etapa, tipo, null);
+  const huecos: HuecoAgenda[] = [];
+  for (let i = 0; i < n; i++) {
+    const h = tomarPuesto(libresDe.get(etapa) ?? [], arranque, dias, sumar);
+    if (h.puestoPrevisto === null) break;
+    huecos.push({ puesto: h.puestoPrevisto, entrada: h.entradaPrevista, fin: h.finPrevisto });
+  }
+  return { duracionDias: dias, sinTipo, huecos };
 }
 
 // ── Lote 4: la vuelta de standby y el reparto inicial ───────────────────────
