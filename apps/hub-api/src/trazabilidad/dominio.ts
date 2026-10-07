@@ -397,6 +397,175 @@ export function estadoPlazo(fechaLimite: string | null, hoy: string): EstadoPlaz
   return fechaLimite < hoy ? 'VENCIDO' : fechaLimite === hoy ? 'VENCE_HOY' : 'EN_PLAZO';
 }
 
+// ── Agenda del taller: configuración ────────────────────────────────────────
+//
+// Cada estado de Desk tiene, además de su rol en el reloj, una CATEGORÍA en la
+// agenda (y, si es una etapa activa, su ETAPA). Son dos cosas distintas con
+// dos usos: el rol gobierna el plazo de «Servicios»; la categoría, los puestos
+// y las filas del taller. Se guardan en columnas distintas de
+// portal.tmc_estados_desk y ninguna de las dos cambia a la otra.
+// Decisiones (D1…D14) y propuesta de partida: docs/trazabilidad-agenda-taller.md.
+
+/** La categoría de un estado en la agenda. Son los valores de `portal.tmc_estados_desk.categoria`. */
+export const CATEGORIAS_AGENDA = ['por_llegar', 'entrada', 'activa', 'standby', 'fin', 'fuera'] as const;
+export type CategoriaAgenda = (typeof CATEGORIAS_AGENDA)[number];
+
+export const ETIQUETA_CATEGORIA: Record<CategoriaAgenda, string> = {
+  por_llegar: 'Por llegar',
+  entrada: 'Fila de entrada',
+  activa: 'Etapa activa',
+  standby: 'Standby',
+  fin: 'Fin de taller',
+  fuera: 'Fuera de la agenda',
+};
+
+/** Las etapas del taller, en su orden. Son los valores de `etapa` en portal.tmc_estados_desk y en las tablas tmc_agenda_*. */
+export const ETAPAS_AGENDA = ['diagnostico', 'proceso', 'verificacion'] as const;
+export type EtapaAgenda = (typeof ETAPAS_AGENDA)[number];
+
+export const ETIQUETA_ETAPA: Record<EtapaAgenda, string> = {
+  diagnostico: 'Diagnóstico',
+  proceso: 'Proceso',
+  verificacion: 'Verificación',
+};
+
+/** Tope de puestos simultáneos de una etapa (el `CHECK` de portal.tmc_agenda_etapas). */
+export const PUESTOS_MAX = 50;
+
+export function esCategoriaAgenda(v: unknown): v is CategoriaAgenda {
+  return typeof v === 'string' && (CATEGORIAS_AGENDA as readonly string[]).includes(v);
+}
+
+export function esEtapaAgenda(v: unknown): v is EtapaAgenda {
+  return typeof v === 'string' && (ETAPAS_AGENDA as readonly string[]).includes(v);
+}
+
+/** La categoría de un estado y, sólo si es una etapa activa, cuál. */
+export interface CategoriaEstado {
+  categoria: CategoriaAgenda;
+  etapa: EtapaAgenda | null;
+}
+
+/** Sólo una etapa activa lleva etapa, y la lleva siempre (el mismo `CHECK` de la migración 050). */
+export function categoriaCoherente(categoria: CategoriaAgenda, etapa: EtapaAgenda | null): boolean {
+  return (categoria === 'activa') === (etapa !== null);
+}
+
+/**
+ * La propuesta de partida (sección C.3 del análisis): los 23 estados del
+ * blueprint de Desk. Es lo que siembra la migración 050 donde nadie ha elegido
+ * todavía (agenda-config.test.ts vigila que coincidan). «Notificado» sigue
+ * ocupando puesto, dentro de Diagnóstico (D2); «Pendiente» y «Solicitud
+ * Soporte», soporte remoto, quedan fuera (D10).
+ */
+export const CATALOGO_ESTADOS_AGENDA: readonly ({ estado: string } & CategoriaEstado)[] = [
+  { estado: 'OV asignada', categoria: 'por_llegar', etapa: null },
+  { estado: 'Ticket creado', categoria: 'por_llegar', etapa: null },
+  { estado: 'Remisión creada', categoria: 'entrada', etapa: null },
+  { estado: 'Ingresado', categoria: 'entrada', etapa: null },
+  { estado: 'Rev./Diagnostico', categoria: 'activa', etapa: 'diagnostico' },
+  { estado: 'Notificado', categoria: 'activa', etapa: 'diagnostico' },
+  { estado: 'En Proceso', categoria: 'activa', etapa: 'proceso' },
+  { estado: 'Continuación del proceso', categoria: 'activa', etapa: 'proceso' },
+  { estado: 'Verificación', categoria: 'activa', etapa: 'verificacion' },
+  { estado: 'Notificación a Compras', categoria: 'standby', etapa: null },
+  { estado: 'Notificación Comercial', categoria: 'standby', etapa: null },
+  { estado: 'Notificación cliente', categoria: 'standby', etapa: null },
+  { estado: 'En espera de SKU inventario', categoria: 'standby', etapa: null },
+  { estado: 'En Espera de Repuestos', categoria: 'standby', etapa: null },
+  { estado: 'Solicitado', categoria: 'standby', etapa: null },
+  { estado: 'Servicio externo', categoria: 'standby', etapa: null },
+  { estado: 'Por Facturar', categoria: 'fin', etapa: null },
+  { estado: 'Liberación Comercial', categoria: 'fin', etapa: null },
+  { estado: 'Por Entregar', categoria: 'fin', etapa: null },
+  { estado: 'Por Entregar / Sin facturar', categoria: 'fin', etapa: null },
+  { estado: 'Finalizado', categoria: 'fin', etapa: null },
+  { estado: 'Pendiente', categoria: 'fuera', etapa: null },
+  { estado: 'Solicitud Soporte', categoria: 'fuera', etapa: null },
+];
+
+const CATALOGO_POR_CLAVE: ReadonlyMap<string, CategoriaEstado> = new Map(
+  CATALOGO_ESTADOS_AGENDA.map((e) => [claveEstadoDesk(e.estado), { categoria: e.categoria, etapa: e.etapa }]),
+);
+
+/**
+ * La categoría (y la etapa) de un estado en la agenda. Casa por
+ * `claveEstadoDesk`. Lo guardado en Configuración (`guardadas`, por clave)
+ * GANA; sin nada guardado vale la propuesta de partida; un estado que no está
+ * en ninguno de los dos sitios queda sin categoría (`null`): la agenda no sabe
+ * dónde ponerlo hasta que alguien se la elija.
+ */
+export function categoriaDeEstado(estado: unknown, guardadas?: { get(clave: string): CategoriaEstado | null | undefined }): CategoriaEstado | null {
+  const clave = claveEstadoDesk(estado);
+  if (!clave) return null;
+  const c = guardadas?.get(clave) ?? CATALOGO_POR_CLAVE.get(clave);
+  return c ? { categoria: c.categoria, etapa: c.etapa } : null;
+}
+
+/** El flujo de un ticket en el taller: un equipo que viene a servicio, o un equipo nuevo. */
+export const FLUJOS_AGENDA = ['servicio', 'equipo_nuevo'] as const;
+export type FlujoAgenda = (typeof FLUJOS_AGENDA)[number];
+
+const CLASIFICACION_EQUIPO_NUEVO = 'equipo nuevo';
+
+/**
+ * El flujo de un ticket (D11) y si hubo que deducirlo.
+ *
+ * Con clasificación (`classification` de Desk 2.0) manda ella: equipo nuevo si
+ * normaliza a «equipo nuevo», y servicio con cualquier otra. Sin ella, la
+ * fuente principal da servicio; el respaldo —cuya réplica la trae vacía— lo
+ * DEDUCE: equipo nuevo si el asunto empieza por «Equipo Nuevo» o el código de
+ * servicio por `HV_`. La marca a mano por ticket, que gana a todo, llega con
+ * las asignaciones (lote 4).
+ */
+export function flujoDeTicket(t: {
+  fuente: 'principal' | 'respaldo';
+  clasificacion: string | null;
+  asunto: string | null;
+  codigoServicio: string | null;
+}): { flujo: FlujoAgenda; deducido: boolean } {
+  const clasificacion = claveTipoServicio(t.clasificacion);
+  if (clasificacion || t.fuente === 'principal') {
+    return { flujo: clasificacion === CLASIFICACION_EQUIPO_NUEVO ? 'equipo_nuevo' : 'servicio', deducido: false };
+  }
+  const nuevo = claveTipoServicio(t.asunto).startsWith(CLASIFICACION_EQUIPO_NUEVO) || /^HV_/i.test(String(t.codigoServicio ?? '').trim());
+  return { flujo: nuevo ? 'equipo_nuevo' : 'servicio', deducido: true };
+}
+
+/** La primera etapa de un ticket: Diagnóstico si viene a servicio; un equipo nuevo entra directo a Proceso. */
+export function etapaInicial(flujo: FlujoAgenda): EtapaAgenda {
+  return flujo === 'equipo_nuevo' ? 'proceso' : 'diagnostico';
+}
+
+/** El «tipo» de la fila por defecto de una etapa en portal.tmc_agenda_duraciones (D9). */
+export const TIPO_POR_DEFECTO = '*';
+
+/** Cuántos días hábiles ocupa un puesto de `etapa` un servicio de ese tipo (clave de tipo, o «*»). */
+export interface DuracionEtapa {
+  etapa: EtapaAgenda;
+  tipo: string;
+  dias: number;
+}
+
+/**
+ * La duración de una etapa para un ticket (D9): la fila exacta de su tipo; si
+ * no la hay, la «*» de la etapa; si tampoco, sin duración (`dias` null). El
+ * tipo es el efectivo —el puesto a mano gana al de la fuente (`tipoEfectivo`)—
+ * y casa por `claveTipoServicio`. Sin tipo se usa la «*» y se marca `sinTipo`.
+ */
+export function duracionDeEtapa(
+  duraciones: readonly DuracionEtapa[],
+  etapa: EtapaAgenda,
+  tipoManual: unknown,
+  tipoFuente: unknown,
+): { dias: number | null; origen: 'tipo' | 'defecto' | null; tipo: string; sinTipo: boolean } {
+  const tipo = claveTipoServicio(tipoEfectivo(tipoManual, tipoFuente).tipo);
+  const de = (t: string) => duraciones.find((d) => d.etapa === etapa && d.tipo === t)?.dias ?? null;
+  const exacta = tipo && tipo !== TIPO_POR_DEFECTO ? de(tipo) : null;
+  const dias = exacta ?? de(TIPO_POR_DEFECTO);
+  return { dias, origen: exacta !== null ? 'tipo' : dias !== null ? 'defecto' : null, tipo, sinTipo: tipo === '' };
+}
+
 // ── Contactos: a quién iría el aviso de cada equipo ─────────────────────────
 //
 // El contacto de un equipo sale del ticket más reciente de Zoho Desk con su

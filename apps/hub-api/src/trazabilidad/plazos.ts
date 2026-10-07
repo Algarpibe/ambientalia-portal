@@ -34,7 +34,7 @@ const MARGEN_FESTIVOS_DIAS = 31;
 /** Lo ya preguntado: el reloj con pausas mira cada día varias veces. Se vacía solo si crece de más. */
 const habiles = new Map<string, boolean>();
 
-function esHabil(fecha: string): boolean {
+export function esHabil(fecha: string): boolean {
   let h = habiles.get(fecha);
   if (h === undefined) {
     h = contarDiasHabiles(fecha, fecha) === 1;
