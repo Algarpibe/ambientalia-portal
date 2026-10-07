@@ -45,8 +45,10 @@ const FILA_DESK2: Fila = {
   fecha_creacion: '2026-09-28',
   prioridad: 'High',
   llegada_ms: '1790000000000',
+  asunto: null,
+  codigo_servicio: null,
 };
-const FILA_REPLICA: Fila = { numero: '884', estado: 'Ingresado', tipo_estado: 'Open', clasificacion: null, tipo_servicio: '', remision_entrada: null, fecha_creacion: '2026-08-03', prioridad: null, llegada_ms: null };
+const FILA_REPLICA: Fila = { numero: '884', estado: 'Ingresado', tipo_estado: 'Open', clasificacion: null, tipo_servicio: '', remision_entrada: null, fecha_creacion: '2026-08-03', prioridad: null, llegada_ms: null, asunto: ' Equipo Nuevo - Cliente Uno ', codigo_servicio: ' HV_18A00001_EDM180C ' };
 
 const SINC_DESK2 = Date.UTC(2026, 9, 6, 12, 0, 0);
 const SINC_REPLICA = Date.UTC(2026, 9, 6, 9, 0, 0);
@@ -74,11 +76,13 @@ describe('normalizarTicket', () => {
       fechaCreacion: '2026-09-28',
       prioridad: 'High',
       llegadaEstado: 1790000000000,
+      asunto: null,
+      codigoServicio: null,
       fuente: 'principal',
     });
   });
 
-  it('una fila de la réplica: el mismo tipo, con null en lo que la réplica no tiene', () => {
+  it('una fila de la réplica: el mismo tipo, con null en lo que la réplica no tiene, y el asunto y el código para deducir el flujo (D11)', () => {
     expect(normalizarTicket(FILA_REPLICA, 'respaldo')).toEqual<TicketTaller>({
       numero: 884,
       estado: 'Ingresado',
@@ -89,8 +93,22 @@ describe('normalizarTicket', () => {
       fechaCreacion: '2026-08-03',
       prioridad: null,
       llegadaEstado: null,
+      asunto: 'Equipo Nuevo - Cliente Uno',
+      codigoServicio: 'HV_18A00001_EDM180C',
       fuente: 'respaldo',
     });
+  });
+
+  it('la réplica lee el asunto y el código de servicio; Desk 2.0 no los pide: allí el flujo sale de la clasificación', async () => {
+    const replica = replicaSana();
+    const desk2 = desk2Sana();
+    await crearFuenteAgenda({ hub: replica.db, desk2: () => null }).ticketsAbiertos();
+    await crearFuenteAgenda({ hub: replica.db, desk2: () => desk2.db }).ticketsAbiertos();
+    expect(replica.consultas[0].sql).toMatch(/t\.subject AS asunto/);
+    expect(replica.consultas[0].sql).toMatch(/t\.codigo_servicio\b/);
+    expect(desk2.consultas[0].sql).toMatch(/NULL::text AS asunto/);
+    expect(desk2.consultas[0].sql).toMatch(/NULL::text AS codigo_servicio/);
+    expect(desk2.consultas[0].sql).not.toMatch(/subject/);
   });
 
   it('las dos fuentes dan exactamente las mismas claves, y ninguna es una marca «sin confirmar» (D13)', () => {

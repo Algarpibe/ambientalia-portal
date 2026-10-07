@@ -752,8 +752,8 @@ describe('agenda: diagnóstico de la fuente', () => {
   const RUTA = '/api/trazabilidad/agenda/fuente';
   const URL_FICTICIA = 'postgres://lector_ficticio:clave-ficticia@desk-ficticio.invalid:5432/desk';
   const SINC = Date.UTC(2026, 9, 6, 12, 0, 0);
-  const fila = (numero: number, estado: string) => ({ numero, estado, tipo_estado: 'Open', clasificacion: null, tipo_servicio: null, remision_entrada: null, fecha_creacion: '2026-10-01', prioridad: null, llegada_ms: null });
-  /** La réplica con tres tickets abiertos, sincronizada hace un minuto. */
+  const fila = (numero: number, estado: string) => ({ numero, estado, tipo_estado: 'Open', clasificacion: null, tipo_servicio: null, remision_entrada: null, fecha_creacion: '2026-10-01', prioridad: null, llegada_ms: null, asunto: `Asunto reservado ${numero}`, codigo_servicio: `MT_18A0${numero}_EDM180C` });
+  /** La réplica con tres tickets abiertos (con su asunto y su código, que no deben salir), sincronizada hace un minuto. */
   const replica: DbLectura = {
     query: async (sql) => ({ rows: sql.includes('max(synced_at)') ? [{ ms: SINC }] : [fila(880, 'Ingresado'), fila(984, 'En Proceso'), fila(990, 'En Proceso')] }),
   };
@@ -796,6 +796,8 @@ describe('agenda: diagnóstico de la fuente', () => {
         ],
       },
     });
+    // La fuente ya lee el asunto y el código de cada ticket (para deducir el flujo): de aquí no salen.
+    expect(JSON.stringify(res.body)).not.toMatch(/Asunto reservado|MT_18A0|asunto|codigo/i);
   });
 
   it('tal como lo monta el servidor, sin DESK2_DB_URL responde con el respaldo y sin error', async () => {

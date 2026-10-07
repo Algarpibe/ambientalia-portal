@@ -17,6 +17,9 @@ import type { DbLectura, FilaTicket } from './fuente.js';
  *   y la réplica no sabe cuál es (D1).
  * · `llegada_ms` es siempre NULL: la réplica no tiene transiciones. La
  *   llegada aproximada sale del historial del portal, que no es de este módulo.
+ * · `asunto` y `codigo_servicio` son columnas de siempre de la réplica (las
+ *   lee «Servicios» en repo.ts): se piden tal cual. Sólo sirven para deducir
+ *   el flujo cuando la clasificación viene vacía (D11, `flujoDeTicket`).
  */
 export async function leerTicketsReplica(db: DbLectura): Promise<FilaTicket[]> {
   const { rows } = await db.query(
@@ -25,7 +28,8 @@ export async function leerTicketsReplica(db: DbLectura): Promise<FilaTicket[]> {
             to_jsonb(t)->>'fecha_remision_entrada' AS remision_entrada,
             COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS fecha_creacion,
             NULL::text AS prioridad,
-            NULL::float8 AS llegada_ms
+            NULL::float8 AS llegada_ms,
+            t.subject AS asunto, t.codigo_servicio
        FROM desk.tickets t
       WHERE t.status_type IS DISTINCT FROM 'Closed'
       ORDER BY t.number`,
