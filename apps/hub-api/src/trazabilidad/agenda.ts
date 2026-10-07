@@ -15,7 +15,8 @@
  * reparto FIFO.
  *
  * La salida es un objeto serializable, sin clientes, seriales ni correos:
- * sólo números de ticket, estados, fechas y marcas.
+ * sólo números de ticket, estados, fechas y marcas. El asunto de cada ticket
+ * (lote 7) va aparte, en `detallesDeTickets`.
  */
 
 import { hoyEnColombia } from '../ausencias/saldo.js';
