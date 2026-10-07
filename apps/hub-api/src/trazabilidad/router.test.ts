@@ -27,12 +27,33 @@ vi.mock('../db.js', () => ({
 const { createTrazabilidadRouter } = await import('./router.js');
 const { reiniciarRegistroEstados } = await import('./registro-estados.js');
 
+const { PERMISOS, ROLES_APP, permisosDe, puede } = await import('./roles.js');
+type Permiso = (typeof PERMISOS)[number];
+type RolApp = (typeof ROLES_APP)[number];
+
+/** El rol guardado de cada usuario (portal.tmc_user_roles). Sin entrada = sin fila = LECTOR. */
+const rolesApp = new Map<string, string>();
+/** Usuarios que «existen» en portal.users para el PUT de roles, con su rol en el portal. */
+const usuariosPortal = new Map<string, 'admin' | 'reader'>();
+const usuarios = { add: (id: string, role: 'admin' | 'reader' = 'reader') => usuariosPortal.set(id, role), clear: () => usuariosPortal.clear() };
+/** Las consultas de negocio. La del rol de quien pide NO entra aquí: va antes y no es de negocio. */
 const queries: string[] = [];
+/** Veces que se ha mirado el rol de alguien. */
+const consultasRol = { n: 0 };
 /** Veces que se ha pedido una conexión para una transacción (sólo la pide el registro de estados). */
 const conexiones = { n: 0 };
 const fakePool = {
-  query: async (sql: string) => {
+  query: async (sql: string, params: unknown[] = []) => {
+    if (sql.includes('FROM portal.tmc_user_roles') && sql.includes('WHERE user_id')) {
+      consultasRol.n++;
+      const role = rolesApp.get(String(params[0]));
+      return { rows: role ? [{ role }] : [], rowCount: role ? 1 : 0 };
+    }
     queries.push(sql);
+    if (sql.includes('FROM portal.users WHERE id')) {
+      const role = usuariosPortal.get(String(params[0]));
+      return { rows: role ? [{ role }] : [], rowCount: role ? 1 : 0 };
+    }
     return { rows: [], rowCount: 0 };
   },
   connect: async () => {
@@ -49,16 +70,29 @@ function app() {
 }
 
 let seq = 0;
-function tokenFor(apps: string[] = ['trazabilidad-mantenimientos']): string {
+/**
+ * Un usuario nuevo y su token. Por defecto tiene la app y es Director Técnico,
+ * para que las pruebas de validación lleguen a la validación; `rol: null` lo
+ * deja sin fila (LECTOR) y `portal: 'admin'` lo hace administrador del portal.
+ */
+function tokenFor(apps: string[] = ['trazabilidad-mantenimientos'], opts: { rol?: string | null; portal?: string } = {}): string {
   const userId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
-  authState.byUser.set(userId, { role: 'reader', apps });
+  authState.byUser.set(userId, { role: opts.portal ?? 'reader', apps });
+  const rol = opts.rol === undefined ? 'DIRECTOR_TECNICO' : opts.rol;
+  if (rol) rolesApp.set(userId, rol);
   return jwt.sign({ sub: `u${seq}@ambientalia.com.co`, user_id: userId, token_version: 0 }, SECRET, { algorithm: 'HS256' });
 }
 const auth = (t = tokenFor()) => ({ Authorization: `Bearer ${t}` });
+/** Cabecera de alguien con la app y ese rol (`null` = sin fila). */
+const conRol = (rol: string | null) => auth(tokenFor(undefined, { rol }));
+/** Cabecera de un administrador del portal: sin la app asignada y sin fila de rol. */
+const comoAdmin = () => auth(tokenFor([], { rol: null, portal: 'admin' }));
 
 beforeEach(() => {
   queries.length = 0;
   conexiones.n = 0;
+  consultasRol.n = 0;
+  usuarios.clear();
 });
 
 describe('guardas', () => {
@@ -81,6 +115,249 @@ describe('guardas', () => {
     const res = await request(app()).get('/api/trazabilidad/equipos?hoy=06-10-2026').set(auth());
     expect(res.status).toBe(400);
     expect(res.body.field).toBe('hoy');
+  });
+});
+
+// Roles de la app: cada escritura comprueba el permiso EN EL SERVIDOR, antes de
+// validar y antes de cualquier consulta de negocio. Las lecturas siguen abiertas
+// a quien tenga la app. La matriz (qué puede cada rol) la recorre roles.test.ts;
+// aquí se comprueba que cada ruta pide el permiso que le toca.
+describe('permisos por rol', () => {
+  type Pedir = (cabecera: { Authorization: string }) => request.Test;
+  const fila = { serial: '18A00001', cliente: 'Cliente Uno', marca: 'Grimm', modelo: 'EDM 180C' };
+  const ESCRITURAS: { ruta: string; permiso: Permiso; pedir: Pedir }[] = [
+    { ruta: 'PUT /trazabilidad/contactos', permiso: 'contactos.write', pedir: (c) => request(app()).put('/api/trazabilidad/contactos').set(c).send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example'] }) },
+    { ruta: 'POST /trazabilidad/importaciones?simular=1', permiso: 'importar', pedir: (c) => request(app()).post('/api/trazabilidad/importaciones?simular=1').set(c).send({ archivo: 'x.xlsx', filas: [fila] }) },
+    { ruta: 'PUT /trazabilidad/seguimiento/:clave', permiso: 'seguimiento.write', pedir: (c) => request(app()).put('/api/trazabilidad/seguimiento/18A00001').set(c).send({ enAmbientalia: true }) },
+    { ruta: 'POST /trazabilidad/avisos', permiso: 'avisos.write', pedir: (c) => request(app()).post('/api/trazabilidad/avisos').set(c).send({ claves: ['18A00001'], fecha: '2026-10-06' }) },
+    { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
+    { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
+    { ruta: 'PUT /trazabilidad/estados', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/estados').set(c).send({ estado: 'Servicio externo', rol: 'standby' }) },
+  ];
+  const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
+
+  it('son las siete escrituras del router, y ninguna queda sin permiso: toda ruta que escribe pasa por escritura() o soloAdmin()', () => {
+    const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
+    const rutas = src.split(/\n\s*router\./).slice(1);
+    const escriben = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
+    expect(escriben).toHaveLength(ESCRITURAS.length + 1); // + PUT /trazabilidad/roles/:userId
+    for (const r of escriben) expect(r).toMatch(/\.\.\.gated,\s*(escritura\('[a-z.]+',|soloAdmin\()/);
+    const pedidos = escriben.map((r) => /escritura\('([a-z.]+)'/.exec(r)?.[1]).filter(Boolean);
+    expect(pedidos.sort()).toEqual(ESCRITURAS.map((e) => e.permiso).sort());
+    for (const r of rutas.filter((x) => /^get\(/.test(x))) expect(r).not.toMatch(/escritura\(/);
+  });
+
+  it.each(casos.filter((c) => !c.pasa))('$rol no puede $ruta → 403 en español y ninguna consulta de negocio', async ({ rol, pedir }) => {
+    const res = await pedir(conRol(rol === 'LECTOR' ? null : rol));
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('forbidden_role');
+    expect(res.body.message).toMatch(/^Tu rol en Trazabilidad \(.+\) no permite /);
+    expect(queries).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it.each(casos.filter((c) => c.pasa))('$rol sí puede $ruta', async ({ pedir, rol }) => {
+    const res = await pedir(conRol(rol));
+    expect([200, 404]).toContain(res.status); // 404 = pasó el permiso y no encontró el equipo o el ticket en el doble
+    expect(queries.length).toBeGreaterThan(0);
+  });
+
+  it.each(ESCRITURAS)('sin fila de rol se es LECTOR: $ruta → 403', async ({ pedir }) => {
+    const res = await pedir(conRol(null));
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/\(Lector\)/);
+    expect(queries).toEqual([]);
+  });
+
+  it.each(ESCRITURAS)('un rol guardado que no se conoce vale lo que LECTOR: $ruta → 403', async ({ pedir }) => {
+    expect((await pedir(conRol('JEFE'))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each(ESCRITURAS)('un administrador del portal puede $ruta sin la app asignada ni fila de rol, y sin que se mire su rol', async ({ pedir }) => {
+    const res = await pedir(comoAdmin());
+    expect([200, 404]).toContain(res.status);
+    expect(consultasRol.n).toBe(0);
+  });
+
+  it('el permiso va antes que la validación: un cuerpo no válido de un LECTOR es 403, no 400', async () => {
+    const c = conRol(null);
+    expect((await request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: '', dias: 'tres' })).status).toBe(403);
+    expect((await request(app()).put('/api/trazabilidad/seguimiento/a%20b').set(c).send({})).status).toBe(403);
+    expect((await request(app()).put('/api/trazabilidad/servicios/abc/tipo').set(c).send({})).status).toBe(403);
+    expect((await request(app()).put('/api/trazabilidad/contactos?hoy=ayer').set(c).send([])).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it('importar de verdad (sin simular) tampoco: 403 y ni se abre la transacción', async () => {
+    for (const rol of [null, 'COMERCIAL', 'TECNICO']) {
+      const res = await request(app()).post('/api/trazabilidad/importaciones').set(conRol(rol)).send({ archivo: 'x.xlsx', filas: [fila] });
+      expect(res.status).toBe(403);
+    }
+    expect(queries).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it('sin la app asignada manda el 403 de la app, tenga el rol que tenga, y no se mira el rol', async () => {
+    for (const { pedir } of ESCRITURAS) {
+      const res = await pedir(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('forbidden');
+    }
+    expect(consultasRol.n).toBe(0);
+    expect(queries).toEqual([]);
+  });
+
+  it('401 sin token en todas las escrituras', async () => {
+    for (const { pedir } of ESCRITURAS) expect((await pedir({ Authorization: '' })).status).toBe(401);
+    expect(queries).toEqual([]);
+  });
+
+  it.each(['/equipos', '/servicios', '/plazos', '/estados'])('leer sigue abierto a un LECTOR, y no hace falta mirar su rol: GET %s → 200', async (ruta) => {
+    const res = await request(app()).get(`/api/trazabilidad${ruta}`).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(consultasRol.n).toBe(0);
+  });
+});
+
+describe('roles: quién soy', () => {
+  const me = (c?: { Authorization: string }) => {
+    const r = request(app()).get('/api/trazabilidad/roles/me');
+    return c ? r.set(c) : r;
+  };
+
+  it('401 sin token y 403 sin la app', async () => {
+    expect((await me()).status).toBe(401);
+    expect((await me(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it('con la app y sin fila de rol se es LECTOR: ningún permiso', async () => {
+    const res = await me(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ role: 'LECTOR', admin: false, permissions: [], canManageRoles: false });
+    expect(res.body.email).toMatch(/@ambientalia\.com\.co$/);
+    expect(res.body.userId).toMatch(/^00000000-0000-4000-8000-/);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([...ROLES_APP])('con el rol %s guardado devuelve ese rol y sus permisos de la matriz', async (rol) => {
+    const res = await me(conRol(rol));
+    expect(res.body).toMatchObject({ role: rol, admin: false, canManageRoles: false });
+    expect(res.body.permissions).toEqual(permisosDe(rol as RolApp));
+    expect(res.body.permissions).not.toContain('roles.manage');
+  });
+
+  it('un rol guardado que no se conoce cae a LECTOR', async () => {
+    expect((await me(conRol('JEFE'))).body).toMatchObject({ role: 'LECTOR', permissions: [] });
+  });
+
+  it('un administrador del portal tiene todos los permisos y gestiona roles, sin la app y sin fila', async () => {
+    const res = await me(comoAdmin());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ role: 'LECTOR', admin: true, canManageRoles: true });
+    expect(res.body.permissions).toEqual([...PERMISOS]);
+  });
+
+  it('un administrador con rol guardado conserva el rol a la vista, y sigue pudiendo todo', async () => {
+    const res = await me(auth(tokenFor([], { rol: 'COMERCIAL', portal: 'admin' })));
+    expect(res.body).toMatchObject({ role: 'COMERCIAL', admin: true });
+    expect(res.body.permissions).toEqual([...PERMISOS]);
+  });
+});
+
+describe('roles: repartirlos (sólo administradores del portal)', () => {
+  const ID = '00000000-0000-4000-8000-999999999999';
+  const lista = (c?: { Authorization: string }) => {
+    const r = request(app()).get('/api/trazabilidad/roles');
+    return c ? r.set(c) : r;
+  };
+  const put = (userId: string, body: unknown, c?: { Authorization: string }) => {
+    const r = request(app()).put(`/api/trazabilidad/roles/${userId}`);
+    return (c ? r.set(c) : r).send(body as object);
+  };
+
+  it('401 sin token y 403 sin la app, en la lista y en el cambio', async () => {
+    expect((await lista()).status).toBe(401);
+    expect((await put(ID, { role: 'TECNICO' })).status).toBe(401);
+    expect((await lista(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect((await put(ID, { role: 'TECNICO' }, auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([...ROLES_APP])('ni siquiera un %s que no sea administrador: 403 en español, en la lista y en el cambio, sin tocar nada', async (rol) => {
+    usuarios.add(ID);
+    for (const res of [await lista(conRol(rol)), await put(ID, { role: 'DIRECTOR_TECNICO' }, conRol(rol))]) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('forbidden_admin');
+      expect(res.body.message).toMatch(/administrador del portal/);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('nadie se sube el rol a sí mismo', async () => {
+    const t = tokenFor(undefined, { rol: 'COMERCIAL' });
+    const yo = (jwt.decode(t) as { user_id: string }).user_id;
+    usuarios.add(yo);
+    expect((await put(yo, { role: 'DIRECTOR_TECNICO' }, auth(t))).status).toBe(403);
+    expect(rolesApp.get(yo)).toBe('COMERCIAL');
+    expect(queries).toEqual([]);
+  });
+
+  it('un administrador ve la lista', async () => {
+    const res = await lista(comoAdmin());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ usuarios: [] });
+    expect(queries.some((q) => /portal\.user_apps/.test(q) && /portal\.tmc_user_roles/.test(q))).toBe(true);
+  });
+
+  it.each(['abc', '123', `${ID}x`, '00000000-0000-4000-8000-99999999999g'])('un usuario que no es un UUID (%s) → 400 en «userId» y ninguna consulta', async (userId) => {
+    const res = await put(userId, { role: 'TECNICO' }, comoAdmin());
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('userId');
+    expect(queries).toEqual([]);
+  });
+
+  it.each([undefined, null, '', 'ADMIN', 'admin', 'tecnico', ' TECNICO', 3, true, ['TECNICO'], { a: 1 }, 'constructor'])('un rol que no es de la matriz (%j) → 400 en «role» y ninguna consulta', async (role) => {
+    usuarios.add(ID);
+    const res = await put(ID, { role }, comoAdmin());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_input');
+    expect(res.body.field).toBe('role');
+    expect(res.body.message).toMatch(/LECTOR, COMERCIAL, TECNICO, DIRECTOR_TECNICO/);
+    expect(queries).toEqual([]);
+  });
+
+  it('un cuerpo que no es un objeto → 400', async () => {
+    expect((await put(ID, [], comoAdmin())).status).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it('un usuario que no existe → 404 y no se escribe nada', async () => {
+    const res = await put(ID, { role: 'TECNICO' }, comoAdmin());
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/usuario/i);
+    expect(queries.some((q) => /INSERT|UPDATE|DELETE/.test(q))).toBe(false);
+  });
+
+  it.each([...ROLES_APP])('un administrador pone el rol %s: 200 con {userId, role} y lo escribe', async (role) => {
+    usuarios.add(ID);
+    const res = await put(ID.toUpperCase(), { role }, comoAdmin());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ userId: ID, role });
+    expect(queries.some((q) => /INSERT INTO portal\.tmc_user_roles/.test(q))).toBe(true);
+  });
+
+  // Un administrador del portal lo puede todo sin rol: ponerle uno no cambiaría
+  // nada y dejaría un dato que engaña. La lista lo enseña en sólo lectura y el
+  // servidor lo rechaza igual, lo pida quien lo pida.
+  it.each([...ROLES_APP])('a un administrador del portal no se le pone rol (%s): 409 en español y no se escribe nada', async (role) => {
+    usuarios.add(ID, 'admin');
+    const res = await put(ID, { role }, comoAdmin());
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('usuario_admin');
+    expect(res.body.message).toMatch(/administrador del portal/);
+    expect(queries.some((q) => /INSERT|UPDATE|DELETE/.test(q))).toBe(false);
   });
 });
 

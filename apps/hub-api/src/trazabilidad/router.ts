@@ -6,6 +6,7 @@ import { hoyEnColombia } from '../ausencias/saldo.js';
 import { festivosDelEje } from './plazos.js';
 import { registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
+import { ETIQUETA_ROL_APP, permisosDe, puede, resolverRol, type Permiso, type RolApp } from './roles.js';
 import {
   TzError,
   esClave,
@@ -15,21 +16,29 @@ import {
   parseImportacion,
   parseNumeroTicket,
   parsePlazo,
+  parseRolApp,
   parseSeguimiento,
   parseTipoManual,
+  parseUserId,
   type Actor,
+  type MiRol,
 } from './types.js';
 
 // Router de «Trazabilidad Mantenimientos Clientes» (GRIMM EDM 180). Se monta
 // bajo /api. Sin cached(): el seguimiento cambia con cada aviso que se registra.
 //
-// Permisos: cualquiera con la app asignada lee, importa, registra seguimiento,
-// cambia los plazos, pone a mano el tipo de servicio de un ticket, elige el
-// rol de cada estado de Desk y pone a mano el contacto de un cliente; cada
-// importación y cada cambio quedan firmados con el correo de quien lo hizo
-// (tmc_importaciones, tmc_seguimiento.actualizado_por,
+// Permisos: leer (los GET) está abierto a cualquiera con la app asignada. Cada
+// ruta que escribe pide además un permiso de la matriz de roles.ts, según el
+// rol de la persona en portal.tmc_user_roles (sin fila = LECTOR, que no cambia
+// nada): se registra con `escritura(permiso, …)`, que lo comprueba antes de
+// validar y antes de cualquier consulta de negocio, y responde 403 en español.
+// Los administradores del portal lo pueden todo y son los únicos que reparten
+// roles (`soloAdmin`). router.test.ts falla si una ruta que escribe se registra
+// sin una de las dos. Cada importación y cada cambio quedan firmados con el
+// correo de quien lo hizo (tmc_importaciones, tmc_seguimiento.actualizado_por,
 // tmc_plazos.actualizado_por, tmc_servicios_tipo.actualizado_por,
-// tmc_estados_desk.actualizado_por, tmc_contactos.actualizado_por).
+// tmc_estados_desk.actualizado_por, tmc_contactos.actualizado_por,
+// tmc_user_roles.actualizado_por).
 
 export const APP_ID = 'trazabilidad-mantenimientos';
 
@@ -46,6 +55,11 @@ function sendError(res: Response, e: unknown, ctx: string): void {
 function actorOf(req: Request): Actor {
   const p = getPayload(req);
   return { userId: p?.user_id ? String(p.user_id) : null, email: String(p?.sub ?? '').toLowerCase() };
+}
+
+/** Administrador del portal: lo dice la base en cada petición (requireAuth pisa el `role` del token). */
+function esAdminPortal(req: Request): boolean {
+  return getPayload(req)?.role === 'admin';
 }
 
 /** ?hoy=AAAA-MM-DD para consultar a otra fecha; por defecto, hoy en Colombia. */
@@ -72,6 +86,78 @@ export function createTrazabilidadRouter(db: Pool): Router {
       }
     };
 
+  /** El rol de quien pide, leído de portal.tmc_user_roles. Sin fila (o sin id en el token) es LECTOR. */
+  const rolDe = async (req: Request): Promise<RolApp> => {
+    const { userId } = actorOf(req);
+    return userId ? resolverRol(await repo.rolDeUsuario(db, userId)) : resolverRol(null);
+  };
+
+  /**
+   * Una ruta que escribe: antes de nada —de validar y de cualquier consulta de
+   * negocio— comprueba que quien pide tiene ese permiso. Un administrador del
+   * portal pasa sin que haga falta mirar su rol.
+   */
+  const escritura = (permiso: Permiso, ctx: string, fn: (req: Request) => Promise<unknown>) =>
+    route(ctx, async (req) => {
+      if (!esAdminPortal(req)) {
+        const rol = await rolDe(req);
+        if (!puede(rol, permiso)) {
+          throw new TzError('forbidden_role', 403, `Tu rol en Trazabilidad (${ETIQUETA_ROL_APP[rol]}) no permite hacer este cambio. Pide a un administrador del portal que te asigne el rol que necesitas.`);
+        }
+      }
+      return fn(req);
+    });
+
+  /** Una ruta de reparto de roles: sólo para administradores del portal, tenga quien pide el rol que tenga. */
+  const soloAdmin = (ctx: string, fn: (req: Request) => Promise<unknown>) =>
+    route(ctx, async (req) => {
+      if (!esAdminPortal(req)) {
+        throw new TzError('forbidden_admin', 403, 'Sólo un administrador del portal puede ver y repartir los roles de Trazabilidad.');
+      }
+      return fn(req);
+    });
+
+  // ── Roles ────────────────────────────────────────────────────────────────
+
+  // Quién soy en la app: mi rol y lo que puedo hacer. Con `permissions` la app
+  // oculta o desactiva lo que no toca; la guarda de verdad es `escritura`.
+  router.get(
+    '/trazabilidad/roles/me',
+    ...gated,
+    route('tmc_roles_me', async (req): Promise<MiRol> => {
+      const { userId, email } = actorOf(req);
+      const admin = esAdminPortal(req);
+      const role = await rolDe(req);
+      return { userId: userId ?? '', email, role, admin, permissions: permisosDe(role, admin), canManageRoles: admin };
+    }),
+  );
+
+  // La gente con la app (más quien ya tiene rol y los administradores) y su rol.
+  router.get(
+    '/trazabilidad/roles',
+    ...gated,
+    soloAdmin('tmc_roles', async () => ({ usuarios: await repo.listarUsuariosRol(db, APP_ID) })),
+  );
+
+  // Pone el rol de una persona: {role}. LECTOR también se guarda (queda quién lo dejó así).
+  // A un administrador del portal no se le pone rol: ya lo puede todo, así que
+  // el rol no cambiaría nada y quedaría un dato que engaña (409).
+  router.put(
+    '/trazabilidad/roles/:userId',
+    ...gated,
+    soloAdmin('tmc_rol', async (req) => {
+      const userId = parseUserId(req.params.userId);
+      const { role } = parseRolApp(req.body);
+      const usuario = await repo.usuarioPortal(db, userId);
+      if (!usuario) throw new TzError('not_found', 404, 'Ese usuario no existe en el portal.');
+      if (usuario.admin) {
+        throw new TzError('usuario_admin', 409, 'Esa persona es administrador del portal: ya tiene todos los permisos y no lleva rol en esta app.');
+      }
+      await repo.guardarRol(db, userId, role, actorOf(req));
+      return { userId, role };
+    }),
+  );
+
   // El inventario: equipos con su estado, su seguimiento, su ticket abierto y
   // su contacto, más los contactos puestos a mano a clientes (`contactos`), que
   // la app necesita enteros para simular a quién iría cada aviso.
@@ -93,7 +179,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.put(
     '/trazabilidad/contactos',
     ...gated,
-    route('tmc_contacto', async (req) => {
+    escritura('contactos.write', 'tmc_contacto', async (req) => {
       const cambio = parseContacto(req.body);
       const hoy = hoyOf(req);
       await repo.guardarContacto(db, cambio, actorOf(req));
@@ -105,7 +191,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.post(
     '/trazabilidad/importaciones',
     ...gated,
-    route('tmc_importar', async (req) => {
+    escritura('importar', 'tmc_importar', async (req) => {
       const imp = parseImportacion(req.body);
       return repo.importar(db, imp, actorOf(req), req.query.simular === '1');
     }),
@@ -114,7 +200,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.put(
     '/trazabilidad/seguimiento/:clave',
     ...gated,
-    route('tmc_seguimiento', async (req) => {
+    escritura('seguimiento.write', 'tmc_seguimiento', async (req) => {
       const clave = req.params.clave;
       if (!esClave(clave)) throw new TzError('invalid_input', 400, 'Clave de equipo no válida.', 'clave');
       await repo.guardarSeguimiento(db, clave, parseSeguimiento(req.body), actorOf(req));
@@ -125,7 +211,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.post(
     '/trazabilidad/avisos',
     ...gated,
-    route('tmc_avisos', async (req) => {
+    escritura('avisos.write', 'tmc_avisos', async (req) => {
       const { claves, fecha } = parseAvisos(req.body);
       return { actualizados: await repo.registrarAvisos(db, claves, fecha, actorOf(req)) };
     }),
@@ -160,7 +246,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.put(
     '/trazabilidad/servicios/:numero/tipo',
     ...gated,
-    route('tmc_servicio_tipo', async (req) => {
+    escritura('servicios.tipo.write', 'tmc_servicio_tipo', async (req) => {
       const numero = parseNumeroTicket(req.params.numero);
       const { tipo } = parseTipoManual(req.body);
       const hoy = hoyOf(req);
@@ -180,7 +266,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.put(
     '/trazabilidad/plazos',
     ...gated,
-    route('tmc_plazo', async (req) => {
+    escritura('config.write', 'tmc_plazo', async (req) => {
       await repo.guardarPlazo(db, parsePlazo(req.body), actorOf(req));
       return { plazos: await repo.listarPlazos(db) };
     }),
@@ -199,7 +285,7 @@ export function createTrazabilidadRouter(db: Pool): Router {
   router.put(
     '/trazabilidad/estados',
     ...gated,
-    route('tmc_estado', async (req) => {
+    escritura('config.write', 'tmc_estado', async (req) => {
       await repo.guardarEstadoDesk(db, parseEstadoDesk(req.body), actorOf(req));
       return { estados: await repo.listarEstadosDesk(db) };
     }),

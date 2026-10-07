@@ -4,6 +4,7 @@ import { api, type Inventario } from '../api';
 import { CONTACTO_MAX_EMAILS, planAvisos, type AvisoEquipo, type ContactoCliente, type CorreoSimulado, type Destinatario, type EquipoVista, type TramoAviso } from '../dominio';
 import { correoAviso, etiquetaOrigen, fechaRelevante, resumenSimulacion, revisarEmails, textoParaCopiar } from '../lib/simulacion';
 import { fmtFecha } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, TONO, Tag } from '../ui';
 
 /**
@@ -40,8 +41,11 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
   const manualDe = useMemo(() => new Map(contactos.map((c) => [c.clave, c])), [contactos]);
   /** El grupo cuyo editor de contacto está abierto. */
   const [editando, setEditando] = useState<string | null>(null);
+  /** Poner o cambiar el contacto de un cliente es lo único que aquí escribe: sin el permiso no se ofrece. */
+  const { puede, motivo } = usePermisos();
+  const puedeContactos = puede('contactos.write');
 
-  const editor = (c: CorreoSimulado<EquipoVista>, onCancel?: () => void) => (
+  const editor =(c: CorreoSimulado<EquipoVista>, onCancel?: () => void) => (
     <EditorContacto
       cliente={c.cliente}
       actual={manualDe.get(c.claveCliente)}
@@ -84,15 +88,16 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
                 <Tarjeta key={id} correo={c} onFicha={onFicha}>
                   <Destinatarios lista={c.destinatarios} />
                   <Vista correo={c} notificar={notificar} />
-                  {editando === id ? (
-                    editor(c, () => setEditando(null))
-                  ) : (
-                    <div>
-                      <Button variant="ghost" className="-ml-2" onClick={() => setEditando(id)}>
-                        <Pencil className="h-4 w-4" aria-hidden /> Cambiar destinatario
-                      </Button>
-                    </div>
-                  )}
+                  {puedeContactos &&
+                    (editando === id ? (
+                      editor(c, () => setEditando(null))
+                    ) : (
+                      <div>
+                        <Button variant="ghost" className="-ml-2" onClick={() => setEditando(id)}>
+                          <Pencil className="h-4 w-4" aria-hidden /> Cambiar destinatario
+                        </Button>
+                      </div>
+                    ))}
                 </Tarjeta>
               );
             })}
@@ -107,13 +112,14 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
               Sin destinatario ({plan.sinDestinatario.length})
             </h3>
             <p className="text-sm text-gray-500">
-              A estos clientes les tocaría el aviso, pero ningún ticket de Desk de sus equipos trae un correo que sirva (los correos de Ambientalia no cuentan). Ponles un contacto.
+              A estos clientes les tocaría el aviso, pero ningún ticket de Desk de sus equipos trae un correo que sirva (los correos de Ambientalia no cuentan).{' '}
+              {puedeContactos ? 'Ponles un contacto.' : `Falta ponerles un contacto. ${motivo}`}
             </p>
           </div>
           <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
             {plan.sinDestinatario.map((c) => (
               <Tarjeta key={idGrupo(c)} correo={c} onFicha={onFicha}>
-                {editor(c)}
+                {puedeContactos && editor(c)}
               </Tarjeta>
             ))}
           </div>

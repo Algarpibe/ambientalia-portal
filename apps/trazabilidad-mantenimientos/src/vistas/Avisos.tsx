@@ -3,6 +3,7 @@ import { Copy, Mail } from 'lucide-react';
 import { api, type Inventario } from '../api';
 import type { ContactoCliente, EquipoVista } from '../dominio';
 import { avisosPorCliente, fmtFecha, mensajeAviso, type GrupoAviso } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, Modal, TONO, Tag } from '../ui';
 import SimulacionAvisos from './SimulacionAvisos';
 
@@ -37,6 +38,8 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
   const [redactar, setRedactar] = useState<GrupoAviso | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Redactar y copiar el aviso lo puede cualquiera; marcar como avisado escribe y pide permiso. */
+  const puedeMarcar = usePermisos().puede('avisos.write');
   const grupos = avisosPorCliente(equipos, ventana);
   const nEquipos = grupos.reduce((s, g) => s + g.equipos.length, 0);
   const nSinAviso = grupos.reduce((s, g) => s + g.sinAviso, 0);
@@ -141,7 +144,7 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
                 <Button onClick={() => setRedactar(g)}>
                   <Mail className="h-4 w-4" aria-hidden /> Redactar aviso
                 </Button>
-                {g.sinAviso > 0 && (
+                {puedeMarcar && g.sinAviso > 0 && (
                   <Button variant="primary" busy={ocupado === g.cliente} onClick={() => void marcar(g)}>
                     Marcar {g.sinAviso} como avisado{g.sinAviso === 1 ? '' : 's'} hoy
                   </Button>

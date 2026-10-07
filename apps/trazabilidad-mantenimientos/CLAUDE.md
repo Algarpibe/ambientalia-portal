@@ -32,9 +32,13 @@ se registra en la app y sobrevive a las reimportaciones.
 | Cuándo se apuntan los cambios de estado: programador de 5 min + al leer «Servicios» (sólo servidor) | `apps/hub-api/src/trazabilidad/registro-estados.ts` |
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
-| HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`) | `apps/hub-api/src/trazabilidad/router.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql` |
+| HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`; cada escritura, además, con `escritura(permiso, …)`) | `apps/hub-api/src/trazabilidad/router.ts` |
+| Roles y matriz de permisos (puro, sin imports; **único sitio** de la matriz; lo usan servidor y UI) | `apps/hub-api/src/trazabilidad/roles.ts` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
+| Navegación en dos niveles (grupos y secciones, `seccionDeHash`) y lo que se enseña según el rol (`tiene`, `etiquetaMiRol`, `motivoSinPermiso`) | `src/lib/navegacion.ts` |
+| Quién soy, al alcance de cualquier vista (`PermisosContext`, `usePermisos`) | `src/permisos.ts` (lo rellena `src/App.tsx` con `GET /roles/me`) |
+| Sección «Roles» (sólo administradores del portal) | `src/vistas/Roles.tsx` |
 | Lectura del Excel en el navegador | `src/lib/importar.ts` |
 | Agregados, calendario y texto del aviso (`mensajeAviso`, también el de cada tramo) | `src/lib/vistas.ts` |
 | Plan del aviso automático (`planAvisos`, `evaluarAviso`), contactos (`contactoDeTickets`, `contactoEfectivo`) y correos (`esEmail`, `esEmailInterno`, `DOMINIOS_INTERNOS`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
@@ -59,11 +63,19 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez |
 | `portal.tmc_estados_historial` | En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
 | `portal.tmc_contactos` | El **contacto puesto a mano a un cliente** (a quién iría su aviso): `clave` (el nombre del cliente normalizado con `claveCliente`, PK, sin FK), `cliente` (como se escribió), `emails` (`TEXT[]`, entre 1 y 5 por `CHECK`, en minúsculas y sin repetir), `nombre` (persona de contacto, `''` si no se puso) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los clientes a los que alguien se lo ha puesto; quitarlo borra la fila. La 048 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla. **Sólo guarda direcciones**: no hay tabla de mensajes, de envíos ni de pendientes en este módulo (`trazabilidad.db.test.ts` vigila la lista de tablas `tmc_*`) |
+| `portal.tmc_user_roles` | El **rol de cada persona en la app**: `user_id` (`UUID`, PK, **con** clave foránea a `portal.users(id)` y `ON DELETE CASCADE`: es la única tabla `tmc_*` que la lleva, porque un rol sin su usuario no significa nada), `role` (`VARCHAR(20) NOT NULL`, **sin valor por defecto**, con `CHECK` a `LECTOR` / `COMERCIAL` / `TECNICO` / `DIRECTOR_TECNICO`) y quién y cuándo lo repartió (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Una fila por usuario; **sin fila se es `LECTOR`**. Cambiar el rol reescribe la fila; poner `LECTOR` también la guarda (queda quién lo dejó así). La 049 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nadie nace con rol. El `CHECK` lleva los mismos valores que `ROLES_APP` de `roles.ts` y `plazos.test.ts` vigila que coincidan |
 
 ## API (`/api/trazabilidad/*`)
 
+Todas piden sesión y la app asignada. Los `GET` no piden nada más. Los que escriben piden además
+un permiso (ver «Permisos»): sin él, 403 `forbidden_role` con mensaje en español, antes de validar
+el cuerpo y antes de cualquier consulta de negocio.
+
 | Método | Ruta | Qué hace |
 |---|---|---|
+| GET | `/trazabilidad/roles/me` | Quién soy en la app: `{userId, email, role, admin, permissions[], canManageRoles}`. `role` es el guardado o `LECTOR` si no hay fila (o si el valor guardado no se conoce); `admin` = administrador del portal; `permissions` son los nombres de la matriz que tiene (todos, si es administrador) y con ellos la UI decide qué enseña; `canManageRoles` = `admin` |
+| GET | `/trazabilidad/roles` | **Sólo administradores del portal** (403 `forbidden_admin` si no). `{usuarios[]}`: quien tiene la app asignada, quien ya tiene un rol guardado y los administradores del portal, por nombre. Cada uno: `{userId, fullName, email, status, admin, role}` |
+| PUT | `/trazabilidad/roles/:userId` | **Sólo administradores del portal.** `{role}`: pone el rol de esa persona y lo firma. Devuelve `{userId, role}`. 400 en `userId` si no es un UUID; 400 en `role` si no es, tal cual, uno de los cuatro; 404 si el usuario no existe en `portal.users`; **409 `usuario_admin` si esa persona es administrador del portal**: ya lo puede todo, así que no lleva rol en la app (en la sección «Roles» sale como «Admin del portal», en sólo lectura y sin desplegable). Un rol guardado de antes de ser administrador se conserva y vuelve a valer si deja de serlo |
 | GET | `/trazabilidad/equipos` (`?hoy=`) | `{hoy, equipos[], ultimaImportacion, contactos[]}`. Equipos activos con estado, seguimiento, `ticket` (el abierto en Zoho Desk, o `null`) y `contacto: {nombre, email, origen: 'desk' \| 'manual', ticket} \| null` (a quién iría su aviso). `contactos` son los puestos a mano a clientes: `{clave, cliente, nombre, emails[], internos[], actualizadoPor, actualizadoEn}` (`internos` = los de `emails` que son de un dominio propio) |
 | PUT | `/trazabilidad/contactos` (`?hoy=`) | `{cliente, emails[], nombre?}`: pone a mano el contacto de un cliente y lo firma; `emails: []` lo quita (vuelve a valer el de Desk). Devuelve lo mismo que el GET de equipos, ya actualizado. 400 en `cliente` si no es un texto no vacío de 200 caracteres como mucho; 400 en `emails` si no es una lista o trae más de 5 correos distintos; 400 en `emails[i]` si ese correo no tiene forma de correo o pasa de 254 caracteres; 400 en `nombre` si no es texto o pasa de 200. Los correos se pasan a minúsculas y se quitan los repetidos. Un correo interno **sí** vale aquí (para probar con un buzón propio) y vuelve señalado en `internos`. **No envía nada** |
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
@@ -76,10 +88,74 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | GET | `/trazabilidad/estados` | `{estados[]}`: todos los estados que existen en `desk.tickets` (de cualquier ticket, cerrados incluidos) más los ya guardados en `tmc_estados_desk` aunque ningún ticket los tenga. Cada uno: `{clave, etiqueta, tipoDesk, ticketsAbiertos, rol, actualizadoPor, actualizadoEn}`; `rol` es `cuenta` (mientras nadie lo cambie), `standby` o `terminado`; `tipoDesk` es el `status_type` de Desk (`Open` / `On Hold` / `Closed`, o `null`) y sólo orienta. Orden: tipo abierto, en espera, cerrado y sin tipo; dentro, más tickets abiertos primero y después alfabético |
 | PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente |
 
-Permisos: cualquiera con la app asignada lee, importa, registra seguimiento, cambia plazos, pone
-a mano el tipo de servicio de un ticket, elige el rol de cada estado de Desk y pone a mano el
-contacto de un cliente; todo queda firmado con su correo. El historial de estados no lo escribe
-nadie a mano: lo apunta hub-api.
+## Permisos
+
+**Leer** está abierto a cualquiera con la app asignada. **Cambiar** algo depende del rol de la
+persona en la app, que reparten los administradores del portal en «Administración» → «Roles».
+Todo cambio sigue quedando firmado con el correo de quien lo hace. El historial de estados no lo
+escribe nadie a mano: lo apunta hub-api.
+
+- **La matriz vive en un solo sitio**: `apps/hub-api/src/trazabilidad/roles.ts` (`ROLES_APP`,
+  `PERMISOS`, `puede`, `permisosDe`, `resolverRol`, `ETIQUETA_ROL_APP`). Es puro y sin imports; la
+  UI lo importa por `src/dominio.ts`. `roles.test.ts` recorre la matriz entera (cada rol × cada
+  permiso). ⚠️ El «rol» de un **estado de Desk** en el reloj (`cuenta` / `standby` / `terminado`,
+  `ROLES_ESTADO` en `dominio.ts`) es otra cosa: lo de las personas lleva siempre «App» o «Permiso».
+- **Sin fila en `portal.tmc_user_roles` se es `LECTOR`** (también con un valor guardado que no se
+  conozca). Al desplegar esto, por tanto, todos pasan a Lector salvo los administradores.
+- **Administradores del portal** (`portal.users.role = 'admin'`, que `requireAuth` relee de la base
+  en cada petición): tienen **todos** los permisos, tengan el rol que tengan y sin necesidad de
+  fila, y son los **únicos** que reparten roles (`roles.manage` no lo tiene ningún rol).
+
+| Permiso | Lector | Comercial | Técnico | Director Técnico | Qué protege hoy |
+|---|:-:|:-:|:-:|:-:|---|
+| `seguimiento.write` | — | sí | sí | sí | `PUT /trazabilidad/seguimiento/:clave` |
+| `avisos.write` | — | sí | — | sí | `POST /trazabilidad/avisos` |
+| `contactos.write` | — | sí | — | sí | `PUT /trazabilidad/contactos` |
+| `servicios.tipo.write` | — | — | sí | sí | `PUT /trazabilidad/servicios/:numero/tipo` |
+| `importar` | — | — | — | sí | `POST /trazabilidad/importaciones` (también con `?simular=1`) |
+| `config.write` | — | — | — | sí | `PUT /trazabilidad/plazos` y `PUT /trazabilidad/estados` (y, con la agenda, vigencias, puestos y duraciones) |
+| `agenda.asignar` | — | — | — | sí | Nada todavía: asignar un puesto en la agenda del taller |
+| `agenda.liberar` | — | — | — | sí | Nada todavía: liberar un puesto a mano |
+| `agenda.reparto` | — | — | — | sí | Nada todavía: confirmar el reparto inicial |
+| `agenda.flujo` | — | — | — | sí | Nada todavía: marcar a mano el flujo de un ticket |
+| `calibraciones.write` | — | — | sí | sí | Nada todavía (reservado): confirmar o registrar calibraciones |
+| `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
+
+El Director Técnico es el de D14 en `docs/trazabilidad-agenda-taller.md`: los endpoints de la
+agenda deben pedir los permisos `agenda.*` y `config.write` que ya están en la matriz, no
+comparar el rol a mano.
+
+**En el servidor** (`router.ts`): toda ruta que escribe se registra con
+`escritura('<permiso>', ctx, fn)`, que mira el rol **antes de validar y antes de cualquier
+consulta de negocio** y responde 403 `forbidden_role` («Tu rol en Trazabilidad (Lector) no
+permite hacer este cambio…»); a un administrador no hace falta mirarle el rol. Las de reparto de
+roles van con `soloAdmin(ctx, fn)` (403 `forbidden_admin`). `router.test.ts` lee `router.ts` y
+**falla si una ruta `post` / `put` / `patch` / `delete` se registra sin una de las dos**: al añadir
+una escritura hay que darle permiso y apuntarla en la lista `ESCRITURAS` de esa prueba.
+
+**En la UI**: `App.tsx` pide `GET /roles/me` al entrar y lo deja en `PermisosContext`; las vistas
+preguntan con `usePermisos().puede('<permiso>')`. Mientras no llega (o si falla) vale `SIN_ROL`,
+es decir, modo de consulta. Sin el permiso: no sale «Importar F-ST-022»; el seguimiento de la
+ficha va desactivado y sin «Guardar»; en «Avisos a clientes» no sale «Marcar como avisado» (sí
+«Redactar aviso» y copiar) ni, en la simulación, «Cambiar destinatario» ni el editor de contacto;
+el desplegable del tipo en «Servicios» va desactivado; y en «Configuración» los plazos y los
+estados se ven pero no se editan, con un aviso arriba. La cabecera enseña «Tu rol: …»
+(`etiquetaMiRol`; a un administrador, «Administrador del portal»). Ocultar es comodidad: **la
+guarda de verdad es la del servidor**.
+
+## Navegación
+
+Dos niveles (`src/lib/navegacion.ts`): arriba el **grupo**, debajo sus **secciones**.
+
+| Grupo | Secciones (hash) |
+|---|---|
+| Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`, con sus vistas Manual / Simulación automática dentro) |
+| Taller | Servicios (`#servicios`); aquí irá la «Agenda del taller» |
+| Administración | Configuración (`#configuracion`) y Roles (`#roles`, sólo se ofrece a los administradores del portal) |
+
+El grupo no va en la URL: se deduce de la sección, así que los hashes de siempre siguen valiendo.
+Un hash vacío o desconocido lleva al Resumen. `#roles` escrito a mano por quien no es
+administrador enseña un aviso (y el servidor tampoco le daría la lista).
 
 ## Contactos: a quién iría el aviso
 
@@ -373,12 +449,18 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
   geometría del calendario de barras (pausas y marca de fin incluidas) y la simulación (texto por
-  tramo, saludo, resumen y correos tecleados: `src/lib/simulacion.test.ts`).
+  tramo, saludo, resumen y correos tecleados: `src/lib/simulacion.test.ts`), y la navegación en
+  dos niveles con lo que se enseña según el rol (`src/lib/navegacion.test.ts`). Las vistas no
+  tienen pruebas de componente: lo que ocultan o desactivan se revisa en el navegador.
 - `npm test --workspace=apps/hub-api` — dominio, el plan del aviso y los contactos
-  (`avisos.test.ts`), plazos (el reloj con pausas, con `hoy` y los tramos como argumentos), router
-  y el programador con reloj de mentira (`src/trazabilidad/*.test.ts`).
+  (`avisos.test.ts`), plazos (el reloj con pausas, con `hoy` y los tramos como argumentos), la
+  matriz de roles entera (`roles.test.ts`), router (401, 403 sin la app, 403 por rol en cada
+  escritura, Lector por defecto, administrador con todo, y la API de roles) y el programador con
+  reloj de mentira (`src/trazabilidad/*.test.ts`).
 - `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real: `registrarEstados`
   (también con llamadas a la vez), «Servicios» de punta a punta con un historial sembrado y `hoy`
-  fijo, el contacto de cada equipo (Desk y puesto a mano) y el orden del cliente en «Servicios».
+  fijo, el contacto de cada equipo (Desk y puesto a mano), el orden del cliente en «Servicios» y
+  los roles (la 049 aplicada varias veces sin tocar lo repartido, el `CHECK`, la clave foránea y
+  la lista de la sección «Roles»).
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

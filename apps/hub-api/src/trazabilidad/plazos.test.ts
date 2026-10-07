@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CONTACTO_MAX_EMAILS, ROLES_ESTADO, TIPOS_COMPUESTOS, claveTipoServicio, type RolEstado } from './dominio.js';
+import { ROLES_APP } from './roles.js';
 import { calcularPlazo, calcularReloj, calcularTramos, diasHabilesEntre, festivosDelEje, sumarDiasHabiles, type DatosReloj, type IntervaloEstado } from './plazos.js';
 
 // Calendario de referencia (octubre de 2026): el lunes 5 es hábil, el lunes 12
@@ -610,8 +611,56 @@ describe('048_trazabilidad_contactos.sql', () => {
     expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 047 y la última', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 047', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'047_trazabilidad_estados_historial\.sql',\s*'048_trazabilidad_contactos\.sql'\]/);
+    expect(db).toMatch(/'047_trazabilidad_estados_historial\.sql',\s*'048_trazabilidad_contactos\.sql'/);
+  });
+});
+
+describe('049_trazabilidad_roles.sql', () => {
+  // La 049 se vuelve a ejecutar en cada arranque: sólo puede crear lo que falte.
+  // Sin semilla: nadie nace con rol (sin fila se es LECTOR), y una sentencia que
+  // escribiera se llevaría por delante los roles que un administrador haya repartido.
+  const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/049_trazabilidad_roles.sql', import.meta.url)), 'utf8');
+  const sinComentarios = SQL.replace(/--.*$/gm, '');
+  const sentencias = sinComentarios
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  it('sólo crea, y siempre con IF NOT EXISTS', () => {
+    expect(sentencias.length).toBeGreaterThanOrEqual(1);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|INDEX) IF NOT EXISTS /);
+    expect(SQL).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_user_roles/);
+  });
+
+  it('sin semilla ni nada que escriba, altere o borre', () => {
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DROP|ALTER|TRUNCATE)\b/i);
+    // El único DELETE es el del ON DELETE CASCADE de la clave foránea.
+    expect(sinComentarios.replace(/ON DELETE CASCADE/gi, '')).not.toMatch(/\bDELETE\b/i);
+  });
+
+  it('el rol sólo admite los cuatro de la matriz (roles.ts) y no tiene valor por defecto: sin fila se es LECTOR', () => {
+    const check = /CHECK \(role IN \(([^)]*)\)\)/i.exec(sinComentarios);
+    expect(check).not.toBeNull();
+    expect(check![1].split(',').map((x) => x.trim().replace(/'/g, ''))).toEqual([...ROLES_APP]);
+    expect(sinComentarios).toMatch(/role\s+VARCHAR\(\d+\)\s+NOT NULL\s+CHECK/i);
+    expect(sinComentarios).not.toMatch(/\bDEFAULT '/i);
+  });
+
+  it('una fila por usuario, que se va con él, y firmada', () => {
+    expect(sinComentarios).toMatch(/user_id\s+UUID\s+PRIMARY KEY\s+REFERENCES portal\.users\(id\) ON DELETE CASCADE/i);
+    expect(sinComentarios).toMatch(/actualizado_por_id\s+UUID\s+NULL/i);
+    expect(sinComentarios).toMatch(/actualizado_por\s+VARCHAR\(254\)\s+NOT NULL/i);
+    expect(sinComentarios).toMatch(/actualizado_en\s+TIMESTAMPTZ\s+NOT NULL/i);
+  });
+
+  it('no toca el esquema desk', () => {
+    expect(SQL).not.toMatch(/\bdesk\./i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 048 y la última', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'048_trazabilidad_contactos\.sql',\s*'049_trazabilidad_roles\.sql'\]/);
   });
 });

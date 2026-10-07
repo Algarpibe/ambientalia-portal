@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { ContactoCliente, EquipoVista, EstadoDesk, FilaImportada, PlazoServicio, ResumenImportacion, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion } from './dominio';
+import type { ContactoCliente, EquipoVista, EstadoDesk, FilaImportada, MiRol, PlazoServicio, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -34,6 +34,12 @@ export interface Servicios {
 }
 
 export const api = {
+  /** Mi rol en la app y lo que me deja hacer (`permissions`). */
+  yo: () => request<MiRol>('GET', '/roles/me'),
+  /** La gente con la app y su rol. Sólo para administradores del portal. */
+  roles: () => request<{ usuarios: UsuarioRol[] }>('GET', '/roles'),
+  /** Pone el rol de una persona. Sólo para administradores del portal. */
+  guardarRol: (userId: string, role: RolApp) => request<{ userId: string; role: RolApp }>('PUT', `/roles/${encodeURIComponent(userId)}`, { role }),
   inventario: () => request<Inventario>('GET', '/equipos'),
   /**
    * Pone a mano el contacto de un cliente (`emails` vacío = quitarlo y volver al de Desk). Devuelve el inventario ya

@@ -250,7 +250,7 @@ Se mide sobre toda la tabla, no por ticket, porque la sincronización de Desk 2.
 
 El Director Técnico (rol `DIRECTOR_TECNICO`) confirma el reparto inicial, asigna y libera puestos, marca el flujo y configura puestos y duraciones. El resto de quienes tienen la app asignada solo consultan.
 
-El rol llega con la fase de roles, que se construye antes que la agenda y usa la migración 049.
+El rol llegó con la fase de roles (migración 049, tabla `portal.tmc_user_roles`), construida antes que la agenda. La matriz de permisos está en `apps/hub-api/src/trazabilidad/roles.ts` y ya incluye los de la agenda: `agenda.reparto` (confirmar el reparto inicial), `agenda.asignar`, `agenda.liberar`, `agenda.flujo` y `config.write` (puestos, duraciones, categoría y etapa de cada estado). Hoy solo los tiene el rol `DIRECTOR_TECNICO`; los administradores del portal tienen todos los permisos. Los endpoints de la agenda piden el permiso, no comparan el rol.
 
 ---
 
@@ -355,7 +355,7 @@ Lo que hay que cambiar en el historial para la agenda:
 
 ## E. Modelo de datos
 
-Todo en el esquema `portal`, migraciones idempotentes de la 050 a la 053. La última registrada hoy es la 048 (`apps/hub-api/src/db.ts:24`); la 049 queda reservada para la fase de roles, que va antes. Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
+Todo en el esquema `portal`, migraciones idempotentes de la 050 a la 053. La última registrada hoy es la 049 (`apps/hub-api/src/db.ts:24`), la de la fase de roles, que va antes; la 050 es la primera libre. Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
 
 ### E.1 Migración 050 — categoría y etapa de cada estado
 
@@ -372,7 +372,7 @@ ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS etapa     VARCHAR(1
 
 - **Valor por defecto en código, la tabla manda.** Una fila solo existe para los estados que alguien ha tocado y `actualizado_por` es obligatorio, así que no se siembra. El catálogo de C.3 vive como constante en `dominio.ts`; si la fila tiene `categoria`, gana la fila. `NULL` = «según el catálogo».
 - **Contrato del PUT.** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre (`apps/hub-api/src/trazabilidad/types.ts:423-433`, `repo.ts:609-618`). Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`.
-- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y la que comprueba cuál es la última migración registrada (`plazos.test.ts:613-616`).
+- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y la que comprueba cuál es la última migración registrada (hoy la de la 049, en el bloque `049_trazabilidad_roles.sql` de `plazos.test.ts`).
 
 ### E.2 Migración 051 — puestos por etapa y duraciones
 
@@ -455,7 +455,7 @@ Mismo patrón que `tmc_servicios_tipo` (`044_trazabilidad_servicios_tipo.sql:26-
 
 Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`). Los cálculos se hacen en el servidor con «hoy» como argumento (`hoyOf`, `router.ts:52-59`).
 
-Las lecturas (`GET`) están abiertas a quien tenga la app. Todo lo que escribe exige además el rol `DIRECTOR_TECNICO` (D14).
+Las lecturas (`GET`) están abiertas a quien tenga la app. Todo lo que escribe exige además un permiso de la matriz de `roles.ts`, que hoy solo tiene el rol `DIRECTOR_TECNICO` (D14) y los administradores del portal: `agenda.reparto` en `POST /agenda/arranque`, `agenda.asignar` en `POST /agenda/asignaciones`, `agenda.liberar` en `DELETE /agenda/asignaciones/:id`, `agenda.flujo` en `PUT /agenda/flujo/:numero` y `config.write` en `PUT /agenda/etapas`, `PUT /agenda/duraciones` y `PUT /estados`. Cada ruta se registra con `escritura('<permiso>', …)` en `router.ts`; una prueba falla si una ruta que escribe se queda sin permiso.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
@@ -762,7 +762,7 @@ No quedan decisiones de negocio abiertas. Las nueve de la primera versión de es
 - **Los valores reales de `DATABASE_URL` y `DB_SCHEMA` de Desk 2.0 en producción:** el propio repositorio los marca como no verificados (`Desk2:DEPLOY.md:331-333`). Sí se verificó el resultado: base `desk`, tablas en el esquema `desk` (D1).
 - **Que los ids de los tickets de Zoho coincidan en las dos bases:** se comparó por número, que es la clave del cruce.
 - **Que «Equipo Nuevo» en el asunto y `HV_` en el código identifiquen siempre ese flujo:** visto en cuatro tickets. Solo afecta al respaldo, y hay marca manual (D11).
-- **Que el rol `DIRECTOR_TECNICO` exista en el portal:** llega con la fase de roles (migración 049), que no se ha revisado aquí.
+- **Que el rol `DIRECTOR_TECNICO` exista en el portal:** resuelto después de este análisis. La fase de roles (migración 049) ya está construida; falta que un administrador del portal asigne el rol a la persona que lo ejerce.
 - **Que la réplica de respaldo traiga `fecha_remision_entrada`:** el 06/10/2026 sus campos personalizados estaban vacíos; no se consultó esa columna en concreto.
 - **El comportamiento real de la agenda:** no existe todavía; el ejemplo de H es un cálculo a mano.
 
@@ -913,7 +913,7 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Migración:** ninguna.
 - **Pruebas:**
   - Todos los endpoints de E.5 tras `requireAuth` + `requireApp`.
-  - Los que escriben exigen además el rol `DIRECTOR_TECNICO`; sin él, 403 (D14).
+  - Los que escriben exigen además su permiso (`agenda.*` o `config.write`, E.5), que hoy solo tiene el rol `DIRECTOR_TECNICO`; sin él, 403 (D14). Cada ruta nueva se apunta en la lista `ESCRITURAS` de `router.test.ts`.
   - Validación con mensajes en español.
   - `GET /agenda` responde aunque Desk 2.0 no conteste, indicando el respaldo y su motivo.
   - `?hoy=` determinista.

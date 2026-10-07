@@ -6,6 +6,7 @@ import { aplicarMigraciones } from '../db.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { claveEstadoDesk, type RolEstado } from './dominio.js';
+import { ROLES_APP } from './roles.js';
 import * as repo from './repo.js';
 import type { FilaImportada } from './types.js';
 
@@ -39,6 +40,7 @@ const SQL_045 = readFileSync(fileURLToPath(new URL('../users/migrations/045_traz
 const SQL_046 = readFileSync(fileURLToPath(new URL('../users/migrations/046_trazabilidad_estados_desk.sql', import.meta.url)), 'utf8');
 const SQL_047 = readFileSync(fileURLToPath(new URL('../users/migrations/047_trazabilidad_estados_historial.sql', import.meta.url)), 'utf8');
 const SQL_048 = readFileSync(fileURLToPath(new URL('../users/migrations/048_trazabilidad_contactos.sql', import.meta.url)), 'utf8');
+const SQL_049 = readFileSync(fileURLToPath(new URL('../users/migrations/049_trazabilidad_roles.sql', import.meta.url)), 'utf8');
 async function resembrarPlazos(): Promise<void> {
   await db.query('TRUNCATE portal.tmc_plazos');
   await db.query(SQL_043);
@@ -358,6 +360,7 @@ describe('contacto de cada equipo', () => {
         'tmc_plazos',
         'tmc_seguimiento',
         'tmc_servicios_tipo',
+        'tmc_user_roles',
       ]);
     });
   });
@@ -1492,5 +1495,112 @@ describe('plazos por tipo de servicio', () => {
   it('la tabla rechaza un plazo fuera de 1..365 aunque alguien se salte la validación', async () => {
     await expect(db.query(`UPDATE portal.tmc_plazos SET dias_habiles = 0 WHERE clave = 'diagnostico'`)).rejects.toThrow();
     await expect(db.query(`UPDATE portal.tmc_plazos SET dias_habiles = 366 WHERE clave = 'diagnostico'`)).rejects.toThrow();
+  });
+});
+
+// Roles de la app (portal.tmc_user_roles, migración 049): el rol de cada
+// persona, que reparten los administradores del portal. Sin fila se es LECTOR.
+describe('roles de la app', () => {
+  const APP = 'trazabilidad-mantenimientos';
+  const admin = { userId: null, email: 'admin@roles-tmc.example' };
+  const NADIE = '00000000-0000-4000-8000-00000000dead';
+
+  /** Un usuario del portal, con la app asignada o sin ella. */
+  async function usuario(nombre: string, opts: { app?: boolean; role?: 'admin' | 'reader' } = {}): Promise<string> {
+    const email = `${nombre.toLowerCase().replace(/\s+/g, '.')}@roles-tmc.example`;
+    const { rows } = await db.query(`INSERT INTO portal.users (full_name, email, password_hash, role, status) VALUES ($1, $2, 'x', $3, 'active') RETURNING id`, [nombre, email, opts.role ?? 'reader']);
+    if (opts.app !== false) await db.query(`INSERT INTO portal.user_apps (user_id, app_id) VALUES ($1, $2)`, [rows[0].id, APP]);
+    return rows[0].id as string;
+  }
+  const filas = async () => (await db.query(`SELECT user_id, role, actualizado_por, actualizado_en FROM portal.tmc_user_roles ORDER BY user_id`)).rows;
+
+  beforeEach(async () => {
+    // Al borrar los usuarios se van sus roles (ON DELETE CASCADE) y sus apps.
+    await db.query(`DELETE FROM portal.users WHERE email LIKE '%@roles-tmc.example'`);
+  });
+
+  it('quien no tiene fila no tiene rol guardado: el dominio lo resuelve a LECTOR', async () => {
+    const id = await usuario('Ana Uno');
+    expect(await repo.rolDeUsuario(db, id)).toBeNull();
+  });
+
+  it.each([...ROLES_APP])('guarda el rol %s, firmado, y lo devuelve', async (rol) => {
+    const id = await usuario('Ana Uno');
+    await repo.guardarRol(db, id, rol, { userId: actor.userId, email: admin.email });
+    expect(await repo.rolDeUsuario(db, id)).toBe(rol);
+    const { rows } = await db.query(`SELECT role, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en FROM portal.tmc_user_roles WHERE user_id = $1`, [id]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ role: rol, por_id: actor.userId, actualizado_por: admin.email });
+    expect(rows[0].actualizado_en).toBeInstanceOf(Date);
+  });
+
+  it('cambiar el rol reescribe la misma fila: una por usuario', async () => {
+    const id = await usuario('Ana Uno');
+    await repo.guardarRol(db, id, 'COMERCIAL', admin);
+    await repo.guardarRol(db, id, 'DIRECTOR_TECNICO', admin);
+    await repo.guardarRol(db, id, 'LECTOR', admin);
+    expect(await repo.rolDeUsuario(db, id)).toBe('LECTOR');
+    expect(await filas()).toHaveLength(1);
+  });
+
+  it('la tabla rechaza un rol que no está en la matriz, y un usuario que no existe', async () => {
+    const id = await usuario('Ana Uno');
+    const ins = (userId: string, role: string) => db.query(`INSERT INTO portal.tmc_user_roles (user_id, role, actualizado_por) VALUES ($1, $2, 'alguien@example.com')`, [userId, role]);
+    await expect(ins(id, 'ADMIN')).rejects.toMatchObject({ code: '23514' });
+    await expect(ins(id, 'lector')).rejects.toMatchObject({ code: '23514' });
+    await expect(ins(NADIE, 'TECNICO')).rejects.toMatchObject({ code: '23503' });
+    expect(await filas()).toEqual([]);
+  });
+
+  it('usuarioPortal distingue al que está del que no, y dice si es administrador del portal', async () => {
+    const id = await usuario('Ana Uno');
+    const jefe = await usuario('Ana Admin', { app: false, role: 'admin' });
+    expect(await repo.usuarioPortal(db, id)).toEqual({ admin: false });
+    expect(await repo.usuarioPortal(db, jefe)).toEqual({ admin: true });
+    expect(await repo.usuarioPortal(db, NADIE)).toBeNull();
+  });
+
+  it('borrar al usuario se lleva su rol', async () => {
+    const id = await usuario('Ana Uno');
+    await repo.guardarRol(db, id, 'TECNICO', admin);
+    await db.query(`DELETE FROM portal.users WHERE id = $1`, [id]);
+    expect(await repo.rolDeUsuario(db, id)).toBeNull();
+  });
+
+  it('la lista trae a quien tiene la app, a quien tiene rol guardado y a los administradores, por nombre; sin fila, LECTOR', async () => {
+    const conApp = await usuario('Berta Dos');
+    const conRol = await usuario('Carlos Tres');
+    const sinApp = await usuario('Dora Cuatro', { app: false });
+    const jefe = await usuario('Ana Admin', { app: false, role: 'admin' });
+    await usuario('Zoe Fuera', { app: false });
+    await repo.guardarRol(db, conRol, 'DIRECTOR_TECNICO', admin);
+    await repo.guardarRol(db, sinApp, 'COMERCIAL', admin);
+
+    const lista = (await repo.listarUsuariosRol(db, APP)).filter((u) => u.email.endsWith('@roles-tmc.example'));
+    expect(lista).toEqual([
+      { userId: jefe, fullName: 'Ana Admin', email: 'ana.admin@roles-tmc.example', status: 'active', admin: true, role: 'LECTOR' },
+      { userId: conApp, fullName: 'Berta Dos', email: 'berta.dos@roles-tmc.example', status: 'active', admin: false, role: 'LECTOR' },
+      { userId: conRol, fullName: 'Carlos Tres', email: 'carlos.tres@roles-tmc.example', status: 'active', admin: false, role: 'DIRECTOR_TECNICO' },
+      { userId: sinApp, fullName: 'Dora Cuatro', email: 'dora.cuatro@roles-tmc.example', status: 'active', admin: false, role: 'COMERCIAL' },
+    ]);
+  });
+
+  it('volver a ejecutar la migración 049 (cada arranque) no toca los roles repartidos', async () => {
+    const id = await usuario('Ana Uno');
+    await repo.guardarRol(db, id, 'DIRECTOR_TECNICO', admin);
+    const antes = await filas();
+    expect(antes).toHaveLength(1);
+    await db.query(SQL_049);
+    await db.query(SQL_049);
+    await aplicarMigraciones(db);
+    expect(await filas()).toEqual(antes);
+    expect(await repo.rolDeUsuario(db, id)).toBe('DIRECTOR_TECNICO');
+  });
+
+  it('sin semilla: tras migrar no hay ningún rol repartido, y las columnas son las de la 049', async () => {
+    await aplicarMigraciones(db);
+    expect(await filas()).toEqual([]);
+    const cols = await db.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'portal' AND table_name = 'tmc_user_roles' `);
+    expect(cols.rows.map((r: { column_name: string }) => r.column_name).sort()).toEqual(['actualizado_en', 'actualizado_por', 'actualizado_por_id', 'role', 'user_id']);
   });
 });
