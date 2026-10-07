@@ -37,8 +37,8 @@ se registra en la app y sobrevive a las reimportaciones.
 | Fuente de la agenda del taller: interfaz, `TicketTaller`, caída al respaldo (sólo servidor, sólo lee) | `apps/hub-api/src/trazabilidad/fuente.ts`; el SQL de cada origen en `fuente-desk2.ts` y `fuente-replica.ts` |
 | Configuración de la agenda, reglas puras: categoría y etapa de un estado (`categoriaDeEstado`, `CATALOGO_ESTADOS_AGENDA`), flujo (`flujoDeTicket`), etapa inicial (`etapaInicial`) y duración (`duracionDeEtapa`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
 | Calendario de la agenda: días hábiles menos cierres de empresa (`esHabilAgenda`, `sumarDiasHabilesAgenda`; sólo servidor) | `apps/hub-api/src/trazabilidad/agenda-calendario.ts` |
-| Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) y el reparto inicial que se propone (`proponerReparto`); pura, sólo servidor, todavía sin endpoint | `apps/hub-api/src/trazabilidad/agenda.ts` |
-| Agenda: la lectura que lo reúne todo (`leerAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL, todavía sin endpoint), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores en `types.ts`; cuándo sale la pasada, en `registro-estados.ts` (`registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
+| Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
+| Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
 | Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
@@ -78,9 +78,11 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 
 ## API (`/api/trazabilidad/*`)
 
-Todas piden sesión y la app asignada. Los `GET` no piden nada más. Los que escriben piden además
+Todas piden sesión y la app asignada. Los `GET` no piden nada más (salvo `GET
+/trazabilidad/agenda/reparto`, que pide `agenda.reparto`). Los que escriben piden además
 un permiso (ver «Permisos»): sin él, 403 `forbidden_role` con mensaje en español, antes de validar
-el cuerpo y antes de cualquier consulta de negocio.
+el cuerpo y antes de cualquier consulta de negocio. Las rutas de la agenda del taller van en la
+segunda tabla, más abajo.
 
 | Método | Ruta | Qué hace |
 |---|---|---|
@@ -96,9 +98,27 @@ el cuerpo y antes de cualquier consulta de negocio.
 | PUT | `/trazabilidad/servicios/:numero/tipo` (`?hoy=`) | `{tipo}`: pone a mano el tipo de servicio del ticket; `null` o vacío lo quita. 400 si `numero` no es un entero positivo o si el tipo no está (por clave normalizada) en `tmc_plazos`; 404 si el ticket no existe en `desk.tickets`. Devuelve lo mismo que el GET, ya recalculado |
 | GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila; `ticketsAbiertos` cuenta por tipo efectivo. Cada plazo lleva `derivadoDe`: `null` en un tipo simple y, en uno compuesto, sus partes `[{clave, etiqueta, dias}]` (entonces `dias` es su suma, o `null` si a alguna le falta) |
 | PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado. 400 en `tipo` si es un tipo compuesto: su plazo se calcula, no se guarda |
-| GET | `/trazabilidad/estados` | `{estados[]}`: todos los estados que existen en `desk.tickets` (de cualquier ticket, cerrados incluidos) más los ya guardados en `tmc_estados_desk` aunque ningún ticket los tenga. Cada uno: `{clave, etiqueta, tipoDesk, ticketsAbiertos, rol, actualizadoPor, actualizadoEn}`; `rol` es `cuenta` (mientras nadie lo cambie), `standby` o `terminado`; `tipoDesk` es el `status_type` de Desk (`Open` / `On Hold` / `Closed`, o `null`) y sólo orienta. Orden: tipo abierto, en espera, cerrado y sin tipo; dentro, más tickets abiertos primero y después alfabético |
-| PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente |
-| GET | `/trazabilidad/agenda/fuente` | Diagnóstico de la fuente de la agenda (ver «Fuente de la agenda»): `{fuente, motivo, mensaje, ultimaSincronizacion, sincronizacionParada, umbralSincronizacionMs, ultimoFalloPrincipal, abiertos: {total, porEstado: [{estado, tickets}]}}`. `fuente` es `principal` (Desk 2.0) o `respaldo` (la réplica); `motivo`, `null` o `sin_variable` / `error_conexion` / `timeout` / `error_consulta`. Sólo recuentos: ni clientes, ni seriales, ni correos. Si Desk 2.0 no contesta responde 200 igual, con el respaldo |
+| GET | `/trazabilidad/estados` | `{estados[]}`: todos los estados que existen en `desk.tickets` (de cualquier ticket, cerrados incluidos) más los ya guardados en `tmc_estados_desk` aunque ningún ticket los tenga. Cada uno: `{clave, etiqueta, tipoDesk, ticketsAbiertos, rol, actualizadoPor, actualizadoEn, categoria, etapa, categoriaPor, categoriaEn}`; `rol` es `cuenta` (mientras nadie lo cambie), `standby` o `terminado`; `tipoDesk` es el `status_type` de Desk (`Open` / `On Hold` / `Closed`, o `null`) y sólo orienta. Los cuatro últimos (añadidos con la agenda; la pantalla de hoy no los usa) son la categoría del estado en la agenda —la guardada o, sin ella, la de la propuesta; `null` = sin categoría— y **su firma, que es otra que la del rol** (`null` si sale de la propuesta). Orden: tipo abierto, en espera, cerrado y sin tipo; dentro, más tickets abiertos primero y después alfabético |
+| PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente. **Sólo el rol**: no escribe la categoría ni su firma, y lo que venga de más en el cuerpo (`categoria`, `etapa`) se ignora; la categoría va por `PUT /trazabilidad/agenda/configuracion/estados` |
+| GET | `/trazabilidad/agenda/fuente` | Diagnóstico de la fuente de la agenda (ver «Fuente de la agenda»): `{fuente, motivo, mensaje, ultimaSincronizacion, sincronizacionParada, umbralSincronizacionMs, ultimoFalloPrincipal, cortacircuitosHasta, abiertos: {total, porEstado: [{estado, tickets}]}}`. `fuente` es `principal` (Desk 2.0) o `respaldo` (la réplica); `motivo`, `null` o `sin_variable` / `error_conexion` / `timeout` / `error_consulta`; `cortacircuitosHasta`, hasta cuándo no se vuelve a probar la principal (`null` si no ha fallado hace poco). Sólo recuentos: ni clientes, ni seriales, ni correos. Si Desk 2.0 no contesta responde 200 igual, con el respaldo |
+
+**Agenda del taller** (lote 5; reglas en «Agenda: API»). Los cuatro cambios de la agenda devuelven
+la agenda ya leída otra vez (lo mismo que `GET /trazabilidad/agenda`, a hoy) y los tres de la
+configuración, la configuración entera. Errores como en el resto: `{error, message, field}`.
+
+| Método | Ruta | Permiso | Qué hace y qué errores da |
+|---|---|---|---|
+| GET | `/trazabilidad/agenda` (`?hoy=`) | — | La agenda: `{hoy, fuente: {fuente, motivo, ultimaSincronizacion}, etapas[], standby[], porLlegar[], finTaller, fueraAgenda, sinCategoria[], avisos[], totalAbiertos, estadoFuente}`. Cada etapa: `{etapa, etiqueta, puestos[], fila[], encadenados[], saturacion: {ocupados, puestos}, primerHueco}` (ver «Agenda: proyección»); `estadoFuente` es el de `GET /agenda/fuente` sin `abiertos`; `avisos` son `{codigo, mensaje}` con `sincronizacion_parada`, `fuente_respaldo`, `estados_sin_categoria` y `pasada_fallida`. Antes de leer lanza la pasada de la agenda. 400 en `hoy` |
+| GET | `/trazabilidad/agenda/reparto` (`?hoy=`) | `agenda.reparto` | La propuesta de reparto inicial (D6), sin escribir: `{hoy, reparto: [{numero, etapa, puesto, desde}]}` |
+| POST | `/trazabilidad/agenda/reparto` | `agenda.reparto` | `{reparto: [{numero, etapa, puesto}]}`: la propuesta tal cual o ajustada, todo o nada. 400 en `reparto` si no es una lista o repite ticket o puesto, y en `numero` / `etapa` / `puesto` de una línea (también si la etapa no tiene ese puesto); **409 `puesto_ocupado` diciendo cuál** («El puesto 2 de Proceso ya está ocupado…»): sólo rellena puestos libres (D19); 409 `ticket_fuera_de_etapa` / `ticket_con_puesto` |
+| POST | `/trazabilidad/agenda/asignaciones` | `agenda.asignar` | `{numero, etapa, puesto, motivo?}`. 400 en `motivo` si el ticket no es el primero de la fila y no se dice; 400 en `puesto` si la etapa no lo tiene; 409 `puesto_ocupado`, `ticket_fuera_de_etapa` o `ticket_con_puesto` |
+| POST | `/trazabilidad/agenda/liberar` | `agenda.liberar` | `{numero, motivo}`: **por número de ticket** (D18). 400 en `numero` o en `motivo` (obligatorio); 404 si el ticket no tiene puesto |
+| PUT | `/trazabilidad/agenda/flujo/:numero` | `agenda.flujo` | `{flujo}`: `servicio` / `equipo_nuevo`, o `null` para quitar la marca. 400 en `numero` o `flujo`; 404 si la fuente no trae abierto el ticket; 409 `flujo_de_la_fuente` si ya trae su clasificación |
+| GET | `/trazabilidad/agenda/huecos` (`?etapa=&tipo=&hoy=`) | — | Cuándo entraría un equipo que llegara hoy a esa etapa: `{hoy, etapa, tipo, duracionDias, sinTipo, fuente, huecos: [{puesto, entrada, fin}]}`, las 5 próximas entradas (`HUECOS_PROXIMOS`), una tras otra. `tipo` es opcional (sin él, la «*»). 400 en `etapa`, `tipo` u `hoy`. Sólo lectura: para la futura reserva del cliente |
+| GET | `/trazabilidad/agenda/configuracion` | — | `{etapas[], duraciones[], estados[]}`: `etapas` = `{etapa, etiqueta, orden, puestos, actualizadoPor, actualizadoEn}`; `duraciones` = `{etapa, tipo, dias, actualizadoPor, actualizadoEn}` (la «*» de cada etapa delante); `estados` = lo mismo que `GET /estados` (rol y categoría con **sus dos firmas**), pero con `ticketsAbiertos` contados en la **fuente de la agenda** |
+| PUT | `/trazabilidad/agenda/configuracion/puestos` | `config.write` | `{etapa, puestos}` (entero 0..50). 400 en `etapa` o `puestos` |
+| PUT | `/trazabilidad/agenda/configuracion/duraciones` | `config.write` | `{etapa, tipo, dias}` (entero 1..365); `dias: null` quita la fila del tipo; **la «*» no se quita: 400 en `dias`**. 400 en `etapa`, `tipo` o `dias` (que falte también) |
+| PUT | `/trazabilidad/agenda/configuracion/estados` | `config.write` | `{estado, categoria, etapa?}`: sólo la categoría (y la etapa, si es `activa`), con su firma; **no toca el rol del reloj ni la suya**. 400 en `estado`, `categoria` o `etapa` (etapa sólo y siempre con `activa`) |
 
 ## Permisos
 
@@ -125,25 +145,27 @@ escribe nadie a mano: lo apunta hub-api.
 | `contactos.write` | — | sí | — | sí | `PUT /trazabilidad/contactos` |
 | `servicios.tipo.write` | — | — | sí | sí | `PUT /trazabilidad/servicios/:numero/tipo` |
 | `importar` | — | — | — | sí | `POST /trazabilidad/importaciones` (también con `?simular=1`) |
-| `config.write` | — | — | — | sí | `PUT /trazabilidad/plazos` y `PUT /trazabilidad/estados` (y, con la agenda, vigencias, puestos y duraciones) |
-| `agenda.asignar` | — | — | — | sí | Ningún endpoint todavía: es el de `repo.asignar` (asignar un puesto en la agenda del taller) |
-| `agenda.liberar` | — | — | — | sí | Ningún endpoint todavía: el de `repo.liberar` (liberar un puesto a mano) |
-| `agenda.reparto` | — | — | — | sí | Ningún endpoint todavía: el de `repo.confirmarRepartoInicial` |
-| `agenda.flujo` | — | — | — | sí | Ningún endpoint todavía: el de `repo.marcarFlujo` (marcar a mano el flujo de un ticket) |
+| `config.write` | — | — | — | sí | `PUT /trazabilidad/plazos`, `PUT /trazabilidad/estados` y los tres `PUT /trazabilidad/agenda/configuracion/…` (puestos, duraciones y categoría de cada estado) |
+| `agenda.asignar` | — | — | — | sí | `POST /trazabilidad/agenda/asignaciones` |
+| `agenda.liberar` | — | — | — | sí | `POST /trazabilidad/agenda/liberar` |
+| `agenda.reparto` | — | — | — | sí | `POST /trazabilidad/agenda/reparto` y, aunque sólo lee, `GET /trazabilidad/agenda/reparto` (la propuesta) |
+| `agenda.flujo` | — | — | — | sí | `PUT /trazabilidad/agenda/flujo/:numero` |
 | `calibraciones.write` | — | — | sí | sí | Nada todavía (reservado): confirmar o registrar calibraciones |
 | `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
 
 El Director Técnico es el de D14 en `docs/trazabilidad-agenda-taller.md`: los endpoints de la
-agenda deben pedir los permisos `agenda.*` y `config.write` que ya están en la matriz, no
-comparar el rol a mano.
+agenda piden los permisos `agenda.*` y `config.write` de la matriz, no comparan el rol a mano.
 
 **En el servidor** (`router.ts`): toda ruta que escribe se registra con
 `escritura('<permiso>', ctx, fn)`, que mira el rol **antes de validar y antes de cualquier
 consulta de negocio** y responde 403 `forbidden_role` («Tu rol en Trazabilidad (Lector) no
 permite hacer este cambio…»); a un administrador no hace falta mirarle el rol. Las de reparto de
 roles van con `soloAdmin(ctx, fn)` (403 `forbidden_admin`). `router.test.ts` lee `router.ts` y
-**falla si una ruta `post` / `put` / `patch` / `delete` se registra sin una de las dos**: al añadir
-una escritura hay que darle permiso y apuntarla en la lista `ESCRITURAS` de esa prueba.
+**falla si una ruta `post` / `put` / `patch` / `delete` se registra sin una de las dos**, o con un
+permiso que no es el de la lista `ESCRITURAS` de esa prueba (ruta a ruta): al añadir una escritura
+hay que darle permiso y apuntarla ahí. `escritura` es el alias de `conPermiso`, que con ese nombre
+sólo usa la única lectura que pide permiso (`GET /trazabilidad/agenda/reparto`); la prueba también
+falla si otra lectura lo pide o si una lleva `escritura`.
 
 **En la UI**: `App.tsx` pide `GET /roles/me` al entrar y lo deja en `PermisosContext`; las vistas
 preguntan con `usePermisos().puede('<permiso>')`. Mientras no llega (o si falla) vale `SIN_ROL`,
@@ -490,12 +512,20 @@ de la configuración va en «Agenda: configuración», el cálculo en «Agenda: 
   `sincronizacionParada` (más de `UMBRAL_SINCRONIZACION_PARADA_MS`, una hora, o ninguna
   sincronización). Su consulta es también una **sonda**: nombra todo lo que leen las otras, así
   que si al rol le falta un permiso el estado cae al respaldo igual que los tickets.
-  `ultimoFalloPrincipal` guarda el último fallo visto por el proceso, aunque ya haya vuelto.
+  `ultimoFalloPrincipal` guarda el último fallo visto por el proceso, aunque ya haya vuelto, y
+  `cortacircuitosHasta`, hasta cuándo no se la vuelve a probar (`null` = cerrado).
 - **Caída al respaldo, por llamada**: sin la variable se usa siempre la réplica y no es un error.
   Con ella, cada llamada prueba la principal **una vez**; si falla, esa llamada lee la réplica.
-  No hay reintentos ni memoria de la caída: la llamada siguiente vuelve a probar. Con la base
-  inalcanzable eso cuesta hasta el tope de conexión (3 s) por llamada. Si falla la réplica, eso
-  sí es un 500.
+  Si falla la réplica, eso sí es un 500.
+- **Cortacircuitos** (`CORTACIRCUITOS_MS`, 60 s): tras un fallo de la principal, las lecturas van
+  **derechas al respaldo** sin esperar otra vez su tope de tiempo (hasta 3 s de conexión o 5 s de
+  consulta). Pasado el minuto, la llamada siguiente la prueba una vez: si contesta, vuelve a
+  mandar ella; si no, otro minuto desde ese intento. El estado es de cada fuente creada:
+  `index.ts` crea **una** y se la da a las rutas y al programador, así que lo comparten. ⚠️ Una
+  lectura servida con el cortacircuitos abierto **es de respaldo y lo dice** (`fuente:
+  'respaldo'`, también en `abiertosConOrigen`): la pasada de la agenda no apunta historial ni
+  cierra asignaciones con ella, ni la toma por «todos cerrados» (`fuente.test.ts` y
+  `agenda-api.db.test.ts` lo prueban).
 - **La conexión** (`db-desk2.ts`): pool propio y perezoso (no se comprueba nada al arrancar), 2
   conexiones como mucho, 3 s para conectar y `statement_timeout` de 5 s. Sólo lectura por partida
   doble: el rol ya lo trae y cada conexión fija `default_transaction_read_only=on` al conectar.
@@ -512,8 +542,9 @@ de la configuración va en «Agenda: configuración», el cálculo en «Agenda: 
 ## Agenda: configuración
 
 Segundo lote de la agenda (`docs/trazabilidad-agenda-taller.md`, secciones C, E y J): el **modelo**
-(migraciones 050 y 051) y las **reglas**, todavía **sin endpoints ni pantalla**. Nada de esto lo
-usa aún «Servicios», el reloj del plazo ni el historial.
+(migraciones 050 y 051) y las **reglas**. Sus endpoints (lote 5) están en la tabla de la API,
+bajo `/trazabilidad/agenda/configuracion`; **todavía sin pantalla**. Nada de esto lo usa
+«Servicios» ni el reloj del plazo.
 
 ### Categoría y etapa de cada estado
 
@@ -562,8 +593,8 @@ Cada estado de Desk tiene una **categoría** en la agenda y, si es una etapa act
 - **Guardar**: `guardarCategoriaEstado(db, {estado, categoria, etapa}, actor)` (`repo.ts`), con
   `validarCategoriaEstado` (`types.ts`): 400 si la categoría o la etapa no existen, o si no
   cuadran (etapa sólo y siempre con `activa`). Los tres `CHECK` de la tabla dicen lo mismo.
-  Todavía no hay lectura de la firma de la categoría (`leerCategoriasEstados` sólo da categoría y
-  etapa): llegará con el endpoint.
+  `leerCategoriasEstados` sólo da categoría y etapa (es lo que usa la proyección); la firma de
+  la categoría la lee `listarEstadosDesk`, junto a la del rol.
 
 ### Flujo y etapa inicial (D11)
 
@@ -596,22 +627,25 @@ cierres)` = los días hábiles de `plazos.ts` (su `esHabil`, sin repetir la regl
 cierres de empresa que da la fuente (`cierresEmpresa`; vacíos en respaldo). El día de partida no
 cuenta; sin cierres da lo mismo que `sumarDiasHabiles`.
 
-### Lo que falta
+### Sus endpoints, y lo que no cambió en «Estados de Desk»
 
-Las cuatro escrituras de arriba **no tienen endpoint**: cuando lo tengan (lote 5) van tras
-`escritura('config.write', …)`, y `PUT /trazabilidad/estados` pasará a aceptar `categoria` y
-`etapa` (hoy sólo conoce `rol`). `GET /trazabilidad/estados` tampoco las devuelve todavía, pero
-**sí lista ya los 23 estados sembrados** aunque ningún ticket los tenga (son filas guardadas).
-Salen como cualquier estado que nadie ha tocado: `rol: 'cuenta'`, `actualizadoPor: null` y
-`actualizadoEn: null` («Nadie lo ha cambiado» en la pantalla); la semilla no aparece como autora
-de nada ahí, porque lo que firma es la categoría.
+Las tres escrituras de la agenda (puestos, duraciones y categoría) van por `PUT
+/trazabilidad/agenda/configuracion/…`, tras `escritura('config.write', …)`. **`PUT
+/trazabilidad/estados` sigue siendo sólo del rol**, con el cuerpo `{estado, rol}` que envía la
+pantalla de hoy: no se hizo «parcial» ni aprendió `categoria` (lo que el análisis preveía en un
+principio); la categoría tiene su ruta y así ninguna de las dos puede pisar a la otra por un
+campo que falte. `GET /trazabilidad/estados` devuelve ya la categoría y su firma (campos
+añadidos) y **lista los 23 estados sembrados** aunque ningún ticket los tenga (son filas
+guardadas): en la pantalla salen como cualquier estado que nadie ha tocado (`rol: 'cuenta'`,
+`actualizadoPor: null`, «Nadie lo ha cambiado»), porque la semilla firma la categoría
+(`categoriaPor: 'semilla (migracion 050)'`), no el rol.
 
 ## Agenda: proyección
 
 Tercer lote (`docs/trazabilidad-agenda-taller.md`, secciones B.5, F y H): el cálculo entero de la
-agenda como **función pura**, `proyectarAgenda(entrada)` en `agenda.ts`. **Sin endpoint ni
-pantalla**: sólo la llama `repo.ts` (`leerAgenda` y las escrituras del lote 4a). No mira el reloj
-ni la base (`agenda.test.ts` tiene la guarda) y no cambia lo que recibe.
+agenda como **función pura**, `proyectarAgenda(entrada)` en `agenda.ts`. La sirve `GET
+/trazabilidad/agenda`; **sin pantalla** todavía. No mira el reloj ni la base (`agenda.test.ts`
+tiene la guarda) y no cambia lo que recibe.
 
 - **Entrada** (`EntradaAgenda`): `hoy`, `tickets` (los de la fuente), `categorias`
   (`leerCategoriasEstados`), `config` (`leerConfigAgenda` vale tal cual), `tiposManuales` (número
@@ -654,13 +688,13 @@ ni la base (`agenda.test.ts` tiene la guarda) y no cambia lo que recibe.
 ## Agenda: asignaciones y arranque
 
 Lote 4a (`docs/trazabilidad-agenda-taller.md`, secciones E.3, E.4, F.5 y J): las tablas 052 y 053
-y lo que las lee y escribe, en `repo.ts`. **Sin endpoints ni pantalla** (lote 5): nadie lo llama
-todavía en producción. Todas reciben la fuente (`FuenteAgenda`) y `hoy` como argumentos.
+y lo que las lee y escribe, en `repo.ts`. Sus rutas llegaron con el lote 5 («Agenda: API»);
+**sin pantalla** todavía. Todas reciben la fuente (`FuenteAgenda`) y `hoy` como argumentos.
 
 - **`leerEntradaAgenda(db, fuente, hoy)`** reúne lo que pide `proyectarAgenda`: abiertos, estado y
   cierres de la fuente (de `hoy` − 120 a `hoy` + 365 días), categorías, puestos y duraciones, el
   tipo puesto a mano, las asignaciones **vigentes**, `vuelvenDeStandby` y los flujos a mano.
-  **`leerAgenda`** devuelve la agenda ya proyectada: es lo que servirá `GET /agenda`.
+  **`leerAgenda`** devuelve la agenda ya proyectada.
 - **`vuelvenDeStandby`** (`agenda.ts`, pura): el ticket está en una etapa activa y, justo antes de
   entrar en ella, el historial lo tiene en un estado de categoría standby; cambiar de estado
   dentro de la etapa no lo borra. Sólo se afirma si el tramo abierto es el estado que da la
@@ -684,12 +718,14 @@ todavía en producción. Todas reciben la fuente (`FuenteAgenda`) y `hoy` como a
 - **`marcarFlujo(db, fuente, numero, flujo | null, actor)`** — permiso `agenda.flujo` (D11): sólo
   el ticket que la fuente trae abierto (404) y **sin clasificación** (409 `flujo_de_la_fuente`);
   `null` quita la marca, siempre. Una marca de un ticket que ahora trae clasificación no se aplica.
-- **Los permisos no se miran en `repo.ts`**: los mirará `escritura('<permiso>', …)` en `router.ts`
-  cuando existan los endpoints.
+- **Los permisos no se miran en `repo.ts`**: los mira `escritura('<permiso>', …)` en `router.ts`.
 - **Dos a la vez**: la última palabra la tienen los dos índices únicos parciales; quien llega
-  segundo recibe el 409 y su transacción se deshace entera.
+  segundo recibe el 409 y su transacción se deshace entera. El 409 de un puesto ocupado **dice
+  cuál** (etapa y número), venga de la proyección o del índice.
 
-`cierre = 'reparto'` está en el `CHECK` y no lo escribe nadie todavía.
+**El reparto inicial sólo rellena puestos libres; nunca reemplaza una asignación (D19).** Para
+mover a alguien: liberar y asignar. Por eso `cierre = 'reparto'` («reemplazada por un reparto»)
+está en el `CHECK` de la 052 **reservado y sin uso**: ningún código lo escribe.
 
 ### La pasada de la agenda: su historial y el cierre automático (lote 4b, D17)
 
@@ -716,16 +752,47 @@ la fuente principal y lleva el suyo, `tmc_agenda_historial`. Unificarlos es un l
   con su propia «una sola a la vez» y su propia frescura de 30 s. Ninguna espera a la otra y el
   fallo de una no toca a la otra (sus errores salen como `tmc_registrar_agenda`). La enciende
   `index.ts` con la opción `agenda` de `iniciarRegistroEstados`; sin esa opción el programador
-  es el de siempre. **`GET /servicios` no la dispara.** El lote 5 podrá llamarla antes de servir
-  `GET /agenda`.
-- ⚠️ **Hasta 5 minutos de desfase**: entre el cambio de estado y la pasada, la asignación sigue
-  vigente en la tabla. La proyección ya no la cuenta y da su puesto por libre, pero ni ese
-  puesto ni ese ticket se pueden asignar (409) hasta que la pasada la cierre o se libere a mano.
+  es el de siempre. **`GET /servicios` no la dispara.** Además sale **a demanda** (D20), por la
+  misma puerta (`agendaAlDia`, que dice si salió bien): antes de servir `GET /agenda` y antes de
+  asignar, confirmar el reparto o liberar (ver «Agenda: API»).
+- ⚠️ **El desfase que queda**: entre el cambio de estado y la pasada siguiente, la asignación
+  sigue vigente en la tabla. La proyección ya no la cuenta y da su puesto por libre, pero ni ese
+  puesto ni ese ticket se pueden asignar (409) hasta que una pasada la cierre o se libere a
+  mano. Con la pasada a demanda eso dura como mucho los 30 s de frescura (no 5 minutos), salvo
+  que la pasada falle o la agenda esté en respaldo.
 - ⚠️ **Sin `DESK2_DB_URL`** la agenda funciona en respaldo, pero su historial no crece y nada se
   cierra solo: sólo queda liberar a mano.
 - La fuente se lee con el bloqueo ya cogido (dos pasadas a la vez no pueden escribir una lectura
   vieja sobre una nueva): mientras la principal tarda en fallar, la pasada retiene una conexión
   de la base del portal, y nada más.
+
+## Agenda: API
+
+Lote 5 (`docs/trazabilidad-agenda-taller.md`, D18 a D20 y sección E.7): las rutas de la tabla
+«Agenda del taller» de la API, en `router.ts`. **Sin pantalla** (lotes 6 y 7): hoy nadie las llama.
+
+- **Pasada a demanda (D20)**: `GET /agenda`, `POST /agenda/reparto`, `POST /agenda/asignaciones` y
+  `POST /agenda/liberar` lanzan antes la pasada de la agenda (`ponerAlDia` → `agendaAlDia` →
+  `registrarEstadosAgenda`), salvo que haya una buena de hace menos de 30 s (`FRESCURA_MS`). En
+  una escritura va **después** del permiso y de validar el cuerpo. Mismo patrón que «Servicios»:
+  **si falla, la petición no falla**; sigue con lo que haya, el error va al registro
+  (`tmc_registrar_agenda`) y la respuesta lleva el aviso `pasada_fallida`. No la lanzan la
+  propuesta de reparto, los huecos, el flujo ni la configuración.
+- **Lo que cambia la agenda devuelve la agenda** (una petición menos por acción; hub-api limita a
+  60 por minuto y por IP toda `/api`).
+- **`hoy`**: en los `GET`, `?hoy=AAAA-MM-DD` como en el resto de la app, y además tiene que ser
+  un día que exista (`hoyAgenda`; 400 con `2026-02-30`). No tiene tope de rango. **Las
+  escrituras no lo aceptan**: usan siempre el día de hoy en Colombia, porque de él sale el
+  `inicio` que se guarda.
+- **Reparto inicial (D19)**: sólo rellena puestos libres. **Liberar (D18)**: por número de ticket.
+- **Huecos** (`huecosDeEtapa`, `agenda.ts`): un equipo que llegara hoy va detrás de toda la fila
+  de la etapa y de los equipos nuevos encadenados; los 5 huecos son sucesivos (cada uno supone
+  ocupados los anteriores durante la duración de ese tipo). Es una previsión, no una reserva:
+  nada se guarda.
+- **Configuración**: `ticketsAbiertos` de cada estado se cuenta en la fuente de la agenda (la
+  de `GET /estados`, en la réplica): pueden no coincidir.
+- ⚠️ **Nada de esto lleva clientes, seriales ni correos**, y de un fallo de Desk 2.0 sólo sale
+  el motivo: `router.test.ts` vigila las dos cosas.
 
 ## Pruebas
 
@@ -766,6 +833,14 @@ la fuente principal y lleva el suyo, `tmc_agenda_historial`. Unificarlos es un l
   a otra etapa, cerrado o desaparecido; no dentro de la etapa), que no escribe sin la variable
   ni con la principal caída mientras «Servicios» sigue apuntando, varias pasadas a la vez y que
   los dos bloqueos son independientes. El programador con las dos pasadas, sin base, en
-  `registro-agenda.test.ts`.
+  `registro-agenda.test.ts`. `agenda-api.db.test.ts` recorre el lote 5 de punta a punta, con las
+  rutas de verdad sobre la base de pruebas y la imitación de Desk 2.0 (sólo la sesión es un
+  doble): leer → repartir → asignar → cambio de estado en la imitación → pasada a demanda → la
+  asignación se cierra → la agenda lo refleja; liberar, D19, el Lector sin permiso, el flujo, la
+  configuración (categoría y rol sin pisarse) y el cortacircuitos con una principal caída de
+  verdad. Sin base, en `router.test.ts`: cada ruta de la agenda con su 401, su 403 sin la app,
+  su 403 por rol, sus 400, 404 y 409, la pasada a demanda (antes de leer, sin repetirse, y el
+  aviso si falla) y la guarda de permisos ruta a ruta; el cortacircuitos, con reloj inyectado,
+  en `fuente.test.ts`; y los huecos, en `agenda.test.ts`.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.
