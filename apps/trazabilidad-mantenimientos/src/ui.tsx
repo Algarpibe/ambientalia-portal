@@ -58,6 +58,14 @@ export function Card({ title, hint, actions, children, className = '' }: { title
   );
 }
 
+/**
+ * Cómo se ve un control desactivado (sin permiso para cambiarlo, o mientras se
+ * guarda): fondo gris y cursor de «no permitido», para que se note que no se
+ * puede tocar. Único sitio: lo llevan los <input>, <select> y <textarea> de la
+ * app, también los que desactiva un <fieldset>.
+ */
+export const DESACTIVADO = 'disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-500';
+
 type Variant = 'primary' | 'secondary' | 'ghost';
 const VARIANT: Record<Variant, string> = {
   primary: 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300',

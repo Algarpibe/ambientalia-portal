@@ -3,7 +3,7 @@ import { api } from '../api';
 import { esEmailInterno, type EquipoVista } from '../dominio';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
-import { Alert, Button, Drawer, EstadoBadge, Tag } from '../ui';
+import { Alert, Button, DESACTIVADO, Drawer, EstadoBadge, Tag } from '../ui';
 
 interface Props {
   equipo: EquipoVista;
@@ -11,8 +11,7 @@ interface Props {
   onGuardado: () => Promise<void>;
 }
 
-const INPUT =
-  'block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
+const INPUT = `block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO}`;
 
 export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
   const s = e.seguimiento;
@@ -117,9 +116,13 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
         <form onSubmit={(ev) => void guardar(ev)} className="flex flex-col gap-3 border-t border-gray-200 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Seguimiento</p>
           {/* Un <fieldset> desactivado desactiva de una vez todo lo que lleva dentro. */}
-          <fieldset disabled={!editable} className="flex min-w-0 flex-col gap-3 disabled:opacity-70">
-            <label className={`flex min-h-[44px] items-center gap-3 rounded-xl border px-3 py-2 text-sm ${editable ? 'cursor-pointer' : ''} ${enAmbientalia ? 'border-blue-300 bg-blue-50' : 'border-gray-200'}`}>
-              <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={enAmbientalia} onChange={(ev) => setEnAmbientalia(ev.target.checked)} />
+          <fieldset disabled={!editable} className="flex min-w-0 flex-col gap-3">
+            <label
+              className={`flex min-h-[44px] items-center gap-3 rounded-xl border px-3 py-2 text-sm ${
+                !editable ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-500' : `cursor-pointer ${enAmbientalia ? 'border-blue-300 bg-blue-50' : 'border-gray-200'}`
+              }`}
+            >
+              <input type="checkbox" className="h-5 w-5 accent-blue-600 disabled:cursor-not-allowed" checked={enAmbientalia} onChange={(ev) => setEnAmbientalia(ev.target.checked)} />
               El equipo está ahora en Ambientalia
             </label>
             <label className="block text-sm">

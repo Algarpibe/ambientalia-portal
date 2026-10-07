@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { ETIQUETA_ROL_APP, ROLES_APP, esRolApp, type RolApp, type UsuarioRol } from '../dominio';
-import { Alert, Card, Loading, Tag } from '../ui';
+import { Alert, Card, DESACTIVADO, Loading, Tag } from '../ui';
 
 interface Props {
   notificar: (msg: string) => void;
@@ -105,7 +105,7 @@ export default function Roles({ notificar }: Props) {
                             const role = ev.target.value;
                             if (esRolApp(role)) void cambiar(u, role);
                           }}
-                          className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${
+                          className={`min-h-[36px] w-[190px] rounded-xl border bg-white px-2 py-1 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO} ${
                             u.role === 'LECTOR' ? 'border-gray-300 text-gray-500' : 'border-gray-400 font-medium text-gray-900'
                           }`}
                         >
