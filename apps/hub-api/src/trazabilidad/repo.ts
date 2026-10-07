@@ -862,9 +862,10 @@ export async function guardarRol(db: Db, userId: string, rol: RolApp, actor: Act
   );
 }
 
-export async function existeUsuario(db: Db, userId: string): Promise<boolean> {
-  const { rows } = await db.query('SELECT 1 FROM portal.users WHERE id = $1', [userId]);
-  return rows.length > 0;
+/** Un usuario del portal y si es administrador; `null` si no existe. */
+export async function usuarioPortal(db: Db, userId: string): Promise<{ admin: boolean } | null> {
+  const { rows } = await db.query('SELECT role FROM portal.users WHERE id = $1', [userId]);
+  return rows.length > 0 ? { admin: rows[0].role === 'admin' } : null;
 }
 
 /**

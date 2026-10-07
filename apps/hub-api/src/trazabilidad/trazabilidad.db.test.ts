@@ -1552,10 +1552,12 @@ describe('roles de la app', () => {
     expect(await filas()).toEqual([]);
   });
 
-  it('existeUsuario distingue al que está del que no', async () => {
+  it('usuarioPortal distingue al que está del que no, y dice si es administrador del portal', async () => {
     const id = await usuario('Ana Uno');
-    expect(await repo.existeUsuario(db, id)).toBe(true);
-    expect(await repo.existeUsuario(db, NADIE)).toBe(false);
+    const jefe = await usuario('Ana Admin', { app: false, role: 'admin' });
+    expect(await repo.usuarioPortal(db, id)).toEqual({ admin: false });
+    expect(await repo.usuarioPortal(db, jefe)).toEqual({ admin: true });
+    expect(await repo.usuarioPortal(db, NADIE)).toBeNull();
   });
 
   it('borrar al usuario se lleva su rol', async () => {

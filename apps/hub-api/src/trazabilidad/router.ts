@@ -140,13 +140,19 @@ export function createTrazabilidadRouter(db: Pool): Router {
   );
 
   // Pone el rol de una persona: {role}. LECTOR también se guarda (queda quién lo dejó así).
+  // A un administrador del portal no se le pone rol: ya lo puede todo, así que
+  // el rol no cambiaría nada y quedaría un dato que engaña (409).
   router.put(
     '/trazabilidad/roles/:userId',
     ...gated,
     soloAdmin('tmc_rol', async (req) => {
       const userId = parseUserId(req.params.userId);
       const { role } = parseRolApp(req.body);
-      if (!(await repo.existeUsuario(db, userId))) throw new TzError('not_found', 404, 'Ese usuario no existe en el portal.');
+      const usuario = await repo.usuarioPortal(db, userId);
+      if (!usuario) throw new TzError('not_found', 404, 'Ese usuario no existe en el portal.');
+      if (usuario.admin) {
+        throw new TzError('usuario_admin', 409, 'Esa persona es administrador del portal: ya tiene todos los permisos y no lleva rol en esta app.');
+      }
       await repo.guardarRol(db, userId, role, actorOf(req));
       return { userId, role };
     }),

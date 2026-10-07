@@ -83,15 +83,17 @@ export default function Roles({ notificar }: Props) {
                   <tr key={u.userId}>
                     <td className="px-3 py-2">
                       <span className="font-medium text-gray-900">{u.fullName}</span>
-                      {u.admin && (
-                        <span className="ml-2" title="Administrador del portal: tiene todos los permisos, tenga el rol que tenga, y puede repartir roles">
-                          <Tag tone="blue">administrador</Tag>
-                        </span>
-                      )}
                       <span className="block text-xs text-gray-500">{u.email}</span>
                     </td>
                     <td className="px-3 py-2 text-gray-600">{ESTADO[u.status] ?? u.status}</td>
                     <td className="px-3 py-1">
+                      {/* Un administrador del portal no lleva rol en la app: lo puede todo. Sólo lectura, sin desplegable (el servidor tampoco lo aceptaría). */}
+                      {u.admin ? (
+                        <span className="inline-flex min-h-[44px] items-center gap-2" title="Administrador del portal: tiene todos los permisos de la app y reparte los roles. No lleva rol.">
+                          <Tag tone="blue">Admin del portal</Tag>
+                          <span className="text-xs text-gray-500">todos los permisos</span>
+                        </span>
+                      ) : (
                       <span className="inline-flex min-h-[44px] items-center gap-2">
                         <select
                           value={u.role}
@@ -119,6 +121,7 @@ export default function Roles({ notificar }: Props) {
                           </span>
                         )}
                       </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -128,7 +131,7 @@ export default function Roles({ notificar }: Props) {
         )}
         <p className="mt-3 text-xs text-gray-500">
           Salen quienes tienen la app asignada, quienes ya tienen un rol y los administradores del portal. El desplegable guarda al momento. Un administrador del portal lo
-          puede todo aunque aquí figure como Lector, y sólo un administrador reparte roles.
+          puede todo y no lleva rol en la app: sale como «Admin del portal», sin desplegable. Sólo un administrador reparte roles.
         </p>
       </Card>
 

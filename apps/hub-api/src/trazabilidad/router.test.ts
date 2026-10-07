@@ -33,8 +33,9 @@ type RolApp = (typeof ROLES_APP)[number];
 
 /** El rol guardado de cada usuario (portal.tmc_user_roles). Sin entrada = sin fila = LECTOR. */
 const rolesApp = new Map<string, string>();
-/** Usuarios que «existen» en portal.users para el PUT de roles. */
-const usuarios = new Set<string>();
+/** Usuarios que «existen» en portal.users para el PUT de roles, con su rol en el portal. */
+const usuariosPortal = new Map<string, 'admin' | 'reader'>();
+const usuarios = { add: (id: string, role: 'admin' | 'reader' = 'reader') => usuariosPortal.set(id, role), clear: () => usuariosPortal.clear() };
 /** Las consultas de negocio. La del rol de quien pide NO entra aquí: va antes y no es de negocio. */
 const queries: string[] = [];
 /** Veces que se ha mirado el rol de alguien. */
@@ -50,8 +51,8 @@ const fakePool = {
     }
     queries.push(sql);
     if (sql.includes('FROM portal.users WHERE id')) {
-      const hay = usuarios.has(String(params[0]));
-      return { rows: hay ? [{ '?column?': 1 }] : [], rowCount: hay ? 1 : 0 };
+      const role = usuariosPortal.get(String(params[0]));
+      return { rows: role ? [{ role }] : [], rowCount: role ? 1 : 0 };
     }
     return { rows: [], rowCount: 0 };
   },
@@ -345,6 +346,18 @@ describe('roles: repartirlos (sólo administradores del portal)', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ userId: ID, role });
     expect(queries.some((q) => /INSERT INTO portal\.tmc_user_roles/.test(q))).toBe(true);
+  });
+
+  // Un administrador del portal lo puede todo sin rol: ponerle uno no cambiaría
+  // nada y dejaría un dato que engaña. La lista lo enseña en sólo lectura y el
+  // servidor lo rechaza igual, lo pida quien lo pida.
+  it.each([...ROLES_APP])('a un administrador del portal no se le pone rol (%s): 409 en español y no se escribe nada', async (role) => {
+    usuarios.add(ID, 'admin');
+    const res = await put(ID, { role }, comoAdmin());
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('usuario_admin');
+    expect(res.body.message).toMatch(/administrador del portal/);
+    expect(queries.some((q) => /INSERT|UPDATE|DELETE/.test(q))).toBe(false);
   });
 });
 
