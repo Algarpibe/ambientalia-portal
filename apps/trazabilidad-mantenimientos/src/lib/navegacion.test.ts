@@ -20,6 +20,7 @@ describe('navegación en dos niveles', () => {
       ['clientes', 'calendario', 'Calendario Calibraciones'],
       ['clientes', 'avisos', 'Avisos a clientes'],
       ['taller', 'servicios', 'Servicios'],
+      ['taller', 'agenda', 'Agenda del taller'],
       ['administracion', 'configuracion', 'Configuración'],
       ['administracion', 'roles', 'Roles'],
     ]);
@@ -38,7 +39,7 @@ describe('navegación en dos niveles', () => {
     expect(seccionesDe('administracion', true).map((s) => s.id)).toEqual(['configuracion', 'roles']);
     for (const gestiona of [true, false]) {
       expect(seccionesDe('clientes', gestiona).map((s) => s.id)).toEqual(['resumen', 'equipos', 'calendario', 'avisos']);
-      expect(seccionesDe('taller', gestiona).map((s) => s.id)).toEqual(['servicios']);
+      expect(seccionesDe('taller', gestiona).map((s) => s.id)).toEqual(['servicios', 'agenda']);
     }
   });
 
@@ -53,6 +54,12 @@ describe('seccionDeHash', () => {
   it.each(['resumen', 'equipos', 'calendario', 'avisos', 'servicios', 'configuracion'] as const)('el hash de siempre #%s sigue llevando a su sección', (id) => {
     expect(seccionDeHash(`#${id}`)).toBe(id);
     expect(seccionDeHash(id)).toBe(id);
+  });
+
+  it('#agenda lleva a la agenda del taller, que cuelga de «Taller» junto a Servicios (que sigue siendo la primera)', () => {
+    expect(seccionDeHash('#agenda')).toBe('agenda');
+    expect(grupoDe('agenda')).toBe('taller');
+    expect(primeraSeccion('taller')).toBe('servicios');
   });
 
   it('#roles es la sección nueva', () => {

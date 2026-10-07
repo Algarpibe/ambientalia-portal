@@ -13,6 +13,7 @@ import Avisos from './vistas/Avisos';
 import FichaEquipo from './vistas/FichaEquipo';
 import Importar from './vistas/Importar';
 import Servicios from './vistas/Servicios';
+import Agenda from './vistas/Agenda';
 import Configuracion from './vistas/Configuracion';
 import Roles from './vistas/Roles';
 
@@ -22,7 +23,8 @@ import Roles from './vistas/Roles';
  * se les venza y programar el servicio.
  *
  * Además, «Servicios» sigue los tickets abiertos en Zoho Desk (de cualquier
- * marca) contra el plazo de su tipo de servicio, que se fija en «Configuración».
+ * marca) contra el plazo de su tipo de servicio, que se fija en «Configuración»,
+ * y «Agenda del taller» (#agenda) enseña qué ticket ocupa cada puesto y la fila.
  *
  * Navegación en dos niveles (`lib/navegacion.ts`): arriba los grupos
  * («Clientes y calibraciones», «Taller», «Administración») y debajo las
@@ -203,6 +205,7 @@ export default function App() {
 
         {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario importado. */}
         {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
+        {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} />}
         {tab === 'configuracion' && <Configuracion notificar={notificar} />}
         {/* #roles escrito a mano por quien no es administrador: se le dice, y el servidor tampoco le daría la lista. */}
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}

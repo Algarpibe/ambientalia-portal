@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, MiRol, PlazoServicio, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, MiRol, PlazoServicio, RespuestaAgenda, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -64,6 +64,8 @@ export const api = {
   /** Sólo la categoría (y la etapa, si es una etapa activa): no toca el rol del reloj ni su firma. */
   guardarCategoria: (estado: string, categoria: CategoriaAgenda, etapa: EtapaAgenda | null) =>
     request<ConfiguracionAgenda>('PUT', '/agenda/configuracion/estados', { estado, categoria, etapa }),
+  /** La agenda del taller a hoy: puestos, filas, listas aparte, avisos, la ficha de cada ticket y el eje del calendario. Lanza antes la pasada de la agenda. */
+  agenda: () => request<RespuestaAgenda>('GET', '/agenda'),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),

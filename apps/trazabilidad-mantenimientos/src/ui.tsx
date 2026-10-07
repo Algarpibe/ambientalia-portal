@@ -2,7 +2,7 @@
  * Primitivas de UI en el lenguaje visual del portal (tarjetas blancas, bordes
  * grises, acento azul, rounded-xl). Botones de al menos 44 px de alto.
  */
-import { useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
 import { ETIQUETA_ESTADO, type EstadoCalibracion, type TicketDesk } from './dominio';
 
@@ -114,24 +114,61 @@ export function Loading({ texto = 'Cargando…' }: { texto?: string }) {
   );
 }
 
-function useEscape(onClose: () => void) {
+const ENFOCABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])';
+/** Los diálogos abiertos, el último encima: sólo ése atiende el teclado (una confirmación sobre una ficha no cierra las dos). */
+const abiertos: object[] = [];
+
+/**
+ * Lo común a un diálogo y al panel lateral: al abrir, el foco entra en él; Tab
+ * no sale; Escape lo cierra; y al cerrar el foco vuelve a donde estaba.
+ * Devuelve la referencia de la caja y el id de su título (`aria-labelledby`).
+ */
+function useDialogo<T extends HTMLElement>(onClose: () => void) {
+  const caja = useRef<T>(null);
+  const titulo = useId();
+  const cerrar = useRef(onClose);
+  cerrar.current = onClose;
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const yo = {};
+    const antes = document.activeElement as HTMLElement | null;
+    abiertos.push(yo);
+    caja.current?.focus();
+    const k = (e: KeyboardEvent) => {
+      const el = caja.current;
+      if (!el || abiertos[abiertos.length - 1] !== yo) return;
+      if (e.key === 'Escape') return cerrar.current();
+      if (e.key !== 'Tab') return;
+      const f = [...el.querySelectorAll<HTMLElement>(ENFOCABLE)];
+      const activo = document.activeElement;
+      const fuera = !el.contains(activo) || activo === el;
+      if (f.length === 0) e.preventDefault();
+      else if (e.shiftKey ? fuera || activo === f[0] : fuera || activo === f[f.length - 1]) {
+        e.preventDefault();
+        f[e.shiftKey ? f.length - 1 : 0].focus();
+      }
+    };
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', k);
+      abiertos.splice(abiertos.indexOf(yo), 1);
+      antes?.focus?.();
+    };
+  }, []);
+  return { caja, titulo };
 }
 
-/** Panel lateral derecho (ficha de un equipo). */
+/** Panel lateral derecho (ficha de un equipo, ficha de un ticket de la agenda). */
 export function Drawer({ title, subtitle, onClose, children }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode }) {
-  useEscape(onClose);
+  const { caja, titulo } = useDialogo<HTMLElement>(onClose);
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-gray-900/40" onClick={onClose} aria-hidden />
-      <aside role="dialog" aria-modal="true" className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-xl">
+      <aside ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-xl focus:outline-none">
         <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4">
           <div className="min-w-0">
-            <div className="text-lg font-semibold text-gray-900">{title}</div>
+            <div id={titulo} className="text-lg font-semibold text-gray-900">
+              {title}
+            </div>
             {subtitle && <div className="text-sm text-gray-500">{subtitle}</div>}
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
@@ -146,13 +183,15 @@ export function Drawer({ title, subtitle, onClose, children }: { title: ReactNod
 
 /** Diálogo centrado. */
 export function Modal({ title, onClose, children, footer }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
-  useEscape(onClose);
+  const { caja, titulo } = useDialogo<HTMLDivElement>(onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[55] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-gray-900/40" onClick={onClose} aria-hidden />
-      <div role="dialog" aria-modal="true" className="relative flex max-h-[90vh] w-full max-w-xl flex-col rounded-2xl bg-white shadow-xl">
+      <div ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="relative flex max-h-[90vh] w-full max-w-xl flex-col rounded-2xl bg-white shadow-xl focus:outline-none">
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <h3 id={titulo} className="text-lg font-semibold text-gray-900">
+            {title}
+          </h3>
           <button type="button" onClick={onClose} aria-label="Cerrar" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
             <X className="h-5 w-5" aria-hidden />
           </button>
