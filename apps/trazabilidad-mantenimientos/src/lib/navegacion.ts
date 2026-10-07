@@ -3,7 +3,7 @@
  * rol de quien la usa. Puro: sin React ni red.
  *
  * Las secciones siguen yendo por hash (#resumen, #equipos, #calendario,
- * #avisos, #servicios, #configuracion y el nuevo #roles): el grupo no está en
+ * #avisos, #servicios, #agenda, #configuracion y #roles): el grupo no está en
  * la URL, se deduce de la sección, así que los enlaces de siempre siguen valiendo.
  *
  * Lo de los permisos aquí sólo decide qué se oculta o se desactiva. La guarda
@@ -24,8 +24,8 @@ export const SECCIONES = [
   { id: 'equipos', label: 'Equipos', grupo: 'clientes', soloGestores: false },
   { id: 'calendario', label: 'Calendario Calibraciones', grupo: 'clientes', soloGestores: false },
   { id: 'avisos', label: 'Avisos a clientes', grupo: 'clientes', soloGestores: false },
-  // Aquí irá también la «Agenda del taller».
   { id: 'servicios', label: 'Servicios', grupo: 'taller', soloGestores: false },
+  { id: 'agenda', label: 'Agenda del taller', grupo: 'taller', soloGestores: false },
   { id: 'configuracion', label: 'Configuración', grupo: 'administracion', soloGestores: false },
   { id: 'roles', label: 'Roles', grupo: 'administracion', soloGestores: true },
 ] as const satisfies readonly { id: string; label: string; grupo: Grupo; soloGestores: boolean }[];

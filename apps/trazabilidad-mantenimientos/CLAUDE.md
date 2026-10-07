@@ -53,6 +53,8 @@ se registra en la app y sobrevive a las reimportaciones.
 | Eje, barras (sus tramos, sus pausas y la marca de fin), colores, textos, filtros (`filtrarServicios`, `GRUPOS_PLAZO`), desplegable del tipo de «Servicios» y, de «Configuración», la nota del tipo compuesto y las opciones y textos del rol de cada estado | `src/lib/servicios.ts` |
 | Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos y rol de cada estado de Desk) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 | Configuración de la agenda del taller (lote 6): puestos, duraciones y categoría de cada estado | `src/vistas/ConfiguracionAgenda.tsx` (los tres bloques y `useAgendaConfig`); lo que calculan —columnas y casillas de la tabla de duraciones, filtro y orden de los estados, firmas— en `src/lib/agenda.ts` (ver «Agenda: pantalla de configuración») |
+| Pantalla «Agenda del taller» (lote 7, `#agenda`): cabecera, resumen, filas, listas aparte y ficha lateral; el calendario por puesto y la lista del teléfono; y las acciones con permiso | `src/vistas/Agenda.tsx`, `src/vistas/AgendaGantt.tsx` y `src/vistas/AgendaAcciones.tsx`; lo que calculan —eje, barras, resumen, lista por días, textos y la propuesta de reparto editable— en `src/lib/agendaTaller.ts` (ver «Agenda: pantalla») |
+| Diálogos y panel lateral: foco al abrir, Tab que no sale, Escape sólo para el de encima y título como etiqueta (`useDialogo`; único sitio) | `src/ui.tsx` (`Modal`, `Drawer`) |
 | Fechas: `fmtFecha` y `fmtFechaHora` (un instante se enseña en hora de **Colombia**; único sitio) | `src/lib/vistas.ts` |
 | Aspecto de un control desactivado (`DESACTIVADO`: fondo gris y cursor de «no permitido»; único sitio) | `src/ui.tsx` |
 
@@ -111,7 +113,7 @@ configuración, la configuración entera. Errores como en el resto: `{error, mes
 
 | Método | Ruta | Permiso | Qué hace y qué errores da |
 |---|---|---|---|
-| GET | `/trazabilidad/agenda` (`?hoy=`) | — | La agenda: `{hoy, fuente: {fuente, motivo, ultimaSincronizacion}, etapas[], standby[], porLlegar[], finTaller, fueraAgenda, sinCategoria[], avisos[], totalAbiertos, estadoFuente}`. Cada etapa: `{etapa, etiqueta, puestos[], fila[], encadenados[], saturacion: {ocupados, puestos}, primerHueco}` (ver «Agenda: proyección»); `estadoFuente` es el de `GET /agenda/fuente` sin `abiertos`; `avisos` son `{codigo, mensaje}` con `sincronizacion_parada`, `fuente_respaldo`, `estados_sin_categoria` y `pasada_fallida`. Antes de leer lanza la pasada de la agenda. 400 en `hoy` |
+| GET | `/trazabilidad/agenda` (`?hoy=`) | — | La agenda: `{hoy, fuente: {fuente, motivo, ultimaSincronizacion}, etapas[], standby[], porLlegar[], finTaller, fueraAgenda, sinCategoria[], avisos[], totalAbiertos, estadoFuente}`. Cada etapa: `{etapa, etiqueta, puestos[], fila[], encadenados[], saturacion: {ocupados, puestos}, primerHueco}` (ver «Agenda: proyección»); `estadoFuente` es el de `GET /agenda/fuente` sin `abiertos`; `avisos` son `{codigo, mensaje}` con `sincronizacion_parada`, `fuente_respaldo`, `estados_sin_categoria` y `pasada_fallida`. Antes de leer lanza la pasada de la agenda. 400 en `hoy`. **Desde el lote 7** (sólo lectura, para la pantalla): cada puesto lleva `finPlanificado`; y la respuesta, `tickets[]` —la ficha de cada abierto: `{numero, asunto, estado, tipo, tipoManual, flujo, flujoOrigen, remisionEntrada, ultimaTransicion}`— y `eje: {desde, hasta, festivos[], cierres[]}` (ver «Agenda: pantalla»). Las cuatro escrituras devuelven lo mismo |
 | GET | `/trazabilidad/agenda/reparto` (`?hoy=`) | `agenda.reparto` | La propuesta de reparto inicial (D6), sin escribir: `{hoy, reparto: [{numero, etapa, puesto, desde}]}` |
 | POST | `/trazabilidad/agenda/reparto` | `agenda.reparto` | `{reparto: [{numero, etapa, puesto}]}`: la propuesta tal cual o ajustada, todo o nada. 400 en `reparto` si no es una lista o repite ticket o puesto, y en `numero` / `etapa` / `puesto` de una línea (también si la etapa no tiene ese puesto); **409 `puesto_ocupado` diciendo cuál** («El puesto 2 de Proceso ya está ocupado…»): sólo rellena puestos libres (D19); 409 `ticket_fuera_de_etapa` / `ticket_con_puesto` |
 | POST | `/trazabilidad/agenda/asignaciones` | `agenda.asignar` | `{numero, etapa, puesto, motivo?}`. 400 en `motivo` si el ticket no es el primero de la fila y no se dice; 400 en `puesto` si la etapa no lo tiene; 409 `puesto_ocupado`, `ticket_fuera_de_etapa` o `ticket_con_puesto` |
@@ -189,7 +191,7 @@ Dos niveles (`src/lib/navegacion.ts`): arriba el **grupo**, debajo sus **seccion
 | Grupo | Secciones (hash) |
 |---|---|
 | Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`, con sus vistas Manual / Simulación automática dentro) |
-| Taller | Servicios (`#servicios`); aquí irá la «Agenda del taller» |
+| Taller | Servicios (`#servicios`) y Agenda del taller (`#agenda`) |
 | Administración | Configuración (`#configuracion`) y Roles (`#roles`, sólo se ofrece a los administradores del portal) |
 
 El grupo no va en la URL: se deduce de la sección, así que los hashes de siempre siguen valiendo.
@@ -487,7 +489,7 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
 ## Fuente de la agenda
 
 Primer lote de la **agenda del taller** (`docs/trazabilidad-agenda-taller.md`, decisiones D4, D12
-y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay pantalla (el modelo
+y D13; plan en su sección J). Es sólo la **capa de lectura**: la pantalla va en «Agenda: pantalla» (el modelo
 de la configuración va en «Agenda: configuración», el cálculo en «Agenda: proyección» y las escrituras en «Agenda: asignaciones y arranque»), y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
 (**cada pantalla lleva el historial de la base de la que lee**: la agenda tiene el suyo, `tmc_agenda_historial`; ver «Agenda: asignaciones y arranque»).
 `abiertosConOrigen()` da los mismos tickets que `ticketsAbiertos()` y dice además quién los dio en esa llamada.
@@ -507,10 +509,12 @@ de la configuración va en «Agenda: configuración», el cálculo en «Agenda: 
   respaldo, `prioridad` y `llegadaEstado` son siempre `null`, y `clasificacion` y
   `remisionEntrada` se leen sólo si la réplica trae la columna (`to_jsonb(t)->>…`: si no existe,
   `null` en vez de error). **Ningún ticket lleva marca «sin confirmar»** (D13).
-  `asunto` y `codigoServicio` (`subject` y `codigo_servicio`, columnas de siempre de la réplica)
-  vienen **sólo en respaldo** —con la principal son `null`: allí no se piden— y sirven para una
-  sola cosa: deducir el flujo (`flujoDeTicket`). ⚠️ El asunto suele llevar el nombre del cliente:
-  no se enseña, y `GET /trazabilidad/agenda/fuente` no lo devuelve (`router.test.ts` lo vigila).
+  `asunto` (`subject`) viene **de las dos fuentes desde el lote 7**: identifica el equipo en la
+  pantalla de la agenda. `codigoServicio` (`codigo_servicio`) sigue **sólo en respaldo** (con la
+  principal es `null`) y, con el asunto, sirve para deducir el flujo (`flujoDeTicket`). ⚠️ El
+  asunto es texto de terceros y suele llevar el nombre del cliente: **sólo sale por `GET
+  /trazabilidad/agenda`** (en `tickets`), la pantalla lo pinta siempre como texto, y `GET
+  /trazabilidad/agenda/fuente` no lo devuelve (`router.test.ts` lo vigila). Ni serial ni correo.
 - **`cierresEmpresa(desde, hasta)`** → fechas de `public.calendario_cierres`; `[]` en respaldo.
 - **`estadoFuente()`** → cuál contesta y por qué (`motivo`: `sin_variable`, `error_conexion`,
   `timeout`, `error_consulta`), el máximo de `synced_at` de la base usada y
@@ -650,7 +654,7 @@ guardadas): en la pantalla salen como cualquier estado que nadie ha tocado (`rol
 
 Tercer lote (`docs/trazabilidad-agenda-taller.md`, secciones B.5, F y H): el cálculo entero de la
 agenda como **función pura**, `proyectarAgenda(entrada)` en `agenda.ts`. La sirve `GET
-/trazabilidad/agenda`; **sin pantalla** todavía. No mira el reloj ni la base (`agenda.test.ts`
+/trazabilidad/agenda` y la pinta «Agenda: pantalla». No mira el reloj ni la base (`agenda.test.ts`
 tiene la guarda) y no cambia lo que recibe.
 
 - **Entrada** (`EntradaAgenda`): `hoy`, `tickets` (los de la fuente), `categorias`
@@ -695,7 +699,7 @@ tiene la guarda) y no cambia lo que recibe.
 
 Lote 4a (`docs/trazabilidad-agenda-taller.md`, secciones E.3, E.4, F.5 y J): las tablas 052 y 053
 y lo que las lee y escribe, en `repo.ts`. Sus rutas llegaron con el lote 5 («Agenda: API»);
-**sin pantalla** todavía. Todas reciben la fuente (`FuenteAgenda`) y `hoy` como argumentos.
+sus botones, con el lote 7b («Agenda: pantalla»). Todas reciben la fuente (`FuenteAgenda`) y `hoy` como argumentos.
 
 - **`leerEntradaAgenda(db, fuente, hoy)`** reúne lo que pide `proyectarAgenda`: abiertos, estado y
   cierres de la fuente (de `hoy` − 120 a `hoy` + 365 días), categorías, puestos y duraciones, el
@@ -775,7 +779,7 @@ la fuente principal y lleva el suyo, `tmc_agenda_historial`. Unificarlos es un l
 ## Agenda: API
 
 Lote 5 (`docs/trazabilidad-agenda-taller.md`, D18 a D20 y sección E.7): las rutas de la tabla
-«Agenda del taller» de la API, en `router.ts`. **Sin pantalla** (lotes 6 y 7): hoy nadie las llama.
+«Agenda del taller» de la API, en `router.ts`. Las llaman las pantallas de los lotes 6 y 7.
 
 - **Pasada a demanda (D20)**: `GET /agenda`, `POST /agenda/reparto`, `POST /agenda/asignaciones` y
   `POST /agenda/liberar` lanzan antes la pasada de la agenda (`ponerAlDia` → `agendaAlDia` →
@@ -803,7 +807,7 @@ Lote 5 (`docs/trazabilidad-agenda-taller.md`, D18 a D20 y sección E.7): las rut
 ## Agenda: pantalla de configuración
 
 Lote 6 (`docs/trazabilidad-agenda-taller.md`, sección J). En «Administración» → «Configuración»,
-debajo de los plazos. La **pantalla de la agenda** (lote 7) sigue sin existir. Todo pide
+debajo de los plazos. La **pantalla de la agenda** (lote 7) va en «Agenda: pantalla». Todo pide
 `config.write`; sin él se ve igual, en consulta.
 
 - **«Agenda del taller · Puestos»**: una fila por etapa con sus puestos (0 a 50), los **tickets
@@ -827,9 +831,54 @@ debajo de los plazos. La **pantalla de la agenda** (lote 7) sigue sin existir. T
   día y `fmtFechaHora` su día y hora **en Colombia** (UTC−5 fijo), con aritmética sobre UTC: no
   dependen de la zona del navegador. Un día suelto («2026-10-07») no se mueve.
 
+**Pulido del lote 7**: el bloque del reloj tiene el mismo filtro «Sólo estados con tickets»
+(`estadosReloj`), encendido de partida; una duración heredada se ve en gris y cursiva y dice
+«(por defecto)» debajo, también en consulta; y todas las tarjetas ocupan el mismo ancho.
+
+## Agenda: pantalla
+
+Lote 7 (`docs/trazabilidad-agenda-taller.md`, secciones G y J). «Taller» → «Agenda del taller»
+(`#agenda`). **Sólo pinta**: todo llega calculado de `GET /trazabilidad/agenda`.
+
+- **Lo que el servidor añadió para ella (sólo lectura, sin rutas ni migraciones nuevas)**:
+  - `tickets[]` (`detallesDeTickets`, `agenda.ts`, pura): la ficha de cada abierto. `tipo` es el
+    efectivo (el puesto a mano, con su etiqueta, gana) y `tipoManual` lo dice; `flujoOrigen` es
+    `clasificacion` (lo trae la fuente: no se puede marcar), `manual`, `deducido` (respaldo) o
+    `defecto`; `ultimaTransicion: {en, origen}` es la transición de la fuente (`fuente`) o, sin
+    ella, el tramo abierto de `tmc_agenda_historial` (`historial` si fue un cambio visto,
+    `primera_observacion` si no). `proyectarAgenda` sigue sin asuntos: van aparte.
+  - `eje` (`ejeAgenda`, `agenda-calendario.ts`): desde hace `EJE_HABILES_ATRAS` (3) días hábiles
+    hasta `EJE_DIAS_ADELANTE` (28) días después de hoy, con sus festivos y cierres de empresa.
+  - `finPlanificado` en cada puesto: el fin que le daba su duración; de ahí a hoy va el retraso.
+- **Refresco**: sola cada 2 minutos (`REFRESCO_MS`) y **sólo con la pestaña visible**
+  (`tocaRefrescar`); un reloj local mira cada 10 s si toca, sin pedir nada. hub-api limita a 60
+  peticiones por minuto y por IP: no bajar ese intervalo.
+- **Calendario** (`AgendaGantt.tsx`): una fila por puesto, agrupadas por etapa; posiciones en
+  porcentaje del eje (mínimo 26 px por día; por debajo, desplazamiento dentro de su caja). **Las
+  barras van de la mitad del día de entrada a la mitad del de salida** (`franja`): el día de
+  inicio no cuenta en la duración y el día en que sale uno entra el siguiente, así que no se
+  pisan; la línea de hoy va también a mitad de columna. Ocupante: transcurrido en sólido, lo que
+  falta en claro y el retraso rayado en rojo, con «pasado de fecha» escrito; previstos (fila y
+  encadenados) en contorno discontinuo y con «previsto». Cada barra abre la ficha y lleva todo
+  el detalle en su `title`.
+- **Por debajo de 640 px** no hay calendario: `ListaDias` (`listaPorDias`), por días y por etapa.
+- **Acciones** (`AgendaAcciones.tsx`, `useAccionesAgenda`), cada una sólo con su permiso:
+  «Proponer reparto inicial» (`agenda.reparto`, si hay puestos libres y asignables: diálogo
+  editable, `lineasDeReparto` / `cambiarLinea`; ante un fallo —el 409— lo explica y vuelve a
+  pedir agenda y propuesta); «Asignar» en la fila (`agenda.asignar`: el primero asignable, con un
+  clic al puesto libre de número menor; cualquier otro, diálogo con puesto y motivo); «Liberar
+  puesto» (`agenda.liberar`: junto al nombre del puesto y en la ficha; el diálogo con motivo es
+  la confirmación); «Marcar flujo» (`agenda.flujo`: en la ficha, sólo si `flujoOrigen` no es
+  `clasificacion`). **Toda escritura pone la agenda que devuelve**, sin pedirla otra vez.
+- ⚠️ **El flujo sólo mueve a quien está en la fila de entrada**: un ticket que ya está en un
+  estado de una etapa se queda en ella aunque se le marque «equipo nuevo» (manda el estado).
+- **No se usan `alert` / `confirm` / `prompt`** del navegador.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
+  lo que calcula la pantalla de la agenda (`src/lib/agendaTaller.test.ts`: eje, barras, resumen,
+  lista por días, textos, reparto editable y refresco, sin reloj ni zona de la máquina),
   las fechas en hora de Colombia (`src/lib/vistas.test.ts`), lo que calcula la configuración de
   la agenda (`src/lib/agenda.test.ts`),
   geometría del calendario de barras (pausas y marca de fin incluidas) y la simulación (texto por

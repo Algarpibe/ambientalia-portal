@@ -99,16 +99,21 @@ describe('normalizarTicket', () => {
     });
   });
 
-  it('la réplica lee el asunto y el código de servicio; Desk 2.0 no los pide: allí el flujo sale de la clasificación', async () => {
+  it('las dos leen el asunto (lote 7: identifica el equipo en la agenda); el código de servicio, sólo la réplica: en Desk 2.0 el flujo sale de la clasificación', async () => {
     const replica = replicaSana();
     const desk2 = desk2Sana();
     await crearFuenteAgenda({ hub: replica.db, desk2: () => null }).ticketsAbiertos();
     await crearFuenteAgenda({ hub: replica.db, desk2: () => desk2.db }).ticketsAbiertos();
     expect(replica.consultas[0].sql).toMatch(/t\.subject AS asunto/);
     expect(replica.consultas[0].sql).toMatch(/t\.codigo_servicio\b/);
-    expect(desk2.consultas[0].sql).toMatch(/NULL::text AS asunto/);
+    expect(desk2.consultas[0].sql).toMatch(/t\.subject AS asunto/);
     expect(desk2.consultas[0].sql).toMatch(/NULL::text AS codigo_servicio/);
-    expect(desk2.consultas[0].sql).not.toMatch(/subject/);
+    // Nada más del ticket: ni serial, ni correo, ni contacto.
+    expect(desk2.consultas[0].sql).not.toMatch(/serial|correo|email|contact|nit|telefono|direccion|\braw\b/i);
+  });
+
+  it('el asunto de Desk 2.0 llega tal cual al ticket, sin espacios de más', () => {
+    expect(normalizarTicket({ ...FILA_DESK2, asunto: '  Asunto <ficticio> & "raro"  ' }, 'principal').asunto).toBe('Asunto <ficticio> & "raro"');
   });
 
   it('las dos fuentes dan exactamente las mismas claves, y ninguna es una marca «sin confirmar» (D13)', () => {

@@ -949,12 +949,26 @@ describe('agenda: lecturas', () => {
     expect(res.status).toBe(200);
     expect(consultasRol.n).toBe(0);
     expect(escriben(queries)).toEqual([]);
-    expect(JSON.stringify(res.body)).not.toMatch(SIN_DATOS_DE_CLIENTE);
+    // Lote 7: la agenda, y sólo ella, lleva el asunto de cada ticket (identifica el equipo en pantalla). Nada más del ticket.
+    const cuerpo = ruta.startsWith(`${A}?`) ? { ...res.body, tickets: (res.body.tickets as { asunto: unknown }[]).map(({ asunto: _, ...resto }) => resto) } : res.body;
+    expect(JSON.stringify(cuerpo)).not.toMatch(SIN_DATOS_DE_CLIENTE);
+  });
+
+  it('GET /agenda: la ficha de cada ticket abierto, con su asunto y sin su código de servicio, y el eje del calendario', async () => {
+    const res = await request(appAgenda()).get(`${A}?hoy=${HOY}`).set(conRol(null));
+    expect(res.body.tickets).toEqual([
+      { numero: 880, asunto: 'Asunto reservado 880', estado: 'Ingresado', tipo: null, tipoManual: false, flujo: 'servicio', flujoOrigen: 'deducido', remisionEntrada: null, ultimaTransicion: null },
+      { numero: 984, asunto: 'Asunto reservado 984', estado: 'En Proceso', tipo: null, tipoManual: false, flujo: 'servicio', flujoOrigen: 'deducido', remisionEntrada: null, ultimaTransicion: null },
+      { numero: 990, asunto: 'Asunto reservado 990', estado: 'En Proceso', tipo: null, tipoManual: false, flujo: 'servicio', flujoOrigen: 'deducido', remisionEntrada: null, ultimaTransicion: null },
+    ]);
+    expect(JSON.stringify(res.body)).not.toMatch(/MT_18A0|codigo_?servicio|serial|email|@/i);
+    // En respaldo no hay cierres de empresa; los festivos son los del tramo.
+    expect(res.body.eje).toEqual({ desde: '2026-10-01', hasta: '2026-11-03', festivos: ['2026-10-12', '2026-11-02'], cierres: [] });
   });
 
   it('GET /agenda: la agenda proyectada a «hoy», con el estado de la fuente y los avisos', async () => {
     const res = await request(appAgenda()).get(`${A}?hoy=${HOY}`).set(conRol(null));
-    expect(Object.keys(res.body).sort()).toEqual(['avisos', 'estadoFuente', 'etapas', 'finTaller', 'fuente', 'fueraAgenda', 'hoy', 'porLlegar', 'sinCategoria', 'standby', 'totalAbiertos']);
+    expect(Object.keys(res.body).sort()).toEqual(['avisos', 'eje', 'estadoFuente', 'etapas', 'finTaller', 'fuente', 'fueraAgenda', 'hoy', 'porLlegar', 'sinCategoria', 'standby', 'tickets', 'totalAbiertos']);
     expect(res.body).toMatchObject({
       hoy: HOY,
       totalAbiertos: 3,

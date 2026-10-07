@@ -41,6 +41,7 @@ async function sembrarDesk2(): Promise<void> {
       ('z-1002', 1002, 'Ingresado', NULL, NULL, '  ', '2026-10-01T15:00:00Z', NULL, NULL, NULL, NULL, '2026-10-01T08:00:00Z'),
       ('app-uno', 10005, 'Rev./Diagnostico', 'Open', 'Urgent', 'Equipo Nuevo', '2026-09-29T03:30:00Z', 'Calibración', NULL, '2026-09-29', '2026-09-30T10:00:00Z', NULL),
       ('z-900', 900, 'Finalizado', 'Closed', 'Low', NULL, '2026-08-01T15:00:00Z', 'Diagnostico', '2026-08-01', '2026-08-02', NULL, '2026-10-06T13:00:00Z');
+    UPDATE desk.tickets SET subject = '  Asunto ficticio 1001 ' WHERE number = 1001;
     INSERT INTO desk.ticket_transitions (ticket_id, to_status, performed_at) VALUES
       ('app-uno', 'Rev./Diagnostico', '2026-09-29T14:00:00Z'),
       ('app-uno', 'Notificado', '2026-09-30T09:00:00Z'),
@@ -53,8 +54,8 @@ describe('fuente principal: la base de Desk 2.0', () => {
   it('lee los tickets sin cerrar, normalizados y por número', async () => {
     await sembrarDesk2();
     expect(await fuenteCon(lector).ticketsAbiertos()).toEqual<TicketTaller[]>([
-      // La prioridad «High» viene de Zoho (no está fijada en la app): no cuenta. Sin transiciones: llegada desconocida.
-      { numero: 1001, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Para Servicio', tipoServicio: 'Diagnostico', remisionEntrada: '2026-09-25', fechaCreacion: '2026-09-21', prioridad: null, llegadaEstado: null, asunto: null, codigoServicio: null, fuente: 'principal' },
+      // La prioridad «High» viene de Zoho (no está fijada en la app): no cuenta. Sin transiciones: llegada desconocida. Con su asunto (lote 7).
+      { numero: 1001, estado: 'Rev./Diagnostico', tipoEstado: 'Open', clasificacion: 'Equipo Para Servicio', tipoServicio: 'Diagnostico', remisionEntrada: '2026-09-25', fechaCreacion: '2026-09-21', prioridad: null, llegadaEstado: null, asunto: 'Asunto ficticio 1001', codigoServicio: null, fuente: 'principal' },
       // Sin tipo de estado sigue siendo «sin cerrar»; la fecha de creación sale de created_time, en el día de Colombia.
       { numero: 1002, estado: 'Ingresado', tipoEstado: null, clasificacion: null, tipoServicio: null, remisionEntrada: null, fechaCreacion: '2026-10-01', prioridad: null, llegadaEstado: null, asunto: null, codigoServicio: null, fuente: 'principal' },
       // Nacido en la app: prioridad fijada, y la llegada es la ÚLTIMA transición a su estado de ahora

@@ -59,6 +59,9 @@ export function estadosAgenda(estados: readonly EstadoDesk[], soloConTickets: bo
   return [...sinCategoria(estados), ...resto];
 }
 
+/** Los estados del bloque del reloj del plazo: con `soloConTickets`, los que hoy tienen algún ticket abierto. */
+export const estadosReloj = (estados: readonly EstadoDesk[], soloConTickets: boolean): readonly EstadoDesk[] => (soloConTickets ? estados.filter((e) => e.ticketsAbiertos > 0) : estados);
+
 /** El aviso que sale al guardar la categoría de un estado: «Notificado: etapa activa · Diagnóstico». */
 export function avisoCategoria(etiqueta: string, categoria: CategoriaAgenda, etapa: EtapaAgenda | null): string {
   return `${etiqueta}: ${ETIQUETA_CATEGORIA[categoria].toLowerCase()}${etapa ? ` · ${ETIQUETA_ETAPA[etapa]}` : ''}`;

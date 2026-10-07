@@ -591,7 +591,7 @@ Las lecturas (`GET`) están abiertas a quien tenga la app, con una excepción: l
 - **`GET /agenda/huecos` es nuevo.** Los huecos son sucesivos: cada uno supone ocupados los anteriores durante lo que dura ese tipo de servicio en la etapa.
 - **Las escrituras de la agenda devuelven la agenda** ya leída otra vez, y las de configuración, la configuración: una petición menos por acción.
 - **`hoy` solo en las lecturas.** Además del formato se exige que el día exista. Las escrituras usan siempre el día de hoy en Colombia: de él sale el `inicio` que se guarda, y no debe poder elegirse.
-- **El eje (festivos y cierres) no va todavía en `GET /agenda`:** el diseño lo preveía y no se ha construido. Se añadirá con la pantalla (lote 7), que es la que sabe qué tramo pinta; las fechas previstas ya vienen calculadas con festivos y cierres.
+- **El eje (festivos y cierres) llegó con el lote 7:** `GET /agenda` devuelve `eje: { desde, hasta, festivos, cierres }` (desde hace 3 días hábiles hasta 28 días después de hoy), y además `tickets` (la ficha de cada abierto, con su asunto) y `finPlanificado` en cada puesto. Todo de solo lectura; ver la sección J, lote 7.
 
 ---
 
@@ -1142,6 +1142,23 @@ Plan original:
 - **Pruebas:** ayudantes puros de `lib/agenda.ts`; typecheck, build del portal y lint.
 
 ### Lote 7 — Pantalla: Agenda del taller
+
+**Construido** el 07/10/2026, partido en 7a (lectura) y 7b (acciones) como estaba previsto. Lo que quedó distinto del plan de abajo y del boceto de G:
+
+- **Tres cambios de backend, aditivos y de solo lectura** (ninguna ruta, escritura ni migración nueva), todos en `GET /agenda` y en lo que devuelven sus cuatro escrituras:
+  - **`tickets`**, la ficha de cada abierto (`detallesDeTickets`, `H/agenda.ts`): asunto, estado, tipo efectivo y si es puesto a mano, flujo y de dónde sale, fecha de remisión y última transición conocida (la de Desk 2.0 o, sin ella, el tramo abierto del historial de la agenda). **El asunto se lee ahora también de Desk 2.0** (`desk.tickets.subject`), para identificar el equipo en pantalla: es texto de terceros, la pantalla lo pinta como texto y el diagnóstico de la fuente sigue sin devolverlo. Ni serial ni correo. La proyección (`proyectarAgenda`) sigue sin asuntos.
+  - **`eje`** (`ejeAgenda`, `H/agenda-calendario.ts`): el tramo del calendario con sus festivos y cierres (lo pendiente de E.7).
+  - **`finPlanificado`** en cada puesto: el fin que le daba su duración. Sin él no se podía pintar dónde empieza el retraso de un ticket pasado de fecha.
+- **Las barras van de la mitad del día de entrada a la mitad del de salida.** El día de inicio no cuenta en la duración y el día en que sale uno entra el siguiente (F.4): dibujadas de día entero se pisarían.
+- **La fila no va en una línea bajo cada etapa del calendario** (G): es una tabla por etapa en una tarjeta «Filas», al lado del calendario en pantallas muy anchas y debajo en el resto, con posición, ticket y asunto, remisión, marcas y fechas previstas.
+- **«Asignar» va en cada ticket de la fila** que ya está en la etapa, mientras haya un puesto libre: el primero, con un clic al puesto libre de número menor; cualquier otro abre un diálogo que pide puesto y motivo.
+- **«Liberar puesto» va junto al nombre del puesto** (y en la ficha), no sobre la barra: pulsar la barra abre la ficha.
+- **En teléfono (menos de 640 px) no hay calendario:** una lista por días y por etapa.
+- **Refresco automático cada 2 minutos, solo con la pestaña visible** (hub-api limita a 60 peticiones por minuto y por IP).
+- **Ficheros:** `U/vistas/Agenda.tsx`, `U/vistas/AgendaGantt.tsx`, `U/vistas/AgendaAcciones.tsx`, `U/lib/agendaTaller.ts` con su prueba (fichero nuevo: `U/lib/agenda.ts` se queda con la configuración), `U/lib/navegacion.ts`, `U/api.ts`, `U/dominio.ts`, `U/ui.tsx` (foco, Tab y Escape de diálogos y panel lateral) y `U/App.tsx`.
+- **Observado al probarla:** marcar el flujo solo mueve a quien está en la fila de entrada; un ticket que ya está en un estado de una etapa se queda en ella (manda el estado, F.2).
+
+Plan original:
 
 - **Objetivo:** la pestaña con el Gantt por puesto, las filas, el carril de standby, la saturación, el primer hueco, el reparto inicial y las acciones de asignar y liberar.
 - **Ficheros:** `U/App.tsx` (pestaña), `U/vistas/Agenda.tsx`, `U/lib/agenda.ts` (geometría de barras por puesto, apoyada en `U/lib/servicios.ts`) con su prueba, y `apps/trazabilidad-mantenimientos/CLAUDE.md`.

@@ -6,6 +6,7 @@ import {
   celdaDuracion,
   columnasDuraciones,
   estadosAgenda,
+  estadosReloj,
   firma,
   leerEntero,
   sinCategoria,
@@ -54,6 +55,11 @@ describe('estados de la tabla de categorías', () => {
 
   it('«sólo estados con tickets» quita los vacíos, pero nunca uno sin categoría: hay que poder dársela', () => {
     expect(estadosAgenda(ESTADOS, true).map((e) => e.etiqueta)).toEqual(['Estado Nuevo', 'Otro Sin Nada', 'Rev./Diagnostico', 'Ingresado', 'Notificado', 'En Proceso']);
+  });
+
+  it('el bloque del reloj tiene el mismo filtro: con él, sólo los estados que hoy tienen tickets, en el orden del servidor', () => {
+    expect(estadosReloj(ESTADOS, true).map((e) => e.etiqueta)).toEqual(['Rev./Diagnostico', 'Ingresado', 'Notificado', 'En Proceso', 'Estado Nuevo']);
+    expect(estadosReloj(ESTADOS, false)).toEqual(ESTADOS);
   });
 
   it('los que no tienen categoría, para el aviso', () => {

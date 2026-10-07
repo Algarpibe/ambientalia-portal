@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type PlazoServicio, type RolEstado } from '../dominio';
-import { firma } from '../lib/agenda';
+import { estadosReloj, firma } from '../lib/agenda';
 import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
@@ -33,11 +33,9 @@ export default function Configuracion({ notificar }: Props) {
   return (
     <div className="flex flex-col gap-4">
       {!puede('config.write') && (
-        <div className="max-w-4xl">
-          <Alert tone="blue" title="Configuración en modo de consulta">
-            La cambia el Director Técnico. {motivo}
-          </Alert>
-        </div>
+        <Alert tone="blue" title="Configuración en modo de consulta">
+          La cambia el Director Técnico. {motivo}
+        </Alert>
       )}
       <Plazos notificar={notificar} />
       <PuestosAgenda agenda={agenda} />
@@ -73,6 +71,8 @@ function EstadosDesk({ notificar }: Props) {
   /** Clave del estado que se está guardando. Mientras dura, ningún desplegable admite otro cambio: las respuestas no se pisan. */
   const [guardando, setGuardando] = useState<string | null>(null);
   const editable = usePermisos().puede('config.write');
+  const [soloConTickets, setSoloConTickets] = useState(true);
+  const filas = estadosReloj(estados ?? [], soloConTickets);
 
   const cargar = useCallback(async () => {
     try {
@@ -105,6 +105,12 @@ function EstadosDesk({ notificar }: Props) {
     <Card
       title="Estados de Desk → reloj del plazo"
       hint="Qué le hace cada estado al reloj del plazo: «Cuenta», el tiempo corre; «Standby», en pausa a la espera del cliente o de un servicio externo (esos días hábiles no cuentan); «Trabajo terminado», parado: el ticket queda cumplido o incumplido según el día en que llegó. El portal mide el tiempo desde que vio cada ticket por primera vez."
+      actions={
+        <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 text-sm text-gray-700">
+          <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={soloConTickets} onChange={(ev) => setSoloConTickets(ev.target.checked)} />
+          Sólo estados con tickets
+        </label>
+      }
     >
       {error && (
         <div className="mb-3">
@@ -128,7 +134,7 @@ function EstadosDesk({ notificar }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {estados.map((e) => {
+              {filas.map((e) => {
                 const tipo = etiquetaTipoDesk(e.tipoDesk);
                 return (
                   <tr key={e.clave}>
@@ -178,7 +184,8 @@ function EstadosDesk({ notificar }: Props) {
         </div>
       )}
       <p className="mt-3 text-xs text-gray-500">
-        Salen todos los estados que existen en Zoho Desk, también los cerrados; el tipo que acompaña a cada uno es el de Desk y sólo orienta: todos empiezan en «Cuenta» (un
+        {soloConTickets && estados ? `Se enseñan ${filas.length} de ${estados.length} estados: los que hoy tienen tickets abiertos. ` : ''}
+        Sin el filtro salen todos los estados que existen en Zoho Desk, también los cerrados; el tipo que acompaña a cada uno es el de Desk y sólo orienta: todos empiezan en «Cuenta» (un
         estado puede estar «En espera» en Desk sin depender del cliente). El desplegable guarda al momento, y el cambio vale también hacia atrás. Lo anterior a la primera
         vez que el portal vio un ticket no se puede saber y cuenta como tiempo normal.
       </p>
@@ -244,7 +251,6 @@ function Plazos({ notificar }: Props) {
     <Card
       title="Plazos por tipo de servicio"
       hint="Días hábiles (lunes a viernes, sin festivos de Colombia) desde el ingreso del equipo; el día de ingreso no cuenta. Cada servicio usa el plazo de su tipo. Vacío = sin plazo."
-      className="max-w-4xl"
     >
       {error && (
         <div className="mb-3">

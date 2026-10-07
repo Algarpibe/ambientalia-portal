@@ -139,10 +139,12 @@ function Casilla(p: {
           if (e.key === 'Enter') e.currentTarget.blur();
           if (e.key === 'Escape') setTxt(null);
         }}
-        className={`block min-h-[44px] w-20 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 ${DESACTIVADO} ${
+        className={`block min-h-[44px] w-20 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums text-gray-900 placeholder:italic placeholder:text-gray-400 focus:outline-none focus:ring-2 ${DESACTIVADO} ${
           mal ? 'border-red-400 focus:ring-red-100' : 'border-gray-300 focus:border-blue-400 focus:ring-blue-100'
         }`}
       />
+      {/* Lo heredado se dice además con palabras, también en consulta: el gris del número no basta. */}
+      {escrito === '' && p.heredado !== null && p.heredado !== undefined && <span className="mt-0.5 block text-[11px] italic text-gray-400">(por defecto)</span>}
       {mal && <span className="mt-1 block max-w-[9rem] text-xs text-red-600">{leido.error}</span>}
     </span>
   );
@@ -156,7 +158,6 @@ export function PuestosAgenda({ agenda }: { agenda: AgendaConfig }) {
     <Card
       title="Agenda del taller · Puestos"
       hint={`Cuántos equipos puede atender a la vez cada etapa (de 0 a ${PUESTOS_MAX}). Se guarda al salir de la casilla. Bajar los puestos no desaloja a nadie: los que sobran dejan de recibir equipos cuando se vacían.`}
-      className="max-w-4xl"
     >
       <ErrorDe agenda={agenda} bloque="puestos" />
       {!config ? (

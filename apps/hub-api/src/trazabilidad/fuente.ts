@@ -76,11 +76,12 @@ export interface TicketTaller {
   /** Llegada exacta al estado de ahora, en milisegundos: la última transición a ese estado en Desk 2.0; `null` si no consta. */
   llegadaEstado: number | null;
   /**
-   * El asunto y el código de servicio, SÓLO en respaldo (`null` con la principal): con ellos se deduce
-   * el flujo cuando no hay clasificación (D11, `flujoDeTicket`). ⚠️ El asunto suele llevar el nombre del
-   * cliente: es para la regla, no para enseñarlo. El diagnóstico de la fuente no lo devuelve.
+   * El asunto del ticket, de las dos fuentes (lote 7): identifica el equipo en la pantalla de la agenda
+   * (`detallesDeTickets`) y, en respaldo, ayuda a deducir el flujo. ⚠️ Es texto de terceros y suele llevar
+   * el nombre del cliente: sólo sale por GET /agenda; el diagnóstico de la fuente no lo devuelve.
    */
   asunto: string | null;
+  /** SÓLO en respaldo (`null` con la principal): con él y el asunto se deduce el flujo cuando no hay clasificación (D11, `flujoDeTicket`). No se enseña. */
   codigoServicio: string | null;
   fuente: NombreFuente;
 }

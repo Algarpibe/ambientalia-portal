@@ -15,11 +15,12 @@
  * reparto FIFO.
  *
  * La salida es un objeto serializable, sin clientes, seriales ni correos:
- * sólo números de ticket, estados, fechas y marcas.
+ * sólo números de ticket, estados, fechas y marcas. El asunto de cada ticket
+ * (lote 7) va aparte, en `detallesDeTickets`.
  */
 
 import { hoyEnColombia } from '../ausencias/saldo.js';
-import { primerDiaHabilAgenda, sumarDiasHabilesAgenda } from './agenda-calendario.js';
+import { primerDiaHabilAgenda, sumarDiasHabilesAgenda, type EjeAgenda } from './agenda-calendario.js';
 import {
   ETAPAS_AGENDA,
   ETIQUETA_ETAPA,
@@ -80,6 +81,10 @@ export interface EntradaAgenda {
   vuelvenDeStandby?: readonly number[];
   /** Flujo marcado a mano por ticket (tmc_agenda_flujo): gana al de la fuente (D11). Quien lo rellena sólo pasa los de tickets sin clasificación. */
   flujosManuales?: { get(numero: number): FlujoAgenda | null | undefined };
+  /** Sólo para la ficha (`detallesDeTickets`): la etiqueta del tipo puesto a mano, por número de ticket. */
+  etiquetasTipoManual?: { get(numero: number): string | null | undefined };
+  /** Sólo para la ficha: el tramo abierto de cada ticket en el historial de la agenda, si es del estado de ahora (`real` = cambio visto, no primera observación). */
+  tramosAbiertos?: { get(numero: number): { desde: number; real: boolean } | null | undefined };
 }
 
 // ── Salida ──────────────────────────────────────────────────────────────────
@@ -141,6 +146,8 @@ export interface PuestoAgenda {
     };
   } | null;
   inicio: string | null;
+  /** El fin que le daba su duración (lote 7: desde él se pinta el retraso). Igual a `finEstimado` mientras no va pasado de fecha. */
+  finPlanificado: string | null;
   finEstimado: string | null;
   /** Debía haber salido antes de hoy: sigue ocupando y se supone que sale el siguiente día hábil. */
   pasadoDeFecha: boolean;
@@ -364,7 +371,7 @@ function proyectar(e: EntradaAgenda) {
       const aExtinguir = puesto > cfg.puestos;
       if (!a) {
         libres.push({ puesto, dia: arranque });
-        return { puesto, ocupante: null, inicio: null, finEstimado: null, pasadoDeFecha: false, aExtinguir };
+        return { puesto, ocupante: null, inicio: null, finPlanificado: null, finEstimado: null, pasadoDeFecha: false, aExtinguir };
       }
       const c = porNumero.get(a.numero);
       const d = duracion(a.numero, etapa, c?.t ?? null);
@@ -378,6 +385,7 @@ function proyectar(e: EntradaAgenda) {
         puesto,
         ocupante: { numero: a.numero, estado: c?.estado ?? null, marcas: { sinTipo: d.sinTipo, sinDuracion: d.dias === null, sinDatosFuente: !c } },
         inicio: a.desde,
+        finPlanificado: fin,
         finEstimado,
         pasadoDeFecha,
         aExtinguir,
@@ -450,6 +458,53 @@ function proyectar(e: EntradaAgenda) {
   };
   return { agenda, libresDe, arranque, sumar };
 }
+
+// ── Lote 7: la ficha de cada ticket ─────────────────────────────────────────
+
+/** Lo que la pantalla enseña de un ticket abierto además de dónde está. Del ticket sólo sale el asunto: ni código, ni serial, ni correo. */
+export interface DetalleTicket {
+  numero: number;
+  /** ⚠️ Texto de terceros (suele llevar el nombre del cliente): se pinta siempre como texto. */
+  asunto: string | null;
+  estado: string;
+  /** El tipo de servicio efectivo: el puesto a mano (con su etiqueta, si se sabe) o el de la fuente; `null` = sin tipo. */
+  tipo: string | null;
+  tipoManual: boolean;
+  flujo: FlujoAgenda;
+  /** `clasificacion`: lo trae la fuente (no se puede marcar a mano); `manual`: marcado en la app; `deducido`: del asunto o el código, en respaldo; `defecto`: sin nada, servicio. */
+  flujoOrigen: 'clasificacion' | 'manual' | 'deducido' | 'defecto';
+  remisionEntrada: string | null;
+  /** Desde cuándo está en su estado: la transición de la fuente si consta; si no, lo que vio el historial de la agenda. */
+  ultimaTransicion: { en: string; origen: 'fuente' | 'historial' | 'primera_observacion' } | null;
+}
+
+/** La ficha de cada ticket abierto, por número. Pura, como la proyección: aplica las mismas reglas de tipo y flujo. */
+export function detallesDeTickets(e: EntradaAgenda): DetalleTicket[] {
+  const instante = (ms: number) => new Date(ms).toISOString();
+  return [...e.tickets]
+    .sort((a, b) => a.numero - b.numero)
+    .map((t) => {
+      const manual = e.tiposManuales.get(t.numero) ?? null;
+      const marcado = e.flujosManuales?.get(t.numero) ?? null;
+      const deFuente = flujoDeTicket(t);
+      const tramo = e.tramosAbiertos?.get(t.numero) ?? null;
+      return {
+        numero: t.numero,
+        asunto: t.asunto,
+        estado: etiquetaEstadoDesk(t.estado),
+        tipo: manual ? (e.etiquetasTipoManual?.get(t.numero) ?? manual) : t.tipoServicio,
+        tipoManual: manual !== null,
+        flujo: marcado ?? deFuente.flujo,
+        flujoOrigen: t.clasificacion ? 'clasificacion' : marcado ? 'manual' : deFuente.deducido ? 'deducido' : 'defecto',
+        remisionEntrada: t.remisionEntrada,
+        ultimaTransicion:
+          t.llegadaEstado !== null ? { en: instante(t.llegadaEstado), origen: 'fuente' } : tramo ? { en: instante(tramo.desde), origen: tramo.real ? 'historial' : 'primera_observacion' } : null,
+      };
+    });
+}
+
+/** Lo que devuelven GET /agenda y las escrituras de la agenda: la proyección, el estado entero de la fuente, la ficha de cada ticket y el eje del calendario. */
+export type RespuestaAgenda = AgendaTaller & { estadoFuente: EstadoFuente; tickets: DetalleTicket[]; eje: EjeAgenda };
 
 // ── Lote 5: los huecos ──────────────────────────────────────────────────────
 
