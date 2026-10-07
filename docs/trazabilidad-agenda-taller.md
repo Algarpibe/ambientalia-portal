@@ -34,12 +34,15 @@ Decididas por Gerencia antes de este análisis:
 | **D3** | **Calendario de la agenda** = días hábiles con festivos de Colombia (`apps/hub-api/src/trazabilidad/plazos.ts`) menos los cierres de empresa de Desk 2.0 (`public.calendario_cierres`). Con la réplica de respaldo no se descuentan cierres y la pantalla lo avisa. No se usan horas hábiles. |
 | **D4** | **La agenda lee de la base `desk` de Desk 2.0** por una conexión de solo lectura: variable `DESK2_DB_URL` y rol `portal_agenda_reader`. El rol lo crea Gerencia, con `SELECT` sobre `desk.tickets`, `desk.ticket_transitions`, `desk.ticket_history`, `public.remisiones` y `public.calendario_cierres`, y `default_transaction_read_only = on`. Motivo: es una copia de Zoho más completa y al día que la réplica del portal; leerla no cambia dónde se trabaja, que sigue siendo Zoho Desk. **La réplica queda de respaldo** detrás del mismo adaptador: sin la variable, o si la conexión falla, la agenda usa la réplica y lo avisa. El cruce entre las dos es por número de ticket. |
 | **D5** | **«Por Facturar» y «Por Entregar» pasan a papel «terminado»** en `tmc_estados_desk`. Lo cambia Gerencia desde Configuración. |
-| **D6** | **Arranque con «Proponer reparto inicial».** La app reparte por orden de llegada en los puestos libres de cada etapa y el jefe de taller confirma todo de una vez o ajusta. Lo que no cabe queda en la fila. |
-| **D7** | **Un ticket sin refrescar más de un día sigue en la agenda**, marcado «sin confirmar». El jefe de taller puede liberar su puesto a mano; queda registrado quién y por qué. |
-| **D8** | **No se reconstruyen llegadas pasadas.** Se usa el orden aproximado y el reordenado del jefe de taller en el arranque. |
+| **D6** | **Arranque con «Proponer reparto inicial».** La app reparte por orden de llegada en los puestos libres de cada etapa y el Director Técnico confirma todo de una vez o ajusta. Lo que no cabe queda en la fila. |
+| **D7** | **El Director Técnico puede liberar un puesto a mano**; queda registrado quién y por qué. La marca «sin confirmar» por ticket que acompañaba a esta decisión queda sustituida por D13. |
+| **D8** | **No se reconstruyen llegadas pasadas.** Se usa el orden aproximado y el reordenado del Director Técnico en el arranque. Ampliada por D12 para la fila de entrada. |
 | **D9** | **Sin tipo de servicio → duración por defecto de la etapa** (fila «*») y marca «sin tipo». El tipo puesto a mano (`tmc_servicios_tipo`) sigue valiendo y gana. |
 | **D10** | **«Pendiente» y «Solicitud Soporte»** (soporte remoto) quedan fuera de la agenda. |
 | **D11** | **Flujo de equipo nuevo = `classification` de Desk 2.0.** Con la réplica de respaldo se deduce del asunto («Equipo Nuevo») o del prefijo `HV_` del código, y se puede marcar a mano por ticket. |
+| **D12** | **El orden de llegada de la fila de entrada es `fecha_remision_entrada`** (Desk 2.0). Con el mismo día, va primero el que tenga llegada exacta en `desk.ticket_transitions` y, si no, el de número más bajo. Sin fecha, el ticket va al final de la fila con la marca «falta fecha de remisión», para que alguien la complete en Zoho. Gerencia confirma que en los tickets en «Ingresado» sin fecha el equipo sí llegó: falta escribirla. En la réplica de respaldo se aplica la misma regla si trae el campo y, si no, la de D8. Las filas de las etapas siguientes y la vuelta de standby no cambian: van al final por el momento de entrada en el estado. |
+| **D13** | **Ningún ticket lleva la marca «sin confirmar».** En su lugar hay un aviso global en la agenda cuando la sincronización entera parece parada: cuando el máximo de `synced_at` de la base de la fuente tiene más de 1 hora. El umbral va en una constante. |
+| **D14** | **El «jefe de taller» de la agenda es el Director Técnico** (rol `DIRECTOR_TECNICO`). También configura puestos y duraciones. |
 
 Ajustes decididos el mismo día:
 
@@ -82,7 +85,7 @@ Dos definiciones de «remisión válida» conviven en Desk 2.0:
 
 `enEstadoDesde` es el `performed_at` de la última fila de `desk.ticket_transitions` cuyo `to_status` coincide con el estado actual del ticket (`Desk2:apps/desk/server/db/sla.ts:78-102`). Para «Remisión creada», esa fila se escribe cuando n8n confirma el documento (`Desk2:apps/desk/server/routes/remision.ts:364-374`). Anular y restaurar la remisión reinicia el turno, porque gana la última entrada.
 
-La agenda adopta esa misma definición de llegada: el instante de entrada en el estado, no la fecha de la remisión.
+La agenda usa esa definición de llegada (el instante de entrada en el estado) para las etapas siguientes y la vuelta de standby. Para la fila de entrada usa la fecha de remisión que el taller escribe en el ticket, `desk.tickets.fecha_remision_entrada` (D12), que es una columna distinta de la tabla `public.remisiones`.
 
 ### A.4 Qué hay hoy en esas tablas
 
@@ -96,7 +99,7 @@ La agenda adopta esa misma definición de llegada: el instante de entrada en el 
 | Tickets nacidos en la app | 1 (número 10005) | D3 |
 | Cierres de empresa cargados | 0 | D9 |
 
-**Consecuencia:** ningún ticket abierto hoy tiene remisión posterior al 24/07/2026, y solo 1 de los 35 abiertos tiene momento de entrada en su estado (D4). La regla 4 se cumplirá con datos exactos a medida que los tickets se muevan desde Desk 2.0; hasta entonces rige el orden aproximado (D8).
+**Consecuencia:** ningún ticket abierto hoy tiene remisión posterior al 24/07/2026, y solo 1 de los 35 abiertos tiene momento de entrada en su estado (D4). Por eso la regla 4 se aplica con `fecha_remision_entrada` del propio ticket, que sí viene rellena en 30 de los 35 abiertos (P2), y no con la tabla de remisiones (D12).
 
 Además, «Remisión creada» solo la alcanzan los tickets nacidos en la app: su único origen es «Ticket creado» (`estadoPorRemision.ts:32-41`). Los nacidos en Zoho pasan de «OV asignada» a «Ingresado».
 
@@ -133,7 +136,9 @@ La agenda lee los tickets de `desk.tickets` de la base `desk` (D4). Qué aporta 
 |---|---|---|
 | Ticket, estado, tipo de estado, sincronización | `desk.tickets` | 776 tickets, 35 abiertos (D2, D3) |
 | Flujo (servicio / equipo nuevo) | `desk.tickets.classification` | Relleno en 34 de los 35 abiertos; 4 son «Equipo Nuevo» (D5) |
+| Orden de la fila de entrada | `desk.tickets.fecha_remision_entrada` | Rellena en 30 de 35 abiertos; precisión de día (P2, D12) |
 | Llegada exacta a un estado | `desk.ticket_transitions` | Solo movimientos hechos en la app: 1 de 35 abiertos (D4) |
+| Salud de la sincronización | máximo de `desk.tickets.synced_at` | Para el aviso global (D13) |
 | Prioridad fijada | `desk.tickets.priority` con `prioridad_en_app_at` | Ninguna fijada hoy (D6) |
 | Cierres de empresa | `public.calendario_cierres` | 0 filas hoy (D9) |
 | Remisiones de entrada | `public.remisiones` | Solo históricas hoy (D8) |
@@ -157,7 +162,9 @@ Sin `DESK2_DB_URL`, o si la conexión falla, el mismo adaptador sirve los ticket
 |---|---|---|
 | Estados | Sí | Sí, puede ir más atrasada |
 | Flujo | `classification` | Deducido del asunto («Equipo Nuevo») o del prefijo `HV_`; corregible a mano (D11) |
-| Llegada | Exacta si hay transición; si no, aproximada | Aproximada (historial del portal) |
+| Orden de la fila de entrada | `fecha_remision_entrada` (D12) | La misma regla si trae el campo; hoy no lo trae, así que rige D8 |
+| Llegada a un estado | Exacta si hay transición; si no, aproximada | Aproximada (historial del portal) |
+| Aviso de sincronización parada | Sí, sobre la base `desk` | Sí, sobre la réplica |
 | Prioridad | La fijada en Desk 2.0 | No hay: FIFO puro |
 | Cierres de empresa | Sí | No, y se avisa |
 | Tickets nacidos en la app | Sí | No existen |
@@ -186,6 +193,7 @@ interface FuenteTaller {
   nombre: 'desk2' | 'replica';
   ticketsAbiertos(): Promise<TicketTaller[]>;
   cierres(desde: string, hasta: string): Promise<string[]>;     // [] con la réplica
+  ultimaSincronizacion(): Promise<number | null>;               // máximo de synced_at de la base (D13)
   capacidades: { prioridad: boolean; cierres: boolean; llegadaExacta: boolean; flujoPorClasificacion: boolean };
 }
 interface TicketTaller {
@@ -195,14 +203,19 @@ interface TicketTaller {
   flujoOrigen: 'clasificacion' | 'deducido' | 'manual';
   prioridad: number;                                             // 0 = sin prioridad fijada
   llegada: { instante: number | null; exacta: boolean };         // entrada en el estado actual
-  sinConfirmar: boolean;                                         // más de un día sin refrescar (D7); nunca los gestionados por la app
+  remisionEntrada: string | null;                                // fecha_remision_entrada, AAAA-MM-DD (D12)
 }
+const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;          // D13: una hora
 // elegirFuente(): desk2 si hay DESK2_DB_URL y responde; si no, replica. Devuelve además el motivo del respaldo.
 ```
 
-### B.5 La llegada a un estado
+### B.5 El orden de llegada
 
-Por orden de preferencia:
+**Fila de entrada (D12).** Manda `fecha_remision_entrada`, ascendente. Con el mismo día, va primero el ticket con llegada exacta en `desk.ticket_transitions`; si no, el de número más bajo. Sin fecha, al final de la fila, con la marca «falta fecha de remisión».
+
+La misma regla ordena a los tickets que ya están en su primera etapa sin puesto, porque llegaron a ella desde la fila de entrada (regla 4). La excepción son los que el historial muestra volviendo de un standby: esos van al final, por el momento en que regresaron.
+
+**Etapas siguientes y vuelta de standby.** Manda la llegada al estado, por orden de preferencia:
 
 1. **Transición de Desk 2.0:** último `performed_at` de `desk.ticket_transitions` con `to_status` = estado actual. Exacta.
 2. **Historial del portal:** `desde` del tramo abierto en `tmc_estados_historial`. Exacta al minuto si `desde_real = TRUE`; aproximada si es primera observación.
@@ -221,6 +234,18 @@ Por orden de preferencia:
 - **Con Desk 2.0:** equipo nuevo si `classification` normaliza a «equipo nuevo»; si no, servicio (`Desk2:packages/shared/src/flujos.ts:51-61`). Hoy son equipo nuevo los tickets 1000, 1001, 1002 y 1008 (D5).
 - **Con la réplica:** `classification` está vacío (Z3). Se deduce: equipo nuevo si el asunto empieza por «Equipo Nuevo» o el código de servicio empieza por `HV_`.
 - **Marca a mano por ticket:** gana siempre, con cualquier fuente. Se guarda en una tabla del portal (E.4).
+
+### B.8 Aviso de sincronización parada (D13)
+
+Ningún ticket lleva marca de «sin confirmar». La agenda muestra un aviso global cuando el máximo de `synced_at` de la base de la fuente activa tiene más de una hora (`UMBRAL_SINCRONIZACION_PARADA_MS`).
+
+Se mide sobre toda la tabla, no por ticket, porque la sincronización de Desk 2.0 solo relee lo que cambia en Zoho: un ticket que nadie toca conserva una fecha antigua aunque su estado sea correcto (689, 881 y 882 el 06/10/2026, P6), y un ticket nacido en la app no la tiene nunca (10005). El máximo de la tabla, en cambio, se mueve cada pocos minutos mientras la sincronización funciona: el 06/10/2026 tenía 45 segundos (P5).
+
+### B.9 Quién opera la agenda (D14)
+
+El Director Técnico (rol `DIRECTOR_TECNICO`) confirma el reparto inicial, asigna y libera puestos, marca el flujo y configura puestos y duraciones. El resto de quienes tienen la app asignada solo consultan.
+
+El rol llega con la fase de roles, que se construye antes que la agenda y usa la migración 049.
 
 ---
 
@@ -302,7 +327,7 @@ Papel y categoría siguen siendo columnas distintas. El papel (`cuenta` / `stand
 
 ## D. ¿Basta el historial de estados?
 
-**Basta para lo decidido.** Con D8 no se reconstruye el pasado: se trabaja con orden aproximado y con el reparto inicial que confirma el jefe de taller (D6).
+**Basta para lo decidido.** Con D8 no se reconstruye el pasado: se trabaja con orden aproximado y con el reparto inicial que confirma el Director Técnico (D6).
 
 Qué da y qué no da `portal.tmc_estados_historial` (`apps/hub-api/src/users/migrations/047_trazabilidad_estados_historial.sql:39-55`, `apps/hub-api/src/trazabilidad/repo.ts:645-689`):
 
@@ -325,9 +350,9 @@ Lo que hay que cambiar en el historial para la agenda:
 
 ## E. Modelo de datos
 
-Todo en el esquema `portal`, migraciones idempotentes desde la 049 (la última registrada es la 048, `apps/hub-api/src/db.ts:24`). Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
+Todo en el esquema `portal`, migraciones idempotentes de la 050 a la 053. La última registrada hoy es la 048 (`apps/hub-api/src/db.ts:24`); la 049 queda reservada para la fase de roles, que va antes. Se reejecutan en cada arranque. Ninguna toca el esquema `desk` ni la base de Desk 2.0.
 
-### E.1 Migración 049 — categoría y etapa de cada estado
+### E.1 Migración 050 — categoría y etapa de cada estado
 
 Extiende `portal.tmc_estados_desk`; sin tabla paralela. No se puede editar la 046: `CREATE TABLE IF NOT EXISTS` no altera una tabla existente y las guardas de pruebas le prohíben `ALTER` (`apps/hub-api/src/trazabilidad/plazos.test.ts:501-509`). Precedentes de `ADD COLUMN IF NOT EXISTS`: `031_registro_exportadores.sql:21-22`, `034_token_version.sql:17`; de CHECK añadido de forma idempotente: `016_ausencias_historico.sql:36-45`.
 
@@ -342,9 +367,9 @@ ALTER TABLE portal.tmc_estados_desk ADD COLUMN IF NOT EXISTS etapa     VARCHAR(1
 
 - **Valor por defecto en código, la tabla manda.** Una fila solo existe para los estados que alguien ha tocado y `actualizado_por` es obligatorio, así que no se siembra. El catálogo de C.3 vive como constante en `dominio.ts`; si la fila tiene `categoria`, gana la fila. `NULL` = «según el catálogo».
 - **Contrato del PUT.** Hoy `PUT /estados` exige `rol` y lo sobrescribe siempre (`apps/hub-api/src/trazabilidad/types.ts:423-433`, `repo.ts:609-618`). Pasa a actualización parcial: `{ estado, rol?, categoria?, etapa? }`.
-- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y «la 048 es la última» (`plazos.test.ts:613-616`).
+- **Guardas a actualizar:** la lista exacta de columnas de la tabla (`apps/hub-api/src/trazabilidad/trazabilidad.db.test.ts:917-918`) y la que comprueba cuál es la última migración registrada (`plazos.test.ts:613-616`).
 
-### E.2 Migración 050 — puestos por etapa y duraciones
+### E.2 Migración 051 — puestos por etapa y duraciones
 
 ```sql
 CREATE TABLE IF NOT EXISTS portal.tmc_agenda_etapas (
@@ -376,7 +401,7 @@ CREATE TABLE IF NOT EXISTS portal.tmc_agenda_duraciones (
 - **Tipo efectivo:** el que ya resuelve `tipoEfectivo` (`dominio.ts:263-268`): el puesto a mano en `tmc_servicios_tipo` gana sobre el de Desk. Si no hay ninguno, el ticket lleva la marca «sin tipo» y usa la fila «*».
 - **No se reutiliza `tmc_plazos`:** aquel es el plazo comprometido con el cliente por tipo; esto es cuánto ocupa un puesto en cada etapa.
 
-### E.3 Migración 051 — asignaciones
+### E.3 Migración 052 — asignaciones
 
 ```sql
 CREATE TABLE IF NOT EXISTS portal.tmc_agenda_asignaciones (
@@ -407,7 +432,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_asig_ticket_uq ON portal.tmc_agenda
 - **Liberación a mano (D7):** `cierre = 'manual'`, con `cerrado_por` y `cierre_motivo` obligatorios.
 - **No se escribe nada en Desk 2.0 ni en Zoho.**
 
-### E.4 Migración 052 — flujo marcado a mano
+### E.4 Migración 053 — flujo marcado a mano
 
 ```sql
 CREATE TABLE IF NOT EXISTS portal.tmc_agenda_flujo (
@@ -425,11 +450,13 @@ Mismo patrón que `tmc_servicios_tipo` (`044_trazabilidad_servicios_tipo.sql:26-
 
 Todos bajo `/api/trazabilidad`, tras `requireAuth` + `requireApp('trazabilidad-mantenimientos')` (`apps/hub-api/src/trazabilidad/router.ts:63`). Los cálculos se hacen en el servidor con «hoy» como argumento (`hoyOf`, `router.ts:52-59`).
 
+Las lecturas (`GET`) están abiertas a quien tenga la app. Todo lo que escribe exige además el rol `DIRECTOR_TECNICO` (D14).
+
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/agenda` (`?hoy=`) | La agenda completa: fuente activa, capacidades y motivo del respaldo; etapas con puestos y ocupación; fila de cada etapa con fecha prevista y sugerido; standby; fin de taller; por llegar; proyección; saturación; primer hueco libre; festivos y cierres del eje; avisos |
+| GET | `/agenda` (`?hoy=`) | La agenda completa: fuente activa, capacidades y motivo del respaldo; etapas con puestos y ocupación; fila de cada etapa con fecha prevista y sugerido; standby; fin de taller; por llegar; proyección; saturación; primer hueco libre; festivos y cierres del eje; aviso de sincronización parada (D13) y demás avisos |
 | GET | `/agenda/arranque` | La propuesta de reparto inicial (D6), sin escribir nada |
-| POST | `/agenda/arranque` | Confirma el reparto: la lista `{ numero, etapa, puesto }` tal como la deja el jefe de taller. Todo o nada |
+| POST | `/agenda/arranque` | Confirma el reparto: la lista `{ numero, etapa, puesto }` tal como la deja el Director Técnico. Todo o nada |
 | POST | `/agenda/asignaciones` | `{ numero, etapa, puesto, motivo? }` → asigna; exige `motivo` si no es el sugerido |
 | DELETE | `/agenda/asignaciones/:id` | Libera un puesto a mano, con `motivo` obligatorio (D7) |
 | GET | `/agenda/config` | Etapas con sus puestos y la tabla de duraciones |
@@ -466,18 +493,32 @@ para cada ticket t:
 duracion(t, e) = duraciones[e][tipoEfectivo(t)] ?? duraciones[e]['*']      // D9
 ```
 
-### F.3 Fila de una etapa (D1)
+### F.3 Fila de una etapa (D1, D12)
 
 ```
+primeraEtapa(t) = (t.flujo = 'equipo_nuevo') ? 'proceso' : 'diagnostico'
+
 fila(e) = tickets en un estado de la etapa e SIN asignación vigente      // «en etapa sin puesto»
           seguidos de tickets de 'entrada' con etapaDestino = e          // fila de entrada
-orden dentro de cada tramo:
-    1. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
-    2. llegada ascendente                             // instante de entrada en el estado
-    3. número de ticket ascendente                    // desempate y llegada desconocida
-si la llegada no es exacta o hay empate  →  «orden aproximado»
+
+clave de orden de un ticket t en la fila de e:
+    0. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
+    si t está en 'entrada', o está en e = primeraEtapa(t) y no vuelve de standby:      // D12
+        1. tiene remisionEntrada antes que no tenerla          // sin fecha → al final, «falta fecha de remisión»
+        2. remisionEntrada ascendente
+        3. con el mismo día: llegada exacta antes que no exacta
+        4. número de ticket ascendente
+    si no:                                            // etapas siguientes y vuelta de standby
+        1. llegada ascendente                         // instante de entrada en el estado
+        2. número de ticket ascendente
+        si la llegada no es exacta o hay empate  →  «orden aproximado»
+
+los tickets del segundo grupo van detrás de los del primero dentro de la misma fila
+«vuelve de standby» = el tramo anterior del historial del portal es de categoría standby
 sugerido(e) = primer ticket de fila(e)
 ```
+
+Con la réplica de respaldo `remisionEntrada` viene vacía, así que todos caerían en «sin fecha»; en ese caso no se pone la marca y se ordena por llegada y número, como en D8.
 
 ### F.4 Simulación por etapa
 
@@ -498,6 +539,8 @@ para cada etapa e:
         previsto(t) = { puesto p, inicio, fin };  libre.actualizar(p, fin)
     primerHueco(e) = el día más temprano de libre tras repartir la fila
     saturacion(e)  = puestos ocupados / puestos[e], más el tamaño de la fila
+
+sincronizacionParada = ahora − fuente.ultimaSincronizacion() > UMBRAL_SINCRONIZACION_PARADA_MS     // D13, aviso global
 ```
 
 El día en que un puesto queda libre es el mismo en que entra el siguiente, porque el día de inicio no cuenta en `sumar`.
@@ -513,7 +556,7 @@ proponerArranque():
             inicio = t.llegada.exacta ? dia(t.llegada) : hoy
             propuesta.añadir(t, e, p, inicio)
     devolver propuesta          // no escribe; lo que no cabe queda en la fila
-confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajustada
+confirmarArranque(lista):       // la que deja el Director Técnico, igual o ajustada
     validar puestos y tickets;  insertar todas con origen = 'arranque' en una transacción
 ```
 
@@ -521,7 +564,9 @@ confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajusta
 
 | Caso | Tratamiento |
 |---|---|
-| **Empate de llegada** | Decide el número de ticket; se marca «orden aproximado» |
+| **Empate en la fila de entrada** | Misma fecha de remisión: primero el que tiene llegada exacta en `desk.ticket_transitions`; si no, el de número más bajo (D12) |
+| **Ticket sin fecha de remisión** | Al final de la fila de entrada, con la marca «falta fecha de remisión». En cuanto se escribe en Zoho y se sincroniza, ocupa su sitio (D12) |
+| **Empate de llegada en etapas siguientes** | Decide el número de ticket; se marca «orden aproximado» |
 | **Pasado de fecha que empuja** | Sigue ocupando; fin proyectado = día hábil siguiente a hoy; se pinta en rojo. Cada día que siga ahí, toda la fila se corre un día |
 | **Standby que libera y vuelve** | Al entrar en standby la asignación se cierra (`cierre = 'estado'`) y sale de la proyección. Al volver a un estado de la etapa entra al final de la fila, con la llegada del momento en que regresó |
 | **Equipo nuevo, dos etapas seguidas** | Ingresado → Proceso → Verificación. Se proyecta en cadena: la llegada prevista a Verificación es el fin previsto en Proceso. Es el único caso en que una etapa alimenta a otra sin standby en medio |
@@ -529,7 +574,8 @@ confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajusta
 | **Puesto que se reduce estando ocupado** | No se desaloja a nadie. Los puestos por encima del nuevo tope quedan «a extinguir»: siguen ocupados hasta que su ticket salga y no reciben a nadie más. La saturación puede superar el 100 % y se avisa |
 | **Más tickets en la etapa que puestos** | Los que no caben encabezan la fila de esa etapa, por delante de la fila de entrada, marcados «en etapa sin puesto» (D6) |
 | **Diagnóstico no encadena con Proceso** | Entre ambas hay siempre standby (notificación y aprobación del cliente), que no se proyecta. La fila de Proceso solo contiene tickets que ya están en «En Proceso» o «Continuación del proceso» |
-| **Ticket «sin confirmar»** | Sigue en su puesto o en su fila, marcado. El jefe de taller puede liberar el puesto a mano, con motivo (D7) |
+| **Sincronización parada** | Si el máximo de `synced_at` de la fuente tiene más de una hora, aviso global arriba de la agenda. No se marca ningún ticket ni se cambia la proyección (D13) |
+| **Ticket que ya no debería ocupar puesto** | El Director Técnico libera el puesto a mano, con motivo; queda registrado (D7) |
 | **Cambio a respaldo** | Las asignaciones vigentes se conservan; no se cierra ninguna automáticamente ni se apunta historial mientras dure. Un ticket que solo existe en Desk 2.0 conserva su puesto, marcado «sin datos de la fuente» |
 | **Ticket con marca manual de flujo** | La marca gana a la fuente; cambiarla recalcula a qué etapa alimenta |
 
@@ -539,19 +585,19 @@ confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajusta
 
 ```
  Agenda del taller                                       hoy mar 06/10/2026
- Fuente: Desk 2.0 · prioridad: ninguna fijada (FIFO puro) · cierres de empresa: 0 · orden aproximado
- [ Proponer reparto inicial ]
- ─────────────────────────────────────────────────────────────────────────────────────────────
+ Fuente: Desk 2.0 · sincronizada hace menos de 1 h · prioridad: ninguna fijada (FIFO puro) · cierres de empresa: 0
+ [ Proponer reparto inicial ]                                              (solo Director Técnico)
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────
                     oct
-                    06  07  08  09 │ 10  11  12 │ 13  14  15  16 │ 17  18 │ 19  20  21
-                    ma  mi  ju  vi │ sá  do  lu*│ ma  mi  ju  vi │ sá  do │ lu  ma  mi
+                    06  07  08  09 │ 10  11  12 │ 13  14  15  16 │ 17  18 │ 19  20  21  22  23
+                    ma  mi  ju  vi │ sá  do  lu*│ ma  mi  ju  vi │ sá  do │ lu  ma  mi  ju  vi
  ▌DIAGNÓSTICO  3/3 puestos · fila 7 · primer hueco: mar 20/10
-   Puesto 1    ▓▓▓▓▓[#10005 ▓▓][·#1005··············][·#1010·········]░░░░░░[·#882·········]
-   Puesto 2         [#993 █████████]░░░░░░░░░░░[·#1006·········][·#880···░░░░░░·····]
-   Puesto 3         [#999 █████████]░░░░░░░░░░░[·#1007·········][·#881···░░░░░░·····]
-   Fila ▸ #1005 mié 07 · #1006 vie 09 · #1007 vie 09 · #1010 mar 13 · #880 jue 15 · #881 jue 15 · #882 vie 16
-          └ en etapa sin puesto ─────────────────────────┘   └ fila de entrada (Ingresado) ──────┘
-          [ Asignar #1005 al Puesto 1 ]   (sugerido; elegir otro pide motivo)
+   Puesto 1         [#999 █████████][·#1006···░░░░░░░░░░░·······][·#1010···░░░░░░·····][·#882·········]
+   Puesto 2         [#993 █████████][·#1007···░░░░░░░░░░░·······][·#880····░░░░░░·····]
+   Puesto 3         [#1005 ████████][·#10005··░░░░░░░░░░░·······][·#881····░░░░░░·····]
+   Fila ▸ #1006 vie 09 · #1007 vie 09 · #10005 vie 09 · #1010 jue 15 · #880! jue 15 · #881! jue 15 · #882! mar 20
+          └ en etapa sin puesto, por fecha de remisión ───────┘   └ fila de entrada ───────────────────┘
+          [ Asignar #1006 al Puesto 1 ]   (sugerido; elegir otro pide motivo)
 
  ▌PROCESO      3/4 puestos · fila 0 · primer hueco: hoy
    Puesto 1         [#984 ██████████████░░░░░░░░░░░██]
@@ -562,38 +608,42 @@ confirmarArranque(lista):       // la que deja el jefe de taller, igual o ajusta
  ▌VERIFICACIÓN 0/2 puestos · fila 0 · primer hueco: hoy
    Puesto 1         ( libre )
    Puesto 2         ( libre )
- ─────────────────────────────────────────────────────────────────────────────────────────────
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────
  STANDBY (15) no ocupan puesto ni se proyectan
    Servicio externo 7 · Notificación cliente 6 · En Espera de Repuestos 1 · En espera de SKU 1
  FIN DE TALLER (6)   Por Facturar 5 · Por Entregar 1
  POR LLEGAR (1)      OV asignada 1
 
  Leyenda: ██ ocupado · ▓▓ pasado de fecha · [·#···] previsto · ░ no hábil (lu* = festivo)
-          ? sin confirmar · «sin tipo» = duración por defecto de la etapa
+          ! falta fecha de remisión · «sin tipo» = duración por defecto de la etapa
 ```
 
 Elementos:
 
 - **Gantt por puesto agrupado por etapa.** Una fila por puesto; barra llena para el ticket que lo ocupa, barra punteada para los previstos. Reutiliza el eje, los días no hábiles y los rayados de `Barras` (`apps/trazabilidad-mantenimientos/src/vistas/Servicios.tsx:494-668`) y la geometría de `apps/trazabilidad-mantenimientos/src/lib/servicios.ts` (`ejeServicios` `:335-348`, `diasDelEje` `:527-534`).
 - **Fila de cada etapa** con la fecha prevista de entrada de cada ticket. El primero es el «sugerido»: un botón lo confirma; elegir otro abre el campo de motivo.
+- **Marca «falta fecha de remisión»** (D12) en los tickets de la fila de entrada que no la tienen, con la indicación de completarla en Zoho.
 - **«Proponer reparto inicial»** (D6): abre la propuesta completa, editable, con un único botón de confirmar.
-- **Liberar puesto** (D7): en cada barra ocupada, con motivo obligatorio. Los tickets «sin confirmar» lo destacan.
+- **Liberar puesto** (D7): en cada barra ocupada, con motivo obligatorio.
+- **Acciones solo para el Director Técnico** (D14): reparto inicial, asignar, liberar, marcar el flujo y configurar. Los demás ven la agenda sin botones.
 - **Carril de standby** agrupado por estado, sin fechas.
 - **Saturación y primer hueco libre** en la cabecera de cada etapa.
 - **Rótulo de fuente** fijo arriba. En respaldo cambia a «Fuente: réplica de Zoho (respaldo) · sin prioridad · sin cierres de empresa · flujo deducido», con el motivo.
+- **Aviso de sincronización parada** (D13): una banda de aviso sobre toda la agenda cuando la fuente lleva más de una hora sin sincronizar, con la hora de la última sincronización. No marca ningún ticket.
 - **Configuración:** un bloque nuevo con puestos y duraciones, y dos columnas más (categoría y etapa) en el bloque «Estados de Desk» (`apps/trazabilidad-mantenimientos/src/vistas/Configuracion.tsx:45-158`).
 
 ---
 
 ## H. Ejemplo resuelto con los tickets abiertos de hoy
 
-**Datos:** los 35 tickets abiertos de la base `desk` el 06/10/2026 (D5), fuente Desk 2.0. **Configuración:** Diagnóstico 3 puestos / 3 días, Proceso 4 puestos / 4 días, Verificación 2 puestos / 1 día, con la fila «*» para todos los tipos.
+**Datos:** los 35 tickets abiertos de la base `desk` el 06/10/2026 (D5, P6), fuente Desk 2.0. **Configuración:** Diagnóstico 3 puestos / 3 días, Proceso 4 puestos / 4 días, Verificación 2 puestos / 1 día, con la fila «*» para todos los tipos.
 
 **Condiciones del día:**
 
-- **Sin prioridad:** ninguna fijada en Desk 2.0 (D6). FIFO puro.
+- **Sin prioridad:** ninguna fijada en Desk 2.0 (P2). FIFO puro.
 - **Sin cierres de empresa:** la tabla está vacía (D9). El lunes 12/10/2026 es festivo en Colombia.
-- **Llegadas:** solo el ticket 10005 tiene llegada exacta a su estado (29/09/2026 por la noche, hora de Colombia; D5). Los otros 34 son de primera observación y van por número («orden aproximado»).
+- **Sincronización al día:** la base se refrescó 45 segundos antes de la consulta (P5); no hay aviso global.
+- **Orden de la primera etapa por fecha de remisión de entrada** (D12, P6).
 - **Sin asignaciones previas:** se parte del reparto inicial (D6).
 
 ### Reparto por categoría
@@ -610,15 +660,30 @@ Elementos:
 
 Suman 35. Los cuatro tickets de equipo nuevo (1000, 1001, 1002, 1008) están en «Servicio externo», es decir, en standby.
 
-### Reparto inicial propuesto (D6)
+### Orden de llegada en Diagnóstico (D12)
 
-Orden de llegada en Diagnóstico: primero el 10005 (llegada exacta, 29/09); después, por número, 993, 999, 1005, 1006, 1007 y 1010.
+| Orden | Ticket | Fecha de remisión de entrada | Nota |
+|---|---|---|---|
+| 1 | 999 | 31/08/2026 | |
+| 2 | 993 | 18/09/2026 | |
+| 3 | 1005 | 25/09/2026 | Mismo día que 1006 y 1007; ninguno tiene llegada exacta, decide el número |
+| 4 | 1006 | 25/09/2026 | |
+| 5 | 1007 | 25/09/2026 | |
+| 6 | 10005 | 29/09/2026 | Tiene llegada exacta, pero no comparte día con nadie |
+| 7 | 1010 | 02/10/2026 | |
+| 8 | 880 | sin fecha | Fila de entrada; «falta fecha de remisión» |
+| 9 | 881 | sin fecha | Fila de entrada; «falta fecha de remisión» |
+| 10 | 882 | sin fecha | Fila de entrada; «falta fecha de remisión» |
+
+Los siete primeros ya están en «Rev./Diagnostico»; los tres últimos esperan en «Ingresado». Ninguno de los siete consta como vuelto de standby: el historial del portal solo tiene su primera observación (Z6).
+
+### Reparto inicial propuesto (D6)
 
 | Etapa | Puesto | Ticket | Inicio | Fin estimado |
 |---|---|---|---|---|
-| Diagnóstico | 1 | 10005 | mar 29/09 (llegada exacta) | vie 02/10 → **pasado de fecha**; se proyecta su salida el mié 07/10 |
+| Diagnóstico | 1 | 999 | mar 06/10 | vie 09/10 |
 | Diagnóstico | 2 | 993 | mar 06/10 | vie 09/10 |
-| Diagnóstico | 3 | 999 | mar 06/10 | vie 09/10 |
+| Diagnóstico | 3 | 1005 | mar 06/10 | vie 09/10 |
 | Proceso | 1 | 984 | mar 06/10 | mar 13/10 |
 | Proceso | 2 | 990 | mar 06/10 | mar 13/10 |
 | Proceso | 3 | 1009 | mar 06/10 | mar 13/10 |
@@ -627,44 +692,43 @@ Orden de llegada en Diagnóstico: primero el 10005 (llegada exacta, 29/09); desp
 
 Cuentas:
 
-- 10005: 3 días hábiles desde el 29/09 → mié 30, jue 1, vie 2. Ya pasó; por la regla 6 sale el día hábil siguiente a hoy, mié 07/10.
-- 993 y 999: 3 días hábiles desde el 06/10 → mié 7, jue 8, vie 9.
+- Diagnóstico: ninguno de los tres tiene llegada exacta a la etapa, así que su duración cuenta desde hoy. 3 días hábiles desde el 06/10 → mié 7, jue 8, vie 9.
 - Proceso: 4 días hábiles desde el 06/10 → mié 7, jue 8, vie 9, mar 13 (el lunes 12 es festivo).
 
 ### Fila de Diagnóstico y fechas previstas
 
 | Orden | Ticket | Situación | Puesto | Entra | Termina |
 |---|---|---|---|---|---|
-| 1 | 1005 | En etapa sin puesto | 1 | mié 07/10 | mar 13/10 |
-| 2 | 1006 | En etapa sin puesto | 2 | vie 09/10 | jue 15/10 |
-| 3 | 1007 | En etapa sin puesto | 3 | vie 09/10 | jue 15/10 |
-| 4 | 1010 | En etapa sin puesto | 1 | mar 13/10 | vie 16/10 |
-| 5 | 880 | Fila de entrada | 2 | jue 15/10 | mar 20/10 |
-| 6 | 881 | Fila de entrada | 3 | jue 15/10 | mar 20/10 |
-| 7 | 882 | Fila de entrada | 1 | vie 16/10 | mié 21/10 |
+| 1 | 1006 | En etapa sin puesto | 1 | vie 09/10 | jue 15/10 |
+| 2 | 1007 | En etapa sin puesto | 2 | vie 09/10 | jue 15/10 |
+| 3 | 10005 | En etapa sin puesto | 3 | vie 09/10 | jue 15/10 |
+| 4 | 1010 | En etapa sin puesto | 1 | jue 15/10 | mar 20/10 |
+| 5 | 880 | Fila de entrada, falta fecha de remisión | 2 | jue 15/10 | mar 20/10 |
+| 6 | 881 | Fila de entrada, falta fecha de remisión | 3 | jue 15/10 | mar 20/10 |
+| 7 | 882 | Fila de entrada, falta fecha de remisión | 1 | mar 20/10 | vie 23/10 |
 
-Cuentas: desde el mié 07/10 → jue 8, vie 9, mar 13. Desde el vie 09/10 → mar 13, mié 14, jue 15. Desde el mar 13/10 → mié 14, jue 15, vie 16. Desde el jue 15/10 → vie 16, lun 19, mar 20. Desde el vie 16/10 → lun 19, mar 20, mié 21.
+Cuentas: desde el vie 09/10 → mar 13, mié 14, jue 15. Desde el jue 15/10 → vie 16, lun 19, mar 20. Desde el mar 20/10 → mié 21, jue 22, vie 23.
 
-Las cinco primeras fechas previstas son las de los tickets 1005, 1006, 1007, 1010 y 880. El primer hueco libre en Diagnóstico tras repartir la fila es el mar 20/10.
+Las cinco primeras fechas previstas son las de los tickets 1006, 1007, 10005, 1010 y 880. El primer hueco libre en Diagnóstico tras repartir la fila es el mar 20/10.
 
 ### Lo que enseña el ejemplo
 
 - **Diagnóstico está saturado desde el primer día:** 7 tickets en la etapa para 3 puestos. Cuatro quedan «en etapa sin puesto» y encabezan la fila.
-- **El único ticket con llegada exacta ya está pasado de fecha** y empuja la fila un día.
+- **La fecha de remisión cambia quién va primero.** Con el orden aproximado de D8 el primer puesto era para el 10005; por remisión es para el 999, que llegó el 31/08, y el 10005 pasa al sexto lugar.
 - **Proceso tiene un hueco libre hoy y fila vacía.** No se puede prever quién lo ocupará, porque los que salgan de Diagnóstico pasan antes por standby.
 - **Verificación está vacía.**
-- **La fila de entrada son tres tickets de febrero** (880, 881, 882). Conviene que el jefe de taller los revise en el arranque.
-- **Con la réplica de respaldo** el resultado cambiaría en dos puntos: no existiría el 10005 y aparecería el 884 en la fila de entrada, que en Desk 2.0 ya está cerrado.
+- **Los tres tickets de la fila de entrada no tienen fecha de remisión** (880, 881, 882). El equipo sí llegó (D12); en cuanto se escriba la fecha en Zoho, pasarían por delante de los que llegaron después.
+- **Con la réplica de respaldo** el resultado cambiaría: no existiría el 10005, aparecería el 884 en la fila de entrada (en Desk 2.0 ya está cerrado) y, al no traer fecha de remisión, el orden sería por número de ticket (D8).
 
 ---
 
 ## I. Riesgos
 
-Las nueve decisiones abiertas de la primera versión de este documento se resolvieron el 06/10/2026 (D4 a D11). La verificación posterior de la base `desk` dejó una sola propuesta nueva pendiente de visto bueno: usar la fecha de remisión de entrada como orden de llegada (ver «Verificación de la fuente principal»). No bloquea la construcción.
+No quedan decisiones de negocio abiertas. Las nueve de la primera versión de este documento se resolvieron el 06/10/2026 (D4 a D11), y las tres que dejó la verificación de la base `desk`, el mismo día (D12 a D14).
 
-1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla. El 06/10/2026 estaba al día (P5). Además, con esta fuente la marca «sin confirmar» señala tickets sin cambios, no datos dudosos (ver «Verificación de la fuente principal»).
-2. **El orden de llegada actual es aproximado.** 34 de los 35 abiertos no tienen llegada exacta. El reparto inicial lo corrige el jefe de taller (D6, D8).
-3. **La remisión de entrada aún no ordena nada.** No hay remisiones de la app ni posteriores al 24/07/2026 (D8).
+1. **Desk 2.0 también puede atrasarse.** Su sincronización por tickets modificados cae al método antiguo (los 100 con actividad más reciente) cuando la búsqueda de Zoho falla. El 06/10/2026 estaba al día (P5). El aviso global de D13 detecta una parada completa, no un ticket suelto que se quede atrás; para eso está la liberación manual (D7).
+2. **La fecha de remisión se escribe a mano en Zoho.** Tiene precisión de día y puede faltar o estar mal: 5 de los 35 abiertos no la tienen (P2). El orden de la fila de entrada depende de que el taller la mantenga (D12).
+3. **El orden en etapas siguientes sigue siendo aproximado.** 34 de los 35 abiertos no tienen llegada exacta a su estado. El reparto inicial lo corrige el Director Técnico (D6, D8).
 4. **Dos procesos sincronizan Zoho por separado.** Desk 2.0 y el trabajador del hub pueden discrepar sobre un mismo ticket. Por eso el historial del portal no apunta en respaldo (B.5).
 5. **Entrar y salir del respaldo.** La agenda cambia de aspecto: aparecen o desaparecen tickets (10005, 884), se pierde la prioridad y los cierres. Las asignaciones se conservan.
 6. **Precisión de 5 minutos.** Un paso muy breve por un estado puede no quedar registrado, y una asignación puede cerrarse hasta 5 minutos tarde.
@@ -687,7 +751,8 @@ Las nueve decisiones abiertas de la primera versión de este documento se resolv
 - **Los valores reales de `DATABASE_URL` y `DB_SCHEMA` de Desk 2.0 en producción:** el propio repositorio los marca como no verificados (`Desk2:DEPLOY.md:331-333`). Sí se verificó el resultado: base `desk`, tablas en el esquema `desk` (D1).
 - **Que los ids de los tickets de Zoho coincidan en las dos bases:** se comparó por número, que es la clave del cruce.
 - **Que «Equipo Nuevo» en el asunto y `HV_` en el código identifiquen siempre ese flujo:** visto en cuatro tickets. Solo afecta al respaldo, y hay marca manual (D11).
-- **Por qué tres tickets «Ingresado» no tienen fecha de remisión de entrada:** el dato dice que falta (P6), no por qué.
+- **Que el rol `DIRECTOR_TECNICO` exista en el portal:** llega con la fase de roles (migración 049), que no se ha revisado aquí.
+- **Que la réplica de respaldo traiga `fecha_remision_entrada`:** el 06/10/2026 sus campos personalizados estaban vacíos; no se consultó esa columna en concreto.
 - **El comportamiento real de la agenda:** no existe todavía; el ejemplo de H es un cálculo a mano.
 
 ## Verificación de la fuente principal (base `desk`, 06/10/2026)
@@ -735,18 +800,16 @@ Consultas `P1`…`P7`, ejecutadas en modo solo lectura sobre la base `desk` el 0
 
 ### Dos consecuencias para el diseño
 
+Las dos se llevaron a Gerencia y quedaron decididas el mismo día: la primera en D13 y la segunda en D12.
+
 1. **«Sin confirmar» no puede medirse igual con Desk 2.0.** Su sincronización solo relee los tickets que cambian en Zoho. Un ticket que nadie toca conserva una fecha de sincronización antigua aunque su estado sea correcto: es el caso del 689, el 881 y el 882, cuyo estado coincidía con Zoho Desk el 06/10/2026. Y un ticket nacido en la app no tiene fecha de sincronización nunca. Con la regla de D7 tal cual («más de un día sin refrescar») esos cuatro saldrían marcados de forma permanente. El adaptador excluye de la marca a los tickets gestionados por la app; para los de Zoho, la marca con Desk 2.0 significa «sin cambios desde hace más de un día», no «dato dudoso». Como D7 los mantiene en la agenda en cualquier caso, no altera la proyección, solo el rótulo.
 2. **Hay una fecha de remisión de entrada utilizable.** `desk.tickets.fecha_remision_entrada` viene rellena en 30 de los 35 abiertos (P2, P6). Es la fecha que el taller escribe en Zoho al recibir el equipo, con precisión de día. No es una reconstrucción del historial, sino una columna actual, y es justo el criterio de la regla 4. Los cinco que no la tienen son los tres «Ingresado» (880, 881, 882), el «OV asignada» (996) y el 968.
 
-### Propuesta que necesita el visto bueno de Gerencia
+### Cómo se resolvió
 
-**Usar `fecha_remision_entrada` como orden de llegada cuando no hay llegada exacta**, en lugar del número de ticket. Afecta al reparto inicial (D6) y a la fila mientras dure el orden aproximado (D8). Solo con la fuente Desk 2.0; en respaldo la columna está vacía.
-
-Con ese criterio, el orden de los siete tickets de Diagnóstico del ejemplo H sería 999 (31/08), 993 (18/09), 1005, 1006 y 1007 (25/09), 10005 (29/09) y 1010 (02/10), en vez de 10005, 993, 999, 1005, 1006, 1007 y 1010.
-
-Otra lectura del mismo dato: los tres tickets en «Ingresado» no tienen fecha de remisión de entrada. Puede que el equipo no haya llegado, o que la fecha no se haya escrito; conviene que el jefe de taller lo revise en el arranque.
-
-Mientras no se decida, rige D8 tal como está y el ejemplo H no cambia.
+- **Orden por fecha de remisión de entrada:** aceptado como D12. El ejemplo H está rehecho con ese orden.
+- **Tickets en «Ingresado» sin fecha de remisión:** Gerencia confirma que el equipo sí llegó y que falta escribir la fecha en Zoho. Van al final de la fila con la marca «falta fecha de remisión» (D12).
+- **Marca «sin confirmar»:** eliminada. La sustituye un aviso global cuando la sincronización de la fuente lleva más de una hora parada (D13).
 
 ### Consultas ejecutadas
 
@@ -782,7 +845,9 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
   - Flujo por `classification`; flujo deducido en la réplica (asunto y `HV_`).
   - Llegada exacta desde `ticket_transitions`; aproximada desde el historial del portal.
   - Prioridad: solo la fijada (`prioridad_en_app_at`); el `High` / `Low` de Zoho da 0.
-  - «Sin confirmar»: un ticket gestionado por la app, sin fecha de sincronización, no se marca.
+  - Fecha de remisión de entrada (`fecha_remision_entrada`) leída de Desk 2.0; vacía en respaldo si la réplica no la trae (D12).
+  - Última sincronización de la fuente = máximo de `synced_at` de toda la tabla; los tickets nacidos en la app, sin fecha, no la alteran (D13).
+  - El adaptador no calcula ninguna marca «sin confirmar» por ticket (D13).
   - Tipo de servicio leído de Desk 2.0; el puesto a mano en el portal gana.
   - Cierres: lista de fechas con Desk 2.0, vacía en respaldo.
   - Guarda: el módulo no contiene ninguna sentencia de escritura contra Desk 2.0.
@@ -792,7 +857,7 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 
 - **Objetivo:** categoría y etapa por estado, puestos por etapa y duraciones por etapa y tipo, con sus reglas puras.
 - **Ficheros:** `H/dominio.ts` (categorías, etapas, catálogo por defecto de C.3, `categoriaDe`), `H/types.ts` (validación de `PUT /estados` parcial, etapas, duraciones), `H/repo.ts` (lectura y escritura), `apps/hub-api/src/db.ts` (registro de migraciones) y sus pruebas.
-- **Migración:** `M/049_trazabilidad_estados_categoria.sql` y `M/050_trazabilidad_agenda_config.sql` (con semillas).
+- **Migración:** `M/050_trazabilidad_estados_categoria.sql` y `M/051_trazabilidad_agenda_config.sql` (con semillas).
 - **Pruebas:**
   - Guardas de migración: idempotentes, sin referencia al esquema `desk`, CHECK coherentes con las constantes.
   - Catálogo por defecto frente a fila guardada; la fila gana.
@@ -807,7 +872,11 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Ficheros:** `H/agenda.ts` y `H/agenda.test.ts`. Reutiliza `sumarDiasHabiles` de `H/plazos.ts`, ampliado para descontar cierres.
 - **Migración:** ninguna.
 - **Pruebas:** un caso por cada fila de F.6, más:
-  - Orden de la fila: prioridad fijada, llegada, número; marca «orden aproximado».
+  - Orden de la fila de entrada y de la primera etapa (D12): fecha de remisión; mismo día → llegada exacta primero, luego número; sin fecha → al final con «falta fecha de remisión».
+  - En respaldo, sin fecha de remisión en ningún ticket: orden por llegada y número, sin la marca (D8).
+  - Orden en etapas siguientes y vuelta de standby: llegada al estado y número; marca «orden aproximado».
+  - La prioridad fijada en Desk 2.0 va por delante de todo lo anterior (D1).
+  - Aviso global de sincronización parada: salta por encima del umbral de una hora y no por debajo; no marca tickets ni cambia la proyección (D13).
   - Festivo y cierre de empresa en mitad de una duración.
   - El ejemplo de la sección H, con datos ficticios equivalentes, da las mismas fechas.
   - Equipo nuevo encadenado Proceso → Verificación.
@@ -817,7 +886,7 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 
 - **Objetivo:** guardar asignaciones, cerrarlas solas, liberar a mano, marcar el flujo y proponer y confirmar el reparto inicial.
 - **Ficheros:** `H/repo.ts` (asignar, liberar, cierre automático, flujo manual), `H/agenda.ts` (`proponerArranque`), `H/registro-estados.ts` y `H/repo.ts` (`registrarEstados` lee del adaptador y no apunta en respaldo; cierra asignaciones en la misma pasada), y pruebas de Postgres.
-- **Migración:** `M/051_trazabilidad_agenda_asignaciones.sql` y `M/052_trazabilidad_agenda_flujo.sql`.
+- **Migración:** `M/052_trazabilidad_agenda_asignaciones.sql` y `M/053_trazabilidad_agenda_flujo.sql`.
 - **Pruebas:**
   - Un puesto, un ticket; un ticket, un puesto (índices parciales), también con dos peticiones a la vez.
   - Asignar a otro que el sugerido exige motivo.
@@ -833,6 +902,7 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Migración:** ninguna.
 - **Pruebas:**
   - Todos los endpoints de E.5 tras `requireAuth` + `requireApp`.
+  - Los que escriben exigen además el rol `DIRECTOR_TECNICO`; sin él, 403 (D14).
   - Validación con mensajes en español.
   - `GET /agenda` responde aunque Desk 2.0 no conteste, indicando el respaldo y su motivo.
   - `?hoy=` determinista.
@@ -840,7 +910,7 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 
 ### Lote 6 — Pantalla: Configuración
 
-- **Objetivo:** que Gerencia pueda ajustar puestos, duraciones y la categoría y etapa de cada estado.
+- **Objetivo:** que el Director Técnico pueda ajustar puestos, duraciones y la categoría y etapa de cada estado (D14). Quien no tiene el rol ve la configuración sin poder editarla.
 - **Ficheros:** `U/api.ts`, `U/dominio.ts`, `U/lib/agenda.ts` (textos y opciones) con su prueba, `U/vistas/Configuracion.tsx` (bloque «Agenda del taller» y dos columnas en «Estados de Desk»).
 - **Migración:** ninguna.
 - **Pruebas:** ayudantes puros de `lib/agenda.ts`; typecheck, build del portal y lint.
@@ -852,11 +922,14 @@ Rutas base: `H` = `apps/hub-api/src/trazabilidad`, `M` = `apps/hub-api/src/users
 - **Migración:** ninguna.
 - **Pruebas:**
   - Geometría: barra ocupada, prevista, pasada de fecha, recorte en los bordes del eje.
-  - Textos del rótulo de fuente en principal y en respaldo.
+  - Textos del rótulo de fuente en principal y en respaldo, del aviso de sincronización parada y de la marca «falta fecha de remisión».
+  - Las acciones solo se ofrecen al Director Técnico.
   - Typecheck, build del portal y lint.
   - Revisión visual en navegador antes de darlo por bueno; es lo único que las pruebas no cubren.
 - **Si supera las 800 líneas:** se parte en 7a (lectura: Gantt, filas, standby) y 7b (acciones: arranque, asignar, liberar).
 
 ### Orden y dependencias
+
+Antes de la agenda va la fase de roles, que usa la migración 049 y aporta el rol `DIRECTOR_TECNICO`; por eso la agenda usa de la 050 a la 053. Los lotes 1 a 4 no dependen del rol; el 5, el 6 y el 7, sí.
 
 `1 → 2 → 3 → 4 → 5 → 6 → 7`. El 3 solo depende de los tipos del 1 y de las constantes del 2. El 6 puede desplegarse antes que el 7 para que la configuración esté lista cuando llegue la pantalla. En cada despliegue, hub-api antes que el portal.
