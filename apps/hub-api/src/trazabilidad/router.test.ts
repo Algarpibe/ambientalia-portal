@@ -788,6 +788,7 @@ describe('agenda: diagnóstico de la fuente', () => {
       sincronizacionParada: false,
       umbralSincronizacionMs: 3_600_000,
       ultimoFalloPrincipal: null,
+      cortacircuitosHasta: null,
       abiertos: {
         total: 3,
         porEstado: [
@@ -822,7 +823,7 @@ describe('agenda: diagnóstico de la fuente', () => {
 
   it('no lleva clientes, seriales ni correos: sólo las claves del diagnóstico', async () => {
     const res = await request(appCon(() => null)).get(RUTA).set(auth());
-    expect(Object.keys(res.body).sort()).toEqual(['abiertos', 'fuente', 'mensaje', 'motivo', 'sincronizacionParada', 'ultimaSincronizacion', 'ultimoFalloPrincipal', 'umbralSincronizacionMs']);
+    expect(Object.keys(res.body).sort()).toEqual(['abiertos', 'cortacircuitosHasta', 'fuente', 'mensaje', 'motivo', 'sincronizacionParada', 'ultimaSincronizacion', 'ultimoFalloPrincipal', 'umbralSincronizacionMs']);
     expect(Object.keys(res.body.abiertos).sort()).toEqual(['porEstado', 'total']);
     expect(JSON.stringify(res.body)).not.toMatch(/@|serial|cliente|email|subject/i);
   });

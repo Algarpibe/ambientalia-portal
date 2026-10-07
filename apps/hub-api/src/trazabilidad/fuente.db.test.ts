@@ -73,6 +73,7 @@ describe('fuente principal: la base de Desk 2.0', () => {
       sincronizacionParada: false,
       umbralSincronizacionMs: 3_600_000,
       ultimoFalloPrincipal: null,
+      cortacircuitosHasta: null,
     });
     expect((await fuenteCon(lector, Date.UTC(2026, 9, 6, 14, 0, 1)).estadoFuente()).sincronizacionParada).toBe(true);
   });
