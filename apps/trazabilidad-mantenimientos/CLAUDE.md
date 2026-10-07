@@ -37,6 +37,7 @@ se registra en la app y sobrevive a las reimportaciones.
 | Fuente de la agenda del taller: interfaz, `TicketTaller`, caída al respaldo (sólo servidor, sólo lee) | `apps/hub-api/src/trazabilidad/fuente.ts`; el SQL de cada origen en `fuente-desk2.ts` y `fuente-replica.ts` |
 | Configuración de la agenda, reglas puras: categoría y etapa de un estado (`categoriaDeEstado`, `CATALOGO_ESTADOS_AGENDA`), flujo (`flujoDeTicket`), etapa inicial (`etapaInicial`) y duración (`duracionDeEtapa`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
 | Calendario de la agenda: días hábiles menos cierres de empresa (`esHabilAgenda`, `sumarDiasHabilesAgenda`; sólo servidor) | `apps/hub-api/src/trazabilidad/agenda-calendario.ts` |
+| Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`; pura, sólo servidor, todavía sin endpoint) | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
 | Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
@@ -455,8 +456,8 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
 ## Fuente de la agenda
 
 Primer lote de la **agenda del taller** (`docs/trazabilidad-agenda-taller.md`, decisiones D4, D12
-y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay filas, proyección
-ni pantalla (el modelo de la configuración va en «Agenda: configuración»), y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
+y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay pantalla (el modelo
+de la configuración va en «Agenda: configuración» y el cálculo en «Agenda: proyección»), y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
 (pasar el historial a esta fuente es del lote 4).
 
 - **Dos orígenes, una interfaz** (`crearFuenteAgenda` en `fuente.ts`):
@@ -600,6 +601,47 @@ Salen como cualquier estado que nadie ha tocado: `rol: 'cuenta'`, `actualizadoPo
 `actualizadoEn: null` («Nadie lo ha cambiado» en la pantalla); la semilla no aparece como autora
 de nada ahí, porque lo que firma es la categoría.
 
+## Agenda: proyección
+
+Tercer lote (`docs/trazabilidad-agenda-taller.md`, secciones B.5, F y H): el cálculo entero de la
+agenda como **función pura**, `proyectarAgenda(entrada)` en `agenda.ts`. **Sin endpoint, sin
+pantalla y sin tablas**: nadie la llama todavía. No mira el reloj ni la base (`agenda.test.ts`
+tiene la guarda) y no cambia lo que recibe.
+
+- **Entrada** (`EntradaAgenda`): `hoy`, `tickets` (los de la fuente), `categorias`
+  (`leerCategoriasEstados`), `config` (`leerConfigAgenda` vale tal cual), `tiposManuales` (número
+  → tipo de `tmc_servicios_tipo`), `cierres`, `estadoFuente` y `asignaciones`
+  (`AsignacionAgenda`: `numero`, `etapa`, `puesto`, `desde` = el **día** desde el que cuenta la
+  duración). Dos opcionales que rellenará el lote 4: `vuelvenDeStandby` (números que el historial
+  muestra volviendo de un standby) y `flujosManuales` (número → flujo marcado a mano).
+- **Salida** (`AgendaTaller`, serializable; sólo números de ticket, estados, fechas y marcas):
+  `etapas` en el orden configurado —cada una con `puestos`, `fila`, `encadenados`, `saturacion`
+  (`ocupados` / `puestos`) y `primerHueco`—, `standby` (con `desde` y `dias`), `porLlegar`,
+  `finTaller` y `fueraAgenda` (recuentos), `sinCategoria` (clave, estado y tickets), `avisos`
+  (`sincronizacion_parada`, `fuente_respaldo`, `estados_sin_categoria`), `fuente` y `totalAbiertos`.
+- **Un ticket, un sitio**: ocupante de un puesto, fila de una etapa, standby, por llegar, fin de
+  taller, fuera o sin categoría. La suma da el total de abiertos. `encadenados` es lo único que
+  repite: es previsión (el equipo nuevo que llegará de Proceso a Verificación).
+- **Sin asignaciones todo el que está en una etapa activa va en su fila** y el reparto FIFO se
+  simula desde hoy: es lo que propondrá el «reparto inicial» (D6).
+- **Orden de la fila** (`ordenDe`): prioridad fijada (sólo fuente principal, D1) → grupo A (la
+  primera etapa del flujo: fecha de remisión; sin fecha, detrás y con `faltaRemision`; mismo día,
+  llegada exacta primero) → grupo B (etapas siguientes y vueltas de standby: llegada al estado)
+  → número de ticket. `motivo` dice cuál decidió. `ordenAproximado` = sin llegada exacta en el
+  grupo B, o un empate que resolvió el número. En respaldo sin fecha de remisión en ningún ticket,
+  el grupo A se ordena como el B y nadie lleva `faltaRemision` (D8).
+- **Reparto** (`tomarPuesto`): cada uno de la fila toma el puesto que antes queda libre (en
+  empate, el de número menor); el día en que sale uno entra el siguiente. Sin duración (ni tipo ni
+  «*»): `sinDuracion`, sin fechas y sin reservar puesto.
+- **Puesto ocupado**: fin = `desde` + duración; si ya pasó, `pasadoDeFecha` y fin = el siguiente
+  día hábil a hoy, que empuja la fila. Acabar hoy no es ir pasado. Una asignación cuyo ticket la
+  fuente trae en otra etapa **no cuenta** (manda el estado); si la fuente no lo trae, conserva el
+  puesto con `sinDatosFuente`. Un puesto por encima de los configurados sale `aExtinguir`: sigue
+  ocupado y no recibe a nadie (ahí `ocupados` supera a `puestos`).
+- **Avisos**: salen de `estadoFuente` (y de que algún ticket venga de la réplica); no marcan
+  ningún ticket ni cambian la proyección (D13). El umbral de una hora lo aplica la fuente, que
+  tiene el reloj; aquí sólo se lee `sincronizacionParada`.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
@@ -611,7 +653,10 @@ de nada ahí, porque lo que firma es la categoría.
   (`avisos.test.ts`), plazos (el reloj con pausas, con `hoy` y los tramos como argumentos), la
   matriz de roles entera (`roles.test.ts`), las reglas de la configuración de la agenda y las
   guardas de las migraciones 050 y 051 (`agenda-config.test.ts`; ahí está también la guarda de
-  cuál es la última migración apuntada en `db.ts`), router (401, 403 sin la app, 403 por rol en cada
+  cuál es la última migración apuntada en `db.ts`), la proyección de la agenda (`agenda.test.ts`:
+  el ejemplo H como prueba dorada, los casos frontera de la sección F y las propiedades —misma
+  entrada, misma salida; ningún ticket dos veces; las listas suman el total— sobre casos
+  generados con semilla), router (401, 403 sin la app, 403 por rol en cada
   escritura, Lector por defecto, administrador con todo, y la API de roles) y el programador con
   reloj de mentira (`src/trazabilidad/*.test.ts`).
 - `npm run test:db` en hub-api — `trazabilidad.db.test.ts` contra Postgres real: `registrarEstados`
