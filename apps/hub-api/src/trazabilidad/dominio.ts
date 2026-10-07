@@ -567,6 +567,31 @@ export function duracionDeEtapa(
   return { dias, origen: exacta !== null ? 'tipo' : dias !== null ? 'defecto' : null, tipo, sinTipo: tipo === '' };
 }
 
+/** Un tipo de servicio que traen los tickets abiertos de la fuente de la agenda, y cuántos lo traen. */
+export interface TipoAbierto {
+  clave: string;
+  etiqueta: string;
+  tickets: number;
+}
+
+/**
+ * Los tipos de servicio que traen unos tickets, uno por clave
+ * (`claveTipoServicio`) y por orden alfabético: las columnas que la tabla de
+ * duraciones debe ofrecer aunque el tipo no tenga fila en `tmc_plazos`. La
+ * etiqueta es la grafía del ticket más antiguo. Sin tipo no cuenta, ni «*».
+ */
+export function tiposDeTickets(tickets: readonly { numero: number; tipoServicio: string | null }[]): TipoAbierto[] {
+  const m = new Map<string, TipoAbierto>();
+  for (const t of [...tickets].sort((a, b) => a.numero - b.numero)) {
+    const clave = claveTipoServicio(t.tipoServicio);
+    if (!clave || clave === TIPO_POR_DEFECTO) continue;
+    const tipo = m.get(clave) ?? { clave, etiqueta: String(t.tipoServicio).replace(/\s+/g, ' ').trim(), tickets: 0 };
+    tipo.tickets++;
+    m.set(clave, tipo);
+  }
+  return [...m.values()].sort((a, b) => a.clave.localeCompare(b.clave));
+}
+
 // ── Contactos: a quién iría el aviso de cada equipo ─────────────────────────
 //
 // El contacto de un equipo sale del ticket más reciente de Zoho Desk con su
