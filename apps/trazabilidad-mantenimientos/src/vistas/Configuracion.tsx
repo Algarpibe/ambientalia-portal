@@ -3,13 +3,15 @@ import { api } from '../api';
 import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type PlazoServicio, type RolEstado } from '../dominio';
 import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Loading } from '../ui';
 
 /**
  * Configuración. Primer bloque: el plazo, en días hábiles, de cada tipo de servicio de Zoho
  * Desk. Con él se calcula la fecha límite de la pestaña «Servicios» (ingreso +
- * plazo). Vacío = ese tipo no tiene plazo. Lo edita cualquiera con la app y
- * cada cambio queda firmado con su correo. Un tipo compuesto (`derivadoDe`) va
+ * plazo). Vacío = ese tipo no tiene plazo. La ve cualquiera con la app; la
+ * edita quien tiene el permiso `config.write` (el Director Técnico y los
+ * administradores del portal) y cada cambio queda firmado con su correo. Un tipo compuesto (`derivadoDe`) va
  * en sólo lectura: su plazo es la suma de los de sus partes. Segundo bloque: el
  * rol de cada estado de Desk en el reloj de ese plazo.
  */
@@ -23,8 +25,16 @@ interface Props {
  * el reloj del plazo.
  */
 export default function Configuracion({ notificar }: Props) {
+  const { puede, motivo } = usePermisos();
   return (
     <div className="flex flex-col gap-4">
+      {!puede('config.write') && (
+        <div className="max-w-4xl">
+          <Alert tone="blue" title="Configuración en modo de consulta">
+            La cambia el Director Técnico. {motivo}
+          </Alert>
+        </div>
+      )}
       <Plazos notificar={notificar} />
       <EstadosDesk notificar={notificar} />
     </div>
@@ -47,6 +57,7 @@ function EstadosDesk({ notificar }: Props) {
   const [error, setError] = useState<string | null>(null);
   /** Clave del estado que se está guardando. Mientras dura, ningún desplegable admite otro cambio: las respuestas no se pisan. */
   const [guardando, setGuardando] = useState<string | null>(null);
+  const editable = usePermisos().puede('config.write');
 
   const cargar = useCallback(async () => {
     try {
@@ -116,7 +127,7 @@ function EstadosDesk({ notificar }: Props) {
                       <span className="inline-flex min-h-[44px] items-center gap-2">
                         <select
                           value={e.rol}
-                          disabled={guardando !== null}
+                          disabled={guardando !== null || !editable}
                           aria-busy={guardando === e.clave}
                           aria-label={`${e.etiqueta}: qué hace el tiempo en este estado`}
                           title={notaEstadoDesk(e)}
@@ -164,6 +175,7 @@ function Plazos({ notificar }: Props) {
   /** Lo que hay escrito en cada casilla que se ha tocado, por clave. */
   const [borrador, setBorrador] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState<string | null>(null);
+  const editable = usePermisos().puede('config.write');
 
   const cargar = useCallback(async () => {
     try {
@@ -265,12 +277,13 @@ function Plazos({ notificar }: Props) {
                       max={PLAZO_MAX_DIAS}
                       step={1}
                       value={txt}
+                      disabled={!editable}
                       onChange={(e) => setBorrador((b) => ({ ...b, [p.clave]: e.target.value }))}
                       onKeyDown={(e) => e.key === 'Enter' && cambiado && void guardar(p)}
                       placeholder="sin plazo"
                       aria-label={`Plazo de ${p.etiqueta} en días hábiles`}
                       aria-invalid={mal}
-                      className={`block min-h-[44px] w-32 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 ${
+                      className={`block min-h-[44px] w-32 rounded-xl border bg-white px-3 py-2 text-sm tabular-nums focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-600 ${
                         mal ? 'border-red-400 focus:ring-red-100' : 'border-gray-300 focus:border-blue-400 focus:ring-blue-100'
                       }`}
                     />
@@ -287,9 +300,11 @@ function Plazos({ notificar }: Props) {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button variant="primary" disabled={!cambiado} busy={guardando === p.clave} onClick={() => void guardar(p)}>
-                      Guardar
-                    </Button>
+                    {editable && (
+                      <Button variant="primary" disabled={!cambiado} busy={guardando === p.clave} onClick={() => void guardar(p)}>
+                        Guardar
+                      </Button>
+                    )}
                   </td>
                 </tr>
               );

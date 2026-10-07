@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { esEmailInterno, type EquipoVista } from '../dominio';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, Drawer, EstadoBadge, Tag } from '../ui';
 
 interface Props {
@@ -21,9 +22,13 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
   const [nota, setNota] = useState(s?.nota ?? '');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Sin el permiso, el seguimiento se enseña en sólo lectura (el servidor tampoco lo guardaría). */
+  const { puede, motivo } = usePermisos();
+  const editable = puede('seguimiento.write');
 
   async function guardar(ev: FormEvent) {
     ev.preventDefault();
+    if (!editable) return;
     setGuardando(true);
     setError(null);
     try {
@@ -111,34 +116,46 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
 
         <form onSubmit={(ev) => void guardar(ev)} className="flex flex-col gap-3 border-t border-gray-200 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Seguimiento</p>
-          <label className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm ${enAmbientalia ? 'border-blue-300 bg-blue-50' : 'border-gray-200'}`}>
-            <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={enAmbientalia} onChange={(ev) => setEnAmbientalia(ev.target.checked)} />
-            El equipo está ahora en Ambientalia
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Aviso enviado al cliente</span>
-            <input type="date" className={INPUT} value={avisoEnviado} onChange={(ev) => setAvisoEnviado(ev.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Servicio programado para</span>
-            <input type="date" className={INPUT} value={servicioProgramado} onChange={(ev) => setServicioProgramado(ev.target.value)} />
-          </label>
-          <label className="block text-sm">
-            <span className="mb-1 block font-medium text-gray-700">Nota</span>
-            <textarea rows={3} maxLength={2000} className={INPUT} value={nota} onChange={(ev) => setNota(ev.target.value)} placeholder="Contacto, acuerdos, número de ticket…" />
-          </label>
+          {/* Un <fieldset> desactivado desactiva de una vez todo lo que lleva dentro. */}
+          <fieldset disabled={!editable} className="flex min-w-0 flex-col gap-3 disabled:opacity-70">
+            <label className={`flex min-h-[44px] items-center gap-3 rounded-xl border px-3 py-2 text-sm ${editable ? 'cursor-pointer' : ''} ${enAmbientalia ? 'border-blue-300 bg-blue-50' : 'border-gray-200'}`}>
+              <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={enAmbientalia} onChange={(ev) => setEnAmbientalia(ev.target.checked)} />
+              El equipo está ahora en Ambientalia
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-gray-700">Aviso enviado al cliente</span>
+              <input type="date" className={INPUT} value={avisoEnviado} onChange={(ev) => setAvisoEnviado(ev.target.value)} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-gray-700">Servicio programado para</span>
+              <input type="date" className={INPUT} value={servicioProgramado} onChange={(ev) => setServicioProgramado(ev.target.value)} />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-gray-700">Nota</span>
+              <textarea rows={3} maxLength={2000} className={INPUT} value={nota} onChange={(ev) => setNota(ev.target.value)} placeholder={editable ? 'Contacto, acuerdos, número de ticket…' : ''} />
+            </label>
+          </fieldset>
           {s && (
             <p className="text-xs text-gray-500">
               Última actualización el {fmtFecha(s.actualizadoEn)} por {s.actualizadoPor}
             </p>
           )}
           {error && <Alert tone="red">{error}</Alert>}
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary" busy={guardando}>
-              Guardar seguimiento
-            </Button>
-            <Button onClick={onClose}>Cancelar</Button>
-          </div>
+          {editable ? (
+            <div className="flex gap-2">
+              <Button type="submit" variant="primary" busy={guardando}>
+                Guardar seguimiento
+              </Button>
+              <Button onClick={onClose}>Cancelar</Button>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500">{motivo}</p>
+              <div>
+                <Button onClick={onClose}>Cerrar</Button>
+              </div>
+            </>
+          )}
         </form>
       </div>
     </Drawer>

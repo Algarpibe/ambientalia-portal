@@ -34,6 +34,7 @@ import {
   tituloTerminado,
 } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, Loading, Tag } from '../ui';
 
 /**
@@ -92,6 +93,8 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
 
   /** Ticket cuyo tipo se está guardando. Mientras dura, ningún desplegable admite otro cambio: las respuestas no se pisan. */
   const [guardando, setGuardando] = useState<number | null>(null);
+  /** Sin el permiso, el desplegable del tipo se enseña desactivado: se ve qué tipo tiene cada ticket y no se cambia. */
+  const puedeTipo = usePermisos().puede('servicios.tipo.write');
 
   /** Pone a mano el tipo de un ticket (clave vacía = quitarlo) y pinta lo que devuelve el servidor. */
   const cambiarTipo = useCallback(
@@ -300,7 +303,7 @@ export default function Servicios({ onConfigurar, notificar }: Props) {
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-[13px]">{s.serial || <Vacio />}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">{s.modelo || <Vacio />}</td>
                   <td className="whitespace-nowrap px-3 py-1.5">
-                    <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando} onCambio={cambiarTipo} />
+                    <TipoSelect s={s} tipos={tipos} guardando={guardando === s.numero} bloqueado={guardando !== null || cargando || !puedeTipo} onCambio={cambiarTipo} />
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-gray-600">
                     {s.estado} <RolTag s={s} />
