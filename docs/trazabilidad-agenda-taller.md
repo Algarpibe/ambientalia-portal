@@ -211,9 +211,14 @@ const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;          // D13: una hor
 
 ### B.5 El orden de llegada
 
-**Fila de entrada (D12).** Manda `fecha_remision_entrada`, ascendente. Con el mismo día, va primero el ticket con llegada exacta en `desk.ticket_transitions`; si no, el de número más bajo. Sin fecha, al final de la fila, con la marca «falta fecha de remisión».
+**Fila de la primera etapa (D12, confirmado por Gerencia el 06/10/2026).** La primera etapa es Diagnóstico en el flujo de servicio y Proceso en el de equipo nuevo. Su fila es **una sola**, formada por:
 
-La misma regla ordena a los tickets que ya están en su primera etapa sin puesto, porque llegaron a ella desde la fila de entrada (regla 4). La excepción son los que el historial muestra volviendo de un standby: esos van al final, por el momento en que regresaron.
+- los tickets en la fila de entrada («Ingresado», «Remisión creada») que van a esa etapa, y
+- los tickets que ya están en un estado de esa etapa sin puesto asignado.
+
+Los dos grupos se mezclan y se ordenan juntos por `fecha_remision_entrada`, ascendente. Con el mismo día, va primero el ticket con llegada exacta en `desk.ticket_transitions`; si no, el de número más bajo. Sin fecha, al final, con la marca «falta fecha de remisión». Estar ya en el estado de la etapa no da preferencia sobre quien sigue en «Ingresado»: manda la fecha de remisión.
+
+**Excepción:** los tickets que el historial muestra volviendo de un standby van al final de la fila de su etapa, detrás de todos los anteriores, ordenados por el momento de entrada en el estado.
 
 **Etapas siguientes y vuelta de standby.** Manda la llegada al estado, por orden de preferencia:
 
@@ -498,22 +503,26 @@ duracion(t, e) = duraciones[e][tipoEfectivo(t)] ?? duraciones[e]['*']      // D9
 ```
 primeraEtapa(t) = (t.flujo = 'equipo_nuevo') ? 'proceso' : 'diagnostico'
 
-fila(e) = tickets en un estado de la etapa e SIN asignación vigente      // «en etapa sin puesto»
-          seguidos de tickets de 'entrada' con etapaDestino = e          // fila de entrada
+candidatos(e) = tickets de 'entrada' con etapaDestino = e                  // «Ingresado», «Remisión creada»
+              ∪ tickets en un estado de la etapa e SIN asignación vigente  // «en etapa sin puesto»
 
-clave de orden de un ticket t en la fila de e:
-    0. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
-    si t está en 'entrada', o está en e = primeraEtapa(t) y no vuelve de standby:      // D12
-        1. tiene remisionEntrada antes que no tenerla          // sin fecha → al final, «falta fecha de remisión»
+grupo A (una sola fila, D12) = candidatos t con e = primeraEtapa(t) que no vuelven de standby
+        // mezcla a los de 'entrada' con los que ya están en la etapa sin puesto: no hay preferencia entre ellos
+    orden:
+        0. prioridad fijada en Desk 2.0, descendente      // solo si fuente.capacidades.prioridad; hoy no hay ninguna
+        1. tiene remisionEntrada antes que no tenerla     // sin fecha → al final, «falta fecha de remisión»
         2. remisionEntrada ascendente
         3. con el mismo día: llegada exacta antes que no exacta
         4. número de ticket ascendente
-    si no:                                            // etapas siguientes y vuelta de standby
-        1. llegada ascendente                         // instante de entrada en el estado
+
+grupo B (al final) = el resto: etapas siguientes y los que vuelven de standby
+    orden:
+        0. prioridad fijada en Desk 2.0, descendente
+        1. llegada ascendente                             // instante de entrada en el estado
         2. número de ticket ascendente
         si la llegada no es exacta o hay empate  →  «orden aproximado»
 
-los tickets del segundo grupo van detrás de los del primero dentro de la misma fila
+fila(e) = grupo A seguido de grupo B
 «vuelve de standby» = el tramo anterior del historial del portal es de categoría standby
 sugerido(e) = primer ticket de fila(e)
 ```
@@ -572,7 +581,9 @@ confirmarArranque(lista):       // la que deja el Director Técnico, igual o aju
 | **Equipo nuevo, dos etapas seguidas** | Ingresado → Proceso → Verificación. Se proyecta en cadena: la llegada prevista a Verificación es el fin previsto en Proceso. Es el único caso en que una etapa alimenta a otra sin standby en medio |
 | **Tipo sin duración** | No puede darse: la fila «*» de cada etapa es obligatoria y no se puede borrar (D9). Un ticket sin tipo usa la «*» y lleva la marca «sin tipo» |
 | **Puesto que se reduce estando ocupado** | No se desaloja a nadie. Los puestos por encima del nuevo tope quedan «a extinguir»: siguen ocupados hasta que su ticket salga y no reciben a nadie más. La saturación puede superar el 100 % y se avisa |
-| **Más tickets en la etapa que puestos** | Los que no caben encabezan la fila de esa etapa, por delante de la fila de entrada, marcados «en etapa sin puesto» (D6) |
+| **Ticket en la primera etapa sin puesto** | Forma una sola fila con los de la fila de entrada, ordenada por fecha de remisión (D12). No pasa por delante de un «Ingresado» que llegó antes. Se marca «en etapa sin puesto». Ejemplo: en Diagnóstico, un ticket en «Rev./Diagnostico» con remisión del 25/09 va detrás de uno en «Ingresado» con remisión del 20/09 |
+| **Ticket que vuelve de standby a la primera etapa** | No entra en la fila única: va al final de la fila de su etapa, por el momento en que volvió al estado (D12) |
+| **Más tickets en una etapa siguiente que puestos** | Los que no caben quedan en la fila de esa etapa, por llegada al estado, marcados «en etapa sin puesto» (D6) |
 | **Diagnóstico no encadena con Proceso** | Entre ambas hay siempre standby (notificación y aprobación del cliente), que no se proyecta. La fila de Proceso solo contiene tickets que ya están en «En Proceso» o «Continuación del proceso» |
 | **Sincronización parada** | Si el máximo de `synced_at` de la fuente tiene más de una hora, aviso global arriba de la agenda. No se marca ningún ticket ni se cambia la proyección (D13) |
 | **Ticket que ya no debería ocupar puesto** | El Director Técnico libera el puesto a mano, con motivo; queda registrado (D7) |
