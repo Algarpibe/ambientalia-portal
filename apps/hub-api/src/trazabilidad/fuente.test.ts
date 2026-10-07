@@ -53,8 +53,9 @@ const SINC_REPLICA = Date.UTC(2026, 9, 6, 9, 0, 0);
 
 const desk2Sana = () =>
   baseFalsa((sql) => {
-    if (sql.includes('calendario_cierres')) return [{ fecha: '2026-12-24' }, { fecha: '2026-12-31' }];
+    // La de la sincronización va primero: es también la sonda y nombra las otras tablas.
     if (sql.includes('max(synced_at)')) return [{ ms: SINC_DESK2 }];
+    if (sql.includes('calendario_cierres')) return [{ fecha: '2026-12-24' }, { fecha: '2026-12-31' }];
     return [FILA_DESK2];
   });
 const replicaSana = () => baseFalsa((sql) => (sql.includes('max(synced_at)') ? [{ ms: SINC_REPLICA }] : [FILA_REPLICA]));

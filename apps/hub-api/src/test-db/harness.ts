@@ -1,4 +1,5 @@
 import { inject } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { createPoolFromUrl, type Pool } from '@algarpibe/zoho-sync';
 import { crearSolicitud } from '../ausencias/repo.js';
 import type { PayloadEvento, Solicitud, TipoSolicitud } from '../ausencias/types.js';
@@ -37,6 +38,76 @@ export async function asegurarDeskTickets(db: Pool): Promise<void> {
       synced_at             timestamptz,
       raw                   jsonb
     )`);
+}
+
+/**
+ * Una imitacion de la base `desk` de Desk 2.0 (la fuente principal de la agenda
+ * del taller) dentro del MISMO contenedor, pero en OTRA base de datos
+ * (`desk2_prueba`): en produccion tambien es otra base, en otro servicio. Solo
+ * las tablas y columnas que hub-api lee (nombres y tipos copiados de
+ * `packages/zoho-sync/src/db/schema.sql` de Desk 2.0), y un rol de solo lectura
+ * como el `portal_agenda_reader` de produccion: `SELECT` tabla a tabla y
+ * `default_transaction_read_only = on`.
+ *
+ * Devuelve dos URLs: la del rol lector (la que imita a `DESK2_DB_URL`) y la del
+ * superusuario del contenedor sobre esa base, para sembrar. La contrasena del
+ * lector se genera en cada llamada: no hay ninguna escrita en el repo.
+ * Idempotente; vaciar las tablas entre tests es cosa de cada fichero.
+ */
+export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlAdmin: string }> {
+  const BASE = 'desk2_prueba';
+  const ROL = 'agenda_lector_prueba';
+  const clave = randomBytes(12).toString('hex');
+
+  const { rows } = await db.query('SELECT 1 FROM pg_database WHERE datname = $1', [BASE]);
+  if (rows.length === 0) await db.query(`CREATE DATABASE ${BASE}`);
+  await db.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROL}') THEN CREATE ROLE ${ROL} LOGIN; END IF;
+    END $$;
+    ALTER ROLE ${ROL} PASSWORD '${clave}';
+    ALTER ROLE ${ROL} SET default_transaction_read_only = on;
+    GRANT CONNECT ON DATABASE ${BASE} TO ${ROL}`);
+
+  const admin = new URL(inject('urlBd'));
+  admin.pathname = `/${BASE}`;
+  const lector = new URL(admin);
+  lector.username = ROL;
+  lector.password = clave;
+
+  const db2 = createPoolFromUrl(admin.toString());
+  try {
+    await db2.query(`
+      CREATE SCHEMA IF NOT EXISTS desk;
+      CREATE TABLE IF NOT EXISTS desk.tickets (
+        id                     text PRIMARY KEY,
+        number                 integer UNIQUE NOT NULL,
+        status                 text NOT NULL,
+        status_type            text,
+        priority               text,
+        classification         text,
+        created_time           timestamptz,
+        tipo_servicio          text,
+        fecha_creacion_ticket  date,
+        fecha_remision_entrada date,
+        prioridad_en_app_at    timestamptz,
+        synced_at              timestamptz
+      );
+      CREATE TABLE IF NOT EXISTS desk.ticket_transitions (
+        id           bigserial PRIMARY KEY,
+        ticket_id    text NOT NULL,
+        to_status    text,
+        performed_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS public.calendario_cierres (
+        fecha date PRIMARY KEY
+      );
+      GRANT USAGE ON SCHEMA desk, public TO ${ROL};
+      GRANT SELECT ON desk.tickets, desk.ticket_transitions, public.calendario_cierres TO ${ROL}`);
+  } finally {
+    await db2.end();
+  }
+  return { urlLector: lector.toString(), urlAdmin: admin.toString() };
 }
 
 /**

@@ -46,9 +46,8 @@ import type { DbLectura, FilaTicket } from './fuente.js';
  * · Los instantes viajan en milisegundos y las fechas como texto: sin depender
  *   del parser de fechas del driver.
  */
-export async function leerTicketsDesk2(db: DbLectura): Promise<FilaTicket[]> {
-  const { rows } = await db.query(
-    `SELECT t.number AS numero, t.status AS estado, t.status_type AS tipo_estado,
+const SQL_TICKETS = `
+     SELECT t.number AS numero, t.status AS estado, t.status_type AS tipo_estado,
             t.classification AS clasificacion, t.tipo_servicio,
             t.fecha_remision_entrada::text AS remision_entrada,
             COALESCE(t.fecha_creacion_ticket, (t.created_time AT TIME ZONE 'America/Bogota')::date)::text AS fecha_creacion,
@@ -60,8 +59,10 @@ export async function leerTicketsDesk2(db: DbLectura): Promise<FilaTicket[]> {
               LIMIT 1) AS llegada_ms
        FROM desk.tickets t
       WHERE t.status_type IS DISTINCT FROM 'Closed'
-      ORDER BY t.number`,
-  );
+      ORDER BY t.number`;
+
+export async function leerTicketsDesk2(db: DbLectura): Promise<FilaTicket[]> {
+  const { rows } = await db.query(SQL_TICKETS);
   return rows;
 }
 
@@ -80,8 +81,20 @@ export async function leerCierresDesk2(db: DbLectura, desde: string, hasta: stri
 /**
  * El máximo de `synced_at` de TODA la tabla, en milisegundos (D13). Los
  * tickets nacidos en la app no tienen fecha de sincronización y no lo alteran.
+ *
+ * Es también la SONDA de `estadoFuente()`, así que en la misma sentencia
+ * nombra (sin traer ninguna fila: `WHERE false`) todo lo que leen las otras
+ * dos consultas. Postgres comprueba tablas, columnas y permisos aunque no
+ * devuelva nada: si a la base le falta algo, o al rol un permiso, esto falla
+ * igual que fallarían los tickets, y el estado no dice «principal» mientras
+ * los tickets salen de la réplica.
  */
 export async function ultimaSincronizacionDesk2(db: DbLectura): Promise<number | null> {
-  const { rows } = await db.query(`SELECT (EXTRACT(EPOCH FROM max(synced_at)) * 1000)::float8 AS ms FROM desk.tickets`);
+  const { rows } = await db.query(
+    `SELECT (EXTRACT(EPOCH FROM max(synced_at)) * 1000)::float8 AS ms,
+            (SELECT count(*) FROM (${SQL_TICKETS}) q WHERE false) AS sonda_tickets,
+            (SELECT count(*) FROM public.calendario_cierres WHERE false) AS sonda_cierres
+       FROM desk.tickets`,
+  );
   return rows[0]?.ms == null ? null : Number(rows[0].ms);
 }
