@@ -6,6 +6,7 @@ import {
   conteoPorEstado,
   enServicio,
   fmtFecha,
+  fmtFechaHora,
   mensajeAviso,
   porCliente,
   rejillaMes,
@@ -134,5 +135,30 @@ describe('formato', () => {
     expect(textoVigencia(-3)).toBe('vencida hace 3 d');
     expect(textoVigencia(0)).toBe('vence hoy');
     expect(textoVigencia(11)).toBe('quedan 11 d');
+  });
+
+  // Las firmas («quién y cuándo») llegan como instantes con zona. El día es el de Colombia (UTC−5 todo el
+  // año), no el de UTC ni el de la máquina: aquí no se usa ni el reloj ni la zona de quien ejecuta la prueba.
+  it('un instante se enseña con el día de Colombia: de 00:00 a 04:59 UTC todavía es el día anterior', () => {
+    expect(fmtFecha('2026-10-07 01:10:00+00')).toBe('06/10/2026');
+    expect(fmtFecha('2026-10-07 04:59:59.999999+00')).toBe('06/10/2026');
+    expect(fmtFecha('2026-10-07 05:00:00+00')).toBe('07/10/2026');
+    expect(fmtFecha('2026-01-01T03:00:00.000Z')).toBe('31/12/2025');
+    expect(fmtFechaHora('2026-10-07 01:10:00+00')).toBe('06/10/2026 20:10');
+    expect(fmtFechaHora('2026-10-07 05:00:00.5+00')).toBe('07/10/2026 00:00');
+  });
+
+  it('el mismo instante da lo mismo venga con la zona que venga', () => {
+    for (const iso of ['2026-10-07T01:10:00Z', '2026-10-07 01:10:00+00', '2026-10-06 20:10:00-05', '2026-10-06T20:10:00-05:00', '2026-10-07 06:40:00+0530']) {
+      expect(fmtFechaHora(iso)).toBe('06/10/2026 20:10');
+    }
+  });
+
+  it('un día suelto (o un texto sin zona) no se mueve; sin fecha, «—»', () => {
+    expect(fmtFecha('2026-10-07')).toBe('07/10/2026');
+    expect(fmtFechaHora('2026-10-07')).toBe('07/10/2026');
+    expect(fmtFecha('2026-10-07 01:10:00')).toBe('07/10/2026');
+    expect(fmtFechaHora(null)).toBe('—');
+    expect(fmtFechaHora(undefined)).toBe('—');
   });
 });
