@@ -515,8 +515,9 @@ const CLASIFICACION_EQUIPO_NUEVO = 'equipo nuevo';
  * normaliza a «equipo nuevo», y servicio con cualquier otra. Sin ella, la
  * fuente principal da servicio; el respaldo —cuya réplica la trae vacía— lo
  * DEDUCE: equipo nuevo si el asunto empieza por «Equipo Nuevo» o el código de
- * servicio por `HV_`. La marca a mano por ticket, que gana a todo, llega con
- * las asignaciones (lote 4).
+ * servicio por `HV_`. La marca a mano por ticket (portal.tmc_agenda_flujo) no
+ * pasa por aquí: sólo existe para el ticket sin clasificación y la aplica la
+ * proyección (`flujosManuales`).
  */
 export function flujoDeTicket(t: {
   fuente: 'principal' | 'respaldo';

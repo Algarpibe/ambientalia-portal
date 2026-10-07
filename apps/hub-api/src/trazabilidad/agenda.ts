@@ -41,9 +41,9 @@ import type { EstadoFuente, MotivoRespaldo, NombreFuente, TicketTaller } from '.
 // ── Entrada ─────────────────────────────────────────────────────────────────
 
 /**
- * Un puesto ocupado: la asignación vigente de un ticket (las crea y las cierra
- * el lote 4, tabla tmc_agenda_asignaciones; hasta entonces la lista llega
- * vacía). `desde` es el DÍA (AAAA-MM-DD) desde el que cuenta la duración.
+ * Un puesto ocupado: la asignación vigente de un ticket (tabla
+ * tmc_agenda_asignaciones; las lee `leerEntradaAgenda`, repo.ts). `desde` es el
+ * DÍA (AAAA-MM-DD) desde el que cuenta la duración: su columna `inicio`.
  */
 export interface AsignacionAgenda {
   /** Número del ticket. */
@@ -75,10 +75,10 @@ export interface EntradaAgenda {
   asignaciones: readonly AsignacionAgenda[];
   /**
    * Tickets que el historial del portal muestra VOLVIENDO de un standby a su
-   * estado de ahora (los calculará el lote 4). Sin él nadie cuenta como vuelto.
+   * etapa de ahora (`vuelvenDeStandby`, abajo). Sin él nadie cuenta como vuelto.
    */
   vuelvenDeStandby?: readonly number[];
-  /** Flujo marcado a mano por ticket (lote 4, tmc_agenda_flujo): gana a la fuente (D11). */
+  /** Flujo marcado a mano por ticket (tmc_agenda_flujo): gana al de la fuente (D11). Quien lo rellena sólo pasa los de tickets sin clasificación. */
   flujosManuales?: { get(numero: number): FlujoAgenda | null | undefined };
 }
 
@@ -220,7 +220,8 @@ function comparar(a: Clave, b: Clave): number {
 
 /**
  * El sitio de un ticket en la fila de `etapa` (F.3). Por este orden:
- *   0. prioridad fijada, de mayor a menor (sólo la de la fuente principal);
+ *   0. prioridad fijada, de mayor a menor (sólo la de la fuente principal):
+ *      por delante de TODA la fila, no dentro de su grupo (D15);
  *   1. grupo A —la primera etapa de su flujo, si no vuelve de standby— antes
  *      que el B —etapas siguientes y vueltas de standby—;
  *   A. con fecha de remisión antes que sin ella; la fecha; con el mismo día,
@@ -342,7 +343,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     };
 
     // Asignaciones vigentes de la etapa. Manda el estado del ticket: si la fuente lo trae y ya no está en
-    // esta etapa, la asignación no cuenta (el lote 4 la cerrará). Si la fuente no lo trae, conserva el puesto.
+    // esta etapa, la asignación no cuenta (cerrarla sola es del lote 4b). Si la fuente no lo trae, conserva el puesto.
     const ocupados = new Map<number, AsignacionAgenda>();
     for (const a of e.asignaciones) {
       if (a.etapa !== etapa || ocupados.has(a.puesto) || conPuesto.has(a.numero)) continue;
