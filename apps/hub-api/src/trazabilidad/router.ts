@@ -4,9 +4,10 @@ import { requireAuth, requireApp, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { getDesk2Pool } from '../db-desk2.js';
-import { huecosDeEtapa, proyectarAgenda, type AgendaTaller } from './agenda.js';
+import { detallesDeTickets, huecosDeEtapa, proyectarAgenda, type RespuestaAgenda } from './agenda.js';
+import { ejeAgenda } from './agenda-calendario.js';
 import { esFechaIso } from './dominio.js';
-import { crearFuenteAgenda, recuentoPorEstado, type EstadoFuente, type FuenteAgenda } from './fuente.js';
+import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { festivosDelEje } from './plazos.js';
 import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
@@ -97,8 +98,7 @@ function hoyAgenda(req: Request): string {
 /** Cuántas entradas próximas da GET /agenda/huecos. */
 export const HUECOS_PROXIMOS = 5;
 
-/** Lo que devuelven GET /agenda y las escrituras de la agenda: la proyección y el estado entero de la fuente. */
-export type RespuestaAgenda = AgendaTaller & { estadoFuente: EstadoFuente };
+export type { RespuestaAgenda };
 
 const AVISO_PASADA_FALLIDA = {
   codigo: 'pasada_fallida',
@@ -354,6 +354,11 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
   // Las respuestas llevan números de ticket, estados, fechas y marcas: ni
   // clientes, ni seriales, ni correos. Lo que cambia la agenda devuelve la
   // agenda ya leída otra vez, como hace «Servicios» con su lista.
+  //
+  // Lote 7 (la pantalla): la agenda —y sólo ella— lleva además `tickets`, la
+  // ficha de cada abierto con su ASUNTO (texto de terceros: identifica el
+  // equipo; quien lo pinta lo trata como texto), y `eje`, el tramo del
+  // calendario con sus festivos y cierres de empresa.
 
   // D20: antes de servir la agenda, y antes de asignar, repartir o liberar, se
   // lanza la pasada de la agenda (su historial y el cierre de las asignaciones
@@ -365,7 +370,7 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
   const agenda = async (hoy: string, alDia: boolean): Promise<RespuestaAgenda> => {
     const entrada = await repo.leerEntradaAgenda(db, fuente, hoy);
     const a = proyectarAgenda(entrada);
-    return { ...a, avisos: alDia ? a.avisos : [...a.avisos, AVISO_PASADA_FALLIDA], estadoFuente: entrada.estadoFuente };
+    return { ...a, avisos: alDia ? a.avisos : [...a.avisos, AVISO_PASADA_FALLIDA], estadoFuente: entrada.estadoFuente, tickets: detallesDeTickets(entrada), eje: ejeAgenda(hoy, entrada.cierres) };
   };
 
   // Un cambio en la agenda: valida el cuerpo, se pone al día (si toca), escribe

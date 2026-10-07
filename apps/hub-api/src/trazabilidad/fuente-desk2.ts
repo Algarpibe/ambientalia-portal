@@ -9,6 +9,7 @@
  *   desk.tickets                 Desk2:packages/zoho-sync/src/db/schema.sql:20-43
  *     id                         schema.sql:21  (texto; `app-<uuid>` en los nacidos en la app)
  *     number                     schema.sql:22
+ *     subject                    schema.sql:23  (lote 7; comprobado en HEAD 351c046: mismas líneas)
  *     status, status_type,
  *     priority, classification   schema.sql:23
  *     created_time               schema.sql:26
@@ -43,8 +44,11 @@ import type { DbLectura, FilaTicket } from './fuente.js';
  *   es el estado de ahora, la misma regla que `entradasActuales`
  *   (Desk2:apps/desk/server/db/sla.ts:78-102), con el mismo desempate por id.
  *   NULL si el ticket no se ha movido desde la app.
- * · `asunto` y `codigo_servicio` van siempre NULL: aquí el flujo sale de
- *   `classification` y no hace falta leer nada más del ticket (D11).
+ * · `asunto` (lote 7): `subject`, para identificar el equipo en la pantalla de
+ *   la agenda. Es texto de terceros y suele llevar el nombre del cliente: sólo
+ *   sale por GET /agenda, nunca por el diagnóstico de la fuente.
+ * · `codigo_servicio` va siempre NULL: aquí el flujo sale de `classification`
+ *   y no hace falta leer nada más del ticket (D11). Ni serial, ni correo.
  * · Los instantes viajan en milisegundos y las fechas como texto: sin depender
  *   del parser de fechas del driver.
  */
@@ -59,7 +63,7 @@ const SQL_TICKETS = `
               WHERE tr.ticket_id = t.id AND tr.to_status = t.status
               ORDER BY tr.performed_at DESC, tr.id DESC
               LIMIT 1) AS llegada_ms,
-            NULL::text AS asunto, NULL::text AS codigo_servicio
+            t.subject AS asunto, NULL::text AS codigo_servicio
        FROM desk.tickets t
       WHERE t.status_type IS DISTINCT FROM 'Closed'
       ORDER BY t.number`;

@@ -8,8 +8,40 @@
  * sin repetirla. Puro: los cierres llegan como argumento, no lee ninguna base.
  */
 
-import { sumarDias } from '../ausencias/festivos.js';
+import { festivosColombia, sumarDias } from '../ausencias/festivos.js';
 import { esHabil } from './plazos.js';
+
+/** El eje del calendario de la pantalla (lote 7): cuántos días hábiles hacia atrás y cuántos días hacia delante de hoy. */
+export const EJE_HABILES_ATRAS = 3;
+export const EJE_DIAS_ADELANTE = 28;
+
+/** El tramo que pinta el calendario de la agenda (ambos días incluidos) y sus días no hábiles que no son fin de semana. */
+export interface EjeAgenda {
+  desde: string;
+  hasta: string;
+  festivos: string[];
+  cierres: string[];
+}
+
+/**
+ * El eje a fecha `hoy`: desde hace `EJE_HABILES_ATRAS` días hábiles de agenda
+ * hasta `EJE_DIAS_ADELANTE` días después, con los festivos de Colombia y los
+ * cierres de empresa que caen dentro. La pantalla sombrea con ellos sin
+ * conocer la regla.
+ */
+export function ejeAgenda(hoy: string, cierres: readonly string[]): EjeAgenda {
+  const cerrados = new Set(cierres);
+  let desde = hoy;
+  for (let quedan = EJE_HABILES_ATRAS; quedan > 0; ) {
+    desde = sumarDias(desde, -1);
+    if (esHabilAgenda(desde, cerrados)) quedan--;
+  }
+  const hasta = sumarDias(hoy, EJE_DIAS_ADELANTE);
+  const dentro = (f: string) => f >= desde && f <= hasta;
+  const festivos: string[] = [];
+  for (let anio = Number(desde.slice(0, 4)); anio <= Number(hasta.slice(0, 4)); anio++) festivos.push(...[...festivosColombia(anio)].filter(dentro));
+  return { desde, hasta, festivos: festivos.sort(), cierres: [...cerrados].filter(dentro).sort() };
+}
 
 /** True si `fecha` (AAAA-MM-DD) es hábil y la empresa no cierra ese día. */
 export function esHabilAgenda(fecha: string, cierres: ReadonlySet<string>): boolean {

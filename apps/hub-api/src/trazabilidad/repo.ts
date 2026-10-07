@@ -818,19 +818,23 @@ export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: strin
     fuente.cierresEmpresa(sumarDias(hoy, -CIERRES_ATRAS_DIAS), sumarDias(hoy, CIERRES_ADELANTE_DIAS)),
     leerCategoriasEstados(db),
     leerConfigAgenda(db),
-    db.query(`SELECT numero, clave FROM portal.tmc_servicios_tipo`),
+    db.query(`SELECT numero, clave, etiqueta FROM portal.tmc_servicios_tipo`),
     db.query(`SELECT numero, etapa, puesto, inicio::text AS desde FROM portal.tmc_agenda_asignaciones WHERE hasta IS NULL ORDER BY etapa, puesto`),
     db.query(`SELECT numero, flujo FROM portal.tmc_agenda_flujo`),
   ]);
   const historial = await db.query(
-    `SELECT numero, clave, (extract(epoch FROM desde) * 1000)::float8 AS desde_ms, (extract(epoch FROM hasta) * 1000)::float8 AS hasta_ms
+    `SELECT numero, clave, desde_real, (extract(epoch FROM desde) * 1000)::float8 AS desde_ms, (extract(epoch FROM hasta) * 1000)::float8 AS hasta_ms
        FROM portal.tmc_agenda_historial WHERE numero = ANY($1::int[])`,
     [tickets.map((t) => t.numero)],
   );
+  const estadoDe = new Map(tickets.map((t) => [t.numero, claveEstadoDesk(t.estado)]));
   const tramos = new Map<number, TramoHistorial[]>();
+  /** Para la ficha: desde cuándo lo vio la agenda en su estado de ahora (su tramo abierto, si es de ese estado). */
+  const tramosAbiertos = new Map<number, { desde: number; real: boolean }>();
   for (const r of historial.rows as Row[]) {
     const tramo = { clave: String(r.clave), desde: Math.round(Number(r.desde_ms)), hasta: r.hasta_ms === null ? null : Math.round(Number(r.hasta_ms)) };
     tramos.set(Number(r.numero), [...(tramos.get(Number(r.numero)) ?? []), tramo]);
+    if (tramo.hasta === null && tramo.clave === estadoDe.get(Number(r.numero))) tramosAbiertos.set(Number(r.numero), { desde: tramo.desde, real: r.desde_real === true });
   }
   const sinClasificacion = new Set(tickets.filter((t) => !t.clasificacion).map((t) => t.numero));
   return {
@@ -844,6 +848,8 @@ export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: strin
     asignaciones: (vigentes.rows as Row[]).filter((r) => esEtapaAgenda(r.etapa)).map((r) => ({ numero: Number(r.numero), etapa: r.etapa, puesto: Number(r.puesto), desde: r.desde })),
     vuelvenDeStandby: vuelvenDeStandby(tickets, tramos, categorias),
     flujosManuales: new Map((flujos.rows as Row[]).filter((r) => sinClasificacion.has(Number(r.numero))).map((r) => [Number(r.numero), r.flujo as FlujoAgenda])),
+    etiquetasTipoManual: new Map((tipos.rows as Row[]).map((r) => [Number(r.numero), String(r.etiqueta ?? r.clave)])),
+    tramosAbiertos,
   };
 }
 

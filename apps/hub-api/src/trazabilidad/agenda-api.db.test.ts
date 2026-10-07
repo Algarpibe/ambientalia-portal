@@ -256,6 +256,34 @@ describe('la agenda de punta a punta', () => {
     expect(etapa(res.body, 'proceso').fila.map((t) => t.numero)).toEqual([2030, 2010]);
     expect(etapa((await put(`${A}/flujo/2030`, { flujo: null })).body, 'diagnostico').fila.map((t) => t.numero)).toContain(2030);
   });
+
+  // Lote 7: lo que la pantalla pinta además de la proyección.
+  it('GET /agenda trae la ficha de cada ticket (asunto de Desk 2.0, tipo a mano, flujo, última transición) y el eje con festivos y cierres', async () => {
+    await admin2.query(`UPDATE desk.tickets SET subject = 'Asunto ficticio <b>2001</b> & "comillas"' WHERE number = 2001`);
+    await admin2.query(`UPDATE desk.tickets SET classification = NULL WHERE number = 2030`);
+    await admin2.query(`INSERT INTO desk.ticket_transitions (ticket_id, to_status, performed_at) VALUES ('z-2010', 'En Proceso', '2026-10-05T15:00:00Z')`);
+    await admin2.query(`INSERT INTO public.calendario_cierres (fecha) VALUES ('2026-10-20'), ('2027-03-01')`);
+    await hub.query(`INSERT INTO portal.tmc_servicios_tipo (numero, clave, etiqueta, actualizado_por) VALUES (2002, 'calibracion', 'Calibración', 'director@example.com')`);
+    await put(`${A}/flujo/2030`, { flujo: 'equipo_nuevo' });
+    const res = await get('?hoy=2026-10-06');
+    expect(res.status).toBe(200);
+    const de = (n: number) => (res.body.tickets as { numero: number }[]).find((t) => t.numero === n);
+    expect((res.body.tickets as { numero: number }[]).map((t) => t.numero)).toEqual([2001, 2002, 2003, 2010, 2020, 2030]);
+    // El asunto viaja como texto, tal cual: quien lo pinta no lo interpreta.
+    expect(de(2001)).toMatchObject({ asunto: 'Asunto ficticio <b>2001</b> & "comillas"', tipo: 'Diagnostico', tipoManual: false, flujo: 'servicio', flujoOrigen: 'clasificacion', remisionEntrada: '2026-09-01' });
+    expect(de(2002)).toMatchObject({ asunto: null, tipo: 'Calibración', tipoManual: true });
+    expect(de(2010)).toMatchObject({ ultimaTransicion: { en: '2026-10-05T15:00:00.000Z', origen: 'fuente' } });
+    expect(de(2030)).toMatchObject({ flujo: 'equipo_nuevo', flujoOrigen: 'manual' });
+    // Sin transición en Desk 2.0: lo que sabe el historial de la agenda, que lo vio por primera vez en esta pasada.
+    expect(de(2020)).toMatchObject({ ultimaTransicion: { origen: 'primera_observacion', en: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) } });
+    expect(res.body.eje).toMatchObject({ desde: '2026-10-01', hasta: '2026-11-03', cierres: ['2026-10-20'] });
+    expect(res.body.eje.festivos).toContain('2026-10-12');
+    // Las escrituras devuelven lo mismo: la pantalla no vuelve a pedir la agenda.
+    const tras = await post('/asignaciones', { numero: 2001, etapa: 'diagnostico', puesto: 1 });
+    expect(Object.keys(tras.body).sort()).toEqual(Object.keys(res.body).sort());
+    // Y el diagnóstico de la fuente sigue sin asuntos.
+    expect(JSON.stringify((await get('/fuente')).body)).not.toMatch(/asunto|ficticio/i);
+  });
 });
 
 describe('configuración de la agenda', () => {

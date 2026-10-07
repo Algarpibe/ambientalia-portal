@@ -93,6 +93,7 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
         prioridad_en_app_at    timestamptz,
         synced_at              timestamptz
       );
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS subject text;
       CREATE TABLE IF NOT EXISTS desk.ticket_transitions (
         id           bigserial PRIMARY KEY,
         ticket_id    text NOT NULL,

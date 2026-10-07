@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { huecosDeEtapa, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda, type TramoHistorial } from './agenda.js';
-import { esHabilAgenda } from './agenda-calendario.js';
+import { detallesDeTickets, huecosDeEtapa, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type AsignacionAgenda, type EntradaAgenda, type TramoHistorial } from './agenda.js';
+import { ejeAgenda, esHabilAgenda } from './agenda-calendario.js';
 import { ETAPAS_AGENDA, type CategoriaEstado, type DuracionEtapa, type EtapaAgenda, type FlujoAgenda } from './dominio.js';
 import { UMBRAL_SINCRONIZACION_PARADA_MS, type EstadoFuente, type TicketTaller } from './fuente.js';
 
@@ -407,7 +407,7 @@ describe('puestos con asignación vigente', () => {
     const con = (hoy: string) => proyectarAgenda(entrada(tickets, { hoy, config: uno, asignaciones: [asig(800, 'diagnostico', 1, '2026-09-28')] }));
     const a = con(HOY);
     expect(etapaDe(a, 'diagnostico').puestos).toEqual([
-      { puesto: 1, ocupante: { numero: 800, estado: 'Rev./Diagnostico', marcas: { sinTipo: false, sinDuracion: false, sinDatosFuente: false } }, inicio: '2026-09-28', finEstimado: '2026-10-07', pasadoDeFecha: true, aExtinguir: false },
+      { puesto: 1, ocupante: { numero: 800, estado: 'Rev./Diagnostico', marcas: { sinTipo: false, sinDuracion: false, sinDatosFuente: false } }, inicio: '2026-09-28', finPlanificado: '2026-10-01', finEstimado: '2026-10-07', pasadoDeFecha: true, aExtinguir: false },
     ]);
     expect(previstos(a, 'diagnostico')).toEqual([[801, 1, '2026-10-07', '2026-10-13']]);
     expect(etapaDe(a, 'diagnostico').primerHueco).toBe('2026-10-13');
@@ -456,6 +456,7 @@ describe('puestos con asignación vigente', () => {
       puesto: 1,
       ocupante: { numero: 840, estado: null, marcas: { sinTipo: true, sinDuracion: false, sinDatosFuente: true } },
       inicio: '2026-10-05',
+      finPlanificado: '2026-10-08',
       finEstimado: '2026-10-08',
       pasadoDeFecha: false,
       aExtinguir: false,
@@ -898,5 +899,93 @@ describe('propiedades', () => {
       expect(JSON.stringify([e, [...e.tiposManuales as Map<number, string>], [...e.categorias as Map<string, CategoriaEstado>]]), nombre).toBe(antes);
       expect(a.etapas.length, nombre).toBe(ETAPAS_AGENDA.length);
     }
+  });
+});
+
+// ── Lote 7: lo que la pantalla pinta además de la proyección ────────────────
+
+describe('detallesDeTickets: la ficha de cada ticket abierto', () => {
+  const de = (e: EntradaAgenda, numero: number) => detallesDeTickets(e).find((d) => d.numero === numero)!;
+
+  it('uno por ticket abierto, por número: asunto, estado, tipo, flujo, remisión y última transición', () => {
+    const e = entrada([tk(902, 'Notificación  cliente', { asunto: 'Asunto ficticio dos' }), tk(901, 'Rev./Diagnostico', { asunto: 'Asunto ficticio uno', remisionEntrada: '2026-09-25', llegadaEstado: ms('2026-10-01') })]);
+    expect(detallesDeTickets(e)).toEqual([
+      { numero: 901, asunto: 'Asunto ficticio uno', estado: 'Rev./Diagnostico', tipo: 'Diagnostico', tipoManual: false, flujo: 'servicio', flujoOrigen: 'clasificacion', remisionEntrada: '2026-09-25', ultimaTransicion: { en: '2026-10-01T15:00:00.000Z', origen: 'fuente' } },
+      { numero: 902, asunto: 'Asunto ficticio dos', estado: 'Notificación cliente', tipo: 'Diagnostico', tipoManual: false, flujo: 'servicio', flujoOrigen: 'clasificacion', remisionEntrada: null, ultimaTransicion: null },
+    ]);
+  });
+
+  it('el tipo puesto a mano gana al de la fuente y se dice; se enseña con su etiqueta si se sabe', () => {
+    const e = entrada([tk(910, 'En Proceso'), tk(911, 'En Proceso', { tipoServicio: null })], { tiposManuales: new Map([[910, 'calibracion']]), etiquetasTipoManual: new Map([[910, 'Calibración']]) });
+    expect(de(e, 910)).toMatchObject({ tipo: 'Calibración', tipoManual: true });
+    expect(de({ ...e, etiquetasTipoManual: undefined }, 910)).toMatchObject({ tipo: 'calibracion', tipoManual: true });
+    expect(de(e, 911)).toMatchObject({ tipo: null, tipoManual: false });
+  });
+
+  it('de dónde sale el flujo: de la clasificación, de la marca a mano, deducido en respaldo o, sin nada, el de por defecto', () => {
+    const e = entrada(
+      [nuevo(920, 'Ingresado'), tk(921, 'Ingresado', { clasificacion: null }), tk(922, 'Ingresado', { clasificacion: null }), tk(923, 'Ingresado', { clasificacion: null, fuente: 'respaldo', asunto: 'Equipo Nuevo de prueba' })],
+      { flujosManuales: new Map<number, FlujoAgenda>([[921, 'equipo_nuevo']]) },
+    );
+    expect(detallesDeTickets(e).map((d) => [d.numero, d.flujo, d.flujoOrigen])).toEqual([
+      [920, 'equipo_nuevo', 'clasificacion'],
+      [921, 'equipo_nuevo', 'manual'],
+      [922, 'servicio', 'defecto'],
+      [923, 'equipo_nuevo', 'deducido'],
+    ]);
+  });
+
+  it('última transición: la de la fuente si consta; si no, el tramo abierto del historial de la agenda, diciendo si es una primera observación', () => {
+    const tramosAbiertos = new Map([
+      [930, { desde: ms('2026-10-02'), real: true }],
+      [931, { desde: ms('2026-10-03'), real: false }],
+      [932, { desde: ms('2026-10-04'), real: true }],
+    ]);
+    const e = entrada([tk(930, 'En Proceso'), tk(931, 'En Proceso'), tk(932, 'En Proceso', { llegadaEstado: ms('2026-10-05') }), tk(933, 'En Proceso')], { tramosAbiertos });
+    expect(detallesDeTickets(e).map((d) => d.ultimaTransicion)).toEqual([
+      { en: '2026-10-02T15:00:00.000Z', origen: 'historial' },
+      { en: '2026-10-03T15:00:00.000Z', origen: 'primera_observacion' },
+      { en: '2026-10-05T15:00:00.000Z', origen: 'fuente' },
+      null,
+    ]);
+  });
+
+  it('no lleva código de servicio, serial ni correo: del ticket sólo sale el asunto', () => {
+    const e = entrada([tk(940, 'En Proceso', { asunto: 'Asunto ficticio', codigoServicio: 'MT_18A00001_EDM180C_261002' })]);
+    expect(Object.keys(detallesDeTickets(e)[0]).sort()).toEqual(['asunto', 'estado', 'flujo', 'flujoOrigen', 'numero', 'remisionEntrada', 'tipo', 'tipoManual', 'ultimaTransicion']);
+    expect(JSON.stringify(detallesDeTickets(e))).not.toMatch(/18A00001|codigo|serial|email|@/i);
+  });
+});
+
+describe('el fin que le daba su duración a quien ocupa un puesto (finPlanificado)', () => {
+  it('coincide con el fin estimado mientras no va pasado; pasado de fecha, es el día en que debía acabar', () => {
+    const tickets = [tk(950, 'Rev./Diagnostico'), tk(951, 'Rev./Diagnostico')];
+    const a = proyectarAgenda(entrada(tickets, { asignaciones: [asig(950, 'diagnostico', 1, '2026-09-28'), asig(951, 'diagnostico', 2)] }));
+    expect(etapaDe(a, 'diagnostico').puestos.map((p) => [p.puesto, p.finPlanificado, p.finEstimado, p.pasadoDeFecha])).toEqual([
+      [1, '2026-10-01', '2026-10-07', true],
+      [2, '2026-10-09', '2026-10-09', false],
+      [3, null, null, false],
+    ]);
+  });
+});
+
+describe('ejeAgenda: el tramo que pinta el calendario, con sus festivos y cierres', () => {
+  it('desde hace tres días hábiles hasta cuatro semanas después de hoy, con los festivos del tramo', () => {
+    const eje = ejeAgenda(HOY, []);
+    // Martes 06/10: hábiles hacia atrás, lun 5, vie 2 y jue 1.
+    expect(eje).toMatchObject({ desde: '2026-10-01', hasta: '2026-11-03', cierres: [] });
+    expect(eje.festivos).toContain('2026-10-12');
+    expect(eje.festivos.every((f) => f >= eje.desde && f <= eje.hasta)).toBe(true);
+    expect([...eje.festivos].sort()).toEqual(eje.festivos);
+  });
+
+  it('un cierre de empresa no cuenta como hábil al retroceder, y sólo salen los cierres del tramo', () => {
+    const eje = ejeAgenda(HOY, ['2026-01-02', '2026-10-05', '2026-10-20', '2027-01-04']);
+    expect(eje.desde).toBe('2026-09-30');
+    expect(eje.cierres).toEqual(['2026-10-05', '2026-10-20']);
+  });
+
+  it('en fin de semana retrocede igual: tres días hábiles antes del sábado', () => {
+    expect(ejeAgenda('2026-10-10', []).desde).toBe('2026-10-07');
   });
 });
