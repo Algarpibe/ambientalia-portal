@@ -718,6 +718,9 @@ describe('estados de Desk y su rol', () => {
       )
     ).rows;
 
+  /** La categoría en la agenda de un estado que nadie ha clasificado: la de la propuesta (o ninguna), sin firma. */
+  const propuesta = (categoria: string | null) => ({ categoria, etapa: null, categoriaPor: null, categoriaEn: null });
+
   beforeEach(async () => {
     await resembrarPlazos();
   });
@@ -733,9 +736,9 @@ describe('estados de Desk y su rol', () => {
     await ticket(5004, 'Finalizado', 'Closed');
     await ticket(5005, 'Finalizado', 'Closed');
     expect(await repo.listarEstadosDesk(db)).toEqual([
-      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 2, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
-      { clave: 'por facturar', etiqueta: 'Por Facturar', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
-      { clave: 'finalizado', etiqueta: 'Finalizado', tipoDesk: 'Closed', ticketsAbiertos: 0, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 2, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null, ...propuesta('entrada') },
+      { clave: 'por facturar', etiqueta: 'Por Facturar', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null, ...propuesta('fin') },
+      { clave: 'finalizado', etiqueta: 'Finalizado', tipoDesk: 'Closed', ticketsAbiertos: 0, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null, ...propuesta('fin') },
     ]);
     // Listar no escribe: sólo hay fila para lo que alguien ha tocado.
     expect(await filas()).toEqual([]);
@@ -756,7 +759,7 @@ describe('estados de Desk y su rol', () => {
     await ticket(5020, '   ');
     await ticket(5021, 'Nuevo', null);
     expect(await repo.listarEstadosDesk(db)).toEqual([
-      { clave: 'nuevo', etiqueta: 'Nuevo', tipoDesk: null, ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      { clave: 'nuevo', etiqueta: 'Nuevo', tipoDesk: null, ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null, ...propuesta(null) },
     ]);
   });
 
@@ -804,7 +807,7 @@ describe('estados de Desk y su rol', () => {
     await ticket(5040, 'Ingresado');
     await marcar('Notificación cliente', 'standby');
     expect(await repo.listarEstadosDesk(db)).toEqual([
-      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null },
+      { clave: 'ingresado', etiqueta: 'Ingresado', tipoDesk: 'Open', ticketsAbiertos: 1, rol: 'cuenta', actualizadoPor: null, actualizadoEn: null, ...propuesta('entrada') },
       {
         clave: 'notificacion cliente',
         etiqueta: 'Notificación cliente',
@@ -813,6 +816,8 @@ describe('estados de Desk y su rol', () => {
         rol: 'standby',
         actualizadoPor: actor.email,
         actualizadoEn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}/),
+        // Guardar el rol no guarda categoría: sigue valiendo la de la propuesta, sin firma.
+        ...propuesta('standby'),
       },
     ]);
     // Cuando un ticket llega a ese estado, coge el tipo de Desk y el rol ya elegido.

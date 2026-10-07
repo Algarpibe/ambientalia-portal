@@ -728,7 +728,7 @@ describe('bloque «Estados de Desk» de Configuración', () => {
   });
 
   it('nota del último cambio: qué rol se eligió, quién y cuándo, o que nadie lo ha tocado', () => {
-    const e: EstadoDesk = { clave: 'servicio externo', etiqueta: 'Servicio externo', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'standby', actualizadoPor: 'st@ambientalia.com.co', actualizadoEn: '2026-10-06 09:15:00.123456-05' };
+    const e: EstadoDesk = { clave: 'servicio externo', etiqueta: 'Servicio externo', tipoDesk: 'On Hold', ticketsAbiertos: 1, rol: 'standby', actualizadoPor: 'st@ambientalia.com.co', actualizadoEn: '2026-10-06 09:15:00.123456-05', categoria: 'standby', etapa: null, categoriaPor: null, categoriaEn: null };
     expect(notaEstadoDesk(e)).toBe('«Standby», elegido por st@ambientalia.com.co el 06/10/2026. Reloj en pausa: a la espera del cliente o de un servicio externo.');
     expect(notaEstadoDesk({ ...e, rol: 'terminado' })).toBe('«Trabajo terminado», elegido por st@ambientalia.com.co el 06/10/2026. Reloj parado: el trabajo técnico está hecho.');
     expect(notaEstadoDesk({ ...e, rol: 'cuenta' })).toBe('«Cuenta», elegido por st@ambientalia.com.co el 06/10/2026. El tiempo en este estado cuenta para el plazo.');
