@@ -66,8 +66,33 @@ describe('053_trazabilidad_agenda_flujo.sql', () => {
     expect(SQL).not.toMatch(/\bREFERENCES\b/i);
   });
 
-  it('las dos están apuntadas en MIGRATIONS, detrás de la 051, y la 053 es la última', () => {
+  it('las dos están apuntadas en MIGRATIONS, detrás de la 051', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'051_trazabilidad_agenda_config\.sql',\s*'052_trazabilidad_agenda_asignaciones\.sql',\s*'053_trazabilidad_agenda_flujo\.sql'\]/);
+    expect(db).toMatch(/'051_trazabilidad_agenda_config\.sql',\s*'052_trazabilidad_agenda_asignaciones\.sql',\s*'053_trazabilidad_agenda_flujo\.sql'/);
+  });
+});
+
+describe('054_trazabilidad_agenda_historial.sql', () => {
+  const SQL = leer('054_trazabilidad_agenda_historial.sql');
+  const { sinComentarios, sentencias } = partes(SQL);
+
+  it('sólo crea con IF NOT EXISTS: ni semilla ni copia del historial de «Servicios»', () => {
+    expect(sentencias).toHaveLength(4);
+    for (const s of sentencias) expect(s).toMatch(/^CREATE (SCHEMA|TABLE|UNIQUE INDEX|INDEX) IF NOT EXISTS /);
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|SELECT)\b/i);
+    expect(sinComentarios).not.toMatch(/tmc_estados_historial/);
+    expect(SQL).not.toMatch(/\bdesk\./);
+    expect(SQL).not.toMatch(/\bREFERENCES\b/i);
+  });
+
+  it('como mucho un tramo abierto por ticket, con las mismas columnas que la 047', () => {
+    expect(sinComentarios).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS tmc_agenda_historial_abierto_uq ON portal\.tmc_agenda_historial \(numero\) WHERE hasta IS NULL/);
+    const columnas = (sql: string) => [...sql.replace(/--.*$/gm, '').match(/CREATE TABLE[^(]*\(([\s\S]*?)\n\);/)![1].matchAll(/^\s+([a-z_]+)\s+([A-Z]+)/gm)].map((m) => `${m[1]} ${m[2]}`);
+    expect(columnas(SQL)).toEqual(columnas(leer('047_trazabilidad_estados_historial.sql')));
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 053, y es la última', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'053_trazabilidad_agenda_flujo\.sql',\s*'054_trazabilidad_agenda_historial\.sql'\]/);
   });
 });

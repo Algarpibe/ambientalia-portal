@@ -96,6 +96,11 @@ export interface EstadoFuente {
 export interface FuenteAgenda {
   /** Tickets sin cerrar, por número. */
   ticketsAbiertos(): Promise<TicketTaller[]>;
+  /**
+   * Los mismos tickets y QUIÉN los ha dado en esta llamada. Para quien no puede confundir «la principal
+   * dice que no hay ninguno abierto» con «la principal no contestó»: una lista vacía no lo distingue.
+   */
+  abiertosConOrigen(): Promise<{ fuente: NombreFuente; tickets: TicketTaller[] }>;
   /** Cierres de empresa del tramo (AAAA-MM-DD, ambos incluidos). Vacío en respaldo: la réplica no los tiene (D3). */
   cierresEmpresa(desde: string, hasta: string): Promise<string[]>;
   estadoFuente(): Promise<EstadoFuente>;
@@ -202,13 +207,18 @@ export function crearFuenteAgenda({ hub, desk2, ahora = Date.now }: DepsFuente):
     return { valor: await deRespaldo(), fuente: 'respaldo', motivo };
   }
 
+  async function abiertosConOrigen() {
+    const { valor, fuente } = await leer(
+      async (db) => (await leerTicketsDesk2(db)).map((f) => normalizarTicket(f, 'principal')),
+      async () => (await leerTicketsReplica(hub)).map((f) => normalizarTicket(f, 'respaldo')),
+    );
+    return { fuente, tickets: valor };
+  }
+
   return {
+    abiertosConOrigen,
     async ticketsAbiertos() {
-      const { valor } = await leer(
-        async (db) => (await leerTicketsDesk2(db)).map((f) => normalizarTicket(f, 'principal')),
-        async () => (await leerTicketsReplica(hub)).map((f) => normalizarTicket(f, 'respaldo')),
-      );
-      return valor;
+      return (await abiertosConOrigen()).tickets;
     },
 
     async cierresEmpresa(desde, hasta) {

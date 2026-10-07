@@ -1,17 +1,18 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 053). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 054). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
 import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
-import type { FuenteAgenda } from './fuente.js';
+import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import {
   asignarClaves,
   asuntoSinCodigo,
   categoriaCoherente,
+  categoriaDeEstado,
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
@@ -770,7 +771,8 @@ const CIERRES_ADELANTE_DIAS = 365;
  * Todo lo que necesita `proyectarAgenda`, reunido: los abiertos, el estado y
  * los cierres de la fuente; las categorías, los puestos y las duraciones; el
  * tipo puesto a mano; las asignaciones vigentes; quién vuelve de standby según
- * el historial del portal; y el flujo marcado a mano, que sólo vale para el
+ * el historial PROPIO de la agenda (tmc_agenda_historial, el de la fuente
+ * principal; no el de «Servicios»); y el flujo marcado a mano, que sólo vale para el
  * ticket cuya fuente no trae clasificación (D11). Sólo lee.
  */
 export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: string): Promise<EntradaAgenda> {
@@ -786,7 +788,7 @@ export async function leerEntradaAgenda(db: Db, fuente: FuenteAgenda, hoy: strin
   ]);
   const historial = await db.query(
     `SELECT numero, clave, (extract(epoch FROM desde) * 1000)::float8 AS desde_ms, (extract(epoch FROM hasta) * 1000)::float8 AS hasta_ms
-       FROM portal.tmc_estados_historial WHERE numero = ANY($1::int[])`,
+       FROM portal.tmc_agenda_historial WHERE numero = ANY($1::int[])`,
     [tickets.map((t) => t.numero)],
   );
   const tramos = new Map<number, TramoHistorial[]>();
@@ -958,6 +960,84 @@ export async function marcarFlujo(db: Db, fuente: FuenteAgenda, numero: number, 
        flujo = EXCLUDED.flujo, actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [numero, flujo, actor.userId, actor.email],
   );
+}
+
+/**
+ * La pasada de la AGENDA: apunta en portal.tmc_agenda_historial los cambios de
+ * estado que da la FUENTE PRINCIPAL y, en la misma transacción y con el mismo
+ * bloqueo, cierra solas las asignaciones cuyo ticket ya no está en la etapa
+ * de su puesto (pasó a standby, a fin de taller, a otra etapa o a un estado
+ * sin categoría, o ya no viene entre los abiertos). Cambiar de estado dentro
+ * de la etapa no cierra nada.
+ *
+ * Es otra tabla, otra base y OTRO bloqueo que `registrarEstados` (abajo), que
+ * sigue apuntando el historial de «Servicios» desde la réplica: ninguna de las
+ * dos espera a la otra, y si la principal falla sólo se salta ésta.
+ *
+ * En respaldo —sin `DESK2_DB_URL`, o con la principal sin contestar— NO
+ * escribe nada: la réplica puede discrepar, y su lectura no significa que los
+ * tickets de la principal se hayan cerrado. Por eso se pregunta quién dio la
+ * lista (`abiertosConOrigen`) en vez de mirar si viene vacía. La fuente se lee
+ * ya con el bloqueo cogido: así dos pasadas a la vez no pueden apuntar una
+ * lectura más vieja encima de una más nueva.
+ *
+ * Los tramos siguen las reglas de `registrarEstados`: sin tramo abierto → uno
+ * nuevo como primera observación (`desde_real` FALSE; es lo que hace la
+ * primera pasada con todos, sin inventar cambios); estado distinto por clave →
+ * cierra y abre en el mismo instante; ya no abierto → cierra. Ese mismo
+ * instante es el `hasta` de las asignaciones que cierra (`cierre = 'estado'`).
+ */
+export async function registrarEstadosAgenda(db: Pool, fuente: FuenteAgenda): Promise<{ fuente: NombreFuente; abiertos: number; cerrados: number; asignacionesCerradas: number }> {
+  return withTransaction(db, async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_agenda_historial'))`);
+    const leido = await fuente.abiertosConOrigen();
+    if (leido.fuente !== 'principal') return { fuente: leido.fuente, abiertos: 0, cerrados: 0, asignacionesCerradas: 0 };
+    const instante: string = ((await c.query(`SELECT clock_timestamp()::text AS ahora`)).rows[0] as Row).ahora;
+    const ahora = new Map<number, string>(leido.tickets.filter((t) => t.numero > 0).map((t) => [t.numero, t.estado]));
+    const [abiertos, vigentes, categorias] = [
+      await c.query(`SELECT id::text AS id, numero, clave FROM portal.tmc_agenda_historial WHERE hasta IS NULL`),
+      await c.query(`SELECT id::text AS id, numero, etapa FROM portal.tmc_agenda_asignaciones WHERE hasta IS NULL`),
+      await leerCategoriasEstados(c),
+    ];
+
+    const cerrar: string[] = [];
+    const enSuEstado = new Set<number>();
+    const cambian = new Set<number>();
+    for (const r of abiertos.rows as Row[]) {
+      const numero = Number(r.numero);
+      const estado = ahora.get(numero);
+      if (estado !== undefined && claveEstadoDesk(estado) === r.clave) enSuEstado.add(numero);
+      else {
+        cerrar.push(r.id);
+        if (estado !== undefined) cambian.add(numero);
+      }
+    }
+    const abrir = [...ahora].filter(([numero]) => !enSuEstado.has(numero));
+    const fueraDeEtapa = (vigentes.rows as Row[])
+      .filter((r) => {
+        const estado = ahora.get(Number(r.numero));
+        return estado === undefined || categoriaDeEstado(estado, categorias)?.etapa !== r.etapa;
+      })
+      .map((r) => r.id as string);
+
+    const afectadas = async (sql: string, params: unknown[]) => (await c.query(sql, params)).rowCount ?? 0;
+    const cerrados = cerrar.length === 0 ? 0 : await afectadas(`UPDATE portal.tmc_agenda_historial SET hasta = GREATEST($2::timestamptz, desde) WHERE id = ANY($1::bigint[]) AND hasta IS NULL`, [cerrar, instante]);
+    const nuevos =
+      abrir.length === 0
+        ? 0
+        : await afectadas(
+            `INSERT INTO portal.tmc_agenda_historial (numero, clave, etiqueta, desde, hasta, desde_real)
+             SELECT x.numero, x.clave, x.etiqueta, $5::timestamptz, NULL, x.desde_real
+               FROM unnest($1::int[], $2::text[], $3::text[], $4::boolean[]) AS x(numero, clave, etiqueta, desde_real)
+             ON CONFLICT (numero) WHERE hasta IS NULL DO NOTHING`,
+            [abrir.map(([numero]) => numero), abrir.map(([, e]) => claveEstadoDesk(e)), abrir.map(([, e]) => etiquetaEstadoDesk(e)), abrir.map(([numero]) => cambian.has(numero)), instante],
+          );
+    const asignacionesCerradas =
+      fueraDeEtapa.length === 0
+        ? 0
+        : await afectadas(`UPDATE portal.tmc_agenda_asignaciones SET hasta = GREATEST($2::timestamptz, desde), cierre = 'estado' WHERE id = ANY($1::bigint[]) AND hasta IS NULL`, [fueraDeEtapa, instante]);
+    return { fuente: leido.fuente, abiertos: nuevos, cerrados, asignacionesCerradas };
+  });
 }
 
 /**

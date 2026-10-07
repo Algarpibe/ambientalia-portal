@@ -102,7 +102,7 @@ afterAll(async () => {
 // Cada prueba empieza como una base recién migrada, con la configuración de partida (3 / 4 / 2 puestos) y sin tickets.
 beforeEach(async () => {
   await hub.query(
-    `TRUNCATE desk.tickets, portal.tmc_agenda_asignaciones, portal.tmc_agenda_flujo, portal.tmc_estados_historial, portal.tmc_servicios_tipo,
+    `TRUNCATE desk.tickets, portal.tmc_agenda_asignaciones, portal.tmc_agenda_flujo, portal.tmc_agenda_historial, portal.tmc_servicios_tipo,
               portal.tmc_estados_desk, portal.tmc_agenda_etapas, portal.tmc_agenda_duraciones RESTART IDENTITY`,
   );
   await hub.query(SQL_050);
@@ -218,7 +218,7 @@ describe('asignar', () => {
   it('un ticket con puesto no coge otro, tampoco si su asignación quedó atrás al cambiar de etapa: hay que liberarla', async () => {
     await repo.asignar(hub, principal(), { numero: 2001, etapa: 'diagnostico', puesto: 1 }, actor, HOY);
     await expect(repo.asignar(hub, principal(), { numero: 2001, etapa: 'diagnostico', puesto: 2 }, actor, HOY)).rejects.toEqual(error(409, { code: 'ticket_con_puesto' }));
-    // El ticket pasa a Proceso; su asignación de Diagnóstico sigue vigente (cerrarla sola es del lote 4b).
+    // El ticket pasa a Proceso; su asignación de Diagnóstico sigue vigente hasta la siguiente pasada de la agenda.
     await admin2.query(`UPDATE desk.tickets SET status = 'En Proceso' WHERE number = 2001`);
     await expect(repo.asignar(hub, principal(), { numero: 2001, etapa: 'proceso', puesto: 1, motivo: 'cambió de etapa' }, actor, HOY)).rejects.toEqual(error(409, { code: 'ticket_con_puesto' }));
     await repo.liberar(hub, { numero: 2001, motivo: 'pasó a Proceso' }, actor);
@@ -390,9 +390,9 @@ describe('leerAgenda: todo lo que necesita la proyección, reunido', () => {
     // El 2001 tiene puesto; una asignación ya cerrada del 2004 no cuenta.
     await repo.asignar(hub, principal(), { numero: 2001, etapa: 'diagnostico', puesto: 1 }, actor, HOY);
     await insertar(2004, 'diagnostico', 2, { hasta: '2030-01-01T00:00:00Z', cierre: 'estado' });
-    // El historial del portal vio al 2003 volver de «Notificación cliente» a Diagnóstico.
+    // El historial de la agenda vio al 2003 volver de «Notificación cliente» a Diagnóstico.
     await hub.query(
-      `INSERT INTO portal.tmc_estados_historial (numero, clave, etiqueta, desde, hasta, desde_real) VALUES
+      `INSERT INTO portal.tmc_agenda_historial (numero, clave, etiqueta, desde, hasta, desde_real) VALUES
          (2003, 'notificacion cliente', 'Notificación cliente', '2026-10-01T15:00:00Z', '2026-10-05T15:00:00Z', FALSE),
          (2003, 'notificado', 'Notificado', '2026-10-05T15:00:00Z', NULL, TRUE),
          (2002, 'rev./diagnostico', 'Rev./Diagnostico', '2026-10-01T15:00:00Z', NULL, FALSE)`,

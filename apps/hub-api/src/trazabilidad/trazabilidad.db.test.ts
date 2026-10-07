@@ -356,6 +356,7 @@ describe('contacto de cada equipo', () => {
         'tmc_agenda_duraciones',
         'tmc_agenda_etapas',
         'tmc_agenda_flujo',
+        'tmc_agenda_historial',
         'tmc_contactos',
         'tmc_equipos',
         'tmc_estados_desk',
