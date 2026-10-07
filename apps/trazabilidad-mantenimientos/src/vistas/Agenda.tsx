@@ -5,6 +5,7 @@ import type { EtapaProyectada, RespuestaAgenda, TicketEnFila } from '../dominio'
 import { REFRESCO_MS, detalleDe, diasEnEstado, encadenadoDe, marcasDeFila, resumenEtapa, rotuloFuente, situacionDe, textoFlujo, textoTransicion, tocaRefrescar, type TonoSaturacion } from '../lib/agendaTaller';
 import { fmtFecha, fmtFechaHora } from '../lib/vistas';
 import { Alert, Button, Card, Drawer, Loading, Tag } from '../ui';
+import { useAccionesAgenda } from './AgendaAcciones';
 import { GanttAgenda, ListaDias } from './AgendaGantt';
 
 /**
@@ -18,6 +19,7 @@ import { GanttAgenda, ListaDias } from './AgendaGantt';
  */
 interface Props {
   onConfigurar: () => void;
+  notificar: (msg: string) => void;
 }
 
 const SATURACION: Record<TonoSaturacion, string> = {
@@ -76,12 +78,14 @@ function useAgenda() {
   return { datos, error, cargando, leida, cargar, poner };
 }
 
-export default function Agenda({ onConfigurar }: Props) {
-  const { datos, error, cargando, leida, cargar } = useAgenda();
+export default function Agenda({ onConfigurar, notificar }: Props) {
+  const { datos, error, cargando, leida, cargar, poner } = useAgenda();
   const [ficha, setFicha] = useState<number | null>(null);
+  const acciones = useAccionesAgenda(datos, poner, notificar);
 
   if (!datos) return error ? <Alert tone="red">{error}</Alert> : <Loading texto="Cargando la agenda del taller…" />;
   const f = datos.estadoFuente;
+  const { deFila } = acciones;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -89,11 +93,15 @@ export default function Agenda({ onConfigurar }: Props) {
           <strong className="font-semibold text-gray-900">Fuente: {rotuloFuente(datos.fuente.fuente)}</strong> · sincronizada {f.ultimaSincronizacion ? fmtFechaHora(f.ultimaSincronizacion) : 'nunca'} · datos de las{' '}
           {fmtFechaHora(new Date(leida).toISOString()).slice(-5)} · {datos.totalAbiertos} tickets abiertos · se actualiza sola cada {REFRESCO_MS / 60_000} minutos
         </p>
-        <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar la agenda">
-          {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {acciones.cabecera}
+          <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar la agenda">
+            {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
+          </Button>
+        </div>
       </div>
       {error && <Alert tone="red">No se pudo actualizar: {error} Se enseña lo último que se leyó.</Alert>}
+      {acciones.error && <Alert tone="red">{acciones.error}</Alert>}
       {datos.avisos.map((a) => (
         <Alert key={a.codigo} tone={a.codigo === 'fuente_respaldo' ? 'blue' : 'amber'}>
           {a.mensaje}
@@ -124,7 +132,7 @@ export default function Agenda({ onConfigurar }: Props) {
 
       <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="hidden min-w-0 sm:block">
-          <GanttAgenda agenda={datos} onTicket={setFicha} />
+          <GanttAgenda agenda={datos} onTicket={setFicha} accionPuesto={acciones.dePuesto} />
         </div>
         <div className="sm:hidden">
           <ListaDias agenda={datos} onTicket={setFicha} />
@@ -132,14 +140,15 @@ export default function Agenda({ onConfigurar }: Props) {
         <Card title="Filas" hint="Quién espera en cada etapa, en su orden, y cuándo se prevé que entre y termine. La fecha de remisión ordena la primera etapa.">
           <div className="flex flex-col gap-5">
             {datos.etapas.map((e) => (
-              <Fila key={e.etapa} agenda={datos} etapa={e} onTicket={setFicha} />
+              <Fila key={e.etapa} agenda={datos} etapa={e} onTicket={setFicha} accion={deFila && ((t) => deFila(e, t))} />
             ))}
           </div>
         </Card>
       </div>
 
       <Carriles agenda={datos} onTicket={setFicha} onConfigurar={onConfigurar} />
-      {ficha !== null && <FichaTicket agenda={datos} numero={ficha} onClose={() => setFicha(null)} />}
+      {ficha !== null && <FichaTicket agenda={datos} numero={ficha} onClose={() => setFicha(null)} acciones={acciones.deFicha(ficha)} />}
+      {acciones.dialogos}
     </div>
   );
 }

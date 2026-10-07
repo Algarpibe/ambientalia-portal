@@ -205,7 +205,7 @@ export default function App() {
 
         {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario importado. */}
         {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
-        {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} />}
+        {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} notificar={notificar} />}
         {tab === 'configuracion' && <Configuracion notificar={notificar} />}
         {/* #roles escrito a mano por quien no es administrador: se le dice, y el servidor tampoco le daría la lista. */}
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}

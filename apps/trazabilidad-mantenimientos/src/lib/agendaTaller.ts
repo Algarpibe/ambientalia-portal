@@ -7,7 +7,7 @@
  * Aquí no se decide nada de la agenda: puestos, filas y fechas previstas
  * llegan ya calculados de GET /trazabilidad/agenda. Sólo se colocan.
  */
-import { diasEntre, type DetalleTicket, type FlujoAgenda, type EtapaAgenda, type EtapaProyectada, type NombreFuente, type PuestoAgenda, type RespuestaAgenda, type TicketEnFila } from '../dominio';
+import { diasEntre, type DetalleTicket, type FlujoAgenda, type EtapaAgenda, type EtapaProyectada, type ItemReparto, type NombreFuente, type PuestoAgenda, type RespuestaAgenda, type TicketEnFila } from '../dominio';
 import { columna, diasDelEje, type Eje } from './servicios';
 import { fmtFecha, fmtFechaHora } from './vistas';
 
@@ -233,6 +233,42 @@ export function diasEnEstado(d: DetalleTicket | null, hoy: string): string {
   const n = Math.max(0, diasEntre(dia, hoy));
   return `${u.origen === 'primera_observacion' ? 'al menos ' : ''}${n} día${n === 1 ? '' : 's'}`;
 }
+
+// ── Acciones (lote 7b): a quién se le puede dar puesto y el reparto inicial ──
+
+/** Los puestos de una etapa que pueden recibir a alguien: sin ocupante y no «a extinguir». */
+export const puestosLibres = (e: EtapaProyectada): number[] => e.puestos.filter((p) => !p.ocupante && !p.aExtinguir).map((p) => p.puesto);
+
+/** Los de la fila a los que se les puede asignar puesto (ya están en un estado de la etapa), en su orden: el primero es el sugerido. */
+export const asignables = (e: EtapaProyectada): TicketEnFila[] => e.fila.filter((t) => t.situacion === 'en_etapa');
+
+/** ¿Tiene sentido proponer un reparto? Alguna etapa con puestos libres y gente a la que dárselos. */
+export const hayReparto = (a: Pick<RespuestaAgenda, 'etapas'>): boolean => a.etapas.some((e) => puestosLibres(e).length > 0 && asignables(e).length > 0);
+
+/** Una línea de la propuesta de reparto que se edita: un puesto libre y el ticket que iría a él (null = se deja libre). */
+export interface LineaReparto {
+  etapa: EtapaAgenda;
+  etiqueta: string;
+  puesto: number;
+  numero: number | null;
+}
+
+/** La propuesta del servidor puesta sobre los puestos libres de cada etapa que tiene a quién asignar. */
+export function lineasDeReparto(a: Pick<RespuestaAgenda, 'etapas'>, propuesta: readonly ItemReparto[]): LineaReparto[] {
+  return a.etapas
+    .filter((e) => asignables(e).length > 0)
+    .flatMap((e) => puestosLibres(e).map((puesto) => ({ etapa: e.etapa, etiqueta: e.etiqueta, puesto, numero: propuesta.find((l) => l.etapa === e.etapa && l.puesto === puesto)?.numero ?? null })));
+}
+
+/** Cambia el ticket de un puesto (null = quitarlo). Si el elegido ya iba a otro puesto de la etapa, se intercambian. */
+export function cambiarLinea(lineas: readonly LineaReparto[], etapa: EtapaAgenda, puesto: number, numero: number | null): LineaReparto[] {
+  const antes = lineas.find((l) => l.etapa === etapa && l.puesto === puesto)?.numero ?? null;
+  return lineas.map((l) => (l.etapa !== etapa ? l : l.puesto === puesto ? { ...l, numero } : numero !== null && l.numero === numero ? { ...l, numero: antes } : l));
+}
+
+/** Lo que se envía al confirmar: las líneas con ticket. */
+export const cuerpoReparto = (lineas: readonly LineaReparto[]): { numero: number; etapa: EtapaAgenda; puesto: number }[] =>
+  lineas.flatMap((l) => (l.numero === null ? [] : [{ numero: l.numero, etapa: l.etapa, puesto: l.puesto }]));
 
 // ── Lista por días (teléfono) ───────────────────────────────────────────────
 

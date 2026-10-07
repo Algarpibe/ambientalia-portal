@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import type { EtapaAgenda, EtapaProyectada, PuestoAgenda, RespuestaAgenda, TicketEnFila } from '../dominio';
 import {
   REFRESCO_MS,
+  asignables,
   barraOcupante,
+  cambiarLinea,
+  cuerpoReparto,
+  hayReparto,
+  lineasDeReparto,
+  puestosLibres,
   barraPrevista,
   detalleDe,
   diasAgenda,
@@ -258,6 +264,47 @@ describe('lista por días (teléfono)', () => {
 
   it('sin nada que contar, vacía', () => {
     expect(listaPorDias(agenda([etapa('diagnostico', 'Diagnóstico', { puestos: [puesto(1)] })]))).toEqual([]);
+  });
+});
+
+describe('acciones (lote 7b): puestos libres, a quién se puede asignar y la propuesta de reparto editable', () => {
+  const diag = etapa('diagnostico', 'Diagnóstico', {
+    puestos: [ocupado(1, 901, '2026-10-05', '2026-10-08'), puesto(2), puesto(3), puesto(4, { aExtinguir: true })],
+    fila: [enFila(910, 1, { situacion: 'entrada' }), enFila(911, 2), enFila(912, 3), enFila(913, 4)],
+  });
+  const proc = etapa('proceso', 'Proceso', { puestos: [puesto(1)], fila: [] });
+  const a = agenda([diag, proc]);
+  const propuesta = [
+    { numero: 911, etapa: 'diagnostico' as const, puesto: 2, desde: HOY },
+    { numero: 912, etapa: 'diagnostico' as const, puesto: 3, desde: HOY },
+  ];
+
+  it('libres: sin ocupante y no «a extinguir»; asignables: los de la fila que ya están en la etapa, en su orden', () => {
+    expect(puestosLibres(diag)).toEqual([2, 3]);
+    expect(asignables(diag).map((t) => t.numero)).toEqual([911, 912, 913]);
+    expect(hayReparto(a)).toBe(true);
+    expect(hayReparto(agenda([proc]))).toBe(false);
+    expect(hayReparto(agenda([etapa('diagnostico', 'Diagnóstico', { puestos: [ocupado(1, 901, HOY, '2026-10-09')], fila: [enFila(911, 1)] })]))).toBe(false);
+  });
+
+  it('una línea por puesto libre de cada etapa con gente que asignar, con lo que propone el servidor', () => {
+    expect(lineasDeReparto(a, propuesta)).toEqual([
+      { etapa: 'diagnostico', etiqueta: 'Diagnóstico', puesto: 2, numero: 911 },
+      { etapa: 'diagnostico', etiqueta: 'Diagnóstico', puesto: 3, numero: 912 },
+    ]);
+  });
+
+  it('quitar un ticket deja libre su puesto; cambiarlo por otro de la fila lo pone; elegir uno ya propuesto los intercambia', () => {
+    const lineas = lineasDeReparto(a, propuesta);
+    const numeros = (l: typeof lineas) => l.map((x) => x.numero);
+    expect(numeros(cambiarLinea(lineas, 'diagnostico', 2, null))).toEqual([null, 912]);
+    expect(numeros(cambiarLinea(lineas, 'diagnostico', 2, 913))).toEqual([913, 912]);
+    expect(numeros(cambiarLinea(lineas, 'diagnostico', 2, 912))).toEqual([912, 911]);
+    expect(numeros(lineas)).toEqual([911, 912]);
+  });
+
+  it('lo que se envía: sólo las líneas con ticket, sin la fecha', () => {
+    expect(cuerpoReparto(cambiarLinea(lineasDeReparto(a, propuesta), 'diagnostico', 3, null))).toEqual([{ numero: 911, etapa: 'diagnostico', puesto: 2 }]);
   });
 });
 

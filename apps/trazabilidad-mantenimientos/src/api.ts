@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, MiRol, PlazoServicio, RespuestaAgenda, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -66,6 +66,15 @@ export const api = {
     request<ConfiguracionAgenda>('PUT', '/agenda/configuracion/estados', { estado, categoria, etapa }),
   /** La agenda del taller a hoy: puestos, filas, listas aparte, avisos, la ficha de cada ticket y el eje del calendario. Lanza antes la pasada de la agenda. */
   agenda: () => request<RespuestaAgenda>('GET', '/agenda'),
+  // Las cuatro acciones de la agenda devuelven la agenda ya leída otra vez: no hace falta volver a pedirla.
+  /** La propuesta de reparto inicial (pide `agenda.reparto`); no escribe. */
+  propuestaReparto: () => request<{ hoy: string; reparto: ItemReparto[] }>('GET', '/agenda/reparto'),
+  confirmarReparto: (reparto: { numero: number; etapa: EtapaAgenda; puesto: number }[]) => request<RespuestaAgenda>('POST', '/agenda/reparto', { reparto }),
+  /** `motivo` es obligatorio si el ticket no es el primero de la fila que ya está en la etapa. */
+  asignarPuesto: (numero: number, etapa: EtapaAgenda, puesto: number, motivo?: string) => request<RespuestaAgenda>('POST', '/agenda/asignaciones', { numero, etapa, puesto, motivo }),
+  liberarPuesto: (numero: number, motivo: string) => request<RespuestaAgenda>('POST', '/agenda/liberar', { numero, motivo }),
+  /** `null` quita la marca. Sólo vale para el ticket cuya fuente no trae clasificación. */
+  marcarFlujo: (numero: number, flujo: FlujoAgenda | null) => request<RespuestaAgenda>('PUT', `/agenda/flujo/${numero}`, { flujo }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),
