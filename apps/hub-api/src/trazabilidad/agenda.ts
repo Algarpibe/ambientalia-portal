@@ -343,7 +343,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
     };
 
     // Asignaciones vigentes de la etapa. Manda el estado del ticket: si la fuente lo trae y ya no está en
-    // esta etapa, la asignación no cuenta (cerrarla sola es del lote 4b). Si la fuente no lo trae, conserva el puesto.
+    // esta etapa, la asignación no cuenta (la cerrará la siguiente pasada de la agenda, `registrarEstadosAgenda`). Si la fuente no lo trae, conserva el puesto.
     const ocupados = new Map<number, AsignacionAgenda>();
     for (const a of e.asignaciones) {
       if (a.etapa !== etapa || ocupados.has(a.puesto) || conPuesto.has(a.numero)) continue;
@@ -446,7 +446,7 @@ export function proyectarAgenda(e: EntradaAgenda): AgendaTaller {
 
 // ── Lote 4: la vuelta de standby y el reparto inicial ───────────────────────
 
-/** Un tramo del historial de un ticket (portal.tmc_estados_historial): estado normalizado e instantes en milisegundos. */
+/** Un tramo del historial de la agenda (portal.tmc_agenda_historial): estado normalizado e instantes en milisegundos. */
 export interface TramoHistorial {
   clave: string;
   desde: number;
