@@ -186,28 +186,47 @@ La pantalla muestra siempre qué fuente está activa y qué no puede dar.
 
 ### B.4 El adaptador
 
-Una sola interfaz y dos implementaciones. Todo lo demás (categorías, puestos, duraciones, asignaciones, proyección) trabaja sobre `TicketTaller` y no sabe de dónde viene.
+Una sola interfaz y dos orígenes. Todo lo demás (categorías, puestos, duraciones, asignaciones, proyección) trabaja sobre `TicketTaller` y no sabe de dónde viene.
+
+**Construido en el lote 1** (`apps/hub-api/src/trazabilidad/fuente.ts`, con el SQL en `fuente-desk2.ts` y `fuente-replica.ts` y la conexión en `apps/hub-api/src/db-desk2.ts`). La interfaz quedó así:
 
 ```ts
-interface FuenteTaller {
-  nombre: 'desk2' | 'replica';
+interface FuenteAgenda {
   ticketsAbiertos(): Promise<TicketTaller[]>;
-  cierres(desde: string, hasta: string): Promise<string[]>;     // [] con la réplica
-  ultimaSincronizacion(): Promise<number | null>;               // máximo de synced_at de la base (D13)
-  capacidades: { prioridad: boolean; cierres: boolean; llegadaExacta: boolean; flujoPorClasificacion: boolean };
+  cierresEmpresa(desde: string, hasta: string): Promise<string[]>;   // [] con la réplica
+  estadoFuente(): Promise<EstadoFuente>;
 }
 interface TicketTaller {
   numero: number;
-  estado: string;
-  flujo: 'servicio' | 'equipo_nuevo';
-  flujoOrigen: 'clasificacion' | 'deducido' | 'manual';
-  prioridad: number;                                             // 0 = sin prioridad fijada
-  llegada: { instante: number | null; exacta: boolean };         // entrada en el estado actual
-  remisionEntrada: string | null;                                // fecha_remision_entrada, AAAA-MM-DD (D12)
+  estado: string;                    // tal cual; se casa por claveEstadoDesk
+  tipoEstado: string | null;         // status_type
+  clasificacion: string | null;      // classification: de aquí sale el flujo (D11)
+  tipoServicio: string | null;
+  remisionEntrada: string | null;    // fecha_remision_entrada, AAAA-MM-DD (D12)
+  fechaCreacion: string | null;      // fecha_creacion_ticket o el día en Colombia de created_time
+  prioridad: string | null;          // sólo la fijada en Desk 2.0 (D1); null si no hay o en respaldo
+  llegadaEstado: number | null;      // ms de la última transición al estado de ahora; null si no consta
+  fuente: 'principal' | 'respaldo';
 }
-const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;          // D13: una hora
-// elegirFuente(): desk2 si hay DESK2_DB_URL y responde; si no, replica. Devuelve además el motivo del respaldo.
+interface EstadoFuente {
+  fuente: 'principal' | 'respaldo';
+  motivo: 'sin_variable' | 'error_conexion' | 'timeout' | 'error_consulta' | null;
+  mensaje: string | null;
+  ultimaSincronizacion: string | null;   // máximo de synced_at de la base usada (D13)
+  sincronizacionParada: boolean;
+  umbralSincronizacionMs: number;
+  ultimoFalloPrincipal: { motivo: string; en: string } | null;
+}
+const UMBRAL_SINCRONIZACION_PARADA_MS = 60 * 60 * 1000;   // D13: una hora
 ```
+
+Diferencias con el boceto de la fase de análisis:
+
+- **No hay `elegirFuente()` ni un objeto por fuente.** La caída es por llamada: cada lectura prueba la principal una vez y, si falla, lee la réplica en esa misma llamada. Cada ticket dice de qué fuente vino y `estadoFuente()` dice cuál contesta y por qué.
+- **Las «capacidades» se deducen de la fuente:** con `respaldo` no hay prioridad, cierres ni llegada exacta.
+- **El adaptador entrega datos, no reglas.** Da `clasificacion`, `prioridad` y `llegadaEstado` tal como están; el flujo (D11, con su deducción en respaldo y la marca a mano), el rango de la prioridad, el tipo puesto a mano y la llegada aproximada del historial del portal se resuelven en los lotes 2 a 4, que son los que tienen esas reglas y tablas. Para deducir el flujo en respaldo habrá que añadir a la lectura de la réplica el asunto y el código de servicio.
+- **La consulta de `estadoFuente()` es también una sonda:** nombra todo lo que leen las demás, para que un permiso que falte en una sola tabla no deje el rótulo en «Desk 2.0» con tickets de la réplica.
+- **Diagnóstico:** `GET /api/trazabilidad/agenda/fuente` devuelve `estadoFuente()` y el recuento de abiertos por estado.
 
 ### B.5 El orden de llegada
 

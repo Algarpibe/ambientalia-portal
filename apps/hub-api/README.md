@@ -30,6 +30,14 @@ Auth = `Authorization: Bearer <jwt>` (el JWT se obtiene en `/api/login`).
   - `JWT_SECRET=<secreto largo aleatorio>` — firma/verifica los JWT.
   - `AUTH_USERS=email:hashBcrypt,...` — usuarios permitidos (hashes bcrypt).
   - `JWT_TTL` — opcional, vida del token (por defecto `8h`).
+  - `DESK2_DB_URL=postgres://portal_agenda_reader:<PASSWORD>@<host interno de desk-db>:5432/desk`
+    — opcional. Enciende la fuente principal de la agenda del taller de
+    Trazabilidad: los tickets se leen de la base `desk` de Desk 2.0, por una
+    conexión de sólo lectura. Si falta, o si está mal o esa base no contesta,
+    hub-api arranca igual y la agenda lee la réplica de siempre (`desk.tickets`
+    de zoho-hub); `GET /api/trazabilidad/agenda/fuente` dice cuál se usa y por
+    qué. Es de runtime (basta reiniciar el servicio) y su valor no se escribe en
+    ningún log.
   - `PORT` — injected by EasyPanel; the app listens on it.
 - **Domain:** assign a public domain to the service, pointing to the container
   port EasyPanel maps (the app uses `$PORT`).

@@ -34,6 +34,8 @@ se registra en la app y sobrevive a las reimportaciones.
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`; cada escritura, además, con `escritura(permiso, …)`) | `apps/hub-api/src/trazabilidad/router.ts` |
 | Roles y matriz de permisos (puro, sin imports; **único sitio** de la matriz; lo usan servidor y UI) | `apps/hub-api/src/trazabilidad/roles.ts` |
+| Fuente de la agenda del taller: interfaz, `TicketTaller`, caída al respaldo (sólo servidor, sólo lee) | `apps/hub-api/src/trazabilidad/fuente.ts`; el SQL de cada origen en `fuente-desk2.ts` y `fuente-replica.ts` |
+| Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
 | Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Navegación en dos niveles (grupos y secciones, `seccionDeHash`) y lo que se enseña según el rol (`tiene`, `etiquetaMiRol`, `motivoSinPermiso`) | `src/lib/navegacion.ts` |
@@ -87,6 +89,7 @@ el cuerpo y antes de cualquier consulta de negocio.
 | PUT | `/trazabilidad/plazos` | `{tipo, dias}` (entero 1..365, o vacío = sin plazo). Devuelve `{plazos[]}` ya actualizado. 400 en `tipo` si es un tipo compuesto: su plazo se calcula, no se guarda |
 | GET | `/trazabilidad/estados` | `{estados[]}`: todos los estados que existen en `desk.tickets` (de cualquier ticket, cerrados incluidos) más los ya guardados en `tmc_estados_desk` aunque ningún ticket los tenga. Cada uno: `{clave, etiqueta, tipoDesk, ticketsAbiertos, rol, actualizadoPor, actualizadoEn}`; `rol` es `cuenta` (mientras nadie lo cambie), `standby` o `terminado`; `tipoDesk` es el `status_type` de Desk (`Open` / `On Hold` / `Closed`, o `null`) y sólo orienta. Orden: tipo abierto, en espera, cerrado y sin tipo; dentro, más tickets abiertos primero y después alfabético |
 | PUT | `/trazabilidad/estados` | `{estado, rol}`: elige el rol de un estado y lo firma. Devuelve `{estados[]}` ya actualizado. 400 en `estado` si no es un texto no vacío de 80 caracteres como mucho; 400 en `rol` si no es, tal cual, `cuenta`, `standby` o `terminado` (el `{estado, standby}` de antes ya no vale). Vale cualquier texto de estado: se puede elegir el rol de uno antes de que un ticket lo use. No toca el historial: el cambio vale hacia atrás desde la lectura siguiente |
+| GET | `/trazabilidad/agenda/fuente` | Diagnóstico de la fuente de la agenda (ver «Fuente de la agenda»): `{fuente, motivo, mensaje, ultimaSincronizacion, sincronizacionParada, umbralSincronizacionMs, ultimoFalloPrincipal, abiertos: {total, porEstado: [{estado, tickets}]}}`. `fuente` es `principal` (Desk 2.0) o `respaldo` (la réplica); `motivo`, `null` o `sin_variable` / `error_conexion` / `timeout` / `error_consulta`. Sólo recuentos: ni clientes, ni seriales, ni correos. Si Desk 2.0 no contesta responde 200 igual, con el respaldo |
 
 ## Permisos
 
@@ -445,6 +448,52 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
   (verde / rojo / neutro según el veredicto) y sin tramo de atraso detrás. La leyenda sólo
   enseña lo que hay pintado (`leyendaServicios`).
 
+## Fuente de la agenda
+
+Primer lote de la **agenda del taller** (`docs/trazabilidad-agenda-taller.md`, decisiones D4, D12
+y D13; plan en su sección J). Es sólo la **capa de lectura**: todavía no hay filas, proyección,
+tablas ni pantalla, y «Servicios» y el historial de estados siguen leyendo la réplica como siempre
+(pasar el historial a esta fuente es del lote 4).
+
+- **Dos orígenes, una interfaz** (`crearFuenteAgenda` en `fuente.ts`):
+  - **principal**: la base `desk` de Desk 2.0 (servicio `desk-db`), por `DESK2_DB_URL` y el rol
+    `portal_agenda_reader`. Lee `desk.tickets`, `desk.ticket_transitions` y
+    `public.calendario_cierres`;
+  - **respaldo**: la réplica `desk.tickets` de zoho-hub, la de «Servicios».
+- **`ticketsAbiertos()`** → `TicketTaller[]`, igual venga de donde venga: `numero`, `estado` (tal
+  cual; se casa por `claveEstadoDesk`), `tipoEstado`, `clasificacion`, `tipoServicio`,
+  `remisionEntrada` (`fecha_remision_entrada`), `fechaCreacion` (la de «Servicios»:
+  `fecha_creacion_ticket` o el día en Colombia de `created_time`), `prioridad` (**sólo** la fijada
+  en Desk 2.0, con `prioridad_en_app_at`; el `High` / `Low` de Zoho da `null`), `llegadaEstado`
+  (milisegundos del `performed_at` de la última transición al estado de ahora) y `fuente`. En
+  respaldo, `prioridad` y `llegadaEstado` son siempre `null`, y `clasificacion` y
+  `remisionEntrada` se leen sólo si la réplica trae la columna (`to_jsonb(t)->>…`: si no existe,
+  `null` en vez de error). **Ningún ticket lleva marca «sin confirmar»** (D13).
+- **`cierresEmpresa(desde, hasta)`** → fechas de `public.calendario_cierres`; `[]` en respaldo.
+- **`estadoFuente()`** → cuál contesta y por qué (`motivo`: `sin_variable`, `error_conexion`,
+  `timeout`, `error_consulta`), el máximo de `synced_at` de la base usada y
+  `sincronizacionParada` (más de `UMBRAL_SINCRONIZACION_PARADA_MS`, una hora, o ninguna
+  sincronización). Su consulta es también una **sonda**: nombra todo lo que leen las otras, así
+  que si al rol le falta un permiso el estado cae al respaldo igual que los tickets.
+  `ultimoFalloPrincipal` guarda el último fallo visto por el proceso, aunque ya haya vuelto.
+- **Caída al respaldo, por llamada**: sin la variable se usa siempre la réplica y no es un error.
+  Con ella, cada llamada prueba la principal **una vez**; si falla, esa llamada lee la réplica.
+  No hay reintentos ni memoria de la caída: la llamada siguiente vuelve a probar. Con la base
+  inalcanzable eso cuesta hasta el tope de conexión (3 s) por llamada. Si falla la réplica, eso
+  sí es un 500.
+- **La conexión** (`db-desk2.ts`): pool propio y perezoso (no se comprueba nada al arrancar), 2
+  conexiones como mucho, 3 s para conectar y `statement_timeout` de 5 s. Sólo lectura por partida
+  doble: el rol ya lo trae y cada conexión fija `default_transaction_read_only=on` al conectar.
+- ⚠️ **La URL no sale nunca**: ni en el registro (se enmascara con `enmascararUrl`), ni en un
+  error, ni en una respuesta. Del error de `pg` —que puede llevar host y usuario— sólo se usa el
+  código para elegir el motivo; su mensaje no se escribe ni se devuelve.
+- **Nombres de Desk 2.0**: tablas y columnas están citadas con ruta y línea en la cabecera de
+  `fuente-desk2.ts`. Desk 2.0 es otro repositorio y aquí sólo se lee su base: ninguna migración
+  de hub-api toca nada suyo.
+- **Encenderlo**: variable `DESK2_DB_URL` en el entorno de hub-api (ver
+  `apps/hub-api/README.md`) y reiniciar. `GET /api/trazabilidad/agenda/fuente` debe responder
+  `fuente: "principal"`. Quitar la variable y reiniciar lo apaga.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
@@ -461,6 +510,11 @@ no mira el reloj ni la base. Todo va por **días de calendario de Bogotá** y s�
   (también con llamadas a la vez), «Servicios» de punta a punta con un historial sembrado y `hoy`
   fijo, el contacto de cada equipo (Desk y puesto a mano), el orden del cliente en «Servicios» y
   los roles (la 049 aplicada varias veces sin tocar lo repartido, el `CHECK`, la clave foránea y
-  la lista de la sección «Roles»).
+  la lista de la sección «Roles»). `fuente.db.test.ts` prueba la fuente de la agenda contra una
+  imitación de la base de Desk 2.0 (`asegurarDesk2` en `src/test-db/harness.ts`: otra base del
+  mismo contenedor, con sólo las columnas que se leen y un rol de sólo lectura): el SQL de las
+  dos fuentes, que una escritura por ese pool falla, que el tope de tiempo corta y la caída al
+  respaldo con fallos de verdad. Lo mismo con bases de mentira, en `fuente.test.ts`, y el pool
+  opcional en `src/db-desk2.test.ts`.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.
