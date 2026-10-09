@@ -4,17 +4,19 @@ import { api } from '../api';
 import type { FilaImportada, ResumenImportacion } from '../dominio';
 import { leerLibro } from '../lib/importar';
 import { Alert, Button, Modal } from '../ui';
+import Congelacion from './Congelacion';
 
 interface Props {
   onClose: () => void;
   onHecho: (total: number) => Promise<void>;
+  notificar: (msg: string) => void;
 }
 
 /**
  * Importación en dos pasos: leer el Excel en el navegador y pedir al servidor
  * un simulacro (altas / cambios / retiradas); sólo al confirmar se escribe.
  */
-export default function Importar({ onClose, onHecho }: Props) {
+export default function Importar({ onClose, onHecho, notificar }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [archivo, setArchivo] = useState<string | null>(null);
   const [filas, setFilas] = useState<FilaImportada[] | null>(null);
@@ -116,6 +118,8 @@ export default function Importar({ onClose, onHecho }: Props) {
             Se ignoran {descartadas.length} fila{descartadas.length === 1 ? '' : 's'} de EDM 180 sin serial o sin cliente (fila{descartadas.length === 1 ? '' : 's'} {descartadas.join(', ')}).
           </Alert>
         )}
+        {/* Acción aparte de la importación de arriba: no la usa ni la cambia. */}
+        <Congelacion notificar={notificar} />
       </div>
     </Modal>
   );

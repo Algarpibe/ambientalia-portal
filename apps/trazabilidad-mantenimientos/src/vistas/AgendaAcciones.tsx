@@ -134,7 +134,7 @@ function MarcarFlujo({ valor, ocupado, onCambio }: { valor: FlujoAgenda | ''; oc
   );
 }
 
-function Motivo({ valor, onCambio, ayuda }: { valor: string; onCambio: (v: string) => void; ayuda: string }) {
+export function Motivo({ valor, onCambio, ayuda }: { valor: string; onCambio: (v: string) => void; ayuda: string }) {
   const id = useId();
   return (
     <div className="mt-3">

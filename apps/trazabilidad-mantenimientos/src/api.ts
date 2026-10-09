@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { CategoriaAgenda, ConfiguracionAgenda, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, Celda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FilaImportada, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, ResultadoCongelacion, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -31,6 +31,14 @@ export interface Servicios {
   festivos: string[];
   /** Los tipos de servicio que se pueden elegir a mano para un ticket, en el orden de Configuracion. */
   tipos: TipoServicioOpcion[];
+}
+
+/** Lo que se manda a congelar: la hoja «Trazabilidad» entera, tal como la leyó el navegador, y la huella del fichero. */
+export interface HojaFst022 {
+  archivo: string;
+  sha256: string;
+  hoja: string;
+  matriz: Celda[][];
 }
 
 export const api = {
@@ -75,6 +83,10 @@ export const api = {
   liberarPuesto: (numero: number, motivo: string) => request<RespuestaAgenda>('POST', '/agenda/liberar', { numero, motivo }),
   /** `null` quita la marca. Sólo vale para el ticket cuya fuente no trae clasificación. */
   marcarFlujo: (numero: number, flujo: FlujoAgenda | null) => request<RespuestaAgenda>('PUT', `/agenda/flujo/${numero}`, { flujo }),
+  /** Las congelaciones de la F-ST-022, la más reciente primero: sólo metadatos y recuentos. */
+  congelaciones: () => request<{ congelaciones: CongelacionFst022[] }>('GET', '/fst022/congelaciones'),
+  /** Congela la hoja entera, o lo simula (mismo resumen, sin escribir). Con una vigente: sólo un administrador y, al confirmar, con motivo. */
+  congelar: (hoja: HojaFst022, simular: boolean, motivo?: string) => request<ResultadoCongelacion>('POST', `/fst022/congelaciones${simular ? '?simular=1' : ''}`, { ...hoja, motivo }),
   simularImportacion: (archivo: string, filas: FilaImportada[]) =>
     request<ResumenImportacion>('POST', '/importaciones?simular=1', { archivo, filas }),
   importar: (archivo: string, filas: FilaImportada[]) => request<ResumenImportacion>('POST', '/importaciones', { archivo, filas }),
