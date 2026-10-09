@@ -892,8 +892,7 @@ contenido de hoy y, por lotes, la releva el portal.
 - La fecha de calibración saldrá del campo de Zoho «Fecha de Calibración»
   (`cf_fecha_de_calibracion`, que se promoverá a columna en Desk 2.0). **Una corrección manual
   manda sobre la fecha de Desk hasta que cambie la de ese ticket en Zoho.**
-- Exportar: la misma información en las mismas columnas, **sin calco visual**.
-- **Importar queda sólo para la congelación inicial.**
+- Exportar: la misma información en las mismas columnas, **sin calco visual**. **Importar queda sólo para la congelación inicial.**
 
 **Lote 9a, construido: la congelación** (tablas, rutas y permiso en sus secciones de arriba).
 
@@ -907,10 +906,8 @@ contenido de hoy y, por lotes, la releva el portal.
   sus filas de subtítulos (hasta tres); **fila de equipo** = por debajo, con algo en cliente,
   marca, modelo o serial y sin un rótulo del pie («totalRevisados», «total equipos», «% de
   avance»); `clave_equipo` sigue las reglas de la importación (`asignarClaves`). Los «problemas»
-  son recuentos de filas de equipo, sólo para saber qué hay: nunca bloquean.
-- **Quién**: la primera, quien tenga `importar`. Con una vigente, sólo un **administrador del
-  portal** y con motivo; la anterior deja de ser la vigente, firmada, y **no se borra**. Todo o
-  nada, en una transacción con su bloqueo (`hashtext('portal.tmc_fst022_congelaciones')`).
+  son recuentos de filas de equipo, sólo para saber qué hay: nunca bloquean. Congelar es todo o
+  nada: una transacción con su bloqueo (`hashtext('portal.tmc_fst022_congelaciones')`).
 - **Pantalla**: bloque «Congelación de la F-ST-022» del diálogo «Importar F-ST-022»
   (`Congelacion.tsx`), aparte de la importación: elegir el .xlsx → simulación (tamaño, filas de
   equipo, problemas por tipo, columnas, sha256 abreviado; **sólo recuentos**) → confirmar. Enseña
@@ -982,10 +979,8 @@ contenido de hoy y, por lotes, la releva el portal.
   su 403 por rol, sus 400, 404 y 409, la pasada a demanda (antes de leer, sin repetirse, y el
   aviso si falla) y la guarda de permisos ruta a ruta; el cortacircuitos, con reloj inyectado,
   en `fuente.test.ts`; y los huecos, en `agenda.test.ts`.
-- La congelación de la F-ST-022: el lector de la hoja entera con un libro ficticio generado en
-  la prueba (`src/lib/importar.test.ts`); en hub-api, `fst022.test.ts` (reglas, validadores,
-  guardas de la 055, cuál es la última migración e inmutabilidad leyendo el fuente),
-  `router.test.ts` (401, 403, 409, 400, 413 y que simular no escribe) y `fst022.db.test.ts` (la
-  055 repetida, una sola vigente, volver a congelar conserva la anterior, todo o nada).
+- La congelación de la F-ST-022: su lector con un libro ficticio (`src/lib/importar.test.ts`) y, en hub-api, `fst022.test.ts`
+  (reglas, validadores, guardas de la 055, última migración e inmutabilidad leyendo el fuente), `router.test.ts` (401, 403, 409,
+  400, 413, simular no escribe) y `fst022.db.test.ts` (055 repetida, una sola vigente, la anterior se conserva, todo o nada).
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

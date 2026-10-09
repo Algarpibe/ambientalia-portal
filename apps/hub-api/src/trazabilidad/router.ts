@@ -242,14 +242,10 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
 
   // ── F-ST-022: congelación (lote 9a) ──────────────────────────────────────
   //
-  // La Excel deja de ser la fuente: aquí se guarda su hoja entera, tal cual.
-  // La primera congelación pide el permiso de importar; con una ya vigente
-  // sólo un administrador del portal puede volver a congelar, y con motivo
-  // (409 / 400, en repo.ts: hay que mirar la base). ?simular=1 valida y
-  // devuelve el resumen sin escribir. El cuerpo es la hoja entera: index.ts le
-  // da su propio límite (FST022_CUERPO_MAX) antes del parser global.
-  // Las filas llevan cliente y serial —lo mismo que ya sirve GET /equipos—:
-  // ni un error ni el registro repiten su contenido.
+  // Guarda la hoja entera, tal cual. La primera pide el permiso de importar; con una vigente sólo un
+  // administrador del portal, y con motivo (409 / 400, en repo.ts: hay que mirar la base). ?simular=1
+  // valida y devuelve el resumen sin escribir. El cuerpo tiene su propio límite (index.ts, FST022_CUERPO_MAX).
+  // Las filas llevan cliente y serial, como GET /equipos: ni un error ni el registro repiten su contenido.
   router.post(
     '/trazabilidad/fst022/congelaciones',
     ...gated,

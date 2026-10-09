@@ -62,9 +62,7 @@ export default function Congelacion({ notificar }: { notificar: (msg: string) =>
 
   const fallo = useCallback((e: unknown) => setError(e instanceof ApiError && e.status === 413 ? 'La hoja es demasiado grande para congelarla desde aquí.' : (e as Error).message), []);
   const cargar = useCallback(() => api.congelaciones().then((r) => setLista(r.congelaciones)).catch(fallo), [fallo]);
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
+  useEffect(() => void cargar(), [cargar]);
 
   const vigente = lista?.find((c) => c.vigente) ?? null;
   const anteriores = lista?.filter((c) => !c.vigente) ?? [];

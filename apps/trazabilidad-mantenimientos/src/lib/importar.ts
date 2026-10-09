@@ -119,12 +119,10 @@ export function leerMatriz(A: unknown[][], hoja = 'Trazabilidad'): Omit<Lectura,
 }
 
 /**
- * Una celda de la hoja tal cual, para la congelación: texto, número o
- * booleano; una fecha como `{v: 'AAAA-MM-DD', t: 'fecha'}` (por `fechaCelda`,
- * el único sitio que normaliza fechas); un error de Excel como `{v: '#VALUE!',
- * t: 'error'}` (el texto con que lo guarda el fichero, en inglés); de una
- * fórmula, su último valor calculado; y, si lleva hipervínculo, su destino en
- * `enlace`. Vacía → null.
+ * Una celda de la hoja tal cual, para la congelación: texto, número o booleano; una fecha como `{v: 'AAAA-MM-DD',
+ * t: 'fecha'}` (por `fechaCelda`, el único sitio que normaliza fechas); un error de Excel como `{v: '#VALUE!', t: 'error'}`
+ * (el texto con que lo guarda el fichero, en inglés); de una fórmula, su último valor calculado; y, si lleva
+ * hipervínculo, su destino en `enlace`. Vacía → null.
  */
 function celda(c: XLSX.CellObject | undefined): Celda {
   if (!c || c.t === 'z' || c.v === undefined || c.v === null) return null;
@@ -139,11 +137,9 @@ function celda(c: XLSX.CellObject | undefined): Celda {
 }
 
 /**
- * La hoja entera como matriz: la fila N de Excel es `matriz[N - 1]` y la
- * columna A es la posición 0, empiece donde empiece el rango usado. Recorre
- * las celdas que existen (no el rango), así que una hoja con formato hasta la
- * fila un millón no cuesta más. De una celda combinada sólo trae valor su
- * esquina; las filas vacías quedan como `[]` y a la derecha no hay nulls de relleno.
+ * La hoja entera como matriz: la fila N de Excel es `matriz[N - 1]` y la columna A es la posición 0, empiece donde
+ * empiece el rango usado. Recorre las celdas que existen (no el rango): una hoja con formato hasta la fila un millón no
+ * cuesta más. De una combinada sólo trae valor su esquina; las filas vacías quedan como `[]`, sin nulls de relleno a la derecha.
  */
 export function matrizDeHoja(ws: XLSX.WorkSheet): Celda[][] {
   const A: Celda[][] = [];

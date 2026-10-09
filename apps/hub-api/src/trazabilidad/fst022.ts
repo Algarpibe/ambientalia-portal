@@ -22,13 +22,11 @@ export const FST022_MAX_FILAS = 2000;
 export const FST022_MAX_COLUMNAS = 60;
 export const FST022_MAX_TEXTO = 2000;
 /**
- * Límite del cuerpo de POST /trazabilidad/fst022/congelaciones (index.ts lo
- * registra antes del parser global de 2 MB). Medido con una hoja ficticia de
- * la forma de la real (50 filas × 17 columnas, un hipervínculo por fila): 9,3 kB
- * de JSON, unos 0,19 kB por fila. Unas 400 filas × 16 columnas son ~0,08 MB, y
- * ~0,3 MB con nombres largos y enlaces de 300 caracteres: hoy cabría en el
- * global. El límite propio (más de diez veces eso) es el margen para una hoja
- * que crezca hacia los topes de arriba, sin subir el del resto de la API.
+ * Límite del cuerpo de POST /trazabilidad/fst022/congelaciones (index.ts lo registra antes del parser global de 2 MB).
+ * Medido con una hoja ficticia de la forma de la real (50 filas × 17 columnas, un hipervínculo por fila): 9,3 kB de JSON,
+ * unos 0,19 kB por fila. Unas 400 filas × 16 columnas son ~0,08 MB, y ~0,3 MB con nombres largos y enlaces de 300
+ * caracteres: hoy cabría en el global. El límite propio (más de diez veces eso) es el margen para una hoja que crezca
+ * hacia los topes de arriba, sin subir el del resto de la API.
  */
 export const FST022_CUERPO_MAX = '4mb';
 
