@@ -254,6 +254,7 @@ export default function App() {
         {equipoFicha && <FichaEquipo equipo={equipoFicha} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} />}
         {importando && puedeImportar && (
           <Importar
+            notificar={notificar}
             onClose={() => setImportando(false)}
             onHecho={async (n) => {
               setImportando(false);

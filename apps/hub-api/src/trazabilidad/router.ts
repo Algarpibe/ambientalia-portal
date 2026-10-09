@@ -18,6 +18,7 @@ import {
   parseAsignacion,
   parseAvisos,
   parseCategoriaEstado,
+  parseCongelacion,
   parseContacto,
   parseDuracionEtapa,
   parseEstadoDesk,
@@ -26,6 +27,7 @@ import {
   parseImportacion,
   parseLiberacion,
   parseNumeroTicket,
+  parsePaginaFst022,
   parsePlazo,
   parsePuestosEtapa,
   parseReparto,
@@ -236,6 +238,32 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
       const imp = parseImportacion(req.body);
       return repo.importar(db, imp, actorOf(req), req.query.simular === '1');
     }),
+  );
+
+  // ── F-ST-022: congelación (lote 9a) ──────────────────────────────────────
+  //
+  // Guarda la hoja entera, tal cual. La primera pide el permiso de importar; con una vigente sólo un
+  // administrador del portal, y con motivo (409 / 400, en repo.ts: hay que mirar la base). ?simular=1
+  // valida y devuelve el resumen sin escribir. El cuerpo tiene su propio límite (index.ts, FST022_CUERPO_MAX).
+  // Las filas llevan cliente y serial, como GET /equipos: ni un error ni el registro repiten su contenido.
+  router.post(
+    '/trazabilidad/fst022/congelaciones',
+    ...gated,
+    escritura('importar', 'tmc_fst022_congelar', async (req) => repo.congelarFst022(db, parseCongelacion(req.body), actorOf(req), esAdminPortal(req), req.query.simular === '1')),
+  );
+
+  // Todas las congelaciones, la más reciente primero: metadatos y recuentos.
+  router.get(
+    '/trazabilidad/fst022/congelaciones',
+    ...gated,
+    route('tmc_fst022_congelaciones', async () => ({ congelaciones: await repo.listarCongelaciones(db) })),
+  );
+
+  // La vigente con sus cabeceras y sus filas, por páginas (?desde=&limite=, 500 por defecto y 1000 como mucho).
+  router.get(
+    '/trazabilidad/fst022/congelaciones/vigente',
+    ...gated,
+    route('tmc_fst022_vigente', async (req) => repo.congelacionVigente(db, parsePaginaFst022(req.query))),
   );
 
   router.put(

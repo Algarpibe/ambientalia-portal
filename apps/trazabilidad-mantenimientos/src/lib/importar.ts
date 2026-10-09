@@ -6,7 +6,7 @@
  * queda sólo con los GRIMM EDM 180. El servidor vuelve a validar todo.
  */
 import * as XLSX from 'xlsx';
-import { esFechaIso, modeloEdm180, type FilaImportada } from '../dominio';
+import { esFechaIso, modeloEdm180, prepararFst022, type Celda, type FilaImportada } from '../dominio';
 
 export class ErrorLectura extends Error {}
 
@@ -49,10 +49,14 @@ export interface Lectura {
   filas: FilaImportada[];
   /** Filas GRIMM EDM 180 descartadas (sin serial o sin cliente), con su número de fila en Excel. */
   descartadas: number[];
+  /** La hoja entera, celda a celda y sin filtrar (todas las marcas, el pie, los datos sucios): lo que se congela. */
+  matriz: Celda[][];
+  /** Sus filas de títulos (hasta tres), tal cual; vacío si no se reconoce la cabecera. */
+  cabeceras: Celda[][];
 }
 
 /** Lee una matriz (filas × columnas) ya extraída de la hoja. */
-export function leerMatriz(A: unknown[][], hoja = 'Trazabilidad'): Lectura {
+export function leerMatriz(A: unknown[][], hoja = 'Trazabilidad'): Omit<Lectura, 'matriz' | 'cabeceras'> {
   const h = A.findIndex((r) => Array.isArray(r) && r.some((c) => norm(c) === 'cliente') && r.some((c) => norm(c) === 'serial'));
   if (h < 0) throw new ErrorLectura('No encuentro la cabecera «Cliente / Serial» en la hoja Trazabilidad.');
   const H = A[h];
@@ -114,11 +118,57 @@ export function leerMatriz(A: unknown[][], hoja = 'Trazabilidad'): Lectura {
   return { hoja, filas, descartadas };
 }
 
+/**
+ * Una celda de la hoja tal cual, para la congelación: texto, número o booleano; una fecha como `{v: 'AAAA-MM-DD',
+ * t: 'fecha'}` (por `fechaCelda`, el único sitio que normaliza fechas); un error de Excel como `{v: '#VALUE!', t: 'error'}`
+ * (el texto con que lo guarda el fichero, en inglés); de una fórmula, su último valor calculado; y, si lleva
+ * hipervínculo, su destino en `enlace`. Vacía → null.
+ */
+function celda(c: XLSX.CellObject | undefined): Celda {
+  if (!c || c.t === 'z' || c.v === undefined || c.v === null) return null;
+  let v: Celda;
+  if (c.t === 'e') v = { v: c.w ?? `#ERROR(${String(c.v)})`, t: 'error' };
+  else if (c.v instanceof Date) {
+    const f = fechaCelda(c.v);
+    v = f ? { v: f, t: 'fecha' } : (c.w ?? null);
+  } else v = c.v;
+  const enlace = c.l?.Target;
+  return enlace ? { ...(v !== null && typeof v === 'object' ? v : { v }), enlace } : v;
+}
+
+/**
+ * La hoja entera como matriz: la fila N de Excel es `matriz[N - 1]` y la columna A es la posición 0, empiece donde
+ * empiece el rango usado. Recorre las celdas que existen (no el rango): una hoja con formato hasta la fila un millón no
+ * cuesta más. De una combinada sólo trae valor su esquina; las filas vacías quedan como `[]`, sin nulls de relleno a la derecha.
+ */
+export function matrizDeHoja(ws: XLSX.WorkSheet): Celda[][] {
+  const A: Celda[][] = [];
+  for (const k of Object.keys(ws)) {
+    if (k.startsWith('!')) continue;
+    const v = celda(ws[k] as XLSX.CellObject);
+    if (v === null) continue;
+    const { r, c } = XLSX.utils.decode_cell(k);
+    (A[r] ??= [])[c] = v;
+  }
+  return Array.from(A, (fila) => Array.from(fila ?? [], (x) => x ?? null));
+}
+
+/** La huella SHA-256 del fichero, en hexadecimal y minúsculas: identifica qué Excel se congeló. */
+export async function sha256Hex(datos: ArrayBuffer): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', datos))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** Lee el libro completo (contenido del .xlsx). */
 export function leerLibro(datos: ArrayBuffer): Lectura {
   const wb = XLSX.read(datos, { type: 'array', cellDates: true });
   const hoja = wb.SheetNames.find((n) => norm(n).startsWith('trazabilidad')) ?? wb.SheetNames[0];
   if (!hoja) throw new ErrorLectura('El archivo no tiene hojas.');
   const A = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[hoja], { header: 1, raw: true, defval: null });
-  return leerMatriz(A, hoja);
+  const matriz = matrizDeHoja(wb.Sheets[hoja]);
+  return { ...leerMatriz(A, hoja), matriz, cabeceras: prepararFst022(matriz)?.cabeceras ?? [] };
+}
+
+/** Lo mismo que `leerLibro`, más la huella del fichero. */
+export async function leerArchivo(datos: ArrayBuffer): Promise<Lectura & { sha256: string }> {
+  return { ...leerLibro(datos), sha256: await sha256Hex(datos) };
 }

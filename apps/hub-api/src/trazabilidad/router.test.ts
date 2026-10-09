@@ -27,6 +27,7 @@ vi.mock('../db.js', () => ({
 const { createTrazabilidadRouter } = await import('./router.js');
 const { reiniciarRegistroEstados } = await import('./registro-estados.js');
 const { crearFuenteAgenda } = await import('./fuente.js');
+const { FST022_CUERPO_MAX } = await import('./fst022.js');
 type DbLectura = import('./fuente.js').DbLectura;
 
 const { PERMISOS, ROLES_APP, permisosDe, puede } = await import('./roles.js');
@@ -92,6 +93,14 @@ function appAgenda(desk2: DbLectura | null = null) {
   return a;
 }
 const HOY = '2026-10-06';
+
+/** Una F-ST-022 ficticia mínima: cabecera, un equipo y el pie. Cliente y serial inventados, que no deben salir en ningún error. */
+const CUERPO_FST022 = {
+  archivo: 'F-ST-022 ficticia.xlsx',
+  sha256: 'ab'.repeat(32),
+  hoja: 'Trazabilidad',
+  matriz: [['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración'], ['Cliente Reservado', 'Grimm', 'EDM 180C', 'SER-RESERVADO', { v: '2025-10-17', t: 'fecha' }], ['total equipos', 1]],
+};
 
 function app() {
   const a = express();
@@ -176,10 +185,12 @@ describe('permisos por rol', () => {
     { ruta: 'PUT /trazabilidad/agenda/configuracion/puestos', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/puestos').set(c).send({ etapa: 'proceso', puestos: 5 }) },
     { ruta: 'PUT /trazabilidad/agenda/configuracion/duraciones', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/duraciones').set(c).send({ etapa: 'proceso', tipo: '*', dias: 4 }) },
     { ruta: 'PUT /trazabilidad/agenda/configuracion/estados', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/estados').set(c).send({ estado: 'Ingresado', categoria: 'entrada' }) },
+    // La congelación de la F-ST-022 (lote 9a): con el permiso de importar.
+    { ruta: 'POST /trazabilidad/fst022/congelaciones?simular=1', permiso: 'importar', pedir: (c) => request(app()).post('/api/trazabilidad/fst022/congelaciones?simular=1').set(c).send(CUERPO_FST022) },
   ];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las catorce escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin()', () => {
+  it('son las quince escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin()', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const escriben = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -1422,5 +1433,139 @@ describe('agenda: configuración (config.write)', () => {
       expect(escriben(queries)[0]).toMatch(/INSERT INTO portal\.tmc_estados_desk \(clave, etiqueta, categoria, etapa, categoria_por_id, categoria_por, categoria_en, actualizado_en\)/);
       expect(escriben(queries)[0]).not.toMatch(/\brol\b|actualizado_por|actualizado_en = /);
     }
+  });
+});
+
+// ── Congelación de la F-ST-022 (lote 9a) ─────────────────────────────────────
+describe('F-ST-022: congelación', () => {
+  const RUTA = '/api/trazabilidad/fst022/congelaciones';
+  /** La congelación vigente tal como la devuelve la base. */
+  const VIGENTE = { id: 7, archivo: 'F-ST-022 ficticia.xlsx', sha256: 'cd'.repeat(32), hoja: 'Trazabilidad', fila_cabecera: 1, total_filas: 3, total_columnas: 5, filas_guardadas: 3, filas_equipo: 1, filas_con_serial: 1, filas_edm180: 1, problemas: {}, vigente: true, motivo: null, por: 'director@example.com', en: '2026-10-09 15:00:00+00', reemplazada_por: null, reemplazada_en: null, reemplazada_motivo: null };
+  const hayVigente = () => respuestas.push([/FROM portal\.tmc_fst022_congelaciones g\s+WHERE g\.vigente/, [VIGENTE]]);
+  const congelar = (c: { Authorization: string }, cuerpo: unknown = CUERPO_FST022, simular = true, a = app()) => request(a).post(`${RUTA}${simular ? '?simular=1' : ''}`).set(c).send(cuerpo as object);
+
+  it('401 sin token y 403 sin la app, en las tres rutas', async () => {
+    for (const pedir of [() => request(app()).get(RUTA), () => request(app()).get(`${RUTA}/vigente`), () => request(app()).post(RUTA).send(CUERPO_FST022)]) {
+      expect((await pedir()).status).toBe(401);
+      expect((await pedir().set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('leer está abierto a quien tenga la app, también a un LECTOR: la lista y la vigente (null si no hay)', async () => {
+    const lista = await request(app()).get(RUTA).set(conRol(null));
+    expect([lista.status, lista.body]).toEqual([200, { congelaciones: [] }]);
+    const vigente = await request(app()).get(`${RUTA}/vigente`).set(conRol(null));
+    expect([vigente.status, vigente.body]).toEqual([200, { congelacion: null, cabeceras: [], filas: [], siguiente: null }]);
+    expect(consultasRol.n).toBe(0);
+    expect((await request(app()).get(`${RUTA}/vigente?limite=5000`).set(auth())).status).toBe(400);
+  });
+
+  it('simular devuelve el resumen (sólo recuentos y títulos) y no escribe ni abre transacción', async () => {
+    const res = await congelar(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ simulado: true, congelacion: null, anterior: null, sha256: 'ab'.repeat(32), resumen: { totalFilas: 3, filasEquipo: 1, filasEdm180: 1, filasOtras: 2 }, titulos: ['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración'] });
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+    expect(escriben(queries)).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it('congelar de verdad: en una transacción, que cierra la anterior si la hay y guarda la cabecera y las filas', async () => {
+    conexiones.cliente = true;
+    respuestas.push([/INSERT INTO portal\.tmc_fst022_congelaciones/, [{ ...VIGENTE, id: 8 }]]);
+    const res = await congelar(auth(), CUERPO_FST022, false);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ simulado: false, anterior: null, congelacion: { id: 8, vigente: true, filasEquipo: 1 } });
+    expect(conexiones.n).toBe(1);
+    expect(escriben(queries).map((q) => /(INSERT INTO|UPDATE) portal\.(\w+)/.exec(q)![2])).toEqual(['tmc_fst022_congelaciones', 'tmc_fst022_congelada']);
+  });
+
+  it('con una vigente, el Director Técnico recibe un 409 que lo explica (también simulando) y no se escribe nada', async () => {
+    conexiones.cliente = true;
+    hayVigente();
+    for (const simular of [true, false]) {
+      const res = await congelar(conRol('DIRECTOR_TECNICO'), { ...CUERPO_FST022, motivo: 'Quiero otra' }, simular);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('congelacion_vigente');
+      expect(res.body.message).toMatch(/Ya hay una congelación vigente.*administrador del portal.*motivo/);
+    }
+    expect(escriben(queries)).toEqual([]);
+  });
+
+  it('con una vigente, un administrador del portal sí: simula sin motivo; al confirmar, sin motivo es un 400 y con él reemplaza', async () => {
+    conexiones.cliente = true;
+    hayVigente();
+    respuestas.push([/INSERT INTO portal\.tmc_fst022_congelaciones/, [{ ...VIGENTE, id: 8, motivo: 'La hoja cambió' }]]);
+    const simulada = await congelar(comoAdmin());
+    expect([simulada.status, simulada.body.anterior?.id]).toEqual([200, 7]);
+    const sinMotivo = await congelar(comoAdmin(), CUERPO_FST022, false);
+    expect([sinMotivo.status, sinMotivo.body.field]).toEqual([400, 'motivo']);
+    expect(escriben(queries)).toEqual([]);
+    const res = await congelar(comoAdmin(), { ...CUERPO_FST022, motivo: 'La hoja cambió' }, false);
+    expect(res.status).toBe(200);
+    expect(escriben(queries).map((q) => /(INSERT INTO|UPDATE) portal\.(\w+)/.exec(q)![0])).toEqual(['UPDATE portal.tmc_fst022_congelaciones', 'INSERT INTO portal.tmc_fst022_congelaciones', 'INSERT INTO portal.tmc_fst022_congelada']);
+  });
+
+  it.each([
+    ['sha256', { sha256: 'no-es-una-huella' }],
+    ['matriz', { matriz: [] }],
+    ['matriz', { matriz: [['sin', 'cabecera']] }],
+    ['matriz', { matriz: Array.from({ length: 2001 }, () => ['x']) }],
+    ['matriz[0]', { matriz: [Array.from({ length: 61 }, () => 'Cliente')] }],
+    ['archivo', { archivo: '' }],
+  ])('400 en «%s», sin tocar la base', async (campo, extra) => {
+    const res = await congelar(auth(), { ...CUERPO_FST022, ...extra });
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe(campo);
+    expect(queries).toEqual([]);
+  });
+
+  it('ni el 400 de una celda ni un fallo de la base repiten lo que traía la hoja, tampoco en el registro', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const mala = await congelar(auth(), { ...CUERPO_FST022, matriz: [...CUERPO_FST022.matriz, ['Cliente Reservado', { v: 'SER-RESERVADO', t: 'raro' }]] });
+    expect([mala.status, mala.body.field]).toEqual([400, 'matriz[3][1]']);
+    conexiones.cliente = true;
+    const rota = { ...fakePool, connect: async () => ({ release: () => {}, query: async (sql: string) => { if (/INSERT INTO portal\.tmc_fst022_congelada/.test(sql)) throw Object.assign(new Error('invalid input: Cliente Reservado'), { code: '22P05', where: 'JSON data: SER-RESERVADO' }); return fakePool.query(sql); } }) } as unknown as Pool;
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(rota));
+    const res = await congelar(auth(), CUERPO_FST022, false, a);
+    expect([res.status, res.body]).toEqual([500, { error: 'internal error' }]);
+    const registrado = error.mock.calls.map((c) => c.map((x) => (x instanceof Error ? `${x.message} ${String(x.stack)} ${JSON.stringify(x)}` : String(x))).join(' ')).join('\n');
+    expect(registrado).toMatch(/tmc_fst022_congelar error/);
+    expect(`${registrado} ${JSON.stringify(mala.body)}`).not.toMatch(/Reservado|RESERVADO/);
+    error.mockRestore();
+  });
+
+  describe('límite del cuerpo', () => {
+    /** Los dos parsers como los monta index.ts: el de la congelación ANTES del global de 2 MB. */
+    function appConLimites() {
+      const a = express();
+      a.use(RUTA, express.json({ limit: FST022_CUERPO_MAX }));
+      a.use(express.json({ limit: '2mb' }));
+      a.use('/api', createTrazabilidadRouter(fakePool));
+      return a;
+    }
+    const relleno = (megas: number) => ({ ...CUERPO_FST022, matriz: [...CUERPO_FST022.matriz, ...Array.from({ length: megas * 500 }, () => [null, null, null, null, null, 'x'.repeat(1990)])] });
+
+    it('una hoja de 3 MB entra por la ruta de la congelación; una de 5 MB es un 413 y no llega a la base', async () => {
+      const cabe = await congelar(auth(), relleno(3), true, appConLimites());
+      expect(cabe.status).toBe(200);
+      queries.length = 0;
+      expect((await congelar(auth(), relleno(5), true, appConLimites())).status).toBe(413);
+      expect(queries).toEqual([]);
+    });
+
+    it('el resto de la API conserva su límite de 2 MB: esos 3 MB a la importación de siempre son un 413', async () => {
+      const res = await request(appConLimites()).post('/api/trazabilidad/importaciones?simular=1').set(auth()).send(relleno(3));
+      expect(res.status).toBe(413);
+    });
+
+    it('index.ts registra el parser de la congelación antes que el global', () => {
+      const src = readFileSync(fileURLToPath(new URL('../index.ts', import.meta.url)), 'utf8');
+      const propio = src.indexOf("app.use('/api/trazabilidad/fst022/congelaciones', express.json({ limit: FST022_CUERPO_MAX }))");
+      expect(propio).toBeGreaterThan(0);
+      expect(propio).toBeLessThan(src.indexOf("app.use(express.json({ limit: '2mb' }))"));
+    });
   });
 });
