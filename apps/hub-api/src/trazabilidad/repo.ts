@@ -1,6 +1,6 @@
 /**
  * SQL de Trazabilidad Mantenimientos Clientes (tablas portal.tmc_*, migraciones
- * 042 a 054). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
+ * 042 a 055). Fechas como texto AAAA-MM-DD (`::text`) para no depender del parser de
  * DATE del driver ni de la zona horaria del proceso.
  */
 
@@ -8,6 +8,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
+import { titulosFst022, type Celda, type FilaCongelada } from './fst022.js';
 import {
   asignarClaves,
   asuntoSinCodigo,
@@ -33,6 +34,7 @@ import {
   partesDeTipo,
   porOrdenEstadosDesk,
   ROL_POR_DEFECTO,
+  serialNorm,
   sumarDias,
   TIPO_POR_DEFECTO,
   tipoEfectivo,
@@ -70,6 +72,9 @@ import {
   type CambioPlazo,
   type CambioPuestosEtapa,
   type ConfigAgenda,
+  type CongelacionFst022,
+  type NuevaCongelacion,
+  type ResultadoCongelacion,
   type ConfiguracionAgenda,
   type EquipoVista,
   type EstadoDesk,
@@ -159,8 +164,8 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
   }));
 }
 
-/** El serial tal como casa con Desk: sin espacios alrededor y en mayúsculas (lo mismo que `upper(trim(…))` en SQL). */
-const claveSerialDesk = (serial: unknown): string => String(serial ?? '').trim().toUpperCase();
+/** El serial tal como casa con Desk (`serialNorm`, dominio.ts: la misma regla que guarda la congelación de la F-ST-022). */
+const claveSerialDesk = serialNorm;
 
 /**
  * El contacto que da Desk para cada serial del inventario activo: el del
@@ -1363,4 +1368,116 @@ export async function listarUsuariosRol(db: Db, appId: string): Promise<UsuarioR
     admin: r.portal_role === 'admin',
     role: resolverRol(r.role),
   }));
+}
+
+// ── Congelación de la F-ST-022 (lote 9a, migración 055) ─────────────────────
+//
+// La hoja entera, tal cual. Sus filas (tmc_fst022_congelada) sólo se insertan
+// —aquí, al congelar— y se leen: nada las cambia ni las quita. Volver a
+// congelar deja la anterior como estaba, sólo que ya no es la vigente.
+// Las filas llevan clientes y seriales: nada de ellas va a un error ni al registro.
+
+const COLS_CONGELACION = `
+  g.id, g.archivo, g.sha256, g.hoja, g.fila_cabecera, g.total_filas, g.total_columnas, g.filas_guardadas, g.filas_equipo,
+  g.filas_con_serial, g.filas_edm180, g.problemas, g.vigente, g.motivo, g.por, g.en::text AS en, g.reemplazada_por,
+  g.reemplazada_en::text AS reemplazada_en, g.reemplazada_motivo`;
+
+const toCongelacion = (r: Row): CongelacionFst022 => ({
+  id: Number(r.id),
+  archivo: r.archivo,
+  sha256: r.sha256,
+  hoja: r.hoja,
+  totalFilas: r.total_filas,
+  totalColumnas: r.total_columnas,
+  filasGuardadas: r.filas_guardadas,
+  filaCabecera: r.fila_cabecera,
+  filasEquipo: r.filas_equipo,
+  filasConSerial: r.filas_con_serial,
+  filasEdm180: r.filas_edm180,
+  filasOtras: r.filas_guardadas - r.filas_equipo,
+  problemas: r.problemas,
+  vigente: r.vigente,
+  motivo: r.motivo,
+  por: r.por,
+  en: r.en,
+  reemplazadaPor: r.reemplazada_por,
+  reemplazadaEn: r.reemplazada_en,
+  reemplazadaMotivo: r.reemplazada_motivo,
+});
+
+/** Todas las congelaciones, la más reciente primero: sólo metadatos y recuentos. */
+export async function listarCongelaciones(db: Db): Promise<CongelacionFst022[]> {
+  const { rows } = await db.query(`SELECT ${COLS_CONGELACION} FROM portal.tmc_fst022_congelaciones g ORDER BY g.id DESC`);
+  return (rows as Row[]).map(toCongelacion);
+}
+
+async function vigenteFst022(db: Db): Promise<Row | null> {
+  const { rows } = await db.query(`SELECT ${COLS_CONGELACION}, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`);
+  return (rows[0] as Row | undefined) ?? null;
+}
+
+/** La congelación vigente con sus cabeceras y una página de sus filas (las posteriores a `desde`); `siguiente` es el `desde` de la página que sigue, o null. */
+export async function congelacionVigente(db: Db, pagina: { desde: number; limite: number }): Promise<{ congelacion: CongelacionFst022 | null; cabeceras: Celda[][]; filas: FilaCongelada[]; siguiente: number | null }> {
+  const v = await vigenteFst022(db);
+  if (!v) return { congelacion: null, cabeceras: [], filas: [], siguiente: null };
+  const { rows } = await db.query(
+    `SELECT fila, celdas, es_equipo, serial_norm, clave_equipo FROM portal.tmc_fst022_congelada
+      WHERE congelacion_id = $1 AND fila > $2 ORDER BY fila LIMIT $3`,
+    [v.id, pagina.desde, pagina.limite + 1],
+  );
+  const filas = (rows as Row[]).slice(0, pagina.limite).map((r): FilaCongelada => ({ fila: r.fila, celdas: r.celdas, esEquipo: r.es_equipo, serialNorm: r.serial_norm, claveEquipo: r.clave_equipo }));
+  return { congelacion: toCongelacion(v), cabeceras: v.cabeceras, filas, siguiente: rows.length > pagina.limite ? filas[filas.length - 1].fila : null };
+}
+
+/**
+ * Congela la hoja (o lo simula, con `simular`: mismo resumen, sin escribir).
+ * La primera vez basta el permiso de la ruta. Con una vigente sólo puede un
+ * administrador del portal (409 si no lo es) y, al confirmar, con motivo
+ * (400): la anterior deja de ser la vigente, firmada, y no se borra. Todo o
+ * nada, en una transacción y de una en una (bloqueo propio).
+ */
+export async function congelarFst022(db: Pool, c: NuevaCongelacion, actor: Actor, admin: boolean, simular: boolean): Promise<ResultadoCongelacion> {
+  const { resumen: r, cabeceras, filas } = c.preparada;
+  const base = { archivo: c.archivo, sha256: c.sha256, hoja: c.hoja, resumen: r, titulos: titulosFst022(cabeceras) };
+  const anteriorSiSePuede = (vigente: Row | null): CongelacionFst022 | null => {
+    if (!vigente) return null;
+    if (!admin) throw new TzError('congelacion_vigente', 409, 'Ya hay una congelación vigente de la F-ST-022. Sólo un administrador del portal puede volver a congelarla, indicando el motivo.');
+    if (!simular && !c.motivo) throw new TzError('invalid_input', 400, 'Para volver a congelar la F-ST-022 hay que indicar el motivo.', 'motivo');
+    return toCongelacion(vigente);
+  };
+  if (simular) return { simulado: true, ...base, anterior: anteriorSiSePuede(await vigenteFst022(db)), congelacion: null };
+  try {
+    return await withTransaction(db, async (t) => {
+      await t.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_fst022_congelaciones'))`);
+      const anterior = anteriorSiSePuede(await vigenteFst022(t));
+      if (anterior) {
+        await t.query(
+          `UPDATE portal.tmc_fst022_congelaciones
+              SET vigente = FALSE, reemplazada_por_id = $2, reemplazada_por = $3, reemplazada_en = NOW(), reemplazada_motivo = $4
+            WHERE id = $1`,
+          [anterior.id, actor.userId, actor.email, c.motivo],
+        );
+      }
+      const { rows } = await t.query(
+        `INSERT INTO portal.tmc_fst022_congelaciones AS g
+           (archivo, sha256, hoja, fila_cabecera, cabeceras, total_filas, total_columnas, filas_guardadas, filas_equipo,
+            filas_con_serial, filas_edm180, problemas, motivo, por_id, por)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)
+         RETURNING ${COLS_CONGELACION}`,
+        [c.archivo, c.sha256, c.hoja, r.filaCabecera, JSON.stringify(cabeceras), r.totalFilas, r.totalColumnas, r.filasGuardadas, r.filasEquipo, r.filasConSerial, r.filasEdm180, JSON.stringify(r.problemas), c.motivo, actor.userId, actor.email],
+      );
+      const congelacion = toCongelacion(rows[0]);
+      await t.query(
+        `INSERT INTO portal.tmc_fst022_congelada (congelacion_id, fila, celdas, es_equipo, serial_norm, clave_equipo)
+         SELECT $1::bigint, f.fila, f.celdas::jsonb, f.es_equipo, f.serial_norm, f.clave_equipo
+           FROM unnest($2::int[], $3::text[], $4::boolean[], $5::text[], $6::text[]) AS f(fila, celdas, es_equipo, serial_norm, clave_equipo)`,
+        [congelacion.id, filas.map((f) => f.fila), filas.map((f) => JSON.stringify(f.celdas)), filas.map((f) => f.esEquipo), filas.map((f) => f.serialNorm), filas.map((f) => f.claveEquipo)],
+      );
+      return { simulado: false, ...base, anterior, congelacion };
+    });
+  } catch (e) {
+    if (e instanceof TzError) throw e;
+    // El error del driver puede citar el contenido de una celda (su `detail` o su `where`): sólo sale su código.
+    throw new Error(`fst022: no se pudo guardar la congelación (${String((e as { code?: unknown }).code ?? 'sin código')})`);
+  }
 }

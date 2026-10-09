@@ -40,6 +40,7 @@ import {
   type TipoAbierto,
   type TramoPlazo,
 } from './dominio.js';
+import { FST022_MAX_COLUMNAS, FST022_MAX_FILAS, FST022_MAX_TEXTO, prepararFst022, type Celda, type Fst022Preparada, type ResumenFst022 } from './fst022.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -209,6 +210,91 @@ export function parseImportacion(body: unknown): Importacion {
     };
   });
   return { archivo, filas };
+}
+
+// ── Congelación de la F-ST-022 (lote 9a) ────────────────────────────────────
+
+/** Una congelación: de qué fichero salió, sus recuentos y quién la hizo (y, si ya no es la vigente, quién la reemplazó). */
+export interface CongelacionFst022 extends ResumenFst022 {
+  id: number;
+  archivo: string;
+  sha256: string;
+  hoja: string;
+  vigente: boolean;
+  motivo: string | null;
+  por: string;
+  en: string;
+  reemplazadaPor: string | null;
+  reemplazadaEn: string | null;
+  reemplazadaMotivo: string | null;
+}
+
+/** Lo que responde POST /trazabilidad/fst022/congelaciones: con `simulado` no se ha escrito nada y `congelacion` es null. */
+export interface ResultadoCongelacion {
+  simulado: boolean;
+  archivo: string;
+  sha256: string;
+  hoja: string;
+  resumen: ResumenFst022;
+  /** Los títulos de cada columna, de arriba abajo. */
+  titulos: string[];
+  /** La que había vigente antes (la que se reemplaza), o null. */
+  anterior: CongelacionFst022 | null;
+  congelacion: CongelacionFst022 | null;
+}
+
+export interface NuevaCongelacion {
+  archivo: string;
+  sha256: string;
+  hoja: string;
+  motivo: string | null;
+  preparada: Fst022Preparada;
+}
+
+const CLAVES_CELDA = new Set(['v', 't', 'enlace']);
+const esTexto = (v: unknown): v is string => typeof v === 'string' && v.length <= FST022_MAX_TEXTO && !v.includes('\u0000');
+const esValor = (v: unknown): boolean => v === null || typeof v === 'boolean' || esTexto(v) || (typeof v === 'number' && Number.isFinite(v));
+function esCelda(c: unknown): c is Celda {
+  if (c === null || typeof c !== 'object') return esValor(c);
+  const o = c as Record<string, unknown>;
+  if (Array.isArray(c) || !Object.keys(o).every((k) => CLAVES_CELDA.has(k)) || !esValor(o.v)) return false;
+  if (o.enlace !== undefined && !esTexto(o.enlace)) return false;
+  return o.t === undefined || (o.t === 'fecha' && esFechaIso(o.v)) || (o.t === 'error' && typeof o.v === 'string');
+}
+
+/**
+ * Valida el cuerpo de POST /trazabilidad/fst022/congelaciones: la hoja entera,
+ * celda a celda. Los mensajes dicen DÓNDE está el fallo y nunca qué traía la
+ * celda (las filas llevan clientes y seriales).
+ */
+export function parseCongelacion(body: unknown): NuevaCongelacion {
+  const b = obj(body, 'body');
+  const archivo = texto(b.archivo, 'archivo', 255, true)!;
+  const hoja = texto(b.hoja, 'hoja', 100, true)!;
+  if (typeof b.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(b.sha256)) throw invalido('La huella del archivo (sha256) no es válida.', 'sha256');
+  if (!Array.isArray(b.matriz)) throw invalido('Faltan las filas de la hoja.', 'matriz');
+  if (b.matriz.length > FST022_MAX_FILAS) throw invalido(`La hoja trae más de ${FST022_MAX_FILAS} filas.`, 'matriz');
+  b.matriz.forEach((r: unknown, i) => {
+    if (!Array.isArray(r)) throw invalido(`La fila ${i + 1} de la hoja no es válida.`, `matriz[${i}]`);
+    if (r.length > FST022_MAX_COLUMNAS) throw invalido(`La fila ${i + 1} trae más de ${FST022_MAX_COLUMNAS} columnas.`, `matriz[${i}]`);
+    const j = r.findIndex((c) => !esCelda(c));
+    if (j >= 0) throw invalido(`La celda de la fila ${i + 1}, columna ${j + 1}, no se puede guardar (valor no admitido o texto de más de ${FST022_MAX_TEXTO} caracteres).`, `matriz[${i}][${j}]`);
+  });
+  const preparada = prepararFst022(b.matriz as Celda[][]);
+  if (!preparada) throw invalido(b.matriz.some((r) => r.length > 0) ? 'No encuentro la cabecera «Cliente / Serial» en la hoja.' : 'La hoja está vacía.', 'matriz');
+  if (preparada.resumen.filasEquipo === 0) throw invalido('La hoja no trae ninguna fila de equipo bajo la cabecera.', 'matriz');
+  return { archivo, sha256: b.sha256, hoja, motivo: motivoLimpio(b.motivo), preparada };
+}
+
+/** `?desde=&limite=` de GET /trazabilidad/fst022/congelaciones/vigente: filas posteriores a `desde`, de `limite` en `limite`. */
+export function parsePaginaFst022(query: Record<string, unknown>): { desde: number; limite: number } {
+  const n = (campo: string, defecto: number, min: number, max: number): number => {
+    const v = query[campo];
+    if (v === undefined) return defecto;
+    if (typeof v !== 'string' || !/^\d{1,7}$/.test(v) || Number(v) < min || Number(v) > max) throw invalido(`«${campo}» debe ser un entero entre ${min} y ${max}.`, campo);
+    return Number(v);
+  };
+  return { desde: n('desde', 0, 0, 9_999_999), limite: n('limite', 500, 1, 1000) };
 }
 
 /** Valida el cuerpo de PUT /trazabilidad/seguimiento/:clave. */

@@ -120,6 +120,11 @@ export function claveSerial(serial: string): string {
   return serial.trim().replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+/** El serial tal como casa con Desk: sin espacios alrededor y en mayúsculas (lo mismo que `upper(trim(…))` en SQL). */
+export function serialNorm(serial: unknown): string {
+  return String(serial ?? '').trim().toUpperCase();
+}
+
 /**
  * Asigna una clave estable a cada fila. La F-ST-022 repite algún serial en dos
  * clientes (p. ej. 18A00004); la primera aparición se queda con el serial y las
