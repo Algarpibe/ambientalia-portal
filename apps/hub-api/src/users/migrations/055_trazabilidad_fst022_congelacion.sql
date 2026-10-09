@@ -1,36 +1,31 @@
 -- Migration 055: Trazabilidad Mantenimientos Clientes - congelacion de la
 -- hoja F-ST-022 (lote 9a).
 --
--- La Excel deja de ser la fuente. Antes se guarda su contenido tal cual, la
--- hoja ENTERA (todas las marcas, tambien los datos sucios), para que lo que
--- venga despues (maestro de equipos y fechas desde la herramienta de tickets,
--- pestana editable, exportar) parta de aqui y no del fichero.
+-- La Excel deja de ser la fuente. Antes se guarda la hoja ENTERA tal cual
+-- (todas las marcas, tambien los datos sucios), como punto de partida.
 --
--- tmc_fst022_congelaciones: una fila por congelacion: de que fichero salio
---   (nombre y sha256, que calcula el navegador), la hoja, sus filas de titulos
---   tal cual (`cabeceras`), recuentos y quien la hizo. Como mucho UNA vigente
---   (indice unico parcial). Volver a congelar no borra la anterior: deja de
---   ser la vigente y se apunta quien la reemplazo, cuando y por que.
+-- tmc_fst022_congelaciones: una fila por congelacion: fichero (nombre y sha256,
+--   que calcula el navegador), hoja, sus filas de titulos tal cual (`cabeceras`),
+--   recuentos y quien la hizo. Como mucho UNA vigente (indice unico parcial).
+--   Volver a congelar no borra la anterior: deja de ser la vigente y se apunta
+--   quien la reemplazo, cuando y por que.
 --
 -- tmc_fst022_congelada: las filas de la hoja que traen algo, por su numero de
 --   fila de Excel. `celdas` es el array posicional de la fila: texto, numero,
 --   booleano, null (vacia) o un objeto {v, t, enlace} para una fecha
 --   (t = fecha, v = AAAA-MM-DD), un error de Excel (t = error, v = su texto) o
 --   una celda con hipervinculo (enlace). Lo demas se DERIVA para consultar:
---   `es_equipo` (fila de un equipo, frente a titulos, pie de totales o valores
---   sueltos), `serial_norm` (el serial en mayusculas y sin espacios alrededor,
---   como lo cruza el portal con los tickets) y `clave_equipo` (la clave de
---   tmc_equipos, solo si la importacion de siempre acepta la fila).
---
---   INMUTABLE: estas filas solo se insertan, al congelar, y se leen. Ningun
---   codigo las cambia ni las borra (fst022.test.ts lo vigila leyendo el fuente).
+--   `es_equipo` (frente a titulos, pie de totales o valores sueltos),
+--   `serial_norm` (mayusculas y sin espacios alrededor, como lo cruza el portal
+--   con los tickets) y `clave_equipo` (la de tmc_equipos, solo si la
+--   importacion de siempre acepta la fila).
+--   INMUTABLE: solo se insertan, al congelar, y se leen. Ningun codigo las
+--   cambia ni las borra (fst022.test.ts lo vigila leyendo el fuente).
 --
 -- IDEMPOTENT: initDb() re-runs every migration on every boot. Only CREATE ...
 -- IF NOT EXISTS, no seed. Never add a statement that fails or changes data on
--- a second run. fst022.test.ts vigila esta regla.
---
--- Las personas, como en el resto del modulo: id + correo, sin clave foranea a
--- portal.users. La unica clave foranea es la de cada fila a su congelacion.
+-- a second run. fst022.test.ts vigila esta regla. La unica clave foranea es la
+-- de cada fila a su congelacion; las personas, id + correo, sin clave foranea.
 
 CREATE SCHEMA IF NOT EXISTS portal;
 

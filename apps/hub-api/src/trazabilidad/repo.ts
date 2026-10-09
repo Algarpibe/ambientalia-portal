@@ -1383,26 +1383,10 @@ const COLS_CONGELACION = `
   g.reemplazada_en::text AS reemplazada_en, g.reemplazada_motivo`;
 
 const toCongelacion = (r: Row): CongelacionFst022 => ({
-  id: Number(r.id),
-  archivo: r.archivo,
-  sha256: r.sha256,
-  hoja: r.hoja,
-  totalFilas: r.total_filas,
-  totalColumnas: r.total_columnas,
-  filasGuardadas: r.filas_guardadas,
-  filaCabecera: r.fila_cabecera,
-  filasEquipo: r.filas_equipo,
-  filasConSerial: r.filas_con_serial,
-  filasEdm180: r.filas_edm180,
-  filasOtras: r.filas_guardadas - r.filas_equipo,
-  problemas: r.problemas,
-  vigente: r.vigente,
-  motivo: r.motivo,
-  por: r.por,
-  en: r.en,
-  reemplazadaPor: r.reemplazada_por,
-  reemplazadaEn: r.reemplazada_en,
-  reemplazadaMotivo: r.reemplazada_motivo,
+  id: Number(r.id), archivo: r.archivo, sha256: r.sha256, hoja: r.hoja, vigente: r.vigente, motivo: r.motivo, por: r.por, en: r.en,
+  totalFilas: r.total_filas, totalColumnas: r.total_columnas, filasGuardadas: r.filas_guardadas, filaCabecera: r.fila_cabecera,
+  filasEquipo: r.filas_equipo, filasConSerial: r.filas_con_serial, filasEdm180: r.filas_edm180, filasOtras: r.filas_guardadas - r.filas_equipo, problemas: r.problemas,
+  reemplazadaPor: r.reemplazada_por, reemplazadaEn: r.reemplazada_en, reemplazadaMotivo: r.reemplazada_motivo,
 });
 
 /** Todas las congelaciones, la más reciente primero: sólo metadatos y recuentos. */

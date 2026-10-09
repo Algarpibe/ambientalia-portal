@@ -12,7 +12,8 @@ servicio de calibración y mantenimiento en vez de recibir el equipo sin previo 
 
 Fuente de datos: la hoja **F-ST-022 «Trazabilidad Mttos Clientes»** (Excel), que se importa
 desde la propia app. El seguimiento (aviso enviado, «en Ambientalia», servicio programado, nota)
-se registra en la app y sobrevive a las reimportaciones.
+se registra en la app y sobrevive a las reimportaciones. ⚠️ **La Excel va a dejar de ser la
+fuente** (decisión del 09/10/2026): ver «F-ST-022: congelación y relevo de la Excel».
 
 ## Regla de negocio (la de la F-ST-022)
 
@@ -40,12 +41,13 @@ se registra en la app y sobrevive a las reimportaciones.
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql` |
+| Congelación de la F-ST-022: reglas puras que comparten servidor y app (`Celda`, `columnasFst022`, `prepararFst022`, topes y límite del cuerpo) | `apps/hub-api/src/trazabilidad/fst022.ts`; su validador (`parseCongelacion`) en `types.ts`, su SQL (`congelarFst022`, `listarCongelaciones`, `congelacionVigente`) en `repo.ts` y su bloque en el diálogo de Importar en `src/vistas/Congelacion.tsx` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
 | Navegación en dos niveles (grupos y secciones, `seccionDeHash`) y lo que se enseña según el rol (`tiene`, `etiquetaMiRol`, `motivoSinPermiso`) | `src/lib/navegacion.ts` |
 | Quién soy, al alcance de cualquier vista (`PermisosContext`, `usePermisos`) | `src/permisos.ts` (lo rellena `src/App.tsx` con `GET /roles/me`) |
 | Sección «Roles» (sólo administradores del portal) | `src/vistas/Roles.tsx` |
-| Lectura del Excel en el navegador | `src/lib/importar.ts` |
+| Lectura del Excel en el navegador: los GRIMM EDM 180 para la importación (`leerMatriz`) y la hoja entera celda a celda para la congelación (`matrizDeHoja`, `sha256Hex`, `leerArchivo`) | `src/lib/importar.ts` |
 | Agregados, calendario y texto del aviso (`mensajeAviso`, también el de cada tramo) | `src/lib/vistas.ts` |
 | Plan del aviso automático (`planAvisos`, `evaluarAviso`), contactos (`contactoDeTickets`, `contactoEfectivo`) y correos (`esEmail`, `esEmailInterno`, `DOMINIOS_INTERNOS`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
 | Asunto y cuerpo del correo simulado, resumen y revisión de los correos tecleados | `src/lib/simulacion.ts` |
@@ -69,6 +71,8 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_equipos` | Un equipo por `clave` (el serial; si la hoja repite un serial, la 2.ª aparición lleva `-2`). `activo = false` cuando una importación ya no lo trae: no se borra |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación: archivo, recuentos y quién |
+| `portal.tmc_fst022_congelaciones` | Una fila por **congelación de la F-ST-022** (055): `archivo`, `sha256` del fichero (lo calcula el navegador), `hoja`, `fila_cabecera` y `cabeceras` (`JSONB`: las filas de títulos tal cual), recuentos (`total_filas`, `total_columnas`, `filas_guardadas`, `filas_equipo`, `filas_con_serial`, `filas_edm180` y `problemas`, `JSONB` de recuentos por tipo), `vigente`, `motivo`, la firma (`por_id`, `por`, `en`) y, al dejar de ser la vigente, `reemplazada_por_id` / `reemplazada_por` / `reemplazada_en` / `reemplazada_motivo`. Índice único parcial `tmc_fst022_congelaciones_vigente_uq` = **como mucho una vigente**; `CHECK` `tmc_fst022_vigente_o_reemplazada` = reemplazada si y sólo si no es la vigente, y entonces firmada y con motivo. Nunca se borra. Sólo `CREATE … IF NOT EXISTS`, sin semilla |
+| `portal.tmc_fst022_congelada` | Las **filas congeladas**: PK `(congelacion_id, fila)` (`fila` = número de fila de Excel; con FK a su congelación), `celdas` (`JSONB`, array posicional: texto, número, booleano, `null`, o `{v, t, enlace}` con `t` = `fecha` (`v` = AAAA-MM-DD) / `error` (`v` = «#VALUE!»…) y `enlace` = destino del hipervínculo) y lo derivado: `es_equipo`, `serial_norm` (`serialNorm`, `dominio.ts`: el `upper(trim())` del cruce con Desk) y `clave_equipo` (la de `tmc_equipos`, sólo si la importación de hoy acepta la fila). Las filas vacías no se guardan. ⚠️ **Inmutable**: sólo se inserta al congelar y se lee; `fst022.test.ts` falla si algún fuente la cambia o la borra |
 | `portal.tmc_plazos` | Plazo en días hábiles por tipo de servicio: `clave` (tipo normalizado), `etiqueta`, `dias_habiles` (NULL = sin plazo) y quién lo cambió. Semilla: Diagnóstico = 3, Calibración = 4; Mantenimiento, Garantía, Otro y No aplica sin plazo. La semilla es `ON CONFLICT DO NOTHING`: un arranque nunca pisa lo editado. La 045 añade, igual de idempotente, la fila del tipo compuesto `diagnostico + calibracion` («Diagnóstico + Calibración») con `dias_habiles` NULL: esa columna **no se lee** para un compuesto (ver «Tipo compuesto») |
 | `portal.tmc_servicios_tipo` | Tipo de servicio puesto a mano, por `numero` de ticket de Desk (sin FK a `desk.*` ni a `tmc_plazos`): `clave` (la de `tmc_plazos`), `etiqueta` (la de ese tipo al elegirlo) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Quitarlo borra la fila. La 044 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca lo elegido |
 | `portal.tmc_estados_desk` | El **rol** de cada estado de Desk en el reloj del plazo: `clave` (el estado normalizado, PK, sin FK a `desk.*`), `etiqueta` (como se escribía al elegirlo), `rol` (`VARCHAR(10) NOT NULL DEFAULT 'cuenta'`, con `CHECK` a `cuenta` / `standby` / `terminado`) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los estados que alguien ha tocado: los demás valen `cuenta` sin estar en la tabla. Volver a `cuenta` no borra la fila (queda quién lo hizo). La 046 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nada nace marcado. ⚠️ La 046 se reescribió antes de desplegarse (antes tenía un booleano `standby`): una base donde hubiera corrido la versión vieja conserva la tabla vieja, porque `CREATE TABLE IF NOT EXISTS` no la cambia; ahí hay que borrarla a mano (`DROP TABLE portal.tmc_estados_desk`) y arrancar otra vez. **Desde la 050 lleva además `categoria` y `etapa`** (la categoría del estado en la agenda del taller; ver «Agenda: configuración»): `VARCHAR(12) NULL` las dos, con tres `CHECK` con nombre (`categoria` en `por_llegar` / `entrada` / `activa` / `standby` / `fin` / `fuera`; `etapa` en `diagnostico` / `proceso` / `verificacion`; y etapa sólo —y siempre— con `activa`). **Cada cosa lleva su firma**: `actualizado_por_id` / `actualizado_por` / `actualizado_en` son la del **rol del reloj**; `categoria_por_id` (`UUID NULL`) / `categoria_por` (`VARCHAR(254) NULL`) / `categoria_en` (`TIMESTAMPTZ NULL`), también de la 050, la de la **categoría y la etapa**. La 050 quita además el `NOT NULL` de `actualizado_por` y `actualizado_en`: una fila puede existir sólo por su categoría, y entonces su rol es el de por defecto y **no lo firma nadie** (las tres `actualizado_*` vacías). La 050 **sí siembra**: crea una fila por cada uno de los 23 estados de la propuesta que no la tenga (con `rol` por defecto, `cuenta`, sin firma del rol y con `categoria_por = 'semilla (migracion 050)'`), así que lo de «sólo hay fila para los estados que alguien ha tocado» ya no vale para ellos. **Ni la 050 ni `guardarCategoriaEstado` escriben `rol` ni `actualizado_*` en una fila que ya existe, y `guardarEstadoDesk` no escribe `categoria`, `etapa` ni `categoria_*`** |
@@ -97,6 +101,9 @@ segunda tabla, más abajo.
 | GET | `/trazabilidad/equipos` (`?hoy=`) | `{hoy, equipos[], ultimaImportacion, contactos[]}`. Equipos activos con estado, seguimiento, `ticket` (el abierto en Zoho Desk, o `null`) y `contacto: {nombre, email, origen: 'desk' \| 'manual', ticket} \| null` (a quién iría su aviso). `contactos` son los puestos a mano a clientes: `{clave, cliente, nombre, emails[], internos[], actualizadoPor, actualizadoEn}` (`internos` = los de `emails` que son de un dominio propio) |
 | PUT | `/trazabilidad/contactos` (`?hoy=`) | `{cliente, emails[], nombre?}`: pone a mano el contacto de un cliente y lo firma; `emails: []` lo quita (vuelve a valer el de Desk). Devuelve lo mismo que el GET de equipos, ya actualizado. 400 en `cliente` si no es un texto no vacío de 200 caracteres como mucho; 400 en `emails` si no es una lista o trae más de 5 correos distintos; 400 en `emails[i]` si ese correo no tiene forma de correo o pasa de 254 caracteres; 400 en `nombre` si no es texto o pasa de 200. Los correos se pasan a minúsculas y se quitan los repetidos. Un correo interno **sí** vale aquí (para probar con un buzón propio) y vuelve señalado en `internos`. **No envía nada** |
 | POST | `/trazabilidad/importaciones` (`?simular=1`) | `{archivo, filas[]}` → altas / cambios / retiradas. Con `simular` no escribe |
+| POST | `/trazabilidad/fst022/congelaciones` (`?simular=1`) | `{archivo, sha256, hoja, matriz, motivo?}`: congela la hoja entera (`matriz[N-1]` = fila N de Excel; cada celda, una `Celda`). Devuelve `{simulado, archivo, sha256, hoja, resumen, titulos[], anterior, congelacion}`; con `simular` no escribe. Permiso `importar`. **Con una vigente: 409 `congelacion_vigente` si quien pide no es administrador del portal** (también simulando) y, al confirmar, 400 en `motivo` si falta. 400 en `sha256` (64 hexadecimales en minúsculas), `archivo`, `hoja`, `matriz` (vacía, sin cabecera «Cliente / Serial», sin filas de equipo o más de 2000 filas), `matriz[i]` (más de 60 columnas) y `matriz[i][j]` (celda no admitida o texto de más de 2000 caracteres; el mensaje nunca repite el contenido). **413** por encima de 4 MB (`FST022_CUERPO_MAX`: parser propio en `index.ts`, antes del global de 2 MB) |
+| GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
+| GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
 | GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), el reloj con pausas (`rolEstado`: `cuenta` / `standby` / `terminado`, el del estado de ahora; `enPausa`; `diasPausados`; `pausas: [{desde, hasta}]`; `terminadoEl`; `medidoDesde`; `fechaLimiteBase` = la fecha sin pausas), `plazoDias`, `fechaLimite` (ya corrida), `diasHabiles` y `estadoPlazo` (`EN_PLAZO` / `VENCE_HOY` / `VENCIDO` / `SIN_PLAZO` en marcha; `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo terminado), y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto). Antes de leer apunta los cambios de estado (`registrarEstados`), si se puede: un fallo ahí no falla la petición |
@@ -149,7 +156,7 @@ escribe nadie a mano: lo apunta hub-api.
 | `avisos.write` | — | sí | — | sí | `POST /trazabilidad/avisos` |
 | `contactos.write` | — | sí | — | sí | `PUT /trazabilidad/contactos` |
 | `servicios.tipo.write` | — | — | sí | sí | `PUT /trazabilidad/servicios/:numero/tipo` |
-| `importar` | — | — | — | sí | `POST /trazabilidad/importaciones` (también con `?simular=1`) |
+| `importar` | — | — | — | sí | `POST /trazabilidad/importaciones` y `POST /trazabilidad/fst022/congelaciones` (también con `?simular=1`). Volver a congelar con una ya vigente pide además ser **administrador del portal** (lo mira `congelarFst022`, que es quien ve la base) |
 | `config.write` | — | — | — | sí | `PUT /trazabilidad/plazos`, `PUT /trazabilidad/estados` y los tres `PUT /trazabilidad/agenda/configuracion/…` (puestos, duraciones y categoría de cada estado) |
 | `agenda.asignar` | — | — | — | sí | `POST /trazabilidad/agenda/asignaciones` |
 | `agenda.liberar` | — | — | — | sí | `POST /trazabilidad/agenda/liberar` |
@@ -174,7 +181,7 @@ falla si otra lectura lo pide o si una lleva `escritura`.
 
 **En la UI**: `App.tsx` pide `GET /roles/me` al entrar y lo deja en `PermisosContext`; las vistas
 preguntan con `usePermisos().puede('<permiso>')`. Mientras no llega (o si falla) vale `SIN_ROL`,
-es decir, modo de consulta. Sin el permiso: no sale «Importar F-ST-022»; el seguimiento de la
+es decir, modo de consulta. Sin el permiso: no sale «Importar F-ST-022» (ni, dentro, «Congelar F-ST-022»); el seguimiento de la
 ficha va desactivado y sin «Guardar»; en «Avisos a clientes» no sale «Marcar como avisado» (sí
 «Redactar aviso» y copiar) ni, en la simulación, «Cambiar destinatario» ni el editor de contacto;
 el desplegable del tipo en «Servicios» va desactivado; y en «Configuración» los plazos, la agenda y
@@ -874,6 +881,55 @@ Lote 7 (`docs/trazabilidad-agenda-taller.md`, secciones G y J). «Taller» → �
   estado de una etapa se queda en ella aunque se le marque «equipo nuevo» (manda el estado).
 - **No se usan `alert` / `confirm` / `prompt`** del navegador.
 
+## F-ST-022: congelación y relevo de la Excel
+
+**Decisiones de Alfonso (09/10/2026).** La Excel F-ST-022 **deja de ser la fuente**: se congela su
+contenido de hoy y, por lotes, la releva el portal.
+
+- La congelación cubre **toda la hoja**: todas las marcas, no sólo GRIMM EDM 180.
+- `desk.equipos` de Desk 2.0 se acepta como **maestro de equipos** (se mantiene a mano allí; el
+  serial no es único; hay borrado físico).
+- La fecha de calibración saldrá del campo de Zoho «Fecha de Calibración»
+  (`cf_fecha_de_calibracion`, que se promoverá a columna en Desk 2.0). **Una corrección manual
+  manda sobre la fecha de Desk hasta que cambie la de ese ticket en Zoho.**
+- Exportar: la misma información en las mismas columnas, **sin calco visual**.
+- **Importar queda sólo para la congelación inicial.**
+
+**Lote 9a, construido: la congelación** (tablas, rutas y permiso en sus secciones de arriba).
+
+- **Qué se guarda**: la hoja cuyo nombre empieza por «trazabilidad», entera y **tal cual**, sin
+  arreglar ni rechazar nada: errores de Excel, texto donde va una fecha («No hay datos», «N/A»),
+  fechas imposibles, seriales en notación científica, seriales repetidos, filas sin serial o sin
+  cliente, el pie de totales y valores sueltos. De una fórmula, su último valor calculado («Días»
+  y «Vigencia» dependen del día en que se guardó el fichero); la fórmula y las celdas combinadas
+  no se guardan. Los errores van con el texto del fichero, en inglés («#VALUE!», no «#¡VALOR!»).
+- **Qué se deriva** (`prepararFst022`, pura): la cabecera es la fila con «Cliente» y «Serial» más
+  sus filas de subtítulos (hasta tres); **fila de equipo** = por debajo, con algo en cliente,
+  marca, modelo o serial y sin un rótulo del pie («totalRevisados», «total equipos», «% de
+  avance»); `clave_equipo` sigue las reglas de la importación (`asignarClaves`). Los «problemas»
+  son recuentos de filas de equipo, sólo para saber qué hay: nunca bloquean.
+- **Quién**: la primera, quien tenga `importar`. Con una vigente, sólo un **administrador del
+  portal** y con motivo; la anterior deja de ser la vigente, firmada, y **no se borra**. Todo o
+  nada, en una transacción con su bloqueo (`hashtext('portal.tmc_fst022_congelaciones')`).
+- **Pantalla**: bloque «Congelación de la F-ST-022» del diálogo «Importar F-ST-022»
+  (`Congelacion.tsx`), aparte de la importación: elegir el .xlsx → simulación (tamaño, filas de
+  equipo, problemas por tipo, columnas, sha256 abreviado; **sólo recuentos**) → confirmar. Enseña
+  la vigente y las anteriores; «Volver a congelar» sólo lo ve un administrador.
+- ⚠️ Las filas llevan clientes y seriales: ni un 400 ni el registro repiten su contenido (del
+  error de la base sólo sale su código). **La importación (`POST /importaciones`) no cambió** y
+  congelar no toca `tmc_equipos`.
+
+**Lo que viene (no construido)**:
+
+- **9b · maestro de equipos**: el inventario sale de `desk.equipos` (Desk 2.0) en vez de la
+  Excel, cruzado con la congelada por `serial_norm`.
+- **9c · fechas de calibración**: de `cf_fecha_de_calibracion` de los tickets, con la corrección
+  manual por encima (tabla propia de calibraciones; el permiso `calibraciones.write` ya existe).
+- **9d · pestaña «Trazabilidad F-ST-022»**: la hoja en el portal, editable, sobre la congelada y
+  lo que aporten 9b y 9c.
+- **9e · «Exportar F-ST-022»**: un .xlsx con la misma información en las mismas columnas (las
+  `cabeceras` guardadas dan el orden), sin calco visual.
+
 ## Pruebas
 
 - `npm test --workspace=apps/trazabilidad-mantenimientos` — lector del Excel, agregados, aviso,
@@ -926,5 +982,10 @@ Lote 7 (`docs/trazabilidad-agenda-taller.md`, secciones G y J). «Taller» → �
   su 403 por rol, sus 400, 404 y 409, la pasada a demanda (antes de leer, sin repetirse, y el
   aviso si falla) y la guarda de permisos ruta a ruta; el cortacircuitos, con reloj inyectado,
   en `fuente.test.ts`; y los huecos, en `agenda.test.ts`.
+- La congelación de la F-ST-022: el lector de la hoja entera con un libro ficticio generado en
+  la prueba (`src/lib/importar.test.ts`); en hub-api, `fst022.test.ts` (reglas, validadores,
+  guardas de la 055, cuál es la última migración e inmutabilidad leyendo el fuente),
+  `router.test.ts` (401, 403, 409, 400, 413 y que simular no escribe) y `fst022.db.test.ts` (la
+  055 repetida, una sola vigente, volver a congelar conserva la anterior, todo o nada).
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.
