@@ -30,7 +30,7 @@ const SIN_CLIENTE = '(sin cliente en Desk 2.0)';
  * un EDM 180 (el EDM 280 o el 1109 quedan fuera).
  */
 export function modeloEdm180(modelo: unknown): string | null {
-  const m = /^(?:GRIMM)?EDM180([A-Z]*)$/.exec(String(modelo ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''));
+  const m = /^(?:GRIMM)?EDM180([A-Z]{0,2})$/.exec(String(modelo ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''));
   return m ? `EDM 180${m[1]}` : null;
 }
 
@@ -158,7 +158,7 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
   const claves = new Set(inventario.map((p) => p.clave));
   const altas = nuevos.map((e): FilaAlta => {
     const serial = e.serial.trim();
-    const base = claveSerial(serial);
+    const base = claveSerial(serial).slice(0, CLAVE_MAX - 4); // sitio para el sufijo «-2»… de una clave ya cogida
     let clave = base;
     for (let i = 2; claves.has(clave); i++) clave = `${base}-${i}`;
     claves.add(clave);

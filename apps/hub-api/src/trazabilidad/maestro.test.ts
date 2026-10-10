@@ -29,7 +29,7 @@ describe('reconocer un GRIMM EDM 180', () => {
     expect(modeloEdm180(escrito)).toBe(esperado);
   });
 
-  it.each(['EDM 280', 'EDM1800', 'EDM 18', '1109', 'WS600', 'APNA-370', '', null, undefined, 180])('%j no es un EDM 180', (modelo) => {
+  it.each(['EDM 280', 'EDM1800', 'EDM 18', '1109', 'WS600', 'APNA-370', 'EDM180 con accesorios', '', null, undefined, 180])('%j no es un EDM 180', (modelo) => {
     expect(modeloEdm180(modelo)).toBeNull();
   });
 
@@ -112,6 +112,14 @@ describe('el plan del cruce', () => {
   it('un serial vacío o más largo que la clave no entra: se cuenta aparte', () => {
     const plan = planMaestro([desk('  '), desk('X'.repeat(CLAVE_MAX + 1))], [], []);
     expect(plan.recuentos).toMatchObject({ maestro: 2, sinSerial: 2, altas: 0 });
+  });
+
+  it('la clave de un alta cabe siempre en su columna, también con el serial más largo y la clave ya cogida', () => {
+    const largo = 'X'.repeat(CLAVE_MAX);
+    const plan = planMaestro([desk(largo)], [portal('OTRO', { clave: largo.slice(0, CLAVE_MAX - 4) })], []);
+    expect(plan.altas).toHaveLength(1);
+    expect(plan.altas[0].clave).toBe(`${'X'.repeat(CLAVE_MAX - 4)}-2`);
+    expect(plan.altas[0].serial).toBe(largo);
   });
 
   it('un equipo ya enlazado casa por su id de Desk 2.0 aunque allí le corrijan el serial: su clave no cambia', () => {
