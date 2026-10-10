@@ -52,14 +52,14 @@ const toSincronizacion = (r: Row): SincronizacionMaestro => ({ id: Number(r.id),
 /**
  * El plan en recuentos, el estado del maestro y la última sincronización. Sin
  * maestro no hay plan (no es un error: se dice por qué). `conDetalle` añade los
- * cambios uno a uno —con clientes y seriales—, acotados: sólo para quien puede aplicarlos.
+ * cambios uno a uno y lo que el plan no toca (sólo en el portal y ambiguos) —con clientes y seriales—, acotados: sólo para quien puede aplicarlos.
  */
 export async function leerPlanMaestro(db: Db, leer: LectorMaestro, conDetalle: boolean): Promise<RespuestaPlanMaestro> {
   const [lectura, { rows }] = await Promise.all([leer(), db.query(`SELECT ${COLS_SINCRONIZACION} FROM portal.tmc_maestro_sincronizaciones ORDER BY id DESC LIMIT 1`)]);
   const ultima = rows[0] ? toSincronizacion(rows[0]) : null;
   if (!lectura.disponible) return { maestro: estadoDe(lectura), plan: null, ultima };
   const { plan, huella } = await calcular(db, lectura.equipos);
-  return { maestro: estadoDe(lectura), plan: { huella, recuentos: plan.recuentos }, ultima, ...(conDetalle ? { detalle: plan.cambios.slice(0, DETALLE_MAX), detalleTotal: plan.cambios.length } : {}) };
+  return { maestro: estadoDe(lectura), plan: { huella, recuentos: plan.recuentos }, ultima, ...(conDetalle ? { detalle: plan.cambios.slice(0, DETALLE_MAX), detalleTotal: plan.cambios.length, revisar: { soloPortal: plan.soloPortal.slice(0, DETALLE_MAX), ambiguos: plan.ambiguos.slice(0, DETALLE_MAX) } } : {}) };
 }
 
 /**

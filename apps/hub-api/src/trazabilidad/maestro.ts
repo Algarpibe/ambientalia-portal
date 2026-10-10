@@ -12,9 +12,12 @@
  * del serial allí no crea un equipo nuevo), y si no (2) por serial con
  * `serialNorm` (dominio.ts): mayúsculas y sin espacios alrededor, lo mismo
  * que `upper(trim(…))`, la regla con que el portal ya cruza con los tickets
- * de Desk y la que guardó la congelación. Un serial repetido en cualquiera de
- * los dos lados es AMBIGUO: no se enlaza ni se toca. Lo que sólo está en el
- * portal tampoco. La fecha de calibración no es de aquí (lote 9c).
+ * de Desk y la que guardó la congelación. Un serial repetido en el maestro es
+ * AMBIGUO: no se enlaza ni se toca. Repetido en el portal, casa con su única
+ * fila ACTIVA (las inactivas son copias retiradas: ni se tocan ni cuentan como
+ * ambiguas); con dos o más activas, o con ninguna, también es ambiguo. Lo que
+ * sólo está en el portal tampoco se toca. La fecha de calibración no es de
+ * aquí (lote 9c). Cualquier corrección de un equipo se hace en Desk 2.0.
  */
 import { claveCliente, claveSerial, serialNorm } from './dominio.js';
 import type { MotivoRespaldo } from './fuente.js';
@@ -64,14 +67,16 @@ export interface RecuentosMaestro {
   /** Sólo en el portal: no se tocan. */
   soloPortal: number;
   soloPortalActivos: number;
-  /** Con el serial repetido en alguno de los dos lados: no se enlazan ni se tocan. */
+  /** Con el serial repetido sin que se sepa cuál es cuál: no se enlazan ni se tocan (ver `planMaestro`). */
   ambiguosMaestro: number;
   ambiguosPortal: number;
+  /** Filas INACTIVAS del portal con el serial de otra fila que es la que vale (la única activa o la ya enlazada): no se tocan ni son ambiguas. */
+  copiasInactivas: number;
   /** Del maestro, sin serial o con uno más largo que la clave. */
   sinSerial: number;
   inactivos: number;
-  /** A los que les cambia el cliente de verdad (por `claveCliente`), no sólo cómo se escribe. */
-  cambianDeCliente: number;
+  /** De `cambios.cliente`, a los que el nombre les cambia por otro: no es sólo mayúsculas, tildes, puntuación o forma societaria (`mismoNombre`). */
+  clienteOtroNombre: number;
   /** Contactos puestos a mano cuyo cliente tiene hoy algún equipo activo y dejaría de tenerlo. */
   contactosSinEquipos: number;
 }
@@ -79,7 +84,33 @@ export interface RecuentosMaestro {
 /** Lo que se escribe en un equipo que casa (todo sale del maestro menos la clave) y en un alta. */
 export interface FilaEnlace { clave: string; deskId: string; serial: string; cliente: string; modelo: string; activo: boolean }
 export type FilaAlta = Omit<FilaEnlace, 'activo'> & { marca: string };
-export interface PlanMaestro { recuentos: RecuentosMaestro; enlaces: FilaEnlace[]; altas: FilaAlta[]; cambios: CambioMaestro[] }
+/** Un equipo que el plan NO toca, para revisarlo: del portal (`clave` = la suya) o de Desk 2.0 (`clave` = su id allí). Lleva cliente y serial. */
+export interface EquipoRevisar { origen: 'portal' | 'desk'; clave: string; serial: string; cliente: string; activo: boolean }
+export interface PlanMaestro { recuentos: RecuentosMaestro; enlaces: FilaEnlace[]; altas: FilaAlta[]; cambios: CambioMaestro[]; soloPortal: EquipoRevisar[]; ambiguos: EquipoRevisar[] }
+
+/** Formas societarias y coletillas que se quitan del final de un nombre para compararlo (ya sin puntos: «S.A.S.» es `sas`). */
+const FORMAS_SOCIETARIAS = new Set(['sas', 'sa', 'ltda', 'limitada', 'bic', 'esp', 'eu', 'sca', 'scs', 'cia', 'y']);
+
+/**
+ * Un nombre de cliente reducido a lo que lo distingue: `claveCliente` (sin
+ * mayúsculas ni tildes), sin puntuación y sin la forma societaria del final
+ * (S.A.S., S.A., Ltda., BIC, E.S.P., «y Cía»…). Nunca lo deja vacío.
+ */
+function nucleoNombre(nombre: unknown): string {
+  const palabras = claveCliente(nombre).replace(/\./g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\bs a s\b/g, 'sas').replace(/\bs a\b/g, 'sa').replace(/\be s p\b/g, 'esp').split(' ').filter(Boolean);
+  while (palabras.length > 1 && FORMAS_SOCIETARIAS.has(palabras[palabras.length - 1])) palabras.pop();
+  return palabras.join(' ');
+}
+
+/**
+ * ¿Dos nombres de cliente son el mismo, escrito de otra forma? Sólo se
+ * igualan mayúsculas, tildes, espacios, puntuación y la forma societaria (el
+ * maestro trae razones sociales; la Excel, nombres cortos). NO adivina que
+ * unas siglas, un nombre más largo o una errata sean el mismo cliente.
+ */
+export function mismoNombre(a: unknown, b: unknown): boolean {
+  return nucleoNombre(a) === nucleoNombre(b);
+}
 
 const limpio = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim();
 const texto = (v: string | boolean): string => (typeof v !== 'boolean' ? v : v ? 'sí' : 'no');
@@ -101,27 +132,36 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
   const porDeskId = new Map(inventario.filter((p) => p.deskId).map((p) => [p.deskId, p]));
   const r: RecuentosMaestro = {
     maestro: m.length, portal: inventario.length, casan: 0, enlaces: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0,
-    soloPortal: 0, soloPortalActivos: 0, ambiguosMaestro: 0, ambiguosPortal: 0, sinSerial: 0, inactivos: m.filter((e) => !e.activo).length, cambianDeCliente: 0, contactosSinEquipos: 0,
+    soloPortal: 0, soloPortalActivos: 0, ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 0, sinSerial: 0, inactivos: m.filter((e) => !e.activo).length, clienteOtroNombre: 0, contactosSinEquipos: 0,
   };
+  const delSerial = new Map<string, EquipoPortal[]>();
+  for (const p of inventario) delSerial.set(serialNorm(p.serial), [...(delSerial.get(serialNorm(p.serial)) ?? []), p]);
+  const soloPortal: EquipoRevisar[] = [];
+  const ambiguos: EquipoRevisar[] = [];
 
-  // 1. Por id de Desk 2.0. 2. Los demás, por serial; el repetido es ambiguo.
+  // 1. Por id de Desk 2.0. 2. Los demás, por serial. Si el portal repite el serial, vale su ÚNICA fila
+  // activa (las inactivas son copias que dejó retiradas una reimportación antigua); con dos o más
+  // activas, con ninguna, o si el serial se repite en el maestro, es ambiguo y no se toca.
   const pares = new Map<string, EquipoMaestro>();
   const sueltos = m.filter((e) => {
     const p = porDeskId.get(e.id);
     if (p) pares.set(p.clave, e);
     return !p;
   });
-  const libres = new Map(inventario.filter((p) => !pares.has(p.clave)).map((p) => [serialNorm(p.serial), p]));
   const nuevos: EquipoMaestro[] = [];
   for (const e of sueltos) {
     const s = serialNorm(e.serial);
-    const p = libres.get(s);
+    const filas = delSerial.get(s) ?? [];
+    const activas = filas.filter((p) => p.activo);
+    const p = filas.length === 1 ? filas[0] : activas.length === 1 ? activas[0] : null;
     if (s === '' || s.length > CLAVE_MAX) r.sinSerial++;
+    else if (enMaestro.get(s) === 1 && filas.length === 0) {
+      if (e.activo) nuevos.push(e);
+    } else if (enMaestro.get(s) === 1 && p && !pares.has(p.clave)) pares.set(p.clave, e);
     // También es ambiguo el que trae el serial de un equipo del portal ya enlazado con otro.
-    else if (enMaestro.get(s)! > 1 || (enPortal.get(s) ?? 0) > 1 || (!p && enPortal.has(s))) r.ambiguosMaestro++;
-    else if (p) pares.set(p.clave, e);
-    else if (e.activo) nuevos.push(e);
+    else ambiguos.push({ origen: 'desk', clave: e.id, serial: e.serial.trim(), cliente: limpio(e.cliente), activo: e.activo });
   }
+  r.ambiguosMaestro = ambiguos.length;
 
   const enlaces: FilaEnlace[] = [];
   const cambios: CambioMaestro[] = [];
@@ -133,11 +173,12 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
     const e = pares.get(p.clave);
     if (!e) {
       const s = serialNorm(p.serial);
-      if ((enPortal.get(s) ?? 0) > 1 || (enMaestro.get(s) ?? 0) > 1) r.ambiguosPortal++;
-      else {
-        r.soloPortal++;
-        if (p.activo) r.soloPortalActivos++;
-      }
+      // De las filas con su serial, las que «valen»: la ya enlazada o la activa. Si es una sola y no es ésta, ésta es su copia inactiva.
+      const valen = (delSerial.get(s) ?? []).filter((x) => pares.has(x.clave) || x.activo);
+      const yo: EquipoRevisar = { origen: 'portal', clave: p.clave, serial: p.serial, cliente: p.cliente, activo: p.activo };
+      if ((enMaestro.get(s) ?? 0) > 1 || (enPortal.get(s)! > 1 && valen.length !== 1)) ambiguos.push(yo);
+      else if (valen.length === 1 && valen[0] !== p) r.copiasInactivas++;
+      else soloPortal.push(yo);
       if (p.activo) despues.add(claveCliente(p.cliente));
       continue;
     }
@@ -146,7 +187,7 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
     enlaces.push(fila);
     r.casan++;
     if (p.deskId !== e.id) r.enlaces++;
-    if (claveCliente(fila.cliente) !== claveCliente(p.cliente)) r.cambianDeCliente++;
+    if (!mismoNombre(fila.cliente, p.cliente)) r.clienteOtroNombre++;
     if (fila.activo) despues.add(claveCliente(fila.cliente));
     for (const campo of CAMPOS_MAESTRO) {
       if (fila[campo] === p[campo]) continue;
@@ -168,8 +209,11 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
     return { clave, deskId: e.id, serial, cliente, marca: limpio(e.marca).slice(0, 60) || 'GRIMM', modelo: modeloEdm180(e.modelo)! };
   });
   r.altas = altas.length;
+  r.soloPortal = soloPortal.length;
+  r.soloPortalActivos = soloPortal.filter((p) => p.activo).length;
+  r.ambiguosPortal = ambiguos.length - r.ambiguosMaestro;
   r.contactosSinEquipos = contactos.filter((c) => antes.has(c) && !despues.has(c)).length;
-  return { recuentos: r, enlaces, altas, cambios };
+  return { recuentos: r, enlaces, altas, cambios, soloPortal, ambiguos };
 }
 
 /** Si el maestro contestó en esta petición y, si no, por qué (un motivo de la lista, nunca el error). */
@@ -185,6 +229,8 @@ export interface RespuestaPlanMaestro {
   ultima: SincronizacionMaestro | null;
   detalle?: CambioMaestro[];
   detalleTotal?: number;
+  /** También sólo con el permiso: lo que el plan no toca, equipo a equipo (acotado como `detalle`). */
+  revisar?: { soloPortal: EquipoRevisar[]; ambiguos: EquipoRevisar[] };
 }
 
 /** Una marca del cruce informativo, sólo recuentos: filas de equipo de la congelación (`v3`) y equipos del maestro (`desk`) de esa marca. */
