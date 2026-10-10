@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardList, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { api, type Inventario } from './api';
-import type { EstadoCalibracion, MiRol } from './dominio';
-import { GRUPOS, SIN_ROL, etiquetaMiRol, grupoDe, motivoSinPermiso, primeraSeccion, seccionDeHash, seccionesDe, tiene, type Seccion } from './lib/navegacion';
+import type { CongelacionFst022, EstadoCalibracion, MiRol } from './dominio';
+import { GRUPOS, SIN_ROL, etiquetaMiRol, grupoDe, motivoSinPermiso, primeraSeccion, seccionDeHash, seccionesDe, type Seccion } from './lib/navegacion';
+import { textoOrigen, vigenteDe } from './lib/origen';
 import { fmtFecha } from './lib/vistas';
 import { PermisosContext } from './permisos';
 import { Alert, Button, Loading } from './ui';
@@ -11,7 +12,6 @@ import Equipos, { FILTRO_VACIO, type Filtro } from './vistas/Equipos';
 import Calendario from './vistas/Calendario';
 import Avisos from './vistas/Avisos';
 import FichaEquipo from './vistas/FichaEquipo';
-import Importar from './vistas/Importar';
 import Servicios from './vistas/Servicios';
 import Agenda from './vistas/Agenda';
 import Configuracion from './vistas/Configuracion';
@@ -21,6 +21,10 @@ import Roles from './vistas/Roles';
  * Trazabilidad Mantenimientos Clientes: vencimientos de calibración de los
  * GRIMM EDM 180 de los clientes (hoja F-ST-022), para avisarles antes de que
  * se les venza y programar el servicio.
+ *
+ * La Excel F-ST-022 ya no se sube desde aquí (se retiró el 10/10/2026): la
+ * hoja está congelada y la cabecera dice cuándo, desde qué archivo y quién;
+ * el detalle, en «Configuración» → «Origen de los datos».
  *
  * Además, «Servicios» sigue los tickets abiertos en Zoho Desk (de cualquier
  * marca) contra el plazo de su tipo de servicio, que se fija en «Configuración»,
@@ -53,7 +57,8 @@ export default function App() {
   const [filtro, setFiltro] = useState<Filtro>(FILTRO_VACIO);
   const [calMes, setCalMes] = useState<{ anio: number; mes: number } | null>(null);
   const [ficha, setFicha] = useState<string | null>(null);
-  const [importando, setImportando] = useState(false);
+  /** Las congelaciones de la F-ST-022, para decir en la cabecera de dónde salen los datos. Si no llegan, la cabecera no lo dice y nada más. */
+  const [congelaciones, setCongelaciones] = useState<CongelacionFst022[] | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const avisoTimer = useRef<number | undefined>(undefined);
 
@@ -81,6 +86,11 @@ export default function App() {
         setErrorRol(null);
       })
       .catch((e: Error) => setErrorRol(e.message));
+    // Sólo para la línea de la cabecera: si falla no se avisa (la tarjeta de «Configuración» sí lo dice).
+    api
+      .congelaciones()
+      .then((r) => setCongelaciones(r.congelaciones))
+      .catch(() => setCongelaciones(null));
   }, []);
 
   useEffect(() => {
@@ -119,12 +129,12 @@ export default function App() {
 
   const equipos = inv?.equipos ?? [];
   const equipoFicha = ficha ? equipos.find((e) => e.clave === ficha) ?? null : null;
-  const ult = inv?.ultimaImportacion;
+  /** «F-ST-022 congelada el … desde «…» por …», o null si no hay congelación (o aún no se sabe). */
+  const origen = textoOrigen(vigenteDe(congelaciones));
   const grupo = grupoDe(tab);
   /** Las secciones de «Clientes y calibraciones» pintan el inventario de la F-ST-022; las demás, no. */
   const deInventario = grupo === 'clientes';
   const gestionaRoles = yo?.canManageRoles ?? false;
-  const puedeImportar = tiene(yo, 'importar');
   const secciones = seccionesDe(grupo, gestionaRoles);
 
   return (
@@ -137,12 +147,7 @@ export default function App() {
               <h1 className="text-xl font-semibold text-gray-900">Trazabilidad Mantenimientos Clientes</h1>
               <p className="max-w-2xl text-sm text-gray-500">
                 GRIMM EDM 180 · vigencia de calibración de 365 días · hoy {fmtFecha(inv?.hoy)}
-                {ult && (
-                  <>
-                    {' '}
-                    · importado el {fmtFecha(ult.en)} desde «{ult.archivo}» por {ult.por}
-                  </>
-                )}
+                {origen && <> · {origen}</>}
               </p>
             </div>
           </div>
@@ -158,11 +163,6 @@ export default function App() {
             {deInventario && (
               <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar">
                 {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
-              </Button>
-            )}
-            {puedeImportar && (
-              <Button variant="primary" onClick={() => setImportando(true)}>
-                <FileSpreadsheet className="h-4 w-4" aria-hidden /> Importar F-ST-022
               </Button>
             )}
           </div>
@@ -203,7 +203,7 @@ export default function App() {
           ))}
         </nav>
 
-        {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario importado. */}
+        {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario. */}
         {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
         {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} notificar={notificar} />}
         {tab === 'configuracion' && <Configuracion notificar={notificar} />}
@@ -222,21 +222,12 @@ export default function App() {
         {deInventario && inv && equipos.length === 0 && (
           <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-sm">
             <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-gray-300" aria-hidden />
-            <p className="mb-1 font-semibold text-gray-800">Todavía no hay equipos cargados</p>
-            {puedeImportar ? (
-              <>
-                <p className="mx-auto mb-4 max-w-md text-sm text-gray-500">
-                  Importa la hoja F-ST-022 «Trazabilidad Mttos Clientes» para ver los GRIMM EDM 180, sus vencimientos de calibración y el calendario.
-                </p>
-                <Button variant="primary" onClick={() => setImportando(true)}>
-                  Importar F-ST-022
-                </Button>
-              </>
-            ) : (
-              <p className="mx-auto max-w-md text-sm text-gray-500">
-                Cuando el Director Técnico importe la hoja F-ST-022 «Trazabilidad Mttos Clientes» verás aquí los GRIMM EDM 180, sus vencimientos de calibración y el calendario.
-              </p>
-            )}
+            <p className="mb-1 font-semibold text-gray-800">No hay equipos en el inventario</p>
+            <p className="mx-auto mb-4 max-w-md text-sm text-gray-500">
+              Aquí se ven los GRIMM EDM 180 de los clientes, sus vencimientos de calibración y el calendario. La Excel F-ST-022 ya no se sube desde la app: el origen de los datos está en
+              «Configuración».
+            </p>
+            <Button onClick={() => irA('configuracion')}>Ver el origen de los datos</Button>
           </div>
         )}
 
@@ -252,17 +243,6 @@ export default function App() {
         )}
 
         {equipoFicha && <FichaEquipo equipo={equipoFicha} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} />}
-        {importando && puedeImportar && (
-          <Importar
-            notificar={notificar}
-            onClose={() => setImportando(false)}
-            onHecho={async (n) => {
-              setImportando(false);
-              await cargar();
-              notificar(`Importación aplicada: ${n} equipos`);
-            }}
-          />
-        )}
         {aviso && (
           <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
             {aviso}
