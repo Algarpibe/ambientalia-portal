@@ -183,7 +183,7 @@ describe('el plan y su aplicación', () => {
 
   const ESPERADO = {
     maestro: 5, portal: 6, casan: 3, enlaces: 3, cambios: { cliente: 2, modelo: 1, serial: 1, activo: 1 }, altas: 1, soloPortal: 1, soloPortalActivos: 1,
-    ambiguosMaestro: 1, ambiguosPortal: 2, sinSerial: 0, inactivos: 1, cambianDeCliente: 2, contactosSinEquipos: 1,
+    ambiguosMaestro: 1, ambiguosPortal: 2, copiasInactivas: 0, sinSerial: 0, inactivos: 1, clienteOtroNombre: 1, contactosSinEquipos: 1,
   };
 
   it('el plan, en recuentos, y su detalle; leerlo no escribe nada', async () => {
@@ -243,7 +243,7 @@ describe('el plan y su aplicación', () => {
     await sincronizar();
     const antes = [await foto(), await loDemas()];
     const otra = await leerPlanMaestro(hub, maestro(), true);
-    expect(otra.plan!.recuentos).toMatchObject({ casan: 4, enlaces: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0, cambianDeCliente: 0, contactosSinEquipos: 0, soloPortal: 1, ambiguosPortal: 2 });
+    expect(otra.plan!.recuentos).toMatchObject({ casan: 4, enlaces: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0, clienteOtroNombre: 0, contactosSinEquipos: 0, soloPortal: 1, ambiguosPortal: 2 });
     expect(otra.detalle).toEqual([]);
     expect(otra.ultima).toMatchObject({ id: 1, por: 'director@example.com' });
     const s = await sincronizar(otra.plan!.huella);
@@ -317,6 +317,48 @@ describe('el plan y su aplicación', () => {
     await c.query('ROLLBACK');
     c.release();
     expect((await enEspera).id).toBe(1);
+  });
+});
+
+// Lo que se vio en producción: una reimportación antigua dejó retirada (inactiva) una fila con el
+// serial de un equipo que sigue activo en otra fila. El maestro tiene ese serial una vez.
+describe('un serial que el portal tiene dos veces: una fila activa y otra inactiva', () => {
+  beforeEach(async () => {
+    await enPortal('18A00030', 'Cliente Ficticio K', '2025-03-03', { activo: false });
+    await enPortal('18A00030', 'Cliente Ficticio L', '2025-11-11', { clave: '18A00030-2' });
+    await enPortal('18A00031', 'Cliente Ficticio M', '2025-01-01');
+    await enPortal('18A00031', 'Cliente Ficticio N', '2025-01-01', { clave: '18A00031-2' });
+    await repo.guardarSeguimiento(hub, '18A00030-2', { enAmbientalia: false, avisoEnviado: '2026-09-01', servicioProgramado: null, nota: 'nota de la activa' }, actor);
+    await enDesk('eq-30', '18A00030', 'Cliente Ficticio L S.A.S.');
+    await enDesk('eq-31', '18A00031', 'Cliente Ficticio M');
+  });
+
+  it('casa con la activa y la enlaza; la inactiva queda tal cual y se cuenta como copia; con dos activas sigue ambiguo; y una segunda sincronización no cambia nada', async () => {
+    const antes = await foto();
+    const r = await leerPlanMaestro(hub, maestro(), true);
+    expect(r.plan!.recuentos).toMatchObject({ maestro: 2, portal: 4, casan: 1, enlaces: 1, cambios: { cliente: 1, modelo: 0, serial: 0, activo: 0 }, clienteOtroNombre: 0, altas: 0, copiasInactivas: 1, ambiguosMaestro: 1, ambiguosPortal: 2, soloPortal: 0 });
+    expect(r.revisar).toEqual({
+      soloPortal: [],
+      ambiguos: [
+        { origen: 'desk', clave: 'eq-31', serial: '18A00031', cliente: 'Cliente Ficticio M', activo: true },
+        { origen: 'portal', clave: '18A00031', serial: '18A00031', cliente: 'Cliente Ficticio M', activo: true },
+        { origen: 'portal', clave: '18A00031-2', serial: '18A00031', cliente: 'Cliente Ficticio N', activo: true },
+      ],
+    });
+    await sincronizar(r.plan!.huella);
+
+    const despues = await foto();
+    const de = (clave: string) => despues.find((e) => e.clave === clave);
+    expect(de('18A00030-2')).toMatchObject({ cliente: 'Cliente Ficticio L S.A.S.', activo: true, desk_id: 'eq-30', origen: 'desk', calibracion: '2025-11-11' });
+    for (const clave of ['18A00030', '18A00031', '18A00031-2']) expect(de(clave)).toEqual(antes.find((e) => e.clave === clave));
+    expect((await repo.listarEquipos(hub, HOY)).find((e) => e.clave === '18A00030-2')).toMatchObject({ cliente: 'Cliente Ficticio L S.A.S.', seguimiento: { nota: 'nota de la activa' } });
+
+    const otra = await leerPlanMaestro(hub, maestro(), true);
+    expect(otra.plan!.recuentos).toMatchObject({ casan: 1, enlaces: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, copiasInactivas: 1, ambiguosPortal: 2 });
+    expect(otra.detalle).toEqual([]);
+    await sincronizar(otra.plan!.huella);
+    expect(await foto()).toEqual(despues);
+    expect((await auditoria()).map((a) => a.cambios.length)).toEqual([1, 0]);
   });
 });
 

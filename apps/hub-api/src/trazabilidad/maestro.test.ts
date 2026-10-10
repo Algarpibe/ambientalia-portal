@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { serialNorm } from './dominio.js';
 import { crearLectorMaestro } from './maestro-desk2.js';
-import { CLAVE_MAX, cruceFst022, esGrimmEdm180, modeloEdm180, planMaestro, type EquipoMaestro, type EquipoPortal } from './maestro.js';
+import { CLAVE_MAX, cruceFst022, esGrimmEdm180, mismoNombre, modeloEdm180, planMaestro, type EquipoMaestro, type EquipoPortal } from './maestro.js';
 import { TzError, parseHuellaPlan } from './types.js';
 
 // El maestro de equipos (lote 9b), sin base: la regla pura del cruce entre
@@ -65,7 +65,7 @@ describe('el plan del cruce', () => {
       desk('18A00004', { activo: false }),
     ];
     const plan = planMaestro(maestro, [portal('18A00001'), portal('18A00002'), portal('18A00003'), portal('18A00004')], []);
-    expect(plan.recuentos).toMatchObject({ casan: 4, enlaces: 4, cambios: { cliente: 1, modelo: 1, serial: 0, activo: 1 }, inactivos: 1, cambianDeCliente: 1 });
+    expect(plan.recuentos).toMatchObject({ casan: 4, enlaces: 4, cambios: { cliente: 1, modelo: 1, serial: 0, activo: 1 }, inactivos: 1, clienteOtroNombre: 0 });
     expect(plan.cambios).toEqual([
       { clave: '18A00001', campo: 'cliente', antes: 'Cliente Ficticio A', despues: 'Cliente Ficticio A S.A.S.' },
       { clave: '18A00002', campo: 'modelo', antes: 'EDM 180C', despues: 'EDM 180D' },
@@ -75,7 +75,7 @@ describe('el plan del cruce', () => {
 
   it('un cliente que sólo cambia de escritura (mayúsculas, tildes, espacios) es un cambio de texto, no un cambio de cliente', () => {
     const plan = planMaestro([desk('18A00001', { cliente: 'CLIENTE  FICTICIO  Á' })], [portal('18A00001', { cliente: 'Cliente Ficticio A' })], ['cliente ficticio a']);
-    expect(plan.recuentos).toMatchObject({ cambios: { ...SIN_CAMBIOS, cliente: 1 }, cambianDeCliente: 0, contactosSinEquipos: 0 });
+    expect(plan.recuentos).toMatchObject({ cambios: { ...SIN_CAMBIOS, cliente: 1 }, clienteOtroNombre: 0, contactosSinEquipos: 0 });
     expect(plan.enlaces[0].cliente).toBe('CLIENTE FICTICIO Á');
   });
 
@@ -107,6 +107,110 @@ describe('el plan del cruce', () => {
     expect(plan.recuentos).toMatchObject({ casan: 1, altas: 0, ambiguosMaestro: 3, ambiguosPortal: 3, soloPortal: 0 });
     expect(plan.enlaces.map((e) => e.clave)).toEqual(['18A00006']);
     expect(plan.altas).toEqual([]);
+  });
+
+  // Lo que se vio en producción: una reimportación antigua dejó una fila retirada (inactiva) con el
+  // serial de un equipo que sigue activo, y por esa copia el activo se quedaba sin enlazar.
+  describe('un serial repetido en el portal', () => {
+    const copia = (serial: string, n: number, activo: boolean, extra: Partial<EquipoPortal> = {}) => portal(serial, { clave: n === 1 ? serial : `${serial}-${n}`, activo, ...extra });
+    const plan = (maestro: EquipoMaestro[], inventario: EquipoPortal[]) => planMaestro(maestro, inventario, []);
+
+    it('una activa y una inactiva, y el maestro lo tiene una vez: casa con la activa; la inactiva no se toca y se cuenta aparte, no como ambigua', () => {
+      const d = desk('18a00004', { cliente: 'Cliente Ficticio B' });
+      for (const inventario of [[copia('18A00004', 1, true), copia('18A00004', 2, false)], [copia('18A00004', 1, false), copia('18A00004', 2, true)]]) {
+        const p = plan([d], inventario);
+        const activa = inventario.find((x) => x.activo)!.clave;
+        expect(p.recuentos).toMatchObject({ casan: 1, enlaces: 1, altas: 0, ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 1, soloPortal: 0 });
+        expect(p.enlaces).toEqual([{ clave: activa, deskId: d.id, serial: '18a00004', cliente: 'Cliente Ficticio B', modelo: 'EDM 180C', activo: true }]);
+        expect(p.ambiguos).toEqual([]);
+      }
+    });
+
+    it('una activa y varias inactivas: igual', () => {
+      const p = plan([desk('18A00004')], [copia('18A00004', 1, false), copia('18A00004', 2, true), copia('18A00004', 3, false)]);
+      expect(p.recuentos).toMatchObject({ casan: 1, copiasInactivas: 2, ambiguosPortal: 0, ambiguosMaestro: 0 });
+      expect(p.enlaces.map((e) => e.clave)).toEqual(['18A00004-2']);
+    });
+
+    it.each([
+      ['dos activas', [true, true], 2],
+      ['ninguna activa', [false, false], 2],
+      ['dos activas y una inactiva', [true, true, false], 3],
+    ])('%s: sigue siendo ambiguo, en los dos lados, y no se toca nada', (_caso, activos, n) => {
+      const p = plan([desk('18A00004')], activos.map((a, i) => copia('18A00004', i + 1, a)));
+      expect(p.recuentos).toMatchObject({ casan: 0, altas: 0, ambiguosMaestro: 1, ambiguosPortal: n, copiasInactivas: 0 });
+      expect(p.enlaces).toEqual([]);
+    });
+
+    it('repetido también en el maestro: ambiguo aunque en el portal sólo una esté activa', () => {
+      const p = plan([desk('18A00004'), desk('18A00004', { cliente: 'Cliente Ficticio B' })], [copia('18A00004', 1, true), copia('18A00004', 2, false)]);
+      expect(p.recuentos).toMatchObject({ casan: 0, altas: 0, ambiguosMaestro: 2, ambiguosPortal: 2, copiasInactivas: 0 });
+    });
+
+    it('el enlace por id sigue mandando: la fila ya enlazada casa aunque esté inactiva, y la otra activa con su serial es ambigua', () => {
+      const d = desk('18A00004');
+      const p = plan([d], [copia('18A00004', 1, false, { deskId: d.id }), copia('18A00004', 2, true)]);
+      expect(p.enlaces.map((e) => e.clave)).toEqual(['18A00004']);
+      expect(p.recuentos).toMatchObject({ casan: 1, enlaces: 0, ambiguosPortal: 1, copiasInactivas: 0 });
+    });
+
+    it('si el maestro no tiene ese serial: la activa es «sólo en el portal» y la inactiva, su copia', () => {
+      const p = plan([], [copia('18A00004', 1, true), copia('18A00004', 2, false)]);
+      expect(p.recuentos).toMatchObject({ soloPortal: 1, soloPortalActivos: 1, copiasInactivas: 1, ambiguosPortal: 0 });
+    });
+
+    it('idempotente: aplicado, el siguiente no trae cambios; y si el maestro lo desactiva después, la copia sigue siendo copia', () => {
+      const d = desk('18A00004');
+      const inventario = [copia('18A00004', 1, true), copia('18A00004', 2, false)];
+      const p = plan([d], inventario);
+      const aplicado = inventario.map((x) => ({ ...x, ...p.enlaces.find((e) => e.clave === x.clave) }));
+      const otra = plan([d], aplicado);
+      expect(otra.recuentos).toMatchObject({ casan: 1, enlaces: 0, cambios: SIN_CAMBIOS, copiasInactivas: 1, ambiguosPortal: 0 });
+      expect(otra.cambios).toEqual([]);
+      const inactivo = plan([{ ...d, activo: false }], aplicado);
+      expect(inactivo.recuentos).toMatchObject({ casan: 1, cambios: { ...SIN_CAMBIOS, activo: 1 }, copiasInactivas: 1, ambiguosPortal: 0 });
+      const despues = aplicado.map((x) => ({ ...x, ...inactivo.enlaces.find((e) => e.clave === x.clave) }));
+      expect(plan([{ ...d, activo: false }], despues).recuentos).toMatchObject({ casan: 1, cambios: SIN_CAMBIOS, copiasInactivas: 1, ambiguosPortal: 0 });
+    });
+  });
+
+  it('para revisar: lo que sólo está en el portal y los ambiguos de los dos lados salen con su clave (o su id de Desk 2.0), serial y cliente', () => {
+    const a = desk('18A00005', { cliente: 'Cliente Ficticio M' });
+    const p = planMaestro([a, desk('18A00001')], [portal('18A00001'), portal('18A00050', { cliente: 'Cliente Ficticio P' }), portal('18A00005'), portal('18A00005', { clave: '18A00005-2', cliente: 'Cliente Ficticio Q' }), portal('18A00060', { activo: false })], []);
+    expect(p.soloPortal).toEqual([
+      { origen: 'portal', clave: '18A00050', serial: '18A00050', cliente: 'Cliente Ficticio P', activo: true },
+      { origen: 'portal', clave: '18A00060', serial: '18A00060', cliente: 'Cliente Ficticio A', activo: false },
+    ]);
+    expect(p.ambiguos).toEqual([
+      { origen: 'desk', clave: a.id, serial: '18A00005', cliente: 'Cliente Ficticio M', activo: true },
+      { origen: 'portal', clave: '18A00005', serial: '18A00005', cliente: 'Cliente Ficticio A', activo: true },
+      { origen: 'portal', clave: '18A00005-2', serial: '18A00005', cliente: 'Cliente Ficticio Q', activo: true },
+    ]);
+  });
+
+  describe('¿cambia el nombre del cliente, o sólo cómo se escribe?', () => {
+    it.each([
+      ['Cliente Ficticio', 'Cliente Ficticio S.A.S.'],
+      ['Cliente Ficticio Ltda', 'CLIENTE FICTICIO S.A.S. BIC'],
+      ['Cliente Ficticio S.A', 'Cliente  Ficticio, S. A. S.'],
+      ['Aguas Ficticias E.S.P.', 'Aguas Ficticias S.A. E.S.P'],
+      ['Cliente-Ficticio (Bogotá)', 'cliente ficticio bogota'],
+      ['Cliente Ficticio & Cía. Ltda.', 'Cliente Ficticio y Cia'],
+    ])('%j y %j son el mismo nombre: sólo cambian mayúsculas, tildes, puntuación o la forma societaria', (a, b) => {
+      expect(mismoNombre(a, b)).toBe(true);
+      expect(planMaestro([desk('18A00001', { cliente: b })], [portal('18A00001', { cliente: a })], []).recuentos).toMatchObject({ cambios: { ...SIN_CAMBIOS, cliente: 1 }, clienteOtroNombre: 0 });
+    });
+
+    it.each([
+      ['CFA', 'Cliente Ficticio Ambiental S.A.S. - CFA'],
+      ['Cliente Ficticio', 'Cliente Ficticio Norte S.A.S.'],
+      ['Cliente Ficticio', 'Cliente Fictisio'],
+      ['Casa Ficticia', 'Ca Ficticia'],
+      ['S.A.S.', 'Ltda'],
+    ])('%j y %j no: no se adivina que unas siglas, un nombre más largo o una errata sean el mismo', (a, b) => {
+      expect(mismoNombre(a, b)).toBe(false);
+      expect(planMaestro([desk('18A00001', { cliente: b })], [portal('18A00001', { cliente: a })], []).recuentos.clienteOtroNombre).toBe(1);
+    });
   });
 
   it('un serial vacío o más largo que la clave no entra: se cuenta aparte', () => {
@@ -141,7 +245,7 @@ describe('el plan del cruce', () => {
     const inventario = [portal('18A00001', { cliente: 'Cliente Ficticio Z' }), portal('18A00002'), portal('18A00003', { cliente: 'Cliente Ficticio C' })];
     // Z se queda sin equipos (su único equipo pasa a B); C también (su equipo deja de estar activo); A conserva uno; «nadie» nunca tuvo.
     const plan = planMaestro(maestro, inventario, ['cliente ficticio z', 'cliente ficticio c', 'cliente ficticio a', 'nadie']);
-    expect(plan.recuentos).toMatchObject({ cambianDeCliente: 1, contactosSinEquipos: 2 });
+    expect(plan.recuentos).toMatchObject({ clienteOtroNombre: 1, contactosSinEquipos: 2 });
     expect(plan.enlaces.map((e) => e.clave)).toEqual(['18A00001', '18A00002', '18A00003']);
   });
 
@@ -167,7 +271,7 @@ describe('el plan del cruce', () => {
       ...plan.altas.map((a) => ({ clave: a.clave, serial: a.serial, cliente: a.cliente, modelo: a.modelo, activo: true, deskId: a.deskId })),
     ];
     const otra = planMaestro(maestro, aplicado, []);
-    expect(otra.recuentos).toMatchObject({ casan: 3, enlaces: 0, altas: 0, cambios: SIN_CAMBIOS, cambianDeCliente: 0, soloPortal: 1 });
+    expect(otra.recuentos).toMatchObject({ casan: 3, enlaces: 0, altas: 0, cambios: SIN_CAMBIOS, clienteOtroNombre: 0, soloPortal: 1 });
     expect(otra.cambios).toEqual([]);
     expect(planMaestro(maestro, aplicado, [])).toEqual(otra);
   });

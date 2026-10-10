@@ -1554,7 +1554,7 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     expect(res.status).toBe(200);
     expect(res.body.maestro).toEqual({ disponible: true, motivo: null, mensaje: null });
     expect(res.body.plan.huella).toMatch(/^[0-9a-f]{64}$/);
-    expect(res.body.plan.recuentos).toMatchObject({ maestro: 1, portal: 1, casan: 1, enlaces: 1, altas: 0, cambios: { cliente: 1, modelo: 0, serial: 0, activo: 0 }, cambianDeCliente: 1 });
+    expect(res.body.plan.recuentos).toMatchObject({ maestro: 1, portal: 1, casan: 1, enlaces: 1, altas: 0, cambios: { cliente: 1, modelo: 0, serial: 0, activo: 0 }, clienteOtroNombre: 1 });
     expect(res.body.ultima).toBeNull();
     expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
@@ -1575,6 +1575,34 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     const res = await request(appMaestro()).get(PLAN).set(cabecera());
     expect(res.body.detalleTotal).toBe(1);
     expect(res.body.detalle).toEqual([{ clave: 'SER-RESERVADO', campo: 'cliente', antes: 'Cliente Antiguo Reservado', despues: 'Cliente Reservado' }]);
+    expect(res.body.revisar).toEqual({ soloPortal: [], ambiguos: [] });
+  });
+
+  // Lo que el plan no toca (sólo en el portal, ambiguos) se puede revisar equipo a equipo, pero sólo con el permiso.
+  const CON_DUDAS: [RegExp, Filas] = [/FROM portal\.tmc_equipos/, [
+    { clave: 'SOLO-RESERVADO', serial: 'SOLO-RESERVADO', cliente: 'Cliente Solo Reservado', modelo: 'EDM 180C', activo: true, desk_id: null },
+    { clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado', modelo: 'EDM 180C', activo: true, desk_id: null },
+    { clave: 'SER-RESERVADO-2', serial: 'ser-reservado', cliente: 'Cliente Doble Reservado', modelo: 'EDM 180C', activo: true, desk_id: null },
+  ]];
+
+  it('el detalle ampliado (sólo en el portal y ambiguos, con clave, serial y cliente) le llega a quien puede sincronizar', async () => {
+    respuestas.push(CON_DUDAS);
+    const res = await request(appMaestro()).get(PLAN).set(conRol('DIRECTOR_TECNICO'));
+    expect(res.body.plan.recuentos).toMatchObject({ casan: 0, soloPortal: 1, ambiguosMaestro: 1, ambiguosPortal: 2 });
+    expect(res.body.revisar.soloPortal).toEqual([{ origen: 'portal', clave: 'SOLO-RESERVADO', serial: 'SOLO-RESERVADO', cliente: 'Cliente Solo Reservado', activo: true }]);
+    expect(res.body.revisar.ambiguos).toEqual([
+      { origen: 'desk', clave: 'eq-1', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado', activo: true },
+      { origen: 'portal', clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado', activo: true },
+      { origen: 'portal', clave: 'SER-RESERVADO-2', serial: 'ser-reservado', cliente: 'Cliente Doble Reservado', activo: true },
+    ]);
+  });
+
+  it.each([null, 'COMERCIAL', 'TECNICO'])('y a quien no (rol %s) sólo sus recuentos: ni `revisar`, ni un cliente, ni un serial', async (rol) => {
+    respuestas.push(CON_DUDAS);
+    const res = await request(appMaestro()).get(PLAN).set(conRol(rol));
+    expect(res.body.plan.recuentos).toMatchObject({ soloPortal: 1, ambiguosPortal: 2 });
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|reservado|eq-1/);
   });
 
   it.each(['sin_variable', 'error_conexion', 'timeout', 'error_consulta'] as const)('sin maestro (%s) el plan responde 200 diciendo por qué, sin plan; y sincronizar es un 409 que no abre transacción ni escribe', async (motivo) => {

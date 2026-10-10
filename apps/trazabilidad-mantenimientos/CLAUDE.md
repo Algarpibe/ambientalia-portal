@@ -109,7 +109,7 @@ segunda tabla, más abajo.
 | POST | `/trazabilidad/importaciones` y `/trazabilidad/fst022/congelaciones` (también con `?simular=1`) | **Retiradas el 10/10/2026: 410 `subida_retirada`** para cualquiera, administrador incluido («La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar…»). Van tras la sesión y la app (401 / 403 como siempre) y no validan el cuerpo ni miran el rol ni la base (`retirada`, `router.ts`). Siguen registradas sólo para decírselo a un portal sin actualizar; ya no tienen parser propio (un cuerpo de más de 2 MB es el 413 del global) |
 | GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
 | GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
-| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `sinSerial`, `inactivos`, `cambianDeCliente`, `contactosSinEquipos`; `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho) y `detalleTotal` |
+| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos`; `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí) |
 | GET | `/trazabilidad/maestro/cruce` | Cruce **informativo** de todas las marcas entre la congelación vigente y el maestro, por serial: `{maestro, congelacion: {id, archivo} \| null, marcas: [{marca, v3, desk, casan, soloV3, soloDesk, ambiguos, sinCeros}]}` (`sinCeros` = de `soloV3`, los de serial numérico que casarían ignorando ceros a la izquierda). Sólo recuentos; no escribe |
 | POST | `/trazabilidad/maestro/sincronizar` | Permiso `maestro.sincronizar`. `{huella?}` (la del plan revisado): aplica el plan de ahora, todo o nada, y devuelve su fila de auditoría. **409 `maestro_no_disponible`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; 400 en `huella` si no son 64 hexadecimales |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
@@ -993,12 +993,31 @@ columnas (no `raw`): las que se leen y sus citas están en la cabecera de `maest
   (`pg_advisory_xact_lock('portal.tmc_maestro_sincronizaciones')`), y una fila de auditoría.
 - **Qué no**: la fecha de calibración de un equipo que ya existe; lo que **sólo está en el
   portal** (ni se borra ni se desactiva: puede ser un serial escrito distinto; se cuenta); los
-  **ambiguos** (serial repetido en el maestro o en el portal: ni se enlazan ni se tocan);
-  seguimiento, contactos, avisos y la congelación. Sin maestro en esa misma petición no escribe.
+  **ambiguos** (ni se enlazan ni se tocan); las copias inactivas; seguimiento, contactos, avisos
+  y la congelación. Sin maestro en esa misma petición no escribe.
+- **Serial repetido** (ajuste tras ver el plan real): repetido **en el maestro** → ambiguo.
+  Repetido **en el portal** → casa con su **única fila activa**; las inactivas con ese serial son
+  copias que dejó retiradas una reimportación antigua: no se tocan y se cuentan aparte
+  (`copiasInactivas`), no como ambiguas. Sigue ambiguo con dos o más activas o con ninguna. El
+  enlace por `desk_id` manda siempre: la fila ya enlazada es «la que vale» aunque esté inactiva.
+- **Nombre del cliente**: el maestro trae **razones sociales** («… S.A.S.», «… S.A.S. BIC»,
+  nombre completo con las siglas al final) y la Excel traía nombres cortos, así que al primer
+  cruce casi todos cambian. `cambios.cliente` cuenta cualquier diferencia de texto;
+  `clienteOtroNombre`, de ellos, los que **no** son sólo mayúsculas, tildes, puntuación o forma
+  societaria (`mismoNombre`: quita del final S.A.S., S.A., Ltda., BIC, E.S.P., «y Cía»…). **No
+  adivina** que unas siglas o un nombre más largo sean el mismo cliente: ésos salen como «otro
+  nombre» y se revisan a ojo en la confirmación. No dice si es otro cliente «de verdad».
+- **Para revisar** (sólo con el permiso): la confirmación enseña primero las **altas**, destacadas
+  (en Desk 2.0 hay equipos **de prueba**: si sale uno, se desactiva allí antes de sincronizar; un
+  inactivo no se da de alta), después los clientes con otro nombre, los demás cambios y, plegados,
+  los que sólo cambian de forma, lo que sólo está en el portal y los ambiguos (`revisar`).
+- **Cualquier corrección de un equipo se hace en Desk 2.0** (serial, cliente, activo, quitar uno
+  de prueba) y se vuelve a mirar el plan: el portal no edita el inventario.
 - **La clave no cambia nunca**, así que el seguimiento (por clave) sigue al equipo. El contacto
-  puesto a mano va **por cliente**: si un equipo cambia de cliente deja de recibirlo (pasa al de
-  Desk o al del cliente nuevo) y el contacto antiguo queda guardado, sin equipos; el plan cuenta
-  cuántos (`contactosSinEquipos`) y cuántos equipos cambian de cliente (`cambianDeCliente`).
+  puesto a mano va **por cliente** (`claveCliente`: sólo iguala mayúsculas, tildes y espacios):
+  si a un equipo le cambia el nombre del cliente —**también si sólo gana un «S.A.S.»**— deja de
+  recibirlo (pasa al de Desk o al del nombre nuevo) y el contacto antiguo queda guardado, sin
+  equipos; el plan cuenta cuántos (`contactosSinEquipos`), resaltado en la tarjeta si no es cero.
 - **Aparte de la agenda**: el lector del maestro no entra en `estadoFuente()` ni comparte el
   cortacircuitos; un fallo suyo no manda la agenda al respaldo (`maestro.db.test.ts`). No tiene
   cortacircuitos propio: lo pide una persona, y la espera la acotan los topes del pool. En
