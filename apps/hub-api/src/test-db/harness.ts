@@ -40,6 +40,9 @@ export async function asegurarDeskTickets(db: Pool): Promise<void> {
     )`);
 }
 
+/** Las columnas de `desk.equipos` que el rol lector de produccion puede leer (ni `raw` ni el resto). */
+export const COLUMNAS_EQUIPOS_LECTOR = 'id, serial, marca, modelo, tipo, cliente_nombre, client_id, modelo_id, codigo_interno, active, pendiente_validar, source, created_at, updated_at';
+
 /**
  * Una imitacion de la base `desk` de Desk 2.0 (la fuente principal de la agenda
  * del taller) dentro del MISMO contenedor, pero en OTRA base de datos
@@ -48,6 +51,11 @@ export async function asegurarDeskTickets(db: Pool): Promise<void> {
  * `packages/zoho-sync/src/db/schema.sql` de Desk 2.0), y un rol de solo lectura
  * como el `portal_agenda_reader` de produccion: `SELECT` tabla a tabla y
  * `default_transaction_read_only = on`.
+ *
+ * `desk.equipos` (el maestro de equipos, lote 9b) va con el permiso POR
+ * COLUMNAS de produccion: el lector solo puede leer `COLUMNAS_EQUIPOS_LECTOR`;
+ * `raw` existe y no se le concede, asi que un SELECT que la nombre (o un `*`)
+ * falla aqui igual que fallaria alli.
  *
  * Devuelve dos URLs: la del rol lector (la que imita a `DESK2_DB_URL`) y la del
  * superusuario del contenedor sobre esa base, para sembrar. La contrasena del
@@ -103,8 +111,27 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
       CREATE TABLE IF NOT EXISTS public.calendario_cierres (
         fecha date PRIMARY KEY
       );
+      CREATE TABLE IF NOT EXISTS desk.equipos (
+        id                text PRIMARY KEY,
+        serial            text NOT NULL,
+        marca             text,
+        modelo            text,
+        tipo              text,
+        cliente_nombre    text,
+        source            text NOT NULL DEFAULT 'seed',
+        active            boolean NOT NULL DEFAULT true,
+        raw               jsonb,
+        created_at        timestamptz NOT NULL DEFAULT now(),
+        updated_at        timestamptz,
+        client_id         text,
+        modelo_id         text,
+        codigo_interno    text,
+        pendiente_validar boolean
+      );
       GRANT USAGE ON SCHEMA desk, public TO ${ROL};
-      GRANT SELECT ON desk.tickets, desk.ticket_transitions, public.calendario_cierres TO ${ROL}`);
+      GRANT SELECT ON desk.tickets, desk.ticket_transitions, public.calendario_cierres TO ${ROL};
+      REVOKE ALL ON desk.equipos FROM ${ROL};
+      GRANT SELECT (${COLUMNAS_EQUIPOS_LECTOR}) ON desk.equipos TO ${ROL}`);
   } finally {
     await db2.end();
   }
