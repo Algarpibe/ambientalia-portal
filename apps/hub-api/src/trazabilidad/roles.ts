@@ -44,7 +44,7 @@ export const PERMISOS = [
   'contactos.write',
   /** Tipo de servicio puesto a mano a un ticket. */
   'servicios.tipo.write',
-  /** Importar la F-ST-022. */
+  /** Importaba y congelaba la F-ST-022. Esa subida se retiró el 10/10/2026: hoy no abre ninguna ruta; se queda porque los nombres de permiso son estables. */
   'importar',
   /** Toda la Configuración: plazos y papel de cada estado de Desk (y, con la agenda, puestos y duraciones). */
   'config.write',
@@ -70,7 +70,7 @@ const MATRIZ: Record<RolApp, readonly Permiso[]> = {
   LECTOR: [],
   COMERCIAL: DE_COMERCIAL,
   TECNICO: DE_TECNICO,
-  // Todo lo de los dos anteriores, más importar, la Configuración y la agenda
+  // Todo lo de los dos anteriores, más la Configuración y la agenda (e `importar`, que ya no abre nada)
   // (es el «Director Técnico» de D14 en docs/trazabilidad-agenda-taller.md).
   DIRECTOR_TECNICO: [...DE_COMERCIAL, ...DE_TECNICO, 'importar', 'config.write', 'agenda.asignar', 'agenda.liberar', 'agenda.reparto', 'agenda.flujo'],
 };

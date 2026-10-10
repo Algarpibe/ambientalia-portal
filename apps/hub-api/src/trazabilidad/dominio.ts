@@ -104,16 +104,9 @@ export function estadoCalibracion(ultimaCalibracion: string | null, hoy: string)
   return { vence, vigenciaDias: v, estado };
 }
 
-/**
- * Normaliza el modelo tal como viene escrito en la hoja («EDM 180C»,
- * «EDM180C», «edm 180 d»…) y devuelve «EDM 180C» / «EDM 180D», o null si no
- * es un EDM 180 (el EDM 280, el 1109 o el WS600 quedan fuera).
- */
-export function modeloEdm180(modelo: unknown): string | null {
-  const m = String(modelo ?? '').toUpperCase().replace(/\s+/g, '');
-  if (!m.startsWith('EDM180')) return null;
-  return `EDM 180${m.slice(6)}`;
-}
+// Cómo se formó la `clave` de cada equipo de tmc_equipos cuando se importaba la
+// F-ST-022 (ya no se importa: hoy estas dos sólo las usan las pruebas, para
+// sembrar un inventario con las mismas claves).
 
 /** Un serial convertido en clave estable (letras, dígitos, _ y -). */
 export function claveSerial(serial: string): string {

@@ -12,7 +12,7 @@ const PUEDE: Record<RolApp, string> = {
   LECTOR: 'Lo ve todo y no cambia nada. Es el rol de quien tiene la app y no tiene otro asignado.',
   COMERCIAL: 'Seguimiento de los equipos, avisos manuales (marcar como avisado) y contacto de cada cliente para los avisos.',
   TECNICO: 'Seguimiento de los equipos y tipo de servicio puesto a mano en un ticket.',
-  DIRECTOR_TECNICO: 'Todo lo de Comercial y lo de Técnico, más importar la F-ST-022, toda la Configuración y, cuando llegue, la agenda del taller.',
+  DIRECTOR_TECNICO: 'Todo lo de Comercial y lo de Técnico, más toda la Configuración y la agenda del taller.',
 };
 
 const ESTADO: Record<string, string> = { active: 'activo', pending: 'pendiente', inactive: 'inactivo' };

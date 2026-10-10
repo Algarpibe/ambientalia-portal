@@ -14,7 +14,6 @@ import { createTrazabilidadRouter } from './trazabilidad/router.js';
 import { iniciarRegistroEstados } from './trazabilidad/registro-estados.js';
 import { registrarEstadosAgenda } from './trazabilidad/repo.js';
 import { crearFuenteAgenda } from './trazabilidad/fuente.js';
-import { FST022_CUERPO_MAX } from './trazabilidad/fst022.js';
 import { getDesk2Pool } from './db-desk2.js';
 import { createDataRouter } from './data.router.js';
 
@@ -57,9 +56,6 @@ app.use(
 // el segundo parser cuando el primero ya dejó puesto `req.body`, así que el
 // resto de endpoints conservan su límite de 2mb.
 app.use('/api/ausencias/solicitudes', express.json({ limit: '12mb' }));
-// La otra excepción: congelar la F-ST-022 de Trazabilidad manda la hoja entera,
-// celda a celda. Mismo motivo y mismo orden; el porqué del número, en fst022.ts.
-app.use('/api/trazabilidad/fst022/congelaciones', express.json({ limit: FST022_CUERPO_MAX }));
 
 // Body JSON. Límite de 2mb para permitir la subida del avatar (data URL de un
 // thumbnail); el resto de payloads son pequeños y hay rate limiting.

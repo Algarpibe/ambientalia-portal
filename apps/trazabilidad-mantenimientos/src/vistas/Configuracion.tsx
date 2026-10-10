@@ -7,6 +7,7 @@ import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, DESACTIVADO, Loading } from '../ui';
 import { CategoriasAgenda, DuracionesAgenda, PuestosAgenda, useAgendaConfig } from './ConfiguracionAgenda';
+import OrigenDatos from './OrigenDatos';
 
 /**
  * Configuración. Primer bloque: el plazo, en días hábiles, de cada tipo de servicio de Zoho
@@ -50,6 +51,8 @@ export default function Configuracion({ notificar }: Props) {
         <EstadosDesk notificar={notificar} />
         <CategoriasAgenda agenda={agenda} />
       </div>
+      {/* No es un ajuste: de dónde salen los datos de la app. Sólo lectura, para cualquiera. */}
+      <OrigenDatos />
     </div>
   );
 }

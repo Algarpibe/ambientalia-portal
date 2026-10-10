@@ -18,13 +18,11 @@ import {
   parseAsignacion,
   parseAvisos,
   parseCategoriaEstado,
-  parseCongelacion,
   parseContacto,
   parseDuracionEtapa,
   parseEstadoDesk,
   parseFlujoManual,
   parseHuecos,
-  parseImportacion,
   parseLiberacion,
   parseNumeroTicket,
   parsePaginaFst022,
@@ -49,8 +47,9 @@ import {
 // validar y antes de cualquier consulta de negocio, y responde 403 en español.
 // Los administradores del portal lo pueden todo y son los únicos que reparten
 // roles (`soloAdmin`). router.test.ts falla si una ruta que escribe se registra
-// sin una de las dos. Cada importación y cada cambio quedan firmados con el
-// correo de quien lo hizo (tmc_importaciones, tmc_seguimiento.actualizado_por,
+// sin una de las dos (o con `retirada`, que no deja pasar a nadie: la subida
+// de la Excel, que se quitó el 10/10/2026). Cada cambio queda firmado con el
+// correo de quien lo hizo (tmc_seguimiento.actualizado_por,
 // tmc_plazos.actualizado_por, tmc_servicios_tipo.actualizado_por,
 // tmc_estados_desk.actualizado_por, tmc_contactos.actualizado_por,
 // tmc_user_roles.actualizado_por).
@@ -160,6 +159,15 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
       return fn(req);
     });
 
+  /**
+   * Una ruta retirada: no deja pasar a nadie —tampoco a un administrador— y
+   * no mira el cuerpo, el rol ni la base. Sólo contesta 410, en español.
+   */
+  const retirada = (ctx: string) =>
+    route(ctx, async () => {
+      throw new TzError('subida_retirada', 410, 'La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar. Lo congelado se consulta en «Administración» → «Configuración».');
+    });
+
   // ── Roles ────────────────────────────────────────────────────────────────
 
   // Quién soy en la app: mi rol y lo que puedo hacer. Con `permissions` la app
@@ -230,27 +238,15 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
     }),
   );
 
-  // ?simular=1 devuelve el recuento (nuevos / actualizados / retirados) sin escribir nada.
-  router.post(
-    '/trazabilidad/importaciones',
-    ...gated,
-    escritura('importar', 'tmc_importar', async (req) => {
-      const imp = parseImportacion(req.body);
-      return repo.importar(db, imp, actorOf(req), req.query.simular === '1');
-    }),
-  );
-
-  // ── F-ST-022: congelación (lote 9a) ──────────────────────────────────────
+  // ── F-ST-022: la Excel ya no se sube (retirada el 10/10/2026) ────────────
   //
-  // Guarda la hoja entera, tal cual. La primera pide el permiso de importar; con una vigente sólo un
-  // administrador del portal, y con motivo (409 / 400, en repo.ts: hay que mirar la base). ?simular=1
-  // valida y devuelve el resumen sin escribir. El cuerpo tiene su propio límite (index.ts, FST022_CUERPO_MAX).
-  // Las filas llevan cliente y serial, como GET /equipos: ni un error ni el registro repiten su contenido.
-  router.post(
-    '/trazabilidad/fst022/congelaciones',
-    ...gated,
-    escritura('importar', 'tmc_fst022_congelar', async (req) => repo.congelarFst022(db, parseCongelacion(req.body), actorOf(req), esAdminPortal(req), req.query.simular === '1')),
-  );
+  // La hoja quedó congelada (tablas tmc_fst022_*) y es el punto de partida
+  // firmado: ni se importa ni se vuelve a congelar. Las dos rutas siguen
+  // registradas sólo para decírselo, con un 410, a un portal sin actualizar;
+  // no hay código detrás que valide ni escriba. El 410 va tras la sesión y la
+  // app (401 / 403 como siempre) y vale también con ?simular=1.
+  router.post('/trazabilidad/importaciones', ...gated, retirada('tmc_importar'));
+  router.post('/trazabilidad/fst022/congelaciones', ...gated, retirada('tmc_fst022_congelar'));
 
   // Todas las congelaciones, la más reciente primero: metadatos y recuentos.
   router.get(
