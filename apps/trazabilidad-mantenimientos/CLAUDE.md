@@ -10,11 +10,13 @@ App interna del portal para seguir los vencimientos de calibración de los **GRI
 (180C y 180D) instalados en clientes y avisarles antes de que se les venza, para programar el
 servicio de calibración y mantenimiento en vez de recibir el equipo sin previo aviso.
 
-Fuente de datos: el inventario (`portal.tmc_equipos`) es el que dejó la última importación de la
-hoja **F-ST-022 «Trazabilidad Mttos Clientes»** (Excel). El seguimiento (aviso enviado, «en
-Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no se sube**
-(decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a congelar. Ver
-«F-ST-022: congelación y relevo de la Excel».
+Fuente de datos: el inventario (`portal.tmc_equipos`) nació de la última importación de la hoja
+**F-ST-022 «Trazabilidad Mttos Clientes»** (Excel) y **desde el lote 9b se alimenta del maestro de
+equipos de Desk 2.0** (`desk.equipos`), a mano y sólo los GRIMM EDM 180; la fecha de calibración
+sigue siendo la que había (ver «Maestro de equipos desde Desk 2.0»). El seguimiento (aviso
+enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
+se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
+congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 
 ## Regla de negocio (la de la F-ST-022)
 
@@ -42,7 +44,9 @@ Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Exc
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql` |
+| Maestro de equipos (lote 9b): regla pura del cruce (`planMaestro`, `modeloEdm180`, `esGrimmEdm180`, `cruceFst022`) y los tipos de su API (sin base; lo importa la app) | `apps/hub-api/src/trazabilidad/maestro.ts`; la lectura de `desk.equipos` (`crearLectorMaestro`, sólo las columnas concedidas, con sus citas de Desk 2.0) en `maestro-desk2.ts`; el SQL del portal (`leerPlanMaestro`, `sincronizarMaestro`, `leerCruceFst022`) en `maestro-repo.ts` |
+| Tarjeta «Maestro de equipos · Desk 2.0» de Configuración y lo que calcula (`lineasPlan`, `hayQueAplicar`, `textoUltima`, `textoCambio`) | `src/vistas/MaestroEquipos.tsx` y `src/lib/maestro.ts` |
 | Congelación de la F-ST-022, **sólo lectura**: la forma de lo guardado (`Celda`, `FilaCongelada`, `ResumenFst022`, `PROBLEMAS_FST022`; sin imports) | `apps/hub-api/src/trazabilidad/fst022.ts`; su SQL (`listarCongelaciones`, `congelacionVigente`) en `repo.ts`; las dos rutas de subida retiradas (`retirada`, 410) en `router.ts` |
 | Tarjeta «Origen de los datos · F-ST-022 congelada» de Configuración y lo que calcula (`vigenteDe`, `textoOrigen` —la línea de la cabecera de la app—, `lineasOrigen`, `ETIQUETA_PROBLEMA`, `huellaCorta`) | `src/vistas/OrigenDatos.tsx` y `src/lib/origen.ts` |
 | UI (Vite + React, cargada en `/trazabilidad-mantenimientos/*`) | `apps/trazabilidad-mantenimientos/src/` |
@@ -69,7 +73,8 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 
 | Tabla | Contenido |
 |---|---|
-| `portal.tmc_equipos` | Un equipo por `clave` (el serial; si la hoja repetía un serial, la 2.ª aparición lleva `-2`: `asignarClaves`). `activo = false` = lo retiró una importación: no se borra. **Ya nada de la app escribe aquí** (lo llenaba la importación de la Excel, retirada el 10/10/2026): contiene lo que dejó la última |
+| `portal.tmc_equipos` | Un equipo por `clave` (el serial; si la hoja repetía un serial, la 2.ª aparición lleva `-2`: `asignarClaves`). `activo = false` = lo retiró una importación o está inactivo en Desk 2.0: no se borra. **Sólo la escribe la sincronización con el maestro** (`maestro-repo.ts`; la importación de la Excel se retiró el 10/10/2026). Desde la 056 lleva `desk_id` (`TEXT NULL`: el id de su equipo en `desk.equipos`; índice único parcial `tmc_equipos_desk_id_uq` = un equipo de Desk 2.0, como mucho en una fila), `origen` (`'fst022'` por defecto = lo que dejó la Excel; `'desk'` = lo confirmó o lo dio de alta el maestro; con `CHECK`) y `maestro_en` (la última sincronización que lo encontró en el maestro). `ultima_calibracion` y las demás columnas de la Excel no las toca nadie; un alta del maestro nace con ellas a NULL |
+| `portal.tmc_maestro_sincronizaciones` | **Auditoría** de cada sincronización aplicada (056): `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosMaestro`), `cambios` (`JSONB`, array de `{clave, campo, antes, despues}`; `campo` = `cliente` / `modelo` / `serial` / `activo` / `alta`), `por_id`, `por` y `en`. Una fila por aplicación, también si no cambió nada. No se cambia ni se borra. Sin semilla ni clave foránea |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación que se hizo: archivo, recuentos y quién. **Histórico**: ya no se añade ninguna fila |
 | `portal.tmc_fst022_congelaciones` | (**Sólo lectura** desde el 10/10/2026: ningún código inserta ni cambia nada en las dos tablas `tmc_fst022_*`; `fst022.test.ts` lo vigila.) Una fila por **congelación de la F-ST-022** (055): `archivo`, `sha256` del fichero (lo calcula el navegador), `hoja`, `fila_cabecera` y `cabeceras` (`JSONB`: las filas de títulos tal cual), recuentos (`total_filas`, `total_columnas`, `filas_guardadas`, `filas_equipo`, `filas_con_serial`, `filas_edm180` y `problemas`, `JSONB` de recuentos por tipo), `vigente`, `motivo`, la firma (`por_id`, `por`, `en`) y, al dejar de ser la vigente, `reemplazada_por_id` / `reemplazada_por` / `reemplazada_en` / `reemplazada_motivo`. Índice único parcial `tmc_fst022_congelaciones_vigente_uq` = **como mucho una vigente**; `CHECK` `tmc_fst022_vigente_o_reemplazada` = reemplazada si y sólo si no es la vigente, y entonces firmada y con motivo. Nunca se borra. Sólo `CREATE … IF NOT EXISTS`, sin semilla |
@@ -104,6 +109,9 @@ segunda tabla, más abajo.
 | POST | `/trazabilidad/importaciones` y `/trazabilidad/fst022/congelaciones` (también con `?simular=1`) | **Retiradas el 10/10/2026: 410 `subida_retirada`** para cualquiera, administrador incluido («La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar…»). Van tras la sesión y la app (401 / 403 como siempre) y no validan el cuerpo ni miran el rol ni la base (`retirada`, `router.ts`). Siguen registradas sólo para decírselo a un portal sin actualizar; ya no tienen parser propio (un cuerpo de más de 2 MB es el 413 del global) |
 | GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
 | GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
+| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `sinSerial`, `inactivos`, `cambianDeCliente`, `contactosSinEquipos`; `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho) y `detalleTotal` |
+| GET | `/trazabilidad/maestro/cruce` | Cruce **informativo** de todas las marcas entre la congelación vigente y el maestro, por serial: `{maestro, congelacion: {id, archivo} \| null, marcas: [{marca, v3, desk, casan, soloV3, soloDesk, ambiguos, sinCeros}]}` (`sinCeros` = de `soloV3`, los de serial numérico que casarían ignorando ceros a la izquierda). Sólo recuentos; no escribe |
+| POST | `/trazabilidad/maestro/sincronizar` | Permiso `maestro.sincronizar`. `{huella?}` (la del plan revisado): aplica el plan de ahora, todo o nada, y devuelve su fila de auditoría. **409 `maestro_no_disponible`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; 400 en `huella` si no son 64 hexadecimales |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
 | GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), el reloj con pausas (`rolEstado`: `cuenta` / `standby` / `terminado`, el del estado de ahora; `enPausa`; `diasPausados`; `pausas: [{desde, hasta}]`; `terminadoEl`; `medidoDesde`; `fechaLimiteBase` = la fecha sin pausas), `plazoDias`, `fechaLimite` (ya corrida), `diasHabiles` y `estadoPlazo` (`EN_PLAZO` / `VENCE_HOY` / `VENCIDO` / `SIN_PLAZO` en marcha; `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo terminado), y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto). Antes de leer apunta los cambios de estado (`registrarEstados`), si se puede: un fallo ahí no falla la petición |
@@ -163,6 +171,7 @@ escribe nadie a mano: lo apunta hub-api.
 | `agenda.reparto` | — | — | — | sí | `POST /trazabilidad/agenda/reparto` y, aunque sólo lee, `GET /trazabilidad/agenda/reparto` (la propuesta) |
 | `agenda.flujo` | — | — | — | sí | `PUT /trazabilidad/agenda/flujo/:numero` |
 | `calibraciones.write` | — | — | sí | sí | Nada todavía (reservado): confirmar o registrar calibraciones |
+| `maestro.sincronizar` | — | — | — | sí | `POST /trazabilidad/maestro/sincronizar` y el `detalle` de `GET /trazabilidad/maestro/plan` (lote 9b) |
 | `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
 
 El Director Técnico es el de D14 en `docs/trazabilidad-agenda-taller.md`: los endpoints de la
@@ -906,6 +915,10 @@ contenido de hoy y, por lotes, la releva el portal.
 - Motivo añadido: importar la V3 habría puesto a NULL `hoja_vida`, `ultima_entrada`,
   `fecha_factura` y los recuentos de `tmc_equipos` (la V3 no trae esas columnas) y habría tomado
   «calibraciones / correctivos del periodo» por posición, de las columnas de Serial y Modelo.
+- **DECIDIDO, opción A (lote 9b)**: el maestro trae al inventario del portal **sólo los GRIMM EDM
+  180**. Resumen, Equipos, Calendario de calibraciones y Avisos siguen enseñando sólo ese modelo,
+  ahora alimentado desde Desk 2.0. Las demás marcas entrarán con la pestaña del lote 9d, tras
+  revisarlas (el cruce informativo de abajo es para eso). La fecha de calibración no se toca en el 9b.
 
 ### Lo congelado: la V3
 
@@ -941,9 +954,9 @@ numérico largo (14 cifras, íntegro: Excel sólo lo *muestra* en notación cien
 - **Cabecera de la app**: «… · F-ST-022 congelada el 10/10/2026 desde «archivo» por quien»
   (`textoOrigen`; el día, en Colombia). Antes decía la última importación. Sin congelación, o si
   la lista no llega, no dice nada.
-- ⚠️ **El inventario sigue siendo `tmc_equipos`**, que ya nadie escribe: es el de la última
-  importación que se hizo (anterior a la V3) y **no** se rellenó desde la congelación. Hasta el
-  9b, la cabecera habla del origen firmado, no de qué fichero llenó esa tabla.
+- ⚠️ **El inventario sigue siendo `tmc_equipos`**: nació de la última importación que se hizo
+  (anterior a la V3), **no** se rellenó desde la congelación y desde el 9b lo actualiza la
+  sincronización con el maestro. La cabecera habla del origen firmado, no de quién llenó la tabla.
 - **`xlsx` (SheetJS) quedó sin uso en esta app**; sigue en su `package.json` hasta que el lote de
   exportar decida.
 
@@ -956,14 +969,49 @@ foránea); o (b) recuperar del historial de git el lector y la ruta (`233c340`, 
 congelar en una rama o en local y llevar el resultado por SQL. La ruta **no** se vuelve a
 desplegar: `router.test.ts` tiene un candado que lo impide.
 
+### Maestro de equipos desde Desk 2.0 (lote 9b)
+
+`desk.equipos` (base de Desk 2.0, por `DESK2_DB_URL`) es el maestro: lo mantiene a mano esa app,
+el serial **no** es único, hay `active` y borrado físico. El rol lector sólo puede leer unas
+columnas (no `raw`): las que se leen y sus citas están en la cabecera de `maestro-desk2.ts`.
+
+- **Se sincroniza a mano**: «Administración» → «Configuración» → tarjeta «Maestro de equipos ·
+  Desk 2.0». Cualquiera con la app ve si el maestro contesta, la última sincronización, el plan
+  en recuentos y el cruce informativo por marca; «Sincronizar con Desk 2.0» (con una confirmación
+  que repite los recuentos y enseña los cambios) sólo le sale a quien tiene `maestro.sincronizar`.
+  **No hay sincronización automática ni programador** (siguiente paso posible: una pasada
+  periódica, cuando el plan lleve tiempo saliendo sin sorpresas).
+- **Cómo casa** (`planMaestro`): del maestro sólo los GRIMM EDM 180 (`esGrimmEdm180`: el modelo
+  sin mayúsculas, espacios ni guiones es `EDM180…`, y la marca dice «grimm» o va vacía). Primero
+  por `desk_id` (si ya se enlazó: una corrección del serial en Desk 2.0 no crea otro equipo);
+  si no, por serial con `serialNorm`, la regla del cruce con los tickets. El modelo se guarda en
+  la forma del portal («EDM 180C», `modeloEdm180`), no en la de Desk («EDM180C»).
+- **Qué escribe**: en los que casan, el enlace (`desk_id`, `origen = 'desk'`, `maestro_en`) y
+  cliente, modelo, serial (como lo escribe el maestro) y `activo`; y da de **alta** lo que sólo
+  está en Desk 2.0 y activo, **sin fecha de calibración** («Sin fecha»). Sin cliente en el
+  maestro se conserva el del portal. Una transacción, con su bloqueo
+  (`pg_advisory_xact_lock('portal.tmc_maestro_sincronizaciones')`), y una fila de auditoría.
+- **Qué no**: la fecha de calibración de un equipo que ya existe; lo que **sólo está en el
+  portal** (ni se borra ni se desactiva: puede ser un serial escrito distinto; se cuenta); los
+  **ambiguos** (serial repetido en el maestro o en el portal: ni se enlazan ni se tocan);
+  seguimiento, contactos, avisos y la congelación. Sin maestro en esa misma petición no escribe.
+- **La clave no cambia nunca**, así que el seguimiento (por clave) sigue al equipo. El contacto
+  puesto a mano va **por cliente**: si un equipo cambia de cliente deja de recibirlo (pasa al de
+  Desk o al del cliente nuevo) y el contacto antiguo queda guardado, sin equipos; el plan cuenta
+  cuántos (`contactosSinEquipos`) y cuántos equipos cambian de cliente (`cambianDeCliente`).
+- **Aparte de la agenda**: el lector del maestro no entra en `estadoFuente()` ni comparte el
+  cortacircuitos; un fallo suyo no manda la agenda al respaldo (`maestro.db.test.ts`). No tiene
+  cortacircuitos propio: lo pide una persona, y la espera la acotan los topes del pool. En
+  respaldo **no hay maestro** (la réplica de zoho-hub tiene `desk.equipos` vacía).
+
 ### Lo que viene (no construido)
 
-- **9b · maestro de equipos**: el inventario sale de `desk.equipos` (Desk 2.0) en vez de
-  `tmc_equipos`, cruzado con la congelada por `serial_norm`.
 - **9c · fechas de calibración**: de `cf_fecha_de_calibracion` de los tickets, con la corrección
   manual por encima (tabla propia de calibraciones; el permiso `calibraciones.write` ya existe).
 - **9d · pestaña «Trazabilidad F-ST-022»**: la hoja en el portal, editable, con **las seis
-  columnas de la V3** (la vigencia, calculada), sobre la congelada y lo que aporten 9b y 9c.
+  columnas de la V3** (la vigencia, calculada), sobre la congelada y lo que aporten 9b y 9c. Con
+  ella entran **las demás marcas** (hoy sólo se cuentan en `GET /maestro/cruce`) y se decide qué
+  hacer con lo que sólo está en el portal y con los ambiguos.
 - **9e · «Exportar F-ST-022»**: un .xlsx con **esas seis columnas** en su orden (las `cabeceras`
   guardadas lo dan), sin calco visual. Es el lote que decide qué hacer con `xlsx`.
 
@@ -1025,5 +1073,10 @@ desplegar: `router.test.ts` tiene un candado que lo impide.
   la app, que las lecturas siguen, y el candado contra una ruta que vuelva a aceptar un fichero) y `fst022.db.test.ts` (la 055
   repetida, los `CHECK`, las lecturas sobre una congelación **sembrada por SQL con la forma de la V3** y que los 410 dejan la base
   como estaba). `trazabilidad.db.test.ts` siembra el inventario a mano (`sembrar`, con `asignarClaves`): ya no hay `repo.importar`.
+- El maestro de equipos: `maestro.test.ts` (la regla del cruce caso a caso, el cruce informativo, el lector que no lanza, las
+  guardas de la 056 y de qué escribe y qué columnas nombra), `router.test.ts` (401, 403, 409 sin maestro o con otro plan, que el
+  plan no lleva clientes ni seriales y el candado de que no entra en la fuente de la agenda), `maestro.db.test.ts` (la 056
+  repetida, el permiso por columnas en la imitación de Desk 2.0 —`raw` falla—, aplicar, idempotencia, todo o nada, dos a la vez
+  y que la agenda sigue en principal aunque falle la lectura de equipos) y, en la app, `src/lib/maestro.test.ts`.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.
