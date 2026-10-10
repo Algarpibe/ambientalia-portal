@@ -49,14 +49,15 @@ describe('055_trazabilidad_fst022_congelacion.sql', () => {
     expect(sinComentarios).toMatch(new RegExp(`motivo\\s+VARCHAR\\(${MOTIVO_MAX}\\)`));
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 054, y es la última: retirar la subida no trae migración ni borra nada', () => {
-    expect(fuente('../db.ts')).toMatch(/'054_trazabilidad_agenda_historial\.sql',\s*'055_trazabilidad_fst022_congelacion\.sql'\]/);
+  // Cuál es la última lo vigila maestro.test.ts (la 056).
+  it('está apuntada en MIGRATIONS, detrás de la 054: retirar la subida no trajo migración ni borró nada', () => {
+    expect(fuente('../db.ts')).toMatch(/'054_trazabilidad_agenda_historial\.sql',\s*'055_trazabilidad_fst022_congelacion\.sql',/);
   });
 });
 
 describe('la congelación ya no se escribe: ni sus filas ni su cabecera', () => {
   it('ningún fuente del módulo inserta, cambia ni borra nada en las tablas tmc_fst022_*: sólo se leen', () => {
-    for (const f of ['./repo.ts', './router.ts', './types.ts', './fst022.ts', './registro-estados.ts']) {
+    for (const f of ['./repo.ts', './router.ts', './types.ts', './fst022.ts', './registro-estados.ts', './maestro.ts', './maestro-desk2.ts', './maestro-repo.ts']) {
       expect(fuente(f)).not.toMatch(/(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)[^;`]*tmc_fst022_\w+/i);
     }
     expect(fuente('./repo.ts')).toMatch(/FROM portal\.tmc_fst022_congelada/);

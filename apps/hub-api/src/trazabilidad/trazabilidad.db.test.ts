@@ -349,6 +349,7 @@ describe('contacto de cada equipo', () => {
         'tmc_fst022_congelaciones',
         'tmc_fst022_congelada',
         'tmc_importaciones',
+        'tmc_maestro_sincronizaciones',
         'tmc_plazos',
         'tmc_seguimiento',
         'tmc_servicios_tipo',

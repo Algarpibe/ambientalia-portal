@@ -8,6 +8,8 @@ import { detallesDeTickets, huecosDeEtapa, proyectarAgenda, type RespuestaAgenda
 import { ejeAgenda } from './agenda-calendario.js';
 import { esFechaIso } from './dominio.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
+import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
+import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
 import { festivosDelEje } from './plazos.js';
 import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
@@ -23,6 +25,7 @@ import {
   parseEstadoDesk,
   parseFlujoManual,
   parseHuecos,
+  parseHuellaPlan,
   parseLiberacion,
   parseNumeroTicket,
   parsePaginaFst022,
@@ -109,9 +112,11 @@ const AVISO_PASADA_FALLIDA = {
 /**
  * `fuente` es de dónde lee la agenda del taller (fuente.ts). Por defecto, la
  * base de Desk 2.0 si hay `DESK2_DB_URL` y, si no (o si falla), la réplica de
- * `db`; las pruebas pasan la suya.
+ * `db`; las pruebas pasan la suya. `maestro` lee el maestro de equipos de esa
+ * misma base de Desk 2.0 (maestro-desk2.ts), aparte de la fuente: no comparten
+ * estado, y sin la variable o si falla no hay maestro (nada lo sustituye).
  */
-export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool })): Router {
+export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool }), maestro: LectorMaestro = crearLectorMaestro(getDesk2Pool)): Router {
   const router = Router();
   const gated = [requireAuth, requireApp(APP_ID)] as const;
 
@@ -261,6 +266,27 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
     ...gated,
     route('tmc_fst022_vigente', async (req) => repo.congelacionVigente(db, parsePaginaFst022(req.query))),
   );
+
+  // ── Maestro de equipos desde Desk 2.0 (lote 9b) ──────────────────────────
+  //
+  // El inventario (tmc_equipos) se alimenta de `desk.equipos`, sólo los GRIMM
+  // EDM 180 y sólo A MANO: primero se ve el plan y después, quien puede, lo
+  // aplica. No hay sincronización automática ni programador.
+
+  // El plan en recuentos, si el maestro contesta (y si no, por qué: 200 igual)
+  // y la última sincronización. Abierto a quien tenga la app: ni clientes ni
+  // seriales. A quien puede sincronizar le llega además `detalle`, los cambios
+  // uno a uno (con cliente y serial), acotados, para revisarlos antes.
+  router.get('/trazabilidad/maestro/plan', ...gated, route('tmc_maestro_plan', async (req) => leerPlanMaestro(db, maestro, esAdminPortal(req) || puede(await rolDe(req), 'maestro.sincronizar'))));
+
+  // Cruce informativo de TODAS las marcas entre la congelación vigente de la
+  // F-ST-022 y el maestro: recuentos por marca. No escribe ni decide nada.
+  router.get('/trazabilidad/maestro/cruce', ...gated, route('tmc_maestro_cruce', async () => leerCruceFst022(db, maestro)));
+
+  // Aplica el plan de ahora: {huella?}, la del plan que se revisó. 409 si el
+  // maestro no contesta (no escribe nunca sin él) o si el plan ya es otro.
+  // Devuelve la fila de auditoría que deja (quién, cuándo y recuentos).
+  router.post('/trazabilidad/maestro/sincronizar', ...gated, escritura('maestro.sincronizar', 'tmc_maestro_sincronizar', async (req) => sincronizarMaestro(db, maestro, parseHuellaPlan(req.body), actorOf(req))));
 
   router.put(
     '/trazabilidad/seguimiento/:clave',

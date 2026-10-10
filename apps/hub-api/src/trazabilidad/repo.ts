@@ -90,7 +90,7 @@ type Db = Pick<PoolClient, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-async function withTransaction<T>(db: Pool, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+export async function withTransaction<T>(db: Pool, fn: (c: PoolClient) => Promise<T>): Promise<T> {
   const client = await db.connect();
   try {
     await client.query('BEGIN');

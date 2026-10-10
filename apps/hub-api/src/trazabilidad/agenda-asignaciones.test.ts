@@ -91,7 +91,7 @@ describe('054_trazabilidad_agenda_historial.sql', () => {
     expect(columnas(SQL)).toEqual(columnas(leer('047_trazabilidad_estados_historial.sql')));
   });
 
-  // Cuál es la última lo vigila fst022.test.ts (la 055).
+  // Cuál es la última lo vigila maestro.test.ts (la 056).
   it('está apuntada en MIGRATIONS, detrás de la 053', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
     expect(db).toMatch(/'053_trazabilidad_agenda_flujo\.sql',\s*'054_trazabilidad_agenda_historial\.sql'/);
