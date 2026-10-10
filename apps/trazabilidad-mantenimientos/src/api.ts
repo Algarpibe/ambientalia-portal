@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -78,6 +78,12 @@ export const api = {
   marcarFlujo: (numero: number, flujo: FlujoAgenda | null) => request<RespuestaAgenda>('PUT', `/agenda/flujo/${numero}`, { flujo }),
   /** Las congelaciones de la F-ST-022, la más reciente primero: sólo metadatos y recuentos. Sólo se leen: la Excel ya no se sube (ni importar ni congelar). */
   congelaciones: () => request<{ congelaciones: CongelacionFst022[] }>('GET', '/fst022/congelaciones'),
+  /** El plan del cruce del inventario con el maestro de equipos de Desk 2.0, en recuentos (y su detalle, sólo si puedo sincronizar). No escribe. */
+  planMaestro: () => request<RespuestaPlanMaestro>('GET', '/maestro/plan'),
+  /** Cruce informativo, por marca, de la F-ST-022 congelada con el maestro. Sólo recuentos; no escribe. */
+  cruceMaestro: () => request<RespuestaCruceFst022>('GET', '/maestro/cruce'),
+  /** Aplica el plan que se revisó (su `huella`): 409 si ya es otro o si Desk 2.0 no contesta. Devuelve su fila de auditoría. */
+  sincronizarMaestro: (huella: string) => request<SincronizacionMaestro>('POST', '/maestro/sincronizar', { huella }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
   registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),

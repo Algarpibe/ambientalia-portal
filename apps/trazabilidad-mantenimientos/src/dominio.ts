@@ -10,6 +10,8 @@ export * from '../../hub-api/src/trazabilidad/fst022';
 // La agenda del taller tal como la sirve GET /agenda (sólo tipos: el cálculo es del servidor).
 export type { AgendaTaller, DetalleTicket, EtapaProyectada, ItemReparto, PuestoAgenda, RespuestaAgenda, TicketEncadenado, TicketEnFila } from '../../hub-api/src/trazabilidad/agenda';
 export type { EstadoFuente, NombreFuente } from '../../hub-api/src/trazabilidad/fuente';
+// El maestro de equipos (Desk 2.0): el plan del cruce y el cruce informativo, tal como los sirve la API (sólo tipos).
+export type { CambioMaestro, CruceMarca, RecuentosMaestro, RespuestaCruceFst022, RespuestaPlanMaestro, SincronizacionMaestro } from '../../hub-api/src/trazabilidad/maestro';
 export type {
   ConfiguracionAgenda,
   CongelacionFst022,

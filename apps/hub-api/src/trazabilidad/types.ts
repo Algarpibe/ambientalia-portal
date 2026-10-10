@@ -181,6 +181,19 @@ export function parsePaginaFst022(query: Record<string, unknown>): { desde: numb
   return { desde: n('desde', 0, 0, 9_999_999), limite: n('limite', 500, 1, 1000) };
 }
 
+/**
+ * Cuerpo de POST /trazabilidad/maestro/sincronizar: `{huella?}`, la del plan
+ * que se revisó (64 hexadecimales). Es opcional: sin ella se aplica el plan
+ * que salga en ese momento.
+ */
+export function parseHuellaPlan(body: unknown): string | null {
+  if (body === undefined || body === null) return null;
+  const { huella } = obj(body, 'body');
+  if (huella === undefined || huella === null) return null;
+  if (typeof huella !== 'string' || !/^[0-9a-f]{64}$/.test(huella)) throw invalido('La huella del plan no es válida.', 'huella');
+  return huella;
+}
+
 /** Valida el cuerpo de PUT /trazabilidad/seguimiento/:clave. */
 export function parseSeguimiento(body: unknown): Seguimiento {
   const b = obj(body, 'body');

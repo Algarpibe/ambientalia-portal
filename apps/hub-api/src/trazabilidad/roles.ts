@@ -58,6 +58,8 @@ export const PERMISOS = [
   'agenda.flujo',
   /** Reservado: confirmar o registrar calibraciones. */
   'calibraciones.write',
+  /** Maestro de equipos: aplicar al inventario el plan del cruce con Desk 2.0 (y ver su detalle). */
+  'maestro.sincronizar',
   /** Repartir roles. De ningún rol: sólo de los administradores del portal. */
   'roles.manage',
 ] as const;
@@ -70,9 +72,9 @@ const MATRIZ: Record<RolApp, readonly Permiso[]> = {
   LECTOR: [],
   COMERCIAL: DE_COMERCIAL,
   TECNICO: DE_TECNICO,
-  // Todo lo de los dos anteriores, más la Configuración y la agenda (e `importar`, que ya no abre nada)
-  // (es el «Director Técnico» de D14 en docs/trazabilidad-agenda-taller.md).
-  DIRECTOR_TECNICO: [...DE_COMERCIAL, ...DE_TECNICO, 'importar', 'config.write', 'agenda.asignar', 'agenda.liberar', 'agenda.reparto', 'agenda.flujo'],
+  // Todo lo de los dos anteriores, más la Configuración, la agenda y el maestro de equipos (e `importar`,
+  // que ya no abre nada) (es el «Director Técnico» de D14 en docs/trazabilidad-agenda-taller.md).
+  DIRECTOR_TECNICO: [...DE_COMERCIAL, ...DE_TECNICO, 'importar', 'config.write', 'agenda.asignar', 'agenda.liberar', 'agenda.reparto', 'agenda.flujo', 'maestro.sincronizar'],
 };
 
 export function esRolApp(v: unknown): v is RolApp {

@@ -20,6 +20,7 @@ const MATRIZ: Record<Permiso, Record<RolApp, boolean>> = {
   'agenda.reparto': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   'agenda.flujo': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   'calibraciones.write': { LECTOR: N, COMERCIAL: N, TECNICO: S, DIRECTOR_TECNICO: S },
+  'maestro.sincronizar': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   'roles.manage': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: N },
 };
 
@@ -28,7 +29,7 @@ describe('roles y permisos: los nombres', () => {
     expect([...ROLES_APP]).toEqual(['LECTOR', 'COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']);
   });
 
-  it('los doce permisos, con sus nombres estables (los de la agenda y calibraciones ya están)', () => {
+  it('los trece permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b)', () => {
     expect([...PERMISOS]).toEqual([
       'seguimiento.write',
       'avisos.write',
@@ -41,6 +42,7 @@ describe('roles y permisos: los nombres', () => {
       'agenda.reparto',
       'agenda.flujo',
       'calibraciones.write',
+      'maestro.sincronizar',
       'roles.manage',
     ]);
     expect(Object.keys(MATRIZ).sort()).toEqual([...PERMISOS].sort());
@@ -54,8 +56,8 @@ describe('roles y permisos: los nombres', () => {
 describe('la matriz entera: cada rol × cada permiso', () => {
   const casos = PERMISOS.flatMap((permiso) => ROLES_APP.map((rol) => ({ rol, permiso, esperado: MATRIZ[permiso][rol] })));
 
-  it('son 48 casos', () => {
-    expect(casos).toHaveLength(48);
+  it('son 52 casos', () => {
+    expect(casos).toHaveLength(52);
   });
 
   it.each(casos)('$rol · $permiso → $esperado', ({ rol, permiso, esperado }) => {

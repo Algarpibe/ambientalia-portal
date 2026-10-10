@@ -206,7 +206,7 @@ export default function App() {
         {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario. */}
         {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
         {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} notificar={notificar} />}
-        {tab === 'configuracion' && <Configuracion notificar={notificar} />}
+        {tab === 'configuracion' && <Configuracion notificar={notificar} onInventario={() => void cargar()} />}
         {/* #roles escrito a mano por quien no es administrador: se le dice, y el servidor tampoco le daría la lista. */}
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}
         {tab === 'roles' && (yo || errorRol) && !gestionaRoles && <Alert tone="amber">Sólo un administrador del portal puede ver y repartir los roles de Trazabilidad.</Alert>}

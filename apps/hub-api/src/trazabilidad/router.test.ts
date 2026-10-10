@@ -93,6 +93,27 @@ function appAgenda(desk2: DbLectura | null = null) {
 }
 const HOY = '2026-10-06';
 
+// El maestro de equipos de estas pruebas: un doble del lector de Desk 2.0. Por defecto contesta con un
+// GRIMM EDM 180 que el portal no tiene (un alta) y una marca que no entra. Cliente y serial reservados.
+type LecturaMaestro = Awaited<ReturnType<import('./maestro-desk2.js').LectorMaestro>>;
+const MAESTRO: LecturaMaestro = {
+  disponible: true,
+  equipos: [
+    { id: 'eq-1', serial: 'SER-RESERVADO', marca: 'GRIMM', modelo: 'EDM180C', cliente: 'Cliente Reservado', activo: true },
+    { id: 'eq-2', serial: 'HB-RESERVADO', marca: 'Horiba', modelo: 'APNA-370', cliente: 'Cliente Reservado', activo: true },
+  ],
+};
+let lecturaMaestro: LecturaMaestro = MAESTRO;
+/** La app con ese maestro. Da conexiones al doble (la sincronización va en una transacción). */
+function appMaestro() {
+  conexiones.cliente = true;
+  respuestas.push([/INSERT INTO portal\.tmc_maestro_sincronizaciones/, [{ id: 3, huella: 'ef'.repeat(32), recuentos: { altas: 1 }, por: 'director@example.com', en: '2026-10-10 15:00:00+00' }]]);
+  const a = express();
+  a.use(express.json());
+  a.use('/api', createTrazabilidadRouter(fakePool, undefined, async () => lecturaMaestro));
+  return a;
+}
+
 /** Lo que mandaba el portal al subir la Excel (importación: `filas`; congelación: `matriz`), con cliente y serial inventados. Ya nadie lo lee. */
 const CUERPO_SUBIDA = {
   archivo: 'F-ST-022 ficticia.xlsx',
@@ -136,6 +157,7 @@ beforeEach(() => {
   usuarios.clear();
   respuestas = [...CONFIG_AGENDA];
   ticketsFuente = [filaTicket(880, 'Ingresado'), filaTicket(984, 'En Proceso'), filaTicket(990, 'En Proceso')];
+  lecturaMaestro = MAESTRO;
   reiniciarRegistroEstados();
 });
 
@@ -183,12 +205,14 @@ describe('permisos por rol', () => {
     { ruta: 'PUT /trazabilidad/agenda/configuracion/puestos', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/puestos').set(c).send({ etapa: 'proceso', puestos: 5 }) },
     { ruta: 'PUT /trazabilidad/agenda/configuracion/duraciones', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/duraciones').set(c).send({ etapa: 'proceso', tipo: '*', dias: 4 }) },
     { ruta: 'PUT /trazabilidad/agenda/configuracion/estados', permiso: 'config.write', pedir: (c) => request(appAgenda()).put('/api/trazabilidad/agenda/configuracion/estados').set(c).send({ estado: 'Ingresado', categoria: 'entrada' }) },
+    // El maestro de equipos (lote 9b): aplicar el plan del cruce con Desk 2.0.
+    { ruta: 'POST /trazabilidad/maestro/sincronizar', permiso: 'maestro.sincronizar', pedir: (c) => request(appMaestro()).post('/api/trazabilidad/maestro/sincronizar').set(c).send({}) },
   ];
   /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las trece escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las catorce escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -1501,5 +1525,124 @@ describe('F-ST-022: congelación (sólo lectura) y subida retirada', () => {
     const res = await request(a).post(RUTA).set(auth()).send({ ...CUERPO_SUBIDA, matriz: Array.from({ length: 1500 }, () => ['x'.repeat(2000)]) });
     expect(res.status).toBe(413);
     expect(queries).toEqual([]);
+  });
+});
+
+// Maestro de equipos desde Desk 2.0 (lote 9b): el plan del cruce (lectura, en
+// recuentos), el cruce informativo con la congelación y aplicar el plan. El
+// SQL lo cubre maestro.db.test.ts; aquí, las guardas y lo que sale en claro.
+describe('maestro de equipos: plan, cruce y sincronizar', () => {
+  const PLAN = '/api/trazabilidad/maestro/plan';
+  const CRUCE = '/api/trazabilidad/maestro/cruce';
+  const SINCRONIZAR = '/api/trazabilidad/maestro/sincronizar';
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q));
+  /** Una fila del inventario del portal que casa con el equipo del maestro y a la que le cambia el cliente. */
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos/, [{ clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Antiguo Reservado', modelo: 'EDM 180C', activo: true, desk_id: null }]];
+
+  it('401 sin token y 403 sin la app, en las tres rutas, sin ninguna consulta', async () => {
+    for (const pedir of [() => request(appMaestro()).get(PLAN), () => request(appMaestro()).get(CRUCE), () => request(appMaestro()).post(SINCRONIZAR)]) {
+      expect((await pedir()).status).toBe(401);
+      const sinApp = await pedir().set(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })));
+      expect([sinApp.status, sinApp.body.error]).toEqual([403, 'forbidden']);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('el plan está abierto a quien tenga la app: a un Lector le llegan el estado del maestro, la huella y los recuentos, sin un cliente ni un serial, y no escribe', async () => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appMaestro()).get(PLAN).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body.maestro).toEqual({ disponible: true, motivo: null, mensaje: null });
+    expect(res.body.plan.huella).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.body.plan.recuentos).toMatchObject({ maestro: 1, portal: 1, casan: 1, enlaces: 1, altas: 0, cambios: { cliente: 1, modelo: 0, serial: 0, activo: 0 }, cambianDeCliente: 1 });
+    expect(res.body.ultima).toBeNull();
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
+    expect(escrituras()).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it.each(['COMERCIAL', 'TECNICO'])('a un %s tampoco le llega el detalle', async (rol) => {
+    respuestas.push(INVENTARIO);
+    expect((await request(appMaestro()).get(PLAN).set(conRol(rol))).body).not.toHaveProperty('detalle');
+  });
+
+  it.each([
+    ['el Director Técnico', () => conRol('DIRECTOR_TECNICO')],
+    ['un administrador del portal', comoAdmin],
+  ])('a quien puede sincronizar (%s) le llega además el detalle de los cambios, aparte y acotado', async (_quien, cabecera) => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appMaestro()).get(PLAN).set(cabecera());
+    expect(res.body.detalleTotal).toBe(1);
+    expect(res.body.detalle).toEqual([{ clave: 'SER-RESERVADO', campo: 'cliente', antes: 'Cliente Antiguo Reservado', despues: 'Cliente Reservado' }]);
+  });
+
+  it.each(['sin_variable', 'error_conexion', 'timeout', 'error_consulta'] as const)('sin maestro (%s) el plan responde 200 diciendo por qué, sin plan; y sincronizar es un 409 que no abre transacción ni escribe', async (motivo) => {
+    lecturaMaestro = { disponible: false, motivo };
+    const plan = await request(appMaestro()).get(PLAN).set(auth());
+    expect(plan.status).toBe(200);
+    expect(plan.body).toMatchObject({ maestro: { disponible: false, motivo }, plan: null, ultima: null });
+    expect(plan.body.maestro.mensaje).toMatch(/Desk 2\.0/);
+    const res = await request(appMaestro()).post(SINCRONIZAR).set(auth()).send({});
+    expect([res.status, res.body.error]).toEqual([409, 'maestro_no_disponible']);
+    expect(res.body.message).toMatch(/No se ha sincronizado nada\.$/);
+    expect(JSON.stringify([plan.body, res.body])).not.toMatch(/postgres:|@|password/i);
+    expect(escrituras()).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it('por defecto el maestro sale de DESK2_DB_URL: sin la variable no hay maestro (sin_variable), y no es un error', async () => {
+    vi.stubEnv('DESK2_DB_URL', '');
+    const res = await request(app()).get(PLAN).set(auth());
+    vi.unstubAllEnvs();
+    expect([res.status, res.body.maestro.motivo, res.body.plan]).toEqual([200, 'sin_variable', null]);
+  });
+
+  it('sincronizar aplica el plan en una transacción y devuelve la fila de auditoría; sin huella vale el plan de ahora', async () => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appMaestro()).post(SINCRONIZAR).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: 3, huella: 'ef'.repeat(32), recuentos: { altas: 1 }, por: 'director@example.com', en: '2026-10-10 15:00:00+00' });
+    expect(conexiones.n).toBe(1);
+    expect(escrituras().map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1])).toEqual(['UPDATE portal.tmc_equipos', 'INSERT INTO portal.tmc_maestro_sincronizaciones']);
+  });
+
+  it('409 si el plan cambió desde que se revisó (otra huella): no escribe nada; con la huella del plan de ahora, sí', async () => {
+    respuestas.push(INVENTARIO);
+    const { huella } = (await request(appMaestro()).get(PLAN).set(auth())).body.plan;
+    const cambiado = await request(appMaestro()).post(SINCRONIZAR).set(auth()).send({ huella: 'ab'.repeat(32) });
+    expect([cambiado.status, cambiado.body.error]).toEqual([409, 'plan_cambiado']);
+    expect(cambiado.body.message).toMatch(/^El plan ha cambiado desde que lo revisaste/);
+    expect(escrituras()).toEqual([]);
+    expect((await request(appMaestro()).post(SINCRONIZAR).set(auth()).send({ huella })).status).toBe(200);
+  });
+
+  it('400 con una huella que no lo es, antes de leer el maestro', async () => {
+    const res = await request(appMaestro()).post(SINCRONIZAR).set(auth()).send({ huella: 'no-es-una-huella' });
+    expect([res.status, res.body.field]).toEqual([400, 'huella']);
+    expect(queries).toEqual([]);
+  });
+
+  it('el cruce informativo está abierto a un Lector y sólo lleva recuentos por marca; sin congelación, vacío', async () => {
+    const vacio = await request(appMaestro()).get(CRUCE).set(conRol(null));
+    expect([vacio.status, vacio.body]).toEqual([200, { maestro: { disponible: true, motivo: null, mensaje: null }, congelacion: null, marcas: [] }]);
+    respuestas.push([/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia.xlsx', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial']] }]]);
+    respuestas.push([/FROM portal\.tmc_fst022_congelada/, [{ celdas: ['Cliente Reservado', 'Grimm', 'EDM 180C', 'SER-RESERVADO'], serial_norm: 'SER-RESERVADO' }, { celdas: ['Cliente Reservado', 'Thermo', '49i', 'TH-RESERVADO'], serial_norm: 'TH-RESERVADO' }]]);
+    const res = await request(appMaestro()).get(CRUCE).set(conRol(null));
+    expect(res.body.marcas).toEqual([
+      { marca: 'Grimm', v3: 1, desk: 1, casan: 1, soloV3: 0, soloDesk: 0, ambiguos: 0, sinCeros: 0 },
+      { marca: 'Thermo', v3: 1, desk: 0, casan: 0, soloV3: 1, soloDesk: 0, ambiguos: 0, sinCeros: 0 },
+      { marca: 'Horiba', v3: 0, desk: 1, casan: 0, soloV3: 0, soloDesk: 1, ambiguos: 0, sinCeros: 0 },
+    ]);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+    expect(escrituras()).toEqual([]);
+    expect(consultasRol.n).toBe(0);
+  });
+
+  it('CANDADO: el maestro no entra en la fuente de la agenda (ni en su sonda) y no hay sincronización automática ni programador', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    for (const f of ['./fuente.ts', './fuente-desk2.ts', './fuente-replica.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/desk\.equipos|maestro/i);
+    const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/maestro\//.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/maestro/plan', 'get /trazabilidad/maestro/cruce', 'post /trazabilidad/maestro/sincronizar']);
   });
 });
