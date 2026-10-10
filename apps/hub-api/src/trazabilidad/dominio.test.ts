@@ -14,7 +14,6 @@ import {
   estadoPlazo,
   etiquetaEstadoDesk,
   modeloDeCodigo,
-  modeloEdm180,
   partesDeTipo,
   porOrdenEstadosDesk,
   sumarDias,
@@ -82,16 +81,7 @@ describe('estadoCalibracion (regla de la F-ST-022: vigencia = última calibraci�
   });
 });
 
-describe('modelos y claves', () => {
-  it('reconoce los EDM 180 tal como se escriben en la hoja', () => {
-    expect(modeloEdm180('EDM 180C')).toBe('EDM 180C');
-    expect(modeloEdm180('EDM180C')).toBe('EDM 180C');
-    expect(modeloEdm180('edm 180 d')).toBe('EDM 180D');
-    expect(modeloEdm180('EDM 280')).toBeNull();
-    expect(modeloEdm180(1109)).toBeNull();
-    expect(modeloEdm180(null)).toBeNull();
-  });
-
+describe('claves', () => {
   it('los seriales repetidos reciben sufijo en orden de aparición', () => {
     expect(asignarClaves(['18A00004', '18A00005', '18A00004', '18A00004'])).toEqual([
       '18A00004',

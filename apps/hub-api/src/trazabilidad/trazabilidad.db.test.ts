@@ -5,32 +5,33 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { aplicarMigraciones } from '../db.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import { hoyEnColombia } from '../ausencias/saldo.js';
-import { claveEstadoDesk, type RolEstado } from './dominio.js';
+import { asignarClaves, claveEstadoDesk, type RolEstado } from './dominio.js';
 import { ROLES_APP } from './roles.js';
 import * as repo from './repo.js';
-import type { FilaImportada } from './types.js';
 
-// El SQL de verdad contra Postgres: importación, reimportación (altas, cambios,
-// retiradas), seguimiento y avisos en bloque.
+// El SQL de verdad contra Postgres: el inventario (que ya nadie importa: aquí
+// se siembra a mano), seguimiento y avisos en bloque.
 
 let db: Pool;
 const actor = { userId: '00000000-0000-4000-8000-000000000001', email: 'st@ambientalia.com.co' };
 const hoy = '2026-10-06';
 
-const fila = (serial: string, cliente: string, ultimaCalibracion: string | null, extra: Partial<FilaImportada> = {}): FilaImportada => ({
-  serial,
-  cliente,
-  marca: 'Grimm',
-  modelo: 'EDM 180C',
-  fechaFactura: '2019-03-04',
-  hojaVida: `HV_${serial}_EDM180C`,
-  ultimaEntrada: null,
-  ultimaCalibracion,
-  entradasSt: 1,
-  calibracionesPeriodo: 2,
-  correctivosPeriodo: 0,
-  ...extra,
-});
+const fila = (serial: string, cliente: string, ultimaCalibracion: string | null) => ({ serial, cliente, ultimaCalibracion });
+/**
+ * Siembra el inventario como lo dejaba la importación de la F-ST-022 (retirada
+ * el 10/10/2026): un GRIMM EDM 180C por fila, con la clave de `asignarClaves`
+ * (el serial; «-2» si se repite). Sólo para pruebas: la app ya no escribe aquí.
+ */
+async function sembrar(filas: ReturnType<typeof fila>[]): Promise<void> {
+  const claves = asignarClaves(filas.map((f) => f.serial));
+  for (const [i, f] of filas.entries()) {
+    await db.query(
+      `INSERT INTO portal.tmc_equipos (clave, serial, cliente, marca, modelo, fecha_factura, hoja_vida, ultima_calibracion, entradas_st, calibraciones_periodo, correctivos_periodo)
+       VALUES ($1, $2, $3, 'Grimm', 'EDM 180C', '2019-03-04', $4, $5, 1, 2, 0)`,
+      [claves[i], f.serial, f.cliente, `HV_${f.serial}_EDM180C`, f.ultimaCalibracion],
+    );
+  }
+}
 
 // Los plazos llevan semilla (migraciones 043 y 045): los tests que la editan la
 // dejan como recién migrada vaciando la tabla y volviendo a ejecutar esos ficheros.
@@ -58,50 +59,39 @@ beforeEach(async () => {
   await db.query('TRUNCATE portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_importaciones, portal.tmc_servicios_tipo, portal.tmc_estados_desk, portal.tmc_estados_historial, portal.tmc_contactos, desk.tickets RESTART IDENTITY');
 });
 
-describe('importar', () => {
-  it('da de alta, calcula el estado y marca los seriales repetidos', async () => {
-    const r = await repo.importar(
-      db,
-      { archivo: 'F-ST-022.xlsx', filas: [fila('18A00006', 'Cliente Cuatro', '2025-10-17'), fila('18A00004', 'Cliente Cinco', '2024-03-26'), fila('18A00004', 'Cliente Seis', '2024-03-26')] },
-      actor,
-      false,
-    );
-    expect(r).toMatchObject({ total: 3, nuevos: 3, actualizados: 0, retirados: 0, por: actor.email });
+describe('el inventario que dejó la importación (ya no se importa: se lee)', () => {
+  it('lista los equipos activos con su estado y marca los seriales repetidos', async () => {
+    await sembrar([fila('18A00006', 'Cliente Cuatro', '2025-10-17'), fila('18A00004', 'Cliente Cinco', '2024-03-26'), fila('18A00004', 'Cliente Seis', '2024-03-26')]);
 
     const eq = await repo.listarEquipos(db, hoy);
     expect(eq.map((e) => e.clave).sort()).toEqual(['18A00004', '18A00004-2', '18A00006']);
     const chem = eq.find((e) => e.clave === '18A00006')!;
     expect(chem).toMatchObject({ vence: '2026-10-17', vigenciaDias: 11, estado: 'VENCE_30', serialRepetido: false, seguimiento: null });
     expect(eq.find((e) => e.clave === '18A00004-2')).toMatchObject({ cliente: 'Cliente Seis', serialRepetido: true, estado: 'FUERA_CICLO' });
-    expect(await repo.ultimaImportacion(db)).toMatchObject({ archivo: 'F-ST-022.xlsx', total: 3 });
   });
 
-  it('simular cuenta sin escribir', async () => {
-    const r = await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('A1', 'C', null)] }, actor, true);
-    expect(r).toMatchObject({ id: null, nuevos: 1 });
-    expect(await repo.listarEquipos(db, hoy)).toEqual([]);
-    expect(await repo.ultimaImportacion(db)).toBeNull();
-  });
-
-  it('reimportar: actualiza lo que cambia, retira lo que falta y conserva el seguimiento', async () => {
-    await repo.importar(db, { archivo: 'v1.xlsx', filas: [fila('A1', 'C1', '2025-01-01'), fila('A2', 'C2', '2025-01-01'), fila('A3', 'C3', '2025-01-01')] }, actor, false);
+  it('un equipo retirado no sale, y su seguimiento sigue guardado', async () => {
+    await sembrar([fila('A1', 'C1', '2025-01-01'), fila('A3', 'C3', '2025-01-01')]);
     await repo.guardarSeguimiento(db, 'A3', { enAmbientalia: true, avisoEnviado: '2026-09-01', servicioProgramado: null, nota: 'llamar a Ana' }, actor);
+    await db.query(`UPDATE portal.tmc_equipos SET activo = FALSE WHERE clave = 'A3'`);
+    expect((await repo.listarEquipos(db, hoy)).map((e) => e.clave)).toEqual(['A1']);
+    expect((await db.query(`SELECT nota FROM portal.tmc_seguimiento WHERE clave = 'A3'`)).rows).toEqual([{ nota: 'llamar a Ana' }]);
+  });
 
-    const r2 = await repo.importar(db, { archivo: 'v2.xlsx', filas: [fila('A1', 'C1', '2025-01-01'), fila('A2', 'C2', '2026-09-30')] }, actor, false);
-    expect(r2).toMatchObject({ nuevos: 0, actualizados: 1, retirados: 1 });
-    expect((await repo.listarEquipos(db, hoy)).map((e) => e.clave)).toEqual(['A1', 'A2']);
+  it('la última importación registrada se sigue leyendo (la de antes de retirar la subida); sin ninguna, null', async () => {
+    expect(await repo.ultimaImportacion(db)).toBeNull();
+    await db.query(`INSERT INTO portal.tmc_importaciones (archivo, total, nuevos, actualizados, retirados, por) VALUES ('F-ST-022 ficticia.xlsx', 3, 3, 0, 0, 'director@example.com')`);
+    expect(await repo.ultimaImportacion(db)).toMatchObject({ id: 1, archivo: 'F-ST-022 ficticia.xlsx', total: 3, nuevos: 3, por: 'director@example.com' });
+  });
 
-    // A3 vuelve en otra importación: reaparece con su seguimiento intacto.
-    const r3 = await repo.importar(db, { archivo: 'v3.xlsx', filas: [fila('A1', 'C1', '2025-01-01'), fila('A2', 'C2', '2026-09-30'), fila('A3', 'C3', '2025-01-01')] }, actor, false);
-    expect(r3).toMatchObject({ nuevos: 0, actualizados: 1, retirados: 0 });
-    const a3 = (await repo.listarEquipos(db, hoy)).find((e) => e.clave === 'A3')!;
-    expect(a3.seguimiento).toMatchObject({ enAmbientalia: true, avisoEnviado: '2026-09-01', nota: 'llamar a Ana', actualizadoPor: actor.email });
+  it('el repositorio ya no sabe importar ni congelar: no exporta nada que escriba el inventario desde una Excel', () => {
+    expect(Object.keys(repo).filter((k) => /import|congelar/i.test(k))).toEqual(['ultimaImportacion']);
   });
 });
 
 describe('seguimiento y avisos', () => {
   beforeEach(async () => {
-    await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('B1', 'C', '2025-10-01'), fila('B2', 'C', '2025-10-20')] }, actor, false);
+    await sembrar([fila('B1', 'C', '2025-10-01'), fila('B2', 'C', '2025-10-20')]);
   });
 
   it('guardar seguimiento de un equipo inexistente es 404', async () => {
@@ -133,7 +123,7 @@ describe('ticket abierto en Desk', () => {
   const ticketDe = async (clave: string) => (await repo.listarEquipos(db, hoy)).find((e) => e.clave === clave)!.ticket;
 
   beforeEach(async () => {
-    await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00002', 'Cliente Dos', '2025-10-20')] }, actor, false);
+    await sembrar([fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00002', 'Cliente Dos', '2025-10-20')]);
   });
 
   it('sin tickets, el equipo no lleva ticket', async () => {
@@ -211,12 +201,7 @@ describe('contacto de cada equipo', () => {
     (await db.query(`SELECT clave, cliente, emails, nombre, actualizado_por_id::text AS por_id, actualizado_por, actualizado_en FROM portal.tmc_contactos ORDER BY clave`)).rows;
 
   beforeEach(async () => {
-    await repo.importar(
-      db,
-      { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-17'), fila('18A00002', 'Cliente  Uno', '2025-10-20'), fila('18A00003', 'Cliente Dos', '2025-10-20')] },
-      actor,
-      false,
-    );
+    await sembrar([fila('18A00001', 'Cliente Uno', '2025-10-17'), fila('18A00002', 'Cliente  Uno', '2025-10-20'), fila('18A00003', 'Cliente Dos', '2025-10-20')]);
   });
 
   it('sin tickets, o sin ninguno con correo, el equipo no lleva contacto', async () => {
@@ -493,14 +478,14 @@ describe('servicios abiertos en Desk', () => {
     const contacto = (account: unknown = null) => ({ id: '9', firstName: ' Ana ', lastName: 'Pérez', email: 'compras@cliente-uno.example', account });
 
     it('(a) gana el cliente del equipo del inventario con ese serial, sin mayúsculas ni espacios', async () => {
-      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01')] }, actor, false);
+      await sembrar([fila('18A00001', 'Cliente Uno', '2025-10-01')]);
       await ticket({ numero: 1080, serial: ' 18a00001 ', asunto, codigo, raw: { contact: contacto(cuenta) } });
       expect(await servicio(1080)).toMatchObject({ cliente: 'Cliente Uno', clienteOrigen: 'equipo', clienteDeAsunto: false });
     });
 
     it('(a) con el serial repetido en el inventario, el equipo activo gana al retirado; si no queda ninguno activo, vale el retirado', async () => {
       // Dos filas con el mismo serial: claves «18A00001» (Cliente Viejo) y «18A00001-2» (Cliente Uno).
-      await repo.importar(db, { archivo: 'v1.xlsx', filas: [fila('18A00001', 'Cliente Viejo', '2025-10-01'), fila('18A00001', 'Cliente Uno', '2025-10-01')] }, actor, false);
+      await sembrar([fila('18A00001', 'Cliente Viejo', '2025-10-01'), fila('18A00001', 'Cliente Uno', '2025-10-01')]);
       await db.query(`UPDATE portal.tmc_equipos SET activo = FALSE WHERE clave = '18A00001'`);
       await ticket({ numero: 1081, serial: '18A00001', asunto, codigo });
       expect(await servicio(1081)).toMatchObject({ cliente: 'Cliente Uno', clienteOrigen: 'equipo' });
@@ -510,7 +495,7 @@ describe('servicios abiertos en Desk', () => {
     });
 
     it('(b) sin equipo con ese serial, la cuenta de Desk', async () => {
-      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00002', 'Cliente Dos', '2025-10-01')] }, actor, false);
+      await sembrar([fila('18A00002', 'Cliente Dos', '2025-10-01')]);
       await ticket({ numero: 1082, serial: '18A00001', asunto, codigo, raw: { contact: contacto(cuenta) } });
       await ticket({ numero: 1083, serial: null, asunto, codigo, raw: { contact: contacto(cuenta) } });
       expect(await servicio(1082)).toMatchObject({ cliente: 'Cuenta de Desk S.A.S.', clienteOrigen: 'cuenta', clienteDeAsunto: false });
@@ -533,7 +518,7 @@ describe('servicios abiertos en Desk', () => {
     });
 
     it('un equipo del inventario con varios tickets no multiplica los servicios', async () => {
-      await repo.importar(db, { archivo: 'x.xlsx', filas: [fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00001', 'Cliente Uno Bis', '2025-10-01')] }, actor, false);
+      await sembrar([fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00001', 'Cliente Uno Bis', '2025-10-01')]);
       await ticket({ numero: 1088, serial: '18A00001' });
       await ticket({ numero: 1089, serial: '18A00001' });
       const s = await repo.listarServicios(db, hoy);

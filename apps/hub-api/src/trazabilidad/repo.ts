@@ -8,9 +8,8 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
-import { titulosFst022, type Celda, type FilaCongelada } from './fst022.js';
+import type { Celda, FilaCongelada } from './fst022.js';
 import {
-  asignarClaves,
   asuntoSinCodigo,
   categoriaCoherente,
   categoriaDeEstado,
@@ -73,13 +72,9 @@ import {
   type CambioPuestosEtapa,
   type ConfigAgenda,
   type CongelacionFst022,
-  type NuevaCongelacion,
-  type ResultadoCongelacion,
   type ConfiguracionAgenda,
   type EquipoVista,
   type EstadoDesk,
-  type FilaImportada,
-  type Importacion,
   type OrigenCliente,
   type PartePlazo,
   type PlazoServicio,
@@ -1181,102 +1176,6 @@ export async function ultimaImportacion(db: Db): Promise<ResumenImportacion | nu
   return rows[0] ? toImport(rows[0]) : null;
 }
 
-/** Campos que vienen de la hoja, en el orden en que se comparan y se escriben. */
-function valores(f: FilaImportada): (string | number | null)[] {
-  return [
-    f.serial, f.cliente, f.marca, f.modelo, f.fechaFactura, f.hojaVida, f.ultimaEntrada, f.ultimaCalibracion,
-    f.entradasSt, f.calibracionesPeriodo, f.correctivosPeriodo,
-  ];
-}
-function valoresFila(r: Row): (string | number | null)[] {
-  return [
-    r.serial, r.cliente, r.marca, r.modelo, r.fecha_factura, r.hoja_vida, r.ultima_entrada, r.ultima_calibracion,
-    r.entradas_st, r.calibraciones_periodo, r.correctivos_periodo,
-  ];
-}
-
-/**
- * Aplica (o simula, con `simular`) una importación de la F-ST-022:
- *  - fila nueva → alta;
- *  - fila existente con cambios, o retirada antes y que vuelve → actualización;
- *  - equipo activo que ya no está en el archivo → se marca inactivo (no se
- *    borra: su seguimiento sigue ahí si vuelve en otra importación).
- * El seguimiento (avisos, notas, «en Ambientalia») no se toca nunca.
- */
-export async function importar(db: Pool, imp: Importacion, actor: Actor, simular: boolean): Promise<ResumenImportacion> {
-  const claves = asignarClaves(imp.filas.map((f) => f.serial));
-  const plan = async (c: Db) => {
-    const { rows } = await c.query(`SELECT ${COLS_EQUIPO} FROM portal.tmc_equipos e ${simular ? '' : 'FOR UPDATE'}`);
-    const previo = new Map<string, Row>((rows as Row[]).map((r) => [r.clave, r]));
-    let nuevos = 0;
-    let actualizados = 0;
-    const cambian: number[] = [];
-    imp.filas.forEach((f, i) => {
-      const p = previo.get(claves[i]);
-      if (!p) {
-        nuevos++;
-        cambian.push(i);
-      } else if (!p.activo || JSON.stringify(valoresFila(p)) !== JSON.stringify(valores(f))) {
-        actualizados++;
-        cambian.push(i);
-      }
-    });
-    const enArchivo = new Set(claves);
-    const retirar = [...previo.values()].filter((r) => r.activo && !enArchivo.has(r.clave)).map((r) => r.clave as string);
-    return { nuevos, actualizados, cambian, retirar };
-  };
-
-  const resumenBase = (p: { nuevos: number; actualizados: number; retirar: string[] }) => ({
-    archivo: imp.archivo,
-    total: imp.filas.length,
-    nuevos: p.nuevos,
-    actualizados: p.actualizados,
-    retirados: p.retirar.length,
-    por: actor.email,
-  });
-
-  if (simular) {
-    const p = await plan(db);
-    return { id: null, ...resumenBase(p), en: new Date().toISOString() };
-  }
-
-  return withTransaction(db, async (c) => {
-    const p = await plan(c);
-    const { rows } = await c.query(
-      `INSERT INTO portal.tmc_importaciones (archivo, total, nuevos, actualizados, retirados, por_id, por)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLS_IMPORT}`,
-      [imp.archivo, imp.filas.length, p.nuevos, p.actualizados, p.retirar.length, actor.userId, actor.email],
-    );
-    const imp_ = toImport(rows[0]);
-    if (p.cambian.length) {
-      const col = (k: number) => p.cambian.map((i) => valores(imp.filas[i])[k]);
-      await c.query(
-        `INSERT INTO portal.tmc_equipos
-           (clave, serial, cliente, marca, modelo, fecha_factura, hoja_vida, ultima_entrada, ultima_calibracion,
-            entradas_st, calibraciones_periodo, correctivos_periodo, activo, importacion_id, actualizado_en)
-         SELECT t.*, TRUE, $13::bigint, NOW()
-           FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::date[], $7::text[],
-                       $8::date[], $9::date[], $10::int[], $11::int[], $12::int[]) AS t
-         ON CONFLICT (clave) DO UPDATE SET
-           serial = EXCLUDED.serial, cliente = EXCLUDED.cliente, marca = EXCLUDED.marca, modelo = EXCLUDED.modelo,
-           fecha_factura = EXCLUDED.fecha_factura, hoja_vida = EXCLUDED.hoja_vida,
-           ultima_entrada = EXCLUDED.ultima_entrada, ultima_calibracion = EXCLUDED.ultima_calibracion,
-           entradas_st = EXCLUDED.entradas_st, calibraciones_periodo = EXCLUDED.calibraciones_periodo,
-           correctivos_periodo = EXCLUDED.correctivos_periodo, activo = TRUE,
-           importacion_id = EXCLUDED.importacion_id, actualizado_en = NOW()`,
-        [p.cambian.map((i) => claves[i]), ...Array.from({ length: 11 }, (_, k) => col(k)), imp_.id],
-      );
-    }
-    if (p.retirar.length) {
-      await c.query(
-        `UPDATE portal.tmc_equipos SET activo = FALSE, importacion_id = $2, actualizado_en = NOW() WHERE clave = ANY($1::text[])`,
-        [p.retirar, imp_.id],
-      );
-    }
-    return imp_;
-  });
-}
-
 async function existeActivo(db: Db, clave: string): Promise<boolean> {
   const { rows } = await db.query(`SELECT 1 FROM portal.tmc_equipos WHERE clave = $1 AND activo`, [clave]);
   return rows.length > 0;
@@ -1372,10 +1271,10 @@ export async function listarUsuariosRol(db: Db, appId: string): Promise<UsuarioR
 
 // ── Congelación de la F-ST-022 (lote 9a, migración 055) ─────────────────────
 //
-// La hoja entera, tal cual. Sus filas (tmc_fst022_congelada) sólo se insertan
-// —aquí, al congelar— y se leen: nada las cambia ni las quita. Volver a
-// congelar deja la anterior como estaba, sólo que ya no es la vigente.
-// Las filas llevan clientes y seriales: nada de ellas va a un error ni al registro.
+// La hoja entera, tal cual, congelada el 10/10/2026. Aquí SÓLO se lee: la
+// subida de la Excel se retiró ese día y no queda código que cree una
+// congelación ni que toque una fila (fst022.test.ts lo vigila). Las filas
+// llevan clientes y seriales: nada de ellas va a un error ni al registro.
 
 const COLS_CONGELACION = `
   g.id, g.archivo, g.sha256, g.hoja, g.fila_cabecera, g.total_filas, g.total_columnas, g.filas_guardadas, g.filas_equipo,
@@ -1411,57 +1310,4 @@ export async function congelacionVigente(db: Db, pagina: { desde: number; limite
   );
   const filas = (rows as Row[]).slice(0, pagina.limite).map((r): FilaCongelada => ({ fila: r.fila, celdas: r.celdas, esEquipo: r.es_equipo, serialNorm: r.serial_norm, claveEquipo: r.clave_equipo }));
   return { congelacion: toCongelacion(v), cabeceras: v.cabeceras, filas, siguiente: rows.length > pagina.limite ? filas[filas.length - 1].fila : null };
-}
-
-/**
- * Congela la hoja (o lo simula, con `simular`: mismo resumen, sin escribir).
- * La primera vez basta el permiso de la ruta. Con una vigente sólo puede un
- * administrador del portal (409 si no lo es) y, al confirmar, con motivo
- * (400): la anterior deja de ser la vigente, firmada, y no se borra. Todo o
- * nada, en una transacción y de una en una (bloqueo propio).
- */
-export async function congelarFst022(db: Pool, c: NuevaCongelacion, actor: Actor, admin: boolean, simular: boolean): Promise<ResultadoCongelacion> {
-  const { resumen: r, cabeceras, filas } = c.preparada;
-  const base = { archivo: c.archivo, sha256: c.sha256, hoja: c.hoja, resumen: r, titulos: titulosFst022(cabeceras) };
-  const anteriorSiSePuede = (vigente: Row | null): CongelacionFst022 | null => {
-    if (!vigente) return null;
-    if (!admin) throw new TzError('congelacion_vigente', 409, 'Ya hay una congelación vigente de la F-ST-022. Sólo un administrador del portal puede volver a congelarla, indicando el motivo.');
-    if (!simular && !c.motivo) throw new TzError('invalid_input', 400, 'Para volver a congelar la F-ST-022 hay que indicar el motivo.', 'motivo');
-    return toCongelacion(vigente);
-  };
-  if (simular) return { simulado: true, ...base, anterior: anteriorSiSePuede(await vigenteFst022(db)), congelacion: null };
-  try {
-    return await withTransaction(db, async (t) => {
-      await t.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_fst022_congelaciones'))`);
-      const anterior = anteriorSiSePuede(await vigenteFst022(t));
-      if (anterior) {
-        await t.query(
-          `UPDATE portal.tmc_fst022_congelaciones
-              SET vigente = FALSE, reemplazada_por_id = $2, reemplazada_por = $3, reemplazada_en = NOW(), reemplazada_motivo = $4
-            WHERE id = $1`,
-          [anterior.id, actor.userId, actor.email, c.motivo],
-        );
-      }
-      const { rows } = await t.query(
-        `INSERT INTO portal.tmc_fst022_congelaciones AS g
-           (archivo, sha256, hoja, fila_cabecera, cabeceras, total_filas, total_columnas, filas_guardadas, filas_equipo,
-            filas_con_serial, filas_edm180, problemas, motivo, por_id, por)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)
-         RETURNING ${COLS_CONGELACION}`,
-        [c.archivo, c.sha256, c.hoja, r.filaCabecera, JSON.stringify(cabeceras), r.totalFilas, r.totalColumnas, r.filasGuardadas, r.filasEquipo, r.filasConSerial, r.filasEdm180, JSON.stringify(r.problemas), c.motivo, actor.userId, actor.email],
-      );
-      const congelacion = toCongelacion(rows[0]);
-      await t.query(
-        `INSERT INTO portal.tmc_fst022_congelada (congelacion_id, fila, celdas, es_equipo, serial_norm, clave_equipo)
-         SELECT $1::bigint, f.fila, f.celdas::jsonb, f.es_equipo, f.serial_norm, f.clave_equipo
-           FROM unnest($2::int[], $3::text[], $4::boolean[], $5::text[], $6::text[]) AS f(fila, celdas, es_equipo, serial_norm, clave_equipo)`,
-        [congelacion.id, filas.map((f) => f.fila), filas.map((f) => JSON.stringify(f.celdas)), filas.map((f) => f.esEquipo), filas.map((f) => f.serialNorm), filas.map((f) => f.claveEquipo)],
-      );
-      return { simulado: false, ...base, anterior, congelacion };
-    });
-  } catch (e) {
-    if (e instanceof TzError) throw e;
-    // El error del driver puede citar el contenido de una celda (su `detail` o su `where`): sólo sale su código.
-    throw new Error(`fst022: no se pudo guardar la congelación (${String((e as { code?: unknown }).code ?? 'sin código')})`);
-  }
 }

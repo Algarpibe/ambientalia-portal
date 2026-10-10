@@ -24,7 +24,6 @@ import {
   esEtapaAgenda,
   esFechaIso,
   esRolEstado,
-  modeloEdm180,
   normalizarEmail,
   partesDeTipo,
   type CategoriaAgenda,
@@ -40,7 +39,7 @@ import {
   type TipoAbierto,
   type TramoPlazo,
 } from './dominio.js';
-import { FST022_MAX_COLUMNAS, FST022_MAX_FILAS, FST022_MAX_TEXTO, prepararFst022, type Celda, type Fst022Preparada, type ResumenFst022 } from './fst022.js';
+import type { ResumenFst022 } from './fst022.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -62,26 +61,6 @@ export class TzError extends Error {
 }
 
 const invalido = (msg: string, field?: string) => new TzError('invalid_input', 400, msg, field);
-
-/** Una fila de la F-ST-022, tal como la manda la app tras leer el Excel. */
-export interface FilaImportada {
-  serial: string;
-  cliente: string;
-  marca: string;
-  modelo: string;
-  fechaFactura: string | null;
-  hojaVida: string | null;
-  ultimaEntrada: string | null;
-  ultimaCalibracion: string | null;
-  entradasSt: number | null;
-  calibracionesPeriodo: number | null;
-  correctivosPeriodo: number | null;
-}
-
-export interface Importacion {
-  archivo: string;
-  filas: FilaImportada[];
-}
 
 export interface Seguimiento {
   enAmbientalia: boolean;
@@ -133,6 +112,7 @@ export interface EquipoVista {
   contacto: ContactoEquipo | null;
 }
 
+/** El registro de una importación de la F-ST-022 (tmc_importaciones). Ya no se importa: se lee la última que quedó. */
 export interface ResumenImportacion {
   id: number | null;
   archivo: string;
@@ -148,8 +128,6 @@ export interface Actor {
   userId: string | null;
   email: string;
 }
-
-export const MAX_FILAS = 3000;
 
 function obj(v: unknown, field: string): Record<string, unknown> {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw invalido('El cuerpo de la petición no es válido.', field);
@@ -173,46 +151,9 @@ function fecha(v: unknown, field: string): string | null {
   return v;
 }
 
-function entero(v: unknown, field: string): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 100_000) {
-    throw invalido(`«${field}» debe ser un entero no negativo.`, field);
-  }
-  return v;
-}
-
-/** Valida el cuerpo de POST /trazabilidad/importaciones. */
-export function parseImportacion(body: unknown): Importacion {
-  const b = obj(body, 'body');
-  const archivo = texto(b.archivo, 'archivo', 255, true)!;
-  if (!Array.isArray(b.filas)) throw invalido('Faltan las filas del archivo.', 'filas');
-  if (b.filas.length === 0) throw invalido('El archivo no trae ningún GRIMM EDM 180.', 'filas');
-  if (b.filas.length > MAX_FILAS) throw invalido(`El archivo trae más de ${MAX_FILAS} filas.`, 'filas');
-  const filas = b.filas.map((raw, i): FilaImportada => {
-    const f = obj(raw, `filas[${i}]`);
-    const p = (campo: string) => `filas[${i}].${campo}`;
-    const modelo = modeloEdm180(f.modelo);
-    if (!modelo) throw invalido(`La fila ${i + 1} no es un GRIMM EDM 180.`, p('modelo'));
-    const marca = texto(f.marca, p('marca'), 60, true)!;
-    if (marca.toLowerCase() !== 'grimm') throw invalido(`La fila ${i + 1} no es de marca GRIMM.`, p('marca'));
-    return {
-      serial: texto(f.serial, p('serial'), 120, true)!,
-      cliente: texto(f.cliente, p('cliente'), 200, true)!,
-      marca: 'Grimm',
-      modelo,
-      fechaFactura: fecha(f.fechaFactura, p('fechaFactura')),
-      hojaVida: texto(f.hojaVida, p('hojaVida'), 200, false),
-      ultimaEntrada: fecha(f.ultimaEntrada, p('ultimaEntrada')),
-      ultimaCalibracion: fecha(f.ultimaCalibracion, p('ultimaCalibracion')),
-      entradasSt: entero(f.entradasSt, p('entradasSt')),
-      calibracionesPeriodo: entero(f.calibracionesPeriodo, p('calibracionesPeriodo')),
-      correctivosPeriodo: entero(f.correctivosPeriodo, p('correctivosPeriodo')),
-    };
-  });
-  return { archivo, filas };
-}
-
-// ── Congelación de la F-ST-022 (lote 9a) ────────────────────────────────────
+// ── Congelación de la F-ST-022 (lote 9a): sólo se lee ───────────────────────
+// La subida de la Excel se retiró el 10/10/2026: aquí no queda ningún validador
+// de un fichero, de unas filas ni de una hoja.
 
 /** Una congelación: de qué fichero salió, sus recuentos y quién la hizo (y, si ya no es la vigente, quién la reemplazó). */
 export interface CongelacionFst022 extends ResumenFst022 {
@@ -227,63 +168,6 @@ export interface CongelacionFst022 extends ResumenFst022 {
   reemplazadaPor: string | null;
   reemplazadaEn: string | null;
   reemplazadaMotivo: string | null;
-}
-
-/** Lo que responde POST /trazabilidad/fst022/congelaciones: con `simulado` no se ha escrito nada y `congelacion` es null. */
-export interface ResultadoCongelacion {
-  simulado: boolean;
-  archivo: string;
-  sha256: string;
-  hoja: string;
-  resumen: ResumenFst022;
-  /** Los títulos de cada columna, de arriba abajo. */
-  titulos: string[];
-  /** La que había vigente antes (la que se reemplaza), o null. */
-  anterior: CongelacionFst022 | null;
-  congelacion: CongelacionFst022 | null;
-}
-
-export interface NuevaCongelacion {
-  archivo: string;
-  sha256: string;
-  hoja: string;
-  motivo: string | null;
-  preparada: Fst022Preparada;
-}
-
-const CLAVES_CELDA = new Set(['v', 't', 'enlace']);
-const esTexto = (v: unknown): v is string => typeof v === 'string' && v.length <= FST022_MAX_TEXTO && !v.includes('\u0000');
-const esValor = (v: unknown): boolean => v === null || typeof v === 'boolean' || esTexto(v) || (typeof v === 'number' && Number.isFinite(v));
-function esCelda(c: unknown): c is Celda {
-  if (c === null || typeof c !== 'object') return esValor(c);
-  const o = c as Record<string, unknown>;
-  if (Array.isArray(c) || !Object.keys(o).every((k) => CLAVES_CELDA.has(k)) || !esValor(o.v)) return false;
-  if (o.enlace !== undefined && !esTexto(o.enlace)) return false;
-  return o.t === undefined || (o.t === 'fecha' && esFechaIso(o.v)) || (o.t === 'error' && typeof o.v === 'string');
-}
-
-/**
- * Valida el cuerpo de POST /trazabilidad/fst022/congelaciones: la hoja entera,
- * celda a celda. Los mensajes dicen DÓNDE está el fallo y nunca qué traía la
- * celda (las filas llevan clientes y seriales).
- */
-export function parseCongelacion(body: unknown): NuevaCongelacion {
-  const b = obj(body, 'body');
-  const archivo = texto(b.archivo, 'archivo', 255, true)!;
-  const hoja = texto(b.hoja, 'hoja', 100, true)!;
-  if (typeof b.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(b.sha256)) throw invalido('La huella del archivo (sha256) no es válida.', 'sha256');
-  if (!Array.isArray(b.matriz)) throw invalido('Faltan las filas de la hoja.', 'matriz');
-  if (b.matriz.length > FST022_MAX_FILAS) throw invalido(`La hoja trae más de ${FST022_MAX_FILAS} filas.`, 'matriz');
-  b.matriz.forEach((r: unknown, i) => {
-    if (!Array.isArray(r)) throw invalido(`La fila ${i + 1} de la hoja no es válida.`, `matriz[${i}]`);
-    if (r.length > FST022_MAX_COLUMNAS) throw invalido(`La fila ${i + 1} trae más de ${FST022_MAX_COLUMNAS} columnas.`, `matriz[${i}]`);
-    const j = r.findIndex((c) => !esCelda(c));
-    if (j >= 0) throw invalido(`La celda de la fila ${i + 1}, columna ${j + 1}, no se puede guardar (valor no admitido o texto de más de ${FST022_MAX_TEXTO} caracteres).`, `matriz[${i}][${j}]`);
-  });
-  const preparada = prepararFst022(b.matriz as Celda[][]);
-  if (!preparada) throw invalido(b.matriz.some((r) => r.length > 0) ? 'No encuentro la cabecera «Cliente / Serial» en la hoja.' : 'La hoja está vacía.', 'matriz');
-  if (preparada.resumen.filasEquipo === 0) throw invalido('La hoja no trae ninguna fila de equipo bajo la cabecera.', 'matriz');
-  return { archivo, sha256: b.sha256, hoja, motivo: motivoLimpio(b.motivo), preparada };
 }
 
 /** `?desde=&limite=` de GET /trazabilidad/fst022/congelaciones/vigente: filas posteriores a `desde`, de `limite` en `limite`. */
