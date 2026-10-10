@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import type { RespuestaCruceFst022, RespuestaPlanMaestro } from '../dominio';
-import { hayQueAplicar, lineasPlan, textoCambio, textoUltima, type LineaPlan } from '../lib/maestro';
+import type { CambioMaestro, EquipoRevisar, RespuestaCruceFst022, RespuestaPlanMaestro } from '../dominio';
+import { bloquesDetalle, hayQueAplicar, lineasPlan, textoCambio, textoUltima, type LineaPlan } from '../lib/maestro';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Loading, Modal, Tag } from '../ui';
 
@@ -11,18 +11,45 @@ interface Props {
   onSincronizado: () => void;
 }
 
-const COLUMNAS_CRUCE = ['Marca', 'En la hoja', 'En Desk 2.0', 'Casan', 'Sólo en la hoja', 'Sólo en Desk 2.0', 'Ambiguos', 'Casarían sin ceros a la izquierda'];
+/** Títulos cortos, para que la cabecera quepa en una línea; el largo va en el `title` y en la nota de debajo. */
+const COLUMNAS_CRUCE: [string, string][] = [
+  ['Marca', 'Marca'],
+  ['Hoja', 'Filas de equipo en la hoja congelada'],
+  ['Desk', 'Equipos en Desk 2.0'],
+  ['Casan', 'Casan por serial'],
+  ['Sólo hoja', 'Sólo en la hoja'],
+  ['Sólo Desk', 'Sólo en Desk 2.0'],
+  ['Ambig.', 'Ambiguos: serial repetido en alguno de los dos lados'],
+  ['Sin ceros', 'De «sólo hoja», los de serial numérico que casarían ignorando los ceros a la izquierda'],
+];
 
 function Lineas({ lineas }: { lineas: LineaPlan[] }) {
   return (
     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
       {lineas.map((l) => (
-        <div key={l.texto} className={`contents ${l.cambia ? 'font-semibold text-blue-900' : ''}`}>
-          <dt className={l.cambia ? '' : 'text-gray-600'}>{l.texto}</dt>
-          <dd className="text-right font-semibold tabular-nums">{l.valor}</dd>
+        <div key={l.texto} className={`contents ${l.aviso ? 'font-semibold text-amber-900' : l.cambia ? 'font-semibold text-blue-900' : ''}`}>
+          <dt className={l.aviso ? '-mx-1 rounded bg-amber-100 px-1' : l.cambia ? '' : 'text-gray-600'}>{l.texto}</dt>
+          <dd className={`text-right font-semibold tabular-nums ${l.aviso ? '-mx-1 rounded bg-amber-100 px-1' : ''}`}>{l.valor}</dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+const cambio = (c: CambioMaestro): [string, string] => [c.clave, textoCambio(c)];
+const equipo = (e: EquipoRevisar): [string, string] => [`${e.origen === 'desk' ? 'Desk 2.0' : 'Portal'} · ${e.serial}`, `${e.cliente || '(sin cliente)'}${e.activo ? '' : ' · inactivo'}`];
+
+/** Un bloque plegable del detalle: equipo (en negrita) y lo que le pasa. Vacío no se pinta. */
+function Bloque({ titulo, nota, items, abierto = false }: { titulo: string; nota?: string; items: [string, string][]; abierto?: boolean }) {
+  if (items.length === 0) return null;
+  return (
+    <details open={abierto} className="text-xs text-gray-700">
+      <summary className="cursor-pointer text-sm font-medium text-gray-800">{titulo}</summary>
+      {nota && <p className="mt-1 text-gray-500">{nota}</p>}
+      <ul className="mt-2 flex flex-col gap-1">
+        {items.map(([quien, que], i) => <li key={`${quien}-${i}`}><span className="font-mono font-semibold">{quien}</span> · {que}</li>)}
+      </ul>
+    </details>
   );
 }
 
@@ -89,6 +116,8 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
   const sincroniza = puede('maestro.sincronizar');
   const detalle = datos?.detalle ?? [];
   const sinEnsenar = (datos?.detalleTotal ?? 0) - detalle.length;
+  const bloques = bloquesDetalle(detalle);
+  const revisar = datos?.revisar ?? { soloPortal: [], ambiguos: [] };
 
   return (
     <Card
@@ -117,7 +146,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
               <h3 className="font-semibold text-gray-900">Plan: qué pasaría al sincronizar ahora</h3>
               <Lineas lineas={lineas} />
               <p className="text-xs text-gray-500">
-                {pendiente ? 'En azul, lo que cambiaría.' : 'El inventario ya está como el maestro: sincronizar no cambiaría nada.'} Lo que sólo está en el portal y los ambiguos no se borran ni se desactivan; el seguimiento y los
+                {pendiente ? 'En azul, lo que cambiaría; en ámbar, lo que conviene mirar antes.' : 'El inventario ya está como el maestro: sincronizar no cambiaría nada.'} Lo que sólo está en el portal y los ambiguos no se borran ni se desactivan; el seguimiento y los
                 contactos se conservan. {!sincroniza && `Sincroniza el Director Técnico. ${motivo}`}
               </p>
             </>
@@ -135,7 +164,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
                 <table className="w-full text-left tabular-nums">
                   <thead>
                     <tr className="border-b border-gray-200 text-gray-500">
-                      {COLUMNAS_CRUCE.map((t, i) => <th key={t} className={`px-2 py-1 font-medium ${i > 0 ? 'text-right' : ''}`}>{t}</th>)}
+                      {COLUMNAS_CRUCE.map(([t, largo], i) => <th key={t} title={largo} className={`whitespace-nowrap px-2 py-1 font-medium ${i > 0 ? 'text-right' : ''}`}>{t}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -147,6 +176,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
                     ))}
                   </tbody>
                 </table>
+                <p className="mt-2 text-gray-500">«Ambig.» = serial repetido en alguno de los dos lados. «Sin ceros» = de los que sólo están en la hoja, los de serial numérico que casarían ignorando los ceros a la izquierda.</p>
               </div>
             )}
           </details>
@@ -166,16 +196,22 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
           <div className="flex flex-col gap-3 text-sm">
             {errorAplicar && <Alert tone="red">{errorAplicar}</Alert>}
             <p>Se aplicará este plan al inventario de GRIMM EDM 180, firmado con tu correo. La fecha de calibración, el seguimiento y los contactos no se tocan, y no se borra ningún equipo.</p>
-            <Lineas lineas={lineas} />
-            {detalle.length > 0 && (
-              <details open className="text-xs text-gray-700">
-                <summary className="cursor-pointer text-sm font-medium text-gray-700">Los {datos?.detalleTotal} cambios, uno a uno</summary>
-                <ul className="mt-2 flex flex-col gap-1">
-                  {detalle.map((c) => <li key={`${c.clave}-${c.campo}`}><span className="font-mono font-semibold">{c.clave}</span> · {textoCambio(c)}</li>)}
+            {/* Las altas, lo primero y destacadas: son equipos nuevos en el inventario y, entre cien cambios de nombre, pasan desapercibidas. */}
+            {bloques.altas.length > 0 && (
+              <Alert tone="amber" title={`Altas: ${bloques.altas.length} ${bloques.altas.length === 1 ? 'equipo nuevo entrará' : 'equipos nuevos entrarán'} al inventario`}>
+                <p>Nacen <strong>sin fecha de calibración</strong> («Sin fecha»). Si alguno no debería estar (un equipo de prueba, por ejemplo), cancela y desactívalo antes en Desk 2.0.</p>
+                <ul className="mt-1 flex flex-col gap-0.5 text-xs">
+                  {bloques.altas.map((c) => <li key={c.clave} className="font-semibold">{c.despues}</li>)}
                 </ul>
-                {sinEnsenar > 0 && <p className="mt-2">…y {sinEnsenar} más, que quedarán en la auditoría.</p>}
-              </details>
+              </Alert>
             )}
+            <Lineas lineas={lineas} />
+            <Bloque abierto titulo={`Clientes con otro nombre (${bloques.otroNombre.length})`} nota="No es sólo la forma de escribirlo: puede ser el mismo cliente con sus siglas o su razón social completa, otro cliente o una errata. Míralos uno a uno." items={bloques.otroNombre.map(cambio)} />
+            <Bloque abierto titulo={`Otros cambios: modelo, serial y activo (${bloques.otros.length})`} items={bloques.otros.map(cambio)} />
+            <Bloque titulo={`Clientes que sólo cambian de forma: mayúsculas, tildes, puntuación o forma societaria (${bloques.mismaForma.length})`} items={bloques.mismaForma.map(cambio)} />
+            <Bloque titulo={`Sólo en el portal: no se tocan (${revisar.soloPortal.length})`} nota="No están entre los GRIMM EDM 180 de Desk 2.0. Si el serial está escrito distinto allí, corrígelo en Desk 2.0." items={revisar.soloPortal.map(equipo)} />
+            <Bloque titulo={`Ambiguos, con el serial repetido: no se tocan (${revisar.ambiguos.length})`} nota="El serial se repite en Desk 2.0, o el portal lo tiene en dos equipos activos (o en ninguno activo)." items={revisar.ambiguos.map(equipo)} />
+            {sinEnsenar > 0 && <p className="text-xs text-gray-600">…y {sinEnsenar} cambios más que no caben aquí; quedarán en la auditoría.</p>}
           </div>
         </Modal>
       )}
