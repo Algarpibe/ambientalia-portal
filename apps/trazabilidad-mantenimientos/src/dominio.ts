@@ -14,8 +14,9 @@ export type { EstadoFuente, NombreFuente } from '../../hub-api/src/trazabilidad/
 // regla con que el servidor decide si un nombre de cliente es el mismo escrito de otra forma (para agrupar el detalle).
 export type { CambioMaestro, CruceMarca, EquipoRevisar, RecuentosMaestro, RespuestaCruceFst022, RespuestaPlanMaestro, SincronizacionMaestro } from '../../hub-api/src/trazabilidad/maestro';
 export { mismoNombre } from '../../hub-api/src/trazabilidad/maestro';
-// Las calibraciones desde Desk 2.0: el plan de la pasada, tal como lo sirve la API (tipos).
-export type { PasadaCalibraciones, RecuentosCalibraciones, RespuestaPlanCalibraciones } from '../../hub-api/src/trazabilidad/calibraciones';
+// Las calibraciones desde Desk 2.0: el plan de la pasada y el historial de un equipo, tal como los sirve la API (tipos), y el orden de su detalle.
+export type { CalibracionHistorial, DetalleCalibracion, EstadoFilaCalibracion, PasadaCalibraciones, RecuentosCalibraciones, RespuestaHistorialCalibraciones, RespuestaPlanCalibraciones, TipoDetalle } from '../../hub-api/src/trazabilidad/calibraciones';
+export { TIPOS_DETALLE } from '../../hub-api/src/trazabilidad/calibraciones';
 export type {
   ConfiguracionAgenda,
   CongelacionFst022,

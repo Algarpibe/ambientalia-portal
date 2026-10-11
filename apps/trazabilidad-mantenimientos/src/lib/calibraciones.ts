@@ -1,11 +1,12 @@
 /**
- * Calibraciones desde Desk 2.0 (lote 9c): lo que calcula la tarjeta
- * «Calibraciones · Desk 2.0» de Configuración a partir del plan que da el
- * servidor. Puro, sin reloj ni red: la regla en sí es de hub-api (`calibraciones.ts`).
+ * Calibraciones desde Desk 2.0 (lote 9c): lo que calculan la tarjeta
+ * «Calibraciones · Desk 2.0» de Configuración y el bloque «Calibraciones» de la
+ * ficha de un equipo a partir de lo que da el servidor. Puro, sin reloj ni red:
+ * la regla en sí es de hub-api (`calibraciones.ts`).
  */
-import type { PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
+import { TIPOS_DETALLE, type CalibracionHistorial, type DetalleCalibracion, type EstadoFilaCalibracion, type PasadaCalibraciones, type RecuentosCalibraciones, type TipoDetalle } from '../dominio';
 import type { LineaPlan } from './maestro';
-import { fmtFechaHora } from './vistas';
+import { fmtFecha, fmtFechaHora } from './vistas';
 
 const cambiadas = (r: RecuentosCalibraciones): number => r.cambiadas + r.reenlazadas;
 
@@ -48,4 +49,41 @@ const cuantas = (n: number, una: string): string => `${n} ${una}${n === 1 ? '' :
 export function textoUltima(u: PasadaCalibraciones): string {
   const r = u.recuentos;
   return `${u.por} · ${fmtFechaHora(u.en)} · ${hayQueTraer(r) ? `${cuantas(r.nuevas + r.partida, 'nueva')}, ${cuantas(cambiadas(r), 'cambiada')} y ${cuantas(r.vaciadas, 'anulada')}` : 'sin cambios'}`;
+}
+
+/** Cada tipo del detalle: su título, si va abierto (lo que hay que mirar antes de traer) y una nota. El orden es el de `TIPOS_DETALLE`. */
+const BLOQUES: Record<TipoDetalle, { titulo: string; abierto: boolean; nota?: string }> = {
+  revision: { titulo: 'En revisión: no cuentan hasta que alguien las mire', abierto: true, nota: 'Fecha posterior a hoy o imposible, o un serial que está en más de un equipo. Se corrige en Zoho (o el equipo, en Desk 2.0) y se vuelven a traer.' },
+  cambiada: { titulo: 'Cambiadas en Zoho: se anula la fila y entra la fecha nueva', abierto: true },
+  vaciada: { titulo: 'Anuladas: el campo se vació en Zoho', abierto: true, nota: 'El ticket ya no trae la fecha. Si son muchas a la vez, no las traigas: puede que el campo haya cambiado de nombre.' },
+  sin_equipo: { titulo: 'Sin equipo: no entran', abierto: true, nota: 'El ticket no trae serial ni equipo: ponle el equipo en Desk 2.0.' },
+  distinta: { titulo: 'Punto de partida con dos fechas: manda la hoja congelada', abierto: true, nota: 'La hoja congelada y el inventario del portal dan fechas distintas para el equipo; «antes» es la del inventario, la que se ve hoy.' },
+  ilegible: { titulo: 'Con un valor que no es una fecha: no entran', abierto: true },
+  no_resucita: { titulo: 'Anuladas a mano: no se vuelven a traer', abierto: false },
+  nueva: { titulo: 'Calibraciones nuevas', abierto: false },
+  otra_marca: { titulo: 'De otras marcas: se guardan sin equipo del inventario', abierto: false, nota: 'El serial no es de un GRIMM EDM 180 del inventario. No cambian nada de lo que hoy se ve.' },
+  partida: { titulo: 'Punto de partida, de la F-ST-022', abierto: false },
+};
+
+export interface BloqueDetalle { titulo: string; nota?: string; abierto: boolean; items: [string, string][] }
+
+const item = (d: DetalleCalibracion): [string, string] => [
+  d.ticket !== null ? `ticket ${d.ticket} · ${d.serial || '(sin serial)'}` : d.serial,
+  d.tipo === 'vaciada' ? `se anula la del ${fmtFecha(d.antes)}` : `${fmtFecha(d.fecha)}${d.antes ? ` (antes, ${fmtFecha(d.antes)})` : ''}${d.nota ? ` · ${d.nota}` : ''}`,
+];
+
+/** El detalle repartido como se enseña al confirmar: un bloque por tipo, lo que hay que mirar primero arriba; los vacíos no salen. */
+export function bloquesDetalle(detalle: readonly DetalleCalibracion[]): BloqueDetalle[] {
+  return TIPOS_DETALLE.map((tipo) => ({ tipo, items: detalle.filter((d) => d.tipo === tipo).map(item) }))
+    .filter((b) => b.items.length > 0)
+    .map(({ tipo, items }) => ({ titulo: `${BLOQUES[tipo].titulo} (${items.length})`, nota: BLOQUES[tipo].nota, abierto: BLOQUES[tipo].abierto, items }));
+}
+
+export const ETIQUETA_ESTADO_FILA: Record<EstadoFilaCalibracion, string> = { vigente: 'Vigente', anulada: 'Anulada', en_revision: 'En revisión' };
+
+/** De dónde sale una calibración del historial de un equipo. */
+export function origenCalibracion(c: Pick<CalibracionHistorial, 'origen' | 'ticket' | 'corrigeTicket'>): string {
+  if (c.origen === 'fst022') return 'F-ST-022';
+  if (c.origen === 'desk') return `Ticket n.º ${c.ticket}`;
+  return c.corrigeTicket === null ? 'Manual' : `Manual (corrige el ticket n.º ${c.corrigeTicket})`;
 }

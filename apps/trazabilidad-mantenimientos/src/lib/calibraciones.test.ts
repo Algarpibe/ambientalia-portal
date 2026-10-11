@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
-import { hayQueTraer, lineasPlan, textoUltima } from './calibraciones';
+import type { CalibracionHistorial, DetalleCalibracion, PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
+import { bloquesDetalle, hayQueTraer, lineasPlan, origenCalibracion, textoUltima } from './calibraciones';
 
-// Lo que enseña la tarjeta «Calibraciones · Desk 2.0» de Configuración: el plan
-// en recuentos y la última pasada. Datos ficticios.
+// Lo que enseñan la tarjeta «Calibraciones · Desk 2.0» de Configuración (el plan
+// en recuentos, la última pasada y el detalle en bloques) y el bloque
+// «Calibraciones» de la ficha de un equipo. Datos ficticios.
 const recuentos = (extra: Partial<RecuentosCalibraciones> = {}): RecuentosCalibraciones => ({
   tickets: 776, conCf: 68, conCampo: 6, porNombre: 5, porEtiqueta: 1, gestionadosPorApp: 0, nuevas: 4, sinCambios: 0, cambiadas: 1, reenlazadas: 0, vaciadas: 1, enRevision: 1, otrasMarcas: 1,
   historial: 0, sinEquipo: 1, ilegibles: 0, noResucitan: 0, partida: 114, partidaDeInventario: 3, partidaDistintas: 2, equiposCambian: 5, salenDeAvisos: 2, entranEnAvisos: 0,
@@ -61,5 +62,50 @@ describe('la última pasada', () => {
   it('quién, cuándo (en hora de Colombia) y qué trajo', () => {
     expect(textoUltima(pasada(recuentos()))).toBe('tecnico@example.com · 11/10/2026 20:10 · 118 nuevas, 1 cambiada y 1 anulada');
     expect(textoUltima(pasada(recuentos(SIN_NADA)))).toBe('tecnico@example.com · 11/10/2026 20:10 · sin cambios');
+  });
+});
+
+describe('el detalle, en bloques', () => {
+  const d = (tipo: DetalleCalibracion['tipo'], extra: Partial<DetalleCalibracion> = {}): DetalleCalibracion => ({ tipo, ticket: 1001, clave: '18A00001', serial: '18A00001', fecha: '2026-09-20', antes: null, nota: null, ...extra });
+
+  it('lo que hay que mirar primero, arriba y abierto; el punto de partida, al final y plegado; un bloque vacío no sale', () => {
+    const bloques = bloquesDetalle([d('partida', { ticket: null, nota: 'F-ST-022 congelada.' }), d('nueva'), d('revision', { fecha: '2027-01-10', nota: 'La fecha es posterior a hoy.' }), d('vaciada', { fecha: null, antes: '2026-06-30' }), d('cambiada', { antes: '2026-09-10' }), d('sin_equipo', { serial: '', clave: null })]);
+    expect(bloques.map((b) => [b.titulo, b.abierto])).toEqual([
+      ['En revisión: no cuentan hasta que alguien las mire (1)', true],
+      ['Cambiadas en Zoho: se anula la fila y entra la fecha nueva (1)', true],
+      ['Anuladas: el campo se vació en Zoho (1)', true],
+      ['Sin equipo: no entran (1)', true],
+      ['Calibraciones nuevas (1)', false],
+      ['Punto de partida, de la F-ST-022 (1)', false],
+    ]);
+    expect(bloques.map((b) => b.items[0])).toEqual([
+      ['ticket 1001 · 18A00001', '10/01/2027 · La fecha es posterior a hoy.'],
+      ['ticket 1001 · 18A00001', '20/09/2026 (antes, 10/09/2026)'],
+      ['ticket 1001 · 18A00001', 'se anula la del 30/06/2026'],
+      ['ticket 1001 · (sin serial)', '20/09/2026'],
+      ['ticket 1001 · 18A00001', '20/09/2026'],
+      ['18A00001', '20/09/2026 · F-ST-022 congelada.'],
+    ]);
+  });
+
+  it('los demás bloques: fechas distintas en la hoja y el inventario, valores ilegibles, anuladas a mano y otras marcas', () => {
+    const bloques = bloquesDetalle([d('otra_marca', { serial: 'HB-0001', clave: null }), d('no_resucita'), d('ilegible', { fecha: null }), d('distinta', { ticket: null, fecha: '2025-11-20', antes: '2025-12-01' })]);
+    expect(bloques.map((b) => [b.titulo, b.items[0][1]])).toEqual([
+      ['Punto de partida con dos fechas: manda la hoja congelada (1)', '20/11/2025 (antes, 01/12/2025)'],
+      ['Con un valor que no es una fecha: no entran (1)', '—'],
+      ['Anuladas a mano: no se vuelven a traer (1)', '20/09/2026'],
+      ['De otras marcas: se guardan sin equipo del inventario (1)', '20/09/2026'],
+    ]);
+  });
+});
+
+describe('el origen de una calibración, en la ficha', () => {
+  const c = (extra: Partial<CalibracionHistorial>) => ({ origen: 'desk', ticket: null, corrigeTicket: null, ...extra }) as CalibracionHistorial;
+
+  it('F-ST-022, ticket n.º o manual (y a qué ticket corrige)', () => {
+    expect(origenCalibracion(c({ origen: 'fst022' }))).toBe('F-ST-022');
+    expect(origenCalibracion(c({ origen: 'desk', ticket: 1001 }))).toBe('Ticket n.º 1001');
+    expect(origenCalibracion(c({ origen: 'manual' }))).toBe('Manual');
+    expect(origenCalibracion(c({ origen: 'manual', corrigeTicket: 1001 }))).toBe('Manual (corrige el ticket n.º 1001)');
   });
 });

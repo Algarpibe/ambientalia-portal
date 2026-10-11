@@ -1,34 +1,83 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type { RespuestaPlanCalibraciones } from '../dominio';
-import { hayQueTraer, lineasPlan, textoUltima } from '../lib/calibraciones';
-import { Alert, Card, Loading, Tag } from '../ui';
-import { Lineas } from './MaestroEquipos';
+import { bloquesDetalle, hayQueTraer, lineasPlan, textoUltima } from '../lib/calibraciones';
+import { usePermisos } from '../permisos';
+import { Alert, Button, Card, Loading, Modal, Tag } from '../ui';
+import { Bloque, Lineas } from './MaestroEquipos';
+
+interface Props {
+  notificar: (msg: string) => void;
+  /** Tras traerlas: el inventario de la app (Resumen, Equipos, Calendario, Avisos) hay que leerlo otra vez. */
+  onTraidas: () => void;
+}
 
 /**
  * «Calibraciones · Desk 2.0», en Configuración: la fecha de calibración de cada
- * equipo saldrá del campo «Fecha de Calibración» de los tickets de Desk 2.0.
- * Lote 9c-1: SÓLO LECTURA, para cualquiera con la app: si Desk 2.0 contesta, la
- * última pasada, el plan en recuentos (qué pasaría al traerlas) y el aviso de
- * salud de la lectura. Todavía no hay botón: traerlas es del lote 9c-2. Nada de
- * esto cambia una fecha ni envía un aviso a nadie.
+ * equipo sale del campo «Fecha de Calibración» de los tickets de Desk 2.0, a
+ * mano. La ve cualquiera con la app (si Desk 2.0 contesta, la última pasada, el
+ * plan en recuentos y el aviso de salud de la lectura); «Traer calibraciones de
+ * Desk 2.0» sólo le sale a quien tiene el permiso `calibraciones.write` (Técnico,
+ * Director Técnico y administradores del portal), con una confirmación que
+ * repite los recuentos y enseña el detalle en bloques. Aquí no se edita ninguna
+ * fecha, y nada de esto envía un aviso a nadie.
  */
-export default function CalibracionesDesk() {
+export default function CalibracionesDesk({ notificar, onTraidas }: Props) {
+  const { puede, motivo } = usePermisos();
   const [datos, setDatos] = useState<RespuestaPlanCalibraciones | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api.planCalibraciones().then(setDatos, (e: Error) => setError(e.message));
+  const [confirmar, setConfirmar] = useState(false);
+  const [aplicando, setAplicando] = useState(false);
+  const [errorAplicar, setErrorAplicar] = useState<string | null>(null);
+
+  const cargar = useCallback(async () => {
+    try {
+      setDatos(await api.planCalibraciones());
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }, []);
+  useEffect(() => {
+    void cargar();
+  }, [cargar]);
+
+  const aplicar = async () => {
+    if (!datos?.plan) return;
+    setAplicando(true);
+    setErrorAplicar(null);
+    try {
+      await api.traerCalibraciones(datos.plan.huella);
+      setConfirmar(false);
+      notificar('Calibraciones traídas de Desk 2.0');
+      onTraidas();
+    } catch (e) {
+      setErrorAplicar((e as Error).message);
+    } finally {
+      setAplicando(false);
+      // También tras un error: si el plan cambió, que se vea el de ahora.
+      await cargar();
+    }
+  };
 
   const plan = datos?.plan ?? null;
   const salud = datos?.salud ?? null;
+  const lineas = plan ? lineasPlan(plan.recuentos) : [];
+  const pendiente = plan !== null && hayQueTraer(plan.recuentos);
+  const trae = puede('calibraciones.write');
+  const detalle = datos?.detalle ?? [];
+  const sinEnsenar = (datos?.detalleTotal ?? 0) - detalle.length;
+  const bloques = bloquesDetalle(detalle);
 
   return (
     <Card
       title="Calibraciones · Desk 2.0"
-      hint="La última calibración de cada equipo saldrá del campo «Fecha de Calibración» de sus tickets en Desk 2.0, sobre el punto de partida de la F-ST-022 congelada. De momento sólo se ve el plan: todavía no se traen, y las fechas de la app siguen como estaban."
+      hint="La última calibración de cada equipo sale del campo «Fecha de Calibración» de sus tickets en Desk 2.0, sobre el punto de partida de la F-ST-022 congelada. Se traen a mano, después de ver el plan: no hay pasada automática, y aquí no se edita ninguna fecha."
+      actions={trae && plan && !salud?.bloquea ? <Button variant="primary" onClick={() => { setErrorAplicar(null); setConfirmar(true); }}>Traer calibraciones de Desk 2.0</Button> : undefined}
     >
       {error && <Alert tone="red">{error}</Alert>}
+      {/* Si al aplicar Desk 2.0 dejó de contestar ya no hay plan (ni diálogo): el motivo se dice aquí. */}
+      {errorAplicar && !confirmar && <Alert tone="red">{errorAplicar}</Alert>}
       {!datos && !error && <Loading texto="Cargando el plan de las calibraciones…" />}
       {datos && (
         <div className="flex max-w-2xl flex-col gap-3 text-sm">
@@ -37,7 +86,7 @@ export default function CalibracionesDesk() {
             {datos.lectura.disponible ? 'Desk 2.0 contesta' : 'Las calibraciones de Desk 2.0 no están disponibles'}
           </p>
           {!datos.lectura.disponible && (
-            <Alert tone="amber" title="No se pueden leer ahora">
+            <Alert tone="amber" title="No se pueden traer ahora">
               {datos.lectura.mensaje} Las fechas siguen como estaban y el resto de la app funciona igual.
             </Alert>
           )}
@@ -50,14 +99,36 @@ export default function CalibracionesDesk() {
           {plan && (
             <>
               <h3 className="font-semibold text-gray-900">Plan: qué pasaría al traerlas ahora</h3>
-              <Lineas lineas={lineasPlan(plan.recuentos)} />
+              <Lineas lineas={lineas} />
               <p className="text-xs text-gray-500">
-                {hayQueTraer(plan.recuentos) ? 'En azul, lo que cambiaría; en ámbar, lo que conviene mirar antes.' : 'Las calibraciones ya están como en Desk 2.0: traerlas no cambiaría nada.'} Una fecha no se editará nunca: si cambia en Zoho, la fila se anula y entra otra. Es sólo el plan:
-                todavía no se puede traer nada desde aquí, y no se envía ningún aviso.
+                {pendiente ? 'En azul, lo que cambiaría; en ámbar, lo que conviene mirar antes.' : 'Las calibraciones ya están como en Desk 2.0: traerlas no cambiaría nada.'} Una fecha no se edita nunca: si cambia en Zoho, la fila se anula y entra otra. No se envía ningún
+                aviso: sólo cambia la fecha que ven Resumen, Equipos, Calendario y Avisos. {!trae && `Las traen el Técnico y el Director Técnico. ${motivo}`}
               </p>
             </>
           )}
         </div>
+      )}
+      {confirmar && plan && (
+        <Modal
+          title="Traer calibraciones de Desk 2.0"
+          onClose={() => !aplicando && setConfirmar(false)}
+          footer={
+            <>
+              <Button onClick={() => setConfirmar(false)} disabled={aplicando}>Cancelar</Button>
+              <Button variant="primary" onClick={() => void aplicar()} busy={aplicando}>{pendiente ? 'Traer' : 'Confirmar sin cambios'}</Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3 text-sm">
+            {errorAplicar && <Alert tone="red">{errorAplicar}</Alert>}
+            <p>Se aplicará este plan, firmado con tu correo. Cambia la última calibración de {plan.recuentos.equiposCambian} {plan.recuentos.equiposCambian === 1 ? 'equipo' : 'equipos'}; no toca el inventario, el seguimiento ni los contactos, y no envía ningún aviso.</p>
+            {/* Lo que hay que mirar antes de traer, lo primero; después los recuentos y, plegado, lo que entra sin más. */}
+            {bloques.filter((b) => b.abierto).map((b) => <Bloque key={b.titulo} {...b} />)}
+            <Lineas lineas={lineas} />
+            {bloques.filter((b) => !b.abierto).map((b) => <Bloque key={b.titulo} {...b} />)}
+            {sinEnsenar > 0 && <p className="text-xs text-gray-600">…y {sinEnsenar} líneas más que no caben aquí; quedarán en la auditoría de la pasada.</p>}
+          </div>
+        </Modal>
       )}
     </Card>
   );
