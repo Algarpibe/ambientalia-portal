@@ -23,7 +23,7 @@ const COLUMNAS_CRUCE: [string, string][] = [
   ['Sin ceros', 'De «sólo hoja», los de serial numérico que casarían ignorando los ceros a la izquierda'],
 ];
 
-function Lineas({ lineas }: { lineas: LineaPlan[] }) {
+export function Lineas({ lineas }: { lineas: LineaPlan[] }) {
   return (
     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
       {lineas.map((l) => (

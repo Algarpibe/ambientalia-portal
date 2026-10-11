@@ -6,6 +6,7 @@ import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk 
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, DESACTIVADO, Loading } from '../ui';
+import CalibracionesDesk from './CalibracionesDesk';
 import { CategoriasAgenda, DuracionesAgenda, PuestosAgenda, useAgendaConfig } from './ConfiguracionAgenda';
 import MaestroEquipos from './MaestroEquipos';
 import OrigenDatos from './OrigenDatos';
@@ -28,8 +29,9 @@ interface Props {
  * plazos por tipo de servicio; la agenda del taller (puestos y duraciones,
  * `ConfiguracionAgenda.tsx`); y, uno junto al otro, lo que cada estado de Desk
  * es para el reloj del plazo y para la agenda, que son dos ajustes distintos.
- * Al final, de dónde salen los datos: la F-ST-022 congelada y el maestro de
- * equipos de Desk 2.0 (`MaestroEquipos.tsx`, que tiene su propio permiso).
+ * Al final, de dónde salen los datos: la F-ST-022 congelada, el maestro de
+ * equipos de Desk 2.0 (`MaestroEquipos.tsx`, que tiene su propio permiso) y
+ * el plan de las calibraciones de sus tickets (`CalibracionesDesk.tsx`).
  */
 export default function Configuracion({ notificar, onInventario }: Props & { /** El inventario de la app cambió (se sincronizó con el maestro): hay que leerlo otra vez. */ onInventario: () => void }) {
   const { puede, motivo } = usePermisos();
@@ -54,10 +56,11 @@ export default function Configuracion({ notificar, onInventario }: Props & { /**
         <EstadosDesk notificar={notificar} />
         <CategoriasAgenda agenda={agenda} />
       </div>
-      {/* No son ajustes: de dónde salen los datos de la app. La hoja congelada, sólo lectura; el maestro lo sincroniza quien tiene su permiso. */}
+      {/* No son ajustes: de dónde salen los datos de la app. La hoja congelada, sólo lectura; el maestro lo sincroniza quien tiene su permiso; de las calibraciones, de momento, sólo el plan. */}
       <div className="grid items-start gap-4 xl:grid-cols-2">
         <OrigenDatos />
         <MaestroEquipos notificar={notificar} onSincronizado={onInventario} />
+        <CalibracionesDesk />
       </div>
     </div>
   );
