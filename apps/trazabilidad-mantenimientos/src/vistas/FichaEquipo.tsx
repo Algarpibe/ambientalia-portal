@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { esEmailInterno, type EquipoVista } from '../dominio';
-import { fmtFecha, textoVigencia } from '../lib/vistas';
+import { esEmailInterno, type EquipoVista, type RespuestaHistorialCalibraciones } from '../dominio';
+import { ETIQUETA_ESTADO_FILA, origenCalibracion } from '../lib/calibraciones';
+import { fmtFecha, fmtFechaHora, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, DESACTIVADO, Drawer, EstadoBadge, Tag } from '../ui';
 
@@ -12,6 +13,44 @@ interface Props {
 }
 
 const INPUT = `block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO}`;
+
+/**
+ * «Calibraciones», en sólo lectura: el historial del equipo (lote 9c), con de
+ * dónde sale cada fecha —la F-ST-022 congelada, un ticket de Desk 2.0 o una
+ * corrección manual—, su estado y cuál es la que cuenta como última. Quién y
+ * cuándo, en el `title` de cada línea. Corregir una fecha es del lote 9d.
+ */
+function Calibraciones({ equipo }: { equipo: EquipoVista }) {
+  const [datos, setDatos] = useState<RespuestaHistorialCalibraciones | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.calibracionesDeEquipo(equipo.clave).then(setDatos, (err: Error) => setError(err.message));
+  }, [equipo.clave]);
+  const filas = datos?.calibraciones ?? [];
+  return (
+    <section aria-labelledby="ficha-calibraciones" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
+      <p id="ficha-calibraciones" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        Calibraciones
+      </p>
+      {error && <Alert tone="red">{error}</Alert>}
+      {!datos && !error && <p className="text-gray-500">Cargando…</p>}
+      {datos && filas.length === 0 && (
+        <p className="text-gray-500">{equipo.ultimaCalibracion ? `Aún no hay calibraciones registradas para este equipo: vale la fecha del inventario (${fmtFecha(equipo.ultimaCalibracion)}).` : 'Sin calibraciones registradas.'}</p>
+      )}
+      <ul className="flex flex-col gap-1.5">
+        {filas.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-center gap-1.5" title={`Registrada por ${c.por} el ${fmtFechaHora(c.en)}${c.motivo ? ` · ${c.motivo}` : ''}${c.anuladaPor ? ` · Anulada por ${c.anuladaPor} el ${fmtFechaHora(c.anuladaEn)}` : ''}`}>
+            <span className={`font-medium tabular-nums ${c.estado === 'anulada' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</span>
+            <span className="text-gray-600">{origenCalibracion(c)}</span>
+            <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
+            {c.cuenta && <Tag tone="blue">La que cuenta</Tag>}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-gray-500">Sólo lectura. Las fechas vienen de la F-ST-022 congelada y de los tickets de Desk 2.0; una fecha no se edita: si cambia en Zoho, se anula y entra la nueva.</p>
+    </section>
+  );
+}
 
 export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
   const s = e.seguimiento;
@@ -90,6 +129,8 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado }: Props) {
             </div>
           ))}
         </dl>
+
+        <Calibraciones equipo={e} />
 
         <section aria-labelledby="ficha-contacto" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
           <p id="ficha-contacto" className="text-xs font-semibold uppercase tracking-wide text-gray-500">

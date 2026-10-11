@@ -6,6 +6,8 @@ import { hoyEnColombia } from '../ausencias/saldo.js';
 import { getDesk2Pool } from '../db-desk2.js';
 import { detallesDeTickets, huecosDeEtapa, proyectarAgenda, type RespuestaAgenda } from './agenda.js';
 import { ejeAgenda } from './agenda-calendario.js';
+import { crearLectorCalibraciones, type LectorCalibraciones } from './calibraciones-desk2.js';
+import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
 import { esFechaIso } from './dominio.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
@@ -115,8 +117,15 @@ const AVISO_PASADA_FALLIDA = {
  * `db`; las pruebas pasan la suya. `maestro` lee el maestro de equipos de esa
  * misma base de Desk 2.0 (maestro-desk2.ts), aparte de la fuente: no comparten
  * estado, y sin la variable o si falla no hay maestro (nada lo sustituye).
+ * `calibraciones` lee de esa misma base las fechas de calibración de los
+ * tickets (calibraciones-desk2.ts), igual de aparte y con la misma regla.
  */
-export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool }), maestro: LectorMaestro = crearLectorMaestro(getDesk2Pool)): Router {
+export function createTrazabilidadRouter(
+  db: Pool,
+  fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool }),
+  maestro: LectorMaestro = crearLectorMaestro(getDesk2Pool),
+  calibraciones: LectorCalibraciones = crearLectorCalibraciones(getDesk2Pool),
+): Router {
   const router = Router();
   const gated = [requireAuth, requireApp(APP_ID)] as const;
 
@@ -287,6 +296,34 @@ export function createTrazabilidadRouter(db: Pool, fuente: FuenteAgenda = crearF
   // maestro no contesta (no escribe nunca sin él) o si el plan ya es otro.
   // Devuelve la fila de auditoría que deja (quién, cuándo y recuentos).
   router.post('/trazabilidad/maestro/sincronizar', ...gated, escritura('maestro.sincronizar', 'tmc_maestro_sincronizar', async (req) => sincronizarMaestro(db, maestro, parseHuellaPlan(req.body), actorOf(req))));
+
+  // ── Calibraciones desde Desk 2.0 (lote 9c) ───────────────────────────────
+  //
+  // La fecha de calibración sale del campo de Zoho de los tickets, que se lee
+  // en la base de Desk 2.0 y se guarda fila a fila (tmc_calibraciones). Sólo A
+  // MANO: primero el plan y después, quien puede, las trae. No hay pasada
+  // automática ni programador, y aquí no se edita ninguna fecha (lote 9d).
+
+  // El plan a hoy, en recuentos: si Desk 2.0 contesta (y si no, por qué: 200
+  // igual), la salud de la lectura y la última pasada. Abierto a quien tenga la
+  // app: ni clientes ni seriales. A quien puede traerlas le llega además el
+  // `detalle` para revisar (con seriales), acotado.
+  router.get('/trazabilidad/calibraciones/plan', ...gated, route('tmc_calibraciones_plan', async (req) => leerPlanCalibraciones(db, calibraciones, hoyEnColombia(), esAdminPortal(req) || puede(await rolDe(req), 'calibraciones.write'))));
+
+  // Aplica el plan de ahora: {huella?}, la del plan que se revisó. 409 si Desk
+  // 2.0 no contesta (no escribe nunca sin él), si el plan ya es otro o si ningún
+  // ticket trae ya el campo. Devuelve la fila de su pasada.
+  router.post('/trazabilidad/calibraciones/sincronizar', ...gated, escritura('calibraciones.write', 'tmc_calibraciones_sincronizar', async (req) => sincronizarCalibraciones(db, calibraciones, parseHuellaPlan(req.body), actorOf(req), hoyEnColombia())));
+
+  // El historial de calibraciones de un equipo, para su ficha: de dónde sale cada fecha y cuál cuenta.
+  router.get(
+    '/trazabilidad/equipos/:clave/calibraciones',
+    ...gated,
+    route('tmc_calibraciones_equipo', async (req) => {
+      if (!esClave(req.params.clave)) throw new TzError('invalid_input', 400, 'Clave de equipo no válida.', 'clave');
+      return historialCalibraciones(db, req.params.clave, hoyOf(req));
+    }),
+  );
 
   router.put(
     '/trazabilidad/seguimiento/:clave',

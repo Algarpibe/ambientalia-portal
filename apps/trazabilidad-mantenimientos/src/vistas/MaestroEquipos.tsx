@@ -23,7 +23,7 @@ const COLUMNAS_CRUCE: [string, string][] = [
   ['Sin ceros', 'De «sólo hoja», los de serial numérico que casarían ignorando los ceros a la izquierda'],
 ];
 
-function Lineas({ lineas }: { lineas: LineaPlan[] }) {
+export function Lineas({ lineas }: { lineas: LineaPlan[] }) {
   return (
     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
       {lineas.map((l) => (
@@ -40,7 +40,7 @@ const cambio = (c: CambioMaestro): [string, string] => [c.clave, textoCambio(c)]
 const equipo = (e: EquipoRevisar): [string, string] => [`${e.origen === 'desk' ? 'Desk 2.0' : 'Portal'} · ${e.serial}`, `${e.cliente || '(sin cliente)'}${e.activo ? '' : ' · inactivo'}`];
 
 /** Un bloque plegable del detalle: equipo (en negrita) y lo que le pasa. Vacío no se pinta. */
-function Bloque({ titulo, nota, items, abierto = false }: { titulo: string; nota?: string; items: [string, string][]; abierto?: boolean }) {
+export function Bloque({ titulo, nota, items, abierto = false }: { titulo: string; nota?: string; items: [string, string][]; abierto?: boolean }) {
   if (items.length === 0) return null;
   return (
     <details open={abierto} className="text-xs text-gray-700">

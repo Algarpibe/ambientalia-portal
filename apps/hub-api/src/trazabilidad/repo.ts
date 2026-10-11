@@ -7,6 +7,7 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
+import { fechaEfectiva, type CalibracionGuardada } from './calibraciones.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import {
@@ -120,9 +121,16 @@ const COLS_EQUIPO = `
  * con el de número más alto y no multiplica filas. Si la réplica lleva más de
  * un día sin refrescarlo (el worker a veces deja de tocar tickets viejos) no se
  * oculta: se marca «sin confirmar».
+ *
+ * `ultimaCalibracion` (y con ella el estado) es la que da la regla de las
+ * calibraciones guardadas (lote 9c, `fechaEfectiva`); el equipo que no tiene
+ * ninguna sigue con la de `tmc_equipos.ultima_calibracion`.
  */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
-  const [{ rows }, deDesk, manuales] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db)]);
+  const [{ rows }, deDesk, manuales, calibraciones] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db)]);
+  const calibracionesDe = new Map<string, CalibracionGuardada[]>();
+  for (const c of calibraciones) if (c.clave) calibracionesDe.set(c.clave, [...(calibracionesDe.get(c.clave) ?? []), c]);
+  const ultimaDe = (r: Row): string | null => fechaEfectiva(calibracionesDe.get(r.clave) ?? [], r.ultima_calibracion, hoy);
   const manualDe = new Map(manuales.map((m) => [m.clave, m]));
   const porSerial = new Map<string, number>();
   for (const r of rows as Row[]) porSerial.set(r.serial, (porSerial.get(r.serial) ?? 0) + 1);
@@ -135,11 +143,11 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
     fechaFactura: r.fecha_factura,
     hojaVida: r.hoja_vida,
     ultimaEntrada: r.ultima_entrada,
-    ultimaCalibracion: r.ultima_calibracion,
+    ultimaCalibracion: ultimaDe(r),
     entradasSt: r.entradas_st,
     calibracionesPeriodo: r.calibraciones_periodo,
     correctivosPeriodo: r.correctivos_periodo,
-    ...estadoCalibracion(r.ultima_calibracion, hoy),
+    ...estadoCalibracion(ultimaDe(r), hoy),
     serialRepetido: (porSerial.get(r.serial) ?? 0) > 1,
     seguimiento: r.tiene_seg
       ? {
@@ -241,6 +249,22 @@ export async function guardarContacto(db: Db, c: CambioContacto, actor: Actor): 
        actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [clave, c.cliente, c.emails, c.nombre, actor.userId, actor.email],
   );
+}
+
+/** Las calibraciones guardadas (057), en orden de alta: todas, o las de un equipo. Sólo lee: las escribe calibraciones-repo.ts. */
+export async function leerCalibraciones(db: Db, clave: string | null = null): Promise<CalibracionGuardada[]> {
+  const { rows } = await db.query(
+    `SELECT c.id, c.clave, c.serial, c.desk_equipo_id, c.fecha::text AS fecha, c.origen, c.ticket, c.estado, c.corrige_ticket, c.corrige_fecha::text AS corrige_fecha,
+            c.motivo, c.por, c.en::text AS en, c.anulada_por, c.anulada_en::text AS anulada_en, c.anulada_pasada_id
+       FROM portal.tmc_calibraciones c
+      WHERE $1::text IS NULL OR c.clave = $1
+      ORDER BY c.id`,
+    [clave],
+  );
+  return (rows as Row[]).map((r) => ({
+    id: Number(r.id), clave: r.clave, serial: r.serial, deskEquipoId: r.desk_equipo_id, fecha: r.fecha, origen: r.origen, ticket: r.ticket, estado: r.estado, corrigeTicket: r.corrige_ticket, corrigeFecha: r.corrige_fecha,
+    anuladaAMano: r.estado === 'anulada' && r.anulada_pasada_id === null, motivo: r.motivo, por: r.por, en: r.en, anuladaPor: r.anulada_por, anuladaEn: r.anulada_en,
+  }));
 }
 
 function consultarEquipos(db: Db) {
