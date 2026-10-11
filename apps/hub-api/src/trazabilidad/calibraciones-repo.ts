@@ -1,22 +1,28 @@
 /**
  * SQL de las calibraciones en la base del PORTAL (lote 9c, migración 057):
- * reunir lo guardado y calcular el plan con la regla de calibraciones.ts.
- * Desk 2.0 llega como función: el lector de calibraciones-desk2.ts.
+ * reunir lo guardado, calcular el plan con la regla de calibraciones.ts,
+ * aplicarlo y dejar su pasada. Desk 2.0 llega como función: el lector de
+ * calibraciones-desk2.ts.
  *
- * Lote 9c-1: SÓLO LEE. El plan dice qué filas nacerían y cuáles se anularían,
- * pero aquí nada las escribe todavía (calibraciones.test.ts vigila que este
- * fichero no tenga ninguna escritura): aplicar el plan, y que el inventario
- * enseñe la fecha de la regla, son del lote 9c-2.
+ * Una pasada escribe, y sólo si Desk 2.0 contestó en esa misma operación:
+ * filas nuevas en tmc_calibraciones (las de Desk y, una vez por equipo, la de
+ * partida) y la anulación de las que ya no valen. Una fecha NUNCA se edita.
+ * No toca el inventario (tmc_equipos y su `ultima_calibracion` se quedan como
+ * están: el inventario enseña la fecha de la regla, `listarEquipos`), ni el
+ * seguimiento, ni los contactos, ni la congelación, ni las filas manuales
+ * (calibraciones.test.ts vigila la lista de escrituras). Se trae a mano, tras
+ * ver el plan: no hay pasada automática.
  */
 
 import { createHash } from 'node:crypto';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { MENSAJE_SIN_CALIBRACIONES, type LectorCalibraciones, type LecturaCalibraciones } from './calibraciones-desk2.js';
-import { planCalibraciones, saludLectura, type EquipoInventario, type FilaPartida, type PasadaCalibraciones, type PlanCalibraciones, type RespuestaPlanCalibraciones, type SaludLectura } from './calibraciones.js';
+import { calibracionQueCuenta, planCalibraciones, saludLectura, type EquipoInventario, type FilaPartida, type PasadaCalibraciones, type PlanCalibraciones, type RespuestaHistorialCalibraciones, type RespuestaPlanCalibraciones, type SaludLectura } from './calibraciones.js';
 import { claveCliente } from './dominio.js';
 import type { Celda } from './fst022.js';
 import type { EstadoMaestro } from './maestro.js';
-import { leerCalibraciones } from './repo.js';
+import { leerCalibraciones, withTransaction } from './repo.js';
+import { TzError, type Actor } from './types.js';
 
 type Db = Pick<Awaited<ReturnType<Pool['connect']>>, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,4 +81,58 @@ export async function leerPlanCalibraciones(db: Db, leer: LectorCalibraciones, h
   if (!lectura.disponible) return { lectura: estadoDe(lectura), plan: null, salud: null, ultima };
   const { plan, huella, salud } = await calcular(db, lectura, hoy, ultima);
   return { lectura: estadoDe(lectura), plan: { huella, recuentos: plan.recuentos }, salud, ultima, ...(conDetalle ? { detalle: plan.detalle.slice(0, DETALLE_MAX), detalleTotal: plan.detalle.length } : {}) };
+}
+
+/**
+ * Aplica el plan de ahora, todo o nada, y deja su pasada. Sin Desk 2.0 no
+ * escribe (409), ni si el plan de ahora no es el que se revisó (`huellaVista`;
+ * 409), ni si la lectura es sospechosa (ningún ticket trae ya el campo; 409).
+ * Con su bloqueo, dos a la vez van una detrás de otra y la segunda calcula su
+ * plan con lo que dejó la primera. Aplicarlo dos veces no cambia nada la segunda.
+ */
+export async function sincronizarCalibraciones(db: Pool, leer: LectorCalibraciones, huellaVista: string | null, actor: Actor, hoy: string): Promise<PasadaCalibraciones> {
+  const lectura = await leer();
+  if (!lectura.disponible) throw new TzError('calibraciones_no_disponibles', 409, `${MENSAJE_SIN_CALIBRACIONES[lectura.motivo]} No se ha traído nada.`);
+  return withTransaction(db, async (c) => {
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('portal.tmc_calibraciones_pasadas'))`);
+    const { plan, huella, salud } = await calcular(c, lectura, hoy, await ultimaPasada(c));
+    if (huellaVista !== null && huellaVista !== huella) {
+      throw new TzError('plan_cambiado', 409, 'El plan ha cambiado desde que lo revisaste (cambió algo en Desk 2.0 o alguien las trajo antes). No se ha aplicado nada: revisa el plan de ahora y vuelve a confirmar.');
+    }
+    if (salud.bloquea) throw new TzError('lectura_sospechosa', 409, salud.mensaje ?? '');
+    const { rows } = await c.query(
+      `INSERT INTO portal.tmc_calibraciones_pasadas (huella, recuentos, detalle, por_id, por)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4, $5)
+       RETURNING ${COLS_PASADA}`,
+      [huella, JSON.stringify(plan.recuentos), JSON.stringify(plan.detalle), actor.userId, actor.email],
+    );
+    const pasada = toPasada(rows[0]);
+    const firma = [pasada.id, actor.userId, actor.email];
+    // Primero se anula: el índice único no admite dos filas sin anular del mismo ticket.
+    if (plan.anular.length > 0) {
+      await c.query(
+        `UPDATE portal.tmc_calibraciones c
+            SET estado = 'anulada', anulada_pasada_id = $2::bigint, anulada_por_id = $3::uuid, anulada_por = $4, anulada_en = NOW(), anulada_motivo = x.motivo
+           FROM jsonb_to_recordset($1::jsonb) AS x(id bigint, motivo text)
+          WHERE c.id = x.id AND c.estado <> 'anulada'`,
+        [JSON.stringify(plan.anular), ...firma],
+      );
+    }
+    if (plan.altas.length > 0) {
+      await c.query(
+        `INSERT INTO portal.tmc_calibraciones (clave, serial, serial_norm, desk_equipo_id, fecha, origen, ticket, estado, motivo, pasada_id, por_id, por)
+         SELECT x.clave, x.serial, x."serialNorm", x."deskEquipoId", x.fecha, x.origen, x.ticket, x.estado, x.motivo, $2::bigint, $3::uuid, $4
+           FROM jsonb_to_recordset($1::jsonb) AS x(clave text, serial text, "serialNorm" text, "deskEquipoId" text, fecha date, origen text, ticket integer, estado text, motivo text)`,
+        [JSON.stringify(plan.altas), ...firma],
+      );
+    }
+    return pasada;
+  });
+}
+
+/** El historial de calibraciones de un equipo, la más reciente primero, y cuál es la que cuenta hoy. */
+export async function historialCalibraciones(db: Db, clave: string, hoy: string): Promise<RespuestaHistorialCalibraciones> {
+  const filas = await leerCalibraciones(db, clave);
+  const cuenta = calibracionQueCuenta(filas, hoy);
+  return { clave, ultima: cuenta?.fecha ?? null, calibraciones: filas.map((f) => ({ ...f, cuenta: f === cuenta })).sort((a, b) => b.fecha.localeCompare(a.fecha) || b.id - a.id) };
 }

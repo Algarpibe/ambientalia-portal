@@ -423,13 +423,14 @@ describe('057_trazabilidad_calibraciones.sql', () => {
 });
 
 describe('las calibraciones no tocan lo que no es suyo', () => {
-  it('lote 9c-1: el plan sólo se lee. Su SQL no escribe en ninguna tabla (ni en las suyas todavía), y el inventario sigue enseñando su fecha de siempre', () => {
+  it('su SQL sólo escribe en tmc_calibraciones y en sus pasadas: ni el inventario, ni el seguimiento, ni la congelación, ni la base de Desk 2.0; y una fecha nunca se edita', () => {
     const src = fuente('./calibraciones-repo.ts');
     const escrituras = [...src.matchAll(/(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+([a-z_.0-9]+)/g)].map((m) => `${m[1].replace(/\s+/g, ' ')} ${m[2]}`);
-    expect(escrituras).toEqual([]);
-    expect(src).not.toMatch(/withTransaction|\.connect\(/);
+    expect(escrituras.sort()).toEqual(['INSERT INTO portal.tmc_calibraciones', 'INSERT INTO portal.tmc_calibraciones_pasadas', 'UPDATE portal.tmc_calibraciones']);
+    const update = /UPDATE portal\.tmc_calibraciones[^`]*/.exec(src)![0];
+    expect(update).toMatch(/SET estado = 'anulada'/);
+    expect(update).not.toMatch(/\bfecha\s*=|\bclave\s*=|\bserial/);
     expect(fuente('./repo.ts')).not.toMatch(/(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+portal\.tmc_calibraciones/);
-    expect(fuente('./repo.ts')).toMatch(/ultimaCalibracion: r\.ultima_calibracion,/);
   });
 
   it('nada de esto manda nada a nadie, y no hay programador: se trae a mano', () => {

@@ -8,14 +8,18 @@ import { createPoolFromUrl, type Pool } from '@algarpibe/zoho-sync';
 import { crearPoolDesk2 } from '../db-desk2.js';
 import { asegurarDesk2, asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import { crearLectorCalibraciones, leerCalibracionesDesk2 } from './calibraciones-desk2.js';
-import { leerPlanCalibraciones } from './calibraciones-repo.js';
+import { leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
+import { planAvisos } from './dominio.js';
 import { crearFuenteAgenda } from './fuente.js';
+import { TzError } from './types.js';
 
-// Las calibraciones desde Desk 2.0 (lote 9c-1) contra Postgres: la 057, la
+// Las calibraciones desde Desk 2.0 (lote 9c) contra Postgres: la 057, la
 // lectura del campo de Zoho en la imitación de Desk 2.0 (por nombre interno y
-// por etiqueta), el plan —que no escribe—, que sin Desk 2.0 no hay plan y que
-// un fallo de esta lectura no mueve la agenda de la principal. Las rutas son
-// las de verdad; sólo la sesión es un doble. Todo ficticio.
+// por etiqueta), el plan —que no escribe—, aplicarlo (todo o nada, idempotente,
+// uno detrás de otro), que sin Desk 2.0 no se escribe, que un fallo de esta
+// lectura no mueve la agenda de la principal y que el inventario enseña la
+// fecha de la regla. Las rutas son las de verdad; sólo la sesión es un doble.
+// Todo ficticio.
 
 const SECRET = 'test-secret-calibraciones';
 process.env.JWT_SECRET = SECRET;
@@ -49,6 +53,8 @@ const desk2 = () => crearLectorCalibraciones(() => lector);
 const sinVariable = crearLectorCalibraciones(() => null);
 const desk2Caido = () => crearLectorCalibraciones(() => caida);
 const plan = async (hoy = HOY) => leerPlanCalibraciones(hub, desk2(), hoy, true);
+const actor = { userId: ADMIN, email: 'director@example.com' };
+const traer = (huella: string | null = null, hoy = HOY) => sincronizarCalibraciones(hub, desk2(), huella, actor, hoy);
 
 const enPortal = (serial: string, cliente: string, calibracion: string | null, extra: { deskId?: string; activo?: boolean } = {}) =>
   hub.query(`INSERT INTO portal.tmc_equipos (clave, serial, cliente, marca, modelo, ultima_calibracion, activo, desk_id) VALUES ($1, $1, $2, 'Grimm', 'EDM 180C', $3, $4, $5)`, [serial, cliente, calibracion, extra.activo ?? true, extra.deskId ?? null]);
@@ -65,7 +71,8 @@ const enDesk = (numero: number, t: { serial?: string | null; equipoId?: string; 
   ]);
 const NOMBRE = (fecha: string) => ({ cf_fecha_de_calibracion: fecha });
 const ETIQUETA = (fecha: string) => ({ 'Fecha de Calibración': fecha });
-/** Una calibración ya guardada, como la dejará una pasada (9c-2): aquí se siembra por SQL. */
+const cambiarFecha = (numero: number, fecha: string | null) => admin2.query(`UPDATE desk.tickets SET raw = jsonb_set(raw, '{cf}', $2::jsonb), custom_fields = $3::jsonb WHERE number = $1`, [numero, JSON.stringify(fecha ? NOMBRE(fecha) : {}), JSON.stringify(fecha ? ETIQUETA(fecha) : {})]);
+/** Una calibración ya guardada, sembrada por SQL (sin pasada: como si la hubiera dejado, o anulado, una persona). */
 const guardada = (ticket: number | null, clave: string | null, fecha: string, extra: { origen?: string; estado?: string; aMano?: boolean } = {}) =>
   hub.query(
     `INSERT INTO portal.tmc_calibraciones (clave, serial, serial_norm, fecha, origen, ticket, estado, por, anulada_por, anulada_en)
@@ -118,9 +125,11 @@ const ESPERADO = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Fila = Record<string, any>;
-const foto = async () => (await hub.query(`SELECT id, clave, fecha::text AS fecha, origen, ticket, estado FROM portal.tmc_calibraciones ORDER BY id`)).rows as Fila[];
-const pasadas = async () => (await hub.query(`SELECT id FROM portal.tmc_calibraciones_pasadas ORDER BY id`)).rows as Fila[];
+const FOTO = `id, clave, serial, serial_norm, desk_equipo_id, fecha::text AS fecha, origen, ticket, estado, motivo, pasada_id, por, anulada_pasada_id, anulada_por, anulada_motivo`;
+const foto = async () => (await hub.query(`SELECT ${FOTO} FROM portal.tmc_calibraciones ORDER BY id`)).rows as Fila[];
+const pasadas = async () => (await hub.query(`SELECT id, huella, recuentos, detalle, por_id, por FROM portal.tmc_calibraciones_pasadas ORDER BY id`)).rows as Fila[];
 const inventario = async () => (await hub.query(`SELECT clave, ultima_calibracion::text AS ultima, activo, desk_id FROM portal.tmc_equipos ORDER BY clave`)).rows as Fila[];
+const fechasDe = async (hoy = HOY) => Object.fromEntries((await repo.listarEquipos(hub, hoy)).map((e) => [e.clave, [e.ultimaCalibracion, e.estado]]));
 
 beforeAll(async () => {
   hub = poolDePrueba();
@@ -301,11 +310,197 @@ describe('el plan', () => {
   });
 });
 
-describe('la ruta', () => {
+describe('aplicar el plan', () => {
+  beforeEach(sembrar);
+
+  it('una fila por calibración (enlazada por el equipo de Desk 2.0 o por serial), la futura en revisión, la de otra marca sin clave, y el punto de partida; firmado, con su pasada, y sin tocar el inventario', async () => {
+    const antes = await inventario();
+    const s = await traer((await plan()).plan!.huella);
+    expect(s).toMatchObject({ id: 1, por: 'director@example.com', recuentos: ESPERADO });
+    expect((await foto()).map((f) => [f.origen, f.ticket, f.clave, f.serial, f.serial_norm, f.desk_equipo_id, f.fecha, f.estado, f.motivo])).toEqual([
+      ['desk', 1001, '18A00001', 'OTRO-SERIAL', 'OTRO-SERIAL', 'eq-1', '2026-09-20', 'vigente', null],
+      ['desk', 1002, '18A00003', '18a00003', '18A00003', null, '2026-08-15', 'vigente', null],
+      ['desk', 1003, '18A00002', '18A00002', '18A00002', null, '2027-01-10', 'en_revision', 'La fecha es posterior a hoy.'],
+      ['desk', 1005, null, 'HB-0001', 'HB-0001', 'eq-h', '2026-06-30', 'vigente', null],
+      ['fst022', null, '18A00001', '18A00001', '18A00001', 'eq-1', '2025-06-01', 'vigente', 'F-ST-022 congelada.'],
+      ['fst022', null, '18A00002', '18A00002', '18A00002', 'eq-2', '2025-11-20', 'vigente', 'F-ST-022 congelada.'],
+      ['fst022', null, '18A00003', '18A00003', '18A00003', null, '2026-03-01', 'vigente', 'Inventario del portal (la hoja congelada no trae fecha para este equipo).'],
+    ]);
+    for (const f of await foto()) expect(f).toMatchObject({ pasada_id: '1', por: 'director@example.com', anulada_pasada_id: null, anulada_por: null });
+    const [pasada] = await pasadas();
+    expect(pasada).toMatchObject({ por_id: ADMIN, por: 'director@example.com', recuentos: ESPERADO, huella: s.huella });
+    expect(pasada.detalle).toHaveLength(8);
+    expect(await inventario()).toEqual(antes);
+  });
+
+  it('idempotente: una segunda pasada no cambia nada y deja su fila de auditoría, sin detalle que escribir', async () => {
+    await traer();
+    const antes = await foto();
+    const otra = await plan();
+    expect(otra.plan!.recuentos).toMatchObject({ nuevas: 0, sinCambios: 4, cambiadas: 0, vaciadas: 0, sinEquipo: 1, partida: 0, equiposCambian: 0, salenDeAvisos: 0 });
+    expect(otra.detalle!.map((d) => d.tipo)).toEqual(['sin_equipo']);
+    expect(otra.ultima).toMatchObject({ id: 1, por: 'director@example.com' });
+    expect((await traer(otra.plan!.huella)).id).toBe(2);
+    expect(await foto()).toEqual(antes);
+  });
+
+  it('la fecha cambió en Zoho → anula la fila (firmada, con su pasada y su motivo) e inserta otra; el campo vaciado → anula y no inserta', async () => {
+    await traer();
+    await cambiarFecha(1001, '2026-09-25');
+    await cambiarFecha(1005, null);
+    const r = await plan();
+    expect(r.plan!.recuentos).toMatchObject({ nuevas: 0, sinCambios: 2, cambiadas: 1, vaciadas: 1, equiposCambian: 1 });
+    await traer(r.plan!.huella);
+    const de = (ticket: number) => foto().then((fs) => fs.filter((f) => f.ticket === ticket).map((f) => [f.fecha, f.estado, f.anulada_pasada_id, f.anulada_por, f.anulada_motivo]));
+    expect(await de(1001)).toEqual([
+      ['2026-09-20', 'anulada', '2', 'director@example.com', 'La fecha cambió en Zoho: 2026-09-20 → 2026-09-25.'],
+      ['2026-09-25', 'vigente', null, null, null],
+    ]);
+    expect(await de(1005)).toEqual([['2026-06-30', 'anulada', '2', 'director@example.com', 'El campo se vació en Zoho (o el ticket ya no está en Desk 2.0).']]);
+    expect((await fechasDe())['18A00001']).toEqual(['2026-09-25', 'AL_DIA']);
+  });
+
+  it('una fila anulada A MANO no la resucita la pasada mientras Zoho siga con esa fecha', async () => {
+    await traer();
+    await hub.query(`UPDATE portal.tmc_calibraciones SET estado = 'anulada', anulada_por = 'tecnico@example.com', anulada_en = NOW(), anulada_motivo = 'No es de este equipo' WHERE ticket = 1001`);
+    const r = await plan();
+    expect(r.plan!.recuentos).toMatchObject({ nuevas: 0, noResucitan: 1 });
+    await traer(r.plan!.huella);
+    expect((await foto()).filter((f) => f.ticket === 1001).map((f) => f.estado)).toEqual(['anulada']);
+    expect((await fechasDe())['18A00001']).toEqual(['2025-06-01', 'VENCIDA']);
+  });
+
+  it('una en revisión por futura pasa a vigente cuando llega su día', async () => {
+    await traer();
+    expect((await fechasDe())['18A00002']).toEqual(['2025-11-20', 'VENCE_60']);
+    const r = await plan('2027-01-10');
+    expect(r.plan!.recuentos).toMatchObject({ reenlazadas: 1, enRevision: 0 });
+    await traer(r.plan!.huella, '2027-01-10');
+    expect((await fechasDe('2027-01-10'))['18A00002']).toEqual(['2027-01-10', 'AL_DIA']);
+  });
+
+  it('todo o nada: si la base falla a mitad, no queda ni una calibración ni la pasada', async () => {
+    const rota = {
+      query: hub.query.bind(hub),
+      connect: async () => {
+        const c = await hub.connect();
+        return { query: (sql: string, p?: unknown[]) => (/INSERT INTO portal\.tmc_calibraciones \(/.test(sql) ? Promise.reject(new Error('la base falló')) : c.query(sql, p)), release: () => c.release() };
+      },
+    } as unknown as Pool;
+    await expect(sincronizarCalibraciones(rota, desk2(), null, actor, HOY)).rejects.toThrow('la base falló');
+    expect([await foto(), await pasadas()]).toEqual([[], []]);
+  });
+
+  it.each([
+    ['sin la variable (o en respaldo: la réplica no trae campos personalizados)', () => sinVariable],
+    ['con Desk 2.0 configurado pero caído', desk2Caido],
+  ])('%s no escribe: 409 y la base como estaba', async (_nombre, lectorDesk2) => {
+    const e = await sincronizarCalibraciones(hub, lectorDesk2(), null, actor, HOY).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(TzError);
+    expect(e).toMatchObject({ status: 409, code: 'calibraciones_no_disponibles' });
+    expect((e as TzError).messageEs).toMatch(/No se ha traído nada\.$/);
+    expect((e as TzError).messageEs).not.toMatch(/postgres|127\.0\.0\.1|agenda_lector/i);
+    expect([await foto(), await pasadas()]).toEqual([[], []]);
+  });
+
+  it('con Desk 2.0 contestando a la agenda pero no a ESTA lectura, tampoco escribe', async () => {
+    await admin2.query(`REVOKE SELECT ON desk.tickets FROM ${ROL_LECTOR}`);
+    await admin2.query(`GRANT SELECT (id, number, status, status_type) ON desk.tickets TO ${ROL_LECTOR}`);
+    try {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await expect(traer()).rejects.toMatchObject({ status: 409, code: 'calibraciones_no_disponibles' });
+      expect([await foto(), await pasadas()]).toEqual([[], []]);
+    } finally {
+      vi.restoreAllMocks();
+      await admin2.query(`GRANT SELECT ON desk.tickets TO ${ROL_LECTOR}`);
+    }
+  });
+
+  it('si el plan cambió entre verlo y aplicarlo (alguien tocó el ticket en Zoho), 409 y no se aplica nada; con la huella de ahora, sí', async () => {
+    const visto = (await plan()).plan!.huella;
+    await cambiarFecha(1001, '2026-09-21');
+    await expect(traer(visto)).rejects.toMatchObject({ status: 409, code: 'plan_cambiado' });
+    expect([await foto(), await pasadas()]).toEqual([[], []]);
+    await traer((await plan()).plan!.huella);
+    expect((await foto()).find((f) => f.ticket === 1001)).toMatchObject({ fecha: '2026-09-21' });
+  });
+
+  it('dos a la vez van una detrás de otra: cada calibración entra una sola vez; con la misma huella, la segunda es un 409', async () => {
+    const [a, b] = await Promise.all([traer(), traer()]);
+    expect([a.id, b.id].sort()).toEqual([1, 2]);
+    expect(await foto()).toHaveLength(7);
+    expect((await pasadas()).map((p) => p.recuentos.nuevas + p.recuentos.partida)).toEqual([7, 0]);
+
+    await cambiarFecha(1001, '2026-09-22');
+    const huella = (await plan()).plan!.huella;
+    const dos = await Promise.allSettled([traer(huella), traer(huella)]);
+    expect(dos.map((d) => d.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect((dos.find((d) => d.status === 'rejected') as PromiseRejectedResult).reason).toMatchObject({ code: 'plan_cambiado' });
+    expect((await foto()).filter((f) => f.ticket === 1001 && f.estado !== 'anulada')).toHaveLength(1);
+  });
+
+  it('salud: si ningún ticket trae ya el campo (lo renombraron en Zoho) NO deja traer: no se anula nada', async () => {
+    await traer();
+    const antes = await foto();
+    await admin2.query(`UPDATE desk.tickets SET raw = raw - 'cf', custom_fields = '{}'`);
+    const r = await plan();
+    expect(r.plan!.recuentos).toMatchObject({ conCf: 0, conCampo: 0, vaciadas: 4 });
+    expect(r.salud!.mensaje).toMatch(/Ningún ticket de Desk 2\.0 trae la «Fecha de Calibración» \(antes la traían 5\)/);
+    await expect(traer(r.plan!.huella)).rejects.toMatchObject({ status: 409, code: 'lectura_sospechosa' });
+    expect(await foto()).toEqual(antes);
+  });
+
+  it('salud: en un entorno donde nunca vino ninguna avisa pero deja traer el punto de partida', async () => {
+    await admin2.query(`UPDATE desk.tickets SET raw = raw - 'cf', custom_fields = '{}'`);
+    const r = await plan();
+    expect(r.salud).toMatchObject({ alerta: true, bloquea: false });
+    await traer(r.plan!.huella);
+    expect((await foto()).map((f) => f.origen)).toEqual(['fst022', 'fst022', 'fst022']);
+  });
+});
+
+describe('el inventario enseña la fecha que da la regla', () => {
+  beforeEach(sembrar);
+
+  it('sin ninguna calibración guardada, cada equipo sigue con la del inventario, como hasta ahora', async () => {
+    expect(await fechasDe()).toEqual({ '18A00001': ['2025-06-01', 'VENCIDA'], '18A00002': ['2025-12-01', 'VENCE_60'], '18A00003': ['2026-03-01', 'AL_DIA'], '18A00004': [null, 'SIN_FECHA'] });
+  });
+
+  it('DE PUNTA A PUNTA: el equipo vencido que recibe una calibración reciente pasa a «Al día» y sale del plan de avisos; y sigue sin existir ningún envío', async () => {
+    const avisos = async () => {
+      const p = planAvisos(await repo.listarEquipos(hub, HOY), HOY, await repo.listarContactos(hub));
+      return [...p.vencidasSinAviso, ...p.correos.flatMap((c) => c.equipos), ...p.sinDestinatario.flatMap((c) => c.equipos)].map((a) => a.equipo.clave).sort();
+    };
+    expect(await avisos()).toEqual(['18A00001', '18A00002']);
+    await traer();
+    expect(await fechasDe()).toEqual({ '18A00001': ['2026-09-20', 'AL_DIA'], '18A00002': ['2025-11-20', 'VENCE_60'], '18A00003': ['2026-08-15', 'AL_DIA'], '18A00004': [null, 'SIN_FECHA'] });
+    expect(await avisos()).toEqual(['18A00002']);
+    // La fecha del inventario no se ha tocado: la que cuenta sale de las calibraciones.
+    expect((await inventario()).map((e) => e.ultima)).toEqual(['2025-06-01', '2025-12-01', '2026-03-01', null]);
+    const { rows } = await hub.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name ~ 'outbox|envio|mensaje|cola|pendiente' AND table_name LIKE 'tmc%'`);
+    expect(rows).toEqual([]);
+  });
+
+  it('la corrección manual (el modelo; su pantalla es del 9d) manda sobre la fecha de Desk de su ticket hasta que esa fecha cambie en Zoho', async () => {
+    await traer();
+    await hub.query(`INSERT INTO portal.tmc_calibraciones (clave, serial, serial_norm, fecha, origen, corrige_ticket, corrige_fecha, motivo, por) VALUES ('18A00001', '18A00001', '18A00001', '2026-09-10', 'manual', 1001, '2026-09-20', 'El certificado dice el 10', 'tecnico@example.com')`);
+    expect((await fechasDe())['18A00001']).toEqual(['2026-09-10', 'AL_DIA']);
+    // Otra pasada, con Zoho igual, no toca nada: la manual sigue mandando.
+    await traer();
+    expect((await fechasDe())['18A00001']).toEqual(['2026-09-10', 'AL_DIA']);
+    await cambiarFecha(1001, '2026-09-12');
+    await traer();
+    expect((await fechasDe())['18A00001']).toEqual(['2026-09-12', 'AL_DIA']);
+    expect((await foto()).filter((f) => f.origen === 'manual').map((f) => f.estado)).toEqual(['vigente']);
+  });
+});
+
+describe('las rutas', () => {
   beforeEach(sembrar);
   const PLAN = '/api/trazabilidad/calibraciones/plan';
+  const TRAER = '/api/trazabilidad/calibraciones/sincronizar';
 
-  it('GET /calibraciones/plan: a un Lector, sólo recuentos (ni un cliente ni un serial); a quien tiene el permiso, además el detalle; y no escribe', async () => {
+  it('GET /calibraciones/plan: a un Lector, sólo recuentos (ni un cliente ni un serial); a quien puede traer, además el detalle; y no escribe', async () => {
     const res = await request(api).get(PLAN).set(comoLector);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ lectura: { disponible: true }, plan: { recuentos: { nuevas: 4, partida: 3 } }, salud: { alerta: false }, ultima: null });
@@ -315,9 +510,40 @@ describe('la ruta', () => {
     expect([await foto(), await pasadas()]).toEqual([[], []]);
   });
 
-  it('todavía no hay ruta que las traiga: POST /calibraciones/sincronizar es un 404 y no toca nada (lote 9c-2)', async () => {
-    const res = await request(api).post('/api/trazabilidad/calibraciones/sincronizar').set(comoAdmin).send({});
-    expect(res.status).toBe(404);
+  it('POST /calibraciones/sincronizar: 403 para un Lector, sin tocar nada; quien puede lo aplica y lo firma con su correo; y el plan siguiente sale sin cambios', async () => {
+    const no = await request(api).post(TRAER).set(comoLector).send({});
+    expect([no.status, no.body.error]).toEqual([403, 'forbidden_role']);
     expect([await foto(), await pasadas()]).toEqual([[], []]);
+
+    const { huella } = (await request(api).get(PLAN).set(comoAdmin)).body.plan;
+    const si = await request(api).post(TRAER).set(comoAdmin).send({ huella });
+    expect(si.status).toBe(200);
+    expect(si.body).toMatchObject({ id: 1, por: 'admin@example.com', recuentos: { nuevas: 4 } });
+    const otra = await request(api).post(TRAER).set(comoAdmin).send({ huella });
+    expect([otra.status, otra.body.error]).toEqual([409, 'plan_cambiado']);
+    expect((await request(api).get(PLAN).set(comoLector)).body).toMatchObject({ plan: { recuentos: { nuevas: 0, partida: 0 } }, ultima: { id: 1, por: 'admin@example.com' } });
+  });
+
+  it('GET /equipos/:clave/calibraciones: el historial del equipo, la más reciente primero, con su origen, su estado, quién y cuándo, y cuál es la que cuenta', async () => {
+    await request(api).post(TRAER).set(comoAdmin).send({});
+    await cambiarFecha(1001, '2026-09-25');
+    await request(api).post(TRAER).set(comoAdmin).send({});
+    const res = await request(api).get('/api/trazabilidad/equipos/18A00001/calibraciones').set(comoLector);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ clave: '18A00001', ultima: '2026-09-25' });
+    expect(res.body.calibraciones.map((c: Fila) => [c.fecha, c.origen, c.ticket, c.estado, c.cuenta, c.por, c.anuladaPor])).toEqual([
+      ['2026-09-25', 'desk', 1001, 'vigente', true, 'admin@example.com', null],
+      ['2026-09-20', 'desk', 1001, 'anulada', false, 'admin@example.com', 'admin@example.com'],
+      ['2025-06-01', 'fst022', null, 'vigente', false, 'admin@example.com', null],
+    ]);
+    expect(res.body.calibraciones[0].en).toMatch(/^2\d{3}-\d\d-\d\d /);
+    expect((await request(api).get('/api/trazabilidad/equipos/18A00004/calibraciones').set(comoLector)).body).toEqual({ clave: '18A00004', ultima: null, calibraciones: [] });
+    expect((await request(api).get('/api/trazabilidad/equipos/a%20b/calibraciones').set(comoLector)).status).toBe(400);
+  });
+
+  it('GET /equipos lleva ya la fecha nueva', async () => {
+    await request(api).post(TRAER).set(comoAdmin).send({});
+    const res = await request(api).get(`/api/trazabilidad/equipos?hoy=${HOY}`).set(comoLector);
+    expect(res.body.equipos.find((e: Fila) => e.clave === '18A00001')).toMatchObject({ ultimaCalibracion: '2026-09-20', estado: 'AL_DIA', vence: '2027-09-20' });
   });
 });
