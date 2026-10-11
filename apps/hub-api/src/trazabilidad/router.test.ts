@@ -114,6 +114,18 @@ function appMaestro() {
   return a;
 }
 
+// Las calibraciones de estas pruebas (lote 9c): un doble del lector de Desk 2.0. Por defecto, un ticket con
+// fecha de un equipo del inventario. Serial reservado: no debe salir en claro. Sin conexiones: el plan sólo lee.
+type LecturaCalibraciones = Awaited<ReturnType<import('./calibraciones-desk2.js').LectorCalibraciones>>;
+const CALIBRACIONES: LecturaCalibraciones = { disponible: true, total: 40, conCf: 9, tickets: [{ numero: 1001, fecha: '2020-01-15', campo: 'nombre_interno', equipoId: 'eq-1', serial: 'SER-RESERVADO', tipoServicio: 'Calibración', estado: 'Finalizado', gestionadoPorApp: false }] };
+let lecturaCalibraciones: LecturaCalibraciones = CALIBRACIONES;
+function appCalibraciones() {
+  const a = express();
+  a.use(express.json());
+  a.use('/api', createTrazabilidadRouter(fakePool, undefined, undefined, async () => lecturaCalibraciones));
+  return a;
+}
+
 /** Lo que mandaba el portal al subir la Excel (importación: `filas`; congelación: `matriz`), con cliente y serial inventados. Ya nadie lo lee. */
 const CUERPO_SUBIDA = {
   archivo: 'F-ST-022 ficticia.xlsx',
@@ -158,6 +170,7 @@ beforeEach(() => {
   respuestas = [...CONFIG_AGENDA];
   ticketsFuente = [filaTicket(880, 'Ingresado'), filaTicket(984, 'En Proceso'), filaTicket(990, 'En Proceso')];
   lecturaMaestro = MAESTRO;
+  lecturaCalibraciones = CALIBRACIONES;
   reiniciarRegistroEstados();
 });
 
@@ -1672,5 +1685,97 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     for (const f of ['./fuente.ts', './fuente-desk2.ts', './fuente-replica.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/desk\.equipos|maestro/i);
     const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/maestro\//.test(r));
     expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/maestro/plan', 'get /trazabilidad/maestro/cruce', 'post /trazabilidad/maestro/sincronizar']);
+  });
+});
+
+// Las calibraciones desde Desk 2.0 (lote 9c-1): el plan, en sólo lectura. El SQL lo cubre
+// calibraciones.db.test.ts; aquí, las guardas y lo que sale en claro. Las fechas son antiguas a propósito:
+// el plan se calcula a hoy (el día en Colombia) y así no depende de cuándo se ejecute la prueba.
+describe('calibraciones desde Desk 2.0: el plan', () => {
+  const PLAN = '/api/trazabilidad/calibraciones/plan';
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q));
+  /** El equipo del ticket, en el inventario del portal y enlazado con Desk 2.0. */
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos/, [{ clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', activo: true, desk_id: 'eq-1', ultima_calibracion: '2019-01-01' }]];
+  /** Una calibración ya guardada de ese ticket. */
+  const GUARDADA: [RegExp, Filas] = [/FROM portal\.tmc_calibraciones c/, [{ id: 1, clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', desk_equipo_id: 'eq-1', fecha: '2020-01-15', origen: 'desk', ticket: 1001, estado: 'vigente', corrige_ticket: null, corrige_fecha: null, motivo: null, por: 'tecnico@example.com', en: '2026-10-11 15:00:00+00', anulada_por: null, anulada_en: null, anulada_pasada_id: null }]];
+
+  it('401 sin token y 403 sin la app, sin ninguna consulta', async () => {
+    expect((await request(appCalibraciones()).get(PLAN)).status).toBe(401);
+    const sinApp = await request(appCalibraciones()).get(PLAN).set(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })));
+    expect([sinApp.status, sinApp.body.error]).toEqual([403, 'forbidden']);
+    expect(queries).toEqual([]);
+  });
+
+  it('el plan está abierto a quien tenga la app: a un Lector le llegan el estado de la lectura, la salud, la huella y los recuentos, sin un cliente ni un serial, y no escribe', async () => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appCalibraciones()).get(PLAN).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body.lectura).toEqual({ disponible: true, motivo: null, mensaje: null });
+    expect(res.body.plan.huella).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.body.plan.recuentos).toMatchObject({ tickets: 40, conCf: 9, conCampo: 1, porNombre: 1, nuevas: 1, otrasMarcas: 0, enRevision: 0, partida: 1, partidaDeInventario: 1, equiposCambian: 1 });
+    expect(res.body.salud).toEqual({ alerta: false, bloquea: false, mensaje: null });
+    expect(res.body.ultima).toBeNull();
+    expect(Object.keys(res.body).sort()).toEqual(['lectura', 'plan', 'salud', 'ultima']);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
+    expect(escrituras()).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it.each([null, 'COMERCIAL'])('a quien no tiene `calibraciones.write` (rol %s) no le llega el detalle', async (rol) => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appCalibraciones()).get(PLAN).set(conRol(rol));
+    expect(res.body).not.toHaveProperty('detalle');
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
+  });
+
+  it.each([
+    ['un Técnico', () => conRol('TECNICO')],
+    ['el Director Técnico', () => conRol('DIRECTOR_TECNICO')],
+    ['un administrador del portal', comoAdmin],
+  ])('a quien lo tiene (%s) le llega además el detalle para revisar, aparte y acotado', async (_quien, cabecera) => {
+    respuestas.push(INVENTARIO);
+    const res = await request(appCalibraciones()).get(PLAN).set(cabecera());
+    expect(res.body.detalleTotal).toBe(2);
+    expect(res.body.detalle).toEqual([
+      { tipo: 'nueva', ticket: 1001, clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', fecha: '2020-01-15', antes: null, nota: null },
+      { tipo: 'partida', ticket: null, clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', fecha: '2019-01-01', antes: null, nota: 'Inventario del portal (la hoja congelada no trae fecha para este equipo).' },
+    ]);
+    expect(escrituras()).toEqual([]);
+  });
+
+  it.each(['sin_variable', 'error_conexion', 'timeout', 'error_consulta'] as const)('sin Desk 2.0 (%s) el plan responde 200 diciendo por qué, sin plan y sin nada de la conexión', async (motivo) => {
+    lecturaCalibraciones = { disponible: false, motivo };
+    const plan = await request(appCalibraciones()).get(PLAN).set(auth());
+    expect(plan.status).toBe(200);
+    expect(plan.body).toMatchObject({ lectura: { disponible: false, motivo }, plan: null, salud: null, ultima: null });
+    expect(plan.body.lectura.mensaje).toMatch(/Desk 2\.0/);
+    expect(JSON.stringify(plan.body)).not.toMatch(/postgres:|@|password/i);
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('por defecto las calibraciones salen de DESK2_DB_URL: sin la variable no hay lectura (sin_variable), y no es un error', async () => {
+    vi.stubEnv('DESK2_DB_URL', '');
+    const res = await request(app()).get(PLAN).set(auth());
+    vi.unstubAllEnvs();
+    expect([res.status, res.body.lectura.motivo, res.body.plan]).toEqual([200, 'sin_variable', null]);
+  });
+
+  it('salud: si ningún ticket trae ya el campo y antes sí, el plan lo dice claramente', async () => {
+    lecturaCalibraciones = { disponible: true, total: 40, conCf: 0, tickets: [] };
+    respuestas.push(INVENTARIO, GUARDADA);
+    const plan = await request(appCalibraciones()).get(PLAN).set(conRol(null));
+    expect(plan.body.salud).toMatchObject({ alerta: true, bloquea: true });
+    expect(plan.body.salud.mensaje).toMatch(/puede que el campo se haya renombrado en Zoho o que Desk 2\.0 no esté releyendo los tickets/);
+    expect(plan.body.plan.recuentos).toMatchObject({ conCampo: 0, vaciadas: 1 });
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('CANDADO: las calibraciones no entran en la fuente de la agenda (ni en su sonda), no hay programador, y de momento su única ruta es el plan: nada escribe todavía', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    for (const f of ['./fuente.ts', './fuente-desk2.ts', './fuente-replica.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/calibraciones-desk2|crearLectorCalibraciones|sincronizarCalibraciones|cf_fecha_de_calibracion|tmc_calibraciones/);
+    const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/[^']*calibraciones/.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/calibraciones/plan']);
+    // `calibraciones.write` sólo decide quién ve el detalle: ninguna escritura lo pide aún (será la del 9c-2).
+    expect(fuente('./router.ts')).not.toMatch(/(escritura|conPermiso)\('calibraciones\.write'/);
   });
 });

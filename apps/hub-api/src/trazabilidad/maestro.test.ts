@@ -378,8 +378,8 @@ describe('056_trazabilidad_maestro_equipos.sql', () => {
     expect(sinComentarios).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS tmc_equipos_desk_id_uq ON portal\.tmc_equipos \(desk_id\) WHERE desk_id IS NOT NULL/);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 055, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'055_trazabilidad_fst022_congelacion\.sql',\s*'056_trazabilidad_maestro_equipos\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 055 (la última es la 057: calibraciones.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'055_trazabilidad_fst022_congelacion\.sql',\s*'056_trazabilidad_maestro_equipos\.sql',/);
   });
 });
 

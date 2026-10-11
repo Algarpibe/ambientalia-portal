@@ -7,6 +7,7 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { inicioDeReparto, proponerReparto, proyectarAgenda, vuelvenDeStandby, type AgendaTaller, type EntradaAgenda, type ItemReparto, type TramoHistorial } from './agenda.js';
 import { primerDiaHabilAgenda } from './agenda-calendario.js';
+import type { CalibracionGuardada } from './calibraciones.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import {
@@ -241,6 +242,22 @@ export async function guardarContacto(db: Db, c: CambioContacto, actor: Actor): 
        actualizado_por_id = EXCLUDED.actualizado_por_id, actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
     [clave, c.cliente, c.emails, c.nombre, actor.userId, actor.email],
   );
+}
+
+/** Las calibraciones guardadas (057), en orden de alta: todas, o las de un equipo. Sólo lee (escribirlas es del lote 9c-2). */
+export async function leerCalibraciones(db: Db, clave: string | null = null): Promise<CalibracionGuardada[]> {
+  const { rows } = await db.query(
+    `SELECT c.id, c.clave, c.serial, c.desk_equipo_id, c.fecha::text AS fecha, c.origen, c.ticket, c.estado, c.corrige_ticket, c.corrige_fecha::text AS corrige_fecha,
+            c.motivo, c.por, c.en::text AS en, c.anulada_por, c.anulada_en::text AS anulada_en, c.anulada_pasada_id
+       FROM portal.tmc_calibraciones c
+      WHERE $1::text IS NULL OR c.clave = $1
+      ORDER BY c.id`,
+    [clave],
+  );
+  return (rows as Row[]).map((r) => ({
+    id: Number(r.id), clave: r.clave, serial: r.serial, deskEquipoId: r.desk_equipo_id, fecha: r.fecha, origen: r.origen, ticket: r.ticket, estado: r.estado, corrigeTicket: r.corrige_ticket, corrigeFecha: r.corrige_fecha,
+    anuladaAMano: r.estado === 'anulada' && r.anulada_pasada_id === null, motivo: r.motivo, por: r.por, en: r.en, anuladaPor: r.anulada_por, anuladaEn: r.anulada_en,
+  }));
 }
 
 function consultarEquipos(db: Db) {
