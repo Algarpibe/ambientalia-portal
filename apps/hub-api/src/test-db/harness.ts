@@ -57,6 +57,11 @@ export const COLUMNAS_EQUIPOS_LECTOR = 'id, serial, marca, modelo, tipo, cliente
  * `raw` existe y no se le concede, asi que un SELECT que la nombre (o un `*`)
  * falla aqui igual que fallaria alli.
  *
+ * `desk.tickets` lleva tambien lo que lee el lote 9c (las fechas de
+ * calibracion): `serial`, `equipo_id`, `managed_by_app` y los dos jsonb donde
+ * viaja el campo de Zoho, `raw` (con su `cf`) y `custom_fields`. Alli el lector
+ * tiene SELECT sobre la tabla ENTERA, y aqui tambien.
+ *
  * Devuelve dos URLs: la del rol lector (la que imita a `DESK2_DB_URL`) y la del
  * superusuario del contenedor sobre esa base, para sembrar. La contrasena del
  * lector se genera en cada llamada: no hay ninguna escrita en el repo.
@@ -102,6 +107,11 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
         synced_at              timestamptz
       );
       ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS subject text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS serial text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS equipo_id text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS managed_by_app boolean NOT NULL DEFAULT false;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS raw jsonb;
       CREATE TABLE IF NOT EXISTS desk.ticket_transitions (
         id           bigserial PRIMARY KEY,
         ticket_id    text NOT NULL,
