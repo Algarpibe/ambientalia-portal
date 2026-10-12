@@ -19,6 +19,7 @@ describe('navegación en dos niveles', () => {
       ['clientes', 'equipos', 'Equipos'],
       ['clientes', 'calendario', 'Calendario Calibraciones'],
       ['clientes', 'avisos', 'Avisos a clientes'],
+      ['clientes', 'fst022', 'Trazabilidad F-ST-022'],
       ['taller', 'servicios', 'Servicios'],
       ['taller', 'agenda', 'Agenda del taller'],
       ['administracion', 'configuracion', 'Configuración'],
@@ -38,7 +39,7 @@ describe('navegación en dos niveles', () => {
     expect(seccionesDe('administracion', false).map((s) => s.id)).toEqual(['configuracion']);
     expect(seccionesDe('administracion', true).map((s) => s.id)).toEqual(['configuracion', 'roles']);
     for (const gestiona of [true, false]) {
-      expect(seccionesDe('clientes', gestiona).map((s) => s.id)).toEqual(['resumen', 'equipos', 'calendario', 'avisos']);
+      expect(seccionesDe('clientes', gestiona).map((s) => s.id)).toEqual(['resumen', 'equipos', 'calendario', 'avisos', 'fst022']);
       expect(seccionesDe('taller', gestiona).map((s) => s.id)).toEqual(['servicios', 'agenda']);
     }
   });
@@ -60,6 +61,13 @@ describe('seccionDeHash', () => {
     expect(seccionDeHash('#agenda')).toBe('agenda');
     expect(grupoDe('agenda')).toBe('taller');
     expect(primeraSeccion('taller')).toBe('servicios');
+  });
+
+  it('#fst022 lleva a la pestaña «Trazabilidad F-ST-022», la última de «Clientes y calibraciones» (el Resumen sigue siendo la primera), y se ofrece a todos', () => {
+    expect(seccionDeHash('#fst022')).toBe('fst022');
+    expect(grupoDe('fst022')).toBe('clientes');
+    expect(primeraSeccion('clientes')).toBe('resumen');
+    expect(SECCIONES.find((s) => s.id === 'fst022')?.soloGestores).toBe(false);
   });
 
   it('#roles es la sección nueva', () => {
