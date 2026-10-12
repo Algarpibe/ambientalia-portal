@@ -138,7 +138,7 @@ beforeEach(async () => {
   await sembrar();
 });
 
-const OTRAS = { maestro: 7, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 4, soloPortal: 0, ambiguos: 2, sinSerial: 0, inactivos: 1 };
+const OTRAS = { maestro: 7, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 4, soloPortal: 0, ambiguos: 2, sinSerial: 0, inactivos: 1, retiradosAMano: 0 };
 const CRUCE = [
   { marca: 'Grimm', filas: 2, enlazadas: 2, soloHoja: 0, sinCeros: 0, repetidas: 0 },
   { marca: 'HORIBA', filas: 4, enlazadas: 2, soloHoja: 1, sinCeros: 1, repetidas: 1 },
