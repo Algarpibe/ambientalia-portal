@@ -21,6 +21,8 @@ const MATRIZ: Record<Permiso, Record<RolApp, boolean>> = {
   'agenda.flujo': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   'calibraciones.write': { LECTOR: N, COMERCIAL: N, TECNICO: S, DIRECTOR_TECNICO: S },
   'maestro.sincronizar': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
+  // Lote 9d-2b: retirar o reincorporar un equipo o una fila de la hoja. Sólo el Director Técnico (por defecto, revisable): el Técnico corrige fechas, no retira.
+  'inventario.write': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   'roles.manage': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: N },
 };
 
@@ -29,7 +31,7 @@ describe('roles y permisos: los nombres', () => {
     expect([...ROLES_APP]).toEqual(['LECTOR', 'COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']);
   });
 
-  it('los trece permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b)', () => {
+  it('los catorce permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b y el de retirar, con el 9d-2b)', () => {
     expect([...PERMISOS]).toEqual([
       'seguimiento.write',
       'avisos.write',
@@ -43,6 +45,7 @@ describe('roles y permisos: los nombres', () => {
       'agenda.flujo',
       'calibraciones.write',
       'maestro.sincronizar',
+      'inventario.write',
       'roles.manage',
     ]);
     expect(Object.keys(MATRIZ).sort()).toEqual([...PERMISOS].sort());
@@ -56,8 +59,8 @@ describe('roles y permisos: los nombres', () => {
 describe('la matriz entera: cada rol × cada permiso', () => {
   const casos = PERMISOS.flatMap((permiso) => ROLES_APP.map((rol) => ({ rol, permiso, esperado: MATRIZ[permiso][rol] })));
 
-  it('son 52 casos', () => {
-    expect(casos).toHaveLength(52);
+  it('son 56 casos', () => {
+    expect(casos).toHaveLength(56);
   });
 
   it.each(casos)('$rol · $permiso → $esperado', ({ rol, permiso, esperado }) => {

@@ -17,6 +17,7 @@ import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-
 import { festivosDelEje } from './plazos.js';
 import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
+import { listarRetiros, retirarEquipo, retirarFila } from './retiros-repo.js';
 import { ETIQUETA_ROL_APP, permisosDe, puede, resolverRol, type Permiso, type RolApp } from './roles.js';
 import {
   TzError,
@@ -35,6 +36,7 @@ import {
   parseLiberacion,
   parseMotivo,
   parseNumeroTicket,
+  parseObjetoRetiro,
   parsePaginaFst022,
   parsePlazo,
   parsePuestosEtapa,
@@ -375,6 +377,28 @@ export function createTrazabilidadRouter(
       return historialCalibraciones(db, req.params.clave, hoyOf(req));
     }),
   );
+
+  // ── Retirar y reincorporar a mano (lote 9d-2b, migración 059) ────────────
+  //
+  // Nada se borra: retirar es marcar, con motivo obligatorio y firma, y se
+  // deshace. Un equipo retirado queda inactivo (sale de Resumen, Equipos,
+  // Calendario y Avisos) y la sincronización del maestro no lo reactiva. Una
+  // fila de la hoja sin equipo sólo se apunta: la congelación no se toca.
+  // Las cuatro piden `inventario.write` y devuelven cómo queda y su historial.
+  const claveDe = (req: Request): string => {
+    if (!esClave(req.params.clave)) throw new TzError('invalid_input', 400, 'Clave de equipo no válida.', 'clave');
+    return req.params.clave;
+  };
+  const deEquipo = (retirar: boolean) => async (req: Request) => retirarEquipo(db, claveDe(req), retirar, parseMotivo(req.body), actorOf(req));
+  const deFila = (retirar: boolean) => async (req: Request) => retirarFila(db, parseEnteroRuta(req.params.fila, 'fila'), retirar, parseMotivo(req.body), actorOf(req), hoyEnColombia());
+
+  router.post('/trazabilidad/equipos/:clave/retirar', ...gated, escritura('inventario.write', 'tmc_equipo_retirar', deEquipo(true)));
+  router.post('/trazabilidad/equipos/:clave/reincorporar', ...gated, escritura('inventario.write', 'tmc_equipo_reincorporar', deEquipo(false)));
+  router.post('/trazabilidad/filas/:fila/retirar', ...gated, escritura('inventario.write', 'tmc_fila_retirar', deFila(true)));
+  router.post('/trazabilidad/filas/:fila/reincorporar', ...gated, escritura('inventario.write', 'tmc_fila_reincorporar', deFila(false)));
+
+  // La auditoría de un equipo (?clave=) o de una fila de la hoja (?fila=): quién lo retiró o lo reincorporó, cuándo y por qué.
+  router.get('/trazabilidad/retiros', ...gated, route('tmc_retiros', async (req) => ({ retiros: await listarRetiros(db, parseObjetoRetiro(req.query)) })));
 
   router.put(
     '/trazabilidad/seguimiento/:clave',

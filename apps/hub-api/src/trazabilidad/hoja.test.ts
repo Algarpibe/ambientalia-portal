@@ -176,7 +176,7 @@ describe('resumen', () => {
       [equipo('18A00001', { ultimaCalibracion: '2026-06-01' }), equipo('18A00002', { activo: false, ultimaCalibracion: '2024-01-01' }), equipo('ALTA-1')],
     );
     expect(t.resumen).toEqual({
-      total: 4, enInventario: 2, inactivos: 1, soloHoja: 2, conAvisos: 2, fueraDeHoja: 1, calibracionesSueltas: 0,
+      total: 4, enInventario: 2, inactivos: 1, soloHoja: 2, conAvisos: 2, retirados: 0, fueraDeHoja: 1, calibracionesSueltas: 0,
       porMarca: [{ clave: 'grimm', marca: 'GRIMM', total: 2 }, { clave: 'horiba', marca: 'Horiba', total: 1 }, { clave: 'thermo', marca: 'Thermo', total: 1 }],
       porEstado: { FUERA_CICLO: 1, VENCIDA: 0, VENCE_30: 1, VENCE_60: 0, VENCE_90: 0, AL_DIA: 1, SIN_FECHA: 1 },
     });
@@ -288,6 +288,44 @@ describe('corregir a mano una fila de la hoja (lote 9d-2b)', () => {
     const [x] = tabla([hoja()], [q], [ticket, corrige]).filas;
     expect([x.situacion, x.ultimaCalibracion]).toEqual(['enlazado', '2026-06-15']);
     expect(x.calibraciones.find((c) => c.cuenta)).toMatchObject({ id: corrige.id, origen: 'manual', corrigeTicket: 2001 });
+  });
+});
+
+// Lote 9d-2b: retirar. Un equipo retirado a mano y una fila de la hoja retirada siguen en la tabla, con quién, cuándo y por qué, y
+// dejan de contar en los totales «vivos» (sólo en la hoja, con avisos, por estado). La hoja congelada no cambia.
+describe('retirados (lote 9d-2b)', () => {
+  const FIRMA = { por: 'director@example.com', en: '2026-10-12 15:00:00+00', motivo: 'El cliente lo dio de baja.' };
+  const filas = () => [
+    fila('Cliente Ficticio A', 'Grimm', 'EDM 180C', '18A00001', '2026-06-01', '18A00001'),
+    fila('Cliente Ficticio A', 'Grimm', 'EDM 180C', '18A00002', '2025-11-01', '18A00002'),
+    fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-1', '2025-11-01'),
+    fila('Cliente Ficticio C', 'Thermo', '49i', 'TH-0007', null),
+  ];
+  const equipos = (retirado: EquipoHoja['retirado'] = null) => [equipo('18A00001', { ultimaCalibracion: '2026-06-01' }), equipo('18A00002', { activo: !retirado, ultimaCalibracion: '2025-11-01', retirado })];
+
+  it('nadie está retirado mientras nadie lo retire', () => {
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: filas(), equipos: equipos(), calibraciones: [] });
+    expect(t.filas.map((f) => f.retirado)).toEqual([null, null, null, null]);
+    expect(t.resumen).toMatchObject({ retirados: 0, soloHoja: 2, conAvisos: 1, porEstado: { AL_DIA: 1, VENCE_30: 2, SIN_FECHA: 1 } });
+  });
+
+  it('un equipo retirado a mano sale como inactivo CON su firma; una fila de la hoja retirada, igual; conservan su fecha y su estado', () => {
+    const f = filas();
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: f, equipos: equipos(FIRMA), calibraciones: [], retiradas: [{ fila: f[3].fila, ...FIRMA, motivo: 'Fila duplicada.' }, { fila: 9999, ...FIRMA }] });
+    expect(t.filas.map((x) => [x.serial, x.situacion, x.retirado?.motivo ?? null, x.estado])).toEqual([
+      ['18A00001', 'inventario', null, 'AL_DIA'],
+      ['18A00002', 'inactivo', 'El cliente lo dio de baja.', 'VENCE_30'],
+      ['HB-1', 'hoja', null, 'VENCE_30'],
+      ['TH-0007', 'hoja', 'Fila duplicada.', 'SIN_FECHA'],
+    ]);
+    expect(t.filas[1].retirado).toEqual(FIRMA);
+    // Los totales «vivos» ya no los cuentan: ni sólo en la hoja, ni con avisos (la retirada no tenía fecha), ni por estado.
+    expect(t.resumen).toMatchObject({ total: 4, retirados: 2, enInventario: 2, inactivos: 1, soloHoja: 1, conAvisos: 0, porEstado: { AL_DIA: 1, VENCE_30: 1, SIN_FECHA: 0 } });
+  });
+
+  it('un equipo fuera de la hoja (o enlazado fuera de seguimiento) retirado a mano también lo dice', () => {
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: [], equipos: [equipo('HB-9', { enSeguimiento: false, activo: false, retirado: FIRMA })], calibraciones: [] });
+    expect(t.fueraDeHoja).toMatchObject([{ clave: 'HB-9', situacion: 'enlazado', retirado: FIRMA }]);
   });
 });
 

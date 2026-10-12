@@ -230,12 +230,20 @@ describe('permisos por rol', () => {
     { ruta: 'POST /trazabilidad/calibraciones/manual', permiso: 'calibraciones.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/calibraciones/manual').set(c).send({ clave: 'SER-RESERVADO', fecha: '2026-09-30', motivo: 'Motivo ficticio.' }) },
     { ruta: 'POST /trazabilidad/calibraciones/:id/anular', permiso: 'calibraciones.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/calibraciones/1/anular').set(c).send({ motivo: 'Motivo ficticio.' }) },
     { ruta: 'POST /trazabilidad/calibraciones/partida/:fila/anular', permiso: 'calibraciones.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/calibraciones/partida/7/anular').set(c).send({ motivo: 'Motivo ficticio.' }) },
+    // Retirar y reincorporar (lote 9d-2b): un equipo, o una fila de la hoja sin equipo. Permiso nuevo, sólo del Director Técnico.
+    ...(['equipos/SER-RESERVADO', 'filas/7'] as const).flatMap((objeto) =>
+      (['retirar', 'reincorporar'] as const).map((accion) => ({
+        ruta: `POST /trazabilidad/${objeto.replace('SER-RESERVADO', ':clave').replace('7', ':fila')}/${accion}`,
+        permiso: 'inventario.write' as Permiso,
+        pedir: (c: { Authorization: string }) => request(appCalibraciones()).post(`/api/trazabilidad/${objeto}/${accion}`).set(c).send({ motivo: 'Motivo ficticio.' }),
+      })),
+    ),
   ];
   /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las dieciocho escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veintidós escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -305,6 +313,8 @@ describe('permisos por rol', () => {
     expect((await request(app()).post('/api/trazabilidad/calibraciones/manual').set(c).send({ fecha: 'ayer' })).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/calibraciones/abc/anular').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/calibraciones/partida/abc/anular').set(c).send({})).status).toBe(403);
+    expect((await request(app()).post('/api/trazabilidad/equipos/a%20b/retirar').set(c).send({})).status).toBe(403);
+    expect((await request(app()).post('/api/trazabilidad/filas/abc/reincorporar').set(c).send({})).status).toBe(403);
     expect(queries).toEqual([]);
   });
 
@@ -1670,7 +1680,7 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia.xlsx', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial']] }]],
     [/FROM portal\.tmc_fst022_congelada/, [{ celdas: ['Cliente Reservado', 'Horiba', 'APNA-370', 'HB-RESERVADO'], serial_norm: 'HB-RESERVADO', clave_equipo: null }, { celdas: ['Cliente Reservado', 'Thermo', '49i', 'TH-RESERVADO'], serial_norm: 'TH-RESERVADO', clave_equipo: null }]],
   ];
-  const OTRAS = { maestro: 1, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 1, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0 };
+  const OTRAS = { maestro: 1, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 1, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0, retiradosAMano: 0 };
 
   it.each([null, 'COMERCIAL', 'TECNICO'])('el plan lleva las otras marcas y el cruce con la hoja SÓLO en recuentos: a quien no puede sincronizar (rol %s) no le llega ni un cliente ni un serial', async (rol) => {
     respuestas.push(INVENTARIO, ...VIGENTE_HOJA);
@@ -2143,5 +2153,167 @@ describe('la tabla de la hoja F-ST-022 (sólo lectura)', () => {
     expect(apuntado).toMatch(/tmc_hoja error/);
     expect(apuntado).not.toMatch(/Reservado|RESERVADO/);
     error.mockRestore();
+  });
+});
+
+// Retirar y reincorporar (lote 9d-2b): un equipo del portal (activo = FALSE con su marca de «retirado a mano») o una fila de la
+// hoja sin equipo. Nada se borra: es marcar, con motivo y firma, y se deshace. El SQL lo cubre retiros.db.test.ts; aquí, las
+// guardas, los 400 / 404 / 409 en español y qué se escribe.
+describe('retirar y reincorporar un equipo o una fila de la hoja', () => {
+  const RUTAS = ['equipos/SER-RESERVADO/retirar', 'equipos/SER-RESERVADO/reincorporar', 'filas/7/retirar', 'filas/7/reincorporar'].map((r) => `/api/trazabilidad/${r}`);
+  const HISTORIAL = '/api/trazabilidad/retiros';
+  const MOTIVO = { motivo: ' El cliente lo dio de baja. ' };
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q)).map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1]);
+  const equipo = (activo: boolean, retirado: boolean): [RegExp, Filas] => [/FROM portal\.tmc_equipos e WHERE e\.clave = \$1 FOR UPDATE/, [{ activo, retirado }]];
+  const ULTIMO = /SELECT r\.accion FROM portal\.tmc_retiros r/;
+  const RETIROS: [RegExp, Filas] = [/SELECT r\.id, r\.accion/, [{ id: 3, accion: 'retirar', motivo: 'El cliente lo dio de baja.', antes: 'activo', despues: 'retirado', por: 'director@example.com', en: '2026-10-12 15:00:00+00' }]];
+  const VIGENTE: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia V3.xlsx', hoja: 'Trazabilidad', por: 'director@example.com', en: '2026-10-10 15:00:00+00', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración', 'Vigencia de Calibración (Dias)']] }]];
+  /** La hoja: la fila 6 es de un equipo del portal; la 7 sólo está en la hoja. */
+  const CONGELADAS: [RegExp, Filas] = [
+    /FROM portal\.tmc_fst022_congelada f/,
+    [
+      { fila: 6, celdas: ['Cliente Reservado', 'Grimm', 'EDM 180C', 'SER-RESERVADO', null, null], serial_norm: 'SER-RESERVADO', clave_equipo: 'SER-RESERVADO' },
+      { fila: 7, celdas: ['Cliente Reservado', 'Horiba', 'APNA-370', 'HB-RESERVADO', null, null], serial_norm: 'HB-RESERVADO', clave_equipo: null },
+    ],
+  ];
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos$/m, [{ clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado S.A.S.', marca: 'GRIMM', modelo: 'EDM 180C', activo: true, ultima_calibracion: null }]];
+  const HOJA = [RETIROS, VIGENTE, CONGELADAS, INVENTARIO];
+  const parametros: unknown[][] = [];
+  const appRetiros = () => {
+    parametros.length = 0;
+    const query = async (sql: string, p: unknown[] = []) => (/^\s*(INSERT|UPDATE)/.test(sql) && parametros.push(p), fakePool.query(sql, p));
+    const pool = { query, connect: async () => (conexiones.n++, { query, release: () => {} }) } as unknown as Pool;
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(pool, undefined, async () => lecturaMaestro));
+    return a;
+  };
+  const pedir = (ruta: string, cabecera = conRol('DIRECTOR_TECNICO'), cuerpo: unknown = MOTIVO) => request(appRetiros()).post(ruta).set(cabecera).send(cuerpo as object);
+
+  it('401 sin token y 403 sin la app, en las cuatro escrituras y en el historial, sin ninguna consulta', async () => {
+    for (const ruta of RUTAS) {
+      expect((await request(appRetiros()).post(ruta).send(MOTIVO)).status).toBe(401);
+      expect((await pedir(ruta, auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })))).body.error).toBe('forbidden');
+    }
+    expect((await request(appRetiros()).get(`${HISTORIAL}?clave=SER-RESERVADO`)).status).toBe(401);
+    expect((await request(appRetiros()).get(`${HISTORIAL}?clave=SER-RESERVADO`).set(auth(tokenFor(['ausencias'])))).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([null, 'COMERCIAL', 'TECNICO'])('no es para el rol %s (el Técnico corrige fechas, pero NO retira): 403 en español y ninguna consulta de negocio, en las cuatro', async (rol) => {
+    for (const ruta of RUTAS) {
+      const res = await pedir(ruta, conRol(rol));
+      expect([res.status, res.body.error]).toEqual([403, 'forbidden_role']);
+      expect(res.body.message).toMatch(/^Tu rol en Trazabilidad \((Lector|Comercial|Técnico)\) no permite /);
+    }
+    expect(queries).toEqual([]);
+    expect(conexiones.n).toBe(0);
+  });
+
+  it('400 sin motivo (obligatorio), o con una clave o una fila que no lo son, antes de leer nada', async () => {
+    for (const ruta of RUTAS) expect((await pedir(ruta, undefined, {})).body).toMatchObject({ error: 'invalid_input', field: 'motivo', message: 'Hay que decir el motivo.' });
+    expect((await pedir('/api/trazabilidad/equipos/a%20b/retirar')).body.field).toBe('clave');
+    expect((await pedir('/api/trazabilidad/filas/abc/retirar')).body.field).toBe('fila');
+    expect(queries).toEqual([]);
+  });
+
+  it('404 si el equipo o la fila no existen: no se escribe nada', async () => {
+    for (const ruta of RUTAS) expect((await pedir(ruta)).status).toBe(404);
+    expect((await pedir(RUTAS[0])).body.message).toBe('Ese equipo no existe en el portal.');
+    expect((await pedir(RUTAS[2])).body.message).toBe('Esa fila no es de un equipo de la hoja F-ST-022 congelada.');
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('retirar un equipo: activo = FALSE con su marca y su apunte, las dos cosas en UNA transacción; devuelve que está retirado y su historial', async () => {
+    respuestas.push(equipo(true, false), RETIROS);
+    const res = await pedir(RUTAS[0]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ retirado: true, retiros: [{ id: 3, accion: 'retirar', motivo: 'El cliente lo dio de baja.', antes: 'activo', despues: 'retirado', por: 'director@example.com', en: '2026-10-12 15:00:00+00' }] });
+    expect(escrituras()).toEqual(['UPDATE portal.tmc_equipos', 'INSERT INTO portal.tmc_retiros']);
+    expect(conexiones.n).toBe(1);
+    expect(parametros[0]).toEqual(['SER-RESERVADO', true, expect.stringMatching(/^0{8}-/), expect.stringMatching(/@/), 'El cliente lo dio de baja.']);
+    expect(parametros[1]).toEqual(['SER-RESERVADO', null, null, 'retirar', 'El cliente lo dio de baja.', 'activo', 'retirado', expect.any(String), expect.stringMatching(/@/)]);
+    // Lo único que se toca del equipo: `activo` y la marca. Ni el cliente, ni el serial, ni `en_seguimiento`.
+    expect(queries.find((q) => /^\s*UPDATE/.test(q))).not.toMatch(/\b(cliente|serial|modelo|marca|en_seguimiento)\s*=/);
+  });
+
+  it('409 al retirar lo ya retirado, o lo que ya está inactivo sin que nadie lo retirara; 409 al reincorporar lo que no está retirado', async () => {
+    respuestas.push(equipo(false, true));
+    const ya = await pedir(RUTAS[0]);
+    expect([ya.status, ya.body.error, ya.body.message]).toEqual([409, 'ya_retirado', 'Ese equipo ya está retirado.']);
+    respuestas.unshift(equipo(false, false));
+    const inactivo = await pedir(RUTAS[0]);
+    expect([inactivo.status, inactivo.body.error]).toEqual([409, 'equipo_inactivo']);
+    expect(inactivo.body.message).toMatch(/ya está inactivo .*Desk 2\.0/);
+    const no = await pedir(RUTAS[1]);
+    expect([no.status, no.body.error]).toEqual([409, 'no_retirado']);
+    respuestas.unshift(equipo(true, false));
+    expect((await pedir(RUTAS[1])).body.error).toBe('no_retirado');
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('reincorporar un equipo: quita la marca, vuelve a activo y lo apunta', async () => {
+    respuestas.push(equipo(false, true), [/SELECT r\.id, r\.accion/, []]);
+    const res = await pedir(RUTAS[1], undefined, { motivo: 'Se retiró por error.' });
+    expect([res.status, res.body]).toEqual([200, { retirado: false, retiros: [] }]);
+    expect(escrituras()).toEqual(['UPDATE portal.tmc_equipos', 'INSERT INTO portal.tmc_retiros']);
+    expect(parametros[0].slice(0, 2)).toEqual(['SER-RESERVADO', false]);
+    expect(parametros[1].slice(0, 7)).toEqual(['SER-RESERVADO', null, null, 'reincorporar', 'Se retiró por error.', 'retirado', 'activo']);
+  });
+
+  it('retirar una fila de la hoja sin equipo: sólo se apunta (con su congelación y su fila); la hoja congelada y el inventario no se tocan', async () => {
+    respuestas.push(...HOJA);
+    const res = await pedir(RUTAS[2]);
+    expect(res.status).toBe(200);
+    expect(res.body.retirado).toBe(true);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_retiros']);
+    expect(parametros[0]).toEqual([null, 7, 7, 'retirar', 'El cliente lo dio de baja.', 'activo', 'retirado', expect.any(String), expect.stringMatching(/@/)]);
+  });
+
+  it('409 si la fila es de un equipo del portal (se retira el equipo), si ya está retirada, o al recuperar una que no lo está', async () => {
+    respuestas.push(...HOJA);
+    const conEquipo = await pedir('/api/trazabilidad/filas/6/retirar');
+    expect([conEquipo.status, conEquipo.body.error]).toEqual([409, 'fila_con_equipo']);
+    const no = await pedir(RUTAS[3]);
+    expect([no.status, no.body.error, no.body.message]).toEqual([409, 'no_retirada', 'Esa fila no está retirada.']);
+    respuestas.unshift([ULTIMO, [{ accion: 'retirar' }]]);
+    const ya = await pedir(RUTAS[2]);
+    expect([ya.status, ya.body.error, ya.body.message]).toEqual([409, 'ya_retirada', 'Esa fila ya está retirada.']);
+    expect(escrituras()).toEqual([]);
+    expect((await pedir(RUTAS[3])).status).toBe(200);
+    expect(parametros[0].slice(0, 7)).toEqual([null, 7, 7, 'reincorporar', 'El cliente lo dio de baja.', 'retirado', 'activo']);
+  });
+
+  it('el historial de retiros está abierto a un Lector, sin mirar su rol: una lectura; 400 si no dice de quién', async () => {
+    respuestas.push(RETIROS);
+    const res = await request(appRetiros()).get(`${HISTORIAL}?clave=SER-RESERVADO`).set(conRol(null));
+    expect([res.status, res.body.retiros]).toEqual([200, RETIROS[1]]);
+    expect((await request(appRetiros()).get(`${HISTORIAL}?fila=7`).set(conRol(null))).status).toBe(200);
+    expect(consultasRol.n).toBe(0);
+    expect(queries).toHaveLength(2);
+    for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
+    const mala = await request(appRetiros()).get(HISTORIAL).set(conRol(null));
+    expect([mala.status, mala.body.field]).toEqual([400, 'clave']);
+  });
+
+  it('la tarjeta del maestro cuenta aparte los retirados a mano que Desk 2.0 tiene activos, sin proponer cambios sobre ellos', async () => {
+    respuestas.push([/FROM portal\.tmc_equipos$/m, [{ clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado', modelo: 'EDM 180C', activo: false, desk_id: 'eq-1', en_seguimiento: true, retirado_en: '2026-10-12 15:00:00+00' }]]);
+    const res = await request(appRetiros()).get('/api/trazabilidad/maestro/plan').set(conRol(null));
+    expect(res.body.plan.recuentos).toMatchObject({ casan: 1, retiradosAMano: 1, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 } });
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+  });
+
+  it('CANDADO: sus rutas son estas cinco, las cuatro escrituras con `inventario.write`; ni programador ni nada que avise', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/(retiros|filas\/|equipos\/:clave\/(retirar|reincorporar))/.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual([
+      'post /trazabilidad/equipos/:clave/retirar',
+      'post /trazabilidad/equipos/:clave/reincorporar',
+      'post /trazabilidad/filas/:fila/retirar',
+      'post /trazabilidad/filas/:fila/reincorporar',
+      'get /trazabilidad/retiros',
+    ]);
+    for (const r of rutas.filter((x) => /^post\(/.test(x))) expect(r).toMatch(/escritura\('inventario\.write',/);
+    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/retiros-repo|retirarEquipo|tmc_retiros/);
   });
 });

@@ -794,6 +794,15 @@ export function parseEnteroRuta(v: unknown, campo: string): number {
   return Number(v);
 }
 
+/** GET /retiros: de quién es el historial, `?clave=` de un equipo o `?fila=` de la hoja congelada (una de las dos). */
+export function parseObjetoRetiro(query: Record<string, unknown>): { clave: string | null; fila: number | null } {
+  const { clave, fila } = query;
+  if ((clave === undefined) === (fila === undefined)) throw invalido('Hay que decir de quién es el historial: la clave de un equipo o una fila de la hoja F-ST-022.', 'clave');
+  if (fila !== undefined) return { clave: null, fila: parseEnteroRuta(fila, 'fila') };
+  if (typeof clave !== 'string' || !esClave(clave)) throw invalido('Clave de equipo no válida.', 'clave');
+  return { clave, fila: null };
+}
+
 /**
  * POST /calibraciones/manual: {clave | fila, fecha, motivo, corrigeTicket?}. La
  * fecha no puede ser posterior a `hoy` (día en Colombia) ni anterior al mínimo

@@ -353,6 +353,8 @@ describe('contacto de cada equipo', () => {
         'tmc_importaciones',
         'tmc_maestro_sincronizaciones',
         'tmc_plazos',
+        // Lote 9d-2b: los apuntes de retirar y reincorporar a mano (quién, cuándo, por qué). No es una tabla de mensajes ni de envíos.
+        'tmc_retiros',
         'tmc_seguimiento',
         'tmc_servicios_tipo',
         'tmc_user_roles',

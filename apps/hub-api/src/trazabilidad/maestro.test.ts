@@ -284,7 +284,7 @@ describe('el plan del cruce: otras marcas, fuera de seguimiento', () => {
   let k = 0;
   const desk = (serial: string, extra: Partial<EquipoMaestro> = {}): EquipoMaestro => ({ id: `ot-${String(++k).padStart(3, '0')}`, serial, marca: 'GRIMM', modelo: 'EDM180C', cliente: 'Cliente Ficticio A', activo: true, ...extra });
   const horiba = (serial: string, extra: Partial<EquipoMaestro> = {}) => desk(serial, { marca: 'Horiba', modelo: 'APNA-370', cliente: 'Cliente Ficticio H S.A.S.', ...extra });
-  const SIN_OTRAS = { maestro: 0, portal: 0, casan: 0, cambios: SIN_CAMBIOS, altas: 0, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0 };
+  const SIN_OTRAS = { maestro: 0, portal: 0, casan: 0, cambios: SIN_CAMBIOS, altas: 0, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0, retiradosAMano: 0 };
   /** El inventario tal como lo deja aplicar el plan: lo que escribe maestro-repo.ts. */
   const aplicar = (p: ReturnType<typeof planMaestro>, inventario: EquipoPortal[]): EquipoPortal[] => [
     ...inventario.map((x) => ({ ...x, ...[...p.enlaces, ...p.otras.enlaces].find((e) => e.clave === x.clave) })),
@@ -443,6 +443,63 @@ describe('el plan del cruce: otras marcas, fuera de seguimiento', () => {
       expect(planMaestro(maestro, aplicar(p, [portal('18A00001')]), [], HOJA).hoja).toEqual(p.hoja);
       expect(planMaestro(maestro, [portal('18A00001')], []).hoja).toEqual({ marcas: [], revisar: [] });
     });
+  });
+});
+
+// Lote 9d-2b: un equipo RETIRADO A MANO (activo = FALSE con su marca: quién, cuándo y por qué) no lo reactiva la sincronización
+// aunque Desk 2.0 lo tenga activo. Antes, `activo` seguía siempre al maestro: un inactivo del portal activo en Desk 2.0 se reactivaba.
+describe('el plan del cruce: retirados a mano', () => {
+  const retirado = (serial: string, extra: Partial<EquipoPortal> = {}) => portal(serial, { activo: false, retiradoAMano: true, ...extra });
+
+  it('contraste: un inactivo SIN la marca, activo en Desk 2.0, se reactiva (activo sigue al maestro, como siempre)', () => {
+    const d = desk('18A00001');
+    const p = planMaestro([d], [portal('18A00001', { activo: false, deskId: d.id })], []);
+    expect([p.enlaces[0].activo, p.recuentos.cambios.activo, p.recuentos.retiradosAMano]).toEqual([true, 1, 0]);
+  });
+
+  it('retirado a mano y activo en Desk 2.0: NO se reactiva ni se propone cambio sobre su `activo`; se cuenta aparte', () => {
+    const d = desk('18A00001');
+    const p = planMaestro([d], [retirado('18A00001', { deskId: d.id })], []);
+    expect(p.enlaces).toMatchObject([{ clave: '18A00001', activo: false }]);
+    expect(p.cambios).toEqual([]);
+    expect(p.recuentos).toMatchObject({ casan: 1, cambios: SIN_CAMBIOS, retiradosAMano: 1, altas: 0 });
+  });
+
+  it('su cliente, su modelo y su serial SÍ siguen actualizándose desde el maestro, y se enlaza si aún no lo estaba', () => {
+    const d = desk(' 18a00001 ', { cliente: 'Cliente Ficticio A S.A.S.', modelo: 'EDM180D' });
+    const p = planMaestro([d], [retirado('18A00001')], []);
+    expect(p.enlaces).toEqual([{ clave: '18A00001', deskId: d.id, serial: '18a00001', cliente: 'Cliente Ficticio A S.A.S.', modelo: 'EDM 180D', activo: false }]);
+    expect(p.cambios.map((c) => c.campo)).toEqual(['cliente', 'modelo', 'serial']);
+    expect(p.recuentos).toMatchObject({ enlaces: 1, retiradosAMano: 1, cambios: { cliente: 1, modelo: 1, serial: 1, activo: 0 } });
+  });
+
+  it('retirado a mano e inactivo también en Desk 2.0: sigue inactivo y no se cuenta (no hay nada que respetar)', () => {
+    const d = desk('18A00001', { activo: false });
+    const p = planMaestro([d], [retirado('18A00001', { deskId: d.id })], []);
+    expect([p.enlaces[0].activo, p.cambios, p.recuentos.retiradosAMano]).toEqual([false, [], 0]);
+  });
+
+  it('reincorporado (sin la marca, activo): vuelve a seguir al maestro, también si allí está inactivo', () => {
+    const d = desk('18A00001', { activo: false });
+    const p = planMaestro([d], [portal('18A00001', { deskId: d.id, retiradoAMano: false })], []);
+    expect([p.enlaces[0].activo, p.recuentos.cambios.activo, p.recuentos.retiradosAMano]).toEqual([false, 1, 0]);
+  });
+
+  it('lo mismo en las otras marcas, fuera de seguimiento; y aplicar el plan no cambia nada la segunda vez', () => {
+    const h = desk('HB-0001', { marca: 'Horiba', modelo: 'APNA-370', cliente: 'Cliente Ficticio H S.A.S.' });
+    const inventario = [retirado('HB-0001', { deskId: h.id, enSeguimiento: false, cliente: 'Cliente Ficticio H S.A.S.', modelo: 'APNA-370' })];
+    const p = planMaestro([h], inventario, []);
+    expect(p.otras.enlaces).toMatchObject([{ clave: 'HB-0001', activo: false }]);
+    expect(p.otras.cambios).toEqual([]);
+    expect(p.otras.recuentos).toMatchObject({ casan: 1, cambios: SIN_CAMBIOS, retiradosAMano: 1 });
+    expect(p.recuentos.retiradosAMano).toBe(0);
+    const otra = planMaestro([h], inventario.map((x) => ({ ...x, ...p.otras.enlaces[0] })), []);
+    expect([otra.otras.enlaces, otra.otras.cambios]).toEqual([p.otras.enlaces, []]);
+  });
+
+  it('un retirado a mano que sólo está en el portal sigue sin tocarse; y su cliente deja de contar como «con equipos activos»', () => {
+    const p = planMaestro([], [retirado('18A00002', { cliente: 'Cliente Ficticio Z' })], ['cliente ficticio z']);
+    expect([p.enlaces, p.cambios, p.recuentos.soloPortal, p.recuentos.soloPortalActivos, p.recuentos.retiradosAMano, p.recuentos.contactosSinEquipos]).toEqual([[], [], 1, 0, 0, 0]);
   });
 });
 
