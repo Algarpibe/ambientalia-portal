@@ -16,6 +16,12 @@
  *  - Vigencia y estado: recalculados a hoy (`estadoCalibracion`). El número de
  *    «Vigencia» que quedó congelado dependía del día y no se enseña.
  * Aparte, los equipos del inventario que no casan con ninguna fila.
+ *
+ * Lote 9d-2a: `tmc_equipos` lleva también las demás marcas, enlazadas con Desk
+ * 2.0 pero FUERA de seguimiento (058). Una fila de uno de ésos enseña cliente,
+ * marca, modelo y serial del maestro (situación `enlazado`), pero su fecha
+ * sale IGUAL que cuando sólo estaba en la hoja —la hoja como punto de partida
+ * más las calibraciones de su serial—: enlazarla no le mueve la fecha.
  */
 import { FECHA_MINIMA_CALIBRACION, calibracionQueCuenta, fechaEfectiva, type EstadoFilaCalibracion, type FilaCalibracion, type OrigenCalibracion } from './calibraciones.js';
 import { ESTADOS, claveCliente, esFechaIso, estadoCalibracion, serialNorm, type EstadoCalibracion, type EstadoEquipo } from './dominio.js';
@@ -24,11 +30,11 @@ import type { Celda, FilaCongelada } from './fst022.js';
 /** Lo que conviene mirar de una fila, en el orden en que se enseña (su texto, en la app: `src/lib/hoja.ts`). */
 export const AVISOS_HOJA = ['sin_serial', 'serial_repetido', 'serial_numerico', 'sin_fecha', 'en_revision', 'calibraciones_sin_atribuir', 'marca_distinta', 'modelo_distinto'] as const;
 export type AvisoHoja = (typeof AVISOS_HOJA)[number];
-/** En el inventario (activo), en el inventario pero inactivo, o sólo en la hoja. */
-export type SituacionHoja = 'inventario' | 'inactivo' | 'hoja';
+/** En el inventario en seguimiento (activo), en él pero inactivo, enlazado con Desk 2.0 fuera de seguimiento (otras marcas), o sólo en la hoja. */
+export type SituacionHoja = 'inventario' | 'inactivo' | 'enlazado' | 'hoja';
 
-/** Un equipo del inventario del portal (activo o no), con la fecha de respaldo de `tmc_equipos`. */
-export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null }
+/** Un equipo de `tmc_equipos` (activo o no), con su fecha de respaldo. `enSeguimiento: false` = otra marca, fuera de seguimiento; si falta, en seguimiento. */
+export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null; enSeguimiento?: boolean }
 /** Una calibración conocida de la fila. `cuenta` = es la que da su «última calibración». La de origen `fst022` de una fila sólo de la hoja es su propia fecha. */
 export interface CalibracionHoja { fecha: string; origen: OrigenCalibracion; ticket: number | null; corrigeTicket: number | null; estado: EstadoFilaCalibracion; cuenta: boolean }
 /** Lo que decía la hoja, sólo de lo que hoy es distinto. */
@@ -108,7 +114,9 @@ function formaComun(filas: readonly FilaHoja[], grupo: (f: FilaHoja) => string, 
 }
 
 const CAMPOS = ['cliente', 'marca', 'modelo', 'serial'] as const;
-const claveModelo = (f: FilaHoja): string => `${f.marcaClave}|${claveCliente(f.modelo).replace(/[\s\-_./]/g, '')}`;
+/** Una marca o un modelo sin lo que no lo distingue: mayúsculas, tildes, espacios, guiones y puntos («APNA 370» = «APNA-370»). */
+const sinRuido = (v: string): string => claveCliente(v).replace(/[\s\-_./]/g, '');
+const claveModelo = (f: FilaHoja): string => `${f.marcaClave}|${sinRuido(f.modelo)}`;
 
 export function tablaHoja(e: EntradaHoja): TablaHoja {
   const { hoy } = e;
@@ -143,20 +151,27 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     const enCelda = f ? valor(celda(f, 'ultima calibracion')) : null;
     const fechaHoja = esFechaIso(enCelda) ? enCelda : null;
     const actual = q ?? deHoja;
-    // Las calibraciones de la fila: las del equipo o, sólo en la hoja, su fecha como punto de partida y las guardadas sin equipo de su serial.
+    /** Enlazado con Desk 2.0, fuera de seguimiento: sus datos son del maestro, pero su fecha se calcula como la de una fila sólo de la hoja. */
+    const fuera = q?.enSeguimiento === false;
+    // Las calibraciones de la fila: las del equipo en seguimiento o, si no lo es, su fecha de la hoja como punto de partida y las guardadas sin equipo de su serial.
     let conocidas: FilaCalibracion[];
-    if (q) conocidas = deEquipo.get(q.clave) ?? [];
+    if (q && !fuera) conocidas = deEquipo.get(q.clave) ?? [];
     else {
-      const sueltas = f?.serialNorm && !repetido(f) ? (sinEquipo.get(f.serialNorm) ?? []) : [];
+      // El serial por el que se le atribuyen: el de su fila si no se repite en la hoja; sin fila, el suyo si la hoja no lo tiene.
+      const serie = f ? (repetido(f) ? null : f.serialNorm) : q && !hojaPorSerial.has(serialNorm(q.serial)) ? serialNorm(q.serial) : null;
+      const sueltas = serie ? (sinEquipo.get(serie) ?? []) : [];
       for (const c of sueltas) atribuidas.add(c.id);
+      const propias = q ? (deEquipo.get(q.clave) ?? []) : [];
       const revision = fechaHoja !== null && (fechaHoja > hoy || fechaHoja < FECHA_MINIMA_CALIBRACION);
-      const partida: FilaCalibracion[] = f && fechaHoja ? [{ id: -f.fila, clave: null, serial: deHoja.serial, deskEquipoId: null, fecha: fechaHoja, origen: 'fst022', ticket: null, estado: revision ? 'en_revision' : 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false }] : [];
-      conocidas = [...partida, ...sueltas];
+      const partida: FilaCalibracion[] = f && fechaHoja && !propias.some((c) => c.origen === 'fst022') ? [{ id: -f.fila, clave: null, serial: deHoja.serial, deskEquipoId: null, fecha: fechaHoja, origen: 'fst022', ticket: null, estado: revision ? 'en_revision' : 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false }] : [];
+      conocidas = [...partida, ...propias, ...sueltas];
     }
     const cuenta = calibracionQueCuenta(conocidas, hoy);
-    const ultima = q ? fechaEfectiva(conocidas, q.ultimaCalibracion, hoy) : (cuenta?.fecha ?? null);
+    const ultima = q && !fuera ? fechaEfectiva(conocidas, q.ultimaCalibracion, hoy) : (cuenta?.fecha ?? null);
     const enHoja: EnHoja = {};
-    if (f && q) for (const k of CAMPOS) if (q[k] !== deHoja[k]) enHoja[k] = deHoja[k];
+    // Lo que hoy es distinto de la hoja. En un equipo en seguimiento, literal (como siempre); en uno fuera, la marca y el modelo sin el ruido de cómo se escriben.
+    const distinto = (k: (typeof CAMPOS)[number], hoyVale: string, enLaHoja: string): boolean => hoyVale !== enLaHoja && !(fuera && (k === 'marca' || k === 'modelo') && sinRuido(hoyVale) === sinRuido(enLaHoja));
+    if (f && q) for (const k of CAMPOS) if (distinto(k, q[k], deHoja[k])) enHoja[k] = deHoja[k];
     if (f && ultima !== fechaHoja) enHoja.ultimaCalibracion = fechaHoja;
     const avisos = new Set<AvisoHoja>();
     if (actual.serial === '') avisos.add('sin_serial');
@@ -166,7 +181,7 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     if (conocidas.some((c) => c.estado === 'en_revision')) avisos.add('en_revision');
     if (f && !q && repetido(f) && sinEquipo.has(f.serialNorm ?? '')) avisos.add('calibraciones_sin_atribuir');
     return {
-      fila: f?.fila ?? null, clave: q?.clave ?? null, situacion: !q ? 'hoja' : q.activo ? 'inventario' : 'inactivo',
+      fila: f?.fila ?? null, clave: q?.clave ?? null, situacion: !q ? 'hoja' : fuera ? 'enlazado' : q.activo ? 'inventario' : 'inactivo',
       cliente: actual.cliente, marca: actual.marca, marcaClave: claveCliente(actual.marca), modelo: actual.modelo, serial: actual.serial, enHoja,
       ultimaCalibracion: ultima, ...estadoCalibracion(ultima, hoy), avisos: [...avisos],
       calibraciones: conocidas.map((c) => ({ fecha: c.fecha, origen: c.origen, ticket: c.ticket, corrigeTicket: c.corrigeTicket, estado: c.estado, cuenta: c === cuenta })).sort((a, b) => b.fecha.localeCompare(a.fecha)),
