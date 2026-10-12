@@ -27,8 +27,10 @@ interface Props {
   onFicha: (clave: string) => void;
 }
 
-const TD = 'px-3 py-2 align-top';
-const DISCRETO = 'block text-[11px] leading-tight text-gray-400';
+const TD = 'break-words px-2 py-2 align-top';
+/** El ancho de cada columna (la tabla es de anchos fijos: cabe entera en un portátil, sin columnas escondidas a la derecha). */
+const ANCHOS = ['w-[5%]', 'w-[18%]', 'w-[8%]', 'w-[9%]', 'w-[12%]', 'w-[12%]', 'w-[7%]', 'w-[15%]', 'w-[14%]'];
+const DISCRETO = 'block font-sans text-[11px] leading-tight text-gray-400';
 
 /** El valor de hoy y, si la hoja decía otra cosa, eso debajo, discreto. */
 function Valor({ hoy, hoja }: { hoy: ReactNode; hoja: string | null | undefined }) {
@@ -68,10 +70,10 @@ const FilaTabla = memo(function FilaTabla({ f, onAbrir }: { f: FilaHoja; onAbrir
       <td className={`${TD} text-gray-600`}>
         <Valor hoy={f.modelo} hoja={f.enHoja.modelo} />
       </td>
-      <td className={`${TD} font-mono text-[13px]`}>
+      <td className={`${TD} break-all font-mono text-[13px]`}>
         <Valor hoy={f.serial} hoja={f.enHoja.serial} />
       </td>
-      <td className={`${TD} whitespace-nowrap tabular-nums`}>
+      <td className={`${TD} tabular-nums`}>
         <Valor hoy={f.ultimaCalibracion && fmtFecha(f.ultimaCalibracion)} hoja={fechaEnHoja(f)} />
         {f.ultimaCalibracion && <span className={`${DISCRETO} text-gray-500`}>{origenFecha(f)}</span>}
       </td>
@@ -86,12 +88,12 @@ const FilaTabla = memo(function FilaTabla({ f, onAbrir }: { f: FilaHoja; onAbrir
   );
 });
 
-/** La misma fila, para el teléfono: una tarjeta que no se desborda. */
+/** La misma fila donde la tabla no cabe (teléfono, tableta, ventana estrecha): una tarjeta que no se desborda. */
 const FilaMovil = memo(function FilaMovil({ f, onAbrir }: { f: FilaHoja; onAbrir: (f: FilaHoja) => void }) {
   const distinto = (['cliente', 'marca', 'modelo', 'serial'] as const).filter((k) => f.enHoja[k] !== undefined).map((k) => `${k} «${f.enHoja[k]}»`);
   return (
-    <li>
-      <button type="button" onClick={() => onAbrir(f)} className="flex w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm">
+    <li className="min-w-0">
+      <button type="button" onClick={() => onAbrir(f)} className="flex h-full w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm">
         <span className="flex flex-wrap items-center justify-between gap-2">
           <EstadoBadge estado={f.estado} />
           <span className={`text-xs font-semibold tabular-nums ${TONO[f.estado].text}`}>{textoVigencia(f.vigenciaDias)}</span>
@@ -113,7 +115,7 @@ const FilaMovil = memo(function FilaMovil({ f, onAbrir }: { f: FilaHoja; onAbrir
 
 function Tabla({ filas, onAbrir, orden, onOrden, vacio }: { filas: FilaHoja[]; onAbrir: (f: FilaHoja) => void; orden?: OrdenHoja; onOrden?: (k: ColumnaHoja) => void; vacio: string }) {
   const Th = ({ k, children, right = false }: { k: ColumnaHoja; children: string; right?: boolean }) => (
-    <th aria-sort={orden?.k === k ? (orden.dir > 0 ? 'ascending' : 'descending') : undefined} className={`px-3 py-2 font-semibold ${right ? 'text-right' : ''}`}>
+    <th aria-sort={orden?.k === k ? (orden.dir > 0 ? 'ascending' : 'descending') : undefined} className={`px-2 py-2 align-bottom font-semibold ${right ? 'text-right' : ''}`}>
       {onOrden ? (
         <button type="button" onClick={() => onOrden(k)} className="uppercase tracking-wide hover:text-gray-800">
           {children}
@@ -126,8 +128,13 @@ function Tabla({ filas, onAbrir, orden, onOrden, vacio }: { filas: FilaHoja[]; o
   );
   return (
     <>
-      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm sm:block">
-        <table className="w-full min-w-[1080px] text-sm">
+      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm xl:block">
+        <table className="w-full min-w-[920px] table-fixed text-sm">
+          <colgroup>
+            {ANCHOS.map((w, i) => (
+              <col key={i} className={w} />
+            ))}
+          </colgroup>
           <thead className="bg-gray-50">
             <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
               <Th k="fila">Fila</Th>
@@ -157,11 +164,12 @@ function Tabla({ filas, onAbrir, orden, onOrden, vacio }: { filas: FilaHoja[]; o
           </tbody>
         </table>
       </div>
-      <ul className="flex flex-col gap-2 sm:hidden">
+      {/* Por debajo de 1280 px la tabla no cabría entera: una tarjeta por fila (en dos columnas si hay sitio). */}
+      <ul className="grid gap-2 md:grid-cols-2 xl:hidden">
         {filas.map((f) => (
           <FilaMovil key={f.fila ?? f.clave} f={f} onAbrir={onAbrir} />
         ))}
-        {filas.length === 0 && <li className="rounded-2xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">{vacio}</li>}
+        {filas.length === 0 && <li className="md:col-span-2 rounded-2xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">{vacio}</li>}
       </ul>
     </>
   );
