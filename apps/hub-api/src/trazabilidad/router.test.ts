@@ -1650,7 +1650,51 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ id: 3, huella: 'ef'.repeat(32), recuentos: { altas: 1 }, por: 'director@example.com', en: '2026-10-10 15:00:00+00' });
     expect(conexiones.n).toBe(1);
-    expect(escrituras().map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1])).toEqual(['UPDATE portal.tmc_equipos', 'INSERT INTO portal.tmc_maestro_sincronizaciones']);
+    // Desde el lote 9d-2a el Horiba del maestro también se escribe: un alta, fuera de seguimiento.
+    expect(escrituras().map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1])).toEqual(['UPDATE portal.tmc_equipos', 'INSERT INTO portal.tmc_equipos', 'INSERT INTO portal.tmc_maestro_sincronizaciones']);
+    const alta = queries.find((q) => /INSERT INTO portal\.tmc_equipos/.test(q))!;
+    expect(alta).toMatch(/\(clave, serial, cliente, marca, modelo, activo, desk_id, origen, maestro_en, en_seguimiento\)/);
+    expect(queries.find((q) => /UPDATE portal\.tmc_equipos/.test(q))).not.toMatch(/en_seguimiento|marca/);
+  });
+
+  // Lote 9d-2a: las otras marcas del maestro, fuera de seguimiento, y el cruce con la hoja congelada dentro del plan.
+  const VIGENTE_HOJA: [RegExp, Filas][] = [
+    [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia.xlsx', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial']] }]],
+    [/FROM portal\.tmc_fst022_congelada/, [{ celdas: ['Cliente Reservado', 'Horiba', 'APNA-370', 'HB-RESERVADO'], serial_norm: 'HB-RESERVADO', clave_equipo: null }, { celdas: ['Cliente Reservado', 'Thermo', '49i', 'TH-RESERVADO'], serial_norm: 'TH-RESERVADO', clave_equipo: null }]],
+  ];
+  const OTRAS = { maestro: 1, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 1, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0 };
+
+  it.each([null, 'COMERCIAL', 'TECNICO'])('el plan lleva las otras marcas y el cruce con la hoja SÓLO en recuentos: a quien no puede sincronizar (rol %s) no le llega ni un cliente ni un serial', async (rol) => {
+    respuestas.push(INVENTARIO, ...VIGENTE_HOJA);
+    const res = await request(appMaestro()).get(PLAN).set(conRol(rol));
+    expect(res.body.plan.otras).toEqual(OTRAS);
+    expect(res.body.plan.hoja).toEqual([{ marca: 'Horiba', filas: 1, enlazadas: 1, soloHoja: 0, sinCeros: 0, repetidas: 0 }, { marca: 'Thermo', filas: 1, enlazadas: 0, soloHoja: 1, sinCeros: 0, repetidas: 0 }]);
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(Object.keys(res.body.plan).sort()).toEqual(['hoja', 'huella', 'otras', 'recuentos']);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-/);
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('a quien puede sincronizar le llega además, aparte del de siempre, el detalle de las otras marcas y las filas de la hoja que no se enlazan', async () => {
+    respuestas.push(INVENTARIO, ...VIGENTE_HOJA);
+    const res = await request(appMaestro()).get(PLAN).set(conRol('DIRECTOR_TECNICO'));
+    expect(res.body.detalle).toHaveLength(1); // el del seguimiento no se mezcla con el de las otras marcas
+    expect(res.body.otras).toEqual({
+      detalle: [{ clave: 'HB-RESERVADO', campo: 'alta', antes: null, despues: 'HB-RESERVADO · Cliente Reservado', ambito: 'otras' }],
+      detalleTotal: 1,
+      soloPortal: [],
+      ambiguos: [],
+      hoja: [{ motivo: 'solo_hoja', marca: 'Thermo', serial: 'TH-RESERVADO', cliente: 'Cliente Reservado' }],
+    });
+  });
+
+  it('la huella cubre los dos ámbitos: si cambia lo que se haría con las otras marcas, el plan revisado ya no vale', async () => {
+    respuestas.push(INVENTARIO);
+    const { huella } = (await request(appMaestro()).get(PLAN).set(auth())).body.plan;
+    lecturaMaestro = { disponible: true, equipos: [{ id: 'eq-1', serial: 'SER-RESERVADO', marca: 'GRIMM', modelo: 'EDM180C', cliente: 'Cliente Reservado', activo: true }, { id: 'eq-2', serial: 'HB-RESERVADO', marca: 'Horiba', modelo: 'APNA-370', cliente: 'Cliente Reservado Dos', activo: true }] };
+    const res = await request(appMaestro()).post(SINCRONIZAR).set(auth()).send({ huella });
+    expect([res.status, res.body.error]).toEqual([409, 'plan_cambiado']);
+    expect(escrituras()).toEqual([]);
   });
 
   it('409 si el plan cambió desde que se revisó (otra huella): no escribe nada; con la huella del plan de ahora, sí', async () => {
