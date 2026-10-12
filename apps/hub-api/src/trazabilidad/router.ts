@@ -10,6 +10,7 @@ import { crearLectorCalibraciones, type LectorCalibraciones } from './calibracio
 import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
 import { esFechaIso } from './dominio.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
+import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
 import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
 import { festivosDelEje } from './plazos.js';
@@ -274,6 +275,19 @@ export function createTrazabilidadRouter(
     '/trazabilidad/fst022/congelaciones/vigente',
     ...gated,
     route('tmc_fst022_vigente', async (req) => repo.congelacionVigente(db, parsePaginaFst022(req.query))),
+  );
+
+  // Pestaña «Trazabilidad F-ST-022» (lote 9d-1): la hoja congelada tal como la
+  // entiende HOY el portal —una fila por equipo de la hoja, de todas las
+  // marcas, con sus valores actuales, su fecha según la regla de las
+  // calibraciones y su estado recalculado— más su resumen y, aparte, lo que
+  // está en el inventario y no en la hoja (hoja.ts). SÓLO LECTURA, abierta a
+  // quien tenga la app, y sale entera de la base del portal: no lee Desk 2.0.
+  // Lleva clientes y seriales, como GET /equipos: nada de eso va al registro.
+  router.get(
+    '/trazabilidad/hoja',
+    ...gated,
+    route('tmc_hoja', async (req) => leerHoja(db, hoyOf(req))),
   );
 
   // ── Maestro de equipos desde Desk 2.0 (lote 9b) ──────────────────────────

@@ -179,7 +179,8 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
   );
 }
 
-function Chip({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: ReactNode }) {
+/** Un filtro que se enciende y se apaga (también lo usa la pestaña «Trazabilidad F-ST-022»). */
+export function Chip({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
