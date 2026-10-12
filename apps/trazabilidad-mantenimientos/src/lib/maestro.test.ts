@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CambioMaestro, RecuentosMaestro, SincronizacionMaestro } from '../dominio';
-import { bloquesDetalle, hayQueAplicar, lineasPlan, textoCambio, textoUltima } from './maestro';
+import type { CambioMaestro, FilaHojaRevisar, RecuentosMaestro, RecuentosOtras, SincronizacionMaestro } from '../dominio';
+import { bloquesDetalle, bloquesHoja, hayQueAplicar, hayQueAplicarOtras, lineasOtras, lineasPlan, textoCambio, textoFilaHoja, textoUltima } from './maestro';
 
 // Lo que enseña la tarjeta «Maestro de equipos · Desk 2.0» de Configuración:
 // el plan del cruce en recuentos y la última sincronización. Datos ficticios.
@@ -60,6 +60,50 @@ describe('el plan en líneas', () => {
 
   it('ni un cliente ni un serial: sólo rótulos y números', () => {
     for (const l of lineasPlan(recuentos())) expect(l.valor).toMatch(/^\d+( \(\d+ activos\)| en Desk 2\.0 · \d+ en el portal)?$/);
+  });
+});
+
+// Lote 9d-2a: el segundo bloque del plan, las otras marcas (fuera de seguimiento), y el cruce con la hoja.
+describe('otras marcas: el plan en líneas y lo que hay que revisar', () => {
+  const otras = (extra: Partial<RecuentosOtras> = {}): RecuentosOtras => ({ maestro: 239, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 237, soloPortal: 0, ambiguos: 2, sinSerial: 0, inactivos: 0, ...extra });
+
+  it('sus recuentos, en el orden en que se leen: en azul lo que se escribiría, en ámbar lo que no entra y hay que mirar', () => {
+    expect(lineasOtras(otras()).map((l) => `${l.aviso ? '!' : l.cambia ? '*' : ' '} ${l.texto}: ${l.valor}`)).toEqual([
+      '  Equipos de otras marcas en Desk 2.0: 239',
+      '  Ya enlazados en el portal (fuera de seguimiento): 0',
+      '* Se enlazan ahora (altas fuera de seguimiento; sin fecha de calibración): 237',
+      '  Cambios en los ya enlazados (cliente, modelo, serial o activo): 0',
+      '! Con el serial repetido: no se enlazan, quedan para revisar: 2',
+      '  Inactivos en Desk 2.0 (no se enlazan): 0',
+      '  Ya no están en Desk 2.0 (no se tocan): 0',
+    ]);
+    const despues = lineasOtras(otras({ portal: 237, casan: 237, altas: 0, cambios: { cliente: 2, modelo: 1, serial: 0, activo: 1 }, sinSerial: 1, soloPortal: 3 }));
+    expect(despues.find((l) => l.texto.startsWith('Cambios'))).toMatchObject({ valor: '4', cambia: true });
+    expect(despues.map((l) => l.texto)).toContain('Sin serial válido en Desk 2.0 (no se enlazan)');
+    expect(despues.find((l) => l.texto.startsWith('Ya no están'))).toMatchObject({ valor: '3', aviso: true });
+    for (const l of lineasOtras(otras())) expect(l.valor).toMatch(/^\d+$/);
+  });
+
+  it('¿hay algo que aplicar? También si sólo cambian las otras marcas', () => {
+    expect(hayQueAplicarOtras(otras())).toBe(true);
+    expect(hayQueAplicarOtras(otras({ altas: 0 }))).toBe(false);
+    expect(hayQueAplicarOtras(otras({ altas: 0, cambios: { cliente: 0, modelo: 0, serial: 1, activo: 0 } }))).toBe(true);
+  });
+
+  it('las filas de la hoja que no se enlazan, en bloques y cada una en una línea', () => {
+    const f = (motivo: FilaHojaRevisar['motivo'], serial: string): FilaHojaRevisar => ({ motivo, marca: 'Horiba', serial, cliente: 'Cliente Ficticio H' });
+    const b = bloquesHoja([f('repetido', 'HB-0002'), f('repetido', 'HB-0002'), f('sin_ceros', '123'), f('solo_hoja', 'TH-0001')]);
+    expect([b.repetido.length, b.sin_ceros.length, b.solo_hoja.length]).toEqual([2, 1, 1]);
+    expect(bloquesHoja([])).toEqual({ repetido: [], sin_ceros: [], solo_hoja: [] });
+    expect(textoFilaHoja(f('sin_ceros', '123'))).toEqual(['Horiba · 123', 'Cliente Ficticio H']);
+    expect(textoFilaHoja({ motivo: 'solo_hoja', marca: '', serial: '', cliente: '' })).toEqual(['(sin marca) · (sin serial)', '(sin cliente)']);
+  });
+
+  it('la última sincronización dice también lo que hizo con las otras marcas, si hizo algo; una de antes del lote se lee igual', () => {
+    const ultima: SincronizacionMaestro = { id: 5, huella: 'ab'.repeat(32), por: 'director@example.com', en: '2026-10-11 01:10:00+00', recuentos: recuentos({ ...SIN_NADA, otras: otras() }) };
+    expect(textoUltima(ultima)).toBe('director@example.com · 10/10/2026 20:10 · sin cambios en GRIMM EDM 180 · otras marcas: 237 enlazadas y 0 cambios');
+    expect(textoUltima({ ...ultima, recuentos: recuentos({ otras: otras({ altas: 0 }) }) })).toBe('director@example.com · 10/10/2026 20:10 · 114 enlazados, 12 cambios y 2 altas');
+    expect(textoUltima({ ...ultima, recuentos: recuentos({ ...SIN_NADA, otras: otras({ altas: 0 }) }) })).toBe('director@example.com · 10/10/2026 20:10 · sin cambios');
   });
 });
 

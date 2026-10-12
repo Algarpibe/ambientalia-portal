@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type { CambioMaestro, EquipoRevisar, RespuestaCruceFst022, RespuestaPlanMaestro } from '../dominio';
-import { bloquesDetalle, hayQueAplicar, lineasPlan, textoCambio, textoUltima, type LineaPlan } from '../lib/maestro';
+import { bloquesDetalle, bloquesHoja, hayQueAplicar, hayQueAplicarOtras, lineasOtras, lineasPlan, textoCambio, textoFilaHoja, textoUltima, type LineaPlan } from '../lib/maestro';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Loading, Modal, Tag } from '../ui';
 
@@ -22,6 +22,17 @@ const COLUMNAS_CRUCE: [string, string][] = [
   ['Ambig.', 'Ambiguos: serial repetido en alguno de los dos lados'],
   ['Sin ceros', 'De «sólo hoja», los de serial numérico que casarían ignorando los ceros a la izquierda'],
 ];
+
+/** El cruce del plan con la hoja congelada, por marca: sólo filas de la hoja. */
+const COLUMNAS_HOJA: [string, string][] = [
+  ['Marca', 'Marca, como la escribe la hoja'],
+  ['Filas', 'Filas de equipo de esa marca en la hoja congelada'],
+  ['Enlazadas', 'Quedarían enlazadas con un equipo: la pestaña enseñará su cliente, marca, modelo y serial de Desk 2.0'],
+  ['Sólo hoja', 'Siguen sólo en la hoja: sin equipo activo en Desk 2.0'],
+  ['Sin ceros', 'De «sólo hoja», las de serial numérico que casarían ignorando los ceros a la izquierda: no se enlazan solas'],
+  ['Repetidas', 'No se enlazan: su serial se repite en la hoja, en Desk 2.0 o en el portal'],
+];
+const TITULO_BLOQUE = 'text-sm font-semibold text-gray-900';
 
 export function Lineas({ lineas }: { lineas: LineaPlan[] }) {
   return (
@@ -55,7 +66,10 @@ export function Bloque({ titulo, nota, items, abierto = false }: { titulo: strin
 
 /**
  * «Maestro de equipos · Desk 2.0», en Configuración: el inventario de GRIMM EDM
- * 180 se alimenta de los equipos de Desk 2.0, a mano. La ve cualquiera con la
+ * 180 se alimenta de los equipos de Desk 2.0, a mano. Desde el lote 9d-2a el
+ * plan trae dos bloques: ése (en seguimiento) y las otras marcas, que se
+ * enlazan sólo para la pestaña «Trazabilidad F-ST-022» y NO generan avisos;
+ * más el cruce con la hoja congelada por marca. La ve cualquiera con la
  * app (el plan del cruce en recuentos, la última sincronización y el cruce
  * informativo por marca con la F-ST-022 congelada); «Sincronizar con Desk 2.0»
  * sólo le sale a quien tiene el permiso `maestro.sincronizar` (el Director
@@ -112,17 +126,21 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
 
   const plan = datos?.plan ?? null;
   const lineas = plan ? lineasPlan(plan.recuentos) : [];
-  const pendiente = plan !== null && hayQueAplicar(plan.recuentos);
+  const pendiente = plan !== null && (hayQueAplicar(plan.recuentos) || hayQueAplicarOtras(plan.otras));
   const sincroniza = puede('maestro.sincronizar');
   const detalle = datos?.detalle ?? [];
-  const sinEnsenar = (datos?.detalleTotal ?? 0) - detalle.length;
   const bloques = bloquesDetalle(detalle);
   const revisar = datos?.revisar ?? { soloPortal: [], ambiguos: [] };
+  // Las otras marcas (fuera de seguimiento): su detalle llega aparte, sólo a quien puede sincronizar.
+  const otras = datos?.otras ?? { detalle: [], detalleTotal: 0, soloPortal: [], ambiguos: [], hoja: [] };
+  const altasOtras = otras.detalle.filter((c) => c.campo === 'alta');
+  const hoja = bloquesHoja(otras.hoja);
+  const sinEnsenar = (datos?.detalleTotal ?? 0) - detalle.length + otras.detalleTotal - otras.detalle.length;
 
   return (
     <Card
       title="Maestro de equipos · Desk 2.0"
-      hint="El inventario de GRIMM EDM 180 sale de los equipos de Desk 2.0. Se sincroniza a mano, después de ver el plan: no hay sincronización automática. La fecha de calibración no se toca."
+      hint="El inventario de GRIMM EDM 180 sale de los equipos de Desk 2.0; las otras marcas se enlazan sólo para la pestaña «Trazabilidad F-ST-022». Se sincroniza a mano, después de ver el plan: no hay sincronización automática. La fecha de calibración no se toca."
       actions={sincroniza && plan ? <Button variant="primary" onClick={() => { setErrorAplicar(null); setConfirmar(true); }}>Sincronizar con Desk 2.0</Button> : undefined}
     >
       {error && <Alert tone="red">{error}</Alert>}
@@ -144,7 +162,35 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
           {plan && (
             <>
               <h3 className="font-semibold text-gray-900">Plan: qué pasaría al sincronizar ahora</h3>
+              <h4 className={TITULO_BLOQUE}>GRIMM EDM 180 · en seguimiento</h4>
               <Lineas lineas={lineas} />
+              <h4 className={`${TITULO_BLOQUE} mt-2`}>Otras marcas · sólo para la pestaña F-ST-022, no entran en Resumen ni Avisos</h4>
+              <Lineas lineas={lineasOtras(plan.otras)} />
+              <p className="text-xs text-gray-600">
+                Las otras marcas <strong>no generan avisos</strong>: quedan enlazadas con Desk 2.0 fuera de seguimiento, para que la pestaña «Trazabilidad F-ST-022» enseñe su cliente, marca, modelo y serial del maestro. No entran en
+                Resumen, Equipos, Calendario ni Avisos.
+              </p>
+              {plan.hoja.length > 0 && (
+                <div className="overflow-x-auto text-xs text-gray-600">
+                  <h4 className={`${TITULO_BLOQUE} mt-2`}>Cruce con la hoja F-ST-022 congelada: qué filas quedarían enlazadas</h4>
+                  <table className="mt-1 w-full text-left tabular-nums">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-500">
+                        {COLUMNAS_HOJA.map(([t, largo], i) => <th key={t} title={largo} className={`whitespace-nowrap px-2 py-1 font-medium ${i > 0 ? 'text-right' : ''}`}>{t}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plan.hoja.map((m) => (
+                        <tr key={m.marca} className="border-b border-gray-100">
+                          <td className="px-2 py-1 font-medium text-gray-800">{m.marca}</td>
+                          {[m.filas, m.enlazadas, m.soloHoja, m.sinCeros, m.repetidas].map((n, i) => <td key={i} className={`px-2 py-1 text-right ${i > 2 && n > 0 ? 'font-semibold text-amber-800' : ''}`}>{n}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-1 text-gray-500">«Sin ceros» (de las que siguen sólo en la hoja) y «Repetidas» no se enlazan solas: quedan para revisar.</p>
+                </div>
+              )}
               <p className="text-xs text-gray-500">
                 {pendiente ? 'En azul, lo que cambiaría; en ámbar, lo que conviene mirar antes.' : 'El inventario ya está como el maestro: sincronizar no cambiaría nada.'} Lo que sólo está en el portal y los ambiguos no se borran ni se desactivan; el seguimiento y los
                 contactos se conservan. {!sincroniza && `Sincroniza el Director Técnico. ${motivo}`}
@@ -160,7 +206,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
             )}
             {cruce && cruce.marcas.length > 0 && (
               <div className="mt-2 overflow-x-auto">
-                <p className="mb-2">Todas las marcas, por serial, entre «{cruce.congelacion?.archivo}» y Desk 2.0. Sólo informa: al inventario sólo entran los GRIMM EDM 180.</p>
+                <p className="mb-2">Todas las marcas, por serial, entre «{cruce.congelacion?.archivo}» y Desk 2.0, contando equipos de los dos lados. Sólo informa: lo que haría la sincronización es el plan de arriba.</p>
                 <table className="w-full text-left tabular-nums">
                   <thead>
                     <tr className="border-b border-gray-200 text-gray-500">
@@ -195,7 +241,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
         >
           <div className="flex flex-col gap-3 text-sm">
             {errorAplicar && <Alert tone="red">{errorAplicar}</Alert>}
-            <p>Se aplicará este plan al inventario de GRIMM EDM 180, firmado con tu correo. La fecha de calibración, el seguimiento y los contactos no se tocan, y no se borra ningún equipo.</p>
+            <p>Se aplicará este plan, firmado con tu correo: el inventario de GRIMM EDM 180 y, aparte, el enlace de las otras marcas. La fecha de calibración, el seguimiento y los contactos no se tocan, y no se borra ningún equipo.</p>
             {/* Las altas, lo primero y destacadas: son equipos nuevos en el inventario y, entre cien cambios de nombre, pasan desapercibidas. */}
             {bloques.altas.length > 0 && (
               <Alert tone="amber" title={`Altas: ${bloques.altas.length} ${bloques.altas.length === 1 ? 'equipo nuevo entrará' : 'equipos nuevos entrarán'} al inventario`}>
@@ -205,12 +251,24 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
                 </ul>
               </Alert>
             )}
+            {/* Lo delicado de las otras marcas, arriba y abierto: lo que NO se enlaza solo y hay que revisar a mano. */}
+            <Bloque abierto titulo={`Otras marcas · con el serial repetido: no se enlazan (${otras.ambiguos.length})`} nota="El serial se repite en Desk 2.0, o ya es de otro equipo del portal. Corrígelo en Desk 2.0 y vuelve a mirar el plan." items={otras.ambiguos.map(equipo)} />
+            <Bloque abierto titulo={`Hoja · filas con el serial repetido: no se enlazan (${hoja.repetido.length})`} nota="No se sabe de cuál de los equipos es cada fila: siguen enseñando lo que decía la hoja." items={hoja.repetido.map(textoFilaHoja)} />
+            <Bloque abierto titulo={`Hoja · seriales numéricos dudosos: no se enlazan (${hoja.sin_ceros.length})`} nota="Casarían con un equipo de Desk 2.0 sólo ignorando los ceros a la izquierda (Excel no los conserva). No se enlazan solos: revísalos uno a uno." items={hoja.sin_ceros.map(textoFilaHoja)} />
+            <h4 className={TITULO_BLOQUE}>GRIMM EDM 180 · en seguimiento</h4>
             <Lineas lineas={lineas} />
+            <h4 className={TITULO_BLOQUE}>Otras marcas · fuera de seguimiento</h4>
+            <Lineas lineas={lineasOtras(plan.otras)} />
+            <p className="text-xs text-gray-600">Las otras marcas <strong>no generan avisos</strong> ni entran en Resumen, Equipos, Calendario ni Avisos: sólo se enlazan para la pestaña «Trazabilidad F-ST-022».</p>
             <Bloque abierto titulo={`Clientes con otro nombre (${bloques.otroNombre.length})`} nota="No es sólo la forma de escribirlo: puede ser el mismo cliente con sus siglas o su razón social completa, otro cliente o una errata. Míralos uno a uno." items={bloques.otroNombre.map(cambio)} />
             <Bloque abierto titulo={`Otros cambios: modelo, serial y activo (${bloques.otros.length})`} items={bloques.otros.map(cambio)} />
             <Bloque titulo={`Clientes que sólo cambian de forma: mayúsculas, tildes, puntuación o forma societaria (${bloques.mismaForma.length})`} items={bloques.mismaForma.map(cambio)} />
             <Bloque titulo={`Sólo en el portal: no se tocan (${revisar.soloPortal.length})`} nota="No están entre los GRIMM EDM 180 de Desk 2.0. Si el serial está escrito distinto allí, corrígelo en Desk 2.0." items={revisar.soloPortal.map(equipo)} />
             <Bloque titulo={`Ambiguos, con el serial repetido: no se tocan (${revisar.ambiguos.length})`} nota="El serial se repite en Desk 2.0, o el portal lo tiene en dos equipos activos (o en ninguno activo)." items={revisar.ambiguos.map(equipo)} />
+            <Bloque titulo={`Otras marcas · se enlazan ahora, fuera de seguimiento (${altasOtras.length})`} nota="Equipos de Desk 2.0 que no son GRIMM EDM 180. Si alguno es de prueba, cancela y desactívalo antes en Desk 2.0." items={altasOtras.map((c) => [c.clave, c.despues ?? ''])} />
+            <Bloque titulo={`Otras marcas · cambios en los ya enlazados (${otras.detalle.length - altasOtras.length})`} items={otras.detalle.filter((c) => c.campo !== 'alta').map(cambio)} />
+            <Bloque titulo={`Otras marcas · ya no están en Desk 2.0: no se tocan (${otras.soloPortal.length})`} items={otras.soloPortal.map(equipo)} />
+            <Bloque titulo={`Hoja · sólo en la hoja: sin equipo activo en Desk 2.0 (${hoja.solo_hoja.length})`} nota="Siguen enseñando lo que decía la hoja. Si el equipo existe, dalo de alta (o actívalo) en Desk 2.0." items={hoja.solo_hoja.map(textoFilaHoja)} />
             {sinEnsenar > 0 && <p className="text-xs text-gray-600">…y {sinEnsenar} cambios más que no caben aquí; quedarán en la auditoría.</p>}
           </div>
         </Modal>

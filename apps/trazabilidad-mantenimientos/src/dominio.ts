@@ -12,7 +12,7 @@ export type { AgendaTaller, DetalleTicket, EtapaProyectada, ItemReparto, PuestoA
 export type { EstadoFuente, NombreFuente } from '../../hub-api/src/trazabilidad/fuente';
 // El maestro de equipos (Desk 2.0): el plan del cruce y el cruce informativo, tal como los sirve la API (tipos), y la
 // regla con que el servidor decide si un nombre de cliente es el mismo escrito de otra forma (para agrupar el detalle).
-export type { CambioMaestro, CruceMarca, EquipoRevisar, RecuentosMaestro, RespuestaCruceFst022, RespuestaPlanMaestro, SincronizacionMaestro } from '../../hub-api/src/trazabilidad/maestro';
+export type { CambioMaestro, CruceHojaMarca, CruceMarca, EquipoRevisar, FilaHojaRevisar, RecuentosMaestro, RecuentosOtras, RespuestaCruceFst022, RespuestaPlanMaestro, SincronizacionMaestro } from '../../hub-api/src/trazabilidad/maestro';
 export { mismoNombre } from '../../hub-api/src/trazabilidad/maestro';
 // Las calibraciones desde Desk 2.0: el plan de la pasada y el historial de un equipo, tal como los sirve la API (tipos), y el orden de su detalle.
 export type { CalibracionHistorial, DetalleCalibracion, EstadoFilaCalibracion, PasadaCalibraciones, RecuentosCalibraciones, RespuestaHistorialCalibraciones, RespuestaPlanCalibraciones, TipoDetalle } from '../../hub-api/src/trazabilidad/calibraciones';
