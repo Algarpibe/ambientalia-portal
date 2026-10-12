@@ -9,6 +9,7 @@ import { ejeAgenda } from './agenda-calendario.js';
 import { crearLectorCalibraciones, type LectorCalibraciones } from './calibraciones-desk2.js';
 import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
 import { esFechaIso } from './dominio.js';
+import { anularCalibracion, anularPartida, registrarManual } from './edicion-repo.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
@@ -22,14 +23,17 @@ import {
   esClave,
   parseAsignacion,
   parseAvisos,
+  parseCalibracionManual,
   parseCategoriaEstado,
   parseContacto,
   parseDuracionEtapa,
+  parseEnteroRuta,
   parseEstadoDesk,
   parseFlujoManual,
   parseHuecos,
   parseHuellaPlan,
   parseLiberacion,
+  parseMotivo,
   parseNumeroTicket,
   parsePaginaFst022,
   parsePlazo,
@@ -328,6 +332,39 @@ export function createTrazabilidadRouter(
   // 2.0 no contesta (no escribe nunca sin él), si el plan ya es otro o si ningún
   // ticket trae ya el campo. Devuelve la fila de su pasada.
   router.post('/trazabilidad/calibraciones/sincronizar', ...gated, escritura('calibraciones.write', 'tmc_calibraciones_sincronizar', async (req) => sincronizarCalibraciones(db, calibraciones, parseHuellaPlan(req.body), actorOf(req), hoyEnColombia())));
+
+  // ── Editar a mano (lote 9d-2b): corregir una fecha de calibración ────────
+  //
+  // Lo hace una persona, con `calibraciones.write`, motivo obligatorio y firma.
+  // Una fecha nunca se edita: se registra otra fila o se anula una. El día es
+  // SIEMPRE el de hoy en Colombia (una manual no puede ser posterior a hoy).
+  // Las tres devuelven el historial ya recalculado y la fecha que cuenta. No
+  // avisan a nadie: el estado del equipo lo recalcula la regla al leer.
+
+  // Registra una calibración manual: {clave | fila, fecha, motivo, corrigeTicket?}.
+  // `fila` es la de la hoja congelada, para lo que no tiene equipo en el portal.
+  router.post(
+    '/trazabilidad/calibraciones/manual',
+    ...gated,
+    escritura('calibraciones.write', 'tmc_calibracion_manual', async (req) => {
+      const hoy = hoyEnColombia();
+      return registrarManual(db, parseCalibracionManual(req.body, hoy), actorOf(req), hoy);
+    }),
+  );
+
+  // Anula la fecha de partida que una fila de la hoja toma de la congelación: {motivo}.
+  router.post(
+    '/trazabilidad/calibraciones/partida/:fila/anular',
+    ...gated,
+    escritura('calibraciones.write', 'tmc_calibracion_partida', async (req) => anularPartida(db, parseEnteroRuta(req.params.fila, 'fila'), parseMotivo(req.body), actorOf(req), hoyEnColombia())),
+  );
+
+  // Anula una calibración guardada (manual, de ticket o de partida): {motivo}. No se desanula: si hace falta, se registra otra.
+  router.post(
+    '/trazabilidad/calibraciones/:id/anular',
+    ...gated,
+    escritura('calibraciones.write', 'tmc_calibracion_anular', async (req) => anularCalibracion(db, parseEnteroRuta(req.params.id, 'id'), parseMotivo(req.body), actorOf(req), hoyEnColombia())),
+  );
 
   // El historial de calibraciones de un equipo, para su ficha: de dónde sale cada fecha y cuál cuenta.
   router.get(

@@ -57,7 +57,7 @@ describe('055_trazabilidad_fst022_congelacion.sql', () => {
 
 describe('la congelación ya no se escribe: ni sus filas ni su cabecera', () => {
   it('ningún fuente del módulo inserta, cambia ni borra nada en las tablas tmc_fst022_*: sólo se leen', () => {
-    for (const f of ['./repo.ts', './router.ts', './types.ts', './fst022.ts', './registro-estados.ts', './maestro.ts', './maestro-desk2.ts', './maestro-repo.ts', './calibraciones.ts', './calibraciones-desk2.ts', './calibraciones-repo.ts']) {
+    for (const f of ['./repo.ts', './router.ts', './types.ts', './fst022.ts', './registro-estados.ts', './maestro.ts', './maestro-desk2.ts', './maestro-repo.ts', './calibraciones.ts', './calibraciones-desk2.ts', './calibraciones-repo.ts', './hoja.ts', './hoja-repo.ts', './edicion-repo.ts']) {
       expect(fuente(f)).not.toMatch(/(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)[^;`]*tmc_fst022_\w+/i);
     }
     expect(fuente('./repo.ts')).toMatch(/FROM portal\.tmc_fst022_congelada/);
