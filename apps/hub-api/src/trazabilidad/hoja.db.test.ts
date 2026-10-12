@@ -145,7 +145,9 @@ describe('GET /trazabilidad/hoja', () => {
       porMarca: [{ clave: 'horiba', marca: 'Horiba', total: 4 }, { clave: 'grimm', marca: 'GRIMM', total: 3 }, { clave: 'thermo', marca: 'Thermo', total: 1 }],
       porEstado: { FUERA_CICLO: 1, VENCIDA: 2, VENCE_30: 0, VENCE_60: 1, VENCE_90: 0, AL_DIA: 3, SIN_FECHA: 1 },
     });
-    expect(JSON.stringify(res.body)).not.toMatch(/357/); // la «Vigencia» congelada no sale
+    // La «Vigencia» congelada (357) no sale. Desde el lote 9d-2b cada calibración lleva el instante de su firma (`en`, `anuladaEn`):
+    // se dejan fuera de la comprobación, porque un instante puede llevar esas tres cifras por casualidad.
+    expect(JSON.stringify(res.body, (k, v) => (k === 'en' || k === 'anuladaEn' ? undefined : v))).not.toMatch(/357/);
   });
 
   it('la fecha de cada equipo activo del inventario es la misma que da GET /equipos (y su vencimiento y su estado)', async () => {
