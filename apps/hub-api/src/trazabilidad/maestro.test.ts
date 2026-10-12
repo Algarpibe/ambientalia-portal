@@ -277,6 +277,175 @@ describe('el plan del cruce', () => {
   });
 });
 
+// Lote 9d-2a: las demás marcas del maestro se enlazan también, pero FUERA de seguimiento (058). Van en
+// `plan.otras`, aparte: nada de lo de arriba (GRIMM EDM 180, en seguimiento) cambia por ellas.
+describe('el plan del cruce: otras marcas, fuera de seguimiento', () => {
+  // El maestro de este bloque, con ids de ancho fijo: el plan va por id y así el orden no depende de cuántos equipos se hayan creado antes.
+  let k = 0;
+  const desk = (serial: string, extra: Partial<EquipoMaestro> = {}): EquipoMaestro => ({ id: `ot-${String(++k).padStart(3, '0')}`, serial, marca: 'GRIMM', modelo: 'EDM180C', cliente: 'Cliente Ficticio A', activo: true, ...extra });
+  const horiba = (serial: string, extra: Partial<EquipoMaestro> = {}) => desk(serial, { marca: 'Horiba', modelo: 'APNA-370', cliente: 'Cliente Ficticio H S.A.S.', ...extra });
+  const SIN_OTRAS = { maestro: 0, portal: 0, casan: 0, cambios: SIN_CAMBIOS, altas: 0, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0 };
+  /** El inventario tal como lo deja aplicar el plan: lo que escribe maestro-repo.ts. */
+  const aplicar = (p: ReturnType<typeof planMaestro>, inventario: EquipoPortal[]): EquipoPortal[] => [
+    ...inventario.map((x) => ({ ...x, ...[...p.enlaces, ...p.otras.enlaces].find((e) => e.clave === x.clave) })),
+    ...p.altas.map((a) => ({ clave: a.clave, serial: a.serial, cliente: a.cliente, modelo: a.modelo, activo: true, deskId: a.deskId })),
+    ...p.otras.altas.map((a) => ({ clave: a.clave, serial: a.serial, cliente: a.cliente, modelo: a.modelo, activo: true, deskId: a.deskId, enSeguimiento: false })),
+  ];
+
+  it('dos ámbitos en el mismo plan: el de GRIMM EDM 180 sale IGUAL que sin las demás marcas, y éstas se dan de alta aparte, enlazadas y con lo del maestro tal cual', () => {
+    const grimm = [desk('18A00001', { cliente: 'Cliente Ficticio A S.A.S.' }), desk('18A00009')];
+    const h = horiba(' HB-0001 ');
+    const g280 = desk('28A00001', { modelo: 'EDM 280', marca: 'Grimm' });
+    const inventario = [portal('18A00001'), portal('18A00050')];
+    const solo = planMaestro(grimm, inventario, ['cliente ficticio a']);
+    const p = planMaestro([...grimm, h, g280, horiba('HB-0002', { activo: false })], inventario, ['cliente ficticio a', 'cliente ficticio h s.a.s.']);
+    expect([p.recuentos, p.enlaces, p.altas, p.cambios, p.soloPortal, p.ambiguos]).toEqual([solo.recuentos, solo.enlaces, solo.altas, solo.cambios, solo.soloPortal, solo.ambiguos]);
+    expect(solo.otras.recuentos).toEqual(SIN_OTRAS);
+    // Un GRIMM de otro modelo va con las otras marcas. La marca, como la escribe el maestro; el modelo, sin pasarlo a la forma del portal.
+    expect(p.otras.altas).toEqual([
+      { clave: 'HB-0001', deskId: h.id, serial: 'HB-0001', cliente: 'Cliente Ficticio H S.A.S.', marca: 'Horiba', modelo: 'APNA-370' },
+      { clave: '28A00001', deskId: g280.id, serial: '28A00001', cliente: 'Cliente Ficticio A', marca: 'Grimm', modelo: 'EDM 280' },
+    ]);
+    expect(p.otras.recuentos).toEqual({ ...SIN_OTRAS, maestro: 3, altas: 2, inactivos: 1 });
+    expect(p.otras.cambios).toEqual([
+      { clave: 'HB-0001', campo: 'alta', antes: null, despues: 'HB-0001 · Cliente Ficticio H S.A.S.', ambito: 'otras' },
+      { clave: '28A00001', campo: 'alta', antes: null, despues: '28A00001 · Cliente Ficticio A', ambito: 'otras' },
+    ]);
+    expect(p.otras.enlaces).toEqual([]);
+  });
+
+  it('sin marca, sin modelo o sin cliente en el maestro, el alta lo dice; lo demasiado largo se recorta a su columna', () => {
+    const p = planMaestro([desk('X-1', { marca: null, modelo: '  ', cliente: null }), desk('X-2', { marca: 'M'.repeat(70), modelo: 'N'.repeat(70) })], [], []);
+    expect(p.otras.altas.map((a) => [a.marca, a.modelo, a.cliente])).toEqual([['(sin marca)', '(sin modelo)', '(sin cliente en Desk 2.0)'], ['M'.repeat(60), 'N'.repeat(60), 'Cliente Ficticio A']]);
+  });
+
+  it('la clave es única entre TODAS las filas (las de los dos ámbitos y las que nacen a la vez), sale de la misma función y cabe en su columna', () => {
+    const largo = 'Y'.repeat(CLAVE_MAX);
+    const maestro = [desk('A/1'), horiba('A_1'), horiba('A 1'), horiba('7'), horiba('HB/9'), horiba(largo)];
+    const p = planMaestro(maestro, [portal('OTRO', { clave: 'HB_9' }), portal('OTRO-2', { clave: largo.slice(0, CLAVE_MAX - 4), enSeguimiento: false, deskId: 'eq-ajeno' })], []);
+    const claves = [...p.altas, ...p.otras.altas].map((a) => a.clave);
+    expect(p.altas.map((a) => a.clave)).toEqual(['A_1']);
+    expect(p.otras.altas.map((a) => [a.serial, a.clave])).toEqual([['A_1', 'A_1-2'], ['A 1', 'A_1-3'], ['7', '7'], ['HB/9', 'HB_9-2'], [largo, `${'Y'.repeat(CLAVE_MAX - 4)}-2`]]);
+    expect(new Set(claves).size).toBe(claves.length);
+    for (const c of claves) expect(c).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
+  });
+
+  it('un serial repetido en el maestro no se da de alta: es ambiguo y sale para revisar; tampoco el que ya está en el portal en otro equipo, ni uno sin serial o demasiado largo', () => {
+    const a = horiba('HB-0005');
+    const b = horiba('hb-0005 ', { cliente: 'Cliente Ficticio J' });
+    const c = horiba('18A00050', { marca: 'Kunak', modelo: 'AIR Pro' }); // el portal tiene ese serial en un GRIMM que el maestro no trae
+    const d = horiba('18A00009'); // el maestro tiene ese serial también en un GRIMM EDM 180
+    const p = planMaestro([a, b, c, d, desk('18A00009'), horiba(''), horiba('Z'.repeat(CLAVE_MAX + 1)), horiba('HB-0006')], [portal('18A00050')], []);
+    expect(p.otras.altas.map((x) => x.serial)).toEqual(['HB-0006']);
+    expect(p.otras.recuentos).toMatchObject({ maestro: 7, altas: 1, ambiguos: 4, sinSerial: 2 });
+    expect(p.otras.ambiguos).toEqual([
+      { origen: 'desk', clave: a.id, serial: 'HB-0005', cliente: 'Cliente Ficticio H S.A.S.', activo: true },
+      { origen: 'desk', clave: b.id, serial: 'hb-0005', cliente: 'Cliente Ficticio J', activo: true },
+      { origen: 'desk', clave: c.id, serial: '18A00050', cliente: 'Cliente Ficticio H S.A.S.', activo: true },
+      { origen: 'desk', clave: d.id, serial: '18A00009', cliente: 'Cliente Ficticio H S.A.S.', activo: true },
+    ]);
+    // El GRIMM EDM 180 con ese serial entra en seguimiento como siempre: lo de las otras marcas no lo frena.
+    expect(p.altas.map((x) => x.serial)).toEqual(['18A00009']);
+  });
+
+  it('idempotente: aplicado, el siguiente no trae nada; después se actualizan como los demás (cliente, modelo, serial, activo) por su id de Desk 2.0, sin cambiar de clave', () => {
+    const g = desk('18A00001');
+    const h = horiba('HB-0001');
+    const k = horiba('KN-0001', { marca: 'Kunak', modelo: 'AIR Pro' });
+    const p = planMaestro([g, h, k], [portal('18A00001')], []);
+    const aplicado = aplicar(p, [portal('18A00001')]);
+    expect(aplicado.map((x) => [x.clave, x.enSeguimiento ?? true])).toEqual([['18A00001', true], ['HB-0001', false], ['KN-0001', false]]);
+    const otra = planMaestro([g, h, k], aplicado, []);
+    expect([otra.otras.recuentos, otra.otras.altas, otra.otras.cambios]).toEqual([{ ...SIN_OTRAS, maestro: 2, portal: 2, casan: 2 }, [], []]);
+    expect([otra.recuentos.altas, otra.recuentos.enlaces, otra.cambios]).toEqual([0, 0, []]);
+
+    const cambiado = planMaestro([g, { ...h, serial: 'HB-0001-B', cliente: 'Cliente Ficticio H Norte S.A.S.', modelo: 'APNA-370 CE' }, { ...k, activo: false }], aplicado, []);
+    expect(cambiado.otras.enlaces).toEqual([
+      { clave: 'HB-0001', deskId: h.id, serial: 'HB-0001-B', cliente: 'Cliente Ficticio H Norte S.A.S.', modelo: 'APNA-370 CE', activo: true },
+      { clave: 'KN-0001', deskId: k.id, serial: 'KN-0001', cliente: 'Cliente Ficticio H S.A.S.', modelo: 'AIR Pro', activo: false },
+    ]);
+    expect(cambiado.otras.recuentos).toMatchObject({ casan: 2, altas: 0, cambios: { cliente: 1, modelo: 1, serial: 1, activo: 1 } });
+    expect(cambiado.otras.cambios.map((c) => [c.clave, c.campo, c.ambito])).toEqual([['HB-0001', 'cliente', 'otras'], ['HB-0001', 'modelo', 'otras'], ['HB-0001', 'serial', 'otras'], ['KN-0001', 'activo', 'otras']]);
+    // Los cambios de cliente de las otras marcas no cuentan como «otro nombre» ni mueven contactos: eso es sólo del seguimiento.
+    expect(cambiado.recuentos).toMatchObject({ clienteOtroNombre: 0, contactosSinEquipos: 0, cambios: SIN_CAMBIOS });
+    expect(planMaestro([g, h, k], aplicar(cambiado, aplicado), []).otras.cambios).toHaveLength(4); // y deshacerlo en Desk 2.0 vuelve a ser un cambio
+  });
+
+  it('nadie cambia de ámbito por sincronizar: ni un equipo en seguimiento que deja de ser EDM 180 en el maestro, ni uno fuera de seguimiento que pasa a serlo', () => {
+    const dentro = desk('18A00001', { modelo: 'EDM 280' }); // en el portal, en seguimiento; el maestro ya no lo da como EDM 180
+    const fuera = desk('28A00001'); // en el portal, fuera de seguimiento; el maestro lo da ahora como EDM 180
+    const inventario = [portal('18A00001', { deskId: dentro.id }), portal('28A00001', { deskId: fuera.id, modelo: 'EDM 280', enSeguimiento: false })];
+    const p = planMaestro([dentro, fuera], inventario, []);
+    // El que está en seguimiento se queda como «sólo en el portal», igual que hoy: ni se toca ni se da de alta otra vez.
+    expect(p.recuentos).toMatchObject({ maestro: 0, portal: 1, casan: 0, altas: 0, soloPortal: 1 });
+    expect([p.enlaces, p.altas, p.otras.altas, p.otras.ambiguos]).toEqual([[], [], [], []]);
+    // El de fuera se actualiza en su ámbito (el modelo, como lo escribe el maestro) y sigue fuera.
+    expect(p.otras.enlaces).toEqual([{ clave: '28A00001', deskId: fuera.id, serial: '28A00001', cliente: 'Cliente Ficticio A', modelo: 'EDM180C', activo: true }]);
+    expect(p.otras.recuentos).toMatchObject({ maestro: 1, portal: 1, casan: 1 });
+  });
+
+  it('uno fuera de seguimiento que ya no está en el maestro no se borra ni se desactiva: se cuenta y sale para revisar', () => {
+    const p = planMaestro([], [portal('HB-0001', { deskId: 'eq-borrado', enSeguimiento: false, cliente: 'Cliente Ficticio H' })], []);
+    expect(p.otras.recuentos).toMatchObject({ portal: 1, casan: 0, soloPortal: 1 });
+    expect(p.otras.soloPortal).toEqual([{ origen: 'portal', clave: 'HB-0001', serial: 'HB-0001', cliente: 'Cliente Ficticio H', activo: true }]);
+    expect([p.recuentos.portal, p.recuentos.soloPortal, p.otras.enlaces]).toEqual([0, 0, []]);
+  });
+
+  it('el plan de las otras marcas tampoco depende del orden en que lleguen las filas', () => {
+    const maestro = [horiba('HB-0003'), desk('18A00001'), horiba('HB/1'), horiba('HB_1'), horiba('HB-0002')];
+    const inventario = [portal('18A00001'), portal('HB-0002', { enSeguimiento: false, deskId: maestro[4].id, cliente: 'Cliente Ficticio H' })];
+    const hoja = [{ marca: 'Horiba', serial: 'HB-0003', cliente: 'Cliente Ficticio H', claveEquipo: null }];
+    expect(planMaestro([...maestro].reverse(), [...inventario].reverse(), [], hoja)).toEqual(planMaestro(maestro, inventario, [], hoja));
+  });
+
+  describe('cruce con la hoja congelada: qué filas quedarían enlazadas con un equipo', () => {
+    const f = (marca: string, serial: string | null, cliente = 'Cliente Ficticio H', claveEquipo: string | null = null) => ({ marca, serial, cliente, claveEquipo });
+    const HOJA = [
+      f('Grimm', '18A00001', 'Cliente Ficticio A', '18A00001'),
+      f('GRIMM', '18A00077', 'Cliente Ficticio X'), // no está en Desk 2.0 ni en el portal
+      f('Horiba', 'HB-0001'),
+      f('HORIBA', 'HB-0002'),
+      f('Horiba', 'HB-0002', 'Cliente Ficticio J'), // repetido en la hoja
+      f('Horiba', 'HB-0005'), // repetido en el maestro
+      f('Horiba', '123'), // en el maestro es 00123
+      f('Horiba', 'HB-0008'), // inactivo en el maestro: no se da de alta
+      f('Thermo', 'TH-0001', 'Cliente Ficticio T'), // la marca no existe en Desk 2.0
+      f('Thermo', null, 'Cliente Ficticio T'),
+    ];
+    const maestro = [desk('18A00001'), horiba('hb-0001'), horiba('HB-0002'), horiba('HB-0005'), horiba('HB-0005'), horiba('00123'), horiba('HB-0008', { activo: false }), horiba('HB-0099')];
+
+    it('por marca y sólo recuentos: enlazadas, sólo en la hoja, con el serial repetido y las que casarían sólo ignorando ceros (que NO se enlazan)', () => {
+      const p = planMaestro(maestro, [portal('18A00001')], [], HOJA);
+      expect(p.hoja.marcas).toEqual([
+        { marca: 'Grimm', filas: 2, enlazadas: 1, soloHoja: 1, repetidas: 0, sinCeros: 0 },
+        { marca: 'Horiba', filas: 6, enlazadas: 1, soloHoja: 2, repetidas: 3, sinCeros: 1 },
+        { marca: 'Thermo', filas: 2, enlazadas: 0, soloHoja: 2, repetidas: 0, sinCeros: 0 },
+      ]);
+      expect(JSON.stringify(p.hoja.marcas)).not.toMatch(/Ficticio|HB-|18A0/);
+    });
+
+    it('y, para revisar, una a una, con lo delicado primero: repetidas, numéricas dudosas y lo que sólo está en la hoja', () => {
+      const p = planMaestro(maestro, [portal('18A00001')], [], HOJA);
+      expect(p.hoja.revisar).toEqual([
+        { motivo: 'repetido', marca: 'HORIBA', serial: 'HB-0002', cliente: 'Cliente Ficticio H' },
+        { motivo: 'repetido', marca: 'Horiba', serial: 'HB-0002', cliente: 'Cliente Ficticio J' },
+        { motivo: 'repetido', marca: 'Horiba', serial: 'HB-0005', cliente: 'Cliente Ficticio H' },
+        { motivo: 'sin_ceros', marca: 'Horiba', serial: '123', cliente: 'Cliente Ficticio H' },
+        { motivo: 'solo_hoja', marca: 'GRIMM', serial: '18A00077', cliente: 'Cliente Ficticio X' },
+        { motivo: 'solo_hoja', marca: 'Horiba', serial: 'HB-0008', cliente: 'Cliente Ficticio H' },
+        { motivo: 'solo_hoja', marca: 'Thermo', serial: 'TH-0001', cliente: 'Cliente Ficticio T' },
+        { motivo: 'solo_hoja', marca: 'Thermo', serial: '', cliente: 'Cliente Ficticio T' },
+      ]);
+    });
+
+    it('con el plan aplicado el cruce dice lo mismo; sin hoja, vacío', () => {
+      const p = planMaestro(maestro, [portal('18A00001')], [], HOJA);
+      expect(planMaestro(maestro, aplicar(p, [portal('18A00001')]), [], HOJA).hoja).toEqual(p.hoja);
+      expect(planMaestro(maestro, [portal('18A00001')], []).hoja).toEqual({ marcas: [], revisar: [] });
+    });
+  });
+});
+
 describe('cruce informativo de la congelación con el maestro (todas las marcas)', () => {
   const v3 = (marca: string, serial: string | null) => ({ marca, serial });
   const eq = (marca: string | null, serial: string) => ({ marca, serial });
