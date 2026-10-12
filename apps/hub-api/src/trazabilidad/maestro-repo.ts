@@ -57,11 +57,10 @@ async function leerHojaCongelada(db: Db): Promise<{ congelacion: { id: number; a
 
 /** El plan de ahora: el maestro ya leído contra el inventario entero del portal (activos o no, en seguimiento o no), los contactos puestos a mano y la hoja congelada. */
 async function calcular(db: Db, equipos: readonly EquipoMaestro[]): Promise<{ plan: PlanMaestro; huella: string }> {
-  const [inventario, contactos, hoja] = await Promise.all([
-    db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento FROM portal.tmc_equipos`),
-    db.query(`SELECT clave FROM portal.tmc_contactos`),
-    leerHojaCongelada(db),
-  ]);
+  // Una detrás de otra: al aplicar, `db` es el cliente de la transacción, y un cliente no lleva dos consultas a la vez.
+  const inventario = await db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento FROM portal.tmc_equipos`);
+  const contactos = await db.query(`SELECT clave FROM portal.tmc_contactos`);
+  const hoja = await leerHojaCongelada(db);
   const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false }));
   const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)), hoja.filas);
   return { plan, huella: huellaDePlan(plan) };
