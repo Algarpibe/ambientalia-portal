@@ -131,8 +131,8 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, 
 
         <Calibraciones equipo={e} onCambio={onCambio} />
 
-        {/* Retirar el equipo (lote 9d-2b): al retirarlo sale del inventario y esta ficha se cierra sola. */}
-        <Retiro accion={{ de: 'equipo', retirar: true, destino: { clave: e.clave } }} retirado={null} onCambio={async (hecho) => (await onCambio(), notificar(hecho))} />
+        {/* Retirar el equipo (lote 9d-2b): sale del inventario, así que la ficha se cierra (cerrarla de verdad: si no, volvería a abrirse sola al reincorporarlo). */}
+        <Retiro accion={{ de: 'equipo', retirar: true, destino: { clave: e.clave } }} retirado={null} onCambio={async (hecho) => (onClose(), await onCambio(), notificar(hecho))} />
 
         <section aria-labelledby="ficha-contacto" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
           <p id="ficha-contacto" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
