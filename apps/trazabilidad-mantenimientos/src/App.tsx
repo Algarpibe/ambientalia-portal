@@ -12,6 +12,7 @@ import Equipos, { FILTRO_VACIO, type Filtro } from './vistas/Equipos';
 import Calendario from './vistas/Calendario';
 import Avisos from './vistas/Avisos';
 import FichaEquipo from './vistas/FichaEquipo';
+import HojaFst022 from './vistas/HojaFst022';
 import Servicios from './vistas/Servicios';
 import Agenda from './vistas/Agenda';
 import Configuracion from './vistas/Configuracion';
@@ -33,7 +34,7 @@ import Roles from './vistas/Roles';
  * Navegación en dos niveles (`lib/navegacion.ts`): arriba los grupos
  * («Clientes y calibraciones», «Taller», «Administración») y debajo las
  * secciones del grupo. Las secciones van por hash (#resumen, #equipos,
- * #calendario, #avisos, #servicios, #configuracion, #roles), igual que el
+ * #calendario, #avisos, #fst022, #servicios, #configuracion, #roles), igual que el
  * resto de apps del portal: el router del portal sólo ve
  * /trazabilidad-mantenimientos/*.
  *
@@ -61,6 +62,8 @@ export default function App() {
   const [congelaciones, setCongelaciones] = useState<CongelacionFst022[] | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const avisoTimer = useRef<number | undefined>(undefined);
+  /** Veces que se ha pulsado «Actualizar»: con cada una, la pestaña «Trazabilidad F-ST-022» vuelve a pedir su tabla. */
+  const [recarga, setRecarga] = useState(0);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -132,8 +135,12 @@ export default function App() {
   /** «F-ST-022 congelada el … desde «…» por …», o null si no hay congelación (o aún no se sabe). */
   const origen = textoOrigen(vigenteDe(congelaciones));
   const grupo = grupoDe(tab);
-  /** Las secciones de «Clientes y calibraciones» pintan el inventario de la F-ST-022; las demás, no. */
-  const deInventario = grupo === 'clientes';
+  /**
+   * Las secciones de «Clientes y calibraciones» pintan el inventario (GRIMM EDM 180); las demás, no. La pestaña
+   * «Trazabilidad F-ST-022» es del grupo pero carga lo suyo (la hoja entera, de todas las marcas): se ve aunque no haya inventario.
+   */
+  const deGrupoClientes = grupo === 'clientes';
+  const deInventario = deGrupoClientes && tab !== 'fst022';
   const gestionaRoles = yo?.canManageRoles ?? false;
   const secciones = seccionesDe(grupo, gestionaRoles);
 
@@ -160,8 +167,8 @@ export default function App() {
                 Tu rol: <strong className="font-semibold text-gray-900">{etiquetaMiRol(yo)}</strong>
               </span>
             )}
-            {deInventario && (
-              <Button variant="ghost" onClick={() => void cargar()} busy={cargando} aria-label="Actualizar">
+            {deGrupoClientes && (
+              <Button variant="ghost" onClick={() => (setRecarga((n) => n + 1), void cargar())} busy={cargando} aria-label="Actualizar">
                 {!cargando && <RefreshCw className="h-4 w-4" aria-hidden />} Actualizar
               </Button>
             )}
@@ -211,6 +218,8 @@ export default function App() {
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}
         {tab === 'roles' && (yo || errorRol) && !gestionaRoles && <Alert tone="amber">Sólo un administrador del portal puede ver y repartir los roles de Trazabilidad.</Alert>}
         {tab === 'roles' && gestionaRoles && <Roles notificar={notificar} />}
+        {/* La hoja F-ST-022 entera, en sólo lectura. Una fila de un equipo activo del inventario abre la ficha de siempre. */}
+        {tab === 'fst022' && <HojaFst022 equipos={equipos} recarga={recarga} onFicha={setFicha} />}
 
         {deInventario && error && (
           <div className="mb-4">

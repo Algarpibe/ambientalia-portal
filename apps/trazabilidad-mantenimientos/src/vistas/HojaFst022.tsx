@@ -1,0 +1,361 @@
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Search } from 'lucide-react';
+import { api } from '../api';
+import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type FilaHoja, type RespuestaHoja } from '../dominio';
+import { ETIQUETA_ESTADO_FILA } from '../lib/calibraciones';
+import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenDe, origenFecha, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
+import { fmtFecha, textoVigencia } from '../lib/vistas';
+import { Alert, Button, Card, Drawer, EstadoBadge, Loading, TONO, Tag } from '../ui';
+import { Chip } from './Equipos';
+
+/**
+ * Pestaña «Trazabilidad F-ST-022» (lote 9d-1), de SÓLO LECTURA: la hoja
+ * congelada, de todas las marcas, tal como la entiende hoy el portal. Las seis
+ * columnas de la hoja en su orden (la vigencia, recalculada a hoy) más el
+ * estado y la situación de cada fila. Todo llega calculado de GET /hoja; aquí
+ * sólo se filtra y se ordena (`lib/hoja.ts`). Corregir algo es del lote 9d-2.
+ *
+ * Una fila de un equipo activo del inventario abre su ficha de siempre; las
+ * demás (sólo en la hoja, o inactivas), un panel con lo que decía la hoja y
+ * sus calibraciones conocidas.
+ */
+interface Props {
+  /** El inventario activo que ya tiene la app: sus filas abren la ficha de equipo. */
+  equipos: EquipoVista[];
+  /** Cambia cuando se pulsa «Actualizar»: vuelve a pedir la tabla. */
+  recarga: number;
+  onFicha: (clave: string) => void;
+}
+
+const TD = 'px-3 py-2 align-top';
+const DISCRETO = 'block text-[11px] leading-tight text-gray-400';
+
+/** El valor de hoy y, si la hoja decía otra cosa, eso debajo, discreto. */
+function Valor({ hoy, hoja }: { hoy: ReactNode; hoja: string | null | undefined }) {
+  return (
+    <>
+      {hoy || <span className="text-gray-300">—</span>}
+      {hoja !== undefined && <span className={DISCRETO}>en la hoja: {hoja || '—'}</span>}
+    </>
+  );
+}
+
+function Etiquetas({ f }: { f: FilaHoja }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Tag tone={f.situacion === 'inventario' ? 'blue' : 'gray'}>{ETIQUETA_SITUACION[f.situacion]}</Tag>
+      {f.avisos.map((a) => (
+        <span key={a} title={ETIQUETA_AVISO[a]}>
+          <Tag tone="amber">{AVISO_CORTO[a]}</Tag>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const fechaEnHoja = (f: FilaHoja): string | undefined => ('ultimaCalibracion' in f.enHoja ? fmtFecha(f.enHoja.ultimaCalibracion) : undefined);
+
+const FilaTabla = memo(function FilaTabla({ f, onAbrir }: { f: FilaHoja; onAbrir: (f: FilaHoja) => void }) {
+  return (
+    <tr tabIndex={0} onClick={() => onAbrir(f)} onKeyDown={(e) => e.key === 'Enter' && onAbrir(f)} className="cursor-pointer hover:bg-gray-50 focus:bg-blue-50 focus:outline-none">
+      <td className={`${TD} tabular-nums text-gray-400`}>{f.fila ?? '—'}</td>
+      <td className={`${TD} text-gray-900`}>
+        <Valor hoy={f.cliente} hoja={f.enHoja.cliente} />
+      </td>
+      <td className={`${TD} text-gray-600`}>
+        <Valor hoy={f.marca} hoja={f.enHoja.marca} />
+      </td>
+      <td className={`${TD} text-gray-600`}>
+        <Valor hoy={f.modelo} hoja={f.enHoja.modelo} />
+      </td>
+      <td className={`${TD} font-mono text-[13px]`}>
+        <Valor hoy={f.serial} hoja={f.enHoja.serial} />
+      </td>
+      <td className={`${TD} whitespace-nowrap tabular-nums`}>
+        <Valor hoy={f.ultimaCalibracion && fmtFecha(f.ultimaCalibracion)} hoja={fechaEnHoja(f)} />
+        {f.ultimaCalibracion && <span className={`${DISCRETO} text-gray-500`}>{origenFecha(f)}</span>}
+      </td>
+      <td className={`${TD} whitespace-nowrap text-right font-semibold tabular-nums ${TONO[f.estado].text}`}>{f.vigenciaDias ?? '—'}</td>
+      <td className={`${TD} whitespace-nowrap`}>
+        <EstadoBadge estado={f.estado} />
+      </td>
+      <td className={TD}>
+        <Etiquetas f={f} />
+      </td>
+    </tr>
+  );
+});
+
+/** La misma fila, para el teléfono: una tarjeta que no se desborda. */
+const FilaMovil = memo(function FilaMovil({ f, onAbrir }: { f: FilaHoja; onAbrir: (f: FilaHoja) => void }) {
+  const distinto = (['cliente', 'marca', 'modelo', 'serial'] as const).filter((k) => f.enHoja[k] !== undefined).map((k) => `${k} «${f.enHoja[k]}»`);
+  return (
+    <li>
+      <button type="button" onClick={() => onAbrir(f)} className="flex w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm">
+        <span className="flex flex-wrap items-center justify-between gap-2">
+          <EstadoBadge estado={f.estado} />
+          <span className={`text-xs font-semibold tabular-nums ${TONO[f.estado].text}`}>{textoVigencia(f.vigenciaDias)}</span>
+        </span>
+        <span className="break-words font-medium text-gray-900">{f.cliente || '—'}</span>
+        <span className="break-words text-gray-600">
+          {f.marca} {f.modelo} · <span className="break-all font-mono text-[13px] text-gray-900">{f.serial || '(sin serial)'}</span>
+        </span>
+        <span className="text-gray-600">
+          Última calibración: <span className="tabular-nums text-gray-900">{fmtFecha(f.ultimaCalibracion)}</span>
+          {f.ultimaCalibracion && <> · {origenFecha(f)}</>}
+        </span>
+        {(distinto.length > 0 || fechaEnHoja(f) !== undefined) && <span className="break-words text-xs text-gray-400">En la hoja: {[...distinto, ...(fechaEnHoja(f) !== undefined ? [`fecha ${fechaEnHoja(f)}`] : [])].join(' · ')}</span>}
+        <Etiquetas f={f} />
+      </button>
+    </li>
+  );
+});
+
+function Tabla({ filas, onAbrir, orden, onOrden, vacio }: { filas: FilaHoja[]; onAbrir: (f: FilaHoja) => void; orden?: OrdenHoja; onOrden?: (k: ColumnaHoja) => void; vacio: string }) {
+  const Th = ({ k, children, right = false }: { k: ColumnaHoja; children: string; right?: boolean }) => (
+    <th aria-sort={orden?.k === k ? (orden.dir > 0 ? 'ascending' : 'descending') : undefined} className={`px-3 py-2 font-semibold ${right ? 'text-right' : ''}`}>
+      {onOrden ? (
+        <button type="button" onClick={() => onOrden(k)} className="uppercase tracking-wide hover:text-gray-800">
+          {children}
+          {orden?.k === k ? (orden.dir > 0 ? ' ↑' : ' ↓') : ''}
+        </button>
+      ) : (
+        <span className="uppercase tracking-wide">{children}</span>
+      )}
+    </th>
+  );
+  return (
+    <>
+      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm sm:block">
+        <table className="w-full min-w-[1080px] text-sm">
+          <thead className="bg-gray-50">
+            <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
+              <Th k="fila">Fila</Th>
+              <Th k="cliente">Cliente</Th>
+              <Th k="marca">Marca</Th>
+              <Th k="modelo">Modelo</Th>
+              <Th k="serial">Serial</Th>
+              <Th k="ultimaCalibracion">Última calibración</Th>
+              <Th k="vigencia" right>
+                Vigencia (días)
+              </Th>
+              <Th k="vigencia">Estado</Th>
+              <Th k="situacion">Situación y avisos</Th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filas.map((f) => (
+              <FilaTabla key={f.fila ?? f.clave} f={f} onAbrir={onAbrir} />
+            ))}
+            {filas.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
+                  {vacio}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <ul className="flex flex-col gap-2 sm:hidden">
+        {filas.map((f) => (
+          <FilaMovil key={f.fila ?? f.clave} f={f} onAbrir={onAbrir} />
+        ))}
+        {filas.length === 0 && <li className="rounded-2xl border border-gray-200 bg-white p-6 text-center text-sm text-gray-500">{vacio}</li>}
+      </ul>
+    </>
+  );
+}
+
+/** Panel de sólo lectura de una fila que no abre ficha de equipo: lo de hoy, lo que decía la hoja y sus calibraciones conocidas. */
+function PanelFila({ f, onClose }: { f: FilaHoja; onClose: () => void }) {
+  const hoy: [string, string][] = [
+    ['Última calibración', `${fmtFecha(f.ultimaCalibracion)}${f.ultimaCalibracion ? ` · ${origenFecha(f)}` : ''}`],
+    ['Vence', fmtFecha(f.vence)],
+    ['Vigencia (días)', f.vigenciaDias === null ? '—' : String(f.vigenciaDias)],
+  ];
+  const hoja: [string, string][] = [
+    ['Cliente', valorEnHoja(f, 'cliente') || '—'],
+    ['Marca', valorEnHoja(f, 'marca') || '—'],
+    ['Modelo', valorEnHoja(f, 'modelo') || '—'],
+    ['Serial', valorEnHoja(f, 'serial') || '—'],
+    ['Última calibración', fmtFecha(valorEnHoja(f, 'ultimaCalibracion'))],
+  ];
+  const Datos = ({ titulo, datos }: { titulo: string; datos: [string, string][] }) => (
+    <section className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{titulo}</p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+        {datos.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-gray-500">{k}</dt>
+            <dd className="break-words font-medium tabular-nums text-gray-900">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+  return (
+    <Drawer onClose={onClose} title={<span className="break-all font-mono">{f.serial || '(sin serial)'}</span>} subtitle={`${f.cliente || '(sin cliente)'} · ${f.marca} ${f.modelo}`}>
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <EstadoBadge estado={f.estado} />
+          <span className="text-sm text-gray-500">{textoVigencia(f.vigenciaDias)}</span>
+          <Tag tone={f.situacion === 'inventario' ? 'blue' : 'gray'}>{ETIQUETA_SITUACION[f.situacion]}</Tag>
+        </div>
+        {f.avisos.length > 0 && (
+          <Alert tone="amber" title="Conviene mirar">
+            <ul className="list-disc pl-4">
+              {f.avisos.map((a) => (
+                <li key={a}>{ETIQUETA_AVISO[a]}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
+        <Datos titulo="Hoy en el portal" datos={hoy} />
+        {f.fila === null ? <p className="border-t border-gray-200 pt-4 text-sm text-gray-500">Este equipo no está en la hoja F-ST-022 congelada.</p> : <Datos titulo={`En la hoja F-ST-022 · fila ${f.fila}`} datos={hoja} />}
+        <section className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Calibraciones conocidas</p>
+          {f.calibraciones.length === 0 && <p className="text-gray-500">{f.ultimaCalibracion ? `Ninguna registrada: vale la fecha del inventario (${fmtFecha(f.ultimaCalibracion)}).` : 'Ninguna.'}</p>}
+          <ul className="flex flex-col gap-1.5">
+            {f.calibraciones.map((c, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-1.5">
+                <span className={`font-medium tabular-nums ${c.estado === 'anulada' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</span>
+                <span className="text-gray-600">{origenDe(c)}</span>
+                <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
+                {c.cuenta && <Tag tone="blue">La que cuenta</Tag>}
+              </li>
+            ))}
+          </ul>
+        </section>
+        <p className="text-xs text-gray-500">
+          Sólo lectura. {f.situacion === 'hoja' ? 'Este equipo sólo está en la hoja: todavía no es del inventario del portal (que hoy lleva sólo los GRIMM EDM 180), así que no entra en Resumen, Equipos, Calendario ni Avisos.' : 'Este equipo está en el inventario, pero inactivo: no entra en Resumen, Equipos, Calendario ni Avisos.'}
+        </p>
+        <div>
+          <Button onClick={onClose}>Cerrar</Button>
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+/** Una cifra del resumen que, además, filtra. */
+function Ficha({ valor, rotulo, nota, activo, onClick }: { valor: number; rotulo: string; nota?: string; activo: boolean; onClick: () => void }) {
+  return (
+    <button type="button" aria-pressed={activo} onClick={onClick} className={`flex min-h-[44px] min-w-0 flex-col rounded-xl border px-3 py-2 text-left transition-colors ${activo ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
+      <span className="text-xl font-semibold tabular-nums text-gray-900">{valor}</span>
+      <span className="text-xs text-gray-600">{rotulo}</span>
+      {nota && <span className="text-[11px] text-gray-400">{nota}</span>}
+    </button>
+  );
+}
+
+export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
+  const [datos, setDatos] = useState<RespuestaHoja | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<FiltroHoja>(FILTRO_HOJA_VACIO);
+  const [orden, setOrden] = useState<OrdenHoja>(ORDEN_HOJA);
+  const [panel, setPanel] = useState<FilaHoja | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    api.hoja().then(
+      (r) => vivo && (setDatos(r), setError(null)),
+      (e: Error) => vivo && setError(e.message),
+    );
+    return () => {
+      vivo = false;
+    };
+  }, [recarga]);
+
+  // Teclear no espera a que se repinte la tabla: el texto se aplica en cuanto hay hueco.
+  const texto = useDeferredValue(filtro.texto);
+  const lista = useMemo(() => (datos ? ordenarHoja(filtrarHoja(datos.filas, { ...filtro, texto }), orden) : []), [datos, filtro, texto, orden]);
+  const activos = useMemo(() => new Set(equipos.map((e) => e.clave)), [equipos]);
+  const abrir = useCallback((f: FilaHoja) => (f.clave !== null && activos.has(f.clave) ? onFicha(f.clave) : setPanel(f)), [activos, onFicha]);
+  const ordenar = useCallback((k: ColumnaHoja) => setOrden((o) => ({ k, dir: o.k === k ? (-o.dir as 1 | -1) : 1 })), []);
+
+  if (error && !datos) return <Alert tone="red">{error}</Alert>;
+  if (!datos) return <Loading texto="Cargando la hoja F-ST-022…" />;
+
+  const r = datos.resumen;
+  const set = (p: Partial<FiltroHoja>) => setFiltro((f) => ({ ...f, ...p }));
+  const alternar = <T,>(lista: T[], v: T): T[] => (lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
+  const c = datos.congelacion;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {error && <Alert tone="red">{error}</Alert>}
+      <Card
+        title="Trazabilidad F-ST-022"
+        hint={c ? `Hoja «${c.hoja}» congelada el ${fmtFecha(c.en)} desde «${c.archivo}» por ${c.por} · valores a hoy, ${fmtFecha(datos.hoy)} · vigencia de 365 días para todas las marcas` : undefined}
+      >
+        {datos.motivo && <Alert tone="amber">{datos.motivo}</Alert>}
+        {c && (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Ficha valor={r.total} rotulo="Equipos en la hoja" nota="todas las marcas" activo={!hayFiltroHoja(filtro)} onClick={() => setFiltro(FILTRO_HOJA_VACIO)} />
+            <Ficha valor={r.enInventario} rotulo="En el inventario" nota={r.inactivos > 0 ? `${r.inactivos} inactivo${r.inactivos === 1 ? '' : 's'}` : undefined} activo={filtro.situacion === 'inventario'} onClick={() => set({ situacion: filtro.situacion === 'inventario' ? '' : 'inventario' })} />
+            <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="aún sin revisar" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
+            <Ficha valor={r.conAvisos} rotulo="Con avisos" nota="conviene mirarlas" activo={filtro.soloAvisos} onClick={() => set({ soloAvisos: !filtro.soloAvisos })} />
+          </div>
+        )}
+        <div className="mt-3">
+          <Alert tone="blue" title="Por ahora es de consulta: aquí no se cambia nada">
+            El cliente, el modelo y el serial de un equipo del inventario se corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). La fecha de calibración, en el ticket de Zoho, en el campo «Fecha de
+            Calibración» (y después se traen las calibraciones en «Configuración»). Lo que sólo está en la hoja todavía no se puede corregir.
+            {r.calibracionesSueltas > 0 && ` Hay ${r.calibracionesSueltas} calibraci${r.calibracionesSueltas === 1 ? 'ón' : 'ones'} de tickets cuyo serial no es de ninguna fila de la hoja.`}
+          </Alert>
+        </div>
+      </Card>
+
+      {c && (
+        <>
+          <label className="relative block">
+            <span className="sr-only">Buscar por cliente, serial o modelo</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
+            <input
+              type="search"
+              value={filtro.texto}
+              onChange={(e) => set({ texto: e.target.value })}
+              placeholder="Buscar por cliente, serial o modelo"
+              className="block min-h-[44px] w-full rounded-xl border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Marca">
+            {r.porMarca.map((m) => (
+              <Chip key={m.clave} activo={filtro.marcas.includes(m.clave)} onClick={() => set({ marcas: alternar(filtro.marcas, m.clave) })}>
+                {etiquetaMarca(m.marca)}
+                <span className="tabular-nums opacity-60">{m.total}</span>
+              </Chip>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Estado">
+            {ESTADOS.map((s) => (
+              <Chip key={s} activo={filtro.estados.includes(s)} onClick={() => set({ estados: alternar(filtro.estados, s) })}>
+                <span className={`h-2 w-2 rounded-full ${TONO[s].dot}`} aria-hidden />
+                {ETIQUETA_ESTADO[s]}
+                <span className="tabular-nums opacity-60">{r.porEstado[s]}</span>
+              </Chip>
+            ))}
+            {(hayFiltroHoja(filtro) || orden.k !== 'fila') && (
+              <button type="button" onClick={() => (setFiltro(FILTRO_HOJA_VACIO), setOrden(ORDEN_HOJA))} className="px-2 text-sm font-medium text-blue-600 hover:underline">
+                Quitar filtros y volver al orden de la hoja
+              </button>
+            )}
+          </div>
+          <p className="text-sm text-gray-500" aria-live="polite">
+            <span className="font-semibold text-gray-800">{textoContador(lista.length, r.total)}</span> · pulsa una fila para ver su detalle
+          </p>
+          <Tabla filas={lista} onAbrir={abrir} orden={orden} onOrden={ordenar} vacio="Ninguna fila cumple los filtros." />
+        </>
+      )}
+
+      <details open={datos.fueraDeHoja.length > 0} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <summary className="min-h-[44px] cursor-pointer py-2 text-sm font-semibold text-gray-900">En el inventario y no en la hoja ({datos.fueraDeHoja.length})</summary>
+        <p className="mb-3 text-xs text-gray-500">Equipos del inventario del portal que no casan con ninguna fila de la hoja congelada: altas del maestro posteriores a la hoja, o un serial que no se pudo emparejar.</p>
+        <Tabla filas={datos.fueraDeHoja} onAbrir={abrir} vacio="Ninguno: todo el inventario está en la hoja." />
+      </details>
+
+      {panel && <PanelFila f={panel} onClose={() => setPanel(null)} />}
+    </div>
+  );
+}
