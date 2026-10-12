@@ -22,8 +22,8 @@ describe('058_trazabilidad_en_seguimiento.sql', () => {
     expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 057, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'057_trazabilidad_calibraciones\.sql',\s*'058_trazabilidad_en_seguimiento\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 057 (la última es la 059: retiros.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'057_trazabilidad_calibraciones\.sql',\s*'058_trazabilidad_en_seguimiento\.sql',/);
   });
 });
 
@@ -48,6 +48,12 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
     'trazabilidad/maestro-repo.ts · INSERT INTO': 'todos',
     // La pestaña «Trazabilidad F-ST-022» enseña la hoja entera: es la que distingue «fuera de seguimiento».
     'trazabilidad/hoja-repo.ts · FROM': 'todos',
+    // AMPLIADA en el lote 9d-2b: retirar y reincorporar un equipo A MANO. Es la segunda escritura de la tabla y está justificada:
+    // la hace una persona con `inventario.write`, con motivo y firma, y sólo cambia `activo` y la marca de retirado (retiros.test.ts
+    // lo vigila: ni cliente, ni serial, ni `en_seguimiento`). Ve los dos ámbitos porque también se retira un equipo enlazado fuera
+    // de seguimiento; no alimenta Resumen, Equipos ni Avisos: ésos siguen leyendo de `INVENTARIO`, que ya deja fuera lo inactivo.
+    'trazabilidad/retiros-repo.ts · FROM': 'todos',
+    'trazabilidad/retiros-repo.ts · UPDATE': 'todos',
   };
 
   it('sólo la nombran los sitios revisados, una vez cada uno', () => {

@@ -55,7 +55,7 @@ export function esGrimmEdm180(marca: unknown, modelo: unknown): boolean {
 /** Un equipo de `desk.equipos`, con lo único que el portal lee de él. */
 export interface EquipoMaestro { id: string; serial: string; marca: string | null; modelo: string | null; cliente: string | null; activo: boolean }
 /** Un equipo del inventario del portal, activo o no; `deskId` es el id de su equipo en Desk 2.0, si ya se enlazó. */
-export interface EquipoPortal { clave: string; serial: string; cliente: string; modelo: string; activo: boolean; deskId: string | null; /** `false` = otra marca, fuera de seguimiento (058); si falta, en seguimiento. */ enSeguimiento?: boolean }
+export interface EquipoPortal { clave: string; serial: string; cliente: string; modelo: string; activo: boolean; deskId: string | null; /** `false` = otra marca, fuera de seguimiento (058); si falta, en seguimiento. */ enSeguimiento?: boolean; /** Lo retiró una persona (059): sigue inactivo aunque el maestro lo tenga activo. */ retiradoAMano?: boolean }
 
 export const CAMPOS_MAESTRO = ['cliente', 'modelo', 'serial', 'activo'] as const;
 export type CampoMaestro = (typeof CAMPOS_MAESTRO)[number];
@@ -88,6 +88,8 @@ export interface RecuentosMaestro {
   clienteOtroNombre: number;
   /** Contactos puestos a mano cuyo cliente tiene hoy algún equipo activo y dejaría de tenerlo. */
   contactosSinEquipos: number;
+  /** Retirados a mano (059) que Desk 2.0 tiene activos: se respetan, no se reactivan ni se propone cambio sobre su `activo` (lote 9d-2b; las auditorías anteriores no lo llevan). */
+  retiradosAMano: number;
   /** Sólo en la auditoría de una sincronización aplicada desde el lote 9d-2a: lo que se hizo con las otras marcas. En el plan va aparte (`plan.otras`). */
   otras?: RecuentosOtras;
 }
@@ -113,6 +115,8 @@ export interface RecuentosOtras {
   sinSerial: number;
   /** Inactivas en Desk 2.0 que el portal no tiene: no se dan de alta. */
   inactivos: number;
+  /** Retiradas a mano que Desk 2.0 tiene activas: no se reactivan. */
+  retiradosAMano: number;
 }
 export interface PlanOtras { recuentos: RecuentosOtras; enlaces: FilaEnlace[]; altas: FilaAlta[]; cambios: CambioMaestro[]; soloPortal: EquipoRevisar[]; ambiguos: EquipoRevisar[] }
 
@@ -184,7 +188,7 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
   const porDeskId = new Map(inventario.filter((p) => p.deskId).map((p) => [p.deskId, p]));
   const r: RecuentosMaestro = {
     maestro: m.length, portal: inventario.length, casan: 0, enlaces: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0,
-    soloPortal: 0, soloPortalActivos: 0, ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 0, sinSerial: 0, inactivos: m.filter((e) => !e.activo).length, clienteOtroNombre: 0, contactosSinEquipos: 0,
+    soloPortal: 0, soloPortalActivos: 0, ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 0, sinSerial: 0, inactivos: m.filter((e) => !e.activo).length, clienteOtroNombre: 0, contactosSinEquipos: 0, retiradosAMano: 0,
   };
   const delSerial = new Map<string, EquipoPortal[]>();
   for (const p of inventario) delSerial.set(serialNorm(p.serial), [...(delSerial.get(serialNorm(p.serial)) ?? []), p]);
@@ -235,9 +239,10 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
       continue;
     }
     const serial = e.serial.trim();
-    const fila: FilaEnlace = { clave: p.clave, deskId: e.id, serial: serial === '' || serial.length > CLAVE_MAX ? p.serial : serial, cliente: limpio(e.cliente).slice(0, CLIENTE_MAX) || p.cliente, modelo: modeloEdm180(e.modelo)!, activo: e.activo };
+    const fila: FilaEnlace = { clave: p.clave, deskId: e.id, serial: serial === '' || serial.length > CLAVE_MAX ? p.serial : serial, cliente: limpio(e.cliente).slice(0, CLIENTE_MAX) || p.cliente, modelo: modeloEdm180(e.modelo)!, activo: activoDe(p, e) };
     enlaces.push(fila);
     r.casan++;
+    if (p.retiradoAMano && e.activo) r.retiradosAMano++;
     if (p.deskId !== e.id) r.enlaces++;
     if (!mismoNombre(fila.cliente, p.cliente)) r.clienteOtroNombre++;
     if (fila.activo) despues.add(claveCliente(fila.cliente));
@@ -269,6 +274,9 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
   return { recuentos: r, enlaces, altas, cambios, soloPortal, ambiguos, otras, hoja: cruceHoja(hoja, quedaria, maestro) };
 }
 
+/** `activo` sigue al maestro… salvo en un equipo retirado a mano (059): ése sigue inactivo hasta que alguien lo reincorpore, lo tenga Desk 2.0 como lo tenga. */
+const activoDe = (p: EquipoPortal, e: EquipoMaestro): boolean => !p.retiradoAMano && e.activo;
+
 /** Una clave libre para un alta: la de su serial (`claveSerial`, la función de siempre) y, si ya está cogida, con «-2», «-3»… Cabe siempre en su columna. */
 function claveLibre(serial: string, claves: Set<string>): string {
   const base = claveSerial(serial).slice(0, CLAVE_MAX - 4); // sitio para el sufijo de una clave ya cogida
@@ -293,7 +301,7 @@ function planOtras(maestro: readonly EquipoMaestro[], dentro: readonly EquipoPor
   const enPortal = new Set([...dentro, ...fuera].map((p) => serialNorm(p.serial)));
   const ids = new Set(maestro.map((e) => e.id));
   const soloPortal = fuera.filter((p) => !ids.has(p.deskId ?? '')).sort((a, b) => a.clave.localeCompare(b.clave)).map((p): EquipoRevisar => ({ origen: 'portal', clave: p.clave, serial: p.serial, cliente: p.cliente, activo: p.activo }));
-  const r: RecuentosOtras = { maestro: m.length, portal: fuera.length, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0, soloPortal: soloPortal.length, ambiguos: 0, sinSerial: 0, inactivos: 0 };
+  const r: RecuentosOtras = { maestro: m.length, portal: fuera.length, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0, soloPortal: soloPortal.length, ambiguos: 0, sinSerial: 0, inactivos: 0, retiradosAMano: 0 };
   const plan: PlanOtras = { recuentos: r, enlaces: [], altas: [], cambios: [], soloPortal, ambiguos: [] };
   for (const e of m) {
     const p = porDeskId.get(e.id);
@@ -303,9 +311,10 @@ function planOtras(maestro: readonly EquipoMaestro[], dentro: readonly EquipoPor
     const cliente = limpio(e.cliente).slice(0, CLIENTE_MAX);
     const modelo = limpio(e.modelo).slice(0, TEXTO_MAX);
     if (p) {
-      const fila: FilaEnlace = { clave: p.clave, deskId: e.id, serial: valido ? serial : p.serial, cliente: cliente || p.cliente, modelo: modelo || p.modelo, activo: e.activo };
+      const fila: FilaEnlace = { clave: p.clave, deskId: e.id, serial: valido ? serial : p.serial, cliente: cliente || p.cliente, modelo: modelo || p.modelo, activo: activoDe(p, e) };
       plan.enlaces.push(fila);
       r.casan++;
+      if (p.retiradoAMano && e.activo) r.retiradosAMano++;
       for (const campo of CAMPOS_MAESTRO) {
         if (fila[campo] === p[campo]) continue;
         r.cambios[campo]++;

@@ -11,8 +11,8 @@ interface Props {
 const PUEDE: Record<RolApp, string> = {
   LECTOR: 'Lo ve todo y no cambia nada. Es el rol de quien tiene la app y no tiene otro asignado.',
   COMERCIAL: 'Seguimiento de los equipos, avisos manuales (marcar como avisado) y contacto de cada cliente para los avisos.',
-  TECNICO: 'Seguimiento de los equipos y tipo de servicio puesto a mano en un ticket.',
-  DIRECTOR_TECNICO: 'Todo lo de Comercial y lo de Técnico, más toda la Configuración, la agenda del taller y sincronizar el inventario con el maestro de equipos de Desk 2.0.',
+  TECNICO: 'Seguimiento de los equipos, tipo de servicio puesto a mano en un ticket, traer las calibraciones de Desk 2.0 y corregir a mano una fecha de calibración (registrar una manual o anular una, siempre con su motivo).',
+  DIRECTOR_TECNICO: 'Todo lo de Comercial y lo de Técnico, más toda la Configuración, la agenda del taller, sincronizar el inventario con el maestro de equipos de Desk 2.0 y retirar o reincorporar a mano un equipo o una fila de la hoja F-ST-022 (con su motivo; no se borra nada).',
 };
 
 const ESTADO: Record<string, string> = { active: 'activo', pending: 'pendiente', inactive: 'inactivo' };

@@ -6,7 +6,7 @@ import { bloquesDetalle, bloquesHoja, hayQueAplicar, hayQueAplicarOtras, lineasO
 // el plan del cruce en recuentos y la última sincronización. Datos ficticios.
 const recuentos = (extra: Partial<RecuentosMaestro> = {}): RecuentosMaestro => ({
   maestro: 116, portal: 118, casan: 114, enlaces: 114, cambios: { cliente: 9, modelo: 0, serial: 2, activo: 1 }, altas: 2, soloPortal: 4, soloPortalActivos: 2,
-  ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 2, sinSerial: 0, inactivos: 1, clienteOtroNombre: 3, contactosSinEquipos: 1,
+  ambiguosMaestro: 0, ambiguosPortal: 0, copiasInactivas: 2, sinSerial: 0, inactivos: 1, clienteOtroNombre: 3, contactosSinEquipos: 1, retiradosAMano: 0,
   ...extra,
 });
 const SIN_NADA = { enlaces: 0, altas: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 } };
@@ -65,7 +65,7 @@ describe('el plan en líneas', () => {
 
 // Lote 9d-2a: el segundo bloque del plan, las otras marcas (fuera de seguimiento), y el cruce con la hoja.
 describe('otras marcas: el plan en líneas y lo que hay que revisar', () => {
-  const otras = (extra: Partial<RecuentosOtras> = {}): RecuentosOtras => ({ maestro: 239, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 237, soloPortal: 0, ambiguos: 2, sinSerial: 0, inactivos: 0, ...extra });
+  const otras = (extra: Partial<RecuentosOtras> = {}): RecuentosOtras => ({ maestro: 239, portal: 0, casan: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 237, soloPortal: 0, ambiguos: 2, sinSerial: 0, inactivos: 0, retiradosAMano: 0, ...extra });
 
   it('sus recuentos, en el orden en que se leen: en azul lo que se escribiría, en ámbar lo que no entra y hay que mirar', () => {
     expect(lineasOtras(otras()).map((l) => `${l.aviso ? '!' : l.cambia ? '*' : ' '} ${l.texto}: ${l.valor}`)).toEqual([
@@ -128,5 +128,17 @@ describe('la última sincronización y el detalle', () => {
     expect(textoCambio({ clave: '18A00001', campo: 'cliente', antes: 'Cliente Ficticio A', despues: 'Cliente Ficticio B' })).toBe('cliente: «Cliente Ficticio A» → «Cliente Ficticio B»');
     expect(textoCambio({ clave: '18A00002', campo: 'activo', antes: 'sí', despues: 'no' })).toBe('activo: «sí» → «no»');
     expect(textoCambio({ clave: '18A00009', campo: 'alta', antes: null, despues: '18A00009 · Cliente Ficticio D' })).toBe('alta: 18A00009 · Cliente Ficticio D');
+  });
+});
+
+// Lote 9d-2b: los equipos retirados a mano que Desk 2.0 tiene activos se cuentan aparte. No es un cambio (no se reactivan) ni un aviso.
+describe('retirados a mano en el plan', () => {
+  const linea = (lineas: { texto: string; valor: string; cambia: boolean; aviso: boolean }[]) => lineas.find((l) => l.texto.startsWith('Retirados a mano'));
+
+  it('en los dos bloques, sólo si hay alguno; un plan de antes de este lote (sin el recuento) no lo enseña', () => {
+    expect(linea(lineasPlan(recuentos()))).toBeUndefined();
+    expect(linea(lineasPlan(recuentos({ retiradosAMano: 2 })))).toEqual({ texto: 'Retirados a mano que Desk 2.0 tiene activos (se respetan: no se reactivan)', valor: '2', cambia: false, aviso: false });
+    expect(linea(lineasOtras({ maestro: 3, portal: 3, casan: 3, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, altas: 0, soloPortal: 0, ambiguos: 0, sinSerial: 0, inactivos: 0, retiradosAMano: 1 }))?.valor).toBe('1');
+    expect(hayQueAplicar(recuentos({ ...SIN_NADA, retiradosAMano: 2 }))).toBe(false);
   });
 });

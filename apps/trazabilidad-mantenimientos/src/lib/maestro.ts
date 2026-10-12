@@ -40,8 +40,12 @@ export function lineasOtras(o: RecuentosOtras): LineaPlan[] {
     ...(o.sinSerial > 0 ? [dato('Sin serial válido en Desk 2.0 (no se enlazan)', o.sinSerial)] : []),
     dato('Inactivos en Desk 2.0 (no se enlazan)', o.inactivos),
     mirar('Ya no están en Desk 2.0 (no se tocan)', o.soloPortal),
+    ...retirados(o.retiradosAMano),
   ];
 }
+
+/** Lote 9d-2b: los retirados a mano que Desk 2.0 tiene activos. Sincronizar los respeta: no es un cambio ni algo que mirar; sólo se dice, si hay alguno. */
+const retirados = (n: number | undefined): LineaPlan[] => (n ? [dato('Retirados a mano que Desk 2.0 tiene activos (se respetan: no se reactivan)', n)] : []);
 
 /** Las filas de la hoja congelada que no quedarían enlazadas, por motivo: lo delicado (repetidas y numéricas dudosas) se enseña primero. */
 export function bloquesHoja(revisar: readonly FilaHojaRevisar[]): Record<FilaHojaRevisar['motivo'], FilaHojaRevisar[]> {
@@ -70,6 +74,7 @@ export function lineasPlan(r: RecuentosMaestro): LineaPlan[] {
     dato('Copias inactivas con el serial de otro equipo (no se tocan)', r.copiasInactivas ?? 0),
     ...(r.sinSerial > 0 ? [dato('Sin serial válido en Desk 2.0 (no entran)', r.sinSerial)] : []),
     dato('Inactivos en Desk 2.0', r.inactivos),
+    ...retirados(r.retiradosAMano),
     mirar('Contactos puestos a mano que se quedarían sin equipos', r.contactosSinEquipos),
   ];
 }

@@ -4,8 +4,9 @@
  * reloj ni red: qué fila es de qué equipo, su fecha y su estado los decide
  * hub-api (`hoja.ts`).
  */
-import { claveCliente, type AvisoHoja, type CalibracionHoja, type EstadoCalibracion, type FilaHoja, type SituacionHoja } from '../dominio';
+import { claveCliente, type AvisoHoja, type CalibracionHoja, type EstadoCalibracion, type FilaHoja, type Retiro, type SituacionHoja } from '../dominio';
 import { origenCalibracion } from './calibraciones';
+import { fmtFecha } from './vistas';
 
 /** Cada aviso de una fila, en claro. */
 export const ETIQUETA_AVISO: Record<AvisoHoja, string> = {
@@ -55,10 +56,32 @@ export interface FiltroHoja {
   /** `inventario` incluye los inactivos (es lo que está en seguimiento); `enlazado`, las otras marcas enlazadas con Desk 2.0. */
   situacion: '' | 'inventario' | 'enlazado' | 'hoja';
   soloAvisos: boolean;
+  /** Sólo lo retirado a mano (un equipo, o una fila de la hoja). Sin él salen todas; «sólo en la hoja» es entonces lo vivo, como su cifra. */
+  retirados: boolean;
 }
-export const FILTRO_HOJA_VACIO: FiltroHoja = { texto: '', marcas: [], estados: [], situacion: '', soloAvisos: false };
+export const FILTRO_HOJA_VACIO: FiltroHoja = { texto: '', marcas: [], estados: [], situacion: '', soloAvisos: false, retirados: false };
 
-export const hayFiltroHoja = (f: FiltroHoja): boolean => f.texto.trim() !== '' || f.marcas.length > 0 || f.estados.length > 0 || f.situacion !== '' || f.soloAvisos;
+export const hayFiltroHoja = (f: FiltroHoja): boolean => f.texto.trim() !== '' || f.marcas.length > 0 || f.estados.length > 0 || f.situacion !== '' || f.soloAvisos || f.retirados;
+
+// ── Retirar y reincorporar (lote 9d-2b) ──
+
+export const textoRetiro = (r: Retiro): string => `Retirado a mano por ${r.por} el ${fmtFecha(r.en)}: ${r.motivo}`;
+
+/** Lo que se puede hacer con esa fila (lo ofrece la pantalla a quien tiene `inventario.write`), o null: un equipo inactivo que nadie retiró no se retira ni se reincorpora aquí. */
+export interface AccionRetiro { de: 'equipo' | 'fila'; retirar: boolean; destino: { clave: string } | { fila: number } }
+export function accionRetiro(f: Pick<FilaHoja, 'clave' | 'fila' | 'situacion' | 'retirado'>): AccionRetiro | null {
+  const retirar = f.retirado === null;
+  if (f.clave !== null) return retirar && f.situacion === 'inactivo' ? null : { de: 'equipo', retirar, destino: { clave: f.clave } };
+  return f.fila === null ? null : { de: 'fila', retirar, destino: { fila: f.fila } };
+}
+
+/** Lo que pasa al retirar o reincorporar, para decirlo antes de confirmar. */
+export function efectoRetiro({ de, retirar }: Pick<AccionRetiro, 'de' | 'retirar'>): string {
+  if (de === 'fila') return retirar ? 'La fila se sigue viendo, atenuada, pero deja de contar en los totales de la pestaña. La hoja congelada no se toca y se puede deshacer.' : 'La fila vuelve a contar en los totales de la pestaña.';
+  return retirar
+    ? 'El equipo sale de Resumen, Equipos, Calendario y Avisos. No se borra: conserva su seguimiento y sus calibraciones, y se puede reincorporar. En Desk 2.0 sigue existiendo: al sincronizar el maestro no se reactiva mientras siga retirado aquí.'
+    : 'El equipo vuelve a estar activo y vuelve a seguir al maestro: si en Desk 2.0 está inactivo, la próxima sincronización lo desactivará.';
+}
 
 export function filtrarHoja(filas: readonly FilaHoja[], f: FiltroHoja): FilaHoja[] {
   const q = claveCliente(f.texto);
@@ -67,6 +90,7 @@ export function filtrarHoja(filas: readonly FilaHoja[], f: FiltroHoja): FilaHoja
       (f.marcas.length === 0 || f.marcas.includes(x.marcaClave)) &&
       (f.estados.length === 0 || f.estados.includes(x.estado)) &&
       (f.situacion === '' || (x.situacion === 'inactivo' ? 'inventario' : x.situacion) === f.situacion) &&
+      (f.retirados ? x.retirado !== null : f.situacion !== 'hoja' || x.retirado === null) &&
       (!f.soloAvisos || x.avisos.length > 0) &&
       (q === '' || [x.cliente, x.serial, x.modelo, x.enHoja.cliente, x.enHoja.serial, x.enHoja.modelo].some((t) => t !== undefined && claveCliente(t).includes(q))),
   );

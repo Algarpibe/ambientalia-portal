@@ -218,8 +218,8 @@ export default function App() {
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}
         {tab === 'roles' && (yo || errorRol) && !gestionaRoles && <Alert tone="amber">Sólo un administrador del portal puede ver y repartir los roles de Trazabilidad.</Alert>}
         {tab === 'roles' && gestionaRoles && <Roles notificar={notificar} />}
-        {/* La hoja F-ST-022 entera, en sólo lectura. Una fila de un equipo activo del inventario abre la ficha de siempre. */}
-        {tab === 'fst022' && <HojaFst022 equipos={equipos} recarga={recarga} onFicha={setFicha} />}
+        {/* La hoja F-ST-022 entera. Una fila de un equipo activo del inventario abre la ficha de siempre; lo que se corrige en su panel vuelve a pedir el inventario. */}
+        {tab === 'fst022' && <HojaFst022 equipos={equipos} recarga={recarga} onFicha={setFicha} onCambio={cargar} />}
 
         {deInventario && error && (
           <div className="mb-4">
@@ -251,7 +251,7 @@ export default function App() {
           </>
         )}
 
-        {equipoFicha && <FichaEquipo equipo={equipoFicha} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} />}
+        {equipoFicha && <FichaEquipo equipo={equipoFicha} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} onCambio={async () => (setRecarga((n) => n + 1), cargar())} notificar={notificar} />}
         {aviso && (
           <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
             {aviso}

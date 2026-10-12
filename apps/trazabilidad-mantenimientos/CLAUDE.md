@@ -19,7 +19,11 @@ de Calibración» de los tickets de Desk 2.0, que se trae a mano (ver «Calibrac
 2.0»). **Desde el lote 9d-2a `tmc_equipos` lleva también las demás marcas del maestro, enlazadas
 pero FUERA de seguimiento** (`en_seguimiento = FALSE`): sólo las enseña la pestaña «Trazabilidad
 F-ST-022»; Resumen, Equipos, Calendario y Avisos siguen siendo sólo GRIMM EDM 180 (ver «Otras
-marcas enlazadas con Desk 2.0, fuera de seguimiento»). El seguimiento (aviso
+marcas enlazadas con Desk 2.0, fuera de seguimiento»). **Desde el lote 9d-2b una persona puede
+corregir a mano una fecha de calibración** (registrar una manual o anular una fila, con motivo y
+firma; ver «Corregir a mano una fecha de calibración») **y retirar un equipo o una fila de la
+hoja** (se marca, no se borra, y la sincronización del maestro lo respeta; ver «Retirar y
+reincorporar a mano»): sigue sin enviarse nada. El seguimiento (aviso
 enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
 se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
 congelar. Ver «F-ST-022: congelación y relevo de la Excel».
@@ -50,10 +54,12 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql` |
+| Retirar y reincorporar a mano (lote 9d-2b, 059): un equipo (`retirarEquipo`) o una fila de la hoja sin equipo (`retirarFila`) y su auditoría (`listarRetiros`) | `apps/hub-api/src/trazabilidad/retiros-repo.ts`; que el maestro respete la marca, en `maestro.ts` (`activoDe`, `retiradosAMano`) y `maestro-repo.ts`; la pantalla en `src/vistas/Retiro.tsx` y lo que calcula (`accionRetiro`, `efectoRetiro`, `textoRetiro`) en `src/lib/hoja.ts` |
 | Calibraciones desde Desk 2.0 (lote 9c): regla pura de la «última calibración» (`calibracionQueCuenta`, `fechaEfectiva`), el plan de la pasada (`planCalibraciones`), la salud de la lectura (`saludLectura`) y los tipos de su API (sin base; lo importa la app) | `apps/hub-api/src/trazabilidad/calibraciones.ts`; la lectura del campo de Zoho en `desk.tickets` (`crearLectorCalibraciones`; **único sitio** que nombra el campo, con sus citas de Desk 2.0) en `calibraciones-desk2.ts`; el SQL del portal (`leerPlanCalibraciones`, `sincronizarCalibraciones`, `historialCalibraciones`) en `calibraciones-repo.ts`; y `leerCalibraciones` (las filas guardadas), con el `listarEquipos` que las aplica al inventario, en `repo.ts` |
 | Tarjeta «Calibraciones · Desk 2.0» de Configuración, el bloque «Calibraciones» de la ficha de un equipo y lo que calculan (`lineasPlan`, `hayQueTraer`, `textoUltima`, `bloquesDetalle`, `origenCalibracion`, `ETIQUETA_ESTADO_FILA`) | `src/vistas/CalibracionesDesk.tsx`, `src/vistas/FichaEquipo.tsx` y `src/lib/calibraciones.ts` |
-| Maestro de equipos (lotes 9b y 9d-2a): regla pura del cruce, en dos ámbitos (`planMaestro` —el de GRIMM EDM 180, en seguimiento—, `planOtras` —las otras marcas, fuera de seguimiento—, `cruceHoja`, `claveLibre`, `modeloEdm180`, `esGrimmEdm180`, `cruceFst022`) y los tipos de su API (sin base; lo importa la app) | `apps/hub-api/src/trazabilidad/maestro.ts`; la lectura de `desk.equipos` (`crearLectorMaestro`, sólo las columnas concedidas, con sus citas de Desk 2.0) en `maestro-desk2.ts`; el SQL del portal (`leerPlanMaestro`, `sincronizarMaestro`, `leerCruceFst022`; **único fichero que escribe `tmc_equipos`**) en `maestro-repo.ts` |
+| Corregir a mano una fecha de calibración (lote 9d-2b): registrar una manual, anular una fila y anular la partida de una fila de la hoja (`registrarManual`, `anularCalibracion`, `anularPartida`; **único fichero, con la pasada, que escribe `tmc_calibraciones`**, y nunca una fecha) | `apps/hub-api/src/trazabilidad/edicion-repo.ts`; sus validadores (`parseCalibracionManual`, `parseMotivo`, `parseEnteroRuta`) en `types.ts`; lo que devuelven (`RespuestaEdicion`) en `hoja.ts`; la lista con sus acciones en `src/vistas/CalibracionesLista.tsx` y lo que dice de cada calibración (`firmaManual`, `detalleCalibracion`, `ticketsCorregibles`, `efectoAnular`) en `src/lib/calibraciones.ts` |
+| Maestro de equipos (lotes 9b y 9d-2a): regla pura del cruce, en dos ámbitos (`planMaestro` —el de GRIMM EDM 180, en seguimiento—, `planOtras` —las otras marcas, fuera de seguimiento—, `cruceHoja`, `claveLibre`, `modeloEdm180`, `esGrimmEdm180`, `cruceFst022`) y los tipos de su API (sin base; lo importa la app) | `apps/hub-api/src/trazabilidad/maestro.ts`; la lectura de `desk.equipos` (`crearLectorMaestro`, sólo las columnas concedidas, con sus citas de Desk 2.0) en `maestro-desk2.ts`; el SQL del portal (`leerPlanMaestro`, `sincronizarMaestro`, `leerCruceFst022`; **el fichero que escribe `tmc_equipos`** —desde el lote 9d-2b, con `retiros-repo.ts`, que sólo toca `activo` y la marca de retirado—) en `maestro-repo.ts` |
 | «En seguimiento» (058): el inventario de la app, **único sitio de `repo.ts` que nombra `tmc_equipos`** (`INVENTARIO`) | `apps/hub-api/src/trazabilidad/repo.ts`; el candado de quién lee la tabla, en `seguimiento.test.ts` |
 | Tarjeta «Maestro de equipos · Desk 2.0» de Configuración y lo que calcula (`lineasPlan`, `lineasOtras`, `hayQueAplicar`, `hayQueAplicarOtras`, `bloquesDetalle`, `bloquesHoja`, `textoFilaHoja`, `textoUltima`, `textoCambio`) | `src/vistas/MaestroEquipos.tsx` y `src/lib/maestro.ts` |
 | Congelación de la F-ST-022, **sólo lectura**: la forma de lo guardado (`Celda`, `FilaCongelada`, `ResumenFst022`, `PROBLEMAS_FST022`; sin imports) | `apps/hub-api/src/trazabilidad/fst022.ts`; su SQL (`listarCongelaciones`, `congelacionVigente`) en `repo.ts`; las dos rutas de subida retiradas (`retirada`, 410) en `router.ts` |
@@ -83,10 +89,11 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 
 | Tabla | Contenido |
 |---|---|
-| `portal.tmc_equipos` | (⚠️ Desde el lote 9c su `ultima_calibracion` **ya no es la que se enseña** si el equipo tiene alguna fila en `tmc_calibraciones`: es sólo el respaldo de quien no tiene ninguna.) Un equipo por `clave` (el serial; si la hoja repetía un serial, la 2.ª aparición lleva `-2`: `asignarClaves`). `activo = false` = lo retiró una importación o está inactivo en Desk 2.0: no se borra. **Sólo la escribe la sincronización con el maestro** (`maestro-repo.ts`; la importación de la Excel se retiró el 10/10/2026). Desde la 056 lleva `desk_id` (`TEXT NULL`: el id de su equipo en `desk.equipos`; índice único parcial `tmc_equipos_desk_id_uq` = un equipo de Desk 2.0, como mucho en una fila), `origen` (`'fst022'` por defecto = lo que dejó la Excel; `'desk'` = lo confirmó o lo dio de alta el maestro; con `CHECK`) y `maestro_en` (la última sincronización que lo encontró en el maestro). `ultima_calibracion` y las demás columnas de la Excel no las toca nadie; un alta del maestro nace con ellas a NULL. **Desde la 058 lleva `en_seguimiento`** (`BOOLEAN NOT NULL DEFAULT TRUE`): `TRUE` = el inventario de la app (hoy, sólo GRIMM EDM 180); `FALSE` = otra marca, enlazada con Desk 2.0 sólo para la pestaña «Trazabilidad F-ST-022». Lo que ya había quedó en `TRUE`; sólo la sincronización con el maestro da de alta filas con `FALSE` y **ningún código cambia el valor de una fila que ya existe** (`seguimiento.test.ts`). ⚠️ **Quien lea esta tabla tiene que decidir si filtra `en_seguimiento`**: la lista revisada está en «Otras marcas enlazadas con Desk 2.0, fuera de seguimiento» |
+| `portal.tmc_equipos` | (⚠️ Desde el lote 9c su `ultima_calibracion` **ya no es la que se enseña** si el equipo tiene alguna fila en `tmc_calibraciones`: es sólo el respaldo de quien no tiene ninguna.) Un equipo por `clave` (el serial; si la hoja repetía un serial, la 2.ª aparición lleva `-2`: `asignarClaves`). `activo = false` = lo retiró una importación, está inactivo en Desk 2.0 o **lo retiró una persona a mano** (059: entonces lleva `retirado_en`, `retirado_por_id`, `retirado_por` y `retirado_motivo`, y la sincronización no lo reactiva): no se borra. **La escriben la sincronización con el maestro** (`maestro-repo.ts`; la importación de la Excel se retiró el 10/10/2026) **y, sólo `activo` y esa marca, retirar o reincorporar a mano** (`retiros-repo.ts`, lote 9d-2b). Desde la 056 lleva `desk_id` (`TEXT NULL`: el id de su equipo en `desk.equipos`; índice único parcial `tmc_equipos_desk_id_uq` = un equipo de Desk 2.0, como mucho en una fila), `origen` (`'fst022'` por defecto = lo que dejó la Excel; `'desk'` = lo confirmó o lo dio de alta el maestro; con `CHECK`) y `maestro_en` (la última sincronización que lo encontró en el maestro). `ultima_calibracion` y las demás columnas de la Excel no las toca nadie; un alta del maestro nace con ellas a NULL. **Desde la 058 lleva `en_seguimiento`** (`BOOLEAN NOT NULL DEFAULT TRUE`): `TRUE` = el inventario de la app (hoy, sólo GRIMM EDM 180); `FALSE` = otra marca, enlazada con Desk 2.0 sólo para la pestaña «Trazabilidad F-ST-022». Lo que ya había quedó en `TRUE`; sólo la sincronización con el maestro da de alta filas con `FALSE` y **ningún código cambia el valor de una fila que ya existe** (`seguimiento.test.ts`). ⚠️ **Quien lea esta tabla tiene que decidir si filtra `en_seguimiento`**: la lista revisada está en «Otras marcas enlazadas con Desk 2.0, fuera de seguimiento» |
 | `portal.tmc_maestro_sincronizaciones` | **Auditoría** de cada sincronización aplicada (056): `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosMaestro`; desde el lote 9d-2a con `otras`, los `RecuentosOtras` de las otras marcas), `cambios` (`JSONB`, array de `{clave, campo, antes, despues}`; `campo` = `cliente` / `modelo` / `serial` / `activo` / `alta`; los de un equipo fuera de seguimiento llevan además `ambito: 'otras'`), `por_id`, `por` y `en`. Una fila por aplicación, también si no cambió nada. No se cambia ni se borra. Sin semilla ni clave foránea |
-| `portal.tmc_calibraciones` | **Una fila por calibración conocida** (057). `clave` (el equipo del portal, `tmc_equipos.clave`; **NULL** si el serial no es de un equipo del inventario: otras marcas, 9d), `serial` (tal cual) y `serial_norm`, `desk_equipo_id` (si el ticket lo trae), `fecha` (`DATE NOT NULL`: **nunca se edita**; corregir es anular la fila e insertar otra), `origen` (`CHECK` a `fst022` = punto de partida, la hoja congelada / `desk` = el campo de Zoho de un ticket / `manual` = lote 9d), `ticket` (sólo y siempre en las de origen `desk`), `corrige_ticket` + `corrige_fecha` (sólo en una `manual` que corrige un ticket: su número y la fecha que ese ticket tenía en Zoho), `estado` (`CHECK` a `vigente` / `anulada` / `en_revision` = no cuenta), `motivo`, la firma del alta (`por_id`, `por`, `en`, y `pasada_id` si la trajo una pasada) y la de la anulación (`anulada_por_id`, `anulada_por`, `anulada_en`, `anulada_motivo`, y `anulada_pasada_id`: **NULL = la anuló una persona**, y entonces la pasada no la resucita). Tres `CHECK` con nombre (`…_ticket_de_desk`, `…_corrige`, `…_anulada_firmada`) y dos índices únicos parciales: `tmc_calibraciones_ticket_uq (ticket) WHERE origen = 'desk' AND estado <> 'anulada'` = **como mucho una fila sin anular por ticket de Desk**, y `tmc_calibraciones_fst022_uq (clave) WHERE origen = 'fst022'` = una fila de partida por equipo. Sin semilla ni clave foránea. **Sólo la escribe la pasada** (`sincronizarCalibraciones`, `calibraciones-repo.ts`: inserta y anula; nunca cambia una fecha), y `calibraciones.test.ts` lo vigila; la corrección manual llegará con el 9d |
+| `portal.tmc_calibraciones` | **Una fila por calibración conocida** (057). `clave` (el equipo del portal, `tmc_equipos.clave`; **NULL** si el serial no es de un equipo del inventario: otras marcas, 9d), `serial` (tal cual) y `serial_norm`, `desk_equipo_id` (si el ticket lo trae), `fecha` (`DATE NOT NULL`: **nunca se edita**; corregir es anular la fila e insertar otra), `origen` (`CHECK` a `fst022` = punto de partida, la hoja congelada / `desk` = el campo de Zoho de un ticket / `manual` = lote 9d), `ticket` (sólo y siempre en las de origen `desk`), `corrige_ticket` + `corrige_fecha` (sólo en una `manual` que corrige un ticket: su número y la fecha que ese ticket tenía en Zoho), `estado` (`CHECK` a `vigente` / `anulada` / `en_revision` = no cuenta), `motivo`, la firma del alta (`por_id`, `por`, `en`, y `pasada_id` si la trajo una pasada) y la de la anulación (`anulada_por_id`, `anulada_por`, `anulada_en`, `anulada_motivo`, y `anulada_pasada_id`: **NULL = la anuló una persona**, y entonces la pasada no la resucita). Tres `CHECK` con nombre (`…_ticket_de_desk`, `…_corrige`, `…_anulada_firmada`) y dos índices únicos parciales: `tmc_calibraciones_ticket_uq (ticket) WHERE origen = 'desk' AND estado <> 'anulada'` = **como mucho una fila sin anular por ticket de Desk**, y `tmc_calibraciones_fst022_uq (clave) WHERE origen = 'fst022'` = una fila de partida por equipo. Sin semilla ni clave foránea. **La escriben la pasada** (`sincronizarCalibraciones`, `calibraciones-repo.ts`: inserta y anula; nunca cambia una fecha; `calibraciones.test.ts` lo vigila) **y, desde el lote 9d-2b, una persona** (`edicion-repo.ts`: inserta una `manual` —o la partida de una fila de la hoja, ya anulada, con `clave` NULL y `origen = 'fst022'`— y anula con `anulada_motivo`; tampoco cambia nunca una fecha; `edicion.test.ts` lo vigila) |
 | `portal.tmc_calibraciones_pasadas` | **Auditoría** de cada pasada aplicada (057), al estilo de `tmc_maestro_sincronizaciones`: `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosCalibraciones`), `detalle` (`JSONB`, array de `DetalleCalibracion`), `por_id`, `por` y `en`. No se cambia ni se borra. Sin semilla |
+| `portal.tmc_retiros` | **Un apunte por cada retiro o reincorporación a mano** (059): de un equipo (`clave`) **o** de una fila de la hoja congelada sin equipo (`congelacion_id` + `fila`) —`CHECK` `tmc_retiros_objeto`: una cosa o la otra—, `accion` (`CHECK` a `retirar` / `reincorporar`), `motivo` (`NOT NULL` y no vacío), `antes` y `despues` (`activo` / `retirado`: el valor anterior y el nuevo) y la firma (`por_id`, `por`, `en`). No se cambia ni se borra: es la auditoría y, para una fila de la hoja, **su estado** (está retirada si su último apunte es un retiro). Sin semilla ni clave foránea. Sólo la escribe `retiros-repo.ts`. **No es una tabla de mensajes ni de envíos** |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación que se hizo: archivo, recuentos y quién. **Histórico**: ya no se añade ninguna fila |
 | `portal.tmc_fst022_congelaciones` | (**Sólo lectura** desde el 10/10/2026: ningún código inserta ni cambia nada en las dos tablas `tmc_fst022_*`; `fst022.test.ts` lo vigila.) Una fila por **congelación de la F-ST-022** (055): `archivo`, `sha256` del fichero (lo calcula el navegador), `hoja`, `fila_cabecera` y `cabeceras` (`JSONB`: las filas de títulos tal cual), recuentos (`total_filas`, `total_columnas`, `filas_guardadas`, `filas_equipo`, `filas_con_serial`, `filas_edm180` y `problemas`, `JSONB` de recuentos por tipo), `vigente`, `motivo`, la firma (`por_id`, `por`, `en`) y, al dejar de ser la vigente, `reemplazada_por_id` / `reemplazada_por` / `reemplazada_en` / `reemplazada_motivo`. Índice único parcial `tmc_fst022_congelaciones_vigente_uq` = **como mucho una vigente**; `CHECK` `tmc_fst022_vigente_o_reemplazada` = reemplazada si y sólo si no es la vigente, y entonces firmada y con motivo. Nunca se borra. Sólo `CREATE … IF NOT EXISTS`, sin semilla |
@@ -121,13 +128,19 @@ segunda tabla, más abajo.
 | POST | `/trazabilidad/importaciones` y `/trazabilidad/fst022/congelaciones` (también con `?simular=1`) | **Retiradas el 10/10/2026: 410 `subida_retirada`** para cualquiera, administrador incluido («La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar…»). Van tras la sesión y la app (401 / 403 como siempre) y no validan el cuerpo ni miran el rol ni la base (`retirada`, `router.ts`). Siguen registradas sólo para decírselo a un portal sin actualizar; ya no tienen parser propio (un cuerpo de más de 2 MB es el 413 del global) |
 | GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
 | GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
-| GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{fecha, origen, ticket, corrigeTicket, estado, cuenta}`). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
-| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos`; `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero) |
+| GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{id, fecha, origen, ticket, corrigeTicket, estado, cuenta}` y, en las guardadas, su firma: `motivo`, `por`, `en`, `anuladaPor`, `anuladaEn`, `anuladaMotivo`; la partida que una fila toma de la hoja no es una fila guardada: su `id` es el de su fila, en negativo). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, retirados, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (desde el lote 9d-2b cada fila lleva `retirado: {por, en, motivo} \| null` —el equipo o, si sólo está en la hoja, la fila—, y `soloHoja`, `conAvisos` y `porEstado` no cuentan lo retirado) (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
+| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos` y, desde el lote 9d-2b, `retiradosAMano` (retirados a mano que Desk 2.0 tiene activos: se respetan; también en `otras`); `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero) |
 | GET | `/trazabilidad/maestro/cruce` | Cruce **informativo** de todas las marcas entre la congelación vigente y el maestro, por serial: `{maestro, congelacion: {id, archivo} \| null, marcas: [{marca, v3, desk, casan, soloV3, soloDesk, ambiguos, sinCeros}]}` (`sinCeros` = de `soloV3`, los de serial numérico que casarían ignorando ceros a la izquierda). Sólo recuentos; no escribe |
 | POST | `/trazabilidad/maestro/sincronizar` | Permiso `maestro.sincronizar`. `{huella?}` (la del plan revisado): aplica el plan de ahora —**los dos ámbitos**, en la misma transacción—, todo o nada, y devuelve su fila de auditoría (`recuentos.otras` = lo hecho con las otras marcas). **409 `maestro_no_disponible`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; 400 en `huella` si no son 64 hexadecimales |
 | GET | `/trazabilidad/calibraciones/plan` | El plan de las calibraciones que traen los tickets de Desk 2.0, **a hoy y sin escribir**: `{lectura: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, salud: {alerta, bloquea, mensaje} \| null, ultima}`. Sin Desk 2.0 (sin variable, caído, sin permiso) responde 200 con `plan: null` y el motivo. `recuentos` (`RecuentosCalibraciones`, `calibraciones.ts`): `tickets`, `conCf` (los que traen `raw.cf`), `conCampo`, `porNombre`, `porEtiqueta`, `gestionadosPorApp`, `nuevas`, `sinCambios`, `cambiadas`, `reenlazadas`, `vaciadas`, `enRevision`, `otrasMarcas`, `historial`, `sinEquipo`, `ilegibles`, `noResucitan`, `partida`, `partidaDeInventario`, `partidaDistintas`, `equiposCambian`, `salenDeAvisos`, `entranEnAvisos`. `salud` avisa si **ningún ticket trae el campo** («puede que el campo se haya renombrado en Zoho o que Desk 2.0 no esté releyendo los tickets») y `bloquea` si antes sí los traía. `ultima` = la última pasada (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `calibraciones.write`** le llegan además `detalle` (línea a línea, con seriales: `{tipo, ticket, clave, serial, fecha, antes, nota}`, ordenado por lo que hay que mirar primero, 300 como mucho) y `detalleTotal` |
 | POST | `/trazabilidad/calibraciones/sincronizar` | Permiso `calibraciones.write`. `{huella?}` (la del plan revisado): aplica el plan de ahora, todo o nada, y devuelve la fila de su pasada (`{id, huella, recuentos, por, en}`). **409 `calibraciones_no_disponibles`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; **409 `lectura_sospechosa`** si ningún ticket trae ya el campo y antes sí (`salud.bloquea`); 400 en `huella` si no son 64 hexadecimales. Usa siempre el día de hoy en Colombia |
-| GET | `/trazabilidad/equipos/:clave/calibraciones` (`?hoy=`) | El historial de calibraciones de un equipo, la más reciente primero: `{clave, ultima, calibraciones: [{id, fecha, origen, ticket, corrigeTicket, estado, motivo, por, en, anuladaPor, anuladaEn, cuenta, …}]}`. `cuenta` = es la que da su última calibración; `ultima`, esa fecha (o `null`). Sin filas, lista vacía. 400 en `clave` si no lo es |
+| GET | `/trazabilidad/equipos/:clave/calibraciones` (`?hoy=`) | El historial de calibraciones de un equipo, la más reciente primero: `{clave, ultima, calibraciones: [{id, fecha, origen, ticket, corrigeTicket, estado, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo, cuenta, …}]}`. `cuenta` = es la que da su última calibración; `ultima`, esa fecha (o `null`). Sin filas, lista vacía. 400 en `clave` si no lo es |
+| POST | `/trazabilidad/calibraciones/manual` | Permiso `calibraciones.write` (lote 9d-2b). `{clave \| fila, fecha, motivo, corrigeTicket?}`: registra una calibración **manual** de un equipo (`clave`) o de una fila de la hoja congelada (`fila`). Devuelve `{id, clave, fila, ultima, estado, calibraciones[]}` (`RespuestaEdicion`): el historial ya recalculado y la fecha que cuenta. 400 en `clave` (ninguna de las dos, o las dos), `fila`, `fecha` (falta, no existe, posterior a hoy o anterior al 2000-01-01), `motivo` (obligatorio, 500 como mucho) o `corrigeTicket`; **404** si el equipo o la fila no existen; **409** `ticket_sin_calibracion`, `ticket_ya_corregido` o `serial_ambiguo`. Usa siempre el día de hoy en Colombia. **No envía nada** |
+| POST | `/trazabilidad/calibraciones/:id/anular` | Permiso `calibraciones.write`. `{motivo}`: anula esa fila guardada, con firma. Devuelve lo mismo que la anterior. 400 en `id` o `motivo`; 404 si no existe; 409 `ya_anulada`. No se desanula |
+| POST | `/trazabilidad/equipos/:clave/retirar` y `/trazabilidad/equipos/:clave/reincorporar` | Permiso `inventario.write` (lote 9d-2b). `{motivo}`: retira a mano un equipo (queda inactivo, con su marca, y la sincronización del maestro no lo reactiva) o lo reincorpora. Devuelve `{retirado, retiros[]}` (cómo queda y su historial). 400 en `clave` o `motivo` (obligatorio); 404 si no existe; 409 `ya_retirado`, `equipo_inactivo` (inactivo sin que nadie lo retirara) o `no_retirado` |
+| POST | `/trazabilidad/filas/:fila/retirar` y `/trazabilidad/filas/:fila/reincorporar` | Permiso `inventario.write`. `{motivo}`: retira (o recupera) una fila de la congelación vigente **que no es de ningún equipo**; sólo apunta, la hoja no se toca. Devuelve lo mismo. 400 en `fila` o `motivo`; 404 si la fila no es de la hoja; 409 `fila_con_equipo`, `ya_retirada` o `no_retirada`. ⚠️ No se llaman `/hoja/…` a propósito: `hoja.test.ts` fija que bajo `/hoja` sólo hay una lectura |
+| GET | `/trazabilidad/retiros` (`?clave=` o `?fila=`) | La auditoría de retiros de un equipo o de una fila de la hoja, la más reciente primero: `{retiros: [{id, accion, motivo, antes, despues, por, en}]}`. Abierta a quien tiene la app. 400 en `clave` si no dice de quién (o dice las dos) o en `fila` |
+| POST | `/trazabilidad/calibraciones/partida/:fila/anular` | Permiso `calibraciones.write`. `{motivo}`: anula la fecha de partida que esa fila de la hoja toma de la congelación (la guarda ya anulada; la congelación no se toca). 400 en `fila` o `motivo`; 404 si la fila no es de la hoja; 409 `partida_guardada` o `serial_ambiguo` |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
 | POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
 | GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), el reloj con pausas (`rolEstado`: `cuenta` / `standby` / `terminado`, el del estado de ahora; `enPausa`; `diasPausados`; `pausas: [{desde, hasta}]`; `terminadoEl`; `medidoDesde`; `fechaLimiteBase` = la fecha sin pausas), `plazoDias`, `fechaLimite` (ya corrida), `diasHabiles` y `estadoPlazo` (`EN_PLAZO` / `VENCE_HOY` / `VENCIDO` / `SIN_PLAZO` en marcha; `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo terminado), y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto). Antes de leer apunta los cambios de estado (`registrarEstados`), si se puede: un fallo ahí no falla la petición |
@@ -186,7 +199,8 @@ escribe nadie a mano: lo apunta hub-api.
 | `agenda.liberar` | — | — | — | sí | `POST /trazabilidad/agenda/liberar` |
 | `agenda.reparto` | — | — | — | sí | `POST /trazabilidad/agenda/reparto` y, aunque sólo lee, `GET /trazabilidad/agenda/reparto` (la propuesta) |
 | `agenda.flujo` | — | — | — | sí | `PUT /trazabilidad/agenda/flujo/:numero` |
-| `calibraciones.write` | — | — | sí | sí | `POST /trazabilidad/calibraciones/sincronizar` y el `detalle` de `GET /trazabilidad/calibraciones/plan` (lote 9c). Corregir una calibración a mano, que también lo pedirá, es del 9d |
+| `calibraciones.write` | — | — | sí | sí | `POST /trazabilidad/calibraciones/sincronizar` y el `detalle` de `GET /trazabilidad/calibraciones/plan` (lote 9c); y corregir una fecha a mano (lote 9d-2b): `POST /trazabilidad/calibraciones/manual`, `POST /trazabilidad/calibraciones/:id/anular` y `POST /trazabilidad/calibraciones/partida/:fila/anular` (por defecto, revisable) |
+| `inventario.write` | — | — | — | sí | Retirar y reincorporar a mano (lote 9d-2b; por defecto, revisable): `POST /trazabilidad/equipos/:clave/retirar`, `…/reincorporar`, `POST /trazabilidad/filas/:fila/retirar` y `…/reincorporar` |
 | `maestro.sincronizar` | — | — | — | sí | `POST /trazabilidad/maestro/sincronizar` y el `detalle` de `GET /trazabilidad/maestro/plan` (lote 9b) |
 | `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
 
@@ -949,7 +963,8 @@ contenido de hoy y, por lotes, la releva el portal.
   `calibraciones-desk2.ts`, `POR_NOMBRE` pasa a ser `t.fecha_calibracion::text` (y la cabecera
   de ese fichero, con su cita). Lo demás —regla, plan, tabla— no se entera.
 - **Una corrección manual manda sobre la fecha de Desk hasta que cambie la de ese ticket en
-  Zoho.** El modelo y la regla ya están (y probados); su pantalla y sus rutas son del 9d.
+  Zoho.** El modelo y la regla ya están (y probados); su pantalla y sus rutas llegaron con el
+  lote 9d-2b («Corregir a mano una fecha de calibración»).
 - El inventario sigue siendo **sólo GRIMM EDM 180**; las demás marcas entran en el 9d (sus
   calibraciones ya se guardan, sin equipo del inventario).
 
@@ -965,6 +980,28 @@ contenido de hoy y, por lotes, la releva el portal.
   180. Incluirlas (por marca o por equipo) **no** es de este lote.
 - **DECIDIDO**: los seriales repetidos y los numéricos dudosos **no se enlazan solos**: quedan
   marcados para revisar.
+
+**Decisiones para el lote 9d-2b (12/10/2026): corregir una fecha a mano y retirar un equipo.**
+Hasta este lote una fecha equivocada sólo se arreglaba en el ticket de Zoho, y un equipo que ya no
+existe no se podía quitar de ningún modo.
+
+- **Corregir una fecha de calibración**: quien tiene `calibraciones.write` (Técnico y Director
+  Técnico; los administradores, todo), **con motivo obligatorio**. *(Permiso y motivo: valores por
+  defecto, revisables —Alfonso los aceptó al pedir el lote, sin discutirlos—.)*
+- **La corrección manda sobre la fecha de Desk hasta que cambie la de ese ticket en Zoho** (la
+  decisión del 09/10 y del 11/10; la regla ya estaba, ahora tiene ruta y pantalla).
+- **Nada se borra y una fecha no se edita**: corregir es registrar otra fila; quitar, anularla
+  con firma y motivo. No hay «desanular»: si hace falta, se registra otra.
+- **Cliente, marca, modelo y serial NO se editan en el portal**: su maestro es Desk 2.0.
+- **Retirar o reincorporar un equipo, o una fila de la hoja**: permiso nuevo, de nombre estable,
+  **`inventario.write`**, sólo del Director Técnico (los administradores, todo), **con motivo
+  obligatorio**. *(Por defecto, revisable: el Técnico corrige fechas, no retira.)*
+- **Retirar es marcar**, con firma y motivo, y **se puede deshacer**: nada se borra. El equipo
+  retirado sale de Resumen, Equipos, Calendario y Avisos como cualquier inactivo, y conserva su
+  seguimiento y sus calibraciones.
+- **«Retirado a mano» no es «inactivo en Desk 2.0»**: lo inactivo en Desk 2.0 sigue al maestro (y
+  vuelve si allí lo reactivan); lo retirado a mano **no se reactiva al sincronizar** aunque Desk
+  2.0 lo tenga activo. En Desk 2.0 el equipo sigue existiendo: aquí no se toca nada suyo.
 
 ### Lo congelado: la V3
 
@@ -1153,17 +1190,86 @@ simulación y calendario son el mismo código de siempre, que ve otra fecha.
   cambiadas, anuladas, sin equipo, punto de partida con dos fechas, valores ilegibles), después
   los recuentos y, plegado, lo que entra sin más (`bloquesDetalle`). Tras traerlas se vuelve a
   leer el inventario de la app.
-- **La ficha de un equipo**: bloque «Calibraciones», de sólo lectura, con su historial —fecha,
-  origen («F-ST-022» / «Ticket n.º …» / «Manual»), estado («Vigente» / «Anulada» / «En revisión»)
-  y cuál es «La que cuenta»—; quién y cuándo, en el `title` de cada línea.
-- **Cualquier corrección se hace hoy en Zoho** (la fecha del ticket) o en Desk 2.0 (el equipo del
-  ticket) y se vuelven a traer: el portal todavía no edita calibraciones.
+- **La ficha de un equipo**: bloque «Calibraciones», con su historial —fecha, origen («Hoja
+  F-ST-022» / «Ticket n.º …» / «Manual»), estado («Vigente» / «Anulada» / «En revisión») y cuál
+  es «La que cuenta»—; quién y cuándo, en el `title` de cada línea. Desde el lote 9d-2b, con
+  `calibraciones.write`, ahí mismo se corrige (sección siguiente).
+- **Lo normal sigue siendo corregir en Zoho** (la fecha del ticket) o en Desk 2.0 (el equipo del
+  ticket) y volver a traerlas; desde el lote 9d-2b una fecha también se puede corregir a mano.
 
-### Pestaña «Trazabilidad F-ST-022» (lote 9d-1, sólo lectura)
+### Corregir a mano una fecha de calibración (lote 9d-2b)
 
-**Estado: se ve, no se edita.** «Clientes y calibraciones» → «Trazabilidad F-ST-022» (`#fst022`),
+**Estado: hecho.** Una persona con `calibraciones.write` registra una calibración **manual** o
+**anula** una fila, siempre con motivo y firma. Sin migración: la 057 ya traía las columnas.
+⚠️ **Es el primer lote que deja a una persona cambiar la fecha de la que dependen los avisos, y NO
+añade ningún camino de envío**: el estado del equipo —y su sitio en Resumen, Calendario, Avisos y
+la simulación— lo recalcula la regla de siempre en la lectura siguiente (`edicion.test.ts` y
+`edicion.db.test.ts` lo vigilan).
+
+- **Dónde vive**: `edicion-repo.ts` (su SQL: **sólo** inserta en `tmc_calibraciones` y anula;
+  nunca cambia una fecha ni nombra una pasada), los validadores en `types.ts`
+  (`parseCalibracionManual`, `parseMotivo`, `parseEnteroRuta`) y las tres rutas en `router.ts`.
+  La regla (`calibraciones.ts`) **no cambió**.
+- **Registrar una manual** (`POST /calibraciones/manual`): `{clave | fila, fecha, motivo,
+  corrigeTicket?}`. La fecha, ni posterior a hoy (día en Colombia; las escrituras no aceptan
+  `?hoy`) ni anterior a `FECHA_MINIMA_CALIBRACION`: una manual nace `vigente`, nunca «en
+  revisión». Inserta una fila `manual`; no toca ninguna otra.
+  - **De quién es**: de un equipo del portal, por su `clave` (en seguimiento o enlazado fuera de
+    seguimiento: se guarda **con su clave**), o de una **fila de la hoja** (`fila`, su número en la
+    congelación vigente). Si esa fila es de un equipo, se guarda con su clave; si **sólo está en
+    la hoja**, **por su serial y sin clave** (el `serial_norm` de la congelada: es por donde la
+    pestaña le atribuye las calibraciones sueltas).
+  - **Una fila con el serial repetido en la hoja (o sin serial) no admite correcciones** (409
+    `serial_ambiguo`): no se sabría de cuál de las filas es. En producción son 6 filas (3 pares).
+  - **`corrigeTicket`**: uno de los tickets de ESE historial, con su calibración sin anular
+    (también vale una «en revisión»). Guarda `corrige_ticket` y, en `corrige_fecha`, **la fecha
+    que ese ticket tiene ahora**: la manual lo tapa —aunque sea anterior— mientras la pasada no
+    vea otra fecha en Zoho. 409 `ticket_sin_calibracion` si el ticket no es de ese historial; 409
+    `ticket_ya_corregido` si ya tiene una corrección vigente para esa misma fecha (se anula
+    antes). Cuando el ticket cambia en Zoho, la corrección deja de contar (sigue guardada) y se
+    puede registrar otra.
+  - Sin `corrigeTicket` es **una calibración más**: cuenta si es la más reciente (a igual fecha,
+    manual > Desk > F-ST-022).
+- **Anular** (`POST /calibraciones/:id/anular`, `{motivo}`): cualquier fila guardada (manual, de
+  ticket, de partida o «en revisión») pasa a `anulada`, firmada, con `anulada_pasada_id` NULL (=
+  la anuló una persona). Deja de contar; si era de un ticket, **la pasada de Desk 2.0 no la
+  resucita mientras Zoho siga con esa fecha** (`noResucitan`), y si la fecha cambia allí, entra la
+  nueva. Con todas las filas de un equipo anuladas, queda «Sin fecha» (no vuelve la del
+  inventario). 409 `ya_anulada`.
+- **Anular la partida de una fila de la hoja** (`POST /calibraciones/partida/:fila/anular`): la
+  fecha que una fila sólo de la hoja (o enlazada fuera de seguimiento) toma de la congelación
+  **no es una fila guardada** —en la respuesta de `GET /hoja` lleva `id` = su fila en negativo—,
+  y la congelación es inmutable. Anularla es **guardar esa fecha ya anulada** (`origen =
+  'fst022'`, sin clave si la fila sólo está en la hoja); `tablaHoja` deja entonces de tomarla de
+  la hoja. Hace falta cuando la fecha buena es **anterior** a la de la hoja: mientras la partida
+  cuente, gana ella. 409 `partida_guardada` si esa fila no toma su fecha de la hoja (un equipo en
+  seguimiento: su partida es una fila normal, que se anula por su id).
+- **Resolver una fila «en revisión»** (fecha futura o absurda, serial ambiguo): se anula, o se
+  registra la manual que corrige ese ticket. Nunca pasa a vigente editándola.
+- **Qué devuelven las tres** (`RespuestaEdicion`, `hoja.ts`): `{id, clave, fila, ultima, estado,
+  calibraciones[]}`, el historial ya recalculado de ese equipo o de esa fila y la fecha que
+  cuenta. Sale de la misma tabla que `GET /hoja`.
+- **Fuera de seguimiento**: una manual en un equipo enlazado se ve en la pestaña y **no asoma en
+  Equipos ni en los avisos** (el blindaje de `en_seguimiento`, probado byte a byte en
+  `edicion.db.test.ts`). ⚠️ El día que una marca pase a seguimiento, las manuales guardadas **por
+  serial** (filas que sólo estaban en la hoja) seguirán sin clave: habrá que re-enlazarlas en ese
+  lote (la pasada no toca las manuales).
+- **Dos a la vez**: registrar y anular la partida cogen el bloqueo de la pasada de calibraciones
+  (`portal.tmc_calibraciones_pasadas`): van una detrás de otra, entre sí y con una pasada.
+- **La pantalla** (`CalibracionesLista.tsx`, la misma lista en la ficha de un equipo y en el panel
+  de la pestaña F-ST-022): con el permiso, **«Corregir fecha»** (fecha, «¿corrige la fecha de un
+  ticket?» con los del historial, y motivo) y **«Anular»** en cada fila sin anular (dice lo que
+  pasa antes de confirmar: `efectoAnular`). Todo dentro de la página. Una manual se distingue:
+  «Manual» y, debajo, quién, cuándo y su motivo (`firmaManual`); el detalle entero, en el `title`
+  (`detalleCalibracion`). Sin el permiso, la lista es la de consulta de siempre. Tras un cambio se
+  vuelven a pedir el historial, la tabla de la pestaña y el inventario.
+
+### Pestaña «Trazabilidad F-ST-022» (lote 9d-1)
+
+**Estado: se ve; desde el lote 9d-2b se corrigen ahí las fechas de calibración** (sección
+anterior). «Clientes y calibraciones» → «Trazabilidad F-ST-022» (`#fst022`),
 para cualquiera con la app: la hoja congelada **entera, de todas las marcas**, tal como la
-entiende hoy el portal. No hay ninguna ruta de escritura, ni migración, ni tabla nueva; el
+entiende hoy el portal. Su ruta, `GET /hoja`, sólo lee; el
 inventario (Resumen, Equipos, Calendario, Avisos) **sigue siendo sólo GRIMM EDM 180**. (Desde el
 lote 9d-2a las otras marcas pueden estar **enlazadas** con Desk 2.0, fuera de seguimiento: lo
 que cambia en esta pestaña está en la sección siguiente.) Vigencia
@@ -1216,12 +1322,13 @@ de 365 días para todas las marcas (decisión de Alfonso, como la hoja).
   contador «N de total»; orden por columna (por defecto, el de la hoja; las sin fecha, siempre
   al final). Tabla de anchos fijos desde 1280 px y tarjetas por debajo (dos columnas desde 768).
   Una fila de un equipo **activo** del inventario abre la ficha de siempre; las demás (sólo en
-  la hoja, o inactivas), un panel de sólo lectura con lo de hoy, lo que decía la hoja y sus
-  calibraciones conocidas. Debajo, «En el inventario y no en la hoja», plegado si está vacío.
-  «Actualizar» (cabecera) vuelve a pedir también la tabla.
-- **Dónde se corrige hoy cada cosa** (la pantalla lo dice): cliente, modelo y serial de un equipo
-  del inventario, en Desk 2.0 (y se sincroniza el maestro); la fecha, en el ticket de Zoho (y se
-  traen las calibraciones). Lo que sólo está en la hoja todavía no se puede corregir.
+  la hoja, o inactivas), un panel con lo de hoy, lo que decía la hoja y sus calibraciones
+  conocidas (con «Corregir fecha» y «Anular» para quien puede: lote 9d-2b). Debajo, «En el
+  inventario y no en la hoja», plegado si está vacío. «Actualizar» (cabecera) vuelve a pedir
+  también la tabla.
+- **Dónde se corrige cada cosa** (la pantalla lo dice): cliente, marca, modelo y serial de un
+  equipo enlazado, **sólo en Desk 2.0** (y se sincroniza el maestro); la fecha, en el ticket de
+  Zoho (y se traen las calibraciones) **o aquí, a mano**, también en lo que sólo está en la hoja.
 
 ### Otras marcas enlazadas con Desk 2.0, fuera de seguimiento (lote 9d-2a)
 
@@ -1234,7 +1341,8 @@ otras marcas. Lo que las tiene fuera de todo lo demás es **una columna**.
   simulación), tiene seguimiento, contacto y da su cliente a «Servicios»—; `FALSE` = está enlazado
   con su equipo de Desk 2.0 **sólo** para que la pestaña «Trazabilidad F-ST-022» enseñe sus datos
   del maestro. Hoy `TRUE` = los GRIMM EDM 180 (118 filas) y `FALSE` = todo lo demás. **Nada cambia
-  el valor de una fila que ya existe**: ni sincronizar, ni ninguna ruta (no hay pantalla para ello).
+  el valor de una fila que ya existe**: ni sincronizar, ni ninguna ruta (no hay pantalla para ello;
+  retirar un equipo a mano, lote 9d-2b, cambia `activo`, **no** `en_seguimiento`).
 - **Quién lee `tmc_equipos` y cuál filtra** (la lista revisada; `seguimiento.test.ts` falla si
   aparece un `FROM / JOIN / UPDATE / INSERT INTO portal.tmc_equipos` fuera de ella):
 
@@ -1242,6 +1350,7 @@ otras marcas. Lo que las tiene fuera de todo lo demás es **una columna**.
   |---|---|---|
   | `repo.ts` → `INVENTARIO` (`(SELECT * FROM portal.tmc_equipos WHERE en_seguimiento)`), **el único sitio de ese fichero que nombra la tabla**. De él leen `consultarEquipos` (GET /equipos y, con él, Resumen, Equipos, Calendario, Avisos y la simulación, que se calculan en el navegador), `contactosDeDesk`, el cliente de `listarServicios`, `existeActivo` (guardar seguimiento) y `registrarAvisos` | **Sí** | Es el blindaje: una fila fuera de seguimiento no existe para la app |
   | `calibraciones-repo.ts` → `calcular` (el plan de la pasada) | **Sí** | Las otras marcas no reciben punto de partida ni se les re-enlaza nada (abajo) |
+  | `retiros-repo.ts` → `retirarEquipo` (lee la fila que retira y su `UPDATE`; lote 9d-2b) | No | Se retira un equipo de cualquier ámbito; sólo escribe `activo` y la marca de retirado, **nunca `en_seguimiento`**, y no alimenta Resumen ni Avisos |
   | `maestro-repo.ts` → `calcular`, y sus `UPDATE` e `INSERT` | No | Tiene que ver los dos ámbitos para no dar de alta dos veces; es el único que escribe |
   | `hoja-repo.ts` → `leerHoja` | No | La pestaña es la que enseña lo enlazado fuera de seguimiento |
 
@@ -1308,18 +1417,69 @@ otras marcas. Lo que las tiene fuera de todo lo demás es **una columna**.
   plegado, lo que se enlaza y lo que sólo está en la hoja. Mismo permiso, `maestro.sincronizar`.
 - ⚠️ **Despliegue**: hub-api antes que el portal (la tarjeta nueva lee `plan.otras`).
 
+### Retirar y reincorporar a mano (lote 9d-2b, migración 059)
+
+**Estado: hecho.** Antes, un equipo que ya no existe no se podía quitar: `activo` seguía siempre
+al maestro, y un inactivo del portal que Desk 2.0 tuviera activo **se reactivaba al sincronizar**.
+
+- **Retirar un equipo** (`POST /equipos/:clave/retirar`, `inventario.write`, `{motivo}`): de
+  cualquier ámbito —en seguimiento o enlazado fuera de seguimiento—. Deja `activo = FALSE` y la
+  marca de «retirado a mano» en el propio equipo (`retirado_en`, `retirado_por_id`,
+  `retirado_por`, `retirado_motivo`), y apunta el retiro en `tmc_retiros`. Las dos cosas en una
+  transacción (todo o nada). 404 si no existe; 409 `ya_retirado`; 409 `equipo_inactivo` si ya
+  está inactivo sin que nadie lo retirara (lo está en Desk 2.0 o lo dejó así una importación
+  antigua: ya no entra en nada y no hay qué marcar).
+- **Efecto**: sale de Resumen, Equipos, Calendario y Avisos (y su simulación) **como cualquier
+  inactivo: esos lectores no han cambiado** (`INVENTARIO` + `activo`). Su seguimiento y sus
+  calibraciones se conservan. En la pestaña F-ST-022 sigue saliendo, atenuado, con «Retirado a
+  mano» y quién, cuándo y por qué.
+- **La sincronización del maestro lo RESPETA** (`maestro.ts`, `activoDe`): para un equipo con la
+  marca, el plan **no propone cambio sobre su `activo`** y lo cuenta aparte, en
+  `retiradosAMano` («retirados a mano que Desk 2.0 tiene activos»; uno por ámbito: `recuentos` y
+  `otras`). Su cliente, su modelo y su serial **sí siguen actualizándose** desde el maestro, y se
+  enlaza si aún no lo estaba. El SQL lo vuelve a mirar al aplicar (`activo = x.activo AND
+  e.retirado_en IS NULL`), por si alguien lo retiró entre el plan y la aplicación. Un retirado a
+  mano que el maestro también tiene inactivo no se cuenta: no hay nada que respetar.
+- **Reincorporar** (`POST /equipos/:clave/reincorporar`): quita la marca, lo deja **activo** y lo
+  apunta. Desde ahí **vuelve a seguir al maestro**: si en Desk 2.0 está inactivo, la siguiente
+  sincronización lo desactiva. 409 `no_retirado` si no tenía la marca.
+- **Una fila de la hoja sin equipo** (`POST /filas/:fila/retirar` y `/reincorporar`): las «sólo
+  en la hoja» y las de serial repetido (la que sobra). **La hoja congelada sigue inmutable**: lo
+  único que se escribe es el apunte en `tmc_retiros`, con su congelación y su fila; la fila está
+  retirada si **su último apunte es un retiro**. Se sigue viendo en la pestaña, atenuada y con su
+  motivo, y **no cuenta en los totales vivos** (`soloHoja`, `conAvisos`, `porEstado`). 404 si la
+  fila no es de la hoja; 409 `fila_con_equipo` si es de un equipo del portal (se retira el
+  equipo), `ya_retirada` o `no_retirada`. ⚠️ Retirar una de dos filas con el mismo serial **no
+  desempata a la otra**: sigue contando como «serial repetido» (no se enlaza ni admite
+  correcciones). Es lo que queda por hacer.
+- **Auditoría** (`tmc_retiros`, `GET /retiros?clave=…` o `?fila=…`, abierta a quien tiene la
+  app): cada retiro y cada reincorporación, con quién, cuándo, motivo y valor anterior y nuevo
+  (`activo` ↔ `retirado`), la más reciente primero. No se cambia ni se borra.
+- **Dónde vive**: `retiros-repo.ts` (`retirarEquipo`, `retirarFila`, `listarRetiros`). **De un
+  equipo sólo se escribe `activo` y la marca**: ni cliente, ni serial, ni `en_seguimiento`
+  (`retiros.test.ts`; y en `seguimiento.test.ts` la lista revisada de quién nombra `tmc_equipos`
+  ganó sus dos entradas, con su justificación). Dos a la vez: la fila del equipo se bloquea
+  (`FOR UPDATE`) y las filas de la hoja van con `pg_advisory_xact_lock('portal.tmc_retiros')`.
+- **La pantalla** (`Retiro.tsx`): en la ficha de un equipo, «Retirar equipo»; en el panel de la
+  pestaña F-ST-022, «Retirar equipo» / «Reincorporar equipo» o «Retirar fila de la hoja» /
+  «Recuperar fila de la hoja» (`accionRetiro`, `src/lib/hoja.ts`; un inactivo que nadie retiró no
+  ofrece nada). **Sólo con `inventario.write`**. La confirmación va dentro de la página, dice el
+  efecto (`efectoRetiro`: sale de Resumen y Avisos; no se borra; se puede deshacer; en Desk 2.0
+  sigue existiendo) y no deja confirmar sin motivo. «Historial de retiros» lo abre cualquiera. La
+  pestaña gana la ficha **«Retirados»**, que filtra, y la tarjeta del maestro, su línea
+  «Retirados a mano que Desk 2.0 tiene activos (se respetan: no se reactivan)».
+- ⚠️ **Despliegue**: hub-api antes que el portal (la 059 se aplica al arrancar; el portal nuevo
+  lee `retirado` y `resumen.retirados` de `GET /hoja`). Nadie queda retirado por desplegar.
+
 ### Lo que viene (no construido)
 
 - **Incluir otras marcas en seguimiento** (por marca o por equipo): poner `en_seguimiento = TRUE`
   a lo que Alfonso decida, con su pantalla, su permiso y su auditoría. Al hacerlo, la pasada de
   calibraciones les dará su punto de partida. Hay que decidir antes la vigencia y los avisos de
   cada marca. **No hay hoy ninguna forma de hacerlo desde la app, a propósito.**
-- **9d-2 · editar desde la pestaña**: sobre la lectura del 9d-1 (que no cambia), las escrituras:
-  la **corrección manual** de una calibración (una fila `manual` en `tmc_calibraciones`; el
-  modelo y la regla ya están, faltan su ruta y su pantalla, con `calibraciones.write`),
-  **retirar** un equipo y decidir qué hacer con lo que sólo está en el portal, con los ambiguos
-  (también los seriales repetidos y los numéricos dudosos de las otras marcas, que hoy sólo se
-  listan) y con las filas `en_revision`. Depende de lo que Alfonso vea en la pestaña.
+- **Distinguir por modelo los seriales repetidos** de la hoja (hoy no se enlazan ni admiten
+  correcciones; retirar la fila que sobra no desempata a la otra) y decidir qué hacer con los
+  numéricos dudosos, que siguen sólo listados.
 - **9e · «Exportar F-ST-022»**: un .xlsx con **las seis columnas** en su orden (las `cabeceras`
   guardadas lo dan) y los valores de la pestaña (`GET /trazabilidad/hoja` ya los da, con la
   vigencia recalculada), sin calco visual. Es el lote que decide qué hacer con `xlsx`.
@@ -1419,5 +1579,28 @@ otras marcas. Lo que las tiene fuera de todo lo demás es **una columna**.
   que no cambian de ámbito, todo o nada, que sin Desk 2.0 no escribe, el blindaje con la sincronización de verdad, la pestaña
   antes y después y que traer las calibraciones después no les da partida ni les re-enlaza nada) y, en la app,
   `src/lib/maestro.test.ts` y `src/lib/hoja.test.ts`.
+- Corregir a mano una fecha (lote 9d-2b): `edicion.test.ts` (los validadores, la regla de siempre vista desde lo que hace una
+  persona —manual, manual que corrige un ticket, anulada, en revisión— y el **candado de qué escribe `edicion-repo.ts`**: sólo
+  inserta calibraciones y anula, nunca una fecha, ni la congelación, ni nada que envíe), `hoja.test.ts` (cada calibración con su
+  id y sus firmas, la manual por serial, la partida anulada que deja de tomarse de la hoja y la manual en un equipo enlazado),
+  `router.test.ts` (401, 403 sin la app, 403 por rol en las tres —Lector y Comercial no; Técnico sí—, cada 400, 404 y 409, qué
+  se escribe y con qué parámetros, que un 500 no lleva clientes ni seriales, y **la lista de rutas de calibraciones, ampliada de
+  tres a seis** con su porqué), `edicion.db.test.ts` (con la imitación de Desk 2.0: el equipo que cambia de estado y sale de —o
+  entra en— los avisos sin que exista ningún envío, anular y que la pasada no lo resucite hasta que Zoho cambie, la manual que
+  corrige un ticket y deja de contar cuando el ticket cambia, dos correcciones a la vez, la fila en revisión, la fila sólo de
+  la hoja por serial y su partida anulada, el serial repetido, y el blindaje: una manual vencida en un equipo fuera de
+  seguimiento no asoma en Equipos ni en los avisos, con su contraprueba) y, en la app, `src/lib/calibraciones.test.ts`.
+- Retirar y reincorporar (lote 9d-2b): `retiros.test.ts` (guardas de la 059, que es **la última migración**, el candado de qué
+  escribe `retiros-repo.ts` —sólo `activo` y la marca de un equipo, y los apuntes: ni `en_seguimiento`, ni la congelación, ni
+  nada que envíe— y que el SQL del maestro respeta la marca), `maestro.test.ts` (el plan con retirados a mano: no se reactivan
+  ni se propone cambio, se cuentan aparte, su cliente sí se actualiza, en los dos ámbitos, y el contraste con un inactivo sin
+  marca), `hoja.test.ts` (la fila retirada con su firma y los totales vivos), `roles.test.ts` (la matriz con
+  `inventario.write`: 56 casos), `seguimiento.test.ts` (**la lista revisada de quién nombra `tmc_equipos`, ampliada** con las
+  dos entradas de `retiros-repo.ts` y su porqué), `router.test.ts` (401, 403 sin la app, 403 por rol en las cuatro —Lector,
+  Comercial **y Técnico** no—, 400, 404, cada 409, qué se escribe y con qué parámetros, el historial abierto y la lista de
+  rutas), `retiros.db.test.ts` (la 059 repetida y sus `CHECK`; retirar: el inventario lo pierde y conserva seguimiento y
+  calibraciones; **la sincronización del maestro no lo reactiva** aunque Desk 2.0 lo tenga activo y sí le cambia el cliente;
+  reincorporar; fuera de seguimiento; la fila de la hoja con la congelación intacta; todo o nada; dos a la vez) y, en la app,
+  `src/lib/hoja.test.ts` y `src/lib/maestro.test.ts`. `trazabilidad.db.test.ts` suma `tmc_retiros` a la lista de tablas `tmc_*`.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

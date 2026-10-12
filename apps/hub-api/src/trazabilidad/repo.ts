@@ -266,7 +266,7 @@ export async function guardarContacto(db: Db, c: CambioContacto, actor: Actor): 
 export async function leerCalibraciones(db: Db, clave: string | null = null): Promise<CalibracionGuardada[]> {
   const { rows } = await db.query(
     `SELECT c.id, c.clave, c.serial, c.desk_equipo_id, c.fecha::text AS fecha, c.origen, c.ticket, c.estado, c.corrige_ticket, c.corrige_fecha::text AS corrige_fecha,
-            c.motivo, c.por, c.en::text AS en, c.anulada_por, c.anulada_en::text AS anulada_en, c.anulada_pasada_id
+            c.motivo, c.por, c.en::text AS en, c.anulada_por, c.anulada_en::text AS anulada_en, c.anulada_motivo, c.anulada_pasada_id
        FROM portal.tmc_calibraciones c
       WHERE $1::text IS NULL OR c.clave = $1
       ORDER BY c.id`,
@@ -274,7 +274,7 @@ export async function leerCalibraciones(db: Db, clave: string | null = null): Pr
   );
   return (rows as Row[]).map((r) => ({
     id: Number(r.id), clave: r.clave, serial: r.serial, deskEquipoId: r.desk_equipo_id, fecha: r.fecha, origen: r.origen, ticket: r.ticket, estado: r.estado, corrigeTicket: r.corrige_ticket, corrigeFecha: r.corrige_fecha,
-    anuladaAMano: r.estado === 'anulada' && r.anulada_pasada_id === null, motivo: r.motivo, por: r.por, en: r.en, anuladaPor: r.anulada_por, anuladaEn: r.anulada_en,
+    anuladaAMano: r.estado === 'anulada' && r.anulada_pasada_id === null, motivo: r.motivo, por: r.por, en: r.en, anuladaPor: r.anulada_por, anuladaEn: r.anulada_en, anuladaMotivo: r.anulada_motivo ?? null,
   }));
 }
 

@@ -23,7 +23,7 @@
  * sale IGUAL que cuando sólo estaba en la hoja —la hoja como punto de partida
  * más las calibraciones de su serial—: enlazarla no le mueve la fecha.
  */
-import { FECHA_MINIMA_CALIBRACION, calibracionQueCuenta, fechaEfectiva, type EstadoFilaCalibracion, type FilaCalibracion, type OrigenCalibracion } from './calibraciones.js';
+import { FECHA_MINIMA_CALIBRACION, calibracionQueCuenta, fechaEfectiva, type CalibracionGuardada, type EstadoFilaCalibracion, type FilaCalibracion, type OrigenCalibracion } from './calibraciones.js';
 import { ESTADOS, claveCliente, esFechaIso, estadoCalibracion, serialNorm, type EstadoCalibracion, type EstadoEquipo } from './dominio.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 
@@ -34,9 +34,21 @@ export type AvisoHoja = (typeof AVISOS_HOJA)[number];
 export type SituacionHoja = 'inventario' | 'inactivo' | 'enlazado' | 'hoja';
 
 /** Un equipo de `tmc_equipos` (activo o no), con su fecha de respaldo. `enSeguimiento: false` = otra marca, fuera de seguimiento; si falta, en seguimiento. */
-export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null; enSeguimiento?: boolean }
-/** Una calibración conocida de la fila. `cuenta` = es la que da su «última calibración». La de origen `fst022` de una fila sólo de la hoja es su propia fecha. */
-export interface CalibracionHoja { fecha: string; origen: OrigenCalibracion; ticket: number | null; corrigeTicket: number | null; estado: EstadoFilaCalibracion; cuenta: boolean }
+export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null; enSeguimiento?: boolean; /** Si lo retiró una persona (059): quién, cuándo y por qué. */ retirado?: Retiro | null }
+/** La firma de un retiro a mano: de un equipo o de una fila de la hoja. */
+export interface Retiro { por: string; en: string; motivo: string }
+/** Un retiro o una reincorporación apuntados (`portal.tmc_retiros`): la auditoría de un equipo o de una fila, la más reciente primero. */
+export interface ApunteRetiro extends Retiro { id: number; accion: 'retirar' | 'reincorporar'; antes: string; despues: string }
+/** Lo que devuelven retirar y reincorporar: cómo queda y su historial. */
+export interface RespuestaRetiro { retirado: boolean; retiros: ApunteRetiro[] }
+/**
+ * Una calibración conocida de la fila. `cuenta` = es la que da su «última calibración». La de origen `fst022` de una fila sólo de la hoja es su
+ * propia fecha: no es una fila guardada, su `id` es el de su fila en NEGATIVO y no lleva firma. Las guardadas llevan quién, cuándo y por qué
+ * (lote 9d-2b: con el id se anulan).
+ */
+export interface CalibracionHoja extends Partial<Pick<CalibracionGuardada, 'motivo' | 'por' | 'en' | 'anuladaPor' | 'anuladaEn' | 'anuladaMotivo'>> { id: number; fecha: string; origen: OrigenCalibracion; ticket: number | null; corrigeTicket: number | null; estado: EstadoFilaCalibracion; cuenta: boolean }
+/** Lo que devuelve una corrección a mano (registrar una calibración o anular una): el historial de la fila o del equipo ya recalculado y la fecha que cuenta. */
+export interface RespuestaEdicion { id: number; clave: string | null; fila: number | null; ultima: string | null; estado: EstadoCalibracion | null; calibraciones: CalibracionHoja[] }
 /** Lo que decía la hoja, sólo de lo que hoy es distinto. */
 export interface EnHoja { cliente?: string; marca?: string; modelo?: string; serial?: string; ultimaCalibracion?: string | null }
 
@@ -57,6 +69,8 @@ export interface FilaHoja extends EstadoEquipo {
   avisos: AvisoHoja[];
   /** La más reciente primero. Si ninguna cuenta y hay fecha, es la de respaldo del inventario. */
   calibraciones: CalibracionHoja[];
+  /** Retirado a mano (lote 9d-2b): el equipo (`tmc_equipos.retirado_*`) o, si la fila sólo está en la hoja, la fila (`tmc_retiros`). null = no. */
+  retirado: Retiro | null;
 }
 
 export interface ResumenHoja {
@@ -66,6 +80,8 @@ export interface ResumenHoja {
   inactivos: number;
   soloHoja: number;
   conAvisos: number;
+  /** Filas retiradas a mano (el equipo o la fila). `soloHoja`, `conAvisos` y `porEstado` NO las cuentan. */
+  retirados: number;
   /** Equipos del inventario que no casan con ninguna fila. */
   fueraDeHoja: number;
   /** Calibraciones guardadas sin equipo (sin anular) que no son de ninguna fila: su serial no está en la hoja, o está repetido. */
@@ -75,7 +91,7 @@ export interface ResumenHoja {
   porEstado: Record<EstadoCalibracion, number>;
 }
 
-export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[] }
+export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[]; /** Las filas de la hoja retiradas a mano (su último apunte es un retiro). */ retiradas?: readonly (Retiro & { fila: number })[] }
 export interface TablaHoja { filas: FilaHoja[]; fueraDeHoja: FilaHoja[]; resumen: ResumenHoja }
 
 /** GET /trazabilidad/hoja. Sin congelación vigente, `congelacion` es null, `motivo` dice por qué y la tabla va vacía. */
@@ -142,6 +158,7 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     if (candidatos.length === 1) enlazar(f, candidatos[0]);
   }
 
+  const retiradaDe = new Map((e.retiradas ?? []).map(({ fila, por, en, motivo }) => [fila, { por, en, motivo }]));
   const deEquipo = agrupar(e.calibraciones, (c) => c.clave);
   const sinEquipo = agrupar(e.calibraciones.filter((c) => c.clave === null), (c) => serialNorm(c.serial));
   const atribuidas = new Set<number>();
@@ -163,7 +180,8 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
       for (const c of sueltas) atribuidas.add(c.id);
       const propias = q ? (deEquipo.get(q.clave) ?? []) : [];
       const revision = fechaHoja !== null && (fechaHoja > hoy || fechaHoja < FECHA_MINIMA_CALIBRACION);
-      const partida: FilaCalibracion[] = f && fechaHoja && !propias.some((c) => c.origen === 'fst022') ? [{ id: -f.fila, clave: null, serial: deHoja.serial, deskEquipoId: null, fecha: fechaHoja, origen: 'fst022', ticket: null, estado: revision ? 'en_revision' : 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false }] : [];
+      // La partida sale de la hoja salvo que ya esté guardada: la de un equipo que pasó a seguimiento, o la que una persona anuló (lote 9d-2b).
+      const partida: FilaCalibracion[] = f && fechaHoja && ![...propias, ...sueltas].some((c) => c.origen === 'fst022') ? [{ id: -f.fila, clave: null, serial: deHoja.serial, deskEquipoId: null, fecha: fechaHoja, origen: 'fst022', ticket: null, estado: revision ? 'en_revision' : 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false }] : [];
       conocidas = [...partida, ...propias, ...sueltas];
     }
     const cuenta = calibracionQueCuenta(conocidas, hoy);
@@ -181,10 +199,13 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     if (conocidas.some((c) => c.estado === 'en_revision')) avisos.add('en_revision');
     if (f && !q && repetido(f) && sinEquipo.has(f.serialNorm ?? '')) avisos.add('calibraciones_sin_atribuir');
     return {
+      retirado: (q ? q.retirado : f ? retiradaDe.get(f.fila) : null) ?? null,
       fila: f?.fila ?? null, clave: q?.clave ?? null, situacion: !q ? 'hoja' : fuera ? 'enlazado' : q.activo ? 'inventario' : 'inactivo',
       cliente: actual.cliente, marca: actual.marca, marcaClave: claveCliente(actual.marca), modelo: actual.modelo, serial: actual.serial, enHoja,
       ultimaCalibracion: ultima, ...estadoCalibracion(ultima, hoy), avisos: [...avisos],
-      calibraciones: conocidas.map((c) => ({ fecha: c.fecha, origen: c.origen, ticket: c.ticket, corrigeTicket: c.corrigeTicket, estado: c.estado, cuenta: c === cuenta })).sort((a, b) => b.fecha.localeCompare(a.fecha)),
+      calibraciones: conocidas
+        .map(({ id, fecha, origen, ticket, corrigeTicket, estado, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo }: FilaCalibracion & Partial<CalibracionGuardada>, i) => ({ id, fecha, origen, ticket, corrigeTicket, estado, cuenta: conocidas[i] === cuenta, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo }))
+        .sort((a, b) => b.fecha.localeCompare(a.fecha)),
     };
   };
 
@@ -200,10 +221,12 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
   }
 
   const cuantas = (situaciones: SituacionHoja[]): number => filas.filter((f) => situaciones.includes(f.situacion)).length;
-  const porEstado = Object.fromEntries(ESTADOS.map((s) => [s, filas.filter((f) => f.estado === s).length])) as Record<EstadoCalibracion, number>;
+  // Lo retirado a mano (un equipo, o una fila de la hoja) sigue en la tabla, pero no cuenta en los totales «vivos».
+  const vivas = filas.filter((f) => f.retirado === null);
+  const porEstado = Object.fromEntries(ESTADOS.map((s) => [s, vivas.filter((f) => f.estado === s).length])) as Record<EstadoCalibracion, number>;
   const porMarca = [...marcas].map(([clave, marca]) => ({ clave, marca, total: filas.filter((f) => f.marcaClave === clave).length })).sort((a, b) => b.total - a.total || a.clave.localeCompare(b.clave));
   const resumen: ResumenHoja = {
-    total: filas.length, enInventario: cuantas(['inventario', 'inactivo']), inactivos: cuantas(['inactivo']), soloHoja: cuantas(['hoja']), conAvisos: filas.filter((f) => f.avisos.length > 0).length, fueraDeHoja: fueraDeHoja.length,
+    total: filas.length, enInventario: cuantas(['inventario', 'inactivo']), inactivos: cuantas(['inactivo']), soloHoja: vivas.filter((f) => f.situacion === 'hoja').length, conAvisos: vivas.filter((f) => f.avisos.length > 0).length, retirados: filas.length - vivas.length, fueraDeHoja: fueraDeHoja.length,
     calibracionesSueltas: e.calibraciones.filter((c) => c.clave === null && c.estado !== 'anulada' && !atribuidas.has(c.id)).length, porMarca, porEstado,
   };
   return { filas, fueraDeHoja, resumen };

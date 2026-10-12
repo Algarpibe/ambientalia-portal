@@ -18,7 +18,7 @@ export { mismoNombre } from '../../hub-api/src/trazabilidad/maestro';
 export type { CalibracionHistorial, DetalleCalibracion, EstadoFilaCalibracion, PasadaCalibraciones, RecuentosCalibraciones, RespuestaHistorialCalibraciones, RespuestaPlanCalibraciones, TipoDetalle } from '../../hub-api/src/trazabilidad/calibraciones';
 export { TIPOS_DETALLE } from '../../hub-api/src/trazabilidad/calibraciones';
 // La pestaña «Trazabilidad F-ST-022»: la tabla de la hoja tal como la sirve GET /hoja (tipos; el cálculo es del servidor).
-export type { AvisoHoja, CalibracionHoja, EnHoja, FilaHoja, RespuestaHoja, ResumenHoja, SituacionHoja } from '../../hub-api/src/trazabilidad/hoja';
+export type { ApunteRetiro, AvisoHoja, CalibracionHoja, EnHoja, FilaHoja, RespuestaEdicion, RespuestaHoja, RespuestaRetiro, ResumenHoja, Retiro, SituacionHoja } from '../../hub-api/src/trazabilidad/hoja';
 export { AVISOS_HOJA } from '../../hub-api/src/trazabilidad/hoja';
 export type {
   ConfiguracionAgenda,

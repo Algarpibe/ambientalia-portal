@@ -183,7 +183,7 @@ describe('el plan y su aplicación', () => {
 
   const ESPERADO = {
     maestro: 5, portal: 6, casan: 3, enlaces: 3, cambios: { cliente: 2, modelo: 1, serial: 1, activo: 1 }, altas: 1, soloPortal: 1, soloPortalActivos: 1,
-    ambiguosMaestro: 1, ambiguosPortal: 2, copiasInactivas: 0, sinSerial: 0, inactivos: 1, clienteOtroNombre: 1, contactosSinEquipos: 1,
+    ambiguosMaestro: 1, ambiguosPortal: 2, copiasInactivas: 0, sinSerial: 0, inactivos: 1, clienteOtroNombre: 1, contactosSinEquipos: 1, retiradosAMano: 0,
   };
 
   it('el plan, en recuentos, y su detalle; leerlo no escribe nada', async () => {

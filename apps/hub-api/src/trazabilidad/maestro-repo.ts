@@ -17,8 +17,13 @@
  * misma transacción: el de siempre (GRIMM EDM 180, en seguimiento) y las otras
  * marcas, que se dan de alta FUERA de seguimiento (058). Una fila que
  * ya existe se actualiza igual en los dos y NUNCA cambia su `en_seguimiento`
- * ni su marca. Éste sigue siendo el único fichero que escribe tmc_equipos, y
- * por eso lee la tabla entera (seguimiento.test.ts).
+ * ni su marca. Lee la tabla entera (seguimiento.test.ts).
+ *
+ * Desde el lote 9d-2b ya no es el único que escribe tmc_equipos: una persona
+ * puede retirar un equipo a mano (retiros-repo.ts, migración 059). Esa marca
+ * se RESPETA aquí: un retirado a mano no se reactiva aunque el maestro lo
+ * tenga activo (lo dice el plan y lo vuelve a mirar el SQL); su cliente, su
+ * modelo y su serial sí siguen actualizándose.
  */
 
 import { createHash } from 'node:crypto';
@@ -58,10 +63,10 @@ async function leerHojaCongelada(db: Db): Promise<{ congelacion: { id: number; a
 /** El plan de ahora: el maestro ya leído contra el inventario entero del portal (activos o no, en seguimiento o no), los contactos puestos a mano y la hoja congelada. */
 async function calcular(db: Db, equipos: readonly EquipoMaestro[]): Promise<{ plan: PlanMaestro; huella: string }> {
   // Una detrás de otra: al aplicar, `db` es el cliente de la transacción, y un cliente no lleva dos consultas a la vez.
-  const inventario = await db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento FROM portal.tmc_equipos`);
+  const inventario = await db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento, retirado_en FROM portal.tmc_equipos`);
   const contactos = await db.query(`SELECT clave FROM portal.tmc_contactos`);
   const hoja = await leerHojaCongelada(db);
-  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false }));
+  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false, retiradoAMano: r.retirado_en != null }));
   const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)), hoja.filas);
   return { plan, huella: huellaDePlan(plan) };
 }
@@ -105,10 +110,11 @@ export async function sincronizarMaestro(db: Pool, leer: LectorMaestro, huellaVi
     const enlaces = [...plan.enlaces, ...plan.otras.enlaces];
     const altas = [...plan.altas.map((a) => ({ ...a, enSeguimiento: true })), ...plan.otras.altas.map((a) => ({ ...a, enSeguimiento: false }))];
     if (enlaces.length > 0) {
+      // Un equipo retirado a mano (059) no se reactiva: el plan ya lo trae inactivo, y aquí se vuelve a mirar por si alguien lo retiró mientras tanto.
       await c.query(
         `UPDATE portal.tmc_equipos e
             SET actualizado_en = CASE WHEN (e.serial, e.cliente, e.modelo, e.activo, e.desk_id) IS DISTINCT FROM (x.serial, x.cliente, x.modelo, x.activo, x."deskId") THEN NOW() ELSE e.actualizado_en END,
-                desk_id = x."deskId", origen = 'desk', maestro_en = NOW(), serial = x.serial, cliente = x.cliente, modelo = x.modelo, activo = x.activo
+                desk_id = x."deskId", origen = 'desk', maestro_en = NOW(), serial = x.serial, cliente = x.cliente, modelo = x.modelo, activo = x.activo AND e.retirado_en IS NULL
            FROM jsonb_to_recordset($1::jsonb) AS x(clave text, "deskId" text, serial text, cliente text, modelo text, activo boolean)
           WHERE e.clave = x.clave`,
         [JSON.stringify(enlaces)],

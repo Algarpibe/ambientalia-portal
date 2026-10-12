@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AVISOS_HOJA, estadoCalibracion, type FilaHoja } from '../dominio';
-import { ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenFecha, porSituacion, textoContador, valorEnHoja, type FiltroHoja } from './hoja';
+import { ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, accionRetiro, efectoRetiro, etiquetaMarca, filtrarHoja, textoRetiro, hayFiltroHoja, ordenarHoja, origenFecha, porSituacion, textoContador, valorEnHoja, type FiltroHoja } from './hoja';
 
 // Lo que calcula la pestaña «Trazabilidad F-ST-022» con la tabla que da el
 // servidor: filtros, orden, contador y textos. Clientes y seriales inventados.
@@ -9,7 +9,7 @@ const HOY = '2026-10-12';
 let n = 5;
 const fila = (extra: Partial<FilaHoja> & { ultimaCalibracion?: string | null } = {}): FilaHoja => {
   const ultima = extra.ultimaCalibracion ?? null;
-  return { fila: ++n, clave: null, situacion: 'hoja', cliente: 'Cliente Ficticio A', marca: 'Horiba', marcaClave: 'horiba', modelo: 'APNA-370', serial: `HB-${n}`, enHoja: {}, avisos: [], calibraciones: [], ...estadoCalibracion(ultima, HOY), ...extra, ultimaCalibracion: ultima };
+  return { fila: ++n, clave: null, situacion: 'hoja', cliente: 'Cliente Ficticio A', marca: 'Horiba', marcaClave: 'horiba', modelo: 'APNA-370', serial: `HB-${n}`, enHoja: {}, avisos: [], calibraciones: [], retirado: null, ...estadoCalibracion(ultima, HOY), ...extra, ultimaCalibracion: ultima };
 };
 const A = fila({ cliente: 'Cliente Ficticio Ñandú S.A.S.', marca: 'GRIMM', marcaClave: 'grimm', modelo: 'EDM 180C', serial: '18A00001', clave: '18A00001', situacion: 'inventario', ultimaCalibracion: '2026-09-20', enHoja: { cliente: 'Nandu corto' } });
 const B = fila({ cliente: 'Cliente Ficticio B', marca: 'GRIMM', marcaClave: 'grimm', modelo: 'EDM 180D', serial: '18A00002', clave: '18A00002', situacion: 'inactivo', ultimaCalibracion: '2025-11-20', avisos: ['en_revision'] });
@@ -84,7 +84,7 @@ describe('orden', () => {
 
 describe('textos', () => {
   it('de dónde sale la fecha: la calibración que cuenta o, si no hay ninguna y hay fecha, el inventario', () => {
-    const cal = (origen: 'fst022' | 'desk' | 'manual', extra = {}) => ({ fecha: '2026-01-01', origen, ticket: null, corrigeTicket: null, estado: 'vigente' as const, cuenta: true, ...extra });
+    const cal = (origen: 'fst022' | 'desk' | 'manual', extra = {}) => ({ id: 1, fecha: '2026-01-01', origen, ticket: null, corrigeTicket: null, estado: 'vigente' as const, cuenta: true, ...extra });
     expect(origenFecha({ ...A, calibraciones: [{ ...cal('fst022'), cuenta: false }, cal('desk', { ticket: 1001 })] })).toBe('Ticket n.º 1001');
     expect(origenFecha({ ...A, calibraciones: [cal('fst022')] })).toBe('Hoja F-ST-022');
     expect(origenFecha({ ...A, calibraciones: [cal('manual', { corrigeTicket: 77 })] })).toBe('Manual (corrige el ticket n.º 77)');
@@ -131,5 +131,43 @@ describe('filas enlazadas fuera de seguimiento', () => {
     expect(NOTA_SITUACION.enlazado).toMatch(/fuera de seguimiento.*Desk 2\.0.*no entra en Resumen, Equipos, Calendario ni Avisos/);
     expect(NOTA_SITUACION.hoja).toMatch(/sólo está en la hoja/);
     expect(NOTA_SITUACION.inactivo).toMatch(/inactivo/);
+  });
+});
+
+// Lote 9d-2b: retirar y reincorporar. Qué fila está retirada, cómo se filtra y qué acción se ofrece (con `inventario.write`).
+describe('retirados', () => {
+  const FIRMA = { por: 'director@example.com', en: '2026-10-12 15:00:00+00', motivo: 'El cliente lo dio de baja.' };
+  const R1 = fila({ serial: 'HB-R1', retirado: FIRMA });
+  const R2 = fila({ serial: '18A00009', clave: '18A00009', situacion: 'inactivo', retirado: FIRMA });
+  const lista = [...TODAS, R1, R2];
+  const con9 = (f: Partial<FiltroHoja>) => filtrarHoja(lista, { ...FILTRO_HOJA_VACIO, ...f }).map((x) => x.serial);
+
+  it('el filtro «retirados» deja sólo lo retirado a mano; sin él salen todas (las retiradas, atenuadas); «sólo en la hoja» es lo vivo, como su cifra', () => {
+    expect(con9({})).toHaveLength(7);
+    expect(con9({ retirados: true })).toEqual(['HB-R1', '18A00009']);
+    expect(con9({ situacion: 'hoja' })).toEqual(['18000000000001', 'HB-0002', 'TH-0007']);
+    expect(con9({ situacion: 'hoja', retirados: true })).toEqual(['HB-R1']);
+    expect(con9({ situacion: 'inventario' })).toEqual(['18A00001', '18A00002', '18A00009']);
+    expect(hayFiltroHoja({ ...FILTRO_HOJA_VACIO, retirados: true })).toBe(true);
+  });
+
+  it('quién lo retiró, cuándo (día en Colombia) y por qué', () => {
+    expect(textoRetiro(FIRMA)).toBe('Retirado a mano por director@example.com el 12/10/2026: El cliente lo dio de baja.');
+  });
+
+  it('la acción que toca: retirar un equipo activo (en seguimiento o enlazado), reincorporar lo retirado, retirar o recuperar una fila sin equipo; nada para un inactivo que nadie retiró', () => {
+    expect(accionRetiro(A)).toEqual({ de: 'equipo', retirar: true, destino: { clave: '18A00001' } });
+    expect(accionRetiro(fila({ clave: 'HB-0009', situacion: 'enlazado' }))).toMatchObject({ de: 'equipo', retirar: true });
+    expect(accionRetiro(B)).toBeNull();
+    expect(accionRetiro(R2)).toEqual({ de: 'equipo', retirar: false, destino: { clave: '18A00009' } });
+    expect(accionRetiro(D)).toEqual({ de: 'fila', retirar: true, destino: { fila: D.fila } });
+    expect(accionRetiro(R1)).toEqual({ de: 'fila', retirar: false, destino: { fila: R1.fila } });
+  });
+
+  it('lo que pasa, dicho antes de confirmar: sale de Resumen y Avisos, no se borra, se puede deshacer y en Desk 2.0 sigue existiendo', () => {
+    expect(efectoRetiro({ de: 'equipo', retirar: true })).toBe('El equipo sale de Resumen, Equipos, Calendario y Avisos. No se borra: conserva su seguimiento y sus calibraciones, y se puede reincorporar. En Desk 2.0 sigue existiendo: al sincronizar el maestro no se reactiva mientras siga retirado aquí.');
+    expect(efectoRetiro({ de: 'equipo', retirar: false })).toMatch(/^El equipo vuelve a estar activo .*vuelve a seguir al maestro/);
+    expect(efectoRetiro({ de: 'fila', retirar: true })).toMatch(/^La fila se sigue viendo, atenuada, .*La hoja congelada no se toca y se puede deshacer\.$/);
+    expect(efectoRetiro({ de: 'fila', retirar: false })).toMatch(/vuelve a contar/);
   });
 });
