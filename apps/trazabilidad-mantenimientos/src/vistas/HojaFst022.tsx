@@ -2,12 +2,13 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type
 import { Search } from 'lucide-react';
 import { api } from '../api';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type FilaHoja, type RespuestaHoja } from '../dominio';
-import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenFecha, porSituacion, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
+import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, accionRetiro, textoRetiro, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenFecha, porSituacion, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Drawer, EstadoBadge, Loading, TONO, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
 import { Chip } from './Equipos';
+import Retiro from './Retiro';
 
 /**
  * Pestaña «Trazabilidad F-ST-022» (lote 9d-1): la hoja congelada, de todas las
@@ -37,6 +38,8 @@ const TD = 'break-words px-2 py-2 align-top';
 /** El ancho de cada columna (la tabla es de anchos fijos: cabe entera en un portátil, sin columnas escondidas a la derecha). */
 const ANCHOS = ['w-[5%]', 'w-[18%]', 'w-[8%]', 'w-[9%]', 'w-[12%]', 'w-[12%]', 'w-[7%]', 'w-[15%]', 'w-[14%]'];
 const DISCRETO = 'block font-sans text-[11px] leading-tight text-gray-400';
+/** Una fila retirada a mano (el equipo o la fila): se sigue viendo, apagada. */
+const ATENUADA = 'opacity-50';
 
 /** El valor de hoy y, si la hoja decía otra cosa, eso debajo, discreto. */
 function Valor({ hoy, hoja }: { hoy: ReactNode; hoja: string | null | undefined }) {
@@ -59,6 +62,11 @@ function Etiquetas({ f }: { f: FilaHoja }) {
   return (
     <div className="flex flex-wrap gap-1">
       <Situacion f={f} />
+      {f.retirado && (
+        <span title={textoRetiro(f.retirado)}>
+          <Tag>Retirado a mano</Tag>
+        </span>
+      )}
       {f.avisos.map((a) => (
         <span key={a} title={ETIQUETA_AVISO[a]}>
           <Tag tone="amber">{AVISO_CORTO[a]}</Tag>
@@ -72,7 +80,7 @@ const fechaEnHoja = (f: FilaHoja): string | undefined => ('ultimaCalibracion' in
 
 const FilaTabla = memo(function FilaTabla({ f, onAbrir }: { f: FilaHoja; onAbrir: (f: FilaHoja) => void }) {
   return (
-    <tr tabIndex={0} onClick={() => onAbrir(f)} onKeyDown={(e) => e.key === 'Enter' && onAbrir(f)} className="cursor-pointer hover:bg-gray-50 focus:bg-blue-50 focus:outline-none">
+    <tr tabIndex={0} onClick={() => onAbrir(f)} onKeyDown={(e) => e.key === 'Enter' && onAbrir(f)} className={`cursor-pointer hover:bg-gray-50 focus:bg-blue-50 focus:outline-none ${f.retirado ? ATENUADA : ''}`}>
       <td className={`${TD} tabular-nums text-gray-400`}>{f.fila ?? '—'}</td>
       <td className={`${TD} text-gray-900`}>
         <Valor hoy={f.cliente} hoja={f.enHoja.cliente} />
@@ -106,7 +114,7 @@ const FilaMovil = memo(function FilaMovil({ f, onAbrir }: { f: FilaHoja; onAbrir
   const distinto = (['cliente', 'marca', 'modelo', 'serial'] as const).filter((k) => f.enHoja[k] !== undefined).map((k) => `${k} «${f.enHoja[k]}»`);
   return (
     <li className="min-w-0">
-      <button type="button" onClick={() => onAbrir(f)} className="flex h-full w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm">
+      <button type="button" onClick={() => onAbrir(f)} className={`flex h-full w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm ${f.retirado ? ATENUADA : ''}`}>
         <span className="flex flex-wrap items-center justify-between gap-2">
           <EstadoBadge estado={f.estado} />
           <span className={`text-xs font-semibold tabular-nums ${TONO[f.estado].text}`}>{textoVigencia(f.vigenciaDias)}</span>
@@ -247,6 +255,7 @@ function PanelFila({ f, onClose, onCambio }: { f: FilaHoja; onClose: () => void;
           <CalibracionesLista items={f.calibraciones} destino={destino} onCambio={onCambio} />
           {!atribuible && puede('calibraciones.write') && <p className="text-xs text-gray-500">No se le puede corregir la fecha: su serial se repite en la hoja (o no tiene), y no se sabría de cuál de las filas es la calibración.</p>}
         </section>
+        <Retiro accion={accionRetiro(f)} retirado={f.retirado} onCambio={() => onCambio()} />
         <p className="text-xs text-gray-500">
           {puede('calibraciones.write') ? 'Cliente, marca, modelo y serial no se cambian aquí. ' : 'Sólo lectura. '}
           {NOTA_SITUACION[f.situacion]}
@@ -322,18 +331,19 @@ export default function HojaFst022({ equipos, recarga, onFicha, onCambio }: Prop
       >
         {datos.motivo && <Alert tone="amber">{datos.motivo}</Alert>}
         {c && (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <Ficha valor={r.total} rotulo="Equipos en la hoja" nota="todas las marcas" activo={!hayFiltroHoja(filtro)} onClick={() => setFiltro(FILTRO_HOJA_VACIO)} />
             <Ficha valor={r.enInventario} rotulo="En el inventario" nota={`en seguimiento${r.inactivos > 0 ? ` · ${r.inactivos} inactivo${r.inactivos === 1 ? '' : 's'}` : ''}`} activo={filtro.situacion === 'inventario'} onClick={() => set({ situacion: filtro.situacion === 'inventario' ? '' : 'inventario' })} />
             <Ficha valor={enlazadas} rotulo="Enlazados con Desk 2.0" nota="fuera de seguimiento" activo={filtro.situacion === 'enlazado'} onClick={() => set({ situacion: filtro.situacion === 'enlazado' ? '' : 'enlazado' })} />
             <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="sin enlazar con Desk 2.0" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
             <Ficha valor={r.conAvisos} rotulo="Con avisos" nota="conviene mirarlas" activo={filtro.soloAvisos} onClick={() => set({ soloAvisos: !filtro.soloAvisos })} />
+            <Ficha valor={r.retirados} rotulo="Retirados" nota="a mano · no cuentan" activo={filtro.retirados} onClick={() => set({ retirados: !filtro.retirados })} />
           </div>
         )}
         <div className="mt-3">
           <Alert tone="blue" title="Qué se corrige aquí y qué se sigue corrigiendo en Desk 2.0">
             La fecha de calibración ya se puede corregir aquí (Técnico y Director Técnico): abre la fila y usa «Corregir fecha» —registra una calibración manual, que puede corregir la de un ticket— o «Anular», siempre con su
-            motivo; nada se borra. Lo normal sigue siendo que la fecha llegue del ticket de Zoho, campo «Fecha de Calibración» (y se traen en «Configuración»). El cliente, la marca, el modelo y el serial NO se cambian en el portal: se
+            motivo; nada se borra. Un equipo que ya no existe, o una fila de la hoja que sobra, se puede retirar (Director Técnico): se sigue viendo, atenuado, sale de Resumen y Avisos, y se puede deshacer. Lo normal sigue siendo que la fecha llegue del ticket de Zoho, campo «Fecha de Calibración» (y se traen en «Configuración»). El cliente, la marca, el modelo y el serial NO se cambian en el portal: se
             corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). Sólo lo que está «en el inventario» (hoy, los GRIMM EDM 180) entra en Resumen, Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no
             genera avisos, tenga la fecha que tenga.
             {r.calibracionesSueltas > 0 && ` Hay ${r.calibracionesSueltas} calibraci${r.calibracionesSueltas === 1 ? 'ón' : 'ones'} de tickets cuyo serial no es de ninguna fila de la hoja.`}

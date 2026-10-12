@@ -5,6 +5,7 @@ import { fmtFecha, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, DESACTIVADO, Drawer, EstadoBadge, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
+import Retiro from './Retiro';
 
 interface Props {
   equipo: EquipoVista;
@@ -12,6 +13,7 @@ interface Props {
   onGuardado: () => Promise<void>;
   /** Tras corregir una calibración: vuelve a pedir el inventario (y la tabla de la pestaña F-ST-022). */
   onCambio: () => Promise<void>;
+  notificar: (msg: string) => void;
 }
 
 const INPUT = `block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO}`;
@@ -49,7 +51,7 @@ function Calibraciones({ equipo, onCambio }: { equipo: EquipoVista; onCambio: ()
   );
 }
 
-export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio }: Props) {
+export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, notificar }: Props) {
   const s = e.seguimiento;
   const [enAmbientalia, setEnAmbientalia] = useState(s?.enAmbientalia ?? false);
   const [avisoEnviado, setAvisoEnviado] = useState(s?.avisoEnviado ?? '');
@@ -128,6 +130,9 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio }
         </dl>
 
         <Calibraciones equipo={e} onCambio={onCambio} />
+
+        {/* Retirar el equipo (lote 9d-2b): al retirarlo sale del inventario y esta ficha se cierra sola. */}
+        <Retiro accion={{ de: 'equipo', retirar: true, destino: { clave: e.clave } }} retirado={null} onCambio={async (hecho) => (await onCambio(), notificar(hecho))} />
 
         <section aria-labelledby="ficha-contacto" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
           <p id="ficha-contacto" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
