@@ -1,7 +1,7 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
 import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
-import type { PasadaCalibraciones, RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaPlanCalibraciones } from './dominio';
+import type { PasadaCalibraciones, RespuestaEdicion, RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaPlanCalibraciones } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -93,6 +93,11 @@ export const api = {
   traerCalibraciones: (huella: string) => request<PasadaCalibraciones>('POST', '/calibraciones/sincronizar', { huella }),
   /** El historial de calibraciones de un equipo (la más reciente primero) y cuál es la que cuenta. */
   calibracionesDeEquipo: (clave: string) => request<RespuestaHistorialCalibraciones>('GET', `/equipos/${encodeURIComponent(clave)}/calibraciones`),
+  // Corregir una fecha a mano (pide `calibraciones.write`): las tres devuelven el historial ya recalculado. Una fecha nunca se edita.
+  /** Registra una calibración manual de un equipo (`clave`) o de una fila de la hoja (`fila`); `corrigeTicket` = el ticket cuya fecha corrige. */
+  registrarCalibracion: (c: ({ clave: string } | { fila: number }) & { fecha: string; motivo: string; corrigeTicket: number | null }) => request<RespuestaEdicion>('POST', '/calibraciones/manual', c),
+  /** Anula una calibración guardada; con un id negativo, la partida que esa fila de la hoja (`-id`) toma de la congelación. */
+  anularCalibracion: (id: number, motivo: string) => request<RespuestaEdicion>('POST', id < 0 ? `/calibraciones/partida/${-id}/anular` : `/calibraciones/${id}/anular`, { motivo }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
   registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),

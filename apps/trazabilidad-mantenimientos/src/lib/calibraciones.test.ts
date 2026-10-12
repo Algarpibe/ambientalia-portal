@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { CalibracionHistorial, DetalleCalibracion, PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
-import { bloquesDetalle, hayQueTraer, lineasPlan, origenCalibracion, textoUltima } from './calibraciones';
+import type { CalibracionHistorial, CalibracionHoja, DetalleCalibracion, PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
+import { bloquesDetalle, detalleCalibracion, efectoAnular, firmaManual, hayQueTraer, lineasPlan, origenCalibracion, textoUltima, ticketsCorregibles } from './calibraciones';
 
 // Lo que enseñan la tarjeta «Calibraciones · Desk 2.0» de Configuración (el plan
 // en recuentos, la última pasada y el detalle en bloques) y el bloque
@@ -96,6 +96,38 @@ describe('el detalle, en bloques', () => {
       ['Anuladas a mano: no se vuelven a traer (1)', '20/09/2026'],
       ['De otras marcas: se guardan sin equipo del inventario (1)', '20/09/2026'],
     ]);
+  });
+});
+
+// Lote 9d-2b: corregir una fecha a mano. Lo que la lista de calibraciones (ficha y panel de la pestaña) dice de cada una y ofrece.
+describe('corregir a mano: lo que se dice y se ofrece de cada calibración', () => {
+  const c = (extra: Partial<CalibracionHoja>): CalibracionHoja => ({ id: 1, fecha: '2026-03-01', origen: 'desk', ticket: 1001, corrigeTicket: null, estado: 'vigente', cuenta: false, ...extra });
+  const MANUAL = c({ id: 9, origen: 'manual', ticket: null, por: 'tecnico@example.com', en: '2026-10-12 15:00:00+00', motivo: 'El certificado dice otra fecha.' });
+
+  it('una manual se distingue a la vista: quién la registró y cuándo (día en Colombia); las demás no llevan firma a la vista', () => {
+    expect(firmaManual(MANUAL)).toBe('por tecnico@example.com el 12/10/2026');
+    expect(firmaManual(c({}))).toBe('');
+    expect(firmaManual(c({ id: -6, origen: 'fst022', ticket: null }))).toBe('');
+  });
+
+  it('el detalle: quién la registró, cuándo y por qué; y, si está anulada, quién, cuándo y por qué. La partida de la hoja no la firma nadie', () => {
+    expect(detalleCalibracion(MANUAL)).toBe('Registrada por tecnico@example.com el 12/10/2026 10:00 · El certificado dice otra fecha.');
+    expect(detalleCalibracion({ ...MANUAL, estado: 'anulada', anuladaPor: 'director@example.com', anuladaEn: '2026-10-12 16:30:00+00', anuladaMotivo: 'Era de otro equipo.' })).toBe(
+      'Registrada por tecnico@example.com el 12/10/2026 10:00 · El certificado dice otra fecha. · Anulada por director@example.com el 12/10/2026 11:30: Era de otro equipo.',
+    );
+    expect(detalleCalibracion(c({ id: -6, origen: 'fst022', ticket: null }))).toBe('La fecha que traía la hoja F-ST-022 congelada.');
+  });
+
+  it('los tickets que se pueden corregir: los de Desk sin anular (también en revisión), una vez cada uno y del más reciente al más antiguo', () => {
+    const items = [c({ ticket: 1001 }), c({ id: 2, ticket: 1003, fecha: '2027-01-01', estado: 'en_revision' }), c({ id: 3, ticket: 1002, estado: 'anulada' }), MANUAL, c({ id: -6, origen: 'fst022', ticket: null })];
+    expect(ticketsCorregibles(items)).toEqual([{ ticket: 1003, fecha: '2027-01-01' }, { ticket: 1001, fecha: '2026-03-01' }]);
+    expect(ticketsCorregibles([MANUAL])).toEqual([]);
+  });
+
+  it('lo que pasa al anular, dicho antes de confirmar: deja de contar y no se borra; de un ticket, que no vuelve con la pasada; de la hoja, que la congelación no se toca', () => {
+    expect(efectoAnular(MANUAL)).toBe('Deja de contar para la última calibración. No se borra, y no se puede desanular: si hace falta, se registra otra.');
+    expect(efectoAnular(c({}))).toMatch(/Al traer las calibraciones de Desk 2\.0 no volverá mientras el ticket n\.º 1001 siga con esa fecha en Zoho\.$/);
+    expect(efectoAnular(c({ id: -6, origen: 'fst022', ticket: null }))).toMatch(/La hoja congelada no se toca: queda apuntado que esa fecha no vale\.$/);
   });
 });
 

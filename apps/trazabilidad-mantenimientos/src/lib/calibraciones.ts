@@ -4,7 +4,7 @@
  * ficha de un equipo a partir de lo que da el servidor. Puro, sin reloj ni red:
  * la regla en sí es de hub-api (`calibraciones.ts`).
  */
-import { TIPOS_DETALLE, type CalibracionHistorial, type DetalleCalibracion, type EstadoFilaCalibracion, type PasadaCalibraciones, type RecuentosCalibraciones, type TipoDetalle } from '../dominio';
+import { TIPOS_DETALLE, type CalibracionHistorial, type CalibracionHoja, type DetalleCalibracion, type EstadoFilaCalibracion, type PasadaCalibraciones, type RecuentosCalibraciones, type TipoDetalle } from '../dominio';
 import type { LineaPlan } from './maestro';
 import { fmtFecha, fmtFechaHora } from './vistas';
 
@@ -80,6 +80,28 @@ export function bloquesDetalle(detalle: readonly DetalleCalibracion[]): BloqueDe
 }
 
 export const ETIQUETA_ESTADO_FILA: Record<EstadoFilaCalibracion, string> = { vigente: 'Vigente', anulada: 'Anulada', en_revision: 'En revisión' };
+
+// ── Corregir una fecha a mano (lote 9d-2b): lo que la lista de calibraciones dice y ofrece de cada una ──
+
+/** Una manual se distingue a la vista: quién la registró y cuándo. Las demás, nada. */
+export const firmaManual = (c: CalibracionHoja): string => (c.origen === 'manual' && c.por ? `por ${c.por} el ${fmtFecha(c.en)}` : '');
+
+/** El detalle de una calibración (su `title`): quién, cuándo y por qué; y lo mismo de su anulación. La partida de una fila de la hoja (id negativo) no la firma nadie. */
+export function detalleCalibracion(c: CalibracionHoja): string {
+  if (!c.por) return 'La fecha que traía la hoja F-ST-022 congelada.';
+  return `Registrada por ${c.por} el ${fmtFechaHora(c.en)}${c.motivo ? ` · ${c.motivo}` : ''}${c.anuladaPor ? ` · Anulada por ${c.anuladaPor} el ${fmtFechaHora(c.anuladaEn)}${c.anuladaMotivo ? `: ${c.anuladaMotivo}` : ''}` : ''}`;
+}
+
+/** Los tickets cuya fecha se puede corregir con una manual: los de Desk 2.0 sin anular (también en revisión), el más reciente primero. */
+export const ticketsCorregibles = (items: readonly CalibracionHoja[]): { ticket: number; fecha: string }[] =>
+  items.flatMap((c) => (c.origen === 'desk' && c.estado !== 'anulada' && c.ticket !== null ? [{ ticket: c.ticket, fecha: c.fecha }] : [])).sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+/** Lo que pasa al anular esa calibración, para decirlo antes de confirmar. */
+export function efectoAnular(c: CalibracionHoja): string {
+  const base = 'Deja de contar para la última calibración. No se borra, y no se puede desanular: si hace falta, se registra otra.';
+  if (c.id < 0) return `${base} La hoja congelada no se toca: queda apuntado que esa fecha no vale.`;
+  return c.origen === 'desk' ? `${base} Al traer las calibraciones de Desk 2.0 no volverá mientras el ticket n.º ${c.ticket} siga con esa fecha en Zoho.` : base;
+}
 
 /** De dónde sale una calibración del historial de un equipo. */
 export function origenCalibracion(c: Pick<CalibracionHistorial, 'origen' | 'ticket' | 'corrigeTicket'>): string {

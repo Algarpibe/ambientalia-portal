@@ -2,23 +2,26 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useState, type
 import { Search } from 'lucide-react';
 import { api } from '../api';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type FilaHoja, type RespuestaHoja } from '../dominio';
-import { ETIQUETA_ESTADO_FILA } from '../lib/calibraciones';
-import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenDe, origenFecha, porSituacion, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
+import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenFecha, porSituacion, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
+import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Drawer, EstadoBadge, Loading, TONO, Tag } from '../ui';
+import CalibracionesLista from './CalibracionesLista';
 import { Chip } from './Equipos';
 
 /**
- * Pestaña «Trazabilidad F-ST-022» (lote 9d-1), de SÓLO LECTURA: la hoja
- * congelada, de todas las marcas, tal como la entiende hoy el portal. Las seis
- * columnas de la hoja en su orden (la vigencia, recalculada a hoy) más el
- * estado y la situación de cada fila. Todo llega calculado de GET /hoja; aquí
- * sólo se filtra y se ordena (`lib/hoja.ts`). Corregir algo es del lote 9d-2.
+ * Pestaña «Trazabilidad F-ST-022» (lote 9d-1): la hoja congelada, de todas las
+ * marcas, tal como la entiende hoy el portal. Las seis columnas de la hoja en
+ * su orden (la vigencia, recalculada a hoy) más el estado y la situación de
+ * cada fila. Todo llega calculado de GET /hoja; aquí sólo se filtra y se
+ * ordena (`lib/hoja.ts`).
  *
  * Una fila de un equipo activo del inventario abre su ficha de siempre; las
  * demás (sólo en la hoja, inactivas o —desde el lote 9d-2a— de otra marca,
- * enlazadas con Desk 2.0 fuera de seguimiento), un panel de sólo lectura con
- * lo que decía la hoja y sus calibraciones conocidas: sin seguimiento ni avisos.
+ * enlazadas con Desk 2.0 fuera de seguimiento), un panel con lo que decía la
+ * hoja y sus calibraciones conocidas: sin seguimiento ni avisos. Desde el lote
+ * 9d-2b, en la ficha y en el panel se corrige la fecha de calibración (con su
+ * permiso); cliente, marca, modelo y serial siguen sin cambiarse aquí.
  */
 interface Props {
   /** El inventario activo que ya tiene la app: sus filas abren la ficha de equipo. */
@@ -26,6 +29,8 @@ interface Props {
   /** Cambia cuando se pulsa «Actualizar»: vuelve a pedir la tabla. */
   recarga: number;
   onFicha: (clave: string) => void;
+  /** Tras corregir algo desde el panel de una fila: vuelve a pedir el inventario de la app. */
+  onCambio: () => Promise<void>;
 }
 
 const TD = 'break-words px-2 py-2 align-top';
@@ -183,8 +188,15 @@ function Tabla({ filas, onAbrir, orden, onOrden, vacio }: { filas: FilaHoja[]; o
   );
 }
 
-/** Panel de sólo lectura de una fila que no abre ficha de equipo: lo de hoy, lo que decía la hoja y sus calibraciones conocidas. */
-function PanelFila({ f, onClose }: { f: FilaHoja; onClose: () => void }) {
+/**
+ * Panel de una fila que no abre ficha de equipo: lo de hoy, lo que decía la hoja y sus calibraciones conocidas. Con
+ * `calibraciones.write` se le puede corregir la fecha y anular una calibración (lote 9d-2b), salvo que su serial se
+ * repita en la hoja (no se sabría de cuál de las filas es); lo demás sigue en consulta.
+ */
+function PanelFila({ f, onClose, onCambio }: { f: FilaHoja; onClose: () => void; onCambio: () => Promise<void> }) {
+  const { puede } = usePermisos();
+  const atribuible = f.clave !== null || (f.fila !== null && !f.avisos.includes('serial_repetido') && !f.avisos.includes('sin_serial'));
+  const destino = !atribuible ? null : f.clave !== null ? { clave: f.clave } : { fila: f.fila! };
   const hoy: [string, string][] = [
     ['Última calibración', `${fmtFecha(f.ultimaCalibracion)}${f.ultimaCalibracion ? ` · ${origenFecha(f)}` : ''}`],
     ['Vence', fmtFecha(f.vence)],
@@ -232,19 +244,12 @@ function PanelFila({ f, onClose }: { f: FilaHoja; onClose: () => void }) {
         <section className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Calibraciones conocidas</p>
           {f.calibraciones.length === 0 && <p className="text-gray-500">{f.ultimaCalibracion ? `Ninguna registrada: vale la fecha del inventario (${fmtFecha(f.ultimaCalibracion)}).` : 'Ninguna.'}</p>}
-          <ul className="flex flex-col gap-1.5">
-            {f.calibraciones.map((c, i) => (
-              <li key={i} className="flex flex-wrap items-center gap-1.5">
-                <span className={`font-medium tabular-nums ${c.estado === 'anulada' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</span>
-                <span className="text-gray-600">{origenDe(c)}</span>
-                <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
-                {c.cuenta && <Tag tone="blue">La que cuenta</Tag>}
-              </li>
-            ))}
-          </ul>
+          <CalibracionesLista items={f.calibraciones} destino={destino} onCambio={onCambio} />
+          {!atribuible && puede('calibraciones.write') && <p className="text-xs text-gray-500">No se le puede corregir la fecha: su serial se repite en la hoja (o no tiene), y no se sabría de cuál de las filas es la calibración.</p>}
         </section>
         <p className="text-xs text-gray-500">
-          Sólo lectura. {NOTA_SITUACION[f.situacion]}
+          {puede('calibraciones.write') ? 'Cliente, marca, modelo y serial no se cambian aquí. ' : 'Sólo lectura. '}
+          {NOTA_SITUACION[f.situacion]}
         </p>
         <div>
           <Button onClick={onClose}>Cerrar</Button>
@@ -265,12 +270,15 @@ function Ficha({ valor, rotulo, nota, activo, onClick }: { valor: number; rotulo
   );
 }
 
-export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
+export default function HojaFst022({ equipos, recarga, onFicha, onCambio }: Props) {
   const [datos, setDatos] = useState<RespuestaHoja | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<FiltroHoja>(FILTRO_HOJA_VACIO);
   const [orden, setOrden] = useState<OrdenHoja>(ORDEN_HOJA);
-  const [panel, setPanel] = useState<FilaHoja | null>(null);
+  /** La fila abierta en el panel, por lo que la identifica: tras un cambio se pinta con lo que devuelva la tabla nueva. */
+  const [panel, setPanel] = useState<number | string | null>(null);
+  /** Veces que se ha corregido algo desde el panel: con cada una se vuelve a pedir la tabla. */
+  const [cambios, setCambios] = useState(0);
 
   useEffect(() => {
     let vivo = true;
@@ -281,13 +289,14 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
     return () => {
       vivo = false;
     };
-  }, [recarga]);
+  }, [recarga, cambios]);
 
   // Teclear no espera a que se repinte la tabla: el texto se aplica en cuanto hay hueco.
   const texto = useDeferredValue(filtro.texto);
   const lista = useMemo(() => (datos ? ordenarHoja(filtrarHoja(datos.filas, { ...filtro, texto }), orden) : []), [datos, filtro, texto, orden]);
   const activos = useMemo(() => new Set(equipos.map((e) => e.clave)), [equipos]);
-  const abrir = useCallback((f: FilaHoja) => (f.clave !== null && activos.has(f.clave) ? onFicha(f.clave) : setPanel(f)), [activos, onFicha]);
+  const abrir = useCallback((f: FilaHoja) => (f.clave !== null && activos.has(f.clave) ? onFicha(f.clave) : setPanel(f.fila ?? f.clave)), [activos, onFicha]);
+  const enPanel = panel !== null && datos ? [...datos.filas, ...datos.fueraDeHoja].find((f) => (f.fila ?? f.clave) === panel) : undefined;
   const ordenar = useCallback((k: ColumnaHoja) => setOrden((o) => ({ k, dir: o.k === k ? (-o.dir as 1 | -1) : 1 })), []);
 
   if (error && !datos) return <Alert tone="red">{error}</Alert>;
@@ -322,10 +331,11 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
           </div>
         )}
         <div className="mt-3">
-          <Alert tone="blue" title="Por ahora es de consulta: aquí no se cambia nada">
-            El cliente, la marca, el modelo y el serial de un equipo enlazado —de cualquier marca— se corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). La fecha de calibración, en el ticket de Zoho, en el
-            campo «Fecha de Calibración» (y después se traen las calibraciones en «Configuración»). Lo que sólo está en la hoja todavía no se puede corregir. Sólo lo que está «en el inventario» (hoy, los GRIMM EDM 180) entra en
-            Resumen, Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no genera avisos.
+          <Alert tone="blue" title="Qué se corrige aquí y qué se sigue corrigiendo en Desk 2.0">
+            La fecha de calibración ya se puede corregir aquí (Técnico y Director Técnico): abre la fila y usa «Corregir fecha» —registra una calibración manual, que puede corregir la de un ticket— o «Anular», siempre con su
+            motivo; nada se borra. Lo normal sigue siendo que la fecha llegue del ticket de Zoho, campo «Fecha de Calibración» (y se traen en «Configuración»). El cliente, la marca, el modelo y el serial NO se cambian en el portal: se
+            corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). Sólo lo que está «en el inventario» (hoy, los GRIMM EDM 180) entra en Resumen, Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no
+            genera avisos, tenga la fecha que tenga.
             {r.calibracionesSueltas > 0 && ` Hay ${r.calibracionesSueltas} calibraci${r.calibracionesSueltas === 1 ? 'ón' : 'ones'} de tickets cuyo serial no es de ninguna fila de la hoja.`}
           </Alert>
         </div>
@@ -385,7 +395,7 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
         ))}
       </details>
 
-      {panel && <PanelFila f={panel} onClose={() => setPanel(null)} />}
+      {enPanel && <PanelFila f={enPanel} onClose={() => setPanel(null)} onCambio={async () => (setCambios((n) => n + 1), onCambio())} />}
     </div>
   );
 }

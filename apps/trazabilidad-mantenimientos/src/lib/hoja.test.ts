@@ -84,7 +84,7 @@ describe('orden', () => {
 
 describe('textos', () => {
   it('de dónde sale la fecha: la calibración que cuenta o, si no hay ninguna y hay fecha, el inventario', () => {
-    const cal = (origen: 'fst022' | 'desk' | 'manual', extra = {}) => ({ fecha: '2026-01-01', origen, ticket: null, corrigeTicket: null, estado: 'vigente' as const, cuenta: true, ...extra });
+    const cal = (origen: 'fst022' | 'desk' | 'manual', extra = {}) => ({ id: 1, fecha: '2026-01-01', origen, ticket: null, corrigeTicket: null, estado: 'vigente' as const, cuenta: true, ...extra });
     expect(origenFecha({ ...A, calibraciones: [{ ...cal('fst022'), cuenta: false }, cal('desk', { ticket: 1001 })] })).toBe('Ticket n.º 1001');
     expect(origenFecha({ ...A, calibraciones: [cal('fst022')] })).toBe('Hoja F-ST-022');
     expect(origenFecha({ ...A, calibraciones: [cal('manual', { corrigeTicket: 77 })] })).toBe('Manual (corrige el ticket n.º 77)');
