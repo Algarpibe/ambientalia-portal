@@ -317,7 +317,7 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
             <Ficha valor={r.total} rotulo="Equipos en la hoja" nota="todas las marcas" activo={!hayFiltroHoja(filtro)} onClick={() => setFiltro(FILTRO_HOJA_VACIO)} />
             <Ficha valor={r.enInventario} rotulo="En el inventario" nota={`en seguimiento${r.inactivos > 0 ? ` · ${r.inactivos} inactivo${r.inactivos === 1 ? '' : 's'}` : ''}`} activo={filtro.situacion === 'inventario'} onClick={() => set({ situacion: filtro.situacion === 'inventario' ? '' : 'inventario' })} />
             <Ficha valor={enlazadas} rotulo="Enlazados con Desk 2.0" nota="fuera de seguimiento" activo={filtro.situacion === 'enlazado'} onClick={() => set({ situacion: filtro.situacion === 'enlazado' ? '' : 'enlazado' })} />
-            <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="sin equipo en Desk 2.0" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
+            <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="sin enlazar con Desk 2.0" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
             <Ficha valor={r.conAvisos} rotulo="Con avisos" nota="conviene mirarlas" activo={filtro.soloAvisos} onClick={() => set({ soloAvisos: !filtro.soloAvisos })} />
           </div>
         )}
