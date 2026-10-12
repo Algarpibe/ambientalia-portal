@@ -86,7 +86,7 @@ async function sembrar(): Promise<void> {
   await enDesk('eq-3', '18A00003', 'Cliente Ficticio C S.A.S.', { modelo: 'EDM180D' }); // renombrado y otro modelo
   await enDesk('eq-4', '18A00004', 'Cliente Ficticio E'); // ambiguo: el portal lo tiene dos veces
   await enDesk('eq-9', '18A00009', 'Cliente Ficticio D', { modelo: 'EDM180D' }); // sólo en Desk 2.0
-  await enDesk('eq-h', 'HB-0001', 'Cliente Ficticio H', { marca: 'Horiba', modelo: 'APNA-370' }); // otra marca: no entra
+  await enDesk('eq-h', 'HB-0001', 'Cliente Ficticio H', { marca: 'Horiba', modelo: 'APNA-370' }); // otra marca: desde el lote 9d-2a se da de alta, fuera de seguimiento (maestro-otras.db.test.ts)
 }
 
 const FOTO = `clave, serial, cliente, marca, modelo, hoja_vida, ultima_calibracion::text AS calibracion, activo, desk_id, origen, actualizado_en::text AS actualizado_en`;
@@ -212,7 +212,9 @@ describe('el plan y su aplicación', () => {
     expect(de('18A00009')).toMatchObject({ serial: '18A00009', cliente: 'Cliente Ficticio D', marca: 'GRIMM', modelo: 'EDM 180D', activo: true, desk_id: 'eq-9', origen: 'desk', calibracion: null, hoja_vida: null });
     // Ni los ambiguos ni el que sólo está en el portal: tal cual, fecha de cambio incluida.
     for (const clave of ['18A00004', '18A00004-2', '18A00050']) expect(de(clave)).toEqual(antes.find((e) => e.clave === clave));
-    expect(despues.map((e) => e.clave)).toEqual(['18A00001', '18A00002', '18A00003', '18A00004', '18A00004-2', '18A00009', '18A00050']);
+    // El Horiba del maestro entra también, pero fuera de seguimiento: no es del inventario de la app (lo prueba el test siguiente).
+    expect(despues.map((e) => e.clave)).toEqual(['18A00001', '18A00002', '18A00003', '18A00004', '18A00004-2', '18A00009', '18A00050', 'HB-0001']);
+    expect((await hub.query(`SELECT clave FROM portal.tmc_equipos WHERE NOT en_seguimiento`)).rows).toEqual([{ clave: 'HB-0001' }]);
     expect(await loDemas()).toEqual(demas);
 
     // La auditoría: quién, la huella, los recuentos y cada cambio con su antes y su después.
@@ -225,6 +227,7 @@ describe('el plan y su aplicación', () => {
       { clave: '18A00003', campo: 'cliente', antes: 'Cliente Ficticio C', despues: 'Cliente Ficticio C S.A.S.' },
       { clave: '18A00003', campo: 'modelo', antes: 'EDM 180C', despues: 'EDM 180D' },
       { clave: '18A00009', campo: 'alta', antes: null, despues: '18A00009 · Cliente Ficticio D' },
+      { clave: 'HB-0001', campo: 'alta', antes: null, despues: 'HB-0001 · Cliente Ficticio H', ambito: 'otras' },
     ]);
   });
 
@@ -249,7 +252,7 @@ describe('el plan y su aplicación', () => {
     const s = await sincronizar(otra.plan!.huella);
     expect(s.id).toBe(2);
     expect([await foto(), await loDemas()]).toEqual(antes);
-    expect((await auditoria()).map((a) => a.cambios.length)).toEqual([6, 0]);
+    expect((await auditoria()).map((a) => a.cambios.length)).toEqual([7, 0]); // los 6 del seguimiento y el alta del Horiba
   });
 
   it('todo o nada: si la base falla a mitad, no queda ni un equipo cambiado ni la auditoría', async () => {
@@ -292,7 +295,7 @@ describe('el plan y su aplicación', () => {
     const [a, b] = await Promise.all([sincronizar(), sincronizar()]);
     expect([a.id, b.id].sort()).toEqual([1, 2]);
     expect((await foto()).filter((e) => e.desk_id === 'eq-9')).toHaveLength(1);
-    expect((await auditoria()).map((x) => x.cambios.length)).toEqual([6, 0]);
+    expect((await auditoria()).map((x) => x.cambios.length)).toEqual([7, 0]);
 
     await admin2.query(`UPDATE desk.equipos SET cliente_nombre = 'Cliente Ficticio W' WHERE id = 'eq-9'`);
     const huella = (await plan()).huella;

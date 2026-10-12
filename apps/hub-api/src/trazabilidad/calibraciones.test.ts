@@ -417,8 +417,8 @@ describe('057_trazabilidad_calibraciones.sql', () => {
     expect(sinComentarios).toMatch(/CREATE TABLE IF NOT EXISTS portal\.tmc_calibraciones_pasadas/);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 056, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'056_trazabilidad_maestro_equipos\.sql',\s*'057_trazabilidad_calibraciones\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 056 (la última es la 058: seguimiento.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'056_trazabilidad_maestro_equipos\.sql',\s*'057_trazabilidad_calibraciones\.sql',/);
   });
 });
 

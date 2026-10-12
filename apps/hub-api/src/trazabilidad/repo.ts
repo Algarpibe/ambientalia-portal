@@ -106,6 +106,17 @@ export async function withTransaction<T>(db: Pool, fn: (c: PoolClient) => Promis
   }
 }
 
+/**
+ * El inventario de la app: los equipos EN SEGUIMIENTO (migración 058; hoy, los
+ * GRIMM EDM 180). Desde el lote 9d-2a `tmc_equipos` lleva también equipos de
+ * otras marcas, enlazados con Desk 2.0 sólo para la pestaña «Trazabilidad
+ * F-ST-022»: no entran en Resumen, Equipos, Calendario, Avisos (ni su
+ * simulación), contactos ni en el cliente de «Servicios». Por eso este fichero
+ * no nombra la tabla en ningún otro sitio: todo lee de aquí
+ * (seguimiento.test.ts lo vigila y seguimiento.db.test.ts lo prueba con datos).
+ */
+const INVENTARIO = `(SELECT * FROM portal.tmc_equipos WHERE en_seguimiento)`;
+
 const COLS_EQUIPO = `
   e.clave, e.serial, e.cliente, e.marca, e.modelo, e.fecha_factura::text AS fecha_factura, e.hoja_vida,
   e.ultima_entrada::text AS ultima_entrada, e.ultima_calibracion::text AS ultima_calibracion,
@@ -190,7 +201,7 @@ async function contactosDeDesk(db: Db): Promise<Map<string, ContactoEquipo>> {
        FROM desk.tickets t
       WHERE trim(t.serial) <> ''
         AND trim(COALESCE(NULLIF(trim(t.raw->>'email'), ''), t.raw->'contact'->>'email', '')) <> ''
-        AND upper(trim(t.serial)) IN (SELECT upper(trim(e.serial)) FROM portal.tmc_equipos e WHERE e.activo)
+        AND upper(trim(t.serial)) IN (SELECT upper(trim(e.serial)) FROM ${INVENTARIO} e WHERE e.activo)
       ORDER BY t.number DESC NULLS LAST`,
   );
   const porSerial = new Map<string, TicketContacto[]>();
@@ -274,7 +285,7 @@ function consultarEquipos(db: Db) {
             s.servicio_programado::text AS servicio_programado, s.nota, s.actualizado_por,
             s.actualizado_en::text AS seg_en,
             tk.number AS ticket_numero, tk.status AS ticket_estado, tk.sin_confirmar AS ticket_sin_confirmar
-       FROM portal.tmc_equipos e
+       FROM ${INVENTARIO} e
        LEFT JOIN portal.tmc_seguimiento s ON s.clave = e.clave
        LEFT JOIN LATERAL (
               SELECT t.number, t.status,
@@ -338,9 +349,10 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
 
 /**
  * El cliente de un servicio, por este orden:
- *  (a) el cliente del equipo de portal.tmc_equipos con el mismo serial (sin
- *      mayúsculas ni espacios; con varios, el activo y, si no hay, uno
- *      retirado) — es el nombre con el que se le conoce en la F-ST-022;
+ *  (a) el cliente del equipo del inventario en seguimiento con el mismo serial
+ *      (sin mayúsculas ni espacios; con varios, el activo y, si no hay, uno
+ *      retirado) — es el nombre con el que se le conoce en la F-ST-022. Las
+ *      otras marcas, fuera de seguimiento, no dan cliente aquí (mejora posible);
  *  (b) la cuenta de Desk (`raw.contact.account.accountName`), que casi nunca viene;
  *  (c) nombre y apellido del contacto del ticket;
  *  (d) el asunto sin el código de servicio: no es un nombre fiable y la app lo
@@ -402,7 +414,7 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
          LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
          LEFT JOIN LATERAL (
                 SELECT e.cliente
-                  FROM portal.tmc_equipos e
+                  FROM ${INVENTARIO} e
                  WHERE trim(t.serial) <> ''
                    AND upper(trim(e.serial)) = upper(trim(t.serial))
                  ORDER BY e.activo DESC, e.clave
@@ -1201,7 +1213,7 @@ export async function ultimaImportacion(db: Db): Promise<ResumenImportacion | nu
 }
 
 async function existeActivo(db: Db, clave: string): Promise<boolean> {
-  const { rows } = await db.query(`SELECT 1 FROM portal.tmc_equipos WHERE clave = $1 AND activo`, [clave]);
+  const { rows } = await db.query(`SELECT 1 FROM ${INVENTARIO} e WHERE e.clave = $1 AND e.activo`, [clave]);
   return rows.length > 0;
 }
 
@@ -1228,7 +1240,7 @@ export async function guardarSeguimiento(db: Db, clave: string, s: Seguimiento, 
 export async function registrarAvisos(db: Db, claves: string[], fecha: string, actor: Actor): Promise<number> {
   const { rowCount } = await db.query(
     `INSERT INTO portal.tmc_seguimiento (clave, aviso_enviado, actualizado_por_id, actualizado_por, actualizado_en)
-     SELECT e.clave, $2::date, $3, $4, NOW() FROM portal.tmc_equipos e WHERE e.clave = ANY($1::text[]) AND e.activo
+     SELECT e.clave, $2::date, $3, $4, NOW() FROM ${INVENTARIO} e WHERE e.clave = ANY($1::text[]) AND e.activo
      ON CONFLICT (clave) DO UPDATE SET
        aviso_enviado = EXCLUDED.aviso_enviado, actualizado_por_id = EXCLUDED.actualizado_por_id,
        actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,

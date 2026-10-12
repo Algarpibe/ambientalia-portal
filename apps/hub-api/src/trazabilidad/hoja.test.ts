@@ -199,8 +199,60 @@ describe('resumen', () => {
   });
 });
 
+// Lote 9d-2a: las demás marcas quedan enlazadas con Desk 2.0, FUERA de seguimiento (058).
+describe('una fila enlazada con un equipo fuera de seguimiento', () => {
+  const otra = (clave: string, extra: Partial<EquipoHoja> = {}): EquipoHoja => equipo(clave, { cliente: 'Cliente Ficticio H S.A.S.', marca: 'Horiba', modelo: 'APNA-370', enSeguimiento: false, ...extra });
+
+  it('enseña cliente, marca, modelo y serial del maestro y pasa a «enlazado»; debajo, lo de la hoja sólo si es otra cosa (marca y modelo, sin mirar mayúsculas, espacios ni guiones)', () => {
+    const t = tabla([fila('Cliente Ficticio H', 'HORIBA', 'apna 370', 'HB-0001', '2026-03-01'), fila('Cliente Ficticio H S.A.S.', 'Horiba', 'APSA-370', 'hb-0002', '2026-03-01')], [otra('HB-0001'), otra('HB-0002')]);
+    expect(t.filas.map((f) => [f.clave, f.situacion, f.cliente, f.marca, f.modelo, f.serial, f.enHoja])).toEqual([
+      ['HB-0001', 'enlazado', 'Cliente Ficticio H S.A.S.', 'Horiba', 'APNA-370', 'HB-0001', { cliente: 'Cliente Ficticio H' }],
+      ['HB-0002', 'enlazado', 'Cliente Ficticio H S.A.S.', 'Horiba', 'APNA-370', 'HB-0002', { modelo: 'APSA-370', serial: 'hb-0002' }],
+    ]);
+    // Con la marca del maestro en todas, ninguna desentona.
+    expect(t.filas.map((f) => f.avisos)).toEqual([[], []]);
+    // En un equipo EN seguimiento la comparación sigue siendo literal, como antes.
+    expect(tabla([fila('Cliente Ficticio A S.A.S.', 'Grimm', 'EDM 180C', '18A00001', null)], [equipo('18A00001')]).filas[0]).toMatchObject({ situacion: 'inventario', enHoja: { marca: 'Grimm' } });
+  });
+
+  it.each([
+    ['sólo la fecha de la hoja', '2026-03-01', []],
+    ['la hoja y un ticket posterior, guardado sin clave', '2025-03-01', [cal(null, 'hb-0001', '2026-06-30')]],
+    ['un ticket anterior a la hoja y otro anulado', '2026-03-01', [cal(null, 'HB-0001', '2025-01-01'), cal(null, 'HB-0001', '2026-09-09', { estado: 'anulada' })]],
+    ['la hoja con una fecha posterior a hoy: en revisión', '2027-01-01', [cal(null, 'HB-0001', '2026-02-02')]],
+    ['sin fecha en la hoja y sin tickets', null, []],
+  ] as [string, string | null, FilaCalibracion[]][])('su última calibración es la MISMA que antes de enlazarla (%s): la hoja como punto de partida más los tickets de su serial', (_caso, enHoja, calibraciones) => {
+    const f = fila('Cliente Ficticio H', 'Horiba', 'APNA-370', 'HB-0001', enHoja);
+    const [antes] = tabla([f], [], calibraciones).filas;
+    const [despues] = tabla([f], [otra('HB-0001', { ultimaCalibracion: null })], calibraciones).filas;
+    expect([antes.situacion, despues.situacion]).toEqual(['hoja', 'enlazado']);
+    expect([despues.ultimaCalibracion, despues.vence, despues.vigenciaDias, despues.estado, despues.calibraciones]).toEqual([antes.ultimaCalibracion, antes.vence, antes.vigenciaDias, antes.estado, antes.calibraciones]);
+    expect(despues.avisos).toEqual(antes.avisos);
+    expect(tabla([f], [otra('HB-0001')], calibraciones).resumen.calibracionesSueltas).toBe(0);
+  });
+
+  it('las que ya tuviera con su clave también cuentan, y no hay fecha de respaldo del inventario: un alta del maestro nace sin fecha', () => {
+    const f = fila('Cliente Ficticio H', 'Horiba', 'APNA-370', 'HB-0001', '2025-03-01');
+    const [con] = tabla([f], [otra('HB-0001')], [cal('HB-0001', 'HB-0001', '2026-08-08', { origen: 'manual', ticket: null })]).filas;
+    expect([con.ultimaCalibracion, con.calibraciones.map((c) => [c.fecha, c.origen, c.cuenta])]).toEqual(['2026-08-08', [['2026-08-08', 'manual', true], ['2025-03-01', 'fst022', false]]]);
+    expect(tabla([fila('Cliente Ficticio H', 'Horiba', 'APNA-370', 'HB-0009', null)], [otra('HB-0009', { ultimaCalibracion: '2020-01-01' })]).filas[0]).toMatchObject({ ultimaCalibracion: null, estado: 'SIN_FECHA' });
+  });
+
+  it('lo que el maestro tiene y la hoja no va aparte, también como «enlazado», con los tickets de su serial; inactivo, sigue siendo «enlazado»', () => {
+    const t = tabla([fila('Cliente Ficticio A', 'Grimm', 'EDM 180C', '18A00001', null, '18A00001')], [equipo('18A00001'), equipo('ALTA-1'), otra('HB-0007'), otra('HB-0008', { activo: false })], [cal(null, 'HB-0007', '2026-05-05')]);
+    expect(t.fueraDeHoja.map((f) => [f.clave, f.situacion, f.ultimaCalibracion])).toEqual([['ALTA-1', 'inventario', null], ['HB-0007', 'enlazado', '2026-05-05'], ['HB-0008', 'enlazado', null]]);
+    expect(t.resumen).toMatchObject({ enInventario: 1, inactivos: 0, soloHoja: 0, fueraDeHoja: 3, calibracionesSueltas: 0 });
+  });
+
+  it('el resumen sigue contando «en el inventario» sólo lo que está en seguimiento', () => {
+    const t = tabla([fila('Cliente Ficticio A', 'Grimm', 'EDM 180C', '18A00001', null, '18A00001'), fila('Cliente Ficticio H', 'Horiba', 'APNA-370', 'HB-0001', null), fila('Cliente Ficticio T', 'Thermo', '49i', 'TH-1', null)], [equipo('18A00001'), otra('HB-0001')]);
+    expect(t.filas.map((f) => f.situacion)).toEqual(['inventario', 'enlazado', 'hoja']);
+    expect(t.resumen).toMatchObject({ total: 3, enInventario: 1, inactivos: 0, soloHoja: 1 });
+  });
+});
+
 describe('sólo lectura', () => {
-  const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+  const fuente =(f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
 
   it('la regla es pura: sólo importa el dominio, las calibraciones y los tipos de la congelación, y no mira el reloj', () => {
     const imports = [...fuente('./hoja.ts').matchAll(/^import (type )?.* from '([^']+)';\r?$/gm)].map((m) => `${m[1] ?? ''}${m[2]}`);

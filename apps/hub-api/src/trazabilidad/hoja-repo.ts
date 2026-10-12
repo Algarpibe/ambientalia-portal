@@ -28,12 +28,13 @@ export async function leerHoja(db: Db, hoy: string): Promise<RespuestaHoja> {
         WHERE g.vigente AND f.es_equipo
         ORDER BY f.fila`,
     ),
-    db.query(`SELECT clave, serial, cliente, marca, modelo, activo, ultima_calibracion::text AS ultima_calibracion FROM portal.tmc_equipos`),
+    // Entero, también lo que está fuera de seguimiento (otras marcas, 058): esta pestaña es la que lo enseña.
+    db.query(`SELECT clave, serial, cliente, marca, modelo, activo, en_seguimiento, ultima_calibracion::text AS ultima_calibracion FROM portal.tmc_equipos`),
     leerCalibraciones(db),
   ]);
   const v = vigentes.rows[0] as Row | undefined;
   const filas = (congeladas.rows as Row[]).map((r): FilaCongelada => ({ fila: r.fila, celdas: r.celdas, esEquipo: true, serialNorm: r.serial_norm, claveEquipo: r.clave_equipo }));
-  const equipos = (inventario.rows as Row[]).map((r): EquipoHoja => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, marca: r.marca, modelo: r.modelo, activo: r.activo, ultimaCalibracion: r.ultima_calibracion }));
+  const equipos = (inventario.rows as Row[]).map((r): EquipoHoja => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, marca: r.marca, modelo: r.modelo, activo: r.activo, ultimaCalibracion: r.ultima_calibracion, enSeguimiento: r.en_seguimiento !== false }));
   return {
     hoy,
     congelacion: v ? { id: Number(v.id), archivo: v.archivo, hoja: v.hoja, por: v.por, en: v.en } : null,

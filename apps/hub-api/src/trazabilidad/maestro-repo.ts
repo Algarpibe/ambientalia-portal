@@ -12,6 +12,13 @@
  * contactos ni la congelación, y no borra ni desactiva nada por no estar en
  * el maestro (maestro.test.ts vigila la lista de escrituras). Se aplica a
  * mano, tras ver el plan: no hay sincronización automática.
+ *
+ * Desde el lote 9d-2a el plan trae dos ámbitos y los dos se aplican en la
+ * misma transacción: el de siempre (GRIMM EDM 180, en seguimiento) y las otras
+ * marcas, que se dan de alta FUERA de seguimiento (058). Una fila que
+ * ya existe se actualiza igual en los dos y NUNCA cambia su `en_seguimiento`
+ * ni su marca. Éste sigue siendo el único fichero que escribe tmc_equipos, y
+ * por eso lee la tabla entera (seguimiento.test.ts).
  */
 
 import { createHash } from 'node:crypto';
@@ -19,7 +26,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { claveCliente } from './dominio.js';
 import type { Celda } from './fst022.js';
 import { MENSAJE_SIN_MAESTRO, type LectorMaestro, type LecturaMaestro } from './maestro-desk2.js';
-import { cruceFst022, planMaestro, type EquipoMaestro, type EquipoPortal, type EstadoMaestro, type PlanMaestro, type RespuestaCruceFst022, type RespuestaPlanMaestro, type SincronizacionMaestro } from './maestro.js';
+import { cruceFst022, planMaestro, type EquipoMaestro, type EquipoPortal, type EstadoMaestro, type FilaHojaCruce, type PlanMaestro, type RespuestaCruceFst022, type RespuestaPlanMaestro, type SincronizacionMaestro } from './maestro.js';
 import { withTransaction } from './repo.js';
 import { TzError, type Actor } from './types.js';
 
@@ -32,17 +39,30 @@ export const DETALLE_MAX = 300;
 
 const estadoDe = (l: LecturaMaestro): EstadoMaestro => (l.disponible ? { disponible: true, motivo: null, mensaje: null } : { disponible: false, motivo: l.motivo, mensaje: MENSAJE_SIN_MAESTRO[l.motivo] });
 
-/** La huella de un plan: lo que escribiría y lo que cambia. Dos planes con la misma huella hacen lo mismo. */
-export const huellaDePlan = (plan: PlanMaestro): string => createHash('sha256').update(JSON.stringify([plan.enlaces, plan.altas, plan.cambios])).digest('hex');
+/** La huella de un plan: lo que escribiría y lo que cambia, en los dos ámbitos. Dos planes con la misma huella hacen lo mismo. */
+export const huellaDePlan = (plan: PlanMaestro): string => createHash('sha256').update(JSON.stringify([plan.enlaces, plan.altas, plan.cambios, plan.otras.enlaces, plan.otras.altas, plan.otras.cambios])).digest('hex');
 
-/** El plan de ahora: el maestro ya leído contra el inventario entero del portal (activos o no) y los contactos puestos a mano. */
+const valor = (c: Celda | undefined): unknown => (c !== null && typeof c === 'object' ? c.v : c);
+
+/** Las filas de equipo de la congelación vigente, para cruzarlas: marca y cliente salen de las columnas que la cabecera titula así. Sin congelación, ninguna. */
+async function leerHojaCongelada(db: Db): Promise<{ congelacion: { id: number; archivo: string } | null; filas: FilaHojaCruce[] }> {
+  const { rows: vigentes } = await db.query(`SELECT g.id, g.archivo, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`);
+  const v = vigentes[0] as Row | undefined;
+  if (!v) return { congelacion: null, filas: [] };
+  const titulos = ((v.cabeceras as Celda[][]).at(-1) ?? []).map((t) => claveCliente(valor(t)));
+  const { rows } = await db.query(`SELECT celdas, serial_norm, clave_equipo FROM portal.tmc_fst022_congelada WHERE congelacion_id = $1 AND es_equipo ORDER BY fila`, [v.id]);
+  const celda = (r: Row, titulo: string): unknown => valor((r.celdas as Celda[])[titulos.indexOf(titulo)]);
+  return { congelacion: { id: Number(v.id), archivo: v.archivo }, filas: (rows as Row[]).map((r) => ({ marca: celda(r, 'marca'), serial: r.serial_norm ?? null, cliente: String(celda(r, 'cliente') ?? '').trim(), claveEquipo: r.clave_equipo ?? null })) };
+}
+
+/** El plan de ahora: el maestro ya leído contra el inventario entero del portal (activos o no, en seguimiento o no), los contactos puestos a mano y la hoja congelada. */
 async function calcular(db: Db, equipos: readonly EquipoMaestro[]): Promise<{ plan: PlanMaestro; huella: string }> {
-  const [inventario, contactos] = await Promise.all([
-    db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id FROM portal.tmc_equipos`),
-    db.query(`SELECT clave FROM portal.tmc_contactos`),
-  ]);
-  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id }));
-  const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)));
+  // Una detrás de otra: al aplicar, `db` es el cliente de la transacción, y un cliente no lleva dos consultas a la vez.
+  const inventario = await db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento FROM portal.tmc_equipos`);
+  const contactos = await db.query(`SELECT clave FROM portal.tmc_contactos`);
+  const hoja = await leerHojaCongelada(db);
+  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false }));
+  const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)), hoja.filas);
   return { plan, huella: huellaDePlan(plan) };
 }
 
@@ -59,7 +79,10 @@ export async function leerPlanMaestro(db: Db, leer: LectorMaestro, conDetalle: b
   const ultima = rows[0] ? toSincronizacion(rows[0]) : null;
   if (!lectura.disponible) return { maestro: estadoDe(lectura), plan: null, ultima };
   const { plan, huella } = await calcular(db, lectura.equipos);
-  return { maestro: estadoDe(lectura), plan: { huella, recuentos: plan.recuentos }, ultima, ...(conDetalle ? { detalle: plan.cambios.slice(0, DETALLE_MAX), detalleTotal: plan.cambios.length, revisar: { soloPortal: plan.soloPortal.slice(0, DETALLE_MAX), ambiguos: plan.ambiguos.slice(0, DETALLE_MAX) } } : {}) };
+  const tope = <T>(lista: readonly T[]): T[] => lista.slice(0, DETALLE_MAX);
+  // El detalle del seguimiento va como siempre; el de las otras marcas, aparte (`otras`), con lo que no se enlaza de la hoja.
+  const detalle = { detalle: tope(plan.cambios), detalleTotal: plan.cambios.length, revisar: { soloPortal: tope(plan.soloPortal), ambiguos: tope(plan.ambiguos) }, otras: { detalle: tope(plan.otras.cambios), detalleTotal: plan.otras.cambios.length, soloPortal: tope(plan.otras.soloPortal), ambiguos: tope(plan.otras.ambiguos), hoja: tope(plan.hoja.revisar) } };
+  return { maestro: estadoDe(lectura), plan: { huella, recuentos: plan.recuentos, otras: plan.otras.recuentos, hoja: plan.hoja.marcas }, ultima, ...(conDetalle ? detalle : {}) };
 }
 
 /**
@@ -78,44 +101,40 @@ export async function sincronizarMaestro(db: Pool, leer: LectorMaestro, huellaVi
     if (huellaVista !== null && huellaVista !== huella) {
       throw new TzError('plan_cambiado', 409, 'El plan ha cambiado desde que lo revisaste (cambió algo en Desk 2.0 o alguien sincronizó antes). No se ha aplicado nada: revisa el plan de ahora y vuelve a confirmar.');
     }
-    if (plan.enlaces.length > 0) {
+    // Los dos ámbitos se escriben igual; lo único que los distingue es con qué `en_seguimiento` NACE un alta.
+    const enlaces = [...plan.enlaces, ...plan.otras.enlaces];
+    const altas = [...plan.altas.map((a) => ({ ...a, enSeguimiento: true })), ...plan.otras.altas.map((a) => ({ ...a, enSeguimiento: false }))];
+    if (enlaces.length > 0) {
       await c.query(
         `UPDATE portal.tmc_equipos e
             SET actualizado_en = CASE WHEN (e.serial, e.cliente, e.modelo, e.activo, e.desk_id) IS DISTINCT FROM (x.serial, x.cliente, x.modelo, x.activo, x."deskId") THEN NOW() ELSE e.actualizado_en END,
                 desk_id = x."deskId", origen = 'desk', maestro_en = NOW(), serial = x.serial, cliente = x.cliente, modelo = x.modelo, activo = x.activo
            FROM jsonb_to_recordset($1::jsonb) AS x(clave text, "deskId" text, serial text, cliente text, modelo text, activo boolean)
           WHERE e.clave = x.clave`,
-        [JSON.stringify(plan.enlaces)],
+        [JSON.stringify(enlaces)],
       );
     }
-    if (plan.altas.length > 0) {
+    if (altas.length > 0) {
       await c.query(
-        `INSERT INTO portal.tmc_equipos (clave, serial, cliente, marca, modelo, activo, desk_id, origen, maestro_en)
-         SELECT x.clave, x.serial, x.cliente, x.marca, x.modelo, TRUE, x."deskId", 'desk', NOW()
-           FROM jsonb_to_recordset($1::jsonb) AS x(clave text, "deskId" text, serial text, cliente text, marca text, modelo text)`,
-        [JSON.stringify(plan.altas)],
+        `INSERT INTO portal.tmc_equipos (clave, serial, cliente, marca, modelo, activo, desk_id, origen, maestro_en, en_seguimiento)
+         SELECT x.clave, x.serial, x.cliente, x.marca, x.modelo, TRUE, x."deskId", 'desk', NOW(), x."enSeguimiento"
+           FROM jsonb_to_recordset($1::jsonb) AS x(clave text, "deskId" text, serial text, cliente text, marca text, modelo text, "enSeguimiento" boolean)`,
+        [JSON.stringify(altas)],
       );
     }
     const { rows } = await c.query(
       `INSERT INTO portal.tmc_maestro_sincronizaciones (huella, recuentos, cambios, por_id, por)
        VALUES ($1, $2::jsonb, $3::jsonb, $4, $5)
        RETURNING ${COLS_SINCRONIZACION}`,
-      [huella, JSON.stringify(plan.recuentos), JSON.stringify(plan.cambios), actor.userId, actor.email],
+      // La auditoría lleva los dos ámbitos: los recuentos de las otras marcas en `otras` y sus cambios marcados con `ambito: 'otras'`.
+      [huella, JSON.stringify({ ...plan.recuentos, otras: plan.otras.recuentos }), JSON.stringify([...plan.cambios, ...plan.otras.cambios]), actor.userId, actor.email],
     );
     return toSincronizacion(rows[0]);
   });
 }
 
-const valor = (c: Celda | undefined): unknown => (c !== null && typeof c === 'object' ? c.v : c);
-
-/** Cruce informativo, de TODAS las marcas, entre la congelación vigente de la F-ST-022 y el maestro: recuentos por marca. No escribe. La marca de cada fila congelada sale de la columna que la cabecera titula «Marca». */
+/** Cruce informativo, de TODAS las marcas, entre la congelación vigente de la F-ST-022 y el maestro: recuentos por marca. No escribe. */
 export async function leerCruceFst022(db: Db, leer: LectorMaestro): Promise<RespuestaCruceFst022> {
-  const [lectura, { rows: vigentes }] = await Promise.all([leer(), db.query(`SELECT g.id, g.archivo, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`)]);
-  const v = vigentes[0] as Row | undefined;
-  const congelacion = v ? { id: Number(v.id), archivo: v.archivo as string } : null;
-  if (!lectura.disponible || !v) return { maestro: estadoDe(lectura), congelacion, marcas: [] };
-  const titulos = ((v.cabeceras as Celda[][]).at(-1) ?? []).map((t) => claveCliente(valor(t)));
-  const { rows } = await db.query(`SELECT celdas, serial_norm FROM portal.tmc_fst022_congelada WHERE congelacion_id = $1 AND es_equipo ORDER BY fila`, [v.id]);
-  const congeladas = (rows as Row[]).map((r) => ({ marca: valor((r.celdas as Celda[])[titulos.indexOf('marca')]), serial: r.serial_norm }));
-  return { maestro: estadoDe(lectura), congelacion, marcas: cruceFst022(congeladas, lectura.equipos) };
+  const [lectura, { congelacion, filas }] = await Promise.all([leer(), leerHojaCongelada(db)]);
+  return { maestro: estadoDe(lectura), congelacion, marcas: lectura.disponible && congelacion ? cruceFst022(filas, lectura.equipos) : [] };
 }

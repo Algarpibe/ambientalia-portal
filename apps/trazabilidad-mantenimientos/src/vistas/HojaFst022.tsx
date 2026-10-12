@@ -3,7 +3,7 @@ import { Search } from 'lucide-react';
 import { api } from '../api';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type FilaHoja, type RespuestaHoja } from '../dominio';
 import { ETIQUETA_ESTADO_FILA } from '../lib/calibraciones';
-import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenDe, origenFecha, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
+import { AVISO_CORTO, ETIQUETA_AVISO, ETIQUETA_SITUACION, FILTRO_HOJA_VACIO, NOTA_SITUACION, ORDEN_HOJA, etiquetaMarca, filtrarHoja, hayFiltroHoja, ordenarHoja, origenDe, origenFecha, porSituacion, textoContador, valorEnHoja, type ColumnaHoja, type FiltroHoja, type OrdenHoja } from '../lib/hoja';
 import { fmtFecha, textoVigencia } from '../lib/vistas';
 import { Alert, Button, Card, Drawer, EstadoBadge, Loading, TONO, Tag } from '../ui';
 import { Chip } from './Equipos';
@@ -16,8 +16,9 @@ import { Chip } from './Equipos';
  * sólo se filtra y se ordena (`lib/hoja.ts`). Corregir algo es del lote 9d-2.
  *
  * Una fila de un equipo activo del inventario abre su ficha de siempre; las
- * demás (sólo en la hoja, o inactivas), un panel con lo que decía la hoja y
- * sus calibraciones conocidas.
+ * demás (sólo en la hoja, inactivas o —desde el lote 9d-2a— de otra marca,
+ * enlazadas con Desk 2.0 fuera de seguimiento), un panel de sólo lectura con
+ * lo que decía la hoja y sus calibraciones conocidas: sin seguimiento ni avisos.
  */
 interface Props {
   /** El inventario activo que ya tiene la app: sus filas abren la ficha de equipo. */
@@ -42,10 +43,17 @@ function Valor({ hoy, hoja }: { hoy: ReactNode; hoja: string | null | undefined 
   );
 }
 
+/** La situación de una fila: en azul lo que está en seguimiento; lo demás, en gris (el texto puede ocupar dos líneas). */
+function Situacion({ f }: { f: FilaHoja }) {
+  return (
+    <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-medium ${f.situacion === 'inventario' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{ETIQUETA_SITUACION[f.situacion]}</span>
+  );
+}
+
 function Etiquetas({ f }: { f: FilaHoja }) {
   return (
     <div className="flex flex-wrap gap-1">
-      <Tag tone={f.situacion === 'inventario' ? 'blue' : 'gray'}>{ETIQUETA_SITUACION[f.situacion]}</Tag>
+      <Situacion f={f} />
       {f.avisos.map((a) => (
         <span key={a} title={ETIQUETA_AVISO[a]}>
           <Tag tone="amber">{AVISO_CORTO[a]}</Tag>
@@ -208,7 +216,7 @@ function PanelFila({ f, onClose }: { f: FilaHoja; onClose: () => void }) {
         <div className="flex flex-wrap items-center gap-2">
           <EstadoBadge estado={f.estado} />
           <span className="text-sm text-gray-500">{textoVigencia(f.vigenciaDias)}</span>
-          <Tag tone={f.situacion === 'inventario' ? 'blue' : 'gray'}>{ETIQUETA_SITUACION[f.situacion]}</Tag>
+          <Situacion f={f} />
         </div>
         {f.avisos.length > 0 && (
           <Alert tone="amber" title="Conviene mirar">
@@ -236,7 +244,7 @@ function PanelFila({ f, onClose }: { f: FilaHoja; onClose: () => void }) {
           </ul>
         </section>
         <p className="text-xs text-gray-500">
-          Sólo lectura. {f.situacion === 'hoja' ? 'Este equipo sólo está en la hoja: todavía no es del inventario del portal (que hoy lleva sólo los GRIMM EDM 180), así que no entra en Resumen, Equipos, Calendario ni Avisos.' : 'Este equipo está en el inventario, pero inactivo: no entra en Resumen, Equipos, Calendario ni Avisos.'}
+          Sólo lectura. {NOTA_SITUACION[f.situacion]}
         </p>
         <div>
           <Button onClick={onClose}>Cerrar</Button>
@@ -286,7 +294,13 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
   if (!datos) return <Loading texto="Cargando la hoja F-ST-022…" />;
 
   const r = datos.resumen;
-  const set = (p: Partial<FiltroHoja>) => setFiltro((f) => ({ ...f, ...p }));
+  const enlazadas = porSituacion(datos.filas).enlazado;
+  // Lo que no está en la hoja, en dos grupos: lo que está en seguimiento y lo enlazado de otras marcas.
+  const fuera: [string, FilaHoja[]][] = [
+    ['En el inventario (en seguimiento)', datos.fueraDeHoja.filter((f) => f.situacion !== 'enlazado')],
+    ['Enlazados con Desk 2.0 · fuera de seguimiento', datos.fueraDeHoja.filter((f) => f.situacion === 'enlazado')],
+  ];
+  const set =(p: Partial<FiltroHoja>) => setFiltro((f) => ({ ...f, ...p }));
   const alternar = <T,>(lista: T[], v: T): T[] => (lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
   const c = datos.congelacion;
 
@@ -299,17 +313,19 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
       >
         {datos.motivo && <Alert tone="amber">{datos.motivo}</Alert>}
         {c && (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             <Ficha valor={r.total} rotulo="Equipos en la hoja" nota="todas las marcas" activo={!hayFiltroHoja(filtro)} onClick={() => setFiltro(FILTRO_HOJA_VACIO)} />
-            <Ficha valor={r.enInventario} rotulo="En el inventario" nota={r.inactivos > 0 ? `${r.inactivos} inactivo${r.inactivos === 1 ? '' : 's'}` : undefined} activo={filtro.situacion === 'inventario'} onClick={() => set({ situacion: filtro.situacion === 'inventario' ? '' : 'inventario' })} />
-            <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="aún sin revisar" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
+            <Ficha valor={r.enInventario} rotulo="En el inventario" nota={`en seguimiento${r.inactivos > 0 ? ` · ${r.inactivos} inactivo${r.inactivos === 1 ? '' : 's'}` : ''}`} activo={filtro.situacion === 'inventario'} onClick={() => set({ situacion: filtro.situacion === 'inventario' ? '' : 'inventario' })} />
+            <Ficha valor={enlazadas} rotulo="Enlazados con Desk 2.0" nota="fuera de seguimiento" activo={filtro.situacion === 'enlazado'} onClick={() => set({ situacion: filtro.situacion === 'enlazado' ? '' : 'enlazado' })} />
+            <Ficha valor={r.soloHoja} rotulo="Sólo en la hoja" nota="sin enlazar con Desk 2.0" activo={filtro.situacion === 'hoja'} onClick={() => set({ situacion: filtro.situacion === 'hoja' ? '' : 'hoja' })} />
             <Ficha valor={r.conAvisos} rotulo="Con avisos" nota="conviene mirarlas" activo={filtro.soloAvisos} onClick={() => set({ soloAvisos: !filtro.soloAvisos })} />
           </div>
         )}
         <div className="mt-3">
           <Alert tone="blue" title="Por ahora es de consulta: aquí no se cambia nada">
-            El cliente, el modelo y el serial de un equipo del inventario se corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). La fecha de calibración, en el ticket de Zoho, en el campo «Fecha de
-            Calibración» (y después se traen las calibraciones en «Configuración»). Lo que sólo está en la hoja todavía no se puede corregir.
+            El cliente, la marca, el modelo y el serial de un equipo enlazado —de cualquier marca— se corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). La fecha de calibración, en el ticket de Zoho, en el
+            campo «Fecha de Calibración» (y después se traen las calibraciones en «Configuración»). Lo que sólo está en la hoja todavía no se puede corregir. Sólo lo que está «en el inventario» (hoy, los GRIMM EDM 180) entra en
+            Resumen, Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no genera avisos.
             {r.calibracionesSueltas > 0 && ` Hay ${r.calibracionesSueltas} calibraci${r.calibracionesSueltas === 1 ? 'ón' : 'ones'} de tickets cuyo serial no es de ninguna fila de la hoja.`}
           </Alert>
         </div>
@@ -358,9 +374,15 @@ export default function HojaFst022({ equipos, recarga, onFicha }: Props) {
       )}
 
       <details open={datos.fueraDeHoja.length > 0} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        <summary className="min-h-[44px] cursor-pointer py-2 text-sm font-semibold text-gray-900">En el inventario y no en la hoja ({datos.fueraDeHoja.length})</summary>
-        <p className="mb-3 text-xs text-gray-500">Equipos del inventario del portal que no casan con ninguna fila de la hoja congelada: altas del maestro posteriores a la hoja, o un serial que no se pudo emparejar.</p>
-        <Tabla filas={datos.fueraDeHoja} onAbrir={abrir} vacio="Ninguno: todo el inventario está en la hoja." />
+        <summary className="min-h-[44px] cursor-pointer py-2 text-sm font-semibold text-gray-900">En el inventario o en Desk 2.0, y no en la hoja ({datos.fueraDeHoja.length})</summary>
+        <p className="mb-3 text-xs text-gray-500">Equipos que no casan con ninguna fila de la hoja congelada: altas del maestro posteriores a la hoja, equipos de otras marcas que la hoja no tenía, o un serial que no se pudo emparejar.</p>
+        {datos.fueraDeHoja.length === 0 && <Tabla filas={[]} onAbrir={abrir} vacio="Ninguno: todo lo enlazado está en la hoja." />}
+        {fuera.map(([titulo, filas]) => filas.length > 0 && (
+          <div key={titulo} className="mb-3 flex flex-col gap-2">
+            <h3 className="text-sm font-semibold text-gray-800">{titulo} ({filas.length})</h3>
+            <Tabla filas={filas} onAbrir={abrir} vacio="" />
+          </div>
+        ))}
       </details>
 
       {panel && <PanelFila f={panel} onClose={() => setPanel(null)} />}
