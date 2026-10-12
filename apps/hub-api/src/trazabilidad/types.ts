@@ -39,6 +39,7 @@ import {
   type TipoAbierto,
   type TramoPlazo,
 } from './dominio.js';
+import { FECHA_MINIMA_CALIBRACION } from './calibraciones.js';
 import type { ResumenFst022 } from './fst022.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
@@ -764,4 +765,51 @@ export function parseRolApp(body: unknown): { role: RolApp } {
   const b = obj(body, 'body');
   if (!esRolApp(b.role)) throw invalido(`El rol no es válido. Opciones: ${ROLES_APP.join(', ')}.`, 'role');
   return { role: b.role };
+}
+
+// ── Editar a mano (lote 9d-2b): corregir una fecha de calibración y anular ──
+
+/** Una calibración registrada a mano: de un equipo del portal (`clave`) o de una fila de la hoja congelada (`fila`), nunca de los dos. */
+export interface CalibracionManual {
+  clave: string | null;
+  fila: number | null;
+  fecha: string;
+  motivo: string;
+  /** El ticket de Desk 2.0 cuya fecha corrige (uno de los del historial), o null: una calibración más. */
+  corrigeTicket: number | null;
+}
+
+const enteroPositivo = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0;
+
+/** `{motivo}`: obligatorio en todo lo que una persona cambia a mano (anular, retirar, reincorporar). */
+export function parseMotivo(body: unknown): string {
+  const motivo = motivoLimpio(obj(body, 'body').motivo);
+  if (motivo === null) throw invalido('Hay que decir el motivo.', 'motivo');
+  return motivo;
+}
+
+/** Un id o un número de fila de la ruta: un entero positivo escrito sólo con dígitos. */
+export function parseEnteroRuta(v: unknown, campo: string): number {
+  if (typeof v !== 'string' || !/^[1-9]\d{0,8}$/.test(v)) throw invalido(`«${campo}» no es válido.`, campo);
+  return Number(v);
+}
+
+/**
+ * POST /calibraciones/manual: {clave | fila, fecha, motivo, corrigeTicket?}. La
+ * fecha no puede ser posterior a `hoy` (día en Colombia) ni anterior al mínimo
+ * de la regla: una manual nace vigente, nunca «en revisión».
+ */
+export function parseCalibracionManual(body: unknown, hoy: string): CalibracionManual {
+  const b = obj(body, 'body');
+  const sin = (v: unknown): boolean => v === undefined || v === null;
+  if (sin(b.clave) === sin(b.fila)) throw invalido('Hay que decir de qué equipo es la calibración: su clave o su fila en la hoja F-ST-022.', 'clave');
+  if (!sin(b.clave) && (typeof b.clave !== 'string' || !esClave(b.clave))) throw invalido('Clave de equipo no válida.', 'clave');
+  if (!sin(b.fila) && !enteroPositivo(b.fila)) throw invalido('La fila de la hoja no es válida.', 'fila');
+  const f = fecha(b.fecha, 'fecha');
+  if (f === null) throw invalido('Falta «fecha».', 'fecha');
+  if (f > hoy) throw invalido('La fecha de calibración no puede ser posterior a hoy.', 'fecha');
+  if (f < FECHA_MINIMA_CALIBRACION) throw invalido(`La fecha de calibración no puede ser anterior al ${FECHA_MINIMA_CALIBRACION}.`, 'fecha');
+  const motivo = parseMotivo(b);
+  if (!sin(b.corrigeTicket) && !enteroPositivo(b.corrigeTicket)) throw invalido('El ticket que se corrige debe ser un entero positivo.', 'corrigeTicket');
+  return { clave: (b.clave as string | undefined) ?? null, fila: (b.fila as number | undefined) ?? null, fecha: f, motivo, corrigeTicket: (b.corrigeTicket as number | undefined) ?? null };
 }

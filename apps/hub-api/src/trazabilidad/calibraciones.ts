@@ -280,7 +280,7 @@ export interface RespuestaPlanCalibraciones {
 }
 
 /** Una fila tal como está guardada, con su motivo y sus firmas (alta y anulación). */
-export interface CalibracionGuardada extends FilaCalibracion { motivo: string | null; por: string; en: string; anuladaPor: string | null; anuladaEn: string | null }
+export interface CalibracionGuardada extends FilaCalibracion { motivo: string | null; por: string; en: string; anuladaPor: string | null; anuladaEn: string | null; anuladaMotivo: string | null }
 /** Una calibración del historial de un equipo, para su ficha. `cuenta` = es la que da su «última calibración». */
 export type CalibracionHistorial = CalibracionGuardada & { cuenta: boolean };
 /** GET /trazabilidad/equipos/:clave/calibraciones. `ultima` es la fecha que da la regla (null si ninguna fila cuenta). */
