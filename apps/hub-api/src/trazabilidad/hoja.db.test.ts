@@ -141,7 +141,7 @@ describe('GET /trazabilidad/hoja', () => {
     expect(filas.map((f) => f.calibraciones.find((c: any) => c.cuenta)).map((c) => (c ? [c.origen, c.ticket] : null))).toEqual([['desk', 1001], ['fst022', null], null, ['fst022', null], ['desk', 1005], ['fst022', null], ['fst022', null], null]);
     expect(res.body.fueraDeHoja).toMatchObject([{ fila: null, clave: '18A00099', situacion: 'inventario', cliente: 'Cliente Ficticio Z', estado: 'SIN_FECHA' }]);
     expect(res.body.resumen).toEqual({
-      total: 8, enInventario: 3, inactivos: 1, soloHoja: 5, conAvisos: 5, fueraDeHoja: 1, calibracionesSueltas: 2,
+      total: 8, enInventario: 3, inactivos: 1, soloHoja: 5, conAvisos: 5, retirados: 0, fueraDeHoja: 1, calibracionesSueltas: 2,
       porMarca: [{ clave: 'horiba', marca: 'Horiba', total: 4 }, { clave: 'grimm', marca: 'GRIMM', total: 3 }, { clave: 'thermo', marca: 'Thermo', total: 1 }],
       porEstado: { FUERA_CICLO: 1, VENCIDA: 2, VENCE_30: 0, VENCE_60: 1, VENCE_90: 0, AL_DIA: 3, SIN_FECHA: 1 },
     });

@@ -17,8 +17,13 @@
  * misma transacción: el de siempre (GRIMM EDM 180, en seguimiento) y las otras
  * marcas, que se dan de alta FUERA de seguimiento (058). Una fila que
  * ya existe se actualiza igual en los dos y NUNCA cambia su `en_seguimiento`
- * ni su marca. Éste sigue siendo el único fichero que escribe tmc_equipos, y
- * por eso lee la tabla entera (seguimiento.test.ts).
+ * ni su marca. Lee la tabla entera (seguimiento.test.ts).
+ *
+ * Desde el lote 9d-2b ya no es el único que escribe tmc_equipos: una persona
+ * puede retirar un equipo a mano (retiros-repo.ts, migración 059). Esa marca
+ * se RESPETA aquí: un retirado a mano no se reactiva aunque el maestro lo
+ * tenga activo (lo dice el plan y lo vuelve a mirar el SQL); su cliente, su
+ * modelo y su serial sí siguen actualizándose.
  */
 
 import { createHash } from 'node:crypto';
