@@ -1835,3 +1835,82 @@ describe('calibraciones desde Desk 2.0: plan, traer e historial', () => {
     expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/calibraciones/plan', 'post /trazabilidad/calibraciones/sincronizar', 'get /trazabilidad/equipos/:clave/calibraciones']);
   });
 });
+
+// Pestaña «Trazabilidad F-ST-022» (lote 9d-1): la tabla de la hoja congelada con sus valores de hoy. Una
+// lectura, abierta a quien tenga la app, que sale entera de la base del portal. Lleva clientes y seriales
+// (como GET /equipos), así que ninguno puede acabar en un error ni en el registro.
+describe('la tabla de la hoja F-ST-022 (sólo lectura)', () => {
+  const RUTA = '/api/trazabilidad/hoja';
+  const VIGENTE: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia V3.xlsx', hoja: 'Trazabilidad', por: 'director@example.com', en: '2026-10-10 15:00:00+00', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración', 'Vigencia de Calibración (Dias)']] }]];
+  const CONGELADAS: [RegExp, Filas] = [
+    /FROM portal\.tmc_fst022_congelada f/,
+    [
+      { fila: 6, celdas: ['Cliente Reservado', 'Grimm', 'EDM 180C', 'SER-RESERVADO', { v: '2025-10-17', t: 'fecha' }, 357], serial_norm: 'SER-RESERVADO', clave_equipo: 'SER-RESERVADO' },
+      { fila: 7, celdas: ['Cliente Reservado', 'Horiba', 'APNA-370', 'HB-RESERVADO', null, null], serial_norm: 'HB-RESERVADO', clave_equipo: null },
+    ],
+  ];
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos/, [{ clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado S.A.S.', marca: 'GRIMM', modelo: 'EDM 180C', activo: true, ultima_calibracion: '2019-01-01' }]];
+  /** Un lector de Desk 2.0 que revienta si alguien lo usa: esta ruta no debe tocarlo. */
+  const prohibido = (): never => {
+    throw new Error('esta ruta no lee Desk 2.0');
+  };
+  const appHoja = (pool: Pool = fakePool) => {
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(pool, { ticketsAbiertos: prohibido, estadoFuente: prohibido } as never, prohibido, prohibido));
+    return a;
+  };
+
+  it('401 sin token y 403 sin la app, sin ninguna consulta', async () => {
+    expect((await request(appHoja()).get(RUTA)).status).toBe(401);
+    const sinApp = await request(appHoja()).get(RUTA).set(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })));
+    expect([sinApp.status, sinApp.body.error]).toEqual([403, 'forbidden']);
+    expect(queries).toEqual([]);
+  });
+
+  it('200 para un Lector, sin mirar su rol: la tabla ya calculada a «hoy», con su congelación y su resumen; cuatro lecturas, ninguna escritura, nada de Desk', async () => {
+    respuestas.push(VIGENTE, CONGELADAS, INVENTARIO);
+    const res = await request(appHoja()).get(`${RUTA}?hoy=2026-10-12`).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['congelacion', 'filas', 'fueraDeHoja', 'hoy', 'motivo', 'resumen']);
+    expect(res.body).toMatchObject({ hoy: '2026-10-12', motivo: null, congelacion: { id: 7, archivo: 'F-ST-022 ficticia V3.xlsx', hoja: 'Trazabilidad', por: 'director@example.com', en: '2026-10-10 15:00:00+00' }, fueraDeHoja: [] });
+    expect(res.body.filas).toMatchObject([
+      { fila: 6, clave: 'SER-RESERVADO', situacion: 'inventario', cliente: 'Cliente Reservado S.A.S.', marca: 'GRIMM', ultimaCalibracion: '2019-01-01', estado: 'FUERA_CICLO', enHoja: { cliente: 'Cliente Reservado', marca: 'Grimm', ultimaCalibracion: '2025-10-17' } },
+      { fila: 7, clave: null, situacion: 'hoja', marca: 'Horiba', serial: 'HB-RESERVADO', ultimaCalibracion: null, estado: 'SIN_FECHA', avisos: ['sin_fecha'] },
+    ]);
+    expect(res.body.resumen).toMatchObject({ total: 2, enInventario: 1, soloHoja: 1, conAvisos: 1 });
+    expect(consultasRol.n).toBe(0);
+    expect(conexiones.n).toBe(0);
+    expect(queries).toHaveLength(4);
+    for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
+    expect(queries.join('\n')).not.toMatch(/\bdesk\./);
+  });
+
+  it('por defecto «hoy» es el día en Colombia; un «hoy» que no es una fecha es un 400', async () => {
+    respuestas.push(VIGENTE, CONGELADAS, INVENTARIO);
+    const res = await request(appHoja()).get(RUTA).set(conRol(null));
+    expect([res.status, res.body.hoy]).toEqual([200, expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)]);
+    const mala = await request(appHoja()).get(`${RUTA}?hoy=ayer`).set(conRol(null));
+    expect([mala.status, mala.body.field]).toEqual([400, 'hoy']);
+  });
+
+  it('sin congelación vigente: 200 con la tabla vacía y un motivo claro', async () => {
+    const res = await request(appHoja()).get(RUTA).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ congelacion: null, filas: [], fueraDeHoja: [], resumen: { total: 0 } });
+    expect(res.body.motivo).toMatch(/^En este entorno no hay ninguna F-ST-022 congelada/);
+  });
+
+  it('si la base falla: 500 genérico, y ni la respuesta ni lo que se apunta en el registro llevan un cliente o un serial', async () => {
+    respuestas.push(VIGENTE, CONGELADAS, INVENTARIO);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const rota = { ...fakePool, query: async (sql: string, params?: unknown[]) => (/tmc_calibraciones/.test(sql) ? Promise.reject(new Error('fallo de la base')) : fakePool.query(sql, params)) } as unknown as Pool;
+    const res = await request(appHoja(rota)).get(RUTA).set(conRol(null));
+    expect([res.status, res.body]).toEqual([500, { error: 'internal error' }]);
+    expect(error).toHaveBeenCalled();
+    const apuntado = error.mock.calls.map((c) => c.map((x) => (x instanceof Error ? `${x.message} ${x.stack}` : JSON.stringify(x))).join(' ')).join('\n');
+    expect(apuntado).toMatch(/tmc_hoja error/);
+    expect(apuntado).not.toMatch(/Reservado|RESERVADO/);
+    error.mockRestore();
+  });
+});
