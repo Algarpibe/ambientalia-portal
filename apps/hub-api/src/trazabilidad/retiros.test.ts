@@ -3,9 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TzError, parseObjetoRetiro } from './types.js';
 
-// Retirar y reincorporar (lote 9d-2b), sin base: las guardas de la 059, que es
-// la última migración, qué escribe su SQL y el validador de «de quién es el
-// historial». El plan del maestro con retirados a mano está en maestro.test.ts;
+// Retirar y reincorporar (lote 9d-2b), sin base: las guardas de la 059, qué
+// escribe su SQL y el validador de «de quién es el historial». El plan del maestro con retirados a mano está en maestro.test.ts;
 // la tabla de la pestaña, en hoja.test.ts; el SQL, en retiros.db.test.ts.
 
 const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
@@ -42,8 +41,9 @@ describe('059_trazabilidad_retiros.sql', () => {
     expect(sinComentarios).toMatch(/CONSTRAINT tmc_retiros_objeto CHECK \(\(clave IS NULL\) <> \(fila IS NULL\) AND \(fila IS NULL\) = \(congelacion_id IS NULL\)\)/);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 058, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'058_trazabilidad_en_seguimiento\.sql',\s*'059_trazabilidad_retiros\.sql'\]/);
+  // Cuál es la última lo vigila exportacion.test.ts (la 060, lote 9e).
+  it('está apuntada en MIGRATIONS, detrás de la 058', () => {
+    expect(fuente('../db.ts')).toMatch(/'058_trazabilidad_en_seguimiento\.sql',\s*'059_trazabilidad_retiros\.sql',/);
   });
 });
 

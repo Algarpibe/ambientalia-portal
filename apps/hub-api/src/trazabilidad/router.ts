@@ -10,6 +10,8 @@ import { crearLectorCalibraciones, type LectorCalibraciones } from './calibracio
 import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
 import { esFechaIso } from './dominio.js';
 import { anularCalibracion, anularPartida, registrarManual } from './edicion-repo.js';
+import { TIPO_XLSX } from './exportacion.js';
+import { exportarHoja, leerExportaciones } from './exportacion-repo.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
@@ -108,6 +110,15 @@ function hoyAgenda(req: Request): string {
   return hoy;
 }
 
+/** Lo que devuelve una ruta que no contesta JSON sino un fichero para descargar (el CORS de index.ts ya expone Content-Disposition). */
+class Fichero {
+  constructor(
+    readonly nombre: string,
+    readonly tipo: string,
+    readonly cuerpo: Buffer,
+  ) {}
+}
+
 /** Cuántas entradas próximas da GET /agenda/huecos. */
 export const HUECOS_PROXIMOS = 5;
 
@@ -140,7 +151,13 @@ export function createTrazabilidadRouter(
     (ctx: string, fn: (req: Request) => Promise<unknown>) =>
     async (req: Request, res: Response): Promise<void> => {
       try {
-        res.json(await fn(req));
+        const r = await fn(req);
+        if (!(r instanceof Fichero)) return void res.json(r);
+        res.setHeader('Content-Type', r.tipo);
+        res.setHeader('Content-Disposition', `attachment; filename="${r.nombre}"`);
+        // Un fichero de hace un rato no vale: cada descarga es la hoja de ese momento, y queda apuntada.
+        res.setHeader('Cache-Control', 'no-store');
+        res.send(r.cuerpo);
       } catch (e) {
         sendError(res, e, ctx);
       }
@@ -157,14 +174,15 @@ export function createTrazabilidadRouter(
    * consulta de negocio— comprueba que quien pide lo tiene. Un administrador
    * del portal pasa sin que haga falta mirar su rol. Toda ruta que escribe se
    * registra con su alias `escritura`; `conPermiso`, con ese nombre, es para
-   * la única lectura que lo pide (la propuesta de reparto).
+   * las dos lecturas que lo piden (la propuesta de reparto y, desde el lote
+   * 9e, exportar la F-ST-022).
    */
   const conPermiso = (permiso: Permiso, ctx: string, fn: (req: Request) => Promise<unknown>) =>
     route(ctx, async (req) => {
       if (!esAdminPortal(req)) {
         const rol = await rolDe(req);
         if (!puede(rol, permiso)) {
-          throw new TzError('forbidden_role', 403, `Tu rol en Trazabilidad (${ETIQUETA_ROL_APP[rol]}) no permite hacer este cambio. Pide a un administrador del portal que te asigne el rol que necesitas.`);
+          throw new TzError('forbidden_role', 403, `Tu rol en Trazabilidad (${ETIQUETA_ROL_APP[rol]}) no permite ${permiso === 'hoja.exportar' ? 'exportar la F-ST-022' : 'hacer este cambio'}. Pide a un administrador del portal que te asigne el rol que necesitas.`);
         }
       }
       return fn(req);
@@ -295,6 +313,25 @@ export function createTrazabilidadRouter(
     ...gated,
     route('tmc_hoja', async (req) => leerHoja(db, hoyOf(req))),
   );
+
+  // Exportar la F-ST-022 (lote 9e): un .xlsx con las seis columnas de la hoja
+  // y los valores de esa misma tabla, más lo retirado, el detalle y unas notas
+  // en hojas aparte (exportacion.ts). SÓLO GENERA un fichero de salida: no
+  // acepta ninguno ni envía nada. No cambia ningún dato, pero se lleva la hoja
+  // entera fuera del portal: pide `hoja.exportar` (el Lector no), que se mira
+  // antes de consultar nada, y deja apuntado quién exportó, cuándo y cuántas
+  // filas (060). Exporta siempre la hoja entera: aquí no hay filtros.
+  router.get(
+    '/trazabilidad/exportar',
+    ...gated,
+    conPermiso('hoja.exportar', 'tmc_exportar', async (req) => {
+      const libro = await exportarHoja(db, hoyAgenda(req), actorOf(req), new Date());
+      return new Fichero(libro.nombre, TIPO_XLSX, libro.cuerpo);
+    }),
+  );
+
+  // La última exportación (quién, cuándo, cuántas filas, de qué congelación) y cuántas van: sólo la firma y recuentos.
+  router.get('/trazabilidad/exportaciones', ...gated, route('tmc_exportaciones', async () => leerExportaciones(db)));
 
   // ── Maestro de equipos desde Desk 2.0 (lote 9b) ──────────────────────────
   //

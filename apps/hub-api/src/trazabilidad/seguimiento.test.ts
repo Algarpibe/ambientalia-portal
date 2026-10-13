@@ -22,7 +22,7 @@ describe('058_trazabilidad_en_seguimiento.sql', () => {
     expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 057 (la última es la 059: retiros.test.ts)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 057 (la última es la 060: exportacion.test.ts)', () => {
     expect(fuente('../db.ts')).toMatch(/'057_trazabilidad_calibraciones\.sql',\s*'058_trazabilidad_en_seguimiento\.sql',/);
   });
 });
