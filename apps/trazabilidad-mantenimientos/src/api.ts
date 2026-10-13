@@ -1,7 +1,7 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
 import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
-import type { ApunteRetiro, PasadaCalibraciones, RespuestaEdicion, RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
+import type { ApunteRetiro, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -81,6 +81,17 @@ export const api = {
   congelaciones: () => request<{ congelaciones: CongelacionFst022[] }>('GET', '/fst022/congelaciones'),
   /** La tabla de la pestaña «Trazabilidad F-ST-022»: la hoja congelada con sus valores de hoy, su resumen y lo que está en el inventario y no en la hoja. Sólo lectura. */
   hoja: () => request<RespuestaHoja>('GET', '/hoja'),
+  /**
+   * Exportar la F-ST-022 (pide `hoja.exportar`): el .xlsx de la hoja entera, a hoy, y el Content-Disposition con su nombre. La petición
+   * lleva el token, así que no vale un enlace: se pide, y lo recibido se guarda desde la página. El servidor la deja apuntada.
+   */
+  exportarHoja: async (): Promise<{ blob: Blob; contentDisposition: string | null }> => {
+    const res = await fetch(`${API_BASE}/exportar`, { headers: authHeaders() });
+    if (!res.ok) throw errorFromResponse(res.status, await res.json().catch(() => null));
+    return { blob: await res.blob(), contentDisposition: res.headers.get('Content-Disposition') };
+  },
+  /** La última exportación (quién, cuándo, cuántas filas) y cuántas van. Sólo la firma y recuentos. */
+  exportaciones: () => request<RespuestaExportaciones>('GET', '/exportaciones'),
   /** El plan del cruce del inventario con el maestro de equipos de Desk 2.0, en recuentos (y su detalle, sólo si puedo sincronizar). No escribe. */
   planMaestro: () => request<RespuestaPlanMaestro>('GET', '/maestro/plan'),
   /** Cruce informativo, por marca, de la F-ST-022 congelada con el maestro. Sólo recuentos; no escribe. */

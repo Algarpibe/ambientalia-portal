@@ -8,6 +8,7 @@ import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Drawer, EstadoBadge, Loading, TONO, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
 import { Chip } from './Equipos';
+import ExportarHoja from './ExportarHoja';
 import Retiro from './Retiro';
 
 /**
@@ -22,7 +23,9 @@ import Retiro from './Retiro';
  * enlazadas con Desk 2.0 fuera de seguimiento), un panel con lo que decía la
  * hoja y sus calibraciones conocidas: sin seguimiento ni avisos. Desde el lote
  * 9d-2b, en la ficha y en el panel se corrige la fecha de calibración (con su
- * permiso); cliente, marca, modelo y serial siguen sin cambiarse aquí.
+ * permiso); cliente, marca, modelo y serial siguen sin cambiarse aquí. Desde el
+ * lote 9e, quien tiene `hoja.exportar` se lleva la hoja entera en un .xlsx
+ * (`ExportarHoja`): es una descarga, aquí no se sube nada.
  */
 interface Props {
   /** El inventario activo que ya tiene la app: sus filas abren la ficha de equipo. */
@@ -340,6 +343,7 @@ export default function HojaFst022({ equipos, recarga, onFicha, onCambio }: Prop
             <Ficha valor={r.retirados} rotulo="Retirados" nota="a mano · no cuentan" activo={filtro.retirados} onClick={() => set({ retirados: !filtro.retirados })} />
           </div>
         )}
+        <ExportarHoja hoy={datos.hoy} recarga={recarga} />
         <div className="mt-3">
           <Alert tone="blue" title="Qué se corrige aquí y qué se sigue corrigiendo en Desk 2.0">
             La fecha de calibración ya se puede corregir aquí (Técnico y Director Técnico): abre la fila y usa «Corregir fecha» —registra una calibración manual, que puede corregir la de un ticket— o «Anular», siempre con su
