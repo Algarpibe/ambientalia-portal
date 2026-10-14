@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
 import { api } from '../api';
 import type { RespuestaExportaciones } from '../dominio';
+import { ApiError } from '../lib/apiError';
 import { NOTA_EXPORTAR, nombreDeDescarga, textoUltimaExportacion } from '../lib/exportar';
 import { usePermisos } from '../permisos';
 import { Alert, Button } from '../ui';
@@ -52,7 +53,8 @@ export default function ExportarHoja({ hoy, recarga }: Props) {
       guardar(blob, nombreDeDescarga(contentDisposition, hoy));
       await cargar();
     } catch (e) {
-      setError(`No se pudo exportar la F-ST-022: ${(e as Error).message}`);
+      // Lo que no es una respuesta del servidor (se cortó la conexión) no trae un mensaje que enseñar.
+      setError(`No se pudo exportar la F-ST-022: ${e instanceof ApiError ? e.message : 'no hay conexión con el servidor. Inténtalo de nuevo en un momento.'}`);
     } finally {
       setGenerando(false);
     }
