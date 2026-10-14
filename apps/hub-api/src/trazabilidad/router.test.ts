@@ -4,6 +4,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import * as XLSX from 'xlsx';
 import type { Pool } from '@algarpibe/zoho-sync';
 
 // Cableado HTTP del router: guardas de auth/app y validación 400 antes de
@@ -265,10 +266,15 @@ describe('permisos por rol', () => {
     const deAgenda = escriben.filter((r) => /^\w+\(\s*'\/trazabilidad\/agenda\//.test(r));
     expect(deAgenda).toHaveLength(7);
     for (const r of deAgenda) expect(r).toMatch(/escritura\('(agenda\.(reparto|asignar|liberar|flujo)|config\.write)',/);
-    // Ninguna lectura lleva guarda de escritura; la única que pide permiso es la propuesta de reparto.
+    // Ninguna lectura lleva guarda de escritura. Las que piden permiso son DOS, y la lista es cerrada: la propuesta de reparto y, desde el
+    // lote 9e, exportar la F-ST-022 —no cambia ningún dato del portal, pero entrega la hoja entera en un fichero que sale de él, así que
+    // el Lector no la tiene (`hoja.exportar`)—. Cualquier otra lectura sigue abierta a quien tenga la app.
     const lecturas = rutas.filter((x) => /^get\(/.test(x));
     for (const r of lecturas) expect(r).not.toMatch(/escritura\(/);
-    expect(lecturas.filter((r) => /conPermiso\(/.test(r)).map((r) => /^get\(\s*'([^']+)'[^]*?conPermiso\('([a-z.]+)'/.exec(r)!.slice(1))).toEqual([['/trazabilidad/agenda/reparto', 'agenda.reparto']]);
+    expect(lecturas.filter((r) => /conPermiso\(/.test(r)).map((r) => /^get\(\s*'([^']+)'[^]*?conPermiso\('([a-z.]+)'/.exec(r)!.slice(1))).toEqual([
+      ['/trazabilidad/exportar', 'hoja.exportar'],
+      ['/trazabilidad/agenda/reparto', 'agenda.reparto'],
+    ]);
   });
 
   it.each(casos.filter((c) => !c.pasa))('$rol no puede $ruta → 403 en español y ninguna consulta de negocio', async ({ rol, pedir }) => {
@@ -2315,5 +2321,208 @@ describe('retirar y reincorporar un equipo o una fila de la hoja', () => {
     ]);
     for (const r of rutas.filter((x) => /^post\(/.test(x))) expect(r).toMatch(/escritura\('inventario\.write',/);
     for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/retiros-repo|retirarEquipo|tmc_retiros/);
+  });
+});
+
+// Exportar la F-ST-022 (lote 9e): un GET que devuelve un .xlsx con la tabla de la pestaña y deja apuntada la exportación. Es una
+// LECTURA con permiso (`hoja.exportar`: Comercial, Técnico y Director Técnico; el Lector no). Sólo genera un fichero de salida: no
+// acepta ninguno. El generador lo cubre exportacion.test.ts y el SQL, exportacion.db.test.ts; aquí, las guardas, las cabeceras, que el
+// fichero se abre y dice lo mismo que GET /hoja, y que ni un error ni el registro llevan un cliente o un serial.
+describe('exportar la F-ST-022 (lectura con permiso)', () => {
+  const RUTA = '/api/trazabilidad/exportar';
+  const ULTIMA = '/api/trazabilidad/exportaciones';
+  const DIA = '2026-10-12';
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const VIGENTE: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia V3.xlsx', hoja: 'Trazabilidad', por: 'director@example.com', en: '2026-10-10 15:00:00+00', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración', 'Vigencia de Calibración (Dias)']] }]];
+  /** La hoja: la 6 es de un equipo del portal, la 7 sólo está en la hoja (con un serial de cifras y ceros delante), la 8 está retirada a mano y la 9 no tiene fecha. */
+  const CONGELADAS: [RegExp, Filas] = [
+    /FROM portal\.tmc_fst022_congelada f/,
+    [
+      { fila: 6, celdas: ['Cliente Reservado', 'Grimm', 'EDM 180C', 'SER-RESERVADO', { v: '2025-10-17', t: 'fecha' }, 357], serial_norm: 'SER-RESERVADO', clave_equipo: 'SER-RESERVADO' },
+      { fila: 7, celdas: ['=Cliente Reservado', 'Horiba', 'APNA-370', '000990000000000017', { v: '2026-03-01', t: 'fecha' }, 357], serial_norm: '000990000000000017', clave_equipo: null },
+      { fila: 8, celdas: ['Cliente Reservado', 'Horiba', 'APNA-370', 'HB-RESERVADO', { v: '2026-02-01', t: 'fecha' }, 357], serial_norm: 'HB-RESERVADO', clave_equipo: null, retiro: 'retirar', retiro_por: 'director@example.com', retiro_en: '2026-10-11 15:00:00+00', retiro_motivo: 'Fila duplicada.' },
+      { fila: 9, celdas: ['Cliente Reservado', 'Thermo', '49i', 'TH-RESERVADO', null, null], serial_norm: 'TH-RESERVADO', clave_equipo: null },
+    ],
+  ];
+  const INVENTARIO: [RegExp, Filas] = [
+    /FROM portal\.tmc_equipos/,
+    [
+      { clave: 'SER-RESERVADO', serial: 'SER-RESERVADO', cliente: 'Cliente Reservado S.A.S.', marca: 'GRIMM', modelo: 'EDM 180C', activo: true, ultima_calibracion: '2026-04-04' },
+      { clave: 'ALTA-RESERVADO', serial: 'ALTA-RESERVADO', cliente: 'Cliente Reservado Dos', marca: 'GRIMM', modelo: 'EDM 180D', activo: true, ultima_calibracion: null },
+    ],
+  ];
+  const HOJA = [VIGENTE, CONGELADAS, INVENTARIO];
+  const parametros: unknown[][] = [];
+  /** Un lector de Desk 2.0 que revienta si alguien lo usa: exportar no debe tocarlo. */
+  const prohibido = (): never => {
+    throw new Error('esta ruta no lee Desk 2.0');
+  };
+  const appExportar = (rota?: RegExp) => {
+    parametros.length = 0;
+    const query = async (sql: string, p: unknown[] = []) => {
+      if (/^\s*(INSERT|UPDATE|DELETE)/.test(sql)) parametros.push(p);
+      if (rota?.test(sql)) throw new Error('fallo de la base');
+      return fakePool.query(sql, p);
+    };
+    const pool = { query, connect: fakePool.connect } as unknown as Pool;
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(pool, { ticketsAbiertos: prohibido, estadoFuente: prohibido } as never, prohibido, prohibido));
+    return a;
+  };
+  /** La respuesta con el cuerpo en bruto (un .xlsx es binario; un error sigue siendo JSON y se lee con `json`). */
+  const pedir = (cabecera: { Authorization: string } | null, ruta = `${RUTA}?hoy=${DIA}`, a = appExportar()) => {
+    const r = request(a).get(ruta);
+    if (cabecera) void r.set(cabecera);
+    return r.buffer(true).parse((res, cb) => {
+      const trozos: Buffer[] = [];
+      res.on('data', (d: Buffer) => trozos.push(d));
+      res.on('end', () => cb(null, Buffer.concat(trozos)));
+    });
+  };
+  const json = (res: request.Response) => JSON.parse((res.body as Buffer).toString('utf8'));
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q)).map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1]);
+  const libro = (res: request.Response) => {
+    const wb = XLSX.read(res.body as Buffer, { type: 'buffer', cellNF: true });
+    return { wb, principal: XLSX.utils.sheet_to_json(wb.Sheets.Trazabilidad, { header: 1, raw: true, defval: null }) as unknown[][], celda: (ref: string): XLSX.CellObject | undefined => wb.Sheets.Trazabilidad[ref] };
+  };
+  const dia = (c: XLSX.CellObject | undefined): string | null => (c ? XLSX.SSF.format('yyyy-mm-dd', c.v as number) : null);
+
+  it('401 sin token y 403 sin la app, en la descarga y en «última exportación», sin ninguna consulta', async () => {
+    for (const ruta of [RUTA, ULTIMA]) {
+      expect((await pedir(null, ruta)).status).toBe(401);
+      const sinApp = await pedir(auth(tokenFor(['ausencias'], { rol: 'DIRECTOR_TECNICO' })), ruta);
+      expect([sinApp.status, json(sinApp).error]).toEqual([403, 'forbidden']);
+    }
+    expect(queries).toEqual([]);
+    expect(consultasRol.n).toBe(0);
+  });
+
+  it.each([null, 'JEFE'])('el Lector (rol %s) NO exporta: 403 en español ANTES de consultar nada, y no queda ningún apunte', async (rol) => {
+    respuestas.push(...HOJA);
+    const res = await pedir(conRol(rol));
+    expect(res.status).toBe(403);
+    expect(json(res)).toEqual({ error: 'forbidden_role', message: 'Tu rol en Trazabilidad (Lector) no permite exportar la F-ST-022. Pide a un administrador del portal que te asigne el rol que necesitas.' });
+    expect(res.headers['content-disposition']).toBeUndefined();
+    expect(queries).toEqual([]);
+    expect(conexiones.n).toBe(0);
+    // El permiso va antes que la validación: con un «hoy» que no vale sigue siendo un 403.
+    expect((await pedir(conRol(rol), `${RUTA}?hoy=ayer`)).status).toBe(403);
+    expect(queries).toEqual([]);
+  });
+
+  it.each([['Comercial', () => conRol('COMERCIAL')], ['Técnico', () => conRol('TECNICO')], ['Director Técnico', () => conRol('DIRECTOR_TECNICO')], ['administrador del portal', comoAdmin]] as [string, () => { Authorization: string }][])(
+    '200 para %s: un .xlsx con su Content-Type, su Content-Disposition (el nombre con la fecha) y sin caché; cuatro lecturas y UN apunte, nada de Desk',
+    async (quien, cabecera) => {
+      respuestas.push(...HOJA);
+      const res = await pedir(cabecera());
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toBe(XLSX_MIME);
+      expect(res.headers['content-disposition']).toBe(`attachment; filename="F-ST-022 Trazabilidad Mttos Clientes ${DIA}.xlsx"`);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect((res.body as Buffer).subarray(0, 2).toString('latin1')).toBe('PK');
+      expect(libro(res).wb.SheetNames).toEqual(['Trazabilidad', 'Retirados', 'Detalle', 'Notas']);
+      expect(queries).toHaveLength(5);
+      for (const q of queries.slice(0, 4)) expect(q).toMatch(/^\s*SELECT/);
+      expect(escrituras()).toEqual(['INSERT INTO portal.tmc_exportaciones']);
+      expect(queries.join('\n')).not.toMatch(/\bdesk\./);
+      expect(conexiones.n).toBe(0);
+      // A un administrador no hace falta mirarle el rol.
+      expect(consultasRol.n).toBe(quien === 'administrador del portal' ? 0 : 1);
+    },
+  );
+
+  it('el fichero se abre y sus valores son los de GET /hoja del mismo «hoy»: las mismas filas vivas, en su orden, con sus seis columnas', async () => {
+    respuestas.push(...HOJA);
+    const a = appExportar();
+    const hoja = (await request(a).get(`/api/trazabilidad/hoja?hoy=${DIA}`).set(conRol(null))).body;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const vivas = [...hoja.filas, ...hoja.fueraDeHoja].filter((f: any) => f.retirado === null) as any[];
+    expect(vivas.map((f) => f.serial)).toEqual(['SER-RESERVADO', '000990000000000017', 'TH-RESERVADO', 'ALTA-RESERVADO']);
+    const { principal, celda, wb } = libro(await pedir(conRol('COMERCIAL'), `${RUTA}?hoy=${DIA}`, a));
+    expect(principal[4]).toEqual(['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración', 'Vigencia de Calibración (Dias)']);
+    expect(principal).toHaveLength(5 + vivas.length);
+    for (const [i, f] of vivas.entries()) {
+      expect(principal[5 + i].slice(0, 4)).toEqual([f.cliente, f.marca, f.modelo, f.serial]);
+      expect(dia(celda(`E${6 + i}`))).toBe(f.ultimaCalibracion);
+      expect(celda(`F${6 + i}`)?.v ?? null).toBe(f.vigenciaDias);
+      expect(celda(`F${6 + i}`)?.f).toBe(f.vigenciaDias === null ? undefined : `E${6 + i}-TODAY()+365`);
+    }
+    // El serial de cifras sale como texto, entero; y un cliente que empieza por «=», como texto, no como fórmula.
+    expect([celda('D7')!.t, celda('D7')!.v]).toEqual(['s', '000990000000000017']);
+    expect([celda('A7')!.t, celda('A7')!.v, celda('A7')!.f]).toEqual(['s', '=Cliente Reservado', undefined]);
+    // Lo retirado a mano no está en la principal: va en su hoja, con quién y por qué.
+    expect(principal.flat()).not.toContain('HB-RESERVADO');
+    const retirados = XLSX.utils.sheet_to_json(wb.Sheets.Retirados, { header: 1, defval: null }) as unknown[][];
+    expect(retirados.slice(1).map((r) => [r[0], r[4], r[6], r[7], r[9]])).toEqual([[8, 'HB-RESERVADO', 'Fila de la hoja', 'director@example.com', 'Fila duplicada.']]);
+  });
+
+  it('el apunte: de qué congelación, a qué día, cuántas filas y retirados, el nombre, la huella del fichero que se entregó y la firma; ni un cliente ni un serial', async () => {
+    respuestas.push(...HOJA);
+    const res = await pedir(conRol('TECNICO'));
+    expect(parametros).toHaveLength(1);
+    const { createHash } = await import('node:crypto');
+    expect(parametros[0]).toEqual([7, DIA, 4, 1, `F-ST-022 Trazabilidad Mttos Clientes ${DIA}.xlsx`, createHash('sha256').update(res.body as Buffer).digest('hex'), expect.stringMatching(/^0{8}-/), expect.stringMatching(/@/), expect.stringMatching(/^\d{4}-\d\d-\d\dT[\d:.]+Z$/)]);
+    expect(JSON.stringify(parametros)).not.toMatch(/Reservado|RESERVADO/);
+  });
+
+  it('por defecto «hoy» es el día en Colombia; un «hoy» que no es una fecha, o un día que no existe, es un 400 sin consultar nada', async () => {
+    respuestas.push(...HOJA);
+    const res = await pedir(conRol('COMERCIAL'), RUTA);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toMatch(/^attachment; filename="F-ST-022 Trazabilidad Mttos Clientes \d{4}-\d{2}-\d{2}\.xlsx"$/);
+    queries.length = 0;
+    for (const hoy of ['ayer', '2026-02-30']) {
+      const mala = await pedir(conRol('COMERCIAL'), `${RUTA}?hoy=${hoy}`);
+      expect([mala.status, json(mala).field]).toEqual([400, 'hoy']);
+    }
+    expect(queries).toEqual([]);
+  });
+
+  it('sin congelación vigente: 200 igual, con la cabecera y lo que haya en el inventario; el apunte lo dice (congelación vacía)', async () => {
+    respuestas.push(INVENTARIO);
+    const res = await pedir(conRol('DIRECTOR_TECNICO'));
+    expect(res.status).toBe(200);
+    const { principal } = libro(res);
+    expect(principal[2][0]).toMatch(/^Sin F-ST-022 congelada en este entorno/);
+    expect(principal.slice(5).map((r) => r[3])).toEqual(['ALTA-RESERVADO', 'SER-RESERVADO']);
+    expect(parametros[0].slice(0, 4)).toEqual([null, DIA, 2, 0]);
+  });
+
+  it.each([['la lectura de la hoja', /tmc_calibraciones/], ['el apunte', /INSERT INTO portal\.tmc_exportaciones/]] as [string, RegExp][])('si falla %s: 500 genérico y NINGÚN fichero; ni la respuesta ni lo que se apunta en el registro llevan un cliente o un serial', async (_que, rota) => {
+    respuestas.push(...HOJA);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await pedir(conRol('COMERCIAL'), `${RUTA}?hoy=${DIA}`, appExportar(rota));
+    expect([res.status, json(res)]).toEqual([500, { error: 'internal error' }]);
+    expect(res.headers['content-disposition']).toBeUndefined();
+    const apuntado = error.mock.calls.map((c) => c.map((x) => (x instanceof Error ? `${x.message} ${x.stack}` : JSON.stringify(x))).join(' ')).join('\n');
+    expect(apuntado).toMatch(/tmc_exportar error/);
+    expect(apuntado).not.toMatch(/Reservado|RESERVADO/);
+    error.mockRestore();
+  });
+
+  it('«última exportación»: abierta a un Lector sin mirar su rol, una lectura, y sólo la firma y recuentos', async () => {
+    const vacia = await request(appExportar()).get(ULTIMA).set(conRol(null));
+    expect([vacia.status, vacia.body]).toEqual([200, { ultima: null, total: 0 }]);
+    respuestas.push([/FROM portal\.tmc_exportaciones x/, [{ id: '3', por: 'comercial@example.com', en: '2026-10-12 20:10:00+00', hoy: DIA, filas: 4, retirados: 1, congelacion_id: '7', archivo: `F-ST-022 Trazabilidad Mttos Clientes ${DIA}.xlsx`, sha256: 'ab'.repeat(32), total: '3' }]]);
+    queries.length = 0;
+    const res = await request(appExportar()).get(ULTIMA).set(conRol(null));
+    expect(res.body).toEqual({ ultima: { id: 3, por: 'comercial@example.com', en: '2026-10-12 20:10:00+00', hoy: DIA, filas: 4, retirados: 1, congelacionId: 7, archivo: `F-ST-022 Trazabilidad Mttos Clientes ${DIA}.xlsx`, sha256: 'ab'.repeat(32) }, total: 3 });
+    expect(consultasRol.n).toBe(0);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatch(/^\s*SELECT/);
+  });
+
+  it('CANDADO: sus rutas son estas dos, las dos GET —nada acepta un fichero ni un cuerpo—, la descarga con `hoja.exportar`; ni programador ni nada que envíe', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    const router = fuente('./router.ts');
+    const rutas = router.split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'[^']*export/.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/exportar', 'get /trazabilidad/exportaciones']);
+    expect(rutas[0]).toMatch(/\.\.\.gated,\s*conPermiso\('hoja\.exportar', 'tmc_exportar',/);
+    for (const r of rutas) expect(r).not.toMatch(/req\.body|req\.file|multer|upload/i);
+    // El router no lee ningún libro: sólo sirve el que genera exportacion.ts.
+    expect(router).not.toMatch(/from 'xlsx'|XLSX\.|multer|busboy|formidable|multipart/i);
+    for (const f of ['./exportacion.ts', './exportacion-repo.ts']) expect(fuente(f), f).not.toMatch(/\bfetch\s*\(|n8n|webhook|nodemailer|smtp|sendMail|outbox|setInterval|setTimeout/i);
+    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/exportacion|exportarHoja|tmc_exportaciones/);
   });
 });

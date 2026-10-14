@@ -23,6 +23,8 @@ const MATRIZ: Record<Permiso, Record<RolApp, boolean>> = {
   'maestro.sincronizar': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   // Lote 9d-2b: retirar o reincorporar un equipo o una fila de la hoja. Sólo el Director Técnico (por defecto, revisable): el Técnico corrige fechas, no retira.
   'inventario.write': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
+  // Lote 9e: exportar la F-ST-022 a un .xlsx. No cambia nada, pero saca del portal la hoja entera: Comercial, Técnico y Director Técnico (por defecto, revisable); el Lector no.
+  'hoja.exportar': { LECTOR: N, COMERCIAL: S, TECNICO: S, DIRECTOR_TECNICO: S },
   'roles.manage': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: N },
 };
 
@@ -31,7 +33,7 @@ describe('roles y permisos: los nombres', () => {
     expect([...ROLES_APP]).toEqual(['LECTOR', 'COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']);
   });
 
-  it('los catorce permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b y el de retirar, con el 9d-2b)', () => {
+  it('los quince permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b, el de retirar con el 9d-2b y el de exportar con el 9e)', () => {
     expect([...PERMISOS]).toEqual([
       'seguimiento.write',
       'avisos.write',
@@ -46,6 +48,7 @@ describe('roles y permisos: los nombres', () => {
       'calibraciones.write',
       'maestro.sincronizar',
       'inventario.write',
+      'hoja.exportar',
       'roles.manage',
     ]);
     expect(Object.keys(MATRIZ).sort()).toEqual([...PERMISOS].sort());
@@ -59,8 +62,12 @@ describe('roles y permisos: los nombres', () => {
 describe('la matriz entera: cada rol × cada permiso', () => {
   const casos = PERMISOS.flatMap((permiso) => ROLES_APP.map((rol) => ({ rol, permiso, esperado: MATRIZ[permiso][rol] })));
 
-  it('son 56 casos', () => {
-    expect(casos).toHaveLength(56);
+  it('son 60 casos', () => {
+    expect(casos).toHaveLength(60);
+  });
+
+  it('exportar la F-ST-022 es de Comercial, Técnico y Director Técnico; el Lector la ve en pantalla y no se la lleva', () => {
+    expect(ROLES_APP.filter((rol) => puede(rol, 'hoja.exportar'))).toEqual(['COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']);
   });
 
   it.each(casos)('$rol · $permiso → $esperado', ({ rol, permiso, esperado }) => {
@@ -88,8 +95,8 @@ describe('administradores del portal', () => {
   });
 
   it('permisosDe devuelve los permisos en el orden de PERMISOS y una copia cada vez', () => {
-    expect(permisosDe('COMERCIAL')).toEqual(['seguimiento.write', 'avisos.write', 'contactos.write']);
-    expect(permisosDe('TECNICO')).toEqual(['seguimiento.write', 'servicios.tipo.write', 'calibraciones.write']);
+    expect(permisosDe('COMERCIAL')).toEqual(['seguimiento.write', 'avisos.write', 'contactos.write', 'hoja.exportar']);
+    expect(permisosDe('TECNICO')).toEqual(['seguimiento.write', 'servicios.tipo.write', 'calibraciones.write', 'hoja.exportar']);
     const a = permisosDe('DIRECTOR_TECNICO');
     a.length = 0;
     expect(permisosDe('DIRECTOR_TECNICO')).toHaveLength(PERMISOS.length - 1);

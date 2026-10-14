@@ -20,6 +20,8 @@ export { TIPOS_DETALLE } from '../../hub-api/src/trazabilidad/calibraciones';
 // La pestaña «Trazabilidad F-ST-022»: la tabla de la hoja tal como la sirve GET /hoja (tipos; el cálculo es del servidor).
 export type { ApunteRetiro, AvisoHoja, CalibracionHoja, EnHoja, FilaHoja, RespuestaEdicion, RespuestaHoja, RespuestaRetiro, ResumenHoja, Retiro, SituacionHoja } from '../../hub-api/src/trazabilidad/hoja';
 export { AVISOS_HOJA } from '../../hub-api/src/trazabilidad/hoja';
+// Exportar la F-ST-022: sólo los tipos de «última exportación» (el libro lo genera el servidor; de aquí no se importa su código, que carga SheetJS).
+export type { Exportacion, RespuestaExportaciones } from '../../hub-api/src/trazabilidad/exportacion';
 export type {
   ConfiguracionAgenda,
   CongelacionFst022,

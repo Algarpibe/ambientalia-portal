@@ -62,13 +62,16 @@ export const PERMISOS = [
   'maestro.sincronizar',
   /** Retirar o reincorporar a mano un equipo, o una fila de la hoja congelada (lote 9d-2b). Corregir una fecha no es de aquí: eso es `calibraciones.write`. */
   'inventario.write',
+  /** Exportar la F-ST-022 a un .xlsx (lote 9e). No cambia nada, pero saca del portal la hoja entera, con clientes y seriales: es la segunda LECTURA que pide permiso. */
+  'hoja.exportar',
   /** Repartir roles. De ningún rol: sólo de los administradores del portal. */
   'roles.manage',
 ] as const;
 export type Permiso = (typeof PERMISOS)[number];
 
-const DE_COMERCIAL: readonly Permiso[] = ['seguimiento.write', 'avisos.write', 'contactos.write'];
-const DE_TECNICO: readonly Permiso[] = ['seguimiento.write', 'servicios.tipo.write', 'calibraciones.write'];
+// Exportar la F-ST-022 (`hoja.exportar`) es de los tres roles que no son Lector (por defecto, revisable: quitarlo de una de estas dos listas se lo quita a ese rol).
+const DE_COMERCIAL: readonly Permiso[] = ['seguimiento.write', 'avisos.write', 'contactos.write', 'hoja.exportar'];
+const DE_TECNICO: readonly Permiso[] = ['seguimiento.write', 'servicios.tipo.write', 'calibraciones.write', 'hoja.exportar'];
 
 const MATRIZ: Record<RolApp, readonly Permiso[]> = {
   LECTOR: [],

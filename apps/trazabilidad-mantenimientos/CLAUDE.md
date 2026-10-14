@@ -23,7 +23,9 @@ marcas enlazadas con Desk 2.0, fuera de seguimiento»). **Desde el lote 9d-2b un
 corregir a mano una fecha de calibración** (registrar una manual o anular una fila, con motivo y
 firma; ver «Corregir a mano una fecha de calibración») **y retirar un equipo o una fila de la
 hoja** (se marca, no se borra, y la sincronización del maestro lo respeta; ver «Retirar y
-reincorporar a mano»): sigue sin enviarse nada. El seguimiento (aviso
+reincorporar a mano»): sigue sin enviarse nada. **Desde el lote 9e la hoja se exporta** a un .xlsx
+con sus seis columnas y los valores de hoy (ver «Exportar la F-ST-022»): es sólo una descarga, con
+su permiso y su apunte; nada se sube. El seguimiento (aviso
 enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
 se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
 congelar. Ver «F-ST-022: congelación y relevo de la Excel».
@@ -54,7 +56,8 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql` |
+| Exportar la F-ST-022 (lote 9e, 060): el generador puro del .xlsx —columnas, filas, vigencia con fórmula, hojas de más y nombre, cada cosa en un solo sitio— (`libroFst022`, `COLUMNAS_FST022`, `filasExportadas`, `FORMULA_VIGENCIA`, `HOJAS_LIBRO`, `ORIGENES_FECHA`, `nombreFichero`) y los tipos de «última exportación» | `apps/hub-api/src/trazabilidad/exportacion.ts`; quien reúne la tabla con `leerHoja`, genera el libro y lo apunta (`exportarHoja`, `leerExportaciones`; **único fichero que escribe `tmc_exportaciones`**) en `exportacion-repo.ts`; cómo se sirve un fichero (`Fichero`) en `router.ts`; el botón en `src/vistas/ExportarHoja.tsx` y lo que calcula (`nombreDeDescarga`, `textoUltimaExportacion`, `NOTA_EXPORTAR`) en `src/lib/exportar.ts` |
 | Retirar y reincorporar a mano (lote 9d-2b, 059): un equipo (`retirarEquipo`) o una fila de la hoja sin equipo (`retirarFila`) y su auditoría (`listarRetiros`) | `apps/hub-api/src/trazabilidad/retiros-repo.ts`; que el maestro respete la marca, en `maestro.ts` (`activoDe`, `retiradosAMano`) y `maestro-repo.ts`; la pantalla en `src/vistas/Retiro.tsx` y lo que calcula (`accionRetiro`, `efectoRetiro`, `textoRetiro`) en `src/lib/hoja.ts` |
 | Calibraciones desde Desk 2.0 (lote 9c): regla pura de la «última calibración» (`calibracionQueCuenta`, `fechaEfectiva`), el plan de la pasada (`planCalibraciones`), la salud de la lectura (`saludLectura`) y los tipos de su API (sin base; lo importa la app) | `apps/hub-api/src/trazabilidad/calibraciones.ts`; la lectura del campo de Zoho en `desk.tickets` (`crearLectorCalibraciones`; **único sitio** que nombra el campo, con sus citas de Desk 2.0) en `calibraciones-desk2.ts`; el SQL del portal (`leerPlanCalibraciones`, `sincronizarCalibraciones`, `historialCalibraciones`) en `calibraciones-repo.ts`; y `leerCalibraciones` (las filas guardadas), con el `listarEquipos` que las aplica al inventario, en `repo.ts` |
 | Tarjeta «Calibraciones · Desk 2.0» de Configuración, el bloque «Calibraciones» de la ficha de un equipo y lo que calculan (`lineasPlan`, `hayQueTraer`, `textoUltima`, `bloquesDetalle`, `origenCalibracion`, `ETIQUETA_ESTADO_FILA`) | `src/vistas/CalibracionesDesk.tsx`, `src/vistas/FichaEquipo.tsx` y `src/lib/calibraciones.ts` |
@@ -94,6 +97,7 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_calibraciones` | **Una fila por calibración conocida** (057). `clave` (el equipo del portal, `tmc_equipos.clave`; **NULL** si el serial no es de un equipo del inventario: otras marcas, 9d), `serial` (tal cual) y `serial_norm`, `desk_equipo_id` (si el ticket lo trae), `fecha` (`DATE NOT NULL`: **nunca se edita**; corregir es anular la fila e insertar otra), `origen` (`CHECK` a `fst022` = punto de partida, la hoja congelada / `desk` = el campo de Zoho de un ticket / `manual` = lote 9d), `ticket` (sólo y siempre en las de origen `desk`), `corrige_ticket` + `corrige_fecha` (sólo en una `manual` que corrige un ticket: su número y la fecha que ese ticket tenía en Zoho), `estado` (`CHECK` a `vigente` / `anulada` / `en_revision` = no cuenta), `motivo`, la firma del alta (`por_id`, `por`, `en`, y `pasada_id` si la trajo una pasada) y la de la anulación (`anulada_por_id`, `anulada_por`, `anulada_en`, `anulada_motivo`, y `anulada_pasada_id`: **NULL = la anuló una persona**, y entonces la pasada no la resucita). Tres `CHECK` con nombre (`…_ticket_de_desk`, `…_corrige`, `…_anulada_firmada`) y dos índices únicos parciales: `tmc_calibraciones_ticket_uq (ticket) WHERE origen = 'desk' AND estado <> 'anulada'` = **como mucho una fila sin anular por ticket de Desk**, y `tmc_calibraciones_fst022_uq (clave) WHERE origen = 'fst022'` = una fila de partida por equipo. Sin semilla ni clave foránea. **La escriben la pasada** (`sincronizarCalibraciones`, `calibraciones-repo.ts`: inserta y anula; nunca cambia una fecha; `calibraciones.test.ts` lo vigila) **y, desde el lote 9d-2b, una persona** (`edicion-repo.ts`: inserta una `manual` —o la partida de una fila de la hoja, ya anulada, con `clave` NULL y `origen = 'fst022'`— y anula con `anulada_motivo`; tampoco cambia nunca una fecha; `edicion.test.ts` lo vigila) |
 | `portal.tmc_calibraciones_pasadas` | **Auditoría** de cada pasada aplicada (057), al estilo de `tmc_maestro_sincronizaciones`: `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosCalibraciones`), `detalle` (`JSONB`, array de `DetalleCalibracion`), `por_id`, `por` y `en`. No se cambia ni se borra. Sin semilla |
 | `portal.tmc_retiros` | **Un apunte por cada retiro o reincorporación a mano** (059): de un equipo (`clave`) **o** de una fila de la hoja congelada sin equipo (`congelacion_id` + `fila`) —`CHECK` `tmc_retiros_objeto`: una cosa o la otra—, `accion` (`CHECK` a `retirar` / `reincorporar`), `motivo` (`NOT NULL` y no vacío), `antes` y `despues` (`activo` / `retirado`: el valor anterior y el nuevo) y la firma (`por_id`, `por`, `en`). No se cambia ni se borra: es la auditoría y, para una fila de la hoja, **su estado** (está retirada si su último apunte es un retiro). Sin semilla ni clave foránea. Sólo la escribe `retiros-repo.ts`. **No es una tabla de mensajes ni de envíos** |
+| `portal.tmc_exportaciones` | **Un apunte por cada exportación de la F-ST-022** (060), para saber qué copia circula: `congelacion_id` (la vigente de la que parte; NULL si no había), `hoy` (el día de los valores), `filas` (las de la hoja principal), `retirados` (los de su hoja aparte), `archivo` (el nombre con que se sirvió), `sha256` (la huella del fichero tal como salió) y la firma (`por_id`, `por`, `en`). **Sólo recuentos y la firma: ni clientes ni seriales.** No se cambia ni se borra. Sin semilla ni clave foránea. Sólo la escribe `exportacion-repo.ts`. **No es una tabla de mensajes ni de envíos**: apunta que alguien descargó un fichero |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación que se hizo: archivo, recuentos y quién. **Histórico**: ya no se añade ninguna fila |
 | `portal.tmc_fst022_congelaciones` | (**Sólo lectura** desde el 10/10/2026: ningún código inserta ni cambia nada en las dos tablas `tmc_fst022_*`; `fst022.test.ts` lo vigila.) Una fila por **congelación de la F-ST-022** (055): `archivo`, `sha256` del fichero (lo calcula el navegador), `hoja`, `fila_cabecera` y `cabeceras` (`JSONB`: las filas de títulos tal cual), recuentos (`total_filas`, `total_columnas`, `filas_guardadas`, `filas_equipo`, `filas_con_serial`, `filas_edm180` y `problemas`, `JSONB` de recuentos por tipo), `vigente`, `motivo`, la firma (`por_id`, `por`, `en`) y, al dejar de ser la vigente, `reemplazada_por_id` / `reemplazada_por` / `reemplazada_en` / `reemplazada_motivo`. Índice único parcial `tmc_fst022_congelaciones_vigente_uq` = **como mucho una vigente**; `CHECK` `tmc_fst022_vigente_o_reemplazada` = reemplazada si y sólo si no es la vigente, y entonces firmada y con motivo. Nunca se borra. Sólo `CREATE … IF NOT EXISTS`, sin semilla |
@@ -112,8 +116,9 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 
 ## API (`/api/trazabilidad/*`)
 
-Todas piden sesión y la app asignada. Los `GET` no piden nada más (salvo `GET
-/trazabilidad/agenda/reparto`, que pide `agenda.reparto`). Los que escriben piden además
+Todas piden sesión y la app asignada. Los `GET` no piden nada más (salvo dos: `GET
+/trazabilidad/agenda/reparto`, que pide `agenda.reparto`, y `GET /trazabilidad/exportar`, que
+pide `hoja.exportar`). Los que escriben piden además
 un permiso (ver «Permisos»): sin él, 403 `forbidden_role` con mensaje en español, antes de validar
 el cuerpo y antes de cualquier consulta de negocio. Las rutas de la agenda del taller van en la
 segunda tabla, más abajo.
@@ -129,6 +134,8 @@ segunda tabla, más abajo.
 | GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
 | GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
 | GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{id, fecha, origen, ticket, corrigeTicket, estado, cuenta}` y, en las guardadas, su firma: `motivo`, `por`, `en`, `anuladaPor`, `anuladaEn`, `anuladaMotivo`; la partida que una fila toma de la hoja no es una fila guardada: su `id` es el de su fila, en negativo). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, retirados, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (desde el lote 9d-2b cada fila lleva `retirado: {por, en, motivo} \| null` —el equipo o, si sólo está en la hoja, la fila—, y `soloHoja`, `conAvisos` y `porEstado` no cuentan lo retirado) (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
+| GET | `/trazabilidad/exportar` (`?hoy=`) | **Permiso `hoja.exportar`** (lote 9e; es una lectura con permiso). Devuelve **un fichero**, no JSON: el .xlsx de la F-ST-022 con la tabla de `GET /hoja` a ese día —hoja «Trazabilidad» con las seis columnas de la V3, y «Retirados», «Detalle» y «Notas»—, con `Content-Disposition: attachment; filename="F-ST-022 Trazabilidad Mttos Clientes AAAA-MM-DD.xlsx"` y `Cache-Control: no-store`. Deja su apunte en `tmc_exportaciones` (si el apunte falla, 500 y ningún fichero). 403 `forbidden_role` sin el permiso, antes de consultar nada; 400 en `hoy` si no es un día que exista. Sin congelación exporta lo que haya. Lleva clientes y seriales; nada de eso va a un error ni al registro. No acepta ningún cuerpo. Ver «Exportar la F-ST-022» |
+| GET | `/trazabilidad/exportaciones` | `{ultima: {id, por, en, hoy, filas, retirados, congelacionId, archivo, sha256} \| null, total}`: la última exportación y cuántas van. Abierta a quien tiene la app; sólo la firma y recuentos |
 | GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos` y, desde el lote 9d-2b, `retiradosAMano` (retirados a mano que Desk 2.0 tiene activos: se respetan; también en `otras`); `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero) |
 | GET | `/trazabilidad/maestro/cruce` | Cruce **informativo** de todas las marcas entre la congelación vigente y el maestro, por serial: `{maestro, congelacion: {id, archivo} \| null, marcas: [{marca, v3, desk, casan, soloV3, soloDesk, ambiguos, sinCeros}]}` (`sinCeros` = de `soloV3`, los de serial numérico que casarían ignorando ceros a la izquierda). Sólo recuentos; no escribe |
 | POST | `/trazabilidad/maestro/sincronizar` | Permiso `maestro.sincronizar`. `{huella?}` (la del plan revisado): aplica el plan de ahora —**los dos ámbitos**, en la misma transacción—, todo o nada, y devuelve su fila de auditoría (`recuentos.otras` = lo hecho con las otras marcas). **409 `maestro_no_disponible`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; 400 en `huella` si no son 64 hexadecimales |
@@ -202,6 +209,7 @@ escribe nadie a mano: lo apunta hub-api.
 | `calibraciones.write` | — | — | sí | sí | `POST /trazabilidad/calibraciones/sincronizar` y el `detalle` de `GET /trazabilidad/calibraciones/plan` (lote 9c); y corregir una fecha a mano (lote 9d-2b): `POST /trazabilidad/calibraciones/manual`, `POST /trazabilidad/calibraciones/:id/anular` y `POST /trazabilidad/calibraciones/partida/:fila/anular` (por defecto, revisable) |
 | `inventario.write` | — | — | — | sí | Retirar y reincorporar a mano (lote 9d-2b; por defecto, revisable): `POST /trazabilidad/equipos/:clave/retirar`, `…/reincorporar`, `POST /trazabilidad/filas/:fila/retirar` y `…/reincorporar` |
 | `maestro.sincronizar` | — | — | — | sí | `POST /trazabilidad/maestro/sincronizar` y el `detalle` de `GET /trazabilidad/maestro/plan` (lote 9b) |
+| `hoja.exportar` | — | sí | sí | sí | `GET /trazabilidad/exportar`: exportar la F-ST-022 a un .xlsx (lote 9e; por defecto, revisable). No cambia nada: es una lectura que se lleva la hoja entera fuera del portal |
 | `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
 
 El Director Técnico es el de D14 en `docs/trazabilidad-agenda-taller.md`: los endpoints de la
@@ -215,8 +223,10 @@ roles van con `soloAdmin(ctx, fn)` (403 `forbidden_admin`). `router.test.ts` lee
 **falla si una ruta `post` / `put` / `patch` / `delete` se registra sin una de las dos**, o con un
 permiso que no es el de la lista `ESCRITURAS` de esa prueba (ruta a ruta): al añadir una escritura
 hay que darle permiso y apuntarla ahí. `escritura` es el alias de `conPermiso`, que con ese nombre
-sólo usa la única lectura que pide permiso (`GET /trazabilidad/agenda/reparto`); la prueba también
-falla si otra lectura lo pide o si una lleva `escritura`. La tercera forma es `retirada(ctx)`: una
+sólo usan las **dos lecturas que piden permiso** (`GET /trazabilidad/agenda/reparto` y, desde el
+lote 9e, `GET /trazabilidad/exportar`; a ésta el 403 le dice «no permite exportar la F-ST-022»);
+la prueba lleva esa lista cerrada y también falla si otra lectura lo pide o si una lleva
+`escritura`. La tercera forma es `retirada(ctx)`: una
 ruta que ya no deja pasar a nadie (410); la prueba fija cuáles son (las dos subidas de la Excel).
 
 **En la UI**: `App.tsx` pide `GET /roles/me` al entrar y lo deja en `PermisosContext`; las vistas
@@ -237,7 +247,7 @@ Dos niveles (`src/lib/navegacion.ts`): arriba el **grupo**, debajo sus **seccion
 
 | Grupo | Secciones (hash) |
 |---|---|
-| Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`, con sus vistas Manual / Simulación automática dentro), Trazabilidad F-ST-022 (`#fst022`, la hoja entera de todas las marcas, sólo lectura) |
+| Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`, con sus vistas Manual / Simulación automática dentro), Trazabilidad F-ST-022 (`#fst022`, la hoja entera de todas las marcas; desde ahí se corrige una fecha, se retira y, con `hoja.exportar`, se exporta) |
 | Taller | Servicios (`#servicios`) y Agenda del taller (`#agenda`) |
 | Administración | Configuración (`#configuracion`) y Roles (`#roles`, sólo se ofrece a los administradores del portal) |
 
@@ -924,6 +934,7 @@ Lote 7 (`docs/trazabilidad-agenda-taller.md`, secciones G y J). «Taller» → �
 ## F-ST-022: congelación y relevo de la Excel
 
 **Estado: la hoja está congelada y la Excel ya no se sube** (ni importar ni volver a congelar).
+**Desde el lote 9e se exporta** (sólo salida; ver «Exportar la F-ST-022» y, al final, el estado del relevo).
 
 **Decisiones de Alfonso (09/10/2026).** La Excel F-ST-022 **deja de ser la fuente**: se congela su
 contenido de hoy y, por lotes, la releva el portal.
@@ -1040,8 +1051,8 @@ numérico largo (14 cifras, íntegro: Excel sólo lo *muestra* en notación cien
 - ⚠️ **El inventario sigue siendo `tmc_equipos`**: nació de la última importación que se hizo
   (anterior a la V3), **no** se rellenó desde la congelación y desde el 9b lo actualiza la
   sincronización con el maestro. La cabecera habla del origen firmado, no de quién llenó la tabla.
-- **`xlsx` (SheetJS) quedó sin uso en esta app**; sigue en su `package.json` hasta que el lote de
-  exportar decida.
+- **`xlsx` (SheetJS) quedó sin uso en esta app**; sigue en su `package.json`. El lote de exportar
+  (9e) genera el libro en hub-api, así que aquí sigue sin hacer falta (ver «Exportar la F-ST-022»).
 
 ### Congelar un entorno nuevo
 
@@ -1471,7 +1482,103 @@ al maestro, y un inactivo del portal que Desk 2.0 tuviera activo **se reactivaba
 - ⚠️ **Despliegue**: hub-api antes que el portal (la 059 se aplica al arrancar; el portal nuevo
   lee `retirado` y `resumen.retirados` de `GET /hoja`). Nadie queda retirado por desplegar.
 
-### Lo que viene (no construido)
+### Exportar la F-ST-022 (lote 9e, migración 060)
+
+**Estado: hecho. Con este lote la Excel queda relevada del todo**: ya no es la fuente ni se sube, y
+quien la necesite fuera del portal **se la lleva exportada**. Decisión de Alfonso (09/10/2026):
+exportar = «la misma información en las mismas columnas», **sin calco visual** de la plantilla.
+⚠️ **Sólo genera un fichero de salida**: no acepta ninguno (la subida sigue retirada, con sus 410),
+no envía nada a nadie y no toca la hoja congelada, el inventario ni las calibraciones.
+
+**Decisiones por defecto, revisables** (Alfonso las verá al probarlo; cada una se cambia en **un
+solo sitio**, que se dice entre paréntesis):
+
+- **Las columnas de la principal**: las seis de la V3, con los mismos títulos y en el mismo orden,
+  y nada más a la derecha; los valores son los de HOY (cliente, marca, modelo y serial actuales, y
+  la última calibración que da la regla). (`COLUMNAS_FST022`, `exportacion.ts`.)
+- **Las filas**: primero las de la hoja congelada, en su orden; después, los equipos que están en
+  el inventario o en Desk 2.0 y no en la hoja (los de `fueraDeHoja`, por cliente y serial). **Lo
+  retirado a mano no sale** en la principal. Lo inactivo que nadie retiró sí sale, como en la
+  pestaña. (`filasExportadas`.)
+- **La vigencia va «viva»**: una fórmula por fila, la de la hoja —`=E6-TODAY()+365`, es decir,
+  última calibración + 365 − HOY()—, con su valor del día de la exportación guardado en caché (es
+  el de la pestaña). Sin fecha, la celda de la fecha y la de la vigencia van vacías.
+  (`FORMULA_VIGENCIA` y la celda que la usa: quitarle `f` la deja en el número del día.)
+- **Tipos de celda**: la fecha es una FECHA de Excel (el número de días, entero y calculado sobre
+  UTC, con formato `dd/mm/yyyy`: es ese día se abra en la zona que se abra); **todo texto es una
+  celda de texto**, escrita a mano —un serial hecho de cifras no pierde ceros ni sale en notación
+  científica, y un cliente o un motivo que empiece por «=», «+», «-» o «@» no puede salir como
+  fórmula—; la vigencia es un número. **No se antepone un apóstrofo** a esos textos: en un .xlsx
+  una celda de texto ya no se interpreta, y anteponerlo cambiaría el dato. ⚠️ Si alguien guarda
+  el libro como CSV y lo vuelve a abrir, esa protección ya no es la del portal.
+- **Las hojas de más**, para la trazabilidad (`HOJAS_LIBRO`): **«Retirados»** (lo retirado a mano
+  —equipo o fila de la hoja— con quién, cuándo en hora de Colombia y motivo), **«Detalle»** (una
+  línea por fila de la principal, en su orden: la fila en este libro, la de la hoja congelada, el
+  serial, de dónde sale la fecha —con el número de ticket—, cuándo vence y su estado ese día) y
+  **«Notas»** (de qué congelación parte, fecha y hora de exportación en Colombia, quién exporta,
+  los recuentos de lo exportado por marca, por estado y por origen de la fecha, y qué significa
+  cada origen: `ORIGENES_FECHA`).
+- **El nombre**: «F-ST-022 Trazabilidad Mttos Clientes AAAA-MM-DD.xlsx», con el día en Colombia.
+  (`nombreFichero`; la app lleva el mismo de reserva, `nombrePorDefecto` en `src/lib/exportar.ts`,
+  por si la cabecera no llegara.)
+- **El permiso**: nuevo y de nombre estable, **`hoja.exportar`**, de Comercial, Técnico y Director
+  Técnico (los administradores, todo); **el Lector no exporta**. (Las listas `DE_COMERCIAL` y
+  `DE_TECNICO` de `roles.ts`.) Se llama `hoja.…` y no `fst022.…` porque las guardas de
+  `router.test.ts` leen el nombre del permiso con letras y puntos.
+- **Sin congelación vigente** se exporta igual lo que haya (los equipos del inventario y de Desk
+  2.0), con su cabecera, y el libro y el apunte dicen que no parte de ninguna hoja congelada.
+- **Cada exportación queda apuntada** (abajo), para saber qué copia circula.
+
+Cómo está hecho:
+
+- **Una sola regla.** `exportarHoja` (`exportacion-repo.ts`) llama a **`leerHoja`**, la misma
+  lectura de `GET /hoja`, y le pasa su respuesta tal cual a `libroFst022` (`exportacion.ts`), un
+  generador **puro** —sin base, sin red y sin reloj: el instante de la exportación le llega como
+  argumento— que no calcula nada de la hoja: sólo la escribe. Lo exportado y lo que se ve en la
+  pestaña no pueden diferir (`exportacion.test.ts` tiene el candado de que ninguno de los dos
+  ficheros nombra `tablaHoja` ni otra regla; `router.test.ts` y `exportacion.db.test.ts` comparan
+  el fichero con `GET /hoja`, y la verificación en navegador, con lo que pinta la pestaña).
+- **SheetJS** (`xlsx`, que ya era dependencia de hub-api) escribe el libro. Esa edición **no
+  escribe estilos ni colores**: sólo anchos de columna y formatos de número. No se intenta más.
+- **La ruta**: `GET /trazabilidad/exportar` (`?hoy=`, que tiene que ser un día que exista). Con
+  `conPermiso('hoja.exportar', …)`: el permiso se mira **antes de consultar nada** (403
+  `forbidden_role`: «Tu rol en Trazabilidad (Lector) no permite exportar la F-ST-022…»). Contesta
+  el fichero —`Content-Type` de .xlsx, `Content-Disposition: attachment; filename="…"`,
+  `Cache-Control: no-store`— por `Fichero`, la única respuesta del router que no es JSON. Es la
+  **segunda lectura que pide permiso** (la otra, la propuesta de reparto): no cambia ningún dato,
+  pero se lleva la hoja entera fuera del portal. ⚠️ No se llama `/fst022/…` ni `/hoja/…` a
+  propósito: `router.test.ts` y `hoja.test.ts` fijan qué rutas hay bajo esos nombres.
+- **El apunte** (`portal.tmc_exportaciones`, migración 060): una fila por exportación, con la
+  congelación de la que parte, el día de los valores, cuántas filas y cuántos retirados, el nombre,
+  **la huella sha256 del fichero tal como salió** (una copia sin tocar se reconoce por ella; una
+  guardada desde Excel ya tiene otra) y la firma. Sólo recuentos: ni clientes ni seriales. Se
+  inserta **después de generar el libro y antes de entregarlo**: si el apunte falla no hay fichero
+  (500), así que no sale ninguna copia sin registrar. Hizo falta tabla porque las demás auditorías
+  del módulo son de una operación concreta, con su propia forma. `GET /trazabilidad/exportaciones`
+  (abierta a quien tiene la app) da `{ultima, total}`.
+- **La pantalla** (`ExportarHoja.tsx`, dentro de la tarjeta de la pestaña): el botón **«Exportar
+  F-ST-022»** sólo le sale a quien tiene `hoja.exportar`; pide el fichero con el token (no vale un
+  enlace), lo guarda con el nombre que manda el servidor (`nombreDeDescarga`) y, mientras tanto,
+  dice «Generando…» y no se puede volver a pulsar. Si falla, el error va en español dentro de la
+  página. Dice que **exporta la hoja entera, no lo filtrado ni el orden de la pantalla**
+  (`NOTA_EXPORTAR`) y, a cualquiera con la app, «Última exportación: quién el día y hora · N filas
+  · van M» (`textoUltimaExportacion`).
+- **`xlsx` en la app**: sigue en el `package.json` de `apps/trazabilidad-mantenimientos` **sin
+  uso** (el libro lo genera hub-api). Quitarlo es un cambio del `package-lock.json` que no se
+  mezcló con este lote; la app no importa de `exportacion.ts` más que tipos, para no cargarlo.
+- ⚠️ **Despliegue**: hub-api antes que el portal (la 060 se aplica al arrancar; el portal nuevo
+  pide `GET /exportaciones` y `hoja.exportar` en `GET /roles/me`). Nadie gana ni pierde nada por
+  desplegar salvo el permiso nuevo de Comercial, Técnico y Director Técnico.
+- **Comprobado en Excel de verdad** (Excel 16, en español, sobre un fichero ficticio): abre las
+  cuatro hojas, pinta la fecha como `23/09/2026`, deja los seriales de cifras como texto (con su
+  aviso de «número almacenado como texto», que es lo que se quiere), trata como texto un cliente
+  que empieza por «=» y **recalcula la vigencia** (al cambiar la fecha de una fila, cambió).
+
+### Estado final del relevo de la Excel, y lo que viene (no construido)
+
+La F-ST-022 está **congelada** (9a), el inventario sale del **maestro de Desk 2.0** (9b, 9d-2a),
+las fechas, de los **tickets** y de las **correcciones a mano** (9c, 9d-2b), la hoja se **ve** en
+su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Queda:
 
 - **Incluir otras marcas en seguimiento** (por marca o por equipo): poner `en_seguimiento = TRUE`
   a lo que Alfonso decida, con su pantalla, su permiso y su auditoría. Al hacerlo, la pasada de
@@ -1480,9 +1587,14 @@ al maestro, y un inactivo del portal que Desk 2.0 tuviera activo **se reactivaba
 - **Distinguir por modelo los seriales repetidos** de la hoja (hoy no se enlazan ni admiten
   correcciones; retirar la fila que sobra no desempata a la otra) y decidir qué hacer con los
   numéricos dudosos, que siguen sólo listados.
-- **9e · «Exportar F-ST-022»**: un .xlsx con **las seis columnas** en su orden (las `cabeceras`
-  guardadas lo dan) y los valores de la pestaña (`GET /trazabilidad/hoja` ya los da, con la
-  vigencia recalculada), sin calco visual. Es el lote que decide qué hacer con `xlsx`.
+- **Automatizar las pasadas**: sincronizar el maestro y traer las calibraciones siguen siendo a
+  mano (plan → confirmación → auditoría); una pasada periódica, cuando los planes lleven tiempo
+  saliendo sin sorpresas. Hasta entonces, lo exportado vale lo que valga la última pasada.
+- **Opción A de la fecha en Desk 2.0** (aplazada): promover «Fecha de Calibración» a una columna
+  propia allí; aquí cambia una línea (`POR_NOMBRE`, `calibraciones-desk2.ts`).
+- **De la exportación**, si Alfonso lo pide al verla: otras columnas u otro orden, la vigencia
+  como número fijo, qué hacer con lo inactivo, quién exporta (todo, valores por defecto de la
+  sección anterior), y quitar `xlsx` del `package.json` de la app.
 
 ## Pruebas
 
@@ -1590,7 +1702,7 @@ al maestro, y un inactivo del portal que Desk 2.0 tuviera activo **se reactivaba
   corrige un ticket y deja de contar cuando el ticket cambia, dos correcciones a la vez, la fila en revisión, la fila sólo de
   la hoja por serial y su partida anulada, el serial repetido, y el blindaje: una manual vencida en un equipo fuera de
   seguimiento no asoma en Equipos ni en los avisos, con su contraprueba) y, en la app, `src/lib/calibraciones.test.ts`.
-- Retirar y reincorporar (lote 9d-2b): `retiros.test.ts` (guardas de la 059, que es **la última migración**, el candado de qué
+- Retirar y reincorporar (lote 9d-2b): `retiros.test.ts` (guardas de la 059, el candado de qué
   escribe `retiros-repo.ts` —sólo `activo` y la marca de un equipo, y los apuntes: ni `en_seguimiento`, ni la congelación, ni
   nada que envíe— y que el SQL del maestro respeta la marca), `maestro.test.ts` (el plan con retirados a mano: no se reactivan
   ni se propone cambio, se cuentan aparte, su cliente sí se actualiza, en los dos ámbitos, y el contraste con un inactivo sin
@@ -1602,5 +1714,22 @@ al maestro, y un inactivo del portal que Desk 2.0 tuviera activo **se reactivaba
   calibraciones; **la sincronización del maestro no lo reactiva** aunque Desk 2.0 lo tenga activo y sí le cambia el cliente;
   reincorporar; fuera de seguimiento; la fila de la hoja con la congelación intacta; todo o nada; dos a la vez) y, en la app,
   `src/lib/hoja.test.ts` y `src/lib/maestro.test.ts`. `trazabilidad.db.test.ts` suma `tmc_retiros` a la lista de tablas `tmc_*`.
+- Exportar la F-ST-022 (lote 9e): `exportacion.test.ts` (el generador, **leyendo con SheetJS el fichero que genera, en memoria**:
+  títulos y orden, bloque de título y cabecera en su fila, tipos de celda —texto, fecha, número—, la fórmula de la vigencia y su
+  valor, que una fecha es ese día sin pasar por la zona de la máquina, seriales numéricos largos y con ceros delante, textos que
+  empiezan por «=», «+», «-» y «@» en las cuatro hojas, filas sin fecha, el orden, lo retirado fuera de la principal y dentro de
+  su hoja, «Detalle» y «Notas», el libro sin congelación y sin nada, que es puro; las guardas de la 060, que es **la última
+  migración**; y los candados: sólo escribe una fórmula, su SQL sólo inserta su apunte, la tabla sale de `leerHoja` y nada envía
+  ni acepta un fichero), `roles.test.ts` (la matriz con `hoja.exportar`: 60 casos), `router.test.ts` (401, 403 sin la app, 403
+  para el Lector antes de consultar nada, 200 con sus cabeceras para Comercial, Técnico, Director Técnico y administrador, que
+  el fichero se abre y dice lo mismo que `GET /hoja` del mismo `hoy`, el apunte y su huella, 400 en `hoy`, sin congelación, 500
+  sin fichero ni clientes en el registro, «última exportación» abierta, **la lista de lecturas con permiso, ampliada de una a
+  dos** con su porqué, y el candado de sus rutas: dos `GET`, ningún cuerpo), `fst022.test.ts` (la lista de fuentes que no
+  escriben `tmc_fst022_*`, con los tres nuevos), `exportacion.db.test.ts` (la 060 repetida; de punta a punta con una congelación
+  ficticia, inventario en seguimiento, otras marcas enlazadas, tickets, **manuales registradas y retirados hechos por sus
+  rutas**: lo exportado = lo de la pestaña, antes y después; el apunte con la huella del fichero entregado; el Lector, 403 y
+  ningún apunte; que exportar no toca ninguna otra tabla, con Desk 2.0 caído; y sin congelación), `trazabilidad.db.test.ts` (suma
+  `tmc_exportaciones` a la lista de tablas `tmc_*`) y, en la app, `src/lib/exportar.test.ts` (el nombre con que se guarda, el
+  texto de «última exportación», quién ve el botón y lo que dice). **Ningún .xlsx entra en el repo.**
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

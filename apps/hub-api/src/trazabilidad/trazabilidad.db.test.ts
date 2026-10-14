@@ -348,6 +348,9 @@ describe('contacto de cada equipo', () => {
         'tmc_equipos',
         'tmc_estados_desk',
         'tmc_estados_historial',
+        // Lote 9e: un apunte por cada exportación de la F-ST-022 (quién, cuándo, cuántas filas, la huella del fichero). Lo que se apunta
+        // es que alguien DESCARGÓ un fichero: no es una tabla de mensajes ni de envíos, y no lleva destinatarios ni nada pendiente.
+        'tmc_exportaciones',
         'tmc_fst022_congelaciones',
         'tmc_fst022_congelada',
         'tmc_importaciones',
