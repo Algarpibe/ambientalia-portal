@@ -9,17 +9,27 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { Celda, FilaCongelada } from './fst022.js';
-import { tablaHoja, type EquipoHoja, type RespuestaHoja } from './hoja.js';
+import { tablaHoja, type EntradaHoja, type EquipoHoja, type RespuestaHoja } from './hoja.js';
+import { EN_INVENTARIO } from './inventario.js';
 import { leerCalibraciones } from './repo.js';
 
 type Db = Pick<Awaited<ReturnType<Pool['connect']>>, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-export const MOTIVO_SIN_CONGELACION = 'En este entorno no hay ninguna F-ST-022 congelada: no hay hoja que enseñar. El inventario de GRIMM EDM 180 sigue en «Equipos».';
+export const MOTIVO_SIN_CONGELACION = 'En este entorno no hay ninguna F-ST-022 congelada: no hay hoja que enseñar. El inventario sigue en «Equipos».';
 
 /** La tabla de la hoja a `hoy` (día en Colombia), con su resumen. Sin congelación vigente, vacía y con su motivo. */
 export async function leerHoja(db: Db, hoy: string): Promise<RespuestaHoja> {
+  const { congelacion, entrada } = await leerEntradaHoja(db, hoy);
+  return { hoy, congelacion, motivo: congelacion ? null : MOTIVO_SIN_CONGELACION, ...tablaHoja(entrada) };
+}
+
+/**
+ * Lo que necesita la regla de hoja.ts, leído en las mismas cuatro consultas. Aparte de `leerHoja` para que incluir una marca (lote 9f,
+ * marcas-repo.ts) calcule la tabla con los equipos que quiera FUERA del inventario: la que daba la pestaña antes de encenderla.
+ */
+export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacion: RespuestaHoja['congelacion']; entrada: EntradaHoja & { equipos: EquipoHoja[] } }> {
   const [vigentes, congeladas, inventario, calibraciones] = await Promise.all([
     db.query(`SELECT g.id, g.archivo, g.hoja, g.por, g.en::text AS en, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`),
     // Con el último apunte de cada fila en tmc_retiros (059): si es un retiro, la fila está retirada a mano. Va en la misma consulta.
@@ -30,18 +40,17 @@ export async function leerHoja(db: Db, hoy: string): Promise<RespuestaHoja> {
         WHERE g.vigente AND f.es_equipo
         ORDER BY f.fila`,
     ),
-    // Entero, también lo que está fuera de seguimiento (otras marcas, 058): esta pestaña es la que lo enseña. Y con su marca de retirado a mano.
-    db.query(`SELECT clave, serial, cliente, marca, modelo, activo, en_seguimiento, ultima_calibracion::text AS ultima_calibracion, retirado_en::text AS retirado_en, retirado_por, retirado_motivo FROM portal.tmc_equipos`),
+    // Entero, también lo que está fuera de seguimiento (otras marcas, 058): esta pestaña es la que lo enseña. Con su marca de retirado a
+    // mano y, desde el lote 9f, si está en el inventario (la regla de siempre, `EN_INVENTARIO`): fuera de seguimiento, eso es que su marca está incluida.
+    db.query(`SELECT clave, serial, cliente, marca, modelo, activo, en_seguimiento, ${EN_INVENTARIO} AS en_inventario, ultima_calibracion::text AS ultima_calibracion, retirado_en::text AS retirado_en, retirado_por, retirado_motivo FROM portal.tmc_equipos`),
     leerCalibraciones(db),
   ]);
   const v = vigentes.rows[0] as Row | undefined;
   const filas = (congeladas.rows as Row[]).map((r): FilaCongelada => ({ fila: r.fila, celdas: r.celdas, esEquipo: true, serialNorm: r.serial_norm, claveEquipo: r.clave_equipo }));
-  const equipos = (inventario.rows as Row[]).map((r): EquipoHoja => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, marca: r.marca, modelo: r.modelo, activo: r.activo, ultimaCalibracion: r.ultima_calibracion, enSeguimiento: r.en_seguimiento !== false, retirado: r.retirado_en ? { por: r.retirado_por ?? '', en: r.retirado_en, motivo: r.retirado_motivo ?? '' } : null }));
+  const equipos = (inventario.rows as Row[]).map((r): EquipoHoja => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, marca: r.marca, modelo: r.modelo, activo: r.activo, ultimaCalibracion: r.ultima_calibracion, enSeguimiento: r.en_seguimiento !== false, incluido: r.en_inventario === true && !r.en_seguimiento, retirado: r.retirado_en ? { por: r.retirado_por ?? '', en: r.retirado_en, motivo: r.retirado_motivo ?? '' } : null }));
   const retiradas = (congeladas.rows as Row[]).filter((r) => r.retiro === 'retirar').map((r) => ({ fila: r.fila as number, por: r.retiro_por, en: r.retiro_en, motivo: r.retiro_motivo }));
   return {
-    hoy,
     congelacion: v ? { id: Number(v.id), archivo: v.archivo, hoja: v.hoja, por: v.por, en: v.en } : null,
-    motivo: v ? null : MOTIVO_SIN_CONGELACION,
-    ...tablaHoja({ hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas }),
+    entrada: { hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas },
   };
 }

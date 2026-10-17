@@ -34,7 +34,7 @@ export type AvisoHoja = (typeof AVISOS_HOJA)[number];
 export type SituacionHoja = 'inventario' | 'inactivo' | 'enlazado' | 'hoja';
 
 /** Un equipo de `tmc_equipos` (activo o no), con su fecha de respaldo. `enSeguimiento: false` = otra marca, fuera de seguimiento; si falta, en seguimiento. */
-export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null; enSeguimiento?: boolean; /** Si lo retiró una persona (059): quién, cuándo y por qué. */ retirado?: Retiro | null }
+export interface EquipoHoja { clave: string; serial: string; cliente: string; marca: string; modelo: string; activo: boolean; ultimaCalibracion: string | null; enSeguimiento?: boolean; /** Si lo retiró una persona (059): quién, cuándo y por qué. */ retirado?: Retiro | null; /** Fuera de seguimiento pero de una marca INCLUIDA (lote 9f, 061): está en el inventario, como uno en seguimiento. */ incluido?: boolean }
 /** La firma de un retiro a mano: de un equipo o de una fila de la hoja. */
 export interface Retiro { por: string; en: string; motivo: string }
 /** Un retiro o una reincorporación apuntados (`portal.tmc_retiros`): la auditoría de un equipo o de una fila, la más reciente primero. */
@@ -168,8 +168,10 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     const enCelda = f ? valor(celda(f, 'ultima calibracion')) : null;
     const fechaHoja = esFechaIso(enCelda) ? enCelda : null;
     const actual = q ?? deHoja;
-    /** Enlazado con Desk 2.0, fuera de seguimiento: sus datos son del maestro, pero su fecha se calcula como la de una fila sólo de la hoja. */
-    const fuera = q?.enSeguimiento === false;
+    /** De otra marca: sus datos son del maestro (su marca y su modelo se comparan sin ruido con la hoja). */
+    const otraMarca = q?.enSeguimiento === false;
+    /** Enlazado con Desk 2.0 y fuera del inventario: su fecha se calcula como la de una fila sólo de la hoja. Si su marca está incluida (9f), como la de Equipos. */
+    const fuera = otraMarca && !q?.incluido;
     // Las calibraciones de la fila: las del equipo en seguimiento o, si no lo es, su fecha de la hoja como punto de partida y las guardadas sin equipo de su serial.
     let conocidas: FilaCalibracion[];
     if (q && !fuera) conocidas = deEquipo.get(q.clave) ?? [];
@@ -188,7 +190,7 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     const ultima = q && !fuera ? fechaEfectiva(conocidas, q.ultimaCalibracion, hoy) : (cuenta?.fecha ?? null);
     const enHoja: EnHoja = {};
     // Lo que hoy es distinto de la hoja. En un equipo en seguimiento, literal (como siempre); en uno fuera, la marca y el modelo sin el ruido de cómo se escriben.
-    const distinto = (k: (typeof CAMPOS)[number], hoyVale: string, enLaHoja: string): boolean => hoyVale !== enLaHoja && !(fuera && (k === 'marca' || k === 'modelo') && sinRuido(hoyVale) === sinRuido(enLaHoja));
+    const distinto = (k: (typeof CAMPOS)[number], hoyVale: string, enLaHoja: string): boolean => hoyVale !== enLaHoja && !(otraMarca && (k === 'marca' || k === 'modelo') && sinRuido(hoyVale) === sinRuido(enLaHoja));
     if (f && q) for (const k of CAMPOS) if (distinto(k, q[k], deHoja[k])) enHoja[k] = deHoja[k];
     if (f && ultima !== fechaHoja) enHoja.ultimaCalibracion = fechaHoja;
     const avisos = new Set<AvisoHoja>();

@@ -19,7 +19,7 @@ import {
   type PlanAvisos,
   type TramoAviso,
 } from '../dominio';
-import { fmtFecha, mensajeAviso } from './vistas';
+import { fmtFecha, mensajeAviso, todosGrimm } from './vistas';
 
 /**
  * La primera línea del correo: por su nombre si entre los destinatarios hay
@@ -47,7 +47,9 @@ export interface CorreoRedactado {
 
 /** El correo que se enviaría para un grupo (cliente + tramo): destinatarios, asunto y cuerpo. */
 export function correoAviso(c: CorreoSimulado<EquipoVista>): CorreoRedactado {
-  const monitores = c.equipos.length === 1 ? 'su monitor GRIMM' : 'sus monitores GRIMM';
+  // Sólo GRIMM, como siempre; con equipos de otra marca incluida (lote 9f), «su equipo» / «sus equipos».
+  const grimm = todosGrimm(c.equipos.map((x) => x.equipo));
+  const monitores = c.equipos.length === 1 ? (grimm ? 'su monitor GRIMM' : 'su equipo') : grimm ? 'sus monitores GRIMM' : 'sus equipos';
   return {
     para: c.destinatarios.map((d) => d.email).join(', '),
     asunto: `${ASUNTO_TRAMO[c.tramo](monitores)} · ${c.cliente}`,

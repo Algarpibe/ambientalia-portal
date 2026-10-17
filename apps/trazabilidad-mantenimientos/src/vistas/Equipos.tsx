@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type EstadoCalibracion } from '../dominio';
-import { conteoPorEstado, enServicio, fmtFecha } from '../lib/vistas';
+import { filtrarPorMarca, marcasDeEquipos } from '../lib/marcas';
+import { conteoPorEstado, enServicio, fmtFecha, marcaAviso } from '../lib/vistas';
 import { EstadoBadge, TONO, Tag, TicketTag } from '../ui';
 
 export interface Filtro {
@@ -9,8 +10,10 @@ export interface Filtro {
   cliente: string;
   serial: string;
   enAmbientalia: boolean;
+  /** La clave de una marca (lote 9f: con marcas incluidas, el inventario tiene varias); vacío, todas. */
+  marca: string;
 }
-export const FILTRO_VACIO: Filtro = { estados: [], cliente: '', serial: '', enAmbientalia: false };
+export const FILTRO_VACIO: Filtro = { estados: [], cliente: '', serial: '', enAmbientalia: false, marca: '' };
 
 type Orden = 'vigencia' | 'cliente' | 'serial' | 'ultimaCalibracion' | 'ultimaEntrada';
 
@@ -24,6 +27,7 @@ interface Props {
 export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
   const [orden, setOrden] = useState<{ k: Orden; dir: 1 | -1 }>({ k: 'vigencia', dir: 1 });
   const clientes = useMemo(() => [...new Set(equipos.map((e) => e.cliente))].sort((a, b) => a.localeCompare(b, 'es')), [equipos]);
+  const marcas = useMemo(() => marcasDeEquipos(equipos), [equipos]);
   const cnt = conteoPorEstado(equipos);
   const q = filtro.serial.trim().toLowerCase();
 
@@ -44,7 +48,7 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
           return e.ultimaEntrada ?? '';
       }
     };
-    return equipos
+    return filtrarPorMarca(equipos, filtro.marca)
       .filter(
         (e) =>
           (filtro.estados.length === 0 || filtro.estados.includes(e.estado)) &&
@@ -63,7 +67,7 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
   const set = (p: Partial<Filtro>) => onFiltro({ ...filtro, ...p });
   const toggleEstado = (s: EstadoCalibracion) =>
     set({ estados: filtro.estados.includes(s) ? filtro.estados.filter((x) => x !== s) : [...filtro.estados, s] });
-  const hayFiltro = filtro.serial || filtro.estados.length || filtro.cliente || filtro.enAmbientalia;
+  const hayFiltro = filtro.serial || filtro.estados.length || filtro.cliente || filtro.enAmbientalia || filtro.marca;
 
   const Th = ({ k, children, right = false }: { k: Orden; children: string; right?: boolean }) => (
     <th className={`px-3 py-2 font-semibold ${right ? 'text-right' : ''}`}>
@@ -88,6 +92,22 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
             <option key={c}>{c}</option>
           ))}
         </select>
+        {/* Con una sola marca (sólo GRIMM) no hay nada que filtrar. */}
+        {marcas.length > 1 && (
+          <select
+            value={filtro.marca}
+            onChange={(e) => set({ marca: e.target.value })}
+            aria-label="Marca"
+            className="min-h-[44px] min-w-[160px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          >
+            <option value="">Todas las marcas</option>
+            {marcas.map((m) => (
+              <option key={m.clave} value={m.clave}>
+                {m.marca} ({m.total})
+              </option>
+            ))}
+          </select>
+        )}
         <label className="relative min-w-[200px] flex-1">
           <span className="sr-only">Buscar por serial</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
@@ -128,7 +148,7 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
             <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
               <Th k="vigencia">Estado</Th>
               <Th k="cliente">Cliente</Th>
-              <th className="px-3 py-2 font-semibold uppercase tracking-wide">Modelo</th>
+              <th className="px-3 py-2 font-semibold uppercase tracking-wide">Marca · modelo</th>
               <Th k="serial">Serial</Th>
               <Th k="ultimaCalibracion">Última calibración</Th>
               <th className="px-3 py-2 font-semibold uppercase tracking-wide">Vence</th>
@@ -146,7 +166,9 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
                   <EstadoBadge estado={e.estado} />
                 </td>
                 <td className="px-3 py-2 text-gray-900">{e.cliente}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-gray-600">{e.modelo}</td>
+                <td className="whitespace-nowrap px-3 py-2 text-gray-600">
+                  {marcaAviso(e)} {e.modelo}
+                </td>
                 <td className="whitespace-nowrap px-3 py-2 font-mono text-[13px]">
                   {e.serial} {e.serialRepetido && <Tag tone="amber">serial repetido</Tag>}
                 </td>

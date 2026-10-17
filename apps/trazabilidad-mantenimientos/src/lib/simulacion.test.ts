@@ -107,6 +107,12 @@ describe('texto del aviso', () => {
     expect(c.cuerpo.trimEnd().endsWith('Ambientalia S.A.S. · Servicio Técnico')).toBe(true);
   });
 
+  it('con equipos de otra marca incluida (lote 9f), el asunto habla de «su equipo» y no de un monitor GRIMM', () => {
+    const h = { ...eq('Cliente Uno', EN_30, desk('compras@cliente-uno.example', 'Ana Pérez')), marca: 'Horiba', modelo: 'APNA-370' };
+    expect(correoAviso(unCorreo([h])).asunto).toBe('Último aviso: la calibración de su equipo vence en los próximos 30 días · Cliente Uno');
+    expect(correoAviso(unCorreo([h, eq('Cliente Uno', EN_30)])).asunto).toBe('Último aviso: la calibración de sus equipos vence en los próximos 30 días · Cliente Uno');
+  });
+
   it('«para» lleva los destinatarios en orden; vacío si el grupo no tiene a quién', () => {
     const con = correoAviso(unCorreo([eq('Cliente Uno', EN_30)], [manual('Cliente Uno', ['jefe@cliente-uno.example', 'copia@example.com'], 'Luis Gómez')]));
     expect(con.para).toBe('jefe@cliente-uno.example, copia@example.com');

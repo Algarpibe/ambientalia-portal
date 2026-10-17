@@ -20,6 +20,7 @@ import { MENSAJE_SIN_CALIBRACIONES, type LectorCalibraciones, type LecturaCalibr
 import { calibracionQueCuenta, planCalibraciones, saludLectura, type EquipoInventario, type FilaPartida, type PasadaCalibraciones, type PlanCalibraciones, type RespuestaHistorialCalibraciones, type RespuestaPlanCalibraciones, type SaludLectura } from './calibraciones.js';
 import { claveCliente } from './dominio.js';
 import type { Celda } from './fst022.js';
+import { EN_INVENTARIO } from './inventario.js';
 import type { EstadoMaestro } from './maestro.js';
 import { leerCalibraciones, withTransaction } from './repo.js';
 import { TzError, type Actor } from './types.js';
@@ -64,9 +65,10 @@ async function leerPartida(db: Db): Promise<FilaPartida[]> {
 /** El plan de ahora: lo leído en Desk 2.0 contra las calibraciones guardadas, el inventario entero (activo o no) y la hoja congelada. */
 async function calcular(db: Db, lectura: Leida, hoy: string, ultima: PasadaCalibraciones | null): Promise<{ plan: PlanCalibraciones; huella: string; salud: SaludLectura }> {
   const filas = await leerCalibraciones(db);
-  // Sólo los equipos en seguimiento (058): las otras marcas, aunque ya estén enlazadas con Desk 2.0, siguen con sus
-  // calibraciones por serial y sin clave, y la pestaña «Trazabilidad F-ST-022» las atribuye a su fila (hoja.ts).
-  const inventario = await db.query(`SELECT clave, serial, activo, desk_id, ultima_calibracion::text AS ultima_calibracion FROM portal.tmc_equipos WHERE en_seguimiento`);
+  // Sólo los equipos del inventario (058 y, desde el lote 9f, los de una marca incluida, 061): las otras marcas, aunque ya estén
+  // enlazadas con Desk 2.0, siguen con sus calibraciones por serial y sin clave, y la pestaña «Trazabilidad F-ST-022» las atribuye a su
+  // fila (hoja.ts). Al incluir una marca, sus partidas y sus sueltas ya se escribieron (marcas-repo.ts): aquí no nace ninguna otra.
+  const inventario = await db.query(`SELECT clave, serial, activo, desk_id, ultima_calibracion::text AS ultima_calibracion FROM portal.tmc_equipos WHERE ${EN_INVENTARIO}`);
   const equipos = (inventario.rows as Row[]).map((r): EquipoInventario => ({ clave: r.clave, serial: r.serial, activo: r.activo, deskId: r.desk_id, ultimaCalibracion: r.ultima_calibracion }));
   const plan = planCalibraciones({ hoy, tickets: lectura.tickets, total: lectura.total, conCf: lectura.conCf, filas, equipos, partida: await leerPartida(db) });
   const antes = Math.max(filas.filter((f) => f.origen === 'desk' && f.estado !== 'anulada').length, ultima?.recuentos.conCampo ?? 0);

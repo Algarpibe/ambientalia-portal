@@ -348,8 +348,8 @@ export default function HojaFst022({ equipos, recarga, onFicha, onCambio }: Prop
           <Alert tone="blue" title="Qué se corrige aquí y qué se sigue corrigiendo en Desk 2.0">
             La fecha de calibración ya se puede corregir aquí (Técnico y Director Técnico): abre la fila y usa «Corregir fecha» —registra una calibración manual, que puede corregir la de un ticket— o «Anular», siempre con su
             motivo; nada se borra. Un equipo que ya no existe, o una fila de la hoja que sobra, se puede retirar (Director Técnico): se sigue viendo, atenuado, sale de Resumen y Avisos, y se puede deshacer. Lo normal sigue siendo que la fecha llegue del ticket de Zoho, campo «Fecha de Calibración» (y se traen en «Configuración»). El cliente, la marca, el modelo y el serial NO se cambian en el portal: se
-            corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). Sólo lo que está «en el inventario» (hoy, los GRIMM EDM 180) entra en Resumen, Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no
-            genera avisos, tenga la fecha que tenga.
+            corrigen en Desk 2.0 (y después se sincroniza el maestro en «Configuración»). Sólo lo que está «en el inventario» (los GRIMM EDM 180 y las marcas encendidas en «Configuración» → «Marcas en seguimiento») entra en Resumen,
+            Equipos, Calendario y Avisos: lo enlazado fuera de seguimiento no genera avisos, tenga la fecha que tenga.
             {r.calibracionesSueltas > 0 && ` Hay ${r.calibracionesSueltas} calibraci${r.calibracionesSueltas === 1 ? 'ón' : 'ones'} de tickets cuyo serial no es de ninguna fila de la hoja.`}
           </Alert>
         </div>

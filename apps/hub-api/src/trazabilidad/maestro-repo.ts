@@ -24,6 +24,14 @@
  * se RESPETA aquí: un retirado a mano no se reactiva aunque el maestro lo
  * tenga activo (lo dice el plan y lo vuelve a mirar el SQL); su cliente, su
  * modelo y su serial sí siguen actualizándose.
+ *
+ * Desde el lote 9f (061) un alta de una marca INCLUIDA entra sola en el
+ * inventario (`EN_INVENTARIO`, inventario.ts: no se le cambia el ámbito); en
+ * esta misma transacción `adoptarIncluidas` (marcas-repo.ts) le da su
+ * partida y le enlaza sus calibraciones sueltas, para que su fecha sea desde
+ * el primer momento la que ya le daba la pestaña. Con todas las marcas
+ * apagadas no escribe nada. Y los recuentos de clientes del plan cuentan
+ * también los equipos de las marcas incluidas.
  */
 
 import { createHash } from 'node:crypto';
@@ -31,6 +39,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { claveCliente } from './dominio.js';
 import type { Celda } from './fst022.js';
 import { MENSAJE_SIN_MAESTRO, type LectorMaestro, type LecturaMaestro } from './maestro-desk2.js';
+import { adoptarIncluidas } from './marcas-repo.js';
 import { cruceFst022, planMaestro, type EquipoMaestro, type EquipoPortal, type EstadoMaestro, type FilaHojaCruce, type PlanMaestro, type RespuestaCruceFst022, type RespuestaPlanMaestro, type SincronizacionMaestro } from './maestro.js';
 import { withTransaction } from './repo.js';
 import { TzError, type Actor } from './types.js';
@@ -63,11 +72,13 @@ async function leerHojaCongelada(db: Db): Promise<{ congelacion: { id: number; a
 /** El plan de ahora: el maestro ya leído contra el inventario entero del portal (activos o no, en seguimiento o no), los contactos puestos a mano y la hoja congelada. */
 async function calcular(db: Db, equipos: readonly EquipoMaestro[]): Promise<{ plan: PlanMaestro; huella: string }> {
   // Una detrás de otra: al aplicar, `db` es el cliente de la transacción, y un cliente no lleva dos consultas a la vez.
-  const inventario = await db.query(`SELECT clave, serial, cliente, modelo, activo, desk_id, en_seguimiento, retirado_en FROM portal.tmc_equipos`);
+  const inventario = await db.query(`SELECT clave, serial, cliente, marca, modelo, activo, desk_id, en_seguimiento, retirado_en FROM portal.tmc_equipos`);
   const contactos = await db.query(`SELECT clave FROM portal.tmc_contactos`);
+  // Las marcas incluidas (lote 9f, 061): sus equipos están en el inventario y sus clientes cuentan en los recuentos de clientes del plan.
+  const incluidas = await db.query(`SELECT clave FROM portal.tmc_marcas WHERE incluida`);
   const hoja = await leerHojaCongelada(db);
-  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false, retiradoAMano: r.retirado_en != null }));
-  const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)), hoja.filas);
+  const portal = (inventario.rows as Row[]).map((r): EquipoPortal => ({ clave: r.clave, serial: r.serial, cliente: r.cliente, marca: r.marca, modelo: r.modelo, activo: r.activo, deskId: r.desk_id, enSeguimiento: r.en_seguimiento !== false, retiradoAMano: r.retirado_en != null }));
+  const plan = planMaestro(equipos, portal, (contactos.rows as Row[]).map((r) => claveCliente(r.clave)), hoja.filas, new Set((incluidas.rows as Row[]).map((r) => r.clave as string)));
   return { plan, huella: huellaDePlan(plan) };
 }
 
@@ -128,6 +139,8 @@ export async function sincronizarMaestro(db: Pool, leer: LectorMaestro, huellaVi
         [JSON.stringify(altas)],
       );
     }
+    // Lote 9f: un alta de una marca incluida (061) entra sola en el inventario; aquí recibe su partida y sus sueltas, como al encender la marca.
+    await adoptarIncluidas(c, actor);
     const { rows } = await c.query(
       `INSERT INTO portal.tmc_maestro_sincronizaciones (huella, recuentos, cambios, por_id, por)
        VALUES ($1, $2::jsonb, $3::jsonb, $4, $5)

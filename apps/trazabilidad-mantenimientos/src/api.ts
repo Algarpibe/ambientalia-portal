@@ -1,7 +1,7 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
 import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
-import type { ApunteRetiro, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
+import type { ApunteRetiro, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaMarcas, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -114,6 +114,10 @@ export const api = {
     request<RespuestaRetiro>('POST', `${'clave' in destino ? `/equipos/${encodeURIComponent(destino.clave)}` : `/filas/${destino.fila}`}/${retirar ? 'retirar' : 'reincorporar'}`, { motivo }),
   /** La auditoría de retiros de un equipo o de una fila de la hoja, la más reciente primero. */
   retiros: (destino: { clave: string } | { fila: number }) => request<{ retiros: ApunteRetiro[] }>('GET', `/retiros?${'clave' in destino ? `clave=${encodeURIComponent(destino.clave)}` : `fila=${destino.fila}`}`),
+  /** Las marcas en seguimiento (lote 9f), cada una con su vista previa en recuentos, y los últimos cambios. */
+  marcas: () => request<RespuestaMarcas>('GET', '/marcas'),
+  /** Enciende (`incluir`) o apaga una marca, con motivo (pide `inventario.write`). Devuelve las marcas ya actualizadas. No envía nada. */
+  cambiarMarca: (clave: string, incluir: boolean, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}`, { incluir, motivo }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
   registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),
