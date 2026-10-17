@@ -106,7 +106,7 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
                         aria-label={`${m.marca}: ${m.incluida ? 'en seguimiento' : 'fuera de seguimiento'}`}
                         disabled={!editable || enviando}
                         onClick={() => (setElegida(m), setMotivo(''), setError(null))}
-                        className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-2 text-sm ${DESACTIVADO} disabled:bg-transparent`}
+                        className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-2 text-sm ${DESACTIVADO} disabled:bg-transparent disabled:opacity-50`}
                       >
                         <span aria-hidden className={`relative h-6 w-11 rounded-full transition-colors ${m.incluida ? 'bg-blue-600' : 'bg-gray-300'}`}>
                           <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${m.incluida ? 'left-[22px]' : 'left-0.5'}`} />
