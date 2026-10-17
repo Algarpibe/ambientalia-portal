@@ -371,6 +371,24 @@ describe('el plan del cruce: otras marcas, fuera de seguimiento', () => {
     expect(planMaestro([g, h, k], aplicar(cambiado, aplicado), []).otras.cambios).toHaveLength(4); // y deshacerlo en Desk 2.0 vuelve a ser un cambio
   });
 
+  it('con su marca INCLUIDA (lote 9f), los clientes de sus equipos cuentan como los del inventario: «otro nombre» y contactos que se quedan sin equipos; el resto del plan no cambia, y con todas apagadas es el de hoy', () => {
+    const h = horiba('HB-0001');
+    const k = horiba('KN-0001', { marca: 'Kunak', modelo: 'AIR Pro' });
+    const inventario = [
+      portal('18A00001'),
+      portal('HB-0001', { deskId: h.id, cliente: 'Cliente Ficticio H', marca: 'HORIBA', modelo: 'APNA-370', enSeguimiento: false }),
+      portal('KN-0001', { deskId: k.id, cliente: 'Cliente Ficticio K', marca: 'Kunak', modelo: 'AIR Pro', enSeguimiento: false }),
+    ];
+    const maestro = [desk('18A00001'), { ...h, cliente: 'Cliente Hache Distinto S.A.S.' }, { ...k, cliente: 'Cliente Ka Distinto' }, horiba('HB-0002', { cliente: 'Cliente Ficticio Nuevo S.A.S.' })];
+    const contactos = ['cliente ficticio h', 'cliente ficticio k'];
+    const apagadas = planMaestro(maestro, inventario, contactos);
+    expect(apagadas.recuentos).toMatchObject({ clienteOtroNombre: 0, contactosSinEquipos: 0 });
+    expect(planMaestro(maestro, inventario, contactos, [], new Set())).toEqual(apagadas);
+    const conHoriba = planMaestro(maestro, inventario, contactos, [], new Set(['horiba']));
+    expect(conHoriba.recuentos).toMatchObject({ clienteOtroNombre: 1, contactosSinEquipos: 1 });
+    expect({ ...conHoriba, recuentos: apagadas.recuentos }).toEqual(apagadas);
+  });
+
   it('nadie cambia de ámbito por sincronizar: ni un equipo en seguimiento que deja de ser EDM 180 en el maestro, ni uno fuera de seguimiento que pasa a serlo', () => {
     const dentro = desk('18A00001', { modelo: 'EDM 280' }); // en el portal, en seguimiento; el maestro ya no lo da como EDM 180
     const fuera = desk('28A00001'); // en el portal, fuera de seguimiento; el maestro lo da ahora como EDM 180

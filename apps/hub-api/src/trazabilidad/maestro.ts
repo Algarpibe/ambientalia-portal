@@ -55,7 +55,7 @@ export function esGrimmEdm180(marca: unknown, modelo: unknown): boolean {
 /** Un equipo de `desk.equipos`, con lo único que el portal lee de él. */
 export interface EquipoMaestro { id: string; serial: string; marca: string | null; modelo: string | null; cliente: string | null; activo: boolean }
 /** Un equipo del inventario del portal, activo o no; `deskId` es el id de su equipo en Desk 2.0, si ya se enlazó. */
-export interface EquipoPortal { clave: string; serial: string; cliente: string; modelo: string; activo: boolean; deskId: string | null; /** `false` = otra marca, fuera de seguimiento (058); si falta, en seguimiento. */ enSeguimiento?: boolean; /** Lo retiró una persona (059): sigue inactivo aunque el maestro lo tenga activo. */ retiradoAMano?: boolean }
+export interface EquipoPortal { clave: string; serial: string; cliente: string; modelo: string; activo: boolean; deskId: string | null; /** `false` = otra marca, fuera de seguimiento (058); si falta, en seguimiento. */ enSeguimiento?: boolean; /** Su marca: con ella se sabe si está en el inventario por su marca (lote 9f). */ marca?: string; /** Lo retiró una persona (059): sigue inactivo aunque el maestro lo tenga activo. */ retiradoAMano?: boolean }
 
 export const CAMPOS_MAESTRO = ['cliente', 'modelo', 'serial', 'activo'] as const;
 export type CampoMaestro = (typeof CAMPOS_MAESTRO)[number];
@@ -174,9 +174,10 @@ const veces = (seriales: readonly string[]): Map<string, number> => {
 
 /**
  * El plan: qué casa, qué cambiaría, qué se daría de alta y qué se queda fuera. `contactos` son las claves de cliente con contacto
- * puesto a mano. Misma entrada (en cualquier orden) → mismo plan; con el plan aplicado, el siguiente no trae nada.
+ * puesto a mano. Misma entrada (en cualquier orden) → mismo plan; con el plan aplicado, el siguiente no trae nada. `incluidas` son las
+ * claves de las marcas incluidas en el inventario (lote 9f, 061): sólo cambian los recuentos de clientes (abajo).
  */
-export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly EquipoPortal[], contactos: readonly string[], hoja: readonly FilaHojaCruce[] = []): PlanMaestro {
+export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly EquipoPortal[], contactos: readonly string[], hoja: readonly FilaHojaCruce[] = [], incluidas: ReadonlySet<string> = new Set()): PlanMaestro {
   // Cada fila del portal está en un ámbito y no sale de él: lo ya enlazado fuera de seguimiento no vuelve por aquí aunque el maestro lo dé ahora como
   // EDM 180, y este ámbito sólo ve las filas en seguimiento. Todos los recuentos de `r` (clientes y contactos incluidos) son, por tanto, sólo suyos.
   const fuera = portal.filter((p) => p.enSeguimiento === false);
@@ -266,8 +267,18 @@ export function planMaestro(maestro: readonly EquipoMaestro[], portal: readonly 
   r.soloPortal = soloPortal.length;
   r.soloPortalActivos = soloPortal.filter((p) => p.activo).length;
   r.ambiguosPortal = ambiguos.length - r.ambiguosMaestro;
-  r.contactosSinEquipos = contactos.filter((c) => antes.has(c) && !despues.has(c)).length;
   const otras = planOtras(maestro, inventario, fuera, claves);
+  // Lote 9f: lo de una marca INCLUIDA también está en el inventario (avisos, contactos): su cliente cuenta en «otro nombre» y en los
+  // contactos que se quedan sin equipos, aunque se sincronice en el ámbito de las otras marcas. Con todas apagadas, nada de esto suma.
+  const enlaceDe = new Map(otras.enlaces.map((f) => [f.clave, f]));
+  for (const p of fuera.filter((x) => incluidas.has(claveCliente(x.marca)))) {
+    const f = enlaceDe.get(p.clave);
+    if (p.activo) antes.add(claveCliente(p.cliente));
+    if (f ? f.activo : p.activo) despues.add(claveCliente(f?.cliente ?? p.cliente));
+    if (f && !mismoNombre(f.cliente, p.cliente)) r.clienteOtroNombre++;
+  }
+  for (const a of otras.altas) if (incluidas.has(claveCliente(a.marca))) despues.add(claveCliente(a.cliente));
+  r.contactosSinEquipos = contactos.filter((c) => antes.has(c) && !despues.has(c)).length;
   // El inventario entero tal como quedaría (los dos ámbitos), para decir qué filas de la hoja se enlazarían con un equipo.
   const serialDe = new Map([...enlaces, ...otras.enlaces].map((f) => [f.clave, f.serial]));
   const quedaria = [...portal.map((p) => ({ clave: p.clave, serial: serialDe.get(p.clave) ?? p.serial })), ...altas, ...otras.altas];
