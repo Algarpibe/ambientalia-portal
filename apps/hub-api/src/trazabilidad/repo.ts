@@ -10,6 +10,7 @@ import { primerDiaHabilAgenda } from './agenda-calendario.js';
 import { fechaEfectiva, type CalibracionGuardada } from './calibraciones.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import type { Celda, FilaCongelada } from './fst022.js';
+import { EN_INVENTARIO } from './inventario.js';
 import {
   asuntoSinCodigo,
   categoriaCoherente,
@@ -107,15 +108,17 @@ export async function withTransaction<T>(db: Pool, fn: (c: PoolClient) => Promis
 }
 
 /**
- * El inventario de la app: los equipos EN SEGUIMIENTO (migración 058; hoy, los
- * GRIMM EDM 180). Desde el lote 9d-2a `tmc_equipos` lleva también equipos de
- * otras marcas, enlazados con Desk 2.0 sólo para la pestaña «Trazabilidad
- * F-ST-022»: no entran en Resumen, Equipos, Calendario, Avisos (ni su
- * simulación), contactos ni en el cliente de «Servicios». Por eso este fichero
- * no nombra la tabla en ningún otro sitio: todo lee de aquí
- * (seguimiento.test.ts lo vigila y seguimiento.db.test.ts lo prueba con datos).
+ * El inventario de la app: los equipos EN SEGUIMIENTO (migración 058: los
+ * GRIMM EDM 180) y, desde el lote 9f, los de una marca INCLUIDA (061): la
+ * regla, `EN_INVENTARIO`, vive en inventario.ts. Desde el lote 9d-2a
+ * `tmc_equipos` lleva también equipos de otras marcas, enlazados con Desk 2.0
+ * para la pestaña «Trazabilidad F-ST-022»: mientras su marca no esté incluida
+ * no entran en Resumen, Equipos, Calendario, Avisos (ni su simulación),
+ * contactos ni en el cliente de «Servicios». Por eso este fichero no nombra la
+ * tabla en ningún otro sitio: todo lee de aquí (seguimiento.test.ts lo vigila;
+ * seguimiento.db.test.ts y marcas.db.test.ts lo prueban con datos).
  */
-const INVENTARIO = `(SELECT * FROM portal.tmc_equipos WHERE en_seguimiento)`;
+const INVENTARIO = `(SELECT * FROM portal.tmc_equipos WHERE ${EN_INVENTARIO})`;
 
 const COLS_EQUIPO = `
   e.clave, e.serial, e.cliente, e.marca, e.modelo, e.fecha_factura::text AS fecha_factura, e.hoja_vida,

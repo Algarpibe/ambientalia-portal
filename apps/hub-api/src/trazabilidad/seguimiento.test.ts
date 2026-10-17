@@ -22,7 +22,7 @@ describe('058_trazabilidad_en_seguimiento.sql', () => {
     expect(sinComentarios).not.toMatch(/outbox|enviad|envio|cola|programad/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 057 (la última es la 060: exportacion.test.ts)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 057 (la última es la 061: marcas.test.ts)', () => {
     expect(fuente('../db.ts')).toMatch(/'057_trazabilidad_calibraciones\.sql',\s*'058_trazabilidad_en_seguimiento\.sql',/);
   });
 });
@@ -34,19 +34,25 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.startsWith('test-db/'));
   const usos = fuentes.flatMap((f) => [...readFileSync(`${RAIZ}/${f}`, 'utf8').matchAll(/\b(FROM|JOIN|UPDATE|INSERT INTO)\s+portal\.tmc_equipos\b([^`]*)/g)].map((m) => ({ donde: `${f} · ${m[1]}`, resto: m[2] })));
 
-  // La lista REVISADA. Añadir un lector aquí es decidir si ve sólo lo que está en seguimiento.
+  // La lista REVISADA. Añadir un lector aquí es decidir si ve sólo lo que está en el inventario.
+  // ADAPTADA en el lote 9f (061): «el inventario» ya no es sólo `en_seguimiento` (los GRIMM EDM 180), sino eso O un equipo de una marca
+  // que el Director Técnico ha incluido (`tmc_marcas`). La regla sigue en UN solo sitio, `EN_INVENTARIO` (inventario.ts, sin imports), y
+  // los que filtran la piden ENTERA y en la misma consulta: con todas las marcas apagadas (como queda al desplegar: la 061 no siembra)
+  // vale exactamente lo de antes, y con una encendida entran sus equipos y nada más (seguimiento.db.test.ts y marcas.db.test.ts lo prueban
+  // con datos, byte a byte). Nadie escribe `en_seguimiento` para incluir una marca: el último candado de abajo no se ha tocado.
   const REVISADOS: Record<string, 'filtra' | 'todos'> = {
     // El inventario de la app: el único sitio de repo.ts que nombra la tabla (`INVENTARIO`). De él beben GET /equipos
     // (y con él Resumen, Equipos, Calendario, Avisos y su simulación), los contactos de Desk, el cliente de
     // «Servicios», guardar el seguimiento y marcar avisos en bloque.
     'trazabilidad/repo.ts · FROM': 'filtra',
-    // La pasada de calibraciones: las otras marcas siguen con sus calibraciones por serial, sin clave.
+    // La pasada de calibraciones: lo que está fuera del inventario (otras marcas no incluidas) sigue con sus calibraciones por serial, sin clave.
     'trazabilidad/calibraciones-repo.ts · FROM': 'filtra',
     // El maestro tiene que ver los dos ámbitos para no dar de alta dos veces, y es el único que escribe.
     'trazabilidad/maestro-repo.ts · FROM': 'todos',
     'trazabilidad/maestro-repo.ts · UPDATE': 'todos',
     'trazabilidad/maestro-repo.ts · INSERT INTO': 'todos',
-    // La pestaña «Trazabilidad F-ST-022» enseña la hoja entera: es la que distingue «fuera de seguimiento».
+    // La pestaña «Trazabilidad F-ST-022» enseña la hoja entera: es la que distingue «fuera de seguimiento». Desde el lote 9f pide además,
+    // por equipo y con la misma `EN_INVENTARIO`, si está en el inventario por su marca (para decir «en el inventario» y darle la fecha de Equipos).
     'trazabilidad/hoja-repo.ts · FROM': 'todos',
     // AMPLIADA en el lote 9d-2b: retirar y reincorporar un equipo A MANO. Es la segunda escritura de la tabla y está justificada:
     // la hace una persona con `inventario.write`, con motivo y firma, y sólo cambia `activo` y la marca de retirado (retiros.test.ts
@@ -60,13 +66,15 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
     expect(usos.map((u) => u.donde).sort()).toEqual(Object.keys(REVISADOS).sort());
   });
 
-  it('los que alimentan la app piden sólo lo que está en seguimiento, en la misma consulta', () => {
-    for (const u of usos) if (REVISADOS[u.donde] === 'filtra') expect(u.resto, u.donde).toMatch(/^\s+WHERE en_seguimiento\b/);
+  it('los que alimentan la app piden sólo lo que está en el inventario —la regla entera, `EN_INVENTARIO`, y nada más—, en la misma consulta', () => {
+    for (const u of usos) if (REVISADOS[u.donde] === 'filtra') expect(u.resto, u.donde).toMatch(/^\s+WHERE \$\{EN_INVENTARIO\}\)?$/);
+    // La regla, tal cual: en seguimiento O de una marca incluida. Ni un OR de más, ni un filtro de menos.
+    expect(fuente('./inventario.ts')).toMatch(/export const EN_INVENTARIO = `\(en_seguimiento OR \$\{claveMarcaSql\('marca'\)\} IN \(SELECT m\.clave FROM portal\.tmc_marcas m WHERE m\.incluida\)\)`;/);
   });
 
   it('en repo.ts todo pasa por `INVENTARIO`: cinco lecturas y ninguna tabla a pelo', () => {
     const src = fuente('./repo.ts');
-    expect(src).toMatch(/const INVENTARIO = `\(SELECT \* FROM portal\.tmc_equipos WHERE en_seguimiento\)`/);
+    expect(src).toMatch(/const INVENTARIO = `\(SELECT \* FROM portal\.tmc_equipos WHERE \$\{EN_INVENTARIO\}\)`/);
     expect(src.match(/\$\{INVENTARIO\} e\b/g)).toHaveLength(5);
     for (const f of ['consultarEquipos', 'contactosDeDesk', 'listarServicios', 'existeActivo', 'registrarAvisos']) {
       const cuerpo = src.slice(src.indexOf(`function ${f}(`));

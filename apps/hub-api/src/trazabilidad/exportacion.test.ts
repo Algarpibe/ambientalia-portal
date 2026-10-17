@@ -296,8 +296,8 @@ describe('060_trazabilidad_exportaciones.sql', () => {
     expect(sinComentarios).not.toMatch(/cliente|\bserial\b|marca|modelo/i); // BIGSERIAL es el tipo de su id
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 059, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'059_trazabilidad_retiros\.sql',\s*'060_trazabilidad_exportaciones\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 059 (la última es la 061: marcas.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'059_trazabilidad_retiros\.sql',\s*'060_trazabilidad_exportaciones\.sql',/);
   });
 });
 

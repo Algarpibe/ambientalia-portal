@@ -355,6 +355,10 @@ describe('contacto de cada equipo', () => {
         'tmc_fst022_congelada',
         'tmc_importaciones',
         'tmc_maestro_sincronizaciones',
+        // Lote 9f: qué marcas están incluidas en el inventario (un interruptor por marca) y el apunte de cada cambio, con su motivo y su
+        // firma. Sólo marcas, recuentos y firmas: no son tablas de mensajes ni de envíos, e incluir una marca no manda nada a nadie.
+        'tmc_marcas',
+        'tmc_marcas_cambios',
         'tmc_plazos',
         // Lote 9d-2b: los apuntes de retirar y reincorporar a mano (quién, cuándo, por qué). No es una tabla de mensajes ni de envíos.
         'tmc_retiros',
