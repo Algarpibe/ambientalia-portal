@@ -115,6 +115,17 @@ describe('por cliente y avisos', () => {
     expect(t).toContain('vence el 17/10/2026.');
     expect(mensajeAviso('X', [vence11('X')])).toContain('el siguiente monitor de partículas GRIMM tiene');
   });
+
+  it('con una marca incluida (lote 9f) cada línea lleva su marca y el texto no habla de «monitores GRIMM» si no lo son todos; sólo GRIMM, el texto de siempre', () => {
+    const horiba = { ...vence11('X'), marca: ' Horiba ', modelo: 'APNA-370' };
+    const t = mensajeAviso('X', [horiba, vence11('X')]);
+    expect(t).toContain('le recordamos que los siguientes equipos tienen la calibración vencida o próxima a vencer:');
+    expect(t).toContain(`• Horiba APNA-370, serial ${horiba.serial}:`);
+    expect(t).toContain('• GRIMM EDM 180C, serial ');
+    expect(mensajeAviso('X', [horiba], { tramo: 30 })).toContain('la calibración del siguiente equipo vence en los próximos 30 días:');
+    const g = vence11('X');
+    expect(mensajeAviso('X', [{ ...g, marca: 'GRIMM' }])).toBe(mensajeAviso('X', [g]));
+  });
 });
 
 describe('calendario', () => {
