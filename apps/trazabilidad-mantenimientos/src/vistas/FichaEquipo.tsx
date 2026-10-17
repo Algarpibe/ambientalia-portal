@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { esEmailInterno, type EquipoVista, type RespuestaHistorialCalibraciones } from '../dominio';
-import { fmtFecha, textoVigencia } from '../lib/vistas';
+import { fmtFecha, marcaAviso, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, DESACTIVADO, Drawer, EstadoBadge, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
@@ -102,7 +102,7 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, 
       title={<span className="font-mono">{e.serial}</span>}
       subtitle={
         <>
-          {e.cliente} · GRIMM {e.modelo}
+          {e.cliente} · {marcaAviso(e)} {e.modelo}
         </>
       }
     >

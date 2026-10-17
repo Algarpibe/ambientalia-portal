@@ -30,11 +30,11 @@ export const AVISO_CORTO: Record<AvisoHoja, string> = {
   marca_distinta: 'marca escrita distinto',
   modelo_distinto: 'modelo escrito distinto',
 };
-/** «En el inventario» = en seguimiento (hoy, los GRIMM EDM 180); «enlazado» = otra marca, con sus datos del maestro pero fuera de seguimiento (lote 9d-2a). */
+/** «En el inventario» = en seguimiento (los GRIMM EDM 180 y, desde el lote 9f, los de una marca encendida); «enlazado» = otra marca, con sus datos del maestro pero fuera de seguimiento (lote 9d-2a). */
 export const ETIQUETA_SITUACION: Record<SituacionHoja, string> = { inventario: 'En el inventario', inactivo: 'En el inventario · inactivo', enlazado: 'Enlazado con Desk 2.0 · fuera de seguimiento', hoja: 'Sólo en la hoja' };
 /** Por qué una fila que no abre ficha de equipo no entra en Resumen ni Avisos, y dónde se corrige (la nota de su panel). */
 export const NOTA_SITUACION: Record<SituacionHoja, string> = {
-  inventario: 'Este equipo está en el inventario, en seguimiento.',
+  inventario: 'Este equipo está en el inventario, en seguimiento (es un GRIMM EDM 180 o su marca está encendida en «Configuración»).',
   inactivo: 'Este equipo está en el inventario, pero inactivo: no entra en Resumen, Equipos, Calendario ni Avisos.',
   enlazado: 'Este equipo está enlazado con Desk 2.0, fuera de seguimiento: su cliente, marca, modelo y serial salen del maestro (se corrigen en Desk 2.0 y se sincroniza), pero no entra en Resumen, Equipos, Calendario ni Avisos, y no genera avisos.',
   hoja: 'Este equipo sólo está en la hoja: no tiene equipo activo en Desk 2.0 con el que enlazarlo (o su serial se repite), así que no entra en Resumen, Equipos, Calendario ni Avisos.',

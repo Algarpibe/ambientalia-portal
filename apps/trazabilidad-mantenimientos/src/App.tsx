@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardList, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { api, type Inventario } from './api';
-import type { CongelacionFst022, EstadoCalibracion, MiRol } from './dominio';
+import type { CongelacionFst022, EstadoCalibracion, MarcaSeguimiento, MiRol } from './dominio';
+import { textoMarcas } from './lib/marcas';
 import { GRUPOS, SIN_ROL, etiquetaMiRol, grupoDe, motivoSinPermiso, primeraSeccion, seccionDeHash, seccionesDe, type Seccion } from './lib/navegacion';
 import { textoOrigen, vigenteDe } from './lib/origen';
 import { fmtFecha } from './lib/vistas';
@@ -20,8 +21,9 @@ import Roles from './vistas/Roles';
 
 /**
  * Trazabilidad Mantenimientos Clientes: vencimientos de calibración de los
- * GRIMM EDM 180 de los clientes (hoja F-ST-022), para avisarles antes de que
- * se les venza y programar el servicio.
+ * GRIMM EDM 180 de los clientes (hoja F-ST-022) y, desde el lote 9f, de las
+ * marcas que se incluyan en seguimiento (la cabecera dice cuáles), para
+ * avisarles antes de que se les venza y programar el servicio.
  *
  * La Excel F-ST-022 ya no se sube desde aquí (se retiró el 10/10/2026): la
  * hoja está congelada y la cabecera dice cuándo, desde qué archivo y quién;
@@ -64,6 +66,8 @@ export default function App() {
   const avisoTimer = useRef<number | undefined>(undefined);
   /** Veces que se ha pulsado «Actualizar»: con cada una, la pestaña «Trazabilidad F-ST-022» vuelve a pedir su tabla. */
   const [recarga, setRecarga] = useState(0);
+  /** Las marcas en seguimiento (lote 9f), para decir en la cabecera cuáles entran. Si no llegan, la cabecera dice la de siempre. */
+  const [marcas, setMarcas] = useState<MarcaSeguimiento[] | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -94,6 +98,10 @@ export default function App() {
       .congelaciones()
       .then((r) => setCongelaciones(r.congelaciones))
       .catch(() => setCongelaciones(null));
+    api
+      .marcas()
+      .then((r) => setMarcas(r.marcas))
+      .catch(() => setMarcas(null));
   }, []);
 
   useEffect(() => {
@@ -153,7 +161,7 @@ export default function App() {
             <div>
               <h1 className="text-xl font-semibold text-gray-900">Trazabilidad Mantenimientos Clientes</h1>
               <p className="max-w-2xl text-sm text-gray-500">
-                GRIMM EDM 180 · vigencia de calibración de 365 días · hoy {fmtFecha(inv?.hoy)}
+                {textoMarcas(marcas)} · vigencia de calibración de 365 días · hoy {fmtFecha(inv?.hoy)}
                 {origen && <> · {origen}</>}
               </p>
             </div>
@@ -213,7 +221,7 @@ export default function App() {
         {/* Servicios, Configuración y Roles cargan lo suyo: funcionan aunque no haya inventario. */}
         {tab === 'servicios' && <Servicios onConfigurar={() => irA('configuracion')} notificar={notificar} />}
         {tab === 'agenda' && <Agenda onConfigurar={() => irA('configuracion')} notificar={notificar} />}
-        {tab === 'configuracion' && <Configuracion notificar={notificar} onInventario={() => void cargar()} />}
+        {tab === 'configuracion' && <Configuracion notificar={notificar} onInventario={() => void cargar()} onMarcas={setMarcas} />}
         {/* #roles escrito a mano por quien no es administrador: se le dice, y el servidor tampoco le daría la lista. */}
         {tab === 'roles' && !yo && !errorRol && <Loading texto="Comprobando tu rol…" />}
         {tab === 'roles' && (yo || errorRol) && !gestionaRoles && <Alert tone="amber">Sólo un administrador del portal puede ver y repartir los roles de Trazabilidad.</Alert>}
@@ -226,14 +234,14 @@ export default function App() {
             <Alert tone="red">{error}</Alert>
           </div>
         )}
-        {deInventario && !inv && !error && <Loading texto="Cargando el inventario de GRIMM EDM 180…" />}
+        {deInventario && !inv && !error && <Loading texto="Cargando el inventario…" />}
 
         {deInventario && inv && equipos.length === 0 && (
           <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-sm">
             <FileSpreadsheet className="mx-auto mb-3 h-10 w-10 text-gray-300" aria-hidden />
             <p className="mb-1 font-semibold text-gray-800">No hay equipos en el inventario</p>
             <p className="mx-auto mb-4 max-w-md text-sm text-gray-500">
-              Aquí se ven los GRIMM EDM 180 de los clientes, sus vencimientos de calibración y el calendario. La Excel F-ST-022 ya no se sube desde la app: el origen de los datos está en
+              Aquí se ven los equipos en seguimiento de los clientes ({textoMarcas(marcas)}), sus vencimientos de calibración y el calendario. La Excel F-ST-022 ya no se sube desde la app: el origen de los datos está en
               «Configuración».
             </p>
             <Button onClick={() => irA('configuracion')}>Ver el origen de los datos</Button>

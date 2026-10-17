@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type PlazoServicio, type RolEstado } from '../dominio';
+import { PLAZO_MAX_DIAS, PLAZO_MIN_DIAS, esRolEstado, type EstadoDesk, type MarcaSeguimiento, type PlazoServicio, type RolEstado } from '../dominio';
 import { estadosReloj, firma } from '../lib/agenda';
 import { OPCIONES_ROL, avisoRol, etiquetaTipoDesk, notaDerivado, notaEstadoDesk } from '../lib/servicios';
 import { fmtFecha } from '../lib/vistas';
@@ -9,6 +9,7 @@ import { Alert, Button, Card, DESACTIVADO, Loading } from '../ui';
 import CalibracionesDesk from './CalibracionesDesk';
 import { CategoriasAgenda, DuracionesAgenda, PuestosAgenda, useAgendaConfig } from './ConfiguracionAgenda';
 import MaestroEquipos from './MaestroEquipos';
+import MarcasSeguimiento from './MarcasSeguimiento';
 import OrigenDatos from './OrigenDatos';
 
 /**
@@ -29,11 +30,12 @@ interface Props {
  * plazos por tipo de servicio; la agenda del taller (puestos y duraciones,
  * `ConfiguracionAgenda.tsx`); y, uno junto al otro, lo que cada estado de Desk
  * es para el reloj del plazo y para la agenda, que son dos ajustes distintos.
- * Al final, de dónde salen los datos: la F-ST-022 congelada, el maestro de
+ * Al final, qué marcas están en seguimiento (`MarcasSeguimiento.tsx`, lote 9f)
+ * y de dónde salen los datos: la F-ST-022 congelada, el maestro de
  * equipos de Desk 2.0 (`MaestroEquipos.tsx`) y las calibraciones de sus
  * tickets (`CalibracionesDesk.tsx`), cada uno con su propio permiso.
  */
-export default function Configuracion({ notificar, onInventario }: Props & { /** El inventario de la app cambió (se sincronizó con el maestro): hay que leerlo otra vez. */ onInventario: () => void }) {
+export default function Configuracion({ notificar, onInventario, onMarcas }: Props & { /** El inventario de la app cambió (se sincronizó con el maestro): hay que leerlo otra vez. */ onInventario: () => void; /** Se encendió o se apagó una marca (lote 9f): la cabecera las dice. */ onMarcas: (marcas: MarcaSeguimiento[]) => void }) {
   const { puede, motivo } = usePermisos();
   const agenda = useAgendaConfig(notificar);
   return (
@@ -58,6 +60,7 @@ export default function Configuracion({ notificar, onInventario }: Props & { /**
       </div>
       {/* No son ajustes: de dónde salen los datos de la app. La hoja congelada, sólo lectura; el maestro y las calibraciones los trae quien tiene su permiso. */}
       <div className="grid items-start gap-4 xl:grid-cols-2">
+        <MarcasSeguimiento notificar={notificar} onCambio={(r) => (onMarcas(r.marcas), onInventario())} />
         <OrigenDatos />
         <MaestroEquipos notificar={notificar} onSincronizado={onInventario} />
         <CalibracionesDesk notificar={notificar} onTraidas={onInventario} />

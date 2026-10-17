@@ -39,7 +39,7 @@ export default function Resumen({ equipos, hoy, onEstados, onCliente, onEnCasa, 
       <section aria-label="Equipos por estado">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-base font-semibold text-gray-900">Equipos por estado de calibración</h2>
-          <p className="text-xs text-gray-500">{total} GRIMM EDM 180 · pulsa un estado para ver sus equipos</p>
+          <p className="text-xs text-gray-500">{total} equipos · pulsa un estado para ver sus equipos</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
           {ESTADOS.map((s) => (
