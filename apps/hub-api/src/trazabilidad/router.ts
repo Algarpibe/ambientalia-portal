@@ -15,6 +15,7 @@ import { exportarHoja, leerExportaciones } from './exportacion-repo.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
+import { cambiarMarca, leerMarcas } from './marcas-repo.js';
 import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
 import { festivosDelEje } from './plazos.js';
 import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
@@ -27,6 +28,8 @@ import {
   parseAsignacion,
   parseAvisos,
   parseCalibracionManual,
+  parseCambioMarca,
+  parseClaveMarca,
   parseCategoriaEstado,
   parseContacto,
   parseDuracionEtapa,
@@ -436,6 +439,14 @@ export function createTrazabilidadRouter(
 
   // La auditoría de un equipo (?clave=) o de una fila de la hoja (?fila=): quién lo retiró o lo reincorporó, cuándo y por qué.
   router.get('/trazabilidad/retiros', ...gated, route('tmc_retiros', async (req) => ({ retiros: await listarRetiros(db, parseObjetoRetiro(req.query)) })));
+
+  // ── Marcas en seguimiento (lote 9f, migración 061) ──────────────────────
+  // Un interruptor por marca: encendida, sus equipos entran en Resumen, Equipos, Calendario y Avisos (GRIMM EDM 180, siempre; fijo).
+  // Leer —cada marca con su vista previa, sólo recuentos— está abierto a quien tiene la app; encender o apagar pide `inventario.write`,
+  // con motivo, y lo deja apuntado. Al encender nacen las partidas y se enlazan las sueltas de sus equipos: sus fechas no se mueven.
+  // No envía nada: los avisos siguen siendo manuales o simulados.
+  router.get('/trazabilidad/marcas', ...gated, route('tmc_marcas', async (req) => leerMarcas(db, hoyAgenda(req))));
+  router.post('/trazabilidad/marcas/:clave', ...gated, escritura('inventario.write', 'tmc_marca_cambiar', async (req) => cambiarMarca(db, parseClaveMarca(req.params.clave), parseCambioMarca(req.body), actorOf(req), hoyEnColombia())));
 
   router.put(
     '/trazabilidad/seguimiento/:clave',

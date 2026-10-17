@@ -794,6 +794,19 @@ export function parseEnteroRuta(v: unknown, campo: string): number {
   return Number(v);
 }
 
+/** POST /marcas/:clave (lote 9f): la clave de una marca tal como la da GET /marcas, ya normalizada («horiba», no «HORIBA»). */
+export function parseClaveMarca(v: unknown): string {
+  if (typeof v !== 'string' || v === '' || v.length > 60 || v !== claveCliente(v)) throw invalido('«clave» no es la clave de una marca.', 'clave');
+  return v;
+}
+
+/** POST /marcas/:clave: `{incluir, motivo}`. Encender (true) o apagar (false) una marca, siempre con motivo. */
+export function parseCambioMarca(body: unknown): { incluir: boolean; motivo: string } {
+  const b = obj(body, 'body');
+  if (typeof b.incluir !== 'boolean') throw invalido('«incluir» debe ser true (encender la marca) o false (apagarla).', 'incluir');
+  return { incluir: b.incluir, motivo: parseMotivo(b) };
+}
+
 /** GET /retiros: de quién es el historial, `?clave=` de un equipo o `?fila=` de la hoja congelada (una de las dos). */
 export function parseObjetoRetiro(query: Record<string, unknown>): { clave: string | null; fila: number | null } {
   const { clave, fila } = query;

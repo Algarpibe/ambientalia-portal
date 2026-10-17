@@ -239,12 +239,14 @@ describe('permisos por rol', () => {
         pedir: (c: { Authorization: string }) => request(appCalibraciones()).post(`/api/trazabilidad/${objeto}/${accion}`).set(c).send({ motivo: 'Motivo ficticio.' }),
       })),
     ),
+    // Marcas en seguimiento (lote 9f): encender o apagar una marca. Cambia qué entra en el inventario, así que es del mismo permiso que retirar.
+    { ruta: 'POST /trazabilidad/marcas/:clave', permiso: 'inventario.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/marcas/horiba').set(c).send({ incluir: true, motivo: 'Motivo ficticio.' }) },
   ];
   /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las veintidós escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veintitrés escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -321,6 +323,7 @@ describe('permisos por rol', () => {
     expect((await request(app()).post('/api/trazabilidad/calibraciones/partida/abc/anular').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/equipos/a%20b/retirar').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/filas/abc/reincorporar').set(c).send({})).status).toBe(403);
+    expect((await request(app()).post('/api/trazabilidad/marcas/A%20B').set(c).send({ incluir: 'sí' })).status).toBe(403);
     expect(queries).toEqual([]);
   });
 
@@ -2321,6 +2324,108 @@ describe('retirar y reincorporar un equipo o una fila de la hoja', () => {
     ]);
     for (const r of rutas.filter((x) => /^post\(/.test(x))) expect(r).toMatch(/escritura\('inventario\.write',/);
     for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/retiros-repo|retirarEquipo|tmc_retiros/);
+  });
+});
+
+// Marcas en seguimiento (lote 9f, 061): GET /marcas (abierto, sólo recuentos) y POST /marcas/:clave (encender o apagar, con
+// `inventario.write`). La regla la cubre marcas.test.ts y el SQL contra Postgres, marcas.db.test.ts; aquí, las guardas, los 400, 404 y
+// 409, qué se escribe y en qué orden, y que la respuesta no lleva ni un cliente ni un serial.
+describe('marcas en seguimiento: leer, encender y apagar', () => {
+  const RUTA = '/api/trazabilidad/marcas';
+  const CUERPO = { incluir: true, motivo: ' Decisión ficticia de incluir la marca. ' };
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q)).map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1]);
+  const VIGENTE: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelaciones g WHERE g\.vigente/, [{ id: 7, archivo: 'F-ST-022 ficticia V3.xlsx', hoja: 'Trazabilidad', por: 'director@example.com', en: '2026-10-10 15:00:00+00', cabeceras: [['Cliente', 'Marca', 'Modelo', 'Serial', 'Última Calibración', 'Vigencia de Calibración (Dias)']] }]];
+  const CONGELADAS: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelada f/, [{ fila: 7, celdas: ['Cliente Reservado', 'HORIBA', 'APNA 370', 'HB-RESERVADO', { v: '2025-01-10', t: 'fecha' }, 357], serial_norm: 'HB-RESERVADO', clave_equipo: null }]];
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos$/m, [{ clave: 'HB-RESERVADO', serial: 'HB-RESERVADO', cliente: 'Cliente Reservado S.A.S.', marca: 'Horiba', modelo: 'APNA-370', activo: true, en_seguimiento: false, en_inventario: false, ultima_calibracion: null }]];
+  const SUELTA: [RegExp, Filas] = [/FROM portal\.tmc_calibraciones c/, [{ id: 5, clave: null, serial: 'HB-RESERVADO', desk_equipo_id: null, fecha: '2025-09-15', origen: 'desk', ticket: 1001, estado: 'vigente', corrige_ticket: null, corrige_fecha: null, motivo: null, por: 'tecnico@example.com', en: '2026-10-11 15:00:00+00', anulada_por: null, anulada_en: null, anulada_motivo: null, anulada_pasada_id: null }]];
+  const guardada = (incluida: boolean): [RegExp, Filas] => [/FROM portal\.tmc_marcas ORDER BY clave/, [{ clave: 'horiba', marca: 'Horiba', incluida, motivo: 'Decisión ficticia.', por: 'director@example.com', en: '2026-10-17 15:00:00+00' }]];
+  const DATOS = [VIGENTE, CONGELADAS, INVENTARIO, SUELTA];
+  const parametros: unknown[][] = [];
+  const appMarcas = () => {
+    parametros.length = 0;
+    const query = async (sql: string, p: unknown[] = []) => (/^\s*(INSERT|UPDATE)/.test(sql) && parametros.push(p), fakePool.query(sql, p));
+    const pool = { query, connect: async () => (conexiones.n++, { query, release: () => {} }) } as unknown as Pool;
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(pool));
+    return a;
+  };
+  const pedir = (clave: string, cabecera = conRol('DIRECTOR_TECNICO'), cuerpo: unknown = CUERPO) => request(appMarcas()).post(`${RUTA}/${clave}`).set(cabecera).send(cuerpo as object);
+
+  it('GET: abierto a un Lector sin mirar su rol; cada marca con su vista previa en recuentos (GRIMM EDM 180 fija); sólo lee; sin un cliente ni un serial', async () => {
+    respuestas.push(...DATOS);
+    const res = await request(appMarcas()).get(`${RUTA}?hoy=2026-10-17`).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body.marcas.map((m: { clave: string; fija: boolean; incluida: boolean }) => [m.clave, m.fija, m.incluida])).toEqual([['grimm edm 180', true, true], ['horiba', false, false]]);
+    expect(res.body.marcas[1].resumen).toEqual({ equipos: 1, porEstado: { FUERA_CICLO: 0, VENCIDA: 1, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_FECHA: 0 }, avisos: 1, clientesAvisos: 1, partidas: 1, enlazadas: 1 });
+    expect(res.body.cambios).toEqual([]);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+    expect(consultasRol.n).toBe(0);
+    for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
+    expect((await request(appMarcas()).get(`${RUTA}?hoy=2026-02-30`).set(conRol(null))).body.field).toBe('hoy');
+  });
+
+  it('401 sin token y 403 sin la app; 403 para Lector, Comercial y Técnico antes de validar y sin ninguna consulta', async () => {
+    expect((await request(appMarcas()).post(`${RUTA}/horiba`).send(CUERPO)).status).toBe(401);
+    expect((await pedir('horiba', auth(tokenFor(['ausencias'])))).body.error).toBe('forbidden');
+    for (const rol of [null, 'COMERCIAL', 'TECNICO']) {
+      const res = await pedir('horiba', conRol(rol), { incluir: 'quizá' });
+      expect([res.status, res.body.error]).toEqual([403, 'forbidden_role']);
+    }
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it.each([
+    ['una clave que no es la de una marca', 'HORIBA', CUERPO, 'clave'],
+    ['«incluir» que no es true ni false', 'horiba', { incluir: 'sí', motivo: 'x' }, 'incluir'],
+    ['sin motivo', 'horiba', { incluir: true, motivo: '   ' }, 'motivo'],
+  ])('400 con %s, sin consultar nada', async (_caso, clave, cuerpo, campo) => {
+    const res = await pedir(clave, comoAdmin(), cuerpo);
+    expect([res.status, res.body.error, res.body.field]).toEqual([400, 'invalid_input', campo]);
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('409 `marca_fija` para GRIMM EDM 180, sin consultar nada; 404 si la marca no tiene equipos ni está guardada; 409 si ya estaba así; ninguno escribe', async () => {
+    const fija = await pedir('grimm%20edm%20180');
+    expect([fija.status, fija.body.error, conexiones.n]).toEqual([409, 'marca_fija', 0]);
+    const no = await pedir('thermo');
+    expect([no.status, no.body.error]).toEqual([404, 'not_found']);
+    respuestas.push(...DATOS, guardada(true));
+    const ya = await pedir('horiba');
+    expect([ya.status, ya.body.error]).toEqual([409, 'ya_incluida']);
+    const apagada = await pedir('kunak', conRol('DIRECTOR_TECNICO'), { incluir: false, motivo: 'x' });
+    expect([apagada.status, apagada.body.error]).toEqual([404, 'not_found']);
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('encender: en una transacción con los dos bloqueos, la partida y el enlace de la suelta, la marca y su apunte, en ese orden; devuelve las marcas', async () => {
+    respuestas.push(...DATOS);
+    const res = await pedir('horiba');
+    expect(res.status).toBe(200);
+    expect(conexiones.n).toBe(1);
+    expect(queries.filter((q) => /pg_advisory_xact_lock/.test(q)).map((q) => /hashtext\('([^']+)'\)/.exec(q)![1])).toEqual(['portal.tmc_calibraciones_pasadas', 'portal.tmc_marcas']);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_calibraciones', 'UPDATE portal.tmc_calibraciones', 'INSERT INTO portal.tmc_marcas', 'INSERT INTO portal.tmc_marcas_cambios']);
+    expect(JSON.parse(parametros[0][0] as string)).toEqual([{ clave: 'HB-RESERVADO', serial: 'HB-RESERVADO', fecha: '2025-01-10', estado: 'vigente', fila: 7, serialNorm: 'HB-RESERVADO', motivo: 'F-ST-022 congelada (fila 7), al incluir su marca en seguimiento.' }]);
+    expect(JSON.parse(parametros[1][0] as string)).toEqual([{ id: 5, clave: 'HB-RESERVADO' }]);
+    expect(parametros[2].slice(0, 4)).toEqual(['horiba', 'Horiba', true, 'Decisión ficticia de incluir la marca.']);
+    expect(parametros[3].slice(0, 7)).toEqual(['horiba', 'Horiba', 'incluir', 'Decisión ficticia de incluir la marca.', 1, 1, 1]);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+  });
+
+  it('apagar: sólo la marca y su apunte; no toca ninguna calibración', async () => {
+    respuestas.push(...DATOS, guardada(true));
+    const res = await pedir('horiba', comoAdmin(), { incluir: false, motivo: 'Vuelta atrás ficticia.' });
+    expect(res.status).toBe(200);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_marcas', 'INSERT INTO portal.tmc_marcas_cambios']);
+    expect(parametros[1].slice(2, 7)).toEqual(['excluir', 'Vuelta atrás ficticia.', 1, 0, 0]);
+  });
+
+  it('CANDADO: sus rutas son estas dos, la escritura con `inventario.write`; ni programador ni nada que avise', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/marcas/.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/marcas', 'post /trazabilidad/marcas/:clave']);
+    expect(rutas[1]).toMatch(/escritura\('inventario\.write',/);
+    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/marcas-repo|cambiarMarca|tmc_marcas/);
   });
 });
 
