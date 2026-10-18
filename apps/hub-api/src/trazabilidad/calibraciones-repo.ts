@@ -11,7 +11,9 @@
  * están: el inventario enseña la fecha de la regla, `listarEquipos`), ni el
  * seguimiento, ni los contactos, ni la congelación, ni las filas manuales
  * (calibraciones.test.ts vigila la lista de escrituras). Se trae a mano, tras
- * ver el plan: no hay pasada automática.
+ * ver el plan, o desde el lote 10 en la pasada nocturna, que lo llama igual
+ * (con la huella del plan que evaluó) sólo si el plan es limpio
+ * (pasadas-nocturnas-repo.ts). Este fichero no sabe nada de ella.
  */
 
 import { createHash } from 'node:crypto';
