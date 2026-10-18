@@ -11,7 +11,9 @@
  * (lote 9c), lo que sólo está en el portal, los ambiguos, el seguimiento, los
  * contactos ni la congelación, y no borra ni desactiva nada por no estar en
  * el maestro (maestro.test.ts vigila la lista de escrituras). Se aplica a
- * mano, tras ver el plan: no hay sincronización automática.
+ * mano, tras ver el plan, o desde el lote 10 en la pasada nocturna, que lo
+ * llama igual (con la huella del plan que evaluó) sólo si el plan es limpio
+ * (pasadas-nocturnas-repo.ts). Este fichero no sabe nada de ella.
  *
  * Desde el lote 9d-2a el plan trae dos ámbitos y los dos se aplican en la
  * misma transacción: el de siempre (GRIMM EDM 180, en seguimiento) y las otras

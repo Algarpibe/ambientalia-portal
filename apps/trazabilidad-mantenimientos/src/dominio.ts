@@ -17,6 +17,8 @@ export { mismoNombre } from '../../hub-api/src/trazabilidad/maestro';
 // Las calibraciones desde Desk 2.0: el plan de la pasada y el historial de un equipo, tal como los sirve la API (tipos), y el orden de su detalle.
 export type { CalibracionHistorial, DetalleCalibracion, EstadoFilaCalibracion, PasadaCalibraciones, RecuentosCalibraciones, RespuestaHistorialCalibraciones, RespuestaPlanCalibraciones, TipoDetalle } from '../../hub-api/src/trazabilidad/calibraciones';
 export { TIPOS_DETALLE } from '../../hub-api/src/trazabilidad/calibraciones';
+// Las pasadas nocturnas (lote 10): la última de cada tipo, tal como la sirven los dos GET de los planes.
+export type { ConNocturna, PasadaNocturna, ResultadoPasada } from '../../hub-api/src/trazabilidad/pasadas-nocturnas';
 // La pestaña «Trazabilidad F-ST-022»: la tabla de la hoja tal como la sirve GET /hoja (tipos; el cálculo es del servidor).
 export type { ApunteRetiro, AvisoHoja, CalibracionHoja, EnHoja, FilaHoja, RespuestaEdicion, RespuestaHoja, RespuestaRetiro, ResumenHoja, Retiro, SituacionHoja } from '../../hub-api/src/trazabilidad/hoja';
 export { AVISOS_HOJA } from '../../hub-api/src/trazabilidad/hoja';

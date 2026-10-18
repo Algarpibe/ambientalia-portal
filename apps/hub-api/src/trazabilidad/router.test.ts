@@ -1601,7 +1601,7 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     expect(res.body.plan.huella).toMatch(/^[0-9a-f]{64}$/);
     expect(res.body.plan.recuentos).toMatchObject({ maestro: 1, portal: 1, casan: 1, enlaces: 1, altas: 0, cambios: { cliente: 1, modelo: 0, serial: 0, activo: 0 }, clienteOtroNombre: 1 });
     expect(res.body.ultima).toBeNull();
-    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'nocturna', 'plan', 'ultima']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
     expect(escrituras()).toEqual([]);
     expect(conexiones.n).toBe(0);
@@ -1646,7 +1646,7 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     respuestas.push(CON_DUDAS);
     const res = await request(appMaestro()).get(PLAN).set(conRol(rol));
     expect(res.body.plan.recuentos).toMatchObject({ soloPortal: 1, ambiguosPortal: 2 });
-    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'nocturna', 'plan', 'ultima']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|reservado|eq-1/);
   });
 
@@ -1696,7 +1696,7 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     const res = await request(appMaestro()).get(PLAN).set(conRol(rol));
     expect(res.body.plan.otras).toEqual(OTRAS);
     expect(res.body.plan.hoja).toEqual([{ marca: 'Horiba', filas: 1, enlazadas: 1, soloHoja: 0, sinCeros: 0, repetidas: 0 }, { marca: 'Thermo', filas: 1, enlazadas: 0, soloHoja: 1, sinCeros: 0, repetidas: 0 }]);
-    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'nocturna', 'plan', 'ultima']);
     expect(Object.keys(res.body.plan).sort()).toEqual(['hoja', 'huella', 'otras', 'recuentos']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-/);
     expect(escrituras()).toEqual([]);
@@ -1756,9 +1756,28 @@ describe('maestro de equipos: plan, cruce y sincronizar', () => {
     expect(consultasRol.n).toBe(0);
   });
 
-  it('CANDADO: el maestro no entra en la fuente de la agenda (ni en su sonda) y no hay sincronización automática ni programador', () => {
+  // Lote 10: el plan lleva además la última pasada NOCTURNA del maestro (resultado y motivos: sólo recuentos y textos).
+  it('el plan lleva la última pasada nocturna del maestro, abierta a un Lector; null si aún no ha salido ninguna', async () => {
+    const vacio = await request(appMaestro()).get(PLAN).set(conRol(null));
+    expect(vacio.body.nocturna).toBeNull();
+    respuestas.push([/FROM portal\.tmc_pasadas_nocturnas WHERE tipo = \$1/, [{ fecha: '2026-10-19', resultado: 'retenida', motivos: ['Equipos nuevos que se darían de alta (GRIMM EDM 180): 1'], empezo: '2026-10-19 07:00:00+00', termino: '2026-10-19 07:00:02+00' }]]);
+    const res = await request(appMaestro()).get(PLAN).set(conRol(null));
+    expect(res.body.nocturna).toEqual({ fecha: '2026-10-19', resultado: 'retenida', motivos: ['Equipos nuevos que se darían de alta (GRIMM EDM 180): 1'], empezo: '2026-10-19 07:00:00+00', termino: '2026-10-19 07:00:02+00' });
+    expect(queries.filter((q) => /tmc_pasadas_nocturnas/.test(q)).every((q) => /^SELECT/.test(q))).toBe(true);
+    lecturaMaestro = { disponible: false, motivo: 'timeout' };
+    expect((await request(appMaestro()).get(PLAN).set(conRol(null))).body.nocturna).toMatchObject({ resultado: 'retenida' });
+  });
+
+  // AMPLIADO en el lote 10: hasta aquí no había sincronización automática. Ahora la hay, pero NO entra por aquí: la
+  // agenda, su sonda, registro-estados.ts e index.ts siguen sin nombrar el maestro. La pasada nocturna vive en sus
+  // ficheros (programador-pasadas.ts, que index.ts enciende, y pasadas-nocturnas-repo.ts, que aplica SÓLO a través de
+  // `sincronizarMaestro`, con su huella y su auditoría): su candado está en pasadas-nocturnas-repo.test.ts. Y las rutas del
+  // maestro siguen siendo estas tres: la nocturna no añade ninguna (se ve en el GET del plan).
+  it('CANDADO: el maestro no entra en la fuente de la agenda (ni en su sonda); la sincronización automática es sólo la nocturna, y no añade rutas', () => {
     const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
     for (const f of ['./fuente.ts', './fuente-desk2.ts', './fuente-replica.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/desk\.equipos|maestro/i);
+    expect(fuente('../index.ts')).toMatch(/import \{ iniciarPasadasNocturnas \} from '\.\/trazabilidad\/programador-pasadas\.js';/);
+    expect(fuente('./pasadas-nocturnas-repo.ts')).toMatch(/sincronizarMaestro\(db, leerMaestro, huella, ACTOR_NOCTURNO\)/);
     const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/maestro\//.test(r));
     expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/maestro/plan', 'get /trazabilidad/maestro/cruce', 'post /trazabilidad/maestro/sincronizar']);
   });
@@ -1795,7 +1814,7 @@ describe('calibraciones desde Desk 2.0: plan, traer e historial', () => {
     expect(res.body.plan.recuentos).toMatchObject({ tickets: 40, conCf: 9, conCampo: 1, porNombre: 1, nuevas: 1, otrasMarcas: 0, enRevision: 0, partida: 1, partidaDeInventario: 1, equiposCambian: 1 });
     expect(res.body.salud).toEqual({ alerta: false, bloquea: false, mensaje: null });
     expect(res.body.ultima).toBeNull();
-    expect(Object.keys(res.body).sort()).toEqual(['lectura', 'plan', 'salud', 'ultima']);
+    expect(Object.keys(res.body).sort()).toEqual(['lectura', 'nocturna', 'plan', 'salud', 'ultima']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO|eq-1/);
     expect(escrituras()).toEqual([]);
     expect(conexiones.n).toBe(0);
@@ -1899,12 +1918,26 @@ describe('calibraciones desde Desk 2.0: plan, traer e historial', () => {
     expect([mala.status, mala.body.field]).toEqual([400, 'clave']);
   });
 
+  // Lote 10: el plan lleva además la última pasada NOCTURNA de las calibraciones.
+  it('el plan lleva la última pasada nocturna de las calibraciones, abierta a un Lector; null si aún no ha salido ninguna', async () => {
+    respuestas.push(INVENTARIO);
+    expect((await request(appCalibraciones()).get(PLAN).set(conRol(null))).body.nocturna).toBeNull();
+    respuestas.push([/FROM portal\.tmc_pasadas_nocturnas WHERE tipo = \$1/, [{ fecha: '2026-10-19', resultado: 'aplicada', motivos: [], empezo: '2026-10-19 07:00:03+00', termino: '2026-10-19 07:00:05+00' }]]);
+    const res = await request(appCalibraciones()).get(PLAN).set(conRol(null));
+    expect(res.body.nocturna).toEqual({ fecha: '2026-10-19', resultado: 'aplicada', motivos: [], empezo: '2026-10-19 07:00:03+00', termino: '2026-10-19 07:00:05+00' });
+    expect(queries.filter((q) => /tmc_pasadas_nocturnas/.test(q)).every((q) => /^SELECT/.test(q))).toBe(true);
+  });
+
   // LISTA REVISADA, ampliada en el lote 9d-2b: a las tres rutas del 9c se suman las tres de la corrección A MANO (registrar una
   // manual, anular una fila y anular la partida de una fila de la hoja). Son escrituras de una persona, con `calibraciones.write`,
   // motivo y firma; ninguna trae nada sola ni avisa a nadie (edicion.test.ts vigila qué escriben). Una ruta más aquí hay que justificarla igual.
-  it('CANDADO: las calibraciones no entran en la fuente de la agenda (ni en su sonda), no hay programador que las traiga solo y sus rutas son estas seis', () => {
+  // AMPLIADO en el lote 10: ahora sí hay quien las trae solo, la pasada NOCTURNA, pero no por la agenda ni por index.ts: vive en
+  // programador-pasadas.ts y pasadas-nocturnas-repo.ts, y trae SÓLO a través de `sincronizarCalibraciones` (con su huella, su
+  // salud y su auditoría). Su candado, en pasadas-nocturnas-repo.test.ts. No añade rutas: se ve en el GET del plan.
+  it('CANDADO: las calibraciones no entran en la fuente de la agenda (ni en su sonda), sólo la pasada nocturna las trae solas y sus rutas son estas seis', () => {
     const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
     for (const f of ['./fuente.ts', './fuente-desk2.ts', './fuente-replica.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/calibraciones-desk2|crearLectorCalibraciones|sincronizarCalibraciones|cf_fecha_de_calibracion|tmc_calibraciones|edicion-repo|registrarManual/);
+    expect(fuente('./pasadas-nocturnas-repo.ts')).toMatch(/sincronizarCalibraciones\(db, leerCalibraciones, huella, ACTOR_NOCTURNO, hoy\)/);
     const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/[^']*calibraciones/.test(r));
     expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual([
       'get /trazabilidad/calibraciones/plan',

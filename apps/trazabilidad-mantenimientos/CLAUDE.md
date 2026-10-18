@@ -28,7 +28,9 @@ con sus seis columnas y los valores de hoy (ver «Exportar la F-ST-022»): es s�
 su permiso y su apunte; nada se sube. **Desde el lote 9f las demás marcas entran en Resumen,
 Equipos, Calendario y Avisos POR MARCA**: un interruptor por marca en Configuración (Director
 Técnico), con vista previa y motivo; GRIMM EDM 180 siempre (ver «Marcas en seguimiento, por
-marca»). Sigue sin enviarse nada. El seguimiento (aviso
+marca»). **Desde el lote 10 el maestro y las calibraciones se traen SOLOS cada noche a las 02:00
+de Colombia**, pero sólo si el plan es «limpio»; lo demás queda retenido para que lo revise una
+persona (ver «Pasadas nocturnas»). Sigue sin enviarse nada. El seguimiento (aviso
 enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
 se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
 congelar. Ver «F-ST-022: congelación y relevo de la Excel».
@@ -49,6 +51,7 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Dominio puro (sin imports; lo usa servidor y UI) | `apps/hub-api/src/trazabilidad/dominio.ts` |
 | Plazos en días hábiles y reloj con pausas, `calcularReloj` (sólo servidor: llama al calendario de Ausencias) | `apps/hub-api/src/trazabilidad/plazos.ts` |
 | Cuándo se apuntan los cambios de estado: programador de 5 min + al leer «Servicios» (sólo servidor) | `apps/hub-api/src/trazabilidad/registro-estados.ts` |
+| Pasadas nocturnas (lote 10, 062): qué plan se aplica solo y cuál se retiene (`decidirMaestro`, `decidirCalibraciones`, `NUEVAS_MAX`, `ACTOR_NOCTURNO`; pura, sin imports más que tipos) y los tipos de lo que devuelve la API (`PasadaNocturna`, `ConNocturna`) | `apps/hub-api/src/trazabilidad/pasadas-nocturnas.ts`; el ejecutor (`ejecutarPasadasNocturnas`, `pasosDesk2`, `ultimaNocturna`; **único fichero que escribe `tmc_pasadas_nocturnas`**, y cambia datos sólo llamando a `sincronizarMaestro` / `sincronizarCalibraciones`) en `pasadas-nocturnas-repo.ts`; el cuándo (`iniciarPasadasNocturnas`, `msHastaProximaPasada`, `yaPasoLaHoraHoy`, `RECUPERACION_MS`), encendido sólo en `apps/hub-api/src/index.ts`, en `programador-pasadas.ts`; la línea de las tarjetas (`lineaNocturna`) en `src/lib/nocturna.ts` y su componente (`LineaNocturna`) en `src/vistas/MaestroEquipos.tsx` |
 | Validación de entrada (400 en español) | `apps/hub-api/src/trazabilidad/types.ts` |
 | SQL | `apps/hub-api/src/trazabilidad/repo.ts` |
 | HTTP (`requireAuth` + `requireApp('trazabilidad-mantenimientos')`; cada escritura, además, con `escritura(permiso, …)`) | `apps/hub-api/src/trazabilidad/router.ts` |
@@ -59,7 +62,7 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql` |
 | Marcas en seguimiento (lote 9f, 061): **qué es el inventario** en un solo sitio (`EN_INVENTARIO`, `claveMarcaSql`; sin imports) | `apps/hub-api/src/trazabilidad/inventario.ts` |
 | Marcas en seguimiento: la regla pura —clave de una marca (`claveMarca`), la fila fija (`CLAVE_EDM180`), la vista previa por marca (`marcasEnSeguimiento`) y lo que se escribe al incluir una (`planAdopcion`)— y los tipos de su API | `apps/hub-api/src/trazabilidad/marcas.ts`; su SQL (`leerMarcas`, `cambiarMarca`, `adoptarIncluidas`; **escribe `tmc_marcas`, `tmc_marcas_cambios` y, en `tmc_calibraciones`, sólo partidas nuevas y la clave de las sueltas**) en `marcas-repo.ts`; la tarjeta en `src/vistas/MarcasSeguimiento.tsx` y lo que calcula (`textoMarcas` —la cabecera—, `lineasVistaPrevia`, `efectoMarca`, `textoCambioMarca`, `marcasDeEquipos`, `filtrarPorMarca`) en `src/lib/marcas.ts` |
 | Exportar la F-ST-022 (lote 9e, 060): el generador puro del .xlsx —columnas, filas, vigencia con fórmula, hojas de más y nombre, cada cosa en un solo sitio— (`libroFst022`, `COLUMNAS_FST022`, `filasExportadas`, `FORMULA_VIGENCIA`, `HOJAS_LIBRO`, `ORIGENES_FECHA`, `nombreFichero`) y los tipos de «última exportación» | `apps/hub-api/src/trazabilidad/exportacion.ts`; quien reúne la tabla con `leerHoja`, genera el libro y lo apunta (`exportarHoja`, `leerExportaciones`; **único fichero que escribe `tmc_exportaciones`**) en `exportacion-repo.ts`; cómo se sirve un fichero (`Fichero`) en `router.ts`; el botón en `src/vistas/ExportarHoja.tsx` y lo que calcula (`nombreDeDescarga`, `textoUltimaExportacion`, `NOTA_EXPORTAR`) en `src/lib/exportar.ts` |
@@ -104,6 +107,7 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_calibraciones` | **Una fila por calibración conocida** (057). `clave` (el equipo del portal, `tmc_equipos.clave`; **NULL** si el serial no es de un equipo del inventario: otras marcas, 9d), `serial` (tal cual) y `serial_norm`, `desk_equipo_id` (si el ticket lo trae), `fecha` (`DATE NOT NULL`: **nunca se edita**; corregir es anular la fila e insertar otra), `origen` (`CHECK` a `fst022` = punto de partida, la hoja congelada / `desk` = el campo de Zoho de un ticket / `manual` = lote 9d), `ticket` (sólo y siempre en las de origen `desk`), `corrige_ticket` + `corrige_fecha` (sólo en una `manual` que corrige un ticket: su número y la fecha que ese ticket tenía en Zoho), `estado` (`CHECK` a `vigente` / `anulada` / `en_revision` = no cuenta), `motivo`, la firma del alta (`por_id`, `por`, `en`, y `pasada_id` si la trajo una pasada) y la de la anulación (`anulada_por_id`, `anulada_por`, `anulada_en`, `anulada_motivo`, y `anulada_pasada_id`: **NULL = la anuló una persona**, y entonces la pasada no la resucita). Tres `CHECK` con nombre (`…_ticket_de_desk`, `…_corrige`, `…_anulada_firmada`) y dos índices únicos parciales: `tmc_calibraciones_ticket_uq (ticket) WHERE origen = 'desk' AND estado <> 'anulada'` = **como mucho una fila sin anular por ticket de Desk**, y `tmc_calibraciones_fst022_uq (clave) WHERE origen = 'fst022'` = una fila de partida por equipo. Sin semilla ni clave foránea. **La escriben la pasada** (`sincronizarCalibraciones`, `calibraciones-repo.ts`: inserta y anula; nunca cambia una fecha; `calibraciones.test.ts` lo vigila) **y, desde el lote 9d-2b, una persona** (`edicion-repo.ts`: inserta una `manual` —o la partida de una fila de la hoja, ya anulada, con `clave` NULL y `origen = 'fst022'`— y anula con `anulada_motivo`; tampoco cambia nunca una fecha; `edicion.test.ts` lo vigila) **y, desde el lote 9f, incluir una marca** (`marcas-repo.ts`: inserta la partida `fst022` de cada equipo de la marca —`ON CONFLICT` sobre `tmc_calibraciones_fst022_uq`: nunca dos— y **pone la clave** a las filas sin clave que la pestaña ya le atribuía por serial, `WHERE clave IS NULL`; ni fecha, ni estado, ni serial, ni firmas; `marcas.test.ts` lo vigila) |
 | `portal.tmc_calibraciones_pasadas` | **Auditoría** de cada pasada aplicada (057), al estilo de `tmc_maestro_sincronizaciones`: `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosCalibraciones`), `detalle` (`JSONB`, array de `DetalleCalibracion`), `por_id`, `por` y `en`. No se cambia ni se borra. Sin semilla |
 | `portal.tmc_retiros` | **Un apunte por cada retiro o reincorporación a mano** (059): de un equipo (`clave`) **o** de una fila de la hoja congelada sin equipo (`congelacion_id` + `fila`) —`CHECK` `tmc_retiros_objeto`: una cosa o la otra—, `accion` (`CHECK` a `retirar` / `reincorporar`), `motivo` (`NOT NULL` y no vacío), `antes` y `despues` (`activo` / `retirado`: el valor anterior y el nuevo) y la firma (`por_id`, `por`, `en`). No se cambia ni se borra: es la auditoría y, para una fila de la hoja, **su estado** (está retirada si su último apunte es un retiro). Sin semilla ni clave foránea. Sólo la escribe `retiros-repo.ts`. **No es una tabla de mensajes ni de envíos** |
+| `portal.tmc_pasadas_nocturnas` | **Un apunte por noche y tipo** de cómo acabó la pasada nocturna (062, lote 10): `fecha` (`DATE`, el día en Colombia), `tipo` (`CHECK` a `maestro` / `calibraciones`), `resultado` (`CHECK` a `en_curso` / `aplicada` / `sin_cambios` / `retenida` / `no_disponible` / `error`), `motivos` (`JSONB`, lista de textos en español; `CHECK` de que es una lista), `huella` y `recuentos` del plan evaluado (NULL si no hubo plan), `pasada_id` (el id de su fila de `tmc_maestro_sincronizaciones` o `tmc_calibraciones_pasadas` si se aplicó; sin clave foránea), `empezo` y `termino`. `tmc_pasadas_nocturnas_dia_uq UNIQUE (fecha, tipo)`: el día se **reclama** con un `INSERT … ON CONFLICT DO NOTHING`, así que dos instancias no repiten la pasada; `CHECK` `tmc_pasadas_nocturnas_termino`: en curso si y sólo si no ha terminado. Sin semilla. Sólo la escribe `pasadas-nocturnas-repo.ts`. Ni clientes ni seriales. **No es una tabla de mensajes ni de envíos** |
 | `portal.tmc_exportaciones` | **Un apunte por cada exportación de la F-ST-022** (060), para saber qué copia circula: `congelacion_id` (la vigente de la que parte; NULL si no había), `hoy` (el día de los valores), `filas` (las de la hoja principal), `retirados` (los de su hoja aparte), `archivo` (el nombre con que se sirvió), `sha256` (la huella del fichero tal como salió) y la firma (`por_id`, `por`, `en`). **Sólo recuentos y la firma: ni clientes ni seriales.** No se cambia ni se borra. Sin semilla ni clave foránea. Sólo la escribe `exportacion-repo.ts`. **No es una tabla de mensajes ni de envíos**: apunta que alguien descargó un fichero |
 | `portal.tmc_seguimiento` | Seguimiento por `clave`, sin FK a propósito (sobrevive a retiradas y vuelve con el equipo) |
 | `portal.tmc_importaciones` | Registro de cada importación que se hizo: archivo, recuentos y quién. **Histórico**: ya no se añade ninguna fila |
@@ -143,10 +147,10 @@ segunda tabla, más abajo.
 | GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{id, fecha, origen, ticket, corrigeTicket, estado, cuenta}` y, en las guardadas, su firma: `motivo`, `por`, `en`, `anuladaPor`, `anuladaEn`, `anuladaMotivo`; la partida que una fila toma de la hoja no es una fila guardada: su `id` es el de su fila, en negativo). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, retirados, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (desde el lote 9d-2b cada fila lleva `retirado: {por, en, motivo} \| null` —el equipo o, si sólo está en la hoja, la fila—, y `soloHoja`, `conAvisos` y `porEstado` no cuentan lo retirado) (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
 | GET | `/trazabilidad/exportar` (`?hoy=`) | **Permiso `hoja.exportar`** (lote 9e; es una lectura con permiso). Devuelve **un fichero**, no JSON: el .xlsx de la F-ST-022 con la tabla de `GET /hoja` a ese día —hoja «Trazabilidad» con las seis columnas de la V3, y «Retirados», «Detalle» y «Notas»—, con `Content-Disposition: attachment; filename="F-ST-022 Trazabilidad Mttos Clientes AAAA-MM-DD.xlsx"` y `Cache-Control: no-store`. Deja su apunte en `tmc_exportaciones` (si el apunte falla, 500 y ningún fichero). 403 `forbidden_role` sin el permiso, antes de consultar nada; 400 en `hoy` si no es un día que exista. Sin congelación exporta lo que haya. Lleva clientes y seriales; nada de eso va a un error ni al registro. No acepta ningún cuerpo. Ver «Exportar la F-ST-022» |
 | GET | `/trazabilidad/exportaciones` | `{ultima: {id, por, en, hoy, filas, retirados, congelacionId, archivo, sha256} \| null, total}`: la última exportación y cuántas van. Abierta a quien tiene la app; sólo la firma y recuentos |
-| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos` y, desde el lote 9d-2b, `retiradosAMano` (retirados a mano que Desk 2.0 tiene activos: se respetan; también en `otras`); `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero) |
+| GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos` y, desde el lote 9d-2b, `retiradosAMano` (retirados a mano que Desk 2.0 tiene activos: se respetan; también en `otras`); `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero). **Desde el lote 10** lleva además `nocturna`: la última pasada nocturna del maestro, `{fecha, resultado, motivos, empezo, termino}` o `null` (para cualquiera con la app: sólo textos y recuentos), también sin maestro |
 | GET | `/trazabilidad/maestro/cruce` | Cruce **informativo** de todas las marcas entre la congelación vigente y el maestro, por serial: `{maestro, congelacion: {id, archivo} \| null, marcas: [{marca, v3, desk, casan, soloV3, soloDesk, ambiguos, sinCeros}]}` (`sinCeros` = de `soloV3`, los de serial numérico que casarían ignorando ceros a la izquierda). Sólo recuentos; no escribe |
 | POST | `/trazabilidad/maestro/sincronizar` | Permiso `maestro.sincronizar`. `{huella?}` (la del plan revisado): aplica el plan de ahora —**los dos ámbitos**, en la misma transacción—, todo o nada, y devuelve su fila de auditoría (`recuentos.otras` = lo hecho con las otras marcas). **409 `maestro_no_disponible`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; 400 en `huella` si no son 64 hexadecimales |
-| GET | `/trazabilidad/calibraciones/plan` | El plan de las calibraciones que traen los tickets de Desk 2.0, **a hoy y sin escribir**: `{lectura: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, salud: {alerta, bloquea, mensaje} \| null, ultima}`. Sin Desk 2.0 (sin variable, caído, sin permiso) responde 200 con `plan: null` y el motivo. `recuentos` (`RecuentosCalibraciones`, `calibraciones.ts`): `tickets`, `conCf` (los que traen `raw.cf`), `conCampo`, `porNombre`, `porEtiqueta`, `gestionadosPorApp`, `nuevas`, `sinCambios`, `cambiadas`, `reenlazadas`, `vaciadas`, `enRevision`, `otrasMarcas`, `historial`, `sinEquipo`, `ilegibles`, `noResucitan`, `partida`, `partidaDeInventario`, `partidaDistintas`, `equiposCambian`, `salenDeAvisos`, `entranEnAvisos`. `salud` avisa si **ningún ticket trae el campo** («puede que el campo se haya renombrado en Zoho o que Desk 2.0 no esté releyendo los tickets») y `bloquea` si antes sí los traía. `ultima` = la última pasada (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `calibraciones.write`** le llegan además `detalle` (línea a línea, con seriales: `{tipo, ticket, clave, serial, fecha, antes, nota}`, ordenado por lo que hay que mirar primero, 300 como mucho) y `detalleTotal` |
+| GET | `/trazabilidad/calibraciones/plan` | El plan de las calibraciones que traen los tickets de Desk 2.0, **a hoy y sin escribir**: `{lectura: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, salud: {alerta, bloquea, mensaje} \| null, ultima}`. Sin Desk 2.0 (sin variable, caído, sin permiso) responde 200 con `plan: null` y el motivo. `recuentos` (`RecuentosCalibraciones`, `calibraciones.ts`): `tickets`, `conCf` (los que traen `raw.cf`), `conCampo`, `porNombre`, `porEtiqueta`, `gestionadosPorApp`, `nuevas`, `sinCambios`, `cambiadas`, `reenlazadas`, `vaciadas`, `enRevision`, `otrasMarcas`, `historial`, `sinEquipo`, `ilegibles`, `noResucitan`, `partida`, `partidaDeInventario`, `partidaDistintas`, `equiposCambian`, `salenDeAvisos`, `entranEnAvisos`. `salud` avisa si **ningún ticket trae el campo** («puede que el campo se haya renombrado en Zoho o que Desk 2.0 no esté releyendo los tickets») y `bloquea` si antes sí los traía. `ultima` = la última pasada (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `calibraciones.write`** le llegan además `detalle` (línea a línea, con seriales: `{tipo, ticket, clave, serial, fecha, antes, nota}`, ordenado por lo que hay que mirar primero, 300 como mucho) y `detalleTotal`. **Desde el lote 10** lleva además `nocturna`, la última pasada nocturna de las calibraciones (misma forma que en el plan del maestro) o `null` |
 | POST | `/trazabilidad/calibraciones/sincronizar` | Permiso `calibraciones.write`. `{huella?}` (la del plan revisado): aplica el plan de ahora, todo o nada, y devuelve la fila de su pasada (`{id, huella, recuentos, por, en}`). **409 `calibraciones_no_disponibles`** si Desk 2.0 no contesta en esa petición (sin variable, caído, sin permiso: nunca escribe sin él); **409 `plan_cambiado`** si la huella ya no es la del plan; **409 `lectura_sospechosa`** si ningún ticket trae ya el campo y antes sí (`salud.bloquea`); 400 en `huella` si no son 64 hexadecimales. Usa siempre el día de hoy en Colombia |
 | GET | `/trazabilidad/equipos/:clave/calibraciones` (`?hoy=`) | El historial de calibraciones de un equipo, la más reciente primero: `{clave, ultima, calibraciones: [{id, fecha, origen, ticket, corrigeTicket, estado, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo, cuenta, …}]}`. `cuenta` = es la que da su última calibración; `ultima`, esa fecha (o `null`). Sin filas, lista vacía. 400 en `clave` si no lo es |
 | POST | `/trazabilidad/calibraciones/manual` | Permiso `calibraciones.write` (lote 9d-2b). `{clave \| fila, fecha, motivo, corrigeTicket?}`: registra una calibración **manual** de un equipo (`clave`) o de una fila de la hoja congelada (`fila`). Devuelve `{id, clave, fila, ultima, estado, calibraciones[]}` (`RespuestaEdicion`): el historial ya recalculado y la fecha que cuenta. 400 en `clave` (ninguna de las dos, o las dos), `fila`, `fecha` (falta, no existe, posterior a hoy o anterior al 2000-01-01), `motivo` (obligatorio, 500 como mucho) o `corrigeTicket`; **404** si el equipo o la fila no existen; **409** `ticket_sin_calibracion`, `ticket_ya_corregido` o `serial_ambiguo`. Usa siempre el día de hoy en Colombia. **No envía nada** |
@@ -1083,12 +1087,15 @@ desplegar: `router.test.ts` tiene un candado que lo impide.
 el serial **no** es único, hay `active` y borrado físico. El rol lector sólo puede leer unas
 columnas (no `raw`): las que se leen y sus citas están en la cabecera de `maestro-desk2.ts`.
 
-- **Se sincroniza a mano**: «Administración» → «Configuración» → tarjeta «Maestro de equipos ·
-  Desk 2.0». Cualquiera con la app ve si el maestro contesta, la última sincronización, el plan
+- **Se sincroniza a mano** y, **desde el lote 10, también sola cada noche si el plan es limpio**:
+  «Administración» → «Configuración» → tarjeta «Maestro de equipos · Desk 2.0». Cualquiera con la
+  app ve si el maestro contesta, la última sincronización, la línea «Pasada nocturna: …», el plan
   en recuentos y el cruce informativo por marca; «Sincronizar con Desk 2.0» (con una confirmación
   que repite los recuentos y enseña los cambios) sólo le sale a quien tiene `maestro.sincronizar`.
-  **No hay sincronización automática ni programador** (siguiente paso posible: una pasada
-  periódica, cuando el plan lleve tiempo saliendo sin sorpresas).
+  La pasada nocturna aplica el plan **sólo si no trae altas, cambios de serial ni de activo,
+  clientes con otro nombre, contactos que se quedan sin equipos ni más ambiguos que la última
+  sincronización aplicada** (en los dos ámbitos); si no, lo retiene y lo dice (ver «Pasadas
+  nocturnas»).
 - **Cómo casa** (`planMaestro`; lo que sigue es el ámbito **en seguimiento**, el único que había
   hasta el lote 9d-2a —las otras marcas, en su sección—): del maestro sólo los GRIMM EDM 180 (`esGrimmEdm180`: el modelo
   sin mayúsculas, espacios ni guiones es `EDM180…`, y la marca dice «grimm» o va vacía). Primero
@@ -1205,8 +1212,11 @@ simulación y calendario son el mismo código de siempre, que ve otra fecha.
   pasada, **anula** las que ya no valen (firmadas, con su motivo y su pasada) e **inserta** las
   nuevas. Con la huella del plan revisado: si ya es otro, 409 y no aplica. Aplicarlo dos veces no
   cambia nada la segunda. **No toca** `tmc_equipos` (ni su `ultima_calibracion`), el seguimiento,
-  los contactos, la congelación ni las filas manuales. **Sin pasada automática ni programador**
-  (siguiente paso posible, cuando el plan lleve tiempo saliendo sin sorpresas).
+  los contactos, la congelación ni las filas manuales. **Desde el lote 10 hay además una pasada
+  nocturna** (02:00 de Colombia) que llama a este mismo `sincronizarCalibraciones`, con la huella
+  del plan que evaluó y la firma «Pasada automática», **sólo si el plan es limpio**: sólo nuevas
+  (30 como mucho), sin cambiadas, vaciadas, re-enlazadas, en revisión, filas de partida ni aviso
+  de salud (ver «Pasadas nocturnas»).
 - **La tarjeta** («Administración» → «Configuración» → «Calibraciones · Desk 2.0», junto a la del
   maestro; `CalibracionesDesk.tsx`): para cualquiera con la app, si Desk 2.0 contesta, la última
   pasada, el plan en recuentos (en azul lo que cambiaría, en ámbar lo que conviene mirar) y el
@@ -1670,6 +1680,90 @@ año y ~29 sin fecha, que **no** piden aviso.
 ⚠️ **Despliegue**: hub-api antes que el portal (la 061 se aplica al arrancar; el portal nuevo pide
 `GET /marcas`). Al desplegar **nada cambia**: todas las marcas apagadas.
 
+### Pasadas nocturnas (lote 10, migración 062)
+
+**Estado: hecho.** Las dos pasadas que eran sólo a mano —sincronizar el maestro de equipos y traer
+las calibraciones desde Desk 2.0— **salen solas cada noche a las 02:00 de Colombia** y se aplican
+**sólo si el plan es «limpio»**; lo demás se **retiene** para que lo mire una persona y lo aplique
+con el botón de siempre, que sigue igual. ⚠️ **Nada de esto envía correos ni avisos a clientes**:
+sólo cambia el inventario y las fechas, como el botón.
+
+**Criterios de «limpio»** (decisión de Alfonso; viven en un solo sitio, `pasadas-nocturnas.ts`, con
+sus pruebas en `pasadas-nocturnas.test.ts`):
+
+- **Maestro — se RETIENE** si hay: altas; cambios de serial; cambios de activo; clientes que pasan
+  a **otro** nombre (`clienteOtroNombre`); más seriales ambiguos (en Desk 2.0 o en el portal) que
+  en la **última sincronización aplicada** (a mano o de noche; si nunca se aplicó ninguna, cualquier
+  ambiguo retiene); y lo mismo en las otras marcas (altas, cambios de serial o de activo, ambiguos
+  que suben). **Se aplican solos** los cambios de modelo, los de cliente que sólo son otra forma de
+  escribir el nombre y los enlaces nuevos.
+- **Calibraciones — se RETIENEN** si la salud de la lectura avisa o bloquea, o hay cambiadas,
+  vaciadas, re-enlazadas o en revisión (son todas las anulaciones del plan), o más de 30 nuevas
+  (`NUEVAS_MAX`). Sólo nuevas, hasta 30: limpio. Los recuentos pasivos (sin equipo, ilegibles, no
+  resucitan, historial) no retienen.
+- **Dos criterios más, puestos por prudencia en este lote (revisables, en el mismo sitio)**: en el
+  maestro retiene también si **algún contacto puesto a mano se quedaría sin equipos**
+  (`contactosSinEquipos`: un cambio de nombre, aunque sea sólo de forma, hace que ese cliente deje
+  de usar el contacto que alguien le puso); en las calibraciones, si nacen **filas de punto de
+  partida** (`partida`: no son nuevas de un ticket).
+- **Sin nada que escribir** → «sin cambios», y no se llama al aplicador (no deja auditoría).
+
+**Cómo va** (`pasadas-nocturnas-repo.ts`, `ejecutarPasadasNocturnas`): maestro primero y luego
+calibraciones, **cada uno por su cuenta** (si el maestro se retiene o falla, las calibraciones
+siguen). Para cada tipo: (1) **reclama el día** con `INSERT … ('en_curso') ON CONFLICT (fecha,
+tipo) DO NOTHING`: si no inserta, otra instancia (u otra pasada de hoy) ya lo hizo y no hace nada;
+(2) lee el plan —el mismo de la tarjeta, con `leerPlanMaestro` / `leerPlanCalibraciones`, sin
+escribir—; sin Desk 2.0, `no_disponible`; (3) decide; (4) si es limpio llama al aplicador de
+siempre (`sincronizarMaestro` / `sincronizarCalibraciones`) **con la huella del plan evaluado**: si
+entretanto cambió, su 409 `plan_cambiado` lo deja `retenida`; si Desk 2.0 deja de contestar,
+`no_disponible`; otro 409 (lectura sospechosa), `retenida` con su mensaje; cualquier otro fallo,
+`error` (el detalle va a la consola y a Sentry como `tmc_pasada_nocturna_<tipo>`; al apunte, sólo
+«falló»); (5) apunta cómo acabó en `tmc_pasadas_nocturnas`. **Nunca escribe en el inventario ni en
+las calibraciones por sí mismo**: sólo a través de los aplicadores, con sus bloqueos, su huella y su
+auditoría. Lo que aplica queda **firmado «Pasada automática»**, sin usuario (`ACTOR_NOCTURNO`:
+`por_id` NULL, `por` = «Pasada automática»; en la tarjeta, «Última sincronización: Pasada automática
+· 19/10/2026 02:00 · …»; las calibraciones que trae, igual).
+
+**Cuándo** (`programador-pasadas.ts`, mismo estilo que `registro-estados.ts`): un `setTimeout` hasta
+las próximas 02:00 de Colombia (UTC−5 todo el año ⇒ 07:00 UTC; `msHastaProximaPasada`, pura y
+probada con cruces de medianoche UTC), que se reprograma en cada disparo; al arrancar **después**
+de las 02:00 de allí, una pasada de **recuperación** a los 2 minutos (`RECUPERACION_MS`): si ese día
+ya tiene su fila no hace nada, porque reclamar el día es lo que lo comprueba —así que cada
+despliegue durante el día sólo hace dos `INSERT` que no insertan—. Una sola pasada a la vez en el
+proceso; los temporizadores no retienen el proceso. Lo enciende **sólo** `index.ts` (las pruebas no
+lo importan).
+
+**En la pantalla**: las tarjetas «Maestro de equipos · Desk 2.0» y «Calibraciones · Desk 2.0»
+llevan, bajo «Última sincronización» / «Última pasada», la línea **«Pasada nocturna del DD/MM/AAAA:
+…»** (`lineaNocturna`, `src/lib/nocturna.ts`): aplicada / sin cambios / Desk 2.0 no contestó / error
+/ en curso, y **«retenida: revisar» en ámbar con la lista de motivos**. La da `nocturna` en los dos
+`GET` de los planes (sin rutas nuevas: `router.test.ts` sigue con sus escrituras contadas).
+
+**Qué hacer cuando sale «retenida»**: abrir la tarjeta, leer los motivos y el plan de ahora (es el
+mismo cálculo; puede haber cambiado desde la noche). Si algo está mal —un equipo de prueba dado de
+alta en Desk 2.0, un serial mal escrito, una fecha imposible en Zoho—, se corrige **en Desk 2.0 o en
+Zoho** y se espera a la noche siguiente o se vuelve a mirar el plan; si todo está bien, se aplica con
+el botón de siempre («Sincronizar con Desk 2.0» / «Traer calibraciones de Desk 2.0»), con la
+confirmación de siempre. Lo aplicado a mano pasa a ser la referencia de los ambiguos para la noche
+siguiente.
+
+⚠️ **Lo que hay que saber**:
+
+- La línea enseña la **última** nocturna: si se retuvo y después alguien aplicó a mano, sigue
+  diciendo «retenida» hasta la noche siguiente («Última sincronización» sí dice quién aplicó).
+- Si el proceso muere a media pasada, el apunte de ese día se queda **«en curso»** y ese día no se
+  repite (la recuperación ve la fila); la noche siguiente sale normal.
+- Sin `DESK2_DB_URL` cada noche apunta `no_disponible` en los dos y no escribe nada.
+- Los candados (`pasadas-nocturnas-repo.test.ts`, `programador-pasadas.test.ts`): los ficheros
+  nuevos sólo escriben su tabla, no nombran `tmc_equipos`, sólo cambian datos a través de los dos
+  aplicadores (fuera de las rutas nadie más los llama) y no contienen nada que envíe; sólo
+  `index.ts` enciende el programador. Los candados «no hay programador» de `maestro*.ts`,
+  `calibraciones*.ts`, `edicion-repo.ts` y `marcas*.ts` siguen en pie; los de `router.test.ts` se
+  ampliaron diciendo por qué.
+- ⚠️ **Despliegue**: hub-api antes que el portal (la 062 se aplica al arrancar; el portal nuevo lee
+  `nocturna`, que un hub-api viejo no manda: la línea diría «todavía ninguna»). La primera pasada
+  sale la primera noche tras desplegar, o a los 2 minutos si se despliega después de las 02:00.
+
 ### Estado final del relevo de la Excel, y lo que viene (no construido)
 
 La F-ST-022 está **congelada** (9a), el inventario sale del **maestro de Desk 2.0** (9b, 9d-2a),
@@ -1683,9 +1777,9 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
   numéricos dudosos, que siguen sólo listados. ⚠️ Con una marca incluida, un equipo suyo con el
   serial repetido en la hoja no toma fecha de la hoja (como en la pestaña); la pasada de
   calibraciones siguiente sí puede enlazarle sus tickets por su id de Desk 2.0 y darle fecha.
-- **Automatizar las pasadas**: sincronizar el maestro y traer las calibraciones siguen siendo a
-  mano (plan → confirmación → auditoría); una pasada periódica, cuando los planes lleven tiempo
-  saliendo sin sorpresas. Hasta entonces, lo exportado vale lo que valga la última pasada.
+- ~~Automatizar las pasadas~~: **hecho en el lote 10** (sección anterior): cada noche a las 02:00
+  de Colombia, aplicando sólo lo limpio. Lo exportado vale lo que valga la última pasada, que
+  ahora es como mucho de anoche si no se retuvo.
 - **Opción A de la fecha en Desk 2.0** (aplazada): promover «Fecha de Calibración» a una columna
   propia allí; aquí cambia una línea (`POR_NOMBRE`, `calibraciones-desk2.ts`).
 - **De la exportación**, si Alfonso lo pide al verla: otras columnas u otro orden, la vigencia
@@ -1843,5 +1937,18 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
   `tmc_marcas_cambios` a la lista de tablas `tmc_*`) y, en la app, `src/lib/marcas.test.ts` (cabecera, vista previa, historial y
   filtro de marca), `src/lib/vistas.test.ts` y `src/lib/simulacion.test.ts` (el texto del aviso con otra marca; con sólo GRIMM, el
   de siempre).
+- Pasadas nocturnas (lote 10): `pasadas-nocturnas.test.ts` (la decisión caso a caso: cada motivo que retiene, lo que se aplica
+  solo, los ambiguos contra la última sincronización aplicada —y sin ninguna—, el tope de 30 nuevas, la salud, «sin cambios», y
+  que es pura), `pasadas-nocturnas-repo.test.ts` (el ejecutor con una base y unos pasos de mentira: reclamar el día, aplicada con
+  la huella evaluada, sin cambios sin llamar al aplicador, retenida, no disponible, 409 `plan_cambiado`, error sin el texto del
+  error, un tipo que no arrastra al otro, el día ya reclamado; las guardas de la 062, que es **la última migración**; y el
+  **candado** de los ficheros nuevos: sólo su tabla, nada de `tmc_equipos`, sólo los dos aplicadores —y nadie más fuera de las
+  rutas los llama— y nada que envíe), `programador-pasadas.test.ts` (las 02:00 de Colombia con cruces de medianoche UTC, la
+  recuperación, encender una vez, apagar, fallos, `unref`, una a la vez, y que sólo `index.ts` lo enciende), `router.test.ts`
+  (`nocturna` en los dos planes, y los candados del maestro y de las calibraciones **ampliados** con su porqué),
+  `pasadas-nocturnas.db.test.ts` (la 062 repetida y sus `CHECK`; con la imitación de Desk 2.0 y los aplicadores de verdad: lo
+  limpio aplicado y firmado «Pasada automática» con su auditoría, el mismo día que no se repite, «sin cambios» al día siguiente,
+  un alta retenida sin tocar el inventario mientras las calibraciones se aplican, sin Desk 2.0 nada, y 31 nuevas retenidas),
+  `trazabilidad.db.test.ts` (suma `tmc_pasadas_nocturnas` a la lista de tablas `tmc_*`) y, en la app, `src/lib/nocturna.test.ts`.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

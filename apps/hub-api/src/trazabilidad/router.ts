@@ -17,6 +17,7 @@ import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
 import { cambiarMarca, leerMarcas } from './marcas-repo.js';
 import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
+import { ultimaNocturna } from './pasadas-nocturnas-repo.js';
 import { festivosDelEje } from './plazos.js';
 import { agendaAlDia, registrarEstadosSinFallar } from './registro-estados.js';
 import * as repo from './repo.js';
@@ -339,14 +340,15 @@ export function createTrazabilidadRouter(
   // ── Maestro de equipos desde Desk 2.0 (lote 9b) ──────────────────────────
   //
   // El inventario (tmc_equipos) se alimenta de `desk.equipos`, sólo los GRIMM
-  // EDM 180 y sólo A MANO: primero se ve el plan y después, quien puede, lo
-  // aplica. No hay sincronización automática ni programador.
+  // EDM 180: primero se ve el plan y después, quien puede, lo aplica. Desde el
+  // lote 10 sale además una pasada NOCTURNA (programador-pasadas.ts) que lo
+  // aplica sola sólo si es limpio; no tiene ruta: se ve en `nocturna`.
 
-  // El plan en recuentos, si el maestro contesta (y si no, por qué: 200 igual)
-  // y la última sincronización. Abierto a quien tenga la app: ni clientes ni
-  // seriales. A quien puede sincronizar le llega además `detalle`, los cambios
-  // uno a uno (con cliente y serial), acotados, para revisarlos antes.
-  router.get('/trazabilidad/maestro/plan', ...gated, route('tmc_maestro_plan', async (req) => leerPlanMaestro(db, maestro, esAdminPortal(req) || puede(await rolDe(req), 'maestro.sincronizar'))));
+  // El plan en recuentos, si el maestro contesta (y si no, por qué: 200 igual),
+  // la última sincronización y la última pasada nocturna. Abierto a quien tenga
+  // la app: ni clientes ni seriales. A quien puede sincronizar le llega además
+  // `detalle`, los cambios uno a uno (con cliente y serial), acotados.
+  router.get('/trazabilidad/maestro/plan', ...gated, route('tmc_maestro_plan', async (req) => ({ ...(await leerPlanMaestro(db, maestro, esAdminPortal(req) || puede(await rolDe(req), 'maestro.sincronizar'))), nocturna: await ultimaNocturna(db, 'maestro') })));
 
   // Cruce informativo de TODAS las marcas entre la congelación vigente de la
   // F-ST-022 y el maestro: recuentos por marca. No escribe ni decide nada.
@@ -360,15 +362,16 @@ export function createTrazabilidadRouter(
   // ── Calibraciones desde Desk 2.0 (lote 9c) ───────────────────────────────
   //
   // La fecha de calibración sale del campo de Zoho de los tickets, que se lee
-  // en la base de Desk 2.0 y se guarda fila a fila (tmc_calibraciones). Sólo A
-  // MANO: primero el plan y después, quien puede, las trae. No hay pasada
-  // automática ni programador, y aquí no se edita ninguna fecha (lote 9d).
+  // en la base de Desk 2.0 y se guarda fila a fila (tmc_calibraciones). Primero
+  // el plan y después, quien puede, las trae; desde el lote 10, además, la
+  // pasada NOCTURNA las trae sola si el plan es limpio (sin ruta: se ve en
+  // `nocturna`). Aquí no se edita ninguna fecha (lote 9d).
 
   // El plan a hoy, en recuentos: si Desk 2.0 contesta (y si no, por qué: 200
-  // igual), la salud de la lectura y la última pasada. Abierto a quien tenga la
-  // app: ni clientes ni seriales. A quien puede traerlas le llega además el
-  // `detalle` para revisar (con seriales), acotado.
-  router.get('/trazabilidad/calibraciones/plan', ...gated, route('tmc_calibraciones_plan', async (req) => leerPlanCalibraciones(db, calibraciones, hoyEnColombia(), esAdminPortal(req) || puede(await rolDe(req), 'calibraciones.write'))));
+  // igual), la salud de la lectura, la última pasada y la última nocturna.
+  // Abierto a quien tenga la app: ni clientes ni seriales. A quien puede
+  // traerlas le llega además el `detalle` para revisar (con seriales), acotado.
+  router.get('/trazabilidad/calibraciones/plan', ...gated, route('tmc_calibraciones_plan', async (req) => ({ ...(await leerPlanCalibraciones(db, calibraciones, hoyEnColombia(), esAdminPortal(req) || puede(await rolDe(req), 'calibraciones.write'))), nocturna: await ultimaNocturna(db, 'calibraciones') })));
 
   // Aplica el plan de ahora: {huella?}, la del plan que se revisó. 409 si Desk
   // 2.0 no contesta (no escribe nunca sin él), si el plan ya es otro o si ningún

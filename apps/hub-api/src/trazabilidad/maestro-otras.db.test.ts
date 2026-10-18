@@ -154,7 +154,7 @@ describe('el plan con las otras marcas', () => {
     expect(res.body.plan.recuentos).toMatchObject({ maestro: 2, portal: 2, casan: 2, enlaces: 0, altas: 0, cambios: { cliente: 0, modelo: 0, serial: 0, activo: 0 }, soloPortal: 0, clienteOtroNombre: 0, contactosSinEquipos: 0 });
     expect(res.body.plan.otras).toEqual(OTRAS);
     expect(res.body.plan.hoja).toEqual(CRUCE);
-    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'plan', 'ultima']);
+    expect(Object.keys(res.body).sort()).toEqual(['maestro', 'nocturna', 'plan', 'ultima']);
     expect(JSON.stringify(res.body)).not.toMatch(/Ficticio|HB-|18A0|28A0|eq-|00123/);
     expect([await equipos(), await auditoria()]).toEqual([antes, []]);
   });
