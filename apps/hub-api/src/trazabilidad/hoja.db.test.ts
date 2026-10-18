@@ -102,7 +102,7 @@ afterAll(async () => {
   await db?.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.tmc_fst022_congelada, portal.tmc_fst022_congelaciones, portal.tmc_equipos, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_seguimiento, portal.tmc_contactos, desk.tickets RESTART IDENTITY');
+  await db.query('TRUNCATE portal.tmc_fst022_congelada, portal.tmc_fst022_congelaciones, portal.tmc_equipos, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_seguimiento, portal.tmc_contactos, portal.tmc_marcas_vigencia, desk.tickets RESTART IDENTITY');
 });
 
 describe('GET /trazabilidad/hoja', () => {
@@ -120,10 +120,11 @@ describe('GET /trazabilidad/hoja', () => {
       [6, 'inventario', 'Cliente Ficticio A S.A.S.', 'GRIMM', 'EDM 180C', '18A00001', '2026-09-20', 'AL_DIA', 343],
       [7, 'inactivo', 'Cliente Ficticio B', 'GRIMM', 'EDM 180C', '18A00002', '2025-11-20', 'VENCE_60', 39],
       [8, 'inventario', 'Cliente Ficticio C', 'GRIMM', 'EDM 180C', '18A00003', '2026-03-01', 'AL_DIA', 140],
-      [9, 'hoja', 'Cliente Ficticio D', 'HORIBA', '370', '18000000000001', '2024-03-01', 'FUERA_CICLO', -590],
-      [10, 'hoja', 'Cliente Ficticio D', 'Horiba', 'APNA-370', 'HB-0002', '2026-06-30', 'AL_DIA', 261],
-      [11, 'hoja', 'Cliente Ficticio E', 'Horiba', 'APNA-370', 'HB-0003', '2025-01-10', 'VENCIDA', -275],
-      [12, 'hoja', 'Cliente Ficticio F', 'Horiba', 'APNA-370', 'HB-0003', '2025-02-10', 'VENCIDA', -244],
+      // Lote 11: Horiba no tiene plazo fijo mientras nadie se lo ponga: su fecha se ve, pero sin vencimiento ni días.
+      [9, 'hoja', 'Cliente Ficticio D', 'HORIBA', '370', '18000000000001', '2024-03-01', 'SIN_VENCIMIENTO', null],
+      [10, 'hoja', 'Cliente Ficticio D', 'Horiba', 'APNA-370', 'HB-0002', '2026-06-30', 'SIN_VENCIMIENTO', null],
+      [11, 'hoja', 'Cliente Ficticio E', 'Horiba', 'APNA-370', 'HB-0003', '2025-01-10', 'SIN_VENCIMIENTO', null],
+      [12, 'hoja', 'Cliente Ficticio F', 'Horiba', 'APNA-370', 'HB-0003', '2025-02-10', 'SIN_VENCIMIENTO', null],
       [13, 'hoja', 'Cliente Ficticio G', 'Thermo', '49i', 'TH-0007', null, 'SIN_FECHA', null],
     ]);
     expect(filas.map((f) => f.enHoja)).toEqual([
@@ -143,7 +144,7 @@ describe('GET /trazabilidad/hoja', () => {
     expect(res.body.resumen).toEqual({
       total: 8, enInventario: 3, inactivos: 1, soloHoja: 5, conAvisos: 5, retirados: 0, fueraDeHoja: 1, calibracionesSueltas: 2,
       porMarca: [{ clave: 'horiba', marca: 'Horiba', total: 4 }, { clave: 'grimm', marca: 'GRIMM', total: 3 }, { clave: 'thermo', marca: 'Thermo', total: 1 }],
-      porEstado: { FUERA_CICLO: 1, VENCIDA: 2, VENCE_30: 0, VENCE_60: 1, VENCE_90: 0, AL_DIA: 3, SIN_FECHA: 1 },
+      porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 1, VENCE_90: 0, AL_DIA: 2, SIN_VENCIMIENTO: 4, SIN_FECHA: 1 },
     });
     // La «Vigencia» congelada (357) no sale. Desde el lote 9d-2b cada calibración lleva el instante de su firma (`en`, `anuladaEn`):
     // se dejan fuera de la comprobación, porque un instante puede llevar esas tres cifras por casualidad.
@@ -179,7 +180,7 @@ describe('GET /trazabilidad/hoja', () => {
     expect(await foto()).toEqual(antes);
   });
 
-  it('el número de consultas no depende del número de filas: cuatro con 8 filas y cuatro con 68', async () => {
+  it('el número de consultas no depende del número de filas: cinco (desde el lote 11, también la vigencia por marca) con 8 filas y cinco con 68', async () => {
     const contar = async (): Promise<number> => {
       let n = 0;
       const espia = { query: (sql: string, params?: unknown[]) => (n++, db.query(sql, params)) };
@@ -188,11 +189,11 @@ describe('GET /trazabilidad/hoja', () => {
       return n;
     };
     await sembrar();
-    expect(await contar()).toBe(4);
+    expect(await contar()).toBe(5);
     await db.query('TRUNCATE portal.tmc_fst022_congelada, portal.tmc_fst022_congelaciones RESTART IDENTITY');
     await congelar([...HOJA, ...Array.from({ length: 60 }, (_, i): FilaHoja => ['Cliente Ficticio H', 'Kunak', 'AIR Pro', `KN-${String(i).padStart(4, '0')}`, '2026-01-15'])]);
     for (let i = 0; i < 60; i++) await guardada(null, `KN-${String(i).padStart(4, '0')}`, '2026-05-05', 'desk', 2000 + i);
-    expect(await contar()).toBe(4);
+    expect(await contar()).toBe(5);
     expect((await pedir()).body.resumen).toMatchObject({ total: 68, soloHoja: 65 });
   });
 

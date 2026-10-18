@@ -139,7 +139,8 @@ function compararConLaPestana(cuerpo: Buffer, t: { filas: Fila[]; fueraDeHoja: F
     expect(fecha(`E${n}`), `fecha de la fila ${n}`).toBe(f.ultimaCalibracion);
     if (f.ultimaCalibracion) expect([celda(`E${n}`)!.t, celda(`E${n}`)!.z]).toEqual(['n', 'dd/mm/yyyy']);
     expect(celda(`F${n}`)?.v ?? null, `vigencia de la fila ${n}`).toBe(f.vigenciaDias);
-    expect(celda(`F${n}`)?.f).toBe(f.vigenciaDias === null ? undefined : `E${n}-TODAY()+365`);
+    // La fórmula lleva la vigencia de su marca (lote 11): 365 en GRIMM; sin vencimiento, ninguna.
+    expect(celda(`F${n}`)?.f).toBe(f.vigenciaDias === null ? undefined : `E${n}-TODAY()+${f.vigenciaMarca}`);
   }
   return vivas;
 }
@@ -221,7 +222,8 @@ describe('GET /trazabilidad/exportar, de punta a punta', () => {
     const vivas = compararConLaPestana(res.body, await hoja());
     expect(vivas.map((f) => f.serial)).toEqual(['18A00001', '18A00002', '18000000000001', 'HB-0001', 'TH-0001', 'EV-0001', 'KN-0001']);
     const { fecha, celda, matriz } = abrir(res.body);
-    expect([fecha('E7'), celda('F7')!.v, fecha('E10'), celda('F10')!.v]).toEqual([dia(-5), 360, dia(-15), 350]);
+    // La fila 10 es de Thermo: sin vencimiento desde el lote 11, lleva su fecha corregida y la vigencia vacía.
+    expect([fecha('E7'), celda('F7')!.v, fecha('E10'), celda('F10')]).toEqual([dia(-5), 360, dia(-15), undefined]);
     expect(antes.fecha('E7')).toBe(dia(-400));
     const retirados = matriz('Retirados');
     expect(retirados.slice(1).map((r) => [r[0], r[1], r[4], r[6], r[7], r[9]])).toEqual([

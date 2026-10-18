@@ -269,7 +269,8 @@ describe('la pestaña «Trazabilidad F-ST-022» y las calibraciones, antes y des
     await traer(); // las calibraciones de los tickets ya estaban traídas: la de HB-0002, sin clave
     const antes = await hoja();
     expect(antes.filas.map((f) => [f.fila, f.situacion, f.cliente])).toEqual([[6, 'inventario', 'Cliente Ficticio A S.A.S.'], [7, 'inventario', 'Cliente Ficticio B'], [8, 'hoja', 'Cliente Ficticio H'], [9, 'hoja', 'Cliente Ficticio H'], [10, 'hoja', 'Cliente Ficticio J'], [11, 'hoja', 'Cliente Ficticio N'], [12, 'hoja', 'Cliente Ficticio K'], [13, 'hoja', 'Cliente Ficticio T']]);
-    expect(fechas(antes).slice(2, 4)).toEqual([[8, '2025-10-22', 'VENCE_30', 'fst022'], [9, '2026-06-30', 'AL_DIA', 'desk']]);
+    // Horiba, sin vencimiento desde el lote 11 (nadie le ha puesto plazo): la fecha es lo que no se mueve.
+    expect(fechas(antes).slice(2, 4)).toEqual([[8, '2025-10-22', 'SIN_VENCIMIENTO', 'fst022'], [9, '2026-06-30', 'SIN_VENCIMIENTO', 'desk']]);
 
     await sincronizar();
     const despues = await hoja();
@@ -310,7 +311,7 @@ describe('la pestaña «Trazabilidad F-ST-022» y las calibraciones, antes y des
 
   it('si las calibraciones aún no se habían traído, enlazar tampoco mueve la fecha de la fila: vale la de la hoja', async () => {
     const antes = fechas(await hoja());
-    expect(antes.slice(2, 4)).toEqual([[8, '2025-10-22', 'VENCE_30', 'fst022'], [9, '2024-01-01', 'FUERA_CICLO', 'fst022']]);
+    expect(antes.slice(2, 4)).toEqual([[8, '2025-10-22', 'SIN_VENCIMIENTO', 'fst022'], [9, '2024-01-01', 'SIN_VENCIMIENTO', 'fst022']]);
     await sincronizar();
     expect(fechas(await hoja())).toEqual(antes);
   });

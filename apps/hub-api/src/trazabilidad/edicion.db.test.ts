@@ -114,11 +114,12 @@ beforeAll(async () => {
   api.use('/api', createTrazabilidadRouter(hub, crearFuenteAgenda({ hub, desk2: () => lector }), undefined, desk2()));
 });
 afterAll(async () => {
-  await hub?.query(`TRUNCATE portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas RESTART IDENTITY`);
+  // La vigencia de Horiba que ponen sus pruebas no se queda para el fichero siguiente (que espera la de por defecto).
+  await hub?.query(`TRUNCATE portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_marcas_vigencia RESTART IDENTITY`);
   await Promise.all([lector?.end(), admin2?.end(), hub?.end()]);
 });
 beforeEach(async () => {
-  await hub.query(`TRUNCATE desk.tickets, portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_contactos, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_maestro_sincronizaciones, portal.tmc_fst022_congelaciones RESTART IDENTITY CASCADE`);
+  await hub.query(`TRUNCATE desk.tickets, portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_contactos, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_maestro_sincronizaciones, portal.tmc_fst022_congelaciones, portal.tmc_marcas_vigencia RESTART IDENTITY CASCADE`);
   await admin2.query('TRUNCATE desk.equipos, desk.tickets, desk.ticket_transitions RESTART IDENTITY');
 });
 
@@ -267,6 +268,9 @@ describe('lo que no está en seguimiento: filas sólo de la hoja y equipos enlaz
     await enPortal('18A00001', 'Cliente Ficticio A', dia(-10));
     await enPortal('HB-0002', 'Cliente Ficticio A', null, { marca: 'Horiba', modelo: 'APNA-370', enSeguimiento: false });
     await congelar([['HB-0001', 'Horiba', dia(-100), null], ['HB-0002', 'Horiba', dia(-500), null], ['TH-0001', 'Thermo', dia(-30), null], ['th-0001', 'Thermo', dia(-40), null]]);
+    // Lote 11: sin nada guardado Horiba no vence. Estas pruebas son de corregir fechas y del blindaje de lo que está fuera de
+    // seguimiento, así que Horiba lleva 365 días, como si se los hubieran puesto: sus estados son los de una marca que sí vence.
+    await hub.query(`INSERT INTO portal.tmc_marcas_vigencia (clave, marca, dias, motivo, por) VALUES ('horiba', 'Horiba', 365, 'Prueba ficticia.', 'director@example.com') ON CONFLICT (clave) DO NOTHING`);
   };
 
   it('una fila sólo de la hoja: la manual se guarda por su serial, sin clave, y la pestaña se la atribuye; su partida de la hoja se puede anular (se guarda ya anulada: la congelación no se toca)', async () => {

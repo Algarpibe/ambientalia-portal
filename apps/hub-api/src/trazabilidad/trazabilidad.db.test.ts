@@ -359,6 +359,10 @@ describe('contacto de cada equipo', () => {
         // firma. Sólo marcas, recuentos y firmas: no son tablas de mensajes ni de envíos, e incluir una marca no manda nada a nadie.
         'tmc_marcas',
         'tmc_marcas_cambios',
+        // Lote 11: la vigencia de calibración por marca (días, o sin vencimiento) y el apunte de cada cambio, con el valor de antes y el
+        // nuevo, su motivo y su firma. Sólo marcas, días y firmas: no son tablas de mensajes ni de envíos, y no mandan nada a nadie.
+        'tmc_marcas_vigencia',
+        'tmc_marcas_vigencia_cambios',
         // Lote 10: un apunte por noche y tipo de cómo acabó la pasada nocturna (aplicada, sin cambios, retenida y por qué…).
         // Sólo resultados, motivos y recuentos: no es una tabla de mensajes ni de envíos, y la pasada no manda nada a nadie.
         'tmc_pasadas_nocturnas',
