@@ -1,5 +1,6 @@
 /**
- * La frecuencia de preventivo de un cliente según su contrato (lote 12), tal como la enseña y la cambia la ficha de un equipo. Puro: sin
+ * La frecuencia de preventivo de un cliente según su contrato (lote 12), tal como la enseña y la cambia la ficha de un equipo y, desde el
+ * lote 13, la lista de clientes de «Configuración» (`filasContratos`). Puro: sin
  * React ni red. La regla es la del servidor (`vigenciaDeGrupo`, marcas.ts): un equipo de una marca «según contrato» vence a los
  * `diasDeMeses(meses)` días de su última calibración; sin frecuencia, no vence. Cambiarla no envía nada: los avisos siguen siendo
  * manuales o simulados.
@@ -63,3 +64,63 @@ export function efectoFrecuencia(n: number, nueva: number | null): string {
 
 /** Un apunte del historial de la frecuencia de un cliente, en una línea. */
 export const textoCambioFrecuencia = (c: CambioFrecuencia): string => `${textoMeses(c.antes)} → ${textoMeses(c.despues)}, por ${c.por} el ${fmtFechaHora(c.en)}: ${c.motivo}`;
+
+/** Una fila de la lista de clientes de «Configuración» (lote 13): un cliente con equipos activos de marcas «según contrato». */
+export interface FilaContrato {
+  /** `claveCliente`: la de la ruta y la de `frecuencias`. */
+  clave: string;
+  /** Su nombre como más se escribe en el inventario (a igualdad, el primero por orden alfabético). */
+  cliente: string;
+  /** Sus equipos activos cuya marca vence según contrato. */
+  equipos: number;
+  /** De ellos, los que están ahora en «Avisos a clientes» (vencidos o por vencer). */
+  enAvisos: number;
+  /** Su frecuencia: los meses, o null = sin frecuencia (sin fila o «sin contrato» guardado). */
+  meses: number | null;
+  /** La fila guardada, con su firma; null si nadie se la ha puesto. */
+  frecuencia: FrecuenciaCliente | null;
+}
+
+const porNombre = (a: string, b: string) => a.localeCompare(b, 'es');
+
+/**
+ * La lista de clientes para rellenar las frecuencias desde una sola pantalla: una fila por cliente con equipos «según contrato» (de los
+ * que llegan en GET /equipos: activos y en el inventario). Los clientes sin frecuencia primero; después, más equipos primero y, a
+ * igualdad, por nombre. Un equipo sin cliente no da fila (no tendría a quién ponérsela).
+ */
+export function filasContratos(equipos: readonly EquipoVista[], frecuencias: readonly FrecuenciaCliente[]): FilaContrato[] {
+  const grupos = new Map<string, { nombres: Map<string, number>; equipos: number; enAvisos: number }>();
+  for (const e of equipos) {
+    const clave = claveCliente(e.cliente);
+    if (!e.segunContrato || clave === '') continue;
+    const g = grupos.get(clave) ?? { nombres: new Map<string, number>(), equipos: 0, enAvisos: 0 };
+    const nombre = e.cliente.trim();
+    g.nombres.set(nombre, (g.nombres.get(nombre) ?? 0) + 1);
+    g.equipos += 1;
+    if (ESTADOS_AVISO.includes(e.estado)) g.enAvisos += 1;
+    grupos.set(clave, g);
+  }
+  const filas = [...grupos].map(([clave, g]): FilaContrato => {
+    const [cliente] = [...g.nombres].sort(([a, na], [b, nb]) => nb - na || porNombre(a, b))[0];
+    const frecuencia = frecuenciaDe(frecuencias, clave);
+    return { clave, cliente, equipos: g.equipos, enAvisos: g.enAvisos, meses: frecuencia?.meses ?? null, frecuencia };
+  });
+  return filas.sort((a, b) => Number(a.meses !== null) - Number(b.meses !== null) || b.equipos - a.equipos || porNombre(a.cliente, b.cliente));
+}
+
+/** Lo que enseña la tabla: sólo los que no tienen frecuencia, si se pide, y los que casan con la búsqueda por nombre (sin mayúsculas, tildes ni espacios de más). */
+export function filtrarContratos(filas: readonly FilaContrato[], { soloSinFrecuencia, busqueda }: { soloSinFrecuencia: boolean; busqueda: string }): FilaContrato[] {
+  const q = claveCliente(busqueda);
+  // `clave` es el nombre ya normalizado de la misma forma: casa con cualquiera de sus grafías.
+  return filas.filter((f) => (!soloSinFrecuencia || f.meses === null) &&f.clave.includes(q));
+}
+
+/** El filtro «sólo sin frecuencia» va encendido de partida si queda algún cliente sin ella. */
+export const hayClientesSinFrecuencia = (filas: readonly FilaContrato[]): boolean => filas.some((f) => f.meses === null);
+
+/** «3 clientes · 2 sin frecuencia», «1 de 3 clientes · …», «1 cliente · todos con frecuencia». */
+export function textoContadorContratos(visibles: readonly FilaContrato[], todas: readonly FilaContrato[]): string {
+  const total = `${todas.length} ${todas.length === 1 ? 'cliente' : 'clientes'}`;
+  const sin = todas.filter((f) => f.meses === null).length;
+  return `${visibles.length === todas.length ? total : `${visibles.length} de ${total}`} · ${sin === 0 ? 'todos con frecuencia' : `${sin} sin frecuencia`}`;
+}
