@@ -48,7 +48,7 @@ import {
   type RolEstado,
   type TicketContacto,
 } from './dominio.js';
-import { vigenciaDeEquipo } from './marcas.js';
+import { vaPorContrato, vigenciaDeEquipo } from './marcas.js';
 import { calcularReloj, type IntervaloEstado } from './plazos.js';
 import { resolverRol, type RolApp } from './roles.js';
 import { leerVigencias } from './vigencia-repo.js';
@@ -142,14 +142,16 @@ const COLS_EQUIPO = `
  * calibraciones guardadas (lote 9c, `fechaEfectiva`); el equipo que no tiene
  * ninguna sigue con la de `tmc_equipos.ultima_calibracion`. El estado se
  * calcula con la vigencia de su marca (lote 11, `vigenciaDeEquipo`: GRIMM EDM
- * 180, 365 días; una marca sin plazo fijo, sin vencimiento).
+ * 180, 365 días; una marca sin plazo fijo, sin vencimiento) y, si su marca va
+ * «según contrato» (lote 12), con la frecuencia de preventivo de su cliente.
  */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
-  const [{ rows }, deDesk, manuales, calibraciones, vigencias] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db), leerVigencias(db)]);
+  const [{ rows }, deDesk, manuales, calibraciones, { vigencias, contratos }] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db), leerVigencias(db)]);
   const calibracionesDe = new Map<string, CalibracionGuardada[]>();
   for (const c of calibraciones) if (c.clave) calibracionesDe.set(c.clave, [...(calibracionesDe.get(c.clave) ?? []), c]);
   const ultimaDe = (r: Row): string | null => fechaEfectiva(calibracionesDe.get(r.clave) ?? [], r.ultima_calibracion, hoy);
-  const vigenciaDe = (r: Row): number | null => vigenciaDeEquipo({ marca: r.marca ?? '', enSeguimiento: r.en_seguimiento !== false }, vigencias);
+  const grupoDe = (r: Row) => ({ marca: r.marca ?? '', cliente: r.cliente ?? '', enSeguimiento: r.en_seguimiento !== false });
+  const vigenciaDe = (r: Row): number | null => vigenciaDeEquipo(grupoDe(r), vigencias, contratos);
   const manualDe = new Map(manuales.map((m) => [m.clave, m]));
   const porSerial = new Map<string, number>();
   for (const r of rows as Row[]) porSerial.set(r.serial, (porSerial.get(r.serial) ?? 0) + 1);
@@ -167,6 +169,7 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
     calibracionesPeriodo: r.calibraciones_periodo,
     correctivosPeriodo: r.correctivos_periodo,
     vigenciaMarca: vigenciaDe(r),
+    segunContrato: vaPorContrato(grupoDe(r), vigencias),
     ...estadoCalibracion(ultimaDe(r), hoy, vigenciaDe(r)),
     serialRepetido: (porSerial.get(r.serial) ?? 0) > 1,
     seguimiento: r.tiene_seg
@@ -1219,6 +1222,17 @@ const toImport = (r: Row): ResumenImportacion => ({
 export async function ultimaImportacion(db: Db): Promise<ResumenImportacion | null> {
   const { rows } = await db.query(`SELECT ${COLS_IMPORT} FROM portal.tmc_importaciones ORDER BY id DESC LIMIT 1`);
   return rows[0] ? toImport(rows[0]) : null;
+}
+
+/**
+ * El cliente de clave `clave` (`claveCliente`) tal como más se escribe en los equipos ACTIVOS del inventario, o null si ninguno es suyo.
+ * Lo usa la frecuencia de preventivo (lote 12, contratos-repo.ts) para saber si el cliente existe sin nombrar ella `tmc_equipos`.
+ */
+export async function clienteDelInventario(db: Db, clave: string): Promise<string | null> {
+  const { rows } = await db.query(`SELECT e.cliente FROM ${INVENTARIO} e WHERE e.activo`);
+  const veces = new Map<string, number>();
+  for (const r of rows as Row[]) if (typeof r.cliente === 'string' && claveCliente(r.cliente) === clave) veces.set(r.cliente.trim(), (veces.get(r.cliente.trim()) ?? 0) + 1);
+  return [...veces].reduce<[string, number] | null>((a, b) => (!a || b[1] > a[1] ? b : a), null)?.[0] ?? null;
 }
 
 async function existeActivo(db: Db, clave: string): Promise<boolean> {

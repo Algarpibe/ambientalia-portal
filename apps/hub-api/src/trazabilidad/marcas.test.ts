@@ -6,7 +6,7 @@ import { claveCliente } from './dominio.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, type EquipoHoja } from './hoja.js';
 import { EN_INVENTARIO, claveMarcaSql } from './inventario.js';
-import { CLAVE_EDM180, claveMarca, etiquetaMarca, marcasEnSeguimiento, planAdopcion } from './marcas.js';
+import { CLAVE_EDM180, SEGUN_CONTRATO, claveMarca, etiquetaMarca, marcasEnSeguimiento, planAdopcion, type FrecuenciasContrato, type ValorVigencia } from './marcas.js';
 
 // Marcas en seguimiento (lote 9f, migración 061), sin base: la clave de una
 // marca, la regla de qué entra en el inventario, la vista previa por marca y lo
@@ -62,10 +62,11 @@ function escenario() {
  * Lote 11: sin nada guardado, Horiba y Kunak NO vencen. Estas pruebas del 9f son de qué entra y de las fechas, así que les ponen 365
  * días como si alguien los hubiera guardado; las de la vigencia por defecto pasan `new Map()`.
  */
-const DOCE_MESES: ReadonlyMap<string, number | null> = new Map([['horiba', 365], ['kunak', 365]]);
-const tabla = (e: ReturnType<typeof escenario>, equipos = e.equipos, calibraciones = e.calibraciones, vigencias = DOCE_MESES) => tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: e.filas, equipos, calibraciones, vigencias });
+const DOCE_MESES: ReadonlyMap<string, ValorVigencia> = new Map([['horiba', 365], ['kunak', 365]]);
+const SIN_CONTRATOS: FrecuenciasContrato = new Map();
+const tabla = (e: ReturnType<typeof escenario>, equipos = e.equipos, calibraciones = e.calibraciones, vigencias = DOCE_MESES, contratos = SIN_CONTRATOS) => tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: e.filas, equipos, calibraciones, vigencias, contratos });
 const FIRMA_VIGENCIA = { por: 'director@example.com', en: '2026-10-18 15:00:00+00', motivo: 'Decisión ficticia.' };
-const guardadasDe = (m: ReadonlyMap<string, number | null>) => [...m].map(([clave, dias]) => ({ clave, marca: clave, dias, ...FIRMA_VIGENCIA }));
+const guardadasDe = (m: ReadonlyMap<string, ValorVigencia>) => [...m].map(([clave, v]) => ({ clave, marca: clave, dias: v === SEGUN_CONTRATO ? null : v, contrato: v === SEGUN_CONTRATO, ...FIRMA_VIGENCIA }));
 const sinClave = (cs: readonly FilaCalibracion[]) => new Set(cs.filter((c) => c.clave === null).map((c) => c.id));
 const todas = (t: ReturnType<typeof tabla>) => [...t.filas, ...t.fueraDeHoja].filter((f) => f.clave !== null);
 
@@ -158,9 +159,9 @@ describe('incluir una marca: la partida y las sueltas (planAdopcion)', () => {
 });
 
 describe('la vista previa por marca (marcasEnSeguimiento)', () => {
-  const vista = (guardadas: Parameters<typeof marcasEnSeguimiento>[0]['guardadas'] = [], vigencias = DOCE_MESES) => {
+  const vista = (guardadas: Parameters<typeof marcasEnSeguimiento>[0]['guardadas'] = [], vigencias = DOCE_MESES, contratos = SIN_CONTRATOS) => {
     const e = escenario();
-    return marcasEnSeguimiento({ tabla: tabla(e, e.equipos, e.calibraciones, vigencias), equipos: e.equipos, guardadas, sinClave: sinClave(e.calibraciones), vigencias: guardadasDe(vigencias) });
+    return marcasEnSeguimiento({ tabla: tabla(e, e.equipos, e.calibraciones, vigencias, contratos), equipos: e.equipos, guardadas, sinClave: sinClave(e.calibraciones), vigencias: guardadasDe(vigencias), contratos });
   };
 
   it('una fila por marca: GRIMM EDM 180 primero, fija y siempre incluida; después las demás, de más a menos equipos; lo que no tiene marca no tiene interruptor', () => {
@@ -182,6 +183,7 @@ describe('la vista previa por marca (marcasEnSeguimiento)', () => {
       partidas: 4,
       enlazadas: 3,
       fechas: ['2023-02-01', '2025-09-15', '2026-03-03', '2026-05-05'],
+      contratos: [null, null, null, null],
     });
     expect(vista().find((m) => m.clave === 'kunak')!.resumen).toMatchObject({ equipos: 1, avisos: 0, partidas: 1, enlazadas: 1 });
     expect(vista()[0].resumen).toMatchObject({ equipos: 1, avisos: 1, clientesAvisos: 1, partidas: 0, enlazadas: 0 });
@@ -203,19 +205,33 @@ describe('la vista previa por marca (marcasEnSeguimiento)', () => {
     const horiba = v.find((m) => m.clave === 'horiba')!;
     expect(horiba.resumen).toMatchObject({ equipos: 5, avisos: 0, clientesAvisos: 0, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, AL_DIA: 0, SIN_VENCIMIENTO: 4, SIN_FECHA: 1 } });
     expect(v.map((m) => [m.clave, m.vigencia])).toEqual([
-      [CLAVE_EDM180, { dias: 365, fija: true, porDefecto: true, firma: null }],
-      ['horiba', { dias: null, fija: false, porDefecto: true, firma: null }],
-      ['grimm', { dias: 365, fija: false, porDefecto: true, firma: null }],
-      ['kunak', { dias: null, fija: false, porDefecto: true, firma: null }],
+      [CLAVE_EDM180, { dias: 365, contrato: false, fija: true, porDefecto: true, firma: null }],
+      ['horiba', { dias: null, contrato: false, fija: false, porDefecto: true, firma: null }],
+      ['grimm', { dias: 365, contrato: false, fija: false, porDefecto: true, firma: null }],
+      ['kunak', { dias: null, contrato: false, fija: false, porDefecto: true, firma: null }],
     ]);
     expect(v[0].resumen).toMatchObject({ equipos: 1, avisos: 1 });
   });
 
   it('una vigencia guardada dice sus días y su firma; una marca que sólo tiene vigencia guardada también sale', () => {
     const v = vista([], new Map([['horiba', 730], ['thermo', 365]]));
-    expect(v.find((m) => m.clave === 'horiba')!.vigencia).toEqual({ dias: 730, fija: false, porDefecto: false, firma: FIRMA_VIGENCIA });
-    expect(v.find((m) => m.clave === 'thermo')).toMatchObject({ vigencia: { dias: 365, porDefecto: false }, resumen: { equipos: 0, fechas: [] } });
+    expect(v.find((m) => m.clave === 'horiba')!.vigencia).toEqual({ dias: 730, contrato: false, fija: false, porDefecto: false, firma: FIRMA_VIGENCIA });
+    expect(v.find((m) => m.clave === 'thermo')).toMatchObject({ vigencia: { dias: 365, porDefecto: false }, resumen: { equipos: 0, fechas: [], contratos: [] } });
     expect(v.find((m) => m.clave === 'kunak')!.vigencia.dias).toBeNull();
+  });
+
+  // Lote 12: «según contrato del cliente». Cada equipo vence con la frecuencia de preventivo de SU cliente; sin frecuencia, sin vencimiento.
+  // La vista previa trae, junto a cada fecha, los días del contrato de su cliente (sólo números): con ellos la pantalla cuenta el cambio.
+  it('«según contrato»: la vigencia lo dice (sin días) y la vista previa cuenta con la frecuencia de cada cliente; un cliente sin ella, sin vencimiento', () => {
+    const contratos: FrecuenciasContrato = new Map([['cliente ficticio h s.a.s.', 6], ['cliente ficticio nuevo', null]]);
+    const horiba = vista([], new Map([['horiba', SEGUN_CONTRATO]]), contratos).find((m) => m.clave === 'horiba')!;
+    expect(horiba.vigencia).toEqual({ dias: null, contrato: true, fija: false, porDefecto: false, firma: FIRMA_VIGENCIA });
+    // H (6 meses = 183 días): la de 2025-09-15 vence el 2026-03-17 (vencida) y la de 2023, +1 año. J y «Nuevo», sin contrato: sin vencimiento.
+    expect(horiba.resumen).toMatchObject({ avisos: 1, clientesAvisos: 1, porEstado: { FUERA_CICLO: 1, VENCIDA: 1, AL_DIA: 0, SIN_VENCIMIENTO: 2, SIN_FECHA: 1 } });
+    expect([horiba.resumen.fechas, horiba.resumen.contratos]).toEqual([['2023-02-01', '2025-09-15', '2026-03-03', '2026-05-05'], [183, 183, null, null]]);
+    // Los días del contrato van aunque la marca aún no vaya por contrato (para la vista previa de pasarla a «según contrato»).
+    expect(vista([], DOCE_MESES, contratos).find((m) => m.clave === 'horiba')!.resumen.contratos).toEqual([183, 183, null, null]);
+    expect(JSON.stringify(horiba)).not.toMatch(/Ficticio|HB-/);
   });
 });
 

@@ -188,10 +188,10 @@ describe('guardas', () => {
     expect(res.status).toBe(403);
   });
 
-  it('200 con la app: devuelve hoy, equipos, la última importación y los contactos puestos a mano', async () => {
+  it('200 con la app: devuelve hoy, equipos, la última importación, los contactos puestos a mano y (lote 12) las frecuencias de preventivo', async () => {
     const res = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [] });
+    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [], frecuencias: [] });
   });
 
   it('400 con un «hoy» mal formado', async () => {
@@ -243,12 +243,15 @@ describe('permisos por rol', () => {
     { ruta: 'POST /trazabilidad/marcas/:clave', permiso: 'inventario.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/marcas/horiba').set(c).send({ incluir: true, motivo: 'Motivo ficticio.' }) },
     // Vigencia de calibración por marca (lote 11): cambiarla mete o saca equipos de Avisos, así que va con el permiso del interruptor.
     { ruta: 'POST /trazabilidad/marcas/:clave/vigencia', permiso: 'inventario.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/marcas/horiba/vigencia').set(c).send({ dias: 365, motivo: 'Motivo ficticio.' }) },
+    // Frecuencia de preventivo de un cliente (lote 12): mete o saca de Avisos a sus equipos «según contrato». Decisión de Alfonso: SÓLO el
+    // administrador del portal, así que su permiso (`contrato.write`) no es de ningún rol: aquí ningún rol pasa y el administrador sí.
+    { ruta: 'POST /trazabilidad/clientes/:clave/frecuencia', permiso: 'contrato.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/clientes/cliente%20uno/frecuencia').set(c).send({ meses: 6, motivo: 'Motivo ficticio.' }) },
   ];
   /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las veinticuatro escrituras del router (la 24.ª, del lote 11: la vigencia de una marca), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veinticinco escrituras del router (la 24.ª, del lote 11: la vigencia de una marca; la 25.ª, del lote 12: la frecuencia de preventivo de un cliente, sólo administradores), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -326,6 +329,7 @@ describe('permisos por rol', () => {
     expect((await request(app()).post('/api/trazabilidad/equipos/a%20b/retirar').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/filas/abc/reincorporar').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/marcas/A%20B').set(c).send({ incluir: 'sí' })).status).toBe(403);
+    expect((await request(app()).post('/api/trazabilidad/clientes/A%20B/frecuencia').set(conRol('DIRECTOR_TECNICO')).send({ meses: 'seis' })).status).toBe(403);
     expect(queries).toEqual([]);
   });
 
@@ -835,7 +839,7 @@ describe('contacto puesto a mano a un cliente', () => {
       .set(auth())
       .send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example', 'alguien@ambientalia.com.co'], nombre: 'Ana Pérez' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [] });
+    expect(res.body).toEqual({ hoy: '2026-10-06', equipos: [], ultimaImportacion: null, contactos: [], frecuencias: [] });
     expect(queries.some((q) => /INSERT INTO portal\.tmc_contactos/.test(q))).toBe(true);
   });
 
@@ -2393,8 +2397,8 @@ describe('marcas en seguimiento: leer, encender y apagar', () => {
     expect(res.status).toBe(200);
     expect(res.body.marcas.map((m: { clave: string; fija: boolean; incluida: boolean }) => [m.clave, m.fija, m.incluida])).toEqual([['grimm edm 180', true, true], ['horiba', false, false]]);
     // Lote 11: Horiba no tiene plazo fijo mientras nadie se lo ponga, así que su equipo vencido no está «en avisos».
-    expect(res.body.marcas[1].resumen).toEqual({ equipos: 1, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_VENCIMIENTO: 1, SIN_FECHA: 0 }, avisos: 0, clientesAvisos: 0, partidas: 1, enlazadas: 1, fechas: ['2025-09-15'] });
-    expect(res.body.marcas.map((m: { vigencia: unknown }) => m.vigencia)).toEqual([{ dias: 365, fija: true, porDefecto: true, firma: null }, { dias: null, fija: false, porDefecto: true, firma: null }]);
+    expect(res.body.marcas[1].resumen).toEqual({ equipos: 1, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_VENCIMIENTO: 1, SIN_FECHA: 0 }, avisos: 0, clientesAvisos: 0, partidas: 1, enlazadas: 1, fechas: ['2025-09-15'], contratos: [null] });
+    expect(res.body.marcas.map((m: { vigencia: unknown }) => m.vigencia)).toEqual([{ dias: 365, contrato: false, fija: true, porDefecto: true, firma: null }, { dias: null, contrato: false, fija: false, porDefecto: true, firma: null }]);
     expect(res.body.cambios).toEqual([]);
     expect(res.body.cambiosVigencia).toEqual([]);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
@@ -2475,7 +2479,22 @@ describe('marcas en seguimiento: leer, encender y apagar', () => {
 describe('vigencia de calibración por marca', () => {
   const equipo = (clave: string, marca: string, enSeguimiento: boolean, ultima: string) => ({ clave, serial: clave, cliente: 'Cliente Reservado', marca, modelo: 'X', fecha_factura: null, hoja_vida: null, ultima_entrada: null, ultima_calibracion: ultima, entradas_st: null, calibraciones_periodo: null, correctivos_periodo: null, activo: true, en_seguimiento: enSeguimiento, tiene_seg: false, ticket_numero: null });
   const EQUIPOS: [RegExp, Filas] = [/tiene_seg/, [equipo('SER-RESERVADO', 'GRIMM', true, '2025-09-03'), equipo('HB-RESERVADO', 'Horiba', false, '2025-09-03')]];
-  const vigencia = (dias: number | null): [RegExp, Filas] => [/FROM portal\.tmc_marcas_vigencia$/, [{ clave: 'horiba', dias }]];
+  // La regla se lee en una consulta (lote 12): lo guardado por marca y la frecuencia de cada cliente.
+  const vigencia = (dias: number | null, ...clientes: Filas): [RegExp, Filas] => [/FROM portal\.tmc_marcas_vigencia UNION ALL/, [{ de: 'marca', clave: 'horiba', valor: dias, contrato: false }, ...clientes]];
+
+  it('GET /equipos (lote 12): un Horiba «según contrato» vence según la frecuencia de SU cliente; sin frecuencia, sin vencimiento; y lleva `segunContrato` y las frecuencias', async () => {
+    respuestas.push(EQUIPOS, [/FROM portal\.tmc_contratos ORDER BY/, [{ clave: 'cliente reservado', cliente: 'Cliente Reservado', meses: 6, motivo: 'Contrato ficticio.', por: 'admin@example.com', en: '2026-10-18 15:00:00+00' }]]);
+    respuestas.unshift([/FROM portal\.tmc_marcas_vigencia UNION ALL/, [{ de: 'marca', clave: 'horiba', valor: null, contrato: true }, { de: 'cliente', clave: 'cliente reservado', valor: 6, contrato: false }]]);
+    const res = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
+    expect(res.body.equipos.map((e: { clave: string; estado: string; vence: string | null; vigenciaMarca: number | null; segunContrato: boolean }) => [e.clave, e.estado, e.vence, e.vigenciaMarca, e.segunContrato])).toEqual([
+      ['SER-RESERVADO', 'VENCIDA', '2026-09-03', 365, false],
+      ['HB-RESERVADO', 'VENCIDA', '2026-03-05', 183, true],
+    ]);
+    expect(res.body.frecuencias).toEqual([{ clave: 'cliente reservado', cliente: 'Cliente Reservado', meses: 6, motivo: 'Contrato ficticio.', por: 'admin@example.com', en: '2026-10-18 15:00:00+00' }]);
+    respuestas[0] = [/FROM portal\.tmc_marcas_vigencia UNION ALL/, [{ de: 'marca', clave: 'horiba', valor: null, contrato: true }]];
+    const sin = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
+    expect(sin.body.equipos[1]).toMatchObject({ estado: 'SIN_VENCIMIENTO', vence: null, vigenciaMarca: null, segunContrato: true });
+  });
 
   it('GET /equipos: el GRIMM EDM 180 vence a los 365 días; un Horiba incluido, sin vencimiento mientras nadie le ponga plazo; con 365 guardados, vence como el GRIMM', async () => {
     respuestas.push(EQUIPOS);
@@ -2551,8 +2570,9 @@ describe('vigencia de calibración por marca', () => {
     expect(conexiones.n).toBe(1);
     expect(queries.filter((q) => /pg_advisory_xact_lock/.test(q)).map((q) => /hashtext\('([^']+)'\)/.exec(q)![1])).toEqual(['portal.tmc_marcas']);
     expect(escrituras()).toEqual(['INSERT INTO portal.tmc_marcas_vigencia', 'INSERT INTO portal.tmc_marcas_vigencia_cambios']);
-    expect(parametros[0].slice(0, 4)).toEqual(['horiba', 'Horiba', 365, 'Decisión ficticia: Horiba cada 12 meses.']);
-    expect(parametros[1].slice(0, 5)).toEqual(['horiba', 'Horiba', null, 365, 'Decisión ficticia: Horiba cada 12 meses.']);
+    // Desde el lote 12, con `contrato` (false: va en días) y, en el apunte, si antes y después iba por contrato.
+    expect(parametros[0].slice(0, 5)).toEqual(['horiba', 'Horiba', 365, false, 'Decisión ficticia: Horiba cada 12 meses.']);
+    expect(parametros[1].slice(0, 7)).toEqual(['horiba', 'Horiba', null, false, 365, false, 'Decisión ficticia: Horiba cada 12 meses.']);
     expect(res.body.marcas.map((m: { clave: string }) => m.clave)).toEqual(['grimm edm 180', 'horiba']);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
   });
@@ -2561,8 +2581,116 @@ describe('vigencia de calibración por marca', () => {
     respuestas.push(firma(365), CONGELADAS, INVENTARIO);
     const res = await pedir('horiba', comoAdmin(), { dias: null, motivo: 'Vuelta atrás ficticia.' });
     expect(res.status).toBe(200);
-    expect(parametros[0].slice(0, 3)).toEqual(['horiba', 'Horiba', null]);
-    expect(parametros[1].slice(2, 5)).toEqual([365, null, 'Vuelta atrás ficticia.']);
+    expect(parametros[0].slice(0, 4)).toEqual(['horiba', 'Horiba', null, false]);
+    expect(parametros[1].slice(2, 7)).toEqual([365, false, null, false, 'Vuelta atrás ficticia.']);
+  });
+
+  // Lote 12: la tercera vigencia, «según contrato del cliente» (`dias: 'contrato'`). Mismo permiso y misma ruta.
+  it('«según contrato» (`dias: \'contrato\'`): se guarda sin días y con `contrato`, y el apunte dice antes y después; la marca lo devuelve', async () => {
+    respuestas.push(CONGELADAS, INVENTARIO);
+    respuestas.unshift([/FROM portal\.tmc_marcas_vigencia ORDER BY clave/, [{ clave: 'horiba', marca: 'Horiba', dias: null, contrato: true, motivo: 'Decisión ficticia.', por: 'director@example.com', en: '2026-10-18 15:00:00+00' }]]);
+    const ya = await pedir('horiba', conRol('DIRECTOR_TECNICO'), { dias: 'contrato', motivo: 'x' });
+    expect([ya.status, ya.body.error]).toEqual([409, 'misma_vigencia']);
+    respuestas.shift();
+    const res = await pedir('horiba', conRol('DIRECTOR_TECNICO'), { dias: 'contrato', motivo: ' Horiba, con el preventivo de cada cliente. ' });
+    expect(res.status).toBe(200);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_marcas_vigencia', 'INSERT INTO portal.tmc_marcas_vigencia_cambios']);
+    expect(parametros[0].slice(0, 5)).toEqual(['horiba', 'Horiba', null, true, 'Horiba, con el preventivo de cada cliente.']);
+    expect(parametros[1].slice(0, 7)).toEqual(['horiba', 'Horiba', null, false, null, true, 'Horiba, con el preventivo de cada cliente.']);
+  });
+
+  it.each([
+    ['otro texto', { dias: 'contratos', motivo: 'x' }],
+    ['«contrato» con mayúsculas', { dias: 'Contrato', motivo: 'x' }],
+  ])('400 en «dias» con %s, sin consultar nada', async (_caso, cuerpo) => {
+    const res = await pedir('horiba', comoAdmin(), cuerpo);
+    expect([res.status, res.body.field]).toEqual([400, 'dias']);
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('GRIMM EDM 180 no puede pasar a «según contrato»: 409 `marca_fija`, sin consultar nada', async () => {
+    const res = await pedir('grimm%20edm%20180', comoAdmin(), { dias: 'contrato', motivo: 'x' });
+    expect([res.status, res.body.error, queries, conexiones.n]).toEqual([409, 'marca_fija', [], 0]);
+  });
+});
+
+// La frecuencia de preventivo de cada cliente (lote 12, 064). Decisión de Alfonso (18/10/2026): un número de meses por cliente (o «sin
+// contrato»), con firma, motivo e historial, que SÓLO rellena un administrador del portal (`contrato.write`, de ningún rol). Leerla está
+// abierto a quien tiene la app. Aquí: las guardas (antes de validar y de consultar), los 400, 404 y 409, qué se escribe y qué devuelve.
+describe('frecuencia de preventivo por cliente', () => {
+  const RUTA = '/api/trazabilidad/clientes';
+  const CLIENTE = 'cliente reservado';
+  const EN_INVENTARIO: [RegExp, Filas] = [/SELECT e\.cliente FROM/, [{ cliente: 'Cliente Reservado' }]];
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q)).map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1]);
+  const appContrato = () => {
+    conexiones.cliente = true;
+    return app();
+  };
+  const pedir = (clave: string, cabecera = comoAdmin(), cuerpo: unknown = { meses: 6, motivo: 'Contrato ficticio de 6 meses.' }) => request(appContrato()).post(`${RUTA}/${encodeURIComponent(clave)}/frecuencia`).set(cabecera).send(cuerpo as object);
+
+  it('401 sin token y 403 sin la app; 403 para TODOS los roles de la app (también el Director Técnico) antes de validar y sin ninguna consulta', async () => {
+    expect((await request(appContrato()).post(`${RUTA}/${encodeURIComponent(CLIENTE)}/frecuencia`).send({ meses: 6, motivo: 'x' })).status).toBe(401);
+    expect((await pedir(CLIENTE, auth(tokenFor(['ausencias'])))).body.error).toBe('forbidden');
+    for (const rol of [null, 'COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']) {
+      const res = await pedir(CLIENTE, conRol(rol), { meses: 'seis' });
+      expect([res.status, res.body.error]).toEqual([403, 'forbidden_role']);
+    }
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it.each([
+    ['una clave que no es la de un cliente (sin normalizar)', 'Cliente Reservado', { meses: 6, motivo: 'x' }, 'clave'],
+    ['una clave vacía de verdad (sólo espacios)', '   ', { meses: 6, motivo: 'x' }, 'clave'],
+    ['sin «meses»', CLIENTE, { motivo: 'x' }, 'meses'],
+    ['0 meses', CLIENTE, { meses: 0, motivo: 'x' }, 'meses'],
+    ['37 meses', CLIENTE, { meses: 37, motivo: 'x' }, 'meses'],
+    ['meses con decimales', CLIENTE, { meses: 6.5, motivo: 'x' }, 'meses'],
+    ['meses como texto', CLIENTE, { meses: '6', motivo: 'x' }, 'meses'],
+    ['sin motivo', CLIENTE, { meses: null, motivo: '  ' }, 'motivo'],
+  ])('400 con %s, sin consultar nada', async (_caso, clave, cuerpo, campo) => {
+    const res = await pedir(clave, comoAdmin(), cuerpo);
+    expect([res.status, res.body.error, res.body.field]).toEqual([400, 'invalid_input', campo]);
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('404 si el cliente no tiene equipos activos en el inventario ni frecuencia guardada; 409 `misma_frecuencia` si no cambia nada; ninguno escribe', async () => {
+    const no = await pedir('cliente inexistente');
+    expect([no.status, no.body.error]).toEqual([404, 'not_found']);
+    respuestas.push(EN_INVENTARIO);
+    const igual = await pedir(CLIENTE, comoAdmin(), { meses: null, motivo: 'x' });
+    expect([igual.status, igual.body.error]).toEqual([409, 'misma_frecuencia']);
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('cambiar: en una transacción, la frecuencia y su apunte; devuelve el inventario ya recalculado (lo mismo que GET /equipos)', async () => {
+    respuestas.push(EN_INVENTARIO);
+    const res = await pedir(CLIENTE);
+    expect(res.status).toBe(200);
+    expect(conexiones.n).toBe(1);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_contratos', 'INSERT INTO portal.tmc_contratos_cambios']);
+    expect(Object.keys(res.body).sort()).toEqual(['contactos', 'equipos', 'frecuencias', 'hoy', 'ultimaImportacion']);
+  });
+
+  it('GET de un cliente: abierto a un Lector sin mirar su rol, su frecuencia y su historial; sólo lee; 400 con una clave sin normalizar', async () => {
+    respuestas.push(
+      [/FROM portal\.tmc_contratos WHERE clave = \$1/, [{ clave: CLIENTE, cliente: 'Cliente Reservado', meses: 6, motivo: 'Contrato ficticio.', por: 'admin@example.com', en: '2026-10-18 15:00:00+00' }]],
+      [/FROM portal\.tmc_contratos_cambios/, [{ id: 1, clave: CLIENTE, cliente: 'Cliente Reservado', antes: null, despues: 6, motivo: 'Contrato ficticio.', por: 'admin@example.com', en: '2026-10-18 15:00:00+00' }]],
+    );
+    const res = await request(app()).get(`${RUTA}/${encodeURIComponent(CLIENTE)}/frecuencia`).set(conRol(null));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ clave: CLIENTE, frecuencia: { meses: 6 }, cambios: [{ antes: null, despues: 6 }] });
+    expect(consultasRol.n).toBe(0);
+    for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
+    expect((await request(app()).get(`${RUTA}/Cliente%20Reservado/frecuencia`).set(conRol(null))).body.field).toBe('clave');
+  });
+
+  it('CANDADO: sus rutas son estas dos, la escritura con `contrato.write` (de ningún rol de la app); ni programador ni nada que avise', () => {
+    const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+    const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/clientes/.test(r));
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/clientes/:clave/frecuencia', 'post /trazabilidad/clientes/:clave/frecuencia']);
+    expect(rutas[1]).toMatch(/escritura\('contrato\.write',/);
+    for (const rol of ROLES_APP) expect(puede(rol, 'contrato.write'), rol).toBe(false);
+    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts', './programador-pasadas.ts', './pasadas-nocturnas-repo.ts']) expect(fuente(f), f).not.toMatch(/contratos-repo|cambiarContrato|tmc_contratos/);
   });
 });
 

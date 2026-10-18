@@ -25,6 +25,14 @@
  * última calibración, pero no vencen, no avisan y no salen en el calendario.
  * Que una marca tenga plazo fijo se guarda por marca (`tmc_marcas_vigencia`);
  * sin fila manda `VIGENCIA_POR_DEFECTO`. GRIMM EDM 180 es fijo (365).
+ *
+ * SEGÚN CONTRATO DEL CLIENTE (lote 12, migración 064; decisión de Alfonso del
+ * 18/10/2026): una marca puede vencer «según contrato» (`SEGUN_CONTRATO`): cada
+ * equipo suyo vence según la frecuencia de preventivo de SU cliente
+ * (`tmc_contratos`, en meses, por `claveCliente`); un cliente sin frecuencia
+ * deja a sus equipos sin vencimiento. La vigencia de un equipo es, pues,
+ * f(marca, cliente): `vigenciaDeGrupo` / `vigenciaDeEquipo`. Meses → días:
+ * `diasDeMeses` (meses × 365 / 12, redondeado; 12 meses = 365 exactos).
  */
 import { ESTADOS, ESTADOS_AVISO, VIGENCIA_DIAS, claveCliente, type EstadoCalibracion } from './dominio.js';
 import type { EquipoHoja, FilaHoja, TablaHoja } from './hoja.js';
@@ -45,18 +53,48 @@ export const VIGENCIA_MAX_DIAS = 1095;
 /** Las marcas con plazo fijo mientras nadie guarde otro: GRIMM EDM 180 y los GRIMM de otros modelos. Las demás, sin vencimiento. */
 export const VIGENCIA_POR_DEFECTO: Readonly<Record<string, number>> = { [CLAVE_EDM180]: VIGENCIA_DIAS, grimm: VIGENCIA_DIAS };
 
-/** Lo guardado en `tmc_marcas_vigencia`: clave de la marca → días, o null (sin vencimiento). */
-export type VigenciasGuardadas = ReadonlyMap<string, number | null>;
+/** Lote 12: la tercera vigencia de una marca, «según contrato del cliente» (cada equipo, la frecuencia de preventivo de SU cliente). */
+export const SEGUN_CONTRATO = 'contrato';
+/** La vigencia de una marca: días, null (sin vencimiento) o «según contrato». */
+export type ValorVigencia = number | null | typeof SEGUN_CONTRATO;
+/** Lo guardado en `tmc_marcas_vigencia`: clave de la marca → días, null (sin vencimiento) o «según contrato» (064). */
+export type VigenciasGuardadas = ReadonlyMap<string, ValorVigencia>;
+/** Lo guardado en `tmc_contratos` (064): clave del cliente (`claveCliente`) → frecuencia de preventivo en meses, o null (sin contrato). */
+export type FrecuenciasContrato = ReadonlyMap<string, number | null>;
 
-/** LA REGLA: la vigencia de la marca `clave` en días; null = sin vencimiento. Lo guardado manda; GRIMM EDM 180, siempre 365. */
-export function vigenciaDeMarca(clave: string, guardadas: VigenciasGuardadas): number | null {
+/** La frecuencia de preventivo que se puede guardar a un cliente: null (sin contrato) o un entero de meses entre estos dos. */
+export const FRECUENCIA_MIN_MESES = 1;
+export const FRECUENCIA_MAX_MESES = 36;
+export const esFrecuenciaValida = (v: unknown): v is number | null => v === null || (typeof v === 'number' && Number.isInteger(v) && v >= FRECUENCIA_MIN_MESES && v <= FRECUENCIA_MAX_MESES);
+
+/**
+ * Meses → días: meses × 365 / 12, redondeado. 12 meses = 365 exactos (no cambia nada de GRIMM) y de 1 a 36 meses da de 30 a 1095 días,
+ * lo mismo que admite una marca en días, así que `estadoCalibracion`, la fórmula de la exportación y `vigenciaMarca` siguen en días.
+ */
+export const diasDeMeses = (meses: number): number => Math.round((meses * VIGENCIA_DIAS) / 12);
+
+/** LA REGLA de la marca `clave`: días, null = sin vencimiento, o «según contrato». Lo guardado manda; GRIMM EDM 180, siempre 365. */
+export function vigenciaDeMarca(clave: string, guardadas: VigenciasGuardadas): ValorVigencia {
   if (clave === CLAVE_EDM180) return VIGENCIA_DIAS;
   if (guardadas.has(clave)) return guardadas.get(clave) ?? null;
   return VIGENCIA_POR_DEFECTO[clave] ?? null;
 }
 
-/** La vigencia de un equipo: la de su grupo (`grupoMarca`: en seguimiento, GRIMM EDM 180; fuera, su marca). */
-export const vigenciaDeEquipo = (q: { enSeguimiento?: boolean; marca: string }, guardadas: VigenciasGuardadas): number | null => vigenciaDeMarca(grupoMarca(q), guardadas);
+/** LA REGLA de un equipo, en días (null = sin vencimiento): la de su marca `clave`; si es «según contrato», la frecuencia de su `cliente`. */
+export function vigenciaDeGrupo(clave: string, cliente: string, guardadas: VigenciasGuardadas, contratos: FrecuenciasContrato): number | null {
+  const v = vigenciaDeMarca(clave, guardadas);
+  return v === SEGUN_CONTRATO ? diasDeContrato(cliente, contratos) : v;
+}
+
+/** Los días de la frecuencia de preventivo del `cliente` (por `claveCliente`), o null si no tiene (sin contrato). */
+export function diasDeContrato(cliente: string, contratos: FrecuenciasContrato): number | null {
+  const meses = contratos.get(claveCliente(cliente));
+  return meses === undefined || meses === null ? null : diasDeMeses(meses);
+}
+
+/** La vigencia de un equipo: la de su grupo (`grupoMarca`: en seguimiento, GRIMM EDM 180; fuera, su marca) y, si va por contrato, su cliente. */
+export const vigenciaDeEquipo = (q: { enSeguimiento?: boolean; marca: string; cliente: string }, guardadas: VigenciasGuardadas, contratos: FrecuenciasContrato): number | null =>
+  vigenciaDeGrupo(grupoMarca(q), q.cliente, guardadas, contratos);
 
 /** True si `v` se puede guardar como vigencia de una marca. */
 export const esVigenciaValida = (v: unknown): v is number | null => v === null || (typeof v === 'number' && Number.isInteger(v) && v >= VIGENCIA_MIN_DIAS && v <= VIGENCIA_MAX_DIAS);
@@ -80,18 +118,34 @@ export interface ResumenMarca {
   enlazadas: number;
   /** Lote 11: la última calibración de cada uno de esos equipos que la tiene (sólo fechas, ordenadas), para la vista previa de cambiar su vigencia. */
   fechas: string[];
+  /** Lote 12: para cada una de `fechas` (mismo orden), los días de la frecuencia de preventivo de su cliente, o null (sin contrato). Sin clientes. */
+  contratos: (number | null)[];
 }
 export interface FirmaMarca { por: string; en: string; motivo: string }
 export interface MarcaGuardada extends FirmaMarca { clave: string; marca: string; incluida: boolean }
-/** Lo guardado en `portal.tmc_marcas_vigencia` (063): la vigencia de una marca, con su firma. `dias` null = sin vencimiento. */
-export interface VigenciaGuardada extends FirmaMarca { clave: string; marca: string; dias: number | null }
-/** La vigencia de una marca (lote 11): sus días (null = sin vencimiento), si es la fija (GRIMM EDM 180), si sale del código (nadie la ha cambiado) y su firma. */
-export interface VigenciaMarca { dias: number | null; fija: boolean; porDefecto: boolean; firma: FirmaMarca | null }
+/** Lo guardado en `portal.tmc_marcas_vigencia` (063): la vigencia de una marca, con su firma. `dias` null = sin vencimiento; `contrato` (064) = según contrato. */
+export interface VigenciaGuardada extends FirmaMarca { clave: string; marca: string; dias: number | null; contrato: boolean }
+/**
+ * La vigencia de una marca (lote 11): sus días (null = sin vencimiento o según contrato), si va «según contrato del cliente» (lote 12), si es
+ * la fija (GRIMM EDM 180), si sale del código (nadie la ha cambiado) y su firma.
+ */
+export interface VigenciaMarca { dias: number | null; contrato: boolean; fija: boolean; porDefecto: boolean; firma: FirmaMarca | null }
+/** El valor de la vigencia de una marca tal como se guarda y se compara: días, null o «según contrato». */
+export const valorVigencia = (v: { dias: number | null; contrato: boolean }): ValorVigencia => (v.contrato ? SEGUN_CONTRATO : v.dias);
+/** True si el equipo vence según el contrato de su cliente (su marca va «según contrato»). */
+export const vaPorContrato = (q: { enSeguimiento?: boolean; marca: string }, guardadas: VigenciasGuardadas): boolean => vigenciaDeMarca(grupoMarca(q), guardadas) === SEGUN_CONTRATO;
+
+/** Lo guardado en `portal.tmc_contratos` (064): la frecuencia de preventivo de un cliente (meses; null = sin contrato), con su firma. */
+export interface FrecuenciaCliente extends FirmaMarca { clave: string; cliente: string; meses: number | null }
+/** Un apunte de `portal.tmc_contratos_cambios`: la frecuencia de antes y la nueva (null = sin contrato). */
+export interface CambioFrecuencia extends FirmaMarca { id: number; clave: string; cliente: string; antes: number | null; despues: number | null }
+/** GET /trazabilidad/clientes/:clave/frecuencia: la de ese cliente (o null) y su historial, el más reciente primero. */
+export interface RespuestaContrato { clave: string; frecuencia: FrecuenciaCliente | null; cambios: CambioFrecuencia[] }
 export interface MarcaSeguimiento { clave: string; marca: string; fija: boolean; incluida: boolean; firma: FirmaMarca | null; vigencia: VigenciaMarca; resumen: ResumenMarca }
 /** Un apunte de `portal.tmc_marcas_cambios`. */
 export interface CambioMarca extends FirmaMarca { id: number; clave: string; marca: string; accion: 'incluir' | 'excluir'; equipos: number; partidas: number; enlazadas: number }
-/** Un apunte de `portal.tmc_marcas_vigencia_cambios` (063): la vigencia de antes y la nueva (null = sin vencimiento). */
-export interface CambioVigencia extends FirmaMarca { id: number; clave: string; marca: string; antes: number | null; despues: number | null }
+/** Un apunte de `portal.tmc_marcas_vigencia_cambios` (063): la vigencia de antes y la nueva (null = sin vencimiento; desde la 064, también «según contrato»). */
+export interface CambioVigencia extends FirmaMarca { id: number; clave: string; marca: string; antes: ValorVigencia; despues: ValorVigencia }
 /** GET /trazabilidad/marcas: cada marca con su vista previa y su vigencia, y los últimos cambios de las dos cosas. */
 export interface RespuestaMarcas { hoy: string; marcas: MarcaSeguimiento[]; cambios: CambioMarca[]; cambiosVigencia: CambioVigencia[] }
 
@@ -117,7 +171,7 @@ export function planAdopcion(tabla: TablaHoja, objetivo: ReadonlySet<string>, si
   return a;
 }
 
-export interface EntradaMarcas { tabla: TablaHoja; equipos: readonly EquipoHoja[]; guardadas: readonly MarcaGuardada[]; sinClave: ReadonlySet<number>; vigencias: readonly VigenciaGuardada[] }
+export interface EntradaMarcas { tabla: TablaHoja; equipos: readonly EquipoHoja[]; guardadas: readonly MarcaGuardada[]; sinClave: ReadonlySet<number>; vigencias: readonly VigenciaGuardada[]; /** Lote 12: la frecuencia de cada cliente. */ contratos: FrecuenciasContrato }
 
 /**
  * Una fila por marca, con su vista previa: GRIMM EDM 180 (fija), las incluidas y después las demás, de más a menos equipos. Una marca
@@ -131,7 +185,9 @@ export function marcasEnSeguimiento(e: EntradaMarcas): MarcaSeguimiento[] {
   for (const f of [...e.tabla.filas, ...e.tabla.fueraDeHoja]) if (f.clave !== null) filaDe.set(f.clave, f);
   const guardada = new Map(e.guardadas.map((g) => [g.clave, g]));
   const vigente = new Map(e.vigencias.map((v) => [v.clave, v]));
-  const dias = new Map(e.vigencias.map((v) => [v.clave, v.dias]));
+  const dias = new Map(e.vigencias.map((v) => [v.clave, valorVigencia(v)]));
+  /** Los días de la frecuencia de preventivo de un cliente (lote 12), o null sin contrato: para la vista previa de pasar a «según contrato». */
+  const diasContrato = (cliente: string): number | null => diasDeContrato(cliente, e.contratos);
   const claves = [...new Set([CLAVE_EDM180, ...e.equipos.map(grupoDe), ...guardada.keys(), ...vigente.keys()])].filter((k) => k !== '');
 
   const marcas = claves.map((clave): MarcaSeguimiento => {
@@ -144,9 +200,11 @@ export function marcasEnSeguimiento(e: EntradaMarcas): MarcaSeguimiento[] {
     const forma = [...veces].reduce<[string, number] | null>((a, b) => (!a || b[1] > a[1] ? b : a), null)?.[0] ?? guardada.get(clave)?.marca ?? clave;
     const g = guardada.get(clave);
     const v = clave === CLAVE_EDM180 ? undefined : vigente.get(clave);
+    const valor = vigenciaDeMarca(clave, dias);
+    const conFecha = vivos.flatMap((f) => (f.ultimaCalibracion ? [{ fecha: f.ultimaCalibracion, contrato: diasContrato(deEquipo.get(f.clave!)?.cliente ?? f.cliente) }] : [])).sort((a, b) => a.fecha.localeCompare(b.fecha));
     return {
       clave, marca: etiquetaMarca(clave, forma), fija: clave === CLAVE_EDM180, incluida: clave === CLAVE_EDM180 || (g?.incluida ?? false), firma: g ? { por: g.por, en: g.en, motivo: g.motivo } : null,
-      vigencia: { dias: vigenciaDeMarca(clave, dias), fija: clave === CLAVE_EDM180, porDefecto: !v, firma: v ? { por: v.por, en: v.en, motivo: v.motivo } : null },
+      vigencia: { dias: valor === SEGUN_CONTRATO ? null : valor, contrato: valor === SEGUN_CONTRATO, fija: clave === CLAVE_EDM180, porDefecto: !v, firma: v ? { por: v.por, en: v.en, motivo: v.motivo } : null },
       resumen: {
         equipos: vivos.length,
         porEstado: Object.fromEntries(ESTADOS.map((s) => [s, vivos.filter((f) => f.estado === s).length])) as Record<EstadoCalibracion, number>,
@@ -154,7 +212,8 @@ export function marcasEnSeguimiento(e: EntradaMarcas): MarcaSeguimiento[] {
         clientesAvisos: new Set(enAvisos.map((f) => claveCliente(deEquipo.get(f.clave!)?.cliente ?? f.cliente))).size,
         partidas: adopcion.partidas.length,
         enlazadas: adopcion.enlazar.length,
-        fechas: vivos.flatMap((f) => (f.ultimaCalibracion ? [f.ultimaCalibracion] : [])).sort(),
+        fechas: conFecha.map((x) => x.fecha),
+        contratos: conFecha.map((x) => x.contrato),
       },
     };
   });

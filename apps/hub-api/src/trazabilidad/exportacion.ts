@@ -181,7 +181,7 @@ export function libroFst022({ tabla, exporta }: EntradaLibro): LibroFst022 {
       ['Retirados a mano (en su hoja, no en la principal)', retirados.length, `Están en «${HOJAS_LIBRO[1]}», con quién, cuándo y por qué. Nada se borró.`],
       [],
       ['Columnas', 'Las seis de la F-ST-022, con sus títulos y en su orden. Cliente, marca, modelo y serial son los de hoy (los del maestro de Desk 2.0 si el equipo está enlazado); la última calibración es la que da la regla del portal.'],
-      ['Vigencia', 'Cada celda lleva la fórmula de la hoja con la vigencia de su marca (GRIMM, 365 días): última calibración + vigencia − HOY(), así que se recalcula sola al abrir el libro otro día; el número guardado es el del día de la exportación. Sin fecha, o si su marca no tiene vencimiento (Horiba y las demás, salvo que se les ponga un plazo en el portal), va vacía.'],
+      ['Vigencia', 'Cada celda lleva la fórmula de la hoja con la vigencia de su marca (GRIMM, 365 días): última calibración + vigencia − HOY(), así que se recalcula sola al abrir el libro otro día; el número guardado es el del día de la exportación. Si su marca vence «según contrato», la vigencia es la frecuencia de preventivo de su cliente (meses × 365 / 12 días, redondeado). Sin fecha, o si no vence (su marca no tiene plazo, o va según contrato y su cliente no tiene frecuencia), va vacía.'],
       ['Detalle', `La hoja «${HOJAS_LIBRO[2]}» dice, fila a fila, de dónde sale cada fecha, cuándo vence y su estado ese día.`],
       [],
       ...[...cuenta((x) => x.marcaClave)].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([clave, total]): Valor[] => [`Marca: ${marcas.get(clave)}`, total]),

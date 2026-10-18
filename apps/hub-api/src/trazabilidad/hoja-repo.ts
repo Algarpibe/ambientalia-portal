@@ -32,7 +32,7 @@ export async function leerHoja(db: Db, hoy: string): Promise<RespuestaHoja> {
  * marcas-repo.ts) calcule la tabla con los equipos que quiera FUERA del inventario: la que daba la pestaña antes de encenderla.
  */
 export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacion: RespuestaHoja['congelacion']; entrada: EntradaHoja & { equipos: EquipoHoja[] } }> {
-  const [vigentes, congeladas, inventario, calibraciones, vigencias] = await Promise.all([
+  const [vigentes, congeladas, inventario, calibraciones, { vigencias, contratos }] = await Promise.all([
     db.query(`SELECT g.id, g.archivo, g.hoja, g.por, g.en::text AS en, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`),
     // Con el último apunte de cada fila en tmc_retiros (059): si es un retiro, la fila está retirada a mano. Va en la misma consulta.
     db.query(
@@ -46,7 +46,8 @@ export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacio
     // mano y, desde el lote 9f, si está en el inventario (la regla de siempre, `EN_INVENTARIO`): fuera de seguimiento, eso es que su marca está incluida.
     db.query(`SELECT clave, serial, cliente, marca, modelo, activo, en_seguimiento, ${EN_INVENTARIO} AS en_inventario, ultima_calibracion::text AS ultima_calibracion, retirado_en::text AS retirado_en, retirado_por, retirado_motivo FROM portal.tmc_equipos`),
     leerCalibraciones(db),
-    // Lote 11: la vigencia guardada por marca (063), para el estado de cada fila. La quinta consulta.
+    // Lote 11: la vigencia guardada por marca (063), para el estado de cada fila. La quinta consulta; desde el lote 12 trae también, en
+    // la misma, la frecuencia de preventivo de cada cliente (064), para las marcas «según contrato».
     leerVigencias(db),
   ]);
   const v = vigentes.rows[0] as Row | undefined;
@@ -55,6 +56,6 @@ export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacio
   const retiradas = (congeladas.rows as Row[]).filter((r) => r.retiro === 'retirar').map((r) => ({ fila: r.fila as number, por: r.retiro_por, en: r.retiro_en, motivo: r.retiro_motivo }));
   return {
     congelacion: v ? { id: Number(v.id), archivo: v.archivo, hoja: v.hoja, por: v.por, en: v.en } : null,
-    entrada: { hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas, vigencias },
+    entrada: { hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas, vigencias, contratos },
   };
 }

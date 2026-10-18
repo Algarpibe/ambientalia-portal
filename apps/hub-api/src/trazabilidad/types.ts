@@ -41,7 +41,7 @@ import {
 } from './dominio.js';
 import { FECHA_MINIMA_CALIBRACION } from './calibraciones.js';
 import type { ResumenFst022 } from './fst022.js';
-import { VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, esVigenciaValida } from './marcas.js';
+import { FRECUENCIA_MAX_MESES, FRECUENCIA_MIN_MESES, SEGUN_CONTRATO, VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, esFrecuenciaValida, esVigenciaValida, type ValorVigencia } from './marcas.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -100,6 +100,8 @@ export interface EquipoVista {
   correctivosPeriodo: number | null;
   /** La vigencia de su marca en días (lote 11); null = sin vencimiento (estado SIN_VENCIMIENTO: no avisa). La usa el plan del aviso. */
   vigenciaMarca: number | null;
+  /** Lote 12: su marca vence «según contrato del cliente» (`vigenciaMarca` es entonces la frecuencia de su cliente, o null si no tiene). */
+  segunContrato: boolean;
   vence: string | null;
   vigenciaDias: number | null;
   estado: EstadoCalibracion;
@@ -810,11 +812,27 @@ export function parseCambioMarca(body: unknown): { incluir: boolean; motivo: str
   return { incluir: b.incluir, motivo: parseMotivo(b) };
 }
 
-/** POST /marcas/:clave/vigencia (lote 11): `{dias, motivo}`. `dias` es null (sin vencimiento) o un entero de 30 a 1095; siempre con motivo. */
-export function parseVigenciaMarca(body: unknown): { dias: number | null; motivo: string } {
+/**
+ * POST /marcas/:clave/vigencia (lote 11): `{dias, motivo}`. `dias` es null (sin vencimiento), un entero de 30 a 1095 o, desde el lote 12,
+ * `'contrato'` (según el contrato de cada cliente); siempre con motivo.
+ */
+export function parseVigenciaMarca(body: unknown): { dias: ValorVigencia; motivo: string } {
   const b = obj(body, 'body');
-  if (!('dias' in b) || !esVigenciaValida(b.dias)) throw invalido(`«dias» debe ser null (sin vencimiento) o un número entero de días entre ${VIGENCIA_MIN_DIAS} y ${VIGENCIA_MAX_DIAS}.`, 'dias');
-  return { dias: b.dias, motivo: parseMotivo(b) };
+  if (!('dias' in b) || !(b.dias === SEGUN_CONTRATO || esVigenciaValida(b.dias))) throw invalido(`«dias» debe ser null (sin vencimiento), «${SEGUN_CONTRATO}» (según el contrato de cada cliente) o un número entero de días entre ${VIGENCIA_MIN_DIAS} y ${VIGENCIA_MAX_DIAS}.`, 'dias');
+  return { dias: b.dias as ValorVigencia, motivo: parseMotivo(b) };
+}
+
+/** /clientes/:clave/frecuencia (lote 12): la clave de un cliente ya normalizada (`claveCliente`: «cliente uno», no «Cliente Uno»). */
+export function parseClaveCliente(v: unknown): string {
+  if (typeof v !== 'string' || v === '' || v.length > CONTACTO_MAX_TEXTO || v !== claveCliente(v)) throw invalido('«clave» no es la clave de un cliente.', 'clave');
+  return v;
+}
+
+/** POST /clientes/:clave/frecuencia (lote 12): `{meses, motivo}`. `meses` es null (sin contrato) o un entero de 1 a 36; siempre con motivo. */
+export function parseFrecuencia(body: unknown): { meses: number | null; motivo: string } {
+  const b = obj(body, 'body');
+  if (!('meses' in b) || !esFrecuenciaValida(b.meses)) throw invalido(`«meses» debe ser null (sin contrato) o un número entero de meses entre ${FRECUENCIA_MIN_MESES} y ${FRECUENCIA_MAX_MESES}.`, 'meses');
+  return { meses: b.meses, motivo: parseMotivo(b) };
 }
 
 /** GET /retiros: de quién es el historial, `?clave=` de un equipo o `?fila=` de la hoja congelada (una de las dos). */

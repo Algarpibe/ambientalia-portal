@@ -72,11 +72,13 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
     expect(fuente('./inventario.ts')).toMatch(/export const EN_INVENTARIO = `\(en_seguimiento OR \$\{claveMarcaSql\('marca'\)\} IN \(SELECT m\.clave FROM portal\.tmc_marcas m WHERE m\.incluida\)\)`;/);
   });
 
-  it('en repo.ts todo pasa por `INVENTARIO`: cinco lecturas y ninguna tabla a pelo', () => {
+  // Lote 12: la sexta, `clienteDelInventario` —si un cliente tiene equipos activos en el inventario, para la frecuencia de preventivo
+  // (contratos-repo.ts, que así no nombra la tabla)—: sólo lee nombres de cliente, también por `INVENTARIO`.
+  it('en repo.ts todo pasa por `INVENTARIO`: seis lecturas y ninguna tabla a pelo', () => {
     const src = fuente('./repo.ts');
     expect(src).toMatch(/const INVENTARIO = `\(SELECT \* FROM portal\.tmc_equipos WHERE \$\{EN_INVENTARIO\}\)`/);
-    expect(src.match(/\$\{INVENTARIO\} e\b/g)).toHaveLength(5);
-    for (const f of ['consultarEquipos', 'contactosDeDesk', 'listarServicios', 'existeActivo', 'registrarAvisos']) {
+    expect(src.match(/\$\{INVENTARIO\} e\b/g)).toHaveLength(6);
+    for (const f of ['consultarEquipos', 'contactosDeDesk', 'listarServicios', 'existeActivo', 'registrarAvisos', 'clienteDelInventario']) {
       const cuerpo = src.slice(src.indexOf(`function ${f}(`));
       expect(cuerpo.slice(0, cuerpo.search(/\r?\n}\r?\n/)), f).toContain('${INVENTARIO} e');
     }

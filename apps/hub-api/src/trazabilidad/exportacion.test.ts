@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as XLSX from 'xlsx';
 import type { FilaCalibracion } from './calibraciones.js';
-import { claveMarca } from './marcas.js';
+import { SEGUN_CONTRATO, claveMarca } from './marcas.js';
 import { COLUMNAS_FST022, FILA_CABECERA, FORMULA_VIGENCIA, HOJAS_LIBRO, TIPO_XLSX, filasExportadas, libroFst022, nombreFichero, origenDeFecha } from './exportacion.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, type EquipoHoja, type RespuestaHoja, type Retiro } from './hoja.js';
@@ -102,6 +102,16 @@ describe('la hoja principal: las seis columnas de la V3, en su sitio', () => {
     expect(dia(n('E7'))).toBe('2025-11-01');
     expect([n('F8')?.f, n('F8')?.v]).toEqual(['E8-TODAY()+730', 385]);
     expect(matriz('Detalle').find((r) => r[2] === 'HB-0001')?.slice(4)).toEqual([null, 'Sin vencimiento']);
+  });
+
+  // Lote 12: una marca «según contrato» lleva en la fórmula los días de la frecuencia de preventivo de SU cliente (6 meses = 183); un
+  // cliente sin frecuencia, como sin vencimiento. La exportación no calcula nada: lo da la tabla de la pestaña.
+  it('«según contrato»: la fórmula con los días del contrato de su cliente; sin contrato, vacía', () => {
+    const filas = [fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-0001', '2025-11-01'), fila('Cliente Ficticio C', 'Horiba', 'APNA-370', 'HB-0002', '2025-11-01')];
+    const t = { ...respuesta({}), ...tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas, equipos: [], calibraciones: [], vigencias: new Map([['horiba', SEGUN_CONTRATO]]), contratos: new Map([['cliente ficticio b', 6]]) }) };
+    const { celda } = leer(t);
+    expect([celda('Trazabilidad', 'F6')?.f, celda('Trazabilidad', 'F6')?.v]).toEqual(['E6-TODAY()+183', t.filas[0].vigenciaDias]);
+    expect(celda('Trazabilidad', 'F7')).toBeUndefined();
   });
 
   it('una fecha AAAA-MM-DD es ESE día en cualquier zona: el número de serie se calcula sobre UTC, también en un 1 de enero y un 31 de diciembre', () => {

@@ -5,7 +5,7 @@ import { fechaEfectiva, type FilaCalibracion } from './calibraciones.js';
 import { estadoCalibracion } from './dominio.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, textoCelda, type EquipoHoja } from './hoja.js';
-import { CLAVE_EDM180 } from './marcas.js';
+import { CLAVE_EDM180, SEGUN_CONTRATO } from './marcas.js';
 
 // La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), sin base: la regla
 // pura que casa cada fila de la hoja congelada con el inventario y le pone su
@@ -75,6 +75,26 @@ describe('una fila por fila de equipo de la hoja, en su orden', () => {
     const conHoriba = tabla(filas, equipos, [], HOY, new Map([['horiba', 730], ['grimm', null], [CLAVE_EDM180, null]]));
     expect(estados(conHoriba).map((x) => x.slice(1))).toEqual([['VENCIDA', '2026-09-01', 365], ['AL_DIA', '2027-09-01', 730], ['SIN_VENCIMIENTO', null, null], ['SIN_VENCIMIENTO', null, null], ['SIN_FECHA', null, 730]]);
     expect(conHoriba.resumen.porEstado).toMatchObject({ VENCIDA: 1, AL_DIA: 1, SIN_VENCIMIENTO: 2, SIN_FECHA: 1 });
+  });
+
+  // Lote 12: una marca «según contrato» vence, en cada fila, con la frecuencia de preventivo de su cliente: el del inventario si la fila es
+  // de un equipo, el escrito en la hoja si no. Sin frecuencia (o «sin contrato»), sin vencimiento. GRIMM EDM 180, 365 siempre.
+  it('«según contrato»: cada fila con la frecuencia de SU cliente (6 meses = 183 días); sin ella, sin vencimiento', () => {
+    const filas = [
+      fila('Cliente Ficticio A', 'GRIMM', 'EDM 180C', '18A00001', '2025-09-01', '18A00001'),
+      fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-0001', '2025-09-01'),
+      fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-0002', '2025-09-01'),
+      fila('Cliente Ficticio C', 'Horiba', 'APNA-370', 'HB-0003', '2025-09-01'),
+    ];
+    // HB-0001 es de un equipo cuyo cliente en el inventario es otro nombre: manda el del inventario (el que se ve en la fila).
+    const equipos = [equipo('18A00001', { ultimaCalibracion: '2025-09-01' }), equipo('HB-0001', { marca: 'Horiba', cliente: 'Cliente Ficticio B S.A.S.', enSeguimiento: false })];
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas, equipos, calibraciones: [], vigencias: new Map([['horiba', SEGUN_CONTRATO], [CLAVE_EDM180, SEGUN_CONTRATO]]), contratos: new Map([['cliente ficticio b s.a.s.', 6], ['cliente ficticio b', 12], ['cliente ficticio c', null]]) });
+    expect(t.filas.map((f) => [f.serial, f.estado, f.vence, f.vigenciaMarca])).toEqual([
+      ['18A00001', 'VENCIDA', '2026-09-01', 365],
+      ['HB-0001', 'VENCIDA', '2026-03-03', 183],
+      ['HB-0002', 'VENCIDA', '2026-09-01', 365],
+      ['HB-0003', 'SIN_VENCIMIENTO', null, null],
+    ]);
   });
 
   it('los números se enseñan como texto, enteros y sin notación científica; y un serial numérico se avisa (pudo perder ceros a la izquierda)', () => {

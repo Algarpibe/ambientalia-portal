@@ -64,6 +64,11 @@ export const PERMISOS = [
   'inventario.write',
   /** Exportar la F-ST-022 a un .xlsx (lote 9e). No cambia nada, pero saca del portal la hoja entera, con clientes y seriales: es la segunda LECTURA que pide permiso. */
   'hoja.exportar',
+  /**
+   * La frecuencia de preventivo de un cliente según su contrato (lote 12): mete o saca de Avisos a sus equipos de marcas «según contrato».
+   * Decisión de Alfonso: SÓLO el administrador del portal, así que no es de ningún rol (los administradores tienen todos los permisos).
+   */
+  'contrato.write',
   /** Repartir roles. De ningún rol: sólo de los administradores del portal. */
   'roles.manage',
 ] as const;

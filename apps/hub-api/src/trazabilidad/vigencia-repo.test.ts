@@ -32,25 +32,34 @@ describe('063_trazabilidad_vigencia_marcas.sql', () => {
     expect(sinComentarios).not.toMatch(/cliente|\bserial\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 062, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'062_trazabilidad_pasadas_nocturnas\.sql',\s*'063_trazabilidad_vigencia_marcas\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 062 (la 064, del lote 12, va detrás)', () => {
+    expect(fuente('../db.ts')).toMatch(/'062_trazabilidad_pasadas_nocturnas\.sql',\s*'063_trazabilidad_vigencia_marcas\.sql',/);
   });
 });
 
 describe('leerVigencias', () => {
-  it('lee la tabla entera: clave → días, o null (sin vencimiento)', async () => {
+  it('lee las dos tablas de la regla en UNA consulta: marca → días, null (sin vencimiento) o «según contrato»; cliente → meses o null', async () => {
     const sqls: string[] = [];
-    const db = { query: async (sql: string) => (sqls.push(sql), { rows: [{ clave: 'horiba', dias: null }, { clave: 'kunak', dias: 730 }] }) } as unknown as Pool;
-    expect([...(await leerVigencias(db))]).toEqual([['horiba', null], ['kunak', 730]]);
+    const filas = [
+      { de: 'marca', clave: 'horiba', valor: null, contrato: true },
+      { de: 'marca', clave: 'kunak', valor: 730, contrato: false },
+      { de: 'marca', clave: 'tca', valor: null, contrato: false },
+      { de: 'cliente', clave: 'cliente ficticio a', valor: 6, contrato: false },
+      { de: 'cliente', clave: 'cliente ficticio b', valor: null, contrato: false },
+    ];
+    const db = { query: async (sql: string) => (sqls.push(sql), { rows: filas }) } as unknown as Pool;
+    const { vigencias, contratos } = await leerVigencias(db);
+    expect([...vigencias]).toEqual([['horiba', 'contrato'], ['kunak', 730], ['tca', null]]);
+    expect([...contratos]).toEqual([['cliente ficticio a', 6], ['cliente ficticio b', null]]);
     expect(sqls).toHaveLength(1);
-    expect(sqls[0]).toMatch(/^SELECT clave, dias FROM portal\.tmc_marcas_vigencia$/);
+    expect(sqls[0]).toMatch(/^SELECT 'marca' AS de, clave, dias AS valor, contrato FROM portal\.tmc_marcas_vigencia\s+UNION ALL\s+SELECT 'cliente', clave, meses, FALSE FROM portal\.tmc_contratos$/);
   });
 });
 
 // CANDADO del lote 11. Cambiar la vigencia de una marca mueve a sus equipos dentro o fuera de Avisos, así que sólo un fichero escribe
 // sus dos tablas (marcas-repo.ts, con la firma, el motivo y el permiso de su interruptor) y nada de esto envía ni avisa a nadie.
 describe('CANDADO: quién escribe la vigencia de una marca', () => {
-  const ficheros = ['./repo.ts', './hoja-repo.ts', './calibraciones-repo.ts', './exportacion-repo.ts', './maestro-repo.ts', './edicion-repo.ts', './retiros-repo.ts', './pasadas-nocturnas-repo.ts', './vigencia-repo.ts', './marcas-repo.ts'];
+  const ficheros = ['./repo.ts', './hoja-repo.ts', './calibraciones-repo.ts', './exportacion-repo.ts', './maestro-repo.ts', './edicion-repo.ts', './retiros-repo.ts', './pasadas-nocturnas-repo.ts', './vigencia-repo.ts', './marcas-repo.ts', './contratos-repo.ts'];
   it('sólo marcas-repo.ts inserta en tmc_marcas_vigencia y tmc_marcas_vigencia_cambios; nadie las cambia ni las borra', () => {
     const escriben = ficheros.filter((f) => /(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+portal\.tmc_marcas_vigencia/.test(fuente(f)));
     expect(escriben).toEqual(['./marcas-repo.ts']);

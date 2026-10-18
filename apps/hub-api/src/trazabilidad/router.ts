@@ -8,6 +8,7 @@ import { detallesDeTickets, huecosDeEtapa, proyectarAgenda, type RespuestaAgenda
 import { ejeAgenda } from './agenda-calendario.js';
 import { crearLectorCalibraciones, type LectorCalibraciones } from './calibraciones-desk2.js';
 import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
+import { cambiarContrato, leerContrato, listarContratos } from './contratos-repo.js';
 import { esFechaIso } from './dominio.js';
 import { anularCalibracion, anularPartida, registrarManual } from './edicion-repo.js';
 import { TIPO_XLSX } from './exportacion.js';
@@ -32,6 +33,8 @@ import {
   parseCambioMarca,
   parseVigenciaMarca,
   parseClaveMarca,
+  parseClaveCliente,
+  parseFrecuencia,
   parseCategoriaEstado,
   parseContacto,
   parseDuracionEtapa,
@@ -187,6 +190,8 @@ export function createTrazabilidadRouter(
       if (!esAdminPortal(req)) {
         const rol = await rolDe(req);
         if (!puede(rol, permiso)) {
+          // `contrato.write` (lote 12) no es de ningún rol: ningún rol que se asigne lo abre.
+          if (permiso === 'contrato.write') throw new TzError('forbidden_role', 403, `Tu rol en Trazabilidad (${ETIQUETA_ROL_APP[rol]}) no permite cambiar la frecuencia de preventivo de un cliente: sólo la cambia un administrador del portal.`);
           throw new TzError('forbidden_role', 403, `Tu rol en Trazabilidad (${ETIQUETA_ROL_APP[rol]}) no permite ${permiso === 'hoja.exportar' ? 'exportar la F-ST-022' : 'hacer este cambio'}. Pide a un administrador del portal que te asigne el rol que necesitas.`);
         }
       }
@@ -256,9 +261,10 @@ export function createTrazabilidadRouter(
   // El inventario: equipos con su estado, su seguimiento, su ticket abierto y
   // su contacto, más los contactos puestos a mano a clientes (`contactos`), que
   // la app necesita enteros para simular a quién iría cada aviso.
+  // Desde el lote 12, también la frecuencia de preventivo de cada cliente que la tiene guardada (`frecuencias`).
   const inventario = async (hoy: string) => {
-    const [equipos, ultimaImportacion, contactos] = await Promise.all([repo.listarEquipos(db, hoy), repo.ultimaImportacion(db), repo.listarContactos(db)]);
-    return { hoy, equipos, ultimaImportacion, contactos };
+    const [equipos, ultimaImportacion, contactos, frecuencias] = await Promise.all([repo.listarEquipos(db, hoy), repo.ultimaImportacion(db), repo.listarContactos(db), listarContratos(db)]);
+    return { hoy, equipos, ultimaImportacion, contactos, frecuencias };
   };
 
   router.get(
@@ -279,6 +285,19 @@ export function createTrazabilidadRouter(
       const hoy = hoyOf(req);
       await repo.guardarContacto(db, cambio, actorOf(req));
       return inventario(hoy);
+    }),
+  );
+
+  // Frecuencia de preventivo de un cliente según su contrato (lote 12, 064): meses o null (sin contrato). Con ella vencen sus equipos de
+  // las marcas «según contrato». Leerla, abierto; cambiarla, SÓLO el administrador del portal (`contrato.write`, de ningún rol), con
+  // motivo. Devuelve lo mismo que el GET de equipos, ya recalculado. No envía nada: los avisos siguen siendo manuales o simulados.
+  router.get('/trazabilidad/clientes/:clave/frecuencia', ...gated, route('tmc_contrato', async (req) => leerContrato(db, parseClaveCliente(req.params.clave))));
+  router.post(
+    '/trazabilidad/clientes/:clave/frecuencia',
+    ...gated,
+    escritura('contrato.write', 'tmc_contrato_cambiar', async (req) => {
+      await cambiarContrato(db, parseClaveCliente(req.params.clave), parseFrecuencia(req.body), actorOf(req));
+      return inventario(hoyEnColombia());
     }),
   );
 
