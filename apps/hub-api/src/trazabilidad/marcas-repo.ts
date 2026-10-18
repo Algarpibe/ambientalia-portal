@@ -20,6 +20,10 @@
  * Toma el bloqueo de la pasada de calibraciones (escribe calibraciones: una
  * pasada, una corrección a mano y esto van una detrás de otra) y el suyo.
  * marcas.test.ts vigila la lista de escrituras. No avisa a nadie.
+ *
+ * Lote 11 (063): cambiar la VIGENCIA de una marca (`cambiarVigencia`) es el
+ * único sitio que escribe `tmc_marcas_vigencia` y su apunte
+ * (vigencia-repo.test.ts lo vigila); con el bloqueo de las marcas y nada más.
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import { hoyEnColombia } from '../ausencias/saldo.js';
@@ -29,6 +33,7 @@ import { tablaHoja, type EquipoHoja } from './hoja.js';
 import { CLAVE_EDM180, claveMarca, marcasEnSeguimiento, planAdopcion, type Adopcion, type CambioMarca, type MarcaGuardada, type RespuestaMarcas } from './marcas.js';
 import { withTransaction } from './repo.js';
 import { TzError, type Actor } from './types.js';
+import { leerCambiosVigencia, leerVigenciasConFirma } from './vigencia-repo.js';
 
 type Db = Pick<Awaited<ReturnType<Pool['connect']>>, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,13 +80,44 @@ async function escribirAdopcion(c: Db, a: Adopcion, actor: Actor): Promise<void>
   }
 }
 
-/** GET /trazabilidad/marcas: cada marca con su vista previa a `hoy` y los últimos cambios. Sólo recuentos y firmas. */
+/** GET /trazabilidad/marcas: cada marca con su vista previa a `hoy`, su vigencia y los últimos cambios. Sólo recuentos, fechas sueltas y firmas. */
 export async function leerMarcas(db: Db, hoy: string): Promise<RespuestaMarcas> {
   const { tabla, equipos, sinClave } = await leer(db, hoy);
   const g = await guardadas(db);
+  const vigencias = await leerVigenciasConFirma(db);
   const { rows } = await db.query(`SELECT id, clave, marca, accion, motivo, equipos, partidas, enlazadas, por, en::text AS en FROM portal.tmc_marcas_cambios ORDER BY id DESC LIMIT ${CAMBIOS_MAX}`);
   const cambios = (rows as Row[]).map((r): CambioMarca => ({ id: Number(r.id), clave: r.clave, marca: r.marca, accion: r.accion, motivo: r.motivo, equipos: r.equipos, partidas: r.partidas, enlazadas: r.enlazadas, por: r.por, en: r.en }));
-  return { hoy, marcas: marcasEnSeguimiento({ tabla, equipos, guardadas: g, sinClave }), cambios };
+  return { hoy, marcas: marcasEnSeguimiento({ tabla, equipos, guardadas: g, sinClave, vigencias }), cambios, cambiosVigencia: await leerCambiosVigencia(db, CAMBIOS_MAX) };
+}
+
+/**
+ * Lote 11: la vigencia de calibración de una marca (`dias`: entero de 30 a 1095, o null = sin vencimiento), con motivo y firma, todo o
+ * nada: la fila de `tmc_marcas_vigencia` y su apunte, con el valor de antes. 409 `marca_fija` para GRIMM EDM 180 (365, siempre); 404 si
+ * la marca no tiene equipos fuera de seguimiento ni está guardada; 409 `misma_vigencia` si ya tenía ese valor (no escribe nada). No toca
+ * ningún equipo ni ninguna calibración: el estado de cada equipo lo recalcula la regla en la lectura siguiente. Devuelve las marcas.
+ */
+export async function cambiarVigencia(db: Pool, clave: string, cambio: { dias: number | null; motivo: string }, actor: Actor, hoy: string): Promise<RespuestaMarcas> {
+  if (clave === CLAVE_EDM180) throw new TzError('marca_fija', 409, 'GRIMM EDM 180 vence siempre a los 365 días (12 meses): su vigencia no se cambia.');
+  await withTransaction(db, async (c) => {
+    await c.query(BLOQUEO_MARCAS);
+    const { tabla, equipos, sinClave } = await leer(c, hoy);
+    const marca = marcasEnSeguimiento({ tabla, equipos, guardadas: await guardadas(c), sinClave, vigencias: await leerVigenciasConFirma(c) }).find((m) => m.clave === clave);
+    if (!marca) throw new TzError('not_found', 404, 'No hay ningún equipo de esa marca en el portal.');
+    if (marca.vigencia.dias === cambio.dias) throw new TzError('misma_vigencia', 409, 'Esa marca ya tiene esa vigencia: no se ha cambiado nada.');
+    const nombre = marca.marca.slice(0, 60);
+    await c.query(
+      `INSERT INTO portal.tmc_marcas_vigencia (clave, marca, dias, motivo, por_id, por, en)
+       VALUES ($1, $2, $3, $4, $5::uuid, $6, NOW())
+       ON CONFLICT (clave) DO UPDATE SET marca = EXCLUDED.marca, dias = EXCLUDED.dias, motivo = EXCLUDED.motivo, por_id = EXCLUDED.por_id, por = EXCLUDED.por, en = NOW()`,
+      [clave, nombre, cambio.dias, cambio.motivo, actor.userId, actor.email],
+    );
+    await c.query(
+      `INSERT INTO portal.tmc_marcas_vigencia_cambios (clave, marca, antes, despues, motivo, por_id, por)
+       VALUES ($1, $2, $3, $4, $5, $6::uuid, $7)`,
+      [clave, nombre, marca.vigencia.dias, cambio.dias, cambio.motivo, actor.userId, actor.email],
+    );
+  });
+  return leerMarcas(db, hoy);
 }
 
 /**
@@ -99,7 +135,7 @@ export async function cambiarMarca(db: Pool, clave: string, cambio: { incluir: b
     const suyos = equipos.filter((q) => q.enSeguimiento === false && claveMarca(q.marca) === clave);
     if (!g && suyos.length === 0) throw new TzError('not_found', 404, 'No hay ningún equipo de esa marca en el portal.');
     if ((g?.incluida ?? false) === cambio.incluir) throw new TzError(cambio.incluir ? 'ya_incluida' : 'no_incluida', 409, cambio.incluir ? 'Esa marca ya está en seguimiento: no se ha cambiado nada.' : 'Esa marca no está en seguimiento: no se ha cambiado nada.');
-    const marca = marcasEnSeguimiento({ tabla, equipos, guardadas: g ? [g] : [], sinClave }).find((m) => m.clave === clave)!;
+    const marca = marcasEnSeguimiento({ tabla, equipos, guardadas: g ? [g] : [], sinClave, vigencias: [] }).find((m) => m.clave === clave)!;
     const adopcion = cambio.incluir ? planAdopcion(tabla, new Set(suyos.map((q) => q.clave)), sinClave) : { partidas: [], enlazar: [] };
     await escribirAdopcion(c, adopcion, actor);
     const nombre = marca.marca.slice(0, 60);

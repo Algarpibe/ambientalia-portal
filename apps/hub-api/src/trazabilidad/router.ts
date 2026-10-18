@@ -15,7 +15,7 @@ import { exportarHoja, leerExportaciones } from './exportacion-repo.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
 import { leerHoja } from './hoja-repo.js';
 import { crearLectorMaestro, type LectorMaestro } from './maestro-desk2.js';
-import { cambiarMarca, leerMarcas } from './marcas-repo.js';
+import { cambiarMarca, cambiarVigencia, leerMarcas } from './marcas-repo.js';
 import { leerCruceFst022, leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
 import { ultimaNocturna } from './pasadas-nocturnas-repo.js';
 import { festivosDelEje } from './plazos.js';
@@ -30,6 +30,7 @@ import {
   parseAvisos,
   parseCalibracionManual,
   parseCambioMarca,
+  parseVigenciaMarca,
   parseClaveMarca,
   parseCategoriaEstado,
   parseContacto,
@@ -450,6 +451,8 @@ export function createTrazabilidadRouter(
   // No envía nada: los avisos siguen siendo manuales o simulados.
   router.get('/trazabilidad/marcas', ...gated, route('tmc_marcas', async (req) => leerMarcas(db, hoyAgenda(req))));
   router.post('/trazabilidad/marcas/:clave', ...gated, escritura('inventario.write', 'tmc_marca_cambiar', async (req) => cambiarMarca(db, parseClaveMarca(req.params.clave), parseCambioMarca(req.body), actorOf(req), hoyEnColombia())));
+  // Lote 11: la vigencia de calibración de una marca (días, o sin vencimiento). Mete o saca equipos de Avisos: el permiso del interruptor.
+  router.post('/trazabilidad/marcas/:clave/vigencia', ...gated, escritura('inventario.write', 'tmc_marca_vigencia', async (req) => cambiarVigencia(db, parseClaveMarca(req.params.clave), parseVigenciaMarca(req.body), actorOf(req), hoyEnColombia())));
 
   router.put(
     '/trazabilidad/seguimiento/:clave',

@@ -35,7 +35,8 @@ export interface TicketCalibracion { numero: number; fecha: string | null; campo
 /** Una fila guardada. `anuladaAMano` = anulada por una persona, no por una pasada: la pasada no la resucita. */
 export interface FilaCalibracion { id: number; clave: string | null; serial: string; deskEquipoId: string | null; fecha: string; origen: OrigenCalibracion; ticket: number | null; estado: EstadoFilaCalibracion; corrigeTicket: number | null; corrigeFecha: string | null; anuladaAMano: boolean }
 /** Un equipo del inventario del portal (activo o no) con la fecha que le dejó la última importación. */
-export interface EquipoInventario { clave: string; serial: string; activo: boolean; deskId: string | null; ultimaCalibracion: string | null }
+/** `vigenciaMarca` (lote 11): la de su marca en días, null = sin vencimiento; con ella se cuenta quién sale o entra en avisos. */
+export interface EquipoInventario { clave: string; serial: string; activo: boolean; deskId: string | null; ultimaCalibracion: string | null; vigenciaMarca: number | null }
 /** Una fila de equipo de la congelación vigente: su clave en el inventario, su serial y su «Última Calibración». */
 export interface FilaPartida { clave: string | null; serialNorm: string | null; fecha: string | null }
 
@@ -236,15 +237,15 @@ export function planCalibraciones(e: EntradaPlanCalibraciones): PlanCalibracione
   ];
   const antesDe = agrupar(filas, (f) => f.clave);
   const despuesDe = agrupar(despues, (f) => f.clave);
-  const enAvisos = (fecha: string | null): boolean => ESTADOS_AVISO.includes(estadoCalibracion(fecha, hoy).estado);
+  const enAvisos = (fecha: string | null, vigencia: number | null): boolean => ESTADOS_AVISO.includes(estadoCalibracion(fecha, hoy, vigencia).estado);
   for (const q of equipos) {
     const antes = fechaEfectiva(antesDe.get(q.clave) ?? [], q.ultimaCalibracion, hoy);
     const luego = fechaEfectiva(despuesDe.get(q.clave) ?? [], q.ultimaCalibracion, hoy);
     r.historial += altas.filter((a) => a.clave === q.clave && a.origen === 'desk' && a.estado === 'vigente' && antes !== null && a.fecha < antes).length;
     if (!q.activo || antes === luego) continue;
     r.equiposCambian++;
-    if (enAvisos(antes) && !enAvisos(luego)) r.salenDeAvisos++;
-    if (!enAvisos(antes) && enAvisos(luego)) r.entranEnAvisos++;
+    if (enAvisos(antes, q.vigenciaMarca) && !enAvisos(luego, q.vigenciaMarca)) r.salenDeAvisos++;
+    if (!enAvisos(antes, q.vigenciaMarca) && enAvisos(luego, q.vigenciaMarca)) r.entranEnAvisos++;
   }
   detalle.sort((a, b) => TIPOS_DETALLE.indexOf(a.tipo) - TIPOS_DETALLE.indexOf(b.tipo));
   return { recuentos: r, altas, anular, detalle };
