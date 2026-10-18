@@ -1,7 +1,7 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
 import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
-import type { ApunteRetiro, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaMarcas, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
+import type { ApunteRetiro, ConNocturna, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaMarcas, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -93,13 +93,13 @@ export const api = {
   /** La última exportación (quién, cuándo, cuántas filas) y cuántas van. Sólo la firma y recuentos. */
   exportaciones: () => request<RespuestaExportaciones>('GET', '/exportaciones'),
   /** El plan del cruce del inventario con el maestro de equipos de Desk 2.0, en recuentos (y su detalle, sólo si puedo sincronizar). No escribe. */
-  planMaestro: () => request<RespuestaPlanMaestro>('GET', '/maestro/plan'),
+  planMaestro: () => request<ConNocturna<RespuestaPlanMaestro>>('GET', '/maestro/plan'),
   /** Cruce informativo, por marca, de la F-ST-022 congelada con el maestro. Sólo recuentos; no escribe. */
   cruceMaestro: () => request<RespuestaCruceFst022>('GET', '/maestro/cruce'),
   /** Aplica el plan que se revisó (su `huella`): 409 si ya es otro o si Desk 2.0 no contesta. Devuelve su fila de auditoría. */
   sincronizarMaestro: (huella: string) => request<SincronizacionMaestro>('POST', '/maestro/sincronizar', { huella }),
   /** El plan de las calibraciones que hay en los tickets de Desk 2.0, en recuentos, con la salud de la lectura (y su detalle, sólo si puedo traerlas). No escribe. */
-  planCalibraciones: () => request<RespuestaPlanCalibraciones>('GET', '/calibraciones/plan'),
+  planCalibraciones: () => request<ConNocturna<RespuestaPlanCalibraciones>>('GET', '/calibraciones/plan'),
   /** Aplica el plan que se revisó (su `huella`): 409 si ya es otro, si Desk 2.0 no contesta o si ningún ticket trae ya el campo. Devuelve la fila de su pasada. */
   traerCalibraciones: (huella: string) => request<PasadaCalibraciones>('POST', '/calibraciones/sincronizar', { huella }),
   /** El historial de calibraciones de un equipo (la más reciente primero) y cuál es la que cuenta. */

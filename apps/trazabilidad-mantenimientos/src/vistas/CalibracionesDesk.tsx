@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import type { RespuestaPlanCalibraciones } from '../dominio';
+import type { ConNocturna, RespuestaPlanCalibraciones } from '../dominio';
 import { bloquesDetalle, hayQueTraer, lineasPlan, textoUltima } from '../lib/calibraciones';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Loading, Modal, Tag } from '../ui';
-import { Bloque, Lineas } from './MaestroEquipos';
+import { Bloque, LineaNocturna, Lineas } from './MaestroEquipos';
 
 interface Props {
   notificar: (msg: string) => void;
@@ -24,7 +24,7 @@ interface Props {
  */
 export default function CalibracionesDesk({ notificar, onTraidas }: Props) {
   const { puede, motivo } = usePermisos();
-  const [datos, setDatos] = useState<RespuestaPlanCalibraciones | null>(null);
+  const [datos, setDatos] = useState<ConNocturna<RespuestaPlanCalibraciones> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmar, setConfirmar] = useState(false);
   const [aplicando, setAplicando] = useState(false);
@@ -72,7 +72,7 @@ export default function CalibracionesDesk({ notificar, onTraidas }: Props) {
   return (
     <Card
       title="Calibraciones · Desk 2.0"
-      hint="La última calibración de cada equipo sale del campo «Fecha de Calibración» de sus tickets en Desk 2.0, sobre el punto de partida de la F-ST-022 congelada. Se traen a mano, después de ver el plan: no hay pasada automática, y aquí no se edita ninguna fecha."
+      hint="La última calibración de cada equipo sale del campo «Fecha de Calibración» de sus tickets en Desk 2.0, sobre el punto de partida de la F-ST-022 congelada. Cada noche a las 02:00 se traen solas si el plan es limpio; si no, quedan retenidas y se traen a mano, después de ver el plan. Aquí no se edita ninguna fecha."
       actions={trae && plan && !salud?.bloquea ? <Button variant="primary" onClick={() => { setErrorAplicar(null); setConfirmar(true); }}>Traer calibraciones de Desk 2.0</Button> : undefined}
     >
       {error && <Alert tone="red">{error}</Alert>}
@@ -96,6 +96,7 @@ export default function CalibracionesDesk({ notificar, onTraidas }: Props) {
             </Alert>
           )}
           <p className="text-xs text-gray-500">Última pasada: {datos.ultima ? textoUltima(datos.ultima) : 'todavía ninguna'}</p>
+          <LineaNocturna nocturna={datos.nocturna ?? null} />
           {plan && (
             <>
               <h3 className="font-semibold text-gray-900">Plan: qué pasaría al traerlas ahora</h3>

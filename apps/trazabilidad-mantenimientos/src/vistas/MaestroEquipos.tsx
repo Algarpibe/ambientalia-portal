@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import type { CambioMaestro, EquipoRevisar, RespuestaCruceFst022, RespuestaPlanMaestro } from '../dominio';
+import type { CambioMaestro, ConNocturna, EquipoRevisar, PasadaNocturna, RespuestaCruceFst022, RespuestaPlanMaestro } from '../dominio';
 import { bloquesDetalle, bloquesHoja, hayQueAplicar, hayQueAplicarOtras, lineasOtras, lineasPlan, textoCambio, textoFilaHoja, textoUltima, type LineaPlan } from '../lib/maestro';
+import { lineaNocturna } from '../lib/nocturna';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Card, Loading, Modal, Tag } from '../ui';
 
@@ -47,6 +48,25 @@ export function Lineas({ lineas }: { lineas: LineaPlan[] }) {
   );
 }
 
+/**
+ * «Pasada nocturna: …» (lote 10): cómo acabó la última que salió sola. Si se
+ * retuvo, en ámbar y con sus motivos: el plan de debajo es el que hay que
+ * revisar, y se aplica con el botón de siempre.
+ */
+export function LineaNocturna({ nocturna }: { nocturna: PasadaNocturna | null }) {
+  const l = lineaNocturna(nocturna);
+  if (l.tono !== 'ambar') return <p className={`text-xs ${l.tono === 'rojo' ? 'font-semibold text-red-700' : 'text-gray-500'}`}>{l.texto}</p>;
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+      <p className="font-semibold">{l.texto}</p>
+      <ul className="mt-1 list-disc pl-5">
+        {l.motivos.map((m) => <li key={m}>{m}</li>)}
+      </ul>
+      <p className="mt-1">No se aplicó nada. Revisa el plan de abajo y, si está bien, aplícalo con el botón de siempre.</p>
+    </div>
+  );
+}
+
 const cambio = (c: CambioMaestro): [string, string] => [c.clave, textoCambio(c)];
 const equipo = (e: EquipoRevisar): [string, string] => [`${e.origen === 'desk' ? 'Desk 2.0' : 'Portal'} · ${e.serial}`, `${e.cliente || '(sin cliente)'}${e.activo ? '' : ' · inactivo'}`];
 
@@ -66,7 +86,8 @@ export function Bloque({ titulo, nota, items, abierto = false }: { titulo: strin
 
 /**
  * «Maestro de equipos · Desk 2.0», en Configuración: el inventario de GRIMM EDM
- * 180 se alimenta de los equipos de Desk 2.0, a mano. Desde el lote 9d-2a el
+ * 180 se alimenta de los equipos de Desk 2.0, a mano (y, desde el lote 10,
+ * cada noche si el plan es limpio: `LineaNocturna`). Desde el lote 9d-2a el
  * plan trae dos bloques: ése (en seguimiento) y las otras marcas, que se
  * enlazan sólo para la pestaña «Trazabilidad F-ST-022» y NO generan avisos;
  * más el cruce con la hoja congelada por marca. La ve cualquiera con la
@@ -78,7 +99,7 @@ export function Bloque({ titulo, nota, items, abierto = false }: { titulo: strin
  */
 export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
   const { puede, motivo } = usePermisos();
-  const [datos, setDatos] = useState<RespuestaPlanMaestro | null>(null);
+  const [datos, setDatos] = useState<ConNocturna<RespuestaPlanMaestro> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cruce, setCruce] = useState<RespuestaCruceFst022 | null>(null);
   const [errorCruce, setErrorCruce] = useState<string | null>(null);
@@ -140,7 +161,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
   return (
     <Card
       title="Maestro de equipos · Desk 2.0"
-      hint="El inventario de GRIMM EDM 180 sale de los equipos de Desk 2.0; las otras marcas se enlazan sólo para la pestaña «Trazabilidad F-ST-022». Se sincroniza a mano, después de ver el plan: no hay sincronización automática. La fecha de calibración no se toca."
+      hint="El inventario de GRIMM EDM 180 sale de los equipos de Desk 2.0; las otras marcas se enlazan sólo para la pestaña «Trazabilidad F-ST-022». Cada noche a las 02:00 se aplica solo si el plan es limpio; si no, queda retenido y se sincroniza a mano, después de ver el plan. La fecha de calibración no se toca."
       actions={sincroniza && plan ? <Button variant="primary" onClick={() => { setErrorAplicar(null); setConfirmar(true); }}>Sincronizar con Desk 2.0</Button> : undefined}
     >
       {error && <Alert tone="red">{error}</Alert>}
@@ -159,6 +180,7 @@ export default function MaestroEquipos({ notificar, onSincronizado }: Props) {
             </Alert>
           )}
           <p className="text-xs text-gray-500">Última sincronización: {datos.ultima ? textoUltima(datos.ultima) : 'todavía ninguna'}</p>
+          <LineaNocturna nocturna={datos.nocturna ?? null} />
           {plan && (
             <>
               <h3 className="font-semibold text-gray-900">Plan: qué pasaría al sincronizar ahora</h3>
