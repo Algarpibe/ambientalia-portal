@@ -10,6 +10,8 @@ import {
   limpiarRetiro,
 } from './repo.js';
 import { retirarEmpleado, reactivarEmpleado, crearSolicitud, listaDeRetirados } from './service.js';
+import { hoyEnColombia } from './saldo.js';
+import { sumarDias, diaDeSemana } from './festivos.js';
 
 // La baja de empleados contra Postgres de verdad.
 //
@@ -468,20 +470,32 @@ describe('retirarEmpleado', () => {
 });
 
 describe('no se piden dias mas alla del retiro', () => {
+  // Fechas relativas a hoy y no fijas: crearSolicitud rechaza unas vacaciones
+  // que empiezan en el pasado (`fecha_en_pasado`), asi que con fechas fijas
+  // estos dos tests caducaron solos en cuanto el calendario las adelanto y
+  // fallaban por la regla equivocada.
+  //
+  // El retiro cae en miercoles, al menos tres semanas por delante: el candado
+  // pide de lunes a miercoles y el 409 de lunes a viernes de la semana
+  // siguiente. La forma es la de las fechas originales (30-sep-2026 era
+  // miercoles) y ningun rango cae entero en fin de semana.
+  const base = sumarDias(hoyEnColombia(), 21);
+  const retiro = sumarDias(base, (3 - diaDeSemana(base) + 7) % 7);
+
   it('409 al pedir vacaciones que terminan despues de la fecha de retiro', async () => {
     const id = await sembrarEmpleado(db, 'limite@baja.test');
-    await fijarRetiro(db, id, '2026-09-30', 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co');
     await expect(
       crearSolicitud(db, { email: 'limite@baja.test', userId: null, esAdmin: false },
-        { tipo: 'vacaciones', fechaInicio: '2026-10-05', fechaFin: '2026-10-09', comentarios: '' }),
+        { tipo: 'vacaciones', fechaInicio: sumarDias(retiro, 5), fechaFin: sumarDias(retiro, 9), comentarios: '' }),
     ).rejects.toMatchObject({ code: 'fecha_posterior_al_retiro', status: 409 });
   });
 
   it('CANDADO: hasta su ultimo dia SI puede pedir', async () => {
     const id = await sembrarEmpleado(db, 'hasta@baja.test');
-    await fijarRetiro(db, id, '2026-09-30', 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co');
     const s = await crearSolicitud(db, { email: 'hasta@baja.test', userId: null, esAdmin: false },
-      { tipo: 'vacaciones', fechaInicio: '2026-09-28', fechaFin: '2026-09-30', comentarios: '' });
+      { tipo: 'vacaciones', fechaInicio: sumarDias(retiro, -2), fechaFin: retiro, comentarios: '' });
     expect(s.estado).toBe('pendiente');
   });
 
