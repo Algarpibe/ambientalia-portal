@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { SEGUN_CONTRATO, VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, valorVigencia, type MarcaSeguimiento, type RespuestaMarcas } from '../dominio';
 import { efectoMarca, efectoVigencia, lineasVistaPrevia, lineasVistaVigencia, textoCambioMarca, textoCambioVigencia, textoDias, textoValorVigencia, vigenciaElegida } from '../lib/marcas';
@@ -35,6 +35,11 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
   const [modo, setModo] = useState<'sin' | 'dias' | 'contrato'>('sin');
   const [dias, setDias] = useState('');
   const [enviando, setEnviando] = useState(false);
+  /** El formulario se abre bajo la tabla: al abrirlo se lleva a la vista, o pulsar en una fila de arriba parece no hacer nada. */
+  const formulario = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (accion) formulario.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, [accion]);
 
   const cargar = useCallback(async () => {
     try {
@@ -171,7 +176,7 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
         </div>
       )}
       {accion && elegida && datos && (
-        <form onSubmit={(ev) => void confirmar(ev)} aria-label={titulo} className="mt-3 flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
+        <form ref={formulario} onSubmit={(ev) => void confirmar(ev)} aria-label={titulo} className="mt-3 flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50/40 p-3">
           <p className="font-semibold text-gray-900">{titulo}</p>
           {accion.tipo === 'vigencia' ? (
             <>
