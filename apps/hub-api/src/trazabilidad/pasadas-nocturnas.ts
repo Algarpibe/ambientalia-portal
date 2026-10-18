@@ -13,7 +13,8 @@
  *     Los cambios de modelo y de cliente que sólo es otra forma de escribir el
  *     nombre se aplican solos. Además (prudencia del lote, revisable): retiene
  *     si algún contacto puesto a mano se quedaría sin equipos, porque entonces
- *     el aviso de ese cliente cambiaría de destinatario sin que nadie lo vea.
+ *     ese cliente dejaría de usar el contacto que alguien le puso, sin que
+ *     nadie lo vea.
  *   · calibraciones: retiene si la salud de la lectura avisa o bloquea, si hay
  *     fechas cambiadas, vaciadas, re-enlazadas o en revisión (que son todas las
  *     anulaciones del plan: anular = cambiadas + reenlazadas + vaciadas) o más

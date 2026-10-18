@@ -210,8 +210,8 @@ describe('061_trazabilidad_marcas_seguimiento.sql', () => {
     expect(sinComentarios).not.toMatch(/cliente|\bserial\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 060, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'060_trazabilidad_exportaciones\.sql',\s*'061_trazabilidad_marcas_seguimiento\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 060 (la última es la 062: pasadas-nocturnas-repo.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'060_trazabilidad_exportaciones\.sql',\s*'061_trazabilidad_marcas_seguimiento\.sql',/);
   });
 });
 
