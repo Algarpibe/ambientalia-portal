@@ -11,6 +11,9 @@ import {
   diasEntre,
   esFechaIso,
   estadoCalibracion,
+  ESTADOS,
+  ESTADOS_AVISO,
+  ETIQUETA_ESTADO,
   estadoPlazo,
   etiquetaEstadoDesk,
   modeloDeCodigo,
@@ -53,31 +56,55 @@ describe('estadoCalibracion (regla de la F-ST-022: vigencia = última calibraci�
   it('reproduce la columna «Vigencia de Calibración (Días)» de la hoja', () => {
     // 18A00006 (Cliente Cuatro), calibrado el 17/10/2025: la hoja da 12 días el 05/10;
     // hoy 06/10 son 11.
-    expect(estadoCalibracion('2025-10-17', hoy)).toEqual({ vence: '2026-10-17', vigenciaDias: 11, estado: 'VENCE_30' });
+    expect(estadoCalibracion('2025-10-17', hoy, 365)).toEqual({ vence: '2026-10-17', vigenciaDias: 11, estado: 'VENCE_30' });
   });
 
   it('clasifica en las franjas 30/60/90', () => {
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 30), hoy).estado).toBe('VENCE_30');
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 31), hoy).estado).toBe('VENCE_60');
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 60), hoy).estado).toBe('VENCE_60');
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 61), hoy).estado).toBe('VENCE_90');
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 90), hoy).estado).toBe('VENCE_90');
-    expect(estadoCalibracion(sumarDias(hoy, -365 + 91), hoy).estado).toBe('AL_DIA');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 30), hoy, 365).estado).toBe('VENCE_30');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 31), hoy, 365).estado).toBe('VENCE_60');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 60), hoy, 365).estado).toBe('VENCE_60');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 61), hoy, 365).estado).toBe('VENCE_90');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 90), hoy, 365).estado).toBe('VENCE_90');
+    expect(estadoCalibracion(sumarDias(hoy, -365 + 91), hoy, 365).estado).toBe('AL_DIA');
   });
 
   it('vence hoy cuenta como «vence ≤ 30», no como vencida', () => {
-    expect(estadoCalibracion(sumarDias(hoy, -365), hoy)).toMatchObject({ vigenciaDias: 0, estado: 'VENCE_30' });
-    expect(estadoCalibracion(sumarDias(hoy, -366), hoy)).toMatchObject({ vigenciaDias: -1, estado: 'VENCIDA' });
+    expect(estadoCalibracion(sumarDias(hoy, -365), hoy, 365)).toMatchObject({ vigenciaDias: 0, estado: 'VENCE_30' });
+    expect(estadoCalibracion(sumarDias(hoy, -366), hoy, 365)).toMatchObject({ vigenciaDias: -1, estado: 'VENCIDA' });
   });
 
   it('vencida hace más de un año pasa a FUERA_CICLO (Estado = 1 en la hoja)', () => {
-    expect(estadoCalibracion(sumarDias(hoy, -730), hoy)).toMatchObject({ vigenciaDias: -365, estado: 'VENCIDA' });
-    expect(estadoCalibracion(sumarDias(hoy, -731), hoy)).toMatchObject({ vigenciaDias: -366, estado: 'FUERA_CICLO' });
+    expect(estadoCalibracion(sumarDias(hoy, -730), hoy, 365)).toMatchObject({ vigenciaDias: -365, estado: 'VENCIDA' });
+    expect(estadoCalibracion(sumarDias(hoy, -731), hoy, 365)).toMatchObject({ vigenciaDias: -366, estado: 'FUERA_CICLO' });
   });
 
   it('sin fecha o con fecha inválida es SIN_FECHA', () => {
-    expect(estadoCalibracion(null, hoy)).toEqual({ vence: null, vigenciaDias: null, estado: 'SIN_FECHA' });
-    expect(estadoCalibracion('2026-13-01', hoy).estado).toBe('SIN_FECHA');
+    expect(estadoCalibracion(null, hoy, 365)).toEqual({ vence: null, vigenciaDias: null, estado: 'SIN_FECHA' });
+    expect(estadoCalibracion('2026-13-01', hoy, 365).estado).toBe('SIN_FECHA');
+  });
+
+  // Lote 11 (decisión de Alfonso, 18/10/2026): la vigencia es de la MARCA. GRIMM, 365 días; las que no tienen plazo fijo (Horiba: se
+  // calibra con el preventivo de su contrato), sin vencimiento. La vigencia llega como argumento: aquí no se decide de quién es.
+  it('sin vigencia (marca sin plazo fijo): SIN_VENCIMIENTO, sin «vence» ni días, aunque la fecha sea de hace años', () => {
+    for (const fecha of ['2026-10-01', '2025-09-03', '2019-01-01']) expect(estadoCalibracion(fecha, hoy, null)).toEqual({ vence: null, vigenciaDias: null, estado: 'SIN_VENCIMIENTO' });
+  });
+
+  it('sin fecha manda sobre sin vencimiento: un equipo sin calibración conocida sigue diciendo SIN_FECHA', () => {
+    expect(estadoCalibracion(null, hoy, null)).toEqual({ vence: null, vigenciaDias: null, estado: 'SIN_FECHA' });
+    expect(estadoCalibracion('2026-13-01', hoy, null).estado).toBe('SIN_FECHA');
+  });
+
+  it('con otra vigencia, vence a sus días; los tramos 30/60/90 son los mismos y «+1 año» sigue siendo vencida hace más de 365 días', () => {
+    expect(estadoCalibracion('2026-04-09', hoy, 180)).toEqual({ vence: '2026-10-06', vigenciaDias: 0, estado: 'VENCE_30' });
+    expect(estadoCalibracion(sumarDias(hoy, -730 + 91), hoy, 730).estado).toBe('AL_DIA');
+    expect(estadoCalibracion(sumarDias(hoy, -180 - 365), hoy, 180)).toMatchObject({ vigenciaDias: -365, estado: 'VENCIDA' });
+    expect(estadoCalibracion(sumarDias(hoy, -180 - 366), hoy, 180)).toMatchObject({ vigenciaDias: -366, estado: 'FUERA_CICLO' });
+  });
+
+  it('SIN_VENCIMIENTO va entre «al día» y «sin fecha», no pide aviso y se enseña «Sin vencimiento»', () => {
+    expect(ESTADOS.slice(-3)).toEqual(['AL_DIA', 'SIN_VENCIMIENTO', 'SIN_FECHA']);
+    expect(ESTADOS_AVISO).not.toContain('SIN_VENCIMIENTO');
+    expect(ETIQUETA_ESTADO.SIN_VENCIMIENTO).toBe('Sin vencimiento');
   });
 });
 

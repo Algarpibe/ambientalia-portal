@@ -35,7 +35,8 @@ const FUERA = '2024-03-26';
 const AL_DIA = '2026-08-01';
 
 let n = 0;
-type Extra = { aviso?: string | null; enAmbientalia?: boolean; ticket?: boolean; contacto?: ContactoEquipo | null };
+type Extra = { aviso?: string | null; enAmbientalia?: boolean; ticket?: boolean; contacto?: ContactoEquipo | null; vigencia?: number | null };
+/** Un GRIMM EDM 180 (vigencia de su marca: 365 días), salvo que se diga otra (`vigencia: null` = marca sin vencimiento). */
 function eq(cliente: string, ultimaCalibracion: string | null, x: Extra = {}): EquipoAviso {
   const serial = `18A${String(++n).padStart(5, '0')}`;
   return {
@@ -44,6 +45,7 @@ function eq(cliente: string, ultimaCalibracion: string | null, x: Extra = {}): E
     cliente,
     modelo: 'EDM 180C',
     ultimaCalibracion,
+    vigenciaMarca: x.vigencia === undefined ? 365 : x.vigencia,
     seguimiento: x.aviso !== undefined || x.enAmbientalia !== undefined ? { enAmbientalia: x.enAmbientalia ?? false, avisoEnviado: x.aviso ?? null } : null,
     ticket: x.ticket ? { numero: 962 } : null,
     contacto: x.contacto === undefined ? null : x.contacto,
@@ -157,8 +159,8 @@ describe('tramos del aviso', () => {
 
   it('el día de entrada es el primero en que el equipo tiene ya el estado de ese tramo', () => {
     // vence 2026-12-02: el 2026-10-02 quedan 61 d (aún VENCE_90) y el 2026-10-03 quedan 60 (ya VENCE_60).
-    expect(estadoCalibracion(EN_60, '2026-10-02').estado).toBe('VENCE_90');
-    expect(estadoCalibracion(EN_60, '2026-10-03').estado).toBe('VENCE_60');
+    expect(estadoCalibracion(EN_60, '2026-10-02', 365).estado).toBe('VENCE_90');
+    expect(estadoCalibracion(EN_60, '2026-10-03', 365).estado).toBe('VENCE_60');
   });
 });
 
@@ -291,6 +293,23 @@ describe('planAvisos: un correo simulado por cliente y tramo', () => {
     const p = planAvisos([eq('Cliente Uno', VENCIDA, { contacto: desk('compras@cliente-uno.example') }), eq('Cliente Uno', FUERA, { contacto: desk('compras@cliente-uno.example') })], HOY);
     expect(p.correos).toEqual([]);
     expect(p.sinDestinatario).toEqual([]);
+  });
+
+  // Lote 11: un equipo de una marca SIN VENCIMIENTO (Horiba, hasta que Alfonso le ponga un plazo) nunca entra en el plan: ni correo,
+  // ni «sin destinatario», ni vencidas sin aviso, ni fuera de ciclo, ni ya avisados o en servicio. Con la misma fecha y 365 días, sí.
+  it('un equipo sin vencimiento no entra en NINGUNA lista del plan, tenga la fecha que tenga y con contacto', () => {
+    const c = { contacto: desk('compras@cliente-uno.example') };
+    const sin = [EN_90, EN_60, EN_30, VENCIDA, FUERA, AL_DIA].flatMap((f) => [eq('Cliente Uno', f, { ...c, vigencia: null }), eq('Cliente Uno', f, { ...c, vigencia: null, aviso: '2026-10-05' }), eq('Cliente Uno', f, { ...c, vigencia: null, ticket: true })]);
+    for (const e of sin) expect(evaluarAviso(e, HOY)).toMatchObject({ estado: 'SIN_VENCIMIENTO', motivo: 'SIN_TRAMO', tramo: null, vence: null, diasParaVencer: null });
+    const p = planAvisos(sin, HOY);
+    expect([p.correos, p.sinDestinatario, p.yaAvisados, p.enServicio, p.vencidasSinAviso, p.fueraCiclo]).toEqual([[], [], [], [], [], []]);
+    const con = planAvisos([EN_30, VENCIDA, FUERA].map((f) => eq('Cliente Uno', f, c)), HOY);
+    expect([con.correos.length, con.vencidasSinAviso.length, con.fueraCiclo.length]).toEqual([1, 1, 1]);
+  });
+
+  it('con otra vigencia de su marca, el tramo sale de ella: 180 días calibrado el 2026-04-30 vence el 2026-10-27 (tramo 30)', () => {
+    expect(evaluarAviso(eq('Cliente Uno', '2026-04-30', { vigencia: 180 }), HOY)).toMatchObject({ estado: 'VENCE_30', vence: '2026-10-27', tramo: 30, motivo: 'DEBIDO' });
+    expect(evaluarAviso(eq('Cliente Uno', '2026-04-30'), HOY)).toMatchObject({ estado: 'AL_DIA', motivo: 'SIN_TRAMO' });
   });
 
   it('como mucho cinco destinatarios puestos a mano: es el tope del contacto', () => {

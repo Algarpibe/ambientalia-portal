@@ -174,8 +174,8 @@ describe('062_trazabilidad_pasadas_nocturnas.sql', () => {
     expect(sinComentarios).not.toMatch(/cliente|\bserial\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 061, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'061_trazabilidad_marcas_seguimiento\.sql',\s*'062_trazabilidad_pasadas_nocturnas\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 061 (la última es la 063: vigencia-repo.test.ts)', () => {
+    expect(fuente('../db.ts')).toMatch(/'061_trazabilidad_marcas_seguimiento\.sql',\s*'062_trazabilidad_pasadas_nocturnas\.sql',/);
   });
 });
 

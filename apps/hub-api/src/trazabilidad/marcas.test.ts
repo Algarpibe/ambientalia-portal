@@ -58,7 +58,14 @@ function escenario() {
   ];
   return { filas, equipos, calibraciones };
 }
-const tabla = (e: ReturnType<typeof escenario>, equipos = e.equipos, calibraciones = e.calibraciones) => tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: e.filas, equipos, calibraciones });
+/**
+ * Lote 11: sin nada guardado, Horiba y Kunak NO vencen. Estas pruebas del 9f son de qué entra y de las fechas, así que les ponen 365
+ * días como si alguien los hubiera guardado; las de la vigencia por defecto pasan `new Map()`.
+ */
+const DOCE_MESES: ReadonlyMap<string, number | null> = new Map([['horiba', 365], ['kunak', 365]]);
+const tabla = (e: ReturnType<typeof escenario>, equipos = e.equipos, calibraciones = e.calibraciones, vigencias = DOCE_MESES) => tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: e.filas, equipos, calibraciones, vigencias });
+const FIRMA_VIGENCIA = { por: 'director@example.com', en: '2026-10-18 15:00:00+00', motivo: 'Decisión ficticia.' };
+const guardadasDe = (m: ReadonlyMap<string, number | null>) => [...m].map(([clave, dias]) => ({ clave, marca: clave, dias, ...FIRMA_VIGENCIA }));
 const sinClave = (cs: readonly FilaCalibracion[]) => new Set(cs.filter((c) => c.clave === null).map((c) => c.id));
 const todas = (t: ReturnType<typeof tabla>) => [...t.filas, ...t.fueraDeHoja].filter((f) => f.clave !== null);
 
@@ -151,9 +158,9 @@ describe('incluir una marca: la partida y las sueltas (planAdopcion)', () => {
 });
 
 describe('la vista previa por marca (marcasEnSeguimiento)', () => {
-  const vista = (guardadas: Parameters<typeof marcasEnSeguimiento>[0]['guardadas'] = []) => {
+  const vista = (guardadas: Parameters<typeof marcasEnSeguimiento>[0]['guardadas'] = [], vigencias = DOCE_MESES) => {
     const e = escenario();
-    return marcasEnSeguimiento({ tabla: tabla(e), equipos: e.equipos, guardadas, sinClave: sinClave(e.calibraciones) });
+    return marcasEnSeguimiento({ tabla: tabla(e, e.equipos, e.calibraciones, vigencias), equipos: e.equipos, guardadas, sinClave: sinClave(e.calibraciones), vigencias: guardadasDe(vigencias) });
   };
 
   it('una fila por marca: GRIMM EDM 180 primero, fija y siempre incluida; después las demás, de más a menos equipos; lo que no tiene marca no tiene interruptor', () => {
@@ -169,11 +176,12 @@ describe('la vista previa por marca (marcasEnSeguimiento)', () => {
     const horiba = vista().find((m) => m.clave === 'horiba')!;
     expect(horiba.resumen).toEqual({
       equipos: 5,
-      porEstado: { FUERA_CICLO: 1, VENCIDA: 1, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 2, SIN_FECHA: 1 },
+      porEstado: { FUERA_CICLO: 1, VENCIDA: 1, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 2, SIN_VENCIMIENTO: 0, SIN_FECHA: 1 },
       avisos: 1,
       clientesAvisos: 1,
       partidas: 4,
       enlazadas: 3,
+      fechas: ['2023-02-01', '2025-09-15', '2026-03-03', '2026-05-05'],
     });
     expect(vista().find((m) => m.clave === 'kunak')!.resumen).toMatchObject({ equipos: 1, avisos: 0, partidas: 1, enlazadas: 1 });
     expect(vista()[0].resumen).toMatchObject({ equipos: 1, avisos: 1, clientesAvisos: 1, partidas: 0, enlazadas: 0 });
@@ -186,6 +194,28 @@ describe('la vista previa por marca (marcasEnSeguimiento)', () => {
     expect(v[1].firma).toEqual(firma);
     expect(v[2].resumen.equipos).toBe(0);
     expect(JSON.stringify(v)).not.toMatch(/Ficticio|HB-|KN-|18A0/);
+  });
+
+  // Lote 11 (decisión de Alfonso, 18/10/2026): sin nada guardado, Horiba y Kunak no vencen. Es lo que deja encender Horiba sin que salgan
+  // sus vencidas «+1 año» como avisos falsos: su vista previa ya no las cuenta.
+  it('vigencia por defecto: Horiba y Kunak sin vencimiento —su vista previa no lleva avisos ni +1 año—; GRIMM EDM 180 (fija) y GRIMM de otros modelos, 365', () => {
+    const v = vista([], new Map());
+    const horiba = v.find((m) => m.clave === 'horiba')!;
+    expect(horiba.resumen).toMatchObject({ equipos: 5, avisos: 0, clientesAvisos: 0, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, AL_DIA: 0, SIN_VENCIMIENTO: 4, SIN_FECHA: 1 } });
+    expect(v.map((m) => [m.clave, m.vigencia])).toEqual([
+      [CLAVE_EDM180, { dias: 365, fija: true, porDefecto: true, firma: null }],
+      ['horiba', { dias: null, fija: false, porDefecto: true, firma: null }],
+      ['grimm', { dias: 365, fija: false, porDefecto: true, firma: null }],
+      ['kunak', { dias: null, fija: false, porDefecto: true, firma: null }],
+    ]);
+    expect(v[0].resumen).toMatchObject({ equipos: 1, avisos: 1 });
+  });
+
+  it('una vigencia guardada dice sus días y su firma; una marca que sólo tiene vigencia guardada también sale', () => {
+    const v = vista([], new Map([['horiba', 730], ['thermo', 365]]));
+    expect(v.find((m) => m.clave === 'horiba')!.vigencia).toEqual({ dias: 730, fija: false, porDefecto: false, firma: FIRMA_VIGENCIA });
+    expect(v.find((m) => m.clave === 'thermo')).toMatchObject({ vigencia: { dias: 365, porDefecto: false }, resumen: { equipos: 0, fechas: [] } });
+    expect(v.find((m) => m.clave === 'kunak')!.vigencia.dias).toBeNull();
   });
 });
 
@@ -210,7 +240,7 @@ describe('061_trazabilidad_marcas_seguimiento.sql', () => {
     expect(sinComentarios).not.toMatch(/cliente|\bserial\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 060 (la última es la 062: pasadas-nocturnas-repo.test.ts)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 060 (la última es la 063: vigencia-repo.test.ts)', () => {
     expect(fuente('../db.ts')).toMatch(/'060_trazabilidad_exportaciones\.sql',\s*'061_trazabilidad_marcas_seguimiento\.sql',/);
   });
 });
@@ -219,8 +249,9 @@ describe('CANDADO: qué escribe incluir o excluir una marca (marcas-repo.ts)', (
   const src = readFileSync(fileURLToPath(new URL('./marcas-repo.ts', import.meta.url)), 'utf8');
   const escrituras = [...src.matchAll(/(INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\s+([a-z_.0-9]+)/g)].map((m) => `${m[1].replace(/\s+/g, ' ')} ${m[2]}`);
 
-  it('su tabla, su apunte, y en las calibraciones sólo la partida y el enlace de una suelta: ni tmc_equipos, ni en_seguimiento, ni la congelación, ni borrar nada', () => {
-    expect(escrituras.sort()).toEqual(['INSERT INTO portal.tmc_calibraciones', 'INSERT INTO portal.tmc_marcas', 'INSERT INTO portal.tmc_marcas_cambios', 'UPDATE portal.tmc_calibraciones']);
+  // Lote 11: más la vigencia de una marca y su apunte (`cambiarVigencia`): las dos tablas de la 063, que sólo escribe este fichero.
+  it('su tabla, su apunte, la vigencia y su apunte, y en las calibraciones sólo la partida y el enlace de una suelta: ni tmc_equipos, ni en_seguimiento, ni la congelación, ni borrar nada', () => {
+    expect(escrituras.sort()).toEqual(['INSERT INTO portal.tmc_calibraciones', 'INSERT INTO portal.tmc_marcas', 'INSERT INTO portal.tmc_marcas_cambios', 'INSERT INTO portal.tmc_marcas_vigencia', 'INSERT INTO portal.tmc_marcas_vigencia_cambios', 'UPDATE portal.tmc_calibraciones']);
     expect(src).not.toMatch(/tmc_equipos|en_seguimiento|tmc_fst022|tmc_seguimiento|tmc_contactos/);
   });
 
