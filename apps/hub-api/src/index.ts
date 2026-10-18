@@ -12,6 +12,7 @@ import { createAusenciasRouter } from './ausencias/router.js';
 import { createCalibracionesRouter } from './calibraciones/router.js';
 import { createTrazabilidadRouter } from './trazabilidad/router.js';
 import { iniciarRegistroEstados } from './trazabilidad/registro-estados.js';
+import { iniciarPasadasNocturnas } from './trazabilidad/programador-pasadas.js';
 import { registrarEstadosAgenda } from './trazabilidad/repo.js';
 import { crearFuenteAgenda } from './trazabilidad/fuente.js';
 import { getDesk2Pool } from './db-desk2.js';
@@ -153,6 +154,11 @@ initDb()
     // de las asignaciones cuyo ticket salió de su etapa. Si Desk 2.0 no está
     // configurado o no contesta, esa pasada no escribe nada y la otra ni se entera.
     iniciarRegistroEstados(getHubPool(), { agenda: (db) => registrarEstadosAgenda(db, fuenteAgenda) });
+    // Pasadas nocturnas de Trazabilidad (lote 10): cada noche a las 02:00 de
+    // Colombia, el inventario y las fechas de calibración desde Desk 2.0, que se
+    // aplican SOLAS sólo si el plan sale limpio; lo demás queda retenido para que
+    // lo revise una persona. No envían nada. Ver trazabilidad/programador-pasadas.ts.
+    iniciarPasadasNocturnas(getHubPool());
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
