@@ -33,8 +33,11 @@ export const TITULO_LIBRO = 'F-ST-022 · Trazabilidad Mttos Clientes';
 export const FILA_CABECERA = 5;
 /** El día es el de los valores (hoy en Colombia). */
 export const nombreFichero = (hoy: string): string => `F-ST-022 Trazabilidad Mttos Clientes ${hoy}.xlsx`;
-/** La de la hoja: (última calibración − HOY) + 365. La fecha está en la columna E. Excel la recalcula al abrir el libro. */
-export const FORMULA_VIGENCIA = (fila: number): string => `E${fila}-TODAY()+365`;
+/**
+ * La de la hoja: (última calibración − HOY) + la vigencia de su marca en días (GRIMM, 365: la de siempre). La fecha está en la columna E.
+ * Excel la recalcula al abrir el libro. Una marca sin vencimiento (lote 11) no lleva fórmula: su vigencia va vacía.
+ */
+export const FORMULA_VIGENCIA = (fila: number, dias: number): string => `E${fila}-TODAY()+${dias}`;
 
 /** Lo que va en una casilla: un texto (siempre celda de texto), un número, nada, o una celda ya hecha (una fecha, la vigencia). */
 type Valor = string | number | null | XLSX.CellObject;
@@ -58,7 +61,7 @@ export const COLUMNAS_FST022: readonly { titulo: string; ancho: number; celda: (
   { titulo: 'Serial', ancho: 22, celda: (x) => x.serial },
   { titulo: 'Última Calibración', ancho: 18, celda: (x) => fecha(x.ultimaCalibracion) },
   // Sin fecha no hay vigencia: la celda va vacía (una fórmula sobre una fecha vacía daría un número absurdo).
-  { titulo: 'Vigencia de Calibración (Dias)', ancho: 16, celda: (x, fila) => (x.vigenciaDias === null ? null : { t: 'n', v: x.vigenciaDias, z: '0', f: FORMULA_VIGENCIA(fila) }) },
+  { titulo: 'Vigencia de Calibración (Dias)', ancho: 16, celda: (x, fila) => (x.vigenciaDias === null || x.vigenciaMarca === null ? null : { t: 'n', v: x.vigenciaDias, z: '0', f: FORMULA_VIGENCIA(fila, x.vigenciaMarca) }) },
 ];
 
 /** Las filas de la principal: primero las de la hoja congelada, en su orden; después, lo que está en el inventario o en Desk 2.0 y no en la hoja. Lo retirado a mano no sale (va en su hoja). */
@@ -178,7 +181,7 @@ export function libroFst022({ tabla, exporta }: EntradaLibro): LibroFst022 {
       ['Retirados a mano (en su hoja, no en la principal)', retirados.length, `Están en «${HOJAS_LIBRO[1]}», con quién, cuándo y por qué. Nada se borró.`],
       [],
       ['Columnas', 'Las seis de la F-ST-022, con sus títulos y en su orden. Cliente, marca, modelo y serial son los de hoy (los del maestro de Desk 2.0 si el equipo está enlazado); la última calibración es la que da la regla del portal.'],
-      ['Vigencia', 'Cada celda lleva la fórmula de la hoja, última calibración + 365 − HOY(), así que se recalcula sola al abrir el libro otro día; el número guardado es el del día de la exportación. Sin fecha, va vacía. 365 días para todas las marcas.'],
+      ['Vigencia', 'Cada celda lleva la fórmula de la hoja con la vigencia de su marca (GRIMM, 365 días): última calibración + vigencia − HOY(), así que se recalcula sola al abrir el libro otro día; el número guardado es el del día de la exportación. Sin fecha, o si su marca no tiene vencimiento (Horiba y las demás, salvo que se les ponga un plazo en el portal), va vacía.'],
       ['Detalle', `La hoja «${HOJAS_LIBRO[2]}» dice, fila a fila, de dónde sale cada fecha, cuándo vence y su estado ese día.`],
       [],
       ...[...cuenta((x) => x.marcaClave)].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([clave, total]): Valor[] => [`Marca: ${marcas.get(clave)}`, total]),

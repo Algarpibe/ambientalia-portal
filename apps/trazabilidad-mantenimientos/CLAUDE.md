@@ -30,18 +30,25 @@ Equipos, Calendario y Avisos POR MARCA**: un interruptor por marca en Configurac
 Técnico), con vista previa y motivo; GRIMM EDM 180 siempre (ver «Marcas en seguimiento, por
 marca»). **Desde el lote 10 el maestro y las calibraciones se traen SOLOS cada noche a las 02:00
 de Colombia**, pero sólo si el plan es «limpio»; lo demás queda retenido para que lo revise una
-persona (ver «Pasadas nocturnas»). Sigue sin enviarse nada. El seguimiento (aviso
+persona (ver «Pasadas nocturnas»). **Desde el lote 11 la vigencia de calibración es POR MARCA**: GRIMM
+vence a los 365 días, como siempre; Horiba y las demás marcas, **sin vencimiento** mientras nadie les
+ponga un plazo en «Marcas en seguimiento» (ver «Vigencia de calibración por marca»). Sigue sin enviarse nada. El seguimiento (aviso
 enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
 se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
 congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 
 ## Regla de negocio (la de la F-ST-022)
 
-- Vigencia de calibración (días) = (Última calibración − HOY) + 365 → `vigenciaDias`.
-- Vence = última calibración + 365 días.
-- Estados (`apps/hub-api/src/trazabilidad/dominio.ts`): `FUERA_CICLO` (vigencia < −365, la hoja
-  lo marca con Estado = 1), `VENCIDA` (−365…−1, llegada urgente posible), `VENCE_30` (0…30),
-  `VENCE_60` (31…60), `VENCE_90` (61…90), `AL_DIA` (> 90), `SIN_FECHA`.
+- Vigencia de calibración (días) = (Última calibración − HOY) + **la vigencia de su marca** →
+  `vigenciaDias`. La de GRIMM es 365 (la de la hoja); desde el lote 11 la de cada marca la da
+  `vigenciaDeMarca` (`marcas.ts`): ver «Vigencia de calibración por marca».
+- Vence = última calibración + la vigencia de su marca.
+- Estados (`apps/hub-api/src/trazabilidad/dominio.ts`, `estadoCalibracion(ultima, hoy, vigencia)`):
+  `FUERA_CICLO` (vencida hace más de 365 días —`FUERA_CICLO_DIAS`, sea cual sea la vigencia de su
+  marca—; la hoja lo marca con Estado = 1), `VENCIDA` (−365…−1, llegada urgente posible), `VENCE_30`
+  (0…30), `VENCE_60` (31…60), `VENCE_90` (61…90), `AL_DIA` (> 90), **`SIN_VENCIMIENTO`** (lote 11:
+  su marca no tiene plazo fijo; con fecha, pero sin `vence` ni `vigenciaDias`: no avisa) y `SIN_FECHA`
+  (sin fecha manda: un equipo sin calibración conocida es `SIN_FECHA` aunque su marca no venza).
 - «Hoy» es el día en Colombia (`hoyEnColombia`), calculado en el servidor.
 
 ## Dónde vive cada cosa
@@ -62,7 +69,8 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql`, `063_trazabilidad_vigencia_marcas.sql` |
+| Vigencia de calibración por marca (lote 11, 063): **la regla, en un solo sitio** (`vigenciaDeMarca`, `vigenciaDeEquipo`, `grupoMarca`, `VIGENCIA_POR_DEFECTO`, `VIGENCIA_MIN_DIAS` / `VIGENCIA_MAX_DIAS`, `esVigenciaValida`) y sus tipos (`VigenciaMarca`, `VigenciaGuardada`, `CambioVigencia`) | `apps/hub-api/src/trazabilidad/marcas.ts` (y el estado, `estadoCalibracion(ultima, hoy, vigencia)` con `SIN_VENCIMIENTO`, en `dominio.ts`); su lectura (`leerVigencias`, `leerVigenciasConFirma`, `leerCambiosVigencia`; sólo lee) en `vigencia-repo.ts`; quien la cambia (`cambiarVigencia`; **único que escribe `tmc_marcas_vigencia` y su apunte**) en `marcas-repo.ts`; su validador (`parseVigenciaMarca`) en `types.ts`; la columna «Vigencia» y su formulario en `src/vistas/MarcasSeguimiento.tsx`, y lo que calcula (`textoDias`, `textoVigencias` —la cabecera—, `vigenciaElegida`, `lineasVistaVigencia`, `efectoVigencia`, `textoCambioVigencia`) en `src/lib/marcas.ts`; el orden y el texto de «sin vencimiento» (`ordenVigencia`, `textoVigencia`) en `src/lib/vistas.ts` |
 | Marcas en seguimiento (lote 9f, 061): **qué es el inventario** en un solo sitio (`EN_INVENTARIO`, `claveMarcaSql`; sin imports) | `apps/hub-api/src/trazabilidad/inventario.ts` |
 | Marcas en seguimiento: la regla pura —clave de una marca (`claveMarca`), la fila fija (`CLAVE_EDM180`), la vista previa por marca (`marcasEnSeguimiento`) y lo que se escribe al incluir una (`planAdopcion`)— y los tipos de su API | `apps/hub-api/src/trazabilidad/marcas.ts`; su SQL (`leerMarcas`, `cambiarMarca`, `adoptarIncluidas`; **escribe `tmc_marcas`, `tmc_marcas_cambios` y, en `tmc_calibraciones`, sólo partidas nuevas y la clave de las sueltas**) en `marcas-repo.ts`; la tarjeta en `src/vistas/MarcasSeguimiento.tsx` y lo que calcula (`textoMarcas` —la cabecera—, `lineasVistaPrevia`, `efectoMarca`, `textoCambioMarca`, `marcasDeEquipos`, `filtrarPorMarca`) en `src/lib/marcas.ts` |
 | Exportar la F-ST-022 (lote 9e, 060): el generador puro del .xlsx —columnas, filas, vigencia con fórmula, hojas de más y nombre, cada cosa en un solo sitio— (`libroFst022`, `COLUMNAS_FST022`, `filasExportadas`, `FORMULA_VIGENCIA`, `HOJAS_LIBRO`, `ORIGENES_FECHA`, `nombreFichero`) y los tipos de «última exportación» | `apps/hub-api/src/trazabilidad/exportacion.ts`; quien reúne la tabla con `leerHoja`, genera el libro y lo apunta (`exportarHoja`, `leerExportaciones`; **único fichero que escribe `tmc_exportaciones`**) en `exportacion-repo.ts`; cómo se sirve un fichero (`Fichero`) en `router.ts`; el botón en `src/vistas/ExportarHoja.tsx` y lo que calcula (`nombreDeDescarga`, `textoUltimaExportacion`, `NOTA_EXPORTAR`) en `src/lib/exportar.ts` |
@@ -103,6 +111,8 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_equipos` | (⚠️ Desde el lote 9c su `ultima_calibracion` **ya no es la que se enseña** si el equipo tiene alguna fila en `tmc_calibraciones`: es sólo el respaldo de quien no tiene ninguna.) Un equipo por `clave` (el serial; si la hoja repetía un serial, la 2.ª aparición lleva `-2`: `asignarClaves`). `activo = false` = lo retiró una importación, está inactivo en Desk 2.0 o **lo retiró una persona a mano** (059: entonces lleva `retirado_en`, `retirado_por_id`, `retirado_por` y `retirado_motivo`, y la sincronización no lo reactiva): no se borra. **La escriben la sincronización con el maestro** (`maestro-repo.ts`; la importación de la Excel se retiró el 10/10/2026) **y, sólo `activo` y esa marca, retirar o reincorporar a mano** (`retiros-repo.ts`, lote 9d-2b). Desde la 056 lleva `desk_id` (`TEXT NULL`: el id de su equipo en `desk.equipos`; índice único parcial `tmc_equipos_desk_id_uq` = un equipo de Desk 2.0, como mucho en una fila), `origen` (`'fst022'` por defecto = lo que dejó la Excel; `'desk'` = lo confirmó o lo dio de alta el maestro; con `CHECK`) y `maestro_en` (la última sincronización que lo encontró en el maestro). `ultima_calibracion` y las demás columnas de la Excel no las toca nadie; un alta del maestro nace con ellas a NULL. **Desde la 058 lleva `en_seguimiento`** (`BOOLEAN NOT NULL DEFAULT TRUE`): `TRUE` = el inventario de la app (hoy, sólo GRIMM EDM 180); `FALSE` = otra marca, enlazada con Desk 2.0 sólo para la pestaña «Trazabilidad F-ST-022». Lo que ya había quedó en `TRUE`; sólo la sincronización con el maestro da de alta filas con `FALSE` y **ningún código cambia el valor de una fila que ya existe** (`seguimiento.test.ts`). ⚠️ **Quien lea esta tabla tiene que decidir si filtra lo que está en el inventario**: desde el lote 9f eso es `en_seguimiento` **o** una marca incluida (`EN_INVENTARIO`, `inventario.ts`; ver «Marcas en seguimiento, por marca»); la lista revisada está en «Otras marcas enlazadas con Desk 2.0, fuera de seguimiento» |
 | `portal.tmc_marcas` | **Las marcas incluidas en el inventario** (061, lote 9f): una fila por marca que alguien ha tocado; **sin fila = apagada** (la 061 no siembra: al desplegar nada cambia). `clave` (`VARCHAR(60)`, PK: la marca normalizada, `claveMarca` = `claveCliente`: «HORIBA» y «Horiba» son la misma), `marca` (como se enseñaba al cambiarla), `incluida` (`BOOLEAN NOT NULL`), `motivo` (`CHECK` no vacío) y la firma del último cambio (`por_id`, `por`, `en`). GRIMM EDM 180 **no** tiene fila: está siempre (es `en_seguimiento`). Sin clave foránea. Sólo la escribe `marcas-repo.ts` |
 | `portal.tmc_marcas_cambios` | **Auditoría** de cada vez que se enciende o se apaga una marca (061): `clave`, `marca`, `accion` (`CHECK` a `incluir` / `excluir`), `motivo` (no vacío), lo que hizo (`equipos` = activos no retirados que entraron o salieron, `partidas` = filas de partida que nacieron, `enlazadas` = calibraciones sueltas que se enlazaron) y la firma (`por_id`, `por`, `en`). No se cambia ni se borra. Sólo marcas, recuentos y firmas. **No es una tabla de mensajes ni de envíos** |
+| `portal.tmc_marcas_vigencia` | **La vigencia de calibración de cada marca** (063, lote 11): una fila por marca que alguien ha tocado; **sin fila manda el código** (`VIGENCIA_POR_DEFECTO`, `marcas.ts`: GRIMM —EDM 180 y otros modelos— 365 días; las demás, sin vencimiento). `clave` (`VARCHAR(60)`, PK: la de `tmc_marcas`, `claveMarca`), `marca` (como se enseñaba), `dias` (`INTEGER NULL`, `CHECK` 30..1095; **NULL = sin vencimiento**), `motivo` (`CHECK` no vacío) y la firma del último cambio (`por_id`, `por`, `en`). `CHECK` `tmc_marcas_vigencia_no_edm180`: GRIMM EDM 180 **no puede tener fila** (es fijo, 365). La 063 **no siembra**: al desplegar no se guarda nada. Sin clave foránea. Sólo la escribe `marcas-repo.ts` (`cambiarVigencia`; `vigencia-repo.test.ts` lo vigila) |
+| `portal.tmc_marcas_vigencia_cambios` | **Auditoría** de cada cambio de vigencia (063): `clave`, `marca`, `antes` y `despues` (`INTEGER NULL`: los días, o NULL = sin vencimiento; `antes` es el que valía, también si era el del código), `motivo` (no vacío) y la firma (`por_id`, `por`, `en`). No se cambia ni se borra. Sólo marcas, días y firmas. **No es una tabla de mensajes ni de envíos** |
 | `portal.tmc_maestro_sincronizaciones` | **Auditoría** de cada sincronización aplicada (056): `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosMaestro`; desde el lote 9d-2a con `otras`, los `RecuentosOtras` de las otras marcas), `cambios` (`JSONB`, array de `{clave, campo, antes, despues}`; `campo` = `cliente` / `modelo` / `serial` / `activo` / `alta`; los de un equipo fuera de seguimiento llevan además `ambito: 'otras'`), `por_id`, `por` y `en`. Una fila por aplicación, también si no cambió nada. No se cambia ni se borra. Sin semilla ni clave foránea |
 | `portal.tmc_calibraciones` | **Una fila por calibración conocida** (057). `clave` (el equipo del portal, `tmc_equipos.clave`; **NULL** si el serial no es de un equipo del inventario: otras marcas, 9d), `serial` (tal cual) y `serial_norm`, `desk_equipo_id` (si el ticket lo trae), `fecha` (`DATE NOT NULL`: **nunca se edita**; corregir es anular la fila e insertar otra), `origen` (`CHECK` a `fst022` = punto de partida, la hoja congelada / `desk` = el campo de Zoho de un ticket / `manual` = lote 9d), `ticket` (sólo y siempre en las de origen `desk`), `corrige_ticket` + `corrige_fecha` (sólo en una `manual` que corrige un ticket: su número y la fecha que ese ticket tenía en Zoho), `estado` (`CHECK` a `vigente` / `anulada` / `en_revision` = no cuenta), `motivo`, la firma del alta (`por_id`, `por`, `en`, y `pasada_id` si la trajo una pasada) y la de la anulación (`anulada_por_id`, `anulada_por`, `anulada_en`, `anulada_motivo`, y `anulada_pasada_id`: **NULL = la anuló una persona**, y entonces la pasada no la resucita). Tres `CHECK` con nombre (`…_ticket_de_desk`, `…_corrige`, `…_anulada_firmada`) y dos índices únicos parciales: `tmc_calibraciones_ticket_uq (ticket) WHERE origen = 'desk' AND estado <> 'anulada'` = **como mucho una fila sin anular por ticket de Desk**, y `tmc_calibraciones_fst022_uq (clave) WHERE origen = 'fst022'` = una fila de partida por equipo. Sin semilla ni clave foránea. **La escriben la pasada** (`sincronizarCalibraciones`, `calibraciones-repo.ts`: inserta y anula; nunca cambia una fecha; `calibraciones.test.ts` lo vigila) **y, desde el lote 9d-2b, una persona** (`edicion-repo.ts`: inserta una `manual` —o la partida de una fila de la hoja, ya anulada, con `clave` NULL y `origen = 'fst022'`— y anula con `anulada_motivo`; tampoco cambia nunca una fecha; `edicion.test.ts` lo vigila) **y, desde el lote 9f, incluir una marca** (`marcas-repo.ts`: inserta la partida `fst022` de cada equipo de la marca —`ON CONFLICT` sobre `tmc_calibraciones_fst022_uq`: nunca dos— y **pone la clave** a las filas sin clave que la pestaña ya le atribuía por serial, `WHERE clave IS NULL`; ni fecha, ni estado, ni serial, ni firmas; `marcas.test.ts` lo vigila) |
 | `portal.tmc_calibraciones_pasadas` | **Auditoría** de cada pasada aplicada (057), al estilo de `tmc_maestro_sincronizaciones`: `huella` (sha256 del plan), `recuentos` (`JSONB`: `RecuentosCalibraciones`), `detalle` (`JSONB`, array de `DetalleCalibracion`), `por_id`, `por` y `en`. No se cambia ni se borra. Sin semilla |
@@ -139,12 +149,12 @@ segunda tabla, más abajo.
 | GET | `/trazabilidad/roles/me` | Quién soy en la app: `{userId, email, role, admin, permissions[], canManageRoles}`. `role` es el guardado o `LECTOR` si no hay fila (o si el valor guardado no se conoce); `admin` = administrador del portal; `permissions` son los nombres de la matriz que tiene (todos, si es administrador) y con ellos la UI decide qué enseña; `canManageRoles` = `admin` |
 | GET | `/trazabilidad/roles` | **Sólo administradores del portal** (403 `forbidden_admin` si no). `{usuarios[]}`: quien tiene la app asignada, quien ya tiene un rol guardado y los administradores del portal, por nombre. Cada uno: `{userId, fullName, email, status, admin, role}` |
 | PUT | `/trazabilidad/roles/:userId` | **Sólo administradores del portal.** `{role}`: pone el rol de esa persona y lo firma. Devuelve `{userId, role}`. 400 en `userId` si no es un UUID; 400 en `role` si no es, tal cual, uno de los cuatro; 404 si el usuario no existe en `portal.users`; **409 `usuario_admin` si esa persona es administrador del portal**: ya lo puede todo, así que no lleva rol en la app (en la sección «Roles» sale como «Admin del portal», en sólo lectura y sin desplegable). Un rol guardado de antes de ser administrador se conserva y vuelve a valer si deja de serlo |
-| GET | `/trazabilidad/equipos` (`?hoy=`) | `{hoy, equipos[], ultimaImportacion, contactos[]}` (`ultimaImportacion` = la última que quedó registrada; la app ya no la enseña). Equipos activos con estado (`ultimaCalibracion` —y con ella `vence`, `vigenciaDias` y `estado`— es **la que da la regla de las calibraciones**, `fechaEfectiva`; el equipo sin ninguna fila sigue con la del inventario), seguimiento, `ticket` (el abierto en Zoho Desk, o `null`) y `contacto: {nombre, email, origen: 'desk' \| 'manual', ticket} \| null` (a quién iría su aviso). `contactos` son los puestos a mano a clientes: `{clave, cliente, nombre, emails[], internos[], actualizadoPor, actualizadoEn}` (`internos` = los de `emails` que son de un dominio propio) |
+| GET | `/trazabilidad/equipos` (`?hoy=`) | `{hoy, equipos[], ultimaImportacion, contactos[]}` (`ultimaImportacion` = la última que quedó registrada; la app ya no la enseña). Equipos activos con estado (`ultimaCalibracion` —y con ella `vence`, `vigenciaDias` y `estado`— es **la que da la regla de las calibraciones**, `fechaEfectiva`; el equipo sin ninguna fila sigue con la del inventario; desde el lote 11, con `vigenciaMarca` —los días de la vigencia de su marca, o `null` = sin vencimiento— y su estado calculado con ella), seguimiento, `ticket` (el abierto en Zoho Desk, o `null`) y `contacto: {nombre, email, origen: 'desk' \| 'manual', ticket} \| null` (a quién iría su aviso). `contactos` son los puestos a mano a clientes: `{clave, cliente, nombre, emails[], internos[], actualizadoPor, actualizadoEn}` (`internos` = los de `emails` que son de un dominio propio) |
 | PUT | `/trazabilidad/contactos` (`?hoy=`) | `{cliente, emails[], nombre?}`: pone a mano el contacto de un cliente y lo firma; `emails: []` lo quita (vuelve a valer el de Desk). Devuelve lo mismo que el GET de equipos, ya actualizado. 400 en `cliente` si no es un texto no vacío de 200 caracteres como mucho; 400 en `emails` si no es una lista o trae más de 5 correos distintos; 400 en `emails[i]` si ese correo no tiene forma de correo o pasa de 254 caracteres; 400 en `nombre` si no es texto o pasa de 200. Los correos se pasan a minúsculas y se quitan los repetidos. Un correo interno **sí** vale aquí (para probar con un buzón propio) y vuelve señalado en `internos`. **No envía nada** |
 | POST | `/trazabilidad/importaciones` y `/trazabilidad/fst022/congelaciones` (también con `?simular=1`) | **Retiradas el 10/10/2026: 410 `subida_retirada`** para cualquiera, administrador incluido («La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar…»). Van tras la sesión y la app (401 / 403 como siempre) y no validan el cuerpo ni miran el rol ni la base (`retirada`, `router.ts`). Siguen registradas sólo para decírselo a un portal sin actualizar; ya no tienen parser propio (un cuerpo de más de 2 MB es el 413 del global) |
 | GET | `/trazabilidad/fst022/congelaciones` | `{congelaciones[]}`, la más reciente primero: metadatos, firma y recuentos (`CongelacionFst022`); ni clientes ni seriales |
 | GET | `/trazabilidad/fst022/congelaciones/vigente` (`?desde=&limite=`) | `{congelacion, cabeceras, filas[], siguiente}`: la vigente (o `null`) y sus filas `{fila, celdas, esEquipo, serialNorm, claveEquipo}` posteriores a `desde`, de `limite` en `limite` (500 por defecto, 1000 como mucho); `siguiente` es el `desde` de la página que sigue, o `null`. Lleva clientes y seriales, como `GET /equipos` |
-| GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{id, fecha, origen, ticket, corrigeTicket, estado, cuenta}` y, en las guardadas, su firma: `motivo`, `por`, `en`, `anuladaPor`, `anuladaEn`, `anuladaMotivo`; la partida que una fila toma de la hoja no es una fila guardada: su `id` es el de su fila, en negativo). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, retirados, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (desde el lote 9d-2b cada fila lleva `retirado: {por, en, motivo} \| null` —el equipo o, si sólo está en la hoja, la fila—, y `soloHoja`, `conAvisos` y `porEstado` no cuentan lo retirado) (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
+| GET | `/trazabilidad/hoja` (`?hoy=`) | La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), **sólo lectura** y ya calculada: `{hoy, congelacion: {id, archivo, hoja, por, en} \| null, motivo, filas[], fueraDeHoja[], resumen}`. Una `FilaHoja` por fila de equipo de la congelación vigente, en el orden de la hoja y de **todas las marcas**: `{fila, clave, situacion: 'inventario' \| 'inactivo' \| 'enlazado' \| 'hoja', cliente, marca, marcaClave, modelo, serial, enHoja, ultimaCalibracion, vigenciaMarca, vence, vigenciaDias, estado, avisos[], calibraciones[]}` (`vigenciaMarca`, lote 11: la de la marca de la fila —con equipo, la de su grupo; sólo en la hoja, la de la marca escrita— o `null`) (`enHoja` = lo que decía la hoja, sólo de lo que hoy es distinto; `calibraciones` = `{id, fecha, origen, ticket, corrigeTicket, estado, cuenta}` y, en las guardadas, su firma: `motivo`, `por`, `en`, `anuladaPor`, `anuladaEn`, `anuladaMotivo`; la partida que una fila toma de la hoja no es una fila guardada: su `id` es el de su fila, en negativo). `fueraDeHoja` = los equipos de `tmc_equipos` —en seguimiento o no— que no casan con ninguna fila (misma forma, `fila: null`); `resumen` = `{total, enInventario, inactivos, soloHoja, conAvisos, retirados, fueraDeHoja, calibracionesSueltas, porMarca: [{clave, marca, total}], porEstado}` (desde el lote 9d-2b cada fila lleva `retirado: {por, en, motivo} \| null` —el equipo o, si sólo está en la hoja, la fila—, y `soloHoja`, `conAvisos` y `porEstado` no cuentan lo retirado) (`enInventario` cuenta **sólo lo que está en seguimiento**; cuántas filas hay `enlazado` no viene: la app lo cuenta de `filas`). Sin congelación vigente: 200 con `congelacion: null`, la tabla vacía y `motivo`. Lleva clientes y seriales, como `GET /equipos`. **No lee Desk 2.0 ni la réplica**: cuatro consultas a la base del portal, haya las filas que haya. 400 en `hoy`. Ver «Pestaña «Trazabilidad F-ST-022»» |
 | GET | `/trazabilidad/exportar` (`?hoy=`) | **Permiso `hoja.exportar`** (lote 9e; es una lectura con permiso). Devuelve **un fichero**, no JSON: el .xlsx de la F-ST-022 con la tabla de `GET /hoja` a ese día —hoja «Trazabilidad» con las seis columnas de la V3, y «Retirados», «Detalle» y «Notas»—, con `Content-Disposition: attachment; filename="F-ST-022 Trazabilidad Mttos Clientes AAAA-MM-DD.xlsx"` y `Cache-Control: no-store`. Deja su apunte en `tmc_exportaciones` (si el apunte falla, 500 y ningún fichero). 403 `forbidden_role` sin el permiso, antes de consultar nada; 400 en `hoy` si no es un día que exista. Sin congelación exporta lo que haya. Lleva clientes y seriales; nada de eso va a un error ni al registro. No acepta ningún cuerpo. Ver «Exportar la F-ST-022» |
 | GET | `/trazabilidad/exportaciones` | `{ultima: {id, por, en, hoy, filas, retirados, congelacionId, archivo, sha256} \| null, total}`: la última exportación y cuántas van. Abierta a quien tiene la app; sólo la firma y recuentos |
 | GET | `/trazabilidad/maestro/plan` | El plan del cruce del inventario con el maestro de equipos, **sin escribir**: `{maestro: {disponible, motivo, mensaje}, plan: {huella, recuentos} \| null, ultima}`. `motivo` es uno de los de la fuente (`sin_variable`…); sin maestro responde 200 con `plan: null`. `recuentos` (`RecuentosMaestro`, `maestro.ts`): `maestro`, `portal`, `casan`, `enlaces`, `cambios: {cliente, modelo, serial, activo}`, `altas`, `soloPortal`, `soloPortalActivos`, `ambiguosMaestro`, `ambiguosPortal`, `copiasInactivas`, `sinSerial`, `inactivos`, `clienteOtroNombre`, `contactosSinEquipos` y, desde el lote 9d-2b, `retiradosAMano` (retirados a mano que Desk 2.0 tiene activos: se respetan; también en `otras`); `ultima` = la última fila de auditoría (`{id, huella, recuentos, por, en}`) o `null`. Ni clientes ni seriales. **Sólo a quien tiene `maestro.sincronizar`** le llegan además `detalle` (los cambios uno a uno, con cliente y serial, 300 como mucho), `detalleTotal` y `revisar: {soloPortal[], ambiguos[]}` (lo que el plan no toca, equipo a equipo: `{origen: 'portal' \| 'desk', clave, serial, cliente, activo}`; en los de Desk 2.0 `clave` es su id allí). **Desde el lote 9d-2a** `plan` lleva además `otras` (`RecuentosOtras`, las otras marcas: `maestro`, `portal`, `casan`, `cambios`, `altas`, `soloPortal`, `ambiguos`, `sinSerial`, `inactivos`) y `hoja` (el cruce con la hoja congelada por marca, en filas de la hoja: `[{marca, filas, enlazadas, soloHoja, sinCeros, repetidas}]`); `recuentos` sigue siendo **sólo el ámbito en seguimiento** y `huella` cubre los dos. Y a quien tiene el permiso le llega, **aparte** de `detalle` y `revisar` (que siguen siendo los del seguimiento), `otras: {detalle[], detalleTotal, soloPortal[], ambiguos[], hoja[]}` (`detalle` con `ambito: 'otras'`; `hoja` = las filas de la hoja que no quedarían enlazadas: `{motivo: 'repetido' \| 'sin_ceros' \| 'solo_hoja', marca, serial, cliente}`, lo delicado primero). **Desde el lote 10** lleva además `nocturna`: la última pasada nocturna del maestro, `{fecha, resultado, motivos, empezo, termino}` o `null` (para cualquiera con la app: sólo textos y recuentos), también sin maestro |
@@ -157,7 +167,8 @@ segunda tabla, más abajo.
 | POST | `/trazabilidad/calibraciones/:id/anular` | Permiso `calibraciones.write`. `{motivo}`: anula esa fila guardada, con firma. Devuelve lo mismo que la anterior. 400 en `id` o `motivo`; 404 si no existe; 409 `ya_anulada`. No se desanula |
 | POST | `/trazabilidad/equipos/:clave/retirar` y `/trazabilidad/equipos/:clave/reincorporar` | Permiso `inventario.write` (lote 9d-2b). `{motivo}`: retira a mano un equipo (queda inactivo, con su marca, y la sincronización del maestro no lo reactiva) o lo reincorpora. Devuelve `{retirado, retiros[]}` (cómo queda y su historial). 400 en `clave` o `motivo` (obligatorio); 404 si no existe; 409 `ya_retirado`, `equipo_inactivo` (inactivo sin que nadie lo retirara) o `no_retirado` |
 | POST | `/trazabilidad/filas/:fila/retirar` y `/trazabilidad/filas/:fila/reincorporar` | Permiso `inventario.write`. `{motivo}`: retira (o recupera) una fila de la congelación vigente **que no es de ningún equipo**; sólo apunta, la hoja no se toca. Devuelve lo mismo. 400 en `fila` o `motivo`; 404 si la fila no es de la hoja; 409 `fila_con_equipo`, `ya_retirada` o `no_retirada`. ⚠️ No se llaman `/hoja/…` a propósito: `hoja.test.ts` fija que bajo `/hoja` sólo hay una lectura |
-| GET | `/trazabilidad/marcas` (`?hoy=`) | Lote 9f. Las marcas en seguimiento: `{hoy, marcas[], cambios[]}`. Cada marca `{clave, marca, fija, incluida, firma: {por, en, motivo} \| null, resumen}`, GRIMM EDM 180 primero (`fija`, `clave = 'grimm edm 180'`, siempre incluida), después las incluidas y las demás de más a menos equipos; `resumen` = la vista previa en recuentos: `{equipos (activos y no retirados), porEstado, avisos (vencidos o por vencer, `ESTADOS_AVISO`), clientesAvisos, partidas, enlazadas}` (lo que entraría al encenderla, o lo que sale al apagarla). `cambios` = los 20 últimos apuntes de `tmc_marcas_cambios`. Abierta a quien tiene la app; **sólo recuentos y firmas, ni clientes ni seriales**. 400 en `hoy` si no es un día que exista |
+| GET | `/trazabilidad/marcas` (`?hoy=`) | Lote 9f. Las marcas en seguimiento: `{hoy, marcas[], cambios[], cambiosVigencia[]}`. Cada marca `{clave, marca, fija, incluida, firma: {por, en, motivo} \| null, vigencia, resumen}`, GRIMM EDM 180 primero (`fija`, `clave = 'grimm edm 180'`, siempre incluida), después las incluidas y las demás de más a menos equipos; `resumen` = la vista previa en recuentos: `{equipos (activos y no retirados), porEstado, avisos (vencidos o por vencer, `ESTADOS_AVISO`), clientesAvisos, partidas, enlazadas, fechas}` (lo que entraría al encenderla, o lo que sale al apagarla; **con la vigencia de la marca**: sin vencimiento, `avisos` es 0). **Desde el lote 11**: `vigencia` = `{dias (null = sin vencimiento), fija, porDefecto (nadie la ha cambiado: la del código), firma \| null}`; `resumen.fechas` = la última calibración de cada uno de esos equipos que la tiene, **sólo las fechas, ordenadas** (con ellas la pantalla calcula la vista previa de cambiar la vigencia); `cambiosVigencia` = los 20 últimos apuntes de `tmc_marcas_vigencia_cambios`. `cambios` = los 20 últimos apuntes de `tmc_marcas_cambios`. Abierta a quien tiene la app; **sólo recuentos, fechas sueltas y firmas, ni clientes ni seriales**. 400 en `hoy` si no es un día que exista |
+| POST | `/trazabilidad/marcas/:clave/vigencia` | Permiso `inventario.write` (lote 11, el del interruptor), mirado **antes de validar y de consultar**. `{dias, motivo}`: la vigencia de calibración de esa marca, `dias` = entero de 30 a 1095 o `null` (sin vencimiento), con motivo y firma; en una transacción con el bloqueo de las marcas: la fila de `tmc_marcas_vigencia` y su apunte (antes → después). No toca ningún equipo ni ninguna calibración: el estado lo recalcula la regla en la lectura siguiente. Devuelve lo mismo que el GET, ya actualizado. 400 en `clave` si no es la clave normalizada de una marca, en `dias` (falta, no es entero, < 30 o > 1095, o es texto) o en `motivo` (obligatorio); **409 `marca_fija`** para GRIMM EDM 180 (sin consultar nada); **404** si la marca no tiene equipos fuera de seguimiento ni está guardada; **409 `misma_vigencia`** si ya tenía ese valor (no escribe nada). Usa siempre el día de hoy en Colombia. **No envía nada** |
 | POST | `/trazabilidad/marcas/:clave` | Permiso `inventario.write` (lote 9f). `{incluir, motivo}`: enciende (`true`) o apaga una marca, con motivo y firma, en una transacción (bloqueo de la pasada de calibraciones y el suyo); al encender, en la misma, las partidas y los enlaces de sus equipos (ver «Marcas en seguimiento, por marca»). Devuelve lo mismo que el GET, ya actualizado. 400 en `clave` si no es la clave normalizada de una marca, en `incluir` si no es booleano, en `motivo` (obligatorio); **409 `marca_fija`** para GRIMM EDM 180; **404** si no hay ningún equipo de esa marca fuera de seguimiento ni está guardada; **409 `ya_incluida` / `no_incluida`** si ya estaba así (no escribe nada). Usa siempre el día de hoy en Colombia. **No envía nada** |
 | GET | `/trazabilidad/retiros` (`?clave=` o `?fila=`) | La auditoría de retiros de un equipo o de una fila de la hoja, la más reciente primero: `{retiros: [{id, accion, motivo, antes, despues, por, en}]}`. Abierta a quien tiene la app. 400 en `clave` si no dice de quién (o dice las dos) o en `fila` |
 | POST | `/trazabilidad/calibraciones/partida/:fila/anular` | Permiso `calibraciones.write`. `{motivo}`: anula la fecha de partida que esa fila de la hoja toma de la congelación (la guarda ya anulada; la congelación no se toca). 400 en `fila` o `motivo`; 404 si la fila no es de la hoja; 409 `partida_guardada` o `serial_ambiguo` |
@@ -220,7 +231,7 @@ escribe nadie a mano: lo apunta hub-api.
 | `agenda.reparto` | — | — | — | sí | `POST /trazabilidad/agenda/reparto` y, aunque sólo lee, `GET /trazabilidad/agenda/reparto` (la propuesta) |
 | `agenda.flujo` | — | — | — | sí | `PUT /trazabilidad/agenda/flujo/:numero` |
 | `calibraciones.write` | — | — | sí | sí | `POST /trazabilidad/calibraciones/sincronizar` y el `detalle` de `GET /trazabilidad/calibraciones/plan` (lote 9c); y corregir una fecha a mano (lote 9d-2b): `POST /trazabilidad/calibraciones/manual`, `POST /trazabilidad/calibraciones/:id/anular` y `POST /trazabilidad/calibraciones/partida/:fila/anular` (por defecto, revisable) |
-| `inventario.write` | — | — | — | sí | Retirar y reincorporar a mano (lote 9d-2b; por defecto, revisable): `POST /trazabilidad/equipos/:clave/retirar`, `…/reincorporar`, `POST /trazabilidad/filas/:fila/retirar` y `…/reincorporar`; y, desde el lote 9f (decisión de Alfonso), encender o apagar una marca: `POST /trazabilidad/marcas/:clave` |
+| `inventario.write` | — | — | — | sí | Retirar y reincorporar a mano (lote 9d-2b; por defecto, revisable): `POST /trazabilidad/equipos/:clave/retirar`, `…/reincorporar`, `POST /trazabilidad/filas/:fila/retirar` y `…/reincorporar`; y, desde el lote 9f (decisión de Alfonso), encender o apagar una marca: `POST /trazabilidad/marcas/:clave`; y, desde el lote 11 (decisión de Alfonso: «con el mismo permiso que su interruptor»), la vigencia de calibración de una marca: `POST /trazabilidad/marcas/:clave/vigencia` |
 | `maestro.sincronizar` | — | — | — | sí | `POST /trazabilidad/maestro/sincronizar` y el `detalle` de `GET /trazabilidad/maestro/plan` (lote 9b) |
 | `hoja.exportar` | — | sí | sí | sí | `GET /trazabilidad/exportar`: exportar la F-ST-022 a un .xlsx (lote 9e; por defecto, revisable). No cambia nada: es una lectura que se lleva la hoja entera fuera del portal |
 | `roles.manage` | — | — | — | — | `GET /trazabilidad/roles` y `PUT /trazabilidad/roles/:userId`: sólo administradores del portal |
@@ -308,6 +319,10 @@ La regla (`evaluarAviso` y `planAvisos`, `dominio.ts`; puras, con `hoy` como arg
 
 - **Tramos 90, 60 y 30**: el tramo de un equipo es el de su estado de hoy (`VENCE_90` → 90,
   `VENCE_60` → 60, `VENCE_30` → 30). `AL_DIA` y `SIN_FECHA` no están en ninguno (`SIN_TRAMO`).
+- **Con la vigencia de su marca** (lote 11): el estado se recalcula con `equipo.vigenciaMarca` (la
+  manda `GET /equipos`). Un equipo **sin vencimiento** (`SIN_VENCIMIENTO`) es `SIN_TRAMO` y **no entra
+  en ninguna lista** del plan —ni correos, ni «sin destinatario», ni «vencidas sin aviso», ni «fuera de
+  ciclo»—, tenga la fecha que tenga (`avisos.test.ts`, `simulacion.test.ts`, `marcas.db.test.ts`).
 - **Una vez por tramo**: se entra en un tramo el día `vence − tramo` (`entradaTramo`). Si el
   «aviso enviado» del seguimiento (`tmc_seguimiento.aviso_enviado`, el mismo de la vista manual)
   es de ese día o posterior, ya está avisado en este tramo (`YA_AVISADO`); si es anterior —fue el
@@ -1307,8 +1322,9 @@ para cualquiera con la app: la hoja congelada **entera, de todas las marcas**, t
 entiende hoy el portal. Su ruta, `GET /hoja`, sólo lee; el
 inventario (Resumen, Equipos, Calendario, Avisos) **sigue siendo sólo GRIMM EDM 180**. (Desde el
 lote 9d-2a las otras marcas pueden estar **enlazadas** con Desk 2.0, fuera de seguimiento: lo
-que cambia en esta pestaña está en la sección siguiente.) Vigencia
-de 365 días para todas las marcas (decisión de Alfonso, como la hoja).
+que cambia en esta pestaña está en la sección siguiente.) ~~Vigencia
+de 365 días para todas las marcas~~: **desde el lote 11, la vigencia de su marca** (GRIMM 365 días;
+Horiba y las demás, sin vencimiento salvo que se les ponga un plazo: «Vigencia de calibración por marca»).
 
 - **Una fila por fila de equipo de la congelación vigente, en el orden de la hoja** (`tablaHoja`,
   `hoja.ts`, pura y con `hoy` como argumento). De dónde sale cada columna:
@@ -1527,7 +1543,10 @@ solo sitio**, que se dice entre paréntesis):
 - **La vigencia va «viva»**: una fórmula por fila, la de la hoja —`=E6-TODAY()+365`, es decir,
   última calibración + 365 − HOY()—, con su valor del día de la exportación guardado en caché (es
   el de la pestaña). Sin fecha, la celda de la fecha y la de la vigencia van vacías.
-  (`FORMULA_VIGENCIA` y la celda que la usa: quitarle `f` la deja en el número del día.)
+  (`FORMULA_VIGENCIA` y la celda que la usa: quitarle `f` la deja en el número del día.) **Desde el
+  lote 11 la fórmula lleva la vigencia de la marca de cada fila** (`FORMULA_VIGENCIA(fila, dias)`:
+  `=E6-TODAY()+365` en GRIMM, como siempre); con su marca **sin vencimiento**, la fecha va y la
+  vigencia, vacía (sin fórmula), y «Detalle» dice «Sin vencimiento». «Notas» lo explica.
 - **Tipos de celda**: la fecha es una FECHA de Excel (el número de días, entero y calculado sobre
   UTC, con formato `dd/mm/yyyy`: es ese día se abra en la zona que se abra); **todo texto es una
   celda de texto**, escrita a mano —un serial hecho de cifras no pierde ceros ni sale en notación
@@ -1611,8 +1630,9 @@ este lote no añade ningún camino de envío.
   que cambiaría y **confirmación con motivo** dentro de la página. Se deshace apagándolo. Un equipo
   concreto de una marca incluida que ya no se atiende **se retira como hoy** (lote 9d-2b).
 - **GRIMM EDM 180 está siempre incluido** (fila fija, sin interruptor).
-- **Vigencia: 365 días para todas las marcas** (la de la hoja). La constante sigue en un solo sitio,
-  `VIGENCIA_DIAS` (`dominio.ts`). **MEJORA POSIBLE**: una vigencia por marca o por modelo (no hecha).
+- ~~**Vigencia: 365 días para todas las marcas**~~ (la de la hoja). **Cambiado en el lote 11** (decisión
+  de Alfonso del 18/10/2026): **vigencia por marca**, GRIMM 365 días y las demás sin vencimiento salvo
+  que se les ponga un plazo (ver «Vigencia de calibración por marca»). Por modelo, no.
 
 **Cómo está hecho (decisiones del lote, revisables):**
 
@@ -1667,7 +1687,9 @@ interruptor. Al pulsarlo, la **vista previa** (cuántos entran, cuántos en avis
 clientes —sólo el número—, +1 año, sin fecha, al día, partidas que nacen y sueltas que se enlazan) y
 la confirmación con motivo, dentro de la página; apagar enseña cuántos salen. Sin el permiso, sólo
 lectura (interruptores atenuados). «Últimos cambios», plegado. La **cabecera** de la app dice las
-marcas incluidas («GRIMM EDM 180 + Horiba · vigencia de calibración de 365 días»); **Equipos** gana la
+marcas incluidas y, desde el lote 11, su vigencia («GRIMM EDM 180 + Horiba · vigencia de calibración:
+GRIMM EDM 180, 12 meses; Horiba, sin vencimiento»; con una sola, «… · vigencia de calibración: 12
+meses»); **Equipos** gana la
 columna «Marca · modelo» y, con más de una marca, el filtro por marca; Resumen dice «N equipos».
 
 **En producción (17/10/2026, sólo recuentos)**: 118 GRIMM EDM 180 en seguimiento y 235 de otras
@@ -1764,6 +1786,86 @@ siguiente.
   `nocturna`, que un hub-api viejo no manda: la línea diría «todavía ninguna»). La primera pasada
   sale la primera noche tras desplegar, o a los 2 minutos si se despliega después de las 02:00.
 
+### Vigencia de calibración por marca (lote 11, migración 063)
+
+**Estado: hecho.** Hasta este lote la calibración vencía a los 365 días para TODOS los equipos. ⚠️
+**Sigue sin enviarse nada**: los avisos son manuales o simulados y este lote no añade ningún camino de
+envío (los candados de avisos y simulación se ampliaron, no se relajaron).
+
+**DECIDIDO (Alfonso, 18/10/2026):**
+
+- **GRIMM: cada 12 meses** (365 días), como hasta ahora. Para GRIMM EDM 180 **no cambia ni un número**.
+- **Horiba NO tiene plazo fijo**: se calibra cuando se le hace el mantenimiento preventivo, y su
+  frecuencia depende del **contrato de cada cliente**, un dato que hoy no existe en ningún sitio. Así que
+  Horiba y las demás marcas empiezan **«sin vencimiento»**: entran en Equipos, en la pestaña y en la
+  exportación con su última calibración, pero **no cuentan como vencidas ni por vencer**, no entran en
+  Avisos (ni manuales ni simulados), ni en los recuentos de vencidos del Resumen, ni con una fecha de
+  próxima calibración en el Calendario.
+- Que una marca tenga plazo fijo se elige **por marca** en la tarjeta «Marcas en seguimiento», con firma
+  y motivo y **con el mismo permiso que su interruptor** (`inventario.write`). Valores: «sin vencimiento»
+  o un número de días (en pantalla, también en meses: «365 días (12 meses)»).
+- ⚠️ **La frecuencia por cliente según contrato NO está hecha** (queda pendiente: «lo que viene», abajo).
+- El fin práctico: **encender Horiba sin que salgan ~125 «vencidos +1 año» falsos** en Avisos.
+
+**La regla, en un solo sitio** (`vigenciaDeMarca`, `marcas.ts`; pura, la usan servidor y app):
+
+- Lo **guardado** (`tmc_marcas_vigencia`) manda; **sin fila, el código** (`VIGENCIA_POR_DEFECTO`):
+  GRIMM EDM 180 y GRIMM de otros modelos (clave `grimm`), 365; cualquier otra marca, `null` = sin
+  vencimiento. **GRIMM EDM 180 es fijo**: siempre 365, aunque hubiera algo guardado (409 `marca_fija` en
+  la ruta y un `CHECK` en la tabla).
+- La marca de un equipo es la de su grupo (`grupoMarca`, la misma de la tarjeta): **en seguimiento =
+  GRIMM EDM 180**; fuera, la clave de su marca (`claveMarca`: «HORIBA» = «Horiba»). En una fila que sólo
+  está en la hoja, la marca escrita en ella.
+- El estado: `estadoCalibracion(ultima, hoy, vigencia)` (`dominio.ts`). La vigencia es **un argumento
+  obligatorio**: ningún sitio puede olvidarla. `null` → **`SIN_VENCIMIENTO`** («Sin vencimiento»; sin
+  `vence` ni `vigenciaDias`). Sin fecha manda (`SIN_FECHA`). Con otra vigencia, los tramos 30/60/90 son
+  los mismos y **«+1 año» (`FUERA_CICLO`) sigue siendo vencida hace más de 365 días** (`FUERA_CICLO_DIAS`),
+  sea cual sea la vigencia: así su rótulo dice la verdad. `SIN_VENCIMIENTO` no está en `ESTADOS_AVISO`.
+
+**Cada sitio donde se usaba 365, y cómo quedó**:
+
+| Dónde | Antes | Ahora |
+|---|---|---|
+| `estadoCalibracion` (`dominio.ts`) | `VIGENCIA_DIAS` fijo | la vigencia, como argumento; `SIN_VENCIMIENTO` si es `null` |
+| `listarEquipos` (`repo.ts`, GET /equipos: Resumen, Equipos, Calendario, Avisos) | 365 | `vigenciaDeEquipo` por fila (con `en_seguimiento` y `marca`); cada equipo lleva `vigenciaMarca` |
+| `evaluarAviso` / `planAvisos` (`dominio.ts`, la simulación y sus pruebas) | recalculaba con 365 | con `equipo.vigenciaMarca` |
+| `tablaHoja` (`hoja.ts`, GET /hoja, la exportación, la vista previa de marcas) | 365 | `vigenciaDeMarca` por fila (`EntradaHoja.vigencias`); cada fila lleva `vigenciaMarca` |
+| `planCalibraciones` (`calibraciones.ts`: `salenDeAvisos` / `entranEnAvisos`) | 365 | con la `vigenciaMarca` de cada equipo (`calibraciones-repo.ts` la lee) |
+| `FORMULA_VIGENCIA` y «Notas» (`exportacion.ts`) | `+365` | `+` los días de su marca; sin vencimiento, sin fórmula |
+| Cabecera de la app, pista de la pestaña F-ST-022 y de «Marcas en seguimiento» | «365 días» | la vigencia de cada marca (`textoVigencias`) |
+| `CIERRES_ADELANTE_DIAS` (`repo.ts`, la agenda) y `PLAZO_MAX_DIAS` | 365 | **no son vigencia**: no se tocan |
+
+**Pasadas nocturnas (lote 10): no cambian de comportamiento.** Sus criterios de «limpio» no miran
+`salenDeAvisos` ni `entranEnAvisos`, y la **huella** del plan de calibraciones es la de lo que se escribe
+(altas y anulaciones), que no depende de la vigencia: cambiar una vigencia no hace que un plan revisado
+deje de valer (`marcas.db.test.ts` lo comprueba). Los dos recuentos —que se guardan en la pasada y se
+enseñan en la tarjeta— **sí cuadran con la regla nueva**: un equipo sin vencimiento cambia de fecha pero
+nunca sale ni entra en avisos.
+
+**La ruta** (tabla de la API): `POST /trazabilidad/marcas/:clave/vigencia`, `{dias, motivo}`, con
+`inventario.write` **antes de validar y de consultar** (es la **24.ª escritura** de la guarda de
+`router.test.ts`, apuntada con su porqué). Escribe la fila y su apunte en una transacción con el bloqueo
+de las marcas; **no toca ningún equipo ni ninguna calibración**. `GET /trazabilidad/marcas` lleva la
+vigencia de cada marca, `resumen.fechas` y `cambiosVigencia`.
+
+**La pantalla** (`MarcasSeguimiento.tsx`): columna **«Vigencia»** en cada fila —«365 días (12 meses)»
+o «sin vencimiento», y «Fija», «Por defecto» o quién y cuándo (el motivo, en su `title`)—. Con el
+permiso, **«Cambiar»** abre dentro de la página: «Sin vencimiento» o «Vence a los N días de la última
+calibración» (con los meses al lado y el aviso si no vale), la **vista previa** (`lineasVistaVigencia`:
+la vigencia antes → después, cuántos equipos con fecha, cuántos **entran** y cuántos **salen** de «Avisos
+a clientes» —o «entrarían al encenderla» si la marca está apagada—, cuántos +1 año y cuántos sin fecha),
+lo que pasa al confirmar (`efectoVigencia`) y el **motivo obligatorio**; nada de `alert`/`confirm`. Sin
+el permiso, «Cambiar» va atenuado, como el interruptor. «Últimos cambios» junta los de los interruptores
+y los de la vigencia. El estado nuevo se pinta en azul cielo («Sin vencimiento»), va al final al ordenar
+por vigencia (antes de «sin fecha», `ordenVigencia`), y la ficha y el calendario dicen «sin vencimiento
+(su marca no tiene plazo fijo)» (`textoVigencia`).
+
+⚠️ **Despliegue**: hub-api antes que el portal (la 063 se aplica al arrancar; el portal nuevo pide
+`vigencia`, `resumen.fechas` y `cambiosVigencia` en `GET /marcas`, y `vigenciaMarca` en `GET /equipos`).
+**Al desplegar**: GRIMM EDM 180 igual; **Horiba y las demás pasan a «sin vencimiento» en la pestaña
+F-ST-022 y en la exportación** (antes vencían a los 365 días); una marca ya encendida sale de Avisos.
+Nada se guarda en la 063 al desplegar.
+
 ### Estado final del relevo de la Excel, y lo que viene (no construido)
 
 La F-ST-022 está **congelada** (9a), el inventario sale del **maestro de Desk 2.0** (9b, 9d-2a),
@@ -1771,7 +1873,9 @@ las fechas, de los **tickets** y de las **correcciones a mano** (9c, 9d-2b), la 
 su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Queda:
 
 - ~~Incluir otras marcas en seguimiento~~: **hecho en el lote 9f, por marca** (sección anterior).
-- **Vigencia por marca o por modelo** (hoy 365 días para todas, decisión de Alfonso).
+- ~~Vigencia por marca~~: **hecha en el lote 11** (GRIMM 365 días; las demás, sin vencimiento salvo que
+  se les ponga un plazo). Queda: **la frecuencia por cliente según su contrato** (la de Horiba, que se
+  calibra con el preventivo; el dato aún no existe en ningún sitio) y, si hiciera falta, por modelo.
 - **Distinguir por modelo los seriales repetidos** de la hoja (hoy no se enlazan ni admiten
   correcciones; retirar la fila que sobra no desempata a la otra) y decidir qué hacer con los
   numéricos dudosos, que siguen sólo listados. ⚠️ Con una marca incluida, un equipo suyo con el
@@ -1950,5 +2054,21 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
   limpio aplicado y firmado «Pasada automática» con su auditoría, el mismo día que no se repite, «sin cambios» al día siguiente,
   un alta retenida sin tocar el inventario mientras las calibraciones se aplican, sin Desk 2.0 nada, y 31 nuevas retenidas),
   `trazabilidad.db.test.ts` (suma `tmc_pasadas_nocturnas` a la lista de tablas `tmc_*`) y, en la app, `src/lib/nocturna.test.ts`.
+- Vigencia por marca (lote 11): `vigencia.test.ts` (la regla: por defecto, lo guardado, GRIMM EDM 180 fijo, el grupo de un equipo, qué
+  valores valen, y que la regla vive en `marcas.ts` sin ciclos y **ningún otro fichero decide una vigencia**), `dominio.test.ts`
+  (`SIN_VENCIMIENTO`, sin fecha manda, otra vigencia con los tramos y el +1 año de siempre), `avisos.test.ts` (un equipo sin vencimiento
+  no entra en NINGUNA lista del plan; con otra vigencia, su tramo), `calibraciones.test.ts` (salen/entran con la vigencia de cada equipo),
+  `hoja.test.ts` (la vigencia de cada fila, por grupo o por la marca escrita), `marcas.test.ts` (la vista previa con la vigencia, `fechas`
+  y el campo `vigencia`; el candado de escrituras de `marcas-repo.ts`, ampliado con las dos tablas de la 063), `exportacion.test.ts` (la
+  fórmula con los días de su marca y sin fórmula si no vence), `vigencia-repo.test.ts` (las guardas de la 063 —sin semilla—, que es **la
+  última migración**, `leerVigencias` y el **candado** de que sólo `marcas-repo.ts` inserta en sus tablas y nadie las cambia ni las borra),
+  `router.test.ts` (GET /equipos con la vigencia de cada marca; la ruta: 401, 403 sin la app, 403 para Lector, Comercial y Técnico antes de
+  validar, cada 400, 409 `marca_fija` sin consultar, 404, 409 `misma_vigencia`, qué se escribe y en qué orden; **la guarda de escrituras,
+  ampliada de 23 a 24**, y el candado de las rutas de marcas, de dos a tres), `marcas.db.test.ts` (contra Postgres: la 063 repetida y sus
+  `CHECK`, GRIMM sin cambios, **encender Horiba sin vencimiento deja el plan de avisos igual byte a byte**, 365 días por la ruta y vuelta
+  atrás byte a byte, salen de avisos con la huella intacta, el Lector y todo o nada), `trazabilidad.db.test.ts` (suma las dos tablas a la
+  lista `tmc_*`) y, en la app, `src/lib/marcas.test.ts` (días y meses, cabecera, lo que se elige, vista previa y efecto), `src/lib/vistas.test.ts`
+  (texto, orden y calendario), `src/lib/hoja.test.ts` (orden) y `src/lib/simulacion.test.ts` (sin vencimiento fuera de la simulación). Las
+  pruebas anteriores con Horiba, Thermo o Kunak que eran de otra cosa (fechas, exportación, blindaje) les ponen 365 días a propósito, y lo dicen.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

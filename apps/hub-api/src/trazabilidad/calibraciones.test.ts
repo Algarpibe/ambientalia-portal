@@ -29,7 +29,8 @@ const HOY = '2026-10-11';
 let n = 0;
 const fila = (extra: Partial<FilaCalibracion> = {}): FilaCalibracion => ({ id: ++n, clave: '18A00001', serial: '18A00001', deskEquipoId: null, fecha: '2025-10-17', origen: 'desk', ticket: null, estado: 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false, ...extra });
 const ticket = (numero: number, fecha: string | null, extra: Partial<TicketCalibracion> = {}): TicketCalibracion => ({ numero, fecha, campo: 'nombre_interno', equipoId: null, serial: '18A00001', tipoServicio: 'Calibración', estado: 'Finalizado', gestionadoPorApp: false, ...extra });
-const equipo = (serial: string, extra: Partial<EquipoInventario> = {}): EquipoInventario => ({ clave: serial, serial, activo: true, deskId: null, ultimaCalibracion: null, ...extra });
+/** Un GRIMM EDM 180 del inventario (vigencia de su marca: 365 días), salvo que se diga otra cosa. */
+const equipo = (serial: string, extra: Partial<EquipoInventario> = {}): EquipoInventario => ({ clave: serial, serial, activo: true, deskId: null, ultimaCalibracion: null, vigenciaMarca: 365, ...extra });
 const plan = (e: Partial<EntradaPlanCalibraciones>): PlanCalibraciones => planCalibraciones({ hoy: HOY, tickets: [], total: e.tickets?.length ?? 0, conCf: e.tickets?.length ?? 0, filas: [], equipos: [equipo('18A00001')], partida: [], ...e });
 /** Lo que haría la base con un plan: anula (no «a mano») e inserta, con ids nuevos. */
 const aplicar = (p: PlanCalibraciones, filas: readonly FilaCalibracion[]): FilaCalibracion[] => [
@@ -251,7 +252,7 @@ describe('el plan de la pasada', () => {
   describe('a cuántos equipos les cambia la última calibración', () => {
     it('un equipo vencido que recibe una calibración reciente: cambia y sale de los avisos', () => {
       const equipos = [equipo('18A00001', { ultimaCalibracion: '2025-06-01' }), equipo('18A00002', { ultimaCalibracion: '2025-12-01' })];
-      expect(estadoCalibracion('2025-06-01', HOY).estado).toBe('VENCIDA');
+      expect(estadoCalibracion('2025-06-01', HOY, 365).estado).toBe('VENCIDA');
       const p = plan({ equipos, tickets: [ticket(1001, '2026-09-20')] });
       expect(p.recuentos).toMatchObject({ equiposCambian: 1, salenDeAvisos: 1, entranEnAvisos: 0 });
     });
@@ -260,6 +261,15 @@ describe('el plan de la pasada', () => {
       const p = plan({ equipos: [equipo('18A00001', { ultimaCalibracion: '2025-06-01', activo: false })], tickets: [ticket(1001, '2026-09-20')] });
       expect(p.recuentos).toMatchObject({ nuevas: 1, equiposCambian: 0, salenDeAvisos: 0 });
       expect(plan({ equipos: [equipo('18A00001', { ultimaCalibracion: '2025-06-01' })], tickets: [ticket(1001, '2027-09-20')] }).recuentos).toMatchObject({ enRevision: 1, equiposCambian: 0 });
+    });
+
+    // Lote 11: «sale de / entra en avisos» se cuenta con la vigencia de la marca de cada equipo, la misma regla que el inventario. Lo
+    // leen la tarjeta y la pasada nocturna (que no decide por ellos): un equipo sin vencimiento cambia de fecha pero nunca entra ni sale.
+    it('con la vigencia de su marca: un equipo sin vencimiento cambia, pero ni sale ni entra en avisos; con 365 días, sí', () => {
+      const sin = plan({ equipos: [equipo('HB-0001', { ultimaCalibracion: '2025-06-01', vigenciaMarca: null }), equipo('HB-0002', { ultimaCalibracion: '2026-09-01', vigenciaMarca: null })], tickets: [ticket(1001, '2026-09-20', { serial: 'HB-0001' }), ticket(1002, '2026-09-21', { serial: 'HB-0002' })] });
+      expect(sin.recuentos).toMatchObject({ equiposCambian: 2, salenDeAvisos: 0, entranEnAvisos: 0 });
+      const con = plan({ equipos: [equipo('HB-0001', { ultimaCalibracion: '2025-06-01', vigenciaMarca: 365 })], tickets: [ticket(1001, '2026-09-20', { serial: 'HB-0001' })] });
+      expect(con.recuentos).toMatchObject({ equiposCambian: 1, salenDeAvisos: 1, entranEnAvisos: 0 });
     });
   });
 

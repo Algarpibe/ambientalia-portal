@@ -13,8 +13,12 @@
  *    «Equipos» (`fechaEfectiva`); para una fila sólo de la hoja, su fecha como
  *    punto de partida más las calibraciones guardadas sin equipo de ese serial
  *    (otras marcas), con la misma regla (`calibracionQueCuenta`).
- *  - Vigencia y estado: recalculados a hoy (`estadoCalibracion`). El número de
- *    «Vigencia» que quedó congelado dependía del día y no se enseña.
+ *  - Vigencia y estado: recalculados a hoy (`estadoCalibracion`) con la
+ *    vigencia de su MARCA (lote 11, `vigenciaDeMarca`: GRIMM 365 días; Horiba
+ *    y las demás, sin vencimiento salvo que se les ponga plazo). La de una
+ *    fila con equipo es la de su grupo (`grupoMarca`); la de una fila sólo de
+ *    la hoja, la de la marca escrita en ella. El número de «Vigencia» que
+ *    quedó congelado dependía del día y no se enseña.
  * Aparte, los equipos del inventario que no casan con ninguna fila.
  *
  * Lote 9d-2a: `tmc_equipos` lleva también las demás marcas, enlazadas con Desk
@@ -25,6 +29,7 @@
  */
 import { FECHA_MINIMA_CALIBRACION, calibracionQueCuenta, fechaEfectiva, type CalibracionGuardada, type EstadoFilaCalibracion, type FilaCalibracion, type OrigenCalibracion } from './calibraciones.js';
 import { ESTADOS, claveCliente, esFechaIso, estadoCalibracion, serialNorm, type EstadoCalibracion, type EstadoEquipo } from './dominio.js';
+import { claveMarca, grupoMarca, vigenciaDeMarca, type VigenciasGuardadas } from './marcas.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 
 /** Lo que conviene mirar de una fila, en el orden en que se enseña (su texto, en la app: `src/lib/hoja.ts`). */
@@ -66,6 +71,8 @@ export interface FilaHoja extends EstadoEquipo {
   serial: string;
   enHoja: EnHoja;
   ultimaCalibracion: string | null;
+  /** La vigencia de su marca en días (lote 11, `vigenciaDeMarca`); null = sin vencimiento. La exportación la escribe en su fórmula. */
+  vigenciaMarca: number | null;
   avisos: AvisoHoja[];
   /** La más reciente primero. Si ninguna cuenta y hay fecha, es la de respaldo del inventario. */
   calibraciones: CalibracionHoja[];
@@ -91,7 +98,7 @@ export interface ResumenHoja {
   porEstado: Record<EstadoCalibracion, number>;
 }
 
-export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[]; /** Las filas de la hoja retiradas a mano (su último apunte es un retiro). */ retiradas?: readonly (Retiro & { fila: number })[] }
+export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[]; /** Las filas de la hoja retiradas a mano (su último apunte es un retiro). */ retiradas?: readonly (Retiro & { fila: number })[]; /** Lote 11: las vigencias guardadas por marca (063); sin ellas, las del código. */ vigencias?: VigenciasGuardadas }
 export interface TablaHoja { filas: FilaHoja[]; fueraDeHoja: FilaHoja[]; resumen: ResumenHoja }
 
 /** GET /trazabilidad/hoja. Sin congelación vigente, `congelacion` es null, `motivo` dice por qué y la tabla va vacía. */
@@ -130,6 +137,7 @@ function formaComun(filas: readonly FilaHoja[], grupo: (f: FilaHoja) => string, 
 }
 
 const CAMPOS = ['cliente', 'marca', 'modelo', 'serial'] as const;
+const SIN_GUARDAR: VigenciasGuardadas = new Map();
 /** Una marca o un modelo sin lo que no lo distingue: mayúsculas, tildes, espacios, guiones y puntos («APNA 370» = «APNA-370»). */
 const sinRuido = (v: string): string => claveCliente(v).replace(/[\s\-_./]/g, '');
 const claveModelo = (f: FilaHoja): string => `${f.marcaClave}|${sinRuido(f.modelo)}`;
@@ -200,11 +208,12 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     if (ultima === null) avisos.add('sin_fecha');
     if (conocidas.some((c) => c.estado === 'en_revision')) avisos.add('en_revision');
     if (f && !q && repetido(f) && sinEquipo.has(f.serialNorm ?? '')) avisos.add('calibraciones_sin_atribuir');
+    const vigenciaMarca = vigenciaDeMarca(q ? grupoMarca(q) : claveMarca(deHoja.marca), e.vigencias ?? SIN_GUARDAR);
     return {
       retirado: (q ? q.retirado : f ? retiradaDe.get(f.fila) : null) ?? null,
       fila: f?.fila ?? null, clave: q?.clave ?? null, situacion: !q ? 'hoja' : fuera ? 'enlazado' : q.activo ? 'inventario' : 'inactivo',
       cliente: actual.cliente, marca: actual.marca, marcaClave: claveCliente(actual.marca), modelo: actual.modelo, serial: actual.serial, enHoja,
-      ultimaCalibracion: ultima, ...estadoCalibracion(ultima, hoy), avisos: [...avisos],
+      ultimaCalibracion: ultima, vigenciaMarca, ...estadoCalibracion(ultima, hoy, vigenciaMarca), avisos: [...avisos],
       calibraciones: conocidas
         .map(({ id, fecha, origen, ticket, corrigeTicket, estado, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo }: FilaCalibracion & Partial<CalibracionGuardada>, i) => ({ id, fecha, origen, ticket, corrigeTicket, estado, cuenta: conocidas[i] === cuenta, motivo, por, en, anuladaPor, anuladaEn, anuladaMotivo }))
         .sort((a, b) => b.fecha.localeCompare(a.fecha)),

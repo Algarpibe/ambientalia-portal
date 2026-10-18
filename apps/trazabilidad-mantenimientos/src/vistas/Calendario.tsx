@@ -34,7 +34,7 @@ export default function Calendario({ equipos, hoy, mes, onMes, onFicha }: Props)
     <button
       type="button"
       onClick={() => onFicha(e.clave)}
-      title={`${e.cliente} · ${e.serial} · ${textoVigencia(e.vigenciaDias)}`}
+      title={`${e.cliente} · ${e.serial} · ${textoVigencia(e.vigenciaDias, e.estado)}`}
       className={`block w-full truncate rounded border-l-4 bg-gray-50 px-1.5 py-0.5 text-left text-[11px] font-medium text-gray-800 hover:bg-gray-100 ${TONO[e.estado].chip}`}
     >
       {e.cliente} <span className="font-mono text-[10px] text-gray-500">{e.serial}</span>

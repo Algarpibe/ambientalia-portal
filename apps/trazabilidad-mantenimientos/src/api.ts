@@ -118,6 +118,8 @@ export const api = {
   marcas: () => request<RespuestaMarcas>('GET', '/marcas'),
   /** Enciende (`incluir`) o apaga una marca, con motivo (pide `inventario.write`). Devuelve las marcas ya actualizadas. No envía nada. */
   cambiarMarca: (clave: string, incluir: boolean, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}`, { incluir, motivo }),
+  /** Lote 11: la vigencia de calibración de una marca (`dias`, o null = sin vencimiento), con motivo (pide `inventario.write`). No envía nada. */
+  cambiarVigencia: (clave: string, dias: number | null, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}/vigencia`, { dias, motivo }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
   registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),

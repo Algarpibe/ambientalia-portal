@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
 import { ESTADOS, ETIQUETA_ESTADO, type EquipoVista, type EstadoCalibracion } from '../dominio';
 import { filtrarPorMarca, marcasDeEquipos } from '../lib/marcas';
-import { conteoPorEstado, enServicio, fmtFecha, marcaAviso } from '../lib/vistas';
+import { conteoPorEstado, enServicio, fmtFecha, marcaAviso, ordenVigencia } from '../lib/vistas';
 import { EstadoBadge, TONO, Tag, TicketTag } from '../ui';
 
 export interface Filtro {
@@ -35,9 +35,9 @@ export default function Equipos({ equipos, filtro, onFiltro, onFicha }: Props) {
     const val = (e: EquipoVista): string | number => {
       switch (orden.k) {
         case 'vigencia':
-          // Lo urgente arriba: los FUERA_CICLO (más de un año vencidos) y los
-          // SIN_FECHA van al final, no delante de las vencidas recientes.
-          return e.estado === 'SIN_FECHA' ? 3e9 : e.estado === 'FUERA_CICLO' ? 2e9 - (e.vigenciaDias ?? 0) : (e.vigenciaDias ?? 0);
+          // Lo urgente arriba: los FUERA_CICLO (más de un año vencidos), los
+          // SIN_VENCIMIENTO y los SIN_FECHA van al final (`ordenVigencia`).
+          return ordenVigencia(e);
         case 'cliente':
           return e.cliente.toLowerCase();
         case 'serial':

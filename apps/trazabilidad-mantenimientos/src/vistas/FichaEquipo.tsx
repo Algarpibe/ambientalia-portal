@@ -109,7 +109,7 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, 
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-2">
           <EstadoBadge estado={e.estado} />
-          <span className="text-sm text-gray-500">{textoVigencia(e.vigenciaDias)}</span>
+          <span className="text-sm text-gray-500">{textoVigencia(e.vigenciaDias, e.estado)}</span>
           {e.serialRepetido && <Tag tone="amber">Serial repetido en la F-ST-022</Tag>}
         </div>
 

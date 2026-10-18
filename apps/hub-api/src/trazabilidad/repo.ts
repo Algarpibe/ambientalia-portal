@@ -48,8 +48,10 @@ import {
   type RolEstado,
   type TicketContacto,
 } from './dominio.js';
+import { vigenciaDeEquipo } from './marcas.js';
 import { calcularReloj, type IntervaloEstado } from './plazos.js';
 import { resolverRol, type RolApp } from './roles.js';
+import { leerVigencias } from './vigencia-repo.js';
 import {
   TzError,
   errorPlazoDerivado,
@@ -123,7 +125,7 @@ const INVENTARIO = `(SELECT * FROM portal.tmc_equipos WHERE ${EN_INVENTARIO})`;
 const COLS_EQUIPO = `
   e.clave, e.serial, e.cliente, e.marca, e.modelo, e.fecha_factura::text AS fecha_factura, e.hoja_vida,
   e.ultima_entrada::text AS ultima_entrada, e.ultima_calibracion::text AS ultima_calibracion,
-  e.entradas_st, e.calibraciones_periodo, e.correctivos_periodo, e.activo`;
+  e.entradas_st, e.calibraciones_periodo, e.correctivos_periodo, e.activo, e.en_seguimiento`;
 
 /**
  * Equipos activos con su seguimiento, el estado calculado a fecha `hoy` y el
@@ -138,13 +140,16 @@ const COLS_EQUIPO = `
  *
  * `ultimaCalibracion` (y con ella el estado) es la que da la regla de las
  * calibraciones guardadas (lote 9c, `fechaEfectiva`); el equipo que no tiene
- * ninguna sigue con la de `tmc_equipos.ultima_calibracion`.
+ * ninguna sigue con la de `tmc_equipos.ultima_calibracion`. El estado se
+ * calcula con la vigencia de su marca (lote 11, `vigenciaDeEquipo`: GRIMM EDM
+ * 180, 365 días; una marca sin plazo fijo, sin vencimiento).
  */
 export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]> {
-  const [{ rows }, deDesk, manuales, calibraciones] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db)]);
+  const [{ rows }, deDesk, manuales, calibraciones, vigencias] = await Promise.all([consultarEquipos(db), contactosDeDesk(db), listarContactos(db), leerCalibraciones(db), leerVigencias(db)]);
   const calibracionesDe = new Map<string, CalibracionGuardada[]>();
   for (const c of calibraciones) if (c.clave) calibracionesDe.set(c.clave, [...(calibracionesDe.get(c.clave) ?? []), c]);
   const ultimaDe = (r: Row): string | null => fechaEfectiva(calibracionesDe.get(r.clave) ?? [], r.ultima_calibracion, hoy);
+  const vigenciaDe = (r: Row): number | null => vigenciaDeEquipo({ marca: r.marca ?? '', enSeguimiento: r.en_seguimiento !== false }, vigencias);
   const manualDe = new Map(manuales.map((m) => [m.clave, m]));
   const porSerial = new Map<string, number>();
   for (const r of rows as Row[]) porSerial.set(r.serial, (porSerial.get(r.serial) ?? 0) + 1);
@@ -161,7 +166,8 @@ export async function listarEquipos(db: Db, hoy: string): Promise<EquipoVista[]>
     entradasSt: r.entradas_st,
     calibracionesPeriodo: r.calibraciones_periodo,
     correctivosPeriodo: r.correctivos_periodo,
-    ...estadoCalibracion(ultimaDe(r), hoy),
+    vigenciaMarca: vigenciaDe(r),
+    ...estadoCalibracion(ultimaDe(r), hoy, vigenciaDe(r)),
     serialRepetido: (porSerial.get(r.serial) ?? 0) > 1,
     seguimiento: r.tiene_seg
       ? {

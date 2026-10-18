@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as XLSX from 'xlsx';
 import type { FilaCalibracion } from './calibraciones.js';
+import { claveMarca } from './marcas.js';
 import { COLUMNAS_FST022, FILA_CABECERA, FORMULA_VIGENCIA, HOJAS_LIBRO, TIPO_XLSX, filasExportadas, libroFst022, nombreFichero, origenDeFecha } from './exportacion.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, type EquipoHoja, type RespuestaHoja, type Retiro } from './hoja.js';
@@ -25,9 +26,14 @@ const equipo = (clave: string, extra: Partial<EquipoHoja> = {}): EquipoHoja => (
 let id = 0;
 const cal = (clave: string | null, serial: string, f: string, extra: Partial<FilaCalibracion> = {}): FilaCalibracion => ({ id: ++id, clave, serial, deskEquipoId: null, fecha: f, origen: 'desk', ticket: 1000 + id, estado: 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false, ...extra });
 
-interface Caso { filas?: FilaCongelada[]; equipos?: EquipoHoja[]; calibraciones?: FilaCalibracion[]; retiradas?: (Retiro & { fila: number })[]; congelacion?: RespuestaHoja['congelacion']; hoy?: string }
-function respuesta({ filas = [], equipos = [], calibraciones = [], retiradas = [], congelacion = CONGELACION, hoy = HOY }: Caso): RespuestaHoja {
-  return { hoy, congelacion, motivo: congelacion ? null : 'No hay hoja.', ...tablaHoja({ hoy, cabeceras: congelacion ? CABECERAS : [], filas, equipos, calibraciones, retiradas }) };
+/**
+ * Lote 11: la vigencia es de la marca, y sin nada guardado Thermo, Horiba y Kunak no vencen. Estas pruebas son del libro, no de la
+ * regla: les ponen 365 días (como si alguien lo hubiera guardado), salvo las de «sin vencimiento», que pasan `vigencias: new Map()`.
+ */
+const DOCE_MESES = new Map<string, number | null>([['thermo', 365], ['horiba', 365], ['kunak', 365]]);
+interface Caso { filas?: FilaCongelada[]; equipos?: EquipoHoja[]; calibraciones?: FilaCalibracion[]; retiradas?: (Retiro & { fila: number })[]; congelacion?: RespuestaHoja['congelacion']; hoy?: string; vigencias?: ReadonlyMap<string, number | null> }
+function respuesta({ filas = [], equipos = [], calibraciones = [], retiradas = [], congelacion = CONGELACION, hoy = HOY, vigencias = DOCE_MESES }: Caso): RespuestaHoja {
+  return { hoy, congelacion, motivo: congelacion ? null : 'No hay hoja.', ...tablaHoja({ hoy, cabeceras: congelacion ? CABECERAS : [], filas, equipos, calibraciones, retiradas, vigencias }) };
 }
 /** El libro generado, leído otra vez con SheetJS (con sus formatos de número y sus fórmulas). */
 function leer(tabla: RespuestaHoja, exporta = EXPORTA) {
@@ -76,12 +82,26 @@ describe('la hoja principal: las seis columnas de la V3, en su sitio', () => {
 
   it('la vigencia sigue «viva»: una fórmula por fila, la de la hoja (última calibración + 365 − HOY()), con su valor a la fecha de exportación en caché, igual al de la pestaña', () => {
     const { celda } = leer(tabla);
-    expect(FORMULA_VIGENCIA(6)).toBe('E6-TODAY()+365');
+    expect(FORMULA_VIGENCIA(6, 365)).toBe('E6-TODAY()+365');
     for (const [i, f] of tabla.filas.entries()) {
       const c = celda('Trazabilidad', `F${6 + i}`)!;
       expect([c.t, c.f, c.v]).toEqual(['n', `E${6 + i}-TODAY()+365`, f.vigenciaDias]);
     }
     expect(tabla.filas.map((f) => f.vigenciaDias)).toEqual([140, 20]);
+  });
+
+  // Lote 11: la fórmula lleva los días de la vigencia de SU marca; una marca sin vencimiento deja la vigencia vacía (como sin fecha),
+  // con su fecha en su sitio, y «Detalle» dice «Sin vencimiento».
+  it('la fórmula usa la vigencia de su marca; sin vencimiento, la celda va vacía, la fecha se queda y el detalle lo dice', () => {
+    expect(FORMULA_VIGENCIA(7, 730)).toBe('E7-TODAY()+730');
+    const t = respuesta({ filas: [fila('Cliente Ficticio A', 'GRIMM', 'EDM 180C', 'SER-0001', '2026-03-01'), fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-0001', '2025-11-01'), fila('Cliente Ficticio B', 'Kunak', 'K1', 'KU-0001', '2025-11-01')], vigencias: new Map([['kunak', 730]]) });
+    const { celda, matriz } = leer(t);
+    const n = (r: string) => celda('Trazabilidad', r);
+    expect([n('F6')?.f, n('F6')?.v]).toEqual(['E6-TODAY()+365', 140]);
+    expect(n('F7')).toBeUndefined();
+    expect(dia(n('E7'))).toBe('2025-11-01');
+    expect([n('F8')?.f, n('F8')?.v]).toEqual(['E8-TODAY()+730', 385]);
+    expect(matriz('Detalle').find((r) => r[2] === 'HB-0001')?.slice(4)).toEqual([null, 'Sin vencimiento']);
   });
 
   it('una fecha AAAA-MM-DD es ESE día en cualquier zona: el número de serie se calcula sobre UTC, también en un 1 de enero y un 31 de diciembre', () => {
@@ -122,7 +142,7 @@ describe('caracteres raros e inyección de fórmulas', () => {
   const RAROS = ['=HYPERLINK("http://example.com","pulsa")', '+57 300 0000000', '-Cliente Ficticio', '@cliente', '=1+1', 'Ñandú & «Cía» "S.A.S." <ficticia>', "O'Higgins; coma, punto y coma", '\t=SUM(A1)'];
 
   it.each(RAROS)('un valor de texto como %j sale tal cual y como TEXTO: nunca como fórmula', (raro) => {
-    const { celda, wb } = leer(respuesta({ filas: [fila(raro, raro, raro, 'TH-0001', '2026-03-01')] }));
+    const { celda, wb } = leer(respuesta({ filas: [fila(raro, raro, raro, 'TH-0001', '2026-03-01')], vigencias: new Map([[claveMarca(raro), 365]]) }));
     for (const col of ['A', 'B', 'C']) {
       const c = celda('Trazabilidad', `${col}6`)!;
       expect([c.t, c.v, c.f]).toEqual(['s', raro.trim(), undefined]);

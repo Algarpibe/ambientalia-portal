@@ -9,10 +9,18 @@
  * La regla de vigencia es la de la hoja F-ST-022 «Trazabilidad Mttos Clientes»:
  *   Vigencia calibración (días) = (Última calibración − HOY) + 365
  * y la columna «Estado» de esa hoja marca 1 cuando la vigencia es < −365.
+ *
+ * Desde el lote 11 (decisión de Alfonso, 18/10/2026) los 365 días son los de
+ * GRIMM: la vigencia es de la MARCA y llega como argumento (`vigenciaDeMarca`,
+ * vigencia.ts). `null` = la marca no tiene plazo fijo (Horiba: se calibra con
+ * el preventivo de su contrato) y el equipo queda SIN_VENCIMIENTO.
  */
 
-/** Días de validez de una calibración (columna AD de la F-ST-022). */
+/** Días de validez de una calibración de GRIMM (columna AD de la F-ST-022). Las demás marcas, lo que diga `vigenciaDeMarca`. */
 export const VIGENCIA_DIAS = 365;
+
+/** Vencida hace más de estos días → FUERA_CICLO («Vencida +1 año», Estado = 1 en la hoja), sea cual sea la vigencia de su marca. */
+export const FUERA_CICLO_DIAS = 365;
 
 /** Umbrales del aviso escalonado (días de vigencia restantes). */
 export const UMBRALES = { aviso30: 30, aviso60: 60, aviso90: 90 } as const;
@@ -24,6 +32,7 @@ export type EstadoCalibracion =
   | 'VENCE_60'
   | 'VENCE_90'
   | 'AL_DIA'
+  | 'SIN_VENCIMIENTO' // su marca no tiene plazo fijo (lote 11): no vence, no pide aviso
   | 'SIN_FECHA';
 
 /** Orden de presentación: de lo más urgente a lo que no pide nada. */
@@ -34,6 +43,7 @@ export const ESTADOS: readonly EstadoCalibracion[] = [
   'VENCE_60',
   'VENCE_90',
   'AL_DIA',
+  'SIN_VENCIMIENTO',
   'SIN_FECHA',
 ];
 
@@ -44,6 +54,7 @@ export const ETIQUETA_ESTADO: Record<EstadoCalibracion, string> = {
   VENCE_60: 'Vence 31–60 días',
   VENCE_90: 'Vence 61–90 días',
   AL_DIA: 'Al día',
+  SIN_VENCIMIENTO: 'Sin vencimiento',
   SIN_FECHA: 'Sin fecha',
 };
 
@@ -77,20 +88,24 @@ export function diasEntre(desde: string, hasta: string): number {
 }
 
 export interface EstadoEquipo {
-  /** Fecha en que se cumple la vigencia (última calibración + 365 días). */
+  /** Fecha en que se cumple la vigencia (última calibración + la vigencia de su marca); null sin fecha o sin vencimiento. */
   vence: string | null;
   /** Días de vigencia restantes; negativo = vencida hace N días. */
   vigenciaDias: number | null;
   estado: EstadoCalibracion;
 }
 
-/** Clasifica un equipo según su última calibración, a fecha `hoy` (AAAA-MM-DD). */
-export function estadoCalibracion(ultimaCalibracion: string | null, hoy: string): EstadoEquipo {
+/**
+ * Clasifica un equipo según su última calibración, a fecha `hoy` (AAAA-MM-DD), con la vigencia de su marca en días (`null` = sin
+ * vencimiento). Sin fecha manda: un equipo sin calibración conocida es SIN_FECHA aunque su marca no venza.
+ */
+export function estadoCalibracion(ultimaCalibracion: string | null, hoy: string, vigencia: number | null): EstadoEquipo {
   if (!ultimaCalibracion || !esFechaIso(ultimaCalibracion)) return { vence: null, vigenciaDias: null, estado: 'SIN_FECHA' };
-  const vence = sumarDias(ultimaCalibracion, VIGENCIA_DIAS);
+  if (vigencia === null) return { vence: null, vigenciaDias: null, estado: 'SIN_VENCIMIENTO' };
+  const vence = sumarDias(ultimaCalibracion, vigencia);
   const v = diasEntre(hoy, vence);
   const estado: EstadoCalibracion =
-    v < -VIGENCIA_DIAS
+    v < -FUERA_CICLO_DIAS
       ? 'FUERA_CICLO'
       : v < 0
         ? 'VENCIDA'
@@ -736,6 +751,8 @@ export interface EquipoAviso {
   cliente: string;
   modelo: string;
   ultimaCalibracion: string | null;
+  /** La vigencia de su marca en días (`vigenciaDeMarca`); null = sin vencimiento: nunca entra en el plan. */
+  vigenciaMarca: number | null;
   seguimiento: { enAmbientalia: boolean; avisoEnviado: string | null } | null;
   /** El ticket abierto en Desk, o null. Sólo importa si lo hay. */
   ticket: object | null;
@@ -755,7 +772,7 @@ export type MotivoAviso =
   | 'DEBIDO' // está en un tramo y aún no se le ha avisado en él: entraría en un correo
   | 'YA_AVISADO' // ya tiene un aviso desde que entró en su tramo
   | 'EN_SERVICIO' // está en un tramo, pero en Ambientalia o con ticket abierto
-  | 'SIN_TRAMO' // al día o sin fecha: no toca nada
+  | 'SIN_TRAMO' // al día, sin fecha o sin vencimiento: no toca nada
   | 'VENCIDA' // vencida en el último año: fuera de la regla automática
   | 'FUERA_CICLO'; // vencida hace más de un año: fuera de la regla automática
 
@@ -780,9 +797,10 @@ export interface AvisoEquipo<E extends EquipoAviso = EquipoAviso> {
  *    tramo o posterior, ya está avisado; si es anterior (fue el del tramo de
  *    antes) o no hay, toca.
  *  - Vencida y fuera de ciclo no entran en la regla.
+ *  - Con la vigencia de su marca: sin vencimiento (lote 11) no está en ningún tramo ni en ninguna lista.
  */
 export function evaluarAviso<E extends EquipoAviso>(equipo: E, hoy: string): AvisoEquipo<E> {
-  const { estado, vence, vigenciaDias } = estadoCalibracion(equipo.ultimaCalibracion, hoy);
+  const { estado, vence, vigenciaDias } = estadoCalibracion(equipo.ultimaCalibracion, hoy, equipo.vigenciaMarca);
   const base = { equipo, estado, vence, diasParaVencer: vigenciaDias };
   const tramo = tramoDeEstado(estado);
   if (tramo === null || vence === null) {

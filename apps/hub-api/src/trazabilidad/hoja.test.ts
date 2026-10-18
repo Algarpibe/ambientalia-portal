@@ -5,6 +5,7 @@ import { fechaEfectiva, type FilaCalibracion } from './calibraciones.js';
 import { estadoCalibracion } from './dominio.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, textoCelda, type EquipoHoja } from './hoja.js';
+import { CLAVE_EDM180 } from './marcas.js';
 
 // La tabla de la pestaña «Trazabilidad F-ST-022» (lote 9d-1), sin base: la regla
 // pura que casa cada fila de la hoja congelada con el inventario y le pone su
@@ -22,7 +23,12 @@ function fila(cliente: Celda, marca: Celda, modelo: Celda, serial: Celda, ultima
 const equipo = (clave: string, extra: Partial<EquipoHoja> = {}): EquipoHoja => ({ clave, serial: clave, cliente: 'Cliente Ficticio A S.A.S.', marca: 'GRIMM', modelo: 'EDM 180C', activo: true, ultimaCalibracion: null, ...extra });
 let id = 0;
 const cal = (clave: string | null, serial: string, f: string, extra: Partial<FilaCalibracion> = {}): FilaCalibracion => ({ id: ++id, clave, serial, deskEquipoId: null, fecha: f, origen: 'desk', ticket: 1000 + id, estado: 'vigente', corrigeTicket: null, corrigeFecha: null, anuladaAMano: false, ...extra });
-const tabla = (filas: FilaCongelada[], equipos: EquipoHoja[] = [], calibraciones: FilaCalibracion[] = [], hoy = HOY) => tablaHoja({ hoy, cabeceras: CABECERAS, filas, equipos, calibraciones });
+/**
+ * Lote 11: sin nada guardado, Horiba y Thermo NO vencen. Estas pruebas son de cómo se arma la tabla, así que les ponen 365 días (como si
+ * alguien los hubiera guardado); las de la vigencia por defecto pasan `new Map()`.
+ */
+const THERMO_365: ReadonlyMap<string, number | null> = new Map([['thermo', 365], ['horiba', 365]]);
+const tabla = (filas: FilaCongelada[], equipos: EquipoHoja[] = [], calibraciones: FilaCalibracion[] = [], hoy = HOY, vigencias = THERMO_365) => tablaHoja({ hoy, cabeceras: CABECERAS, filas, equipos, calibraciones, vigencias });
 
 describe('una fila por fila de equipo de la hoja, en su orden', () => {
   it('las filas que no son de un equipo (títulos, cabecera) no salen, y el orden es el de la hoja aunque lleguen desordenadas', () => {
@@ -39,11 +45,36 @@ describe('una fila por fila de equipo de la hoja, en su orden', () => {
   });
 
   it('la vigencia y el estado se recalculan a hoy con la regla de siempre: el número congelado de la hoja no sale', () => {
-    const t = tabla([fila('Cliente Ficticio C', 'Thermo', '49i', 'TH-0007', '2025-11-01')]);
-    expect(t.filas[0]).toMatchObject(estadoCalibracion('2025-11-01', HOY));
-    expect(t.filas[0]).toMatchObject({ vigenciaDias: 20, estado: 'VENCE_30' });
+    const t = tabla([fila('Cliente Ficticio C', 'Thermo', '49i', 'TH-0007', '2025-11-01')], [], [], HOY, THERMO_365);
+    expect(t.filas[0]).toMatchObject(estadoCalibracion('2025-11-01', HOY, 365));
+    expect(t.filas[0]).toMatchObject({ vigenciaDias: 20, estado: 'VENCE_30', vigenciaMarca: 365 });
     expect(JSON.stringify(t)).not.toMatch(/357/);
-    expect(tabla([fila('Cliente Ficticio C', 'Thermo', '49i', 'TH-0007', '2025-11-01')], [], [], '2026-11-02').filas[0]).toMatchObject({ vigenciaDias: -1, estado: 'VENCIDA' });
+    expect(tabla([fila('Cliente Ficticio C', 'Thermo', '49i', 'TH-0007', '2025-11-01')], [], [], '2026-11-02', THERMO_365).filas[0]).toMatchObject({ vigenciaDias: -1, estado: 'VENCIDA' });
+  });
+
+  // Lote 11: la vigencia es la de la MARCA de cada fila. Sin nada guardado, GRIMM vence a los 365 días y las demás no vencen: se ven con
+  // su fecha, pero sin «vence» ni días. La de un equipo en seguimiento es siempre la de GRIMM EDM 180; la de uno fuera, la de su marca;
+  // la de una fila sólo de la hoja, la de la marca escrita en ella.
+  it('con la vigencia de su marca: GRIMM (en seguimiento o de otro modelo) 365 días; Horiba y Thermo, sin vencimiento salvo lo guardado', () => {
+    const filas = [
+      fila('Cliente Ficticio A', 'GRIMM', 'EDM 180C', '18A00001', '2025-09-01', '18A00001'),
+      fila('Cliente Ficticio B', 'Horiba', 'APNA-370', 'HB-0001', '2025-09-01'),
+      fila('Cliente Ficticio B', 'Thermo', '49i', 'TH-0001', '2019-01-01'),
+      fila('Cliente Ficticio C', 'Grimm', 'EDM 280', '28A00001', '2025-09-01'),
+      fila('Cliente Ficticio D', 'Horiba', 'APNA-370', 'HB-0002', null),
+    ];
+    const equipos = [equipo('18A00001', { ultimaCalibracion: '2025-09-01', marca: 'Horiba' }), equipo('HB-0001', { marca: 'HORIBA', enSeguimiento: false })];
+    const estados = (t: ReturnType<typeof tabla>) => t.filas.map((f) => [f.serial, f.estado, f.vence, f.vigenciaMarca]);
+    expect(estados(tabla(filas, equipos, [], HOY, new Map()))).toEqual([
+      ['18A00001', 'VENCIDA', '2026-09-01', 365],
+      ['HB-0001', 'SIN_VENCIMIENTO', null, null],
+      ['TH-0001', 'SIN_VENCIMIENTO', null, null],
+      ['28A00001', 'VENCIDA', '2026-09-01', 365],
+      ['HB-0002', 'SIN_FECHA', null, null],
+    ]);
+    const conHoriba = tabla(filas, equipos, [], HOY, new Map([['horiba', 730], ['grimm', null], [CLAVE_EDM180, null]]));
+    expect(estados(conHoriba).map((x) => x.slice(1))).toEqual([['VENCIDA', '2026-09-01', 365], ['AL_DIA', '2027-09-01', 730], ['SIN_VENCIMIENTO', null, null], ['SIN_VENCIMIENTO', null, null], ['SIN_FECHA', null, 730]]);
+    expect(conHoriba.resumen.porEstado).toMatchObject({ VENCIDA: 1, AL_DIA: 1, SIN_VENCIMIENTO: 2, SIN_FECHA: 1 });
   });
 
   it('los números se enseñan como texto, enteros y sin notación científica; y un serial numérico se avisa (pudo perder ceros a la izquierda)', () => {
@@ -106,7 +137,7 @@ describe('última calibración', () => {
     for (const [i, [clave, respaldo, filas]] of casos.entries()) {
       const esperada = fechaEfectiva(filas, respaldo, HOY);
       expect([clave, t.filas[i].ultimaCalibracion]).toEqual([clave, esperada]);
-      expect(t.filas[i]).toMatchObject(estadoCalibracion(esperada, HOY));
+      expect(t.filas[i]).toMatchObject(estadoCalibracion(esperada, HOY, 365));
     }
     expect(t.filas.map((f) => f.ultimaCalibracion)).toEqual(['2025-01-15', '2025-10-17', '2026-08-03', '2025-10-17', null, null, '2026-05-05']);
     // De dónde sale: la fila que cuenta va marcada; sin ninguna fila, vale la del inventario y no hay ninguna marcada.
@@ -178,7 +209,7 @@ describe('resumen', () => {
     expect(t.resumen).toEqual({
       total: 4, enInventario: 2, inactivos: 1, soloHoja: 2, conAvisos: 2, retirados: 0, fueraDeHoja: 1, calibracionesSueltas: 0,
       porMarca: [{ clave: 'grimm', marca: 'GRIMM', total: 2 }, { clave: 'horiba', marca: 'Horiba', total: 1 }, { clave: 'thermo', marca: 'Thermo', total: 1 }],
-      porEstado: { FUERA_CICLO: 1, VENCIDA: 0, VENCE_30: 1, VENCE_60: 0, VENCE_90: 0, AL_DIA: 1, SIN_FECHA: 1 },
+      porEstado: { FUERA_CICLO: 1, VENCIDA: 0, VENCE_30: 1, VENCE_60: 0, VENCE_90: 0, AL_DIA: 1, SIN_VENCIMIENTO: 0, SIN_FECHA: 1 },
     });
   });
 
@@ -304,14 +335,14 @@ describe('retirados (lote 9d-2b)', () => {
   const equipos = (retirado: EquipoHoja['retirado'] = null) => [equipo('18A00001', { ultimaCalibracion: '2026-06-01' }), equipo('18A00002', { activo: !retirado, ultimaCalibracion: '2025-11-01', retirado })];
 
   it('nadie está retirado mientras nadie lo retire', () => {
-    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: filas(), equipos: equipos(), calibraciones: [] });
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: filas(), equipos: equipos(), calibraciones: [], vigencias: THERMO_365 });
     expect(t.filas.map((f) => f.retirado)).toEqual([null, null, null, null]);
     expect(t.resumen).toMatchObject({ retirados: 0, soloHoja: 2, conAvisos: 1, porEstado: { AL_DIA: 1, VENCE_30: 2, SIN_FECHA: 1 } });
   });
 
   it('un equipo retirado a mano sale como inactivo CON su firma; una fila de la hoja retirada, igual; conservan su fecha y su estado', () => {
     const f = filas();
-    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: f, equipos: equipos(FIRMA), calibraciones: [], retiradas: [{ fila: f[3].fila, ...FIRMA, motivo: 'Fila duplicada.' }, { fila: 9999, ...FIRMA }] });
+    const t = tablaHoja({ hoy: HOY, cabeceras: CABECERAS, filas: f, equipos: equipos(FIRMA), calibraciones: [], retiradas: [{ fila: f[3].fila, ...FIRMA, motivo: 'Fila duplicada.' }, { fila: 9999, ...FIRMA }], vigencias: THERMO_365 });
     expect(t.filas.map((x) => [x.serial, x.situacion, x.retirado?.motivo ?? null, x.estado])).toEqual([
       ['18A00001', 'inventario', null, 'AL_DIA'],
       ['18A00002', 'inactivo', 'El cliente lo dio de baja.', 'VENCE_30'],
@@ -332,9 +363,9 @@ describe('retirados (lote 9d-2b)', () => {
 describe('sólo lectura', () => {
   const fuente =(f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
 
-  it('la regla es pura: sólo importa el dominio, las calibraciones y los tipos de la congelación, y no mira el reloj', () => {
+  it('la regla es pura: sólo importa el dominio, las calibraciones, la vigencia por marca (marcas.ts, lote 11) y los tipos de la congelación, y no mira el reloj', () => {
     const imports = [...fuente('./hoja.ts').matchAll(/^import (type )?.* from '([^']+)';\r?$/gm)].map((m) => `${m[1] ?? ''}${m[2]}`);
-    expect(imports.sort()).toEqual(['./calibraciones.js', './dominio.js', 'type ./fst022.js']);
+    expect(imports.sort()).toEqual(['./calibraciones.js', './dominio.js', './marcas.js', 'type ./fst022.js']);
     expect(fuente('./hoja.ts')).not.toMatch(/Date\.now|new Date\(\)/);
   });
 

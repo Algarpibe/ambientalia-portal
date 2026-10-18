@@ -120,7 +120,7 @@ const FilaMovil = memo(function FilaMovil({ f, onAbrir }: { f: FilaHoja; onAbrir
       <button type="button" onClick={() => onAbrir(f)} className={`flex h-full w-full min-w-0 flex-col gap-1.5 rounded-2xl border border-gray-200 bg-white p-3 text-left text-sm shadow-sm ${f.retirado ? ATENUADA : ''}`}>
         <span className="flex flex-wrap items-center justify-between gap-2">
           <EstadoBadge estado={f.estado} />
-          <span className={`text-xs font-semibold tabular-nums ${TONO[f.estado].text}`}>{textoVigencia(f.vigenciaDias)}</span>
+          <span className={`text-xs font-semibold tabular-nums ${TONO[f.estado].text}`}>{textoVigencia(f.vigenciaDias, f.estado)}</span>
         </span>
         <span className="break-words font-medium text-gray-900">{f.cliente || '—'}</span>
         <span className="break-words text-gray-600">
@@ -238,7 +238,7 @@ function PanelFila({ f, onClose, onCambio }: { f: FilaHoja; onClose: () => void;
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-2">
           <EstadoBadge estado={f.estado} />
-          <span className="text-sm text-gray-500">{textoVigencia(f.vigenciaDias)}</span>
+          <span className="text-sm text-gray-500">{textoVigencia(f.vigenciaDias, f.estado)}</span>
           <Situacion f={f} />
         </div>
         {f.avisos.length > 0 && (
@@ -330,7 +330,7 @@ export default function HojaFst022({ equipos, recarga, onFicha, onCambio }: Prop
       {error && <Alert tone="red">{error}</Alert>}
       <Card
         title="Trazabilidad F-ST-022"
-        hint={c ? `Hoja «${c.hoja}» congelada el ${fmtFecha(c.en)} desde «${c.archivo}» por ${c.por} · valores a hoy, ${fmtFecha(datos.hoy)} · vigencia de 365 días para todas las marcas` : undefined}
+        hint={c ? `Hoja «${c.hoja}» congelada el ${fmtFecha(c.en)} desde «${c.archivo}» por ${c.por} · valores a hoy, ${fmtFecha(datos.hoy)} · vigencia de cada marca: GRIMM 365 días (12 meses); las demás, la de «Marcas en seguimiento» (sin vencimiento si no tienen plazo)` : undefined}
       >
         {datos.motivo && <Alert tone="amber">{datos.motivo}</Alert>}
         {c && (

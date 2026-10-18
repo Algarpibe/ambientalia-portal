@@ -41,6 +41,7 @@ import {
 } from './dominio.js';
 import { FECHA_MINIMA_CALIBRACION } from './calibraciones.js';
 import type { ResumenFst022 } from './fst022.js';
+import { VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, esVigenciaValida } from './marcas.js';
 import { ROLES_APP, esRolApp, type Permiso, type RolApp } from './roles.js';
 
 // Sin «parameter properties»: la app del portal importa este fichero (sólo
@@ -97,6 +98,8 @@ export interface EquipoVista {
   entradasSt: number | null;
   calibracionesPeriodo: number | null;
   correctivosPeriodo: number | null;
+  /** La vigencia de su marca en días (lote 11); null = sin vencimiento (estado SIN_VENCIMIENTO: no avisa). La usa el plan del aviso. */
+  vigenciaMarca: number | null;
   vence: string | null;
   vigenciaDias: number | null;
   estado: EstadoCalibracion;
@@ -805,6 +808,13 @@ export function parseCambioMarca(body: unknown): { incluir: boolean; motivo: str
   const b = obj(body, 'body');
   if (typeof b.incluir !== 'boolean') throw invalido('«incluir» debe ser true (encender la marca) o false (apagarla).', 'incluir');
   return { incluir: b.incluir, motivo: parseMotivo(b) };
+}
+
+/** POST /marcas/:clave/vigencia (lote 11): `{dias, motivo}`. `dias` es null (sin vencimiento) o un entero de 30 a 1095; siempre con motivo. */
+export function parseVigenciaMarca(body: unknown): { dias: number | null; motivo: string } {
+  const b = obj(body, 'body');
+  if (!('dias' in b) || !esVigenciaValida(b.dias)) throw invalido(`«dias» debe ser null (sin vencimiento) o un número entero de días entre ${VIGENCIA_MIN_DIAS} y ${VIGENCIA_MAX_DIAS}.`, 'dias');
+  return { dias: b.dias, motivo: parseMotivo(b) };
 }
 
 /** GET /retiros: de quién es el historial, `?clave=` de un equipo o `?fila=` de la hoja congelada (una de las dos). */

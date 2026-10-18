@@ -167,7 +167,9 @@ describe('retirar un equipo en seguimiento', () => {
     const h = await hoja();
     expect(h.filas[0]).toMatchObject({ clave: '18A00001', situacion: 'inactivo', estado: 'VENCE_30', retirado: { por: 'director@example.com', motivo: 'El cliente lo dio de baja.' } });
     expect(h.resumen).toMatchObject({ retirados: 1, enInventario: 2, inactivos: 1 });
-    expect(h.resumen.porEstado.VENCE_30).toBe(3); // las tres filas sin equipo, que siguen vivas
+    // Las tres filas sin equipo, que siguen vivas: son de Thermo y Environics, sin vencimiento desde el lote 11 (no tienen plazo fijo).
+    expect(h.resumen.porEstado.SIN_VENCIMIENTO).toBe(3);
+    expect(h.resumen.porEstado.VENCE_30).toBe(0);
   });
 
   it('la sincronización del maestro NO lo reactiva aunque Desk 2.0 lo tenga activo: lo cuenta aparte, sin proponer cambio sobre su `activo`, y sí le actualiza el cliente', async () => {

@@ -10,6 +10,7 @@ import {
   mensajeAviso,
   porCliente,
   rejillaMes,
+  ordenVigencia,
   textoVigencia,
   vencimientosPorMes,
 } from './vistas';
@@ -31,7 +32,8 @@ function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<Segu
     entradasSt: null,
     calibracionesPeriodo: null,
     correctivosPeriodo: null,
-    ...estadoCalibracion(ultimaCalibracion, HOY),
+    vigenciaMarca: 365,
+    ...estadoCalibracion(ultimaCalibracion, HOY, 365),
     serialRepetido: false,
     seguimiento: seg
       ? { enAmbientalia: false, avisoEnviado: null, servicioProgramado: null, nota: '', actualizadoPor: 'x', actualizadoEn: '', ...seg }
@@ -53,7 +55,7 @@ describe('conteos y meses', () => {
   const L = [vencida('A'), vence11('A'), vence57('B'), alDia('B'), fuera('C'), eq('C', null)];
 
   it('cuenta por estado', () => {
-    expect(conteoPorEstado(L)).toEqual({ FUERA_CICLO: 1, VENCIDA: 1, VENCE_30: 1, VENCE_60: 1, VENCE_90: 0, AL_DIA: 1, SIN_FECHA: 1 });
+    expect(conteoPorEstado(L)).toEqual({ FUERA_CICLO: 1, VENCIDA: 1, VENCE_30: 1, VENCE_60: 1, VENCE_90: 0, AL_DIA: 1, SIN_VENCIMIENTO: 0, SIN_FECHA: 1 });
   });
 
   it('reparte los vencimientos en los 12 meses siguientes y lleva el atraso aparte', () => {
@@ -146,6 +148,18 @@ describe('formato', () => {
     expect(textoVigencia(-3)).toBe('vencida hace 3 d');
     expect(textoVigencia(0)).toBe('vence hoy');
     expect(textoVigencia(11)).toBe('quedan 11 d');
+    expect(textoVigencia(null)).toBe('sin fecha de calibración');
+  });
+
+  // Lote 11: un equipo de una marca sin plazo fijo (Horiba) no vence. Se dice, en vez de «sin fecha», y no ocupa el calendario.
+  it('sin vencimiento: se dice así, va al final de la lista (antes de «sin fecha») y no cuenta en el calendario de vencimientos', () => {
+    const sin = { ...eq('Cliente Ficticio A', '2025-09-03'), vigenciaMarca: null, ...estadoCalibracion('2025-09-03', HOY, null) };
+    expect(textoVigencia(sin.vigenciaDias, sin.estado)).toBe('sin vencimiento (su marca no tiene plazo fijo)');
+    expect(textoVigencia(null, 'SIN_FECHA')).toBe('sin fecha de calibración');
+    const lista = [eq('B', null), sin, eq('C', '2024-01-01'), vence11('D'), vencida('E')];
+    expect([...lista].sort((a, b) => ordenVigencia(a) - ordenVigencia(b)).map((e) => e.estado)).toEqual(['VENCIDA', 'VENCE_30', 'FUERA_CICLO', 'SIN_VENCIMIENTO', 'SIN_FECHA']);
+    const { atraso, meses } = vencimientosPorMes([sin], HOY);
+    expect([atraso, meses.reduce((s, m) => s + m.total, 0)]).toEqual([0, 0]);
   });
 
   // Las firmas («quién y cuándo») llegan como instantes con zona. El día es el de Colombia (UTC−5 todo el

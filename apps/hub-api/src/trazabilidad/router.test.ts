@@ -241,12 +241,14 @@ describe('permisos por rol', () => {
     ),
     // Marcas en seguimiento (lote 9f): encender o apagar una marca. Cambia qué entra en el inventario, así que es del mismo permiso que retirar.
     { ruta: 'POST /trazabilidad/marcas/:clave', permiso: 'inventario.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/marcas/horiba').set(c).send({ incluir: true, motivo: 'Motivo ficticio.' }) },
+    // Vigencia de calibración por marca (lote 11): cambiarla mete o saca equipos de Avisos, así que va con el permiso del interruptor.
+    { ruta: 'POST /trazabilidad/marcas/:clave/vigencia', permiso: 'inventario.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/marcas/horiba/vigencia').set(c).send({ dias: 365, motivo: 'Motivo ficticio.' }) },
   ];
   /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
   const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las veintitrés escrituras del router, cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veinticuatro escrituras del router (la 24.ª, del lote 11: la vigencia de una marca), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -2151,7 +2153,7 @@ describe('la tabla de la hoja F-ST-022 (sólo lectura)', () => {
     expect(queries).toEqual([]);
   });
 
-  it('200 para un Lector, sin mirar su rol: la tabla ya calculada a «hoy», con su congelación y su resumen; cuatro lecturas, ninguna escritura, nada de Desk', async () => {
+  it('200 para un Lector, sin mirar su rol: la tabla ya calculada a «hoy», con su congelación y su resumen; cinco lecturas (desde el lote 11, también la vigencia por marca), ninguna escritura, nada de Desk', async () => {
     respuestas.push(VIGENTE, CONGELADAS, INVENTARIO);
     const res = await request(appHoja()).get(`${RUTA}?hoy=2026-10-12`).set(conRol(null));
     expect(res.status).toBe(200);
@@ -2164,7 +2166,7 @@ describe('la tabla de la hoja F-ST-022 (sólo lectura)', () => {
     expect(res.body.resumen).toMatchObject({ total: 2, enInventario: 1, soloHoja: 1, conAvisos: 1 });
     expect(consultasRol.n).toBe(0);
     expect(conexiones.n).toBe(0);
-    expect(queries).toHaveLength(4);
+    expect(queries).toHaveLength(5);
     for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
     expect(queries.join('\n')).not.toMatch(/\bdesk\./);
   });
@@ -2390,8 +2392,11 @@ describe('marcas en seguimiento: leer, encender y apagar', () => {
     const res = await request(appMarcas()).get(`${RUTA}?hoy=2026-10-17`).set(conRol(null));
     expect(res.status).toBe(200);
     expect(res.body.marcas.map((m: { clave: string; fija: boolean; incluida: boolean }) => [m.clave, m.fija, m.incluida])).toEqual([['grimm edm 180', true, true], ['horiba', false, false]]);
-    expect(res.body.marcas[1].resumen).toEqual({ equipos: 1, porEstado: { FUERA_CICLO: 0, VENCIDA: 1, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_FECHA: 0 }, avisos: 1, clientesAvisos: 1, partidas: 1, enlazadas: 1 });
+    // Lote 11: Horiba no tiene plazo fijo mientras nadie se lo ponga, así que su equipo vencido no está «en avisos».
+    expect(res.body.marcas[1].resumen).toEqual({ equipos: 1, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_VENCIMIENTO: 1, SIN_FECHA: 0 }, avisos: 0, clientesAvisos: 0, partidas: 1, enlazadas: 1, fechas: ['2025-09-15'] });
+    expect(res.body.marcas.map((m: { vigencia: unknown }) => m.vigencia)).toEqual([{ dias: 365, fija: true, porDefecto: true, firma: null }, { dias: null, fija: false, porDefecto: true, firma: null }]);
     expect(res.body.cambios).toEqual([]);
+    expect(res.body.cambiosVigencia).toEqual([]);
     expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
     expect(consultasRol.n).toBe(0);
     for (const q of queries) expect(q).toMatch(/^\s*SELECT/);
@@ -2453,12 +2458,111 @@ describe('marcas en seguimiento: leer, encender y apagar', () => {
     expect(parametros[1].slice(2, 7)).toEqual(['excluir', 'Vuelta atrás ficticia.', 1, 0, 0]);
   });
 
-  it('CANDADO: sus rutas son estas dos, la escritura con `inventario.write`; ni programador ni nada que avise', () => {
+  it('CANDADO: sus rutas son estas tres —desde el lote 11, también la vigencia de una marca—, las dos escrituras con `inventario.write`; ni programador ni nada que avise', () => {
     const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
     const rutas = fuente('./router.ts').split(/\n\s*router\./).slice(1).filter((r) => /^\w+\(\s*'\/trazabilidad\/marcas/.test(r));
-    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/marcas', 'post /trazabilidad/marcas/:clave']);
+    expect(rutas.map((r) => /^(\w+)\(\s*'([^']+)'/.exec(r)!.slice(1).join(' '))).toEqual(['get /trazabilidad/marcas', 'post /trazabilidad/marcas/:clave', 'post /trazabilidad/marcas/:clave/vigencia']);
     expect(rutas[1]).toMatch(/escritura\('inventario\.write',/);
-    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/marcas-repo|cambiarMarca|tmc_marcas/);
+    expect(rutas[2]).toMatch(/escritura\('inventario\.write',/);
+    for (const f of ['./fuente.ts', './registro-estados.ts', '../index.ts']) expect(fuente(f), f).not.toMatch(/marcas-repo|cambiarMarca|cambiarVigencia|tmc_marcas/);
+  });
+});
+
+// Vigencia de calibración por marca (lote 11, 063). Decisión de Alfonso (18/10/2026): GRIMM, 365 días; Horiba y las demás, SIN
+// VENCIMIENTO hasta que se les ponga un plazo en «Marcas en seguimiento» (POST /marcas/:clave/vigencia, `inventario.write`, el permiso
+// de su interruptor). Aquí: que el inventario (GET /equipos) calcula el estado con la vigencia de la marca, y las guardas, los 400, 404
+// y 409, qué se escribe y en qué orden. La regla la cubre vigencia.test.ts; el SQL contra Postgres, vigencia.db.test.ts.
+describe('vigencia de calibración por marca', () => {
+  const equipo = (clave: string, marca: string, enSeguimiento: boolean, ultima: string) => ({ clave, serial: clave, cliente: 'Cliente Reservado', marca, modelo: 'X', fecha_factura: null, hoja_vida: null, ultima_entrada: null, ultima_calibracion: ultima, entradas_st: null, calibraciones_periodo: null, correctivos_periodo: null, activo: true, en_seguimiento: enSeguimiento, tiene_seg: false, ticket_numero: null });
+  const EQUIPOS: [RegExp, Filas] = [/tiene_seg/, [equipo('SER-RESERVADO', 'GRIMM', true, '2025-09-03'), equipo('HB-RESERVADO', 'Horiba', false, '2025-09-03')]];
+  const vigencia = (dias: number | null): [RegExp, Filas] => [/FROM portal\.tmc_marcas_vigencia$/, [{ clave: 'horiba', dias }]];
+
+  it('GET /equipos: el GRIMM EDM 180 vence a los 365 días; un Horiba incluido, sin vencimiento mientras nadie le ponga plazo; con 365 guardados, vence como el GRIMM', async () => {
+    respuestas.push(EQUIPOS);
+    const sin = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
+    expect(sin.body.equipos.map((e: { clave: string; estado: string; vence: string | null; vigenciaMarca: number | null }) => [e.clave, e.estado, e.vence, e.vigenciaMarca])).toEqual([
+      ['SER-RESERVADO', 'VENCIDA', '2026-09-03', 365],
+      ['HB-RESERVADO', 'SIN_VENCIMIENTO', null, null],
+    ]);
+    respuestas.unshift(vigencia(365));
+    const con = await request(app()).get('/api/trazabilidad/equipos?hoy=2026-10-06').set(auth());
+    expect(con.body.equipos.map((e: { estado: string; vigenciaMarca: number | null }) => [e.estado, e.vigenciaMarca])).toEqual([['VENCIDA', 365], ['VENCIDA', 365]]);
+  });
+
+  const RUTA = '/api/trazabilidad/marcas';
+  const CONGELADAS: [RegExp, Filas] = [/FROM portal\.tmc_fst022_congelada f/, []];
+  const INVENTARIO: [RegExp, Filas] = [/FROM portal\.tmc_equipos$/m, [{ clave: 'HB-RESERVADO', serial: 'HB-RESERVADO', cliente: 'Cliente Reservado S.A.S.', marca: 'Horiba', modelo: 'APNA-370', activo: true, en_seguimiento: false, en_inventario: true, ultima_calibracion: '2025-09-03' }]];
+  const firma = (dias: number | null): [RegExp, Filas] => [/FROM portal\.tmc_marcas_vigencia ORDER BY clave/, [{ clave: 'horiba', marca: 'Horiba', dias, motivo: 'Decisión ficticia.', por: 'director@example.com', en: '2026-10-18 15:00:00+00' }]];
+  const escrituras = () => queries.filter((q) => /^\s*(INSERT|UPDATE|DELETE)/.test(q)).map((q) => /^\s*(\w+ (?:INTO )?[a-z_.]+)/.exec(q)![1]);
+  const parametros: unknown[][] = [];
+  const appVigencia = () => {
+    parametros.length = 0;
+    const query = async (sql: string, p: unknown[] = []) => (/^\s*(INSERT|UPDATE)/.test(sql) && parametros.push(p), fakePool.query(sql, p));
+    const pool = { query, connect: async () => (conexiones.n++, { query, release: () => {} }) } as unknown as Pool;
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createTrazabilidadRouter(pool));
+    return a;
+  };
+  const CUERPO = { dias: 365, motivo: ' Decisión ficticia: Horiba cada 12 meses. ' };
+  const pedir = (clave: string, cabecera = conRol('DIRECTOR_TECNICO'), cuerpo: unknown = CUERPO) => request(appVigencia()).post(`${RUTA}/${clave}/vigencia`).set(cabecera).send(cuerpo as object);
+
+  it('401 sin token y 403 sin la app; 403 para Lector, Comercial y Técnico antes de validar y sin ninguna consulta', async () => {
+    expect((await request(appVigencia()).post(`${RUTA}/horiba/vigencia`).send(CUERPO)).status).toBe(401);
+    expect((await pedir('horiba', auth(tokenFor(['ausencias'])))).body.error).toBe('forbidden');
+    for (const rol of [null, 'COMERCIAL', 'TECNICO']) {
+      const res = await pedir('horiba', conRol(rol), { dias: 'nunca' });
+      expect([res.status, res.body.error]).toEqual([403, 'forbidden_role']);
+    }
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it.each([
+    ['una clave que no es la de una marca', 'HORIBA', CUERPO, 'clave'],
+    ['sin «dias»', 'horiba', { motivo: 'x' }, 'dias'],
+    ['menos de 30 días', 'horiba', { dias: 29, motivo: 'x' }, 'dias'],
+    ['más de 1095 días', 'horiba', { dias: 1096, motivo: 'x' }, 'dias'],
+    ['días con decimales', 'horiba', { dias: 365.5, motivo: 'x' }, 'dias'],
+    ['días como texto', 'horiba', { dias: '365', motivo: 'x' }, 'dias'],
+    ['sin motivo', 'horiba', { dias: null, motivo: '   ' }, 'motivo'],
+  ])('400 con %s, sin consultar nada', async (_caso, clave, cuerpo, campo) => {
+    const res = await pedir(clave, comoAdmin(), cuerpo);
+    expect([res.status, res.body.error, res.body.field]).toEqual([400, 'invalid_input', campo]);
+    expect([queries, conexiones.n]).toEqual([[], 0]);
+  });
+
+  it('409 `marca_fija` para GRIMM EDM 180 sin consultar nada; 404 si la marca no tiene equipos ni está guardada; 409 `misma_vigencia` si ya tenía ese valor; ninguno escribe', async () => {
+    const fija = await pedir('grimm%20edm%20180');
+    expect([fija.status, fija.body.error, conexiones.n]).toEqual([409, 'marca_fija', 0]);
+    const no = await pedir('thermo');
+    expect([no.status, no.body.error]).toEqual([404, 'not_found']);
+    respuestas.push(CONGELADAS, INVENTARIO);
+    const igual = await pedir('horiba', conRol('DIRECTOR_TECNICO'), { dias: null, motivo: 'x' });
+    expect([igual.status, igual.body.error]).toEqual([409, 'misma_vigencia']);
+    respuestas.unshift(firma(365));
+    expect((await pedir('horiba')).body.error).toBe('misma_vigencia');
+    expect(escrituras()).toEqual([]);
+  });
+
+  it('cambiar: en una transacción con el bloqueo de las marcas, la vigencia y su apunte (antes → después), en ese orden; devuelve las marcas ya con ella', async () => {
+    respuestas.push(CONGELADAS, INVENTARIO);
+    const res = await pedir('horiba');
+    expect(res.status).toBe(200);
+    expect(conexiones.n).toBe(1);
+    expect(queries.filter((q) => /pg_advisory_xact_lock/.test(q)).map((q) => /hashtext\('([^']+)'\)/.exec(q)![1])).toEqual(['portal.tmc_marcas']);
+    expect(escrituras()).toEqual(['INSERT INTO portal.tmc_marcas_vigencia', 'INSERT INTO portal.tmc_marcas_vigencia_cambios']);
+    expect(parametros[0].slice(0, 4)).toEqual(['horiba', 'Horiba', 365, 'Decisión ficticia: Horiba cada 12 meses.']);
+    expect(parametros[1].slice(0, 5)).toEqual(['horiba', 'Horiba', null, 365, 'Decisión ficticia: Horiba cada 12 meses.']);
+    expect(res.body.marcas.map((m: { clave: string }) => m.clave)).toEqual(['grimm edm 180', 'horiba']);
+    expect(JSON.stringify(res.body)).not.toMatch(/Reservado|RESERVADO/);
+  });
+
+  it('volver a «sin vencimiento»: `dias: null`, con el valor de antes en su apunte', async () => {
+    respuestas.push(firma(365), CONGELADAS, INVENTARIO);
+    const res = await pedir('horiba', comoAdmin(), { dias: null, motivo: 'Vuelta atrás ficticia.' });
+    expect(res.status).toBe(200);
+    expect(parametros[0].slice(0, 3)).toEqual(['horiba', 'Horiba', null]);
+    expect(parametros[1].slice(2, 5)).toEqual([365, null, 'Vuelta atrás ficticia.']);
   });
 });
 
@@ -2550,7 +2654,7 @@ describe('exportar la F-ST-022 (lectura con permiso)', () => {
   });
 
   it.each([['Comercial', () => conRol('COMERCIAL')], ['Técnico', () => conRol('TECNICO')], ['Director Técnico', () => conRol('DIRECTOR_TECNICO')], ['administrador del portal', comoAdmin]] as [string, () => { Authorization: string }][])(
-    '200 para %s: un .xlsx con su Content-Type, su Content-Disposition (el nombre con la fecha) y sin caché; cuatro lecturas y UN apunte, nada de Desk',
+    '200 para %s: un .xlsx con su Content-Type, su Content-Disposition (el nombre con la fecha) y sin caché; cinco lecturas y UN apunte, nada de Desk',
     async (quien, cabecera) => {
       respuestas.push(...HOJA);
       const res = await pedir(cabecera());
@@ -2560,8 +2664,8 @@ describe('exportar la F-ST-022 (lectura con permiso)', () => {
       expect(res.headers['cache-control']).toBe('no-store');
       expect((res.body as Buffer).subarray(0, 2).toString('latin1')).toBe('PK');
       expect(libro(res).wb.SheetNames).toEqual(['Trazabilidad', 'Retirados', 'Detalle', 'Notas']);
-      expect(queries).toHaveLength(5);
-      for (const q of queries.slice(0, 4)) expect(q).toMatch(/^\s*SELECT/);
+      expect(queries).toHaveLength(6); // las cinco lecturas de la tabla (desde el lote 11, también la vigencia por marca) y el apunte
+      for (const q of queries.slice(0, 5)) expect(q).toMatch(/^\s*SELECT/);
       expect(escrituras()).toEqual(['INSERT INTO portal.tmc_exportaciones']);
       expect(queries.join('\n')).not.toMatch(/\bdesk\./);
       expect(conexiones.n).toBe(0);

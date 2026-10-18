@@ -4,7 +4,8 @@
  * vigente, el inventario entero y las calibraciones guardadas—: no consulta
  * los tickets ni el maestro, así que responde igual con Desk 2.0 caído.
  *
- * Son cuatro consultas, haya las filas que haya (hoja.db.test.ts lo mide).
+ * Son cinco consultas, haya las filas que haya (hoja.db.test.ts lo mide): las
+ * cuatro de siempre y, desde el lote 11, la vigencia guardada por marca.
  * Las filas llevan clientes y seriales: nada de ellas va a un error ni al registro.
  */
 import type { Pool } from '@algarpibe/zoho-sync';
@@ -12,6 +13,7 @@ import type { Celda, FilaCongelada } from './fst022.js';
 import { tablaHoja, type EntradaHoja, type EquipoHoja, type RespuestaHoja } from './hoja.js';
 import { EN_INVENTARIO } from './inventario.js';
 import { leerCalibraciones } from './repo.js';
+import { leerVigencias } from './vigencia-repo.js';
 
 type Db = Pick<Awaited<ReturnType<Pool['connect']>>, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,11 +28,11 @@ export async function leerHoja(db: Db, hoy: string): Promise<RespuestaHoja> {
 }
 
 /**
- * Lo que necesita la regla de hoja.ts, leído en las mismas cuatro consultas. Aparte de `leerHoja` para que incluir una marca (lote 9f,
+ * Lo que necesita la regla de hoja.ts, leído en las mismas cinco consultas. Aparte de `leerHoja` para que incluir una marca (lote 9f,
  * marcas-repo.ts) calcule la tabla con los equipos que quiera FUERA del inventario: la que daba la pestaña antes de encenderla.
  */
 export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacion: RespuestaHoja['congelacion']; entrada: EntradaHoja & { equipos: EquipoHoja[] } }> {
-  const [vigentes, congeladas, inventario, calibraciones] = await Promise.all([
+  const [vigentes, congeladas, inventario, calibraciones, vigencias] = await Promise.all([
     db.query(`SELECT g.id, g.archivo, g.hoja, g.por, g.en::text AS en, g.cabeceras FROM portal.tmc_fst022_congelaciones g WHERE g.vigente`),
     // Con el último apunte de cada fila en tmc_retiros (059): si es un retiro, la fila está retirada a mano. Va en la misma consulta.
     db.query(
@@ -44,6 +46,8 @@ export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacio
     // mano y, desde el lote 9f, si está en el inventario (la regla de siempre, `EN_INVENTARIO`): fuera de seguimiento, eso es que su marca está incluida.
     db.query(`SELECT clave, serial, cliente, marca, modelo, activo, en_seguimiento, ${EN_INVENTARIO} AS en_inventario, ultima_calibracion::text AS ultima_calibracion, retirado_en::text AS retirado_en, retirado_por, retirado_motivo FROM portal.tmc_equipos`),
     leerCalibraciones(db),
+    // Lote 11: la vigencia guardada por marca (063), para el estado de cada fila. La quinta consulta.
+    leerVigencias(db),
   ]);
   const v = vigentes.rows[0] as Row | undefined;
   const filas = (congeladas.rows as Row[]).map((r): FilaCongelada => ({ fila: r.fila, celdas: r.celdas, esEquipo: true, serialNorm: r.serial_norm, claveEquipo: r.clave_equipo }));
@@ -51,6 +55,6 @@ export async function leerEntradaHoja(db: Db, hoy: string): Promise<{ congelacio
   const retiradas = (congeladas.rows as Row[]).filter((r) => r.retiro === 'retirar').map((r) => ({ fila: r.fila as number, por: r.retiro_por, en: r.retiro_en, motivo: r.retiro_motivo }));
   return {
     congelacion: v ? { id: Number(v.id), archivo: v.archivo, hoja: v.hoja, por: v.por, en: v.en } : null,
-    entrada: { hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas },
+    entrada: { hoy, cabeceras: (v?.cabeceras as Celda[][] | undefined) ?? [], filas, equipos, calibraciones, retiradas, vigencias },
   };
 }
