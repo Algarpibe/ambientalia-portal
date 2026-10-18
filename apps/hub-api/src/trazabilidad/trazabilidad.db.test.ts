@@ -359,6 +359,9 @@ describe('contacto de cada equipo', () => {
         // firma. Sólo marcas, recuentos y firmas: no son tablas de mensajes ni de envíos, e incluir una marca no manda nada a nadie.
         'tmc_marcas',
         'tmc_marcas_cambios',
+        // Lote 10: un apunte por noche y tipo de cómo acabó la pasada nocturna (aplicada, sin cambios, retenida y por qué…).
+        // Sólo resultados, motivos y recuentos: no es una tabla de mensajes ni de envíos, y la pasada no manda nada a nadie.
+        'tmc_pasadas_nocturnas',
         'tmc_plazos',
         // Lote 9d-2b: los apuntes de retirar y reincorporar a mano (quién, cuándo, por qué). No es una tabla de mensajes ni de envíos.
         'tmc_retiros',
