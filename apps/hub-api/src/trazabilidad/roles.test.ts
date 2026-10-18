@@ -25,6 +25,8 @@ const MATRIZ: Record<Permiso, Record<RolApp, boolean>> = {
   'inventario.write': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: S },
   // Lote 9e: exportar la F-ST-022 a un .xlsx. No cambia nada, pero saca del portal la hoja entera: Comercial, Técnico y Director Técnico (por defecto, revisable); el Lector no.
   'hoja.exportar': { LECTOR: N, COMERCIAL: S, TECNICO: S, DIRECTOR_TECNICO: S },
+  // Lote 12: la frecuencia de preventivo de un cliente. Decisión de Alfonso: sólo el administrador del portal, así que de ningún rol.
+  'contrato.write': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: N },
   'roles.manage': { LECTOR: N, COMERCIAL: N, TECNICO: N, DIRECTOR_TECNICO: N },
 };
 
@@ -33,7 +35,7 @@ describe('roles y permisos: los nombres', () => {
     expect([...ROLES_APP]).toEqual(['LECTOR', 'COMERCIAL', 'TECNICO', 'DIRECTOR_TECNICO']);
   });
 
-  it('los quince permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b, el de retirar con el 9d-2b y el de exportar con el 9e)', () => {
+  it('los dieciséis permisos, con sus nombres estables (los de la agenda y calibraciones ya están; el del maestro de equipos llegó con el lote 9b, el de retirar con el 9d-2b, el de exportar con el 9e y el de la frecuencia de contrato con el 12)', () => {
     expect([...PERMISOS]).toEqual([
       'seguimiento.write',
       'avisos.write',
@@ -49,6 +51,7 @@ describe('roles y permisos: los nombres', () => {
       'maestro.sincronizar',
       'inventario.write',
       'hoja.exportar',
+      'contrato.write',
       'roles.manage',
     ]);
     expect(Object.keys(MATRIZ).sort()).toEqual([...PERMISOS].sort());
@@ -62,8 +65,8 @@ describe('roles y permisos: los nombres', () => {
 describe('la matriz entera: cada rol × cada permiso', () => {
   const casos = PERMISOS.flatMap((permiso) => ROLES_APP.map((rol) => ({ rol, permiso, esperado: MATRIZ[permiso][rol] })));
 
-  it('son 60 casos', () => {
-    expect(casos).toHaveLength(60);
+  it('son 64 casos', () => {
+    expect(casos).toHaveLength(64);
   });
 
   it('exportar la F-ST-022 es de Comercial, Técnico y Director Técnico; el Lector la ve en pantalla y no se la lleva', () => {
@@ -86,6 +89,11 @@ describe('la matriz entera: cada rol × cada permiso', () => {
   it('ningún rol gestiona roles: eso es de los administradores del portal', () => {
     for (const rol of ROLES_APP) expect(puede(rol, 'roles.manage')).toBe(false);
   });
+
+  it('ningún rol rellena la frecuencia de preventivo de un cliente (lote 12): sólo el administrador del portal', () => {
+    for (const rol of ROLES_APP) expect(puede(rol, 'contrato.write')).toBe(false);
+    expect(puede('LECTOR', 'contrato.write', true)).toBe(true);
+  });
 });
 
 describe('administradores del portal', () => {
@@ -99,7 +107,7 @@ describe('administradores del portal', () => {
     expect(permisosDe('TECNICO')).toEqual(['seguimiento.write', 'servicios.tipo.write', 'calibraciones.write', 'hoja.exportar']);
     const a = permisosDe('DIRECTOR_TECNICO');
     a.length = 0;
-    expect(permisosDe('DIRECTOR_TECNICO')).toHaveLength(PERMISOS.length - 1);
+    expect(permisosDe('DIRECTOR_TECNICO')).toHaveLength(PERMISOS.length - 2); // ni roles.manage ni contrato.write: los dos, sólo de administradores del portal
   });
 });
 

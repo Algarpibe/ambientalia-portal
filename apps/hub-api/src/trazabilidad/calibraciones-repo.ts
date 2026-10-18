@@ -73,10 +73,11 @@ async function calcular(db: Db, lectura: Leida, hoy: string, ultima: PasadaCalib
   // enlazadas con Desk 2.0, siguen con sus calibraciones por serial y sin clave, y la pestaña «Trazabilidad F-ST-022» las atribuye a su
   // fila (hoja.ts). Al incluir una marca, sus partidas y sus sueltas ya se escribieron (marcas-repo.ts): aquí no nace ninguna otra.
   // Lote 11: con su marca y si está en seguimiento, para la vigencia de cada uno (`vigenciaDeEquipo`): quién sale o entra en avisos
-  // se cuenta con la misma regla que el inventario. No cambia nada de lo que se escribe (la huella es la de siempre).
-  const inventario = await db.query(`SELECT clave, serial, activo, desk_id, ultima_calibracion::text AS ultima_calibracion, marca, en_seguimiento FROM portal.tmc_equipos WHERE ${EN_INVENTARIO}`);
-  const vigencias = await leerVigencias(db);
-  const equipos = (inventario.rows as Row[]).map((r): EquipoInventario => ({ clave: r.clave, serial: r.serial, activo: r.activo, deskId: r.desk_id, ultimaCalibracion: r.ultima_calibracion, vigenciaMarca: vigenciaDeEquipo({ marca: r.marca ?? '', enSeguimiento: r.en_seguimiento !== false }, vigencias) }));
+  // se cuenta con la misma regla que el inventario. No cambia nada de lo que se escribe (la huella es la de siempre). Lote 12: con su
+  // cliente, por si su marca va «según contrato».
+  const inventario = await db.query(`SELECT clave, serial, activo, desk_id, ultima_calibracion::text AS ultima_calibracion, marca, cliente, en_seguimiento FROM portal.tmc_equipos WHERE ${EN_INVENTARIO}`);
+  const { vigencias, contratos } = await leerVigencias(db);
+  const equipos = (inventario.rows as Row[]).map((r): EquipoInventario => ({ clave: r.clave, serial: r.serial, activo: r.activo, deskId: r.desk_id, ultimaCalibracion: r.ultima_calibracion, vigenciaMarca: vigenciaDeEquipo({ marca: r.marca ?? '', cliente: r.cliente ?? '', enSeguimiento: r.en_seguimiento !== false }, vigencias, contratos) }));
   const plan = planCalibraciones({ hoy, tickets: lectura.tickets, total: lectura.total, conCf: lectura.conCf, filas, equipos, partida: await leerPartida(db) });
   const antes = Math.max(filas.filter((f) => f.origen === 'desk' && f.estado !== 'anulada').length, ultima?.recuentos.conCampo ?? 0);
   return { plan, huella: huellaDePlan(plan), salud: saludLectura(plan.recuentos.conCampo, antes) };

@@ -29,7 +29,7 @@
  */
 import { FECHA_MINIMA_CALIBRACION, calibracionQueCuenta, fechaEfectiva, type CalibracionGuardada, type EstadoFilaCalibracion, type FilaCalibracion, type OrigenCalibracion } from './calibraciones.js';
 import { ESTADOS, claveCliente, esFechaIso, estadoCalibracion, serialNorm, type EstadoCalibracion, type EstadoEquipo } from './dominio.js';
-import { claveMarca, grupoMarca, vigenciaDeMarca, type VigenciasGuardadas } from './marcas.js';
+import { claveMarca, grupoMarca, vigenciaDeGrupo, type FrecuenciasContrato, type VigenciasGuardadas } from './marcas.js';
 import type { Celda, FilaCongelada } from './fst022.js';
 
 /** Lo que conviene mirar de una fila, en el orden en que se enseña (su texto, en la app: `src/lib/hoja.ts`). */
@@ -98,7 +98,7 @@ export interface ResumenHoja {
   porEstado: Record<EstadoCalibracion, number>;
 }
 
-export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[]; /** Las filas de la hoja retiradas a mano (su último apunte es un retiro). */ retiradas?: readonly (Retiro & { fila: number })[]; /** Lote 11: las vigencias guardadas por marca (063); sin ellas, las del código. */ vigencias?: VigenciasGuardadas }
+export interface EntradaHoja { hoy: string; cabeceras: readonly Celda[][]; filas: readonly FilaCongelada[]; equipos: readonly EquipoHoja[]; calibraciones: readonly FilaCalibracion[]; /** Las filas de la hoja retiradas a mano (su último apunte es un retiro). */ retiradas?: readonly (Retiro & { fila: number })[]; /** Lote 11: las vigencias guardadas por marca (063); sin ellas, las del código. */ vigencias?: VigenciasGuardadas; /** Lote 12: la frecuencia de preventivo de cada cliente (064), para las marcas «según contrato»; sin ella, sin contrato. */ contratos?: FrecuenciasContrato }
 export interface TablaHoja { filas: FilaHoja[]; fueraDeHoja: FilaHoja[]; resumen: ResumenHoja }
 
 /** GET /trazabilidad/hoja. Sin congelación vigente, `congelacion` es null, `motivo` dice por qué y la tabla va vacía. */
@@ -138,6 +138,7 @@ function formaComun(filas: readonly FilaHoja[], grupo: (f: FilaHoja) => string, 
 
 const CAMPOS = ['cliente', 'marca', 'modelo', 'serial'] as const;
 const SIN_GUARDAR: VigenciasGuardadas = new Map();
+const SIN_CONTRATOS: FrecuenciasContrato = new Map();
 /** Una marca o un modelo sin lo que no lo distingue: mayúsculas, tildes, espacios, guiones y puntos («APNA 370» = «APNA-370»). */
 const sinRuido = (v: string): string => claveCliente(v).replace(/[\s\-_./]/g, '');
 const claveModelo = (f: FilaHoja): string => `${f.marcaClave}|${sinRuido(f.modelo)}`;
@@ -208,7 +209,8 @@ export function tablaHoja(e: EntradaHoja): TablaHoja {
     if (ultima === null) avisos.add('sin_fecha');
     if (conocidas.some((c) => c.estado === 'en_revision')) avisos.add('en_revision');
     if (f && !q && repetido(f) && sinEquipo.has(f.serialNorm ?? '')) avisos.add('calibraciones_sin_atribuir');
-    const vigenciaMarca = vigenciaDeMarca(q ? grupoMarca(q) : claveMarca(deHoja.marca), e.vigencias ?? SIN_GUARDAR);
+    // La regla (lote 11 y 12): la de su grupo —con equipo— o la de la marca escrita en la hoja; si va «según contrato», la de su cliente.
+    const vigenciaMarca = vigenciaDeGrupo(q ? grupoMarca(q) : claveMarca(deHoja.marca), actual.cliente, e.vigencias ?? SIN_GUARDAR, e.contratos ?? SIN_CONTRATOS);
     return {
       retirado: (q ? q.retirado : f ? retiradaDe.get(f.fila) : null) ?? null,
       fila: f?.fila ?? null, clave: q?.clave ?? null, situacion: !q ? 'hoja' : fuera ? 'enlazado' : q.activo ? 'inventario' : 'inactivo',

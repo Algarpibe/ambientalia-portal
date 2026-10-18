@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import type { EquipoVista, MarcaSeguimiento, ResumenMarca } from '../dominio';
-import { efectoMarca, efectoVigencia, filtrarPorMarca, lineasVistaPrevia, lineasVistaVigencia, marcasDeEquipos, textoCambioMarca, textoCambioVigencia, textoDias, textoMarcas, textoVigencias, vigenciaElegida } from './marcas';
+import type { EquipoVista, MarcaSeguimiento, ResumenMarca, ValorVigencia } from '../dominio';
+import { efectoMarca, efectoVigencia, filtrarPorMarca, lineasVistaPrevia, lineasVistaVigencia, marcasDeEquipos, textoCambioMarca, textoCambioVigencia, textoDias, textoMarcas, textoValorVigencia, textoVigencias, vigenciaElegida } from './marcas';
 
 // Lo que calcula la tarjeta «Marcas en seguimiento» (lote 9f), la cabecera y el
 // filtro de marca de «Equipos». Sólo recuentos y textos: nada de esto envía nada.
 
-const VACIO: ResumenMarca = { equipos: 0, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_VENCIMIENTO: 0, SIN_FECHA: 0 }, avisos: 0, clientesAvisos: 0, partidas: 0, enlazadas: 0, fechas: [] };
-/** Con 365 días salvo que se diga otra cosa (GRIMM EDM 180, fija). */
-const marca = (clave: string, nombre: string, incluida: boolean, resumen: Partial<ResumenMarca> = {}, dias: number | null = 365): MarcaSeguimiento => ({
-  clave, marca: nombre, fija: clave === 'grimm edm 180', incluida, firma: null, vigencia: { dias, fija: clave === 'grimm edm 180', porDefecto: true, firma: null }, resumen: { ...VACIO, ...resumen },
+const VACIO: ResumenMarca = { equipos: 0, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, VENCE_60: 0, VENCE_90: 0, AL_DIA: 0, SIN_VENCIMIENTO: 0, SIN_FECHA: 0 }, avisos: 0, clientesAvisos: 0, partidas: 0, enlazadas: 0, fechas: [], contratos: [] };
+/** Con 365 días salvo que se diga otra cosa (GRIMM EDM 180, fija). Lote 12: `'contrato'` = según contrato del cliente. */
+const marca = (clave: string, nombre: string, incluida: boolean, resumen: Partial<ResumenMarca> = {}, dias: ValorVigencia = 365): MarcaSeguimiento => ({
+  clave, marca: nombre, fija: clave === 'grimm edm 180', incluida, firma: null, vigencia: { dias: dias === 'contrato' ? null : dias, contrato: dias === 'contrato', fija: clave === 'grimm edm 180', porDefecto: true, firma: null }, resumen: { ...VACIO, ...resumen },
 });
 const HORIBA = marca('horiba', 'Horiba', false, { equipos: 230, avisos: 24, clientesAvisos: 11, porEstado: { ...VACIO.porEstado, VENCIDA: 24, FUERA_CICLO: 126, SIN_FECHA: 29, AL_DIA: 51 }, partidas: 201, enlazadas: 9 });
 
@@ -58,7 +58,9 @@ describe('la vigencia de una marca', () => {
   const HOY = '2026-10-17';
   // Horiba: una vence en días con 365 (2025-10-22), una vencida en el último año (2025-08-01), una +1 año (2024-02-02) y una al día.
   const fechas = ['2024-02-02', '2025-08-01', '2025-10-22', '2026-06-30'];
-  const horiba = (incluida: boolean, dias: number | null) => marca('horiba', 'Horiba', incluida, { equipos: 5, fechas, porEstado: { ...VACIO.porEstado, SIN_FECHA: 1 } }, dias);
+  // Lote 12: los días del contrato del cliente de cada una (los dos primeros, de un cliente sin frecuencia; los otros dos, 6 meses).
+  const contratos = [null, null, 183, 183];
+  const horiba = (incluida: boolean, dias: ValorVigencia) => marca('horiba', 'Horiba', incluida, { equipos: 5, fechas, contratos, porEstado: { ...VACIO.porEstado, SIN_FECHA: 1 } }, dias);
 
   it('se lee en días y en meses; sin plazo, «sin vencimiento»', () => {
     expect([365, 730, 1095, 30, 90, 182, 180, 45].map(textoDias)).toEqual(['365 días (12 meses)', '730 días (24 meses)', '1095 días (36 meses)', '30 días (1 mes)', '90 días (3 meses)', '182 días (6 meses)', '180 días (unos 6 meses)', '45 días (unos 1,5 meses)']);
@@ -108,6 +110,30 @@ describe('la vigencia de una marca', () => {
 
   it('el apunte de un cambio de vigencia, en una línea', () => {
     expect(textoCambioVigencia({ id: 1, clave: 'horiba', marca: 'Horiba', antes: null, despues: 365, motivo: 'Decisión ficticia.', por: 'director@example.com', en: '2026-10-18 20:00:00+00' })).toBe('Horiba: vigencia sin vencimiento → 365 días (12 meses), por director@example.com el 18/10/2026 15:00: Decisión ficticia.');
+    expect(textoCambioVigencia({ id: 2, clave: 'horiba', marca: 'Horiba', antes: null, despues: 'contrato', motivo: 'Decisión ficticia.', por: 'director@example.com', en: '2026-10-18 20:00:00+00' })).toMatch(/^Horiba: vigencia sin vencimiento → según contrato del cliente, por /);
+  });
+
+  // Lote 12: la tercera opción, «según contrato del cliente». Cada equipo vence con la frecuencia de preventivo de SU cliente (los días
+  // llegan, sin clientes, en `resumen.contratos`); un cliente sin frecuencia deja al suyo sin vencimiento.
+  it('«según contrato»: se lee así, la cabecera lo dice y el formulario lo elige', () => {
+    expect([textoValorVigencia('contrato'), textoValorVigencia(365), textoValorVigencia(null)]).toEqual(['según contrato del cliente', '365 días (12 meses)', 'sin vencimiento']);
+    expect(textoVigencias([marca('grimm edm 180', 'GRIMM EDM 180', true), horiba(true, 'contrato')])).toBe('vigencia de calibración: GRIMM EDM 180, 12 meses; Horiba, según contrato');
+    expect([vigenciaElegida('contrato', ''), vigenciaElegida('contrato', 'lo que sea')]).toEqual(['contrato', 'contrato']);
+  });
+
+  it('vista previa de pasar a «según contrato»: cuenta cada equipo con los días del contrato de su cliente; dice cuántos quedan sin vencimiento por no tener frecuencia', () => {
+    expect(lineasVistaVigencia(horiba(true, null), 'contrato', HOY).map((l) => [l.texto, l.valor])).toEqual([
+      ['Vigencia', 'sin vencimiento → según contrato del cliente'],
+      ['Equipos activos de la marca con fecha de calibración', '4'],
+      ['Entran en «Avisos a clientes» (vencidas o por vencer)', '2'],
+      ['Salen de «Avisos a clientes»', '0'],
+      ['Vencidas hace más de un año (no piden aviso)', '0'],
+      ['Sin fecha (no vencen ni avisan)', '1'],
+      ['De ellos, de clientes sin frecuencia de preventivo (siguen sin vencimiento)', '2'],
+    ]);
+    // De «según contrato» a 365 días: la de 2025-08-01 (cliente sin frecuencia) entra; la de 2026-06-30 (6 meses: por vencer) sale, al día.
+    expect(lineasVistaVigencia(horiba(true, 'contrato'), 365, HOY).slice(0, 4).map((l) => l.valor)).toEqual(['según contrato del cliente → 365 días (12 meses)', '4', '1', '1']);
+    expect(efectoVigencia(horiba(true, null), 'contrato')).toMatch(/vence según la frecuencia de preventivo de su cliente.*sin frecuencia.*sin vencimiento.*No se envía ningún correo/);
   });
 });
 

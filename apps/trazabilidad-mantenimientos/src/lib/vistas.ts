@@ -48,8 +48,8 @@ export function fmtFechaHora(iso: string | null | undefined): string {
 }
 
 /** «vencida hace 32 d» / «vence hoy» / «quedan 11 d»; sin días, «sin vencimiento» (lote 11: su marca no tiene plazo fijo) o «sin fecha». */
-export function textoVigencia(v: number | null, estado?: EstadoCalibracion): string {
-  if (estado === 'SIN_VENCIMIENTO') return 'sin vencimiento (su marca no tiene plazo fijo)';
+export function textoVigencia(v: number | null, estado?: EstadoCalibracion, segunContrato = false): string {
+  if (estado === 'SIN_VENCIMIENTO') return segunContrato ? 'sin vencimiento (su cliente no tiene frecuencia de preventivo)' : 'sin vencimiento (su marca no tiene plazo fijo)';
   if (v === null) return 'sin fecha de calibración';
   if (v < 0) return `vencida hace ${-v} d`;
   if (v === 0) return 'vence hoy';

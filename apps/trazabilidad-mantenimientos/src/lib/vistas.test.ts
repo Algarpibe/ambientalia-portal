@@ -33,6 +33,7 @@ function eq(cliente: string, ultimaCalibracion: string | null, seg: Partial<Segu
     calibracionesPeriodo: null,
     correctivosPeriodo: null,
     vigenciaMarca: 365,
+    segunContrato: false,
     ...estadoCalibracion(ultimaCalibracion, HOY, 365),
     serialRepetido: false,
     seguimiento: seg
@@ -156,6 +157,8 @@ describe('formato', () => {
     const sin = { ...eq('Cliente Ficticio A', '2025-09-03'), vigenciaMarca: null, ...estadoCalibracion('2025-09-03', HOY, null) };
     expect(textoVigencia(sin.vigenciaDias, sin.estado)).toBe('sin vencimiento (su marca no tiene plazo fijo)');
     expect(textoVigencia(null, 'SIN_FECHA')).toBe('sin fecha de calibración');
+    // Lote 12: si su marca va «según contrato», lo que le falta es la frecuencia de su cliente.
+    expect(textoVigencia(sin.vigenciaDias, sin.estado, true)).toBe('sin vencimiento (su cliente no tiene frecuencia de preventivo)');
     const lista = [eq('B', null), sin, eq('C', '2024-01-01'), vence11('D'), vencida('E')];
     expect([...lista].sort((a, b) => ordenVigencia(a) - ordenVigencia(b)).map((e) => e.estado)).toEqual(['VENCIDA', 'VENCE_30', 'FUERA_CICLO', 'SIN_VENCIMIENTO', 'SIN_FECHA']);
     const { atraso, meses } = vencimientosPorMes([sin], HOY);

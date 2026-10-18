@@ -145,11 +145,11 @@ beforeAll(async () => {
   api.use('/api', createTrazabilidadRouter(hub, crearFuenteAgenda({ hub, desk2: () => lector }), maestro(), tickets()));
 });
 afterAll(async () => {
-  await hub?.query(`TRUNCATE portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_fst022_congelaciones, portal.tmc_marcas, portal.tmc_marcas_cambios, portal.tmc_retiros, portal.tmc_marcas_vigencia, portal.tmc_marcas_vigencia_cambios RESTART IDENTITY CASCADE`);
+  await hub?.query(`TRUNCATE portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_fst022_congelaciones, portal.tmc_marcas, portal.tmc_marcas_cambios, portal.tmc_retiros, portal.tmc_marcas_vigencia, portal.tmc_marcas_vigencia_cambios, portal.tmc_contratos, portal.tmc_contratos_cambios RESTART IDENTITY CASCADE`);
   await Promise.all([lector?.end(), admin2?.end(), hub?.end()]);
 });
 beforeEach(async () => {
-  await hub.query(`TRUNCATE desk.tickets, portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_contactos, portal.tmc_maestro_sincronizaciones, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_estados_historial, portal.tmc_fst022_congelaciones, portal.tmc_marcas, portal.tmc_marcas_cambios, portal.tmc_retiros, portal.tmc_marcas_vigencia, portal.tmc_marcas_vigencia_cambios RESTART IDENTITY CASCADE`);
+  await hub.query(`TRUNCATE desk.tickets, portal.tmc_equipos, portal.tmc_seguimiento, portal.tmc_contactos, portal.tmc_maestro_sincronizaciones, portal.tmc_calibraciones, portal.tmc_calibraciones_pasadas, portal.tmc_estados_historial, portal.tmc_fst022_congelaciones, portal.tmc_marcas, portal.tmc_marcas_cambios, portal.tmc_retiros, portal.tmc_marcas_vigencia, portal.tmc_marcas_vigencia_cambios, portal.tmc_contratos, portal.tmc_contratos_cambios RESTART IDENTITY CASCADE`);
   await admin2.query('TRUNCATE desk.equipos, desk.tickets, desk.ticket_transitions RESTART IDENTITY');
   await sembrar();
 });
@@ -327,7 +327,7 @@ describe('VIGENCIA POR MARCA (lote 11)', () => {
   it('encender Horiba SIN vigencia: entran sus equipos con su fecha y «sin vencimiento», y el plan de avisos (manual y simulación) queda IDÉNTICO byte a byte: ni un aviso falso', async () => {
     await porDefecto();
     const marcasAntes = (await pedir('marcas')).body.marcas.find((m: Fila) => m.clave === 'horiba');
-    expect(marcasAntes.vigencia).toEqual({ dias: null, fija: false, porDefecto: true, firma: null });
+    expect(marcasAntes.vigencia).toEqual({ dias: null, contrato: false, fija: false, porDefecto: true, firma: null });
     // Con 365 días serían 2 en avisos y 1 «+1 año» (ENCENDIDA, arriba); sin vencimiento, ninguno: se ven, pero no avisan.
     expect(marcasAntes.resumen).toMatchObject({ equipos: 6, avisos: 0, clientesAvisos: 0, porEstado: { FUERA_CICLO: 0, VENCIDA: 0, VENCE_30: 0, SIN_VENCIMIENTO: 4, SIN_FECHA: 2 } });
     await pedir('servicios');
@@ -393,5 +393,115 @@ describe('VIGENCIA POR MARCA (lote 11)', () => {
     } as unknown as Pool;
     await expect(cambiarVigencia(rota, 'horiba', { dias: 365, motivo: 'm' }, actor, HOY)).rejects.toThrow('la base falló');
     expect(await tablas()).toEqual([[], []]);
+  });
+});
+
+// Lote 12 (064), decisión de Alfonso del 18/10/2026: Horiba se calibra con el preventivo, cuya frecuencia depende del CONTRATO de cada
+// cliente. Una marca puede vencer «según contrato»; cada cliente, su frecuencia en meses (sólo la pone un administrador del portal). Aquí,
+// con la misma hoja, las rutas de verdad y Postgres. H (Cliente Ficticio H S.A.S.) tiene HB-0001 y HB-0002; J, los demás Horiba.
+describe('SEGÚN CONTRATO DEL CLIENTE (lote 12)', () => {
+  const SQL_064 = readFileSync(fileURLToPath(new URL('../users/migrations/064_trazabilidad_contratos.sql', import.meta.url)), 'utf8');
+  const H = 'cliente ficticio h s.a.s.';
+  const porDefecto = () => hub.query(`TRUNCATE portal.tmc_marcas_vigencia, portal.tmc_marcas_vigencia_cambios, portal.tmc_contratos, portal.tmc_contratos_cambios RESTART IDENTITY`);
+  const vigencia = (dias: number | null | 'contrato', quien = comoAdmin) => request(api).post('/api/trazabilidad/marcas/horiba/vigencia').set(quien).send({ dias, motivo: 'Decisión ficticia de Alfonso.' });
+  const frecuencia = (clave: string, meses: number | null, quien = comoAdmin, motivo = 'Contrato ficticio.') => request(api).post(`/api/trazabilidad/clientes/${encodeURIComponent(clave)}/frecuencia`).set(quien).send({ meses, motivo });
+  const tablas = async () => Promise.all(['tmc_marcas_vigencia', 'tmc_marcas_vigencia_cambios', 'tmc_contratos', 'tmc_contratos_cambios'].map(async (t) => (await hub.query(`SELECT * FROM portal.${t} ORDER BY 1`)).rows));
+  const estados = async () => Object.fromEntries((await equipos()).filter((e) => e.clave.startsWith('HB-')).map((e) => [e.clave, [e.estado, e.vence, e.vigenciaMarca, e.segunContrato]]));
+
+  it('la 064: ejecutarla otra vez no cambia nada y no siembra; sus CHECK (según contrato sin días, GRIMM EDM 180 nunca, meses de 1 a 36, motivo)', async () => {
+    await cambiar('horiba', true);
+    expect((await frecuencia(H, 6)).status).toBe(200);
+    expect((await vigencia('contrato')).status).toBe(200);
+    const antes = await tablas();
+    await hub.query(SQL_064);
+    await hub.query(SQL_064);
+    expect(await tablas()).toEqual(antes);
+    await porDefecto();
+    await hub.query(SQL_064);
+    expect(await tablas()).toEqual([[], [], [], []]);
+    const marca = (clave: string, dias: number | null) => hub.query(`INSERT INTO portal.tmc_marcas_vigencia (clave, marca, dias, contrato, motivo, por) VALUES ($1, $1, $2, true, 'm', 'x@example.com')`, [clave, dias]);
+    await expect(marca('kunak', 365)).rejects.toThrow(/check/i);
+    await expect(marca(CLAVE_EDM180, null)).rejects.toThrow(/check/i);
+    const cliente = (meses: number | null, motivo = 'm') => hub.query(`INSERT INTO portal.tmc_contratos (clave, cliente, meses, motivo, por) VALUES ('cliente ficticio q', 'Cliente Ficticio Q', $1, $2, 'x@example.com')`, [meses, motivo]);
+    for (const [meses, motivo] of [[0, 'm'], [37, 'm'], [6, '  ']] as const) await expect(cliente(meses, motivo)).rejects.toThrow(/check/i);
+    await marca('kunak', null);
+    await cliente(null);
+  });
+
+  it('Horiba «según contrato» sin frecuencias: como sin vencimiento (avisos IDÉNTICOS byte a byte); con la de SU cliente vence con ella (12 meses = 365 días); volver a «sin contrato» lo deja todo BYTE A BYTE', async () => {
+    await porDefecto();
+    await cambiar('horiba', true);
+    await pedir('servicios');
+    const sinVencimiento = await foto();
+    expect((await vigencia('contrato')).status).toBe(200);
+    const sinFrecuencias = await foto();
+    expect(sinFrecuencias.avisos).toBe(sinVencimiento.avisos);
+    expect(await estados()).toEqual({
+      'HB-0001': ['SIN_VENCIMIENTO', null, null, true],
+      'HB-0002': ['SIN_VENCIMIENTO', null, null, true],
+      'HB-0003': ['SIN_VENCIMIENTO', null, null, true],
+      'HB-0005': ['SIN_VENCIMIENTO', null, null, true],
+      'HB-0006': ['SIN_FECHA', null, null, true],
+      'HB-0007': ['SIN_FECHA', null, null, true],
+    });
+    // 6 meses = 183 días, sólo para los de H; los de J siguen sin vencimiento. Devuelve el inventario ya recalculado.
+    const seis = await frecuencia(H, 6);
+    expect(seis.status).toBe(200);
+    expect(seis.body.frecuencias).toEqual([{ clave: H, cliente: 'Cliente Ficticio H S.A.S.', meses: 6, motivo: 'Contrato ficticio.', por: 'admin@example.com', en: expect.any(String) }]);
+    expect((await estados())['HB-0001']).toEqual(['VENCIDA', '2026-04-23', 183, true]);
+    expect((await estados())['HB-0002']).toEqual(['VENCE_90', '2026-12-30', 183, true]);
+    expect((await estados())['HB-0003']).toEqual(['SIN_VENCIMIENTO', null, null, true]);
+    expect((await pedir('hoja')).body.filas.find((f: Fila) => f.clave === 'HB-0001')).toMatchObject({ estado: 'VENCIDA', vigenciaMarca: 183 });
+    // 12 meses: lo mismo que una marca de 365 días.
+    expect((await frecuencia(H, 12)).status).toBe(200);
+    expect((await estados())['HB-0001']).toEqual(['VENCE_30', '2026-10-22', 365, true]);
+    // De vuelta a «sin contrato»: nada queda movido (los apuntes quedan, con antes y después; y la fila, con meses NULL, en `frecuencias`).
+    expect((await frecuencia(H, null, comoAdmin, 'Fin del contrato ficticio.')).status).toBe(200);
+    const sinLista = (f: Record<string, string>) => ({ ...f, equipos: JSON.stringify({ ...JSON.parse(f.equipos), frecuencias: null }) });
+    expect(sinLista(await foto())).toEqual(sinLista(sinFrecuencias));
+    const historial = (await pedir(`clientes/${encodeURIComponent(H)}/frecuencia`)).body;
+    expect(historial.frecuencia).toMatchObject({ meses: null, motivo: 'Fin del contrato ficticio.' });
+    expect(historial.cambios.map((c: Fila) => [c.antes, c.despues])).toEqual([[12, null], [6, 12], [null, 6]]);
+    const igual = await frecuencia(H, null);
+    expect([igual.status, igual.body.error]).toEqual([409, 'misma_frecuencia']);
+  });
+
+  it('la vista previa de pasar la marca a «según contrato» trae, por fecha, los días del contrato de cada cliente; el apunte de la marca dice antes y después', async () => {
+    await porDefecto();
+    await cambiar('horiba', true);
+    await frecuencia(H, 6);
+    const horiba = (await pedir('marcas')).body.marcas.find((m: Fila) => m.clave === 'horiba');
+    expect([horiba.resumen.fechas, horiba.resumen.contratos]).toEqual([['2024-02-02', '2025-08-01', '2025-10-22', '2026-06-30'], [null, null, 183, 183]]);
+    const res = await vigencia('contrato');
+    expect(res.body.marcas.find((m: Fila) => m.clave === 'horiba').vigencia).toMatchObject({ dias: null, contrato: true, porDefecto: false });
+    expect(res.body.cambiosVigencia[0]).toMatchObject({ antes: null, despues: 'contrato' });
+    expect(JSON.stringify(res.body)).not.toMatch(/Ficticio|HB-|eq-/);
+    expect((await vigencia(365)).body.cambiosVigencia[0]).toMatchObject({ antes: 'contrato', despues: 365 });
+  });
+
+  it('sólo el administrador del portal: un Lector, 403 sin escribir; 404 un cliente sin equipos activos en el inventario (también si su marca está apagada); GRIMM EDM 180 no pasa a «según contrato»', async () => {
+    await porDefecto();
+    const apagada = await frecuencia(H, 6);
+    expect([apagada.status, apagada.body.error]).toEqual([404, 'not_found']);
+    await cambiar('horiba', true);
+    const no = await frecuencia(H, 6, comoLector);
+    expect([no.status, no.body.error]).toEqual([403, 'forbidden_role']);
+    expect((await frecuencia('cliente ficticio inexistente', 6)).status).toBe(404);
+    const fija = await request(api).post(`/api/trazabilidad/marcas/${encodeURIComponent(CLAVE_EDM180)}/vigencia`).set(comoAdmin).send({ dias: 'contrato', motivo: 'x' });
+    expect([fija.status, fija.body.error]).toEqual([409, 'marca_fija']);
+    expect(await tablas()).toEqual([[], [], [], []]);
+  });
+
+  it('el plan de las calibraciones cuenta quién sale de avisos con la frecuencia de SU cliente; su huella no depende de ella (la pasada nocturna no cambia)', async () => {
+    await porDefecto();
+    await cambiar('horiba', true);
+    await vigencia('contrato');
+    await ticketCalibrado(1011, 'HB-0001', 'eq-h1', '2026-10-01'); // HB-0001 (H), vencido con 6 meses, se pone al día
+    const sin = (await leerPlanCalibraciones(hub, tickets(), HOY, false)).plan!;
+    expect(sin.recuentos).toMatchObject({ nuevas: 1, equiposCambian: 1, salenDeAvisos: 0, entranEnAvisos: 0 });
+    await frecuencia(H, 6);
+    const con = (await leerPlanCalibraciones(hub, tickets(), HOY, false)).plan!;
+    expect(con.recuentos).toMatchObject({ nuevas: 1, equiposCambian: 1, salenDeAvisos: 1, entranEnAvisos: 0 });
+    expect(con.huella).toBe(sin.huella);
   });
 });

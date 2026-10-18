@@ -26,6 +26,9 @@ export { AVISOS_HOJA } from '../../hub-api/src/trazabilidad/hoja';
 export type { CambioMarca, CambioVigencia, FirmaMarca, MarcaSeguimiento, RespuestaMarcas, ResumenMarca, VigenciaMarca } from '../../hub-api/src/trazabilidad/marcas';
 // Y, desde el lote 11, qué vigencia se puede guardar (la misma comprobación que hace el servidor).
 export { VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, claveMarca, esVigenciaValida } from '../../hub-api/src/trazabilidad/marcas';
+// Lote 12: «según contrato del cliente» y la frecuencia de preventivo de cada cliente (la misma regla y las mismas comprobaciones del servidor).
+export type { CambioFrecuencia, FrecuenciaCliente, RespuestaContrato, ValorVigencia } from '../../hub-api/src/trazabilidad/marcas';
+export { FRECUENCIA_MAX_MESES, FRECUENCIA_MIN_MESES, SEGUN_CONTRATO, diasDeMeses, esFrecuenciaValida, valorVigencia } from '../../hub-api/src/trazabilidad/marcas';
 // Exportar la F-ST-022: sólo los tipos de «última exportación» (el libro lo genera el servidor; de aquí no se importa su código, que carga SheetJS).
 export type { Exportacion, RespuestaExportaciones } from '../../hub-api/src/trazabilidad/exportacion';
 export type {

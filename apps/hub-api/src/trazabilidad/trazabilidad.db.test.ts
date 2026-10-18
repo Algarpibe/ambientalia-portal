@@ -345,6 +345,10 @@ describe('contacto de cada equipo', () => {
         'tmc_calibraciones',
         'tmc_calibraciones_pasadas',
         'tmc_contactos',
+        // Lote 12: la frecuencia de preventivo de cada cliente según su contrato (meses, o sin contrato) y el apunte de cada cambio, con
+        // el valor de antes y el nuevo, su motivo y su firma. Sólo clientes, meses y firmas: no son tablas de mensajes ni de envíos.
+        'tmc_contratos',
+        'tmc_contratos_cambios',
         'tmc_equipos',
         'tmc_estados_desk',
         'tmc_estados_historial',

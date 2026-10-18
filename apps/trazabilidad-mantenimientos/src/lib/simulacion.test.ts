@@ -28,6 +28,7 @@ function eq(cliente: string, ultimaCalibracion: string | null, contacto: Contact
     calibracionesPeriodo: null,
     correctivosPeriodo: null,
     vigenciaMarca: 365,
+    segunContrato: false,
     ...estadoCalibracion(ultimaCalibracion, HOY, 365),
     serialRepetido: false,
     seguimiento: seg ? { enAmbientalia: false, avisoEnviado: null, servicioProgramado: null, nota: '', actualizadoPor: 'x', actualizadoEn: '', ...seg } : null,
