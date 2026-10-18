@@ -23,8 +23,9 @@ export type { ConNocturna, PasadaNocturna, ResultadoPasada } from '../../hub-api
 export type { ApunteRetiro, AvisoHoja, CalibracionHoja, EnHoja, FilaHoja, RespuestaEdicion, RespuestaHoja, RespuestaRetiro, ResumenHoja, Retiro, SituacionHoja } from '../../hub-api/src/trazabilidad/hoja';
 export { AVISOS_HOJA } from '../../hub-api/src/trazabilidad/hoja';
 // Marcas en seguimiento (lote 9f): las marcas con su vista previa, tal como las sirve GET /marcas, y la clave de una marca (la del servidor).
-export type { CambioMarca, FirmaMarca, MarcaSeguimiento, RespuestaMarcas, ResumenMarca } from '../../hub-api/src/trazabilidad/marcas';
-export { claveMarca } from '../../hub-api/src/trazabilidad/marcas';
+export type { CambioMarca, CambioVigencia, FirmaMarca, MarcaSeguimiento, RespuestaMarcas, ResumenMarca, VigenciaMarca } from '../../hub-api/src/trazabilidad/marcas';
+// Y, desde el lote 11, qué vigencia se puede guardar (la misma comprobación que hace el servidor).
+export { VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, claveMarca, esVigenciaValida } from '../../hub-api/src/trazabilidad/marcas';
 // Exportar la F-ST-022: sólo los tipos de «última exportación» (el libro lo genera el servidor; de aquí no se importa su código, que carga SheetJS).
 export type { Exportacion, RespuestaExportaciones } from '../../hub-api/src/trazabilidad/exportacion';
 export type {

@@ -47,12 +47,20 @@ export function fmtFechaHora(iso: string | null | undefined): string {
   return c ? `${diaMesAnio(c.dia)} ${c.hora}` : fmtFecha(iso);
 }
 
-/** «vencida hace 32 d» / «vence hoy» / «quedan 11 d». */
-export function textoVigencia(v: number | null): string {
+/** «vencida hace 32 d» / «vence hoy» / «quedan 11 d»; sin días, «sin vencimiento» (lote 11: su marca no tiene plazo fijo) o «sin fecha». */
+export function textoVigencia(v: number | null, estado?: EstadoCalibracion): string {
+  if (estado === 'SIN_VENCIMIENTO') return 'sin vencimiento (su marca no tiene plazo fijo)';
   if (v === null) return 'sin fecha de calibración';
   if (v < 0) return `vencida hace ${-v} d`;
   if (v === 0) return 'vence hoy';
   return `quedan ${v} d`;
+}
+
+/** Orden por vigencia (Equipos y la pestaña F-ST-022): lo urgente arriba; «vencida +1 año», «sin vencimiento» y «sin fecha», al final. */
+export function ordenVigencia(e: { estado: EstadoCalibracion; vigenciaDias: number | null }): number {
+  if (e.estado === 'SIN_FECHA') return 3e9;
+  if (e.estado === 'SIN_VENCIMIENTO') return 2.5e9;
+  return e.estado === 'FUERA_CICLO' ? 2e9 - (e.vigenciaDias ?? 0) : (e.vigenciaDias ?? 0);
 }
 
 export function conteoPorEstado(eqs: readonly EquipoVista[]): Record<EstadoCalibracion, number> {

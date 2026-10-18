@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ClipboardList, FileSpreadsheet, RefreshCw } from 'lucide-react';
 import { api, type Inventario } from './api';
 import type { CongelacionFst022, EstadoCalibracion, MarcaSeguimiento, MiRol } from './dominio';
-import { textoMarcas } from './lib/marcas';
+import { textoMarcas, textoVigencias } from './lib/marcas';
 import { GRUPOS, SIN_ROL, etiquetaMiRol, grupoDe, motivoSinPermiso, primeraSeccion, seccionDeHash, seccionesDe, type Seccion } from './lib/navegacion';
 import { textoOrigen, vigenteDe } from './lib/origen';
 import { fmtFecha } from './lib/vistas';
@@ -161,7 +161,7 @@ export default function App() {
             <div>
               <h1 className="text-xl font-semibold text-gray-900">Trazabilidad Mantenimientos Clientes</h1>
               <p className="max-w-2xl text-sm text-gray-500">
-                {textoMarcas(marcas)} · vigencia de calibración de 365 días · hoy {fmtFecha(inv?.hoy)}
+                {textoMarcas(marcas)} · {textoVigencias(marcas)} · hoy {fmtFecha(inv?.hoy)}
                 {origen && <> · {origen}</>}
               </p>
             </div>

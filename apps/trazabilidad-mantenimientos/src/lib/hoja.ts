@@ -6,7 +6,7 @@
  */
 import { claveCliente, type AvisoHoja, type CalibracionHoja, type EstadoCalibracion, type FilaHoja, type Retiro, type SituacionHoja } from '../dominio';
 import { origenCalibracion } from './calibraciones';
-import { fmtFecha } from './vistas';
+import { fmtFecha, ordenVigencia } from './vistas';
 
 /** Cada aviso de una fila, en claro. */
 export const ETIQUETA_AVISO: Record<AvisoHoja, string> = {
@@ -124,8 +124,8 @@ export function ordenarHoja(filas: readonly FilaHoja[], { k, dir }: OrdenHoja): 
       case 'ultimaCalibracion':
         return f.ultimaCalibracion;
       case 'vigencia':
-        // Como en «Equipos»: lo urgente arriba; «vencida +1 año» y «sin fecha», al final.
-        return f.estado === 'SIN_FECHA' ? 3e9 : f.estado === 'FUERA_CICLO' ? 2e9 - (f.vigenciaDias ?? 0) : (f.vigenciaDias ?? 0);
+        // Como en «Equipos»: lo urgente arriba; «vencida +1 año», «sin vencimiento» y «sin fecha», al final.
+        return ordenVigencia(f);
       case 'situacion':
         return ORDEN_SITUACION[f.situacion];
     }

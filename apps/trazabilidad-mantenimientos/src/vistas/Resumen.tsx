@@ -9,6 +9,7 @@ const DESCRIPCION: Record<EstadoCalibracion, string> = {
   VENCE_60: 'Programar servicio',
   VENCE_90: 'Aviso previo',
   AL_DIA: 'Más de 90 días de vigencia',
+  SIN_VENCIMIENTO: 'Su marca no tiene plazo fijo',
   SIN_FECHA: 'Falta la última calibración',
 };
 

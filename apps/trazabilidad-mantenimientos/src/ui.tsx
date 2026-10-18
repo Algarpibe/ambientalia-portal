@@ -14,6 +14,7 @@ export const TONO: Record<EstadoCalibracion, { badge: string; dot: string; text:
   VENCE_60: { badge: 'bg-amber-50 text-amber-800 ring-amber-200', dot: 'bg-amber-400', text: 'text-amber-700', bar: 'bg-amber-400', chip: 'border-l-amber-400' },
   VENCE_90: { badge: 'bg-lime-50 text-lime-800 ring-lime-200', dot: 'bg-lime-500', text: 'text-lime-700', bar: 'bg-lime-500', chip: 'border-l-lime-500' },
   AL_DIA: { badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200', dot: 'bg-emerald-500', text: 'text-emerald-700', bar: 'bg-emerald-500', chip: 'border-l-emerald-500' },
+  SIN_VENCIMIENTO: { badge: 'bg-sky-50 text-sky-700 ring-sky-200', dot: 'bg-sky-400', text: 'text-sky-700', bar: 'bg-sky-300', chip: 'border-l-sky-400' },
   SIN_FECHA: { badge: 'bg-slate-100 text-slate-600 ring-slate-200', dot: 'bg-slate-400', text: 'text-slate-500', bar: 'bg-slate-300', chip: 'border-l-slate-400' },
 };
 
