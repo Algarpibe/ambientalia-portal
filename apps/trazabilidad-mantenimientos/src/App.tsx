@@ -259,7 +259,7 @@ export default function App() {
           </>
         )}
 
-        {equipoFicha && <FichaEquipo equipo={equipoFicha} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} onCambio={async () => (setRecarga((n) => n + 1), cargar())} notificar={notificar} />}
+        {equipoFicha && inv && <FichaEquipo equipo={equipoFicha} inventario={inv} onInventario={setInv} onClose={() => setFicha(null)} onGuardado={async () => { await cargar(); notificar('Seguimiento guardado'); }} onCambio={async () => (setRecarga((n) => n + 1), cargar())} notificar={notificar} />}
         {aviso && (
           <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white shadow-lg">
             {aviso}

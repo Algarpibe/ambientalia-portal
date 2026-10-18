@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api } from '../api';
+import { api, type Inventario } from '../api';
 import { esEmailInterno, type EquipoVista, type RespuestaHistorialCalibraciones } from '../dominio';
 import { fmtFecha, marcaAviso, textoVigencia } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, DESACTIVADO, Drawer, EstadoBadge, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
+import FrecuenciaContrato from './FrecuenciaContrato';
 import Retiro from './Retiro';
 
 interface Props {
   equipo: EquipoVista;
+  /** Lote 12: el inventario entero (las frecuencias de los clientes y los equipos, para la vista previa) y cómo sustituirlo. */
+  inventario: Inventario;
+  onInventario: (inv: Inventario) => void;
   onClose: () => void;
   onGuardado: () => Promise<void>;
   /** Tras corregir una calibración: vuelve a pedir el inventario (y la tabla de la pestaña F-ST-022). */
@@ -51,7 +55,7 @@ function Calibraciones({ equipo, onCambio }: { equipo: EquipoVista; onCambio: ()
   );
 }
 
-export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, notificar }: Props) {
+export default function FichaEquipo({ equipo: e, inventario, onInventario, onClose, onGuardado, onCambio, notificar }: Props) {
   const s = e.seguimiento;
   const [enAmbientalia, setEnAmbientalia] = useState(s?.enAmbientalia ?? false);
   const [avisoEnviado, setAvisoEnviado] = useState(s?.avisoEnviado ?? '');
@@ -109,7 +113,7 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, 
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-center gap-2">
           <EstadoBadge estado={e.estado} />
-          <span className="text-sm text-gray-500">{textoVigencia(e.vigenciaDias, e.estado)}</span>
+          <span className="text-sm text-gray-500">{textoVigencia(e.vigenciaDias, e.estado, e.segunContrato)}</span>
           {e.serialRepetido && <Tag tone="amber">Serial repetido en la F-ST-022</Tag>}
         </div>
 
@@ -155,6 +159,9 @@ export default function FichaEquipo({ equipo: e, onClose, onGuardado, onCambio, 
           )}
           <p className="text-xs text-gray-500">Se cambia, para todos los equipos del cliente, en «Avisos a clientes» → «Simulación automática». Hoy no se envía ningún correo automático.</p>
         </section>
+
+        {/* Lote 12: la frecuencia de preventivo del cliente según su contrato (sólo la cambia un administrador del portal). */}
+        <FrecuenciaContrato equipo={e} inventario={inventario} onInventario={onInventario} notificar={notificar} />
 
         <form onSubmit={(ev) => void guardar(ev)} className="flex flex-col gap-3 border-t border-gray-200 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Seguimiento</p>

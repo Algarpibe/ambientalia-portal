@@ -2,6 +2,7 @@
 import { authHeaders } from '@suite/auth-client';
 import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
 import type { ApunteRetiro, ConNocturna, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaMarcas, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
+import type { FrecuenciaCliente, RespuestaContrato, ValorVigencia } from './dominio';
 import { errorFromResponse } from './lib/apiError';
 
 const API_BASE = `${(import.meta.env.VITE_HUB_API_URL as string | undefined) ?? ''}/api/trazabilidad`;
@@ -23,6 +24,8 @@ export interface Inventario {
   ultimaImportacion: ResumenImportacion | null;
   /** Los contactos puestos a mano a clientes: ganan al contacto de Desk de sus equipos. */
   contactos: ContactoCliente[];
+  /** Lote 12: la frecuencia de preventivo de cada cliente que la tiene guardada (meses, o null = sin contrato). */
+  frecuencias?: FrecuenciaCliente[];
 }
 
 /** Tickets de Desk sin cerrar, con su plazo calculado en el servidor (pausas de standby y trabajo terminado incluidos). */
@@ -118,8 +121,12 @@ export const api = {
   marcas: () => request<RespuestaMarcas>('GET', '/marcas'),
   /** Enciende (`incluir`) o apaga una marca, con motivo (pide `inventario.write`). Devuelve las marcas ya actualizadas. No envía nada. */
   cambiarMarca: (clave: string, incluir: boolean, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}`, { incluir, motivo }),
-  /** Lote 11: la vigencia de calibración de una marca (`dias`, o null = sin vencimiento), con motivo (pide `inventario.write`). No envía nada. */
-  cambiarVigencia: (clave: string, dias: number | null, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}/vigencia`, { dias, motivo }),
+  /** Lote 11: la vigencia de calibración de una marca (`dias`, null = sin vencimiento o, lote 12, `'contrato'`), con motivo (pide `inventario.write`). No envía nada. */
+  cambiarVigencia: (clave: string, dias: ValorVigencia, motivo: string) => request<RespuestaMarcas>('POST', `/marcas/${encodeURIComponent(clave)}/vigencia`, { dias, motivo }),
+  /** Lote 12: la frecuencia de preventivo de un cliente (por su clave) y su historial. Abierta a quien tiene la app. */
+  contrato: (clave: string) => request<RespuestaContrato>('GET', `/clientes/${encodeURIComponent(clave)}/frecuencia`),
+  /** Lote 12: pone la frecuencia de preventivo de un cliente (`meses`, o null = sin contrato), con motivo. Sólo administradores del portal. Devuelve el inventario ya recalculado. No envía nada. */
+  cambiarFrecuencia: (clave: string, meses: number | null, motivo: string) => request<Inventario>('POST', `/clientes/${encodeURIComponent(clave)}/frecuencia`, { meses, motivo }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
   registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),
