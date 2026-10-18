@@ -5,7 +5,7 @@
  * redactan. Encender una marca no envía nada: los avisos siguen siendo
  * manuales o simulados.
  */
-import { ESTADOS_AVISO, claveMarca, esVigenciaValida, estadoCalibracion, type CambioMarca, type CambioVigencia, type EquipoVista, type MarcaSeguimiento } from '../dominio';
+import { ESTADOS_AVISO, SEGUN_CONTRATO, claveMarca, esVigenciaValida, estadoCalibracion, valorVigencia, type CambioMarca, type CambioVigencia, type EquipoVista, type MarcaSeguimiento, type ValorVigencia } from '../dominio';
 import { fmtFechaHora } from './vistas';
 
 // ── Vigencia de calibración por marca (lote 11) ─────────────────────────────
@@ -25,19 +25,23 @@ function meses(dias: number): string {
 /** «365 días (12 meses)»; sin plazo, «sin vencimiento». */
 export const textoDias = (dias: number | null): string => (dias === null ? 'sin vencimiento' : `${dias} días (${meses(dias)})`);
 
+/** La vigencia de una marca en palabras: «según contrato del cliente» (lote 12) o la de `textoDias`. */
+export const textoValorVigencia = (v: ValorVigencia): string => (v === SEGUN_CONTRATO ? 'según contrato del cliente' : textoDias(v));
+
 /** La vigencia de las marcas incluidas, para la cabecera: «12 meses» si todas tienen la misma; si no, por grupos. Sin la lista, la de GRIMM. */
 export function textoVigencias(marcas: readonly MarcaSeguimiento[] | null): string {
-  const grupos = new Map<number | null, string[]>();
-  for (const m of (marcas ?? []).filter((x) => x.incluida)) grupos.set(m.vigencia.dias, [...(grupos.get(m.vigencia.dias) ?? []), m.marca]);
-  const valor = (d: number | null) => (d === null ? 'sin vencimiento' : meses(d));
+  const grupos = new Map<ValorVigencia, string[]>();
+  for (const m of (marcas ?? []).filter((x) => x.incluida)) grupos.set(valorVigencia(m.vigencia), [...(grupos.get(valorVigencia(m.vigencia)) ?? []), m.marca]);
+  const valor = (d: ValorVigencia) => (d === SEGUN_CONTRATO ? 'según contrato' : d === null ? 'sin vencimiento' : meses(d));
   const nombres = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs.at(-1)}`);
   if (grupos.size < 2) return `vigencia de calibración: ${valor(grupos.size === 1 ? [...grupos.keys()][0] : 365)}`;
   return `vigencia de calibración: ${[...grupos].map(([d, xs]) => `${nombres(xs)}, ${valor(d)}`).join('; ')}`;
 }
 
-/** Lo elegido en el formulario: `null` = sin vencimiento; un entero de días de 30 a 1095; `undefined` = no vale. */
-export function vigenciaElegida(modo: 'sin' | 'dias', texto: string): number | null | undefined {
+/** Lo elegido en el formulario: `null` = sin vencimiento; `'contrato'` = según contrato (lote 12); un entero de días de 30 a 1095; `undefined` = no vale. */
+export function vigenciaElegida(modo: 'sin' | 'dias' | 'contrato', texto: string): ValorVigencia | undefined {
   if (modo === 'sin') return null;
+  if (modo === 'contrato') return SEGUN_CONTRATO;
   const n = /^\s*\d+\s*$/.test(texto) ? Number(texto) : Number.NaN;
   return esVigenciaValida(n) ? n : undefined;
 }
@@ -46,36 +50,45 @@ export interface LineaVigencia { texto: string; valor: string; cambia?: boolean;
 
 /**
  * La vista previa de cambiar la vigencia de una marca a `nuevo`, sobre las últimas calibraciones de sus equipos activos (`resumen.fechas`,
- * sólo fechas) y con la misma regla del servidor (`estadoCalibracion`): cuántos entran en «Avisos a clientes» y cuántos salen.
+ * sólo fechas) y con la misma regla del servidor (`estadoCalibracion`): cuántos entran en «Avisos a clientes» y cuántos salen. Con «según
+ * contrato» (lote 12), cada fecha cuenta con los días del contrato de su cliente (`resumen.contratos`, en el mismo orden; null = sin él).
  */
-export function lineasVistaVigencia(m: MarcaSeguimiento, nuevo: number | null, hoy: string): LineaVigencia[] {
-  const enAvisos = (f: string, d: number | null) => ESTADOS_AVISO.includes(estadoCalibracion(f, hoy, d).estado);
+export function lineasVistaVigencia(m: MarcaSeguimiento, nuevo: ValorVigencia, hoy: string): LineaVigencia[] {
   const fechas = m.resumen.fechas;
-  const entran = fechas.filter((f) => !enAvisos(f, m.vigencia.dias) && enAvisos(f, nuevo)).length;
-  const salen = fechas.filter((f) => enAvisos(f, m.vigencia.dias) && !enAvisos(f, nuevo)).length;
-  const fuera = fechas.filter((f) => estadoCalibracion(f, hoy, nuevo).estado === 'FUERA_CICLO').length;
+  const contratos = m.resumen.contratos ?? [];
+  const actual = valorVigencia(m.vigencia);
+  const dias = (v: ValorVigencia, i: number): number | null => (v === SEGUN_CONTRATO ? (contratos[i] ?? null) : v);
+  const estado = (i: number, v: ValorVigencia) => estadoCalibracion(fechas[i], hoy, dias(v, i)).estado;
+  const enAvisos = (i: number, v: ValorVigencia) => ESTADOS_AVISO.includes(estado(i, v));
+  const indices = fechas.map((_, i) => i);
+  const entran = indices.filter((i) => !enAvisos(i, actual) && enAvisos(i, nuevo)).length;
+  const salen = indices.filter((i) => enAvisos(i, actual) && !enAvisos(i, nuevo)).length;
+  const fuera = indices.filter((i) => estado(i, nuevo) === 'FUERA_CICLO').length;
   return [
-    { texto: 'Vigencia', valor: `${textoDias(m.vigencia.dias)} → ${textoDias(nuevo)}`, cambia: true },
+    { texto: 'Vigencia', valor: `${textoValorVigencia(actual)} → ${textoValorVigencia(nuevo)}`, cambia: true },
     { texto: 'Equipos activos de la marca con fecha de calibración', valor: String(fechas.length) },
     { texto: m.incluida ? 'Entran en «Avisos a clientes» (vencidas o por vencer)' : 'Entrarían en «Avisos a clientes» al encenderla', valor: String(entran), ...(entran > 0 ? { aviso: true } : {}) },
     { texto: m.incluida ? 'Salen de «Avisos a clientes»' : 'Ya no entrarían en «Avisos a clientes» al encenderla', valor: String(salen) },
     { texto: 'Vencidas hace más de un año (no piden aviso)', valor: String(fuera) },
     { texto: 'Sin fecha (no vencen ni avisan)', valor: String(m.resumen.porEstado.SIN_FECHA) },
+    ...(nuevo === SEGUN_CONTRATO ? [{ texto: 'De ellos, de clientes sin frecuencia de preventivo (siguen sin vencimiento)', valor: String(indices.filter((i) => dias(nuevo, i) === null).length) }] : []),
   ];
 }
 
 /** Lo que pasa al confirmar el cambio de vigencia, dicho antes. */
-export function efectoVigencia(m: MarcaSeguimiento, nuevo: number | null): string {
+export function efectoVigencia(m: MarcaSeguimiento, nuevo: ValorVigencia): string {
   const antes = m.incluida ? '' : 'La marca no está en seguimiento: Avisos no cambia hasta encenderla. ';
   const que =
-    nuevo === null
-      ? 'Sus equipos dejan de vencer: siguen en Equipos y en la pestaña «Trazabilidad F-ST-022» con su última calibración, pero no salen en Avisos ni en el Calendario.'
-      : `Sus equipos vencen a los ${textoDias(nuevo)} de su última calibración: Resumen, Calendario y Avisos lo recalculan al volver a leer.`;
+    nuevo === SEGUN_CONTRATO
+      ? 'Cada equipo vence según la frecuencia de preventivo de su cliente (se pone en la ficha de un equipo, sólo un administrador del portal); los de un cliente sin frecuencia siguen sin vencimiento.'
+      : nuevo === null
+        ? 'Sus equipos dejan de vencer: siguen en Equipos y en la pestaña «Trazabilidad F-ST-022» con su última calibración, pero no salen en Avisos ni en el Calendario.'
+        : `Sus equipos vencen a los ${textoDias(nuevo)} de su última calibración: Resumen, Calendario y Avisos lo recalculan al volver a leer.`;
   return `${antes}${que} No se envía ningún correo: los avisos siguen siendo manuales o simulados. Se puede volver a cambiar.`;
 }
 
 /** Un apunte del historial de vigencias, en una línea. */
-export const textoCambioVigencia = (c: CambioVigencia): string => `${c.marca}: vigencia ${textoDias(c.antes)} → ${textoDias(c.despues)}, por ${c.por} el ${fmtFechaHora(c.en)}: ${c.motivo}`;
+export const textoCambioVigencia = (c: CambioVigencia): string => `${c.marca}: vigencia ${textoValorVigencia(c.antes)} → ${textoValorVigencia(c.despues)}, por ${c.por} el ${fmtFechaHora(c.en)}: ${c.motivo}`;
 
 /** «GRIMM EDM 180 + Horiba»: las marcas incluidas, GRIMM EDM 180 delante. Sin la lista, la de siempre. */
 export function textoMarcas(marcas: readonly MarcaSeguimiento[] | null): string {
