@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { estadoCalibracion, type EquipoVista, type FrecuenciaCliente } from '../dominio';
-import { efectoFrecuencia, frecuenciaDe, frecuenciaElegida, lineasVistaFrecuencia, textoCambioFrecuencia, textoContrato, textoMeses } from './contratos';
+import { efectoFrecuencia, filasContratos, filtrarContratos, frecuenciaDe, frecuenciaElegida, hayClientesSinFrecuencia, lineasVistaFrecuencia, textoCambioFrecuencia, textoContadorContratos, textoContrato, textoMeses } from './contratos';
 
 // La frecuencia de preventivo de un cliente (lote 12), en la ficha de un equipo: cómo se lee, qué se elige, la vista previa (cuántos
 // equipos de ese cliente, de marcas «según contrato», entran o salen de «Avisos a clientes») y lo que pasa al confirmar. Nada se envía.
@@ -80,5 +80,77 @@ describe('la vista previa de cambiar la frecuencia de un cliente', () => {
 
   it('un apunte del historial, en una línea', () => {
     expect(textoCambioFrecuencia({ id: 1, clave: CLAVE, cliente: 'Cliente Ficticio A S.A.S.', antes: null, despues: 6, ...FIRMA })).toBe('sin contrato → 6 meses (183 días), por admin@example.com el 18/10/2026 15:00: Contrato ficticio.');
+  });
+});
+
+// Lote 13: la lista de clientes de «Configuración» para rellenar las frecuencias desde una sola pantalla. Sale del inventario que ya
+// llega (GET /equipos: los equipos con `segunContrato` y `frecuencias`), sin rutas nuevas.
+describe('la lista de clientes con equipos «según contrato»', () => {
+  // A: tres según contrato (uno vencido hace 8 meses con 6 meses de contrato → en avisos), escrito de dos formas, y un GRIMM que no cuenta.
+  // B: dos según contrato, sin frecuencia. C: uno, con «sin contrato» guardado. D: sólo GRIMM (no sale). Uno sin cliente (no sale).
+  const equipos = [
+    eq('Cliente Ficticio A S.A.S.', '2026-02-10', true, 183),
+    eq('Cliente Ficticio A S.A.S.', '2026-08-10', true, 183),
+    eq('CLIENTE FICTICIO A S.A.S. ', null, true, 183),
+    eq('Cliente Ficticio A S.A.S.', '2025-10-01', false),
+    eq('Cliente Ficticio B', '2026-02-10', true),
+    eq('Cliente Ficticio B', '2026-03-10', true),
+    eq('Cliente Ficticio C', '2026-02-10', true),
+    eq('Cliente Ficticio D', '2025-10-01', false),
+    eq('  ', '2026-02-10', true),
+  ];
+  const frecuencias: FrecuenciaCliente[] = [
+    { clave: CLAVE, cliente: 'Cliente Ficticio A S.A.S.', meses: 6, ...FIRMA },
+    { clave: 'cliente ficticio c', cliente: 'Cliente Ficticio C', meses: null, ...FIRMA },
+    { clave: 'cliente ficticio e', cliente: 'Cliente Ficticio E', meses: 12, ...FIRMA },
+  ];
+
+  it('una fila por cliente con equipos «según contrato»: su nombre como más se escribe, cuántos, cuántos en avisos y su frecuencia', () => {
+    const filas = filasContratos(equipos, frecuencias);
+    expect(filas.map((f) => [f.clave, f.cliente, f.equipos, f.enAvisos, f.meses])).toEqual([
+      ['cliente ficticio b', 'Cliente Ficticio B', 2, 0, null],
+      ['cliente ficticio c', 'Cliente Ficticio C', 1, 0, null],
+      [CLAVE, 'Cliente Ficticio A S.A.S.', 3, 1, 6],
+    ]);
+    expect(filas[2].frecuencia).toEqual(frecuencias[0]);
+    expect(filas[1].frecuencia).toEqual(frecuencias[1]);
+    expect(filas[0].frecuencia).toBeNull();
+  });
+
+  it('orden: primero los que no tienen frecuencia; dentro, más equipos primero y, a igualdad, por nombre', () => {
+    const muchos = [
+      eq('Cliente Ficticio Z', '2026-02-10', true),
+      eq('Cliente Ficticio Y', '2026-02-10', true),
+      eq('Cliente Ficticio X', '2026-02-10', true, 183),
+      eq('Cliente Ficticio X', '2026-02-10', true, 183),
+      eq('Cliente Ficticio W', '2026-02-10', true, 183),
+      eq('Cliente Ficticio V', '2026-02-10', true),
+      eq('Cliente Ficticio V', '2026-02-10', true),
+    ];
+    const fs: FrecuenciaCliente[] = ['cliente ficticio x', 'cliente ficticio w'].map((clave) => ({ clave, cliente: clave, meses: 6, ...FIRMA }));
+    expect(filasContratos(muchos, fs).map((f) => f.cliente)).toEqual(['Cliente Ficticio V', 'Cliente Ficticio Y', 'Cliente Ficticio Z', 'Cliente Ficticio X', 'Cliente Ficticio W']);
+  });
+
+  it('sin ningún equipo «según contrato», ninguna fila (la tarjeta lo dice y no enseña la tabla)', () => {
+    expect(filasContratos(equipos.filter((e) => !e.segunContrato), frecuencias)).toEqual([]);
+    expect(filasContratos([], [])).toEqual([]);
+  });
+
+  it('filtro «sólo sin frecuencia» y búsqueda por nombre, sin mayúsculas, tildes ni espacios de más', () => {
+    const filas = filasContratos(equipos, frecuencias);
+    expect(filtrarContratos(filas, { soloSinFrecuencia: true, busqueda: '' }).map((f) => f.clave)).toEqual(['cliente ficticio b', 'cliente ficticio c']);
+    expect(filtrarContratos(filas, { soloSinFrecuencia: false, busqueda: '' })).toHaveLength(3);
+    expect(filtrarContratos(filas, { soloSinFrecuencia: false, busqueda: '  FICTÍCIO   a ' }).map((f) => f.clave)).toEqual([CLAVE]);
+    expect(filtrarContratos(filas, { soloSinFrecuencia: true, busqueda: 'ficticio a' })).toEqual([]);
+    expect(filtrarContratos(filas, { soloSinFrecuencia: false, busqueda: 'nadie' })).toEqual([]);
+  });
+
+  it('el filtro va encendido de partida sólo si hay algún cliente sin frecuencia; y el contador', () => {
+    const filas = filasContratos(equipos, frecuencias);
+    expect(hayClientesSinFrecuencia(filas)).toBe(true);
+    expect(hayClientesSinFrecuencia(filas.filter((f) => f.meses !== null))).toBe(false);
+    expect(textoContadorContratos(filas, filas)).toBe('3 clientes · 2 sin frecuencia');
+    expect(textoContadorContratos(filas.slice(0, 1), filas)).toBe('1 de 3 clientes · 2 sin frecuencia');
+    expect(textoContadorContratos(filas.slice(2), filas.slice(2))).toBe('1 cliente · todos con frecuencia');
   });
 });

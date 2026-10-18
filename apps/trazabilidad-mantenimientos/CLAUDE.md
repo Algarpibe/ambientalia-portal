@@ -34,7 +34,8 @@ persona (ver «Pasadas nocturnas»). **Desde el lote 11 la vigencia de calibraci
 vence a los 365 días, como siempre; Horiba y las demás marcas, **sin vencimiento** mientras nadie les
 ponga un plazo en «Marcas en seguimiento» (ver «Vigencia de calibración por marca»). **Desde el lote 12 una marca puede vencer
 «según contrato del cliente»**: cada equipo, con la frecuencia de preventivo de SU cliente, que sólo pone un administrador del portal
-en la ficha de un equipo (ver «Frecuencia de preventivo por cliente»). Sigue sin enviarse nada. El seguimiento (aviso
+en la ficha de un equipo o, **desde el lote 13**, en la lista de clientes de «Configuración» (ver «Frecuencia de preventivo por cliente» y
+«Lista de clientes para rellenar la frecuencia»). Sigue sin enviarse nada. El seguimiento (aviso
 enviado, «en Ambientalia», servicio programado, nota) se registra en la app. ⚠️ **La Excel ya no
 se sube** (decisión del 10/10/2026): la hoja está congelada y ni se importa ni se vuelve a
 congelar. Ver «F-ST-022: congelación y relevo de la Excel».
@@ -74,7 +75,7 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
 | Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql`, `063_trazabilidad_vigencia_marcas.sql`, `064_trazabilidad_contratos.sql` |
-| Frecuencia de preventivo por cliente y vigencia «según contrato» (lote 12, 064): la regla sigue en `marcas.ts` (`SEGUN_CONTRATO`, `ValorVigencia`, `vigenciaDeGrupo` —marca + cliente—, `vigenciaDeEquipo`, `diasDeContrato`, `diasDeMeses`, `esFrecuenciaValida`, `FRECUENCIA_MIN_MESES` / `FRECUENCIA_MAX_MESES`, `valorVigencia`, `vaPorContrato`) con sus tipos (`FrecuenciaCliente`, `CambioFrecuencia`, `RespuestaContrato`) | su lectura junto a la de las marcas, en UNA consulta (`leerVigencias` → `{vigencias, contratos}`), en `vigencia-repo.ts`; quien la cambia (`cambiarContrato`, `leerContrato`, `listarContratos`; **único que escribe `tmc_contratos` y su historial**) en `contratos-repo.ts`; si un cliente tiene equipos activos en el inventario (`clienteDelInventario`) en `repo.ts`; sus validadores (`parseClaveCliente`, `parseFrecuencia`) en `types.ts`; el permiso (`contrato.write`, de ningún rol) en `roles.ts`; la sección de la ficha en `src/vistas/FrecuenciaContrato.tsx` y lo que calcula (`textoMeses`, `frecuenciaDe`, `frecuenciaElegida`, `textoContrato`, `equiposPorContrato`, `lineasVistaFrecuencia`, `efectoFrecuencia`, `textoCambioFrecuencia`) en `src/lib/contratos.ts`; la tercera opción de «Cambiar» y su vista previa (`textoValorVigencia`, `vigenciaElegida`, `lineasVistaVigencia`) en `src/vistas/MarcasSeguimiento.tsx` y `src/lib/marcas.ts` |
+| Frecuencia de preventivo por cliente y vigencia «según contrato» (lote 12, 064): la regla sigue en `marcas.ts` (`SEGUN_CONTRATO`, `ValorVigencia`, `vigenciaDeGrupo` —marca + cliente—, `vigenciaDeEquipo`, `diasDeContrato`, `diasDeMeses`, `esFrecuenciaValida`, `FRECUENCIA_MIN_MESES` / `FRECUENCIA_MAX_MESES`, `valorVigencia`, `vaPorContrato`) con sus tipos (`FrecuenciaCliente`, `CambioFrecuencia`, `RespuestaContrato`) | su lectura junto a la de las marcas, en UNA consulta (`leerVigencias` → `{vigencias, contratos}`), en `vigencia-repo.ts`; quien la cambia (`cambiarContrato`, `leerContrato`, `listarContratos`; **único que escribe `tmc_contratos` y su historial**) en `contratos-repo.ts`; si un cliente tiene equipos activos en el inventario (`clienteDelInventario`) en `repo.ts`; sus validadores (`parseClaveCliente`, `parseFrecuencia`) en `types.ts`; el permiso (`contrato.write`, de ningún rol) en `roles.ts`; la sección de la ficha en `src/vistas/FrecuenciaContrato.tsx` (desde el lote 13, con el formulario por cliente, `FormularioFrecuencia`, y su botón, `BotonCambiar`, que reutiliza la tarjeta «Frecuencia de preventivo por cliente» de `src/vistas/FrecuenciasClientes.tsx`; la lista que pinta —`filasContratos`, `filtrarContratos`, `hayClientesSinFrecuencia`, `textoContadorContratos`— en `src/lib/contratos.ts`) y lo que calcula (`textoMeses`, `frecuenciaDe`, `frecuenciaElegida`, `textoContrato`, `equiposPorContrato`, `lineasVistaFrecuencia`, `efectoFrecuencia`, `textoCambioFrecuencia`) en `src/lib/contratos.ts`; la tercera opción de «Cambiar» y su vista previa (`textoValorVigencia`, `vigenciaElegida`, `lineasVistaVigencia`) en `src/vistas/MarcasSeguimiento.tsx` y `src/lib/marcas.ts` |
 | Vigencia de calibración por marca (lote 11, 063): **la regla, en un solo sitio** (`vigenciaDeMarca`, `vigenciaDeEquipo`, `grupoMarca`, `VIGENCIA_POR_DEFECTO`, `VIGENCIA_MIN_DIAS` / `VIGENCIA_MAX_DIAS`, `esVigenciaValida`) y sus tipos (`VigenciaMarca`, `VigenciaGuardada`, `CambioVigencia`) | `apps/hub-api/src/trazabilidad/marcas.ts` (y el estado, `estadoCalibracion(ultima, hoy, vigencia)` con `SIN_VENCIMIENTO`, en `dominio.ts`); su lectura (`leerVigencias`, `leerVigenciasConFirma`, `leerCambiosVigencia`; sólo lee) en `vigencia-repo.ts`; quien la cambia (`cambiarVigencia`; **único que escribe `tmc_marcas_vigencia` y su apunte**) en `marcas-repo.ts`; su validador (`parseVigenciaMarca`) en `types.ts`; la columna «Vigencia» y su formulario en `src/vistas/MarcasSeguimiento.tsx`, y lo que calcula (`textoDias`, `textoVigencias` —la cabecera—, `vigenciaElegida`, `lineasVistaVigencia`, `efectoVigencia`, `textoCambioVigencia`) en `src/lib/marcas.ts`; el orden y el texto de «sin vencimiento» (`ordenVigencia`, `textoVigencia`) en `src/lib/vistas.ts` |
 | Marcas en seguimiento (lote 9f, 061): **qué es el inventario** en un solo sitio (`EN_INVENTARIO`, `claveMarcaSql`; sin imports) | `apps/hub-api/src/trazabilidad/inventario.ts` |
 | Marcas en seguimiento: la regla pura —clave de una marca (`claveMarca`), la fila fija (`CLAVE_EDM180`), la vista previa por marca (`marcasEnSeguimiento`) y lo que se escribe al incluir una (`planAdopcion`)— y los tipos de su API | `apps/hub-api/src/trazabilidad/marcas.ts`; su SQL (`leerMarcas`, `cambiarMarca`, `adoptarIncluidas`; **escribe `tmc_marcas`, `tmc_marcas_cambios` y, en `tmc_calibraciones`, sólo partidas nuevas y la clave de las sueltas**) en `marcas-repo.ts`; la tarjeta en `src/vistas/MarcasSeguimiento.tsx` y lo que calcula (`textoMarcas` —la cabecera—, `lineasVistaPrevia`, `efectoMarca`, `textoCambioMarca`, `marcasDeEquipos`, `filtrarPorMarca`) en `src/lib/marcas.ts` |
@@ -1953,9 +1954,46 @@ encendida). Se guarda con el nombre como más se escribe en el inventario.
 tenga frecuencia); (2) en «Equipos», abrir un equipo Horiba de cada cliente con contrato → «Frecuencia de preventivo del cliente» →
 «Cambiar» → meses y motivo. Cada cliente que rellene mete en Avisos a sus Horiba vencidos o por vencer.
 
-**Pendiente (no construido)**: contratos distintos **por equipo** (hoy, una frecuencia por cliente); una **lista de clientes** para
-rellenar las frecuencias de una vez (hoy, una ficha de equipo por cliente); poner la frecuencia a un cliente cuya marca aún está apagada;
-y, si se quiere precisión de calendario, vencer «el mismo día N meses después» en vez de meses × 365 / 12.
+**Pendiente (no construido)**: contratos distintos **por equipo** (hoy, una frecuencia por cliente); poner la frecuencia a un cliente
+cuya marca aún está apagada; y, si se quiere precisión de calendario, vencer «el mismo día N meses después» en vez de meses × 365 / 12.
+~~Una lista de clientes para rellenar las frecuencias de una vez~~: **hecha en el lote 13** (sección siguiente).
+
+### Lista de clientes para rellenar la frecuencia (lote 13)
+
+**Estado: hecho, sin rutas ni migraciones nuevas; sólo el portal.** Con Horiba ya «según contrato» en producción y muchos clientes por
+rellenar, abrir la ficha de un equipo de cada cliente era lento. ⚠️ **Sigue sin enviarse nada**: los avisos son manuales o simulados.
+
+**DECIDIDO (Alfonso, 18/10/2026):** una tarjeta en «Configuración» con una fila por cliente, para rellenar las frecuencias desde una sola
+pantalla, con el MISMO «Cambiar» de la ficha; editable sólo por el administrador del portal (`contrato.write`), visible para cualquiera con
+la app.
+
+- **La tarjeta** («Administración» → «Configuración» → **«Frecuencia de preventivo por cliente»**, `src/vistas/FrecuenciasClientes.tsx`,
+  a todo el ancho, justo antes de «Marcas en seguimiento»): una fila por **cliente con equipos activos de marcas «según contrato»** con su
+  nombre (como más se escribe en el inventario), **cuántos equipos «según contrato»** tiene, **cuántos están ahora en Avisos** (vencidos o
+  por vencer, `ESTADOS_AVISO`) y su **frecuencia** («6 meses (183 días)» o «sin contrato», en ámbar) con quién y cuándo la puso (el motivo,
+  en su `title`). **Filtro «Sólo sin frecuencia»**, encendido de partida si queda alguno; **búsqueda por nombre** (sin mayúsculas, tildes ni
+  espacios de más: casa con cualquier grafía del cliente); contador («12 de 40 clientes · 12 sin frecuencia»). **Orden**: primero los sin
+  frecuencia; después, más equipos primero; a igualdad, por nombre.
+- **«Sin frecuencia» = sin meses**: sin fila **o** con «sin contrato» guardado (decisión de este lote: para la regla es lo mismo, no vence).
+  Un cliente al que un administrador le puso «sin contrato» a propósito sigue saliendo con el filtro, con su firma debajo.
+- **«Cambiar»** (atenuado sin el permiso, «Sólo lectura: la pone un administrador del portal») abre **justo bajo su fila** el mismo
+  formulario de la ficha (`FormularioFrecuencia`): meses o «sin contrato», la vista previa (`lineasVistaFrecuencia`: entran / salen de
+  Avisos, +1 año, sin fecha), el efecto, el motivo obligatorio y la confirmación dentro de la página, sin `alert` / `confirm`. Además se
+  lleva a la vista al abrirse (`scrollIntoView`, la lección de `ae980f1`). Uno abierto a la vez. Tras guardar, el servidor devuelve el
+  inventario ya recalculado y la app lo pinta: con el filtro encendido, el cliente desaparece de la lista.
+- **Sin ninguna marca «según contrato»** (o sin equipos activos de ellas en el inventario) la tarjeta lo dice y no enseña la tabla.
+- **De dónde salen los datos**: del inventario que la app ya tiene (`GET /trazabilidad/equipos`: cada equipo con `segunContrato` y
+  `estado`, y la respuesta con `frecuencias`). `App.tsx` se lo pasa a «Configuración» (`inventario`, `errorInventario`,
+  `onInventarioRecalculado`). La lista la calcula `filasContratos` (`src/lib/contratos.ts`, pura) y la filtra `filtrarContratos`. **Ninguna
+  ruta nueva**: la escritura es la de siempre, `POST /trazabilidad/clientes/:clave/frecuencia` (`router.test.ts` sigue con sus 25
+  escrituras con guarda). Un equipo sin cliente no da fila. Los clientes con frecuencia guardada pero sin equipos «según contrato» no salen.
+- **La ficha del equipo sigue igual**: el bloque «Frecuencia de preventivo del cliente» (`FrecuenciaContrato.tsx`) enseña lo mismo y su
+  «Cambiar» abre el mismo formulario, que desde este lote recibe el cliente (`clave`, nombre, meses) en vez del equipo; su historial sigue
+  ahí. «Marcas en seguimiento» dice ahora dónde se pone la frecuencia.
+
+⚠️ **Despliegue**: **sólo el portal** (hub-api no cambia). Al desplegar nada cambia en los datos. Alfonso (administrador) ve en
+«Configuración» la tarjeta nueva con los clientes de Horiba sin frecuencia arriba; a cada uno, «Cambiar» → meses → motivo → «Guardar
+frecuencia». Quien no es administrador la ve con «Cambiar» atenuado.
 
 ### Estado final del relevo de la Excel, y lo que viene (no construido)
 
@@ -1966,8 +2004,8 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
 - ~~Incluir otras marcas en seguimiento~~: **hecho en el lote 9f, por marca** (sección anterior).
 - ~~Vigencia por marca~~: **hecha en el lote 11** (GRIMM 365 días; las demás, sin vencimiento salvo que
   se les ponga un plazo). ~~La frecuencia por cliente según su contrato~~: **hecha en el lote 12** (una por
-  cliente). Queda: contratos distintos **por equipo**, una lista de clientes para rellenarlas de una vez y, si hiciera falta, vigencia
-  por modelo.
+  cliente; ~~una lista de clientes para rellenarlas de una vez~~: **hecha en el lote 13**). Queda: contratos distintos **por equipo** y,
+  si hiciera falta, vigencia por modelo.
 - **Distinguir por modelo los seriales repetidos** de la hoja (hoy no se enlazan ni admiten
   correcciones; retirar la fila que sobra no desempata a la otra) y decidir qué hacer con los
   numéricos dudosos, que siguen sólo listados. ⚠️ Con una marca incluida, un equipo suyo con el
@@ -2176,5 +2214,10 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
   huella intacta), `trazabilidad.db.test.ts` (suma las dos tablas a la lista `tmc_*`) y, en la app, `src/lib/contratos.test.ts` (textos,
   lo que se elige, la vista previa por cliente y el efecto), `src/lib/marcas.test.ts` (la tercera opción y su vista previa) y
   `src/lib/vistas.test.ts`. Sin pruebas de componente: la ficha y el «Cambiar» se revisan en el navegador.
+- Lista de clientes para la frecuencia (lote 13): sólo en la app, `src/lib/contratos.test.ts` (`filasContratos`: una fila por cliente con
+  equipos «según contrato» —el nombre más escrito, los recuentos de equipos y de avisos, la frecuencia y su firma—, sin GRIMM ni equipos sin
+  cliente, el orden —sin frecuencia primero, más equipos, nombre—, sin ninguna marca «según contrato» ninguna fila; `filtrarContratos` con
+  el filtro y la búsqueda sin mayúsculas, tildes ni espacios; el filtro de partida y el contador). hub-api no cambia. Sin pruebas de
+  componente: la tarjeta y el formulario bajo su fila se revisan en el navegador.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.

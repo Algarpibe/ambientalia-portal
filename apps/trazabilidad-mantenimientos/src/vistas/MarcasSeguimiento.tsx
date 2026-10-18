@@ -91,7 +91,7 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
   return (
     <Card
       title="Marcas en seguimiento"
-      hint="Qué marcas entran en Resumen, Equipos, Calendario y Avisos, y cuándo vence su calibración. GRIMM EDM 180, siempre y a los 365 días (12 meses). Las demás no vencen mientras no se les ponga un plazo, o «según contrato del cliente»: Horiba se calibra con el preventivo de cada contrato, y la frecuencia de cada cliente se pone en la ficha de uno de sus equipos. Nada de esto envía nada: los avisos siguen siendo manuales o simulados."
+      hint="Qué marcas entran en Resumen, Equipos, Calendario y Avisos, y cuándo vence su calibración. GRIMM EDM 180, siempre y a los 365 días (12 meses). Las demás no vencen mientras no se les ponga un plazo, o «según contrato del cliente»: Horiba se calibra con el preventivo de cada contrato, y la frecuencia de cada cliente se pone en «Frecuencia de preventivo por cliente» (o en la ficha de uno de sus equipos). Nada de esto envía nada: los avisos siguen siendo manuales o simulados."
     >
       {!editable && <p className="mb-3 text-xs text-gray-500">Sólo lectura: las enciende, las apaga y les pone la vigencia el Director Técnico.</p>}
       {error && (
@@ -204,7 +204,7 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
                   días de la última calibración
                   {modo === 'dias' && <span className="text-xs text-gray-600">{nueva === undefined || nueva === SEGUN_CONTRATO ? `Un número entero de ${VIGENCIA_MIN_DIAS} a ${VIGENCIA_MAX_DIAS}.` : textoDias(nueva)}</span>}
                 </label>
-                {/* Lote 12: cada equipo vence con la frecuencia de preventivo de SU cliente (la pone un administrador en la ficha de un equipo). */}
+                {/* Lote 12: cada equipo vence con la frecuencia de preventivo de SU cliente (la pone un administrador en «Frecuencia de preventivo por cliente» o en la ficha de un equipo). */}
                 <label className="flex min-h-[44px] items-center gap-2">
                   <input type="radio" name="vigencia" checked={modo === 'contrato'} onChange={() => setModo('contrato')} className={DESACTIVADO} />
                   Según contrato del cliente (cada equipo, con la frecuencia de preventivo de su cliente; sin ella, no vence)
