@@ -27,7 +27,8 @@ function eq(cliente: string, ultimaCalibracion: string | null, contacto: Contact
     entradasSt: null,
     calibracionesPeriodo: null,
     correctivosPeriodo: null,
-    ...estadoCalibracion(ultimaCalibracion, HOY),
+    vigenciaMarca: 365,
+    ...estadoCalibracion(ultimaCalibracion, HOY, 365),
     serialRepetido: false,
     seguimiento: seg ? { enAmbientalia: false, avisoEnviado: null, servicioProgramado: null, nota: '', actualizadoPor: 'x', actualizadoEn: '', ...seg } : null,
     ticket: null,
@@ -148,6 +149,15 @@ describe('resumen de la simulación', () => {
 
   it('sin nada que avisar, todo a cero', () => {
     expect(resumenSimulacion(planAvisos([], HOY))).toEqual({ correos: 0, clientes: 0, equipos: 0, sinDestinatario: 0, equiposSinDestinatario: 0 });
+  });
+
+  // Lote 11: los equipos de una marca sin vencimiento (Horiba, mientras nadie le ponga plazo) llegan del servidor con `vigenciaMarca:
+  // null` y la simulación —que se calcula aquí, en el navegador— no los cuenta nunca, tengan la fecha que tengan.
+  it('un equipo de una marca sin vencimiento no entra en la simulación aunque su fecha pediría aviso', () => {
+    const horiba = (f: string) => ({ ...eq('Cliente Uno', f, desk('compras@cliente-uno.example')), marca: 'Horiba', vigenciaMarca: null, ...estadoCalibracion(f, HOY, null) });
+    const p = planAvisos([horiba(EN_30), horiba(EN_60), horiba('2025-09-03'), horiba('2023-01-01')], HOY);
+    expect(resumenSimulacion(p)).toEqual({ correos: 0, clientes: 0, equipos: 0, sinDestinatario: 0, equiposSinDestinatario: 0 });
+    expect([p.vencidasSinAviso, p.fueraCiclo]).toEqual([[], []]);
   });
 });
 

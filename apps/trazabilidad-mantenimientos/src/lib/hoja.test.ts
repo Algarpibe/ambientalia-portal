@@ -9,7 +9,9 @@ const HOY = '2026-10-12';
 let n = 5;
 const fila = (extra: Partial<FilaHoja> & { ultimaCalibracion?: string | null } = {}): FilaHoja => {
   const ultima = extra.ultimaCalibracion ?? null;
-  return { fila: ++n, clave: null, situacion: 'hoja', cliente: 'Cliente Ficticio A', marca: 'Horiba', marcaClave: 'horiba', modelo: 'APNA-370', serial: `HB-${n}`, enHoja: {}, avisos: [], calibraciones: [], retirado: null, ...estadoCalibracion(ultima, HOY), ...extra, ultimaCalibracion: ultima };
+  // Con 365 días, como GRIMM: estas pruebas son de filtros y orden (la vigencia de cada marca la decide el servidor, lote 11).
+  const vigenciaMarca = extra.vigenciaMarca === undefined ? 365 : extra.vigenciaMarca;
+  return { fila: ++n, clave: null, situacion: 'hoja', cliente: 'Cliente Ficticio A', marca: 'Horiba', marcaClave: 'horiba', modelo: 'APNA-370', serial: `HB-${n}`, enHoja: {}, avisos: [], calibraciones: [], retirado: null, vigenciaMarca, ...estadoCalibracion(ultima, HOY, vigenciaMarca), ...extra, ultimaCalibracion: ultima };
 };
 const A = fila({ cliente: 'Cliente Ficticio Ñandú S.A.S.', marca: 'GRIMM', marcaClave: 'grimm', modelo: 'EDM 180C', serial: '18A00001', clave: '18A00001', situacion: 'inventario', ultimaCalibracion: '2026-09-20', enHoja: { cliente: 'Nandu corto' } });
 const B = fila({ cliente: 'Cliente Ficticio B', marca: 'GRIMM', marcaClave: 'grimm', modelo: 'EDM 180D', serial: '18A00002', clave: '18A00002', situacion: 'inactivo', ultimaCalibracion: '2025-11-20', avisos: ['en_revision'] });
@@ -75,6 +77,9 @@ describe('orden', () => {
     expect(orden('ultimaCalibracion')).toEqual(['18000000000001', 'HB-0002', '18A00002', '18A00001', 'TH-0007']);
     expect(orden('ultimaCalibracion', -1)).toEqual(['18A00001', '18A00002', 'HB-0002', '18000000000001', 'TH-0007']);
     expect(orden('vigencia')).toEqual(['HB-0002', '18A00002', '18A00001', '18000000000001', 'TH-0007']);
+    // Lote 11: una fila sin vencimiento (su marca no tiene plazo) va detrás de «+1 año» y delante de «sin fecha».
+    const sin = fila({ serial: 'HB-SIN', ultimaCalibracion: '2019-01-01', vigenciaMarca: null });
+    expect(ordenarHoja([sin, D, B, E, A, C], { k: 'vigencia', dir: 1 }).map((x) => x.serial)).toEqual(['HB-0002', '18A00002', '18A00001', '18000000000001', 'HB-SIN', 'TH-0007']);
   });
 
   it('por situación: inventario, inactivo y sólo en la hoja; a igualdad, el orden de la hoja', () => {
