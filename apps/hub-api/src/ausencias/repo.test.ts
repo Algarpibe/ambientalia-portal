@@ -211,10 +211,22 @@ describe('decidirModificacion contra un driver falso', () => {
 // entró: si la entrada ya viniera ordenada, un comparador roto pasaría igual.
 
 /** Un movimiento con lo mínimo para ordenar; el resto es relleno inerte. */
-function movimiento(id: string, decididaAt: string | null, createdAt: string): Movimiento {
+function movimiento(
+  id: string,
+  decididaAt: string | null,
+  createdAt: string,
+  // El estado importa desde que `registrada` ordena por su creación: es lo
+  // único que distingue una incapacidad —que nunca se decide— de una solicitud
+  // que todavía espera firma.
+  //
+  // `Extract` y no `Movimiento['estado']`: eso último une los estados de las
+  // DOS ramas y dejaría pasar `retirada` o `caducada`, que son de una
+  // modificación y no caben en la fila que este helper construye.
+  estado: Extract<Movimiento, { clase: 'solicitud' }>['estado'] = 'aprobada',
+): Movimiento {
   return {
     clase: 'solicitud',
-    estado: 'aprobada',
+    estado,
     id,
     solicitudId: id,
     empleadoNombre: 'Ana Ruiz',
@@ -287,6 +299,78 @@ describe('porFechaDeCierre: el orden del registro', () => {
       movimiento('decidida', marca('2-10', '09:00:00'), marca('1-01', '09:00:00')),
     ];
     expect(ordenados(entrada)).toEqual(['decidida', 'sin-cierre']);
+  });
+
+  // ── Las `registrada`: su creación ES su cierre ──────────────────────────
+  //
+  // Una incapacidad no se decide, se informa: nace `registrada` y su
+  // `decidida_at` se queda en NULL para siempre. Con el `NULLS LAST` a secas
+  // eso la mandaba al fondo del registro DE POR VIDA, debajo de cualquier
+  // decisión por vieja que fuera. En producción eran siete incapacidades
+  // enterradas bajo setenta y ocho filas, y daban la impresión de no existir.
+  //
+  // Para ellas el movimiento ocurrió al informarlas, así que ordenan por
+  // `createdAt`. No se generaliza a todo lo que tiene `decididaAt` en null, y
+  // los dos tests siguientes fijan los dos bordes de esa decisión.
+
+  it('una incapacidad registrada se ordena por su creación, no al fondo', () => {
+    const entrada = [
+      movimiento('decidida-vieja', marca('1-10', '09:00:00'), marca('1-01', '09:00:00')),
+      movimiento('incapacidad-hoy', null, marca('3-01', '09:00:00'), 'registrada'),
+    ];
+    expect(ordenados(entrada)).toEqual(['incapacidad-hoy', 'decidida-vieja']);
+  });
+
+  it('CANDADO: una PENDIENTE sigue al fondo, aunque sea la más reciente', () => {
+    // El borde que impide que esto se convierta en «todo lo que no tiene
+    // decisión sube». Una pendiente todavía no ha ocurrido: ponerla arriba
+    // llenaría la cabecera del registro de solicitudes sobre las que aún no ha
+    // pasado nada, y su sitio propio es la bandeja de aprobación.
+    const entrada = [
+      movimiento('pendiente', null, marca('3-01', '09:00:00'), 'pendiente'),
+      movimiento('decidida', marca('1-10', '09:00:00'), marca('1-01', '09:00:00')),
+    ];
+    expect(ordenados(entrada)).toEqual(['decidida', 'pendiente']);
+    // `pendiente_2` es la otra mitad del trámite y cuenta igual: la cascada no
+    // cambia que nadie ha cerrado nada todavía.
+    const conSegunda = [
+      movimiento('pendiente-2', null, marca('3-01', '09:00:00'), 'pendiente_2'),
+      movimiento('decidida', marca('1-10', '09:00:00'), marca('1-01', '09:00:00')),
+    ];
+    expect(ordenados(conSegunda)).toEqual(['decidida', 'pendiente-2']);
+  });
+
+  it('CANDADO: una APROBADA sin decidida_at tampoco sube', () => {
+    // El otro borde, y el que protege al histórico importado de la hoja: esas
+    // filas llegaron `aprobada` sin `decidida_at`, y su `created_at` es el día
+    // de la IMPORTACIÓN, no el de la ausencia. Ordenarlas por él las agruparía
+    // todas juntas en la fecha en que se cargó el Excel, que no significa nada.
+    const entrada = [
+      movimiento('importada', null, marca('3-01', '09:00:00')),
+      movimiento('decidida', marca('1-10', '09:00:00'), marca('1-01', '09:00:00')),
+    ];
+    expect(ordenados(entrada)).toEqual(['decidida', 'importada']);
+  });
+
+  it('entre varias registradas, la más reciente arriba', () => {
+    const entrada = [
+      movimiento('inc-1', null, marca('1-01', '09:00:00'), 'registrada'),
+      movimiento('inc-2', null, marca('2-01', '09:00:00'), 'registrada'),
+      movimiento('inc-3', null, marca('3-01', '09:00:00'), 'registrada'),
+    ];
+    expect(ordenados(entrada)).toEqual(['inc-3', 'inc-2', 'inc-1']);
+  });
+
+  it('una registrada y una decidida se intercalan por su fecha, sin preferencia', () => {
+    // Las dos escalas conviven en la misma columna de orden: no hay un bloque
+    // de incapacidades arriba y otro de decisiones debajo, sino una sola
+    // cronología. Es lo que hace que el registro se lea como un registro.
+    const entrada = [
+      movimiento('decidida-ene', marca('1-10', '09:00:00'), marca('1-01', '09:00:00')),
+      movimiento('inc-feb', null, marca('2-15', '09:00:00'), 'registrada'),
+      movimiento('decidida-mar', marca('3-10', '09:00:00'), marca('3-01', '09:00:00')),
+    ];
+    expect(ordenados(entrada)).toEqual(['decidida-mar', 'inc-feb', 'decidida-ene']);
   });
 
   it('la lista mezclada: cierre DESC, luego las sin cerrar, y createdAt DESC dentro de cada grupo', () => {

@@ -3722,11 +3722,40 @@ async function movimientosDeModificaciones(db: Pool, soloDe: string | null): Pro
  * implementación. Cambiaría una invariante documentada, que un `grep` basta
  * para vigilar, por otra que depende del motor de JS y que no vigila nadie.
  */
+/**
+ * Cuándo ocurrió el movimiento de esta fila, para ordenar el registro.
+ *
+ * Normalmente es `decididaAt`. La excepción son las `registrada`: una
+ * incapacidad NO se decide, se informa, así que su `decidida_at` se queda en
+ * NULL para siempre y el movimiento ocurrió al crearla.
+ *
+ * ⚠️ Sin esta excepción, el `NULLS LAST` de abajo mandaba TODA incapacidad al
+ * fondo del registro de por vida, debajo de cualquier decisión por vieja que
+ * fuera. En producción eran siete enterradas bajo setenta y ocho filas, y
+ * parecía que la pantalla no las traía.
+ *
+ * ⚠️ Y NO se generaliza a todo lo que tenga `decididaAt` en null, por dos
+ * casos que deben seguir al fondo:
+ *
+ *  · Las PENDIENTES, porque todavía no ha ocurrido nada. Subirlas llenaría la
+ *    cabecera de solicitudes sin cerrar, y su sitio es la bandeja.
+ *  · Las APROBADAS sin `decidida_at`, que son el histórico importado de la
+ *    hoja: su `created_at` es el día de la IMPORTACIÓN y no el de la ausencia,
+ *    así que ordenarlas por él las amontonaría todas en la fecha en que se
+ *    cargó el Excel.
+ */
+function cuandoOcurrio(m: Movimiento): string | null {
+  if (m.decididaAt !== null) return m.decididaAt;
+  return m.clase === 'solicitud' && m.estado === 'registrada' ? m.createdAt : null;
+}
+
 export function porFechaDeCierre(a: Movimiento, b: Movimiento): number {
-  if (a.decididaAt !== b.decididaAt) {
-    if (a.decididaAt === null) return 1;
-    if (b.decididaAt === null) return -1;
-    return a.decididaAt < b.decididaAt ? 1 : -1;
+  const cierreA = cuandoOcurrio(a);
+  const cierreB = cuandoOcurrio(b);
+  if (cierreA !== cierreB) {
+    if (cierreA === null) return 1;
+    if (cierreB === null) return -1;
+    return cierreA < cierreB ? 1 : -1;
   }
   if (a.createdAt === b.createdAt) return 0;
   return a.createdAt < b.createdAt ? 1 : -1;
