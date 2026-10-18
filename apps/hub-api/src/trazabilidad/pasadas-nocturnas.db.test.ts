@@ -36,7 +36,8 @@ const conFecha = (numero: number, serial: string, equipoId: string, fecha: strin
     equipoId,
     JSON.stringify({ subject: 'reservado', cf: { cf_fecha_de_calibracion: fecha } }),
   ]);
-const filas = async (sql: string) => (await hub.query(sql)).rows;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const filas = async (sql: string): Promise<Record<string, any>[]> => (await hub.query(sql)).rows;
 const nocturnas = () => filas(`SELECT fecha::text AS fecha, tipo, resultado, motivos, huella, pasada_id, termino IS NOT NULL AS termino FROM portal.tmc_pasadas_nocturnas ORDER BY id`);
 
 beforeAll(async () => {
