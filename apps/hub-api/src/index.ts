@@ -17,6 +17,7 @@ import { registrarEstadosAgenda } from './trazabilidad/repo.js';
 import { crearFuenteAgenda } from './trazabilidad/fuente.js';
 import { getDesk2Pool } from './db-desk2.js';
 import { createDataRouter } from './data.router.js';
+import { createHealthRouter } from './health.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -93,24 +94,9 @@ app.post('/api/login',
     }
   });
 
-app.get('/health', async (_req, res) => {
-  try {
-    const db = getHubPool();
-    // SEC-212 — endpoint no autenticado: valida conectividad y existencia de los
-    // 3 esquemas, pero NO expone los conteos de negocio (deals/invoices/tickets).
-    await db.query(
-      `SELECT (SELECT count(*)::int FROM crm.deals) deals,
-              (SELECT count(*)::int FROM books.invoices) invoices,
-              (SELECT count(*)::int FROM desk.tickets) tickets`
-    );
-    res.json({ ok: true });
-  } catch (e) {
-    // /health is unauthenticated — don't leak raw driver errors to callers.
-    console.error('health check failed', e);
-    captureError(e, { endpoint: 'health' });
-    res.status(500).json({ ok: false, error: 'hub unreachable' });
-  }
-});
+// /health: anónimo, con su propio rate limit y sin contar filas (INFRA-532).
+// Recibe el getter y no el pool: se monta antes de initDb.
+app.use(createHealthRouter(getHubPool));
 
 // Los endpoints de datos (/api/reconciliation, /inventory,
 // /customer-valuation, /sales-orders/pending, /invoices/:n/detail,

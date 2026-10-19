@@ -1,17 +1,71 @@
-import { createPoolFromUrl, type Pool } from '@algarpibe/zoho-sync';
+import { Pool } from '@algarpibe/zoho-sync';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { seedUsersFromEnv } from './users/seed-from-env.js';
 
+/*
+ * DATA-331 — topes del pool principal. Es el pool de TODO hub-api, login
+ * incluido: `requireAuth` relee rol y apps de la BD en cada petición. Antes se
+ * creaba con `createPoolFromUrl`, que no fija ninguno, y los valores por
+ * defecto de `pg` son esperar para siempre: una consulta colgada retenía su
+ * conexión sin límite, y con el pool agotado cada petición nueva se quedaba en
+ * cola indefinidamente. Ahora una consulta que se pasa la corta Postgres
+ * (`statement_timeout`) y una petición que no consigue conexión falla con 500
+ * en vez de colgar. Mismo patrón que `crearPoolDesk2` (db-desk2.ts), con
+ * valores holgados: aquí corren los informes pesados (consolidador, WO-sales),
+ * no lecturas cortas.
+ */
+
+/** Las 10 de `pg` por defecto, ahora explícitas. */
+export const HUB_MAX_CONEXIONES = 10;
+/** Espera máxima por una conexión, sea abrirla o que el pool libere una. */
+export const HUB_TIMEOUT_CONEXION_MS = 10_000;
+/** Tope de cada consulta (`statement_timeout`): lo aplica el propio Postgres. */
+export const HUB_TIMEOUT_CONSULTA_MS = 30_000;
+
+/**
+ * Un pool hacia la base del hub con los topes de arriba. Exportada para las
+ * pruebas (la de Postgres baja `consultaMs` para no esperar 30 s); el servidor
+ * usa `getHubPool`.
+ */
+export function crearPoolHub(url: string, topes: { consultaMs?: number } = {}): Pool {
+  return new Pool({
+    connectionString: url,
+    max: HUB_MAX_CONEXIONES,
+    connectionTimeoutMillis: HUB_TIMEOUT_CONEXION_MS,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: topes.consultaMs ?? HUB_TIMEOUT_CONSULTA_MS,
+  });
+}
+
+/**
+ * El pool de un solo uso del arranque, para migraciones y seed. SIN
+ * `statement_timeout`, a propósito: si una migración legítima tardara más que
+ * el tope, hub-api no arrancaría nunca y se llevaría todas las apps por
+ * delante, reintento tras reintento. Una sola conexión: las migraciones van en
+ * serie.
+ */
+export function crearPoolMigraciones(url: string): Pool {
+  const p = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: HUB_TIMEOUT_CONEXION_MS });
+  // Mismo motivo que el listener de getHubPool: sin él, el 'error' de un
+  // cliente inactivo tumba el proceso en pleno arranque.
+  p.on('error', (err: Error) => console.error('hub migrations pool error', err));
+  return p;
+}
+
 let pool: Pool | null = null;
 
-/** Returns the shared read-only hub pool, creating it on first use. */
+/**
+ * El pool compartido, creado en el primer uso. NO es de solo lectura, aunque
+ * así lo decía este comentario: el mismo rol aplica las migraciones y escribe
+ * en `portal.*` (DATA-332).
+ */
 export function getHubPool(): Pool {
   if (!pool) {
     const url = process.env.HUB_DB_URL;
     if (!url) throw new Error('HUB_DB_URL is not set');
-    pool = createPoolFromUrl(url);
+    pool = crearPoolHub(url);
     // Without a listener, an idle-client 'error' (backend restart, network
     // blip) is an unhandled EventEmitter error and crashes the process.
     pool.on('error', (err: Error) => console.error('hub pool error', err));
@@ -59,16 +113,20 @@ export async function initDb(): Promise<void> {
     process.exit(1);
   }
 
-  let db: Pool;
   try {
-    db = getHubPool();
-    await db.query('SELECT 1');
+    await getHubPool().query('SELECT 1');
   } catch (err) {
     console.error('FATAL: no se pudo conectar a la base de datos del hub.', err);
     process.exit(1);
   }
 
-  await aplicarMigraciones(db);
-
-  await seedUsersFromEnv(db);
+  // Migraciones y seed por su propio pool, sin el tope de consulta del
+  // principal (ver crearPoolMigraciones). Se cierra al acabar, falle o no.
+  const migraciones = crearPoolMigraciones(process.env.HUB_DB_URL);
+  try {
+    await aplicarMigraciones(migraciones);
+    await seedUsersFromEnv(migraciones);
+  } finally {
+    await migraciones.end();
+  }
 }
