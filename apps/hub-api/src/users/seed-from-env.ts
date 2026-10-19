@@ -10,7 +10,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 //   - Todos entran con status='active' (ya eran usuarios operativos).
 //   - El password_hash de AUTH_USERS ya es bcrypt → se inserta tal cual.
 //   - full_name no existe en AUTH_USERS → se deriva de la parte local del email.
-//   - ON CONFLICT (email) DO NOTHING → idempotente y seguro de re-ejecutar.
+//   - Solo con portal.users vacía (DATA-335): ver seedUsersFromEnv.
 
 interface SeedUser {
   email: string;
@@ -45,13 +45,25 @@ function fullNameFromEmail(email: string): string {
 }
 
 /**
- * Inserta en `users` los usuarios definidos en AUTH_USERS. Idempotente: los
- * emails ya presentes se ignoran (ON CONFLICT DO NOTHING). No modifica usuarios
- * existentes ni sus roles/estados.
+ * Inserta en `users` los usuarios definidos en AUTH_USERS, SOLO si la tabla está
+ * vacía. AUTH_USERS sirve únicamente para el primer arranque de una base nueva:
+ * `/api/auth/register` crea usuarios `pending` y hace falta un admin que los
+ * apruebe, así que sin seed una base recreada se queda sin nadie que entre.
+ *
+ * DATA-335 — antes insertaba en cada arranque con `ON CONFLICT DO NOTHING`: un
+ * usuario borrado desde el panel que siguiera en la variable volvía a nacer,
+ * activo, en el siguiente despliegue. Con la tabla ya poblada no se toca nada,
+ * y se deja dicho en el log para que se note que la variable sobra.
  */
 export async function seedUsersFromEnv(pool: Pool): Promise<void> {
   const seedUsers = parseAuthUsers(process.env.AUTH_USERS);
   if (seedUsers.length === 0) return;
+
+  const { rows } = await pool.query(`SELECT EXISTS (SELECT 1 FROM portal.users) AS hay`);
+  if ((rows[0] as { hay: boolean }).hay) {
+    console.log('AUTH_USERS ignorada: portal.users ya tiene usuarios. Solo sirve para el primer arranque; puede quitarse.');
+    return;
+  }
 
   for (const user of seedUsers) {
     await pool.query(
