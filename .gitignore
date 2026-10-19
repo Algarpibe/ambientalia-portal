@@ -3,6 +3,10 @@ node_modules/
 
 # Worktrees de Claude Code (viven dentro del repo; no versionar su contenido)
 .claude/worktrees/
+# AI-916 — permisos de shell y rutas personales de cada máquina. Hasta ahora lo
+# tapaba solo el .gitignore global del usuario: un clon sin esa regla lo subiría
+# a un repo público.
+.claude/settings.local.json
 
 # Build artifacts
 dist/
