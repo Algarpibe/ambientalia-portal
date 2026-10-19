@@ -18,21 +18,28 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // FE-411 — si la precarga falla, `selected` se queda vacío. Guardar con eso
+  // manda `PUT apps: []` y deja al usuario sin ninguna app, así que con la
+  // carga fallida no se pinta la selección ni se deja guardar.
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let active = true;
     (async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         const res = await authFetch(`/api/users/${user.id}/apps`);
         if (!res.ok) {
           notify('No se pudieron cargar las apps del usuario.', 'error');
+          if (active) setLoadError(true);
           return;
         }
         const data = await res.json();
         if (active) setSelected(new Set(Array.isArray(data.apps) ? data.apps : []));
       } catch {
         notify('No se pudo conectar con el servidor.', 'error');
+        if (active) setLoadError(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -84,6 +91,10 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
         <div className="px-6 py-4 max-h-80 overflow-y-auto">
           {loading ? (
             <p className="text-gray-400 py-6 text-center">Cargando…</p>
+          ) : loadError ? (
+            <p className="text-red-600 py-6 text-center text-sm">
+              No se pudieron cargar las apps actuales del usuario. Cierra y vuelve a intentarlo.
+            </p>
           ) : (
             APPS.map((app) => (
               <label key={app.id} className="flex items-center gap-3 py-2 cursor-pointer">
@@ -108,7 +119,7 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
           </button>
           <button
             onClick={save}
-            disabled={saving || loading}
+            disabled={saving || loading || loadError}
             className="px-4 py-2 text-sm rounded-lg bg-cyan-500 text-white font-semibold hover:bg-cyan-600 disabled:opacity-50">
             {saving ? 'Guardando…' : 'Guardar'}
           </button>

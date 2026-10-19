@@ -58,4 +58,24 @@ describe('AppAssignModal', () => {
     const body = JSON.parse(putCall![1].body);
     expect(new Set(body.apps)).toEqual(new Set(['inventory-optimization', 'payment-reconciliation']));
   });
+
+  // FE-411 — si la precarga falla, la selección se queda vacía. Con Guardar
+  // activo, un clic mandaba `PUT apps: []` y dejaba al usuario sin ninguna app.
+  describe('si no se pudieron cargar las apps actuales', () => {
+    it.each([
+      ['el servidor responde con error', () => mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) })],
+      ['no hay conexión', () => mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'))],
+    ])('%s: no deja guardar ni muestra una selección vacía', async (_caso, fallar) => {
+      fallar();
+      render(<AppAssignModal user={user} onClose={() => {}} onSaved={() => {}} />);
+
+      expect(await screen.findByText(/No se pudieron cargar las apps/)).toBeTruthy();
+      expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+      const guardar = screen.getByText('Guardar') as HTMLButtonElement;
+      expect(guardar.disabled).toBe(true);
+
+      fireEvent.click(guardar);
+      expect(mockFetch.mock.calls.some((c) => c[1]?.method === 'PUT')).toBe(false);
+    });
+  });
 });
