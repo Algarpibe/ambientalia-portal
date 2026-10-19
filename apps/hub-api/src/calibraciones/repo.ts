@@ -731,12 +731,16 @@ export async function listAudit(db: Db, f: { entity?: string; entityId?: string 
     params.push(f.entityId);
     where.push(`entity_id = $${params.length}`);
   }
+  // Newest first (DATA-341): with the 1000-row cap, ascending order kept the
+  // oldest entries and nothing recent was ever listed past that point.
+  // Qualified on purpose: a bare `ORDER BY id` binds to the OUTPUT column
+  // `id::text AS id` and sorts as text ('999' > '1001').
   const { rows } = await db.query(
     `SELECT id::text AS id, actor_id, actor_email, entity, entity_id, action, old_value, new_value, reason,
             at::text AS at
        FROM portal.cal_audit_log
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY id
+      ORDER BY cal_audit_log.id DESC
       LIMIT 1000`,
     params,
   );

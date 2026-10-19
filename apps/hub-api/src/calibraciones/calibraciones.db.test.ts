@@ -166,10 +166,24 @@ describe('audit log is append-only', () => {
     const e = await equipment('6103-S');
     await service.updateEquipment(db, tech, e.id, { notes: 'Revisado' });
     const log = await service.auditLog(db, 'equipment', e.id);
-    expect(log.map((r) => r.action)).toEqual(['CREATE', 'UPDATE']);
-    expect(log[1].oldValue).toMatchObject({ notes: null });
-    expect(log[1].newValue).toMatchObject({ notes: 'Revisado' });
-    expect(log[1].actorEmail).toBe(tech.email);
+    // Newest first (DATA-341).
+    expect(log.map((r) => r.action)).toEqual(['UPDATE', 'CREATE']);
+    expect(log[0].oldValue).toMatchObject({ notes: null });
+    expect(log[0].newValue).toMatchObject({ notes: 'Revisado' });
+    expect(log[0].actorEmail).toBe(tech.email);
+  });
+
+  // DATA-341 — the listing is capped at 1000 rows. Ascending, the cap kept the
+  // OLDEST ones: past 1000 entries, nothing recent was ever shown.
+  it('lists the most recent entries first, so the cap never hides new ones', async () => {
+    await db.query(
+      `INSERT INTO portal.cal_audit_log (actor_email, entity, entity_id, action)
+       SELECT 'tech@cal.test', 'equipment', 'e-' || g, 'CREATE' FROM generate_series(1, 1001) g`,
+    );
+    const log = await service.auditLog(db);
+    expect(log).toHaveLength(1000);
+    expect(log[0].entityId).toBe('e-1001');
+    expect(log[999].entityId).toBe('e-2');
   });
 });
 
@@ -225,7 +239,7 @@ describe('calculate → approve (TAD T3)', () => {
     expect(detail.ancestors.map((a) => a.internalCode)).toEqual(['SRP-CALAIRE']);
     expect(detail.history.map((h) => h.id)).toEqual([approved.id]);
     const log = await service.auditLog(db, 'verification', approved.id);
-    expect(log.map((r) => r.action)).toEqual(['CREATE', 'CALCULATE', 'APPROVE']);
+    expect(log.map((r) => r.action)).toEqual(['APPROVE', 'CALCULATE', 'CREATE']);
   });
 
   it('TECNICO cannot approve; only CALCULATED can be approved', async () => {
