@@ -36,7 +36,14 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
           return;
         }
         const data = await res.json();
-        if (active) setSelected(new Set(Array.isArray(data.apps) ? data.apps : []));
+        // Una respuesta sin la lista es otra forma de no saber qué tenía: no
+        // se convierte en «ninguna app».
+        if (!Array.isArray(data?.apps)) {
+          notify('No se pudieron cargar las apps del usuario.', 'error');
+          if (active) setLoadError(true);
+          return;
+        }
+        if (active) setSelected(new Set(data.apps));
       } catch {
         notify('No se pudo conectar con el servidor.', 'error');
         if (active) setLoadError(true);

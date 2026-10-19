@@ -65,6 +65,7 @@ describe('AppAssignModal', () => {
     it.each([
       ['el servidor responde con error', () => mockFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) })],
       ['no hay conexión', () => mockFetch.mockRejectedValueOnce(new Error('Failed to fetch'))],
+      ['la respuesta no trae la lista de apps', () => mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) })],
     ])('%s: no deja guardar ni muestra una selección vacía', async (_caso, fallar) => {
       fallar();
       render(<AppAssignModal user={user} onClose={() => {}} onSaved={() => {}} />);
