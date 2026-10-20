@@ -53,6 +53,31 @@ describe('AdminUsers', () => {
     expect((screen.getByText('Siguiente') as HTMLButtonElement).disabled).toBe(false);
   });
 
+  // FE-414: con la carga fallida la lista queda vacía; la tabla no puede decir
+  // «No hay usuarios.» ni la cabecera «0 usuarios registrados».
+  it('si la carga falla no presenta la lista vacía como ausencia de usuarios', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    renderAdmin();
+    expect(await screen.findByText('No se pudo cargar la lista de usuarios.')).toBeTruthy();
+    expect(screen.queryByText('No hay usuarios.')).toBeNull();
+    expect(screen.queryByText(/0 usuarios registrados/)).toBeNull();
+  });
+
+  it('si la carga falla por red tampoco presenta la lista vacía', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'));
+    renderAdmin();
+    expect(await screen.findByText('No se pudo conectar con el servidor.')).toBeTruthy();
+    expect(screen.queryByText('No hay usuarios.')).toBeNull();
+    expect(screen.queryByText(/0 usuarios registrados/)).toBeNull();
+  });
+
+  it('con la carga correcta y sin usuarios sí muestra la lista vacía', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ users: [], total: 0, page: 1, limit: 50 }) });
+    renderAdmin();
+    expect(await screen.findByText('No hay usuarios.')).toBeTruthy();
+    expect(screen.getByText('0 usuarios registrados en total.')).toBeTruthy();
+  });
+
   it('muestra error si la carga falla', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     renderAdmin();

@@ -58,4 +58,43 @@ describe('FrecuenciaCorreos (Ajustes, solo admin)', () => {
     fireEvent.change(screen.getByLabelText('Frecuencia de Marcela'), { target: { value: 'semanal' } });
     expect((screen.getAllByRole('button', { name: /guardar/i })[0] as HTMLButtonElement).disabled).toBe(true);
   });
+
+  // FE-414: una carga fallida deja la lista vacía; eso no es «no hay usuarios
+  // con la app», y sin la lista real no hay nada que se pueda guardar.
+  describe('cuando la carga falla', () => {
+    const esperarFinCarga = () => waitFor(() => expect(screen.queryByText('Cargando…')).toBeNull());
+
+    it('muestra el error en lugar del mensaje de lista vacía y no deja guardar', async () => {
+      mockFetch.mockRejectedValue(new Error('network down'));
+      render(<FrecuenciaCorreos />);
+      await esperarFinCarga();
+      expect(screen.queryByText(/No hay usuarios activos/)).toBeNull();
+      expect(screen.getByRole('alert').textContent).toMatch(/No se pudo cargar la frecuencia de correos/);
+      expect(screen.queryByRole('button', { name: /guardar/i })).toBeNull();
+      expect(notify).toHaveBeenCalledWith('No se pudo cargar la frecuencia de correos.', 'error');
+    });
+
+    it('trata como fallo una respuesta HTTP de error', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+      render(<FrecuenciaCorreos />);
+      await esperarFinCarga();
+      expect(screen.queryByText(/No hay usuarios activos/)).toBeNull();
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+
+    it('trata como fallo una respuesta sin la lista', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ error: 'x' }) });
+      render(<FrecuenciaCorreos />);
+      await esperarFinCarga();
+      expect(screen.queryByText(/No hay usuarios activos/)).toBeNull();
+      expect(screen.getByRole('alert')).toBeTruthy();
+    });
+
+    it('mantiene el mensaje de lista vacía cuando la carga va bien y no hay nadie', async () => {
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] });
+      render(<FrecuenciaCorreos />);
+      expect(await screen.findByText(/No hay usuarios activos/)).toBeTruthy();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
 });

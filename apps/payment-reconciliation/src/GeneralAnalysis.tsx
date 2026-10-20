@@ -4,6 +4,7 @@ import { analyzeCustomerPayments, getUniqueCustomers, getFilteredDataByDate, get
 import { applyExtraFilters, filterAndSortMetrics } from './metrics/generalAnalysisMetrics';
 import { ArrowUpDown, FileDown, Filter, Eye, X, GripVertical } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
+import { LoadErrorState } from './components/LoadErrorState';
 
 interface GeneralAnalysisProps {
   reconciledData: ReconciledRow[];
@@ -15,6 +16,10 @@ interface GeneralAnalysisProps {
   onCustomEndDateChange?: (date: string) => void;
   onCustomerClick?: (customerName: string) => void;
   loading?: boolean;
+  /** FE-414: mensaje de la carga fallida; con él no se pinta la tabla vacía. */
+  error?: string | null;
+  /** Vuelve a pedir los datos desde el aviso de error. */
+  onRetry?: () => void;
 }
 
 const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
@@ -27,6 +32,8 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
   onCustomEndDateChange,
   onCustomerClick,
   loading = false,
+  error,
+  onRetry,
 }) => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>({
     key: 'customerName',
@@ -469,8 +476,12 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
         </div>
       )}
 
+      {/* FE-414: tras una carga fallida `reconciledData` llega vacío; sin el
+          aviso la tabla decía «Mostrando 0 clientes» como si no hubiera datos. */}
       {loading ? (
         <SkeletonAnalytics cards={9} />
+      ) : error ? (
+        <LoadErrorState message={error} onRetry={onRetry} />
       ) : (
         <>
           <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">

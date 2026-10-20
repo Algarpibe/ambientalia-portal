@@ -10,6 +10,7 @@ import { computeWorseningClients } from './metrics/worseningClients';
 import type { WorseningClientsResult } from './metrics/worseningClients';
 import { SkeletonAnalytics } from './SkeletonLoader';
 import { chartHeight } from './overdueByClientFormat';
+import { LoadErrorState } from './components/LoadErrorState';
 
 const YearlyTrendCharts = lazy(() => import('./YearlyTrendCharts'));
 const OverdueByClientChart = lazy(() => import('./OverdueByClientChart'));
@@ -21,6 +22,10 @@ interface KpisTabProps {
   today?: Date;
   /** Opens the detail of an invoice (the aging drill-down links to it). */
   onInvoiceClick?: (invoiceNumber: string) => void;
+  /** FE-414: mensaje de la carga fallida; con él no se pinta el estado vacío. */
+  error?: string | null;
+  /** Vuelve a pedir los datos desde el aviso de error. */
+  onRetry?: () => void;
 }
 
 // A stale chunk after a deploy (or any render failure) must not take down the whole portal.
@@ -345,7 +350,7 @@ function CalculationNotes() {
   );
 }
 
-export default function KpisTab({ reconciledData, loading = false, today, onInvoiceClick }: KpisTabProps) {
+export default function KpisTab({ reconciledData, loading = false, today, onInvoiceClick, error, onRetry }: KpisTabProps) {
   const [selectedBucket, setSelectedBucket] = useState<AgingKey | null>(null);
   const rows = useMemo(
     () => computeYearlyTrend(reconciledData, today ?? new Date()),
@@ -375,6 +380,9 @@ export default function KpisTab({ reconciledData, loading = false, today, onInvo
   );
 
   if (loading) return <SkeletonAnalytics cards={3} />;
+  // FE-414: tras una carga fallida `reconciledData` llega vacío y, sin esto,
+  // caía en «No hay facturas vencidas», que afirma algo que no se sabe.
+  if (error) return <LoadErrorState message={error} onRetry={onRetry} />;
 
   const hasAging = aging.buckets.some((b) => b.invoiceCount > 0) || aging.otherCurrencyInvoiceCount > 0;
   const emptyTrend = (

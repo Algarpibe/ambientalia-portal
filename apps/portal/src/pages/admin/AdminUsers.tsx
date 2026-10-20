@@ -116,6 +116,12 @@ export default function AdminUsers() {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // FE-414: si la carga falla sin haber traído nunca usuarios, `users` y `total`
+  // siguen en su valor inicial y la tarjeta decía «0 usuarios registrados» y
+  // «No hay usuarios.». El banner de error ya explica el fallo, así que en ese
+  // caso no se pintan ni el recuento ni la tabla. Si ya había una lista cargada,
+  // se conserva junto al banner como hasta ahora.
+  const loadFailed = error !== '' && users.length === 0;
 
   return (
     <div className="flex-grow bg-[#F7F8FA] p-8">
@@ -142,22 +148,26 @@ export default function AdminUsers() {
               <ShieldCheck className="w-5 h-5 text-blue-500" />
               <h2 className="text-lg font-semibold text-gray-900">Lista de Usuarios</h2>
             </div>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {total} usuario{total === 1 ? '' : 's'} registrado{total === 1 ? '' : 's'} en total.
-            </p>
+            {!loadFailed && (
+              <p className="text-sm text-gray-500 mt-0.5">
+                {total} usuario{total === 1 ? '' : 's'} registrado{total === 1 ? '' : 's'} en total.
+              </p>
+            )}
           </div>
 
-          <UserTable
-            users={users}
-            loading={loading}
-            currentUserId={user_id}
-            onApprove={handleApprove}
-            onDeactivate={handleDeactivate}
-            onReactivate={handleReactivate}
-            onChangeRole={handleChangeRole}
-            onDelete={handleDelete}
-            onAssignApps={setAppsUser}
-          />
+          {!loadFailed && (
+            <UserTable
+              users={users}
+              loading={loading}
+              currentUserId={user_id}
+              onApprove={handleApprove}
+              onDeactivate={handleDeactivate}
+              onReactivate={handleReactivate}
+              onChangeRole={handleChangeRole}
+              onDelete={handleDelete}
+              onAssignApps={setAppsUser}
+            />
+          )}
         </div>
 
         {appsUser && (
