@@ -618,6 +618,12 @@ export function errorDeSolape(choque: repo.Solape): AusenciaError {
  * `PATCH` nació copiando media, el tipo sin el estado— y porque los candados no
  * lo habrían visto: cada puerta prueba la suya, así que cambiar la regla en un
  * solo sitio deja verdes los tests de las otras.
+ *
+ * ⚠️ `db` tiene que ser el `tx` de una transacción que ya tiene el candado del
+ * empleado (DATA-336): por el pool, la comprobación puede mirar mientras otra
+ * petición de la misma persona ya miró y está a punto de escribir. El alta la
+ * llama dentro de `repo.conCandadoDelEmpleado`; la propuesta, dentro de
+ * `repo.crearModificacion`.
  */
 async function exigirSinSolape(
   db: repo.Consultable,
@@ -1313,7 +1319,7 @@ export async function pedirModificacion(
   // acortar es la única salida que le queda a una ausencia ya empezada, que no
   // se puede anular (ver `noHaEmpezado`).
   //
-  // Las dos mitades del `if` no comprueban lo mismo por partida doble:
+  // Las dos mitades de la condición no comprueban lo mismo por partida doble:
   //  - `datos.fechaInicio && datos.fechaFin` la pide EL COMPILADOR:
   //    `NuevaModificacion` (types.ts) es una interface plana, no una unión
   //    discriminada, así que `clase === 'fechas'` no estrecha `string | null` a
@@ -1325,17 +1331,27 @@ export async function pedirModificacion(
   //    regla. Lo que NO hace: obligar a nadie a volver aquí. Si mañana
   //    `CLASES_MODIFICACION` gana una tercera clase con fechas, quedará fuera
   //    del candado en silencio mientras nadie toque esta línea.
-  if (datos.clase === 'fechas' && datos.fechaInicio && datos.fechaFin) {
-    await exigirSinSolape(
-      db,
-      empleado.id,
-      solicitud.tipo,
-      solicitud.estado,
-      datos.fechaInicio,
-      datos.fechaFin,
-      solicitud.id,
-    );
-  }
+  //
+  // DATA-336 — la comprobación NO corre aquí sino dentro de la transacción de
+  // `repo.crearModificacion`, bajo el candado del empleado y con su `tx`: por el
+  // pool miraba el destino mientras un alta de la misma persona ya lo había
+  // comprobado y estaba a punto de confirmar, y la propuesta nacía apuntando a
+  // un día ocupado. Se prepara aquí porque la REGLA sigue siendo del servicio.
+  const fechaInicioNueva = datos.fechaInicio;
+  const fechaFinNueva = datos.fechaFin;
+  const comprobarSolape =
+    datos.clase === 'fechas' && fechaInicioNueva && fechaFinNueva
+      ? (tx: repo.PoolClient) =>
+          exigirSinSolape(
+            tx,
+            empleado.id,
+            solicitud.tipo,
+            solicitud.estado,
+            fechaInicioNueva,
+            fechaFinNueva,
+            solicitud.id,
+          )
+      : undefined;
 
   const decisor = decisorDeModificacion(solicitud);
   // `estadoAdmiteModificacion` ya lo ha exigido, pero eso vive treinta líneas
@@ -1359,6 +1375,7 @@ export async function pedirModificacion(
       aprobadorCorreo: decisor,
     },
     construirPayloadModificacion,
+    comprobarSolape,
   );
 
   if (!resultado.ok) {
