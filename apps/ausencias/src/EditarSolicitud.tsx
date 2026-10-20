@@ -73,6 +73,9 @@ export default function EditarSolicitud({ solicitud, empleados, festivos, onGuar
           fechaFin,
           dias: diasNum,
           estado,
+          // DATA-337 — lo que había al abrir el formulario, no lo elegido en él:
+          // si alguien la decidió entre medias, hub-api no pisa esa decisión.
+          estadoLeido: solicitud.estado,
           comentarios: comentarios.trim() || null,
           observaciones: observaciones.trim() || null,
         }),

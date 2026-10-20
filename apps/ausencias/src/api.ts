@@ -559,6 +559,16 @@ async function errorDeAusencia(res: Response): Promise<Error> {
   };
   if (cuerpo?.error && DEL_OTORGAMIENTO[cuerpo.error]) return new Error(DEL_OTORGAMIENTO[cuerpo.error]);
 
+  // DATA-337 — alguien firmó, rechazó o anuló la solicitud mientras el admin
+  // tenía abierto el formulario. No se guardó nada: guardar habría deshecho esa
+  // decisión. Lo que toca es volver a abrirla para partir de lo que hay ahora.
+  if (cuerpo?.error === 'solicitud_cambiada') {
+    return new Error(
+      'La solicitud cambió mientras la editabas (alguien la firmó, rechazó o anuló) y no se ha guardado nada. ' +
+        'Cierra el formulario y vuelve a abrirla para ver cómo está ahora.',
+    );
+  }
+
   // Los de la incapacidad. Mapa aparte del de arriba y no una entrada más: son
   // de otro tipo de solicitud, y juntarlos haría que un vistazo al nombre del
   // mapa dijera algo falso sobre la mitad de sus claves.
@@ -1033,6 +1043,11 @@ export interface EdicionSolicitud {
   fechaFin: string;
   dias: number;
   estado: EstadoSolicitud;
+  /**
+   * El estado que tenía la solicitud al abrir el formulario (DATA-337). hub-api
+   * no guarda nada si ya no coincide: alguien la decidió entre medias.
+   */
+  estadoLeido: EstadoSolicitud;
   comentarios: string | null;
   observaciones: string | null;
 }
