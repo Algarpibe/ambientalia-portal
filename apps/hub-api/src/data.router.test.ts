@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
@@ -114,5 +114,46 @@ describe('createDataRouter — autorización por-app (SEC-210/211, PRIV-810)', (
     expect(res.status).toBe(403);
     expect(res.body.nit).toBeUndefined();
     expect(res.body.direccion).toBeUndefined();
+  });
+});
+
+// DATA-333 — `from`/`to` forman la clave de la caché y llegaban sin validar:
+// cada texto distinto era un dataset de conciliación entero guardado aparte. El
+// portal nunca los manda, así que solo los usa quien llama a la API a mano.
+describe('GET /api/reconciliation/data — rango de fechas', () => {
+  const pedir = (query: string) =>
+    request(app())
+      .get(`/api/reconciliation/data${query}`)
+      .set('Authorization', `Bearer ${token(['payment-reconciliation'])}`);
+
+  beforeEach(async () => {
+    (await import('./cache.js')).clearCache();
+    vi.mocked((await import('./reconciliation.js')).getReconciliationData).mockClear();
+  });
+
+  it.each([
+    ['?from=2026-01-01&to=lo-que-sea', 'texto que no es fecha'],
+    ['?from=2026-02-30&to=2026-03-31', 'fecha que no existe'],
+    ['?from=2026-1-1&to=2026-03-31', 'sin ceros a la izquierda'],
+    ['?from=2026-01-01', 'solo una de las dos'],
+    ['?from=2026-03-31&to=2026-01-01', 'desde posterior a hasta'],
+  ])('400 con %s (%s), sin consultar ni cachear nada', async (query) => {
+    const res = await pedir(query);
+    expect(res.status).toBe(400);
+    expect((await import('./reconciliation.js')).getReconciliationData).not.toHaveBeenCalled();
+  });
+
+  it('200 con un rango válido, que llega tal cual a la consulta', async () => {
+    const res = await pedir('?from=2026-01-01&to=2026-03-31');
+    expect(res.status).toBe(200);
+    expect((await import('./reconciliation.js')).getReconciliationData).toHaveBeenCalledWith(
+      expect.anything(),
+      '2026-01-01',
+      '2026-03-31',
+    );
+  });
+
+  it('200 sin rango, que es lo que pide el portal', async () => {
+    expect((await pedir('')).status).toBe(200);
   });
 });

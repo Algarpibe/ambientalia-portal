@@ -29,15 +29,40 @@ function sendError(res: Response, e: unknown, ctx: string): void {
   res.status(500).json({ error: 'internal error' });
 }
 
+/** `AAAA-MM-DD` que además existe en el calendario (rechaza el 30 de febrero). */
+function esFechaIso(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
+/**
+ * El rango de conciliación, validado (DATA-333). `from` y `to` forman la clave
+ * de la caché: sin validar, cada texto distinto guardaba un dataset entero
+ * aparte, y 60 peticiones por minuto bastaban para llenar la memoria. Los dos o
+ * ninguno —la consulta solo filtra con los dos—, y en orden. El portal no los
+ * manda: devuelve `null` (sin rango) en el caso normal.
+ */
+function rangoDeConciliacion(q: Request['query']): { from: string; to: string } | null | 'invalido' {
+  const { from, to } = q;
+  if (from === undefined && to === undefined) return null;
+  if (typeof from !== 'string' || typeof to !== 'string') return 'invalido';
+  if (!esFechaIso(from) || !esFechaIso(to) || from > to) return 'invalido';
+  return { from, to };
+}
+
 /** Monta los endpoints de datos bajo '/api' con guard por-app. */
 export function createDataRouter(db: Pool): Router {
   const router = Router();
 
   router.get('/reconciliation/data', requireAuth, requireApp(APP_PAGOS), async (req: Request, res: Response) => {
     try {
-      const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-      const to = typeof req.query.to === 'string' ? req.query.to : undefined;
-      const data = await cached(`reconciliation:${from || ''}:${to || ''}`, () => getReconciliationData(db, from, to));
+      const rango = rangoDeConciliacion(req.query);
+      if (rango === 'invalido') {
+        return void res.status(400).json({ error: 'from y to deben ser fechas AAAA-MM-DD, las dos y en orden' });
+      }
+      const { from, to } = rango ?? { from: undefined, to: undefined };
+      const data = await cached(`reconciliation:${from ?? ''}:${to ?? ''}`, () => getReconciliationData(db, from, to));
       res.json(data);
     } catch (e) {
       sendError(res, e, 'reconciliation');
