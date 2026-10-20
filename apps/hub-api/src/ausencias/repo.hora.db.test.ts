@@ -6,6 +6,7 @@ import {
   actualizarSolicitud,
   crearModificacion,
   decidirModificacion,
+  solicitudPorId,
   type EdicionSolicitud,
 } from './repo.js';
 import { construirPayloadCorreccion } from './notificaciones.js';
@@ -241,8 +242,13 @@ describe('las horas no sobreviven a un rango de varios dias', () => {
    * Google—: pasarle el real es lo que hace `repo.correccion-admin.db.test.ts`
    * y lo que deja el camino exacto del router.
    */
-  const corregir = (solicitudId: string, campos: EdicionSolicitud) =>
-    actualizarSolicitud(db, solicitudId, campos, ADMIN, construirPayloadCorreccion);
+  // El testigo de DATA-337 se lee de la fila justo antes, como si el admin
+  // acabara de abrir el formulario: estos tests van de las horas, no de él.
+  const corregir = async (solicitudId: string, campos: Omit<EdicionSolicitud, 'estadoLeido'>) => {
+    const vista = await solicitudPorId(db, solicitudId);
+    if (!vista) throw new Error(`no existe la solicitud ${solicitudId}`);
+    return actualizarSolicitud(db, solicitudId, { ...campos, estadoLeido: vista.estado }, ADMIN, construirPayloadCorreccion);
+  };
 
   it('CANDADO: actualizarSolicitud estirando a dos dias NO revienta, y borra las horas', async () => {
     // Sin el CASE, el UPDATE viola el CHECK, la transaccion entera hace ROLLBACK

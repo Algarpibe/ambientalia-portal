@@ -338,6 +338,13 @@ class SolapeAlAplicar extends Error {
   }
 }
 
+/** La señal del testigo de DATA-337. La clase de verdad, en `repo.ts`. */
+class SolicitudCambiada extends Error {
+  constructor() {
+    super('solicitud_cambiada');
+  }
+}
+
 /**
  * Que cuenta como ausencia VIVA. Fuente de verdad: `repo.ocupaAgenda`, que el
  * repo real comparte entre sus cuatro puertas.
@@ -547,6 +554,7 @@ vi.mock('./repo.js', async () => ({
     return MOVIMIENTOS_FALSOS;
   },
   SolapeAlAplicar,
+  SolicitudCambiada,
   ocupaAgenda,
   // `_adminEmail` y `_construirPayload` se aceptan y se IGNORAN a proposito. El
   // repo real los usa para encolar un `correccion_admin` cuando la correccion
@@ -587,6 +595,9 @@ vi.mock('./repo.js', async () => ({
     }
     const s = estado.solicitudes.find((x) => x.id === id);
     if (!s || !estado.plantilla.some((e) => e.id === campos.empleadoId)) return null;
+    // ⚠️ REGLA REIMPLEMENTADA AQUI: el testigo de DATA-337, que en el repo real
+    // va en el WHERE del UPDATE. Lo vigila repo.edicion-testigo.db.test.ts.
+    if (s.estado !== campos.estadoLeido) throw new SolicitudCambiada();
     Object.assign(s, {
       empleadoId: campos.empleadoId,
       tipo: campos.tipo,
@@ -3507,11 +3518,34 @@ describe('edición de solicitudes', () => {
     ...over,
   });
 
-  const editar = (id: string, body: Record<string, unknown>, tok = admin()) =>
-    request(app()).patch(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${tok}`).send(body);
+  // Sin `estadoLeido` en el cuerpo, se pone el estado ACTUAL de la fila: es lo
+  // que hace el portal, que lo manda tal como lo cargó al abrir el formulario.
+  // Los tests de DATA-337 lo ponen a mano —viejo, o `undefined`— y entonces no
+  // se toca: es lo que prueban.
+  const editar = (id: string, body: Record<string, unknown>, tok = admin()) => {
+    // `?? 'pendiente'`: si la fila no existe da igual el valor, pero tiene que
+    // ser válido o el 404 que se prueba saldría 400.
+    const vista = estado.solicitudes.find((x) => x.id === id)?.estado ?? 'pendiente';
+    const cuerpo = 'estadoLeido' in body ? body : { ...body, estadoLeido: vista };
+    return request(app()).patch(`/api/ausencias/solicitudes/${id}`).set('Authorization', `Bearer ${tok}`).send(cuerpo);
+  };
 
   it('solo el admin puede editar', async () => {
     await editar(await crear(), edicion(), token()).expect(403);
+  });
+
+  it('DATA-337: sin el estado que vio el formulario, 400', async () => {
+    const r = await editar(await crear(), edicion({ estadoLeido: undefined })).expect(400);
+    expect(r.body).toMatchObject({ error: 'estado_invalido', field: 'estadoLeido' });
+  });
+
+  it('DATA-337: si la solicitud cambió desde que se abrió el formulario, 409 y no se toca', async () => {
+    const id = await crear();
+    const r = await editar(id, edicion({ estadoLeido: 'aprobada', comentarios: 'pisaría la firma' })).expect(409);
+    expect(r.body).toMatchObject({ error: 'solicitud_cambiada' });
+    const s = estado.solicitudes.find((x) => x.id === id);
+    expect(s?.estado).toBe('pendiente');
+    expect(s?.comentarios).not.toBe('pisaría la firma');
   });
 
   it('corrige tipo, fechas, días y estado de una vez', async () => {
@@ -6194,6 +6228,8 @@ describe('POST /ausencias/modificaciones/:id/decision', () => {
         fechaFin: '2026-07-09',
         dias: 3,
         estado: 'aprobada',
+        // El testigo de DATA-337: `conPropuesta` deja la solicitud `aprobada`.
+        estadoLeido: 'aprobada',
         comentarios: 'Corregido a mano',
         observaciones: null,
       })

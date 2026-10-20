@@ -671,7 +671,14 @@ export function createAusenciasRouter(db: Pool): Router {
       // `service.errorDeSolape`, que es lo que garantiza que este 409 sea el mismo
       // `code`, el mismo `field` y el mismo `detalle` —sin el `id` del choque— que
       // el de las otras tres puertas.
-      const error = e instanceof repo.SolapeAlAplicar ? service.errorDeSolape(e.solape) : e;
+      // DATA-337 — alguien decidió la solicitud desde que el admin abrió el
+      // formulario: 409, y el portal le pide que la vuelva a abrir.
+      const error =
+        e instanceof repo.SolapeAlAplicar
+          ? service.errorDeSolape(e.solape)
+          : e instanceof repo.SolicitudCambiada
+            ? new AusenciaError('solicitud_cambiada', 409, 'estado')
+            : e;
       sendError(res, error, 'ausencias_editar_solicitud');
     }
   });

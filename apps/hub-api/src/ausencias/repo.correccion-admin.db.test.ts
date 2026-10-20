@@ -63,6 +63,8 @@ function edicionDe(s: Solicitud, over: Partial<EdicionSolicitud> = {}): EdicionS
     fechaFin: s.fechaFin,
     dias: s.diasHabiles,
     estado: s.estado,
+    // El testigo de DATA-337: lo que el admin vio, que es la fila tal cual.
+    estadoLeido: s.estado,
     comentarios: s.comentarios,
     observaciones: s.observaciones,
     ...over,
