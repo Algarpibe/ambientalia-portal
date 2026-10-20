@@ -58,7 +58,15 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 export class UserService {
-  constructor(private readonly repo: UserRepository) {}
+  /**
+   * `bcryptCost` existe solo para los tests de propiedades que no van del hash
+   * (TEST-713): el servidor lo construye sin él y usa siempre `BCRYPT_COST`. Que
+   * el valor por defecto siga siendo 12 lo vigila la propiedad 4.3.
+   */
+  constructor(
+    private readonly repo: UserRepository,
+    private readonly bcryptCost: number = BCRYPT_COST,
+  ) {}
 
   /**
    * Registro por autoservicio. Valida, hashea con bcrypt (coste ≥ 12) y crea el
@@ -72,7 +80,7 @@ export class UserService {
       throw new UserError('email_already_registered', 409, 'email');
     }
 
-    const hash = await bcrypt.hash(clean.password, BCRYPT_COST);
+    const hash = await bcrypt.hash(clean.password, this.bcryptCost);
     try {
       return await this.repo.create(clean, hash);
     } catch (err) {
@@ -213,7 +221,7 @@ export class UserService {
     if (String(newPwd ?? '').length < MIN_PASSWORD_LENGTH) {
       throw new UserError('password_too_short', 400, 'newPassword');
     }
-    const hash = await bcrypt.hash(newPwd, BCRYPT_COST);
+    const hash = await bcrypt.hash(newPwd, this.bcryptCost);
     // `updatePassword` incrementa `token_version` en la MISMA sentencia
     // (SEC-220): cambiar la contraseña invalida las sesiones vivas, que es
     // justo lo que espera quien la cambia porque sospecha que se la robaron.
