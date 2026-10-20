@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  HUB_ESPERA_CANDADO_MIGRACION_MS,
   HUB_MAX_CONEXIONES,
   HUB_TIMEOUT_CONEXION_MS,
   HUB_TIMEOUT_CONSULTA_MS,
@@ -40,6 +41,16 @@ describe('el pool de las migraciones', () => {
     try {
       expect(opciones(pool).statement_timeout).toBeFalsy();
       expect(opciones(pool).max).toBe(1);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it('sí corta la espera por un candado (DATA-340): un ALTER bloqueado no cuelga el arranque', async () => {
+    const pool = crearPoolMigraciones(URL_FICTICIA);
+    try {
+      expect(opciones(pool).lock_timeout).toBe(HUB_ESPERA_CANDADO_MIGRACION_MS);
+      expect(HUB_ESPERA_CANDADO_MIGRACION_MS).toBeGreaterThan(0);
     } finally {
       await pool.end();
     }
