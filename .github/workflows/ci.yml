@@ -105,3 +105,61 @@ jobs:
       # quedan informativas hasta migrar; baja el --audit-level cuando se resuelvan.
       - name: npm audit (bloquea en críticas de prod)
         run: npm audit --omit=dev --audit-level=critical
+
+  # INFRA-534 (parte 2) — la imagen de hub-api se construye AQUÍ y no en EasyPanel.
+  # Construyendo allí, EasyPanel pasaba TODAS las variables del servicio como
+  # `--build-arg` y, si el build fallaba, imprimía la línea de `docker buildx
+  # build` con todos los valores (JWT_SECRET, HUB_DB_URL...). Ahora EasyPanel solo
+  # descarga `ghcr.io/algarpibe/ambientalia-hub-api:latest`: sin build allí, no
+  # hay log de build que filtre nada.
+  #
+  # En un PR construye sin publicar: así cada cambio comprueba que la imagen sigue
+  # construyendo antes del merge, y no en el despliegue. En `main` publica, y solo
+  # después de que `build-and-test` pase (`needs`): `latest` no puede apuntar a un
+  # commit con el CI en rojo, que es justo lo que pedía INFRA-531 para hub-api.
+  imagen-hub-api:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Login en GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # El NPM_TOKEN va como build-arg: el Dockerfile ya no lo nombra en ningún RUN
+      # ni lo declara en la etapa final (INFRA-534, parte 1), y GitHub enmascara el
+      # secret en este log. No se exporta caché a ningún registry: las etapas
+      # intermedias sí llevan el ARG en su historia y no deben salir de aquí.
+      #
+      # `provenance` y `sbom` en false A PROPÓSITO: en un repo público la acción
+      # genera por defecto la atestación en modo máximo, que incluye los valores de
+      # los build-args — publicaría el token junto a la imagen.
+      #
+      # La imagen es PRIVADA: lleva dentro el código de @algarpibe/zoho-sync.
+      - name: Construir (y en main, publicar) la imagen
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/hub-api/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          provenance: false
+          sbom: false
+          build-args: |
+            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Algarpibe/ambientalia-portal
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: |
+            ghcr.io/algarpibe/ambientalia-hub-api:latest
+            ghcr.io/algarpibe/ambientalia-hub-api:${{ github.sha }}
