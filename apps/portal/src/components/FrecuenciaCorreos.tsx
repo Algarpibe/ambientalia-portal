@@ -45,6 +45,11 @@ export default function FrecuenciaCorreos() {
   const [borradores, setBorradores] = useState<Destinatario[]>([]);
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState<string | null>(null);
+  // FE-414 — si la carga falla, la lista se queda vacía y se leía como «no hay
+  // usuarios con la app». Con la carga fallida se avisa del error y no se pinta
+  // ninguna fila, así que tampoco queda nada que guardar (mismo criterio que
+  // FE-411 en AppAssignModal).
+  const [errorCarga, setErrorCarga] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -52,11 +57,15 @@ export default function FrecuenciaCorreos() {
         const res = await authFetch(RUTA);
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
-        const lista = Array.isArray(data) ? (data as Destinatario[]) : [];
+        // Una respuesta sin la lista es otra forma de no saber quién la recibe:
+        // no se convierte en «ningún destinatario».
+        if (!Array.isArray(data)) throw new Error('respuesta sin lista');
+        const lista = data as Destinatario[];
         setGuardados(lista);
         setBorradores(lista);
       } catch {
         notify('No se pudo cargar la frecuencia de correos.', 'error');
+        setErrorCarga(true);
       } finally {
         setCargando(false);
       }
@@ -105,6 +114,10 @@ export default function FrecuenciaCorreos() {
 
       {cargando ? (
         <p className="text-sm text-gray-400">Cargando…</p>
+      ) : errorCarga ? (
+        <p role="alert" className="text-sm text-red-600">
+          No se pudo cargar la frecuencia de correos. Recarga la página para volver a intentarlo.
+        </p>
       ) : borradores.length === 0 ? (
         <p className="text-sm text-gray-500">No hay usuarios activos con la app Carga de Pedidos WO asignada.</p>
       ) : (

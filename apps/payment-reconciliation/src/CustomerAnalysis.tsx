@@ -4,6 +4,7 @@ import type { ReconciledRow, CustomerAnalysisResult, DateRangeOption } from './t
 import { performCustomerAnalysis, getUniqueCustomers, parseExcelDate, getDateRangeBounds, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
 import { TrendingUp, TrendingDown, Minus, FileDown, BarChart3, AlertTriangle, CheckCircle2, Activity, Info, X, Filter, Table as TableIcon, AlertCircle } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
+import { LoadErrorState } from './components/LoadErrorState';
 
 interface CustomerAnalysisProps {
     reconciledData: ReconciledRow[];
@@ -16,6 +17,10 @@ interface CustomerAnalysisProps {
     selectedCustomer?: string;
     onCustomerChange?: (customerName: string) => void;
     loading?: boolean;
+    /** FE-414: mensaje de la carga fallida; con él no se pinta el estado vacío. */
+    error?: string | null;
+    /** Vuelve a pedir los datos desde el aviso de error. */
+    onRetry?: () => void;
 }
 
 const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
@@ -28,7 +33,9 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
     onCustomEndDateChange,
     selectedCustomer: selectedCustomerProp,
     onCustomerChange,
-    loading = false
+    loading = false,
+    error,
+    onRetry
 }) => {
     const [selectedCustomerInternal, setSelectedCustomerInternal] = useState<string>('');
     const [showInfoModal, setShowInfoModal] = useState(false);
@@ -416,6 +423,12 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
             </div>
         );
     };
+
+    // FE-414: tras una carga fallida `reconciledData` llega vacío; sin esta
+    // comprobación previa se leía como «No hay datos de conciliación».
+    if (error) {
+        return <LoadErrorState message={error} onRetry={onRetry} />;
+    }
 
     if (reconciledData.length === 0) {
         return (

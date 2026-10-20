@@ -187,6 +187,15 @@ describe('KpisTab', () => {
     expect(help).toHaveTextContent('señal clara');
   });
 
+  // FE-414: con la carga fallida `reconciledData` llega vacío; eso no es «no hay
+  // facturas vencidas», es «no se pudo cargar».
+  it('shows the load error instead of the empty state when loading failed', () => {
+    const message = 'No se pudieron cargar los datos del hub de Zoho. Reintenta.';
+    render(<KpisTab reconciledData={[]} error={message} today={TODAY} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.queryByText(/No hay facturas vencidas/)).not.toBeInTheDocument();
+  });
+
   it('shows no table while loading', () => {
     render(<KpisTab reconciledData={[row()]} loading today={TODAY} />);
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
