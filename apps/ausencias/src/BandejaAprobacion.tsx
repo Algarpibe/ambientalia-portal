@@ -84,8 +84,10 @@ function TarjetaDelSolicitante({
 }
 
 /**
- * Los dos códigos que el endpoint de decisión sabe devolver, dichos a quien
- * DECIDE y no a quien pidió.
+ * Los códigos de los endpoints de decisión —el de una solicitud y el de un
+ * cambio— que llegan crudos, dichos a quien DECIDE y no a quien pidió.
+ * `motivo_demasiado_largo` no está: el texto de `mensajeDeModificacion` es
+ * impersonal y le vale igual al decisor.
  *
  * El mapa de `mensajeDeModificacion` está escrito en segunda persona hacia el
  * solicitante —«Tu jefe ya decidió esa petición», «mientras rellenabas esto»— y
@@ -99,6 +101,10 @@ const MENSAJE_DECISION: Record<string, string> = {
   ya_decidida: 'Esa petición ya estaba decidida. Recarga la página para ver el resultado.',
   solicitud_cambio_de_estado:
     'La solicitud cambió después de pedirse este cambio, así que no se puede aplicar. Pídele que lo retire.',
+  // FE-413 — el 400 de forma de los dos endpoints. La bandeja siempre manda un
+  // booleano, así que solo saldría con un bundle desfasado; sin entrada aquí
+  // atravesaría `mensajeDeModificacion` y se pintaría el código crudo.
+  aprueba_requerido: 'No se pudo registrar la decisión. Recarga la página e inténtalo de nuevo.',
 };
 
 interface Props {
@@ -151,7 +157,14 @@ export default function BandejaAprobacion({
     } catch (e) {
       // No se toca el estado local: la fila se queda como estaba y el usuario ve
       // el porqué. Un 409 aquí significa que ya la decidió alguien.
-      onError((e as Error).message);
+      //
+      // FE-413 — traducido como en `decidirCambio`: `decidirSolicitud` va por
+      // `mensajeDeError`, que en un 400/409 devuelve el código crudo de hub-api
+      // (`ya_decidida`, `motivo_demasiado_largo`, `aprueba_requerido`). El 403 y el
+      // 404 ya llegan redactados, igual que un fallo de red, y atraviesan los dos
+      // mapas sin tocarse porque ninguno los tiene como clave.
+      const codigo = (e as Error).message;
+      onError(MENSAJE_DECISION[codigo] ?? mensajeDeModificacion(codigo));
     } finally {
       setOcupada(null);
     }
@@ -159,8 +172,8 @@ export default function BandejaAprobacion({
 
   /**
    * Decide una PROPUESTA, no la solicitud. Mismo cuerpo y mismo patrón que
-   * `decidir` —el servidor lo hizo idéntico a propósito—, con dos diferencias:
-   * el estado que toca es el suyo, y el error se traduce.
+   * `decidir` —el servidor lo hizo idéntico a propósito—, con una diferencia:
+   * el estado que toca es el suyo. El error se traduce igual en los dos (FE-413).
    */
   async function decidirCambio(id: string, aprueba: boolean, texto?: string) {
     setOcupadoCambio(id);
@@ -169,7 +182,7 @@ export default function BandejaAprobacion({
       setRechazandoCambio(null);
       setMotivoCambio('');
     } catch (e) {
-      // Traducido, al revés que en `decidir`: los 409 de aquí llegan como código
+      // Traducido, igual que en `decidir`: los 409 de aquí llegan como código
       // crudo (`ya_decidida`, `solicitud_cambio_de_estado`) y esta línea es lo
       // único que va a leer quien pulsó. Primero la redacción para el decisor y,
       // si el código no es de los suyos —un 400 de forma, o uno que este bundle

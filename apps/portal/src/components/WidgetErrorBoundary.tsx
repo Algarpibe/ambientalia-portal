@@ -31,14 +31,16 @@ export class WidgetErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       const { widgetName } = this.props;
-      const message = this.state.error?.message ?? 'Error desconocido';
+      // FE-413 — sin el mensaje del error: en la home lo ve cualquiera, suele venir
+      // en inglés y puede llevar detalles internos. El error real ya va a Sentry
+      // desde `componentDidCatch`.
       return (
         <div className="h-full w-full bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col gap-2 overflow-hidden">
           <div className="flex items-center gap-2 text-red-600 font-semibold text-sm">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span className="truncate">{widgetName ?? 'Widget'}</span>
           </div>
-          <p className="text-xs text-red-500 leading-snug">Error al renderizar: {message}</p>
+          <p className="text-xs text-red-500 leading-snug">No se pudo mostrar este widget. Recarga la página para intentarlo de nuevo.</p>
         </div>
       );
     }

@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Suspense, Component, useState } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
+import { Suspense, useState } from 'react';
 import { lazyConReintento } from './lib/lazyConReintento';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -8,7 +7,7 @@ import RequireAuth from './components/RequireAuth';
 import RequireAdmin from './components/RequireAdmin';
 import AppGuard from './components/AppGuard';
 import NotificationHost from './components/NotificationHost';
-import { captureError } from './sentry';
+import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
@@ -28,42 +27,6 @@ const OvPendientes = lazyConReintento(() => import('../../contabilidad/src/AppOV
 const Ausencias = lazyConReintento(() => import('../../ausencias/src/App'));
 const Calibraciones = lazyConReintento(() => import('../../calibraciones/src/App'));
 const TrazabilidadMantenimientos = lazyConReintento(() => import('../../trazabilidad-mantenimientos/src/App'));
-
-class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("ErrorBoundary caught an error", error, errorInfo);
-    captureError(error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex-grow bg-red-50 p-12 flex items-center justify-center text-center">
-          <div>
-            <h2 className="text-2xl font-bold text-red-700 mb-4">Error al cargar la aplicación</h2>
-            <p className="text-red-600 mb-6 max-w-md mx-auto">{this.state.error?.message}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-6 py-2 bg-red-600 text-white rounded-lg font-semibold"
-            >
-              Reintentar
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 function LoadingFallback() {
   return (
