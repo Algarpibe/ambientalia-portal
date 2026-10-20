@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { hashMatriz, construirCuerpo, computarPendiente } from './email.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { buildWorldOfficeCsv } from './builder.js';
@@ -43,21 +45,23 @@ describe('computarPendiente', () => {
 
   /** Fake db: `filas` son los destinatarios que devuelve destinatariosConEstado (sin
    *  hash_recibido ni frecuencia = usuario nuevo en 'inmediato'). `cortes` captura los
-   *  parámetros de cada sellado de franja. */
+   *  parámetros de cada sellado de franja. `connect()` da un cliente que comparte la
+   *  misma `query`: la transacción y el candado (DATA-339) los prueba email.db.test.ts
+   *  contra Postgres real; aquí BEGIN/COMMIT/advisory lock y las reservas caen al
+   *  `rows: []` del final (nadie tiene reserva vigente). */
   function fakeDb(filas: Record<string, unknown>[]) {
     const cortes: unknown[][] = [];
-    const db = {
-      query: async (sql: string, params: unknown[]) => {
-        if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
-          cortes.push(params);
-          return { rows: [] };
-        }
-        if (sql.includes('wo_sales_email_estado')) return { rows: [] };
-        if (sql.includes('wo_sales_email_sent')) return { rows: filas };
-        if (sql.includes('books.sales_orders')) return { rows: [{ salesorder_number: 'OV-1' }] };
+    const query = async (sql: string, params: unknown[]) => {
+      if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
+        cortes.push(params);
         return { rows: [] };
-      },
+      }
+      if (sql.includes('wo_sales_email_estado')) return { rows: [] };
+      if (sql.includes('wo_sales_email_sent')) return { rows: filas };
+      if (sql.includes('books.sales_orders')) return { rows: [{ salesorder_number: 'OV-1' }] };
+      return { rows: [] };
     };
+    const db = { query, connect: async () => ({ query, release: () => {} }) };
     return Object.assign(db, { cortes }) as any;
   }
 
@@ -140,5 +144,26 @@ describe('construirCuerpo — aviso del archivo consolidado (§9)', () => {
   it('no avisa cuando el archivo lleva una sola orden', () => {
     const cuerpo = construirCuerpo(resumen(1), DEFAULT_CONFIG);
     expect(cuerpo).not.toMatch(/no lo subas/i);
+  });
+});
+
+// DATA-339: la reserva por destinatario. Las migraciones se re-ejecutan en CADA arranque
+// sin tabla de control, y si una falla hub-api no arranca: tiene que ser solo DDL
+// idempotente. El comportamiento lo prueba email.db.test.ts contra Postgres real.
+describe('065_wo_sales_email_reserva.sql', () => {
+  const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
+  const sinComentarios = fuente('../users/migrations/065_wo_sales_email_reserva.sql').replace(/--.*$/gm, '');
+  const sentencias = sinComentarios.split(';').map((s) => s.trim()).filter(Boolean);
+
+  it('solo crea con IF NOT EXISTS y no toca datos en un segundo arranque', () => {
+    expect(sentencias.map((s) => /^CREATE (?:SCHEMA|TABLE) IF NOT EXISTS \S+/.exec(s)?.[0])).toEqual([
+      'CREATE SCHEMA IF NOT EXISTS portal',
+      'CREATE TABLE IF NOT EXISTS portal.wo_sales_email_reserva',
+    ]);
+    expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b/i);
+  });
+
+  it('está apuntada en MIGRATIONS, detrás de la 064, y es la última', () => {
+    expect(fuente('../db.ts')).toMatch(/'064_trazabilidad_contratos\.sql',\s*'065_wo_sales_email_reserva\.sql'\]/);
   });
 });
