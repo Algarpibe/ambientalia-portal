@@ -1326,6 +1326,12 @@ export interface EdicionSolicitud {
   fechaFin: string;
   dias: number;
   estado: Solicitud['estado'];
+  /**
+   * El estado que tenía la fila cuando el admin abrió el formulario: el testigo
+   * de DATA-337. `estado` es lo que quiere dejar; esto, lo que vio. Si ya no
+   * coinciden con la fila, alguien decidió entre medias y no se escribe nada.
+   */
+  estadoLeido: Solicitud['estado'];
   comentarios: string | null;
   observaciones: string | null;
 }
@@ -1468,7 +1474,16 @@ export async function actualizarSolicitud(
               hora_fin          = CASE WHEN $3::varchar = 'permiso' AND $4::date = $5::date
                                        THEN s.hora_fin ELSE NULL END
          FROM portal.empleados e
-        WHERE s.id = $1 AND e.id = $2
+        -- DATA-337 — el testigo del estado que vio el admin. El formulario se
+        -- cargó minutos antes: si el jefe aprobó entre medias, escribir el
+        -- estado del formulario devolvería la solicitud a pendiente con el
+        -- correo «aprobada» ya encolado. En el WHERE y no en un if sobre
+        -- previa, que se leyó sin candado: si la firma confirma justo ahora,
+        -- Postgres espera a que suelte la fila y vuelve a evaluar esto sobre la
+        -- versión ya firmada. Va después del solape y del 404 de previa: no
+        -- cambia lo que contestan esas dos puertas. (Sin comillas invertidas:
+        -- este comentario vive dentro de la plantilla de la consulta.)
+        WHERE s.id = $1 AND e.id = $2 AND s.estado = $10
         RETURNING s.id`,
       [
         id,
@@ -1480,9 +1495,16 @@ export async function actualizarSolicitud(
         campos.estado,
         campos.comentarios,
         campos.observaciones,
+        campos.estadoLeido,
       ],
     );
-    if (rows.length === 0) return null;
+    if (rows.length === 0) {
+      // Cero filas puede ser el testigo o el empleado destino que no existe; solo
+      // lo segundo es un 404.
+      const ahora = await solicitudPorId(client, id);
+      if (ahora !== null && ahora.estado !== campos.estadoLeido) throw new SolicitudCambiada();
+      return null;
+    }
 
     const actual = await solicitudPorId(client, id);
     // Imposible en la practica —acabamos de escribir esa fila por este mismo
@@ -2457,6 +2479,18 @@ class ChoqueConLaSolicitud extends Error {}
 export class SolapeAlAplicar extends Error {
   constructor(public readonly solape: Solape) {
     super('solape');
+  }
+}
+
+/**
+ * La solicitud ya no está en el estado que el admin vio al abrir el formulario
+ * (DATA-337): alguien la firmó, la rechazó o la anuló entre medias. Sale del
+ * módulo por lo mismo que `SolapeAlAplicar`: el `PATCH` no pasa por el servicio y
+ * la traduce a 409 el `catch` de su ruta.
+ */
+export class SolicitudCambiada extends Error {
+  constructor() {
+    super('solicitud_cambiada');
   }
 }
 

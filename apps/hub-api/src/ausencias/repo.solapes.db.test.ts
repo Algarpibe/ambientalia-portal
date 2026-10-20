@@ -396,6 +396,9 @@ describe('actualizarSolicitud frente al solape', () => {
     fechaFin: '2026-07-14',
     dias: 5,
     estado: 'aprobada',
+    // El testigo de DATA-337: `sembrarBase` siembra `aprobada`. Quien edite otra
+    // fila lo sobreescribe, como la rechazada de más abajo.
+    estadoLeido: 'aprobada',
     comentarios: null,
     observaciones: null,
     ...over,
@@ -506,7 +509,7 @@ describe('actualizarSolicitud frente al solape', () => {
     const r = await actualizarSolicitud(
       db,
       rechazada.id,
-      edicion({ estado: 'rechazada', comentarios: 'Arreglando una errata' }),
+      edicion({ estado: 'rechazada', estadoLeido: 'rechazada', comentarios: 'Arreglando una errata' }),
       ADMIN,
       payloadStub,
     );

@@ -101,6 +101,7 @@ export function validarEdicionSolicitud(body: unknown): {
   fechaFin: string;
   dias: number;
   estado: EstadoSolicitud;
+  estadoLeido: EstadoSolicitud;
   comentarios: string | null;
   observaciones: string | null;
 } {
@@ -117,6 +118,15 @@ export function validarEdicionSolicitud(body: unknown): {
   // una solicitud atascada en él.
   const estado = b.estado as EstadoSolicitud;
   if (!(ESTADOS as readonly string[]).includes(estado)) throw new AusenciaError('estado_invalido', 400, 'estado');
+
+  // DATA-337 — el estado que tenía la fila cuando se abrió el formulario. Sin
+  // él no se puede saber si alguien firmó entre medias, y escribir `estado` a
+  // ciegas revertía esa firma. Obligatorio: un cliente que no lo mande es uno
+  // que pisaría decisiones sin enterarse.
+  const estadoLeido = b.estadoLeido as EstadoSolicitud;
+  if (!(ESTADOS as readonly string[]).includes(estadoLeido)) {
+    throw new AusenciaError('estado_invalido', 400, 'estadoLeido');
+  }
 
   const fechaInicio = String(b.fechaInicio ?? '');
   const fechaFin = String(b.fechaFin ?? '');
@@ -138,6 +148,7 @@ export function validarEdicionSolicitud(body: unknown): {
     // Postgres lo redondee por detrás sin que nadie lo vea.
     dias: Math.round(dias * 10) / 10,
     estado,
+    estadoLeido,
     comentarios: texto(b.comentarios),
     observaciones: texto(b.observaciones),
   };
