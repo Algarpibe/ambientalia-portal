@@ -2930,6 +2930,14 @@ export const MAX_INTENTOS = 5;
  * `intentos` se incrementa aquí para poder detectar en la BD un evento que lleva
  * reintentándose sin éxito — y, desde el incidente del 2026-08-24, para dejar de
  * servirlo pasado `MAX_INTENTOS`.
+ *
+ * ⚠️ `FOR UPDATE SKIP LOCKED` en la subconsulta (DATA-338): la reserva por sí
+ * sola no cerraba dos peticiones SOLAPADAS. La subconsulta elige los ids con la
+ * foto del inicio de la sentencia; la segunda petición esperaba el candado de la
+ * primera y, al soltarse, Postgres solo revisaba el WHERE de fuera —`id IN
+ * (...)`, que seguía siendo cierto—, así que las dos marcaban y devolvían las
+ * mismas filas. Ahora la segunda salta las que la primera tiene cogidas y se
+ * lleva otras, o ninguna.
  */
 export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPendiente[]> {
   const { rows } = await db.query(
@@ -2940,7 +2948,8 @@ export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPe
                WHERE enviado_at IS NULL
                  AND intentos < $3
                  AND (servido_at IS NULL OR servido_at < now() - $2::interval)
-               ORDER BY id LIMIT $1)
+               ORDER BY id LIMIT $1
+                 FOR UPDATE SKIP LOCKED)
       RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
     [limite, RESERVA, MAX_INTENTOS],
   );

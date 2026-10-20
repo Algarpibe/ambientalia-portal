@@ -140,3 +140,32 @@ describe('eventosPendientes: el tope de intentos', () => {
     expect((await filaDe(id)).enviado).toBe(true);
   });
 });
+
+describe('eventosPendientes: dos disparadores a la vez (DATA-338)', () => {
+  it('CANDADO: lo que una petición está reservando no se lo lleva la otra', async () => {
+    // La reserva de la 019 no bastaba con dos peticiones solapadas: la subconsulta
+    // elige los ids con la foto del inicio de la sentencia, la segunda espera el
+    // candado de la primera y, al soltarse, Postgres solo revisa el WHERE de
+    // fuera (`id IN (...)`), no la subconsulta. Las dos devolvían la misma fila.
+    //
+    // Determinista: la primera reserva dentro de una transacción que no confirma
+    // hasta que la segunda ya está lanzada, que es la ventana del incidente
+    // (webhook y barrido con 0,7 s de diferencia) pero sin depender del reloj.
+    const id = await sembrarEvento();
+    const primera = await db.connect();
+    try {
+      await primera.query('BEGIN');
+      const deLaPrimera = await eventosPendientes(primera as unknown as Pool);
+      expect(deLaPrimera.map((e) => e.id)).toEqual([id]);
+
+      const segunda = eventosPendientes(db);
+      await new Promise((r) => setTimeout(r, 300));
+      await primera.query('COMMIT');
+
+      expect((await segunda).map((e) => e.id)).not.toContain(id);
+    } finally {
+      primera.release();
+    }
+    expect((await filaDe(id)).intentos).toBe(1);
+  });
+});
