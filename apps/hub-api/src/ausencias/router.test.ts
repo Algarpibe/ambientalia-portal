@@ -1115,6 +1115,11 @@ vi.mock('./repo.js', async () => ({
     _db: unknown,
     datos: Record<string, unknown>,
     construirPayload: (s: unknown, m: unknown, evento: string) => unknown,
+    // DATA-336 — el solape de la propuesta ya no lo mira el servicio por el
+    // pool: se lo pasa al repo para que corra bajo el candado del empleado,
+    // antes del INSERT. El doble tiene que ejecutarlo, o los candados de la
+    // propuesta solapada se quedarían sin nadie que lance el 409.
+    comprobarBajoCandado?: (tx: unknown) => Promise<void>,
   ) => {
     estado.ultimaAlta = datos;
     // El adelanto de otra transacción, si el test lo ha programado: ocurre
@@ -1123,6 +1128,7 @@ vi.mock('./repo.js', async () => ({
       const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
       if (s) s.estado = estado.pisarEstadoAlCrearModificacion;
     }
+    if (comprobarBajoCandado) await comprobarBajoCandado(null);
 
     const s = estado.solicitudes.find((x) => x.id === datos.solicitudId);
     // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el

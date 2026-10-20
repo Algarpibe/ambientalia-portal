@@ -85,9 +85,50 @@ export async function conCandadoDelEmpleado<T>(
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   return withTransaction(db, async (client) => {
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('ausencias:empleado:' || $1::text))`, [empleadoId]);
+    await bloquearEmpleado(client, empleadoId);
     return fn(client);
   });
+}
+
+/**
+ * El candado de DATA-336, dentro de una transacción que ya abrió otro. La llave
+ * es UNA y vive solo aquí: el alta y las tres puertas que mueven fechas
+ * (proponer, firmar y el PATCH de admin) tienen que esperarse entre sí, y eso
+ * solo ocurre si piden exactamente la misma. Se suelta con el COMMIT o el
+ * ROLLBACK de esa transacción.
+ */
+async function bloquearEmpleado(client: PoolClient, empleadoId: string): Promise<void> {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext('ausencias:empleado:' || $1::text))`, [empleadoId]);
+}
+
+/** El empleado al que pertenece hoy la solicitud, o null si no existe. */
+async function duenoDe(client: PoolClient, solicitudId: string): Promise<string | null> {
+  const { rows } = await client.query(`SELECT empleado_id FROM portal.solicitudes_ausencia WHERE id = $1`, [
+    solicitudId,
+  ]);
+  return rows.length === 0 ? null : (rows[0] as { empleado_id: string }).empleado_id;
+}
+
+/**
+ * DATA-336 — el candado del DUEÑO de una solicitud, para las puertas que solo
+ * conocen su id (proponer y firmar un cambio de fechas).
+ *
+ * El dueño se lee ANTES de tener el candado, y eso deja una rendija: un PATCH de
+ * admin que reasigne la solicitud a otra persona puede confirmar mientras se
+ * espera. Por eso se relee después; si cambió, devuelve `false` y quien llama
+ * aborta con su 409 de «la solicitud cambió debajo». Basta con releer una vez
+ * porque el PATCH toma también el candado del dueño de ORIGEN
+ * (`actualizarSolicitud`): con este candado en la mano nadie más puede cambiar
+ * el dueño hasta el COMMIT.
+ *
+ * Devuelve `true` también si la solicitud no existe: no hay nada que bloquear, y
+ * la escritura de detrás ya contesta que no la encuentra.
+ */
+async function bloquearDuenoDe(client: PoolClient, solicitudId: string): Promise<boolean> {
+  const dueno = await duenoDe(client, solicitudId);
+  if (dueno === null) return true;
+  await bloquearEmpleado(client, dueno);
+  return (await duenoDe(client, solicitudId)) === dueno;
 }
 
 // ── Empleados ──────────────────────────────────────────────────────────────
@@ -1380,11 +1421,12 @@ export interface EdicionSolicitud {
  * no puede dejar el correo dicho—, y que la relectura final vaya DESPUÉS del
  * UPDATE por ese mismo `client`: el UPDATE deja la fila bloqueada hasta el
  * COMMIT, así que lo que se devuelve lleva lo que ESTA petición escribió y no lo
- * que otra transacción pudiera colar entre dos consultas sueltas del pool. Lo
- * que **no** da es cerrar la ventana de carrera:
- * `BEGIN` pelado es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE`, así que
- * dos correcciones simultáneas la pasan las dos (el porqué entero, en
- * `solapeDe`).
+ * que otra transacción pudiera colar entre dos consultas sueltas del pool. La
+ * transacción sola NO cierra la ventana de carrera —`BEGIN` pelado es READ
+ * COMMITTED y el `SELECT` del solape no lleva `FOR UPDATE`—: la cierra el
+ * candado del empleado que se toma al entrar (DATA-336), el mismo que el alta y
+ * que las otras dos puertas que mueven fechas. Lo vigila
+ * `cambios-concurrentes.db.test.ts`.
  */
 export async function actualizarSolicitud(
   db: Pool,
@@ -1394,6 +1436,22 @@ export async function actualizarSolicitud(
   construirPayload: (previa: Solicitud, actual: Solicitud, adminEmail: string) => PayloadEvento,
 ): Promise<Solicitud | null> {
   return withTransaction(db, async (client) => {
+    // DATA-336 — el candado del empleado, antes de cualquier lectura que decida.
+    // Sin él, dos correcciones simultáneas (o una corrección y un alta, o una
+    // firma) miraban las dos el destino libre y las dos escribían.
+    //
+    // Es la única puerta con DOS empleados: el destino (`campos.empleadoId`),
+    // cuya agenda se comprueba, y el de origen, porque una reasignación le quita
+    // la fila y `bloquearDuenoDe` cuenta con que nadie cambie el dueño sin su
+    // candado. Se piden ordenados para que dos PATCH cruzados (A→B y B→A) no se
+    // esperen el uno al otro para siempre; el resto de puertas pide uno solo.
+    const origen = await duenoDe(client, id);
+    const llaves = [...new Set([campos.empleadoId, ...(origen === null ? [] : [origen])])].sort();
+    for (const llave of llaves) await bloquearEmpleado(client, llave);
+    // Otro PATCH reasignó la fila mientras se esperaba: el origen que se
+    // bloqueó ya no es el suyo. Es el mismo 409 que el testigo de DATA-337.
+    if (origen !== null && (await duenoDe(client, id)) !== origen) throw new SolicitudCambiada();
+
     // Solo hay algo que comprobar si la fila que va a quedar OCUPA agenda. Las
     // dos mitades importan y la del estado se pasó por alto la primera vez: sin
     // ella, corregirle una errata a una RECHAZADA que tuviera una ausencia viva
@@ -2346,9 +2404,24 @@ export async function crearModificacion(
     modificacion: Modificacion,
     evento: typeof EVENTO_ALTA_MODIFICACION,
   ) => PayloadEvento,
+  /**
+   * Las comprobaciones del servicio que tienen que correr BAJO el candado y por
+   * esta misma conexión: hoy, el solape de las fechas propuestas
+   * (`exigirSinSolape`). Lo que lance sale tal cual, con ROLLBACK. Opcional
+   * porque los tests de repo siembran propuestas sin pasar por el servicio.
+   */
+  comprobarBajoCandado?: (client: PoolClient) => Promise<void>,
 ): Promise<ResultadoAlta> {
   try {
     return await withTransaction(db, async (client): Promise<ResultadoAlta> => {
+      // DATA-336 — el candado del dueño, antes de la comprobación del solape.
+      // Sin él, el servicio miraba el destino por el pool mientras un alta de
+      // la misma persona ya lo había comprobado y estaba a punto de confirmar:
+      // la propuesta nacía apuntando a un día que ya estaba ocupado. La firma lo
+      // habría cazado después, pero el aviso que da esta puerta llegaba tarde.
+      if (!(await bloquearDuenoDe(client, datos.solicitudId))) return { ok: false, razon: 'estado' };
+      if (comprobarBajoCandado) await comprobarBajoCandado(client);
+
       const { rows } = await client.query(
         `INSERT INTO portal.solicitud_modificaciones
            (solicitud_id, clase, estado_previo, fecha_inicio_previa, fecha_fin_previa,
@@ -2593,9 +2666,9 @@ async function aplicarALaSolicitud(client: PoolClient, m: Modificacion): Promise
  * que le falta a `Modificacion`; ve exactamente lo mismo que vería antes, porque
  * `solapeDe` excluye a esta solicitud por su id. Si choca, **LANZA** —por lo
  * mismo que el paso 2, ver abajo— y el ROLLBACK se lleva por delante los pasos
- * 1 y 2, con lo que el outbox se queda sin aviso. Lo que **no** hace es cerrar
- * la carrera: esto es READ COMMITTED y el `SELECT` no lleva `FOR UPDATE` (el
- * porqué entero, en `solapeDe`).
+ * 1 y 2, con lo que el outbox se queda sin aviso. La carrera —esto es READ
+ * COMMITTED y el `SELECT` no lleva `FOR UPDATE`— la cierra el candado del
+ * empleado que se toma al entrar (DATA-336, ver `bloquearDuenoDe`).
  *
  * ⚠️ Si el paso 2 no encuentra fila, esto **LANZA**, y ese lanzamiento es lo más
  * importante de la función. El ROLLBACK deshace también el paso 1, así que la
@@ -2620,6 +2693,21 @@ export async function decidirModificacion(
 ): Promise<ResultadoDecisionModificacion> {
   try {
     return await withTransaction(db, async (client): Promise<ResultadoDecisionModificacion> => {
+      // DATA-336 — el candado del dueño de la solicitud, lo primero. Sin él, dos
+      // firmas simultáneas que llevaban dos solicitudes de la misma persona al
+      // mismo día comprobaban el solape las dos antes de que ninguna confirmara,
+      // y las dos se aplicaban. `solicitud_id` no cambia nunca en una propuesta,
+      // así que leerlo sin candado es seguro; el dueño, no (ver
+      // `bloquearDuenoDe`), y si cambió mientras se esperaba la solicitud se ha
+      // movido debajo: el mismo 409 que el testigo triple.
+      const { rows: propia } = await client.query(
+        `SELECT solicitud_id FROM portal.solicitud_modificaciones WHERE id = $1`,
+        [id],
+      );
+      if (propia.length > 0 && !(await bloquearDuenoDe(client, (propia[0] as { solicitud_id: string }).solicitud_id))) {
+        throw new ChoqueConLaSolicitud();
+      }
+
       const { rows } = await client.query(
         `UPDATE portal.solicitud_modificaciones m
             SET estado = $2, decidida_at = now(), aprobador_user_id = $3, motivo_rechazo = $4
@@ -3288,10 +3376,14 @@ export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): b
  * `ROLLBACK`. Lo que **no** da es un snapshot compartido: `BEGIN` pelado es
  * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera
  * tampoco la cierra esta función —el `SELECT` no lleva `FOR UPDATE`—: dos
- * llamadas simultáneas pasan las dos. Para el ALTA la cierra quien la llama,
- * `conCandadoDelEmpleado` (DATA-336), que serializa por empleado. Las otras
- * puertas que la usan (proponer y firmar un cambio de fechas, el `PATCH` de
- * admin) siguen sin ese candado. Lo que se descartó es cerrarlo en la propia
+ * llamadas simultáneas pasan las dos. La cierra quien la llama, con el candado
+ * del empleado de DATA-336 tomado ANTES de llamarla y por la misma conexión: el
+ * alta (`conCandadoDelEmpleado`), proponer y firmar un cambio de fechas
+ * (`bloquearDuenoDe` en `crearModificacion` y `decidirModificacion`) y el
+ * `PATCH` de admin (`actualizarSolicitud`). Las cuatro piden la MISMA llave, así
+ * que también se esperan entre puertas distintas. Una llamada nueva que use esta
+ * función para decidir una escritura sin ese candado vuelve a abrir la carrera;
+ * lo vigila `cambios-concurrentes.db.test.ts`. Lo que se descartó es cerrarlo en la propia
  * tabla, con un índice único parcial como el que la 024 pone a las
  * propuestas: la restricción falla al
  * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
