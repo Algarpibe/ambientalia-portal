@@ -40,14 +40,37 @@ export function crearPoolHub(url: string, topes: { consultaMs?: number } = {}): 
 }
 
 /**
+ * DATA-340 — cuánto espera una migración por un candado antes de rendirse
+ * (`lock_timeout`). Las migraciones se re-ejecutan en cada arranque, y
+ * `ALTER TABLE … ADD COLUMN IF NOT EXISTS` pide ACCESS EXCLUSIVE ANTES de mirar
+ * si la columna ya existe. Si otra transacción tiene la tabla abierta (el
+ * contenedor viejo atendiendo una petición en un despliegue solapado, un
+ * `pg_dump`), el ALTER espera; y en Postgres lo que llega DETRÁS a esa tabla se
+ * pone en cola tras él, así que esperar sin límite colgaba el arranque y además
+ * dejaba sin login al contenedor que seguía en pie.
+ *
+ * Rendirse es lo barato: `initDb` falla, el proceso termina y EasyPanel lo
+ * reinicia, que vuelve a intentarlo con la tabla seguramente ya libre. Cinco
+ * segundos sobran: sin contención, el candado se concede al instante.
+ */
+export const HUB_ESPERA_CANDADO_MIGRACION_MS = 5_000;
+
+/**
  * El pool de un solo uso del arranque, para migraciones y seed. SIN
  * `statement_timeout`, a propósito: si una migración legítima tardara más que
  * el tope, hub-api no arrancaría nunca y se llevaría todas las apps por
- * delante, reintento tras reintento. Una sola conexión: las migraciones van en
- * serie.
+ * delante, reintento tras reintento. Lo que SÍ tiene tope es la espera por un
+ * candado (DATA-340, ver arriba): eso no es trabajo lento, es estar bloqueando a
+ * otros. Una sola conexión: las migraciones van en serie. `esperaCandadoMs` es
+ * para las pruebas, que no esperan cinco segundos.
  */
-export function crearPoolMigraciones(url: string): Pool {
-  const p = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: HUB_TIMEOUT_CONEXION_MS });
+export function crearPoolMigraciones(url: string, topes: { esperaCandadoMs?: number } = {}): Pool {
+  const p = new Pool({
+    connectionString: url,
+    max: 1,
+    connectionTimeoutMillis: HUB_TIMEOUT_CONEXION_MS,
+    lock_timeout: topes.esperaCandadoMs ?? HUB_ESPERA_CANDADO_MIGRACION_MS,
+  });
   // Mismo motivo que el listener de getHubPool: sin él, el 'error' de un
   // cliente inactivo tumba el proceso en pleno arranque.
   p.on('error', (err: Error) => console.error('hub migrations pool error', err));
