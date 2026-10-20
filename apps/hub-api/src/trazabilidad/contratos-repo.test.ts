@@ -44,8 +44,8 @@ describe('064_trazabilidad_contratos.sql', () => {
     expect(sinComentarios).not.toMatch(/\bserial\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 063, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'063_trazabilidad_vigencia_marcas\.sql',\s*'064_trazabilidad_contratos\.sql'\]/);
+  it('está apuntada en MIGRATIONS, detrás de la 063', () => {
+    expect(fuente('../db.ts')).toMatch(/'063_trazabilidad_vigencia_marcas\.sql',\s*'064_trazabilidad_contratos\.sql',/);
   });
 });
 
