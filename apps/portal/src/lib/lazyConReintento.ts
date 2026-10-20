@@ -51,6 +51,28 @@ export function importarConReintento<T>(factory: () => Promise<T>, opts: Opcione
   });
 }
 
+/**
+ * FE-413 — si, pese al reintento y a la recarga de arriba, el import sigue fallando,
+ * el error llega al ErrorBoundary del portal. Esto lo reconoce para que la pantalla
+ * diga «recarga la página» en vez de enseñar el texto del navegador.
+ *
+ * Por el mensaje porque no hay otra señal: Chrome, Firefox y Safari lanzan un
+ * `TypeError` genérico, cada uno con su redacción. `ChunkLoadError` es el `name` que
+ * usan los empaquetadores tipo webpack; Vite no lo emite, pero cuesta una comparación
+ * y deja la pantalla correcta si una dependencia trae su propio cargador.
+ */
+const MENSAJES_DE_IMPORT_FALLIDO = [
+  /Failed to fetch dynamically imported module/i, // Chrome / Edge
+  /error loading dynamically imported module/i, // Firefox
+  /Importing a module script failed/i, // Safari
+];
+
+export function esFalloDeCargaDeModulo(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'ChunkLoadError') return true;
+  return MENSAJES_DE_IMPORT_FALLIDO.some((patron) => patron.test(error.message));
+}
+
 /** lazy() con auto-reintento y recarga ante un import dinámico fallido. Misma firma que
  *  el lazy de React (ComponentType<any>) para aceptar exactamente lo mismo que él. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -6,6 +6,13 @@ import '../../payment-reconciliation/src/App.css'
 import App from './App.tsx'
 import { API_BASE, clearToken } from './auth'
 import { instalarInterceptor401 } from './lib/interceptor401'
+import { instalarTraduccionDeErroresDeRed } from './lib/erroresDeRed'
+
+// FE-413 — un fallo de red llega a las pantallas en español y no con el texto
+// del navegador. Sin condición: vale para cualquier servidor, no solo hub-api.
+// Se instala ANTES que el de FE-412, así que queda por debajo de él: el 401
+// sigue viéndose igual y el rechazo de red sube ya traducido.
+instalarTraduccionDeErroresDeRed()
 
 // FE-412 — un 401 de hub-api en CUALQUIER app saca del portal. Antes de pintar
 // nada, para que ninguna petición se escape sin pasar por él. Recarga entera y
