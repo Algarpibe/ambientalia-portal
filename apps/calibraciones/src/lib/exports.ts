@@ -10,6 +10,7 @@
  * as the point import template (D-029). The per-verification points CSV starts
  * with the template columns, so it can be imported again as-is.
  */
+import { escaparCeldaCsv } from '@suite/format';
 import type { EquipmentWithValidity, ExpirationItem, VerificationDetail, VerificationListItem } from '../types';
 import { CSV_TEMPLATE_HEADER } from './csv';
 import { APPLICATION_LABEL, BUCKET, EQUIPMENT_TYPE_LABEL, KIND_LABEL, RESULT, ROUTE_LABEL, STATUS } from './domain';
@@ -34,8 +35,13 @@ export const FMT = { slope: '0.00000', intercept: '0.000', ppb: '0.00', pct: '0.
 function csvCell(c: Cell): string {
   if (c === null || c === undefined) return '';
   if (typeof c === 'boolean') return c ? 'Sí' : 'No';
-  const s = typeof c === 'number' ? formatInputNumber(c) : c;
-  return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // Numbers go out as they are (comma decimal): a formatted number has no `;`
+  // or quotes to escape, and must NOT go through the formula guard below, or a
+  // negative intercept would become text.
+  if (typeof c === 'number') return formatInputNumber(c);
+  // Text typed by users (SEC-232): the shared escaper neutralizes a leading
+  // = + - @ and applies RFC 4180 quoting.
+  return escaparCeldaCsv(c);
 }
 
 export function toCsv(header: readonly string[], rows: readonly Cell[][]): string {

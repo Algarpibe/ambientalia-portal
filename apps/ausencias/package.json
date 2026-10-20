@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
     "@suite/auth-client": "*",
+    "@suite/format": "*",
     "@suite/http": "*",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",

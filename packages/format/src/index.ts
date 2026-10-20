@@ -31,3 +31,33 @@ export function formatCompactUSD(n: number): string {
 export function formatPct(fraccion: number): string {
   return `${(safeNumber(fraccion) * 100).toFixed(1)}%`;
 }
+
+/** Lo que Excel o LibreOffice ejecutan como fórmula si abre la celda. */
+const INICIO_DE_FORMULA = /^[=+\-@\t\r]/;
+
+/**
+ * Una celda lista para un CSV que alguien abrirá en Excel (AI-913).
+ *
+ * Cierra la inyección de fórmulas (SEC-231/232): un TEXTO que empieza por
+ * `= + - @`, tabulador o retorno de carro se prefija con una comilla simple,
+ * que Excel muestra como texto literal en vez de ejecutarlo. Antes había tres
+ * escapadores escritos por separado y ninguno lo hacía.
+ *
+ * Solo los textos: un `number` sale tal cual, porque un intercepto de -0,0012
+ * es un dato y con la comilla delante Excel lo leería como texto. Quien ya
+ * convirtió el número a cadena (para fijar decimales, por ejemplo) tiene que
+ * pasar el número y no la cadena, o el `-` se neutralizará.
+ *
+ * Después, entrecomillado RFC 4180 si el texto lleva comillas, el separador o
+ * saltos de línea.
+ *
+ * ⚠️ NO sirve para el fichero de World Office (SEC-233): ese no lo abre una
+ * persona sino el importador de WO, y la comilla acabaría dentro de los datos.
+ */
+export function escaparCeldaCsv(valor: string | number | null | undefined, separador = ';'): string {
+  if (valor === null || valor === undefined) return '';
+  if (typeof valor === 'number') return String(valor);
+  const texto = INICIO_DE_FORMULA.test(valor) ? `'${valor}` : valor;
+  const necesitaComillas = texto.includes('"') || texto.includes(separador) || /[\r\n]/.test(texto);
+  return necesitaComillas ? `"${texto.replace(/"/g, '""')}"` : texto;
+}

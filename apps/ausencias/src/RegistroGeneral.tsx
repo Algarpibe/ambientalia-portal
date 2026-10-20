@@ -26,6 +26,7 @@ import {
 } from './dominio';
 import EditarSolicitud from './EditarSolicitud';
 import EditarModificacion from './EditarModificacion';
+import { lineasDelCsv } from './registroCsv';
 
 // El registro general: lo que antes había que ir a mirar a la hoja. Cada fila ya
 // no es una solicitud, sino un MOVIMIENTO —o una solicitud, o una modificación
@@ -190,12 +191,6 @@ interface Props {
   puedeExportar: boolean;
 }
 
-/** Escapa una celda para CSV: comillas dobles y separador dentro del texto. */
-function celdaCsv(v: string | number | null): string {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
 /**
  * Los días de un grupo de filas.
  *
@@ -220,56 +215,15 @@ function contarPorPersona(filas: MovimientoDeSolicitud[]): [string, number][] {
 }
 
 /**
- * El CSV que sustituye al Excel de nómina.
- *
- * ⚠️ Solo entran SOLICITUDES DE AUSENCIA, y el tipo del parámetro es lo que lo
- * sostiene. La regla ya existía para los otorgamientos, y las modificaciones caen
- * bajo exactamente la misma: la columna «Días» significa días fuera en todas las
- * columnas que tiene el fichero, y **no hay ninguna que diga el signo ni que diga
- * que una fila es una anulación**. Una anulación ahí dentro se leería como unos
- * días de ausencia MÁS cuando es justo lo contrario, y un cambio de fechas
- * contaría los mismos días dos veces. Es un error que se descubre en un recibo.
- *
- * Todo eso se sigue viendo en la tabla, que sí marca la clase con un chip y los
- * otorgamientos con un `+`. Quien necesite el detalle lo tiene ahí.
+ * Descarga el CSV que sustituye al Excel de nómina. Qué entra y cómo se escapa
+ * cada celda, en `lineasDelCsv` (registroCsv.ts).
  *
  * El nombre del fichero sigue diciendo `solicitudes_ausencia` porque eso es
  * exactamente lo que lleva dentro, aunque la pantalla de la que sale ya enseñe
  * más cosas.
  */
 function exportarCsv(filas: MovimientoDeSolicitud[]) {
-  const cab = ['Nombre y Apellidos', 'Tipo', 'Fecha Inicio', 'Fecha Fin', 'Días', 'Estado', 'Comentarios', 'Observaciones'];
-  const lineas = [
-    cab.join(';'),
-    ...filas.map((s) =>
-      [
-        s.empleadoNombre,
-        ETIQUETA_TIPO[s.tipo],
-        s.fechaInicio,
-        s.fechaFin,
-        s.diasHabiles,
-        // `chipDeSolicitud` y NO `chipDe(s.estado)`: una anulada saldría rotulada
-        // «Rechazada» —quien lo lea entenderá que el jefe le negó unos días que en
-        // realidad devolvió la propia persona—. Se exporta la MISMA etiqueta que
-        // se ve en pantalla, que es lo que permite cotejar fichero y tabla.
-        //
-        // Es además la SEGUNDA cerradura del candado de arriba, y sale gratis:
-        // `anuladaAt` vive solo en la rama `solicitud` de la unión, así que esta
-        // línea tampoco compilaría si alguien ensanchara el parámetro a
-        // `Movimiento[]` para «exportarlo todo».
-        chipDeSolicitud(s).label,
-        s.motivo ?? '',
-        // Última columna, en la misma posición que tenía antes de que el
-        // registro pasara a ser de movimientos: `observaciones` vive solo en
-        // la rama `solicitud` de la unión, así que esta línea es la TERCERA
-        // cerradura del candado de más arriba y sale gratis por la misma
-        // razón que `anuladaAt`.
-        s.observaciones ?? '',
-      ]
-        .map(celdaCsv)
-        .join(';'),
-    ),
-  ];
+  const lineas = lineasDelCsv(filas);
   // BOM para que Excel abra las tildes bien en Windows sin preguntar nada.
   const blob = new Blob(['﻿' + lineas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);

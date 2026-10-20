@@ -22,6 +22,14 @@ describe('toCsv', () => {
     expect(csv.startsWith('﻿')).toBe(true);
     expect(csv.slice(1).split('\r\n')).toEqual(['a;b;c;d', '1,5;"x;y";Sí;', '-0,25;"di ""hola""";No;ok', '']);
   });
+
+  // SEC-232 — the text cells (notes, locations, internal codes) are typed by
+  // users and the file is opened in Excel: a leading = + - @ ran as a formula.
+  // Negative NUMBERS must stay numbers, though: an intercept of -0.25 is data.
+  it('neutralizes text that Excel would run as a formula, but never a negative number', () => {
+    const csv = toCsv(['nota', 'valor', 'otra'], [['=HYPERLINK("http://x";"Ver")', -0.25, '-sin dato']]);
+    expect(csv.slice(1).split('\r\n')[1]).toBe(`"'=HYPERLINK(""http://x"";""Ver"")";-0,25;'-sin dato`);
+  });
 });
 
 describe('verificationPointsCsv', () => {
