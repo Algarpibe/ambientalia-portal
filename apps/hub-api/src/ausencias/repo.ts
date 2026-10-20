@@ -38,7 +38,9 @@ import type {
 
 // El tipo del cliente transaccional se deriva del Pool para no depender de un
 // import directo de 'pg' (mismo truco que users.repository.ts).
-type PoolClient = Awaited<ReturnType<Pool['connect']>>;
+export type PoolClient = Awaited<ReturnType<Pool['connect']>>;
+/** El pool o el cliente de una transacción: lo que hace falta para leer. */
+export type Consultable = Pool | PoolClient;
 
 /** Ejecuta `fn` dentro de BEGIN/COMMIT; hace ROLLBACK ante cualquier error. */
 async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -54,6 +56,38 @@ async function withTransaction<T>(db: Pool, fn: (client: PoolClient) => Promise<
   } finally {
     client.release();
   }
+}
+
+/**
+ * DATA-336 — una transacción en la que nadie más puede dar de alta una
+ * solicitud de ESTE empleado hasta el COMMIT.
+ *
+ * Las comprobaciones del alta (solape, otorgamiento duplicado, saldo) son
+ * lecturas: si corren fuera de la transacción del INSERT, dos peticiones
+ * simultáneas miran las dos antes de que ninguna escriba, las dos ven el
+ * camino libre y las dos se crean — un doble clic concedía dos veces el mismo
+ * otorgamiento o dejaba la bolsa en negativo. Con este candado la segunda
+ * espera en la primera línea, y cuando entra ya ve la fila de la primera.
+ *
+ * Candado consultivo y no `SELECT ... FOR UPDATE`: lo que hay que bloquear es
+ * una fila que todavía NO existe (la nueva solicitud). Y no un índice único:
+ * hay datos previos que lo incumplen (ver `existeOtorgamientoDelDia`). Es por
+ * empleado, así que dos personas distintas no se esperan entre sí. Se suelta
+ * solo al terminar la transacción, con COMMIT o con ROLLBACK.
+ *
+ * ⚠️ `fn` tiene que hacer TODAS sus lecturas con el `client` que recibe: una
+ * lectura por el pool va por otra conexión y no garantiza ver lo mismo que el
+ * INSERT.
+ */
+export async function conCandadoDelEmpleado<T>(
+  db: Pool,
+  empleadoId: string,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  return withTransaction(db, async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('ausencias:empleado:' || $1::text))`, [empleadoId]);
+    return fn(client);
+  });
 }
 
 // ── Empleados ──────────────────────────────────────────────────────────────
@@ -242,7 +276,7 @@ export async function esAprobadorDeAlguien(db: Pool, email: string): Promise<boo
  * en el maestro o si alguien la desactivó — las dos cosas significan lo mismo
  * para la cascada: aquí se acaba el árbol.
  */
-export async function enlaceDe(db: Pool, correo: string): Promise<EnlaceJerarquia | null> {
+export async function enlaceDe(db: Consultable, correo: string): Promise<EnlaceJerarquia | null> {
   const { rows } = await db.query(
     `SELECT lower(correo) AS correo, lower(aprobador_correo) AS aprobador_correo
        FROM portal.empleados
@@ -420,7 +454,7 @@ export function ramaDeDosNiveles(): string {
  * que escribir el `null` explícito.
  */
 export async function empleadosConSaldo(
-  db: Pool,
+  db: Consultable,
   soloDe: string | null,
   empleadoId: string | null,
 ): Promise<EmpleadoConSaldo[]> {
@@ -489,7 +523,7 @@ function aAusenciaDeEmpleado(r: FilaAusenciaDb): AusenciaDeEmpleado {
  * puro se queda igualmente como red de seguridad — y ahora es doble red, porque
  * cada bolsa tiene que descartar además los tipos de la otra.
  */
-export async function ausenciasQueTocanElSaldo(db: Pool, ids: string[]): Promise<AusenciaDeEmpleado[]> {
+export async function ausenciasQueTocanElSaldo(db: Consultable, ids: string[]): Promise<AusenciaDeEmpleado[]> {
   if (ids.length === 0) return [];
   const { rows } = await db.query(
     // `created_at` es TIMESTAMPTZ y se recorta a fecha AQUÍ, no en el módulo
@@ -1832,6 +1866,10 @@ async function anotarEventoDeCalendario(
  * Crea la solicitud, su adjunto y el evento de outbox **en una transacción**:
  * una solicitud guardada sin su evento nunca notificaría a nadie, y un evento
  * sin solicitud es basura que n8n reintentaría en bucle.
+ *
+ * El alta del servidor NO pasa por aquí sino por `insertarSolicitud`, dentro de
+ * `conCandadoDelEmpleado` (DATA-336). Esta se queda para quien ya sabe que no
+ * compite con nadie, como la siembra de los tests.
  */
 export async function crearSolicitud(
   db: Pool,
@@ -1840,56 +1878,65 @@ export async function crearSolicitud(
   eventos: EventoSolicitud[],
   construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
 ): Promise<Solicitud> {
-  return withTransaction(db, async (client) => {
-    const { rows } = await client.query(
-      `INSERT INTO portal.solicitudes_ausencia
-         (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
-          dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
-          informado_correo, hora_inicio, hora_fin)
-       VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time)
-       RETURNING id`,
-      [
-        datos.tipo,
-        datos.empleadoId,
-        datos.solicitanteEmail,
-        datos.fechaInicio,
-        datos.fechaFin,
-        datos.diasHabiles,
-        datos.comentarios,
-        datos.estado,
-        datos.aprobadorCorreo,
-        datos.segundoAprobadorCorreo,
-        datos.informadoCorreo,
-        datos.horaInicio,
-        datos.horaFin,
-      ],
+  return withTransaction(db, (client) => insertarSolicitud(client, datos, adjunto, eventos, construirPayload));
+}
+
+/** Lo que hace `crearSolicitud`, sobre una transacción que ya abrió otro. */
+export async function insertarSolicitud(
+  client: PoolClient,
+  datos: DatosInsercion,
+  adjunto: { nombreArchivo: string; mime: string; contenido: Buffer } | null,
+  eventos: EventoSolicitud[],
+  construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
+): Promise<Solicitud> {
+  const { rows } = await client.query(
+    `INSERT INTO portal.solicitudes_ausencia
+       (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
+        dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
+        informado_correo, hora_inicio, hora_fin)
+     VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time)
+     RETURNING id`,
+    [
+      datos.tipo,
+      datos.empleadoId,
+      datos.solicitanteEmail,
+      datos.fechaInicio,
+      datos.fechaFin,
+      datos.diasHabiles,
+      datos.comentarios,
+      datos.estado,
+      datos.aprobadorCorreo,
+      datos.segundoAprobadorCorreo,
+      datos.informadoCorreo,
+      datos.horaInicio,
+      datos.horaFin,
+    ],
+  );
+  const id = (rows[0] as { id: string }).id;
+
+  if (adjunto) {
+    await client.query(
+      `INSERT INTO portal.solicitud_adjuntos (solicitud_id, nombre_archivo, mime, contenido)
+       VALUES ($1, $2, $3, $4)`,
+      [id, adjunto.nombreArchivo, adjunto.mime, adjunto.contenido],
     );
-    const id = (rows[0] as { id: string }).id;
+  }
 
-    if (adjunto) {
-      await client.query(
-        `INSERT INTO portal.solicitud_adjuntos (solicitud_id, nombre_archivo, mime, contenido)
-         VALUES ($1, $2, $3, $4)`,
-        [id, adjunto.nombreArchivo, adjunto.mime, adjunto.contenido],
-      );
-    }
+  const { rows: creada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
+  const solicitud = aSolicitud(creada[0] as FilaSolicitudDb);
 
-    const { rows: creada } = await client.query(`${SELECT_SOLICITUD} WHERE s.id = $1`, [id]);
-    const solicitud = aSolicitud(creada[0] as FilaSolicitudDb);
+  // El orden importa: el outbox se sirve por `id` ascendente, así que el
+  // acuse al solicitante sale antes que el aviso a quien aprueba.
+  for (const evento of eventos) {
+    const payload = construirPayload(solicitud, evento);
+    await client.query(
+      `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
+      [id, evento, JSON.stringify(payload)],
+    );
+    await anotarEventoDeCalendario(client, solicitud, payload);
+  }
 
-    // El orden importa: el outbox se sirve por `id` ascendente, así que el
-    // acuse al solicitante sale antes que el aviso a quien aprueba.
-    for (const evento of eventos) {
-      const payload = construirPayload(solicitud, evento);
-      await client.query(
-        `INSERT INTO portal.ausencias_outbox (solicitud_id, evento, payload) VALUES ($1, $2, $3::jsonb)`,
-        [id, evento, JSON.stringify(payload)],
-      );
-      await anotarEventoDeCalendario(client, solicitud, payload);
-    }
-
-    return solicitud;
-  });
+  return solicitud;
 }
 
 export async function solicitudesDeEmpleado(db: Pool, empleadoId: string): Promise<Solicitud[]> {
@@ -3197,10 +3244,13 @@ export function ocupaAgenda(tipo: TipoSolicitud, estado: Solicitud['estado']): b
  * —una consulta por el `Pool` no lo vería— y se deshace con el mismo
  * `ROLLBACK`. Lo que **no** da es un snapshot compartido: `BEGIN` pelado es
  * READ COMMITTED, y ahí cada sentencia toma el suyo. La ventana de carrera
- * tampoco se cierra —este `SELECT` no lleva `FOR UPDATE`—, y dos altas
- * simultáneas la pasan las dos. Cerrarla del
- * todo pediría un candado en la BD, como el índice único parcial de la 024
- * hace con las propuestas. Se decidió no ponerlo: la restricción falla al
+ * tampoco la cierra esta función —el `SELECT` no lleva `FOR UPDATE`—: dos
+ * llamadas simultáneas pasan las dos. Para el ALTA la cierra quien la llama,
+ * `conCandadoDelEmpleado` (DATA-336), que serializa por empleado. Las otras
+ * puertas que la usan (proponer y firmar un cambio de fechas, el `PATCH` de
+ * admin) siguen sin ese candado. Lo que se descartó es cerrarlo en la propia
+ * tabla, con un índice único parcial como el que la 024 pone a las
+ * propuestas: la restricción falla al
  * aplicarse si hay datos que ya la incumplen, y los hay: comprobado el
  * 2026-08-18 contra producción, un empleado tiene vacaciones aprobadas del 10
  * al 14 de agosto de 2026 y un permiso aprobado el 14. Y desde el 2026-08-21 hay

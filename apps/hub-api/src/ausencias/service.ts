@@ -620,7 +620,7 @@ export function errorDeSolape(choque: repo.Solape): AusenciaError {
  * solo sitio deja verdes los tests de las otras.
  */
 async function exigirSinSolape(
-  db: Pool,
+  db: repo.Consultable,
   empleadoId: string,
   tipo: TipoSolicitud,
   estado: EstadoSolicitud,
@@ -673,12 +673,13 @@ async function exigirSinSolape(
  * una bandeja que no puede vaciar. Tampoco en el `PATCH` de admin: ahí no se
  * decide nada, se corrige el registro.
  *
- * ⚠️ NO cierra la carrera de dos altas simultáneas: son dos SELECT sin `FOR
- * UPDATE`, igual que `solapeDe` y por la misma razón que aquella documenta. Dos
- * pestañas mandando a la vez pueden colar un día de más.
+ * Son dos SELECT sin `FOR UPDATE`: por sí sola esta comprobación no cierra la
+ * carrera de dos altas simultáneas. La cierra que el alta la llame bajo
+ * `repo.conCandadoDelEmpleado` y con su `tx` (DATA-336): la segunda pestaña
+ * espera a que la primera confirme y ya ve su día en trámite.
  */
 async function exigirCompensatoriosSuficientes(
-  db: Pool,
+  db: repo.Consultable,
   empleado: Empleado,
   tipo: TipoSolicitud,
   dias: number,
@@ -739,7 +740,7 @@ async function exigirCompensatoriosSuficientes(
  * visible a quién le falta el corte sin castigar a nadie por ello.
  */
 async function exigirVacacionesSuficientes(
-  db: Pool,
+  db: repo.Consultable,
   empleado: Empleado,
   tipo: TipoSolicitud,
   dias: number,
@@ -780,6 +781,122 @@ async function exigirVacacionesSuficientes(
   });
 }
 
+/**
+ * El tramo del alta que corre bajo el candado del empleado (DATA-336): las
+ * comprobaciones que leen —solape, otorgamiento duplicado, saldo— y el INSERT,
+ * todo por la MISMA transacción `tx`. Ver `repo.conCandadoDelEmpleado`.
+ *
+ * Es el cuerpo de `crearSolicitud` tal cual estaba, con `tx` donde ponía `db`:
+ * se saca a una función propia para no tener que re-sangrarlo entero dentro
+ * del callback del candado.
+ */
+async function altaBajoCandado(
+  tx: repo.PoolClient,
+  sesion: Sesion,
+  empleado: Empleado,
+  datos: NuevaSolicitud,
+  aprueba: boolean,
+  estado: EstadoSolicitud,
+): Promise<Solicitud> {
+  // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
+  // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
+  // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
+  // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
+  // esta comprobación necesita, así que tiene que ir antes por fuerza.
+  await exigirSinSolape(tx, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
+  // El otorgamiento no pasa por la comprobación de arriba —está exento de
+  // `ocupaAgenda` a propósito, porque su fecha es el día que se TRABAJÓ y tiene
+  // que poder caer dentro de las propias vacaciones—, y esa exención dejaba
+  // abierto reclamar DOS veces la misma jornada: dos peticiones por el mismo
+  // sábado conceden el doble de días por un solo día de trabajo, y ninguna de
+  // sus cuatro reglas propias lo miraba.
+  //
+  // Por eso una regla suya y estrecha, en vez de meterlo en `ocupaAgenda`:
+  // aquello cerraría el duplicado y de paso rompería el caso más típico que
+  // tiene este tipo.
+  if (esOtorgamiento(datos.tipo) && (await repo.existeOtorgamientoDelDia(tx, empleado.id, datos.fechaInicio, null))) {
+    throw new AusenciaError('otorgamiento_duplicado', 409, 'fechaInicio');
+  }
+  // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
+  // daría 0 justo en el caso normal —el sábado por el que se gana el
+  // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
+  // viene validado, y `validarNuevaSolicitud` garantiza que existe si y solo si
+  // el tipo es otorgamiento.
+  const diasHabiles = datos.dias ?? contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
+  // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
+  // y de decodificar el base64 del adjunto para no procesar 8 MB de una solicitud
+  // que se va a rechazar.
+  await exigirCompensatoriosSuficientes(tx, empleado, datos.tipo, diasHabiles);
+  // Las dos puertas van seguidas y ninguna se solapa con la otra: cada una mira
+  // su `tipo` y sale enseguida si no es el suyo, así que solo una llega a
+  // consultar el saldo. Se llaman las dos, y no un `if/else` sobre el tipo,
+  // porque el día que haya una tercera bolsa la lista crece sin tocar el flujo.
+  await exigirVacacionesSuficientes(tx, empleado, datos.tipo, diasHabiles, sesion.esAdmin);
+
+  // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
+  // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
+  // trámite no mueva una solicitud que ya está en vuelo.
+  //
+  // El correo del jefe pasa por `jefeEfectivo` ANTES de resolver su enlace: quien
+  // es su propio jefe firma con el aprobador de reserva, y el segundo nivel tiene
+  // que subirse desde el árbol de ÉSE y no del suyo propio.
+  //
+  // Un otorgamiento se firma con UNA sola firma, sea cual sea la casilla de la
+  // ficha: conceder días es una decisión del jefe inmediato y no hay nada que un
+  // segundo escalón añada. No se inventa nada — es exactamente lo que ya hace una
+  // ficha con `requiereSegundaFirma` apagada, y el de segundo nivel queda en
+  // `informado`, enterándose del resultado.
+  const correoDelJefe = jefeEfectivo(empleado);
+  const firmantes = aprueba
+    ? aprobadoresDe(
+        {
+          ...empleado,
+          aprobadorCorreo: correoDelJefe,
+          requiereSegundaFirma: empleado.requiereSegundaFirma && !esOtorgamiento(datos.tipo),
+        },
+        await repo.enlaceDe(tx, correoDelJefe),
+      )
+    : null;
+
+  const adjunto = datos.adjunto
+    ? {
+        nombreArchivo: nombreArchivoNormalizado(datos.tipo, empleado.nombreCompleto, datos.fechaInicio),
+        mime: datos.adjunto.mime,
+        contenido: Buffer.from(datos.adjunto.contenidoBase64, 'base64'),
+      }
+    : null;
+
+  // El tope real, ya decodificado: la estimación de base64 puede quedarse corta
+  // si el cliente mete relleno o saltos de línea.
+  if (adjunto && adjunto.contenido.length > MAX_ADJUNTO_BYTES) {
+    throw new AusenciaError('adjunto_demasiado_grande', 400, 'adjunto');
+  }
+
+  return repo.insertarSolicitud(
+    tx,
+    {
+      tipo: datos.tipo,
+      empleadoId: empleado.id,
+      solicitanteEmail: empleado.correo,
+      fechaInicio: datos.fechaInicio,
+      fechaFin: datos.fechaFin,
+      diasHabiles,
+      horaInicio: datos.horaInicio,
+      horaFin: datos.horaFin,
+      comentarios: datos.comentarios ?? null,
+      estado,
+      // Una incapacidad no la aprueba nadie: dejar aquí un aprobador la haría
+      // aparecer en su bandeja de pendientes.
+      aprobadorCorreo: firmantes ? firmantes.primero : null,
+      segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
+      informadoCorreo: firmantes ? firmantes.informado : null,
+    },
+    adjunto,
+    eventosDeAlta(datos.tipo),
+    construirPayload,
+  );
+}
+
 export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
   const datos = validarNuevaSolicitud(body, hoyEnColombia());
   const empleado = await empleadoDeSesion(db, sesion);
@@ -818,102 +935,11 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // `datos.tipo`, así que adelantarlas no cambia nada más.
   const aprueba = requiereAprobacion(datos.tipo);
   const estado = aprueba ? 'pendiente' : 'registrada';
-  // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
-  // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
-  // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
-  // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
-  // esta comprobación necesita, así que tiene que ir antes por fuerza.
-  await exigirSinSolape(db, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
-  // El otorgamiento no pasa por la comprobación de arriba —está exento de
-  // `ocupaAgenda` a propósito, porque su fecha es el día que se TRABAJÓ y tiene
-  // que poder caer dentro de las propias vacaciones—, y esa exención dejaba
-  // abierto reclamar DOS veces la misma jornada: dos peticiones por el mismo
-  // sábado conceden el doble de días por un solo día de trabajo, y ninguna de
-  // sus cuatro reglas propias lo miraba.
-  //
-  // Por eso una regla suya y estrecha, en vez de meterlo en `ocupaAgenda`:
-  // aquello cerraría el duplicado y de paso rompería el caso más típico que
-  // tiene este tipo.
-  if (esOtorgamiento(datos.tipo) && (await repo.existeOtorgamientoDelDia(db, empleado.id, datos.fechaInicio, null))) {
-    throw new AusenciaError('otorgamiento_duplicado', 409, 'fechaInicio');
-  }
-  // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
-  // daría 0 justo en el caso normal —el sábado por el que se gana el
-  // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
-  // viene validado, y `validarNuevaSolicitud` garantiza que existe si y solo si
-  // el tipo es otorgamiento.
-  const diasHabiles = datos.dias ?? contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
-  // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
-  // y de decodificar el base64 del adjunto para no procesar 8 MB de una solicitud
-  // que se va a rechazar.
-  await exigirCompensatoriosSuficientes(db, empleado, datos.tipo, diasHabiles);
-  // Las dos puertas van seguidas y ninguna se solapa con la otra: cada una mira
-  // su `tipo` y sale enseguida si no es el suyo, así que solo una llega a
-  // consultar el saldo. Se llaman las dos, y no un `if/else` sobre el tipo,
-  // porque el día que haya una tercera bolsa la lista crece sin tocar el flujo.
-  await exigirVacacionesSuficientes(db, empleado, datos.tipo, diasHabiles, sesion.esAdmin);
-
-  // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
-  // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
-  // trámite no mueva una solicitud que ya está en vuelo.
-  //
-  // El correo del jefe pasa por `jefeEfectivo` ANTES de resolver su enlace: quien
-  // es su propio jefe firma con el aprobador de reserva, y el segundo nivel tiene
-  // que subirse desde el árbol de ÉSE y no del suyo propio.
-  //
-  // Un otorgamiento se firma con UNA sola firma, sea cual sea la casilla de la
-  // ficha: conceder días es una decisión del jefe inmediato y no hay nada que un
-  // segundo escalón añada. No se inventa nada — es exactamente lo que ya hace una
-  // ficha con `requiereSegundaFirma` apagada, y el de segundo nivel queda en
-  // `informado`, enterándose del resultado.
-  const correoDelJefe = jefeEfectivo(empleado);
-  const firmantes = aprueba
-    ? aprobadoresDe(
-        {
-          ...empleado,
-          aprobadorCorreo: correoDelJefe,
-          requiereSegundaFirma: empleado.requiereSegundaFirma && !esOtorgamiento(datos.tipo),
-        },
-        await repo.enlaceDe(db, correoDelJefe),
-      )
-    : null;
-
-  const adjunto = datos.adjunto
-    ? {
-        nombreArchivo: nombreArchivoNormalizado(datos.tipo, empleado.nombreCompleto, datos.fechaInicio),
-        mime: datos.adjunto.mime,
-        contenido: Buffer.from(datos.adjunto.contenidoBase64, 'base64'),
-      }
-    : null;
-
-  // El tope real, ya decodificado: la estimación de base64 puede quedarse corta
-  // si el cliente mete relleno o saltos de línea.
-  if (adjunto && adjunto.contenido.length > MAX_ADJUNTO_BYTES) {
-    throw new AusenciaError('adjunto_demasiado_grande', 400, 'adjunto');
-  }
-
-  const solicitud = await repo.crearSolicitud(
-    db,
-    {
-      tipo: datos.tipo,
-      empleadoId: empleado.id,
-      solicitanteEmail: empleado.correo,
-      fechaInicio: datos.fechaInicio,
-      fechaFin: datos.fechaFin,
-      diasHabiles,
-      horaInicio: datos.horaInicio,
-      horaFin: datos.horaFin,
-      comentarios: datos.comentarios ?? null,
-      estado,
-      // Una incapacidad no la aprueba nadie: dejar aquí un aprobador la haría
-      // aparecer en su bandeja de pendientes.
-      aprobadorCorreo: firmantes ? firmantes.primero : null,
-      segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
-      informadoCorreo: firmantes ? firmantes.informado : null,
-    },
-    adjunto,
-    eventosDeAlta(datos.tipo),
-    construirPayload,
+  // DATA-336 — de aquí al INSERT, todo bajo el candado del empleado: sin él, dos
+  // altas simultáneas comprobaban las dos antes de que ninguna escribiera, y las
+  // dos pasaban. Ver `repo.conCandadoDelEmpleado`.
+  const solicitud = await repo.conCandadoDelEmpleado(db, empleado.id, (tx) =>
+    altaBajoCandado(tx, sesion, empleado, datos, aprueba, estado),
   );
 
   // Sin await: el aviso es un atajo para que el correo salga en un segundo en vez
@@ -2458,7 +2484,7 @@ export interface SaldosDeSesion {
  * id que decida el cliente). Pasarle la ficha de otro devuelve el saldo de ese
  * otro sin rechistar.
  */
-export async function saldosDeSesion(db: Pool, empleado: Empleado): Promise<SaldosDeSesion> {
+export async function saldosDeSesion(db: repo.Consultable, empleado: Empleado): Promise<SaldosDeSesion> {
   const hoy = hoyEnColombia();
   const [fila] = await repo.empleadosConSaldo(db, null, empleado.id);
   // Sin fila —la ficha se desactivó después de que la sesión ya estuviera

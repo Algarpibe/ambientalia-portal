@@ -995,6 +995,14 @@ vi.mock('./repo.js', async () => ({
     }
     return s;
   },
+  // DATA-336 — el alta del servidor va por estas dos. Este doble no tiene
+  // transacciones ni concurrencia, así que el candado solo ejecuta el callback:
+  // que serialice de verdad lo prueba alta-concurrente.db.test.ts, contra
+  // Postgres. `insertarSolicitud` es el mismo INSERT que `crearSolicitud`, así que
+  // delega en el de este doble en vez de copiarlo.
+  conCandadoDelEmpleado: async (_db: unknown, _empleadoId: string, fn: (tx: unknown) => Promise<unknown>) => fn(null),
+  insertarSolicitud: async (...args: unknown[]) =>
+    ((await import('./repo.js')).crearSolicitud as (...a: unknown[]) => Promise<unknown>)(...args),
   decidirSolicitud: async (
     _db: unknown,
     id: string,
