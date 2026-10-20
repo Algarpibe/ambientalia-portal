@@ -43,9 +43,12 @@ vi.mock('./contabilidad/detalle.js', () => ({
 }));
 
 let createDataRouter: typeof import('./data.router.js')['createDataRouter'];
+// TEST-713 — este import arrastra auth.ts, sentry y los mocks de seis módulos:
+// solo, un par de segundos; con la suite completa en paralelo llegó a pasar de
+// los 10 s del hookTimeout por defecto y el fichero caía sin un test rojo.
 beforeAll(async () => {
   ({ createDataRouter } = await import('./data.router.js'));
-});
+}, 60_000);
 
 // El fallback AUTH_USERS se retiró (2026-08-23) y con él la rama que dejaba
 // pasar tokens sin `user_id` sin tocar la BD. requireAuth consulta siempre y

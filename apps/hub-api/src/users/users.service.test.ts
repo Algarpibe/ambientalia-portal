@@ -139,11 +139,21 @@ class FakeUserRepository {
   }
 }
 
-function makeService() {
+/**
+ * `costeBcrypt` solo lo bajan las propiedades que prueban la lógica del registro
+ * y no el hash (TEST-713): con el coste real, 4.2 + 4.3 + 4.4 hacían ~300 hashes
+ * de coste 12, unos dos minutos de CPU que dejaban sin aire al resto de ficheros
+ * de la suite y los hacían caer por timeout. La 4.3 —la que sí vigila el coste—
+ * sigue con el de producción.
+ */
+function makeService(costeBcrypt?: number) {
   const repo = new FakeUserRepository();
-  const service = new UserService(repo as unknown as UserRepository);
+  const service = new UserService(repo as unknown as UserRepository, costeBcrypt);
   return { repo, service };
 }
+
+/** Coste mínimo que admite bcryptjs: para las propiedades que no van del hash. */
+const COSTE_RAPIDO = 4;
 
 // --- Arbitraries ---
 const seg = fc
@@ -166,10 +176,25 @@ const registerInputArb = fc.record({ fullName: validNameArb, email: emailArb, pa
 const APP_IDS = ['payment-reconciliation', 'inventory', 'customer-valuation'];
 const appListArb = fc.subarray(APP_IDS);
 
-// bcrypt coste 12 × 100 iteraciones es intrínsecamente lento (~20-50 s/test), y
+// bcrypt coste 12 × 100 iteraciones es intrínsecamente lento (~20-60 s/test), y
 // bajo contención de CPU en la suite completa puede acercarse al minuto. Timeout
 // holgado para no ser flaky, manteniendo las 100 iteraciones que exige el diseño.
+// Hoy solo la 4.3 paga ese coste; ver `makeService`.
 const HASH_TIMEOUT = 180_000;
+
+// Margen para las propiedades que no hashean (TEST-713): solas tardan
+// milisegundos, pero corren al lado de ficheros pesados y los 5 s por defecto
+// llegaron a quedarse cortos en el CI (la 4.5, 5004 ms el 2026-10-20).
+const PROPIEDAD_TIMEOUT = 30_000;
+
+describe('UserService — coste de bcrypt', () => {
+  it('se puede bajar al construir el servicio (solo lo hacen los tests)', async () => {
+    const { repo, service } = makeService(COSTE_RAPIDO);
+    await service.register({ fullName: 'Ana', email: 'ana@coste.test', password: 'clave-larga' });
+    const guardado = await repo.findByEmail('ana@coste.test');
+    expect(bcrypt.getRounds(guardado!.password_hash)).toBe(COSTE_RAPIDO);
+  });
+});
 
 describe('UserService — preferencias de UI', () => {
   it('un usuario nuevo no tiene preferencias', async () => {
@@ -236,7 +261,8 @@ describe('UserService — property tests', () => {
     async () => {
       await fc.assert(
         fc.asyncProperty(registerInputArb, async (input) => {
-          const { service } = makeService();
+          // Coste rápido: esto va del estado inicial, no del hash (ver makeService).
+          const { service } = makeService(COSTE_RAPIDO);
           const user = await service.register(input);
           expect(user.status).toBe('pending');
           expect(user.role).toBe('reader');
@@ -244,7 +270,7 @@ describe('UserService — property tests', () => {
         { numRuns: 100 },
       );
     },
-    HASH_TIMEOUT,
+    PROPIEDAD_TIMEOUT,
   );
 
   // Feature: user-management, Property 2: Hash bcrypt con coste mínimo 12
@@ -275,7 +301,8 @@ describe('UserService — property tests', () => {
     async () => {
       await fc.assert(
         fc.asyncProperty(registerInputArb, async (input) => {
-          const { repo, service } = makeService();
+          // Coste rápido: esto va del correo duplicado, no del hash (ver makeService).
+          const { repo, service } = makeService(COSTE_RAPIDO);
           await service.register(input);
 
           let err: unknown;
@@ -292,7 +319,7 @@ describe('UserService — property tests', () => {
         { numRuns: 100 },
       );
     },
-    HASH_TIMEOUT,
+    PROPIEDAD_TIMEOUT,
   );
 
   // Feature: user-management, Property 4: Emails/campos inválidos siempre rechazados con 400
@@ -331,7 +358,7 @@ describe('UserService — property tests', () => {
       }),
       { numRuns: 100 },
     );
-  });
+  }, PROPIEDAD_TIMEOUT);
 
   // Feature: user-management, Property 5: Transiciones de estado válidas
   // Validates: Requirements 2.2, 2.3, 2.5, 3.1
@@ -354,7 +381,7 @@ describe('UserService — property tests', () => {
       }),
       { numRuns: 100 },
     );
-  });
+  }, PROPIEDAD_TIMEOUT);
 
   // Feature: user-management, Property 8: Auto-protección del administrador
   // Validates: Requirements 2.7
@@ -384,7 +411,7 @@ describe('UserService — property tests', () => {
       }),
       { numRuns: 100 },
     );
-  });
+  }, PROPIEDAD_TIMEOUT);
 
   // Feature: user-management, Property 10: Round-trip de asignación de apps
   // Validates: Requirements 4.1, 4.2
@@ -404,5 +431,5 @@ describe('UserService — property tests', () => {
       }),
       { numRuns: 100 },
     );
-  });
+  }, PROPIEDAD_TIMEOUT);
 });
