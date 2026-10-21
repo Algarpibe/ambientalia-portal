@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { authFetch } from '../../lib/api';
 import { notify } from '../../lib/notify';
 import { APPS } from '../../lib/apps';
+import { useDialogo } from '../../lib/useDialogo';
 import type { AdminUser } from './types';
 
 // Modal de asignación de aplicaciones (Req 4.2). Precarga las apps actuales del
@@ -22,6 +23,9 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
   // manda `PUT apps: []` y deja al usuario sin ninguna app, así que con la
   // carga fallida no se pinta la selección ni se deja guardar.
   const [loadError, setLoadError] = useState(false);
+  // FE-419 — foco, Escape y vuelta del foco. Con el PUT en vuelo Escape no
+  // cierra, igual que Cancelar está deshabilitado.
+  const { ref: refDialogo, idTitulo } = useDialogo({ onCerrar: onClose, bloqueado: saving });
 
   useEffect(() => {
     let active = true;
@@ -87,9 +91,16 @@ export default function AppAssignModal({ user, onClose, onSaved }: AppAssignModa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={refDialogo}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={idTitulo}
+        tabIndex={-1}
+        className="bg-white rounded-xl shadow-xl w-full max-w-md focus:outline-none"
+        onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">Asignar aplicaciones</h2>
+          <h2 id={idTitulo} className="text-lg font-bold text-gray-900">Asignar aplicaciones</h2>
           <p className="text-sm text-gray-500">
             {user.full_name} · {user.email}
           </p>

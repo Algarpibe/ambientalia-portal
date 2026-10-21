@@ -78,3 +78,61 @@ describe('AuthRightPanel — registro (task 14.1)', () => {
     await waitFor(() => expect(notify).toHaveBeenCalled());
   });
 });
+
+// FE-419 — el login era inusable con lector de pantalla: las <label> no estaban
+// asociadas a sus campos, el ojo de la contraseña no tenía nombre y los errores
+// no se anunciaban. Las consultas por etiqueta y rol prueban justo eso.
+describe('AuthRightPanel — accesibilidad (FE-419)', () => {
+  function renderLogin() {
+    return render(
+      <MemoryRouter>
+        <AuthRightPanel isSignUp={false} onToggle={() => {}} />
+      </MemoryRouter>,
+    );
+  }
+
+  it('login: cada campo se alcanza por su etiqueta', () => {
+    renderLogin();
+    expect((screen.getByLabelText('Correo electrónico') as HTMLInputElement).type).toBe('email');
+    expect((screen.getByLabelText('Contraseña') as HTMLInputElement).type).toBe('password');
+  });
+
+  it('registro: nombre, correo y contraseña se alcanzan por su etiqueta', () => {
+    renderSignup();
+    expect((screen.getByLabelText('Nombre completo') as HTMLInputElement).name).toBe('fullName');
+    expect((screen.getByLabelText('Correo electrónico') as HTMLInputElement).name).toBe('email');
+    expect((screen.getByLabelText('Contraseña') as HTMLInputElement).name).toBe('password');
+  });
+
+  it('el botón del ojo dice qué hace y refleja su estado', () => {
+    renderLogin();
+    const mostrar = screen.getByRole('button', { name: 'Mostrar contraseña' });
+    expect(mostrar.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(mostrar);
+    const ocultar = screen.getByRole('button', { name: 'Ocultar contraseña' });
+    expect(ocultar.getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByLabelText('Contraseña') as HTMLInputElement).type).toBe('text');
+  });
+
+  it('login fallido: el error se anuncia como alerta', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
+    const { container } = renderLogin();
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'a@b.com' } });
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'x' } });
+    submit(container);
+    const alerta = await screen.findByRole('alert');
+    expect(alerta.textContent).toMatch(/inválidos/);
+  });
+
+  it('registro inválido: cada campo queda marcado y enlazado con su mensaje', () => {
+    const { container } = renderSignup();
+    fill('tu@ejemplo.com', 'no-es-email');
+    submit(container);
+    const correo = screen.getByLabelText('Correo electrónico');
+    expect(correo.getAttribute('aria-invalid')).toBe('true');
+    const idMensaje = correo.getAttribute('aria-describedby');
+    expect(idMensaje).toBeTruthy();
+    expect(document.getElementById(idMensaje!)?.textContent).toMatch(/Correo electrónico inválido/);
+    expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
+  });
+});

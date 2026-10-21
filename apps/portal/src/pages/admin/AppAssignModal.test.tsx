@@ -79,4 +79,37 @@ describe('AppAssignModal', () => {
       expect(mockFetch.mock.calls.some((c) => c[1]?.method === 'PUT')).toBe(false);
     });
   });
+
+  // FE-419 — el modal era un <div> sin rol: el lector de pantalla no sabía que
+  // se había abierto un diálogo, Escape no hacía nada y el foco se quedaba en
+  // la tabla de detrás.
+  describe('accesibilidad (FE-419)', () => {
+    it('es un diálogo modal nombrado por su título y recibe el foco', async () => {
+      render(<AppAssignModal user={user} onClose={() => {}} onSaved={() => {}} />);
+      const dialogo = screen.getByRole('dialog', { name: 'Asignar aplicaciones' });
+      expect(dialogo.getAttribute('aria-modal')).toBe('true');
+      expect(dialogo.contains(document.activeElement)).toBe(true);
+      await screen.findByRole('checkbox', { name: 'Análisis de Inventario' });
+    });
+
+    it('Escape cierra el modal', async () => {
+      const onClose = vi.fn();
+      render(<AppAssignModal user={user} onClose={onClose} onSaved={() => {}} />);
+      await screen.findByRole('checkbox', { name: 'Análisis de Inventario' });
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it('mientras guarda, Escape no lo cierra (el PUT sigue en vuelo)', async () => {
+      const onClose = vi.fn();
+      render(<AppAssignModal user={user} onClose={onClose} onSaved={() => {}} />);
+      await screen.findByRole('checkbox', { name: 'Análisis de Inventario' });
+      // El PUT no responde todavía: el modal se queda en «Guardando…».
+      mockFetch.mockReturnValueOnce(new Promise(() => {}));
+      fireEvent.click(screen.getByText('Guardar'));
+      expect(screen.getByText('Guardando…')).toBeTruthy();
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
 });

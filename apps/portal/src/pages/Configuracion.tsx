@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { User, Mail, Lock, KeyRound, Shield, Camera, Save, Clock, Eye, EyeOff } from 'lucide-react';
 import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
@@ -27,6 +27,8 @@ export default function Configuracion() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [savingPwd, setSavingPwd] = useState(false);
+  // FE-419 — prefijo para asociar cada <label> con su campo (htmlFor/id).
+  const uid = useId();
 
   const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -144,10 +146,11 @@ export default function Configuracion() {
                 registro: es el nombre con el que la persona firma las
                 aprobaciones, y renombrarse reescribiría a posteriori quién
                 aparece en decisiones ya tomadas. Mismo trato que el correo. */}
-            <label className="block text-sm font-medium text-gray-600 mb-1">Nombre Completo</label>
+            <label htmlFor={`${uid}-nombre`} className="block text-sm font-medium text-gray-600 mb-1">Nombre Completo</label>
             <div className="relative">
               <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
+                id={`${uid}-nombre`}
                 value={profile?.full_name ?? ''}
                 readOnly
                 className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
@@ -156,10 +159,11 @@ export default function Configuracion() {
             <p className="text-xs text-gray-500 mt-1 mb-4">Se fijó al crear tu cuenta y no puede editarse.</p>
 
             {/* Email (solo lectura) */}
-            <label className="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
+            <label htmlFor={`${uid}-correo`} className="block text-sm font-medium text-gray-600 mb-1">Correo Electrónico</label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
+                id={`${uid}-correo`}
                 value={profile?.email ?? ''}
                 readOnly
                 className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 text-gray-500"
@@ -181,12 +185,13 @@ export default function Configuracion() {
                   { label: 'Contraseña Actual', value: currentPassword, set: setCurrentPassword, ph: 'Tu contraseña actual', Icon: Lock },
                   { label: 'Nueva Contraseña', value: newPassword, set: setNewPassword, ph: `Mínimo ${MIN_PASSWORD} caracteres`, Icon: KeyRound },
                   { label: 'Confirmar Contraseña', value: confirmPassword, set: setConfirmPassword, ph: 'Repite la nueva contraseña', Icon: Shield },
-                ].map((f) => (
+                ].map((f, i) => (
                   <div key={f.label}>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">{f.label}</label>
+                    <label htmlFor={`${uid}-clave-${i}`} className="block text-sm font-medium text-gray-600 mb-1">{f.label}</label>
                     <div className="relative">
                       <f.Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                       <input
+                        id={`${uid}-clave-${i}`}
                         type={showPwd ? 'text' : 'password'}
                         value={f.value}
                         onChange={(e) => f.set(e.target.value)}
@@ -196,7 +201,10 @@ export default function Configuracion() {
                       <button
                         type="button"
                         onClick={() => setShowPwd((s) => !s)}
-                        aria-label="Mostrar u ocultar contraseñas"
+                        // FE-419: el nombre dice lo que hará (afecta a los tres
+                        // campos, de ahí el plural) y aria-pressed su estado.
+                        aria-label={showPwd ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
+                        aria-pressed={showPwd}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                         {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>

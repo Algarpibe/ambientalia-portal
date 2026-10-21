@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Plus, X } from 'lucide-react';
 import { getApp } from '../lib/apps';
+import { useDialogo } from '../lib/useDialogo';
 import type { WidgetDescriptor } from '../widgets/types';
 
 // Panel lateral (slide-over) con los widgets disponibles que aún no están
@@ -24,6 +25,11 @@ export default function CatalogPanel({ open, onClose, availableWidgets, onAddWid
     return [...map.entries()];
   }, [availableWidgets]);
 
+  // FE-419 — foco dentro al abrir, Escape para cerrar y vuelta al botón que lo
+  // abrió. El nombre accesible ya lo da aria-label, así que el id del título no
+  // se usa.
+  const { ref } = useDialogo<HTMLElement>({ abierto: open, onCerrar: onClose });
+
   return (
     <>
       {/* Overlay */}
@@ -32,11 +38,19 @@ export default function CatalogPanel({ open, onClose, availableWidgets, onAddWid
         onClick={onClose}
         aria-hidden="true"
       />
-      {/* Slide-over */}
+      {/* Slide-over. Sigue montado cerrado para que se vea la animación de
+          salida; por eso, cerrado se marca inert + aria-hidden (FE-419): fuera de
+          la pantalla seguía siendo un diálogo anunciable y sus botones recibían
+          el foco con Tab sin que se vieran. */}
       <aside
-        className={`fixed inset-y-0 right-0 w-80 max-w-[90vw] bg-white shadow-xl z-50 transform transition-transform duration-200 flex flex-col ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        ref={ref}
+        className={`fixed inset-y-0 right-0 w-80 max-w-[90vw] bg-white shadow-xl z-50 transform transition-transform duration-200 flex flex-col focus:outline-none ${open ? 'translate-x-0' : 'translate-x-full'}`}
         role="dialog"
+        aria-modal={open ? 'true' : undefined}
         aria-label="Catálogo de widgets"
+        aria-hidden={open ? undefined : 'true'}
+        inert={!open}
+        tabIndex={-1}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-900">Añadir widget</h2>
