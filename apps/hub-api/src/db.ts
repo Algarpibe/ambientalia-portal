@@ -112,15 +112,42 @@ function migrationsDir(): string {
  * nadie apunto en el array: produccion tampoco la aplicaria, asi que los dos
  * esquemas coinciden en no tenerla y nadie se queja. Eso solo se delata de
  * rebote, cuando algun test de BD toca el esquema que esa migracion traia.
+ *
+ * DATA-344 — van bajo un candado consultivo de SESIÓN (`CANDADO_MIGRACIONES`):
+ * si dos arranques coinciden (un despliegue que solapa el contenedor nuevo con
+ * el viejo, dos réplicas), el segundo espera a que el primero termine en vez de
+ * aplicar el mismo DDL a la vez, que sobre una base nueva hace chocar dos
+ * `CREATE TABLE IF NOT EXISTS` en el catálogo y tumba uno de los arranques. De
+ * sesión y no de transacción porque las migraciones no van en una transacción:
+ * por eso todo corre por UNA conexión fija, la que tiene el candado.
+ *
+ * La espera la acota el `lock_timeout` del pool de migraciones (DATA-340): si el
+ * otro arranque se queda colgado con el candado, este se rinde y EasyPanel lo
+ * reintenta, igual que ante cualquier otro candado.
  */
 export async function aplicarMigraciones(db: Pool): Promise<void> {
   const dir = migrationsDir();
-  for (const file of MIGRATIONS) {
-    const sql = readFileSync(join(dir, file), 'utf8');
-    await db.query(sql);
-    console.log(`migration applied: ${file}`);
+  const client = await db.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', [CANDADO_MIGRACIONES]);
+    for (const file of MIGRATIONS) {
+      const sql = readFileSync(join(dir, file), 'utf8');
+      await client.query(sql);
+      console.log(`migration applied: ${file}`);
+    }
+    await client.query('SELECT pg_advisory_unlock(hashtext($1))', [CANDADO_MIGRACIONES]);
+  } catch (err) {
+    // Se DESTRUYE la conexión en vez de devolverla al pool: así Postgres suelta el
+    // candado aunque el fallo la haya dejado inservible, y no hace falta un UNLOCK
+    // que podría fallar a su vez y tapar el error de verdad.
+    client.release(err as Error);
+    throw err;
   }
+  client.release();
 }
+
+/** Llave del candado de las migraciones (DATA-344). Exportada para los tests. */
+export const CANDADO_MIGRACIONES = 'hub-api:migraciones';
 
 /**
  * Inicialización de BD en el arranque (Requirements 6.3, 6.5):
