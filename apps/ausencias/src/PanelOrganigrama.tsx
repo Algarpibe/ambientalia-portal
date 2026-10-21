@@ -120,28 +120,31 @@ export default function PanelOrganigrama({ activo }: Props) {
     const fila = filas[id];
     if (!fila) return;
     actualizar(id, { guardando: true, error: null, exito: false });
+    // Un solo botón por fila, como hasta ahora, pero SIETE endpoints detrás: se
+    // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
+    // porque los que responden el maestro entero tienen que ver ya escrito lo
+    // del anterior — con `Promise.all`, la respuesta que llegara última podría
+    // ser la construida ANTES de los otros cambios. Las respuestas no se usan:
+    // quien resincroniza la fila es el `cargar` de abajo.
+    const empleado = empleados.find((x) => x.id === id);
+    const pasos: { campo: string; cambio: boolean; enviar: () => Promise<unknown> }[] = [
+      { campo: 'jefe inmediato', cambio: fila.aprobadorCorreo !== empleado?.aprobadorCorreo, enviar: () => fijarJefe(id, fila.aprobadorCorreo) },
+      { campo: 'copia', cambio: fila.copiaCorreo !== empleado?.copiaCorreo, enviar: () => fijarCopia(id, fila.copiaCorreo) },
+      { campo: 'soportes', cambio: fila.veAdjuntos !== empleado?.veAdjuntos, enviar: () => fijarVisor(id, fila.veAdjuntos) },
+      { campo: 'registro', cambio: fila.exportaRegistro !== empleado?.exportaRegistro, enviar: () => fijarExportador(id, fila.exportaRegistro) },
+      { campo: 'toda la empresa', cambio: fila.veTodaLaEmpresa !== empleado?.veTodaLaEmpresa, enviar: () => fijarVisorDeEmpresa(id, fila.veTodaLaEmpresa) },
+      { campo: 'KPIs', cambio: fila.veKpis !== empleado?.veKpis, enviar: () => fijarVisorDeKpis(id, fila.veKpis) },
+      { campo: 'segunda firma', cambio: fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma, enviar: () => fijarSegundaFirma(id, fila.requiereSegundaFirma) },
+    ];
+    let guardados = 0;
+    let enCurso = '';
     try {
-      // Un solo botón por fila, como hasta ahora, pero SEIS endpoints detrás: se
-      // llama a cada uno solo si su campo cambió. Secuencial y no en paralelo
-      // porque los que responden el maestro entero tienen que ver ya escrito lo
-      // del anterior — con `Promise.all`, la respuesta que llegara última podría
-      // ser la construida ANTES de los otros cambios.
-      const empleado = empleados.find((x) => x.id === id);
-      if (fila.aprobadorCorreo !== empleado?.aprobadorCorreo) await fijarJefe(id, fila.aprobadorCorreo);
-      if (fila.copiaCorreo !== empleado?.copiaCorreo) await fijarCopia(id, fila.copiaCorreo);
-      if (fila.veAdjuntos !== empleado?.veAdjuntos) await fijarVisor(id, fila.veAdjuntos);
-      // `fijarExportador` devuelve `{ ok }` y no el maestro (a diferencia de los
-      // otros cuatro): no importa, porque igual que ellos su respuesta no se usa
-      // aquí. Quien de verdad resincroniza la fila es el `cargar(id)` de abajo.
-      if (fila.exportaRegistro !== empleado?.exportaRegistro) await fijarExportador(id, fila.exportaRegistro);
-      // Igual que `fijarExportador`: devuelve `{ ok }` y no el maestro, y da lo
-      // mismo porque la fila la resincroniza el `cargar(id)` de abajo.
-      if (fila.veTodaLaEmpresa !== empleado?.veTodaLaEmpresa) await fijarVisorDeEmpresa(id, fila.veTodaLaEmpresa);
-      // La cuarta llave, igual que las dos de arriba: `{ ok }` y la fila la
-      // resincroniza el `cargar(id)`.
-      if (fila.veKpis !== empleado?.veKpis) await fijarVisorDeKpis(id, fila.veKpis);
-      if (fila.requiereSegundaFirma !== empleado?.requiereSegundaFirma)
-        await fijarSegundaFirma(id, fila.requiereSegundaFirma);
+      for (const paso of pasos) {
+        if (!paso.cambio) continue;
+        enCurso = paso.campo;
+        await paso.enviar();
+        guardados++;
+      }
       // Se recarga el maestro entero y no solo esta fila: cambiar el jefe de
       // alguien cambia la SEGUNDA firma de todos los que cuelgan de él, y dejar
       // esas filas con el valor viejo sería mentir sobre a quién sube su
@@ -154,7 +157,24 @@ export default function PanelOrganigrama({ activo }: Props) {
         delete timeoutsExito.current[id];
       }, 2000);
     } catch (e) {
-      actualizar(id, { guardando: false, error: (e as Error).message });
+      // FE-416 — los siete PUT no comparten transacción: si uno falla, los de
+      // antes YA están guardados. Antes la fila se quedaba con la foto vieja del
+      // maestro y lo presentaba todo como pendiente, sin decir qué había entrado.
+      // Ahora se relee el maestro SIN resincronizar esta fila (`cargar()` sin id
+      // conserva lo marcado): lo que entró deja de contar como cambio, lo que no
+      // sigue pendiente, y un segundo Guardar manda solo eso. Un endpoint único
+      // transaccional cerraría también el estado intermedio, pero obligaría a
+      // rehacer siete operaciones de hub-api con su propia transacción y su
+      // registro, y cada llave es independiente: el estado a medias es válido.
+      if (guardados > 0) await cargar();
+      const motivo = `No se pudo guardar «${enCurso}»: ${(e as Error).message}`;
+      actualizar(id, {
+        guardando: false,
+        error:
+          guardados > 0
+            ? `${motivo}. Los cambios anteriores sí se guardaron; pulsa Guardar otra vez para lo que falta.`
+            : motivo,
+      });
     }
   }
 
