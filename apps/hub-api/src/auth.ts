@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { getHubPool } from './db.js';
@@ -339,10 +340,22 @@ interface CronTokenOpts {
   header?: string;
 }
 
+/**
+ * SEC-236 — compara dos secretos en tiempo constante. Con `===` la comparación se
+ * corta en el primer carácter distinto, y el tiempo de respuesta dice cuántos
+ * acertó quien prueba. Se comparan los SHA-256 y no los textos porque
+ * `timingSafeEqual` exige la misma longitud: cortar antes por longitud volvería a
+ * filtrar cuánto mide el secreto.
+ */
+function mismoSecreto(a: string, b: string): boolean {
+  const resumen = (s: string) => createHash('sha256').update(s).digest();
+  return timingSafeEqual(resumen(a), resumen(b));
+}
+
 function checkCronToken(req: Request, res: Response, next: NextFunction, opts: CronTokenOpts): void {
   const esperado = process.env[opts.env ?? 'WO_SALES_CRON_TOKEN'];
   const recibido = req.header(opts.header ?? 'X-WO-Sales-Cron-Token');
-  if (esperado && recibido && recibido === esperado) {
+  if (esperado && recibido && mismoSecreto(recibido, esperado)) {
     next();
     return;
   }

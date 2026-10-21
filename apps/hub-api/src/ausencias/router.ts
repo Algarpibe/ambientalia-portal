@@ -298,9 +298,12 @@ export function createAusenciasRouter(db: Pool): Router {
       const desde = String(req.query.desde ?? '');
       const hasta = String(req.query.hasta ?? '');
       res.json({ diasHabiles: contarDiasHabiles(desde, hasta) });
-    } catch (e) {
+    } catch {
       // Aquí un error solo puede venir de un rango mal formado: es un 400, no un 500.
-      res.status(400).json({ error: 'rango_invalido', detalle: (e as Error).message });
+      // SEC-237 — solo el código, sin `e.message`: era la única ruta que devolvía el
+      // texto interno del error, y nadie lo lee (el portal cuenta los días en
+      // dominio.ts y no llama a esta ruta).
+      res.status(400).json({ error: 'rango_invalido' });
     }
   });
 
