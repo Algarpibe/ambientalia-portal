@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, inject } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { aplicarMigraciones } from './db.js';
+import { aplicarMigraciones, crearPoolMigraciones, CANDADO_MIGRACIONES } from './db.js';
 import { EVENTOS } from './ausencias/types.js';
 import { poolDePrueba, limpiar, sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from './test-db/harness.js';
 
@@ -84,5 +84,67 @@ describe('las migraciones contra una base de verdad', () => {
     }
 
     expect(await eventosDelOutbox(db)).toEqual([...EVENTOS]);
+  });
+});
+
+// DATA-344 — dos arranques de hub-api a la vez (un despliegue que solapa el
+// contenedor nuevo con el viejo, o dos réplicas) aplicaban el DDL en paralelo:
+// sobre una base nueva, dos `CREATE TABLE IF NOT EXISTS` simultáneos chocan en
+// el catálogo y uno de los dos arranques muere. Aquí «otro arranque» es una
+// sesión que tiene cogido el candado de las migraciones.
+describe('el candado de las migraciones', () => {
+  /**
+   * Hay una sesión esperando el candado de las MIGRACIONES. Por el texto de la
+   * consulta y no solo por el tipo de espera: los tests de ausencias corren en
+   * paralelo y también esperan candados consultivos (DATA-336), lo que daría un
+   * verde de casualidad.
+   */
+  async function hayQuienEspera(): Promise<boolean> {
+    const { rows } = await db.query(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'
+          AND query = 'SELECT pg_advisory_lock(hashtext($1))'`,
+    );
+    return (rows[0] as { n: number }).n > 0;
+  }
+
+  it('CANDADO: si otro arranque está migrando, espera a que termine en vez de pisarle', async () => {
+    const otro = await db.connect();
+    const migraciones = crearPoolMigraciones(inject('urlBd'));
+    try {
+      await otro.query('SELECT pg_advisory_lock(hashtext($1))', [CANDADO_MIGRACIONES]);
+      const aplicando = aplicarMigraciones(migraciones);
+
+      // Sondeo corto: la sesión de las migraciones tiene que quedarse esperando
+      // el candado, no empezar a ejecutar DDL.
+      let espera = false;
+      for (let i = 0; i < 30 && !espera; i++) {
+        espera = await hayQuienEspera();
+        if (!espera) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(espera).toBe(true);
+
+      // El otro arranque termina: ahora sí entra, y termina bien.
+      await otro.query('SELECT pg_advisory_unlock(hashtext($1))', [CANDADO_MIGRACIONES]);
+      await expect(aplicando).resolves.toBeUndefined();
+    } finally {
+      otro.release();
+      await migraciones.end();
+    }
+  });
+
+  it('si el otro no suelta el candado, se rinde con el lock_timeout de DATA-340 en vez de colgar', async () => {
+    const otro = await db.connect();
+    const migraciones = crearPoolMigraciones(inject('urlBd'), { esperaCandadoMs: 200 });
+    try {
+      await otro.query('SELECT pg_advisory_lock(hashtext($1))', [CANDADO_MIGRACIONES]);
+      // 55P03 = lock_not_available. Sin el candado de DATA-344 esto resolvía:
+      // las migraciones corrían en paralelo con el otro arranque.
+      await expect(aplicarMigraciones(migraciones)).rejects.toMatchObject({ code: '55P03' });
+    } finally {
+      await otro.query('SELECT pg_advisory_unlock(hashtext($1))', [CANDADO_MIGRACIONES]);
+      otro.release();
+      await migraciones.end();
+    }
   });
 });
