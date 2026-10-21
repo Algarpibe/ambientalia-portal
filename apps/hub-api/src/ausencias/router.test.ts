@@ -7405,3 +7405,17 @@ describe('quien firma los correos de decision', () => {
     expect(cuerpo).not.toContain('Ana Ruiz\nAnalista');
   });
 });
+
+// SEC-237 — era la única ruta que devolvía `e.message` al cliente. Hoy solo
+// repite la fecha mal escrita, pero cualquier otro error de la función saldría
+// tal cual. El código basta: el portal no llama a esta ruta y cuenta los días
+// por su cuenta (dominio.ts).
+describe('GET /ausencias/dias-habiles con un rango mal formado', () => {
+  it('400 con el código y nada más: sin el mensaje interno del error', async () => {
+    const r = await request(app())
+      .get('/api/ausencias/dias-habiles?desde=no-es-fecha&hasta=2026-07-10')
+      .set('Authorization', `Bearer ${token()}`)
+      .expect(400);
+    expect(r.body).toEqual({ error: 'rango_invalido' });
+  });
+});

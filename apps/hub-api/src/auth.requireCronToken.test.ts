@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Request, Response } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { requireCronToken } from './auth.js';
+
+// SEC-236 — se espía `timingSafeEqual` sin cambiar lo que hace: el resto de
+// tests del fichero sigue comparando de verdad.
+vi.mock('node:crypto', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:crypto')>();
+  return { ...original, timingSafeEqual: vi.fn(original.timingSafeEqual) };
+});
 
 function res(): Response {
   const r: Partial<Response> = {};
@@ -92,5 +100,35 @@ describe('requireCronToken({ env, header })', () => {
     requireCronToken(OPTS)(reqConCabecera('X-Ausencias-Cron-Token', 'lo-que-sea'), r, next);
     expect(next).not.toHaveBeenCalled();
     expect(r.status).toHaveBeenCalledWith(401);
+  });
+});
+
+// SEC-236 — con `===` la comparación se corta en el primer carácter distinto, y
+// el tiempo de respuesta dice cuántos acertó quien prueba. Sobre HTTP el ruido de
+// red lo hace impracticable, pero cerrarlo no cuesta nada. Que sea en tiempo
+// constante no se ve en el resultado (pasa o no pasa igual), así que se mira que
+// la decisión salga de `timingSafeEqual`, también cuando las longitudes difieren:
+// cortar antes por longitud volvería a filtrar algo.
+describe('requireCronToken compara en tiempo constante (SEC-236)', () => {
+  beforeEach(() => {
+    process.env.WO_SALES_CRON_TOKEN = 'secreto-123';
+    vi.mocked(timingSafeEqual).mockClear();
+  });
+  afterEach(() => { delete process.env.WO_SALES_CRON_TOKEN; });
+
+  it('con el token correcto', () => {
+    const next = vi.fn();
+    requireCronToken(reqCon('secreto-123'), res(), next);
+    expect(next).toHaveBeenCalled();
+    expect(timingSafeEqual).toHaveBeenCalledTimes(1);
+  });
+
+  it('con un token de OTRA longitud también pasa por la comparación constante', () => {
+    const r = res();
+    const next = vi.fn();
+    requireCronToken(reqCon('corto'), r, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(r.status).toHaveBeenCalledWith(401);
+    expect(timingSafeEqual).toHaveBeenCalledTimes(1);
   });
 });
