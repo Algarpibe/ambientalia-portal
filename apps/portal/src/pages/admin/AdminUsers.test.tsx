@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AdminUsers from './AdminUsers';
 import { authFetch } from '../../lib/api';
@@ -89,5 +89,62 @@ describe('AdminUsers', () => {
     renderAdmin();
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth', { replace: true }));
     expect(clearToken).toHaveBeenCalled();
+  });
+});
+
+// FE-417: sin estado «en curso», un doble clic lanzaba dos peticiones y la segunda
+// mostraba un toast de error aunque la acción ya se hubiera aplicado.
+describe('AdminUsers · doble envío (FE-417)', () => {
+  const lista = [user('1', 'Ana', 'active'), user('2', 'Beto', 'pending')];
+
+  /** La carga de la lista responde al momento; la mutación queda pendiente hasta `soltar`. */
+  function mutacionPendiente() {
+    let soltar!: (r: unknown) => void;
+    const pendiente = new Promise((resolve) => { soltar = resolve; });
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method) return Promise.resolve({ ok: true, json: async () => ({ users: lista, total: 2, page: 1, limit: 50 }) });
+      return pendiente;
+    });
+    return { soltar };
+  }
+  const mutaciones = () => mockFetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method);
+
+  it('Aprobar dos veces seguidas envía UNA petición y el botón queda deshabilitado mientras tanto', async () => {
+    const { soltar } = mutacionPendiente();
+    renderAdmin();
+    const aprobar = await screen.findByRole('button', { name: /Aprobar/ });
+    fireEvent.click(aprobar);
+    fireEvent.click(aprobar);
+    expect(mutaciones()).toHaveLength(1);
+    expect((aprobar as HTMLButtonElement).disabled).toBe(true);
+    // Si falla, el botón vuelve a estar disponible para reintentar.
+    soltar({ ok: false, status: 500, json: async () => ({}) });
+    await waitFor(() => expect((screen.getByRole('button', { name: /Aprobar/ }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it('Desactivar dos veces seguidas envía UNA petición', async () => {
+    mutacionPendiente();
+    renderAdmin();
+    const desactivar = await screen.findByRole('button', { name: /Desactivar/ });
+    fireEvent.click(desactivar);
+    fireEvent.click(desactivar);
+    expect(mutaciones()).toHaveLength(1);
+    expect((desactivar as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('Eliminar dos veces seguidas envía UNA petición', async () => {
+    const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      mutacionPendiente();
+      renderAdmin();
+      await screen.findByText('Ana');
+      const [eliminar] = screen.getAllByRole('button', { name: 'Eliminar usuario' });
+      fireEvent.click(eliminar);
+      fireEvent.click(eliminar);
+      expect(mutaciones()).toHaveLength(1);
+      expect((eliminar as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      confirmar.mockRestore();
+    }
   });
 });

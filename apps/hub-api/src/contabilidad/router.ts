@@ -125,8 +125,11 @@ export function createContabilidadRouter(db: Pool): Router {
       const anio = parseAnio(req.params.year);
       if (anio === null) return void res.status(400).json({ error: 'year inválido' });
       const presupuesto = (req.body as { presupuesto?: unknown }).presupuesto;
-      if (typeof presupuesto !== 'number' || !Number.isFinite(presupuesto) || presupuesto < 0) {
-        return void res.status(400).json({ error: 'presupuesto (number >= 0) requerido' });
+      // FE-415: 0 deja el KPI de cumplimiento sin base (antes entraba con un Guardar
+      // en blanco, `Number('') === 0`). No hay semántica de «borrar» presupuesto que
+      // preservar: null ya se rechazaba y no existe DELETE.
+      if (typeof presupuesto !== 'number' || !Number.isFinite(presupuesto) || presupuesto <= 0) {
+        return void res.status(400).json({ error: 'presupuesto (number > 0) requerido' });
       }
       const userId = getPayload(req)?.user_id ?? null;
       await upsertBudget(db, anio, presupuesto, userId ? String(userId) : null);

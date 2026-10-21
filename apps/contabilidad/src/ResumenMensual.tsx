@@ -85,6 +85,11 @@ function PresupuestoKpi({
 }) {
   const [editando, setEditando] = useState(false);
   const [valor, setValor] = useState('');
+  // FE-415: `Number('') === 0`, así que un Guardar en blanco grababa un presupuesto 0 que
+  // deja sin base el KPI de cumplimiento. Solo se admite un número finito > 0 (el servidor
+  // aplica la misma regla).
+  const numero = valor.trim() === '' ? NaN : Number(valor);
+  const valido = Number.isFinite(numero) && numero > 0;
 
   if (editando) {
     return (
@@ -100,8 +105,10 @@ function PresupuestoKpi({
         />
         <div className="mt-2 flex gap-2">
           <button
-            onClick={() => { const n = Number(valor); if (Number.isFinite(n) && n >= 0) onGuardar(n); setEditando(false); }}
-            className="rounded bg-blue-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-blue-600"
+            onClick={() => { if (!valido) return; onGuardar(numero); setEditando(false); }}
+            disabled={!valido || guardando}
+            title={valido ? undefined : 'Introduce un presupuesto mayor que 0'}
+            className="rounded bg-blue-500 px-2 py-0.5 text-xs font-semibold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
           >Guardar</button>
           <button onClick={() => setEditando(false)} className="rounded px-2 py-0.5 text-xs text-gray-500 hover:text-gray-800">Cancelar</button>
         </div>

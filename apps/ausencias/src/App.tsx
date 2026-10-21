@@ -111,6 +111,12 @@ export default function App() {
   // objetos distintos, y compartir la variable haria que confirmar una apagara
   // el boton de la otra.
   const [retirandoSolicitud, setRetirandoSolicitud] = useState<string | null>(null);
+  // FE-417: qué solicitud tiene la retirada YA ENVIADA, esperando respuesta. Es el
+  // gemelo de `retirando` para las propuestas: sin él, un doble clic en «Sí, retirar»
+  // mandaba dos peticiones y la segunda volvía con 409 a la caja roja aunque la
+  // primera ya hubiera retirado la solicitud. Va aparte de `retirandoSolicitud`, que
+  // solo dice qué fila enseña la confirmación.
+  const [enviandoRetiro, setEnviandoRetiro] = useState<string | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -434,6 +440,8 @@ export default function App() {
    * es además la verdad: la fila sigue existiendo en el registro.
    */
   async function retirarLaSolicitud(s: Solicitud) {
+    if (enviandoRetiro === s.id) return;
+    setEnviandoRetiro(s.id);
     try {
       const retirada = await retirarSolicitud(s.id);
       setMias((ms) => ms.map((m) => (m.id === retirada.id ? retirada : m)));
@@ -443,6 +451,7 @@ export default function App() {
       // La fila se queda como está y el mensaje lo explica.
       setError(mensajeDeModificacion((e as Error).message));
     } finally {
+      setEnviandoRetiro(null);
       setRetirandoSolicitud(null);
     }
   }
@@ -483,6 +492,7 @@ export default function App() {
     // aprobada— este botón desaparece y quedan los de siempre.
     if (puedeRetirarla(s)) {
       const confirmando = retirandoSolicitud === s.id;
+      const enviando = enviandoRetiro === s.id;
       return (
         <div className="flex items-center gap-2">
           {confirmando ? (
@@ -490,15 +500,19 @@ export default function App() {
               <span className="text-xs text-gray-600">¿Retirarla?</span>
               <button
                 type="button"
+                disabled={enviando}
                 onClick={() => void retirarLaSolicitud(s)}
-                className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+                className="rounded-xl bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
-                Sí, retirar
+                {enviando ? 'Retirando…' : 'Sí, retirar'}
               </button>
+              {/* También «No»: con la petición ya en vuelo, cerrar la confirmación no la
+                  cancela y solo escondería el aviso de que sigue en marcha. */}
               <button
                 type="button"
+                disabled={enviando}
                 onClick={() => setRetirandoSolicitud(null)}
-                className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+                className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
               >
                 No
               </button>
@@ -730,6 +744,7 @@ export default function App() {
                       : 'Todavía no has enviado ninguna solicitud.'
                   }
                   acciones={accionesMias}
+                  onError={setError}
                 />
               </div>
 

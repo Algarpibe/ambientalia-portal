@@ -26,6 +26,9 @@ export default function PanelAdjuntos({ activo }: Props) {
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // FE-418: el fallo al bajar un soporte va aparte de `error`, que significa «la lista
+  // no cargó» y por eso oculta la tabla; una descarga fallida no invalida la lista.
+  const [errorDescarga, setErrorDescarga] = useState<string | null>(null);
   const [tipo, setTipo] = useState('');
   const [persona, setPersona] = useState('');
   const [anio, setAnio] = useState('');
@@ -34,6 +37,7 @@ export default function PanelAdjuntos({ activo }: Props) {
     if (!activo) return;
     let vivo = true;
     setCargando(true);
+    setErrorDescarga(null);
     fetchConAdjunto()
       .then((s) => {
         if (!vivo) return;
@@ -84,9 +88,9 @@ export default function PanelAdjuntos({ activo }: Props) {
         en una carpeta externa.
       </p>
 
-      {error && (
+      {(error ?? errorDescarga) && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {error ?? errorDescarga}
         </div>
       )}
 
@@ -141,6 +145,7 @@ export default function PanelAdjuntos({ activo }: Props) {
           solicitudes={filtradas}
           mostrarSolicitante
           vacio="Todavía no hay ninguna solicitud con soporte adjunto."
+          onError={setErrorDescarga}
         />
       )}
     </div>
