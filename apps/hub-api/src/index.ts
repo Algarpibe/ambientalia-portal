@@ -18,6 +18,7 @@ import { crearFuenteAgenda } from './trazabilidad/fuente.js';
 import { getDesk2Pool } from './db-desk2.js';
 import { createDataRouter } from './data.router.js';
 import { createHealthRouter } from './health.js';
+import { cabecerasDeSeguridad } from './cabeceras-seguridad.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -27,6 +28,10 @@ const PORT = Number(process.env.PORT) || 3001;
 // No usar `true` (confiar en todos) porque permitiría falsear la IP y saltarse el
 // rate-limit. Si algún día se antepone otro proxy (p. ej. Cloudflare), subir el número.
 app.set('trust proxy', 1);
+
+// SEC-235 — nosniff y compañía en todas las respuestas. Antes que cualquier
+// app.use: lo que responda un router montado antes saldría sin ellas.
+cabecerasDeSeguridad(app);
 
 // DATA-001 — compresión gzip: los payloads JSON (facturas/pagos/ítems) comprimen
 // ~5-10×, reduciendo mucho el tamaño en la red sin cambiar el dato ni la lógica.
