@@ -173,6 +173,16 @@ const validPassArb = fc.array(passChar, { minLength: 8, maxLength: 30 }).map((a)
 
 const registerInputArb = fc.record({ fullName: validNameArb, email: emailArb, password: validPassArb });
 
+/**
+ * Nombres que el servicio tiene que rechazar por largos (> 100). El filtro es por
+ * el `trim()` del servicio: sin él, uno con espacios en los bordes quedaba en 100
+ * o menos y era válido (ver «generadores de los tests de propiedades»).
+ */
+const longNameArb = fc
+  .array(nameChar, { minLength: 101, maxLength: 130 })
+  .map((a) => a.join(''))
+  .filter((s) => s.trim().length > 100);
+
 const APP_IDS = ['payment-reconciliation', 'inventory', 'customer-valuation'];
 const appListArb = fc.subarray(APP_IDS);
 
@@ -183,9 +193,26 @@ const appListArb = fc.subarray(APP_IDS);
 const HASH_TIMEOUT = 180_000;
 
 // Margen para las propiedades que no hashean (TEST-713): solas tardan
-// milisegundos, pero corren al lado de ficheros pesados y los 5 s por defecto
-// llegaron a quedarse cortos en el CI (la 4.5, 5004 ms el 2026-10-20).
+// milisegundos, pero corren al lado de ficheros pesados. Ojo: el timeout de la
+// 4.5 que motivó subirlo (5004 ms el 2026-10-20, y otra vez a los 30 s) NO era
+// falta de margen sino un fallo real tapado — ver «generadores de los tests de
+// propiedades». Un timeout en una propiedad que no hashea es una pista, no un
+// límite que estirar.
 const PROPIEDAD_TIMEOUT = 30_000;
+
+describe('generadores de los tests de propiedades', () => {
+  // El servicio recorta el nombre ANTES de medirlo (validateRegisterInput), así
+  // que un «nombre largo» que empiece o acabe en espacios puede ser válido. La 4.5
+  // lo daba por inválido: ~1,5 % de sus ejecuciones fallaban, y como esa entrada sí
+  // se hashea, la reducción de fast-check agotaba el tiempo y el fallo se veía como
+  // un timeout (5004 ms el 2026-10-20; 30 s después de subirle el límite).
+  it('un nombre «largo» sigue pasando de 100 caracteres después del trim', () => {
+    fc.assert(
+      fc.property(longNameArb, (nombre) => nombre.trim().length > 100),
+      { numRuns: 20_000 },
+    );
+  });
+});
 
 describe('UserService — coste de bcrypt', () => {
   it('se puede bajar al construir el servicio (solo lo hacen los tests)', async () => {
@@ -334,7 +361,6 @@ describe('UserService — property tests', () => {
       fc.string({ maxLength: 20 }).filter((e) => !isValidEmail(e)),
     );
     const shortPassArb = fc.string({ maxLength: 7 });
-    const longNameArb = fc.array(nameChar, { minLength: 101, maxLength: 130 }).map((a) => a.join(''));
     const badNameArb = fc.oneof(fc.constant(''), fc.constant('   '), longNameArb);
 
     const invalidInputArb = fc.oneof(
@@ -345,7 +371,10 @@ describe('UserService — property tests', () => {
 
     await fc.assert(
       fc.asyncProperty(invalidInputArb, async (input) => {
-        const { repo, service } = makeService();
+        // Coste rápido: una entrada inválida no llega a hashearse. Si algún día una
+        // se colara, con el coste real la reducción de fast-check hashearía en bucle
+        // y el fallo saldría como timeout en vez de con su contraejemplo.
+        const { repo, service } = makeService(COSTE_RAPIDO);
         let err: unknown;
         try {
           await service.register(input);
