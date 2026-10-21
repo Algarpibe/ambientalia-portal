@@ -9,6 +9,12 @@ import type { AdminUser, UserRole } from './types';
 export interface UserRowActionsProps {
   user: AdminUser;
   isSelf: boolean;
+  /**
+   * FE-417: hay una mutación en vuelo para este usuario. Deshabilita las acciones que
+   * lanzan petición (no «Asignar apps», que solo abre el modal) para que un doble clic
+   * no envíe la misma orden dos veces.
+   */
+  busy?: boolean;
   onApprove: (u: AdminUser) => void;
   onDeactivate: (u: AdminUser) => void;
   onReactivate: (u: AdminUser) => void;
@@ -17,23 +23,24 @@ export interface UserRowActionsProps {
   onAssignApps: (u: AdminUser) => void;
 }
 
-const textBtn = 'inline-flex items-center gap-1.5 text-sm font-medium transition-colors';
+const textBtn = 'inline-flex items-center gap-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
 export default function UserRowActions(props: UserRowActionsProps) {
   const { user, isSelf } = props;
+  const busy = props.busy ?? false;
 
   return (
     <div className="flex items-center justify-end gap-3">
       {/* Aprobar (pending) */}
       {user.status === 'pending' && (
-        <button onClick={() => props.onApprove(user)} className={`${textBtn} text-green-600 hover:text-green-700`}>
+        <button onClick={() => props.onApprove(user)} disabled={busy} className={`${textBtn} text-green-600 hover:text-green-700`}>
           <CheckCircle2 className="w-4 h-4" /> Aprobar
         </button>
       )}
 
       {/* Reactivar (inactive) */}
       {user.status === 'inactive' && (
-        <button onClick={() => props.onReactivate(user)} className={`${textBtn} text-green-600 hover:text-green-700`}>
+        <button onClick={() => props.onReactivate(user)} disabled={busy} className={`${textBtn} text-green-600 hover:text-green-700`}>
           <RefreshCw className="w-4 h-4" /> Reactivar
         </button>
       )}
@@ -55,7 +62,8 @@ export default function UserRowActions(props: UserRowActionsProps) {
             aria-label="Cambiar rol"
             value={user.role}
             onChange={(e) => props.onChangeRole(user, e.target.value as UserRole)}
-            className="appearance-none bg-transparent text-sm focus:outline-none cursor-pointer min-w-[8rem]">
+            disabled={busy}
+            className="appearance-none bg-transparent text-sm focus:outline-none cursor-pointer min-w-[8rem] disabled:opacity-50 disabled:cursor-not-allowed">
             <option value="reader">Lector</option>
             <option value="admin">Administrador</option>
           </select>
@@ -65,7 +73,7 @@ export default function UserRowActions(props: UserRowActionsProps) {
 
       {/* Desactivar (active, no en la propia cuenta) */}
       {user.status === 'active' && !isSelf && (
-        <button onClick={() => props.onDeactivate(user)} className={`${textBtn} text-gray-600 hover:text-gray-900`}>
+        <button onClick={() => props.onDeactivate(user)} disabled={busy} className={`${textBtn} text-gray-600 hover:text-gray-900`}>
           <XCircle className="w-4 h-4" /> Desactivar
         </button>
       )}
@@ -75,7 +83,8 @@ export default function UserRowActions(props: UserRowActionsProps) {
         <button
           onClick={() => props.onDelete(user)}
           aria-label="Eliminar usuario"
-          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+          disabled={busy}
+          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           <Trash2 className="w-4 h-4" />
         </button>
       )}

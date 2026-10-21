@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Paperclip } from 'lucide-react';
-import { descargarAdjunto, type Solicitud } from './api';
+import { descargarAdjunto, type Adjunto, type Solicitud } from './api';
 import {
   diasDeLaFila,
   fechasDeLaFila,
@@ -25,6 +26,12 @@ interface Props {
   /** Contenido de la última columna: los botones de decisión, si los hay. */
   acciones?: (s: Solicitud) => React.ReactNode;
   vacio: string;
+  /**
+   * FE-418: dónde contar que falló la descarga de un adjunto. Obligatoria a
+   * propósito, como en `BandejaAprobacion`: cada pantalla decide en qué banner sale,
+   * y el compilador impide que una nueva vuelva a tragarse el fallo.
+   */
+  onError: (mensaje: string) => void;
 }
 
 export default function TablaSolicitudes({
@@ -33,7 +40,26 @@ export default function TablaSolicitudes({
   mostrarDecidida,
   acciones,
   vacio,
+  onError,
 }: Props) {
+  // FE-418: id del adjunto que se está bajando. Apaga su enlace mientras tanto, para
+  // que un doble clic no lance dos descargas y se vea que algo está en marcha.
+  const [descargando, setDescargando] = useState<string | null>(null);
+
+  async function descargar(adjunto: Adjunto) {
+    if (descargando === adjunto.id) return;
+    setDescargando(adjunto.id);
+    try {
+      await descargarAdjunto(adjunto);
+    } catch (e) {
+      // Antes era un `void` sin catch: rechazo sin manejar y la persona sin enterarse.
+      // `descargarAdjunto` ya redacta el mensaje (mensajeDeError); aquí se añade cuál.
+      onError(`No se pudo descargar «${adjunto.nombreArchivo}». ${(e as Error).message}`);
+    } finally {
+      setDescargando(null);
+    }
+  }
+
   if (solicitudes.length === 0) {
     return <p className="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-500">{vacio}</p>;
   }
@@ -88,11 +114,13 @@ export default function TablaSolicitudes({
                   {s.adjunto && (
                     <button
                       type="button"
-                      onClick={() => void descargarAdjunto(s.adjunto!)}
-                      className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      onClick={() => void descargar(s.adjunto!)}
+                      disabled={descargando === s.adjunto.id}
+                      className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:underline disabled:cursor-wait disabled:text-gray-400 disabled:no-underline"
                     >
                       <Paperclip className="h-3.5 w-3.5" />
                       {s.adjunto.nombreArchivo}
+                      {descargando === s.adjunto.id && ' · descargando…'}
                     </button>
                   )}
                 </td>

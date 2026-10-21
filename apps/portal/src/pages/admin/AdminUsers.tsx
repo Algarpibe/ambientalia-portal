@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Users } from 'lucide-react';
 import { authFetch } from '../../lib/api';
@@ -75,9 +75,23 @@ export default function AdminUsers() {
     load(page);
   }, [page, load]);
 
-  /** Ejecuta una mutación, notifica el resultado y refresca la lista. */
+  // FE-417: usuarios con una mutación en vuelo. Sin esto un doble clic lanzaba dos
+  // peticiones y la segunda acababa en toast de error aunque la primera ya hubiera
+  // aplicado el cambio. El ref corta el reenvío en el mismo tick (antes de que el
+  // re-render deshabilite el botón); el estado es lo que pinta la fila deshabilitada.
+  const enCursoRef = useRef(new Set<string>());
+  const [enCurso, setEnCurso] = useState<ReadonlySet<string>>(() => new Set());
+  const marcarEnCurso = useCallback((id: string, activo: boolean) => {
+    if (activo) enCursoRef.current.add(id);
+    else enCursoRef.current.delete(id);
+    setEnCurso(new Set(enCursoRef.current));
+  }, []);
+
+  /** Ejecuta una mutación sobre `userId`, notifica el resultado y refresca la lista. */
   const act = useCallback(
-    async (req: () => Promise<Response>, okMsg: string) => {
+    async (userId: string, req: () => Promise<Response>, okMsg: string) => {
+      if (enCursoRef.current.has(userId)) return;
+      marcarEnCurso(userId, true);
       try {
         const res = await req();
         if (res.status === 401) {
@@ -93,13 +107,15 @@ export default function AdminUsers() {
         await load(page);
       } catch {
         notify('No se pudo conectar con el servidor.', 'error');
+      } finally {
+        marcarEnCurso(userId, false);
       }
     },
-    [load, page, handleExpiredSession],
+    [load, page, handleExpiredSession, marcarEnCurso],
   );
 
   const changeStatus = (u: AdminUser, status: 'active' | 'inactive', okMsg: string) =>
-    act(() => authFetch(`/api/users/${u.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), okMsg);
+    act(u.id, () => authFetch(`/api/users/${u.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), okMsg);
 
   const handleApprove = (u: AdminUser) => changeStatus(u, 'active', 'Usuario aprobado.');
   const handleReactivate = (u: AdminUser) => changeStatus(u, 'active', 'Usuario reactivado.');
@@ -107,12 +123,14 @@ export default function AdminUsers() {
 
   const handleChangeRole = (u: AdminUser, role: UserRole) => {
     if (role === u.role) return;
-    act(() => authFetch(`/api/users/${u.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }), 'Rol actualizado.');
+    act(u.id, () => authFetch(`/api/users/${u.id}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }), 'Rol actualizado.');
   };
 
   const handleDelete = (u: AdminUser) => {
+    // Con la eliminación ya en vuelo no se vuelve a pedir confirmación.
+    if (enCursoRef.current.has(u.id)) return;
     if (!window.confirm(`¿Eliminar permanentemente a ${u.email}? Esta acción no se puede deshacer.`)) return;
-    act(() => authFetch(`/api/users/${u.id}`, { method: 'DELETE' }), 'Usuario eliminado.');
+    act(u.id, () => authFetch(`/api/users/${u.id}`, { method: 'DELETE' }), 'Usuario eliminado.');
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -160,6 +178,7 @@ export default function AdminUsers() {
               users={users}
               loading={loading}
               currentUserId={user_id}
+              busyIds={enCurso}
               onApprove={handleApprove}
               onDeactivate={handleDeactivate}
               onReactivate={handleReactivate}

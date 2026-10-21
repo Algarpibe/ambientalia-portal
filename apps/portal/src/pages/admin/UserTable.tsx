@@ -10,6 +10,8 @@ export interface UserTableProps {
   users: AdminUser[];
   loading: boolean;
   currentUserId: string | null;
+  /** FE-417: usuarios con una mutación en vuelo; sus acciones se pintan deshabilitadas. */
+  busyIds?: ReadonlySet<string>;
   onApprove: (u: AdminUser) => void;
   onDeactivate: (u: AdminUser) => void;
   onReactivate: (u: AdminUser) => void;
@@ -62,6 +64,7 @@ export default function UserTable(props: UserTableProps) {
                   <UserRowActions
                     user={u}
                     isSelf={currentUserId != null && u.id === currentUserId}
+                    busy={props.busyIds?.has(u.id) ?? false}
                     onApprove={props.onApprove}
                     onDeactivate={props.onDeactivate}
                     onReactivate={props.onReactivate}

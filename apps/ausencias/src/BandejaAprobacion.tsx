@@ -484,6 +484,7 @@ export default function BandejaAprobacion({
         mostrarSolicitante
         vacio="No tienes solicitudes pendientes de aprobar."
         acciones={acciones}
+        onError={onError}
       />
 
       {ajenas.length > 0 && (
@@ -501,6 +502,7 @@ export default function BandejaAprobacion({
             solicitudes={ajenas}
             mostrarSolicitante
             vacio=""
+            onError={onError}
             acciones={(s) =>
               destrabando === s.id ? (
                 <div className="flex w-72 flex-col gap-2">
@@ -560,6 +562,7 @@ export default function BandejaAprobacion({
             solicitudes={cambios}
             mostrarSolicitante
             vacio=""
+            onError={onError}
             // Se busca la fila en `cambios` en vez de castear la que llega: es la
             // misma fila, pero así el tipo lo garantiza el compilador y no un
             // `as` que dejaría de ser cierto si algún día esta tabla se compartiera.

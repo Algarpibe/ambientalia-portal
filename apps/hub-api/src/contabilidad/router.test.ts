@@ -132,6 +132,37 @@ describe('PUT /api/contabilidad/budget/:year', () => {
       .send({ presupuesto: 1000 });
     expect(res.status).toBe(403);
   });
+
+  // FE-415: un presupuesto 0 o negativo vacía de sentido el KPI de cumplimiento.
+  // El endpoint no ofrece vía para «borrar» el presupuesto (null ya se rechazaba;
+  // NaN llega como null en JSON), así que solo se admiten números finitos > 0.
+  it.each([
+    ['cero', 0],
+    ['negativo', -5],
+    ['cadena vacía', ''],
+    ['null (NaN serializado)', null],
+  ])('400 si el presupuesto es %s', async (_nombre, presupuesto) => {
+    const pool = fakePool();
+    const res = await request(appConPool(pool))
+      .put('/api/contabilidad/budget/2027')
+      .set('Authorization', `Bearer ${token(['contabilidad'], 'admin')}`)
+      .send({ presupuesto });
+    expect(res.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('200 con un presupuesto positivo y lo persiste', async () => {
+    const pool = fakePool();
+    const res = await request(appConPool(pool))
+      .put('/api/contabilidad/budget/2027')
+      .set('Authorization', `Bearer ${token(['contabilidad'], 'admin')}`)
+      .send({ presupuesto: 4416000000 });
+    expect(res.status).toBe(200);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining('contabilidad_budget'),
+      [2027, 4416000000, USER_ID],
+    );
+  });
 });
 
 describe('app ov-pendientes (acceso acotado)', () => {
