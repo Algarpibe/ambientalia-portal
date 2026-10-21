@@ -16,6 +16,7 @@ import isotipo from '../assets/ambientalia-isotipo.png';
 import { logout } from '../auth';
 import { useAuth } from '../hooks/useAuth';
 import { hasAssignedInCategory } from '../lib/apps';
+import { useDialogo } from '../lib/useDialogo';
 
 // El estado plegado vive en localStorage y NO en el perfil del usuario a propósito:
 // es una preferencia por dispositivo (plegada en el portátil, desplegada en el
@@ -78,21 +79,25 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
     return () => clearTimeout(id);
   }, [mobileOpen]);
 
-  // Con el panel abierto, Escape cierra y el fondo no debe hacer scroll: en un
-  // móvil, arrastrar sobre el panel movería la página de debajo.
+  // Con el panel abierto el fondo no debe hacer scroll: en un móvil, arrastrar
+  // sobre el panel movería la página de debajo.
   useEffect(() => {
     if (!mobileOpen) return;
-    const alPulsar = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onMobileClose?.();
-    };
-    document.addEventListener('keydown', alPulsar);
     const previo = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', alPulsar);
       document.body.style.overflow = previo;
     };
-  }, [mobileOpen, onMobileClose]);
+  }, [mobileOpen]);
+
+  // FE-419 — Escape, foco dentro al abrir y vuelta al botón de menú al cerrar,
+  // con el mismo hook que el resto de diálogos del portal. Se activa cuando el
+  // panel ya está montado (`montado` va un render por detrás de `mobileOpen`) y
+  // se suelta en cuanto se pide cerrar, sin esperar a la animación de salida.
+  const { ref: refPanel } = useDialogo<HTMLElement>({
+    abierto: montado && mobileOpen,
+    onCerrar: () => onMobileClose?.(),
+  });
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -221,10 +226,12 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             }`}
           />
           <aside
+            ref={refPanel}
             role="dialog"
             aria-modal="true"
             aria-label="Menú de navegación"
-            className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white p-6 flex flex-col overflow-y-auto shadow-xl transition-transform duration-200 ease-out ${
+            tabIndex={-1}
+            className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white p-6 flex flex-col overflow-y-auto shadow-xl transition-transform duration-200 ease-out focus:outline-none ${
               visible ? 'translate-x-0' : '-translate-x-full'
             }`}
           >

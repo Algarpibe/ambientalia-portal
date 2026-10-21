@@ -5,6 +5,7 @@ import { useWidgetRegistry } from '../hooks/useWidgetRegistry';
 import { useDashboardLayout } from '../hooks/useDashboardLayout';
 import WidgetGrid from '../components/WidgetGrid';
 import CatalogPanel from '../components/CatalogPanel';
+import { useDialogo } from '../lib/useDialogo';
 
 // Dashboard = panel de widgets configurables del usuario. La navegación a las
 // apps vive en el Sidebar (Herramientas / Aplicaciones), por lo que el dashboard
@@ -30,6 +31,12 @@ export default function Dashboard() {
   const hasWidgets = anchoredWidgetIds.size > 0;
   const deleteTarget = confirmDelete ? allWidgets.find((w) => w.id === confirmDelete) : null;
   const noAppsAssigned = assigned.length === 0;
+  // FE-419 — la confirmación ya era role="dialog" pero sin nombre, sin Escape y
+  // sin mover el foco: con teclado se seguía tabulando por el panel de detrás.
+  const { ref: refConfirmacion, idTitulo: idTituloConfirmacion } = useDialogo({
+    abierto: deleteTarget != null,
+    onCerrar: () => setConfirmDelete(null),
+  });
 
   return (
     <main className="flex-grow bg-transparent p-6 overflow-y-auto">
@@ -46,9 +53,13 @@ export default function Dashboard() {
         <div className="flex items-center gap-4">
           <div className="relative flex-1 md:flex-none">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input type="text" placeholder="Buscar app..." className="input-field pl-10 pr-4 w-full md:w-64" />
+            {/* FE-419: el placeholder no es un nombre accesible (desaparece al
+                escribir y varios lectores no lo leen); de ahí el aria-label. */}
+            <input type="text" placeholder="Buscar app..." aria-label="Buscar app" className="input-field pl-10 pr-4 w-full md:w-64" />
           </div>
-          <button className="p-2.5 bg-white rounded-2xl border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors shadow-soft">
+          <button
+            aria-label="Notificaciones"
+            className="p-2.5 bg-white rounded-2xl border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors shadow-soft">
             <Bell size={20} />
           </button>
         </div>
@@ -156,9 +167,16 @@ export default function Dashboard() {
 
       {/* Confirmación de eliminación */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Eliminar widget</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div
+            ref={refConfirmacion}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={idTituloConfirmacion}
+            tabIndex={-1}
+            className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 focus:outline-none"
+          >
+            <h3 id={idTituloConfirmacion} className="text-lg font-bold text-gray-900 mb-2">Eliminar widget</h3>
             <p className="text-sm text-gray-600 mb-6">¿Quitar «{deleteTarget.name}» de tu panel?</p>
             <div className="flex justify-end gap-2">
               <button

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { API_BASE, setToken } from '../../auth';
@@ -31,6 +31,22 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [registerSuccess, setRegisterSuccess] = useState(false);
+
+  // FE-419 — ids para asociar cada <label> con su campo (htmlFor) y cada campo
+  // con su mensaje de error (aria-describedby). useId los hace únicos aunque el
+  // panel se pinte dos veces; login y registro nunca conviven, así que pueden
+  // compartirlos.
+  const uid = useId();
+  const ids = { fullName: `${uid}-nombre`, email: `${uid}-correo`, password: `${uid}-clave` };
+  const idError = (campo: keyof FieldErrors) => `${ids[campo]}-error`;
+  /** Marca el campo como inválido y lo enlaza con su mensaje, solo si hay error. */
+  const propsError = (campo: keyof FieldErrors) =>
+    fieldErrors[campo] ? { 'aria-invalid': true, 'aria-describedby': idError(campo) } : {};
+  // El ojo dice lo que HARÁ al pulsarlo y aria-pressed su estado actual.
+  const propsOjo = {
+    'aria-label': showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña',
+    'aria-pressed': showPassword,
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -179,21 +195,23 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
         <form onSubmit={handleSubmit} className="flex-1" noValidate>
           <h3 className="text-2xl font-bold text-white mb-8">Crea tu cuenta</h3>
 
-          {/* Error Message (registro) */}
+          {/* Error Message (registro). role="alert" para que se anuncie (FE-419). */}
           {error && (
-            <div className="mb-6 p-4 bg-red-500 bg-opacity-20 border border-red-500 border-opacity-50 rounded-lg">
+            <div role="alert" className="mb-6 p-4 bg-red-500 bg-opacity-20 border border-red-500 border-opacity-50 rounded-lg">
               <p className="text-red-300 text-sm">{error}</p>
             </div>
           )}
 
           {/* Full Name Field */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label htmlFor={ids.fullName} className="block text-sm font-medium text-gray-300 mb-2">
               Nombre completo
             </label>
             <div className="relative group">
               <User className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
               <input
+                id={ids.fullName}
+                {...propsError('fullName')}
                 type="text"
                 name="fullName"
                 value={formData.fullName}
@@ -203,17 +221,19 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 className="w-full pl-12 pr-4 py-3 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10 text-white placeholder-gray-500 transition-all duration-300 focus:outline-none focus:bg-opacity-10 focus:border-opacity-30 focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-20"
               />
             </div>
-            {fieldErrors.fullName && <p className="mt-2 text-sm text-red-300">{fieldErrors.fullName}</p>}
+            {fieldErrors.fullName && <p id={idError('fullName')} role="alert" className="mt-2 text-sm text-red-300">{fieldErrors.fullName}</p>}
           </div>
 
           {/* Email Field */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label htmlFor={ids.email} className="block text-sm font-medium text-gray-300 mb-2">
               Correo electrónico
             </label>
             <div className="relative group">
               <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
               <input
+                id={ids.email}
+                {...propsError('email')}
                 type="email"
                 name="email"
                 value={formData.email}
@@ -223,17 +243,19 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 className="w-full pl-12 pr-4 py-3 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10 text-white placeholder-gray-500 transition-all duration-300 focus:outline-none focus:bg-opacity-10 focus:border-opacity-30 focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-20"
               />
             </div>
-            {fieldErrors.email && <p className="mt-2 text-sm text-red-300">{fieldErrors.email}</p>}
+            {fieldErrors.email && <p id={idError('email')} role="alert" className="mt-2 text-sm text-red-300">{fieldErrors.email}</p>}
           </div>
 
           {/* Password Field */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label htmlFor={ids.password} className="block text-sm font-medium text-gray-300 mb-2">
               Contraseña
             </label>
             <div className="relative group">
               <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
               <input
+                id={ids.password}
+                {...propsError('password')}
                 type={showPassword ? 'text' : 'password'}
                 name="password"
                 value={formData.password}
@@ -243,6 +265,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
               />
               <button
                 type="button"
+                {...propsOjo}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors">
                 {showPassword ? (
@@ -252,7 +275,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 )}
               </button>
             </div>
-            {fieldErrors.password && <p className="mt-2 text-sm text-red-300">{fieldErrors.password}</p>}
+            {fieldErrors.password && <p id={idError('password')} role="alert" className="mt-2 text-sm text-red-300">{fieldErrors.password}</p>}
           </div>
 
           {/* Terms Checkbox */}
@@ -321,21 +344,24 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
         <form onSubmit={handleSubmit} className="flex-1">
           <h3 className="text-2xl font-bold text-white mb-8">Bienvenido de vuelta</h3>
 
-          {/* Error Message */}
+          {/* Error Message. role="alert" para que se anuncie (FE-419): un login
+              fallido no cambia de pantalla y, sin esto, no se enteraba nadie que
+              no lo viera. */}
           {error && (
-            <div className="mb-6 p-4 bg-red-500 bg-opacity-20 border border-red-500 border-opacity-50 rounded-lg">
+            <div role="alert" className="mb-6 p-4 bg-red-500 bg-opacity-20 border border-red-500 border-opacity-50 rounded-lg">
               <p className="text-red-300 text-sm">{error}</p>
             </div>
           )}
 
           {/* Email Field */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label htmlFor={ids.email} className="block text-sm font-medium text-gray-300 mb-2">
               Correo electrónico
             </label>
             <div className="relative group">
               <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
               <input
+                id={ids.email}
                 type="email"
                 name="email"
                 value={formData.email}
@@ -348,12 +374,13 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
 
           {/* Password Field */}
           <div className="mb-8">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label htmlFor={ids.password} className="block text-sm font-medium text-gray-300 mb-2">
               Contraseña
             </label>
             <div className="relative group">
               <Lock className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
               <input
+                id={ids.password}
                 type={showPassword ? 'text' : 'password'}
                 name="password"
                 value={formData.password}
@@ -363,6 +390,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
               />
               <button
                 type="button"
+                {...propsOjo}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors">
                 {showPassword ? (

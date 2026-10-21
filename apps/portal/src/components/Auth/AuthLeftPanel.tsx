@@ -114,11 +114,16 @@ export default function AuthLeftPanel() {
           </p>
         </div>
 
-        {/* Carousel indicators */}
+        {/* Carousel indicators. FE-419: eran botones vacíos, sin nombre; ahora
+            cada uno dice a qué diapositiva lleva y el actual se marca con
+            aria-current, que es lo que el punto ancho comunica a la vista. */}
         <div className="absolute bottom-8 flex gap-2">
           {slides.map((_, index) => (
             <button
               key={index}
+              type="button"
+              aria-label={`Ir a la diapositiva ${index + 1}`}
+              aria-current={index === currentSlide ? 'true' : undefined}
               onClick={() => setCurrentSlide(index)}
               className={`h-2 rounded-full transition-all duration-300 ${
                 index === currentSlide ? 'bg-white w-6' : 'bg-white bg-opacity-40 w-2'

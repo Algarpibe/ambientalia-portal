@@ -158,6 +158,14 @@ describe('Sidebar — navegación móvil (panel deslizante)', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  // FE-419 — el panel ya era un diálogo modal, pero el foco se quedaba detrás:
+  // con teclado había que tabular por toda la página para llegar a los enlaces.
+  it('al abrir, el foco entra en el panel', () => {
+    renderMovil(true);
+    const panel = screen.getByRole('dialog', { name: 'Menú de navegación' });
+    expect(panel.contains(document.activeElement)).toBe(true);
+  });
+
   it('el panel respeta el rol: sin admin no aparece Usuarios', () => {
     setAuth({ isAuthenticated: true, role: 'reader', user_id: 'b', apps: ['contabilidad'] });
     render(

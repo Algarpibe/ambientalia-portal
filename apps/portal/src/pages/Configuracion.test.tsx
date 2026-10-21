@@ -75,4 +75,26 @@ describe('Configuración', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/users/me/password', expect.objectContaining({ method: 'PATCH' })),
     );
   });
+
+  // FE-419 — las <label> de la página no estaban asociadas a sus campos: el
+  // lector de pantalla anunciaba «campo de edición» sin decir cuál.
+  it('cada campo del perfil y de seguridad se alcanza por su etiqueta', () => {
+    render(<Configuracion />);
+    expect((screen.getByLabelText('Nombre Completo') as HTMLInputElement).value).toBe('Alfonso García');
+    expect((screen.getByLabelText('Correo Electrónico') as HTMLInputElement).value).toBe('comercial@x.com');
+    expect(screen.getByLabelText('Contraseña Actual')).toBe(screen.getByPlaceholderText('Tu contraseña actual'));
+    expect(screen.getByLabelText('Nueva Contraseña')).toBe(screen.getByPlaceholderText(/Mínimo/i));
+    expect(screen.getByLabelText('Confirmar Contraseña')).toBe(screen.getByPlaceholderText('Repite la nueva contraseña'));
+  });
+
+  it('el ojo de las contraseñas dice qué hará y refleja su estado', () => {
+    render(<Configuracion />);
+    const mostrar = screen.getAllByRole('button', { name: 'Mostrar contraseñas' });
+    expect(mostrar).toHaveLength(3);
+    expect(mostrar[0].getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(mostrar[0]);
+    const ocultar = screen.getAllByRole('button', { name: 'Ocultar contraseñas' });
+    expect(ocultar[0].getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByLabelText('Nueva Contraseña') as HTMLInputElement).type).toBe('text');
+  });
 });
