@@ -31,6 +31,13 @@ describe('cabecerasDeSeguridad (SEC-235)', () => {
     expect(r.headers['referrer-policy']).toBe('no-referrer');
   });
 
+  it('obliga a HTTPS durante un año (HSTS), sin includeSubDomains', async () => {
+    // El proxy de EasyPanel NO la pone: comprobado contra producción el
+    // 2026-10-21, la respuesta de la API llegaba sin ella.
+    const r = await request(app()).get('/json').expect(200);
+    expect(r.headers['strict-transport-security']).toBe('max-age=31536000');
+  });
+
   it('una respuesta JSON también, y sin anunciar que es Express', async () => {
     const r = await request(app()).get('/json').expect(200);
     expect(r.headers['x-content-type-options']).toBe('nosniff');

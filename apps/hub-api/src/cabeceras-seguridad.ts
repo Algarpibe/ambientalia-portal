@@ -15,7 +15,11 @@ import type { Express } from 'express';
  *    `Cross-Origin-Resource-Policy`, `Cross-Origin-Embedder-Policy`— no aporta en
  *    una API de JSON y ficheros, y alguna (la CSP) puede romper el visor de PDF del
  *    navegador si alguien abre una descarga en una pestaña.
- * HSTS tampoco va aquí: lo pone el proxy de EasyPanel, que es quien termina TLS.
+ *
+ * HSTS SÍ va aquí. Se supuso que lo ponía el proxy de EasyPanel, que es quien
+ * termina TLS, y no: comprobado contra producción el 2026-10-21, la API respondía
+ * sin `Strict-Transport-Security`. Ponerla desde detrás del proxy es seguro: el
+ * navegador solo la tiene en cuenta si la recibe por HTTPS.
  *
  * Tiene que montarse ANTES que cualquier router: lo que responda un router
  * montado antes saldría sin estas cabeceras. Lo vigila cabeceras-seguridad.test.ts.
@@ -31,6 +35,10 @@ export function cabecerasDeSeguridad(app: Express): void {
     // Las URLs de la API llevan el cliente en la query (PRIV-815): que no viajen
     // en el Referer si una respuesta llega a cargar algo de fuera.
     res.setHeader('Referrer-Policy', 'no-referrer');
+    // Un año de HTTPS obligatorio, el mismo plazo que el portal (nginx.conf). Sin
+    // `includeSubDomains`: desde api.ambientalia.cloud solo cubriría subdominios de
+    // la propia API, que no existen, y no aporta nada que no dé ya el `max-age`.
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     next();
   });
 }
