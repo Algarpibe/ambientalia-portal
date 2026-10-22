@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { leerVigencias } from './vigencia-repo.js';
+import { leerCambiosVigencia, leerVigencias } from './vigencia-repo.js';
 
 // La vigencia por marca (lote 11): la 063, su lectura y el CANDADO de quién la escribe.
 const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
@@ -53,6 +53,32 @@ describe('leerVigencias', () => {
     expect([...contratos]).toEqual([['cliente ficticio a', 6], ['cliente ficticio b', null]]);
     expect(sqls).toHaveLength(1);
     expect(sqls[0]).toMatch(/^SELECT 'marca' AS de, clave, dias AS valor, contrato FROM portal\.tmc_marcas_vigencia\s+UNION ALL\s+SELECT 'cliente', clave, meses, FALSE FROM portal\.tmc_contratos$/);
+  });
+});
+
+// DATA-330: el límite del historial viaja como parámetro enlazado, nunca interpolado en el texto SQL.
+describe('leerCambiosVigencia', () => {
+  const capturar = () => {
+    const llamadas: { sql: string; params: unknown[] | undefined }[] = [];
+    const db = { query: async (sql: string, params?: unknown[]) => (llamadas.push({ sql, params }), { rows: [] }) } as unknown as Pool;
+    return { llamadas, db };
+  };
+
+  it('pasa el límite como $n en los parámetros: el SQL no lleva ningún número detrás de LIMIT', async () => {
+    const { llamadas, db } = capturar();
+    await leerCambiosVigencia(db, 20);
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0].sql).toMatch(/ORDER BY id DESC LIMIT \$1$/);
+    expect(llamadas[0].sql).not.toMatch(/LIMIT\s+\d/);
+    expect(llamadas[0].params).toEqual([20]);
+  });
+
+  it('rechaza un límite que no sea un entero positivo antes de tocar la BD (hoy acabaría en un error de sintaxis SQL)', async () => {
+    for (const malo of [Number.NaN, 0, -1, 2.5, Number.POSITIVE_INFINITY]) {
+      const { llamadas, db } = capturar();
+      await expect(leerCambiosVigencia(db, malo), String(malo)).rejects.toThrow(RangeError);
+      expect(llamadas).toHaveLength(0);
+    }
   });
 });
 

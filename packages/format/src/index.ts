@@ -32,6 +32,21 @@ export function formatPct(fraccion: number): string {
   return `${(safeNumber(fraccion) * 100).toFixed(1)}%`;
 }
 
+/**
+ * DATA-334 — `n` redondeado a `decimales`, como número (no como texto), para la
+ * frontera de una exportación: las sumas y restas en coma flotante dejan residuo
+ * (0,1 + 0,2 = 0.30000000000000004) y un exportador a Excel lo escribía tal cual.
+ * Importes a 2 decimales; cantidades a 6, como `sinResiduo` de hub-api (wo-sales):
+ * el residuo vive en el decimal 15-16 y ninguna cantidad real de Zoho llega a seis.
+ *
+ * Excepción al guard de este módulo: NaN e Infinity pasan sin tocar. Esto no
+ * pinta un texto sino que entrega el dato, y convertirlo en 0 escondería una
+ * celda rota bajo un valor verosímil. El `+ 0` evita el -0 de un residuo negativo.
+ */
+export function redondear(n: number, decimales: number): number {
+  return Number.isFinite(n) ? Number(n.toFixed(decimales)) + 0 : n;
+}
+
 /** Lo que Excel o LibreOffice ejecutan como fórmula si abre la celda. */
 const INICIO_DE_FORMULA = /^[=+\-@\t\r]/;
 

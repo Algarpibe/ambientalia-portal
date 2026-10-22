@@ -1,7 +1,7 @@
 // Formateadores compartidos (@suite/format, cierra AI-613). Se conserva este
 // módulo como fachada para no tocar los imports `./format` de la app.
 import { formatCOP } from '@suite/format';
-export { formatCOP, formatPct } from '@suite/format';
+export { formatCOP, formatPct, redondear } from '@suite/format';
 
 /**
  * Importe en su moneda. Hay pagos en USD y EUR, y formatearlos con formatCOP los pintaría

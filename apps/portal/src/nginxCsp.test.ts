@@ -74,3 +74,13 @@ describe('CSP del portal (SEC-234)', () => {
     expect(csp.get('base-uri')).toEqual(["'self'"]);
   });
 });
+
+// INFRA-540 — sin `server_tokens off;` nginx anuncia su versión exacta en la
+// cabecera Server y en sus páginas de error, lo que regala a un atacante qué
+// CVE probar. Debe ser una directiva activa (no comentada) del bloque server.
+describe('nginx no publica su versión (INFRA-540)', () => {
+  it('tiene `server_tokens off;` activo', () => {
+    const activas = conf.split(/\r?\n/).map((l) => l.replace(/#.*$/, '').trim());
+    expect(activas).toContain('server_tokens off;');
+  });
+});

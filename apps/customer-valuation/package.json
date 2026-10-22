@@ -12,6 +12,7 @@
   "dependencies": {
     "@suite/a11y": "*",
     "@suite/auth-client": "*",
+    "@suite/format": "*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

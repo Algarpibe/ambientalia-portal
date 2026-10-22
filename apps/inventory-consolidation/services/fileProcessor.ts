@@ -1,5 +1,6 @@
 import type { RawRowData, ProcessedItem } from '../types';
 import * as XLSX from 'xlsx';
+import { redondear } from '@suite/format';
 
 export const findColumnKey = (columns: string[], aliases: string[]): string | null => {
   for (const alias of aliases) {
@@ -123,12 +124,29 @@ export const processInventoryData = (
     return finalData;
 };
 
+/**
+ * DATA-334 — las filas tal como van al Excel: cada cantidad redondeada a 6 decimales.
+ * Las existencias salen de sumas y restas en coma flotante (contabilidad − comprometido)
+ * y llegaban a la celda con residuo (0.19999999999999998). Seis decimales, como
+ * `sinResiduo` de hub-api: el residuo vive en el decimal 15-16 y ninguna cantidad real
+ * de Zoho llega a seis. Sólo aquí, en la frontera: processInventoryData no cambia.
+ * Los textos (sku, OV) y las celdas vacías ('') pasan tal cual; no muta `data`.
+ */
+export const filasParaExcel = (data: ProcessedItem[]): ProcessedItem[] =>
+  data.map((fila) => {
+    const copia: Record<string, unknown> = { ...fila };
+    for (const [clave, valor] of Object.entries(copia)) {
+      if (typeof valor === 'number') copia[clave] = redondear(valor, 6);
+    }
+    return copia as unknown as ProcessedItem;
+  });
+
 export const downloadExcelFile = (data: ProcessedItem[], filename: string): void => {
   if (data.length === 0) {
     console.warn("No data to download.");
     return;
   }
-  const worksheet = XLSX.utils.json_to_sheet(data);
+  const worksheet = XLSX.utils.json_to_sheet(filasParaExcel(data));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Inventario Desglosado");
   
