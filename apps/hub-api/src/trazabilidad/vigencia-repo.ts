@@ -38,8 +38,13 @@ export async function leerVigenciasConFirma(db: Db): Promise<VigenciaGuardada[]>
   return (rows as Row[]).map((r) => ({ clave: r.clave, marca: r.marca, dias: dias(r.dias), contrato: r.contrato === true, motivo: r.motivo, por: r.por, en: r.en }));
 }
 
-/** Los últimos `limite` cambios de vigencia, el más reciente primero. */
+/**
+ * Los últimos `limite` cambios de vigencia, el más reciente primero. DATA-330: el límite va como parámetro enlazado ($1) y no
+ * interpolado en el SQL, y se exige entero positivo antes de consultar: un NaN o un decimal fallaría igual en Postgres, pero con un
+ * error de tipo opaco; así el fallo dice qué valor llegó. El único llamador pasa la constante CAMBIOS_MAX (marcas-repo.ts).
+ */
 export async function leerCambiosVigencia(db: Db, limite: number): Promise<CambioVigencia[]> {
-  const { rows } = await db.query(`SELECT id, clave, marca, antes, despues, antes_contrato, despues_contrato, motivo, por, en::text AS en FROM portal.tmc_marcas_vigencia_cambios ORDER BY id DESC LIMIT ${Number(limite)}`);
+  if (!Number.isInteger(limite) || limite <= 0) throw new RangeError(`leerCambiosVigencia: el límite debe ser un entero positivo (llegó ${limite})`);
+  const { rows } = await db.query(`SELECT id, clave, marca, antes, despues, antes_contrato, despues_contrato, motivo, por, en::text AS en FROM portal.tmc_marcas_vigencia_cambios ORDER BY id DESC LIMIT $1`, [limite]);
   return (rows as Row[]).map((r) => ({ id: Number(r.id), clave: r.clave, marca: r.marca, antes: valor(r.antes, r.antes_contrato), despues: valor(r.despues, r.despues_contrato), motivo: r.motivo, por: r.por, en: r.en }));
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { AnalysisResult } from '../types';
 import { cn } from './ui';
 import { isUrgentItem, suggestedOrderFor } from '../utils/resultTableLogic';
+import { filasOcSugerida } from '../utils/suggestedPOExport';
 
 interface SuggestedLine {
     sku: string;
@@ -114,21 +115,8 @@ export default function SuggestedPO({ data }: { data: AnalysisResult[] }) {
 
     const exportExcel = async () => {
         const XLSX = await import('xlsx');
-        const rows = groups.flatMap((g) =>
-            g.lines.map((l) => ({
-                Proveedor: g.vendor,
-                SKU: l.sku,
-                'Artículo': l.itemName,
-                Estatus: l.status,
-                'Física disponible': l.physicalAvailable,
-                'Punto de pedido': Math.round(l.reorderPoint),
-                'En camino': l.incoming,
-                'Cantidad sugerida': l.suggestedQty,
-                'Lead time (días)': l.leadTimeDays,
-                'Precio (USD)': l.unitPrice,
-                'Importe estimado (USD)': l.amount,
-            }))
-        );
+        // Filas con el importe y la física ya sin residuo de coma flotante (DATA-334).
+        const rows = filasOcSugerida(groups);
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, ws, 'OC Sugerida');

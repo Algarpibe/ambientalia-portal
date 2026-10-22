@@ -3,6 +3,7 @@ import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { activable } from '@suite/a11y';
 import { fetchFacturasPorEntregar, type FacturaPorEntregar } from './api';
 import DetalleModal from './DetalleModal';
+import { redondear } from './format';
 
 /**
  * Parte de trabajo de bodega: SOLO las facturas cuya mercancía ya facturada sigue sin
@@ -38,7 +39,9 @@ export default function FacturasPorEntregar() {
     );
   }, [filas, filtro]);
 
-  const totalUds = useMemo(() => visibles.reduce((a, f) => a + f.unidadesPorDespachar, 0), [visibles]);
+  // DATA-334 — la suma en coma flotante de cantidades fraccionarias deja residuo
+  // (0,1 + 0,2 = 0.30000000000000004); seis decimales lo borran sin tocar una cantidad real.
+  const totalUds = useMemo(() => redondear(visibles.reduce((a, f) => a + f.unidadesPorDespachar, 0), 6), [visibles]);
   const sel = filas?.find((f) => f.invoiceNumber === detalle);
 
   return (
