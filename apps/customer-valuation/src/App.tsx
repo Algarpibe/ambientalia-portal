@@ -360,8 +360,11 @@ export default function App() {
 
                 <section className="filters card" style={{ marginTop: '16px' }}>
                   <div className="filters__row">
+                    {/* FE-419 — el placeholder no es un nombre accesible (desaparece al escribir
+                        y no todos los lectores lo leen): el buscador lo lleva en aria-label. */}
                     <input
                       className="filters__search"
+                      aria-label="Buscar cliente"
                       placeholder="🔍 Buscar..."
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
@@ -382,32 +385,39 @@ export default function App() {
                     <div className="filters__divider" />
 
                     {/* Filtros de Segmento */}
+                    {/* FE-419 — son interruptores: aria-pressed dice cuál está activo, que
+                        antes solo se veía por el color de la píldora. */}
                     <button
                       className={`pill ${!selectedQuadrant && !selectedSegment ? 'pill--active' : ''}`}
+                      aria-pressed={!selectedQuadrant && !selectedSegment}
                       onClick={() => { setSelectedQuadrant(null); setSelectedSegment(null); }}
                     >
                       Todos: {clients.length}
                     </button>
                     <button
                       className={`pill pill--premium ${selectedSegment === 'Premium' ? 'pill--active' : ''}`}
+                      aria-pressed={selectedSegment === 'Premium'}
                       onClick={() => setSelectedSegment(selectedSegment === 'Premium' ? null : 'Premium')}
                     >
                       Premium: {stats.bySegment['Premium'] || 0}
                     </button>
                     <button
                       className={`pill pill--condicionado ${selectedSegment === 'Valioso Condicionado' ? 'pill--active' : ''}`}
+                      aria-pressed={selectedSegment === 'Valioso Condicionado'}
                       onClick={() => setSelectedSegment(selectedSegment === 'Valioso Condicionado' ? null : 'Valioso Condicionado')}
                     >
                       Valioso Condicionado: {stats.bySegment['Valioso Condicionado'] || 0}
                     </button>
                     <button
                       className={`pill pill--estandar ${selectedSegment === 'Estándar' ? 'pill--active' : ''}`}
+                      aria-pressed={selectedSegment === 'Estándar'}
                       onClick={() => setSelectedSegment(selectedSegment === 'Estándar' ? null : 'Estándar')}
                     >
                       Estándar: {stats.bySegment['Estándar'] || 0}
                     </button>
                     <button
                       className={`pill pill--restringido ${selectedSegment === 'Restringido' ? 'pill--active' : ''}`}
+                      aria-pressed={selectedSegment === 'Restringido'}
                       onClick={() => setSelectedSegment(selectedSegment === 'Restringido' ? null : 'Restringido')}
                     >
                       Restringido: {stats.bySegment['Restringido'] || 0}

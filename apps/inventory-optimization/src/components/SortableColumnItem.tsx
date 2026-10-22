@@ -49,6 +49,8 @@ export const SortableColumnItem: React.FC<SortableColumnItemProps> = ({ id, col,
                         e.stopPropagation();
                         onToggle(col.key);
                     }}
+                    // FE-419 — botón solo-icono (el ojo): el nombre dice qué hará al pulsarlo.
+                    aria-label={`${isVisible ? 'Ocultar' : 'Mostrar'} la columna ${col.label}`}
                     className={cn(
                         "p-0.5 rounded transition-colors",
                         isVisible

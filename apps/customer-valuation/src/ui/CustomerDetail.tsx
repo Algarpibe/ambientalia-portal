@@ -10,7 +10,8 @@
  */
 
 import type { ScoringConfig, ExtendedScoringConfig, ClientProfile, ExtendedClientProfile, MetricDocumentation, ExtendedScoreResult, SalesHistoryMetrics } from '../types';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
+import { activable, useDialogo } from '@suite/a11y';
 
 interface CustomerDetailProps {
   client?: ClientProfile | ExtendedClientProfile;
@@ -84,7 +85,20 @@ function ScoreGauge({ label, score, subtitle, onInfo }: { label: string; score: 
   const percentage = Math.min(100, Math.max(0, score));
 
   return (
-    <div className="score-gauge" onClick={onInfo} style={{ cursor: onInfo ? 'pointer' : 'default' }} title={onInfo ? 'Click para más información' : ''}>
+    <div
+      className="score-gauge"
+      // FE-419 — con `onInfo` el medidor abre la explicación del score: se hace operable con
+      // Enter o Espacio (y alcanzable con Tab) sin cambiarlo a <button>, para no tocar su
+      // maquetación. El nombre resume lo que se ve («V», el valor y el rótulo) y lo que hace.
+      {...(onInfo && {
+        ...activable(onInfo),
+        role: 'button',
+        'aria-haspopup': 'dialog' as const,
+        'aria-label': `Score ${label}${subtitle ? ` (${subtitle})` : ''}: ${score.toFixed(0)}, ver qué significa`,
+      })}
+      style={{ cursor: onInfo ? 'pointer' : 'default' }}
+      title={onInfo ? 'Click para más información' : ''}
+    >
       <div className="score-gauge__label">{label}</div>
       <div className="score-gauge__value" style={{ color }}>
         {score.toFixed(0)}
@@ -192,12 +206,42 @@ function PolicyCard({ policy }: { policy: { creditPolicy: string; creditDescript
   );
 }
 
+// FE-419 — fondo + panel de los dos modales de información de esta vista: role="dialog",
+// aria-modal y el título como nombre (el id llega a `children` para ponerlo en el
+// encabezado), más el teclado y el foco de useDialogo (foco dentro al abrir, Escape, Tab
+// encerrado y foco de vuelta a quien lo abrió). El clic en el fondo sigue cerrando, como antes.
+function MarcoModal({ onCerrar, fondo, panel, children }: {
+  onCerrar: () => void;
+  fondo: string;
+  panel: string;
+  children: (idTitulo: string) => ReactNode;
+}) {
+  const { ref, idTitulo } = useDialogo<HTMLDivElement>({ onCerrar });
+  return (
+    <div className={fondo} onClick={onCerrar}>
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={idTitulo}
+        tabIndex={-1}
+        className={panel}
+        style={{ outline: 'none' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children(idTitulo)}
+      </div>
+    </div>
+  );
+}
+
 function MetricModal({ metric, onClose }: { metric: MetricDocumentation; onClose: () => void }) {
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>×</button>
-        <h3>{metric.name}</h3>
+    <MarcoModal onCerrar={onClose} fondo="modal-overlay" panel="modal-content">
+      {(idTitulo) => (<>
+        {/* FE-419 — botón solo-icono: sin nombre se anunciaba como «×». */}
+        <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        <h3 id={idTitulo}>{metric.name}</h3>
         <div className="modal-section">
           <label>Fórmula:</label>
           <code>{metric.formula}</code>
@@ -215,8 +259,8 @@ function MetricModal({ metric, onClose }: { metric: MetricDocumentation; onClose
           <label>Ejemplo:</label>
           <p>{metric.example}</p>
         </div>
-      </div>
-    </div>
+      </>)}
+    </MarcoModal>
   );
 }
 
@@ -263,7 +307,8 @@ function MetricRow({
         <div className="metric-row__label">
           {label}
           {doc && (
-            <button className="metric-info-btn" onClick={() => setShowModal(true)}>ℹ️</button>
+            // FE-419 — botón solo-icono: el nombre dice de qué métrica abre la explicación.
+            <button className="metric-info-btn" onClick={() => setShowModal(true)} aria-label={`Qué es ${label}`} aria-haspopup="dialog">ℹ️</button>
           )}
         </div>
         <div className="metric-row__value">{displayValue}</div>
@@ -812,16 +857,18 @@ export function CustomerDetail({ client, config, extendedConfig, onBack }: Custo
 
       {/* Modal de información de scores */}
       {showScoreInfo && scoreInfoMap[showScoreInfo as keyof typeof scoreInfoMap] && (
-        <div className="score-info-modal" onClick={() => setShowScoreInfo(null)}>
-          <div className="score-info-modal__content" onClick={(e) => e.stopPropagation()}>
+        <MarcoModal onCerrar={() => setShowScoreInfo(null)} fondo="score-info-modal" panel="score-info-modal__content">
+          {(idTitulo) => (<>
             <button
               className="score-info-modal__close"
               onClick={() => setShowScoreInfo(null)}
+              // FE-419 — botón solo-icono: sin nombre se anunciaba como «✕».
+              aria-label="Cerrar"
             >
               ✕
             </button>
             <div className="score-info-modal__header">
-              <h3>{scoreInfoMap[showScoreInfo as keyof typeof scoreInfoMap].name}</h3>
+              <h3 id={idTitulo}>{scoreInfoMap[showScoreInfo as keyof typeof scoreInfoMap].name}</h3>
               <div className="score-info-modal__label">Score {showScoreInfo}</div>
             </div>
             <div className="score-info-modal__section">
@@ -832,8 +879,8 @@ export function CustomerDetail({ client, config, extendedConfig, onBack }: Custo
               <h4>¿Cómo se calcula?</h4>
               <p className="score-info-modal__formula">{scoreInfoMap[showScoreInfo as keyof typeof scoreInfoMap].formula}</p>
             </div>
-          </div>
-        </div>
+          </>)}
+        </MarcoModal>
       )}
     </div>
   );

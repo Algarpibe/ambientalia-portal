@@ -2,6 +2,7 @@ import React from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { Upload, FileSpreadsheet, X, CheckCircle2 } from 'lucide-react';
+import { useDialogo } from '@suite/a11y';
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -144,6 +145,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ label, accept = '.xlsx,.
                             onFileSelect(null as any);
                         }}
                         className="absolute top-3 left-3 text-slate-300 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-full transition-colors z-20"
+                        // FE-419 — botón solo-icono: nombre accesible explícito, sin depender
+                        // del title (que solo aparece al pasar el ratón).
+                        aria-label="Eliminar archivo"
                         title="Eliminar archivo"
                     >
                         <X size={14} />
@@ -162,15 +166,29 @@ interface ModalProps {
 }
 
 export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
+    // FE-419 — diálogo modal de verdad: foco dentro al abrir (en «Cerrar», el primer
+    // control), Escape cierra, Tab no se escapa a la tabla de detrás y, al cerrar, el foco
+    // vuelve a la fila que lo abrió. El hook va antes del `return null` (las reglas de
+    // hooks) y con `abierto`, porque el componente sigue montado mientras está cerrado.
+    const { ref, idTitulo } = useDialogo<HTMLDivElement>({ abierto: isOpen, onCerrar: onClose });
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div
+                ref={ref}
+                tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={idTitulo}
+                className="bg-white rounded-lg shadow-xl w-full max-w-3xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 focus:outline-none"
+            >
                 <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-                    <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+                    <h3 id={idTitulo} className="text-lg font-semibold text-gray-900">{title}</h3>
                     <button
                         onClick={onClose}
+                        // FE-419 — botón solo-icono (la «✕»): sin esto se anunciaba como «✕».
+                        aria-label="Cerrar"
                         className="text-gray-400 hover:text-gray-600 transition-colors"
                     >
                         ✕

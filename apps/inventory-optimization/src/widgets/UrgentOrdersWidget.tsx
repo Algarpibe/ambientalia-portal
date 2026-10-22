@@ -4,6 +4,7 @@ import { urgentOrders, manufacturersOf, type UrgentRow } from './analysis';
 import { useSortable, sortArrow } from './useSortable';
 import { useColumnOrder } from './useColumnOrder';
 import ColumnOrderMenu from './ColumnOrderMenu';
+import { ariaSort } from '@suite/a11y';
 
 // Widget: tabla "Pedidos Urgentes" (artículos con estado 'Urgente'), con las
 // mismas columnas que la pantalla de la app y un filtro por fabricante.
@@ -110,10 +111,15 @@ export default function UrgentOrdersWidget() {
                 <th
                   key={c.key}
                   onClick={() => toggle(c.key)}
+                  aria-sort={ariaSort(sortKey === c.key, sortDir === 'asc')}
                   title={`Ordenar por ${c.label}`}
                   className={`px-2 py-1.5 font-semibold text-gray-500 border-b border-gray-200 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 ${c.numeric ? 'text-right' : 'text-left'}`}
                 >
-                  {c.label} <span className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
+                  {/* FE-419 — el botón da el foco y el rol; su clic (también Enter y Espacio)
+                      sube al <th>, que ordena. La flecha va oculta: el sentido lo da aria-sort. */}
+                  <button type="button">
+                    {c.label} <span aria-hidden="true" className="text-gray-300">{sortArrow(sortKey === c.key, sortDir)}</span>
+                  </button>
                 </th>
               ))}
             </tr>

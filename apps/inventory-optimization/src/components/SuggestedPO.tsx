@@ -187,9 +187,12 @@ export default function SuggestedPO({ data }: { data: AnalysisResult[] }) {
                         <div className="flex items-center justify-between bg-gray-50 px-4 py-3">
                             <button
                                 onClick={() => toggle(g.vendor)}
+                                // FE-419 — pliega y despliega la tabla del proveedor: aria-expanded
+                                // dice cómo está; el triángulo, que lo decía solo a la vista, va oculto.
+                                aria-expanded={!isCollapsed}
                                 className="flex items-center gap-2 text-left"
                             >
-                                <span className="text-gray-400 text-xs w-3">{isCollapsed ? '▸' : '▾'}</span>
+                                <span aria-hidden="true" className="text-gray-400 text-xs w-3">{isCollapsed ? '▸' : '▾'}</span>
                                 <span className="font-semibold text-gray-900">{g.vendor}</span>
                                 <span className="text-xs text-gray-500">
                                     ({g.lines.length} art. · {g.totalUnits} u.)

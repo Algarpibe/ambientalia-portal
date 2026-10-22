@@ -4,6 +4,7 @@ import { StatusBadge, LevelStatusBadge, cn, Modal } from './ui';
 import SuggestedPO from './SuggestedPO';
 import DeadStock from './DeadStock';
 import { ArrowUpDown, Download, Settings2 } from 'lucide-react';
+import { activable, ariaSort } from '@suite/a11y';
 import {
     KeyboardSensor,
     PointerSensor,
@@ -480,9 +481,13 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             ) : (
             <>
             <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row gap-4 justify-between items-center bg-gray-50">
+                {/* FE-419 — ni el buscador ni los filtros tienen rótulo visible: el placeholder
+                    y la primera opción («Fabricante», «ABC»…) no dan nombre accesible, así que
+                    cada control lo lleva en aria-label. */}
                 <div className="flex flex-wrap gap-3 w-full sm:w-auto">
                     <input
                         type="text"
+                        aria-label="Buscar SKU o nombre"
                         placeholder="Buscar SKU o Nombre..."
                         className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500 w-full sm:w-64"
                         value={filter}
@@ -490,6 +495,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     />
 
                     <select
+                        aria-label="Fabricante"
                         className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                         value={manufacturerFilter}
                         onChange={(e) => setManufacturerFilter(e.target.value)}
@@ -501,6 +507,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     </select>
 
                     <select
+                        aria-label="Categoría"
                         className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                         value={categoryFilter}
                         onChange={(e) => setCategoryFilter(e.target.value)}
@@ -513,6 +520,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
 
                     {activeTab !== 'urgent' && activeTab !== 'current_inventory' && (
                         <select
+                            aria-label="Estatus"
                             className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                             value={statusFilter}
                             onChange={(e) => setStatusFilter(e.target.value)}
@@ -541,6 +549,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     )}
                     {activeTab === 'current_inventory' && (
                         <select
+                            aria-label="Seguimiento"
                             className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                             value={trackingFilter}
                             onChange={(e) => setTrackingFilter(e.target.value as any)}
@@ -553,6 +562,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     {activeTab !== 'urgent' && activeTab !== 'current_inventory' && (
                         <>
                             <select
+                                aria-label="Variabilidad"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={variabilityFilter}
                                 onChange={(e) => setVariabilityFilter(e.target.value)}
@@ -563,6 +573,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <option value="Baja">Baja</option>
                             </select>
                             <select
+                                aria-label="Tipo de demanda"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={demandTypeFilter}
                                 onChange={(e) => setDemandTypeFilter(e.target.value)}
@@ -572,6 +583,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <option value="Anormal">Anormal</option>
                             </select>
                             <select
+                                aria-label="Tipo de valor"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={valueTypeFilter}
                                 onChange={(e) => setValueTypeFilter(e.target.value)}
@@ -582,6 +594,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <option value="Estándar">Estándar</option>
                             </select>
                             <select
+                                aria-label="ABC"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={abcFilter}
                                 onChange={(e) => setAbcFilter(e.target.value)}
@@ -592,6 +605,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <option value="C">C · bajo</option>
                             </select>
                             <select
+                                aria-label="XYZ"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={xyzFilter}
                                 onChange={(e) => setXyzFilter(e.target.value)}
@@ -602,6 +616,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <option value="Z">Z · errática</option>
                             </select>
                             <select
+                                aria-label="Patrón de demanda"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={patternFilter}
                                 onChange={(e) => setPatternFilter(e.target.value)}
@@ -617,6 +632,7 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     {activeTab === 'urgent' && (
                         <>
                             <select
+                                aria-label="Tipo de valor"
                                 className="border border-gray-300 rounded-md px-3 py-2 text-xs focus:ring-indigo-500 focus:border-indigo-500"
                                 value={valueTypeFilter}
                                 onChange={(e) => setValueTypeFilter(e.target.value)}
@@ -642,6 +658,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                     <div className="relative">
                         <button
                             onClick={() => setShowColumnPicker(!showColumnPicker)}
+                            // FE-419 — desplegable no modal: aria-expanded dice si el panel está abierto.
+                            aria-expanded={showColumnPicker}
                             className={cn(
                                 "inline-flex items-center px-4 py-2 border text-xs font-medium rounded-md shadow-sm transition-colors",
                                 showColumnPicker
@@ -758,11 +776,20 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                         col.key === 'status' && !columnWidths[col.key] && "min-w-[150px]"
                                     )}
                                     onClick={() => handleSort(col.key as keyof AnalysisResult)}
+                                    aria-sort={ariaSort(sortField === col.key, sortDirection === 'asc')}
                                 >
-                                    <div className="flex items-center gap-1 truncate">
+                                    {/* FE-419 — el botón hace la cabecera alcanzable con Tab y la
+                                        anuncia como accionable. No lleva onClick propio: su clic
+                                        (también el que generan Enter y Espacio) sube al <th>, que
+                                        sigue ordenando igual, incluido el clic en el relleno. Ocupa
+                                        la celda como el <div> al que sustituye (flex, w-full) y
+                                        repite `uppercase` porque el preflight de Tailwind quita a los
+                                        botones el text-transform que heredarían del <th>. El icono ya
+                                        es aria-hidden (lucide) y el sentido lo da aria-sort. */}
+                                    <button type="button" className="flex w-full items-center gap-1 truncate uppercase">
                                         {col.label}
                                         <ArrowUpDown className="w-3 h-3 text-gray-300" />
-                                    </div>
+                                    </button>
                                     <div
                                         onMouseDown={(e) => {
                                             const th = e.currentTarget.parentElement;
@@ -783,7 +810,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                             filteredData.map((row) => (
                                 <tr
                                     key={row.sku}
-                                    onClick={() => setSelectedItem(row)}
+                                    // FE-419 — la fila abre la justificación también con Enter o
+                                    // Espacio y se anuncia por lo que abre; el clic sigue igual.
+                                    {...activable(() => setSelectedItem(row))}
+                                    aria-label={`Abrir la justificación del artículo ${row.sku}`}
                                     className={cn(
                                         "hover:bg-gray-50 transition-colors cursor-pointer",
                                         row.manualReview && "bg-amber-50/50"
@@ -1083,6 +1113,10 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowHistoryColumnPicker(!showHistoryColumnPicker)}
+                                        // FE-419 — botón solo-icono que despliega un panel en línea
+                                        // (no un diálogo): nombre explícito y si está abierto.
+                                        aria-label="Configurar columnas de historial"
+                                        aria-expanded={showHistoryColumnPicker}
                                         className={cn(
                                             "p-1.5 rounded-md border shadow-sm transition-colors",
                                             showHistoryColumnPicker
