@@ -80,9 +80,10 @@ export function crearPoolMigraciones(url: string, topes: { esperaCandadoMs?: num
 let pool: Pool | null = null;
 
 /**
- * El pool compartido, creado en el primer uso. NO es de solo lectura, aunque
- * así lo decía este comentario: el mismo rol aplica las migraciones y escribe
- * en `portal.*` (DATA-332).
+ * El pool compartido, creado en el primer uso, para las peticiones. NO es de
+ * solo lectura: escribe en `portal.*`. Con la separación de DATA-332 activada,
+ * HUB_DB_URL es la de `portal_app`, que lee y escribe filas pero no puede tocar
+ * el esquema; sin activar, es el mismo rol que aplica las migraciones.
  */
 export function getHubPool(): Pool {
   if (!pool) {
@@ -98,7 +99,7 @@ export function getHubPool(): Pool {
 
 // Migraciones aplicadas en orden al arranque. Son idempotentes (IF NOT EXISTS),
 // así que re-ejecutarlas en cada boot es seguro.
-const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '013_user_state_fk_cascade.sql', '014_drop_salestracker.sql', '015_ausencias.sql', '016_ausencias_historico.sql', '017_saldo_vacaciones.sql', '018_ausencias_cascada.sql', '019_ausencias_outbox_reserva.sql', '020_ausencias_drop_drive.sql', '021_ausencias_copia.sql', '022_ausencias_visores.sql', '023_ausencias_segunda_firma.sql', '024_ausencias_modificaciones.sql', '025_ausencias_evento_ancho.sql', '026_ausencias_evento_calendario.sql', '027_ausencias_correccion_admin.sql', '028_ausencias_outbox_huerfano.sql', '029_saldo_compensatorios.sql', '030_ausencias_otorgamiento.sql', '031_registro_exportadores.sql', '032_ausencias_visor_empresa.sql', '033_ausencias_retirada_y_caducada.sql', '034_token_version.sql', '035_ausencias_baja_empleado.sql', '036_ausencias_hora_permiso.sql', '037_drop_customer_profitability.sql', '038_ausencias_ve_kpis.sql', '039_wo_sales_email_frecuencia.sql', '040_calibraciones.sql', '041_drop_product_sales.sql', '042_trazabilidad_mantenimientos.sql', '043_trazabilidad_plazos.sql', '044_trazabilidad_servicios_tipo.sql', '045_trazabilidad_tipo_combinado.sql', '046_trazabilidad_estados_desk.sql', '047_trazabilidad_estados_historial.sql', '048_trazabilidad_contactos.sql', '049_trazabilidad_roles.sql', '050_trazabilidad_estados_categoria.sql', '051_trazabilidad_agenda_config.sql', '052_trazabilidad_agenda_asignaciones.sql', '053_trazabilidad_agenda_flujo.sql', '054_trazabilidad_agenda_historial.sql', '055_trazabilidad_fst022_congelacion.sql', '056_trazabilidad_maestro_equipos.sql', '057_trazabilidad_calibraciones.sql', '058_trazabilidad_en_seguimiento.sql', '059_trazabilidad_retiros.sql', '060_trazabilidad_exportaciones.sql', '061_trazabilidad_marcas_seguimiento.sql', '062_trazabilidad_pasadas_nocturnas.sql', '063_trazabilidad_vigencia_marcas.sql', '064_trazabilidad_contratos.sql', '065_wo_sales_email_reserva.sql', '066_indices_correo_lower.sql', '067_solicitudes_empleado_restrict.sql'];
+const MIGRATIONS = ['001_create_users.sql', '002_add_avatar.sql', '003_add_preferences.sql', '004_wo_sales_email.sql', '005_drop_wo_sales_recipients.sql', '006_wo_sales_email_sent.sql', '007_contabilidad_overrides.sql', '008_contabilidad_budget.sql', '013_user_state_fk_cascade.sql', '014_drop_salestracker.sql', '015_ausencias.sql', '016_ausencias_historico.sql', '017_saldo_vacaciones.sql', '018_ausencias_cascada.sql', '019_ausencias_outbox_reserva.sql', '020_ausencias_drop_drive.sql', '021_ausencias_copia.sql', '022_ausencias_visores.sql', '023_ausencias_segunda_firma.sql', '024_ausencias_modificaciones.sql', '025_ausencias_evento_ancho.sql', '026_ausencias_evento_calendario.sql', '027_ausencias_correccion_admin.sql', '028_ausencias_outbox_huerfano.sql', '029_saldo_compensatorios.sql', '030_ausencias_otorgamiento.sql', '031_registro_exportadores.sql', '032_ausencias_visor_empresa.sql', '033_ausencias_retirada_y_caducada.sql', '034_token_version.sql', '035_ausencias_baja_empleado.sql', '036_ausencias_hora_permiso.sql', '037_drop_customer_profitability.sql', '038_ausencias_ve_kpis.sql', '039_wo_sales_email_frecuencia.sql', '040_calibraciones.sql', '041_drop_product_sales.sql', '042_trazabilidad_mantenimientos.sql', '043_trazabilidad_plazos.sql', '044_trazabilidad_servicios_tipo.sql', '045_trazabilidad_tipo_combinado.sql', '046_trazabilidad_estados_desk.sql', '047_trazabilidad_estados_historial.sql', '048_trazabilidad_contactos.sql', '049_trazabilidad_roles.sql', '050_trazabilidad_estados_categoria.sql', '051_trazabilidad_agenda_config.sql', '052_trazabilidad_agenda_asignaciones.sql', '053_trazabilidad_agenda_flujo.sql', '054_trazabilidad_agenda_historial.sql', '055_trazabilidad_fst022_congelacion.sql', '056_trazabilidad_maestro_equipos.sql', '057_trazabilidad_calibraciones.sql', '058_trazabilidad_en_seguimiento.sql', '059_trazabilidad_retiros.sql', '060_trazabilidad_exportaciones.sql', '061_trazabilidad_marcas_seguimiento.sql', '062_trazabilidad_pasadas_nocturnas.sql', '063_trazabilidad_vigencia_marcas.sql', '064_trazabilidad_contratos.sql', '065_wo_sales_email_reserva.sql', '066_indices_correo_lower.sql', '067_solicitudes_empleado_restrict.sql', '068_permisos_portal_app.sql'];
 
 function migrationsDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'users', 'migrations');
@@ -150,6 +151,20 @@ export async function aplicarMigraciones(db: Pool): Promise<void> {
 export const CANDADO_MIGRACIONES = 'hub-api:migraciones';
 
 /**
+ * DATA-332 — con qué conexión corren las migraciones y el seed. Con
+ * HUB_MIGRATION_DB_URL, con la suya: el rol dueño de `portal`, con DDL, que solo
+ * se usa al arrancar. Sin ella, con la de las peticiones, como siempre: activar
+ * la separación no puede ser requisito para arrancar, así que el código se
+ * despliega antes y la separación se enciende después, en EasyPanel.
+ *
+ * Vacía o en blanco cuenta como ausente: una variable a medio quitar no debe
+ * tumbar el arranque con un «connection string vacío».
+ */
+export function urlMigraciones(principal: string, propia: string | undefined): string {
+  return propia?.trim() || principal;
+}
+
+/**
  * Inicialización de BD en el arranque (Requirements 6.3, 6.5):
  *  - Si HUB_DB_URL no está definida → termina el proceso (< 5 s).
  *  - Si la BD no es alcanzable → termina el proceso con mensaje de error.
@@ -172,7 +187,14 @@ export async function initDb(): Promise<void> {
 
   // Migraciones y seed por su propio pool, sin el tope de consulta del
   // principal (ver crearPoolMigraciones). Se cierra al acabar, falle o no.
-  const migraciones = crearPoolMigraciones(process.env.HUB_DB_URL);
+  // El log dice SI hay rol propio, nunca la URL: lleva la contraseña.
+  const propia = process.env.HUB_MIGRATION_DB_URL;
+  console.log(
+    propia?.trim()
+      ? 'Migraciones con su propio rol (HUB_MIGRATION_DB_URL).'
+      : 'Migraciones con el rol de las peticiones (sin HUB_MIGRATION_DB_URL).',
+  );
+  const migraciones = crearPoolMigraciones(urlMigraciones(process.env.HUB_DB_URL, propia));
   try {
     await aplicarMigraciones(migraciones);
     await seedUsersFromEnv(migraciones);

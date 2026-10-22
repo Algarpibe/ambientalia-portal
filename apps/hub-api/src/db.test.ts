@@ -6,6 +6,7 @@ import {
   HUB_TIMEOUT_CONSULTA_MS,
   crearPoolHub,
   crearPoolMigraciones,
+  urlMigraciones,
 } from './db.js';
 
 // DATA-331 — el pool principal es el de TODO hub-api, login incluido
@@ -54,5 +55,24 @@ describe('el pool de las migraciones', () => {
     } finally {
       await pool.end();
     }
+  });
+});
+
+// DATA-332 — las migraciones pueden ir con su propio rol (el dueño del esquema,
+// con DDL) mientras las peticiones van con uno que solo lee y escribe filas.
+describe('con qué conexión corren las migraciones', () => {
+  const PROPIA = 'postgres://migrador_ficticio:clave-ficticia@hub-ficticio.invalid:5432/zoho-hub';
+
+  it('con HUB_MIGRATION_DB_URL, usan esa y no la de las peticiones', () => {
+    expect(urlMigraciones(URL_FICTICIA, PROPIA)).toBe(PROPIA);
+  });
+
+  it('sin ella, la de siempre: activar la separación no puede ser requisito para arrancar', () => {
+    expect(urlMigraciones(URL_FICTICIA, undefined)).toBe(URL_FICTICIA);
+  });
+
+  it('vacía o en blanco cuenta como ausente: una variable a medio quitar en EasyPanel no tumba el arranque', () => {
+    expect(urlMigraciones(URL_FICTICIA, '')).toBe(URL_FICTICIA);
+    expect(urlMigraciones(URL_FICTICIA, '   ')).toBe(URL_FICTICIA);
   });
 });
