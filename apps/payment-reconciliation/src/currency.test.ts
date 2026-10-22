@@ -1,5 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { BASE_REPORTING_CURRENCY, currencyOf, isCop, formatMoney } from './currency';
+import { formatCOP } from '@suite/format';
+import { BASE_REPORTING_CURRENCY, currencyOf, isCop, formatMoney, formatTableAmount } from './currency';
+
+// ARQ-611 — el peso se pinta en todo el portal con formatCOP de @suite/format; la
+// rama COP de formatMoney delega en él para que no vuelva a haber dos formatos.
+// El espacio tras "$" es duro (U+00A0).
+describe('formatMoney en pesos (ARQ-611)', () => {
+  it('la rama COP es exactamente formatCOP', () => {
+    expect(formatMoney(1234567.6)).toBe('$\u00a01.234.568');
+    for (const n of [0, -1234.4, 1234567.6, NaN, Infinity]) {
+      expect(formatMoney(n, 'COP')).toBe(formatCOP(n));
+    }
+  });
+});
+
+// ARQ-611 — la tabla principal pintaba los pesos en en-US con código
+// ("COP  1,234,568"), distinto del resto de la app. Los pesos pasan a formatCOP;
+// las demás divisas (≈1 % de las facturas) conservan su texto de siempre, porque
+// la pantalla de dólares queda fuera de este cambio.
+describe('formatTableAmount', () => {
+  it('pesos como formatCOP, no como "COP  1,234,568"', () => {
+    expect(formatTableAmount(1234567.6, 'COP')).toBe('$\u00a01.234.568');
+    expect(formatTableAmount(NaN, 'COP')).toBe('$\u00a00');
+  });
+
+  it('otra divisa conserva el formato en-US con código, sin decimales', () => {
+    // El espacio normal + el duro vienen del `.replace(código, código + ' ')` de siempre.
+    expect(formatTableAmount(1234.5, 'USD')).toBe('USD \u00a01,235');
+    expect(formatTableAmount(-1234.5, 'USD')).toBe('-USD \u00a01,235');
+  });
+});
 
 describe('currency helpers', () => {
   it('reports in COP', () => {

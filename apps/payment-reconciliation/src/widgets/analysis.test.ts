@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { summarize, pendingByCustomer, openInvoices } from './analysis';
+import { summarize, pendingByCustomer, openInvoices, formatPercent } from './analysis';
+
+// ARQ-611 — formatPercent era una copia de formatPct de @suite/format con guard
+// `value || 0`, que tapaba NaN pero no Infinity: salía "Infinity%" en el widget.
+describe('formatPercent (widgets de conciliación)', () => {
+  it('fracción a porcentaje con un decimal, como formatPct', () => {
+    expect(formatPercent(0.1234)).toBe('12.3%');
+  });
+
+  it('NaN e Infinity se pintan como 0.0%, no como "Infinity%"', () => {
+    expect(formatPercent(NaN)).toBe('0.0%');
+    expect(formatPercent(Infinity)).toBe('0.0%');
+  });
+});
 
 const inv = (over: Record<string, unknown>) => ({
   invoiceNumber: 'F1', clientName: 'ACME', invoiceDate: '2026-01-01', dueDate: '2026-02-01',

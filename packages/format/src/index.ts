@@ -12,22 +12,32 @@ export function safeNumber(n: number): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Pesos colombianos sin decimales. Ej: $1.234.567 */
+/**
+ * Pesos colombianos sin decimales. Ej: 1234567.6 → "$ 1.234.568".
+ * El espacio tras "$" es duro (U+00A0): un test que compare el texto exacto
+ * tiene que escribirlo como \u00a0.
+ */
 export function formatCOP(n: number): string {
   return cop.format(safeNumber(n));
 }
 
-/** Dólares sin decimales. Ej: $1,234,568 */
+/**
+ * Dólares sin decimales, con locale es-CO. Ej: 1234567.6 → "US$ 1.234.568"
+ * (espacio duro U+00A0, punto de miles). No es el "$1,234,568" de en-US.
+ */
 export function formatUSD(n: number): string {
   return usd.format(safeNumber(n));
 }
 
-/** USD compacto para ejes/tooltips. Ej: $1,2 M / $980 K */
+/** USD compacto para ejes/tooltips. Ej: 1234567 → "US$1,2 M" / 980000 → "US$980 k" */
 export function formatCompactUSD(n: number): string {
   return usdCompact.format(safeNumber(n));
 }
 
-/** Fracción 0..1 como porcentaje con un decimal. Ej: 0.1234 → "12.3%" */
+/**
+ * Fracción 0..1 como porcentaje con un decimal. Ej: 0.1234 → "12.3%".
+ * toFixed no usa locale: el decimal es punto, no la coma de es-CO.
+ */
 export function formatPct(fraccion: number): string {
   return `${(safeNumber(fraccion) * 100).toFixed(1)}%`;
 }

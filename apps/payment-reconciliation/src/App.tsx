@@ -14,7 +14,7 @@ import { activable, ariaSort } from '@suite/a11y';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 import DetalleModal from './DetalleModal';
 import { LoadErrorState } from './components/LoadErrorState';
-import { currencyOf } from './currency';
+import { currencyOf, formatTableAmount } from './currency';
 
 type ActiveView = 'reconciliation' | 'analysis' | 'general' | 'kpis';
 
@@ -695,14 +695,14 @@ function App() {
                                 }
                                 if (column === 'total') {
                                   return (
-                                    <td key={column} className="px-6 py-4 text-slate-900 font-semibold">{row.total.toLocaleString('en-US', { style: 'currency', currency: currencyOf(row), currencyDisplay: 'code', maximumFractionDigits: 0 }).replace(currencyOf(row), currencyOf(row) + ' ')}</td>
+                                    <td key={column} className="px-6 py-4 text-slate-900 font-semibold">{formatTableAmount(row.total, currencyOf(row))}</td>
                                   );
                                 }
                                 if (column === 'balance') {
                                   return (
                                     <td key={column} className="px-6 py-4">
                                       <span className={`text-sm px-2 py-1 rounded-full font-medium ${row.balance === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                        {row.balance.toLocaleString('en-US', { style: 'currency', currency: currencyOf(row), currencyDisplay: 'code', maximumFractionDigits: 0 }).replace(currencyOf(row), currencyOf(row) + ' ')}
+                                        {formatTableAmount(row.balance, currencyOf(row))}
                                       </span>
                                     </td>
                                   );
