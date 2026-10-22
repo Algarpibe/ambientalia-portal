@@ -13,6 +13,8 @@ dist/
 dist-ssr/
 build/
 *.tsbuildinfo
+# TEST-712 — informes de cobertura de Vitest
+coverage/
 *.pyc
 
 # Environment files
