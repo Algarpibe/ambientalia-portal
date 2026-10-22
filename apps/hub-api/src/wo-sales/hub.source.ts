@@ -219,9 +219,29 @@ export function pendientePorFacturar(
   facturada: number,
   cancelada: number
 ): { cantidad: number; incluir: boolean } {
-  const pendiente = pedida - facturada - cancelada;
+  // Redondeada ANTES de decidir si entra: sin eso, una línea facturada del todo con
+  // cantidades fraccionarias podía quedar en un residuo positivo (1e-16) y colarse en
+  // el archivo con cantidad «casi cero».
+  const pendiente = sinResiduo(pedida - facturada - cancelada);
   const incluir = !(Number.isFinite(pendiente) && pendiente <= 0);
   return { cantidad: pendiente, incluir };
+}
+
+/**
+ * DATA-334 — quita el residuo del coma flotante de una cantidad calculada en JS.
+ *
+ * El paquete de la réplica convierte todo `numeric` de Postgres en float64
+ * (`setTypeParser(1700, parseFloat)`, a nivel de proceso; vive en
+ * @algarpibe/zoho-sync y no aquí), así que restar cantidades fraccionarias deja
+ * cosas como 10,2 − 7 = 3.1999999999999993, y el builder escribe la cantidad TAL
+ * CUAL en el archivo que se carga en World Office.
+ *
+ * Seis decimales: el residuo está en el decimal 15-16, así que redondear a seis no
+ * cambia ninguna cantidad real de Zoho (que usa como mucho unos pocos) y lo borra.
+ * NaN e Infinity pasan sin tocar: el builder los caza como 'valor_no_numerico'.
+ */
+export function sinResiduo(n: number): number {
+  return Number.isFinite(n) ? Number(n.toFixed(6)) : n;
 }
 
 /**
@@ -231,7 +251,7 @@ export function pendientePorFacturar(
  * NaN se propaga para que el builder lo cace.
  */
 export function facturadaEnviada(facturada: number, sinEnviar: number): number {
-  return Math.max(0, facturada - sinEnviar);
+  return Math.max(0, sinResiduo(facturada - sinEnviar));
 }
 
 export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): SalesOrderSource {
@@ -282,7 +302,8 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
         const facturada = facturadaEnviada(aNumero(f.cantidad_facturada), aNumero(f.cantidad_sin_enviar));
         const cancelada = aNumero(f.cantidad_cancelada);
         const pedida = aNumeroObligatorio(f.quantity);
-        if (Number.isFinite(facturada)) ov.cantidadFacturada += facturada;
+        // Sin residuo en cada suma (DATA-334): este total sale en el aviso del archivo.
+        if (Number.isFinite(facturada)) ov.cantidadFacturada = sinResiduo(ov.cantidadFacturada + facturada);
         const { cantidad, incluir } = pendientePorFacturar(pedida, facturada, cancelada);
         if (!incluir) continue;
 
