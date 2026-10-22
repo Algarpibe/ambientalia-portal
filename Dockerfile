@@ -22,8 +22,20 @@ COPY apps/ausencias/package*.json ./apps/ausencias/
 COPY apps/calibraciones/package*.json ./apps/calibraciones/
 COPY apps/trazabilidad-mantenimientos/package*.json ./apps/trazabilidad-mantenimientos/
 
-# Instalar dependencias globales del monorepo
-RUN npm install
+# Instalar dependencias globales del monorepo.
+#
+# INFRA-536 — `npm ci` y no `npm install`: instala EXACTAMENTE lo que dice
+# package-lock.json, las mismas versiones con las que pasó el CI, y falla si el
+# lockfile no cuadra con los package.json en vez de «arreglarlo» en silencio
+# dentro de la imagen. Con `npm install` el build podía acabar con versiones
+# que nadie había probado.
+#
+# Que falten aquí los package.json de apps/hub-api y de packages/* no estorba:
+# npm instala lo de los workspaces presentes. Lo de hub-api, incluido el paquete
+# privado @algarpibe/zoho-sync que pide token, se queda fuera; los packages/*
+# llegan con el `COPY . .` de abajo (verificado construyendo la imagen el
+# 2026-10-22).
+RUN npm ci
 
 # Copiar el resto del código fuente
 COPY . .
