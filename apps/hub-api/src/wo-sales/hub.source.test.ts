@@ -115,3 +115,38 @@ describe('facturas sin enviar siguen pendientes para World Office', () => {
     expect(ov.cantidadFacturada).toBe(0);
   });
 });
+
+// DATA-334 — el paquete de la réplica convierte todo `numeric` de Postgres en
+// float64 (`setTypeParser(1700, parseFloat)`), y la cantidad pendiente se calcula
+// restando en JavaScript. Con cantidades fraccionarias la resta deja el residuo
+// del coma flotante —10,2 − 7 = 3.1999999999999993— y el builder lo escribía TAL
+// CUAL en el archivo que se carga en World Office.
+describe('cantidades fraccionarias sin residuo de coma flotante (DATA-334)', () => {
+  it('pendientePorFacturar devuelve la resta exacta', () => {
+    expect(pendientePorFacturar(10.2, 7, 0).cantidad).toBe(3.2);
+    expect(pendientePorFacturar(1.1, 0.2, 0.3).cantidad).toBe(0.6);
+  });
+
+  it('facturadaEnviada devuelve la resta exacta', () => {
+    expect(facturadaEnviada(10.3, 0.1)).toBe(10.2);
+  });
+
+  it('lo ya facturado de la OV (el aviso del archivo) se acumula sin residuo', async () => {
+    const linea = (id: string, facturada: string) => ({
+      salesorder_id: '1', salesorder_number: 'OV-2026-200', fecha: '2026-10-01', customer_name: 'Cliente',
+      currency_code: 'COP', nit: '800153696', fecha_entrega: null, forma_pago: null, plazo_pago: '15',
+      descuento_cabecera: null, line_item_id: id, quantity: 5, rate: 1000, sku: `SKU-${id}`,
+      item_name: 'Art', descuento: null, cantidad_facturada: facturada, cantidad_cancelada: null,
+      cantidad_sin_enviar: null, centro_costos: null,
+    });
+    const db = { query: async () => ({ rows: [linea('L1', '0.1'), linea('L2', '0.2')] }) } as never;
+    const [ov] = await createHubSalesOrderSource(db, DEFAULT_CONFIG).ordenesVivas({ desde: '2000-01-01', hasta: '2026-12-31' });
+    expect(ov.cantidadFacturada).toBe(0.3);
+    expect(ov.lineas.map((l) => l.cantidad)).toEqual([4.9, 4.8]);
+  });
+
+  it('un dato corrupto sigue propagándose como NaN para que el builder lo avise', () => {
+    expect(Number.isNaN(pendientePorFacturar(NaN, 0, 0).cantidad)).toBe(true);
+    expect(Number.isNaN(facturadaEnviada(NaN, 0))).toBe(true);
+  });
+});

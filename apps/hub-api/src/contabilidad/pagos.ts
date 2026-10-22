@@ -58,7 +58,7 @@ export interface FilaPago {
   payment_mode: string | null;
   reference_number: string | null;
   currency_code: string | null;
-  amount: number | string | null;          // numeric de pg llega como texto
+  amount: number | string | null;          // numeric llega como float (DATA-334); string si viene del raw
   unused_amount: number | string | null;
   invoice_number: string | null;           // null: el pago no se aplicó a ninguna factura
   amount_applied: number | string | null;

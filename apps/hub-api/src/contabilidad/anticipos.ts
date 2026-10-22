@@ -14,7 +14,7 @@ export interface AnticipoRow {
   estado: string | null;
   cliente: string | null;
   moneda: string | null;
-  cobrado: number | string | null;   // payment_made (numeric de pg llega como texto)
+  cobrado: number | string | null;   // payment_made: numeric llega como float (DATA-334); string si viene del raw
   aplicado: number | string | null;  // payment_drawn
   referencia: string | null;
   descripciones: string[];
