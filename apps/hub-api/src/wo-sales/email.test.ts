@@ -163,7 +163,9 @@ describe('065_wo_sales_email_reserva.sql', () => {
     expect(sinComentarios).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 064, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'064_trazabilidad_contratos\.sql',\s*'065_wo_sales_email_reserva\.sql'\]/);
+  // Ya no es la última (la 066 va detrás): basta con que esté justo detrás de la
+  // 064, como se relajaron en su día las comprobaciones de la 062 y la 063.
+  it('está apuntada en MIGRATIONS, detrás de la 064', () => {
+    expect(fuente('../db.ts')).toMatch(/'064_trazabilidad_contratos\.sql',\s*'065_wo_sales_email_reserva\.sql'/);
   });
 });
