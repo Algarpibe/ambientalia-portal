@@ -146,6 +146,33 @@ jobs:
       # los build-args — publicaría el token junto a la imagen.
       #
       # La imagen es PRIVADA: lleva dentro el código de @algarpibe/zoho-sync.
+      #
+      # INFRA-536 — primero se construye y se ARRANCA en local, antes de publicar
+      # nada. Sin HUB_DB_URL, hub-api escribe «HUB_DB_URL no está definida» y sale;
+      # pero Node resuelve TODOS los `import` antes de ejecutar una sola línea, así
+      # que llegar a ese mensaje prueba que la imagen trae cada dependencia en su
+      # sitio. Un `npm ci` que dejara algo fuera, o un node_modules copiado a la
+      # carpeta equivocada, revientan aquí con ERR_MODULE_NOT_FOUND y no en
+      # producción. El paso de publicar reutiliza la caché de este build.
+      - name: Construir la imagen para probarla
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/hub-api/Dockerfile
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          sbom: false
+          build-args: |
+            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
+          tags: hub-api:prueba
+
+      - name: Prueba de humo — la imagen arranca y carga todas sus dependencias
+        run: |
+          salida=$(docker run --rm hub-api:prueba 2>&1 || true)
+          echo "$salida"
+          echo "$salida" | grep -q "HUB_DB_URL no está definida" || { echo "::error::La imagen no llegó a arrancar"; exit 1; }
+
       - name: Construir (y en main, publicar) la imagen
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
