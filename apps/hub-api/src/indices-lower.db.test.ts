@@ -55,32 +55,49 @@ describe('índices en minúsculas para las búsquedas por correo (DATA-343)', ()
     ).toContain('idx_empleados_aprobador_lower');
   });
 
-  // Las bandejas de pendientes NO necesitan índice en minúsculas: el parcial por
+  // Las bandejas de pendientes NO necesitan índice en minúsculas: un índice por
   // estado ya las deja en lo pendiente (ver la 066). Esto vigila que lo sigan
   // usando, para que un cambio en esas consultas no las devuelva a recorrer la
   // tabla entera sin que nadie se entere.
-  it('las bandejas de pendientes siguen usando su índice parcial por estado', async () => {
-    expect(
-      await indicesDelPlan(
-        `SELECT id FROM portal.solicitudes_ausencia s
-          WHERE s.estado = 'pendiente' AND lower(s.aprobador_correo) = lower($1)`,
-        [CORREO],
-      ),
-    ).toContain('idx_solicitudes_aprobador');
-    expect(
-      await indicesDelPlan(
-        `SELECT id FROM portal.solicitudes_ausencia s
-          WHERE s.estado = 'pendiente_2' AND lower(s.segundo_aprobador_correo) = lower($1)`,
-        [CORREO],
-      ),
-    ).toContain('idx_solicitudes_segundo_aprobador');
-    expect(
-      await indicesDelPlan(
-        `SELECT id FROM portal.solicitud_modificaciones m
-          WHERE m.estado = 'pendiente' AND lower(m.aprobador_correo) = lower($1)`,
-        [CORREO],
-      ),
-    ).toContain('idx_modificaciones_aprobador');
+  //
+  // Se acepta CUALQUIERA de los índices que acotan por ese estado, no uno en
+  // concreto. Ninguno cubre `lower(correo)`, así que para el planificador valen
+  // lo mismo, y cuál elige depende de las estadísticas que dejen los tests
+  // anteriores en la base compartida. Exigir el parcial hizo fallar el CI de main
+  // el 2026-10-22 (cogió `idx_solicitudes_estado`) con el mismo código que había
+  // pasado en el PR. Lo que importa —no recorrer la tabla— se cumple con
+  // cualquiera de ellos.
+  async function usaAlgunoDe(sql: string, aceptables: string[]): Promise<void> {
+    const usados = await indicesDelPlan(sql, [CORREO]);
+    expect(usados.filter((i) => aceptables.includes(i)), `plan con ${JSON.stringify(usados)}`).not.toEqual([]);
+  }
+
+  it('las bandejas de pendientes siguen usando un índice que las acota por estado', async () => {
+    await usaAlgunoDe(
+      `SELECT id FROM portal.solicitudes_ausencia s
+        WHERE s.estado = 'pendiente' AND lower(s.aprobador_correo) = lower($1)`,
+      ['idx_solicitudes_aprobador', 'idx_solicitudes_estado'],
+    );
+    await usaAlgunoDe(
+      `SELECT id FROM portal.solicitudes_ausencia s
+        WHERE s.estado = 'pendiente_2' AND lower(s.segundo_aprobador_correo) = lower($1)`,
+      ['idx_solicitudes_segundo_aprobador', 'idx_solicitudes_estado'],
+    );
+    await usaAlgunoDe(
+      `SELECT id FROM portal.solicitud_modificaciones m
+        WHERE m.estado = 'pendiente' AND lower(m.aprobador_correo) = lower($1)`,
+      ['idx_modificaciones_aprobador', 'ux_modificaciones_una_pendiente'],
+    );
+  });
+
+  it('una bandeja que dejara de filtrar por estado no pasaría la comprobación', async () => {
+    // Que `usaAlgunoDe` no sea un verde regalado: sin el filtro por estado, ningún
+    // índice aceptable sirve y el plan no puede contener ninguno.
+    const usados = await indicesDelPlan(
+      `SELECT id FROM portal.solicitudes_ausencia s WHERE lower(s.segundo_aprobador_correo) = lower($1)`,
+      [CORREO],
+    );
+    expect(usados.filter((i) => ['idx_solicitudes_segundo_aprobador', 'idx_solicitudes_estado'].includes(i))).toEqual([]);
   });
 
   it('usuarios del portal por su correo', async () => {
