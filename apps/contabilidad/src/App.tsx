@@ -147,24 +147,26 @@ export default function App() {
 
       <div className={tab === 'facturacion' ? '' : 'hidden'}>
 
-      {/* Barra de filtros */}
+      {/* Barra de filtros. FE-419: los selects no tienen etiqueta visible (la primera
+          opción hace de rótulo), así que el nombre para el lector de pantalla va en
+          aria-label; sin él se anunciaban solo como «cuadro combinado». */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select className={selCls} value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+        <select aria-label="Año" className={selCls} value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
           {(data?.aniosDisponibles?.length ? data.aniosDisponibles : [anio]).map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
         </select>
-        <select className={selCls} value={cliente} onChange={(e) => setCliente(e.target.value)}>
+        <select aria-label="Cliente" className={selCls} value={cliente} onChange={(e) => setCliente(e.target.value)}>
           <option value="">Todos los clientes</option>
           {clientes.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select className={selCls} value={estado} onChange={(e) => setEstado(e.target.value as Estado)}>
+        <select aria-label="Estado" className={selCls} value={estado} onChange={(e) => setEstado(e.target.value as Estado)}>
           <option value="todas">Todos los estados</option>
           <option value="pagada">Pagadas</option>
           <option value="saldo">Con saldo</option>
           <option value="vencida">Vencidas</option>
         </select>
-        <select className={selCls} value={mes} onChange={(e) => setMes(Number(e.target.value))}>
+        <select aria-label="Mes" className={selCls} value={mes} onChange={(e) => setMes(Number(e.target.value))}>
           <option value={0}>Todos los meses</option>
           {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].map((m, i) => (
             <option key={m} value={i + 1}>{m}</option>

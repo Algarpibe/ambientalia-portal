@@ -4,6 +4,7 @@ import type { ReconciledRow, CustomerAnalysisResult, DateRangeOption } from './t
 import { performCustomerAnalysis, getUniqueCustomers, parseExcelDate, getDateRangeBounds, getDPDColor, getOnTimeColor, getSeverityColor, getVolatilityColor } from './customerAnalysisUtils';
 import { TrendingUp, TrendingDown, Minus, FileDown, BarChart3, AlertTriangle, CheckCircle2, Activity, Info, X, Filter, Table as TableIcon, AlertCircle } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
+import { activable, useDialogo } from '@suite/a11y';
 import { LoadErrorState } from './components/LoadErrorState';
 
 interface CustomerAnalysisProps {
@@ -252,7 +253,13 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
     };
 
     // Invoices List Modal Component
-    const InvoicesListModal = () => {
+    // FE-419 — los dos modales de esta vista se pintan llamando a estas funciones, no
+    // como <InvoicesListModal /> o <InfoModal />: al estar definidas dentro del render,
+    // cada render creaba un TIPO de componente nuevo y React desmontaba y volvía a
+    // montar el modal entero; con el foco gestionado por useDialogo, eso lo arrancaba y
+    // lo devolvía en cada actualización del padre. El hook vive en MarcoModal, que sí
+    // es un componente estable.
+    const renderInvoicesListModal = () => {
         if (!showInvoicesListModal || !selectedCustomer) return null;
 
         // Get invoices for the selected customer and current date range
@@ -268,20 +275,21 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
         });
 
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowInvoicesListModal(false)}>
-                <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <MarcoModal onCerrar={() => setShowInvoicesListModal(false)} className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col">
+                {(idTitulo) => (<>
                     <div className="bg-gradient-to-r from-slate-800 to-slate-700 text-white px-6 py-4 rounded-t-2xl flex justify-between items-center shrink-0">
                         <div className="flex items-center gap-3">
                             <div className="bg-white/10 p-2 rounded-lg">
                                 <TableIcon className="text-white w-5 h-5" />
                             </div>
                             <div>
-                                <h3 className="text-lg font-bold">Detalle de Facturas</h3>
+                                <h3 id={idTitulo} className="text-lg font-bold">Detalle de Facturas</h3>
                                 <div className="text-xs text-slate-300 opacity-90">{selectedCustomer} • {sortedInvoices.length} facturas</div>
                             </div>
                         </div>
                         <button
                             onClick={() => setShowInvoicesListModal(false)}
+                            aria-label="Cerrar"
                             className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-1 transition-colors"
                         >
                             <X size={24} />
@@ -366,24 +374,25 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                             Cerrar
                         </button>
                     </div>
-                </div>
-            </div>
+                </>)}
+            </MarcoModal>
         );
     };
 
     // Info Modal Component
-    const InfoModal = () => {
+    const renderInfoModal = () => {
         if (!showInfoModal || !selectedMetric || !metricInfo[selectedMetric]) return null;
 
         const info = metricInfo[selectedMetric];
 
         return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowInfoModal(false)}>
-                <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <MarcoModal onCerrar={() => setShowInfoModal(false)} className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                {(idTitulo) => (<>
                     <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-6 py-4 rounded-t-2xl flex justify-between items-center">
-                        <h3 className="text-xl font-bold">{info.title}</h3>
+                        <h3 id={idTitulo} className="text-xl font-bold">{info.title}</h3>
                         <button
                             onClick={() => setShowInfoModal(false)}
+                            aria-label="Cerrar"
                             className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-1 transition-colors"
                         >
                             <X size={24} />
@@ -419,8 +428,8 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                             Cerrar
                         </button>
                     </div>
-                </div>
-            </div>
+                </>)}
+            </MarcoModal>
         );
     };
 
@@ -442,8 +451,8 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
 
     return (
         <div className="space-y-6 fade-in">
-            <InfoModal />
-            <InvoicesListModal />
+            {renderInfoModal()}
+            {renderInvoicesListModal()}
 
             <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100 overflow-hidden">
                 <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-slate-50/50">
@@ -504,10 +513,13 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                         </div>
 
                         {/* Custom Dates */}
+                        {/* FE-419: las dos fechas no tienen rótulo visible (solo la «a» entre
+                            ellas), así que el nombre va en aria-label. */}
                         {dateRange === 'custom' && (
                             <div className="flex items-center gap-2">
                                 <input
                                     type="date"
+                                    aria-label="Fecha de inicio"
                                     value={customStartDate}
                                     onChange={(e) => onCustomStartDateChange?.(e.target.value)}
                                     className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 shadow-sm shadow-indigo-100/20"
@@ -515,6 +527,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                 <span className="text-slate-400">a</span>
                                 <input
                                     type="date"
+                                    aria-label="Fecha de fin"
                                     value={customEndDate}
                                     onChange={(e) => onCustomEndDateChange?.(e.target.value)}
                                     className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 shadow-sm shadow-indigo-100/20"
@@ -550,6 +563,10 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                     <Activity size={20} />
                                     <button
                                         onClick={() => showMetricInfo('dpd')}
+                                        // FE-419 — botón solo-icono: el title no basta como nombre
+                                        // (era el mismo en las cinco tarjetas); el aria-label dice
+                                        // de qué métrica es.
+                                        aria-label="Ver cómo se calcula: DPD Promedio"
                                         className="hover:opacity-70 transition-opacity"
                                         title="Ver cómo se calcula"
                                     >
@@ -571,6 +588,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                     <CheckCircle2 size={20} />
                                     <button
                                         onClick={() => showMetricInfo('onTime')}
+                                        aria-label="Ver cómo se calcula: % A Tiempo"
                                         className="hover:opacity-70 transition-opacity"
                                         title="Ver cómo se calcula"
                                     >
@@ -594,6 +612,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                     <AlertTriangle size={20} />
                                     <button
                                         onClick={() => showMetricInfo('severity')}
+                                        aria-label="Ver cómo se calcula: Severidad"
                                         className="hover:opacity-70 transition-opacity"
                                         title="Ver cómo se calcula"
                                     >
@@ -615,6 +634,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                     <Activity size={20} />
                                     <button
                                         onClick={() => showMetricInfo('volatility')}
+                                        aria-label="Ver cómo se calcula: Volatilidad"
                                         className="hover:opacity-70 transition-opacity"
                                         title="Ver cómo se calcula"
                                     >
@@ -638,6 +658,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                     <Activity size={20} />
                                     <button
                                         onClick={() => showMetricInfo('volatilityMora')}
+                                        aria-label="Ver cómo se calcula: Volatilidad Mora"
                                         className="hover:opacity-70 transition-opacity"
                                         title="Ver cómo se calcula"
                                     >
@@ -658,8 +679,13 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                     <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-6">
                         <h3 className="text-lg font-bold text-slate-800 mb-4">Resumen General</h3>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {/* FE-419: abre el listado también con Enter o Espacio. Se queda como
+                                <div role="button"> en vez de <button> para no tocar su maquetación;
+                                el nombre sale del contenido («Total Facturas N»). */}
                             <div
-                                onClick={() => setShowInvoicesListModal(true)}
+                                role="button"
+                                aria-haspopup="dialog"
+                                {...activable(() => setShowInvoicesListModal(true))}
                                 className="group cursor-pointer p-3 -m-3 rounded-lg hover:bg-white/50 transition-colors"
                             >
                                 <div className="text-sm text-slate-600 mb-1 flex items-center gap-2">
@@ -939,5 +965,32 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
         </div>
     );
 };
+
+// FE-419 — fondo + panel de los modales de esta vista: role="dialog", aria-modal y el
+// título como nombre (el id llega a `children` para ponerlo en el encabezado), más el
+// teclado y el foco de useDialogo (foco dentro al abrir, Escape, Tab encerrado y foco
+// de vuelta al botón que lo abrió). El clic en el fondo sigue cerrando, como antes.
+function MarcoModal({ onCerrar, className, children }: {
+    onCerrar: () => void;
+    className: string;
+    children: (idTitulo: string) => React.ReactNode;
+}) {
+    const { ref, idTitulo } = useDialogo<HTMLDivElement>({ onCerrar });
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onCerrar}>
+            <div
+                ref={ref}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={idTitulo}
+                tabIndex={-1}
+                className={`${className} focus:outline-none`}
+                onClick={(e) => e.stopPropagation()}
+            >
+                {children(idTitulo)}
+            </div>
+        </div>
+    );
+}
 
 export default CustomerAnalysis;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, PackageOpen } from 'lucide-react';
 import { getUserId } from '@suite/auth-client';
+import { activable, ariaSort } from '@suite/a11y';
 import { fetchOVPendientes, type OVPendienteFacturable } from './api';
 import { formatCOP } from './format';
 import DetalleModal from './DetalleModal';
@@ -172,14 +173,16 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
 
       {ordenes && !cargando && (
         <>
+          {/* FE-419: sin etiquetas visibles, el nombre de cada filtro va en aria-label
+              (el placeholder no cuenta como nombre fiable para el lector de pantalla). */}
           <div className="flex flex-wrap items-center gap-3">
-            <select className="rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" value={estado} onChange={(e) => setEstado(e.target.value)}>
+            <select aria-label="Estado" className="rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" value={estado} onChange={(e) => setEstado(e.target.value)}>
               <option value="todos">Todos los estados</option>
               <option value="open">Abiertas</option>
               <option value="overdue">Vencidas</option>
               <option value="partially_invoiced">Parciales</option>
             </select>
-            <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar OV o cliente…" className="w-64 rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" />
+            <input value={filtro} onChange={(e) => setFiltro(e.target.value)} aria-label="Buscar OV o cliente" placeholder="Buscar OV o cliente…" className="w-64 rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none" />
             <div className="flex flex-wrap gap-4 text-sm">
               <span className="text-gray-500">{totales.n} OV</span>
               <span className="text-gray-700">Total: <b className="tabular-nums">{formatCOP(totales.total)}</b></span>
@@ -244,15 +247,22 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
                     <th
                       key={c.key}
                       onClick={c.kind === 'indicio' ? undefined : () => toggleSort(c.key as SortKey)}
+                      aria-sort={c.kind === 'indicio' ? undefined : ariaSort(sort.key === c.key, sort.dir === 1)}
                       title={c.label}
                       className={`group relative select-none px-2 py-2 font-semibold ${
                         c.align === 'right' ? 'text-right' : 'text-left'
                       } ${c.kind === 'indicio' ? '' : 'cursor-pointer hover:text-gray-900'}`}
                     >
-                      <span className="block truncate">
-                        {c.label}
-                        {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
-                      </span>
+                      {c.kind === 'indicio' ? (
+                        <span className="block truncate">{c.label}</span>
+                      ) : (
+                        // FE-419 — mismo patrón que FacturasTable: el botón da el foco y el
+                        // rol; su clic sube al <th>, que es quien ordena.
+                        <button type="button" className={`block w-full truncate ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
+                          {c.label}
+                          <span aria-hidden="true">{sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}</span>
+                        </button>
+                      )}
                       <ResizeHandle
                         ancho={anchoActual(c)}
                         onPreview={(a) => setArrastre(a === null ? null : { key: c.key, ancho: a })}
@@ -265,7 +275,13 @@ export default function OVPendientes({ bare = false }: { bare?: boolean }) {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtradas.map((o) => (
-                  <tr key={o.salesorder_number} onClick={() => setDetalleOV(o.salesorder_number)} className="cursor-pointer hover:bg-amber-50/40">
+                  <tr
+                    key={o.salesorder_number}
+                    // FE-419 — también se abre con Enter o Espacio.
+                    {...activable(() => setDetalleOV(o.salesorder_number))}
+                    aria-label={`Abrir el detalle de la OV ${o.salesorder_number}`}
+                    className="cursor-pointer hover:bg-amber-50/40"
+                  >
                     {visibles.map((c) => {
                       if (c.kind === 'indicio') {
                         return <td key={c.key} className="px-2 py-1"><Luces o={o} /></td>;

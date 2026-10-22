@@ -28,6 +28,8 @@ export default function ColumnOrderMenu({ columns, onMove }: Props) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        // FE-419 — desplegable no modal: aria-expanded dice si la lista está abierta.
+        aria-expanded={open}
         className="inline-flex items-center gap-1 text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-600 hover:bg-gray-50 whitespace-nowrap"
       >
         <SlidersHorizontal size={13} /> Columnas

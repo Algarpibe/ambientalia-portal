@@ -7,6 +7,7 @@ import ColumnOrderMenu from './ColumnOrderMenu';
 import DetalleModal from './DetalleModal';
 import { currencyOf, formatMoney } from './currency';
 import { pendingTotals } from './salesOrdersPendingTotals';
+import { activable, ariaSort } from '@suite/a11y';
 
 // Vista "Órdenes por Facturar": OV pendientes de facturar (sin facturar + parcial),
 // desde el endpoint hub-api /api/sales-orders/pending. Autocontenida.
@@ -159,9 +160,11 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
         bare ? 'h-full' : 'bg-white rounded-2xl border border-slate-100 shadow-soft'
       }`}
     >
-      {/* Controles */}
+      {/* Controles. FE-419: los selects no tienen rótulo visible (la primera opción hace
+          de rótulo) y «Actualizar» es solo un icono: el nombre va en aria-label. */}
       <div className="flex flex-wrap items-center gap-3 p-4 border-b border-slate-100 shrink-0">
         <select
+          aria-label="Cliente"
           value={client}
           onChange={(e) => setClient(e.target.value)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none max-w-xs"
@@ -173,6 +176,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
         </select>
 
         <select
+          aria-label="Estado"
           value={status}
           onChange={(e) => setStatus(e.target.value as StatusFilter)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none"
@@ -191,7 +195,7 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
             {foreignCount > 0 && <span className="text-slate-400 text-xs"> (sin incluir {foreignCount} {foreignCount === 1 ? 'orden' : 'órdenes'} en otra moneda)</span>}
           </span>
           <ColumnOrderMenu columns={orderedCols.map((c) => ({ key: String(c.key), label: c.label }))} onMove={move} />
-          <button onClick={load} title="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50">
+          <button onClick={load} title="Actualizar" aria-label="Actualizar" className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-50">
             <RefreshCw size={16} />
           </button>
         </div>
@@ -206,10 +210,16 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
                 <th
                   key={c.key}
                   onClick={() => toggle(c.key)}
+                  aria-sort={ariaSort(sortKey === c.key, sortDir === 'asc')}
                   title={`Ordenar por ${c.label}`}
                   className={`px-4 py-3 font-semibold text-slate-500 whitespace-nowrap cursor-pointer select-none hover:text-slate-700 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
                 >
-                  {c.label} <span className="text-slate-300">{sortArrow(sortKey === c.key, sortDir)}</span>
+                  {/* FE-419 — el botón da el foco con Tab y el rol; sin onClick propio, su
+                      clic (también el de Enter y Espacio) sube al <th>, que ordena. La
+                      flecha va aria-hidden: el sentido lo declara aria-sort. */}
+                  <button type="button">
+                    {c.label} <span aria-hidden="true" className="text-slate-300">{sortArrow(sortKey === c.key, sortDir)}</span>
+                  </button>
                 </th>
               ))}
             </tr>
@@ -223,7 +233,13 @@ export default function SalesOrdersPending({ bare = false }: { bare?: boolean })
               </tr>
             ) : (
               sorted.map((o) => (
-                <tr key={o.salesorder_number} onClick={() => setDetalleOV(o.salesorder_number)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
+                <tr
+                  key={o.salesorder_number}
+                  // FE-419 — también se abre con Enter o Espacio.
+                  {...activable(() => setDetalleOV(o.salesorder_number))}
+                  aria-label={`Abrir el detalle de la OV ${o.salesorder_number}`}
+                  className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                >
                   {orderedCols.map((c) => (
                     <td
                       key={c.key}

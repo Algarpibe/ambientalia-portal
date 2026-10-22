@@ -10,6 +10,7 @@ import { reconcileInvoices, formatExcelDate } from './reconcile';
 import { sortReconciledRows, nextSortConfig } from './reconciliationSort';
 import type { ReconciliationSortConfig, ReconciliationSortKey } from './reconciliationSort';
 import { authHeaders } from '@suite/auth-client';
+import { activable, ariaSort } from '@suite/a11y';
 import { SkeletonTableBody, SkeletonHeader, SkeletonFilterPanel, SkeletonAnalytics } from './SkeletonLoader';
 import DetalleModal from './DetalleModal';
 import { LoadErrorState } from './components/LoadErrorState';
@@ -168,6 +169,12 @@ function App() {
   };
 
   // Encabezado ordenable: la flecha marca la columna activa y su dirección.
+  // FE-419 — el contenido es un <button> (antes un <div>) para que la cabecera se
+  // alcance con Tab y se anuncie como accionable. Sin onClick propio: su clic, también
+  // el que generan Enter y Espacio, sube al <th>, que ordena como siempre (incluido el
+  // clic en el relleno de la celda). `uppercase` se repite porque el preflight de
+  // Tailwind anula text-transform en los botones. El sentido lo declara aria-sort, por
+  // eso la flecha de texto va aria-hidden.
   const sortableHeader = (column: ReconciliationSortKey, label: string, title: string) => {
     const active = sortConfig?.key === column;
     return (
@@ -175,15 +182,16 @@ function App() {
         key={column}
         className="px-6 py-4 text-sm font-bold text-slate-600 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-slate-100 transition-colors group select-none"
         onClick={() => handleSort(column)}
+        aria-sort={ariaSort(active, sortConfig?.direction === 'asc')}
         title={title}
       >
-        <div className="flex items-center gap-1">
+        <button type="button" className="flex w-full items-center gap-1 uppercase">
           {label}
           <ArrowUpDown size={14} className={`transition-colors ${active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`} />
           {active && (
-            <span className="text-indigo-600 text-xs font-bold">{sortConfig?.direction === 'asc' ? '↑' : '↓'}</span>
+            <span aria-hidden="true" className="text-indigo-600 text-xs font-bold">{sortConfig?.direction === 'asc' ? '↑' : '↓'}</span>
           )}
-        </div>
+        </button>
       </th>
     );
   };
@@ -316,8 +324,12 @@ function App() {
 
                   <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 flex-1">
+                      {/* FE-419: el panel de filtros se despliega dentro de la página (no es un
+                          modal), así que el botón es un desplegable: aria-expanded dice si
+                          está abierto. Igual el de «Columnas». */}
                       <button
                         onClick={() => setShowFilterPanel(!showFilterPanel)}
+                        aria-expanded={showFilterPanel}
                         className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg ${showFilterPanel
                           ? 'text-white bg-indigo-700 hover:bg-indigo-800'
                           : 'text-white bg-indigo-600 hover:bg-indigo-700'
@@ -359,6 +371,7 @@ function App() {
                       <div className="relative">
                         <button
                           onClick={() => setShowColumnPanel(!showColumnPanel)}
+                          aria-expanded={showColumnPanel}
                           className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200 hover:border-indigo-300"
                         >
                           <Eye size={18} />
@@ -509,12 +522,13 @@ function App() {
                           </>
                         )}
 
-                        {/* Payment Status Filter */}
+                        {/* Payment Status Filter. FE-419: el rótulo era un <label> sin control
+                            asociado (no nombraba nada); ahora es el nombre del grupo de casillas. */}
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-semibold text-slate-700">
+                          <span id="payment-status-label" className="text-sm font-semibold text-slate-700">
                             Estado de Pago
-                          </label>
-                          <div className="space-y-2 p-3 bg-white border border-slate-300 rounded-lg">
+                          </span>
+                          <div role="group" aria-labelledby="payment-status-label" className="space-y-2 p-3 bg-white border border-slate-300 rounded-lg">
                             <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors">
                               <input
                                 type="checkbox"
@@ -639,7 +653,14 @@ function App() {
                           <SkeletonTableBody rows={8} columns={8} />
                         ) : (
                           filteredAndSortedData.map((row, idx) => (
-                            <tr key={idx} onClick={() => setDetalleFactura(row.invoiceNumber)} className="cursor-pointer hover:bg-slate-50/50 transition-colors">
+                            <tr
+                              key={idx}
+                              // FE-419 — la fila abre el detalle también con Enter o Espacio y
+                              // se anuncia por lo que abre; el clic sigue igual.
+                              {...activable(() => setDetalleFactura(row.invoiceNumber))}
+                              aria-label={`Abrir el detalle de la factura ${row.invoiceNumber}`}
+                              className="cursor-pointer hover:bg-slate-50/50 transition-colors"
+                            >
                               {columnOrder.map((column) => {
                                 if (!columnVisibility[column as keyof typeof columnVisibility]) return null;
 

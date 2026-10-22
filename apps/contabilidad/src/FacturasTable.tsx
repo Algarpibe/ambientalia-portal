@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { activable, ariaSort } from '@suite/a11y';
 import type { FacturaContable } from './api';
 import { formatCOP, formatPct } from './format';
 import ResizeHandle from './ResizeHandle';
@@ -133,15 +134,25 @@ export default function FacturasTable({
               <th
                 key={c.key}
                 onClick={c.kind === 'luz' ? undefined : () => toggleSort(c.key as SortKey)}
+                aria-sort={c.kind === 'luz' ? undefined : ariaSort(sort.key === c.key, sort.dir === 1)}
                 title={c.kind === 'luz' ? 'Entrega pendiente: hay artículos de la factura sin empaquetar' : c.label}
                 className={`group relative select-none px-2 py-2 font-semibold ${
                   c.align === 'right' ? 'text-right' : 'text-left'
                 } ${c.kind === 'luz' ? '' : 'cursor-pointer hover:text-gray-900'}`}
               >
-                <span className="block truncate">
-                  {c.label}
-                  {sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
-                </span>
+                {c.kind === 'luz' ? (
+                  <span className="block truncate">{c.label}</span>
+                ) : (
+                  // FE-419 — el botón hace la cabecera alcanzable con Tab y la anuncia
+                  // como accionable. No lleva onClick propio: su clic (también el que
+                  // generan Enter y Espacio) sube al <th>, que sigue ordenando igual que
+                  // antes, incluido el clic en el relleno de la celda. La flecha va
+                  // aria-hidden porque el sentido ya lo declara aria-sort.
+                  <button type="button" className={`block w-full truncate ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
+                    {c.label}
+                    <span aria-hidden="true">{sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}</span>
+                  </button>
+                )}
                 <ResizeHandle
                   ancho={anchoActual(c)}
                   minimo={ANCHO_MINIMO}
@@ -157,7 +168,12 @@ export default function FacturasTable({
           {ordenadas.map((f, i) => (
             <tr
               key={f.invoiceNumber}
-              onClick={() => onAbrirDetalle?.(f.invoiceNumber)}
+              // FE-419 — la fila abre el detalle también con Enter o Espacio y se anuncia
+              // por lo que abre; el clic sigue igual.
+              {...(onAbrirDetalle && {
+                ...activable(() => onAbrirDetalle(f.invoiceNumber)),
+                'aria-label': `Abrir el detalle de la factura ${f.invoiceNumber}`,
+              })}
               className="cursor-pointer hover:bg-blue-50/40"
             >
               <td className="px-2 py-1 text-gray-400">{i + 1}</td>
@@ -183,6 +199,9 @@ export default function FacturasTable({
                         // (un input no controlado con defaultValue no se actualizaría solo).
                         key={`${f.invoiceNumber}:${f.cartera}`}
                         type="text"
+                        // FE-419 — sin etiqueta visible por fila: el nombre dice de qué
+                        // factura es la cartera que se edita.
+                        aria-label={`Cartera de la factura ${f.invoiceNumber}`}
                         defaultValue={f.cartera}
                         disabled={guardando === f.invoiceNumber}
                         onBlur={(e) => {

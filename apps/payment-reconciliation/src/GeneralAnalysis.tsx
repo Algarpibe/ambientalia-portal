@@ -5,6 +5,7 @@ import { applyExtraFilters, filterAndSortMetrics } from './metrics/generalAnalys
 import { ArrowUpDown, FileDown, Filter, Eye, X, GripVertical } from 'lucide-react';
 import { SkeletonAnalytics } from './SkeletonLoader';
 import { LoadErrorState } from './components/LoadErrorState';
+import { ariaSort } from '@suite/a11y';
 
 interface GeneralAnalysisProps {
   reconciledData: ReconciledRow[];
@@ -118,6 +119,28 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
     });
   };
 
+  // Encabezado ordenable (antes repetido seis veces a mano con las mismas clases).
+  // FE-419 — el contenido es un <button> para que la cabecera se alcance con Tab y se
+  // anuncie como accionable; sin onClick propio, su clic (también el de Enter y Espacio)
+  // sube al <th>, que ordena como siempre. `uppercase` se repite porque el preflight de
+  // Tailwind anula text-transform en los botones. aria-sort declara el sentido.
+  const sortableHeader = (key: string, label: string, align: 'left' | 'right') => {
+    const active = sortConfig?.key === key;
+    return (
+      <th
+        key={key}
+        onClick={() => handleSort(key)}
+        aria-sort={ariaSort(active, sortConfig?.direction === 'asc')}
+        className={`px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group${align === 'right' ? ' text-right' : ''}`}
+      >
+        <button type="button" className={`flex w-full items-center gap-1 uppercase${align === 'right' ? ' justify-end' : ''}`}>
+          {label}
+          <ArrowUpDown size={14} className={active ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
+        </button>
+      </th>
+    );
+  };
+
   const toggleColumnVisibility = (column: string) => {
     setColumnVisibility((prev) => ({
       ...prev,
@@ -172,8 +195,11 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 flex-1">
+            {/* FE-419: el panel se despliega dentro de la página (no es modal): el botón
+                dice con aria-expanded si está abierto. Igual el de «Columnas». */}
             <button
               onClick={() => setShowFilterPanel(!showFilterPanel)}
+              aria-expanded={showFilterPanel}
               className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg ${
                 showFilterPanel
                   ? 'text-white bg-indigo-700 hover:bg-indigo-800'
@@ -340,12 +366,14 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
               </div>
             )}
 
-            {/* Payment Status Filter */}
+            {/* Payment Status Filter. FE-419: este rótulo y los de los dos rangos de abajo
+                eran <label> sin control asociado (no nombraban nada); ahora nombran su
+                grupo, y cada casilla de mínimo/máximo lleva su propio nombre. */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-semibold text-slate-700">
+              <span id="payment-status-label-general" className="text-sm font-semibold text-slate-700">
                 Estado de Pago
-              </label>
-              <div className="space-y-2 p-3 bg-slate-50 border border-slate-300 rounded-lg">
+              </span>
+              <div role="group" aria-labelledby="payment-status-label-general" className="space-y-2 p-3 bg-slate-50 border border-slate-300 rounded-lg">
                 <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-2 rounded transition-colors">
                   <input
                     type="checkbox"
@@ -396,12 +424,13 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
 
             {/* DPD Range Filter */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-semibold text-slate-700">
+              <span id="dpd-range-label-general" className="text-sm font-semibold text-slate-700">
                 DPD Promedio (días)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
+              </span>
+              <div role="group" aria-labelledby="dpd-range-label-general" className="grid grid-cols-2 gap-2">
                 <input
                   type="number"
+                  aria-label="DPD promedio mínimo"
                   value={dpdMin}
                   onChange={(e) => setDpdMin(e.target.value)}
                   placeholder="Mín"
@@ -409,6 +438,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                 />
                 <input
                   type="number"
+                  aria-label="DPD promedio máximo"
                   value={dpdMax}
                   onChange={(e) => setDpdMax(e.target.value)}
                   placeholder="Máx"
@@ -419,12 +449,13 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
 
             {/* % On Time Range */}
             <div className="flex flex-col gap-2">
-              <label className="text-sm font-semibold text-slate-700">
+              <span id="on-time-range-label-general" className="text-sm font-semibold text-slate-700">
                 % A Tiempo
-              </label>
-              <div className="grid grid-cols-2 gap-2">
+              </span>
+              <div role="group" aria-labelledby="on-time-range-label-general" className="grid grid-cols-2 gap-2">
                 <input
                   type="number"
+                  aria-label="% a tiempo mínimo"
                   value={onTimeMin}
                   onChange={(e) => setOnTimeMin(e.target.value)}
                   placeholder="Mín %"
@@ -434,6 +465,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                 />
                 <input
                   type="number"
+                  aria-label="% a tiempo máximo"
                   value={onTimeMax}
                   onChange={(e) => setOnTimeMax(e.target.value)}
                   placeholder="Máx %"
@@ -520,11 +552,13 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                   </div>
                 </div>
 
-                {/* Custom Dates */}
+                {/* Custom Dates. FE-419: sin rótulo visible (solo la «a» entre ellas), el
+                    nombre de cada fecha va en aria-label. */}
                 {dateRange === 'custom' && (
                   <div className="flex items-center gap-2">
                     <input
                       type="date"
+                      aria-label="Fecha de inicio"
                       value={customStartDate}
                       onChange={(e) => onCustomStartDateChange?.(e.target.value)}
                       className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 shadow-sm shadow-indigo-100/20"
@@ -532,6 +566,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                     <span className="text-slate-400">a</span>
                     <input
                       type="date"
+                      aria-label="Fecha de fin"
                       value={customEndDate}
                       onChange={(e) => onCustomEndDateChange?.(e.target.value)}
                       className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2 shadow-sm shadow-indigo-100/20"
@@ -548,6 +583,7 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                 <div className="relative">
                   <button
                     onClick={() => setShowColumnPanel(!showColumnPanel)}
+                    aria-expanded={showColumnPanel}
                     className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg transition-all font-medium text-sm"
                   >
                     <Eye size={18} />
@@ -606,90 +642,12 @@ const GeneralAnalysis: React.FC<GeneralAnalysisProps> = ({
                     {columnOrder.map((column) => {
                       if (!columnVisibility[column as keyof typeof columnVisibility]) return null;
                       
-                      if (column === 'customerName') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('customerName')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group"
-                          >
-                            <div className="flex items-center gap-1">
-                              Nombre de Cliente
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'customerName' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
-                      if (column === 'averageDPD') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('averageDPD')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group text-right"
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              DPD Promedio
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'averageDPD' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
-                      if (column === 'onTimePercentage') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('onTimePercentage')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group text-right"
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              % A Tiempo
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'onTimePercentage' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
-                      if (column === 'weightedDPD') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('weightedDPD')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group text-right"
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              Severidad
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'weightedDPD' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
-                      if (column === 'volatility') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('volatility')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group text-right"
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              Volatilidad
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'volatility' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
-                      if (column === 'volatilityMora') {
-                        return (
-                          <th
-                            key={column}
-                            onClick={() => handleSort('volatilityMora')}
-                            className="px-6 py-4 text-xs font-bold text-slate-600 uppercase tracking-wider cursor-pointer hover:bg-slate-100 transition-colors group text-right"
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              Volatilidad Mora
-                              <ArrowUpDown size={14} className={sortConfig?.key === 'volatilityMora' ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'} />
-                            </div>
-                          </th>
-                        );
-                      }
+                      if (column === 'customerName') return sortableHeader('customerName', 'Nombre de Cliente', 'left');
+                      if (column === 'averageDPD') return sortableHeader('averageDPD', 'DPD Promedio', 'right');
+                      if (column === 'onTimePercentage') return sortableHeader('onTimePercentage', '% A Tiempo', 'right');
+                      if (column === 'weightedDPD') return sortableHeader('weightedDPD', 'Severidad', 'right');
+                      if (column === 'volatility') return sortableHeader('volatility', 'Volatilidad', 'right');
+                      if (column === 'volatilityMora') return sortableHeader('volatilityMora', 'Volatilidad Mora', 'right');
                       return null;
                     })}
                   </tr>

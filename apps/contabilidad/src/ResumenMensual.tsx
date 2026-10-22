@@ -98,6 +98,9 @@ function PresupuestoKpi({
         <input
           autoFocus
           type="number"
+          // FE-419 — el rótulo de encima es un <div>, no un <label>: sin esto el campo
+          // se anunciaba sin nombre.
+          aria-label={`Presupuesto ${anio}`}
           defaultValue={presupuesto ?? ''}
           onChange={(e) => setValor(e.target.value)}
           disabled={guardando}
