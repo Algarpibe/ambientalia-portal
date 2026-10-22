@@ -123,6 +123,14 @@ const abiertos: object[] = [];
  * Lo común a un diálogo y al panel lateral: al abrir, el foco entra en él; Tab
  * no sale; Escape lo cierra; y al cerrar el foco vuelve a donde estaba.
  * Devuelve la referencia de la caja y el id de su título (`aria-labelledby`).
+ *
+ * FE-419 — no se sustituye por el `useDialogo` de @suite/a11y porque no hacen lo mismo:
+ * el compartido no apila (cada diálogo abierto escucha el teclado, así que Escape en una
+ * confirmación de la agenda abierta sobre la ficha del ticket cerraría las dos, y con las
+ * dos atentas al Tab cada pulsación dentro de la confirmación acabaría otra vez en su primer
+ * control) y, al abrir, pone el foco en el
+ * primer control («Cerrar») en vez de en la caja. Si el compartido aprende a apilar, se
+ * puede migrar decidiendo antes dónde debe caer el foco.
  */
 function useDialogo<T extends HTMLElement>(onClose: () => void) {
   const caja = useRef<T>(null);

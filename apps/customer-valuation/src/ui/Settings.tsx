@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { ScoringConfig, ExtendedScoringConfig } from '../types';
 
 interface SettingsProps {
@@ -41,6 +41,10 @@ export function Settings({
     // Local pending state
     const [pendingConfig, setPendingConfig] = useState<ScoringConfig>(config);
     const [pendingExtendedConfig, setPendingExtendedConfig] = useState<ExtendedScoringConfig>(extendedConfig);
+    // FE-419 — ids para asociar cada casilla con su texto (htmlFor). useId y no un id fijo:
+    // la app también se monta dentro del portal y un id repetido rompería la asociación.
+    const idAnioActual = useId();
+    const idGating = useId();
 
     // Check if any changes have been made
     const hasChanges = JSON.stringify(config) !== JSON.stringify(pendingConfig) ||
@@ -159,6 +163,7 @@ export function Settings({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
                             <input
                                 type="checkbox"
+                                id={idAnioActual}
                                 checked={pendingConfig.includeCurrentYearInHistory}
                                 onChange={(e) => {
                                     const includeCurrentYearInHistory = e.target.checked;
@@ -166,7 +171,7 @@ export function Settings({
                                     setPendingExtendedConfig({ ...pendingExtendedConfig, includeCurrentYearInHistory });
                                 }}
                             />
-                            <label>Incluir año actual (2026) en cálculos de ventas históricas</label>
+                            <label htmlFor={idAnioActual}>Incluir año actual (2026) en cálculos de ventas históricas</label>
                             <span 
                                 style={{ 
                                     cursor: 'help', 
@@ -249,6 +254,7 @@ export function Settings({
                         <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--muted)', position: 'relative' }}>
                             <input
                                 type="checkbox"
+                                id={idGating}
                                 checked={pendingConfig.useGatingForSegmentation}
                                 onChange={(e) => {
                                     const useGatingForSegmentation = e.target.checked;
@@ -256,7 +262,9 @@ export function Settings({
                                     setPendingExtendedConfig({ ...pendingExtendedConfig, useGatingForSegmentation });
                                 }}
                             />
-                            <span>Aplicar candados de gating al asignar etiqueta de segmento</span>
+                            {/* FE-419 — era un <span> suelto: como <label> asociada da nombre a la
+                                casilla y el clic en el texto la marca, igual que la de arriba. */}
+                            <label htmlFor={idGating}>Aplicar candados de gating al asignar etiqueta de segmento</label>
                             <span 
                                 style={{ 
                                     cursor: 'help', 
@@ -281,6 +289,9 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            // FE-419 — el rótulo de al lado («Score V mínimo:») se repite
+                                            // en los tres segmentos: el nombre dice de cuál es el campo.
+                                            aria-label="Premium: score V mínimo"
                                             value={pendingConfig.segmentThresholds.premiumMinValue}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, premiumMinValue: Number(e.target.value) };
@@ -296,6 +307,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Premium: score P mínimo"
                                             value={pendingConfig.segmentThresholds.premiumMinPayment}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, premiumMinPayment: Number(e.target.value) };
@@ -318,6 +330,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Valioso Condicionado: score V mínimo"
                                             value={pendingConfig.segmentThresholds.condicionadoMinValue}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, condicionadoMinValue: Number(e.target.value) };
@@ -333,6 +346,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Valioso Condicionado: score P mínimo"
                                             value={pendingConfig.segmentThresholds.condicionadoMinPayment}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, condicionadoMinPayment: Number(e.target.value) };
@@ -355,6 +369,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Estándar: score V mínimo"
                                             value={pendingConfig.segmentThresholds.estandarMinValue}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, estandarMinValue: Number(e.target.value) };
@@ -370,6 +385,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Estándar: score P mínimo"
                                             value={pendingConfig.segmentThresholds.estandarMinPayment}
                                             onChange={(e) => {
                                                 const segmentThresholds = { ...pendingConfig.segmentThresholds, estandarMinPayment: Number(e.target.value) };
@@ -412,6 +428,9 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            // FE-419 — «Peso Valor (V)» y «Peso Pagos (P)» se repiten en las
+                                            // dos configuraciones: el nombre dice de cuál es el campo.
+                                            aria-label="Score Total Estándar (V + P): peso Valor (V)"
                                             value={Math.round(pendingConfig.totalScoreValueWeight * 100)}
                                             onChange={(e) => setPendingConfig({ ...pendingConfig, totalScoreValueWeight: Number(e.target.value) / 100 })}
                                             style={{ width: '60px', padding: '4px', textAlign: 'right' }}
@@ -423,6 +442,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Score Total Estándar (V + P): peso Pagos (P)"
                                             value={Math.round(pendingConfig.totalScorePaymentWeight * 100)}
                                             onChange={(e) => setPendingConfig({ ...pendingConfig, totalScorePaymentWeight: Number(e.target.value) / 100 })}
                                             style={{ width: '60px', padding: '4px', textAlign: 'right' }}
@@ -455,6 +475,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Score Total Extendido (V + P + S): peso Valor (V)"
                                             value={Math.round(pendingExtendedConfig.totalScoreWeightsExtended.value * 100)}
                                             onChange={(e) => setPendingExtendedConfig({
                                                 ...pendingExtendedConfig,
@@ -469,6 +490,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Score Total Extendido (V + P + S): peso Pagos (P)"
                                             value={Math.round(pendingExtendedConfig.totalScoreWeightsExtended.payment * 100)}
                                             onChange={(e) => setPendingExtendedConfig({
                                                 ...pendingExtendedConfig,
@@ -483,6 +505,7 @@ export function Settings({
                                             type="number"
                                             min="0"
                                             max="100"
+                                            aria-label="Score Total Extendido (V + P + S): peso Ventas (S)"
                                             value={Math.round(pendingExtendedConfig.totalScoreWeightsExtended.sales * 100)}
                                             onChange={(e) => setPendingExtendedConfig({
                                                 ...pendingExtendedConfig,
@@ -560,6 +583,12 @@ export function Settings({
             );
 }
 
+/** «gmPct» → «Gm Pct»: el rótulo de un indicador tal como lo pinta la descripción. */
+function etiquetaIndicador(key: string): string {
+    const label = key.replace(/([A-Z])/g, ' $1').trim();
+    return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 function SettingSection({
     title,
     weights,
@@ -597,6 +626,11 @@ function SettingSection({
                     onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(124, 58, 237, 0.1)'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     title="Ver descripción de indicadores"
+                    // FE-419 — botón solo-icono (ℹ️) que despliega un panel en línea, no un
+                    // diálogo: nombre explícito con la sección (el title era igual en las tres)
+                    // y aria-expanded para saber si la descripción está abierta.
+                    aria-label={`Ver descripción de indicadores: ${title}`}
+                    aria-expanded={showTooltip}
                 >
                     ℹ️
                 </button>
@@ -625,11 +659,9 @@ function SettingSection({
                         Descripción de indicadores:
                     </div>
                     {Object.entries(weights).map(([key]) => {
-                        const label = key.replace(/([A-Z])/g, ' $1').trim();
-                        const capitalizedLabel = label.charAt(0).toUpperCase() + label.slice(1);
                         return (
                             <div key={key} style={{ marginBottom: '8px' }}>
-                                <strong style={{ color: 'var(--text)' }}>{capitalizedLabel}:</strong>
+                                <strong style={{ color: 'var(--text)' }}>{etiquetaIndicador(key)}:</strong>
                                 <div style={{ color: 'var(--muted)', marginTop: '2px' }}>
                                     {descriptions[key] || 'Sin descripción disponible'}
                                 </div>
@@ -663,6 +695,10 @@ function SettingSection({
                         </span>
                         <input
                             type="number"
+                            // FE-419 — el rótulo de al lado no estaba asociado y se repite entre
+                            // secciones con otros pesos: el nombre lleva la sección y el indicador,
+                            // con la misma mayúscula inicial que se ve (capitalize).
+                            aria-label={`${title}: ${etiquetaIndicador(key)}`}
                             min="0"
                             max="100"
                             value={Math.round(Number(val) * 100)}

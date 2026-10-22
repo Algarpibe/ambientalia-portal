@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { ClientProfile, ExtendedClientProfile } from '../types';
 import { rankClients } from '../metrics/clientListHelpers';
+import { activable, ariaSort } from '@suite/a11y';
 
 export function RankingTable({
   clients,
@@ -33,6 +34,19 @@ export function RankingTable({
     return sortConfig.direction === 'desc' ? ' ↓' : ' ↑';
   };
 
+  // FE-419 — cabecera ordenable: el botón la hace alcanzable con Tab y la anuncia como
+  // accionable. No lleva onClick propio: su clic (también el que generan Enter y Espacio)
+  // sube al <th>, que sigue ordenando igual, incluido el clic en el relleno de la celda. La
+  // flecha va aria-hidden porque el sentido ya lo declara aria-sort en el <th>. La clase
+  // `sort-btn` (styles.css) le quita el aspecto de botón para que todo herede del <th>.
+  const ordenable = (key: string, className: string) => (
+    <th className={`${className} sortable`} onClick={() => requestSort(key)} aria-sort={ariaSort(sortConfig.key === key, sortConfig.direction === 'asc')}>
+      <button type="button" className="sort-btn">
+        {key}<span aria-hidden="true">{getSortIcon(key)}</span>
+      </button>
+    </th>
+  );
+
   // Check if any client has salesScore (extended data)
   const showSalesScore = hasSalesHistory || validClients.some(c =>
     'salesScore' in (c.scores ?? {}) && (c.scores as any)?.salesScore !== null
@@ -49,38 +63,16 @@ export function RankingTable({
           <thead>
             <tr>
               <th className="col-rank">#</th>
-              <th className="col-name sortable" onClick={() => requestSort('CLIENTE')}>
-                CLIENTE{getSortIcon('CLIENTE')}
-              </th>
-              {showSalesScore && (
-                <th className="col-score sortable" onClick={() => requestSort('S')}>
-                  S{getSortIcon('S')}
-                </th>
-              )}
-              <th className="col-score sortable" onClick={() => requestSort('V')}>
-                V{getSortIcon('V')}
-              </th>
-              <th className="col-score sortable" onClick={() => requestSort('P')}>
-                P{getSortIcon('P')}
-              </th>
-              <th className="col-score sortable" onClick={() => requestSort('T')}>
-                T{getSortIcon('T')}
-              </th>
-              <th className="col-segment sortable" onClick={() => requestSort('SEGMENTO')}>
-                SEGMENTO{getSortIcon('SEGMENTO')}
-              </th>
-              <th className="col-metric text-right sortable" onClick={() => requestSort('VENTAS')}>
-                VENTAS{getSortIcon('VENTAS')}
-              </th>
-              <th className="col-metric text-right sortable" onClick={() => requestSort('MARGEN%')}>
-                MARGEN%{getSortIcon('MARGEN%')}
-              </th>
-              <th className="col-metric text-right sortable" onClick={() => requestSort('DPD P95')}>
-                DPD P95{getSortIcon('DPD P95')}
-              </th>
-              <th className="col-metric text-right sortable" onClick={() => requestSort('% MORA')}>
-                % MORA{getSortIcon('% MORA')}
-              </th>
+              {ordenable('CLIENTE', 'col-name')}
+              {showSalesScore && ordenable('S', 'col-score')}
+              {ordenable('V', 'col-score')}
+              {ordenable('P', 'col-score')}
+              {ordenable('T', 'col-score')}
+              {ordenable('SEGMENTO', 'col-segment')}
+              {ordenable('VENTAS', 'col-metric text-right')}
+              {ordenable('MARGEN%', 'col-metric text-right')}
+              {ordenable('DPD P95', 'col-metric text-right')}
+              {ordenable('% MORA', 'col-metric text-right')}
             </tr>
           </thead>
           <tbody>
@@ -92,7 +84,10 @@ export function RankingTable({
                 <tr
                   key={c.clientKey}
                   className={selectedClientKey === c.clientKey ? 'selected' : ''}
-                  onClick={() => onSelect(c)}
+                  // FE-419 — la fila abre el detalle también con Enter o Espacio y se anuncia
+                  // por lo que abre; el clic sigue igual.
+                  {...activable(() => onSelect(c))}
+                  aria-label={`Abrir el detalle de ${c.displayName}`}
                 >
                   <td className="text-center text-muted">{idx + 1}</td>
                   <td className="text-accent">{c.displayName}</td>

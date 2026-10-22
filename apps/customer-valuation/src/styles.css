@@ -938,6 +938,24 @@ input[type="file"] {
   text-align: right;
 }
 
+/* FE-419 — botón de la cabecera ordenable (RankingTable): está para el teclado y el lector
+   de pantalla, no para verse. Se le quita el aspecto de botón y hereda del <th> letra,
+   color, mayúsculas y alineación; dentro del portal, además, el preflight de Tailwind pone
+   text-transform: none a los botones. El contorno de foco del navegador se conserva. */
+.data-table th .sort-btn {
+  background: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  white-space: inherit;
+  cursor: inherit;
+}
+
 .data-table tbody tr {
   cursor: pointer;
   transition: background-color 0.15s ease;

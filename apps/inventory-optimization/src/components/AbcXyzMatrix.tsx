@@ -98,6 +98,9 @@ export default function AbcXyzMatrix({
                                         <td key={code} className="p-1">
                                             <button
                                                 onClick={() => onSelect(active ? 'all' : a, active ? 'all' : x)}
+                                                // FE-419 — la celda es un filtro que se activa y desactiva;
+                                                // el anillo de color lo decía solo a la vista.
+                                                aria-pressed={active}
                                                 title={ABC_XYZ_HINT[code]}
                                                 className={cn(
                                                     'w-full rounded-md px-2 py-2 text-left transition-all border',
