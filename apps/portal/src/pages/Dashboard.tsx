@@ -5,7 +5,7 @@ import { useWidgetRegistry } from '../hooks/useWidgetRegistry';
 import { useDashboardLayout } from '../hooks/useDashboardLayout';
 import WidgetGrid from '../components/WidgetGrid';
 import CatalogPanel from '../components/CatalogPanel';
-import { useDialogo } from '../lib/useDialogo';
+import { useDialogo } from '@suite/a11y';
 
 // Dashboard = panel de widgets configurables del usuario. La navegación a las
 // apps vive en el Sidebar (Herramientas / Aplicaciones), por lo que el dashboard

@@ -1,0 +1,25 @@
+{
+  // Mismo perfil estricto que las sub-apps que consumen el paquete (se importa como
+  // código fuente y cada una lo type-checkea con su propio tsconfig). Aquí, además, el
+  // `jsx` es lo que hace que Vitest compile los tests con el runtime automático de
+  // React: sin él, esbuild emite `React.createElement` y los tests fallan con
+  // «React is not defined».
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+}

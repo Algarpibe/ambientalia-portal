@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Loader2, AlertCircle } from 'lucide-react';
+import { useDialogo } from '@suite/a11y';
 import { formatMoney } from './currency';
 import { fetchFacturaDetalle, fetchOVDetalle, type DetalleFactura, type DetalleOV } from './detalleApi';
 
@@ -11,20 +12,11 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
   const [d, setD] = useState<Detalle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
-  }, [onClose]);
-
-  // FE-414 — mover el foco al diálogo al abrir y devolverlo al cerrar.
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    modalRef.current?.focus();
-    return () => prev?.focus();
-  }, []);
+  // FE-419 — Escape, foco dentro al abrir (en «Cerrar», el primer control), Tab que no
+  // se escapa a la página de detrás y foco de vuelta a la fila al cerrar: lo mismo que
+  // los diálogos del portal. Sustituye al manejo propio de FE-414, que no encerraba el
+  // Tab y usaba un id fijo para el título, el mismo que el detalle de Contabilidad.
+  const { ref, idTitulo } = useDialogo<HTMLDivElement>({ onCerrar: onClose });
 
   useEffect(() => {
     let vivo = true;
@@ -40,9 +32,9 @@ export default function DetalleModal({ tipo, numero, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4" onClick={onClose}>
-      <div ref={modalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="detalle-modal-title" className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl focus:outline-none" onClick={(e) => e.stopPropagation()}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={idTitulo} className="mt-10 w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl focus:outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
-          <h2 id="detalle-modal-title" className="text-lg font-bold text-slate-800">
+          <h2 id={idTitulo} className="text-lg font-bold text-slate-800">
             {tipo === 'factura' ? 'Factura' : 'Orden de venta'} {numero}
           </h2>
           <button onClick={onClose} aria-label="Cerrar" className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={20} /></button>

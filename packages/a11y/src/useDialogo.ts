@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 
 // FE-419 — comportamiento de teclado y foco compartido por los diálogos modales
-// del portal. El marcado (role="dialog", aria-modal, aria-labelledby) lo pone
+// del portal y de las sub-apps. El marcado (role="dialog", aria-modal, aria-labelledby) lo pone
 // cada componente con lo que devuelve el hook; aquí vive lo que no se ve:
 //
 // - Al abrir, el foco entra en el primer control del diálogo (o en el propio

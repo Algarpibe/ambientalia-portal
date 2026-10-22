@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Plus, X } from 'lucide-react';
 import { getApp } from '../lib/apps';
-import { useDialogo } from '../lib/useDialogo';
+import { useDialogo } from '@suite/a11y';
 import type { WidgetDescriptor } from '../widgets/types';
 
 // Panel lateral (slide-over) con los widgets disponibles que aún no están

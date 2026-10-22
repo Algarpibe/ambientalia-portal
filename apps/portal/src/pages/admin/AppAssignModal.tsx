@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { authFetch } from '../../lib/api';
 import { notify } from '../../lib/notify';
 import { APPS } from '../../lib/apps';
-import { useDialogo } from '../../lib/useDialogo';
+import { useDialogo } from '@suite/a11y';
 import type { AdminUser } from './types';
 
 // Modal de asignación de aplicaciones (Req 4.2). Precarga las apps actuales del

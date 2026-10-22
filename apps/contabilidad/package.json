@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@suite/a11y": "*",
     "@suite/auth-client": "*",
     "@suite/format": "*",
     "@suite/http": "*",

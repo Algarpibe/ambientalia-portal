@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { activable } from '@suite/a11y';
 import { fetchFacturasPorEntregar, type FacturaPorEntregar } from './api';
 import DetalleModal from './DetalleModal';
 
@@ -60,6 +61,8 @@ export default function FacturasPorEntregar() {
             <input
               value={filtro}
               onChange={(e) => setFiltro(e.target.value)}
+              // FE-419 — el placeholder no es un nombre fiable para el lector de pantalla.
+              aria-label="Buscar factura, cliente u OV"
               placeholder="Buscar factura, cliente u OV…"
               className="w-72 rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none"
             />
@@ -90,7 +93,9 @@ export default function FacturasPorEntregar() {
                   {visibles.map((f) => (
                     <tr
                       key={f.invoiceNumber}
-                      onClick={() => setDetalle(f.invoiceNumber)}
+                      // FE-419 — también se abre con Enter o Espacio.
+                      {...activable(() => setDetalle(f.invoiceNumber))}
+                      aria-label={`Abrir el detalle de la factura ${f.invoiceNumber}`}
                       className="cursor-pointer hover:bg-violet-50/50"
                     >
                       <td className="px-2 py-1 whitespace-nowrap font-medium">

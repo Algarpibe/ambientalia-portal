@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sentry/react": "^10.65.0",
+    "@suite/a11y": "*",
     "lucide-react": "^0.562.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -16,7 +16,7 @@ import isotipo from '../assets/ambientalia-isotipo.png';
 import { logout } from '../auth';
 import { useAuth } from '../hooks/useAuth';
 import { hasAssignedInCategory } from '../lib/apps';
-import { useDialogo } from '../lib/useDialogo';
+import { useDialogo } from '@suite/a11y';
 
 // El estado plegado vive en localStorage y NO en el perfil del usuario a propósito:
 // es una preferencia por dispositivo (plegada en el portátil, desplegada en el
