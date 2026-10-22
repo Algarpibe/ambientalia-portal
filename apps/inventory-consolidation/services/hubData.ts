@@ -1,3 +1,4 @@
+import { mensajeDeError } from '@suite/http';
 import type { RawRowData } from '../types';
 
 // "Generar desde la base de datos": los mismos tres listados que se exportan de Zoho
@@ -48,7 +49,10 @@ interface CargarOpts {
 export async function cargarDesdeHub({ apiBase, headers, fetchImpl = fetch }: CargarOpts): Promise<HubConsolidacion> {
   if (!apiBase) throw new Error('Configuración incompleta: falta VITE_HUB_API_URL');
   const res = await fetchImpl(`${apiBase}/api/inventory-consolidation/data`, { headers });
-  if (!res.ok) throw new Error(`El servidor respondió HTTP ${res.status}`);
+  // ARQ-611 — App.tsx enseña este mensaje tal cual: el texto común de
+  // @suite/http dice qué hacer (p. ej. pedir la app ante un 403) en vez de
+  // «El servidor respondió HTTP 403».
+  if (!res.ok) throw new Error(await mensajeDeError(res));
   const d = await res.json();
   if (!['inventory', 'fact', 'env'].every((k) => Array.isArray(d?.[k]))) {
     throw new Error('Respuesta del hub con formato inesperado');
