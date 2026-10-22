@@ -12,7 +12,7 @@ Auth = `Authorization: Bearer <jwt>` (el JWT se obtiene en `/api/login`).
 | Method | Path | Auth | Returns |
 |--------|------|------|---------|
 | GET | `/health` | none | `{ ok, deals, invoices, tickets }` (hub counts) |
-| POST | `/api/login` | none | `{ token }` — valida credenciales (`AUTH_USERS`) y emite un JWT |
+| POST | `/api/login` | none | `{ token }` — valida credenciales contra `portal.users` y emite un JWT |
 | GET | `/api/reconciliation/data?from=&to=` | Bearer JWT | `{ invoices, payments }` |
 | GET | `/api/inventory/data` | Bearer JWT | datos de inventario/reposición |
 | GET | `/api/customer-valuation/data` | Bearer JWT | valoración de clientes |
@@ -28,8 +28,13 @@ Auth = `Authorization: Bearer <jwt>` (el JWT se obtiene en `/api/login`).
   - `HUB_DB_URL=postgres://hub_reader:<PASSWORD>@ambientalia_project_zoho-hub-db:5432/zoho-hub`
   - `ALLOWED_ORIGIN=<portal public domain>` (e.g. `https://portal.tu-dominio.com`)
   - `JWT_SECRET=<secreto largo aleatorio>` — firma/verifica los JWT.
-  - `AUTH_USERS=email:hashBcrypt,...` — usuarios permitidos (hashes bcrypt).
-  - `JWT_TTL` — opcional, vida del token (por defecto `8h`).
+  - `AUTH_USERS=email:hashBcrypt,...` — solo para el primer arranque de una
+    base nueva: si `portal.users` está vacía, siembra estos usuarios (el primero,
+    admin); si no, se ignora. No sirve para iniciar sesión.
+  - `JWT_TTL` — opcional, vida del token (por defecto `7d`).
+  - `NODE_ENV` — opcional; solo etiqueta el entorno en Sentry (por defecto `production`).
+  - La lista completa y comentada está en `.env.example`; el test
+    `src/env-example.test.ts` falla si el código lee una variable que no figure allí.
   - `DESK2_DB_URL=postgres://portal_agenda_reader:<PASSWORD>@<host interno de desk-db>:5432/desk`
     — opcional. Enciende la fuente principal de la agenda del taller de
     Trazabilidad: los tickets se leen de la base `desk` de Desk 2.0, por una
@@ -71,7 +76,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ## Security note
 
-Auth real por JWT: `/api/login` valida credenciales (bcrypt contra `AUTH_USERS`)
+Auth real por JWT: `/api/login` valida credenciales (bcrypt contra `portal.users`)
 y emite un token firmado con `JWT_SECRET`; los endpoints de datos exigen
 `Authorization: Bearer`. Defensa en profundidad: el hub solo es alcanzable a
 través de este servicio y CORS está restringido al origen del portal
