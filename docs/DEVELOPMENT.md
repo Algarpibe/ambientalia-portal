@@ -24,9 +24,11 @@ En EasyPanel, `NPM_TOKEN` se pasa como **build-arg** al `Dockerfile` de hub-api
 
 Ver los `.env.example` de cada servicio:
 - Raíz `.env.example` — `NPM_TOKEN` (build).
-- `apps/hub-api/.env.example` — `HUB_DB_URL`, `API_KEY`, `ALLOWED_ORIGIN`, `PORT`.
-- `apps/portal/.env.example` — `VITE_HUB_API_URL`, `VITE_HUB_API_KEY`
-  (⚠ estas viajan al bundle; ver SEC-001 en `AUDIT_REPORT.md`).
+- `apps/hub-api/.env.example` — la lista completa de hub-api. La mantiene al día
+  `apps/hub-api/src/env-example.test.ts`, que falla si el código lee una variable
+  que no figure allí (INFRA-537).
+- `apps/portal/.env.example` — `VITE_HUB_API_URL`, `VITE_SENTRY_DSN`
+  (⚠ todo `VITE_*` viaja al bundle: nunca secretos).
 
 > **CORS fail-closed**: fijar `ALLOWED_ORIGIN` (origen del portal) en el entorno
 > del hub-api **antes de desplegar**, o el navegador bloqueará las peticiones.
