@@ -81,9 +81,22 @@ describe('cargarDesdeHub', () => {
       .rejects.toThrow(/VITE_HUB_API_URL/);
   });
 
-  it('propaga el HTTP de error (p. ej. 403 sin la app asignada)', async () => {
-    const fetchImpl = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) }) as unknown as Response);
-    await expect(cargarDesdeHub({ apiBase: 'https://hub', headers: {}, fetchImpl })).rejects.toThrow(/403/);
+  // ARQ-611 — App.tsx pone este mensaje TAL CUAL en pantalla («Error al generar
+  // desde la base de datos: …»). Antes decía «El servidor respondió HTTP 403»,
+  // que no le dice al usuario qué hacer. Ahora es el texto de @suite/http, el
+  // mismo que ven ausencias y contabilidad.
+  const fallo = (status: number) =>
+    vi.fn(async () => ({ ok: false, status, json: async () => ({}) }) as unknown as Response);
+
+  it('un 403 dice qué hacer: pedir la app a un administrador', async () => {
+    await expect(cargarDesdeHub({ apiBase: 'https://hub', headers: {}, fetchImpl: fallo(403) }))
+      .rejects.toThrow('No tienes esta aplicación asignada. Pide acceso a un administrador del portal.');
+  });
+
+  it('un 500 sale en castellano, sin el «HTTP» crudo', async () => {
+    const err = await cargarDesdeHub({ apiBase: 'https://hub', headers: {}, fetchImpl: fallo(500) }).catch((e: Error) => e);
+    expect((err as Error).message).toBe('No se pudieron cargar los datos (error 500). Inténtalo de nuevo en un momento.');
+    expect((err as Error).message).not.toMatch(/HTTP/);
   });
 
   it('rechaza una respuesta con formato inesperado', async () => {
