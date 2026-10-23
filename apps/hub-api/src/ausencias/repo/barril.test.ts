@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import * as repo from '../repo.js';
 import * as kpis from './kpis.js';
+import * as visores from './visores.js';
 
 // ARQ-612 — repo.ts se parte en trozos dentro de repo/, pero sigue siendo la
 // ÚNICA puerta: reexporta todo lo de los trozos. Dos cosas lo sostienen, y las
@@ -17,7 +18,7 @@ import * as kpis from './kpis.js';
 //
 // Cada PR que saque un trozo nuevo lo añade a TROZOS.
 
-const TROZOS: Record<string, Record<string, unknown>> = { kpis };
+const TROZOS: Record<string, Record<string, unknown>> = { kpis, visores };
 
 describe('repo.ts como barril de repo/ (ARQ-612)', () => {
   for (const [nombre, trozo] of Object.entries(TROZOS)) {
