@@ -6,8 +6,8 @@ import type { Pool } from '@algarpibe/zoho-sync';
 //   the customer ordered, NOT the invoice date; see SALES_BY_YEAR_SQL).
 // - inventory: current stock from books.items (reorder level, on-hand, committed,
 //   available, manufacturer).
-// - leadTime: per-item lead time from the Zoho "Lead Time" custom field (in the
-//   item raw). Returns null until the field is created + populated in Zoho.
+// - leadTime: per-item lead time (days) from the Zoho "Lead Time" custom field
+//   (raw.custom_field_hash.cf_lead_time). Null when the field is empty.
 // Keys match what the SPA's calculations read (flexible key matching).
 
 export interface InventoryData {
@@ -138,25 +138,24 @@ const INVENTORY_SQL = `
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 
-// Lead time (POR AHORA): SOLO el valor sembrado desde el Excel de importación
-// (public.item_lead_times, columna G de "Importar_120726"). Un artículo sin valor
-// en esa tabla queda con lead time 0 → aparece en el análisis pero sin sugerencia
-// de pedido hasta que se cargue su lead time.
+// Lead time (en días): el campo personalizado "Lead Time" del artículo en Zoho
+// (cf_lead_time). La réplica lo trae en raw.custom_field_hash, NO en la raíz del
+// raw (verificado 2026-10-23: 1327 de 1327 activos con valor, iguales al Excel).
+// Sustituye a la tabla sembrada public.item_lead_times (Excel "Importar_120726"),
+// que deja de leerse. Un artículo con el campo vacío queda con lead time 0 →
+// aparece en el análisis pero sin sugerencia de pedido hasta que se rellene en Zoho.
 //
-// MEJORAS FUTURAS (aún no implementadas — no estamos preparados para ello):
-//   1) Tomar el lead time del campo habilitado de Zoho (cf_lead_time).
-//   2) Calcular el lead time REAL = tiempo entre la OC y la recepción
-//      (min fecha de recepción − fecha de la OC), con su desviación, cuando el
-//      artículo tenga suficientes OC recibidas.
+// MEJORA FUTURA (aún no implementada): calcular el lead time REAL = tiempo entre la
+// OC y la recepción (min fecha de recepción − fecha de la OC), con su desviación,
+// cuando el artículo tenga suficientes OC recibidas (fuente 'Calculado').
 const LEAD_TIME_SQL = `
   SELECT it.sku                                  AS "Código de Producto",
          COALESCE(it.raw ->> 'manufacturer', '') AS "Fabricante",
-         seed.lead_time_days::text               AS "Lead Time",
+         NULLIF(it.raw -> 'custom_field_hash' ->> 'cf_lead_time', '') AS "Lead Time",
          0                                        AS "Lead Time Desv",
-         'Manual'                                 AS "Lead Time Fuente",
+         'Zoho'                                   AS "Lead Time Fuente",
          0                                        AS "Lead Time N"
     FROM books.items it
-    LEFT JOIN public.item_lead_times seed ON seed.sku = it.sku
    WHERE it.sku IS NOT NULL AND it.sku <> ''
      AND (it.raw ->> 'status') IS DISTINCT FROM 'inactive'`;
 

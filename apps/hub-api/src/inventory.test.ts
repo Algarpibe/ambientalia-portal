@@ -43,6 +43,18 @@ describe('inventory — getInventoryData', () => {
     expect(invSql).toMatch(/so\.status NOT IN \('void', 'draft', 'pending_approval'\)/);
   });
 
+  it('SQL de lead time: sale del campo de Zoho cf_lead_time (custom_field_hash), ya no del Excel sembrado', async () => {
+    let ltSql = '';
+    const query = vi.fn(async (sql: string) => {
+      if (/"Lead Time"/.test(sql)) ltSql = sql;
+      return { rows: [] };
+    });
+    await getInventoryData({ query } as unknown as Pool);
+    expect(ltSql).toMatch(/custom_field_hash' ->> 'cf_lead_time'/);
+    expect(ltSql).toMatch(/'Zoho'\s+AS "Lead Time Fuente"/);
+    expect(ltSql).not.toMatch(/item_lead_times/);
+  });
+
   it('devuelve las 6 claves (4 años + inventory + leadTime)', async () => {
     const query = vi.fn(async () => ({ rows: [] }));
     const data = await getInventoryData({ query } as unknown as Pool);
