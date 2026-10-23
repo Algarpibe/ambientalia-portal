@@ -17,6 +17,7 @@ import {
   type MesDelAnio,
 } from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
+import { AusenciaError } from './errores.js';
 import {
   absentismoPorMes,
   acumulacionExcesiva,
@@ -72,23 +73,9 @@ import {
   type TipoSolicitud,
 } from './types.js';
 
-/** Error de dominio con su código HTTP, como `UserError` en users.service.ts. */
-export class AusenciaError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly status: number,
-    public readonly field?: string,
-    /**
-     * Datos del conflicto, para los errores que sin ellos no se pueden accionar.
-     * «Te solapas» sin decir CON QUÉ deja a la persona sin saber qué corregir.
-     * Opcional: la inmensa mayoría de los errores se explican solos con `code`.
-     */
-    public readonly detalle?: Record<string, unknown>,
-  ) {
-    super(code);
-    this.name = 'AusenciaError';
-  }
-}
+// ARQ-612 — la clase vive en errores.ts; se reexporta para que quien la
+// importaba de aquí (router.ts, los tests) no cambie.
+export { AusenciaError };
 
 /** Tope del PDF adjunto. Una incapacidad escaneada rara vez pasa de 2-3 MB. */
 export const MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;

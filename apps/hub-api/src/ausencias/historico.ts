@@ -1,5 +1,5 @@
 import { esFechaValida } from './dias-habiles.js';
-import { AusenciaError } from './service.js';
+import { AusenciaError } from './errores.js';
 import {
   ESTADOS,
   ESTADOS_MODIFICACION,
