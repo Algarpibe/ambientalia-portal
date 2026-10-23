@@ -125,6 +125,8 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({
             { key: 'availableQuantity', label: 'Disponible' },
             { key: 'futureAvailable', label: 'Disponible a Futuro' },
             { key: 'coverageDays', label: 'Cobertura (Días)' },
+            { key: 'leadTimeDays', label: 'LT (Días)' },
+            { key: 'leadTimeStdDays', label: 'σ LT (Días)' },
             { key: 'etaDate', label: 'ETA (llegada)' },
             { key: 'reorderPoint', label: 'PDP Propuesto' },
             { key: 'erpLevel', label: 'Nivel ERP' },
