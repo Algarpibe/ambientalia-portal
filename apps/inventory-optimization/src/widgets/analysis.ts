@@ -4,6 +4,7 @@
 // inventario ni inventar campos: el resultado y sus estados son idénticos a los
 // que muestra la pantalla de "Análisis de Inventario".
 
+import { formatCOP } from '@suite/format';
 import { processInventoryData } from '../utils/calculations';
 import { isUrgentItem } from '../utils/resultTableLogic';
 import type { AnalysisResult } from '../types';
@@ -159,9 +160,11 @@ export function analyze(data: InventoryData): InventorySummary {
 
 // ─── Formateo compartido ─────────────────────────────────────────────────────
 
-/** Formato de moneda es-CO en COP, sin decimales (helper del contrato de widgets). */
-export const formatMoney = (value: number): string =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value || 0);
+/**
+ * Formato de moneda es-CO en COP, sin decimales (helper del contrato de widgets).
+ * ARQ-611: es formatCOP; la copia local dejaba pasar Infinity como "$ ∞".
+ */
+export const formatMoney = formatCOP;
 
 /**
  * Formato de moneda en USD, sin decimales. Los costos y valores de inventario de

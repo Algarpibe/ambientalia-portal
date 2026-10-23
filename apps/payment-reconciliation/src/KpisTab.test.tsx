@@ -109,6 +109,20 @@ describe('KpisTab', () => {
     expect(aging).toHaveTextContent('1 facturas');
   });
 
+  // ARQ-611 — los montos en pesos de esta pestaña salen de formatCOP de
+  // @suite/format, no de una copia local. Se compara textContent exacto porque
+  // toHaveTextContent normaliza el espacio duro (U+00A0) tras "$" y no lo vería.
+  it('pinta el total vencido en pesos con formatCOP', () => {
+    render(
+      <KpisTab
+        reconciledData={[row({ dueDate: '19 sep 2026', total: 1234567.6, balance: 1234567.6, paymentDetails: [] })]}
+        today={TODAY}
+      />,
+    );
+    const aging = screen.getByRole('region', { name: 'Cartera por antigüedad (hoy)' });
+    expect(within(aging).getByText(/Total vencido/).querySelector('strong')?.textContent).toBe('$\u00a01.234.568');
+  });
+
   it('warns about open invoices in another currency below the aging cards', () => {
     render(
       <KpisTab

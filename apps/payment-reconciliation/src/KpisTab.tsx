@@ -11,6 +11,9 @@ import type { WorseningClientsResult } from './metrics/worseningClients';
 import { SkeletonAnalytics } from './SkeletonLoader';
 import { chartHeight } from './overdueByClientFormat';
 import { LoadErrorState } from './components/LoadErrorState';
+// ARQ-611: los montos de esta pestaña son solo COP (los KPI de dinero excluyen
+// otras divisas), así que van directos a formatCOP en vez de una copia local.
+import { formatCOP } from '@suite/format';
 
 const YearlyTrendCharts = lazy(() => import('./YearlyTrendCharts'));
 const OverdueByClientChart = lazy(() => import('./OverdueByClientChart'));
@@ -55,9 +58,6 @@ class ChartsErrorBoundary extends Component<{ children: ReactNode }, { failed: b
 
 const oneDecimal = (n: number) =>
   n.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-
-const money = (n: number) =>
-  n.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
 
 const days = (n: number | null) => (n === null ? '—' : `${oneDecimal(n)} días`);
 
@@ -156,7 +156,7 @@ function AgingInvoicesTable({
                     inv.invoiceNumber
                   )}
                 </td>
-                <td className="px-4 py-2 text-right text-slate-900">{money(inv.balance)}</td>
+                <td className="px-4 py-2 text-right text-slate-900">{formatCOP(inv.balance)}</td>
                 <td className="px-4 py-2 text-right text-slate-600">{dueText(inv.daysPastDue)}</td>
               </tr>
             ))}
@@ -186,7 +186,7 @@ function AgingSection({
           Cartera por antigüedad (hoy)
         </h3>
         <p className="text-sm text-slate-600">
-          Total vencido: <strong className="text-red-700">{money(aging.overdueBalance)}</strong> ·{' '}
+          Total vencido: <strong className="text-red-700">{formatCOP(aging.overdueBalance)}</strong> ·{' '}
           {aging.overdueInvoiceCount} facturas
         </p>
       </div>
@@ -201,7 +201,7 @@ function AgingSection({
             className={`rounded-xl border px-4 py-3 text-left ${b.invoices.length === 0 ? 'opacity-60 cursor-default' : 'cursor-pointer hover:shadow-md'} ${selected === b.key ? 'ring-2 ring-indigo-500' : ''} ${b.key === 'notDue' ? 'bg-slate-50 border-slate-100' : 'bg-red-50/40 border-red-100'}`}
           >
             <p className="text-xs font-semibold text-slate-500">{AGING_LABELS[b.key]}</p>
-            <p className="text-lg font-bold text-slate-900 truncate" title={money(b.balance)}>{money(b.balance)}</p>
+            <p className="text-lg font-bold text-slate-900 truncate" title={formatCOP(b.balance)}>{formatCOP(b.balance)}</p>
             <p className="text-xs text-slate-500">
               {b.invoiceCount} facturas · {b.clientCount} clientes
             </p>
@@ -267,7 +267,7 @@ function WorseningClientsTable({ result }: { result: WorseningClientsResult }) {
                 <td className="px-6 py-4 text-right text-slate-600">{oneDecimal(c.previousDPD)} días</td>
                 <td className="px-6 py-4 text-right text-slate-900">{oneDecimal(c.currentDPD)} días</td>
                 <td className="px-6 py-4 text-right font-semibold text-red-700">+{oneDecimal(c.change)} días</td>
-                <td className="px-6 py-4 text-right text-slate-900">{c.overdueBalance > 0 ? money(c.overdueBalance) : '—'}</td>
+                <td className="px-6 py-4 text-right text-slate-900">{c.overdueBalance > 0 ? formatCOP(c.overdueBalance) : '—'}</td>
               </tr>
             ))}
           </tbody>

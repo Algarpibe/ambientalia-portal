@@ -4,6 +4,7 @@
 // los pasan por el motor de scoring/segmentación ya existente (clientAggregator).
 // Sin estado ni dependencias del Portal.
 
+import { formatPct } from '@suite/format';
 import { normalizeClientName } from '../utils/normalize';
 import {
   aggregateClients,
@@ -249,4 +250,5 @@ export function analyze(
 export const formatMoney = (value: number): string =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value || 0);
 
-export const formatPercent = (value: number): string => `${((value || 0) * 100).toFixed(1)}%`;
+// ARQ-611: la copia local (`value || 0`) dejaba pasar Infinity como "Infinity%".
+export const formatPercent = formatPct;

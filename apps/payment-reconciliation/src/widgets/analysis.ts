@@ -3,6 +3,7 @@
 // (mismos nombres de campo: invoices/payments del hub de Zoho) en una forma
 // independiente y sin estado.
 
+import { formatPct } from '@suite/format';
 import { parseExcelDate } from '../customerAnalysisUtils';
 import { currencyOf, isCop, formatMoney as formatMoneyIn } from '../currency';
 
@@ -183,4 +184,5 @@ export function formatDate(value: unknown): string {
 
 export const formatMoney = (value: number, currency: string = 'COP'): string => formatMoneyIn(value, currency);
 
-export const formatPercent = (value: number): string => `${((value || 0) * 100).toFixed(1)}%`;
+// ARQ-611: la copia local (`value || 0`) dejaba pasar Infinity como "Infinity%".
+export const formatPercent = formatPct;

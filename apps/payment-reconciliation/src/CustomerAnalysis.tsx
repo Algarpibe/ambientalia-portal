@@ -83,16 +83,9 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
         return num.toFixed(decimals);
     };
 
-    // Sums are COP-only (see customerAnalysisUtils); a single invoice passes its own currency.
-    const formatCurrency = (num: number, currency: string = 'COP'): string => {
-        if (currency !== 'COP') return formatMoney(num, currency);
-        return num.toLocaleString('en-US', {
-            style: 'currency',
-            currency: 'COP',
-            currencyDisplay: 'code',
-            maximumFractionDigits: 0
-        }).replace('COP', 'COP ');
-    };
+    // Las sumas son solo COP (ver customerAnalysisUtils) y van a formatMoney sin
+    // divisa; una factura suelta pasa la suya. ARQ-611: el peso sale de formatCOP
+    // (vía formatMoney), ya no en en-US con código ("COP  1,234,568").
 
     const getTrendIcon = (value: number) => {
         if (value > 0.5) return <TrendingUp className="text-red-500" size={16} />;
@@ -164,7 +157,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
             { Métrica: 'Cliente', Valor: current.customerName },
             { Métrica: 'Total de Facturas', Valor: current.totalInvoices },
             { Métrica: 'Facturas con Pagos', Valor: current.totalInvoicesWithPayments },
-            { Métrica: 'Valor Total Facturado', Valor: formatCurrency(current.totalInvoiceValue) },
+            { Métrica: 'Valor Total Facturado', Valor: formatMoney(current.totalInvoiceValue) },
             { Métrica: '', Valor: '' },
             { Métrica: 'DPD Promedio (días)', Valor: formatNumber(current.averageDPD, 1) },
             { Métrica: '% Facturas a Tiempo', Valor: formatNumber(current.onTimePercentage, 1) + '%' },
@@ -179,25 +172,25 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                 'Banda de Mora': '1-15 días',
                 'Cantidad': current.latePaymentBands.band1_15.count,
                 'Porcentaje': formatNumber(current.latePaymentBands.band1_15.percentage, 1) + '%',
-                'Valor Total': formatCurrency(current.latePaymentBands.band1_15.totalValue),
+                'Valor Total': formatMoney(current.latePaymentBands.band1_15.totalValue),
             },
             {
                 'Banda de Mora': '16-30 días',
                 'Cantidad': current.latePaymentBands.band16_30.count,
                 'Porcentaje': formatNumber(current.latePaymentBands.band16_30.percentage, 1) + '%',
-                'Valor Total': formatCurrency(current.latePaymentBands.band16_30.totalValue),
+                'Valor Total': formatMoney(current.latePaymentBands.band16_30.totalValue),
             },
             {
                 'Banda de Mora': '31-60 días',
                 'Cantidad': current.latePaymentBands.band31_60.count,
                 'Porcentaje': formatNumber(current.latePaymentBands.band31_60.percentage, 1) + '%',
-                'Valor Total': formatCurrency(current.latePaymentBands.band31_60.totalValue),
+                'Valor Total': formatMoney(current.latePaymentBands.band31_60.totalValue),
             },
             {
                 'Banda de Mora': '>60 días',
                 'Cantidad': current.latePaymentBands.bandOver60.count,
                 'Porcentaje': formatNumber(current.latePaymentBands.bandOver60.percentage, 1) + '%',
-                'Valor Total': formatCurrency(current.latePaymentBands.bandOver60.totalValue),
+                'Valor Total': formatMoney(current.latePaymentBands.bandOver60.totalValue),
             },
         ];
 
@@ -325,10 +318,10 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                                         </td>
                                         <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatExcelDate(row.invoiceDate)}</td>
                                         <td className="px-6 py-4 text-slate-600 text-sm whitespace-nowrap">{formatExcelDate(row.dueDate)}</td>
-                                        <td className="px-6 py-4 text-slate-900 font-semibold text-sm">{formatCurrency(row.total, currencyOf(row))}</td>
+                                        <td className="px-6 py-4 text-slate-900 font-semibold text-sm">{formatMoney(row.total, currencyOf(row))}</td>
                                         <td className="px-6 py-4">
                                             <span className={`text-xs px-2 py-1 rounded-full font-medium ${row.balance === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                                {formatCurrency(row.balance, currencyOf(row))}
+                                                {formatMoney(row.balance, currencyOf(row))}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4">
@@ -704,7 +697,7 @@ const CustomerAnalysis: React.FC<CustomerAnalysisProps> = ({
                             </div>
                             <div className="col-span-2 p-3 -m-3">
                                 <div className="text-sm text-slate-600 mb-1">Valor Total Facturado</div>
-                                <div className="text-2xl font-bold text-slate-900">{formatCurrency(analysisResult.current.totalInvoiceValue)}</div>
+                                <div className="text-2xl font-bold text-slate-900">{formatMoney(analysisResult.current.totalInvoiceValue)}</div>
                             </div>
                         </div>
                     </div>
