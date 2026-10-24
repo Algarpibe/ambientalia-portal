@@ -30,18 +30,24 @@ export default defineConfig({
       // meta. Si un cambio los rompe, lo que toca es cubrir lo nuevo, no
       // bajarlos. El resto del código se mide pero no bloquea.
       //
-      // Fuera del umbral, a propósito, los repositorios SQL (`ausencias/repo.ts`,
-      // `users/users.repository.ts`): son consultas contra Postgres y los cubre
-      // `npm run test:db`, que corre en otro proceso y no suma aquí. Medidos
-      // desde este run saldrían al 17 % y obligarían a poner un umbral tan bajo
-      // que no vigilaría nada. `seed-from-env.ts` tampoco: es el arranque de una
-      // base vacía, también probado contra Postgres.
+      // ARQ-612 — los trozos de `ausencias/service/` van DENTRO del de ausencias:
+      // es el mismo código que antes vivía en service.ts, y un glob que solo
+      // mirase los ficheros sueltos de ausencias/ lo dejaría fuera sin avisar.
+      // Lo vigila `ausencias/service/barril.test.ts`, con este mismo emparejador.
+      //
+      // Fuera del umbral, a propósito, los repositorios SQL (`ausencias/repo.ts`
+      // y sus trozos de `repo/`, `users/users.repository.ts`): son consultas
+      // contra Postgres y los cubre `npm run test:db`, que corre en otro proceso
+      // y no suma aquí. Medidos desde este run saldrían al 17 % y obligarían a
+      // poner un umbral tan bajo que no vigilaría nada. `seed-from-env.ts`
+      // tampoco: es el arranque de una base vacía, también probado contra
+      // Postgres.
       //
       // Medido: auth L97,9 B93,2 F100 · ausencias L97,5 B90,1 F99,5 ·
       // users L87,2 B66,4 F96,2.
       thresholds: {
         'src/auth.ts': { lines: 95, branches: 90, functions: 100, statements: 95 },
-        'src/ausencias/!(repo).ts': { lines: 95, branches: 85, functions: 95, statements: 95 },
+        'src/ausencias/{!(repo).ts,service/*.ts}': { lines: 95, branches: 85, functions: 95, statements: 95 },
         'src/users/!(users.repository|seed-from-env).ts': {
           lines: 80,
           branches: 55,

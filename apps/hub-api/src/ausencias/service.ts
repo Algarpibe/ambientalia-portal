@@ -1,21 +1,6 @@
 import type { Pool } from '@algarpibe/zoho-sync';
 import { avisarN8n } from './avisar.js';
 import { APROBADOR_POR_DEFECTO, COPIA_POR_DEFECTO } from './config.js';
-import {
-  diasDelAnio,
-  diasDelMes,
-  esAnioValido,
-  esMesValido,
-  franjasDelAnio,
-  marcasDelMes,
-  mesesDelAnio,
-  rangoDelAnio,
-  rangoDelMes,
-  type DiaCalendario,
-  type FranjaCalendario,
-  type MarcaCalendario,
-  type MesDelAnio,
-} from './calendario.js';
 import { contarDiasHabiles, esFechaValida, MAX_DIAS_RANGO } from './dias-habiles.js';
 import { AusenciaError } from './errores.js';
 import {
@@ -34,13 +19,11 @@ import {
   type PendientesPorAntiguedad,
   type TiempoDeAprobador,
 } from './kpis.js';
-import { resolverEmpleado, validarFilasHistorico } from './historico.js';
 import { aprobadoresDe, construirIndice, creariaCiclo, detectarCiclos, jefeEfectivo } from './jerarquia.js';
 import {
   construirPayload,
   construirPayloadModificacion,
   eventosDeAlta,
-  type Firmante,
 } from './notificaciones.js';
 import * as repo from './repo.js';
 import {
@@ -52,6 +35,7 @@ import {
   type SaldoCompensatorios,
   type SaldoVacaciones,
 } from './saldo.js';
+import { empleadoDeSesion, firmanteDeSesion, type Sesion } from './service/sesion.js';
 import {
   CLASES_MODIFICACION,
   ETIQUETA_TIPO,
@@ -76,6 +60,16 @@ import {
 // ARQ-612 — la clase vive en errores.ts; se reexporta para que quien la
 // importaba de aquí (router.ts, los tests) no cambie.
 export { AusenciaError };
+
+// ARQ-612 — este fichero se parte en trozos dentro de service/, con el mismo
+// patrón que repo.ts: sigue siendo la ÚNICA puerta y reexporta todo lo de los
+// trozos, así que router.ts y los tests lo siguen llamando igual. Lo vigila
+// service/barril.test.ts, que comprueba además que los trozos sigan dentro
+// del umbral de cobertura.
+//
+// Quién es la sesión vive en service/sesion.ts: lo usan casi todos los casos
+// de uso que siguen aquí, y por eso se importa arriba.
+export * from './service/sesion.js';
 
 /** Tope del PDF adjunto. Una incapacidad escaneada rara vez pasa de 2-3 MB. */
 export const MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
@@ -508,26 +502,6 @@ export function nombreArchivoNormalizado(
 }
 
 // ── Casos de uso ───────────────────────────────────────────────────────────
-
-export interface Sesion {
-  email: string;
-  userId: string | null;
-  esAdmin: boolean;
-}
-
-/**
- * El empleado del usuario logueado, dándolo de alta si aún no tenía ficha.
- *
- * Quien tiene la app asignada es exactamente quien debe poder solicitar, así
- * que la asignación ya es el permiso; la ficha se deriva sola de la cuenta del
- * portal. Solo queda 403 cuando de verdad no hay de dónde sacarla: un token
- * legacy sin usuario en BD, o una ficha que un admin desactivó a propósito.
- */
-export async function empleadoDeSesion(db: Pool, sesion: Sesion): Promise<Empleado> {
-  const empleado = await repo.asegurarEmpleado(db, sesion.userId, sesion.email);
-  if (!empleado) throw new AusenciaError('empleado_no_registrado', 403);
-  return empleado;
-}
 
 /**
  * Lo que el cliente necesita saber del choque, y nada más.
@@ -1034,34 +1008,6 @@ export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<S
   // recorta solo cuando recibe NULL, y pasar `undefined` lo dejaría en un
   // parámetro sin valor en vez de en «sin recorte».
   return repo.solicitudesConAdjunto(db, sesion.esAdmin ? null : sesion.email);
-}
-
-/**
- * Quién firma los correos que salen de esta decisión: la persona de la sesión.
- *
- * La sesión y NO el `aprobadorCorreo` congelado en la solicitud, y la diferencia
- * importa en el caso que se da de verdad: un admin destrabando una aprobación
- * firma con su nombre, porque es quien decidió. Es el mismo criterio que la
- * columna «Decidida por» del registro, donde ya costó cuatro formas distintas de
- * atribuirle a alguien un acto que no hizo.
- *
- * `null` si no tiene ficha —se es aprobador por figurar en la columna de otro, y
- * un admin puede no tenerla—, y entonces `firmaDe` cae a la firma de la empresa.
- *
- * ⚠️ Si la consulta falla NO se tumba la decisión: la firma es un adorno del
- * correo y la aprobación es lo que el usuario vino a hacer. Perder la firma es
- * un correo menos personal; perder la decisión por no poder firmarla sería
- * cambiar un fallo cosmético por uno de negocio. Mismo criterio que los saldos
- * en `/ausencias/contexto`.
- */
-async function firmanteDeSesion(db: Pool, sesion: Sesion): Promise<Firmante | null> {
-  try {
-    const ficha = await repo.empleadoDeUsuario(db, sesion.userId, sesion.email);
-    return ficha ? { nombreCompleto: ficha.nombreCompleto, cargo: ficha.cargo } : null;
-  } catch (e) {
-    console.error('ausencias_firmante error', e);
-    return null;
-  }
 }
 
 export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknown): Promise<Solicitud> {
@@ -1658,74 +1604,8 @@ export function puedeVerAdjunto(
 
 // ── Importación del histórico de la hoja ───────────────────────────────────
 
-export interface ResumenImportacion {
-  /** Filas leídas del Excel. */
-  total: number;
-  /** De esas, las que se pudieron atribuir a un empleado. */
-  resueltas: number;
-  importadas: number;
-  yaExistian: number;
-  /** Nombres que no casan con nadie. Se enseñan, no se adivinan. */
-  sinResolver: string[];
-  /** Nombres que casan con más de una persona. */
-  ambiguos: { nombre: string; candidatos: string[] }[];
-}
-
-/**
- * Importa el histórico que solo vivía en la hoja.
- *
- * Con `dryRun` no escribe nada: la UI lo llama primero así para poder enseñar
- * el recuento y los nombres problemáticos antes de tocar la tabla.
- *
- * Importa lo que resuelve y **reporta lo que no**, en vez de abortar entero por
- * un nombre suelto. Reimportar es inocuo (el INSERT se salta lo que ya está),
- * así que corregir el maestro y volver a pasar el fichero es el camino natural.
- */
-export async function importarHistorico(db: Pool, body: unknown): Promise<ResumenImportacion> {
-  const filas = validarFilasHistorico(body);
-  const dryRun = (body as { dryRun?: unknown })?.dryRun === true;
-  const empleados = await repo.listarEmpleados(db);
-
-  const resueltas: repo.FilaHistoricoResuelta[] = [];
-  const sinResolver = new Set<string>();
-  const ambiguos = new Map<string, string[]>();
-
-  for (const f of filas) {
-    const r = resolverEmpleado(f.nombre, empleados);
-    if (r.ambiguo) {
-      ambiguos.set(f.nombre, r.ambiguo.map((e) => e.nombreCompleto));
-      continue;
-    }
-    if (!r.empleado) {
-      sinResolver.add(f.nombre);
-      continue;
-    }
-    resueltas.push({
-      empleadoId: r.empleado.id,
-      tipo: f.tipo,
-      fechaInicio: f.fechaInicio,
-      fechaFin: f.fechaFin,
-      dias: f.dias,
-      comentarios: f.comentarios,
-      observaciones: f.observaciones,
-      // Todas las de la hoja están resueltas: las incapacidades se informan y el
-      // resto llegó con «Aprobado? = Sí» (los rechazos nunca se registraron).
-      estado: f.tipo === 'incapacidad' ? 'registrada' : 'aprobada',
-    });
-  }
-
-  const { importadas, yaExistian } = await repo.importarHistorico(db, resueltas, dryRun);
-
-  return {
-    total: filas.length,
-    resueltas: resueltas.length,
-    importadas,
-    yaExistian,
-    sinResolver: [...sinResolver],
-    ambiguos: [...ambiguos].map(([nombre, candidatos]) => ({ nombre, candidatos })),
-  };
-}
-
+// ARQ-612 — en service/historico.ts. Se reexporta todo.
+export * from './service/historico.js';
 
 // ── Saldo de vacaciones ────────────────────────────────────────────────────
 
@@ -2524,138 +2404,9 @@ export async function fijarSaldo(db: Pool, empleadoId: string, body: unknown): P
 
 // ── Calendario ─────────────────────────────────────────────────────────────
 
-/**
- * A quién ve esta sesión en el calendario: `null` es «sin acotar» y un correo es
- * «su rama de dos niveles y él mismo» (ver `repo.alcanceDelCalendario`).
- *
- * ⚠️ Existe una sola vez y la comparten la vista MENSUAL y la ANUAL. No es
- * comodidad: son la misma pantalla con dos formas, y si el alcance se resolviera
- * por separado en cada una, cambiar la regla en una dejaría a la otra
- * contestando lo de antes — sin fallar, y enseñando de más justo en la vista que
- * nadie volvió a revisar.
- *
- * El CORREO de la sesión, no el id de su ficha. Es la misma clave con la que
- * este módulo resuelve todo lo demás —`esAprobadorDeAlguien`,
- * `esVisorDeAdjuntos`, `puedeExportarRegistro`— y la única con la que se puede
- * expresar «mi rama», porque el organigrama son correos (`aprobador_correo`) y
- * no ids.
- *
- * Aquí hubo un `empleadoDeUsuario` + un centinela `ID_INEXISTENTE`. Aquel
- * centinela existía porque `null` significa «sin acotar» en los dos repos y
- * quien no tuviera ficha habría caído en esa rama viendo la plantilla entera.
- * Con el correo ya no hace falta: quien no tenga ficha no casa con ninguna fila
- * y recibe una rejilla vacía, que es justo lo que toca. Y un jefe SIN ficha
- * —que puede darse, porque se es aprobador por figurar en la columna de otro—
- * ve a su equipo en vez de nada.
- */
-async function alcanceDeSesion(db: Pool, sesion: Sesion): Promise<string | null> {
-  // El mismo `veTodo` que decide en `movimientosVisibles`, y escrito igual a
-  // propósito: son las dos caras del mismo permiso, y quien lo tenga tiene que
-  // ver la compañía entera en las dos pantallas o en ninguna.
-  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
-  return veTodo ? null : sesion.email;
-}
-
-export interface CalendarioDelMes {
-  empleados: repo.EmpleadoActivo[];
-  dias: DiaCalendario[];
-  marcas: MarcaCalendario[];
-}
-
-/**
- * El calendario de un mes, con las marcas ya expandidas por día.
- *
- * El parámetro es un mes y no un rango libre: acotarlo así impide que una
- * petición pida cinco años de golpe, y la interfaz solo navega mes a mes.
- *
- * **Tres alcances, y el del medio es el normal.** Un admin —o quien tenga
- * `ve_toda_la_empresa`, migración 032— ve la plantilla entera. **Un jefe ve su
- * propia fila y la de su rama de dos niveles**, que es exactamente la gente
- * cuyas ausencias firma. Quien no aprueba a nadie sigue viendo solo la suya.
- *
- * El escalón del medio se añadió el 2026-08-21 a petición expresa, y es el que
- * hace útil la pantalla para un jefe: coordinar un equipo exige ver cuándo falta
- * ese equipo. No reabre lo que se cerró en su día —la rejilla no vuelve a
- * enseñar a cualquiera cuándo falta cada compañero—, porque el alcance está
- * atado al organigrama y no al hecho de tener la app.
- *
- * El recorte lo hace el SQL, no un filtro sobre la respuesta: si las marcas
- * ajenas llegaran al navegador ya estarían expuestas, por mucho que no se
- * pinten. Y la definición de «mi rama» NO se reescribe aquí: el repo la comparte
- * con el registro de movimientos y con los saldos (ver `alcanceDelCalendario`).
- *
- * El recorte se hace en el SQL, no filtrando la respuesta: si las marcas ajenas
- * llegaran al navegador ya estarían expuestas, por mucho que no se pinten. Es la
- * misma lección del enmascarado de incapacidades que se retiró en su día.
- *
- * ⚠️ No oculta tanto como parece: n8n sigue publicando cada ausencia aprobada en
- * el Google Calendar «Ambientalia Staff», con el nombre de la persona en el
- * título. Quien tenga ese calendario compartido ve lo mismo por otra vía.
- */
-export async function calendarioDelMes(db: Pool, sesion: Sesion, mes: string): Promise<CalendarioDelMes> {
-  if (!esMesValido(mes)) throw new AusenciaError('mes_invalido', 400, 'mes');
-
-  const soloDe = await alcanceDeSesion(db, sesion);
-
-  const { desde, hasta } = rangoDelMes(mes);
-  const [empleados, ausencias] = await Promise.all([
-    repo.empleadosActivos(db, soloDe),
-    repo.ausenciasEntre(db, soloDe, desde, hasta),
-  ]);
-
-  return {
-    empleados,
-    dias: diasDelMes(mes),
-    marcas: marcasDelMes(mes, ausencias),
-  };
-}
-
-export interface CalendarioDelAnio {
-  empleados: repo.EmpleadoActivo[];
-  anio: string;
-  /** 365, o 366 si es bisiesto. Es el denominador de todos los anchos. */
-  diasDelAnio: number;
-  meses: MesDelAnio[];
-  franjas: FranjaCalendario[];
-}
-
-/**
- * El año entero, para la vista de franjas.
- *
- * Devuelve FRANJAS y no marcas por día, y ahí está el porqué de que exista una
- * función aparte en vez de un parámetro de `calendarioDelMes`: la rejilla
- * mensual rellena celdas y necesita un objeto por día; la anual dibuja barras y
- * necesita uno por ausencia. Expandir el año a días serían ~14.600 objetos en la
- * respuesta y otros tantos nodos en el DOM para pintar unas trescientas barras.
- *
- * **El alcance es EXACTAMENTE el de la vista mensual**, y no por copia: las dos
- * llaman a `alcanceDeSesion`. Un admin o un visor de empresa ven la plantilla
- * entera, un jefe su rama de dos niveles y su propia fila, y el resto solo la
- * suya. Ampliar el rango de un mes a un año no puede ampliar de paso a quién se
- * ve, que es la forma más fácil de convertir una vista nueva en una fuga.
- *
- * El parámetro es un año y no un rango libre, por lo mismo que allí es un mes:
- * acotarlo así impide que una petición pida cinco años de golpe.
- */
-export async function calendarioDelAnio(db: Pool, sesion: Sesion, anio: string): Promise<CalendarioDelAnio> {
-  if (!esAnioValido(anio)) throw new AusenciaError('anio_invalido', 400, 'anio');
-
-  const soloDe = await alcanceDeSesion(db, sesion);
-
-  const { desde, hasta } = rangoDelAnio(anio);
-  const [empleados, ausencias] = await Promise.all([
-    repo.empleadosActivos(db, soloDe),
-    repo.ausenciasEntre(db, soloDe, desde, hasta),
-  ]);
-
-  return {
-    empleados,
-    anio,
-    diasDelAnio: diasDelAnio(anio),
-    meses: mesesDelAnio(anio),
-    franjas: franjasDelAnio(anio, ausencias),
-  };
-}
+// ARQ-612 — en service/calendario.ts, las dos vistas con el alcance que
+// comparten. Se reexporta todo.
+export * from './service/calendario.js';
 
 // ── Baja de un empleado ─────────────────────────────────────────────────────
 
