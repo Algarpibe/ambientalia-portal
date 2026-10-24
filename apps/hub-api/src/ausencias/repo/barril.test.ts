@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import * as repo from '../repo.js';
+import * as historico from './historico.js';
 import * as kpis from './kpis.js';
 import * as visores from './visores.js';
 
@@ -18,7 +19,7 @@ import * as visores from './visores.js';
 //
 // Cada PR que saque un trozo nuevo lo añade a TROZOS.
 
-const TROZOS: Record<string, Record<string, unknown>> = { kpis, visores };
+const TROZOS: Record<string, Record<string, unknown>> = { historico, kpis, visores };
 
 describe('repo.ts como barril de repo/ (ARQ-612)', () => {
   for (const [nombre, trozo] of Object.entries(TROZOS)) {
