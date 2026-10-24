@@ -4,9 +4,12 @@ import { describe, it, expect } from 'vitest';
 import * as repo from '../repo.js';
 import * as adjuntos from './adjuntos.js';
 import * as calendario from './calendario.js';
+import * as filas from './filas.js';
 import * as historico from './historico.js';
 import * as kpis from './kpis.js';
 import * as outbox from './outbox.js';
+import * as retiro from './retiro.js';
+import * as saldos from './saldos.js';
 import * as visores from './visores.js';
 
 // ARQ-612 — repo.ts se parte en trozos dentro de repo/, pero sigue siendo la
@@ -21,6 +24,11 @@ import * as visores from './visores.js';
 //     llegarían a un SQL que no existe en ellos. El compilador no lo ve.
 //
 // Cada PR que saque un trozo nuevo lo añade a TROZOS.
+//
+// Y al revés, INTERNOS: piezas que comparten dos trozos (la traducción de una
+// fila, por ejemplo) pero que repo.ts NO tiene que exportar. Si se colaran por
+// un `export *`, repo.ts tendría funciones públicas nuevas que el doble de
+// router.test.ts no conoce.
 
 const TROZOS: Record<string, Record<string, unknown>> = {
   adjuntos,
@@ -28,8 +36,12 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   historico,
   kpis,
   outbox,
+  retiro,
+  saldos,
   visores,
 };
+
+const INTERNOS: Record<string, Record<string, unknown>> = { filas };
 
 describe('repo.ts como barril de repo/ (ARQ-612)', () => {
   for (const [nombre, trozo] of Object.entries(TROZOS)) {
@@ -37,6 +49,14 @@ describe('repo.ts como barril de repo/ (ARQ-612)', () => {
       const funciones = Object.keys(trozo).filter((k) => typeof trozo[k] === 'function');
       expect(funciones.length).toBeGreaterThan(0);
       for (const f of funciones) expect((repo as Record<string, unknown>)[f], f).toBe(trozo[f]);
+    });
+  }
+
+  for (const [nombre, interno] of Object.entries(INTERNOS)) {
+    it(`NO reexporta las funciones de repo/${nombre}.ts, que son internas`, () => {
+      const funciones = Object.keys(interno).filter((k) => typeof interno[k] === 'function');
+      expect(funciones.length).toBeGreaterThan(0);
+      for (const f of funciones) expect((repo as Record<string, unknown>)[f], f).toBeUndefined();
     });
   }
 
