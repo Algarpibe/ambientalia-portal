@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import * as repo from '../repo.js';
 import * as adjuntos from './adjuntos.js';
 import * as calendario from './calendario.js';
+import * as empleados from './empleados.js';
 import * as filas from './filas.js';
 import * as historico from './historico.js';
 import * as kpis from './kpis.js';
@@ -33,6 +34,7 @@ import * as visores from './visores.js';
 const TROZOS: Record<string, Record<string, unknown>> = {
   adjuntos,
   calendario,
+  empleados,
   historico,
   kpis,
   outbox,
