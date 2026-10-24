@@ -7,6 +7,7 @@ import * as service from '../service.js';
 import * as calendario from './calendario.js';
 import * as historico from './historico.js';
 import * as sesion from './sesion.js';
+import * as validacion from './validacion.js';
 
 // ARQ-612 — service.ts se parte en trozos dentro de service/, con el mismo
 // patrón que repo.ts: sigue siendo la ÚNICA puerta y reexporta todo lo de los
@@ -30,6 +31,7 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   calendario,
   historico,
   sesion,
+  validacion,
 };
 
 const SERVICE = __dirname;
