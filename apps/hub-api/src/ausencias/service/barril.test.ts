@@ -6,7 +6,9 @@ import { describe, it, expect } from 'vitest';
 import * as service from '../service.js';
 import * as calendario from './calendario.js';
 import * as historico from './historico.js';
+import * as registro from './registro.js';
 import * as sesion from './sesion.js';
+import * as solapes from './solapes.js';
 import * as validacion from './validacion.js';
 
 // ARQ-612 — service.ts se parte en trozos dentro de service/, con el mismo
@@ -30,7 +32,9 @@ import * as validacion from './validacion.js';
 const TROZOS: Record<string, Record<string, unknown>> = {
   calendario,
   historico,
+  registro,
   sesion,
+  solapes,
   validacion,
 };
 
