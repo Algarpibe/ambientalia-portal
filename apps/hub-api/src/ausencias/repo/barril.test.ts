@@ -8,6 +8,7 @@ import * as empleados from './empleados.js';
 import * as filas from './filas.js';
 import * as historico from './historico.js';
 import * as kpis from './kpis.js';
+import * as modificaciones from './modificaciones.js';
 import * as outbox from './outbox.js';
 import * as registro from './registro.js';
 import * as retiro from './retiro.js';
@@ -40,6 +41,7 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   empleados,
   historico,
   kpis,
+  modificaciones,
   outbox,
   registro,
   retiro,
