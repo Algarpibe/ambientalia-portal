@@ -1,5 +1,4 @@
 import type { Pool } from '@algarpibe/zoho-sync';
-import type { AusenciaRango } from './calendario.js';
 import type { EnlaceJerarquia } from './jerarquia.js';
 import { cambiaLaHoja, esOtorgamiento, estaEnElCalendario } from './types.js';
 import type {
@@ -12,8 +11,6 @@ import type {
   EventoBorrado,
   EventoCorreccion,
   EventoModificacion,
-  EventoOutbox,
-  EventoPendiente,
   EventoSolicitud,
   Modificacion,
   Movimiento,
@@ -2194,289 +2191,19 @@ export async function borrarModificacion(db: Pool, id: string): Promise<Modifica
 
 // ── Adjuntos ───────────────────────────────────────────────────────────────
 
-export interface AdjuntoCompleto {
-  solicitudId: string;
-  solicitanteEmail: string;
-  aprobadorCorreo: string | null;
-  segundoAprobadorCorreo: string | null;
-  nombreArchivo: string;
-  mime: string;
-  contenido: Buffer;
-}
-
-export async function adjuntoPorId(db: Pool, id: string): Promise<AdjuntoCompleto | null> {
-  const { rows } = await db.query(
-    `SELECT a.solicitud_id, s.solicitante_email, s.aprobador_correo, s.segundo_aprobador_correo,
-            a.nombre_archivo, a.mime, a.contenido
-       FROM portal.solicitud_adjuntos a
-       JOIN portal.solicitudes_ausencia s ON s.id = a.solicitud_id
-      WHERE a.id = $1`,
-    [id],
-  );
-  if (!rows.length) return null;
-  const r = rows[0] as {
-    solicitud_id: string;
-    solicitante_email: string;
-    aprobador_correo: string | null;
-    segundo_aprobador_correo: string | null;
-    nombre_archivo: string;
-    mime: string;
-    contenido: Buffer;
-  };
-  return {
-    solicitudId: r.solicitud_id,
-    solicitanteEmail: r.solicitante_email,
-    aprobadorCorreo: r.aprobador_correo,
-    segundoAprobadorCorreo: r.segundo_aprobador_correo,
-    nombreArchivo: r.nombre_archivo,
-    mime: r.mime,
-    contenido: r.contenido,
-  };
-}
+// ARQ-612 — en repo/adjuntos.ts. Se reexporta todo, como los grupos de arriba.
+export * from './repo/adjuntos.js';
 
 // ── Outbox ─────────────────────────────────────────────────────────────────
 
-/**
- * Cuánto queda reservado un evento tras servirlo. Tiene que ser holgadamente
- * mayor que lo que tarda un lote en enviarse y confirmarse (Gmail, calendario y
- * hoja, hasta 20 eventos), y menor que el barrido de 10 minutos, para que un
- * envío que se cayó de verdad se reintente en la pasada siguiente.
- */
-const RESERVA = '5 minutes';
-
-/**
- * Cuántas veces se sirve un evento antes de aparcarlo.
- *
- * ⚠️ Nació de un incidente, y conviene saber cuál antes de tocarlo. El
- * 2026-08-24 se borraron unas solicitudes desde el Registro general; sus seis
- * eventos `borrado_admin` fallaban al borrar el evento de Google —ya no estaba—
- * y el workflow de n8n no llegaba nunca al paso de confirmar. Como el correo se
- * manda ANTES de tocar el calendario, cada ciclo de diez minutos reenviaba los
- * seis. Se descubrió al día siguiente, con 119 intentos y unos setecientos
- * correos.
- *
- * El fallo de n8n se arregló aparte. Esto es el respaldo: **un evento que no se
- * confirma deja de servirse**, pase lo que pase aguas abajo. Con este tope aquel
- * incidente habrían sido treinta correos en vez de setecientos.
- *
- * Cinco y no más: el reintento existe para cubrir un fallo pasajero (Gmail que
- * no responde, un timeout), y eso se resuelve en el segundo o el tercero. Lo que
- * falla cinco veces seguidas está roto, y seguir insistiendo no lo arregla; solo
- * multiplica el daño.
- *
- * Aparcado NO es enviado: la fila conserva `enviado_at` a null a propósito, para
- * que siga saliendo en una consulta de diagnóstico como lo que es — un aviso que
- * NO se entregó y que hay que mirar a mano.
- */
-export const MAX_INTENTOS = 5;
-
-/**
- * Los eventos aún no ejecutados, del más antiguo al más nuevo.
- *
- * Sirve el evento **sin marcarlo como enviado**: el estado solo avanza en
- * `confirmarEventos`. Si Gmail falla a mitad, el evento vuelve a la cola solo. El
- * precio es que un fallo DESPUÉS de enviar el correo puede duplicarlo; se
- * prefiere un correo repetido a una solicitud que nadie ve.
- *
- * Pero servir **sí reserva**: `servido_at` lo aparta de la cola durante unos
- * minutos. Sin eso, los dos disparadores del workflow —el webhook del portal y el
- * barrido de diez minutos— pueden leer las mismas filas si arrancan con pocos
- * segundos de diferencia, porque entre servir y confirmar pasa lo que tarde el
- * envío. Ocurrió en producción: 0,7 s de separación, correo duplicado. Sobre un
- * evento `aprobada` habría sido además un evento de calendario y una fila de la
- * hoja por duplicado.
- *
- * `intentos` se incrementa aquí para poder detectar en la BD un evento que lleva
- * reintentándose sin éxito — y, desde el incidente del 2026-08-24, para dejar de
- * servirlo pasado `MAX_INTENTOS`.
- *
- * ⚠️ `FOR UPDATE SKIP LOCKED` en la subconsulta (DATA-338): la reserva por sí
- * sola no cerraba dos peticiones SOLAPADAS. La subconsulta elige los ids con la
- * foto del inicio de la sentencia; la segunda petición esperaba el candado de la
- * primera y, al soltarse, Postgres solo revisaba el WHERE de fuera —`id IN
- * (...)`, que seguía siendo cierto—, así que las dos marcaban y devolvían las
- * mismas filas. Ahora la segunda salta las que la primera tiene cogidas y se
- * lleva otras, o ninguna.
- */
-export async function eventosPendientes(db: Pool, limite = 20): Promise<EventoPendiente[]> {
-  const { rows } = await db.query(
-    `UPDATE portal.ausencias_outbox o
-        SET intentos = o.intentos + 1, servido_at = now()
-      WHERE o.id IN (
-              SELECT id FROM portal.ausencias_outbox
-               WHERE enviado_at IS NULL
-                 AND intentos < $3
-                 AND (servido_at IS NULL OR servido_at < now() - $2::interval)
-               ORDER BY id LIMIT $1
-                 FOR UPDATE SKIP LOCKED)
-      RETURNING o.id, o.evento, o.solicitud_id, o.intentos, o.payload`,
-    [limite, RESERVA, MAX_INTENTOS],
-  );
-  // `solicitud_id` nulable desde la 028: la clave ajena es `ON DELETE SET NULL`
-  // para que el borrado de un evento de Google sobreviva a la solicitud que lo
-  // pidio. El cast tiene que decirlo o `tsc` se cree un `string` que puede no
-  // serlo, y eso convierte un null real en un fallo en tiempo de ejecucion.
-  return (rows as {
-    id: string;
-    evento: EventoOutbox;
-    solicitud_id: string | null;
-    intentos: number;
-    payload: PayloadEvento;
-  }[])
-    .map((r) => ({
-      id: Number(r.id),
-      evento: r.evento,
-      solicitudId: r.solicitud_id,
-      intentos: r.intentos,
-      payload: r.payload,
-    }))
-    .sort((a, b) => a.id - b.id);
-}
-
-/** Marca como enviados los ids que n8n confirma. Idempotente. */
-export async function confirmarEventos(db: Pool, ids: number[]): Promise<number> {
-  if (ids.length === 0) return 0;
-  const { rowCount } = await db.query(
-    'UPDATE portal.ausencias_outbox SET enviado_at = now() WHERE id = ANY($1::bigint[]) AND enviado_at IS NULL',
-    [ids],
-  );
-  return rowCount ?? 0;
-}
+// ARQ-612 — el lado lector, en repo/outbox.ts. Los INSERT de eventos se quedan
+// dentro de las transacciones de solicitudes y modificaciones de este fichero.
+export * from './repo/outbox.js';
 
 // ── Calendario ─────────────────────────────────────────────────────────────
 
-/** Un empleado activo, reducido a lo que la rejilla necesita para su fila. */
-export interface EmpleadoActivo {
-  id: string;
-  nombreCompleto: string;
-}
-
-interface FilaEmpleadoActivoDb {
-  id: string;
-  nombre_completo: string;
-}
-
-function aEmpleadoActivo(r: FilaEmpleadoActivoDb): EmpleadoActivo {
-  return { id: r.id, nombreCompleto: r.nombre_completo };
-}
-
-/**
- * Los empleados activos, para que el calendario tenga una fila por persona.
- *
- * No se reutiliza `listarEmpleados`: esa NO filtra por `activo`, así que
- * arrastraría las fichas dadas de baja —justo lo que se hace con quien deja de
- * ser empleado directo— y saldrían como filas vacías para siempre.
- */
-/**
- * Los empleados activos. `soloEmpleadoId` acota a uno: es lo que ve quien no es
- * admin en el calendario. Sin valor por defecto a propósito —igual que en
- * `empleadosConSaldo`—, para que acotar o no acotar sea siempre una decisión
- * escrita en el llamante y no un olvido que enseñe la plantilla entera.
- */
-/**
- * A quién alcanza el calendario de quien pregunta: SU propia fila y la de su
- * rama de dos niveles. Con el parámetro a NULL no acota nada, que es lo que
- * necesitan un administrador y quien tenga `ve_toda_la_empresa`.
- *
- * Envuelve `ramaDeDosNiveles()` en vez de reescribirla: la definición de «mi
- * rama» tiene que seguir siendo la MISMA que la del registro de movimientos y
- * la de los saldos, y una copia divergente no lanza — solo enseña las ausencias
- * de gente que no es de quien mira. Lo único que añade es el «y yo», que el
- * recorte por rama no incluye: `aprobador_correo` de uno apunta a su jefe, no a
- * uno mismo, así que sin este OR un jefe vería el calendario de su equipo y no
- * el suyo.
- *
- * ⚠️ Lo usan DOS consultas —las filas y las marcas— y tienen que decir
- * exactamente lo mismo. Si discreparan no fallaría nada: saldría una persona sin
- * marcas, o marcas de alguien que no tiene fila y que por tanto no se pintan.
- * Por eso está aquí y no copiado en cada una.
- *
- * Hereda de `ramaDeDosNiveles` las dos condiciones de uso: `$1` es SIEMPRE el
- * primer parámetro de la consulta que lo incrusta, y la tabla `portal.empleados`
- * va aliasada como `e`.
- */
-export function alcanceDelCalendario(): string {
-  return `(${ramaDeDosNiveles()} OR lower(e.correo) = lower($1))`;
-}
-
-export async function empleadosActivos(db: Pool, soloDe: string | null): Promise<EmpleadoActivo[]> {
-  const { rows } = await db.query(
-    // Aliasada como `e` porque lo exige el fragmento que se incrusta debajo.
-    `SELECT e.id, e.nombre_completo FROM portal.empleados e
-      WHERE e.activo AND ${alcanceDelCalendario()}
-      ORDER BY e.nombre_completo`,
-    [soloDe],
-  );
-  return (rows as FilaEmpleadoActivoDb[]).map(aEmpleadoActivo);
-}
-
-interface FilaAusenciaRangoDb {
-  empleado_id: string;
-  tipo: TipoSolicitud;
-  estado: Solicitud['estado'];
-  fecha_inicio: string;
-  fecha_fin: string;
-}
-
-function aAusenciaRango(r: FilaAusenciaRangoDb): AusenciaRango {
-  return {
-    empleadoId: r.empleado_id,
-    tipo: r.tipo,
-    estado: r.estado,
-    fechaInicio: r.fecha_inicio,
-    fechaFin: r.fecha_fin,
-  };
-}
-
-/**
- * Las ausencias que SOLAPAN con el rango, no las contenidas en él.
- *
- * La condición natural (`fecha_inicio >= desde AND fecha_fin <= hasta`) perdería
- * exactamente las que cruzan el cambio de mes, que son las que más importa ver:
- * un mes que no las enseña miente sobre quién está fuera el día 1.
- */
-export async function ausenciasEntre(
-  db: Pool,
-  soloDe: string | null,
-  desde: string,
-  hasta: string,
-): Promise<AusenciaRango[]> {
-  const { rows } = await db.query(
-    `SELECT s.empleado_id, s.tipo, s.estado,
-            s.fecha_inicio::text AS fecha_inicio,
-            s.fecha_fin::text    AS fecha_fin
-       FROM portal.solicitudes_ausencia s
-       JOIN portal.empleados e ON e.id = s.empleado_id
-      WHERE e.activo
-        AND s.estado <> 'rechazada'
-        -- Un otorgamiento no es una ausencia: su fecha es el dia que se trabajo
-        -- de mas, y pintarlo aqui diria que esa persona NO estuvo justo el dia
-        -- que si estuvo. El filtro va en el SQL y no en el frontend porque el
-        -- calendario del portal no filtra nada por su cuenta: pinta lo que le
-        -- llega, ya expandido por dia.
-        AND s.tipo <> 'otorgamiento'
-        -- El MISMO alcance que empleadosActivos, y por eso compartido: si los
-        -- dos discreparan saldrian marcas de gente sin fila (invisibles) o
-        -- filas sin marcas, y ninguna de las dos cosas falla.
-        --
-        -- Sin comillas invertidas en este comentario a proposito: vive DENTRO
-        -- del template literal de la consulta y una sin escapar lo cierra a
-        -- mitad de frase. Ya paso una vez, en la consulta de movimientos.
-        AND ${alcanceDelCalendario()}
-        AND s.fecha_inicio <= $3::date
-        AND s.fecha_fin    >= $2::date
-      -- Determinismo del pintado, no estética: dos ausencias solapadas del
-      -- mismo empleado producen dos marcas para el mismo (empleadoId, fecha), y
-      -- el frontend arma un Map con esa clave, así que gana la última. Sin este
-      -- ORDER BY, cuál de las dos "gana" podría cambiar entre peticiones.
-      ORDER BY s.fecha_inicio, s.id`,
-    // `soloDe` como PRIMER parámetro, siempre: es la regla que imponen
-    // `ramaDeDosNiveles` y el fragmento que lo envuelve. Las fechas se corrieron
-    // a $2 y $3 por eso, no por gusto.
-    [soloDe, desde, hasta],
-  );
-  return (rows as FilaAusenciaRangoDb[]).map(aAusenciaRango);
-}
+// ARQ-612 — en repo/calendario.ts. Se reexporta todo, como los grupos de arriba.
+export * from './repo/calendario.js';
 
 /** Una ausencia viva que se cruza con un rango. Lo justo para redactar el aviso. */
 export interface Solape {
