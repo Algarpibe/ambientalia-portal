@@ -36,6 +36,7 @@ import {
   type SaldoVacaciones,
 } from './saldo.js';
 import { empleadoDeSesion, firmanteDeSesion, type Sesion } from './service/sesion.js';
+import { errorDeSolape, exigirSinSolape } from './service/solapes.js';
 import {
   MAX_ADJUNTO_BYTES,
   MAX_MOTIVO,
@@ -53,7 +54,6 @@ import {
   type EstadoModificacion,
   type EstadoSolicitud,
   type Modificacion,
-  type Movimiento,
   type NuevaSolicitud,
   type Solicitud,
   type TipoSolicitud,
@@ -85,114 +85,10 @@ export * from './service/validacion.js';
 
 // ── Casos de uso ───────────────────────────────────────────────────────────
 
-/**
- * Lo que el cliente necesita saber del choque, y nada más.
- *
- * Campo a campo, y sin el `id`: es a la vez lo que hace que esto compile
- * —`Solape` es una interface, sin index signature implícita, así que
- * `AusenciaError` no la admite tal cual— y lo que evita mandar al cliente un
- * uuid que no necesita.
- *
- * Tiene nombre y no `Record<string, unknown>` a secas porque el `detalle` de un
- * `AusenciaError` no lo tiene: sin este alias, quien redacta el 409 en el
- * navegador se lo inventa campo a campo y nada compara las dos listas.
- *
- * ⚠️ `type` y NO `interface`, y la diferencia es de compilación: TypeScript le
- * da index signature implícita a un alias de tipo, pero no a una interface. En
- * cuanto esto sea una `interface` deja de ser asignable al
- * `Record<string, unknown>` del `detalle` de `AusenciaError` y `errorDeSolape`
- * no compila — que es exactamente lo que le pasa a `repo.Solape`, y por lo que
- * existe la función de abajo.
- */
-export type SolapeDetalle = {
-  tipo: TipoSolicitud;
-  estado: EstadoSolicitud;
-  fechaInicio: string;
-  fechaFin: string;
-};
-
-/**
- * El choque recortado a eso. Privada a propósito: quien lo necesita desde fuera
- * necesita en realidad el error entero, y para eso está `errorDeSolape`.
- */
-function detalleDelSolape(choque: repo.Solape): SolapeDetalle {
-  return {
-    tipo: choque.tipo,
-    estado: choque.estado,
-    fechaInicio: choque.fechaInicio,
-    fechaFin: choque.fechaFin,
-  };
-}
-
-/**
- * El 409 del solapamiento entero, escrito una sola vez.
- *
- * El `detalle` no era lo único que había que atar: `code`, `status` y `field` son
- * igual de contrato, y estaban tecleados a mano en los tres sitios que responden
- * este error —`exigirSinSolape` para el alta y la propuesta, la traducción de
- * `decidirModificacion` más abajo, y el `catch` del `PATCH` en `router.ts`—. Con
- * la tripleta suelta bastaba con que uno dijera `fechaFin`, o un `code` con otra
- * letra, para que la interfaz tuviera que aprender dos formas de contar lo mismo,
- * y ningún test lo habría visto: cada puerta afirma la SUYA.
- *
- * Lo vigilan los cuatro tests de `router.test.ts` que afirman
- * `error: 'rango_solapado'` desde HTTP, uno por puerta; tres comparan además las
- * claves exactas del `detalle`, que es donde vive la promesa de no filtrar el
- * `id` del choque.
- */
-export function errorDeSolape(choque: repo.Solape): AusenciaError {
-  return new AusenciaError('rango_solapado', 409, 'fechaInicio', detalleDelSolape(choque));
-}
-
-/**
- * Corta si esta persona ya tiene una ausencia viva en esas fechas.
- *
- * Aquí se decide qué es un solapamiento para las DOS puertas que pasan por el
- * servicio: esta alta y proponer un cambio de fechas.
- *
- * ⚠️ Las otras dos no pasan por aquí, y no es descuido. Firmar el cambio vive
- * dentro de la transacción de `repo.decidirModificacion`, con un `PoolClient` y
- * sin poder lanzar `AusenciaError`. Y el `PATCH` de admin no tiene función de
- * servicio —el router llama a `repo.actualizarSolicitud` derecho— y su
- * comprobación va también dentro de esa transacción, para no mirar por una
- * conexión y escribir por otra. Las dos llaman a `repo.solapeDe` por su cuenta,
- * pero la REGLA de qué ocupa agenda ya no se repite en ninguna: las cuatro
- * puertas llaman a `repo.ocupaAgenda`. Se comparte porque copiarla salió mal —el
- * `PATCH` nació copiando media, el tipo sin el estado— y porque los candados no
- * lo habrían visto: cada puerta prueba la suya, así que cambiar la regla en un
- * solo sitio deja verdes los tests de las otras.
- *
- * ⚠️ `db` tiene que ser el `tx` de una transacción que ya tiene el candado del
- * empleado (DATA-336): por el pool, la comprobación puede mirar mientras otra
- * petición de la misma persona ya miró y está a punto de escribir. El alta la
- * llama dentro de `repo.conCandadoDelEmpleado`; la propuesta, dentro de
- * `repo.crearModificacion`.
- */
-async function exigirSinSolape(
-  db: repo.Consultable,
-  empleadoId: string,
-  tipo: TipoSolicitud,
-  estado: EstadoSolicitud,
-  fechaInicio: string,
-  fechaFin: string,
-  excluirSolicitudId: string | null,
-): Promise<void> {
-  // La fila que va a quedar escrita solo puede chocar con alguien si ella misma
-  // OCUPA agenda; si no, comprobarla solo sirve para negar lo que nadie tenía por
-  // qué negar. El porqué de cada mitad, en `repo.ocupaAgenda`.
-  //
-  // Por estas dos puertas hoy no pasa ninguna fila que no ocupe por su estado: el
-  // alta nace `pendiente` o `registrada` —nunca `rechazada`— y
-  // `estadoAdmiteModificacion` deja fuera a las rechazadas mucho antes de llegar a
-  // la propuesta. Se pasa el estado igual, porque preguntar por la fila ENTERA es
-  // lo que impide que esta puerta diverja de las otras tres — que es exactamente
-  // lo que pasó cuando el `PATCH` copió media regla.
-  if (!repo.ocupaAgenda(tipo, estado)) return;
-
-  const choque = await repo.solapeDe(db, empleadoId, fechaInicio, fechaFin, excluirSolicitudId);
-  if (!choque) return;
-  throw errorDeSolape(choque);
-}
+// ARQ-612 — el solapamiento visto desde el servicio, en service/solapes.ts: lo
+// que se le cuenta al cliente del choque y la puerta que comparten el alta y
+// proponer un cambio de fechas. Se reexporta todo.
+export * from './service/solapes.js';
 
 /**
  * Corta si esta persona no tiene compensatorios suficientes.
@@ -526,71 +422,9 @@ export async function pendientesDeAprobar(db: Pool, sesion: Sesion): Promise<Sol
   return pendientes.map((s) => ({ ...s, esMiTurno: (correoDelTurno(s) ?? '').toLowerCase() === yo }));
 }
 
-/**
- * El registro de movimientos que le corresponde a quien pregunta.
- *
- * ⚠️ El recorte lo decide AQUÍ el servidor a partir de la sesión, y NUNCA un
- * parámetro que mande el cliente: es la única barrera entre un jefe y el
- * historial de toda la empresa.
- *
- * Sustituye a `decididasPorMi` —que iba acotada al correo y sin guard porque
- * una lista vacía ya era la respuesta correcta—. Aquí no vale ese criterio: el
- * `soloDe` de `repo.movimientos` recorta por RAMA del organigrama, así que a
- * quien no aprueba a nadie no le saldría una lista vacía sino su propia rama
- * vacía... y a quien sí aprueba le saldrían las incapacidades y los permisos
- * —con sus motivos— de su rama. Por eso el 403 explícito: quien no es aprobador
- * no tiene registro que ver, y decírselo es mejor que enseñarle un vacío que
- * parece un fallo.
- *
- * Hay una TERCERA vía además de admin y aprobador: la ficha marcada con
- * `ve_toda_la_empresa` (migración 032), que entra sin aprobar a nadie y sin
- * recorte por rama. Existe para el puesto de administración que lleva la
- * nómina, que necesita la compañía entera y no una rama, y a quien darle el rol
- * de admin le regalaría además editar, borrar e importar.
- */
-export async function movimientosVisibles(db: Pool, sesion: Sesion): Promise<Movimiento[]> {
-  // Se resuelve UNA vez y antes del guard porque decide las DOS cosas: si pasa
-  // y qué ve. Preguntarlo por separado en cada sitio dejaría abierta la puerta a
-  // que un día solo se cambiara uno de los dos, y esa discrepancia no falla: o
-  // deja fuera a quien tiene el permiso, o —lo grave— deja pasar el recorte por
-  // rama sobre alguien a quien ya se le abrió el 403.
-  const veTodo = sesion.esAdmin || (await repo.esVisorDeTodaLaEmpresa(db, sesion.email));
-  if (!veTodo && !(await repo.esAprobadorDeAlguien(db, sesion.email))) {
-    throw new AusenciaError('no_es_aprobador', 403);
-  }
-  return repo.movimientos(db, veTodo ? null : sesion.email);
-}
-
-/**
- * Todas las solicitudes que llevan un PDF, para que administración pueda abrirlos
- * sin salir del portal.
- *
- * Hace falta una pantalla propia porque **las incapacidades no aparecen en
- * ninguna otra**: nacen `registrada` y sin aprobador, así que ni la bandeja
- * (`pendiente`/`pendiente_2`) ni el historial (`aprobada`/`rechazada`) las
- * alcanzan, y «Registro general» es solo de admin. Justo las incapacidades son
- * las que siempre traen soporte médico.
- *
- * 403 y no 404, al revés que en `/adjuntos/:id`: allí el 404 evita confirmar que
- * un adjunto concreto existe; una colección no dice nada de nadie en particular.
- */
-export async function solicitudesConAdjunto(db: Pool, sesion: Sesion): Promise<Solicitud[]> {
-  if (!sesion.esAdmin && !(await repo.esVisorDeAdjuntos(db, sesion.email))) {
-    throw new AusenciaError('no_es_visor_de_adjuntos', 403);
-  }
-  // ⚠️ LA LLAVE `ve_adjuntos` YA NO ABRE LA COMPAÑÍA ENTERA. Abre la rama de dos
-  // niveles de quien la tiene, que es el mismo alcance que el Calendario y el
-  // Registro general. Solo un administrador sigue viendo todo.
-  //
-  // Antes daba acceso a los soportes de cualquiera —incluidos los PDF médicos
-  // de gente con la que quien miraba no tiene ninguna relación—, y eso no era
-  // lo que la casilla prometía a quien la marcaba.
-  //
-  // El `null` explícito de admin es obligatorio: sin él, `ramaDeDosNiveles` no
-  // recorta solo cuando recibe NULL, y pasar `undefined` lo dejaría en un
-  // parámetro sin valor en vez de en «sin recorte».
-  return repo.solicitudesConAdjunto(db, sesion.esAdmin ? null : sesion.email);
-}
+// ARQ-612 — quién ve qué en el registro (los movimientos, la pestaña de
+// adjuntos y la puerta de un PDF), en service/registro.ts. Se reexporta todo.
+export * from './service/registro.js';
 
 export async function decidir(db: Pool, sesion: Sesion, id: string, body: unknown): Promise<Solicitud> {
   const b = (body ?? {}) as Record<string, unknown>;
@@ -1142,46 +976,6 @@ export async function decidirModificacion(
   // solicitud necesita la versión nueva. Devolver solo la propuesta obligaría a
   // una segunda llamada cuyo resultado podría ya no ser este.
   return { modificacion: resultado.modificacion, solicitud: resultado.solicitud };
-}
-
-/**
- * El solicitante, sus dos aprobadores y quien tenga la llave maestra pueden ver
- * el PDF; nadie más (salvo admin).
- *
- * `esVisor` entra por parámetro y no se consulta aquí: desde que la lista salió
- * de `config.ts` a `portal.empleados`, resolverla dentro obligaría a pasar el
- * `Pool` y esta función dejaría de poder probarse sin Postgres — que no hay en
- * ningún test del repo. Quien llama lo resuelve con `repo.esVisorDeAdjuntos`.
- *
- * La llave AÑADE acceso, nunca lo condiciona: por eso va como retorno propio y
- * no como una condición del `return` final. Quitársela a alguien no puede
- * dejarle sin ver sus propias solicitudes.
- */
-export function puedeVerAdjunto(
-  sesion: Sesion,
-  a: repo.AdjuntoCompleto,
-  /**
-   * Tiene la llave `ve_adjuntos` **y** el solicitante está en su rama de dos
-   * niveles. Las dos cosas, y por eso el nombre cambió: la llave sola dejó de
-   * ser un pase libre cuando la pestaña pasó a recortar por rama.
-   *
-   * Si aquí bastara con tener la llave, esconder filas en la lista no serviría
-   * de nada: quien conociera la URL de un adjunto lo abriría igual. La lista y
-   * esta puerta tienen que decir lo mismo.
-   */
-  visorEnSuRama: boolean,
-): boolean {
-  if (sesion.esAdmin) return true;
-  if (visorEnSuRama) return true;
-  const yo = sesion.email.toLowerCase();
-  // El segundo aprobador entra aquí aunque todavía no sea su turno: la ruta del
-  // adjunto devuelve 404 y no 403, así que sin esto tendría que firmar un permiso
-  // sin poder abrir su soporte y sin entender por qué.
-  return (
-    a.solicitanteEmail.toLowerCase() === yo ||
-    (a.aprobadorCorreo ?? '').toLowerCase() === yo ||
-    (a.segundoAprobadorCorreo ?? '').toLowerCase() === yo
-  );
 }
 
 // ── Importación del histórico de la hoja ───────────────────────────────────
