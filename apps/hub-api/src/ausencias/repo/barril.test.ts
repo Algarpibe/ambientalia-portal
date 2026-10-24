@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import * as repo from '../repo.js';
 import * as adjuntos from './adjuntos.js';
@@ -73,11 +73,21 @@ describe('repo.ts como barril de repo/ (ARQ-612)', () => {
   }
 
   it('solo repo.ts importa de repo/: el resto pasa por repo.ts', () => {
-    const AUSENCIAS = join(__dirname, '..');
+    // Por la ruta RESUELTA y no por el texto del import: desde service/ el mismo
+    // trozo se escribe '../repo/x.js', y la expresión sobre './repo/' que había
+    // aquí lo dejaba pasar — y con él la llamada que esquiva el doble.
+    const REPO = __dirname;
+    const AUSENCIAS = join(REPO, '..');
     const infractores = readdirSync(AUSENCIAS, { recursive: true, encoding: 'utf8' })
-      .map((r) => r.replace(/\\/g, '/'))
-      .filter((r) => r.endsWith('.ts') && r !== 'repo.ts' && !r.startsWith('repo/'))
-      .filter((r) => /from '\.\/repo\//.test(readFileSync(join(AUSENCIAS, r), 'utf8')));
+      .filter((r) => r.endsWith('.ts'))
+      .map((r) => join(AUSENCIAS, r))
+      .filter((f) => f !== join(AUSENCIAS, 'repo.ts') && !f.startsWith(REPO + sep))
+      .filter((f) =>
+        [...readFileSync(f, 'utf8').matchAll(/from '(\.[^']+)'/g)].some((m) =>
+          resolve(dirname(f), m[1]).startsWith(REPO + sep),
+        ),
+      )
+      .map((f) => relative(AUSENCIAS, f));
     expect(infractores).toEqual([]);
   });
 });
