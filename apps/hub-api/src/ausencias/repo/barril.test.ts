@@ -13,6 +13,7 @@ import * as registro from './registro.js';
 import * as retiro from './retiro.js';
 import * as saldos from './saldos.js';
 import * as solapes from './solapes.js';
+import * as solicitudes from './solicitudes.js';
 import * as visores from './visores.js';
 
 // ARQ-612 — repo.ts se parte en trozos dentro de repo/, pero sigue siendo la
@@ -44,6 +45,7 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   retiro,
   saldos,
   solapes,
+  solicitudes,
   visores,
 };
 
