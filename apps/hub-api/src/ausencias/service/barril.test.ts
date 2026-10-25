@@ -2,11 +2,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import micromatch from 'micromatch';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import * as service from '../service.js';
 import * as calendario from './calendario.js';
 import * as historico from './historico.js';
 import * as registro from './registro.js';
+import * as retiro from './retiro.js';
+import * as saldos from './saldos.js';
 import * as sesion from './sesion.js';
 import * as solapes from './solapes.js';
 import * as validacion from './validacion.js';
@@ -33,6 +35,8 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   calendario,
   historico,
   registro,
+  retiro,
+  saldos,
   sesion,
   solapes,
   validacion,
@@ -75,15 +79,25 @@ describe('service.ts como barril de service/ (ARQ-612)', () => {
     expect(infractores).toEqual([]);
   });
 
-  it('cada trozo de service/ entra en el umbral de cobertura de ausencias (TEST-712)', async () => {
-    // Import dinámico con la ruta en una variable: uno literal metería
-    // vitest.config.ts en el build de tsc, y está fuera de `rootDir`.
+  // Los globs del umbral, leídos del propio vitest.config.ts. Import dinámico
+  // con la ruta en una variable: uno literal metería vitest.config.ts en el
+  // build de tsc, y está fuera de `rootDir`.
+  //
+  // En un `beforeAll` y no dentro del test, por lo mismo que TEST-713: el
+  // config arrastra `vitest/config`, y con la suite entera en paralelo y la
+  // cobertura instrumentando ese import pasó de los 5 s por defecto de un test
+  // (solo tarda menos de uno). El hook tiene los 60 s de `hookTimeout`.
+  let globs: string[] = [];
+  beforeAll(async () => {
     const config = pathToFileURL(join(HUB_API, 'vitest.config.ts')).href;
     const { default: vitest } = (await import(config)) as {
       default: { test: { coverage: { thresholds: Record<string, unknown> } } };
     };
-    const globs = Object.keys(vitest.test.coverage.thresholds);
+    globs = Object.keys(vitest.test.coverage.thresholds);
+  });
 
+  it('cada trozo de service/ entra en el umbral de cobertura de ausencias (TEST-712)', () => {
+    expect(globs.length).toBeGreaterThan(0);
     const trozos = fuentes(SERVICE);
     expect(trozos.length).toBeGreaterThan(0);
     // Vitest compara cada glob con la ruta relativa a la raíz del proyecto y con
