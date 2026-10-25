@@ -6,6 +6,8 @@ import { beforeAll, describe, it, expect } from 'vitest';
 import * as service from '../service.js';
 import * as calendario from './calendario.js';
 import * as historico from './historico.js';
+import * as kpis from './kpis.js';
+import * as organigrama from './organigrama.js';
 import * as registro from './registro.js';
 import * as retiro from './retiro.js';
 import * as saldos from './saldos.js';
@@ -34,6 +36,8 @@ import * as validacion from './validacion.js';
 const TROZOS: Record<string, Record<string, unknown>> = {
   calendario,
   historico,
+  kpis,
+  organigrama,
   registro,
   retiro,
   saldos,
