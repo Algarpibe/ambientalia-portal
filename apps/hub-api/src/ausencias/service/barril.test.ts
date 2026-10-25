@@ -7,6 +7,8 @@ import * as service from '../service.js';
 import * as calendario from './calendario.js';
 import * as historico from './historico.js';
 import * as registro from './registro.js';
+import * as retiro from './retiro.js';
+import * as saldos from './saldos.js';
 import * as sesion from './sesion.js';
 import * as solapes from './solapes.js';
 import * as validacion from './validacion.js';
@@ -33,6 +35,8 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   calendario,
   historico,
   registro,
+  retiro,
+  saldos,
   sesion,
   solapes,
   validacion,
