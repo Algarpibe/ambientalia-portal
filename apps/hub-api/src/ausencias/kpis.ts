@@ -602,7 +602,12 @@ export interface VentanaDeKpis {
  *
  * Sin año, el comienzo es el DÍA 1 del mes, no el día suelto de hace N meses:
  * las series se agrupan por mes, y empezar a mitad dejaría el primer mes
- * incompleto y su barra más baja que la realidad.
+ * incompleto y su barra más baja que la realidad. Y va por `Date.UTC` con el
+ * día fijado en 1, no restando meses a la fecha completa: `setUTCMonth` sobre
+ * un día 31 desborda al mes siguiente —el 31 de marzo menos un mes daría el 3
+ * de marzo— y desplazaría el primer mes de la serie sin más síntoma que una
+ * barra de menos. (Lo explicaba `primerDiaMesesAtras` en service.ts, que hacía
+ * lo mismo y se quedó sin uso cuando llegó esta función.)
  */
 export function ventanaDeKpis(
   anio: number | null,

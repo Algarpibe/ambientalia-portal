@@ -209,19 +209,6 @@ export async function kpis(db: Pool, anio: number | null = null): Promise<Kpis> 
 }
 
 /**
- * El día 1 del mes que queda `meses` hacia atrás desde `hoy`.
- *
- * Va por `Date.UTC` con el día fijado en 1 y no restando meses a la fecha
- * completa: `setUTCMonth` sobre un día 31 desborda al mes siguiente —el 31 de
- * marzo menos un mes daría el 3 de marzo—, y aquí eso desplazaría el primer mes
- * de la serie sin más síntoma que una barra de menos.
- */
-function primerDiaMesesAtras(hoy: string, meses: number): string {
-  const [anio, mes] = hoy.split('-').map(Number);
-  return new Date(Date.UTC(anio, mes - 1 - meses, 1)).toISOString().slice(0, 10);
-}
-
-/**
  * Un decimal. Sumar cien `disponible` en coma flotante produce colas del tipo
  * `1234.5999999999999`, y esta cifra se lee como si fuera contable.
  */
