@@ -13,6 +13,7 @@ import * as retiro from './retiro.js';
 import * as saldos from './saldos.js';
 import * as sesion from './sesion.js';
 import * as solapes from './solapes.js';
+import * as solicitudes from './solicitudes.js';
 import * as validacion from './validacion.js';
 
 // ARQ-612 — service.ts se parte en trozos dentro de service/, con el mismo
@@ -43,6 +44,7 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   saldos,
   sesion,
   solapes,
+  solicitudes,
   validacion,
 };
 
