@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as api from '../api';
+import * as adjuntos from './adjuntos';
+import * as calendario from './calendario';
 import * as http from './http';
+import * as modificaciones from './modificaciones';
+import * as saldos from './saldos';
+import * as solicitudes from './solicitudes';
 
 // ARQ-612 — api.ts se parte en trozos dentro de api/, con el mismo patrón que
 // repo.ts y service.ts en hub-api: sigue siendo la ÚNICA puerta y reexporta
@@ -25,7 +30,13 @@ import * as http from './http';
 //
 // Cada PR que saque un trozo nuevo lo añade a TROZOS.
 
-const TROZOS: Record<string, Record<string, unknown>> = {};
+const TROZOS: Record<string, Record<string, unknown>> = {
+  adjuntos,
+  calendario,
+  modificaciones,
+  saldos,
+  solicitudes,
+};
 
 const INTERNOS: Record<string, Record<string, unknown>> = { http };
 
