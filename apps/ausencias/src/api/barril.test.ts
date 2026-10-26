@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import * as api from '../api';
 import * as adjuntos from './adjuntos';
 import * as calendario from './calendario';
+import * as historico from './historico';
 import * as http from './http';
 import * as modificaciones from './modificaciones';
+import * as organigrama from './organigrama';
+import * as registro from './registro';
 import * as saldos from './saldos';
 import * as solicitudes from './solicitudes';
 
@@ -33,7 +36,10 @@ import * as solicitudes from './solicitudes';
 const TROZOS: Record<string, Record<string, unknown>> = {
   adjuntos,
   calendario,
+  historico,
   modificaciones,
+  organigrama,
+  registro,
   saldos,
   solicitudes,
 };
