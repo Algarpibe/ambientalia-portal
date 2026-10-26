@@ -6,34 +6,16 @@ import { CHIP_ESTADO, ETIQUETA_TIPO, rangoFechas } from './dominio';
 // ARQ-612 — cómo se habla con hub-api (la URL base, los verbos y la lectura de
 // los errores) vive en api/http.ts, que es INTERNO: de ahí solo se reexportan
 // los tipos de los detalles de error. Los endpoints de abajo importan los verbos.
-import {
-  API_BASE,
-  conCuerpo,
-  errorGenerico,
-  get,
-  patch,
-  patchSolapable,
-  post,
-  postSolapable,
-  put,
-} from './api/http';
+import { API_BASE, conCuerpo, errorGenerico, get, patch, patchSolapable, post, put } from './api/http';
 import type {
-  Adjunto,
-  CalendarioDelAnio,
-  CalendarioDelMes,
-  ClaseModificacion,
-  Contexto,
   Empleado,
   EmpleadoConJefatura,
   EstadoModificacion,
   EstadoSolicitud,
   Modificacion,
-  NuevaSolicitud,
   SaldoCompensatorios,
-  SaldoDeEmpleado,
   SaldoVacaciones,
   Solicitud,
-  SolicitudPendiente,
   TipoSolicitud,
 } from './api/tipos';
 
@@ -48,133 +30,12 @@ export { esAdmin };
 export type * from './api/tipos';
 export type { CompensatoriosDetalle, RetiroDetalle, SolapeDetalle } from './api/http';
 
-export const fetchContexto = () => get<Contexto>('/api/ausencias/contexto');
-
-/** Las dos bolsas de quien pregunta, tal como vienen: claves hermanas. */
-export interface MisSaldos {
-  saldo: SaldoVacaciones | null;
-  compensatorios?: SaldoCompensatorios | null;
-}
-
-/**
- * Solo los saldos de quien pregunta. Lo usa el widget del dashboard, que no
- * necesita el resto del contexto —festivos de tres años incluidos— y lo cargaría
- * en cada visita a la home del portal.
- *
- * Se llama `fetchMisSaldos` y no `fetchMiSaldo` a propósito: cambia la forma de
- * lo que devuelve, y el rename obliga a `tsc` a señalar a sus dos llamantes en
- * vez de dejar que alguien siga creyendo que sale el saldo pelado.
- */
-export const fetchMisSaldos = () => get<MisSaldos>('/api/ausencias/mi-saldo');
-
-export const fetchMisSolicitudes = () =>
-  get<{ solicitudes: Solicitud[] }>('/api/ausencias/mis-solicitudes').then((d) => d.solicitudes);
-
-export const fetchPendientes = () =>
-  get<{ solicitudes: SolicitudPendiente[] }>('/api/ausencias/pendientes').then((d) => d.solicitudes);
-
-export const crearSolicitud = (s: NuevaSolicitud) => postSolapable<Solicitud>('/api/ausencias/solicitudes', s);
-
-export const decidirSolicitud = (id: string, aprueba: boolean, motivo?: string) =>
-  post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/decision`, { aprueba, motivo });
-
-/**
- * Lo que el trabajador manda al pedir un cambio sobre una solicitud suya.
- *
- * Ni `empleadoId` ni los días hábiles: el primero sale de la sesión y los
- * segundos los cuenta el servidor, igual que en `NuevaSolicitud`.
- *
- * Las fechas son OPCIONALES y en una anulación se OMITEN: mandarlas con valor
- * es un 400 (`anulacion_con_fechas`) a propósito, para que un cliente con un bug
- * no crea haber pedido un cambio de fechas habiendo pedido una anulación.
- */
-export interface NuevaModificacion {
-  clase: ClaseModificacion;
-  fechaInicio?: string;
-  fechaFin?: string;
-  motivo?: string;
-}
-
-/** El dueño pide cambiar las fechas de una solicitud suya, o anularla. */
-export const pedirModificacion = (solicitudId: string, m: NuevaModificacion) =>
-  postSolapable<Modificacion>(`/api/ausencias/solicitudes/${encodeURIComponent(solicitudId)}/modificaciones`, m);
-
-/**
- * El autor se echa atrás. Sin correo a nadie: retirar deja la solicitud tal como
- * estaba. La propuesta no se borra, pasa a `retirada`; por eso es un POST y no
- * un DELETE.
- */
-export const retirarModificacion = (id: string) =>
-  post<Modificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/retirar`, {});
-
-/**
- * El dueño retira su propia SOLICITUD, antes de que nadie la firme.
- *
- * No la borra: la deja en `rechazada` con su `anuladaAt`, igual que una anulación
- * aprobada, y sigue en el registro. Por eso es un POST y no un DELETE — y además
- * el DELETE de esa ruta ya existe, es de admin y hace otra cosa.
- *
- * Avisa al jefe, que la tenía en la bandeja y va a verla desaparecer.
- */
-export const retirarSolicitud = (id: string) =>
-  post<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}/retirar`, {});
-
-/**
- * Una solicitud con la propuesta de cambio que espera decisión. Espejo de
- * `SolicitudConPropuesta` en `apps/hub-api/src/ausencias/service.ts`.
- *
- * Es una SOLICITUD y no una propuesta suelta a propósito: la propuesta por sí
- * sola no dice de quién es ni de qué tipo, y la bandeja del jefe necesita las
- * dos cosas para pintar la fila con la misma tabla que el resto.
- */
-export interface SolicitudConPropuesta extends Solicitud {
-  /** No nula: esta respuesta solo trae solicitudes que tienen una viva. */
-  modificacionPendiente: Modificacion;
-  /**
-   * El `esMiTurno` de esta bandeja: si a quien pregunta le toca decidir ESTA
-   * propuesta. Lo calcula hub-api con el MISMO guard que el endpoint de
-   * decisión, y por eso el navegador no lo recalcula: la parte que un espejo
-   * manual se deja es justo la que más importa —la raíz del organigrama es su
-   * propio jefe, así que sobre sus propias solicitudes el decisor congelado es
-   * ella misma y no puede autoaprobarse—. Un admin también recibe las de todo
-   * el mundo, y sobre esas sí puede.
-   *
-   * En el runtime puede llegar `undefined` pese al tipo, igual que `esMiTurno`:
-   * se lee `!== false` para que un campo ausente degrade a «ofrécele los
-   * botones» —en el peor caso el servidor contesta 403 y se enseña el porqué— y
-   * nunca a una bandeja de filas muertas que nadie puede tocar.
-   */
-  puedoDecidirla: boolean;
-}
-
-/** Las propuestas de cambio que esperan la decisión de quien pregunta. */
-export const fetchModificacionesPendientes = () =>
-  get<{ solicitudes: SolicitudConPropuesta[] }>('/api/ausencias/modificaciones/pendientes').then(
-    (d) => d.solicitudes,
-  );
-
-/**
- * Lo que devuelve decidir una propuesta: las DOS filas que toca la decisión.
- *
- * `solicitud` viene releída después de aplicarla, así que ya trae las fechas
- * nuevas (o la anulación) y `modificacionPendiente` en `null` —la propuesta
- * dejó de estar viva—, que es justo lo que la interfaz necesita para repintar
- * la fila sin una segunda llamada.
- */
-export interface DecisionModificacion {
-  modificacion: Modificacion;
-  solicitud: Solicitud;
-}
-
-/**
- * El jefe aprueba o rechaza el cambio. Mismo cuerpo que `decidirSolicitud`
- * (`{ aprueba, motivo? }`) a propósito, para reutilizar el patrón de la bandeja.
- */
-export const decidirModificacion = (id: string, aprueba: boolean, motivo?: string) =>
-  postSolapable<DecisionModificacion>(`/api/ausencias/modificaciones/${encodeURIComponent(id)}/decision`, {
-    aprueba,
-    motivo,
-  });
+// Los endpoints, por tema. Se reexporta todo de cada trozo.
+export * from './api/solicitudes';
+export * from './api/modificaciones';
+export * from './api/saldos';
+export * from './api/calendario';
+export * from './api/adjuntos';
 
 /** Da de alta a todos los usuarios del portal que ya tienen la app asignada. */
 export const sincronizarEmpleados = () =>
@@ -766,85 +627,3 @@ export const fijarSegundaFirma = (id: string, requiereSegundaFirma: boolean) =>
   put<EmpleadoConJefatura>(`/api/ausencias/empleados/${encodeURIComponent(id)}/segunda-firma`, {
     requiereSegundaFirma,
   });
-
-/**
- * Descarga el PDF de una solicitud. Va por fetch y no por `<a href>` porque el
- * endpoint exige la cabecera Authorization, que un enlace no puede mandar.
- */
-export async function descargarAdjunto(adjunto: Adjunto): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/ausencias/adjuntos/${encodeURIComponent(adjunto.id)}`, {
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error(await mensajeDeError(res));
-  const url = URL.createObjectURL(await res.blob());
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = adjunto.nombreArchivo;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-/** Lee un File como base64 sin la cabecera `data:...;base64,`. */
-export function leerComoBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const lector = new FileReader();
-    lector.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-    lector.onload = () => {
-      const r = String(lector.result);
-      const coma = r.indexOf(',');
-      resolve(coma >= 0 ? r.slice(coma + 1) : r);
-    };
-    lector.readAsDataURL(file);
-  });
-}
-
-/** Las solicitudes con PDF. Solo para admin y la lista de administración. */
-export const fetchConAdjunto = () =>
-  get<{ solicitudes: Solicitud[] }>('/api/ausencias/adjuntos').then((d) => d.solicitudes);
-
-/** Los saldos que puede ver quien pregunta: todos si es admin, si no los suyos. */
-export const fetchSaldos = () =>
-  get<{ saldos: SaldoDeEmpleado[] }>('/api/ausencias/saldos').then((d) => d.saldos);
-
-/** Un punto de corte a mandar. Los dos a null vacían esa bolsa. */
-export interface CorteAFijar {
-  saldoCorte: number | string | null;
-  fechaCorte: string | null;
-}
-
-/**
- * Fija los puntos de corte de un empleado (solo admin).
- *
- * `saldoCorte` admite `string` a propósito, además de `number`: si el panel
- * convirtiera con `Number()` antes de mandarlo, un `'abc'` tecleado por error
- * se volvería `NaN`, y `JSON.stringify(NaN)` produce `null` — con lo que el
- * backend recibiría «vaciar la configuración» en vez de «esto no es un
- * número», y respondería un 400 confuso o, peor, borraría un saldo ya puesto.
- * Mandando la cadena tal cual, la validación de forma vive en un solo sitio
- * (el backend, con su regex) y el mensaje de error que llega es el correcto.
- *
- * Las CUATRO claves van siempre, incluso si el admin no tocó los compensatorios.
- * El backend lee «clave ausente» como «no toques esa bolsa», y esa lectura está
- * ahí para el bundle viejo, no para éste: mandarlas siempre deja esa rama como
- * lo que es, una red para la ventana de despliegue, y no como algo que dependa
- * de qué campos rellenó el admin.
- */
-export const fijarSaldo = (empleadoId: string, vacaciones: CorteAFijar, compensatorios: CorteAFijar) =>
-  put<SaldoDeEmpleado>(`/api/ausencias/empleados/${encodeURIComponent(empleadoId)}/saldo`, {
-    saldoCorte: vacaciones.saldoCorte,
-    fechaCorte: vacaciones.fechaCorte,
-    compensatoriosSaldoCorte: compensatorios.saldoCorte,
-    compensatoriosFechaCorte: compensatorios.fechaCorte,
-  });
-
-/** El calendario de un mes `YYYY-MM`. Lo ve cualquiera que tenga la app. */
-export const fetchCalendario = (mes: string) =>
-  get<CalendarioDelMes>(`/api/ausencias/calendario?mes=${encodeURIComponent(mes)}`);
-
-/**
- * El año entero en franjas. Ruta aparte de la mensual porque la respuesta tiene
- * otra forma —barras en vez de marcas por día—, no porque cambie el permiso: el
- * alcance que aplica es el mismo, y lo resuelve el servidor.
- */
-export const fetchCalendarioAnual = (anio: string) =>
-  get<CalendarioDelAnio>(`/api/ausencias/calendario-anual?anio=${encodeURIComponent(anio)}`);
