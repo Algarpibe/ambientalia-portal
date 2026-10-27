@@ -4,9 +4,11 @@ import * as adjuntos from './adjuntos';
 import * as calendario from './calendario';
 import * as historico from './historico';
 import * as http from './http';
+import * as kpis from './kpis';
 import * as modificaciones from './modificaciones';
 import * as organigrama from './organigrama';
 import * as registro from './registro';
+import * as retiro from './retiro';
 import * as saldos from './saldos';
 import * as solicitudes from './solicitudes';
 
@@ -37,9 +39,11 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   adjuntos,
   calendario,
   historico,
+  kpis,
   modificaciones,
   organigrama,
   registro,
+  retiro,
   saldos,
   solicitudes,
 };
