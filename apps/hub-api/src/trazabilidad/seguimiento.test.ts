@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 // y el CANDADO de quién lee `portal.tmc_equipos`. Desde este lote la tabla
 // lleva también equipos de otras marcas, enlazados con Desk 2.0 pero FUERA de
 // seguimiento: no pueden asomar en Resumen, Equipos, Calendario, Avisos (ni su
-// simulación), contactos ni Servicios. Lo que prueba que no asoman, con datos,
-// es seguimiento.db.test.ts; esto vigila que nadie añada un lector sin revisar.
+// simulación), contactos ni Servicios. La única excepción, desde el 2026-11-04,
+// es el NOMBRE del cliente de un ticket en Servicios (`CLIENTE_POR_SERIAL`). Lo
+// que prueba que no asoman, con datos, es seguimiento.db.test.ts; esto vigila
+// que nadie añada un lector sin revisar.
 
 const RAIZ = fileURLToPath(new URL('..', import.meta.url));
 const fuente = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
@@ -42,9 +44,13 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
   // con datos, byte a byte). Nadie escribe `en_seguimiento` para incluir una marca: el último candado de abajo no se ha tocado.
   const REVISADOS: Record<string, 'filtra' | 'todos'> = {
     // El inventario de la app: el único sitio de repo.ts que nombra la tabla (`INVENTARIO`). De él beben GET /equipos
-    // (y con él Resumen, Equipos, Calendario, Avisos y su simulación), los contactos de Desk, el cliente de
-    // «Servicios», guardar el seguimiento y marcar avisos en bloque.
+    // (y con él Resumen, Equipos, Calendario, Avisos y su simulación), los contactos de Desk, guardar el seguimiento
+    // y marcar avisos en bloque.
     'trazabilidad/repo.ts · FROM': 'filtra',
+    // AMPLIADA el 2026-11-04: `CLIENTE_POR_SERIAL`, el NOMBRE del cliente de un ticket en «Servicios», de cualquier equipo del maestro
+    // con su serial (un Horiba con la marca apagada salía con el nombre del contacto). Ve los dos ámbitos a propósito y sólo da ese
+    // nombre: el candado de abajo vigila que sólo lo use `listarServicios`, una vez, y que sólo saque el cliente.
+    'trazabilidad/inventario.ts · FROM': 'todos',
     // La pasada de calibraciones: lo que está fuera del inventario (otras marcas no incluidas) sigue con sus calibraciones por serial, sin clave.
     'trazabilidad/calibraciones-repo.ts · FROM': 'filtra',
     // El maestro tiene que ver los dos ámbitos para no dar de alta dos veces, y es el único que escribe.
@@ -72,16 +78,25 @@ describe('CANDADO: quién lee portal.tmc_equipos', () => {
     expect(fuente('./inventario.ts')).toMatch(/export const EN_INVENTARIO = `\(en_seguimiento OR \$\{claveMarcaSql\('marca'\)\} IN \(SELECT m\.clave FROM portal\.tmc_marcas m WHERE m\.incluida\)\)`;/);
   });
 
-  // Lote 12: la sexta, `clienteDelInventario` —si un cliente tiene equipos activos en el inventario, para la frecuencia de preventivo
+  // Lote 12: `clienteDelInventario` —si un cliente tiene equipos activos en el inventario, para la frecuencia de preventivo
   // (contratos-repo.ts, que así no nombra la tabla)—: sólo lee nombres de cliente, también por `INVENTARIO`.
-  it('en repo.ts todo pasa por `INVENTARIO`: seis lecturas y ninguna tabla a pelo', () => {
+  // 2026-11-04: `listarServicios` deja de leer de `INVENTARIO` (el candado siguiente): quedan cinco.
+  it('en repo.ts todo pasa por `INVENTARIO`: cinco lecturas y ninguna tabla a pelo', () => {
     const src = fuente('./repo.ts');
     expect(src).toMatch(/const INVENTARIO = `\(SELECT \* FROM portal\.tmc_equipos WHERE \$\{EN_INVENTARIO\}\)`/);
-    expect(src.match(/\$\{INVENTARIO\} e\b/g)).toHaveLength(6);
-    for (const f of ['consultarEquipos', 'contactosDeDesk', 'listarServicios', 'existeActivo', 'registrarAvisos', 'clienteDelInventario']) {
+    expect(src.match(/\$\{INVENTARIO\} e\b/g)).toHaveLength(5);
+    for (const f of ['consultarEquipos', 'contactosDeDesk', 'existeActivo', 'registrarAvisos', 'clienteDelInventario']) {
       const cuerpo = src.slice(src.indexOf(`function ${f}(`));
       expect(cuerpo.slice(0, cuerpo.search(/\r?\n}\r?\n/)), f).toContain('${INVENTARIO} e');
     }
+  });
+
+  it('`CLIENTE_POR_SERIAL` sólo lee lo del nombre del cliente y lo usa sólo «Servicios», una vez, para sacar `e.cliente`', () => {
+    expect(fuente('./inventario.ts')).toMatch(/export const CLIENTE_POR_SERIAL = `\(SELECT clave, serial, cliente, activo, \$\{EN_INVENTARIO\} AS en_inventario FROM portal\.tmc_equipos\)`;/);
+    for (const f of fuentes) expect((readFileSync(`${RAIZ}/${f}`, 'utf8').match(/\$\{CLIENTE_POR_SERIAL\}/g) ?? []).length, f).toBe(f === 'trazabilidad/repo.ts' ? 1 : 0);
+    const src = fuente('./repo.ts');
+    const cuerpo = src.slice(src.indexOf('function listarServicios('));
+    expect(cuerpo.slice(0, cuerpo.search(/\r?\n}\r?\n/))).toMatch(/SELECT e\.cliente\s+FROM \$\{CLIENTE_POR_SERIAL\} e\s/);
   });
 
   it('nadie cambia `en_seguimiento` de una fila que ya existe: sincronizar sólo lo pone al dar de alta', () => {

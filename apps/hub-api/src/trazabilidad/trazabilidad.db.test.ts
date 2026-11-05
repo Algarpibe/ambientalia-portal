@@ -517,6 +517,22 @@ describe('servicios abiertos en Desk', () => {
       expect(await servicio(1081)).toMatchObject({ cliente: 'Cliente Viejo', clienteOrigen: 'equipo', clienteDeAsunto: false });
     });
 
+    it('(a) también da cliente un equipo del maestro fuera del inventario (otra marca, no incluida)', async () => {
+      await sembrar([fila('V3BW1WJD', 'Cliente Horiba S.A.S.', null)]);
+      await db.query(`UPDATE portal.tmc_equipos SET marca = 'Horiba', en_seguimiento = FALSE`);
+      await ticket({ numero: 1090, serial: 'V3BW1WJD', asunto, codigo, raw: { contact: contacto(null) } });
+      expect(await servicio(1090)).toMatchObject({ cliente: 'Cliente Horiba S.A.S.', clienteOrigen: 'equipo', clienteDeAsunto: false });
+    });
+
+    it('(a) con el serial en el inventario y fuera de él, gana el del inventario aunque el otro esté activo', async () => {
+      // «18A00001» (Cliente Uno) queda retirado pero en el inventario; «18A00001-2» (Cliente Otra Marca), activo y fuera.
+      await sembrar([fila('18A00001', 'Cliente Uno', '2025-10-01'), fila('18A00001', 'Cliente Otra Marca', '2025-10-01')]);
+      await db.query(`UPDATE portal.tmc_equipos SET activo = FALSE WHERE clave = '18A00001'`);
+      await db.query(`UPDATE portal.tmc_equipos SET marca = 'Horiba', en_seguimiento = FALSE WHERE clave = '18A00001-2'`);
+      await ticket({ numero: 1091, serial: '18A00001', asunto, codigo });
+      expect(await servicio(1091)).toMatchObject({ cliente: 'Cliente Uno', clienteOrigen: 'equipo' });
+    });
+
     it('(b) sin equipo con ese serial, la cuenta de Desk', async () => {
       await sembrar([fila('18A00002', 'Cliente Dos', '2025-10-01')]);
       await ticket({ numero: 1082, serial: '18A00001', asunto, codigo, raw: { contact: contacto(cuenta) } });

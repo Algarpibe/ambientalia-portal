@@ -441,11 +441,13 @@ el tiempo en standby se descuenta y el trabajo terminado para el reloj, y eso va
 - **Modelo** = tercer tramo de `codigo_servicio`. **Cliente** (`clienteDeServicio`, `repo.ts`), por
   este orden, con su origen en `clienteOrigen`:
   1. `equipo` — el cliente del equipo de `portal.tmc_equipos` con el mismo serial (sin mayúsculas
-     ni espacios; con varios, el activo y, si no hay ninguno activo, uno retirado): es el nombre
-     de la F-ST-022;
+     ni espacios), de CUALQUIER marca, esté o no en el inventario (2026-11-04: un Horiba con la
+     marca apagada salía con el nombre del contacto). Con varios, el del inventario
+     (`EN_INVENTARIO`) primero; dentro, el activo y, si no hay ninguno activo, uno retirado;
   2. `cuenta` — `raw->'contact'->'account'->>'accountName'` (en producción `account` llega casi
      siempre `null`);
-  3. `contacto` — nombre y apellido de `raw->'contact'`;
+  3. `contacto` — nombre y apellido de `raw->'contact'`; la app lo enseña «contacto: …» en cursiva
+     gris (`textoCliente`, `src/lib/servicios.ts`): es una persona, no la empresa;
   4. `asunto` — el asunto sin el código de servicio (`clienteDeAsunto = true`, en cursiva gris:
      no es un nombre fiable).
 

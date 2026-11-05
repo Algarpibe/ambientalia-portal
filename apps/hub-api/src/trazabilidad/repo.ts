@@ -10,7 +10,7 @@ import { primerDiaHabilAgenda } from './agenda-calendario.js';
 import { fechaEfectiva, type CalibracionGuardada } from './calibraciones.js';
 import type { FuenteAgenda, NombreFuente } from './fuente.js';
 import type { Celda, FilaCongelada } from './fst022.js';
-import { EN_INVENTARIO } from './inventario.js';
+import { CLIENTE_POR_SERIAL, EN_INVENTARIO } from './inventario.js';
 import {
   asuntoSinCodigo,
   categoriaCoherente,
@@ -115,10 +115,11 @@ export async function withTransaction<T>(db: Pool, fn: (c: PoolClient) => Promis
  * regla, `EN_INVENTARIO`, vive en inventario.ts. Desde el lote 9d-2a
  * `tmc_equipos` lleva también equipos de otras marcas, enlazados con Desk 2.0
  * para la pestaña «Trazabilidad F-ST-022»: mientras su marca no esté incluida
- * no entran en Resumen, Equipos, Calendario, Avisos (ni su simulación),
- * contactos ni en el cliente de «Servicios». Por eso este fichero no nombra la
- * tabla en ningún otro sitio: todo lee de aquí (seguimiento.test.ts lo vigila;
- * seguimiento.db.test.ts y marcas.db.test.ts lo prueban con datos).
+ * no entran en Resumen, Equipos, Calendario, Avisos (ni su simulación) ni
+ * contactos. Por eso este fichero no nombra la tabla en ningún otro sitio: todo
+ * lee de aquí (seguimiento.test.ts lo vigila; seguimiento.db.test.ts y
+ * marcas.db.test.ts lo prueban con datos). La única excepción es el nombre del
+ * cliente de un ticket en «Servicios» (2026-11-04), con `CLIENTE_POR_SERIAL`.
  */
 const INVENTARIO = `(SELECT * FROM portal.tmc_equipos WHERE ${EN_INVENTARIO})`;
 
@@ -361,10 +362,10 @@ export async function listarTiposServicio(db: Db): Promise<TipoServicioOpcion[]>
 
 /**
  * El cliente de un servicio, por este orden:
- *  (a) el cliente del equipo del inventario en seguimiento con el mismo serial
- *      (sin mayúsculas ni espacios; con varios, el activo y, si no hay, uno
- *      retirado) — es el nombre con el que se le conoce en la F-ST-022. Las
- *      otras marcas, fuera de seguimiento, no dan cliente aquí (mejora posible);
+ *  (a) el cliente del equipo del maestro con el mismo serial (sin mayúsculas ni
+ *      espacios), de cualquier marca: saber de quién es un equipo no depende de
+ *      que se siga (`CLIENTE_POR_SERIAL`). Con varios, el del inventario
+ *      (`EN_INVENTARIO`) primero; dentro, el activo y, si no hay, uno retirado;
  *  (b) la cuenta de Desk (`raw.contact.account.accountName`), que casi nunca viene;
  *  (c) nombre y apellido del contacto del ticket;
  *  (d) el asunto sin el código de servicio: no es un nombre fiable y la app lo
@@ -409,7 +410,7 @@ function clienteDeServicio(r: Row): { cliente: string; origen: OrigenCliente } {
  *
  * El ingreso es la fecha de creación que trae el ticket o, si falta, el día en
  * Colombia de created_time. El cliente lo resuelve `clienteDeServicio`: el del
- * equipo del inventario con ese serial y, si no, lo que viaje en `raw`.
+ * equipo del maestro con ese serial y, si no, lo que viaje en `raw`.
  */
 export async function listarServicios(db: Db, hoy: string): Promise<ServicioVista[]> {
   const [{ rows }, { tipos, plazos }, conRol, historial] = await Promise.all([
@@ -426,10 +427,10 @@ export async function listarServicios(db: Db, hoy: string): Promise<ServicioVist
          LEFT JOIN portal.tmc_servicios_tipo m ON m.numero = t.number
          LEFT JOIN LATERAL (
                 SELECT e.cliente
-                  FROM ${INVENTARIO} e
+                  FROM ${CLIENTE_POR_SERIAL} e
                  WHERE trim(t.serial) <> ''
                    AND upper(trim(e.serial)) = upper(trim(t.serial))
-                 ORDER BY e.activo DESC, e.clave
+                 ORDER BY e.en_inventario DESC, e.activo DESC, e.clave
                  LIMIT 1
               ) eq ON TRUE
         WHERE ${TICKET_ABIERTO}

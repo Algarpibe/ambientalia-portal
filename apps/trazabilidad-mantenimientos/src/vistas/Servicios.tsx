@@ -25,6 +25,7 @@ import {
   resumenServicios,
   segmentosBarra,
   selectorTipo,
+  textoCliente,
   textoPlazo,
   textoTramos,
   tituloFechaLimite,
@@ -354,26 +355,23 @@ function RolTag({ s }: { s: ServicioVista }) {
 
 /** De dónde sale el cliente de un servicio, para su `title`. */
 const ORIGEN_CLIENTE: Record<OrigenCliente, string> = {
-  equipo: 'Cliente del equipo con este serial en el inventario (F-ST-022)',
+  equipo: 'Cliente del equipo con este serial en el maestro de equipos (Desk 2.0)',
   cuenta: 'Cuenta del ticket en Zoho Desk',
-  contacto: 'Nombre del contacto del ticket en Zoho Desk: Desk no envía la cuenta y el serial no está en el inventario',
-  asunto: 'Ni el inventario ni Desk dan el cliente de este ticket: se muestra su asunto',
+  contacto: 'Nombre del contacto del ticket en Zoho Desk, no de la empresa: Desk no envía la cuenta y el serial no está en el maestro de equipos',
+  asunto: 'Ni el maestro de equipos ni Desk dan el cliente de este ticket: se muestra su asunto',
 };
 
 /**
- * El cliente del servicio: el del inventario por serial, la cuenta de Desk o el
- * contacto del ticket; si no hay nada, el asunto del ticket en gris (no es un
- * nombre de cliente fiable).
+ * El cliente del servicio: el del maestro por serial, la cuenta de Desk o el
+ * contacto del ticket («contacto: …»); si no hay nada, el asunto del ticket. El
+ * contacto y el asunto, en gris (`textoCliente`): no son el nombre de la empresa.
  */
 function Cliente({ s }: { s: ServicioVista }) {
   if (!s.cliente) return <Vacio />;
-  return s.clienteDeAsunto ? (
-    <span className="italic text-gray-500" title={ORIGEN_CLIENTE.asunto}>
-      {s.cliente}
-    </span>
-  ) : (
-    <span className="text-gray-900" title={ORIGEN_CLIENTE[s.clienteOrigen]}>
-      {s.cliente}
+  const { texto, apagado } = textoCliente(s);
+  return (
+    <span className={apagado ? 'italic text-gray-500' : 'text-gray-900'} title={ORIGEN_CLIENTE[s.clienteOrigen]}>
+      {texto}
     </span>
   );
 }
@@ -594,12 +592,13 @@ function Barras({ servicios, hoy, festivos }: { servicios: ServicioVista[]; hoy:
             const der = b?.plazo ? (b.plazo.hasta + 1) * COL - (b.atraso ? 0 : 2) : 0;
             const segmentos = b?.plazo ? (segmentosBarra(s, eje) ?? []) : [];
             const pausas = b ? pausasBarra(s, eje, hoy) : [];
+            const cli = textoCliente(s);
             return (
               <div key={s.numero} className="flex border-b border-gray-100 last:border-b-0" style={{ height: FILA }}>
                 <div className="z-10 flex shrink-0 items-center gap-2 border-r border-gray-200 bg-white px-3 text-xs sm:sticky sm:left-0" style={{ width: ETIQ }} title={s.asunto || undefined}>
                   <span className={`h-2 w-2 shrink-0 rounded-full ${s.sinConfirmar ? 'bg-amber-400' : t.dot}`} title={s.sinConfirmar ? 'Sin confirmar: Desk lleva más de un día sin refrescarlo' : undefined} />
                   <span className="shrink-0 font-mono font-semibold text-gray-900">{s.numero}</span>
-                  <span className={`truncate ${s.clienteDeAsunto ? 'italic text-gray-500' : 'text-gray-700'}`}>{s.cliente || s.serial || '—'}</span>
+                  <span className={`truncate ${cli.apagado ? 'italic text-gray-500' : 'text-gray-700'}`}>{cli.texto || s.serial || '—'}</span>
                   <RolTag s={s} />
                 </div>
                 <div className="relative flex shrink-0 items-center" style={{ width: ancho }} title={detalle}>

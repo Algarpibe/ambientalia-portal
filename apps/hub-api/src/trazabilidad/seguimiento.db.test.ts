@@ -13,8 +13,10 @@ import { planAvisos } from './dominio.js';
 // dados de alta FUERA de seguimiento —con fechas que pedirían aviso, clientes
 // con contacto puesto a mano y tickets abiertos con su serial— no cambian ni un
 // byte de lo que alimenta Resumen, Equipos, Calendario, Avisos, su simulación,
-// los contactos y Servicios. Resumen, Calendario y la simulación se calculan en
-// el navegador con lo que da GET /equipos: si esa respuesta es idéntica, lo son.
+// los contactos y Servicios —salvo, desde el 2026-11-04, el nombre del cliente de
+// un ticket con su serial en Servicios—. Resumen, Calendario y la simulación se
+// calculan en el navegador con lo que da GET /equipos: si esa respuesta es
+// idéntica, lo son.
 // Clientes y seriales inventados (el repo es público).
 
 const SECRET = 'test-secret-seguimiento';
@@ -73,6 +75,12 @@ async function traerOtrasMarcas(): Promise<void> {
 }
 
 const pedir = (ruta: string) => request(api).get(`/api/trazabilidad/${ruta}?hoy=${HOY}`).set(admin);
+/** GET /servicios (como texto) con el cliente de esos tickets cambiado al del maestro: lo único que puede cambiar al traer otras marcas. */
+function conClienteDelMaestro(servicios: string, clientes: Record<number, string>): string {
+  const b = JSON.parse(servicios) as { servicios: { numero: number; cliente: string; clienteOrigen: string }[] };
+  for (const s of b.servicios) if (s.numero in clientes) Object.assign(s, { cliente: clientes[s.numero], clienteOrigen: 'equipo' });
+  return JSON.stringify(b);
+}
 /** Todo lo que la app enseña del inventario y de los tickets, como texto: equipos y contactos, el plan de avisos (lo que usan «Avisos» y su simulación) y servicios. */
 async function foto(): Promise<Record<string, string>> {
   const [equipos, servicios] = await Promise.all([pedir('equipos'), pedir('servicios')]);
@@ -124,12 +132,18 @@ describe('las otras marcas, fuera de seguimiento, no asoman en nada de lo que ya
     expect((JSON.parse(antes.servicios).servicios as { numero: number; cliente: string }[]).map((s) => [s.numero, s.cliente])).toEqual([[603, 'Cliente Ficticio C'], [602, 'Noa Ficticia'], [601, 'Cuenta Ficticia A']]);
 
     await traerOtrasMarcas();
-    expect(await foto()).toEqual(antes);
+    const despues = await foto();
+    expect({ ...despues, servicios: '' }).toEqual({ ...antes, servicios: '' });
+    // AMPLIADO el 2026-11-04: en Servicios cambia SÓLO el nombre del cliente de los tickets con el serial de un equipo de otra marca,
+    // que ahora es el del maestro (antes, la cuenta o el contacto). Ni un byte más. El 603 sigue con el del inventario (18A00003) aunque
+    // «Cliente Ficticio Z» tenga el mismo serial fuera de él.
+    expect(despues.servicios).toBe(conClienteDelMaestro(antes.servicios, { 601: 'Cliente Ficticio A', 602: 'Cliente Ficticio H S.A.S.' }));
 
-    // Contraprueba: lo único que las tiene fuera es `en_seguimiento`. Con la columna a TRUE se colarían en todo.
+    // Contraprueba: lo único que las tiene fuera es `en_seguimiento`. Con la columna a TRUE se colarían en todo (en Servicios ya
+    // daban su cliente: ahí la contraprueba es que no cambie nada más que eso).
     await db.query(`UPDATE portal.tmc_equipos SET en_seguimiento = TRUE`);
     const colados = await foto();
-    for (const k of ['equipos', 'avisos', 'servicios'] as const) expect(colados[k], k).not.toBe(antes[k]);
+    for (const k of ['equipos', 'avisos'] as const) expect(colados[k], k).not.toBe(antes[k]);
   });
 
   it('no se les puede guardar seguimiento ni marcar un aviso: para la app ese equipo no está en el inventario', async () => {

@@ -28,6 +28,7 @@ import {
   mesesDelEje,
   porUrgenciaPlazo,
   resumenServicios,
+  textoCliente,
   textoPlazo,
   textoTramos,
   tituloFechaLimite,
@@ -739,5 +740,21 @@ describe('bloque «Estados de Desk» de Configuración', () => {
     expect(avisoRol('Notificación cliente', 'standby')).toBe('Notificación cliente: standby (reloj en pausa)');
     expect(avisoRol('Por Facturar', 'terminado')).toBe('Por Facturar: trabajo terminado (reloj parado)');
     expect(avisoRol('En Proceso', 'cuenta')).toBe('En Proceso: cuenta');
+  });
+});
+
+describe('textoCliente: el contacto no pasa por empresa', () => {
+  it('el cliente del equipo o la cuenta de Desk van tal cual', () => {
+    expect(textoCliente(sv(null, null, { cliente: 'Cliente Uno S.A.S.', clienteOrigen: 'equipo' }))).toEqual({ texto: 'Cliente Uno S.A.S.', apagado: false });
+    expect(textoCliente(sv(null, null, { cliente: 'Cuenta S.A.S.', clienteOrigen: 'cuenta' }))).toEqual({ texto: 'Cuenta S.A.S.', apagado: false });
+  });
+
+  it('el nombre del contacto lleva «contacto:» delante y va apagado', () => {
+    expect(textoCliente(sv(null, null, { cliente: 'Ana Pérez', clienteOrigen: 'contacto' }))).toEqual({ texto: 'contacto: Ana Pérez', apagado: true });
+  });
+
+  it('el asunto va apagado, sin prefijo; sin nada, vacío', () => {
+    expect(textoCliente(sv(null, null, { cliente: 'Servicio Técnico', clienteOrigen: 'asunto', clienteDeAsunto: true }))).toEqual({ texto: 'Servicio Técnico', apagado: true });
+    expect(textoCliente(sv(null, null, { cliente: '', clienteOrigen: 'asunto', clienteDeAsunto: true }))).toEqual({ texto: '', apagado: true });
   });
 });

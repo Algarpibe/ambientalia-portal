@@ -20,7 +20,8 @@ import { leerPlanMaestro, sincronizarMaestro } from './maestro-repo.js';
 // hoja no tiene) y una hoja congelada con forma de V3 (con una marca que no
 // existe en Desk 2.0): el plan, aplicarlo, idempotencia, todo o nada, que sin
 // maestro no escribe, que lo que ya había (GET /equipos, avisos, servicios)
-// queda IDÉNTICO, y la pestaña «Trazabilidad F-ST-022» antes y después.
+// queda IDÉNTICO —salvo, desde el 2026-11-04, el nombre del cliente de un
+// ticket en servicios—, y la pestaña «Trazabilidad F-ST-022» antes y después.
 // Las rutas son las de verdad; sólo la sesión es un doble. Todo ficticio.
 
 const SECRET = 'test-secret-maestro-otras';
@@ -202,13 +203,19 @@ describe('aplicar', () => {
     expect(fila.cambios.map((c: Fila) => [c.clave, c.campo, c.ambito])).toEqual([['28A00001', 'alta', 'otras'], ['HB-0001', 'alta', 'otras'], ['hb-0002', 'alta', 'otras'], ['00123', 'alta', 'otras']]);
   });
 
-  it('BLINDAJE con la sincronización de verdad: GET /equipos, el plan de avisos, GET /servicios, el seguimiento y los contactos quedan idénticos byte a byte', async () => {
+  it('BLINDAJE con la sincronización de verdad: GET /equipos, el plan de avisos, el seguimiento y los contactos quedan idénticos byte a byte; en GET /servicios, sólo el cliente del ticket de un equipo dado de alta', async () => {
     await pedir(`servicios?hoy=${HOY}`); // la primera lectura apunta el historial de estados
     const antes = await fotoApp();
     expect(JSON.parse(antes.equipos).equipos).toHaveLength(2);
     await sincronizar();
     expect((await equipos()).filter((e) => !e.en_seguimiento)).toHaveLength(4);
-    expect(await fotoApp()).toEqual(antes);
+    const despues = await fotoApp();
+    expect({ ...despues, servicios: '' }).toEqual({ ...antes, servicios: '' });
+    // AMPLIADO el 2026-11-04: el 700 (HB-0001) salía con el nombre del contacto; ahora, con el cliente del maestro. Ni un byte más.
+    const esperado = JSON.parse(antes.servicios) as { servicios: { numero: number; cliente: string; clienteOrigen: string }[] };
+    expect(esperado.servicios.map((s) => [s.numero, s.cliente, s.clienteOrigen])).toEqual([[700, 'Eva Ficticia', 'contacto']]);
+    Object.assign(esperado.servicios[0], { cliente: 'Cliente Ficticio H S.A.S.', clienteOrigen: 'equipo' });
+    expect(despues.servicios).toBe(JSON.stringify(esperado));
     expect((await repo.listarEquipos(hub, HOY)).map((e) => e.clave)).toEqual(['18A00001', '18A00002']);
   });
 
