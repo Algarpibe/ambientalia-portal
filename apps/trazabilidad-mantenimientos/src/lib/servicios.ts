@@ -48,6 +48,16 @@ export const TONO_PLAZO: Record<EstadoPlazo, { badge: string; dot: string; text:
 const dHab = (n: number): string => `${n} día${n === 1 ? '' : 's'} hábil${n === 1 ? '' : 'es'}`;
 
 /**
+ * Cómo se enseña el cliente de un servicio. El nombre del contacto lleva
+ * «contacto:» delante para que no pase por una empresa; él y el asunto van
+ * apagados (`apagado`): ninguno es el cliente que da el maestro o Desk.
+ */
+export function textoCliente(s: Pick<ServicioVista, 'cliente' | 'clienteOrigen'>): { texto: string; apagado: boolean } {
+  if (s.clienteOrigen === 'contacto') return { texto: `contacto: ${s.cliente}`, apagado: true };
+  return { texto: s.cliente, apagado: s.clienteOrigen === 'asunto' };
+}
+
+/**
  * «quedan 2 d háb.» / «vence hoy» / «vencido hace 3 d háb.» / «sin plazo». Con
  * el reloj en pausa (standby) se dice delante: la cuenta está congelada. Con el
  * trabajo terminado, el veredicto: «cumplido» / «incumplido · 2 d háb.» /
