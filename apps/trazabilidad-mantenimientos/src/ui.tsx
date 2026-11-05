@@ -120,7 +120,7 @@ const ENFOCABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
 const abiertos: object[] = [];
 
 /**
- * Lo común a un diálogo y al panel lateral: al abrir, el foco entra en él; Tab
+ * Lo común a un diálogo, al panel lateral y a la ficha centrada: al abrir, el foco entra en él; Tab
  * no sale; Escape lo cierra; y al cerrar el foco vuelve a donde estaba.
  * Devuelve la referencia de la caja y el id de su título (`aria-labelledby`).
  *
@@ -166,26 +166,52 @@ function useDialogo<T extends HTMLElement>(onClose: () => void) {
   return { caja, titulo };
 }
 
-/** Panel lateral derecho (ficha de un equipo, ficha de un ticket de la agenda). */
+/** Título, subtítulo y «Cerrar» del panel lateral y de la ficha centrada. */
+function CabeceraFicha({ id, title, subtitle, onClose }: { id: string; title: ReactNode; subtitle?: ReactNode; onClose: () => void }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4">
+      <div className="min-w-0">
+        <div id={id} className="text-lg font-semibold text-gray-900">
+          {title}
+        </div>
+        {subtitle && <div className="text-sm text-gray-500">{subtitle}</div>}
+      </div>
+      <button type="button" onClick={onClose} aria-label="Cerrar" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+        <X className="h-5 w-5" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/** Panel lateral derecho (ficha de un ticket de la agenda, panel de una fila de la hoja F-ST-022). */
 export function Drawer({ title, subtitle, onClose, children }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode }) {
   const { caja, titulo } = useDialogo<HTMLElement>(onClose);
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-gray-900/40" onClick={onClose} aria-hidden />
       <aside ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="absolute inset-y-0 right-0 flex w-full max-w-md flex-col bg-white shadow-xl focus:outline-none">
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4">
-          <div className="min-w-0">
-            <div id={titulo} className="text-lg font-semibold text-gray-900">
-              {title}
-            </div>
-            {subtitle && <div className="text-sm text-gray-500">{subtitle}</div>}
-          </div>
-          <button type="button" onClick={onClose} aria-label="Cerrar" className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
-            <X className="h-5 w-5" aria-hidden />
-          </button>
-        </div>
+        <CabeceraFicha id={titulo} title={title} subtitle={subtitle} onClose={onClose} />
         <div className="flex-1 overflow-y-auto p-4">{children}</div>
       </aside>
+    </div>
+  );
+}
+
+/**
+ * Ficha ancha y centrada (la de un equipo, desde el 05/11/2026): en una pantalla de
+ * ordenador cabe entera sin bajar; si no cabe (pantalla baja o móvil), baja por dentro,
+ * nunca la página. Teclado como el panel lateral (`useDialogo`) y por debajo de `Modal`
+ * (z-50 frente a z-[55]): las confirmaciones que abre se ven encima.
+ */
+export function FichaCentrada({ title, subtitle, onClose, children }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode }) {
+  const { caja, titulo } = useDialogo<HTMLDivElement>(onClose);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-gray-900/40" onClick={onClose} aria-hidden />
+      <div ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="relative flex max-h-[94vh] w-full max-w-6xl flex-col rounded-2xl bg-white shadow-xl focus:outline-none">
+        <CabeceraFicha id={titulo} title={title} subtitle={subtitle} onClose={onClose} />
+        <div className="overflow-y-auto px-5 py-4">{children}</div>
+      </div>
     </div>
   );
 }
