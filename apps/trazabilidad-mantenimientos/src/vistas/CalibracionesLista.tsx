@@ -16,6 +16,8 @@ interface Props {
   destino: { clave: string } | { fila: number } | null;
   /** Tras registrar o anular: quien la pinta vuelve a pedir lo suyo. */
   onCambio: () => Promise<void>;
+  /** Clases de más para la lista (la ficha de equipo la acota en alto para no tener que bajar). */
+  claseLista?: string;
 }
 
 /**
@@ -26,7 +28,7 @@ interface Props {
  * las dos con motivo y dentro de la página. Sin el permiso, sólo se consulta.
  * Una fecha nunca se edita. La guarda de verdad es la del servidor.
  */
-export default function CalibracionesLista({ items, destino, onCambio }: Props) {
+export default function CalibracionesLista({ items, destino, onCambio, claseLista = '' }: Props) {
   const editable = usePermisos().puede('calibraciones.write') && destino !== null;
   /** Qué se está haciendo: registrar una manual o anular esa calibración. */
   const [accion, setAccion] = useState<'corregir' | CalibracionHoja | null>(null);
@@ -75,7 +77,7 @@ export default function CalibracionesLista({ items, destino, onCambio }: Props) 
 
   return (
     <>
-      <ul className="flex flex-col gap-1.5">
+      <ul className={`flex flex-col gap-1.5 ${claseLista}`}>
         {items.map((c) => (
           <li key={c.id} className="flex flex-wrap items-center gap-1.5" title={detalleCalibracion(c)}>
             <span className={`font-medium tabular-nums ${c.estado === 'anulada' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</span>
