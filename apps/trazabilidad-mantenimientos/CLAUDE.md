@@ -1323,9 +1323,9 @@ la simulación— lo recalcula la regla de siempre en la lectura siguiente (`edi
   de la pestaña F-ST-022): con el permiso, **«Corregir fecha»** (fecha, «¿corrige la fecha de un
   ticket?» con los del historial, y motivo) y **«Anular»** en cada fila sin anular (dice lo que
   pasa antes de confirmar: `efectoAnular`). Todo dentro de la página. Desde el 07/11/2026 es una
-  **tabla** (Fecha · Origen · Estado · Anular), con la que cuenta resaltada en azul; quién, cuándo
-  y el motivo ya no van debajo de cada fila sino en su `title` (`detalleCalibracion`), al pasar el
-  ratón. Sin el permiso, la misma tabla sin la columna de «Anular». Tras un cambio se vuelven a
+  **tabla** (Fecha · Estado · Anular; la columna «Origen» se quitó el mismo día a pedido de
+  Alfonso), con la que cuenta resaltada en azul; de dónde sale (`origenDe`), quién, cuándo y el
+  motivo van en su `title` (`detalleCalibracion`), al pasar el ratón. Sin el permiso, la misma tabla sin la columna de «Anular». Tras un cambio se vuelven a
   pedir el historial, la tabla de la pestaña y el inventario.
 
 ### Pestaña «Trazabilidad F-ST-022» (lote 9d-1)
