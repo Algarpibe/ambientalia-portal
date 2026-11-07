@@ -54,7 +54,7 @@ function Calibraciones({ equipo, onCambio }: { equipo: EquipoVista; onCambio: ()
       {datos && filas.length === 0 && (
         <p className="text-gray-500">{equipo.ultimaCalibracion ? `Aún no hay calibraciones registradas para este equipo: vale la fecha del inventario (${fmtFecha(equipo.ultimaCalibracion)}).` : 'Sin calibraciones registradas.'}</p>
       )}
-      {datos && <CalibracionesLista items={filas} destino={{ clave: equipo.clave }} onCambio={async () => void (await Promise.all([cargar(), onCambio()]))} claseLista="lg:max-h-48 lg:overflow-y-auto" />}
+      {datos && <CalibracionesLista items={filas} destino={{ clave: equipo.clave }} onCambio={async () => void (await Promise.all([cargar(), onCambio()]))} claseLista="lg:max-h-56 lg:overflow-y-auto" />}
       <p className="text-xs text-gray-500">
         {editable ? '' : 'Sólo lectura. '}Las fechas vienen de la F-ST-022 congelada, de los tickets de Desk 2.0 y de las correcciones hechas a mano; una fecha no se edita: se anula y se registra otra.
       </p>

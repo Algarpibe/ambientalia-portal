@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import type { CalibracionHoja } from '../dominio';
-import { ETIQUETA_ESTADO_FILA, detalleCalibracion, efectoAnular, firmaManual, ticketsCorregibles } from '../lib/calibraciones';
+import { ETIQUETA_ESTADO_FILA, detalleCalibracion, efectoAnular, ticketsCorregibles } from '../lib/calibraciones';
 import { origenDe } from '../lib/hoja';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
@@ -9,6 +9,8 @@ import { Alert, Button, DESACTIVADO, Tag } from '../ui';
 
 const INPUT = `block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 ${DESACTIVADO}`;
 const CAJA = 'flex flex-col gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3';
+/** Cabecera de la tabla: fija arriba si la lista baja por dentro de su recuadro. */
+const TH = 'sticky top-0 border-b border-gray-200 bg-white py-1 pl-1 pr-2 font-medium';
 
 interface Props {
   items: CalibracionHoja[];
@@ -16,13 +18,15 @@ interface Props {
   destino: { clave: string } | { fila: number } | null;
   /** Tras registrar o anular: quien la pinta vuelve a pedir lo suyo. */
   onCambio: () => Promise<void>;
-  /** Clases de más para la lista (la ficha de equipo la acota en alto para no tener que bajar). */
+  /** Clases de más para el recuadro de la tabla (la ficha de equipo lo acota en alto para no tener que bajar). */
   claseLista?: string;
 }
 
 /**
  * Las calibraciones conocidas de un equipo o de una fila de la hoja (ficha de
- * equipo y panel de la pestaña F-ST-022) y, con `calibraciones.write`, lo que
+ * equipo y panel de la pestaña F-ST-022), en una tabla —fecha, origen y estado;
+ * la que cuenta, resaltada; quién, cuándo y por qué, en el `title` de cada fila—
+ * y, con `calibraciones.write`, lo que
  * se puede hacer con ellas (lote 9d-2b): «Corregir fecha» —registra una
  * manual, que puede corregir un ticket del historial— y «Anular» una fila,
  * las dos con motivo y dentro de la página. Sin el permiso, sólo se consulta.
@@ -77,22 +81,51 @@ export default function CalibracionesLista({ items, destino, onCambio, claseList
 
   return (
     <>
-      <ul className={`flex flex-col gap-1.5 ${claseLista}`}>
-        {items.map((c) => (
-          <li key={c.id} className="flex flex-wrap items-center gap-1.5" title={detalleCalibracion(c)}>
-            <span className={`font-medium tabular-nums ${c.estado === 'anulada' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</span>
-            <span className="text-gray-600">{origenDe(c)}</span>
-            <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
-            {c.cuenta && <Tag tone="blue">La que cuenta</Tag>}
-            {editable && c.estado !== 'anulada' && (
-              <button type="button" onClick={() => abrir(c)} className="rounded-lg px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50">
-                Anular
-              </button>
-            )}
-            {firmaManual(c) && <span className="w-full text-xs text-gray-500">{firmaManual(c)}{c.motivo ? ` · ${c.motivo}` : ''}</span>}
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 && (
+        <div className={claseLista}>
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs text-gray-500">
+                <th scope="col" className={TH}>Fecha</th>
+                <th scope="col" className={TH}>Origen</th>
+                <th scope="col" className={TH}>Estado</th>
+                {editable && (
+                  <th scope="col" className={TH}>
+                    <span className="sr-only">Acciones</span>
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((c) => {
+                const anulada = c.estado === 'anulada';
+                return (
+                  // Quién, cuándo y por qué (y su anulación), al pasar el ratón: `detalleCalibracion`.
+                  <tr key={c.id} title={detalleCalibracion(c)} className={`border-b border-gray-100 ${c.cuenta ? 'bg-blue-50' : ''}`}>
+                    <td className={`whitespace-nowrap py-1.5 pl-1 pr-2 font-medium tabular-nums ${anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</td>
+                    <td className={`py-1.5 pr-2 ${anulada ? 'text-gray-400' : 'text-gray-600'}`}>{origenDe(c)}</td>
+                    <td className="py-1.5 pr-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
+                        {c.cuenta && <Tag tone="blue">La que cuenta</Tag>}
+                      </div>
+                    </td>
+                    {editable && (
+                      <td className="py-1.5 text-right">
+                        {!anulada && (
+                          <button type="button" onClick={() => abrir(c)} aria-label={`Anular la calibración del ${fmtFecha(c.fecha)}`} className="rounded-lg px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50">
+                            Anular
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       {editable && accion === null && (
         <div>
           <Button onClick={() => abrir('corregir')}>Corregir fecha</Button>
