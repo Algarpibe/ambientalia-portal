@@ -109,3 +109,40 @@ export function origenCalibracion(c: Pick<CalibracionHistorial, 'origen' | 'tick
   if (c.origen === 'desk') return `Ticket n.º ${c.ticket}`;
   return c.corrigeTicket === null ? 'Manual' : `Manual (corrige el ticket n.º ${c.corrigeTicket})`;
 }
+
+// ── Tiempo entre calibraciones (gráfico de la ficha, 07/11/2026) ────────────
+
+/** Lo que pasó entre dos calibraciones seguidas: días y meses (con un decimal). */
+export interface IntervaloCalibracion { desde: string; hasta: string; dias: number; meses: number }
+
+const DIA_MS = 86_400_000;
+const diasEntre = (a: string, b: string): number => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / DIA_MS);
+/** Días → meses medios (365 / 12 días cada uno), con un decimal. */
+const aMeses = (dias: number): number => Math.round((dias * 12) / 365 * 10) / 10;
+
+/**
+ * Los intervalos entre calibraciones de un equipo, de la más antigua a la más reciente, su promedio
+ * (calculado sobre los días) y la vigencia de su marca en meses, para la línea de referencia (`null` = sin vencimiento).
+ * Sólo cuentan las vigentes: ni anuladas, ni en revisión, ni el ticket que corrige una manual vigente. Una misma fecha cuenta una vez.
+ */
+export function intervalosCalibracion(items: readonly CalibracionHoja[], vigenciaDias: number | null): { intervalos: IntervaloCalibracion[]; promedioMeses: number | null; referenciaMeses: number | null } {
+  const vigentes = items.filter((c) => c.estado === 'vigente');
+  const corregidos = new Set(vigentes.flatMap((c) => (c.origen === 'manual' && c.corrigeTicket !== null ? [c.corrigeTicket] : [])));
+  const fechas = [...new Set(vigentes.filter((c) => !(c.origen === 'desk' && c.ticket !== null && corregidos.has(c.ticket))).map((c) => c.fecha))].sort();
+  const intervalos = fechas.slice(1).map((hasta, i) => {
+    const dias = diasEntre(fechas[i], hasta);
+    return { desde: fechas[i], hasta, dias, meses: aMeses(dias) };
+  });
+  const promedioMeses = intervalos.length === 0 ? null : aMeses(intervalos.reduce((s, i) => s + i.dias, 0) / intervalos.length);
+  return { intervalos, promedioMeses, referenciaMeses: vigenciaDias === null ? null : aMeses(vigenciaDias) };
+}
+
+/** 11.7 → «11,7»; 12 → «12,0». */
+export const mesesConDecimal = (meses: number): string => meses.toFixed(1).replace('.', ',');
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+/** «2024-06-05» → «jun 24»: el rótulo de cada barra (el mes de la calibración en que acaba el intervalo). */
+export const etiquetaMes = (iso: string): string => `${MESES_CORTOS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(2, 4)}`;
+
+/** El detalle de una barra, al pasar el ratón. */
+export const textoIntervalo = (i: IntervaloCalibracion): string => `${fmtFecha(i.desde)} → ${fmtFecha(i.hasta)} · ${mesesConDecimal(i.meses)} meses`;

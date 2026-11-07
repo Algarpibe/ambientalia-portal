@@ -198,19 +198,19 @@ export function Drawer({ title, subtitle, onClose, children }: { title: ReactNod
 }
 
 /**
- * Ficha ancha y centrada (la de un equipo, desde el 05/11/2026): en una pantalla de
- * ordenador cabe entera sin bajar; si no cabe (pantalla baja o móvil), baja por dentro,
- * nunca la página. Teclado como el panel lateral (`useDialogo`) y por debajo de `Modal`
- * (z-50 frente a z-[55]): las confirmaciones que abre se ven encima.
+ * Ficha a pantalla completa (la de un equipo: centrada desde el 05/11/2026 y, desde el
+ * 07/11/2026, ocupando toda la ventana con un margen pequeño). Si no cabe (pantalla baja
+ * o móvil), baja por dentro, nunca la página. Teclado como el panel lateral (`useDialogo`)
+ * y por debajo de `Modal` (z-50 frente a z-[55]): las confirmaciones que abre se ven encima.
  */
 export function FichaCentrada({ title, subtitle, onClose, children }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode }) {
   const { caja, titulo } = useDialogo<HTMLDivElement>(onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex p-2 sm:p-4">
       <div className="absolute inset-0 bg-gray-900/40" onClick={onClose} aria-hidden />
-      <div ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="relative flex max-h-[94vh] w-full max-w-6xl flex-col rounded-2xl bg-white shadow-xl focus:outline-none">
+      <div ref={caja} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titulo} className="relative flex h-full w-full flex-col rounded-2xl bg-white shadow-xl focus:outline-none">
         <CabeceraFicha id={titulo} title={title} subtitle={subtitle} onClose={onClose} />
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CalibracionHistorial, CalibracionHoja, DetalleCalibracion, PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
-import { bloquesDetalle, detalleCalibracion, efectoAnular, firmaManual, hayQueTraer, lineasPlan, origenCalibracion, textoUltima, ticketsCorregibles } from './calibraciones';
+import { bloquesDetalle, detalleCalibracion, efectoAnular, etiquetaMes, firmaManual, hayQueTraer, intervalosCalibracion, lineasPlan, mesesConDecimal, origenCalibracion, textoIntervalo, textoUltima, ticketsCorregibles } from './calibraciones';
 
 // Lo que enseñan la tarjeta «Calibraciones · Desk 2.0» de Configuración (el plan
 // en recuentos, la última pasada y el detalle en bloques) y el bloque
@@ -128,6 +128,50 @@ describe('corregir a mano: lo que se dice y se ofrece de cada calibración', () 
     expect(efectoAnular(MANUAL)).toBe('Deja de contar para la última calibración. No se borra, y no se puede desanular: si hace falta, se registra otra.');
     expect(efectoAnular(c({}))).toMatch(/Al traer las calibraciones de Desk 2\.0 no volverá mientras el ticket n\.º 1001 siga con esa fecha en Zoho\.$/);
     expect(efectoAnular(c({ id: -6, origen: 'fst022', ticket: null }))).toMatch(/La hoja congelada no se toca: queda apuntado que esa fecha no vale\.$/);
+  });
+});
+
+// 07/11/2026: el gráfico «Tiempo entre calibraciones» de la ficha de un equipo.
+describe('tiempo entre calibraciones: los intervalos, su promedio y la línea de la vigencia', () => {
+  const c = (extra: Partial<CalibracionHoja>): CalibracionHoja => ({ id: 1, fecha: '2026-03-01', origen: 'manual', ticket: null, corrigeTicket: null, estado: 'vigente', cuenta: false, ...extra });
+
+  it('un intervalo por cada dos calibraciones seguidas, de la más antigua a la más reciente, en días y en meses con un decimal; el promedio sale de los días', () => {
+    const r = intervalosCalibracion([c({ id: 2, fecha: '2024-06-05' }), c({ id: 3, origen: 'fst022', fecha: '2025-08-01', cuenta: true }), c({ id: 1, fecha: '2023-06-14' })], 365);
+    expect(r.intervalos).toEqual([
+      { desde: '2023-06-14', hasta: '2024-06-05', dias: 357, meses: 11.7 },
+      { desde: '2024-06-05', hasta: '2025-08-01', dias: 422, meses: 13.9 },
+    ]);
+    expect(r.promedioMeses).toBe(12.8);
+    expect(r.referenciaMeses).toBe(12);
+  });
+
+  it('sólo cuentan las vigentes: ni anuladas, ni en revisión, ni el ticket que corrige una manual vigente; una misma fecha cuenta una vez', () => {
+    const items = [
+      c({ id: 1, origen: 'desk', ticket: 500, fecha: '2022-01-10' }),
+      c({ id: 2, corrigeTicket: 500, fecha: '2022-01-20' }),
+      c({ id: 3, fecha: '2023-01-01', estado: 'anulada' }),
+      c({ id: 4, origen: 'desk', ticket: 501, fecha: '2023-06-01', estado: 'en_revision' }),
+      c({ id: 5, origen: 'desk', ticket: 502, fecha: '2024-01-20' }),
+      c({ id: 6, origen: 'fst022', fecha: '2024-01-20' }),
+    ];
+    expect(intervalosCalibracion(items, 365).intervalos).toEqual([{ desde: '2022-01-20', hasta: '2024-01-20', dias: 730, meses: 24 }]);
+    // Si la corrección está anulada, el ticket vuelve a contar.
+    const sinCorreccion = items.map((x) => (x.id === 2 ? { ...x, estado: 'anulada' as const } : x));
+    expect(intervalosCalibracion(sinCorreccion, 365).intervalos.map((i) => i.desde)).toEqual(['2022-01-10']);
+  });
+
+  it('con menos de dos calibraciones no hay intervalos ni promedio; sin vigencia en su marca no hay línea', () => {
+    expect(intervalosCalibracion([c({})], 365)).toEqual({ intervalos: [], promedioMeses: null, referenciaMeses: 12 });
+    expect(intervalosCalibracion([], null)).toEqual({ intervalos: [], promedioMeses: null, referenciaMeses: null });
+    expect(intervalosCalibracion([], 182).referenciaMeses).toBe(6);
+  });
+
+  it('cómo se escribe: meses con coma decimal, el mes de cada barra y el detalle al pasar el ratón', () => {
+    expect(mesesConDecimal(11.7)).toBe('11,7');
+    expect(mesesConDecimal(12)).toBe('12,0');
+    expect(etiquetaMes('2024-06-05')).toBe('jun 24');
+    expect(etiquetaMes('2025-12-31')).toBe('dic 25');
+    expect(textoIntervalo({ desde: '2023-06-14', hasta: '2024-06-05', dias: 357, meses: 11.7 })).toBe('14/06/2023 → 05/06/2024 · 11,7 meses');
   });
 });
 
