@@ -6,6 +6,7 @@ import { usePermisos } from '../permisos';
 import { Alert, Button, DESACTIVADO, EstadoBadge, FichaCentrada, Tag } from '../ui';
 import CalibracionesLista from './CalibracionesLista';
 import FrecuenciaContrato from './FrecuenciaContrato';
+import IntervalosCalibracion from './IntervalosCalibracion';
 import Retiro from './Retiro';
 
 interface Props {
@@ -45,20 +46,24 @@ function Calibraciones({ equipo, onCambio }: { equipo: EquipoVista; onCambio: ()
   useEffect(() => void cargar(), [cargar]);
   const filas = datos?.calibraciones ?? [];
   return (
-    <section aria-labelledby="ficha-calibraciones" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
-      <p id="ficha-calibraciones" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-        Calibraciones
-      </p>
-      {error && <Alert tone="red">{error}</Alert>}
-      {!datos && !error && <p className="text-gray-500">Cargando…</p>}
-      {datos && filas.length === 0 && (
-        <p className="text-gray-500">{equipo.ultimaCalibracion ? `Aún no hay calibraciones registradas para este equipo: vale la fecha del inventario (${fmtFecha(equipo.ultimaCalibracion)}).` : 'Sin calibraciones registradas.'}</p>
-      )}
-      {datos && <CalibracionesLista items={filas} destino={{ clave: equipo.clave }} onCambio={async () => void (await Promise.all([cargar(), onCambio()]))} claseLista="lg:max-h-56 lg:overflow-y-auto" />}
-      <p className="text-xs text-gray-500">
-        {editable ? '' : 'Sólo lectura. '}Las fechas vienen de la F-ST-022 congelada, de los tickets de Desk 2.0 y de las correcciones hechas a mano; una fecha no se edita: se anula y se registra otra.
-      </p>
-    </section>
+    <>
+      <section aria-labelledby="ficha-calibraciones" className="flex flex-col gap-1.5 border-t border-gray-200 pt-4 text-sm">
+        <p id="ficha-calibraciones" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Calibraciones
+        </p>
+        {error && <Alert tone="red">{error}</Alert>}
+        {!datos && !error && <p className="text-gray-500">Cargando…</p>}
+        {datos && filas.length === 0 && (
+          <p className="text-gray-500">{equipo.ultimaCalibracion ? `Aún no hay calibraciones registradas para este equipo: vale la fecha del inventario (${fmtFecha(equipo.ultimaCalibracion)}).` : 'Sin calibraciones registradas.'}</p>
+        )}
+        {datos && <CalibracionesLista items={filas} destino={{ clave: equipo.clave }} onCambio={async () => void (await Promise.all([cargar(), onCambio()]))} claseLista="lg:max-h-64 lg:overflow-y-auto" />}
+        <p className="text-xs text-gray-500">
+          {editable ? '' : 'Sólo lectura. '}Las fechas vienen de la F-ST-022 congelada, de los tickets de Desk 2.0 y de las correcciones hechas a mano; una fecha no se edita: se anula y se registra otra.
+        </p>
+      </section>
+      {/* 07/11/2026: los meses entre calibraciones, con el mismo historial de la tabla. */}
+      {datos && <IntervalosCalibracion items={filas} vigenciaDias={equipo.vigenciaMarca} />}
+    </>
   );
 }
 
@@ -117,7 +122,7 @@ export default function FichaEquipo({ equipo: e, inventario, onInventario, onClo
         </>
       }
     >
-      {/* Tres columnas en pantalla de ordenador (el equipo y su contacto · sus calibraciones y lo que se le hace · el seguimiento); apiladas por debajo. */}
+      {/* Tres columnas en pantalla de ordenador (el equipo y su contacto · sus calibraciones, su gráfico y el retiro · el seguimiento y la frecuencia del cliente); apiladas por debajo. */}
       <div className="grid gap-x-6 gap-y-5 lg:grid-cols-3">
         <div className={COLUMNA}>
           <div className="flex flex-wrap items-center gap-2">
@@ -170,9 +175,6 @@ export default function FichaEquipo({ equipo: e, inventario, onInventario, onClo
 
           {/* Retirar el equipo (lote 9d-2b): sale del inventario, así que la ficha se cierra (cerrarla de verdad: si no, volvería a abrirse sola al reincorporarlo). */}
           <Retiro accion={{ de: 'equipo', retirar: true, destino: { clave: e.clave } }} retirado={null} onCambio={async (hecho) => (onClose(), await onCambio(), notificar(hecho))} />
-
-          {/* Lote 12: la frecuencia de preventivo del cliente según su contrato (sólo la cambia un administrador del portal). */}
-          <FrecuenciaContrato equipo={e} inventario={inventario} onInventario={onInventario} notificar={notificar} />
         </div>
 
         <div className={`${COLUMNA} ${COLUMNA_SIGUIENTE}`}>
@@ -223,6 +225,9 @@ export default function FichaEquipo({ equipo: e, inventario, onInventario, onClo
               </>
             )}
           </form>
+
+          {/* Lote 12: la frecuencia de preventivo del cliente según su contrato (sólo la cambia un administrador del portal). Bajo el seguimiento desde el 07/11/2026, para dejar sitio al gráfico de calibraciones. */}
+          <FrecuenciaContrato equipo={e} inventario={inventario} onInventario={onInventario} notificar={notificar} />
         </div>
       </div>
     </FichaCentrada>
