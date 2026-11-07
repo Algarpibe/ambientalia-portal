@@ -24,8 +24,8 @@ interface Props {
 
 /**
  * Las calibraciones conocidas de un equipo o de una fila de la hoja (ficha de
- * equipo y panel de la pestaña F-ST-022), en una tabla —fecha, origen y estado;
- * la que cuenta, resaltada; quién, cuándo y por qué, en el `title` de cada fila—
+ * equipo y panel de la pestaña F-ST-022), en una tabla —fecha y estado; la que
+ * cuenta, resaltada; de dónde sale, quién, cuándo y por qué, en el `title` de cada fila—
  * y, con `calibraciones.write`, lo que
  * se puede hacer con ellas (lote 9d-2b): «Corregir fecha» —registra una
  * manual, que puede corregir un ticket del historial— y «Anular» una fila,
@@ -87,7 +87,6 @@ export default function CalibracionesLista({ items, destino, onCambio, claseList
             <thead>
               <tr className="text-xs text-gray-500">
                 <th scope="col" className={TH}>Fecha</th>
-                <th scope="col" className={TH}>Origen</th>
                 <th scope="col" className={TH}>Estado</th>
                 {editable && (
                   <th scope="col" className={TH}>
@@ -100,10 +99,9 @@ export default function CalibracionesLista({ items, destino, onCambio, claseList
               {items.map((c) => {
                 const anulada = c.estado === 'anulada';
                 return (
-                  // Quién, cuándo y por qué (y su anulación), al pasar el ratón: `detalleCalibracion`.
-                  <tr key={c.id} title={detalleCalibracion(c)} className={`border-b border-gray-100 ${c.cuenta ? 'bg-blue-50' : ''}`}>
+                  // De dónde sale (sin columna desde el 07/11/2026), quién, cuándo y por qué (y su anulación), al pasar el ratón.
+                  <tr key={c.id} title={c.por ? `${origenDe(c)} · ${detalleCalibracion(c)}` : detalleCalibracion(c)} className={`border-b border-gray-100 ${c.cuenta ? 'bg-blue-50' : ''}`}>
                     <td className={`whitespace-nowrap py-1.5 pl-1 pr-2 font-medium tabular-nums ${anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmtFecha(c.fecha)}</td>
-                    <td className={`py-1.5 pr-2 ${anulada ? 'text-gray-400' : 'text-gray-600'}`}>{origenDe(c)}</td>
                     <td className="py-1.5 pr-2">
                       <div className="flex flex-wrap gap-1">
                         <Tag tone={c.estado === 'en_revision' ? 'amber' : 'gray'}>{ETIQUETA_ESTADO_FILA[c.estado]}</Tag>
