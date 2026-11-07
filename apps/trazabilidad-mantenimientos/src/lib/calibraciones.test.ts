@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { CalibracionHistorial, CalibracionHoja, DetalleCalibracion, PasadaCalibraciones, RecuentosCalibraciones } from '../dominio';
-import { bloquesDetalle, detalleCalibracion, efectoAnular, etiquetaMes, firmaManual, hayQueTraer, intervalosCalibracion, lineasPlan, mesesConDecimal, origenCalibracion, textoIntervalo, textoUltima, ticketsCorregibles } from './calibraciones';
+import { bloquesDetalle, detalleCalibracion, efectoAnular, ejeMeses, etiquetaMes, firmaManual, hayQueTraer, intervalosCalibracion, lineasPlan, mesesConDecimal, origenCalibracion, textoIntervalo, textoUltima, ticketsCorregibles } from './calibraciones';
 
 // Lo que enseñan la tarjeta «Calibraciones · Desk 2.0» de Configuración (el plan
 // en recuentos, la última pasada y el detalle en bloques) y el bloque
@@ -164,6 +164,16 @@ describe('tiempo entre calibraciones: los intervalos, su promedio y la línea de
     expect(intervalosCalibracion([c({})], 365)).toEqual({ intervalos: [], promedioMeses: null, referenciaMeses: 12 });
     expect(intervalosCalibracion([], null)).toEqual({ intervalos: [], promedioMeses: null, referenciaMeses: null });
     expect(intervalosCalibracion([], 182).referenciaMeses).toBe(6);
+  });
+
+  it('el eje de los meses: de 0 a un tope redondo con un poco de aire, en pasos de 1, 2, 3, 6, 12, 24, 36 o 60 meses y cuatro tramos como mucho', () => {
+    expect(ejeMeses(45)).toEqual({ tope: 48, marcas: [0, 12, 24, 36, 48] });
+    expect(ejeMeses(13.9)).toEqual({ tope: 18, marcas: [0, 6, 12, 18] });
+    // Una barra justo en la vigencia (12) no toca el techo.
+    expect(ejeMeses(12)).toEqual({ tope: 18, marcas: [0, 6, 12, 18] });
+    expect(ejeMeses(3.5)).toEqual({ tope: 4, marcas: [0, 1, 2, 3, 4] });
+    expect(ejeMeses(0)).toEqual({ tope: 1, marcas: [0, 1] });
+    expect(ejeMeses(300)).toEqual({ tope: 336, marcas: [0, 84, 168, 252, 336] });
   });
 
   it('cómo se escribe: meses con coma decimal, el mes de cada barra y el detalle al pasar el ratón', () => {

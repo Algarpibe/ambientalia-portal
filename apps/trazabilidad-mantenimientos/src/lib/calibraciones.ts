@@ -137,6 +137,18 @@ export function intervalosCalibracion(items: readonly CalibracionHoja[], vigenci
   return { intervalos, promedioMeses, referenciaMeses: vigenciaDias === null ? null : aMeses(vigenciaDias) };
 }
 
+const PASOS_EJE = [1, 2, 3, 6, 12, 24, 36, 60];
+/**
+ * El eje Y del gráfico, en meses: de 0 a un tope redondo con un 5 % de aire sobre el mayor valor (las barras y la
+ * vigencia), en el paso más fino de `PASOS_EJE` que deje cuatro tramos como mucho; si ni el mayor basta, años enteros.
+ */
+export function ejeMeses(maximo: number): { tope: number; marcas: number[] } {
+  const objetivo = Math.max(maximo * 1.05, 1);
+  const paso = PASOS_EJE.find((p) => Math.ceil(objetivo / p) <= 4) ?? Math.ceil(objetivo / 4 / 12) * 12;
+  const tramos = Math.ceil(objetivo / paso);
+  return { tope: tramos * paso, marcas: Array.from({ length: tramos + 1 }, (_, i) => i * paso) };
+}
+
 /** 11.7 → «11,7»; 12 → «12,0». */
 export const mesesConDecimal = (meses: number): string => meses.toFixed(1).replace('.', ',');
 
