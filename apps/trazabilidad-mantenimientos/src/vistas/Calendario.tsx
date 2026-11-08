@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { EquipoVista } from '../dominio';
-import { MESES, MESES_CORTOS, porUrgencia, rejillaMes, textoVigencia } from '../lib/vistas';
-import { Button, Card, TONO } from '../ui';
-import { FilaUrgente } from './Resumen';
+import { MESES, MESES_CORTOS, rejillaMes, textoVigencia } from '../lib/vistas';
+import { Button, TONO } from '../ui';
 
 interface Props {
   equipos: EquipoVista[];
@@ -23,7 +22,6 @@ export default function Calendario({ equipos, hoy, mes, onMes, onFicha }: Props)
   const dias = rejillaMes(equipos, actual.anio, actual.mes);
   const delMes = dias.filter((d) => d.delMes && d.equipos.length);
   const totalMes = delMes.reduce((s, d) => s + d.equipos.length, 0);
-  const atraso = equipos.filter((e) => e.estado === 'VENCIDA').sort(porUrgencia);
 
   const mover = (n: number) => {
     const t = actual.mes + n;
@@ -41,8 +39,10 @@ export default function Calendario({ equipos, hoy, mes, onMes, onFicha }: Props)
     </button>
   );
 
+  // 08/11/2026: sin el panel lateral «Atraso: vencidas» (a pedido de Alfonso): esa lista ya está en Equipos (filtro «Vencida»)
+  // y en la tarjeta «Llegada urgente» del Resumen, así que el calendario ocupa todo el ancho.
   return (
-    <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div>
       <section className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h2 className="mr-2 w-full text-lg sm:w-auto sm:min-w-[180px] font-semibold capitalize text-gray-900">
@@ -102,18 +102,6 @@ export default function Calendario({ equipos, hoy, mes, onMes, onFicha }: Props)
           ))}
         </div>
       </section>
-
-      <Card title={`Atraso: vencidas (${atraso.length})`} hint="Calibración vencida en el último año. Pueden llegar sin previo aviso.">
-        {atraso.length === 0 ? (
-          <p className="text-sm text-gray-500">Ninguna.</p>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {atraso.map((e) => (
-              <FilaUrgente key={e.clave} e={e} onClick={() => onFicha(e.clave)} />
-            ))}
-          </ul>
-        )}
-      </Card>
     </div>
   );
 }
