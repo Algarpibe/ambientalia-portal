@@ -37,6 +37,7 @@ describe('el rótulo del interruptor', () => {
   it('apagado, y por qué si nadie lo pidió', () => {
     expect(rotuloModo({ modo: 'apagado', motivo: null, buzonPrueba: null }).texto).toBe('No sale ningún correo. El interruptor se cambia sólo en el servidor.');
     expect(rotuloModo({ modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null })).toEqual({ tono: 'amber', titulo: 'Envío apagado', texto: 'No sale ningún correo: nadie ha encendido el interruptor. El interruptor se cambia sólo en el servidor.' });
+    expect(rotuloModo({ modo: 'apagado', motivo: 'sin_canal', buzonPrueba: null }).texto).toMatch(/https.*host interno.*token/);
     for (const motivo of ['valor_desconocido', 'sin_canal', 'sin_buzon_prueba'] as const) {
       expect(rotuloModo({ modo: 'apagado', motivo, buzonPrueba: null }).texto).toMatch(/^No sale ningún correo: .+\. El interruptor se cambia sólo en el servidor\.$/);
     }

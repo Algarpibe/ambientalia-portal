@@ -21,7 +21,7 @@ export interface Rotulo {
 const POR_QUE: Record<MotivoApagado, string> = {
   sin_valor: 'nadie ha encendido el interruptor',
   valor_desconocido: 'el interruptor tiene un valor que no se reconoce',
-  sin_canal: 'falta la configuración del canal de correo',
+  sin_canal: 'falta la configuración del canal de correo (la URL de n8n tiene que ser https, o de un host interno de una sola palabra, y hay que poner el token)',
   sin_buzon_prueba: 'falta el buzón de prueba o no es de @ambientalia.com.co',
 };
 

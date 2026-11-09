@@ -1,6 +1,6 @@
 /** Cliente HTTP de la API de Trazabilidad (hub-api, `/api/trazabilidad/*`). */
 import { authHeaders } from '@suite/auth-client';
-import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol } from './dominio';
+import type { CategoriaAgenda, ConfiguracionAgenda, CongelacionFst022, ContactoCliente, EnvioAviso, EquipoVista, EstadoDesk, EtapaAgenda, FlujoAgenda, ItemReparto, MiRol, PlazoServicio, RespuestaAgenda, RespuestaCruceFst022, RespuestaPlanMaestro, ResumenImportacion, RolApp, RolEstado, Seguimiento, ServicioVista, SincronizacionMaestro, TipoServicioOpcion, UsuarioRol, RespuestaEnvios, TramoAviso } from './dominio';
 import type { ApunteRetiro, ConNocturna, PasadaCalibraciones, RespuestaEdicion, RespuestaExportaciones,RespuestaHistorialCalibraciones, RespuestaHoja, RespuestaMarcas, RespuestaPlanCalibraciones, RespuestaRetiro } from './dominio';
 import type { FrecuenciaCliente, RespuestaContrato, ValorVigencia } from './dominio';
 import { errorFromResponse } from './lib/apiError';
@@ -48,7 +48,7 @@ export const api = {
   inventario: () => request<Inventario>('GET', '/equipos'),
   /**
    * Pone a mano el contacto de un cliente (`emails` vacío = quitarlo y volver al de Desk). Devuelve el inventario ya
-   * actualizado. Sólo guarda a quién se le escribiría: la app no envía correos (el aviso automático es una simulación).
+   * actualizado. Sólo guarda a quién se le escribe: el correo lo manda, a mano, `enviarAviso`.
    */
   guardarContacto: (cliente: string, emails: string[], nombre: string) => request<Inventario>('PUT', '/contactos', { cliente, emails, nombre }),
   servicios: () => request<Servicios>('GET', '/servicios'),
@@ -129,5 +129,14 @@ export const api = {
   cambiarFrecuencia: (clave: string, meses: number | null, motivo: string) => request<Inventario>('POST', `/clientes/${encodeURIComponent(clave)}/frecuencia`, { meses, motivo }),
   guardarSeguimiento: (clave: string, s: Seguimiento) =>
     request<{ ok: true }>('PUT', `/seguimiento/${encodeURIComponent(clave)}`, s),
-  registrarAvisos: (claves: string[], fecha: string) => request<{ actualizados: number }>('POST', '/avisos', { claves, fecha }),
+  /** El modo del envío de avisos (apagado / prueba / real, y por qué) y los últimos envíos. */
+  envios: () => request<RespuestaEnvios>('GET', '/avisos/envios'),
+  /**
+   * Envía el aviso de una tarjeta (pide `avisos.write`): el servidor la vuelve a calcular y redacta él el correo. Devuelve su envío.
+   * Ojo: ante un tiempo agotado contesta «sin_confirmar» al instante, pero GET lo presenta «en_curso» hasta los 2 minutos: tras
+   * enviar, la pantalla vuelve a pedir `envios()` y decide los botones con esa lista (ver lib/envios.ts), no con esta respuesta.
+   */
+  enviarAviso: (claveCliente: string, tramo: TramoAviso, equipos: string[]) => request<EnvioAviso>('POST', '/avisos/envios', { claveCliente, tramo, equipos }),
+  /** Resuelve a mano un envío sin confirmar: `salio` = «Sí salió» (true) o «No salió» (false). 409 `no_sin_confirmar` si aún no tiene 2 minutos. */
+  resolverEnvio: (id: number, salio: boolean) => request<EnvioAviso>('POST', `/avisos/envios/${id}/resolver`, { salio }),
 };

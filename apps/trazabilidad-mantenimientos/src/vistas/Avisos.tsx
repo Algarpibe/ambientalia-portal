@@ -1,16 +1,17 @@
-import { useState } from 'react';
-import { Copy, Mail } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Send } from 'lucide-react';
 import { api, type Inventario } from '../api';
-import type { ContactoCliente, EquipoVista } from '../dominio';
-import { avisosPorCliente, fmtFecha, mensajeAviso, type GrupoAviso } from '../lib/vistas';
+import { ETIQUETA_TRAMO, correoDePrueba, correoReal, destinatariosAceptables, type ContactoCliente, type CorreoSimulado, type EnvioAviso, type EquipoVista, type EstadoCanal, type RespuestaEnvios } from '../dominio';
+import { botonEnviar, errorDeEnvio, puedeResolver, rotuloModo, textoEstadoEnvio, ultimoEnvioDe } from '../lib/envios';
+import { fmtFechaHora } from '../lib/vistas';
 import { usePermisos } from '../permisos';
-import { Alert, Button, Modal, TONO, Tag } from '../ui';
-import SimulacionAvisos from './SimulacionAvisos';
+import { Alert, Button, Modal, Tag } from '../ui';
+import TarjetasAvisos from './TarjetasAvisos';
 
 interface Props {
   equipos: EquipoVista[];
   hoy: string;
-  /** Los contactos puestos a mano a clientes (para la simulación). */
+  /** Los contactos puestos a mano a clientes (destinatarios de las tarjetas). */
   contactos: ContactoCliente[];
   onFicha: (clave: string) => void;
   onCambio: () => Promise<void>;
@@ -19,179 +20,241 @@ interface Props {
   notificar: (msg: string) => void;
 }
 
-const VENTANAS = [30, 60, 90] as const;
+/** El canal cuando deja enviar: prueba o real. */
+type CanalAbierto = Exclude<EstadoCanal, { modo: 'apagado' }>;
 
 /**
- * Dos vistas: «Manual» es la de siempre (redactar, copiar y marcar como
- * avisado); «Simulación automática» enseña lo que enviaría hoy el aviso
- * automático a 90, 60 y 30 días, sin enviar nada.
+ * «Avisos a clientes», una sola pantalla (2026-11-08): arriba, la posición del
+ * interruptor de envío, que decide el servidor; en medio, una tarjeta por
+ * cliente y tramo (TarjetasAvisos.tsx) con su «Enviar correo»; abajo, los
+ * últimos envíos, con «Sí salió» / «No salió» para los que quedaron sin
+ * confirmar. Al enviar, la pantalla sólo dice qué tarjeta y qué equipos vio:
+ * el servidor la vuelve a calcular y redacta él el correo, con el mismo texto
+ * que aquí se enseña (avisos-correo.ts), que no se edita.
+ *
+ * El estado de cada tarjeta, su botón y «Sí salió» / «No salió» salen SIEMPRE
+ * de la lista de GET /avisos/envios, que se vuelve a pedir tras cada envío y
+ * cada resolución; la respuesta del POST sólo se enseña como aviso.
  */
-const VISTAS = [
-  { id: 'manual', label: 'Manual' },
-  { id: 'simulacion', label: 'Simulación automática' },
-] as const;
-type Vista = (typeof VISTAS)[number]['id'];
-
 export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onInventario, notificar }: Props) {
-  const [vista, setVista] = useState<Vista>('manual');
-  const [ventana, setVentana] = useState<number>(90);
-  const [redactar, setRedactar] = useState<GrupoAviso | null>(null);
-  const [ocupado, setOcupado] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  /** Redactar y copiar el aviso lo puede cualquiera; marcar como avisado escribe y pide permiso. */
-  const puedeMarcar = usePermisos().puede('avisos.write');
-  const grupos = avisosPorCliente(equipos, ventana);
-  const nEquipos = grupos.reduce((s, g) => s + g.equipos.length, 0);
-  const nSinAviso = grupos.reduce((s, g) => s + g.sinAviso, 0);
+  const [envios, setEnvios] = useState<RespuestaEnvios | null>(null);
+  const [errorEnvios, setErrorEnvios] = useState<string | null>(null);
+  const [confirmar, setConfirmar] = useState<CorreoSimulado<EquipoVista> | null>(null);
+  /** Ver y copiar el aviso lo puede cualquiera; enviarlo y resolver un «sin confirmar» piden `avisos.write`. */
+  const puedeEnviar = usePermisos().puede('avisos.write');
 
-  async function marcar(g: GrupoAviso) {
-    const claves = g.equipos.filter((e) => !e.seguimiento?.avisoEnviado).map((e) => e.clave);
-    setOcupado(g.cliente);
+  const cargarEnvios = useCallback(async () => {
+    try {
+      setEnvios(await api.envios());
+      setErrorEnvios(null);
+    } catch (e) {
+      setErrorEnvios((e as Error).message);
+    }
+  }, []);
+  useEffect(() => {
+    void cargarEnvios();
+  }, [cargarEnvios]);
+
+  /** Tras enviar o resolver: el inventario (los avisados cambian de grupo) y los envíos. */
+  const recargar = async () => {
+    await Promise.all([onCambio(), cargarEnvios()]);
+  };
+
+  const canal = envios?.canal ?? null;
+  const lista = envios?.envios ?? [];
+  const rotulo = canal ? rotuloModo(canal) : null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {rotulo && (
+        <Alert tone={rotulo.tono} title={rotulo.titulo}>
+          <p>{rotulo.texto}</p>
+        </Alert>
+      )}
+      {errorEnvios && <Alert tone="red">No se pudo leer el estado del envío: {errorEnvios}</Alert>}
+      <TarjetasAvisos
+        equipos={equipos}
+        hoy={hoy}
+        contactos={contactos}
+        envios={lista}
+        onFicha={onFicha}
+        onInventario={onInventario}
+        notificar={notificar}
+        accion={(c) => {
+          if (!puedeEnviar) return null;
+          if (canal && canal.modo !== 'apagado' && !destinatariosAceptables(correoReal(c).para)) {
+            return <p className="text-xs text-amber-800">No se puede enviar: hay que dejar entre 1 y 5 correos válidos. Pon a mano el contacto del cliente.</p>;
+          }
+          const b = canal ? botonEnviar(canal, ultimoEnvioDe(lista, c.claveCliente, c.tramo)) : { activo: false, texto: 'Cargando…' };
+          return (
+            <Button variant="primary" disabled={!b.activo} onClick={() => setConfirmar(c)}>
+              <Send className="h-4 w-4" aria-hidden /> {b.texto}
+            </Button>
+          );
+        }}
+      />
+      <UltimosEnvios envios={lista} puedeResolverAqui={puedeEnviar} recargar={recargar} notificar={notificar} />
+      {confirmar && canal && canal.modo !== 'apagado' && (
+        <Confirmar
+          correo={confirmar}
+          canal={canal}
+          onClose={() => setConfirmar(null)}
+          onEnviado={async (e) => {
+            // La respuesta del POST sólo se enseña; lo que decide la pantalla es lo que sirva GET.
+            await recargar();
+            if (e.estado === 'fallido') return;
+            setConfirmar(null);
+            notificar(e.estado === 'enviado' ? `Aviso enviado a ${e.cliente}` : 'Sin confirmar: revisa Enviados de info@ en un par de minutos y resuélvelo en «Últimos envíos»');
+          }}
+          onFallo={async (texto, recargarPantalla) => {
+            await recargar();
+            if (recargarPantalla) {
+              setConfirmar(null);
+              notificar(texto);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** La confirmación: a quién sale, con qué asunto y con qué texto, tal como lo enviará el servidor. */
+function Confirmar({
+  correo,
+  canal,
+  onClose,
+  onEnviado,
+  onFallo,
+}: {
+  correo: CorreoSimulado<EquipoVista>;
+  canal: CanalAbierto;
+  onClose: () => void;
+  onEnviado: (e: EnvioAviso) => Promise<void>;
+  onFallo: (texto: string, recargar: boolean) => Promise<void>;
+}) {
+  const real = useMemo(() => correoReal(correo), [correo]);
+  const sale = canal.modo === 'prueba' ? correoDePrueba(real, canal.buzonPrueba) : real;
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function enviar() {
+    setEnviando(true);
     setError(null);
     try {
-      const r = await api.registrarAvisos(claves, hoy);
-      await onCambio();
-      notificar(`${r.actualizados} equipo${r.actualizados === 1 ? '' : 's'} de ${g.cliente} marcado${r.actualizados === 1 ? '' : 's'} como avisado${r.actualizados === 1 ? '' : 's'}`);
-    } catch (e) {
-      setError((e as Error).message);
+      const e = await api.enviarAviso(correo.claveCliente, correo.tramo, correo.equipos.map((a) => a.equipo.clave));
+      if (e.estado === 'fallido') setError(`No salió: ${e.error ?? 'sin motivo'}. No se ha marcado nada; puedes volver a intentarlo.`);
+      await onEnviado(e);
+    } catch (x) {
+      const m = errorDeEnvio(x);
+      if (!m.recargar) setError(m.texto);
+      await onFallo(m.texto, m.recargar);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Enviar el aviso a ${correo.cliente}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={enviando}>
+            Cancelar
+          </Button>
+          <Button variant="primary" busy={enviando} onClick={() => void enviar()}>
+            <Send className="h-4 w-4" aria-hidden /> Enviar
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 text-sm">
+        {canal.modo === 'prueba' && (
+          <Alert tone="blue" title="Modo prueba">
+            <p>
+              Sale sólo hacia {canal.buzonPrueba}, con «[PRUEBA]» en el asunto. Al cliente no le llega nada y ningún equipo queda marcado como avisado. En modo real iría a: {real.para.join(', ')}.
+            </p>
+          </Alert>
+        )}
+        <p>
+          <span className="text-gray-500">Para: </span>
+          <span className="break-all font-medium text-gray-900">{sale.para.join(', ')}</span>
+        </p>
+        <p>
+          <span className="text-gray-500">Asunto: </span>
+          <span className="font-medium text-gray-900">{sale.asunto}</span>
+        </p>
+        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 font-sans text-sm text-gray-800">{sale.cuerpo}</pre>
+        <p className="text-xs text-gray-500">
+          {ETIQUETA_TRAMO[correo.tramo]} · {correo.equipos.length === 1 ? '1 equipo' : `${correo.equipos.length} equipos`}. El texto no se edita: es el que redacta el servidor al enviar.
+        </p>
+        {error && <Alert tone="red">{error}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+/** «Últimos envíos», plegado: fecha, quién, cliente, grupo, modo y resultado; con «Sí salió» / «No salió» en los que GET presenta sin confirmar. */
+function UltimosEnvios({ envios, puedeResolverAqui, recargar, notificar }: { envios: EnvioAviso[]; puedeResolverAqui: boolean; recargar: () => Promise<void>; notificar: (m: string) => void }) {
+  const [ocupado, setOcupado] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function resolver(e: EnvioAviso, salio: boolean) {
+    setOcupado(e.id);
+    setError(null);
+    try {
+      await api.resolverEnvio(e.id, salio);
+      await recargar();
+      notificar(salio ? 'Apuntado como enviado' : 'Apuntado como no enviado: la tarjeta se puede volver a enviar');
+    } catch (x) {
+      const m = errorDeEnvio(x);
+      setError(m.texto);
+      if (m.recargar) await recargar();
     } finally {
       setOcupado(null);
     }
   }
 
-  const selector = (
-    <div role="group" aria-label="Vista de los avisos" className="inline-flex self-start overflow-hidden rounded-xl border border-gray-300 bg-white">
-      {VISTAS.map((v) => (
-        <button
-          key={v.id}
-          type="button"
-          aria-pressed={vista === v.id}
-          onClick={() => setVista(v.id)}
-          className={`min-h-[44px] px-4 text-sm font-medium transition-colors ${vista === v.id ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-        >
-          {v.label}
-        </button>
-      ))}
-    </div>
-  );
-
-  if (vista === 'simulacion') {
-    return (
-      <div className="flex flex-col gap-4">
-        {selector}
-        <SimulacionAvisos equipos={equipos} hoy={hoy} contactos={contactos} onFicha={onFicha} onInventario={onInventario} notificar={notificar} />
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4">
-      {selector}
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="mr-2 text-sm text-gray-600">Equipos vencidos o que vencen en los próximos</p>
-        {VENTANAS.map((v) => (
-          <button
-            key={v}
-            type="button"
-            aria-pressed={ventana === v}
-            onClick={() => setVentana(v)}
-            className={`min-h-[36px] rounded-full border px-3 text-xs font-medium ${ventana === v ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
-          >
-            {v} días
-          </button>
-        ))}
-        <p className="text-xs text-gray-500">
-          · {grupos.length} clientes · {nEquipos} equipos · {nSinAviso} sin aviso · no incluye los que ya están en Ambientalia ni los que tienen ticket abierto en Desk
-        </p>
-      </div>
-
-      {error && <Alert tone="red">{error}</Alert>}
-
-      {grupos.length === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">Nada que avisar en esta ventana. Prueba con una más amplia.</div>
-      ) : (
-        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-          {grupos.map((g) => (
-            <article key={g.cliente} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div>
-                <h3 className="text-base font-semibold text-gray-900">{g.cliente}</h3>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {g.sinAviso ? (
-                    <span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700 ring-1 ring-inset ring-orange-200">{g.sinAviso} sin aviso</span>
-                  ) : (
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">Todos avisados</span>
-                  )}
-                  <Tag>
-                    {g.equipos.length} equipo{g.equipos.length === 1 ? '' : 's'}
-                  </Tag>
-                </div>
-              </div>
-              <table className="w-full text-sm">
-                <tbody className="divide-y divide-gray-100">
-                  {g.equipos.map((e) => (
-                    <tr key={e.clave} onClick={() => onFicha(e.clave)} className="cursor-pointer hover:bg-gray-50">
-                      <td className="py-1.5 pr-2 font-mono text-[13px]">{e.serial}</td>
-                      <td className="py-1.5 pr-2 tabular-nums text-gray-600">{fmtFecha(e.vence)}</td>
-                      <td className={`py-1.5 pr-2 text-right font-semibold tabular-nums ${TONO[e.estado].text}`}>
-                        {(e.vigenciaDias ?? 0) < 0 ? e.vigenciaDias : `+${e.vigenciaDias}`} d
-                      </td>
-                      <td className="py-1.5 text-right">{e.seguimiento?.avisoEnviado ? <Tag>Avisado {fmtFecha(e.seguimiento.avisoEnviado)}</Tag> : <span className="text-gray-300">—</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="mt-auto flex flex-wrap gap-2">
-                <Button onClick={() => setRedactar(g)}>
-                  <Mail className="h-4 w-4" aria-hidden /> Redactar aviso
-                </Button>
-                {puedeMarcar && g.sinAviso > 0 && (
-                  <Button variant="primary" busy={ocupado === g.cliente} onClick={() => void marcar(g)}>
-                    Marcar {g.sinAviso} como avisado{g.sinAviso === 1 ? '' : 's'} hoy
-                  </Button>
+    <details className="rounded-2xl border border-gray-200 bg-white">
+      <summary className="flex min-h-[44px] cursor-pointer flex-wrap items-center gap-2 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50">
+        Últimos envíos <Tag>{envios.length}</Tag>
+      </summary>
+      <div className="flex flex-col gap-2 border-t border-gray-200 px-4 py-3">
+        {error && <Alert tone="red">{error}</Alert>}
+        {envios.length === 0 ? (
+          <p className="text-sm text-gray-500">Todavía no se ha enviado ninguno.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100 text-sm">
+            {envios.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                <span className="tabular-nums text-gray-500">{fmtFechaHora(e.creadoEn)}</span>
+                <span className="text-gray-700">{e.por}</span>
+                <span className="min-w-0 break-words font-medium text-gray-900">{e.cliente}</span>
+                <span className="text-gray-600">{ETIQUETA_TRAMO[e.tramo]}</span>
+                <Tag tone={e.modo === 'real' ? 'blue' : 'gray'}>{e.modo}</Tag>
+                <span className={e.estado === 'enviado' ? 'text-emerald-700' : e.estado === 'fallido' ? 'text-red-700' : 'text-amber-800'}>{textoEstadoEnvio(e)}</span>
+                {e.resueltoPor && (
+                  <span className="text-xs text-gray-500">
+                    resuelto por {e.resueltoPor} el {fmtFechaHora(e.resueltoEn)}
+                  </span>
                 )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {redactar && <Redactar grupo={redactar} onClose={() => setRedactar(null)} notificar={notificar} />}
-    </div>
-  );
-}
-
-function Redactar({ grupo, onClose, notificar }: { grupo: GrupoAviso; onClose: () => void; notificar: (m: string) => void }) {
-  const [texto, setTexto] = useState(() => mensajeAviso(grupo.cliente, grupo.equipos));
-  async function copiar() {
-    try {
-      await navigator.clipboard.writeText(texto);
-      notificar('Texto copiado');
-    } catch {
-      notificar('No se pudo copiar: selecciona el texto y usa Ctrl+C');
-    }
-  }
-  return (
-    <Modal
-      title={`Aviso para ${grupo.cliente}`}
-      onClose={onClose}
-      footer={
-        <>
-          <Button onClick={onClose}>Cerrar</Button>
-          <Button variant="primary" onClick={() => void copiar()}>
-            <Copy className="h-4 w-4" aria-hidden /> Copiar texto
-          </Button>
-        </>
-      }
-    >
-      <label className="block text-sm">
-        <span className="mb-1 block text-gray-600">Puedes editarlo antes de copiarlo al correo.</span>
-        <textarea
-          value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          rows={14}
-          className="block w-full rounded-xl border border-gray-300 bg-white p-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-        />
-      </label>
-    </Modal>
+                {puedeResolverAqui && puedeResolver(e) && (
+                  <span className="flex gap-2">
+                    <Button busy={ocupado === e.id} onClick={() => void resolver(e, true)}>
+                      Sí salió
+                    </Button>
+                    <Button disabled={ocupado === e.id} onClick={() => void resolver(e, false)}>
+                      No salió
+                    </Button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
   );
 }
