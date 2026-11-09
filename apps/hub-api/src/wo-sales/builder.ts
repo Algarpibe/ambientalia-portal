@@ -237,6 +237,20 @@ export function buildWorldOfficeCsv(
     (a, b) => a.fecha.localeCompare(b.fecha) || a.numero.localeCompare(b.numero)
   );
 
+  // El DocumentoNúmero se asigna por número de OV, pero la réplica agrupa por salesorder_id:
+  // dos OV distintas con el mismo número saldrían con el mismo DocumentoNúmero. Se avisa una
+  // vez por número y el archivo no cambia («avisar y seguir»): un humano lo revisa.
+  const apariciones = new Map<string, number>();
+  for (const ov of ordenes) apariciones.set(ov.numero, (apariciones.get(ov.numero) ?? 0) + 1);
+  for (const [numero, n] of apariciones) {
+    if (n < 2) continue;
+    avisar({
+      tipo: 'ov_numero_repetido',
+      orden: numero,
+      mensaje: `La OV aparece ${n} veces en la réplica de Zoho (son órdenes distintas con el mismo número): salen ${n} pedidos con el mismo DocumentoNúmero ${documentoNumeros.get(numero)}. Revisa en Zoho cuál es la vigente antes de subir el archivo a World Office.`,
+    });
+  }
+
   for (const ov of ordenadas) {
     const documentoNumero = documentoNumeros.get(ov.numero);
     if (documentoNumero === undefined) {

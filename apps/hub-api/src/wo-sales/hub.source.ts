@@ -268,7 +268,10 @@ export function createHubSalesOrderSource(db: Pool, config: WoSalesConfig): Sale
 
       // Clave = salesorder_id (la PK), no el número: si dos OV compartieran número,
       // agrupar por número fundiría sus líneas en un pedido y el CSV reservaría mal
-      // el inventario. Hoy no pasa, pero quitar la suposición sale gratis.
+      // el inventario. El 2026-11-09 la réplica no tenía ningún número repetido; si
+      // aparece uno (p. ej. una OV borrada y recreada en Zoho antes de la barrida nocturna
+      // de huérfanos), el builder avisa con 'ov_numero_repetido': ambas siguen saliendo y
+      // comparten DocumentoNúmero, que se asigna por número.
       const porOrden = new Map<string, SalesOrder>();
       for (const f of rows as Fila[]) {
         let ov = porOrden.get(f.salesorder_id);

@@ -106,6 +106,29 @@ describe('computarPendiente', () => {
     }
   });
 
+  it('una corrida normal no trae OV repetidas ni la línea en el cuerpo', async () => {
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), source, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) {
+      expect(r.resumen.repetidas).toEqual([]);
+      expect(r.cuerpo).not.toContain('OV con número repetido en Zoho');
+    }
+  });
+
+  it('dos OV de Zoho con el mismo número: el cuerpo y el resumen las nombran', async () => {
+    const otra: SalesOrder = { ...ov, lineas: [{ ...ov.lineas[0], sku: 'S2', cantidad: 5 }] };
+    const dupSource = {
+      ordenesVivas: async () => [ov, otra],
+      ordenesAntiguas: async () => [],
+    } as unknown as SalesOrderSource;
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), dupSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) {
+      expect(r.resumen.repetidas).toEqual(['OV-1']);
+      expect(r.cuerpo).toContain('OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1.');
+    }
+  });
+
   it('no envía cuando no hay pendientes (todos ya tienen el archivo actual o no hay destinatarios)', async () => {
     const r = await computarPendiente(fakeDb([]), source, DEFAULT_CONFIG, filtro, 'a.xls');
     expect(r.enviar).toBe(false);
@@ -115,7 +138,7 @@ describe('computarPendiente', () => {
 describe('construirCuerpo', () => {
   it('incluye el asunto, los totales y las OV cambiadas', () => {
     const cuerpo = construirCuerpo(
-      { ordenes: 3, filas: 7, cambiadas: ['OV-2026-138', 'OV-2026-077'], advertencias: 0 },
+      { ordenes: 3, filas: 7, cambiadas: ['OV-2026-138', 'OV-2026-077'], advertencias: 0, repetidas: [] },
       DEFAULT_CONFIG
     );
     expect(cuerpo).toContain('Nueva actualización de MovimientoInventarioWO');
@@ -124,9 +147,9 @@ describe('construirCuerpo', () => {
     expect(cuerpo).toContain('OV-2026-138');
   });
   it('menciona las advertencias solo si las hay', () => {
-    const con = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 5 }, DEFAULT_CONFIG);
+    const con = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 5, repetidas: [] }, DEFAULT_CONFIG);
     expect(con).toContain('5');
-    const sin = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 0 }, DEFAULT_CONFIG);
+    const sin = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 0, repetidas: [] }, DEFAULT_CONFIG);
     expect(sin.toLowerCase()).not.toContain('advertencia');
   });
 });
@@ -134,7 +157,7 @@ describe('construirCuerpo', () => {
 // Cada OV lleva su propio DocumentoNúmero, fijo y persistente: el correo ya no avisa de un
 // número de documento compartido por varias órdenes, aunque el archivo lleve muchas.
 describe('construirCuerpo — varias órdenes en el archivo', () => {
-  const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0 });
+  const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0, repetidas: [] });
 
   it('con varias órdenes no avisa de un número de documento compartido', () => {
     const cuerpo = construirCuerpo(resumen(25), DEFAULT_CONFIG);

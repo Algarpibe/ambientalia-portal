@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildWorldOfficeCsv, sumarDias, derivarPrefijo, consecutivoOV } from './builder.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { COLUMNS } from './columns.js';
-import type { SalesOrder } from './types.js';
+import type { SalesOrder, Warning } from './types.js';
 
 function decodificar(buf: Buffer): string[] {
   return new TextDecoder('windows-1252').decode(buf).split('\r\n');
@@ -426,6 +426,50 @@ describe('DocumentoNúmero: el número fijo de cada OV', () => {
 
   it('lanza si a una OV le falta número: nunca sale la columna D vacía', () => {
     expect(() => buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG, new Map())).toThrow(/OV-2026-138/);
+  });
+
+  describe('OV con número repetido en la réplica de Zoho (avisar y seguir)', () => {
+    const NUM = 'OV-2026-212';
+    const numeros = new Map([[NUM, 40]]);
+    const repetida = (n: number): SalesOrder[] =>
+      Array.from({ length: n }, (_, i) => ({
+        ...OV_BASE,
+        numero: NUM,
+        lineas: [{ ...OV_BASE.lineas[0], sku: `SKU-${i}`, cantidad: i + 1 }],
+      }));
+    const repetidos = (ws: Warning[]) => ws.filter((w) => w.tipo === 'ov_numero_repetido');
+
+    it('avisa UNA vez por número, con cuántas veces aparece y el DocumentoNúmero compartido', () => {
+      const { warnings } = buildWorldOfficeCsv(repetida(2), DEFAULT_CONFIG, numeros);
+      const avisos = repetidos(warnings);
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0].orden).toBe(NUM);
+      expect(avisos[0].mensaje).toContain('2 veces');
+      expect(avisos[0].mensaje).toContain('DocumentoNúmero 40');
+    });
+
+    it('no quita nada del archivo: los dos pedidos siguen saliendo con el mismo número', () => {
+      const { csv, filas } = buildWorldOfficeCsv(repetida(2), DEFAULT_CONFIG, numeros);
+      expect(filas).toBe(2);
+      const iDoc = COLUMNS.indexOf('DocumentoNúmero');
+      const docs = decodificar(csv)
+        .filter(Boolean)
+        .slice(1)
+        .map((f) => f.split(';')[iDoc]);
+      expect(docs).toEqual(['40', '40']);
+    });
+
+    it('con tres apariciones sigue siendo UN aviso, que dice 3 veces', () => {
+      const avisos = repetidos(buildWorldOfficeCsv(repetida(3), DEFAULT_CONFIG, numeros).warnings);
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0].mensaje).toContain('3 veces');
+    });
+
+    it('sin números repetidos no hay aviso', () => {
+      const a: SalesOrder = { ...OV_BASE, numero: 'OV-2026-150' };
+      const b: SalesOrder = { ...OV_BASE, numero: 'OV-2026-212' };
+      expect(repetidos(build([a, b]).warnings)).toEqual([]);
+    });
   });
 });
 

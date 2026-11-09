@@ -69,7 +69,9 @@ export type WarningTipo =
   | 'plazo_pago_ausente'
   // §6 (v2): World Office los TOLERA en la carga, pero se avisa para revisión humana.
   | 'valor_cero'
-  | 'vencimiento_antes_de_fecha';
+  | 'vencimiento_antes_de_fecha'
+  // §8.1: dos OV distintas de Zoho con el mismo número comparten DocumentoNúmero.
+  | 'ov_numero_repetido';
 
 export interface Warning {
   tipo: WarningTipo;
@@ -103,6 +105,8 @@ export interface ResumenEmail {
   filas: number;
   cambiadas: string[];
   advertencias: number;
+  /** Números de OV que aparecen 2+ veces en la réplica (comparten DocumentoNúmero). */
+  repetidas: string[];
 }
 
 export type EmailPendiente =

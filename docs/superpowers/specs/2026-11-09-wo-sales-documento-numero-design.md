@@ -118,13 +118,22 @@ Las cuatro vías hacen lo mismo justo antes de construir:
 - Falla la asignación (BD caída, choque inesperado) → la transacción se revierte entera, el
   endpoint responde 500 con `sendError` y **no sale ningún archivo**. Nunca hay numeración a
   medias.
-- No se añade ningún `WarningTipo`: no hay que sincronizar `apps/WO-sales/src/App.tsx`.
+- Dos OV distintas de Zoho con el mismo número (p. ej. una borrada y recreada antes de la
+  barrida nocturna de huérfanos) compartirían DocumentoNúmero, que se asigna por número.
+  Decisión: **avisar y seguir**. Nuevo `WarningTipo` `ov_numero_repetido`, un solo aviso por
+  número (no por aparición ni por línea); el archivo no cambia. El correo añade la línea «OV con
+  número repetido en Zoho» (`resumen.repetidas`) antes de «Advertencias». Se sincronizó
+  `apps/WO-sales/src/App.tsx` (unión `WarningTipo` y `WARNING_META`).
 
 ## 6. Pruebas (TDD estricto)
 
 - `builder.test.ts`: escribe el número del mapa y no uno por posición; dos builds con
   distinto subconjunto de OV dan a la misma OV el mismo número; lanza si falta una OV en el
-  mapa.
+  mapa; un número repetido en la entrada da un único aviso `ov_numero_repetido` (también con
+  tres apariciones), ambos pedidos siguen en la matriz con el mismo número, y sin repetidos no
+  hay aviso.
+- `email.test.ts`: con dos OV del mismo número el cuerpo trae la línea de OV repetida y
+  `resumen.repetidas` la nombra; una corrida normal trae `repetidas: []` y ninguna línea.
 - `documento-numero.test.ts`: orden numérico por año y consecutivo; `OV-2026-999` antes que
   `OV-2026-1000`; no conformes al final.
 - `documento-numero.db.test.ts` (contra Postgres real):
@@ -138,7 +147,8 @@ Las cuatro vías hacen lo mismo justo antes de construir:
 
 ## 7. Despliegue y verificación
 
-- Orden: solo hub-api (la SPA no cambia).
+- Orden: desplegar hub-api y la SPA de WO-sales juntas. Si la SPA es más vieja, muestra el slug
+  crudo `ov_numero_repetido` (`metaDe` cae al tipo), lo cual es inofensivo pero confuso.
 - **Antes del primer archivo real**: si hoy hay abierta alguna OV **anterior a la 212** que no
   esté entre las 37 congeladas, se llevará el 38 y la 212 bajará al 39. El plan incluye la
   consulta SQL contra la réplica (`books.*`, base `zoho-hub`) que lista las OV vivas sin

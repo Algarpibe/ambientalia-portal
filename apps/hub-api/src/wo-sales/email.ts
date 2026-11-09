@@ -33,6 +33,11 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
     `Órdenes de venta: ${resumen.ordenes} · Líneas de producto: ${resumen.filas}`,
   ];
   if (resumen.cambiadas.length) lineas.push(`OV con cambios: ${resumen.cambiadas.join(', ')}`);
+  if (resumen.repetidas.length) {
+    lineas.push(
+      `OV con número repetido en Zoho (comparten DocumentoNúmero): ${resumen.repetidas.join(', ')}. No las subas a World Office sin revisarlas.`
+    );
+  }
   if (resumen.advertencias > 0) {
     lineas.push(`Advertencias: ${resumen.advertencias}. Revísalas en la app antes de subir el archivo.`);
   }
@@ -114,6 +119,7 @@ export async function computarPendiente(
     filas: matriz.length - 1,
     cambiadas,
     advertencias: warnings.length,
+    repetidas: warnings.filter((w) => w.tipo === 'ov_numero_repetido').map((w) => w.orden),
   };
   return {
     enviar: true,

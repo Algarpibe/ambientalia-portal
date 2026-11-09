@@ -37,7 +37,8 @@ type WarningTipo =
   | 'valor_saneado'
   | 'plazo_pago_ausente'
   | 'valor_cero'
-  | 'vencimiento_antes_de_fecha';
+  | 'vencimiento_antes_de_fecha'
+  | 'ov_numero_repetido';
 
 interface Warning {
   tipo: WarningTipo;
@@ -101,6 +102,7 @@ const WARNING_META: Record<WarningTipo, { titulo: string; unidad: 'linea' | 'ord
   ov_antigua: { titulo: 'Orden antigua que sigue abierta', unidad: 'orden' },
   valor_cero: { titulo: 'Valor unitario en 0 (revisar antes de facturar)', unidad: 'linea' },
   vencimiento_antes_de_fecha: { titulo: 'Vencimiento anterior a la fecha (se usó la fecha)', unidad: 'orden' },
+  ov_numero_repetido: { titulo: 'Número de OV repetido en Zoho (comparten DocumentoNúmero)', unidad: 'orden' },
 };
 
 const metaDe = (tipo: WarningTipo) =>
