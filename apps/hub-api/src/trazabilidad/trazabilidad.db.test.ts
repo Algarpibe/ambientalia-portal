@@ -334,7 +334,7 @@ describe('contacto de cada equipo', () => {
       expect(await contactoDe('18A00001')).toMatchObject({ origen: 'manual', email: 'jefe@cliente-uno.example' });
     });
 
-    it('ninguna tabla del módulo guarda mensajes ni envíos: el aviso automático es sólo una simulación', async () => {
+    it('las tablas del módulo son las revisadas, una a una: la ÚNICA de envíos es tmc_avisos_envios (lo que una persona envió con su botón) y ninguna es una cola de mensajes pendientes', async () => {
       const { rows } = await db.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'tmc\\_%' ORDER BY 1`);
       expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
         'tmc_agenda_asignaciones',
@@ -342,6 +342,9 @@ describe('contacto de cada equipo', () => {
         'tmc_agenda_etapas',
         'tmc_agenda_flujo',
         'tmc_agenda_historial',
+        // 2026-11-08 (069): el registro de cada «Enviar correo» de «Avisos a clientes» —quién, cuándo, a quién iba, a quién se mandó y
+        // cómo acabó—. Se apunta al pulsar el botón y se cierra con la respuesta: nada lo lee para enviar, así que no es una cola.
+        'tmc_avisos_envios',
         'tmc_calibraciones',
         'tmc_calibraciones_pasadas',
         'tmc_contactos',
