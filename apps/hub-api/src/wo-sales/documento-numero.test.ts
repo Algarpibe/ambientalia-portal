@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { ordenarParaAsignar } from './documento-numero.js';
 
 describe('ordenarParaAsignar', () => {
@@ -26,5 +28,12 @@ describe('ordenarParaAsignar', () => {
     const entrada = ['OV-2026-213', 'OV-2026-212'];
     ordenarParaAsignar(entrada);
     expect(entrada).toEqual(['OV-2026-213', 'OV-2026-212']);
+  });
+});
+
+describe('migración 070', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 069, y es la última', () => {
+    const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
+    expect(db).toMatch(/'069_trazabilidad_avisos_envios\.sql',\s*'070_wo_sales_documento_numero\.sql'\];/);
   });
 });

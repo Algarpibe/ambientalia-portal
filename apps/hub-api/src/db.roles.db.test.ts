@@ -131,6 +131,17 @@ describe('el rol de las peticiones (portal_app)', () => {
     expect(rows).toEqual([{ nota: 'ya puedo' }]);
   });
 
+  it('la numeración de WO-sales sigue sin UPDATE ni DELETE tras otro arranque (la 068 los re-concede y la 070 los quita)', async () => {
+    await arrancar();
+    const { rows } = await admin.query(
+      `SELECT has_table_privilege('portal_app', 'portal.wo_sales_documento_numero', 'SELECT') AS sel,
+              has_table_privilege('portal_app', 'portal.wo_sales_documento_numero', 'INSERT') AS ins,
+              has_table_privilege('portal_app', 'portal.wo_sales_documento_numero', 'UPDATE') AS upd,
+              has_table_privilege('portal_app', 'portal.wo_sales_documento_numero', 'DELETE') AS del`,
+    );
+    expect(rows[0]).toEqual({ sel: true, ins: true, upd: false, del: false });
+  });
+
   it('dar los permisos en cada arranque no espera a las peticiones que están en curso', async () => {
     // La 068 corre en CADA arranque, y en un despliegue el contenedor viejo sigue
     // atendiendo mientras arranca el nuevo (DATA-340). Si el GRANT esperara a una

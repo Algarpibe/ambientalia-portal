@@ -3,8 +3,8 @@
 -- El builder numeraba por POSICIÓN en cada archivo, desde 1: cada archivo chocaba con los
 -- pedidos ya cargados en World Office, y cuando una OV salía del archivo (facturada) las de
 -- detrás se corrían un número. Aquí cada OV recibe su número UNA vez y lo conserva para
--- siempre: las filas nunca se borran ni se modifican (por eso portal_app solo tiene SELECT e
--- INSERT). Un solo contador para todos los prefijos (OV_25, OV_26, OV_27…), que nunca se
+-- siempre: las filas nunca se borran ni se modifican (por eso, al terminar cada arranque,
+-- portal_app solo tiene SELECT e INSERT; ver el final). Un solo contador para todos los prefijos (OV_25, OV_26, OV_27…), que nunca se
 -- reinicia: el siguiente es MAX + 1 (documento-numero.repo.ts), no una SEQUENCE, que gastaría
 -- números en un INSERT que choca o se revierte.
 --
@@ -64,9 +64,14 @@ INSERT INTO portal.wo_sales_documento_numero (numero_ov, documento_numero, orige
 ON CONFLICT DO NOTHING;
 
 -- DATA-332: el rol de las peticiones lee y añade números, nunca los cambia ni los borra.
+-- La 068 re-concede SELECT, INSERT, UPDATE y DELETE sobre TODAS las tablas del esquema en cada
+-- arranque, y corre ANTES que esta: sin el REVOKE, desde el segundo arranque portal_app volvería
+-- a poder modificar y borrar números. Como la 070 corre después de la 068, cada arranque termina
+-- con solo SELECT e INSERT.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'portal_app') THEN
     GRANT SELECT, INSERT ON portal.wo_sales_documento_numero TO portal_app;
+    REVOKE UPDATE, DELETE, TRUNCATE ON portal.wo_sales_documento_numero FROM portal_app;
   END IF;
 END $$;

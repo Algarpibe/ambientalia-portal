@@ -7,7 +7,7 @@ import { ordenarParaAsignar } from './documento-numero.js';
  * mismo número a OV distintas. El UNIQUE de la tabla es la red de seguridad. Distinto del
  * candado del correo ('wo-sales:email'): las dos transacciones no se anidan.
  */
-const BLOQUEO = `SELECT pg_advisory_xact_lock(hashtext('portal.wo_sales_documento_numero'))`;
+export const BLOQUEO_NUMERACION = `SELECT pg_advisory_xact_lock(hashtext('portal.wo_sales_documento_numero'))`;
 
 interface FilaNumero {
   numero_ov: string;
@@ -27,7 +27,7 @@ export async function asignarDocumentoNumeros(db: Pool, numerosOV: readonly stri
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await client.query(BLOQUEO);
+    await client.query(BLOQUEO_NUMERACION);
 
     const { rows } = await client.query(
       `SELECT numero_ov, documento_numero

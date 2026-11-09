@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
-import { asignarDocumentoNumeros } from './documento-numero.repo.js';
+import { asignarDocumentoNumeros, BLOQUEO_NUMERACION } from './documento-numero.repo.js';
 import { poolDePrueba } from '../test-db/harness.js';
 
 // DocumentoNúmero persistente (§8.1) contra Postgres de verdad: la siembra de la migración, la
@@ -44,11 +44,13 @@ describe('migración 070: siembra del archivo del 31/10', () => {
   });
 
   it('re-ejecutarla (initDb lo hace en cada arranque) no duplica ni cambia nada', async () => {
+    await asignarDocumentoNumeros(db, ['OV-2026-212']);
     const ruta = fileURLToPath(new URL('../users/migrations/070_wo_sales_documento_numero.sql', import.meta.url));
     await db.query(readFileSync(ruta, 'utf8'));
     const todas = await filas();
-    expect(todas).toHaveLength(37);
-    expect(todas[36]).toMatchObject({ numero_ov: 'OV-2026-211', documento_numero: 37 });
+    expect(todas).toHaveLength(38);
+    expect(todas.find((f) => f.numero_ov === 'OV-2026-212')?.documento_numero).toBe(38);
+    expect(todas.find((f) => f.numero_ov === 'OV-2026-211')?.documento_numero).toBe(37);
   });
 });
 
@@ -83,13 +85,35 @@ describe('asignarDocumentoNumeros', () => {
   });
 
   it('dos asignaciones a la vez no repiten número ni dejan huecos', async () => {
-    const [a, b] = await Promise.all([
-      asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']),
-      asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']),
-    ]);
-    expect(a.get('OV-2026-213')).toBe(b.get('OV-2026-213'));
-    const nuevos = (await filas()).filter((f) => f.origen === 'asignado').map((f) => f.documento_numero);
-    expect(nuevos).toEqual([38, 39, 40]);
+    // Determinista: otra sesión tiene el candado; las dos asignaciones se quedan esperándolo
+    // (se ve en pg_stat_activity, por el texto de la consulta) y solo entonces se suelta.
+    const otro = await db.connect();
+    try {
+      await otro.query('BEGIN');
+      await otro.query(BLOQUEO_NUMERACION);
+      const pa = asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']);
+      const pb = asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
+
+      let esperando = 0;
+      for (let i = 0; i < 30 && esperando < 2; i++) {
+        const { rows } = await db.query(
+          `SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND wait_event = 'advisory' AND query = $1`,
+          [BLOQUEO_NUMERACION],
+        );
+        esperando = (rows[0] as { n: number }).n;
+        if (esperando < 2) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(esperando).toBe(2);
+
+      await otro.query('COMMIT');
+      const [a, b] = await Promise.all([pa, pb]);
+      expect(a.get('OV-2026-213')).toBe(b.get('OV-2026-213'));
+      const nuevos = (await filas()).filter((f) => f.origen === 'asignado').map((f) => f.documento_numero);
+      expect(nuevos).toEqual([38, 39, 40]);
+    } finally {
+      otro.release();
+    }
   });
 
   it('un número de OV repetido en la entrada cuenta una sola vez', async () => {
