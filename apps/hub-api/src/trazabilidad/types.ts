@@ -19,6 +19,7 @@ import {
   claveCliente,
   claveEstadoDesk,
   claveTipoServicio,
+  comoTramoAviso,
   esCategoriaAgenda,
   esEmail,
   esEtapaAgenda,
@@ -37,6 +38,7 @@ import {
   type RangoFechas,
   type RolEstado,
   type TipoAbierto,
+  type TramoAviso,
   type TramoPlazo,
 } from './dominio.js';
 import { FECHA_MINIMA_CALIBRACION } from './calibraciones.js';
@@ -212,18 +214,34 @@ export function parseSeguimiento(body: unknown): Seguimiento {
   };
 }
 
-/** Valida el cuerpo de POST /trazabilidad/avisos. */
-export function parseAvisos(body: unknown): { claves: string[]; fecha: string } {
+/** Lo que manda la pantalla al pulsar «Enviar correo»: qué tarjeta (cliente y tramo) y qué equipos (sus claves) se vieron en ella. */
+export interface PedidoEnvio {
+  claveCliente: string;
+  tramo: TramoAviso;
+  equipos: string[];
+}
+
+/** Valida el cuerpo de POST /trazabilidad/avisos/envios. El tramo puede llegar como 90 o «90»: sale el canónico, el del plan. */
+export function parsePedidoEnvio(body: unknown): PedidoEnvio {
   const b = obj(body, 'body');
-  const f = fecha(b.fecha, 'fecha');
-  if (!f) throw invalido('Falta la fecha del aviso.', 'fecha');
-  if (!Array.isArray(b.claves) || b.claves.length === 0) throw invalido('No hay equipos que marcar.', 'claves');
-  if (b.claves.length > 500) throw invalido('Demasiados equipos en un solo aviso.', 'claves');
-  const claves = b.claves.map((c, i) => {
-    if (typeof c !== 'string' || !esClave(c)) throw invalido('Clave de equipo no válida.', `claves[${i}]`);
+  const clave = b.claveCliente;
+  if (typeof clave !== 'string' || clave === '' || clave.length > CONTACTO_MAX_TEXTO || clave !== claveCliente(clave)) throw invalido('«claveCliente» no es la clave de un cliente.', 'claveCliente');
+  const tramo = comoTramoAviso(b.tramo);
+  if (tramo === null) throw invalido('«tramo» debe ser 90, 60, 30 o «vencida».', 'tramo');
+  if (!Array.isArray(b.equipos) || b.equipos.length === 0) throw invalido('Faltan los equipos de la tarjeta.', 'equipos');
+  if (b.equipos.length > 500) throw invalido('Demasiados equipos en una tarjeta.', 'equipos');
+  const equipos = b.equipos.map((c, i) => {
+    if (typeof c !== 'string' || !esClave(c)) throw invalido('Clave de equipo no válida.', `equipos[${i}]`);
     return c;
   });
-  return { claves: [...new Set(claves)], fecha: f };
+  return { claveCliente: clave, tramo, equipos: [...new Set(equipos)] };
+}
+
+/** Valida el cuerpo de POST /trazabilidad/avisos/envios/:id/resolver: `{salio}`, si el correo salió («Sí salió») o no. */
+export function parseResolucion(body: unknown): boolean {
+  const b = obj(body, 'body');
+  if (typeof b.salio !== 'boolean') throw invalido('«salio» debe ser verdadero o falso.', 'salio');
+  return b.salio;
 }
 
 export function esClave(s: string): boolean {

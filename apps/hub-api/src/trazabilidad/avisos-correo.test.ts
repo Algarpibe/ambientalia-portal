@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ETIQUETA_TRAMO, SIN_CONFIRMAR_MS, correoAviso, correoDePrueba, correoReal, esBuzonDePrueba, estadoPresentado, fechaDia, marcaAviso, mensajeAviso, mismaHuella, saludoAviso, todosGrimm } from './avisos-correo.js';
+import { ETIQUETA_TRAMO, MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoAviso, correoDePrueba, correoReal, destinatariosAceptables, esBuzonDePrueba, estadoPresentado, fechaDia, marcaAviso, mensajeAviso, mismaHuella, saludoAviso, todosGrimm } from './avisos-correo.js';
 import { estadoCalibracion, planAvisos, type ContactoEquipo } from './dominio.js';
 
 // El texto del aviso a clientes: el que sale de verdad al pulsar «Enviar correo»
@@ -141,6 +141,13 @@ describe('lo que sale: el correo real y su versión de prueba', () => {
   ])('un buzón %j no vale: ni es de prueba ni se redacta nada', (b) => {
     expect(esBuzonDePrueba(b)).toBe(false);
     expect(() => correoDePrueba(real, b)).toThrow(/@ambientalia\.com\.co/);
+  });
+
+  it('a quién se puede enviar de verdad: de 1 a 5 correos válidos y distintos (la misma regla en prueba y en real)', () => {
+    const cinco = ['a1@cliente-uno.example', 'a2@cliente-uno.example', 'a3@cliente-uno.example', 'a4@cliente-uno.example', 'a5@cliente-uno.example'];
+    expect(MAX_DESTINATARIOS).toBe(5);
+    expect([destinatariosAceptables(['compras@cliente-uno.example']), destinatariosAceptables(cinco)]).toEqual([true, true]);
+    for (const para of [[], [...cinco, 'a6@cliente-uno.example'], ['no-es-un-correo'], ['compras@cliente-uno.example', ' Compras@Cliente-Uno.example']]) expect(destinatariosAceptables(para), String(para)).toBe(false);
   });
 });
 

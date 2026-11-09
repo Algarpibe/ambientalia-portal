@@ -24,11 +24,22 @@ vi.mock('../db.js', () => ({
     on: () => {},
   }),
 }));
+// Ninguna app de este fichero usa el canal de los avisos de verdad (ni el entorno ni la red): el de por defecto es uno apagado
+// que no remite nunca. Las pruebas del envío pasan el suyo (`appAvisos`).
+vi.mock('./envio-avisos.js', () => ({
+  crearCanalAvisos: () => ({
+    estado: () => ({ modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null }),
+    remitir: async () => {
+      throw new Error('el canal apagado de las pruebas no remite nada');
+    },
+  }),
+}));
 
 const { createTrazabilidadRouter } = await import('./router.js');
 const { reiniciarRegistroEstados } = await import('./registro-estados.js');
 const { crearFuenteAgenda } = await import('./fuente.js');
 type DbLectura = import('./fuente.js').DbLectura;
+type CanalAvisos = import('./avisos-correo.js').CanalAvisos;
 
 const { PERMISOS, ROLES_APP, permisosDe, puede } = await import('./roles.js');
 type Permiso = (typeof PERMISOS)[number];
@@ -130,6 +141,24 @@ function appCalibraciones() {
   return a;
 }
 
+// El canal de salida de los avisos de estas pruebas: uno de mentira en modo prueba, que apunta lo que se le da y contesta «enviado».
+const remitidos: unknown[] = [];
+const CANAL_PRUEBA: CanalAvisos = {
+  estado: () => ({ modo: 'prueba', motivo: null, buzonPrueba: 'buzon-prueba@ambientalia.com.co' }),
+  remitir: async (correo) => {
+    remitidos.push(correo);
+    return { tipo: 'enviado', messageId: 'msg-ficticio' };
+  },
+};
+/** La app con ese canal. Da conexiones al doble (resolver un envío va en una transacción). */
+function appAvisos() {
+  conexiones.cliente = true;
+  const a = express();
+  a.use(express.json());
+  a.use('/api', createTrazabilidadRouter(fakePool, undefined, undefined, undefined, CANAL_PRUEBA));
+  return a;
+}
+
 /** Lo que mandaba el portal al subir la Excel (importación: `filas`; congelación: `matriz`), con cliente y serial inventados. Ya nadie lo lee. */
 const CUERPO_SUBIDA = {
   archivo: 'F-ST-022 ficticia.xlsx',
@@ -176,6 +205,7 @@ beforeEach(() => {
   lecturaMaestro = MAESTRO;
   lecturaCalibraciones = CALIBRACIONES;
   reiniciarRegistroEstados();
+  remitidos.length = 0;
 });
 
 describe('guardas', () => {
@@ -210,7 +240,9 @@ describe('permisos por rol', () => {
   const ESCRITURAS: { ruta: string; permiso: Permiso; pedir: Pedir }[] = [
     { ruta: 'PUT /trazabilidad/contactos', permiso: 'contactos.write', pedir: (c) => request(app()).put('/api/trazabilidad/contactos').set(c).send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example'] }) },
     { ruta: 'PUT /trazabilidad/seguimiento/:clave', permiso: 'seguimiento.write', pedir: (c) => request(app()).put('/api/trazabilidad/seguimiento/18A00001').set(c).send({ enAmbientalia: true }) },
-    { ruta: 'POST /trazabilidad/avisos', permiso: 'avisos.write', pedir: (c) => request(app()).post('/api/trazabilidad/avisos').set(c).send({ claves: ['18A00001'], fecha: '2026-10-06' }) },
+    // Avisos a clientes (2026-11-08): enviar el aviso de una tarjeta y resolver un envío sin confirmar. El permiso que marcaba en bloque.
+    { ruta: 'POST /trazabilidad/avisos/envios', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'] }) },
+    { ruta: 'POST /trazabilidad/avisos/envios/:id/resolver', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios/7/resolver').set(c).send({ salio: false }) },
     { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
     { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
     { ruta: 'PUT /trazabilidad/estados', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/estados').set(c).send({ estado: 'Servicio externo', rol: 'standby' }) },
@@ -247,11 +279,14 @@ describe('permisos por rol', () => {
     // administrador del portal, así que su permiso (`contrato.write`) no es de ningún rol: aquí ningún rol pasa y el administrador sí.
     { ruta: 'POST /trazabilidad/clientes/:clave/frecuencia', permiso: 'contrato.write', pedir: (c) => request(appCalibraciones()).post('/api/trazabilidad/clientes/cliente%20uno/frecuencia').set(c).send({ meses: 6, motivo: 'Motivo ficticio.' }) },
   ];
-  /** Las dos subidas de la Excel, retiradas el 10/10/2026: siguen registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada»). */
-  const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones'];
+  /**
+   * Las dos subidas de la Excel, retiradas el 10/10/2026, y marcar avisos en bloque, retirado con el envío (2026-11-08): siguen
+   * registradas sólo para contestar 410 (ver «F-ST-022: … subida retirada» y «avisos a clientes: enviar y resolver»).
+   */
+  const RETIRADAS = ['POST /trazabilidad/importaciones', 'POST /trazabilidad/fst022/congelaciones', 'POST /trazabilidad/avisos'];
   const casos = ESCRITURAS.flatMap((e) => ROLES_APP.map((rol) => ({ ...e, rol, pasa: puede(rol, e.permiso) })));
 
-  it('son las veinticinco escrituras del router (la 24.ª, del lote 11: la vigencia de una marca; la 25.ª, del lote 12: la frecuencia de preventivo de un cliente, sólo administradores), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las dos subidas retiradas, por retirada(), que no deja pasar a nadie', () => {
+  it('son las veintiséis escrituras del router (la 24.ª, del lote 11: la vigencia de una marca; la 25.ª, del lote 12: la frecuencia de preventivo de un cliente, sólo administradores; y, en lugar de marcar en bloque, enviar y resolver un aviso), cada una con SU permiso, y ninguna queda sin guarda: toda ruta que escribe pasa por escritura() o soloAdmin(); las tres retiradas, por retirada(), que no deja pasar a nadie', () => {
     const src = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
     const rutas = src.split(/\n\s*router\./).slice(1);
     const todas = rutas.filter((r) => /^(post|put|patch|delete)\(/.test(r));
@@ -330,6 +365,8 @@ describe('permisos por rol', () => {
     expect((await request(app()).post('/api/trazabilidad/filas/abc/reincorporar').set(c).send({})).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/marcas/A%20B').set(c).send({ incluir: 'sí' })).status).toBe(403);
     expect((await request(app()).post('/api/trazabilidad/clientes/A%20B/frecuencia').set(conRol('DIRECTOR_TECNICO')).send({ meses: 'seis' })).status).toBe(403);
+    expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ tramo: 45 })).status).toBe(403);
+    expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios/abc/resolver').set(c).send({})).status).toBe(403);
     expect(queries).toEqual([]);
   });
 
@@ -348,7 +385,7 @@ describe('permisos por rol', () => {
     expect(queries).toEqual([]);
   });
 
-  it.each(['/equipos', '/servicios', '/plazos', '/estados'])('leer sigue abierto a un LECTOR, y no hace falta mirar su rol: GET %s → 200', async (ruta) => {
+  it.each(['/equipos', '/servicios', '/plazos', '/estados', '/avisos/envios'])('leer sigue abierto a un LECTOR, y no hace falta mirar su rol: GET %s → 200', async (ruta) => {
     const res = await request(app()).get(`/api/trazabilidad${ruta}`).set(conRol(null));
     expect(res.status).toBe(200);
     expect(consultasRol.n).toBe(0);
@@ -888,10 +925,57 @@ describe('validación antes de escribir', () => {
     expect(res.status).toBe(404);
   });
 
-  it('avisos sin claves → 400', async () => {
-    const res = await request(app()).post('/api/trazabilidad/avisos').set(auth()).send({ claves: [], fecha: '2026-10-06' });
-    expect(res.status).toBe(400);
+  it('marcar avisos en bloque se retiró: 410 para cualquiera, sin validar, sin mirar el rol ni tocar la base', async () => {
+    for (const cabecera of [conRol(null), conRol('COMERCIAL'), comoAdmin()]) {
+      const res = await request(app()).post('/api/trazabilidad/avisos').set(cabecera).send({ claves: ['18A00001'], fecha: '2026-10-06' });
+      expect([res.status, res.body.error]).toEqual([410, 'marcar_retirado']);
+      expect(res.body.message).toMatch(/Enviar correo/);
+    }
+    expect([queries, consultasRol.n]).toEqual([[], 0]);
+  });
+});
+
+// El envío de los avisos (2026-11-08) por HTTP, con el doble de la base: el interruptor, la validación y la lectura.
+// El flujo entero, contra Postgres y con un canal de mentira, está en avisos-envios.db.test.ts.
+describe('avisos a clientes: enviar y resolver', () => {
+  const TARJETA = { claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'] };
+
+  it('con el envío apagado (el canal por defecto de estas pruebas): 409, sin una sola consulta de negocio', async () => {
+    const res = await request(app()).post('/api/trazabilidad/avisos/envios').set(auth()).send(TARJETA);
+    expect([res.status, res.body.error]).toEqual([409, 'envio_apagado']);
     expect(queries).toEqual([]);
+  });
+
+  it.each([
+    ['sin cuerpo', {}],
+    ['una clave de cliente sin normalizar', { ...TARJETA, claveCliente: 'Cliente Uno' }],
+    ['un tramo que no existe', { ...TARJETA, tramo: 45 }],
+    ['un tramo con espacios', { ...TARJETA, tramo: ' 30' }],
+    ['un tramo dentro de una lista', { ...TARJETA, tramo: ['30'] }],
+    ['sin equipos', { ...TARJETA, equipos: [] }],
+    ['una clave de equipo que no vale', { ...TARJETA, equipos: ['a b'] }],
+  ])('400 antes de nada: %s', async (_caso, cuerpo) => {
+    expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(auth()).send(cuerpo)).status).toBe(400);
+    expect([queries, remitidos]).toEqual([[], []]);
+  });
+
+  it('el tramo llega como 90 o «90» (o «vencida») y sale canónico, el del plan; los equipos, sin repetidos', async () => {
+    const { parsePedidoEnvio } = await import('./types.js');
+    for (const [tramo, canonico] of [[90, 90], ['90', 90], ['30', 30], ['vencida', 'vencida']]) expect(parsePedidoEnvio({ ...TARJETA, tramo }).tramo).toBe(canonico);
+    expect(parsePedidoEnvio({ ...TARJETA, equipos: ['18A00001', '18A00001'] }).equipos).toEqual(['18A00001']);
+  });
+
+  it('resolver: 400 si «salio» no es verdadero o falso, o si el id no vale', async () => {
+    expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios/7/resolver').set(auth()).send({ salio: 'sí' })).status).toBe(400);
+    expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios/abc/resolver').set(auth()).send({ salio: true })).status).toBe(400);
+    expect(queries).toEqual([]);
+  });
+
+  it('GET: el modo efectivo y los últimos envíos, abierto a un Lector', async () => {
+    const apagado = await request(app()).get('/api/trazabilidad/avisos/envios').set(conRol(null));
+    expect([apagado.status, apagado.body]).toEqual([200, { canal: { modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null }, envios: [] }]);
+    const prueba = await request(appAvisos()).get('/api/trazabilidad/avisos/envios').set(conRol(null));
+    expect(prueba.body.canal).toEqual({ modo: 'prueba', motivo: null, buzonPrueba: 'buzon-prueba@ambientalia.com.co' });
   });
 });
 

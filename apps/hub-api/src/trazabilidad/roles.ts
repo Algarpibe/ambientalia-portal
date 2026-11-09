@@ -38,7 +38,7 @@ export const ETIQUETA_ROL_APP: Record<RolApp, string> = {
 export const PERMISOS = [
   /** Seguimiento de un equipo: nota, servicio programado, «en Ambientalia» y aviso enviado. */
   'seguimiento.write',
-  /** Avisos manuales: marcar como avisado en bloque. */
+  /** Avisos a clientes: enviar el aviso de una tarjeta («Enviar correo») y resolver un envío sin confirmar. */
   'avisos.write',
   /** Contacto de un cliente para los avisos. */
   'contactos.write',

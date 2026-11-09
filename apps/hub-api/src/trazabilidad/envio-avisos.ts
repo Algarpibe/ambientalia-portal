@@ -35,8 +35,8 @@
  * ruta de «Enviar correo» (sólo lo importa router.ts). Es la pieza que cambiará
  * al pasar a Desk 2.0.
  */
-import { esBuzonDePrueba, type CanalAvisos, type CorreoAEnviar, type EstadoCanal, type MotivoApagado, type ResultadoRemision } from './avisos-correo.js';
-import { esEmail, normalizarEmail } from './dominio.js';
+import { destinatariosAceptables, esBuzonDePrueba, type CanalAvisos, type CorreoAEnviar, type EstadoCanal, type MotivoApagado, type ResultadoRemision } from './avisos-correo.js';
+import { normalizarEmail } from './dominio.js';
 
 /** Cuánto se espera, como mucho, la respuesta de n8n. */
 export const ESPERA_MAX_MS = 30_000;
@@ -66,14 +66,9 @@ function esUrl(v: string | undefined): boolean {
 /** Un token válido como valor de cabecera: sólo ASCII visible (0x21–0x7E), sin espacios. */
 const esToken = (v: string | undefined): boolean => v !== undefined && /^[\x21-\x7E]+$/.test(v);
 
-const MAX_DESTINATARIOS = 5;
-/** Antes de la red, en real: de 1 a 5 correos válidos y distintos, y un asunto. */
+/** Antes de la red, en real: de 1 a 5 correos válidos y distintos (`destinatariosAceptables`), y un asunto. */
 function correoAceptable(correo: CorreoAEnviar): boolean {
-  const { para } = correo;
-  if (!Array.isArray(para) || para.length < 1 || para.length > MAX_DESTINATARIOS) return false;
-  if (!para.every((p) => esEmail(p))) return false;
-  if (new Set(para.map((p) => normalizarEmail(p))).size !== para.length) return false;
-  return typeof correo.asunto === 'string' && correo.asunto.trim() !== '';
+  return destinatariosAceptables(correo.para) && typeof correo.asunto === 'string' && correo.asunto.trim() !== '';
 }
 
 /** El modo efectivo según el entorno y, si queda apagado sin pedirlo, por qué. Sólo mira `env`. */

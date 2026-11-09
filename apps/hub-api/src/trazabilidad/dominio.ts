@@ -734,6 +734,12 @@ export function contactoEfectivo(manual: ContactoCliente | null | undefined, des
 export const TRAMOS_AVISO = [90, 60, 30, 'vencida'] as const;
 export type TramoAviso = (typeof TRAMOS_AVISO)[number];
 
+/** El tramo canónico de un valor de fuera (el cuerpo de una petición o la columna de texto de la 069): 90 o '90' → 90; null si no es ninguno. */
+export function comoTramoAviso(v: unknown): TramoAviso | null {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  return TRAMOS_AVISO.find((t) => String(t) === String(v)) ?? null;
+}
+
 /** El tramo en el que está un equipo según su estado; null si no está en ninguno (al día, sin fecha, sin vencimiento o fuera de ciclo). */
 export function tramoDeEstado(estado: EstadoCalibracion): TramoAviso | null {
   return estado === 'VENCE_90' ? 90 : estado === 'VENCE_60' ? 60 : estado === 'VENCE_30' ? 30 : estado === 'VENCIDA' ? 'vencida' : null;
