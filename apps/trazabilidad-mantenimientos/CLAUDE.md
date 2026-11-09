@@ -3,8 +3,10 @@
 **Meta: que lleguen menos equipos de clientes sin avisar.** Para eso se avisa a cada cliente antes
 de que se le venza la calibración de su GRIMM EDM 180 (objetivo: avisos automáticos a 90, 60 y 30 días).
 
-⚠️ **Hoy el aviso automático es una SIMULACIÓN: nada en esta app ni en su API envía correos**
-(ver «Aviso automático: simulación»). Los avisos se siguen copiando y enviando a mano.
+⚠️ **Los avisos a clientes se envían A MANO, tarjeta a tarjeta, con «Enviar correo»**, y sólo si el
+interruptor de hub-api lo deja (`TMC_AVISOS_ENVIO`: *apagado* por defecto, *prueba* —todo al buzón
+interno— o *real*; ver «Avisos a clientes: plan y envío»). No hay envío automático: ningún reloj,
+pasada ni arranque envía nada.
 
 App interna del portal para seguir los vencimientos de calibración de los **GRIMM EDM 180**
 (180C y 180D) instalados en clientes y avisarles antes de que se les venza, para programar el
@@ -74,7 +76,7 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Proyección de la agenda: puestos, filas ordenadas, fechas previstas y listas aparte (`proyectarAgenda`), quién vuelve de standby (`vuelvenDeStandby`) el reparto inicial que se propone (`proponerReparto`) y cuándo entraría un equipo que llegara hoy (`huecosDeEtapa`); pura, sólo servidor | `apps/hub-api/src/trazabilidad/agenda.ts` |
 | Agenda: la lectura que lo reúne todo (`leerAgenda`), su configuración entera (`leerConfiguracionAgenda`), asignar, liberar, reparto inicial y flujo a mano (SQL), y la pasada de la agenda (`registrarEstadosAgenda`: su historial y el cierre automático de asignaciones) | `apps/hub-api/src/trazabilidad/repo.ts`; sus validadores y los `parse…` del cuerpo de cada petición en `types.ts`; sus rutas en `router.ts` (ver «Agenda: API»); cuándo sale la pasada, en `registro-estados.ts` (`agendaAlDia`, `registrarAgendaSinFallar`), encendida en `apps/hub-api/src/index.ts` |
 | Conexión opcional y de sólo lectura a la base de Desk 2.0 (`DESK2_DB_URL`) | `apps/hub-api/src/db-desk2.ts` |
-| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql`, `063_trazabilidad_vigencia_marcas.sql`, `064_trazabilidad_contratos.sql` |
+| Migraciones (esquema `portal`, idempotentes) | `apps/hub-api/src/users/migrations/042_trazabilidad_mantenimientos.sql`, `043_trazabilidad_plazos.sql`, `044_trazabilidad_servicios_tipo.sql`, `045_trazabilidad_tipo_combinado.sql`, `046_trazabilidad_estados_desk.sql`, `047_trazabilidad_estados_historial.sql`, `048_trazabilidad_contactos.sql`, `049_trazabilidad_roles.sql`, `050_trazabilidad_estados_categoria.sql`, `051_trazabilidad_agenda_config.sql`, `052_trazabilidad_agenda_asignaciones.sql`, `053_trazabilidad_agenda_flujo.sql`, `054_trazabilidad_agenda_historial.sql`, `055_trazabilidad_fst022_congelacion.sql`, `056_trazabilidad_maestro_equipos.sql`, `057_trazabilidad_calibraciones.sql`, `058_trazabilidad_en_seguimiento.sql`, `059_trazabilidad_retiros.sql`, `060_trazabilidad_exportaciones.sql`, `061_trazabilidad_marcas_seguimiento.sql`, `062_trazabilidad_pasadas_nocturnas.sql`, `063_trazabilidad_vigencia_marcas.sql`, `064_trazabilidad_contratos.sql`, `069_trazabilidad_avisos_envios.sql` |
 | Frecuencia de preventivo por cliente y vigencia «según contrato» (lote 12, 064): la regla sigue en `marcas.ts` (`SEGUN_CONTRATO`, `ValorVigencia`, `vigenciaDeGrupo` —marca + cliente—, `vigenciaDeEquipo`, `diasDeContrato`, `diasDeMeses`, `esFrecuenciaValida`, `FRECUENCIA_MIN_MESES` / `FRECUENCIA_MAX_MESES`, `valorVigencia`, `vaPorContrato`) con sus tipos (`FrecuenciaCliente`, `CambioFrecuencia`, `RespuestaContrato`) | su lectura junto a la de las marcas, en UNA consulta (`leerVigencias` → `{vigencias, contratos}`), en `vigencia-repo.ts`; quien la cambia (`cambiarContrato`, `leerContrato`, `listarContratos`; **único que escribe `tmc_contratos` y su historial**) en `contratos-repo.ts`; si un cliente tiene equipos activos en el inventario (`clienteDelInventario`) en `repo.ts`; sus validadores (`parseClaveCliente`, `parseFrecuencia`) en `types.ts`; el permiso (`contrato.write`, de ningún rol) en `roles.ts`; la sección de la ficha en `src/vistas/FrecuenciaContrato.tsx` (desde el lote 13, con el formulario por cliente, `FormularioFrecuencia`, y su botón, `BotonCambiar`, que reutiliza la tarjeta «Frecuencia de preventivo por cliente» de `src/vistas/FrecuenciasClientes.tsx`; la lista que pinta —`filasContratos`, `filtrarContratos`, `hayClientesSinFrecuencia`, `textoContadorContratos`— en `src/lib/contratos.ts`) y lo que calcula (`textoMeses`, `frecuenciaDe`, `frecuenciaElegida`, `textoContrato`, `equiposPorContrato`, `lineasVistaFrecuencia`, `efectoFrecuencia`, `textoCambioFrecuencia`) en `src/lib/contratos.ts`; la tercera opción de «Cambiar» y su vista previa (`textoValorVigencia`, `vigenciaElegida`, `lineasVistaVigencia`) en `src/vistas/MarcasSeguimiento.tsx` y `src/lib/marcas.ts` |
 | Vigencia de calibración por marca (lote 11, 063): **la regla, en un solo sitio** (`vigenciaDeMarca`, `vigenciaDeEquipo`, `grupoMarca`, `VIGENCIA_POR_DEFECTO`, `VIGENCIA_MIN_DIAS` / `VIGENCIA_MAX_DIAS`, `esVigenciaValida`) y sus tipos (`VigenciaMarca`, `VigenciaGuardada`, `CambioVigencia`) | `apps/hub-api/src/trazabilidad/marcas.ts` (y el estado, `estadoCalibracion(ultima, hoy, vigencia)` con `SIN_VENCIMIENTO`, en `dominio.ts`); su lectura (`leerVigencias`, `leerVigenciasConFirma`, `leerCambiosVigencia`; sólo lee) en `vigencia-repo.ts`; quien la cambia (`cambiarVigencia`; **único que escribe `tmc_marcas_vigencia` y su apunte**) en `marcas-repo.ts`; su validador (`parseVigenciaMarca`) en `types.ts`; la columna «Vigencia» y su formulario en `src/vistas/MarcasSeguimiento.tsx`, y lo que calcula (`textoDias`, `textoVigencias` —la cabecera—, `vigenciaElegida`, `lineasVistaVigencia`, `efectoVigencia`, `textoCambioVigencia`) en `src/lib/marcas.ts`; el orden y el texto de «sin vencimiento» (`ordenVigencia`, `textoVigencia`) en `src/lib/vistas.ts` |
 | Marcas en seguimiento (lote 9f, 061): **qué es el inventario** en un solo sitio (`EN_INVENTARIO`, `claveMarcaSql`; sin imports) | `apps/hub-api/src/trazabilidad/inventario.ts` |
@@ -94,10 +96,14 @@ congelar. Ver «F-ST-022: congelación y relevo de la Excel».
 | Navegación en dos niveles (grupos y secciones, `seccionDeHash`) y lo que se enseña según el rol (`tiene`, `etiquetaMiRol`, `motivoSinPermiso`) | `src/lib/navegacion.ts` |
 | Quién soy, al alcance de cualquier vista (`PermisosContext`, `usePermisos`) | `src/permisos.ts` (lo rellena `src/App.tsx` con `GET /roles/me`) |
 | Sección «Roles» (sólo administradores del portal) | `src/vistas/Roles.tsx` |
-| Agregados, calendario y texto del aviso (`mensajeAviso`, también el de cada tramo) | `src/lib/vistas.ts` |
-| Plan del aviso automático (`planAvisos`, `evaluarAviso`), contactos (`contactoDeTickets`, `contactoEfectivo`) y correos (`esEmail`, `esEmailInterno`, `DOMINIOS_INTERNOS`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
-| Asunto y cuerpo del correo simulado, resumen y revisión de los correos tecleados | `src/lib/simulacion.ts` |
-| Sub-vista «Simulación automática» de «Avisos a clientes» | `src/vistas/SimulacionAvisos.tsx` (el selector Manual / Simulación está en `src/vistas/Avisos.tsx`) |
+| Agregados y calendario; el texto del aviso (`mensajeAviso`, `marcaAviso`, `todosGrimm`) sólo se reexporta desde hub-api | `src/lib/vistas.ts` |
+| Plan de los avisos (`planAvisos`, `evaluarAviso`; cuatro tramos, `TRAMOS_AVISO`: 90, 60, 30 y `'vencida'`), contactos (`contactoDeTickets`, `contactoEfectivo`) y correos (`esEmail`, `esEmailInterno`, `DOMINIOS_INTERNOS`) | `apps/hub-api/src/trazabilidad/dominio.ts` (puro, compartido) |
+| El correo del aviso: texto por tramo (`correoAviso`, `mensajeAviso`, `saludoAviso`, `ETIQUETA_TRAMO`), lo que sale (`correoReal`, `correoDePrueba`, y `correoQueSale` = la regla única según el interruptor), `esBuzonDePrueba`, `mismosDestinatarios`, y la forma de los envíos (`EstadoCanal`, `CanalAvisos`, `EnvioAviso`, `estadoPresentado`, `mismaHuella`) | `apps/hub-api/src/trazabilidad/avisos-correo.ts` (puro, compartido: el servidor redacta con él lo que sale y la app enseña lo mismo) |
+| El canal de salida: el interruptor (`modoEfectivo`) y la entrega a n8n (`crearCanalAvisos`, `ESPERA_MAX_MS`, `CABECERA_TOKEN`); **la única pieza de `src/trazabilidad` que llama a la red** | `apps/hub-api/src/trazabilidad/envio-avisos.ts` |
+| «Enviar correo»: el flujo del envío y el SQL de su registro (`enviarAviso`, `resolverEnvio`, `leerEnvios`; **único que escribe `tmc_avisos_envios`**) | `apps/hub-api/src/trazabilidad/avisos-envios-repo.ts`; sus validadores (`parsePedidoEnvio`, `parseResolucion`) en `types.ts` |
+| Resumen de las tarjetas, texto para copiar, revisión de los correos tecleados y la fecha de los informativos | `src/lib/simulacion.ts` |
+| Lo que la pantalla dice del envío: rótulo del interruptor (`rotuloModo`), estado de cada envío (`textoEstadoEnvio`), qué ofrece cada tarjeta (`accionTarjeta`, `botonEnviar`, `ultimoEnvioDe`), «Sí salió» / «No salió» (`puedeResolver`), el refresco (`msHastaRefresco`), los errores en palabras (`errorDeEnvio`) y quién avisó (`envioDeEquipo`) | `src/lib/envios.ts` |
+| Pantalla «Avisos a clientes»: rótulo, confirmación y últimos envíos (`src/vistas/Avisos.tsx`); tarjetas, «sin destinatario» e informativos (`src/vistas/TarjetasAvisos.tsx`) | `src/vistas/Avisos.tsx`, `src/vistas/TarjetasAvisos.tsx` |
 | Eje, barras (sus tramos, sus pausas y la marca de fin), colores, textos, filtros (`filtrarServicios`, `GRUPOS_PLAZO`), desplegable del tipo de «Servicios» y, de «Configuración», la nota del tipo compuesto y las opciones y textos del rol de cada estado | `src/lib/servicios.ts` |
 | Pestañas «Servicios» (lista + calendario de barras) y «Configuración» (plazos y rol de cada estado de Desk) | `src/vistas/Servicios.tsx`, `src/vistas/Configuracion.tsx` |
 | Configuración de la agenda del taller (lote 6): puestos, duraciones y categoría de cada estado | `src/vistas/ConfiguracionAgenda.tsx` (los tres bloques y `useAgendaConfig`); lo que calculan —columnas y casillas de la tabla de duraciones, filtro y orden de los estados, firmas— en `src/lib/agenda.ts` (ver «Agenda: pantalla de configuración») |
@@ -140,7 +146,8 @@ Registro en el portal (los cinco puntos de siempre): `portal/src/lib/apps.ts`,
 | `portal.tmc_agenda_flujo` | El **flujo marcado a mano** a un ticket (D11): `numero` (PK, sin FK), `flujo` (`CHECK` a `servicio` / `equipo_nuevo`) y quién y cuándo. Sólo se marca el ticket cuya fuente no trae clasificación; quitar la marca borra la fila. La 053 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla |
 | `portal.tmc_agenda_historial` | El **historial de estados propio de la agenda** (D17): mismas columnas e índices que `tmc_estados_historial` (`tmc_agenda_historial_abierto_uq` = un tramo abierto por ticket), pero alimentado desde la **fuente principal** y sólo cuando contesta ella. Sólo lo escribe `registrarEstadosAgenda`. De aquí sale «vuelve de standby». La 054 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla y sin copiar nada del otro historial |
 | `portal.tmc_estados_historial` | (El de **«Servicios»**, desde la réplica.) En qué estado ha estado cada ticket, por tramos: `id`, `numero` (ticket de Desk, sin FK), `clave` y `etiqueta` del estado tal como se vio (`TEXT`; la clave puede ser vacía), `desde`, `hasta` (NULL = tramo abierto) y `desde_real` (FALSE = primera observación: el comienzo real no se sabe). `CHECK (hasta IS NULL OR hasta >= desde)`; índice único parcial `(numero) WHERE hasta IS NULL` = como mucho un tramo abierto por ticket; índice `(numero, desde)`. Sólo la escribe `registrarEstados`. **No guarda el rol.** La 047 sólo tiene `CREATE … IF NOT EXISTS`: un arranque no toca el historial, que no se puede reconstruir |
-| `portal.tmc_contactos` | El **contacto puesto a mano a un cliente** (a quién iría su aviso): `clave` (el nombre del cliente normalizado con `claveCliente`, PK, sin FK), `cliente` (como se escribió), `emails` (`TEXT[]`, entre 1 y 5 por `CHECK`, en minúsculas y sin repetir), `nombre` (persona de contacto, `''` si no se puso) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los clientes a los que alguien se lo ha puesto; quitarlo borra la fila. La 048 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla. **Sólo guarda direcciones**: no hay tabla de mensajes, de envíos ni de pendientes en este módulo (`trazabilidad.db.test.ts` vigila la lista de tablas `tmc_*`) |
+| `portal.tmc_contactos` | El **contacto puesto a mano a un cliente** (a quién iría su aviso): `clave` (el nombre del cliente normalizado con `claveCliente`, PK, sin FK), `cliente` (como se escribió), `emails` (`TEXT[]`, entre 1 y 5 por `CHECK`, en minúsculas y sin repetir), `nombre` (persona de contacto, `''` si no se puso) y quién y cuándo (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Sólo hay fila para los clientes a los que alguien se lo ha puesto; quitarlo borra la fila. La 048 sólo tiene `CREATE … IF NOT EXISTS`, sin semilla. **Sólo guarda direcciones**; lo que se envía se apunta en `tmc_avisos_envios` (`trazabilidad.db.test.ts` vigila la lista de tablas `tmc_*`) |
+| `portal.tmc_avisos_envios` | **Un apunte por cada «Enviar correo»** (069): `creado_en`, `dia` (el día de Colombia del envío: el que se pone como «Aviso enviado al cliente»), la firma (`por_id`, `por`), `modo` (`CHECK` a `prueba` / `real`: apagado no deja fila), `clave_cliente` + `cliente`, `tramo` (`CHECK` a `'90'` / `'60'` / `'30'` / `'vencida'`), `equipos` (las claves de la tarjeta), `destinatarios` (los de verdad), `enviado_a` (a quién se mandó: en prueba, sólo el buzón de prueba), `asunto` (**no guarda el texto**), `estado` (`CHECK` a `en_curso` / `enviado` / `fallido`), `message_id` (el de Gmail), `error`, `terminado_en` y la resolución a mano (`resuelto_por_id`, `resuelto_por`, `resuelto_en`). Índice único parcial `tmc_avisos_envios_en_curso_uq (clave_cliente, tramo) WHERE estado = 'en_curso'` = **un solo envío abierto por tarjeta** (doble clic o dos personas → 409). Tres `CHECK` con nombre (`…_terminado`, `…_enviado`, `…_resuelto`). Sin semilla ni clave foránea; da sus permisos a `portal_app` ella misma (la 068 corre antes). Sólo la escribe `avisos-envios-repo.ts`. **Es un registro, no una cola**: nada la lee para enviar. Se llama «registro» y no «envíos» porque los candados de `calibraciones.db.test.ts` y `edicion.db.test.ts` prohíben tablas `tmc*` con «envio» |
 | `portal.tmc_user_roles` | El **rol de cada persona en la app**: `user_id` (`UUID`, PK, **con** clave foránea a `portal.users(id)` y `ON DELETE CASCADE`: es la única tabla `tmc_*` que la lleva, porque un rol sin su usuario no significa nada), `role` (`VARCHAR(20) NOT NULL`, **sin valor por defecto**, con `CHECK` a `LECTOR` / `COMERCIAL` / `TECNICO` / `DIRECTOR_TECNICO`) y quién y cuándo lo repartió (`actualizado_por_id`, `actualizado_por`, `actualizado_en`). Una fila por usuario; **sin fila se es `LECTOR`**. Cambiar el rol reescribe la fila; poner `LECTOR` también la guarda (queda quién lo dejó así). La 049 sólo tiene `CREATE … IF NOT EXISTS`, **sin semilla**: nadie nace con rol. El `CHECK` lleva los mismos valores que `ROLES_APP` de `roles.ts` y `plazos.test.ts` vigila que coincidan |
 
 ## API (`/api/trazabilidad/*`)
@@ -183,7 +190,10 @@ segunda tabla, más abajo.
 | GET | `/trazabilidad/retiros` (`?clave=` o `?fila=`) | La auditoría de retiros de un equipo o de una fila de la hoja, la más reciente primero: `{retiros: [{id, accion, motivo, antes, despues, por, en}]}`. Abierta a quien tiene la app. 400 en `clave` si no dice de quién (o dice las dos) o en `fila` |
 | POST | `/trazabilidad/calibraciones/partida/:fila/anular` | Permiso `calibraciones.write`. `{motivo}`: anula la fecha de partida que esa fila de la hoja toma de la congelación (la guarda ya anulada; la congelación no se toca). 400 en `fila` o `motivo`; 404 si la fila no es de la hoja; 409 `partida_guardada` o `serial_ambiguo` |
 | PUT | `/trazabilidad/seguimiento/:clave` | `{enAmbientalia, avisoEnviado, servicioProgramado, nota}` |
-| POST | `/trazabilidad/avisos` | `{claves[], fecha}`: marca el aviso en bloque sin tocar el resto del seguimiento |
+| GET | `/trazabilidad/avisos/envios` | `{canal: {modo, motivo, buzonPrueba}, envios[]}`: el modo efectivo del envío (`apagado` / `prueba` / `real`; `motivo` = por qué está apagado sin pedirlo: `sin_valor`, `valor_desconocido`, `sin_canal`, `sin_buzon_prueba`) y los 30 últimos envíos más los que sigan en curso (`EnvioAviso`: `{id, creadoEn, por, modo, claveCliente, cliente, tramo, equipos, destinatarios, enviadoA, asunto, estado, messageId, error, resueltoPor, resueltoEn}`; `estado` = `en_curso`, `sin_confirmar` —un «en curso» de 2 minutos o más—, `enviado` o `fallido`). Abierta a quien tiene la app. **La pantalla decide botones y «Sí salió» / «No salió» sólo con esta lista, nunca con la respuesta del POST** (el POST contesta `sin_confirmar` al momento ante un tiempo agotado; GET lo sirve `en_curso` hasta los 2 minutos) |
+| POST | `/trazabilidad/avisos/envios` | Permiso `avisos.write`. `{claveCliente, tramo, equipos[], modo, para[]}`: la tarjeta (`tramo` = 90, 60, 30 o `'vencida'`), las claves de los equipos que se vieron en ella y **lo que enseñaba la confirmación**: `modo` (`prueba` / `real`) y `para` (los destinatarios REALES, de 1 a 5 correos). El servidor vuelve a calcular el plan con los datos de ese momento y redacta él el correo. 400 en `claveCliente`, `tramo`, `equipos`, `modo` o `para`; **409 `envio_apagado`** sin consultar nada; **409 `modo_cambiado`** si el modo del servidor ya no es el confirmado; **404 `tarjeta_no_encontrada`** si ya no hay esa tarjeta; **409 `tarjeta_cambiada`** si sus equipos no son los vistos; **409 `destinatarios_no_validos`** si la tarjeta no va a entre 1 y 5 correos válidos y distintos (el mensaje pide poner a mano el contacto, con 5 direcciones como mucho); **409 `destinatarios_cambiados`** si sus destinatarios de verdad ya no son los confirmados; **409 `ya_enviando`** si ya hay uno abierto de esa tarjeta. Las comprobaciones se repiten dentro de la transacción del apunte (carrera). Devuelve su `EnvioAviso`: `enviado` (en real, sus equipos quedan con «Aviso enviado al cliente» = hoy, en la misma transacción), `fallido` (con `error`) o `sin_confirmar` |
+| POST | `/trazabilidad/avisos/envios/:id/resolver` | Permiso `avisos.write`. `{salio}`: resuelve a mano un envío sin confirmar —`true` = «Sí salió» (pasa a `enviado` y, si era real, marca sus equipos con el día del envío), `false` = «No salió» (`fallido`: la tarjeta se puede volver a enviar)—, con firma. 400 en `id` o `salio`; 404 si no existe; **409 `no_sin_confirmar`** si ya está resuelto o lleva menos de 2 minutos en curso |
+| POST | `/trazabilidad/avisos` | **Retirada** junto con la antigua pestaña Manual: **410 `marcar_retirado`** para cualquiera, sin validar ni mirar la base (`retirada`) |
 | GET | `/trazabilidad/servicios` (`?hoy=`) | `{hoy, servicios[], festivos[], tipos[]}`: tickets de Desk sin cerrar con ingreso, tipo efectivo (`tipoServicio`) y su origen (`tipoOrigen`: `manual` / `desk` / `null`, `tipoDesk`, `tipoManual: {clave, por, en}`), el reloj con pausas (`rolEstado`: `cuenta` / `standby` / `terminado`, el del estado de ahora; `enPausa`; `diasPausados`; `pausas: [{desde, hasta}]`; `terminadoEl`; `medidoDesde`; `fechaLimiteBase` = la fecha sin pausas), `plazoDias`, `fechaLimite` (ya corrida), `diasHabiles` y `estadoPlazo` (`EN_PLAZO` / `VENCE_HOY` / `VENCIDO` / `SIN_PLAZO` en marcha; `CUMPLIDO` / `INCUMPLIDO` / `TERMINADO` con el trabajo terminado), y `tramos` (`[{clave, etiqueta, dias, hasta}]`, sólo en un tipo compuesto con plazo; `null` en el resto): el día en que acaba cada parte, el último = `fechaLimite`; `festivos` son los del tramo del calendario de barras; `tipos` (`{clave, etiqueta, dias}`) son los que se pueden elegir a mano: las filas de `tmc_plazos` en el orden de Configuración, con `dias` ya resuelto (la suma, en un compuesto). Antes de leer apunta los cambios de estado (`registrarEstados`), si se puede: un fallo ahí no falla la petición |
 | PUT | `/trazabilidad/servicios/:numero/tipo` (`?hoy=`) | `{tipo}`: pone a mano el tipo de servicio del ticket; `null` o vacío lo quita. 400 si `numero` no es un entero positivo o si el tipo no está (por clave normalizada) en `tmc_plazos`; 404 si el ticket no existe en `desk.tickets`. Devuelve lo mismo que el GET, ya recalculado |
 | GET | `/trazabilidad/plazos` | `{plazos[]}`: las filas de `tmc_plazos` más los tipos que traigan los tickets abiertos y aún no tengan fila; `ticketsAbiertos` cuenta por tipo efectivo. Cada plazo lleva `derivadoDe`: `null` en un tipo simple y, en uno compuesto, sus partes `[{clave, etiqueta, dias}]` (entonces `dias` es su suma, o `null` si a alguna le falta) |
@@ -231,7 +241,7 @@ escribe nadie a mano: lo apunta hub-api.
 | Permiso | Lector | Comercial | Técnico | Director Técnico | Qué protege hoy |
 |---|:-:|:-:|:-:|:-:|---|
 | `seguimiento.write` | — | sí | sí | sí | `PUT /trazabilidad/seguimiento/:clave` |
-| `avisos.write` | — | sí | — | sí | `POST /trazabilidad/avisos` |
+| `avisos.write` | — | sí | — | sí | `POST /trazabilidad/avisos/envios` (enviar el aviso de una tarjeta) y `POST /trazabilidad/avisos/envios/:id/resolver` (resolver un envío sin confirmar). Antes, marcar en bloque (retirado) |
 | `contactos.write` | — | sí | — | sí | `PUT /trazabilidad/contactos` |
 | `servicios.tipo.write` | — | — | sí | sí | `PUT /trazabilidad/servicios/:numero/tipo` |
 | `importar` | — | — | — | sí | **Nada**: protegía la importación y la congelación de la Excel, retiradas el 10/10/2026 (410 para todos). Se queda en la matriz porque los nombres de permiso son estables (`roles.ts` lo dice); `router.test.ts` falla si alguna ruta vuelve a pedirlo |
@@ -262,13 +272,13 @@ sólo usan las **dos lecturas que piden permiso** (`GET /trazabilidad/agenda/rep
 lote 9e, `GET /trazabilidad/exportar`; a ésta el 403 le dice «no permite exportar la F-ST-022»);
 la prueba lleva esa lista cerrada y también falla si otra lectura lo pide o si una lleva
 `escritura`. La tercera forma es `retirada(ctx)`: una
-ruta que ya no deja pasar a nadie (410); la prueba fija cuáles son (las dos subidas de la Excel).
+ruta que ya no deja pasar a nadie (410); la prueba fija cuáles son (las dos subidas de la Excel y marcar avisos en bloque).
 
 **En la UI**: `App.tsx` pide `GET /roles/me` al entrar y lo deja en `PermisosContext`; las vistas
 preguntan con `usePermisos().puede('<permiso>')`. Mientras no llega (o si falla) vale `SIN_ROL`,
 es decir, modo de consulta. Sin el permiso: el seguimiento de la
-ficha va desactivado y sin «Guardar»; en «Avisos a clientes» no sale «Marcar como avisado» (sí
-«Redactar aviso» y copiar) ni, en la simulación, «Cambiar destinatario» ni el editor de contacto;
+ficha va desactivado y sin «Guardar»; en «Avisos a clientes» no sale «Enviar correo» ni, en los
+últimos envíos, «Sí salió» / «No salió» (sí ver y copiar el texto), ni «Cambiar destinatario» ni el editor de contacto;
 el desplegable del tipo en «Servicios» va desactivado; y en «Configuración» los plazos, la agenda y
 los estados se ven pero no se editan, con un aviso arriba. **Lo desactivado se nota**: todo
 `<input>`, `<select>` y `<textarea>` lleva `DESACTIVADO` (`src/ui.tsx`: fondo gris y cursor de «no
@@ -282,7 +292,7 @@ Dos niveles (`src/lib/navegacion.ts`): arriba el **grupo**, debajo sus **seccion
 
 | Grupo | Secciones (hash) |
 |---|---|
-| Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`, con sus vistas Manual / Simulación automática dentro), Trazabilidad F-ST-022 (`#fst022`, la hoja entera de todas las marcas; desde ahí se corrige una fecha, se retira y, con `hoja.exportar`, se exporta) |
+| Clientes y calibraciones | Resumen (`#resumen`), Equipos (`#equipos`), Calendario Calibraciones (`#calendario`), Avisos a clientes (`#avisos`: una tarjeta por cliente y tramo, con «Enviar correo»), Trazabilidad F-ST-022 (`#fst022`, la hoja entera de todas las marcas; desde ahí se corrige una fecha, se retira y, con `hoja.exportar`, se exporta) |
 | Taller | Servicios (`#servicios`) y Agenda del taller (`#agenda`) |
 | Administración | Configuración (`#configuracion`) y Roles (`#roles`, sólo se ofrece a los administradores del portal) |
 
@@ -314,56 +324,117 @@ el servidor y otra vez el plan). Puesto a mano sí se admite —para probar con 
 se señala como «interno» en la respuesta y en la UI.
 
 La ficha del equipo (`FichaEquipo.tsx`) enseña su contacto en sólo lectura (nombre, correo, origen
-y ticket); se cambia en «Avisos a clientes» → «Simulación automática».
+y ticket); se cambia en «Avisos a clientes», con «Cambiar destinatario» en su tarjeta.
 
-## Aviso automático: simulación
+## Avisos a clientes: plan y envío
 
-**Estado: ensayo en seco (dry run).** El negocio está en fase de pruebas y ha decidido que **no
-puede salir ningún correo a un cliente**. Por eso en este módulo **no hay ningún camino de código
-que envíe**: ni llamada a un servicio de correo ni a un automatizador externo, ni tabla de
-mensajes pendientes, ni programador de envíos, ni botón de enviar. Todo lo de abajo sólo
-**calcula y enseña** lo que se enviaría. `router.test.ts` y `plazos.test.ts` tienen candados que
-fallan si aparece algo así en `router.ts`, `repo.ts`, `dominio.ts`, `types.ts` o en la 048. Pasar
-a enviar de verdad es otra tarea, con su decisión de negocio; no es «activar» nada de aquí.
+**El envío es siempre a mano** (decisión de Alfonso, 2026-11-08; diseño en
+`docs/superpowers/specs/2026-11-08-envio-avisos-clientes-design.md`): una persona pulsa «Enviar
+correo» en una tarjeta. No hay envío automático: ningún reloj, pasada nocturna ni arranque llama
+al envío; sólo la ruta POST del botón (`envio-avisos.test.ts` lo vigila).
 
 La regla (`evaluarAviso` y `planAvisos`, `dominio.ts`; puras, con `hoy` como argumento):
 
-- **Tramos 90, 60 y 30**: el tramo de un equipo es el de su estado de hoy (`VENCE_90` → 90,
-  `VENCE_60` → 60, `VENCE_30` → 30). `AL_DIA` y `SIN_FECHA` no están en ninguno (`SIN_TRAMO`).
+- **Cuatro tramos** (`TRAMOS_AVISO`): 90, 60 y 30 días antes del vencimiento (`VENCE_90`,
+  `VENCE_60`, `VENCE_30`) y **«vencida»** (`VENCIDA`: vencida hace menos de un año). `AL_DIA`,
+  `SIN_FECHA` y `SIN_VENCIMIENTO` no están en ninguno (`SIN_TRAMO`); `FUERA_CICLO` (más de un año)
+  sigue fuera.
 - **Con la vigencia de su marca** (lote 11): el estado se recalcula con `equipo.vigenciaMarca` (la
   manda `GET /equipos`). Un equipo **sin vencimiento** (`SIN_VENCIMIENTO`) es `SIN_TRAMO` y **no entra
-  en ninguna lista** del plan —ni correos, ni «sin destinatario», ni «vencidas sin aviso», ni «fuera de
-  ciclo»—, tenga la fecha que tenga (`avisos.test.ts`, `simulacion.test.ts`, `marcas.db.test.ts`).
-- **Una vez por tramo**: se entra en un tramo el día `vence − tramo` (`entradaTramo`). Si el
-  «aviso enviado» del seguimiento (`tmc_seguimiento.aviso_enviado`, el mismo de la vista manual)
-  es de ese día o posterior, ya está avisado en este tramo (`YA_AVISADO`); si es anterior —fue el
-  del tramo de antes— o no hay, **toca** (`DEBIDO`). No hay registro propio de avisos todavía.
+  en ninguna lista** del plan, tenga la fecha que tenga (`avisos.test.ts`, `simulacion.test.ts`,
+  `marcas.db.test.ts`).
+- **Una vez por tramo**: se entra en un tramo el día `vence − tramo` y en «vencida» el mismo día del
+  vencimiento (`entradaTramo`). Si el «aviso enviado» del seguimiento (`tmc_seguimiento.aviso_enviado`)
+  es de ese día o posterior, ya está avisado (`YA_AVISADO`); si es anterior —fue el del tramo de
+  antes— o no hay, **toca** (`DEBIDO`). En «vencida», por tanto, **una sola vez por vencimiento**.
 - **Nunca en servicio** (`enServicio`: «en Ambientalia» a mano o ticket abierto en Desk) →
   `EN_SERVICIO`, que manda sobre «ya avisado».
-- **`VENCIDA` y `FUERA_CICLO` quedan fuera de la regla automática** (motivos `VENCIDA` y
-  `FUERA_CICLO`): no generan correo simulado. Se enseñan aparte para que se vea a quién deja
-  fuera: «Vencidas sin aviso» = vencidas hasta un año, fuera de servicio y sin «aviso enviado»
-  del día del vencimiento o posterior; «Fuera de ciclo» = todas las de más de un año.
-- **Un correo por cliente y tramo** (agrupa por `claveCliente`), con los equipos de ese cliente a
-  los que toca. **Destinatarios**: los correos puestos a mano al cliente si los tiene; si no, los
-  correos distintos de los contactos de Desk de esos equipos. Sin ninguno → «sin destinatario».
+- **Una tarjeta por cliente y tramo** (agrupa por `claveCliente`), lo más urgente primero (vencida,
+  30, 60, 90). **Destinatarios**: los correos puestos a mano al cliente si los tiene; si no, los
+  distintos de los contactos de Desk de esos equipos. Sin ninguno → «sin destinatario» (sin botón).
+  Para enviar tienen que ser de 1 a 5 correos válidos y distintos (`destinatariosAceptables`).
 - **Marca en el texto** (lote 9f): cada línea lleva la marca del equipo (`marcaAviso`: «GRIMM»
   para los GRIMM, como siempre; la suya para los demás) y, si no son todos GRIMM, el aviso habla de
   «equipos» en vez de «monitores de partículas GRIMM» (también el asunto). Con sólo GRIMM el texto
   es el de siempre, letra a letra (`todosGrimm`, `src/lib/vistas.ts`).
-- **Texto** (`correoAviso` en `src/lib/simulacion.ts`, sobre `mensajeAviso`): el cuerpo del aviso
-  manual con la frase de entrada del tramo (90 = primer aviso «con antelación», 60 =
-  recordatorio, 30 = «último aviso») y un asunto por tramo. Saluda por su nombre si entre los
-  destinatarios hay exactamente uno con nombre; si no, el «Estimado cliente …» de siempre. (En el
-  contacto puesto a mano, el nombre va con el primer correo.)
+- **Texto** (`correoAviso`, `avisos-correo.ts`, sobre `mensajeAviso`): un asunto y una frase de
+  entrada por tramo (90 = primer aviso «con antelación», 60 = recordatorio, 30 = «último aviso»,
+  vencida = «está vencida», con su propio párrafo final). Saluda por su nombre si entre los
+  destinatarios hay exactamente uno con nombre; si no, «Estimado cliente …». **El mismo código
+  redacta en el servidor (lo que sale) y en la pantalla (lo que se ve):** `correoQueSale(tarjeta,
+  canal)` es la regla única (real → el real; prueba → el de prueba al buzón; apagado → nada).
 
-En la UI, «Avisos a clientes» tiene dos vistas: **«Manual»** (la de siempre: redactar, copiar,
-marcar como avisado; intacta) y **«Simulación automática»**: un aviso fijo de que es una
-simulación, el resumen (correos, clientes, equipos, grupos sin destinatario), una tarjeta por
-correo (cliente, tramo, destinatarios con su origen y la marca «interno», equipos, asunto y texto
-plegados con «Copiar texto», y «Cambiar destinatario»), los grupos «Sin destinatario» con el
-editor del contacto abierto, y cuatro secciones plegadas que explican lo que queda fuera («Ya
-avisados en este tramo», «En servicio», «Vencidas sin aviso», «Fuera de ciclo»).
+El envío:
+
+- **El interruptor** (variables de entorno de hub-api; se cambian sólo en EasyPanel, el portal no
+  puede): `TMC_AVISOS_ENVIO` = `apagado` (por defecto) · `prueba` · `real`, exactamente así
+  (cualquier otro valor, o ninguno, es apagado); `TMC_AVISOS_BUZON_PRUEBA` (en prueba, todo va ahí;
+  si falta o no es `@ambientalia.com.co`, prueba es apagado: `sin_buzon_prueba`); `TMC_AVISOS_N8N_URL`
+  y `TMC_AVISOS_N8N_TOKEN` (el Webhook de n8n y su token). Si falta alguno o no valen, el modo es
+  apagado por `sin_canal`. **La URL** tiene que ser `https`, o `http` sólo hacia un servidor de una
+  sola etiqueta (un servicio interno de Docker, sin punto ni `:`), y sin usuario ni clave. **El
+  token** tiene que ser texto ASCII visible (0x21–0x7E) sin espacios; se genera con 64 hex
+  (p. ej. `openssl rand -hex 32`). Se leen una vez, al arrancar: cambiar el modo es cambiar la
+  variable y desplegar. `GET /trazabilidad/avisos/envios` sirve el modo efectivo y por qué, para el
+  rótulo de la pantalla.
+- **Al pulsar «Enviar»** la pantalla manda la tarjeta (cliente, tramo y las claves de los equipos
+  que vio) **y lo que confirmó**: el `modo` y los destinatarios reales (`para`). Antes de mandar, la
+  confirmación vuelve a pedir `GET /avisos/envios` y aborta si el modo ya no es el que enseñaba.
+  El servidor vuelve a calcular el plan con los datos del momento (el mismo `listarEquipos` +
+  `listarContactos` que `GET /equipos`): sin esa tarjeta, 404; con otros equipos, 409
+  `tarjeta_cambiada`; en otro modo, 409 `modo_cambiado`; a otros destinatarios, 409
+  `destinatarios_cambiados`; a una lista que no vale (más de 5, repetidos), 409
+  `destinatarios_no_validos`. **Lo que se confirma es lo que sale**: esas comprobaciones se repiten
+  dentro de la transacción del apunte. Apunta el envío «en curso» (índice único: doble clic o dos
+  personas → 409 `ya_enviando`), lo entrega al canal con 30 s como mucho y lo cierra: confirmado →
+  `enviado` (en real, en la misma transacción, `registrarAvisos` pone «Aviso enviado al cliente» =
+  hoy a sus equipos y la tarjeta pasa a «Ya avisados»); rechazado → `fallido`, se ve el motivo y se
+  puede reintentar; sin respuesta, o si esa transacción falla → sigue «en curso» y la pantalla dice
+  **«sin confirmar»**.
+- **Códigos de error del envío** (la pantalla los traduce en `errorDeEnvio`, `src/lib/envios.ts`;
+  los que piden recargar actualizan la pantalla y dejan un aviso fijo): `envio_apagado`,
+  `modo_cambiado`, `tarjeta_no_encontrada`, `tarjeta_cambiada`, `destinatarios_cambiados`,
+  `destinatarios_no_validos`, `ya_enviando`, `no_sin_confirmar` y, de la ruta retirada,
+  `marcar_retirado`.
+- **«Sin confirmar»** = un «en curso» que ya no espera respuesta (de 2 minutos o más; también si el
+  servidor se reinició a mitad). No deja reenviar la tarjeta. La pantalla vuelve a pedir la lista
+  sola a los 2 minutos y 5 segundos de ver un «en curso», y con «Actualizar». En «Últimos envíos» se
+  resuelve a mano, mirando Enviados de info@: «Sí salió» (enviado y, en real, marca los equipos con
+  el día del envío) o «No salió» (fallido: la tarjeta vuelve a poder enviarse). Los botones salen
+  **sólo de lo que sirve GET**, nunca de la respuesta del POST (que dice `sin_confirmar` al momento
+  mientras GET sigue diciendo `en_curso` y la resolución se rechaza antes de los 2 minutos).
+- **En prueba**: el único destinatario es el buzón de prueba (lo reescribe el servidor y lo vuelve a
+  comprobar el canal), el asunto empieza por «[PRUEBA] » y el cuerpo dice a quién habría ido; no se
+  marca ningún equipo. El registro guarda los destinatarios de verdad y a quién se mandó.
+- **Tres candados independientes**: el interruptor, que falla cerrado; el modo prueba, que reescribe
+  los destinatarios en el servidor; y **la barrera de n8n**, que rechaza cualquier destinatario que
+  no sea `@ambientalia.com.co`. Quitarla es un paso aparte de la fase 5 del plan de pruebas, con la
+  decisión explícita de Alfonso y los secretos ya rotados.
+- **n8n** («Trazabilidad — avisos a clientes (envío)»): Webhook con token (Header Auth, cabecera
+  `X-Tmc-Avisos-Token`) → barrera de dominio → Gmail con la cuenta de info@ (credencial puesta a
+  mano) → responde `{ok: true, messageId}` o `{ok: false, error}`. Ver `docs/n8n-automatizaciones.md`.
+- **Despliegue**: la ruta POST cambió de forma (ahora exige `modo` y `para`) y la vieja de marcar
+  responde 410. **hub-api y el portal se despliegan seguidos, hub-api primero**: con el portal viejo
+  sobre el hub-api nuevo, «Enviar correo» daría 400 y marcar daría 410 (nada se envía ni se marca
+  por error); con el portal nuevo sobre el hub-api viejo no hay ruta.
+- **Por teléfono** sigue valiendo: la fecha «Aviso enviado al cliente» se pone a mano en la ficha del
+  equipo (`seguimiento.write`).
+- Los candados de siempre («nada de esto envía» en `router.ts`, `repo.ts`, `dominio.ts`, `types.ts` y
+  demás módulos) siguen intactos: el envío vive en `envio-avisos.ts`, que es lo único que nombra n8n.
+
+En la UI, «Avisos a clientes» es una sola pantalla: arriba el rótulo del interruptor (apagado y por
+qué —para `sin_canal`, que la URL de n8n tiene que ser https o de un host interno de una sola
+palabra y que hace falta el token—, prueba con su buzón, o real); el resumen; una tarjeta por correo
+(cliente, tramo, destinatarios con su origen y la marca «interno», equipos, asunto y texto plegados
+con «Copiar texto», el último envío de la tarjeta, «Cambiar destinatario» y **«Enviar correo»**
+—desactivado y con el rótulo «Envío apagado» con el interruptor apagado; «Enviando…» o «Sin
+confirmar» mientras haya un envío abierto; una indicación en vez del botón si los destinatarios no
+valen—, que abre una confirmación con destinatarios, asunto y texto completo, sin editar, que no se
+cierra mientras envía); los grupos «Sin destinatario» con el editor del contacto; los informativos
+plegados («Ya avisados en este tramo», con quién lo envió si salió desde aquí en ese tramo; «En
+servicio»; «Fuera de ciclo»); y, al final, **«Últimos envíos»** plegados (fecha, quién, cliente,
+grupo, modo y resultado) con «Sí salió» / «No salió» en los sin confirmar. Si falla la lectura del
+estado del envío, un aviso con «Reintentar».
 
 ## Cruce con Zoho Desk (ticket abierto)
 
@@ -1939,7 +2010,7 @@ encendida). Se guarda con el nombre como más se escribe en el inventario.
 **La pantalla**:
 
 - **Dónde está «la ficha del cliente»**: en esta app **no hay una ficha de cliente**; el contacto del cliente se ve en la ficha de cada
-  equipo («Contacto para el aviso») y se cambia en «Avisos a clientes» → «Simulación automática». La frecuencia va **en la ficha del
+  equipo («Contacto para el aviso») y se cambia en «Avisos a clientes», con «Cambiar destinatario» en su tarjeta. La frecuencia va **en la ficha del
   equipo**, justo debajo del contacto: bloque **«Frecuencia de preventivo del cliente»** (`FrecuenciaContrato.tsx`) con el valor
   («6 meses (183 días)» o «sin contrato»), quién y cuándo (el motivo en su `title`), qué significa para ESE equipo (`textoContrato`:
   vence a los N meses / su cliente no tiene frecuencia y no vence / su marca no va por contrato) y, plegado, su historial. **«Cambiar»
@@ -2222,5 +2293,19 @@ su pestaña (9d-1), se **retira** lo que sobra (9d-2b) y se **exporta** (9e). Qu
   cliente, el orden —sin frecuencia primero, más equipos, nombre—, sin ninguna marca «según contrato» ninguna fila; `filtrarContratos` con
   el filtro y la búsqueda sin mayúsculas, tildes ni espacios; el filtro de partida y el contador). hub-api no cambia. Sin pruebas de
   componente: la tarjeta y el formulario bajo su fila se revisan en el navegador.
+- Envío de los avisos (2026-11-08): `avisos.test.ts` (el tramo «vencida»: una vez por vencimiento, en servicio
+  fuera, por delante del de 30), `avisos-correo.test.ts` (el texto de «vencida» letra a letra, la versión de prueba
+  —sólo al buzón, «[PRUEBA]», a quién habría ido—, `correoQueSale`, `mismosDestinatarios`, `mismaHuella`,
+  `estadoPresentado` y el candado de que es puro),
+  `envio-avisos.test.ts` (las guardas de la 069, el interruptor que falla cerrado, la entrega con una red de mentira
+  —confirmado, rechazado, sin respuesta, sin conexión— y los **candados**: único fuente que llama a la red y lee
+  `TMC_AVISOS_*`, sin relojes, sólo lo importa `router.ts`, sólo la ruta del botón llama a `enviarAviso`),
+  `router.test.ts` (la guarda de escrituras **de 25 a 26**, la tercera ruta retirada, apagado sin consultar, cada
+  400 —también `modo` y `para`—), `avisos-envios.db.test.ts` (contra Postgres con un canal de mentira: prueba sin
+  marcar nada, real marcando en la misma transacción, «vencida», 404/409 de la tarjeta, `modo_cambiado` y
+  `destinatarios_cambiados` —también en plena carrera—, el doble envío, fallido y reintento, sin confirmar y su
+  resolución, la transacción final que falla, la 069 repetida), `trazabilidad.db.test.ts` (suma
+  `tmc_avisos_envios` a la lista `tmc_*`) y, en la app, `src/lib/envios.test.ts` (rótulo, estados, qué ofrece cada
+  tarjeta, errores, refresco y quién avisó). Sin pruebas de componente: la pantalla se revisa en el navegador.
 - Datos de prueba siempre ficticios (el repo es público): «Cliente Uno», seriales `18A00001`,
   correos en `@example.com` / `@cliente-uno.example`.
