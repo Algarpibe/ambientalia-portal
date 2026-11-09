@@ -4,6 +4,7 @@ import type { WoSalesConfig } from './config.js';
 import type { EmailPendiente, ResumenEmail } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 import { buildWorldOfficeCsv } from './builder.js';
+import { asignarDocumentoNumeros } from './documento-numero.repo.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
 import {
   cambiadasDesde,
@@ -76,7 +77,10 @@ export async function computarPendiente(
   // Lo lento (leer la réplica de Zoho y armar la matriz) va FUERA del candado: no
   // depende del estado del correo y no tiene por qué hacer esperar a la otra petición.
   const ordenes = await source.ordenesVivas(filtro);
-  const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config);
+  // DocumentoNúmero fijo por OV (§8.1). Toma su propio candado y hace COMMIT antes de entrar al
+  // del correo: los dos no se anidan.
+  const numeros = await asignarDocumentoNumeros(db, ordenes.map((o) => o.numero));
+  const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config, numeros);
   const token = hashMatriz(matriz);
 
   // Leer, decidir, sellar cortes y reservar en UNA transacción con el candado del

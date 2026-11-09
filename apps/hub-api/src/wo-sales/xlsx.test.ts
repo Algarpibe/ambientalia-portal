@@ -72,7 +72,8 @@ describe('tipar', () => {
 });
 
 describe('buildWorldOfficeXlsx', () => {
-  const buf = () => buildWorldOfficeXlsx(buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG).matriz);
+  const buf = () =>
+    buildWorldOfficeXlsx(buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG, new Map([[OV_BASE.numero, 1]])).matriz);
 
   it('es un .xls binario real (BIFF8), como el modelo', () => {
     // Firma de documento compuesto OLE2 = .xls de Excel 97-2003.

@@ -73,7 +73,15 @@ export function partirCentroCostos(valor: string | null): {
   return { codigo, descripcion: resto.join(' '), valido: true };
 }
 
-export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig): BuildResult {
+/**
+ * `documentoNumeros`: el DocumentoNúmero fijo de cada OV (número de OV → número), de
+ * portal.wo_sales_documento_numero vía asignarDocumentoNumeros (§8.1). El builder no toca la BD.
+ */
+export function buildWorldOfficeCsv(
+  ordenes: SalesOrder[],
+  config: WoSalesConfig,
+  documentoNumeros: ReadonlyMap<string, number>
+): BuildResult {
   const warnings: Warning[] = [];
   // Matriz de celdas (cabecera + una fila por línea), como strings. Es la fuente única
   // para los dos formatos: el CSV se serializa uniendo con ';' y codificando a cp1252;
@@ -218,20 +226,24 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     ];
   }
 
-  // DocumentoNúmero (§3): un consecutivo por OV, desde consecutivoInicial. Un pedido de WO
-  // por OV para que cada pedido se convierta en la factura de su OV (en Zoho cada OV se
+  // DocumentoNúmero (§3, §8.1): el número FIJO de cada OV, de la tabla persistente. Un pedido
+  // de WO por OV para que cada pedido se convierta en la factura de su OV (en Zoho cada OV se
   // factura por separado). Agrupar por (fecha, NIT) escondía OV dentro del pedido de otra:
   // OV-2026-178..182 salían dentro del pedido con Nota "177". Una OV tiene una sola fecha
-  // y un solo NIT, así que la llave de documento sigue siendo coherente (§7.4). Orden:
-  // fecha ascendente y, en la misma fecha, número de OV; las líneas de una OV quedan
-  // contiguas.
+  // y un solo NIT, así que la llave de documento sigue siendo coherente (§7.4). Orden de las
+  // filas: fecha ascendente y, en la misma fecha, número de OV; las líneas de una OV quedan
+  // contiguas. El orden ya NO decide el número: una OV lleva el mismo en todos los archivos.
   const ordenadas = [...ordenes].sort(
     (a, b) => a.fecha.localeCompare(b.fecha) || a.numero.localeCompare(b.numero)
   );
-  let siguienteNumero = config.consecutivoInicial;
 
   for (const ov of ordenadas) {
-    const documentoNumero = siguienteNumero++;
+    const documentoNumero = documentoNumeros.get(ov.numero);
+    if (documentoNumero === undefined) {
+      // Fallo de programación (el llamador no asignó), no un dato de Zoho: mejor ningún
+      // archivo que uno con la columna D vacía o con un número inventado.
+      throw new Error(`WO-sales: la OV ${ov.numero} no tiene DocumentoNúmero asignado`);
+    }
     if (ov.lineas.length === 0) {
       avisar({
         tipo: 'ov_sin_lineas',
@@ -284,7 +296,7 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
       config.tipoDocumento, //            1  Tipo Documento (PED)
       derivarPrefijo(ov.fecha, config), //2  prefijo (OV_AA)
-      String(documentoNumero), //          3  DocumentoNúmero (consecutivo por OV)
+      String(documentoNumero), //          3  DocumentoNúmero (fijo por OV)
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)

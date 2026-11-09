@@ -30,14 +30,6 @@ export interface WoSalesConfig {
   /** Vacío = derivar del año del documento como `OV_{AA}` (2 dígitos: OV_26). World
    *  Office NO acepta el año de 4 dígitos. Si se fija, se usa el literal. */
   prefijo: string;
-  /**
-   * Primer número de documento (§3). `DocumentoNúmero` ya NO es fijo: es un consecutivo
-   * por OV (un pedido de WO por OV). Este es el número de la PRIMERA OV; las demás
-   * siguen en orden de fecha y número de OV. OJO (§8.1): el par (prefijo, DocumentoNúmero) debe ser
-   * único en WO para todo el año — hay que persistir el último usado entre archivos y
-   * arrancar desde ahí, NO desde 1. Pendiente de cablear la persistencia.
-   */
-  consecutivoInicial: number;
   terceroInterno: string;
   formaPago: string;
   verificado: string;
@@ -80,9 +72,6 @@ export const DEFAULT_CONFIG: WoSalesConfig = {
   tipoDocumento: 'PED',
   // Vacío = OV_{AA} (2 dígitos del año). WO no acepta el año de 4 dígitos → OV_26.
   prefijo: '',
-  // Primer consecutivo. Default 1 SOLO para arrancar; en producción debe venir del
-  // último número ya cargado en WO (§8.1), no hardcodearse en 1.
-  consecutivoInicial: 1,
   terceroInterno: '416544',
   // "Nota" ya no es fija: lleva el consecutivo XXX de la OV (ver builder, consecutivoOV).
   formaPago: 'Credito',
