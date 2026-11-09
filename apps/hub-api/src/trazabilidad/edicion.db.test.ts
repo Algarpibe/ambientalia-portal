@@ -159,7 +159,8 @@ describe('registrar una calibración manual', () => {
     expect((await manual({ clave: '18A00002', fecha: VENCE_EN_8 })).status).toBe(200);
     expect([await estadoDe('18A00002'), await enAvisos('18A00002')]).toEqual([[VENCE_EN_8, 'VENCE_30'], true]);
     const tablas = (await hub.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name ~ 'outbox|envio|mensaje|correo'`)).rows.map((r: Fila) => r.table_name).filter((t: string) => t.startsWith('tmc_'));
-    expect(tablas).toEqual([]);
+    // 2026-11-08 (069, decisión de Alfonso): la ÚNICA tabla de envíos es el registro de «Enviar correo»; cualquier otra hace fallar esto.
+    expect(tablas).toEqual(['tmc_avisos_envios']);
   });
 
   it('un Lector no puede (403) y la base queda como estaba; un equipo que no existe es un 404; una fecha de mañana, un 400', async () => {

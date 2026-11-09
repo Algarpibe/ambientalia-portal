@@ -477,8 +477,9 @@ describe('el inventario enseña la fecha que da la regla', () => {
     expect(await avisos()).toEqual(['18A00002']);
     // La fecha del inventario no se ha tocado: la que cuenta sale de las calibraciones.
     expect((await inventario()).map((e) => e.ultima)).toEqual(['2025-06-01', '2025-12-01', '2026-03-01', null]);
-    const { rows } = await hub.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name ~ 'outbox|envio|mensaje|cola|pendiente' AND table_name LIKE 'tmc%'`);
-    expect(rows).toEqual([]);
+    const { rows } = await hub.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name ~ 'outbox|envio|mensaje|cola|pendiente' AND table_name LIKE 'tmc%' ORDER BY 1`);
+    // 2026-11-08 (069, decisión de Alfonso): la ÚNICA tabla de envíos es el registro de «Enviar correo»; cualquier otra hace fallar esto.
+    expect(rows).toEqual([{ table_name: 'tmc_avisos_envios' }]);
   });
 
   it('la corrección manual (el modelo; su pantalla es del 9d) manda sobre la fecha de Desk de su ticket hasta que esa fecha cambie en Zoho', async () => {
