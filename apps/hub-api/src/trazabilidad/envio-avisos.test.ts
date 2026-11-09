@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CABECERA_TOKEN, ESPERA_MAX_MS, crearCanalAvisos, modoEfectivo } from './envio-avisos.js';
 
@@ -207,5 +207,46 @@ describe('lo que no debe salir ni cambiar', () => {
     const r = red(json(200, { ok: true, messageId: 'msg-ficticio-3' }));
     const para = ['a1@cliente-uno.example', 'a2@cliente-uno.example', 'a3@cliente-uno.example', 'a4@cliente-uno.example', 'a5@cliente-uno.example'];
     expect((await crearCanalAvisos(REAL, r.fn).remitir({ ...CORREO_REAL, para }, 1)).tipo).toBe('enviado');
+  });
+});
+
+// CANDADO (2026-11-08). Hasta aquí, nada de src/trazabilidad podía enviar. Ahora hay UN camino, y se vigila con lupa:
+//   · sólo envio-avisos.ts llama a la red, nombra n8n o lee TMC_AVISOS_* (los candados «nada de esto envía» de router.ts,
+//     repo.ts, dominio.ts, types.ts y demás siguen en pie, sin tocar);
+//   · no tiene relojes ni programador: la espera máxima es AbortSignal.timeout;
+//   · sólo lo importa router.ts, y nadie más que la ruta del botón llama a enviarAviso;
+//   · un modo desconocido es apagado y, en prueba, el único destinatario es el buzón (arriba: «el interruptor» y «el canal»).
+describe('CANDADO: el canal de salida', () => {
+  const SRC = fileURLToPath(new URL('..', import.meta.url));
+  const APP = fileURLToPath(new URL('../../../trazabilidad-mantenimientos/src', import.meta.url));
+  const listar = (raiz: string) =>
+    (readdirSync(raiz, { recursive: true }) as string[]).map((f) => f.replace(/\\/g, '/')).filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.startsWith('test-db/'));
+  const fuentes = listar(SRC);
+  const leer = (f: string) => readFileSync(`${SRC}/${f}`, 'utf8');
+  const canal = leer('trazabilidad/envio-avisos.ts');
+
+  it('es el único fuente de src/trazabilidad que llama a la red, nombra n8n o mira el entorno, y el único de hub-api que lee TMC_AVISOS_*', () => {
+    const red = /\bfetch\b|n8n|webhook|nodemailer|smtp|sendMail|outbox|https?\.request|undici|AbortSignal/i;
+    const deTrazabilidad = fuentes.filter((f) => f.startsWith('trazabilidad/'));
+    expect(deTrazabilidad.filter((f) => red.test(leer(f)))).toEqual(['trazabilidad/envio-avisos.ts']);
+    expect(deTrazabilidad.filter((f) => /process\.env/.test(leer(f)))).toEqual(['trazabilidad/envio-avisos.ts']);
+    expect(fuentes.filter((f) => /TMC_AVISOS_/.test(leer(f)))).toEqual(['trazabilidad/envio-avisos.ts']);
+  });
+
+  it('no tiene relojes ni programador: espera con AbortSignal.timeout y nada más', () => {
+    expect(canal).not.toMatch(/setInterval|setTimeout|setImmediate|\bcron\b|schedule/i);
+    expect(canal).toMatch(/signal: AbortSignal\.timeout\(ESPERA_MAX_MS\)/);
+  });
+
+  it('sólo lo importa router.ts —ni otro fuente de hub-api ni la app—, y él sólo importa el correo del aviso y el dominio', () => {
+    expect(fuentes.filter((f) => /envio-avisos(\.js)?'/.test(leer(f)))).toEqual(['trazabilidad/router.ts']);
+    expect(listar(APP).filter((f) => readFileSync(`${APP}/${f}`, 'utf8').includes('envio-avisos'))).toEqual([]);
+    expect([...canal.matchAll(/^import\b[^;]*?from '([^']+)';/gms)].map((m) => m[1]).sort()).toEqual(['./avisos-correo.js', './dominio.js']);
+  });
+
+  it('nada envía por su cuenta: sólo la ruta del botón llama a enviarAviso, sólo el flujo del envío llama a remitir, y el arranque no sabe de ellos', () => {
+    expect(fuentes.filter((f) => /\benviarAviso\(/.test(leer(f))).sort()).toEqual(['trazabilidad/avisos-envios-repo.ts', 'trazabilidad/router.ts']);
+    expect(fuentes.filter((f) => /\.remitir\(/.test(leer(f)))).toEqual(['trazabilidad/avisos-envios-repo.ts']);
+    expect(leer('index.ts')).not.toMatch(/enviarAviso|crearCanalAvisos|remitir|envio-avisos/);
   });
 });

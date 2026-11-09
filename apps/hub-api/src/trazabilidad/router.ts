@@ -499,7 +499,8 @@ export function createTrazabilidadRouter(
   // ── Avisos a clientes: «Enviar correo» (2026-11-08, migración 069) ───────
   //
   // El envío es siempre a mano, tarjeta a tarjeta: sólo estas rutas lo disparan
-  // o lo resuelven. La pantalla manda qué tarjeta y qué equipos vio; a quién va
+  // o lo resuelven (envio-avisos.test.ts vigila que nada más llame a
+  // `enviarAviso`). La pantalla manda qué tarjeta y qué equipos vio; a quién va
   // y con qué texto lo decide el servidor (avisos-envios-repo.ts). El modo
   // —apagado, prueba o real— sale del entorno de hub-api y no se cambia desde
   // aquí: GET lo enseña, con los últimos envíos.

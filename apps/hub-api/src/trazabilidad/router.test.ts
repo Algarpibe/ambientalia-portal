@@ -895,8 +895,9 @@ describe('contacto puesto a mano a un cliente', () => {
   });
 
   // Simulación: ni este router ni lo que cuelga de él tienen por dónde enviar un correo.
-  it('nada de esto envía: ni el router ni el repo ni el dominio ni la validación llaman a la red', () => {
-    for (const f of ['./router.ts', './repo.ts', './dominio.ts', './types.ts']) {
+  // Desde el envío (2026-11-08), también el flujo de «Enviar correo»: entrega al canal que le pasan, pero no sabe cómo sale.
+  it('nada de esto envía: ni el router ni el repo ni el dominio ni la validación ni el flujo del envío llaman a la red', () => {
+    for (const f of ['./router.ts', './repo.ts', './dominio.ts', './types.ts', './avisos-envios-repo.ts']) {
       const src = readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
       expect(src).not.toMatch(/\bfetch\s*\(|n8n|webhook|nodemailer|smtp|sendMail|outbox/i);
     }
