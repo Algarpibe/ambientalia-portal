@@ -10,7 +10,7 @@ interface Props {
 /** Lo que puede cada rol, en una línea. La regla de verdad es la matriz de roles.ts (hub-api). */
 const PUEDE: Record<RolApp, string> = {
   LECTOR: 'Lo ve todo y no cambia nada; tampoco exporta la F-ST-022. Es el rol de quien tiene la app y no tiene otro asignado.',
-  COMERCIAL: 'Seguimiento de los equipos, avisos manuales (marcar como avisado), contacto de cada cliente para los avisos y exportar la F-ST-022 a Excel.',
+  COMERCIAL: 'Seguimiento de los equipos, enviar el aviso a un cliente desde su tarjeta («Enviar correo») y resolver un envío sin confirmar, contacto de cada cliente para los avisos y exportar la F-ST-022 a Excel.',
   TECNICO: 'Seguimiento de los equipos, tipo de servicio puesto a mano en un ticket, traer las calibraciones de Desk 2.0, corregir a mano una fecha de calibración (registrar una manual o anular una, siempre con su motivo) y exportar la F-ST-022 a Excel.',
   DIRECTOR_TECNICO: 'Todo lo de Comercial y lo de Técnico (también exportar la F-ST-022), más toda la Configuración, la agenda del taller, sincronizar el inventario con el maestro de equipos de Desk 2.0 y retirar o reincorporar a mano un equipo o una fila de la hoja F-ST-022 (con su motivo; no se borra nada).',
 };

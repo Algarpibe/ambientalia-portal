@@ -2,8 +2,8 @@
  * La frecuencia de preventivo de un cliente según su contrato (lote 12), tal como la enseña y la cambia la ficha de un equipo y, desde el
  * lote 13, la lista de clientes de «Configuración» (`filasContratos`). Puro: sin
  * React ni red. La regla es la del servidor (`vigenciaDeGrupo`, marcas.ts): un equipo de una marca «según contrato» vence a los
- * `diasDeMeses(meses)` días de su última calibración; sin frecuencia, no vence. Cambiarla no envía nada: los avisos siguen siendo
- * manuales o simulados.
+ * `diasDeMeses(meses)` días de su última calibración; sin frecuencia, no vence. Cambiarla no envía nada: el aviso sale sólo a mano,
+ * desde su tarjeta de «Avisos a clientes».
  */
 import { ESTADOS_AVISO, claveCliente, diasDeMeses, esFrecuenciaValida, estadoCalibracion, type CambioFrecuencia, type EquipoVista, type FrecuenciaCliente } from '../dominio';
 import type { LineaVigencia } from './marcas';
@@ -59,7 +59,7 @@ export function efectoFrecuencia(n: number, nueva: number | null): string {
       : nueva === null
         ? `Sus ${n} equipos de marcas «según contrato» dejan de vencer: no salen en Avisos ni en el Calendario.`
         : `Sus ${n} equipos de marcas «según contrato» vencen a los ${textoMeses(nueva)} de su última calibración: Resumen, Calendario y Avisos lo recalculan.`;
-  return `${que} No se envía ningún correo: los avisos siguen siendo manuales o simulados. Se puede volver a cambiar.`;
+  return `${que} No se envía ningún correo: el aviso sale sólo a mano, desde su tarjeta de «Avisos a clientes». Se puede volver a cambiar.`;
 }
 
 /** Un apunte del historial de la frecuencia de un cliente, en una línea. */

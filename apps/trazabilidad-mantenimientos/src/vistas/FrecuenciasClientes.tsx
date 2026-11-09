@@ -37,7 +37,7 @@ export default function FrecuenciasClientes({ inventario, errorInventario, onInv
   return (
     <Card
       title="Frecuencia de preventivo por cliente"
-      hint="Los clientes con equipos de marcas que vencen «según contrato del cliente» (se elige en «Marcas en seguimiento»): cada uno vence con la frecuencia de preventivo de su contrato y, sin ella, no vence ni avisa. También se cambia en la ficha de cualquiera de sus equipos. Nada de esto envía nada: los avisos siguen siendo manuales o simulados."
+      hint="Los clientes con equipos de marcas que vencen «según contrato del cliente» (se elige en «Marcas en seguimiento»): cada uno vence con la frecuencia de preventivo de su contrato y, sin ella, no vence ni avisa. También se cambia en la ficha de cualquiera de sus equipos. Nada de esto envía nada: el aviso sale sólo a mano, desde su tarjeta de «Avisos a clientes»."
     >
       {!editable && <p className="mb-3 text-xs text-gray-500">Sólo lectura: la pone un administrador del portal.</p>}
       {errorInventario && !inventario ? (

@@ -43,7 +43,7 @@ ejecución de la relación comercial y el cumplimiento de obligaciones contables
 tributarias. Para clientes persona natural, NIT y dirección constituyen dato
 personal (Ley 1581 de 2012).
 
-**No** se expone email, teléfono ni cédula por ninguna query del hub.
+**No** se expone email, teléfono ni cédula por ninguna query del hub, salvo los correos de los contactos de clientes de Trazabilidad Mantenimientos (§2.2).
 
 Medidas asociadas:
 
@@ -82,6 +82,29 @@ rompería el requisito/su test.
 - **Retención y acceso** `[Definir]`: fijar el periodo de conservación de estos logs en
   el agregador (p. ej. 90–180 días) y restringir su acceso al administrador.
 
+### 2.2 Registro de los avisos a clientes (Trazabilidad Mantenimientos)
+
+`portal.tmc_avisos_envios` (migración 069) guarda una fila por cada aviso de calibración que una
+persona envía desde «Avisos a clientes»: cuándo y quién (correo del usuario interno), el modo
+(prueba o real), el cliente (su nombre y su clave normalizada), el tramo, las claves de los equipos,
+**los correos de los destinatarios del cliente** (los del contacto puesto a mano en la app o los de
+los tickets de Zoho Desk), a quién se mandó de verdad (en prueba, sólo el buzón interno), el asunto,
+el resultado (el identificador del mensaje de Gmail o el motivo del fallo) y, si hizo falta, quién lo
+resolvió a mano. **No guarda el cuerpo del correo.**
+
+- **Finalidad y base legal:** avisar al cliente del vencimiento de la calibración de su equipo
+  (ejecución de la relación comercial y de servicio técnico) y dejar constancia de qué se le avisó,
+  cuándo y quién.
+- **Acceso:** sólo quien tiene la app `trazabilidad-mantenimientos` (`requireApp` en el servidor),
+  igual que los contactos que ya enseña `GET /trazabilidad/equipos`.
+- **No es la fuente de los contactos:** los correos se copian del contacto vigente al enviar.
+  Rectificar o suprimir un contacto se hace donde nace (Zoho Desk o el contacto puesto a mano en la
+  app); las filas ya apuntadas conservan el correo al que se envió.
+- **También en n8n:** el flujo que envía guarda en sus ejecuciones los destinatarios, el asunto y el
+  cuerpo, con la retención de ejecuciones que tenga configurada n8n.
+- **Retención** `[Definir]`: fijar cuánto se conservan estas filas (p. ej. el mismo plazo que los
+  soportes del servicio técnico) y si se anonimizan después.
+
 ## 3. Arquitectura del dato (clave para retención/borrado)
 
 ```
@@ -92,11 +115,16 @@ Zoho (FUENTE DE VERDAD)  ──sync (worker @algarpibe/zoho-sync, ~cada 3 min)�
   borra directamente en el hub (el usuario de DB solo tiene `SELECT`).
 - Cualquier rectificación o supresión debe hacerse **en Zoho**, y **propagarse**
   al hub por el worker de sincronización.
+- **Excepción: datos propios del portal.** Lo que escribe el propio portal en el
+  esquema `portal` no es réplica de Zoho. Entre ellos `portal.tmc_avisos_envios`
+  (§2.2): destinatarios del cliente, asunto, quién y cuándo (no el cuerpo). No lo
+  corrige el worker: se atiende aparte (§5, paso 6).
 
 ## 4. Política de retención
 
-- El hub **no define una retención propia**: refleja lo que exista en Zoho. El
-  dato vive en el hub mientras exista en Zoho.
+- El hub **no define una retención propia** para lo que replica de Zoho: vive en
+  el hub mientras exista en Zoho. Los datos propios del portal (p. ej.
+  `tmc_avisos_envios`) tienen su retención aparte, hoy `[Definir]` (§2.2).
 - **Retención en Zoho (fuente):** `[Definir: periodo de conservación de datos de
   clientes/facturación — típicamente ligado a obligaciones contables/tributarias,
   p. ej. conservación de soportes contables]`.
@@ -113,8 +141,15 @@ Zoho (FUENTE DE VERDAD)  ──sync (worker @algarpibe/zoho-sync, ~cada 3 min)�
    registro del cliente.
 5. **Propagación al hub**: asegurar que el cambio llegue a `zoho-hub` (ver §6 —
    hoy hay una brecha técnica a cerrar).
-6. **Verificación**: confirmar que el hub ya no expone el dato (query de §7).
-7. **Registro y respuesta**: documentar la solicitud y responder al titular
+6. **Datos propios del portal** (no los toca el worker): si el titular es un
+   contacto de un cliente de Trazabilidad Mantenimientos, rectificar o suprimir
+   también su correo en `portal.tmc_avisos_envios` (columnas `destinatarios` y
+   `enviado_a`) y quitar o corregir su contacto puesto a mano
+   (`portal.tmc_contactos`). Además, borrar sus ejecuciones del flujo de envío en
+   el historial de n8n, que guarda el correo entero (destinatarios, asunto y
+   cuerpo). `[Definir quién lo ejecuta y cómo se deja constancia]`.
+7. **Verificación**: confirmar que el hub ya no expone el dato (query de §7).
+8. **Registro y respuesta**: documentar la solicitud y responder al titular
    dentro del plazo legal.
 
 ## 6. Brecha técnica a cerrar (propagación de borrados)

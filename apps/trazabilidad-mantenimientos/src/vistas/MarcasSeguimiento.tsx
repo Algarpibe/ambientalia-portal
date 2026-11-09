@@ -91,7 +91,7 @@ export default function MarcasSeguimiento({ notificar, onCambio }: Props) {
   return (
     <Card
       title="Marcas en seguimiento"
-      hint="Qué marcas entran en Resumen, Equipos, Calendario y Avisos, y cuándo vence su calibración. GRIMM EDM 180, siempre y a los 365 días (12 meses). Las demás no vencen mientras no se les ponga un plazo, o «según contrato del cliente»: Horiba se calibra con el preventivo de cada contrato, y la frecuencia de cada cliente se pone en «Frecuencia de preventivo por cliente» (o en la ficha de uno de sus equipos). Nada de esto envía nada: los avisos siguen siendo manuales o simulados."
+      hint="Qué marcas entran en Resumen, Equipos, Calendario y Avisos, y cuándo vence su calibración. GRIMM EDM 180, siempre y a los 365 días (12 meses). Las demás no vencen mientras no se les ponga un plazo, o «según contrato del cliente»: Horiba se calibra con el preventivo de cada contrato, y la frecuencia de cada cliente se pone en «Frecuencia de preventivo por cliente» (o en la ficha de uno de sus equipos). Nada de esto envía nada: el aviso sale sólo a mano, desde su tarjeta de «Avisos a clientes»."
     >
       {!editable && <p className="mb-3 text-xs text-gray-500">Sólo lectura: las enciende, las apaga y les pone la vigencia el Director Técnico.</p>}
       {error && (

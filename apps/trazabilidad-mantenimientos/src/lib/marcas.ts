@@ -2,8 +2,8 @@
  * Lo que calcula la tarjeta «Marcas en seguimiento» de Configuración (lote 9f),
  * la línea de la cabecera y el filtro de marca de «Equipos». Puro: sin React
  * ni red. Los recuentos llegan hechos del servidor (GET /marcas); aquí sólo se
- * redactan. Encender una marca no envía nada: los avisos siguen siendo
- * manuales o simulados.
+ * redactan. Encender una marca no envía nada: el aviso sale sólo a mano,
+ * desde su tarjeta de «Avisos a clientes».
  */
 import { ESTADOS_AVISO, SEGUN_CONTRATO, claveMarca, esVigenciaValida, estadoCalibracion, valorVigencia, type CambioMarca, type CambioVigencia, type EquipoVista, type MarcaSeguimiento, type ValorVigencia } from '../dominio';
 import { fmtFechaHora } from './vistas';
@@ -84,7 +84,7 @@ export function efectoVigencia(m: MarcaSeguimiento, nuevo: ValorVigencia): strin
       : nuevo === null
         ? 'Sus equipos dejan de vencer: siguen en Equipos y en la pestaña «Trazabilidad F-ST-022» con su última calibración, pero no salen en Avisos ni en el Calendario.'
         : `Sus equipos vencen a los ${textoDias(nuevo)} de su última calibración: Resumen, Calendario y Avisos lo recalculan al volver a leer.`;
-  return `${antes}${que} No se envía ningún correo: los avisos siguen siendo manuales o simulados. Se puede volver a cambiar.`;
+  return `${antes}${que} No se envía ningún correo: el aviso sale sólo a mano, desde su tarjeta de «Avisos a clientes». Se puede volver a cambiar.`;
 }
 
 /** Un apunte del historial de vigencias, en una línea. */
@@ -125,7 +125,7 @@ export function efectoMarca(m: MarcaSeguimiento): string {
   const n = m.resumen.equipos;
   return m.incluida
     ? `Sus ${n} equipos activos salen de Resumen, Equipos, Calendario y Avisos. Nada se borra: su seguimiento y sus calibraciones se conservan y la pestaña «Trazabilidad F-ST-022» los sigue enseñando. Se puede volver a encender.`
-    : `Sus ${n} equipos activos entran en Resumen, Equipos, Calendario y Avisos con la misma fecha de calibración que hoy enseña la pestaña «Trazabilidad F-ST-022». No se envía ningún correo: los avisos siguen siendo manuales o simulados. Un equipo que ya no se atiende se retira como siempre, y la marca se puede volver a apagar.`;
+    : `Sus ${n} equipos activos entran en Resumen, Equipos, Calendario y Avisos con la misma fecha de calibración que hoy enseña la pestaña «Trazabilidad F-ST-022». No se envía ningún correo: el aviso sale sólo a mano, desde su tarjeta de «Avisos a clientes». Un equipo que ya no se atiende se retira como siempre, y la marca se puede volver a apagar.`;
 }
 
 /** Un apunte del historial de cambios, en una línea. */

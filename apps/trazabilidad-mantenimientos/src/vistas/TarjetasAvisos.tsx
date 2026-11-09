@@ -128,7 +128,7 @@ export default function TarjetasAvisos({ equipos, hoy, contactos, envios, onFich
           lista={plan.yaAvisados}
           onFicha={onFicha}
           detalle={(a) => {
-            const e = envioDeEquipo(envios, a.equipo.clave);
+            const e = envioDeEquipo(envios, a.equipo.clave, a.tramo);
             return e ? `enviado desde aquí por ${e.por}` : null;
           }}
         />

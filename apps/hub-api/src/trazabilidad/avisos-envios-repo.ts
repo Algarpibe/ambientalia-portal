@@ -23,7 +23,7 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import { captureError } from '../sentry.js';
-import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoDePrueba, correoReal, destinatariosAceptables, estadoPresentado, mismaHuella, type CanalAvisos, type CorreoAEnviar, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type ResultadoRemision, type RespuestaEnvios } from './avisos-correo.js';
+import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoQueSale, correoReal, destinatariosAceptables, estadoPresentado, huellaTexto, mismaHuella, mismosDestinatarios, type CanalAvisos, type CorreoAEnviar, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type ResultadoRemision, type RespuestaEnvios } from './avisos-correo.js';
 import { comoTramoAviso, planAvisos, type TramoAviso } from './dominio.js';
 import { listarContactos, listarEquipos, registrarAvisos, withTransaction } from './repo.js';
 import { TzError, type Actor, type PedidoEnvio } from './types.js';
@@ -84,12 +84,21 @@ export async function leerEnvios(db: Db, canal: EstadoCanal): Promise<RespuestaE
  * los vistos (la huella son sus claves, no sus seriales: las mismas que se
  * apuntan y que marca `registrarAvisos`).
  */
-async function tarjetaVigente(db: Db, pedido: PedidoEnvio, hoy: string) {
+async function tarjetaVigente(db: Db, pedido: PedidoEnvio, hoy: string, estado: EstadoCanal) {
+  // Lo que se confirmó es lo que sale: el mismo modo y, más abajo, los mismos destinatarios de verdad.
+  if (estado.modo !== pedido.modo) throw new TzError('modo_cambiado', 409, 'El modo del envío cambió desde que abriste la confirmación: no se ha enviado nada. Se ha actualizado la pantalla; revisa y vuelve a enviar.');
   const [equipos, contactos] = await Promise.all([listarEquipos(db, hoy), listarContactos(db)]);
   const tarjeta = planAvisos(equipos, hoy, contactos).correos.find((c) => c.claveCliente === pedido.claveCliente && c.tramo === pedido.tramo);
   if (!tarjeta) throw new TzError('tarjeta_no_encontrada', 404, 'Ese aviso ya no está pendiente (puede que ya se haya enviado o que sus equipos hayan cambiado): recarga la página.');
   const claves = tarjeta.equipos.map((a) => a.equipo.clave);
   if (!mismaHuella(claves, pedido.equipos)) throw new TzError('tarjeta_cambiada', 409, 'La tarjeta cambió desde que la abriste: recarga la página y revísala antes de enviar.');
+  // Primero que se pueda enviar (también en prueba, para que la prueba enseñe lo que el real rechazaría); después, que sea a quien se confirmó.
+  const ahora = correoReal(tarjeta).para;
+  if (!destinatariosAceptables(ahora)) {
+    throw new TzError('destinatarios_no_validos', 409, `Este aviso no se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente, con ${MAX_DESTINATARIOS} direcciones como mucho, y vuelve a intentarlo. No se ha enviado ni apuntado nada.`);
+  }
+  if (!mismosDestinatarios(ahora, pedido.para)) throw new TzError('destinatarios_cambiados', 409, 'Los destinatarios de esta tarjeta cambiaron desde que abriste la confirmación: no se ha enviado nada. Se ha actualizado la pantalla; revisa y vuelve a enviar.');
+  if (huellaTexto(correoReal(tarjeta)) !== pedido.huellaTexto) throw new TzError('texto_cambiado', 409, 'El texto del aviso cambió desde que abriste la confirmación (una fecha de calibración o un nombre): no se ha enviado nada. Se ha actualizado la pantalla; léelo de nuevo y vuelve a enviar.');
   return { tarjeta, claves };
 }
 
@@ -138,12 +147,9 @@ async function entregar(canal: CanalAvisos, correo: CorreoAEnviar, id: number): 
 export async function enviarAviso(db: Pool, canal: CanalAvisos, pedido: PedidoEnvio, actor: Actor, hoy: string): Promise<EnvioAviso> {
   const estado = canal.estado();
   if (estado.modo === 'apagado') throw new TzError('envio_apagado', 409, 'El envío de avisos está apagado: no se ha enviado nada.');
-  const { tarjeta, claves } = await tarjetaVigente(db, pedido, hoy);
+  const { tarjeta, claves } = await tarjetaVigente(db, pedido, hoy, estado);
   const real = correoReal(tarjeta);
-  if (!destinatariosAceptables(real.para)) {
-    throw new TzError('destinatarios_no_validos', 409, `Este aviso no se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente, con ${MAX_DESTINATARIOS} direcciones como mucho, y vuelve a intentarlo. No se ha enviado ni apuntado nada.`);
-  }
-  const sale = estado.modo === 'prueba' ? correoDePrueba(real, estado.buzonPrueba) : real;
+  const sale = correoQueSale(tarjeta, estado) as CorreoAEnviar; // no es null: apagado ya se rechazó arriba
   // Apuntar y volver a mirar la tarjeta, en UNA transacción y en ese orden. Si otro envío de la misma tarjeta cerró (y marcó sus
   // equipos) entre la lectura de arriba y este apunte, el índice único ya no lo para —ese otro ya no está «en curso»—, pero la segunda
   // lectura, posterior al INSERT (READ COMMITTED), sí lo ve: ROLLBACK, sin fila y sin llamar al canal.
@@ -161,7 +167,7 @@ export async function enviarAviso(db: Pool, canal: CanalAvisos, pedido: PedidoEn
       if (pg.code === '23505' && pg.constraint === UNICO_EN_CURSO) throw new TzError('ya_enviando', 409, 'Este aviso ya se está enviando, o quedó sin confirmar: míralo en «Últimos envíos».');
       throw e;
     }
-    await tarjetaVigente(enSerie(c), pedido, hoy);
+    await tarjetaVigente(enSerie(c), pedido, hoy, canal.estado());
     return nuevo;
   });
   const r = await entregar(canal, sale, id);

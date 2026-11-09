@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ETIQUETA_TRAMO, MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoAviso, correoDePrueba, correoReal, destinatariosAceptables, esBuzonDePrueba, estadoPresentado, fechaDia, marcaAviso, mensajeAviso, mismaHuella, saludoAviso, todosGrimm } from './avisos-correo.js';
+import { ETIQUETA_TRAMO, MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoAviso, correoDePrueba, correoQueSale, correoReal, destinatariosAceptables, esBuzonDePrueba, estadoPresentado, fechaDia, huellaTexto, marcaAviso, mensajeAviso, mismaHuella, mismosDestinatarios, saludoAviso, todosGrimm } from './avisos-correo.js';
 import { estadoCalibracion, planAvisos, type ContactoEquipo } from './dominio.js';
 
 // El texto del aviso a clientes: el que sale de verdad al pulsar «Enviar correo»
@@ -125,6 +125,34 @@ describe('lo que sale: el correo real y su versión de prueba', () => {
     expect(p.cuerpo.endsWith(real.cuerpo)).toBe(true);
     expect(real.para).toHaveLength(2); // el real no se toca
     expect(correoDePrueba({ ...real, para: [] }, BUZON).cuerpo.split('\n')[0]).toContain('(sin destinatario)');
+  });
+
+  it('correoQueSale: real → el real; prueba → el de prueba al buzón; apagado → null', () => {
+    const t = tarjeta([eq('Cliente Uno', EN_30, desk('compras@cliente-uno.example', 'Ana Pérez'))]);
+    const r = correoReal(t);
+    expect(correoQueSale(t, { modo: 'real', motivo: null, buzonPrueba: null })).toEqual(r);
+    expect(correoQueSale(t, { modo: 'prueba', motivo: null, buzonPrueba: BUZON })).toEqual(correoDePrueba(r, BUZON));
+    expect(correoQueSale(t, { modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null })).toBeNull();
+  });
+
+  it('huellaTexto: estable, corta, en hexadecimal; cambia con cualquier letra del asunto o del cuerpo (fecha, nombre del cliente o del contacto)', () => {
+    const t = (cliente: string, ultima: string, nombre: string) => correoReal(tarjeta([eq(cliente, ultima, desk('compras@cliente-uno.example', nombre))]));
+    const base = t('Cliente Uno', EN_30, 'Ana Pérez');
+    const h = huellaTexto(base);
+    expect(h).toMatch(/^[0-9a-f]{8}$/);
+    expect(huellaTexto({ ...base })).toBe(h);
+    expect(huellaTexto({ asunto: 'a', cuerpo: 'bc' })).not.toBe(huellaTexto({ asunto: 'ab', cuerpo: 'c' })); // la frontera cuenta
+    // La huella no depende de los destinatarios (de eso se ocupa `para`), sí del texto.
+    expect(huellaTexto(Object.assign({}, base, { para: ['otro@example.com'] }))).toBe(h);
+    expect(huellaTexto(t('Cliente Uno', '2025-10-18', 'Ana Pérez'))).not.toBe(h); // otra fecha de calibración
+    expect(huellaTexto(t('Cliente Dos', EN_30, 'Ana Pérez'))).not.toBe(h); // otro nombre de cliente
+    expect(huellaTexto(t('Cliente Uno', EN_30, 'Ana Perez'))).not.toBe(h); // otro nombre de contacto
+  });
+
+  it('mismosDestinatarios: sin importar orden ni mayúsculas; distinta lista, no', () => {
+    expect(mismosDestinatarios(['b@x.example', 'A@x.example'], ['a@x.example', 'b@x.example'])).toBe(true);
+    expect(mismosDestinatarios(['a@x.example'], ['a@x.example', 'b@x.example'])).toBe(false);
+    expect(mismosDestinatarios(['a@x.example'], ['c@x.example'])).toBe(false);
   });
 
   it.each([
