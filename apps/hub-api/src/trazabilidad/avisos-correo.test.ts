@@ -127,7 +127,18 @@ describe('lo que sale: el correo real y su versión de prueba', () => {
     expect(correoDePrueba({ ...real, para: [] }, BUZON).cuerpo.split('\n')[0]).toContain('(sin destinatario)');
   });
 
-  it.each(['buzon@example.com', 'buzon@correo.ambientalia.com.co', 'buzon@ambientalia.com.co.example', 'no-es-correo', ''])('un buzón %j no vale: ni es de prueba ni se redacta nada', (b) => {
+  it.each([
+    'buzon@example.com',
+    'buzon@correo.ambientalia.com.co',
+    'buzon@ambientalia.com.co.example',
+    'no-es-correo',
+    '',
+    // CANDADO: una lista nunca pasa por buzón de prueba, aunque acabe en el dominio propio (en prueba no sale nada fuera de Ambientalia).
+    'otro@example.com, buzon@ambientalia.com.co',
+    'otro@example.com buzon@ambientalia.com.co',
+    'otro@example.com;buzon@ambientalia.com.co',
+    'otro@example.com@ambientalia.com.co',
+  ])('un buzón %j no vale: ni es de prueba ni se redacta nada', (b) => {
     expect(esBuzonDePrueba(b)).toBe(false);
     expect(() => correoDePrueba(real, b)).toThrow(/@ambientalia\.com\.co/);
   });
