@@ -4,6 +4,8 @@ import type { WoSalesConfig } from './config.js';
 import type { EmailPendiente, ResumenEmail } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 import { buildWorldOfficeCsv } from './builder.js';
+import { asignarDocumentoNumeros } from './documento-numero.repo.js';
+import { numerosANumerar } from './documento-numero.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
 import {
   cambiadasDesde,
@@ -31,20 +33,12 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
     'Se adjunta el archivo actualizado de pedidos para World Office.',
     `Órdenes de venta: ${resumen.ordenes} · Líneas de producto: ${resumen.filas}`,
   ];
-  // §9: este correo es la puerta por la que el archivo llega a contabilidad SIN pasar
-  // por el panel de advertencias de la app. Si lleva varias OV, el aviso tiene que ir
-  // aquí o nadie lo ve antes de subirlo a World Office.
-  if (resumen.ordenes > 1) {
+  if (resumen.cambiadas.length) lineas.push(`OV con cambios: ${resumen.cambiadas.join(', ')}`);
+  if (resumen.repetidas.length) {
     lineas.push(
-      '',
-      `ATENCIÓN: el archivo lleva ${resumen.ordenes} órdenes de venta bajo el mismo número de ` +
-        'documento, y World Office las fusionaría en un solo pedido. No lo subas tal cual ' +
-        'al ERP: está pendiente de confirmar con contabilidad si el archivo debe llevar ' +
-        'una sola orden de venta.',
-      ''
+      `OV con número repetido en Zoho (comparten DocumentoNúmero): ${resumen.repetidas.join(', ')}. Revisa en Zoho cuál es la vigente antes de subir el archivo.`
     );
   }
-  if (resumen.cambiadas.length) lineas.push(`OV con cambios: ${resumen.cambiadas.join(', ')}`);
   if (resumen.advertencias > 0) {
     lineas.push(`Advertencias: ${resumen.advertencias}. Revísalas en la app antes de subir el archivo.`);
   }
@@ -76,7 +70,10 @@ export async function computarPendiente(
   // Lo lento (leer la réplica de Zoho y armar la matriz) va FUERA del candado: no
   // depende del estado del correo y no tiene por qué hacer esperar a la otra petición.
   const ordenes = await source.ordenesVivas(filtro);
-  const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config);
+  // DocumentoNúmero fijo por OV (§8.1). Toma su propio candado y hace COMMIT antes de entrar al
+  // del correo: los dos no se anidan.
+  const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));
+  const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config, numeros);
   const token = hashMatriz(matriz);
 
   // Leer, decidir, sellar cortes y reservar en UNA transacción con el candado del
@@ -123,6 +120,7 @@ export async function computarPendiente(
     filas: matriz.length - 1,
     cambiadas,
     advertencias: warnings.length,
+    repetidas: warnings.filter((w) => w.tipo === 'ov_numero_repetido').map((w) => w.orden),
   };
   return {
     enviar: true,

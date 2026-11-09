@@ -73,7 +73,16 @@ export function partirCentroCostos(valor: string | null): {
   return { codigo, descripcion: resto.join(' '), valido: true };
 }
 
-export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig): BuildResult {
+/**
+ * `documentoNumeros`: el DocumentoNúmero fijo de cada OV (número de OV → número), de
+ * portal.wo_sales_documento_numero vía asignarDocumentoNumeros (§8.1). El builder no toca la BD.
+ * Solo las OV con líneas tienen número (numerosANumerar); una sin líneas no lo necesita.
+ */
+export function buildWorldOfficeCsv(
+  ordenes: SalesOrder[],
+  config: WoSalesConfig,
+  documentoNumeros: ReadonlyMap<string, number>
+): BuildResult {
   const warnings: Warning[] = [];
   // Matriz de celdas (cabecera + una fila por línea), como strings. Es la fuente única
   // para los dos formatos: el CSV se serializa uniendo con ';' y codificando a cp1252;
@@ -218,20 +227,26 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     ];
   }
 
-  // DocumentoNúmero (§3): un consecutivo por OV, desde consecutivoInicial. Un pedido de WO
-  // por OV para que cada pedido se convierta en la factura de su OV (en Zoho cada OV se
+  // DocumentoNúmero (§3, §8.1): el número FIJO de cada OV, de la tabla persistente. Un pedido
+  // de WO por OV para que cada pedido se convierta en la factura de su OV (en Zoho cada OV se
   // factura por separado). Agrupar por (fecha, NIT) escondía OV dentro del pedido de otra:
   // OV-2026-178..182 salían dentro del pedido con Nota "177". Una OV tiene una sola fecha
-  // y un solo NIT, así que la llave de documento sigue siendo coherente (§7.4). Orden:
-  // fecha ascendente y, en la misma fecha, número de OV; las líneas de una OV quedan
-  // contiguas.
+  // y un solo NIT, así que la llave de documento sigue siendo coherente (§7.4). Orden de las
+  // filas: fecha ascendente y, en la misma fecha, número de OV; las líneas de una OV quedan
+  // contiguas. El orden ya NO decide el número: una OV lleva el mismo en todos los archivos.
   const ordenadas = [...ordenes].sort(
     (a, b) => a.fecha.localeCompare(b.fecha) || a.numero.localeCompare(b.numero)
   );
-  let siguienteNumero = config.consecutivoInicial;
 
   for (const ov of ordenadas) {
-    const documentoNumero = siguienteNumero++;
+    const documentoNumero = documentoNumeros.get(ov.numero);
+    // Solo las OV con líneas reciben número (numerosANumerar): una sin líneas no emite filas y
+    // lo toma la primera vez que aparece con líneas. Aquí solo avisa.
+    if (documentoNumero === undefined && ov.lineas.length > 0) {
+      // Fallo de programación (el llamador no asignó), no un dato de Zoho: mejor ningún
+      // archivo que uno con la columna D vacía o con un número inventado.
+      throw new Error(`WO-sales: la OV ${ov.numero} no tiene DocumentoNúmero asignado`);
+    }
     if (ov.lineas.length === 0) {
       avisar({
         tipo: 'ov_sin_lineas',
@@ -284,7 +299,7 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
       config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
       config.tipoDocumento, //            1  Tipo Documento (PED)
       derivarPrefijo(ov.fecha, config), //2  prefijo (OV_AA)
-      String(documentoNumero), //          3  DocumentoNúmero (consecutivo por OV)
+      String(documentoNumero ?? ''), //    3  DocumentoNúmero (fijo por OV)
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)
@@ -303,6 +318,24 @@ export function buildWorldOfficeCsv(ordenes: SalesOrder[], config: WoSalesConfig
     for (const linea of ov.lineas) {
       matriz.push([...encabezado, ...detalle(ov, linea, vencimiento)]);
     }
+  }
+
+  // El DocumentoNúmero se asigna por número de OV, pero la réplica agrupa por salesorder_id:
+  // dos OV distintas con el mismo número saldrían con el mismo DocumentoNúmero y WO las juntaría
+  // en un solo pedido. Se avisa una vez por número («avisar y seguir»); el archivo no cambia.
+  // Va después del bucle (el número ya pasó la guarda que lanza) y solo cuenta las OV que
+  // emiten filas: una sin líneas no colisiona en el archivo.
+  const apariciones = new Map<string, number>();
+  for (const ov of ordenadas) {
+    if (ov.lineas.length > 0) apariciones.set(ov.numero, (apariciones.get(ov.numero) ?? 0) + 1);
+  }
+  for (const [numero, n] of apariciones) {
+    if (n < 2) continue;
+    avisar({
+      tipo: 'ov_numero_repetido',
+      orden: numero,
+      mensaje: `La OV aparece ${n} veces en la réplica de Zoho (son órdenes distintas con el mismo número) y todas llevan el DocumentoNúmero ${documentoNumeros.get(numero)}: World Office las juntaría en un solo pedido. Revisa en Zoho cuál es la vigente antes de subir el archivo.`,
+    });
   }
 
   return {

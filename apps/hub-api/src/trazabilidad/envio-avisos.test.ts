@@ -50,8 +50,8 @@ describe('069_trazabilidad_avisos_envios.sql', () => {
     expect(sinComentarios).not.toMatch(/cuerpo/i);
   });
 
-  it('está apuntada en MIGRATIONS, detrás de la 068, y es la última', () => {
-    expect(fuente('../db.ts')).toMatch(/'068_permisos_portal_app\.sql',\s*'069_trazabilidad_avisos_envios\.sql'\];/);
+  it('está apuntada en MIGRATIONS, detrás de la 068', () => {
+    expect(fuente('../db.ts')).toMatch(/'068_permisos_portal_app\.sql',\s*'069_trazabilidad_avisos_envios\.sql'/);
   });
 });
 

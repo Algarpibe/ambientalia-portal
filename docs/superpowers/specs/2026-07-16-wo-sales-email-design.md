@@ -91,7 +91,9 @@ no JWT de usuario. 401 si falta o no coincide.
 - `GET /api/wo-sales/email/pendiente`
   → `{ enviar: false }` | `{ enviar: true, xlsBase64, nombreArchivo, destinatarios:
   [{email, nombre}], asunto, cuerpo, resumen: { ordenes, filas, cambiadas: string[],
-  advertencias: number }, token }`
+  advertencias: number, repetidas: string[] }, token }`
+  `repetidas` = números de OV que aparecen 2+ veces en la réplica de Zoho y comparten
+  DocumentoNúmero (añadido el 2026-11-09 para §8.1); el cuerpo las nombra antes de las advertencias.
   El `asunto` y `cuerpo` los arma hub-api (una sola fuente, testeable). `cambiadas` =
   OV vivas con `zoho_last_modified > ultimo_envio_at` (mejor esfuerzo, para el cuerpo).
   - **Asunto**: `Nueva actualización de MovimientoInventarioWO`

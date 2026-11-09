@@ -3,6 +3,8 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import { requireAuth, requireApp, requireCronToken, requireAdmin } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { buildWorldOfficeCsv } from './builder.js';
+import { asignarDocumentoNumeros } from './documento-numero.repo.js';
+import { numerosANumerar } from './documento-numero.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
 import { createHubSalesOrderSource } from './hub.source.js';
 import { DEFAULT_CONFIG } from './config.js';
@@ -139,7 +141,8 @@ export function createWoSalesRouter(db: Pool): Router {
         source.ordenesVivas(filtro),
         source.ordenesAntiguas(filtro),
       ]);
-      const { warnings, filas } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
+      const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));
+      const { warnings, filas } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG, numeros);
       // Las OV vivas anteriores al rango no entran al archivo, pero se listan: son
       // pedidos que llevan años sin cerrarse y alguien tiene que mirarlos.
       const avisosAntiguas: Warning[] = antiguas.map((o) => ({
@@ -160,7 +163,8 @@ export function createWoSalesRouter(db: Pool): Router {
       if (!leido.ok) return void res.status(400).json({ error: leido.error, field: leido.field });
 
       const ordenes = await source.ordenesVivas(leido.filtro);
-      const { csv, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
+      const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));
+      const { csv, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG, numeros);
       res.setHeader('Content-Type', 'text/csv; charset=windows-1252');
       res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso, 'csv')}"`);
       // El mismo motivo por el que no se usa cached(): un CSV desactualizado subido al
@@ -196,7 +200,8 @@ export function createWoSalesRouter(db: Pool): Router {
       if (!leido.ok) return void res.status(400).json({ error: leido.error, field: leido.field });
 
       const ordenes = await source.ordenesVivas(leido.filtro);
-      const { matriz, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG);
+      const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));
+      const { matriz, warnings } = buildWorldOfficeCsv(ordenes, DEFAULT_CONFIG, numeros);
       const xls = buildWorldOfficeXlsx(matriz);
       res.setHeader('Content-Type', 'application/vnd.ms-excel');
       res.setHeader('Content-Disposition', `attachment; filename="${nombreArchivo(hoyIso, 'xls')}"`);

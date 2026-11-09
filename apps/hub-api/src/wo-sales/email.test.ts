@@ -20,6 +20,8 @@ describe('hashMatriz', () => {
   });
 });
 
+const MAX_SEMBRADO = 38; // MAX(documento_numero) que ve la fakeDb: la primera OV nueva recibe MAX_SEMBRADO + 1
+
 describe('computarPendiente', () => {
   // Una OV mínima válida; el builder real produce una matriz estable a partir de ella.
   const ov: SalesOrder = {
@@ -40,7 +42,7 @@ describe('computarPendiente', () => {
   const source: SalesOrderSource = {
     ordenesVivas: async () => [ov],
     ordenesAntiguas: async () => [],
-  } as unknown as SalesOrderSource;
+  };
   const filtro: SalesOrderFiltro = { desde: '2026-01-01', hasta: '2026-12-31' };
 
   /** Fake db: `filas` son los destinatarios que devuelve destinatariosConEstado (sin
@@ -52,6 +54,8 @@ describe('computarPendiente', () => {
   function fakeDb(filas: Record<string, unknown>[]) {
     const cortes: unknown[][] = [];
     const query = async (sql: string, params: unknown[]) => {
+      // asignarDocumentoNumeros: tabla con las MAX_SEMBRADO congeladas → 'OV-1' recibe MAX_SEMBRADO + 1.
+      if (sql.includes('MAX(documento_numero)')) return { rows: [{ max: MAX_SEMBRADO }] };
       if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
         cortes.push(params);
         return { rows: [] };
@@ -69,7 +73,7 @@ describe('computarPendiente', () => {
   const ahora = new Date('2026-09-25T10:00-05:00');
   const hoy8 = new Date('2026-09-25T08:00-05:00');
   const ayer8 = new Date('2026-09-24T08:00-05:00');
-  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG).matriz);
+  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG, new Map([['OV-1', MAX_SEMBRADO + 1]])).matriz);
   const diario = { frecuencia: 'diario', hora: 8, dia_semana: null };
 
   it('diario: franja nueva con cambios → se envía, y la franja NO se sella hasta confirmar', async () => {
@@ -104,6 +108,65 @@ describe('computarPendiente', () => {
     }
   });
 
+  it('una corrida normal no trae OV repetidas ni la línea en el cuerpo', async () => {
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), source, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) {
+      expect(r.resumen.repetidas).toEqual([]);
+      expect(r.cuerpo).not.toContain('OV con número repetido en Zoho');
+    }
+  });
+
+  it('dos OV de Zoho con el mismo número: el cuerpo y el resumen las nombran', async () => {
+    const otra: SalesOrder = { ...ov, lineas: [{ ...ov.lineas[0], sku: 'S2', cantidad: 5 }] };
+    const dupSource = {
+      ordenesVivas: async () => [ov, otra],
+      ordenesAntiguas: async () => [],
+    };
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), dupSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) {
+      expect(r.resumen.repetidas).toEqual(['OV-1']);
+      expect(r.cuerpo).toContain(
+        'OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1. Revisa en Zoho cuál es la vigente antes de subir el archivo.'
+      );
+    }
+  });
+
+  it('una OV sin líneas no consume número: la asignación solo recibe la OV con líneas', async () => {
+    const vacia: SalesOrder = { ...ov, numero: 'OV-0', lineas: [] };
+    const mixSource: SalesOrderSource = {
+      ordenesVivas: async () => [vacia, ov],
+      ordenesAntiguas: async () => [],
+    };
+    const db = fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]);
+    const originalConnect = db.connect;
+    const select: unknown[][] = [];
+    db.connect = async () => {
+      const c = await originalConnect();
+      const q = c.query;
+      c.query = async (sql: string, params: unknown[]) => {
+        if (sql.includes('numero_ov = ANY')) select.push(params);
+        return q(sql, params);
+      };
+      return c;
+    };
+    const r = await computarPendiente(db, mixSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    expect(select).toEqual([[['OV-1']]]);
+  });
+
+  it('dos números repetidos: resumen.repetidas los trae en el orden del archivo', async () => {
+    const mk = (numero: string, sku: string): SalesOrder => ({ ...ov, numero, lineas: [{ ...ov.lineas[0], sku }] });
+    const dupSource: SalesOrderSource = {
+      ordenesVivas: async () => [mk('OV-9', 'a'), mk('OV-9', 'b'), mk('OV-2', 'c'), mk('OV-2', 'd')],
+      ordenesAntiguas: async () => [],
+    };
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), dupSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) expect(r.resumen.repetidas).toEqual(['OV-2', 'OV-9']);
+  });
+
   it('no envía cuando no hay pendientes (todos ya tienen el archivo actual o no hay destinatarios)', async () => {
     const r = await computarPendiente(fakeDb([]), source, DEFAULT_CONFIG, filtro, 'a.xls');
     expect(r.enviar).toBe(false);
@@ -113,7 +176,7 @@ describe('computarPendiente', () => {
 describe('construirCuerpo', () => {
   it('incluye el asunto, los totales y las OV cambiadas', () => {
     const cuerpo = construirCuerpo(
-      { ordenes: 3, filas: 7, cambiadas: ['OV-2026-138', 'OV-2026-077'], advertencias: 0 },
+      { ordenes: 3, filas: 7, cambiadas: ['OV-2026-138', 'OV-2026-077'], advertencias: 0, repetidas: [] },
       DEFAULT_CONFIG
     );
     expect(cuerpo).toContain('Nueva actualización de MovimientoInventarioWO');
@@ -122,28 +185,49 @@ describe('construirCuerpo', () => {
     expect(cuerpo).toContain('OV-2026-138');
   });
   it('menciona las advertencias solo si las hay', () => {
-    const con = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 5 }, DEFAULT_CONFIG);
+    const con = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 5, repetidas: [] }, DEFAULT_CONFIG);
     expect(con).toContain('5');
-    const sin = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 0 }, DEFAULT_CONFIG);
+    const sin = construirCuerpo({ ordenes: 1, filas: 1, cambiadas: [], advertencias: 0, repetidas: [] }, DEFAULT_CONFIG);
     expect(sin.toLowerCase()).not.toContain('advertencia');
   });
 });
 
-// §9: el correo automático adjunta el archivo consolidado. Es la puerta por la que el
-// archivo llega a contabilidad sin pasar por el panel de advertencias de la app, así
-// que el aviso de no subirlo tal cual tiene que ir en el cuerpo del mensaje.
-describe('construirCuerpo — aviso del archivo consolidado (§9)', () => {
-  const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0 });
+// Cada OV lleva su propio DocumentoNúmero, fijo y persistente: el correo ya no avisa de un
+// número de documento compartido por varias órdenes, aunque el archivo lleve muchas.
+describe('construirCuerpo — varias órdenes en el archivo', () => {
+  const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0, repetidas: [] });
 
-  it('avisa de no subir el archivo cuando lleva varias órdenes', () => {
+  it('con varias órdenes no avisa de un número de documento compartido', () => {
     const cuerpo = construirCuerpo(resumen(25), DEFAULT_CONFIG);
-    expect(cuerpo).toMatch(/no lo subas/i);
-    expect(cuerpo).toContain('25');
+    expect(cuerpo).not.toContain('ATENCIÓN');
+    expect(cuerpo).not.toContain('mismo número de documento');
+    expect(cuerpo).not.toMatch(/no lo subas/i);
+    expect(cuerpo).toContain('Órdenes de venta: 25 · Líneas de producto: 75');
   });
 
-  it('no avisa cuando el archivo lleva una sola orden', () => {
-    const cuerpo = construirCuerpo(resumen(1), DEFAULT_CONFIG);
-    expect(cuerpo).not.toMatch(/no lo subas/i);
+  it('cuerpo exacto sin cambiadas, sin repetidas y sin advertencias', () => {
+    expect(construirCuerpo(resumen(1), DEFAULT_CONFIG)).toBe(
+      [
+        DEFAULT_CONFIG.emailAsunto,
+        '',
+        'Se adjunta el archivo actualizado de pedidos para World Office.',
+        'Órdenes de venta: 1 · Líneas de producto: 3',
+      ].join('\n')
+    );
+  });
+
+  it('orden de las líneas: cambios, luego OV repetidas, luego advertencias', () => {
+    const cuerpo = construirCuerpo(
+      { ordenes: 2, filas: 2, cambiadas: ['OV-1'], advertencias: 3, repetidas: ['OV-1'] },
+      DEFAULT_CONFIG
+    );
+    const i = (t: string) => cuerpo.indexOf(t);
+    expect(i('OV con cambios')).toBeGreaterThan(-1);
+    expect(i('OV con cambios')).toBeLessThan(i('OV con número repetido en Zoho'));
+    expect(i('OV con número repetido en Zoho')).toBeLessThan(i('Advertencias:'));
+    expect(cuerpo).toContain(
+      'OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1. Revisa en Zoho cuál es la vigente antes de subir el archivo.'
+    );
   });
 });
 
