@@ -16,7 +16,7 @@ function porTexto(a: string, b: string): number {
 
 /**
  * Orden de asignación: por año y consecutivo NUMÉRICOS de "OV-AAAA-XXX" (la OV-2026-999 antes que
- * la OV-2026-1000), para que en un lote la OV-2026-212 reciba su número antes que la 213. Lo que
+ * la OV-2026-1000), para que en un lote la OV-2026-213 reciba su número antes que la 214. Lo que
  * no cumpla el patrón va al final, en orden de texto. Devuelve un arreglo nuevo.
  */
 export function ordenarParaAsignar(numerosOV: readonly string[]): string[] {

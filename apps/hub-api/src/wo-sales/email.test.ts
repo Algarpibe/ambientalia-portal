@@ -20,7 +20,7 @@ describe('hashMatriz', () => {
   });
 });
 
-const MAX_SEMBRADO = 37; // MAX(documento_numero) que ve la fakeDb: la primera OV nueva recibe MAX_SEMBRADO + 1
+const MAX_SEMBRADO = 38; // MAX(documento_numero) que ve la fakeDb: la primera OV nueva recibe MAX_SEMBRADO + 1
 
 describe('computarPendiente', () => {
   // Una OV mínima válida; el builder real produce una matriz estable a partir de ella.

@@ -50,3 +50,20 @@ describe('migración 070', () => {
     expect(db).toMatch(/'069_trazabilidad_avisos_envios\.sql',\s*'070_wo_sales_documento_numero\.sql'\];/);
   });
 });
+
+describe('migración 070: siembra', () => {
+  const sql = readFileSync(
+    fileURLToPath(new URL('../users/migrations/070_wo_sales_documento_numero.sql', import.meta.url)),
+    'utf8'
+  );
+  const semillas = [...sql.matchAll(/\('(OV-\d{4}-\d+)',\s*(\d+),\s*'congelado'\)/g)].map((m) => [m[1], Number(m[2])]);
+
+  it('congela 38 OV, del 1 al 38 sin huecos', () => {
+    expect(semillas.map((s) => s[1])).toEqual(Array.from({ length: 38 }, (_, i) => i + 1));
+  });
+
+  it('la OV-2026-212 queda congelada con el 38 (ya facturada: no saldrá en el archivo)', () => {
+    expect(semillas).toContainEqual(['OV-2026-211', 37]);
+    expect(semillas).toContainEqual(['OV-2026-212', 38]);
+  });
+});

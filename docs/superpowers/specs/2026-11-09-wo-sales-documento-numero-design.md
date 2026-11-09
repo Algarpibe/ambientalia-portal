@@ -30,11 +30,11 @@ Consecuencias:
   numeración en WO queda seguida, sin huecos.
 - **Un solo contador para todos los prefijos**, que nunca se reinicia: OV_25 y OV_26
   comparten la secuencia, y en 2027 (OV_27) se sigue desde el número que toque.
-- **Arranque**: la OV-2026-212 es la **38** y a partir de ahí, consecutivos.
+- **Arranque**: la OV-2026-212 queda congelada con el **38** (decisión del usuario, 2026-11-09): ya está facturada en Zoho antes del despliegue y nunca saldrá en el archivo, pero se congela para que la 213 sea la **39**, la 214 la 40, y así consecutivos. La 212 NO está cargada en WO.
 - **Congelación**: las OV anteriores conservan el número con el que salieron en el archivo
   `apps/WO-sales/xlsx/DocumentosVentasEncabezadosMovimientoInventarioWO_2026-10-31.xls`
   (gitignored). Ese archivo trae 37 pedidos numerados del 1 al 37 sin huecos; el último es
-  la OV-2026-211 → 37, coherente con que la 212 sea la 38.
+  la OV-2026-211 → 37. La 212 (→ 38) se añade a la siembra por la decisión de arriba; no estaba en ese archivo.
 - **Solo las OV que emiten filas (al menos una línea) reciben número.** Una OV sin líneas
   (`ov_sin_lineas`) no llega a World Office y no consume número: lo recibe la primera vez que
   aparece con líneas. Así la numeración no deja huecos.
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
 - Clave = número de OV de Zoho (`SalesOrder.numero`), que es lo único que conoce el archivo
   del 31/10 y lo que el builder ya recibe.
 - Las filas **nunca se borran ni se modifican**: eso es lo que hace al número irrepetible.
-- La misma migración siembra las 37 OV congeladas con `origen = 'congelado'` y
+- La misma migración siembra 38 OV congeladas (las 37 del archivo más la 212) con `origen = 'congelado'` y
   `INSERT … ON CONFLICT DO NOTHING` (initDb re-ejecuta las migraciones en cada arranque; la
   siembra tiene que ser idempotente). El número de OV se reconstruye como
   `OV-20{AA}-{Nota}` a partir del prefijo y la Nota del archivo:
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
 | 5 | OV-2025-199 | 15 | OV-2026-156 | 25 | OV-2026-196 | 35 | OV-2026-209 |
 | 6 | OV-2026-021 | 16 | OV-2026-157 | 26 | OV-2026-198 | 36 | OV-2026-210 |
 | 7 | OV-2026-033 | 17 | OV-2026-160 | 27 | OV-2026-201 | 37 | OV-2026-211 |
-| 8 | OV-2026-057 | 18 | OV-2026-167 | 28 | OV-2026-202 | | |
+| 8 | OV-2026-057 | 18 | OV-2026-167 | 28 | OV-2026-202 | 38 | OV-2026-212 |
 | 9 | OV-2026-081 | 19 | OV-2026-171 | 29 | OV-2026-203 | | |
 | 10 | OV-2026-142 | 20 | OV-2026-187 | 30 | OV-2026-204 | | |
 
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
      patrón de candado del repo (p. ej. `contratos-repo.ts`), distinto del candado del correo.
   3. Lee las filas existentes de esos números de OV.
   4. A las que faltan, en el orden de `ordenarParaAsignar`, les da `MAX(documento_numero) + 1`,
-     `+ 2`… (`origen = 'asignado'`). Con la siembra, el primero es el 38.
+     `+ 2`… (`origen = 'asignado'`). Con la siembra, el primero es el 39.
   5. `COMMIT` y devuelve el mapa completo (existentes + recién asignados).
   - El candado serializa dos generaciones simultáneas; el `UNIQUE` es la red de seguridad.
   - Se usa `MAX + 1` y no una `SEQUENCE`: una secuencia consume números aunque el `INSERT`
@@ -149,9 +149,9 @@ una línea; una OV sin líneas no se numera y el builder solo la avisa).
 - `documento-numero.test.ts`: orden numérico por año y consecutivo; `OV-2026-999` antes que
   `OV-2026-1000`; no conformes al final.
 - `documento-numero.db.test.ts` (contra Postgres real):
-  - las 37 congeladas están sembradas (`OV-2026-211` → 37);
-  - la primera OV nueva recibe el 38; un lote `[OV-2026-213, OV-2026-212]` da 212 → 38 y
-    213 → 39;
+  - las 38 congeladas están sembradas (`OV-2026-211` → 37, `OV-2026-212` → 38);
+  - la primera OV nueva recibe el 39; un lote `[OV-2026-214, OV-2026-213]` da 213 → 39 y
+    214 → 40;
   - volver a pedir las mismas OV devuelve los mismos números sin crear filas;
   - una OV que deja de pedirse no libera su número (la siguiente nueva no lo reutiliza);
   - dos asignaciones concurrentes con OV nuevas solapadas no repiten número ni dejan huecos.
@@ -161,12 +161,12 @@ una línea; una OV sin líneas no se numera y el builder solo la avisa).
 
 - Orden: desplegar hub-api y la SPA de WO-sales juntas. Si la SPA es más vieja, muestra el slug
   crudo `ov_numero_repetido` (`metaDe` cae al tipo), lo cual es inofensivo pero confuso.
-- **Antes del primer archivo real**: si hoy hay abierta alguna OV **anterior a la 212** que no
-  esté entre las 37 congeladas, se llevará el 38 y la 212 bajará al 39. El plan incluye la
+- **Antes del primer archivo real**: si hoy hay abierta alguna OV **anterior a la 213** que no
+  esté entre las 38 congeladas, se llevará el 39 y la 213 bajará al 40. El plan incluye la
   consulta SQL contra la réplica (`books.*`, base `zoho-hub`) que lista las OV vivas sin
   número congelado, para revisarlo antes de desplegar.
 - **Después de desplegar**: consulta que muestra las últimas filas de
-  `portal.wo_sales_documento_numero` para confirmar 212 → 38 y los siguientes.
+  `portal.wo_sales_documento_numero` para confirmar 213 → 39 y los siguientes.
 
 ## 8. Fuera de alcance
 

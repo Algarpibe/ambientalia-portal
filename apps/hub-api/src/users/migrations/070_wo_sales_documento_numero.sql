@@ -11,7 +11,8 @@
 --
 -- Siembra: las 37 OV del archivo DocumentosVentasEncabezadosMovimientoInventarioWO_2026-10-31.xls
 -- (lo que ya está cargado en WO), con el número que llevaban allí. Número de OV reconstruido como
--- OV-20{AA}-{Nota} a partir del prefijo y la Nota. La siguiente, OV-2026-212, recibe el 38.
+-- OV-20{AA}-{Nota} a partir del prefijo y la Nota. Más la OV-2026-212 con el 38 (ver abajo).
+-- La siguiente OV nueva, OV-2026-213, recibe el 39.
 --
 -- Solo DDL e INSERT idempotentes: initDb() re-ejecuta las migraciones en cada arranque.
 
@@ -61,7 +62,11 @@ INSERT INTO portal.wo_sales_documento_numero (numero_ov, documento_numero, orige
   ('OV-2026-208', 34, 'congelado'),
   ('OV-2026-209', 35, 'congelado'),
   ('OV-2026-210', 36, 'congelado'),
-  ('OV-2026-211', 37, 'congelado')
+  ('OV-2026-211', 37, 'congelado'),
+  -- Decisión del usuario (2026-11-09): la 212 queda congelada con el 38. Ya está facturada en Zoho
+  -- (antes del despliegue), así que nunca saldrá en el archivo; se congela para que la 213 reciba el
+  -- 39. A diferencia de las filas 1–37, NO estaba en el archivo del 31/10 ni está cargada en WO.
+  ('OV-2026-212', 38, 'congelado')
 ON CONFLICT DO NOTHING;
 
 -- DATA-332: el rol de las peticiones lee y añade números, nunca los cambia ni los borra.

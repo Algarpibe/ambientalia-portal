@@ -3,10 +3,10 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Que la columna D (`DocumentoNúmero`) del archivo de World Office salga de una tabla
-persistente: cada OV recibe un número una sola vez (OV-2026-212 = 38) y lo conserva para siempre.
+persistente: cada OV recibe un número una sola vez (OV-2026-212 = 38, congelada; la primera nueva, la 213, = 39) y lo conserva para siempre.
 
-**Architecture:** Una tabla `portal.wo_sales_documento_numero` (migración 070) sembrada con las 37
-OV ya cargadas en WO. Un repo asigna `MAX + 1` a las OV que aún no tienen número, en una
+**Architecture:** Una tabla `portal.wo_sales_documento_numero` (migración 070) sembrada con 38 OV (las 37
+ya cargadas en WO y la 212). Un repo asigna `MAX + 1` a las OV que aún no tienen número, en una
 transacción con candado consultivo. El builder sigue puro: recibe un `Map<numeroOV, número>`.
 Las cuatro vías que generan el archivo (preview, csv, xlsx, correo) asignan antes de construir.
 
@@ -35,7 +35,7 @@ Vitest (unitarios en `vitest.config.ts`; contra Postgres real con Testcontainers
 |---|---|---|
 | `apps/hub-api/src/wo-sales/documento-numero.ts` | Crear | Puro: orden en que las OV sin número reciben el suyo. |
 | `apps/hub-api/src/wo-sales/documento-numero.test.ts` | Crear | Unitarios del orden. |
-| `apps/hub-api/src/users/migrations/070_wo_sales_documento_numero.sql` | Crear | Tabla + siembra de las 37 congeladas + permisos de `portal_app`. |
+| `apps/hub-api/src/users/migrations/070_wo_sales_documento_numero.sql` | Crear | Tabla + siembra de las 38 congeladas + permisos de `portal_app`. |
 | `apps/hub-api/src/db.ts` | Modificar (línea 102, array `MIGRATIONS`) | Registrar la 070. |
 | `apps/hub-api/src/wo-sales/documento-numero.repo.ts` | Crear | BD: `asignarDocumentoNumeros(db, numerosOV)`. |
 | `apps/hub-api/src/wo-sales/documento-numero.db.test.ts` | Crear | Contra Postgres real: siembra, asignación, estabilidad, concurrencia. |
@@ -207,71 +207,73 @@ async function filas(): Promise<Fila[]> {
 }
 
 describe('migración 070: siembra del archivo del 31/10', () => {
-  it('congela las 37 OV ya cargadas en WO, del 1 al 37 sin huecos', async () => {
+  it('congela las 37 OV ya cargadas en WO más la 212, del 1 al 38 sin huecos', async () => {
     const congeladas = (await filas()).filter((f) => f.origen === 'congelado');
-    expect(congeladas.map((f) => f.documento_numero)).toEqual(Array.from({ length: 37 }, (_, i) => i + 1));
+    expect(congeladas.map((f) => f.documento_numero)).toEqual(Array.from({ length: 38 }, (_, i) => i + 1));
     expect(congeladas[0].numero_ov).toBe('OV-2022-105');
     expect(congeladas[36].numero_ov).toBe('OV-2026-211');
+    expect(congeladas[37].numero_ov).toBe('OV-2026-212');
   });
 
   it('re-ejecutarla (initDb lo hace en cada arranque) no duplica ni cambia nada', async () => {
     const ruta = fileURLToPath(new URL('../users/migrations/070_wo_sales_documento_numero.sql', import.meta.url));
     await db.query(readFileSync(ruta, 'utf8'));
     const todas = await filas();
-    expect(todas).toHaveLength(37);
+    expect(todas).toHaveLength(38);
     expect(todas[36]).toMatchObject({ numero_ov: 'OV-2026-211', documento_numero: 37 });
+    expect(todas[37]).toMatchObject({ numero_ov: 'OV-2026-212', documento_numero: 38 });
   });
 });
 
 describe('asignarDocumentoNumeros', () => {
   it('una OV congelada conserva su número', async () => {
-    const m = await asignarDocumentoNumeros(db, ['OV-2026-211', 'OV-2025-030']);
-    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-211': 37, 'OV-2025-030': 2 });
+    const m = await asignarDocumentoNumeros(db, ['OV-2026-211', 'OV-2026-212', 'OV-2025-030']);
+    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-211': 37, 'OV-2026-212': 38, 'OV-2025-030': 2 });
   });
 
-  it('la primera OV nueva recibe el 38', async () => {
-    const m = await asignarDocumentoNumeros(db, ['OV-2026-212']);
-    expect(m.get('OV-2026-212')).toBe(38);
+  it('la primera OV nueva recibe el 39 (la 212 está congelada con el 38)', async () => {
+    const m = await asignarDocumentoNumeros(db, ['OV-2026-213']);
+    expect(m.get('OV-2026-213')).toBe(39);
   });
 
-  it('un lote se reparte por número de OV: la 212 antes que la 213', async () => {
-    const m = await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-212', 'OV-2026-211']);
-    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-211': 37, 'OV-2026-212': 38, 'OV-2026-213': 39 });
+  it('un lote se reparte por número de OV: la 213 antes que la 214', async () => {
+    const m = await asignarDocumentoNumeros(db, ['OV-2026-214', 'OV-2026-213', 'OV-2026-211']);
+    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-211': 37, 'OV-2026-213': 39, 'OV-2026-214': 40 });
   });
 
   it('pedir otra vez las mismas OV devuelve los mismos números sin crear filas', async () => {
-    const primera = await asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']);
-    const segunda = await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-212']);
+    const primera = await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
+    const segunda = await asignarDocumentoNumeros(db, ['OV-2026-214', 'OV-2026-213']);
     expect(Object.fromEntries(segunda)).toEqual(Object.fromEntries(primera));
     expect((await filas()).filter((f) => f.origen === 'asignado')).toHaveLength(2);
   });
 
   it('una OV que sale del archivo (facturada) no libera su número', async () => {
-    await asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']);
-    // La 212 se facturó y ya no se pide; entra la 214.
-    const m = await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
-    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-213': 39, 'OV-2026-214': 40 });
+    await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
+    // La 213 se facturó y ya no se pide; entra la 215.
+    const m = await asignarDocumentoNumeros(db, ['OV-2026-214', 'OV-2026-215']);
+    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-214': 40, 'OV-2026-215': 41 });
   });
 
   it('dos asignaciones a la vez no repiten número ni dejan huecos', async () => {
     const [a, b] = await Promise.all([
-      asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']),
       asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']),
+      asignarDocumentoNumeros(db, ['OV-2026-214', 'OV-2026-215']),
     ]);
-    expect(a.get('OV-2026-213')).toBe(b.get('OV-2026-213'));
+    expect(a.get('OV-2026-214')).toBe(b.get('OV-2026-214'));
     const nuevos = (await filas()).filter((f) => f.origen === 'asignado').map((f) => f.documento_numero);
-    expect(nuevos).toEqual([38, 39, 40]);
+    expect(nuevos).toEqual([39, 40, 41]);
   });
 
   it('un número de OV repetido en la entrada cuenta una sola vez', async () => {
-    const m = await asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-212']);
-    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-212': 38 });
+    const m = await asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-213']);
+    expect(Object.fromEntries(m)).toEqual({ 'OV-2026-213': 39 });
   });
 
   it('sin OV devuelve un mapa vacío y no crea filas', async () => {
     const m = await asignarDocumentoNumeros(db, []);
     expect(m.size).toBe(0);
-    expect(await filas()).toHaveLength(37);
+    expect(await filas()).toHaveLength(38);
   });
 });
 ```
@@ -298,7 +300,7 @@ Crear `apps/hub-api/src/users/migrations/070_wo_sales_documento_numero.sql`:
 --
 -- Siembra: las 37 OV del archivo DocumentosVentasEncabezadosMovimientoInventarioWO_2026-10-31.xls
 -- (lo que ya está cargado en WO), con el número que llevaban allí. Número de OV reconstruido como
--- OV-20{AA}-{Nota} a partir del prefijo y la Nota. La siguiente, OV-2026-212, recibe el 38.
+-- OV-20{AA}-{Nota} a partir del prefijo y la Nota. Más la OV-2026-212 con el 38; la siguiente nueva, OV-2026-213, recibe el 39.
 --
 -- Solo DDL e INSERT idempotentes: initDb() re-ejecuta las migraciones en cada arranque.
 
@@ -348,7 +350,10 @@ INSERT INTO portal.wo_sales_documento_numero (numero_ov, documento_numero, orige
   ('OV-2026-208', 34, 'congelado'),
   ('OV-2026-209', 35, 'congelado'),
   ('OV-2026-210', 36, 'congelado'),
-  ('OV-2026-211', 37, 'congelado')
+  ('OV-2026-211', 37, 'congelado'),
+  -- Decisión del usuario (2026-11-09): la 212 ya está facturada en Zoho y nunca saldrá en el archivo;
+  -- se congela con el 38 para que la 213 reciba el 39. NO estaba en el archivo del 31/10.
+  ('OV-2026-212', 38, 'congelado')
 ON CONFLICT DO NOTHING;
 
 -- DATA-332: el rol de las peticiones lee y añade números, nunca los cambia ni los borra.
@@ -887,7 +892,7 @@ No es código. Empujar no despliega: el usuario fusiona a `main` y despliega a m
 (`WARNING_META`) y por la clave de las filas de la vista previa; una SPA vieja mostraría el aviso
 con su nombre técnico.
 
-- [ ] **Step 1: ANTES de desplegar — ¿hay OV vivas anteriores a la 212 sin número congelado?**
+- [ ] **Step 1: ANTES de desplegar — ¿hay OV vivas anteriores a la 213 sin número congelado?**
 
 En la consola Postgres de EasyPanel (abre en la base `postgres`):
 
@@ -909,22 +914,22 @@ SELECT so.salesorder_number, so.date, so.status
      'OV-2026-188','OV-2026-189','OV-2026-193','OV-2026-194','OV-2026-196',
      'OV-2026-198','OV-2026-201','OV-2026-202','OV-2026-203','OV-2026-204',
      'OV-2026-205','OV-2026-206','OV-2026-207','OV-2026-208','OV-2026-209',
-     'OV-2026-210','OV-2026-211')
+     'OV-2026-210','OV-2026-211','OV-2026-212')
  ORDER BY so.salesorder_number;
 ```
 
-Expected: solo OV-2026-212 en adelante. Si sale alguna anterior (p. ej. OV-2026-150), esa se
-llevaría el 38 y la 212 bajaría al 39: decidir antes de desplegar (cerrarla en Zoho o congelarla
+Expected: solo OV-2026-213 en adelante. Si sale alguna anterior (p. ej. OV-2026-150), esa se
+llevaría el 39 y la 213 bajaría al 40: decidir antes de desplegar (cerrarla en Zoho o congelarla
 con su número de WO).
 
 Una OV de esa lista sin líneas pendientes (en la vista previa sale con `ov_sin_lineas`) no
-consume número, así que no mueve la 212.
+consume número, así que no mueve la 213.
 
-- [ ] **Step 1b: ANTES de desplegar — las 37 claves congeladas existen en Zoho**
+- [ ] **Step 1b: ANTES de desplegar — las 38 claves congeladas existen en Zoho**
 
 La siembra reconstruye el número de OV como `OV-20{AA}-{Nota}`, con el año del PREFIJO, que el
 builder sacaba de la FECHA de la OV. Si alguna OV tuviera un número de otro año que su fecha, su
-clave congelada no casaría y recibiría un número nuevo (≥ 38) en silencio:
+clave congelada no casaría y recibiría un número nuevo (≥ 39) en silencio:
 
 ```sql
 \c zoho-hub
@@ -938,10 +943,10 @@ SELECT count(*) AS encontradas
      'OV-2026-188','OV-2026-189','OV-2026-193','OV-2026-194','OV-2026-196',
      'OV-2026-198','OV-2026-201','OV-2026-202','OV-2026-203','OV-2026-204',
      'OV-2026-205','OV-2026-206','OV-2026-207','OV-2026-208','OV-2026-209',
-     'OV-2026-210','OV-2026-211');
+     'OV-2026-210','OV-2026-211','OV-2026-212');
 ```
 
-Expected: `encontradas = 37`. Si sale menos, no desplegar: hay que corregir la clave de la que
+Expected: `encontradas = 38`. Si sale menos, no desplegar: hay que corregir la clave de la que
 falte en la migración 070.
 
 - [ ] **Step 1c: Avisar a contabilidad del correo que llegará tras desplegar**
@@ -950,8 +955,8 @@ La columna D cambia de número por posición a número fijo, así que la huella 
 (`hashMatriz`) cambia una vez para todos: quien tenga frecuencia `inmediato` recibe un correo en
 el primer ciclo de n8n tras el despliegue (los de diario/semanal/fin de mes, en su próxima franja),
 probablemente sin «OV con cambios» que lo explique. Decirle a Xiomara que ese correo trae el mismo
-contenido con la numeración nueva (la 212 = 38) y que es el primero que se puede cargar sin
-retocar la columna D.
+contenido con la numeración nueva (la 213 = 39) y que es el primero que se puede cargar sin
+retocar la columna D. El primer archivo traerá la 213 = 39 y la 214 = 40. La OV-2026-212 (= 38) NO saldrá en el archivo porque ya está facturada en Zoho; si hay que tenerla en WO, se carga a mano con DocumentoNúmero 38.
 
 - [ ] **Step 2: Fusionar a `main` y desplegar hub-api y la SPA de WO-sales en EasyPanel**
 
@@ -975,10 +980,11 @@ SELECT numero_ov, documento_numero, origen, asignado_at
  LIMIT 10;
 ```
 
-Expected: `OV-2026-212 → 38` (`origen = asignado`) y las siguientes consecutivas; debajo,
+Expected: `OV-2026-213 → 39` (`origen = asignado`) y las siguientes consecutivas; debajo,
+`OV-2026-212 → 38` (`congelado`) y
 `OV-2026-211 → 37` (`congelado`).
 
 - [ ] **Step 4: Revisar el primer archivo antes de subirlo a WO**
 
-Descargar el `.xls` desde la app y comprobar que la columna D de la OV-2026-212 es 38 y que
+Descargar el `.xls` desde la app y comprobar que la columna D de la OV-2026-213 es 39 y que
 ninguna OV ya cargada aparece con un número distinto al de su carga.
