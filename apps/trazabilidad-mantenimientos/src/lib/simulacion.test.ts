@@ -158,7 +158,7 @@ describe('resumen de la simulación', () => {
     const horiba = (f: string) => ({ ...eq('Cliente Uno', f, desk('compras@cliente-uno.example')), marca: 'Horiba', vigenciaMarca: null, ...estadoCalibracion(f, HOY, null) });
     const p = planAvisos([horiba(EN_30), horiba(EN_60), horiba('2025-09-03'), horiba('2023-01-01')], HOY);
     expect(resumenSimulacion(p)).toEqual({ correos: 0, clientes: 0, equipos: 0, sinDestinatario: 0, equiposSinDestinatario: 0 });
-    expect([p.vencidasSinAviso, p.fueraCiclo]).toEqual([[], []]);
+    expect(p.fueraCiclo).toEqual([]);
   });
 });
 
@@ -201,19 +201,21 @@ describe('textos de apoyo', () => {
     expect(etiquetaOrigen('manual')).toBe('manual');
   });
 
-  it('la fecha que explica por qué un equipo no está en la simulación', () => {
+  it('la fecha que explica por qué un equipo no tiene tarjeta, según su motivo (también en «vencida»)', () => {
     const p = planAvisos(
       [
         eq('Cliente Uno', EN_60, null, { avisoEnviado: '2026-10-04' }),
         eq('Cliente Uno', EN_30, null, { enAmbientalia: true }),
-        eq('Cliente Uno', '2025-09-03'),
+        eq('Cliente Uno', '2025-09-03', null, { enAmbientalia: true }),
+        eq('Cliente Uno', '2025-09-03', null, { avisoEnviado: '2026-09-10' }),
         eq('Cliente Uno', '2024-03-26'),
       ],
       HOY,
     );
-    expect(fechaRelevante(p.yaAvisados[0])).toBe('avisado el 04/10/2026 · en el tramo desde el 03/10/2026');
-    expect(fechaRelevante(p.enServicio[0])).toBe('vence el 17/10/2026');
-    expect(fechaRelevante(p.vencidasSinAviso[0])).toBe('venció el 03/09/2026');
+    expect(fechaRelevante(p.yaAvisados[1])).toBe('avisado el 04/10/2026 · en el tramo desde el 03/10/2026');
+    expect(fechaRelevante(p.yaAvisados[0])).toBe('avisado el 10/09/2026 · vencida desde el 03/09/2026');
+    expect(fechaRelevante(p.enServicio[1])).toBe('vence el 17/10/2026');
+    expect(fechaRelevante(p.enServicio[0])).toBe('venció el 03/09/2026');
     expect(fechaRelevante(p.fueraCiclo[0])).toBe('venció el 26/03/2025');
   });
 });

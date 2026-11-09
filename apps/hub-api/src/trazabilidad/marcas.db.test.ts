@@ -216,7 +216,7 @@ describe('ENCENDIDA', () => {
     const plan = planAvisos(eq as never, HOY, (await pedir('equipos')).body.contactos);
     const claves = (xs: { equipo: Fila }[]) => xs.map((a) => a.equipo.clave);
     expect([...plan.correos, ...plan.sinDestinatario].flatMap((g) => claves(g.equipos))).toContain('HB-0001');
-    expect(claves(plan.vencidasSinAviso)).toContain('HB-0003');
+    expect([...plan.correos, ...plan.sinDestinatario].filter((g) => g.tramo === 'vencida').flatMap((g) => claves(g.equipos))).toContain('HB-0003');
     expect(claves(plan.fueraCiclo)).toContain('HB-0005');
     expect(JSON.stringify(plan.correos)).not.toMatch(/HB-000[2567]/);
     // Se les puede guardar seguimiento: ahora sí están en el inventario.

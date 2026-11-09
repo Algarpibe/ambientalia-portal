@@ -723,25 +723,25 @@ export function contactoEfectivo(manual: ContactoCliente | null | undefined, des
   return desk;
 }
 
-// ── Aviso automático a clientes: SIMULACIÓN ─────────────────────────────────
+// ── Avisos a clientes: el plan ───────────────────────────────────────────────
 //
-// La meta es avisar solos a 90, 60 y 30 días del vencimiento. Hoy esto es un
-// ensayo: aquí sólo se CALCULA qué se enviaría y a quién, para enseñarlo en la
-// pestaña «Avisos a clientes». Nada de este fichero envía nada, y no hay nada
-// que lo llame para enviar.
+// Qué aviso le toca hoy a cada equipo y a quién iría: a 90, 60 y 30 días del
+// vencimiento y, una sola vez, al vencer. Aquí sólo se CALCULA: lo pinta la
+// pestaña «Avisos a clientes» y, al pulsar «Enviar correo», el servidor lo
+// vuelve a calcular para saber qué sale. Nada de este fichero envía nada.
 
-/** Los tramos del aviso, en días antes del vencimiento, del primero al último. */
-export const TRAMOS_AVISO = [90, 60, 30] as const;
+/** Los tramos del aviso, del primero al último: 90, 60 y 30 días antes del vencimiento y «vencida» (en el último año: una sola vez por vencimiento). */
+export const TRAMOS_AVISO = [90, 60, 30, 'vencida'] as const;
 export type TramoAviso = (typeof TRAMOS_AVISO)[number];
 
-/** El tramo en el que está un equipo según su estado; null si no está en ninguno. */
+/** El tramo en el que está un equipo según su estado; null si no está en ninguno (al día, sin fecha, sin vencimiento o fuera de ciclo). */
 export function tramoDeEstado(estado: EstadoCalibracion): TramoAviso | null {
-  return estado === 'VENCE_90' ? 90 : estado === 'VENCE_60' ? 60 : estado === 'VENCE_30' ? 30 : null;
+  return estado === 'VENCE_90' ? 90 : estado === 'VENCE_60' ? 60 : estado === 'VENCE_30' ? 30 : estado === 'VENCIDA' ? 'vencida' : null;
 }
 
-/** El día en que un equipo entra en un tramo: su vencimiento menos los días del tramo. */
+/** El día en que un equipo entra en un tramo: su vencimiento menos los días del tramo; en «vencida», el mismo día del vencimiento. */
 export function entradaTramo(vence: string, tramo: TramoAviso): string {
-  return sumarDias(vence, -tramo);
+  return tramo === 'vencida' ? vence : sumarDias(vence, -tramo);
 }
 
 /** Lo que el plan del aviso necesita de un equipo (la `EquipoVista` del servidor lo cumple). */
@@ -767,21 +767,20 @@ export function enServicio(e: Pick<EquipoAviso, 'seguimiento' | 'ticket'>): bool
   return Boolean(e.seguimiento?.enAmbientalia) || e.ticket !== null;
 }
 
-/** Por qué a un equipo le tocaría (o no) el aviso automático hoy. */
+/** Por qué a un equipo le toca (o no) el aviso hoy. */
 export type MotivoAviso =
-  | 'DEBIDO' // está en un tramo y aún no se le ha avisado en él: entraría en un correo
-  | 'YA_AVISADO' // ya tiene un aviso desde que entró en su tramo
+  | 'DEBIDO' // está en un tramo y aún no se le ha avisado en él: entra en un correo
+  | 'YA_AVISADO' // ya tiene un aviso desde que entró en su tramo (en «vencida», desde que venció)
   | 'EN_SERVICIO' // está en un tramo, pero en Ambientalia o con ticket abierto
   | 'SIN_TRAMO' // al día, sin fecha o sin vencimiento: no toca nada
-  | 'VENCIDA' // vencida en el último año: fuera de la regla automática
-  | 'FUERA_CICLO'; // vencida hace más de un año: fuera de la regla automática
+  | 'FUERA_CICLO'; // vencida hace más de un año: fuera de los avisos
 
 export interface AvisoEquipo<E extends EquipoAviso = EquipoAviso> {
   equipo: E;
   estado: EstadoCalibracion;
   vence: string | null;
   motivo: MotivoAviso;
-  /** Su tramo de hoy; null fuera de los tres tramos. */
+  /** Su tramo de hoy; null fuera de los cuatro tramos. */
   tramo: TramoAviso | null;
   /** El día en que entró en ese tramo. */
   entradaTramo: string | null;
@@ -790,13 +789,15 @@ export interface AvisoEquipo<E extends EquipoAviso = EquipoAviso> {
 }
 
 /**
- * Decide, a fecha `hoy`, si a un equipo le tocaría el aviso automático.
- *  - Sólo en los tramos 90 / 60 / 30 (estados VENCE_90 / VENCE_60 / VENCE_30).
+ * Decide, a fecha `hoy`, si a un equipo le toca el aviso.
+ *  - En los tramos 90 / 60 / 30 (estados VENCE_90 / VENCE_60 / VENCE_30) y en
+ *    «vencida» (VENCIDA: vencida en el último año).
  *  - Nunca si está en servicio (`enServicio`).
  *  - Una vez por tramo: si su «aviso enviado» es del día en que entró en el
  *    tramo o posterior, ya está avisado; si es anterior (fue el del tramo de
- *    antes) o no hay, toca.
- *  - Vencida y fuera de ciclo no entran en la regla.
+ *    antes) o no hay, toca. En «vencida» se entra el día del vencimiento: una
+ *    sola vez por vencimiento.
+ *  - Fuera de ciclo (vencida hace más de un año) no entra.
  *  - Con la vigencia de su marca: sin vencimiento (lote 11) no está en ningún tramo ni en ninguna lista.
  */
 export function evaluarAviso<E extends EquipoAviso>(equipo: E, hoy: string): AvisoEquipo<E> {
@@ -804,7 +805,7 @@ export function evaluarAviso<E extends EquipoAviso>(equipo: E, hoy: string): Avi
   const base = { equipo, estado, vence, diasParaVencer: vigenciaDias };
   const tramo = tramoDeEstado(estado);
   if (tramo === null || vence === null) {
-    const motivo: MotivoAviso = estado === 'FUERA_CICLO' ? 'FUERA_CICLO' : estado === 'VENCIDA' ? 'VENCIDA' : 'SIN_TRAMO';
+    const motivo: MotivoAviso = estado === 'FUERA_CICLO' ? 'FUERA_CICLO' : 'SIN_TRAMO';
     return { ...base, motivo, tramo: null, entradaTramo: null };
   }
   const entrada = entradaTramo(vence, tramo);
@@ -844,11 +845,9 @@ export interface PlanAvisos<E extends EquipoAviso = EquipoAviso> {
   correos: CorreoSimulado<E>[];
   /** Los grupos a los que tocaría avisar pero no tienen a quién. */
   sinDestinatario: CorreoSimulado<E>[];
-  /** Informativos: por qué algo no está en la simulación. */
+  /** Informativos: por qué un equipo no tiene tarjeta hoy. */
   yaAvisados: AvisoEquipo<E>[];
   enServicio: AvisoEquipo<E>[];
-  /** Vencidas (hasta un año) que no están en servicio y sin aviso desde que vencieron. */
-  vencidasSinAviso: AvisoEquipo<E>[];
   fueraCiclo: AvisoEquipo<E>[];
 }
 
@@ -868,26 +867,26 @@ function destinatariosDe(equipos: readonly AvisoEquipo[], manual: ContactoClient
   return [...vistos.values()];
 }
 
+/** El orden de las tarjetas: lo más urgente primero (vencida, 30, 60 y 90). */
+const ORDEN_TRAMO: Record<TramoAviso, number> = { vencida: 0, 30: 1, 60: 2, 90: 3 };
+
 /**
- * El plan del aviso automático a fecha `hoy`: qué correos se enviarían y qué
- * queda fuera y por qué. Un correo por cliente (por `claveCliente`) y tramo,
+ * El plan de los avisos a fecha `hoy`: qué correos (tarjetas) tocan y a quién,
+ * y qué queda fuera y por qué. Un correo por cliente (por `claveCliente`) y tramo,
  * con los equipos de ese cliente a los que toca. Destinatarios: los correos
  * puestos a mano al cliente si los tiene (`manuales`) y, si no, los distintos
  * que den los contactos de Desk de esos equipos. Es sólo un cálculo.
  */
 export function planAvisos<E extends EquipoAviso>(equipos: readonly E[], hoy: string, manuales: readonly ContactoCliente[] = []): PlanAvisos<E> {
   const manualDe = new Map(manuales.map((m) => [claveCliente(m.clave || m.cliente), m]));
-  const plan: PlanAvisos<E> = { hoy, correos: [], sinDestinatario: [], yaAvisados: [], enServicio: [], vencidasSinAviso: [], fueraCiclo: [] };
+  const plan: PlanAvisos<E> = { hoy, correos: [], sinDestinatario: [], yaAvisados: [], enServicio: [], fueraCiclo: [] };
   const grupos = new Map<string, CorreoSimulado<E>>();
   for (const e of equipos) {
     const a = evaluarAviso(e, hoy);
     if (a.motivo === 'YA_AVISADO') plan.yaAvisados.push(a);
     else if (a.motivo === 'EN_SERVICIO') plan.enServicio.push(a);
     else if (a.motivo === 'FUERA_CICLO') plan.fueraCiclo.push(a);
-    else if (a.motivo === 'VENCIDA') {
-      const aviso = e.seguimiento?.avisoEnviado ?? null;
-      if (!enServicio(e) && !(aviso !== null && a.vence !== null && aviso >= a.vence)) plan.vencidasSinAviso.push(a);
-    } else if (a.motivo === 'DEBIDO' && a.tramo !== null) {
+    else if (a.motivo === 'DEBIDO' && a.tramo !== null) {
       const clave = claveCliente(e.cliente);
       const id = `${a.tramo}|${clave}`;
       const g = grupos.get(id) ?? { claveCliente: clave, cliente: e.cliente.replace(/\s+/g, ' ').trim(), tramo: a.tramo, equipos: [], destinatarios: [], origen: null };
@@ -902,9 +901,9 @@ export function planAvisos<E extends EquipoAviso>(equipos: readonly E[], hoy: st
     g.origen = g.destinatarios[0]?.origen ?? null;
     (g.destinatarios.length > 0 ? plan.correos : plan.sinDestinatario).push(g);
   }
-  const porTramoYCliente = (a: CorreoSimulado, b: CorreoSimulado) => a.tramo - b.tramo || a.cliente.localeCompare(b.cliente, 'es');
+  const porTramoYCliente = (a: CorreoSimulado, b: CorreoSimulado) => ORDEN_TRAMO[a.tramo] - ORDEN_TRAMO[b.tramo] || a.cliente.localeCompare(b.cliente, 'es');
   plan.correos.sort(porTramoYCliente);
   plan.sinDestinatario.sort(porTramoYCliente);
-  for (const lista of [plan.yaAvisados, plan.enServicio, plan.vencidasSinAviso, plan.fueraCiclo]) lista.sort(porDias);
+  for (const lista of [plan.yaAvisados, plan.enServicio, plan.fueraCiclo]) lista.sort(porDias);
   return plan;
 }

@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Copy, Pencil } from 'lucide-react';
 import { api, type Inventario } from '../api';
-import { CONTACTO_MAX_EMAILS, planAvisos, type AvisoEquipo, type ContactoCliente, type CorreoSimulado, type Destinatario, type EquipoVista, type TramoAviso } from '../dominio';
+import { CONTACTO_MAX_EMAILS, ETIQUETA_TRAMO, planAvisos, type AvisoEquipo, type ContactoCliente, type CorreoSimulado, type Destinatario, type EquipoVista, type TramoAviso } from '../dominio';
 import { correoAviso, etiquetaOrigen, fechaRelevante, resumenSimulacion, revisarEmails, textoParaCopiar } from '../lib/simulacion';
 import { fmtFecha } from '../lib/vistas';
 import { usePermisos } from '../permisos';
@@ -28,9 +28,8 @@ interface Props {
 const INPUT =
   'block w-full min-h-[44px] rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100';
 
-/** Clases de la etiqueta de cada tramo: las mismas que el estado «vence en …» de ese tramo. */
-const TONO_TRAMO: Record<TramoAviso, string> = { 90: TONO.VENCE_90.badge, 60: TONO.VENCE_60.badge, 30: TONO.VENCE_30.badge };
-const TITULO_TRAMO: Record<TramoAviso, string> = { 90: 'Primer aviso', 60: 'Recordatorio', 30: 'Último aviso' };
+/** Clases de la etiqueta de cada tramo: las mismas que el estado de ese tramo («vence en …» o «vencida»). */
+const TONO_TRAMO: Record<TramoAviso, string> = { 90: TONO.VENCE_90.badge, 60: TONO.VENCE_60.badge, 30: TONO.VENCE_30.badge, vencida: TONO.VENCIDA.badge };
 
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 const idGrupo = (c: CorreoSimulado<EquipoVista>) => `${c.tramo}|${c.claveCliente}`;
@@ -62,7 +61,7 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
     <div className="flex flex-col gap-4">
       <Alert tone="amber" title="Simulación: no se envía ningún correo">
         <p>
-          Esto es lo que el aviso automático enviaría hoy ({fmtFecha(hoy)}) a 90, 60 y 30 días del vencimiento. Estamos en fase de pruebas: la app no manda nada a ningún cliente. Sirve para
+          Esto es lo que el aviso automático enviaría hoy ({fmtFecha(hoy)}) a 90, 60 y 30 días del vencimiento y al vencer. Estamos en fase de pruebas: la app no manda nada a ningún cliente. Sirve para
           revisar destinatarios y textos. Si quieres avisar a alguien, copia el texto, envíalo tú y márcalo como avisado en la vista «Manual».
         </p>
       </Alert>
@@ -129,12 +128,6 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
       <div className="flex flex-col gap-2">
         <Informativo titulo="Ya avisados en este tramo" nota="Tienen un aviso registrado desde que entraron en su tramo: no se les repite hasta el siguiente." lista={plan.yaAvisados} onFicha={onFicha} />
         <Informativo titulo="En servicio" nota="En un tramo, pero ya en Ambientalia o con un ticket abierto en Desk: no se les avisa." lista={plan.enServicio} onFicha={onFicha} />
-        <Informativo
-          titulo="Vencidas sin aviso"
-          nota="Vencidas hace menos de un año, fuera de servicio y sin aviso desde que vencieron. El aviso automático no las cubre: avísales desde la vista «Manual»."
-          lista={plan.vencidasSinAviso}
-          onFicha={onFicha}
-        />
         <Informativo titulo="Fuera de ciclo" nota="Vencidas hace más de un año. El aviso automático no las cubre." lista={plan.fueraCiclo} onFicha={onFicha} />
       </div>
     </div>
@@ -148,15 +141,13 @@ function Tarjeta({ correo: c, onFicha, children }: { correo: CorreoSimulado<Equi
       <div>
         <h4 className="break-words text-base font-semibold text-gray-900">{c.cliente}</h4>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${TONO_TRAMO[c.tramo]}`}>
-            {TITULO_TRAMO[c.tramo]} · {c.tramo} días
-          </span>
+          <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${TONO_TRAMO[c.tramo]}`}>{ETIQUETA_TRAMO[c.tramo]}</span>
           <Tag>{plural(c.equipos.length, 'equipo', 'equipos')}</Tag>
         </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <caption className="sr-only">Equipos de {c.cliente} en el tramo de {c.tramo} días</caption>
+          <caption className="sr-only">Equipos de {c.cliente}: {ETIQUETA_TRAMO[c.tramo]}</caption>
           <thead className="sr-only">
             <tr>
               <th scope="col">Serial</th>

@@ -469,7 +469,7 @@ describe('el inventario enseña la fecha que da la regla', () => {
   it('DE PUNTA A PUNTA: el equipo vencido que recibe una calibración reciente pasa a «Al día» y sale del plan de avisos; y sigue sin existir ningún envío', async () => {
     const avisos = async () => {
       const p = planAvisos(await repo.listarEquipos(hub, HOY), HOY, await repo.listarContactos(hub));
-      return [...p.vencidasSinAviso, ...p.correos.flatMap((c) => c.equipos), ...p.sinDestinatario.flatMap((c) => c.equipos)].map((a) => a.equipo.clave).sort();
+      return [...p.correos.flatMap((c) => c.equipos), ...p.sinDestinatario.flatMap((c) => c.equipos)].map((a) => a.equipo.clave).sort();
     };
     expect(await avisos()).toEqual(['18A00001', '18A00002']);
     await traer();

@@ -1,10 +1,10 @@
 /**
  * Lo que pinta la sub-vista «Simulación automática» de «Avisos a clientes».
- * Puro: sin React ni red. El plan (a quién le tocaría el aviso y a quién iría)
- * lo calcula el dominio (`planAvisos`); aquí sólo se redacta, se cuenta y se
- * revisa lo que se teclea en el editor de contacto.
- *
- * Es una SIMULACIÓN: nada de este fichero —ni de la app— envía un correo.
+ * Puro: sin React ni red. El plan (a quién le toca el aviso y a quién iría)
+ * lo calcula el dominio (`planAvisos`) y el texto del correo, hub-api
+ * (`avisos-correo.ts`: el mismo que redacta el servidor); aquí sólo se cuenta,
+ * se junta para copiar y se revisa lo que se teclea en el editor de contacto.
+ * Nada de este fichero envía nada.
  */
 import {
   CONTACTO_MAX_EMAILS,
@@ -12,54 +12,17 @@ import {
   esEmailInterno,
   normalizarEmail,
   type AvisoEquipo,
+  type CorreoRedactado,
   type CorreoSimulado,
-  type Destinatario,
   type EquipoVista,
   type OrigenContacto,
   type PlanAvisos,
-  type TramoAviso,
 } from '../dominio';
-import { fmtFecha, mensajeAviso, todosGrimm } from './vistas';
+import { fmtFecha } from './vistas';
 
-/**
- * La primera línea del correo: por su nombre si entre los destinatarios hay
- * exactamente uno con nombre; si no hay ninguno o hay varios, el saludo
- * genérico al cliente.
- */
-export function saludoAviso(cliente: string, destinatarios: readonly Destinatario[]): string {
-  const nombres = [...new Set(destinatarios.map((d) => d.nombre.trim()).filter(Boolean))];
-  return nombres.length === 1 ? `Estimado/a ${nombres[0]}:` : `Estimado cliente ${cliente}:`;
-}
-
-/** Cómo empieza el asunto en cada tramo: primer aviso, recordatorio y último aviso. */
-const ASUNTO_TRAMO: Record<TramoAviso, (monitores: string) => string> = {
-  90: (m) => `Calibración de ${m}: vence en los próximos 90 días`,
-  60: (m) => `Recordatorio: la calibración de ${m} vence en los próximos 60 días`,
-  30: (m) => `Último aviso: la calibración de ${m} vence en los próximos 30 días`,
-};
-
-export interface CorreoRedactado {
-  /** Los destinatarios, separados por comas; vacío si el grupo no tiene a quién. */
-  para: string;
-  asunto: string;
-  cuerpo: string;
-}
-
-/** El correo que se enviaría para un grupo (cliente + tramo): destinatarios, asunto y cuerpo. */
-export function correoAviso(c: CorreoSimulado<EquipoVista>): CorreoRedactado {
-  // Sólo GRIMM, como siempre; con equipos de otra marca incluida (lote 9f), «su equipo» / «sus equipos».
-  const grimm = todosGrimm(c.equipos.map((x) => x.equipo));
-  const monitores = c.equipos.length === 1 ? (grimm ? 'su monitor GRIMM' : 'su equipo') : grimm ? 'sus monitores GRIMM' : 'sus equipos';
-  return {
-    para: c.destinatarios.map((d) => d.email).join(', '),
-    asunto: `${ASUNTO_TRAMO[c.tramo](monitores)} · ${c.cliente}`,
-    cuerpo: mensajeAviso(
-      c.cliente,
-      c.equipos.map((x) => x.equipo),
-      { tramo: c.tramo, saludo: saludoAviso(c.cliente, c.destinatarios) },
-    ),
-  };
-}
+/** El saludo y el correo de cada tarjeta viven en hub-api (`avisos-correo.ts`): se reexportan para que la app tenga una sola regla. */
+export { correoAviso, saludoAviso } from '../dominio';
+export type { CorreoRedactado } from '../dominio';
 
 /** Destinatarios, asunto y cuerpo en un solo texto, para copiarlo al portapapeles. */
 export function textoParaCopiar(c: CorreoRedactado): string {
@@ -115,9 +78,9 @@ export function etiquetaOrigen(origen: OrigenContacto): string {
   return origen === 'desk' ? 'Desk' : 'manual';
 }
 
-/** La fecha que explica por qué un equipo no está en la simulación, según su motivo. */
+/** La fecha que explica por qué un equipo no tiene tarjeta, según su motivo (en «vencida», desde cuándo está vencida). */
 export function fechaRelevante(a: AvisoEquipo<EquipoVista>): string {
-  if (a.motivo === 'YA_AVISADO') return `avisado el ${fmtFecha(a.equipo.seguimiento?.avisoEnviado)} · en el tramo desde el ${fmtFecha(a.entradaTramo)}`;
-  if (a.motivo === 'VENCIDA' || a.motivo === 'FUERA_CICLO') return `venció el ${fmtFecha(a.vence)}`;
+  if (a.motivo === 'YA_AVISADO') return `avisado el ${fmtFecha(a.equipo.seguimiento?.avisoEnviado)} · ${a.tramo === 'vencida' ? 'vencida' : 'en el tramo'} desde el ${fmtFecha(a.entradaTramo)}`;
+  if (a.tramo === 'vencida' || a.motivo === 'FUERA_CICLO') return `venció el ${fmtFecha(a.vence)}`;
   return a.vence ? `vence el ${fmtFecha(a.vence)}` : 'sin fecha de calibración';
 }
