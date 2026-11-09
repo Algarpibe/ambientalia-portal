@@ -92,11 +92,22 @@ const esEspera = (e: unknown): boolean => ['TimeoutError', 'AbortError'].include
 const sinConexion = (e: unknown): boolean => SIN_CONEXION.has(String((e as { cause?: { code?: unknown } } | null)?.cause?.code));
 
 /**
+ * Las cuatro variables del envío, leídas una a una por su nombre: así las ve el
+ * detector de `.env.example` (INFRA-537), que no entiende `process.env` suelto.
+ */
+const entornoDelProceso = (): Entorno => ({
+  TMC_AVISOS_ENVIO: process.env.TMC_AVISOS_ENVIO,
+  TMC_AVISOS_BUZON_PRUEBA: process.env.TMC_AVISOS_BUZON_PRUEBA,
+  TMC_AVISOS_N8N_URL: process.env.TMC_AVISOS_N8N_URL,
+  TMC_AVISOS_N8N_TOKEN: process.env.TMC_AVISOS_N8N_TOKEN,
+});
+
+/**
  * El canal de verdad. En producción, con el entorno del proceso y el `fetch` de
  * Node; las pruebas le pasan los suyos. Lee el entorno una vez, al crearse (al
  * arrancar hub-api): cambiar el modo es cambiar la variable y desplegar.
  */
-export function crearCanalAvisos(env: Entorno = process.env, red: Red = fetch): CanalAvisos {
+export function crearCanalAvisos(env: Entorno = entornoDelProceso(), red: Red = fetch): CanalAvisos {
   const estado = modoEfectivo(env);
   const url = env.TMC_AVISOS_N8N_URL ?? '';
   const token = env.TMC_AVISOS_N8N_TOKEN ?? '';
