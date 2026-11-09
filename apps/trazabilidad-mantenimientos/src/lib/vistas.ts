@@ -3,7 +3,7 @@
  * probarlo en node. El estado de cada equipo NO se calcula aquí: llega del
  * servidor (dominio.ts) y aquí sólo se cuenta, agrupa y redacta.
  */
-import { ESTADOS, ESTADOS_AVISO, claveMarca, diasEntre, enServicio, sumarDias, type EquipoVista, type EstadoCalibracion, type TramoAviso } from '../dominio';
+import { ESTADOS, ESTADOS_AVISO, diasEntre, enServicio, sumarDias, type EquipoVista, type EstadoCalibracion } from '../dominio';
 
 export const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 export const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -166,59 +166,13 @@ export function avisosPorCliente(eqs: readonly EquipoVista[], ventana: number): 
     .sort((a, b) => Number(b.sinAviso > 0) - Number(a.sinAviso > 0) || porUrgencia(a.equipos[0], b.equipos[0]));
 }
 
-/** La marca de un equipo en el texto de un aviso: «GRIMM», como siempre, o la suya si es de otra marca incluida (lote 9f). */
-export const marcaAviso = (e: Pick<EquipoVista, 'marca'>): string => (claveMarca(e.marca) === 'grimm' ? 'GRIMM' : e.marca.trim());
-/** Si todos son GRIMM: entonces el aviso habla de «monitores de partículas GRIMM», como siempre. */
-export const todosGrimm = (eqs: readonly Pick<EquipoVista, 'marca'>[]): boolean => eqs.every((e) => claveMarca(e.marca) === 'grimm');
-
-/** Lo que cambia en el texto del aviso cuando es el de un tramo del aviso automático. */
-export interface OpcionesAviso {
-  /** El tramo (90, 60 o 30 días): cambia la frase de entrada. Sin él, el texto manual de siempre. */
-  tramo?: TramoAviso;
-  /** La primera línea. Sin ella, «Estimado cliente …:». */
-  saludo?: string;
-}
-
-/** Cómo empieza la frase de entrada en cada tramo: primer aviso, recordatorio y último aviso. */
-const ENTRADA_TRAMO: Record<TramoAviso, string> = {
-  90: 'le informamos con antelación de que',
-  60: 'le recordamos que',
-  30: 'le recordamos, como último aviso, que',
-};
-
 /**
- * Texto del aviso previo al cliente, listo para copiar en un correo. Con
- * `opciones.tramo` es el del aviso automático de ese tramo: mismo cuerpo, con
- * la frase de entrada propia del tramo.
+ * El texto del aviso —la marca de cada equipo (`marcaAviso`), si son todos
+ * GRIMM (`todosGrimm`) y el cuerpo (`mensajeAviso`)— vive en hub-api
+ * (`avisos-correo.ts`): el servidor redacta con él lo que de verdad sale. Aquí
+ * sólo se reexporta, como `enServicio`, para que la app tenga una sola regla.
  */
-export function mensajeAviso(cliente: string, equipos: readonly EquipoVista[], opciones: OpcionesAviso = {}): string {
-  const lineas = equipos
-    .map((e) => {
-      const cuando = (e.vigenciaDias ?? 0) < 0 ? `vencida desde el ${fmtFecha(e.vence)}` : `vence el ${fmtFecha(e.vence)}`;
-      return `• ${marcaAviso(e)} ${e.modelo}, serial ${e.serial}: última calibración ${fmtFecha(e.ultimaCalibracion)}, ${cuando}.`;
-    })
-    .join('\n');
-  const plural = equipos.length !== 1;
-  // Sólo GRIMM: el texto de siempre. Con equipos de otra marca incluida (lote 9f), «equipos», sin decir de qué son.
-  const que = todosGrimm(equipos) ? (plural ? 'los siguientes monitores de partículas GRIMM' : 'el siguiente monitor de partículas GRIMM') : plural ? 'los siguientes equipos' : 'el siguiente equipo';
-  const entrada =
-    opciones.tramo === undefined
-      ? `le recordamos que ${que} ${plural ? 'tienen' : 'tiene'} la calibración vencida o próxima a vencer:`
-      : `${ENTRADA_TRAMO[opciones.tramo]} la calibración ${plural ? `de ${que}` : `d${que}`} vence en los próximos ${opciones.tramo} días:`;
-  return [
-    opciones.saludo ?? `Estimado cliente ${cliente}:`,
-    '',
-    `Desde el Servicio Técnico de Ambientalia ${entrada}`,
-    '',
-    lineas,
-    '',
-    'Para mantener la validez de sus mediciones y evitar paradas no previstas, le proponemos programar desde ahora el servicio de calibración y mantenimiento. Indíquenos la fecha en que podría enviarnos los equipos o, si lo prefiere, coordinamos la recogida.',
-    '',
-    'Quedamos atentos.',
-    '',
-    'Ambientalia S.A.S. · Servicio Técnico',
-  ].join('\n');
-}
+export { marcaAviso, mensajeAviso, todosGrimm } from '../dominio';
 
 export interface DiaCalendario {
   fecha: string;

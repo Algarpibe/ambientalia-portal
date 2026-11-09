@@ -3,6 +3,8 @@
  * el servidor). Toda la UI lo importa desde aquí.
  */
 export * from '../../hub-api/src/trazabilidad/dominio';
+// El correo del aviso a clientes (texto por tramo, versión de prueba y la forma de los envíos): el mismo que redacta el servidor al enviar.
+export * from '../../hub-api/src/trazabilidad/avisos-correo';
 // Roles y permisos de la app: la misma matriz que comprueba el servidor.
 export * from '../../hub-api/src/trazabilidad/roles';
 // La congelación de la F-ST-022: la forma de lo guardado, que la app sólo lee.
