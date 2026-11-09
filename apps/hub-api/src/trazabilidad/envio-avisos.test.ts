@@ -112,3 +112,100 @@ describe('el canal: la entrega a n8n', () => {
     expect(await crearCanalAvisos(REAL, red(contestar).fn).remitir(CORREO_REAL, 7)).toEqual(esperado);
   });
 });
+
+describe('la entrega: nunca un segundo correo por un error ambiguo', () => {
+  it('pide redirect: manual y un 3xx es rechazado (el flujo no corrió; el token no viaja a otro sitio)', async () => {
+    const r = red(async () => new Response('', { status: 307, headers: { Location: 'https://otro.example.test/x' } }));
+    const res = await crearCanalAvisos(REAL, r.fn).remitir(CORREO_REAL, 1);
+    expect(r.llamadas[0].init.redirect).toBe('manual');
+    expect(res.tipo).toBe('rechazado');
+  });
+
+  it.each([
+    ['500 sin más', async () => new Response('', { status: 500 })],
+    ['502 con HTML', async () => new Response('<html>Bad Gateway</html>', { status: 502 })],
+    ['504 vacío', async () => new Response(null, { status: 504 })],
+    ['500 con ok: true y messageId (pudo salir)', json(500, { ok: true, messageId: 'msg-ficticio-2' })],
+    ['2xx con ok: true y messageId vacío', json(200, { ok: true, messageId: '' })],
+    ['2xx con ok: true y messageId que no es texto', json(200, { ok: true, messageId: 42 })],
+    ['2xx con ok: true sin messageId', json(200, { ok: true })],
+  ])('%s → sin_respuesta', async (_caso, contestar) => {
+    expect(await crearCanalAvisos(REAL, red(contestar).fn).remitir(CORREO_REAL, 1)).toEqual({ tipo: 'sin_respuesta' });
+  });
+
+  it('un 5xx con ok: false de nuestro flujo es rechazado; un 4xx sin JSON, también', async () => {
+    expect(await crearCanalAvisos(REAL, red(json(502, { ok: false, error: 'Fallo ficticio.' })).fn).remitir(CORREO_REAL, 1)).toEqual({ tipo: 'rechazado', motivo: 'Fallo ficticio.' });
+    expect((await crearCanalAvisos(REAL, red(async () => new Response('', { status: 429 })).fn).remitir(CORREO_REAL, 1)).tipo).toBe('rechazado');
+  });
+
+  it('si leer el cuerpo agota la espera: sin_respuesta', async () => {
+    const r = red(async () => ({ ok: true, status: 200, json: async () => { throw new DOMException('La espera se acabó', 'TimeoutError'); } }) as unknown as Response);
+    expect(await crearCanalAvisos(REAL, r.fn).remitir(CORREO_REAL, 1)).toEqual({ tipo: 'sin_respuesta' });
+  });
+});
+
+describe('la configuración del canal, más estricta', () => {
+  it.each([
+    ['http con un punto en el servidor', 'http://n8n.example.test/webhook/x'],
+    ['http con una IP', 'http://10.0.0.5/webhook/x'],
+    ['http con IPv6', 'http://[::1]/webhook/x'],
+    ['con usuario y clave', 'https://usuario:clave@n8n.example.test/webhook/x'],
+    ['con sólo usuario', 'https://usuario@n8n.example.test/webhook/x'],
+    ['otro protocolo', 'ftp://n8n.example.test/x'],
+  ])('URL %s → apagado (sin_canal)', (_caso, u) => {
+    expect(modoEfectivo({ ...REAL, TMC_AVISOS_N8N_URL: u })).toEqual({ modo: 'apagado', motivo: 'sin_canal', buzonPrueba: null });
+  });
+
+  it('https, o http sólo con un servidor de una sola etiqueta (un servicio de Docker), valen', () => {
+    expect(modoEfectivo({ ...REAL, TMC_AVISOS_N8N_URL: 'https://n8n.example.test/webhook/x' }).modo).toBe('real');
+    expect(modoEfectivo({ ...REAL, TMC_AVISOS_N8N_URL: 'http://n8n:5678/webhook/x' }).modo).toBe('real');
+  });
+
+  it.each([
+    ['con un espacio dentro', 'token con espacio'],
+    ['con un salto de línea', 'token\nmalo'],
+    ['con una tilde', 'tokenñ'],
+    ['con espacios alrededor', ' token-ficticio '],
+  ])('token %s → apagado (sin_canal)', (_caso, t) => {
+    expect(modoEfectivo({ ...REAL, TMC_AVISOS_N8N_TOKEN: t })).toEqual({ modo: 'apagado', motivo: 'sin_canal', buzonPrueba: null });
+  });
+});
+
+describe('lo que no debe salir ni cambiar', () => {
+  it('el motivo de n8n no repite el token', async () => {
+    const res = await crearCanalAvisos(REAL, red(json(422, { ok: false, error: 'Token token-ficticio inválido; otra vez token-ficticio.' })).fn).remitir(CORREO_REAL, 1);
+    expect(res).toEqual({ tipo: 'rechazado', motivo: 'Token [token] inválido; otra vez [token].' });
+  });
+
+  it('el estado devuelto está congelado y tocarlo no abre la prueba a otros destinatarios', async () => {
+    const r = red(json(200, { ok: true, messageId: 'x' }));
+    const canal = crearCanalAvisos(PRUEBA, r.fn);
+    const e = canal.estado() as { buzonPrueba: string };
+    expect(Object.isFrozen(e)).toBe(true);
+    try {
+      e.buzonPrueba = 'compras@cliente-uno.example';
+    } catch {
+      /* congelado: en modo estricto lanza */
+    }
+    expect((await canal.remitir(CORREO_REAL, 1)).tipo).toBe('rechazado');
+    expect(r.llamadas).toEqual([]);
+  });
+
+  it.each([
+    ['sin destinatarios', { ...CORREO_REAL, para: [] }],
+    ['seis destinatarios', { ...CORREO_REAL, para: ['a1@cliente-uno.example', 'a2@cliente-uno.example', 'a3@cliente-uno.example', 'a4@cliente-uno.example', 'a5@cliente-uno.example', 'a6@cliente-uno.example'] }],
+    ['uno que no es un correo', { ...CORREO_REAL, para: ['no-es-un-correo'] }],
+    ['repetidos (aunque cambie la caja)', { ...CORREO_REAL, para: ['compras@cliente-uno.example', ' Compras@Cliente-Uno.example'] }],
+    ['asunto vacío', { ...CORREO_REAL, asunto: '  ' }],
+  ])('en real, %s → rechazado y sin llamar a la red', async (_caso, correo) => {
+    const r = red(json(200, { ok: true, messageId: 'x' }));
+    expect((await crearCanalAvisos(REAL, r.fn).remitir(correo, 1)).tipo).toBe('rechazado');
+    expect(r.llamadas).toEqual([]);
+  });
+
+  it('en real, de uno a cinco destinatarios válidos y distintos sí sale', async () => {
+    const r = red(json(200, { ok: true, messageId: 'msg-ficticio-3' }));
+    const para = ['a1@cliente-uno.example', 'a2@cliente-uno.example', 'a3@cliente-uno.example', 'a4@cliente-uno.example', 'a5@cliente-uno.example'];
+    expect((await crearCanalAvisos(REAL, r.fn).remitir({ ...CORREO_REAL, para }, 1)).tipo).toBe('enviado');
+  });
+});
