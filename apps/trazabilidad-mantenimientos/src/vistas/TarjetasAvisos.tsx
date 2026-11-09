@@ -1,28 +1,31 @@
 import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Copy, Pencil } from 'lucide-react';
 import { api, type Inventario } from '../api';
-import { CONTACTO_MAX_EMAILS, ETIQUETA_TRAMO, planAvisos, type AvisoEquipo, type ContactoCliente, type CorreoSimulado, type Destinatario, type EquipoVista, type TramoAviso } from '../dominio';
+import { CONTACTO_MAX_EMAILS, ETIQUETA_TRAMO, planAvisos, type AvisoEquipo, type ContactoCliente, type CorreoSimulado, type Destinatario, type EnvioAviso, type EquipoVista, type TramoAviso } from '../dominio';
+import { envioDeEquipo, textoEstadoEnvio, ultimoEnvioDe } from '../lib/envios';
 import { correoAviso, etiquetaOrigen, fechaRelevante, resumenSimulacion, revisarEmails, textoParaCopiar } from '../lib/simulacion';
-import { fmtFecha } from '../lib/vistas';
+import { fmtFecha, fmtFechaHora } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, TONO, Tag } from '../ui';
 
 /**
- * Sub-vista «Simulación automática» de «Avisos a clientes»: qué correos
- * mandaría HOY el aviso automático a 90, 60 y 30 días, a quién y con qué
- * texto, y qué equipos quedan fuera y por qué.
- *
- * Es un ensayo: aquí no hay botón de enviar ni nada que envíe. Lo único que
- * se guarda es el contacto puesto a mano a un cliente (a quién se le
- * escribiría), y el texto se puede copiar para mandarlo a mano.
+ * Las tarjetas de «Avisos a clientes»: qué aviso toca HOY a cada cliente (a 90,
+ * 60 y 30 días del vencimiento y al vencer), a quién iría y con qué texto, y qué
+ * equipos quedan fuera y por qué. El botón de cada tarjeta (`accion`) lo pone
+ * Avisos.tsx, que es quien envía; aquí sólo se escribe el contacto puesto a
+ * mano a un cliente (a quién se le escribe).
  */
 interface Props {
   equipos: EquipoVista[];
   hoy: string;
   contactos: ContactoCliente[];
+  /** Los últimos envíos (GET /avisos/envios), del más reciente al más antiguo. */
+  envios: EnvioAviso[];
   onFicha: (clave: string) => void;
   onInventario: (inv: Inventario) => void;
   notificar: (msg: string) => void;
+  /** El botón «Enviar correo» de una tarjeta con destinatario, o null si quien mira no puede enviar. */
+  accion: (c: CorreoSimulado<EquipoVista>) => ReactNode;
 }
 
 const INPUT =
@@ -34,13 +37,13 @@ const TONO_TRAMO: Record<TramoAviso, string> = { 90: TONO.VENCE_90.badge, 60: TO
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 const idGrupo = (c: CorreoSimulado<EquipoVista>) => `${c.tramo}|${c.claveCliente}`;
 
-export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onInventario, notificar }: Props) {
+export default function TarjetasAvisos({ equipos, hoy, contactos, envios, onFicha, onInventario, notificar, accion }: Props) {
   const plan = useMemo(() => planAvisos(equipos, hoy, contactos), [equipos, hoy, contactos]);
   const r = resumenSimulacion(plan);
   const manualDe = useMemo(() => new Map(contactos.map((c) => [c.clave, c])), [contactos]);
   /** El grupo cuyo editor de contacto está abierto. */
   const [editando, setEditando] = useState<string | null>(null);
-  /** Poner o cambiar el contacto de un cliente es lo único que aquí escribe: sin el permiso no se ofrece. */
+  /** Poner o cambiar el contacto de un cliente pide su permiso: sin él no se ofrece. */
   const { puede, motivo } = usePermisos();
   const puedeContactos = puede('contactos.write');
 
@@ -59,25 +62,18 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
 
   return (
     <div className="flex flex-col gap-4">
-      <Alert tone="amber" title="Simulación: no se envía ningún correo">
-        <p>
-          Esto es lo que el aviso automático enviaría hoy ({fmtFecha(hoy)}) a 90, 60 y 30 días del vencimiento y al vencer. Estamos en fase de pruebas: la app no manda nada a ningún cliente. Sirve para
-          revisar destinatarios y textos. Si quieres avisar a alguien, copia el texto, envíalo tú y márcalo como avisado en la vista «Manual».
-        </p>
-      </Alert>
-
       <p className="text-sm text-gray-700" aria-live="polite">
-        <strong className="font-semibold text-gray-900">{plural(r.correos, 'correo simulado', 'correos simulados')}</strong> a {plural(r.clientes, 'cliente', 'clientes')} ·{' '}
+        <strong className="font-semibold text-gray-900">{plural(r.correos, 'aviso por enviar', 'avisos por enviar')}</strong> hoy ({fmtFecha(hoy)}) a {plural(r.clientes, 'cliente', 'clientes')} ·{' '}
         {plural(r.equipos, 'equipo', 'equipos')} · {plural(r.sinDestinatario, 'grupo', 'grupos')} sin destinatario
       </p>
 
       <section aria-labelledby="sim-correos" className="flex flex-col gap-3">
         <h3 id="sim-correos" className="text-base font-semibold text-gray-900">
-          Correos que se enviarían hoy ({plan.correos.length})
+          Por enviar hoy ({plan.correos.length})
         </h3>
         {plan.correos.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-            Hoy el aviso automático no enviaría ningún correo{plan.sinDestinatario.length > 0 ? ': los grupos a los que toca avisar no tienen destinatario (abajo).' : '.'}
+            Hoy no toca enviar ningún aviso{plan.sinDestinatario.length > 0 ? ': los grupos a los que toca avisar no tienen destinatario (abajo).' : '.'}
           </div>
         ) : (
           <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 2xl:grid-cols-3">
@@ -87,16 +83,16 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
                 <Tarjeta key={id} correo={c} onFicha={onFicha}>
                   <Destinatarios lista={c.destinatarios} />
                   <Vista correo={c} notificar={notificar} />
-                  {puedeContactos &&
-                    (editando === id ? (
-                      editor(c, () => setEditando(null))
-                    ) : (
-                      <div>
-                        <Button variant="ghost" className="-ml-2" onClick={() => setEditando(id)}>
-                          <Pencil className="h-4 w-4" aria-hidden /> Cambiar destinatario
-                        </Button>
-                      </div>
-                    ))}
+                  <UltimoEnvio envio={ultimoEnvioDe(envios, c.claveCliente, c.tramo)} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {accion(c)}
+                    {puedeContactos && editando !== id && (
+                      <Button variant="ghost" onClick={() => setEditando(id)}>
+                        <Pencil className="h-4 w-4" aria-hidden /> Cambiar destinatario
+                      </Button>
+                    )}
+                  </div>
+                  {puedeContactos && editando === id && editor(c, () => setEditando(null))}
                 </Tarjeta>
               );
             })}
@@ -126,9 +122,18 @@ export default function SimulacionAvisos({ equipos, hoy, contactos, onFicha, onI
       )}
 
       <div className="flex flex-col gap-2">
-        <Informativo titulo="Ya avisados en este tramo" nota="Tienen un aviso registrado desde que entraron en su tramo: no se les repite hasta el siguiente." lista={plan.yaAvisados} onFicha={onFicha} />
+        <Informativo
+          titulo="Ya avisados en este tramo"
+          nota="Tienen un aviso registrado desde que entraron en su tramo (las vencidas, desde que vencieron): no se les repite hasta el siguiente."
+          lista={plan.yaAvisados}
+          onFicha={onFicha}
+          detalle={(a) => {
+            const e = envioDeEquipo(envios, a.equipo.clave);
+            return e ? `enviado desde aquí por ${e.por}` : null;
+          }}
+        />
         <Informativo titulo="En servicio" nota="En un tramo, pero ya en Ambientalia o con un ticket abierto en Desk: no se les avisa." lista={plan.enServicio} onFicha={onFicha} />
-        <Informativo titulo="Fuera de ciclo" nota="Vencidas hace más de un año. El aviso automático no las cubre." lista={plan.fueraCiclo} onFicha={onFicha} />
+        <Informativo titulo="Fuera de ciclo" nota="Vencidas hace más de un año: no se les avisa desde aquí." lista={plan.fueraCiclo} onFicha={onFicha} />
       </div>
     </div>
   );
@@ -201,7 +206,7 @@ function Destinatarios({ lista }: { lista: Destinatario[] }) {
   );
 }
 
-/** Asunto y cuerpo del correo simulado, plegados, con su botón de copiar. Sin botón de enviar: no hay envío. */
+/** Asunto y cuerpo del correo, plegados, con su botón de copiar: el mismo texto que redacta el servidor al enviar. */
 function Vista({ correo, notificar }: { correo: CorreoSimulado<EquipoVista>; notificar: (m: string) => void }) {
   const c = useMemo(() => correoAviso(correo), [correo]);
   async function copiar() {
@@ -331,8 +336,31 @@ function EditorContacto({
   );
 }
 
-/** Una sección informativa plegada: por qué esos equipos no están en la simulación. */
-function Informativo({ titulo, nota, lista, onFicha }: { titulo: string; nota: string; lista: AvisoEquipo<EquipoVista>[]; onFicha: (clave: string) => void }) {
+/** El último envío de la tarjeta, si lo hay: en qué modo, cuándo, quién y cómo acabó. */
+function UltimoEnvio({ envio }: { envio: EnvioAviso | null }) {
+  if (!envio) return null;
+  return (
+    <p className="text-xs text-gray-600">
+      Último envío ({envio.modo}, {fmtFechaHora(envio.creadoEn)}, {envio.por}): {textoEstadoEnvio(envio)}
+    </p>
+  );
+}
+
+/** Una sección informativa plegada: por qué esos equipos no tienen tarjeta. */
+function Informativo({
+  titulo,
+  nota,
+  lista,
+  onFicha,
+  detalle,
+}: {
+  titulo: string;
+  nota: string;
+  lista: AvisoEquipo<EquipoVista>[];
+  onFicha: (clave: string) => void;
+  /** Un dato más por equipo (quién lo avisó desde aquí), o null. */
+  detalle?: (a: AvisoEquipo<EquipoVista>) => string | null;
+}) {
   return (
     <details className="rounded-2xl border border-gray-200 bg-white">
       <summary className="flex min-h-[44px] cursor-pointer flex-wrap items-center gap-2 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50">
@@ -344,15 +372,19 @@ function Informativo({ titulo, nota, lista, onFicha }: { titulo: string; nota: s
           <p className="text-sm text-gray-500">Ninguno.</p>
         ) : (
           <ul className="divide-y divide-gray-100 text-sm">
-            {lista.map((a) => (
-              <li key={a.equipo.clave} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5">
-                <span className="min-w-0 break-words text-gray-900">{a.equipo.cliente}</span>
-                <button type="button" onClick={() => onFicha(a.equipo.clave)} className="rounded font-mono text-[13px] text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
-                  {a.equipo.serial}
-                </button>
-                <span className="text-gray-500">{fechaRelevante(a)}</span>
-              </li>
-            ))}
+            {lista.map((a) => {
+              const d = detalle?.(a) ?? null;
+              return (
+                <li key={a.equipo.clave} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5">
+                  <span className="min-w-0 break-words text-gray-900">{a.equipo.cliente}</span>
+                  <button type="button" onClick={() => onFicha(a.equipo.clave)} className="rounded font-mono text-[13px] text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                    {a.equipo.serial}
+                  </button>
+                  <span className="text-gray-500">{fechaRelevante(a)}</span>
+                  {d && <span className="text-gray-500">· {d}</span>}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
