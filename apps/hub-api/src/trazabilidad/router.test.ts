@@ -241,7 +241,7 @@ describe('permisos por rol', () => {
     { ruta: 'PUT /trazabilidad/contactos', permiso: 'contactos.write', pedir: (c) => request(app()).put('/api/trazabilidad/contactos').set(c).send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example'] }) },
     { ruta: 'PUT /trazabilidad/seguimiento/:clave', permiso: 'seguimiento.write', pedir: (c) => request(app()).put('/api/trazabilidad/seguimiento/18A00001').set(c).send({ enAmbientalia: true }) },
     // Avisos a clientes (2026-11-08): enviar el aviso de una tarjeta y resolver un envío sin confirmar. El permiso que marcaba en bloque.
-    { ruta: 'POST /trazabilidad/avisos/envios', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'] }) },
+    { ruta: 'POST /trazabilidad/avisos/envios', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'] }) },
     { ruta: 'POST /trazabilidad/avisos/envios/:id/resolver', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios/7/resolver').set(c).send({ salio: false }) },
     { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
     { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
@@ -939,7 +939,7 @@ describe('validación antes de escribir', () => {
 // El envío de los avisos (2026-11-08) por HTTP, con el doble de la base: el interruptor, la validación y la lectura.
 // El flujo entero, contra Postgres y con un canal de mentira, está en avisos-envios.db.test.ts.
 describe('avisos a clientes: enviar y resolver', () => {
-  const TARJETA = { claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'] };
+  const TARJETA = { claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'] };
 
   it('con el envío apagado (el canal por defecto de estas pruebas): 409, sin una sola consulta de negocio', async () => {
     const res = await request(app()).post('/api/trazabilidad/avisos/envios').set(auth()).send(TARJETA);
@@ -955,6 +955,15 @@ describe('avisos a clientes: enviar y resolver', () => {
     ['un tramo dentro de una lista', { ...TARJETA, tramo: ['30'] }],
     ['sin equipos', { ...TARJETA, equipos: [] }],
     ['una clave de equipo que no vale', { ...TARJETA, equipos: ['a b'] }],
+    ['sin modo', { ...TARJETA, modo: undefined }],
+    ['un modo que no es prueba ni real', { ...TARJETA, modo: 'apagado' }],
+    ['un modo con mayúsculas', { ...TARJETA, modo: 'Real' }],
+    ['sin destinatarios (para)', { ...TARJETA, para: undefined }],
+    ['para vacío', { ...TARJETA, para: [] }],
+    ['para con más de cinco correos', { ...TARJETA, para: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((x) => `${x}@cliente-uno.example`) }],
+    ['para con un correo que no vale', { ...TARJETA, para: ['no-es-un-correo'] }],
+    ['para con algo que no es texto', { ...TARJETA, para: [7] }],
+    ['para que no es una lista', { ...TARJETA, para: 'compras@cliente-uno.example' }],
   ])('400 antes de nada: %s', async (_caso, cuerpo) => {
     expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(auth()).send(cuerpo)).status).toBe(400);
     expect([queries, remitidos]).toEqual([[], []]);
@@ -964,6 +973,12 @@ describe('avisos a clientes: enviar y resolver', () => {
     const { parsePedidoEnvio } = await import('./types.js');
     for (const [tramo, canonico] of [[90, 90], ['90', 90], ['30', 30], ['vencida', 'vencida']]) expect(parsePedidoEnvio({ ...TARJETA, tramo }).tramo).toBe(canonico);
     expect(parsePedidoEnvio({ ...TARJETA, equipos: ['18A00001', '18A00001'] }).equipos).toEqual(['18A00001']);
+  });
+
+  it('modo y para: el modo exacto, y los correos normalizados y sin repetir', async () => {
+    const { parsePedidoEnvio } = await import('./types.js');
+    const p = parsePedidoEnvio({ ...TARJETA, modo: 'real', para: [' Compras@Cliente-Uno.example ', 'compras@cliente-uno.example', 'otro@cliente-uno.example'] });
+    expect([p.modo, p.para]).toEqual(['real', ['compras@cliente-uno.example', 'otro@cliente-uno.example']]);
   });
 
   it('resolver: 400 si «salio» no es verdadero o falso, o si el id no vale', async () => {

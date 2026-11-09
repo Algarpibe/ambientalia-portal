@@ -174,6 +174,24 @@ export function correoDePrueba(real: CorreoAEnviar, buzon: string): CorreoAEnvia
   };
 }
 
+/**
+ * Lo que sale de verdad de una tarjeta con el interruptor como esté: en real, el
+ * correo real; en prueba, su versión de prueba al buzón; apagado, nada (null).
+ * Es la regla única del servidor al enviar y de la confirmación de la pantalla.
+ */
+export function correoQueSale<E extends EquipoAviso & EquipoTexto>(c: CorreoSimulado<E>, canal: EstadoCanal): CorreoAEnviar | null {
+  if (canal.modo === 'apagado') return null;
+  const real = correoReal(c);
+  return canal.modo === 'prueba' ? correoDePrueba(real, canal.buzonPrueba) : real;
+}
+
+/** True si son los mismos correos, sin importar el orden ni las mayúsculas. */
+export function mismosDestinatarios(ahora: readonly string[], vistos: readonly string[]): boolean {
+  const a = ahora.map(normalizarEmail).sort();
+  const b = vistos.map(normalizarEmail).sort();
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
 /** Cuántos destinatarios admite, como mucho, un aviso que sale de verdad (el mismo tope que el contacto puesto a mano). */
 export const MAX_DESTINATARIOS = 5;
 

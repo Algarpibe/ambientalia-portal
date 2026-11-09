@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Send } from 'lucide-react';
 import { api, type Inventario } from '../api';
-import { ETIQUETA_TRAMO, correoDePrueba, correoReal, destinatariosAceptables, type ContactoCliente, type CorreoSimulado, type EnvioAviso, type EquipoVista, type EstadoCanal, type RespuestaEnvios } from '../dominio';
-import { botonEnviar, errorDeEnvio, puedeResolver, rotuloModo, textoEstadoEnvio, ultimoEnvioDe } from '../lib/envios';
+import { ETIQUETA_TRAMO, correoQueSale, correoReal, type ContactoCliente, type CorreoAEnviar, type CorreoSimulado, type EnvioAviso, type EquipoVista, type EstadoCanal, type RespuestaEnvios } from '../dominio';
+import { accionTarjeta, canalIgual, errorDeEnvio, msHastaRefresco, puedeResolver, rotuloModo, textoEstadoEnvio, textoFallo, ultimoEnvioDe } from '../lib/envios';
 import { fmtFechaHora } from '../lib/vistas';
 import { usePermisos } from '../permisos';
 import { Alert, Button, Modal, Tag } from '../ui';
@@ -10,6 +10,8 @@ import TarjetasAvisos from './TarjetasAvisos';
 
 interface Props {
   equipos: EquipoVista[];
+  /** Veces que se ha pulsado «Actualizar» en la cabecera: con cada una, los envíos se vuelven a pedir. */
+  recarga: number;
   hoy: string;
   /** Los contactos puestos a mano a clientes (destinatarios de las tarjetas). */
   contactos: ContactoCliente[];
@@ -36,10 +38,12 @@ type CanalAbierto = Exclude<EstadoCanal, { modo: 'apagado' }>;
  * de la lista de GET /avisos/envios, que se vuelve a pedir tras cada envío y
  * cada resolución; la respuesta del POST sólo se enseña como aviso.
  */
-export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onInventario, notificar }: Props) {
+export default function Avisos({ equipos, recarga: pulsos, hoy, contactos, onFicha, onCambio, onInventario, notificar }: Props) {
   const [envios, setEnvios] = useState<RespuestaEnvios | null>(null);
   const [errorEnvios, setErrorEnvios] = useState<string | null>(null);
   const [confirmar, setConfirmar] = useState<CorreoSimulado<EquipoVista> | null>(null);
+  /** Lo que se dijo tras un error que obligó a actualizar la pantalla: se queda hasta que se cierra (un aviso de 3 s no basta). */
+  const [aviso, setAviso] = useState<string | null>(null);
   /** Ver y copiar el aviso lo puede cualquiera; enviarlo y resolver un «sin confirmar» piden `avisos.write`. */
   const puedeEnviar = usePermisos().puede('avisos.write');
 
@@ -51,9 +55,18 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
       setErrorEnvios((e as Error).message);
     }
   }, []);
+  // Al entrar y con cada «Actualizar» de la cabecera.
   useEffect(() => {
     void cargarEnvios();
-  }, [cargarEnvios]);
+  }, [cargarEnvios, pulsos]);
+
+  // Un envío «en curso» pasa a «sin confirmar» a los 2 minutos sin que nadie toque nada: un refresco único (cada cambio de la lista lo reprograma).
+  const pendiente = msHastaRefresco(envios?.envios ?? []);
+  useEffect(() => {
+    if (pendiente === null) return;
+    const t = setTimeout(() => void cargarEnvios(), pendiente);
+    return () => clearTimeout(t);
+  }, [envios, pendiente, cargarEnvios]);
 
   /** Tras enviar o resolver: el inventario (los avisados cambian de grupo) y los envíos. */
   const recargar = async () => {
@@ -71,7 +84,24 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
           <p>{rotulo.texto}</p>
         </Alert>
       )}
-      {errorEnvios && <Alert tone="red">No se pudo leer el estado del envío: {errorEnvios}</Alert>}
+      {errorEnvios && (
+        <Alert tone="red">
+          <div className="flex flex-wrap items-center gap-3">
+            <span>No se pudo leer el estado del envío: {errorEnvios}</span>
+            <Button onClick={() => void cargarEnvios()}>Reintentar</Button>
+          </div>
+        </Alert>
+      )}
+      {aviso && (
+        <Alert tone="amber">
+          <div className="flex flex-wrap items-center gap-3">
+            <span>{aviso}</span>
+            <Button variant="ghost" onClick={() => setAviso(null)}>
+              Entendido
+            </Button>
+          </div>
+        </Alert>
+      )}
       <TarjetasAvisos
         equipos={equipos}
         hoy={hoy}
@@ -81,14 +111,12 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
         onInventario={onInventario}
         notificar={notificar}
         accion={(c) => {
-          if (!puedeEnviar) return null;
-          if (canal && canal.modo !== 'apagado' && !destinatariosAceptables(correoReal(c).para)) {
-            return <p className="text-xs text-amber-800">No se puede enviar: hay que dejar entre 1 y 5 correos válidos. Pon a mano el contacto del cliente.</p>;
-          }
-          const b = canal ? botonEnviar(canal, ultimoEnvioDe(lista, c.claveCliente, c.tramo)) : { activo: false, texto: 'Cargando…' };
+          const a = accionTarjeta({ puedeEnviar, canal, fallo: errorEnvios !== null, ultimo: ultimoEnvioDe(lista, c.claveCliente, c.tramo), para: correoReal(c).para });
+          if (!a) return null;
+          if (a.tipo === 'aviso') return <p className="text-xs text-amber-800">{a.texto}</p>;
           return (
-            <Button variant="primary" disabled={!b.activo} onClick={() => setConfirmar(c)}>
-              <Send className="h-4 w-4" aria-hidden /> {b.texto}
+            <Button variant="primary" disabled={!a.activo} onClick={() => setConfirmar(c)}>
+              <Send className="h-4 w-4" aria-hidden /> {a.texto}
             </Button>
           );
         }}
@@ -103,6 +131,7 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
             // La respuesta del POST sólo se enseña; lo que decide la pantalla es lo que sirva GET.
             await recargar();
             if (e.estado === 'fallido') return;
+            setAviso(null);
             setConfirmar(null);
             notificar(e.estado === 'enviado' ? `Aviso enviado a ${e.cliente}` : 'Sin confirmar: revisa Enviados de info@ en un par de minutos y resuélvelo en «Últimos envíos»');
           }}
@@ -110,7 +139,7 @@ export default function Avisos({ equipos, hoy, contactos, onFicha, onCambio, onI
             await recargar();
             if (recargarPantalla) {
               setConfirmar(null);
-              notificar(texto);
+              setAviso(texto);
             }
           }}
         />
@@ -134,7 +163,7 @@ function Confirmar({
   onFallo: (texto: string, recargar: boolean) => Promise<void>;
 }) {
   const real = useMemo(() => correoReal(correo), [correo]);
-  const sale = canal.modo === 'prueba' ? correoDePrueba(real, canal.buzonPrueba) : real;
+  const sale = correoQueSale(correo, canal) as CorreoAEnviar; // el canal está abierto: no es null
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -142,8 +171,14 @@ function Confirmar({
     setEnviando(true);
     setError(null);
     try {
-      const e = await api.enviarAviso(correo.claveCliente, correo.tramo, correo.equipos.map((a) => a.equipo.clave));
-      if (e.estado === 'fallido') setError(`No salió: ${e.error ?? 'sin motivo'}. No se ha marcado nada; puedes volver a intentarlo.`);
+      // Lo que se confirma es lo que sale: si el interruptor ya no está como lo enseña esta confirmación, no se envía.
+      const ahora = (await api.envios()).canal;
+      if (!canalIgual(ahora, canal)) {
+        await onFallo(errorDeEnvio({ code: 'modo_cambiado' }).texto, true);
+        return;
+      }
+      const e = await api.enviarAviso(correo.claveCliente, correo.tramo, correo.equipos.map((a) => a.equipo.clave), canal.modo, real.para);
+      if (e.estado === 'fallido') setError(textoFallo(e.error));
       await onEnviado(e);
     } catch (x) {
       const m = errorDeEnvio(x);
@@ -157,7 +192,7 @@ function Confirmar({
   return (
     <Modal
       title={`Enviar el aviso a ${correo.cliente}`}
-      onClose={onClose}
+      onClose={enviando ? () => undefined : onClose} // mientras sale, no se cierra (ni con la X, Escape o el fondo): el resultado se tiene que ver
       footer={
         <>
           <Button onClick={onClose} disabled={enviando}>

@@ -41,6 +41,7 @@ import {
   type TramoAviso,
   type TramoPlazo,
 } from './dominio.js';
+import { MAX_DESTINATARIOS } from './avisos-correo.js';
 import { FECHA_MINIMA_CALIBRACION } from './calibraciones.js';
 import type { ResumenFst022 } from './fst022.js';
 import { FRECUENCIA_MAX_MESES, FRECUENCIA_MIN_MESES, SEGUN_CONTRATO, VIGENCIA_MAX_DIAS, VIGENCIA_MIN_DIAS, esFrecuenciaValida, esVigenciaValida, type ValorVigencia } from './marcas.js';
@@ -219,6 +220,10 @@ export interface PedidoEnvio {
   claveCliente: string;
   tramo: TramoAviso;
   equipos: string[];
+  /** El modo que enseñaba la confirmación: si el del servidor ya es otro, no se envía (409 `modo_cambiado`). */
+  modo: 'prueba' | 'real';
+  /** Los destinatarios REALES que enseñaba la confirmación, normalizados: si ya son otros, no se envía (409 `destinatarios_cambiados`). */
+  para: string[];
 }
 
 /** Valida el cuerpo de POST /trazabilidad/avisos/envios. El tramo puede llegar como 90 o «90»: sale el canónico, el del plan. */
@@ -234,7 +239,14 @@ export function parsePedidoEnvio(body: unknown): PedidoEnvio {
     if (typeof c !== 'string' || !esClave(c)) throw invalido('Clave de equipo no válida.', `equipos[${i}]`);
     return c;
   });
-  return { claveCliente: clave, tramo, equipos: [...new Set(equipos)] };
+  if (b.modo !== 'prueba' && b.modo !== 'real') throw invalido('«modo» debe ser «prueba» o «real»: el que enseñaba la confirmación.', 'modo');
+  if (!Array.isArray(b.para) || b.para.length < 1 || b.para.length > MAX_DESTINATARIOS) throw invalido(`«para» debe llevar de 1 a ${MAX_DESTINATARIOS} correos: los de la confirmación.`, 'para');
+  const para = b.para.map((c, i) => {
+    const e = typeof c === 'string' ? normalizarEmail(c) : '';
+    if (!esEmail(e)) throw invalido('Correo de destinatario no válido.', `para[${i}]`);
+    return e;
+  });
+  return { claveCliente: clave, tramo, equipos: [...new Set(equipos)], modo: b.modo, para: [...new Set(para)] };
 }
 
 /** Valida el cuerpo de POST /trazabilidad/avisos/envios/:id/resolver: `{salio}`, si el correo salió («Sí salió») o no. */

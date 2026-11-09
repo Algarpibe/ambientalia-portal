@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { EnvioAviso } from '../dominio';
-import { botonEnviar, envioDeEquipo, errorDeEnvio, puedeResolver, rotuloModo, textoEstadoEnvio, ultimoEnvioDe } from './envios';
+import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, type EnvioAviso, type EstadoCanal } from '../dominio';
+import { accionTarjeta, botonEnviar, canalIgual, envioDeEquipo, errorDeEnvio, msHastaRefresco, puedeResolver, rotuloModo, textoEstadoEnvio, textoFallo, ultimoEnvioDe } from './envios';
 
 // Lo que la pantalla de avisos dice del envío. Sin red: los envíos son de mentira, y ficticios.
 
@@ -69,9 +69,72 @@ describe('cada envío y cada tarjeta', () => {
 
   it('quién avisó a un equipo desde aquí: sólo un envío real que salió', () => {
     const real = envio({ modo: 'real', equipos: ['18A00001', '18A00002'], enviadoA: ['compras@cliente-uno.example'] });
-    expect(envioDeEquipo([envio(), real], '18A00002')).toBe(real);
-    expect(envioDeEquipo([envio({ modo: 'real', estado: 'fallido' })], '18A00001')).toBeNull();
-    expect(envioDeEquipo([envio()], '18A00001')).toBeNull(); // en prueba no se avisa a nadie
+    expect(envioDeEquipo([envio(), real], '18A00002', 30)).toBe(real);
+    expect(envioDeEquipo([envio({ modo: 'real', estado: 'fallido' })], '18A00001', 30)).toBeNull();
+    expect(envioDeEquipo([envio()], '18A00001', 30)).toBeNull(); // en prueba no se avisa a nadie
+  });
+
+  it('...y del tramo en que está el equipo: un aviso real de otro tramo no cuenta', () => {
+    const de90 = envio({ modo: 'real', tramo: 90 });
+    expect(envioDeEquipo([de90], '18A00001', 30)).toBeNull();
+    expect(envioDeEquipo([de90], '18A00001', 90)).toBe(de90);
+    expect(envioDeEquipo([de90], '18A00001', null)).toBeNull();
+  });
+});
+
+describe('qué ofrece cada tarjeta', () => {
+  const ACEPTABLE = ['compras@cliente-uno.example'];
+  const base = { puedeEnviar: true, canal: PRUEBA as EstadoCanal | null, fallo: false, ultimo: null, para: ACEPTABLE };
+
+  it('sin permiso para enviar, nada', () => {
+    expect(accionTarjeta({ ...base, puedeEnviar: false })).toBeNull();
+  });
+
+  it('con destinatarios aceptables, el botón de siempre; apagado, desactivado', () => {
+    expect(accionTarjeta(base)).toEqual({ tipo: 'boton', activo: true, texto: 'Enviar correo' });
+    expect(accionTarjeta({ ...base, canal: { modo: 'apagado', motivo: null, buzonPrueba: null } })).toEqual({ tipo: 'boton', activo: false, texto: 'Envío apagado' });
+    expect(accionTarjeta({ ...base, ultimo: envio({ estado: 'en_curso' }) })).toEqual({ tipo: 'boton', activo: false, texto: 'Enviando…' });
+  });
+
+  it('con más de MAX_DESTINATARIOS, repetidos o ninguno, una indicación en lugar del botón', () => {
+    const seis = ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => `${x}@cliente-uno.example`);
+    for (const para of [seis, [], ['a@cliente-uno.example', 'A@cliente-uno.example']]) {
+      expect(accionTarjeta({ ...base, para })).toEqual({ tipo: 'aviso', texto: `No se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente.` });
+    }
+    // apagado manda sobre la indicación: ahí no hay nada que enviar de todos modos
+    expect(accionTarjeta({ ...base, para: seis, canal: { modo: 'apagado', motivo: null, buzonPrueba: null } })).toMatchObject({ tipo: 'boton', activo: false });
+  });
+
+  it('sin el estado del envío todavía: «Cargando…», o «Sin estado del envío» si la lectura falló', () => {
+    expect(accionTarjeta({ ...base, canal: null })).toEqual({ tipo: 'boton', activo: false, texto: 'Cargando…' });
+    expect(accionTarjeta({ ...base, canal: null, fallo: true })).toEqual({ tipo: 'boton', activo: false, texto: 'Sin estado del envío' });
+  });
+});
+
+describe('lo que se confirmó y lo que dice el servidor ahora', () => {
+  it('el mismo canal: igual modo y mismo buzón', () => {
+    expect(canalIgual(PRUEBA, { ...PRUEBA })).toBe(true);
+    expect(canalIgual(PRUEBA, REAL)).toBe(false);
+    expect(canalIgual(PRUEBA, { ...PRUEBA, buzonPrueba: 'otro@ambientalia.com.co' })).toBe(false);
+    expect(canalIgual(REAL, { modo: 'apagado', motivo: null, buzonPrueba: null })).toBe(false);
+  });
+
+  it('el motivo de un apagado no cuenta como cambio de modo', () => {
+    expect(canalIgual({ modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null }, { modo: 'apagado', motivo: 'sin_canal', buzonPrueba: null })).toBe(true);
+  });
+});
+
+describe('el refresco de los envíos en curso y el texto de un fallo', () => {
+  it('con algún «en curso» en la lista de GET, un refresco a los 2 minutos y 5 segundos; si no, ninguno', () => {
+    expect(msHastaRefresco([envio({ estado: 'enviado' }), envio({ estado: 'sin_confirmar' })])).toBeNull();
+    expect(msHastaRefresco([])).toBeNull();
+    expect(msHastaRefresco([envio({ estado: 'enviado' }), envio({ estado: 'en_curso' })])).toBe(SIN_CONFIRMAR_MS + 5000);
+  });
+
+  it('el fallo no repite el punto del motivo', () => {
+    expect(textoFallo('Barrera ficticia.')).toBe('No salió: Barrera ficticia. No se ha marcado nada; puedes volver a intentarlo.');
+    expect(textoFallo('Barrera ficticia')).toBe('No salió: Barrera ficticia. No se ha marcado nada; puedes volver a intentarlo.');
+    expect(textoFallo(null)).toBe('No salió: sin motivo. No se ha marcado nada; puedes volver a intentarlo.');
   });
 });
 
@@ -94,10 +157,13 @@ describe('«Sí salió» / «No salió»', () => {
 
 describe('los errores del envío, en palabras de la pantalla', () => {
   it('cada código conocido tiene su mensaje, y los de «recarga» piden recargar', () => {
-    expect(errorDeEnvio({ status: 409, code: 'envio_apagado', message: 'x' })).toEqual({ texto: 'El envío está apagado: no se ha enviado nada.', recargar: false });
-    expect(errorDeEnvio({ status: 404, code: 'tarjeta_no_encontrada', message: 'x' })).toMatchObject({ recargar: true, texto: expect.stringMatching(/recarga/i) });
-    expect(errorDeEnvio({ status: 409, code: 'tarjeta_cambiada', message: 'x' })).toMatchObject({ recargar: true, texto: expect.stringMatching(/recarga/i) });
-    expect(errorDeEnvio({ status: 410, code: 'marcar_retirado', message: 'x' })).toMatchObject({ recargar: true, texto: expect.stringMatching(/recarga/i) });
+    expect(errorDeEnvio({ status: 409, code: 'envio_apagado', message: 'x' })).toEqual({ texto: 'El envío está apagado: no se ha enviado nada. Se ha actualizado la pantalla.', recargar: true });
+    for (const [status, code] of [[404, 'tarjeta_no_encontrada'], [409, 'tarjeta_cambiada'], [410, 'marcar_retirado'], [409, 'modo_cambiado'], [409, 'destinatarios_cambiados']] as const) {
+      const e = errorDeEnvio({ status, code, message: 'x' });
+      expect([code, e.recargar, e.texto.endsWith('Se ha actualizado la pantalla.'), /recarga la página/i.test(e.texto)]).toEqual([code, true, true, false]);
+    }
+    expect(errorDeEnvio({ status: 409, code: 'modo_cambiado', message: 'x' }).texto).toMatch(/modo/);
+    expect(errorDeEnvio({ status: 409, code: 'destinatarios_cambiados', message: 'x' }).texto).toMatch(/destinatarios/);
     expect(errorDeEnvio({ status: 409, code: 'ya_enviando', message: 'x' })).toMatchObject({ recargar: false, texto: expect.stringMatching(/Últimos envíos/) });
     expect(errorDeEnvio({ status: 409, code: 'destinatarios_no_validos', message: 'x' })).toMatchObject({ recargar: false, texto: expect.stringMatching(/contacto.*5/) });
     expect(errorDeEnvio({ status: 409, code: 'no_sin_confirmar', message: 'x' })).toMatchObject({ recargar: true, texto: expect.stringMatching(/sin confirmar/) });

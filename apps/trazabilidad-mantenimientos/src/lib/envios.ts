@@ -10,7 +10,7 @@
  * tiempo agotado; GET lo presenta «en curso» hasta los 2 minutos y el servidor
  * rechaza (409) resolverlo antes. Tras enviar, la pantalla vuelve a pedir la lista.
  */
-import type { EnvioAviso, EstadoCanal, EstadoEnvio, MotivoApagado, TramoAviso } from '../dominio';
+import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, destinatariosAceptables, type EnvioAviso, type EstadoCanal, type EstadoEnvio, type MotivoApagado, type TramoAviso } from '../dominio';
 
 export interface Rotulo {
   tono: 'amber' | 'blue' | 'green';
@@ -62,16 +62,47 @@ export function puedeResolver(envio: EnvioAviso | null): boolean {
   return envio?.estado === 'sin_confirmar';
 }
 
-/** El envío REAL que avisó a un equipo desde aquí (el más reciente), o null si se le avisó de otra forma (por teléfono, a mano). */
-export function envioDeEquipo(envios: readonly EnvioAviso[], clave: string): EnvioAviso | null {
-  return envios.find((e) => e.modo === 'real' && e.estado === 'enviado' && e.equipos.includes(clave)) ?? null;
+/** El envío REAL que avisó a un equipo desde aquí EN SU TRAMO (el más reciente), o null si se le avisó de otra forma (por teléfono, a mano). */
+export function envioDeEquipo(envios: readonly EnvioAviso[], clave: string, tramo: TramoAviso | null): EnvioAviso | null {
+  return envios.find((e) => e.modo === 'real' && e.estado === 'enviado' && e.tramo === tramo && e.equipos.includes(clave)) ?? null;
 }
 
-const RECARGA = ' Recarga la página.';
+/** Qué ofrece una tarjeta con destinatario: nada (sin permiso), una indicación (no se podría enviar) o el botón. */
+export type AccionTarjeta = { tipo: 'aviso'; texto: string } | { tipo: 'boton'; activo: boolean; texto: string };
+
+/** Decide qué pone la pantalla en una tarjeta: `para` son sus destinatarios de verdad (correoReal) y `ultimo` su último envío según GET. */
+export function accionTarjeta(a: { puedeEnviar: boolean; canal: EstadoCanal | null; fallo: boolean; ultimo: EnvioAviso | null; para: readonly string[] }): AccionTarjeta | null {
+  if (!a.puedeEnviar) return null;
+  if (!a.canal) return { tipo: 'boton', activo: false, texto: a.fallo ? 'Sin estado del envío' : 'Cargando…' };
+  if (a.canal.modo !== 'apagado' && !destinatariosAceptables(a.para)) {
+    return { tipo: 'aviso', texto: `No se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente.` };
+  }
+  return { tipo: 'boton', ...botonEnviar(a.canal, a.ultimo) };
+}
+
+/** True si el modo (y el buzón de prueba) son los mismos: lo que enseñó la confirmación contra lo que dice el servidor ahora. El motivo de un apagado no cuenta. */
+export function canalIgual(a: EstadoCanal, b: EstadoCanal): boolean {
+  return a.modo === b.modo && a.buzonPrueba === b.buzonPrueba;
+}
+
+/** Cuándo volver a pedir los envíos si la lista tiene alguno «en curso» (a los 2 minutos más 5 segundos ya será «sin confirmar»); null si no hace falta. */
+export function msHastaRefresco(envios: readonly EnvioAviso[]): number | null {
+  return envios.some((e) => e.estado === 'en_curso') ? SIN_CONFIRMAR_MS + 5000 : null;
+}
+
+/** Lo que se dice cuando el canal contesta que el correo NO salió; el motivo ya suele traer su punto. */
+export function textoFallo(error: string | null): string {
+  return `No salió: ${(error ?? 'sin motivo').replace(/\.+$/, '')}. No se ha marcado nada; puedes volver a intentarlo.`;
+}
+
+/** Con `recargar`, la pantalla ya se ha vuelto a pedir al servidor cuando se enseña el mensaje. */
+const RECARGA = ' Se ha actualizado la pantalla.';
 
 /** Lo que dice la pantalla por cada código de error del envío; `recargar` = la pantalla vuelve a pedir la lista. */
 const ERROR_ENVIO: Record<string, { texto: string; recargar: boolean }> = {
-  envio_apagado: { texto: 'El envío está apagado: no se ha enviado nada.', recargar: false },
+  envio_apagado: { texto: `El envío está apagado: no se ha enviado nada.${RECARGA}`, recargar: true },
+  modo_cambiado: { texto: `El modo del envío cambió mientras tenías abierta la confirmación y no se ha enviado nada. Revisa el modo y vuelve a enviar.${RECARGA}`, recargar: true },
+  destinatarios_cambiados: { texto: `Los destinatarios de este aviso cambiaron mientras tenías abierta la confirmación y no se ha enviado nada. Revisa a quién va y vuelve a enviar.${RECARGA}`, recargar: true },
   tarjeta_no_encontrada: { texto: `Ese aviso ya no está pendiente: puede que ya se haya enviado o que sus equipos hayan cambiado.${RECARGA}`, recargar: true },
   tarjeta_cambiada: { texto: `La tarjeta cambió desde que la abriste y no se ha enviado nada.${RECARGA}`, recargar: true },
   ya_enviando: { texto: 'Este aviso ya se está enviando o quedó sin confirmar: míralo en «Últimos envíos».', recargar: false },
