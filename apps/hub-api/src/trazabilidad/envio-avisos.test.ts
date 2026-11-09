@@ -1,6 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { CABECERA_TOKEN, ESPERA_MAX_MS, crearCanalAvisos, modoEfectivo } from './envio-avisos.js';
+
+const URL_N8N = 'https://n8n.example.com/webhook/tmc-avisos-ficticio';
+const BUZON = 'buzon-prueba@ambientalia.com.co';
+const BASE = { TMC_AVISOS_N8N_URL: URL_N8N, TMC_AVISOS_N8N_TOKEN: 'token-ficticio', TMC_AVISOS_BUZON_PRUEBA: BUZON };
+const PRUEBA = { ...BASE, TMC_AVISOS_ENVIO: 'prueba' };
+const REAL = { ...BASE, TMC_AVISOS_ENVIO: 'real' };
+const CORREO_PRUEBA = { para: [BUZON], asunto: '[PRUEBA] Asunto ficticio', cuerpo: 'Cuerpo ficticio.' };
+const CORREO_REAL = { para: ['compras@cliente-uno.example'], asunto: 'Asunto ficticio', cuerpo: 'Cuerpo ficticio.' };
+
+/** Una red de mentira que apunta lo que se le pide y contesta lo que se le diga. */
+function red(contestar: () => Promise<Response>) {
+  const llamadas: { url: string; init: RequestInit }[] = [];
+  return {
+    llamadas,
+    fn: async (url: string, init: RequestInit) => {
+      llamadas.push({ url, init });
+      return contestar();
+    },
+  };
+}
+const json = (status: number, cuerpo: unknown) => async () => new Response(JSON.stringify(cuerpo), { status, headers: { 'Content-Type': 'application/json' } });
 
 // El envío de los avisos a clientes (2026-11-08): su registro (069), su canal
 // de salida y sus candados. Nada de aquí llama a la red: la red es de mentira.
@@ -30,5 +52,63 @@ describe('069_trazabilidad_avisos_envios.sql', () => {
 
   it('está apuntada en MIGRATIONS, detrás de la 068, y es la última', () => {
     expect(fuente('../db.ts')).toMatch(/'068_permisos_portal_app\.sql',\s*'069_trazabilidad_avisos_envios\.sql'\];/);
+  });
+});
+
+describe('el interruptor: falla cerrado', () => {
+  it.each([
+    ['sin la variable', {}, 'sin_valor'],
+    ['vacía', { TMC_AVISOS_ENVIO: '' }, 'sin_valor'],
+    ['«apagado»', { ...BASE, TMC_AVISOS_ENVIO: 'apagado' }, null],
+    ['un valor que no se conoce', { ...BASE, TMC_AVISOS_ENVIO: 'si' }, 'valor_desconocido'],
+    ['en mayúsculas', { ...BASE, TMC_AVISOS_ENVIO: 'REAL' }, 'valor_desconocido'],
+    ['con un espacio detrás', { ...BASE, TMC_AVISOS_ENVIO: 'real ' }, 'valor_desconocido'],
+    ['real sin URL', { ...REAL, TMC_AVISOS_N8N_URL: undefined }, 'sin_canal'],
+    ['real con algo que no es una URL', { ...REAL, TMC_AVISOS_N8N_URL: 'n8n.example.com' }, 'sin_canal'],
+    ['real sin token', { ...REAL, TMC_AVISOS_N8N_TOKEN: ' ' }, 'sin_canal'],
+    ['prueba sin token', { ...PRUEBA, TMC_AVISOS_N8N_TOKEN: undefined }, 'sin_canal'],
+    ['prueba sin buzón', { ...PRUEBA, TMC_AVISOS_BUZON_PRUEBA: undefined }, 'sin_buzon_prueba'],
+    ['prueba con un buzón de fuera', { ...PRUEBA, TMC_AVISOS_BUZON_PRUEBA: 'buzon@example.com' }, 'sin_buzon_prueba'],
+    ['prueba con un subdominio', { ...PRUEBA, TMC_AVISOS_BUZON_PRUEBA: 'buzon@correo.ambientalia.com.co' }, 'sin_buzon_prueba'],
+  ])('%s → apagado', (_caso, env, motivo) => {
+    expect(modoEfectivo(env)).toEqual({ modo: 'apagado', motivo, buzonPrueba: null });
+  });
+
+  it('prueba, con todo y un buzón de @ambientalia.com.co (en minúsculas); real, con URL y token', () => {
+    expect(modoEfectivo({ ...PRUEBA, TMC_AVISOS_BUZON_PRUEBA: ' Buzon-Prueba@Ambientalia.com.co ' })).toEqual({ modo: 'prueba', motivo: null, buzonPrueba: BUZON });
+    expect(modoEfectivo({ ...REAL, TMC_AVISOS_BUZON_PRUEBA: undefined })).toEqual({ modo: 'real', motivo: null, buzonPrueba: null });
+  });
+});
+
+describe('el canal: la entrega a n8n', () => {
+  it('en prueba: POST a la URL, con el token en su cabecera, el correo en JSON y la espera máxima; confirmado → enviado', async () => {
+    const r = red(json(200, { ok: true, messageId: 'msg-ficticio-1' }));
+    expect(await crearCanalAvisos(PRUEBA, r.fn).remitir(CORREO_PRUEBA, 7)).toEqual({ tipo: 'enviado', messageId: 'msg-ficticio-1' });
+    expect(r.llamadas).toHaveLength(1);
+    const { url, init } = r.llamadas[0];
+    expect([url, init.method, (init.headers as Record<string, string>)[CABECERA_TOKEN]]).toEqual([URL_N8N, 'POST', 'token-ficticio']);
+    expect(JSON.parse(String(init.body))).toEqual({ referencia: 7, ...CORREO_PRUEBA });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(ESPERA_MAX_MS).toBe(30_000);
+  });
+
+  it('apagado, o en prueba con un destinatario que no es sólo el buzón, ni llama a la red', async () => {
+    const r = red(json(200, { ok: true, messageId: 'x' }));
+    expect((await crearCanalAvisos({}, r.fn).remitir(CORREO_REAL, 1)).tipo).toBe('rechazado');
+    expect((await crearCanalAvisos(PRUEBA, r.fn).remitir(CORREO_REAL, 1)).tipo).toBe('rechazado');
+    expect((await crearCanalAvisos(PRUEBA, r.fn).remitir({ ...CORREO_PRUEBA, para: [BUZON, 'compras@cliente-uno.example'] }, 1)).tipo).toBe('rechazado');
+    expect(r.llamadas).toEqual([]);
+  });
+
+  it.each([
+    ['n8n lo rechaza, con su motivo', json(422, { ok: false, error: 'Barrera ficticia.' }), { tipo: 'rechazado', motivo: 'Barrera ficticia.' }],
+    ['un 200 con ok: false', json(200, { ok: false, error: 'Gmail no lo envió (ficticio).' }), { tipo: 'rechazado', motivo: 'Gmail no lo envió (ficticio).' }],
+    ['el token no vale (sin JSON)', async () => new Response('Forbidden', { status: 403 }), { tipo: 'rechazado', motivo: 'El servicio de correo respondió 403: no ha salido nada.' }],
+    ['un 200 que no dice nada claro', json(200, { recibido: true }), { tipo: 'sin_respuesta' }],
+    ['no contesta a tiempo', async () => { throw new DOMException('La espera se acabó', 'TimeoutError'); }, { tipo: 'sin_respuesta' }],
+    ['no se pudo conectar', async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }); }, { tipo: 'rechazado', motivo: 'No se pudo conectar con el servicio de correo: no ha salido nada.' }],
+    ['se cortó a mitad', async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } }); }, { tipo: 'sin_respuesta' }],
+  ])('%s', async (_caso, contestar, esperado) => {
+    expect(await crearCanalAvisos(REAL, red(contestar).fn).remitir(CORREO_REAL, 7)).toEqual(esperado);
   });
 });
