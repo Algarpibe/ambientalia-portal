@@ -1,7 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ordenarParaAsignar } from './documento-numero.js';
+import { ordenarParaAsignar, numerosANumerar } from './documento-numero.js';
+
+describe('numerosANumerar', () => {
+  it('excluye las OV sin líneas y conserva el orden de entrada', () => {
+    const l = [{}];
+    expect(
+      numerosANumerar([
+        { numero: 'OV-2026-213', lineas: l },
+        { numero: 'OV-2026-150', lineas: [] },
+        { numero: 'OV-2026-212', lineas: l },
+      ])
+    ).toEqual(['OV-2026-213', 'OV-2026-212']);
+  });
+});
 
 describe('ordenarParaAsignar', () => {
   it('ordena por año y consecutivo de la OV', () => {

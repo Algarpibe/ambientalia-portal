@@ -352,10 +352,14 @@ INSERT INTO portal.wo_sales_documento_numero (numero_ov, documento_numero, orige
 ON CONFLICT DO NOTHING;
 
 -- DATA-332: el rol de las peticiones lee y añade números, nunca los cambia ni los borra.
+-- La 068 re-concede SELECT, INSERT, UPDATE y DELETE sobre TODAS las tablas del esquema en cada
+-- arranque y corre ANTES que esta: sin el REVOKE, desde el segundo arranque portal_app volvería
+-- a poder modificar y borrar números.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'portal_app') THEN
     GRANT SELECT, INSERT ON portal.wo_sales_documento_numero TO portal_app;
+    REVOKE UPDATE, DELETE, TRUNCATE ON portal.wo_sales_documento_numero FROM portal_app;
   END IF;
 END $$;
 ```
@@ -913,6 +917,9 @@ Expected: solo OV-2026-212 en adelante. Si sale alguna anterior (p. ej. OV-2026-
 llevaría el 38 y la 212 bajaría al 39: decidir antes de desplegar (cerrarla en Zoho o congelarla
 con su número de WO).
 
+Una OV de esa lista sin líneas pendientes (en la vista previa sale con `ov_sin_lineas`) no
+consume número, así que no mueve la 212.
+
 - [ ] **Step 1b: ANTES de desplegar — las 37 claves congeladas existen en Zoho**
 
 La siembra reconstruye el número de OV como `OV-20{AA}-{Nota}`, con el año del PREFIJO, que el
@@ -947,6 +954,14 @@ contenido con la numeración nueva (la 212 = 38) y que es el primero que se pued
 retocar la columna D.
 
 - [ ] **Step 2: Fusionar a `main` y desplegar hub-api y la SPA de WO-sales en EasyPanel**
+
+Justo después de desplegar, nadie debe abrir una vista previa FILTRADA (por cliente o por fecha)
+antes de la primera generación sin filtros: esperar al primer ciclo de n8n (≤ 5 min) o abrir la
+vista previa sin filtros. La primera generación decide el orden de los números nuevos.
+
+**Rollback**: volver a la imagen anterior de hub-api cuando ya se cargaron en WO archivos con
+números fijos reiniciaría la numeración desde 1 y chocaría con lo cargado. Solo es seguro antes de
+subir a WO el primer archivo con números fijos.
 
 - [ ] **Step 3: DESPUÉS de desplegar — comprobar la numeración**
 

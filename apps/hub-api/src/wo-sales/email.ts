@@ -5,6 +5,7 @@ import type { EmailPendiente, ResumenEmail } from './types.js';
 import type { SalesOrderSource, SalesOrderFiltro } from './source.js';
 import { buildWorldOfficeCsv } from './builder.js';
 import { asignarDocumentoNumeros } from './documento-numero.repo.js';
+import { numerosANumerar } from './documento-numero.js';
 import { buildWorldOfficeXlsx } from './xlsx.js';
 import {
   cambiadasDesde,
@@ -71,7 +72,7 @@ export async function computarPendiente(
   const ordenes = await source.ordenesVivas(filtro);
   // DocumentoNúmero fijo por OV (§8.1). Toma su propio candado y hace COMMIT antes de entrar al
   // del correo: los dos no se anidan.
-  const numeros = await asignarDocumentoNumeros(db, ordenes.map((o) => o.numero));
+  const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));
   const { matriz, warnings } = buildWorldOfficeCsv(ordenes, config, numeros);
   const token = hashMatriz(matriz);
 

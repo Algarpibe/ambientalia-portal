@@ -35,6 +35,9 @@ Consecuencias:
   `apps/WO-sales/xlsx/DocumentosVentasEncabezadosMovimientoInventarioWO_2026-10-31.xls`
   (gitignored). Ese archivo trae 37 pedidos numerados del 1 al 37 sin huecos; el último es
   la OV-2026-211 → 37, coherente con que la 212 sea la 38.
+- **Solo las OV que emiten filas (al menos una línea) reciben número.** Una OV sin líneas
+  (`ov_sin_lineas`) no llega a World Office y no consume número: lo recibe la primera vez que
+  aparece con líneas. Así la numeración no deja huecos.
 - **Se asigna al generar**, en las cuatro vías (vista previa, `.csv`, `.xls` y correo de
   n8n). Como n8n consulta `/email/pendiente` cada 5 minutos, en la práctica una OV recibe su
   número a los pocos minutos de aparecer en la réplica. Si una OV se cancela después de
@@ -75,6 +78,9 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
 | 10 | OV-2026-142 | 20 | OV-2026-187 | 30 | OV-2026-204 | | |
 
 - Se registra en `MIGRATIONS` de `apps/hub-api/src/db.ts`.
+- Un bloque `DO` al final: si existe el rol `portal_app`, le concede `SELECT, INSERT` y le
+  revoca `UPDATE, DELETE, TRUNCATE` sobre la tabla, porque la 068 re-concede todos los permisos
+  del esquema en cada arranque (y corre antes que la 070).
 
 ### 4.2 Asignación — `documento-numero.ts` (puro) + `documento-numero.repo.ts` (BD)
 
@@ -98,7 +104,7 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
 
 - `buildWorldOfficeCsv(ordenes, config, documentoNumeros: ReadonlyMap<string, number>)`.
   Sigue sin tocar la BD: escribe en la columna D el número del mapa para `ov.numero`.
-- Si a una OV le falta número en el mapa, **lanza un error** (no saca un archivo con la
+- Si a una OV **con líneas** le falta número en el mapa, **lanza un error** (no saca un archivo con la
   columna vacía ni inventa un número): es un fallo de programación, no un dato de Zoho.
 - El orden de las filas del archivo no cambia (fecha y número de OV).
 - Se elimina `config.consecutivoInicial` (tipo, valor por defecto y comentarios).
@@ -106,7 +112,9 @@ CREATE TABLE IF NOT EXISTS portal.wo_sales_documento_numero (
 ### 4.4 Llamadores
 
 Las cuatro vías hacen lo mismo justo antes de construir:
-`const numeros = await asignarDocumentoNumeros(db, ordenes.map((o) => o.numero));`
+`const numeros = await asignarDocumentoNumeros(db, numerosANumerar(ordenes));`
+(`numerosANumerar`, puro en `documento-numero.ts`, devuelve los números de las OV con al menos
+una línea; una OV sin líneas no se numera y el builder solo la avisa).
 
 - `router.ts`: `/wo-sales/preview`, `/wo-sales/csv`, `/wo-sales/xlsx`.
 - `email.ts`: `computarPendiente` (ya recibe `db`).
@@ -120,6 +128,8 @@ Las cuatro vías hacen lo mismo justo antes de construir:
 - Falla la asignación (BD caída, choque inesperado) → la transacción se revierte entera, el
   endpoint responde 500 con `sendError` y **no sale ningún archivo**. Nunca hay numeración a
   medias.
+- Se eliminó del correo el bloque «ATENCIÓN … mismo número de documento … no lo subas»: dejó
+  de ser cierto al numerar por OV.
 - Dos OV distintas de Zoho con el mismo número (p. ej. una borrada y recreada antes de la
   barrida nocturna de huérfanos) compartirían DocumentoNúmero, que se asigna por número.
   Decisión: **avisar y seguir**. Nuevo `WarningTipo` `ov_numero_repetido`, un solo aviso por

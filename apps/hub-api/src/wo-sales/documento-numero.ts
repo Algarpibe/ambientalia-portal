@@ -29,3 +29,12 @@ export function ordenarParaAsignar(numerosOV: readonly string[]): string[] {
     return porTexto(a, b);
   });
 }
+
+/**
+ * Números de las OV que SÍ emiten filas (al menos una línea), en el orden de entrada. Una OV sin
+ * líneas no llega a World Office, así que no consume número: lo recibe la primera vez que aparece
+ * con líneas. Puede traer repetidos; el repo los deduplica.
+ */
+export function numerosANumerar(ordenes: readonly { numero: string; lineas: readonly unknown[] }[]): string[] {
+  return ordenes.filter((o) => o.lineas.length > 0).map((o) => o.numero);
+}

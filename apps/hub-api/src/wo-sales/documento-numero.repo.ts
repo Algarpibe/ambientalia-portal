@@ -25,6 +25,7 @@ export async function asignarDocumentoNumeros(db: Pool, numerosOV: readonly stri
   if (unicos.length === 0) return new Map();
 
   const client = await db.connect();
+  let fallo: unknown;
   try {
     await client.query('BEGIN');
     await client.query(BLOQUEO_NUMERACION);
@@ -57,9 +58,15 @@ export async function asignarDocumentoNumeros(db: Pool, numerosOV: readonly stri
     await client.query('COMMIT');
     return numeros;
   } catch (err) {
-    await client.query('ROLLBACK');
+    // Si el ROLLBACK también falla, el error que sale es el original y el cliente (roto) se destruye.
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* el error original manda */
+    }
+    fallo = err;
     throw err;
   } finally {
-    client.release();
+    client.release(fallo as Error | undefined);
   }
 }

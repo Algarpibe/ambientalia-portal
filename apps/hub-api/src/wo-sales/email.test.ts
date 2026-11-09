@@ -133,6 +133,29 @@ describe('computarPendiente', () => {
     }
   });
 
+  it('una OV sin líneas no consume número: la asignación solo recibe la OV con líneas', async () => {
+    const vacia: SalesOrder = { ...ov, numero: 'OV-0', lineas: [] };
+    const mixSource: SalesOrderSource = {
+      ordenesVivas: async () => [vacia, ov],
+      ordenesAntiguas: async () => [],
+    };
+    const db = fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]);
+    const originalConnect = db.connect;
+    const select: unknown[][] = [];
+    db.connect = async () => {
+      const c = await originalConnect();
+      const q = c.query;
+      c.query = async (sql: string, params: unknown[]) => {
+        if (sql.includes('numero_ov = ANY')) select.push(params);
+        return q(sql, params);
+      };
+      return c;
+    };
+    const r = await computarPendiente(db, mixSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    expect(select).toEqual([[['OV-1']]]);
+  });
+
   it('dos números repetidos: resumen.repetidas los trae en el orden del archivo', async () => {
     const mk = (numero: string, sku: string): SalesOrder => ({ ...ov, numero, lineas: [{ ...ov.lineas[0], sku }] });
     const dupSource: SalesOrderSource = {

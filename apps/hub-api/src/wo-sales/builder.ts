@@ -76,6 +76,7 @@ export function partirCentroCostos(valor: string | null): {
 /**
  * `documentoNumeros`: el DocumentoNúmero fijo de cada OV (número de OV → número), de
  * portal.wo_sales_documento_numero vía asignarDocumentoNumeros (§8.1). El builder no toca la BD.
+ * Solo las OV con líneas tienen número (numerosANumerar); una sin líneas no lo necesita.
  */
 export function buildWorldOfficeCsv(
   ordenes: SalesOrder[],
@@ -239,7 +240,9 @@ export function buildWorldOfficeCsv(
 
   for (const ov of ordenadas) {
     const documentoNumero = documentoNumeros.get(ov.numero);
-    if (documentoNumero === undefined) {
+    // Solo las OV con líneas reciben número (numerosANumerar): una sin líneas no emite filas y
+    // lo toma la primera vez que aparece con líneas. Aquí solo avisa.
+    if (documentoNumero === undefined && ov.lineas.length > 0) {
       // Fallo de programación (el llamador no asignó), no un dato de Zoho: mejor ningún
       // archivo que uno con la columna D vacía o con un número inventado.
       throw new Error(`WO-sales: la OV ${ov.numero} no tiene DocumentoNúmero asignado`);
@@ -296,7 +299,7 @@ export function buildWorldOfficeCsv(
       config.empresa, //                  0  Empresa (fijo AMBIENTALIA SAS)
       config.tipoDocumento, //            1  Tipo Documento (PED)
       derivarPrefijo(ov.fecha, config), //2  prefijo (OV_AA)
-      String(documentoNumero), //          3  DocumentoNúmero (fijo por OV)
+      String(documentoNumero ?? ''), //    3  DocumentoNúmero (fijo por OV)
       toWoDate(ov.fecha), //              4  Fecha
       config.terceroInterno, //           5  Tercero Interno (texto, fijo)
       campo(ov.numero, ov.nit ?? ''), //  6  Tercero Externo (NIT, texto)

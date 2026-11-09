@@ -428,6 +428,12 @@ describe('DocumentoNúmero: el número fijo de cada OV', () => {
     expect(() => buildWorldOfficeCsv([OV_BASE], DEFAULT_CONFIG, new Map())).toThrow(/OV-2026-138/);
   });
 
+  it('una OV sin líneas que no está en el mapa no lanza: avisa ov_sin_lineas y no emite filas', () => {
+    const r = buildWorldOfficeCsv([{ ...OV_BASE, lineas: [] }], DEFAULT_CONFIG, new Map());
+    expect(r.filas).toBe(0);
+    expect(r.warnings.map((w) => w.tipo)).toContain('ov_sin_lineas');
+  });
+
   describe('OV con número repetido en la réplica de Zoho (avisar y seguir)', () => {
     const NUM = 'OV-2026-212';
     const numeros = new Map([[NUM, 40]]);
