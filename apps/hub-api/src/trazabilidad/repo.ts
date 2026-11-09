@@ -1260,17 +1260,19 @@ export async function guardarSeguimiento(db: Db, clave: string, s: Seguimiento, 
 /**
  * Registra el aviso al cliente en varios equipos a la vez (los de un envío).
  * Sólo toca la fecha del aviso, y nunca la echa atrás: un envío antiguo que se
- * resuelve tarde no pisa un aviso más nuevo. El resto del seguimiento de cada
- * equipo se conserva. (La ficha del equipo cambia la fecha por su cuenta, con
- * `guardarSeguimiento`.)
+ * resuelve tarde no pisa un aviso más nuevo, ni su firma (esa fila no se toca).
+ * El resto del seguimiento de cada equipo se conserva. Devuelve cuántos equipos
+ * estrenan o adelantan su aviso. (La ficha del equipo cambia la fecha por su
+ * cuenta, con `guardarSeguimiento`.)
  */
 export async function registrarAvisos(db: Db, claves: string[], fecha: string, actor: Actor): Promise<number> {
   const { rowCount } = await db.query(
     `INSERT INTO portal.tmc_seguimiento AS s (clave, aviso_enviado, actualizado_por_id, actualizado_por, actualizado_en)
      SELECT e.clave, $2::date, $3, $4, NOW() FROM ${INVENTARIO} e WHERE e.clave = ANY($1::text[]) AND e.activo
      ON CONFLICT (clave) DO UPDATE SET
-       aviso_enviado = GREATEST(s.aviso_enviado, EXCLUDED.aviso_enviado), actualizado_por_id = EXCLUDED.actualizado_por_id,
-       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()`,
+       aviso_enviado = EXCLUDED.aviso_enviado, actualizado_por_id = EXCLUDED.actualizado_por_id,
+       actualizado_por = EXCLUDED.actualizado_por, actualizado_en = NOW()
+     WHERE s.aviso_enviado IS NULL OR s.aviso_enviado < EXCLUDED.aviso_enviado`,
     [claves, fecha, actor.userId, actor.email],
   );
   return rowCount ?? 0;

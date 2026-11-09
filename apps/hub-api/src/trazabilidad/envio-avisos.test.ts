@@ -226,7 +226,7 @@ describe('CANDADO: el canal de salida', () => {
   const canal = leer('trazabilidad/envio-avisos.ts');
 
   it('es el único fuente de src/trazabilidad que llama a la red, nombra n8n o mira el entorno, y el único de hub-api que lee TMC_AVISOS_*', () => {
-    const red = /\bfetch\b|n8n|webhook|nodemailer|smtp|sendMail|outbox|https?\.request|undici|AbortSignal/i;
+    const red = /\bfetch\b|n8n|webhook|nodemailer|smtp|sendMail|outbox|https?\.request|\bhttps?\.(get|request)\b|undici|AbortSignal|from ['"]node:(http|https|net|tls|dgram)['"]|from ['"](http|https|net|tls|dgram)['"]/i;
     const deTrazabilidad = fuentes.filter((f) => f.startsWith('trazabilidad/'));
     expect(deTrazabilidad.filter((f) => red.test(leer(f)))).toEqual(['trazabilidad/envio-avisos.ts']);
     expect(deTrazabilidad.filter((f) => /process\.env/.test(leer(f)))).toEqual(['trazabilidad/envio-avisos.ts']);
@@ -238,8 +238,11 @@ describe('CANDADO: el canal de salida', () => {
     expect(canal).toMatch(/signal: AbortSignal\.timeout\(ESPERA_MAX_MS\)/);
   });
 
+  /** Si un fuente nombra ese módulo en una cadena —import estático o dinámico, con cualquier comilla—. */
+  const loNombra = (modulo: string) => new RegExp(`['"\`][^'"\`\\n]*\\b${modulo}(\\.js)?['"\`]`);
+
   it('sólo lo importa router.ts —ni otro fuente de hub-api ni la app—, y él sólo importa el correo del aviso y el dominio', () => {
-    expect(fuentes.filter((f) => /envio-avisos(\.js)?'/.test(leer(f)))).toEqual(['trazabilidad/router.ts']);
+    expect(fuentes.filter((f) => loNombra('envio-avisos').test(leer(f)))).toEqual(['trazabilidad/router.ts']);
     expect(listar(APP).filter((f) => readFileSync(`${APP}/${f}`, 'utf8').includes('envio-avisos'))).toEqual([]);
     expect([...canal.matchAll(/^import\b[^;]*?from '([^']+)';/gms)].map((m) => m[1]).sort()).toEqual(['./avisos-correo.js', './dominio.js']);
   });
@@ -248,5 +251,9 @@ describe('CANDADO: el canal de salida', () => {
     expect(fuentes.filter((f) => /\benviarAviso\(/.test(leer(f))).sort()).toEqual(['trazabilidad/avisos-envios-repo.ts', 'trazabilidad/router.ts']);
     expect(fuentes.filter((f) => /\.remitir\(/.test(leer(f)))).toEqual(['trazabilidad/avisos-envios-repo.ts']);
     expect(leer('index.ts')).not.toMatch(/enviarAviso|crearCanalAvisos|remitir|envio-avisos/);
+    // Ni a pelo ni de otra forma (desestructurar, `canal['remitir']`): sólo nombran `remitir` quien lo declara (el tipo), quien lo
+    // implementa (el canal) y quien lo llama (el flujo del envío). Y el flujo del envío sólo lo importa el router.
+    expect(fuentes.filter((f) => /remitir/.test(leer(f))).sort()).toEqual(['trazabilidad/avisos-correo.ts', 'trazabilidad/avisos-envios-repo.ts', 'trazabilidad/envio-avisos.ts']);
+    expect(fuentes.filter((f) => loNombra('avisos-envios-repo').test(leer(f)))).toEqual(['trazabilidad/router.ts']);
   });
 });

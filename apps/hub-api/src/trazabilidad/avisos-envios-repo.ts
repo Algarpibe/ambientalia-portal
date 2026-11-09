@@ -93,12 +93,23 @@ async function tarjetaVigente(db: Db, pedido: PedidoEnvio, hoy: string) {
   return { tarjeta, claves };
 }
 
-/** Las consultas sobre una conexión, de una en una: el plan lanza varias a la vez, y pg no quiere que se encolen en un mismo cliente. */
-function enSerie(c: Db): Db {
+/**
+ * Las consultas sobre una conexión, de una en una: el plan lanza varias a la
+ * vez, y pg no quiere que se encolen en un mismo cliente. Tras la primera que
+ * falla, las demás fallan con su mismo error sin llegar a la conexión: no deben
+ * correr tras el ROLLBACK, ni sobre un cliente ya devuelto al pool.
+ */
+export function enSerie(c: Db): Db {
   let cola: Promise<unknown> = Promise.resolve();
+  let fallo: { error: unknown } | null = null;
   const query = (...args: unknown[]) => {
-    const p = cola.then(() => (c.query as (...a: unknown[]) => Promise<unknown>)(...args));
-    cola = p.catch(() => undefined);
+    const p = cola.then(() => {
+      if (fallo) throw fallo.error;
+      return (c.query as (...a: unknown[]) => Promise<unknown>)(...args);
+    });
+    cola = p.catch((error: unknown) => {
+      fallo ??= { error };
+    });
     return p;
   };
   return { query } as unknown as Db;

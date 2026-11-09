@@ -9,6 +9,7 @@ import { hoyEnColombia } from '../ausencias/saldo.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import type { CanalAvisos, CorreoAEnviar, EstadoCanal, ResultadoRemision } from './avisos-correo.js';
 import { planAvisos } from './dominio.js';
+import { registrarAvisos } from './repo.js';
 
 // «Enviar correo» contra Postgres, con las rutas de verdad: sólo la sesión y el canal de salida son de mentira (aquí
 // no sale nada a la red ni se lee el entorno). Todo ficticio: clientes, seriales y correos.
@@ -165,6 +166,35 @@ describe('enviar el aviso de una tarjeta', () => {
     }
   });
 
+  it('la carrera de verdad, con dos conexiones: B espera a que A cierre y, al ver sus equipos ya marcados, se deshace: 404, sin correo y sin fila', async () => {
+    estado = REAL;
+    const { rows: [deA] } = await hub.query(
+      `INSERT INTO portal.tmc_avisos_envios (dia, por, modo, clave_cliente, cliente, tramo, equipos, destinatarios, enviado_a, asunto)
+       VALUES ($1, 'a@example.com', 'real', 'cliente ficticio a', 'Cliente Ficticio A', '30', ARRAY['18A00001', '18A00002'], ARRAY['compras@cliente-a.example'], ARRAY['compras@cliente-a.example'], 'Asunto ficticio') RETURNING id`,
+      [HOY],
+    );
+    const a = await hub.connect(); // el cierre de A, sin confirmar todavía
+    try {
+      await a.query('BEGIN');
+      await a.query(`UPDATE portal.tmc_avisos_envios SET estado = 'enviado', message_id = 'msg-de-a', terminado_en = NOW() WHERE id = $1`, [deA.id]);
+      await registrarAvisos(a, ['18A00001', '18A00002'], HOY, { userId: null, email: 'a@example.com' });
+      const b = enviar().then((r) => r);
+      let esperando = false; // B, bloqueado en su INSERT por la fila de A
+      for (let i = 0; !esperando && i < 500; i++) {
+        esperando = (await hub.query(`SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'INSERT INTO portal.tmc_avisos_envios%'`)).rows.length > 0;
+        if (!esperando) await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(esperando).toBe(true);
+      await a.query('COMMIT');
+      const res = await b;
+      expect([res.status, res.body.error]).toEqual([404, 'tarjeta_no_encontrada']);
+      expect([remitidos.length, (await registro()).map((r) => r.estado)]).toEqual([0, ['enviado']]);
+    } finally {
+      await a.query('ROLLBACK').catch(() => undefined); // si ya se confirmó, no hace nada
+      a.release();
+    }
+  });
+
   it('si el canal revienta, cuenta como sin respuesta: sigue en curso («sin confirmar») y va a Sentry sin el texto del error', async () => {
     estado = REAL;
     contestar = async () => {
@@ -256,6 +286,8 @@ describe('enviar el aviso de una tarjeta', () => {
     await hub.query(`INSERT INTO portal.tmc_seguimiento (clave, aviso_enviado, actualizado_por) VALUES ('18A00001', $1, 'ficha@example.com')`, [HOY]); // y a uno se le avisó después
     expect((await resolver(body.id, true)).body.estado).toBe('enviado');
     expect(await avisados()).toEqual([{ clave: '18A00001', aviso: HOY }, { clave: '18A00002', aviso: dia(-2) }]);
+    // Y el que conserva su aviso más nuevo conserva también su firma: no se reescribe quién lo cambió.
+    expect((await hub.query('SELECT clave, actualizado_por FROM portal.tmc_seguimiento ORDER BY clave')).rows).toEqual([{ clave: '18A00001', actualizado_por: 'ficha@example.com' }, { clave: '18A00002', actualizado_por: 'comercial@example.com' }]);
   });
 
   it('una respuesta tardía: si ya se resolvió «No salió», el «enviado» del canal no lo cambia ni marca nada, y queda a la vista en Sentry', async () => {
