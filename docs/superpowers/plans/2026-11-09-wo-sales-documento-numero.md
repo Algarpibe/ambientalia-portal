@@ -861,12 +861,13 @@ por:
 ```markdown
 **Estado:** implementado en la rama `feat/wo-sales-documento-numero` (plan:
 `docs/superpowers/plans/2026-11-09-wo-sales-documento-numero.md`); pendiente de desplegar hub-api
+y la SPA de WO-sales
 ```
 
 - [ ] **Step 4: Commit y push**
 
 ```bash
-git add docs/superpowers/specs/2026-11-09-wo-sales-documento-numero-design.md
+git add docs/superpowers/specs/2026-11-09-wo-sales-documento-numero-design.md docs/superpowers/plans/2026-11-09-wo-sales-documento-numero.md
 git commit -m "docs(wo-sales): la spec del DocumentoNúmero persistente queda implementada"
 git push -u origin feat/wo-sales-documento-numero
 ```
@@ -877,8 +878,10 @@ Expected: la rama sube y el CI (build + `test:db`) queda en verde.
 
 ### Task 5: Despliegue (lo hace el usuario; aquí solo el guion)
 
-No es código. Empujar no despliega: el usuario fusiona a `main` y despliega **hub-api** a mano en
-EasyPanel (la SPA no cambia).
+No es código. Empujar no despliega: el usuario fusiona a `main` y despliega a mano en EasyPanel
+**hub-api y la SPA de WO-sales, juntas**. La SPA cambia por el aviso `ov_numero_repetido`
+(`WARNING_META`) y por la clave de las filas de la vista previa; una SPA vieja mostraría el aviso
+con su nombre técnico.
 
 - [ ] **Step 1: ANTES de desplegar — ¿hay OV vivas anteriores a la 212 sin número congelado?**
 
@@ -910,7 +913,40 @@ Expected: solo OV-2026-212 en adelante. Si sale alguna anterior (p. ej. OV-2026-
 llevaría el 38 y la 212 bajaría al 39: decidir antes de desplegar (cerrarla en Zoho o congelarla
 con su número de WO).
 
-- [ ] **Step 2: Fusionar a `main` y desplegar hub-api en EasyPanel**
+- [ ] **Step 1b: ANTES de desplegar — las 37 claves congeladas existen en Zoho**
+
+La siembra reconstruye el número de OV como `OV-20{AA}-{Nota}`, con el año del PREFIJO, que el
+builder sacaba de la FECHA de la OV. Si alguna OV tuviera un número de otro año que su fecha, su
+clave congelada no casaría y recibiría un número nuevo (≥ 38) en silencio:
+
+```sql
+\c zoho-hub
+SELECT count(*) AS encontradas
+  FROM books.sales_orders
+ WHERE salesorder_number IN (
+     'OV-2022-105','OV-2025-030','OV-2025-086','OV-2025-087','OV-2025-199',
+     'OV-2026-021','OV-2026-033','OV-2026-057','OV-2026-081','OV-2026-142',
+     'OV-2026-143','OV-2026-146','OV-2026-153','OV-2026-155','OV-2026-156',
+     'OV-2026-157','OV-2026-160','OV-2026-167','OV-2026-171','OV-2026-187',
+     'OV-2026-188','OV-2026-189','OV-2026-193','OV-2026-194','OV-2026-196',
+     'OV-2026-198','OV-2026-201','OV-2026-202','OV-2026-203','OV-2026-204',
+     'OV-2026-205','OV-2026-206','OV-2026-207','OV-2026-208','OV-2026-209',
+     'OV-2026-210','OV-2026-211');
+```
+
+Expected: `encontradas = 37`. Si sale menos, no desplegar: hay que corregir la clave de la que
+falte en la migración 070.
+
+- [ ] **Step 1c: Avisar a contabilidad del correo que llegará tras desplegar**
+
+La columna D cambia de número por posición a número fijo, así que la huella del archivo
+(`hashMatriz`) cambia una vez para todos: quien tenga frecuencia `inmediato` recibe un correo en
+el primer ciclo de n8n tras el despliegue (los de diario/semanal/fin de mes, en su próxima franja),
+probablemente sin «OV con cambios» que lo explique. Decirle a Xiomara que ese correo trae el mismo
+contenido con la numeración nueva (la 212 = 38) y que es el primero que se puede cargar sin
+retocar la columna D.
+
+- [ ] **Step 2: Fusionar a `main` y desplegar hub-api y la SPA de WO-sales en EasyPanel**
 
 - [ ] **Step 3: DESPUÉS de desplegar — comprobar la numeración**
 

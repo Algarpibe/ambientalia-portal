@@ -1,7 +1,9 @@
 # WO-sales — DocumentoNúmero persistente e irrepetible
 
 **Fecha:** 2026-11-09
-**Estado:** diseño aprobado, pendiente de escribir el plan de implementación
+**Estado:** implementado en la rama `feat/wo-sales-documento-numero` (plan:
+`docs/superpowers/plans/2026-11-09-wo-sales-documento-numero.md`); pendiente de desplegar hub-api
+y la SPA de WO-sales
 **Depende de:** WO-sales V1 (`2026-07-15-wo-sales-design.md`) y el envío por correo
 (`2026-07-16-wo-sales-email-design.md`), ambos en producción.
 
