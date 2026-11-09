@@ -20,6 +20,8 @@ describe('hashMatriz', () => {
   });
 });
 
+const MAX_SEMBRADO = 37; // MAX(documento_numero) que ve la fakeDb: la primera OV nueva recibe MAX_SEMBRADO + 1
+
 describe('computarPendiente', () => {
   // Una OV mínima válida; el builder real produce una matriz estable a partir de ella.
   const ov: SalesOrder = {
@@ -40,7 +42,7 @@ describe('computarPendiente', () => {
   const source: SalesOrderSource = {
     ordenesVivas: async () => [ov],
     ordenesAntiguas: async () => [],
-  } as unknown as SalesOrderSource;
+  };
   const filtro: SalesOrderFiltro = { desde: '2026-01-01', hasta: '2026-12-31' };
 
   /** Fake db: `filas` son los destinatarios que devuelve destinatariosConEstado (sin
@@ -52,8 +54,8 @@ describe('computarPendiente', () => {
   function fakeDb(filas: Record<string, unknown>[]) {
     const cortes: unknown[][] = [];
     const query = async (sql: string, params: unknown[]) => {
-      // asignarDocumentoNumeros: tabla con las 37 congeladas → 'OV-1' recibe el 38.
-      if (sql.includes('MAX(documento_numero)')) return { rows: [{ max: 37 }] };
+      // asignarDocumentoNumeros: tabla con las MAX_SEMBRADO congeladas → 'OV-1' recibe MAX_SEMBRADO + 1.
+      if (sql.includes('MAX(documento_numero)')) return { rows: [{ max: MAX_SEMBRADO }] };
       if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
         cortes.push(params);
         return { rows: [] };
@@ -71,7 +73,7 @@ describe('computarPendiente', () => {
   const ahora = new Date('2026-09-25T10:00-05:00');
   const hoy8 = new Date('2026-09-25T08:00-05:00');
   const ayer8 = new Date('2026-09-24T08:00-05:00');
-  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG, new Map([['OV-1', 38]])).matriz);
+  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG, new Map([['OV-1', MAX_SEMBRADO + 1]])).matriz);
   const diario = { frecuencia: 'diario', hora: 8, dia_semana: null };
 
   it('diario: franja nueva con cambios → se envía, y la franja NO se sella hasta confirmar', async () => {
@@ -120,13 +122,26 @@ describe('computarPendiente', () => {
     const dupSource = {
       ordenesVivas: async () => [ov, otra],
       ordenesAntiguas: async () => [],
-    } as unknown as SalesOrderSource;
+    };
     const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), dupSource, DEFAULT_CONFIG, filtro, 'a.xls');
     expect(r.enviar).toBe(true);
     if (r.enviar) {
       expect(r.resumen.repetidas).toEqual(['OV-1']);
-      expect(r.cuerpo).toContain('OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1.');
+      expect(r.cuerpo).toContain(
+        'OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1. Revisa en Zoho cuál es la vigente antes de subir el archivo.'
+      );
     }
+  });
+
+  it('dos números repetidos: resumen.repetidas los trae en el orden del archivo', async () => {
+    const mk = (numero: string, sku: string): SalesOrder => ({ ...ov, numero, lineas: [{ ...ov.lineas[0], sku }] });
+    const dupSource: SalesOrderSource = {
+      ordenesVivas: async () => [mk('OV-9', 'a'), mk('OV-9', 'b'), mk('OV-2', 'c'), mk('OV-2', 'd')],
+      ordenesAntiguas: async () => [],
+    };
+    const r = await computarPendiente(fakeDb([{ email: 'nuevo@x.co', nombre: 'Nuevo' }]), dupSource, DEFAULT_CONFIG, filtro, 'a.xls');
+    expect(r.enviar).toBe(true);
+    if (r.enviar) expect(r.resumen.repetidas).toEqual(['OV-2', 'OV-9']);
   });
 
   it('no envía cuando no hay pendientes (todos ya tienen el archivo actual o no hay destinatarios)', async () => {
@@ -167,9 +182,29 @@ describe('construirCuerpo — varias órdenes en el archivo', () => {
     expect(cuerpo).toContain('Órdenes de venta: 25 · Líneas de producto: 75');
   });
 
-  it('con una sola orden el cuerpo tampoco avisa', () => {
-    const cuerpo = construirCuerpo(resumen(1), DEFAULT_CONFIG);
-    expect(cuerpo).not.toContain('ATENCIÓN');
+  it('cuerpo exacto sin cambiadas, sin repetidas y sin advertencias', () => {
+    expect(construirCuerpo(resumen(1), DEFAULT_CONFIG)).toBe(
+      [
+        DEFAULT_CONFIG.emailAsunto,
+        '',
+        'Se adjunta el archivo actualizado de pedidos para World Office.',
+        'Órdenes de venta: 1 · Líneas de producto: 3',
+      ].join('\n')
+    );
+  });
+
+  it('orden de las líneas: cambios, luego OV repetidas, luego advertencias', () => {
+    const cuerpo = construirCuerpo(
+      { ordenes: 2, filas: 2, cambiadas: ['OV-1'], advertencias: 3, repetidas: ['OV-1'] },
+      DEFAULT_CONFIG
+    );
+    const i = (t: string) => cuerpo.indexOf(t);
+    expect(i('OV con cambios')).toBeGreaterThan(-1);
+    expect(i('OV con cambios')).toBeLessThan(i('OV con número repetido en Zoho'));
+    expect(i('OV con número repetido en Zoho')).toBeLessThan(i('Advertencias:'));
+    expect(cuerpo).toContain(
+      'OV con número repetido en Zoho (comparten DocumentoNúmero): OV-1. Revisa en Zoho cuál es la vigente antes de subir el archivo.'
+    );
   });
 });
 

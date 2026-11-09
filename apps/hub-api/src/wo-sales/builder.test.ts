@@ -446,6 +446,29 @@ describe('DocumentoNúmero: el número fijo de cada OV', () => {
       expect(avisos[0].orden).toBe(NUM);
       expect(avisos[0].mensaje).toContain('2 veces');
       expect(avisos[0].mensaje).toContain('DocumentoNúmero 40');
+      expect(avisos[0].mensaje).toContain('un solo pedido');
+    });
+
+    it('dos números repetidos distintos dan dos avisos, en el orden del archivo', () => {
+      const A = 'OV-2026-150';
+      const B = 'OV-2026-212';
+      const ov = (numero: string, sku: string): SalesOrder => ({
+        ...OV_BASE,
+        numero,
+        lineas: [{ ...OV_BASE.lineas[0], sku }],
+      });
+      const { warnings } = buildWorldOfficeCsv(
+        [ov(B, 'B1'), ov(B, 'B2'), ov(A, 'A1'), ov(A, 'A2')],
+        DEFAULT_CONFIG,
+        new Map([[A, 7], [B, 40]])
+      );
+      expect(repetidos(warnings).map((w) => w.orden)).toEqual([A, B]);
+    });
+
+    it('si una de las copias no tiene líneas no hay colisión en el archivo: sin aviso', () => {
+      const [con, otra] = repetida(2);
+      const { warnings } = buildWorldOfficeCsv([con, { ...otra, lineas: [] }], DEFAULT_CONFIG, numeros);
+      expect(repetidos(warnings)).toEqual([]);
     });
 
     it('no quita nada del archivo: los dos pedidos siguen saliendo con el mismo número', () => {

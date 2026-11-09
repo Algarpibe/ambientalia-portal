@@ -35,7 +35,7 @@ export function construirCuerpo(resumen: ResumenEmail, config: WoSalesConfig): s
   if (resumen.cambiadas.length) lineas.push(`OV con cambios: ${resumen.cambiadas.join(', ')}`);
   if (resumen.repetidas.length) {
     lineas.push(
-      `OV con número repetido en Zoho (comparten DocumentoNúmero): ${resumen.repetidas.join(', ')}. No las subas a World Office sin revisarlas.`
+      `OV con número repetido en Zoho (comparten DocumentoNúmero): ${resumen.repetidas.join(', ')}. Revisa en Zoho cuál es la vigente antes de subir el archivo.`
     );
   }
   if (resumen.advertencias > 0) {

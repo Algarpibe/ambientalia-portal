@@ -602,8 +602,8 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.ordenes.map((o) => (
-                    <tr key={o.numero} className="border-t border-gray-100 hover:bg-gray-50">
+                  {data.ordenes.map((o, i) => (
+                    <tr key={`${o.numero}-${i}`}className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-6 py-3 font-medium text-gray-900 whitespace-nowrap">
                         {o.numero}
                       </td>
