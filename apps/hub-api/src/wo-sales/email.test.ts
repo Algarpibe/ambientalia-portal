@@ -131,21 +131,22 @@ describe('construirCuerpo', () => {
   });
 });
 
-// §9: el correo automático adjunta el archivo consolidado. Es la puerta por la que el
-// archivo llega a contabilidad sin pasar por el panel de advertencias de la app, así
-// que el aviso de no subirlo tal cual tiene que ir en el cuerpo del mensaje.
-describe('construirCuerpo — aviso del archivo consolidado (§9)', () => {
+// Cada OV lleva su propio DocumentoNúmero, fijo y persistente: el correo ya no avisa de un
+// número de documento compartido por varias órdenes, aunque el archivo lleve muchas.
+describe('construirCuerpo — varias órdenes en el archivo', () => {
   const resumen = (ordenes: number) => ({ ordenes, filas: ordenes * 3, cambiadas: [], advertencias: 0 });
 
-  it('avisa de no subir el archivo cuando lleva varias órdenes', () => {
+  it('con varias órdenes no avisa de un número de documento compartido', () => {
     const cuerpo = construirCuerpo(resumen(25), DEFAULT_CONFIG);
-    expect(cuerpo).toMatch(/no lo subas/i);
-    expect(cuerpo).toContain('25');
+    expect(cuerpo).not.toContain('ATENCIÓN');
+    expect(cuerpo).not.toContain('mismo número de documento');
+    expect(cuerpo).not.toMatch(/no lo subas/i);
+    expect(cuerpo).toContain('Órdenes de venta: 25 · Líneas de producto: 75');
   });
 
-  it('no avisa cuando el archivo lleva una sola orden', () => {
+  it('con una sola orden el cuerpo tampoco avisa', () => {
     const cuerpo = construirCuerpo(resumen(1), DEFAULT_CONFIG);
-    expect(cuerpo).not.toMatch(/no lo subas/i);
+    expect(cuerpo).not.toContain('ATENCIÓN');
   });
 });
 
