@@ -52,8 +52,8 @@ describe('computarPendiente', () => {
   function fakeDb(filas: Record<string, unknown>[]) {
     const cortes: unknown[][] = [];
     const query = async (sql: string, params: unknown[]) => {
-      // asignarDocumentoNumeros: tabla vacía en el doble → MAX 0, así que 'OV-1' recibe el 1.
-      if (sql.includes('MAX(documento_numero)')) return { rows: [{ max: 0 }] };
+      // asignarDocumentoNumeros: tabla con las 37 congeladas → 'OV-1' recibe el 38.
+      if (sql.includes('MAX(documento_numero)')) return { rows: [{ max: 37 }] };
       if (sql.includes('UPDATE portal.wo_sales_email_frecuencia')) {
         cortes.push(params);
         return { rows: [] };
@@ -71,7 +71,7 @@ describe('computarPendiente', () => {
   const ahora = new Date('2026-09-25T10:00-05:00');
   const hoy8 = new Date('2026-09-25T08:00-05:00');
   const ayer8 = new Date('2026-09-24T08:00-05:00');
-  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG, new Map([['OV-1', 1]])).matriz);
+  const tokenActual = () => hashMatriz(buildWorldOfficeCsv([ov], DEFAULT_CONFIG, new Map([['OV-1', 38]])).matriz);
   const diario = { frecuencia: 'diario', hora: 8, dia_semana: null };
 
   it('diario: franja nueva con cambios → se envía, y la franja NO se sella hasta confirmar', async () => {
