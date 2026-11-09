@@ -78,9 +78,9 @@ export function etiquetaOrigen(origen: OrigenContacto): string {
   return origen === 'desk' ? 'Desk' : 'manual';
 }
 
-/** La fecha que explica por qué un equipo no está en la simulación, según su motivo. */
+/** La fecha que explica por qué un equipo no tiene tarjeta, según su motivo (en «vencida», desde cuándo está vencida). */
 export function fechaRelevante(a: AvisoEquipo<EquipoVista>): string {
-  if (a.motivo === 'YA_AVISADO') return `avisado el ${fmtFecha(a.equipo.seguimiento?.avisoEnviado)} · en el tramo desde el ${fmtFecha(a.entradaTramo)}`;
-  if (a.motivo === 'VENCIDA' || a.motivo === 'FUERA_CICLO') return `venció el ${fmtFecha(a.vence)}`;
+  if (a.motivo === 'YA_AVISADO') return `avisado el ${fmtFecha(a.equipo.seguimiento?.avisoEnviado)} · ${a.tramo === 'vencida' ? 'vencida' : 'en el tramo'} desde el ${fmtFecha(a.entradaTramo)}`;
+  if (a.tramo === 'vencida' || a.motivo === 'FUERA_CICLO') return `venció el ${fmtFecha(a.vence)}`;
   return a.vence ? `vence el ${fmtFecha(a.vence)}` : 'sin fecha de calibración';
 }

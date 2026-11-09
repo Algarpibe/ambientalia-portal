@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { correoAviso, fechaDia, marcaAviso, mensajeAviso, saludoAviso, todosGrimm } from './avisos-correo.js';
+import { ETIQUETA_TRAMO, correoAviso, fechaDia, marcaAviso, mensajeAviso, saludoAviso, todosGrimm } from './avisos-correo.js';
 import { estadoCalibracion, planAvisos, type ContactoEquipo } from './dominio.js';
 
 // El texto del aviso a clientes: el que sale de verdad al pulsar «Enviar correo»
@@ -64,6 +64,46 @@ describe('el texto del aviso (movido de la app sin cambiar una letra)', () => {
       /^Estimado cliente Cliente Uno:\n\nDesde el Servicio Técnico de Ambientalia le recordamos que el siguiente monitor de partículas GRIMM tiene la calibración vencida o próxima a vencer:/,
     );
     expect(saludoAviso('Cliente Uno', [])).toBe('Estimado cliente Cliente Uno:');
+  });
+});
+
+describe('el texto del grupo «vencida» (aprobado el 2026-11-08)', () => {
+  it('el del diseño, letra a letra: un GRIMM, sin nombre de contacto', () => {
+    const e = { ...eq('Cliente Ejemplo S.A.S.', '2025-09-15', desk('compras@cliente-ejemplo.example'), 'Grimm', 'EDM 180'), clave: '18A00001', serial: '18A00001' };
+    const c = correoAviso(tarjeta([e]));
+    expect(c.asunto).toBe('La calibración de su monitor GRIMM está vencida · Cliente Ejemplo S.A.S.');
+    expect(c.cuerpo).toBe(
+      [
+        'Estimado cliente Cliente Ejemplo S.A.S.:',
+        '',
+        'Desde el Servicio Técnico de Ambientalia le informamos de que la calibración del siguiente monitor de partículas GRIMM está vencida:',
+        '',
+        '• GRIMM EDM 180, serial 18A00001: última calibración 15/09/2025, vencida desde el 15/09/2026.',
+        '',
+        'Mientras la calibración esté vencida, las mediciones del equipo pueden perder su validez. Le proponemos programar cuanto antes el servicio de calibración y mantenimiento. Indíquenos la fecha en que podría enviarnos el equipo o, si lo prefiere, coordinamos la recogida.',
+        '',
+        'Quedamos atentos.',
+        '',
+        'Ambientalia S.A.S. · Servicio Técnico',
+      ].join('\n'),
+    );
+  });
+
+  it('con varios, «sus monitores GRIMM», «los siguientes…», «de los equipos» y «enviarnos los equipos»; con otra marca, «su equipo»', () => {
+    const d = desk('compras@cliente-uno.example');
+    const c = correoAviso(tarjeta([eq('Cliente Uno', '2025-09-03', d), eq('Cliente Uno', '2025-08-20', d)]));
+    expect(c.asunto).toBe('La calibración de sus monitores GRIMM está vencida · Cliente Uno');
+    expect(c.cuerpo).toContain('le informamos de que la calibración de los siguientes monitores de partículas GRIMM está vencida:');
+    expect(c.cuerpo).toContain('Mientras la calibración esté vencida, las mediciones de los equipos pueden perder su validez.');
+    expect(c.cuerpo).toContain('Indíquenos la fecha en que podría enviarnos los equipos o, si lo prefiere, coordinamos la recogida.');
+    const h = correoAviso(tarjeta([eq('Cliente Dos', '2025-09-03', d, 'Horiba', 'APNA-370')]));
+    expect(h.asunto).toBe('La calibración de su equipo está vencida · Cliente Dos');
+    expect(h.cuerpo).toContain('la calibración del siguiente equipo está vencida:');
+    expect(h.cuerpo).toContain('• Horiba APNA-370, serial ');
+  });
+
+  it('la etiqueta de cada tramo en la pantalla', () => {
+    expect(ETIQUETA_TRAMO).toEqual({ 90: 'Primer aviso · 90 días', 60: 'Recordatorio · 60 días', 30: 'Último aviso · 30 días', vencida: 'Vencida' });
   });
 });
 

@@ -143,15 +143,17 @@ describe('contacto de un equipo', () => {
 });
 
 describe('tramos del aviso', () => {
-  it('son 90, 60 y 30, y cada estado próximo a vencer tiene el suyo', () => {
-    expect([...TRAMOS_AVISO]).toEqual([90, 60, 30]);
+  it('son 90, 60, 30 y, el último, «vencida»; cada estado próximo a vencer, y el de vencida en el último año, tiene el suyo', () => {
+    expect([...TRAMOS_AVISO]).toEqual([90, 60, 30, 'vencida']);
     expect(tramoDeEstado('VENCE_90')).toBe(90);
     expect(tramoDeEstado('VENCE_60')).toBe(60);
     expect(tramoDeEstado('VENCE_30')).toBe(30);
-    for (const e of ['AL_DIA', 'SIN_FECHA', 'VENCIDA', 'FUERA_CICLO'] as const) expect(tramoDeEstado(e)).toBeNull();
+    expect(tramoDeEstado('VENCIDA')).toBe('vencida');
+    for (const e of ['AL_DIA', 'SIN_FECHA', 'SIN_VENCIMIENTO', 'FUERA_CICLO'] as const) expect(tramoDeEstado(e)).toBeNull();
   });
 
-  it('se entra en un tramo el día «vence − tramo»', () => {
+  it('se entra en un tramo el día «vence − tramo»; en «vencida», el mismo día del vencimiento', () => {
+    expect(entradaTramo('2026-09-03', 'vencida')).toBe('2026-09-03');
     expect(entradaTramo('2026-12-02', 60)).toBe('2026-10-03');
     expect(entradaTramo('2026-12-25', 90)).toBe('2026-09-26');
     expect(entradaTramo('2026-10-17', 30)).toBe('2026-09-17');
@@ -194,8 +196,11 @@ describe('evaluarAviso: ¿tocaría avisar hoy?', () => {
     expect(evaluarAviso(eq('Cliente Uno', null), HOY)).toMatchObject({ motivo: 'SIN_TRAMO', tramo: null, diasParaVencer: null });
   });
 
-  it('vencida y fuera de ciclo quedan fuera de la regla automática, cada una con su motivo', () => {
-    expect(evaluarAviso(eq('Cliente Uno', VENCIDA), HOY)).toMatchObject({ motivo: 'VENCIDA', tramo: null, diasParaVencer: -33 });
+  it('vencida en el último año es el tramo «vencida», que se entra el día del vencimiento: una sola vez por vencimiento; fuera de ciclo sigue fuera', () => {
+    expect(evaluarAviso(eq('Cliente Uno', VENCIDA), HOY)).toMatchObject({ motivo: 'DEBIDO', tramo: 'vencida', entradaTramo: '2026-09-03', diasParaVencer: -33 });
+    expect(evaluarAviso(eq('Cliente Uno', VENCIDA, { aviso: '2026-08-20' }), HOY).motivo).toBe('DEBIDO'); // el aviso fue antes de vencer
+    expect(evaluarAviso(eq('Cliente Uno', VENCIDA, { aviso: '2026-09-03' }), HOY).motivo).toBe('YA_AVISADO');
+    expect(evaluarAviso(eq('Cliente Uno', VENCIDA, { enAmbientalia: true }), HOY).motivo).toBe('EN_SERVICIO');
     expect(evaluarAviso(eq('Cliente Uno', FUERA), HOY)).toMatchObject({ motivo: 'FUERA_CICLO', tramo: null });
   });
 
@@ -271,40 +276,48 @@ describe('planAvisos: un correo simulado por cliente y tramo', () => {
     expect(p.sinDestinatario.map((c) => [c.cliente, c.tramo, c.destinatarios, c.origen])).toEqual([['Cliente Uno', 30, [], null]]);
   });
 
-  it('lo que no entra queda en su grupo informativo, con su motivo', () => {
+  it('lo que no entra queda en su grupo informativo, con su motivo; las vencidas sin aviso desde que vencieron forman el grupo «vencida»', () => {
     const avisado = eq('Cliente Uno', EN_60, { aviso: '2026-10-04' });
     const enCasa = eq('Cliente Uno', EN_30, { ticket: true });
     const vencida = eq('Cliente Uno', VENCIDA);
-    const vencidaAvisadaAntes = eq('Cliente Uno', VENCIDA, { aviso: '2026-08-20' }); // el aviso fue antes de vencer
-    const vencidaAvisada = eq('Cliente Uno', VENCIDA, { aviso: '2026-09-03' }); // avisada el día en que venció
+    const vencidaAvisadaAntes = eq('Cliente Uno', VENCIDA, { aviso: '2026-08-20' }); // el aviso fue antes de vencer: toca otra vez
+    const vencidaAvisada = eq('Cliente Uno', VENCIDA, { aviso: '2026-09-03' }); // avisada el día en que venció: ya está
     const vencidaEnCasa = eq('Cliente Uno', VENCIDA, { enAmbientalia: true });
     const fuera = eq('Cliente Uno', FUERA);
     const p = planAvisos([avisado, enCasa, vencida, vencidaAvisadaAntes, vencidaAvisada, vencidaEnCasa, fuera, eq('Cliente Uno', AL_DIA), eq('Cliente Uno', null)], HOY);
     expect(p.correos).toEqual([]);
-    expect(p.sinDestinatario).toEqual([]);
-    expect(p.yaAvisados.map((x) => x.equipo.serial)).toEqual([avisado.serial]);
-    expect(p.enServicio.map((x) => x.equipo.serial)).toEqual([enCasa.serial]);
-    expect(p.vencidasSinAviso.map((x) => x.equipo.serial)).toEqual([vencida.serial, vencidaAvisadaAntes.serial]);
+    expect(p.sinDestinatario.map((c) => [c.cliente, c.tramo, c.equipos.map((x) => x.equipo.serial)])).toEqual([['Cliente Uno', 'vencida', [vencida.serial, vencidaAvisadaAntes.serial]]]);
+    expect(p.yaAvisados.map((x) => x.equipo.serial)).toEqual([vencidaAvisada.serial, avisado.serial]);
+    expect(p.enServicio.map((x) => x.equipo.serial)).toEqual([vencidaEnCasa.serial, enCasa.serial]);
     expect(p.fueraCiclo.map((x) => x.equipo.serial)).toEqual([fuera.serial]);
-    expect(p.vencidasSinAviso.every((x) => x.motivo === 'VENCIDA')).toBe(true);
+    expect(Object.keys(p).sort()).toEqual(['correos', 'enServicio', 'fueraCiclo', 'hoy', 'sinDestinatario', 'yaAvisados']);
   });
 
-  it('las vencidas y las de fuera de ciclo no generan ningún correo simulado aunque tengan contacto', () => {
-    const p = planAvisos([eq('Cliente Uno', VENCIDA, { contacto: desk('compras@cliente-uno.example') }), eq('Cliente Uno', FUERA, { contacto: desk('compras@cliente-uno.example') })], HOY);
-    expect(p.correos).toEqual([]);
-    expect(p.sinDestinatario).toEqual([]);
+  it('las vencidas con contacto van en UN correo del grupo «vencida» por cliente; las de fuera de ciclo, en ninguno', () => {
+    const d = { contacto: desk('compras@cliente-uno.example') };
+    const v1 = eq('Cliente Uno', VENCIDA, d); // venció hace 33 d
+    const v2 = eq('Cliente Uno', '2025-08-01', d); // venció el 2026-08-01, hace 66 d
+    const p = planAvisos([v1, v2, eq('Cliente Uno', FUERA, d)], HOY);
+    expect(p.correos.map((c) => [c.tramo, c.equipos.map((x) => x.equipo.serial)])).toEqual([['vencida', [v2.serial, v1.serial]]]);
+    expect([p.sinDestinatario, p.fueraCiclo.length]).toEqual([[], 1]);
+  });
+
+  it('lo más urgente primero: el grupo «vencida» va delante del de 30, y éste del de 90', () => {
+    const d = { contacto: desk('compras@cliente-uno.example') };
+    const p = planAvisos([eq('Cliente Uno', EN_90, d), eq('Cliente Dos', EN_30, d), eq('Cliente Tres', VENCIDA, d)], HOY);
+    expect(p.correos.map((c) => [c.tramo, c.cliente])).toEqual([['vencida', 'Cliente Tres'], [30, 'Cliente Dos'], [90, 'Cliente Uno']]);
   });
 
   // Lote 11: un equipo de una marca SIN VENCIMIENTO (Horiba, hasta que Alfonso le ponga un plazo) nunca entra en el plan: ni correo,
-  // ni «sin destinatario», ni vencidas sin aviso, ni fuera de ciclo, ni ya avisados o en servicio. Con la misma fecha y 365 días, sí.
+  // ni «sin destinatario», ni fuera de ciclo, ni ya avisados o en servicio. Con la misma fecha y 365 días, sí.
   it('un equipo sin vencimiento no entra en NINGUNA lista del plan, tenga la fecha que tenga y con contacto', () => {
     const c = { contacto: desk('compras@cliente-uno.example') };
     const sin = [EN_90, EN_60, EN_30, VENCIDA, FUERA, AL_DIA].flatMap((f) => [eq('Cliente Uno', f, { ...c, vigencia: null }), eq('Cliente Uno', f, { ...c, vigencia: null, aviso: '2026-10-05' }), eq('Cliente Uno', f, { ...c, vigencia: null, ticket: true })]);
     for (const e of sin) expect(evaluarAviso(e, HOY)).toMatchObject({ estado: 'SIN_VENCIMIENTO', motivo: 'SIN_TRAMO', tramo: null, vence: null, diasParaVencer: null });
     const p = planAvisos(sin, HOY);
-    expect([p.correos, p.sinDestinatario, p.yaAvisados, p.enServicio, p.vencidasSinAviso, p.fueraCiclo]).toEqual([[], [], [], [], [], []]);
+    expect([p.correos, p.sinDestinatario, p.yaAvisados, p.enServicio, p.fueraCiclo]).toEqual([[], [], [], [], []]);
     const con = planAvisos([EN_30, VENCIDA, FUERA].map((f) => eq('Cliente Uno', f, c)), HOY);
-    expect([con.correos.length, con.vencidasSinAviso.length, con.fueraCiclo.length]).toEqual([1, 1, 1]);
+    expect([con.correos.map((x) => x.tramo), con.fueraCiclo.length]).toEqual([['vencida', 30], 1]);
   });
 
   it('con otra vigencia de su marca, el tramo sale de ella: 180 días calibrado el 2026-04-30 vence el 2026-10-27 (tramo 30)', () => {
