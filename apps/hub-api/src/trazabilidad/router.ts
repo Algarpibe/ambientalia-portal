@@ -6,11 +6,14 @@ import { hoyEnColombia } from '../ausencias/saldo.js';
 import { getDesk2Pool } from '../db-desk2.js';
 import { detallesDeTickets, huecosDeEtapa, proyectarAgenda, type RespuestaAgenda } from './agenda.js';
 import { ejeAgenda } from './agenda-calendario.js';
+import type { CanalAvisos } from './avisos-correo.js';
+import { enviarAviso, leerEnvios, resolverEnvio } from './avisos-envios-repo.js';
 import { crearLectorCalibraciones, type LectorCalibraciones } from './calibraciones-desk2.js';
 import { historialCalibraciones, leerPlanCalibraciones, sincronizarCalibraciones } from './calibraciones-repo.js';
 import { cambiarContrato, leerContrato, listarContratos } from './contratos-repo.js';
 import { esFechaIso } from './dominio.js';
 import { anularCalibracion, anularPartida, registrarManual } from './edicion-repo.js';
+import { crearCanalAvisos } from './envio-avisos.js';
 import { TIPO_XLSX } from './exportacion.js';
 import { exportarHoja, leerExportaciones } from './exportacion-repo.js';
 import { crearFuenteAgenda, recuentoPorEstado, type FuenteAgenda } from './fuente.js';
@@ -28,7 +31,6 @@ import {
   TzError,
   esClave,
   parseAsignacion,
-  parseAvisos,
   parseCalibracionManual,
   parseCambioMarca,
   parseVigenciaMarca,
@@ -48,9 +50,11 @@ import {
   parseNumeroTicket,
   parseObjetoRetiro,
   parsePaginaFst022,
+  parsePedidoEnvio,
   parsePlazo,
   parsePuestosEtapa,
   parseReparto,
+  parseResolucion,
   parseRolApp,
   parseSeguimiento,
   parseTipoManual,
@@ -145,12 +149,15 @@ const AVISO_PASADA_FALLIDA = {
  * estado, y sin la variable o si falla no hay maestro (nada lo sustituye).
  * `calibraciones` lee de esa misma base las fechas de calibración de los
  * tickets (calibraciones-desk2.ts), igual de aparte y con la misma regla.
+ * `canal` es por dónde salen los avisos a clientes (envio-avisos.ts), con su
+ * configuración del entorno: sin ella, apagado. Las pruebas pasan uno falso.
  */
 export function createTrazabilidadRouter(
   db: Pool,
   fuente: FuenteAgenda = crearFuenteAgenda({ hub: db, desk2: getDesk2Pool }),
   maestro: LectorMaestro = crearLectorMaestro(getDesk2Pool),
   calibraciones: LectorCalibraciones = crearLectorCalibraciones(getDesk2Pool),
+  canal: CanalAvisos = crearCanalAvisos(),
 ): Router {
   const router = Router();
   const gated = [requireAuth, requireApp(APP_ID)] as const;
@@ -210,11 +217,16 @@ export function createTrazabilidadRouter(
 
   /**
    * Una ruta retirada: no deja pasar a nadie —tampoco a un administrador— y
-   * no mira el cuerpo, el rol ni la base. Sólo contesta 410, en español.
+   * no mira el cuerpo, el rol ni la base. Sólo contesta 410, en español; por
+   * defecto, el de la subida de la Excel.
    */
-  const retirada = (ctx: string) =>
+  const retirada = (
+    ctx: string,
+    codigo = 'subida_retirada',
+    mensaje = 'La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar. Lo congelado se consulta en «Administración» → «Configuración».',
+  ) =>
     route(ctx, async () => {
-      throw new TzError('subida_retirada', 410, 'La subida de la Excel F-ST-022 se retiró el 10/10/2026: la hoja está congelada y ya no se importa ni se vuelve a congelar. Lo congelado se consulta en «Administración» → «Configuración».');
+      throw new TzError(codigo, 410, mensaje);
     });
 
   // ── Roles ────────────────────────────────────────────────────────────────
@@ -275,8 +287,8 @@ export function createTrazabilidadRouter(
 
   // Contacto puesto a mano a un cliente: {cliente, emails[], nombre?}; con
   // `emails` vacío se quita y vuelve a valer el de Desk. Devuelve lo mismo que
-  // el GET de equipos, ya actualizado. Sólo guarda a quién se le escribiría:
-  // esta API no manda ningún correo (el aviso automático es una simulación).
+  // el GET de equipos, ya actualizado. Sólo guarda a quién se le escribe: el
+  // correo lo manda, a mano, «Enviar correo» (abajo, `avisos/envios`).
   router.put(
     '/trazabilidad/contactos',
     ...gated,
@@ -484,14 +496,19 @@ export function createTrazabilidadRouter(
     }),
   );
 
-  router.post(
-    '/trazabilidad/avisos',
-    ...gated,
-    escritura('avisos.write', 'tmc_avisos', async (req) => {
-      const { claves, fecha } = parseAvisos(req.body);
-      return { actualizados: await repo.registrarAvisos(db, claves, fecha, actorOf(req)) };
-    }),
-  );
+  // ── Avisos a clientes: «Enviar correo» (2026-11-08, migración 069) ───────
+  //
+  // El envío es siempre a mano, tarjeta a tarjeta: sólo estas rutas lo disparan
+  // o lo resuelven. La pantalla manda qué tarjeta y qué equipos vio; a quién va
+  // y con qué texto lo decide el servidor (avisos-envios-repo.ts). El modo
+  // —apagado, prueba o real— sale del entorno de hub-api y no se cambia desde
+  // aquí: GET lo enseña, con los últimos envíos.
+  router.get('/trazabilidad/avisos/envios', ...gated, route('tmc_avisos_envios', async () => leerEnvios(db, canal.estado())));
+  router.post('/trazabilidad/avisos/envios', ...gated, escritura('avisos.write', 'tmc_aviso_enviar', async (req) => enviarAviso(db, canal, parsePedidoEnvio(req.body), actorOf(req), hoyEnColombia())));
+  router.post('/trazabilidad/avisos/envios/:id/resolver', ...gated, escritura('avisos.write', 'tmc_aviso_resolver', async (req) => resolverEnvio(db, parseEnteroRuta(req.params.id, 'id'), parseResolucion(req.body), actorOf(req))));
+
+  // Marcar avisos en bloque se retiró con la vista «Manual»: 410 a un portal sin actualizar.
+  router.post('/trazabilidad/avisos', ...gated, retirada('tmc_avisos', 'marcar_retirado', 'Marcar avisos en bloque se retiró: recarga la página. El aviso se envía desde su tarjeta, con «Enviar correo»; si se avisa por teléfono, se apunta en la ficha del equipo.'));
 
   // Tickets de Desk sin cerrar con su plazo. `festivos` son los del tramo que
   // pinta el calendario de barras, para que la app sombree los días no hábiles;

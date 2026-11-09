@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import { planAvisos } from './dominio.js';
+import { registrarAvisos } from './repo.js';
 
 // BLINDAJE de «en seguimiento» (lote 9d-2a, migración 058) contra Postgres, con
 // las rutas de verdad (sólo la sesión es un doble): equipos de otras marcas
@@ -152,8 +153,8 @@ describe('las otras marcas, fuera de seguimiento, no asoman en nada de lo que ya
     const antes = (await foto()).seguimiento;
     const seguimiento = await request(api).put('/api/trazabilidad/seguimiento/HB-0001').set(admin).send({ enAmbientalia: true, avisoEnviado: '2026-10-12', servicioProgramado: null, nota: '' });
     expect([seguimiento.status, seguimiento.body.error]).toEqual([404, 'not_found']);
-    const avisos = await request(api).post('/api/trazabilidad/avisos').set(admin).send({ claves: ['HB-0001', 'HB-0002', '18A00003-2', '18A00001'], fecha: '2026-10-12' });
-    expect([avisos.status, avisos.body]).toEqual([200, { actualizados: 1 }]);
+    // Marcar en bloque se retiró (2026-11-08): lo que marca, ahora tras «Enviar correo», sigue siendo `registrarAvisos`.
+    expect(await registrarAvisos(db, ['HB-0001', 'HB-0002', '18A00003-2', '18A00001'], '2026-10-12', { userId: null, email: 'admin@example.com' })).toBe(1);
     expect((await db.query(`SELECT clave FROM portal.tmc_seguimiento ORDER BY clave`)).rows).toEqual([{ clave: '18A00001' }, { clave: '18A00002' }]);
     expect(antes).not.toContain('HB-0001');
   });
