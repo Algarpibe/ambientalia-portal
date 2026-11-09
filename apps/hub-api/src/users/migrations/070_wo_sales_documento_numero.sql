@@ -4,9 +4,10 @@
 -- pedidos ya cargados en World Office, y cuando una OV salía del archivo (facturada) las de
 -- detrás se corrían un número. Aquí cada OV recibe su número UNA vez y lo conserva para
 -- siempre: las filas nunca se borran ni se modifican (por eso, al terminar cada arranque,
--- portal_app solo tiene SELECT e INSERT; ver el final). Un solo contador para todos los prefijos (OV_25, OV_26, OV_27…), que nunca se
--- reinicia: el siguiente es MAX + 1 (documento-numero.repo.ts), no una SEQUENCE, que gastaría
--- números en un INSERT que choca o se revierte.
+-- portal_app solo tiene SELECT e INSERT; ver el final). Un solo contador para todos los prefijos
+-- (OV_25, OV_26, OV_27…), que nunca se reinicia: el siguiente es MAX + 1
+-- (documento-numero.repo.ts), no una SEQUENCE, que gastaría números en un INSERT que choca o se
+-- revierte.
 --
 -- Siembra: las 37 OV del archivo DocumentosVentasEncabezadosMovimientoInventarioWO_2026-10-31.xls
 -- (lo que ya está cargado en WO), con el número que llevaban allí. Número de OV reconstruido como

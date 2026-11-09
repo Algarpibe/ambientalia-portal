@@ -88,11 +88,13 @@ describe('asignarDocumentoNumeros', () => {
     // Determinista: otra sesión tiene el candado; las dos asignaciones se quedan esperándolo
     // (se ve en pg_stat_activity, por el texto de la consulta) y solo entonces se suelta.
     const otro = await db.connect();
+    let pa: Promise<Map<string, number>> | undefined;
+    let pb: Promise<Map<string, number>> | undefined;
     try {
       await otro.query('BEGIN');
       await otro.query(BLOQUEO_NUMERACION);
-      const pa = asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']);
-      const pb = asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
+      pa = asignarDocumentoNumeros(db, ['OV-2026-212', 'OV-2026-213']);
+      pb = asignarDocumentoNumeros(db, ['OV-2026-213', 'OV-2026-214']);
 
       let esperando = 0;
       for (let i = 0; i < 30 && esperando < 2; i++) {
@@ -112,7 +114,10 @@ describe('asignarDocumentoNumeros', () => {
       const nuevos = (await filas()).filter((f) => f.origen === 'asignado').map((f) => f.documento_numero);
       expect(nuevos).toEqual([38, 39, 40]);
     } finally {
-      otro.release();
+      // release(true) destruye la conexión: si el test falló a medias, la transacción aborta
+      // y el candado se libera.
+      otro.release(true);
+      await Promise.allSettled([pa, pb]);
     }
   });
 
