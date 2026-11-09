@@ -9,7 +9,7 @@
  * dicen siempre lo mismo, letra a letra. `avisos-correo.test.ts` vigila que no
  * gane imports ni llamadas.
  */
-import { claveCliente, type CorreoSimulado, type Destinatario, type EquipoAviso, type TramoAviso } from './dominio.js';
+import { claveCliente, esEmail, normalizarEmail, type CorreoSimulado, type Destinatario, type EquipoAviso, type TramoAviso } from './dominio.js';
 
 /** Lo que el texto del aviso necesita de un equipo (la `EquipoVista` del servidor lo cumple). */
 export interface EquipoTexto {
@@ -136,4 +136,111 @@ export function correoAviso<E extends EquipoAviso & EquipoTexto>(c: CorreoSimula
       { tramo: c.tramo, saludo: saludoAviso(c.cliente, c.destinatarios) },
     ),
   };
+}
+
+// ── El envío (2026-11-08): lo que sale, su versión de prueba y lo que sirve la API ──
+
+/** Lo que se manda de verdad: a quién (direcciones sueltas), con qué asunto y con qué cuerpo. */
+export interface CorreoAEnviar {
+  para: string[];
+  asunto: string;
+  cuerpo: string;
+}
+
+/** El correo de una tarjeta tal como sale en modo real: a sus destinatarios, con su asunto y su cuerpo. */
+export function correoReal<E extends EquipoAviso & EquipoTexto>(c: CorreoSimulado<E>): CorreoAEnviar {
+  const { asunto, cuerpo } = correoAviso(c);
+  return { para: c.destinatarios.map((d) => d.email), asunto, cuerpo };
+}
+
+/** True si `v` es un correo de `@ambientalia.com.co` —el dominio exacto, sin subdominios—: el único que vale como buzón de prueba. */
+export function esBuzonDePrueba(v: unknown): boolean {
+  const e = normalizarEmail(v);
+  return esEmail(e) && e.endsWith('@ambientalia.com.co');
+}
+
+/**
+ * El mismo correo en modo prueba: va SÓLO al buzón de prueba, el asunto empieza
+ * por «[PRUEBA] » y el cuerpo empieza diciendo a quién habría ido de verdad. Un
+ * buzón que no sea de @ambientalia.com.co no se acepta: no se redacta nada.
+ */
+export function correoDePrueba(real: CorreoAEnviar, buzon: string): CorreoAEnviar {
+  if (!esBuzonDePrueba(buzon)) throw new Error('El buzón de prueba tiene que ser de @ambientalia.com.co.');
+  const habria = real.para.length > 0 ? real.para.join(', ') : '(sin destinatario)';
+  return {
+    para: [normalizarEmail(buzon)],
+    asunto: `[PRUEBA] ${real.asunto}`,
+    cuerpo: [`[PRUEBA] Este correo no ha salido hacia el cliente. En modo real habría ido a: ${habria}.`, '', '— — —', '', real.cuerpo].join('\n'),
+  };
+}
+
+/** True si los equipos que vio quien pulsó «Enviar» son exactamente los de la tarjeta de ahora (sin importar el orden ni los repetidos). */
+export function mismaHuella(ahora: readonly string[], vistos: readonly string[]): boolean {
+  const a = [...new Set(ahora)].sort();
+  const b = [...new Set(vistos)].sort();
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+/** Por qué el envío está apagado sin que nadie lo pidiera. */
+export type MotivoApagado = 'sin_valor' | 'valor_desconocido' | 'sin_canal' | 'sin_buzon_prueba';
+
+/** El modo efectivo del envío (el interruptor de hub-api) y, si quedó apagado sin pedirlo, por qué. Lo sirve GET /trazabilidad/avisos/envios. */
+export type EstadoCanal =
+  | { modo: 'apagado'; motivo: MotivoApagado | null; buzonPrueba: null }
+  | { modo: 'prueba'; motivo: null; buzonPrueba: string }
+  | { modo: 'real'; motivo: null; buzonPrueba: null };
+
+/** Lo que contesta el canal de salida al darle un correo. */
+export type ResultadoRemision =
+  | { tipo: 'enviado'; messageId: string } // lo confirmó
+  | { tipo: 'rechazado'; motivo: string } // seguro que no salió
+  | { tipo: 'sin_respuesta' }; // no se sabe: pudo salir
+
+/** El canal de salida de los avisos. Su única implementación es envio-avisos.ts; las pruebas pasan uno falso. */
+export interface CanalAvisos {
+  estado(): EstadoCanal;
+  remitir(correo: CorreoAEnviar, referencia: number): Promise<ResultadoRemision>;
+}
+
+/** El estado guardado de un envío (portal.tmc_avisos_envios). */
+export type EstadoGuardado = 'en_curso' | 'enviado' | 'fallido';
+/** Como lo enseña la pantalla: un «en curso» que ya no espera respuesta es «sin confirmar» (no es un estado guardado aparte). */
+export type EstadoEnvio = EstadoGuardado | 'sin_confirmar';
+
+/** A partir de cuánto un envío «en curso» deja de esperar respuesta (el canal espera 30 s como mucho). */
+export const SIN_CONFIRMAR_MS = 2 * 60_000;
+
+/** El estado de un envío como lo enseña la pantalla, con su edad en milisegundos. */
+export function estadoPresentado(estado: EstadoGuardado, edadMs: number): EstadoEnvio {
+  return estado === 'en_curso' && edadMs >= SIN_CONFIRMAR_MS ? 'sin_confirmar' : estado;
+}
+
+/** Un envío de un aviso, como lo sirve la API. */
+export interface EnvioAviso {
+  id: number;
+  /** El instante en que se pulsó «Enviar», con su zona. */
+  creadoEn: string;
+  por: string;
+  modo: 'prueba' | 'real';
+  claveCliente: string;
+  cliente: string;
+  tramo: TramoAviso;
+  equipos: string[];
+  /** Los destinatarios de verdad de la tarjeta. */
+  destinatarios: string[];
+  /** A quién se mandó: en prueba, sólo el buzón de prueba. */
+  enviadoA: string[];
+  asunto: string;
+  estado: EstadoEnvio;
+  messageId: string | null;
+  error: string | null;
+  /** Quién lo resolvió a mano («Sí salió» / «No salió») y cuándo; null si no hizo falta. */
+  resueltoPor: string | null;
+  resueltoEn: string | null;
+}
+
+/** GET /trazabilidad/avisos/envios: el modo efectivo y los últimos envíos, del más reciente al más antiguo. */
+export interface RespuestaEnvios {
+  canal: EstadoCanal;
+  envios: EnvioAviso[];
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ETIQUETA_TRAMO, correoAviso, fechaDia, marcaAviso, mensajeAviso, saludoAviso, todosGrimm } from './avisos-correo.js';
+import { ETIQUETA_TRAMO, SIN_CONFIRMAR_MS, correoAviso, correoDePrueba, correoReal, esBuzonDePrueba, estadoPresentado, fechaDia, marcaAviso, mensajeAviso, mismaHuella, saludoAviso, todosGrimm } from './avisos-correo.js';
 import { estadoCalibracion, planAvisos, type ContactoEquipo } from './dominio.js';
 
 // El texto del aviso a clientes: el que sale de verdad al pulsar «Enviar correo»
@@ -104,6 +104,47 @@ describe('el texto del grupo «vencida» (aprobado el 2026-11-08)', () => {
 
   it('la etiqueta de cada tramo en la pantalla', () => {
     expect(ETIQUETA_TRAMO).toEqual({ 90: 'Primer aviso · 90 días', 60: 'Recordatorio · 60 días', 30: 'Último aviso · 30 días', vencida: 'Vencida' });
+  });
+});
+
+describe('lo que sale: el correo real y su versión de prueba', () => {
+  const BUZON = 'buzon-prueba@ambientalia.com.co';
+  const real = { para: ['compras@cliente-uno.example', 'copia@example.com'], asunto: 'Último aviso: la calibración de su monitor GRIMM vence en los próximos 30 días · Cliente Uno', cuerpo: 'Estimado/a Ana Pérez:\n\nTexto ficticio.' };
+
+  it('el real va a los destinatarios de la tarjeta, con el asunto y el cuerpo de siempre', () => {
+    const t = tarjeta([eq('Cliente Uno', EN_30, desk('compras@cliente-uno.example', 'Ana Pérez'))]);
+    const { asunto, cuerpo } = correoAviso(t);
+    expect(correoReal(t)).toEqual({ para: ['compras@cliente-uno.example'], asunto, cuerpo });
+  });
+
+  it('en prueba el ÚNICO destinatario es el buzón; el asunto empieza por «[PRUEBA] » y el cuerpo, por a quién habría ido', () => {
+    const p = correoDePrueba(real, ' Buzon-Prueba@Ambientalia.com.co ');
+    expect(p.para).toEqual([BUZON]);
+    expect(p.asunto).toBe(`[PRUEBA] ${real.asunto}`);
+    expect(p.cuerpo.split('\n')[0]).toBe('[PRUEBA] Este correo no ha salido hacia el cliente. En modo real habría ido a: compras@cliente-uno.example, copia@example.com.');
+    expect(p.cuerpo.endsWith(real.cuerpo)).toBe(true);
+    expect(real.para).toHaveLength(2); // el real no se toca
+    expect(correoDePrueba({ ...real, para: [] }, BUZON).cuerpo.split('\n')[0]).toContain('(sin destinatario)');
+  });
+
+  it.each(['buzon@example.com', 'buzon@correo.ambientalia.com.co', 'buzon@ambientalia.com.co.example', 'no-es-correo', ''])('un buzón %j no vale: ni es de prueba ni se redacta nada', (b) => {
+    expect(esBuzonDePrueba(b)).toBe(false);
+    expect(() => correoDePrueba(real, b)).toThrow(/@ambientalia\.com\.co/);
+  });
+});
+
+describe('la huella de una tarjeta y el estado de un envío', () => {
+  it('misma huella = los mismos equipos, sin importar el orden ni los repetidos', () => {
+    expect(mismaHuella(['18A00002', '18A00001'], ['18A00001', '18A00002', '18A00001'])).toBe(true);
+    expect(mismaHuella(['18A00001', '18A00002'], ['18A00001'])).toBe(false);
+    expect(mismaHuella(['18A00001'], ['18A00001', '18A00003'])).toBe(false);
+  });
+
+  it('un «en curso» de 2 minutos o más se enseña como «sin confirmar»; lo demás, tal cual', () => {
+    expect(SIN_CONFIRMAR_MS).toBe(120_000);
+    expect(estadoPresentado('en_curso', 119_999)).toBe('en_curso');
+    expect(estadoPresentado('en_curso', 120_000)).toBe('sin_confirmar');
+    expect([estadoPresentado('enviado', 999_999), estadoPresentado('fallido', 999_999)]).toEqual(['enviado', 'fallido']);
   });
 });
 
