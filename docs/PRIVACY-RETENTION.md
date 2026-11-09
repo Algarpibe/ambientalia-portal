@@ -43,7 +43,7 @@ ejecución de la relación comercial y el cumplimiento de obligaciones contables
 tributarias. Para clientes persona natural, NIT y dirección constituyen dato
 personal (Ley 1581 de 2012).
 
-**No** se expone email, teléfono ni cédula por ninguna query del hub.
+**No** se expone email, teléfono ni cédula por ninguna query del hub, salvo los correos de los contactos de clientes de Trazabilidad Mantenimientos (§2.2).
 
 Medidas asociadas:
 
@@ -81,6 +81,29 @@ rompería el requisito/su test.
 
 - **Retención y acceso** `[Definir]`: fijar el periodo de conservación de estos logs en
   el agregador (p. ej. 90–180 días) y restringir su acceso al administrador.
+
+### 2.2 Registro de los avisos a clientes (Trazabilidad Mantenimientos)
+
+`portal.tmc_avisos_envios` (migración 069) guarda una fila por cada aviso de calibración que una
+persona envía desde «Avisos a clientes»: cuándo y quién (correo del usuario interno), el modo
+(prueba o real), el cliente (su nombre y su clave normalizada), el tramo, las claves de los equipos,
+**los correos de los destinatarios del cliente** (los del contacto puesto a mano en la app o los de
+los tickets de Zoho Desk), a quién se mandó de verdad (en prueba, sólo el buzón interno), el asunto,
+el resultado (el identificador del mensaje de Gmail o el motivo del fallo) y, si hizo falta, quién lo
+resolvió a mano. **No guarda el cuerpo del correo.**
+
+- **Finalidad y base legal:** avisar al cliente del vencimiento de la calibración de su equipo
+  (ejecución de la relación comercial y de servicio técnico) y dejar constancia de qué se le avisó,
+  cuándo y quién.
+- **Acceso:** sólo quien tiene la app `trazabilidad-mantenimientos` (`requireApp` en el servidor),
+  igual que los contactos que ya enseña `GET /trazabilidad/equipos`.
+- **No es la fuente de los contactos:** los correos se copian del contacto vigente al enviar.
+  Rectificar o suprimir un contacto se hace donde nace (Zoho Desk o el contacto puesto a mano en la
+  app); las filas ya apuntadas conservan el correo al que se envió.
+- **También en n8n:** el flujo que envía guarda en sus ejecuciones los destinatarios, el asunto y el
+  cuerpo, con la retención de ejecuciones que tenga configurada n8n.
+- **Retención** `[Definir]`: fijar cuánto se conservan estas filas (p. ej. el mismo plazo que los
+  soportes del servicio técnico) y si se anonimizan después.
 
 ## 3. Arquitectura del dato (clave para retención/borrado)
 
