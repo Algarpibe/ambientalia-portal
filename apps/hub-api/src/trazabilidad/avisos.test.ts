@@ -4,6 +4,7 @@ import {
   DOMINIOS_INTERNOS,
   TRAMOS_AVISO,
   claveCliente,
+  comoTramoAviso,
   contactoDeTickets,
   contactoEfectivo,
   enServicio,
@@ -150,6 +151,11 @@ describe('tramos del aviso', () => {
     expect(tramoDeEstado('VENCE_30')).toBe(30);
     expect(tramoDeEstado('VENCIDA')).toBe('vencida');
     for (const e of ['AL_DIA', 'SIN_FECHA', 'SIN_VENCIMIENTO', 'FUERA_CICLO'] as const) expect(tramoDeEstado(e)).toBeNull();
+  });
+
+  it('el tramo canónico de lo que llega de fuera: 90 o «90» (la columna de la 069 es texto) son 90; «vencida», «vencida»; nada más', () => {
+    expect([90, '90', 60, '60', 30, '30', 'vencida'].map(comoTramoAviso)).toEqual([90, 90, 60, 60, 30, 30, 'vencida']);
+    for (const v of [45, '45', ' 30', '30.0', ['30'], 'VENCIDA', null, undefined, true]) expect(comoTramoAviso(v), JSON.stringify(v)).toBeNull();
   });
 
   it('se entra en un tramo el día «vence − tramo»; en «vencida», el mismo día del vencimiento', () => {

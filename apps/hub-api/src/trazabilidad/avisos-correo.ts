@@ -174,6 +174,20 @@ export function correoDePrueba(real: CorreoAEnviar, buzon: string): CorreoAEnvia
   };
 }
 
+/** Cuántos destinatarios admite, como mucho, un aviso que sale de verdad (el mismo tope que el contacto puesto a mano). */
+export const MAX_DESTINATARIOS = 5;
+
+/**
+ * True si a esos destinatarios se les puede enviar de verdad: de 1 a
+ * `MAX_DESTINATARIOS` correos válidos y distintos. La exige el canal en modo
+ * real antes de tocar la red, y el servidor, en prueba y en real, antes de
+ * apuntar el envío: así la prueba ya enseña lo que el real rechazaría.
+ */
+export function destinatariosAceptables(para: readonly string[]): boolean {
+  if (!Array.isArray(para) || para.length < 1 || para.length > MAX_DESTINATARIOS) return false;
+  return para.every((p) => esEmail(p)) && new Set(para.map((p) => normalizarEmail(p))).size === para.length;
+}
+
 /** True si los equipos que vio quien pulsó «Enviar» son exactamente los de la tarjeta de ahora (sin importar el orden ni los repetidos). */
 export function mismaHuella(ahora: readonly string[], vistos: readonly string[]): boolean {
   const a = [...new Set(ahora)].sort();
