@@ -23,7 +23,7 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import { captureError } from '../sentry.js';
-import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoDePrueba, correoReal, destinatariosAceptables, estadoPresentado, mismaHuella, type CanalAvisos, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type RespuestaEnvios } from './avisos-correo.js';
+import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoDePrueba, correoReal, destinatariosAceptables, estadoPresentado, mismaHuella, type CanalAvisos, type CorreoAEnviar, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type ResultadoRemision, type RespuestaEnvios } from './avisos-correo.js';
 import { comoTramoAviso, planAvisos, type TramoAviso } from './dominio.js';
 import { listarContactos, listarEquipos, registrarAvisos, withTransaction } from './repo.js';
 import { TzError, type Actor, type PedidoEnvio } from './types.js';
@@ -79,6 +79,47 @@ export async function leerEnvios(db: Db, canal: EstadoCanal): Promise<RespuestaE
 }
 
 /**
+ * La tarjeta de ahora del pedido, leída con `db`: el plan sobre el inventario y
+ * los contactos de ese momento. 404 si ya no está; 409 si sus equipos no son
+ * los vistos (la huella son sus claves, no sus seriales: las mismas que se
+ * apuntan y que marca `registrarAvisos`).
+ */
+async function tarjetaVigente(db: Db, pedido: PedidoEnvio, hoy: string) {
+  const [equipos, contactos] = await Promise.all([listarEquipos(db, hoy), listarContactos(db)]);
+  const tarjeta = planAvisos(equipos, hoy, contactos).correos.find((c) => c.claveCliente === pedido.claveCliente && c.tramo === pedido.tramo);
+  if (!tarjeta) throw new TzError('tarjeta_no_encontrada', 404, 'Ese aviso ya no está pendiente (puede que ya se haya enviado o que sus equipos hayan cambiado): recarga la página.');
+  const claves = tarjeta.equipos.map((a) => a.equipo.clave);
+  if (!mismaHuella(claves, pedido.equipos)) throw new TzError('tarjeta_cambiada', 409, 'La tarjeta cambió desde que la abriste: recarga la página y revísala antes de enviar.');
+  return { tarjeta, claves };
+}
+
+/** Las consultas sobre una conexión, de una en una: el plan lanza varias a la vez, y pg no quiere que se encolen en un mismo cliente. */
+function enSerie(c: Db): Db {
+  let cola: Promise<unknown> = Promise.resolve();
+  const query = (...args: unknown[]) => {
+    const p = cola.then(() => (c.query as (...a: unknown[]) => Promise<unknown>)(...args));
+    cola = p.catch(() => undefined);
+    return p;
+  };
+  return { query } as unknown as Db;
+}
+
+/**
+ * Entrega el correo al canal. Si el canal revienta (no debería: contesta
+ * siempre) es una duda —pudo salir—: cuenta como sin respuesta. A Sentry va
+ * sólo la clase del error, nunca su texto, que podría llevar el correo o la
+ * configuración del canal.
+ */
+async function entregar(canal: CanalAvisos, correo: CorreoAEnviar, id: number): Promise<ResultadoRemision> {
+  try {
+    return await canal.remitir(correo, id);
+  } catch (e) {
+    captureError(new Error(`El canal de los avisos falló al entregar (${e instanceof Error ? e.constructor.name : typeof e}).`), { endpoint: 'tmc_aviso_remitir', envio: id });
+    return { tipo: 'sin_respuesta' };
+  }
+}
+
+/**
  * POST /trazabilidad/avisos/envios: envía el aviso de UNA tarjeta y devuelve su
  * envío tal como queda («enviado», «fallido» o «sin confirmar»). `hoy` es el día
  * de Colombia: el del plan y el que se apunta como «Aviso enviado al cliente».
@@ -86,31 +127,33 @@ export async function leerEnvios(db: Db, canal: EstadoCanal): Promise<RespuestaE
 export async function enviarAviso(db: Pool, canal: CanalAvisos, pedido: PedidoEnvio, actor: Actor, hoy: string): Promise<EnvioAviso> {
   const estado = canal.estado();
   if (estado.modo === 'apagado') throw new TzError('envio_apagado', 409, 'El envío de avisos está apagado: no se ha enviado nada.');
-  const [equipos, contactos] = await Promise.all([listarEquipos(db, hoy), listarContactos(db)]);
-  const tarjeta = planAvisos(equipos, hoy, contactos).correos.find((c) => c.claveCliente === pedido.claveCliente && c.tramo === pedido.tramo);
-  if (!tarjeta) throw new TzError('tarjeta_no_encontrada', 404, 'Ese aviso ya no está pendiente (puede que ya se haya enviado o que sus equipos hayan cambiado): recarga la página.');
-  // La huella son las claves de los equipos (no sus seriales): las mismas que se apuntan y que marca `registrarAvisos`.
-  const claves = tarjeta.equipos.map((a) => a.equipo.clave);
-  if (!mismaHuella(claves, pedido.equipos)) throw new TzError('tarjeta_cambiada', 409, 'La tarjeta cambió desde que la abriste: recarga la página y revísala antes de enviar.');
+  const { tarjeta, claves } = await tarjetaVigente(db, pedido, hoy);
   const real = correoReal(tarjeta);
   if (!destinatariosAceptables(real.para)) {
     throw new TzError('destinatarios_no_validos', 409, `Este aviso no se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente, con ${MAX_DESTINATARIOS} direcciones como mucho, y vuelve a intentarlo. No se ha enviado ni apuntado nada.`);
   }
   const sale = estado.modo === 'prueba' ? correoDePrueba(real, estado.buzonPrueba) : real;
-  let id: number;
-  try {
-    const { rows } = await db.query(
-      `INSERT INTO portal.tmc_avisos_envios (dia, por_id, por, modo, clave_cliente, cliente, tramo, equipos, destinatarios, enviado_a, asunto)
-       VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8::text[], $9::text[], $10::text[], $11) RETURNING id`,
-      [hoy, actor.userId, actor.email, estado.modo, tarjeta.claveCliente, tarjeta.cliente, String(tarjeta.tramo), claves, real.para, sale.para, sale.asunto],
-    );
-    id = Number(rows[0].id);
-  } catch (e) {
-    const pg = e as { code?: string; constraint?: string };
-    if (pg.code === '23505' && pg.constraint === UNICO_EN_CURSO) throw new TzError('ya_enviando', 409, 'Este aviso ya se está enviando, o quedó sin confirmar: míralo en «Últimos envíos».');
-    throw e;
-  }
-  const r = await canal.remitir(sale, id);
+  // Apuntar y volver a mirar la tarjeta, en UNA transacción y en ese orden. Si otro envío de la misma tarjeta cerró (y marcó sus
+  // equipos) entre la lectura de arriba y este apunte, el índice único ya no lo para —ese otro ya no está «en curso»—, pero la segunda
+  // lectura, posterior al INSERT (READ COMMITTED), sí lo ve: ROLLBACK, sin fila y sin llamar al canal.
+  const id = await withTransaction(db, async (c) => {
+    let nuevo: number;
+    try {
+      const { rows } = await c.query(
+        `INSERT INTO portal.tmc_avisos_envios (dia, por_id, por, modo, clave_cliente, cliente, tramo, equipos, destinatarios, enviado_a, asunto)
+         VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8::text[], $9::text[], $10::text[], $11) RETURNING id`,
+        [hoy, actor.userId, actor.email, estado.modo, tarjeta.claveCliente, tarjeta.cliente, String(tarjeta.tramo), claves, real.para, sale.para, sale.asunto],
+      );
+      nuevo = Number(rows[0].id);
+    } catch (e) {
+      const pg = e as { code?: string; constraint?: string };
+      if (pg.code === '23505' && pg.constraint === UNICO_EN_CURSO) throw new TzError('ya_enviando', 409, 'Este aviso ya se está enviando, o quedó sin confirmar: míralo en «Últimos envíos».');
+      throw e;
+    }
+    await tarjetaVigente(enSerie(c), pedido, hoy);
+    return nuevo;
+  });
+  const r = await entregar(canal, sale, id);
   if (r.tipo === 'rechazado') {
     await db.query(`UPDATE portal.tmc_avisos_envios SET estado = 'fallido', error = $2, terminado_en = NOW() WHERE id = $1 AND estado = 'en_curso'`, [id, r.motivo]);
   } else if (r.tipo === 'enviado') {
@@ -121,7 +164,9 @@ export async function enviarAviso(db: Pool, canal: CanalAvisos, pedido: PedidoEn
             WHERE id = $1 AND estado = 'en_curso' RETURNING modo, equipos, dia::text AS dia`,
           [id, r.messageId],
         );
-        if (rows[0]?.modo === 'real') await registrarAvisos(c, rows[0].equipos, rows[0].dia, actor);
+        // Llegó tarde: alguien ya lo resolvió a mano. No se toca, pero el desajuste queda a la vista.
+        if (rows.length === 0) captureError(new Error('El canal confirmó un aviso que ya estaba resuelto a mano.'), { endpoint: 'tmc_aviso_enviado_tardio', envio: id, messageId: r.messageId });
+        else if (rows[0].modo === 'real') await registrarAvisos(c, rows[0].equipos, rows[0].dia, actor);
       });
     } catch (e) {
       // El correo salió, pero no quedó apuntado: sigue «en curso» y una persona lo resuelve («Sí salió»).
