@@ -1,6 +1,6 @@
 /**
- * Lo que pinta la sub-vista «Simulación automática» de «Avisos a clientes».
- * Puro: sin React ni red. El plan (a quién le toca el aviso y a quién iría)
+ * Lo que pintan las tarjetas de «Avisos a clientes» (cuántas, texto para copiar y revisión de los
+ * correos tecleados). Puro: sin React ni red. El plan (a quién le toca el aviso y a quién iría)
  * lo calcula el dominio (`planAvisos`) y el texto del correo, hub-api
  * (`avisos-correo.ts`: el mismo que redacta el servidor); aquí sólo se cuenta,
  * se junta para copiar y se revisa lo que se teclea en el editor de contacto.

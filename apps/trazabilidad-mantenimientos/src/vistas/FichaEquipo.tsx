@@ -166,7 +166,7 @@ export default function FichaEquipo({ equipo: e, inventario, onInventario, onClo
             ) : (
               <p className="text-gray-500">Sin contacto: ningún ticket de Desk de este equipo trae un correo del cliente.</p>
             )}
-            <p className="text-xs text-gray-500">Se cambia, para todos los equipos del cliente, en «Avisos a clientes» → «Simulación automática». Hoy no se envía ningún correo automático.</p>
+            <p className="text-xs text-gray-500">Se cambia, para todos los equipos del cliente, con «Cambiar destinatario» en su tarjeta de «Avisos a clientes». El aviso se envía desde esa tarjeta, a mano.</p>
           </section>
         </div>
 
