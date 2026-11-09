@@ -23,7 +23,7 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import { captureError } from '../sentry.js';
-import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoQueSale, correoReal, destinatariosAceptables, estadoPresentado, mismaHuella, mismosDestinatarios, type CanalAvisos, type CorreoAEnviar, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type ResultadoRemision, type RespuestaEnvios } from './avisos-correo.js';
+import { MAX_DESTINATARIOS, SIN_CONFIRMAR_MS, correoQueSale, correoReal, destinatariosAceptables, estadoPresentado, huellaTexto, mismaHuella, mismosDestinatarios, type CanalAvisos, type CorreoAEnviar, type EnvioAviso, type EstadoCanal, type EstadoGuardado, type ResultadoRemision, type RespuestaEnvios } from './avisos-correo.js';
 import { comoTramoAviso, planAvisos, type TramoAviso } from './dominio.js';
 import { listarContactos, listarEquipos, registrarAvisos, withTransaction } from './repo.js';
 import { TzError, type Actor, type PedidoEnvio } from './types.js';
@@ -98,6 +98,7 @@ async function tarjetaVigente(db: Db, pedido: PedidoEnvio, hoy: string, estado: 
     throw new TzError('destinatarios_no_validos', 409, `Este aviso no se puede enviar: tiene que ir a entre 1 y ${MAX_DESTINATARIOS} correos válidos y distintos. Pon a mano el contacto del cliente, con ${MAX_DESTINATARIOS} direcciones como mucho, y vuelve a intentarlo. No se ha enviado ni apuntado nada.`);
   }
   if (!mismosDestinatarios(ahora, pedido.para)) throw new TzError('destinatarios_cambiados', 409, 'Los destinatarios de esta tarjeta cambiaron desde que abriste la confirmación: no se ha enviado nada. Se ha actualizado la pantalla; revisa y vuelve a enviar.');
+  if (huellaTexto(correoReal(tarjeta)) !== pedido.huellaTexto) throw new TzError('texto_cambiado', 409, 'El texto del aviso cambió desde que abriste la confirmación (una fecha de calibración o un nombre): no se ha enviado nada. Se ha actualizado la pantalla; léelo de nuevo y vuelve a enviar.');
   return { tarjeta, claves };
 }
 

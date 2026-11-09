@@ -158,12 +158,13 @@ describe('«Sí salió» / «No salió»', () => {
 describe('los errores del envío, en palabras de la pantalla', () => {
   it('cada código conocido tiene su mensaje, y los de «recarga» piden recargar', () => {
     expect(errorDeEnvio({ status: 409, code: 'envio_apagado', message: 'x' })).toEqual({ texto: 'El envío está apagado: no se ha enviado nada. Se ha actualizado la pantalla.', recargar: true });
-    for (const [status, code] of [[404, 'tarjeta_no_encontrada'], [409, 'tarjeta_cambiada'], [410, 'marcar_retirado'], [409, 'modo_cambiado'], [409, 'destinatarios_cambiados']] as const) {
+    for (const [status, code] of [[404, 'tarjeta_no_encontrada'], [409, 'tarjeta_cambiada'], [410, 'marcar_retirado'], [409, 'modo_cambiado'], [409, 'destinatarios_cambiados'], [409, 'texto_cambiado']] as const) {
       const e = errorDeEnvio({ status, code, message: 'x' });
       expect([code, e.recargar, e.texto.endsWith('Se ha actualizado la pantalla.'), /recarga la página/i.test(e.texto)]).toEqual([code, true, true, false]);
     }
     expect(errorDeEnvio({ status: 409, code: 'modo_cambiado', message: 'x' }).texto).toMatch(/modo/);
     expect(errorDeEnvio({ status: 409, code: 'destinatarios_cambiados', message: 'x' }).texto).toMatch(/destinatarios/);
+    expect(errorDeEnvio({ status: 409, code: 'texto_cambiado', message: 'x' }).texto).toMatch(/texto/);
     expect(errorDeEnvio({ status: 409, code: 'ya_enviando', message: 'x' })).toMatchObject({ recargar: false, texto: expect.stringMatching(/Últimos envíos/) });
     expect(errorDeEnvio({ status: 409, code: 'destinatarios_no_validos', message: 'x' })).toMatchObject({ recargar: false, texto: expect.stringMatching(/contacto.*5/) });
     expect(errorDeEnvio({ status: 409, code: 'no_sin_confirmar', message: 'x' })).toMatchObject({ recargar: true, texto: expect.stringMatching(/sin confirmar/) });

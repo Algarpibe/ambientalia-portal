@@ -102,6 +102,7 @@ const RECARGA = ' Se ha actualizado la pantalla.';
 const ERROR_ENVIO: Record<string, { texto: string; recargar: boolean }> = {
   envio_apagado: { texto: `El envío está apagado: no se ha enviado nada.${RECARGA}`, recargar: true },
   modo_cambiado: { texto: `El modo del envío cambió mientras tenías abierta la confirmación y no se ha enviado nada. Revisa el modo y vuelve a enviar.${RECARGA}`, recargar: true },
+  texto_cambiado: { texto: `El texto del aviso cambió mientras tenías abierta la confirmación (una fecha de calibración o un nombre) y no se ha enviado nada. Léelo de nuevo y vuelve a enviar.${RECARGA}`, recargar: true },
   destinatarios_cambiados: { texto: `Los destinatarios de este aviso cambiaron mientras tenías abierta la confirmación y no se ha enviado nada. Revisa a quién va y vuelve a enviar.${RECARGA}`, recargar: true },
   tarjeta_no_encontrada: { texto: `Ese aviso ya no está pendiente: puede que ya se haya enviado o que sus equipos hayan cambiado.${RECARGA}`, recargar: true },
   tarjeta_cambiada: { texto: `La tarjeta cambió desde que la abriste y no se ha enviado nada.${RECARGA}`, recargar: true },

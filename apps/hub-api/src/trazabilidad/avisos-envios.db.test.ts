@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { hoyEnColombia } from '../ausencias/saldo.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
-import type { CanalAvisos, CorreoAEnviar, EstadoCanal, ResultadoRemision } from './avisos-correo.js';
+import { correoReal, huellaTexto, type CanalAvisos, type CorreoAEnviar, type EstadoCanal, type ResultadoRemision } from './avisos-correo.js';
 import { planAvisos } from './dominio.js';
 import { registrarAvisos } from './repo.js';
 
@@ -53,7 +53,15 @@ const TARJETA = { claveCliente: 'cliente ficticio a', tramo: 30, equipos: ['18A0
 
 const enPortal = (clave: string, ultima: string) => hub.query(`INSERT INTO portal.tmc_equipos (clave, serial, cliente, marca, modelo, ultima_calibracion) VALUES ($1, $1, 'Cliente Ficticio A', 'GRIMM', 'EDM 180C', $2)`, [clave, ultima]);
 /** Lo que confirmó quien pulsa «Enviar»: la tarjeta, el modo del servidor de ahora y los destinatarios de verdad (salvo que el caso diga otra cosa). */
-const enviar = (cuerpo: object = {}) => request(api).post('/api/trazabilidad/avisos/envios').set(como).send({ ...TARJETA, modo: estado.modo, para: ['compras@cliente-a.example'], ...cuerpo });
+const enviar = async (cuerpo: Record<string, unknown> = {}) => {
+  const base = { ...TARJETA, modo: estado.modo, para: ['compras@cliente-a.example'], ...cuerpo };
+  return request(api).post('/api/trazabilidad/avisos/envios').set(como).send({ huellaTexto: await huellaDe(String(base.claveCliente), base.tramo), ...base });
+};
+/** La huella del texto que enseñaría la tarjeta ahora (o una que no casa con nada si la tarjeta ya no está: el servidor dirá 404 antes). */
+const huellaDe = async (claveCliente: string, tramo: unknown) => {
+  const t = (await plan()).correos.find((c) => c.claveCliente === claveCliente && String(c.tramo) === String(tramo));
+  return t ? huellaTexto(correoReal(t as Parameters<typeof correoReal>[0])) : 'ffffffff';
+};
 const resolver = (id: unknown, salio: boolean) => request(api).post(`/api/trazabilidad/avisos/envios/${id}/resolver`).set(como).send({ salio });
 const envios = async () => (await request(api).get('/api/trazabilidad/avisos/envios').set(como)).body.envios as { estado: string; tramo: unknown }[];
 const registro = async () => (await hub.query(`SELECT modo, tramo, equipos, destinatarios, enviado_a, asunto, estado, message_id, error, dia::text AS dia FROM portal.tmc_avisos_envios ORDER BY id`)).rows as Record<string, unknown>[];
@@ -157,6 +165,30 @@ describe('enviar el aviso de una tarjeta', () => {
     // El mismo conjunto en otro orden y con mayúsculas sí vale.
     await hub.query(`UPDATE portal.tmc_contactos SET emails = ARRAY['b@cliente-a.example', 'a@cliente-a.example']`);
     expect((await enviar({ para: ['A@Cliente-A.example', 'b@cliente-a.example'] })).body.estado).toBe('enviado');
+  });
+
+  it('si el texto cambió desde que se abrió la confirmación (el nombre del contacto, una fecha): 409 `texto_cambiado`, y nada sale ni se apunta', async () => {
+    const vista = await huellaDe('cliente ficticio a', 30); // lo que enseñaba la confirmación
+    await hub.query(`UPDATE portal.tmc_contactos SET nombre = 'Beatriz Ficticia'`);
+    const res = await enviar({ huellaTexto: vista });
+    expect([res.status, res.body.error]).toEqual([409, 'texto_cambiado']);
+    expect([remitidos, await registro()]).toEqual([[], []]);
+    expect((await enviar()).body.estado).toBe('enviado'); // con la huella de ahora, sí
+  });
+
+  it('el texto que cambia en plena carrera (entre la primera lectura y el apunte) también se frena dentro de la transacción', async () => {
+    estado = REAL;
+    await hub.query(`CREATE OR REPLACE FUNCTION portal.tmc_prueba_nombre() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      UPDATE portal.tmc_contactos SET nombre = 'Otra Persona Ficticia'; RETURN NEW; END $$`);
+    await hub.query('CREATE TRIGGER tmc_prueba_nombre BEFORE INSERT ON portal.tmc_avisos_envios FOR EACH ROW EXECUTE FUNCTION portal.tmc_prueba_nombre()');
+    try {
+      const res = await enviar();
+      expect([res.status, res.body.error]).toEqual([409, 'texto_cambiado']);
+      expect([remitidos, await registro(), await avisados()]).toEqual([[], [], []]);
+    } finally {
+      await hub.query('DROP TRIGGER IF EXISTS tmc_prueba_nombre ON portal.tmc_avisos_envios');
+      await hub.query('DROP FUNCTION IF EXISTS portal.tmc_prueba_nombre()');
+    }
   });
 
   it('el cambio de destinatarios en plena carrera (entre la primera lectura y el apunte) también se frena dentro de la transacción', async () => {

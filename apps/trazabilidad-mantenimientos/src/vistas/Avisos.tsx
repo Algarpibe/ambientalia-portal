@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Send } from 'lucide-react';
 import { api, type Inventario } from '../api';
-import { ETIQUETA_TRAMO, correoQueSale, correoReal, type ContactoCliente, type CorreoAEnviar, type CorreoSimulado, type EnvioAviso, type EquipoVista, type EstadoCanal, type RespuestaEnvios } from '../dominio';
+import { ETIQUETA_TRAMO, correoQueSale, huellaTexto, correoReal, type ContactoCliente, type CorreoAEnviar, type CorreoSimulado, type EnvioAviso, type EquipoVista, type EstadoCanal, type RespuestaEnvios } from '../dominio';
 import { accionTarjeta, canalIgual, errorDeEnvio, msHastaRefresco, puedeResolver, rotuloModo, textoEstadoEnvio, textoFallo, ultimoEnvioDe } from '../lib/envios';
 import { fmtFechaHora } from '../lib/vistas';
 import { usePermisos } from '../permisos';
@@ -41,7 +41,8 @@ type CanalAbierto = Exclude<EstadoCanal, { modo: 'apagado' }>;
 export default function Avisos({ equipos, recarga: pulsos, hoy, contactos, onFicha, onCambio, onInventario, notificar }: Props) {
   const [envios, setEnvios] = useState<RespuestaEnvios | null>(null);
   const [errorEnvios, setErrorEnvios] = useState<string | null>(null);
-  const [confirmar, setConfirmar] = useState<CorreoSimulado<EquipoVista> | null>(null);
+  /** Lo que enseña la confirmación abierta, congelado al abrirla: un refresco de fondo no cambia lo que se confirma (el servidor compara con lo vivo). */
+  const [confirmar, setConfirmar] = useState<{ correo: CorreoSimulado<EquipoVista>; canal: CanalAbierto } | null>(null);
   /** Lo que se dijo tras un error que obligó a actualizar la pantalla: se queda hasta que se cierra (un aviso de 3 s no basta). */
   const [aviso, setAviso] = useState<string | null>(null);
   /** Ver y copiar el aviso lo puede cualquiera; enviarlo y resolver un «sin confirmar» piden `avisos.write`. */
@@ -115,17 +116,17 @@ export default function Avisos({ equipos, recarga: pulsos, hoy, contactos, onFic
           if (!a) return null;
           if (a.tipo === 'aviso') return <p className="text-xs text-amber-800">{a.texto}</p>;
           return (
-            <Button variant="primary" disabled={!a.activo} onClick={() => setConfirmar(c)}>
+            <Button variant="primary" disabled={!a.activo} onClick={() => canal && canal.modo !== 'apagado' && setConfirmar({ correo: c, canal })}>
               <Send className="h-4 w-4" aria-hidden /> {a.texto}
             </Button>
           );
         }}
       />
       <UltimosEnvios envios={lista} puedeResolverAqui={puedeEnviar} recargar={recargar} notificar={notificar} />
-      {confirmar && canal && canal.modo !== 'apagado' && (
+      {confirmar && (
         <Confirmar
-          correo={confirmar}
-          canal={canal}
+          correo={confirmar.correo}
+          canal={confirmar.canal}
           onClose={() => setConfirmar(null)}
           onEnviado={async (e) => {
             // La respuesta del POST sólo se enseña; lo que decide la pantalla es lo que sirva GET.
@@ -177,7 +178,7 @@ function Confirmar({
         await onFallo(errorDeEnvio({ code: 'modo_cambiado' }).texto, true);
         return;
       }
-      const e = await api.enviarAviso(correo.claveCliente, correo.tramo, correo.equipos.map((a) => a.equipo.clave), canal.modo, real.para);
+      const e = await api.enviarAviso(correo.claveCliente, correo.tramo, correo.equipos.map((a) => a.equipo.clave), canal.modo, real.para, huellaTexto(real));
       if (e.estado === 'fallido') setError(textoFallo(e.error));
       await onEnviado(e);
     } catch (x) {

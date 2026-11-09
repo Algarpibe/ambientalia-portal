@@ -133,12 +133,13 @@ export const api = {
   envios: () => request<RespuestaEnvios>('GET', '/avisos/envios'),
   /**
    * Envía el aviso de una tarjeta (pide `avisos.write`): el servidor la vuelve a calcular y redacta él el correo. Devuelve su envío.
-   * `modo` y `para` (los destinatarios de verdad) son lo que enseñaba la confirmación: si el servidor ya tiene otros, 409 y no sale nada.
+   * `modo`, `para` (los destinatarios de verdad) y `huellaTexto` (la del asunto y cuerpo reales) son lo que enseñaba la confirmación:
+   * si el servidor ya tiene otros, 409 y no sale nada.
    * Ojo: ante un tiempo agotado contesta «sin_confirmar» al instante, pero GET lo presenta «en_curso» hasta los 2 minutos: tras
    * enviar, la pantalla vuelve a pedir `envios()` y decide los botones con esa lista (ver lib/envios.ts), no con esta respuesta.
    */
-  enviarAviso: (claveCliente: string, tramo: TramoAviso, equipos: string[], modo: 'prueba' | 'real', para: string[]) =>
-    request<EnvioAviso>('POST', '/avisos/envios', { claveCliente, tramo, equipos, modo, para }),
+  enviarAviso: (claveCliente: string, tramo: TramoAviso, equipos: string[], modo: 'prueba' | 'real', para: string[], huellaTexto: string) =>
+    request<EnvioAviso>('POST', '/avisos/envios', { claveCliente, tramo, equipos, modo, para, huellaTexto }),
   /** Resuelve a mano un envío sin confirmar: `salio` = «Sí salió» (true) o «No salió» (false). 409 `no_sin_confirmar` si aún no tiene 2 minutos. */
   resolverEnvio: (id: number, salio: boolean) => request<EnvioAviso>('POST', `/avisos/envios/${id}/resolver`, { salio }),
 };

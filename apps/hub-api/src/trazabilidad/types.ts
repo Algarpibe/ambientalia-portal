@@ -224,6 +224,8 @@ export interface PedidoEnvio {
   modo: 'prueba' | 'real';
   /** Los destinatarios REALES que enseñaba la confirmación, normalizados: si ya son otros, no se envía (409 `destinatarios_cambiados`). */
   para: string[];
+  /** La huella (`huellaTexto`) del asunto y el cuerpo que enseñaba la confirmación: si el texto de ahora es otro, no se envía (409 `texto_cambiado`). */
+  huellaTexto: string;
 }
 
 /** Valida el cuerpo de POST /trazabilidad/avisos/envios. El tramo puede llegar como 90 o «90»: sale el canónico, el del plan. */
@@ -246,7 +248,8 @@ export function parsePedidoEnvio(body: unknown): PedidoEnvio {
     if (!esEmail(e)) throw invalido('Correo de destinatario no válido.', `para[${i}]`);
     return e;
   });
-  return { claveCliente: clave, tramo, equipos: [...new Set(equipos)], modo: b.modo, para: [...new Set(para)] };
+  if (typeof b.huellaTexto !== 'string' || !/^[0-9a-f]{1,64}$/.test(b.huellaTexto)) throw invalido('«huellaTexto» debe ser la huella (hexadecimal) del texto que enseñaba la confirmación.', 'huellaTexto');
+  return { claveCliente: clave, tramo, equipos: [...new Set(equipos)], modo: b.modo, para: [...new Set(para)], huellaTexto: b.huellaTexto };
 }
 
 /** Valida el cuerpo de POST /trazabilidad/avisos/envios/:id/resolver: `{salio}`, si el correo salió («Sí salió») o no. */

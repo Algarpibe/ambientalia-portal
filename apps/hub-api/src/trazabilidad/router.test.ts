@@ -241,7 +241,7 @@ describe('permisos por rol', () => {
     { ruta: 'PUT /trazabilidad/contactos', permiso: 'contactos.write', pedir: (c) => request(app()).put('/api/trazabilidad/contactos').set(c).send({ cliente: 'Cliente Uno', emails: ['compras@cliente-uno.example'] }) },
     { ruta: 'PUT /trazabilidad/seguimiento/:clave', permiso: 'seguimiento.write', pedir: (c) => request(app()).put('/api/trazabilidad/seguimiento/18A00001').set(c).send({ enAmbientalia: true }) },
     // Avisos a clientes (2026-11-08): enviar el aviso de una tarjeta y resolver un envío sin confirmar. El permiso que marcaba en bloque.
-    { ruta: 'POST /trazabilidad/avisos/envios', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'] }) },
+    { ruta: 'POST /trazabilidad/avisos/envios', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(c).send({ claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'], huellaTexto: '1a2b3c4d' }) },
     { ruta: 'POST /trazabilidad/avisos/envios/:id/resolver', permiso: 'avisos.write', pedir: (c) => request(appAvisos()).post('/api/trazabilidad/avisos/envios/7/resolver').set(c).send({ salio: false }) },
     { ruta: 'PUT /trazabilidad/servicios/:numero/tipo', permiso: 'servicios.tipo.write', pedir: (c) => request(app()).put('/api/trazabilidad/servicios/962/tipo').set(c).send({ tipo: 'Diagnóstico' }) },
     { ruta: 'PUT /trazabilidad/plazos', permiso: 'config.write', pedir: (c) => request(app()).put('/api/trazabilidad/plazos').set(c).send({ tipo: 'Diagnóstico', dias: 3 }) },
@@ -939,7 +939,7 @@ describe('validación antes de escribir', () => {
 // El envío de los avisos (2026-11-08) por HTTP, con el doble de la base: el interruptor, la validación y la lectura.
 // El flujo entero, contra Postgres y con un canal de mentira, está en avisos-envios.db.test.ts.
 describe('avisos a clientes: enviar y resolver', () => {
-  const TARJETA = { claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'] };
+  const TARJETA = { claveCliente: 'cliente uno', tramo: 30, equipos: ['18A00001'], modo: 'prueba', para: ['compras@cliente-uno.example'], huellaTexto: '1a2b3c4d' };
 
   it('con el envío apagado (el canal por defecto de estas pruebas): 409, sin una sola consulta de negocio', async () => {
     const res = await request(app()).post('/api/trazabilidad/avisos/envios').set(auth()).send(TARJETA);
@@ -964,6 +964,11 @@ describe('avisos a clientes: enviar y resolver', () => {
     ['para con un correo que no vale', { ...TARJETA, para: ['no-es-un-correo'] }],
     ['para con algo que no es texto', { ...TARJETA, para: [7] }],
     ['para que no es una lista', { ...TARJETA, para: 'compras@cliente-uno.example' }],
+    ['sin huella del texto', { ...TARJETA, huellaTexto: undefined }],
+    ['una huella vacía', { ...TARJETA, huellaTexto: '' }],
+    ['una huella que no es hexadecimal', { ...TARJETA, huellaTexto: 'zzzz' }],
+    ['una huella demasiado larga', { ...TARJETA, huellaTexto: 'a'.repeat(65) }],
+    ['una huella que no es texto', { ...TARJETA, huellaTexto: 12345678 }],
   ])('400 antes de nada: %s', async (_caso, cuerpo) => {
     expect((await request(appAvisos()).post('/api/trazabilidad/avisos/envios').set(auth()).send(cuerpo)).status).toBe(400);
     expect([queries, remitidos]).toEqual([[], []]);

@@ -185,6 +185,22 @@ export function correoQueSale<E extends EquipoAviso & EquipoTexto>(c: CorreoSimu
   return canal.modo === 'prueba' ? correoDePrueba(real, canal.buzonPrueba) : real;
 }
 
+/**
+ * La huella del texto de un correo (asunto y cuerpo): FNV-1a de 32 bits sobre sus unidades UTF-16, en 8 cifras
+ * hexadecimales. La pantalla manda la que vio y el servidor la compara con la de ahora: si cambió la fecha de una
+ * calibración o un nombre entre medias, no se envía un texto que nadie confirmó. Es integridad de intención, no seguridad.
+ */
+export function huellaTexto(c: Pick<CorreoAEnviar, 'asunto' | 'cuerpo'>): string {
+  let h = 0x811c9dc5;
+  for (const ch of `${c.asunto}\u0000${c.cuerpo}`) {
+    for (let i = 0; i < ch.length; i++) {
+      h ^= ch.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
 /** True si son los mismos correos, sin importar el orden ni las mayúsculas. */
 export function mismosDestinatarios(ahora: readonly string[], vistos: readonly string[]): boolean {
   const a = ahora.map(normalizarEmail).sort();

@@ -115,11 +115,16 @@ Zoho (FUENTE DE VERDAD)  ──sync (worker @algarpibe/zoho-sync, ~cada 3 min)�
   borra directamente en el hub (el usuario de DB solo tiene `SELECT`).
 - Cualquier rectificación o supresión debe hacerse **en Zoho**, y **propagarse**
   al hub por el worker de sincronización.
+- **Excepción: datos propios del portal.** Lo que escribe el propio portal en el
+  esquema `portal` no es réplica de Zoho. Entre ellos `portal.tmc_avisos_envios`
+  (§2.2): destinatarios del cliente, asunto, quién y cuándo (no el cuerpo). No lo
+  corrige el worker: se atiende aparte (§5, paso 6).
 
 ## 4. Política de retención
 
-- El hub **no define una retención propia**: refleja lo que exista en Zoho. El
-  dato vive en el hub mientras exista en Zoho.
+- El hub **no define una retención propia** para lo que replica de Zoho: vive en
+  el hub mientras exista en Zoho. Los datos propios del portal (p. ej.
+  `tmc_avisos_envios`) tienen su retención aparte, hoy `[Definir]` (§2.2).
 - **Retención en Zoho (fuente):** `[Definir: periodo de conservación de datos de
   clientes/facturación — típicamente ligado a obligaciones contables/tributarias,
   p. ej. conservación de soportes contables]`.
@@ -136,8 +141,15 @@ Zoho (FUENTE DE VERDAD)  ──sync (worker @algarpibe/zoho-sync, ~cada 3 min)�
    registro del cliente.
 5. **Propagación al hub**: asegurar que el cambio llegue a `zoho-hub` (ver §6 —
    hoy hay una brecha técnica a cerrar).
-6. **Verificación**: confirmar que el hub ya no expone el dato (query de §7).
-7. **Registro y respuesta**: documentar la solicitud y responder al titular
+6. **Datos propios del portal** (no los toca el worker): si el titular es un
+   contacto de un cliente de Trazabilidad Mantenimientos, rectificar o suprimir
+   también su correo en `portal.tmc_avisos_envios` (columnas `destinatarios` y
+   `enviado_a`) y quitar o corregir su contacto puesto a mano
+   (`portal.tmc_contactos`). Además, borrar sus ejecuciones del flujo de envío en
+   el historial de n8n, que guarda el correo entero (destinatarios, asunto y
+   cuerpo). `[Definir quién lo ejecuta y cómo se deja constancia]`.
+7. **Verificación**: confirmar que el hub ya no expone el dato (query de §7).
+8. **Registro y respuesta**: documentar la solicitud y responder al titular
    dentro del plazo legal.
 
 ## 6. Brecha técnica a cerrar (propagación de borrados)
