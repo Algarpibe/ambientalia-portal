@@ -9,6 +9,7 @@ import { hoyEnColombia } from '../ausencias/saldo.js';
 import { asegurarDeskTickets, poolDePrueba } from '../test-db/harness.js';
 import type { CanalAvisos, CorreoAEnviar, EstadoCanal, ResultadoRemision } from './avisos-correo.js';
 import { planAvisos } from './dominio.js';
+import { registrarAvisos } from './repo.js';
 
 // «Enviar correo» contra Postgres, con las rutas de verdad: sólo la sesión y el canal de salida son de mentira (aquí
 // no sale nada a la red ni se lee el entorno). Todo ficticio: clientes, seriales y correos.
@@ -21,6 +22,9 @@ vi.mock('../db.js', () => ({
     on: () => {},
   }),
 }));
+/** Lo que se manda a Sentry: aquí se apunta para mirarlo. */
+const capturados = vi.hoisted(() => [] as { e: unknown; contexto?: Record<string, unknown> }[]);
+vi.mock('../sentry.js', async (original) => ({ ...(await original<typeof import('../sentry.js')>()), captureError: (e: unknown, contexto?: Record<string, unknown>) => void capturados.push({ e, contexto }) }));
 const { createTrazabilidadRouter } = await import('./router.js');
 
 const HOY = hoyEnColombia();
@@ -75,6 +79,7 @@ beforeEach(async () => {
   estado = PRUEBA;
   contestar = async () => ({ tipo: 'enviado', messageId: 'msg-ficticio-1' });
   remitidos.length = 0;
+  capturados.length = 0;
   await enPortal('18A00001', VENCE_EN_10);
   await enPortal('18A00002', VENCE_EN_10);
   await hub.query(`INSERT INTO portal.tmc_contactos (clave, cliente, emails, nombre, actualizado_por) VALUES ('cliente ficticio a', 'Cliente Ficticio A', ARRAY['compras@cliente-a.example'], 'Ana Ficticia', 'alguien@example.com')`);
@@ -142,6 +147,65 @@ describe('enviar el aviso de una tarjeta', () => {
     expect([remitidos, await registro()]).toEqual([[], []]);
   });
 
+  it('la carrera de dos envíos: si los equipos quedan avisados entre la primera lectura y el apunte, se vuelve a mirar la tarjeta dentro de la transacción del apunte: 404, no sale nada y no queda fila', async () => {
+    estado = REAL;
+    // Un disparador hace de «el otro envío», que cierra justo antes del apunte de éste: marca sus equipos con el día de la fila.
+    // Corre dentro de la transacción del apunte, así que el ROLLBACK lo deshace también; lo que se prueba es el orden: apuntar y LUEGO volver a mirar.
+    await hub.query(`CREATE OR REPLACE FUNCTION portal.tmc_prueba_carrera() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      INSERT INTO portal.tmc_seguimiento (clave, aviso_enviado, actualizado_por) SELECT unnest(NEW.equipos), NEW.dia, 'otra@example.com'
+        ON CONFLICT (clave) DO UPDATE SET aviso_enviado = EXCLUDED.aviso_enviado;
+      RETURN NEW; END $$`);
+    await hub.query('CREATE TRIGGER tmc_prueba_carrera BEFORE INSERT ON portal.tmc_avisos_envios FOR EACH ROW EXECUTE FUNCTION portal.tmc_prueba_carrera()');
+    try {
+      const res = await enviar();
+      expect([res.status, res.body.error]).toEqual([404, 'tarjeta_no_encontrada']);
+      expect([remitidos, await registro(), await avisados()]).toEqual([[], [], []]);
+    } finally {
+      await hub.query('DROP TRIGGER IF EXISTS tmc_prueba_carrera ON portal.tmc_avisos_envios');
+      await hub.query('DROP FUNCTION IF EXISTS portal.tmc_prueba_carrera()');
+    }
+  });
+
+  it('la carrera de verdad, con dos conexiones: B espera a que A cierre y, al ver sus equipos ya marcados, se deshace: 404, sin correo y sin fila', async () => {
+    estado = REAL;
+    const { rows: [deA] } = await hub.query(
+      `INSERT INTO portal.tmc_avisos_envios (dia, por, modo, clave_cliente, cliente, tramo, equipos, destinatarios, enviado_a, asunto)
+       VALUES ($1, 'a@example.com', 'real', 'cliente ficticio a', 'Cliente Ficticio A', '30', ARRAY['18A00001', '18A00002'], ARRAY['compras@cliente-a.example'], ARRAY['compras@cliente-a.example'], 'Asunto ficticio') RETURNING id`,
+      [HOY],
+    );
+    const a = await hub.connect(); // el cierre de A, sin confirmar todavía
+    try {
+      await a.query('BEGIN');
+      await a.query(`UPDATE portal.tmc_avisos_envios SET estado = 'enviado', message_id = 'msg-de-a', terminado_en = NOW() WHERE id = $1`, [deA.id]);
+      await registrarAvisos(a, ['18A00001', '18A00002'], HOY, { userId: null, email: 'a@example.com' });
+      const b = enviar().then((r) => r);
+      let esperando = false; // B, bloqueado en su INSERT por la fila de A
+      for (let i = 0; !esperando && i < 500; i++) {
+        esperando = (await hub.query(`SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'INSERT INTO portal.tmc_avisos_envios%'`)).rows.length > 0;
+        if (!esperando) await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(esperando).toBe(true);
+      await a.query('COMMIT');
+      const res = await b;
+      expect([res.status, res.body.error]).toEqual([404, 'tarjeta_no_encontrada']);
+      expect([remitidos.length, (await registro()).map((r) => r.estado)]).toEqual([0, ['enviado']]);
+    } finally {
+      await a.query('ROLLBACK').catch(() => undefined); // si ya se confirmó, no hace nada
+      a.release();
+    }
+  });
+
+  it('si el canal revienta, cuenta como sin respuesta: sigue en curso («sin confirmar») y va a Sentry sin el texto del error', async () => {
+    estado = REAL;
+    contestar = async () => {
+      throw new Error('fallo ficticio con token-ficticio');
+    };
+    const res = await enviar();
+    expect([res.status, res.body.estado, (await registro())[0].estado]).toEqual([200, 'sin_confirmar', 'en_curso']);
+    expect(capturados.map((c) => c.contexto)).toEqual([{ endpoint: 'tmc_aviso_remitir', envio: res.body.id }]);
+    expect(JSON.stringify(capturados.map((c) => [String(c.e), c.contexto]))).not.toContain('token-ficticio');
+  });
+
   it('apagado: 409 y no se apunta nada', async () => {
     estado = { modo: 'apagado', motivo: 'sin_valor', buzonPrueba: null };
     const res = await enviar();
@@ -202,6 +266,46 @@ describe('enviar el aviso de una tarjeta', () => {
     contestar = async () => ({ tipo: 'enviado', messageId: 'msg-ficticio-3' });
     expect((await enviar()).body.estado).toBe('enviado');
     expect(await avisados()).toEqual([]); // en prueba nunca se marca
+  });
+
+  it('«Sí salió» en prueba lo da por enviado y no marca nada', async () => {
+    contestar = async () => ({ tipo: 'sin_respuesta' });
+    const { body } = await enviar();
+    await atrasar(3);
+    const si = await resolver(body.id, true);
+    expect([si.status, si.body.estado, await avisados()]).toEqual([200, 'enviado', []]);
+  });
+
+  it('«Sí salió» en real marca SÓLO los equipos apuntados en la fila, con el día de la fila, y nunca echa atrás un aviso más nuevo', async () => {
+    estado = REAL;
+    contestar = async () => ({ tipo: 'sin_respuesta' });
+    const { body } = await enviar();
+    await atrasar(3);
+    await hub.query(`UPDATE portal.tmc_avisos_envios SET dia = $1`, [dia(-2)]); // un envío de hace dos días
+    await enPortal('18A00003', VENCE_EN_10); // entra en la tarjeta después del envío
+    await hub.query(`INSERT INTO portal.tmc_seguimiento (clave, aviso_enviado, actualizado_por) VALUES ('18A00001', $1, 'ficha@example.com')`, [HOY]); // y a uno se le avisó después
+    expect((await resolver(body.id, true)).body.estado).toBe('enviado');
+    expect(await avisados()).toEqual([{ clave: '18A00001', aviso: HOY }, { clave: '18A00002', aviso: dia(-2) }]);
+    // Y el que conserva su aviso más nuevo conserva también su firma: no se reescribe quién lo cambió.
+    expect((await hub.query('SELECT clave, actualizado_por FROM portal.tmc_seguimiento ORDER BY clave')).rows).toEqual([{ clave: '18A00001', actualizado_por: 'ficha@example.com' }, { clave: '18A00002', actualizado_por: 'comercial@example.com' }]);
+  });
+
+  it('una respuesta tardía: si ya se resolvió «No salió», el «enviado» del canal no lo cambia ni marca nada, y queda a la vista en Sentry', async () => {
+    estado = REAL;
+    let soltar: () => void = () => {};
+    const puerta = new Promise<void>((r) => (soltar = r));
+    contestar = async () => {
+      await puerta;
+      return { tipo: 'enviado', messageId: 'msg-tardio' };
+    };
+    const primero = enviar().then((r) => r);
+    for (let i = 0; remitidos.length === 0 && i < 500; i++) await new Promise((r) => setTimeout(r, 10));
+    await atrasar(3);
+    const id = Number((await hub.query('SELECT id FROM portal.tmc_avisos_envios')).rows[0].id);
+    expect((await resolver(id, false)).body.estado).toBe('fallido');
+    soltar();
+    expect([(await primero).body.estado, await avisados()]).toEqual(['fallido', []]);
+    expect(capturados.map((c) => c.contexto)).toEqual([{ endpoint: 'tmc_aviso_enviado_tardio', envio: id, messageId: 'msg-tardio' }]);
   });
 
   it('si la transacción final falla, el correo salió pero queda «sin confirmar» y no se marca nada', async () => {
