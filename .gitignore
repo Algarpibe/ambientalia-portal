@@ -78,3 +78,8 @@ reference/
 # indexados son los de ESTA copia, asi que compartirlo daria respuestas de otro
 # arbol. Cada worktree se reinicializa el suyo.
 .codegraph/
+
+# Equipos en taller (D9 del diseño): el prompt original, la página de Claude (lleva los
+# IDs de las carpetas de Drive) y las fixtures reales llevan datos de clientes. Solo en local.
+apps/equipos-desk2/
+apps/hub-api/src/equipos/nucleo/fixtures-reales/
