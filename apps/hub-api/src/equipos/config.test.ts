@@ -62,6 +62,16 @@ describe('leerConfig: endurecimiento', () => {
     expect(inspect(c, { depth: 10 })).not.toMatch(/PRIVATE KEY|AAA/);
   });
 
+  it('la clave no sale por spread, structuredClone, Object.entries ni util.inspect de la cuenta', () => {
+    const sa = leerConfig(DRIVE).drive!.cuentaServicio;
+    expect(JSON.stringify({ ...sa })).not.toMatch(/PRIVATE KEY|AAA/);
+    expect(JSON.stringify(structuredClone(sa))).not.toMatch(/PRIVATE KEY|AAA/);
+    expect(JSON.stringify(Object.entries(sa))).not.toMatch(/PRIVATE KEY|AAA/);
+    expect(Object.keys(sa)).not.toContain('private_key');
+    expect(inspect(sa)).not.toMatch(/PRIVATE KEY|AAA/);
+    expect(sa.private_key).toContain('PRIVATE KEY');
+  });
+
   it('una clave con los saltos de línea escapados dos veces se normaliza', () => {
     const doble = JSON.stringify({ client_email: 'sa@ficticio.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\\nAAA\\n-----END PRIVATE KEY-----\\n' });
     expect(leerConfig({ ...DRIVE, EQUIPOS_GOOGLE_CUENTA_SERVICIO: doble }).drive?.cuentaServicio.private_key).toBe('-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n');

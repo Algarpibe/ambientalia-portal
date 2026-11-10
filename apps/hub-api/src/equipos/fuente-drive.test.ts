@@ -103,6 +103,33 @@ describe('fuenteDrive', () => {
   });
 });
 
+describe('fuenteDrive: validación de carpetas y copia sin id', () => {
+  it('una carpeta con forma no válida se rechaza al construir, sin repetir el valor', () => {
+    const malo = "x' or name contains 'y";
+    for (const cfg of [
+      { ...CFG, carpetaTemporalOcr: malo },
+      { ...CFG, carpetas: { ...CFG.carpetas, entradas: malo } },
+      { ...CFG, carpetas: { ...CFG.carpetas, salidasGeneradas: malo } },
+      { ...CFG, carpetas: { ...CFG.carpetas, salidasEscaneadas: malo } },
+    ]) {
+      let msg = '';
+      try { fuenteDrive(cfg); } catch (e) { msg = (e as Error).message; }
+      expect(msg).not.toBe('');
+      expect(msg).not.toContain(malo);
+    }
+  });
+
+  it('si la copia no devuelve id, no se intenta borrar "undefined", no se cuenta y falla con texto fijo', async () => {
+    const g = googleFalso({ copiar: () => J({}) });
+    const d = fuenteDrive(CFG, { fetch: g.f, esperar: sinPausa });
+    const e = await d.textoPdf('S1').catch((x) => x);
+    expect(e).toBeInstanceOf(Error);
+    expect(motivoDrive(e)).toBe('error inesperado');
+    expect(g.llamadas.some((l) => l.includes('undefined') || l.startsWith('DELETE'))).toBe(false);
+    expect(d.copiasSinBorrar()).toBe(0);
+  });
+});
+
 describe('fuenteDrive: copias del OCR y reintentos', () => {
   it('la copia NO se reintenta ante un 503 (no es idempotente) y no hay nada que borrar', async () => {
     const g = googleFalso({ copiar: () => new Response('x', { status: 503 }) });

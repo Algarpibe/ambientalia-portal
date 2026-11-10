@@ -31,6 +31,9 @@ export const RESERVA_POR_DEFECTO = 'comercial@ambientalia.com.co';
 /** Solo salen correos a este dominio (la barrera de n8n dice lo mismo). */
 export const DOMINIO_ALERTA = '@ambientalia.com.co';
 
+/** Una dirección de correo del dominio de alertas: una sola arroba, sin espacios. */
+export const DIRECCION_ALERTA = /^[^\s@]+@ambientalia\.com\.co$/;
+
 export interface ConfigAlerta {
   url: string;
   token: string;
@@ -72,7 +75,9 @@ function cuenta(v: string | undefined): CuentaServicioGoogle | null {
     // Saltos de línea escapados dos veces (\n literal) pasan a ser reales.
     const clave = j.private_key.replace(/\\n/g, '\n');
     if (!clave.includes('PRIVATE KEY')) return null;
-    const sa: CuentaServicioGoogle = { client_email: j.client_email, private_key: clave };
+    const sa = { client_email: j.client_email } as CuentaServicioGoogle;
+    // No enumerable: ni el spread, ni structuredClone, ni Object.entries la copian; sigue legible como `sa.private_key`.
+    Object.defineProperty(sa, 'private_key', { value: clave, enumerable: false });
     // La clave no sale por JSON.stringify ni por util.inspect.
     const oculto = { client_email: j.client_email, private_key: '[oculta]' };
     Object.defineProperty(sa, 'toJSON', { value: () => oculto, enumerable: false });
@@ -105,6 +110,6 @@ export function leerConfig(env: Entorno = entornoDelProceso()): ConfigEquipos {
     faltaDrive,
     horaDiaria: HORA.test(hora) ? hora : HORA_POR_DEFECTO,
     alerta: esUrl(url) && esToken(token) ? { url, token } : null,
-    reserva: /^[^\s@]+@ambientalia\.com\.co$/.test(reserva) ? reserva : RESERVA_POR_DEFECTO,
+    reserva: DIRECCION_ALERTA.test(reserva) ? reserva : RESERVA_POR_DEFECTO,
   };
 }

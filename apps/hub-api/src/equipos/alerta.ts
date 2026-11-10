@@ -7,7 +7,7 @@
  * ⚠️ El token no sale nunca: ni en el registro ni en el error que se guarda
  * (`alerta_ultimo_error`), que además se corta.
  */
-import { DOMINIO_ALERTA, type ConfigAlerta } from './config.js';
+import { DIRECCION_ALERTA, type ConfigAlerta } from './config.js';
 
 /** La cabecera del token: la credencial «Header Auth» del Webhook de n8n la comprueba. */
 export const CABECERA_TOKEN = 'X-Equipos-Alerta-Token';
@@ -30,7 +30,7 @@ type Red = (url: string, init: RequestInit) => Promise<Response>;
 
 /** Los correos del dominio, sin repetir; si no queda ninguno, la dirección de reserva. */
 export function destinatarios(correos: readonly string[], reserva: string): string[] {
-  const del = [...new Set(correos.map((c) => c.trim().toLowerCase()).filter((c) => c.endsWith(DOMINIO_ALERTA) && !/\s/.test(c)))];
+  const del = [...new Set(correos.map((c) => c.trim().toLowerCase()).filter((c) => DIRECCION_ALERTA.test(c)))];
   return del.length ? del.sort() : [reserva];
 }
 

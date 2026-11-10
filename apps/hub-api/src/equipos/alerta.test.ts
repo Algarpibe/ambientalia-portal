@@ -10,6 +10,8 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 describe('destinatarios', () => {
   it('solo el dominio, sin repetir y en minúsculas', () =>
     expect(destinatarios(['B@ambientalia.com.co', 'b@ambientalia.com.co', 'x@otro.com', 'a@ambientalia.com.co'], 'r@ambientalia.com.co')).toEqual(['a@ambientalia.com.co', 'b@ambientalia.com.co']));
+  it('rechaza direcciones con más de una arroba o con espacios', () =>
+    expect(destinatarios(['a@b@ambientalia.com.co', 'a b@ambientalia.com.co', ' ok@ambientalia.com.co '], 'r@ambientalia.com.co')).toEqual(['ok@ambientalia.com.co']));
   it('sin ninguno, la dirección de reserva', () => expect(destinatarios(['x@otro.com'], 'comercial@ambientalia.com.co')).toEqual(['comercial@ambientalia.com.co']));
 });
 
@@ -51,6 +53,16 @@ describe('crearCanalAlerta', () => {
   it('el error de n8n se guarda sin el token y cortado', async () => {
     const r = await crearCanalAlerta(CFG, async () => json({ ok: false, error: 'destino fuera del dominio; token tok-secreto-1' }, 422)).enviar(CORREO, 1);
     expect(r).toEqual({ ok: false, error: 'n8n respondió 422: destino fuera del dominio; token [token]' });
+  });
+
+  it('el error guardado se corta a 300 caracteres', async () => {
+    const r = await crearCanalAlerta(CFG, async () => json({ ok: false, error: 'e'.repeat(500) }, 422)).enviar(CORREO, 1);
+    expect(r).toEqual({ ok: false, error: 'n8n respondió 422: ' + 'e'.repeat(300) });
+  });
+
+  it('una respuesta de error que no es JSON (HTML 502) es un fallo clasificado sin repetir el cuerpo', async () => {
+    const r = await crearCanalAlerta(CFG, async () => new Response('<html>Bad Gateway SECRETO</html>', { status: 502, headers: { 'content-type': 'text/html' } })).enviar(CORREO, 1);
+    expect(r).toEqual({ ok: false, error: 'n8n respondió 502' });
   });
 
   it('sin conexión o sin respuesta a tiempo, un error claro', async () => {

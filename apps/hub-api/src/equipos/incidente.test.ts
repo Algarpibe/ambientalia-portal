@@ -21,6 +21,9 @@ describe('decidirIncidente', () => {
     expect(decidirIncidente({ origen: 'boton', ok: false }, abierto(1))).toEqual({ accion: 'contar', fallosProgramados: 1, enviarAlerta: false });
   });
 
+  it('una corrida del botón con el incidente en 2 fallos y sin alerta enviada no avisa', () =>
+    expect(decidirIncidente({ origen: 'boton', ok: false }, abierto(2, null))).toEqual({ accion: 'contar', fallosProgramados: 2, enviarAlerta: false }));
+
   it('se avisa una sola vez por incidente', () =>
     expect(decidirIncidente({ origen: 'programada', ok: false }, abierto(2, '2026-11-10T11:30:00.000Z'))).toEqual({ accion: 'contar', fallosProgramados: 3, enviarAlerta: false }));
 

@@ -118,6 +118,10 @@ export function tokenGoogle(sa: CuentaServicioGoogle, scopes: string[], f: typeo
 }
 
 export function fuenteDrive(cfg: ConfigDrive, o: OpcionesDrive = {}): FuenteDrive {
+  // Defensa en profundidad: estos ids van dentro de consultas `q` (limpiarTemporal, listar).
+  for (const id of [cfg.carpetaTemporalOcr, cfg.carpetas.entradas, cfg.carpetas.salidasGeneradas, cfg.carpetas.salidasEscaneadas]) {
+    if (!ID_DRIVE.test(id)) throw new Error('id de carpeta de Drive no válido');
+  }
   const f = o.fetch || fetch;
   const esperar = o.esperar || pausa;
   const gtok = tokenGoogle(cfg.cuentaServicio, ['https://www.googleapis.com/auth/drive'], f);
@@ -177,11 +181,13 @@ export function fuenteDrive(cfg: ConfigDrive, o: OpcionesDrive = {}): FuenteDriv
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mimeType: 'application/vnd.google-apps.document', name: PREFIJO_COPIA_OCR + id, parents: [cfg.carpetaTemporalOcr] }),
-    }, 1)).json()) as { id: string };
+    }, 1)).json()) as { id?: string };
+    const copiaId = c.id;
+    if (typeof copiaId !== 'string' || !copiaId) throw new Error('Drive no devolvió el id de la copia');
     try {
-      return await (await gget(D + '/files/' + encodeURIComponent(c.id) + '/export?mimeType=text/plain')).text();
+      return await (await gget(D + '/files/' + encodeURIComponent(copiaId) + '/export?mimeType=text/plain')).text();
     } finally {
-      await borrar(c.id).catch(() => {
+      await borrar(copiaId).catch(() => {
         sinBorrar++;
       });
     }
