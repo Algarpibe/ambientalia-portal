@@ -29,6 +29,14 @@ export const MINUTOS_ABANDONO = 180;
 /** Se lanza al cerrar una corrida que ya no está en curso (abandonada y quizá sustituida por otra). */
 const CORRIDA_CERRADA = 'corrida ya cerrada o abandonada';
 
+/** La corrida ya no estaba en curso (abandonada o cerrada) al intentar cerrarla: su resultado se descarta. */
+export class CorridaCerrada extends Error {
+  constructor() {
+    super(CORRIDA_CERRADA);
+    this.name = 'CorridaCerrada';
+  }
+}
+
 export interface CorridaBuena {
   foto: Foto;
   exits: CacheEscaneos;
@@ -165,7 +173,7 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
             WHERE id = $1 AND en_curso`,
           [id, JSON.stringify(r.avisos), JSON.stringify(r.conteos)],
         );
-        if (cierre.rowCount !== 1) throw new Error(CORRIDA_CERRADA); // el ROLLBACK descarta también foto y cachés
+        if (cierre.rowCount !== 1) throw new CorridaCerrada(); // el ROLLBACK descarta también foto y cachés
       });
     },
 
@@ -173,7 +181,7 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
       await enTransaccion(db, async (c) => {
         if (exits) await guardarEstado(c, 'exits', exits);
         const cierre = await c.query(`UPDATE portal.equipos_ejecucion SET en_curso = NULL, fin = now(), ok = false, causa = $2 WHERE id = $1 AND en_curso`, [id, causa.slice(0, 300)]);
-        if (cierre.rowCount !== 1) throw new Error(CORRIDA_CERRADA);
+        if (cierre.rowCount !== 1) throw new CorridaCerrada();
       });
     },
 

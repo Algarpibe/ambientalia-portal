@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { crearServicioEquipos, vigilarFuentes, type FuentesCorrida } from './servicio.js';
 import { ErrorDrive, type FuenteDrive } from './fuente-drive.js';
 import { SinDesk2, type FuenteDesk2 } from './fuente-desk2.js';
-import { CV, EST, type CacheEscaneos, type Foto } from './nucleo/index.js';
-import type { RepoEquipos, CorridaBuena } from './repo.js';
+import { CV, EST, type CacheEscaneos, type Foto, type RemisionEntrada } from './nucleo/index.js';
+import { CorridaCerrada, type RepoEquipos, type CorridaBuena } from './repo.js';
 import type { Corrida, Incidente } from './contrato.js';
 import type { DecisionIncidente } from './incidente.js';
 import type { CanalAlerta, CorreoAlerta } from './alerta.js';
@@ -17,6 +17,7 @@ function repoEnMemoria() {
   const s = {
     foto: FOTO_VIEJA as Foto | null,
     exits: null as CacheEscaneos | null,
+    cacheEnt: {} as Record<string, RemisionEntrada>,
     enCurso: false,
     corridas: [] as Corrida[],
     incidente: null as Incidente | null,
@@ -36,8 +37,8 @@ function repoEnMemoria() {
       s.corridas.push({ id: ++n, origen, inicio: '', fin: null, enCurso: true, ok: null, causa: null, avisos: [], conteos: null });
       return n;
     },
-    leerCaches: async () => ({ exits: s.exits, ent: {} }),
-    terminarBien: async (id, r: CorridaBuena) => { s.foto = r.foto; s.exits = r.exits; cerrar(id, true, null, { avisos: r.avisos, conteos: r.conteos }); },
+    leerCaches: async () => ({ exits: s.exits, ent: s.cacheEnt }),
+    terminarBien: async (id, r: CorridaBuena) => { s.foto = r.foto; s.exits = r.exits; s.cacheEnt = r.ent; cerrar(id, true, null, { avisos: r.avisos, conteos: r.conteos }); },
     terminarMal: async (id, causa, exits) => { if (exits) s.exits = exits; cerrar(id, false, causa); },
     leerFoto: async () => s.foto,
     leerAjustes: async () => ({}),
@@ -305,5 +306,157 @@ describe('vigilarFuentes', () => {
       expect(v.fallo()).toBe('drive: HTTP ' + status);
       expect(v.pdfsSinTexto()).toEqual([]);
     }
+  });
+});
+
+const ticketAbierto = async () => [
+  { id: 'T1', ticketNumber: '1401', status: 'Open', statusType: 'Open', createdTime: '2026-11-02T10:00:00.000Z', modifiedTime: '2026-11-03T10:00:00.000Z', cf: { cf_serial: '18A90001' } },
+];
+
+describe('fallos de fuente a mitad de la corrida', () => {
+  it('si fallan los comentarios de un ticket (Desk 2.0), la corrida falla con «desk2: …» y no toca la foto', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes({ tickets: ticketAbierto });
+    f.desk2.comentarios = async () => { throw Object.assign(new Error('pg: host secreto'), { code: '42501' }); };
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'desk2: consulta rechazada (permisos o esquema)' });
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
+
+  it('si falla la remisión de entrada (Drive 5xx), la corrida falla con «drive: …»', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.remisionEntrada = async () => { throw new ErrorDrive(500); };
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 500' });
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
+});
+
+describe('alerta según el origen', () => {
+  it('un fallo lanzado con el botón nunca envía la alerta, ni repetido', async () => {
+    const { repo, s } = repoEnMemoria();
+    const { canal, enviados } = canalFalso();
+    const srv = crear(() => fuentes({ sonda: async () => { throw new SinDesk2(); } }), repo, canal);
+    for (let i = 0; i < 3; i++) await srv.ejecutar('boton', null);
+    expect(enviados).toHaveLength(0);
+    expect(s.incidente?.fallosProgramados ?? 0).toBe(0);
+  });
+});
+
+describe('corrida abandonada (el repositorio rechaza el cierre)', () => {
+  const abandonar = (repo: RepoEquipos, que: 'bien' | 'mal' | 'ambas'): RepoEquipos => ({
+    ...repo,
+    terminarBien: que === 'mal' ? repo.terminarBien : async () => { throw new CorridaCerrada(); },
+    terminarMal: que === 'bien' ? repo.terminarMal : async () => { throw new CorridaCerrada(); },
+  });
+  const caida = () => fuentes({ sonda: async () => { throw new SinDesk2(); } });
+
+  it('una corrida buena que termina tarde se descarta: ni incidente ni alerta', async () => {
+    const { repo, s } = repoEnMemoria();
+    const { canal, enviados } = canalFalso();
+    const srv = crear(() => fuentes(), abandonar(repo, 'bien'), canal);
+    expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'error', causa: 'abandonada' });
+    expect(s.incidente).toBeNull();
+    expect(enviados).toHaveLength(0);
+  });
+
+  it('una corrida fallida que termina tarde no cuenta para el incidente aunque sea programada', async () => {
+    const { repo, s } = repoEnMemoria();
+    const { canal, enviados } = canalFalso();
+    const r = abandonar(repo, 'mal');
+    const srv = crear(caida, r, canal);
+    expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'error', causa: 'abandonada' });
+    s.enCurso = false;
+    expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'error', causa: 'abandonada' });
+    expect(s.incidente).toBeNull();
+    expect(enviados).toHaveLength(0);
+  });
+});
+
+describe('robustez del candado y del registro', () => {
+  it('si el repositorio falla al cerrar la corrida, el candado del proceso se suelta', async () => {
+    const { repo } = repoEnMemoria();
+    const roto: RepoEquipos = { ...repo, terminarBien: async () => { throw new Error('pg caído'); }, terminarMal: async () => { throw new Error('pg caído'); } };
+    const srv = crear(() => fuentes(), roto);
+    expect(await srv.ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'interno: no se pudo guardar' });
+    expect(srv.actualizando()).toBe(false);
+  });
+
+  it('un error inesperado se registra con su nombre y código, nunca con el mensaje', async () => {
+    const { repo } = repoEnMemoria();
+    const roto: RepoEquipos = { ...repo, leerCaches: async () => { throw Object.assign(new Error('pg: host secreto'), { code: 'ECONNRESET' }); } };
+    const logs: string[] = [];
+    const srv = crearServicioEquipos({ repo: roto, fuentes: () => fuentes(), canal: canalFalso().canal, reserva: 'x@ambientalia.com.co', log: (t) => logs.push(t), hoy: () => '2026-11-10' });
+    expect(await srv.ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'interno: error inesperado' });
+    const texto = logs.join('\n');
+    expect(texto).toMatch(/Error/);
+    expect(texto).toMatch(/ECONNRESET/);
+    expect(texto).not.toMatch(/secreto/);
+  });
+
+  it('lanzar no deja una promesa rechazada sin atender si el registro del incidente revienta', async () => {
+    const { repo } = repoEnMemoria();
+    const srv = crearServicioEquipos({ repo, fuentes: () => fuentes(), canal: canalFalso().canal, reserva: 'x@ambientalia.com.co', log: () => { throw new Error('log roto'); }, hoy: () => '2026-11-10' });
+    const sin: unknown[] = [];
+    const h = (e: unknown) => sin.push(e);
+    process.on('unhandledRejection', h);
+    expect(await srv.lanzar('boton', null)).toBe('iniciada');
+    await new Promise((r) => setTimeout(r, 20));
+    process.off('unhandledRejection', h);
+    expect(sin).toEqual([]);
+  });
+});
+
+describe('ilegibles', () => {
+  it('tras añadir los PDF sin texto, siguen de más reciente a más antiguo', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S1') throw new ErrorDrive(400); return ''; } });
+    await crear(() => f, repo).ejecutar('boton', null);
+    const d = (s.foto?.ilegibles ?? []).map((x) => x.d);
+    expect(d).toEqual([...d].sort((a, b) => b.localeCompare(a)));
+    expect(d.length).toBeGreaterThan(1);
+  });
+});
+
+describe('una remisión de entrada que Drive no puede exportar (A9 extendido)', () => {
+  const entradaRota = (rota: Set<string>, status = 400) => (id: string) => {
+    if (rota.has(id)) throw new ErrorDrive(status);
+    return Promise.resolve('');
+  };
+
+  it('4xx en UNA: la corrida sigue, la entrada figura, hay aviso sin secretos y no entra en la caché', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']))(id);
+    const r = await crear(() => f, repo).ejecutar('boton', null);
+    expect(r.estado).toBe('ok');
+    expect(s.foto?.rows.map((x) => x.sn)).toContain('18A90001');
+    expect(r.estado === 'ok' && r.avisos.some((a) => a === 'Remisión de entrada 18A90001: Drive HTTP 400')).toBe(true);
+    expect(s.cacheEnt?.E1).toBeUndefined();
+  });
+
+  it('en la siguiente corrida, arreglada la remisión, se lee y se guarda en la caché', async () => {
+    const { repo, s } = repoEnMemoria();
+    const rotas = new Set(['E1']);
+    const f = () => { const x = fuentes(); x.drive.remisionEntrada = async (id) => entradaRota(rotas)(id); return x; };
+    await crear(f, repo).ejecutar('boton', null);
+    rotas.clear();
+    await crear(f, repo).ejecutar('boton', null);
+    expect(s.cacheEnt?.E1).toBeDefined();
+  });
+
+  it('2 o más fallan y ninguna sale: es de Drive y la corrida falla', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.entradas = async () => [{ id: 'E1', title: '261101 - CLIENTE A - 18A90001' }, { id: 'E3', title: '261102 - CLIENTE D - 18A90003' }];
+    f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1', 'E3']), 403)(id);
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo leer ninguna remisión de entrada (HTTP 403)' });
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
+
+  it('un 5xx en una sola hace fallar la corrida', async () => {
+    const { repo } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']), 503)(id);
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 503' });
   });
 });
