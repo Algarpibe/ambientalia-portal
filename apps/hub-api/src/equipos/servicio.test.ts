@@ -409,7 +409,7 @@ describe('robustez del candado y del registro', () => {
 describe('ilegibles', () => {
   it('tras añadir los PDF sin texto, siguen de más reciente a más antiguo', async () => {
     const { repo, s } = repoEnMemoria();
-    const f = fuentes({ textoPdf: async (id) => { if (id === 'S1') throw new ErrorDrive(400); return ''; } });
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(400); return ''; } });
     await crear(() => f, repo).ejecutar('boton', null);
     const d = (s.foto?.ilegibles ?? []).map((x) => x.d);
     expect(d).toEqual([...d].sort((a, b) => b.localeCompare(a)));

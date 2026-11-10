@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import type { RepoEquipos } from './repo.js';
+import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
-import type { AjusteFirmado, Corrida, LlavesUsuario, UsuarioConLlaves } from './contrato.js';
+import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, UsuarioConLlaves } from './contrato.js';
 
 // Las rutas con Express de verdad: guardas de sesión y de app, llaves, 403/400/404/409/503.
 // El SQL lo cubre repo.db.test.ts; aquí el repositorio y el servicio son dobles. La
@@ -26,38 +26,48 @@ vi.mock('../db.js', () => ({
 const { createEquiposTallerRouter } = await import('./router.js');
 
 let seq = 0;
-function token(o: { role?: string; apps?: string[] } = {}): { auth: string; userId: string } {
+function token(o: { role?: string; apps?: string[] } = {}): { auth: string; userId: string; email: string } {
   const userId = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
   usuarios.set(userId, { role: o.role ?? 'reader', apps: o.apps ?? ['equipos-taller'] });
-  return { auth: 'Bearer ' + jwt.sign({ sub: `u${seq}@ambientalia.com.co`, user_id: userId, token_version: 0 }, SECRET, { algorithm: 'HS256' }), userId };
+  const email = `u${seq}@ambientalia.com.co`;
+  return { email, auth: 'Bearer ' + jwt.sign({ sub: email, user_id: userId, token_version: 0 }, SECRET, { algorithm: 'HS256' }), userId };
 }
 
 const llaves = new Map<string, LlavesUsuario>();
 const guardados: { clave: string; t: string; m: string; userId: string | null; usuario: string }[] = [];
 let lanzar: ServicioEquipos['lanzar'] = async () => 'iniciada';
 let configurado = true;
+let servicioOcupado = false;
+let fallaLeer = false;
+let incidente: Incidente | null = null;
+const borrados: string[] = [];
 let enCurso: Corrida | null = null;
 let terminada: Corrida | null = null;
 const repo = {
   leerFoto: async () => null,
-  leerAjustes: async () => ({}),
+  leerAjustes: async () => {
+    if (fallaLeer) throw new Error('connection to server at "db.interno" failed: password=secreto');
+    return {};
+  },
   ultimaCorrida: async () => enCurso ?? terminada,
   ultimaCorridaTerminada: async () => terminada,
   ultimaCorridaBuena: async () => null,
-  incidenteAbierto: async () => null,
+  incidenteAbierto: async () => incidente,
   llavesDe: async (userId: string | null) => llaves.get(String(userId)) ?? { editaAjustes: false, recibeAlertas: false },
   guardarAjuste: async (clave: string, a: { t: AjusteFirmado['t']; m: string }, f: { userId: string | null; usuario: string }): Promise<AjusteFirmado> => {
     guardados.push({ clave, ...a, ...f });
     return { ...a, at: '2026-11-10', usuario: f.usuario, creadoEn: '2026-11-10T15:00:00.000Z' };
   },
-  borrarAjuste: async () => {},
+  borrarAjuste: async (clave: string) => {
+    borrados.push(clave);
+  },
   listarLlaves: async (): Promise<UsuarioConLlaves[]> => [{ userId: 'u', nombre: 'Persona Ficticia', email: 'p@ambientalia.com.co', esAdmin: false, editaAjustes: true, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null }],
   guardarLlaves: async (userId: string, l: LlavesUsuario, por: string): Promise<UsuarioConLlaves | null> =>
     userId.endsWith('999999999999') ? null : { userId, nombre: 'X', email: 'x@ambientalia.com.co', esAdmin: false, ...l, actualizadoPor: por, actualizadoEn: '2026-11-10T15:00:00.000Z' },
 } as unknown as RepoEquipos;
 const servicio = {
   configurado: () => configurado,
-  actualizando: () => false,
+  actualizando: () => servicioOcupado,
   lanzar: (o: 'programada' | 'boton', u: string | null) => lanzar(o, u),
 } as unknown as ServicioEquipos;
 
@@ -76,6 +86,10 @@ beforeEach(() => {
   configurado = true;
   enCurso = null;
   terminada = null;
+  servicioOcupado = false;
+  fallaLeer = false;
+  incidente = null;
+  borrados.length = 0;
 });
 
 describe('guardas', () => {
@@ -98,14 +112,44 @@ describe('GET /equipos-taller', () => {
   });
 });
 
+describe('GET: otros caminos', () => {
+  it('sin configurar, lo dice', async () => {
+    configurado = false;
+    expect((await request(app()).get(B).set('Authorization', token().auth)).body.configurado).toBe(false);
+  });
+  it('actualizando si el servicio de este proceso está corriendo', async () => {
+    servicioOcupado = true;
+    expect((await request(app()).get(B).set('Authorization', token().auth)).body.actualizando).toBe(true);
+  });
+  it('un fallo del repositorio es un 500 genérico, sin detalles', async () => {
+    fallaLeer = true;
+    const r = await request(app()).get(B).set('Authorization', token().auth);
+    expect([r.status, r.body]).toEqual([500, { error: 'internal error' }]);
+    expect(r.text).not.toMatch(/secreto|db.interno/);
+  });
+  it('el error de la alerta solo lo ve un admin', async () => {
+    incidente = { id: 1, abiertoEn: '2026-11-10T11:30:00.000Z', fallosProgramados: 2, alertaEnviadaEn: null, alertaUltimoError: 'n8n: HTTP 500' };
+    const normal = await request(app()).get(B).set('Authorization', token().auth);
+    const admin = await request(app()).get(B).set('Authorization', token({ role: 'admin' }).auth);
+    expect(normal.body.incidente).toMatchObject({ id: 1, fallosProgramados: 2, alertaUltimoError: null });
+    expect(admin.body.incidente.alertaUltimoError).toBe('n8n: HTTP 500');
+  });
+});
+
 describe('aviso de foto vieja con una corrida en curso', () => {
-  const corrida = (o: Partial<Corrida>): Corrida => ({ id: 1, origen: 'programada', inicio: '2026-11-10T11:30:00.000Z', fin: null, enCurso: false, ok: null, causa: null, avisos: [], conteos: null, ...o });
+  const corrida = (o: Partial<Corrida>): Corrida => ({ id: 1, origen: 'programada', inicio: new Date().toISOString(), fin: null, enCurso: false, ok: null, causa: null, avisos: [], conteos: null, ...o });
   it('ultima es la última TERMINADA (fallida) aunque haya otra en curso, y actualizando sigue siendo true', async () => {
     terminada = corrida({ id: 1, fin: '2026-11-10T11:35:00.000Z', ok: false, causa: 'drive: HTTP 403' });
     enCurso = corrida({ id: 2, enCurso: true });
     const r = await request(app()).get(B).set('Authorization', token().auth);
     expect(r.body.actualizando).toBe(true);
     expect(r.body.ultima).toMatchObject({ id: 1, ok: false, causa: 'drive: HTTP 403', enCurso: false });
+  });
+  it('una corrida en curso abandonada (más vieja que el plazo) ya no cuenta como «actualizando»', async () => {
+    enCurso = corrida({ id: 2, enCurso: true, inicio: new Date(Date.now() - (MINUTOS_ABANDONO + 1) * 60_000).toISOString() });
+    expect((await request(app()).get(B).set('Authorization', token().auth)).body.actualizando).toBe(false);
+    enCurso = corrida({ id: 2, enCurso: true, inicio: new Date(Date.now() - (MINUTOS_ABANDONO - 5) * 60_000).toISOString() });
+    expect((await request(app()).get(B).set('Authorization', token().auth)).body.actualizando).toBe(true);
   });
 });
 
@@ -144,6 +188,17 @@ describe('ajustes', () => {
     expect(r.body.ajuste).toMatchObject({ t: 'out', m: 'recogido el 10 nov', usuario: expect.stringMatching(/@ambientalia\.com\.co$/) });
     expect(guardados[0]).toMatchObject({ clave: '1BA90417|2026-11-01', userId: t.userId });
   });
+  it('400 si m no es texto', async () => {
+    const a = token({ role: 'admin' }).auth;
+    expect((await put(a, '1BA90417|2026-11-01', { t: 'in', m: 5 })).status).toBe(400);
+    expect((await put(a, '1BA90417|2026-11-01', { t: 'in', m: { x: 1 } })).status).toBe(400);
+    expect(guardados).toEqual([]);
+  });
+  it('ignora el usuario o userId que mande el cliente: firma con el del token', async () => {
+    const t = token({ role: 'admin' });
+    await put(t.auth, '1BA90417|2026-11-01', { t: 'in', usuario: 'otro@ambientalia.com.co', userId: 'otro' });
+    expect(guardados[0]).toMatchObject({ userId: t.userId, usuario: t.email });
+  });
   it('un admin puede sin la llave', async () => expect((await put(token({ role: 'admin' }).auth, 'pdf:Abcdefghij_-12', { t: 'pdf' })).status).toBe(200));
   it('400 si la clave o el tipo no valen', async () => {
     const a = token({ role: 'admin' }).auth;
@@ -155,6 +210,11 @@ describe('ajustes', () => {
     const t = token();
     llaves.set(t.userId, { editaAjustes: true, recibeAlertas: false });
     expect((await request(app()).delete(B + '/ajustes/' + encodeURIComponent("x' OR 1=1")).set('Authorization', t.auth)).status).toBe(400);
+  });
+  it('DELETE pasa la clave ya decodificada, y un admin puede sin la llave', async () => {
+    const r = await request(app()).delete(B + '/ajustes/' + encodeURIComponent('1BA90417|2026-11-01')).set('Authorization', token({ role: 'admin' }).auth);
+    expect(r.status).toBe(204);
+    expect(borrados).toEqual(['1BA90417|2026-11-01']);
   });
   it('DELETE con la llave: 204', async () => {
     const t = token();
@@ -173,14 +233,14 @@ describe('llaves', () => {
     expect([r.status, r.body[0].nombre]).toEqual([200, 'Persona Ficticia']);
   });
   it('PUT firma con el admin; 400 si no son booleanos; 404 si el usuario no existe', async () => {
-    const a = token({ role: 'admin' }).auth;
+    const adm = token({ role: 'admin' });
+    const a = adm.auth;
     const r = await request(app()).put(B + '/llaves/00000000-0000-4000-8000-000000000001').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: false });
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ editaAjustes: true, recibeAlertas: false, actualizadoPor: expect.stringMatching(/@ambientalia\.com\.co$/) });
+    expect(r.body).toMatchObject({ editaAjustes: true, recibeAlertas: false, actualizadoPor: adm.email });
     expect((await request(app()).put(B + '/llaves/00000000-0000-4000-8000-000000000001').set('Authorization', a).send({ editaAjustes: 'sí', recibeAlertas: false })).status).toBe(400);
     const mala = await request(app()).put(B + '/llaves/no-es-uuid').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: true });
     expect([mala.status, mala.body.message]).toEqual([400, 'Llaves no válidas']);
-    expect((await request(app()).put(B + '/llaves/no-es-uuid').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: true })).status).toBe(400);
     expect((await request(app()).put(B + '/llaves/00000000-0000-4000-8000-999999999999').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: true })).status).toBe(404);
   });
 });

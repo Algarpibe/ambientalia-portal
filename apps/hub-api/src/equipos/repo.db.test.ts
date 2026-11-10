@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba } from '../test-db/harness.js';
-import { crearRepoEquipos, type RepoEquipos } from './repo.js';
+import { CorridaCerrada, crearRepoEquipos, type RepoEquipos } from './repo.js';
 import { CV, EST, type Foto } from './nucleo/index.js';
 
 // La migración 071 y el repositorio contra Postgres real (Testcontainers). Todo ficticio:
@@ -97,7 +97,7 @@ describe('corridas', () => {
 
     it('terminarBien lanza y no toca foto, cachés ni la fila abandonada', async () => {
       const a = await abandonadaYNueva();
-      await expect(repo.terminarBien(a, { foto: FOTO, exits: EXITS, ent: {}, avisos: [], conteos: {} })).rejects.toThrow('corrida ya cerrada o abandonada');
+      await expect(repo.terminarBien(a, { foto: FOTO, exits: EXITS, ent: {}, avisos: [], conteos: {} })).rejects.toBeInstanceOf(CorridaCerrada);
       expect(await repo.leerFoto()).toEqual(FOTO_B);
       expect(await repo.leerCaches()).toEqual({ exits: EXITS_B, ent: { N: { eq: 'B', srv: '', k: '' } } });
       expect(await filaA(a)).toEqual({ ok: false, causa: 'abandonada', en_curso: null });
@@ -105,7 +105,7 @@ describe('corridas', () => {
 
     it('terminarMal lanza y no pisa exits ni la fila abandonada', async () => {
       const a = await abandonadaYNueva();
-      await expect(repo.terminarMal(a, 'drive: HTTP 403', EXITS)).rejects.toThrow('corrida ya cerrada o abandonada');
+      await expect(repo.terminarMal(a, 'drive: HTTP 403', EXITS)).rejects.toBeInstanceOf(CorridaCerrada);
       expect((await repo.leerCaches()).exits).toEqual(EXITS_B);
       expect(await filaA(a)).toEqual({ ok: false, causa: 'abandonada', en_curso: null });
     });
@@ -191,6 +191,26 @@ describe('llaves', () => {
     await usuario('baja@equipos.test', { app: true, status: 'inactive' });
     const l = (await repo.listarLlaves()).filter((x) => x.email.endsWith('@equipos.test'));
     expect(l.map((x) => [x.email, x.esAdmin])).toEqual([['admin@equipos.test', true], ['con-app@equipos.test', false]]);
+  });
+
+  it('guardarLlaves: solo a un usuario activo que sea admin o tenga la app; si no, null', async () => {
+    const llaves = { editaAjustes: true, recibeAlertas: true };
+    const sinApp = await usuario('sin-app@equipos.test');
+    const baja = await usuario('baja@equipos.test', { app: true, status: 'inactive' });
+    const admin = await usuario('admin@equipos.test', { role: 'admin' });
+    expect(await repo.guardarLlaves(sinApp, llaves, 'x')).toBeNull();
+    expect(await repo.guardarLlaves(baja, llaves, 'x')).toBeNull();
+    expect(await repo.guardarLlaves(admin, llaves, 'x')).toMatchObject({ userId: admin, esAdmin: true });
+    expect((await db.query('SELECT count(*)::int AS n FROM portal.equipos_llaves WHERE user_id = ANY($1::uuid[])', [[sinApp, baja]])).rows[0].n).toBe(0);
+  });
+
+  it('los correos de la alerta: dejan de llegar a quien perdió la app; un admin los recibe sin tenerla', async () => {
+    const a = await usuario('recibe@equipos.test', { app: true });
+    const perdio = await usuario('perdio@equipos.test', { app: true });
+    const admin = await usuario('admin@equipos.test', { role: 'admin' });
+    for (const u of [a, perdio, admin]) await repo.guardarLlaves(u, { editaAjustes: false, recibeAlertas: true }, 'x');
+    await db.query('DELETE FROM portal.user_apps WHERE user_id = $1', [perdio]);
+    expect((await repo.correosAlerta()).filter((x) => x.endsWith('@equipos.test'))).toEqual(['admin@equipos.test', 'recibe@equipos.test']);
   });
 
   it('los correos de la alerta: activos con recibe_alertas', async () => {

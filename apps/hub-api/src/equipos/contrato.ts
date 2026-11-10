@@ -58,6 +58,7 @@ export interface RespuestaEquipos {
   actualizando: boolean;
   /** false si falta la configuración de Google Drive. */
   configurado: boolean;
+  /** La última corrida YA TERMINADA (ok o fallida): enCurso es siempre false. La que corre se refleja en `actualizando`. */
   ultima: Corrida | null;
   ultimaBuena: Corrida | null;
   incidente: Incidente | null;

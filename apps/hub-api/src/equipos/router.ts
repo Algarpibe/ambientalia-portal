@@ -17,7 +17,7 @@ import { Router, type Request, type Response } from 'express';
 import { getPayload, requireApp, requireAuth } from '../auth.js';
 import { captureError } from '../sentry.js';
 import { ajusteValido, APP_ID, claveValida, type RespuestaEquipos } from './contrato.js';
-import type { RepoEquipos } from './repo.js';
+import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
 
 export interface DepsRouter {
@@ -36,6 +36,10 @@ class ErrorRuta extends Error {
     this.cuerpo = cuerpo;
   }
 }
+
+/** Una corrida «en curso» más vieja que el plazo de abandono es una huérfana (el proceso murió): no bloquea. */
+const enCursoVigente = (c: { enCurso: boolean; inicio: string } | null): boolean =>
+  c?.enCurso === true && Date.now() - Date.parse(c.inicio) < MINUTOS_ABANDONO * 60_000;
 
 export function createEquiposTallerRouter(deps: DepsRouter): Router {
   const router = Router();
@@ -80,11 +84,12 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const cuerpo: RespuestaEquipos = {
       snap,
       ajustes,
-      actualizando: deps.servicio.actualizando() || enCurso?.enCurso === true,
+      actualizando: deps.servicio.actualizando() || enCursoVigente(enCurso),
       configurado: deps.servicio.configurado(),
       ultima,
       ultimaBuena,
-      incidente,
+      // El error de la alerta puede traer detalle del webhook: solo lo ve un admin.
+      incidente: incidente && !q.esAdmin ? { ...incidente, alertaUltimoError: null } : incidente,
       permisos: { ...llaves, esAdmin: q.esAdmin, puedeEditar: q.esAdmin || llaves.editaAjustes },
     };
     res.set('Cache-Control', 'no-store').json(cuerpo);
@@ -101,8 +106,8 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const q = await exigirEditar(req);
     const clave = String(req.params.clave);
     const b = (req.body ?? {}) as { t?: unknown; m?: unknown };
-    if (!ajusteValido(clave, b.t)) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Ajuste no válido' });
-    const ajuste = await deps.repo.guardarAjuste(clave, { t: b.t, m: String(b.m ?? '').slice(0, 300) }, { userId: q.userId, usuario: q.email });
+    if (!ajusteValido(clave, b.t) || (b.m !== undefined && typeof b.m !== 'string')) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Ajuste no válido' });
+    const ajuste = await deps.repo.guardarAjuste(clave, { t: b.t, m: (b.m ?? '').slice(0, 300) }, { userId: q.userId, usuario: q.email });
     res.json({ ajuste });
   }));
 

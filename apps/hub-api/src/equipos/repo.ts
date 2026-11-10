@@ -252,7 +252,9 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
     async correosAlerta() {
       const { rows } = await db.query(
         `SELECT u.email FROM portal.equipos_llaves l JOIN portal.users u ON u.id = l.user_id
-          WHERE l.recibe_alertas AND u.status = 'active' ORDER BY lower(u.email)`,
+          WHERE l.recibe_alertas AND u.status = 'active'
+            AND (u.role = 'admin' OR EXISTS (SELECT 1 FROM portal.user_apps a WHERE a.user_id = u.id AND a.app_id = 'equipos-taller'))
+          ORDER BY lower(u.email)`,
       );
       return rows.map((x: Fila) => String(x.email));
     },
@@ -274,7 +276,12 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
     },
 
     async guardarLlaves(userId, l, actualizadoPor) {
-      const existe = await db.query('SELECT 1 FROM portal.users WHERE id = $1::uuid', [userId]);
+      // Solo a quien hoy puede entrar a la app: activo y (admin o con la app asignada).
+      const existe = await db.query(
+        `SELECT 1 FROM portal.users u WHERE u.id = $1::uuid AND u.status = 'active'
+            AND (u.role = 'admin' OR EXISTS (SELECT 1 FROM portal.user_apps a WHERE a.user_id = u.id AND a.app_id = 'equipos-taller'))`,
+        [userId],
+      );
       if (!existe.rows.length) return null;
       await db.query(
         `INSERT INTO portal.equipos_llaves (user_id, edita_ajustes, recibe_alertas, actualizado_por, actualizado_en)
