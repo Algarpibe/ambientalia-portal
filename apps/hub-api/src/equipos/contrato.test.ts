@@ -9,6 +9,11 @@ describe('claves y tipos de ajuste', () => {
     expect(['1BA90417|2026-11-01', '*1BA90417', 'pdf:Abcdefghij_-12'].every(claveValida)).toBe(true);
     expect(["x' OR 1=1", '1ba90417|2026-11-01', 'pdf:corto', '*AB'].some(claveValida)).toBe(false);
   });
+  it('rechaza fechas imposibles y acepta el 29 de febrero bisiesto', () => {
+    expect(['1BA90417|2026-13-45', '1BA90417|2026-02-30', '1BA90417|2026-00-10', '1BA90417|2026-04-31'].some(claveValida)).toBe(false);
+    expect(claveValida('1BA90417|2028-02-29')).toBe(true);
+    expect(claveValida('1BA90417|2026-02-29')).toBe(false);
+  });
   it('«pdf» solo con una clave «pdf:», y al revés', () => {
     expect(ajusteValido('pdf:Abcdefghij_-12', 'pdf')).toBe(true);
     expect(ajusteValido('pdf:Abcdefghij_-12', 'out')).toBe(false);

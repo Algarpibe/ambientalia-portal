@@ -76,7 +76,13 @@ export interface UsuarioConLlaves extends LlavesUsuario {
 
 const CLAVE = /^(\*[A-Z0-9]{3,20}|[A-Z0-9]{3,20}\|\d{4}-\d{2}-\d{2}|pdf:[A-Za-z0-9_-]{10,80})$/;
 /** Claves de ajuste: «SERIAL|AAAA-MM-DD», «*SERIAL» o «pdf:<idDrive>» (el serial, en clase OCR). */
-export const claveValida = (k: string): boolean => CLAVE.test(k);
+export const claveValida = (k: string): boolean => {
+  if (!CLAVE.test(k)) return false;
+  const f = k.split('|')[1];
+  if (!f) return true;
+  const d = new Date(f + 'T00:00:00Z'); // rechaza 2026-13-45 y 2026-02-30
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === f;
+};
 
 export const TIPOS_AJUSTE: readonly Ajuste['t'][] = ['in', 'out', 'ret', 'pdf'];
 

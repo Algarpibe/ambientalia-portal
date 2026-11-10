@@ -10,7 +10,7 @@
  * Las variables se leen una a una por su nombre: así las ve el detector de
  * `.env.example` (env-example.test.ts, INFRA-537).
  */
-import type { ConfigDrive, CuentaServicioGoogle } from './fuente-drive.js';
+import { ID_DRIVE, type ConfigDrive, type CuentaServicioGoogle } from './fuente-drive.js';
 
 type Entorno = Readonly<Record<string, string | undefined>>;
 
@@ -48,7 +48,6 @@ export interface ConfigEquipos {
   reserva: string;
 }
 
-const ID_DRIVE = /^[A-Za-z0-9_-]{10,100}$/;
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** https, o http sólo hacia un servidor de una sola etiqueta (un servicio de Docker); sin usuario ni clave. Igual que trazabilidad/envio-avisos.ts. */
@@ -69,9 +68,16 @@ const esToken = (v: string | undefined): v is string => v !== undefined && /^[\x
 function cuenta(v: string | undefined): CuentaServicioGoogle | null {
   try {
     const j = JSON.parse(String(v ?? '')) as Partial<CuentaServicioGoogle>;
-    return typeof j.client_email === 'string' && typeof j.private_key === 'string' && j.private_key.includes('PRIVATE KEY')
-      ? { client_email: j.client_email, private_key: j.private_key }
-      : null;
+    if (typeof j.client_email !== 'string' || typeof j.private_key !== 'string') return null;
+    // Saltos de línea escapados dos veces (\n literal) pasan a ser reales.
+    const clave = j.private_key.replace(/\\n/g, '\n');
+    if (!clave.includes('PRIVATE KEY')) return null;
+    const sa: CuentaServicioGoogle = { client_email: j.client_email, private_key: clave };
+    // La clave no sale por JSON.stringify ni por util.inspect.
+    const oculto = { client_email: j.client_email, private_key: '[oculta]' };
+    Object.defineProperty(sa, 'toJSON', { value: () => oculto, enumerable: false });
+    Object.defineProperty(sa, Symbol.for('nodejs.util.inspect.custom'), { value: () => oculto, enumerable: false });
+    return sa;
   } catch {
     return null;
   }
@@ -92,7 +98,7 @@ export function leerConfig(env: Entorno = entornoDelProceso()): ConfigEquipos {
   const carpetaTemporalOcr = carpeta('EQUIPOS_DRIVE_TEMPORAL');
   const hora = (env.EQUIPOS_HORA_DIARIA ?? '').trim();
   const url = (env.EQUIPOS_ALERTA_WEBHOOK_URL ?? '').trim();
-  const token = env.EQUIPOS_ALERTA_TOKEN;
+  const token = env.EQUIPOS_ALERTA_TOKEN?.trim();
   const reserva = (env.EQUIPOS_ALERTA_RESERVA ?? '').trim().toLowerCase();
   return {
     drive: sa && !faltaDrive.length ? { cuentaServicio: sa, carpetas: { entradas, salidasGeneradas, salidasEscaneadas }, carpetaTemporalOcr } : null,

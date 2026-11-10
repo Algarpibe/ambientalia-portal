@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { inspect } from 'node:util';
 import { HORA_POR_DEFECTO, leerConfig, RESERVA_POR_DEFECTO } from './config.js';
 
 // Configuración desde el entorno: qué deja el módulo «sin configurar» y qué se apaga.
@@ -50,5 +51,23 @@ describe('leerConfig', () => {
     expect(leerConfig({}).reserva).toBe(RESERVA_POR_DEFECTO);
     expect(leerConfig({ EQUIPOS_ALERTA_RESERVA: 'Taller@Ambientalia.com.co' }).reserva).toBe('taller@ambientalia.com.co');
     expect(leerConfig({ EQUIPOS_ALERTA_RESERVA: 'alguien@gmail.com' }).reserva).toBe(RESERVA_POR_DEFECTO);
+  });
+});
+
+describe('leerConfig: endurecimiento', () => {
+  it('la clave privada no sale ni por JSON.stringify ni por util.inspect, pero se sigue pudiendo leer', () => {
+    const c = leerConfig(DRIVE);
+    expect(c.drive?.cuentaServicio.private_key).toContain('PRIVATE KEY');
+    expect(JSON.stringify(c)).not.toMatch(/PRIVATE KEY|AAA/);
+    expect(inspect(c, { depth: 10 })).not.toMatch(/PRIVATE KEY|AAA/);
+  });
+
+  it('una clave con los saltos de línea escapados dos veces se normaliza', () => {
+    const doble = JSON.stringify({ client_email: 'sa@ficticio.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\\nAAA\\n-----END PRIVATE KEY-----\\n' });
+    expect(leerConfig({ ...DRIVE, EQUIPOS_GOOGLE_CUENTA_SERVICIO: doble }).drive?.cuentaServicio.private_key).toBe('-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n');
+  });
+
+  it('el token de la alerta se recorta', () => {
+    expect(leerConfig({ EQUIPOS_ALERTA_WEBHOOK_URL: 'https://n8n.example/webhook/x', EQUIPOS_ALERTA_TOKEN: '  t0k\n' }).alerta?.token).toBe('t0k');
   });
 });
