@@ -6,8 +6,8 @@
 // vuelve a comprobar cada llave: aquí solo se ocultan botones.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  ADENTRO, EST, VISTAS, TONO, aplicarAjustes, avisoFoto, claveFila, claveIlegible, dias, enlaceArchivo, enlaceCarpeta, filasDeVista,
-  ilegiblesPendientes, Reglas, type Ajuste, type Fila, type Ilegible, type RespuestaEquipos,
+  ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, avisoFoto, claveFila, claveIlegible, dias, enlaceArchivo, enlaceCarpeta,
+  filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, type Ajuste, type Fila, type Filtros, type Ilegible, type RespuestaEquipos,
 } from './nucleo';
 import { apiEquipos, type ApiEquipos } from './api';
 import PanelLlaves from './PanelLlaves';
@@ -39,6 +39,8 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   const [aviso, setAviso] = useState('');
   const [pedido, setPedido] = useState<Pedido | null>(null);
   const [nota, setNota] = useState('');
+  // Filtros por cliente y por estado en Desk: aplican a todas las vistas y a los conteos.
+  const [fl, setFl] = useState<Filtros>(SIN_FILTROS);
 
   const cargar = useCallback(async () => {
     try { setDatos(await api.estado()); }
@@ -55,11 +57,26 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   const ajustes = datos?.ajustes || {};
   const snap = datos?.snap || null;
   const puedeEditar = datos?.permisos.puedeEditar ?? false;
-  const filas = useMemo(() => aplicarAjustes(snap?.rows || [], ajustes), [snap, ajustes]);
+  const todas = useMemo(() => aplicarAjustes(snap?.rows || [], ajustes), [snap, ajustes]);
+  const filas = useMemo(() => aplicarFiltros(todas, fl), [todas, fl]);
   const pendientes = ilegiblesPendientes(snap, ajustes);
   const hoy = snap?.hoy || new Date().toISOString().slice(0, 10);
   const v = VISTAS.find((x) => x.nombre === vista) || VISTAS[0];
   const lista = filasDeVista(filas, v.nombre);
+  const deVista = filasDeVista(todas, v.nombre);
+  const selector = (campo: keyof Filtros, titulo: string) => {
+    const total = aplicarFiltros(deVista, { ...fl, [campo]: '' }).length;
+    return (
+      <label className="flex items-center gap-1.5 text-sm text-slate-600">
+        {titulo}
+        <select value={fl[campo]} onChange={(e) => setFl({ ...fl, [campo]: e.target.value })}
+          className={'max-w-xs rounded-md border bg-white px-2 py-1 text-slate-900 ' + (fl[campo] ? 'border-sky-700' : 'border-slate-300')}>
+          <option value="">Todos ({total})</option>
+          {opcionesFiltro(deVista, campo, fl).map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta} ({o.n})</option>)}
+        </select>
+      </label>
+    );
+  };
   const fotoVieja = datos ? avisoFoto(datos, fmt) : null;
 
   async function actualizar() {
@@ -233,6 +250,11 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
           </span>
         ))}
       </nav>
+      <div role="group" aria-label="Filtros" className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {selector('cliente', 'Cliente')}
+        {selector('zoho', 'Estado en Desk')}
+        {hayFiltros(fl) ? <button className="rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] hover:bg-slate-50" onClick={() => setFl(SIN_FILTROS)}>Quitar filtros</button> : null}
+      </div>
       <p className="mb-3 text-sm text-slate-600">{v.ayuda}</p>
 
       {!snap ? (
@@ -247,7 +269,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
           </table>
         </div>
       ) : (
-        <p className="py-8 text-slate-500">No hay equipos en esta vista.</p>
+        <p className="py-8 text-slate-500">{hayFiltros(fl) ? 'No hay equipos en esta vista con los filtros elegidos.' : 'No hay equipos en esta vista.'}</p>
       )}
       {v.nombre === EST.REVISAR && snap ? ilegibles() : null}
 

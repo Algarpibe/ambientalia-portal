@@ -1,6 +1,6 @@
 // Lógica de pantalla compartida por la página de Claude y la pantalla React de Desk 2.0:
 // ajustes manuales, vistas (pestañas), orden y remisiones ilegibles pendientes.
-import { ADENTRO, cls, nrm } from "./reglas.js";
+import { ADENTRO, cls, key, nrm } from "./reglas.js";
 import { EST, type Ajuste, type Ajustes, type Fila, type Foto, type Ilegible } from "./tipos.js";
 
 /** Clave de ajuste de una entrada. */
@@ -88,3 +88,64 @@ export const dias = (a: string, b: string): number => Math.max(0, Math.floor((ne
 
 export const enlaceArchivo = (id: string) => "https://drive.google.com/file/d/" + encodeURIComponent(id) + "/view";
 export const enlaceCarpeta = (id: string) => "https://drive.google.com/drive/folders/" + encodeURIComponent(id);
+
+// ---------- Filtros por cliente y por estado en Zoho ----------
+/** Valor del filtro de Zoho para los equipos sin ticket enlazado. */
+export const SIN_TICKET = "Sin ticket";
+const SUFIJOS = new Set(["S", "A", "SA", "SAS", "LTDA", "LIMITADA", "E", "P", "ESP", "BIC", "CIA", "INC"]);
+
+/** Clave de agrupación del cliente: sin tildes, sin puntuación y sin sufijos societarios («Cliente Ejemplo S.A. E.S.P.» = «CLIENTE EJEMPLO»). */
+export function claveCliente(c: string): string {
+  const p = key(c).replace(/[^A-Z0-9&]+/g, " ").trim().split(" ").filter(Boolean);
+  while (p.length > 1 && SUFIJOS.has(p[p.length - 1])) p.pop();
+  return p.join(" ");
+}
+export const estadoZoho = (r: Pick<Fila, "z">): string => (r.z ? r.z.st || "Sin estado" : SIN_TICKET);
+
+/** Filtros activos; "" = todos. `cliente` es la clave de claveCliente. */
+export interface Filtros {
+  cliente: string;
+  zoho: string;
+}
+export const SIN_FILTROS: Filtros = { cliente: "", zoho: "" };
+export const hayFiltros = (f: Filtros): boolean => !!(f.cliente || f.zoho);
+
+export function aplicarFiltros(rows: Fila[], f: Filtros): Fila[] {
+  if (!hayFiltros(f)) return rows;
+  return rows.filter((r) => (!f.cliente || claveCliente(r.c) === f.cliente) && (!f.zoho || estadoZoho(r) === f.zoho));
+}
+
+export interface OpcionFiltro {
+  valor: string;
+  etiqueta: string;
+  /** Equipos de la vista actual con ese valor (respetando el otro filtro). */
+  n: number;
+}
+
+/**
+ * Opciones de un filtro para las filas de la vista actual, con cuántos equipos tiene cada una,
+ * respetando el otro filtro. El valor elegido siempre aparece, aunque quede en 0.
+ * Clientes: el nombre que más se repite en el grupo. Estados de Zoho: de mayor a menor cantidad, «Sin ticket» al final.
+ */
+export function opcionesFiltro(rowsVista: Fila[], campo: keyof Filtros, f: Filtros): OpcionFiltro[] {
+  const base = aplicarFiltros(rowsVista, campo === "cliente" ? { ...f, cliente: "" } : { ...f, zoho: "" });
+  const grupos = new Map<string, { n: number; nombres: Map<string, number> }>();
+  base.forEach((r) => {
+    const v = campo === "cliente" ? claveCliente(r.c) : estadoZoho(r);
+    const g = grupos.get(v) || { n: 0, nombres: new Map<string, number>() };
+    g.n++;
+    const nom = campo === "cliente" ? r.c.trim() : v;
+    g.nombres.set(nom, (g.nombres.get(nom) || 0) + 1);
+    grupos.set(v, g);
+  });
+  const sel = f[campo];
+  if (sel && !grupos.has(sel)) grupos.set(sel, { n: 0, nombres: new Map([[sel, 1]]) });
+  const op = [...grupos.entries()].map(([valor, g]) => ({
+    valor,
+    etiqueta: [...g.nombres.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0],
+    n: g.n,
+  }));
+  return campo === "cliente"
+    ? op.sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, "es"))
+    : op.sort((a, b) => Number(a.valor === SIN_TICKET) - Number(b.valor === SIN_TICKET) || b.n - a.n || a.etiqueta.localeCompare(b.etiqueta, "es"));
+}

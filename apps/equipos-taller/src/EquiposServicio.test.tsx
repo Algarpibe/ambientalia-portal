@@ -89,6 +89,25 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     await waitFor(() => expect(chipYa(/En taller/).textContent).toBe('1En taller'));
   });
 
+  it('filtra por cliente y por estado en Desk, con los conteos de las vistas', async () => {
+    render(<EquiposServicio api={apiFalsa().api} />);
+    const cliente = await screen.findByRole('combobox', { name: /Cliente/ });
+    await waitFor(() => expect([...(cliente as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Todos (1)', 'Cliente A (1)']));
+    fireEvent.click(await chip(/Revisar/));
+    expect([...(screen.getByRole('combobox', { name: /Cliente/ }) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Todos (1)', 'Cliente B (1)']);
+    fireEvent.change(screen.getByRole('combobox', { name: /Cliente/ }), { target: { value: 'CLIENTE B' } });
+    expect(chipYa(/En taller/).textContent).toBe('0En taller');
+    expect(chipYa(/Revisar/).textContent).toMatch(/^1Revisar/);
+    expect(screen.getByText('G7XN900T')).toBeTruthy();
+    expect([...(screen.getByRole('combobox', { name: /Estado en Desk/ }) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Todos (1)', 'Sin ticket (1)']);
+    fireEvent.change(screen.getByRole('combobox', { name: /Estado en Desk/ }), { target: { value: 'Sin ticket' } });
+    expect(screen.getByText('G7XN900T')).toBeTruthy();
+    fireEvent.click(chipYa(/En taller/));
+    expect(screen.getByText('No hay equipos en esta vista con los filtros elegidos.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar filtros' }));
+    expect(chipYa(/En taller/).textContent).toBe('1En taller');
+  });
+
   it('«Actualizar información» lanza la actualización y se deshabilita mientras corre', async () => {
     const { api, llamadas } = apiFalsa();
     render(<EquiposServicio api={api} />);
