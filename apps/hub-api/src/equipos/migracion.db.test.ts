@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba } from '../test-db/harness.js';
 
-// La 071 contra Postgres de verdad: re-ejecutarla (como hace initDb() en cada arranque)
-// no falla, no siembra nada y deja las tablas y vistas esperadas.
-const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/071_equipos_taller.sql', import.meta.url)), 'utf8');
+// La 071 y la 072 contra Postgres de verdad: re-ejecutarlas (como hace initDb() en cada
+// arranque) no falla, no siembra nada y deja las tablas y vistas esperadas.
+const leer = (n: string) => readFileSync(fileURLToPath(new URL('../users/migrations/' + n, import.meta.url)), 'utf8');
+const SQL = leer('071_equipos_taller.sql');
+const SQL_072 = leer('072_equipos_drive_n8n.sql');
 
 let db: Pool;
 beforeAll(() => {
@@ -22,13 +24,13 @@ describe('migración 071 contra Postgres', () => {
     await db.query(SQL);
   });
 
-  it('deja las cinco tablas y las dos vistas', async () => {
+  it('deja sus cinco tablas y sus dos vistas (equipos_drive_archivos y equipos_sincronizacion son de la 072)', async () => {
     const { rows } = await db.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'equipos\\_%' ORDER BY 1`,
     );
     expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
-      'equipos_ajuste', 'equipos_ejecucion', 'equipos_estado', 'equipos_incidente', 'equipos_llaves',
-      'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
+      'equipos_ajuste', 'equipos_drive_archivos', 'equipos_ejecucion', 'equipos_estado', 'equipos_incidente', 'equipos_llaves',
+      'equipos_sincronizacion', 'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
     ]);
   });
 
@@ -50,5 +52,47 @@ describe('migración 071 contra Postgres', () => {
       const { rows } = await db.query(`SELECT count(*)::int AS n FROM portal.${t}`);
       expect(rows[0].n, t).toBe(0);
     }
+  });
+});
+
+describe('migración 072 contra Postgres', () => {
+  const vaciar = () => db.query('TRUNCATE portal.equipos_drive_archivos, portal.equipos_sincronizacion RESTART IDENTITY');
+  const columnas = async () =>
+    (await db.query(
+      `SELECT table_name, column_name, data_type FROM information_schema.columns
+        WHERE table_schema = 'portal' AND table_name IN ('equipos_drive_archivos', 'equipos_sincronizacion') ORDER BY 1, 2`,
+    )).rows;
+
+  it('se puede aplicar dos veces más sin cambiar columnas ni borrar filas', async () => {
+    await vaciar();
+    await db.query(`INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo) VALUES ('ARCHIVO000001', 'entradas', 'X')`);
+    const antes = await columnas();
+    await db.query(SQL_072);
+    await db.query(SQL_072);
+    expect(await columnas()).toEqual(antes);
+    expect((await db.query('SELECT count(*)::int AS n FROM portal.equipos_drive_archivos')).rows[0].n).toBe(1);
+    await vaciar();
+  });
+
+  it('no siembra ninguna fila', async () => {
+    await vaciar();
+    await db.query(SQL_072);
+    for (const t of ['equipos_drive_archivos', 'equipos_sincronizacion']) {
+      expect((await db.query(`SELECT count(*)::int AS n FROM portal.${t}`)).rows[0].n, t).toBe(0);
+    }
+  });
+
+  it('la base también comprueba el id, la carpeta, el fallo, que las salidas de n8n no lleven texto y el estado de la pasada', async () => {
+    await vaciar();
+    const malas = [
+      `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo) VALUES ('x'' OR 1=1', 'entradas', 'X')`,
+      `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo) VALUES ('ARCHIVO000002', 'temporal', 'X')`,
+      `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo, texto) VALUES ('ARCHIVO000003', 'salidas_n8n', 'X', 'texto')`,
+      `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo, error_status) VALUES ('ARCHIVO000004', 'entradas', 'X', 429)`,
+      `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo) VALUES ('ARCHIVO000005', 'entradas', '')`,
+      `INSERT INTO portal.equipos_sincronizacion (pasada, fin) VALUES ('4711', now())`,
+      `INSERT INTO portal.equipos_sincronizacion (pasada) VALUES ('4711; DROP')`,
+    ];
+    for (const sql of malas) await expect(db.query(sql), sql).rejects.toMatchObject({ code: '23514' });
   });
 });
