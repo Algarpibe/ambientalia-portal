@@ -41,14 +41,14 @@ export type ResultadoListado =
   | { estado: 'pasada_cerrada' }
   | { estado: 'pasada_en_curso' }
   | { estado: 'sospechoso'; bajas: number; vivos: number };
-export type CierrePasada = 'cerrada' | 'desconocida' | 'ya_cerrada' | 'incompleta';
+export type CierrePasada = 'cerrada' | 'desconocida' | 'ya_cerrada' | 'incompleta' | 'tardia';
 
 export interface RepoSync {
   /** El listado COMPLETO de una carpeta en una pasada: altas, nombres y borrados. Devuelve los ids a los que les falta texto. */
   registrarListado(pasada: string, carpeta: Carpeta, archivos: ArchivoListado[]): Promise<ResultadoListado>;
   /** El texto (o el fallo) de un archivo. false si no está, está borrado o su carpeta no lleva texto. */
   guardarTexto(id: string, r: ResultadoTexto): Promise<boolean>;
-  /** Cierra la pasada como completa. Exige el listado de las tres carpetas. */
+  /** Cierra la pasada como completa. Exige el listado de las tres carpetas; si lleva abierta más de HORAS_PASADA_ABANDONADA la cierra como fallida ('tardia'). */
   cerrarPasada(pasada: string, conteos: ConteosFin): Promise<CierrePasada>;
   /** La última pasada COMPLETA, o null si nunca hubo una. */
   ultimaSincronizacion(): Promise<SincronizacionHecha | null>;
@@ -104,6 +104,19 @@ export function crearRepoSync(db: Pool): RepoSync {
           [carpeta, ids],
         )).rows[0];
         if (listadoSospechoso(n.bajas, n.vivos, archivos.length)) return { estado: 'sospechoso', bajas: n.bajas, vivos: n.vivos };
+        // Los que saldrían de OTRA carpeta hacia esta cuentan como bajas de la suya (un listado
+        // mandado a la carpeta equivocada no puede vaciarla ni borrarle el texto).
+        const fuera = (await c.query(
+          `SELECT o.carpeta, o.vivos::int AS vivos, count(*)::int AS movidos
+             FROM portal.equipos_drive_archivos a
+             JOIN (SELECT carpeta, count(*) AS vivos FROM portal.equipos_drive_archivos WHERE NOT borrado GROUP BY carpeta) o ON o.carpeta = a.carpeta
+            WHERE a.id = ANY($2::text[]) AND a.carpeta <> $1 AND NOT a.borrado
+            GROUP BY o.carpeta, o.vivos`,
+          [carpeta, ids],
+        )).rows;
+        for (const o of fuera) {
+          if (listadoSospechoso(o.movidos, o.vivos, o.vivos - o.movidos)) return { estado: 'sospechoso', bajas: o.movidos, vivos: o.vivos };
+        }
         await c.query(
           `INSERT INTO portal.equipos_sincronizacion (pasada, listados) VALUES ($1, jsonb_build_object($2::text, $3::int))
            ON CONFLICT (pasada) DO UPDATE SET listados = portal.equipos_sincronizacion.listados || EXCLUDED.listados`,
@@ -159,13 +172,18 @@ export function crearRepoSync(db: Pool): RepoSync {
     },
 
     async cerrarPasada(pasada, conteos) {
+      // Una sola sentencia: si lleva abierta más de HORAS_PASADA_ABANDONADA se cierra como
+      // fallida (la frescura se mide desde «fin», y una pasada tan larga no es fresca).
       const { rows } = await db.query(
-        `UPDATE portal.equipos_sincronizacion SET fin = now(), ok = true, conteos = $2::jsonb
+        `UPDATE portal.equipos_sincronizacion
+            SET fin = now(),
+                ok = inicio >= now() - make_interval(hours => $3),
+                conteos = CASE WHEN inicio >= now() - make_interval(hours => $3) THEN $2::jsonb ELSE conteos END
           WHERE pasada = $1 AND fin IS NULL AND listados ?& ARRAY['entradas', 'salidas_n8n', 'salidas_escaneadas']
-          RETURNING id`,
-        [pasada, JSON.stringify(conteos)],
+          RETURNING ok`,
+        [pasada, JSON.stringify(conteos), HORAS_PASADA_ABANDONADA],
       );
-      if (rows.length) return 'cerrada';
+      if (rows.length) return rows[0].ok ? 'cerrada' : 'tardia';
       const p = await db.query('SELECT fin FROM portal.equipos_sincronizacion WHERE pasada = $1', [pasada]);
       if (!p.rows.length) return 'desconocida';
       return p.rows[0].fin ? 'ya_cerrada' : 'incompleta';

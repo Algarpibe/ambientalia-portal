@@ -100,6 +100,36 @@ describe('registrarListado', () => {
     expect(await borrados()).toBe(6);
   });
 
+  it('exactamente la mitad de una carpeta de 22 no es sospechoso; una más, sí', async () => {
+    const veintidos = Array.from({ length: 22 }, (_, i) => A('ENTRADA' + String(i).padStart(5, '0')));
+    await listar('p1', 'entradas', veintidos);
+    expect(await sync.registrarListado('p1', 'entradas', veintidos.slice(0, 11))).toMatchObject({ estado: 'ok' });
+    await vaciar();
+    await listar('p1', 'entradas', veintidos);
+    expect(await sync.registrarListado('p1', 'entradas', veintidos.slice(0, 10))).toMatchObject({ estado: 'sospechoso' });
+  });
+
+  it('un listado con ids de otra carpeta no los mueve: sospechoso si vacía esa carpeta o mueve más de 10 y la mitad', async () => {
+    const doce = Array.from({ length: 12 }, (_, i) => A('ESCANEO' + String(i).padStart(5, '0')));
+    await listar('p1', 'salidas_escaneadas', doce);
+    for (const a of doce.slice(0, 11)) await sync.guardarTexto(a.id, { texto: 'OCR ' + a.id });
+    // Carpeta equivocada: los 12 de salidas_escaneadas llegan como «entradas».
+    expect(await sync.registrarListado('p1', 'entradas', doce)).toMatchObject({ estado: 'sospechoso' });
+    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 11))).toMatchObject({ estado: 'sospechoso' });
+    expect(await fila('ESCANEO00000')).toMatchObject({ carpeta: 'salidas_escaneadas', texto: 'OCR ESCANEO00000', borrado: false });
+    expect((await db.query(`SELECT count(*)::int AS n FROM portal.equipos_drive_archivos WHERE carpeta = 'salidas_escaneadas' AND NOT borrado`)).rows[0].n).toBe(12);
+    // Un movimiento aislado (1 de 12) sí pasa.
+    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 1))).toMatchObject({ estado: 'ok' });
+    expect(await fila('ESCANEO00000')).toMatchObject({ carpeta: 'entradas', texto: null });
+  });
+
+  it('un archivo con texto que pasa a salidas de n8n pierde texto y fallo sin violar el CHECK', async () => {
+    await listar('p1', 'salidas_escaneadas', [A('ARCHIVO00001'), A('ESCANEO00002')]);
+    await sync.guardarTexto('ARCHIVO00001', { texto: 'OCR' });
+    await listar('p1', 'salidas_n8n', [A('ARCHIVO00001')]);
+    expect(await fila('ARCHIVO00001')).toMatchObject({ carpeta: 'salidas_n8n', texto: null, error_status: null, borrado: false });
+  });
+
   it('un listado sospechoso tampoco cuenta para la pasada: su «fin» queda incompleto', async () => {
     await pasadaCompleta('p1', { entradas: [A('ENTRADA00001')] });
     expect(await sync.registrarListado('p2', 'entradas', [])).toMatchObject({ estado: 'sospechoso' });
@@ -135,6 +165,20 @@ describe('pasadas', () => {
     expect(await sync.registrarListado('p1', 'entradas', [])).toEqual({ estado: 'pasada_cerrada' });
     const p = (await db.query('SELECT ok, listados, conteos FROM portal.equipos_sincronizacion WHERE pasada = $1', ['p1'])).rows[0];
     expect(p).toEqual({ ok: true, listados: { entradas: 0, salidas_n8n: 0, salidas_escaneadas: 0 }, conteos: SIN_CONTEOS });
+  });
+
+  it(`un «fin» pasadas ${HORAS_PASADA_ABANDONADA} h no la da por buena: queda fallida y no cuenta como fresca`, async () => {
+    for (const c of CARPETAS) await listar('p1', c, []);
+    await db.query(`UPDATE portal.equipos_sincronizacion SET inicio = now() - make_interval(hours => $1, mins => 1) WHERE pasada = 'p1'`, [HORAS_PASADA_ABANDONADA]);
+    expect(await sync.cerrarPasada('p1', SIN_CONTEOS)).toBe('tardia');
+    expect((await db.query(`SELECT ok, fin IS NOT NULL AS cerrada FROM portal.equipos_sincronizacion WHERE pasada = 'p1'`)).rows[0]).toEqual({ ok: false, cerrada: true });
+    expect(await sync.ultimaSincronizacion()).toBeNull();
+    expect(await sync.cerrarPasada('p1', SIN_CONTEOS)).toBe('ya_cerrada');
+  });
+
+  it('dos pasadas a la vez: solo una escribe, la otra queda «en curso»', async () => {
+    const r = await Promise.all([sync.registrarListado('pa', 'entradas', []), sync.registrarListado('pb', 'entradas', [])]);
+    expect(r.map((x) => x.estado).sort()).toEqual(['ok', 'pasada_en_curso']);
   });
 
   it('ultimaSincronizacion: null sin ninguna completa; si no, la de «fin» más reciente', async () => {

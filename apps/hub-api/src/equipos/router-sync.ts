@@ -67,6 +67,7 @@ export function createEquiposSyncRouter(sync: RepoSync): Router {
     if (r === 'cerrada') res.json({ ok: true });
     else if (r === 'desconocida') res.status(404).json({ error: 'pasada_desconocida', message: 'No hay ninguna pasada con ese id' });
     else if (r === 'ya_cerrada') res.status(409).json(pasadaCerrada);
+    else if (r === 'tardia') res.status(409).json({ error: 'pasada_tardia', message: 'La pasada tardó demasiado y se descartó; empiece otra' });
     else res.status(409).json({ error: 'pasada_incompleta', message: 'Falta el listado de alguna carpeta' });
   }));
 

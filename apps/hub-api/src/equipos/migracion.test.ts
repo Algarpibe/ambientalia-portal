@@ -39,6 +39,10 @@ describe('migración 072 (Drive vía n8n)', () => {
 
   it('solo DDL idempotente', () => soloIdempotente(SQL_072));
 
+  it('no borra nada (se re-ejecuta en cada arranque)', () => {
+    expect(SQL_072).not.toMatch(/\b(DROP|TRUNCATE)\b|DELETE\s+FROM/i);
+  });
+
   it('da permisos a portal_app solo si el rol existe (DATA-332), también sobre la secuencia', () => {
     expect(SQL_072).toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'portal_app'\)/);
     expect(SQL_072).toMatch(/GRANT USAGE, SELECT ON SEQUENCE portal\.equipos_sincronizacion_id_seq TO portal_app/);

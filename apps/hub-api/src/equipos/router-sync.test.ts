@@ -147,6 +147,9 @@ describe('POST /fin', () => {
     cierre = 'incompleta';
     const r = await post('/fin', FIN);
     expect([r.status, r.body.error]).toEqual([409, 'pasada_incompleta']);
+    cierre = 'tardia';
+    const t = await post('/fin', FIN);
+    expect([t.status, t.body.error]).toEqual([409, 'pasada_tardia']);
   });
 
   it('400 sin un conteo por carpeta', async () => {
