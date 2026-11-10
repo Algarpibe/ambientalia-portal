@@ -45,9 +45,9 @@ describe('ordenarParaAsignar', () => {
 });
 
 describe('migración 070', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 069, y es la última', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 069 (la última la vigila equipos/migracion.test.ts)', () => {
     const db = readFileSync(fileURLToPath(new URL('../db.ts', import.meta.url)), 'utf8');
-    expect(db).toMatch(/'069_trazabilidad_avisos_envios\.sql',\s*'070_wo_sales_documento_numero\.sql'\];/);
+    expect(db).toMatch(/'069_trazabilidad_avisos_envios\.sql',\s*'070_wo_sales_documento_numero\.sql'[,\]]/);
   });
 });
 
