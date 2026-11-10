@@ -132,6 +132,7 @@ export function crearAnonimizador(evitar = new Set()) {
       const p = prefijo(c);
       const s = [...c].map((x, i) => {
         if (i < p) return x;
+        if (i === 0 && x === '0') return '0'; // un cero a la izquierda (OCR) se conserva
         if (CONF_CLASES.includes(x)) return elegir(r, i === 0 ? CONF_CLASES.filter((k) => k !== '0') : CONF_CLASES);
         return /\d/.test(x) ? elegir(r, DIGITOS_PLANOS) : elegir(r, LETRAS_PLANAS);
       }).join('');
@@ -332,8 +333,15 @@ export function buscarFugas(reales, rutas) {
   for (const f of ficheros) {
     const t = readFileSync(f, 'utf8');
     const c = claseTexto(t);
-    for (const x of valores) if (c.includes(x)) fugas.push(f + ': ' + x);
-    for (const x of tickets) if (new RegExp('(^|[^0-9])' + x + '([^0-9]|$)').test(t)) fugas.push(f + ': ticket ' + x);
+    // Nunca se devuelve el valor: solo el fichero y dónde está la coincidencia.
+    for (const x of valores) {
+      const pos = c.indexOf(x);
+      if (pos >= 0) fugas.push(f + ': coincidencia en la posición ' + pos + ' (longitud ' + x.length + ')');
+    }
+    for (const x of tickets) {
+      const m = new RegExp('(^|[^0-9])' + x + '([^0-9]|$)').exec(t);
+      if (m) fugas.push(f + ': coincidencia de ticket en la posición ' + (m.index + m[1].length) + ' (longitud ' + x.length + ')');
+    }
   }
   return fugas;
 }

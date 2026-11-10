@@ -26,6 +26,17 @@ describe('seriales', () => {
     expect(cls(largo)).toBe(cls(a.serial('355590041')));
   });
 
+  it('una clase que empieza por 0 sigue empezando por 0 (OCR con ceros a la izquierda)', () => {
+    const a = crearAnonimizador();
+    for (const real of ['0355590041', '0K7R2X9Q', '0ABCD1234']) {
+      const s = a.clase(real);
+      expect(s.startsWith('0')).toBe(true);
+      expect(s).toHaveLength(real.length);
+      expect(s).not.toBe(real);
+    }
+    expect(a.clase('0355590041')).toBe(a.clase('0355590041')); // determinista por valor
+  });
+
   it('el prefijo GRIMM se conserva y el resto cambia', () => {
     const s = crearAnonimizador().serial('18A90417');
     expect(s).toMatch(/^18A\d{5}$/);
@@ -93,7 +104,13 @@ describe('anonimizar', () => {
       for (const [n, t] of Object.entries(anonimizar(reales))) writeFileSync(join(dir, n), t);
       expect(buscarFugas(reales, [dir])).toEqual([]);
       writeFileSync(join(dir, 'fuga.txt'), 'el serial 18A90417 de QUIMERA');
-      expect(buscarFugas(reales, [dir]).length).toBeGreaterThan(0);
+      const fugas = buscarFugas(reales, [dir]);
+      expect(fugas.length).toBeGreaterThan(0);
+      // nunca devuelve el valor filtrado: solo el fichero y la posición y longitud de la coincidencia
+      for (const f of fugas) {
+        expect(f).not.toMatch(/18A90417|QUIMERA|1033/i);
+        expect(f).toMatch(/fuga\.txt: coincidencia en la posición \d+ \(longitud \d+\)/);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
