@@ -18,8 +18,16 @@ type Db = Pick<PoolClient, 'query'>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Fila = Record<string, any>;
 
-/** Una corrida que lleva más de esto «en curso» se da por abandonada (el proceso cayó a mitad). */
+/**
+ * Una corrida que lleva más de esto «en curso» se da por abandonada (el proceso cayó a mitad).
+ * Consecuencias: tras una caída o un redeploy a mitad de corrida, el botón responde 409
+ * («ya hay una corrida») hasta que pasan estos minutos; y las corridas abandonadas
+ * (ok = false, causa 'abandonada') no cuentan para los incidentes.
+ */
 export const MINUTOS_ABANDONO = 180;
+
+/** Se lanza al cerrar una corrida que ya no está en curso (abandonada y quizá sustituida por otra). */
+const CORRIDA_CERRADA = 'corrida ya cerrada o abandonada';
 
 export interface CorridaBuena {
   foto: Foto;
@@ -150,18 +158,20 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
         await guardarEstado(c, 'exits', r.exits);
         await guardarEstado(c, 'ent', r.ent);
         await guardarEstado(c, 'foto', r.foto);
-        await c.query(
+        const cierre = await c.query(
           `UPDATE portal.equipos_ejecucion SET en_curso = NULL, fin = now(), ok = true, causa = NULL, avisos = $2::jsonb, conteos = $3::jsonb
-            WHERE id = $1`,
+            WHERE id = $1 AND en_curso`,
           [id, JSON.stringify(r.avisos), JSON.stringify(r.conteos)],
         );
+        if (cierre.rowCount !== 1) throw new Error(CORRIDA_CERRADA); // el ROLLBACK descarta también foto y cachés
       });
     },
 
     async terminarMal(id, causa, exits) {
       await enTransaccion(db, async (c) => {
         if (exits) await guardarEstado(c, 'exits', exits);
-        await c.query(`UPDATE portal.equipos_ejecucion SET en_curso = NULL, fin = now(), ok = false, causa = $2 WHERE id = $1`, [id, causa.slice(0, 300)]);
+        const cierre = await c.query(`UPDATE portal.equipos_ejecucion SET en_curso = NULL, fin = now(), ok = false, causa = $2 WHERE id = $1 AND en_curso`, [id, causa.slice(0, 300)]);
+        if (cierre.rowCount !== 1) throw new Error(CORRIDA_CERRADA);
       });
     },
 

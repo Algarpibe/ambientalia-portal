@@ -81,6 +81,36 @@ describe('corridas', () => {
     expect(vieja).toEqual({ ok: false, causa: 'abandonada', en_curso: null });
   });
 
+  describe('una corrida abandonada no pisa a otra más nueva', () => {
+    const FOTO_B: Foto = { ...FOTO, hoy: '2026-11-11' };
+    const EXITS_B = { v: CV, list: [] };
+    const abandonadaYNueva = async () => {
+      const a = (await repo.iniciarCorrida('programada', null))!;
+      await db.query(`UPDATE portal.equipos_ejecucion SET inicio = now() - interval '181 minutes' WHERE id = $1`, [a]);
+      const b = (await repo.iniciarCorrida('boton', null))!;
+      await repo.terminarBien(b, { foto: FOTO_B, exits: EXITS_B, ent: { N: { eq: 'B', srv: '', k: '' } }, avisos: [], conteos: {} });
+      const b2 = (await repo.iniciarCorrida('boton', null))!; // B ya cerró; otra en curso
+      expect(b2).not.toBeNull();
+      return a;
+    };
+    const filaA = async (a: number) => (await db.query('SELECT ok, causa, en_curso FROM portal.equipos_ejecucion WHERE id = $1', [a])).rows[0];
+
+    it('terminarBien lanza y no toca foto, cachés ni la fila abandonada', async () => {
+      const a = await abandonadaYNueva();
+      await expect(repo.terminarBien(a, { foto: FOTO, exits: EXITS, ent: {}, avisos: [], conteos: {} })).rejects.toThrow('corrida ya cerrada o abandonada');
+      expect(await repo.leerFoto()).toEqual(FOTO_B);
+      expect(await repo.leerCaches()).toEqual({ exits: EXITS_B, ent: { N: { eq: 'B', srv: '', k: '' } } });
+      expect(await filaA(a)).toEqual({ ok: false, causa: 'abandonada', en_curso: null });
+    });
+
+    it('terminarMal lanza y no pisa exits ni la fila abandonada', async () => {
+      const a = await abandonadaYNueva();
+      await expect(repo.terminarMal(a, 'drive: HTTP 403', EXITS)).rejects.toThrow('corrida ya cerrada o abandonada');
+      expect((await repo.leerCaches()).exits).toEqual(EXITS_B);
+      expect(await filaA(a)).toEqual({ ok: false, causa: 'abandonada', en_curso: null });
+    });
+  });
+
   it('terminarBien escribe foto, cachés y cierre; terminarMal no toca la foto pero sí guarda exits', async () => {
     const u = await usuario('boton@equipos.test');
     const id1 = (await repo.iniciarCorrida('boton', u))!;
