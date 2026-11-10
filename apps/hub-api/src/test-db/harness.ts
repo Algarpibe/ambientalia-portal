@@ -62,6 +62,9 @@ export const COLUMNAS_EQUIPOS_LECTOR = 'id, serial, marca, modelo, tipo, cliente
  * viaja el campo de Zoho, `raw` (con su `cf`) y `custom_fields`. Alli el lector
  * tiene SELECT sobre la tabla ENTERA, y aqui tambien.
  *
+ * `desk.conversations` (Equipos en taller) va con SELECT, como el que Gerencia concede a
+ * `portal_agenda_reader` en producción (§9.1 del diseño de equipos-taller).
+ *
  * Devuelve dos URLs: la del rol lector (la que imita a `DESK2_DB_URL`) y la del
  * superusuario del contenedor sobre esa base, para sembrar. La contrasena del
  * lector se genera en cada llamada: no hay ninguna escrita en el repo.
@@ -138,8 +141,20 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
         codigo_interno    text,
         pendiente_validar boolean
       );
+      CREATE TABLE IF NOT EXISTS desk.conversations (
+        id             bigserial PRIMARY KEY,
+        ticket_id      text NOT NULL,
+        kind           text NOT NULL,
+        author_name    text,
+        author_type    text,
+        is_public      boolean,
+        content        text,
+        content_type   text,
+        commented_time timestamptz,
+        raw            jsonb
+      );
       GRANT USAGE ON SCHEMA desk, public TO ${ROL};
-      GRANT SELECT ON desk.tickets, desk.ticket_transitions, public.calendario_cierres TO ${ROL};
+      GRANT SELECT ON desk.tickets, desk.ticket_transitions, public.calendario_cierres, desk.conversations TO ${ROL};
       REVOKE ALL ON desk.equipos FROM ${ROL};
       GRANT SELECT (${COLUMNAS_EQUIPOS_LECTOR}) ON desk.equipos TO ${ROL}`);
   } finally {
