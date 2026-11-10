@@ -12,7 +12,7 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 
 - Cada campo `cf_*` se rellena en este orden: `raw.cf`, luego `custom_fields` por etiqueta, luego la columna tipada promovida. En los tickets `managed_by_app` el orden se invierte: primero `custom_fields` y columnas, y `raw.cf` al final. Estado, fecha de modificación y de cierre de un ticket gestionado salen de las columnas.
 - Comentarios: `desk.conversations` con `kind = 'comment'`, los 15 más recientes (`commented_time DESC NULLS LAST`).
-- Las etiquetas «Serial 1», «Serial 2» y «Serial 3» **no están confirmadas**: se verifican en la primera corrida real.
+- Etiquetas comprobadas en la base de Desk 2.0 el 10/11/2026: `custom_fields` guarda «Serial1», «Serial2» y «Serial3» (sin espacio). La búsqueda por etiqueta ignora los separadores, así que coinciden con `cf_serial1` a `cf_serial3`. «Equipo» (`cf_equipo_1`) no aparece en `custom_fields` porque Desk 2.0 lo pasa a la columna `equipo`, que es de donde se lee. «Equipo1» a «Equipo3» son otros campos (los de las remisiones con varios equipos) y el núcleo no los usa.
 
 **Drive:** tres carpetas (entradas, salidas generadas por n8n, salidas escaneadas) más una temporal para el OCR. Solo se hace OCR de los PDF que no están en la caché.
 
