@@ -164,7 +164,7 @@ describe('lo nuevo en el portal', () => {
 
   it('sin configurar: lo dice y el botón queda desactivado', async () => {
     render(<EquiposServicio api={apiFalsa({ configurado: false }).api} />);
-    expect((await screen.findByRole('alert')).textContent).toBe('Falta configurar Google Drive');
+    expect((await screen.findByRole('alert')).textContent).toBe('Falta la primera sincronización con n8n');
     expect((screen.getByRole('button', { name: 'Actualizar información' }) as HTMLButtonElement).disabled).toBe(true);
   });
 

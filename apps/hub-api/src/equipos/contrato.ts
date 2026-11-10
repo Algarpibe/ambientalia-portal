@@ -11,6 +11,9 @@ export const APP_ID = 'equipos-taller';
 
 export type OrigenCorrida = 'programada' | 'boton';
 
+/** Causa de una corrida cuando la última sincronización completa de n8n es demasiado vieja (la escribe servicio.ts). */
+export const CAUSA_SYNC_ATRASADA = 'drive: sincronización de n8n atrasada';
+
 /** Una fila de `portal.equipos_ejecucion`. */
 export interface Corrida {
   id: number;
@@ -56,7 +59,7 @@ export interface RespuestaEquipos {
   snap: Foto | null;
   ajustes: Record<string, AjusteFirmado>;
   actualizando: boolean;
-  /** false si falta la configuración de Google Drive. */
+  /** false mientras no haya ninguna sincronización completa de n8n (la copia de Drive). */
   configurado: boolean;
   /** La última corrida YA TERMINADA (ok o fallida): enCurso es siempre false. La que corre se refleja en `actualizando`. */
   ultima: Corrida | null;
@@ -101,6 +104,7 @@ export interface AvisoFoto {
 /** Qué fuente falló, dicho para la pantalla. */
 function queFallo(causa: string | null): string {
   if (causa?.startsWith('desk2:')) return 'No se pudo leer Desk 2.0';
+  if (causa === CAUSA_SYNC_ATRASADA) return 'La copia de Google Drive (n8n) está atrasada';
   if (causa?.startsWith('drive:')) return 'No se pudo leer Google Drive';
   return 'No se pudo actualizar la información';
 }
@@ -113,7 +117,7 @@ export function avisoFoto(
   e: Pick<RespuestaEquipos, 'configurado' | 'ultima' | 'ultimaBuena' | 'incidente'>,
   fecha: (iso: string) => string,
 ): AvisoFoto | null {
-  if (!e.configurado) return { texto: 'Falta configurar Google Drive', destacado: false };
+  if (!e.configurado) return { texto: 'Falta la primera sincronización con n8n', destacado: false };
   if (!e.ultima || e.ultima.ok !== false) return null;
   const datos = e.ultimaBuena?.fin ? '; datos del ' + fecha(e.ultimaBuena.fin) : '; todavía no hay datos';
   return { texto: queFallo(e.ultima.causa) + datos, destacado: (e.incidente?.fallosProgramados ?? 0) >= 2 };

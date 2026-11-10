@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { inspect } from 'node:util';
-import { HORA_POR_DEFECTO, leerConfig, RESERVA_POR_DEFECTO } from './config.js';
+import { HORA_POR_DEFECTO, leerConfig, MAX_HORAS_SYNC_POR_DEFECTO, RESERVA_POR_DEFECTO } from './config.js';
 
 // Configuración desde el entorno: qué deja el módulo «sin configurar» y qué se apaga.
 // Todo ficticio: ni la clave ni las carpetas son reales.
@@ -79,5 +79,23 @@ describe('leerConfig: endurecimiento', () => {
 
   it('el token de la alerta se recorta', () => {
     expect(leerConfig({ EQUIPOS_ALERTA_WEBHOOK_URL: 'https://n8n.example/webhook/x', EQUIPOS_ALERTA_TOKEN: '  t0k\n' }).alerta?.token).toBe('t0k');
+  });
+});
+
+describe('leerConfig: la copia de Drive que manda n8n', () => {
+  it('la frescura máxima es de 6 h salvo un entero de 1 a 168', () => {
+    expect(MAX_HORAS_SYNC_POR_DEFECTO).toBe(6);
+    expect(leerConfig({}).maxHorasSync).toBe(MAX_HORAS_SYNC_POR_DEFECTO);
+    expect(leerConfig({ EQUIPOS_SYNC_MAX_HORAS: '12' }).maxHorasSync).toBe(12);
+    expect(leerConfig({ EQUIPOS_SYNC_MAX_HORAS: ' 168 ' }).maxHorasSync).toBe(168);
+    for (const v of ['0', '169', '1.5', '-3', 'seis', '']) expect(leerConfig({ EQUIPOS_SYNC_MAX_HORAS: v }).maxHorasSync, v).toBe(MAX_HORAS_SYNC_POR_DEFECTO);
+  });
+
+  it('del token solo se sabe si está y vale como cabecera; su valor no sale', () => {
+    expect(leerConfig({}).tokenSync).toBe(false);
+    expect(leerConfig({ EQUIPOS_SYNC_TOKEN: 'con espacio' }).tokenSync).toBe(false);
+    const c = leerConfig({ EQUIPOS_SYNC_TOKEN: 'token-ficticio-123' });
+    expect(c.tokenSync).toBe(true);
+    expect(JSON.stringify(c)).not.toMatch(/token-ficticio-123/);
   });
 });

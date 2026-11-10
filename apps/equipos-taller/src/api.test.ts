@@ -30,8 +30,8 @@ describe('apiEquipos', () => {
     expect(await apiEquipos(B, f, cab).actualizar()).toBe('iniciada');
   });
   it('un 503 o un 403 lanzan el mensaje del servidor', async () => {
-    const { f } = falso({ ['POST ' + B + '/actualizar']: J({ error: 'sin_configurar', message: 'Falta configurar Google Drive' }, 503), ['GET ' + B + '/llaves']: J({ error: 'forbidden' }, 403) });
-    await expect(apiEquipos(B, f, cab).actualizar()).rejects.toThrow('Falta configurar Google Drive');
+    const { f } = falso({ ['POST ' + B + '/actualizar']: J({ error: 'sin_configurar', message: 'Falta la primera sincronización con n8n' }, 503), ['GET ' + B + '/llaves']: J({ error: 'forbidden' }, 403) });
+    await expect(apiEquipos(B, f, cab).actualizar()).rejects.toThrow('Falta la primera sincronización con n8n');
     await expect(apiEquipos(B, f, cab).llaves()).rejects.toThrow('forbidden');
   });
   it('un 400 o un 404 lanzan el texto fijo del servidor', async () => {

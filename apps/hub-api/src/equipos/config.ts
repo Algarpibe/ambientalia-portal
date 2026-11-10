@@ -20,6 +20,8 @@ const entornoDelProceso = (): Entorno => ({
   EQUIPOS_DRIVE_SALIDAS_N8N: process.env.EQUIPOS_DRIVE_SALIDAS_N8N,
   EQUIPOS_DRIVE_SALIDAS_ESCANEADAS: process.env.EQUIPOS_DRIVE_SALIDAS_ESCANEADAS,
   EQUIPOS_DRIVE_TEMPORAL: process.env.EQUIPOS_DRIVE_TEMPORAL,
+  EQUIPOS_SYNC_TOKEN: process.env.EQUIPOS_SYNC_TOKEN,
+  EQUIPOS_SYNC_MAX_HORAS: process.env.EQUIPOS_SYNC_MAX_HORAS,
   EQUIPOS_HORA_DIARIA: process.env.EQUIPOS_HORA_DIARIA,
   EQUIPOS_ALERTA_WEBHOOK_URL: process.env.EQUIPOS_ALERTA_WEBHOOK_URL,
   EQUIPOS_ALERTA_TOKEN: process.env.EQUIPOS_ALERTA_TOKEN,
@@ -33,6 +35,9 @@ export const DOMINIO_ALERTA = '@ambientalia.com.co';
 
 /** Una dirección de correo del dominio de alertas: una sola arroba, sin espacios. */
 export const DIRECCION_ALERTA = /^[^\s@]+@ambientalia\.com\.co$/;
+
+/** Horas que puede tener, como mucho, la última sincronización completa de n8n. */
+export const MAX_HORAS_SYNC_POR_DEFECTO = 6;
 
 export interface ConfigAlerta {
   url: string;
@@ -49,6 +54,10 @@ export interface ConfigEquipos {
   /** null = alerta apagada. */
   alerta: ConfigAlerta | null;
   reserva: string;
+  /** EQUIPOS_SYNC_MAX_HORAS: con una copia de Drive más vieja, la corrida falla. */
+  maxHorasSync: number;
+  /** Si EQUIPOS_SYNC_TOKEN está y vale como cabecera. Nunca su valor: lo lee requireCronToken (auth.ts). */
+  tokenSync: boolean;
 }
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -67,6 +76,8 @@ function esUrl(v: string | undefined): boolean {
 }
 /** Un token válido como valor de cabecera: sólo ASCII visible, sin espacios. */
 const esToken = (v: string | undefined): v is string => v !== undefined && /^[\x21-\x7E]+$/.test(v);
+/** Un entero de hasta tres cifras (luego se acota de 1 a 168). */
+const HORAS = /^\d{1,3}$/;
 
 function cuenta(v: string | undefined): CuentaServicioGoogle | null {
   try {
@@ -105,11 +116,15 @@ export function leerConfig(env: Entorno = entornoDelProceso()): ConfigEquipos {
   const url = (env.EQUIPOS_ALERTA_WEBHOOK_URL ?? '').trim();
   const token = env.EQUIPOS_ALERTA_TOKEN?.trim();
   const reserva = (env.EQUIPOS_ALERTA_RESERVA ?? '').trim().toLowerCase();
+  const horas = (env.EQUIPOS_SYNC_MAX_HORAS ?? '').trim();
+  const maxHoras = HORAS.test(horas) ? Number(horas) : NaN;
   return {
     drive: sa && !faltaDrive.length ? { cuentaServicio: sa, carpetas: { entradas, salidasGeneradas, salidasEscaneadas }, carpetaTemporalOcr } : null,
     faltaDrive,
     horaDiaria: HORA.test(hora) ? hora : HORA_POR_DEFECTO,
     alerta: esUrl(url) && esToken(token) ? { url, token } : null,
     reserva: DIRECCION_ALERTA.test(reserva) ? reserva : RESERVA_POR_DEFECTO,
+    maxHorasSync: maxHoras >= 1 && maxHoras <= 168 ? maxHoras : MAX_HORAS_SYNC_POR_DEFECTO,
+    tokenSync: esToken(env.EQUIPOS_SYNC_TOKEN),
   };
 }

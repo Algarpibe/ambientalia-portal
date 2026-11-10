@@ -169,7 +169,7 @@ describe('POST /equipos-taller/actualizar', () => {
   it('503 sin configurar', async () => {
     lanzar = async () => 'sin_configurar';
     const r = await request(app()).post(B + '/actualizar').set('Authorization', token().auth);
-    expect([r.status, r.body.message]).toEqual([503, 'Falta configurar Google Drive']);
+    expect([r.status, r.body.message]).toEqual([503, 'Falta la primera sincronización con n8n']);
   });
 });
 

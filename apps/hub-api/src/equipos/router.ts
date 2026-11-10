@@ -97,7 +97,7 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
 
   router.post('/equipos-taller/actualizar', ...gated, ruta('equipos_actualizar', async (req, res) => {
     const e = await deps.servicio.lanzar('boton', quien(req).userId);
-    if (e === 'sin_configurar') res.status(503).json({ error: 'sin_configurar', message: 'Falta configurar Google Drive' });
+    if (e === 'sin_configurar') res.status(503).json({ error: 'sin_configurar', message: 'Falta la primera sincronización con n8n' });
     else if (e === 'ocupado') res.status(409).json({ estado: 'ocupado', message: 'Ya se está actualizando' });
     else res.status(202).json({ estado: 'iniciada' });
   }));
