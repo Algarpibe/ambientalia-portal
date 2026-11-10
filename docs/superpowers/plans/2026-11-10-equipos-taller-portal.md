@@ -37,7 +37,7 @@
 | A6 | Búsqueda por serial: `ILIKE` sobre `serial`, `subject`, `raw->'cf'` y `raw->>'subject'`, los 10 más recientes. | Equivale a la búsqueda `_all` de Zoho que usaba el módulo. |
 | A7 | El programador NO lanza corrida de recuperación al arrancar. | Una corrida «programada» tras cada despliegue contaría para el incidente. Para eso está el botón. |
 | A8 | No hay «tarjeta en el Dashboard»: el Dashboard del portal es de widgets y su propio código dice que no repite el directorio de apps. La app aparece en el Sidebar (por `APPS`) y en Aplicaciones. | `apps/portal/src/pages/Dashboard.tsx:10-12`. |
-| A9 | Un PDF que Drive no puede exportar hace fallar la corrida (D5), aunque sea uno solo. | Es lo que dice D5. Riesgo: un PDF corrupto bloquea la foto hasta que se arregle en Drive; la causa (`drive: HTTP 4xx`) lo delata. |
+| A9 | Un PDF que Drive no puede convertir a texto (4xx de ese archivo, que no sea 401 ni 429) **no** hace fallar la corrida: va a remisiones ilegibles («sin texto legible») y no entra en la caché, así que se reintenta en cada corrida. Si fallan **todos** los PDF intentados (2 o más) y ninguno sale, es un problema de Drive y la corrida falla. El listado, el token, la cuota, los 5xx y la red siguen haciendo fallar la corrida. | Decisión de Alfonso (10/11/2026), que corrige D5 para que un PDF corrupto no bloquee la foto. Ver diseño §5.1. |
 | A10 | El registro de ids de app es `apps/portal/src/lib/apps.ts` (`APPS`): de ahí salen el modal de asignación, el AppGuard y el Sidebar. hub-api no tiene lista blanca de apps. | `users.repository.ts:setApps` guarda cualquier id. |
 | A11 | El admin se comprueba con `getPayload(req)?.role === 'admin'` (lo rellena `requireAuth` desde la base). | `auth.ts:232`. |
 
@@ -3379,7 +3379,7 @@ git commit -m "feat(equipos-taller): repositorio de portal.equipos_* (corridas, 
 - Create: `apps/hub-api/src/equipos/servicio.ts`
 - Test: `apps/hub-api/src/equipos/servicio.test.ts`
 
-Se adapta de `servidor/servicio.ts`. Lo nuevo: la sonda de Desk 2.0 antes de Drive, las fuentes vigiladas (cualquier fallo hace fallida la corrida, D5; el núcleo, que convierte fallos en avisos, no se toca), `exits` guardado aunque falle Drive, el incidente y la alerta.
+Se adapta de `servidor/servicio.ts`. Lo nuevo: la sonda de Desk 2.0 antes de Drive, las fuentes vigiladas (cualquier fallo hace fallida la corrida, D5, salvo el de un PDF concreto al pasarlo a texto, que va a ilegibles: supuesto A9; el núcleo, que convierte fallos en avisos, no se toca), `exits` guardado aunque falle Drive, el incidente y la alerta.
 
 - [ ] **Step 1: Escribir la prueba que falla**
 
@@ -3512,12 +3512,48 @@ describe('una corrida fallida', () => {
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
-  it('si falla Drive en un PDF, no toca la foto pero SÍ guarda el OCR que ya salió', async () => {
+  it('si Drive falla de verdad (5xx) en un PDF, no toca la foto pero SÍ guarda el OCR que ya salió', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(500); return block('18A90002'); } });
     expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 500' });
     expect(s.foto).toBe(FOTO_VIEJA);
     expect(s.exits?.list.map((x) => x.id)).toEqual(['S1']);
+  });
+
+  it('si TODOS los PDF intentados fallan al pasarlos a texto (2 o más), es un problema de Drive: la corrida falla', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes({ textoPdf: async () => { throw new ErrorDrive(403); } });
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo convertir ningún PDF (HTTP 403)' });
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
+});
+
+describe('un PDF que Drive no puede convertir (A9)', () => {
+  it('la corrida sigue; ese PDF va a ilegibles y NO entra en la caché (se reintenta en la siguiente)', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(400); return block('18A90002'); } });
+    const r = await crear(() => f, repo).ejecutar('boton', null);
+    expect(r).toMatchObject({ estado: 'ok', conteos: { remisiones_ilegibles: 1 } });
+    expect(s.foto?.ilegibles).toContainEqual({
+      id: 'S2',
+      n: '261020 - CLIENTE C.pdf',
+      d: '2026-10-20',
+      m: 'sin texto legible',
+      q: 'Google Drive no pudo convertir este PDF a texto (HTTP 400): revisar el archivo en Drive',
+      p: [],
+    });
+    expect(s.exits?.list.map((x) => x.id)).toEqual(['S1']);
+  });
+
+  it('en la siguiente corrida se vuelve a intentar y, si ya sale, deja de ser ilegible por ese motivo', async () => {
+    const { repo, s } = repoEnMemoria();
+    let roto = true;
+    const f = () => fuentes({ textoPdf: async (id) => { if (id === 'S2' && roto) throw new ErrorDrive(400); return block(id === 'S2' ? '18A90001' : '18A90002'); } });
+    await crear(f, repo).ejecutar('boton', null);
+    roto = false;
+    await crear(f, repo).ejecutar('boton', null);
+    expect(s.foto?.ilegibles?.some((x) => x.id === 'S2')).toBe(false);
+    expect(s.exits?.list.map((x) => x.id).sort()).toEqual(['S1', 'S2']);
   });
 });
 
@@ -3586,12 +3622,32 @@ describe('incidente y alerta', () => {
 describe('vigilarFuentes', () => {
   it('apunta la primera causa de cada origen y Desk 2.0 manda sobre Drive', async () => {
     const f = fuentes({ tickets: async () => { throw Object.assign(new Error('x'), { code: '42501' }); } });
-    f.drive.textoPdf = async () => { throw new ErrorDrive(403); };
+    f.drive.salidasEscaneadas = async () => { throw new ErrorDrive(403); };
     const v = vigilarFuentes(f);
-    await v.fuentes.textoPdf('S1').catch(() => {});
+    await v.fuentes.salidasEscaneadas().catch(() => {});
     expect(v.fallo()).toBe('drive: HTTP 403');
     await v.fuentes.tickets('18A90001').catch(() => {});
     expect(v.fallo()).toBe('desk2: consulta rechazada (permisos o esquema)');
+  });
+
+  it('un 4xx al convertir UN PDF es del archivo: no es fallo de la corrida y sale en pdfsSinTexto con su título', async () => {
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(403); return 'texto'; } });
+    const v = vigilarFuentes(f);
+    await v.fuentes.salidasEscaneadas();
+    await v.fuentes.textoPdf('S1');
+    await expect(v.fuentes.textoPdf('S2')).rejects.toBeInstanceOf(ErrorDrive);
+    expect(v.fallo()).toBeNull();
+    expect(v.pdfsSinTexto()).toEqual([{ id: 'S2', n: '261020 - CLIENTE C.pdf', status: 403 }]);
+  });
+
+  it('401 (token) y 429 (cuota) al convertir un PDF NO son del archivo: hacen fallar la corrida', async () => {
+    for (const status of [401, 429]) {
+      const f = fuentes({ textoPdf: async () => { throw new ErrorDrive(status); } });
+      const v = vigilarFuentes(f);
+      await v.fuentes.textoPdf('S1').catch(() => {});
+      expect(v.fallo()).toBe('drive: HTTP ' + status);
+      expect(v.pdfsSinTexto()).toEqual([]);
+    }
   });
 });
 ```
@@ -3617,17 +3673,22 @@ Crear `apps/hub-api/src/equipos/servicio.ts`:
  *      muchos fallos en avisos y sigue; aquí cualquier fallo de una fuente hace
  *      fallida la corrida (D5: nunca una foto con datos incompletos). Si falla
  *      Drive, el texto de OCR ya extraído se guarda igual (`exits` es caché).
+ *      EXCEPCIÓN (A9): un PDF concreto que Drive no puede pasar a texto (4xx de
+ *      ese archivo) no es un fallo de la fuente: va a ilegibles y, como el núcleo
+ *      no lo mete en la caché, se reintenta en la siguiente corrida. Si fallan
+ *      todos los intentados (2 o más) y ninguno sale, sí es de Drive.
  *   4. Foto y cierre en una transacción (repo.terminarBien).
  * Después, el incidente (incidente.ts) y, si toca, la alerta (alerta.ts).
  *
  * Una corrida fallida NUNCA toca `foto`. La siguiente es el reintento.
  */
 import { actualizar, hoyBogota } from './nucleo/actualizar.js';
-import { EST, type Foto, type Fuentes, type Resultado } from './nucleo/tipos.js';
+import { iso } from './nucleo/reglas.js';
+import { EST, type Foto, type Fuentes, type Ilegible, type Resultado } from './nucleo/tipos.js';
 import type { OrigenCorrida } from './contrato.js';
 import { decidirIncidente } from './incidente.js';
 import { correoAlerta, destinatarios, type CanalAlerta } from './alerta.js';
-import { motivoDrive, type FuenteDrive } from './fuente-drive.js';
+import { ErrorDrive, motivoDrive, type FuenteDrive } from './fuente-drive.js';
 import { motivoDesk2, type FuenteDesk2 } from './fuente-desk2.js';
 import type { RepoEquipos } from './repo.js';
 
@@ -3677,13 +3738,47 @@ export function contar(foto: Foto): Record<string, number> {
   };
 }
 
+/** Un PDF de salida escaneada que Drive no pudo pasar a texto (A9). */
+export interface PdfSinTexto {
+  id: string;
+  /** Nombre del archivo en Drive (el id si no apareció en el listado). */
+  n: string;
+  status: number;
+}
+
+/**
+ * ¿El fallo es de UN archivo concreto y no de Drive? Un 4xx de la conversión que
+ * no sea del token (401) ni de la cuota (429). Un 403 entra aquí: Drive lo da,
+ * por ejemplo, cuando un archivo supera el tamaño exportable. Si el problema es
+ * de permisos de la carpeta temporal, fallan TODOS y lo detecta `fallo()`.
+ */
+export function esFalloDeArchivo(e: unknown): e is ErrorDrive {
+  return e instanceof ErrorDrive && !e.enToken && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429;
+}
+
+/** La fila de ilegibles de un PDF sin texto. `d` sale del AAMMDD del nombre, como en el núcleo. */
+export function ilegibleSinTexto(p: PdfSinTexto): Ilegible {
+  return {
+    id: p.id,
+    n: p.n,
+    d: iso((p.n.match(/^\d{6}/) || [''])[0]),
+    m: 'sin texto legible',
+    q: 'Google Drive no pudo convertir este PDF a texto (HTTP ' + p.status + '): revisar el archivo en Drive',
+    p: [],
+  };
+}
+
 /**
  * Las fuentes del núcleo, vigiladas: cada fallo se apunta (el primero de cada
  * origen, ya traducido a una causa sin secretos) y el error sigue su camino.
+ * Los fallos de archivo al pasar un PDF a texto se apartan en `pdfsSinTexto()`.
  */
-export function vigilarFuentes(f: FuentesCorrida): { fuentes: Fuentes; fallo(): string | null } {
+export function vigilarFuentes(f: FuentesCorrida): { fuentes: Fuentes; fallo(): string | null; pdfsSinTexto(): PdfSinTexto[] } {
   let desk2: string | null = null;
   let drive: string | null = null;
+  const titulos = new Map<string, string>();
+  const sinTexto: PdfSinTexto[] = [];
+  let convertidos = 0;
   const de = <A extends unknown[], R>(origen: 'desk2' | 'drive', fn: (...a: A) => Promise<R>) =>
     async (...a: A): Promise<R> => {
       try {
@@ -3698,14 +3793,32 @@ export function vigilarFuentes(f: FuentesCorrida): { fuentes: Fuentes; fallo(): 
     fuentes: {
       entradas: de('drive', () => f.drive.entradas()),
       salidasGeneradas: de('drive', () => f.drive.salidasGeneradas()),
-      salidasEscaneadas: de('drive', () => f.drive.salidasEscaneadas()),
-      textoPdf: de('drive', (id: string) => f.drive.textoPdf(id)),
+      salidasEscaneadas: de('drive', async () => {
+        const lista = await f.drive.salidasEscaneadas();
+        for (const a of lista) titulos.set(a.id, a.title);
+        return lista;
+      }),
+      textoPdf: async (id: string) => {
+        try {
+          const t = await f.drive.textoPdf(id);
+          convertidos++;
+          return t;
+        } catch (e) {
+          if (esFalloDeArchivo(e)) sinTexto.push({ id, n: titulos.get(id) ?? id, status: e.status });
+          else drive ??= 'drive: ' + motivoDrive(e);
+          throw e; // el núcleo lo apunta en avisos y NO lo mete en la caché
+        }
+      },
       remisionEntrada: de('drive', (id: string) => f.drive.remisionEntrada(id)),
       tickets: de('desk2', (sn: string) => f.desk2.tickets(sn)),
       ticketNumero: de('desk2', (n: string) => f.desk2.ticketNumero(n)),
       comentarios: de('desk2', (id: string) => f.desk2.comentarios(id)),
     },
-    fallo: () => desk2 ?? drive,
+    fallo: () =>
+      desk2 ??
+      drive ??
+      (sinTexto.length >= 2 && convertidos === 0 ? 'drive: no se pudo convertir ningún PDF (HTTP ' + sinTexto[0].status + ')' : null),
+    pdfsSinTexto: () => [...sinTexto],
   };
 }
 
@@ -3742,6 +3855,7 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
         causa = 'desk2: ' + motivoDesk2(e);
       }
       let r: Resultado | null = null;
+      let sinTexto: PdfSinTexto[] = [];
       if (!causa) {
         const v = vigilarFuentes(f);
         const cache = await deps.repo.leerCaches();
@@ -3751,6 +3865,7 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
           causa = v.fallo() ?? 'interno: error inesperado';
         }
         causa ??= v.fallo();
+        sinTexto = v.pdfsSinTexto();
       }
       if (causa || !r) {
         const c = causa ?? 'interno: error inesperado';
@@ -3759,8 +3874,10 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
       } else {
         const sinCf = sonda && sonda.total > sonda.conCf ? sonda.total - sonda.conCf : 0;
         const avisos = sinCf ? [...r.avisos, sinCf + ' tickets de Desk 2.0 sin campos personalizados (raw.cf): se usan solo sus columnas'] : r.avisos;
-        const conteos = contar(r.snap);
-        await deps.repo.terminarBien(id, { foto: r.snap, exits: r.exits, ent: r.ent, avisos, conteos });
+        // A9: los PDF que Drive no pudo pasar a texto van a ilegibles (no están en la caché).
+        const foto: Foto = sinTexto.length ? { ...r.snap, ilegibles: [...(r.snap.ilegibles ?? []), ...sinTexto.map(ilegibleSinTexto)] } : r.snap;
+        const conteos = contar(foto);
+        await deps.repo.terminarBien(id, { foto, exits: r.exits, ent: r.ent, avisos, conteos });
         fin = { estado: 'ok', conteos, avisos };
       }
     } catch {
@@ -3808,7 +3925,7 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
 cd apps/hub-api && npx vitest run src/equipos/servicio.test.ts
 ```
 
-Esperado: PASS, 10 tests.
+Esperado: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -5500,7 +5617,7 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 
 1. **Candado:** se inserta la corrida «en curso» (`portal.equipos_ejecucion`). Si ya hay otra: 409 «Ya se está actualizando». Una corrida colgada más de 180 min se da por abandonada.
 2. **Desk 2.0:** una sonda de `desk.tickets` y `desk.conversations`. Si falla → `desk2: <motivo>`.
-3. **Drive y núcleo:** listado de las 3 carpetas, OCR solo de los PDF que no están en la caché (`exits`, versión CV del núcleo), tickets por serial y comentarios de los equipos que siguen adentro. Cualquier fallo de una fuente hace fallida la corrida (`drive: …` o `desk2: …`); el texto de OCR ya extraído se guarda igual.
+3. **Drive y núcleo:** listado de las 3 carpetas, OCR solo de los PDF que no están en la caché (`exits`, versión CV del núcleo), tickets por serial y comentarios de los equipos que siguen adentro. Cualquier fallo de una fuente hace fallida la corrida (`drive: …` o `desk2: …`); el texto de OCR ya extraído se guarda igual. Excepción: un PDF concreto que Drive no puede pasar a texto va a remisiones ilegibles («Google Drive no pudo convertir este PDF a texto») y se reintenta en cada corrida; solo si fallan todos los intentados (2 o más) la corrida falla.
 4. **Foto:** la foto y el cierre de la corrida, en una transacción.
 
 Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última buena y avisa («No se pudo leer Desk 2.0; datos del …»). La siguiente corrida es el reintento.
@@ -5512,7 +5629,7 @@ Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última bue
 | `desk2: consulta rechazada (permisos o esquema)` | Falta el `GRANT SELECT ON desk.conversations TO portal_agenda_reader`, o cambió una columna. |
 | `drive: token rechazado (HTTP 4xx)` | La cuenta de servicio (`EQUIPOS_GOOGLE_CUENTA_SERVICIO`) no vale o está deshabilitada. |
 | `drive: HTTP 403` / `404` | A la cuenta de servicio le falta una carpeta compartida (lectura en las 3; edición en la temporal). |
-| `drive: HTTP 4xx` en el OCR | Un PDF que Drive no puede convertir: corregirlo o sacarlo de la carpeta. |
+| `drive: no se pudo convertir ningún PDF (HTTP 4xx)` | Fallan todos los PDF al pasarlos a texto: casi siempre, a la cuenta de servicio le falta edición en la carpeta temporal del OCR. (Un solo PDF que falla no aparece aquí: sale en remisiones ilegibles.) |
 
 ## Corrida diaria e incidentes
 
