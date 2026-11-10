@@ -4,8 +4,8 @@ import { crearEquiposTaller } from './index.js';
 import { detenerProgramadorEquipos } from './programador.js';
 import { leerConfig } from './config.js';
 
-// El montaje: sin Drive queda «sin configurar» y no enciende el programador. La base no
-// se toca al montar (el pool es un doble que falla si alguien lo usa).
+// El montaje: el programador se enciende siempre (sin sincronización de n8n, cada corrida
+// programada se omite) y montar no toca la base (el pool es un doble que falla si alguien lo usa).
 const pool = { query: async () => { throw new Error('no se debe consultar al montar'); }, connect: async () => { throw new Error('no'); } } as unknown as Pool;
 
 afterEach(() => {
@@ -14,24 +14,27 @@ afterEach(() => {
 });
 
 describe('crearEquiposTaller', () => {
-  it('sin la configuración de Drive: sin configurar, sin programador, y lo dice nombrando solo variables', () => {
+  it('sin EQUIPOS_SYNC_TOKEN lo dice nombrando solo la variable, y el programador se enciende igual, una vez', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const m = crearEquiposTaller(pool, () => null, leerConfig({}));
-    expect(m.servicio.configurado()).toBe(false);
-    expect(m.iniciarProgramador()).toBe(false);
-    expect(warn.mock.calls.flat().join(' ')).toMatch(/sin configurar \(faltan o no valen: EQUIPOS_GOOGLE_CUENTA_SERVICIO, EQUIPOS_DRIVE_ENTRADAS/);
-  });
-
-  it('con Drive configurado, el programador se enciende una vez', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const cfg = leerConfig({
-      EQUIPOS_GOOGLE_CUENTA_SERVICIO: JSON.stringify({ client_email: 'sa@ficticio.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\nA\n-----END PRIVATE KEY-----' }),
-      EQUIPOS_DRIVE_ENTRADAS: 'carpetaEntradas01', EQUIPOS_DRIVE_SALIDAS_N8N: 'carpetaSalidasN8n1', EQUIPOS_DRIVE_SALIDAS_ESCANEADAS: 'carpetaEscaneos01', EQUIPOS_DRIVE_TEMPORAL: 'carpetaTemporal01',
-    });
-    const m = crearEquiposTaller(pool, () => null, cfg);
-    expect(m.servicio.configurado()).toBe(true);
+    const m = crearEquiposTaller(pool, () => null, leerConfig({}));
+    expect(warn.mock.calls.flat().join(' ')).toMatch(/falta o no vale EQUIPOS_SYNC_TOKEN/);
     expect(m.iniciarProgramador()).toBe(true);
     expect(m.iniciarProgramador()).toBe(false);
+  });
+
+  it('con el token no avisa de él y nunca enseña su valor', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const m = crearEquiposTaller(pool, () => null, leerConfig({ EQUIPOS_SYNC_TOKEN: 'token-ficticio-123' }));
+    const t = warn.mock.calls.flat().join(' ');
+    expect(t).not.toMatch(/EQUIPOS_SYNC_TOKEN/);
+    expect(t).not.toMatch(/token-ficticio-123/);
+    expect(typeof m.sync.registrarListado).toBe('function');
+  });
+
+  it('«configurado» lo decide la base: sin ninguna pasada completa de n8n, false', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const vacia = { query: async () => ({ rows: [], rowCount: 0 }), connect: async () => { throw new Error('no'); } } as unknown as Pool;
+    expect(await crearEquiposTaller(vacia, () => null, leerConfig({})).servicio.configurado()).toBe(false);
   });
 });

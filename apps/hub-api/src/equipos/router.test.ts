@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
 import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, UsuarioConLlaves } from './contrato.js';
+import type { RepoSync } from './repo-sync.js';
 
 // Las rutas con Express de verdad: guardas de sesión y de app, llaves, 403/400/404/409/503.
 // El SQL lo cubre repo.db.test.ts; aquí el repositorio y el servicio son dobles. La
@@ -66,7 +67,7 @@ const repo = {
     userId.endsWith('999999999999') ? null : { userId, nombre: 'X', email: 'x@ambientalia.com.co', esAdmin: false, ...l, actualizadoPor: por, actualizadoEn: '2026-11-10T15:00:00.000Z' },
 } as unknown as RepoEquipos;
 const servicio = {
-  configurado: () => configurado,
+  configurado: async () => configurado,
   actualizando: () => servicioOcupado,
   lanzar: (o: 'programada' | 'boton', u: string | null) => lanzar(o, u),
 } as unknown as ServicioEquipos;
@@ -74,7 +75,7 @@ const servicio = {
 const app = () => {
   const a = express();
   a.use(express.json());
-  a.use('/api', createEquiposTallerRouter({ repo, servicio }));
+  a.use('/api', createEquiposTallerRouter({ repo, servicio, sync: {} as unknown as RepoSync }));
   return a;
 };
 const B = '/api/equipos-taller';
@@ -242,5 +243,13 @@ describe('llaves', () => {
     const mala = await request(app()).put(B + '/llaves/no-es-uuid').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: true });
     expect([mala.status, mala.body.message]).toEqual([400, 'Llaves no válidas']);
     expect((await request(app()).put(B + '/llaves/00000000-0000-4000-8000-999999999999').set('Authorization', a).send({ editaAjustes: true, recibeAlertas: true })).status).toBe(404);
+  });
+});
+
+describe('rutas de n8n', () => {
+  it('están montadas y las guarda su token, no la sesión', async () => {
+    delete process.env.EQUIPOS_SYNC_TOKEN;
+    const r = await request(app()).post(B + '/sync/fin').set('Authorization', token({ role: 'admin' }).auth).send({ pasada: '1', conteos: {} });
+    expect([r.status, r.body]).toEqual([401, { error: 'unauthorized' }]);
   });
 });

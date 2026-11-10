@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { crearServicioEquipos, vigilarFuentes, type FuentesCorrida } from './servicio.js';
-import { ErrorDrive, type FuenteDrive } from './fuente-drive.js';
+import { CAUSA_COPIA_DRIVE, crearServicioEquipos, vigilarFuentes, type DepsServicio, type FuentesCorrida } from './servicio.js';
+import { FalloArchivo, type FuenteDrive } from './fuente-n8n.js';
 import { SinDesk2, type FuenteDesk2 } from './fuente-desk2.js';
 import { CV, EST, type CacheEscaneos, type Foto, type RemisionEntrada } from './nucleo/index.js';
 import { CorridaCerrada, type RepoEquipos, type CorridaBuena } from './repo.js';
-import type { Corrida, Incidente } from './contrato.js';
+import type { SincronizacionHecha } from './repo-sync.js';
+import { CAUSA_SYNC_ATRASADA, type Corrida, type Incidente } from './contrato.js';
 import type { DecisionIncidente } from './incidente.js';
 import type { CanalAlerta, CorreoAlerta } from './alerta.js';
 
-// Una corrida de punta a punta con un repositorio EN MEMORIA y fuentes simuladas:
-// candado, Desk 2.0 → Drive → núcleo → foto, y el incidente con su alerta. El SQL del
-// repositorio: repo.db.test.ts. Todo ficticio.
+// Una corrida de punta a punta con un repositorio EN MEMORIA y fuentes simuladas: candado,
+// Desk 2.0 → frescura de la copia de Drive → núcleo → foto, y el incidente con su alerta.
+// El SQL: repo.db.test.ts y repo-sync.db.test.ts. Todo ficticio.
 const FOTO_VIEJA: Foto = { at: '2026-11-08T11:35:00.000Z', hoy: '2026-11-08', rows: [], ilegibles: [] };
+const AHORA = Date.parse('2026-11-10T11:30:00.000Z');
+const HORA = 3_600_000;
+/** La última pasada completa de n8n: terminó hace 70 minutos. */
+const SYNC: SincronizacionHecha = { pasada: '101', inicio: '2026-11-10T10:00:00.000Z', fin: '2026-11-10T10:20:00.000Z' };
+const haceHoras = (h: number, masMs = 0): SincronizacionHecha => ({ ...SYNC, fin: new Date(AHORA - h * HORA - masMs).toISOString() });
 
 function repoEnMemoria() {
   const s = {
@@ -72,8 +78,6 @@ function fuentes(
     textoPdf?: (id: string) => Promise<string>;
     sonda?: () => Promise<{ total: number; conCf: number }>;
     tickets?: FuenteDesk2['tickets'];
-    limpiarTemporal?: FuenteDrive['limpiarTemporal'];
-    copiasSinBorrar?: () => number;
   } = {},
 ): FuentesCorrida {
   const drive: FuenteDrive = {
@@ -82,8 +86,6 @@ function fuentes(
     salidasEscaneadas: async () => [{ id: 'S1', title: '260915 - CLIENTE B.pdf' }, { id: 'S2', title: '261020 - CLIENTE C.pdf' }],
     textoPdf: o.textoPdf ?? (async (id) => (id === 'S1' ? block('18A90002') : '')),
     remisionEntrada: async () => '',
-    limpiarTemporal: o.limpiarTemporal ?? (async () => ({ borradas: 0, fallidas: 0 })),
-    copiasSinBorrar: o.copiasSinBorrar ?? (() => 0),
   };
   const desk2: FuenteDesk2 = {
     sonda: o.sonda ?? (async () => ({ total: 3, conCf: 3 })),
@@ -98,8 +100,13 @@ function canalFalso(ok = true) {
   const canal: CanalAlerta = { encendido: true, enviar: async (correo, ref) => { enviados.push({ correo, ref }); return ok ? { ok: true } : { ok: false, error: 'n8n respondió 500' }; } };
   return { canal, enviados };
 }
-const crear = (f: () => FuentesCorrida, repo: RepoEquipos, canal = canalFalso().canal) =>
-  crearServicioEquipos({ repo, fuentes: f, canal, reserva: 'comercial@ambientalia.com.co', log: () => {}, hoy: () => '2026-11-10' });
+/** El servicio con la copia de Drive al día, salvo que `o` diga otra cosa. */
+const crear = (f: () => FuentesCorrida, repo: RepoEquipos, canal = canalFalso().canal, o: Partial<DepsServicio> = {}) =>
+  crearServicioEquipos({
+    repo, sync: { ultimaSincronizacion: async () => SYNC }, fuentes: () => f(), maxHorasSync: 6, canal,
+    reserva: 'comercial@ambientalia.com.co', log: () => {}, hoy: () => '2026-11-10', ahora: () => AHORA, ...o,
+  });
+const conSync = (s: SincronizacionHecha | null): Partial<DepsServicio> => ({ sync: { ultimaSincronizacion: async () => s } });
 
 describe('una corrida buena', () => {
   it('escribe la foto con sus conteos y la caché de OCR', async () => {
@@ -116,17 +123,99 @@ describe('una corrida buena', () => {
     const r = await crear(() => fuentes({ sonda: async () => ({ total: 10, conCf: 7 }) }), repo).ejecutar('boton', null);
     expect(r.estado === 'ok' && r.avisos).toContain('3 tickets de Desk 2.0 sin campos personalizados (raw.cf): se usan solo sus columnas');
   });
+
+  it('D10: el OCR se relee de la copia en cada corrida, así que un PDF renombrado sale con su nombre nuevo', async () => {
+    const { repo, s } = repoEnMemoria();
+    s.exits = { v: CV, list: [{ id: 'S1', n: '260915 - NOMBRE VIEJO.pdf', d: '2026-09-15', t: [], it: {} }] };
+    const leidos: string[] = [];
+    await crear(() => fuentes({ textoPdf: async (id) => { leidos.push(id); return id === 'S1' ? block('18A90002') : ''; } }), repo).ejecutar('boton', null);
+    expect(leidos.sort()).toEqual(['S1', 'S2']);
+    expect(s.exits?.list.find((x) => x.id === 'S1')?.n).toBe('260915 - CLIENTE B.pdf');
+  });
+
+  it('la caché de remisiones de entrada SÍ se usa: una entrada ya leída no se vuelve a pedir', async () => {
+    const { repo, s } = repoEnMemoria();
+    s.cacheEnt = { E1: { eq: 'EDM180C', srv: '', k: '' } };
+    const pedidas: string[] = [];
+    const f = fuentes();
+    f.drive.remisionEntrada = async (id) => { pedidas.push(id); return ''; };
+    await crear(() => f, repo).ejecutar('boton', null);
+    expect(pedidas).toEqual([]);
+    expect(s.foto?.rows.find((x) => x.sn === '18A90001')?.eq).toBe('EDM180C');
+  });
+
+  it('las fuentes se construyen con la pasada con la que corre', async () => {
+    const { repo } = repoEnMemoria();
+    let vista: SincronizacionHecha | null = null;
+    await crear(() => fuentes(), repo, canalFalso().canal, { fuentes: (x) => { vista = x; return fuentes(); } }).ejecutar('boton', null);
+    expect(vista).toEqual(SYNC);
+  });
+});
+
+describe('la copia de Drive que manda n8n', () => {
+  it('sin ninguna sincronización completa: «sin_configurar», y no se registra corrida ni incidente', async () => {
+    const { repo, s } = repoEnMemoria();
+    const srv = crear(() => fuentes(), repo, canalFalso().canal, conSync(null));
+    expect(await srv.configurado()).toBe(false);
+    expect(await srv.lanzar('boton', null)).toBe('sin_configurar');
+    expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'sin_configurar' });
+    expect(s.corridas).toEqual([]);
+    expect(s.incidente).toBeNull();
+  });
+
+  it('con una sincronización completa, configurado', async () => {
+    expect(await crear(() => fuentes(), repoEnMemoria().repo).configurado()).toBe(true);
+  });
+
+  it('más vieja que el máximo: la corrida falla sin leer la copia ni tocar la foto', async () => {
+    const { repo, s } = repoEnMemoria();
+    let leyo = false;
+    const f = fuentes();
+    f.drive.entradas = async () => { leyo = true; return []; };
+    expect(await crear(() => f, repo, canalFalso().canal, conSync(haceHoras(6, 1))).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
+    expect(leyo).toBe(false);
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
+
+  it('justo en el máximo todavía vale; el máximo es configurable', async () => {
+    expect((await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(6))).ejecutar('boton', null)).estado).toBe('ok');
+    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, { ...conSync(haceHoras(2)), maxHorasSync: 1 }).ejecutar('boton', null);
+    expect(r).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
+  });
+
+  it('atrasada cuenta para el incidente: a la 2.ª programada sale la alerta con esa causa', async () => {
+    const { repo } = repoEnMemoria();
+    const { canal, enviados } = canalFalso();
+    const srv = crear(() => fuentes(), repo, canal, conSync(haceHoras(30)));
+    await srv.ejecutar('programada', null);
+    await srv.ejecutar('programada', null);
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0].correo.cuerpo).toMatch(/sincronización de n8n atrasada/);
+  });
+
+  it('si fallan a la vez Desk 2.0 y la frescura, la causa es la de Desk 2.0', async () => {
+    const f = fuentes({ sonda: async () => { throw new SinDesk2(); } });
+    expect(await crear(() => f, repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30))).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'desk2: sin configurar' });
+  });
+
+  it('si no se puede leer la copia (la base), la corrida falla sin tocar la foto', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.entradas = async () => { throw Object.assign(new Error('pg: host secreto'), { code: 'ECONNRESET' }); };
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
+    expect(s.foto).toBe(FOTO_VIEJA);
+  });
 });
 
 describe('una corrida fallida', () => {
-  it('si falla Desk 2.0 no toca la foto ni lee Drive', async () => {
+  it('si falla Desk 2.0 no toca la foto ni lee la copia', async () => {
     const { repo, s } = repoEnMemoria();
-    let leyoDrive = false;
+    let leyo = false;
     const f = fuentes({ sonda: async () => { throw new SinDesk2(); } });
-    f.drive.entradas = async () => { leyoDrive = true; return []; };
+    f.drive.entradas = async () => { leyo = true; return []; };
     expect(await crear(() => f, repo).ejecutar('programada', null)).toEqual({ estado: 'error', causa: 'desk2: sin configurar' });
     expect(s.foto).toBe(FOTO_VIEJA);
-    expect(leyoDrive).toBe(false);
+    expect(leyo).toBe(false);
   });
 
   it('si Desk 2.0 falla a mitad (un serial), la corrida falla aunque el núcleo siga', async () => {
@@ -136,26 +225,28 @@ describe('una corrida fallida', () => {
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
-  it('si Drive falla de verdad (5xx) en un PDF, no toca la foto pero SÍ guarda el OCR que ya salió', async () => {
+  it('si la copia falla al leer un PDF (la base, no el archivo), no toca la foto pero SÍ guarda el OCR que ya salió', async () => {
     const { repo, s } = repoEnMemoria();
-    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(500); return block('18A90002'); } });
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 500' });
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new Error('pg: host secreto'); return block('18A90002'); } });
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
     expect(s.exits?.list.map((x) => x.id)).toEqual(['S1']);
   });
 
-  it('si TODOS los PDF intentados fallan al pasarlos a texto (2 o más), es un problema de Drive: la corrida falla', async () => {
-    const { repo, s } = repoEnMemoria();
-    const f = fuentes({ textoPdf: async () => { throw new ErrorDrive(403); } });
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo convertir ningún PDF (HTTP 403)' });
-    expect(s.foto).toBe(FOTO_VIEJA);
+  it('si TODOS los PDF están sin texto (2 o más) y ninguno sale, la corrida falla', async () => {
+    for (const [status, cola] of [[403, 'HTTP 403'], [null, 'texto pendiente de n8n']] as const) {
+      const { repo, s } = repoEnMemoria();
+      const f = fuentes({ textoPdf: async () => { throw new FalloArchivo(status); } });
+      expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo convertir ningún PDF (' + cola + ')' });
+      expect(s.foto).toBe(FOTO_VIEJA);
+    }
   });
 });
 
-describe('un PDF que Drive no puede convertir (A9)', () => {
-  it('la corrida sigue; ese PDF va a ilegibles y NO entra en la caché (se reintenta en la siguiente)', async () => {
+describe('un PDF sin texto en la copia (A9)', () => {
+  it('con un fallo guardado: la corrida sigue, el PDF va a ilegibles con su código y NO entra en la caché', async () => {
     const { repo, s } = repoEnMemoria();
-    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(400); return block('18A90002'); } });
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(400); return block('18A90002'); } });
     const r = await crear(() => f, repo).ejecutar('boton', null);
     expect(r).toMatchObject({ estado: 'ok', conteos: { remisiones_ilegibles: 1 } });
     expect(s.foto?.ilegibles).toContainEqual({
@@ -169,49 +260,22 @@ describe('un PDF que Drive no puede convertir (A9)', () => {
     expect(s.exits?.list.map((x) => x.id)).toEqual(['S1']);
   });
 
-  it('en la siguiente corrida se vuelve a intentar y, si ya sale, deja de ser ilegible por ese motivo', async () => {
+  it('con el texto todavía pendiente: también va a ilegibles, diciendo que falta n8n', async () => {
+    const { repo, s } = repoEnMemoria();
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(null); return block('18A90002'); } });
+    expect((await crear(() => f, repo).ejecutar('boton', null)).estado).toBe('ok');
+    expect(s.foto?.ilegibles?.find((x) => x.id === 'S2')?.q).toBe('n8n todavía no ha enviado el texto de este PDF: se pedirá en la próxima sincronización');
+  });
+
+  it('en la siguiente corrida, si ya tiene texto, deja de ser ilegible por ese motivo', async () => {
     const { repo, s } = repoEnMemoria();
     let roto = true;
-    const f = () => fuentes({ textoPdf: async (id) => { if (id === 'S2' && roto) throw new ErrorDrive(400); return block(id === 'S2' ? '18A90001' : '18A90002'); } });
+    const f = () => fuentes({ textoPdf: async (id) => { if (id === 'S2' && roto) throw new FalloArchivo(400); return block(id === 'S2' ? '18A90001' : '18A90002'); } });
     await crear(f, repo).ejecutar('boton', null);
     roto = false;
     await crear(f, repo).ejecutar('boton', null);
     expect(s.foto?.ilegibles?.some((x) => x.id === 'S2')).toBe(false);
     expect(s.exits?.list.map((x) => x.id).sort()).toEqual(['S1', 'S2']);
-  });
-});
-
-describe('copias temporales del OCR', () => {
-  it('limpia la carpeta temporal tras la sonda y ANTES de leer Drive', async () => {
-    const { repo } = repoEnMemoria();
-    const orden: string[] = [];
-    const f = fuentes({ sonda: async () => { orden.push('sonda'); return { total: 1, conCf: 1 }; }, limpiarTemporal: async () => { orden.push('limpiar'); return { borradas: 2, fallidas: 0 }; } });
-    const entradas = f.drive.entradas;
-    f.drive.entradas = async () => { orden.push('drive'); return entradas(); };
-    await crear(() => f, repo).ejecutar('boton', null);
-    expect(orden.slice(0, 3)).toEqual(['sonda', 'limpiar', 'drive']);
-  });
-
-  it('si el barrido falla, la corrida falla con «drive: <motivo>», sin leer Drive ni tocar la foto', async () => {
-    const { repo, s } = repoEnMemoria();
-    let leyoDrive = false;
-    const f = fuentes({ limpiarTemporal: async () => { throw Object.assign(new ErrorDrive(403), { message: 'cuerpo secreto' }); } });
-    f.drive.entradas = async () => { leyoDrive = true; return []; };
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 403' });
-    expect(leyoDrive).toBe(false);
-    expect(s.foto).toBe(FOTO_VIEJA);
-  });
-
-  it('si el barrido no pudo borrar alguna, la corrida sigue y lo avisa', async () => {
-    const { repo } = repoEnMemoria();
-    const r = await crear(() => fuentes({ limpiarTemporal: async () => ({ borradas: 1, fallidas: 2 }) }), repo).ejecutar('boton', null);
-    expect(r.estado === 'ok' && r.avisos).toContain('2 copias temporales del OCR no se pudieron borrar (carpeta temporal)');
-  });
-
-  it('si en esta corrida quedaron copias sin borrar, una corrida buena lo avisa', async () => {
-    const { repo } = repoEnMemoria();
-    const r = await crear(() => fuentes({ copiasSinBorrar: () => 3 }), repo).ejecutar('boton', null);
-    expect(r.estado === 'ok' && r.avisos).toContain('3 copias temporales del OCR no se pudieron borrar; se reintentará en la próxima corrida');
   });
 });
 
@@ -233,14 +297,6 @@ describe('candado', () => {
     expect(srv.actualizando()).toBe(false);
     expect(await srv.lanzar('boton', null)).toBe('iniciada');
     await srv.enCurso();
-  });
-
-  it('sin Drive configurado, «sin_configurar» y no se registra ninguna corrida', async () => {
-    const { repo, s } = repoEnMemoria();
-    const srv = crearServicioEquipos({ repo, fuentes: null, canal: canalFalso().canal, reserva: 'x@ambientalia.com.co', log: () => {} });
-    expect(srv.configurado()).toBe(false);
-    expect(await srv.lanzar('boton', null)).toBe('sin_configurar');
-    expect(s.corridas).toEqual([]);
   });
 });
 
@@ -278,34 +334,35 @@ describe('incidente y alerta', () => {
 });
 
 describe('vigilarFuentes', () => {
-  it('apunta la primera causa de cada origen y Desk 2.0 manda sobre Drive', async () => {
+  it('apunta la primera causa de cada origen y Desk 2.0 manda sobre la copia', async () => {
     const f = fuentes({ tickets: async () => { throw Object.assign(new Error('x'), { code: '42501' }); } });
-    f.drive.salidasEscaneadas = async () => { throw new ErrorDrive(403); };
+    f.drive.salidasEscaneadas = async () => { throw new Error('pg: host secreto'); };
     const v = vigilarFuentes(f);
     await v.fuentes.salidasEscaneadas().catch(() => {});
-    expect(v.fallo()).toBe('drive: HTTP 403');
+    expect(v.fallo()).toBe(CAUSA_COPIA_DRIVE);
     await v.fuentes.tickets('18A90001').catch(() => {});
     expect(v.fallo()).toBe('desk2: consulta rechazada (permisos o esquema)');
   });
 
-  it('un 4xx al convertir UN PDF es del archivo: no es fallo de la corrida y sale en pdfsSinTexto con su título', async () => {
-    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(403); return 'texto'; } });
+  it('un FalloArchivo de UN PDF no es fallo de la corrida y sale en pdfsSinTexto con su título', async () => {
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(403); return 'texto'; } });
     const v = vigilarFuentes(f);
     await v.fuentes.salidasEscaneadas();
     await v.fuentes.textoPdf('S1');
-    await expect(v.fuentes.textoPdf('S2')).rejects.toBeInstanceOf(ErrorDrive);
+    await expect(v.fuentes.textoPdf('S2')).rejects.toBeInstanceOf(FalloArchivo);
     expect(v.fallo()).toBeNull();
     expect(v.pdfsSinTexto()).toEqual([{ id: 'S2', n: '261020 - CLIENTE C.pdf', status: 403 }]);
   });
 
-  it('401 (token) y 429 (cuota) al convertir un PDF NO son del archivo: hacen fallar la corrida', async () => {
-    for (const status of [401, 429]) {
-      const f = fuentes({ textoPdf: async () => { throw new ErrorDrive(status); } });
-      const v = vigilarFuentes(f);
-      await v.fuentes.textoPdf('S1').catch(() => {});
-      expect(v.fallo()).toBe('drive: HTTP ' + status);
-      expect(v.pdfsSinTexto()).toEqual([]);
-    }
+  it('cualquier otro error al leer un PDF o una remisión (la base) sí hace fallar la corrida', async () => {
+    const f = fuentes({ textoPdf: async () => { throw new Error('pg caído'); } });
+    f.drive.remisionEntrada = async () => { throw new Error('pg caído'); };
+    const v = vigilarFuentes(f);
+    await v.fuentes.textoPdf('S1').catch(() => {});
+    await v.fuentes.remisionEntrada!('E1').catch(() => {});
+    expect(v.fallo()).toBe(CAUSA_COPIA_DRIVE);
+    expect(v.pdfsSinTexto()).toEqual([]);
+    expect(v.entradasSinLeer()).toEqual([]);
   });
 });
 
@@ -322,11 +379,11 @@ describe('fallos de fuente a mitad de la corrida', () => {
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
-  it('si falla la remisión de entrada (Drive 5xx), la corrida falla con «drive: …»', async () => {
+  it('si falla leer una remisión de entrada en la base (no el archivo), la corrida falla', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
-    f.drive.remisionEntrada = async () => { throw new ErrorDrive(500); };
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 500' });
+    f.drive.remisionEntrada = async () => { throw new Error('pg caído'); };
+    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 });
@@ -385,7 +442,7 @@ describe('robustez del candado y del registro', () => {
     const { repo } = repoEnMemoria();
     const roto: RepoEquipos = { ...repo, leerCaches: async () => { throw Object.assign(new Error('pg: host secreto'), { code: 'ECONNRESET' }); } };
     const logs: string[] = [];
-    const srv = crearServicioEquipos({ repo: roto, fuentes: () => fuentes(), canal: canalFalso().canal, reserva: 'x@ambientalia.com.co', log: (t) => logs.push(t), hoy: () => '2026-11-10' });
+    const srv = crear(() => fuentes(), roto, canalFalso().canal, { log: (t) => { logs.push(t); } });
     expect(await srv.ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'interno: error inesperado' });
     const texto = logs.join('\n');
     expect(texto).toMatch(/Error/);
@@ -395,7 +452,7 @@ describe('robustez del candado y del registro', () => {
 
   it('lanzar no deja una promesa rechazada sin atender si el registro del incidente revienta', async () => {
     const { repo } = repoEnMemoria();
-    const srv = crearServicioEquipos({ repo, fuentes: () => fuentes(), canal: canalFalso().canal, reserva: 'x@ambientalia.com.co', log: () => { throw new Error('log roto'); }, hoy: () => '2026-11-10' });
+    const srv = crear(() => fuentes(), repo, canalFalso().canal, { log: () => { throw new Error('log roto'); } });
     const sin: unknown[] = [];
     const h = (e: unknown) => sin.push(e);
     process.on('unhandledRejection', h);
@@ -409,7 +466,7 @@ describe('robustez del candado y del registro', () => {
 describe('ilegibles', () => {
   it('tras añadir los PDF sin texto, siguen de más reciente a más antiguo', async () => {
     const { repo, s } = repoEnMemoria();
-    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new ErrorDrive(400); return ''; } });
+    const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(400); return ''; } });
     await crear(() => f, repo).ejecutar('boton', null);
     const d = (s.foto?.ilegibles ?? []).map((x) => x.d);
     expect(d).toEqual([...d].sort((a, b) => b.localeCompare(a)));
@@ -417,24 +474,32 @@ describe('ilegibles', () => {
   });
 });
 
-describe('una remisión de entrada que Drive no puede exportar (A9 extendido)', () => {
-  const entradaRota = (rota: Set<string>, status = 400) => (id: string) => {
-    if (rota.has(id)) throw new ErrorDrive(status);
+describe('una remisión de entrada sin texto en la copia (A9 extendido)', () => {
+  const entradaRota = (rota: Set<string>, status: number | null = 400) => (id: string) => {
+    if (rota.has(id)) throw new FalloArchivo(status);
     return Promise.resolve('');
   };
 
-  it('4xx en UNA: la corrida sigue, la entrada figura, hay aviso sin secretos y no entra en la caché', async () => {
+  it('con un fallo guardado en UNA: la corrida sigue, la entrada figura, hay aviso sin secretos y no entra en la caché', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
     f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']))(id);
     const r = await crear(() => f, repo).ejecutar('boton', null);
     expect(r.estado).toBe('ok');
     expect(s.foto?.rows.map((x) => x.sn)).toContain('18A90001');
-    expect(r.estado === 'ok' && r.avisos.some((a) => a === 'Remisión de entrada 18A90001: Drive HTTP 400')).toBe(true);
+    expect(r.estado === 'ok' && r.avisos).toContain('Remisión de entrada 18A90001: Drive HTTP 400');
     expect(s.cacheEnt?.E1).toBeUndefined();
   });
 
-  it('en la siguiente corrida, arreglada la remisión, se lee y se guarda en la caché', async () => {
+  it('con el texto todavía pendiente, el aviso lo dice', async () => {
+    const { repo } = repoEnMemoria();
+    const f = fuentes();
+    f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']), null)(id);
+    const r = await crear(() => f, repo).ejecutar('boton', null);
+    expect(r.estado === 'ok' && r.avisos).toContain('Remisión de entrada 18A90001: n8n todavía no envió su texto');
+  });
+
+  it('en la siguiente corrida, con su texto, se lee y se guarda en la caché', async () => {
     const { repo, s } = repoEnMemoria();
     const rotas = new Set(['E1']);
     const f = () => { const x = fuentes(); x.drive.remisionEntrada = async (id) => entradaRota(rotas)(id); return x; };
@@ -444,19 +509,12 @@ describe('una remisión de entrada que Drive no puede exportar (A9 extendido)', 
     expect(s.cacheEnt?.E1).toBeDefined();
   });
 
-  it('2 o más fallan y ninguna sale: es de Drive y la corrida falla', async () => {
+  it('2 o más sin texto y ninguna sale: la corrida falla', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
     f.drive.entradas = async () => [{ id: 'E1', title: '261101 - CLIENTE A - 18A90001' }, { id: 'E3', title: '261102 - CLIENTE D - 18A90003' }];
     f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1', 'E3']), 403)(id);
     expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo leer ninguna remisión de entrada (HTTP 403)' });
     expect(s.foto).toBe(FOTO_VIEJA);
-  });
-
-  it('un 5xx en una sola hace fallar la corrida', async () => {
-    const { repo } = repoEnMemoria();
-    const f = fuentes();
-    f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']), 503)(id);
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: HTTP 503' });
   });
 });

@@ -1,20 +1,22 @@
 /**
- * Una corrida de «Equipos en taller» (§5.1 del diseño):
- *   1. Candado: la corrida se inserta «en curso»; si choca, «ocupado» (409).
- *   2. Desk 2.0: una sonda antes de nada. Si falla → «desk2: <motivo>». Luego el
- *      barrido de las copias huérfanas del OCR en la carpeta temporal (si falla →
- *      «drive: <motivo>»; las que no se puedan borrar son un aviso).
- *   3. Drive + núcleo: `actualizar` con las fuentes VIGILADAS. El núcleo convierte
- *      muchos fallos en avisos y sigue; aquí cualquier fallo de una fuente hace
- *      fallida la corrida (D5: nunca una foto con datos incompletos). Si falla
- *      Drive, el texto de OCR ya extraído se guarda igual (`exits` es caché).
- *      EXCEPCIÓN (A9): un PDF concreto que Drive no puede pasar a texto (4xx de
- *      ese archivo) no es un fallo de la fuente: va a ilegibles y, como el núcleo
- *      no lo mete en la caché, se reintenta en la siguiente corrida. Si fallan
- *      todos los intentados (2 o más) y ninguno sale, sí es de Drive. Lo mismo
- *      con la remisión de entrada de un equipo concreto: el núcleo la apunta en
- *      avisos, no la cachea y el equipo cuenta por el nombre de su carpeta.
- *   4. Foto y cierre en una transacción (repo.terminarBien).
+ * Una corrida de «Equipos en taller» (§5.1 del diseño, con la revisión del 10/11/2026):
+ *   1. Candado. Sin ninguna sincronización completa de n8n, «sin configurar» (503) y no
+ *      se registra nada. Si la hay, la corrida se inserta «en curso»; si choca, «ocupado» (409).
+ *   2. Desk 2.0: una sonda antes de nada. Si falla → «desk2: <motivo>».
+ *   3. Frescura: si la última pasada completa de n8n tiene más de `maxHorasSync` horas
+ *      → CAUSA_SYNC_ATRASADA (D5: nunca una foto con datos incompletos).
+ *   4. Copia de Drive + núcleo: `actualizar` con las fuentes VIGILADAS. El núcleo
+ *      convierte muchos fallos en avisos y sigue; aquí, cualquier fallo de una fuente hace
+ *      fallida la corrida. Si falla la copia, el OCR ya leído se guarda igual (`exits` es caché).
+ *      EXCEPCIÓN (A9): un archivo concreto sin texto (`FalloArchivo`: n8n guardó su fallo,
+ *      o el texto aún no llegó) no es un fallo de la fuente. Un PDF va a ilegibles; una
+ *      remisión de entrada, a avisos (el núcleo no la cachea y el equipo cuenta por el
+ *      nombre de su carpeta). Si fallan todos los intentados (2 o más) y ninguno sale, sí
+ *      falla la corrida.
+ *      D10: la caché `exits` NO entra al núcleo, que relee de la copia el OCR de todos los
+ *      PDF (una consulta, no un OCR). Así, un PDF renombrado o un texto reenviado se nota
+ *      en la corrida siguiente. La de remisiones de entrada (`ent`) sí entra.
+ *   5. Foto y cierre en una transacción (repo.terminarBien).
  * Después, el incidente (incidente.ts) y, si toca, la alerta (alerta.ts).
  *
  * Una corrida fallida NUNCA toca `foto`. La siguiente es el reintento.
@@ -22,14 +24,20 @@
 import { actualizar, hoyBogota } from './nucleo/actualizar.js';
 import { iso } from './nucleo/reglas.js';
 import { EST, type Foto, type Fuentes, type Ilegible, type Resultado } from './nucleo/tipos.js';
-import type { OrigenCorrida } from './contrato.js';
+import { CAUSA_SYNC_ATRASADA, type OrigenCorrida } from './contrato.js';
 import { decidirIncidente } from './incidente.js';
 import { correoAlerta, destinatarios, type CanalAlerta } from './alerta.js';
-import { ErrorDrive, motivoDrive, type FuenteDrive } from './fuente-drive.js';
+import { FalloArchivo, type FuenteDrive } from './fuente-n8n.js';
 import { motivoDesk2, type FuenteDesk2 } from './fuente-desk2.js';
 import { CorridaCerrada, type RepoEquipos } from './repo.js';
+import type { RepoSync, SincronizacionHecha } from './repo-sync.js';
 
-/** Para el registro: nombre y código del error, NUNCA su mensaje ni su pila (pueden llevar datos de la base o de Google). */
+const HORA_MS = 3_600_000;
+
+/** Causa de la corrida cuando falla la lectura de la copia de Drive (la base de hub-api), no un archivo. */
+export const CAUSA_COPIA_DRIVE = 'interno: no se pudo leer la copia de Drive';
+
+/** Para el registro: nombre y código del error, NUNCA su mensaje ni su pila (pueden llevar datos de la base). */
 function huella(e: unknown): string {
   const nombre = String((e as { name?: unknown } | null)?.name ?? 'desconocido').slice(0, 40);
   const code = (e as { code?: unknown } | null)?.code;
@@ -48,7 +56,8 @@ export type ResultadoCorrida =
   | { estado: 'sin_configurar' };
 
 export interface ServicioEquipos {
-  configurado(): boolean;
+  /** Hay al menos una sincronización completa de n8n (si no, «sin configurar»). */
+  configurado(): Promise<boolean>;
   /** Hay una corrida de este proceso en marcha. */
   actualizando(): boolean;
   /** Para la ruta POST: empieza la corrida y no espera. */
@@ -61,12 +70,18 @@ export interface ServicioEquipos {
 
 export interface DepsServicio {
   repo: RepoEquipos;
-  /** null = «sin configurar» (falta Drive). */
-  fuentes: (() => FuentesCorrida) | null;
+  /** De la copia de Drive, el servicio solo mira la última pasada completa. */
+  sync: Pick<RepoSync, 'ultimaSincronizacion'>;
+  /** Fuentes NUEVAS para cada corrida, sobre la pasada con la que corre (la de Desk 2.0 guarda un mapa por corrida). */
+  fuentes: (s: SincronizacionHecha) => FuentesCorrida;
+  /** EQUIPOS_SYNC_MAX_HORAS: con una copia más vieja, la corrida falla. */
+  maxHorasSync: number;
   canal: CanalAlerta;
   reserva: string;
   log?: (t: string) => void;
   hoy?: () => string;
+  /** El reloj de la frescura (las pruebas lo fijan). */
+  ahora?: () => number;
 }
 
 /** Conteos de la foto, para `equipos_ejecucion.conteos` (tendencia y psql). */
@@ -82,23 +97,17 @@ export function contar(foto: Foto): Record<string, number> {
   };
 }
 
-/** Un PDF de salida escaneada que Drive no pudo pasar a texto (A9). */
+/** Un PDF de salida escaneada sin texto en la copia (A9). */
 export interface PdfSinTexto {
   id: string;
   /** Nombre del archivo en Drive (el id si no apareció en el listado). */
   n: string;
-  status: number;
+  /** El fallo que guardó n8n, o null si su texto todavía no llegó. */
+  status: number | null;
 }
 
-/**
- * ¿El fallo es de UN archivo concreto y no de Drive? Un 4xx de la conversión que
- * no sea del token (401) ni de la cuota (429). Un 403 entra aquí: Drive lo da,
- * por ejemplo, cuando un archivo supera el tamaño exportable. Si el problema es
- * de permisos de la carpeta temporal, fallan TODOS y lo detecta `fallo()`.
- */
-export function esFalloDeArchivo(e: unknown): e is ErrorDrive {
-  return e instanceof ErrorDrive && !e.enToken && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429;
-}
+/** Cómo se nombra en una causa el fallo de un archivo. */
+const etiqueta = (status: number | null): string => (status === null ? 'texto pendiente de n8n' : 'HTTP ' + status);
 
 /** La fila de ilegibles de un PDF sin texto. `d` sale del AAMMDD del nombre, como en el núcleo. */
 export function ilegibleSinTexto(p: PdfSinTexto): Ilegible {
@@ -107,31 +116,32 @@ export function ilegibleSinTexto(p: PdfSinTexto): Ilegible {
     n: p.n,
     d: iso((p.n.match(/^\d{6}/) || [''])[0]),
     m: 'sin texto legible',
-    q: 'Google Drive no pudo convertir este PDF a texto (HTTP ' + p.status + '): revisar el archivo en Drive',
+    q: p.status === null
+      ? 'n8n todavía no ha enviado el texto de este PDF: se pedirá en la próxima sincronización'
+      : 'Google Drive no pudo convertir este PDF a texto (HTTP ' + p.status + '): revisar el archivo en Drive',
     p: [],
   };
 }
 
 /**
- * Las fuentes del núcleo, vigiladas: cada fallo se apunta (el primero de cada
- * origen, ya traducido a una causa sin secretos) y el error sigue su camino.
- * Los fallos de archivo (4xx que no es 401 ni 429) al pasar un PDF a texto se
- * apartan en `pdfsSinTexto()`, y los de una remisión de entrada concreta en
- * `entradasSinLeer()`: no hacen fallar la corrida (A9), salvo que fallen 2 o más
- * y ninguna salga.
+ * Las fuentes del núcleo, vigiladas: cada fallo se apunta (el primero de cada origen, ya
+ * traducido a una causa sin secretos) y el error sigue su camino. Un `FalloArchivo` al
+ * leer el texto de un PDF se aparta en `pdfsSinTexto()`, y el de una remisión de entrada
+ * en `entradasSinLeer()`: no hacen fallar la corrida (A9), salvo que fallen 2 o más y
+ * ninguno salga. Cualquier otro error de la copia es de la base: CAUSA_COPIA_DRIVE.
  */
 export function vigilarFuentes(f: FuentesCorrida): {
   fuentes: Fuentes;
   fallo(): string | null;
   pdfsSinTexto(): PdfSinTexto[];
-  entradasSinLeer(): { id: string; status: number }[];
+  entradasSinLeer(): { id: string; status: number | null }[];
 } {
   let desk2: string | null = null;
   let drive: string | null = null;
   const titulos = new Map<string, string>();
   const sinTexto: PdfSinTexto[] = [];
   let convertidos = 0;
-  const entSinLeer: { id: string; status: number }[] = [];
+  const entSinLeer: { id: string; status: number | null }[] = [];
   let entLeidas = 0;
   const de = <A extends unknown[], R>(origen: 'desk2' | 'drive', fn: (...a: A) => Promise<R>) =>
     async (...a: A): Promise<R> => {
@@ -139,7 +149,7 @@ export function vigilarFuentes(f: FuentesCorrida): {
         return await fn(...a);
       } catch (e) {
         if (origen === 'desk2') desk2 ??= 'desk2: ' + motivoDesk2(e);
-        else drive ??= 'drive: ' + motivoDrive(e);
+        else drive ??= CAUSA_COPIA_DRIVE;
         throw e;
       }
     };
@@ -158,8 +168,8 @@ export function vigilarFuentes(f: FuentesCorrida): {
           convertidos++;
           return t;
         } catch (e) {
-          if (esFalloDeArchivo(e)) sinTexto.push({ id, n: titulos.get(id) ?? id, status: e.status });
-          else drive ??= 'drive: ' + motivoDrive(e);
+          if (e instanceof FalloArchivo) sinTexto.push({ id, n: titulos.get(id) ?? id, status: e.status });
+          else drive ??= CAUSA_COPIA_DRIVE;
           throw e; // el núcleo lo apunta en avisos y NO lo mete en la caché
         }
       },
@@ -169,8 +179,8 @@ export function vigilarFuentes(f: FuentesCorrida): {
           entLeidas++;
           return t;
         } catch (e) {
-          if (esFalloDeArchivo(e)) entSinLeer.push({ id, status: e.status });
-          else drive ??= 'drive: ' + motivoDrive(e);
+          if (e instanceof FalloArchivo) entSinLeer.push({ id, status: e.status });
+          else drive ??= CAUSA_COPIA_DRIVE;
           throw e; // el núcleo lo apunta en avisos y NO lo mete en la caché
         }
       },
@@ -181,8 +191,8 @@ export function vigilarFuentes(f: FuentesCorrida): {
     fallo: () =>
       desk2 ??
       drive ??
-      (sinTexto.length >= 2 && convertidos === 0 ? 'drive: no se pudo convertir ningún PDF (HTTP ' + sinTexto[0].status + ')' : null) ??
-      (entSinLeer.length >= 2 && entLeidas === 0 ? 'drive: no se pudo leer ninguna remisión de entrada (HTTP ' + entSinLeer[0].status + ')' : null),
+      (sinTexto.length >= 2 && convertidos === 0 ? 'drive: no se pudo convertir ningún PDF (' + etiqueta(sinTexto[0].status) + ')' : null) ??
+      (entSinLeer.length >= 2 && entLeidas === 0 ? 'drive: no se pudo leer ninguna remisión de entrada (' + etiqueta(entSinLeer[0].status) + ')' : null),
     pdfsSinTexto: () => [...sinTexto],
     entradasSinLeer: () => [...entSinLeer],
   };
@@ -191,6 +201,7 @@ export function vigilarFuentes(f: FuentesCorrida): {
 export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
   const log = deps.log ?? ((t: string) => console.log(t));
   const hoy = deps.hoy ?? hoyBogota;
+  const ahora = deps.ahora ?? Date.now;
   let actual: Promise<ResultadoCorrida> | null = null;
 
   async function registrarIncidente(origen: OrigenCorrida, ok: boolean, causa: string | null): Promise<void> {
@@ -209,7 +220,7 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
     }
   }
 
-  async function correr(id: number, origen: OrigenCorrida): Promise<ResultadoCorrida> {
+  async function correr(id: number, origen: OrigenCorrida, s: SincronizacionHecha): Promise<ResultadoCorrida> {
     let causa: string | null = null;
     let fin: ResultadoCorrida;
     let guardando = false;
@@ -218,31 +229,23 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
       return { estado: 'error', causa: 'abandonada' };
     };
     try {
-      // La fábrica debe construir una fuente de Drive NUEVA por corrida (`copiasSinBorrar` cuenta por instancia).
-      const f = (deps.fuentes as () => FuentesCorrida)();
+      const f = deps.fuentes(s);
       let sonda: { total: number; conCf: number } | null = null;
       try {
         sonda = await f.desk2.sonda();
       } catch (e) {
         causa = 'desk2: ' + motivoDesk2(e);
       }
-      // Barrido de las copias huérfanas del OCR: antes de que el núcleo lea Drive.
-      const avisosCopias: string[] = [];
-      if (!causa) {
-        try {
-          const b = await f.drive.limpiarTemporal();
-          if (b.fallidas > 0) avisosCopias.push(b.fallidas + ' copias temporales del OCR no se pudieron borrar (carpeta temporal)');
-        } catch (e) {
-          causa = 'drive: ' + motivoDrive(e);
-        }
-      }
+      // D5: con una copia de Drive vieja no se clasifica (n8n dejó de sincronizar).
+      if (!causa && ahora() - Date.parse(s.fin) > deps.maxHorasSync * HORA_MS) causa = CAUSA_SYNC_ATRASADA;
       let r: Resultado | null = null;
       let sinTexto: PdfSinTexto[] = [];
       if (!causa) {
         const v = vigilarFuentes(f);
         const cache = await deps.repo.leerCaches();
         try {
-          r = await actualizar(v.fuentes, { snap: null, exits: cache.exits, ent: cache.ent, cmt: {} }, { hoy: hoy(), prog: () => {} });
+          // D10: `exits: null`, el OCR se relee de la copia; `ent` sí se reutiliza.
+          r = await actualizar(v.fuentes, { snap: null, exits: null, ent: cache.ent, cmt: {} }, { hoy: hoy(), prog: () => {} });
         } catch (e) {
           if (!v.fallo()) log('equipos-taller: error inesperado en el núcleo (' + huella(e) + ')');
           causa = v.fallo() ?? 'interno: error inesperado';
@@ -257,12 +260,9 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
         fin = { estado: 'error', causa: c };
       } else {
         const sinCf = sonda && sonda.total > sonda.conCf ? sonda.total - sonda.conCf : 0;
-        const avisos = [...r.avisos, ...avisosCopias];
+        const avisos = [...r.avisos];
         if (sinCf) avisos.push(sinCf + ' tickets de Desk 2.0 sin campos personalizados (raw.cf): se usan solo sus columnas');
-        const sinBorrar = f.drive.copiasSinBorrar();
-        if (sinBorrar > 0) avisos.push(sinBorrar + ' copias temporales del OCR no se pudieron borrar; se reintentará en la próxima corrida');
-        // A9: los PDF que Drive no pudo pasar a texto van a ilegibles (no están en la caché).
-        // Mismo orden que el núcleo: más reciente primero.
+        // A9: los PDF sin texto van a ilegibles (no están en la caché). Mismo orden que el núcleo: más reciente primero.
         const foto: Foto = sinTexto.length
           ? { ...r.snap, ilegibles: [...(r.snap.ilegibles ?? []), ...sinTexto.map(ilegibleSinTexto)].sort((a, b) => b.d.localeCompare(a.d)) }
           : r.snap;
@@ -292,10 +292,11 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
 
   /** El candado y el arranque. La corrida va envuelta (`{ corrida }`) para que el `async` no la espere. */
   async function arrancar(origen: OrigenCorrida, userId: string | null): Promise<'ocupado' | 'sin_configurar' | { corrida: Promise<ResultadoCorrida> }> {
-    if (!deps.fuentes) return 'sin_configurar';
+    const s = await deps.sync.ultimaSincronizacion();
+    if (!s) return 'sin_configurar';
     const id = await deps.repo.iniciarCorrida(origen, userId);
     if (id === null) return 'ocupado';
-    const corrida: Promise<ResultadoCorrida> = correr(id, origen).finally(() => {
+    const corrida: Promise<ResultadoCorrida> = correr(id, origen, s).finally(() => {
       if (actual === corrida) actual = null;
     });
     actual = corrida;
@@ -303,7 +304,7 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
   }
 
   return {
-    configurado: () => deps.fuentes !== null,
+    configurado: async () => (await deps.sync.ultimaSincronizacion()) !== null,
     actualizando: () => actual !== null,
     async lanzar(origen, userId) {
       const a = await arrancar(origen, userId);

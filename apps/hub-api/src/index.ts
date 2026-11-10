@@ -151,9 +151,9 @@ initDb()
     // aplican SOLAS sólo si el plan sale limpio; lo demás queda retenido para que
     // lo revise una persona. No envían nada. Ver trazabilidad/programador-pasadas.ts.
     iniciarPasadasNocturnas(getHubPool());
-    // Equipos en taller: qué equipos están físicamente en el taller (remisiones de
-    // Drive x tickets y comentarios de Desk 2.0). Sin la configuración de Drive queda
-    // «sin configurar» (la pantalla lo dice) y su programador no se enciende.
+    // Equipos en taller: qué equipos están físicamente en el taller (la copia de Drive
+    // que manda n8n x tickets y comentarios de Desk 2.0). Hasta la primera
+    // sincronización completa de n8n queda «sin configurar» (la pantalla lo dice).
     const equiposTaller = crearEquiposTaller(getHubPool(), getDesk2Pool);
     app.use('/api', createEquiposTallerRouter(equiposTaller));
     equiposTaller.iniciarProgramador();

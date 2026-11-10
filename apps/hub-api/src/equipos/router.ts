@@ -8,6 +8,7 @@
  *   DELETE /equipos-taller/ajustes/:clave   204           (edita_ajustes o admin)
  *   GET    /equipos-taller/llaves           (admin)
  *   PUT    /equipos-taller/llaves/:userId   ← { editaAjustes, recibeAlertas } (admin)
+ *   POST   /equipos-taller/sync/{listado,texto,fin}   n8n, con token de máquina y sin sesión (router-sync.ts)
  *
  * Express 4: un rechazo de promesa no llega solo al manejador de errores, así que
  * cada ruta va envuelta (`ruta`). Un error nuestro es 500 genérico y Sentry; nunca
@@ -19,10 +20,14 @@ import { captureError } from '../sentry.js';
 import { ajusteValido, APP_ID, claveValida, type RespuestaEquipos } from './contrato.js';
 import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
+import type { RepoSync } from './repo-sync.js';
+import { createEquiposSyncRouter } from './router-sync.js';
 
 export interface DepsRouter {
   repo: RepoEquipos;
   servicio: ServicioEquipos;
+  /** La copia de Drive que manda n8n. */
+  sync: RepoSync;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,6 +48,8 @@ const enCursoVigente = (c: { enCurso: boolean; inicio: string } | null): boolean
 
 export function createEquiposTallerRouter(deps: DepsRouter): Router {
   const router = Router();
+  // Las rutas de n8n: sin sesión ni app; las guarda su token (EQUIPOS_SYNC_TOKEN).
+  router.use(createEquiposSyncRouter(deps.sync));
   const gated = [requireAuth, requireApp(APP_ID)] as const;
   const quien = (req: Request) => {
     const p = getPayload(req);
@@ -78,14 +85,14 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const q = quien(req);
     // `ultima` es la última corrida TERMINADA: si fuera la que está en curso, el aviso de foto vieja
     // desaparecería mientras corre (hasta 180 min tras una caída). «actualizando» sí mira la que corre.
-    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves] = await Promise.all([
-      deps.repo.leerFoto(), deps.repo.leerAjustes(), deps.repo.ultimaCorrida(), deps.repo.ultimaCorridaTerminada(), deps.repo.ultimaCorridaBuena(), deps.repo.incidenteAbierto(), deps.repo.llavesDe(q.userId),
+    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves, configurado] = await Promise.all([
+      deps.repo.leerFoto(), deps.repo.leerAjustes(), deps.repo.ultimaCorrida(), deps.repo.ultimaCorridaTerminada(), deps.repo.ultimaCorridaBuena(), deps.repo.incidenteAbierto(), deps.repo.llavesDe(q.userId), deps.servicio.configurado(),
     ]);
     const cuerpo: RespuestaEquipos = {
       snap,
       ajustes,
       actualizando: deps.servicio.actualizando() || enCursoVigente(enCurso),
-      configurado: deps.servicio.configurado(),
+      configurado,
       ultima,
       ultimaBuena,
       // El error de la alerta puede traer detalle del webhook: solo lo ve un admin.
