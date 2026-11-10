@@ -10,10 +10,14 @@
  *   · el ticket sale de `raw` (la respuesta de Zoho que guarda Desk 2.0), con
  *     número, estado, tipo de estado y asunto de las COLUMNAS (Desk 2.0 los
  *     mantiene al día también en los tickets gestionados desde la app);
- *   · los `cf_*` salen de `raw->'cf'`. Ese objeto solo lo traen los tickets que
- *     Desk 2.0 ha releído al detalle (ver calibraciones-desk2.ts): lo que falte se
- *     completa con las columnas promovidas (`serial`, `tipo_servicio`,
- *     `fecha_remision_entrada`), y la sonda cuenta cuántos tickets no lo traen;
+ *   · los `cf_*` salen de TRES sitios (ver calibraciones-desk2.ts y las
+ *     PROMOTED_COLUMNS de Desk 2.0): `raw->'cf'` (nombre interno; solo lo traen los
+ *     tickets releídos al detalle y NO se actualiza en los `managed_by_app`),
+ *     `custom_fields` (etiqueta → valor, SIN las etiquetas promovidas) y las columnas
+ *     promovidas (`CAMPOS`). Ticket normal: raw.cf, luego custom_fields, luego columnas.
+ *     `managed_by_app`: al revés (raw.cf está rancio), y estado, cierre y última
+ *     modificación salen de las columnas. La sonda cuenta cuántos tickets traen
+ *     `raw.cf` o `custom_fields`;
  *   · el id que usa el núcleo es el de la URL del ticket (`dv/<id>`) o el de la
  *     fila: aquí se recuerda a qué fila corresponde para leer sus comentarios.
  */
@@ -38,7 +42,7 @@ export function motivoDesk2(e: unknown): string {
 export interface SondaDesk2 {
   /** Tickets en la tabla. */
   total: number;
-  /** Cuántos traen `raw->'cf'`. */
+  /** Cuántos traen `raw->'cf'` o `custom_fields` (los que no, solo cuentan con las columnas promovidas). */
   conCf: number;
 }
 
@@ -50,8 +54,27 @@ export interface FuenteDesk2 {
   comentarios(ticketId: string): Promise<ComentarioZoho[]>;
 }
 
-const COLUMNAS = `t.id, t.number, t.serial, t.tipo_servicio, t.fecha_remision_entrada::text AS fecha_remision_entrada,
-       t.subject, t.status, t.status_type, t.created_time, t.raw`;
+/** `cf_*` del núcleo → columna promovida de desk.tickets y etiqueta de Zoho (custom_fields). */
+const CAMPOS: { cf: string; col?: string; etiqueta: string }[] = [
+  { cf: 'cf_serial', col: 'serial', etiqueta: 'Serial' },
+  { cf: 'cf_serial1', etiqueta: 'Serial 1' },
+  { cf: 'cf_serial2', etiqueta: 'Serial 2' },
+  { cf: 'cf_serial3', etiqueta: 'Serial 3' },
+  { cf: 'cf_codigo_servicio', col: 'codigo_servicio', etiqueta: 'Código Servicio' },
+  { cf: 'cf_equipo_1', col: 'equipo', etiqueta: 'Equipo' },
+  { cf: 'cf_modelo', col: 'modelo', etiqueta: 'Modelo de equipo' },
+  { cf: 'cf_encargado', col: 'encargado', etiqueta: 'Encargado' },
+  { cf: 'cf_tipo_de_servicio', col: 'tipo_servicio', etiqueta: 'Tipo de Servicio' },
+  { cf: 'cf_fecha_remision_entreda', col: 'fecha_remision_entrada', etiqueta: 'Fecha Remisión Entrada' },
+  { cf: 'cf_fecha_remision_de_salida', col: 'fecha_remision_salida', etiqueta: 'Fecha Remisión de Salida' },
+  { cf: 'cf_fecha_finalizacion_st', col: 'fecha_finalizacion_st', etiqueta: 'Fecha Finalización ST' },
+  { cf: 'cf_fecha_entrada_de_servicio_externo', col: 'fecha_entrada_servicio_externo', etiqueta: 'Fecha Entrada de servicio externo' },
+  { cf: 'cf_fecha_salida_servicio_externo', col: 'fecha_salida_servicio_externo', etiqueta: 'Fecha Salida Servicio externo' },
+];
+const FECHAS = new Set(['fecha_remision_entrada', 'fecha_remision_salida', 'fecha_finalizacion_st', 'fecha_entrada_servicio_externo', 'fecha_salida_servicio_externo']);
+const COLUMNAS = `t.id, t.number, t.subject, t.status, t.status_type, t.created_time, t.modified_time, t.closed_time,
+       t.managed_by_app, t.custom_fields, t.raw,
+       ${CAMPOS.filter((c) => c.col).map((c) => (FECHAS.has(c.col!) ? `t.${c.col}::text AS ${c.col}` : `t.${c.col}`)).join(', ')}`;
 const COLUMNAS_COMENTARIO = 'c.ticket_id, c.kind, c.content, c.commented_time, c.raw';
 /** Como la búsqueda de Zoho por serial: los 10 más recientes. */
 export const LIMITE_TICKETS = 10;
@@ -62,10 +85,15 @@ const esObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 const texto = (v: unknown): string | undefined => (v === null || v === undefined || v === '' ? undefined : String(v));
 const instante = (v: unknown): string | undefined => (v instanceof Date ? v.toISOString() : texto(v));
 /** Escapa los comodines de ILIKE. */
+/** Etiqueta sin mayúsculas, tildes ni separadores: «Serial 1» = «serial_1». */
+const clave = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const literal = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
 
 export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
-  /** Id que usa el núcleo → id de la fila en desk.tickets. */
+  /**
+   * Id que usa el núcleo → id de la fila en desk.tickets. Vive lo que vive la fuente: el
+   * servicio crea una por corrida (`fuentes: () => FuentesCorrida`); el tope es sólo una red.
+   */
   const filas = new Map<string, string>();
   const db = (): DbLectura => {
     const d = desk2();
@@ -75,12 +103,20 @@ export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
 
   function aZoho(r: Record<string, unknown>): TicketZoho {
     const raw = esObj(r.raw) ? r.raw : {};
-    const cf: Record<string, string | null | undefined> = esObj(raw.cf) ? { ...(raw.cf as Record<string, string | null>) } : {};
-    cf.cf_serial ??= texto(r.serial);
-    cf.cf_tipo_de_servicio ??= texto(r.tipo_servicio);
-    cf.cf_fecha_remision_entreda ??= texto(r.fecha_remision_entrada);
+    const gestionado = r.managed_by_app === true;
+    const deRaw: Record<string, string | null | undefined> = esObj(raw.cf) ? { ...(raw.cf as Record<string, string | null>) } : {};
+    const porEtiqueta = new Map<string, unknown>();
+    if (esObj(r.custom_fields)) for (const [k, v] of Object.entries(r.custom_fields)) porEtiqueta.set(clave(k), v);
+    const cf: Record<string, string | null | undefined> = { ...deRaw };
+    for (const c of CAMPOS) {
+      const candidatos = [texto(deRaw[c.cf]), texto(porEtiqueta.get(clave(c.etiqueta))), c.col ? texto(r[c.col]) : undefined];
+      if (gestionado) candidatos.push(candidatos.shift()); // raw.cf está rancio: va el último
+      const v = candidatos.find((x) => x !== undefined);
+      if (v !== undefined) cf[c.cf] = v;
+    }
     const id = String(r.id);
     const webUrl = texto(raw.webUrl) ?? '';
+    if (filas.size > 5000) filas.clear();
     filas.set((webUrl.match(/dv\/(\d+)/) || [])[1] || id, id);
     return {
       id,
@@ -88,8 +124,8 @@ export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
       status: texto(r.status) ?? texto(raw.status),
       statusType: texto(r.status_type) ?? texto(raw.statusType),
       createdTime: texto(raw.createdTime) ?? instante(r.created_time),
-      closedTime: texto(raw.closedTime) ?? null,
-      modifiedTime: texto(raw.modifiedTime) ?? '',
+      closedTime: (gestionado ? instante(r.closed_time) ?? texto(raw.closedTime) : texto(raw.closedTime) ?? instante(r.closed_time)) ?? null,
+      modifiedTime: (gestionado ? instante(r.modified_time) ?? texto(raw.modifiedTime) : texto(raw.modifiedTime) ?? instante(r.modified_time)) ?? '',
       subject: texto(r.subject) ?? texto(raw.subject),
       webUrl,
       cf,
@@ -100,7 +136,7 @@ export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
     async sonda() {
       const { rows } = await db().query(
         `SELECT count(*)::int AS total,
-                count(*) FILTER (WHERE jsonb_typeof(t.raw->'cf') = 'object')::int AS con_cf,
+                count(*) FILTER (WHERE jsonb_typeof(t.raw->'cf') = 'object' OR t.custom_fields <> '{}'::jsonb)::int AS con_cf,
                 (SELECT count(*) FROM (SELECT ${COLUMNAS} FROM desk.tickets t WHERE false) s)::int AS sonda_tickets,
                 (SELECT count(*) FROM (SELECT ${COLUMNAS_COMENTARIO} FROM desk.conversations c WHERE false) s)::int AS sonda_comentarios
            FROM desk.tickets t`,
@@ -113,7 +149,7 @@ export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
       const { rows } = await db().query(
         `SELECT ${COLUMNAS}
            FROM desk.tickets t
-          WHERE concat_ws(' ', t.serial, t.subject, (t.raw->'cf')::text, t.raw->>'subject') ILIKE '%' || $1 || '%'
+          WHERE concat_ws(' ', t.serial, t.codigo_servicio, t.subject, (t.raw->'cf')::text, t.custom_fields::text, t.raw->>'subject') ILIKE '%' || $1 || '%'
           ORDER BY t.created_time DESC NULLS LAST, t.number DESC
           LIMIT ${LIMITE_TICKETS}`,
         [literal(s)],
@@ -130,7 +166,7 @@ export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {
         `SELECT ${COLUMNAS_COMENTARIO}
            FROM desk.conversations c
           WHERE c.ticket_id = $1 AND c.kind = 'comment'
-          ORDER BY c.commented_time DESC
+          ORDER BY c.commented_time DESC NULLS LAST
           LIMIT ${LIMITE_COMENTARIOS}`,
         [filas.get(ticketId) ?? ticketId],
       );

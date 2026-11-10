@@ -35,6 +35,17 @@ beforeEach(async () => {
        ('app-5c1d', 1402, 'En taller', 'Open', '2026-11-03T09:00:00Z', 'Mantenimiento', NULL,
         'Equipo 18A90999 de otro cliente ficticio', '18A90999', NULL)`,
   );
+  // Solo custom_fields y columnas (sin raw), y un managed_by_app con raw.cf rancio.
+  await admin.query(
+    `INSERT INTO desk.tickets (id, number, status, status_type, created_time, modified_time, subject, serial, encargado, fecha_remision_salida, custom_fields, managed_by_app, raw) VALUES
+       ('solo-cf', 1403, 'En taller', 'Open', '2026-11-04T09:00:00Z', '2026-11-04T10:00:00Z', 'Equipo 18A90111 ficticio', '18A90111', 'Técnico Dos', '2026-11-07', '{"Serial 1":"18A90112"}', false, NULL),
+       ('gestionado', 1404, 'Finalizado', 'Closed', '2026-11-04T09:00:00Z', '2026-11-08T10:00:00Z', 'Equipo 18A90222 ficticio', '18A90222', 'Técnico Tres', '2026-11-09', '{"Serial 1":"18A90223"}', true,
+        '{"modifiedTime":"2026-11-04T10:00:00Z","cf":{"cf_encargado":"Rancio","cf_fecha_remision_de_salida":"2026-01-01","cf_serial1":"VIEJO"}}')`,
+  );
+  // 15 comentarios sin fecha no pueden comerse el LIMIT 15.
+  await admin.query(
+    `INSERT INTO desk.conversations (ticket_id, kind, content, commented_time) SELECT '900000000000000001', 'comment', 'sin fecha', NULL FROM generate_series(1, 15)`,
+  );
   await admin.query(
     `INSERT INTO desk.conversations (ticket_id, kind, author_name, author_type, is_public, content, content_type, commented_time, raw) VALUES
        ('900000000000000001', 'comment', 'Técnico Uno', 'AGENT', false, 'Equipo recogido por el cliente', 'plainText', '2026-11-06T15:00:00Z', '{"attachments":[{"name":"261106 - CLIENTE.pdf"}]}'),
@@ -44,7 +55,7 @@ beforeEach(async () => {
 
 describe('fuenteDesk2 contra Postgres', () => {
   it('la sonda pasa con el rol lector y cuenta los tickets con raw.cf', async () => {
-    expect(await fuenteDesk2(() => lector).sonda()).toEqual({ total: 2, conCf: 1 });
+    expect(await fuenteDesk2(() => lector).sonda()).toEqual({ total: 4, conCf: 3 });
   });
 
   it('busca por el serial en las columnas y en raw.cf, del más reciente al más antiguo', async () => {
@@ -55,6 +66,18 @@ describe('fuenteDesk2 contra Postgres', () => {
     const [app] = await f.tickets('18A90999');
     expect(Reglas.tnorm(app)).toMatchObject({ n: '1402', id: 'app-5c1d', srv: 'Mantenimiento' });
     expect(await f.tickets('18A00000')).toEqual([]);
+  });
+
+  it('un ticket con solo custom_fields y columnas completa lo que el núcleo necesita', async () => {
+    const [t] = await fuenteDesk2(() => lector).tickets('18A90111');
+    const z = Reglas.tnorm(t);
+    expect([z.n, z.enc, z.fs, t.cf?.cf_serial1]).toEqual(['1403', 'Técnico Dos', '2026-11-07', '18A90112']);
+  });
+
+  it('un managed_by_app prefiere columnas y custom_fields sobre su raw.cf rancio', async () => {
+    const [t] = await fuenteDesk2(() => lector).tickets('18A90222');
+    const z = Reglas.tnorm(t);
+    expect([z.enc, z.fs, t.cf?.cf_serial1, t.status, t.modifiedTime]).toEqual(['Técnico Tres', '2026-11-09', '18A90223', 'Finalizado', '2026-11-08T10:00:00.000Z']);
   });
 
   it('el número exacto y los comentarios (solo los «comment»)', async () => {

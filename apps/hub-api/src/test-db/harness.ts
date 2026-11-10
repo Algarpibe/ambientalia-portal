@@ -115,6 +115,16 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
       ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS custom_fields jsonb NOT NULL DEFAULT '{}'::jsonb;
       ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS managed_by_app boolean NOT NULL DEFAULT false;
       ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS raw jsonb;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS modified_time timestamptz;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS closed_time timestamptz;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS codigo_servicio text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS equipo text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS modelo text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS encargado text;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS fecha_remision_salida date;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS fecha_finalizacion_st date;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS fecha_salida_servicio_externo date;
+      ALTER TABLE desk.tickets ADD COLUMN IF NOT EXISTS fecha_entrada_servicio_externo date;
       CREATE TABLE IF NOT EXISTS desk.ticket_transitions (
         id           bigserial PRIMARY KEY,
         ticket_id    text NOT NULL,

@@ -110,3 +110,51 @@ describe('sonda y fallos', () => {
     expect(motivoDesk2(Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:5432'), { code: 'ECONNREFUSED' }))).toBe('sin conexión');
   });
 });
+
+describe('campos personalizados: raw.cf, columnas promovidas y custom_fields', () => {
+  const SIN_CF = { webUrl: '' };
+  it('un ticket sin raw.cf recupera de las columnas promovidas y de custom_fields lo que el núcleo necesita', async () => {
+    const { db } = baseFalsa(() => [{
+      ...FILA, raw: SIN_CF, codigo_servicio: 'SRV_261030', equipo: 'EDM180C', modelo: 'Modelo X', encargado: 'Técnico Dos',
+      fecha_remision_salida: '2026-11-05', fecha_finalizacion_st: '2026-11-04', fecha_salida_servicio_externo: '2026-11-01', fecha_entrada_servicio_externo: '2026-11-03',
+      custom_fields: { 'Serial 1': '18A90500' },
+    }]);
+    const [t] = await fuenteDesk2(() => db).tickets('18A90417');
+    const z = Reglas.tnorm(t);
+    expect([z.fs, z.ff, z.xo, z.xi, z.enc, z.eq, z.srv, z.fe]).toEqual(['2026-11-05', '2026-11-04', '2026-11-01', '2026-11-03', 'Técnico Dos', 'EDM180C Modelo X', 'Calibración', '2026-10-30']);
+    expect(t.cf?.cf_codigo_servicio).toBe('SRV_261030');
+    expect(t.cf?.cf_serial1).toBe('18A90500');
+  });
+
+  it('raw.cf manda por nombre interno en un ticket normal; las columnas solo rellenan lo que falta', async () => {
+    const { db } = baseFalsa(() => [{ ...FILA, encargado: 'Otro', fecha_remision_salida: '2099-01-01', fecha_finalizacion_st: '2026-11-04' }]);
+    const z = Reglas.tnorm((await fuenteDesk2(() => db).tickets('18A90417'))[0]);
+    expect([z.enc, z.fs, z.ff]).toEqual(['Técnico Uno', '2026-11-05', '2026-11-04']);
+  });
+
+  it('un ticket managed_by_app prefiere columnas y custom_fields sobre un raw.cf rancio, y toma estado y fechas de las columnas', async () => {
+    const { db } = baseFalsa(() => [{
+      ...FILA, managed_by_app: true, status: 'Finalizado', status_type: 'Closed',
+      modified_time: new Date('2026-11-08T10:00:00.000Z'), closed_time: new Date('2026-11-08T11:00:00.000Z'),
+      encargado: 'Técnico Tres', fecha_remision_salida: '2026-11-09', custom_fields: { 'Serial 1': '18A90500' },
+      raw: { ...FILA.raw, status: 'Rev./Diagnostico', modifiedTime: '2026-11-02T10:00:00.000Z', closedTime: null, cf: { ...FILA.raw.cf, cf_serial1: 'VIEJO' } },
+    }]);
+    const [t] = await fuenteDesk2(() => db).tickets('18A90417');
+    const z = Reglas.tnorm(t);
+    expect([z.enc, z.fs, t.cf?.cf_serial1]).toEqual(['Técnico Tres', '2026-11-09', '18A90500']);
+    expect([t.status, t.modifiedTime, t.closedTime]).toEqual(['Finalizado', '2026-11-08T10:00:00.000Z', '2026-11-08T11:00:00.000Z']);
+  });
+
+  it('la sonda cuenta como con campos los tickets que traen raw.cf o custom_fields', async () => {
+    const { db, consultas } = baseFalsa(() => [{ total: 12, con_cf: 9 }]);
+    await fuenteDesk2(() => db).sonda();
+    expect(consultas[0].sql).toMatch(/jsonb_typeof\(t\.raw->'cf'\) = 'object'/);
+    expect(consultas[0].sql).toMatch(/custom_fields/);
+  });
+
+  it('los comentarios sin fecha no se comen el LIMIT: van al final', async () => {
+    const { db, consultas } = baseFalsa(() => []);
+    await fuenteDesk2(() => db).comentarios('x');
+    expect(consultas[0].sql).toMatch(/ORDER BY c\.commented_time DESC NULLS LAST/);
+  });
+});
