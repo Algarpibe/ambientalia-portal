@@ -16,6 +16,7 @@ import { iniciarPasadasNocturnas } from './trazabilidad/programador-pasadas.js';
 import { registrarEstadosAgenda } from './trazabilidad/repo.js';
 import { crearFuenteAgenda } from './trazabilidad/fuente.js';
 import { getDesk2Pool } from './db-desk2.js';
+import { crearEquiposTaller, createEquiposTallerRouter } from './equipos/index.js';
 import { createDataRouter } from './data.router.js';
 import { createHealthRouter } from './health.js';
 import { cabecerasDeSeguridad } from './cabeceras-seguridad.js';
@@ -150,6 +151,12 @@ initDb()
     // aplican SOLAS sólo si el plan sale limpio; lo demás queda retenido para que
     // lo revise una persona. No envían nada. Ver trazabilidad/programador-pasadas.ts.
     iniciarPasadasNocturnas(getHubPool());
+    // Equipos en taller: qué equipos están físicamente en el taller (remisiones de
+    // Drive x tickets y comentarios de Desk 2.0). Sin la configuración de Drive queda
+    // «sin configurar» (la pantalla lo dice) y su programador no se enciende.
+    const equiposTaller = crearEquiposTaller(getHubPool(), getDesk2Pool);
+    app.use('/api', createEquiposTallerRouter(equiposTaller));
+    equiposTaller.iniciarProgramador();
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
