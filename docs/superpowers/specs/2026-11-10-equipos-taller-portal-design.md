@@ -18,7 +18,7 @@ El módulo ya existe como código TypeScript probado en `apps/equipos-desk2/`. S
 | D2 | El motor vive en hub-api (`apps/hub-api/src/equipos/`). La pantalla, en la sub-app `apps/equipos-taller/`, que importa el núcleo por ruta relativa. | Es el patrón de Calibraciones: funciona con `tsc -b` y con el Dockerfile sin tocar el build. |
 | D3 | Drive se lee con una **cuenta de servicio de Google**, por `fetch` y sin dependencias nuevas. Tiene lectura en las 3 carpetas y edición solo en una carpeta temporal para el OCR. | El código ya existe y está probado. Con n8n habría que reescribir las fuentes y construir un OCR asíncrono. |
 | D4 | Los tickets salen de `desk.tickets` y los comentarios de `desk.conversations`, en la base de Desk 2.0, por `getDesk2Pool()` (`DESK2_DB_URL`, rol `portal_agenda_reader`). **No se usa la API de Zoho.** | Zoho Desk deja de usarse el próximo año y Desk 2.0 conserva los datos. `desk.conversations` está completa desde el 02/11/2026. |
-| D5 | **Sin réplica de respaldo.** Si falla Desk 2.0 **o Drive**, no se actualiza: se conserva la última foto buena. Hay una excepción: un PDF concreto que Drive no puede pasar a texto va a la lista de ilegibles (§5.1). | Nunca se muestra una clasificación hecha con datos incompletos. La réplica no tiene comentarios, así que con ella la regla 6 se apagaría sin avisar. |
+| D5 | **Sin réplica de respaldo.** Si falla Desk 2.0 **o Drive**, no se actualiza: se conserva la última foto buena. Hay dos excepciones: un PDF concreto que Drive no puede pasar a texto va a la lista de ilegibles, y una remisión de entrada que no se puede leer se indica en los avisos sin hacer fallar la corrida (§5.1). | Nunca se muestra una clasificación hecha con datos incompletos. La réplica no tiene comentarios, así que con ella la regla 6 se apagaría sin avisar. |
 | D6 | Alerta por un webhook de n8n, **una vez por incidente**, cuando hay 2 corridas programadas fallidas seguidas. | Evita el ruido de avisar en cada fallo. |
 | D7 | Llaves por usuario: `edita_ajustes` y `recibe_alertas`. | Es el mismo modelo de llaves por ficha que usa Ausencias. |
 | D8 | Las tablas van en el esquema `portal`, con prefijo `equipos_`. | Es la convención del portal, y el rol de hub-api ya es dueño de ese esquema. |
@@ -90,6 +90,14 @@ Todas las rutas van bajo `requireAuth` + `requireApp('equipos-taller')`.
      - No entra en la caché, así que se reintenta en cada corrida y desaparece de la lista en cuanto se arregla en Drive.
      - Si fallan **todos** los PDF intentados (2 o más) y ninguno sale, el problema es de Drive (por ejemplo, permisos de la carpeta temporal) y la corrida falla con `drive: no se pudo convertir ningún PDF (HTTP <código>)`.
      - El listado de las carpetas, el token, la cuota, los 5xx y la red siguen haciendo fallar la corrida.
+   - **La misma excepción vale para las remisiones de entrada (decisión del 10/11/2026).** Si Drive no puede leer el documento de una remisión de entrada (4xx de ese archivo):
+     - El equipo sigue contando como entrada, porque la fecha, el cliente y el serial salen del nombre de la carpeta.
+     - Se pierde lo que aporta el documento (el número de ticket y el nombre del equipo), y el enlace con el ticket sigue con las reglas 2 a 4.
+     - La corrida lo indica en sus avisos y lo reintenta en la siguiente.
+     - Si fallan todas las intentadas (2 o más) y ninguna sale, la corrida falla con `drive: no se pudo leer ninguna remisión de entrada (HTTP <código>)`.
+   - **Limpieza de la carpeta temporal.** Al empezar cada corrida, después de la sonda de Desk 2.0, se borran las copias de OCR que hayan quedado de corridas anteriores (prefijo `ocr-tmp-`, solo en la carpeta temporal).
+     - Si no se puede listar esa carpeta, la corrida falla.
+     - Si alguna copia no se puede borrar, la corrida sigue y lo indica en sus avisos.
 4. **Cálculo.** Se aplican el núcleo y los ajustes. La foto y el cierre de la corrida se escriben **en una sola transacción**.
 
 Una corrida fallida **nunca** modifica `foto`. La siguiente corrida es el reintento.
