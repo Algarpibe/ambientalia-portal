@@ -11,7 +11,8 @@ import {
   PackageOpen,
   CalendarDays,
   Gauge,
-  CalendarClock
+  CalendarClock,
+  Hammer
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isRouteAssigned } from '../lib/apps';
@@ -94,6 +95,13 @@ const aplicaciones: AppConfig[] = [
     path: "/trazabilidad-mantenimientos",
     icon: CalendarClock,
     color: "from-cyan-500 to-teal-700"
+  },
+  {
+    name: "Equipos en taller",
+    description: "Qué equipos están físicamente en el taller de servicio técnico, por fecha de llegada, cruzando las remisiones de Drive con los tickets de Desk.",
+    path: "/equipos-taller",
+    icon: Hammer,
+    color: "from-orange-400 to-amber-600"
   }
 ];
 

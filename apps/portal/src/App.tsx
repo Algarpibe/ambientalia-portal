@@ -27,6 +27,7 @@ const OvPendientes = lazyConReintento(() => import('../../contabilidad/src/AppOV
 const Ausencias = lazyConReintento(() => import('../../ausencias/src/App'));
 const Calibraciones = lazyConReintento(() => import('../../calibraciones/src/App'));
 const TrazabilidadMantenimientos = lazyConReintento(() => import('../../trazabilidad-mantenimientos/src/App'));
+const EquiposTaller = lazyConReintento(() => import('../../equipos-taller/src/App'));
 
 function LoadingFallback() {
   return (
@@ -82,6 +83,7 @@ function App() {
                     <Route path="/ausencias/*" element={<AppGuard appId="ausencias"><Ausencias /></AppGuard>} />
                     <Route path="/calibraciones/*" element={<AppGuard appId="calibraciones"><Calibraciones /></AppGuard>} />
                     <Route path="/trazabilidad-mantenimientos/*" element={<AppGuard appId="trazabilidad-mantenimientos"><TrazabilidadMantenimientos /></AppGuard>} />
+                    <Route path="/equipos-taller/*" element={<AppGuard appId="equipos-taller"><EquiposTaller /></AppGuard>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>

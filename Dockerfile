@@ -21,6 +21,7 @@ COPY apps/WO-sales/package*.json ./apps/WO-sales/
 COPY apps/ausencias/package*.json ./apps/ausencias/
 COPY apps/calibraciones/package*.json ./apps/calibraciones/
 COPY apps/trazabilidad-mantenimientos/package*.json ./apps/trazabilidad-mantenimientos/
+COPY apps/equipos-taller/package*.json ./apps/equipos-taller/
 
 # Instalar dependencias globales del monorepo.
 #

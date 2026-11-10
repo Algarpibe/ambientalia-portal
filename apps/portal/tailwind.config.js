@@ -16,6 +16,7 @@ export default {
     "../ausencias/src/**/*.{js,ts,jsx,tsx}",
     "../calibraciones/src/**/*.{js,ts,jsx,tsx}",
     "../trazabilidad-mantenimientos/src/**/*.{js,ts,jsx,tsx}",
+    "../equipos-taller/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
