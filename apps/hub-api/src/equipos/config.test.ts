@@ -1,37 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { inspect } from 'node:util';
 import { HORA_POR_DEFECTO, leerConfig, MAX_HORAS_SYNC_POR_DEFECTO, RESERVA_POR_DEFECTO } from './config.js';
 
-// Configuración desde el entorno: qué deja el módulo «sin configurar» y qué se apaga.
-// Todo ficticio: ni la clave ni las carpetas son reales.
-const SA = JSON.stringify({ client_email: 'sa@ficticio.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n' });
-const DRIVE = {
-  EQUIPOS_GOOGLE_CUENTA_SERVICIO: SA,
-  EQUIPOS_DRIVE_ENTRADAS: 'carpetaEntradas01',
-  EQUIPOS_DRIVE_SALIDAS_N8N: 'carpetaSalidasN8n1',
-  EQUIPOS_DRIVE_SALIDAS_ESCANEADAS: 'carpetaEscaneos01',
-  EQUIPOS_DRIVE_TEMPORAL: 'carpetaTemporal01',
-};
-
+// Configuración desde el entorno. Drive ya no se configura aquí: lo lee n8n y manda la copia.
+// Todo ficticio.
 describe('leerConfig', () => {
-  it('con todo lo de Drive queda configurado, con las carpetas en su sitio', () => {
-    const c = leerConfig(DRIVE);
-    expect(c.faltaDrive).toEqual([]);
-    expect(c.drive?.carpetas).toEqual({ entradas: 'carpetaEntradas01', salidasGeneradas: 'carpetaSalidasN8n1', salidasEscaneadas: 'carpetaEscaneos01' });
-    expect(c.drive?.carpetaTemporalOcr).toBe('carpetaTemporal01');
-    expect(c.drive?.cuentaServicio.client_email).toBe('sa@ficticio.iam.gserviceaccount.com');
-  });
-
-  it('sin la cuenta de servicio, o con un JSON que no vale, queda sin configurar y nombra la variable (sin su valor)', () => {
-    expect(leerConfig({ ...DRIVE, EQUIPOS_GOOGLE_CUENTA_SERVICIO: undefined })).toMatchObject({ drive: null, faltaDrive: ['EQUIPOS_GOOGLE_CUENTA_SERVICIO'] });
-    const mal = leerConfig({ ...DRIVE, EQUIPOS_GOOGLE_CUENTA_SERVICIO: '{"client_email":"x"' });
-    expect(mal.drive).toBeNull();
-    expect(JSON.stringify(mal)).not.toMatch(/client_email/);
-  });
-
-  it('una carpeta que falta o con caracteres raros deja el módulo sin configurar', () => {
-    expect(leerConfig({ ...DRIVE, EQUIPOS_DRIVE_TEMPORAL: '' }).faltaDrive).toEqual(['EQUIPOS_DRIVE_TEMPORAL']);
-    expect(leerConfig({ ...DRIVE, EQUIPOS_DRIVE_ENTRADAS: "abc' or name contains '" }).faltaDrive).toEqual(['EQUIPOS_DRIVE_ENTRADAS']);
+  it('ya no lee Drive: ni cuenta de servicio ni carpetas', () => {
+    const c = leerConfig({ EQUIPOS_GOOGLE_CUENTA_SERVICIO: '{"client_email":"x"}', EQUIPOS_DRIVE_ENTRADAS: 'carpetaEntradas01' });
+    expect(Object.keys(c).sort()).toEqual(['alerta', 'horaDiaria', 'maxHorasSync', 'reserva', 'tokenSync']);
   });
 
   it('la hora diaria es 06:30 salvo una HH:MM válida', () => {
@@ -51,30 +26,6 @@ describe('leerConfig', () => {
     expect(leerConfig({}).reserva).toBe(RESERVA_POR_DEFECTO);
     expect(leerConfig({ EQUIPOS_ALERTA_RESERVA: 'Taller@Ambientalia.com.co' }).reserva).toBe('taller@ambientalia.com.co');
     expect(leerConfig({ EQUIPOS_ALERTA_RESERVA: 'alguien@gmail.com' }).reserva).toBe(RESERVA_POR_DEFECTO);
-  });
-});
-
-describe('leerConfig: endurecimiento', () => {
-  it('la clave privada no sale ni por JSON.stringify ni por util.inspect, pero se sigue pudiendo leer', () => {
-    const c = leerConfig(DRIVE);
-    expect(c.drive?.cuentaServicio.private_key).toContain('PRIVATE KEY');
-    expect(JSON.stringify(c)).not.toMatch(/PRIVATE KEY|AAA/);
-    expect(inspect(c, { depth: 10 })).not.toMatch(/PRIVATE KEY|AAA/);
-  });
-
-  it('la clave no sale por spread, structuredClone, Object.entries ni util.inspect de la cuenta', () => {
-    const sa = leerConfig(DRIVE).drive!.cuentaServicio;
-    expect(JSON.stringify({ ...sa })).not.toMatch(/PRIVATE KEY|AAA/);
-    expect(JSON.stringify(structuredClone(sa))).not.toMatch(/PRIVATE KEY|AAA/);
-    expect(JSON.stringify(Object.entries(sa))).not.toMatch(/PRIVATE KEY|AAA/);
-    expect(Object.keys(sa)).not.toContain('private_key');
-    expect(inspect(sa)).not.toMatch(/PRIVATE KEY|AAA/);
-    expect(sa.private_key).toContain('PRIVATE KEY');
-  });
-
-  it('una clave con los saltos de línea escapados dos veces se normaliza', () => {
-    const doble = JSON.stringify({ client_email: 'sa@ficticio.iam.gserviceaccount.com', private_key: '-----BEGIN PRIVATE KEY-----\\nAAA\\n-----END PRIVATE KEY-----\\n' });
-    expect(leerConfig({ ...DRIVE, EQUIPOS_GOOGLE_CUENTA_SERVICIO: doble }).drive?.cuentaServicio.private_key).toBe('-----BEGIN PRIVATE KEY-----\nAAA\n-----END PRIVATE KEY-----\n');
   });
 
   it('el token de la alerta se recorta', () => {
