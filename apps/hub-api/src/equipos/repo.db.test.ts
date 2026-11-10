@@ -33,6 +33,8 @@ beforeAll(() => {
   repo = crearRepoEquipos(db);
 });
 afterAll(async () => {
+  await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves RESTART IDENTITY');
+  await db.query(`DELETE FROM portal.users WHERE email LIKE '%@equipos.test'`);
   await db.end();
 });
 beforeEach(async () => {

@@ -119,6 +119,25 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
   });
 });
 
+describe('aviso de actualización', () => {
+  it('«Actualizando…» desaparece cuando la corrida termina', async () => {
+    const { api } = apiFalsa();
+    let activa = false;
+    const base = api.estado;
+    api.estado = async () => ({ ...(await base()), actualizando: activa });
+    api.actualizar = async () => { activa = true; return 'iniciada'; };
+    render(<EquiposServicio api={api} />);
+    const b = await screen.findByRole('button', { name: 'Actualizar información' });
+    await waitFor(() => expect((b as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(b);
+    await screen.findByText(/^Actualizando… \(la primera vez/);
+    await screen.findByRole('button', { name: 'Actualizando…' });
+    activa = false;
+    await waitFor(() => expect(screen.queryByText(/^Actualizando… \(la primera vez/)).toBeNull(), { timeout: 6000 });
+    expect(screen.getByRole('button', { name: 'Actualizar información' })).toBeTruthy();
+  }, 10000);
+});
+
 describe('lo nuevo en el portal', () => {
   it('sin la llave «edita ajustes» no hay botones de ajuste (ni en Revisar ni en las ilegibles)', async () => {
     render(<EquiposServicio api={apiFalsa({ permisos: { editaAjustes: false, recibeAlertas: false, esAdmin: false, puedeEditar: false } }).api} />);

@@ -40,6 +40,21 @@ Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última bue
 | `drive: HTTP 403` / `404` | A la cuenta de servicio le falta una carpeta compartida (lectura en las 3; edición en la temporal). |
 | `drive: no se pudo convertir ningún PDF (HTTP 4xx)` | Fallan todos los PDF al pasarlos a texto: casi siempre, a la cuenta de servicio le falta edición en la carpeta temporal del OCR. (Un solo PDF que falla no aparece aquí: sale en remisiones ilegibles.) |
 
+### Si el servidor cayó o se redesplegó a mitad de una corrida
+
+La corrida queda «en curso» en la base y nadie la cierra. Hasta que pasan los 180 min, el botón responde 409 y la pantalla sigue en «Actualizando…». Para liberarla antes, el dueño puede ejecutar esto en psql. Solo marca como abandonadas las corridas que siguen «en curso» y llevan más de 10 minutos (es el mismo `UPDATE` que usa `repo.ts`, con 10 en vez de 180). Ejecútalo **solo si no hay una corrida realmente en marcha**:
+
+```sql
+UPDATE portal.equipos_ejecucion SET en_curso = NULL, fin = now(), ok = false, causa = 'abandonada' WHERE en_curso AND inicio < now() - make_interval(mins => 10);
+```
+
+La foto no se toca y la corrida abandonada no cuenta para los incidentes.
+
+### Notas de operación
+
+- **Límites de Drive.** Drive informa de los límites de uso como 403, y el sistema trata un 403 de un archivo como error de ese PDF. Esos PDF salen como «sin texto legible» durante una corrida y se corrigen solos en la siguiente. Es lo esperado en la primera corrida (unos 190 PDF).
+- **Pool de Desk 2.0.** El pool tiene 2 conexiones y las comparte con Trazabilidad. Si aparece `desk2: tiempo agotado`, esa es la causa más probable.
+
 ## Corrida diaria e incidentes
 
 - A las `EQUIPOS_HORA_DIARIA` de Colombia (06:30 por defecto). No hay corrida de recuperación al arrancar: si un despliegue cae después de la hora, usar el botón.

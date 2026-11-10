@@ -60,6 +60,19 @@ describe('iniciarProgramadorEquipos', () => {
     expect(ejecutar).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ['ocupado', 'ya había una en curso'],
+    ['sin_configurar', 'falta configurar'],
+  ])('una corrida programada omitida (%s) deja una línea fija', async (estado, motivo) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(t('2026-11-09T11:29:00.000Z'));
+    const log = vi.fn();
+    const ejecutar = vi.fn(async () => ({ estado }));
+    iniciarProgramadorEquipos(ejecutar, { hora: '06:30', log });
+    await vi.advanceTimersByTimeAsync(MIN);
+    expect(log).toHaveBeenCalledWith('equipos-taller: corrida programada omitida (' + motivo + ')');
+  });
+
   it('detenerlo cancela la siguiente', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(t('2026-11-09T10:00:00.000Z'));

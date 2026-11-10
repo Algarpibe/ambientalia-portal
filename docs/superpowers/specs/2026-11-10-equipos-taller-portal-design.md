@@ -48,7 +48,7 @@ El módulo ya existe como código TypeScript probado en `apps/equipos-desk2/`. S
   - el aviso de foto vieja (§5.3);
   - el panel de llaves, que solo ven los admin;
   - los botones de ajuste ocultos para quien no tenga `edita_ajustes`.
-- **Portal**: ruta perezosa `/equipos-taller`, tarjeta en el Dashboard y en Aplicaciones, el id de la app en la gestión de usuarios y el `COPY` del `package.json` de la sub-app en el `Dockerfile` raíz.
+- **Portal**: ruta perezosa `/equipos-taller`, entrada en el Sidebar (vía `apps/portal/src/lib/apps.ts`) y en Aplicaciones (el Dashboard solo muestra widgets, así que no lleva tarjeta), el id de la app en la gestión de usuarios y el `COPY` del `package.json` de la sub-app en el `Dockerfile` raíz.
 
 ### 3.3 API
 
@@ -70,8 +70,8 @@ Todas las rutas van bajo `requireAuth` + `requireApp('equipos-taller')`.
   - `exits`: la caché del texto de OCR. **Su versión sigue siendo CV = 3**, y solo se sube si cambia lo que se extrae de cada PDF.
   - `ent`: las entradas ya leídas.
   - Ya no hay caché de comentarios (`cmt`), porque se leen en cada corrida.
-- **`equipos_ajuste`**: `clave text PK`, `tipo` (`in`/`out`/`ret`/`pdf`), `nota`, `user_id`, `usuario`, `creado_en`. Los formatos de clave no cambian: `SERIAL_cls|AAAA-MM-DD`, `*SERIAL_cls` y `pdf:<idDrive>`.
-- **`equipos_ejecucion`**: `id`, `origen` (`programada`/`boton`), `user_id`, `inicio`, `fin`, `en_curso`, `ok`, `causa`, `conteos jsonb`. Lleva un índice único parcial sobre `en_curso` que impide dos corridas a la vez.
+- **`equipos_ajuste`**: `clave text PK`, `tipo` (`in`/`out`/`ret`/`pdf`), `nota`, `user_id`, `usuario`, `creado_en`. No tiene columna `hasta`: un ajuste dura hasta que alguien lo deshace. Los formatos de clave no cambian: `SERIAL_cls|AAAA-MM-DD`, `*SERIAL_cls` y `pdf:<idDrive>`.
+- **`equipos_ejecucion`**: `id`, `origen` (`programada`/`boton`), `user_id`, `inicio`, `fin`, `en_curso`, `ok`, `causa`, `avisos jsonb`, `conteos jsonb`. Lleva un índice único parcial sobre `en_curso` que impide dos corridas a la vez.
 - **`equipos_incidente`**: `id`, `abierto_en`, `cerrado_en`, `fallos_programados`, `alerta_enviada_en`, `alerta_ultimo_error`. Como mucho hay un incidente abierto.
 - **`equipos_llaves`**: `user_id PK` (FK a `portal.users`), `edita_ajustes`, `recibe_alertas`, `actualizado_por`, `actualizado_en`.
 - **Vistas** `equipos_v_equipos` y `equipos_v_remisiones_ilegibles`, para consultar en psql.

@@ -43,6 +43,9 @@ describe('migración 071 contra Postgres', () => {
   });
 
   it('no siembra ninguna fila', async () => {
+    // Otras pruebas dejan filas: se vacía ANTES de re-aplicar y se comprueba que la 071 no siembra.
+    await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves RESTART IDENTITY CASCADE');
+    await db.query(SQL);
     for (const t of ['equipos_estado', 'equipos_ajuste', 'equipos_ejecucion', 'equipos_incidente', 'equipos_llaves']) {
       const { rows } = await db.query(`SELECT count(*)::int AS n FROM portal.${t}`);
       expect(rows[0].n, t).toBe(0);

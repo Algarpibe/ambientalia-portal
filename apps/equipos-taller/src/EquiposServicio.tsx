@@ -4,7 +4,7 @@
 // cosas (§3.2 del diseño): el aviso de foto vieja, el panel de llaves (solo admin) y los
 // botones de ajuste ocultos para quien no tenga la llave «edita ajustes». El servidor
 // vuelve a comprobar cada llave: aquí solo se ocultan botones.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, avisoFoto, claveFila, claveIlegible, dias, enlaceArchivo, enlaceCarpeta,
   filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, type Ajuste, type Fila, type Filtros, type Ilegible, type RespuestaEquipos,
@@ -53,6 +53,14 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
     const t = setInterval(() => void cargar(), 3000);
     return () => clearInterval(t);
   }, [datos?.actualizando, cargar]);
+
+  // Al terminar la corrida se retira el «Actualizando…» (los demás avisos se quedan).
+  const estabaActualizando = useRef(false);
+  useEffect(() => {
+    const ahora = datos?.actualizando === true;
+    if (estabaActualizando.current && !ahora) setAviso((a) => (a.startsWith('Actualizando…') ? '' : a));
+    estabaActualizando.current = ahora;
+  }, [datos?.actualizando]);
 
   const ajustes = datos?.ajustes || {};
   const snap = datos?.snap || null;

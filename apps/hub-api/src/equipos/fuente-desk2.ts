@@ -84,9 +84,9 @@ export const LIMITE_COMENTARIOS = 15;
 const esObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const texto = (v: unknown): string | undefined => (v === null || v === undefined || v === '' ? undefined : String(v));
 const instante = (v: unknown): string | undefined => (v instanceof Date ? v.toISOString() : texto(v));
-/** Escapa los comodines de ILIKE. */
 /** Etiqueta sin mayúsculas, tildes ni separadores: «Serial 1» = «serial_1». */
 const clave = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+/** Escapa los comodines de ILIKE. */
 const literal = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
 
 export function fuenteDesk2(desk2: () => DbLectura | null): FuenteDesk2 {

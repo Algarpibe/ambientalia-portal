@@ -43,7 +43,13 @@ export function iniciarProgramadorEquipos(
     const mio = setTimeout(() => {
       if (temporizador !== mio) return;
       programar();
-      void ejecutar().catch(() => log('equipos-taller: la corrida programada no pudo empezar'));
+      void ejecutar()
+        .then((r) => {
+          const estado = (r as { estado?: string } | null | undefined)?.estado;
+          if (estado === 'ocupado') log('equipos-taller: corrida programada omitida (ya había una en curso)');
+          else if (estado === 'sin_configurar') log('equipos-taller: corrida programada omitida (falta configurar)');
+        })
+        .catch(() => log('equipos-taller: la corrida programada no pudo empezar'));
     }, ms);
     mio.unref?.();
     temporizador = mio;
