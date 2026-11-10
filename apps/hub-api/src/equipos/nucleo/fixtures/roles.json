@@ -1,0 +1,22 @@
+{
+  "seriales": {
+    "S_ACCESORIOS": "18A12510",
+    "S_B8": "75780",
+    "S_DEFORMADO": "18A94006",
+    "S_FECHA_ERRADA": "18A93855",
+    "S_PARCIAL": "18A60810",
+    "S_SIN_DIGITOS": "TLUX1NK0",
+    "S_SIN_TEXTO_1": "18A23793",
+    "S_SIN_TEXTO_2": "18A49141",
+    "S_T7": "8B75PVN8",
+    "S_TICKET_EN_REMISION": "18A27500"
+  },
+  "tickets": {
+    "T_EN_REMISION": "724",
+    "T_PARCIAL": "1069"
+  },
+  "clientes": {
+    "C_ILEGIBLE": "ALFA",
+    "C_SIN_TEXTO": "BRAVO"
+  }
+}

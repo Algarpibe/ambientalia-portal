@@ -1,0 +1,412 @@
+{
+  "_nota": "Fixtures anonimizadas con apps/hub-api/scripts/equipos-anonimizar.mjs: clientes, seriales, tickets y textos sustituidos de forma determinista; se conservan las peculiaridades del OCR.",
+  "ilegibles": [
+    {
+      "n": "260717 - CPT.pdf",
+      "d": "2026-07-17",
+      "t": [],
+      "it": {}
+    },
+    {
+      "n": "260707 - BRAVO.pdf",
+      "d": "2026-07-07",
+      "t": [],
+      "it": {}
+    },
+    {
+      "n": "260702 - RBCOKH6.pdf",
+      "d": "2026-07-02",
+      "t": [
+        "CANT1DAD",
+        "41S611P",
+        "SS9B1",
+        "9ST94",
+        "20260T02",
+        "6660GAYHY",
+        "6B012",
+        "10066T2VFR"
+      ],
+      "it": {
+        "20260T02": {
+          "e": "Eutbefo Vogid · Gokhxboa Técnico Ambientalia S.A.S",
+          "k": ""
+        },
+        "41S611P": {
+          "e": "Ambientalia BCS. · GOS 762.731.642-0 · Firma:",
+          "k": ""
+        },
+        "CANT1DAD": {
+          "e": "Teléfono · Qhaih",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260626 - QMMGOEF.pdf",
+      "d": "2026-06-26",
+      "t": [
+        "260626",
+        "3S964",
+        "G4TSSCD0",
+        "CANT1DAD",
+        "1S663",
+        "TXXR9BT3",
+        "TST6S1",
+        "KGCHZLSGVBS",
+        "BTBT9T",
+        "T61BB",
+        "33TSB"
+      ],
+      "it": {
+        "BTBT9T": {
+          "e": "CRVBJI DE AOBBI · NOF. POSTAL IWOY.",
+          "k": "1257"
+        },
+        "CANT1DAD": {
+          "e": "GOS · Qhaih",
+          "k": ""
+        },
+        "KGCHZLSGVBS": {
+          "e": "QM 96 68B 12 · TQU/ZRQ · YUIZ CREDITO",
+          "k": "1257"
+        }
+      }
+    },
+    {
+      "n": "260604 - UZJ.pdf",
+      "d": "2026-06-04",
+      "t": [
+        "260604",
+        "30BB3B0S",
+        "CANT1DAD",
+        "S0036T93"
+      ],
+      "it": {
+        "S0036T93": {
+          "e": "C · Nombre: · Cedula:",
+          "k": ""
+        },
+        "CANT1DAD": {
+          "e": "GOS · Qhaih",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260206 - Bravo.pdf",
+      "d": "2026-02-06",
+      "t": [
+        "CANT1DAD",
+        "6B012"
+      ],
+      "it": {
+        "CANT1DAD": {
+          "e": "Qhaih",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260121 - METROLOGICAL.pdf",
+      "d": "2026-01-21",
+      "t": [
+        "CNB4TL0TS169",
+        "20260121",
+        "REC1B1D0",
+        "SZHUTTW"
+      ],
+      "it": {
+        "SZHUTTW": {
+          "e": "freurjuea јәр yuzr c(s)ocs (s)oyods · Od8\\!23ଧ",
+          "k": ""
+        },
+        "REC1B1D0": {
+          "e": "16:52 · 21 PFR 7337 · Equipo(s) bgphsi(s) a ygkotioy del laboratorio",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260115 - ALFA.pdf",
+      "d": "2026-01-15",
+      "t": [
+        "CANT1DAD",
+        "66BB9",
+        "CNES9",
+        "1TS2S9134",
+        "1BS06S66",
+        "B6D1U"
+      ],
+      "it": {
+        "CNES9": {
+          "e": "CONDICIONES TECNICAS · EDM 751P · Grimm · 18\\#94006 · Equipo calibrado y en óptimas fiehod",
+          "k": ""
+        },
+        "1TS2S9134": {
+          "e": "Firma: · Nombre: · Cedula:",
+          "k": ""
+        },
+        "CANT1DAD": {
+          "e": "GOS · Qhaih",
+          "k": ""
+        }
+      }
+    }
+  ],
+  "legibles": [
+    {
+      "n": "260422 - AKOQNTOLKSZL.pdf",
+      "d": "2026-04-22",
+      "t": [
+        "T1CKET",
+        "WQ330PCDSK",
+        "1G2AB104",
+        "BB0T661B",
+        "20260422",
+        "H0S111"
+      ],
+      "it": {
+        "1G2AB104": {
+          "e": "",
+          "k": "1077"
+        },
+        "T1CKET": {
+          "e": "Teléfono: · Qhaih:",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260108 - METROLOGICAL.pdf",
+      "d": "2026-01-08",
+      "t": [
+        "1BA4B0ST",
+        "2026010B",
+        "REC1B1D0"
+      ],
+      "it": {
+        "REC1B1D0": {
+          "e": "LABORATORIO DE QWSHIDIWIQ · 16:46 · 08 PFR 7337 · Equipo(s) bgphsi(s) a gfa",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260813 - METROLOGICAL.pdf",
+      "d": "2026-08-13",
+      "t": [
+        "1BA66BT0",
+        "B3ZZ1SB04T60"
+      ],
+      "it": {}
+    },
+    {
+      "n": "260609 - DABUWIUIFQQ.pdf",
+      "d": "2026-06-09",
+      "t": [
+        "260609",
+        "2B099T6B",
+        "QZH6099",
+        "VTT3931SBB",
+        "2B094S4B",
+        "STKWU494",
+        "6611BST",
+        "4B233TT"
+      ],
+      "it": {}
+    },
+    {
+      "n": "261009 - LTB.pdf",
+      "d": "2026-10-09",
+      "t": [
+        "261009",
+        "263STJXZS1B",
+        "KSPGSYWX",
+        "91216T",
+        "NS0TDE",
+        "F1DMW0CE00T",
+        "S21B9T32",
+        "TST16T46",
+        "AFNSF1",
+        "JSMDP0XH16ST",
+        "TYVBSB0CB1B3",
+        "FTNUTUSPW"
+      ],
+      "it": {
+        "AFNSF1": {
+          "e": "Togo equipo\\_1 · MSSQ · Pfwofiu · Descripción · LIUTDOU ENDISO",
+          "k": ""
+        },
+        "NS0TDE": {
+          "e": "Hogg · MOXRTCRH · Jqnxxtxeceti: · Gvdhiadpffqv",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260115 - IDBJFJIL.pdf",
+      "d": "2026-01-15",
+      "t": [
+        "1S663",
+        "SFF120T2",
+        "TST6S1",
+        "KGCHZLSGVBS",
+        "BTBT9T",
+        "S1BSS",
+        "1BS06S66",
+        "UCEXQKK1B",
+        "42MYX"
+      ],
+      "it": {
+        "BTBT9T": {
+          "e": "CRVBJI DE AOBBI · NOF. POSTAL IWOY.:",
+          "k": "1257"
+        }
+      }
+    },
+    {
+      "n": "260916 - BQEUIKOZSW.pdf",
+      "d": "2026-09-16",
+      "t": [
+        "260916",
+        "296B210",
+        "CANT1DAD",
+        "SY69BB1616B",
+        "16BXK3B13"
+      ],
+      "it": {
+        "SY69BB1616B": {
+          "e": "CONDICIONES TECNICAS · Equipo calibrado",
+          "k": ""
+        },
+        "CANT1DAD": {
+          "e": "GOS · Qhaih",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "261009 - FYER.pdf",
+      "d": "2026-10-09",
+      "t": [
+        "260109",
+        "14S1494",
+        "T1CKET",
+        "ADUT0TBSBB",
+        "VDJLBTT1B1S",
+        "XRSPST363SN",
+        "20T61009",
+        "H0S111",
+        "24B6316B"
+      ],
+      "it": {
+        "ADUT0TBSBB": {
+          "e": "EU · SHELTER · YOLLO/ YFSIRTLMIV · EN THWQ LSTGKI Y OPERATIVO",
+          "k": ""
+        },
+        "T1CKET": {
+          "e": "Teléfono · Cvdrv",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260825 - METROLABOR.pdf",
+      "d": "2026-08-25",
+      "t": [
+        "CANT1DAD",
+        "SY69BB1616B",
+        "20160B2S",
+        "DZBK1FKT1C",
+        "REC1B1D0"
+      ],
+      "it": {
+        "SY69BB1616B": {
+          "e": "CONDICIONES TECNICAS · Qyxbhqd pro 2 · DAVIS · Equipo para calibración · GC",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "261103 - PJTT.pdf",
+      "d": "2026-11-03",
+      "t": [
+        "261103",
+        "REM202623T",
+        "0V20261T0",
+        "6660GAYHY",
+        "BT2166SVRQ",
+        "1S9TT"
+      ],
+      "it": {
+        "0V20261T0": {
+          "e": "n° · 19 iht 7337 · Mgwsejhw a:",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "260202 - OYR.pdf",
+      "d": "2026-02-02",
+      "t": [
+        "RS1BTT",
+        "B0TELLAS",
+        "1214ZHW",
+        "JG104B124",
+        "MAN0METR0"
+      ],
+      "it": {
+        "B0TELLAS": {
+          "e": "Diwiui: R-SI-877 · RYB YHSQOE EO 1214ZHW WOFOAEGI",
+          "k": ""
+        }
+      }
+    },
+    {
+      "n": "3395 - EMH.pdf",
+      "d": "",
+      "t": [
+        "REM20260TT",
+        "0V20260T0",
+        "ESCZ14B1BB",
+        "N0VG0BB0",
+        "EBJTT291T",
+        "6660GAYHY"
+      ],
+      "it": {
+        "REM20260TT": {
+          "e": "N° Remisión REM-2026-077",
+          "k": ""
+        }
+      }
+    }
+  ],
+  "fechaErrada": {
+    "n": "270316 - ALFA.pdf",
+    "d": "2027-03-16",
+    "t": [
+      "2T0316",
+      "69B4S34",
+      "T1CKET",
+      "EDM1B0C",
+      "1BA93BSS",
+      "20260316",
+      "6B012",
+      "H0S111"
+    ],
+    "it": {
+      "1BA93BSS": {
+        "e": "EDM180C · Grimm",
+        "k": "1058"
+      },
+      "EDM1B0C": {
+        "e": "Grimm",
+        "k": "1058"
+      },
+      "T1CKET": {
+        "e": "GOS · Qhaih",
+        "k": ""
+      }
+    }
+  }
+}
