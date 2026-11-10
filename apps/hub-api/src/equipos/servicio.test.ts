@@ -45,6 +45,7 @@ function repoEnMemoria() {
     borrarAjuste: async () => {},
     ultimaCorrida: async () => s.corridas.at(-1) ?? null,
     ultimaCorridaBuena: async () => [...s.corridas].reverse().find((c) => c.ok) ?? null,
+    ultimaCorridaTerminada: async () => [...s.corridas].reverse().find((c) => !c.enCurso) ?? null,
     incidenteAbierto: async () => s.incidente,
     aplicarIncidente: async (d: DecisionIncidente) => {
       if (d.accion === 'abrir') s.incidente = { id: 1, abiertoEn: '', fallosProgramados: d.fallosProgramados, alertaEnviadaEn: null, alertaUltimoError: null };

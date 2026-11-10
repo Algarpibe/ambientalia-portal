@@ -124,6 +124,15 @@ describe('corridas', () => {
     expect((await repo.leerCaches()).exits).toEqual(exits2);
     expect(await repo.ultimaCorrida()).toMatchObject({ id: id2, origen: 'programada', ok: false, causa: 'drive: HTTP 403', enCurso: false });
     expect(await repo.ultimaCorridaBuena()).toMatchObject({ id: id1, origen: 'boton', ok: true, avisos: ['un aviso'], conteos: { en_taller: 1 } });
+    // Con otra en curso, `ultimaCorrida` la devuelve pero `ultimaCorridaTerminada` sigue en la última cerrada.
+    const id3 = (await repo.iniciarCorrida('boton', null))!;
+    expect(await repo.ultimaCorrida()).toMatchObject({ id: id3, enCurso: true });
+    expect(await repo.ultimaCorridaTerminada()).toMatchObject({ id: id2, ok: false, enCurso: false });
+  });
+
+  it('ultimaCorridaTerminada es null si solo hay una en curso', async () => {
+    await repo.iniciarCorrida('boton', null);
+    expect(await repo.ultimaCorridaTerminada()).toBeNull();
   });
 
   it('las vistas de psql leen la foto y dejan fuera las ilegibles revisadas', async () => {

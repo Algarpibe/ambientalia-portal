@@ -51,6 +51,8 @@ export interface RepoEquipos {
   borrarAjuste(clave: string): Promise<void>;
   ultimaCorrida(): Promise<Corrida | null>;
   ultimaCorridaBuena(): Promise<Corrida | null>;
+  /** La última corrida YA CERRADA (ok o fallida); ignora la que está en curso. */
+  ultimaCorridaTerminada(): Promise<Corrida | null>;
   incidenteAbierto(): Promise<Incidente | null>;
   /** Aplica la decisión. Devuelve el id del incidente que queda abierto, o null. */
   aplicarIncidente(d: DecisionIncidente, abiertoId: number | null): Promise<number | null>;
@@ -207,6 +209,11 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
 
     async ultimaCorridaBuena() {
       const { rows } = await db.query(`SELECT ${COLS_CORRIDA} FROM portal.equipos_ejecucion WHERE ok ORDER BY id DESC LIMIT 1`);
+      return rows[0] ? aCorrida(rows[0]) : null;
+    },
+
+    async ultimaCorridaTerminada() {
+      const { rows } = await db.query(`SELECT ${COLS_CORRIDA} FROM portal.equipos_ejecucion WHERE en_curso IS NULL ORDER BY id DESC LIMIT 1`);
       return rows[0] ? aCorrida(rows[0]) : null;
     },
 
