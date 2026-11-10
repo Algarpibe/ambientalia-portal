@@ -159,6 +159,70 @@ Notas de implementación que costaron tiempo:
   (`{{ $('Pedir pendiente').item.json.destinatarios.map(d => d.email) }}`) para marcar
   exactamente a quien recibió, no a quien se haya podido añadir entre medias.
 
+### 2.3 La variante síncrona: hub-api llama a un Webhook y espera (avisos de Trazabilidad)
+
+El envío de los avisos a clientes de Trazabilidad (2026-11-08) **no** sigue el patrón de arriba: no
+hay cola ni sondeo, porque quien pulsa «Enviar correo» necesita saber al momento si salió (y la cola
+con sondeo fue el mecanismo del incidente de los 700 correos de agosto de 2026).
+
+| Workflow | Id | Forma |
+|---|---|---|
+| **Trazabilidad · Avisos a clientes (envío)** | `VqI0Esq61vdpNsOu` | Webhook síncrono (`POST /webhook/tmc-avisos-clientes`): un correo por llamada, con respuesta |
+
+```
+hub-api (POST JSON {referencia, para, asunto, cuerpo}, cabecera X-Tmc-Avisos-Token,
+         espera 30 s como mucho, no sigue redirecciones)
+      ▼
+Webhook (Header Auth, credencial «Token avisos TMC») ── token malo ──▶ 403 de n8n
+      ▼
+Set «Barrera de dominio» + IF: ¿1 a 5 destinatarios, todos exactamente @ambientalia.com.co,
+                              con asunto (sin saltos de línea) y texto?
+      │ (no) ──▶ Respond 422 {ok: false, error: 'barrera: …'}
+      ▼ (sí)
+Gmail (credencial «Gmail info@»; texto plano; appendAttribution = false; sin reintentos)
+      │ (error) ──▶ Respond 502 {error: 'gmail: …'}   ← SIN ok:false, a propósito
+      ▼
+Respond 200 {ok: true, messageId}
+```
+
+Cómo lo lee hub-api (`apps/hub-api/src/trazabilidad/envio-avisos.ts`, la única pieza que llama a la red):
+
+| Respuesta | Para hub-api | Qué pasa en la app |
+|---|---|---|
+| 2xx con `ok: true` y `messageId` | enviado | queda «Enviado» (en modo real, el equipo se marca avisado) |
+| `ok: false` (cualquier código), 3xx o 4xx | rechazado: **seguro** que no salió | «Fallido», se puede reenviar |
+| cualquier otra cosa (5xx sin `ok:false`, sin respuesta en 30 s) | sin confirmar: **pudo** salir | la tarjeta se bloquea; a los 2 min una persona pulsa «Sí salió» / «No salió» mirando Enviados de info@ |
+
+- Por eso el fallo de Gmail responde 502 **sin** `ok:false`: un fallo tardío (p. ej. un timeout con
+  Google) puede llegar después de que el correo saliera; tratarlo como «no salió» permitiría reenviarlo.
+  Y por eso el Gmail no reintenta.
+- Variables de hub-api en EasyPanel: `TMC_AVISOS_ENVIO` (`apagado` | `prueba` | `real`; cualquier otro
+  valor = apagado), `TMC_AVISOS_BUZON_PRUEBA`, `TMC_AVISOS_N8N_URL` y `TMC_AVISOS_N8N_TOKEN`. Si la URL
+  no es https (o un host interno de una sola palabra) o falta el token, el portal dice «Envío apagado ·
+  falta la configuración del canal» (le pasó la primera vez: la línea del token estaba vacía).
+- El token es el valor de la credencial Header Auth del Webhook y el mismo que `TMC_AVISOS_N8N_TOKEN`.
+  Propio de este flujo: no se reutiliza el de otra app. Si aparece en un chat o en un log, se rota en
+  los dos sitios.
+- **La credencial de Gmail es propia de info@** («Gmail info@»). No usar la «Gmail account»
+  compartida: la usan 66 flujos (WO-sales, Vacaciones, Remisiones…) y el correo saldría desde otra
+  cuenta. n8n asigna esa por defecto al abrir un nodo Gmail nuevo: revisarlo.
+- El cliente OAuth de Google es el del proyecto `n8n-easypanel-ambientalia` (cuenta comercial@),
+  pasado a **«Interno»** el 2026-11-10: cualquier cuenta @ambientalia.com.co puede conectarse y las
+  conexiones ya no caducan cada 7 días (pasaba mientras era «Externo» en modo «Prueba»).
+- **La barrera de dominio es un candado**: mientras exista, nada sale fuera de Ambientalia aunque
+  hub-api estuviera en modo real. Quitarla es la fase 5 del plan de pruebas
+  (`docs/superpowers/specs/2026-11-08-envio-avisos-clientes-design.md`), con la decisión explícita de
+  Alfonso y los secretos ya rotados.
+- Las ejecuciones de n8n guardan la cabecera con el token y el cuerpo del correo: restringir quién
+  ve el flujo.
+- Probarlo a mano desde PowerShell: `Read-Host` **enseña** lo que se teclea (dos veces acabó la clave
+  en el chat). Leerla así, que la oculta:
+  `$t = [System.Net.NetworkCredential]::new('', (Read-Host 'Token' -AsSecureString)).Password`,
+  y ejecutar esa línea sola (si se pega junto con otras, `Read-Host` se traga la siguiente).
+- Probado el 2026-11-10 (fases 2 a 4): envío directo, barrera (422, Gmail no se ejecuta), sin token
+  (403), tarjetas reales en modo prueba, flujo desactivado (404 → «Fallido»), «sin confirmar» que sí
+  salió y que no salió (con una espera temporal de 40 s, ya quitada).
+
 ---
 
 ## 3. Checklist para una app nueva
