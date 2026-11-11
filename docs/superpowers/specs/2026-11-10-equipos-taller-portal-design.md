@@ -118,7 +118,7 @@ Se crea **inactivo y sin credenciales**: el usuario le pone la credencial de Dri
 
 - **`equipos_estado`**: `clave text PK`, `valor jsonb`, `actualizado_en`. Las claves son:
   - `foto`: las filas y las ilegibles. Se conservan las claves cortas de JSON (`d`, `c`, `sn`, `est`, `src`, `why`, `x`, `z`, `zc`, `pa`, `xd`, `eq`).
-  - `exits`: la caché del texto de OCR. **Su versión sigue siendo CV = 3**. Desde la revisión se sigue guardando, pero la corrida no la usa como entrada (D10).
+  - `exits`: la caché del texto de OCR. **Su versión sigue siendo CV = 3**. Desde la revisión la corrida no la usa como entrada (D10): solo la guarda una corrida buena, completa. Una fallida no la toca, porque la suya tendría solo parte de los PDF.
   - `ent`: las entradas ya leídas.
   - Ya no hay caché de comentarios (`cmt`), porque se leen en cada corrida.
 - **`equipos_ajuste`**: `clave text PK`, `tipo` (`in`/`out`/`ret`/`pdf`), `nota`, `user_id`, `usuario`, `creado_en`. No tiene columna `hasta`: un ajuste dura hasta que alguien lo deshace. Los formatos de clave no cambian: `SERIAL_cls|AAAA-MM-DD`, `*SERIAL_cls` y `pdf:<idDrive>`.
@@ -229,7 +229,7 @@ Se hacen con Vitest. **El código nuevo se escribe en TDD estricto.** Las prueba
   - `router-sync`, con Express real: el token, los 400, 404 y 409, y un listado de 10 000 archivos.
   - `fuente-n8n`, con un repositorio falso: textos, fallos y pendientes.
 - **`incidente`** (puro): 1 fallo no avisa; 2 programados avisan; las corridas del botón no cuentan; se avisa una sola vez; el reintento si el webhook falla; el cierre y la nueva alerta tras recuperarse.
-- **`servicio`:** una corrida fallida no toca `foto` pero sí guarda `exits`; el 409 con el candado; «sin configurar» sin sincronización; la copia atrasada; los archivos sin texto (A9).
+- **`servicio`:** una corrida fallida no toca `foto` ni `exits`; el 409 con el candado; «sin configurar» sin sincronización; la copia atrasada; los archivos sin texto (A9).
 - **Router:** con Express real. Las llaves, el 403 sin la app o sin la llave, el 503 sin configurar.
 - **Migraciones y repositorios:** en `*.db.test.ts`, contra el Postgres de pruebas. Cada migración debe poder ejecutarse dos veces sin cambiar nada.
 - **Pantalla:** prueba de React con jsdom en la sub-app. Cubre los avisos y los botones ocultos sin la llave.

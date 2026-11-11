@@ -7,7 +7,7 @@
  *      → CAUSA_SYNC_ATRASADA (D5: nunca una foto con datos incompletos).
  *   4. Copia de Drive + núcleo: `actualizar` con las fuentes VIGILADAS. El núcleo
  *      convierte muchos fallos en avisos y sigue; aquí, cualquier fallo de una fuente hace
- *      fallida la corrida. Si falla la copia, el OCR ya leído se guarda igual (`exits` es caché).
+ *      fallida la corrida.
  *      EXCEPCIÓN (A9): un archivo concreto sin texto (`FalloArchivo`: n8n guardó su fallo,
  *      o el texto aún no llegó) no es un fallo de la fuente. Un PDF va a ilegibles; una
  *      remisión de entrada, a avisos (el núcleo no la cachea y el equipo cuenta por el
@@ -16,10 +16,12 @@
  *      D10: la caché `exits` NO entra al núcleo, que relee de la copia el OCR de todos los
  *      PDF (una consulta, no un OCR). Así, un PDF renombrado o un texto reenviado se nota
  *      en la corrida siguiente. La de remisiones de entrada (`ent`) sí entra.
- *   5. Foto y cierre en una transacción (repo.terminarBien).
+ *   5. Foto y cierre en una transacción (repo.terminarBien), con `exits` y `ent`.
  * Después, el incidente (incidente.ts) y, si toca, la alerta (alerta.ts).
  *
- * Una corrida fallida NUNCA toca `foto`. La siguiente es el reintento.
+ * Una corrida fallida NUNCA toca `foto` ni `exits`. La siguiente es el reintento. `exits` ya
+ * no ahorra nada (D10): solo la escribe una corrida buena, completa. La de una fallida
+ * tendría solo los PDF leídos antes del fallo y pisaría la buena.
  */
 import { actualizar, hoyBogota } from './nucleo/actualizar.js';
 import { iso } from './nucleo/reglas.js';
@@ -256,7 +258,8 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
       if (causa || !r) {
         const c = causa ?? 'interno: error inesperado';
         guardando = true;
-        await deps.repo.terminarMal(id, c, r ? r.exits : null);
+        // Sin `exits`: la de una corrida fallida es parcial (ver la cabecera).
+        await deps.repo.terminarMal(id, c, null);
         fin = { estado: 'error', causa: c };
       } else {
         const sinCf = sonda && sonda.total > sonda.conCf ? sonda.total - sonda.conCf : 0;

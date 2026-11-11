@@ -3117,7 +3117,7 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 3. **Frescura de la copia:** si la última pasada completa de n8n tiene más de `EQUIPOS_SYNC_MAX_HORAS` (6 h por defecto) → `drive: sincronización de n8n atrasada`.
 4. **Copia de Drive y núcleo:** se leen los listados de la copia, el OCR de **todos** los PDF y las remisiones de entrada que no están en la caché `ent`. Luego, los tickets por serial y los comentarios de los equipos que siguen adentro.
    - El OCR se relee de la copia: la caché `exits` no se usa como entrada, porque releer es una consulta. Así, un PDF renombrado se ve con su nombre nuevo.
-   - Cualquier fallo de una fuente hace fallida la corrida. El OCR ya leído se guarda igual.
+   - Cualquier fallo de una fuente hace fallida la corrida. Una corrida fallida no toca la caché `exits`: la suya tendría solo parte de los PDF.
    - **Excepciones:**
      - Un PDF sin texto en la copia (n8n guardó su fallo, o el texto aún no llegó) va a remisiones ilegibles y se reintenta en cada corrida.
      - Una remisión de ENTRADA sin texto genera un aviso. La entrada se cuenta igual y se reintenta.

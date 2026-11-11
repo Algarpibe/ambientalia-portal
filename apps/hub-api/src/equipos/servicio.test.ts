@@ -225,12 +225,16 @@ describe('una corrida fallida', () => {
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
-  it('si la copia falla al leer un PDF (la base, no el archivo), no toca la foto pero SÍ guarda el OCR que ya salió', async () => {
+  it('si la copia falla al leer un PDF (la base, no el archivo), no toca la foto ni pisa `exits` con la de una corrida a medias', async () => {
+    // D10: `exits` ya no entra a la corrida, así que la de una corrida fallida solo tendría
+    // los PDF leídos antes del fallo. Se queda la de la última corrida buena.
     const { repo, s } = repoEnMemoria();
+    const previa: CacheEscaneos = { v: CV, list: [{ id: 'S1', n: '260915 - CLIENTE B.pdf', d: '2026-09-15', t: [], it: {} }, { id: 'S2', n: '261020 - CLIENTE C.pdf', d: '2026-10-20', t: [], it: {} }] };
+    s.exits = previa;
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new Error('pg: host secreto'); return block('18A90002'); } });
     expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
-    expect(s.exits?.list.map((x) => x.id)).toEqual(['S1']);
+    expect(s.exits).toBe(previa);
   });
 
   it('si TODOS los PDF están sin texto (2 o más) y ninguno sale, la corrida falla', async () => {

@@ -51,7 +51,7 @@ export interface RepoEquipos {
   leerCaches(): Promise<{ exits: CacheEscaneos | null; ent: Record<string, RemisionEntrada> }>;
   /** La foto, los cachés y el cierre de la corrida, en UNA transacción. */
   terminarBien(id: number, r: CorridaBuena): Promise<void>;
-  /** Cierra la corrida como fallida. No toca `foto`; `exits`, si llega, sí (es caché). */
+  /** Cierra la corrida como fallida. No toca `foto`; `exits`, si llega, sí. servicio.ts ya no la pasa (D10: sería parcial). */
   terminarMal(id: number, causa: string, exits: CacheEscaneos | null): Promise<void>;
   leerFoto(): Promise<Foto | null>;
   leerAjustes(): Promise<Record<string, AjusteFirmado>>;
