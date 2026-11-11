@@ -98,10 +98,10 @@ describe('MisEquipos: lista y cabecera', () => {
     expect(within(t).getByText('EDM180C')).toBeTruthy();
     expect(within(t).getByText('Cliente Demo · #1234')).toBeTruthy();
   });
-  it('es de solo lectura: sin botones de acción ni campos (solo «Cambiar» y el enlace al taller)', async () => {
+  it('es de solo lectura: sin botones de acción ni campos (solo «Cambiar», «Escanear S/N» y el enlace al taller)', async () => {
     montar(UNO);
     await listo();
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Cambiar']);
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Cambiar', 'Escanear S/N']);
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
     expect(document.querySelector('input,textarea,select,video')).toBeNull();
   });
@@ -139,5 +139,49 @@ describe('MisEquipos: navegación y sondeo', () => {
     expect(screen.getByText('Cargando tablero…')).toBeTruthy();
     await listo();
     expect(screen.getByRole('alert').textContent).toContain('No tienes acceso');
+  });
+});
+
+describe('MisEquipos: Escanear S/N', () => {
+  const abrir = async () => { montar(UNO); await listo(); fireEvent.click(screen.getByRole('button', { name: 'Escanear S/N' })); };
+  const buscar = (sn: string) => {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Número de serie' }), { target: { value: sn } });
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }));
+  };
+  const camara = (lectura: string) => {
+    const parar = vi.fn();
+    vi.stubGlobal('BarcodeDetector', class { detect = vi.fn(async () => [{ rawValue: lectura }]); });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop: parar }] })) } });
+    return parar;
+  };
+  afterEach(() => { Reflect.deleteProperty(navigator, 'mediaDevices'); });
+
+  it('a mano: encuentra el equipo en todo el taller (sin importar mayúsculas) o avisa que no existe', async () => {
+    await abrir();
+    buscar(' 18a90005 ');
+    expect(within(screen.getByRole('region', { name: 'Resultado de la búsqueda' })).getByLabelText('Equipo 18A90005')).toBeTruthy();
+    buscar('NOEXISTE1');
+    expect(screen.getByText('No hay un equipo con el S/N NOEXISTE1.')).toBeTruthy();
+  });
+  it('sin lector de códigos del navegador solo ofrece la entrada manual', async () => {
+    await abrir();
+    expect(screen.queryByRole('button', { name: 'Usar la cámara' })).toBeNull();
+  });
+  it('con cámara: lee el código, muestra el equipo y apaga la cámara', async () => {
+    const parar = camara('18A90005');
+    await abrir();
+    fireEvent.click(screen.getByRole('button', { name: 'Usar la cámara' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByLabelText('Equipo 18A90005')).toBeTruthy();
+    expect(parar).toHaveBeenCalled();
+  });
+  it('cerrar el panel con la cámara encendida la apaga y no deja temporizadores propios', async () => {
+    const parar = camara('SINLECTURA');
+    await abrir();
+    fireEvent.click(screen.getByRole('button', { name: 'Usar la cámara' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    expect(parar).toHaveBeenCalled();
+    expect(screen.queryByRole('textbox')).toBeNull();
   });
 });

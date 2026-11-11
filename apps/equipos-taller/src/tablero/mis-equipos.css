@@ -23,5 +23,11 @@
 .tt-dias-suave-ambar { background: var(--tt-dias-s-ambar); color: var(--tt-tx-dias-s-ambar); }
 .tt-dias-suave-rojo { background: var(--tt-dias-s-rojo); color: var(--tt-tx-dias-s-rojo); }
 
-.tt-mis-barra { position: fixed; left: 0; right: 0; bottom: 0; margin: 0 !important; padding: 12px; background: var(--tt-fondo); border-top: 1px solid var(--tt-divisor); display: flex; justify-content: center; }
-.tt-mis-barra .tt-mis-boton { width: 100%; max-width: 616px; }
+.tt-mis-barra { position: fixed; left: 0; right: 0; bottom: 0; margin: 0 !important; padding: 12px; background: var(--tt-fondo); border-top: 1px solid var(--tt-divisor); display: flex; gap: 8px; }
+
+.tt-mis-escaner { display: flex; flex-direction: column; gap: 8px; background: var(--tt-columna); border-radius: 12px; padding: 12px; }
+.tt-mis-escaner-forma { display: flex; gap: 8px; }
+.tt-mis-campo { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--tt-tarjeta-borde); background: var(--tt-tarjeta); color: var(--tt-tx1); font-size: 16px; }
+.tt-mis-video { width: 100%; border-radius: 12px; background: var(--tt-cab); }
+
+.tt-mis-barra .tt-mis-boton { flex: 1; }

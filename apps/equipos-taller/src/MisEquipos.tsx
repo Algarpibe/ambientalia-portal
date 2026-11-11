@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ColumnaTablero, Tarjeta } from './nucleo';
 import { apiEquipos } from './api';
 import { Raiz, SinTablero, hhmm, useTableroDatos } from './tablero/Tablero';
+import EscanearSerial from './EscanearSerial';
 import { coincideTecnico, esDe, tecnicosDelTablero } from './tecnico';
 import './tablero/tablero.css';
 import './tablero/mis-equipos.css';
@@ -24,7 +25,7 @@ function Selector({ nombres, onElegir }: { nombres: string[]; onElegir: (n: stri
   );
 }
 
-function Ficha({ t }: { t: Tarjeta }) {
+export function Ficha({ t }: { t: Tarjeta }) {
   return (
     <article className="tt-tarjeta" aria-label={`Equipo ${t.sn}`}>
       <div className="tt-tarjeta-cab">
@@ -57,6 +58,7 @@ export default function MisEquipos({ nombre, pedir: pedirProp }: { nombre: strin
   const { datos, modelo, ajustes, okEn, fallo, obsoleto } = useTableroDatos(pedir);
   const [guardado, setGuardado] = useState<string | null>(leer);
   const [cambiando, setCambiando] = useState(false);
+  const [escaneando, setEscaneando] = useState(false);
   if (!modelo) return <SinTablero tema="sistema" hayDatos={!!datos} fallo={fallo} />;
 
   const nombres = tecnicosDelTablero(modelo);
@@ -90,8 +92,10 @@ export default function MisEquipos({ nombre, pedir: pedirProp }: { nombre: strin
       </ul>
       {elegido && todas.length === 0 ? <p className="tt-mensaje">{`No hay equipos asignados a ${elegido}.`}</p> : null}
       {!elegido || todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
+      {escaneando ? <EscanearSerial tarjetas={modelo.columnas.flatMap((c) => c.tarjetas)} onCerrar={() => setEscaneando(false)} mostrar={(t) => <Ficha key={t.clave} t={t} />} /> : null}
       {grupos.map((g) => <Grupo key={g.id} col={g} />)}
       <nav className="tt-mis-barra" aria-label="Taller">
+        <button type="button" className="tt-mis-boton" onClick={() => setEscaneando(true)}>Escanear S/N</button>
         <a className="tt-mis-boton" href="/equipos-taller?vista=tablero">Ver taller completo</a>
       </nav>
     </Raiz>
