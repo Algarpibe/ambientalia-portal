@@ -27,7 +27,7 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { ArchivoDrive } from './nucleo/tipos.js';
-import { listadoSospechoso, type ArchivoListado, type Carpeta, type ConteosFin, type ResultadoTexto } from './sync.js';
+import { CARPETAS, listadoSospechoso, type ArchivoListado, type Carpeta, type ConteosFin, type ResultadoTexto } from './sync.js';
 
 type PoolClient = Awaited<ReturnType<Pool['connect']>>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,20 +78,29 @@ export interface RepoSync {
   /** La última pasada COMPLETA, o null si nunca hubo una. */
   ultimaSincronizacion(): Promise<SincronizacionHecha | null>;
   /**
-   * Lo que la corrida ve de una carpeta: sin los borrados ni los pendientes de texto que
-   * cambiaron después del «fin» de `pasada` (los trajo una pasada que no ha terminado).
+   * Lo que la corrida ve de la copia, tal como la dejó `pasada`: los tres listados y los
+   * textos de los PDF, en UNA instantánea (REPEATABLE READ, solo lectura). Una pasada que
+   * aplica listados a la vez no puede dejar un archivo en dos carpetas, ni en ninguna.
    */
-  listarCarpeta(carpeta: Carpeta, pasada: string): Promise<ArchivoDrive[]>;
+  leerCopia(pasada: string): Promise<CopiaCorrida>;
   /** null si el archivo no está en esa carpeta (o está borrado). */
   leerTexto(carpeta: Carpeta, id: string): Promise<TextoGuardado | null>;
 }
 
+/** Lo que la corrida lee de la copia de una vez (repo-sync `leerCopia`). */
+export interface CopiaCorrida {
+  /** Por carpeta: sin los borrados ni los pendientes de texto que cambiaron después del «fin» de la pasada (los trajo una que no ha terminado). */
+  listados: Record<Carpeta, ArchivoDrive[]>;
+  /** El texto guardado de cada salida escaneada viva: la corrida los lee todos (D10). */
+  textosPdf: Map<string, TextoGuardado>;
+}
+
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
 
-async function enTransaccion<T>(db: Pool, fn: (c: PoolClient) => Promise<T>): Promise<T> {
+async function enTransaccion<T>(db: Pool, fn: (c: PoolClient) => Promise<T>, inicio = 'BEGIN'): Promise<T> {
   const c = await db.connect();
   try {
-    await c.query('BEGIN');
+    await c.query(inicio);
     const out = await fn(c);
     await c.query('COMMIT');
     return out;
@@ -236,17 +245,28 @@ export function crearRepoSync(db: Pool): RepoSync {
       return rows[0] ? { pasada: String(rows[0].pasada), inicio: iso(rows[0].inicio), fin: iso(rows[0].fin) } : null;
     },
 
-    async listarCarpeta(carpeta, pasada) {
-      // Sin la pasada (no debería pasar), 'infinity': no se esconde nada.
-      const { rows } = await db.query(
-        `SELECT id, titulo FROM portal.equipos_drive_archivos
-          WHERE carpeta = $1 AND NOT borrado
-            AND NOT (carpeta <> 'salidas_n8n' AND texto IS NULL AND error_status IS NULL
-                     AND actualizado_en > COALESCE((SELECT fin FROM portal.equipos_sincronizacion WHERE pasada = $2), 'infinity'::timestamptz))
-          ORDER BY titulo, id`,
-        [carpeta, pasada],
-      );
-      return rows.map((x: Fila) => ({ id: String(x.id), title: String(x.titulo) }));
+    async leerCopia(pasada) {
+      return enTransaccion(db, async (c): Promise<CopiaCorrida> => {
+        const listados = {} as Record<Carpeta, ArchivoDrive[]>;
+        for (const carpeta of CARPETAS) {
+          // Sin la pasada (no debería pasar), 'infinity': no se esconde nada.
+          const { rows } = await c.query(
+            `SELECT id, titulo FROM portal.equipos_drive_archivos
+              WHERE carpeta = $1 AND NOT borrado
+                AND NOT (carpeta <> 'salidas_n8n' AND texto IS NULL AND error_status IS NULL
+                         AND actualizado_en > COALESCE((SELECT fin FROM portal.equipos_sincronizacion WHERE pasada = $2), 'infinity'::timestamptz))
+              ORDER BY titulo, id`,
+            [carpeta, pasada],
+          );
+          listados[carpeta] = rows.map((x: Fila) => ({ id: String(x.id), title: String(x.titulo) }));
+        }
+        const { rows } = await c.query(
+          `SELECT id, texto, error_status FROM portal.equipos_drive_archivos WHERE carpeta = 'salidas_escaneadas' AND NOT borrado`,
+        );
+        const textosPdf = new Map<string, TextoGuardado>(rows.map((x: Fila): [string, TextoGuardado] => [String(x.id), { texto: x.texto ?? null, errorStatus: x.error_status ?? null }]));
+        return { listados, textosPdf };
+        // REPEATABLE READ: todas las consultas ven la base como estaba en la primera. Solo lee.
+      }, 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     },
 
     async leerTexto(carpeta, id) {

@@ -276,18 +276,18 @@ describe('«fin» con todos los textos fallidos (OCR o exportación rotos en n8n
   });
 });
 
-describe('lo que ve la corrida (listarCarpeta y leerTexto)', () => {
+describe('lo que ve la corrida (leerCopia y leerTexto)', () => {
   it('sin borrados, y sin los pendientes que trajo una pasada posterior a la última completa', async () => {
     await pasadaCompleta('p1', { entradas: [A('ENTRADA00001'), A('ENTRADA00002'), A('ENTRADA00004')], salidas_n8n: [A('SALIDAN8N001')] });
     await sync.guardarTexto('ENTRADA00001', { texto: 'remisión' });
     // La pasada 2, a medias: borra ENTRADA00002, trae ENTRADA00003 (sin texto aún) y una salida de n8n nueva.
     await listar('p2', 'entradas', [A('ENTRADA00001'), A('ENTRADA00003'), A('ENTRADA00004')]);
     await listar('p2', 'salidas_n8n', [A('SALIDAN8N001'), A('SALIDAN8N002')]);
-    const ids = async (c: Carpeta) => (await sync.listarCarpeta(c, 'p1')).map((x) => x.id);
+    const ids = async (c: Carpeta) => (await sync.leerCopia('p1')).listados[c].map((x) => x.id);
     // ENTRADA00004 sigue pendiente DESDE la pasada 1: se ve (y fallará como archivo sin texto).
     expect(await ids('entradas')).toEqual(['ENTRADA00001', 'ENTRADA00004']);
     // Las salidas de n8n no llevan texto: se ven en cuanto llegan.
-    expect(await sync.listarCarpeta('salidas_n8n', 'p1')).toEqual([
+    expect((await sync.leerCopia('p1')).listados.salidas_n8n).toEqual([
       { id: 'SALIDAN8N001', title: 'SALIDAN8N001 nombre' }, { id: 'SALIDAN8N002', title: 'SALIDAN8N002 nombre' },
     ]);
     // En cuanto llega su texto, la nueva ya se ve.
@@ -297,7 +297,53 @@ describe('lo que ve la corrida (listarCarpeta y leerTexto)', () => {
 
   it('con una pasada que no existe no esconde nada', async () => {
     await listar('p1', 'entradas', [A('ENTRADA00001')]);
-    expect((await sync.listarCarpeta('entradas', 'nada')).map((x) => x.id)).toEqual(['ENTRADA00001']);
+    expect((await sync.leerCopia('nada')).listados.entradas.map((x) => x.id)).toEqual(['ENTRADA00001']);
+  });
+
+  it('trae el texto guardado de cada salida escaneada viva: texto, fallo o pendiente', async () => {
+    await pasadaCompleta('p1', { salidas_escaneadas: [A('ESCANEO00001'), A('ESCANEO00002'), A('ESCANEO00003'), A('ESCANEO00004')] });
+    await sync.guardarTexto('ESCANEO00001', { texto: 'OCR' });
+    await sync.guardarTexto('ESCANEO00002', { status: 403 });
+    await listar('p2', 'salidas_escaneadas', [A('ESCANEO00001'), A('ESCANEO00002'), A('ESCANEO00003')]);
+    const t = (await sync.leerCopia('p1')).textosPdf;
+    expect([...t.entries()].sort()).toEqual([
+      ['ESCANEO00001', { texto: 'OCR', errorStatus: null }],
+      ['ESCANEO00002', { texto: null, errorStatus: 403 }],
+      ['ESCANEO00003', { texto: null, errorStatus: null }],
+    ]);
+  });
+
+  it('los tres listados y los textos de los PDF salen de UNA instantánea: una pasada que mueve un archivo a mitad no la parte', async () => {
+    await pasadaCompleta('p1', { salidas_escaneadas: [A('ARCHIVO00001'), A('ESCANEO00002')] });
+    await sync.guardarTexto('ARCHIVO00001', { texto: 'OCR' });
+    // Un pool que, justo después del primer listado de la corrida (entradas), deja que la pasada 2
+    // mueva ARCHIVO00001 de salidas escaneadas a entradas, por otra conexión y confirmado.
+    let movido = false;
+    const pool = {
+      query: (...a: unknown[]) => (db.query as (...x: unknown[]) => unknown)(...a),
+      connect: async () => {
+        const c = await db.connect();
+        let n = 0;
+        return {
+          query: async (...a: unknown[]) => {
+            const r = await (c.query as (...x: unknown[]) => Promise<unknown>)(...a);
+            if (++n === 2 && !movido) {
+              movido = true;
+              expect(await sync.registrarListado('p2', 'entradas', [A('ARCHIVO00001')])).toMatchObject({ estado: 'ok' });
+            }
+            return r;
+          },
+          release: () => c.release(),
+        };
+      },
+    } as unknown as Pool;
+    const copia = await crearRepoSync(pool).leerCopia('p1');
+    expect(movido).toBe(true);
+    expect((await fila('ARCHIVO00001')).carpeta).toBe('entradas');
+    // La corrida lo ve donde estaba al empezar a leer, y con su texto: ni en ninguna carpeta ni en dos.
+    expect(copia.listados.entradas).toEqual([]);
+    expect(copia.listados.salidas_escaneadas.map((x) => x.id)).toEqual(['ARCHIVO00001', 'ESCANEO00002']);
+    expect(copia.textosPdf.get('ARCHIVO00001')).toEqual({ texto: 'OCR', errorStatus: null });
   });
 
   it('leerTexto: texto, fallo, o null si es de otra carpeta', async () => {

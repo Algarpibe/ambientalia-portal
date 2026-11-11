@@ -154,6 +154,7 @@ Se crea **inactivo y sin credenciales**: el usuario le pone la credencial de Dri
    - Sin los archivos borrados en Drive.
    - Sin los que trajo una pasada posterior y todavía no tienen texto.
    - El OCR de todos los PDF se relee de la copia (D10). Las remisiones de entrada se leen solo si no están en la caché `ent`.
+   - Los tres listados y el OCR de los PDF se leen en **una sola instantánea** (REPEATABLE READ, solo lectura). Una pasada que aplica un listado mientras la corrida lee no puede dejar un archivo en dos carpetas, ni en ninguna.
    - Si la copia no se puede leer (falla la base), la corrida falla con `interno: no se pudo leer la copia de Drive`.
    - **Excepción (decisión del 10/11/2026): un archivo concreto sin texto no hace fallar la corrida.** Es un archivo cuyo fallo guardó n8n (un 4xx que no sea 401 ni 429), o cuyo texto no llegó en la última pasada completa.
      - **Un PDF** va a la lista de remisiones ilegibles con el motivo «sin texto legible» (regla 11). La explicación es «Google Drive no pudo convertir este PDF a texto (HTTP <código>)» o «n8n todavía no ha enviado el texto de este PDF».

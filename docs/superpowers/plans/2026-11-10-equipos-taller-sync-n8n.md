@@ -3102,7 +3102,7 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 
 **Drive, vía n8n.** hub-api no habla con Google: el Workspace de la empresa no deja compartir Drive con cuentas de servicio. El flujo de n8n «Equipos · Sincronizar remisiones» (abajo) lista cada hora las tres carpetas: entradas, salidas generadas por n8n y salidas escaneadas. Manda a hub-api los nombres y los textos, que se guardan en `portal.equipos_drive_archivos` (la copia). Cada pasada queda en `portal.equipos_sincronizacion`.
 
-- **Qué ve la corrida:** la copia tal como la dejó la **última pasada completa**, sin lo borrado en Drive y sin lo que trajo una pasada posterior que aún no tiene texto.
+- **Qué ve la corrida:** la copia tal como la dejó la **última pasada completa**, sin lo borrado en Drive y sin lo que trajo una pasada posterior que aún no tiene texto. Los tres listados y el OCR de los PDF se leen en una sola instantánea, así que una pasada que llega a mitad no parte la vista.
 - **Texto de una remisión de entrada:** el primer Google Doc de la carpeta, exportado como Markdown. Si no hay documento, es un texto vacío.
 - **Texto de una salida escaneada:** el OCR. n8n copia el PDF como Google Doc con OCR en español, lo exporta a texto y borra la copia.
 - **Qué texto pide hub-api:** el de lo nuevo; el de lo que cambió de nombre (mientras llega, vale el viejo); y, cada 6 h, el de lo que tiene un fallo guardado.
