@@ -7,6 +7,7 @@ import RequireAuth from './components/RequireAuth';
 import RequireAdmin from './components/RequireAdmin';
 import AppGuard from './components/AppGuard';
 import RutaTableroTv from './components/RutaTableroTv';
+import RutaMisEquipos from './components/RutaMisEquipos';
 import NotificationHost from './components/NotificationHost';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -56,6 +57,9 @@ function App() {
 
         {/* Pantalla de TV del taller — pantalla completa, fuera del shell */}
         <Route path="/equipos-taller/tv" element={<RutaTableroTv />} />
+
+        {/* «Mis equipos» (móvil, solo lectura) — fuera del shell */}
+        <Route path="/equipos-taller/mis-equipos" element={<RutaMisEquipos />} />
 
         {/* Main app with sidebar */}
         <Route

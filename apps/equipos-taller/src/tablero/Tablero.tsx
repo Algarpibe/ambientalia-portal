@@ -19,9 +19,9 @@ const dos = (n: number) => String(n).padStart(2, '0');
 /** HH:MM en Bogotá de un instante en milisegundos. */
 export const hhmm = (ms: number): string => `${dos(horaBogota(ms))}:${dos(new Date(ms - 5 * 3600e3).getUTCMinutes())}`;
 
-function Raiz({ tema, children }: { tema: TemaPantalla; children: ReactNode }) {
+export function Raiz({ tema, children, clase = '' }: { tema: TemaPantalla; children: ReactNode; clase?: string }) {
   return (
-    <div className="tt-tablero" data-tema={tema}>
+    <div className={`tt-tablero ${clase}`.trim()} data-tema={tema}>
       <style href="tt-temas" precedence="tt">{cssTemas()}</style>
       {children}
     </div>

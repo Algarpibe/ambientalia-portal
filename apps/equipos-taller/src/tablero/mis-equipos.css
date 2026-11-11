@@ -1,0 +1,27 @@
+/* «Mis equipos» (celular, fluido desde 390 px). Solo variables --tt-*; el tema sigue al sistema. */
+.tt-mis { min-height: 100vh; border-radius: 0; padding: 0 0 88px; gap: 12px; max-width: 640px; margin: 0 auto; }
+.tt-mis > *:not(.tt-mis-cab) { margin-left: 12px; margin-right: 12px; }
+.tt-mis-cab { background: var(--tt-cab); color: var(--tt-tx-cab); display: flex; align-items: center; gap: 12px; padding: 16px; }
+.tt-av-grande { width: 44px; height: 44px; font-size: 16px; }
+.tt-mis-id { flex: 1; min-width: 0; }
+.tt-mis-id p { font-size: 13px; color: var(--tt-tx-cab-tenue); margin: 0; }
+.tt-mis-id h1 { font-size: 20px; font-weight: 800; line-height: 1.2; margin: 0; overflow-wrap: anywhere; }
+
+.tt-mis-boton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--tt-tarjeta-borde); background: var(--tt-tarjeta); color: var(--tt-tx1); font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+.tt-mis-cambiar { background: transparent; color: var(--tt-tx-cab); border-color: var(--tt-tx-cab-tenue); }
+
+.tt-mis-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; list-style: none; padding: 0; }
+.tt-mis-kpis .tt-kpi { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; }
+.tt-mis-kpis .tt-kpi-n { font-size: 26px; }
+
+.tt-mis-selector { display: flex; flex-direction: column; gap: 8px; }
+.tt-mis-selector h2 { font-size: 18px; margin: 0; }
+.tt-mis-grupo { display: flex; flex-direction: column; gap: 8px; }
+
+.tt-dias-suave { border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.tt-dias-suave-verde { background: var(--tt-dias-s-verde); color: var(--tt-tx-dias-s-verde); }
+.tt-dias-suave-ambar { background: var(--tt-dias-s-ambar); color: var(--tt-tx-dias-s-ambar); }
+.tt-dias-suave-rojo { background: var(--tt-dias-s-rojo); color: var(--tt-tx-dias-s-rojo); }
+
+.tt-mis-barra { position: fixed; left: 0; right: 0; bottom: 0; margin: 0 !important; padding: 12px; background: var(--tt-fondo); border-top: 1px solid var(--tt-divisor); display: flex; justify-content: center; }
+.tt-mis-barra .tt-mis-boton { width: 100%; max-width: 616px; }
