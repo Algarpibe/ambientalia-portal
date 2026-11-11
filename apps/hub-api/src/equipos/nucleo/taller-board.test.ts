@@ -236,6 +236,17 @@ describe('KPIs', () => {
     expect(t.kpis.map((k) => k.etiqueta)).toEqual(['En taller', 'Por revisar', 'Salió con ticket abierto', 'Servicio externo', 'Entregados']);
   });
 
+  it('tonos como en el PDF: Por revisar ámbar, Salió con ticket abierto rojo, Entregados verde; a 0, neutro', () => {
+    const conDatos = [
+      fila('K1', 'En Proceso', { est: EST.REVISAR }),
+      fila('K2', 'Por Facturar', { est: EST.ENTREGADO }),
+      fila('K3', 'En Proceso'),
+    ];
+    const tono = (filas: Fila[]) => Object.fromEntries(construirTablero(filas, CFG, AHORA).kpis.map((k) => [k.id, k.tono]));
+    expect(tono(conDatos)).toEqual({ en_taller: 'neutro', revisar: 'ambar', ticket_abierto: 'rojo', externo: 'neutro', entregado: 'verde' });
+    expect(tono([])).toMatchObject({ revisar: 'neutro', ticket_abierto: 'neutro' });
+  });
+
   it('un ajuste «ret» cuenta como Retirado y no como En taller', () => {
     const f = fila('R1', 'En Proceso');
     const ajustada = aplicarAjustes([f], { ['R1|' + f.d]: { t: 'ret', m: 'devuelto', at: '2026-11-02' } });

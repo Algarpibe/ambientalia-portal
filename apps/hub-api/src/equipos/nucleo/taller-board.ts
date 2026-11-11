@@ -1,7 +1,7 @@
 // Modelo puro del tablero kanban del taller: de las filas ajustadas a columnas, tarjetas, etiquetas, días y KPIs.
 // Sin E/S ni reloj propio: el instante actual entra como parámetro (`ahoraMs`).
 import { nkey } from "./reglas.js";
-import { VISTAS, claveFila } from "./pantalla.js";
+import { VISTAS, VISTA_PARCIALES, VISTA_TICKET_ABIERTO, claveFila } from "./pantalla.js";
 import { EST, type Fila } from "./tipos.js";
 import { COLUMNAS_TALLER, columnaDeEstado, esEsperaRepuestos, esEstadoCerrado, type ColumnaId } from "./taller-columns.js";
 
@@ -36,8 +36,8 @@ const KPI_DEFS = {
   externo: { vista: EST.EXTERNO, etiqueta: "Servicio externo" },
   revisar: { vista: EST.REVISAR, etiqueta: "Por revisar" },
   ticket_cerrado: { vista: EST.CERRADO, etiqueta: "Ticket cerrado sin salida" },
-  ticket_abierto: { vista: "Salió con ticket abierto", etiqueta: "Salió con ticket abierto" },
-  parciales: { vista: "Salidas parciales", etiqueta: "Salidas parciales" },
+  ticket_abierto: { vista: VISTA_TICKET_ABIERTO, etiqueta: VISTA_TICKET_ABIERTO },
+  parciales: { vista: VISTA_PARCIALES, etiqueta: VISTA_PARCIALES },
   entregado: { vista: EST.ENTREGADO, etiqueta: "Entregados" },
   retirado: { vista: EST.RETIRADO, etiqueta: "Retirado" },
 } as const;
@@ -52,9 +52,15 @@ export interface Kpi {
   tono: "neutro" | "ambar" | "rojo" | "verde";
 }
 
-/** Tono del KPI: ámbar si hay algo que atender, verde para lo entregado, neutro en el resto. */
+/**
+ * Tono del KPI, como en el PDF: «Salió con ticket abierto» rojo y lo que hay que revisar ámbar
+ * (solo si hay alguno), lo entregado verde, el resto neutro.
+ */
 const tonoKpi = (id: KpiId, valor: number): Kpi["tono"] =>
-  id === "entregado" ? "verde" : valor > 0 && (id === "revisar" || id === "ticket_cerrado" || id === "ticket_abierto" || id === "parciales") ? "ambar" : "neutro";
+  id === "entregado" ? "verde"
+    : valor > 0 && id === "ticket_abierto" ? "rojo"
+    : valor > 0 && (id === "revisar" || id === "ticket_cerrado" || id === "parciales") ? "ambar"
+    : "neutro";
 
 export interface ColumnaTablero {
   id: ColumnaId;
