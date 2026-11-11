@@ -6,11 +6,16 @@ import { TEMAS } from './temas';
 const leer = (f: string) => readFileSync(new URL(f, import.meta.url), 'utf8');
 const LITERAL_COLOR = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\(/;
 
-describe('tablero.css', () => {
+describe('tablero.css y Tablero.tsx', () => {
   const css = leer('./tablero.css');
   it('tablero.css no tiene literales de color (hex, rgb, hsl…)', () => {
     expect(css.length).toBeGreaterThan(500);
     expect(css).not.toMatch(LITERAL_COLOR);
+  });
+  it('Tablero.tsx no tiene literales de color', () => {
+    const tsx = leer('./Tablero.tsx');
+    expect(tsx.length).toBeGreaterThan(500);
+    expect(tsx).not.toMatch(LITERAL_COLOR);
   });
   it('cada variable --tt-* que usa existe en la tabla de tokens', () => {
     const usadas = [...css.matchAll(/var\(--tt-([a-z0-9-]+)\)/g)].map((m) => m[1]);
