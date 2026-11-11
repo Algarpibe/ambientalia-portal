@@ -91,11 +91,12 @@ Las rutas de la pantalla van bajo `requireAuth` + `requireApp('equipos-taller')`
 |---|---|---|
 | `POST /api/equipos-taller/sync/listado` | `{ pasada, carpeta, archivos: [{ id, titulo }] }`, con el listado **completo** de una carpeta. | 200 `{ faltaTexto: [ids] }`: da de alta los nuevos, actualiza los nombres y marca `borrado` lo que ya no está. 409 si la pasada ya terminó, si hay otra pasada en curso o si el listado vaciaría la carpeta (o borraría más de la mitad y más de 10 archivos); también si movería así los de otra carpeta. El 409 sospechoso lleva `{ bajas, vivos, carpeta }`, con la carpeta que perdería los archivos. |
 | `POST /api/equipos-taller/sync/texto` | `{ id, texto }` o `{ id, error: { status } }`. | 204; 404 si el archivo no está en la copia. |
-| `POST /api/equipos-taller/sync/fin` | `{ pasada, conteos }`. | 200; 404 si la pasada no existe; 409 si ya terminó o le falta el listado de alguna carpeta. |
+| `POST /api/equipos-taller/sync/fin` | `{ pasada, conteos }`. | 200 `{ ok: true, completa: true }`; o 200 `{ ok: true, completa: false, motivo: 'textos_fallidos' }`, cerrada pero sin contar como fresca (ver abajo); 404 si la pasada no existe; 409 si ya terminó o le falta el listado de alguna carpeta. |
 
 - `pasada` es el id de la ejecución de n8n, y `carpeta` es `entradas`, `salidas_n8n` o `salidas_escaneadas`.
 - **Qué texto se pide:** solo en entradas y salidas escaneadas. Se pide el de un archivo nuevo, el de uno que cambió de nombre desde que llegó su texto (el viejo se sigue usando hasta que llega el nuevo) y, cada 6 horas, el de uno con fallo guardado.
 - **Fallos que se guardan:** `status` solo admite un fallo de ese archivo, es decir, un 4xx que no sea 401 ni 429. Un fallo pasajero no se manda: el archivo queda pendiente y n8n lo pide en la pasada siguiente.
+- **Textos fallidos:** como la corrida da por buenos los PDF que ya tienen texto (D10), un OCR roto para todo lo nuevo no la haría fallar. Por eso «fin» cierra la pasada como fallida (`motivo = 'textos_fallidos'`, no cuenta como fresca) si en entradas o en salidas escaneadas hay 2 o más archivos cuya racha de fallos empezó en una pasada posterior a la del último texto bueno de esa carpeta. Se juzga por pasadas (un texto bueno en la misma pasada basta), una pasada sin resultados no lo limpia y lo limpia el primer texto bueno. Los reintentos de archivos rotos de verdad no lo disparan si después de su primer fallo llegó algún texto bueno. Si dura más de `EQUIPOS_SYNC_MAX_HORAS`, la corrida falla por copia atrasada y salta la alerta (§5.2).
 - **Validación estricta:** ids con la forma de Drive, sin repetidos; hasta 10 000 archivos por listado; nombres de hasta 300 caracteres; los textos se recortan a 200 000. Cabe en el límite de 2 MB del servidor.
 
 ### 3.4 Flujo de n8n «Equipos · Sincronizar remisiones»
@@ -129,10 +130,12 @@ Se crea **inactivo y sin credenciales**: el usuario le pone la credencial de Dri
   - `texto`: NULL hasta que llega; un texto vacío es válido (carpeta de entrada sin documento).
   - `titulo_texto`: el nombre que tenía el archivo cuando llegó su texto.
   - `error_status`: el fallo de ese archivo.
+  - `texto_sync` y `error_sync`: la pasada en la que llegó su último texto y aquella en la que empezó su racha de fallos (para los textos fallidos, §3.3).
   - `texto_en`, `borrado`, `creado_en` y `actualizado_en` (el último cambio del listado).
   - La base comprueba la forma del id, la carpeta y que `salidas_n8n` no lleve texto.
 - **`equipos_sincronizacion`** (072): una fila por pasada de n8n.
   - `pasada` (el id de la ejecución, único), `inicio`, `fin` y `ok`.
+  - `motivo`: por qué no vale una pasada cerrada (`abandonada`, `tardia` o `textos_fallidos`); NULL si vale.
   - `listados`: carpeta → archivos recibidos.
   - `conteos`: los que manda «fin».
   - Una pasada sin «fin» de más de 2 horas se cierra como fallida cuando empieza otra. Hasta entonces, no puede empezar otra.

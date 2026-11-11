@@ -3136,7 +3136,7 @@ Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última bue
 | `desk2: sin configurar` | Falta `DESK2_DB_URL` en hub-api. |
 | `desk2: sin conexión` / `tiempo agotado` | La base de Desk 2.0 no responde (mismo pool que Trazabilidad: 3 s para conectar, 5 s por consulta). |
 | `desk2: consulta rechazada (permisos o esquema)` | Falta el `GRANT SELECT ON desk.conversations TO portal_agenda_reader`, o cambió una columna. |
-| `drive: sincronización de n8n atrasada` | n8n lleva más de `EQUIPOS_SYNC_MAX_HORAS` sin terminar una pasada. Mirar las ejecuciones del flujo en n8n y `portal.equipos_sincronizacion` (abajo). Puede ser una credencial de Drive caducada, el flujo desactivado, un `EQUIPOS_SYNC_TOKEN` distinto del de la credencial Header Auth (401) o un listado rechazado (409). |
+| `drive: sincronización de n8n atrasada` | n8n lleva más de `EQUIPOS_SYNC_MAX_HORAS` sin terminar una pasada **que valga**. Mirar las ejecuciones del flujo en n8n y `portal.equipos_sincronizacion` (abajo, columna `motivo`). Puede ser una credencial de Drive caducada, el flujo desactivado, un `EQUIPOS_SYNC_TOKEN` distinto del de la credencial Header Auth (401), un listado rechazado (409) o, con `motivo = 'textos_fallidos'`, que el OCR o la exportación fallan en todos los archivos nuevos (mirar `error_status` en `portal.equipos_drive_archivos`). |
 | `drive: no se pudo convertir ningún PDF (HTTP 4xx)` | Todos los PDF tienen un fallo guardado. Casi siempre, la cuenta de n8n no puede editar la carpeta temporal del OCR. Un solo PDF que falla no aparece aquí: sale en remisiones ilegibles. |
 | `drive: no se pudo convertir ningún PDF (texto pendiente de n8n)` | n8n listó los PDF pero no mandó sus textos (mirar sus ejecuciones). |
 | `drive: no se pudo leer ninguna remisión de entrada (…)` | Lo mismo, con las remisiones de entrada. |
@@ -3282,7 +3282,8 @@ El usuario completa tres cosas:
 
 - **`conteos`:** los archivos listados en cada carpeta. Lleva las tres claves, con enteros ≥ 0, y ninguna más.
 - **Respuestas:**
-  - `200 { "ok": true }`: la pasada cuenta como **completa**. La corrida diaria la usa y mide desde ella la frescura.
+  - `200 { "ok": true, "completa": true }`: la pasada cuenta como **completa**. La corrida diaria la usa y mide desde ella la frescura.
+  - `200 { "ok": true, "completa": false, "motivo": "textos_fallidos" }`: la pasada se cerró, pero **no** cuenta como fresca. En entradas o en salidas escaneadas hay 2 o más archivos que empezaron a fallar después del último texto bueno de esa carpeta: el OCR o la exportación están fallando en todo lo nuevo. Para n8n es como el otro 200: no hay que hacer nada distinto. Si sigue así más de `EQUIPOS_SYNC_MAX_HORAS`, las corridas fallan por copia atrasada y salta la alerta. Se limpia con el primer texto bueno de esa carpeta.
   - `404 { "error": "pasada_desconocida" }`.
   - `409 { "error": "pasada_cerrada" }`.
   - `409 { "error": "pasada_incompleta" }`: falta el listado de alguna carpeta.
@@ -3298,7 +3299,7 @@ El usuario completa tres cosas:
 
 ```sql
 -- Últimas pasadas
-SELECT id, pasada, inicio, fin, ok, listados, conteos FROM portal.equipos_sincronizacion ORDER BY id DESC LIMIT 10;
+SELECT id, pasada, inicio, fin, ok, motivo, listados, conteos FROM portal.equipos_sincronizacion ORDER BY id DESC LIMIT 10;
 -- Archivos sin texto o con un fallo guardado
 SELECT carpeta, id, titulo, error_status, texto_en FROM portal.equipos_drive_archivos
  WHERE NOT borrado AND carpeta <> 'salidas_n8n' AND (texto IS NULL OR error_status IS NOT NULL) ORDER BY carpeta, titulo;
@@ -3553,7 +3554,7 @@ return [{ json: {
 4. **Primera ejecución:** ejecutar el flujo a mano una vez. Es la carga completa, con unos 190 PDF de OCR y tantas remisiones de entrada como carpetas, y puede durar más de una hora: si la instancia tiene `EXECUTIONS_TIMEOUT`, tiene que cubrirla. Después, comprobar en psql que la pasada terminó con `ok = true`:
 
    ```sql
-   SELECT pasada, inicio, fin, ok, listados, conteos FROM portal.equipos_sincronizacion ORDER BY id DESC LIMIT 3;
+   SELECT pasada, inicio, fin, ok, motivo, listados, conteos FROM portal.equipos_sincronizacion ORDER BY id DESC LIMIT 3;
    ```
 
 5. **Activar** el flujo.

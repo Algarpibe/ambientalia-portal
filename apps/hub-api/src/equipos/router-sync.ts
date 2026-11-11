@@ -7,7 +7,10 @@
  *
  *   POST /equipos-taller/sync/listado  ← { pasada, carpeta, archivos: [{ id, titulo }] }  → 200 { faltaTexto } · 409 (sospechoso: + { bajas, vivos, carpeta })
  *   POST /equipos-taller/sync/texto    ← { id, texto } | { id, error: { status } }        → 204 · 404
- *   POST /equipos-taller/sync/fin      ← { pasada, conteos }                              → 200 { ok } · 404 · 409
+ *   POST /equipos-taller/sync/fin      ← { pasada, conteos }                              → 200 { ok, completa, motivo? } · 404 · 409
+ *
+ * «fin» con 200 siempre cierra la pasada. `completa: false` (con `motivo: 'textos_fallidos'`)
+ * dice que no cuenta como fresca: los textos de una carpeta están fallando (repo-sync.ts).
  *
  * 400 si el cuerpo no vale, con un mensaje fijo que nunca repite lo recibido. Un error
  * nuestro es un 500 genérico y va a Sentry.
@@ -70,7 +73,9 @@ export function createEquiposSyncRouter(sync: RepoSync): Router {
     const v = validarFin(req.body);
     if (!v.ok) return invalido(res, v.error);
     const r = await sync.cerrarPasada(v.valor.pasada, v.valor.conteos);
-    if (r === 'cerrada') res.json({ ok: true });
+    // Cerrada en los dos casos (200, `ok`): `completa` dice si cuenta para la frescura.
+    if (r === 'cerrada') res.json({ ok: true, completa: true });
+    else if (r === 'textos_fallidos') res.json({ ok: true, completa: false, motivo: 'textos_fallidos' });
     else if (r === 'desconocida') res.status(404).json({ error: 'pasada_desconocida', message: 'No hay ninguna pasada con ese id' });
     else if (r === 'ya_cerrada') res.status(409).json(pasadaCerrada);
     else if (r === 'tardia') res.status(409).json({ error: 'pasada_tardia', message: 'La pasada tardó demasiado y se descartó; empiece otra' });

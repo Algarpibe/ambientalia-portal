@@ -172,7 +172,7 @@ describe('pasadas', () => {
     for (const c of CARPETAS) await listar('p1', c, []);
     await db.query(`UPDATE portal.equipos_sincronizacion SET inicio = now() - make_interval(hours => $1, mins => 1) WHERE pasada = 'p1'`, [HORAS_PASADA_ABANDONADA]);
     expect(await sync.cerrarPasada('p1', SIN_CONTEOS)).toBe('tardia');
-    expect((await db.query(`SELECT ok, fin IS NOT NULL AS cerrada FROM portal.equipos_sincronizacion WHERE pasada = 'p1'`)).rows[0]).toEqual({ ok: false, cerrada: true });
+    expect((await db.query(`SELECT ok, motivo, fin IS NOT NULL AS cerrada FROM portal.equipos_sincronizacion WHERE pasada = 'p1'`)).rows[0]).toEqual({ ok: false, motivo: 'tardia', cerrada: true });
     expect(await sync.ultimaSincronizacion()).toBeNull();
     expect(await sync.cerrarPasada('p1', SIN_CONTEOS)).toBe('ya_cerrada');
   });
@@ -200,8 +200,79 @@ describe('pasadas', () => {
     expect(await sync.registrarListado('p2', 'entradas', [])).toEqual({ estado: 'pasada_en_curso' });
     await db.query(`UPDATE portal.equipos_sincronizacion SET inicio = now() - make_interval(hours => $1, mins => 1) WHERE pasada = 'p1'`, [HORAS_PASADA_ABANDONADA]);
     expect(await sync.registrarListado('p2', 'entradas', [])).toMatchObject({ estado: 'ok' });
-    expect((await db.query(`SELECT ok, fin IS NOT NULL AS cerrada FROM portal.equipos_sincronizacion WHERE pasada = 'p1'`)).rows[0]).toEqual({ ok: false, cerrada: true });
+    expect((await db.query(`SELECT ok, motivo, fin IS NOT NULL AS cerrada FROM portal.equipos_sincronizacion WHERE pasada = 'p1'`)).rows[0]).toEqual({ ok: false, motivo: 'abandonada', cerrada: true });
     expect(await sync.cerrarPasada('p1', SIN_CONTEOS)).toBe('ya_cerrada');
+  });
+});
+
+describe('«fin» con todos los textos fallidos (OCR o exportación rotos en n8n)', () => {
+  /** Lista las tres carpetas de una pasada, sin «fin». */
+  const abrir = async (pasada: string, l: Partial<Record<Carpeta, ArchivoListado[]>> = {}) => {
+    for (const c of CARPETAS) await listar(pasada, c, l[c] ?? []);
+  };
+  const estado = async (pasada: string) =>
+    (await db.query('SELECT ok, motivo, fin IS NOT NULL AS cerrada, conteos FROM portal.equipos_sincronizacion WHERE pasada = $1', [pasada])).rows[0];
+  const CONTEOS = { entradas: 2, salidas_n8n: 0, salidas_escaneadas: 2 };
+  const DOS = [A('ARCHIVO00001'), A('ARCHIVO00002')];
+
+  it('2 o más resultados en una carpeta y todos fallos: se cierra fallida (textos_fallidos) y no cuenta como fresca', async () => {
+    for (const [mala, sana] of [['salidas_escaneadas', 'entradas'], ['entradas', 'salidas_escaneadas']] as const) {
+      await vaciar();
+      await pasadaCompleta('p0');
+      await abrir('p1', { [mala]: DOS, [sana]: [A('SANO00000001')] });
+      await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+      await sync.guardarTexto('ARCHIVO00002', { status: 404 });
+      // La otra carpeta funciona: no tapa a la rota.
+      await sync.guardarTexto('SANO00000001', { texto: 'bien' });
+      expect(await sync.cerrarPasada('p1', CONTEOS), mala).toBe('textos_fallidos');
+      expect(await estado('p1'), mala).toEqual({ ok: false, motivo: 'textos_fallidos', cerrada: true, conteos: CONTEOS });
+      expect((await sync.ultimaSincronizacion())?.pasada, mala).toBe('p0');
+      expect(await sync.cerrarPasada('p1', CONTEOS), mala).toBe('ya_cerrada');
+    }
+  });
+
+  it('un texto bueno entre los fallos basta, llegue antes o después', async () => {
+    await abrir('p1', { salidas_escaneadas: [...DOS, A('ESCANEO00003')] });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ESCANEO00003', { texto: 'OCR' });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('cerrada');
+    expect((await sync.ultimaSincronizacion())?.pasada).toBe('p1');
+  });
+
+  it('con menos de 2 resultados no se juzga: un solo fallo, y la pasada vale', async () => {
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('cerrada');
+    expect(await estado('p1')).toMatchObject({ ok: true, motivo: null });
+  });
+
+  it('sigue fallida mientras no llegue un texto bueno: una pasada sin resultados no la limpia, un texto bueno sí', async () => {
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('textos_fallidos');
+    // Los fallos no se vuelven a pedir hasta pasadas 6 h: la siguiente pasada no trae resultados.
+    await abrir('p2', { salidas_escaneadas: DOS });
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('textos_fallidos');
+    await abrir('p3', { salidas_escaneadas: [...DOS, A('ESCANEO00003')] });
+    await sync.guardarTexto('ESCANEO00003', { texto: 'OCR' });
+    expect(await sync.cerrarPasada('p3', CONTEOS)).toBe('cerrada');
+  });
+
+  it('el reintento de fallos que empezaron antes del último texto bueno no la tumba (archivos rotos de verdad)', async () => {
+    await abrir('p1', { salidas_escaneadas: [...DOS, A('ESCANEO00003')] });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    await sync.guardarTexto('ESCANEO00003', { texto: 'OCR' });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('cerrada');
+    await db.query('UPDATE portal.equipos_drive_archivos SET texto_en = now() - make_interval(hours => $1, mins => 1) WHERE error_status IS NOT NULL', [HORAS_REINTENTO_ERROR]);
+    expect(await listar('p2', 'salidas_escaneadas', [...DOS, A('ESCANEO00003')])).toEqual(['ARCHIVO00001', 'ARCHIVO00002']);
+    await listar('p2', 'entradas', []);
+    await listar('p2', 'salidas_n8n', []);
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('cerrada');
   });
 });
 

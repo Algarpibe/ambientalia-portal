@@ -10,6 +10,20 @@
  *   · el de un archivo que cambió de nombre desde que llegó su texto (el viejo se
  *     conserva y se sigue usando hasta que llegue el nuevo);
  *   · el de un archivo con un fallo guardado, pasadas HORAS_REINTENTO_ERROR horas.
+ *
+ * Textos fallidos (que el OCR o la exportación de n8n se rompan sin que nadie se entere):
+ * la corrida da por buenos los PDF que ya tienen texto, así que un OCR roto para todo lo
+ * NUEVO no la haría fallar. Lo vigila «fin»: cada texto apunta la pasada en la que llegó
+ * (`texto_sync`) y cada racha de fallos la pasada en la que empezó (`error_sync`; los
+ * reintentos no la mueven). Si en entradas o en salidas escaneadas hay MIN_TEXTOS_FALLIDOS
+ * o más archivos cuya racha empezó en una pasada posterior a la del último texto bueno de
+ * esa carpeta, la pasada se cierra fallida ('textos_fallidos') y no cuenta como fresca: la
+ * regla de frescura de la corrida (EQUIPOS_SYNC_MAX_HORAS) la hace fallar y salta la alerta.
+ *   · Se juzga por pasadas, no por el orden de llegada: un texto bueno en la misma pasada basta.
+ *   · Es persistente: una pasada sin resultados no lo limpia (los fallos no se vuelven a pedir
+ *     hasta pasadas 6 h); lo limpia el primer texto bueno de esa carpeta.
+ *   · Un par de archivos rotos de verdad no lo dispara para siempre: con un texto bueno
+ *     posterior a su primer fallo, sus reintentos ya no cuentan.
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { ArchivoDrive } from './nucleo/tipos.js';
@@ -23,6 +37,11 @@ type Fila = Record<string, any>;
 export const HORAS_REINTENTO_ERROR = 6;
 /** Una pasada sin «fin» más vieja que esto se da por abandonada (n8n murió a mitad); hasta entonces, no empieza otra. */
 export const HORAS_PASADA_ABANDONADA = 2;
+/** Archivos de una carpeta con fallos y sin ningún texto bueno después: desde aquí, «fin» cierra la pasada como 'textos_fallidos'. */
+export const MIN_TEXTOS_FALLIDOS = 2;
+
+/** La pasada abierta (como mucho hay una): la de los textos que llegan ahora. */
+const PASADA_ABIERTA = 'SELECT id FROM portal.equipos_sincronizacion WHERE fin IS NULL ORDER BY id DESC LIMIT 1';
 
 /** Una pasada completa (con «fin»). */
 export interface SincronizacionHecha {
@@ -42,14 +61,19 @@ export type ResultadoListado =
   | { estado: 'pasada_en_curso' }
   /** `carpeta`: la que perdería los archivos (la del listado, o aquella de la que saldrían hacia la del listado). */
   | { estado: 'sospechoso'; carpeta: Carpeta; bajas: number; vivos: number };
-export type CierrePasada = 'cerrada' | 'desconocida' | 'ya_cerrada' | 'incompleta' | 'tardia';
+/** 'textos_fallidos': cerrada, pero fallida (no cuenta como fresca); ver la cabecera. */
+export type CierrePasada = 'cerrada' | 'textos_fallidos' | 'desconocida' | 'ya_cerrada' | 'incompleta' | 'tardia';
 
 export interface RepoSync {
   /** El listado COMPLETO de una carpeta en una pasada: altas, nombres y borrados. Devuelve los ids a los que les falta texto. */
   registrarListado(pasada: string, carpeta: Carpeta, archivos: ArchivoListado[]): Promise<ResultadoListado>;
   /** El texto (o el fallo) de un archivo. false si no está, está borrado o su carpeta no lleva texto. */
   guardarTexto(id: string, r: ResultadoTexto): Promise<boolean>;
-  /** Cierra la pasada como completa. Exige el listado de las tres carpetas; si lleva abierta más de HORAS_PASADA_ABANDONADA la cierra como fallida ('tardia'). */
+  /**
+   * Cierra la pasada como completa. Exige el listado de las tres carpetas. La cierra como
+   * fallida si lleva abierta más de HORAS_PASADA_ABANDONADA ('tardia') o si los textos de una
+   * carpeta están fallando ('textos_fallidos', ver la cabecera).
+   */
   cerrarPasada(pasada: string, conteos: ConteosFin): Promise<CierrePasada>;
   /** La última pasada COMPLETA, o null si nunca hubo una. */
   ultimaSincronizacion(): Promise<SincronizacionHecha | null>;
@@ -88,7 +112,7 @@ export function crearRepoSync(db: Pool): RepoSync {
         await c.query(`SELECT pg_advisory_xact_lock(hashtext('equipos-taller:sync'))`);
         // Una pasada sin «fin» de hace más de HORAS_PASADA_ABANDONADA: n8n murió a mitad.
         await c.query(
-          `UPDATE portal.equipos_sincronizacion SET fin = now(), ok = false
+          `UPDATE portal.equipos_sincronizacion SET fin = now(), ok = false, motivo = 'abandonada'
             WHERE fin IS NULL AND pasada <> $1 AND inicio < now() - make_interval(hours => $2)`,
           [pasada, HORAS_PASADA_ABANDONADA],
         );
@@ -134,6 +158,8 @@ export function crearRepoSync(db: Pool): RepoSync {
              titulo_texto = CASE WHEN a.carpeta = EXCLUDED.carpeta THEN a.titulo_texto END,
              error_status = CASE WHEN a.carpeta = EXCLUDED.carpeta THEN a.error_status END,
              texto_en     = CASE WHEN a.carpeta = EXCLUDED.carpeta THEN a.texto_en END,
+             texto_sync   = CASE WHEN a.carpeta = EXCLUDED.carpeta THEN a.texto_sync END,
+             error_sync   = CASE WHEN a.carpeta = EXCLUDED.carpeta THEN a.error_sync END,
              carpeta = EXCLUDED.carpeta, titulo = EXCLUDED.titulo, borrado = false, actualizado_en = now()
            WHERE a.titulo IS DISTINCT FROM EXCLUDED.titulo OR a.borrado OR a.carpeta <> EXCLUDED.carpeta`,
           [carpeta, ids, archivos.map((a) => a.titulo)],
@@ -157,15 +183,20 @@ export function crearRepoSync(db: Pool): RepoSync {
     },
 
     async guardarTexto(id, r) {
+      // Cada resultado apunta la pasada abierta (ver la cabecera: textos fallidos).
       const res = 'texto' in r
         ? await db.query(
-          `UPDATE portal.equipos_drive_archivos SET texto = $2, titulo_texto = titulo, error_status = NULL, texto_en = now()
+          `UPDATE portal.equipos_drive_archivos
+              SET texto = $2, titulo_texto = titulo, error_status = NULL, error_sync = NULL, texto_en = now(), texto_sync = (${PASADA_ABIERTA})
             WHERE id = $1 AND NOT borrado AND carpeta <> 'salidas_n8n'`,
           [id, r.texto],
         )
-        // Un fallo no borra el texto que hubiera: sigue valiendo hasta que llegue uno nuevo.
+        // Un fallo no borra el texto que hubiera: sigue valiendo hasta que llegue uno nuevo. Si
+        // el archivo ya estaba fallando, la racha conserva la pasada en la que empezó.
         : await db.query(
-          `UPDATE portal.equipos_drive_archivos SET error_status = $2, texto_en = now()
+          `UPDATE portal.equipos_drive_archivos
+              SET error_status = $2, texto_en = now(),
+                  error_sync = CASE WHEN error_status IS NOT NULL AND error_sync IS NOT NULL THEN error_sync ELSE (${PASADA_ABIERTA}) END
             WHERE id = $1 AND NOT borrado AND carpeta <> 'salidas_n8n'`,
           [id, r.status],
         );
@@ -173,18 +204,28 @@ export function crearRepoSync(db: Pool): RepoSync {
     },
 
     async cerrarPasada(pasada, conteos) {
-      // Una sola sentencia: si lleva abierta más de HORAS_PASADA_ABANDONADA se cierra como
-      // fallida (la frescura se mide desde «fin», y una pasada tan larga no es fresca).
+      // Una sola sentencia. Fallida si lleva abierta más de HORAS_PASADA_ABANDONADA (la
+      // frescura se mide desde «fin», y una pasada tan larga no es fresca) o si alguna carpeta
+      // con texto tiene MIN_TEXTOS_FALLIDOS o más rachas de fallos que empezaron después de su
+      // último texto bueno. `rotas` se evalúa una vez.
       const { rows } = await db.query(
-        `UPDATE portal.equipos_sincronizacion
+        `WITH rotas AS (
+           SELECT a.carpeta FROM portal.equipos_drive_archivos a
+            WHERE a.carpeta <> 'salidas_n8n' AND NOT a.borrado AND a.error_status IS NOT NULL
+              AND a.error_sync > COALESCE((SELECT max(b.texto_sync) FROM portal.equipos_drive_archivos b WHERE b.carpeta = a.carpeta), 0)
+            GROUP BY a.carpeta HAVING count(*) >= $4
+         )
+         UPDATE portal.equipos_sincronizacion
             SET fin = now(),
-                ok = inicio >= now() - make_interval(hours => $3),
+                ok = inicio >= now() - make_interval(hours => $3) AND NOT EXISTS (SELECT 1 FROM rotas),
+                motivo = CASE WHEN inicio < now() - make_interval(hours => $3) THEN 'tardia'
+                              WHEN EXISTS (SELECT 1 FROM rotas) THEN 'textos_fallidos' END,
                 conteos = CASE WHEN inicio >= now() - make_interval(hours => $3) THEN $2::jsonb ELSE conteos END
           WHERE pasada = $1 AND fin IS NULL AND listados ?& ARRAY['entradas', 'salidas_n8n', 'salidas_escaneadas']
-          RETURNING ok`,
-        [pasada, JSON.stringify(conteos), HORAS_PASADA_ABANDONADA],
+          RETURNING ok, motivo`,
+        [pasada, JSON.stringify(conteos), HORAS_PASADA_ABANDONADA, MIN_TEXTOS_FALLIDOS],
       );
-      if (rows.length) return rows[0].ok ? 'cerrada' : 'tardia';
+      if (rows.length) return rows[0].ok ? 'cerrada' : rows[0].motivo === 'textos_fallidos' ? 'textos_fallidos' : 'tardia';
       const p = await db.query('SELECT fin FROM portal.equipos_sincronizacion WHERE pasada = $1', [pasada]);
       if (!p.rows.length) return 'desconocida';
       return p.rows[0].fin ? 'ya_cerrada' : 'incompleta';

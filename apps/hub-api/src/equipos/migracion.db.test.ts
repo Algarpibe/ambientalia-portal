@@ -92,6 +92,11 @@ describe('migración 072 contra Postgres', () => {
       `INSERT INTO portal.equipos_drive_archivos (id, carpeta, titulo) VALUES ('ARCHIVO000005', 'entradas', '')`,
       `INSERT INTO portal.equipos_sincronizacion (pasada, fin) VALUES ('4711', now())`,
       `INSERT INTO portal.equipos_sincronizacion (pasada) VALUES ('4711; DROP')`,
+      // motivo: solo, y siempre, en una pasada fallida; y uno de los conocidos.
+      `INSERT INTO portal.equipos_sincronizacion (pasada, motivo) VALUES ('4712', 'textos_fallidos')`,
+      `INSERT INTO portal.equipos_sincronizacion (pasada, fin, ok) VALUES ('4713', now(), false)`,
+      `INSERT INTO portal.equipos_sincronizacion (pasada, fin, ok, motivo) VALUES ('4714', now(), true, 'tardia')`,
+      `INSERT INTO portal.equipos_sincronizacion (pasada, fin, ok, motivo) VALUES ('4715', now(), false, 'otro')`,
     ];
     for (const sql of malas) await expect(db.query(sql), sql).rejects.toMatchObject({ code: '23514' });
   });

@@ -147,7 +147,8 @@ describe('POST /texto', () => {
 
 describe('POST /fin', () => {
   it('200 al cerrar; 404 si no existe; 409 si ya terminó o le falta alguna carpeta', async () => {
-    expect([(await post('/fin', FIN)).status, llamadas]).toEqual([200, [['fin', '4711', FIN.conteos]]]);
+    const ok = await post('/fin', FIN);
+    expect([ok.status, ok.body, llamadas]).toEqual([200, { ok: true, completa: true }, [['fin', '4711', FIN.conteos]]]);
     cierre = 'desconocida';
     expect([(await post('/fin', FIN)).status, (await post('/fin', FIN)).body.error]).toEqual([404, 'pasada_desconocida']);
     cierre = 'ya_cerrada';
@@ -158,6 +159,12 @@ describe('POST /fin', () => {
     cierre = 'tardia';
     const t = await post('/fin', FIN);
     expect([t.status, t.body.error]).toEqual([409, 'pasada_tardia']);
+  });
+
+  it('con todos los textos fallidos: 200 igual (la pasada se cerró), pero no cuenta como completa', async () => {
+    cierre = 'textos_fallidos';
+    const r = await post('/fin', FIN);
+    expect([r.status, r.body]).toEqual([200, { ok: true, completa: false, motivo: 'textos_fallidos' }]);
   });
 
   it('400 sin un conteo por carpeta', async () => {

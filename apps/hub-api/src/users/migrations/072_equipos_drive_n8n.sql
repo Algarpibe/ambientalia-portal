@@ -18,6 +18,10 @@ CREATE SCHEMA IF NOT EXISTS portal;
 -- texto          NULL = todavía no llegó, '' es válido (carpeta de entrada sin documento)
 -- titulo_texto   el nombre cuando llegó el texto: si el archivo cambia de nombre, se vuelve a pedir
 -- error_status   el último fallo de ESE archivo (4xx que no es 401 ni 429), que se vuelve a pedir cada 6 h
+-- texto_sync     la pasada (equipos_sincronizacion.id) en la que llegó su último texto
+-- error_sync     la pasada en la que empezó su racha de fallos (el primero tras su último texto); los
+--                reintentos no la mueven. Con las dos, «fin» ve si el OCR o la exportación de n8n
+--                fallan en todo lo nuevo (repo-sync.ts, cerrarPasada)
 -- actualizado_en el último cambio del listado (alta, nombre, carpeta, borrado o reaparición)
 CREATE TABLE IF NOT EXISTS portal.equipos_drive_archivos (
   id             text        PRIMARY KEY CHECK (id ~ '^[A-Za-z0-9_-]{10,100}$'),
@@ -27,6 +31,8 @@ CREATE TABLE IF NOT EXISTS portal.equipos_drive_archivos (
   titulo_texto   text        NULL,
   error_status   integer     NULL CHECK (error_status BETWEEN 400 AND 499 AND error_status NOT IN (401, 429)),
   texto_en       timestamptz NULL,
+  texto_sync     bigint      NULL,
+  error_sync     bigint      NULL,
   borrado        boolean     NOT NULL DEFAULT false,
   creado_en      timestamptz NOT NULL DEFAULT now(),
   actualizado_en timestamptz NOT NULL DEFAULT now(),
@@ -34,7 +40,9 @@ CREATE TABLE IF NOT EXISTS portal.equipos_drive_archivos (
 );
 CREATE INDEX IF NOT EXISTS equipos_drive_archivos_vivos ON portal.equipos_drive_archivos (carpeta) WHERE NOT borrado;
 
--- Una pasada está abierta mientras fin y ok son NULL. Con «fin», ok = true; abandonada, ok = false.
+-- Una pasada está abierta mientras fin y ok son NULL. Con «fin», ok = true; si no vale, ok = false
+-- con su motivo: 'abandonada' (sin «fin» en 2 h), 'tardia' («fin» pasadas 2 h) o 'textos_fallidos'
+-- (todos los textos recientes de una carpeta, 2 o más, son fallos).
 -- listados: carpeta → archivos recibidos; «fin» exige las tres carpetas.
 CREATE TABLE IF NOT EXISTS portal.equipos_sincronizacion (
   id       bigserial   PRIMARY KEY,
@@ -42,9 +50,11 @@ CREATE TABLE IF NOT EXISTS portal.equipos_sincronizacion (
   inicio   timestamptz NOT NULL DEFAULT now(),
   fin      timestamptz NULL,
   ok       boolean     NULL,
+  motivo   text        NULL CHECK (motivo IN ('abandonada', 'tardia', 'textos_fallidos')),
   listados jsonb       NOT NULL DEFAULT '{}'::jsonb,
   conteos  jsonb       NULL,
-  CONSTRAINT equipos_sincronizacion_estado CHECK ((fin IS NULL) = (ok IS NULL))
+  CONSTRAINT equipos_sincronizacion_estado CHECK ((fin IS NULL) = (ok IS NULL)),
+  CONSTRAINT equipos_sincronizacion_motivo CHECK ((motivo IS NOT NULL) = (ok IS FALSE))
 );
 CREATE INDEX IF NOT EXISTS equipos_sincronizacion_completas ON portal.equipos_sincronizacion (fin DESC) WHERE ok;
 
