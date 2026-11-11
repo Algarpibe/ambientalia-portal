@@ -222,7 +222,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
 
   const ultima = datos?.ultima;
   return (
-    <main className="mx-auto max-w-7xl p-4 text-slate-900">
+    <main className="w-full p-4 text-slate-900">
       <header className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Equipos en taller</h1>

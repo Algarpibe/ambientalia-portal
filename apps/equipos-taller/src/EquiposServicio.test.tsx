@@ -62,6 +62,13 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     expect(screen.getByText('1 aviso en la última ejecución')).toBeTruthy();
   });
 
+  it('ocupa todo el ancho de la pantalla (sin ancho máximo)', async () => {
+    render(<EquiposServicio api={apiFalsa().api} />);
+    const main = await screen.findByRole('main');
+    expect(main.className).not.toMatch(/\bmax-w-/);
+    expect(main.className).toMatch(/\bw-full\b/);
+  });
+
   it('equipo y cliente van en columnas separadas', async () => {
     render(<EquiposServicio api={apiFalsa().api} />);
     const celda = (await screen.findByText('18A90001')).closest('tr')!.querySelectorAll('td');
