@@ -1,0 +1,71 @@
+/* Tablero kanban del taller. Solo variables --tt-* (los colores viven en temas.ts). */
+.tt-tablero { background: var(--tt-fondo); color: var(--tt-tx1); font-family: 'Inter Variable', system-ui, sans-serif; padding: 16px; border-radius: 12px; display: flex; flex-direction: column; gap: 14px; }
+.tt-mono { font-family: 'JetBrains Mono Variable', ui-monospace, monospace; }
+
+.tt-estado { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; font-size: 13px; color: var(--tt-atenuado); }
+.tt-aviso { border: 2px solid var(--tt-sin-asignar); color: var(--tt-sin-asignar); border-radius: 8px; padding: 8px 12px; font-weight: 600; }
+.tt-mensaje { padding: 48px 16px; text-align: center; color: var(--tt-atenuado); font-size: 16px; }
+
+.tt-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.tt-kpi { background: var(--tt-kpi); border: 1px solid var(--tt-kpi-borde); border-radius: 14px; padding: 12px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.tt-kpi-n { font-size: 32px; font-weight: 800; line-height: 1; }
+.tt-kpi-e { font-size: 14px; color: var(--tt-atenuado); }
+.tt-tono-ambar { color: var(--tt-kpi-ambar); }
+.tt-tono-rojo { color: var(--tt-kpi-rojo); }
+.tt-tono-verde { color: var(--tt-kpi-verde); }
+
+.tt-columnas { display: grid; grid-template-columns: repeat(6, minmax(210px, 1fr)); gap: 12px; overflow-x: auto; align-items: start; }
+.tt-col { background: var(--tt-columna); border-radius: 16px; border-top: 6px solid var(--col); padding: 16px 12px 12px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.tt-col-entrada { --col: var(--tt-est-entrada); }
+.tt-col-diagnostico { --col: var(--tt-est-diagnostico); }
+.tt-col-notificacion { --col: var(--tt-est-notificacion); }
+.tt-col-proceso { --col: var(--tt-est-proceso); }
+.tt-col-externo { --col: var(--tt-est-externo); }
+.tt-col-entregar { --col: var(--tt-est-entregar); }
+.tt-col-cab { display: flex; align-items: center; gap: 8px; }
+.tt-punto { width: 12px; height: 12px; border-radius: 50%; background: var(--col); flex: none; }
+.tt-col-nombre { flex: 1; font-size: 16px; font-weight: 700; line-height: 1.2; }
+.tt-cuenta { min-width: 32px; height: 28px; padding: 0 8px; border-radius: 14px; background: var(--col); color: var(--tt-tx-estado); font-size: 15px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+.tt-col-desc { font-size: 12px; color: var(--tt-tenue); min-height: 2.6em; }
+.tt-vacio { border: 2px dashed var(--tt-vacio-borde); border-radius: 12px; color: var(--tt-tx-vacio); text-align: center; padding: 24px 8px; font-size: 14px; }
+
+.tt-tarjeta { background: var(--tt-tarjeta); border: 1px solid var(--tt-tarjeta-borde); box-shadow: var(--tt-sombra); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tt-tarjeta-cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tt-sn { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-dias { border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.tt-dias-verde { background: var(--tt-dias-verde); color: var(--tt-tx-dias-verde); }
+.tt-dias-ambar { background: var(--tt-dias-ambar); color: var(--tt-tx-dias-ambar); }
+.tt-dias-rojo { background: var(--tt-dias-rojo); color: var(--tt-tx-dias-rojo); }
+.tt-equipo { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-cliente { font-size: 13px; color: var(--tt-atenuado); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
+.tt-etiqueta { background: var(--tt-etiqueta); color: var(--tt-tx-etiqueta); border-radius: 8px; padding: 2px 8px; font-size: 12px; font-weight: 600; }
+.tt-pie { border-top: 1px solid var(--tt-divisor); padding-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.tt-av { width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; flex: none; color: var(--tt-tx-av); }
+.tt-av-0 { background: var(--tt-av-0); }
+.tt-av-1 { background: var(--tt-av-1); }
+.tt-av-2 { background: var(--tt-av-2); }
+.tt-av-3 { background: var(--tt-av-3); }
+.tt-av-4 { background: var(--tt-av-4); }
+.tt-av-5 { background: var(--tt-av-5); }
+.tt-av-sin { background: transparent; border: 2px dashed var(--tt-sin-asignar); color: var(--tt-sin-asignar); }
+.tt-av-neutro { background: transparent; border: 2px dashed var(--tt-vacio-borde); color: var(--tt-tenue); }
+.tt-tecnico { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-tecnico-sin { color: var(--tt-sin-asignar); }
+.tt-tecnico-neutro { color: var(--tt-tenue); font-weight: 500; }
+.tt-ticket { color: var(--tt-tenue); font-size: 13px; }
+
+.tt-tarjeta-compacta { padding: 8px 12px; gap: 4px; }
+.tt-tarjeta-compacta .tt-pie { border-top: 0; padding-top: 0; }
+.tt-marca { width: 8px; height: 8px; border-radius: 50%; background: var(--tt-tx-etiqueta); flex: none; }
+.tt-mas { background: var(--tt-tarjeta); border: 2px dashed var(--tt-vacio-borde); border-radius: 12px; text-align: center; padding: 12px 8px; font-weight: 700; color: var(--tt-atenuado); }
+
+.tt-leyenda { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; font-size: 13px; color: var(--tt-cuerpo); }
+.tt-leyenda-izq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.tt-cuadro { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.tt-cuadro-verde { background: var(--tt-dias-verde); }
+.tt-cuadro-ambar { background: var(--tt-dias-ambar); }
+.tt-cuadro-rojo { background: var(--tt-dias-rojo); }
+.tt-circulo-sin { display: inline-block; width: 14px; height: 14px; border-radius: 50%; border: 2px dashed var(--tt-sin-asignar); margin-right: 6px; vertical-align: -2px; }
+
+@media (max-width: 900px) { .tt-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -5,6 +5,7 @@
  * comprueba con su propia configuración, así que aquí no entra nada de Node.
  */
 import type { Ajuste, Foto } from './nucleo/tipos.js';
+import type { AjustesTablero, Tablero } from './nucleo/taller-board.js';
 
 /** Id de la app en `portal.user_apps` y en el JWT. */
 export const APP_ID = 'equipos-taller';
@@ -78,6 +79,16 @@ export interface RespuestaEquipos {
   ultimaBuena: Corrida | null;
   incidente: Incidente | null;
   permisos: PermisosPantalla;
+  /** Ajustes efectivos del tablero. Opcional: un servidor anterior no lo manda y la pantalla usa los de por defecto. */
+  tablero?: AjustesTablero;
+}
+
+/** Lo que recibe una pantalla de TV por el endpoint de kiosco (lote 4a): el tablero ya construido. */
+export interface RespuestaTablero {
+  tablero: Tablero;
+  ajustes: AjustesTablero;
+  fotoEn: string | null;
+  aviso: AvisoFoto | null;
 }
 
 /** Una fila de GET /api/equipos-taller/llaves. */

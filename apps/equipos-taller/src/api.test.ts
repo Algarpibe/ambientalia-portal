@@ -62,4 +62,16 @@ describe('apiEquipos', () => {
     expect((await apiEquipos(B, f, cab).guardarLlaves('u1', { editaAjustes: true, recibeAlertas: false })).editaAjustes).toBe(true);
     expect(JSON.parse(String(pedidos[0].init.body))).toEqual({ editaAjustes: true, recibeAlertas: false });
   });
+  it('estado() pasa la señal de aborto al fetch (el sondeo del tablero corta a los 20 s)', async () => {
+    const { f, pedidos } = falso({ ['GET ' + B]: J({ snap: null }) });
+    const control = new AbortController();
+    await apiEquipos(B, f, cab).estado(control.signal);
+    expect(pedidos[0].init.signal).toBe(control.signal);
+  });
+  it('el error de un 401 lleva su código para que el tablero muestre «sin acceso»', async () => {
+    const { f } = falso({ ['GET ' + B]: J({ error: 'unauthorized' }, 401) });
+    await expect(apiEquipos(B, f, cab).estado()).rejects.toMatchObject({ status: 401, message: 'unauthorized' });
+    const { f: g } = falso({ ['GET ' + B]: J({}, 503) });
+    await expect(apiEquipos(B, g, cab).estado()).rejects.toMatchObject({ status: 503, message: 'Error 503' });
+  });
 });
