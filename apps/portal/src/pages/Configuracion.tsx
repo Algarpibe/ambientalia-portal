@@ -243,7 +243,7 @@ export default function Configuracion() {
         {isAdmin && <FrecuenciaCorreos />}
 
         {/* Solo administradores: quién edita ajustes y quién recibe la alerta en «Equipos en taller» */}
-        {isAdmin && <PanelLlaves api={apiLlaves} />}
+        {isAdmin && <PanelLlaves api={apiLlaves} avisar={notify} />}
       </div>
     </div>
   );

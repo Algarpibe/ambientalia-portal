@@ -125,7 +125,7 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 |---|---|
 | Abrir y filtrar | Quien tenga la app `equipos-taller`, y los admin. |
 | Ajustes manuales («Sigue en taller», «Confirmar salida», «Marcar retirado», «Deshacer ajuste», «Ya revisada») | La llave `edita_ajustes`, o ser admin. |
-| Gestionar las llaves (Ajustes → «Equipos en taller · Llaves») | Solo los admin. Las llaves solo se pueden dar a usuarios **activos** que tengan la app (o sean admin). |
+| Gestionar las llaves (Ajustes → «Equipos en taller · Llaves») | Solo los admin. Las llaves solo se pueden dar a usuarios **activos** que tengan la app (o sean admin). Las casillas no guardan solas: cada fila se guarda con su botón «Guardar». |
 | Recibir la alerta | La llave `recibe_alertas` (los admin no la tienen por defecto), con el usuario activo y con la app o admin. |
 | Mandar la copia de Drive | Solo n8n, con el token `EQUIPOS_SYNC_TOKEN`. |
 

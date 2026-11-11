@@ -57,6 +57,18 @@ describe('Configuración', () => {
     expect(llavesApi.llaves).toHaveBeenCalled();
   });
 
+  it('las llaves se guardan con el botón «Guardar» de cada fila y se avisa con las notificaciones del portal', async () => {
+    llavesApi.guardarLlaves.mockImplementation(async (userId: string, l: object) => ({
+      userId, nombre: 'Persona Uno', email: 'p1@x.co', esAdmin: false, actualizadoPor: null, actualizadoEn: null, ...l,
+    }));
+    render(<Configuracion />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Recibe alertas: Persona Uno' }));
+    expect(llavesApi.guardarLlaves).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar llaves de Persona Uno' }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('Llaves de Persona Uno guardadas.', 'info'));
+    expect(llavesApi.guardarLlaves).toHaveBeenCalledWith('u1', { editaAjustes: false, recibeAlertas: true });
+  });
+
   it('quien no es administrador no ve la sección ni pide las llaves', () => {
     rol.actual = 'viewer';
     render(<Configuracion />);
@@ -69,7 +81,8 @@ describe('Configuración', () => {
     render(<Configuracion />);
     expect((screen.getByDisplayValue('Alfonso García') as HTMLInputElement).readOnly).toBe(true);
     // Se fue el botón que lo guardaba; el de contraseña sigue en su sitio.
-    expect(screen.queryByText('Guardar')).toBeNull();
+    // (Por su nombre accesible: los «Guardar» de las llaves se llaman «Guardar llaves de …».)
+    expect(screen.queryByRole('button', { name: 'Guardar' })).toBeNull();
     expect(screen.getByText('Actualizar Contraseña')).toBeTruthy();
   });
 
