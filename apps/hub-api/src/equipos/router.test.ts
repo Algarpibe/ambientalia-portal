@@ -6,6 +6,8 @@ import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
 import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, UsuarioConLlaves } from './contrato.js';
 import type { CierrePasada, RepoSync } from './repo-sync.js';
+import type { ResultadoAjustes, ResultadoToken, ServicioTablero } from './servicio-tablero.js';
+import { AJUSTES_TABLERO_POR_DEFECTO } from './nucleo/index.js';
 
 // Las rutas con Express de verdad: guardas de sesión y de app, llaves, 403/400/404, y la
 // corrida que lanza cada «fin» de n8n. El SQL lo cubre repo.db.test.ts; aquí el repositorio
@@ -75,11 +77,24 @@ const servicio = {
 } as unknown as ServicioEquipos;
 let cierre: CierrePasada = 'cerrada';
 const sync = { cerrarPasada: async () => cierre } as unknown as RepoSync;
+// El servicio del tablero (su lógica: servicio-tablero.test.ts): aquí solo se mira quién puede llamarlo y cómo se responde.
+const KIOSCO = { id: '00000000-0000-4000-8000-0000000000aa', nombre: 'TV uno', creadoPor: 'admin@ambientalia.com.co', creadoEn: '2026-11-12T00:00:00.000Z', revocadoEn: null, ultimoUsoEn: null };
+const aTablero: unknown[][] = [];
+let guardaAjustes: ResultadoAjustes;
+let creaToken: ResultadoToken;
+let revoca = true;
+const tablero = {
+  ajustes: async () => { aTablero.push(['ajustes']); return AJUSTES_TABLERO_POR_DEFECTO; },
+  guardarAjustes: async (p: unknown, por: string) => { aTablero.push(['guardar', p, por]); return guardaAjustes; },
+  crearToken: async (n: unknown, por: string) => { aTablero.push(['crear', n, por]); return creaToken; },
+  listarTokens: async () => { aTablero.push(['listar']); return [KIOSCO]; },
+  revocarToken: async (id: string, por: string) => { aTablero.push(['revocar', id, por]); return revoca; },
+} as unknown as ServicioTablero;
 
 const app = () => {
   const a = express();
   a.use(express.json());
-  a.use('/api', createEquiposTallerRouter({ repo, servicio, sync }));
+  a.use('/api', createEquiposTallerRouter({ repo, servicio, sync, tablero }));
   return a;
 };
 const B = '/api/equipos-taller';
@@ -96,6 +111,10 @@ beforeEach(() => {
   incidente = null;
   borrados.length = 0;
   cierre = 'cerrada';
+  aTablero.length = 0;
+  guardaAjustes = { ok: true, ajustes: { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 45 } };
+  creaToken = { ok: true, kiosco: KIOSCO, secreto: 'tvk_' + 'A'.repeat(43) };
+  revoca = true;
   vi.restoreAllMocks();
 });
 
@@ -290,5 +309,83 @@ describe('rutas de n8n', () => {
     } finally {
       delete process.env.EQUIPOS_SYNC_TOKEN;
     }
+  });
+});
+
+describe('ajustes del tablero', () => {
+  const R = B + '/tablero/ajustes';
+  it('GET y PUT solo para un admin (también con la app y la llave), 401 sin sesión', async () => {
+    const lector = token();
+    llaves.set(lector.userId, { editaAjustes: true, recibeAlertas: true });
+    expect((await request(app()).get(R)).status).toBe(401);
+    expect((await request(app()).get(R).set('Authorization', lector.auth)).status).toBe(403);
+    expect((await request(app()).put(R).set('Authorization', lector.auth).send({ umbralAmbar: 45 })).status).toBe(403);
+    expect(aTablero).toEqual([]);
+  });
+
+  it('un admin los lee, y los guarda firmados con su correo', async () => {
+    const adm = token({ role: 'admin' });
+    const g = await request(app()).get(R).set('Authorization', adm.auth);
+    expect([g.status, g.body, g.headers['cache-control']]).toEqual([200, AJUSTES_TABLERO_POR_DEFECTO, 'no-store']);
+    const p = await request(app()).put(R).set('Authorization', adm.auth).send({ umbralAmbar: 45 });
+    expect([p.status, p.body.umbralAmbar]).toEqual([200, 45]);
+    expect(aTablero).toContainEqual(['guardar', { umbralAmbar: 45 }, adm.email]);
+  });
+
+  it('si no valen, 400 con el motivo', async () => {
+    guardaAjustes = { ok: false, motivo: 'El umbral rojo debe ser un entero mayor que el ámbar' };
+    const r = await request(app()).put(R).set('Authorization', token({ role: 'admin' }).auth).send({ umbralRojo: 1 });
+    expect([r.status, r.body]).toEqual([400, { error: 'invalid_input', message: 'El umbral rojo debe ser un entero mayor que el ámbar' }]);
+  });
+
+  it('GET /equipos-taller lleva los efectivos en «tablero»: solo ellos, con una consulta más', async () => {
+    const r = await request(app()).get(B).set('Authorization', token().auth);
+    expect(r.body.tablero).toEqual(AJUSTES_TABLERO_POR_DEFECTO);
+    expect(Object.keys(r.body.tablero).sort()).toEqual(['kpis', 'nocheDesde', 'nocheHasta', 'umbralAmbar', 'umbralRojo']);
+    expect(aTablero).toEqual([['ajustes']]);
+  });
+});
+
+describe('llaves de kiosco (administración)', () => {
+  const T = B + '/kiosco/tokens';
+  const ID = KIOSCO.id;
+  it('un no admin no puede crear, listar ni revocar (403), ni sin sesión (401)', async () => {
+    const a = token({ apps: ['equipos-taller'] }).auth;
+    for (const [m, u] of [['get', T], ['post', T], ['delete', T + '/' + ID]] as const) {
+      expect((await request(app())[m](u).set('Authorization', a).send({ nombre: 'TV' })).status, m).toBe(403);
+      expect((await request(app())[m](u).send({ nombre: 'TV' })).status, m).toBe(401);
+    }
+    expect(aTablero).toEqual([]);
+  });
+
+  it('crear: 201 con el secreto una vez y sin caché, firmado con el admin', async () => {
+    const adm = token({ role: 'admin' });
+    const r = await request(app()).post(T).set('Authorization', adm.auth).send({ nombre: 'TV uno' });
+    expect([r.status, r.headers['cache-control']]).toEqual([201, 'no-store']);
+    expect(r.body).toEqual({ kiosco: KIOSCO, secreto: 'tvk_' + 'A'.repeat(43) });
+    expect(aTablero).toEqual([['crear', 'TV uno', adm.email]]);
+  });
+
+  it('crear: 400 si el nombre no vale y 409 si ya hay una activa con él', async () => {
+    const a = token({ role: 'admin' }).auth;
+    creaToken = { ok: false, motivo: 'nombre' };
+    expect((await request(app()).post(T).set('Authorization', a).send({ nombre: '' })).status).toBe(400);
+    creaToken = { ok: false, motivo: 'repetido' };
+    expect((await request(app()).post(T).set('Authorization', a).send({ nombre: 'TV uno' })).status).toBe(409);
+  });
+
+  it('listar: solo metadatos, sin resumen ni secreto', async () => {
+    const r = await request(app()).get(T).set('Authorization', token({ role: 'admin' }).auth);
+    expect(r.body).toEqual([KIOSCO]);
+    expect(r.text).not.toMatch(/hash|secreto|tvk_/);
+  });
+
+  it('revocar: 204; 404 si no existe o ya estaba revocada; 400 si el id no es un uuid', async () => {
+    const adm = token({ role: 'admin' });
+    expect((await request(app()).delete(T + '/' + ID).set('Authorization', adm.auth)).status).toBe(204);
+    expect(aTablero).toEqual([['revocar', ID, adm.email]]);
+    revoca = false;
+    expect((await request(app()).delete(T + '/' + ID).set('Authorization', adm.auth)).status).toBe(404);
+    expect((await request(app()).delete(T + '/no-es-uuid').set('Authorization', adm.auth)).status).toBe(400);
   });
 });

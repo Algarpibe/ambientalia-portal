@@ -32,6 +32,7 @@ describe('crearEquiposTaller', () => {
     expect(t).not.toMatch(/EQUIPOS_SYNC_TOKEN/);
     expect(t).not.toMatch(/token-ficticio-123/);
     expect(typeof m.sync.registrarListado).toBe('function');
+    expect([typeof m.tablero.validarKiosco, typeof m.tablero.crearToken]).toEqual(['function', 'function']);
   });
 
   it('«configurado» lo decide la base: sin ninguna pasada completa de n8n, false', async () => {

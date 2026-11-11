@@ -8,6 +8,8 @@
  *   GET    /equipos-taller/llaves           (admin)
  *   PUT    /equipos-taller/llaves/:userId   ← { editaAjustes, recibeAlertas } (admin)
  *   POST   /equipos-taller/sync/{listado,texto,fin}   n8n, con token de máquina y sin sesión (router-sync.ts)
+ *   GET    /equipos-taller/kiosco/tablero   la TV, con su llave en X-Kiosk-Token y sin sesión (router-kiosco.ts)
+ *   GET|PUT /equipos-taller/tablero/ajustes (admin) · GET|POST /equipos-taller/kiosco/tokens (admin; el POST da 201 con el secreto, una vez) · DELETE /equipos-taller/kiosco/tokens/:id (admin)
  *
  * No hay botón para actualizar (retirado el 11/11/2026): cada «fin» que cierra una pasada de
  * n8n lanza la corrida «sincronizacion», así que la pantalla se actualiza sola cada hora. La
@@ -25,12 +27,16 @@ import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
 import type { RepoSync } from './repo-sync.js';
 import { createEquiposSyncRouter } from './router-sync.js';
+import { createEquiposKioscoRouter } from './router-kiosco.js';
+import type { ServicioTablero } from './servicio-tablero.js';
 
 export interface DepsRouter {
   repo: RepoEquipos;
   servicio: ServicioEquipos;
   /** La copia de Drive que manda n8n. */
   sync: RepoSync;
+  /** Ajustes del tablero y llaves de kiosco. */
+  tablero: ServicioTablero;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,6 +65,8 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
       if (e !== 'iniciada') console.log('equipos-taller: corrida tras la sincronización omitida (' + (e === 'ocupado' ? 'ya hay una en curso' : 'falta configurar') + ')');
     },
   }));
+  // La TV: sin sesión, con su llave de kiosco. Solo esta ruta la acepta; las demás siguen pidiendo JWT.
+  router.use(createEquiposKioscoRouter(deps.tablero));
   const gated = [requireAuth, requireApp(APP_ID)] as const;
   const quien = (req: Request) => {
     const p = getPayload(req);
@@ -94,8 +102,8 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const q = quien(req);
     // `ultima` es la última corrida TERMINADA: si fuera la que está en curso, el aviso de foto vieja
     // desaparecería mientras corre (hasta 180 min tras una caída). «actualizando» sí mira la que corre.
-    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves, configurado] = await Promise.all([
-      deps.repo.leerFoto(), deps.repo.leerAjustes(), deps.repo.ultimaCorrida(), deps.repo.ultimaCorridaTerminada(), deps.repo.ultimaCorridaBuena(), deps.repo.incidenteAbierto(), deps.repo.llavesDe(q.userId), deps.servicio.configurado(),
+    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves, configurado, tablero] = await Promise.all([
+      deps.repo.leerFoto(), deps.repo.leerAjustes(), deps.repo.ultimaCorrida(), deps.repo.ultimaCorridaTerminada(), deps.repo.ultimaCorridaBuena(), deps.repo.incidenteAbierto(), deps.repo.llavesDe(q.userId), deps.servicio.configurado(), deps.tablero.ajustes(),
     ]);
     const cuerpo: RespuestaEquipos = {
       snap,
@@ -107,6 +115,7 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
       // El error de la alerta puede traer detalle del webhook: solo lo ve un admin.
       incidente: incidente && !q.esAdmin ? { ...incidente, alertaUltimoError: null } : incidente,
       permisos: { ...llaves, esAdmin: q.esAdmin, puedeEditar: q.esAdmin || llaves.editaAjustes },
+      tablero,
     };
     res.set('Cache-Control', 'no-store').json(cuerpo);
   }));
@@ -143,6 +152,42 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const u = await deps.repo.guardarLlaves(userId, { editaAjustes: b.editaAjustes, recibeAlertas: b.recibeAlertas }, q.email);
     if (!u) throw new ErrorRuta(404, { error: 'not_found', message: 'Usuario no encontrado' });
     res.json(u);
+  }));
+
+  router.get('/equipos-taller/tablero/ajustes', ...gated, ruta('equipos_tablero_ajustes', async (req, res) => {
+    exigirAdmin(req);
+    res.set('Cache-Control', 'no-store').json(await deps.tablero.ajustes());
+  }));
+
+  router.put('/equipos-taller/tablero/ajustes', ...gated, ruta('equipos_tablero_ajustes_guardar', async (req, res) => {
+    const q = exigirAdmin(req);
+    const r = await deps.tablero.guardarAjustes(req.body, q.email);
+    if (!r.ok) throw new ErrorRuta(400, { error: 'invalid_input', message: r.motivo });
+    res.json(r.ajustes);
+  }));
+
+  router.get('/equipos-taller/kiosco/tokens', ...gated, ruta('equipos_kiosco_listar', async (req, res) => {
+    exigirAdmin(req);
+    res.set('Cache-Control', 'no-store').json(await deps.tablero.listarTokens());
+  }));
+
+  // El secreto va SOLO en esta respuesta: no se guarda en claro y ninguna otra ruta lo devuelve.
+  router.post('/equipos-taller/kiosco/tokens', ...gated, ruta('equipos_kiosco_crear', async (req, res) => {
+    const q = exigirAdmin(req);
+    const r = await deps.tablero.crearToken((req.body ?? {}).nombre, q.email);
+    if (!r.ok) {
+      const repetido = r.motivo === 'repetido';
+      throw new ErrorRuta(repetido ? 409 : 400, { error: repetido ? 'conflict' : 'invalid_input', message: repetido ? 'Ya hay una llave activa con ese nombre' : 'El nombre debe tener entre 1 y 60 caracteres' });
+    }
+    res.set('Cache-Control', 'no-store').status(201).json({ kiosco: r.kiosco, secreto: r.secreto });
+  }));
+
+  router.delete('/equipos-taller/kiosco/tokens/:id', ...gated, ruta('equipos_kiosco_revocar', async (req, res) => {
+    const q = exigirAdmin(req);
+    const id = String(req.params.id);
+    if (!UUID.test(id)) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Id no válido' });
+    if (!(await deps.tablero.revocarToken(id, q.email))) throw new ErrorRuta(404, { error: 'not_found', message: 'No hay ninguna llave activa con ese id' });
+    res.status(204).end();
   }));
 
   return router;
