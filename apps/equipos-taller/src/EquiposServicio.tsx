@@ -130,8 +130,8 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
         <td className="px-2 py-2">
           {z?.eq || r.eq || 'Equipo sin identificar'}
           {!z?.eq && r.eq ? <span className="text-slate-500"> (remisión de entrada)</span> : null}
-          <div className="text-sm text-slate-500">{r.c}</div>
         </td>
+        <td className="px-2 py-2">{r.c}</td>
         <td className="whitespace-nowrap px-2 py-2 tabular-nums">
           <A href={enlaceCarpeta(r.id)}>{r.d}</A>
           <div className="text-sm text-slate-500">{adentro && r.d ? dias(r.d, hoy) + ' días' : ''}</div>
@@ -265,7 +265,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
         <div className="overflow-x-auto rounded border border-slate-200 bg-white">
           <table className="w-full text-left">
             <thead className="bg-slate-50 text-sm text-slate-600">
-              <tr>{['S/N', 'Equipo y cliente', 'Entrada', 'Ticket', 'Estado en Desk', 'Responsable', 'Clasificación y motivo'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr>
+              <tr>{['S/N', 'Equipo', 'Cliente', 'Entrada', 'Ticket', 'Estado en Desk', 'Responsable', 'Clasificación y motivo'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>{lista.map(filaEquipo)}</tbody>
           </table>

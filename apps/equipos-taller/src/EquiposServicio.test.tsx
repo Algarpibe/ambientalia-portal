@@ -62,6 +62,15 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     expect(screen.getByText('1 aviso en la última ejecución')).toBeTruthy();
   });
 
+  it('equipo y cliente van en columnas separadas', async () => {
+    render(<EquiposServicio api={apiFalsa().api} />);
+    const celda = (await screen.findByText('18A90001')).closest('tr')!.querySelectorAll('td');
+    const cabecera = [...screen.getAllByRole('columnheader')].map((h) => h.textContent);
+    expect(cabecera.slice(0, 3)).toEqual(['S/N', 'Equipo', 'Cliente']);
+    expect(celda[1].textContent).toBe('EDM180C');
+    expect(celda[2].textContent).toBe('Cliente A');
+  });
+
   it('en Revisar lista las remisiones ilegibles, sugiere el equipo y permite marcarlas como revisadas', async () => {
     const { api, llamadas } = apiFalsa();
     render(<EquiposServicio api={api} />);
