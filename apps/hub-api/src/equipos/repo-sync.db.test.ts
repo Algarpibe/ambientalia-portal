@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { poolDePrueba } from '../test-db/harness.js';
-import { crearRepoSync, HORAS_PASADA_ABANDONADA, HORAS_REINTENTO_ERROR, type RepoSync } from './repo-sync.js';
+import { crearRepoSync, HORAS_PASADA_ABANDONADA, HORAS_RACHA_RECIENTE, HORAS_REINTENTO_ERROR, type RepoSync } from './repo-sync.js';
 import { CARPETAS, MAX_ARCHIVOS, type ArchivoListado, type Carpeta } from './sync.js';
 
 // La copia de Drive que manda n8n (migración 072) contra Postgres real: qué texto se pide,
@@ -258,6 +258,68 @@ describe('«fin» con todos los textos fallidos (OCR o exportación rotos en n8n
     await abrir('p3', { salidas_escaneadas: [...DOS, A('ESCANEO00003')] });
     await sync.guardarTexto('ESCANEO00003', { texto: 'OCR' });
     expect(await sync.cerrarPasada('p3', CONTEOS)).toBe('cerrada');
+  });
+
+  it('motivoUltimaPasada: el de la última pasada cerrada (null si valió o si no hay ninguna); la abierta no cuenta', async () => {
+    expect(await sync.motivoUltimaPasada()).toBeNull();
+    await pasadaCompleta('p0');
+    expect(await sync.motivoUltimaPasada()).toBeNull();
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('textos_fallidos');
+    expect(await sync.motivoUltimaPasada()).toBe('textos_fallidos');
+    await listar('p2', 'entradas', []);
+    expect(await sync.motivoUltimaPasada()).toBe('textos_fallidos');
+    await listar('p2', 'salidas_n8n', []);
+    await listar('p2', 'salidas_escaneadas', DOS);
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('textos_fallidos');
+    await envejecerRachas(HORAS_RACHA_RECIENTE);
+    await pasadaCompleta('p3', { salidas_escaneadas: DOS });
+    expect(await sync.motivoUltimaPasada()).toBeNull();
+  });
+
+  /** Lleva el inicio de las rachas de fallos `h` horas (y un minuto) atrás, con el reloj de la base. */
+  const envejecerRachas = (h: number) =>
+    db.query('UPDATE portal.equipos_drive_archivos SET error_desde = now() - make_interval(hours => $1, mins => 1) WHERE error_status IS NOT NULL', [h]);
+
+  it(`una racha solo cuenta ${HORAS_RACHA_RECIENTE} h: 2 archivos corruptos la tumban ahora, pero no ${HORAS_RACHA_RECIENTE} h después aunque no llegue ningún texto bueno`, async () => {
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('textos_fallidos');
+    await envejecerRachas(HORAS_RACHA_RECIENTE);
+    await abrir('p2', { salidas_escaneadas: DOS });
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('cerrada');
+  });
+
+  it(`un OCR roto de verdad sigue roto pasadas ${HORAS_RACHA_RECIENTE} h, porque lo nuevo que llega sigue fallando; el primer texto bueno lo limpia`, async () => {
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('textos_fallidos');
+    await envejecerRachas(HORAS_RACHA_RECIENTE);
+    const nuevos = [...DOS, A('ESCANEO00003'), A('ESCANEO00004')];
+    await abrir('p2', { salidas_escaneadas: nuevos });
+    await sync.guardarTexto('ESCANEO00003', { status: 403 });
+    await sync.guardarTexto('ESCANEO00004', { status: 403 });
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('textos_fallidos');
+    await abrir('p3', { salidas_escaneadas: [...nuevos, A('ESCANEO00005')] });
+    await sync.guardarTexto('ESCANEO00005', { texto: 'OCR' });
+    expect(await sync.cerrarPasada('p3', CONTEOS)).toBe('cerrada');
+  });
+
+  it('el reintento de una racha no la rejuvenece: sigue contando desde su primer fallo', async () => {
+    await abrir('p1', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p1', CONTEOS)).toBe('textos_fallidos');
+    await envejecerRachas(HORAS_RACHA_RECIENTE);
+    await db.query('UPDATE portal.equipos_drive_archivos SET texto_en = now() - make_interval(hours => $1, mins => 1)', [HORAS_REINTENTO_ERROR]);
+    await abrir('p2', { salidas_escaneadas: DOS });
+    await sync.guardarTexto('ARCHIVO00001', { status: 403 });
+    await sync.guardarTexto('ARCHIVO00002', { status: 403 });
+    expect(await sync.cerrarPasada('p2', CONTEOS)).toBe('cerrada');
   });
 
   it('el reintento de fallos que empezaron antes del último texto bueno no la tumba (archivos rotos de verdad)', async () => {

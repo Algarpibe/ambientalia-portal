@@ -4,8 +4,8 @@ import { FalloArchivo, type FuenteDrive } from './fuente-n8n.js';
 import { SinDesk2, type FuenteDesk2 } from './fuente-desk2.js';
 import { CV, EST, type CacheEscaneos, type Foto, type RemisionEntrada } from './nucleo/index.js';
 import { CorridaCerrada, type RepoEquipos, type CorridaBuena } from './repo.js';
-import type { SincronizacionHecha } from './repo-sync.js';
-import { CAUSA_SYNC_ATRASADA, type Corrida, type Incidente } from './contrato.js';
+import type { MotivoPasada, SincronizacionHecha } from './repo-sync.js';
+import { CAUSA_SYNC_ATRASADA, CAUSA_TEXTOS_FALLIDOS, type Corrida, type Incidente } from './contrato.js';
 import type { DecisionIncidente } from './incidente.js';
 import type { CanalAlerta, CorreoAlerta } from './alerta.js';
 
@@ -103,10 +103,12 @@ function canalFalso(ok = true) {
 /** El servicio con la copia de Drive al día, salvo que `o` diga otra cosa. */
 const crear = (f: () => FuentesCorrida, repo: RepoEquipos, canal = canalFalso().canal, o: Partial<DepsServicio> = {}) =>
   crearServicioEquipos({
-    repo, sync: { ultimaSincronizacion: async () => SYNC }, fuentes: () => f(), maxHorasSync: 6, canal,
+    repo, sync: { ultimaSincronizacion: async () => SYNC, motivoUltimaPasada: async () => null }, fuentes: () => f(), maxHorasSync: 6, canal,
     reserva: 'comercial@ambientalia.com.co', log: () => {}, hoy: () => '2026-11-10', ahora: () => AHORA, ...o,
   });
-const conSync = (s: SincronizacionHecha | null): Partial<DepsServicio> => ({ sync: { ultimaSincronizacion: async () => s } });
+/** La última pasada completa es `s`; la última cerrada (que puede ser posterior y fallida) tiene `motivo`. */
+const conSync = (s: SincronizacionHecha | null, motivo: () => Promise<MotivoPasada | null> = async () => null): Partial<DepsServicio> =>
+  ({ sync: { ultimaSincronizacion: async () => s, motivoUltimaPasada: motivo } });
 
 describe('una corrida buena', () => {
   it('escribe la foto con sus conteos y la caché de OCR', async () => {
@@ -191,6 +193,29 @@ describe('la copia de Drive que manda n8n', () => {
     await srv.ejecutar('programada', null);
     expect(enviados).toHaveLength(1);
     expect(enviados[0].correo.cuerpo).toMatch(/sincronización de n8n atrasada/);
+  });
+
+  it('si la copia no está al día porque la última pasada cerró con textos fallidos, la causa lo dice, y la alerta también', async () => {
+    const { repo, s } = repoEnMemoria();
+    const { canal, enviados } = canalFalso();
+    const srv = crear(() => fuentes(), repo, canal, conSync(haceHoras(30), async () => 'textos_fallidos'));
+    expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'error', causa: CAUSA_TEXTOS_FALLIDOS });
+    expect(s.foto).toBe(FOTO_VIEJA);
+    await srv.ejecutar('programada', null);
+    expect(enviados).toHaveLength(1);
+    expect(enviados[0].correo.cuerpo).toMatch(/n8n no pudo leer los textos de Drive \(OCR\)/);
+  });
+
+  it('la frescura no cambia: con la copia al día, una pasada posterior con textos fallidos no hace fallar la corrida', async () => {
+    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(1), async () => 'textos_fallidos')).ejecutar('boton', null);
+    expect(r.estado).toBe('ok');
+  });
+
+  it('con la copia atrasada por otro motivo (o si no se puede leer el motivo), la causa sigue siendo «atrasada»', async () => {
+    for (const motivo of [async () => 'tardia' as const, async () => 'abandonada' as const, async () => { throw new Error('pg caído'); }]) {
+      const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30), motivo)).ejecutar('boton', null);
+      expect(r).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
+    }
   });
 
   it('si fallan a la vez Desk 2.0 y la frescura, la causa es la de Desk 2.0', async () => {

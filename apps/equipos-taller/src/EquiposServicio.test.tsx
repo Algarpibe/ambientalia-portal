@@ -3,7 +3,7 @@
 // aviso de foto vieja, los botones ocultos sin la llave y el panel de llaves. Todo ficticio.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
+import { CAUSA_TEXTOS_FALLIDOS, EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
 import EquiposServicio from './EquiposServicio';
 import type { ApiEquipos } from './api';
 
@@ -153,6 +153,11 @@ describe('lo nuevo en el portal', () => {
     const a = await screen.findByRole('alert');
     expect(a.textContent).toMatch(/^No se pudo leer Desk 2\.0; datos del /);
     expect(a.className).not.toMatch(/font-semibold/);
+  });
+
+  it('si n8n no pudo leer los textos de Drive, el aviso lo dice así', async () => {
+    render(<EquiposServicio api={apiFalsa({ ultima: corrida({ id: 2, ok: false, causa: CAUSA_TEXTOS_FALLIDOS, avisos: [] }) }).api} />);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/^n8n no pudo leer las remisiones de Drive; datos del /);
   });
 
   it('con 2 o más corridas programadas fallidas el aviso va destacado', async () => {

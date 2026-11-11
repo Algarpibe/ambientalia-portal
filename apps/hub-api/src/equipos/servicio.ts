@@ -4,7 +4,9 @@
  *      se registra nada. Si la hay, la corrida se inserta «en curso»; si choca, «ocupado» (409).
  *   2. Desk 2.0: una sonda antes de nada. Si falla → «desk2: <motivo>».
  *   3. Frescura: si la última pasada completa de n8n tiene más de `maxHorasSync` horas
- *      → CAUSA_SYNC_ATRASADA (D5: nunca una foto con datos incompletos).
+ *      → CAUSA_SYNC_ATRASADA (D5: nunca una foto con datos incompletos). Si la última pasada
+ *      CERRADA fue 'textos_fallidos' (repo-sync.ts), la causa es CAUSA_TEXTOS_FALLIDOS: n8n
+ *      sí sincroniza, pero no puede leer los textos. La regla de frescura es la misma.
  *   4. Copia de Drive + núcleo: `actualizar` con las fuentes VIGILADAS. El núcleo
  *      convierte muchos fallos en avisos y sigue; aquí, cualquier fallo de una fuente hace
  *      fallida la corrida.
@@ -26,7 +28,7 @@
 import { actualizar, hoyBogota } from './nucleo/actualizar.js';
 import { iso } from './nucleo/reglas.js';
 import { EST, type Foto, type Fuentes, type Ilegible, type Resultado } from './nucleo/tipos.js';
-import { CAUSA_SYNC_ATRASADA, type OrigenCorrida } from './contrato.js';
+import { CAUSA_SYNC_ATRASADA, CAUSA_TEXTOS_FALLIDOS, type OrigenCorrida } from './contrato.js';
 import { decidirIncidente } from './incidente.js';
 import { correoAlerta, destinatarios, type CanalAlerta } from './alerta.js';
 import { FalloArchivo, type FuenteDrive } from './fuente-n8n.js';
@@ -72,8 +74,8 @@ export interface ServicioEquipos {
 
 export interface DepsServicio {
   repo: RepoEquipos;
-  /** De la copia de Drive, el servicio solo mira la última pasada completa. */
-  sync: Pick<RepoSync, 'ultimaSincronizacion'>;
+  /** De la copia de Drive, el servicio solo mira la última pasada completa y, si está atrasada, el motivo de la última cerrada. */
+  sync: Pick<RepoSync, 'ultimaSincronizacion' | 'motivoUltimaPasada'>;
   /** Fuentes NUEVAS para cada corrida, sobre la pasada con la que corre (la de Desk 2.0 guarda un mapa por corrida). */
   fuentes: (s: SincronizacionHecha) => FuentesCorrida;
   /** EQUIPOS_SYNC_MAX_HORAS: con una copia más vieja, la corrida falla. */
@@ -238,8 +240,12 @@ export function crearServicioEquipos(deps: DepsServicio): ServicioEquipos {
       } catch (e) {
         causa = 'desk2: ' + motivoDesk2(e);
       }
-      // D5: con una copia de Drive vieja no se clasifica (n8n dejó de sincronizar).
-      if (!causa && ahora() - Date.parse(s.fin) > deps.maxHorasSync * HORA_MS) causa = CAUSA_SYNC_ATRASADA;
+      // D5: con una copia de Drive vieja no se clasifica (n8n dejó de sincronizar, o sincroniza
+      // pero sus pasadas cierran con textos fallidos). Sin el motivo, la causa genérica.
+      if (!causa && ahora() - Date.parse(s.fin) > deps.maxHorasSync * HORA_MS) {
+        const motivo = await deps.sync.motivoUltimaPasada().catch(() => null);
+        causa = motivo === 'textos_fallidos' ? CAUSA_TEXTOS_FALLIDOS : CAUSA_SYNC_ATRASADA;
+      }
       let r: Resultado | null = null;
       let sinTexto: PdfSinTexto[] = [];
       if (!causa) {

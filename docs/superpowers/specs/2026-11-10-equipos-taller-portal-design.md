@@ -96,7 +96,7 @@ Las rutas de la pantalla van bajo `requireAuth` + `requireApp('equipos-taller')`
 - `pasada` es el id de la ejecución de n8n, y `carpeta` es `entradas`, `salidas_n8n` o `salidas_escaneadas`.
 - **Qué texto se pide:** solo en entradas y salidas escaneadas. Se pide el de un archivo nuevo, el de uno que cambió de nombre desde que llegó su texto (el viejo se sigue usando hasta que llega el nuevo) y, cada 6 horas, el de uno con fallo guardado.
 - **Fallos que se guardan:** `status` solo admite un fallo de ese archivo, es decir, un 4xx que no sea 401 ni 429. Un fallo pasajero no se manda: el archivo queda pendiente y n8n lo pide en la pasada siguiente.
-- **Textos fallidos:** como la corrida da por buenos los PDF que ya tienen texto (D10), un OCR roto para todo lo nuevo no la haría fallar. Por eso «fin» cierra la pasada como fallida (`motivo = 'textos_fallidos'`, no cuenta como fresca) si en entradas o en salidas escaneadas hay 2 o más archivos cuya racha de fallos empezó en una pasada posterior a la del último texto bueno de esa carpeta. Se juzga por pasadas (un texto bueno en la misma pasada basta), una pasada sin resultados no lo limpia y lo limpia el primer texto bueno. Los reintentos de archivos rotos de verdad no lo disparan si después de su primer fallo llegó algún texto bueno. Si dura más de `EQUIPOS_SYNC_MAX_HORAS`, la corrida falla por copia atrasada y salta la alerta (§5.2).
+- **Textos fallidos:** como la corrida da por buenos los PDF que ya tienen texto (D10), un OCR roto para todo lo nuevo no la haría fallar. Por eso «fin» cierra la pasada como fallida (`motivo = 'textos_fallidos'`, no cuenta como fresca) si en entradas o en salidas escaneadas hay 2 o más archivos cuya racha de fallos empezó **en las últimas 24 horas** (reloj de la base) y en una pasada posterior a la del último texto bueno de esa carpeta. Se juzga por pasadas (un texto bueno en la misma pasada basta), una pasada sin resultados no lo limpia y lo limpia el primer texto bueno. Un par de archivos rotos de verdad deja de contar con un texto bueno posterior a su primer fallo o, sin él, a las 24 horas: sus reintentos no rejuvenecen la racha. Un OCR roto de verdad sigue detectado, porque cada archivo nuevo que falla abre una racha nueva. Si dura más de `EQUIPOS_SYNC_MAX_HORAS`, la corrida falla con su propia causa, `drive: n8n no pudo leer los textos de Drive (OCR)` (§5.1), y salta la alerta (§5.2).
 - **Validación estricta:** ids con la forma de Drive, sin repetidos; hasta 10 000 archivos por listado; nombres de hasta 300 caracteres; los textos se recortan a 200 000. Cabe en el límite de 2 MB del servidor.
 
 ### 3.4 Flujo de n8n «Equipos · Sincronizar remisiones»
@@ -130,7 +130,7 @@ Se crea **inactivo y sin credenciales**: el usuario le pone la credencial de Dri
   - `texto`: NULL hasta que llega; un texto vacío es válido (carpeta de entrada sin documento).
   - `titulo_texto`: el nombre que tenía el archivo cuando llegó su texto.
   - `error_status`: el fallo de ese archivo.
-  - `texto_sync` y `error_sync`: la pasada en la que llegó su último texto y aquella en la que empezó su racha de fallos (para los textos fallidos, §3.3).
+  - `texto_sync`, `error_sync` y `error_desde`: la pasada en la que llegó su último texto, y la pasada y la hora en que empezó su racha de fallos (para los textos fallidos, §3.3).
   - `texto_en`, `borrado`, `creado_en` y `actualizado_en` (el último cambio del listado).
   - La base comprueba la forma del id, la carpeta y que `salidas_n8n` no lleve texto.
 - **`equipos_sincronizacion`** (072): una fila por pasada de n8n.
@@ -149,7 +149,7 @@ Se crea **inactivo y sin credenciales**: el usuario le pone la credencial de Dri
 
 1. **Candado.** Sin ninguna sincronización completa de n8n, la respuesta es «sin configurar» (503) y no se registra nada. Si la hay, se inserta la corrida con `en_curso`. Si choca con el índice único, la respuesta es 409 «ya se está actualizando».
 2. **Desk 2.0.** Si falla, la corrida termina como fallida, con la causa `desk2: <motivo>`.
-3. **Frescura de la copia de Drive.** Si la última sincronización completa de n8n tiene más de `EQUIPOS_SYNC_MAX_HORAS` horas (6 por defecto), la corrida falla con la causa `drive: sincronización de n8n atrasada`. Cuenta para el incidente como cualquier otra corrida programada fallida.
+3. **Frescura de la copia de Drive.** Si la última sincronización completa de n8n tiene más de `EQUIPOS_SYNC_MAX_HORAS` horas (6 por defecto), la corrida falla con la causa `drive: sincronización de n8n atrasada`. Si la última pasada cerrada lo fue con `motivo = 'textos_fallidos'` (§3.3), la causa es `drive: n8n no pudo leer los textos de Drive (OCR)`: n8n sí sincroniza, pero no puede leer los textos. La regla de frescura es la misma. Cuenta para el incidente como cualquier otra corrida programada fallida.
 4. **Copia de Drive.** La corrida ve la copia tal como la dejó la última pasada completa:
    - Sin los archivos borrados en Drive.
    - Sin los que trajo una pasada posterior y todavía no tienen texto.
@@ -185,7 +185,7 @@ Una corrida fallida **nunca** modifica `foto`. La siguiente corrida es el reinte
 
 | Estado | Aviso |
 |---|---|
-| La última corrida falló | «No se pudo leer Desk 2.0», «No se pudo leer Google Drive» o «La copia de Google Drive (n8n) está atrasada», seguido de «; datos del <fecha y hora de la foto buena>». |
+| La última corrida falló | «No se pudo leer Desk 2.0», «No se pudo leer Google Drive», «La copia de Google Drive (n8n) está atrasada» o «n8n no pudo leer las remisiones de Drive», seguido de «; datos del <fecha y hora de la foto buena>». |
 | Incidente con 2 o más corridas programadas fallidas | El mismo aviso, **destacado**. |
 | Módulo sin configurar (ninguna sincronización completa de n8n) | «Falta la primera sincronización con n8n». El botón «Actualizar información» queda desactivado. |
 

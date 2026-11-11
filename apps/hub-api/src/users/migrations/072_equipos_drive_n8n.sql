@@ -20,8 +20,10 @@ CREATE SCHEMA IF NOT EXISTS portal;
 -- error_status   el último fallo de ESE archivo (4xx que no es 401 ni 429), que se vuelve a pedir cada 6 h
 -- texto_sync     la pasada (equipos_sincronizacion.id) en la que llegó su último texto
 -- error_sync     la pasada en la que empezó su racha de fallos (el primero tras su último texto); los
---                reintentos no la mueven. Con las dos, «fin» ve si el OCR o la exportación de n8n
---                fallan en todo lo nuevo (repo-sync.ts, cerrarPasada)
+--                reintentos no la mueven
+-- error_desde    cuándo empezó esa racha (reloj de la base): solo cuentan las de las últimas 24 h.
+--                Con las tres, «fin» ve si el OCR o la exportación de n8n fallan en todo lo nuevo
+--                (repo-sync.ts, cerrarPasada)
 -- actualizado_en el último cambio del listado (alta, nombre, carpeta, borrado o reaparición)
 CREATE TABLE IF NOT EXISTS portal.equipos_drive_archivos (
   id             text        PRIMARY KEY CHECK (id ~ '^[A-Za-z0-9_-]{10,100}$'),
@@ -33,6 +35,7 @@ CREATE TABLE IF NOT EXISTS portal.equipos_drive_archivos (
   texto_en       timestamptz NULL,
   texto_sync     bigint      NULL,
   error_sync     bigint      NULL,
+  error_desde    timestamptz NULL,
   borrado        boolean     NOT NULL DEFAULT false,
   creado_en      timestamptz NOT NULL DEFAULT now(),
   actualizado_en timestamptz NOT NULL DEFAULT now(),
@@ -42,7 +45,8 @@ CREATE INDEX IF NOT EXISTS equipos_drive_archivos_vivos ON portal.equipos_drive_
 
 -- Una pasada está abierta mientras fin y ok son NULL. Con «fin», ok = true; si no vale, ok = false
 -- con su motivo: 'abandonada' (sin «fin» en 2 h), 'tardia' («fin» pasadas 2 h) o 'textos_fallidos'
--- (todos los textos recientes de una carpeta, 2 o más, son fallos).
+-- (2 o más archivos de una carpeta empezaron a fallar en las últimas 24 h, después de su último
+-- texto bueno).
 -- listados: carpeta → archivos recibidos; «fin» exige las tres carpetas.
 CREATE TABLE IF NOT EXISTS portal.equipos_sincronizacion (
   id       bigserial   PRIMARY KEY,

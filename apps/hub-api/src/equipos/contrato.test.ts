@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ajusteValido, avisoFoto, CAUSA_SYNC_ATRASADA, claveValida, type Corrida } from './contrato.js';
+import { ajusteValido, avisoFoto, CAUSA_SYNC_ATRASADA, CAUSA_TEXTOS_FALLIDOS, claveValida, type Corrida } from './contrato.js';
 
 const corrida = (c: Partial<Corrida>): Corrida => ({ id: 1, origen: 'programada', inicio: '2026-11-10T11:30:00.000Z', fin: '2026-11-10T11:35:00.000Z', enCurso: false, ok: true, causa: null, avisos: [], conteos: null, ...c });
 const fecha = (iso: string) => 'F(' + iso.slice(0, 10) + ')';
@@ -36,6 +36,10 @@ describe('avisoFoto (§5.3)', () => {
     expect(avisoFoto({ ...base, ultima: corrida({ ok: false, causa: CAUSA_SYNC_ATRASADA }), ultimaBuena: corrida({ fin: '2026-11-08T11:35:00.000Z' }) }, fecha)?.texto)
       .toBe('La copia de Google Drive (n8n) está atrasada; datos del F(2026-11-08)'));
   it('la causa de la copia atrasada es la que escribe el servicio', () => expect(CAUSA_SYNC_ATRASADA).toBe('drive: sincronización de n8n atrasada'));
+  it('si n8n no pudo leer los textos (OCR), lo dice así: ni copia atrasada ni fallo de Drive', () =>
+    expect(avisoFoto({ ...base, ultima: corrida({ ok: false, causa: CAUSA_TEXTOS_FALLIDOS }), ultimaBuena: corrida({ fin: '2026-11-08T11:35:00.000Z' }) }, fecha)?.texto)
+      .toBe('n8n no pudo leer las remisiones de Drive; datos del F(2026-11-08)'));
+  it('la causa de los textos fallidos es la que escribe el servicio', () => expect(CAUSA_TEXTOS_FALLIDOS).toBe('drive: n8n no pudo leer los textos de Drive (OCR)'));
   it('sin foto buena todavía', () => expect(avisoFoto({ ...base, ultima: corrida({ ok: false, causa: 'drive: HTTP 403' }), ultimaBuena: null }, fecha)?.texto).toBe('No se pudo leer Google Drive; todavía no hay datos'));
   it('con 2 o más corridas programadas fallidas, destacado', () =>
     expect(avisoFoto({ ...base, ultima: corrida({ ok: false, causa: 'desk2: tiempo agotado' }), incidente: { id: 1, abiertoEn: '', fallosProgramados: 2, alertaEnviadaEn: null, alertaUltimoError: null } }, fecha)?.destacado).toBe(true));

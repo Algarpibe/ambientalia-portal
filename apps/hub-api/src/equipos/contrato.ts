@@ -13,6 +13,11 @@ export type OrigenCorrida = 'programada' | 'boton';
 
 /** Causa de una corrida cuando la última sincronización completa de n8n es demasiado vieja (la escribe servicio.ts). */
 export const CAUSA_SYNC_ATRASADA = 'drive: sincronización de n8n atrasada';
+/**
+ * Causa de una corrida cuando la copia no está al día porque la última pasada de n8n cerró
+ * con textos fallidos (el OCR o la exportación fallan en todo lo nuevo; la escribe servicio.ts).
+ */
+export const CAUSA_TEXTOS_FALLIDOS = 'drive: n8n no pudo leer los textos de Drive (OCR)';
 
 /** Una fila de `portal.equipos_ejecucion`. */
 export interface Corrida {
@@ -105,6 +110,7 @@ export interface AvisoFoto {
 function queFallo(causa: string | null): string {
   if (causa?.startsWith('desk2:')) return 'No se pudo leer Desk 2.0';
   if (causa === CAUSA_SYNC_ATRASADA) return 'La copia de Google Drive (n8n) está atrasada';
+  if (causa === CAUSA_TEXTOS_FALLIDOS) return 'n8n no pudo leer las remisiones de Drive';
   if (causa?.startsWith('drive:')) return 'No se pudo leer Google Drive';
   return 'No se pudo actualizar la información';
 }
