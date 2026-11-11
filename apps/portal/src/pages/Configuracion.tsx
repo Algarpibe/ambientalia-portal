@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { User, Mail, Lock, KeyRound, Shield, Camera, Save, Clock, Eye, EyeOff } from 'lucide-react';
 import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
@@ -6,6 +6,8 @@ import { fileToResizedDataUrl } from '../lib/image';
 import { useProfile, notifyProfileUpdated } from '../hooks/useProfile';
 import Avatar from '../components/Avatar';
 import FrecuenciaCorreos from '../components/FrecuenciaCorreos';
+import PanelLlaves from '../../../equipos-taller/src/PanelLlaves';
+import { apiEquipos } from '../../../equipos-taller/src/api';
 
 const MIN_PASSWORD = 8; // coincide con el backend (Req 1.6)
 
@@ -94,6 +96,7 @@ export default function Configuracion() {
   };
 
   const isAdmin = profile?.role === 'admin';
+  const apiLlaves = useMemo(() => apiEquipos(), []);
 
   return (
     <div className="flex-grow bg-[#F7F8FA] p-6 md:p-8 overflow-y-auto">
@@ -238,6 +241,9 @@ export default function Configuracion() {
 
         {/* Solo administradores: frecuencia del correo automático de Carga de Pedidos WO */}
         {isAdmin && <FrecuenciaCorreos />}
+
+        {/* Solo administradores: quién edita ajustes y quién recibe la alerta en «Equipos en taller» */}
+        {isAdmin && <PanelLlaves api={apiLlaves} />}
       </div>
     </div>
   );

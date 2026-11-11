@@ -10,7 +10,6 @@ import {
   filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, type Ajuste, type Fila, type Filtros, type Ilegible, type RespuestaEquipos,
 } from './nucleo';
 import { apiEquipos, type ApiEquipos } from './api';
-import PanelLlaves from './PanelLlaves';
 
 const TONOS = [
   'bg-emerald-100 text-emerald-900', // en taller
@@ -287,8 +286,6 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
           <ul className="mt-1 list-disc pl-5">{ultima.avisos.slice(0, 40).map((a, i) => <li key={i}>{a}</li>)}</ul>
         </details>
       ) : null}
-
-      {datos?.permisos.esAdmin ? <PanelLlaves api={api} /> : null}
     </main>
   );
 }

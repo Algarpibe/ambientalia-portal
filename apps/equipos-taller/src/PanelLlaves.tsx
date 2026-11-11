@@ -1,7 +1,8 @@
 // Panel de llaves de «Equipos en taller» (solo admin): quién edita los ajustes y quién
-// recibe la alerta de foto vieja. Se abre plegado; carga la lista al desplegarlo.
+// recibe la alerta de foto vieja. Vive en Ajustes del portal (sección solo para admin) y
+// carga la lista al montarse.
 // Los admin ya editan sin la llave; la alerta, en cambio, se da explícitamente (§6).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ApiEquipos } from './api';
 import type { LlavesUsuario, UsuarioConLlaves } from './nucleo';
 
@@ -9,11 +10,14 @@ export default function PanelLlaves({ api }: { api: ApiEquipos }) {
   const [usuarios, setUsuarios] = useState<UsuarioConLlaves[] | null>(null);
   const [error, setError] = useState('');
 
-  async function abrir(abierto: boolean) {
-    if (!abierto || usuarios) return;
-    try { setUsuarios(await api.llaves()); }
-    catch (e) { setError('No se pudieron cargar las llaves: ' + (e as Error).message); }
-  }
+  useEffect(() => {
+    let vivo = true;
+    api.llaves().then(
+      (l) => { if (vivo) setUsuarios(l); },
+      (e) => { if (vivo) setError('No se pudieron cargar las llaves: ' + (e as Error).message); },
+    );
+    return () => { vivo = false; };
+  }, [api]);
   async function cambiar(u: UsuarioConLlaves, cambio: Partial<LlavesUsuario>) {
     try {
       const nuevo = await api.guardarLlaves(u.userId, { editaAjustes: u.editaAjustes, recibeAlertas: u.recibeAlertas, ...cambio });
@@ -23,8 +27,8 @@ export default function PanelLlaves({ api }: { api: ApiEquipos }) {
   }
 
   return (
-    <details className="mt-8 rounded border border-slate-200 bg-white p-3 text-sm" onToggle={(e) => void abrir((e.currentTarget as HTMLDetailsElement).open)}>
-      <summary className="cursor-pointer font-semibold">Llaves de la app</summary>
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-sm">
+      <h2 className="text-lg font-semibold text-gray-900">Equipos en taller · Llaves</h2>
       <p className="mt-2 text-slate-600">«Edita ajustes»: puede usar los botones de ajuste manual. «Recibe alertas»: recibe el correo cuando la información lleva dos actualizaciones diarias sin poder actualizarse. Los administradores editan sin la llave, pero la alerta hay que dársela.</p>
       {error ? <p role="alert" className="mt-2 text-red-800">{error}</p> : null}
       {usuarios === null ? (
@@ -43,6 +47,6 @@ export default function PanelLlaves({ api }: { api: ApiEquipos }) {
       ) : (
         <p className="mt-2 text-slate-500">Nadie tiene la app todavía. Asígnala desde la gestión de usuarios del portal.</p>
       )}
-    </details>
+    </div>
   );
 }

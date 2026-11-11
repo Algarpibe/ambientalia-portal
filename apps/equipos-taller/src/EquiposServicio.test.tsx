@@ -173,16 +173,9 @@ describe('lo nuevo en el portal', () => {
     expect((screen.getByRole('button', { name: 'Actualizar información' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('el panel de llaves solo lo ve un admin, y guarda cada casilla', async () => {
-    const { api, llamadas } = apiFalsa({ permisos: { editaAjustes: false, recibeAlertas: false, esAdmin: true, puedeEditar: true } });
+  it('el panel de llaves ya no está en esta pantalla (vive en Ajustes), ni para un admin', async () => {
+    const { api } = apiFalsa({ permisos: { editaAjustes: false, recibeAlertas: false, esAdmin: true, puedeEditar: true } });
     render(<EquiposServicio api={api} />);
-    const panel = (await screen.findByText('Llaves de la app')).closest('details')!;
-    panel.open = true;
-    fireEvent(panel, new Event('toggle'));
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Recibe alertas: Persona Uno' }));
-    await waitFor(() => expect(llamadas).toContain('llaves u1 false true'));
-    cleanup();
-    render(<EquiposServicio api={apiFalsa().api} />);
     await screen.findByRole('navigation', { name: 'Vistas' });
     expect(screen.queryByText('Llaves de la app')).toBeNull();
   });

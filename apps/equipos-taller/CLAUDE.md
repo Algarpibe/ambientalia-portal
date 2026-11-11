@@ -14,7 +14,7 @@ Pantalla de la app `equipos-taller` del portal: qué equipos están físicamente
   - `fuente-n8n.ts` se la da al núcleo.
 
   Hasta la primera pasada completa, la pantalla dice «Falta la primera sincronización con n8n».
-- **Pantalla:** `src/EquiposServicio.tsx` (trasladada sin rediseño de Desk 2.0), `src/PanelLlaves.tsx` (solo admin), `src/api.ts`.
+- **Pantalla:** `src/EquiposServicio.tsx` (trasladada sin rediseño de Desk 2.0), `src/api.ts`. `src/PanelLlaves.tsx` (solo admin) NO se muestra aquí: lo renderiza la página Ajustes del portal (`apps/portal/src/pages/Configuracion.tsx`, sección «Equipos en taller · Llaves»).
 - **Sin tarjeta en el Dashboard:** la app sale en la barra lateral (`apps/portal/src/lib/apps.ts`) y en Aplicaciones.
 
 ## Reglas de trabajo

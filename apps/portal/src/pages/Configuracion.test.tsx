@@ -5,11 +5,16 @@ import Configuracion from './Configuracion';
 import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
 
+const rol = vi.hoisted(() => ({ actual: 'admin' }));
+const llavesApi = vi.hoisted(() => ({ llaves: vi.fn(), guardarLlaves: vi.fn() }));
+
 vi.mock('../lib/api', () => ({ authFetch: vi.fn() }));
 vi.mock('../lib/notify', () => ({ notify: vi.fn() }));
+// El cliente de la sub-app (hub-api) se sustituye: aquí solo importa quién ve la sección.
+vi.mock('../../../equipos-taller/src/api', () => ({ apiEquipos: () => llavesApi }));
 vi.mock('../hooks/useProfile', () => ({
   useProfile: () => ({
-    profile: { id: 'u', full_name: 'Alfonso García', email: 'comercial@x.com', role: 'admin', status: 'active', created_at: '2026-03-12T00:00:00.000Z', avatar: null },
+    profile: { id: 'u', full_name: 'Alfonso García', email: 'comercial@x.com', role: rol.actual, status: 'active', created_at: '2026-03-12T00:00:00.000Z', avatar: null },
     loading: false,
     reload: vi.fn(),
   }),
@@ -19,7 +24,11 @@ vi.mock('../hooks/useProfile', () => ({
 const mockFetch = authFetch as unknown as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  rol.actual = 'admin';
   mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+  llavesApi.llaves.mockResolvedValue([
+    { userId: 'u1', nombre: 'Persona Uno', email: 'p1@x.co', esAdmin: false, editaAjustes: false, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null },
+  ]);
 });
 afterEach(() => {
   cleanup();
@@ -39,6 +48,20 @@ describe('Configuración', () => {
     render(<Configuracion />);
     expect(screen.getByText(/Frecuencia de correos/i)).toBeTruthy();
     await waitFor(() => expect(mockFetch).toHaveBeenCalledWith('/api/wo-sales/email/frecuencias'));
+  });
+
+  it('un administrador ve la sección «Equipos en taller · Llaves» con la lista cargada', async () => {
+    render(<Configuracion />);
+    expect(screen.getByRole('heading', { name: 'Equipos en taller · Llaves' })).toBeTruthy();
+    expect(await screen.findByRole('checkbox', { name: 'Edita ajustes: Persona Uno' })).toBeTruthy();
+    expect(llavesApi.llaves).toHaveBeenCalled();
+  });
+
+  it('quien no es administrador no ve la sección ni pide las llaves', () => {
+    rol.actual = 'viewer';
+    render(<Configuracion />);
+    expect(screen.queryByText('Equipos en taller · Llaves')).toBeNull();
+    expect(llavesApi.llaves).not.toHaveBeenCalled();
   });
 
   // El nombre se fija en el registro: es con el que se firman las aprobaciones.
