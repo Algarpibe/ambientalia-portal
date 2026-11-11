@@ -31,7 +31,7 @@ export interface Tarjeta {
 
 // ---------- KPIs seleccionables: los contadores de VISTAS ----------
 /** Id de cada KPI → nombre de su vista en VISTAS y etiqueta con que se muestra en pantalla. */
-const KPI_DEFS = {
+export const KPI_DEFS = {
   en_taller: { vista: EST.TALLER, etiqueta: "En taller" },
   externo: { vista: EST.EXTERNO, etiqueta: "Servicio externo" },
   revisar: { vista: EST.REVISAR, etiqueta: "Por revisar" },

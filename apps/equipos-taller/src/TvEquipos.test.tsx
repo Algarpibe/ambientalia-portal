@@ -3,7 +3,7 @@
 // limpieza de temporizadores. Fuente de datos inyectada (`pedir`). Datos ficticios.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { AJUSTES_TABLERO_POR_DEFECTO, EST, type Fila, type RespuestaEquipos } from './nucleo';
+import { AJUSTES_TABLERO_POR_DEFECTO, EST, construirTablero, type Fila, type RespuestaEquipos } from './nucleo';
 import TvEquipos from './TvEquipos';
 
 const AHORA = Date.parse('2026-11-11T20:00:00Z'); // 15:00 en Bogotá
@@ -12,7 +12,7 @@ const tamano = (w: number, h: number) => {
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
 };
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(AHORA); tamano(1920, 1080); });
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); location.hash = ''; });
 
 const z = (n: string, st: string, enc: string) => ({ n, id: n, st, stt: 'Open', u: 'https://x/' + n, m: '', enc, eq: 'EDM180C', srv: '', fs: '', cl: '' });
 const fila = (sn: string, d: string, extra: Partial<Fila> = {}): Fila =>
@@ -151,5 +151,33 @@ describe('TvEquipos: estados y limpieza', () => {
     for (let i = 0; i < 120; i++) await avanzar(60_000);
     expect(nodos()).toBe(n0);
     expect(vi.getTimerCount()).toBe(t0);
+  });
+});
+
+describe('TvEquipos: modo kiosco (llave en el fragmento #k=)', () => {
+  const TOKEN = 'tvk_' + 'A'.repeat(43);
+  const kiosco = (status: number, cuerpo: unknown) => {
+    const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify(cuerpo), { status }));
+    vi.stubGlobal('fetch', f);
+    return f;
+  };
+  it('pide /kiosco/tablero solo con X-Kiosk-Token, dibuja el tablero ya armado y conserva el fragmento', async () => {
+    location.hash = '#k=' + TOKEN;
+    const f = kiosco(200, { tablero: construirTablero(FILAS, AJUSTES_TABLERO_POR_DEFECTO, AHORA), ajustes: AJUSTES_TABLERO_POR_DEFECTO, fotoEn: '2026-11-11T19:10:00Z', aviso: null });
+    render(<TvEquipos buscar="" />);
+    await avanzar(0);
+    expect(f).toHaveBeenCalledTimes(1);
+    const [url, init] = f.mock.calls[0];
+    expect(String(url).endsWith('/api/equipos-taller/kiosco/tablero')).toBe(true);
+    expect(init?.headers).toEqual({ 'X-Kiosk-Token': TOKEN });
+    expect(screen.getByText('En taller')).toBeTruthy();
+    expect(location.hash).toBe('#k=' + TOKEN);
+  });
+  it('una llave inválida o revocada (401) muestra un aviso de acceso, nunca pantalla en blanco', async () => {
+    location.hash = '#k=' + TOKEN;
+    kiosco(401, { error: 'unauthorized' });
+    render(<TvEquipos buscar="" />);
+    await avanzar(0);
+    expect(screen.getByRole('alert').textContent).toBe('La llave de esta pantalla no es válida o fue revocada. Pide una nueva en Ajustes.');
   });
 });

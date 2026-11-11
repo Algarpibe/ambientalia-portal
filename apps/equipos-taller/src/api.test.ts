@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiEquipos } from './api';
+import { apiEquipos, apiKiosco, leerTokenKiosco } from './api';
 
 // El cliente HTTP con un fetch de mentira: rutas, cabeceras y qué cuenta como error.
 function falso(respuestas: Record<string, Response>) {
@@ -73,5 +73,46 @@ describe('apiEquipos', () => {
     await expect(apiEquipos(B, f, cab).estado()).rejects.toMatchObject({ status: 401, message: 'unauthorized' });
     const { f: g } = falso({ ['GET ' + B]: J({}, 503) });
     await expect(apiEquipos(B, g, cab).estado()).rejects.toMatchObject({ status: 503, message: 'Error 503' });
+  });
+});
+
+const TOKEN = 'tvk_' + 'A'.repeat(43);
+describe('cliente del kiosco', () => {
+  it('leerTokenKiosco toma la llave del fragmento #k= y descarta lo que no tiene su forma', () => {
+    expect(leerTokenKiosco('#k=' + TOKEN)).toBe(TOKEN);
+    expect(leerTokenKiosco('#k=otra')).toBeNull();
+    expect(leerTokenKiosco('')).toBeNull();
+  });
+  it('envía la llave SOLO en X-Kiosk-Token: ni en la URL, ni sesión, ni fragmento', async () => {
+    const url = B + '/kiosco/tablero';
+    const { f, pedidos } = falso({ ['GET ' + url]: J({ tablero: { columnas: [], kpis: [] } }) });
+    await apiKiosco(TOKEN, B, f).tablero();
+    expect(pedidos[0].url).toBe(url);
+    expect(pedidos[0].url).not.toMatch(/tvk_|#|[?]/);
+    expect(pedidos[0].init.headers).toEqual({ 'X-Kiosk-Token': TOKEN });
+  });
+  it('un 401 llega con su código para mostrar el aviso de acceso', async () => {
+    const { f } = falso({ ['GET ' + B + '/kiosco/tablero']: J({ error: 'unauthorized' }, 401) });
+    await expect(apiKiosco(TOKEN, B, f).tablero()).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('cliente de ajustes y llaves del kiosco (admin)', () => {
+  it('rutas y cuerpos de ajustes del tablero y de las llaves de la TV', async () => {
+    const k = { id: 'i1', nombre: 'TV Prueba' };
+    const { f, pedidos } = falso({
+      ['GET ' + B + '/tablero/ajustes']: J({ umbralAmbar: 30 }),
+      ['PUT ' + B + '/tablero/ajustes']: J({ umbralAmbar: 20 }),
+      ['GET ' + B + '/kiosco/tokens']: J([k]),
+      ['POST ' + B + '/kiosco/tokens']: J({ kiosco: k, secreto: TOKEN }, 201),
+      ['DELETE ' + B + '/kiosco/tokens/i1']: new Response(null, { status: 204 }),
+    });
+    const api = apiEquipos(B, f, cab);
+    expect((await api.ajustesTablero()).umbralAmbar).toBe(30);
+    expect((await api.guardarAjustesTablero({ umbralAmbar: 20 })).umbralAmbar).toBe(20);
+    expect(await api.kioscos()).toEqual([k]);
+    expect((await api.crearKiosco('TV Prueba')).secreto).toBe(TOKEN);
+    await api.revocarKiosco('i1');
+    expect(pedidos.map((p) => p.init.body ?? null)).toEqual([null, '{"umbralAmbar":20}', null, '{"nombre":"TV Prueba"}', null]);
   });
 });

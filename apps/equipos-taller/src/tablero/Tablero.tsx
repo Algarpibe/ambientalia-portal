@@ -175,10 +175,11 @@ export function useTableroDatos(pedir: (senal: AbortSignal) => Promise<Respuesta
 }
 
 /** Mensaje mientras no hay tablero que dibujar: carga, sin acceso, red caída o sin datos. */
-export function SinTablero({ tema, hayDatos, fallo }: { tema: TemaPantalla; hayDatos: boolean; fallo: 'red' | 'acceso' | null }) {
+export function SinTablero({ tema, hayDatos, fallo, kiosco = false }: { tema: TemaPantalla; hayDatos: boolean; fallo: 'red' | 'acceso' | null; kiosco?: boolean }) {
   return (
     <Raiz tema={tema}>
       {hayDatos ? <p className="tt-mensaje">Aún no hay datos. Se actualizan solos cuando termina la sincronización con n8n.</p>
+        : fallo === 'acceso' && kiosco ? <p role="alert" className="tt-mensaje">La llave de esta pantalla no es válida o fue revocada. Pide una nueva en Ajustes.</p>
         : fallo === 'acceso' ? <p role="alert" className="tt-mensaje">No tienes acceso al tablero. Vuelve a iniciar sesión o pide la app «Equipos en taller».</p>
         : fallo ? <p role="alert" className="tt-mensaje">No se pudo cargar el tablero. Se reintenta cada 60 s.</p>
         : <p className="tt-mensaje">Cargando tablero…</p>}

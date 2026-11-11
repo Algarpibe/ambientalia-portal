@@ -26,7 +26,7 @@ const montar = () => render(
     </Routes>
   </MemoryRouter>,
 );
-afterEach(() => { cleanup(); vi.clearAllMocks(); estado.sesion = true; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); estado.sesion = true; location.hash = ''; });
 
 describe('RutaTableroTv', () => {
   it('con sesión y la app asignada muestra la TV y pide que no se envíe el Referer', async () => {
@@ -41,6 +41,14 @@ describe('RutaTableroTv', () => {
     montar();
     expect(await screen.findByText('LOGIN')).toBeTruthy();
     expect(estado.montada).not.toHaveBeenCalled();
+  });
+  it('con la llave de kiosco en el fragmento monta la TV SIN sesión (la llave es la credencial)', async () => {
+    estado.auth = auth([]);
+    estado.sesion = false;
+    location.hash = '#k=tvk_' + 'A'.repeat(43);
+    montar();
+    expect(await screen.findByText('TV DEL TALLER')).toBeTruthy();
+    expect(document.head.querySelector('meta[name="referrer"]')?.getAttribute('content')).toBe('no-referrer');
   });
   it('con sesión pero sin la app, vuelve al inicio sin montar la TV', async () => {
     estado.auth = auth(['contabilidad']);

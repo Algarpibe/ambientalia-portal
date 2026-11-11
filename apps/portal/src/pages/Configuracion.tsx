@@ -7,6 +7,8 @@ import { useProfile, notifyProfileUpdated } from '../hooks/useProfile';
 import Avatar from '../components/Avatar';
 import FrecuenciaCorreos from '../components/FrecuenciaCorreos';
 import PanelLlaves from '../../../equipos-taller/src/PanelLlaves';
+import PanelTablero from '../../../equipos-taller/src/PanelTablero';
+import PanelKiosco from '../../../equipos-taller/src/PanelKiosco';
 import { apiEquipos } from '../../../equipos-taller/src/api';
 
 const MIN_PASSWORD = 8; // coincide con el backend (Req 1.6)
@@ -244,6 +246,10 @@ export default function Configuracion() {
 
         {/* Solo administradores: quién edita ajustes y quién recibe la alerta en «Equipos en taller» */}
         {isAdmin && <PanelLlaves api={apiLlaves} avisar={notify} />}
+
+        {/* Solo administradores: umbrales, horas e indicadores del tablero, y las llaves de las TV */}
+        {isAdmin && <PanelTablero api={apiLlaves} avisar={notify} />}
+        {isAdmin && <PanelKiosco api={apiLlaves} avisar={notify} />}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
 
 const rol = vi.hoisted(() => ({ actual: 'admin' }));
-const llavesApi = vi.hoisted(() => ({ llaves: vi.fn(), guardarLlaves: vi.fn() }));
+const llavesApi = vi.hoisted(() => ({ llaves: vi.fn(), guardarLlaves: vi.fn(), ajustesTablero: vi.fn(), kioscos: vi.fn() }));
 
 vi.mock('../lib/api', () => ({ authFetch: vi.fn() }));
 vi.mock('../lib/notify', () => ({ notify: vi.fn() }));
@@ -26,6 +26,8 @@ const mockFetch = authFetch as unknown as ReturnType<typeof vi.fn>;
 beforeEach(() => {
   rol.actual = 'admin';
   mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+  llavesApi.ajustesTablero.mockResolvedValue({ umbralAmbar: 30, umbralRojo: 90, nocheDesde: 18, nocheHasta: 6, kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'] });
+  llavesApi.kioscos.mockResolvedValue([{ id: 'k1', nombre: 'TV Prueba', creadoPor: 'a@x.co', creadoEn: '2026-11-10T15:00:00Z', revocadoEn: null, ultimoUsoEn: null }]);
   llavesApi.llaves.mockResolvedValue([
     { userId: 'u1', nombre: 'Persona Uno', email: 'p1@x.co', esAdmin: false, editaAjustes: false, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null },
   ]);
@@ -69,11 +71,22 @@ describe('Configuración', () => {
     expect(llavesApi.guardarLlaves).toHaveBeenCalledWith('u1', { editaAjustes: false, recibeAlertas: true });
   });
 
+  it('un administrador ve las secciones «Equipos en taller · Tablero» y «Equipos en taller · Kiosco» con sus datos', async () => {
+    render(<Configuracion />);
+    expect(screen.getByRole('heading', { name: 'Equipos en taller · Tablero' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Equipos en taller · Kiosco' })).toBeTruthy();
+    expect(await screen.findByLabelText('Umbral ámbar (días)')).toBeTruthy();
+    expect(await screen.findByText('TV Prueba')).toBeTruthy();
+  });
+
   it('quien no es administrador no ve la sección ni pide las llaves', () => {
     rol.actual = 'viewer';
     render(<Configuracion />);
     expect(screen.queryByText('Equipos en taller · Llaves')).toBeNull();
     expect(llavesApi.llaves).not.toHaveBeenCalled();
+    expect(screen.queryByText('Equipos en taller · Tablero')).toBeNull();
+    expect(llavesApi.ajustesTablero).not.toHaveBeenCalled();
+    expect(llavesApi.kioscos).not.toHaveBeenCalled();
   });
 
   // El nombre se fija en el registro: es con el que se firman las aprobaciones.
