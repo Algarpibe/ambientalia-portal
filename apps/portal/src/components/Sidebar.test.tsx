@@ -177,3 +177,30 @@ describe('Sidebar — navegación móvil (panel deslizante)', () => {
     expect(panel.querySelector('a[href="/admin/users"]')).toBeNull();
   });
 });
+
+describe('Sidebar — entrada «Tablero TV»', () => {
+  const enlaceTv = () => screen.queryByText('Tablero TV')?.closest('a') ?? null;
+
+  it('admin o titular de la app: enlace que abre /equipos-taller/tv en pestaña nueva', () => {
+    for (const parcial of [{ role: 'admin' as const, apps: [] }, { role: 'reader' as const, apps: ['equipos-taller'] }]) {
+      cleanup();
+      setAuth({ isAuthenticated: true, user_id: 'u', ...parcial });
+      renderSidebar();
+      const a = enlaceTv();
+      expect(a).toBeTruthy();
+      expect(a!.getAttribute('href')).toBe('/equipos-taller/tv');
+      expect(a!.getAttribute('target')).toBe('_blank');
+      expect(a!.getAttribute('rel')).toBe('noopener noreferrer');
+    }
+  });
+
+  it('lector sin la app o sin sesión: no aparece', () => {
+    setAuth({ isAuthenticated: true, role: 'reader', user_id: 'r', apps: ['contabilidad'] });
+    renderSidebar();
+    expect(enlaceTv()).toBeNull();
+    cleanup();
+    setAuth({ isAuthenticated: false, role: null });
+    renderSidebar();
+    expect(enlaceTv()).toBeNull();
+  });
+});

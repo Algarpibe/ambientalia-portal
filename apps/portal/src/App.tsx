@@ -6,6 +6,7 @@ import TopBar from './components/TopBar';
 import RequireAuth from './components/RequireAuth';
 import RequireAdmin from './components/RequireAdmin';
 import AppGuard from './components/AppGuard';
+import RutaTableroTv from './components/RutaTableroTv';
 import NotificationHost from './components/NotificationHost';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -52,6 +53,9 @@ function App() {
       <Routes>
         {/* Authentication page - no sidebar */}
         <Route path="/auth" element={<Auth />} />
+
+        {/* Pantalla de TV del taller — pantalla completa, fuera del shell */}
+        <Route path="/equipos-taller/tv" element={<RutaTableroTv />} />
 
         {/* Main app with sidebar */}
         <Route

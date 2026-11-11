@@ -4,7 +4,7 @@
 import { useCallback, useMemo, type ReactNode } from 'react';
 import {
   AJUSTES_TABLERO_POR_DEFECTO, aplicarAjustes, construirTablero, horaBogota,
-  type AjustesTablero, type ColumnaTablero, type Tablero as TableroModelo, type Tarjeta as TarjetaModelo,
+  type AjustesTablero, type ColumnaTablero, type RespuestaEquipos, type Tablero as TableroModelo, type Tarjeta as TarjetaModelo,
 } from '../nucleo';
 import { apiEquipos, type ApiEquipos } from '../api';
 import './fuentes';
@@ -120,6 +120,12 @@ function Leyenda({ ajustes }: { ajustes: AjustesTablero }) {
   );
 }
 
+/** «Actualizado HH:MM · datos de las HH:MM · se refresca cada 60 s». */
+export function lineaEstado(okEn: number, datosEn: string | null): string {
+  const datos = datosEn ? Date.parse(datosEn) : NaN;
+  return `Actualizado ${hhmm(okEn)}${Number.isFinite(datos) ? ` · datos de las ${hhmm(datos)}` : ''} · se refresca cada 60 s`;
+}
+
 export interface PropsTableroVista {
   tablero: TableroModelo;
   ajustes: AjustesTablero;
@@ -131,18 +137,15 @@ export interface PropsTableroVista {
   /** Hora de la foto de datos (ISO). */
   datosEn?: string | null;
   obsoleto?: boolean;
+  /** Cabecera propia (la TV): sustituye a la línea de estado de la pestaña. */
+  cabecera?: ReactNode;
 }
 
-export function TableroVista({ tablero, ajustes, tema = 'dia', presupuesto = false, okEn = null, datosEn = null, obsoleto = false }: PropsTableroVista) {
-  const datos = datosEn ? Date.parse(datosEn) : NaN;
+export function TableroVista({ tablero, ajustes, tema = 'dia', presupuesto = false, okEn = null, datosEn = null, obsoleto = false, cabecera }: PropsTableroVista) {
   return (
     <Raiz tema={tema}>
       {obsoleto && okEn !== null ? <p role="alert" className="tt-aviso">{`Datos desactualizados desde ${hhmm(okEn)}`}</p> : null}
-      {okEn !== null ? (
-        <p className="tt-estado">
-          <span>{`Actualizado ${hhmm(okEn)}${Number.isFinite(datos) ? ` · datos de las ${hhmm(datos)}` : ''} · se refresca cada 60 s`}</span>
-        </p>
-      ) : null}
+      {cabecera ?? (okEn !== null ? <p className="tt-estado"><span>{lineaEstado(okEn, datosEn)}</span></p> : null)}
       <ul className="tt-kpis" aria-label="Indicadores">
         {tablero.kpis.map((k) => (
           <li key={k.id} className="tt-kpi">
@@ -159,28 +162,35 @@ export function TableroVista({ tablero, ajustes, tema = 'dia', presupuesto = fal
   );
 }
 
-/** El tablero con sus datos: sondea la API cada 60 s y arma el modelo en el navegador con el núcleo compartido. */
-export default function Tablero({ api: apiProp, tema = 'dia' }: { api?: ApiEquipos; tema?: TemaPantalla }) {
-  const api = useMemo(() => apiProp || apiEquipos(), [apiProp]);
-  const pedir = useCallback((senal: AbortSignal) => api.estado(senal), [api]);
+/** Sondea una fuente cada 60 s y arma el modelo en el navegador con el núcleo compartido. */
+export function useTableroDatos(pedir: (senal: AbortSignal) => Promise<RespuestaEquipos>) {
   const { datos, okEn, fallo, obsoleto, ahora } = useSondeo(pedir);
-
   const ajustes = datos?.tablero ?? AJUSTES_TABLERO_POR_DEFECTO;
   const snap = datos?.snap ?? null;
   const modelo = useMemo(
     () => (datos && snap ? construirTablero(aplicarAjustes(snap.rows, datos.ajustes), ajustes, ahora) : null),
     [datos, snap, ajustes, ahora],
   );
+  return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto };
+}
 
-  if (!datos) {
-    return (
-      <Raiz tema={tema}>
-        {fallo === 'acceso' ? <p role="alert" className="tt-mensaje">No tienes acceso al tablero. Vuelve a iniciar sesión o pide la app «Equipos en taller».</p>
-          : fallo ? <p role="alert" className="tt-mensaje">No se pudo cargar el tablero. Se reintenta cada 60 s.</p>
-          : <p className="tt-mensaje">Cargando tablero…</p>}
-      </Raiz>
-    );
-  }
-  if (!modelo) return <Raiz tema={tema}><p className="tt-mensaje">Aún no hay datos. Se actualizan solos cuando termina la sincronización con n8n.</p></Raiz>;
-  return <TableroVista tablero={modelo} ajustes={ajustes} tema={tema} okEn={okEn} datosEn={snap?.at ?? null} obsoleto={obsoleto} />;
+/** Mensaje mientras no hay tablero que dibujar: carga, sin acceso, red caída o sin datos. */
+export function SinTablero({ tema, hayDatos, fallo }: { tema: TemaPantalla; hayDatos: boolean; fallo: 'red' | 'acceso' | null }) {
+  return (
+    <Raiz tema={tema}>
+      {hayDatos ? <p className="tt-mensaje">Aún no hay datos. Se actualizan solos cuando termina la sincronización con n8n.</p>
+        : fallo === 'acceso' ? <p role="alert" className="tt-mensaje">No tienes acceso al tablero. Vuelve a iniciar sesión o pide la app «Equipos en taller».</p>
+        : fallo ? <p role="alert" className="tt-mensaje">No se pudo cargar el tablero. Se reintenta cada 60 s.</p>
+        : <p className="tt-mensaje">Cargando tablero…</p>}
+    </Raiz>
+  );
+}
+
+/** El tablero de la pestaña, con los datos de GET /api/equipos-taller. */
+export default function Tablero({ api: apiProp, tema = 'dia' }: { api?: ApiEquipos; tema?: TemaPantalla }) {
+  const api = useMemo(() => apiProp || apiEquipos(), [apiProp]);
+  const pedir = useCallback((senal: AbortSignal) => api.estado(senal), [api]);
+  const { datos, modelo, ajustes, datosEn, okEn, fallo, obsoleto } = useTableroDatos(pedir);
+  if (!modelo) return <SinTablero tema={tema} hayDatos={!!datos} fallo={fallo} />;
+  return <TableroVista tablero={modelo} ajustes={ajustes} tema={tema} okEn={okEn} datosEn={datosEn} obsoleto={obsoleto} />;
 }

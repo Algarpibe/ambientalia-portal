@@ -22,6 +22,15 @@ describe('tablero.css y Tablero.tsx', () => {
     expect(usadas.length).toBeGreaterThan(20);
     for (const u of usadas) expect(Object.keys(TEMAS.dia), 'token ' + u).toContain(u);
   });
+  it('tv.css y TvEquipos.tsx tampoco, y sus variables --tt-* existen', () => {
+    const tv = leer('./tv.css');
+    expect(tv.length).toBeGreaterThan(500);
+    expect(tv).not.toMatch(LITERAL_COLOR);
+    expect(leer('../TvEquipos.tsx')).not.toMatch(LITERAL_COLOR);
+    const usadas = [...tv.matchAll(/var\(--tt-([a-z0-9-]+)\)/g)].map((m) => m[1]);
+    expect(usadas.length).toBeGreaterThan(0);
+    for (const u of usadas) expect(Object.keys(TEMAS.dia), 'token ' + u).toContain(u);
+  });
   it('el detector de literales sí ve un hex y un rgba', () => {
     expect('color:#fff').toMatch(LITERAL_COLOR);
     expect('box-shadow:0 0 rgba(0,0,0,.1)').toMatch(LITERAL_COLOR);

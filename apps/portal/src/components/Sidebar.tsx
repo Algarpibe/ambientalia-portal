@@ -6,6 +6,7 @@ import {
   Users,
   Box,
   Wrench,
+  Tv,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -55,6 +56,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const { role, apps } = useAuth();
   const showHerramientas = hasAssignedInCategory('herramienta', apps);
   const showAplicaciones = hasAssignedInCategory('aplicacion', apps);
+  const showTableroTv = role === 'admin' || apps.includes('equipos-taller');
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSED_KEY) === 'true',
@@ -144,6 +146,20 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             <Box size={20} className="shrink-0" />
             {!plegada && 'Aplicaciones'}
           </Link>
+        )}
+        {showTableroTv && (
+          // Pantalla completa fuera del shell: pestaña nueva para dejarla fija en la TV.
+          <a
+            href="/equipos-taller/tv"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={alNavegar}
+            className={itemClass('/equipos-taller/tv', plegada)}
+            title={plegada ? 'Tablero TV' : undefined}
+          >
+            <Tv size={20} className="shrink-0" />
+            {!plegada && 'Tablero TV'}
+          </a>
         )}
         {role === 'admin' && (
           <Link
