@@ -9,11 +9,12 @@ const DIR = fileURLToPath(new URL('./', import.meta.url));
 const fuentes = readdirSync(DIR).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
 
 describe('núcleo puro', () => {
-  it('son los cinco ficheros del módulo', () => expect(fuentes.sort()).toEqual(['actualizar.ts', 'index.ts', 'pantalla.ts', 'reglas.ts', 'tipos.ts']));
+  it('son los siete ficheros del módulo', () =>
+    expect(fuentes.sort()).toEqual(['actualizar.ts', 'index.ts', 'pantalla.ts', 'reglas.ts', 'taller-board.ts', 'taller-columns.ts', 'tipos.ts']));
 
   it.each(fuentes)('%s solo importa de su propia carpeta', (f) => {
     const imports = [...readFileSync(DIR + f, 'utf8').matchAll(/^\s*(?:import|export)[^'"]*from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
-    expect(imports.filter((i) => !/^\.\/[a-z]+\.js$/.test(i))).toEqual([]);
+    expect(imports.filter((i) => !/^\.\/[a-z]+(-[a-z]+)*\.js$/.test(i))).toEqual([]);
   });
 
   it('no usa nada de Node', () => {

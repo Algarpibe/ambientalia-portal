@@ -5,3 +5,5 @@ export * as Reglas from "./reglas.js";
 export { ADENTRO } from "./reglas.js";
 export { actualizar, buscarIlegibles, CV, hoyBogota } from "./actualizar.js";
 export * from "./pantalla.js";
+export * from "./taller-columns.js";
+export * from "./taller-board.js";
