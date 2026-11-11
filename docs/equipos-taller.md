@@ -137,17 +137,18 @@ Ya no hay variables de la cuenta de servicio ni de las carpetas de Drive. Los ID
 
 ## Pasos pendientes del usuario
 
-1. **`.env.example`:** pegar el bloque `EQUIPOS_*` en `apps/hub-api/.env.example`, porque los agentes no pueden escribir ficheros `.env*`. Hasta entonces, `src/env-example.test.ts` falla en «cada variable del código está en el ejemplo».
-2. **Desk 2.0:** `GRANT SELECT ON desk.conversations TO portal_agenda_reader;`
+1. **`.env.example`:** **sustituir** el bloque «Equipos en taller» de `apps/hub-api/.env.example` por el nuevo (sin las variables de la cuenta de servicio ni de las carpetas de Drive, con `EQUIPOS_SYNC_TOKEN` y `EQUIPOS_SYNC_MAX_HORAS`), porque los agentes no pueden escribir ficheros `.env*`. Hasta entonces, `src/env-example.test.ts` falla en «cada variable del código está en el ejemplo».
+2. **Desk 2.0:** `GRANT SELECT ON desk.conversations TO portal_agenda_reader;` (hecho el 10/11/2026).
 3. **Token en n8n:** crear la credencial **Header Auth** «Token sincronización Equipos» (nombre de la cabecera `X-Equipos-Sync-Token`; valor, el mismo que `EQUIPOS_SYNC_TOKEN`).
 4. **Token en EasyPanel:** cargar `EQUIPOS_SYNC_TOKEN` en hub-api. Si se cargaron, quitar las variables de Drive de la versión anterior.
 5. **Flujo de sincronización en n8n** (abajo):
-   - ponerle la credencial «Google Drive account» y la credencial del token, y rellenar «Configuración»;
+   - ponerle la credencial «Google Drive account» y la credencial del token, y revisar «Configuración»;
    - ejecutarlo **a mano** una vez (es la carga completa) y comprobar en psql que la pasada terminó con `ok = true` en `portal.equipos_sincronizacion`;
+   - si la carga completa tarda más de 2 horas, la pasada termina como `tardia` (`ok = false`): los textos ya recibidos se conservan, así que basta con **volver a ejecutarlo a mano**, que esta vez termina rápido;
    - solo entonces, activarlo.
 6. **Flujo de la alerta:** dejarlo **inactivo** hasta configurar la alerta.
 7. **App y llaves:** asignarlas a los usuarios, y volver a marcar a mano el retirado conocido.
-8. **Cuenta de servicio:** la cuenta de servicio de Google, su clave y el proyecto de GCP `portal-ambientalia` ya no se usan: se pueden borrar.
+8. **Cuenta de servicio:** la cuenta de servicio de Google, su clave y el proyecto de Google Cloud que se creó para ella ya no se usan: se pueden borrar.
 
 ## Flujo de n8n «Equipos · Sincronizar remisiones»
 
@@ -162,9 +163,10 @@ El usuario completa tres cosas:
 - **Cuándo:** cada hora. Cada ejecución es una **pasada**, y su id es `{{ $execution.id }}`.
 - **Autenticación:** las tres llamadas a hub-api llevan la cabecera `X-Equipos-Sync-Token`. Sin la variable en hub-api, o con otro valor: `401 { "error": "unauthorized" }`.
 - **Orden de una pasada:** comprobación de la carpeta temporal y barrido → entradas → salidas generadas por n8n → salidas escaneadas → «fin». En cada carpeta: el listado completo y, después, los textos de `faltaTexto`.
-- **Parámetros de Drive:** todas las llamadas llevan `supportsAllDrives=true`; las de listado, además, `includeItemsFromAllDrives=true` y `corpora=allDrives`, como hacía hub-api.
+- **Parámetros de Drive:** las llamadas de listado, copia, borrado y comprobación llevan `supportsAllDrives=true`; las de listado, además, `includeItemsFromAllDrives=true` y `corpora=allDrives`, como hacía hub-api. Las exportaciones (`files.export`) no admiten ese parámetro y no lo llevan.
 - **Listados incompletos:** si un listado de Drive no se puede leer entero (falla una página), la ejecución se para sin mandar ni ese listado ni el «fin». La pasada no cuenta.
-- **429 y 5xx:** en el listado y en el «fin», n8n reintenta con esperas de 25 s antes de rendirse; un fallo que sigue después de los reintentos para la ejecución.
+- **429 y 5xx:** en el listado y en el «fin», n8n reintenta hasta 3 veces con esperas de 35 s (para no caer los tres intentos en la misma ventana de 60 s del límite de peticiones de hub-api); un fallo que sigue después de los reintentos para la ejecución.
+- **Nombres de archivo:** antes de mandar un listado, n8n recorta los nombres a 300 caracteres y pone `(sin nombre)` a los vacíos, porque hub-api rechaza el listado entero si alguno no cumple.
 - **Carpeta temporal:** al empezar, n8n comprueba que puede escribir en ella; si no, la pasada se para antes de tocar hub-api.
 - **Barrido:** también al empezar, n8n borra de la carpeta temporal las copias `ocr-tmp-*` de más de 30 minutos (restos de pasadas que murieron a mitad). Las recientes se respetan, porque pueden ser de una pasada en marcha.
 
