@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { activable, ariaSort } from '@suite/a11y';
 import type { FacturaContable } from './api';
 import { formatCOP, formatPct } from './format';
+import { diasEnCartera } from './cartera';
 import ResizeHandle from './ResizeHandle';
 
 type SortKey = keyof FacturaContable;
@@ -12,8 +13,10 @@ type SortKey = keyof FacturaContable;
  * columna es añadir una entrada aquí; el selector la recoge sola.
  *
  * `entrega` y `cartera` no son texto plano —una es la luz de entrega pendiente y la
- * otra un input editable—, por eso llevan su propio `kind`. Se listan como columnas
- * normales para que también se puedan reordenar, ocultar y redimensionar.
+ * otra los días en cartera, calculados al pintar—, por eso llevan su propio `kind`.
+ * Se listan como columnas normales para que también se puedan reordenar, ocultar y
+ * redimensionar. La clave `cartera` se conserva (antes era una nota manual) para no
+ * romper el orden y la visibilidad que cada usuario ya tiene guardados.
  */
 interface ColDef {
   key: ColKey;
@@ -49,8 +52,19 @@ const COLUMNAS: ColDef[] = [
   { key: 'retenciones', label: 'RETENCIONES', align: 'right', kind: 'money', ancho: 110 },
   { key: 'participacion', label: '% PART.', align: 'right', kind: 'pct', ancho: 85 },
   { key: 'invoiceNumber', label: 'FACTURA', align: 'left', kind: 'text', ancho: 95 },
-  { key: 'cartera', label: 'CARTERA', align: 'left', kind: 'cartera', ancho: 160 },
+  { key: 'cartera', label: 'CARTERA (DÍAS)', align: 'right', kind: 'cartera', ancho: 110 },
 ];
+
+const AYUDA_CARTERA = 'Días en cartera: hoy − fecha de vencimiento (solo facturas con saldo; negativo = aún por vencer)';
+
+/** Texto del tooltip de la celda de cartera. */
+function explicarDias(d: number): string {
+  const n = Math.abs(d);
+  const dias = n === 1 ? 'día' : 'días';
+  if (d > 0) return `Vencida hace ${n} ${dias}`;
+  if (d < 0) return `Vence en ${n} ${dias}`;
+  return 'Vence hoy';
+}
 
 export const ORDEN_POR_DEFECTO: ColKey[] = COLUMNAS.map((c) => c.key);
 export const ETIQUETAS = Object.fromEntries(COLUMNAS.map((c) => [c.key, c.label])) as Record<ColKey, string>;
@@ -61,8 +75,8 @@ const ANCHO_NUMERO_FILA = 44;
 
 interface Props {
   facturas: FacturaContable[];
-  onEditarCartera: (invoiceNumber: string, cartera: string) => void;
-  guardando: string | null; // invoiceNumber que se está guardando, o null
+  /** Fecha de hoy (YYYY-MM-DD, local) para calcular los días en cartera. */
+  hoy: string;
   onAbrirDetalle?: (invoiceNumber: string) => void;
   orden: ColKey[];
   esVisible: (key: ColKey) => boolean;
@@ -80,8 +94,7 @@ function texto(f: FacturaContable, kind: ColDef['kind'], key: ColKey): string {
 
 export default function FacturasTable({
   facturas,
-  onEditarCartera,
-  guardando,
+  hoy,
   onAbrirDetalle,
   orden,
   esVisible,
@@ -103,15 +116,20 @@ export default function FacturasTable({
     arrastre?.key === c.key ? arrastre.ancho : (anchoDe(c.key) ?? c.ancho);
 
   const ordenadas = useMemo(() => {
+    // La cartera se ordena por sus días, no por el campo `cartera` de la factura; las
+    // pagadas (sin días) cuentan como el mínimo y quedan al final en descendente.
+    const valor = (f: FacturaContable) =>
+      sort.key === 'cartera' ? (diasEnCartera(f, hoy) ?? Number.NEGATIVE_INFINITY) : f[sort.key];
     const arr = [...facturas];
     arr.sort((a, b) => {
-      const av = a[sort.key];
-      const bv = b[sort.key];
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sort.dir;
+      const av = valor(a);
+      const bv = valor(b);
+      // Comparación y no resta: Infinity − Infinity daría NaN.
+      if (typeof av === 'number' && typeof bv === 'number') return (av === bv ? 0 : av < bv ? -1 : 1) * sort.dir;
       return String(av).localeCompare(String(bv), 'es') * sort.dir;
     });
     return arr;
-  }, [facturas, sort]);
+  }, [facturas, sort, hoy]);
 
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: 1 }));
@@ -135,7 +153,13 @@ export default function FacturasTable({
                 key={c.key}
                 onClick={c.kind === 'luz' ? undefined : () => toggleSort(c.key as SortKey)}
                 aria-sort={c.kind === 'luz' ? undefined : ariaSort(sort.key === c.key, sort.dir === 1)}
-                title={c.kind === 'luz' ? 'Entrega pendiente: hay artículos de la factura sin empaquetar' : c.label}
+                title={
+                  c.kind === 'luz'
+                    ? 'Entrega pendiente: hay artículos de la factura sin empaquetar'
+                    : c.kind === 'cartera'
+                      ? AYUDA_CARTERA
+                      : c.label
+                }
                 className={`group relative select-none px-2 py-2 font-semibold ${
                   c.align === 'right' ? 'text-right' : 'text-left'
                 } ${c.kind === 'luz' ? '' : 'cursor-pointer hover:text-gray-900'}`}
@@ -191,25 +215,16 @@ export default function FacturasTable({
                   );
                 }
                 if (c.kind === 'cartera') {
+                  const dias = diasEnCartera(f, hoy);
                   return (
-                    <td key={c.key} className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        // key incluye la cartera: si un guardado falla y App revierte el
-                        // valor en estado, el input se remonta y muestra el valor revertido
-                        // (un input no controlado con defaultValue no se actualizaría solo).
-                        key={`${f.invoiceNumber}:${f.cartera}`}
-                        type="text"
-                        // FE-419 — sin etiqueta visible por fila: el nombre dice de qué
-                        // factura es la cartera que se edita.
-                        aria-label={`Cartera de la factura ${f.invoiceNumber}`}
-                        defaultValue={f.cartera}
-                        disabled={guardando === f.invoiceNumber}
-                        onBlur={(e) => {
-                          if (e.target.value !== f.cartera) onEditarCartera(f.invoiceNumber, e.target.value);
-                        }}
-                        placeholder="—"
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none"
-                      />
+                    <td
+                      key={c.key}
+                      title={dias === null ? undefined : explicarDias(dias)}
+                      className={`truncate px-2 py-1 text-right tabular-nums ${
+                        dias === null ? 'text-gray-300' : dias > 0 ? 'font-semibold text-red-600' : 'text-gray-500'
+                      }`}
+                    >
+                      {dias === null ? '—' : dias}
                     </td>
                   );
                 }

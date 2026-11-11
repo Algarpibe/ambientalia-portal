@@ -115,14 +115,6 @@ describe('Facturación (FE-419)', () => {
     expect(document.activeElement).toBe(fila);
   });
 
-  it('el input de cartera tiene nombre y sus teclas no abren el detalle', async () => {
-    render(<App />);
-    const cartera = await screen.findByRole('textbox', { name: 'Cartera de la factura FV-1' });
-    fireEvent.keyDown(cartera, { key: 'Enter' });
-    fireEvent.keyDown(cartera, { key: ' ' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
   it('el campo del presupuesto tiene nombre', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'editar' }));

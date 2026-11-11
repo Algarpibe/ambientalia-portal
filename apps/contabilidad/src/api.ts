@@ -85,16 +85,6 @@ export async function fetchContabilidad(year?: number): Promise<ContabilidadData
   return (await res.json()) as ContabilidadData;
 }
 
-/** Guarda la cartera de una factura. Lanza Error con mensaje en español si falla. */
-export async function guardarCartera(invoiceNumber: string, cartera: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/contabilidad/cartera/${encodeURIComponent(invoiceNumber)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ cartera }),
-  });
-  if (!res.ok) throw new Error(await mensajeDeError(res));
-}
-
 /** Guarda el presupuesto de un año (solo admin en el backend). */
 export async function guardarPresupuesto(year: number, presupuesto: number): Promise<void> {
   const res = await fetch(`${API_BASE}/api/contabilidad/budget/${year}`, {

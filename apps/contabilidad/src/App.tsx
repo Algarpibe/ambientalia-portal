@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, Search, Landmark } from 'lucide-react';
-import { fetchContabilidad, guardarCartera, guardarPresupuesto, esAdmin, type ContabilidadData, type FacturaContable } from './api';
+import { fetchContabilidad, guardarPresupuesto, esAdmin, type ContabilidadData, type FacturaContable } from './api';
 import { formatCOP } from './format';
+import { hoyLocal } from './cartera';
 import FacturasTable, { ORDEN_POR_DEFECTO, ETIQUETAS, type ColKey } from './FacturasTable';
 import ColumnasMenu from './ColumnasMenu';
 import { useColumnPrefs, clavePrefs } from './useColumnPrefs';
@@ -31,7 +32,6 @@ export default function App() {
   const [mes, setMes] = useState(0); // 0 = todos
   const [soloEntregaPendiente, setSoloEntregaPendiente] = useState(false);
   const [tab, setTab] = useState<'facturacion' | 'ov' | 'pagos'>('facturacion');
-  const [guardando, setGuardando] = useState<string | null>(null);
   const [guardandoPpto, setGuardandoPpto] = useState(false);
   const [detalleFactura, setDetalleFactura] = useState<string | null>(null);
 
@@ -39,7 +39,7 @@ export default function App() {
   // Configuración de columnas del usuario: la clave lleva su user_id, así dos personas
   // que compartan el mismo navegador no se pisan la vista.
   const cols = useColumnPrefs<ColKey>(clavePrefs('facturas', getUserId()), ORDEN_POR_DEFECTO);
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyLocal();
 
   useEffect(() => {
     let vivo = true;
@@ -76,21 +76,6 @@ export default function App() {
     );
   }, [facturasFiltradas]);
 
-  async function onEditarCartera(invoiceNumber: string, cartera: string) {
-    if (!data) return;
-    const anterior = data.facturas.find((f) => f.invoiceNumber === invoiceNumber)?.cartera ?? '';
-    setData({ ...data, facturas: data.facturas.map((f) => (f.invoiceNumber === invoiceNumber ? { ...f, cartera } : f)) });
-    setGuardando(invoiceNumber);
-    try {
-      await guardarCartera(invoiceNumber, cartera);
-    } catch (e) {
-      setData((d) => (d ? { ...d, facturas: d.facturas.map((f) => (f.invoiceNumber === invoiceNumber ? { ...f, cartera: anterior } : f)) } : d));
-      setError((e as Error).message);
-    } finally {
-      setGuardando(null);
-    }
-  }
-
   async function onGuardarPresupuesto(presupuesto: number) {
     if (!data) return;
     const anterior = data.resumen.presupuesto;
@@ -115,7 +100,7 @@ export default function App() {
         <Landmark className="h-6 w-6 text-blue-600" />
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Contabilidad</h1>
-          <p className="text-sm text-gray-500">Datos en vivo desde Zoho. La columna Cartera se guarda al salir de la celda.</p>
+          <p className="text-sm text-gray-500">Datos en vivo desde Zoho. La columna Cartera muestra los días desde el vencimiento de las facturas con saldo.</p>
         </div>
       </header>
 
@@ -221,8 +206,7 @@ export default function App() {
 
           <FacturasTable
             facturas={facturasFiltradas}
-            onEditarCartera={onEditarCartera}
-            guardando={guardando}
+            hoy={hoy}
             onAbrirDetalle={setDetalleFactura}
             orden={cols.orden}
             esVisible={cols.esVisible}
