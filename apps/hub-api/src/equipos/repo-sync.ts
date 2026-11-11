@@ -40,7 +40,8 @@ export type ResultadoListado =
   | { estado: 'ok'; faltaTexto: string[] }
   | { estado: 'pasada_cerrada' }
   | { estado: 'pasada_en_curso' }
-  | { estado: 'sospechoso'; bajas: number; vivos: number };
+  /** `carpeta`: la que perdería los archivos (la del listado, o aquella de la que saldrían hacia la del listado). */
+  | { estado: 'sospechoso'; carpeta: Carpeta; bajas: number; vivos: number };
 export type CierrePasada = 'cerrada' | 'desconocida' | 'ya_cerrada' | 'incompleta' | 'tardia';
 
 export interface RepoSync {
@@ -103,7 +104,7 @@ export function crearRepoSync(db: Pool): RepoSync {
              FROM portal.equipos_drive_archivos WHERE carpeta = $1 AND NOT borrado`,
           [carpeta, ids],
         )).rows[0];
-        if (listadoSospechoso(n.bajas, n.vivos, archivos.length)) return { estado: 'sospechoso', bajas: n.bajas, vivos: n.vivos };
+        if (listadoSospechoso(n.bajas, n.vivos, archivos.length)) return { estado: 'sospechoso', carpeta, bajas: n.bajas, vivos: n.vivos };
         // Los que saldrían de OTRA carpeta hacia esta cuentan como bajas de la suya (un listado
         // mandado a la carpeta equivocada no puede vaciarla ni borrarle el texto).
         const fuera = (await c.query(
@@ -115,7 +116,7 @@ export function crearRepoSync(db: Pool): RepoSync {
           [carpeta, ids],
         )).rows;
         for (const o of fuera) {
-          if (listadoSospechoso(o.movidos, o.vivos, o.vivos - o.movidos)) return { estado: 'sospechoso', bajas: o.movidos, vivos: o.vivos };
+          if (listadoSospechoso(o.movidos, o.vivos, o.vivos - o.movidos)) return { estado: 'sospechoso', carpeta: o.carpeta as Carpeta, bajas: o.movidos, vivos: o.vivos };
         }
         await c.query(
           `INSERT INTO portal.equipos_sincronizacion (pasada, listados) VALUES ($1, jsonb_build_object($2::text, $3::int))

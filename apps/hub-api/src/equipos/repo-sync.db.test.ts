@@ -93,8 +93,8 @@ describe('registrarListado', () => {
   it('no aplica un listado sospechoso: vacío con la carpeta llena, o que borraría más de 10 y más de la mitad', async () => {
     const doce = Array.from({ length: 12 }, (_, i) => A('ENTRADA' + String(i).padStart(5, '0')));
     await listar('p1', 'entradas', doce);
-    expect(await sync.registrarListado('p1', 'entradas', [])).toEqual({ estado: 'sospechoso', bajas: 12, vivos: 12 });
-    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 1))).toEqual({ estado: 'sospechoso', bajas: 11, vivos: 12 });
+    expect(await sync.registrarListado('p1', 'entradas', [])).toEqual({ estado: 'sospechoso', carpeta: 'entradas', bajas: 12, vivos: 12 });
+    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 1))).toEqual({ estado: 'sospechoso', carpeta: 'entradas', bajas: 11, vivos: 12 });
     expect(await borrados()).toBe(0);
     expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 6))).toMatchObject({ estado: 'ok' });
     expect(await borrados()).toBe(6);
@@ -113,9 +113,10 @@ describe('registrarListado', () => {
     const doce = Array.from({ length: 12 }, (_, i) => A('ESCANEO' + String(i).padStart(5, '0')));
     await listar('p1', 'salidas_escaneadas', doce);
     for (const a of doce.slice(0, 11)) await sync.guardarTexto(a.id, { texto: 'OCR ' + a.id });
-    // Carpeta equivocada: los 12 de salidas_escaneadas llegan como «entradas».
-    expect(await sync.registrarListado('p1', 'entradas', doce)).toMatchObject({ estado: 'sospechoso' });
-    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 11))).toMatchObject({ estado: 'sospechoso' });
+    // Carpeta equivocada: los 12 de salidas_escaneadas llegan como «entradas». El resultado
+    // nombra la carpeta de la que SALDRÍAN (donde hay que mirar), no la del listado.
+    expect(await sync.registrarListado('p1', 'entradas', doce)).toEqual({ estado: 'sospechoso', carpeta: 'salidas_escaneadas', bajas: 12, vivos: 12 });
+    expect(await sync.registrarListado('p1', 'entradas', doce.slice(0, 11))).toEqual({ estado: 'sospechoso', carpeta: 'salidas_escaneadas', bajas: 11, vivos: 12 });
     expect(await fila('ESCANEO00000')).toMatchObject({ carpeta: 'salidas_escaneadas', texto: 'OCR ESCANEO00000', borrado: false });
     expect((await db.query(`SELECT count(*)::int AS n FROM portal.equipos_drive_archivos WHERE carpeta = 'salidas_escaneadas' AND NOT borrado`)).rows[0].n).toBe(12);
     // Un movimiento aislado (1 de 12) sí pasa.

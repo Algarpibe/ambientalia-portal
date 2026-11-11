@@ -5,7 +5,7 @@
  * (`EQUIPOS_SYNC_TOKEN`, cabecera `X-Equipos-Sync-Token`; sin la variable, 401 a todo),
  * con el mismo patrón que WO-sales y Ausencias.
  *
- *   POST /equipos-taller/sync/listado  ← { pasada, carpeta, archivos: [{ id, titulo }] }  → 200 { faltaTexto } · 409
+ *   POST /equipos-taller/sync/listado  ← { pasada, carpeta, archivos: [{ id, titulo }] }  → 200 { faltaTexto } · 409 (sospechoso: + { bajas, vivos, carpeta })
  *   POST /equipos-taller/sync/texto    ← { id, texto } | { id, error: { status } }        → 204 · 404
  *   POST /equipos-taller/sync/fin      ← { pasada, conteos }                              → 200 { ok } · 404 · 409
  *
@@ -44,11 +44,17 @@ export function createEquiposSyncRouter(sync: RepoSync): Router {
     else if (r.estado === 'pasada_cerrada') res.status(409).json(pasadaCerrada);
     else if (r.estado === 'pasada_en_curso') res.status(409).json({ error: 'pasada_en_curso', message: 'Hay otra pasada sin terminar' });
     else {
+      // `carpeta` es una de las tres de CARPETAS (no lo recibido): la que perdería los
+      // archivos. Si no es la del listado, los ids son de otra carpeta y hay que mirar en esa.
+      const desde = r.carpeta === v.valor.carpeta
+        ? 'El listado borraría '
+        : 'El listado de ' + v.valor.carpeta + ' sacaría ';
       res.status(409).json({
         error: 'listado_sospechoso',
-        message: 'El listado borraría ' + r.bajas + ' de ' + r.vivos + ' archivos de la carpeta: no se aplica',
+        message: desde + r.bajas + ' de ' + r.vivos + ' archivos de la carpeta ' + r.carpeta + ': no se aplica',
         bajas: r.bajas,
         vivos: r.vivos,
+        carpeta: r.carpeta,
       });
     }
   }));

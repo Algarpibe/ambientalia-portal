@@ -94,9 +94,17 @@ describe('POST /listado', () => {
     expect([(await post('/listado', LISTADO)).status, (await post('/listado', LISTADO)).body.error]).toEqual([409, 'pasada_cerrada']);
     listado = { estado: 'pasada_en_curso' };
     expect((await post('/listado', LISTADO)).body.error).toBe('pasada_en_curso');
-    listado = { estado: 'sospechoso', bajas: 40, vivos: 41 };
+    listado = { estado: 'sospechoso', carpeta: 'entradas', bajas: 40, vivos: 41 };
     const r = await post('/listado', LISTADO);
-    expect([r.status, r.body.error, r.body.bajas, r.body.vivos]).toEqual([409, 'listado_sospechoso', 40, 41]);
+    expect([r.status, r.body.error, r.body.bajas, r.body.vivos, r.body.carpeta]).toEqual([409, 'listado_sospechoso', 40, 41, 'entradas']);
+    expect(r.body.message).toBe('El listado borraría 40 de 41 archivos de la carpeta entradas: no se aplica');
+  });
+
+  it('409 sospechoso por archivos de OTRA carpeta: nombra la carpeta de la que saldrían', async () => {
+    listado = { estado: 'sospechoso', carpeta: 'salidas_escaneadas', bajas: 12, vivos: 12 };
+    const r = await post('/listado', LISTADO);
+    expect([r.status, r.body.error, r.body.carpeta]).toEqual([409, 'listado_sospechoso', 'salidas_escaneadas']);
+    expect(r.body.message).toBe('El listado de entradas sacaría 12 de 12 archivos de la carpeta salidas_escaneadas: no se aplica');
   });
 
   it('un listado de 10 000 archivos cabe en el límite de 2 MB', async () => {

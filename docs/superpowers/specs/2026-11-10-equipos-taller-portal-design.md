@@ -89,7 +89,7 @@ Las rutas de la pantalla van bajo `requireAuth` + `requireApp('equipos-taller')`
 
 | Ruta | Cuerpo | Respuesta |
 |---|---|---|
-| `POST /api/equipos-taller/sync/listado` | `{ pasada, carpeta, archivos: [{ id, titulo }] }`, con el listado **completo** de una carpeta. | 200 `{ faltaTexto: [ids] }`: da de alta los nuevos, actualiza los nombres y marca `borrado` lo que ya no está. 409 si la pasada ya terminó, si hay otra pasada en curso o si el listado vaciaría la carpeta (o borraría más de la mitad y más de 10 archivos). |
+| `POST /api/equipos-taller/sync/listado` | `{ pasada, carpeta, archivos: [{ id, titulo }] }`, con el listado **completo** de una carpeta. | 200 `{ faltaTexto: [ids] }`: da de alta los nuevos, actualiza los nombres y marca `borrado` lo que ya no está. 409 si la pasada ya terminó, si hay otra pasada en curso o si el listado vaciaría la carpeta (o borraría más de la mitad y más de 10 archivos); también si movería así los de otra carpeta. El 409 sospechoso lleva `{ bajas, vivos, carpeta }`, con la carpeta que perdería los archivos. |
 | `POST /api/equipos-taller/sync/texto` | `{ id, texto }` o `{ id, error: { status } }`. | 204; 404 si el archivo no está en la copia. |
 | `POST /api/equipos-taller/sync/fin` | `{ pasada, conteos }`. | 200; 404 si la pasada no existe; 409 si ya terminó o le falta el listado de alguna carpeta. |
 

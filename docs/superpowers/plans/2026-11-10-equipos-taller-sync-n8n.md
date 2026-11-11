@@ -3252,7 +3252,7 @@ El usuario completa tres cosas:
   - `200 { "faltaTexto": ["<id>", …] }`: los ids a los que n8n debe mandar texto. Siempre está vacío en salidas_n8n.
   - `409 { "error": "pasada_en_curso" }`: otra pasada empezó hace menos de 2 h y no ha terminado. La ejecución se para. Es normal si la anterior (la carga completa) sigue en marcha.
   - `409 { "error": "pasada_cerrada" }`: esta pasada ya mandó «fin».
-  - `409 { "error": "listado_sospechoso", "bajas": n, "vivos": m }`: el listado viene vacío con la carpeta llena, o borraría más de 10 archivos y más de la mitad. No se aplica nada. Casi siempre es un ID de carpeta equivocado o un permiso perdido; si de verdad se vació la carpeta, ver más abajo.
+  - `409 { "error": "listado_sospechoso", "bajas": n, "vivos": m, "carpeta": "<carpeta>" }`: el listado viene vacío con la carpeta llena, o borraría más de 10 archivos y más de la mitad. `carpeta` es la que perdería los archivos: la del listado o, si los ids son de otra carpeta (se moverían a esta), esa otra; el mensaje la nombra. No se aplica nada. Casi siempre es un ID de carpeta equivocado o un permiso perdido; si de verdad se vació la carpeta, ver más abajo.
   - `400 { "error": "invalid_input", "message": "…" }`: el cuerpo no vale. El mensaje es fijo y no repite lo recibido.
 
 **2. Texto** — `POST <hub>/api/equipos-taller/sync/texto`, uno por archivo:
