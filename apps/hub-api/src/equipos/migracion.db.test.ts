@@ -25,13 +25,13 @@ describe('migración 071 contra Postgres', () => {
     await db.query(SQL);
   });
 
-  it('deja sus cinco tablas y sus dos vistas (equipos_drive_archivos y equipos_sincronizacion son de la 072)', async () => {
+  it('deja sus cinco tablas y sus dos vistas (equipos_drive_archivos y equipos_sincronizacion son de la 072; equipos_kiosco y equipos_tablero_config, de la 074)', async () => {
     const { rows } = await db.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'equipos\\_%' ORDER BY 1`,
     );
     expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
-      'equipos_ajuste', 'equipos_drive_archivos', 'equipos_ejecucion', 'equipos_estado', 'equipos_incidente', 'equipos_llaves',
-      'equipos_sincronizacion', 'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
+      'equipos_ajuste', 'equipos_drive_archivos', 'equipos_ejecucion', 'equipos_estado', 'equipos_incidente', 'equipos_kiosco', 'equipos_llaves',
+      'equipos_sincronizacion', 'equipos_tablero_config', 'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
     ]);
   });
 

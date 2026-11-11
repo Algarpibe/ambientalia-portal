@@ -9,6 +9,7 @@ const leer = (ruta: string) => readFileSync(fileURLToPath(new URL(ruta, import.m
 const SQL = leer('../users/migrations/071_equipos_taller.sql');
 const SQL_072 = leer('../users/migrations/072_equipos_drive_n8n.sql');
 const SQL_073 = leer('../users/migrations/073_equipos_origen_sincronizacion.sql');
+const SQL_074 = leer('../users/migrations/074_equipos_tablero.sql');
 const soloIdempotente = (sql: string) => {
   const creates = sql.match(/CREATE (UNIQUE )?(TABLE|INDEX|VIEW|SCHEMA|OR REPLACE VIEW)[^;]*/g) || [];
   expect(creates.length).toBeGreaterThan(0);
@@ -51,8 +52,8 @@ describe('migración 072 (Drive vía n8n)', () => {
 });
 
 describe('migración 073 (origen «sincronizacion»)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 072, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'072_equipos_drive_n8n\.sql',\s*'073_equipos_origen_sincronizacion\.sql'\];/);
+  it('está apuntada en MIGRATIONS, detrás de la 072', () => {
+    expect(leer('../db.ts')).toMatch(/'072_equipos_drive_n8n\.sql',\s*'073_equipos_origen_sincronizacion\.sql'[,\]]/);
   });
 
   it('no siembra nada', () => {
@@ -70,5 +71,22 @@ describe('migración 073 (origen «sincronizacion»)', () => {
   it('el CHECK nuevo admite los tres orígenes (boton, por las filas viejas) y la guarda mira su contenido, no su nombre', () => {
     expect(SQL_073).toMatch(/ADD CONSTRAINT equipos_ejecucion_origen_check\s+CHECK \(origen IN \('programada', 'boton', 'sincronizacion'\)\)/);
     expect(SQL_073).toMatch(/pg_get_constraintdef\(oid\) LIKE '%sincronizacion%'/);
+  });
+});
+
+describe('migración 074 (tablero y llaves de kiosco)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 073, y es la última', () => {
+    expect(leer('../db.ts')).toMatch(/'073_equipos_origen_sincronizacion\.sql',\s*'074_equipos_tablero\.sql'\];/);
+  });
+
+  it('no siembra ni borra nada (se re-ejecuta en cada arranque)', () => {
+    expect(SQL_074).not.toMatch(/INSERT\s+INTO|\b(DROP|TRUNCATE)\b|DELETE\s+FROM/i);
+  });
+
+  it('solo DDL idempotente', () => soloIdempotente(SQL_074));
+
+  it('da permisos a portal_app solo si el rol existe (DATA-332)', () => {
+    expect(SQL_074).toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'portal_app'\)/);
+    expect(SQL_074).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON portal\.equipos_tablero_config, portal\.equipos_kiosco TO portal_app/);
   });
 });

@@ -5,7 +5,8 @@
  * comprueba con su propia configuración, así que aquí no entra nada de Node.
  */
 import type { Ajuste, Foto } from './nucleo/tipos.js';
-import type { AjustesTablero, Tablero } from './nucleo/taller-board.js';
+import { construirTablero, type AjustesTablero, type Tablero } from './nucleo/taller-board.js';
+import { aplicarAjustes } from './nucleo/pantalla.js';
 
 /** Id de la app en `portal.user_apps` y en el JWT. */
 export const APP_ID = 'equipos-taller';
@@ -89,6 +90,25 @@ export interface RespuestaTablero {
   ajustes: AjustesTablero;
   fotoEn: string | null;
   aviso: AvisoFoto | null;
+}
+
+/**
+ * El tablero que ve la TV: el MISMO cálculo que hace el navegador con una sesión (aplicarAjustes + construirTablero),
+ * así que con la misma foto y el mismo reloj los dos caminos dan lo mismo. Lista blanca: solo estos cuatro campos salen
+ * (nada de motivos, salidas, ids de Drive, notas, firmas, permisos ni llaves).
+ */
+export function armarRespuestaTablero(e: { snap: Foto | null; ajustes: Record<string, AjusteFirmado>; cfg: AjustesTablero; aviso: AvisoFoto | null }, ahoraMs: number): RespuestaTablero {
+  return { tablero: construirTablero(aplicarAjustes(e.snap?.rows ?? [], e.ajustes), e.cfg, ahoraMs), ajustes: e.cfg, fotoEn: e.snap?.at ?? null, aviso: e.aviso };
+}
+
+/** Una llave de kiosco de la TV (`portal.equipos_kiosco`), solo metadatos: ni el resumen ni el secreto salen nunca. */
+export interface Kiosco {
+  id: string;
+  nombre: string;
+  creadoPor: string;
+  creadoEn: string;
+  revocadoEn: string | null;
+  ultimoUsoEn: string | null;
 }
 
 /** Una fila de GET /api/equipos-taller/llaves. */
