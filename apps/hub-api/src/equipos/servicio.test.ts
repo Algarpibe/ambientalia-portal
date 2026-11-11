@@ -113,7 +113,7 @@ const conSync = (s: SincronizacionHecha | null, motivo: () => Promise<MotivoPasa
 describe('una corrida buena', () => {
   it('escribe la foto con sus conteos y la caché de OCR', async () => {
     const { repo, s } = repoEnMemoria();
-    const r = await crear(() => fuentes(), repo).ejecutar('boton', null);
+    const r = await crear(() => fuentes(), repo).ejecutar('sincronizacion', null);
     expect(r).toMatchObject({ estado: 'ok', conteos: { en_taller: 1, remisiones_ilegibles: 1 } });
     expect(s.foto?.rows.map((x) => x.sn + ':' + x.est).sort()).toEqual(['18A90001:' + EST.TALLER, '18A90002:' + EST.ENTREGADO]);
     expect(s.exits?.v).toBe(CV);
@@ -122,7 +122,7 @@ describe('una corrida buena', () => {
 
   it('avisa (sin fallar) de los tickets de Desk 2.0 que no traen raw.cf', async () => {
     const { repo } = repoEnMemoria();
-    const r = await crear(() => fuentes({ sonda: async () => ({ total: 10, conCf: 7 }) }), repo).ejecutar('boton', null);
+    const r = await crear(() => fuentes({ sonda: async () => ({ total: 10, conCf: 7 }) }), repo).ejecutar('sincronizacion', null);
     expect(r.estado === 'ok' && r.avisos).toContain('3 tickets de Desk 2.0 sin campos personalizados (raw.cf): se usan solo sus columnas');
   });
 
@@ -130,7 +130,7 @@ describe('una corrida buena', () => {
     const { repo, s } = repoEnMemoria();
     s.exits = { v: CV, list: [{ id: 'S1', n: '260915 - NOMBRE VIEJO.pdf', d: '2026-09-15', t: [], it: {} }] };
     const leidos: string[] = [];
-    await crear(() => fuentes({ textoPdf: async (id) => { leidos.push(id); return id === 'S1' ? block('18A90002') : ''; } }), repo).ejecutar('boton', null);
+    await crear(() => fuentes({ textoPdf: async (id) => { leidos.push(id); return id === 'S1' ? block('18A90002') : ''; } }), repo).ejecutar('sincronizacion', null);
     expect(leidos.sort()).toEqual(['S1', 'S2']);
     expect(s.exits?.list.find((x) => x.id === 'S1')?.n).toBe('260915 - CLIENTE B.pdf');
   });
@@ -141,7 +141,7 @@ describe('una corrida buena', () => {
     const pedidas: string[] = [];
     const f = fuentes();
     f.drive.remisionEntrada = async (id) => { pedidas.push(id); return ''; };
-    await crear(() => f, repo).ejecutar('boton', null);
+    await crear(() => f, repo).ejecutar('sincronizacion', null);
     expect(pedidas).toEqual([]);
     expect(s.foto?.rows.find((x) => x.sn === '18A90001')?.eq).toBe('EDM180C');
   });
@@ -149,7 +149,7 @@ describe('una corrida buena', () => {
   it('las fuentes se construyen con la pasada con la que corre', async () => {
     const { repo } = repoEnMemoria();
     let vista: SincronizacionHecha | null = null;
-    await crear(() => fuentes(), repo, canalFalso().canal, { fuentes: (x) => { vista = x; return fuentes(); } }).ejecutar('boton', null);
+    await crear(() => fuentes(), repo, canalFalso().canal, { fuentes: (x) => { vista = x; return fuentes(); } }).ejecutar('sincronizacion', null);
     expect(vista).toEqual(SYNC);
   });
 });
@@ -159,7 +159,7 @@ describe('la copia de Drive que manda n8n', () => {
     const { repo, s } = repoEnMemoria();
     const srv = crear(() => fuentes(), repo, canalFalso().canal, conSync(null));
     expect(await srv.configurado()).toBe(false);
-    expect(await srv.lanzar('boton', null)).toBe('sin_configurar');
+    expect(await srv.lanzar('sincronizacion', null)).toBe('sin_configurar');
     expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'sin_configurar' });
     expect(s.corridas).toEqual([]);
     expect(s.incidente).toBeNull();
@@ -174,14 +174,14 @@ describe('la copia de Drive que manda n8n', () => {
     let leyo = false;
     const f = fuentes();
     f.drive.entradas = async () => { leyo = true; return []; };
-    expect(await crear(() => f, repo, canalFalso().canal, conSync(haceHoras(6, 1))).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
+    expect(await crear(() => f, repo, canalFalso().canal, conSync(haceHoras(6, 1))).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
     expect(leyo).toBe(false);
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
   it('justo en el máximo todavía vale; el máximo es configurable', async () => {
-    expect((await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(6))).ejecutar('boton', null)).estado).toBe('ok');
-    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, { ...conSync(haceHoras(2)), maxHorasSync: 1 }).ejecutar('boton', null);
+    expect((await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(6))).ejecutar('sincronizacion', null)).estado).toBe('ok');
+    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, { ...conSync(haceHoras(2)), maxHorasSync: 1 }).ejecutar('sincronizacion', null);
     expect(r).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
   });
 
@@ -207,27 +207,27 @@ describe('la copia de Drive que manda n8n', () => {
   });
 
   it('la frescura no cambia: con la copia al día, una pasada posterior con textos fallidos no hace fallar la corrida', async () => {
-    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(1), async () => 'textos_fallidos')).ejecutar('boton', null);
+    const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(1), async () => 'textos_fallidos')).ejecutar('sincronizacion', null);
     expect(r.estado).toBe('ok');
   });
 
   it('con la copia atrasada por otro motivo (o si no se puede leer el motivo), la causa sigue siendo «atrasada»', async () => {
     for (const motivo of [async () => 'tardia' as const, async () => 'abandonada' as const, async () => { throw new Error('pg caído'); }]) {
-      const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30), motivo)).ejecutar('boton', null);
+      const r = await crear(() => fuentes(), repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30), motivo)).ejecutar('sincronizacion', null);
       expect(r).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
     }
   });
 
   it('si fallan a la vez Desk 2.0 y la frescura, la causa es la de Desk 2.0', async () => {
     const f = fuentes({ sonda: async () => { throw new SinDesk2(); } });
-    expect(await crear(() => f, repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30))).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'desk2: sin configurar' });
+    expect(await crear(() => f, repoEnMemoria().repo, canalFalso().canal, conSync(haceHoras(30))).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'desk2: sin configurar' });
   });
 
   it('si no se puede leer la copia (la base), la corrida falla sin tocar la foto', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
     f.drive.entradas = async () => { throw Object.assign(new Error('pg: host secreto'), { code: 'ECONNRESET' }); };
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
+    expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 });
@@ -257,7 +257,7 @@ describe('una corrida fallida', () => {
     const previa: CacheEscaneos = { v: CV, list: [{ id: 'S1', n: '260915 - CLIENTE B.pdf', d: '2026-09-15', t: [], it: {} }, { id: 'S2', n: '261020 - CLIENTE C.pdf', d: '2026-10-20', t: [], it: {} }] };
     s.exits = previa;
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new Error('pg: host secreto'); return block('18A90002'); } });
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
+    expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
     expect(s.exits).toBe(previa);
   });
@@ -266,7 +266,7 @@ describe('una corrida fallida', () => {
     for (const [status, cola] of [[403, 'HTTP 403'], [null, 'texto pendiente de n8n']] as const) {
       const { repo, s } = repoEnMemoria();
       const f = fuentes({ textoPdf: async () => { throw new FalloArchivo(status); } });
-      expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo convertir ningún PDF (' + cola + ')' });
+      expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo convertir ningún PDF (' + cola + ')' });
       expect(s.foto).toBe(FOTO_VIEJA);
     }
   });
@@ -276,7 +276,7 @@ describe('un PDF sin texto en la copia (A9)', () => {
   it('con un fallo guardado: la corrida sigue, el PDF va a ilegibles con su código y NO entra en la caché', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(400); return block('18A90002'); } });
-    const r = await crear(() => f, repo).ejecutar('boton', null);
+    const r = await crear(() => f, repo).ejecutar('sincronizacion', null);
     expect(r).toMatchObject({ estado: 'ok', conteos: { remisiones_ilegibles: 1 } });
     expect(s.foto?.ilegibles).toContainEqual({
       id: 'S2',
@@ -292,7 +292,7 @@ describe('un PDF sin texto en la copia (A9)', () => {
   it('con el texto todavía pendiente: también va a ilegibles, diciendo que falta n8n', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(null); return block('18A90002'); } });
-    expect((await crear(() => f, repo).ejecutar('boton', null)).estado).toBe('ok');
+    expect((await crear(() => f, repo).ejecutar('sincronizacion', null)).estado).toBe('ok');
     expect(s.foto?.ilegibles?.find((x) => x.id === 'S2')?.q).toBe('n8n todavía no ha enviado el texto de este PDF: se pedirá en la próxima sincronización');
   });
 
@@ -300,9 +300,9 @@ describe('un PDF sin texto en la copia (A9)', () => {
     const { repo, s } = repoEnMemoria();
     let roto = true;
     const f = () => fuentes({ textoPdf: async (id) => { if (id === 'S2' && roto) throw new FalloArchivo(400); return block(id === 'S2' ? '18A90001' : '18A90002'); } });
-    await crear(f, repo).ejecutar('boton', null);
+    await crear(f, repo).ejecutar('sincronizacion', null);
     roto = false;
-    await crear(f, repo).ejecutar('boton', null);
+    await crear(f, repo).ejecutar('sincronizacion', null);
     expect(s.foto?.ilegibles?.some((x) => x.id === 'S2')).toBe(false);
     expect(s.exits?.list.map((x) => x.id).sort()).toEqual(['S1', 'S2']);
   });
@@ -317,14 +317,14 @@ describe('candado', () => {
     const listar = f.drive.salidasEscaneadas;
     f.drive.salidasEscaneadas = async () => { await espera; return listar(); };
     const srv = crear(() => f, repo);
-    expect(await srv.lanzar('boton', null)).toBe('iniciada');
+    expect(await srv.lanzar('sincronizacion', null)).toBe('iniciada');
     expect(srv.actualizando()).toBe(true);
-    expect(await srv.lanzar('boton', null)).toBe('ocupado');
+    expect(await srv.lanzar('sincronizacion', null)).toBe('ocupado');
     expect(await srv.ejecutar('programada', null)).toEqual({ estado: 'ocupado' });
     soltar();
     await srv.enCurso();
     expect(srv.actualizando()).toBe(false);
-    expect(await srv.lanzar('boton', null)).toBe('iniciada');
+    expect(await srv.lanzar('sincronizacion', null)).toBe('iniciada');
     await srv.enCurso();
   });
 });
@@ -357,7 +357,7 @@ describe('incidente y alerta', () => {
     expect(malo.enviados[0].correo.para).toEqual(['comercial@ambientalia.com.co']);
     await srv.ejecutar('programada', null);
     expect(malo.enviados).toHaveLength(2);
-    await crear(() => fuentes(), repo, malo.canal).ejecutar('boton', null);
+    await crear(() => fuentes(), repo, malo.canal).ejecutar('sincronizacion', null);
     expect(s.incidente).toBeNull();
   });
 });
@@ -404,7 +404,7 @@ describe('fallos de fuente a mitad de la corrida', () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes({ tickets: ticketAbierto });
     f.desk2.comentarios = async () => { throw Object.assign(new Error('pg: host secreto'), { code: '42501' }); };
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'desk2: consulta rechazada (permisos o esquema)' });
+    expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'desk2: consulta rechazada (permisos o esquema)' });
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 
@@ -412,17 +412,17 @@ describe('fallos de fuente a mitad de la corrida', () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
     f.drive.remisionEntrada = async () => { throw new Error('pg caído'); };
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
+    expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: CAUSA_COPIA_DRIVE });
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 });
 
 describe('alerta según el origen', () => {
-  it('un fallo lanzado con el botón nunca envía la alerta, ni repetido', async () => {
+  it('una corrida «sincronizacion» fallida (la de cada hora) nunca envía la alerta, ni repetida', async () => {
     const { repo, s } = repoEnMemoria();
     const { canal, enviados } = canalFalso();
     const srv = crear(() => fuentes({ sonda: async () => { throw new SinDesk2(); } }), repo, canal);
-    for (let i = 0; i < 3; i++) await srv.ejecutar('boton', null);
+    for (let i = 0; i < 3; i++) await srv.ejecutar('sincronizacion', null);
     expect(enviados).toHaveLength(0);
     expect(s.incidente?.fallosProgramados ?? 0).toBe(0);
   });
@@ -463,7 +463,7 @@ describe('robustez del candado y del registro', () => {
     const { repo } = repoEnMemoria();
     const roto: RepoEquipos = { ...repo, terminarBien: async () => { throw new Error('pg caído'); }, terminarMal: async () => { throw new Error('pg caído'); } };
     const srv = crear(() => fuentes(), roto);
-    expect(await srv.ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'interno: no se pudo guardar' });
+    expect(await srv.ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'interno: no se pudo guardar' });
     expect(srv.actualizando()).toBe(false);
   });
 
@@ -472,7 +472,7 @@ describe('robustez del candado y del registro', () => {
     const roto: RepoEquipos = { ...repo, leerCaches: async () => { throw Object.assign(new Error('pg: host secreto'), { code: 'ECONNRESET' }); } };
     const logs: string[] = [];
     const srv = crear(() => fuentes(), roto, canalFalso().canal, { log: (t) => { logs.push(t); } });
-    expect(await srv.ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'interno: error inesperado' });
+    expect(await srv.ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'interno: error inesperado' });
     const texto = logs.join('\n');
     expect(texto).toMatch(/Error/);
     expect(texto).toMatch(/ECONNRESET/);
@@ -485,7 +485,7 @@ describe('robustez del candado y del registro', () => {
     const sin: unknown[] = [];
     const h = (e: unknown) => sin.push(e);
     process.on('unhandledRejection', h);
-    expect(await srv.lanzar('boton', null)).toBe('iniciada');
+    expect(await srv.lanzar('sincronizacion', null)).toBe('iniciada');
     await new Promise((r) => setTimeout(r, 20));
     process.off('unhandledRejection', h);
     expect(sin).toEqual([]);
@@ -496,7 +496,7 @@ describe('ilegibles', () => {
   it('tras añadir los PDF sin texto, siguen de más reciente a más antiguo', async () => {
     const { repo, s } = repoEnMemoria();
     const f = fuentes({ textoPdf: async (id) => { if (id === 'S2') throw new FalloArchivo(400); return ''; } });
-    await crear(() => f, repo).ejecutar('boton', null);
+    await crear(() => f, repo).ejecutar('sincronizacion', null);
     const d = (s.foto?.ilegibles ?? []).map((x) => x.d);
     expect(d).toEqual([...d].sort((a, b) => b.localeCompare(a)));
     expect(d.length).toBeGreaterThan(1);
@@ -513,7 +513,7 @@ describe('una remisión de entrada sin texto en la copia (A9 extendido)', () => 
     const { repo, s } = repoEnMemoria();
     const f = fuentes();
     f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']))(id);
-    const r = await crear(() => f, repo).ejecutar('boton', null);
+    const r = await crear(() => f, repo).ejecutar('sincronizacion', null);
     expect(r.estado).toBe('ok');
     expect(s.foto?.rows.map((x) => x.sn)).toContain('18A90001');
     expect(r.estado === 'ok' && r.avisos).toContain('Remisión de entrada 18A90001: Drive HTTP 400');
@@ -524,7 +524,7 @@ describe('una remisión de entrada sin texto en la copia (A9 extendido)', () => 
     const { repo } = repoEnMemoria();
     const f = fuentes();
     f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1']), null)(id);
-    const r = await crear(() => f, repo).ejecutar('boton', null);
+    const r = await crear(() => f, repo).ejecutar('sincronizacion', null);
     expect(r.estado === 'ok' && r.avisos).toContain('Remisión de entrada 18A90001: n8n todavía no envió su texto');
   });
 
@@ -532,9 +532,9 @@ describe('una remisión de entrada sin texto en la copia (A9 extendido)', () => 
     const { repo, s } = repoEnMemoria();
     const rotas = new Set(['E1']);
     const f = () => { const x = fuentes(); x.drive.remisionEntrada = async (id) => entradaRota(rotas)(id); return x; };
-    await crear(f, repo).ejecutar('boton', null);
+    await crear(f, repo).ejecutar('sincronizacion', null);
     rotas.clear();
-    await crear(f, repo).ejecutar('boton', null);
+    await crear(f, repo).ejecutar('sincronizacion', null);
     expect(s.cacheEnt?.E1).toBeDefined();
   });
 
@@ -543,7 +543,7 @@ describe('una remisión de entrada sin texto en la copia (A9 extendido)', () => 
     const f = fuentes();
     f.drive.entradas = async () => [{ id: 'E1', title: '261101 - CLIENTE A - 18A90001' }, { id: 'E3', title: '261102 - CLIENTE D - 18A90003' }];
     f.drive.remisionEntrada = async (id) => entradaRota(new Set(['E1', 'E3']), 403)(id);
-    expect(await crear(() => f, repo).ejecutar('boton', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo leer ninguna remisión de entrada (HTTP 403)' });
+    expect(await crear(() => f, repo).ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: 'drive: no se pudo leer ninguna remisión de entrada (HTTP 403)' });
     expect(s.foto).toBe(FOTO_VIEJA);
   });
 });

@@ -1,6 +1,18 @@
 # Equipos en taller — integración en el portal (diseño)
 
-Fecha: 10/11/2026. Estado: implementado y desplegado; **revisado el 10/11/2026 (Drive vía n8n)**. Plan original: `docs/superpowers/plans/2026-11-10-equipos-taller-portal.md`. Plan de la revisión: `docs/superpowers/plans/2026-11-10-equipos-taller-sync-n8n.md`.
+Fecha: 10/11/2026. Estado: implementado y desplegado; **revisado el 10/11/2026 (Drive vía n8n)** y **el 11/11/2026 (se actualiza sola cada hora)**. Plan original: `docs/superpowers/plans/2026-11-10-equipos-taller-portal.md`. Plan de la revisión: `docs/superpowers/plans/2026-11-10-equipos-taller-sync-n8n.md`.
+
+## Revisión del 11/11/2026: se actualiza sola cada hora
+
+**Por qué.** Con la copia de Drive llegando cada hora, el botón «Actualizar información» sobraba: para ver lo nuevo alguien tenía que acordarse de pulsarlo.
+
+**Qué cambia:**
+
+1. **Cada «fin» de n8n que cierra una pasada** (los dos 200: completa o con textos fallidos) lanza una corrida con un origen nuevo, `sincronizacion` (migración 073, que conserva `boton` en el CHECK por las filas viejas). hub-api responde a n8n primero y no espera a la corrida; un fallo al lanzarla va al log, sin detalles, y a Sentry. Si ya hay una en curso (la de las 06:30), se omite y lo dice el log. Un «fin» con 404 o 409 no lanza nada.
+2. **Se retiran** el botón, el método `actualizar()` del cliente y la ruta `POST /api/equipos-taller/actualizar` (ahora 404). Mientras corre una corrida, la cabecera dice «Actualizando…» como texto y la pantalla consulta cada 3 s; al terminar, pide los datos una vez más.
+3. **Los textos** que mandaban a pulsar el botón (pantalla sin datos, ilegibles y el correo de la alerta) dicen ahora que se actualiza sola cada hora.
+
+**No cambian** la corrida diaria (`programada`, 06:30), las reglas de los incidentes (§5.2: solo las programadas suman y avisan; una corrida `sincronizacion` fallida abre el incidente como lo hacía el botón, y una buena lo cierra), el núcleo, los ajustes ni los flujos de n8n. Las menciones al botón en el resto de este documento son de antes de esta revisión.
 
 ## Revisión del 10/11/2026: Drive vía n8n
 

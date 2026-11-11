@@ -45,7 +45,7 @@ export function correoAlerta(d: { causa: string; fallosProgramados: number; foto
       'La actualización diaria de «Equipos en taller» ha fallado ' + d.fallosProgramados + ' veces seguidas.',
       'Motivo de la última: ' + d.causa + '.',
       desde ? 'La pantalla sigue mostrando los datos del ' + desde + '.' : 'Todavía no hay ninguna foto buena.',
-      'Cuando se resuelva, basta pulsar «Actualizar información» en el portal. Este aviso no se repite mientras dure el incidente.',
+      'Cuando se resuelva, la pantalla se actualiza sola en la siguiente sincronización (cada hora). Este aviso no se repite mientras dure el incidente.',
     ].join('\n\n'),
   };
 }

@@ -9,7 +9,14 @@ import type { Ajuste, Foto } from './nucleo/tipos.js';
 /** Id de la app en `portal.user_apps` y en el JWT. */
 export const APP_ID = 'equipos-taller';
 
-export type OrigenCorrida = 'programada' | 'boton';
+/**
+ * Quién lanzó la corrida:
+ *   · 'programada': la diaria (programador.ts). Solo esta cuenta para los incidentes (incidente.ts).
+ *   · 'sincronizacion': la que lanza cada «fin» de una pasada de n8n, cada hora (router-sync.ts).
+ *   · 'boton': el botón «Actualizar información», retirado el 11/11/2026. Ya no se lanza, pero
+ *     quedan filas con este origen en `portal.equipos_ejecucion` (migración 073).
+ */
+export type OrigenCorrida = 'programada' | 'sincronizacion' | 'boton';
 
 /** Causa de una corrida cuando la última sincronización completa de n8n es demasiado vieja (la escribe servicio.ts). */
 export const CAUSA_SYNC_ATRASADA = 'drive: sincronización de n8n atrasada';

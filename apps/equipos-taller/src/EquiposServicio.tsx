@@ -3,7 +3,8 @@
 // botones que la página de Claude); los datos vienen de /api/equipos-taller. Añade tres
 // cosas (§3.2 del diseño): el aviso de foto vieja, el panel de llaves (solo admin) y los
 // botones de ajuste ocultos para quien no tenga la llave «edita ajustes». El servidor
-// vuelve a comprobar cada llave: aquí solo se ocultan botones.
+// vuelve a comprobar cada llave: aquí solo se ocultan botones. Y quita uno: el de
+// «Actualizar información» (11/11/2026), porque cada sincronización de n8n lanza la corrida.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, avisoFoto, claveFila, claveIlegible, dias, enlaceArchivo, enlaceCarpeta,
@@ -21,6 +22,8 @@ const TONOS = [
 const enlace = 'text-sky-700 underline underline-offset-2 hover:text-sky-900';
 const boton = 'mr-1.5 mt-1.5 rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] hover:bg-slate-50 disabled:opacity-50';
 const fmt = (d: string) => (d ? new Date(d).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '');
+/** Sin botón para actualizar: lo dicen los textos que antes mandaban a pulsarlo. */
+const SOLA = 'Se actualiza sola cada hora, cuando termina la sincronización con n8n.';
 const A = ({ href, children }: { href: string; children: ReactNode }) => (
   <a className={enlace} href={href} target="_blank" rel="noopener noreferrer">{children}</a>
 );
@@ -46,20 +49,22 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
     catch (e) { setAviso('No se pudo cargar: ' + (e as Error).message); }
   }, [api]);
   useEffect(() => { void cargar(); }, [cargar]);
-  // Mientras hay una corrida en curso (desde aquí o la programada), se consulta cada 3 s.
+  // No hay botón: la pantalla se actualiza sola con la corrida de cada sincronización de n8n
+  // (cada hora) y con la diaria. Mientras hay una en curso, se consulta cada 3 s.
   useEffect(() => {
     if (!datos?.actualizando) return;
     const t = setInterval(() => void cargar(), 3000);
     return () => clearInterval(t);
   }, [datos?.actualizando, cargar]);
 
-  // Al terminar la corrida se retira el «Actualizando…» (los demás avisos se quedan).
+  // Al terminar la corrida se piden los datos una vez más: la consulta que vio el final pudo
+  // leer la foto justo antes de que se guardara la nueva.
   const estabaActualizando = useRef(false);
   useEffect(() => {
     const ahora = datos?.actualizando === true;
-    if (estabaActualizando.current && !ahora) setAviso((a) => (a.startsWith('Actualizando…') ? '' : a));
+    if (estabaActualizando.current && !ahora) void cargar();
     estabaActualizando.current = ahora;
-  }, [datos?.actualizando]);
+  }, [datos?.actualizando, cargar]);
 
   const ajustes = datos?.ajustes || {};
   const snap = datos?.snap || null;
@@ -86,13 +91,6 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   };
   const fotoVieja = datos ? avisoFoto(datos, fmt) : null;
 
-  async function actualizar() {
-    try {
-      const e = await api.actualizar();
-      setAviso(e === 'ocupado' ? 'Ya hay una actualización en curso.' : 'Actualizando… (la primera vez puede tardar varios minutos)');
-      await cargar();
-    } catch (e) { setAviso('No se pudo actualizar: ' + (e as Error).message); }
-  }
   async function guardar(clave: string, tipo: Ajuste['t'], m = '') {
     try {
       const a = await api.guardarAjuste(clave, tipo, m);
@@ -180,7 +178,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   }
 
   function ilegibles() {
-    if (snap && !snap.ilegibles) return <p className="mt-6 text-sm text-slate-500">Pulsa «Actualizar información» para revisar las remisiones escaneadas ilegibles.</p>;
+    if (snap && !snap.ilegibles) return <p className="mt-6 text-sm text-slate-500">Las remisiones escaneadas ilegibles saldrán aquí en la próxima actualización. {SOLA}</p>;
     const todas = snap?.ilegibles || [];
     const hechas = todas.filter((x) => ajustes[claveIlegible(x)]);
     const tabla = (a: Ilegible[]) => (
@@ -230,10 +228,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
           <h1 className="text-xl font-semibold">Equipos en taller</h1>
           <p className="text-sm text-slate-600">{snap ? <>Última actualización: <b>{fmt(snap.at)}</b></> : 'Sin actualizar todavía'}</p>
         </div>
-        <button onClick={() => void actualizar()} disabled={!datos || datos.actualizando || !datos.configurado}
-          className="rounded bg-sky-700 px-4 py-2 font-medium text-white hover:bg-sky-800 disabled:opacity-50">
-          {datos?.actualizando ? 'Actualizando…' : 'Actualizar información'}
-        </button>
+        {datos?.actualizando ? <p className="text-sm font-medium text-sky-800">Actualizando…</p> : null}
       </header>
       {fotoVieja ? (
         <p role="alert" className={'mb-2 rounded px-3 py-2 text-sm ' + (fotoVieja.destacado ? 'border border-red-300 bg-red-50 font-semibold text-red-800' : 'bg-amber-50 text-amber-900')}>
@@ -265,7 +260,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
       <p className="mb-3 text-sm text-slate-600">{v.ayuda}</p>
 
       {!snap ? (
-        <p className="py-8 text-slate-500">Aún no hay datos. Pulsa «Actualizar información» para consultar Drive y Desk 2.0.</p>
+        <p className="py-8 text-slate-500">Aún no hay datos. {SOLA}</p>
       ) : lista.length ? (
         <div className="overflow-x-auto rounded border border-slate-200 bg-white">
           <table className="w-full text-left">

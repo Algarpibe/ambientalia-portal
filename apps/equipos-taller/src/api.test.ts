@@ -21,18 +21,20 @@ describe('apiEquipos', () => {
     expect(pedidos[0].init.headers).toMatchObject({ Authorization: 'Bearer t', 'Content-Type': 'application/json' });
     expect(JSON.parse(String(pedidos[0].init.body))).toEqual({ t: 'in', m: '' });
   });
-  it('409 al actualizar es «ocupado», no un error', async () => {
-    const { f } = falso({ ['POST ' + B + '/actualizar']: J({ estado: 'ocupado', message: 'Ya se está actualizando' }, 409) });
-    expect(await apiEquipos(B, f, cab).actualizar()).toBe('ocupado');
+  it('no tiene «actualizar»: el botón se retiró y la pantalla se actualiza sola', () => {
+    expect('actualizar' in apiEquipos(B, falso({}).f, cab)).toBe(false);
   });
-  it('202 al actualizar es «iniciada»', async () => {
-    const { f } = falso({ ['POST ' + B + '/actualizar']: J({ estado: 'iniciada' }, 202) });
-    expect(await apiEquipos(B, f, cab).actualizar()).toBe('iniciada');
-  });
-  it('un 503 o un 403 lanzan el mensaje del servidor', async () => {
-    const { f } = falso({ ['POST ' + B + '/actualizar']: J({ error: 'sin_configurar', message: 'Falta la primera sincronización con n8n' }, 503), ['GET ' + B + '/llaves']: J({ error: 'forbidden' }, 403) });
-    await expect(apiEquipos(B, f, cab).actualizar()).rejects.toThrow('Falta la primera sincronización con n8n');
+  it('un 403 lanza el mensaje del servidor', async () => {
+    const { f } = falso({ ['GET ' + B + '/llaves']: J({ error: 'forbidden' }, 403) });
     await expect(apiEquipos(B, f, cab).llaves()).rejects.toThrow('forbidden');
+  });
+  it('un 409 ya es un error como otro 4xx, y un 503 no enseña su cuerpo (solo los daba el botón)', async () => {
+    const { f } = falso({
+      ['PUT ' + B + '/ajustes/x']: J({ error: 'conflicto', message: 'Texto fijo del servidor' }, 409),
+      ['GET ' + B]: J({ error: 'x', message: 'detalle: password=hunter2' }, 503),
+    });
+    await expect(apiEquipos(B, f, cab).guardarAjuste('x', 'in')).rejects.toThrow('Texto fijo del servidor');
+    await expect(apiEquipos(B, f, cab).estado()).rejects.toThrow('Error 503');
   });
   it('un 400 o un 404 lanzan el texto fijo del servidor', async () => {
     const { f } = falso({

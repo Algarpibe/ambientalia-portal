@@ -9,7 +9,7 @@
  *     disparo (no un intervalo de 24 h: así no deriva); no retiene el proceso;
  *   · SIN corrida de recuperación al arrancar: un despliegue después de la hora no
  *     lanza nada (contaría como corrida programada para el incidente). Para eso
- *     está el botón.
+ *     está la corrida de cada hora, la del «fin» de n8n (router-sync.ts).
  *   · un fallo se apunta y no para nada. Dos corridas a la vez las impide el
  *     candado de la base.
  */

@@ -1,7 +1,7 @@
 /**
  * Una corrida de «Equipos en taller» (§5.1 del diseño, con la revisión del 10/11/2026):
- *   1. Candado. Sin ninguna sincronización completa de n8n, «sin configurar» (503) y no
- *      se registra nada. Si la hay, la corrida se inserta «en curso»; si choca, «ocupado» (409).
+ *   1. Candado. Sin ninguna sincronización completa de n8n, «sin configurar» y no se
+ *      registra nada. Si la hay, la corrida se inserta «en curso»; si choca, «ocupado».
  *   2. Desk 2.0: una sonda antes de nada. Si falla → «desk2: <motivo>».
  *   3. Frescura: si la última pasada completa de n8n tiene más de `maxHorasSync` horas
  *      → CAUSA_SYNC_ATRASADA (D5: nunca una foto con datos incompletos). Si la última pasada
@@ -64,7 +64,7 @@ export interface ServicioEquipos {
   configurado(): Promise<boolean>;
   /** Hay una corrida de este proceso en marcha. */
   actualizando(): boolean;
-  /** Para la ruta POST: empieza la corrida y no espera. */
+  /** Para el «fin» de cada pasada de n8n (router.ts, origen 'sincronizacion'): empieza la corrida y no espera. */
   lanzar(origen: OrigenCorrida, userId: string | null): Promise<'iniciada' | 'ocupado' | 'sin_configurar'>;
   /** Para el programador: corre y espera a que termine. */
   ejecutar(origen: OrigenCorrida, userId: string | null): Promise<ResultadoCorrida>;

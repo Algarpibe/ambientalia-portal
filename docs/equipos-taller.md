@@ -1,10 +1,12 @@
 # Equipos en taller
 
-Qué equipos están **físicamente** dentro del taller de servicio técnico, ordenados por fecha de llegada. Cruza las remisiones de entrada y de salida de Google Drive (la copia que manda n8n cada hora) con los tickets de Desk 2.0 y sus comentarios. Diseño: `docs/superpowers/specs/2026-11-10-equipos-taller-portal-design.md`, con la revisión «Drive vía n8n» del 10/11/2026.
+Qué equipos están **físicamente** dentro del taller de servicio técnico, ordenados por fecha de llegada. Cruza las remisiones de entrada y de salida de Google Drive (la copia que manda n8n cada hora) con los tickets de Desk 2.0 y sus comentarios. Diseño: `docs/superpowers/specs/2026-11-10-equipos-taller-portal-design.md`, con la revisión «Drive vía n8n» del 10/11/2026 y la de «se actualiza sola» del 11/11/2026.
+
+**No hay botón para actualizar.** La pantalla se actualiza sola: cada vez que n8n termina una pasada de la copia de Drive (cada hora), hub-api lanza una corrida. Además está la diaria de las 06:30.
 
 - **App del portal:** `equipos-taller` (ruta `/equipos-taller`, sub-app `apps/equipos-taller`). Aparece en la barra lateral (`apps/portal/src/lib/apps.ts`) y en Aplicaciones; **no** tiene tarjeta en el Dashboard.
 - **Motor:** `apps/hub-api/src/equipos/`. Las reglas viven SOLO en `nucleo/` (puro, sin E/S); la pantalla lo importa por ruta relativa.
-- **Datos:** `portal.equipos_*` (migraciones 071 y 072). Para psql: `portal.equipos_v_equipos` y `portal.equipos_v_remisiones_ilegibles`.
+- **Datos:** `portal.equipos_*` (migraciones 071, 072 y 073). Para psql: `portal.equipos_v_equipos` y `portal.equipos_v_remisiones_ilegibles`.
 
 ## De dónde sale cada dato
 
@@ -28,9 +30,9 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 ## Una corrida
 
 1. **Candado.**
-   - Sin ninguna sincronización completa de n8n, la respuesta es «sin configurar» (503) y no se registra nada.
-   - Si no, se inserta la corrida «en curso» (`portal.equipos_ejecucion`). Si ya hay otra: 409 «Ya se está actualizando».
-   - Una corrida colgada más de 180 min se da por abandonada. Hasta entonces, si el proceso murió a mitad (caída o despliegue), el botón responde 409. El indicador «actualizando» caduca con esos mismos 180 min.
+   - Sin ninguna sincronización completa de n8n, la corrida se omite («sin configurar») y no se registra nada.
+   - Si no, se inserta la corrida «en curso» (`portal.equipos_ejecucion`). Si ya hay otra, se omite («ocupado»): pasa, por ejemplo, si llega un «fin» de n8n mientras corre la de las 06:30.
+   - Una corrida colgada más de 180 min se da por abandonada. Hasta entonces, si el proceso murió a mitad (caída o despliegue), las corridas nuevas se omiten. El indicador «actualizando» caduca con esos mismos 180 min.
 2. **Desk 2.0:** una sonda de `desk.tickets` y `desk.conversations`. Si falla → `desk2: <motivo>`.
 3. **Frescura de la copia:** si la última pasada completa de n8n tiene más de `EQUIPOS_SYNC_MAX_HORAS` (6 h por defecto) → `drive: sincronización de n8n atrasada`. Si, además, la última pasada **cerrada** terminó con `motivo = 'textos_fallidos'`, la causa es `drive: n8n no pudo leer los textos de Drive (OCR)`.
 4. **Copia de Drive y núcleo:** se leen los listados de la copia, el OCR de **todos** los PDF y las remisiones de entrada que no están en la caché `ent`. Luego, los tickets por serial y los comentarios de los equipos que siguen adentro.
@@ -46,7 +48,7 @@ Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última bue
 
 **Aviso de foto vieja en pantalla:**
 - Se calcula con la última corrida **terminada**, no con la que está en curso, para que no desaparezca mientras corre.
-- Sin ninguna sincronización completa, dice «Falta la primera sincronización con n8n» y el botón «Actualizar información» queda desactivado.
+- Sin ninguna sincronización completa, dice «Falta la primera sincronización con n8n».
 - Con la copia atrasada dice «La copia de Google Drive (n8n) está atrasada; datos del …».
 - Con la causa de textos fallidos dice «n8n no pudo leer las remisiones de Drive; datos del …».
 - El detalle del último error de la alerta (`alertaUltimoError`) solo lo reciben los admin.
@@ -70,7 +72,7 @@ Una corrida fallida **nunca** toca la foto: la pantalla sigue con la última bue
 
 ### Si el servidor cayó o se redesplegó a mitad de una corrida
 
-La corrida queda «en curso» en la base y nadie la cierra. Hasta que pasan los 180 min, el botón responde 409 y la pantalla sigue en «Actualizando…».
+La corrida queda «en curso» en la base y nadie la cierra. Hasta que pasan los 180 min, las corridas nuevas (la de cada hora y la diaria) se omiten y la pantalla sigue en «Actualizando…».
 
 Para liberarla antes, el dueño puede ejecutar esto en psql. Solo marca como abandonadas las corridas que siguen «en curso» y llevan más de 10 minutos (es el mismo `UPDATE` que usa `repo.ts`, con 10 en vez de 180). Ejecútalo **solo si no hay una corrida realmente en marcha**:
 
@@ -86,20 +88,25 @@ La foto no se toca y la corrida abandonada no cuenta para los incidentes.
 - **Límite de peticiones de hub-api.** `/api/` admite 60 peticiones por minuto y por IP, y todas las de n8n salen de la misma. Por eso el flujo hace una pausa de 1 s antes de cada envío de texto y reintenta los 429.
 - **Pool de Desk 2.0.** El pool tiene 2 conexiones y las comparte con Trazabilidad. Si aparece `desk2: tiempo agotado`, esa es la causa más probable.
 
-## Corrida diaria e incidentes
+## Corrida de cada hora, corrida diaria e incidentes
 
-- **Hora:** las `EQUIPOS_HORA_DIARIA` de Colombia (06:30 por defecto). No hay corrida de recuperación al arrancar: si un despliegue cae después de la hora, se usa el botón.
+- **Cada hora (origen `sincronizacion`):** cada «fin» que cierra una pasada de n8n (los dos 200: completa o con textos fallidos) lanza una corrida.
+  - hub-api responde a n8n **antes** y no espera a la corrida: ni lo que tarde ni un fallo cambian la respuesta. Un fallo al lanzarla va al log («no se pudo lanzar la corrida», sin detalles) y a Sentry.
+  - Si ya hay una en curso (por ejemplo, la de las 06:30) o falta configurar, se omite y lo dice el log: «corrida tras la sincronización omitida (ya hay una en curso)» o «(falta configurar)».
+  - Un «fin» con 404 o 409 no lanza nada.
+- **Diaria (origen `programada`):** a las `EQUIPOS_HORA_DIARIA` de Colombia (06:30 por defecto). No hay corrida de recuperación al arrancar: si un despliegue cae después de la hora, la corrida de cada hora cubre el hueco.
 - **Programador:** se enciende siempre. Mientras no haya ninguna sincronización completa, cada corrida programada se omite (lo dice el log: «corrida programada omitida (falta configurar)») y no cuenta para los incidentes.
 - **Incidente:**
-  - Lo abre la primera corrida fallida tras una buena.
-  - Solo las corridas **programadas** suman fallos. Con 2 seguidos se envía **una** alerta.
+  - Lo abre la primera corrida fallida tras una buena, sea programada o de cada hora.
+  - Solo las corridas **programadas** suman fallos. Con 2 seguidos se envía **una** alerta. Las de cada hora nunca suman ni avisan.
   - Si el envío falla, se guarda el error (`alerta_ultimo_error`) y se reintenta en la siguiente programada.
-  - Una corrida buena lo cierra.
+  - Una corrida buena lo cierra, sea programada o de cada hora.
   - Si n8n deja de sincronizar, las corridas programadas fallan por copia atrasada y, a la segunda, sale la alerta.
 - **Destinatarios:** solo los usuarios **activos** que sean admin o tengan la app, **y** tengan la llave «recibe alertas». Si no hay ninguno, `EQUIPOS_ALERTA_RESERVA` (por defecto comercial@ambientalia.com.co). Solo direcciones `@ambientalia.com.co`.
 
 ```sql
--- Últimas corridas y el incidente abierto
+-- Últimas corridas y el incidente abierto. origen: 'sincronizacion' (cada hora), 'programada' (la diaria)
+-- o 'boton' (filas de antes del 11/11/2026, cuando había botón).
 SELECT id, origen, inicio, fin, ok, causa FROM portal.equipos_ejecucion ORDER BY id DESC LIMIT 10;
 SELECT * FROM portal.equipos_incidente WHERE cerrado_en IS NULL;
 ```
@@ -110,11 +117,13 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 
 `RETIRADOS_FIJOS` está **vacío a propósito**. Tras el despliegue hay un caso conocido que debe volver a marcarse a mano con «Marcar retirado».
 
+**Sin botón «Actualizar información»** (retirado el 11/11/2026): la pantalla se actualiza sola con la corrida de cada hora. Mientras corre una corrida, la cabecera dice «Actualizando…» (texto, no botón) y la pantalla consulta cada 3 s hasta que termina; entonces pide los datos una vez más. Sin datos todavía, dice «Se actualiza sola cada hora, cuando termina la sincronización con n8n.».
+
 ## Permisos
 
 | Acción | Quién |
 |---|---|
-| Abrir, filtrar, «Actualizar información» | Quien tenga la app `equipos-taller`, y los admin. |
+| Abrir y filtrar | Quien tenga la app `equipos-taller`, y los admin. |
 | Ajustes manuales («Sigue en taller», «Confirmar salida», «Marcar retirado», «Deshacer ajuste», «Ya revisada») | La llave `edita_ajustes`, o ser admin. |
 | Gestionar las llaves (Ajustes → «Equipos en taller · Llaves») | Solo los admin. Las llaves solo se pueden dar a usuarios **activos** que tengan la app (o sean admin). |
 | Recibir la alerta | La llave `recibe_alertas` (los admin no la tienen por defecto), con el usuario activo y con la app o admin. |
@@ -215,8 +224,9 @@ El usuario completa tres cosas:
 
 - **`conteos`:** los archivos listados en cada carpeta. Lleva las tres claves, con enteros ≥ 0, y ninguna más.
 - **Respuestas:**
-  - `200 { "ok": true, "completa": true }`: la pasada cuenta como **completa**. La corrida diaria la usa y mide desde ella la frescura.
+  - `200 { "ok": true, "completa": true }`: la pasada cuenta como **completa**. Las corridas la usan y miden desde ella la frescura.
   - `200 { "ok": true, "completa": false, "motivo": "textos_fallidos" }`: la pasada se cerró, pero **no** cuenta como fresca (regla de los textos fallidos, arriba). Para n8n es como el otro 200: no hay que hacer nada distinto. Si sigue así más de `EQUIPOS_SYNC_MAX_HORAS`, las corridas fallan con `drive: n8n no pudo leer los textos de Drive (OCR)` y salta la alerta.
+  - Con cualquiera de los dos 200, hub-api lanza después la corrida de cada hora (origen `sincronizacion`). n8n no tiene que hacer nada: la respuesta no la espera.
   - `404 { "error": "pasada_desconocida" }`.
   - `409 { "error": "pasada_cerrada" }`.
   - `409 { "error": "pasada_incompleta" }`: falta el listado de alguna carpeta.

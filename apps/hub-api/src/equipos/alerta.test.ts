@@ -23,6 +23,11 @@ describe('correoAlerta', () => {
     expect(c.cuerpo).toMatch(/drive: HTTP 403/);
   });
   it('sin foto buena todavía, lo dice', () => expect(correoAlerta({ causa: 'desk2: sin conexión', fallosProgramados: 2, fotoBuena: null }).cuerpo).toMatch(/Todavía no hay ninguna foto buena/));
+  it('no manda a pulsar ningún botón: la pantalla se actualiza sola con la sincronización de cada hora', () => {
+    const c = correoAlerta({ causa: 'drive: HTTP 403', fallosProgramados: 2, fotoBuena: null });
+    expect(c.cuerpo).toMatch(/Cuando se resuelva, la pantalla se actualiza sola en la siguiente sincronización \(cada hora\)\./);
+    expect(c.cuerpo).not.toMatch(/Actualizar información|pulsar/);
+  });
 });
 
 describe('crearCanalAlerta', () => {

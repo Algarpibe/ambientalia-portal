@@ -16,13 +16,19 @@ describe('decidirIncidente', () => {
   it('el 2.º fallo programado seguido avisa', () =>
     expect(decidirIncidente({ origen: 'programada', ok: false }, abierto(1))).toEqual({ accion: 'contar', fallosProgramados: 2, enviarAlerta: true }));
 
-  it('las corridas del botón no cuentan ni avisan, pero sí abren', () => {
-    expect(decidirIncidente({ origen: 'boton', ok: false }, null)).toEqual({ accion: 'abrir', fallosProgramados: 0, enviarAlerta: false });
-    expect(decidirIncidente({ origen: 'boton', ok: false }, abierto(1))).toEqual({ accion: 'contar', fallosProgramados: 1, enviarAlerta: false });
-  });
+  // «sincronizacion»: la que lanza cada «fin» de n8n (cada hora). «boton»: el botón ya retirado (quedan filas viejas).
+  describe.each(['sincronizacion', 'boton'] as const)('corridas «%s»', (origen) => {
+    it('no cuentan ni avisan, pero sí abren', () => {
+      expect(decidirIncidente({ origen, ok: false }, null)).toEqual({ accion: 'abrir', fallosProgramados: 0, enviarAlerta: false });
+      expect(decidirIncidente({ origen, ok: false }, abierto(1))).toEqual({ accion: 'contar', fallosProgramados: 1, enviarAlerta: false });
+    });
 
-  it('una corrida del botón con el incidente en 2 fallos y sin alerta enviada no avisa', () =>
-    expect(decidirIncidente({ origen: 'boton', ok: false }, abierto(2, null))).toEqual({ accion: 'contar', fallosProgramados: 2, enviarAlerta: false }));
+    it('con el incidente en 2 fallos y sin alerta enviada, no avisan', () =>
+      expect(decidirIncidente({ origen, ok: false }, abierto(2, null))).toEqual({ accion: 'contar', fallosProgramados: 2, enviarAlerta: false }));
+
+    it('una buena cierra el incidente', () =>
+      expect(decidirIncidente({ origen, ok: true }, abierto(3, '2026-11-10T11:30:00.000Z')).accion).toBe('cerrar'));
+  });
 
   it('se avisa una sola vez por incidente', () =>
     expect(decidirIncidente({ origen: 'programada', ok: false }, abierto(2, '2026-11-10T11:30:00.000Z'))).toEqual({ accion: 'contar', fallosProgramados: 3, enviarAlerta: false }));
@@ -30,10 +36,8 @@ describe('decidirIncidente', () => {
   it('si el webhook falló (sin alerta_enviada_en), la siguiente programada fallida lo reintenta', () =>
     expect(decidirIncidente({ origen: 'programada', ok: false }, abierto(2))).toEqual({ accion: 'contar', fallosProgramados: 3, enviarAlerta: true }));
 
-  it('una corrida buena cierra el incidente, sea programada o del botón', () => {
-    expect(decidirIncidente({ origen: 'boton', ok: true }, abierto(3, '2026-11-10T11:30:00.000Z')).accion).toBe('cerrar');
-    expect(decidirIncidente({ origen: 'programada', ok: true }, abierto(1)).accion).toBe('cerrar');
-  });
+  it('una corrida programada buena cierra el incidente', () =>
+    expect(decidirIncidente({ origen: 'programada', ok: true }, abierto(1)).accion).toBe('cerrar'));
 
   it('tras cerrarse, un fallo nuevo abre otro incidente desde cero y puede volver a avisar', () => {
     expect(decidirIncidente({ origen: 'programada', ok: false }, null)).toEqual({ accion: 'abrir', fallosProgramados: 1, enviarAlerta: false });

@@ -11,6 +11,8 @@
  *
  * «fin» con 200 siempre cierra la pasada. `completa: false` (con `motivo: 'textos_fallidos'`)
  * dice que no cuenta como fresca: los textos de una carpeta están fallando (repo-sync.ts).
+ * Tras ese 200 se llama a `alCerrarPasada` (en hub-api, la corrida «sincronizacion»: así la
+ * pantalla se actualiza sola cada hora), DESPUÉS de responder y sin esperarla.
  *
  * 400 si el cuerpo no vale, con un mensaje fijo que nunca repite lo recibido. Un error
  * nuestro es un 500 genérico y va a Sentry.
@@ -23,8 +25,30 @@ import { validarFin, validarListado, validarTexto } from './sync.js';
 
 const tokenSync = requireCronToken({ env: 'EQUIPOS_SYNC_TOKEN', header: 'X-Equipos-Sync-Token' });
 
-export function createEquiposSyncRouter(sync: RepoSync): Router {
+/** Para el registro: el nombre del error, NUNCA su mensaje (puede llevar datos de la base). */
+const nombreError = (e: unknown): string => String((e as { name?: unknown } | null)?.name ?? 'desconocido').slice(0, 40);
+
+export interface OpcionesSync {
+  /**
+   * Se llama cuando un «fin» cierra la pasada (los dos 200). No se espera: n8n ya tiene su
+   * respuesta, y ni lo que tarde ni un fallo la tocan. Un fallo va al log (sin su mensaje) y a Sentry.
+   */
+  alCerrarPasada?: () => unknown;
+}
+
+export function createEquiposSyncRouter(sync: RepoSync, opciones: OpcionesSync = {}): Router {
   const router = Router();
+  const trasCerrar = () => {
+    const lanzar = opciones.alCerrarPasada;
+    if (!lanzar) return;
+    // En una promesa: ni una excepción síncrona sale de aquí.
+    Promise.resolve()
+      .then(() => lanzar())
+      .catch((e: unknown) => {
+        console.error('equipos_sync_fin: no se pudo lanzar la corrida (' + nombreError(e) + ')');
+        captureError(e, { endpoint: 'equipos_sync_fin_corrida' });
+      });
+  };
   const ruta = (ctx: string, fn: (req: Request, res: Response) => Promise<void>) => async (req: Request, res: Response) => {
     try {
       await fn(req, res);
@@ -80,6 +104,8 @@ export function createEquiposSyncRouter(sync: RepoSync): Router {
     else if (r === 'ya_cerrada') res.status(409).json(pasadaCerrada);
     else if (r === 'tardia') res.status(409).json({ error: 'pasada_tardia', message: 'La pasada tardó demasiado y se descartó; empiece otra' });
     else res.status(409).json({ error: 'pasada_incompleta', message: 'Falta el listado de alguna carpeta' });
+    // Ya respondido: la pasada se cerró con esta llamada, así que toca la corrida de cada hora.
+    if (r === 'cerrada' || r === 'textos_fallidos') trasCerrar();
   }));
 
   return router;

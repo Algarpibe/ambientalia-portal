@@ -31,10 +31,13 @@ const sync = {
   },
 } as unknown as RepoSync;
 
+// Lo que se lanza al cerrar una pasada (en hub-api, la corrida «sincronizacion»: router.ts).
+let alCerrar: () => unknown;
+const lanzadas: string[] = [];
 const app = () => {
   const a = express();
   a.use(express.json({ limit: '2mb' })); // el mismo límite que hub-api (src/index.ts)
-  a.use('/api', createEquiposSyncRouter(sync));
+  a.use('/api', createEquiposSyncRouter(sync, { alCerrarPasada: () => { lanzadas.push('corrida'); return alCerrar(); } }));
   return a;
 };
 const B = '/api/equipos-taller/sync';
@@ -52,7 +55,11 @@ beforeEach(() => {
   cierre = 'cerrada';
   falla = false;
   llamadas.length = 0;
+  alCerrar = async () => 'iniciada';
+  lanzadas.length = 0;
+  vi.restoreAllMocks();
 });
+const unRato = () => new Promise((r) => setTimeout(r, 30));
 
 describe('token de máquina', () => {
   it('401 sin el token o con otro, en las tres rutas, sin tocar nada', async () => {
@@ -169,5 +176,55 @@ describe('POST /fin', () => {
 
   it('400 sin un conteo por carpeta', async () => {
     expect((await post('/fin', { pasada: '4711', conteos: { entradas: 1 } })).status).toBe(400);
+  });
+});
+
+describe('POST /fin: la corrida de cada hora', () => {
+  it('al cerrar la pasada (completa o con textos fallidos) lanza la corrida, una vez', async () => {
+    for (const c of ['cerrada', 'textos_fallidos'] as const) {
+      cierre = c;
+      lanzadas.length = 0;
+      expect((await post('/fin', FIN)).status).toBe(200);
+      await vi.waitFor(() => expect(lanzadas).toEqual(['corrida']));
+    }
+  });
+
+  it('con 404, 409 o 400 no lanza nada', async () => {
+    for (const c of ['desconocida', 'ya_cerrada', 'tardia', 'incompleta'] as const) {
+      cierre = c;
+      expect((await post('/fin', FIN)).status).toBeGreaterThanOrEqual(404);
+    }
+    expect((await post('/fin', { pasada: '4711' })).status).toBe(400);
+    await unRato();
+    expect(lanzadas).toEqual([]);
+  });
+
+  it('la respuesta a n8n no espera a la corrida', async () => {
+    alCerrar = () => new Promise(() => {}); // nunca termina
+    const r = await post('/fin', FIN);
+    expect([r.status, r.body]).toEqual([200, { ok: true, completa: true }]);
+  });
+
+  it('si lanzarla falla (rechazo o excepción), la respuesta no cambia y el log no lleva detalles', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const malo = new Error('connection to server at "db.interno" failed: password=secreto');
+    for (const f of [async () => { throw malo; }, () => { throw malo; }]) {
+      alCerrar = f;
+      err.mockClear();
+      const r = await post('/fin', FIN);
+      expect([r.status, r.body]).toEqual([200, { ok: true, completa: true }]);
+      await vi.waitFor(() => expect(err).toHaveBeenCalledTimes(1));
+      const texto = err.mock.calls.flat().map(String).join(' ');
+      expect(texto).toMatch(/no se pudo lanzar la corrida/);
+      expect(texto).not.toMatch(/secreto|db\.interno/);
+    }
+  });
+
+  it('sin alCerrarPasada, /fin responde igual', async () => {
+    const a = express();
+    a.use(express.json());
+    a.use('/api', createEquiposSyncRouter(sync));
+    const r = await request(a).post(B + '/fin').set('X-Equipos-Sync-Token', TOKEN).send(FIN);
+    expect([r.status, r.body]).toEqual([200, { ok: true, completa: true }]);
   });
 });

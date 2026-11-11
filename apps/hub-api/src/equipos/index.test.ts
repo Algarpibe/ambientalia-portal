@@ -65,15 +65,15 @@ describe('crearEquiposTaller: lo que conecta con la corrida', () => {
   it('la frescura usa EQUIPOS_SYNC_MAX_HORAS: una copia de hace 2 h vale con el máximo por defecto y falla con 1', async () => {
     callar();
     const conDefecto = crearEquiposTaller(hubFalso(haceHoras(2)).pool, desk2, leerConfig({}));
-    expect((await conDefecto.servicio.ejecutar('boton', null)).estado).toBe('ok');
+    expect((await conDefecto.servicio.ejecutar('sincronizacion', null)).estado).toBe('ok');
     const conUna = crearEquiposTaller(hubFalso(haceHoras(2)).pool, desk2, leerConfig({ EQUIPOS_SYNC_MAX_HORAS: '1' }));
-    expect(await conUna.servicio.ejecutar('boton', null)).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
+    expect(await conUna.servicio.ejecutar('sincronizacion', null)).toEqual({ estado: 'error', causa: CAUSA_SYNC_ATRASADA });
   });
 
   it('la copia de Drive se lee con la pasada de la última sincronización completa', async () => {
     callar();
     const { pool, consultas } = hubFalso(haceHoras(0));
-    expect((await crearEquiposTaller(pool, desk2, leerConfig({})).servicio.ejecutar('boton', null)).estado).toBe('ok');
+    expect((await crearEquiposTaller(pool, desk2, leerConfig({})).servicio.ejecutar('sincronizacion', null)).estado).toBe('ok');
     const deLaCopia = consultas.filter((c) => /FROM portal\.equipos_drive_archivos/.test(c.sql) && /equipos_sincronizacion WHERE pasada/.test(c.sql));
     expect(deLaCopia.map((c) => c.params)).toEqual([['entradas', '4711'], ['salidas_n8n', '4711'], ['salidas_escaneadas', '4711']]);
   });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // La pantalla con una API simulada: vistas, conteos, ilegibles en «Revisar», ajustes, el
-// aviso de foto vieja, los botones ocultos sin la llave y el panel de llaves. Todo ficticio.
+// aviso de foto vieja, «Actualizando…» sin botón, los botones ocultos sin la llave y el panel
+// de llaves. Todo ficticio.
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CAUSA_TEXTOS_FALLIDOS, EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
@@ -39,7 +40,6 @@ function apiFalsa(o: Partial<RespuestaEquipos> = {}) {
   const usuarios: UsuarioConLlaves[] = [{ userId: 'u1', nombre: 'Persona Uno', email: 'p1@ambientalia.com.co', esAdmin: false, editaAjustes: false, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null }];
   const api: ApiEquipos = {
     estado: async () => structuredClone(e),
-    actualizar: async () => { llamadas.push('actualizar'); e.actualizando = true; return 'iniciada'; },
     guardarAjuste: async (k, t: Ajuste['t'], m = '') => { llamadas.push('put ' + k + ' ' + t + ' ' + m); const a: AjusteFirmado = { t, m, at: '2026-11-09', usuario: 'yo', creadoEn: '' }; e.ajustes[k] = a; return a; },
     borrarAjuste: async (k) => { llamadas.push('delete ' + k); delete e.ajustes[k]; },
     llaves: async () => { llamadas.push('llaves'); return structuredClone(usuarios); },
@@ -108,33 +108,57 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     expect(chipYa(/En taller/).textContent).toBe('1En taller');
   });
 
-  it('«Actualizar información» lanza la actualización y se deshabilita mientras corre', async () => {
-    const { api, llamadas } = apiFalsa();
-    render(<EquiposServicio api={api} />);
-    const b = await screen.findByRole('button', { name: 'Actualizar información' });
-    await waitFor(() => expect((b as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(b);
-    await screen.findByRole('button', { name: 'Actualizando…' });
-    expect(llamadas).toEqual(['actualizar']);
+  it('no hay botón para actualizar: la pantalla se actualiza sola', async () => {
+    render(<EquiposServicio api={apiFalsa().api} />);
+    await screen.findByRole('navigation', { name: 'Vistas' });
+    expect(screen.queryByRole('button', { name: /Actualiz/ })).toBeNull();
+  });
+
+  it('sin foto todavía, dice que se actualiza sola cada hora', async () => {
+    render(<EquiposServicio api={apiFalsa({ snap: null }).api} />);
+    expect(await screen.findByText('Aún no hay datos. Se actualiza sola cada hora, cuando termina la sincronización con n8n.')).toBeTruthy();
+  });
+
+  it('una foto sin la lista de ilegibles dice que saldrá con la próxima actualización, sin mandar a pulsar nada', async () => {
+    const { snap } = estado();
+    render(<EquiposServicio api={apiFalsa({ snap: { ...snap!, ilegibles: undefined } }).api} />);
+    fireEvent.click(await chip(/Revisar/));
+    expect(screen.getByText('Las remisiones escaneadas ilegibles saldrán aquí en la próxima actualización. Se actualiza sola cada hora, cuando termina la sincronización con n8n.')).toBeTruthy();
+    expect(screen.queryByText(/Pulsa/)).toBeNull();
   });
 });
 
-describe('aviso de actualización', () => {
-  it('«Actualizando…» desaparece cuando la corrida termina', async () => {
+describe('actualización en curso (la de cada hora o la diaria)', () => {
+  it('la cabecera dice «Actualizando…» como texto, no como botón, y desaparece cuando la corrida termina', async () => {
     const { api } = apiFalsa();
-    let activa = false;
+    let activa = true;
     const base = api.estado;
     api.estado = async () => ({ ...(await base()), actualizando: activa });
-    api.actualizar = async () => { activa = true; return 'iniciada'; };
     render(<EquiposServicio api={api} />);
-    const b = await screen.findByRole('button', { name: 'Actualizar información' });
-    await waitFor(() => expect((b as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(b);
-    await screen.findByText(/^Actualizando… \(la primera vez/);
-    await screen.findByRole('button', { name: 'Actualizando…' });
+    expect(await screen.findByText('Actualizando…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Actualiz/ })).toBeNull();
     activa = false;
-    await waitFor(() => expect(screen.queryByText(/^Actualizando… \(la primera vez/)).toBeNull(), { timeout: 6000 });
-    expect(screen.getByRole('button', { name: 'Actualizar información' })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Actualizando…')).toBeNull(), { timeout: 6000 });
+  }, 10000);
+
+  it('al terminar vuelve a pedir los datos: muestra la foto nueva aunque la última consulta aún trajera la vieja', async () => {
+    const { api } = apiFalsa();
+    const base = api.estado;
+    let termino = false;
+    let tras = 0;
+    api.estado = async () => {
+      const e = await base();
+      if (!termino) return { ...e, actualizando: true };
+      // La primera respuesta tras terminar aún trae la foto vieja (se leyó justo antes del cierre).
+      if (tras++ === 0) return { ...e, actualizando: false };
+      return { ...e, actualizando: false, snap: { ...e.snap!, rows: [...e.snap!.rows, fila('18A90009', '2026-10-01', EST.TALLER)] } };
+    };
+    render(<EquiposServicio api={api} />);
+    await screen.findByText('Actualizando…');
+    expect((await chip(/En taller/)).textContent).toBe('1En taller');
+    termino = true;
+    await waitFor(() => expect(chipYa(/En taller/).textContent).toBe('2En taller'), { timeout: 6000 });
+    expect(screen.queryByText('Actualizando…')).toBeNull();
   }, 10000);
 });
 
@@ -145,7 +169,6 @@ describe('lo nuevo en el portal', () => {
     expect(screen.queryByRole('button', { name: 'Sigue en taller' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Marcar retirado' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Ya revisada' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Actualizar información' })).toBeTruthy(); // actualizar sí puede
   });
 
   it('si la última corrida falló, avisa de qué y de cuándo son los datos', async () => {
@@ -167,10 +190,9 @@ describe('lo nuevo en el portal', () => {
     expect(a.className).toMatch(/font-semibold/);
   });
 
-  it('sin configurar: lo dice y el botón queda desactivado', async () => {
+  it('sin configurar: lo dice', async () => {
     render(<EquiposServicio api={apiFalsa({ configurado: false }).api} />);
     expect((await screen.findByRole('alert')).textContent).toBe('Falta la primera sincronización con n8n');
-    expect((screen.getByRole('button', { name: 'Actualizar información' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('el panel de llaves ya no está en esta pantalla (vive en Ajustes), ni para un admin', async () => {

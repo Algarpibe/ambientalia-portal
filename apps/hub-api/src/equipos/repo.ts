@@ -20,8 +20,8 @@ type Fila = Record<string, any>;
 
 /**
  * Una corrida que lleva más de esto «en curso» se da por abandonada (el proceso cayó a mitad).
- * Consecuencias: tras una caída o un redeploy a mitad de corrida, el botón responde 409
- * («ya hay una corrida») hasta que pasan estos minutos; y las corridas abandonadas
+ * Consecuencias: tras una caída o un redeploy a mitad de corrida, las corridas nuevas (la de
+ * cada hora y la diaria) se omiten («ocupado») hasta que pasan estos minutos; y las corridas abandonadas
  * (ok = false, causa 'abandonada') no cuentan para los incidentes.
  */
 export const MINUTOS_ABANDONO = 180;

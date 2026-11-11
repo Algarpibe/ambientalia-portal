@@ -4,15 +4,17 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
-import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, UsuarioConLlaves } from './contrato.js';
-import type { RepoSync } from './repo-sync.js';
+import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, UsuarioConLlaves } from './contrato.js';
+import type { CierrePasada, RepoSync } from './repo-sync.js';
 
-// Las rutas con Express de verdad: guardas de sesión y de app, llaves, 403/400/404/409/503.
-// El SQL lo cubre repo.db.test.ts; aquí el repositorio y el servicio son dobles. La
-// sesión: requireAuth real con la consulta de usuario simulada (mismo patrón que
-// calibraciones/router.test.ts). Todo ficticio.
+// Las rutas con Express de verdad: guardas de sesión y de app, llaves, 403/400/404, y la
+// corrida que lanza cada «fin» de n8n. El SQL lo cubre repo.db.test.ts; aquí el repositorio
+// y el servicio son dobles. La sesión: requireAuth real con la consulta de usuario simulada
+// (mismo patrón que calibraciones/router.test.ts). Todo ficticio.
 const SECRET = 'test-secret-equipos-taller';
 process.env.JWT_SECRET = SECRET;
+const TOKEN_SYNC = 'token-sync-ficticio';
+process.env.EQUIPOS_SYNC_TOKEN = TOKEN_SYNC;
 
 const usuarios = vi.hoisted(() => new Map<string, { role: string; apps: string[] }>());
 vi.mock('../db.js', () => ({
@@ -69,13 +71,15 @@ const repo = {
 const servicio = {
   configurado: async () => configurado,
   actualizando: () => servicioOcupado,
-  lanzar: (o: 'programada' | 'boton', u: string | null) => lanzar(o, u),
+  lanzar: (o: OrigenCorrida, u: string | null) => lanzar(o, u),
 } as unknown as ServicioEquipos;
+let cierre: CierrePasada = 'cerrada';
+const sync = { cerrarPasada: async () => cierre } as unknown as RepoSync;
 
 const app = () => {
   const a = express();
   a.use(express.json());
-  a.use('/api', createEquiposTallerRouter({ repo, servicio, sync: {} as unknown as RepoSync }));
+  a.use('/api', createEquiposTallerRouter({ repo, servicio, sync }));
   return a;
 };
 const B = '/api/equipos-taller';
@@ -91,6 +95,8 @@ beforeEach(() => {
   fallaLeer = false;
   incidente = null;
   borrados.length = 0;
+  cierre = 'cerrada';
+  vi.restoreAllMocks();
 });
 
 describe('guardas', () => {
@@ -154,23 +160,46 @@ describe('aviso de foto vieja con una corrida en curso', () => {
   });
 });
 
-describe('POST /equipos-taller/actualizar', () => {
-  it('202 al empezar, como corrida del botón y con el usuario', async () => {
-    const t = token();
-    let visto: unknown[] = [];
-    lanzar = async (...a) => { visto = a; return 'iniciada'; };
-    const r = await request(app()).post(B + '/actualizar').set('Authorization', t.auth);
-    expect([r.status, r.body]).toEqual([202, { estado: 'iniciada' }]);
-    expect(visto).toEqual(['boton', t.userId]);
+describe('sin botón: la pantalla se actualiza sola', () => {
+  it('POST /equipos-taller/actualizar ya no existe (404), tampoco para un admin', async () => {
+    let lanzada = false;
+    lanzar = async () => { lanzada = true; return 'iniciada'; };
+    expect((await request(app()).post(B + '/actualizar').set('Authorization', token().auth)).status).toBe(404);
+    expect((await request(app()).post(B + '/actualizar').set('Authorization', token({ role: 'admin' }).auth)).status).toBe(404);
+    expect(lanzada).toBe(false);
   });
-  it('409 si ya hay una en curso', async () => {
+});
+
+describe('POST /equipos-taller/sync/fin lanza la corrida «sincronizacion»', () => {
+  const FIN = { pasada: '4711', conteos: { entradas: 1, salidas_n8n: 0, salidas_escaneadas: 0 } };
+  const fin = () => request(app()).post(B + '/sync/fin').set('X-Equipos-Sync-Token', TOKEN_SYNC).send(FIN);
+
+  it('al cerrar la pasada, sin usuario', async () => {
+    const vistos: unknown[][] = [];
+    lanzar = async (...a) => { vistos.push(a); return 'iniciada'; };
+    expect((await fin()).body).toEqual({ ok: true, completa: true });
+    cierre = 'textos_fallidos';
+    expect((await fin()).body).toEqual({ ok: true, completa: false, motivo: 'textos_fallidos' });
+    await vi.waitFor(() => expect(vistos).toEqual([['sincronizacion', null], ['sincronizacion', null]]));
+  });
+
+  it('si ya hay una en curso (la de las 06:30) o falta configurar, se omite y lo dice el log', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     lanzar = async () => 'ocupado';
-    expect((await request(app()).post(B + '/actualizar').set('Authorization', token().auth)).status).toBe(409);
-  });
-  it('503 sin configurar', async () => {
+    await fin();
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('equipos-taller: corrida tras la sincronización omitida (ya hay una en curso)'));
     lanzar = async () => 'sin_configurar';
-    const r = await request(app()).post(B + '/actualizar').set('Authorization', token().auth);
-    expect([r.status, r.body.message]).toEqual([503, 'Falta la primera sincronización con n8n']);
+    await fin();
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('equipos-taller: corrida tras la sincronización omitida (falta configurar)'));
+  });
+
+  it('una pasada que no se cerró no lanza nada', async () => {
+    let lanzada = false;
+    lanzar = async () => { lanzada = true; return 'iniciada'; };
+    cierre = 'ya_cerrada';
+    expect((await fin()).status).toBe(409);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(lanzada).toBe(false);
   });
 });
 

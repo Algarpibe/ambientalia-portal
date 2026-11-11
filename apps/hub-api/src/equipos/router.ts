@@ -3,12 +3,15 @@
  * detrás de `requireAuth` + `requireApp('equipos-taller')` (los admin pasan).
  *
  *   GET    /equipos-taller                  foto, ajustes, corridas, incidente, configuración y permisos
- *   POST   /equipos-taller/actualizar       202 · 409 si ya corre · 503 sin configurar
  *   PUT    /equipos-taller/ajustes/:clave   ← { t, m? }   (edita_ajustes o admin)
  *   DELETE /equipos-taller/ajustes/:clave   204           (edita_ajustes o admin)
  *   GET    /equipos-taller/llaves           (admin)
  *   PUT    /equipos-taller/llaves/:userId   ← { editaAjustes, recibeAlertas } (admin)
  *   POST   /equipos-taller/sync/{listado,texto,fin}   n8n, con token de máquina y sin sesión (router-sync.ts)
+ *
+ * No hay botón para actualizar (retirado el 11/11/2026): cada «fin» que cierra una pasada de
+ * n8n lanza la corrida «sincronizacion», así que la pantalla se actualiza sola cada hora. La
+ * diaria («programada», programador.ts) sigue igual.
  *
  * Express 4: un rechazo de promesa no llega solo al manejador de errores, así que
  * cada ruta va envuelta (`ruta`). Un error nuestro es 500 genérico y Sentry; nunca
@@ -48,8 +51,14 @@ const enCursoVigente = (c: { enCurso: boolean; inicio: string } | null): boolean
 
 export function createEquiposTallerRouter(deps: DepsRouter): Router {
   const router = Router();
-  // Las rutas de n8n: sin sesión ni app; las guarda su token (EQUIPOS_SYNC_TOKEN).
-  router.use(createEquiposSyncRouter(deps.sync));
+  // Las rutas de n8n: sin sesión ni app; las guarda su token (EQUIPOS_SYNC_TOKEN). Cada pasada
+  // cerrada lanza la corrida de cada hora; si ya corre otra (la de las 06:30), se omite.
+  router.use(createEquiposSyncRouter(deps.sync, {
+    alCerrarPasada: async () => {
+      const e = await deps.servicio.lanzar('sincronizacion', null);
+      if (e !== 'iniciada') console.log('equipos-taller: corrida tras la sincronización omitida (' + (e === 'ocupado' ? 'ya hay una en curso' : 'falta configurar') + ')');
+    },
+  }));
   const gated = [requireAuth, requireApp(APP_ID)] as const;
   const quien = (req: Request) => {
     const p = getPayload(req);
@@ -100,13 +109,6 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
       permisos: { ...llaves, esAdmin: q.esAdmin, puedeEditar: q.esAdmin || llaves.editaAjustes },
     };
     res.set('Cache-Control', 'no-store').json(cuerpo);
-  }));
-
-  router.post('/equipos-taller/actualizar', ...gated, ruta('equipos_actualizar', async (req, res) => {
-    const e = await deps.servicio.lanzar('boton', quien(req).userId);
-    if (e === 'sin_configurar') res.status(503).json({ error: 'sin_configurar', message: 'Falta la primera sincronización con n8n' });
-    else if (e === 'ocupado') res.status(409).json({ estado: 'ocupado', message: 'Ya se está actualizando' });
-    else res.status(202).json({ estado: 'iniciada' });
   }));
 
   router.put('/equipos-taller/ajustes/:clave', ...gated, ruta('equipos_ajuste_guardar', async (req, res) => {
