@@ -252,4 +252,14 @@ describe('rutas de n8n', () => {
     const r = await request(app()).post(B + '/sync/fin').set('Authorization', token({ role: 'admin' }).auth).send({ pasada: '1', conteos: {} });
     expect([r.status, r.body]).toEqual([401, { error: 'unauthorized' }]);
   });
+
+  it('con su token entran SIN sesión: llegan a la validación (400), no al 401 de requireAuth', async () => {
+    process.env.EQUIPOS_SYNC_TOKEN = 'token-sync-ficticio';
+    try {
+      const r = await request(app()).post(B + '/sync/fin').set('X-Equipos-Sync-Token', 'token-sync-ficticio').send({ pasada: '1', conteos: {} });
+      expect([r.status, r.body.error]).toEqual([400, 'invalid_input']);
+    } finally {
+      delete process.env.EQUIPOS_SYNC_TOKEN;
+    }
+  });
 });
