@@ -159,7 +159,10 @@ describe('actualizarNota', () => {
     const { id } = await insertarNota(db, YO, 'Ana Ruiz', nueva());
     await db.query(`UPDATE portal.ausencias_notas SET updated_at = '2026-01-01T00:00:00Z' WHERE id = $1`, [id]);
     const n = await actualizarNota(db, id, YO, { comentario: 'Editada' });
-    expect(n?.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
+    // Primero que la edicion ocurrio: con `n` a null, el `>` de abajo compararia
+    // undefined y el test no probaria nada.
+    expect(n).toMatchObject({ comentario: 'Editada' });
+    expect((n?.updatedAt ?? '') > '2026-01-01T00:00:00.000Z').toBe(true);
   });
 
   it('cambia categoria, fecha y comentario', async () => {
