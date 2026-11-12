@@ -53,7 +53,8 @@ function motivoInvalido(x: unknown): string {
   if (!hora(o.nocheDesde) || !hora(o.nocheHasta)) return 'Las horas deben ser enteros de 0 a 23';
   if (!Array.isArray(o.kpis) || o.kpis.length !== KPIS_REQUERIDOS) return `Hay que elegir exactamente ${KPIS_REQUERIDOS} KPIs`;
   if (!o.kpis.every((k) => (KPI_IDS as readonly unknown[]).includes(k))) return 'Hay un KPI desconocido';
-  return `Los ${KPIS_REQUERIDOS} KPIs deben ser distintos`;
+  if (new Set(o.kpis).size !== KPIS_REQUERIDOS) return `Los ${KPIS_REQUERIDOS} KPIs deben ser distintos`;
+  return 'El tema de la TV debe ser «dia», «noche» o «auto»';
 }
 
 export function crearServicioTablero(deps: DepsTablero): ServicioTablero {

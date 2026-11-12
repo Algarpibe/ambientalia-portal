@@ -181,6 +181,7 @@ describe('T5 sobreexposición y T6 robo de la base', () => {
     const s = await secretoNuevo();
     const r = await pedir(s);
     expect(Object.keys(r.body).sort()).toEqual(['ajustes', 'aviso', 'fotoEn', 'tablero']);
+    expect(Object.keys(r.body.ajustes).sort()).toEqual(['kpis', 'nocheDesde', 'nocheHasta', 'temaTv', 'umbralAmbar', 'umbralRojo']);
     expect(r.body.fotoEn).toBe('2026-11-12T03:00:00.000Z');
     expect(r.text).not.toMatch(/tvk_|kiosco|hash|TV uno/);
   });

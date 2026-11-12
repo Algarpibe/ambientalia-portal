@@ -26,7 +26,7 @@ const mockFetch = authFetch as unknown as ReturnType<typeof vi.fn>;
 beforeEach(() => {
   rol.actual = 'admin';
   mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
-  llavesApi.ajustesTablero.mockResolvedValue({ umbralAmbar: 30, umbralRojo: 90, nocheDesde: 18, nocheHasta: 6, kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'] });
+  llavesApi.ajustesTablero.mockResolvedValue({ umbralAmbar: 30, umbralRojo: 90, nocheDesde: 18, nocheHasta: 6, kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'], temaTv: 'dia' });
   llavesApi.kioscos.mockResolvedValue([{ id: 'k1', nombre: 'TV Prueba', creadoPor: 'a@x.co', creadoEn: '2026-11-10T15:00:00Z', revocadoEn: null, ultimoUsoEn: null }]);
   llavesApi.llaves.mockResolvedValue([
     { userId: 'u1', nombre: 'Persona Uno', email: 'p1@x.co', esAdmin: false, editaAjustes: false, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null },

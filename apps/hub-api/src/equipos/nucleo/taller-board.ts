@@ -85,7 +85,14 @@ export interface AjustesTablero {
   nocheHasta: number;
   /** Exactamente 5 KPIs distintos, en orden. */
   kpis: KpiId[];
+  /** Tema de la TV: fijo de día, fijo de noche o «auto» (noche entre `nocheDesde` y `nocheHasta`). */
+  temaTv: ModoTemaTv;
 }
+
+/** Los valores que admite el tema de la TV (y `?tema=` en su dirección). */
+export const MODOS_TEMA_TV = ["dia", "noche", "auto"] as const;
+export type ModoTemaTv = (typeof MODOS_TEMA_TV)[number];
+export const esModoTemaTv = (x: unknown): x is ModoTemaTv => (MODOS_TEMA_TV as readonly unknown[]).includes(x);
 
 export const AJUSTES_TABLERO_POR_DEFECTO: AjustesTablero = {
   umbralAmbar: 30,
@@ -93,6 +100,7 @@ export const AJUSTES_TABLERO_POR_DEFECTO: AjustesTablero = {
   nocheDesde: 18,
   nocheHasta: 6,
   kpis: ["en_taller", "revisar", "ticket_abierto", "externo", "entregado"],
+  temaTv: "dia",
 };
 
 const esEntero = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x);
@@ -102,14 +110,15 @@ const esHora = (x: unknown): x is number => esEntero(x) && x >= 0 && x <= 23;
 export function validarAjustesTablero(x: unknown): AjustesTablero | null {
   if (!x || typeof x !== "object" || Array.isArray(x)) return null;
   const o = x as Record<string, unknown>;
-  const { umbralAmbar, umbralRojo, nocheDesde, nocheHasta, kpis } = o;
+  const { umbralAmbar, umbralRojo, nocheDesde, nocheHasta, kpis, temaTv } = o;
   if (!esEntero(umbralAmbar) || umbralAmbar < 1) return null;
   if (!esEntero(umbralRojo) || umbralRojo <= umbralAmbar) return null;
   if (!esHora(nocheDesde) || !esHora(nocheHasta)) return null;
   if (!Array.isArray(kpis) || kpis.length !== KPIS_REQUERIDOS) return null;
   if (!kpis.every((k): k is KpiId => typeof k === "string" && (KPI_IDS as readonly string[]).includes(k))) return null;
   if (new Set(kpis).size !== KPIS_REQUERIDOS) return null;
-  return { umbralAmbar, umbralRojo, nocheDesde, nocheHasta, kpis: [...kpis] };
+  if (!esModoTemaTv(temaTv)) return null;
+  return { umbralAmbar, umbralRojo, nocheDesde, nocheHasta, kpis: [...kpis], temaTv };
 }
 
 // ---------- Hora y días en Bogotá (UTC-5 todo el año, sin horario de verano) ----------

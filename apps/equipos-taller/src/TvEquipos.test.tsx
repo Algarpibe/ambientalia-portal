@@ -94,37 +94,66 @@ describe('TvEquipos: cabecera y KPIs', () => {
 });
 
 describe('TvEquipos: tema', () => {
-  it('auto: día a las 15:00 y noche a las 03:00', async () => {
+  const MADRUGADA = Date.parse('2026-11-11T08:00:00Z'); // 03:00 en Bogotá
+  const con = (temaTv: 'dia' | 'noche' | 'auto', extra = {}) => resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv, ...extra } });
+  it('por defecto (ajuste «Día») es día también de madrugada', async () => {
+    vi.setSystemTime(MADRUGADA);
     render(<TvEquipos pedir={fuente(resp())} buscar="" />);
     await avanzar(0);
     expect(tema()).toBe('dia');
+  });
+  it('el ajuste «Noche» es noche a las 15:00; «Automático» sigue el horario: día a las 15:00 y noche a las 03:00', async () => {
+    render(<TvEquipos pedir={fuente(con('noche'))} buscar="" />);
+    await avanzar(0);
+    expect(tema()).toBe('noche');
     cleanup();
-    vi.setSystemTime(Date.parse('2026-11-11T08:00:00Z'));
-    render(<TvEquipos pedir={fuente(resp())} buscar="" />);
+    render(<TvEquipos pedir={fuente(con('auto'))} buscar="" />);
+    await avanzar(0);
+    expect(tema()).toBe('dia');
+    cleanup();
+    vi.setSystemTime(MADRUGADA);
+    render(<TvEquipos pedir={fuente(con('auto'))} buscar="" />);
     await avanzar(0);
     expect(tema()).toBe('noche');
   });
-  it('?tema= manda; uno inválido es auto', async () => {
+  it('?tema= manda sobre el ajuste; uno inválido usa el ajuste', async () => {
     render(<TvEquipos pedir={fuente(resp())} buscar="?tema=noche" />);
     await avanzar(0);
     expect(tema()).toBe('noche');
     cleanup();
-    render(<TvEquipos pedir={fuente(resp())} buscar="?tema=otro" />);
+    render(<TvEquipos pedir={fuente(con('noche'))} buscar="?tema=dia" />);
     await avanzar(0);
     expect(tema()).toBe('dia');
+    cleanup();
+    vi.setSystemTime(MADRUGADA);
+    render(<TvEquipos pedir={fuente(resp())} buscar="?tema=auto" />);
+    await avanzar(0);
+    expect(tema()).toBe('noche');
+    cleanup();
+    vi.setSystemTime(AHORA); // 15:00: «otro» no es auto, manda el ajuste «Noche»
+    render(<TvEquipos pedir={fuente(con('noche'))} buscar="?tema=otro" />);
+    await avanzar(0);
+    expect(tema()).toBe('noche');
   });
-  it('cambia a noche a las 18:00 sin recargar, y respeta las horas configuradas', async () => {
+  it('en «Automático» cambia a noche a las 18:00 sin recargar, y respeta las horas configuradas', async () => {
     vi.setSystemTime(Date.parse('2026-11-11T22:59:55Z')); // 17:59:55
-    render(<TvEquipos pedir={fuente(resp())} buscar="" />);
+    render(<TvEquipos pedir={fuente(con('auto'))} buscar="" />);
     await avanzar(0);
     expect(tema()).toBe('dia');
     await avanzar(10_000);
     expect(tema()).toBe('noche');
     cleanup();
     vi.setSystemTime(Date.parse('2026-11-11T22:00:00Z')); // 17:00 con noche desde las 17
-    render(<TvEquipos pedir={fuente(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, nocheDesde: 17 } }))} buscar="" />);
+    render(<TvEquipos pedir={fuente(con('auto', { nocheDesde: 17 }))} buscar="" />);
     await avanzar(0);
     expect(tema()).toBe('noche');
+  });
+  it('en «Día» no cambia a las 18:00', async () => {
+    vi.setSystemTime(Date.parse('2026-11-11T22:59:55Z')); // 17:59:55
+    render(<TvEquipos pedir={fuente(resp())} buscar="" />);
+    await avanzar(0);
+    await avanzar(10_000);
+    expect(tema()).toBe('dia');
   });
 });
 
@@ -172,6 +201,14 @@ describe('TvEquipos: modo kiosco (llave en el fragmento #k=)', () => {
     expect(init?.headers).toEqual({ 'X-Kiosk-Token': TOKEN });
     expect(screen.getByText('En taller')).toBeTruthy();
     expect(location.hash).toBe('#k=' + TOKEN);
+  });
+  it('usa el tema de la TV que llega en los ajustes del servidor', async () => {
+    location.hash = '#k=' + TOKEN;
+    const ajustes = { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv: 'noche' as const };
+    kiosco(200, { tablero: construirTablero(FILAS, ajustes, AHORA), ajustes, fotoEn: '2026-11-11T19:10:00Z', aviso: null });
+    render(<TvEquipos buscar="" />); // 15:00 en Bogotá
+    await avanzar(0);
+    expect(tema()).toBe('noche');
   });
   it('una llave inválida o revocada (401) muestra un aviso de acceso, nunca pantalla en blanco', async () => {
     location.hash = '#k=' + TOKEN;

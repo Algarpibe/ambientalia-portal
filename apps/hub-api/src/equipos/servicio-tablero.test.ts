@@ -141,6 +141,15 @@ describe('tableroKiosco', () => {
     }
   });
 
+  it('la TV con llave recibe el tema elegido en Ajustes dentro de «ajustes»', async () => {
+    const noche = crearServicioTablero({
+      repo, configurado: async () => true,
+      tablero: { ...tablero, leerAjustesTablero: async () => ({ ...AJUSTES_TABLERO_POR_DEFECTO, temaTv: 'noche' }) },
+    });
+    expect((await noche.tableroKiosco(AHORA)).ajustes.temaTv).toBe('noche');
+    expect((await s.tableroKiosco(AHORA)).ajustes.temaTv).toBe('dia');
+  });
+
   it('sin foto, un tablero vacío y fotoEn null (no revienta)', async () => {
     const vacio = crearServicioTablero({ repo: { ...repo, leerFoto: async () => null }, tablero, configurado: async () => true });
     const r = await vacio.tableroKiosco(AHORA);
@@ -155,7 +164,15 @@ describe('guardarAjustes', () => {
     expect(ajustesGuardados).toHaveLength(1);
   });
 
+  it('guarda solo el tema de la TV y conserva el resto', async () => {
+    const r = await s.guardarAjustes({ temaTv: 'auto' }, 'admin@equipos.test');
+    expect(r).toEqual({ ok: true, ajustes: { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 10, umbralRojo: 20, temaTv: 'auto' } });
+    expect(ajustesGuardados).toEqual([{ ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 10, umbralRojo: 20, temaTv: 'auto' }]);
+  });
+
   it.each([
+    [{ temaTv: 'claro' }, /tema de la TV/i],
+    [{ temaTv: null }, /tema de la TV/i],
     [{ umbralRojo: 10 }, /rojo/i],
     [{ umbralAmbar: 0 }, /ámbar/i],
     [{ nocheDesde: 24 }, /hora/i],

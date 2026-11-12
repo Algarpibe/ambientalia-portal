@@ -280,6 +280,7 @@ describe('ajustes del tablero', () => {
     expect(AJUSTES_TABLERO_POR_DEFECTO).toEqual({
       umbralAmbar: 30, umbralRojo: 90, nocheDesde: 18, nocheHasta: 6,
       kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'],
+      temaTv: 'dia',
     });
   });
 
@@ -304,6 +305,10 @@ describe('ajustes del tablero', () => {
     ['KPI repetido', { kpis: ['en_taller', 'en_taller', 'ticket_abierto', 'externo', 'entregado'] }],
     ['KPI desconocido', { kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'inventado'] }],
     ['KPI no es lista', { kpis: 'en_taller' }],
+    ['tema de la TV desconocido', { temaTv: 'claro' }],
+    ['tema de la TV en mayúsculas', { temaTv: 'NOCHE' }],
+    ['tema de la TV que no es texto', { temaTv: 1 }],
+    ['sin tema de la TV', { temaTv: undefined }],
   ])('rechaza: %s', (_n, o) => expect(malo(o)).toBeNull());
 
   it('rechaza lo que no es objeto', () => {
@@ -311,8 +316,12 @@ describe('ajustes del tablero', () => {
   });
 
   it('acepta horas límite 0 y 23 y otra selección válida de 5 KPIs', () => {
-    const ok = { umbralAmbar: 1, umbralRojo: 2, nocheDesde: 0, nocheHasta: 23, kpis: ['retirado', 'parciales', 'ticket_cerrado', 'externo', 'en_taller'] };
+    const ok = { umbralAmbar: 1, umbralRojo: 2, nocheDesde: 0, nocheHasta: 23, kpis: ['retirado', 'parciales', 'ticket_cerrado', 'externo', 'en_taller'], temaTv: 'auto' };
     expect(validarAjustesTablero(ok)).toEqual(ok);
+  });
+
+  it.each(['dia', 'noche', 'auto'])('acepta el tema de la TV «%s»', (temaTv) => {
+    expect(validarAjustesTablero({ ...AJUSTES_TABLERO_POR_DEFECTO, temaTv })?.temaTv).toBe(temaTv);
   });
 
   it('descarta campos extra', () => {

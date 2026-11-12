@@ -1,5 +1,5 @@
 // Reglas puras de la pantalla de TV: escala del lienzo 1920×1080, tema día/noche y fecha larga.
-import { fechaBogota, horaBogota, type AjustesTablero } from '../nucleo';
+import { esModoTemaTv, fechaBogota, horaBogota, type AjustesTablero, type ModoTemaTv } from '../nucleo';
 
 export const LIENZO = { ancho: 1920, alto: 1080 } as const;
 
@@ -21,9 +21,13 @@ export function temaAuto(ms: number, a: Pick<AjustesTablero, 'nocheDesde' | 'noc
   return noche ? 'noche' : 'dia';
 }
 
-/** `?tema=dia|noche` manda; cualquier otra cosa (auto, vacío, inválido) es automático. */
-export function resolverTema(param: string | null, ms: number, a: Pick<AjustesTablero, 'nocheDesde' | 'nocheHasta'>): TemaTv {
-  return param === 'dia' || param === 'noche' ? param : temaAuto(ms, a);
+/**
+ * Tema de la TV: `?tema=dia|noche|auto` manda; sin él (o con uno inválido), el ajuste «Tema de la TV»
+ * (si falta o no se reconoce, día). Solo `auto` mira el horario de noche.
+ */
+export function resolverTema(param: string | null, ms: number, a: Pick<AjustesTablero, 'nocheDesde' | 'nocheHasta' | 'temaTv'>): TemaTv {
+  const modo: ModoTemaTv = esModoTemaTv(param) ? param : esModoTemaTv(a.temaTv) ? a.temaTv : 'dia';
+  return modo === 'auto' ? temaAuto(ms, a) : modo;
 }
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];

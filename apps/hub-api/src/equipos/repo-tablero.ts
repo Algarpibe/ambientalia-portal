@@ -1,11 +1,11 @@
 /**
- * Lectura y escritura de `portal.equipos_tablero_config` y `portal.equipos_kiosco` (migración 074).
+ * Lectura y escritura de `portal.equipos_tablero_config` y `portal.equipos_kiosco` (migraciones 074 y 075).
  * Solo SQL: qué se acepta lo deciden servicio-tablero.ts (validación) y router.ts (permisos).
  * De la llave solo se guarda el SHA-256 del secreto; el texto plano nunca llega aquí.
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { Kiosco } from './contrato.js';
-import { AJUSTES_TABLERO_POR_DEFECTO, type AjustesTablero, type KpiId } from './nucleo/index.js';
+import { AJUSTES_TABLERO_POR_DEFECTO, type AjustesTablero, type KpiId, type ModoTemaTv } from './nucleo/index.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Fila = Record<string, any>;
@@ -49,20 +49,23 @@ const esDuplicado = (e: unknown): boolean => (e as { code?: unknown } | null)?.c
 export function crearRepoTablero(db: Pool): RepoTablero {
   return {
     async leerAjustesTablero() {
-      const { rows } = await db.query('SELECT umbral_ambar, umbral_rojo, noche_desde, noche_hasta, kpis FROM portal.equipos_tablero_config');
+      const { rows } = await db.query('SELECT umbral_ambar, umbral_rojo, noche_desde, noche_hasta, kpis, tema_tv FROM portal.equipos_tablero_config');
       const x = rows[0] as Fila | undefined;
       if (!x) return { ...AJUSTES_TABLERO_POR_DEFECTO, kpis: [...AJUSTES_TABLERO_POR_DEFECTO.kpis] };
-      return { umbralAmbar: x.umbral_ambar, umbralRojo: x.umbral_rojo, nocheDesde: x.noche_desde, nocheHasta: x.noche_hasta, kpis: x.kpis as KpiId[] };
+      return {
+        umbralAmbar: x.umbral_ambar, umbralRojo: x.umbral_rojo, nocheDesde: x.noche_desde, nocheHasta: x.noche_hasta,
+        kpis: x.kpis as KpiId[], temaTv: x.tema_tv as ModoTemaTv,
+      };
     },
 
     async guardarAjustesTablero(a, por) {
       await db.query(
-        `INSERT INTO portal.equipos_tablero_config (id, umbral_ambar, umbral_rojo, noche_desde, noche_hasta, kpis, actualizado_por, actualizado_en)
-         VALUES (true, $1, $2, $3, $4, $5, $6, now())
+        `INSERT INTO portal.equipos_tablero_config (id, umbral_ambar, umbral_rojo, noche_desde, noche_hasta, kpis, tema_tv, actualizado_por, actualizado_en)
+         VALUES (true, $1, $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (id) DO UPDATE SET umbral_ambar = EXCLUDED.umbral_ambar, umbral_rojo = EXCLUDED.umbral_rojo,
-           noche_desde = EXCLUDED.noche_desde, noche_hasta = EXCLUDED.noche_hasta, kpis = EXCLUDED.kpis,
+           noche_desde = EXCLUDED.noche_desde, noche_hasta = EXCLUDED.noche_hasta, kpis = EXCLUDED.kpis, tema_tv = EXCLUDED.tema_tv,
            actualizado_por = EXCLUDED.actualizado_por, actualizado_en = now()`,
-        [a.umbralAmbar, a.umbralRojo, a.nocheDesde, a.nocheHasta, a.kpis, por],
+        [a.umbralAmbar, a.umbralRojo, a.nocheDesde, a.nocheHasta, a.kpis, a.temaTv, por],
       );
     },
 

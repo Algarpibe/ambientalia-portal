@@ -48,13 +48,35 @@ describe('temaAuto', () => {
 
 describe('resolverTema', () => {
   const madrugada = bogota('03:00');
-  it('?tema=dia y ?tema=noche mandan sobre la hora', () => {
-    expect(resolverTema('dia', madrugada, CFG)).toBe('dia');
-    expect(resolverTema('noche', bogota('12:00'), CFG)).toBe('noche');
+  const mediodia = bogota('12:00');
+  const AUTO = { ...CFG, temaTv: 'auto' as const };
+  const NOCHE = { ...CFG, temaTv: 'noche' as const };
+  it('sin ?tema= y con el ajuste por defecto es día, también de madrugada', () => {
+    expect(CFG.temaTv).toBe('dia');
+    expect(resolverTema(null, madrugada, CFG)).toBe('dia');
+    expect(resolverTema(null, mediodia, CFG)).toBe('dia');
   });
-  it('auto, ausente o inválido se comportan como auto', () => {
-    for (const p of ['auto', null, '', 'otro']) expect(resolverTema(p, madrugada, CFG)).toBe('noche');
-    expect(resolverTema('otro', bogota('12:00'), CFG)).toBe('dia');
+  it('sin ?tema= manda el ajuste: «noche» a cualquier hora, «auto» según el horario', () => {
+    expect(resolverTema(null, mediodia, NOCHE)).toBe('noche');
+    expect(resolverTema(null, madrugada, AUTO)).toBe('noche');
+    expect(resolverTema(null, mediodia, AUTO)).toBe('dia');
+  });
+  it('?tema=dia, ?tema=noche y ?tema=auto mandan sobre el ajuste', () => {
+    expect(resolverTema('dia', madrugada, NOCHE)).toBe('dia');
+    expect(resolverTema('noche', mediodia, CFG)).toBe('noche');
+    expect(resolverTema('auto', madrugada, CFG)).toBe('noche');
+    expect(resolverTema('auto', mediodia, NOCHE)).toBe('dia');
+  });
+  it('un ?tema= vacío o inválido usa el ajuste', () => {
+    for (const p of ['', 'otro', 'NOCHE']) {
+      expect(resolverTema(p, madrugada, CFG), p).toBe('dia');
+      expect(resolverTema(p, mediodia, NOCHE), p).toBe('noche');
+      expect(resolverTema(p, madrugada, AUTO), p).toBe('noche');
+    }
+  });
+  it('un ajuste ausente o desconocido (hub-api sin la 075) es día', () => {
+    expect(resolverTema(null, madrugada, { nocheDesde: 18, nocheHasta: 6 } as unknown as typeof CFG)).toBe('dia');
+    expect(resolverTema(null, madrugada, { ...CFG, temaTv: 'claro' } as unknown as typeof CFG)).toBe('dia');
   });
 });
 

@@ -6,8 +6,10 @@ import { poolDePrueba } from '../test-db/harness.js';
 import { crearRepoTablero, type RepoTablero } from './repo-tablero.js';
 import { AJUSTES_TABLERO_POR_DEFECTO } from './nucleo/index.js';
 
-// La migración 074 (ajustes del tablero y llaves de kiosco) contra Postgres real. Todo ficticio.
-const SQL = readFileSync(fileURLToPath(new URL('../users/migrations/074_equipos_tablero.sql', import.meta.url)), 'utf8');
+// Las migraciones 074 (ajustes del tablero y llaves de kiosco) y 075 (tema de la TV) contra Postgres real. Todo ficticio.
+const leer = (n: string) => readFileSync(fileURLToPath(new URL('../users/migrations/' + n, import.meta.url)), 'utf8');
+const SQL = leer('074_equipos_tablero.sql');
+const SQL_075 = leer('075_equipos_tablero_tema_tv.sql');
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const CONFIG = { ambar: 30, rojo: 90, desde: 18, hasta: 6, kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'] };
@@ -29,6 +31,7 @@ beforeAll(async () => {
   db = poolDePrueba();
   repo = crearRepoTablero(db);
   await db.query(SQL);
+  await db.query(SQL_075);
 });
 afterAll(async () => {
   await vaciar();
@@ -82,8 +85,44 @@ describe('migración 074 contra Postgres', () => {
   });
 });
 
+describe('migración 075 (tema de la TV) contra Postgres', () => {
+  const temas = async () => (await db.query('SELECT tema_tv FROM portal.equipos_tablero_config')).rows.map((r: { tema_tv: string }) => r.tema_tv);
+  const checksDelTema = async () =>
+    (await db.query(
+      `SELECT conname FROM pg_constraint
+        WHERE conrelid = 'portal.equipos_tablero_config'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%tema_tv%'`,
+    )).rows.map((r: { conname: string }) => r.conname);
+  const ponerTema = (t: string | null) => db.query('UPDATE portal.equipos_tablero_config SET tema_tv = $1', [t]);
+
+  it('se puede aplicar dos veces más sin error, sin tocar el tema guardado y con un solo CHECK', async () => {
+    await poner();
+    await ponerTema('noche');
+    await db.query(SQL_075);
+    await db.query(SQL_075);
+    expect(await temas()).toEqual(['noche']);
+    expect(await checksDelTema()).toEqual(['equipos_tablero_tema_tv_check']);
+  });
+
+  it('sobre una base de antes de la 075, la fila que ya había queda en «dia»', async () => {
+    await db.query('ALTER TABLE portal.equipos_tablero_config DROP COLUMN tema_tv');
+    await poner();
+    await db.query(SQL_075);
+    expect(await temas()).toEqual(['dia']);
+    expect(await checksDelTema()).toEqual(['equipos_tablero_tema_tv_check']);
+  });
+
+  it('el CHECK admite dia, noche y auto, y rechaza cualquier otro valor o ninguno', async () => {
+    await poner();
+    for (const t of ['dia', 'noche', 'auto']) await ponerTema(t);
+    await expect(ponerTema('claro')).rejects.toMatchObject({ code: '23514' });
+    await expect(ponerTema('NOCHE')).rejects.toMatchObject({ code: '23514' });
+    await expect(ponerTema(null)).rejects.toMatchObject({ code: '23502' });
+    expect(await temas()).toEqual(['auto']);
+  });
+});
+
 describe('repo-tablero', () => {
-  const NUEVOS = { umbralAmbar: 45, umbralRojo: 120, nocheDesde: 19, nocheHasta: 5, kpis: ['externo', 'en_taller', 'parciales', 'retirado', 'revisar'] as const };
+  const NUEVOS = { umbralAmbar: 45, umbralRojo: 120, nocheDesde: 19, nocheHasta: 5, kpis: ['externo', 'en_taller', 'parciales', 'retirado', 'revisar'] as const, temaTv: 'auto' as const };
 
   it('sin fila, los ajustes son los de por defecto', async () => {
     expect(await repo.leerAjustesTablero()).toEqual(AJUSTES_TABLERO_POR_DEFECTO);

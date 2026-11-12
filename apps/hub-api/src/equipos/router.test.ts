@@ -341,7 +341,7 @@ describe('ajustes del tablero', () => {
   it('GET /equipos-taller lleva los efectivos en «tablero»: solo ellos, con una consulta más', async () => {
     const r = await request(app()).get(B).set('Authorization', token().auth);
     expect(r.body.tablero).toEqual(AJUSTES_TABLERO_POR_DEFECTO);
-    expect(Object.keys(r.body.tablero).sort()).toEqual(['kpis', 'nocheDesde', 'nocheHasta', 'umbralAmbar', 'umbralRojo']);
+    expect(Object.keys(r.body.tablero).sort()).toEqual(['kpis', 'nocheDesde', 'nocheHasta', 'temaTv', 'umbralAmbar', 'umbralRojo']);
     expect(aTablero).toEqual([['ajustes']]);
   });
 });
