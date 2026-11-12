@@ -168,26 +168,26 @@ describe('Tablero (con sondeo)', () => {
     expect(screen.getAllByRole('region')).toHaveLength(6);
     expect(screen.getByText('menos de 30 d')).toBeTruthy();
   });
-  it('por defecto sigue el horario día/noche de los ajustes (Bogotá), como la TV', async () => {
+  it('sin `tema` es día a cualquier hora: no sigue el horario ni el tema de la TV', async () => {
     const tema = () => document.querySelector('.tt-tablero')?.getAttribute('data-tema');
-    render(<Tablero api={apiCon(resp())} />); // 15:00 en Bogotá
-    await avanzar(0);
-    expect(tema()).toBe('dia');
-    cleanup();
-    vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z')); // 19:43 en Bogotá
+    vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z')); // 19:43 en Bogotá, dentro del horario de noche
     render(<Tablero api={apiCon(resp())} />);
     await avanzar(0);
-    expect(tema()).toBe('noche');
-    cleanup();
-    render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, nocheDesde: 20 } }))} />); // noche desde las 20
-    await avanzar(0);
     expect(tema()).toBe('dia');
+    cleanup();
+    for (const temaTv of ['noche', 'auto'] as const) {
+      render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv } }))} />);
+      await avanzar(0);
+      expect(tema(), temaTv).toBe('dia');
+      cleanup();
+    }
   });
-  it('un tema explícito manda sobre el horario', async () => {
-    vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z'));
-    render(<Tablero api={apiCon(resp())} tema="dia" />);
+  it('con `tema` pinta ese tema, también mientras carga', async () => {
+    render(<Tablero api={apiCon(resp())} tema="noche" />); // 15:00 en Bogotá
+    expect(document.querySelector('.tt-tablero')?.getAttribute('data-tema')).toBe('noche');
     await avanzar(0);
-    expect(document.querySelector('.tt-tablero')?.getAttribute('data-tema')).toBe('dia');
+    expect(screen.getAllByRole('region')).toHaveLength(6);
+    expect(document.querySelector('.tt-tablero')?.getAttribute('data-tema')).toBe('noche');
   });
   it('usa los ajustes del servidor si vienen en la respuesta', async () => {
     render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 45, umbralRojo: 120 } }))} />);
