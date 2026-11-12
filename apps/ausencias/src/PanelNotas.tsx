@@ -79,13 +79,20 @@ export default function PanelNotas({ activo }: Props) {
     () => [...new Set(notas.map((n) => n.empleadoNombre))].sort((a, b) => a.localeCompare(b, 'es')),
     [notas],
   );
-  const visibles = useMemo(() => filtrarNotas(notas, filtros), [notas, filtros]);
+  // Si la última nota de la persona filtrada desaparece (borrada o recargada),
+  // el <select> ya no tiene esa opción y enseñaría «Todas»; el filtro, en
+  // cambio, seguiría aplicado sin forma de quitarlo. Por eso se deriva aquí.
+  const persona = personas.includes(filtros.empleadoNombre) ? filtros.empleadoNombre : '';
+  const visibles = useMemo(
+    () => filtrarNotas(notas, { ...filtros, empleadoNombre: persona }),
+    [notas, filtros, persona],
+  );
 
   function guardada(n: Nota) {
     setNotas((ns) => ordenarNotas([n, ...ns.filter((x) => x.id !== n.id)]));
     setEdicion(null);
-    // Si se le cambió o quitó la imagen, la que estuviera abierta ya no es la suya.
-    if (imagen?.notaId === n.id) setImagen(null);
+    // Cierra la imagen abierta de ESTA nota: pudo cambiar o quitarse al guardar.
+    setImagen((i) => (i?.notaId === n.id ? null : i));
   }
 
   function alternarEstado(n: Nota) {
@@ -94,7 +101,7 @@ export default function PanelNotas({ activo }: Props) {
     editarNota(n.id, { estado: n.estado === 'abierta' ? 'resuelta' : 'abierta' })
       .then((actual) => setNotas((ns) => ns.map((x) => (x.id === actual.id ? actual : x))))
       .catch((e: Error) => setErrorAccion(textoDeErrorDeNota(e.message)))
-      .finally(() => setOcupada(null));
+      .finally(() => setOcupada((o) => (o === n.id ? null : o)));
   }
 
   function borrar(id: string) {
@@ -104,10 +111,10 @@ export default function PanelNotas({ activo }: Props) {
       .then(() => {
         setNotas((ns) => ns.filter((x) => x.id !== id));
         setABorrar(null);
-        if (imagen?.notaId === id) setImagen(null);
+        setImagen((i) => (i?.notaId === id ? null : i));
       })
       .catch((e: Error) => setErrorAccion(textoDeErrorDeNota(e.message)))
-      .finally(() => setOcupada(null));
+      .finally(() => setOcupada((o) => (o === id ? null : o)));
   }
 
   // La imagen solo se baja al pedirla: abrir la pestaña no descarga las fotos
@@ -122,7 +129,7 @@ export default function PanelNotas({ activo }: Props) {
     urlDeImagenDeNota(n.id)
       .then((url) => setImagen({ notaId: n.id, url }))
       .catch((e: Error) => setErrorAccion(textoDeErrorDeNota(e.message)))
-      .finally(() => setOcupada(null));
+      .finally(() => setOcupada((o) => (o === n.id ? null : o)));
   }
 
   const selCls = 'rounded-xl border border-gray-300 py-1.5 px-3 text-sm focus:border-blue-400 focus:outline-none';
@@ -142,8 +149,9 @@ export default function PanelNotas({ activo }: Props) {
         {!edicion && (
           <button
             type="button"
+            disabled={!!error}
             onClick={() => setEdicion({ nota: null })}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             <Plus className="h-4 w-4" /> Nueva nota
           </button>
@@ -192,7 +200,7 @@ export default function PanelNotas({ activo }: Props) {
         </select>
         <select
           aria-label="Filtrar por persona"
-          value={filtros.empleadoNombre}
+          value={persona}
           onChange={(e) => setFiltros((f) => ({ ...f, empleadoNombre: e.target.value }))}
           className={selCls}
         >
@@ -230,7 +238,13 @@ export default function PanelNotas({ activo }: Props) {
               <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{n.comentario}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {n.imagen && (
-                  <button type="button" disabled={ocupada === n.id} onClick={() => alternarImagen(n)} className={btnCls}>
+                  <button
+                    type="button"
+                    aria-expanded={imagen?.notaId === n.id}
+                    disabled={ocupada === n.id}
+                    onClick={() => alternarImagen(n)}
+                    className={btnCls}
+                  >
                     <Paperclip className="h-3.5 w-3.5" /> {imagen?.notaId === n.id ? 'Ocultar imagen' : 'Ver imagen'}
                   </button>
                 )}

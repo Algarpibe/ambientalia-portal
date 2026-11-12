@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import {
   crearNota,
@@ -33,6 +33,22 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   const [vistaPrevia, setVistaPrevia] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const busquedaRef = useRef<HTMLInputElement>(null);
+  const archivoRef = useRef<HTMLInputElement>(null);
+  const id = useId();
+  const idPersona = `${id}-persona`;
+  const idFecha = `${id}-fecha`;
+  const idComentario = `${id}-comentario`;
+  const idImagen = `${id}-imagen`;
+
+  // «Editar» en una fila de abajo abre el formulario arriba del todo, fuera de
+  // la vista: sin esto parecería que el botón no hace nada. El panel le pone
+  // `key`, así que esto corre una vez por apertura.
+  useEffect(() => {
+    formRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    busquedaRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // La URL de la vista previa retiene el fichero en memoria hasta revocarla.
   useEffect(() => {
@@ -58,12 +74,20 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   // enseña su nombre copiado para que el <select> no aparente otra cosa.
   const fueraDeLaLista = nota !== null && !empleados.some((e) => e.id === nota.empleadoId);
 
+  function vaciarArchivo() {
+    setArchivo(null);
+    if (archivoRef.current) archivoRef.current.value = '';
+  }
+
   function elegirArchivo(f: File | undefined) {
-    if (!f) return;
+    if (!f) {
+      setArchivo(null);
+      return;
+    }
     const problema = errorDeImagen(f);
     if (problema) {
       setError(problema);
-      setArchivo(null);
+      vaciarArchivo();
       return;
     }
     setError(null);
@@ -118,18 +142,30 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   const rotuloCls = 'mb-1 block font-medium text-gray-700';
 
   return (
-    <form onSubmit={guardar} className="mb-4 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+    <form ref={formRef} onSubmit={guardar} className="mb-4 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold text-gray-900">{nota ? 'Editar nota' : 'Nueva nota'}</h4>
-        <button type="button" onClick={onCancelar} aria-label="Cerrar" className="rounded-lg p-1 text-gray-500 hover:bg-gray-200">
+        {/* Mientras se guarda no se cierra: un guardado tardío cerraría el
+            formulario que estuviera abierto entonces, quizá otro. */}
+        <button
+          type="button"
+          onClick={onCancelar}
+          disabled={enviando}
+          aria-label="Cerrar"
+          className="rounded-lg p-1 text-gray-500 hover:bg-gray-200 disabled:opacity-50"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="text-sm">
-          <span className={rotuloCls}>Persona que lo solicita</span>
+          <label htmlFor={idPersona} className={rotuloCls}>
+            Persona que lo solicita
+          </label>
+          {/* Sin rótulo visible: conserva su aria-label, que aquí no sobra. */}
           <input
+            ref={busquedaRef}
             type="search"
             aria-label="Buscar persona"
             placeholder="Buscar por nombre…"
@@ -137,7 +173,7 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
             onChange={(e) => setBusqueda(e.target.value)}
             className={`${campoCls} mb-1`}
           />
-          <select aria-label="Persona" value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)} className={campoCls}>
+          <select id={idPersona} value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)} className={campoCls}>
             {fueraDeLaLista ? (
               <option value={nota.empleadoId ?? ''}>{nota.empleadoNombre} (ya no está en la plantilla)</option>
             ) : (
@@ -152,20 +188,21 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
         </div>
 
         <div className="text-sm">
-          <span className={rotuloCls}>Fecha</span>
-          <input type="date" aria-label="Fecha" required value={fecha} onChange={(e) => setFecha(e.target.value)} className={campoCls} />
+          <label htmlFor={idFecha} className={rotuloCls}>
+            Fecha
+          </label>
+          <input id={idFecha} type="date" required value={fecha} onChange={(e) => setFecha(e.target.value)} className={campoCls} />
         </div>
       </div>
 
       <div className="text-sm">
         <span className={rotuloCls}>Categoría</span>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Categoría">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Categoría">
           {CATEGORIAS_NOTA.map((c) => (
             <button
               key={c.id}
               type="button"
-              role="radio"
-              aria-checked={categoria === c.id}
+              aria-pressed={categoria === c.id}
               onClick={() => setCategoria(c.id)}
               className={`rounded-xl border px-3 py-1.5 text-sm ${
                 categoria === c.id
@@ -180,9 +217,11 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
       </div>
 
       <div className="text-sm">
-        <span className={rotuloCls}>Comentario</span>
+        <label htmlFor={idComentario} className={rotuloCls}>
+          Comentario
+        </label>
         <textarea
-          aria-label="Comentario"
+          id={idComentario}
           rows={3}
           maxLength={MAX_COMENTARIO}
           value={comentario}
@@ -195,14 +234,26 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
       </div>
 
       <div className="text-sm">
-        <span className={rotuloCls}>Imagen (opcional)</span>
+        <label htmlFor={idImagen} className={rotuloCls}>
+          Imagen (opcional)
+        </label>
         <input
+          ref={archivoRef}
+          id={idImagen}
           type="file"
-          aria-label="Imagen"
           accept={MIMES_IMAGEN.join(',')}
           onChange={(e) => elegirArchivo(e.target.files?.[0])}
           className="text-sm"
         />
+        {archivo && (
+          <button
+            type="button"
+            onClick={vaciarArchivo}
+            className="ml-2 rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+          >
+            Quitar imagen
+          </button>
+        )}
         {vistaPrevia && <img src={vistaPrevia} alt="Vista previa" className="mt-2 max-h-48 rounded-lg border border-gray-200" />}
         {nota?.imagen && !archivo && (
           <label className="mt-2 flex items-center gap-2 text-gray-700">
@@ -222,7 +273,8 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
         <button
           type="button"
           onClick={onCancelar}
-          className="rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+          disabled={enviando}
+          className="rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
         >
           Cancelar
         </button>
