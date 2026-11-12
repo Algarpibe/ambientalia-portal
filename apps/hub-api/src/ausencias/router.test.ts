@@ -1732,6 +1732,7 @@ function app() {
   // Mismo orden que index.ts: el parser holgado de la ruta de creación va antes
   // que el global, o el de 2mb rechazaría el adjunto con un 413.
   a.use('/api/ausencias/solicitudes', express.json({ limit: '12mb' }));
+  a.use('/api/ausencias/notas', express.json({ limit: '12mb' }));
   a.use(express.json({ limit: '2mb' }));
   a.use('/api', createAusenciasRouter({} as never));
   return a;
@@ -7486,5 +7487,120 @@ describe('GET /ausencias/dias-habiles con un rango mal formado', () => {
       .set('Authorization', `Bearer ${token()}`)
       .expect(400);
     expect(r.body).toEqual({ error: 'rango_invalido' });
+  });
+});
+
+describe('notas personales del administrador', () => {
+  const ADMIN = 'admin@ambientalia.com.co';
+  const OTRO_ADMIN = 'otro.admin@ambientalia.com.co';
+  // Ids propios: E1 y E2 (arriba) ya son fichas de la plantilla por defecto.
+  const EMPLEADO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const CUALQUIERA = '33333333-3333-4333-8333-333333333333';
+  const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64');
+  const admin = (sub = ADMIN) => token({ sub, role: 'admin' });
+  const pedir = (metodo: 'get' | 'post' | 'patch' | 'delete', ruta: string, tok = admin()) =>
+    request(app())[metodo](`/api/ausencias${ruta}`).set('Authorization', `Bearer ${tok}`);
+  const alta = (over: Record<string, unknown> = {}, tok = admin()) =>
+    pedir('post', '/notas', tok).send({
+      empleadoId: EMPLEADO,
+      categoria: 'retraso',
+      fecha: '2026-11-12',
+      comentario: 'Llega tarde',
+      ...over,
+    });
+
+  beforeEach(() => {
+    estado.plantilla.push({ id: EMPLEADO, nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co', activo: true });
+  });
+
+  it.each([
+    ['get', '/notas'],
+    ['post', '/notas'],
+    ['patch', `/notas/${CUALQUIERA}`],
+    ['delete', `/notas/${CUALQUIERA}`],
+    ['get', `/notas/${CUALQUIERA}/imagen`],
+  ] as const)('CANDADO: %s %s sin ser admin → 403', async (metodo, ruta) => {
+    await pedir(metodo, ruta, token()).expect(403);
+  });
+
+  it('crea la nota con el nombre de la ficha y la devuelve en la lista', async () => {
+    const r = await alta().expect(201);
+    expect(r.body).toMatchObject({ empleadoNombre: 'Beto Díaz', categoria: 'retraso', estado: 'abierta', imagen: null });
+    const l = await pedir('get', '/notas').expect(200);
+    expect(l.body.notas.map((n: any) => n.id)).toEqual([r.body.id]);
+  });
+
+  it('404 si la persona no es una ficha activa', async () => {
+    const r = await alta({ empleadoId: E_FANTASMA }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('400 con el codigo y el campo de la validacion', async () => {
+    const r = await alta({ categoria: 'vacaciones' }).expect(400);
+    expect(r.body).toMatchObject({ error: 'categoria_invalida', field: 'categoria' });
+  });
+
+  it('CANDADO: acepta una foto de ~7,5 MB (parser propio de 12 MB)', async () => {
+    const foto = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(7.5 * 1024 * 1024)]);
+    const r = await alta({ imagen: { nombreArchivo: 'foto.jpg', mime: 'image/jpeg', contenidoBase64: foto.toString('base64') } }).expect(201);
+    expect(r.body.imagen).toMatchObject({ mime: 'image/jpeg', bytes: foto.length });
+  });
+
+  it('sirve la imagen con su tipo, en linea y sin dejar que el navegador lo adivine', async () => {
+    const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
+    const r = await pedir('get', `/notas/${body.id}/imagen`).expect(200);
+    expect(r.headers['content-type']).toContain('image/jpeg');
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['content-disposition']).toBe('inline');
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+
+  it('404 al pedir la imagen de una nota que no tiene', async () => {
+    const { body } = await alta().expect(201);
+    const r = await pedir('get', `/notas/${body.id}/imagen`).expect(404);
+    expect(r.body.error).toBe('imagen_no_encontrada');
+  });
+
+  it('PATCH marca resuelta y reabre', async () => {
+    const { body } = await alta().expect(201);
+    const resuelta = await pedir('patch', `/notas/${body.id}`).send({ estado: 'resuelta' }).expect(200);
+    expect(resuelta.body.estado).toBe('resuelta');
+    expect(resuelta.body.resueltaAt).not.toBeNull();
+    const abierta = await pedir('patch', `/notas/${body.id}`).send({ estado: 'abierta' }).expect(200);
+    expect(abierta.body).toMatchObject({ estado: 'abierta', resueltaAt: null });
+  });
+
+  it('PATCH sin ningun campo → 400 sin_cambios', async () => {
+    const { body } = await alta().expect(201);
+    const r = await pedir('patch', `/notas/${body.id}`).send({}).expect(400);
+    expect(r.body.error).toBe('sin_cambios');
+  });
+
+  it('PATCH con otra persona copia su nombre', async () => {
+    const OTRA = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    estado.plantilla.push({ id: OTRA, nombreCompleto: 'Carla Gómez', correo: 'carla@ambientalia.com.co', activo: true });
+    const { body } = await alta().expect(201);
+    const r = await pedir('patch', `/notas/${body.id}`).send({ empleadoId: OTRA }).expect(200);
+    expect(r.body).toMatchObject({ empleadoId: OTRA, empleadoNombre: 'Carla Gómez' });
+  });
+
+  it('DELETE → 204 y la nota desaparece de la lista', async () => {
+    const { body } = await alta().expect(201);
+    await pedir('delete', `/notas/${body.id}`).expect(204);
+    expect((await pedir('get', '/notas').expect(200)).body.notas).toEqual([]);
+  });
+
+  it('CANDADO: la nota de otro administrador es un 404, no un 403', async () => {
+    const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
+    const otro = admin(OTRO_ADMIN);
+    expect((await pedir('get', '/notas', otro).expect(200)).body.notas).toEqual([]);
+    await pedir('patch', `/notas/${body.id}`, otro).send({ estado: 'resuelta' }).expect(404);
+    await pedir('delete', `/notas/${body.id}`, otro).expect(404);
+    await pedir('get', `/notas/${body.id}/imagen`, otro).expect(404);
+  });
+
+  it('404 con un id de nota que no es un UUID', async () => {
+    const r = await pedir('delete', '/notas/no-es-uuid').expect(404);
+    expect(r.body.error).toBe('nota_no_encontrada');
   });
 });

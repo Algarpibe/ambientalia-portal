@@ -969,5 +969,62 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  // ── Notas personales del administrador ───────────────────────────────────
+  //
+  // `requireAdmin` es el candado de verdad: la pestaña escondida no bastaría.
+  // De quién es cada nota lo decide el SQL (`autor_email`, migración 076), así
+  // que la nota de otro administrador es un 404 y no un 403.
+
+  router.get('/ausencias/notas', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json({ notas: await service.listarNotas(db, sesionDe(req).email) });
+    } catch (e) {
+      sendError(res, e, 'ausencias_notas_listar');
+    }
+  });
+
+  router.post('/ausencias/notas', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.status(201).json(await service.crearNota(db, sesionDe(req).email, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_notas_crear');
+    }
+  });
+
+  router.patch('/ausencias/notas/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.editarNota(db, sesionDe(req).email, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_notas_editar');
+    }
+  });
+
+  router.delete('/ausencias/notas/:id', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      await service.borrarNota(db, sesionDe(req).email, req.params.id);
+      res.status(204).end();
+    } catch (e) {
+      sendError(res, e, 'ausencias_notas_borrar');
+    }
+  });
+
+  router.get('/ausencias/notas/:id/imagen', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const imagen = await service.descargarImagenDeNota(db, sesionDe(req).email, req.params.id);
+      res.setHeader('Content-Type', imagen.mime);
+      // `inline` a secas, sin el nombre: lo escribe el cliente, y un carácter
+      // fuera de ASCII en una cabecera hace que Node lance (un 500). Para
+      // pintarla en la página no hace falta.
+      res.setHeader('Content-Disposition', 'inline');
+      // El tipo ya está comprobado por sus primeros bytes al subirla; esto
+      // impide además que el navegador se ponga a adivinar otro.
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(imagen.contenido);
+    } catch (e) {
+      sendError(res, e, 'ausencias_notas_imagen');
+    }
+  });
+
   return router;
 }

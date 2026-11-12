@@ -54,3 +54,13 @@ describe('migración 076 (notas personales)', () => {
     );
   });
 });
+
+describe('index.ts', () => {
+  it('CANDADO: /api/ausencias/notas tiene su parser de 12 MB, registrado ANTES del global de 2 MB', () => {
+    // Si el de 2 MB corre primero, cualquier foto de móvil da 413 y este nunca
+    // llega a verla. router.test.ts monta su propia app y no puede cazarlo.
+    expect(leer('../index.ts')).toMatch(
+      /app\.use\('\/api\/ausencias\/notas', express\.json\(\{ limit: '12mb' \}\)\);[\s\S]*app\.use\(express\.json\(\{ limit: '2mb' \}\)\);/,
+    );
+  });
+});
