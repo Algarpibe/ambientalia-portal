@@ -20,6 +20,7 @@ import { crearEquiposTaller, createEquiposTallerRouter } from './equipos/index.j
 import { createDataRouter } from './data.router.js';
 import { createHealthRouter } from './health.js';
 import { cabecerasDeSeguridad } from './cabeceras-seguridad.js';
+import { errorEnJson } from './errores-json.js';
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -159,6 +160,10 @@ initDb()
     equiposTaller.iniciarProgramador();
     // Endpoints de datos con guard por-app (SEC-210/211, PRIV-810).
     app.use('/api', createDataRouter(getHubPool()));
+    // El ÚLTIMO: lo que acabe en next(err) —un JSON roto, un cuerpo demasiado grande,
+    // un fallo sin capturar de una ruta— sale como JSON y sin traza, aunque NODE_ENV
+    // no sea «production». Ver errores-json.ts.
+    app.use(errorEnJson);
     app.listen(PORT, () => console.log(`hub-api listening on :${PORT}`));
   })
   .catch((e) => {
