@@ -107,13 +107,19 @@ export default function PanelNotas({ activo }: Props) {
   function borrar(id: string) {
     setOcupada(id);
     setErrorAccion(null);
+    const quitarDeLaLista = () => {
+      setNotas((ns) => ns.filter((x) => x.id !== id));
+      setABorrar(null);
+      setImagen((i) => (i?.notaId === id ? null : i));
+    };
     borrarNota(id)
-      .then(() => {
-        setNotas((ns) => ns.filter((x) => x.id !== id));
-        setABorrar(null);
-        setImagen((i) => (i?.notaId === id ? null : i));
+      .then(quitarDeLaLista)
+      .catch((e: Error) => {
+        // Ya la borró otra pestaña: el fin que se buscaba está cumplido, así que
+        // también sale de la lista, aunque el aviso cuente por qué.
+        if (e.message === 'nota_no_encontrada') quitarDeLaLista();
+        setErrorAccion(textoDeErrorDeNota(e.message));
       })
-      .catch((e: Error) => setErrorAccion(textoDeErrorDeNota(e.message)))
       .finally(() => setOcupada((o) => (o === id ? null : o)));
   }
 
