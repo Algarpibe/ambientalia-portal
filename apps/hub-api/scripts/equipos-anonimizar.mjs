@@ -306,22 +306,87 @@ export function anonimizar(reales) {
  * OCR (así se encuentran escritos de cualquier forma: «0» u «O», «5» o «S»…).
  */
 export function valoresReales(reales) {
-  const { roles, escaneos } = reales;
+  return [...new Set([...valoresDeRoles(reales), ...clasesDeEscaneo(reales.escaneos)])].filter((x) => x.length >= 4);
+}
+/** Los seriales y los nombres que se conocen por su rol (y los seriales de tickets.json). */
+function valoresDeRoles(reales) {
+  const { roles } = reales;
   const v = new Set();
   for (const s of Object.values(roles.seriales || {})) v.add(cls(s));
   for (const c of seriales(reales.tickets)) v.add(c);
   for (const c of Object.values(roles.clientes || {})) v.add(cls(key(c)));
   for (const k of Object.keys(roles.remisiones || {})) v.add(cls(key(k)));
+  return v;
+}
+/** Lo que los escaneos reales tomaron por serial (`t`), menos lo que el formato reconoce. */
+function clasesDeEscaneo(escaneos) {
+  const v = new Set();
   for (const x of [...escaneos.ilegibles, ...escaneos.legibles, escaneos.fechaErrada])
     for (const c of x.t || []) if (c.length >= 5 && !protegida(c) && !deVocabulario(c)) v.add(c);
-  return [...v].filter((x) => x.length >= 4);
+  return v;
+}
+/** Una clase que se lee entera como palabra: sin más dígitos que 0 y 1 (O e I en el OCR) y con alguna letra que no puede ser un dígito. */
+const seLeeComoPalabra = (c) => /^[A-Z01]+$/.test(c) && [...c].some((x) => LETRAS_PLANAS.includes(x));
+/**
+ * Las clases que SOLO salen de los escaneos y se leen como palabra. scanParse (reglas.ts)
+ * toma por serial un token sin dígitos reales cuando va solo en su línea y en mayúsculas,
+ * y así entra alguna palabra común. Buscarlas como subcadena las encontraba dentro de
+ * cualquier identificador (fooOpen, isFoo) y en cualquier frase; se buscan como las
+ * escribiría el OCR: palabra entera y en mayúsculas. Si la clase es también un serial o un
+ * nombre de los roles, no está aquí y se sigue buscando como subcadena, en cualquier caja.
+ */
+function palabrasDeEscaneo(reales) {
+  const deRoles = valoresDeRoles(reales);
+  return new Set([...clasesDeEscaneo(reales.escaneos)].filter((c) => seLeeComoPalabra(c) && !deRoles.has(c)));
 }
 /** Un texto entero pasado a clase OCR, sin quitar separadores (los valores no los llevan). */
 const claseTexto = (t) => key(t).replace(/O/g, '0').replace(/I/g, '1').replace(/5/g, 'S').replace(/7/g, 'T').replace(/8/g, 'B');
+/**
+ * Las palabras enteras del texto escritas en mayúsculas, en clase OCR, con la posición de la
+ * primera. El «_» cuenta como parte de la palabra: IS_FOO es un identificador, no «FOO».
+ */
+function palabrasEnMayusculas(t) {
+  const m = new Map();
+  for (const p of t.matchAll(/[\p{L}\p{M}\p{N}_]+/gu)) {
+    if (p[0] !== p[0].toUpperCase()) continue;
+    const c = claseTexto(p[0]);
+    if (!m.has(c)) m.set(c, p.index);
+  }
+  return m;
+}
 
-/** Busca valores reales en los ficheros dados. Devuelve «ruta: valor» por cada hallazgo. */
+/**
+ * Dónde está un ticket real en el texto, o -1.
+ *
+ * En un fichero de DATOS (.json, que es lo que escribe `generar`) cuenta cualquier aparición
+ * que no forme parte de un número más largo: el anonimizador cambia TODO número de 3–4 cifras
+ * del rango de tickets, así que uno real que quede ahí es una fuga sin más.
+ *
+ * En el resto (código, documentación, SVG) un número de tres cifras sale por todas partes
+ * (recuentos, listas, decimales, versiones) y solo hay 800 tickets posibles: buscarlo suelto
+ * daba falsos positivos. Ahí cuenta solo con contexto de ticket —«#962», «ticket 962»,
+ * «Ticket #962», «ticketNumber: '962'», «tiquete nº 962»— o solo en su línea, que es como lo
+ * imprime una remisión y como lo lee scanParse. Y nunca como parte de un número más largo,
+ * un decimal o un código (#9620, 962.5, #962a3f).
+ */
+function posicionTicket(t, x, deDatos) {
+  if (deDatos) {
+    const m = new RegExp('(^|[^0-9])' + x + '([^0-9]|$)').exec(t);
+    return m ? m.index + m[1].length : -1;
+  }
+  const antes = String.raw`#|\b(?:tickets?|tiquetes?|tkt)[A-Za-z_]*["']?(?:[ \t]*(?:[:=#]|n[º°o.]+))?[ \t]*["']?`;
+  const re = new RegExp(String.raw`((?:${antes})[ \t]*)(?<!\p{N})${x}(?![\p{L}\p{N}]|[.,]\p{N})|^([ \t]*)${x}[ \t]*$`, 'imu');
+  const m = re.exec(t);
+  return m ? m.index + (m[1] ?? m[2]).length : -1;
+}
+
+/**
+ * Busca valores reales en los ficheros dados. Devuelve, por cada hallazgo, el fichero y la
+ * posición y longitud de la coincidencia; nunca el valor.
+ */
 export function buscarFugas(reales, rutas) {
   const valores = valoresReales(reales);
+  const palabras = palabrasDeEscaneo(reales);
   const tickets = Object.values(reales.roles.tickets || {}).map(String);
   const ficheros = [];
   const recorrer = (p) => {
@@ -333,14 +398,18 @@ export function buscarFugas(reales, rutas) {
   for (const f of ficheros) {
     const t = readFileSync(f, 'utf8');
     const c = claseTexto(t);
+    let mayusculas; // se calcula solo si hace falta
     // Nunca se devuelve el valor: solo el fichero y dónde está la coincidencia.
     for (const x of valores) {
-      const pos = c.indexOf(x);
+      // Las palabras del escaneo, enteras y en mayúsculas; los seriales y los nombres, como
+      // subcadena y en cualquier caja (estricto: también pegados a otra palabra).
+      const pos = palabras.has(x) ? ((mayusculas ??= palabrasEnMayusculas(t)).get(x) ?? -1) : c.indexOf(x);
       if (pos >= 0) fugas.push(f + ': coincidencia en la posición ' + pos + ' (longitud ' + x.length + ')');
     }
+    const deDatos = /\.json$/i.test(f);
     for (const x of tickets) {
-      const m = new RegExp('(^|[^0-9])' + x + '([^0-9]|$)').exec(t);
-      if (m) fugas.push(f + ': coincidencia de ticket en la posición ' + (m.index + m[1].length) + ' (longitud ' + x.length + ')');
+      const pos = posicionTicket(t, x, deDatos);
+      if (pos >= 0) fugas.push(f + ': coincidencia de ticket en la posición ' + pos + ' (longitud ' + x.length + ')');
     }
   }
   return fugas;
