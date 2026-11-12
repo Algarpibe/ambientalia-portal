@@ -28,3 +28,4 @@ export * from './api/registro';
 export * from './api/organigrama';
 export * from './api/retiro';
 export * from './api/kpis';
+export * from './api/notas';

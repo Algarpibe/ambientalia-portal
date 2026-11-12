@@ -6,6 +6,7 @@ import * as historico from './historico';
 import * as http from './http';
 import * as kpis from './kpis';
 import * as modificaciones from './modificaciones';
+import * as notas from './notas';
 import * as organigrama from './organigrama';
 import * as registro from './registro';
 import * as retiro from './retiro';
@@ -41,6 +42,7 @@ const TROZOS: Record<string, Record<string, unknown>> = {
   historico,
   kpis,
   modificaciones,
+  notas,
   organigrama,
   registro,
   retiro,
