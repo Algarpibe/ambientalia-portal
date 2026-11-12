@@ -53,14 +53,16 @@ En Linux: `google-chrome --kiosk --noerrdialogs --user-data-dir=$HOME/tv-taller 
 
 ## Tema día / noche
 
-- Por defecto es **automático**: noche de 18:00 a 06:00, hora de Bogotá, con un fundido suave. Las horas se cambian en Ajustes → «Equipos en taller · Tablero».
-- Para forzarlo, añade `?tema=` **antes** del `#`:
+- Por defecto es **Día**, a cualquier hora.
+- Se elige para todas las TV en Ajustes → «Equipos en taller · Tablero» → «Tema de la TV»: **Día**, **Noche** o **Automático (por horario)**. Se guarda con su propio «Guardar» y las TV lo toman en el siguiente refresco (60 s), sin recargar.
+- **Automático**: noche de 18:00 a 06:00, hora de Bogotá, con un fundido suave al cambiar. Las horas («Noche desde» / «Noche hasta», en el mismo panel) **solo cuentan en Automático**.
+- Para una TV concreta, `?tema=` **antes** del `#` manda sobre el ajuste:
 
   ```text
   https://<portal>/equipos-taller/tv?tema=noche#k=tvk_EJEMPLO_NO_ES_UNA_LLAVE_REAL_000000000
   ```
 
-  Valores: `dia`, `noche` o `auto`. Cualquier otro valor se trata como `auto`.
+  Valores: `dia`, `noche` o `auto`. Cualquier otro valor se ignora y vale el ajuste.
 
 ## Cambiar la llave sin dejar la TV a oscuras
 

@@ -125,15 +125,16 @@ Una vista más sobre la misma foto, **de solo lectura** (cambio SDD `tablero-kan
 
 | Dónde | Qué |
 |---|---|
-| Botones «Tabla \| Tablero» de la app (`?vista=tablero`) | El tablero dentro del portal, para todos los que tienen la app. |
-| `/equipos-taller/tv` | La TV: pantalla completa, tema día/noche, con sesión o con llave de kiosco. Guía: [equipos-taller-kiosco.md](equipos-taller-kiosco.md). |
+| Botones «Tabla \| Tablero» de la app (`?vista=tablero`) | El tablero dentro del portal, para todos los que tienen la app. Con el tablero a la vista salen los botones «Día \| Noche»: Día por defecto, y cada dispositivo recuerda el que se eligió (en el navegador). No sigue la hora ni el tema de la TV. |
+| `/equipos-taller/tv` | La TV: pantalla completa, con sesión o con llave de kiosco. Tema según el ajuste «Tema de la TV» (Día por defecto); `?tema=` manda en cada TV. Guía: [equipos-taller-kiosco.md](equipos-taller-kiosco.md). |
 | `/equipos-taller/mis-equipos` | «Mis equipos» en el móvil: los equipos del técnico, agrupados por columna. Le reconoce por el nombre del portal; si no coincide con ningún responsable de Desk, o con varios, pregunta «¿Quién eres?» y el móvil lo recuerda. Sin botones de cambio de estado. |
 
 - **Columnas** (`nucleo/taller-columns.ts`): Entrada – Remisión (sin ticket, Ticket creado, OV asignada, Remisión creada), Rev. / Diagnóstico, Notificación cliente, En proceso, Servicio externo y Por entregar. El reparto de los 26 estados de Desk está en ese archivo; una prueba falla si alguno queda sin columna. Un estado desconocido va a Rev. / Diagnóstico con una etiqueta que lo nombra.
 - **Tarjetas**: solo las filas «En taller» y «Servicio externo», ya con los ajustes manuales aplicados. La suma de las columnas es igual a esos dos contadores. Las de «Servicio externo» van a su columna sea cual sea el estado del ticket.
 - **Contadores**: los mismos `VISTAS` de la tabla (`nucleo/taller-board.ts`). Cuáles 5 se ven se elige en Ajustes.
 - **Días**: de calendario, desde la entrada hasta hoy en Bogotá. Semáforo verde / ámbar / rojo con los umbrales de Ajustes (30 y 90 por defecto).
-- **Ajustes** (solo admin): Ajustes → «Equipos en taller · Tablero» (umbrales, horas del tema noche, 5 contadores) y «Equipos en taller · Kiosco» (llaves de la TV). Se guardan en `portal.equipos_tablero_config` (una fila) y `portal.equipos_kiosco` (migración 074).
+- **Ajustes** (solo admin): Ajustes → «Equipos en taller · Tablero» (umbrales, tema de la TV, horas del tema noche, 5 contadores) y «Equipos en taller · Kiosco» (llaves de la TV). Se guardan en `portal.equipos_tablero_config` (una fila) y `portal.equipos_kiosco` (migración 074).
+- **Tema de la TV**: Día (por defecto), Noche o Automático (por horario). Las horas de noche solo cuentan en Automático. Columna `tema_tv` de `portal.equipos_tablero_config` (migración 075; la fila que ya hubiera queda en Día). Viaja en `tablero` de `GET /api/equipos-taller` y en `ajustes` de la respuesta de kiosco, así que hub-api se despliega antes que el portal.
 - **Datos de la TV con llave**: `GET /api/equipos-taller/kiosco/tablero`, cabecera `X-Kiosk-Token`. Devuelve solo el tablero ya armado; ninguna otra ruta acepta la llave.
 
 ## Permisos
