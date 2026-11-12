@@ -142,7 +142,13 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   const rotuloCls = 'mb-1 block font-medium text-gray-700';
 
   return (
-    <form ref={formRef} onSubmit={guardar} className="mb-4 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+    // scroll-mt-28: la cabecera de la app es `sticky top-0` (App.tsx); sin este
+    // margen, el scrollIntoView de arriba dejaría el título y el buscador debajo.
+    <form
+      ref={formRef}
+      onSubmit={guardar}
+      className="mb-4 scroll-mt-28 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4"
+    >
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold text-gray-900">{nota ? 'Editar nota' : 'Nueva nota'}</h4>
         {/* Mientras se guarda no se cierra: un guardado tardío cerraría el
