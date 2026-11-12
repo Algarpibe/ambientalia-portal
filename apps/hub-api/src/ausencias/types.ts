@@ -883,3 +883,68 @@ export type Movimiento =
       observaciones: string | null;
     })
   | (MovimientoBase & { clase: 'fechas' | 'anulacion'; estado: EstadoModificacion });
+
+// ── Notas personales del administrador (migración 076) ─────────────────────
+
+/** `retraso` = «Informar retraso», `solicitud` = «Solicitudes», `otro` = «Otros». */
+export const CATEGORIAS_NOTA = ['retraso', 'solicitud', 'otro'] as const;
+export type CategoriaNota = (typeof CATEGORIAS_NOTA)[number];
+
+export const ESTADOS_NOTA = ['abierta', 'resuelta'] as const;
+export type EstadoNota = (typeof ESTADOS_NOTA)[number];
+
+/** Los tres formatos que un navegador pinta sin sorpresas. Nada de SVG: lleva script. */
+export const MIMES_IMAGEN_NOTA = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export type MimeImagenNota = (typeof MIMES_IMAGEN_NOTA)[number];
+
+/** Lo que la lista enseña de la imagen: sin los bytes, que van por su propia ruta. */
+export interface ImagenDeNota {
+  id: string;
+  nombreArchivo: string;
+  mime: MimeImagenNota;
+  bytes: number;
+}
+
+export interface Nota {
+  id: string;
+  /** `null` si la ficha se borró después: la nota sobrevive con el nombre copiado. */
+  empleadoId: string | null;
+  empleadoNombre: string;
+  categoria: CategoriaNota;
+  /** `YYYY-MM-DD`: el día al que se refiere la nota, no cuándo se escribió. */
+  fecha: string;
+  comentario: string;
+  estado: EstadoNota;
+  resueltaAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  imagen: ImagenDeNota | null;
+}
+
+/** Una imagen ya validada y decodificada, lista para el INSERT. */
+export interface ImagenNuevaDeNota {
+  nombreArchivo: string;
+  mime: MimeImagenNota;
+  contenido: Buffer;
+}
+
+export interface NuevaNota {
+  empleadoId: string;
+  categoria: CategoriaNota;
+  fecha: string;
+  comentario: string;
+  imagen: ImagenNuevaDeNota | null;
+}
+
+/**
+ * Lo que cambia una edición. Ausente = no se toca. En `imagen`, `null` = quitarla
+ * y un valor = sustituirla: por eso es `?:` y además admite `null`.
+ */
+export interface CambioNota {
+  empleadoId?: string;
+  categoria?: CategoriaNota;
+  fecha?: string;
+  comentario?: string;
+  estado?: EstadoNota;
+  imagen?: ImagenNuevaDeNota | null;
+}
