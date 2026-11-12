@@ -24,7 +24,6 @@ interface Props {
 
 export default function FormularioNota({ empleados, nota, onGuardada, onCancelar }: Props) {
   const [empleadoId, setEmpleadoId] = useState(nota?.empleadoId ?? '');
-  const [busqueda, setBusqueda] = useState('');
   const [categoria, setCategoria] = useState<CategoriaNota>(nota?.categoria ?? 'solicitud');
   const [fecha, setFecha] = useState(nota?.fecha ?? hoyEnColombia());
   const [comentario, setComentario] = useState(nota?.comentario ?? '');
@@ -34,7 +33,7 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
-  const busquedaRef = useRef<HTMLInputElement>(null);
+  const personaRef = useRef<HTMLSelectElement>(null);
   const archivoRef = useRef<HTMLInputElement>(null);
   const id = useId();
   const idPersona = `${id}-persona`;
@@ -47,7 +46,7 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
   // `key`, así que esto corre una vez por apertura.
   useEffect(() => {
     formRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    busquedaRef.current?.focus({ preventScroll: true });
+    personaRef.current?.focus({ preventScroll: true });
   }, []);
 
   // La URL de la vista previa retiene el fichero en memoria hasta revocarla.
@@ -61,14 +60,12 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
     return () => URL.revokeObjectURL(url);
   }, [archivo]);
 
-  // La persona elegida se queda en la lista aunque no case con la búsqueda: si
-  // desapareciera del <select>, el navegador enseñaría otra que nadie eligió.
-  const opciones = useMemo(() => {
-    const q = busqueda.trim().toLocaleLowerCase('es');
-    return empleados
-      .filter((e) => e.id === empleadoId || !q || e.nombreCompleto.toLocaleLowerCase('es').includes(q))
-      .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es'));
-  }, [empleados, busqueda, empleadoId]);
+  // Por orden alfabético: el desplegable es la única forma de elegir, así que se
+  // busca a ojo (o tecleando la inicial con el desplegable enfocado).
+  const opciones = useMemo(
+    () => [...empleados].sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es')),
+    [empleados],
+  );
 
   // Una nota cuya persona ya no es una ficha activa (retirada o borrada): se
   // enseña su nombre copiado para que el <select> no aparente otra cosa.
@@ -143,7 +140,7 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
 
   return (
     // scroll-mt-28: la cabecera de la app es `sticky top-0` (App.tsx); sin este
-    // margen, el scrollIntoView de arriba dejaría el título y el buscador debajo.
+    // margen, el scrollIntoView de arriba dejaría el título y la persona debajo.
     <form
       ref={formRef}
       onSubmit={guardar}
@@ -169,17 +166,13 @@ export default function FormularioNota({ empleados, nota, onGuardada, onCancelar
           <label htmlFor={idPersona} className={rotuloCls}>
             Persona que lo solicita
           </label>
-          {/* Sin rótulo visible: conserva su aria-label, que aquí no sobra. */}
-          <input
-            ref={busquedaRef}
-            type="search"
-            aria-label="Buscar persona"
-            placeholder="Buscar por nombre…"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className={`${campoCls} mb-1`}
-          />
-          <select id={idPersona} value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)} className={campoCls}>
+          <select
+            ref={personaRef}
+            id={idPersona}
+            value={empleadoId}
+            onChange={(e) => setEmpleadoId(e.target.value)}
+            className={campoCls}
+          >
             {fueraDeLaLista ? (
               <option value={nota.empleadoId ?? ''}>{nota.empleadoNombre} (ya no está en la plantilla)</option>
             ) : (

@@ -122,7 +122,8 @@ administración del router.
 - `'notas'` se añade a `PESTANAS_VALIDAS` (abre con `/ausencias#notas`). La pestaña se
   muestra solo con `contexto.esAdmin`, junto a Empleados y Organigrama.
 - **Alta**, plegable bajo un botón «Nueva nota»:
-  - Persona: selector con búsqueda sobre las fichas activas (la lista que ya usa Empleados).
+  - Persona: desplegable con las fichas activas por orden alfabético (la lista que ya usa
+    Empleados). Sin buscador: se quitó a petición del usuario tras verlo en producción.
   - Categoría: tres botones (*Informar retraso* / *Solicitudes* / *Otros*).
   - Fecha: hoy por defecto.
   - Comentario: obligatorio, con contador hasta 2000.
