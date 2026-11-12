@@ -1,4 +1,4 @@
-// Panel de ajustes del tablero de «Equipos en taller» (solo admin): umbrales de color, tema de la TV,
+// Panel de ajustes del tablero de «Equipos en taller» (solo admin): umbrales de color, tema del tablero,
 // horas del tema nocturno (solo en «Automático») e indicadores de la cabecera. Vive en Ajustes del
 // portal. Cada fila es un borrador que se guarda con su propio «Guardar», activo solo si esa fila
 // cambió y el resultado completo es válido (misma regla que `validarAjustesTablero`, que el servidor
@@ -29,7 +29,7 @@ const NOMBRE_TEMA: Record<ModoTemaTv, string> = { dia: 'Día', noche: 'Noche', a
 
 const FILAS: { fila: Fila; titulo: string; guardada: string; fallo: string; error: string }[] = [
   { fila: 'umbrales', titulo: 'umbrales', guardada: 'Umbrales guardados.', fallo: 'los umbrales', error: 'Los umbrales son días enteros desde 1, y el rojo debe ser mayor que el ámbar.' },
-  { fila: 'tema', titulo: 'tema de la TV', guardada: 'Tema de la TV guardado.', fallo: 'el tema de la TV', error: 'Elige Día, Noche o Automático.' },
+  { fila: 'tema', titulo: 'tema del tablero', guardada: 'Tema del tablero guardado.', fallo: 'el tema del tablero', error: 'Elige Día, Noche o Automático.' },
   { fila: 'horas', titulo: 'horas nocturnas', guardada: 'Horas nocturnas guardadas.', fallo: 'las horas nocturnas', error: 'Las horas son números enteros de 0 a 23.' },
   { fila: 'kpis', titulo: 'indicadores', guardada: 'Indicadores guardados.', fallo: 'los indicadores', error: 'Elige exactamente 5 indicadores distintos.' },
 ];
@@ -95,7 +95,7 @@ export default function PanelTablero({ api, avisar }: {
                 {f.fila === 'umbrales' ? <>{numero('Umbral ámbar (días)', 'umbralAmbar')}{numero('Umbral rojo (días)', 'umbralRojo')}</> : null}
                 {f.fila === 'tema' ? (
                   <fieldset className="flex-1 min-w-[16rem]">
-                    <legend className="text-slate-600">Tema de la TV</legend>
+                    <legend className="text-slate-600">Tema del tablero</legend>
                     <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1">{MODOS_TEMA_TV.map((m) => (
                       <label key={m} className="flex items-center gap-2">
                         <input type="radio" name="temaTv" checked={b.temaTv === m} onChange={() => cambiar({ temaTv: m })} />
@@ -107,7 +107,7 @@ export default function PanelTablero({ api, avisar }: {
                 {f.fila === 'horas' ? (
                   <>
                     {numero('Noche desde (hora)', 'nocheDesde')}{numero('Noche hasta (hora)', 'nocheHasta')}
-                    <p className="basis-full text-slate-500 order-last">Solo se usan con el tema de la TV en «Automático».</p>
+                    <p className="basis-full text-slate-500 order-last">Solo se usan con el tema del tablero en «Automático».</p>
                   </>
                 ) : null}
                 {f.fila === 'kpis' ? (

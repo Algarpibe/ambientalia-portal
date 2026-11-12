@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Panel de ajustes del tablero (Ajustes del portal): cada fila (umbrales, tema de la TV, horas,
+// Panel de ajustes del tablero (Ajustes del portal): cada fila (umbrales, tema del tablero, horas,
 // indicadores) se guarda con su propio «Guardar», solo si cambió y el resultado es válido. Todo ficticio.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -27,7 +27,7 @@ describe('PanelTablero', () => {
     const { guardar, avisos } = montar();
     await screen.findByLabelText('Umbral ámbar (días)');
     expect(campo('Umbral rojo (días)').value).toBe('90');
-    for (const f of ['umbrales', 'tema de la TV', 'horas nocturnas', 'indicadores']) expect(guardarDe(f).disabled).toBe(true);
+    for (const f of ['umbrales', 'tema del tablero', 'horas nocturnas', 'indicadores']) expect(guardarDe(f).disabled).toBe(true);
 
     fireEvent.change(campo('Umbral ámbar (días)'), { target: { value: '20' } });
     expect(guardarDe('umbrales').disabled).toBe(false);
@@ -62,30 +62,30 @@ describe('PanelTablero', () => {
     await waitFor(() => expect(guardar).toHaveBeenCalledWith({ kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'retirado'] }));
   });
 
-  it('tema de la TV: Día por defecto; elegir otro activa solo su «Guardar» y envía solo el tema', async () => {
+  it('tema del tablero: Día por defecto; elegir otro activa solo su «Guardar» y envía solo el tema', async () => {
     const { guardar, avisos } = montar();
-    const tema = await screen.findByRole('group', { name: 'Tema de la TV' });
+    const tema = await screen.findByRole('group', { name: 'Tema del tablero' });
     const opcion = (n: string) => within(tema).getByRole('radio', { name: n }) as HTMLInputElement;
     expect(opcion('Día').checked).toBe(true);
     expect([opcion('Noche').checked, opcion('Automático (por horario)').checked]).toEqual([false, false]);
 
     fireEvent.click(opcion('Noche'));
-    expect(guardarDe('tema de la TV').disabled).toBe(false);
+    expect(guardarDe('tema del tablero').disabled).toBe(false);
     fireEvent.click(opcion('Día'));
-    expect(guardarDe('tema de la TV').disabled).toBe(true);
+    expect(guardarDe('tema del tablero').disabled).toBe(true);
 
     fireEvent.click(opcion('Automático (por horario)'));
     for (const f of ['umbrales', 'horas nocturnas', 'indicadores']) expect(guardarDe(f).disabled).toBe(true);
-    fireEvent.click(guardarDe('tema de la TV'));
+    fireEvent.click(guardarDe('tema del tablero'));
     await waitFor(() => expect(guardar).toHaveBeenCalledWith({ temaTv: 'auto' }));
-    await waitFor(() => expect(guardarDe('tema de la TV').disabled).toBe(true));
-    expect(avisos).toEqual(['info: Tema de la TV guardado.']);
+    await waitFor(() => expect(guardarDe('tema del tablero').disabled).toBe(true));
+    expect(avisos).toEqual(['info: Tema del tablero guardado.']);
   });
 
   it('las horas nocturnas avisan de que solo cuentan en Automático', async () => {
     montar();
     await screen.findByLabelText('Noche desde (hora)');
-    expect(screen.getByText(/Solo se usan con el tema de la TV en «Automático»/)).toBeTruthy();
+    expect(screen.getByText(/Solo se usan con el tema del tablero en «Automático»/)).toBeTruthy();
   });
 
   it('si el servidor rechaza, avisa y conserva el borrador para reintentar', async () => {

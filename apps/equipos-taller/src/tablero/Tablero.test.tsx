@@ -168,19 +168,24 @@ describe('Tablero (con sondeo)', () => {
     expect(screen.getAllByRole('region')).toHaveLength(6);
     expect(screen.getByText('menos de 30 d')).toBeTruthy();
   });
-  it('sin `tema` es día a cualquier hora: no sigue el horario ni el tema de la TV', async () => {
+  it('sin `tema` sigue el «Tema del tablero» de Ajustes: Día, Noche o Automático por horario', async () => {
     const tema = () => document.querySelector('.tt-tablero')?.getAttribute('data-tema');
     vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z')); // 19:43 en Bogotá, dentro del horario de noche
-    render(<Tablero api={apiCon(resp())} />);
-    await avanzar(0);
-    expect(tema()).toBe('dia');
-    cleanup();
-    for (const temaTv of ['noche', 'auto'] as const) {
-      render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv } }))} />);
+    const casos = [
+      [undefined, 'dia'], // sin ajustes del servidor: Día
+      ['dia', 'dia'], ['noche', 'noche'], ['auto', 'noche'],
+    ] as const;
+    for (const [temaTv, esperado] of casos) {
+      const tablero = temaTv ? { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv } : undefined;
+      render(<Tablero api={apiCon(resp(tablero ? { tablero } : {}))} />);
       await avanzar(0);
-      expect(tema(), temaTv).toBe('dia');
+      expect(tema(), String(temaTv)).toBe(esperado);
       cleanup();
     }
+    vi.setSystemTime(AHORA); // 15:00 en Bogotá: Automático es día
+    render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, temaTv: 'auto' } }))} />);
+    await avanzar(0);
+    expect(tema()).toBe('dia');
   });
   it('con `tema` pinta ese tema, también mientras carga', async () => {
     render(<Tablero api={apiCon(resp())} tema="noche" />); // 15:00 en Bogotá

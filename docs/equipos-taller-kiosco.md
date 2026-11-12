@@ -54,7 +54,7 @@ En Linux: `google-chrome --kiosk --noerrdialogs --user-data-dir=$HOME/tv-taller 
 ## Tema día / noche
 
 - Por defecto es **Día**, a cualquier hora.
-- Se elige para todas las TV en Ajustes → «Equipos en taller · Tablero» → «Tema de la TV»: **Día**, **Noche** o **Automático (por horario)**. Se guarda con su propio «Guardar» y las TV lo toman en el siguiente refresco (60 s), sin recargar.
+- Se elige en Ajustes → «Equipos en taller · Tablero» → «Tema del tablero»: **Día**, **Noche** o **Automático (por horario)**. Vale para todas las TV y para la pestaña «Tablero» de la app. Se guarda con su propio «Guardar» y las pantallas lo toman en el siguiente refresco (60 s), sin recargar.
 - **Automático**: noche de 18:00 a 06:00, hora de Bogotá, con un fundido suave al cambiar. Las horas («Noche desde» / «Noche hasta», en el mismo panel) **solo cuentan en Automático**.
 - Para una TV concreta, `?tema=` **antes** del `#` manda sobre el ajuste:
 

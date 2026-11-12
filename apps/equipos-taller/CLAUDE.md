@@ -18,7 +18,7 @@ Pantalla de la app `equipos-taller` del portal: qué equipos están físicamente
 - **Sin tarjeta en el Dashboard:** la app sale en la barra lateral (`apps/portal/src/lib/apps.ts`) y en Aplicaciones.
 - **Tablero kanban** (cambio SDD `tablero-kanban-taller`; artefactos en `openspec/changes/tablero-kanban-taller/`, fuera de git):
   - Modelo puro en el núcleo: `nucleo/taller-board.ts` (columnas, tarjetas, días, semáforo, KPIs, validación de ajustes) y `nucleo/taller-columns.ts` (reparto de los estados de Desk; una prueba exige cubrir todos).
-  - Pantallas en `src/tablero/` (`Tablero.tsx`, `temas.ts`, `medidas.ts`, `useSondeo.ts`, CSS) más `src/App.tsx` (botones «Tabla | Tablero» y «Día | Noche»), `src/TvEquipos.tsx` (TV), `src/MisEquipos.tsx` + `src/tecnico.ts` + `src/EscanearSerial.tsx` («Mis equipos») y `src/PanelTablero.tsx` / `src/PanelKiosco.tsx` (Ajustes del portal).
+  - Pantallas en `src/tablero/` (`Tablero.tsx`, `temas.ts`, `medidas.ts`, `useSondeo.ts`, CSS) más `src/App.tsx` (botones «Tabla | Tablero»; el tema sale del ajuste «Tema del tablero», sin selector en la pestaña), `src/TvEquipos.tsx` (TV), `src/MisEquipos.tsx` + `src/tecnico.ts` + `src/EscanearSerial.tsx` («Mis equipos») y `src/PanelTablero.tsx` / `src/PanelKiosco.tsx` (Ajustes del portal).
   - Rutas del portal fuera del shell: `apps/portal/src/components/RutaTableroTv.tsx` y `RutaMisEquipos.tsx`.
   - Servidor: `servicio-tablero.ts`, `repo-tablero.ts`, `router-kiosco.ts` (la ÚNICA ruta que acepta la llave de kiosco) y migraciones 074 y 075 (tema de la TV). Operación: `docs/equipos-taller-kiosco.md`.
 

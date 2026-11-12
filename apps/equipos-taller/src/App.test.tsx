@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-// App: el conmutador «Tabla | Tablero» y el tema «Día | Noche» del tablero. La tabla es la vista por
-// defecto y no cambia; el tablero se calcula en el navegador con el núcleo compartido. Todo ficticio.
+// App: el conmutador «Tabla | Tablero». La tabla es la vista por defecto y no cambia; el tablero se
+// calcula en el navegador con el núcleo compartido y su tema sale de Ajustes. Todo ficticio.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { EST, type Fila, type RespuestaEquipos } from './nucleo';
 import type { ApiEquipos } from './api';
-import App, { CLAVE_TEMA_TABLERO } from './App';
+import App from './App';
 
 const fila = (sn: string, d: string, extra: Partial<Fila> = {}): Fila =>
   ({ id: 'F' + sn, d, c: 'Cliente A', sn, est: EST.TALLER, src: '', why: [], x: null, z: null, zc: false, pa: [], xd: '', eq: 'EDM180C', ...extra });
@@ -83,61 +83,33 @@ describe('App: conmutador Tabla | Tablero', () => {
   });
 });
 
-describe('App: tema «Día | Noche» de la pestaña Tablero', () => {
-  // Almacenamiento en memoria: el localStorage de jsdom choca con el global de Node 22+.
-  const memoria = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }; };
-  beforeEach(() => { vi.stubGlobal('localStorage', memoria()); });
-  afterEach(() => { vi.unstubAllGlobals(); });
-  const temas = () => screen.getByRole('group', { name: 'Tema del tablero' });
-  const temaDe = (n: string) => within(temas()).getByRole('button', { name: n });
+describe('App: el tema del tablero se configura en Ajustes, no en la pestaña', () => {
   const pintado = async () => {
     await screen.findAllByRole('region');
     return document.querySelector('.tt-tablero')?.getAttribute('data-tema');
   };
-
-  it('solo aparece con el tablero a la vista, y por defecto es Día', async () => {
-    render(<App api={api()} />);
-    await screen.findByRole('navigation', { name: 'Vistas' });
-    expect(screen.queryByRole('group', { name: 'Tema del tablero' })).toBeNull();
-    fireEvent.click(boton('Tablero'));
-    expect(await pintado()).toBe('dia');
-    expect(temaDe('Día').getAttribute('aria-pressed')).toBe('true');
-    expect(temaDe('Noche').getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(boton('Tabla'));
-    expect(screen.queryByRole('group', { name: 'Tema del tablero' })).toBeNull();
+  const conTema = (temaTv: 'dia' | 'noche'): ApiEquipos => ({
+    ...api(),
+    estado: async () => ({ ...structuredClone(respuesta), tablero: { umbralAmbar: 30, umbralRojo: 90, nocheDesde: 18, nocheHasta: 6, kpis: ['en_taller', 'revisar', 'ticket_abierto', 'externo', 'entregado'], temaTv } }),
   });
 
-  it('«Noche» pinta el tablero de noche y el dispositivo lo recuerda; «Día» lo devuelve', async () => {
+  it('no hay selector de tema junto a «Tabla | Tablero»', async () => {
     history.replaceState(null, '', '/equipos-taller?vista=tablero');
     render(<App api={api()} />);
     await pintado();
-    fireEvent.click(temaDe('Noche'));
-    expect(await pintado()).toBe('noche');
-    expect(temaDe('Noche').getAttribute('aria-pressed')).toBe('true');
-    expect(localStorage.getItem(CLAVE_TEMA_TABLERO)).toBe('noche');
-    cleanup();
-    render(<App api={api()} />);
-    expect(await pintado()).toBe('noche');
-    expect(temaDe('Noche').getAttribute('aria-pressed')).toBe('true');
-    fireEvent.click(temaDe('Día'));
-    expect(await pintado()).toBe('dia');
-    expect(localStorage.getItem(CLAVE_TEMA_TABLERO)).toBe('dia');
+    expect(screen.queryByRole('group', { name: 'Tema del tablero' })).toBeNull();
+    expect(within(conmutador()).queryByRole('button', { name: 'Noche' })).toBeNull();
   });
 
-  it('un valor guardado desconocido es Día', async () => {
-    localStorage.setItem(CLAVE_TEMA_TABLERO, 'sistema');
+  it('sin ajustes del servidor, Día', async () => {
     history.replaceState(null, '', '/equipos-taller?vista=tablero');
     render(<App api={api()} />);
     expect(await pintado()).toBe('dia');
-    expect(temaDe('Día').getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('si el almacenamiento local falla, empieza en Día y el cambio vale en esta visita', async () => {
-    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } });
+  it('con el tema en «Noche» en Ajustes, la pestaña se pinta de noche', async () => {
     history.replaceState(null, '', '/equipos-taller?vista=tablero');
-    render(<App api={api()} />);
-    expect(await pintado()).toBe('dia');
-    fireEvent.click(temaDe('Noche'));
+    render(<App api={conTema('noche')} />);
     expect(await pintado()).toBe('noche');
   });
 });

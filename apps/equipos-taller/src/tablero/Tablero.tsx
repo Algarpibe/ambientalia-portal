@@ -10,6 +10,7 @@ import { apiEquipos, type ApiEquipos } from '../api';
 import './fuentes';
 import './tablero.css';
 import { MEDIDAS, alturaTarjeta, planColumna } from './medidas';
+import { resolverTema } from './pantalla';
 import { cssTemas } from './temas';
 import { useSondeo } from './useSondeo';
 
@@ -171,7 +172,7 @@ export function useTableroDatos(pedir: (senal: AbortSignal) => Promise<Respuesta
     () => (datos && snap ? construirTablero(aplicarAjustes(snap.rows, datos.ajustes), ajustes, ahora) : null),
     [datos, snap, ajustes, ahora],
   );
-  return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto };
+  return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto, ahora };
 }
 
 /** Mensaje mientras no hay tablero que dibujar: carga, sin acceso, red caída o sin datos. */
@@ -188,13 +189,15 @@ export function SinTablero({ tema, hayDatos, fallo, kiosco = false }: { tema: Te
 }
 
 /**
- * La pestaña «Tablero» de la app, con los datos de GET /api/equipos-taller. El tema lo elige quien la
- * mira (botones «Día | Noche» de App.tsx); sin `tema`, día. Ni el horario ni el tema de la TV cuentan aquí.
+ * La pestaña «Tablero» de la app, con los datos de GET /api/equipos-taller. Sin `tema`, sigue el «Tema del
+ * tablero» de Ajustes (el mismo que la TV): Día, Noche o Automático por horario, recalculado en cada ciclo
+ * del sondeo de 60 s. Sin ajustes del servidor, Día.
  */
-export default function Tablero({ api: apiProp, tema = 'dia' }: { api?: ApiEquipos; tema?: TemaPantalla }) {
+export default function Tablero({ api: apiProp, tema: temaFijo }: { api?: ApiEquipos; tema?: TemaPantalla }) {
   const api = useMemo(() => apiProp || apiEquipos(), [apiProp]);
   const pedir = useCallback((senal: AbortSignal) => api.estado(senal), [api]);
-  const { datos, modelo, ajustes, datosEn, okEn, fallo, obsoleto } = useTableroDatos(pedir);
+  const { datos, modelo, ajustes, datosEn, okEn, fallo, obsoleto, ahora } = useTableroDatos(pedir);
+  const tema: TemaPantalla = temaFijo ?? resolverTema(null, ahora, ajustes);
   if (!modelo) return <SinTablero tema={tema} hayDatos={!!datos} fallo={fallo} />;
   return <TableroVista tablero={modelo} ajustes={ajustes} tema={tema} okEn={okEn} datosEn={datosEn} obsoleto={obsoleto} />;
 }
