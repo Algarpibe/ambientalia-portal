@@ -146,6 +146,8 @@ const estado = {
   /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
   orden: [] as string[],
   plantilla: [] as any[],
+  /** Las notas personales: `{ autor, nota, contenido }`, con `contenido` = bytes de la imagen o null. */
+  notas: [] as any[],
   yaEnBd: 0,
   historicoInsertado: 0,
   solicitudes: [] as Record<string, unknown>[],
@@ -1557,6 +1559,63 @@ vi.mock('./repo.js', async () => ({
         s.fechaInicio === fecha &&
         (excluirSolicitudId === null || s.id !== excluirSolicitudId),
     ),
+  // Notas personales (repo/notas.ts). Doble minimo: el SQL de verdad, y sobre
+  // todo su filtro por autor consulta a consulta, lo vigila
+  // repo.notas.db.test.ts. Aqui solo hace falta que las rutas tengan donde
+  // escribir.
+  notasDeAutor: async (_db: unknown, autor: string) =>
+    estado.notas.filter((f: any) => f.autor === autor).map((f: any) => f.nota),
+  notaDeAutor: async (_db: unknown, id: string, autor: string) =>
+    estado.notas.find((f: any) => f.nota.id === id && f.autor === autor)?.nota ?? null,
+  insertarNota: async (_db: unknown, autor: string, empleadoNombre: string, datos: any) => {
+    const id = `00000000-0000-4000-8000-${String(estado.notas.length + 1).padStart(12, '0')}`;
+    const nota = {
+      id,
+      empleadoId: datos.empleadoId,
+      empleadoNombre,
+      categoria: datos.categoria,
+      fecha: datos.fecha,
+      comentario: datos.comentario,
+      estado: 'abierta',
+      resueltaAt: null,
+      createdAt: '2026-01-15T12:00:00.000Z',
+      updatedAt: '2026-01-15T12:00:00.000Z',
+      imagen: datos.imagen
+        ? { id: `${id}-img`, nombreArchivo: datos.imagen.nombreArchivo, mime: datos.imagen.mime, bytes: datos.imagen.contenido.length }
+        : null,
+    };
+    estado.notas.push({ autor, nota, contenido: datos.imagen?.contenido ?? null });
+    return nota;
+  },
+  actualizarNota: async (_db: unknown, id: string, autor: string, cambio: any, empleadoNombre?: string) => {
+    const fila = estado.notas.find((f: any) => f.nota.id === id && f.autor === autor);
+    if (!fila) return null;
+    const { imagen, ...resto } = cambio;
+    Object.assign(fila.nota, resto, empleadoNombre === undefined ? {} : { empleadoNombre });
+    if (cambio.estado !== undefined) {
+      fila.nota.resueltaAt = cambio.estado === 'resuelta' ? (fila.nota.resueltaAt ?? '2026-01-15T12:00:00.000Z') : null;
+    }
+    if (imagen === null) {
+      fila.nota.imagen = null;
+      fila.contenido = null;
+    } else if (imagen !== undefined) {
+      fila.nota.imagen = { id: `${id}-img`, nombreArchivo: imagen.nombreArchivo, mime: imagen.mime, bytes: imagen.contenido.length };
+      fila.contenido = imagen.contenido;
+    }
+    return fila.nota;
+  },
+  eliminarNota: async (_db: unknown, id: string, autor: string) => {
+    const i = estado.notas.findIndex((f: any) => f.nota.id === id && f.autor === autor);
+    if (i < 0) return false;
+    estado.notas.splice(i, 1);
+    return true;
+  },
+  imagenDeNota: async (_db: unknown, id: string, autor: string) => {
+    const fila = estado.notas.find((f: any) => f.nota.id === id && f.autor === autor);
+    return fila?.contenido
+      ? { nombreArchivo: fila.nota.imagen.nombreArchivo, mime: fila.nota.imagen.mime, contenido: fila.contenido }
+      : null;
+  },
 }));
 
 // ── El candado del doble ───────────────────────────────────────────────────
@@ -1760,6 +1819,7 @@ beforeEach(() => {
   estado.aniosKpi = [];
   estado.ventanas = {};
   estado.adminsDelPortal = [];
+  estado.notas = [];
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
   estado.fichasDelCalendario = [
