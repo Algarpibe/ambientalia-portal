@@ -3,17 +3,17 @@ import type { CategoriaNota, EstadoNota, Nota } from './api';
 // Las notas personales del administrador: lo que se puede decidir sin pantalla.
 // Vive aquí, con tests, y no dentro de los componentes, que no tienen ninguno.
 
-export const CATEGORIAS_NOTA: { id: CategoriaNota; label: string }[] = [
-  { id: 'retraso', label: 'Informar retraso' },
-  { id: 'solicitud', label: 'Solicitudes' },
-  { id: 'otro', label: 'Otros' },
-];
-
 export const ETIQUETA_CATEGORIA: Record<CategoriaNota, string> = {
   retraso: 'Informar retraso',
   solicitud: 'Solicitudes',
   otro: 'Otros',
 };
+
+/** Derivada de `ETIQUETA_CATEGORIA` para no repetir los textos; conserva su orden. */
+export const CATEGORIAS_NOTA = (Object.keys(ETIQUETA_CATEGORIA) as CategoriaNota[]).map((id) => ({
+  id,
+  label: ETIQUETA_CATEGORIA[id],
+}));
 
 /** Espejo de los topes de hub-api: avisar aquí ahorra subir 8 MB para nada. */
 export const MAX_COMENTARIO = 2000;
@@ -67,8 +67,11 @@ const MENSAJES: Record<string, string> = {
   comentario_demasiado_largo: `El comentario no puede pasar de ${MAX_COMENTARIO} caracteres.`,
   sin_cambios: 'No hay nada que guardar.',
   nombre_archivo_invalido: 'El nombre del archivo no es válido.',
-  imagen_no_admitida: 'La imagen tiene que ser JPG, PNG o WebP de verdad, no solo por la extensión.',
+  imagen_no_admitida: 'El contenido del archivo no coincide con su extensión. Guárdalo de nuevo como JPG, PNG o WebP.',
   imagen_demasiado_grande: 'La imagen pasa de 8 MB.',
+  nota_no_encontrada: 'Esa nota ya no existe: puede que la borraras desde otra pestaña.',
+  empleado_no_encontrado: 'Esa persona ya no está en la plantilla.',
+  imagen_no_encontrada: 'Esa imagen ya no está.',
 };
 
 export function textoDeErrorDeNota(mensaje: string): string {

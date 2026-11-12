@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { Nota } from './api';
-import { errorDeImagen, fechaCorta, filtrarNotas, ordenarNotas, textoDeErrorDeNota } from './notas';
+import {
+  MAX_IMAGEN_BYTES,
+  errorDeImagen,
+  fechaCorta,
+  filtrarNotas,
+  ordenarNotas,
+  textoDeErrorDeNota,
+} from './notas';
 
 const nota = (over: Partial<Nota> = {}): Nota => ({
   id: 'n1',
@@ -55,8 +62,15 @@ describe('fechaCorta', () => {
 });
 
 describe('errorDeImagen', () => {
-  it('admite JPEG, PNG y WebP de hasta 8 MB', () => {
-    expect(errorDeImagen({ type: 'image/png', size: 1000 })).toBeNull();
+  // Literales y no `MIMES_IMAGEN`: iterar la propia lista haría desaparecer el
+  // test de un formato si alguien lo quitara de ella.
+  it.each(['image/jpeg', 'image/png', 'image/webp'])('admite %s', (type) => {
+    expect(errorDeImagen({ type, size: 1000 })).toBeNull();
+  });
+
+  it('el tope de 8 MB es inclusivo: justo 8 MB vale y un byte más no', () => {
+    expect(errorDeImagen({ type: 'image/png', size: MAX_IMAGEN_BYTES })).toBeNull();
+    expect(errorDeImagen({ type: 'image/png', size: MAX_IMAGEN_BYTES + 1 })).toMatch(/8 MB/);
   });
 
   it('rechaza otros formatos', () => {
@@ -72,5 +86,25 @@ describe('textoDeErrorDeNota', () => {
   it('traduce los códigos de hub-api y deja pasar el resto', () => {
     expect(textoDeErrorDeNota('imagen_no_admitida')).toMatch(/JPG, PNG o WebP/);
     expect(textoDeErrorDeNota('Tu sesión ha caducado.')).toBe('Tu sesión ha caducado.');
+  });
+
+  // Los 10 códigos de 400 y los 3 de 404 que puede devolver hub-api: ninguno
+  // puede llegar a pantalla tal cual.
+  it.each([
+    'categoria_invalida',
+    'estado_invalido',
+    'fecha_invalida',
+    'comentario_vacio',
+    'comentario_invalido',
+    'comentario_demasiado_largo',
+    'nombre_archivo_invalido',
+    'imagen_no_admitida',
+    'imagen_demasiado_grande',
+    'sin_cambios',
+    'nota_no_encontrada',
+    'empleado_no_encontrado',
+    'imagen_no_encontrada',
+  ])('traduce %s', (codigo) => {
+    expect(textoDeErrorDeNota(codigo)).not.toBe(codigo);
   });
 });

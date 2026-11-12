@@ -400,6 +400,8 @@ export interface NuevaSolicitud {
 
 // ── Notas personales del administrador ─────────────────────────────────────
 // Espejo manual de los tipos de hub-api (ausencias/types.ts): mismos nombres.
+// `ImagenSubida` y `NuevaNota.imagen` son la forma en que la imagen viaja
+// (base64), no la que tiene en el servidor (Buffer).
 
 export type CategoriaNota = 'retraso' | 'solicitud' | 'otro';
 export type EstadoNota = 'abierta' | 'resuelta';
@@ -434,7 +436,7 @@ export interface ImagenSubida {
   contenidoBase64: string;
 }
 
-export interface NotaNueva {
+export interface NuevaNota {
   empleadoId: string;
   categoria: CategoriaNota;
   fecha: string;
