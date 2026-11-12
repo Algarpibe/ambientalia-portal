@@ -28,10 +28,12 @@ CREATE TABLE IF NOT EXISTS portal.ausencias_notas (
   categoria       VARCHAR(20)  NOT NULL CONSTRAINT ausencias_notas_categoria_ck CHECK (categoria IN ('retraso', 'solicitud', 'otro')),
   fecha           DATE         NOT NULL,
   -- Ni btrim ni char_length(btrim(...)): btrim sin segundo argumento solo quita
-  -- el espacio U+0020, así que un comentario de solo tabuladores, saltos de línea
-  -- o espacios duros pasaría por «no vacío», y el tope de 2000 se mediría sobre
-  -- el texto recortado y no sobre el que se guarda. '\S' exige algún carácter que
-  -- no sea blanco y el tope se mide sobre lo guardado.
+  -- el espacio U+0020, así que un comentario de solo tabuladores o saltos de línea
+  -- pasaría por «no vacío», y el tope de 2000 se mediría sobre el texto recortado
+  -- y no sobre el que se guarda. '\S' exige algún carácter que no sea blanco y el
+  -- tope se mide sobre lo guardado. Ojo: para Postgres el espacio duro (U+00A0)
+  -- NO es blanco; un comentario solo de eso lo para el servicio, que guarda el
+  -- texto tras el trim() de JS.
   comentario      TEXT         NOT NULL CONSTRAINT ausencias_notas_comentario_ck CHECK (comentario ~ '\S' AND char_length(comentario) <= 2000),
   estado          VARCHAR(10)  NOT NULL DEFAULT 'abierta' CONSTRAINT ausencias_notas_estado_ck CHECK (estado IN ('abierta', 'resuelta')),
   resuelta_at     TIMESTAMPTZ,
