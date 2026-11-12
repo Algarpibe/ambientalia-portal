@@ -168,6 +168,27 @@ describe('Tablero (con sondeo)', () => {
     expect(screen.getAllByRole('region')).toHaveLength(6);
     expect(screen.getByText('menos de 30 d')).toBeTruthy();
   });
+  it('por defecto sigue el horario día/noche de los ajustes (Bogotá), como la TV', async () => {
+    const tema = () => document.querySelector('.tt-tablero')?.getAttribute('data-tema');
+    render(<Tablero api={apiCon(resp())} />); // 15:00 en Bogotá
+    await avanzar(0);
+    expect(tema()).toBe('dia');
+    cleanup();
+    vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z')); // 19:43 en Bogotá
+    render(<Tablero api={apiCon(resp())} />);
+    await avanzar(0);
+    expect(tema()).toBe('noche');
+    cleanup();
+    render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, nocheDesde: 20 } }))} />); // noche desde las 20
+    await avanzar(0);
+    expect(tema()).toBe('dia');
+  });
+  it('un tema explícito manda sobre el horario', async () => {
+    vi.setSystemTime(Date.parse('2026-11-12T00:43:00Z'));
+    render(<Tablero api={apiCon(resp())} tema="dia" />);
+    await avanzar(0);
+    expect(document.querySelector('.tt-tablero')?.getAttribute('data-tema')).toBe('dia');
+  });
   it('usa los ajustes del servidor si vienen en la respuesta', async () => {
     render(<Tablero api={apiCon(resp({ tablero: { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 45, umbralRojo: 120 } }))} />);
     await avanzar(0);

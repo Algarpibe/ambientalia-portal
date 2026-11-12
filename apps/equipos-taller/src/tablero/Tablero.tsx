@@ -10,6 +10,7 @@ import { apiEquipos, type ApiEquipos } from '../api';
 import './fuentes';
 import './tablero.css';
 import { MEDIDAS, alturaTarjeta, planColumna } from './medidas';
+import { temaAuto } from './pantalla';
 import { cssTemas } from './temas';
 import { useSondeo } from './useSondeo';
 
@@ -171,7 +172,7 @@ export function useTableroDatos(pedir: (senal: AbortSignal) => Promise<Respuesta
     () => (datos && snap ? construirTablero(aplicarAjustes(snap.rows, datos.ajustes), ajustes, ahora) : null),
     [datos, snap, ajustes, ahora],
   );
-  return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto };
+  return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto, ahora };
 }
 
 /** Mensaje mientras no hay tablero que dibujar: carga, sin acceso, red caída o sin datos. */
@@ -188,10 +189,15 @@ export function SinTablero({ tema, hayDatos, fallo, kiosco = false }: { tema: Te
 }
 
 /** El tablero de la pestaña, con los datos de GET /api/equipos-taller. */
-export default function Tablero({ api: apiProp, tema = 'dia' }: { api?: ApiEquipos; tema?: TemaPantalla }) {
+/**
+ * La pestaña «Tablero» de la app. Sin `tema`, sigue el mismo horario día/noche que la TV (Ajustes,
+ * hora de Bogotá), recalculado en cada ciclo del sondeo de 60 s.
+ */
+export default function Tablero({ api: apiProp, tema: temaFijo }: { api?: ApiEquipos; tema?: TemaPantalla }) {
   const api = useMemo(() => apiProp || apiEquipos(), [apiProp]);
   const pedir = useCallback((senal: AbortSignal) => api.estado(senal), [api]);
-  const { datos, modelo, ajustes, datosEn, okEn, fallo, obsoleto } = useTableroDatos(pedir);
+  const { datos, modelo, ajustes, datosEn, okEn, fallo, obsoleto, ahora } = useTableroDatos(pedir);
+  const tema: TemaPantalla = temaFijo ?? temaAuto(ahora, ajustes);
   if (!modelo) return <SinTablero tema={tema} hayDatos={!!datos} fallo={fallo} />;
   return <TableroVista tablero={modelo} ajustes={ajustes} tema={tema} okEn={okEn} datosEn={datosEn} obsoleto={obsoleto} />;
 }
