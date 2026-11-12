@@ -539,6 +539,12 @@ describe('CHECK de la migracion 076', () => {
     await expect(insertarCruda({ comentario: '   ' })).rejects.toMatchObject({ code: '23514' });
   });
 
+  it('rechaza un comentario hecho solo de tabuladores y saltos de linea', async () => {
+    // Por esto el CHECK es `comentario ~ '\S'` y no `btrim(...)`: btrim sin
+    // segundo argumento solo quita espacios.
+    await expect(insertarCruda({ comentario: '\t\n\n' })).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('rechaza una categoria desconocida', async () => {
     await expect(insertarCruda({ categoria: 'vacaciones' })).rejects.toMatchObject({ code: '23514' });
   });
@@ -888,7 +894,7 @@ El CANDADO «modela exactamente las funciones que exporta repo.ts» (router.test
 - [ ] **Step 7: Comprobar que pasan**
 
 Run: `npx vitest run --config vitest.db.config.ts src/ausencias/repo.notas.db.test.ts`
-Expected: PASS, 21 tests.
+Expected: PASS, 22 tests (26 tras la revisión de calidad, commit 3258bf3).
 
 Run: `npx vitest run src/ausencias/repo/barril.test.ts src/ausencias/router.test.ts`
 Expected: PASS (incluido el CANDADO del doble).
@@ -1066,6 +1072,7 @@ import type { ImagenCompletaDeNota } from '../repo.js';
 import {
   CATEGORIAS_NOTA,
   ESTADOS_NOTA,
+  MAX_COMENTARIO_NOTA,
   MIMES_IMAGEN_NOTA,
   type CambioNota,
   type CategoriaNota,
@@ -1084,7 +1091,8 @@ import { MAX_ADJUNTO_BYTES } from './validacion.js';
 // cada nota lo decide el SQL (`autor_email`). Aquí no se repite ninguna de las
 // dos: un candado duplicado esconde el día que el otro se rompe.
 
-const MAX_COMENTARIO_NOTA = 2000;
+// MAX_COMENTARIO_NOTA viene de types.ts: es el mismo número que el CHECK de la
+// 076, y notas.estatico.test.ts vigila que no se separen.
 const MAX_NOMBRE_IMAGEN = 200;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FIRMA_PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -1271,6 +1279,8 @@ Expected: sin errores.
 git add apps/hub-api/src/ausencias/service/notas.ts apps/hub-api/src/ausencias/service.ts apps/hub-api/src/ausencias/service/barril.test.ts apps/hub-api/src/ausencias/notas.test.ts
 git commit -m "feat(ausencias): validacion y servicio de las notas personales"
 ```
+
+> **Nota tras la revisión de calidad:** el código de arriba es el del primer commit (944cffe). El commit ee5090c lo endureció: `nombreArchivo`, `mime` y `contenidoBase64` solo se aceptan como string, un NUL en el comentario es `comentario_invalido` y en el nombre `nombre_archivo_invalido`, una fecha anterior a `0001-01-01` es `fecha_invalida`, y `notas.test.ts` pasó a 29 tests. La fuente de verdad es el fichero, no este bloque.
 
 ---
 
@@ -1510,7 +1520,7 @@ Expected: PASS, todo el fichero de router incluido.
 - [ ] **Step 6: Suite unitaria completa con cobertura**
 
 Run: `npm test`
-Expected: PASS, y sin incumplir el umbral `src/ausencias/{!(repo).ts,service/*.ts}` (95 % de líneas, funciones y sentencias; 85 % de ramas). Si `service/notas.ts` o `router.ts` quedan por debajo, añadir el test que falte (sin bajar el umbral).
+Expected: PASS salvo `scripts/equipos-anonimizar.test.mjs`, que falla ya en `main` en esta copia de Windows (SyntaxError: el shebang de `scripts/equipos-anonimizar.mjs` termina en CRLF por `core.autocrlf`; ajeno a esta rama, no tocarlo). Todo lo demás en verde y sin incumplir el umbral `src/ausencias/{!(repo).ts,service/*.ts}` (95 % de líneas, funciones y sentencias; 85 % de ramas). Si `service/notas.ts` o `router.ts` quedan por debajo, añadir el test que falte (sin bajar el umbral).
 
 - [ ] **Step 7: Commit**
 
@@ -1745,6 +1755,7 @@ const MENSAJES: Record<string, string> = {
   estado_invalido: 'Ese estado no existe.',
   fecha_invalida: 'La fecha no es válida.',
   comentario_vacio: 'Escribe un comentario.',
+  comentario_invalido: 'El comentario lleva un carácter que no se puede guardar.',
   comentario_demasiado_largo: `El comentario no puede pasar de ${MAX_COMENTARIO} caracteres.`,
   sin_cambios: 'No hay nada que guardar.',
   nombre_archivo_invalido: 'El nombre del archivo no es válido.',
@@ -1826,6 +1837,8 @@ Expected: sin errores.
 git add apps/ausencias/src/api/tipos.ts apps/ausencias/src/api/notas.ts apps/ausencias/src/api.ts apps/ausencias/src/api/barril.test.ts apps/ausencias/src/notas.ts apps/ausencias/src/notas.test.ts
 git commit -m "feat(ausencias): api y modulo puro de las notas personales en el front"
 ```
+
+> **Nota tras la revisión de calidad:** el commit de corrección siguiente cambió lo de arriba: `NotaNueva` pasó a llamarse `NuevaNota`; `api/notas.ts` lee el código de los 404 (`nota_no_encontrada`, `empleado_no_encontrado`, `imagen_no_encontrada`) en vez de dejar que `mensajeDeError` los convierta en «No se pudieron cargar los datos»; `MENSAJES` cubre esos tres y `imagen_no_admitida` explica lo de la extensión; `CATEGORIAS_NOTA` se deriva de `ETIQUETA_CATEGORIA`. La fuente de verdad es el fichero.
 
 ---
 
@@ -2465,6 +2478,8 @@ Para cada fila: aplicar la mutación con Edit, correr el comando y confirmar que
 | 3 | `repo/notas.ts` | En `eliminarNota`, quitar `AND autor_email = $2` y su parámetro | BD | «otro autor no la borra» |
 | 4 | `repo/notas.ts` | En `imagenDeNota`, quitar `AND n.autor_email = $2` y su parámetro | BD | «otro autor no descarga su imagen» |
 | 5 | `repo/notas.ts` | `COALESCE(resuelta_at, NOW())` → `NOW()` | BD | «volver a marcarla resuelta conserva la primera fecha» |
+| 5b | `repo/notas.ts` | En `notaDeAutor`, quitar `AND n.autor_email = $2` y su parámetro | BD | «otro autor no la lee» |
+| 5c | `repo/notas.ts` | En `actualizarNota`, mover el bloque de la imagen (`if (cambio.imagen === null) … guardarImagen`) por delante de `if (!rowCount) return null;` | BD | «otro autor no le sustituye la imagen» y «otro autor no la edita, ni le quita la imagen» |
 | 6 | `service/notas.ts` | Borrar la línea `if (detectarMimeImagen(contenido) !== mime) ...` | `npx vitest run src/ausencias/notas.test.ts` | «CANDADO: rechaza una imagen cuyos bytes no casan» |
 | 7 | `router.ts` | En `router.post('/ausencias/notas', ...)`, quitar `requireAdmin, ` | `npx vitest run src/ausencias/router.test.ts -t "notas personales"` | «CANDADO: post /notas sin ser admin → 403» |
 | 8 | `index.ts` | Borrar `app.use('/api/ausencias/notas', express.json({ limit: '12mb' }));` | `npx vitest run src/ausencias/notas.estatico.test.ts` | «CANDADO: /api/ausencias/notas tiene su parser» |
@@ -2488,7 +2503,7 @@ Expected: idéntico al Step 1. Run: `git status --short` → ningún fichero mod
 Desde `apps/hub-api`:
 - `npx tsc --noEmit -p .` → sin errores.
 - `npm test` → PASS con los umbrales de cobertura.
-- `npm run test:db` → PASS. El total tiene que ser el de `main` + 21 tests y + 1 fichero (`repo.notas.db.test.ts`). Para saber el de `main`, mirar la salida de `test:db` en la Task 3 Step 7 o, si no se apuntó, restar 21 al total de ahora y comprobar que `repo.notas.db.test.ts` aporta exactamente 21. Nunca `git stash` sin rutas: el `.gitignore` modificado del usuario se iría con él.
+- `npm run test:db` → PASS. `main` tenía 833 tests en 61 ficheros (medido en la Task 3: 855 en 62 con los 22 iniciales de `repo.notas.db.test.ts`, que la revisión de calidad subió a 26). El total tiene que ser 833 + lo que aporte `repo.notas.db.test.ts`, en 62 ficheros. Nunca `git stash` sin rutas: el `.gitignore` modificado del usuario se iría con él.
 
 Desde `apps/ausencias`:
 - `npm run typecheck`, `npm test` y `npm run build` → en verde.
@@ -2510,7 +2525,7 @@ por:
   verdad: la pestaña oculta no basta.
 ```
 
-y en la lista de 400 añadir `nombre_archivo_invalido`. Añadir también: «**404** `imagen_no_encontrada` al pedir la imagen de una nota que no tiene o que es ajena.» En «Imagen», precisar que la descarga va con `Content-Disposition: inline` sin nombre de fichero. Cambiar la línea **Estado** de la cabecera a «implementado en la rama `feat/ausencias-notas`; pendiente de desplegar hub-api y el portal».
+En §4, la frase «Todas pasan por los mismos `gated` (`requireAuth` + `requireApp(APP_ID)`) que el resto de rutas de la app» pasa a «Todas van detrás de `requireAuth, requireAdmin`, como el resto de rutas de administración del router». En la lista de 400 añadir `nombre_archivo_invalido` y `comentario_invalido` (un carácter NUL, que Postgres no admite en `text`); y anotar que una fecha anterior a `0001-01-01` es `fecha_invalida`. Añadir también: «**404** `imagen_no_encontrada` al pedir la imagen de una nota que no tiene o que es ajena.» En «Imagen», precisar que la descarga va con `Content-Disposition: inline` sin nombre de fichero. En §3, la regla de `comentario` pasa a `CHECK (comentario ~ '\S' AND char_length(comentario) <= 2000)` (btrim solo quitaba espacios) y se anota que todos los CHECK llevan nombre explícito. Cambiar la línea **Estado** de la cabecera a «implementado en la rama `feat/ausencias-notas`; pendiente de desplegar hub-api y el portal».
 
 - [ ] **Step 3: Commit de la documentación**
 

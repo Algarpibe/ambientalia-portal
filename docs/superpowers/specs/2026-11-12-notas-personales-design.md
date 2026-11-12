@@ -1,7 +1,8 @@
 # Ausencias — Notas personales del administrador
 
 **Fecha:** 2026-11-12
-**Estado:** diseño aprobado en brainstorming; pendiente de plan de implementación
+**Estado:** implementado en la rama `feat/ausencias-notas` (plan:
+`docs/superpowers/plans/2026-11-12-notas-personales.md`); pendiente de desplegar hub-api y el portal
 **Depende de:** la app de Vacaciones y Permisos (`apps/ausencias` + `apps/hub-api/src/ausencias`),
 en producción, y la partición en barriles de ARQ-612.
 
@@ -23,6 +24,9 @@ se dijo, una imagen de apoyo y si ya está atendido.
   `autor_email`. Si algún día hay un segundo administrador, no verá estas notas. Es la única
   excepción a «un admin lo tiene todo», y se acepta porque son notas personales, no datos de
   la empresa.
+  Ojo: la propiedad va por el correo, no por el id de usuario. Si se borra un usuario
+  administrador, sus notas quedan sin dueño visible, y una cuenta nueva con el mismo correo
+  las heredaría. Se acepta: el correo es la identidad que usa toda la app.
 - **Con estado:** `abierta` / `resuelta`, filtrable.
 - **Tabla propia, fuera de `solicitudes_ausencia`.** Meterlas como un tipo más obligaría a
   excluirlas en cada consulta de saldo, KPIs, calendario y Registro general; un olvido las
@@ -41,13 +45,15 @@ se dijo, una imagen de apoyo y si ya está atendido.
 | `empleado_nombre` | `VARCHAR(255)` NOT NULL | Copia del nombre al crear la nota |
 | `categoria` | `VARCHAR(20)` NOT NULL | `CHECK IN ('retraso', 'solicitud', 'otro')` |
 | `fecha` | `DATE` NOT NULL | El día al que se refiere la nota |
-| `comentario` | `TEXT` NOT NULL | `CHECK (char_length(btrim(comentario)) BETWEEN 1 AND 2000)` |
+| `comentario` | `TEXT` NOT NULL | `CHECK (comentario ~ '\S' AND char_length(comentario) <= 2000)`. No `btrim`: sin segundo argumento solo quita espacios y dejaría pasar un comentario de tabuladores o saltos de línea |
 | `estado` | `VARCHAR(10)` NOT NULL DEFAULT `'abierta'` | `CHECK IN ('abierta', 'resuelta')` |
 | `resuelta_at` | `TIMESTAMPTZ` NULL | Coherente con `estado` (CHECK: `resuelta` ⇔ no nulo) |
 | `autor_email` | `VARCHAR(254)` NOT NULL | En minúsculas |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` NOT NULL DEFAULT `NOW()` | |
 
-Índice: `(autor_email, fecha DESC)`.
+Índice: `(autor_email, fecha DESC)`. Todos los CHECK llevan nombre explícito (`*_ck` y
+`ausencias_notas_resuelta_coherente`), y `notas.estatico.test.ts` vigila que sus listas y su
+tope digan lo mismo que las constantes de `types.ts`.
 
 `ON DELETE SET NULL` + `empleado_nombre` y no `RESTRICT` ni `CASCADE`: `RESTRICT` haría que
 borrar una ficha mal dada de alta fallara por una nota que nadie más ve, y `CASCADE` borraría
@@ -73,8 +79,8 @@ Tabla aparte, como `solicitud_adjuntos`, para que listar notas no arrastre los b
 ## 4. API (hub-api)
 
 Código en `repo/notas.ts` y `service/notas.ts`, exportados desde sus barriles; rutas en
-`router.ts`. Todas pasan por los mismos `gated` (`requireAuth` + `requireApp(APP_ID)`) que el
-resto de rutas de la app.
+`router.ts`. Todas van detrás de `requireAuth, requireAdmin`, como el resto de rutas de
+administración del router.
 
 | Método y ruta | Cuerpo / respuesta |
 |---|---|
@@ -82,19 +88,24 @@ resto de rutas de la app.
 | `POST /api/ausencias/notas` | `{ empleadoId, categoria, fecha, comentario, imagen?: { nombreArchivo, mime, contenidoBase64 } }` → la nota creada |
 | `PATCH /api/ausencias/notas/:id` | Cualquier subconjunto de `categoria`, `fecha`, `comentario`, `estado`, `empleadoId`, `imagen`. `imagen: null` la quita; `imagen: {...}` la sustituye. Cambiar `empleadoId` vuelve a copiar `empleado_nombre`. Al pasar a `resuelta` se fija `resuelta_at`; al reabrir se vacía. Un cuerpo sin ningún campo reconocido es 400 `sin_cambios` |
 | `DELETE /api/ausencias/notas/:id` | 204. La imagen cae por cascada |
-| `GET /api/ausencias/notas/:id/imagen` | Los bytes, con su `Content-Type` y `X-Content-Type-Options: nosniff` |
+| `GET /api/ausencias/notas/:id/imagen` | Los bytes, con su `Content-Type`, `Content-Disposition: inline` (sin nombre de fichero: lo escribe el cliente y un carácter fuera de latin1 haría lanzar a Node), `X-Content-Type-Options: nosniff` y `Cache-Control: no-store` |
 
 ### Errores
 
-- **403** `solo_administrador` si la sesión no es `admin`. Es el candado de verdad: la
-  pestaña oculta no basta.
+- **403** `forbidden` si la sesión no es `admin` (lo contesta `requireAdmin`). Es el candado
+  de verdad: la pestaña oculta no basta.
 - **404** `nota_no_encontrada` si la nota no existe **o es de otro autor**. 404 y no 403
   para no revelar que existe.
 - **404** `empleado_no_encontrado` si `empleadoId` no es una ficha activa. Mismo código y
   estado que ya usa la app para ese caso.
-- **400** con código propio: `categoria_invalida`, `estado_invalido`, `fecha_invalida`,
-  `comentario_vacio`, `comentario_demasiado_largo`, `sin_cambios`, `imagen_no_admitida`,
+- **404** `imagen_no_encontrada` al pedir la imagen de una nota que no tiene o que es ajena.
+- **400** con código propio: `categoria_invalida`, `estado_invalido`, `fecha_invalida` (también
+  una fecha anterior a `0001-01-01`, que Postgres no admite), `comentario_vacio`,
+  `comentario_invalido` (un carácter NUL, que Postgres no admite en `text`),
+  `comentario_demasiado_largo`, `sin_cambios`, `nombre_archivo_invalido`, `imagen_no_admitida`,
   `imagen_demasiado_grande`.
+- En el front, `api/notas.ts` conserva el código de los 404 (si no, `mensajeDeError` los
+  convertiría en «No se pudieron cargar los datos») y `notas.ts` pone cada código en palabras.
 
 ### Imagen
 
