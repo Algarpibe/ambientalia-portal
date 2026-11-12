@@ -148,6 +148,8 @@ const estado = {
   plantilla: [] as any[],
   /** Las notas personales: `{ autor, nota, contenido }`, con `contenido` = bytes de la imagen o null. */
   notas: [] as any[],
+  /** Contador monotonico de ids de nota: `length + 1` repetiria id tras un borrado. */
+  siguienteNota: 0,
   yaEnBd: 0,
   historicoInsertado: 0,
   solicitudes: [] as Record<string, unknown>[],
@@ -1559,16 +1561,22 @@ vi.mock('./repo.js', async () => ({
         s.fechaInicio === fecha &&
         (excluirSolicitudId === null || s.id !== excluirSolicitudId),
     ),
-  // Notas personales (repo/notas.ts). Doble minimo: el SQL de verdad, y sobre
-  // todo su filtro por autor consulta a consulta, lo vigila
-  // repo.notas.db.test.ts. Aqui solo hace falta que las rutas tengan donde
-  // escribir.
+  // Notas personales (repo/notas.ts).
+  //
+  // ⚠️ REGLAS DE SQL REIMPLEMENTADAS AQUI: el filtro por `autor_email` de cada
+  // consulta y el `COALESCE(resuelta_at, NOW())` de `repo.actualizarNota`. Las
+  // fuentes de verdad son esas consultas, y quien las ejecuta contra Postgres
+  // real es `repo.notas.db.test.ts`. Esto solo IMITA su resultado y diverge en
+  // dos bordes conocidos: `notasDeAutor` no ordena (el SQL ordena por
+  // `fecha DESC, created_at DESC`) y `actualizarNota` no mueve `updatedAt`
+  // (el SQL hace `updated_at = NOW()`). Ningun test del router debe asertar
+  // ninguno de los dos.
   notasDeAutor: async (_db: unknown, autor: string) =>
     estado.notas.filter((f: any) => f.autor === autor).map((f: any) => f.nota),
   notaDeAutor: async (_db: unknown, id: string, autor: string) =>
     estado.notas.find((f: any) => f.nota.id === id && f.autor === autor)?.nota ?? null,
   insertarNota: async (_db: unknown, autor: string, empleadoNombre: string, datos: any) => {
-    const id = `00000000-0000-4000-8000-${String(estado.notas.length + 1).padStart(12, '0')}`;
+    const id = `00000000-0000-4000-8000-${String(++estado.siguienteNota).padStart(12, '0')}`;
     const nota = {
       id,
       empleadoId: datos.empleadoId,
@@ -1820,6 +1828,7 @@ beforeEach(() => {
   estado.ventanas = {};
   estado.adminsDelPortal = [];
   estado.notas = [];
+  estado.siguienteNota = 0;
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
   estado.fichasDelCalendario = [

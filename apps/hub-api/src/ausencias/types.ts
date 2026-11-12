@@ -902,6 +902,11 @@ export const MAX_COMENTARIO_NOTA = 2000;
 
 /** Lo que la lista enseña de la imagen: sin los bytes, que van por su propia ruta. */
 export interface ImagenDeNota {
+  /**
+   * Se conserva al sustituir la imagen (ON CONFLICT DO UPDATE sobre nota_id), así
+   * que no sirve como marca de versión: dos imágenes distintas de la misma nota
+   * comparten id.
+   */
   id: string;
   nombreArchivo: string;
   mime: MimeImagenNota;

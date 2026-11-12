@@ -59,8 +59,11 @@ describe('insertarNota y notasDeAutor', () => {
 
   it('con imagen: la lista trae los metadatos y no los bytes', async () => {
     const n = await insertarNota(db, YO, 'Ana Ruiz', conImagen());
-    expect(n.imagen).toMatchObject({ nombreArchivo: 'foto.jpg', mime: 'image/jpeg', bytes: JPEG.length });
-    expect(n.imagen).not.toHaveProperty('contenido');
+    const listada = (await notasDeAutor(db, YO))[0];
+    for (const v of [n, listada]) {
+      expect(v.imagen).toMatchObject({ nombreArchivo: 'foto.jpg', mime: 'image/jpeg', bytes: JPEG.length });
+      expect(v.imagen).not.toHaveProperty('contenido');
+    }
     const img = await imagenDeNota(db, n.id, YO);
     expect(img?.contenido.equals(JPEG)).toBe(true);
     expect(img?.mime).toBe('image/jpeg');
@@ -93,6 +96,13 @@ describe('CANDADO: cada nota es de quien la escribe', () => {
     const mia = await notaDeAutor(db, id, YO);
     expect(mia?.comentario).toBe('Llega tarde por cita medica');
     expect(mia?.imagen).not.toBeNull();
+  });
+
+  it('otro autor no le sustituye la imagen', async () => {
+    expect(
+      await actualizarNota(db, id, OTRO, { imagen: { nombreArchivo: 'x.png', mime: 'image/png', contenido: PNG } }),
+    ).toBeNull();
+    expect((await imagenDeNota(db, id, YO))?.contenido.equals(JPEG)).toBe(true);
   });
 
   it('otro autor no la borra', async () => {
@@ -145,6 +155,13 @@ describe('actualizarNota', () => {
     expect(n).toMatchObject({ empleadoId: otraFicha, empleadoNombre: 'Beto Diaz' });
   });
 
+  it('una edicion mueve updated_at', async () => {
+    const { id } = await insertarNota(db, YO, 'Ana Ruiz', nueva());
+    await db.query(`UPDATE portal.ausencias_notas SET updated_at = '2026-01-01T00:00:00Z' WHERE id = $1`, [id]);
+    const n = await actualizarNota(db, id, YO, { comentario: 'Editada' });
+    expect(n?.updatedAt).not.toBe('2026-01-01T00:00:00.000Z');
+  });
+
   it('cambia categoria, fecha y comentario', async () => {
     const { id } = await insertarNota(db, YO, 'Ana Ruiz', nueva());
     const n = await actualizarNota(db, id, YO, { categoria: 'otro', fecha: '2026-10-01', comentario: 'Otro asunto' });
@@ -194,6 +211,20 @@ describe('CHECK de la migracion 076', () => {
 
   it('rechaza una nota resuelta sin resuelta_at', async () => {
     await expect(insertarCruda({ estado: 'resuelta' })).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('rechaza una nota abierta con resuelta_at', async () => {
+    await expect(
+      db.query(
+        `INSERT INTO portal.ausencias_notas (empleado_nombre, categoria, fecha, comentario, estado, resuelta_at, autor_email)
+         VALUES ('X', 'otro', '2026-11-12', 'ok', 'abierta', NOW(), $1)`,
+        [YO],
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('rechaza un comentario de mas de 2000 caracteres', async () => {
+    await expect(insertarCruda({ comentario: 'x'.repeat(2001) })).rejects.toMatchObject({ code: '23514' });
   });
 
   it('rechaza un autor con mayusculas', async () => {
