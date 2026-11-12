@@ -49,4 +49,14 @@ describe('errores de la api de notas', () => {
       crearNota({ empleadoId: 'e1', categoria: 'otro', fecha: '2026-11-12', comentario: '' }),
     ).rejects.toThrow(new Error('comentario_vacio'));
   });
+
+  // El 404 más realista de los tres: la ficha se dio de baja después de cargar
+  // la lista. El de arriba no lo cubre: un 400 sale con su código aunque
+  // `crearNota` volviera al `post` de siempre.
+  it('crearNota: un 404 llega con su código', async () => {
+    responde(json(404, { error: 'empleado_no_encontrado' }));
+    await expect(
+      crearNota({ empleadoId: 'e1', categoria: 'otro', fecha: '2026-11-12', comentario: 'x' }),
+    ).rejects.toThrow(new Error('empleado_no_encontrado'));
+  });
 });
