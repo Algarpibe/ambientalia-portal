@@ -16,6 +16,11 @@ Pantalla de la app `equipos-taller` del portal: qué equipos están físicamente
   Hasta la primera pasada completa, la pantalla dice «Falta la primera sincronización con n8n».
 - **Pantalla:** `src/EquiposServicio.tsx` (trasladada sin rediseño de Desk 2.0), `src/api.ts`. `src/PanelLlaves.tsx` (solo admin) NO se muestra aquí: lo renderiza la página Ajustes del portal (`apps/portal/src/pages/Configuracion.tsx`, sección «Equipos en taller · Llaves»).
 - **Sin tarjeta en el Dashboard:** la app sale en la barra lateral (`apps/portal/src/lib/apps.ts`) y en Aplicaciones.
+- **Tablero kanban** (cambio SDD `tablero-kanban-taller`; artefactos en `openspec/changes/tablero-kanban-taller/`, fuera de git):
+  - Modelo puro en el núcleo: `nucleo/taller-board.ts` (columnas, tarjetas, días, semáforo, KPIs, validación de ajustes) y `nucleo/taller-columns.ts` (reparto de los estados de Desk; una prueba exige cubrir todos).
+  - Pantallas en `src/tablero/` (`Tablero.tsx`, `temas.ts`, `medidas.ts`, `useSondeo.ts`, CSS) más `src/App.tsx` (botones «Tabla | Tablero»), `src/TvEquipos.tsx` (TV), `src/MisEquipos.tsx` + `src/tecnico.ts` + `src/EscanearSerial.tsx` («Mis equipos») y `src/PanelTablero.tsx` / `src/PanelKiosco.tsx` (Ajustes del portal).
+  - Rutas del portal fuera del shell: `apps/portal/src/components/RutaTableroTv.tsx` y `RutaMisEquipos.tsx`.
+  - Servidor: `servicio-tablero.ts`, `repo-tablero.ts`, `router-kiosco.ts` (la ÚNICA ruta que acepta la llave de kiosco) y migración 074. Operación: `docs/equipos-taller-kiosco.md`.
 
 ## Reglas de trabajo
 
@@ -26,6 +31,8 @@ Pantalla de la app `equipos-taller` del portal: qué equipos están físicamente
   - Antes de commitear: `cd apps/hub-api && node scripts/equipos-anonimizar.mjs verificar src/equipos/nucleo/fixtures-reales src/equipos scripts ../equipos-taller/src ../../docs`.
 - La pantalla solo **oculta** botones según `permisos`: el servidor comprueba cada llave.
 - `RETIRADOS_FIJOS` (núcleo) está vacío a propósito: los retirados se marcan con «Marcar retirado».
+- **Tablero:** solo lectura (nada escribe en Desk ni en Zoho). Colores SOLO con los tokens `--tt-*` de `src/tablero/temas.ts`: `tablero.css.test.ts` rechaza literales de color en el CSS y los TSX del tablero, y `temas.test.ts` exige contraste 4,5:1 (3:1 desde 24 px) en los dos temas; si un par falla, se cambia el color, nunca el umbral. Los temporizadores se limpian al desmontar (pruebas con `vi.getTimerCount()`).
+- **Llave de kiosco:** cualquier cambio en `router-kiosco.ts` o `servicio-tablero.ts` mantiene en verde las pruebas de amenazas T1–T8 de `router-kiosco.test.ts`.
 
 ## Pruebas
 

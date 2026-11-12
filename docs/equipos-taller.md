@@ -119,6 +119,23 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 
 **Sin botón «Actualizar información»** (retirado el 11/11/2026): la pantalla se actualiza sola con la corrida de cada hora. Mientras corre una corrida, la cabecera dice «Actualizando…» (texto, no botón) y la pantalla consulta cada 3 s hasta que termina; entonces pide los datos una vez más. Sin datos todavía, dice «Se actualiza sola cada hora, cuando termina la sincronización con n8n.».
 
+## Tablero kanban
+
+Una vista más sobre la misma foto, **de solo lectura** (cambio SDD `tablero-kanban-taller`, 11/11/2026). La tabla no cambia.
+
+| Dónde | Qué |
+|---|---|
+| Botones «Tabla \| Tablero» de la app (`?vista=tablero`) | El tablero dentro del portal, para todos los que tienen la app. |
+| `/equipos-taller/tv` | La TV: pantalla completa, tema día/noche, con sesión o con llave de kiosco. Guía: [equipos-taller-kiosco.md](equipos-taller-kiosco.md). |
+| `/equipos-taller/mis-equipos` | «Mis equipos» en el móvil: los equipos del técnico, agrupados por columna. Le reconoce por el nombre del portal; si no coincide con ningún responsable de Desk, o con varios, pregunta «¿Quién eres?» y el móvil lo recuerda. Sin botones de cambio de estado. |
+
+- **Columnas** (`nucleo/taller-columns.ts`): Entrada – Remisión (sin ticket, Ticket creado, OV asignada, Remisión creada), Rev. / Diagnóstico, Notificación cliente, En proceso, Servicio externo y Por entregar. El reparto de los 26 estados de Desk está en ese archivo; una prueba falla si alguno queda sin columna. Un estado desconocido va a Rev. / Diagnóstico con una etiqueta que lo nombra.
+- **Tarjetas**: solo las filas «En taller» y «Servicio externo», ya con los ajustes manuales aplicados. La suma de las columnas es igual a esos dos contadores. Las de «Servicio externo» van a su columna sea cual sea el estado del ticket.
+- **Contadores**: los mismos `VISTAS` de la tabla (`nucleo/taller-board.ts`). Cuáles 5 se ven se elige en Ajustes.
+- **Días**: de calendario, desde la entrada hasta hoy en Bogotá. Semáforo verde / ámbar / rojo con los umbrales de Ajustes (30 y 90 por defecto).
+- **Ajustes** (solo admin): Ajustes → «Equipos en taller · Tablero» (umbrales, horas del tema noche, 5 contadores) y «Equipos en taller · Kiosco» (llaves de la TV). Se guardan en `portal.equipos_tablero_config` (una fila) y `portal.equipos_kiosco` (migración 074).
+- **Datos de la TV con llave**: `GET /api/equipos-taller/kiosco/tablero`, cabecera `X-Kiosk-Token`. Devuelve solo el tablero ya armado; ninguna otra ruta acepta la llave.
+
 ## Permisos
 
 | Acción | Quién |
@@ -128,6 +145,9 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 | Gestionar las llaves (Ajustes → «Equipos en taller · Llaves») | Solo los admin. Las llaves solo se pueden dar a usuarios **activos** que tengan la app (o sean admin). Las casillas no guardan solas: cada fila se guarda con su botón «Guardar». |
 | Recibir la alerta | La llave `recibe_alertas` (los admin no la tienen por defecto), con el usuario activo y con la app o admin. |
 | Mandar la copia de Drive | Solo n8n, con el token `EQUIPOS_SYNC_TOKEN`. |
+| Ver el tablero, la TV con sesión y «Mis equipos» | Quien tenga la app `equipos-taller`, y los admin. |
+| Ajustes del tablero y llaves de kiosco (generar, ver la lista, revocar) | Solo los admin. |
+| Ver la TV sin sesión | Una llave de kiosco activa. Solo abre los datos del tablero. |
 
 La migración no siembra ni la app ni las llaves: se asignan a mano.
 
