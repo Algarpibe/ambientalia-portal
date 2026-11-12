@@ -39,6 +39,7 @@ import TablaSolicitudes from './TablaSolicitudes';
 import BandejaAprobacion from './BandejaAprobacion';
 import PanelAdjuntos from './PanelAdjuntos';
 import PanelKpis from './PanelKpis';
+import PanelNotas from './PanelNotas';
 import ImportarEmpleados from './ImportarEmpleados';
 import ImportarHistorico from './ImportarHistorico';
 import RegistroGeneral from './RegistroGeneral';
@@ -58,6 +59,7 @@ const PESTANAS_VALIDAS = [
   'historico',
   'calendario',
   'kpis',
+  'notas',
 ] as const;
 
 type Pestana = (typeof PESTANAS_VALIDAS)[number];
@@ -269,7 +271,9 @@ export default function App() {
       // distintos. Empleados es el alta —se hace una vez—, y el organigrama se
       // revisa cada vez que alguien cambia de jefe. Juntos, el segundo quedaba
       // enterrado bajo el primero.
-      p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos']);
+      // Las notas van dentro de `esAdmin` y sin llave propia: hoy solo hay un
+      // administrador, y cada nota es además de quien la escribe (migración 076).
+      p.push(['empleados', 'Empleados'], ['organigrama', 'Organigrama'], ['saldos', 'Saldos'], ['notas', 'Notas']);
     }
     return p;
   }, [contexto, veTodaLaEmpresa, veKpis, pendientes.length, cambios.length]);
@@ -831,6 +835,9 @@ export default function App() {
               </div>
               <div className={tab === 'saldos' ? '' : 'hidden'}>
                 <PanelSaldos activo={tab === 'saldos'} onSaldoFijado={refrescarSaldosPropios} />
+              </div>
+              <div className={tab === 'notas' ? '' : 'hidden'}>
+                <PanelNotas activo={tab === 'notas'} />
               </div>
             </>
           )}

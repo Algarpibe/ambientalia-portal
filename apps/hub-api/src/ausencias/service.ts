@@ -84,3 +84,8 @@ export * from './service/calendario.js';
 // ARQ-612 — en service/retiro.ts: registrar la baja, deshacerla y la lista de
 // retirados. Se reexporta todo.
 export * from './service/retiro.js';
+
+// ── Notas personales del administrador ─────────────────────────────────────
+
+// En service/notas.ts: la validación pura y la orquestación. Se reexporta todo.
+export * from './service/notas.js';

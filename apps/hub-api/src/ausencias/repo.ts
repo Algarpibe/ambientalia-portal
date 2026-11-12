@@ -99,3 +99,8 @@ export * from './repo/registro.js';
 
 // ARQ-612 — en repo/retiro.ts. Se reexporta todo, como los grupos de arriba.
 export * from './repo/retiro.js';
+
+// ── Notas personales del administrador ─────────────────────────────────────
+
+// En repo/notas.ts. Cada consulta filtra por `autor_email`: ver la migración 076.
+export * from './repo/notas.js';

@@ -146,6 +146,10 @@ const estado = {
   /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
   orden: [] as string[],
   plantilla: [] as any[],
+  /** Las notas personales: `{ autor, nota, contenido }`, con `contenido` = bytes de la imagen o null. */
+  notas: [] as any[],
+  /** Contador monotonico de ids de nota: `length + 1` repetiria id tras un borrado. */
+  siguienteNota: 0,
   yaEnBd: 0,
   historicoInsertado: 0,
   solicitudes: [] as Record<string, unknown>[],
@@ -1557,6 +1561,69 @@ vi.mock('./repo.js', async () => ({
         s.fechaInicio === fecha &&
         (excluirSolicitudId === null || s.id !== excluirSolicitudId),
     ),
+  // Notas personales (repo/notas.ts).
+  //
+  // ⚠️ REGLAS DE SQL REIMPLEMENTADAS AQUI: el filtro por `autor_email` de cada
+  // consulta y el `COALESCE(resuelta_at, NOW())` de `repo.actualizarNota`. Las
+  // fuentes de verdad son esas consultas, y quien las ejecuta contra Postgres
+  // real es `repo.notas.db.test.ts`. Esto solo IMITA su resultado y diverge en
+  // dos bordes conocidos: `notasDeAutor` no ordena (el SQL ordena por
+  // `fecha DESC, created_at DESC`) y `actualizarNota` no mueve `updatedAt`
+  // (el SQL hace `updated_at = NOW()`). Ningun test del router debe asertar
+  // ninguno de los dos.
+  notasDeAutor: async (_db: unknown, autor: string) =>
+    estado.notas.filter((f: any) => f.autor === autor).map((f: any) => f.nota),
+  notaDeAutor: async (_db: unknown, id: string, autor: string) =>
+    estado.notas.find((f: any) => f.nota.id === id && f.autor === autor)?.nota ?? null,
+  insertarNota: async (_db: unknown, autor: string, empleadoNombre: string, datos: any) => {
+    const id = `00000000-0000-4000-8000-${String(++estado.siguienteNota).padStart(12, '0')}`;
+    const nota = {
+      id,
+      empleadoId: datos.empleadoId,
+      empleadoNombre,
+      categoria: datos.categoria,
+      fecha: datos.fecha,
+      comentario: datos.comentario,
+      estado: 'abierta',
+      resueltaAt: null,
+      createdAt: '2026-01-15T12:00:00.000Z',
+      updatedAt: '2026-01-15T12:00:00.000Z',
+      imagen: datos.imagen
+        ? { id: `${id}-img`, nombreArchivo: datos.imagen.nombreArchivo, mime: datos.imagen.mime, bytes: datos.imagen.contenido.length }
+        : null,
+    };
+    estado.notas.push({ autor, nota, contenido: datos.imagen?.contenido ?? null });
+    return nota;
+  },
+  actualizarNota: async (_db: unknown, id: string, autor: string, cambio: any, empleadoNombre?: string) => {
+    const fila = estado.notas.find((f: any) => f.nota.id === id && f.autor === autor);
+    if (!fila) return null;
+    const { imagen, ...resto } = cambio;
+    Object.assign(fila.nota, resto, empleadoNombre === undefined ? {} : { empleadoNombre });
+    if (cambio.estado !== undefined) {
+      fila.nota.resueltaAt = cambio.estado === 'resuelta' ? (fila.nota.resueltaAt ?? '2026-01-15T12:00:00.000Z') : null;
+    }
+    if (imagen === null) {
+      fila.nota.imagen = null;
+      fila.contenido = null;
+    } else if (imagen !== undefined) {
+      fila.nota.imagen = { id: `${id}-img`, nombreArchivo: imagen.nombreArchivo, mime: imagen.mime, bytes: imagen.contenido.length };
+      fila.contenido = imagen.contenido;
+    }
+    return fila.nota;
+  },
+  eliminarNota: async (_db: unknown, id: string, autor: string) => {
+    const i = estado.notas.findIndex((f: any) => f.nota.id === id && f.autor === autor);
+    if (i < 0) return false;
+    estado.notas.splice(i, 1);
+    return true;
+  },
+  imagenDeNota: async (_db: unknown, id: string, autor: string) => {
+    const fila = estado.notas.find((f: any) => f.nota.id === id && f.autor === autor);
+    return fila?.contenido
+      ? { nombreArchivo: fila.nota.imagen.nombreArchivo, mime: fila.nota.imagen.mime, contenido: fila.contenido }
+      : null;
+  },
 }));
 
 // ── El candado del doble ───────────────────────────────────────────────────
@@ -1665,6 +1732,7 @@ function app() {
   // Mismo orden que index.ts: el parser holgado de la ruta de creación va antes
   // que el global, o el de 2mb rechazaría el adjunto con un 413.
   a.use('/api/ausencias/solicitudes', express.json({ limit: '12mb' }));
+  a.use('/api/ausencias/notas', express.json({ limit: '12mb' }));
   a.use(express.json({ limit: '2mb' }));
   a.use('/api', createAusenciasRouter({} as never));
   return a;
@@ -1760,6 +1828,8 @@ beforeEach(() => {
   estado.aniosKpi = [];
   estado.ventanas = {};
   estado.adminsDelPortal = [];
+  estado.notas = [];
+  estado.siguienteNota = 0;
   // Beto tiene correo propio a proposito: es la unica forma de distinguir «me
   // veo a mi» de «los veo a todos» en un recorte que compara por correo.
   estado.fichasDelCalendario = [
@@ -7417,5 +7487,135 @@ describe('GET /ausencias/dias-habiles con un rango mal formado', () => {
       .set('Authorization', `Bearer ${token()}`)
       .expect(400);
     expect(r.body).toEqual({ error: 'rango_invalido' });
+  });
+});
+
+describe('notas personales del administrador', () => {
+  const ADMIN = 'admin@ambientalia.com.co';
+  const OTRO_ADMIN = 'otro.admin@ambientalia.com.co';
+  // Ids propios: E1 y E2 (arriba) ya son fichas de la plantilla por defecto.
+  const EMPLEADO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const CUALQUIERA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64');
+  const admin = (sub = ADMIN) => token({ sub, role: 'admin' });
+  const pedir = (metodo: 'get' | 'post' | 'patch' | 'delete', ruta: string, tok = admin()) =>
+    request(app())[metodo](`/api/ausencias${ruta}`).set('Authorization', `Bearer ${tok}`);
+  const alta = (over: Record<string, unknown> = {}, tok = admin()) =>
+    pedir('post', '/notas', tok).send({
+      empleadoId: EMPLEADO,
+      categoria: 'retraso',
+      fecha: '2026-11-12',
+      comentario: 'Llega tarde',
+      ...over,
+    });
+
+  beforeEach(() => {
+    estado.plantilla.push({ id: EMPLEADO, nombreCompleto: 'Beto Díaz', correo: 'beto.diaz@ambientalia.com.co', activo: true });
+  });
+
+  it.each([
+    ['get', '/notas'],
+    ['post', '/notas'],
+    ['patch', `/notas/${CUALQUIERA}`],
+    ['delete', `/notas/${CUALQUIERA}`],
+    ['get', `/notas/${CUALQUIERA}/imagen`],
+  ] as const)('CANDADO: %s %s sin ser admin → 403', async (metodo, ruta) => {
+    await pedir(metodo, ruta, token()).expect(403);
+  });
+
+  it('crea la nota con el nombre de la ficha y la devuelve en la lista', async () => {
+    const r = await alta().expect(201);
+    expect(r.body).toMatchObject({ empleadoNombre: 'Beto Díaz', categoria: 'retraso', estado: 'abierta', imagen: null });
+    const l = await pedir('get', '/notas').expect(200);
+    expect(l.body.notas.map((n: any) => n.id)).toEqual([r.body.id]);
+  });
+
+  it('404 si la persona no existe', async () => {
+    const r = await alta({ empleadoId: E_FANTASMA }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('404 si la persona es una ficha dada de baja', async () => {
+    const BAJA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    estado.plantilla.push({ id: BAJA, nombreCompleto: 'Dora Baja', correo: 'dora@ambientalia.com.co', activo: false });
+    const r = await alta({ empleadoId: BAJA }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('400 con el codigo y el campo de la validacion', async () => {
+    const r = await alta({ categoria: 'vacaciones' }).expect(400);
+    expect(r.body).toMatchObject({ error: 'categoria_invalida', field: 'categoria' });
+  });
+
+  it('CANDADO: acepta una foto de ~7,5 MB (parser propio de 12 MB)', async () => {
+    const foto = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(7.5 * 1024 * 1024)]);
+    const r = await alta({ imagen: { nombreArchivo: 'foto.jpg', mime: 'image/jpeg', contenidoBase64: foto.toString('base64') } }).expect(201);
+    expect(r.body.imagen).toMatchObject({ mime: 'image/jpeg', bytes: foto.length });
+  });
+
+  it('sirve la imagen con su tipo, en linea y sin dejar que el navegador lo adivine', async () => {
+    const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
+    const r = await pedir('get', `/notas/${body.id}/imagen`).expect(200);
+    expect(r.headers['content-type']).toBe('image/jpeg');
+    // Los bytes, no solo las cabeceras: un handler que mandara JSON con este
+    // Content-Type pasaría las comprobaciones de arriba.
+    expect(Buffer.compare(r.body, Buffer.from(JPEG_B64, 'base64'))).toBe(0);
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['content-disposition']).toBe('inline');
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+
+  it('404 al pedir la imagen de una nota que no tiene', async () => {
+    const { body } = await alta().expect(201);
+    const r = await pedir('get', `/notas/${body.id}/imagen`).expect(404);
+    expect(r.body.error).toBe('imagen_no_encontrada');
+  });
+
+  it('PATCH marca resuelta y reabre', async () => {
+    const { body } = await alta().expect(201);
+    const resuelta = await pedir('patch', `/notas/${body.id}`).send({ estado: 'resuelta' }).expect(200);
+    expect(resuelta.body.estado).toBe('resuelta');
+    expect(resuelta.body.resueltaAt).not.toBeNull();
+    const abierta = await pedir('patch', `/notas/${body.id}`).send({ estado: 'abierta' }).expect(200);
+    expect(abierta.body).toMatchObject({ estado: 'abierta', resueltaAt: null });
+  });
+
+  it('PATCH sin ningun campo → 400 sin_cambios', async () => {
+    const { body } = await alta().expect(201);
+    const r = await pedir('patch', `/notas/${body.id}`).send({}).expect(400);
+    expect(r.body.error).toBe('sin_cambios');
+  });
+
+  it('PATCH con otra persona copia su nombre', async () => {
+    const OTRA = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    estado.plantilla.push({ id: OTRA, nombreCompleto: 'Carla Gómez', correo: 'carla@ambientalia.com.co', activo: true });
+    const { body } = await alta().expect(201);
+    const r = await pedir('patch', `/notas/${body.id}`).send({ empleadoId: OTRA }).expect(200);
+    expect(r.body).toMatchObject({ empleadoId: OTRA, empleadoNombre: 'Carla Gómez' });
+  });
+
+  it('DELETE → 204 y la nota desaparece de la lista', async () => {
+    const { body } = await alta().expect(201);
+    await pedir('delete', `/notas/${body.id}`).expect(204);
+    expect((await pedir('get', '/notas').expect(200)).body.notas).toEqual([]);
+  });
+
+  it('CANDADO: la nota de otro administrador es un 404, no un 403', async () => {
+    const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
+    const otro = admin(OTRO_ADMIN);
+    expect((await pedir('get', '/notas', otro).expect(200)).body.notas).toEqual([]);
+    expect((await pedir('patch', `/notas/${body.id}`, otro).send({ estado: 'resuelta' }).expect(404)).body.error).toBe('nota_no_encontrada');
+    expect((await pedir('delete', `/notas/${body.id}`, otro).expect(404)).body.error).toBe('nota_no_encontrada');
+    expect((await pedir('get', `/notas/${body.id}/imagen`, otro).expect(404)).body.error).toBe('imagen_no_encontrada');
+    // Y el dueño la sigue viendo intacta: los intentos ajenos no tocaron nada.
+    const mias = (await pedir('get', '/notas').expect(200)).body.notas;
+    expect(mias).toHaveLength(1);
+    expect(mias[0]).toMatchObject({ id: body.id, estado: 'abierta' });
+    expect(mias[0].imagen).not.toBeNull();
+  });
+
+  it('404 con un id de nota que no es un UUID', async () => {
+    const r = await pedir('delete', '/notas/no-es-uuid').expect(404);
+    expect(r.body.error).toBe('nota_no_encontrada');
   });
 });

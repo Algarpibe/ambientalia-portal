@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// Las migraciones de «Equipos en taller» sin base: que están apuntadas, en orden, que la 075
-// es la última y que no siembran nada. Lo que hacen contra Postgres: migracion.db.test.ts,
+// Las migraciones de «Equipos en taller» sin base: que están apuntadas, en orden y que no
+// siembran nada. Lo que hacen contra Postgres: migracion.db.test.ts,
 // repo.db.test.ts, repo-sync.db.test.ts y repo-tablero.db.test.ts.
 const leer = (ruta: string) => readFileSync(fileURLToPath(new URL(ruta, import.meta.url)), 'utf8');
 const SQL = leer('../users/migrations/071_equipos_taller.sql');
@@ -93,8 +93,10 @@ describe('migración 074 (tablero y llaves de kiosco)', () => {
 });
 
 describe('migración 075 (tema de la TV)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 074, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'074_equipos_tablero\.sql',\s*'075_equipos_tablero_tema_tv\.sql'\];/);
+  // Ya no es la última (la 076 de las notas de Ausencias va detrás): basta con
+  // que esté justo detrás de la 074. Mismo relevo que en wo-sales/email.test.ts.
+  it('está apuntada en MIGRATIONS, detrás de la 074', () => {
+    expect(leer('../db.ts')).toMatch(/'074_equipos_tablero\.sql',\s*'075_equipos_tablero_tema_tv\.sql'[,\]]/);
   });
 
   it('no siembra ni borra nada (se re-ejecuta en cada arranque)', () => {

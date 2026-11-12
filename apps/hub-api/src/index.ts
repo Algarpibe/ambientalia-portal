@@ -66,6 +66,10 @@ app.use(
 // resto de endpoints conservan su límite de 2mb.
 app.use('/api/ausencias/solicitudes', express.json({ limit: '12mb' }));
 
+// Las notas personales del administrador pueden llevar una foto (hasta 8 MB,
+// ~11 MB en base64): misma excepción y mismo orden que la línea de arriba.
+app.use('/api/ausencias/notas', express.json({ limit: '12mb' }));
+
 // Body JSON. Límite de 2mb para permitir la subida del avatar (data URL de un
 // thumbnail); el resto de payloads son pequeños y hay rate limiting.
 app.use(express.json({ limit: '2mb' }));

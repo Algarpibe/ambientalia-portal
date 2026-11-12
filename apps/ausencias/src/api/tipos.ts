@@ -397,3 +397,59 @@ export interface NuevaSolicitud {
   horaInicio?: string;
   horaFin?: string;
 }
+
+// ── Notas personales del administrador ─────────────────────────────────────
+// Espejo manual de los tipos de hub-api (ausencias/types.ts): mismos nombres.
+// `ImagenSubida` y `NuevaNota.imagen` son la forma en que la imagen viaja
+// (base64), no la que tiene en el servidor (Buffer).
+
+export type CategoriaNota = 'retraso' | 'solicitud' | 'otro';
+export type EstadoNota = 'abierta' | 'resuelta';
+
+export interface ImagenDeNota {
+  id: string;
+  nombreArchivo: string;
+  mime: string;
+  bytes: number;
+}
+
+export interface Nota {
+  id: string;
+  /** `null` si la ficha se borró: la nota conserva el nombre copiado. */
+  empleadoId: string | null;
+  empleadoNombre: string;
+  categoria: CategoriaNota;
+  /** `YYYY-MM-DD`. */
+  fecha: string;
+  comentario: string;
+  estado: EstadoNota;
+  resueltaAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  imagen: ImagenDeNota | null;
+}
+
+/** Una imagen tal como viaja a hub-api. */
+export interface ImagenSubida {
+  nombreArchivo: string;
+  mime: string;
+  contenidoBase64: string;
+}
+
+export interface NuevaNota {
+  empleadoId: string;
+  categoria: CategoriaNota;
+  fecha: string;
+  comentario: string;
+  imagen?: ImagenSubida;
+}
+
+/** Solo lo que cambia. `imagen: null` = quitarla. */
+export interface CambioNota {
+  empleadoId?: string;
+  categoria?: CategoriaNota;
+  fecha?: string;
+  comentario?: string;
+  estado?: EstadoNota;
+  imagen?: ImagenSubida | null;
+}
