@@ -161,9 +161,13 @@ function etiquetasDe(r: Fila): Etiqueta[] {
   return out;
 }
 
+/** Lo que Desk pone en «Encargado» cuando el ticket aún no tiene técnico: no es una persona. */
+const SIN_TECNICO_DESK = new Set(["Pendiente Asignar"].map(nkey));
+
 function tarjetaDe(r: Fila, cfg: AjustesTablero, ahoraMs: number): Tarjeta {
   const dias = diasEnTaller(r.d, ahoraMs);
-  const enc = r.z?.enc?.trim() ?? "";
+  const crudo = r.z?.enc?.trim() ?? "";
+  const enc = SIN_TECNICO_DESK.has(nkey(crudo)) ? "" : crudo;
   return {
     clave: claveFila(r),
     sn: r.sn,

@@ -140,6 +140,13 @@ describe('contenido de la tarjeta', () => {
     expect([neutro.pie, neutro.tecnico]).toEqual(['neutro', null]);
   });
 
+  it('«Pendiente Asignar» (lo que pone Desk sin técnico) es «Sin asignar», no un técnico', () => {
+    for (const enc of ['Pendiente Asignar', 'PENDIENTE  asignar ']) {
+      const t = tarjeta(fila('A1', 'En Proceso', { z: tk('En Proceso', { enc }) }));
+      expect([t.pie, t.tecnico], enc).toEqual(['sin_asignar', null]);
+    }
+  });
+
   it('avatar: FNV-1a de nkey(nombre) mod 6, determinista y sin importar tildes ni mayúsculas', () => {
     expect(avatarDe('Técnico Uno')).toBe(2);
     expect(avatarDe('TECNICO   uno')).toBe(2);
