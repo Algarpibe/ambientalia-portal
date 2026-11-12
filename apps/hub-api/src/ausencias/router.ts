@@ -1013,7 +1013,8 @@ export function createAusenciasRouter(db: Pool): Router {
       const imagen = await service.descargarImagenDeNota(db, sesionDe(req).email, req.params.id);
       res.setHeader('Content-Type', imagen.mime);
       // `inline` a secas, sin el nombre: lo escribe el cliente, y un carácter
-      // fuera de ASCII en una cabecera hace que Node lance (un 500). Para
+      // fuera de latin1 en una cabecera hace que Node lance (un 500), y uno
+      // dentro de latin1 sale con la codificación rota. Para
       // pintarla en la página no hace falta.
       res.setHeader('Content-Disposition', 'inline');
       // El tipo ya está comprobado por sus primeros bytes al subirla; esto

@@ -7495,7 +7495,7 @@ describe('notas personales del administrador', () => {
   const OTRO_ADMIN = 'otro.admin@ambientalia.com.co';
   // Ids propios: E1 y E2 (arriba) ya son fichas de la plantilla por defecto.
   const EMPLEADO = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  const CUALQUIERA = '33333333-3333-4333-8333-333333333333';
+  const CUALQUIERA = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString('base64');
   const admin = (sub = ADMIN) => token({ sub, role: 'admin' });
   const pedir = (metodo: 'get' | 'post' | 'patch' | 'delete', ruta: string, tok = admin()) =>
@@ -7530,8 +7530,15 @@ describe('notas personales del administrador', () => {
     expect(l.body.notas.map((n: any) => n.id)).toEqual([r.body.id]);
   });
 
-  it('404 si la persona no es una ficha activa', async () => {
+  it('404 si la persona no existe', async () => {
     const r = await alta({ empleadoId: E_FANTASMA }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('404 si la persona es una ficha dada de baja', async () => {
+    const BAJA = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    estado.plantilla.push({ id: BAJA, nombreCompleto: 'Dora Baja', correo: 'dora@ambientalia.com.co', activo: false });
+    const r = await alta({ empleadoId: BAJA }).expect(404);
     expect(r.body.error).toBe('empleado_no_encontrado');
   });
 
@@ -7549,7 +7556,10 @@ describe('notas personales del administrador', () => {
   it('sirve la imagen con su tipo, en linea y sin dejar que el navegador lo adivine', async () => {
     const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
     const r = await pedir('get', `/notas/${body.id}/imagen`).expect(200);
-    expect(r.headers['content-type']).toContain('image/jpeg');
+    expect(r.headers['content-type']).toBe('image/jpeg');
+    // Los bytes, no solo las cabeceras: un handler que mandara JSON con este
+    // Content-Type pasaría las comprobaciones de arriba.
+    expect(Buffer.compare(r.body, Buffer.from(JPEG_B64, 'base64'))).toBe(0);
     expect(r.headers['x-content-type-options']).toBe('nosniff');
     expect(r.headers['content-disposition']).toBe('inline');
     expect(r.headers['cache-control']).toBe('no-store');
@@ -7594,9 +7604,14 @@ describe('notas personales del administrador', () => {
     const { body } = await alta({ imagen: { nombreArchivo: 'f.jpg', mime: 'image/jpeg', contenidoBase64: JPEG_B64 } }).expect(201);
     const otro = admin(OTRO_ADMIN);
     expect((await pedir('get', '/notas', otro).expect(200)).body.notas).toEqual([]);
-    await pedir('patch', `/notas/${body.id}`, otro).send({ estado: 'resuelta' }).expect(404);
-    await pedir('delete', `/notas/${body.id}`, otro).expect(404);
-    await pedir('get', `/notas/${body.id}/imagen`, otro).expect(404);
+    expect((await pedir('patch', `/notas/${body.id}`, otro).send({ estado: 'resuelta' }).expect(404)).body.error).toBe('nota_no_encontrada');
+    expect((await pedir('delete', `/notas/${body.id}`, otro).expect(404)).body.error).toBe('nota_no_encontrada');
+    expect((await pedir('get', `/notas/${body.id}/imagen`, otro).expect(404)).body.error).toBe('imagen_no_encontrada');
+    // Y el dueño la sigue viendo intacta: los intentos ajenos no tocaron nada.
+    const mias = (await pedir('get', '/notas').expect(200)).body.notas;
+    expect(mias).toHaveLength(1);
+    expect(mias[0]).toMatchObject({ id: body.id, estado: 'abierta' });
+    expect(mias[0].imagen).not.toBeNull();
   });
 
   it('404 con un id de nota que no es un UUID', async () => {
