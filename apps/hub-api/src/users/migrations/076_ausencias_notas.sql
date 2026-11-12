@@ -25,12 +25,17 @@ CREATE TABLE IF NOT EXISTS portal.ausencias_notas (
   id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   empleado_id     UUID         REFERENCES portal.empleados(id) ON DELETE SET NULL,
   empleado_nombre VARCHAR(255) NOT NULL,
-  categoria       VARCHAR(20)  NOT NULL CHECK (categoria IN ('retraso', 'solicitud', 'otro')),
+  categoria       VARCHAR(20)  NOT NULL CONSTRAINT ausencias_notas_categoria_ck CHECK (categoria IN ('retraso', 'solicitud', 'otro')),
   fecha           DATE         NOT NULL,
-  comentario      TEXT         NOT NULL CHECK (char_length(btrim(comentario)) BETWEEN 1 AND 2000),
-  estado          VARCHAR(10)  NOT NULL DEFAULT 'abierta' CHECK (estado IN ('abierta', 'resuelta')),
+  -- Ni btrim ni char_length(btrim(...)): btrim sin segundo argumento solo quita
+  -- el espacio U+0020, así que un comentario de solo tabuladores, saltos de línea
+  -- o espacios duros pasaría por «no vacío», y el tope de 2000 se mediría sobre
+  -- el texto recortado y no sobre el que se guarda. '\S' exige algún carácter que
+  -- no sea blanco y el tope se mide sobre lo guardado.
+  comentario      TEXT         NOT NULL CONSTRAINT ausencias_notas_comentario_ck CHECK (comentario ~ '\S' AND char_length(comentario) <= 2000),
+  estado          VARCHAR(10)  NOT NULL DEFAULT 'abierta' CONSTRAINT ausencias_notas_estado_ck CHECK (estado IN ('abierta', 'resuelta')),
   resuelta_at     TIMESTAMPTZ,
-  autor_email     VARCHAR(254) NOT NULL CHECK (autor_email = lower(autor_email)),
+  autor_email     VARCHAR(254) NOT NULL CONSTRAINT ausencias_notas_autor_minusculas_ck CHECK (autor_email = lower(autor_email)),
   created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   -- Resuelta si y solo si tiene fecha de resolución: así ningún UPDATE puede
@@ -46,7 +51,7 @@ CREATE TABLE IF NOT EXISTS portal.ausencias_nota_imagenes (
   id             UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
   nota_id        UUID         NOT NULL UNIQUE REFERENCES portal.ausencias_notas(id) ON DELETE CASCADE,
   nombre_archivo VARCHAR(255) NOT NULL,
-  mime           VARCHAR(20)  NOT NULL CHECK (mime IN ('image/jpeg', 'image/png', 'image/webp')),
+  mime           VARCHAR(20)  NOT NULL CONSTRAINT ausencias_nota_imagenes_mime_ck CHECK (mime IN ('image/jpeg', 'image/png', 'image/webp')),
   contenido      BYTEA        NOT NULL,
   created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );

@@ -194,6 +194,10 @@ export async function asegurarDesk2(db: Pool): Promise<{ urlLector: string; urlA
  * auditoria de este esquema no tiene FK a proposito, asi que el CASCADE de
  * `empleados` no se la lleva y hay que anadirla A MANO.
  *
+ * `portal.ausencias_notas` y `portal.ausencias_nota_imagenes` (076) caerian por el
+ * CASCADE desde `portal.empleados`, pero `ausencias_notas.empleado_id` admite NULL
+ * y por eso se listan, para no depender de esa FK.
+ *
  * No sirve envolver cada test en una transaccion: el codigo bajo prueba abre las
  * suyas con `withTransaction`, y anidarlas exigiria savepoints — justo lo que no
  * se quiere simular, porque el ROLLBACK real es una de las cosas que se prueban.

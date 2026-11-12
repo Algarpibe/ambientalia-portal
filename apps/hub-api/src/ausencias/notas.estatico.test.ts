@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { CATEGORIAS_NOTA, ESTADOS_NOTA, MAX_COMENTARIO_NOTA, MIMES_IMAGEN_NOTA } from './types.js';
 
 // Las notas personales sin base de datos: que la migración 076 está apuntada,
 // es idempotente y da permisos a portal_app. Lo que hace contra Postgres lo
 // vigila repo.notas.db.test.ts.
 const leer = (ruta: string) => readFileSync(fileURLToPath(new URL(ruta, import.meta.url)), 'utf8');
 const SQL_076 = leer('../users/migrations/076_ausencias_notas.sql');
+// Sin comentarios: el texto explicativo puede nombrar DROP o INSERT sin ser sentencia.
+const SIN_COMENTARIOS = SQL_076.replace(/--.*$/gm, '');
+const lista = (s: string) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 
 describe('migración 076 (notas personales)', () => {
   it('está apuntada en MIGRATIONS, detrás de la 075, y es la última', () => {
@@ -14,13 +18,31 @@ describe('migración 076 (notas personales)', () => {
   });
 
   it('no siembra ni borra nada (se re-ejecuta en cada arranque)', () => {
-    expect(SQL_076).not.toMatch(/INSERT\s+INTO|\b(DROP|TRUNCATE)\b|DELETE\s+FROM/i);
+    // ALTER también: un ALTER ... ADD CONSTRAINT no es re-ejecutable.
+    expect(SIN_COMENTARIOS).not.toMatch(/INSERT\s+INTO|\b(DROP|TRUNCATE|ALTER)\b|DELETE\s+FROM/i);
   });
 
   it('solo DDL idempotente', () => {
-    const creates = SQL_076.match(/CREATE (UNIQUE )?(TABLE|INDEX|VIEW|SCHEMA|OR REPLACE VIEW)[^;]*/g) || [];
+    const creates = SIN_COMENTARIOS.match(/CREATE (UNIQUE )?(TABLE|INDEX|VIEW|SCHEMA|OR REPLACE VIEW)[^;]*/g) || [];
     expect(creates.length).toBeGreaterThan(0);
     expect(creates.filter((c) => !/IF NOT EXISTS|OR REPLACE/.test(c))).toEqual([]);
+  });
+
+  it('CANDADO: los CHECK de la 076 dicen lo mismo que los tipos', () => {
+    const listaDe = (col: string) => lista(SIN_COMENTARIOS.match(new RegExp(`CHECK \\(${col} IN \\(([^)]*)\\)\\)`, 'i'))![1]);
+    const varchar = (col: string) => Number(SIN_COMENTARIOS.match(new RegExp(`\\b${col}\\s+VARCHAR\\((\\d+)\\)`, 'i'))![1]);
+    const pares = [
+      ['categoria', CATEGORIAS_NOTA],
+      ['estado', ESTADOS_NOTA],
+      ['mime', MIMES_IMAGEN_NOTA],
+    ] as const;
+    for (const [col, tipo] of pares) {
+      const valores = listaDe(col);
+      expect(valores, col).toEqual([...tipo]);
+      for (const v of valores) expect(v.length, `${col}=${v}`).toBeLessThanOrEqual(varchar(col));
+    }
+    const tope = SIN_COMENTARIOS.match(/char_length\(comentario\) <= (\d+)/)![1];
+    expect(Number(tope)).toBe(MAX_COMENTARIO_NOTA);
   });
 
   it('da permisos a portal_app solo si el rol existe (DATA-332)', () => {

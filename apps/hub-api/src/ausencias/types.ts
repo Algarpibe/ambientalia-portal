@@ -897,6 +897,9 @@ export type EstadoNota = (typeof ESTADOS_NOTA)[number];
 export const MIMES_IMAGEN_NOTA = ['image/jpeg', 'image/png', 'image/webp'] as const;
 export type MimeImagenNota = (typeof MIMES_IMAGEN_NOTA)[number];
 
+/** Mismo tope que el CHECK de la 076 y que usará el servicio: se importa de aquí, no se redefine. */
+export const MAX_COMENTARIO_NOTA = 2000;
+
 /** Lo que la lista enseña de la imagen: sin los bytes, que van por su propia ruta. */
 export interface ImagenDeNota {
   id: string;
