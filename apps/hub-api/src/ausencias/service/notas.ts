@@ -69,13 +69,18 @@ function validarEstado(v: unknown): EstadoNota {
 }
 
 function validarFecha(v: unknown): string {
-  if (typeof v !== 'string' || !esFechaValida(v)) throw new AusenciaError('fecha_invalida', 400, 'fecha');
+  // El año 0 pasa esFechaValida, pero no existe en el DATE de Postgres (un 500).
+  if (typeof v !== 'string' || !esFechaValida(v) || v < '0001-01-01') {
+    throw new AusenciaError('fecha_invalida', 400, 'fecha');
+  }
   return v;
 }
 
 function validarComentario(v: unknown): string {
   const c = typeof v === 'string' ? v.trim() : '';
   if (!c) throw new AusenciaError('comentario_vacio', 400, 'comentario');
+  // Postgres no admite el carácter NUL en un text: sin este rechazo sería un 500.
+  if (c.includes('\u0000')) throw new AusenciaError('comentario_invalido', 400, 'comentario');
   if (c.length > MAX_COMENTARIO_NOTA) throw new AusenciaError('comentario_demasiado_largo', 400, 'comentario');
   return c;
 }
@@ -83,11 +88,13 @@ function validarComentario(v: unknown): string {
 function validarImagen(v: unknown): ImagenNuevaDeNota {
   if (typeof v !== 'object' || v === null) throw new AusenciaError('imagen_no_admitida', 400, 'imagen');
   const a = v as Record<string, unknown>;
-  const nombreArchivo = String(a.nombreArchivo ?? '').trim();
-  const mime = String(a.mime ?? '');
-  const contenidoBase64 = String(a.contenidoBase64 ?? '');
+  // Solo strings: String({}) guardaría '[object Object]' como nombre.
+  const nombreArchivo = typeof a.nombreArchivo === 'string' ? a.nombreArchivo.trim() : '';
+  const mime = typeof a.mime === 'string' ? a.mime : '';
+  const contenidoBase64 = typeof a.contenidoBase64 === 'string' ? a.contenidoBase64 : '';
 
-  if (!nombreArchivo || nombreArchivo.length > MAX_NOMBRE_IMAGEN) {
+  // El NUL en el nombre reventaría el INSERT (Postgres no lo admite en un text).
+  if (!nombreArchivo || nombreArchivo.length > MAX_NOMBRE_IMAGEN || nombreArchivo.includes('\u0000')) {
     throw new AusenciaError('nombre_archivo_invalido', 400, 'imagen');
   }
   if (!(MIMES_IMAGEN_NOTA as readonly string[]).includes(mime)) throw new AusenciaError('imagen_no_admitida', 400, 'imagen');
@@ -147,7 +154,8 @@ export async function listarNotas(db: Pool, autorEmail: string): Promise<Nota[]>
 
 export async function crearNota(db: Pool, autorEmail: string, body: unknown): Promise<Nota> {
   const datos = validarNuevaNota(body);
-  return repo.insertarNota(db, autorEmail, await nombreDeFicha(db, datos.empleadoId), datos);
+  const empleadoNombre = await nombreDeFicha(db, datos.empleadoId);
+  return repo.insertarNota(db, autorEmail, empleadoNombre, datos);
 }
 
 export async function editarNota(db: Pool, autorEmail: string, id: string, body: unknown): Promise<Nota> {

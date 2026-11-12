@@ -36,6 +36,13 @@ describe('detectarMimeImagen', () => {
     expect(detectarMimeImagen(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg">'))).toBeNull();
     expect(detectarMimeImagen(Buffer.alloc(0))).toBeNull();
   });
+
+  it('no reconoce lo que empieza como una firma real y no lo es', () => {
+    const wave = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WAVE')]);
+    expect(detectarMimeImagen(wave)).toBeNull();
+    expect(detectarMimeImagen(Buffer.from([0xff, 0xd8, 0x00]))).toBeNull();
+    expect(detectarMimeImagen(PNG.subarray(0, 7))).toBeNull();
+  });
 });
 
 describe('validarNuevaNota', () => {
@@ -83,7 +90,8 @@ describe('validarNuevaNota', () => {
     falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ nombreArchivo: ' ' }) })), 'nombre_archivo_invalido');
   });
 
-  it('rechaza un formato que no es JPEG, PNG ni WebP', () => {
+  // La lista de MIME no se puede aislar sin mocks: aquí cae ya por la firma de los bytes.
+  it('rechaza un SVG declarado como imagen', () => {
     falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ mime: 'image/svg+xml' }) })), 'imagen_no_admitida');
   });
 
@@ -95,13 +103,42 @@ describe('validarNuevaNota', () => {
     falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ contenidoBase64: '' }) })), 'imagen_no_admitida');
   });
 
-  it('rechaza una imagen de más de 8 MB sin llegar a decodificarla', () => {
+  it('rechaza una imagen de más de 8 MB antes de mirar sus bytes', () => {
     const enorme = 'A'.repeat(12 * 1024 * 1024); // ~9 MB una vez decodificado
     falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ contenidoBase64: enorme }) })), 'imagen_demasiado_grande');
   });
 
   it('una imagen que no es un objeto no se admite', () => {
     falla(() => validarNuevaNota(cuerpo({ imagen: 'foto.jpg' })), 'imagen_no_admitida');
+  });
+
+  it('una imagen null explícita es una nota sin imagen', () => {
+    expect(validarNuevaNota(cuerpo({ imagen: null })).imagen).toBeNull();
+  });
+
+  it('rechaza un nombre de imagen de 201 caracteres', () => {
+    falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ nombreArchivo: 'a'.repeat(201) }) })), 'nombre_archivo_invalido');
+  });
+
+  it('rechaza un nombre de imagen que no es un texto', () => {
+    falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ nombreArchivo: {} }) })), 'nombre_archivo_invalido');
+  });
+
+  it('acepta un empleadoId en mayúsculas', () => {
+    const id = EMPLEADO.toUpperCase();
+    expect(validarNuevaNota(cuerpo({ empleadoId: id })).empleadoId).toBe(id);
+  });
+
+  it('rechaza un comentario con el carácter NUL', () => {
+    falla(() => validarNuevaNota(cuerpo({ comentario: 'hola\u0000mundo' })), 'comentario_invalido');
+  });
+
+  it('rechaza un nombre de imagen con el carácter NUL', () => {
+    falla(() => validarNuevaNota(cuerpo({ imagen: imagen({ nombreArchivo: 'fo\u0000to.jpg' }) })), 'nombre_archivo_invalido');
+  });
+
+  it('rechaza el año 0, que Postgres no tiene', () => {
+    falla(() => validarNuevaNota(cuerpo({ fecha: '0000-01-01' })), 'fecha_invalida');
   });
 });
 
