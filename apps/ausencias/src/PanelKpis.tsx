@@ -1,6 +1,5 @@
 import { useEffect, useId, useState } from 'react';
 import {
-  Activity,
   AlertTriangle,
   CalendarRange,
   Clock,
@@ -21,10 +20,14 @@ import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 //  2. ¿Quién lo concentra?  → las dos listas de acumulación excesiva.
 //  3. ¿Quién está atascado? → mediana y p90 por aprobador.
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
-//  5. ¿Cómo va la salud?    → los días perdidos por incapacidad, mes a mes.
-//  6. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
-//  7. ¿Quién ha tenido qué? → el resumen por persona de cada tipo de ausencia.
-//  8. ¿Cuánto roza?         → rechazos, anulaciones y cambios de fecha.
+//  5. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
+//  6. ¿Quién ha tenido qué? → el resumen por persona de cada tipo de ausencia.
+//  7. ¿Cuánto roza?         → rechazos, anulaciones y cambios de fecha.
+//
+// El absentismo por incapacidad (días perdidos, mes a mes) se quitó de la
+// pantalla a petición del usuario el 2026-11-12. hub-api lo sigue calculando
+// (`absentismo` en la respuesta); las incapacidades siguen en la gráfica de
+// estacionalidad y en el resumen por persona.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -187,7 +190,6 @@ export default function PanelKpis({ activo }: Props) {
       <AcumulacionExcesiva acumulacion={datos.acumulacion} />
       <PendientesAhora pendientes={datos.pendientes} />
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
-      <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
       {datos.resumenPorPersona && <ResumenDeAusencias resumen={datos.resumenPorPersona} anio={datos.anio} />}
       <FriccionDelProceso friccion={datos.friccion} desde={datos.desde} />
@@ -469,102 +471,7 @@ function TiemposDeAprobacion({ tiempos, desde }: { tiempos: Kpis['tiempos']; des
   );
 }
 
-// ── Absentismo ─────────────────────────────────────────────────────────────
-
-function AbsentismoPorIncapacidad({ absentismo }: { absentismo: Kpis['absentismo'] }) {
-  const { meses, totalDiasHabiles, totalEpisodios } = absentismo;
-  const { techo, marcas } = escalaDeGrafica(Math.max(...meses.map((m) => m.diasHabiles), 0));
-
-  return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5">
-      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-        <Activity className="h-4 w-4 text-gray-400" />
-        Absentismo por incapacidad
-      </h2>
-      <p className="mt-1 text-xs text-gray-500">
-        Días de <strong>trabajo</strong> perdidos, no de calendario: un viernes a lunes son 2 días, no 4. Una
-        incapacidad que cruza dos meses se reparte entre los dos.
-      </p>
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        <Cifra etiqueta="Días perdidos" valor={String(totalDiasHabiles)} detalle="en toda la ventana" />
-        <Cifra etiqueta="Incapacidades" valor={String(totalEpisodios)} />
-        <Cifra
-          etiqueta="Media por mes"
-          valor={meses.length > 0 ? (totalDiasHabiles / meses.length).toLocaleString('es-CO', { maximumFractionDigits: 1 }) : '—'}
-        />
-      </div>
-
-      {/* Barras en CSS, sin librería de gráficas: son doce valores y una
-          dependencia nueva costaría más que esto.
-
-          ⚠️ LA ALTURA VA EN PÍXELES, NO EN PORCENTAJE, y no es una cuestión de
-          gusto: el contenedor lleva `items-end` (align-items: flex-end), así que
-          las columnas NO se estiran y toman la altura de su contenido. Un
-          `height: X%` dentro resolvería contra un padre de altura `auto` —es
-          decir, contra nada— y saldría cero. Con la altura calculada aquí en px
-          la barra no depende de cómo el navegador resuelva ese porcentaje. */}
-      <div className="mt-5 flex">
-        <EjeY marcas={marcas} techo={techo} />
-        <div className="relative flex-1">
-          <LineasGuia marcas={marcas} techo={techo} />
-          <div className="relative flex items-end gap-1" style={{ height: `${ALTO_BARRA}px` }}>
-            {meses.map((m) => (
-              <div key={m.mes} className="relative h-full flex-1" title={tituloDelMes(m)}>
-                <div
-                  className="absolute inset-x-0 bottom-0 rounded-t bg-blue-500/70"
-                  // El `minHeight` es para que un mes con datos pero poco valor
-                  // no se vea igual que uno vacío: una barra invisible y un cero
-                  // se leen igual, y no son lo mismo.
-                  //
-                  // Contra `techo` y no contra el máximo: si no, la barra más
-                  // alta llegaría arriba del todo y no coincidiría con su marca.
-                  style={{
-                    height: `${(m.diasHabiles / techo) * ALTO_BARRA}px`,
-                    minHeight: m.diasHabiles > 0 ? '2px' : '0',
-                  }}
-                />
-                {/* El número va DENTRO de la columna y en absoluto sobre su
-                    barra: con el eje de altura fija, ponerlo en el flujo lo
-                    empujaría fuera del área o encogería la barra. */}
-                {m.diasHabiles > 0 && (
-                  <span
-                    className="absolute inset-x-0 text-center text-[10px] tabular-nums text-gray-400"
-                    style={{ bottom: `${(m.diasHabiles / techo) * ALTO_BARRA + 2}px` }}
-                  >
-                    {m.diasHabiles}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="mt-1 flex gap-1">
-            {meses.map((m) => (
-              <div key={m.mes} className="flex-1 text-center text-[10px] text-gray-400">
-                {/* Solo el mes; el año iría repetido doce veces y no cabe. */}
-                {m.mes.slice(5)}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <p className="mt-3 text-xs italic text-gray-400">
-        El último mes va a medias: aún no ha terminado. Y con pocos meses de histórico, una subida puede ser
-        una gripe que pasó por la oficina y no una tendencia.
-      </p>
-    </section>
-  );
-}
-
-function tituloDelMes(m: Kpis['absentismo']['meses'][number]): string {
-  if (m.episodios === 0) return `${m.mes}: sin incapacidades`;
-  const personas = m.personas === 1 ? '1 persona' : `${m.personas} personas`;
-  const episodios = m.episodios === 1 ? '1 incapacidad' : `${m.episodios} incapacidades`;
-  // Los nombres en su propia línea: en una sola, con seis o siete personas, la
-  // cifra que encabeza el tooltip queda empujada fuera de la vista.
-  return `${m.mes}: ${m.diasHabiles} días perdidos · ${episodios} · ${personas}\n${listaDeNombres(m.nombres)}`;
-}
+// ── Estacionalidad ─────────────────────────────────────────────────────────
 
 /**
  * Los nombres de un tooltip, recortados.
@@ -579,8 +486,6 @@ function listaDeNombres(nombres: string[]): string {
   if (nombres.length <= TOPE) return nombres.join(', ');
   return `${nombres.slice(0, TOPE).join(', ')} y ${nombres.length - TOPE} más`;
 }
-
-// ── Estacionalidad ─────────────────────────────────────────────────────────
 
 /** Los cuatro tipos, con el color de su tramo en la barra apilada. */
 const TIPOS_ESTACIONALIDAD = [
@@ -735,9 +640,10 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
           </div>
 
           {/* Barras apiladas: cada mes es una columna con los cuatro tipos
-              uno encima de otro. Sin librería, por lo mismo que en absentismo. */}
-          {/* ⚠️ Misma regla que en la gráfica de absentismo: la altura de la
-              columna se calcula en PÍXELES. Con `items-end`, la columna no se
+              uno encima de otro. Barras en CSS, sin librería de gráficas: son
+              unas decenas de valores y una dependencia nueva costaría más. */}
+          {/* ⚠️ LA ALTURA DE LA COLUMNA VA EN PÍXELES, NO EN PORCENTAJE, y no es
+              cuestión de gusto. Con `items-end`, la columna no se
               estira y mide lo que su contenido, así que un `height: %` dentro
               resolvería contra `auto` y daría cero — que es exactamente lo que
               pasaba: la sección salía con el hueco vacío y ni una barra.
@@ -754,9 +660,9 @@ function Estacionalidad({ estacionalidad }: { estacionalidad: Kpis['estacionalid
                   <div key={m.mes} className="flex flex-1 flex-col" title={tituloEstacional(m, tiposVisibles)}>
                     <div
                       className="flex w-full flex-col-reverse overflow-hidden rounded-t"
-                      // Contra `techo` y no contra el máximo, por lo mismo que
-                      // en absentismo: la barra más alta tiene que coincidir con
-                      // una marca del eje y no pasarse de la última.
+                      // Contra `techo` y no contra el máximo: la barra más alta
+                      // tiene que coincidir con una marca del eje y no pasarse
+                      // de la última.
                       style={{
                         height: `${(m.total / techo) * ALTO_BARRA}px`,
                         minHeight: m.total > 0 ? '2px' : '0',
