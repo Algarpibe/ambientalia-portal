@@ -52,6 +52,14 @@ export function createResetMailer({
 }: ResetMailerOptions = {}): ResetMailer {
   const url = (env.PASSWORD_RESET_N8N_URL ?? '').trim();
   const token = (env.PASSWORD_RESET_N8N_TOKEN ?? '').trim();
+  // Aviso único al arrancar: sin esto, el fallo solo asoma cuando alguien pide un
+  // enlace, y a esa persona ya se le dijo que revisara su correo. Va por console.warn
+  // (como el de ALLOWED_ORIGIN) y no por `log`, que queda para los eventos por envío.
+  if (url === '' || token === '') {
+    console.warn(
+      'WARNING: password_reset_sin_configurar_al_arrancar — falta PASSWORD_RESET_N8N_URL o PASSWORD_RESET_N8N_TOKEN; no saldrá ningún correo de restablecer contraseña.',
+    );
+  }
   return {
     async send({ para, asunto, cuerpo }: ResetEmail): Promise<void> {
       if (url === '' || token === '') {

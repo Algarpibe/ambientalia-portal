@@ -121,4 +121,22 @@ describe('createResetMailer', () => {
     expect(reg.eventos.map((e) => e.event)).toEqual(['password_reset_sin_configurar']);
     expect(reg.errores).toEqual([]);
   });
+
+  it.each([
+    ['sin ninguna variable', {}],
+    ['sin la URL', { PASSWORD_RESET_N8N_TOKEN: 'token-ficticio' }],
+    ['sin el token', { PASSWORD_RESET_N8N_URL: URL_N8N }],
+    ['con la URL en blanco', { ...ENV, PASSWORD_RESET_N8N_URL: '  ' }],
+  ])('%s: avisa una sola vez al crearse, antes de que nadie pida un enlace', (_caso, env) => {
+    const aviso = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createResetMailer({ env, net: red(async () => new Response('', { status: 200 })).fn, log: registro().log, report: registro().report });
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(String(aviso.mock.calls[0][0])).toContain('password_reset_sin_configurar_al_arrancar');
+  });
+
+  it('configurado: no avisa al crearse', () => {
+    const aviso = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createResetMailer({ env: ENV, net: red(async () => new Response('', { status: 200 })).fn, log: registro().log, report: registro().report });
+    expect(aviso).not.toHaveBeenCalled();
+  });
 });
