@@ -152,6 +152,61 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   return actualizado;
 }
 
+/** El tope de la columna: `portal.empleados.cargo VARCHAR(255)`. */
+const CARGO_MAX = 255;
+
+// U+0000–U+001F y U+007F. El NUL es el que de verdad rompe: PostgreSQL no lo
+// admite en una columna de texto y la ruta contestaría un 500. El resto
+// (tabulador, salto de línea…) no tiene sitio en un cargo de una sola línea, y
+// descolocaría la firma de los correos, que lo pone en su propia línea.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001F\u007F]/;
+
+/**
+ * Lo que de verdad se guarda como cargo a partir del cuerpo de la petición.
+ *
+ * `null`, el texto vacío y el texto de solo espacios significan lo mismo: «sin
+ * cargo», que la pantalla pinta como «—». Cualquier otro tipo, incluida la clave
+ * ausente, es un 400: se exige, no se interpreta.
+ *
+ * La longitud se cuenta por puntos de código (`[...cargo].length`) y no con
+ * `.length`, porque así cuenta `VARCHAR(255)`: un emoji es un carácter para
+ * PostgreSQL y dos unidades UTF-16 para JavaScript.
+ */
+export function normalizarCargo(bruto: unknown): string | null {
+  if (bruto === null) return null;
+  if (typeof bruto !== 'string') throw new AusenciaError('cargo_invalido', 400, 'cargo');
+  const cargo = bruto.trim();
+  if (!cargo) return null;
+  if (CONTROL.test(cargo) || [...cargo].length > CARGO_MAX) {
+    throw new AusenciaError('cargo_invalido', 400, 'cargo');
+  }
+  return cargo;
+}
+
+/**
+ * Pone, cambia o quita el cargo de alguien. Solo fichas activas.
+ *
+ * Sin registro de auditoría y sin correo, como la copia y la segunda firma: el
+ * cargo no da ningún permiso. Se ve en el acto en la firma de los correos y en
+ * `empleadoCargo`, también en solicitudes ya en trámite, porque los dos lo leen
+ * de la ficha al usarlo.
+ *
+ * Devuelve `Empleado` y no `EmpleadoConJefatura`, al contrario que `fijarJefe`
+ * y `fijarCopia`: el cargo no toca el árbol, y recalcular `empleadosConJefatura`
+ * serían tres consultas para nada. La pantalla recarga la lista igualmente.
+ */
+export async function fijarCargo(db: Pool, empleadoId: string, body: unknown): Promise<Empleado> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const cargo = normalizarCargo(b.cargo);
+
+  if (!(await repo.fijarCargo(db, empleadoId, cargo))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizado = await repo.empleadoPorId(db, empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
 /**
  * Enciende o apaga la segunda firma de alguien.
  *

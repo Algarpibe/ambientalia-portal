@@ -856,6 +856,14 @@ vi.mock('./repo.js', async () => ({
     e.copiaCorreo = copia;
     return true;
   },
+  // Con el `activo !== false`, al contrario que fijarCopia: es lo que hace el
+  // repo de verdad, y la ruta del cargo tiene un test de ficha inactiva.
+  fijarCargo: async (_db: unknown, empleadoId: string, cargo: string | null) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId && x.activo !== false);
+    if (!e) return false;
+    e.cargo = cargo;
+    return true;
+  },
   fijarSegundaFirma: async (_db: unknown, empleadoId: string, requiere: boolean) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
@@ -4735,6 +4743,54 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
       .set('Authorization', `Bearer ${token()}`)
       .send({ copiaCorreo: 'ana.ruiz@ambientalia.com.co' })
       .expect(403);
+  });
+});
+
+describe('PUT /ausencias/empleados/:id/cargo', () => {
+  const fijar = (id: string, body: object, t = token({ role: 'admin' })) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/cargo`).set('Authorization', `Bearer ${t}`).send(body);
+
+  it('un admin fija el cargo, recortado, y recibe la ficha', async () => {
+    const r = await fijar(E1, { cargo: '  Jefa de taller  ' }).expect(200);
+    expect(r.body).toMatchObject({ id: E1, cargo: 'Jefa de taller' });
+  });
+
+  it('null y el texto vacio dejan la ficha sin cargo', async () => {
+    expect((await fijar(E1, { cargo: null }).expect(200)).body.cargo).toBeNull();
+    expect((await fijar(E2, { cargo: '   ' }).expect(200)).body.cargo).toBeNull();
+  });
+
+  it('400 cargo_invalido, con el campo, si no es ni texto ni null', async () => {
+    const r = await fijar(E1, { cargo: 42 }).expect(400);
+    expect(r.body).toEqual({ error: 'cargo_invalido', field: 'cargo' });
+  });
+
+  it('400 cargo_invalido si falta la clave', async () => {
+    const r = await fijar(E1, {}).expect(400);
+    expect(r.body.error).toBe('cargo_invalido');
+  });
+
+  it('400 cargo_invalido con un caracter de control, y la ficha no cambia', async () => {
+    const r = await fijar(E1, { cargo: 'Jefa\u0000' }).expect(400);
+    expect(r.body.error).toBe('cargo_invalido');
+    expect(estado.plantilla.find((x: any) => x.id === E1)!.cargo).toBe('Analista');
+  });
+
+  it('404 si la ficha no existe', async () => {
+    const r = await fijar(E_FANTASMA, { cargo: 'Jefa de taller' }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('404 si la ficha esta inactiva, y su cargo no se toca', async () => {
+    const e1 = estado.plantilla.find((x: any) => x.id === E1)!;
+    e1.activo = false;
+    const r = await fijar(E1, { cargo: 'Jefa de taller' }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+    expect(e1.cargo).toBe('Analista');
+  });
+
+  it('403 a quien no es admin', async () => {
+    await fijar(E1, { cargo: 'Jefa de taller' }, token()).expect(403);
   });
 });
 
