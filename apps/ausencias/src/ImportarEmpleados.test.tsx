@@ -170,6 +170,35 @@ describe('editar el cargo', () => {
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
   });
 
+  it('si una baja de otra fila termina antes, el final del guardado no cierra la edición de otra persona', async () => {
+    const marta = { ...ficha('e3', 'Marta Ruiz', 'Técnica'), fechaRetiro: '2099-12-31' };
+    await montar([ana, luis, marta]);
+    let terminar!: (f: EmpleadoConJefatura) => void;
+    api.fijarCargo.mockReturnValue(
+      new Promise<EmpleadoConJefatura>((r) => {
+        terminar = r;
+      }),
+    );
+    api.reactivarEmpleado.mockResolvedValue(undefined);
+
+    fireEvent.click(lapiz('Ana Pérez'));
+    fireEvent.change(campo('Ana Pérez'), { target: { value: 'Jefa de taller' } });
+    fireEvent.keyDown(campo('Ana Pérez'), { key: 'Enter' });
+    await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(true));
+
+    // La baja de Marta comparte `guardando`: al terminar libera los lápices
+    // aunque el guardado de Ana siga en vuelo.
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar' }));
+    await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
+    fireEvent.click(lapiz('Luis Gómez'));
+    fireEvent.change(campo('Luis Gómez'), { target: { value: 'A medias' } });
+
+    terminar({ ...ana, cargo: 'Jefa de taller' });
+    await waitFor(() => expect(api.fijarCargo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText('Cargo de Ana Pérez actualizado.')).toBeTruthy());
+    expect(campo('Luis Gómez').value).toBe('A medias');
+  });
+
   it('si falla, enseña el error y deja la edición abierta con lo tecleado', async () => {
     await montar([ana]);
     api.fijarCargo.mockRejectedValue(new Error('Esa ficha ya no está activa. Recarga la lista.'));
@@ -181,5 +210,7 @@ describe('editar el cargo', () => {
     await waitFor(() => expect(screen.getByText('Esa ficha ya no está activa. Recarga la lista.')).toBeTruthy());
     expect(campo('Ana Pérez').value).toBe('Jefa de taller');
     expect(api.fetchEmpleados).toHaveBeenCalledTimes(1);
+    // `setGuardando(null)` va en el `finally`: tras un fallo se puede reintentar.
+    expect((screen.getByLabelText('Guardar el cargo de Ana Pérez') as HTMLButtonElement).disabled).toBe(false);
   });
 });

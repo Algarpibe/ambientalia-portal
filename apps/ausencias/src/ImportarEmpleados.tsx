@@ -148,7 +148,11 @@ export default function ImportarEmpleados() {
     setExito(null);
     try {
       await fijarCargo(e.id, texto);
-      setEdicionCargo(null);
+      // Solo cierra SU fila. El candado de los lápices cubre el caso normal,
+      // pero `guardando` es un solo hueco que comparte con la baja: si una baja
+      // de otra fila termina antes, los lápices se reabren con este guardado
+      // todavía en vuelo, y sin esto su final cerraría la edición de otra persona.
+      setEdicionCargo((cur) => (cur?.id === e.id ? null : cur));
       setExito(`Cargo de ${e.nombreCompleto} actualizado.`);
       setRecarga((n) => n + 1);
     } catch (err) {
