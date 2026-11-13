@@ -101,11 +101,16 @@ export interface FilaDeResumen {
   deBaja: boolean;
   /** Días laborables. */
   vacaciones: number;
-  /** Horas de los permisos que las tienen. */
+  /** Horas, un decimal. */
   permisoHoras: number;
-  /** Días laborables de los permisos de día completo (sin horas). */
+  /**
+   * Días laborables de los permisos sin hora: los de día completo y todos los
+   * anteriores a la migración 036.
+   */
   permisoDias: number;
+  /** Días laborables. */
   compensatorio: number;
+  /** Días laborables. */
   incapacidad: number;
 }
 
