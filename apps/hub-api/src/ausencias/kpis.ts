@@ -365,13 +365,20 @@ export function absentismoPorMes(
 export const TIPOS_DE_AUSENCIA = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad'] as const;
 export type TipoDeAusencia = (typeof TIPOS_DE_AUSENCIA)[number];
 
-/** Una ausencia reducida a lo que el KPI de estacionalidad necesita. */
+/** Una ausencia reducida a lo que los KPIs de estacionalidad y del resumen necesitan. */
 export interface AusenciaParaKpi {
   tipo: TipoDeAusencia;
   empleadoId: string;
   nombreCompleto: string;
   fechaInicio: string;
   fechaFin: string;
+  /**
+   * `HH:MM`, solo en un permiso de unas horas (las dos o ninguna: CHECK de la
+   * 036). Opcionales para que quien no las necesita —la estacionalidad y sus
+   * tests— no tenga que inventarlas.
+   */
+  horaInicio?: string | null;
+  horaFin?: string | null;
 }
 
 export interface MesDeEstacionalidad {

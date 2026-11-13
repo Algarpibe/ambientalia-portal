@@ -151,6 +151,8 @@ export async function incapacidadesParaKpi(
  * · El mismo solape con la ventana que `incapacidadesParaKpi`, y por lo mismo:
  *   las filas viajan con sus fechas originales porque recortar es trabajo del
  *   motor, que es quien sabe repartir por mes.
+ *
+ * También la usa el resumen por persona, que necesita las horas de los permisos.
  */
 export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): Promise<AusenciaParaKpi[]> {
   const { rows } = await db.query(
@@ -158,7 +160,11 @@ export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): 
             s.empleado_id,
             e.nombre_completo,
             s.fecha_inicio::text AS fecha_inicio,
-            s.fecha_fin::text    AS fecha_fin
+            s.fecha_fin::text    AS fecha_fin,
+            -- to_char y no ::text: el driver devuelve un TIME como '09:00:00' (mismo
+            -- criterio que repo/filas.ts).
+            to_char(s.hora_inicio, 'HH24:MI') AS hora_inicio,
+            to_char(s.hora_fin,    'HH24:MI') AS hora_fin
        FROM portal.solicitudes_ausencia s
        JOIN portal.empleados e ON e.id = s.empleado_id
       WHERE s.tipo   = ANY($3::varchar[])
@@ -175,6 +181,8 @@ export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): 
       nombre_completo: string;
       fecha_inicio: string;
       fecha_fin: string;
+      hora_inicio: string | null;
+      hora_fin: string | null;
     }[]
   ).map((r) => ({
     tipo: r.tipo,
@@ -182,6 +190,8 @@ export async function ausenciasParaKpi(db: Pool, desde: string, hasta: string): 
     nombreCompleto: r.nombre_completo,
     fechaInicio: r.fecha_inicio,
     fechaFin: r.fecha_fin,
+    horaInicio: r.hora_inicio,
+    horaFin: r.hora_fin,
   }));
 }
 
