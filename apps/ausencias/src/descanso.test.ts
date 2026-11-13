@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import type { TramoDeDescanso } from './api';
 import { fechaConMes, textoDeDescanso } from './descanso';
 
-const f = (tramo: 'nunca' | 'alarma' | 'aviso' | 'ok' | 'ahora', dias: number | null, meses: number | null) => ({
+const f = (tramo: TramoDeDescanso, dias: number | null, meses: number | null) => ({
   tramo,
   diasSinVacaciones: dias,
   mesesSinVacaciones: meses,
@@ -10,12 +11,14 @@ const f = (tramo: 'nunca' | 'alarma' | 'aviso' | 'ok' | 'ahora', dias: number | 
 describe('textoDeDescanso', () => {
   it('de vacaciones ahora y sin vacaciones registradas', () => {
     expect(textoDeDescanso(f('ahora', 200, 6))).toBe('de vacaciones ahora');
+    expect(textoDeDescanso(f('ahora', null, null))).toBe('de vacaciones ahora');
     expect(textoDeDescanso(f('nunca', null, null))).toBe('sin vacaciones registradas');
   });
 
   it('en días por debajo de 60', () => {
     expect(textoDeDescanso(f('ok', 1, 0))).toBe('hace 1 día');
     expect(textoDeDescanso(f('ok', 34, 1))).toBe('hace 34 días');
+    expect(textoDeDescanso(f('ok', 59, 1))).toBe('hace 59 días');
   });
 
   it('CANDADO: en meses desde 60 días, con los meses que manda el servidor', () => {

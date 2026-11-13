@@ -18,7 +18,7 @@ import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 // pantalla de la app, y que responden preguntas distintas:
 //
 //  1. ¿Cuánto debemos?      → el pasivo de vacaciones de la plantilla activa.
-//  2. ¿Quién lleva más sin descansar? → el tiempo desde las últimas vacaciones de cada uno.
+//  2. ¿Quién no descansa?   → el tiempo desde las últimas vacaciones de cada uno.
 //  3. ¿Quién está atascado? → mediana y p90 por aprobador.
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //  5. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
@@ -305,12 +305,16 @@ function SinDescansar({ descanso }: { descanso: NonNullable<Kpis['descanso']> })
 
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <Cifra
-          etiqueta={`Más de ${umbralAlarmaMeses} meses`}
+          etiqueta={`${umbralAlarmaMeses} meses o más`}
           valor={String(conteo.alarma)}
           detalle="o sin vacaciones registradas"
-          alarma={conteo.alarma > 0}
+          tono={conteo.alarma > 0 ? 'rojo' : undefined}
         />
-        <Cifra etiqueta={`De ${umbralAvisoMeses} a ${umbralAlarmaMeses} meses`} valor={String(conteo.aviso)} />
+        <Cifra
+          etiqueta={`De ${umbralAvisoMeses} a ${umbralAlarmaMeses} meses`}
+          valor={String(conteo.aviso)}
+          tono={conteo.aviso > 0 ? 'ambar' : undefined}
+        />
         <Cifra etiqueta={`Menos de ${umbralAvisoMeses} meses`} valor={String(conteo.ok)} detalle="o de vacaciones ahora" />
       </div>
 
@@ -325,8 +329,11 @@ function SinDescansar({ descanso }: { descanso: NonNullable<Kpis['descanso']> })
                 sin descansar y no tiene nada previsto» es un caso sobre el que
                 actuar; «lleva un año pero ya tiene 15 días pedidos», no. */}
             <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
-              {f.ultimoDia && <span>último día: {fechaConMes(f.ultimoDia)}</span>}
-              <span>saldo {formatDias(f.saldo)} días</span>
+              {/* Quien está de vacaciones ahora trae el fin de las vacaciones
+                  ANTERIORES: junto a «de vacaciones ahora» se leería como el
+                  de las actuales, así que se omite. */}
+              {f.ultimoDia && f.tramo !== 'ahora' && <span>último día: {fechaConMes(f.ultimoDia)}</span>}
+              <span className={f.saldo < 0 ? 'text-red-600' : undefined}>saldo {formatDias(f.saldo)} días</span>
               {/* Para quien está de vacaciones ahora, «sin nada previsto»
                   sonaría a alarma y es lo contrario: se omite. */}
               {f.tramo !== 'ahora' &&
@@ -859,16 +866,21 @@ function Cifra({
   valor,
   detalle,
   alarma = false,
+  tono,
 }: {
   etiqueta: string;
   valor: string;
   detalle?: string;
   alarma?: boolean;
+  /** Si viene, manda sobre `alarma`: el color del número casa con el de las filas. */
+  tono?: 'rojo' | 'ambar';
 }) {
+  const color =
+    tono === 'rojo' ? 'text-red-600' : tono === 'ambar' ? 'text-amber-600' : alarma ? 'text-amber-600' : 'text-gray-900';
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-gray-500">{etiqueta}</div>
-      <div className={`mt-1 text-2xl font-semibold ${alarma ? 'text-amber-600' : 'text-gray-900'}`}>
+      <div className={`mt-1 text-2xl font-semibold ${color}`}>
         {valor}
       </div>
       {detalle !== undefined && <div className="mt-0.5 text-xs text-gray-500">{detalle}</div>}
