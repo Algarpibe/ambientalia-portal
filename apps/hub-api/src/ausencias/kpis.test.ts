@@ -5,6 +5,8 @@ import {
   tiemposPorAprobador,
   pendientesPorAntiguedad,
   acumulacionExcesiva,
+  descansoPorPersona,
+  mesesDesde,
   absentismoPorMes,
   estacionalidadPorMes,
   resumenPorPersona,
@@ -937,5 +939,95 @@ describe('resumenPorPersona', () => {
     // 2026-09-13 es domingo: la incapacidad no suma ningún día laborable.
     const r = resumenPorPersona([au('incapacidad', ZOE, '2026-09-13', '2026-09-13')], [ANA], ...ANIO_2026);
     expect(r.filas.map((f) => f.nombreCompleto)).toEqual(['Ana Ruiz']);
+  });
+});
+
+describe('descansoPorPersona', () => {
+  const HOY = '2026-11-12';
+  const ficha = (empleadoId: string, nombreCompleto: string, saldo = 10) => ({ empleadoId, nombreCompleto, saldo });
+  const plan = (
+    ultimasVacaciones: string | null,
+    extra: { diasProgramados?: number; deVacacionesAhora?: boolean } = {},
+  ) => ({ ultimasVacaciones, diasProgramados: 0, deVacacionesAhora: false, ...extra });
+  type Plan = ReturnType<typeof plan>;
+  const calcular = (fichas: ReturnType<typeof ficha>[], planes: [string, Plan][]) =>
+    descansoPorPersona(fichas, new Map(planes), HOY, 6, 12);
+  const tramoDe = (r: ReturnType<typeof calcular>, id: string) => r.filas.find((f) => f.empleadoId === id)?.tramo;
+
+  it('mesesDesde: 365 días son 12 meses y 183 son 6', () => {
+    expect(mesesDesde(365)).toBe(12);
+    expect(mesesDesde(364)).toBe(11);
+    expect(mesesDesde(183)).toBe(6);
+    expect(mesesDesde(182)).toBe(5);
+  });
+
+  it('los cinco tramos', () => {
+    const r = calcular(
+      [ficha('n', 'Nunca'), ficha('a', 'Alarma'), ficha('v', 'Aviso'), ficha('o', 'Ok'), ficha('h', 'Ahora')],
+      [
+        ['n', plan(null)],
+        ['a', plan('2025-11-12')], // 365 días
+        ['v', plan('2026-05-13')], // 183 días
+        ['o', plan('2026-05-14')], // 182 días
+        ['h', plan('2026-01-10', { deVacacionesAhora: true })],
+      ],
+    );
+    expect(['n', 'a', 'v', 'o', 'h'].map((id) => tramoDe(r, id))).toEqual(['nunca', 'alarma', 'aviso', 'ok', 'ahora']);
+  });
+
+  it('CANDADO: los bordes de 6 y 12 meses caen donde dice la etiqueta', () => {
+    const r = calcular(
+      [ficha('a', 'A'), ficha('b', 'B')],
+      [
+        ['a', plan('2025-11-13')], // 364 días → 11 meses → aviso
+        ['b', plan('2025-11-12')], // 365 días → 12 meses → alarma
+      ],
+    );
+    expect(r.filas.find((f) => f.empleadoId === 'a')).toMatchObject({ diasSinVacaciones: 364, mesesSinVacaciones: 11, tramo: 'aviso' });
+    expect(r.filas.find((f) => f.empleadoId === 'b')).toMatchObject({ diasSinVacaciones: 365, mesesSinVacaciones: 12, tramo: 'alarma' });
+  });
+
+  it('CANDADO: quien está de vacaciones hoy es «ahora», aunque sus últimas terminadas sean viejas', () => {
+    const r = calcular([ficha('h', 'Ahora')], [['h', plan('2024-01-10', { deVacacionesAhora: true })]]);
+    expect(tramoDe(r, 'h')).toBe('ahora');
+  });
+
+  it('una ficha sin planificación es «nunca», sin nada pedido', () => {
+    const r = calcular([ficha('x', 'Sin plan')], []);
+    expect(r.filas[0]).toMatchObject({ tramo: 'nunca', diasSinVacaciones: null, mesesSinVacaciones: null, ultimoDia: null, diasProgramados: 0 });
+  });
+
+  it('orden: nunca primero, luego de más a menos días, «ahora» al final; empate por nombre', () => {
+    const r = calcular(
+      [ficha('h', 'Hugo'), ficha('o', 'Olga'), ficha('n', 'Nora'), ficha('b2', 'Beto'), ficha('b1', 'Ana')],
+      [
+        ['h', plan('2026-01-10', { deVacacionesAhora: true })],
+        ['o', plan('2026-10-01')],
+        ['n', plan(null)],
+        ['b2', plan('2025-06-01')],
+        ['b1', plan('2025-06-01')],
+      ],
+    );
+    expect(r.filas.map((f) => f.nombreCompleto)).toEqual(['Nora', 'Ana', 'Beto', 'Olga', 'Hugo']);
+  });
+
+  it('CANDADO: los contadores meten «nunca» en alarma y «ahora» en ok', () => {
+    const r = calcular(
+      [ficha('n', 'N'), ficha('a', 'A'), ficha('v', 'V'), ficha('o', 'O'), ficha('h', 'H')],
+      [
+        ['n', plan(null)],
+        ['a', plan('2025-01-01')],
+        ['v', plan('2026-03-01')],
+        ['o', plan('2026-10-01')],
+        ['h', plan('2026-01-10', { deVacacionesAhora: true })],
+      ],
+    );
+    expect(r.conteo).toEqual({ alarma: 2, aviso: 1, ok: 2 });
+    expect(r).toMatchObject({ umbralAvisoMeses: 6, umbralAlarmaMeses: 12 });
+  });
+
+  it('lleva el saldo con un decimal, el último día y lo ya pedido', () => {
+    const r = calcular([ficha('a', 'A', 28.76)], [['a', plan('2026-10-01', { diasProgramados: 15 })]]);
+    expect(r.filas[0]).toMatchObject({ saldo: 28.8, ultimoDia: '2026-10-01', diasProgramados: 15, deVacacionesAhora: false });
   });
 });
