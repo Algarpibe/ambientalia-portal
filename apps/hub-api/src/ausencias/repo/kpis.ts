@@ -251,6 +251,13 @@ export interface PlanificacionDeEmpleado {
   ultimasVacaciones: string | null;
   /** Días hábiles de vacaciones pedidos hacia adelante. */
   diasProgramados: number;
+  /**
+   * Tiene unas vacaciones que ocupan agenda y abarcan hoy (bordes incluidos).
+   * Sin esto, la tarjeta de descanso diría «descansó hace 8 meses» de alguien
+   * que está de vacaciones ahora mismo: `ultimasVacaciones` solo mira las ya
+   * terminadas.
+   */
+  deVacacionesAhora: boolean;
 }
 
 /**
@@ -280,6 +287,9 @@ export interface PlanificacionDeEmpleado {
  * las pendientes de firma: quien ya las pidió ha planificado, aunque su jefe no
  * haya firmado todavía. Para la pregunta que responde la señal —«¿tiene algo
  * previsto?»— una pendiente vale igual que una aprobada.
+ *
+ * Tercera señal, `de_vacaciones_ahora`: unas vacaciones en agenda que abarcan
+ * hoy (bordes incluidos), con el mismo recorte de estado que `ultimas_vacaciones`.
  */
 export async function planificacionDeVacaciones(
   db: Pool,
@@ -301,16 +311,30 @@ export async function planificacionDeVacaciones(
                 AND p.estado  = ANY($3::varchar[])
                 AND p.fecha_inicio > $1::date
             ), 0)::float8 AS dias_programados
+            , EXISTS (SELECT 1
+                FROM portal.solicitudes_ausencia a
+               WHERE a.empleado_id = e.id
+                 AND a.tipo    = 'vacaciones'
+                 AND a.estado  = ANY($2::varchar[])
+                 AND a.fecha_inicio <= $1::date
+                 AND a.fecha_fin    >= $1::date
+            ) AS de_vacaciones_ahora
        FROM portal.empleados e
       WHERE e.activo`,
     [hoy, ESTADOS.filter(estaEnElCalendario), [...ESTADOS.filter(estaEnElCalendario), ...ESTADOS_EN_TRAMITE]],
   );
   return (
-    rows as { empleado_id: string; ultimas_vacaciones: string | null; dias_programados: number }[]
+    rows as {
+      empleado_id: string;
+      ultimas_vacaciones: string | null;
+      dias_programados: number;
+      de_vacaciones_ahora: boolean;
+    }[]
   ).map((r) => ({
     empleadoId: r.empleado_id,
     ultimasVacaciones: r.ultimas_vacaciones,
     diasProgramados: r.dias_programados,
+    deVacacionesAhora: r.de_vacaciones_ahora,
   }));
 }
 

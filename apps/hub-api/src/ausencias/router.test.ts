@@ -224,7 +224,12 @@ const estado = {
   /** Lo que `repo.solicitudesParaFriccion` devuelve. */
   friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
   /** Lo que `repo.planificacionDeVacaciones` devuelve, por empleado. */
-  planificacionKpi: [] as { empleadoId: string; ultimasVacaciones: string | null; diasProgramados: number }[],
+  planificacionKpi: [] as {
+    empleadoId: string;
+    ultimasVacaciones: string | null;
+    diasProgramados: number;
+    deVacacionesAhora?: boolean;
+  }[],
   /** Lo que `repo.aniosConAusencias` devuelve, para el selector del panel. */
   aniosKpi: [] as number[],
   /**
@@ -958,7 +963,10 @@ vi.mock('./repo.js', async () => ({
     return estado.ausenciasKpi;
   },
   solicitudesParaFriccion: async (_db: unknown, _desdeIso: string) => estado.friccionKpi,
-  planificacionDeVacaciones: async (_db: unknown, _hoy: string) => estado.planificacionKpi,
+  // `deVacacionesAhora` por defecto a false: los tests que siembran la
+  // planificación antes de existir este campo no lo llevan.
+  planificacionDeVacaciones: async (_db: unknown, _hoy: string) =>
+    estado.planificacionKpi.map((p) => ({ deVacacionesAhora: false, ...p })),
   aniosConAusencias: async (_db: unknown) => estado.aniosKpi,
   crearSolicitud: async (
     _db: unknown,

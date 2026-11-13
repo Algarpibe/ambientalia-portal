@@ -146,3 +146,27 @@ describe('planificacionDeVacaciones: la fila', () => {
     expect(await fila()).toMatchObject({ ultimasVacaciones: '2026-07-10', diasProgramados: 5 });
   });
 });
+
+describe('deVacacionesAhora', () => {
+  it('marca a quien tiene unas vacaciones que empiezan hoy', async () => {
+    await sembrar('vacaciones', 'aprobada', '2026-09-07', '2026-09-11');
+    expect((await fila())?.deVacacionesAhora).toBe(true);
+  });
+
+  it('tambien si hoy es su ultimo dia', async () => {
+    await sembrar('vacaciones', 'aprobada', '2026-09-01', '2026-09-07');
+    expect((await fila())?.deVacacionesAhora).toBe(true);
+  });
+
+  it('CANDADO: no con unas ya terminadas ni con unas futuras', async () => {
+    await sembrar('vacaciones', 'aprobada', '2026-08-03', '2026-08-07');
+    await sembrar('vacaciones', 'aprobada', '2026-09-14', '2026-09-18');
+    expect((await fila())?.deVacacionesAhora).toBe(false);
+  });
+
+  it('no con unas pendientes ni con un permiso de hoy', async () => {
+    await sembrar('vacaciones', 'pendiente', '2026-09-07', '2026-09-11');
+    await sembrar('permiso', 'aprobada', '2026-09-07', '2026-09-07');
+    expect((await fila())?.deVacacionesAhora).toBe(false);
+  });
+});
