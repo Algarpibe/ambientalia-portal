@@ -40,6 +40,15 @@ describe('repo.fijarCargo', () => {
     expect(await cargoEnBd(empleadoId)).toBeNull();
   });
 
+  it('guardar el mismo cargo otra vez tambien es true', async () => {
+    // La pantalla puede mandar el cargo sin tocarlo (Enter sobre el mismo
+    // texto). Postgres cuenta las filas que casan, no las que cambian: si
+    // alguien anadiera un `AND cargo IS DISTINCT FROM $2`, esto daria false y
+    // el servicio contestaria un 404 enganoso.
+    expect(await fijarCargo(db, empleadoId, 'Analista')).toBe(true);
+    expect(await cargoEnBd(empleadoId)).toBe('Analista');
+  });
+
   it('una ficha inactiva: false, y su cargo no se toca', async () => {
     // Mismo criterio AND activo que fijarJefe y fijarCopia: la escritura cubre
     // exactamente el conjunto que la lectura ensena.
