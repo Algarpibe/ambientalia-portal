@@ -5348,6 +5348,20 @@ describe('GET /ausencias/kpis', () => {
     expect(r.body.estacionalidad.mesPico).toBe(mesActual);
   });
 
+  it('el descanso trae a toda la plantilla, de quien nunca descansó a quien está de vacaciones', async () => {
+    const correo = conLlave();
+    estado.planificacionKpi = [
+      { empleadoId: E1, ultimasVacaciones: null, diasProgramados: 0 },
+      { empleadoId: E2, ultimasVacaciones: '2025-12-19', diasProgramados: 0, deVacacionesAhora: true },
+    ];
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.descanso.filas.map((f: { nombreCompleto: string; tramo: string }) => [f.nombreCompleto, f.tramo])).toEqual([
+      ['Ana Ruiz Molina', 'nunca'],
+      ['Luis Prieto Cano', 'ahora'],
+    ]);
+    expect(r.body.descanso).toMatchObject({ conteo: { alarma: 1, aviso: 0, ok: 1 }, umbralAvisoMeses: 6, umbralAlarmaMeses: 12 });
+  });
+
   it('el resumen por persona trae a toda la plantilla, las horas de los permisos y las fichas de baja', async () => {
     const correo = conLlave();
     const mesActual = new Date().toISOString().slice(0, 7);
