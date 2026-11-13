@@ -13,8 +13,11 @@ const SIN_COMENTARIOS = SQL_076.replace(/--.*$/gm, '');
 const lista = (s: string) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 
 describe('migración 076 (notas personales)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 075, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'075_equipos_tablero_tema_tv\.sql',\s*'076_ausencias_notas\.sql'\];/);
+  // Ya no es la última (la 077 de la recuperación de contraseña va detrás):
+  // basta con que esté justo detrás de la 075. Mismo relevo que en
+  // equipos/migracion.test.ts con la 075.
+  it('está apuntada en MIGRATIONS, detrás de la 075', () => {
+    expect(leer('../db.ts')).toMatch(/'075_equipos_tablero_tema_tv\.sql',\s*'076_ausencias_notas\.sql'[,\]]/);
   });
 
   it('no siembra ni borra nada (se re-ejecuta en cada arranque)', () => {
