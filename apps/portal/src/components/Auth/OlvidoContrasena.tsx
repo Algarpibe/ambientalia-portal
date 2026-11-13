@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Mail, CheckCircle2 } from 'lucide-react';
 import { API_BASE } from '../../auth';
 import {
@@ -23,6 +23,13 @@ export default function OlvidoContrasena({ onVolver }: OlvidoContrasenaProps) {
   const [enviado, setEnviado] = useState(false);
   const [error, setError] = useState('');
   const idCorreo = `${useId()}-correo`;
+  const tituloEnviado = useRef<HTMLHeadingElement>(null);
+
+  // Al enviarse, el formulario desaparece y el foco caería al <body>: se lleva
+  // al título de la confirmación para que el lector de pantalla la anuncie.
+  useEffect(() => {
+    if (enviado) tituloEnviado.current?.focus();
+  }, [enviado]);
 
   const enviar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +60,9 @@ export default function OlvidoContrasena({ onVolver }: OlvidoContrasenaProps) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center">
         <CheckCircle2 className="w-16 h-16 text-cyan-400 mb-6" />
-        <h3 className="text-2xl font-bold text-white mb-3">Revisa tu correo</h3>
+        <h3 ref={tituloEnviado} tabIndex={-1} className="text-2xl font-bold text-white mb-3 focus:outline-none">
+          Revisa tu correo
+        </h3>
         <p role="status" className="text-gray-300 mb-8 max-w-sm">
           {MENSAJE_ENLACE_PEDIDO}
         </p>
@@ -99,6 +108,7 @@ export default function OlvidoContrasena({ onVolver }: OlvidoContrasenaProps) {
             placeholder="tu@ejemplo.com"
             maxLength={254}
             autoComplete="email"
+            autoFocus
             className="w-full pl-12 pr-4 py-3 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10 text-white placeholder-gray-500 transition-all duration-300 focus:outline-none focus:bg-opacity-10 focus:border-opacity-30 focus:ring-2 focus:ring-cyan-400 focus:ring-opacity-20"
           />
         </div>

@@ -455,7 +455,10 @@ export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = fal
       )}
 
       {/* ¿Olvidaste tu contraseña? */}
-      {!isSignUp && olvido && <OlvidoContrasena onVolver={() => setOlvido(false)} />}
+      {!isSignUp && olvido && <OlvidoContrasena onVolver={() => {
+        setOlvido(false);
+        setError(''); // un error de login anterior no debe reaparecer al volver
+      }} />}
     </div>
   );
 }

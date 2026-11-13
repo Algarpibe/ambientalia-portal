@@ -215,6 +215,53 @@ describe('AuthRightPanel — ¿Olvidaste tu contraseña?', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('No se pudo conectar con el servidor. Reintenta.');
   });
 
+  it('al abrir el modo «olvidé» el foco queda en el correo', () => {
+    renderLogin();
+    abrirOlvido();
+    expect(document.activeElement).toBe(screen.getByLabelText('Correo electrónico'));
+  });
+
+  it('tras enviar, el foco pasa al título de la confirmación y el mensaje es un status', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({}) } as unknown as Response);
+    renderLogin();
+    abrirOlvido();
+    enviarCorreo('persona@ejemplo.test');
+    expect((await screen.findByRole('status')).textContent).toContain('Si el correo está registrado');
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Revisa tu correo' }));
+  });
+
+  it('una respuesta que no es 200 ni 429 → «No se pudo enviar el enlace. Reintenta.»', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500, json: async () => ({}) } as unknown as Response);
+    renderLogin();
+    abrirOlvido();
+    enviarCorreo('persona@ejemplo.test');
+    expect((await screen.findByRole('alert')).textContent).toContain('No se pudo enviar el enlace. Reintenta.');
+  });
+
+  it('«Enviar enlace» queda deshabilitado mientras la petición está en vuelo', async () => {
+    let resolver: (r: Response) => void = () => {};
+    vi.mocked(fetch).mockReturnValue(new Promise<Response>((res) => { resolver = res; }));
+    renderLogin();
+    abrirOlvido();
+    enviarCorreo('persona@ejemplo.test');
+    const boton = (await screen.findByRole('button', { name: 'Enviando...' })) as HTMLButtonElement;
+    expect(boton.disabled).toBe(true);
+    resolver({ ok: true, status: 200, json: async () => ({}) } as unknown as Response);
+    expect(await screen.findByRole('status')).toBeTruthy();
+  });
+
+  it('un error de login previo no reaparece al volver desde el modo «olvidé»', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
+    const { container } = renderLogin();
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@ejemplo.test' } });
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'x' } });
+    fireEvent.submit(container.querySelector('form')!);
+    await screen.findByRole('alert');
+    abrirOlvido();
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a iniciar sesión' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('con olvidoInicial se abre directamente en el modo «olvidé»', () => {
     render(
       <MemoryRouter>
