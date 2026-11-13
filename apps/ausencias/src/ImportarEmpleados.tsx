@@ -258,7 +258,10 @@ export default function ImportarEmpleados() {
                               onChange={(ev) => setEdicionCargo({ id: e.id, texto: ev.target.value })}
                               onKeyDown={(ev) => {
                                 if (ev.key === 'Enter' && guardando !== e.id) void guardarCargo(e, edicionCargo.texto);
-                                if (ev.key === 'Escape') setEdicionCargo(null);
+                                // Mientras se guarda no se cierra: si el guardado
+                                // fallara, el error saldría sin edición abierta y
+                                // el texto tecleado se habría perdido.
+                                if (ev.key === 'Escape' && guardando !== e.id) setEdicionCargo(null);
                               }}
                               aria-label={`Cargo de ${e.nombreCompleto}`}
                               className="w-48 rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
@@ -267,14 +270,17 @@ export default function ImportarEmpleados() {
                               type="button"
                               disabled={guardando === e.id}
                               onClick={() => void guardarCargo(e, edicionCargo.texto)}
+                              aria-label={`Guardar el cargo de ${e.nombreCompleto}`}
                               className="rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
                             >
                               {guardando === e.id ? 'Guardando…' : 'Guardar'}
                             </button>
                             <button
                               type="button"
+                              disabled={guardando === e.id}
                               onClick={() => setEdicionCargo(null)}
-                              className="rounded-xl px-2 py-1.5 text-sm text-gray-600 hover:underline"
+                              aria-label={`Cancelar la edición del cargo de ${e.nombreCompleto}`}
+                              className="rounded-xl px-2 py-1.5 text-sm text-gray-600 hover:underline disabled:opacity-50"
                             >
                               Cancelar
                             </button>
@@ -282,13 +288,19 @@ export default function ImportarEmpleados() {
                         ) : (
                           <div className="flex items-center gap-1.5">
                             <span>{e.cargo ?? '—'}</span>
+                            {/* Mientras se guarda una fila no se abre otra: el
+                                final de ese guardado cerraría la edición
+                                equivocada y su error parecería de la otra
+                                persona. */}
                             <button
                               type="button"
+                              disabled={guardando !== null}
                               onClick={() => setEdicionCargo({ id: e.id, texto: e.cargo ?? '' })}
                               aria-label={`Editar el cargo de ${e.nombreCompleto}`}
-                              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                              title="Editar el cargo"
+                              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
                             >
-                              <Pencil className="h-3.5 w-3.5" />
+                              <Pencil className="h-4 w-4" />
                             </button>
                           </div>
                         )}

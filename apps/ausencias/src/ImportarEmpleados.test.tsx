@@ -64,6 +64,7 @@ describe('editar el cargo', () => {
     await montar([ana]);
     fireEvent.click(lapiz('Ana Pérez'));
     expect(campo('Ana Pérez').value).toBe('Analista');
+    expect(document.activeElement).toBe(campo('Ana Pérez'));
   });
 
   it('sin cargo, la celda dice «—» y el campo abre vacío', async () => {
@@ -97,7 +98,7 @@ describe('editar el cargo', () => {
 
     fireEvent.click(lapiz('Ana Pérez'));
     fireEvent.change(campo('Ana Pérez'), { target: { value: 'Jefa de taller' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    fireEvent.click(screen.getByLabelText('Guardar el cargo de Ana Pérez'));
 
     await waitFor(() => expect(api.fijarCargo).toHaveBeenCalledWith('e1', 'Jefa de taller'));
   });
@@ -127,7 +128,7 @@ describe('editar el cargo', () => {
   it('Cancelar cierra sin guardar', async () => {
     await montar([ana]);
     fireEvent.click(lapiz('Ana Pérez'));
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByLabelText('Cancelar la edición del cargo de Ana Pérez'));
 
     expect(sinCampo('Ana Pérez')).toBeNull();
     expect(api.fijarCargo).not.toHaveBeenCalled();
@@ -142,6 +143,31 @@ describe('editar el cargo', () => {
     expect(sinCampo('Ana Pérez')).toBeNull();
     expect(campo('Luis Gómez').value).toBe('');
     expect(api.fijarCargo).not.toHaveBeenCalled();
+  });
+
+  it('mientras se guarda: no se abre otra fila, ni se cancela la que se está guardando', async () => {
+    await montar([ana, luis]);
+    let terminar!: (f: EmpleadoConJefatura) => void;
+    api.fijarCargo.mockReturnValue(
+      new Promise<EmpleadoConJefatura>((r) => {
+        terminar = r;
+      }),
+    );
+
+    fireEvent.click(lapiz('Ana Pérez'));
+    fireEvent.change(campo('Ana Pérez'), { target: { value: 'Jefa de taller' } });
+    fireEvent.keyDown(campo('Ana Pérez'), { key: 'Enter' });
+
+    // Si el lápiz de Luis se pudiera abrir ahora, el final del guardado de Ana
+    // cerraría la edición de Luis.
+    await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(true));
+    const cancelar = screen.getByLabelText('Cancelar la edición del cargo de Ana Pérez') as HTMLButtonElement;
+    expect(cancelar.disabled).toBe(true);
+    fireEvent.keyDown(campo('Ana Pérez'), { key: 'Escape' });
+    expect(campo('Ana Pérez').value).toBe('Jefa de taller');
+
+    terminar({ ...ana, cargo: 'Jefa de taller' });
+    await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
   });
 
   it('si falla, enseña el error y deja la edición abierta con lo tecleado', async () => {
