@@ -27,6 +27,29 @@ express-rate-limit 7, Vitest 2 + supertest, `*.db.test.ts` con testcontainers y 
 
 ---
 
+## Desvíos durante la ejecución (2026-11-13)
+
+Cambios posteriores a la revisión respecto a las tareas de más abajo (que no se reescriben); el
+spec ya recoge el resultado:
+
+- Comprobación del formato del token (`/^[A-Za-z0-9_-]{43}$/`) en el servicio, antes de bcrypt.
+- Los tests usan tokens de 43 caracteres en base64url, no cadenas cortas inventadas.
+- Guardas contra fallos síncronos: en el aviso posterior al commit del servicio y en la llamada
+  a `requestReset` del router (`Promise.resolve().then(...)`).
+- Tope de 320 caracteres para el correo en `forgot-password` (y `missing_email` si queda en blanco).
+- El mailer cancela el cuerpo de la respuesta de n8n y avisa una vez al arrancar si falta la
+  configuración (`password_reset_sin_configurar_al_arrancar`).
+- La prueba de concurrencia con BD fuerza un solape real entre los dos consumos.
+- La limpieza de caducados usa `interval '24 hours'`.
+- Accesibilidad: foco gestionado en el modo «olvidé» y en la página de restablecer.
+- El depurador de URLs de Sentry del portal quita también el fragmento (`#t=`, `#k=`).
+- Nodos de n8n tal como se construyeron: Webhook 2.1, Gmail 2.2 con la credencial «Gmail info@»,
+  Respond to Webhook 1.5.
+- La página de restablecer descarta un token mal formado y muestra directamente «enlace no
+  válido».
+
+---
+
 ## Reglas para quien implemente
 
 - **TDD estricto:** cada test se ve en ROJO, y por la razón esperada, antes de escribir el código.
