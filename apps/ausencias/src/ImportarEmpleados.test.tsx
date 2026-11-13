@@ -158,19 +158,22 @@ describe('editar el cargo', () => {
     fireEvent.change(campo('Ana Pérez'), { target: { value: 'Jefa de taller' } });
     fireEvent.keyDown(campo('Ana Pérez'), { key: 'Enter' });
 
-    // Si el lápiz de Luis se pudiera abrir ahora, el final del guardado de Ana
-    // cerraría la edición de Luis.
+    // Si el lápiz de Luis se pudiera abrir ahora, un fallo del guardado de Ana
+    // saldría junto a la edición de Luis, y el mensaje no dice de quién es.
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(true));
     const cancelar = screen.getByLabelText('Cancelar la edición del cargo de Ana Pérez') as HTMLButtonElement;
     expect(cancelar.disabled).toBe(true);
     fireEvent.keyDown(campo('Ana Pérez'), { key: 'Escape' });
     expect(campo('Ana Pérez').value).toBe('Jefa de taller');
+    // Lo que se teclease ahora no viajaría (ya se mandó el texto del Enter) y el
+    // aviso diría «actualizado» igualmente: el campo no admite cambios.
+    expect(campo('Ana Pérez').readOnly).toBe(true);
 
     terminar({ ...ana, cargo: 'Jefa de taller' });
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
   });
 
-  it('si una baja de otra fila termina antes, el final del guardado no cierra la edición de otra persona', async () => {
+  it('si deshacer la baja de otra fila termina antes, el final del guardado no cierra la edición de otra persona', async () => {
     const marta = { ...ficha('e3', 'Marta Ruiz', 'Técnica'), fechaRetiro: '2099-12-31' };
     await montar([ana, luis, marta]);
     let terminar!: (f: EmpleadoConJefatura) => void;
@@ -186,8 +189,8 @@ describe('editar el cargo', () => {
     fireEvent.keyDown(campo('Ana Pérez'), { key: 'Enter' });
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(true));
 
-    // La baja de Marta comparte `guardando`: al terminar libera los lápices
-    // aunque el guardado de Ana siga en vuelo.
+    // Deshacer la baja de Marta («Quitar») comparte `guardando`: al terminar
+    // libera los lápices aunque el guardado de Ana siga en vuelo.
     fireEvent.click(screen.getByRole('button', { name: 'Quitar' }));
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
     fireEvent.click(lapiz('Luis Gómez'));

@@ -258,6 +258,9 @@ export default function ImportarEmpleados() {
                               type="text"
                               autoFocus
                               maxLength={255}
+                              // Mientras se guarda, lo tecleado no viajaría (el
+                              // texto ya salió) y el aviso diría «actualizado».
+                              readOnly={guardando === e.id}
                               value={edicionCargo.texto}
                               onChange={(ev) => setEdicionCargo({ id: e.id, texto: ev.target.value })}
                               onKeyDown={(ev) => {
@@ -292,10 +295,10 @@ export default function ImportarEmpleados() {
                         ) : (
                           <div className="flex items-center gap-1.5">
                             <span>{e.cargo ?? '—'}</span>
-                            {/* Mientras se guarda una fila no se abre otra: el
-                                final de ese guardado cerraría la edición
-                                equivocada y su error parecería de la otra
-                                persona. */}
+                            {/* Mientras se guarda una fila no se abre otra: si
+                                ese guardado fallara, su error saldría junto a
+                                la edición de otra persona, y el mensaje no dice
+                                de quién es. */}
                             <button
                               type="button"
                               disabled={guardando !== null}
