@@ -56,7 +56,9 @@ export class FakeStore implements PasswordResetStore {
   }
 
   async findUserByEmail(email: string): Promise<ResetUser | null> {
-    const u = this.users.find((x) => x.email === email.trim().toLowerCase());
+    // Igualdad exacta, como el SQL: normalizar el correo es cosa del servicio, y
+    // un doble que lo hiciera por él dejaría pasar un servicio que no lo hace.
+    const u = this.users.find((x) => x.email === email);
     return u ? { id: u.id, email: u.email, fullName: u.fullName, status: u.status } : null;
   }
 

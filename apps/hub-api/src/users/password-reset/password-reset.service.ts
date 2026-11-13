@@ -19,6 +19,8 @@ export const MIN_REQUEST_INTERVAL_MS = 2 * 60_000;
 /** Freno por cuenta: enlaces como mucho en la última hora. */
 export const MAX_REQUESTS_PER_HOUR = 5;
 const HOUR_MS = 60 * 60_000;
+/** Formato exacto de generateToken: 32 bytes en base64url sin relleno. */
+const TOKEN_FORMAT = /^[A-Za-z0-9_-]{43}$/;
 
 /** Lo que hace falta saber de la cuenta para decidir si se manda el enlace. */
 export interface ResetUser {
@@ -185,7 +187,9 @@ export class PasswordResetService {
     if (typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
       throw new PasswordResetError('password_too_short');
     }
-    if (typeof token !== 'string' || token === '') {
+    // Un token que no tiene el formato del generado no puede existir: se
+    // rechaza antes de gastar un bcrypt de coste 12 con basura.
+    if (typeof token !== 'string' || !TOKEN_FORMAT.test(token)) {
       throw new PasswordResetError('invalid_or_expired_token');
     }
 
@@ -200,8 +204,12 @@ export class PasswordResetService {
     // El aviso sale sin esperar: la respuesta no depende de él, y un fallo del
     // correo no deshace un cambio que ya está confirmado en la BD. El mailer de
     // verdad nunca rechaza; el catch cubre a cualquier otro que lo hiciera.
-    void this.mailer
-      .send({ para: user.email, ...buildPasswordChangedEmail({ fullName: user.fullName, changedAt: now }) })
+    // Promise.resolve().then: si armar el correo o send lanzaran de forma
+    // síncrona, tampoco puede escapar nada hacia la petición ya confirmada.
+    void Promise.resolve()
+      .then(() =>
+        this.mailer.send({ para: user.email, ...buildPasswordChangedEmail({ fullName: user.fullName, changedAt: now }) }),
+      )
       .catch(() => this.log('password_reset_envio_fallido', { user_id: user.userId }));
   }
 }

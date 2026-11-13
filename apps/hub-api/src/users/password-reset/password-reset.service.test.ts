@@ -20,7 +20,11 @@ import { FakeClock, FakeMailer, FakeStore } from './test-fakes.js';
 const PORTAL = 'https://portal.ejemplo.test';
 const T0 = Date.parse('2026-11-13T15:00:00.000Z');
 const MIN = 60_000;
-const sha256 = (texto: string) => createHash('sha256').update(texto).digest('hex');
+/** Un token con el formato del real (43 caracteres base64url), pero predecible. */
+const tokenFijo = (n: number) => `token-${n}`.padEnd(43, '_');
+const TOKEN_1 = tokenFijo(1);
+const TOKEN_2 = tokenFijo(2);
+const sha256 =(texto: string) => createHash('sha256').update(texto).digest('hex');
 /** El error con el que rechaza una promesa, o null si resuelve. */
 const fallo = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
 
@@ -40,7 +44,7 @@ function montar({ tokenReal = false }: { tokenReal?: boolean } = {}) {
     portalUrl: PORTAL,
     bcryptCost: 4,
     log,
-    randomToken: tokenReal ? undefined : () => `token-${++n}`,
+    randomToken: tokenReal ? undefined : () => tokenFijo(++n),
   });
   return { store, mailer, reloj, eventos, service };
 }
@@ -77,7 +81,7 @@ describe('requestReset', () => {
     expect(mailer.sent).toHaveLength(1);
     expect(mailer.sent[0].para).toBe('ana@ejemplo.test');
     expect(mailer.sent[0].asunto).toBe('Restablecer tu contraseña del Portal Ambientalia');
-    expect(mailer.sent[0].cuerpo).toContain(`href="${PORTAL}/auth/restablecer#t=token-1"`);
+    expect(mailer.sent[0].cuerpo).toContain(`href="${PORTAL}/auth/restablecer#t=${TOKEN_1}"`);
     // El log lleva el id, nunca el correo.
     expect(eventos).toEqual([{ event: 'password_reset_requested', data: { user_id: ana.id } }]);
   });
@@ -104,8 +108,8 @@ describe('requestReset', () => {
     store.addUser({ email: 'ana@ejemplo.test' });
     await service.requestReset('ana@ejemplo.test');
     expect(store.tokens).toHaveLength(1);
-    expect(store.tokens[0].tokenHash).toBe(sha256('token-1'));
-    expect(JSON.stringify(store.tokens)).not.toContain('token-1');
+    expect(store.tokens[0].tokenHash).toBe(sha256(TOKEN_1));
+    expect(JSON.stringify(store.tokens)).not.toContain(TOKEN_1);
   });
 
   it('el enlace caduca a los 30 minutos de pedirlo', async () => {
@@ -163,8 +167,8 @@ describe('requestReset', () => {
     reloj.advance(3 * MIN);
     await service.requestReset('ana@ejemplo.test');
 
-    expect(await fallo(service.resetPassword('token-1', 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
-    expect(await fallo(service.resetPassword('token-2', 'clave-nueva-1'))).toBeNull();
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
+    expect(await fallo(service.resetPassword(TOKEN_2, 'clave-nueva-1'))).toBeNull();
   });
 
   it('sin randomToken usa generateToken: 32 bytes en base64url, y a la BD va su huella', async () => {
@@ -180,7 +184,7 @@ describe('requestReset', () => {
 describe('resetPassword', () => {
   it('clave de menos de 8 caracteres → password_too_short (400), y el enlace sigue sin gastar', async () => {
     const { store, service, ana } = await conEnlace();
-    const error = await fallo(service.resetPassword('token-1', '1234567'));
+    const error = await fallo(service.resetPassword(TOKEN_1, '1234567'));
     expect(error).toBeInstanceOf(PasswordResetError);
     expect(error).toMatchObject({ code: 'password_too_short', status: 400 });
     expect(store.tokens[0].usedAt).toBeNull();
@@ -189,7 +193,7 @@ describe('resetPassword', () => {
 
   it('una clave que no es texto → password_too_short', async () => {
     const { service } = await conEnlace();
-    expect(await fallo(service.resetPassword('token-1', 12345678))).toMatchObject({ code: 'password_too_short' });
+    expect(await fallo(service.resetPassword(TOKEN_1, 12345678))).toMatchObject({ code: 'password_too_short' });
   });
 
   it.each([
@@ -205,9 +209,36 @@ describe('resetPassword', () => {
     });
   });
 
+  it.each([
+    ['corto', 'abc'],
+    ['largo', 'a'.repeat(44)],
+    ['con caracteres fuera de base64url', `${'a'.repeat(42)}+`],
+    ['con relleno =', `${'a'.repeat(42)}=`],
+  ])('token con formato inválido (%s) → invalid_or_expired_token sin llegar al repositorio', async (_caso, token) => {
+    const { store, service } = await conEnlace();
+    const consumir = vi.spyOn(store, 'consumeAndSetPassword');
+    expect(await fallo(service.resetPassword(token, 'clave-nueva-1'))).toMatchObject({
+      code: 'invalid_or_expired_token',
+      status: 400,
+    });
+    expect(consumir).not.toHaveBeenCalled();
+  });
+
+  it('si el aviso lanza de forma síncrona, el restablecimiento sigue en pie', async () => {
+    const { store, mailer, eventos, service, ana } = await conEnlace();
+    mailer.send = () => {
+      throw new Error('fallo síncrono');
+    };
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toBeNull();
+    expect(store.userById(ana.id).tokenVersion).toBe(1);
+    await vi.waitFor(() =>
+      expect(eventos).toContainEqual({ event: 'password_reset_envio_fallido', data: { user_id: ana.id } }),
+    );
+  });
+
   it('restablece: guarda el bcrypt de la clave nueva, sube token_version y gasta el enlace', async () => {
     const { store, eventos, service, ana } = await conEnlace();
-    await service.resetPassword('token-1', 'clave-nueva-1');
+    await service.resetPassword(TOKEN_1, 'clave-nueva-1');
     const u = store.userById(ana.id);
     expect(await bcrypt.compare('clave-nueva-1', u.passwordHash)).toBe(true);
     expect(u.tokenVersion).toBe(1);
@@ -217,7 +248,7 @@ describe('resetPassword', () => {
 
   it('tras restablecer avisa por correo a la propia cuenta', async () => {
     const { mailer, service } = await conEnlace();
-    await service.resetPassword('token-1', 'clave-nueva-1');
+    await service.resetPassword(TOKEN_1, 'clave-nueva-1');
     await vi.waitFor(() => expect(mailer.sent).toHaveLength(1));
     expect(mailer.sent[0]).toMatchObject({
       para: 'ana@ejemplo.test',
@@ -228,34 +259,34 @@ describe('resetPassword', () => {
   it('vale hasta un milisegundo antes de los 30 minutos', async () => {
     const { reloj, service } = await conEnlace();
     reloj.advance(30 * MIN - 1);
-    expect(await fallo(service.resetPassword('token-1', 'clave-nueva-1'))).toBeNull();
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toBeNull();
   });
 
   it('a los 30 minutos ya no vale, y la clave no cambia', async () => {
     const { store, reloj, service, ana } = await conEnlace();
     reloj.advance(30 * MIN);
-    expect(await fallo(service.resetPassword('token-1', 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
     expect(store.userById(ana.id).passwordHash).toBe('hash-viejo');
   });
 
   it('solo sirve una vez', async () => {
     const { store, service, ana } = await conEnlace();
-    await service.resetPassword('token-1', 'clave-nueva-1');
-    expect(await fallo(service.resetPassword('token-1', 'otra-clave-2'))).toMatchObject({ code: 'invalid_or_expired_token' });
+    await service.resetPassword(TOKEN_1, 'clave-nueva-1');
+    expect(await fallo(service.resetPassword(TOKEN_1, 'otra-clave-2'))).toMatchObject({ code: 'invalid_or_expired_token' });
     expect(store.userById(ana.id).tokenVersion).toBe(1);
   });
 
   it('si la cuenta deja de estar activa antes de usar el enlace → invalid_or_expired_token', async () => {
     const { store, service, ana } = await conEnlace();
     store.userById(ana.id).status = 'inactive';
-    expect(await fallo(service.resetPassword('token-1', 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toMatchObject({ code: 'invalid_or_expired_token' });
     expect(store.userById(ana.id).passwordHash).toBe('hash-viejo');
   });
 
   it('si el aviso falla, el restablecimiento no se deshace', async () => {
     const { store, mailer, eventos, service, ana } = await conEnlace();
     mailer.fail = true;
-    expect(await fallo(service.resetPassword('token-1', 'clave-nueva-1'))).toBeNull();
+    expect(await fallo(service.resetPassword(TOKEN_1, 'clave-nueva-1'))).toBeNull();
     expect(store.userById(ana.id).tokenVersion).toBe(1);
     await vi.waitFor(() =>
       expect(eventos).toContainEqual({ event: 'password_reset_envio_fallido', data: { user_id: ana.id } }),
@@ -270,11 +301,11 @@ describe('resetPassword', () => {
       mailer: new FakeMailer(),
       now: new FakeClock(T0).now,
       portalUrl: PORTAL,
-      randomToken: () => 'token-1',
+      randomToken: () => TOKEN_1,
       log: () => {},
     });
     await service.requestReset('ana@ejemplo.test');
-    await service.resetPassword('token-1', 'clave-nueva-1');
+    await service.resetPassword(TOKEN_1, 'clave-nueva-1');
     expect(store.userById(ana.id).passwordHash).toMatch(/^\$2[ab]\$12\$/);
   });
 });
