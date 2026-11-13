@@ -172,10 +172,35 @@ describe('consumeAndSetPassword', () => {
   it('dos consumos simultaneos del mismo token: solo uno gana', async () => {
     const yo = await sembrarUsuario('ana', 'Ana Ruiz');
     await repo.createToken({ userId: yo, tokenHash: 'huella', expiresAt: at(30 * MIN), now: T0 });
-    const [a, b] = await Promise.all([
-      repo.consumeAndSetPassword({ tokenHash: 'huella', passwordHash: 'hash-a', now: at(MIN) }),
-      repo.consumeAndSetPassword({ tokenHash: 'huella', passwordHash: 'hash-b', now: at(MIN) }),
-    ]);
+    // Un tercer cliente retiene el bloqueo de la fila: asi las dos llamadas
+    // llegan al UPDATE a la vez y las dos quedan esperando (se comprueba en
+    // pg_stat_activity) antes de soltarlo. Sin esto podrian correr una tras otra.
+    const bloqueo = await db.connect();
+    let pa: ReturnType<typeof repo.consumeAndSetPassword>;
+    let pb: ReturnType<typeof repo.consumeAndSetPassword>;
+    try {
+      await bloqueo.query('BEGIN');
+      await bloqueo.query('SELECT 1 FROM portal.password_reset_tokens WHERE token_hash = $1 FOR UPDATE', ['huella']);
+      pa = repo.consumeAndSetPassword({ tokenHash: 'huella', passwordHash: 'hash-a', now: at(MIN) });
+      pb = repo.consumeAndSetPassword({ tokenHash: 'huella', passwordHash: 'hash-b', now: at(MIN) });
+      let esperando = 0;
+      for (let i = 0; i < 100 && esperando < 2; i++) {
+        const { rows } = await db.query(
+          `SELECT count(*)::int AS n FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+        );
+        esperando = (rows[0] as { n: number }).n;
+        if (esperando < 2) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(esperando).toBeGreaterThanOrEqual(2);
+      await bloqueo.query('COMMIT');
+    } catch (err) {
+      await bloqueo.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      bloqueo.release();
+    }
+    const [a, b] = await Promise.all([pa, pb]);
     expect([a, b].filter((r) => r !== null)).toHaveLength(1);
     const u = await usuario(yo);
     expect(u.token_version).toBe(1);

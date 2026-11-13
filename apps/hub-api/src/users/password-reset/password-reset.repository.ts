@@ -54,7 +54,7 @@ export class PasswordResetRepository implements PasswordResetStore {
       );
       // Limpieza de paso: los caducados hace más de un día, de cualquier cuenta.
       await client.query(
-        `DELETE FROM portal.password_reset_tokens WHERE expires_at < $1::timestamptz - interval '1 day'`,
+        `DELETE FROM portal.password_reset_tokens WHERE expires_at < $1::timestamptz - interval '24 hours'`,
         [now],
       );
       await client.query(
@@ -121,7 +121,8 @@ export class PasswordResetRepository implements PasswordResetStore {
       await client.query(commitIf(result) ? 'COMMIT' : 'ROLLBACK');
       return result;
     } catch (err) {
-      await client.query('ROLLBACK');
+      // Si el ROLLBACK también falla, no debe tapar el error original.
+      await client.query('ROLLBACK').catch(() => {});
       throw err;
     } finally {
       client.release();
