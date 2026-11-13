@@ -16,7 +16,9 @@ vi.mock('../auth', async (importOriginal) => ({
   API_BASE: 'http://test',
 }));
 
-const TOKEN = 'TokenDePrueba_-123';
+// Un token con el formato real: 32 bytes en base64url = 43 caracteres (el servidor
+// solo acepta /^[A-Za-z0-9_-]{43}$/).
+const TOKEN = 'TokenDePrueba_-1234567890abcdefghijklmnopqr';
 
 function abrir(url: string) {
   window.history.replaceState(null, '', url);
@@ -108,6 +110,19 @@ describe('/auth/restablecer', () => {
     expect(screen.queryByLabelText('Nueva contraseña')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Pedir un enlace nuevo' }));
     expect(screen.getByRole('button', { name: 'Enviar enlace' })).toBeTruthy();
+  });
+
+  it.each([
+    ['uno de 10 caracteres (enlace cortado)', 'abcdefghij'],
+    ['uno de 43 caracteres con un carácter que no es base64url', `${'a'.repeat(42)}!`],
+    ['uno de 44 caracteres', 'a'.repeat(44)],
+  ])('token mal formado, %s: enlace no válido al instante, sin formulario ni petición', (_caso, malo) => {
+    abrir(`/auth/restablecer#t=${malo}`);
+    expect(screen.getByText('Este enlace no es válido o ha caducado')).toBeTruthy();
+    expect(screen.queryByLabelText('Nueva contraseña')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('');
+    expect(document.activeElement).toBe(screen.getByText('Este enlace no es válido o ha caducado'));
   });
 
   it('400 invalid_or_expired_token: enlace no válido', async () => {

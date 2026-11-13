@@ -21,9 +21,15 @@ const CLASE_CAMPO =
 
 type Estado = 'formulario' | 'hecho' | 'invalido';
 
-/** El token de `#t=<token>`, o cadena vacía si no viene. */
+// El servidor solo acepta 32 bytes aleatorios en base64url (43 caracteres). Un
+// enlace cortado o mal pegado jamás va a valer: se descarta aquí para no dejar a
+// la persona escribir la contraseña dos veces antes de decirle que el enlace falla.
+const FORMATO_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+
+/** El token de `#t=<token>`, o cadena vacía si no viene o no tiene el formato del servidor. */
 function leerToken(hash: string): string {
-  return new URLSearchParams(hash.replace(/^#/, '')).get('t') ?? '';
+  const token = new URLSearchParams(hash.replace(/^#/, '')).get('t') ?? '';
+  return FORMATO_TOKEN.test(token) ? token : '';
 }
 
 export default function RestablecerContrasena() {
