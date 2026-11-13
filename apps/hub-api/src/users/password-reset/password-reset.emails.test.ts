@@ -44,6 +44,12 @@ describe('buildResetLinkEmail', () => {
     expect(correo.cuerpo).toContain('tu contraseña no cambia');
   });
 
+  it('escapa el enlace dentro del href: una comilla no puede romper el atributo', () => {
+    const c = buildResetLinkEmail({ fullName: 'Ana Ruiz', portalUrl: 'https://portal.ejemplo.test/?a=1&b="x', token: TOKEN });
+    expect(c.cuerpo).toContain('href="https://portal.ejemplo.test/?a=1&amp;b=&quot;x/auth/restablecer#t=');
+    expect(c.cuerpo).not.toContain('"x');
+  });
+
   it('escapa el nombre: lo escribió la persona al registrarse', () => {
     const c = buildResetLinkEmail({ fullName: '<script>alert(1)</script>', portalUrl: PORTAL, token: TOKEN });
     expect(c.cuerpo).not.toContain('<script>');

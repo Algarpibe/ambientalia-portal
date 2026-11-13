@@ -14,7 +14,10 @@ export interface ResetEmailContent {
   cuerpo: string;
 }
 
-/** Fecha y hora de Colombia, p. ej. «13 de noviembre de 2026, 22:30». */
+/**
+ * Fecha y hora de Colombia. El separador exacto entre fecha y hora depende de
+ * la versión de ICU de Node; por eso los tests solo comprueban fragmentos.
+ */
 const FECHA_COLOMBIA = new Intl.DateTimeFormat('es-CO', {
   day: 'numeric',
   month: 'long',
