@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Pencil, RotateCcw, UserMinus, UserPlus } from 'lucide-react';
 import {
   fetchEmpleados,
   fetchRetirados,
+  fijarCargo,
   fijarRetiro,
   reactivarEmpleado,
   sincronizarEmpleados,
@@ -42,6 +43,11 @@ export default function ImportarEmpleados() {
   // propósito: registrar una baja es un acto deliberado sobre una persona, no
   // una edición en bloque como la del panel de Saldos.
   const [edicion, setEdicion] = useState<{ id: string; fecha: string } | null>(null);
+  // La fila cuyo cargo se está editando y lo que lleva tecleado. Aparte de
+  // `edicion` (la baja): son dos celdas distintas de la misma fila, y mezclarlas
+  // obligaría a distinguir en cada render qué se está editando. Una sola fila a
+  // la vez, por lo mismo que la baja.
+  const [edicionCargo, setEdicionCargo] = useState<{ id: string; texto: string } | null>(null);
   const [guardando, setGuardando] = useState<string | null>(null);
   // Un contador, y no llamar a las dos cargas a mano en cada acción: las dos
   // listas se contradicen en cuanto una se queda vieja —la misma ficha estaría
@@ -128,6 +134,25 @@ export default function ImportarEmpleados() {
       setRecarga((n) => n + 1);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setGuardando(null);
+    }
+  }
+
+  // Manda el texto tal cual: el recorte y el «vacío = sin cargo» los decide el
+  // servidor, que es quien tiene la regla entera (`normalizarCargo`). Si falla,
+  // la edición se queda abierta con lo tecleado para poder corregirlo.
+  async function guardarCargo(e: Empleado, texto: string) {
+    setGuardando(e.id);
+    setError(null);
+    setExito(null);
+    try {
+      await fijarCargo(e.id, texto);
+      setEdicionCargo(null);
+      setExito(`Cargo de ${e.nombreCompleto} actualizado.`);
+      setRecarga((n) => n + 1);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setGuardando(null);
     }
@@ -220,7 +245,54 @@ export default function ImportarEmpleados() {
                   {activos.map((e) => (
                     <tr key={e.id} className="hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-900">{e.nombreCompleto}</td>
-                      <td className="px-4 py-2.5 text-gray-600">{e.cargo ?? '—'}</td>
+                      <td className="px-4 py-2.5 text-gray-600">
+                        {edicionCargo?.id === e.id ? (
+                          <div className="flex items-center gap-2">
+                            {/* maxLength es solo ayuda: el tope de verdad lo
+                                pone el servidor, contando como VARCHAR(255). */}
+                            <input
+                              type="text"
+                              autoFocus
+                              maxLength={255}
+                              value={edicionCargo.texto}
+                              onChange={(ev) => setEdicionCargo({ id: e.id, texto: ev.target.value })}
+                              onKeyDown={(ev) => {
+                                if (ev.key === 'Enter' && guardando !== e.id) void guardarCargo(e, edicionCargo.texto);
+                                if (ev.key === 'Escape') setEdicionCargo(null);
+                              }}
+                              aria-label={`Cargo de ${e.nombreCompleto}`}
+                              className="w-48 rounded-xl border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              disabled={guardando === e.id}
+                              onClick={() => void guardarCargo(e, edicionCargo.texto)}
+                              className="rounded-xl border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
+                            >
+                              {guardando === e.id ? 'Guardando…' : 'Guardar'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEdicionCargo(null)}
+                              className="rounded-xl px-2 py-1.5 text-sm text-gray-600 hover:underline"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span>{e.cargo ?? '—'}</span>
+                            <button
+                              type="button"
+                              onClick={() => setEdicionCargo({ id: e.id, texto: e.cargo ?? '' })}
+                              aria-label={`Editar el cargo de ${e.nombreCompleto}`}
+                              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-gray-600">{e.correo}</td>
                       <td className="px-4 py-2.5 text-gray-600">{e.aprobadorCorreo}</td>
                       <td className="px-4 py-2.5">
