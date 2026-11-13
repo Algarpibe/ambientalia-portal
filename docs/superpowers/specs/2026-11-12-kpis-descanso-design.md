@@ -51,8 +51,8 @@ tiempo que ha pasado desde el último día de vacaciones de cada persona de la p
     183 son 6.
   - Orden: `nunca` primero; luego de más a menos días; `ahora` al final. Empate: nombre
     (`localeCompare 'es'`).
-  - Contadores: cuántos en `alarma`, `aviso` y `ok` (los `nunca` cuentan en `alarma`: es lo
-    más grave).
+  - Contadores: cuántos en `alarma`, `aviso` y `ok`. Los `nunca` cuentan en `alarma` (es lo
+    más grave) y los `ahora` en `ok` (están descansando).
   - Umbrales (6 y 12 meses) como constantes del servicio y devueltos en la respuesta, para que
     la pantalla los diga sin reinventarlos.
 - **Respuesta:** campo nuevo `descanso` en `Kpis`:
