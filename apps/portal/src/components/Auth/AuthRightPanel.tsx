@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { API_BASE, setToken } from '../../auth';
 import { notify } from '../../lib/notify';
+import OlvidoContrasena from './OlvidoContrasena';
 
 type FieldErrors = { fullName?: string; email?: string; password?: string };
 
@@ -16,10 +17,20 @@ const FIELD_MESSAGES: Record<string, string> = {
 interface AuthRightPanelProps {
   isSignUp: boolean;
   onToggle: (value: boolean) => void;
+  /** Abre directamente el modo «¿Olvidaste tu contraseña?» (desde un enlace caducado). */
+  olvidoInicial?: boolean;
 }
 
-export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelProps) {
+export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = false }: AuthRightPanelProps) {
   const navigate = useNavigate();
+  // Tercer modo del panel: «¿Olvidaste tu contraseña?». Solo existe dentro de la
+  // pestaña de iniciar sesión, por eso vive aquí y no en AuthCard; cambiar de
+  // pestaña lo cierra.
+  const [olvido, setOlvido] = useState(olvidoInicial);
+  const irAPestana = (signUp: boolean) => {
+    setOlvido(false);
+    onToggle(signUp);
+  };
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -153,7 +164,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
       {/* Tab Toggle */}
       <div className="flex gap-4 mb-8">
         <button
-          onClick={() => onToggle(false)}
+          onClick={() => irAPestana(false)}
           className={`pb-2 font-semibold text-sm transition-all duration-300 ${
             !isSignUp
               ? 'text-white border-b-2 border-cyan-400'
@@ -162,7 +173,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
           Iniciar sesión
         </button>
         <button
-          onClick={() => onToggle(true)}
+          onClick={() => irAPestana(true)}
           className={`pb-2 font-semibold text-sm transition-all duration-300 ${
             isSignUp
               ? 'text-white border-b-2 border-cyan-400'
@@ -183,7 +194,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
           </p>
           <button
             type="button"
-            onClick={() => onToggle(false)}
+            onClick={() => irAPestana(false)}
             className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
             Volver a iniciar sesión
           </button>
@@ -331,7 +342,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
             Ya soy miembro{' '}
             <button
               type="button"
-              onClick={() => onToggle(false)}
+              onClick={() => irAPestana(false)}
               className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Iniciar sesión
             </button>
@@ -340,7 +351,7 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
       )}
 
       {/* Sign In Form */}
-      {!isSignUp && (
+      {!isSignUp && !olvido && (
         <form onSubmit={handleSubmit} className="flex-1">
           <h3 className="text-2xl font-bold text-white mb-8">Bienvenido de vuelta</h3>
 
@@ -400,6 +411,15 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
                 )}
               </button>
             </div>
+            {/* Recuperación de contraseña: solo en la pestaña de iniciar sesión. */}
+            <div className="mt-2 text-right">
+              <button
+                type="button"
+                onClick={() => setOlvido(true)}
+                className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
+                ¿Olvidaste tu contraseña?
+              </button>
+            </div>
           </div>
 
           {/* Submit Button */}
@@ -426,13 +446,16 @@ export default function AuthRightPanel({ isSignUp, onToggle }: AuthRightPanelPro
             ¿No tienes cuenta?{' '}
             <button
               type="button"
-              onClick={() => onToggle(true)}
+              onClick={() => irAPestana(true)}
               className="text-cyan-400 hover:text-cyan-300 font-semibold transition-colors">
               Registrarse
             </button>
           </p>
         </form>
       )}
+
+      {/* ¿Olvidaste tu contraseña? */}
+      {!isSignUp && olvido && <OlvidoContrasena onVolver={() => setOlvido(false)} />}
     </div>
   );
 }
