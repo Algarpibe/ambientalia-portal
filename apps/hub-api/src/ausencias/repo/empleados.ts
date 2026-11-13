@@ -315,6 +315,21 @@ export async function fijarCopia(db: Pool, empleadoId: string, copiaCorreo: stri
 }
 
 /**
+ * Fija (o quita, con `null`) el cargo de un empleado. Devuelve false si no
+ * existía o estaba inactivo, igual que `fijarJefe` y `fijarCopia`.
+ *
+ * No valida nada: qué es un cargo aceptable (recorte, vacío, longitud,
+ * caracteres de control) lo decide `normalizarCargo` en el servicio.
+ */
+export async function fijarCargo(db: Pool, empleadoId: string, cargo: string | null): Promise<boolean> {
+  const { rowCount } = await db.query(`UPDATE portal.empleados SET cargo = $2 WHERE id = $1 AND activo`, [
+    empleadoId,
+    cargo,
+  ]);
+  return (rowCount ?? 0) > 0;
+}
+
+/**
  * Enciende o apaga la segunda firma de un empleado. Devuelve false si no existía
  * o estaba inactivo, igual que `fijarJefe` y `fijarCopia`.
  */

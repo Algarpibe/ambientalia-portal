@@ -856,6 +856,14 @@ vi.mock('./repo.js', async () => ({
     e.copiaCorreo = copia;
     return true;
   },
+  // Con el `activo !== false`, al contrario que fijarCopia: es lo que hace el
+  // repo de verdad, y la ruta del cargo tiene un test de ficha inactiva.
+  fijarCargo: async (_db: unknown, empleadoId: string, cargo: string | null) => {
+    const e = estado.plantilla.find((x: any) => x.id === empleadoId && x.activo !== false);
+    if (!e) return false;
+    e.cargo = cargo;
+    return true;
+  },
   fijarSegundaFirma: async (_db: unknown, empleadoId: string, requiere: boolean) => {
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
