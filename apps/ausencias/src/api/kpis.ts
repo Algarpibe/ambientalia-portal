@@ -46,6 +46,32 @@ export interface AcumulacionExcesiva {
   umbralAlarma: number;
 }
 
+/** Espejo de `TramoDeDescanso` de hub-api. */
+export type TramoDeDescanso = 'nunca' | 'alarma' | 'aviso' | 'ok' | 'ahora';
+
+/** Cuánto lleva una persona sin descansar. Espejo de `FichaDeDescanso` de hub-api. */
+export interface FichaDeDescanso {
+  empleadoId: string;
+  nombreCompleto: string;
+  tramo: TramoDeDescanso;
+  /** Días de calendario desde sus últimas vacaciones; `null` = nunca. */
+  diasSinVacaciones: number | null;
+  /** Meses completos (`floor(dias × 12 / 365)`); `null` = nunca. */
+  mesesSinVacaciones: number | null;
+  /** `YYYY-MM-DD`. */
+  ultimoDia: string | null;
+  deVacacionesAhora: boolean;
+  diasProgramados: number;
+  saldo: number;
+}
+
+export interface Descanso {
+  filas: FichaDeDescanso[];
+  conteo: { alarma: number; aviso: number; ok: number };
+  umbralAvisoMeses: number;
+  umbralAlarmaMeses: number;
+}
+
 /** Un mes de la serie de absentismo. */
 export interface MesDeAbsentismo {
   /** `YYYY-MM`. */
@@ -154,6 +180,8 @@ export interface Kpis {
    * dice a quién, que es lo único con lo que se puede hacer algo.
    */
   acumulacion: AcumulacionExcesiva;
+  /** Opcional: si el portal llega antes que hub-api, la sección no se pinta. */
+  descanso?: Descanso;
   /** Días perdidos por incapacidad, mes a mes. La tendencia se lee de la serie:
    *  el servidor no calcula ninguna pendiente ni media móvil. */
   absentismo: Absentismo;
