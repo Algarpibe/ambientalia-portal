@@ -236,3 +236,19 @@ describe('sin sesión', () => {
     expect(leer('./password-reset.router.ts')).not.toMatch(/\brequire(Auth|Admin)\b|getPayload|auth\.js/);
   });
 });
+
+describe('montaje en index.ts', () => {
+  it('se monta en /api justo detras del router de usuarios, con el repositorio, el mailer y la base del portal', () => {
+    const index = leer('../../index.ts');
+    const usuarios = index.indexOf("app.use('/api', createUsersRouter(getHubPool()));");
+    const restablecer = index.indexOf("app.use('/api', createPasswordResetRouter(");
+    expect(usuarios).toBeGreaterThan(-1);
+    expect(restablecer).toBeGreaterThan(usuarios);
+    // Nada montado entre medias.
+    expect(index.slice(usuarios + 1, restablecer)).not.toMatch(/app\.use\(/);
+    const montaje = index.slice(restablecer, index.indexOf('})));', restablecer));
+    expect(montaje).toMatch(/new PasswordResetRepository\(getHubPool\(\)\)/);
+    expect(montaje).toMatch(/createResetMailer\(\)/);
+    expect(montaje).toMatch(/portalUrl: urlPortal\(\)/);
+  });
+});
