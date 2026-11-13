@@ -223,6 +223,42 @@ Cómo lo lee hub-api (`apps/hub-api/src/trazabilidad/envio-avisos.ts`, la única
   (403), tarjetas reales en modo prueba, flujo desactivado (404 → «Fallido»), «sin confirmar» que sí
   salió y que no salió (con una espera temporal de 40 s, ya quitada).
 
+### 2.4 Recuperación de contraseña del portal (webhook síncrono, sin barrera)
+
+Los correos de «¿Olvidaste tu contraseña?» (2026-11-13) siguen la forma de 2.3, más simple: hub-api
+llama al Webhook al momento y espera 10 s como mucho, pero la persona no espera a n8n (hub-api ya le ha
+respondido) y nadie reintenta: si falla, vuelve a pedir el enlace.
+
+| Workflow | Forma |
+|---|---|
+| **Portal — Restablecer contraseña** (id `0jYHqM3Z2mHZNFOC`) | Webhook síncrono (`POST /webhook/portal-restablecer-contrasena`): un correo por llamada |
+
+```
+hub-api (POST JSON {para, asunto, cuerpo}, cabecera X-Password-Reset-Token,
+         espera 10 s como mucho, no sigue redirecciones; nunca lanza)
+      ▼
+Webhook 2.1 (Header Auth, credencial «Token restablecer contraseña») ── token malo ──▶ 403 de n8n
+      ▼
+Gmail 2.2 (credencial «Gmail info@», la misma de 2.3; HTML; appendAttribution = false; sin reintentos)
+      │ (error) ──▶ la ejecución falla y n8n responde 500
+      ▼
+Respond to Webhook 1.5 → 200 {ok: true}
+```
+
+- Lo llama `apps/hub-api/src/users/password-reset/password-reset.mailer.ts`. Cualquier respuesta que no
+  sea 2xx, o 10 s sin respuesta, deja en el log de hub-api `password_reset_envio_fallido`; sin
+  `PASSWORD_RESET_N8N_URL` o `PASSWORD_RESET_N8N_TOKEN`, `password_reset_sin_configurar` y no sale nada.
+- **No guarda las ejecuciones correctas** (`saveDataSuccessExecution: none`): el enlace con su token no
+  queda en el historial. Las fallidas sí se guardan, para diagnosticar, y llevan el enlace y la
+  cabecera: restringir quién ve el flujo. El enlace caduca a los 30 minutos y es de un solo uso.
+- El Gmail no tiene salida de error a propósito: con ella la ejecución acabaría «bien» y, al no
+  guardarse las correctas, se perdería el rastro del fallo.
+- El token es el valor de la credencial Header Auth y el mismo que `PASSWORD_RESET_N8N_TOKEN` en
+  EasyPanel. Propio de este flujo. Si aparece en un chat o en un log, se rota en los dos sitios.
+- Sin barrera de dominio: el destinatario es siempre el correo de la propia cuenta, que hub-api lee de
+  `portal.users`, nunca del cuerpo de la petición del navegador.
+- Probarlo a mano como en 2.3 (el token leído con `-AsSecureString`) y SIEMPRE a un buzón propio.
+
 ---
 
 ## 3. Checklist para una app nueva

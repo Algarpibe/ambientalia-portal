@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard';
 import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
 import Auth from './pages/Auth';
+import RestablecerContrasena from './pages/RestablecerContrasena';
 import Configuracion from './pages/Configuracion';
 import AdminUsers from './pages/admin/AdminUsers';
 
@@ -54,6 +55,9 @@ function App() {
       <Routes>
         {/* Authentication page - no sidebar */}
         <Route path="/auth" element={<Auth />} />
+
+        {/* Restablecer la contraseña desde el enlace del correo — pública, sin sidebar */}
+        <Route path="/auth/restablecer" element={<RestablecerContrasena />} />
 
         {/* Pantalla de TV del taller — pantalla completa, fuera del shell */}
         <Route path="/equipos-taller/tv" element={<RutaTableroTv />} />

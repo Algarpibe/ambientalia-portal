@@ -6,6 +6,11 @@ import rateLimit from 'express-rate-limit';
 import { getHubPool, initDb } from './db.js';
 import { loginUser } from './auth.js';
 import { createUsersRouter } from './users/users.router.js';
+import { createPasswordResetRouter } from './users/password-reset/password-reset.router.js';
+import { PasswordResetService } from './users/password-reset/password-reset.service.js';
+import { PasswordResetRepository } from './users/password-reset/password-reset.repository.js';
+import { createResetMailer } from './users/password-reset/password-reset.mailer.js';
+import { urlPortal } from './ausencias/config.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
 import { createAusenciasRouter } from './ausencias/router.js';
@@ -127,6 +132,17 @@ initDb()
     // Montado en '/api' → expone /api/users*, /api/auth/register. El rate limit
     // propio del router corre antes de requireAuth/requireAdmin.
     app.use('/api', createUsersRouter(getHubPool()));
+    // Recuperación de contraseña por correo → /api/auth/forgot-password y
+    // /api/auth/reset-password. Públicas, como /api/auth/register: cada una con
+    // su rate limit por IP, y el global de /api/ encima. El enlace del correo
+    // apunta a PORTAL_URL (urlPortal, la misma base que los correos de
+    // Ausencias) y el correo sale por el webhook de n8n.
+    app.use('/api', createPasswordResetRouter(new PasswordResetService({
+      store: new PasswordResetRepository(getHubPool()),
+      mailer: createResetMailer(),
+      now: () => new Date(),
+      portalUrl: urlPortal(),
+    })));
     // Router de WO-sales → /api/wo-sales/preview y /api/wo-sales/csv. Se monta aquí
     // por lo mismo que el de usuarios: necesita getHubPool() ya validado.
     app.use('/api', createWoSalesRouter(getHubPool()));

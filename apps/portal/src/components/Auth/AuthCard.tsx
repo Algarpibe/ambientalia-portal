@@ -1,9 +1,15 @@
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import AuthLeftPanel from './AuthLeftPanel';
 import AuthRightPanel from './AuthRightPanel';
+import type { ModoAuth } from './recuperacion';
 
 export default function AuthCard() {
-  const [isSignUp, setIsSignUp] = useState(true);
+  // Quien llega desde otra pantalla puede pedir con qué se abre, en
+  // `location.state.modo`: «login» tras restablecer la contraseña y «olvido»
+  // desde un enlace no válido. Sin indicación, el registro, como siempre.
+  const modo = (useLocation().state as { modo?: ModoAuth } | null)?.modo;
+  const [isSignUp, setIsSignUp] = useState(modo !== 'login' && modo !== 'olvido');
 
   return (
     <div
@@ -18,7 +24,7 @@ export default function AuthCard() {
 
       {/* Right Panel - Authentication */}
       <div className="w-full md:w-1/2">
-        <AuthRightPanel isSignUp={isSignUp} onToggle={setIsSignUp} />
+        <AuthRightPanel isSignUp={isSignUp} onToggle={setIsSignUp} olvidoInicial={modo === 'olvido'} />
       </div>
     </div>
   );

@@ -9,6 +9,16 @@ describe('stripQuery', () => {
   it('deja intacta una URL sin query', () => {
     expect(stripQuery('https://api/x')).toBe('https://api/x');
   });
+  it('quita el fragmento (el token de restablecer viaja en #t=)', () => {
+    const out = stripQuery('https://p.ejemplo.test/auth/restablecer#t=abc');
+    expect(out).toBe('https://p.ejemplo.test/auth/restablecer');
+    expect(out).not.toContain('#');
+    expect(out).not.toContain('abc');
+  });
+  it('corta en el primero de ? o #, el que venga antes', () => {
+    expect(stripQuery('https://p.ejemplo.test/x#a?b')).toBe('https://p.ejemplo.test/x');
+    expect(stripQuery('https://p.ejemplo.test/x?a#b')).toBe('https://p.ejemplo.test/x');
+  });
   it('tolera undefined/null', () => {
     expect(stripQuery(undefined)).toBeUndefined();
     expect(stripQuery(null)).toBeUndefined();
@@ -47,6 +57,20 @@ describe('scrubEvent (PRIV-813)', () => {
     expect((bc[0].data as Record<string, unknown>).url).toBe('https://api/reconciliation/data');
     expect((bc[1].data as Record<string, unknown>).to).toBe('/x');
     expect((bc[1].data as Record<string, unknown>).from).toBe('/y');
+  });
+
+  it('no deja secretos del fragmento en los breadcrumbs de navegacion', () => {
+    const event = {
+      breadcrumbs: [
+        {
+          category: 'navigation',
+          data: { from: '/auth/restablecer#t=SECRETO', to: '/auth/restablecer#t=SECRETO' },
+        },
+      ],
+    } as unknown as Sentry.ErrorEvent;
+
+    const out = scrubEvent(event);
+    expect(JSON.stringify(out)).not.toContain('SECRETO');
   });
 
   it('no falla si el evento no trae request ni breadcrumbs', () => {

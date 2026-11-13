@@ -6,14 +6,17 @@ const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 export const sentryEnabled = Boolean(dsn);
 
 /**
- * Quita la query string de una URL. Varios endpoints del hub reciben el nombre
- * del cliente y rangos por query param (p. ej. `?cliente=…`), así que las URLs
- * capturadas por Sentry podrían llevar PII (PRIV-813/PRIV-815). Devuelve la URL
- * sin todo lo que va tras el primer `?`.
+ * Quita la query string y el fragmento de una URL. Varios endpoints del hub
+ * reciben el nombre del cliente y rangos por query param (p. ej. `?cliente=…`),
+ * así que las URLs capturadas por Sentry podrían llevar PII (PRIV-813/PRIV-815).
+ * Y los secretos viajan en el fragmento (token de restablecer contraseña `#t=`,
+ * llave del kiosco de TV `#k=`): la instrumentación del historial registra la
+ * URL anterior al `replaceState` que los quita de la barra. Devuelve la URL sin
+ * todo lo que va desde el primer `?` o `#`, el que venga antes.
  */
 export function stripQuery(url?: string | null): string | undefined {
   if (!url) return url ?? undefined;
-  const i = url.indexOf('?');
+  const i = url.search(/[?#]/);
   return i === -1 ? url : url.slice(0, i);
 }
 
