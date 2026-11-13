@@ -6,8 +6,10 @@ import type { PaginatedUsers, RegisterInput, UserPublic, UserRole, SelfProfile }
 // (rol por defecto al aprobar, auto-protección del admin) y traduce fallos a
 // errores de dominio (UserError) que el router mapea a códigos HTTP.
 
-const BCRYPT_COST = 12; // Requirement 1.3: coste mínimo 12
-const MIN_PASSWORD_LENGTH = 8; // Requirement 1.6
+// Exportadas para la recuperación de contraseña (password-reset/): la clave
+// nueva sigue las mismas reglas que la del registro, sin copiar los números.
+export const BCRYPT_COST = 12; // Requirement 1.3: coste mínimo 12
+export const MIN_PASSWORD_LENGTH = 8; // Requirement 1.6
 const MAX_FULL_NAME_LENGTH = 100; // Requirement 1.7 (form de registro)
 const MAX_EMAIL_LENGTH = 254; // Requirement 1.1 / RFC 5321
 const USERS_PER_PAGE = 50; // Requirement 2.1
