@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
 import { formatDias } from './dominio';
+import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 
 // El panel de análisis. Cifras que hoy no se pueden mirar en ninguna otra
 // pantalla de la app, y que responden preguntas distintas:
@@ -22,7 +23,8 @@ import { formatDias } from './dominio';
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //  5. ¿Cómo va la salud?    → los días perdidos por incapacidad, mes a mes.
 //  6. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
-//  7. ¿Cuánto roza?         → rechazos, anulaciones y cambios de fecha.
+//  7. ¿Quién ha tenido qué? → el resumen por persona de cada tipo de ausencia.
+//  8. ¿Cuánto roza?         → rechazos, anulaciones y cambios de fecha.
 //
 // Lo que NO hay aquí son gráficas de tendencia (absentismo por mes,
 // estacionalidad, tasa de rechazo). Se estudiaron y se dejaron fuera a
@@ -187,6 +189,7 @@ export default function PanelKpis({ activo }: Props) {
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
       <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
+      {datos.resumenPorPersona && <ResumenDeAusencias resumen={datos.resumenPorPersona} anio={datos.anio} />}
       <FriccionDelProceso friccion={datos.friccion} desde={datos.desde} />
     </div>
   );
@@ -235,7 +238,7 @@ function SelectorDeAnio({
           versión «de 2024» de cuánto se debe ahora mismo. Sin este aviso,
           elegir un año pasado y ver el mismo pasivo se lee como un fallo. */}
       <span className="text-xs text-gray-500">
-        Afecta a las gráficas y a los tiempos de aprobación. El pasivo, quién acumula y lo que espera firma
+        Afecta a las gráficas, al resumen por persona y a los tiempos de aprobación. El pasivo, quién acumula y lo que espera firma
         son siempre de hoy.
       </span>
     </div>
@@ -830,6 +833,84 @@ function tituloEstacional(
     .filter((t) => m[t.clave] > 0)
     .map((t) => `${t.etiqueta} (${m[t.clave]}): ${listaDeNombres(m.nombres[t.clave])}`);
   return `${m.mes}: ${m.total} días\n${lineas.join('\n')}`;
+}
+
+// ── Resumen por persona ────────────────────────────────────────────────────
+
+/**
+ * Una fila por persona con lo que ha tenido de cada tipo en el periodo del
+ * selector. Las cifras vienen hechas de hub-api (`resumenPorPersona`), total
+ * incluido: aquí solo se formatean.
+ */
+function ResumenDeAusencias({
+  resumen,
+  anio,
+}: {
+  resumen: NonNullable<Kpis['resumenPorPersona']>;
+  anio: number | null;
+}) {
+  const { filas, total } = resumen;
+  const th = 'py-2 pr-4 font-medium';
+  const num = 'whitespace-nowrap py-2 pr-4 text-right tabular-nums';
+  const idTitulo = useId();
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 id={idTitulo} className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Users className="h-4 w-4 text-gray-400" />
+        Resumen por persona
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        Lo que ha tenido cada uno {rotuloDelPeriodo(anio)}. Vacaciones, compensatorios e incapacidades en días
+        laborables; los permisos en horas, y aparte («d») los que no tienen hora: los de día completo y todos
+        los anteriores al 25 de agosto de 2026, cuando la app empezó a guardarla, aunque fueran de unas horas.
+      </p>
+
+      {/* overflow-x-auto: en el móvil se desplaza la tabla, no la página. */}
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-sm" aria-labelledby={idTitulo}>
+          <thead className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <tr className="border-b border-gray-200">
+              <th scope="col" className={th}>Nombre</th>
+              <th scope="col" className={`${th} text-right`}>Vacaciones (días)</th>
+              <th scope="col" className={`${th} text-right`}>Permisos</th>
+              <th scope="col" className={`${th} text-right`}>Compensatorios (días)</th>
+              <th scope="col" className={`${th} text-right`}>Incapacidades (días)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((f) => (
+              <tr key={f.empleadoId} className="border-b border-gray-100 last:border-0">
+                <th scope="row" className="py-2 pr-4 text-left font-normal text-gray-900">
+                  {f.nombreCompleto}
+                  {f.deBaja && <span className="ml-1 whitespace-nowrap text-xs text-gray-500">(de baja)</span>}
+                </th>
+                <td className={num}>{celdaDeDias(f.vacaciones)}</td>
+                <td className={num}>{celdaDePermisos(f.permisoHoras, f.permisoDias)}</td>
+                <td className={num}>{celdaDeDias(f.compensatorio)}</td>
+                <td className={num}>{celdaDeDias(f.incapacidad)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-gray-300 font-semibold text-gray-900">
+              <th scope="row" className="py-2 pr-4 text-left font-semibold text-gray-900">Total</th>
+              <td className={num}>{celdaDeDias(total.vacaciones)}</td>
+              <td className={num}>{celdaDePermisos(total.permisoHoras, total.permisoDias)}</td>
+              <td className={num}>{celdaDeDias(total.compensatorio)}</td>
+              <td className={num}>{celdaDeDias(total.incapacidad)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <p className="mt-3 text-xs italic text-gray-400">
+        Solo cuentan las solicitudes aprobadas y las incapacidades registradas: no entran las pendientes, las
+        anuladas ni los compensatorios concedidos. En permisos esta tabla no cuadra con la gráfica de arriba: allí un permiso
+        con hora cuenta como un día; aquí, sus horas.
+      </p>
+    </section>
+  );
 }
 
 // ── Fricción ───────────────────────────────────────────────────────────────

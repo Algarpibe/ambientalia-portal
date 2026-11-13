@@ -7,6 +7,7 @@ import {
   acumulacionExcesiva,
   absentismoPorMes,
   estacionalidadPorMes,
+  resumenPorPersona,
   friccion,
   diasDesde,
   ventanaDeKpis,
@@ -794,5 +795,147 @@ describe('los nombres que viajan a los tooltips', () => {
     );
     expect(r.meses[0].nombres.vacaciones).toEqual(['Ana Ruiz']);
     expect(r.meses[1].nombres.vacaciones).toEqual(['Ana Ruiz']);
+  });
+});
+
+describe('resumenPorPersona', () => {
+  const ANA = { empleadoId: 'e1', nombreCompleto: 'Ana Ruiz' };
+  const BETO = { empleadoId: 'e2', nombreCompleto: 'Beto Díaz' };
+  type Tipo = 'vacaciones' | 'permiso' | 'compensatorio' | 'incapacidad';
+  const au = (
+    tipo: Tipo,
+    quien: { empleadoId: string; nombreCompleto: string },
+    fechaInicio: string,
+    fechaFin: string,
+    horas: [string, string] | null = null,
+  ) => ({ tipo, ...quien, fechaInicio, fechaFin, horaInicio: horas?.[0] ?? null, horaFin: horas?.[1] ?? null });
+  const ANIO_2026: [string, string] = ['2026-01', '2026-12'];
+
+  it('toda la plantilla activa sale, aunque no tenga nada, en orden alfabético', () => {
+    const r = resumenPorPersona([], [BETO, ANA], ...ANIO_2026);
+    expect(r.filas.map((f) => f.nombreCompleto)).toEqual(['Ana Ruiz', 'Beto Díaz']);
+    expect(r.filas[0]).toEqual({
+      ...ANA,
+      deBaja: false,
+      vacaciones: 0,
+      permisoHoras: 0,
+      permisoDias: 0,
+      compensatorio: 0,
+      incapacidad: 0,
+    });
+  });
+
+  it('suma días laborables por tipo', () => {
+    const r = resumenPorPersona(
+      [
+        au('vacaciones', ANA, '2026-09-07', '2026-09-11'), // lunes a viernes: 5
+        au('compensatorio', ANA, '2026-09-14', '2026-09-14'), // 1
+        au('incapacidad', ANA, '2026-09-15', '2026-09-16'), // 2
+      ],
+      [ANA],
+      ...ANIO_2026,
+    );
+    expect(r.filas[0]).toMatchObject({ vacaciones: 5, compensatorio: 1, incapacidad: 2 });
+  });
+
+  it('CANDADO: una ausencia a caballo entre dos años solo suma lo que cae dentro', () => {
+    // Lunes 29 de diciembre de 2025 a viernes 2 de enero de 2026: del 29 al 31
+    // caen en 2025, el 1 de enero es festivo y solo el 2 cuenta para 2026.
+    const r = resumenPorPersona([au('vacaciones', ANA, '2025-12-29', '2026-01-02')], [ANA], ...ANIO_2026);
+    expect(r.filas[0].vacaciones).toBe(1);
+  });
+
+  it('CANDADO: los permisos con hora suman horas y los de día completo, días aparte', () => {
+    const r = resumenPorPersona(
+      [
+        au('permiso', ANA, '2026-09-01', '2026-09-01', ['09:00', '11:30']), // 2,5 h
+        au('permiso', ANA, '2026-09-02', '2026-09-02', ['08:00', '09:15']), // 1,25 h
+        au('permiso', ANA, '2026-09-03', '2026-09-03'), // jueves, día completo
+      ],
+      [ANA],
+      ...ANIO_2026,
+    );
+    expect(r.filas[0]).toMatchObject({ permisoHoras: 3.8, permisoDias: 1 });
+  });
+
+  it('un permiso con hora fuera del periodo no cuenta', () => {
+    const r = resumenPorPersona([au('permiso', ANA, '2025-12-10', '2025-12-10', ['09:00', '10:00'])], [ANA], ...ANIO_2026);
+    expect(r.filas[0].permisoHoras).toBe(0);
+  });
+
+  it('CANDADO: una ficha de baja sale solo si tuvo algo en el periodo, y marcada', () => {
+    const ZOE = { empleadoId: 'e9', nombreCompleto: 'Zoe Baja' };
+    const XAVI = { empleadoId: 'e8', nombreCompleto: 'Xavi Fuera' };
+    const r = resumenPorPersona(
+      [au('vacaciones', ZOE, '2026-03-02', '2026-03-02'), au('vacaciones', XAVI, '2025-03-03', '2025-03-03')],
+      [ANA],
+      ...ANIO_2026,
+    );
+    expect(r.filas.map((f) => [f.nombreCompleto, f.deBaja])).toEqual([
+      ['Ana Ruiz', false],
+      ['Zoe Baja', true],
+    ]);
+  });
+
+  it('el nombre de una ficha activa es el de la ficha, no el que traiga la ausencia', () => {
+    const r = resumenPorPersona(
+      [au('vacaciones', { empleadoId: 'e1', nombreCompleto: 'Ana R.' }, '2026-03-02', '2026-03-02')],
+      [ANA],
+      ...ANIO_2026,
+    );
+    expect(r.filas).toHaveLength(1);
+    expect(r.filas[0]).toMatchObject({ nombreCompleto: 'Ana Ruiz', vacaciones: 1 });
+  });
+
+  it('CANDADO: dos personas con el mismo nombre no se funden', () => {
+    const OTRA_ANA = { empleadoId: 'e3', nombreCompleto: 'Ana Ruiz' };
+    const r = resumenPorPersona([au('vacaciones', OTRA_ANA, '2026-03-02', '2026-03-02')], [ANA, OTRA_ANA], ...ANIO_2026);
+    expect(r.filas).toHaveLength(2);
+    expect(r.filas.find((f) => f.empleadoId === 'e3')?.vacaciones).toBe(1);
+    expect(r.filas.find((f) => f.empleadoId === 'e1')?.vacaciones).toBe(0);
+  });
+
+  it('los totales suman las filas', () => {
+    const r = resumenPorPersona(
+      [
+        au('vacaciones', ANA, '2026-09-07', '2026-09-08'), // 2
+        au('vacaciones', BETO, '2026-09-09', '2026-09-09'), // 1
+        au('permiso', BETO, '2026-09-10', '2026-09-10', ['10:00', '11:30']), // 1,5 h
+        au('permiso', ANA, '2026-09-11', '2026-09-11'), // 1 d
+        au('incapacidad', BETO, '2026-09-14', '2026-09-14'), // 1
+        au('compensatorio', ANA, '2026-09-15', '2026-09-15'), // 1
+      ],
+      [ANA, BETO],
+      ...ANIO_2026,
+    );
+    expect(r.total).toEqual({ vacaciones: 3, permisoHoras: 1.5, permisoDias: 1, compensatorio: 1, incapacidad: 1 });
+  });
+
+  it('el total suma las filas ya redondeadas, para que cuadre con lo que se ve', () => {
+    // 1 h 15 son 1,25: redondear da 1,3 en cada fila y el total ha de ser 2,6
+    // (la suma de lo pintado), no 2,5 (la suma de los valores sin redondear).
+    const r = resumenPorPersona(
+      [
+        au('permiso', ANA, '2026-09-01', '2026-09-01', ['09:00', '10:15']),
+        au('permiso', BETO, '2026-09-01', '2026-09-01', ['09:00', '10:15']),
+      ],
+      [ANA, BETO],
+      ...ANIO_2026,
+    );
+    expect(r.filas.map((f) => f.permisoHoras)).toEqual([1.3, 1.3]);
+    expect(r.total.permisoHoras).toBe(2.6);
+  });
+
+  it('un permiso con hora de una ficha de baja sale con sus horas y marcado', () => {
+    const ZOE = { empleadoId: 'e9', nombreCompleto: 'Zoe Baja' };
+    const r = resumenPorPersona([au('permiso', ZOE, '2026-03-02', '2026-03-02', ['09:00', '11:00'])], [ANA], ...ANIO_2026);
+    expect(r.filas.find((f) => f.empleadoId === 'e9')).toMatchObject({ deBaja: true, permisoHoras: 2 });
+  });
+
+  it('CANDADO: una ficha de baja que acaba con todo a cero no sale, pero una activa sí', () => {
+    const ZOE = { empleadoId: 'e9', nombreCompleto: 'Zoe Baja' };
+    // 2026-09-13 es domingo: la incapacidad no suma ningún día laborable.
+    const r = resumenPorPersona([au('incapacidad', ZOE, '2026-09-13', '2026-09-13')], [ANA], ...ANIO_2026);
+    expect(r.filas.map((f) => f.nombreCompleto)).toEqual(['Ana Ruiz']);
   });
 });

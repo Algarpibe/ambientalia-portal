@@ -94,6 +94,31 @@ export interface Estacionalidad {
   mesPico: string | null;
 }
 
+/** Una persona en el resumen por persona. Espejo de `FilaDeResumen` de hub-api. */
+export interface FilaDeResumen {
+  empleadoId: string;
+  nombreCompleto: string;
+  deBaja: boolean;
+  /** Días laborables. */
+  vacaciones: number;
+  /** Horas, un decimal. */
+  permisoHoras: number;
+  /**
+   * Días laborables de los permisos sin hora: los de día completo y todos los
+   * anteriores a la migración 036.
+   */
+  permisoDias: number;
+  /** Días laborables. */
+  compensatorio: number;
+  /** Días laborables. */
+  incapacidad: number;
+}
+
+export interface ResumenPorPersona {
+  filas: FilaDeResumen[];
+  total: Omit<FilaDeResumen, 'empleadoId' | 'nombreCompleto' | 'deBaja'>;
+}
+
 /**
  * Cuánto roce genera el proceso.
  *
@@ -138,6 +163,11 @@ export interface Kpis {
    * comparar mes a mes con la de `absentismo`.
    */
   estacionalidad: Estacionalidad;
+  /**
+   * Opcional a propósito: si el portal se despliega antes que hub-api, la
+   * respuesta no lo trae y la sección simplemente no se pinta.
+   */
+  resumenPorPersona?: ResumenPorPersona;
   /** Rechazos, anulaciones y cambios de fecha. Comparte ventana con `tiempos`:
    *  los dos miden el proceso de aprobación. */
   friccion: Friccion;

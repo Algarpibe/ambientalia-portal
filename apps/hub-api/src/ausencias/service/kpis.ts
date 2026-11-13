@@ -7,12 +7,14 @@ import {
   friccion,
   ventanaDeKpis,
   pendientesPorAntiguedad,
+  resumenPorPersona,
   tiemposPorAprobador,
   type Absentismo,
   type AcumulacionExcesiva,
   type Estacionalidad,
   type Friccion,
   type PendientesPorAntiguedad,
+  type ResumenPorPersona,
   type TiempoDeAprobador,
 } from '../kpis.js';
 import * as repo from '../repo.js';
@@ -81,6 +83,14 @@ export interface Kpis {
    * serie no se puede comparar mes a mes con la de `absentismo`.
    */
   estacionalidad: Estacionalidad;
+  /**
+   * Lo que ha tenido cada persona de cada tipo en el periodo. Sale de las MISMAS
+   * ausencias que la estacionalidad, recortadas a la ventana general (meses
+   * completos): tabla y gráfica cuadran en vacaciones, compensatorios e
+   * incapacidades. En permisos no, porque la gráfica cuenta un permiso con hora
+   * como su día y el resumen lo cuenta en horas.
+   */
+  resumenPorPersona: ResumenPorPersona;
   /**
    * Cuánto roce genera el proceso: rechazos, anulaciones y cambios de fecha.
    * Comparte ventana con `tiempos` —los dos miden el proceso de aprobación—.
@@ -198,6 +208,15 @@ export async function kpis(db: Pool, anio: number | null = null): Promise<Kpis> 
       ausencias,
       estacional.desde.slice(0, 7),
       estacional.hasta.slice(0, 7),
+    ),
+    // Las ausencias de la estacionalidad sirven tal cual: su ventana siempre
+    // contiene la general (24 meses frente a 12, o el mismo año). La plantilla
+    // activa es `empleados`, la misma lista del pasivo.
+    resumenPorPersona: resumenPorPersona(
+      ausencias,
+      empleados,
+      general.desde.slice(0, 7),
+      general.hasta.slice(0, 7),
     ),
     friccion: friccion(paraFriccion),
     tiempos: tiemposPorAprobador(decisiones),

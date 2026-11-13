@@ -365,13 +365,20 @@ export function absentismoPorMes(
 export const TIPOS_DE_AUSENCIA = ['vacaciones', 'permiso', 'compensatorio', 'incapacidad'] as const;
 export type TipoDeAusencia = (typeof TIPOS_DE_AUSENCIA)[number];
 
-/** Una ausencia reducida a lo que el KPI de estacionalidad necesita. */
+/** Una ausencia reducida a lo que los KPIs de estacionalidad y del resumen necesitan. */
 export interface AusenciaParaKpi {
   tipo: TipoDeAusencia;
   empleadoId: string;
   nombreCompleto: string;
   fechaInicio: string;
   fechaFin: string;
+  /**
+   * `HH:MM`, solo en un permiso de unas horas (las dos o ninguna: CHECK de la
+   * 036). Opcionales para que quien no las necesita —la estacionalidad y sus
+   * tests— no tenga que inventarlas.
+   */
+  horaInicio?: string | null;
+  horaFin?: string | null;
 }
 
 export interface MesDeEstacionalidad {
@@ -483,6 +490,125 @@ export function estacionalidadPorMes(
   };
 }
 
+// ── Resumen por persona ────────────────────────────────────────────────────
+
+/** Una persona en el resumen: lo que ha tenido de cada tipo en el periodo. */
+export interface FilaDeResumen {
+  empleadoId: string;
+  nombreCompleto: string;
+  /** No está en la plantilla activa: sale porque tuvo algo en el periodo. */
+  deBaja: boolean;
+  /** Días laborables. */
+  vacaciones: number;
+  /** Horas de los permisos que las tienen, con un decimal. */
+  permisoHoras: number;
+  /**
+   * Días laborables de los permisos SIN horas: los de día completo y todos los
+   * anteriores a la migración 036. Van aparte y no convertidos a horas porque la
+   * app no conoce la jornada, y suponerla inventaría una cifra.
+   */
+  permisoDias: number;
+  /** Días laborables. */
+  compensatorio: number;
+  /** Días laborables. */
+  incapacidad: number;
+}
+
+export interface ResumenPorPersona {
+  filas: FilaDeResumen[];
+  /** Calculado aquí para que la fila de total no pueda discrepar de las de arriba. */
+  total: Omit<FilaDeResumen, 'empleadoId' | 'nombreCompleto' | 'deBaja'>;
+}
+
+/**
+ * Lo que ha tenido cada persona de cada tipo de ausencia en el periodo.
+ *
+ * Recorta por meses completos con `tramosPorMes`, el mismo reparto que la
+ * estacionalidad: tabla y gráfica salen de las mismas ausencias y cuadran en
+ * vacaciones, compensatorios e incapacidades. En permisos NO: la gráfica cuenta
+ * un permiso con hora como su día y el resumen lo cuenta en horas.
+ *
+ * Toda la plantilla activa sale aunque no tenga nada —ver quién no ha pedido
+ * nada también es información—, y las fichas de baja solo si tuvieron algo en
+ * el periodo. Se agrupa por id y no por nombre: dos personas pueden llamarse
+ * igual. El nombre de una ficha activa es el de la ficha, no el que traiga la
+ * ausencia.
+ */
+export function resumenPorPersona(
+  ausencias: AusenciaParaKpi[],
+  activos: { empleadoId: string; nombreCompleto: string }[],
+  desdeMes: string,
+  hastaMes: string,
+): ResumenPorPersona {
+  const meses = mesesEntre(desdeMes, hastaMes);
+  const vacia = (empleadoId: string, nombreCompleto: string, deBaja: boolean): FilaDeResumen => ({
+    empleadoId,
+    nombreCompleto,
+    deBaja,
+    vacaciones: 0,
+    permisoHoras: 0,
+    permisoDias: 0,
+    compensatorio: 0,
+    incapacidad: 0,
+  });
+  const porId = new Map(activos.map((e) => [e.empleadoId, vacia(e.empleadoId, e.nombreCompleto, false)]));
+
+  for (const au of ausencias) {
+    const tramos = tramosPorMes(au.fechaInicio, au.fechaFin, meses);
+    // Fuera del periodo entera: no suma, y una ficha de baja no gana fila por ella.
+    if (tramos.length === 0) continue;
+    let fila = porId.get(au.empleadoId);
+    if (!fila) {
+      fila = vacia(au.empleadoId, au.nombreCompleto, true);
+      porId.set(au.empleadoId, fila);
+    }
+    // Un permiso con hora cuenta sus horas aunque su día no sea laborable: es una
+    // ausencia aprobada, y esconderla sería peor que enseñarla.
+    if (au.tipo === 'permiso' && au.horaInicio && au.horaFin) {
+      fila.permisoHoras += horasDelPermiso(au.horaInicio, au.horaFin);
+      continue;
+    }
+    const dias = tramos.reduce((s, [, d]) => s + d, 0);
+    if (au.tipo === 'permiso') fila.permisoDias += dias;
+    else fila[au.tipo] += dias;
+  }
+
+  const filas = [...porId.values()]
+    .map((f) => ({
+      ...f,
+      vacaciones: redondear(f.vacaciones),
+      permisoHoras: redondear(f.permisoHoras),
+      permisoDias: redondear(f.permisoDias),
+      compensatorio: redondear(f.compensatorio),
+      incapacidad: redondear(f.incapacidad),
+    }))
+    // Una ficha de baja con todo a cero (su ausencia cayó solo en días no
+    // laborables) no aporta nada; las activas sí salen a cero a propósito.
+    .filter((f) => !f.deBaja || f.vacaciones + f.permisoHoras + f.permisoDias + f.compensatorio + f.incapacidad > 0)
+    .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es') || a.empleadoId.localeCompare(b.empleadoId));
+
+  const suma = (clave: keyof ResumenPorPersona['total']) => redondear(filas.reduce((s, f) => s + f[clave], 0));
+  return {
+    filas,
+    total: {
+      vacaciones: suma('vacaciones'),
+      permisoHoras: suma('permisoHoras'),
+      permisoDias: suma('permisoDias'),
+      compensatorio: suma('compensatorio'),
+      incapacidad: suma('incapacidad'),
+    },
+  };
+}
+
+/** Las horas entre dos `HH:MM` del mismo día. El CHECK de la 036 garantiza fin > inicio. */
+function horasDelPermiso(inicio: string, fin: string): number {
+  const minutos = (hhmm: string) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  return (minutos(fin) - minutos(inicio)) / 60;
+}
+
 // ── Fricción ───────────────────────────────────────────────────────────────
 
 /** Una solicitud reducida a las tres señales de fricción que el KPI mira. */
@@ -559,9 +685,9 @@ export function friccion(solicitudes: SolicitudParaFriccion[]): Friccion {
  * Reparte un rango de fechas entre los meses de la serie que toca, devolviendo
  * los DÍAS HÁBILES que le corresponden a cada uno.
  *
- * Es el corazón compartido de `absentismoPorMes` y `estacionalidadPorMes`: los
- * dos tienen que repartir igual, y escribirlo dos veces es la forma segura de
- * que un día dejen de coincidir. Omite los meses que el rango no toca, así que
+ * Es el corazón compartido de `absentismoPorMes`, `estacionalidadPorMes` y
+ * `resumenPorPersona`: los tres tienen que repartir igual, y escribirlo más de
+ * una vez es la forma segura de que un día dejen de coincidir. Omite los meses que el rango no toca, así que
  * quien llame puede usar el propio bucle para saber si la ausencia entró en la
  * ventana o se quedó fuera entera.
  */

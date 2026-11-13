@@ -103,4 +103,26 @@ describe('ausenciasParaKpi', () => {
   it('sin ausencias, lista vacia', async () => {
     expect(await ausenciasParaKpi(db, '2026-09-01', '2026-09-30')).toEqual([]);
   });
+
+  it('trae las horas de un permiso con hora y null en el resto', async () => {
+    // El resumen por persona cuenta los permisos en horas: sin estas dos
+    // columnas solo podria contarlos en dias.
+    await sembrarSolicitud(db, {
+      empleadoId,
+      correo: CORREO,
+      estado: 'aprobada',
+      tipo: 'permiso',
+      fechaInicio: '2026-09-01',
+      fechaFin: '2026-09-01',
+      segundoAprobadorCorreo: null,
+      horaInicio: '09:00',
+      horaFin: '11:30',
+    });
+    await sembrar('vacaciones', 'aprobada', '2026-09-07', '2026-09-11');
+    const filas = await ausenciasParaKpi(db, '2026-09-01', '2026-09-30');
+    expect(filas.map((f) => [f.tipo, f.horaInicio, f.horaFin])).toEqual([
+      ['permiso', '09:00', '11:30'],
+      ['vacaciones', null, null],
+    ]);
+  });
 });
