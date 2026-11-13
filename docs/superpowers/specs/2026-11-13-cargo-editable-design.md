@@ -1,7 +1,10 @@
 # Ausencias — cargo editable desde la pestaña Empleados
 
 **Fecha:** 2026-11-13
-**Estado:** diseño aprobado; pendiente de plan.
+**Estado:** implementado (plan: `docs/superpowers/plans/2026-11-13-cargo-editable.md`); pendiente
+de desplegar hub-api y el portal. Tras la revisión: el lector de errores exige código Y estado
+(§4.1), y mientras se guarda un cargo no se abre otra fila ni se cancela o edita la que se guarda
+(§4.2).
 **Depende de:** la pestaña Empleados (`apps/ausencias/src/ImportarEmpleados.tsx`) y las puertas
 del organigrama en hub-api (`service/organigrama.ts`, `repo/empleados.ts`, `router.ts`), en
 producción.
@@ -98,27 +101,38 @@ fijarCargo(id: string, cargo: string | null): Promise<Empleado>
 patrón de `errorDeNota`), porque `mensajeDeError` enseñaría el código crudo `cargo_invalido` en
 un 400 y «No se pudieron cargar los datos (error 404)» en un 404:
 
-- `cargo_invalido` → «El cargo admite hasta 255 caracteres y no puede llevar saltos de línea ni
-  caracteres de control.»
+- 400 con `error: 'cargo_invalido'` → «El cargo admite hasta 255 caracteres y no puede llevar
+  saltos de línea ni caracteres de control.»
 - 404 con `error: 'empleado_no_encontrado'` → «Esa ficha ya no está activa. Recarga la lista.»
 - Cualquier otra cosa → `errorGenerico`. Esto incluye un 404 **sin** ese código: es lo que
   contestaría un hub-api antiguo si el portal se desplegara antes y la ruta no existiera
-  todavía, y decir «la ficha no está activa» sería mentir.
+  todavía, y decir «la ficha no está activa» sería mentir. También un 404 JSON con otro código, y
+  cualquiera de los dos códigos con el estado que no le toca: se traduce solo la pareja exacta.
 
 ### 4.2 `ImportarEmpleados.tsx`
 
 - Estado nuevo `edicionCargo: { id: string; texto: string } | null`, separado del de la baja
   (`edicion`). Comparten `guardando`.
-- **Celda sin editar:** el cargo (o «—») y un botón de lápiz (`Pencil` de lucide-react) con
-  `aria-label` «Editar el cargo de {nombre}».
+- **Celda sin editar:** el cargo (o «—») y un botón de lápiz (`Pencil` de lucide-react, mismo
+  tamaño y `title` que el lápiz de `RegistroGeneral`) con `aria-label` «Editar el cargo de
+  {nombre}».
 - **Al pulsar el lápiz:** un `<input type="text">` con el foco puesto, `maxLength={255}`,
   `aria-label` «Cargo de {nombre}» y precargado con el cargo actual (o vacío). Al lado,
-  **Guardar** (desactivado mientras se guarda esa fila; dice «Guardando…») y **Cancelar**.
+  **Guardar** (dice «Guardando…» mientras se guarda) y **Cancelar**, con los nombres accesibles
+  «Guardar el cargo de {nombre}» y «Cancelar la edición del cargo de {nombre}»: una misma fila
+  puede enseñar el Guardar de la baja y el del cargo a la vez.
 - **Teclado:** Enter guarda y Esc cancela.
 - **Una fila a la vez:** pulsar el lápiz de otra fila abandona la edición anterior sin guardar.
+- **Mientras se guarda:**
+  - todos los lápices están desactivados (`guardando !== null`): si el guardado fallara, su error
+    saldría junto a la edición de otra persona, y los mensajes no dicen de quién son;
+  - en la fila que se guarda, Guardar y Cancelar están desactivados, Esc no hace nada y el campo
+    es de solo lectura: lo que se teclease no viajaría y el aviso diría «actualizado» igualmente.
 - **Al guardar:** manda el texto tal cual (el recorte y el vacío → `null` los decide el
-  servidor), cierra la edición, pone el aviso verde «Cargo de {nombre} actualizado.» y recarga
-  la lista con `setRecarga`, como hacen la baja y el alta.
+  servidor), cierra la edición **de su fila** si sigue abierta, pone el aviso verde «Cargo de
+  {nombre} actualizado.» y recarga la lista con `setRecarga`, como hacen la baja y el alta.
+  «De su fila» porque `guardando` es un solo hueco que comparte con la baja: si deshacer la baja
+  de otra fila termina antes, los lápices se reabren con este guardado todavía en vuelo.
 - **Si falla:** el mensaje del lector de errores sale en la caja roja que ya existe, y la
   edición sigue abierta con lo tecleado para poder corregirlo.
 
