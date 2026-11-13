@@ -130,4 +130,61 @@ describe('/auth/restablecer', () => {
     escribir('clave-nueva-1', 'clave-nueva-1');
     expect((await screen.findByRole('alert')).textContent).toContain('No se pudo conectar con el servidor. Reintenta.');
   });
+
+  it('400 password_too_short del servidor → su mensaje', async () => {
+    abrir(`/auth/restablecer#t=${TOKEN}`);
+    vi.mocked(fetch).mockResolvedValue(respuesta(400, { error: 'password_too_short' }));
+    escribir('clave-nueva-1', 'clave-nueva-1');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'La contraseña debe tener al menos 8 caracteres.',
+    );
+  });
+
+  it('un error cualquiera (500) → mensaje genérico', async () => {
+    abrir(`/auth/restablecer#t=${TOKEN}`);
+    vi.mocked(fetch).mockResolvedValue(respuesta(500, {}));
+    escribir('clave-nueva-1', 'clave-nueva-1');
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'No se pudo restablecer la contraseña. Reintenta.',
+    );
+  });
+
+  it('el botón queda deshabilitado mientras la petición está en vuelo', async () => {
+    abrir(`/auth/restablecer#t=${TOKEN}`);
+    let resolver!: (r: Response) => void;
+    vi.mocked(fetch).mockReturnValue(new Promise<Response>((r) => (resolver = r)));
+    escribir('clave-nueva-1', 'clave-nueva-1');
+    const boton = await screen.findByRole('button', { name: /Guardando/ });
+    expect((boton as HTMLButtonElement).disabled).toBe(true);
+    resolver(respuesta(200, { message: 'password_reset' }));
+    await screen.findByText('Contraseña actualizada');
+  });
+
+  describe('foco', () => {
+    it('al montar con token, el foco está en la contraseña nueva', () => {
+      abrir(`/auth/restablecer#t=${TOKEN}`);
+      expect(document.activeElement).toBe(screen.getByLabelText('Nueva contraseña'));
+    });
+
+    it('tras el éxito, el foco pasa al título «Contraseña actualizada»', async () => {
+      abrir(`/auth/restablecer#t=${TOKEN}`);
+      vi.mocked(fetch).mockResolvedValue(respuesta(200, { message: 'password_reset' }));
+      escribir('clave-nueva-1', 'clave-nueva-1');
+      const titulo = await screen.findByText('Contraseña actualizada');
+      expect(document.activeElement).toBe(titulo);
+    });
+
+    it('tras un 400 de token inválido, el foco pasa al título del enlace no válido', async () => {
+      abrir(`/auth/restablecer#t=${TOKEN}`);
+      vi.mocked(fetch).mockResolvedValue(respuesta(400, { error: 'invalid_or_expired_token' }));
+      escribir('clave-nueva-1', 'clave-nueva-1');
+      const titulo = await screen.findByText('Este enlace no es válido o ha caducado');
+      expect(document.activeElement).toBe(titulo);
+    });
+
+    it('sin token, el título del enlace no válido recibe el foco al cargar', () => {
+      abrir('/auth/restablecer');
+      expect(document.activeElement).toBe(screen.getByText('Este enlace no es válido o ha caducado'));
+    });
+  });
 });

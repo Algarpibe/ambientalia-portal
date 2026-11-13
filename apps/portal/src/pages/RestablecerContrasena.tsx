@@ -40,6 +40,7 @@ export default function RestablecerContrasena() {
   const uid = useId();
   const ids = { clave: `${uid}-clave`, confirmacion: `${uid}-confirmacion` };
   const tituloHecho = useRef<HTMLHeadingElement>(null);
+  const tituloInvalido = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -52,6 +53,7 @@ export default function RestablecerContrasena() {
   // al título de la confirmación para que el lector de pantalla la anuncie.
   useEffect(() => {
     if (estado === 'hecho') tituloHecho.current?.focus();
+    if (estado === 'invalido') tituloInvalido.current?.focus();
   }, [estado]);
 
   const irAlAcceso = (modo: ModoAuth) => {
@@ -122,7 +124,9 @@ export default function RestablecerContrasena() {
               {estado === 'invalido' && (
                 <div className="flex-1 flex flex-col items-center justify-center text-center">
                   <TriangleAlert className="w-16 h-16 text-amber-300 mb-6" />
-                  <h3 className="text-2xl font-bold text-white mb-3">Este enlace no es válido o ha caducado</h3>
+                  <h3 ref={tituloInvalido} tabIndex={-1} className="text-2xl font-bold text-white mb-3 focus:outline-none">
+                    Este enlace no es válido o ha caducado
+                  </h3>
                   <p className="text-gray-300 mb-8 max-w-sm">
                     Los enlaces para restablecer la contraseña valen 30 minutos y una sola vez. Pide uno nuevo.
                   </p>
