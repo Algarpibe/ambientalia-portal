@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizarCargo } from './service.js';
+import { AusenciaError, normalizarCargo } from './service.js';
 
 // La regla del cargo, aislada y pura: qué llega del cuerpo de la petición y qué
 // acaba en la columna `cargo VARCHAR(255)`.
@@ -9,6 +9,9 @@ function fallo(bruto: unknown): unknown {
   try {
     normalizarCargo(bruto);
   } catch (e) {
+    // La clase importa, no solo los campos: `sendError` (router.ts) decide el
+    // código HTTP con `instanceof AusenciaError`, y cualquier otra cosa sale 500.
+    expect(e).toBeInstanceOf(AusenciaError);
     return e;
   }
   return null;
@@ -40,7 +43,7 @@ describe('normalizarCargo', () => {
     }
   });
 
-  it('400 con un carácter de control en medio: NUL, salto de línea, tabulador, DEL', () => {
+  it('400 con un carácter de control que el recorte no quita: NUL (también al final), salto de línea, tabulador, DEL', () => {
     for (const bruto of ['Jefa\u0000', 'Jefa\nde taller', 'Jefa\tde taller', 'Jefa\u007Fde taller']) {
       expect(fallo(bruto), JSON.stringify(bruto)).toMatchObject(INVALIDO);
     }
