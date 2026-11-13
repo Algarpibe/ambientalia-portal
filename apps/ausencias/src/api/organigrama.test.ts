@@ -62,6 +62,23 @@ describe('fijarCargo', () => {
     expect(error?.message).toMatch(/404/);
   });
 
+  it('un 404 JSON con OTRO código tampoco dice que la ficha no está activa', async () => {
+    // Si alguien copiara aquí la regla de `errorDeNota` («cualquier `error` de
+    // texto»), este 404 acabaría diciendo «Esa ficha ya no está activa».
+    responde(json(404, { error: 'not_found' }));
+    const error = await fijarCargo('e1', 'x').then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(error?.message).not.toMatch(/ficha/);
+    expect(error?.message).toMatch(/404/);
+  });
+
+  it('el código solo se traduce con su estado: empleado_no_encontrado en un 400 no dice nada de la ficha', async () => {
+    responde(json(400, { error: 'empleado_no_encontrado' }));
+    await expect(fijarCargo('e1', 'x')).rejects.toThrow(new Error('empleado_no_encontrado'));
+  });
+
   it('otro 400 sale por el mensaje genérico', async () => {
     responde(json(400, { error: 'otra_cosa' }));
     await expect(fijarCargo('e1', 'x')).rejects.toThrow(new Error('otra_cosa'));
