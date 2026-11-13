@@ -686,8 +686,8 @@ export function friccion(solicitudes: SolicitudParaFriccion[]): Friccion {
  * los DÍAS HÁBILES que le corresponden a cada uno.
  *
  * Es el corazón compartido de `absentismoPorMes`, `estacionalidadPorMes` y
- * `resumenPorPersona`: los tres tienen que repartir igual, y escribirlo dos veces es la forma segura de
- * que un día dejen de coincidir. Omite los meses que el rango no toca, así que
+ * `resumenPorPersona`: los tres tienen que repartir igual, y escribirlo más de
+ * una vez es la forma segura de que un día dejen de coincidir. Omite los meses que el rango no toca, así que
  * quien llame puede usar el propio bucle para saber si la ausencia entró en la
  * ventana o se quedó fuera entera.
  */

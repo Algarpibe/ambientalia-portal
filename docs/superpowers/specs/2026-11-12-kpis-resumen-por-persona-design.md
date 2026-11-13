@@ -1,7 +1,8 @@
 # Ausencias — KPIs: resumen por persona
 
 **Fecha:** 2026-11-12
-**Estado:** diseño aprobado en brainstorming; pendiente de plan de implementación
+**Estado:** implementado (plan: `docs/superpowers/plans/2026-11-12-kpis-resumen-por-persona.md`);
+pendiente de desplegar hub-api y el portal
 **Depende de:** el panel de KPIs de Vacaciones y Permisos (`apps/ausencias/src/PanelKpis.tsx`,
 `apps/hub-api/src/ausencias/service/kpis.ts`, `kpis.ts`, `repo/kpis.ts`), en producción.
 
@@ -30,7 +31,11 @@ ausencia en el periodo elegido: vacaciones, permisos, compensatorios e incapacid
   añaden `hora_inicio` y `hora_fin` (`TIME`, solo en permisos con hora).
 - Esa consulta se pide con la ventana de estacionalidad, que siempre contiene la del periodo
   (24 meses frente a 12, o el mismo año). El resumen recorta a la ventana `general` en el
-  motor, como hace la gráfica.
+  motor, como hace la gráfica, y por **meses completos**: del mes de inicio del periodo al mes
+  en curso (la consulta no trae ausencias que empiecen después de hoy). Así, con un año
+  elegido, vacaciones, compensatorios e incapacidades cuadran con la gráfica; en permisos no,
+  porque la gráfica cuenta un permiso con hora como su día y la tabla en horas (la pantalla lo
+  dice).
 - **Función pura nueva `resumenPorPersona`** en `apps/hub-api/src/ausencias/kpis.ts`:
   - Vacaciones, compensatorios e incapacidades: días laborables dentro de la ventana, con el
     mismo reparto que `tramosPorMes` (una ausencia que cruza el cambio de año solo suma lo que
@@ -39,8 +44,8 @@ ausencia en el periodo elegido: vacaciones, permisos, compensatorios e incapacid
     dentro de la ventana.
   - Permisos sin hora: días laborables dentro de la ventana, en un contador aparte.
   - **Filas:** toda la plantilla activa (la lista que el servicio ya carga para el pasivo),
-    aunque no tenga nada; más las fichas de baja que tuvieron alguna ausencia en la ventana,
-    marcadas `deBaja: true`. Orden alfabético español (`localeCompare(…, 'es')`, el mismo
+    aunque no tenga nada; más las fichas de baja con algo distinto de cero en la ventana
+    (una de baja cuya única ausencia cayó en festivo no sale), marcadas `deBaja: true`. Orden alfabético español (`localeCompare(…, 'es')`, el mismo
     criterio que `ordenarNombres`). Se agrupa por id, no por nombre: dos personas pueden
     llamarse igual.
   - **Totales** de cada columna, calculados en el servidor para que la fila de total no pueda

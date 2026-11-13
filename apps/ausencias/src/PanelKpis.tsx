@@ -863,7 +863,7 @@ function ResumenDeAusencias({
       <p className="mt-1 text-xs text-gray-500">
         Lo que ha tenido cada uno {rotuloDelPeriodo(anio)}. Vacaciones, compensatorios e incapacidades en días
         laborables; los permisos en horas, y aparte («d») los que no tienen hora: los de día completo y todos
-        los anteriores a agosto de 2026, cuando la app empezó a guardarla, aunque fueran de unas horas.
+        los anteriores al 25 de agosto de 2026, cuando la app empezó a guardarla, aunque fueran de unas horas.
       </p>
 
       {/* overflow-x-auto: en el móvil se desplaza la tabla, no la página. */}
