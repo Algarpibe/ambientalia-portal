@@ -2,6 +2,7 @@ import type { Pool } from '@algarpibe/zoho-sync';
 import {
   absentismoPorMes,
   acumulacionExcesiva,
+  descansoPorPersona,
   diasDesde,
   estacionalidadPorMes,
   friccion,
@@ -11,6 +12,7 @@ import {
   tiemposPorAprobador,
   type Absentismo,
   type AcumulacionExcesiva,
+  type Descanso,
   type Estacionalidad,
   type Friccion,
   type PendientesPorAntiguedad,
@@ -53,6 +55,14 @@ const MESES_DE_ESTACIONALIDAD = 24;
 const UMBRAL_ACUMULACION_AVISO = 15;
 const UMBRAL_ACUMULACION_ALARMA = 30;
 
+/**
+ * Los tramos de la tarjeta de descanso, EN MESES desde las últimas vacaciones:
+ * medio año ya es para preguntar; un año, para actuar. Van en meses y no en días
+ * para que coincidan con lo que la tarjeta escribe («hace 12 meses»).
+ */
+const UMBRAL_DESCANSO_AVISO_MESES = 6;
+const UMBRAL_DESCANSO_ALARMA_MESES = 12;
+
 export interface Kpis {
   /**
    * La deuda: cuántos días de vacaciones y de compensatorios tiene acumulados
@@ -71,6 +81,11 @@ export interface Kpis {
    * dice a quién, que es lo único con lo que se puede hacer algo.
    */
   acumulacion: AcumulacionExcesiva;
+  /**
+   * Cuánto lleva cada persona de la plantilla activa sin descansar. Es una foto
+   * de HOY, como `acumulacion`: no la mueve el selector de año.
+   */
+  descanso: Descanso;
   /**
    * Días de trabajo perdidos por incapacidad, mes a mes. La tendencia se lee de
    * la serie: aquí no se calcula ninguna pendiente ni media móvil, porque con
@@ -199,6 +214,15 @@ export async function kpis(db: Pool, anio: number | null = null): Promise<Kpis> 
       }),
       UMBRAL_ACUMULACION_AVISO,
       UMBRAL_ACUMULACION_ALARMA,
+    ),
+    // Misma lista `saldos` y misma planificación que la acumulación, sin
+    // consulta añadida.
+    descanso: descansoPorPersona(
+      saldos.map((s) => ({ empleadoId: s.empleadoId, nombreCompleto: s.nombreCompleto, saldo: s.saldo.disponible })),
+      porEmpleado,
+      hoy,
+      UMBRAL_DESCANSO_AVISO_MESES,
+      UMBRAL_DESCANSO_ALARMA_MESES,
     ),
     // La serie va del primer mes de la ventana al mes en curso, incluido: el
     // mes actual sale a medias por definición, y esconderlo dejaría la gráfica

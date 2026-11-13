@@ -224,7 +224,12 @@ const estado = {
   /** Lo que `repo.solicitudesParaFriccion` devuelve. */
   friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
   /** Lo que `repo.planificacionDeVacaciones` devuelve, por empleado. */
-  planificacionKpi: [] as { empleadoId: string; ultimasVacaciones: string | null; diasProgramados: number }[],
+  planificacionKpi: [] as {
+    empleadoId: string;
+    ultimasVacaciones: string | null;
+    diasProgramados: number;
+    deVacacionesAhora?: boolean;
+  }[],
   /** Lo que `repo.aniosConAusencias` devuelve, para el selector del panel. */
   aniosKpi: [] as number[],
   /**
@@ -958,7 +963,10 @@ vi.mock('./repo.js', async () => ({
     return estado.ausenciasKpi;
   },
   solicitudesParaFriccion: async (_db: unknown, _desdeIso: string) => estado.friccionKpi,
-  planificacionDeVacaciones: async (_db: unknown, _hoy: string) => estado.planificacionKpi,
+  // `deVacacionesAhora` por defecto a false: los tests que siembran la
+  // planificación antes de existir este campo no lo llevan.
+  planificacionDeVacaciones: async (_db: unknown, _hoy: string) =>
+    estado.planificacionKpi.map((p) => ({ deVacacionesAhora: false, ...p })),
   aniosConAusencias: async (_db: unknown) => estado.aniosKpi,
   crearSolicitud: async (
     _db: unknown,
@@ -5338,6 +5346,25 @@ describe('GET /ausencias/kpis', () => {
     expect(m.incapacidad).toBe(1);
     expect(m.total).toBe(3);
     expect(r.body.estacionalidad.mesPico).toBe(mesActual);
+  });
+
+  it('el descanso trae a toda la plantilla, de quien nunca descansó a quien está de vacaciones', async () => {
+    const correo = conLlave();
+    // Saldos distintos y distinguibles: si el servicio tomara el de
+    // compensatorios en vez del de vacaciones, el test fallaría.
+    Object.assign(estado.plantilla[0], { saldoCorte: 20, fechaCorte: '2026-01-15', compensatoriosSaldoCorte: 7 });
+    // E2 va primero a propósito: el orden de entrada no debe ser el de salida.
+    estado.planificacionKpi = [
+      { empleadoId: E2, ultimasVacaciones: '2025-12-19', diasProgramados: 0, deVacacionesAhora: true },
+      { empleadoId: E1, ultimasVacaciones: null, diasProgramados: 0 },
+    ];
+    const r = await pedir(token({ sub: correo })).expect(200);
+    expect(r.body.descanso.filas.map((f: { nombreCompleto: string; tramo: string }) => [f.nombreCompleto, f.tramo])).toEqual([
+      ['Ana Ruiz Molina', 'nunca'],
+      ['Luis Prieto Cano', 'ahora'],
+    ]);
+    expect(r.body.descanso.filas[0].saldo).toBe(20);
+    expect(r.body.descanso).toMatchObject({ conteo: { alarma: 1, aviso: 0, ok: 1 }, umbralAvisoMeses: 6, umbralAlarmaMeses: 12 });
   });
 
   it('el resumen por persona trae a toda la plantilla, las horas de los permisos y las fichas de baja', async () => {

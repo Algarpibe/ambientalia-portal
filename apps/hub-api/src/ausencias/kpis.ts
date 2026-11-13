@@ -233,6 +233,114 @@ export function acumulacionExcesiva(
   };
 }
 
+// ── Descanso ───────────────────────────────────────────────────────────────
+
+export type TramoDeDescanso = 'nunca' | 'alarma' | 'aviso' | 'ok' | 'ahora';
+
+/** Cuánto lleva una persona sin descansar, ya clasificado. */
+export interface FichaDeDescanso {
+  empleadoId: string;
+  nombreCompleto: string;
+  tramo: TramoDeDescanso;
+  /** Días de calendario desde el fin de sus últimas vacaciones; `null` = nunca. */
+  diasSinVacaciones: number | null;
+  /** `floor(dias × 12 / 365)`; `null` = nunca. Decide el tramo y el texto. */
+  mesesSinVacaciones: number | null;
+  /** Fin de sus últimas vacaciones ya disfrutadas, `YYYY-MM-DD`. */
+  ultimoDia: string | null;
+  deVacacionesAhora: boolean;
+  /** Días hábiles de vacaciones ya pedidos hacia adelante. */
+  diasProgramados: number;
+  /** Días de vacaciones disponibles, un decimal. */
+  saldo: number;
+}
+
+export interface Descanso {
+  filas: FichaDeDescanso[];
+  /** `nunca` cuenta en alarma (es lo más grave) y `ahora` en ok (está descansando). */
+  conteo: { alarma: number; aviso: number; ok: number };
+  /** Los umbrales aplicados, para que la pantalla los diga sin reinventarlos. */
+  umbralAvisoMeses: number;
+  umbralAlarmaMeses: number;
+}
+
+/** Lo que la tarjeta necesita de `repo.planificacionDeVacaciones`. */
+export interface PlanDeDescanso {
+  ultimasVacaciones: string | null;
+  diasProgramados: number;
+  deVacacionesAhora: boolean;
+}
+
+/**
+ * Meses completos en unos días: `floor(dias × 12 / 365)`. Con esta fórmula 365
+ * días son exactamente 12 meses y 183 son 6, así que el tramo y la etiqueta
+ * («hace 12 meses») no pueden discrepar en el borde, que es donde se miran.
+ */
+export function mesesDesde(dias: number): number {
+  return Math.floor((dias * 12) / 365);
+}
+
+/** `nunca` arriba (lo más grave), `ahora` abajo (está descansando), el resto en medio. */
+const ORDEN_DE_TRAMO: Record<TramoDeDescanso, number> = { nunca: 0, alarma: 1, aviso: 1, ok: 1, ahora: 2 };
+
+/**
+ * Cuánto lleva cada persona de la plantilla activa sin descansar, del que más
+ * tiempo lleva al que está de vacaciones ahora.
+ *
+ * Solo cuentan las vacaciones: un compensatorio o un permiso no son un descanso
+ * largo. `null` en los días es «nunca», no «hoy» (ver `diasDesde`).
+ */
+export function descansoPorPersona(
+  fichas: { empleadoId: string; nombreCompleto: string; saldo: number }[],
+  planes: Map<string, PlanDeDescanso>,
+  hoy: string,
+  umbralAvisoMeses: number,
+  umbralAlarmaMeses: number,
+): Descanso {
+  const filas: FichaDeDescanso[] = fichas.map((f) => {
+    const plan = planes.get(f.empleadoId);
+    const ultimoDia = plan?.ultimasVacaciones ?? null;
+    const dias = diasDesde(ultimoDia, hoy);
+    const meses = dias === null ? null : mesesDesde(dias);
+    const ahora = plan?.deVacacionesAhora ?? false;
+    const tramo: TramoDeDescanso = ahora
+      ? 'ahora'
+      : meses === null
+        ? 'nunca'
+        : meses >= umbralAlarmaMeses
+          ? 'alarma'
+          : meses >= umbralAvisoMeses
+            ? 'aviso'
+            : 'ok';
+    return {
+      empleadoId: f.empleadoId,
+      nombreCompleto: f.nombreCompleto,
+      tramo,
+      diasSinVacaciones: dias,
+      mesesSinVacaciones: meses,
+      ultimoDia,
+      deVacacionesAhora: ahora,
+      diasProgramados: plan?.diasProgramados ?? 0,
+      saldo: redondear(f.saldo),
+    };
+  });
+
+  filas.sort(
+    (a, b) =>
+      ORDEN_DE_TRAMO[a.tramo] - ORDEN_DE_TRAMO[b.tramo] ||
+      (b.diasSinVacaciones ?? 0) - (a.diasSinVacaciones ?? 0) ||
+      a.nombreCompleto.localeCompare(b.nombreCompleto, 'es'),
+  );
+
+  const cuantos = (...tramos: TramoDeDescanso[]) => filas.filter((f) => tramos.includes(f.tramo)).length;
+  return {
+    filas,
+    conteo: { alarma: cuantos('alarma', 'nunca'), aviso: cuantos('aviso'), ok: cuantos('ok', 'ahora') },
+    umbralAvisoMeses,
+    umbralAlarmaMeses,
+  };
+}
+
 // ── Absentismo por incapacidad ─────────────────────────────────────────────
 
 /** Una incapacidad reducida a lo que el KPI de absentismo necesita. */

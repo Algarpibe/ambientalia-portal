@@ -10,6 +10,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
+import { COLOR_DE_TRAMO, fechaConMes, textoDeDescanso } from './descanso';
 import { formatDias } from './dominio';
 import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 
@@ -17,7 +18,7 @@ import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 // pantalla de la app, y que responden preguntas distintas:
 //
 //  1. ¿Cuánto debemos?      → el pasivo de vacaciones de la plantilla activa.
-//  2. ¿Quién lo concentra?  → las dos listas de acumulación excesiva.
+//  2. ¿Quién no descansa?   → el tiempo desde las últimas vacaciones de cada uno.
 //  3. ¿Quién está atascado? → mediana y p90 por aprobador.
 //  4. ¿Qué está esperando?  → las pendientes repartidas por antigüedad.
 //  5. ¿Cuándo se van todos? → los días de ausencia por mes y tipo, a dos años.
@@ -187,7 +188,7 @@ export default function PanelKpis({ activo }: Props) {
         onCambio={setAnio}
       />
       <PasivoDeVacaciones pasivo={datos.pasivo} />
-      <AcumulacionExcesiva acumulacion={datos.acumulacion} />
+      {datos.descanso && <SinDescansar descanso={datos.descanso} />}
       <PendientesAhora pendientes={datos.pendientes} />
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
@@ -278,115 +279,75 @@ function PasivoDeVacaciones({ pasivo }: { pasivo: Kpis['pasivo'] }) {
   );
 }
 
-// ── Acumulación ────────────────────────────────────────────────────────────
+// ── Descanso ───────────────────────────────────────────────────────────────
 
-function AcumulacionExcesiva({ acumulacion }: { acumulacion: Kpis['acumulacion'] }) {
-  const { aviso, alarma, umbralAviso, umbralAlarma } = acumulacion;
-  const nadie = aviso.length === 0 && alarma.length === 0;
+/**
+ * Cuánto lleva cada uno sin descansar: toda la plantilla activa, de quien nunca
+ * ha descansado a quien está de vacaciones ahora. Los tramos y los meses los
+ * decide hub-api (`descansoPorPersona`); aquí solo se pintan.
+ *
+ * Sustituye a «Quién acumula de más» (2026-11-12, a petición del usuario).
+ * hub-api sigue calculando `acumulacion`.
+ */
+function SinDescansar({ descanso }: { descanso: NonNullable<Kpis['descanso']> }) {
+  const { filas, conteo, umbralAvisoMeses, umbralAlarmaMeses } = descanso;
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-5">
       <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
         <Users className="h-4 w-4 text-gray-400" />
-        Quién acumula de más
+        Cuánto lleva cada uno sin descansar
       </h2>
       <p className="mt-1 text-xs text-gray-500">
-        La cifra de arriba dice cuánto se debe; ésta, a quién. Con un devengo de 1,25 días al mes, cada{' '}
-        {umbralAviso} días son aproximadamente un año sin disfrutar vacaciones.
+        Tiempo desde el último día de vacaciones ya disfrutadas. Solo cuentan las vacaciones: un compensatorio o un
+        permiso no son un descanso largo.
       </p>
 
-      {nadie ? (
-        <p className="mt-4 text-sm text-gray-500">
-          Nadie pasa de {umbralAviso} días acumulados.
-        </p>
-      ) : (
-        <div className="mt-4 grid gap-5 sm:grid-cols-2">
-          {/* La alarma va primero y a la izquierda: es la lista corta y la que
-              hay que mirar con prisa. */}
-          <ListaDeFichas
-            titulo={`Más de ${umbralAlarma} días`}
-            explicacion="Unos dos años acumulados. Ya no se corrige solo."
-            fichas={alarma}
-            alarma
-          />
-          <ListaDeFichas
-            titulo={`Entre ${umbralAviso} y ${umbralAlarma} días`}
-            explicacion="Un año largo. Todavía se corrige planificando."
-            fichas={aviso}
-          />
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ListaDeFichas({
-  titulo,
-  explicacion,
-  fichas,
-  alarma = false,
-}: {
-  titulo: string;
-  explicacion: string;
-  fichas: Kpis['acumulacion']['aviso'];
-  alarma?: boolean;
-}) {
-  return (
-    <div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs uppercase tracking-wide text-gray-500">{titulo}</span>
-        <span className={`text-lg font-semibold ${alarma && fichas.length > 0 ? 'text-amber-600' : 'text-gray-900'}`}>
-          {fichas.length}
-        </span>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <Cifra
+          etiqueta={`${umbralAlarmaMeses} meses o más`}
+          valor={String(conteo.alarma)}
+          detalle="o sin vacaciones registradas"
+          tono={conteo.alarma > 0 ? 'rojo' : undefined}
+        />
+        <Cifra
+          etiqueta={`De ${umbralAvisoMeses} a ${umbralAlarmaMeses} meses`}
+          valor={String(conteo.aviso)}
+          tono={conteo.aviso > 0 ? 'ambar' : undefined}
+        />
+        <Cifra etiqueta={`Menos de ${umbralAvisoMeses} meses`} valor={String(conteo.ok)} detalle="o de vacaciones ahora" />
       </div>
-      <p className="mt-0.5 text-xs text-gray-500">{explicacion}</p>
 
-      {fichas.length === 0 ? (
-        <p className="mt-2 text-sm text-gray-400">Nadie.</p>
-      ) : (
-        <ul className="mt-2 space-y-2">
-          {/* Con nombre y no solo el recuento: «hay 4 personas» no se puede
-              accionar, y «Fulana, 42 días» sí. */}
-          {fichas.map((f) => (
-            <li key={f.empleadoId} className="text-sm">
-              <div className="flex justify-between gap-3">
-                <span className="truncate text-gray-900">{f.nombreCompleto}</span>
-                <span className="shrink-0 tabular-nums text-gray-500">{formatDias(f.dias)}</span>
-              </div>
-              {/* Las dos señales van JUNTAS y debajo del nombre porque juntas
-                  son la frase entera: «lleva dos años sin descansar y no tiene
-                  nada previsto» es un caso sobre el que actuar; «lleva dos años
-                  pero ya tiene 15 días pedidos» no lo es. Enseñar una sin la
-                  otra devuelve la lista al falso positivo que vienen a matar. */}
-              <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
-                <span>{textoSinVacaciones(f.diasSinVacaciones)}</span>
-                {f.diasProgramados > 0 ? (
-                  <span className="text-emerald-600">{formatDias(f.diasProgramados)} ya pedidos</span>
+      <ul className="mt-4 divide-y divide-gray-100">
+        {filas.map((f) => (
+          <li key={f.empleadoId} className="py-2 text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="truncate text-gray-900">{f.nombreCompleto}</span>
+              <span className={`shrink-0 font-medium tabular-nums ${COLOR_DE_TRAMO[f.tramo]}`}>{textoDeDescanso(f)}</span>
+            </div>
+            {/* El último día, el saldo y lo ya pedido van juntos: «lleva un año
+                sin descansar y no tiene nada previsto» es un caso sobre el que
+                actuar; «lleva un año pero ya tiene 15 días pedidos», no. */}
+            <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
+              {/* Quien está de vacaciones ahora trae el fin de las vacaciones
+                  ANTERIORES: junto a «de vacaciones ahora» se leería como el
+                  de las actuales, así que se omite. */}
+              {f.ultimoDia && f.tramo !== 'ahora' && <span>último día: {fechaConMes(f.ultimoDia)}</span>}
+              <span className={f.saldo < 0 ? 'text-red-600' : undefined}>saldo {formatDias(f.saldo)} días</span>
+              {/* Para quien está de vacaciones ahora, «sin nada previsto»
+                  sonaría a alarma y es lo contrario: se omite. */}
+              {f.tramo !== 'ahora' &&
+                (f.diasProgramados > 0 ? (
+                  <span className="text-emerald-600">{formatDias(f.diasProgramados)} días ya pedidos</span>
                 ) : (
                   <span className="text-amber-600">sin nada previsto</span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
-}
-
-/**
- * Cuánto lleva sin vacaciones, en la unidad que se entiende de un vistazo.
- *
- * `null` es «nunca», no «hoy»: quien no ha disfrutado vacaciones desde que
- * entró es el caso más grave de la lista, y decir «hace 0 días» lo pintaría
- * como el más tranquilo.
- */
-function textoSinVacaciones(dias: number | null): string {
-  if (dias === null) return 'sin vacaciones registradas';
-  if (dias < 60) return `descansó hace ${dias} ${dias === 1 ? 'día' : 'días'}`;
-  const meses = Math.round(dias / 30);
-  if (meses < 24) return `descansó hace ${meses} meses`;
-  return `descansó hace ${Math.floor(meses / 12)} años`;
 }
 
 // ── Pendientes ─────────────────────────────────────────────────────────────
@@ -905,16 +866,21 @@ function Cifra({
   valor,
   detalle,
   alarma = false,
+  tono,
 }: {
   etiqueta: string;
   valor: string;
   detalle?: string;
   alarma?: boolean;
+  /** Si viene, manda sobre `alarma`: el color del número casa con el de las filas. */
+  tono?: 'rojo' | 'ambar';
 }) {
+  const color =
+    tono === 'rojo' ? 'text-red-600' : tono === 'ambar' ? 'text-amber-600' : alarma ? 'text-amber-600' : 'text-gray-900';
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-gray-500">{etiqueta}</div>
-      <div className={`mt-1 text-2xl font-semibold ${alarma ? 'text-amber-600' : 'text-gray-900'}`}>
+      <div className={`mt-1 text-2xl font-semibold ${color}`}>
         {valor}
       </div>
       {detalle !== undefined && <div className="mt-0.5 text-xs text-gray-500">{detalle}</div>}
