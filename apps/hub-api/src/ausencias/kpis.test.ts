@@ -903,10 +903,39 @@ describe('resumenPorPersona', () => {
         au('permiso', BETO, '2026-09-10', '2026-09-10', ['10:00', '11:30']), // 1,5 h
         au('permiso', ANA, '2026-09-11', '2026-09-11'), // 1 d
         au('incapacidad', BETO, '2026-09-14', '2026-09-14'), // 1
+        au('compensatorio', ANA, '2026-09-15', '2026-09-15'), // 1
       ],
       [ANA, BETO],
       ...ANIO_2026,
     );
-    expect(r.total).toEqual({ vacaciones: 3, permisoHoras: 1.5, permisoDias: 1, compensatorio: 0, incapacidad: 1 });
+    expect(r.total).toEqual({ vacaciones: 3, permisoHoras: 1.5, permisoDias: 1, compensatorio: 1, incapacidad: 1 });
+  });
+
+  it('el total suma las filas ya redondeadas, para que cuadre con lo que se ve', () => {
+    // 1 h 15 son 1,25: redondear da 1,3 en cada fila y el total ha de ser 2,6
+    // (la suma de lo pintado), no 2,5 (la suma de los valores sin redondear).
+    const r = resumenPorPersona(
+      [
+        au('permiso', ANA, '2026-09-01', '2026-09-01', ['09:00', '10:15']),
+        au('permiso', BETO, '2026-09-01', '2026-09-01', ['09:00', '10:15']),
+      ],
+      [ANA, BETO],
+      ...ANIO_2026,
+    );
+    expect(r.filas.map((f) => f.permisoHoras)).toEqual([1.3, 1.3]);
+    expect(r.total.permisoHoras).toBe(2.6);
+  });
+
+  it('un permiso con hora de una ficha de baja sale con sus horas y marcado', () => {
+    const ZOE = { empleadoId: 'e9', nombreCompleto: 'Zoe Baja' };
+    const r = resumenPorPersona([au('permiso', ZOE, '2026-03-02', '2026-03-02', ['09:00', '11:00'])], [ANA], ...ANIO_2026);
+    expect(r.filas.find((f) => f.empleadoId === 'e9')).toMatchObject({ deBaja: true, permisoHoras: 2 });
+  });
+
+  it('CANDADO: una ficha de baja que acaba con todo a cero no sale, pero una activa sí', () => {
+    const ZOE = { empleadoId: 'e9', nombreCompleto: 'Zoe Baja' };
+    // 2026-09-13 es domingo: la incapacidad no suma ningún día laborable.
+    const r = resumenPorPersona([au('incapacidad', ZOE, '2026-09-13', '2026-09-13')], [ANA], ...ANIO_2026);
+    expect(r.filas.map((f) => f.nombreCompleto)).toEqual(['Ana Ruiz']);
   });
 });

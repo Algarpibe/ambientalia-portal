@@ -86,7 +86,9 @@ export interface Kpis {
   /**
    * Lo que ha tenido cada persona de cada tipo en el periodo. Sale de las MISMAS
    * ausencias que la estacionalidad, recortadas a la ventana general (meses
-   * completos), así que la tabla y la gráfica cuadran en un año concreto.
+   * completos): tabla y gráfica cuadran en vacaciones, compensatorios e
+   * incapacidades. En permisos no, porque la gráfica cuenta un permiso con hora
+   * como su día y el resumen lo cuenta en horas.
    */
   resumenPorPersona: ResumenPorPersona;
   /**

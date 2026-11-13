@@ -211,7 +211,7 @@ const estado = {
     fechaInicio: string;
     fechaFin: string;
   }[],
-  /** Lo que `repo.ausenciasParaKpi` devuelve, para el KPI de estacionalidad. */
+  /** Lo que `repo.ausenciasParaKpi` devuelve, para la estacionalidad y el resumen por persona. */
   ausenciasKpi: [] as {
     tipo: string;
     empleadoId: string;
@@ -5376,6 +5376,22 @@ describe('GET /ausencias/kpis', () => {
       compensatorio: 0,
       incapacidad: 1,
     });
+  });
+
+  it('CANDADO: el resumen mira el periodo del selector, no la ventana de la estacionalidad', async () => {
+    // Reloj en 2026-01-15 y sin ?year: la ventana general empieza en 2025-01 y la
+    // de la estacionalidad en 2024-01. Unas vacaciones de junio de 2024 llegan a
+    // la estacionalidad, pero el resumen no debe sumarlas.
+    const correo = conLlave();
+    estado.ausenciasKpi = [
+      { tipo: 'vacaciones', empleadoId: E2, nombreCompleto: 'Luis Prieto Cano', fechaInicio: '2024-06-17', fechaFin: '2024-06-21' }, // lunes a viernes sin festivos
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const junio = (r.body.estacionalidad.meses as Record<string, number & string>[]).find((x) => x.mes === '2024-06')!;
+    expect(junio.vacaciones).toBe(5);
+    const luis = (r.body.resumenPorPersona.filas as Record<string, unknown>[]).find((f) => f.empleadoId === E2);
+    expect(luis).toMatchObject({ nombreCompleto: 'Luis Prieto Cano', vacaciones: 0 });
   });
 
   it('la fricción llega con rechazos y anulaciones SEPARADOS', async () => {

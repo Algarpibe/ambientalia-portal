@@ -500,7 +500,7 @@ export interface FilaDeResumen {
   deBaja: boolean;
   /** Días laborables. */
   vacaciones: number;
-  /** Horas de los permisos que las tienen. */
+  /** Horas de los permisos que las tienen, con un decimal. */
   permisoHoras: number;
   /**
    * Días laborables de los permisos SIN horas: los de día completo y todos los
@@ -508,7 +508,9 @@ export interface FilaDeResumen {
    * app no conoce la jornada, y suponerla inventaría una cifra.
    */
   permisoDias: number;
+  /** Días laborables. */
   compensatorio: number;
+  /** Días laborables. */
   incapacidad: number;
 }
 
@@ -522,7 +524,9 @@ export interface ResumenPorPersona {
  * Lo que ha tenido cada persona de cada tipo de ausencia en el periodo.
  *
  * Recorta por meses completos con `tramosPorMes`, el mismo reparto que la
- * estacionalidad: tabla y gráfica salen de las mismas ausencias y cuadran.
+ * estacionalidad: tabla y gráfica salen de las mismas ausencias y cuadran en
+ * vacaciones, compensatorios e incapacidades. En permisos NO: la gráfica cuenta
+ * un permiso con hora como su día y el resumen lo cuenta en horas.
  *
  * Toda la plantilla activa sale aunque no tenga nada —ver quién no ha pedido
  * nada también es información—, y las fichas de baja solo si tuvieron algo en
@@ -558,6 +562,8 @@ export function resumenPorPersona(
       fila = vacia(au.empleadoId, au.nombreCompleto, true);
       porId.set(au.empleadoId, fila);
     }
+    // Un permiso con hora cuenta sus horas aunque su día no sea laborable: es una
+    // ausencia aprobada, y esconderla sería peor que enseñarla.
     if (au.tipo === 'permiso' && au.horaInicio && au.horaFin) {
       fila.permisoHoras += horasDelPermiso(au.horaInicio, au.horaFin);
       continue;
@@ -576,6 +582,9 @@ export function resumenPorPersona(
       compensatorio: redondear(f.compensatorio),
       incapacidad: redondear(f.incapacidad),
     }))
+    // Una ficha de baja con todo a cero (su ausencia cayó solo en días no
+    // laborables) no aporta nada; las activas sí salen a cero a propósito.
+    .filter((f) => !f.deBaja || f.vacaciones + f.permisoHoras + f.permisoDias + f.compensatorio + f.incapacidad > 0)
     .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es') || a.empleadoId.localeCompare(b.empleadoId));
 
   const suma = (clave: keyof ResumenPorPersona['total']) => redondear(filas.reduce((s, f) => s + f[clave], 0));
@@ -676,8 +685,8 @@ export function friccion(solicitudes: SolicitudParaFriccion[]): Friccion {
  * Reparte un rango de fechas entre los meses de la serie que toca, devolviendo
  * los DÍAS HÁBILES que le corresponden a cada uno.
  *
- * Es el corazón compartido de `absentismoPorMes` y `estacionalidadPorMes`: los
- * dos tienen que repartir igual, y escribirlo dos veces es la forma segura de
+ * Es el corazón compartido de `absentismoPorMes`, `estacionalidadPorMes` y
+ * `resumenPorPersona`: los tres tienen que repartir igual, y escribirlo dos veces es la forma segura de
  * que un día dejen de coincidir. Omite los meses que el rango no toca, así que
  * quien llame puede usar el propio bucle para saber si la ausencia entró en la
  * ventana o se quedó fuera entera.
