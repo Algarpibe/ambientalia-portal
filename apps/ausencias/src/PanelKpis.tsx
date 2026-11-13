@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { kpis as fetchKpis, type Kpis } from './api';
 import { formatDias } from './dominio';
+import { celdaDeDias, celdaDePermisos, rotuloDelPeriodo } from './resumenKpis';
 
 // El panel de análisis. Cifras que hoy no se pueden mirar en ninguna otra
 // pantalla de la app, y que responden preguntas distintas:
@@ -187,6 +188,7 @@ export default function PanelKpis({ activo }: Props) {
       <TiemposDeAprobacion tiempos={datos.tiempos} desde={datos.desde} />
       <AbsentismoPorIncapacidad absentismo={datos.absentismo} />
       <Estacionalidad estacionalidad={datos.estacionalidad} />
+      {datos.resumenPorPersona && <ResumenDeAusencias resumen={datos.resumenPorPersona} anio={datos.anio} />}
       <FriccionDelProceso friccion={datos.friccion} desde={datos.desde} />
     </div>
   );
@@ -830,6 +832,81 @@ function tituloEstacional(
     .filter((t) => m[t.clave] > 0)
     .map((t) => `${t.etiqueta} (${m[t.clave]}): ${listaDeNombres(m.nombres[t.clave])}`);
   return `${m.mes}: ${m.total} días\n${lineas.join('\n')}`;
+}
+
+// ── Resumen por persona ────────────────────────────────────────────────────
+
+/**
+ * Una fila por persona con lo que ha tenido de cada tipo en el periodo del
+ * selector. Las cifras vienen hechas de hub-api (`resumenPorPersona`), total
+ * incluido: aquí solo se formatean.
+ */
+function ResumenDeAusencias({
+  resumen,
+  anio,
+}: {
+  resumen: NonNullable<Kpis['resumenPorPersona']>;
+  anio: number | null;
+}) {
+  const { filas, total } = resumen;
+  const th = 'py-2 pr-4 font-medium';
+  const num = 'whitespace-nowrap py-2 pr-4 text-right tabular-nums';
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <Users className="h-4 w-4 text-gray-400" />
+        Resumen por persona
+      </h2>
+      <p className="mt-1 text-xs text-gray-500">
+        Lo que ha tenido cada uno {rotuloDelPeriodo(anio)}. Vacaciones, compensatorios e incapacidades en días
+        laborables; los permisos en horas y, aparte («d»), los de día completo, que no tienen horas.
+      </p>
+
+      {/* overflow-x-auto: en el móvil se desplaza la tabla, no la página. */}
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <tr className="border-b border-gray-200">
+              <th className={th}>Nombre</th>
+              <th className={`${th} text-right`}>Vacaciones (días)</th>
+              <th className={`${th} text-right`}>Permisos</th>
+              <th className={`${th} text-right`}>Compensatorios (días)</th>
+              <th className={`${th} text-right`}>Incapacidades (días)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((f) => (
+              <tr key={f.empleadoId} className="border-b border-gray-100">
+                <td className="py-2 pr-4 text-gray-900">
+                  {f.nombreCompleto}
+                  {f.deBaja && <span className="ml-1 text-xs text-gray-400">(de baja)</span>}
+                </td>
+                <td className={num}>{celdaDeDias(f.vacaciones)}</td>
+                <td className={num}>{celdaDePermisos(f.permisoHoras, f.permisoDias)}</td>
+                <td className={num}>{celdaDeDias(f.compensatorio)}</td>
+                <td className={num}>{celdaDeDias(f.incapacidad)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-gray-300 font-semibold text-gray-900">
+              <td className="py-2 pr-4">Total</td>
+              <td className={num}>{celdaDeDias(total.vacaciones)}</td>
+              <td className={num}>{celdaDePermisos(total.permisoHoras, total.permisoDias)}</td>
+              <td className={num}>{celdaDeDias(total.compensatorio)}</td>
+              <td className={num}>{celdaDeDias(total.incapacidad)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <p className="mt-3 text-xs italic text-gray-400">
+        Solo cuentan las solicitudes aprobadas y las incapacidades registradas: no entran las pendientes, las
+        anuladas ni los compensatorios concedidos.
+      </p>
+    </section>
+  );
 }
 
 // ── Fricción ───────────────────────────────────────────────────────────────
