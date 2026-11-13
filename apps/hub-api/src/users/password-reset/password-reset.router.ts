@@ -13,6 +13,8 @@ import { PasswordResetError, type PasswordResetService } from './password-reset.
 export const LIMIT_WINDOW_MS = 15 * 60_000;
 export const FORGOT_LIMIT = 5;
 export const RESET_LIMIT = 10;
+/** Máximo de una dirección de correo (RFC 5321): más largo no puede ser una cuenta. */
+export const MAX_EMAIL_LENGTH = 320;
 
 /** Lo que el router necesita del servicio (los tests le pasan un stub). */
 export type PasswordResetActions = Pick<PasswordResetService, 'requestReset' | 'resetPassword'>;
@@ -33,12 +35,14 @@ export function createPasswordResetRouter(service: PasswordResetActions): Router
   // existe. Los fallos de después van al log y a captureError.
   router.post('/auth/forgot-password', forgotLimiter, (req: Request, res: Response) => {
     const { email } = (req.body ?? {}) as { email?: unknown };
-    if (typeof email !== 'string' || email.trim() === '') {
+    if (typeof email !== 'string' || email.trim() === '' || email.length > MAX_EMAIL_LENGTH) {
       res.status(400).json({ error: 'missing_email' });
       return;
     }
     res.json({ message: 'reset_requested' });
-    void service.requestReset(email).catch((e: unknown) => {
+    // Promise.resolve().then: si requestReset lanzara de forma síncrona (el
+    // puerto no lo garantiza async), el error tampoco escapa de la petición.
+    void Promise.resolve().then(() => service.requestReset(email)).catch((e: unknown) => {
       console.error('forgot_password error', e);
       captureError(e, { endpoint: 'forgot_password' });
     });

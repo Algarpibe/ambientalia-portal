@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import request from 'supertest';
+import { captureError } from '../../sentry.js';
 import {
   FORGOT_LIMIT,
   LIMIT_WINDOW_MS,
+  MAX_EMAIL_LENGTH,
   RESET_LIMIT,
   createPasswordResetRouter,
   type PasswordResetActions,
@@ -26,7 +28,13 @@ const RESET = '/api/auth/reset-password';
 // real (43 caracteres base64url). Los tokens de prueba lo respetan.
 const tokenFijo = (n: number | string) => `token-${n}`.padEnd(43, '_');
 
-afterEach(() => vi.restoreAllMocks());
+// Sentry no se toca de verdad: solo se vigila que los errores se reporten.
+vi.mock('../../sentry.js', () => ({ captureError: vi.fn() }));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(captureError).mockClear();
+});
 
 function montar(service: PasswordResetActions) {
   const app = express();
@@ -104,6 +112,34 @@ describe('POST /api/auth/forgot-password', () => {
     const res = await request(montar(service)).post(FORGOT).send({ email: 'ana@ejemplo.test' });
     expect(res.status).toBe(200);
     await vi.waitFor(() => expect(error).toHaveBeenCalledWith('forgot_password error', expect.any(Error)));
+    expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'forgot_password' });
+  });
+
+  it('si requestReset lanza de forma sincrona, la respuesta sale igual y el error se reporta', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const service = stub({
+      requestReset: vi.fn(() => {
+        throw new Error('fallo sincrono');
+      }) as unknown as PasswordResetActions['requestReset'],
+    });
+    const res = await request(montar(service)).post(FORGOT).send({ email: 'ana@ejemplo.test' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'reset_requested' });
+    await vi.waitFor(() =>
+      expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'forgot_password' }),
+    );
+  });
+
+  it(`un correo de mas de ${MAX_EMAIL_LENGTH} caracteres → 400 missing_email, y no trabaja`, async () => {
+    const service = stub();
+    const largo = `${'a'.repeat(MAX_EMAIL_LENGTH - '@ejemplo.test'.length + 1)}@ejemplo.test`;
+    expect(largo).toHaveLength(MAX_EMAIL_LENGTH + 1);
+    const res = await request(montar(service)).post(FORGOT).send({ email: largo });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'missing_email' });
+    expect(service.requestReset).not.toHaveBeenCalled();
+    const justo = largo.slice(1);
+    expect((await request(montar(service)).post(FORGOT).send({ email: justo })).status).toBe(200);
   });
 
   it(`más de ${FORGOT_LIMIT} en 15 minutos desde la misma IP → 429`, async () => {
@@ -161,6 +197,18 @@ describe('POST /api/auth/reset-password', () => {
     const res = await request(montar(service)).post(RESET).send({ token: 't', newPassword: 'clave-nueva-1' });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'internal error' });
+    expect(captureError).toHaveBeenCalledWith(expect.any(Error), { endpoint: 'reset_password' });
+  });
+
+  it('un PasswordResetError no se reporta a Sentry', async () => {
+    const service = stub({
+      resetPassword: vi.fn(async () => {
+        throw new PasswordResetError('invalid_or_expired_token');
+      }),
+    });
+    const res = await request(montar(service)).post(RESET).send({ token: 't', newPassword: 'clave-nueva-1' });
+    expect(res.status).toBe(400);
+    expect(captureError).not.toHaveBeenCalled();
   });
 
   it(`más de ${RESET_LIMIT} intentos en 15 minutos desde la misma IP → 429`, async () => {
