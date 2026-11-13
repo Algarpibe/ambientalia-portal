@@ -218,6 +218,8 @@ const estado = {
     nombreCompleto: string;
     fechaInicio: string;
     fechaFin: string;
+    horaInicio?: string | null;
+    horaFin?: string | null;
   }[],
   /** Lo que `repo.solicitudesParaFriccion` devuelve. */
   friccionKpi: [] as { estado: string; anulada: boolean; cambioDeFechas: boolean }[],
@@ -5336,6 +5338,44 @@ describe('GET /ausencias/kpis', () => {
     expect(m.incapacidad).toBe(1);
     expect(m.total).toBe(3);
     expect(r.body.estacionalidad.mesPico).toBe(mesActual);
+  });
+
+  it('el resumen por persona trae a toda la plantilla, las horas de los permisos y las fichas de baja', async () => {
+    const correo = conLlave();
+    const mesActual = new Date().toISOString().slice(0, 7);
+    const lunes = primerLunesDe(mesActual);
+    estado.ausenciasKpi = [
+      { tipo: 'vacaciones', empleadoId: E1, nombreCompleto: 'Ana Ruiz', fechaInicio: lunes, fechaFin: sumaDias(lunes, 1) },
+      {
+        tipo: 'permiso',
+        empleadoId: E1,
+        nombreCompleto: 'Ana Ruiz',
+        fechaInicio: sumaDias(lunes, 3),
+        fechaFin: sumaDias(lunes, 3),
+        horaInicio: '09:00',
+        horaFin: '11:30',
+      },
+      // E_FANTASMA no está en la plantilla: hace de ficha dada de baja.
+      { tipo: 'incapacidad', empleadoId: E_FANTASMA, nombreCompleto: 'Carla Baja', fechaInicio: sumaDias(lunes, 2), fechaFin: sumaDias(lunes, 2) },
+    ];
+
+    const r = await pedir(token({ sub: correo })).expect(200);
+    const filas = r.body.resumenPorPersona.filas as Record<string, unknown>[];
+    // El nombre de una ficha activa es el de la plantilla, no el de la ausencia.
+    expect(filas.map((f) => [f.nombreCompleto, f.deBaja])).toEqual([
+      ['Ana Ruiz Molina', false],
+      ['Carla Baja', true],
+      ['Luis Prieto Cano', false],
+    ]);
+    expect(filas[0]).toMatchObject({ vacaciones: 2, permisoHoras: 2.5, permisoDias: 0 });
+    expect(filas[1]).toMatchObject({ incapacidad: 1 });
+    expect(r.body.resumenPorPersona.total).toEqual({
+      vacaciones: 2,
+      permisoHoras: 2.5,
+      permisoDias: 0,
+      compensatorio: 0,
+      incapacidad: 1,
+    });
   });
 
   it('la fricción llega con rechazos y anulaciones SEPARADOS', async () => {
