@@ -153,6 +153,11 @@ describe('deVacacionesAhora', () => {
     expect((await fila())?.deVacacionesAhora).toBe(true);
   });
 
+  it('tambien con unas vacaciones registradas que abarcan hoy', async () => {
+    await sembrar('vacaciones', 'registrada', '2026-09-07', '2026-09-11');
+    expect((await fila())?.deVacacionesAhora).toBe(true);
+  });
+
   it('tambien si hoy es su ultimo dia', async () => {
     await sembrar('vacaciones', 'aprobada', '2026-09-01', '2026-09-07');
     expect((await fila())?.deVacacionesAhora).toBe(true);

@@ -1026,6 +1026,16 @@ describe('descansoPorPersona', () => {
     expect(r).toMatchObject({ umbralAvisoMeses: 6, umbralAlarmaMeses: 12 });
   });
 
+  it('ahora sin vacaciones anteriores: es «ahora» y no «nunca»', () => {
+    const r = calcular([ficha('h', 'Ahora')], [['h', plan(null, { deVacacionesAhora: true })]]);
+    expect(r.filas[0]).toMatchObject({ tramo: 'ahora', diasSinVacaciones: null });
+  });
+
+  it('un saldo negativo sale tal cual', () => {
+    const r = calcular([ficha('a', 'A', -2.04)], [['a', plan('2026-10-01')]]);
+    expect(r.filas[0].saldo).toBe(-2);
+  });
+
   it('lleva el saldo con un decimal, el último día y lo ya pedido', () => {
     const r = calcular([ficha('a', 'A', 28.76)], [['a', plan('2026-10-01', { diasProgramados: 15 })]]);
     expect(r.filas[0]).toMatchObject({ saldo: 28.8, ultimoDia: '2026-10-01', diasProgramados: 15, deVacacionesAhora: false });

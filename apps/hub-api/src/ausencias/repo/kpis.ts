@@ -244,7 +244,7 @@ export async function solicitudesParaFriccion(
   }));
 }
 
-/** Las dos señales de planificación de un empleado. */
+/** Las tres señales de planificación de un empleado. */
 export interface PlanificacionDeEmpleado {
   empleadoId: string;
   /** Fin de sus últimas vacaciones YA disfrutadas, o `null` si no hay. */
@@ -263,11 +263,11 @@ export interface PlanificacionDeEmpleado {
 /**
  * Cuándo descansó por última vez cada empleado activo y cuánto tiene ya pedido.
  *
- * Las dos señales miran la MISMA tabla con recortes opuestos —pasado contra
+ * Las tres señales miran la MISMA tabla con recortes opuestos —pasado contra
  * futuro— y por eso van en una sola consulta: separarlas daría dos recorridos
  * de lo mismo y dos sitios donde equivocarse con el `hoy`.
  *
- * ⚠️ Parte de `portal.empleados` con LEFT JOIN y no de las solicitudes: la
+ * ⚠️ Parte de `portal.empleados`, con subconsultas correlacionadas por empleado, y no de las solicitudes: la
  * lista de acumulación recorre la plantilla entera, y si esto devolviera solo a
  * quien tiene solicitudes, el resto se quedaría sin señales y la pantalla no
  * podría distinguir «no tiene plan» de «no tengo el dato».

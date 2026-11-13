@@ -5350,15 +5350,20 @@ describe('GET /ausencias/kpis', () => {
 
   it('el descanso trae a toda la plantilla, de quien nunca descansó a quien está de vacaciones', async () => {
     const correo = conLlave();
+    // Saldos distintos y distinguibles: si el servicio tomara el de
+    // compensatorios en vez del de vacaciones, el test fallaría.
+    Object.assign(estado.plantilla[0], { saldoCorte: 20, fechaCorte: '2026-01-15', compensatoriosSaldoCorte: 7 });
+    // E2 va primero a propósito: el orden de entrada no debe ser el de salida.
     estado.planificacionKpi = [
-      { empleadoId: E1, ultimasVacaciones: null, diasProgramados: 0 },
       { empleadoId: E2, ultimasVacaciones: '2025-12-19', diasProgramados: 0, deVacacionesAhora: true },
+      { empleadoId: E1, ultimasVacaciones: null, diasProgramados: 0 },
     ];
     const r = await pedir(token({ sub: correo })).expect(200);
     expect(r.body.descanso.filas.map((f: { nombreCompleto: string; tramo: string }) => [f.nombreCompleto, f.tramo])).toEqual([
       ['Ana Ruiz Molina', 'nunca'],
       ['Luis Prieto Cano', 'ahora'],
     ]);
+    expect(r.body.descanso.filas[0].saldo).toBe(20);
     expect(r.body.descanso).toMatchObject({ conteo: { alarma: 1, aviso: 0, ok: 1 }, umbralAvisoMeses: 6, umbralAlarmaMeses: 12 });
   });
 
