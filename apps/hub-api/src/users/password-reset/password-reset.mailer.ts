@@ -67,6 +67,8 @@ export function createResetMailer({
           redirect: 'manual',
           signal: AbortSignal.timeout(MAILER_TIMEOUT_MS),
         });
+        // El cuerpo no interesa: se suelta para que undici libere el socket sin esperar al GC.
+        await res.body?.cancel().catch(() => {});
         if (!res.ok) throw new Error(`El webhook de n8n respondió ${res.status}`);
       } catch (e) {
         log('password_reset_envio_fallido', { motivo: e instanceof Error ? e.message : String(e) });

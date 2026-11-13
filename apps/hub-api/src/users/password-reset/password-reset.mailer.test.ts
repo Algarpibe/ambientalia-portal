@@ -38,6 +38,15 @@ function registro() {
 
 afterEach(() => vi.restoreAllMocks());
 
+/** Todas las formas en que n8n puede fallar. */
+const FALLOS: [string, () => Promise<Response>][] = [
+  ['un 500', async () => new Response('', { status: 500 })],
+  ['un 403 (token malo)', async () => new Response('', { status: 403 })],
+  ['un 3xx (no se siguen redirecciones)', async () => new Response('', { status: 307, headers: { Location: 'https://otro.ejemplo.test/' } })],
+  ['un fallo de red', async (): Promise<Response> => { throw new TypeError('fetch failed'); }],
+  ['la espera agotada', async (): Promise<Response> => { throw new DOMException('La espera se acabó', 'TimeoutError'); }],
+];
+
 describe('createResetMailer', () => {
   it('hace POST a la URL con la cabecera del token y el cuerpo {para, asunto, cuerpo}, sin seguir redirecciones', async () => {
     const r = red(async () => new Response('{"ok":true}', { status: 200 }));
@@ -64,13 +73,7 @@ describe('createResetMailer', () => {
     expect(TOKEN_HEADER).toBe('X-Password-Reset-Token');
   });
 
-  it.each([
-    ['un 500', async () => new Response('', { status: 500 })],
-    ['un 403 (token malo)', async () => new Response('', { status: 403 })],
-    ['un 3xx (no se siguen redirecciones)', async () => new Response('', { status: 307, headers: { Location: 'https://otro.ejemplo.test/' } })],
-    ['un fallo de red', async (): Promise<Response> => { throw new TypeError('fetch failed'); }],
-    ['la espera agotada', async (): Promise<Response> => { throw new DOMException('La espera se acabó', 'TimeoutError'); }],
-  ])('%s: no lanza, deja password_reset_envio_fallido y lo manda a captureError', async (_caso, contestar) => {
+  it.each(FALLOS)('%s: no lanza, deja password_reset_envio_fallido y lo manda a captureError', async (_caso, contestar) => {
     const reg = registro();
     await expect(
       createResetMailer({ env: ENV, net: red(contestar).fn, log: reg.log, report: reg.report }).send(CORREO),
@@ -79,12 +82,30 @@ describe('createResetMailer', () => {
     expect(reg.errores).toHaveLength(1);
   });
 
-  it('el log del fallo no lleva ni el correo ni el cuerpo', async () => {
+  it.each(FALLOS)('%s: ni el log ni lo que va a captureError llevan el correo, el cuerpo ni el token', async (_caso, contestar) => {
     const reg = registro();
-    await createResetMailer({ env: ENV, net: red(async () => new Response('', { status: 500 })).fn, log: reg.log, report: reg.report }).send(CORREO);
-    const texto = JSON.stringify(reg.eventos);
-    expect(texto).not.toContain('persona@ejemplo.test');
-    expect(texto).not.toContain('Cuerpo ficticio');
+    await createResetMailer({ env: ENV, net: red(contestar).fn, log: reg.log, report: reg.report }).send(CORREO);
+    const errores = reg.errores.map((e) => (e instanceof Error ? `${e.name} ${e.message} ${e.stack ?? ''}` : String(e)));
+    const texto = JSON.stringify([reg.eventos, errores]);
+    for (const secreto of ['persona@ejemplo.test', 'Cuerpo ficticio', 'token-ficticio']) {
+      expect(texto).not.toContain(secreto);
+    }
+  });
+
+  it.each([
+    ['2xx', 200],
+    ['no 2xx', 500],
+  ])('libera la respuesta de n8n (cancela su cuerpo) con %s', async (_caso, status) => {
+    let cancelado = false;
+    const cuerpo = new ReadableStream({ cancel: () => { cancelado = true; } });
+    const reg = registro();
+    await createResetMailer({
+      env: ENV,
+      net: red(async () => new Response(cuerpo, { status })).fn,
+      log: reg.log,
+      report: reg.report,
+    }).send(CORREO);
+    expect(cancelado).toBe(true);
   });
 
   it.each([
