@@ -1,7 +1,10 @@
 # Ausencias — KPIs: cuánto lleva cada uno sin descansar
 
 **Fecha:** 2026-11-12
-**Estado:** diseño aprobado en brainstorming; pendiente de plan de implementación
+**Estado:** implementado (plan: `docs/superpowers/plans/2026-11-12-kpis-descanso.md`); pendiente
+de desplegar hub-api y el portal. Tras la revisión: el contador de alarma se rotula «12 meses o
+más», va en rojo y el de aviso en ámbar (como sus filas); a quien está de vacaciones ahora no se
+le enseña «último día» (sería el de sus vacaciones anteriores); un saldo negativo sale en rojo.
 **Depende de:** el panel de KPIs de Vacaciones y Permisos (`PanelKpis.tsx`, `service/kpis.ts`,
 `kpis.ts`, `repo/kpis.ts`), en producción.
 
