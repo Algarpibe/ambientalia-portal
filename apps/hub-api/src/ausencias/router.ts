@@ -391,6 +391,23 @@ export function createAusenciasRouter(db: Pool): Router {
   });
 
   /**
+   * Pone, cambia o quita el cargo de alguien. Solo admin. No manda ningún
+   * correo, igual que el jefe o la copia: configurar la ficha no es decidir
+   * nada sobre una solicitud.
+   *
+   * Como la copia, el cargo NO se congela en el alta: la firma de los correos y
+   * `empleadoCargo` lo leen de la ficha al usarlo, así que el cambio se ve
+   * también en las solicitudes que ya estén en trámite.
+   */
+  router.put('/ausencias/empleados/:id/cargo', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      res.json(await service.fijarCargo(db, req.params.id, req.body));
+    } catch (e) {
+      sendError(res, e, 'ausencias_fijar_cargo');
+    }
+  });
+
+  /**
    * Enciende o apaga la segunda firma de alguien. Solo admin.
    *
    * Las solicitudes ya en vuelo NO se mueven: cada una lleva congelado desde el

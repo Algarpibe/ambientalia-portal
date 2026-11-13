@@ -185,6 +185,29 @@ export function normalizarCargo(bruto: unknown): string | null {
 }
 
 /**
+ * Pone, cambia o quita el cargo de alguien. Solo fichas activas.
+ *
+ * Sin registro de auditoría y sin correo, como la copia y la segunda firma: el
+ * cargo no da ningún permiso. Se ve en el acto en la firma de los correos y en
+ * `empleadoCargo`, también en solicitudes ya en trámite, porque los dos lo leen
+ * de la ficha al usarlo.
+ *
+ * Devuelve `Empleado` y no `EmpleadoConJefatura`, al contrario que `fijarJefe`
+ * y `fijarCopia`: el cargo no toca el árbol, y recalcular `empleadosConJefatura`
+ * serían tres consultas para nada. La pantalla recarga la lista igualmente.
+ */
+export async function fijarCargo(db: Pool, empleadoId: string, body: unknown): Promise<Empleado> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+  const cargo = normalizarCargo(b.cargo);
+
+  if (!(await repo.fijarCargo(db, empleadoId, cargo))) throw new AusenciaError('empleado_no_encontrado', 404);
+
+  const actualizado = await repo.empleadoPorId(db, empleadoId);
+  if (!actualizado) throw new AusenciaError('empleado_no_encontrado', 404);
+  return actualizado;
+}
+
+/**
  * Enciende o apaga la segunda firma de alguien.
  *
  * Sin registro de auditoría, al contrario que `fijarVisor`: esto no da acceso a

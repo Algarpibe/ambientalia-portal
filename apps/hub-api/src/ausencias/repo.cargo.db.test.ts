@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Pool } from '@algarpibe/zoho-sync';
 import { fijarCargo } from './repo.js';
+import { fijarCargo as fijarCargoServicio } from './service.js';
 import { poolDePrueba, limpiar, sembrarEmpleado } from '../test-db/harness.js';
 
 // La puerta del cargo de la ficha. sembrarEmpleado siembra siempre con
@@ -67,5 +68,28 @@ describe('repo.fijarCargo', () => {
     const largo = '\u{1F600}'.repeat(255);
     expect(await fijarCargo(db, empleadoId, largo)).toBe(true);
     expect(await cargoEnBd(empleadoId)).toBe(largo);
+  });
+});
+
+describe('service.fijarCargo contra la BD', () => {
+  it('recorta, guarda y devuelve la ficha releida', async () => {
+    const ficha = await fijarCargoServicio(db, empleadoId, { cargo: '  Jefa de taller  ' });
+    expect(ficha).toMatchObject({ id: empleadoId, cargo: 'Jefa de taller' });
+    expect(await cargoEnBd(empleadoId)).toBe('Jefa de taller');
+  });
+
+  it('el texto vacio deja el cargo en null', async () => {
+    const ficha = await fijarCargoServicio(db, empleadoId, { cargo: '   ' });
+    expect(ficha.cargo).toBeNull();
+    expect(await cargoEnBd(empleadoId)).toBeNull();
+  });
+
+  it('404 con una ficha inactiva, y su cargo no se toca', async () => {
+    await db.query(`UPDATE portal.empleados SET activo = FALSE WHERE id = $1`, [empleadoId]);
+    await expect(fijarCargoServicio(db, empleadoId, { cargo: 'Jefa de taller' })).rejects.toMatchObject({
+      code: 'empleado_no_encontrado',
+      status: 404,
+    });
+    expect(await cargoEnBd(empleadoId)).toBe('Analista');
   });
 });

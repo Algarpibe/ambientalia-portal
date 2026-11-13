@@ -4746,6 +4746,54 @@ describe('PUT /ausencias/empleados/:id/copia', () => {
   });
 });
 
+describe('PUT /ausencias/empleados/:id/cargo', () => {
+  const fijar = (id: string, body: object, t = token({ role: 'admin' })) =>
+    request(app()).put(`/api/ausencias/empleados/${id}/cargo`).set('Authorization', `Bearer ${t}`).send(body);
+
+  it('un admin fija el cargo, recortado, y recibe la ficha', async () => {
+    const r = await fijar(E1, { cargo: '  Jefa de taller  ' }).expect(200);
+    expect(r.body).toMatchObject({ id: E1, cargo: 'Jefa de taller' });
+  });
+
+  it('null y el texto vacio dejan la ficha sin cargo', async () => {
+    expect((await fijar(E1, { cargo: null }).expect(200)).body.cargo).toBeNull();
+    expect((await fijar(E2, { cargo: '   ' }).expect(200)).body.cargo).toBeNull();
+  });
+
+  it('400 cargo_invalido, con el campo, si no es ni texto ni null', async () => {
+    const r = await fijar(E1, { cargo: 42 }).expect(400);
+    expect(r.body).toEqual({ error: 'cargo_invalido', field: 'cargo' });
+  });
+
+  it('400 cargo_invalido si falta la clave', async () => {
+    const r = await fijar(E1, {}).expect(400);
+    expect(r.body.error).toBe('cargo_invalido');
+  });
+
+  it('400 cargo_invalido con un caracter de control, y la ficha no cambia', async () => {
+    const r = await fijar(E1, { cargo: 'Jefa\u0000' }).expect(400);
+    expect(r.body.error).toBe('cargo_invalido');
+    expect(estado.plantilla.find((x: any) => x.id === E1)!.cargo).toBe('Analista');
+  });
+
+  it('404 si la ficha no existe', async () => {
+    const r = await fijar(E_FANTASMA, { cargo: 'Jefa de taller' }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+  });
+
+  it('404 si la ficha esta inactiva, y su cargo no se toca', async () => {
+    const e1 = estado.plantilla.find((x: any) => x.id === E1)!;
+    e1.activo = false;
+    const r = await fijar(E1, { cargo: 'Jefa de taller' }).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+    expect(e1.cargo).toBe('Analista');
+  });
+
+  it('403 a quien no es admin', async () => {
+    await fijar(E1, { cargo: 'Jefa de taller' }, token()).expect(403);
+  });
+});
+
 describe('PUT /ausencias/empleados/:id/visor', () => {
   it('un admin da la llave, y el registro dice quién la dio y a quién', async () => {
     // El `sub` del admin es DISTINTO del correo del empleado afectado a
