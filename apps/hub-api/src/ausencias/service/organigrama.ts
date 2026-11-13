@@ -152,6 +152,38 @@ export async function fijarCopia(db: Pool, empleadoId: string, body: unknown): P
   return actualizado;
 }
 
+/** El tope de la columna: `portal.empleados.cargo VARCHAR(255)`. */
+const CARGO_MAX = 255;
+
+// U+0000–U+001F y U+007F. El NUL es el que de verdad rompe: PostgreSQL no lo
+// admite en una columna de texto y la ruta contestaría un 500. El resto
+// (tabulador, salto de línea…) no tiene sitio en un cargo de una sola línea, y
+// descolocaría la firma de los correos, que lo pone en su propia línea.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001F\u007F]/;
+
+/**
+ * Lo que de verdad se guarda como cargo a partir del cuerpo de la petición.
+ *
+ * `null`, el texto vacío y el texto de solo espacios significan lo mismo: «sin
+ * cargo», que la pantalla pinta como «—». Cualquier otro tipo, incluida la clave
+ * ausente, es un 400: se exige, no se interpreta.
+ *
+ * La longitud se cuenta por puntos de código (`[...cargo].length`) y no con
+ * `.length`, porque así cuenta `VARCHAR(255)`: un emoji es un carácter para
+ * PostgreSQL y dos unidades UTF-16 para JavaScript.
+ */
+export function normalizarCargo(bruto: unknown): string | null {
+  if (bruto === null) return null;
+  if (typeof bruto !== 'string') throw new AusenciaError('cargo_invalido', 400, 'cargo');
+  const cargo = bruto.trim();
+  if (!cargo) return null;
+  if (CONTROL.test(cargo) || [...cargo].length > CARGO_MAX) {
+    throw new AusenciaError('cargo_invalido', 400, 'cargo');
+  }
+  return cargo;
+}
+
 /**
  * Enciende o apaga la segunda firma de alguien.
  *
