@@ -181,8 +181,8 @@ describe('Sidebar — navegación móvil (panel deslizante)', () => {
 describe('Sidebar — entrada «Tablero TV»', () => {
   const enlaceTv = () => screen.queryByText('Tablero TV')?.closest('a') ?? null;
 
-  it('admin o titular de la app: enlace que abre /equipos-taller/tv en pestaña nueva', () => {
-    for (const parcial of [{ role: 'admin' as const, apps: [] }, { role: 'reader' as const, apps: ['equipos-taller'] }]) {
+  it('quien tiene la app «Equipos en taller» (admin o no): enlace que abre /equipos-taller/tv en pestaña nueva', () => {
+    for (const parcial of [{ role: 'admin' as const, apps: ['equipos-taller'] }, { role: 'reader' as const, apps: ['equipos-taller'] }]) {
       cleanup();
       setAuth({ isAuthenticated: true, user_id: 'u', ...parcial });
       renderSidebar();
@@ -194,8 +194,12 @@ describe('Sidebar — entrada «Tablero TV»', () => {
     }
   });
 
-  it('lector sin la app o sin sesión: no aparece', () => {
+  it('sin la app no aparece, tampoco para un admin (la pantalla lo mandaría al inicio), ni sin sesión', () => {
     setAuth({ isAuthenticated: true, role: 'reader', user_id: 'r', apps: ['contabilidad'] });
+    renderSidebar();
+    expect(enlaceTv()).toBeNull();
+    cleanup();
+    setAuth({ isAuthenticated: true, role: 'admin', user_id: 'a', apps: ['trazabilidad-mantenimientos'] });
     renderSidebar();
     expect(enlaceTv()).toBeNull();
     cleanup();

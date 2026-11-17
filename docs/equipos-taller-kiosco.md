@@ -10,7 +10,7 @@ Puede entrar de dos maneras:
 
 | Cómo | Para qué |
 |---|---|
-| Con sesión del portal (menú lateral → «Tablero TV») | Un usuario con la app `equipos-taller`, o un admin, que quiere verla en su equipo. La sesión caduca a los 7 días. |
+| Con sesión del portal (menú lateral → «Tablero TV») | Un usuario con la app `equipos-taller` asignada (también los admin: sin la app no ven la opción) que quiere verla en su equipo. La sesión caduca a los 7 días. |
 | Con una **llave de kiosco**, sin sesión | El televisor del taller, que no tiene a nadie delante para iniciar sesión. |
 
 ## La llave de kiosco

@@ -56,7 +56,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const { role, apps } = useAuth();
   const showHerramientas = hasAssignedInCategory('herramienta', apps);
   const showAplicaciones = hasAssignedInCategory('aplicacion', apps);
-  const showTableroTv = role === 'admin' || apps.includes('equipos-taller');
+  // Solo con la app «Equipos en taller», también para los admin: la ruta de la TV (AppGuard)
+  // mira las apps asignadas, así que a un admin sin la app el enlace lo mandaría al inicio.
+  const showTableroTv = apps.includes('equipos-taller');
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSED_KEY) === 'true',
