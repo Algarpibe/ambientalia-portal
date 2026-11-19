@@ -3,7 +3,7 @@
 // Los colores salen SOLO de los tokens --tt-* (temas.ts); los textos de la pantalla, en español.
 import { useCallback, useMemo, type ReactNode } from 'react';
 import {
-  AJUSTES_TABLERO_POR_DEFECTO, aplicarAjustes, construirTablero, horaBogota,
+  AJUSTES_TABLERO_POR_DEFECTO, aplicarAjustes, aplicarResponsables, construirTablero, horaBogota,
   type AjustesTablero, type ColumnaTablero, type RespuestaEquipos, type Tablero as TableroModelo, type Tarjeta as TarjetaModelo,
 } from '../nucleo';
 import { apiEquipos, type ApiEquipos } from '../api';
@@ -169,7 +169,8 @@ export function useTableroDatos(pedir: (senal: AbortSignal) => Promise<Respuesta
   const ajustes = datos?.tablero ?? AJUSTES_TABLERO_POR_DEFECTO;
   const snap = datos?.snap ?? null;
   const modelo = useMemo(
-    () => (datos && snap ? construirTablero(aplicarAjustes(snap.rows, datos.ajustes), ajustes, ahora) : null),
+    // Mismo encadenado que la tabla y la TV con llave: ajustes manuales y luego el responsable del portal (D7).
+    () => (datos && snap ? construirTablero(aplicarResponsables(aplicarAjustes(snap.rows, datos.ajustes), datos.responsables ?? {}), ajustes, ahora) : null),
     [datos, snap, ajustes, ahora],
   );
   return { datos, modelo, ajustes, datosEn: snap?.at ?? null, okEn, fallo, obsoleto, ahora };

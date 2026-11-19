@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import {
-  AJUSTES_TABLERO_POR_DEFECTO, EST, aplicarAjustes, construirTablero,
+  AJUSTES_TABLERO_POR_DEFECTO, EST, aplicarAjustes, claveFila, construirTablero,
   type AjustesTablero, type Fila, type RespuestaEquipos,
 } from '../nucleo';
 import type { ApiEquipos } from '../api';
@@ -232,6 +232,16 @@ describe('Tablero (con sondeo)', () => {
     await avanzar(0);
     expect(screen.getByText(/Aún no hay datos/)).toBeTruthy();
   });
+  it('muestra al responsable asignado en el portal, aunque Desk diga otro (D7)', async () => {
+    const responsables = { [claveFila(FILAS[0])]: { userId: '00000000-0000-4000-8000-0000000000c2', nombre: 'Técnico Dos', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' } };
+    render(<Tablero api={apiCon(resp({ responsables }))} />);
+    await avanzar(0);
+    const t = within(screen.getByRole('article', { name: 'Equipo 18A90001' }));
+    expect(t.getByText('Técnico Dos')).toBeTruthy();
+    expect(t.getByText('TD')).toBeTruthy();
+    expect(t.queryByText('Técnico Uno')).toBeNull();
+  });
+
   it('al desmontar no deja temporizadores', async () => {
     const { unmount } = render(<Tablero api={apiCon(resp())} />);
     await avanzar(0);
