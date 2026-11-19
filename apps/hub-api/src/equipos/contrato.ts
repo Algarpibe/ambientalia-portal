@@ -156,7 +156,7 @@ const CLAVE_VISITA = /^[A-Z0-9]{3,20}\|\d{4}-\d{2}-\d{2}$/;
 /** Clave de UNA visita («SERIAL|AAAA-MM-DD»), la única que admite el responsable: ni «*SERIAL» ni «pdf:». */
 export const claveVisitaValida = (k: string): boolean => CLAVE_VISITA.test(k) && claveValida(k);
 
-export const TIPOS_AJUSTE:readonly Ajuste['t'][] = ['in', 'out', 'ret', 'pdf'];
+export const TIPOS_AJUSTE: readonly Ajuste['t'][] = ['in', 'out', 'ret', 'pdf'];
 
 /** ¿Clave válida y tipo que casa con ella? «pdf» solo para «pdf:<id>», y al revés. */
 export function ajusteValido(clave: string, t: unknown): t is Ajuste['t'] {
