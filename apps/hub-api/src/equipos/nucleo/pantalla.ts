@@ -1,5 +1,5 @@
 // Lógica de pantalla compartida por la página de Claude y la pantalla React de Desk 2.0:
-// ajustes manuales, vistas (pestañas), orden y remisiones ilegibles pendientes.
+// ajustes manuales, responsable asignado (D7), vistas (pestañas), orden y remisiones ilegibles pendientes.
 import { ADENTRO, cls, key, nkey, nrm } from "./reglas.js";
 import { EST, type Ajuste, type Ajustes, type Fila, type Foto, type Ilegible, type ResponsableFila } from "./tipos.js";
 
@@ -32,7 +32,9 @@ export function aplicarAjustes(rows: Fila[], aj: Ajustes): Fila[] {
 
 /**
  * Pone en cada visita su responsable asignado en el portal (por `claveFila`: la visita siguiente del mismo
- * serial no lo hereda). Va SIEMPRE detrás de aplicarAjustes: en la tabla, en el tablero y en la TV.
+ * serial no lo hereda). Espera filas recién salidas de la foto/aplicarAjustes: no limpia un `resp` previo
+ * cuando la clave no está en el mapa. Por convención va detrás de aplicarAjustes (en la tabla, el tablero y
+ * la TV); el orden no cambia el resultado, porque `claveFila` solo usa sn y d.
  */
 export function aplicarResponsables(rows: Fila[], mapa: Record<string, ResponsableFila>): Fila[] {
   return rows.map((r) => {

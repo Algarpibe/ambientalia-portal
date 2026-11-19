@@ -30,8 +30,9 @@ describe('aplicarResponsables', () => {
 
   it('deja igual las filas sin asignación y no toca la lista recibida', () => {
     const rows = [fila()];
-    const out = aplicarResponsables(rows, {});
-    expect(out[0]).toBe(rows[0]);
+    expect(aplicarResponsables(rows, {})[0]).toBe(rows[0]);
+    const out = aplicarResponsables(rows, { [claveFila(rows[0])]: ASIGNADO });
+    expect(out[0].resp).toEqual(ASIGNADO);
     expect(rows[0].resp).toBeUndefined();
   });
 
@@ -62,6 +63,11 @@ describe('responsableDe (D7)', () => {
   it('sin ticket ni asignación, nadie; sin ticket pero asignado en el portal, el asignado', () => {
     expect(responsableDe(fila({ z: null }))).toBeNull();
     expect(responsableDe({ ...fila({ z: null }), resp: ASIGNADO })?.nombre).toBe('Técnico Dos');
+  });
+
+  it('un nombre en blanco no cuenta (cae al Encargado de Desk, sin cuenta) y uno con espacios sale recortado', () => {
+    expect(responsableDe({ ...fila(), resp: { userId: '00000000-0000-4000-8000-0000000000c3', nombre: '   ' } })).toEqual({ nombre: 'Técnico Uno', origen: 'desk' });
+    expect(responsableDe({ ...fila(), resp: { nombre: '  Técnico Uno  ' } })).toEqual({ nombre: 'Técnico Uno', origen: 'portal' });
   });
 
   it('una asignación solo con el nombre (la de la TV con llave) no inventa la cuenta', () => {
