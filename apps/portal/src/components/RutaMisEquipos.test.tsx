@@ -8,13 +8,13 @@ import { resolve } from 'node:path';
 import type { AuthState } from '../hooks/useAuth';
 import RutaMisEquipos from './RutaMisEquipos';
 
-const estado = vi.hoisted(() => ({ auth: null as AuthState | null, sesion: true, perfil: { profile: { full_name: 'María Pérez Gómez' } as { full_name: string } | null, loading: false }, montada: vi.fn() }));
+const estado = vi.hoisted(() => ({ auth: null as AuthState | null, sesion: true, perfil: { profile: { id: 'u-perfil', full_name: 'María Pérez Gómez' } as { id: string; full_name: string } | null, loading: false }, montada: vi.fn() }));
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => estado.auth }));
 vi.mock('../hooks/useProfile', () => ({ useProfile: () => estado.perfil }));
 vi.mock('../auth', () => ({ isAuthenticated: () => estado.sesion }));
 vi.mock('../lib/notify', () => ({ notify: vi.fn() }));
 vi.mock('../../../equipos-taller/src/MisEquipos', () => ({
-  default: ({ nombre }: { nombre: string | null }) => { estado.montada(); return <div>{`MIS EQUIPOS DE ${nombre}`}</div>; },
+  default: ({ nombre, userId }: { nombre: string | null; userId?: string | null }) => { estado.montada(); return <div>{`MIS EQUIPOS DE ${nombre} (${userId})`}</div>; },
 }));
 
 const auth = (apps: string[]): AuthState => ({ isAuthenticated: true, user_id: 'u', email: 'a@x.com', role: 'reader', apps });
@@ -27,13 +27,13 @@ const montar = () => render(
     </Routes>
   </MemoryRouter>,
 );
-afterEach(() => { cleanup(); vi.clearAllMocks(); estado.sesion = true; estado.perfil = { profile: { full_name: 'María Pérez Gómez' }, loading: false }; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); estado.sesion = true; estado.perfil = { profile: { id: 'u-perfil', full_name: 'María Pérez Gómez' }, loading: false }; });
 
 describe('RutaMisEquipos', () => {
-  it('con sesión y la app asignada monta la vista con el nombre del perfil', async () => {
+  it('con sesión y la app asignada monta la vista con el nombre y la cuenta del perfil', async () => {
     estado.auth = auth(['equipos-taller']);
     montar();
-    expect(await screen.findByText('MIS EQUIPOS DE María Pérez Gómez')).toBeTruthy();
+    expect(await screen.findByText('MIS EQUIPOS DE María Pérez Gómez (u-perfil)')).toBeTruthy();
   });
   it('mientras el perfil carga no monta la vista (evita mostrar el selector por error)', () => {
     estado.auth = auth(['equipos-taller']);

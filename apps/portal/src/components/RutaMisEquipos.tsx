@@ -10,16 +10,19 @@ const MisEquipos = lazyConReintento(() => import('../../../equipos-taller/src/Mi
 
 const cargando = <p role="status">Cargando…</p>;
 
-/** Espera al perfil propio: sin él, la vista preguntaría «¿Quién eres?» aunque el nombre coincida. */
+/**
+ * Espera al perfil propio: sin él, la vista preguntaría «¿Quién eres?» aunque el nombre coincida. Manda el
+ * nombre (para los equipos de Desk) y la cuenta (para los que el portal asignó a este usuario).
+ */
 function ConPerfil() {
   const { profile, loading } = useProfile();
   if (loading) return cargando;
-  return <MisEquipos nombre={profile?.full_name ?? null} />;
+  return <MisEquipos nombre={profile?.full_name ?? null} userId={profile?.id ?? null} />;
 }
 
 /**
  * `/equipos-taller/mis-equipos`: vista móvil de solo lectura, FUERA del shell (sin barra lateral ni
- * superior). Requiere sesión y la app «equipos-taller»; el nombre sale de `GET /api/users/me`.
+ * superior). Requiere sesión y la app «equipos-taller»; el nombre y el id salen de `GET /api/users/me`.
  */
 export default function RutaMisEquipos() {
   return (
