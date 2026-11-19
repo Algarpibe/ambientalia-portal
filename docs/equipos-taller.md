@@ -131,7 +131,7 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 - Si el usuario asignado deja de estar activo o pierde la app, la visita vuelve a mostrar el Encargado de Desk; si la recupera, su asignación vuelve a contar. Si se borra el usuario, se borran sus asignaciones.
 - Si dos personas asignan a la vez, gana la última; la otra lo ve en el siguiente refresco de 60 s.
 - La TV con llave solo recibe el nombre: ni la cuenta, ni quién asignó, ni cuándo.
-- `responsables` viaja en `GET /api/equipos-taller`: hub-api (078) se despliega antes que el portal.
+- `responsables` viaja en `GET /api/equipos-taller`: hub-api (078) se despliega antes que el portal. Si después hubiera que volver atrás SOLO el portal, la TV con llave (que arma el tablero en hub-api) seguiría mostrando a los asignados, mientras la tabla, el tablero y «Mis equipos» volverían al Encargado de Desk: es inofensivo, pero las vistas no coincidirían hasta revertir también hub-api o volver a desplegar el portal.
 
 ```sql
 -- Asignaciones guardadas (las de usuarios inactivos o sin la app están, pero no cuentan).
