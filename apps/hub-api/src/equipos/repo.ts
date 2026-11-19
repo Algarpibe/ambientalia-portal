@@ -74,7 +74,11 @@ export interface RepoEquipos {
   guardarLlaves(userId: string, l: LlavesUsuario, actualizadoPor: string): Promise<UsuarioConLlaves | null>;
   /** Las asignaciones VIGENTES (D6: usuario activo y con la app), por clave de visita, con el nombre actual del usuario. */
   listarResponsables(): Promise<Record<string, ResponsableAsignado>>;
-  /** Upsert por clave. `quien` firma: su nombre de ahora o, si no se encuentra, su correo. */
+  /**
+   * Upsert por clave. `quien` firma: su nombre de ahora o, si no tiene `userId` o su nombre está en blanco, su correo.
+   * `userId` (el asignado y quien asigna) debe ser un UUID válido de un usuario existente: el router lo valida antes
+   * de llamar; un `quien.userId` sin fila violaría la FK `asignado_por_id`.
+   */
   guardarResponsable(clave: string, userId: string, quien: { userId: string | null; email: string }): Promise<ResponsableAsignado>;
   /** Idempotente. */
   borrarResponsable(clave: string): Promise<void>;
@@ -324,7 +328,7 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
     },
 
     async guardarResponsable(clave, userId, quien) {
-      // La firma es el nombre de quien asigna EN ESTE MOMENTO (el JWT no lo lleva); sin su fila, su correo.
+      // La firma es el nombre de quien asigna EN ESTE MOMENTO (el JWT no lo lleva); sin `quien.userId` o con el nombre en blanco, su correo.
       const { rows } = await db.query(
         `WITH g AS (
            INSERT INTO portal.equipos_responsable (clave, user_id, asignado_por_id, asignado_por, asignado_en)

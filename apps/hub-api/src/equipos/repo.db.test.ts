@@ -233,16 +233,26 @@ describe('responsables (migración 078)', () => {
     const uno = await usuario('uno@equipos.test', { app: true });
     const dos = await usuario('dos@equipos.test', { app: true });
     const jefe = await usuario('jefe@equipos.test', { app: true });
+    const otro = await usuario('otro@equipos.test', { app: true });
     const a = await repo.guardarResponsable(K, uno, { userId: jefe, email: 'jefe@equipos.test' });
     expect(a).toEqual({ userId: uno, nombre: 'uno', por: 'jefe', en: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) });
-    await repo.guardarResponsable(K, dos, { userId: jefe, email: 'jefe@equipos.test' });
+    const b = await repo.guardarResponsable(K, dos, { userId: otro, email: 'otro@equipos.test' });
+    expect(b.por).toBe('otro');
+    expect(new Date(b.en).getTime()).toBeGreaterThanOrEqual(new Date(a.en).getTime());
     expect(Object.keys(await repo.listarResponsables())).toEqual([K]);
-    expect((await repo.listarResponsables())[K]).toMatchObject({ userId: dos, nombre: 'dos', por: 'jefe' });
+    expect((await repo.listarResponsables())[K]).toMatchObject({ userId: dos, nombre: 'dos', por: 'otro' });
     await db.query(`UPDATE portal.users SET full_name = 'Dos Renombrado' WHERE id = $1`, [dos]);
     expect((await repo.listarResponsables())[K].nombre).toBe('Dos Renombrado');
     await repo.borrarResponsable(K);
     await repo.borrarResponsable(K);
     expect(await repo.listarResponsables()).toEqual({});
+  });
+
+  it('si el nombre de quien asigna está en blanco, la firma es su correo', async () => {
+    const uno = await usuario('uno@equipos.test', { app: true });
+    const jefe = await usuario('jefe@equipos.test', { app: true });
+    await db.query(`UPDATE portal.users SET full_name = '   ' WHERE id = $1`, [jefe]);
+    expect((await repo.guardarResponsable(K, uno, { userId: jefe, email: 'jefe@equipos.test' })).por).toBe('jefe@equipos.test');
   });
 
   it('sin la cuenta de quien asigna, la firma es su correo', async () => {
