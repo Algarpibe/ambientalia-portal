@@ -10,6 +10,7 @@ const leer = (n: string) => readFileSync(fileURLToPath(new URL('../users/migrati
 const SQL = leer('071_equipos_taller.sql');
 const SQL_072 = leer('072_equipos_drive_n8n.sql');
 const SQL_073 = leer('073_equipos_origen_sincronizacion.sql');
+const SQL_078 = leer('078_equipos_responsable.sql');
 
 let db: Pool;
 beforeAll(() => {
@@ -25,13 +26,13 @@ describe('migración 071 contra Postgres', () => {
     await db.query(SQL);
   });
 
-  it('deja sus cinco tablas y sus dos vistas (equipos_drive_archivos y equipos_sincronizacion son de la 072; equipos_kiosco y equipos_tablero_config, de la 074)', async () => {
+  it('deja sus cinco tablas y sus dos vistas (equipos_drive_archivos y equipos_sincronizacion son de la 072; equipos_kiosco y equipos_tablero_config, de la 074; equipos_responsable, de la 078)', async () => {
     const { rows } = await db.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name LIKE 'equipos\\_%' ORDER BY 1`,
     );
     expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
       'equipos_ajuste', 'equipos_drive_archivos', 'equipos_ejecucion', 'equipos_estado', 'equipos_incidente', 'equipos_kiosco', 'equipos_llaves',
-      'equipos_sincronizacion', 'equipos_tablero_config', 'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
+      'equipos_responsable', 'equipos_sincronizacion', 'equipos_tablero_config', 'equipos_v_equipos', 'equipos_v_remisiones_ilegibles',
     ]);
   });
 
@@ -149,6 +150,66 @@ describe('migración 073 contra Postgres', () => {
       const { rows } = await db.query('SELECT origen FROM portal.equipos_ejecucion ORDER BY id');
       expect(rows.map((r: { origen: string }) => r.origen)).toEqual(['boton', 'sincronizacion']);
     }
+    await vaciar();
+  });
+});
+
+describe('migración 078 contra Postgres', () => {
+  const vaciar = async () => {
+    await db.query('TRUNCATE portal.equipos_responsable');
+    await db.query(`DELETE FROM portal.users WHERE email LIKE '%@equipos.test'`);
+  };
+  const usuario = async (email: string): Promise<string> =>
+    (await db.query(
+      `INSERT INTO portal.users (full_name, email, password_hash, role, status) VALUES ($1, $2, 'x', 'reader', 'active') RETURNING id::text AS id`,
+      [email.split('@')[0], email],
+    )).rows[0].id;
+  const asignar = (clave: string, userId: string, por: string | null = null) =>
+    db.query(`INSERT INTO portal.equipos_responsable (clave, user_id, asignado_por_id, asignado_por) VALUES ($1, $2, $3, 'x')`, [clave, userId, por]);
+  const cuantas = async () => (await db.query('SELECT count(*)::int AS n FROM portal.equipos_responsable')).rows[0].n;
+
+  it('se puede aplicar dos veces más sin cambiar columnas ni borrar filas', async () => {
+    await vaciar();
+    await asignar('1BA9041T|2026-11-01', await usuario('uno@equipos.test'));
+    const columnas = async () =>
+      (await db.query(
+        `SELECT column_name, data_type, is_nullable FROM information_schema.columns
+          WHERE table_schema = 'portal' AND table_name = 'equipos_responsable' ORDER BY 1`,
+      )).rows;
+    const antes = await columnas();
+    await db.query(SQL_078);
+    await db.query(SQL_078);
+    expect(await columnas()).toEqual(antes);
+    expect(await cuantas()).toBe(1);
+    await vaciar();
+  });
+
+  it('no siembra ninguna fila', async () => {
+    await vaciar();
+    await db.query(SQL_078);
+    expect(await cuantas()).toBe(0);
+  });
+
+  it('la clave es solo de visita: el CHECK rechaza «*SERIAL», «pdf:» y cualquier otra cosa', async () => {
+    await vaciar();
+    const u = await usuario('uno@equipos.test');
+    for (const mala of ['*1BA9041T', 'pdf:Abcdefghij_-12', "x' OR 1=1", '1ba9041t|2026-11-01', '1BA9041T|26-11-01']) {
+      await expect(asignar(mala, u), mala).rejects.toMatchObject({ code: '23514' });
+    }
+    await asignar('1BA9041T|2026-11-01', u);
+    expect(await cuantas()).toBe(1);
+    await vaciar();
+  });
+
+  it('al borrar un usuario se borran sus asignaciones; al borrar a quien asignó, solo se olvida su id (D6)', async () => {
+    await vaciar();
+    const tecnico = await usuario('tecnico@equipos.test');
+    const jefe = await usuario('jefe@equipos.test');
+    await asignar('1BA9041T|2026-11-01', tecnico, jefe);
+    await db.query('DELETE FROM portal.users WHERE id = $1', [jefe]);
+    expect((await db.query('SELECT asignado_por_id, asignado_por FROM portal.equipos_responsable')).rows).toEqual([{ asignado_por_id: null, asignado_por: 'x' }]);
+    await db.query('DELETE FROM portal.users WHERE id = $1', [tecnico]);
+    expect(await cuantas()).toBe(0);
     await vaciar();
   });
 });

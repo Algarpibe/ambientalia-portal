@@ -11,6 +11,9 @@ const SQL_072 = leer('../users/migrations/072_equipos_drive_n8n.sql');
 const SQL_073 = leer('../users/migrations/073_equipos_origen_sincronizacion.sql');
 const SQL_074 = leer('../users/migrations/074_equipos_tablero.sql');
 const SQL_075 = leer('../users/migrations/075_equipos_tablero_tema_tv.sql');
+const SQL_078 = leer('../users/migrations/078_equipos_responsable.sql');
+// Sin comentarios: el texto explicativo puede nombrar DROP o INSERT sin ser sentencia.
+const SIN_COMENTARIOS_078 = SQL_078.replace(/--.*$/gm, '');
 const soloIdempotente = (sql: string) => {
   const creates = sql.match(/CREATE (UNIQUE )?(TABLE|INDEX|VIEW|SCHEMA|OR REPLACE VIEW)[^;]*/g) || [];
   expect(creates.length).toBeGreaterThan(0);
@@ -107,5 +110,29 @@ describe('migración 075 (tema de la TV)', () => {
     expect(SQL_075).toMatch(/ADD COLUMN IF NOT EXISTS tema_tv text NOT NULL DEFAULT 'dia'/);
     expect(SQL_075).toMatch(/IF NOT EXISTS \([^)]*conname\s*=\s*'equipos_tablero_tema_tv_check'/s);
     expect(SQL_075).toMatch(/ADD CONSTRAINT equipos_tablero_tema_tv_check\s+CHECK \(tema_tv IN \('dia', 'noche', 'auto'\)\)/);
+  });
+});
+
+describe('migración 078 (responsable asignado desde la tabla)', () => {
+  it('está apuntada en MIGRATIONS, detrás de la 077, y es la última', () => {
+    expect(leer('../db.ts')).toMatch(/'077_password_reset_tokens\.sql',\s*'078_equipos_responsable\.sql'\];/);
+  });
+
+  it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {
+    expect(SIN_COMENTARIOS_078).not.toMatch(/INSERT\s+INTO|UPDATE\s+portal|\b(DROP|TRUNCATE|ALTER)\b|DELETE\s+FROM/i);
+    expect(SIN_COMENTARIOS_078).not.toMatch(/user_apps/);
+  });
+
+  it('solo DDL idempotente', () => soloIdempotente(SQL_078));
+
+  it('la clave es la de una visita (sin «*SERIAL» ni «pdf:») y se guarda la cuenta, no el nombre', () => {
+    expect(SIN_COMENTARIOS_078).toContain("CHECK (clave ~ '^[A-Z0-9]{3,20}\\|\\d{4}-\\d{2}-\\d{2}$')");
+    expect(SIN_COMENTARIOS_078).toMatch(/user_id\s+uuid\s+NOT NULL REFERENCES portal\.users\(id\) ON DELETE CASCADE/);
+    expect(SIN_COMENTARIOS_078).toMatch(/asignado_por_id\s+uuid\s+NULL REFERENCES portal\.users\(id\) ON DELETE SET NULL/);
+  });
+
+  it('da permisos a portal_app solo si el rol existe (DATA-332)', () => {
+    expect(SIN_COMENTARIOS_078).toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'portal_app'\)/);
+    expect(SIN_COMENTARIOS_078).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON portal\.equipos_responsable TO portal_app/);
   });
 });

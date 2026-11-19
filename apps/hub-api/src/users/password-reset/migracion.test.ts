@@ -12,8 +12,10 @@ const SQL_077 = leer('../migrations/077_password_reset_tokens.sql');
 const SIN_COMENTARIOS = SQL_077.replace(/--.*$/gm, '');
 
 describe('migración 077 (tokens de restablecimiento de contraseña)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 076, y es la última', () => {
-    expect(leer('../../db.ts')).toMatch(/'076_ausencias_notas\.sql',\s*'077_password_reset_tokens\.sql'\];/);
+  // Ya no es la última (la 078 de «Equipos en taller» va detrás): basta con que
+  // esté justo detrás de la 076. Mismo relevo que la 075 en equipos/migracion.test.ts.
+  it('está apuntada en MIGRATIONS, detrás de la 076', () => {
+    expect(leer('../../db.ts')).toMatch(/'076_ausencias_notas\.sql',\s*'077_password_reset_tokens\.sql'[,\]]/);
   });
 
   it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {
