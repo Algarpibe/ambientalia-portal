@@ -349,6 +349,33 @@ describe('responsable asignado desde la tabla', () => {
     expect(firmas).toEqual([]);
   });
 
+  it('401 sin sesión también en PUT y DELETE de responsables', async () => {
+    const rs = [await request(app()).put(R(K)).send({ userId: TEC_UNO }), await request(app()).delete(R(K))];
+    expect(rs.map((r) => r.status)).toEqual([401, 401]);
+    expect([firmas, borradosResp]).toEqual([[], []]);
+  });
+
+  it('sin la llave, una clave o un userId inválidos dan 403 sin_llave, no 400 (el permiso va antes que la validación)', async () => {
+    const a = token().auth;
+    const rs = [
+      await put(a, '*1BA9041T', { userId: TEC_UNO }),
+      await put(a, K, { userId: 'no-es-uuid' }),
+      await put(a, '*1BA9041T', {}),
+      await request(app()).delete(R('*1BA9041T')).set('Authorization', a),
+    ];
+    expect(rs.map((r) => [r.status, r.body.error])).toEqual([[403, 'sin_llave'], [403, 'sin_llave'], [403, 'sin_llave'], [403, 'sin_llave']]);
+    expect([firmas, borradosResp]).toEqual([[], []]);
+  });
+
+  it('acepta un uuid en mayúsculas y lo pasa tal cual a esTecnicoValido y a guardarResponsable', async () => {
+    const MAYUS = TEC_UNO.toUpperCase();
+    const valido = vi.spyOn(repo, 'esTecnicoValido').mockResolvedValue(true);
+    const r = await put(conLlave().auth, K, { userId: MAYUS });
+    expect(r.status).toBe(200);
+    expect(valido).toHaveBeenCalledWith(MAYUS);
+    expect(firmas.map((f) => f.userId)).toEqual([MAYUS]);
+  });
+
   it('400 si la clave no es de una visita o falta el userId', async () => {
     const a = conLlave().auth;
     for (const mala of ['*1BA9041T', 'pdf:Abcdefghij_-12', "x' OR 1=1", '1BA9041T|2026-02-30']) {
