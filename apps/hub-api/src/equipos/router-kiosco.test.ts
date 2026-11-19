@@ -201,7 +201,7 @@ describe('T5 sobreexposición y T6 robo de la base', () => {
     expect(tarjetas[0].tecnico).toEqual({ nombre: 'Técnico Uno', iniciales: 'TU', avatar: 2 });
     for (const prohibido of ['userId', '00000000-0000-4000-8000-00000000abcd', 'Admin Uno', '2026-11-11T15:00:00.000Z']) expect(r.text, prohibido).not.toContain(prohibido);
     expect(JSON.stringify(r.body)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-    expect(JSON.stringify(r.body)).not.toMatch(/"(userId|por|en)"s*:/);
+    expect(JSON.stringify(r.body)).not.toMatch(/"(userId|por|en)"\s*:/);
     expect(r.text).toContain('Técnico Uno');
   });
 

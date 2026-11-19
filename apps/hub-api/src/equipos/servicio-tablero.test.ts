@@ -156,7 +156,7 @@ describe('tableroKiosco', () => {
     const texto = JSON.stringify(r);
     for (const prohibido of [ASIGNADO_ID, 'userId', 'Admin Uno', '2026-11-11T15:00:00.000Z']) expect(texto, prohibido).not.toContain(prohibido);
     expect(texto).not.toMatch(UUID);
-    expect(texto).not.toMatch(/"(userId|por|en)"s*:/);
+    expect(texto).not.toMatch(/"(userId|por|en)"\s*:/);
     expect(texto).toContain('Técnico Dos');
   });
 

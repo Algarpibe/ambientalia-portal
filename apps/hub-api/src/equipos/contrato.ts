@@ -104,10 +104,10 @@ export interface RespuestaTablero {
  * campos salen (nada de motivos, salidas, ids de Drive, notas, firmas, permisos ni llaves).
  */
 export function armarRespuestaTablero(
-  e: { snap: Foto | null; ajustes: Record<string, AjusteFirmado>; responsables?: Record<string, ResponsableAsignado>; cfg: AjustesTablero; aviso: AvisoFoto | null },
+  e: { snap: Foto | null; ajustes: Record<string, AjusteFirmado>; responsables: Record<string, ResponsableAsignado>; cfg: AjustesTablero; aviso: AvisoFoto | null },
   ahoraMs: number,
 ): RespuestaTablero {
-  const soloNombres = Object.fromEntries(Object.entries(e.responsables ?? {}).map(([k, r]) => [k, { nombre: r.nombre }]));
+  const soloNombres = Object.fromEntries(Object.entries(e.responsables).map(([k, r]) => [k, { nombre: r.nombre }]));
   const filas = aplicarResponsables(aplicarAjustes(e.snap?.rows ?? [], e.ajustes), soloNombres);
   return { tablero: construirTablero(filas, e.cfg, ahoraMs), ajustes: e.cfg, fotoEn: e.snap?.at ?? null, aviso: e.aviso };
 }
