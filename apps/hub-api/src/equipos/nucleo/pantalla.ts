@@ -1,7 +1,7 @@
 // Lógica de pantalla compartida por la página de Claude y la pantalla React de Desk 2.0:
 // ajustes manuales, vistas (pestañas), orden y remisiones ilegibles pendientes.
-import { ADENTRO, cls, key, nrm } from "./reglas.js";
-import { EST, type Ajuste, type Ajustes, type Fila, type Foto, type Ilegible } from "./tipos.js";
+import { ADENTRO, cls, key, nkey, nrm } from "./reglas.js";
+import { EST, type Ajuste, type Ajustes, type Fila, type Foto, type Ilegible, type ResponsableFila } from "./tipos.js";
 
 /** Clave de ajuste de una entrada. */
 export const claveFila = (r: Pick<Fila, "sn" | "d">): string => cls(r.sn) + "|" + r.d;
@@ -28,6 +28,45 @@ export function aplicarAjustes(rows: Fila[], aj: Ajustes): Fila[] {
     if (b && r.est !== EST.ENTREGADO) return { ...r, est: EST.RETIRADO, src: "manual", why: r.why.concat(b) };
     return r;
   });
+}
+
+/**
+ * Pone en cada visita su responsable asignado en el portal (por `claveFila`: la visita siguiente del mismo
+ * serial no lo hereda). Va SIEMPRE detrás de aplicarAjustes: en la tabla, en el tablero y en la TV.
+ */
+export function aplicarResponsables(rows: Fila[], mapa: Record<string, ResponsableFila>): Fila[] {
+  return rows.map((r) => {
+    const a = mapa[claveFila(r)];
+    return a ? { ...r, resp: a } : r;
+  });
+}
+
+/** Lo que Desk pone en «Encargado» cuando el ticket aún no tiene técnico: no es una persona. */
+const SIN_TECNICO_DESK = new Set(["Pendiente Asignar"].map(nkey));
+
+/** El Encargado del ticket en Desk 2.0, o "" si no hay ticket, está vacío o es «Pendiente Asignar». */
+export function encargadoDesk(r: Pick<Fila, "z">): string {
+  const crudo = r.z?.enc?.trim() ?? "";
+  return SIN_TECNICO_DESK.has(nkey(crudo)) ? "" : crudo;
+}
+
+export interface ResponsableEfectivo {
+  nombre: string;
+  /** Solo si viene del portal con su cuenta (la TV con llave no la recibe). */
+  userId?: string;
+  origen: "portal" | "desk";
+}
+
+/**
+ * Responsable efectivo de una visita (D7): la asignación del portal; si no, el Encargado de Desk.
+ * «Pendiente Asignar» no es nadie (se muestra «Sin asignar»). La misma regla en la tabla, el tablero,
+ * la TV y «Mis equipos».
+ */
+export function responsableDe(r: Pick<Fila, "z" | "resp">): ResponsableEfectivo | null {
+  const nombre = (r.resp?.nombre ?? "").trim();
+  if (nombre) return r.resp?.userId ? { nombre, userId: r.resp.userId, origen: "portal" } : { nombre, origen: "portal" };
+  const enc = encargadoDesk(r);
+  return enc ? { nombre: enc, origen: "desk" } : null;
 }
 
 /** Ajustes guardados por versiones anteriores de la página de Claude. */

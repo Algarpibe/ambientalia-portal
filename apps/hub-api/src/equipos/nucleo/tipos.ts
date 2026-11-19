@@ -164,6 +164,18 @@ export interface Clasificacion {
   xd: string;
 }
 
+/**
+ * Responsable asignado desde el portal a una visita (`portal.equipos_responsable`). La TV con llave solo
+ * recibe `nombre`: ni la cuenta, ni quién lo asignó, ni cuándo.
+ */
+export interface ResponsableFila {
+  userId?: string;
+  nombre: string;
+  /** Quién lo asignó y cuándo (ISO). */
+  por?: string;
+  en?: string;
+}
+
 /** Una fila de la pantalla: una entrada de un equipo. */
 export interface Fila {
   id: string;
@@ -184,6 +196,8 @@ export interface Fila {
   eq: string;
   /** Marcada por un ajuste manual (1 = de esta entrada, 2 = del serial). */
   man?: 1 | 2;
+  /** Responsable asignado en el portal (D7: manda sobre el Encargado de Desk). Lo pone aplicarResponsables; la foto no lo guarda. */
+  resp?: ResponsableFila;
 }
 
 export interface EquipoPosible {

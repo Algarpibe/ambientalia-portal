@@ -1,7 +1,7 @@
 // Modelo puro del tablero kanban del taller: de las filas ajustadas a columnas, tarjetas, etiquetas, días y KPIs.
 // Sin E/S ni reloj propio: el instante actual entra como parámetro (`ahoraMs`).
 import { nkey } from "./reglas.js";
-import { VISTAS, VISTA_PARCIALES, VISTA_TICKET_ABIERTO, claveFila } from "./pantalla.js";
+import { VISTAS, VISTA_PARCIALES, VISTA_TICKET_ABIERTO, claveFila, responsableDe } from "./pantalla.js";
 import { EST, type Fila } from "./tipos.js";
 import { COLUMNAS_TALLER, columnaDeEstado, esEsperaRepuestos, esEstadoCerrado, type ColumnaId } from "./taller-columns.js";
 
@@ -24,7 +24,8 @@ export interface Tarjeta {
   dias: number;
   tono: TonoDias;
   etiquetas: Etiqueta[];
-  tecnico: { nombre: string; iniciales: string; avatar: number } | null;
+  /** El responsable efectivo (D7). `userId` solo si lo asignó el portal; vacío si viene de Desk o en la TV con llave. */
+  tecnico: { nombre: string; iniciales: string; avatar: number; userId?: string } | null;
   ticket: string | null;
   pie: "tecnico" | "sin_asignar" | "neutro";
 }
@@ -170,13 +171,10 @@ function etiquetasDe(r: Fila): Etiqueta[] {
   return out;
 }
 
-/** Lo que Desk pone en «Encargado» cuando el ticket aún no tiene técnico: no es una persona. */
-const SIN_TECNICO_DESK = new Set(["Pendiente Asignar"].map(nkey));
-
 function tarjetaDe(r: Fila, cfg: AjustesTablero, ahoraMs: number): Tarjeta {
   const dias = diasEnTaller(r.d, ahoraMs);
-  const crudo = r.z?.enc?.trim() ?? "";
-  const enc = SIN_TECNICO_DESK.has(nkey(crudo)) ? "" : crudo;
+  // D7: la asignación del portal; si no, el Encargado de Desk («Pendiente Asignar» no es nadie).
+  const resp = responsableDe(r);
   return {
     clave: claveFila(r),
     sn: r.sn,
@@ -186,9 +184,11 @@ function tarjetaDe(r: Fila, cfg: AjustesTablero, ahoraMs: number): Tarjeta {
     dias,
     tono: tonoDias(dias, cfg),
     etiquetas: etiquetasDe(r),
-    tecnico: enc ? { nombre: enc, iniciales: iniciales(enc), avatar: avatarDe(enc) } : null,
+    tecnico: resp
+      ? { nombre: resp.nombre, iniciales: iniciales(resp.nombre), avatar: avatarDe(resp.nombre), ...(resp.userId ? { userId: resp.userId } : {}) }
+      : null,
     ticket: r.z ? r.z.n : null,
-    pie: !r.z ? "neutro" : enc ? "tecnico" : "sin_asignar",
+    pie: resp ? "tecnico" : !r.z ? "neutro" : "sin_asignar",
   };
 }
 
