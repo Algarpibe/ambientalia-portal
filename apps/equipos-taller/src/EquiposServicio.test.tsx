@@ -4,7 +4,7 @@
 // de llaves. Todo ficticio.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { CAUSA_TEXTOS_FALLIDOS, EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
+import { CAUSA_TEXTOS_FALLIDOS, EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type ResponsableAsignado, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
 import EquiposServicio from './EquiposServicio';
 import type { ApiEquipos } from './api';
 
@@ -34,9 +34,14 @@ const estado = (o: Partial<RespuestaEquipos> = {}): RespuestaEquipos => ({
   },
   ...o,
 });
+// Dos técnicos con la app a los que se puede asignar una visita (GET /tecnicos).
+const TEC_DOS = '00000000-0000-4000-8000-0000000000c2';
+const TEC_TRES = '00000000-0000-4000-8000-0000000000c3';
 function apiFalsa(o: Partial<RespuestaEquipos> = {}) {
   const e = estado(o);
   const llamadas: string[] = [];
+  // Las del responsable van aparte: varias pruebas miran `llamadas[0]` y `tecnicos` se pide al montar.
+  const resp: string[] = [];
   const usuarios: UsuarioConLlaves[] = [{ userId: 'u1', nombre: 'Persona Uno', email: 'p1@ambientalia.com.co', esAdmin: false, editaAjustes: false, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null }];
   const api: ApiEquipos = {
     estado: async () => structuredClone(e),
@@ -44,8 +49,21 @@ function apiFalsa(o: Partial<RespuestaEquipos> = {}) {
     borrarAjuste: async (k) => { llamadas.push('delete ' + k); delete e.ajustes[k]; },
     llaves: async () => { llamadas.push('llaves'); return structuredClone(usuarios); },
     guardarLlaves: async (userId, l) => { llamadas.push('llaves ' + userId + ' ' + l.editaAjustes + ' ' + l.recibeAlertas); return { ...usuarios[0], ...l }; },
+    tecnicos: async () => { resp.push('tecnicos'); return [{ userId: TEC_DOS, nombre: 'Técnico Dos' }, { userId: TEC_TRES, nombre: 'Técnico Tres' }]; },
+    asignarResponsable: async (k, userId) => {
+      resp.push('put ' + k + ' ' + userId);
+      const r: ResponsableAsignado = { userId, nombre: userId === TEC_DOS ? 'Técnico Dos' : 'Técnico Tres', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' };
+      e.responsables = { ...(e.responsables ?? {}), [k]: r };
+      return r;
+    },
+    quitarResponsable: async (k) => {
+      resp.push('delete ' + k);
+      const m = { ...(e.responsables ?? {}) };
+      delete m[k];
+      e.responsables = m;
+    },
   };
-  return { api, llamadas };
+  return { api, llamadas, resp };
 }
 afterEach(cleanup);
 const chip = async (n: RegExp) => within(await screen.findByRole('navigation', { name: 'Vistas' })).getByRole('button', { name: n });

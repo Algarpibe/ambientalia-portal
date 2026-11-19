@@ -20,6 +20,9 @@ const api = (): ApiEquipos => ({
   borrarAjuste: async () => {},
   llaves: async () => [],
   guardarLlaves: async () => { throw new Error('no se usa'); },
+  tecnicos: async () => [],
+  asignarResponsable: async () => { throw new Error('no se usa'); },
+  quitarResponsable: async () => {},
 });
 
 beforeEach(() => { history.replaceState({ usr: 'estado-del-router' }, '', '/equipos-taller'); });

@@ -74,6 +74,24 @@ describe('apiEquipos', () => {
     const { f: g } = falso({ ['GET ' + B]: J({}, 503) });
     await expect(apiEquipos(B, g, cab).estado()).rejects.toMatchObject({ status: 503, message: 'Error 503' });
   });
+  it('responsables: técnicos, asignar con la clave codificada y quitar', async () => {
+    const R = { userId: 'u2', nombre: 'Técnico Dos', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' };
+    const { f, pedidos } = falso({
+      ['GET ' + B + '/tecnicos']: J({ tecnicos: [{ userId: 'u2', nombre: 'Técnico Dos' }] }),
+      ['PUT ' + B + '/responsables/1BA9041T%7C2026-11-01']: J({ responsable: R }),
+      ['DELETE ' + B + '/responsables/1BA9041T%7C2026-11-01']: J({ ok: true }),
+    });
+    const api = apiEquipos(B, f, cab);
+    expect(await api.tecnicos()).toEqual([{ userId: 'u2', nombre: 'Técnico Dos' }]);
+    expect(await api.asignarResponsable('1BA9041T|2026-11-01', 'u2')).toEqual(R);
+    await expect(api.quitarResponsable('1BA9041T|2026-11-01')).resolves.toBeUndefined();
+    expect(pedidos.map((p) => p.init.body ?? null)).toEqual([null, '{"userId":"u2"}', null]);
+  });
+  it('un 422 al asignar lanza el texto fijo del servidor', async () => {
+    const msg = 'Ese usuario no está activo o no tiene la app «Equipos en taller».';
+    const { f } = falso({ ['PUT ' + B + '/responsables/1BA9041T%7C2026-11-01']: J({ error: 'usuario_sin_app', message: msg }, 422) });
+    await expect(apiEquipos(B, f, cab).asignarResponsable('1BA9041T|2026-11-01', 'u9')).rejects.toThrow(msg);
+  });
 });
 
 const TOKEN = 'tvk_' + 'A'.repeat(43);

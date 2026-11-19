@@ -3,7 +3,9 @@
  * «actualizar»: la pantalla se actualiza sola con la corrida que lanza cada sincronización de n8n.
  */
 import { authHeaders } from '@suite/auth-client';
-import type { Ajuste, AjusteFirmado, AjustesTablero, Kiosco, LlavesUsuario, RespuestaEquipos, RespuestaTablero, UsuarioConLlaves } from './nucleo';
+import type {
+  Ajuste, AjusteFirmado, AjustesTablero, Kiosco, LlavesUsuario, ResponsableAsignado, RespuestaEquipos, RespuestaTablero, TecnicoAsignable, UsuarioConLlaves,
+} from './nucleo';
 
 export interface ApiEquipos {
   estado(senal?: AbortSignal): Promise<RespuestaEquipos>;
@@ -11,6 +13,11 @@ export interface ApiEquipos {
   borrarAjuste(clave: string): Promise<void>;
   llaves(): Promise<UsuarioConLlaves[]>;
   guardarLlaves(userId: string, l: LlavesUsuario): Promise<UsuarioConLlaves>;
+  /** A quién se puede asignar una visita (usuarios activos con la app). Solo con la llave «edita ajustes» o admin. */
+  tecnicos(): Promise<TecnicoAsignable[]>;
+  asignarResponsable(clave: string, userId: string): Promise<ResponsableAsignado>;
+  /** Vuelve al Encargado de Desk. Vale también si no había asignación. */
+  quitarResponsable(clave: string): Promise<void>;
 }
 
 /** Ajustes del tablero y llaves de la TV (solo admin). */
@@ -58,8 +65,12 @@ function crearPedir(base: string, f: typeof fetch, cabeceras: () => Record<strin
 export function apiEquipos(base = BASE, f: typeof fetch = (...a) => fetch(...a), cabeceras: () => Record<string, string> = authHeaders): ApiEquipos & ApiTablero {
   const pedir = crearPedir(base, f, cabeceras);
   const k = (clave: string) => '/ajustes/' + encodeURIComponent(clave);
+  const r = (clave: string) => '/responsables/' + encodeURIComponent(clave);
   return {
     estado: (senal) => pedir<RespuestaEquipos>('GET', '', undefined, senal),
+    tecnicos: async () => (await pedir<{ tecnicos: TecnicoAsignable[] }>('GET', '/tecnicos')).tecnicos,
+    asignarResponsable: async (clave, userId) => (await pedir<{ responsable: ResponsableAsignado }>('PUT', r(clave), { userId })).responsable,
+    quitarResponsable: async (clave) => { await pedir<{ ok: true }>('DELETE', r(clave)); },
     guardarAjuste: async (clave, t, m = '') => (await pedir<{ ajuste: AjusteFirmado }>('PUT', k(clave), { t, m })).ajuste,
     borrarAjuste: async (clave) => { await pedir<void>('DELETE', k(clave)); },
     llaves: () => pedir<UsuarioConLlaves[]>('GET', '/llaves'),
