@@ -82,13 +82,19 @@ describe('MisEquipos: identidad', () => {
 describe('MisEquipos: asignación del portal (por la cuenta)', () => {
   const asignado = (userId: string, nombre: string) => ({ userId, nombre, por: 'Admin Uno', en: '2026-11-11T15:00:00.000Z' });
 
-  it('encuentra la tarjeta por userId aunque el nombre no coincida, sin preguntar «¿Quién eres?»', async () => {
+  it('muestra la tarjeta por userId aunque el nombre no coincida, y sigue preguntando «¿Quién eres?» para las de Desk', async () => {
     const filas = [...FILAS, fila('18A90008', '2026-11-05', 'Ingresado', '')];
     const r: RespuestaEquipos = { ...resp(filas), responsables: { [claveFila(filas[5])]: asignado('u-yo', 'Nombre En Cuenta') } };
     render(<MisEquipos nombre="Alguien Más" userId="u-yo" pedir={vi.fn(async () => structuredClone(r))} />);
     await listo();
     expect(screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Equipo 18A90008']);
-    expect(screen.queryByRole('group', { name: '¿Quién eres?' })).toBeNull();
+    const selector = screen.getByRole('group', { name: '¿Quién eres?' });
+    expect(within(selector).getAllByRole('button').map((b) => b.textContent)).toEqual([UNO, 'Técnico Dos']);
+    fireEvent.click(within(selector).getByRole('button', { name: UNO }));
+    const sns = screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'));
+    expect(sns).toHaveLength(5);
+    expect(sns).toContain('Equipo 18A90008');
+    expect(sns).toContain('Equipo 18A90001');
   });
 
   it('si el portal asignó la visita a otra cuenta, no te aparece aunque el nombre coincida y Desk diga que es tuya', async () => {

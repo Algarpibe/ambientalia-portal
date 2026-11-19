@@ -97,7 +97,7 @@ export default function MisEquipos({ nombre, userId = null, pedir: pedirProp }: 
         {kpis.map((k) => <li key={k.e} className="tt-kpi"><span className="tt-kpi-n">{k.v}</span><span className="tt-kpi-e">{k.e}</span></li>)}
       </ul>
       {elegido && todas.length === 0 ? <p className="tt-mensaje">{`No hay equipos asignados a ${elegido}.`}</p> : null}
-      {todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
+      {!elegido || todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
       {escaneando ? <EscanearSerial tarjetas={modelo.columnas.flatMap((c) => c.tarjetas)} onCerrar={() => setEscaneando(false)} mostrar={(t) => <Ficha key={t.clave} t={t} />} /> : null}
       {grupos.map((g) => <Grupo key={g.id} col={g} />)}
       <nav className="tt-mis-barra" aria-label="Taller">
