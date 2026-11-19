@@ -36,7 +36,7 @@ export interface ServicioTablero {
 }
 
 export interface DepsTablero {
-  repo: Pick<RepoEquipos, 'leerFoto' | 'leerAjustes' | 'ultimaCorridaTerminada' | 'ultimaCorridaBuena' | 'incidenteAbierto'>;
+  repo: Pick<RepoEquipos, 'leerFoto' | 'leerAjustes' | 'listarResponsables' | 'ultimaCorridaTerminada' | 'ultimaCorridaBuena' | 'incidenteAbierto'>;
   tablero: RepoTablero;
   configurado: () => Promise<boolean>;
   ahora?: () => number;
@@ -96,11 +96,12 @@ export function crearServicioTablero(deps: DepsTablero): ServicioTablero {
     },
 
     async tableroKiosco(ahoraMs) {
-      const [snap, ajustes, cfg, configurado, ultima, ultimaBuena, incidente] = await Promise.all([
-        repo.leerFoto(), repo.leerAjustes(), tablero.leerAjustesTablero(), deps.configurado(),
+      const [snap, ajustes, responsables, cfg, configurado, ultima, ultimaBuena, incidente] = await Promise.all([
+        repo.leerFoto(), repo.leerAjustes(), repo.listarResponsables(), tablero.leerAjustesTablero(), deps.configurado(),
         repo.ultimaCorridaTerminada(), repo.ultimaCorridaBuena(), repo.incidenteAbierto(),
       ]);
-      return armarRespuestaTablero({ snap, ajustes, cfg, aviso: avisoFoto({ configurado, ultima, ultimaBuena, incidente }, fmt) }, ahoraMs);
+      // armarRespuestaTablero deja solo el nombre del responsable: la TV sin sesión nunca ve la cuenta.
+      return armarRespuestaTablero({ snap, ajustes, responsables, cfg, aviso: avisoFoto({ configurado, ultima, ultimaBuena, incidente }, fmt) }, ahoraMs);
     },
   };
 }

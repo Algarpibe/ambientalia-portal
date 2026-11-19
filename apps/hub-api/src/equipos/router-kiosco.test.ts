@@ -6,7 +6,8 @@ import type { RepoSync } from './repo-sync.js';
 import type { RepoTablero } from './repo-tablero.js';
 import type { ServicioEquipos } from './servicio.js';
 import { crearServicioTablero, type ServicioTablero } from './servicio-tablero.js';
-import { AJUSTES_TABLERO_POR_DEFECTO } from './nucleo/index.js';
+import { AJUSTES_TABLERO_POR_DEFECTO, EST, type Fila } from './nucleo/index.js';
+import type { ResponsableAsignado } from './contrato.js';
 
 // Las amenazas T1–T8 de la llave de kiosco, con Express de verdad y el servicio de verdad sobre un
 // repositorio en memoria (el SQL: repo-tablero.db.test.ts). Todo ficticio.
@@ -22,6 +23,8 @@ let activas: Map<string, { id: string; nombre: string; hash: string; ultimoUsoEn
 let revocadas: Set<string>;
 let busquedas: number;
 let fallaFoto: boolean;
+let filas: Fila[];
+let responsables: Record<string, ResponsableAsignado>;
 const tableroRepo: RepoTablero = {
   leerAjustesTablero: async () => AJUSTES_TABLERO_POR_DEFECTO,
   guardarAjustesTablero: async () => {},
@@ -42,9 +45,10 @@ const tableroRepo: RepoTablero = {
 const repoEquipos = {
   leerFoto: async () => {
     if (fallaFoto) throw new Error('connection to server at "db.interno" failed: password=secreto');
-    return { at: '2026-11-12T03:00:00.000Z', hoy: '2026-11-11', rows: [], ilegibles: [] };
+    return { at: '2026-11-12T03:00:00.000Z', hoy: '2026-11-11', rows: filas, ilegibles: [] };
   },
   leerAjustes: async () => ({}),
+  listarResponsables: async () => responsables,
   ultimaCorridaTerminada: async () => null,
   ultimaCorridaBuena: async () => null,
   incidenteAbierto: async () => null,
@@ -77,6 +81,8 @@ beforeEach(() => {
   revocadas = new Set();
   busquedas = 0;
   fallaFoto = false;
+  filas = [];
+  responsables = {};
   vistos = [];
   tablero = crearServicioTablero({ repo: repoEquipos, tablero: tableroRepo, configurado: async () => true });
 });
@@ -184,6 +190,19 @@ describe('T5 sobreexposición y T6 robo de la base', () => {
     expect(Object.keys(r.body.ajustes).sort()).toEqual(['kpis', 'nocheDesde', 'nocheHasta', 'temaTv', 'umbralAmbar', 'umbralRojo']);
     expect(r.body.fotoEn).toBe('2026-11-12T03:00:00.000Z');
     expect(r.text).not.toMatch(/tvk_|kiosco|hash|TV uno/);
+  });
+
+  it('el responsable asignado en el portal llega solo con su nombre: ni la cuenta, ni quién lo asignó, ni cuándo', async () => {
+    filas = [{ id: 'E1', d: '2026-11-01', c: 'CLIENTE A', sn: '18A90417', est: EST.TALLER, src: '', why: [], x: null, z: null, zc: false, pa: [], xd: '', eq: '' }];
+    responsables = { '1BA9041T|2026-11-01': { userId: '00000000-0000-4000-8000-00000000abcd', nombre: 'Técnico Uno', por: 'Admin Uno', en: '2026-11-11T15:00:00.000Z' } };
+    const r = await pedir(await secretoNuevo());
+    expect(r.status).toBe(200);
+    const tarjetas = r.body.tablero.columnas.flatMap((c: { tarjetas: { tecnico: unknown }[] }) => c.tarjetas);
+    expect(tarjetas[0].tecnico).toEqual({ nombre: 'Técnico Uno', iniciales: 'TU', avatar: 2 });
+    for (const prohibido of ['userId', '00000000-0000-4000-8000-00000000abcd', 'Admin Uno', '2026-11-11T15:00:00.000Z']) expect(r.text, prohibido).not.toContain(prohibido);
+    expect(JSON.stringify(r.body)).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    expect(JSON.stringify(r.body)).not.toMatch(/"(userId|por|en)"s*:/);
+    expect(r.text).toContain('Técnico Uno');
   });
 
   it('la base solo ve el resumen SHA-256: la llave en claro nunca se busca ni se guarda', async () => {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { armarRespuestaTablero, type AjusteFirmado, type Kiosco } from './contrato.js';
-import { aplicarAjustes, construirTablero, AJUSTES_TABLERO_POR_DEFECTO, EST, type Foto } from './nucleo/index.js';
+import { armarRespuestaTablero, type AjusteFirmado, type Kiosco, type ResponsableAsignado } from './contrato.js';
+import { aplicarAjustes, aplicarResponsables, avatarDe, construirTablero, AJUSTES_TABLERO_POR_DEFECTO, EST, type Foto } from './nucleo/index.js';
 import { crearServicioTablero, formatoToken, hashToken, type ServicioTablero } from './servicio-tablero.js';
 import type { KioscoActivo, RepoTablero } from './repo-tablero.js';
 
@@ -18,6 +18,12 @@ const FOTO: Foto = {
   ilegibles: [],
 };
 const AJUSTES: Record<string, AjusteFirmado> = { '18A90001|2026-11-01': { t: 'in', m: 'NOTA-PRIVADA', at: '2026-11-02', usuario: 'quien@equipos.test', creadoEn: '2026-11-02T10:00:00.000Z' } };
+// La visita 18A90001 del 1/11 (clave en clase OCR) asignada en el portal: la TV solo debe ver el nombre.
+const ASIGNADO_ID = '00000000-0000-4000-8000-00000000abcd';
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const RESPONSABLES: Record<string, ResponsableAsignado> = {
+  '1BA90001|2026-11-01': { userId: ASIGNADO_ID, nombre: 'Técnico Dos', por: 'Admin Uno', en: '2026-11-11T15:00:00.000Z' },
+};
 
 let kioscos: KioscoActivo[];
 let usos: string[];
@@ -41,6 +47,7 @@ const tablero: RepoTablero = {
 const repo = {
   leerFoto: async () => FOTO,
   leerAjustes: async () => AJUSTES,
+  listarResponsables: async () => RESPONSABLES,
   ultimaCorridaTerminada: async () => null,
   ultimaCorridaBuena: async () => null,
   incidenteAbierto: async () => null,
@@ -118,12 +125,13 @@ describe('validarKiosco', () => {
 });
 
 describe('tableroKiosco', () => {
-  it('el mismo resultado que armar el tablero en el cliente con la misma foto y el mismo reloj', async () => {
+  it('el mismo resultado que armar el tablero en el cliente con la misma foto y el mismo reloj (salvo la cuenta del responsable)', async () => {
     const r = await s.tableroKiosco(AHORA);
     const cfg = { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 10, umbralRojo: 20 };
-    expect(r.tablero).toEqual(construirTablero(aplicarAjustes(FOTO.rows, AJUSTES), cfg, AHORA));
+    const soloNombre = { '1BA90001|2026-11-01': { nombre: 'Técnico Dos' } };
+    expect(r.tablero).toEqual(construirTablero(aplicarResponsables(aplicarAjustes(FOTO.rows, AJUSTES), soloNombre), cfg, AHORA));
     expect(r.tablero.columnas.flatMap((c) => c.tarjetas)).toHaveLength(2);
-    expect(r).toEqual(armarRespuestaTablero({ snap: FOTO, ajustes: AJUSTES, cfg, aviso: null }, AHORA));
+    expect(r).toEqual(armarRespuestaTablero({ snap: FOTO, ajustes: AJUSTES, responsables: RESPONSABLES, cfg, aviso: null }, AHORA));
     expect(r.ajustes).toEqual(cfg);
     expect(r.fotoEn).toBe(FOTO.at);
   });
@@ -139,6 +147,17 @@ describe('tableroKiosco', () => {
     for (const prohibido of ['MOTIVO-INTERNO', 'SALIDA-INTERNA', 'DRIVEID', 'NOTA-PRIVADA', 'quien@equipos.test', '"why"', '"x"', 'permisos', 'llaves']) {
       expect(texto, prohibido).not.toContain(prohibido);
     }
+  });
+
+  it('el responsable asignado en el portal llega a la TV solo con su nombre: ni la cuenta, ni quién ni cuándo', async () => {
+    const r = await s.tableroKiosco(AHORA);
+    const t = r.tablero.columnas.flatMap((c) => c.tarjetas).find((x) => x.sn === '18A90001')!;
+    expect([t.pie, t.tecnico]).toEqual(['tecnico', { nombre: 'Técnico Dos', iniciales: 'TD', avatar: avatarDe('Técnico Dos') }]);
+    const texto = JSON.stringify(r);
+    for (const prohibido of [ASIGNADO_ID, 'userId', 'Admin Uno', '2026-11-11T15:00:00.000Z']) expect(texto, prohibido).not.toContain(prohibido);
+    expect(texto).not.toMatch(UUID);
+    expect(texto).not.toMatch(/"(userId|por|en)"s*:/);
+    expect(texto).toContain('Técnico Dos');
   });
 
   it('la TV con llave recibe el tema elegido en Ajustes dentro de «ajustes»', async () => {

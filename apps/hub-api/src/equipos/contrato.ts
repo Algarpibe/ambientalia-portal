@@ -6,7 +6,7 @@
  */
 import type { Ajuste, Foto } from './nucleo/tipos.js';
 import { construirTablero, type AjustesTablero, type Tablero } from './nucleo/taller-board.js';
-import { aplicarAjustes } from './nucleo/pantalla.js';
+import { aplicarAjustes, aplicarResponsables } from './nucleo/pantalla.js';
 
 /** Id de la app en `portal.user_apps` y en el JWT. */
 export const APP_ID = 'equipos-taller';
@@ -98,12 +98,18 @@ export interface RespuestaTablero {
 }
 
 /**
- * El tablero que ve la TV: el MISMO cálculo que hace el navegador con una sesión (aplicarAjustes + construirTablero),
- * así que con la misma foto y el mismo reloj los dos caminos dan lo mismo. Lista blanca: solo estos cuatro campos salen
- * (nada de motivos, salidas, ids de Drive, notas, firmas, permisos ni llaves).
+ * El tablero que ve la TV: el MISMO cálculo que hace el navegador con una sesión (aplicarAjustes + aplicarResponsables +
+ * construirTablero), así que con la misma foto y el mismo reloj los dos caminos dan lo mismo, salvo la cuenta del
+ * responsable: la TV solo recibe su NOMBRE (ni userId, ni quién lo asignó, ni cuándo). Lista blanca: solo estos cuatro
+ * campos salen (nada de motivos, salidas, ids de Drive, notas, firmas, permisos ni llaves).
  */
-export function armarRespuestaTablero(e: { snap: Foto | null; ajustes: Record<string, AjusteFirmado>; cfg: AjustesTablero; aviso: AvisoFoto | null }, ahoraMs: number): RespuestaTablero {
-  return { tablero: construirTablero(aplicarAjustes(e.snap?.rows ?? [], e.ajustes), e.cfg, ahoraMs), ajustes: e.cfg, fotoEn: e.snap?.at ?? null, aviso: e.aviso };
+export function armarRespuestaTablero(
+  e: { snap: Foto | null; ajustes: Record<string, AjusteFirmado>; responsables?: Record<string, ResponsableAsignado>; cfg: AjustesTablero; aviso: AvisoFoto | null },
+  ahoraMs: number,
+): RespuestaTablero {
+  const soloNombres = Object.fromEntries(Object.entries(e.responsables ?? {}).map(([k, r]) => [k, { nombre: r.nombre }]));
+  const filas = aplicarResponsables(aplicarAjustes(e.snap?.rows ?? [], e.ajustes), soloNombres);
+  return { tablero: construirTablero(filas, e.cfg, ahoraMs), ajustes: e.cfg, fotoEn: e.snap?.at ?? null, aviso: e.aviso };
 }
 
 /** Una llave de kiosco de la TV (`portal.equipos_kiosco`), solo metadatos: ni el resumen ni el secreto salen nunca. */
