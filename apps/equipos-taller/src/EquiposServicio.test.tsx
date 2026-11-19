@@ -76,7 +76,7 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     await waitFor(() => expect(within(nav).getByRole('button', { name: /En taller/ }).textContent).toBe('1En taller'));
     expect(within(nav).getByRole('button', { name: /Revisar/ }).textContent).toBe('1Revisar+ 2 remisiones ilegibles');
     expect(within(nav).getByRole('button', { name: /Salió con ticket abierto/ }).textContent).toBe('1Salió con ticket abierto');
-    expect(screen.getByText('Técnico Uno')).toBeTruthy();
+    expect((await screen.findByText('18A90001')).closest('tr')!.textContent).toContain('Técnico Uno');
     expect(screen.getByText('1 aviso en la última ejecución')).toBeTruthy();
   });
 
@@ -277,5 +277,101 @@ describe('lo nuevo en el portal', () => {
     render(<EquiposServicio api={api} />);
     await screen.findByRole('navigation', { name: 'Vistas' });
     expect(screen.queryByText('Llaves de la app')).toBeNull();
+  });
+});
+
+describe('responsable asignado desde la tabla', () => {
+  const K1 = '1BA90001|2026-06-01'; // claveFila de 18A90001 entrado el 2026-06-01 (serial en clase OCR)
+  const ASIGNADO: ResponsableAsignado = { userId: TEC_DOS, nombre: 'Técnico Dos', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' };
+  const SIN_PERMISO = { editaAjustes: false, recibeAlertas: false, esAdmin: false, puedeEditar: false };
+  const selectorDe = () => screen.findByRole<HTMLSelectElement>('combobox', { name: 'Responsable de 18A90001' });
+  const selectorYa = () => screen.getByRole<HTMLSelectElement>('combobox', { name: 'Responsable de 18A90001' });
+
+  it('sin permiso no hay selector ni se piden los técnicos: solo el nombre, como hoy', async () => {
+    const { api, resp } = apiFalsa({ permisos: SIN_PERMISO });
+    render(<EquiposServicio api={api} />);
+    expect(await screen.findByText('Técnico Uno')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: /Responsable de/ })).toBeNull();
+    expect(resp).toEqual([]);
+  });
+
+  it('con permiso, la celda es un selector: «De Desk: <Encargado>» y luego los técnicos con la app, pedidos una vez', async () => {
+    const { api, resp } = apiFalsa();
+    render(<EquiposServicio api={api} />);
+    const s = await selectorDe();
+    expect([...s.options].map((x) => x.textContent)).toEqual(['De Desk: Técnico Uno', 'Técnico Dos', 'Técnico Tres']);
+    expect(s.value).toBe('');
+    expect(resp).toEqual(['tecnicos']);
+  });
+
+  it('elegir un técnico lo guarda al momento y la celda lleva quién y cuándo lo asignó', async () => {
+    const { api, resp } = apiFalsa();
+    render(<EquiposServicio api={api} />);
+    fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
+    await waitFor(() => expect(resp).toContain('put ' + K1 + ' ' + TEC_DOS));
+    await waitFor(() => expect(selectorYa().title).toBe('Asignado por Admin Uno el 19/11/2026'));
+    expect(selectorYa().value).toBe(TEC_DOS);
+  });
+
+  it('la opción «De Desk» quita la asignación', async () => {
+    const { api, resp } = apiFalsa({ responsables: { [K1]: ASIGNADO } });
+    render(<EquiposServicio api={api} />);
+    const s = await selectorDe();
+    await waitFor(() => expect(s.value).toBe(TEC_DOS));
+    fireEvent.change(s, { target: { value: '' } });
+    await waitFor(() => expect(resp).toContain('delete ' + K1));
+    expect(selectorYa().value).toBe('');
+  });
+
+  it('si el servidor falla, el selector vuelve a lo de antes y avisa (D8)', async () => {
+    const { api } = apiFalsa();
+    api.asignarResponsable = async () => { throw new Error('Ese usuario no está activo o no tiene la app «Equipos en taller».'); };
+    render(<EquiposServicio api={api} />);
+    fireEvent.change(await selectorDe(), { target: { value: TEC_TRES } });
+    expect(await screen.findByText('No se pudo cambiar el responsable: Ese usuario no está activo o no tiene la app «Equipos en taller».')).toBeTruthy();
+    expect(selectorYa().value).toBe('');
+  });
+
+  it('dos cambios seguidos que fallan vuelven a lo último confirmado, no a lo optimista del primero', async () => {
+    const { api } = apiFalsa();
+    const pendientes: Array<(e: Error) => void> = [];
+    api.asignarResponsable = () => new Promise((_, rechazar) => { pendientes.push(rechazar); });
+    render(<EquiposServicio api={api} />);
+    const s = await selectorDe();
+    fireEvent.change(s, { target: { value: TEC_DOS } });
+    fireEvent.change(selectorYa(), { target: { value: TEC_TRES } });
+    await waitFor(() => expect(pendientes.length).toBe(2));
+    expect(selectorYa().value).toBe(TEC_TRES);
+    await act(async () => { pendientes[0](new Error('x')); });
+    expect(selectorYa().value).toBe(TEC_TRES); // la primera ya no manda
+    await act(async () => { pendientes[1](new Error('y')); });
+    await waitFor(() => expect(selectorYa().value).toBe(''));
+  });
+
+  it('si no se pueden cargar los técnicos, la columna se ve como sin permiso y avisa una vez', async () => {
+    const { api } = apiFalsa();
+    let veces = 0;
+    api.tecnicos = async () => { veces++; throw new Error('Error 500'); };
+    render(<EquiposServicio api={api} />);
+    expect(await screen.findByText('No se pudo cargar la lista de técnicos: Error 500')).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: /Responsable de/ })).toBeNull();
+    expect(screen.getByText('Técnico Uno')).toBeTruthy();
+    expect(veces).toBe(1);
+  });
+
+  it('sin permiso, el nombre asignado en el portal manda sobre Desk y lleva su firma en el title', async () => {
+    render(<EquiposServicio api={apiFalsa({ permisos: SIN_PERMISO, responsables: { [K1]: ASIGNADO } }).api} />);
+    const nombre = await screen.findByText('Técnico Dos');
+    expect(nombre.getAttribute('title')).toBe('Asignado por Admin Uno el 19/11/2026');
+    expect(screen.queryByText('Técnico Uno')).toBeNull();
+  });
+
+  it('«Pendiente Asignar» de Desk se ve como «Sin asignar»', async () => {
+    const base = estado();
+    const rows = base.snap!.rows.map((r) => (r.sn === '18A90001' ? { ...r, z: { ...r.z!, enc: 'Pendiente Asignar' } } : r));
+    render(<EquiposServicio api={apiFalsa({ permisos: SIN_PERMISO, snap: { ...base.snap!, rows } }).api} />);
+    const tr = (await screen.findByText('18A90001')).closest('tr')!;
+    expect(within(tr).getByText('Sin asignar')).toBeTruthy();
+    expect(within(tr).queryByText('Pendiente Asignar')).toBeNull();
   });
 });

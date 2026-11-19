@@ -7,8 +7,9 @@
 // «Actualizar información» (11/11/2026), porque cada sincronización de n8n lanza la corrida.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, avisoFoto, claveFila, claveIlegible, dias, enlaceArchivo, enlaceCarpeta,
-  filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, type Ajuste, type Fila, type Filtros, type Ilegible, type RespuestaEquipos,
+  ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, aplicarResponsables, avisoFoto, claveFila, claveIlegible, claveVisitaValida, dias,
+  encargadoDesk, enlaceArchivo, enlaceCarpeta, fechaBogota, filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, responsableDe,
+  type Ajuste, type Fila, type Filtros, type Ilegible, type ResponsableAsignado, type RespuestaEquipos, type TecnicoAsignable,
 } from './nucleo';
 import { apiEquipos, type ApiEquipos } from './api';
 
@@ -25,6 +26,13 @@ const boton = 'mr-1.5 mt-1.5 rounded border border-slate-300 bg-white px-2 py-0.
 const REFRESCO_MS = 60_000;
 const NO_SE_PUDO_CARGAR = 'No se pudo cargar: ';
 const fmt = (d: string) => (d ? new Date(d).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '');
+/** «Asignado por <quien> el dd/mm/aaaa» (fecha de Bogotá) de una asignación del portal, o nada. */
+function firmaResponsable(r: Fila): string | undefined {
+  const ms = r.resp?.en ? Date.parse(r.resp.en) : NaN;
+  if (!r.resp?.por || !Number.isFinite(ms)) return undefined;
+  const [a, m, d] = fechaBogota(ms).split('-');
+  return 'Asignado por ' + r.resp.por + ' el ' + d + '/' + m + '/' + a;
+}
 /** Sin botón para actualizar: lo dicen los textos que antes mandaban a pulsarlo. */
 const SOLA = 'Se actualiza sola cada hora, cuando termina la sincronización con n8n.';
 const A = ({ href, children }: { href: string; children: ReactNode }) => (
@@ -46,10 +54,24 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   const [nota, setNota] = useState('');
   // Filtros por cliente y por estado en Desk: aplican a todas las vistas y a los conteos.
   const [fl, setFl] = useState<Filtros>(SIN_FILTROS);
+  // A quién se puede asignar una visita (GET /tecnicos): se pide UNA vez, y solo con permiso. null = sin
+  // lista (sin permiso, o falló): la columna «Responsable» se ve como sin permiso, solo nombres.
+  const [tecnicos, setTecnicos] = useState<TecnicoAsignable[] | null>(null);
+  const pidioTecnicos = useRef(false);
+  // Cambios de responsable en vuelo, por visita: `n` numera la última petición, `base` es lo último confirmado
+  // por el servidor (a lo que se vuelve si la última falla) y `quiere` lo que se ve mientras tanto.
+  const enVuelo = useRef(new Map<string, { n: number; base: ResponsableAsignado | undefined; quiere: ResponsableAsignado | undefined }>());
 
   const cargar = useCallback(async () => {
     try {
-      setDatos(await api.estado());
+      const nuevo = await api.estado();
+      // Un cambio de responsable aún sin confirmar no se pisa con la foto del servidor (se vería un valor falso).
+      if (enVuelo.current.size) {
+        const m = { ...(nuevo.responsables ?? {}) };
+        enVuelo.current.forEach((v, k) => { if (v.quiere) m[k] = v.quiere; else delete m[k]; });
+        nuevo.responsables = m;
+      }
+      setDatos(nuevo);
       // Un fallo anterior ya no vale: se quita su aviso (los demás avisos se quedan).
       setAviso((a) => (a.startsWith(NO_SE_PUDO_CARGAR) ? '' : a));
     } catch (e) { setAviso(NO_SE_PUDO_CARGAR + (e as Error).message); }
@@ -81,7 +103,14 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   const ajustes = datos?.ajustes || {};
   const snap = datos?.snap || null;
   const puedeEditar = datos?.permisos.puedeEditar ?? false;
-  const todas = useMemo(() => aplicarAjustes(snap?.rows || [], ajustes), [snap, ajustes]);
+  const responsables = datos?.responsables;
+  // Mismo encadenado que el tablero y la TV: ajustes manuales y luego el responsable del portal (D7).
+  const todas = useMemo(() => aplicarResponsables(aplicarAjustes(snap?.rows || [], ajustes), responsables ?? {}), [snap, ajustes, responsables]);
+  useEffect(() => {
+    if (!puedeEditar || pidioTecnicos.current) return;
+    pidioTecnicos.current = true;
+    api.tecnicos().then(setTecnicos, (e: Error) => setAviso('No se pudo cargar la lista de técnicos: ' + e.message));
+  }, [puedeEditar, api]);
   const filas = useMemo(() => aplicarFiltros(todas, fl), [todas, fl]);
   const pendientes = ilegiblesPendientes(snap, ajustes);
   const hoy = snap?.hoy || new Date().toISOString().slice(0, 10);
@@ -118,6 +147,33 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
       setDatos((d) => { if (!d) return d; const aj = { ...d.ajustes }; existentes.forEach((k) => delete aj[k]); return { ...d, ajustes: aj }; });
     } catch (e) { setAviso('No se pudo deshacer: ' + (e as Error).message); }
   }
+  /** D8: se guarda al elegir. La tabla cambia al momento; si el servidor falla, vuelve a lo último confirmado y avisa. */
+  async function asignar(clave: string, userId: string) {
+    const poner = (r: ResponsableAsignado | undefined) =>
+      setDatos((d) => {
+        if (!d) return d;
+        const m = { ...(d.responsables ?? {}) };
+        if (r) m[clave] = r;
+        else delete m[clave];
+        return { ...d, responsables: m };
+      });
+    const previo = enVuelo.current.get(clave);
+    const n = (previo?.n ?? 0) + 1;
+    const t = tecnicos?.find((x) => x.userId === userId);
+    const quiere: ResponsableAsignado | undefined = userId && t ? { userId, nombre: t.nombre, por: '', en: '' } : undefined;
+    const reg = { n, base: previo ? previo.base : datos?.responsables?.[clave], quiere };
+    enVuelo.current.set(clave, reg);
+    poner(quiere);
+    try {
+      const r = userId ? await api.asignarResponsable(clave, userId) : undefined;
+      if (!userId) await api.quitarResponsable(clave);
+      reg.base = r;
+      if (enVuelo.current.get(clave)?.n === n) { enVuelo.current.delete(clave); poner(r); }
+    } catch (e) {
+      if (enVuelo.current.get(clave)?.n === n) { enVuelo.current.delete(clave); poner(reg.base); }
+      setAviso('No se pudo cambiar el responsable: ' + (e as Error).message);
+    }
+  }
 
   // Funciones de dibujo (no componentes) para que el campo de texto no se vuelva a montar al escribir.
   const pregunta = (clave: string) =>
@@ -129,6 +185,26 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
       </div>
     ) : null;
   const pedir = (clave: string, tipo: Ajuste['t'], ayuda: string) => { setPedido({ clave, tipo, ayuda }); setNota(''); };
+
+  // Columna «Responsable» (D7): el asignado en el portal o el Encargado de Desk; «Pendiente Asignar» se ve
+  // «Sin asignar». Con permiso, una clave de visita válida y la lista de técnicos, es un selector que guarda al
+  // elegir. Sin eso, solo el nombre, como antes.
+  function celdaResponsable(r: Fila, k: string) {
+    const ef = responsableDe(r);
+    const texto = ef ? ef.nombre : r.z?.enc?.trim() ? 'Sin asignar' : '';
+    const firma = firmaResponsable(r);
+    if (!puedeEditar || !tecnicos || !claveVisitaValida(k)) return <span title={firma}>{texto}</span>;
+    const elegido = ef?.origen === 'portal' && ef.userId ? ef.userId : '';
+    // Una asignación vigente siempre es de alguien de la lista; si la lista se quedó vieja, no se pierde.
+    const opciones = elegido && !tecnicos.some((x) => x.userId === elegido) ? [...tecnicos, { userId: elegido, nombre: ef?.nombre ?? '' }] : tecnicos;
+    return (
+      <select aria-label={'Responsable de ' + r.sn} title={firma} value={elegido} onChange={(e) => void asignar(k, e.target.value)}
+        className="max-w-[14rem] rounded border border-slate-300 bg-white px-1 py-0.5 text-sm">
+        <option value="">{'De Desk: ' + (encargadoDesk(r) || 'sin asignar')}</option>
+        {opciones.map((x) => <option key={x.userId} value={x.userId}>{x.nombre}</option>)}
+      </select>
+    );
+  }
 
   function filaEquipo(r: Fila) {
     const z = r.z;
@@ -154,7 +230,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
         <td className="px-2 py-2">
           {z ? (<>{z.st}<div className="text-sm text-slate-500">{(z.srv || '') + (z.m ? ' · modificado ' + z.m.slice(0, 10) : '')}</div></>) : null}
         </td>
-        <td className="px-2 py-2">{z?.enc || ''}</td>
+        <td className="px-2 py-2">{celdaResponsable(r, k)}</td>
         <td className="max-w-xl px-2 py-2 text-sm">
           <span className={'rounded px-1.5 py-0.5 ' + TONOS[TONO[r.est] ?? 2]}>{r.est}{r.src ? ' · ' + r.src : ''}</span>
           {r.est === EST.ENTREGADO && z && !r.zc && r.xd ? (
