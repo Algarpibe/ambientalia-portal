@@ -6,7 +6,7 @@ Qué equipos están **físicamente** dentro del taller de servicio técnico, ord
 
 - **App del portal:** `equipos-taller` (ruta `/equipos-taller`, sub-app `apps/equipos-taller`). Aparece en la barra lateral (`apps/portal/src/lib/apps.ts`) y en Aplicaciones; **no** tiene tarjeta en el Dashboard.
 - **Motor:** `apps/hub-api/src/equipos/`. Las reglas viven SOLO en `nucleo/` (puro, sin E/S); la pantalla lo importa por ruta relativa.
-- **Datos:** `portal.equipos_*` (migraciones 071, 072 y 073). Para psql: `portal.equipos_v_equipos` y `portal.equipos_v_remisiones_ilegibles`.
+- **Datos:** `portal.equipos_*` (migraciones 071 a 075 y 078). Para psql: `portal.equipos_v_equipos` y `portal.equipos_v_remisiones_ilegibles`.
 
 ## De dónde sale cada dato
 
@@ -119,6 +119,27 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 
 **Sin botón «Actualizar información»** (retirado el 11/11/2026): la pantalla se actualiza sola con la corrida de cada hora. Con la pantalla abierta, la tabla vuelve a pedir los datos cada 60 s (como el Tablero y la TV), sin tocar la vista ni los filtros; si una consulta falla, conserva lo que había. Mientras corre una corrida, la cabecera dice «Actualizando…» (texto, no botón) y la pantalla consulta cada 3 s hasta que termina; entonces pide los datos una vez más. Sin datos todavía, dice «Se actualiza sola cada hora, cuando termina la sincronización con n8n.».
 
+**Responsable** (19/11/2026; diseño `docs/superpowers/specs/2026-11-19-equipos-responsable-design.md`). La columna muestra, por este orden (`responsableDe` en `nucleo/pantalla.ts`: la misma regla en la tabla, el tablero, la TV y «Mis equipos»):
+
+1. la persona asignada en el portal a esa visita, si sigue activa y con la app;
+2. si no, el Encargado del ticket en Desk 2.0;
+3. «Pendiente Asignar» de Desk se ve «Sin asignar».
+
+- Quien tiene la llave «edita ajustes» (o es admin) ve un selector. «De Desk: <Encargado>» quita la asignación; debajo están los usuarios activos con la app. Se guarda al elegir, una petición cada vez por visita: si se elige otro mientras se guarda, se manda ese al terminar. Si falla, vuelve a lo último que confirmó el servidor y avisa. Sin permiso, o en una visita con el serial ilegible, solo se ve el nombre. Un nombre asignado en el portal lleva en el `title` quién lo asignó y cuándo.
+- La asignación es **por visita** (`portal.equipos_responsable`, migración 078): si el equipo vuelve al taller, la entrada nueva empieza sin asignación.
+- Desk 2.0 no cambia: el portal y Desk pueden mostrar personas distintas para el mismo equipo.
+- Si el usuario asignado deja de estar activo o pierde la app, la visita vuelve a mostrar el Encargado de Desk; si la recupera, su asignación vuelve a contar. Si se borra el usuario, se borran sus asignaciones.
+- Si dos personas asignan a la vez, gana la última; la otra lo ve en el siguiente refresco de 60 s.
+- La TV con llave solo recibe el nombre: ni la cuenta, ni quién asignó, ni cuándo.
+- `responsables` viaja en `GET /api/equipos-taller`: hub-api (078) se despliega antes que el portal.
+
+```sql
+-- Asignaciones guardadas (las de usuarios inactivos o sin la app están, pero no cuentan).
+SELECT r.clave, u.full_name, u.status, r.asignado_por, r.asignado_en
+  FROM portal.equipos_responsable r JOIN portal.users u ON u.id = r.user_id
+ ORDER BY r.asignado_en DESC;
+```
+
 ## Tablero kanban
 
 Una vista más sobre la misma foto, **de solo lectura** (cambio SDD `tablero-kanban-taller`, 11/11/2026). La tabla no cambia.
@@ -127,7 +148,7 @@ Una vista más sobre la misma foto, **de solo lectura** (cambio SDD `tablero-kan
 |---|---|
 | Botones «Tabla \| Tablero» de la app (`?vista=tablero`) | El tablero dentro del portal, para todos los que tienen la app. Su tema es el «Tema del tablero» de Ajustes (el mismo que la TV); no hay selector en la pestaña. |
 | `/equipos-taller/tv` | La TV: pantalla completa, con sesión o con llave de kiosco. Tema según el ajuste «Tema del tablero» (Día por defecto); `?tema=` manda en cada TV. Guía: [equipos-taller-kiosco.md](equipos-taller-kiosco.md). |
-| `/equipos-taller/mis-equipos` | «Mis equipos» en el móvil: los equipos del técnico, agrupados por columna. Le reconoce por el nombre del portal; si no coincide con ningún responsable de Desk, o con varios, pregunta «¿Quién eres?» y el móvil lo recuerda. Sin botones de cambio de estado. |
+| `/equipos-taller/mis-equipos` | «Mis equipos» en el móvil: los equipos del técnico, agrupados por columna. Una visita asignada en el portal es suya si se asignó a su cuenta (aunque el nombre no coincida), y de nadie más. Las demás se reconocen por el nombre del portal frente al Encargado de Desk; si no coincide con ninguno, o con varios, pregunta «¿Quién eres?» y el móvil lo recuerda. Sin botones de cambio de estado. |
 
 - **Columnas** (`nucleo/taller-columns.ts`): Entrada – Remisión (sin ticket, Ticket creado, OV asignada, Remisión creada), Rev. / Diagnóstico, Notificación cliente, En proceso, Servicio externo y Por entregar. El reparto de los 26 estados de Desk está en ese archivo; una prueba falla si alguno queda sin columna. Un estado desconocido va a Rev. / Diagnóstico con una etiqueta que lo nombra.
 - **Tarjetas**: solo las filas «En taller» y «Servicio externo», ya con los ajustes manuales aplicados. La suma de las columnas es igual a esos dos contadores. Las de «Servicio externo» van a su columna sea cual sea el estado del ticket.
@@ -143,6 +164,7 @@ Una vista más sobre la misma foto, **de solo lectura** (cambio SDD `tablero-kan
 |---|---|
 | Abrir y filtrar | Quien tenga la app `equipos-taller`, y los admin. |
 | Ajustes manuales («Sigue en taller», «Confirmar salida», «Marcar retirado», «Deshacer ajuste», «Ya revisada») | La llave `edita_ajustes`, o ser admin. |
+| Asignar el responsable de una visita (columna «Responsable» de la tabla) | La llave `edita_ajustes`, o ser admin. Solo a usuarios **activos** con la app: un admin sin la app no aparece. |
 | Gestionar las llaves (Ajustes → «Equipos en taller · Llaves») | Solo los admin. Las llaves solo se pueden dar a usuarios **activos** que tengan la app (o sean admin). Las casillas no guardan solas: cada fila se guarda con su botón «Guardar». |
 | Recibir la alerta | La llave `recibe_alertas` (los admin no la tienen por defecto), con el usuario activo y con la app o admin. |
 | Mandar la copia de Drive | Solo n8n, con el token `EQUIPOS_SYNC_TOKEN`. |

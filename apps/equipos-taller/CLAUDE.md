@@ -21,6 +21,10 @@ Pantalla de la app `equipos-taller` del portal: qué equipos están físicamente
   - Pantallas en `src/tablero/` (`Tablero.tsx`, `temas.ts`, `medidas.ts`, `useSondeo.ts`, CSS) más `src/App.tsx` (botones «Tabla | Tablero»; el tema sale del ajuste «Tema del tablero», sin selector en la pestaña), `src/TvEquipos.tsx` (TV), `src/MisEquipos.tsx` + `src/tecnico.ts` + `src/EscanearSerial.tsx` («Mis equipos») y `src/PanelTablero.tsx` / `src/PanelKiosco.tsx` (Ajustes del portal).
   - Rutas del portal fuera del shell: `apps/portal/src/components/RutaTableroTv.tsx` y `RutaMisEquipos.tsx`.
   - Servidor: `servicio-tablero.ts`, `repo-tablero.ts`, `router-kiosco.ts` (la ÚNICA ruta que acepta la llave de kiosco) y migraciones 074 y 075 (tema de la TV). Operación: `docs/equipos-taller-kiosco.md`.
+- **Responsable asignado desde la tabla** (diseño `docs/superpowers/specs/2026-11-19-equipos-responsable-design.md`):
+  - Regla única en el núcleo (D7): `responsableDe` y `aplicarResponsables`, en `nucleo/pantalla.ts`. Por convención `aplicarResponsables` va detrás de `aplicarAjustes`: en la tabla, en `useTableroDatos` (tablero, TV con sesión y «Mis equipos») y en `armarRespuestaTablero` (TV con llave, que solo recibe el nombre).
+  - Servidor: `portal.equipos_responsable` (migración 078, una fila por visita); `repo.ts` (`listarResponsables`, `guardarResponsable`, `borrarResponsable`, `listarTecnicos`, `esTecnicoValido`); y las rutas `GET /tecnicos` y `PUT|DELETE /responsables/:clave` de `router.ts` (llave «edita ajustes» o admin).
+  - Pantalla: la misma columna «Responsable» de siempre; el selector solo aparece con permiso. La cola de guardado (una petición cada vez por visita) vive en `src/responsable.ts` (`useAsignarResponsable`). «Mis equipos» (`tecnico.ts`, `esMia`): con asignación del portal, por la cuenta (`userId`, que manda `RutaMisEquipos`); sin ella, por el nombre como antes.
 
 ## Reglas de trabajo
 
