@@ -9,9 +9,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   ADENTRO, EST, VISTAS, TONO, SIN_FILTROS, aplicarAjustes, aplicarFiltros, aplicarResponsables, avisoFoto, claveFila, claveIlegible, claveVisitaValida, dias,
   encargadoDesk, enlaceArchivo, enlaceCarpeta, fechaBogota, filasDeVista, hayFiltros, ilegiblesPendientes, opcionesFiltro, Reglas, responsableDe,
-  type Ajuste, type Fila, type Filtros, type Ilegible, type ResponsableAsignado, type RespuestaEquipos, type TecnicoAsignable,
+  type Ajuste, type Fila, type Filtros, type Ilegible, type RespuestaEquipos, type TecnicoAsignable,
 } from './nucleo';
 import { apiEquipos, type ApiEquipos } from './api';
+import { useAsignarResponsable } from './responsable';
 
 const TONOS = [
   'bg-emerald-100 text-emerald-900', // en taller
@@ -58,20 +59,11 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   // lista (sin permiso, o falló): la columna «Responsable» se ve como sin permiso, solo nombres.
   const [tecnicos, setTecnicos] = useState<TecnicoAsignable[] | null>(null);
   const pidioTecnicos = useRef(false);
-  // Cambios de responsable en vuelo, por visita: `n` numera la última petición, `base` es lo último confirmado
-  // por el servidor (a lo que se vuelve si la última falla) y `quiere` lo que se ve mientras tanto.
-  const enVuelo = useRef(new Map<string, { n: number; base: ResponsableAsignado | undefined; quiere: ResponsableAsignado | undefined }>());
+  const { asignar, conPendientes } = useAsignarResponsable({ api, datos, setDatos, tecnicos, setAviso });
 
   const cargar = useCallback(async () => {
     try {
-      const nuevo = await api.estado();
-      // Un cambio de responsable aún sin confirmar no se pisa con la foto del servidor (se vería un valor falso).
-      if (enVuelo.current.size) {
-        const m = { ...(nuevo.responsables ?? {}) };
-        enVuelo.current.forEach((v, k) => { if (v.quiere) m[k] = v.quiere; else delete m[k]; });
-        nuevo.responsables = m;
-      }
-      setDatos(nuevo);
+      setDatos(conPendientes(await api.estado()));
       // Un fallo anterior ya no vale: se quita su aviso (los demás avisos se quedan).
       setAviso((a) => (a.startsWith(NO_SE_PUDO_CARGAR) ? '' : a));
     } catch (e) { setAviso(NO_SE_PUDO_CARGAR + (e as Error).message); }
@@ -147,33 +139,6 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
       setDatos((d) => { if (!d) return d; const aj = { ...d.ajustes }; existentes.forEach((k) => delete aj[k]); return { ...d, ajustes: aj }; });
     } catch (e) { setAviso('No se pudo deshacer: ' + (e as Error).message); }
   }
-  /** D8: se guarda al elegir. La tabla cambia al momento; si el servidor falla, vuelve a lo último confirmado y avisa. */
-  async function asignar(clave: string, userId: string) {
-    const poner = (r: ResponsableAsignado | undefined) =>
-      setDatos((d) => {
-        if (!d) return d;
-        const m = { ...(d.responsables ?? {}) };
-        if (r) m[clave] = r;
-        else delete m[clave];
-        return { ...d, responsables: m };
-      });
-    const previo = enVuelo.current.get(clave);
-    const n = (previo?.n ?? 0) + 1;
-    const t = tecnicos?.find((x) => x.userId === userId);
-    const quiere: ResponsableAsignado | undefined = userId && t ? { userId, nombre: t.nombre, por: '', en: '' } : undefined;
-    const reg = { n, base: previo ? previo.base : datos?.responsables?.[clave], quiere };
-    enVuelo.current.set(clave, reg);
-    poner(quiere);
-    try {
-      const r = userId ? await api.asignarResponsable(clave, userId) : undefined;
-      if (!userId) await api.quitarResponsable(clave);
-      reg.base = r;
-      if (enVuelo.current.get(clave)?.n === n) { enVuelo.current.delete(clave); poner(r); }
-    } catch (e) {
-      if (enVuelo.current.get(clave)?.n === n) { enVuelo.current.delete(clave); poner(reg.base); }
-      setAviso('No se pudo cambiar el responsable: ' + (e as Error).message);
-    }
-  }
 
   // Funciones de dibujo (no componentes) para que el campo de texto no se vuelva a montar al escribir.
   const pregunta = (clave: string) =>
@@ -198,7 +163,7 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
     // Una asignación vigente siempre es de alguien de la lista; si la lista se quedó vieja, no se pierde.
     const opciones = elegido && !tecnicos.some((x) => x.userId === elegido) ? [...tecnicos, { userId: elegido, nombre: ef?.nombre ?? '' }] : tecnicos;
     return (
-      <select aria-label={'Responsable de ' + r.sn} title={firma} value={elegido} onChange={(e) => void asignar(k, e.target.value)}
+      <select aria-label={'Responsable de ' + r.sn + ' (entrada ' + r.d + ')'} title={firma} value={elegido} onChange={(e) => void asignar(k, e.target.value)}
         className="max-w-[14rem] rounded border border-slate-300 bg-white px-1 py-0.5 text-sm">
         <option value="">{'De Desk: ' + (encargadoDesk(r) || 'sin asignar')}</option>
         {opciones.map((x) => <option key={x.userId} value={x.userId}>{x.nombre}</option>)}

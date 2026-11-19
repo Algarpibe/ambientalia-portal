@@ -284,8 +284,28 @@ describe('responsable asignado desde la tabla', () => {
   const K1 = '1BA90001|2026-06-01'; // claveFila de 18A90001 entrado el 2026-06-01 (serial en clase OCR)
   const ASIGNADO: ResponsableAsignado = { userId: TEC_DOS, nombre: 'Técnico Dos', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' };
   const SIN_PERMISO = { editaAjustes: false, recibeAlertas: false, esAdmin: false, puedeEditar: false };
-  const selectorDe = () => screen.findByRole<HTMLSelectElement>('combobox', { name: 'Responsable de 18A90001' });
-  const selectorYa = () => screen.getByRole<HTMLSelectElement>('combobox', { name: 'Responsable de 18A90001' });
+  // El nombre lleva la fecha de entrada: dos visitas del mismo serial no comparten nombre.
+  const NOMBRE = 'Responsable de 18A90001 (entrada 2026-06-01)';
+  const selectorDe = () => screen.findByRole<HTMLSelectElement>('combobox', { name: NOMBRE });
+  const selectorYa = () => screen.getByRole<HTMLSelectElement>('combobox', { name: NOMBRE });
+  // PUT/DELETE retenidos a mano: `pend` son los PUT abiertos, `calls` el orden en que llegan al servidor.
+  const retenida = () => {
+    const { api, resp } = apiFalsa();
+    const calls: string[] = [];
+    const pend: Array<{ u: string; ok: (r: ResponsableAsignado) => void; ko: (e: Error) => void }> = [];
+    let abiertas = 0;
+    let maxAbiertas = 0;
+    api.asignarResponsable = (_k, u) => {
+      calls.push('put ' + (u === TEC_DOS ? 'DOS' : 'TRES'));
+      maxAbiertas = Math.max(maxAbiertas, ++abiertas);
+      return new Promise<ResponsableAsignado>((ok, ko) => {
+        pend.push({ u, ok: (r) => { abiertas--; ok(r); }, ko: (e) => { abiertas--; ko(e); } });
+      });
+    };
+    api.quitarResponsable = async (k) => { calls.push('delete ' + k); };
+    return { api, resp, calls, pend, max: () => maxAbiertas };
+  };
+  const asignadoA = (u: string, nombre: string): ResponsableAsignado => ({ userId: u, nombre, por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' });
 
   it('sin permiso no hay selector ni se piden los técnicos: solo el nombre, como hoy', async () => {
     const { api, resp } = apiFalsa({ permisos: SIN_PERMISO });
@@ -332,20 +352,67 @@ describe('responsable asignado desde la tabla', () => {
     expect(selectorYa().value).toBe('');
   });
 
-  it('dos cambios seguidos que fallan vuelven a lo último confirmado, no a lo optimista del primero', async () => {
-    const { api } = apiFalsa();
-    const pendientes: Array<(e: Error) => void> = [];
-    api.asignarResponsable = () => new Promise((_, rechazar) => { pendientes.push(rechazar); });
+  it('(a) si el primero se confirma y el segundo, en cola, falla, queda lo del primero con su firma y el aviso', async () => {
+    const { api, pend } = retenida();
     render(<EquiposServicio api={api} />);
-    const s = await selectorDe();
-    fireEvent.change(s, { target: { value: TEC_DOS } });
+    fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
     fireEvent.change(selectorYa(), { target: { value: TEC_TRES } });
-    await waitFor(() => expect(pendientes.length).toBe(2));
+    await waitFor(() => expect(pend.length).toBe(1));
+    await act(async () => { pend[0].ok(asignadoA(TEC_DOS, 'Técnico Dos')); });
+    await waitFor(() => expect(pend.length).toBe(2));
+    await act(async () => { pend[1].ko(new Error('falló')); });
+    expect(await screen.findByText('No se pudo cambiar el responsable: falló')).toBeTruthy();
+    await waitFor(() => expect(selectorYa().value).toBe(TEC_DOS));
+    expect(selectorYa().title).toBe('Asignado por Admin Uno el 19/11/2026');
+  });
+
+  it('(b) dos cambios rápidos nunca dejan dos peticiones abiertas: llegan en el orden elegido', async () => {
+    const { api, calls, pend, max } = retenida();
+    render(<EquiposServicio api={api} />);
+    fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
+    fireEvent.change(selectorYa(), { target: { value: TEC_TRES } });
+    await waitFor(() => expect(calls).toEqual(['put DOS']));
     expect(selectorYa().value).toBe(TEC_TRES);
-    await act(async () => { pendientes[0](new Error('x')); });
-    expect(selectorYa().value).toBe(TEC_TRES); // la primera ya no manda
-    await act(async () => { pendientes[1](new Error('y')); });
+    await act(async () => { pend[0].ok(asignadoA(TEC_DOS, 'Técnico Dos')); });
+    await waitFor(() => expect(calls).toEqual(['put DOS', 'put TRES']));
+    await act(async () => { pend[1].ok(asignadoA(TEC_TRES, 'Técnico Tres')); });
+    await waitFor(() => expect(selectorYa().value).toBe(TEC_TRES));
+    expect(max()).toBe(1);
+  });
+
+  it('(c) Dos, Tres y «De Desk» elegidos durante la primera petición mandan una sola más: quitar', async () => {
+    const { api, calls, pend } = retenida();
+    render(<EquiposServicio api={api} />);
+    fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
+    fireEvent.change(selectorYa(), { target: { value: TEC_TRES } });
+    fireEvent.change(selectorYa(), { target: { value: '' } });
+    await act(async () => { pend[0].ok(asignadoA(TEC_DOS, 'Técnico Dos')); });
+    await waitFor(() => expect(calls).toEqual(['put DOS', 'delete 1BA90001|2026-06-01']));
     await waitFor(() => expect(selectorYa().value).toBe(''));
+    expect(pend.length).toBe(1);
+  });
+
+  it('(d) el refresco de 60 s no pisa con el valor viejo un cambio que aún se está guardando', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { api, pend } = retenida();
+      render(<EquiposServicio api={api} />);
+      fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
+      await waitFor(() => expect(pend.length).toBe(1));
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(selectorYa().value).toBe(TEC_DOS);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('(e) si falla la primera mientras Tres espera, vuelve a lo confirmado y no sale otra petición', async () => {
+    const { api, calls, pend } = retenida();
+    render(<EquiposServicio api={api} />);
+    fireEvent.change(await selectorDe(), { target: { value: TEC_DOS } });
+    fireEvent.change(selectorYa(), { target: { value: TEC_TRES } });
+    await act(async () => { pend[0].ko(new Error('x')); });
+    expect(await screen.findByText('No se pudo cambiar el responsable: x')).toBeTruthy();
+    await waitFor(() => expect(selectorYa().value).toBe(''));
+    expect(calls).toEqual(['put DOS']);
   });
 
   it('si no se pueden cargar los técnicos, la columna se ve como sin permiso y avisa una vez', async () => {
