@@ -1,7 +1,7 @@
 /**
- * Lectura y escritura de las tablas `portal.equipos_*` (migración 071). Solo SQL:
+ * Lectura y escritura de las tablas `portal.equipos_*` (migraciones 071 y 078). Solo SQL:
  * qué se escribe lo deciden servicio.ts (corridas), incidente.ts (incidentes) y
- * router.ts (ajustes y llaves).
+ * router.ts (ajustes, llaves y responsables).
  *
  * `equipos_estado` guarda tres claves: `foto` (lo que muestra la pantalla),
  * `exits` (caché del texto de OCR, versión CV del núcleo) y `ent` (remisiones de
@@ -9,7 +9,7 @@
  */
 import type { Pool } from '@algarpibe/zoho-sync';
 import type { CacheEscaneos, Foto, RemisionEntrada } from './nucleo/tipos.js';
-import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, UsuarioConLlaves } from './contrato.js';
+import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, ResponsableAsignado, TecnicoAsignable, UsuarioConLlaves } from './contrato.js';
 import type { DecisionIncidente } from './incidente.js';
 import type { ResultadoAlerta } from './alerta.js';
 
@@ -72,6 +72,16 @@ export interface RepoEquipos {
   listarLlaves(): Promise<UsuarioConLlaves[]>;
   /** null si el usuario no existe. */
   guardarLlaves(userId: string, l: LlavesUsuario, actualizadoPor: string): Promise<UsuarioConLlaves | null>;
+  /** Las asignaciones VIGENTES (D6: usuario activo y con la app), por clave de visita, con el nombre actual del usuario. */
+  listarResponsables(): Promise<Record<string, ResponsableAsignado>>;
+  /** Upsert por clave. `quien` firma: su nombre de ahora o, si no se encuentra, su correo. */
+  guardarResponsable(clave: string, userId: string, quien: { userId: string | null; email: string }): Promise<ResponsableAsignado>;
+  /** Idempotente. */
+  borrarResponsable(clave: string): Promise<void>;
+  /** Usuarios activos con la app, por nombre (D5). Un admin sin la app no entra. */
+  listarTecnicos(): Promise<TecnicoAsignable[]>;
+  /** ¿Activo y con la app? */
+  esTecnicoValido(userId: string): Promise<boolean>;
 }
 
 const iso = (v: unknown): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : String(v));
@@ -138,6 +148,15 @@ const aUsuario = (x: Fila): UsuarioConLlaves => ({
   recibeAlertas: x.recibe_alertas === true,
   actualizadoPor: x.actualizado_por ?? null,
   actualizadoEn: iso(x.actualizado_en),
+});
+
+/** Activo y con la app asignada: a quién se puede asignar una visita y qué asignaciones cuentan (D5, D6). Sin excepción para los admin. */
+const SQL_CON_LA_APP = `u.status = 'active' AND EXISTS (SELECT 1 FROM portal.user_apps a WHERE a.user_id = u.id AND a.app_id = 'equipos-taller')`;
+const aResponsable = (x: Fila): ResponsableAsignado => ({
+  userId: String(x.user_id),
+  nombre: x.full_name ?? '',
+  por: x.asignado_por ?? '',
+  en: iso(x.asignado_en) ?? '',
 });
 
 export function crearRepoEquipos(db: Pool): RepoEquipos {
@@ -292,6 +311,48 @@ export function crearRepoEquipos(db: Pool): RepoEquipos {
       );
       const { rows } = await db.query(`SELECT ${SQL_USUARIO_LLAVES} WHERE u.id = $1::uuid`, [userId]);
       return aUsuario(rows[0]);
+    },
+
+    async listarResponsables() {
+      const { rows } = await db.query(
+        `SELECT r.clave, r.user_id::text AS user_id, u.full_name, r.asignado_por, r.asignado_en
+           FROM portal.equipos_responsable r JOIN portal.users u ON u.id = r.user_id
+          WHERE ${SQL_CON_LA_APP}
+          ORDER BY r.clave`,
+      );
+      return Object.fromEntries(rows.map((x: Fila) => [x.clave, aResponsable(x)]));
+    },
+
+    async guardarResponsable(clave, userId, quien) {
+      // La firma es el nombre de quien asigna EN ESTE MOMENTO (el JWT no lo lleva); sin su fila, su correo.
+      const { rows } = await db.query(
+        `WITH g AS (
+           INSERT INTO portal.equipos_responsable (clave, user_id, asignado_por_id, asignado_por, asignado_en)
+           VALUES ($1, $2::uuid, $3::uuid,
+                   COALESCE((SELECT NULLIF(btrim(p.full_name), '') FROM portal.users p WHERE p.id = $3::uuid), $4), now())
+           ON CONFLICT (clave) DO UPDATE SET user_id = EXCLUDED.user_id, asignado_por_id = EXCLUDED.asignado_por_id,
+                                             asignado_por = EXCLUDED.asignado_por, asignado_en = now()
+           RETURNING clave, user_id, asignado_por, asignado_en
+         )
+         SELECT g.clave, g.user_id::text AS user_id, u.full_name, g.asignado_por, g.asignado_en
+           FROM g JOIN portal.users u ON u.id = g.user_id`,
+        [clave, userId, quien.userId, quien.email],
+      );
+      return aResponsable(rows[0]);
+    },
+
+    async borrarResponsable(clave) {
+      await db.query('DELETE FROM portal.equipos_responsable WHERE clave = $1', [clave]);
+    },
+
+    async listarTecnicos() {
+      const { rows } = await db.query(`SELECT u.id::text AS user_id, u.full_name FROM portal.users u WHERE ${SQL_CON_LA_APP} ORDER BY lower(u.full_name), u.id`);
+      return rows.map((x: Fila) => ({ userId: String(x.user_id), nombre: x.full_name ?? '' }));
+    },
+
+    async esTecnicoValido(userId) {
+      const { rows } = await db.query(`SELECT 1 FROM portal.users u WHERE u.id = $1::uuid AND ${SQL_CON_LA_APP}`, [userId]);
+      return rows.length > 0;
     },
   };
 }

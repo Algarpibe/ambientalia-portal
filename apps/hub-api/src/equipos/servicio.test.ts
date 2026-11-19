@@ -68,6 +68,11 @@ function repoEnMemoria() {
     llavesDe: async () => ({ editaAjustes: false, recibeAlertas: false }),
     listarLlaves: async () => [],
     guardarLlaves: async () => null,
+    listarResponsables: async () => ({}),
+    guardarResponsable: async () => { throw new Error('no se usa'); },
+    borrarResponsable: async () => {},
+    listarTecnicos: async () => [],
+    esTecnicoValido: async () => false,
   };
   return { repo, s };
 }

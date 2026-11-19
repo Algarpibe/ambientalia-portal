@@ -33,12 +33,12 @@ beforeAll(() => {
   repo = crearRepoEquipos(db);
 });
 afterAll(async () => {
-  await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves RESTART IDENTITY');
+  await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves, portal.equipos_responsable RESTART IDENTITY');
   await db.query(`DELETE FROM portal.users WHERE email LIKE '%@equipos.test'`);
   await db.end();
 });
 beforeEach(async () => {
-  await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves RESTART IDENTITY');
+  await db.query('TRUNCATE portal.equipos_estado, portal.equipos_ajuste, portal.equipos_ejecucion, portal.equipos_incidente, portal.equipos_llaves, portal.equipos_responsable RESTART IDENTITY');
   await db.query(`DELETE FROM portal.users WHERE email LIKE '%@equipos.test'`);
 });
 
@@ -223,5 +223,57 @@ describe('llaves', () => {
     await repo.guardarLlaves(b, { editaAjustes: false, recibeAlertas: true }, 'x');
     await repo.guardarLlaves(c, { editaAjustes: true, recibeAlertas: false }, 'x');
     expect((await repo.correosAlerta()).filter((x) => x.endsWith('@equipos.test'))).toEqual(['recibe@equipos.test']);
+  });
+});
+
+describe('responsables (migración 078)', () => {
+  const K = '1BA9041T|2026-11-01';
+
+  it('guardar, reasignar y borrar (idempotente), con el nombre ACTUAL del usuario y la firma de quien asignó', async () => {
+    const uno = await usuario('uno@equipos.test', { app: true });
+    const dos = await usuario('dos@equipos.test', { app: true });
+    const jefe = await usuario('jefe@equipos.test', { app: true });
+    const a = await repo.guardarResponsable(K, uno, { userId: jefe, email: 'jefe@equipos.test' });
+    expect(a).toEqual({ userId: uno, nombre: 'uno', por: 'jefe', en: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) });
+    await repo.guardarResponsable(K, dos, { userId: jefe, email: 'jefe@equipos.test' });
+    expect(Object.keys(await repo.listarResponsables())).toEqual([K]);
+    expect((await repo.listarResponsables())[K]).toMatchObject({ userId: dos, nombre: 'dos', por: 'jefe' });
+    await db.query(`UPDATE portal.users SET full_name = 'Dos Renombrado' WHERE id = $1`, [dos]);
+    expect((await repo.listarResponsables())[K].nombre).toBe('Dos Renombrado');
+    await repo.borrarResponsable(K);
+    await repo.borrarResponsable(K);
+    expect(await repo.listarResponsables()).toEqual({});
+  });
+
+  it('sin la cuenta de quien asigna, la firma es su correo', async () => {
+    const uno = await usuario('uno@equipos.test', { app: true });
+    expect((await repo.guardarResponsable(K, uno, { userId: null, email: 'quien@equipos.test' })).por).toBe('quien@equipos.test');
+  });
+
+  it('listarResponsables omite a los usuarios inactivos o sin la app; la fila se conserva y vuelve a contar (D6)', async () => {
+    const baja = await usuario('baja@equipos.test', { app: true });
+    const sinApp = await usuario('sin-app@equipos.test', { app: true });
+    const vigente = await usuario('vigente@equipos.test', { app: true });
+    await repo.guardarResponsable('1BA90001|2026-11-01', baja, { userId: null, email: 'x@equipos.test' });
+    await repo.guardarResponsable('1BA90002|2026-11-01', sinApp, { userId: null, email: 'x@equipos.test' });
+    await repo.guardarResponsable('1BA90003|2026-11-01', vigente, { userId: null, email: 'x@equipos.test' });
+    await db.query(`UPDATE portal.users SET status = 'inactive' WHERE id = $1`, [baja]);
+    await db.query('DELETE FROM portal.user_apps WHERE user_id = $1', [sinApp]);
+    expect(Object.keys(await repo.listarResponsables())).toEqual(['1BA90003|2026-11-01']);
+    expect((await db.query('SELECT count(*)::int AS n FROM portal.equipos_responsable')).rows[0].n).toBe(3);
+    await db.query(`INSERT INTO portal.user_apps (user_id, app_id) VALUES ($1, 'equipos-taller')`, [sinApp]);
+    expect(Object.keys(await repo.listarResponsables())).toEqual(['1BA90002|2026-11-01', '1BA90003|2026-11-01']);
+  });
+
+  it('técnicos asignables: activos con la app, por nombre; ni inactivos, ni sin la app, ni un admin sin ella (D5)', async () => {
+    const beta = await usuario('beta@equipos.test', { app: true });
+    const alfa = await usuario('alfa@equipos.test', { app: true });
+    const baja = await usuario('baja@equipos.test', { app: true, status: 'inactive' });
+    const sinApp = await usuario('sin-app@equipos.test');
+    const admin = await usuario('admin@equipos.test', { role: 'admin' });
+    const mios = new Set([beta, alfa, baja, sinApp, admin]);
+    expect((await repo.listarTecnicos()).filter((t) => mios.has(t.userId))).toEqual([{ userId: alfa, nombre: 'alfa' }, { userId: beta, nombre: 'beta' }]);
+    expect(await repo.esTecnicoValido(alfa)).toBe(true);
+    for (const id of [baja, sinApp, admin, '00000000-0000-4000-8000-00000000dead']) expect(await repo.esTecnicoValido(id), id).toBe(false);
   });
 });
