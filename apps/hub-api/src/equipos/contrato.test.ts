@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ajusteValido, avisoFoto, CAUSA_SYNC_ATRASADA, CAUSA_TEXTOS_FALLIDOS, claveValida, type Corrida } from './contrato.js';
+import { ajusteValido, avisoFoto, CAUSA_SYNC_ATRASADA, CAUSA_TEXTOS_FALLIDOS, claveValida, claveVisitaValida, type Corrida } from './contrato.js';
 
 const corrida = (c: Partial<Corrida>): Corrida => ({ id: 1, origen: 'programada', inicio: '2026-11-10T11:30:00.000Z', fin: '2026-11-10T11:35:00.000Z', enCurso: false, ok: true, causa: null, avisos: [], conteos: null, ...c });
 const fecha = (iso: string) => 'F(' + iso.slice(0, 10) + ')';
@@ -20,6 +20,13 @@ describe('claves y tipos de ajuste', () => {
     expect(ajusteValido('1BA90417|2026-11-01', 'pdf')).toBe(false);
     expect(ajusteValido('1BA90417|2026-11-01', 'in')).toBe(true);
     expect(ajusteValido('1BA90417|2026-11-01', 'borrar')).toBe(false);
+  });
+});
+
+describe('claves de visita (responsable asignado)', () => {
+  it('solo «SERIAL|AAAA-MM-DD» con una fecha que exista: ni «*SERIAL», ni «pdf:», ni nada más', () => {
+    expect(['1BA9041T|2026-11-01', '1BA90417|2028-02-29'].every(claveVisitaValida)).toBe(true);
+    expect(['*1BA9041T', 'pdf:Abcdefghij_-12', "x' OR 1=1", '1ba9041t|2026-11-01', '1BA9041T|2026-02-30', 'AB|2026-11-01', ''].some(claveVisitaValida)).toBe(false);
   });
 });
 

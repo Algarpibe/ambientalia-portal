@@ -82,6 +82,11 @@ export interface RespuestaEquipos {
   permisos: PermisosPantalla;
   /** Ajustes efectivos del tablero. Opcional: un servidor anterior no lo manda y la pantalla usa los de por defecto. */
   tablero?: AjustesTablero;
+  /**
+   * Responsables asignados desde la tabla, por clave de visita (`claveFila`). Solo los VIGENTES (D6: usuario
+   * activo y con la app). Opcional: un servidor anterior no lo manda y la pantalla lo trata como vacío.
+   */
+  responsables?: Record<string, ResponsableAsignado>;
 }
 
 /** Lo que recibe una pantalla de TV por el endpoint de kiosco (lote 4a): el tablero ya construido. */
@@ -121,6 +126,22 @@ export interface UsuarioConLlaves extends LlavesUsuario {
   actualizadoEn: string | null;
 }
 
+/** El responsable asignado desde la tabla a una visita (`portal.equipos_responsable`), con el nombre ACTUAL del usuario. */
+export interface ResponsableAsignado {
+  userId: string;
+  nombre: string;
+  /** Quién lo asignó (su nombre en ese momento o, si no se encontró, su correo). */
+  por: string;
+  /** Cuándo (ISO). */
+  en: string;
+}
+
+/** Un usuario al que se puede asignar una visita: activo y con la app `equipos-taller` (D5). Respuesta de GET /tecnicos. */
+export interface TecnicoAsignable {
+  userId: string;
+  nombre: string;
+}
+
 const CLAVE = /^(\*[A-Z0-9]{3,20}|[A-Z0-9]{3,20}\|\d{4}-\d{2}-\d{2}|pdf:[A-Za-z0-9_-]{10,80})$/;
 /** Claves de ajuste: «SERIAL|AAAA-MM-DD», «*SERIAL» o «pdf:<idDrive>» (el serial, en clase OCR). */
 export const claveValida = (k: string): boolean => {
@@ -131,7 +152,11 @@ export const claveValida = (k: string): boolean => {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === f;
 };
 
-export const TIPOS_AJUSTE: readonly Ajuste['t'][] = ['in', 'out', 'ret', 'pdf'];
+const CLAVE_VISITA = /^[A-Z0-9]{3,20}\|\d{4}-\d{2}-\d{2}$/;
+/** Clave de UNA visita («SERIAL|AAAA-MM-DD»), la única que admite el responsable: ni «*SERIAL» ni «pdf:». */
+export const claveVisitaValida = (k: string): boolean => CLAVE_VISITA.test(k) && claveValida(k);
+
+export const TIPOS_AJUSTE:readonly Ajuste['t'][] = ['in', 'out', 'ret', 'pdf'];
 
 /** ¿Clave válida y tipo que casa con ella? «pdf» solo para «pdf:<id>», y al revés. */
 export function ajusteValido(clave: string, t: unknown): t is Ajuste['t'] {
