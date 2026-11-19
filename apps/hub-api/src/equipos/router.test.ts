@@ -4,7 +4,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
-import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, UsuarioConLlaves } from './contrato.js';
+import type { AjusteFirmado, Corrida, Incidente, LlavesUsuario, OrigenCorrida, ResponsableAsignado, UsuarioConLlaves } from './contrato.js';
 import type { CierrePasada, RepoSync } from './repo-sync.js';
 import type { ResultadoAjustes, ResultadoToken, ServicioTablero } from './servicio-tablero.js';
 import { AJUSTES_TABLERO_POR_DEFECTO } from './nucleo/index.js';
@@ -48,6 +48,12 @@ let incidente: Incidente | null = null;
 const borrados: string[] = [];
 let enCurso: Corrida | null = null;
 let terminada: Corrida | null = null;
+// Responsables: dos técnicos con la app; cualquier otro uuid «no está activo o no tiene la app».
+const TEC_UNO = '00000000-0000-4000-8000-0000000000c1';
+const TEC_DOS = '00000000-0000-4000-8000-0000000000c2';
+const asignados = new Map<string, ResponsableAsignado>();
+const firmas: { clave: string; userId: string; quien: { userId: string | null; email: string } }[] = [];
+const borradosResp: string[] = [];
 const repo = {
   leerFoto: async () => null,
   leerAjustes: async () => {
@@ -69,6 +75,19 @@ const repo = {
   listarLlaves: async (): Promise<UsuarioConLlaves[]> => [{ userId: 'u', nombre: 'Persona Ficticia', email: 'p@ambientalia.com.co', esAdmin: false, editaAjustes: true, recibeAlertas: false, actualizadoPor: null, actualizadoEn: null }],
   guardarLlaves: async (userId: string, l: LlavesUsuario, por: string): Promise<UsuarioConLlaves | null> =>
     userId.endsWith('999999999999') ? null : { userId, nombre: 'X', email: 'x@ambientalia.com.co', esAdmin: false, ...l, actualizadoPor: por, actualizadoEn: '2026-11-10T15:00:00.000Z' },
+  listarResponsables: async () => Object.fromEntries(asignados),
+  listarTecnicos: async () => [{ userId: TEC_UNO, nombre: 'Técnico Uno' }, { userId: TEC_DOS, nombre: 'Técnico Dos' }],
+  esTecnicoValido: async (userId: string) => userId === TEC_UNO || userId === TEC_DOS,
+  guardarResponsable: async (clave: string, userId: string, quien: { userId: string | null; email: string }): Promise<ResponsableAsignado> => {
+    firmas.push({ clave, userId, quien });
+    const r = { userId, nombre: userId === TEC_UNO ? 'Técnico Uno' : 'Técnico Dos', por: quien.email, en: '2026-11-19T15:00:00.000Z' };
+    asignados.set(clave, r);
+    return r;
+  },
+  borrarResponsable: async (clave: string) => {
+    borradosResp.push(clave);
+    asignados.delete(clave);
+  },
 } as unknown as RepoEquipos;
 const servicio = {
   configurado: async () => configurado,
@@ -115,6 +134,9 @@ beforeEach(() => {
   guardaAjustes = { ok: true, ajustes: { ...AJUSTES_TABLERO_POR_DEFECTO, umbralAmbar: 45 } };
   creaToken = { ok: true, kiosco: KIOSCO, secreto: 'tvk_' + 'A'.repeat(43) };
   revoca = true;
+  asignados.clear();
+  firmas.length = 0;
+  borradosResp.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -135,6 +157,12 @@ describe('GET /equipos-taller', () => {
   it('sin la llave, puedeEditar es false (salvo admin)', async () => {
     expect((await request(app()).get(B).set('Authorization', token().auth)).body.permisos.puedeEditar).toBe(false);
     expect((await request(app()).get(B).set('Authorization', token({ role: 'admin' }).auth)).body.permisos.puedeEditar).toBe(true);
+  });
+  it('lleva las asignaciones vigentes en «responsables», también a quien no tiene la llave', async () => {
+    const r1 = { userId: TEC_UNO, nombre: 'Técnico Uno', por: 'Admin Uno', en: '2026-11-19T15:00:00.000Z' };
+    asignados.set('1BA9041T|2026-11-01', r1);
+    const r = await request(app()).get(B).set('Authorization', token().auth);
+    expect(r.body.responsables).toEqual({ '1BA9041T|2026-11-01': r1 });
   });
 });
 
@@ -269,6 +297,67 @@ describe('ajustes', () => {
     const t = token();
     llaves.set(t.userId, { editaAjustes: true, recibeAlertas: false });
     expect((await request(app()).delete(B + '/ajustes/' + encodeURIComponent('*1BA90417')).set('Authorization', t.auth)).status).toBe(204);
+  });
+});
+
+describe('responsable asignado desde la tabla', () => {
+  const K = '1BA9041T|2026-11-01';
+  const R = (k: string) => B + '/responsables/' + encodeURIComponent(k);
+  const put = (auth: string, k: string, b: object) => request(app()).put(R(k)).set('Authorization', auth).send(b);
+  const conLlave = () => {
+    const t = token();
+    llaves.set(t.userId, { editaAjustes: true, recibeAlertas: false });
+    return t;
+  };
+
+  it('403 sin_llave en las tres rutas, sin tocar nada; 401 sin sesión', async () => {
+    const a = token().auth;
+    const rs = [await request(app()).get(B + '/tecnicos').set('Authorization', a), await put(a, K, { userId: TEC_UNO }), await request(app()).delete(R(K)).set('Authorization', a)];
+    expect(rs.map((r) => [r.status, r.body.error])).toEqual([[403, 'sin_llave'], [403, 'sin_llave'], [403, 'sin_llave']]);
+    expect([firmas, borradosResp]).toEqual([[], []]);
+    expect((await request(app()).get(B + '/tecnicos')).status).toBe(401);
+  });
+
+  it('GET /tecnicos con la llave: los usuarios con la app, sin caché', async () => {
+    const r = await request(app()).get(B + '/tecnicos').set('Authorization', conLlave().auth);
+    expect([r.status, r.headers['cache-control'], r.body]).toEqual([200, 'no-store', { tecnicos: [{ userId: TEC_UNO, nombre: 'Técnico Uno' }, { userId: TEC_DOS, nombre: 'Técnico Dos' }] }]);
+  });
+
+  it('asignar, reasignar y quitar (dos veces: 200 también si ya no había asignación)', async () => {
+    const t = conLlave();
+    const a = await put(t.auth, K, { userId: TEC_UNO });
+    expect([a.status, a.body]).toEqual([200, { responsable: { userId: TEC_UNO, nombre: 'Técnico Uno', por: t.email, en: '2026-11-19T15:00:00.000Z' } }]);
+    expect((await put(t.auth, K, { userId: TEC_DOS })).body.responsable.userId).toBe(TEC_DOS);
+    expect(asignados.get(K)?.userId).toBe(TEC_DOS);
+    for (let i = 0; i < 2; i++) {
+      const d = await request(app()).delete(R(K)).set('Authorization', t.auth);
+      expect([d.status, d.body]).toEqual([200, { ok: true }]);
+    }
+    expect(borradosResp).toEqual([K, K]);
+    expect(asignados.size).toBe(0);
+  });
+
+  it('un admin puede sin la llave, y firma el token, no lo que mande el cliente', async () => {
+    const adm = token({ role: 'admin' });
+    expect((await put(adm.auth, K, { userId: TEC_UNO, por: 'otro@ambientalia.com.co', quien: 'otro' })).status).toBe(200);
+    expect(firmas).toEqual([{ clave: K, userId: TEC_UNO, quien: { userId: adm.userId, email: adm.email } }]);
+  });
+
+  it('422 usuario_sin_app si el usuario no está activo o no tiene la app', async () => {
+    const r = await put(conLlave().auth, K, { userId: '00000000-0000-4000-8000-0000000000ff' });
+    expect([r.status, r.body.error]).toEqual([422, 'usuario_sin_app']);
+    expect(firmas).toEqual([]);
+  });
+
+  it('400 si la clave no es de una visita o falta el userId', async () => {
+    const a = conLlave().auth;
+    for (const mala of ['*1BA9041T', 'pdf:Abcdefghij_-12', "x' OR 1=1", '1BA9041T|2026-02-30']) {
+      const r = await put(a, mala, { userId: TEC_UNO });
+      expect([mala, r.status, r.body.error]).toEqual([mala, 400, 'invalid_input']);
+      expect((await request(app()).delete(R(mala)).set('Authorization', a)).status, mala).toBe(400);
+    }
+    for (const b of [{}, { userId: 5 }, { userId: 'no-es-uuid' }]) expect((await put(a, K, b)).status, JSON.stringify(b)).toBe(400);
+    expect([firmas, borradosResp]).toEqual([[], []]);
   });
 });
 

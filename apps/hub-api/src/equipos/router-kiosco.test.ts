@@ -157,6 +157,7 @@ describe('T4 escalada', () => {
       ['get', B + '/tablero/ajustes'], ['put', B + '/tablero/ajustes'],
       ['get', B + '/kiosco/tokens'], ['post', B + '/kiosco/tokens'], ['delete', B + '/kiosco/tokens/00000000-0000-4000-8000-000000000001'],
       ['post', B + '/sync/fin'],
+      ['get', B + '/tecnicos'], ['put', B + '/responsables/1BA9041T%7C2026-11-01'], ['delete', B + '/responsables/1BA9041T%7C2026-11-01'],
     ];
     for (const [metodo, ruta] of otras) {
       const r = await (request(app()) as unknown as Record<string, (u: string) => request.Test>)[metodo](ruta).set('X-Kiosk-Token', s).send({ umbralAmbar: 1 });

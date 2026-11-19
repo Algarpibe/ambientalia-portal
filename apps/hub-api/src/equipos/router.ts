@@ -5,6 +5,9 @@
  *   GET    /equipos-taller                  foto, ajustes, corridas, incidente, configuración y permisos
  *   PUT    /equipos-taller/ajustes/:clave   ← { t, m? }   (edita_ajustes o admin)
  *   DELETE /equipos-taller/ajustes/:clave   204           (edita_ajustes o admin)
+ *   GET    /equipos-taller/tecnicos         { tecnicos }  a quién se puede asignar una visita (edita_ajustes o admin)
+ *   PUT    /equipos-taller/responsables/:clave  ← { userId } → { responsable } · 400 · 422 usuario_sin_app (edita_ajustes o admin)
+ *   DELETE /equipos-taller/responsables/:clave  → { ok: true }, también si no había asignación (edita_ajustes o admin)
  *   GET    /equipos-taller/llaves           (admin)
  *   PUT    /equipos-taller/llaves/:userId   ← { editaAjustes, recibeAlertas } (admin)
  *   POST   /equipos-taller/sync/{listado,texto,fin}   n8n, con token de máquina y sin sesión (router-sync.ts)
@@ -22,7 +25,7 @@
 import { Router, type Request, type Response } from 'express';
 import { getPayload, requireApp, requireAuth } from '../auth.js';
 import { captureError } from '../sentry.js';
-import { ajusteValido, APP_ID, claveValida, type RespuestaEquipos } from './contrato.js';
+import { ajusteValido, APP_ID, claveValida, claveVisitaValida, type RespuestaEquipos } from './contrato.js';
 import { MINUTOS_ABANDONO, type RepoEquipos } from './repo.js';
 import type { ServicioEquipos } from './servicio.js';
 import type { RepoSync } from './repo-sync.js';
@@ -102,8 +105,9 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     const q = quien(req);
     // `ultima` es la última corrida TERMINADA: si fuera la que está en curso, el aviso de foto vieja
     // desaparecería mientras corre (hasta 180 min tras una caída). «actualizando» sí mira la que corre.
-    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves, configurado, tablero] = await Promise.all([
+    const [snap, ajustes, enCurso, ultima, ultimaBuena, incidente, llaves, configurado, tablero, responsables] = await Promise.all([
       deps.repo.leerFoto(), deps.repo.leerAjustes(), deps.repo.ultimaCorrida(), deps.repo.ultimaCorridaTerminada(), deps.repo.ultimaCorridaBuena(), deps.repo.incidenteAbierto(), deps.repo.llavesDe(q.userId), deps.servicio.configurado(), deps.tablero.ajustes(),
+      deps.repo.listarResponsables(),
     ]);
     const cuerpo: RespuestaEquipos = {
       snap,
@@ -116,6 +120,7 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
       incidente: incidente && !q.esAdmin ? { ...incidente, alertaUltimoError: null } : incidente,
       permisos: { ...llaves, esAdmin: q.esAdmin, puedeEditar: q.esAdmin || llaves.editaAjustes },
       tablero,
+      responsables,
     };
     res.set('Cache-Control', 'no-store').json(cuerpo);
   }));
@@ -135,6 +140,34 @@ export function createEquiposTallerRouter(deps: DepsRouter): Router {
     if (!claveValida(clave)) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Clave no válida' });
     await deps.repo.borrarAjuste(clave);
     res.status(204).end();
+  }));
+
+  // Responsable de cada visita: asigna quien tiene la llave «edita ajustes» o es admin (D4), y solo a
+  // usuarios activos con la app (D5). La clave es la de UNA visita: ni «*SERIAL» ni «pdf:».
+  router.get('/equipos-taller/tecnicos', ...gated, ruta('equipos_tecnicos', async (req, res) => {
+    await exigirEditar(req);
+    res.set('Cache-Control', 'no-store').json({ tecnicos: await deps.repo.listarTecnicos() });
+  }));
+
+  router.put('/equipos-taller/responsables/:clave', ...gated, ruta('equipos_responsable_guardar', async (req, res) => {
+    const q = await exigirEditar(req);
+    const clave = String(req.params.clave);
+    const { userId } = (req.body ?? {}) as { userId?: unknown };
+    if (!claveVisitaValida(clave) || typeof userId !== 'string' || !UUID.test(userId)) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Asignación no válida' });
+    if (!(await deps.repo.esTecnicoValido(userId))) {
+      throw new ErrorRuta(422, { error: 'usuario_sin_app', message: 'Ese usuario no está activo o no tiene la app «Equipos en taller».' });
+    }
+    // La firma sale del token, nunca del cuerpo.
+    const responsable = await deps.repo.guardarResponsable(clave, userId, { userId: q.userId, email: q.email });
+    res.json({ responsable });
+  }));
+
+  router.delete('/equipos-taller/responsables/:clave', ...gated, ruta('equipos_responsable_borrar', async (req, res) => {
+    await exigirEditar(req);
+    const clave = String(req.params.clave);
+    if (!claveVisitaValida(clave)) throw new ErrorRuta(400, { error: 'invalid_input', message: 'Clave no válida' });
+    await deps.repo.borrarResponsable(clave);
+    res.json({ ok: true });
   }));
 
   router.get('/equipos-taller/llaves', ...gated, ruta('equipos_llaves_listar', async (req, res) => {
