@@ -21,6 +21,9 @@ const TONOS = [
 ];
 const enlace = 'text-sky-700 underline underline-offset-2 hover:text-sky-900';
 const boton = 'mr-1.5 mt-1.5 rounded border border-slate-300 bg-white px-2 py-0.5 text-[13px] hover:bg-slate-50 disabled:opacity-50';
+/** Cada cuánto se vuelven a pedir los datos con la pantalla abierta (como el Tablero y la TV). */
+const REFRESCO_MS = 60_000;
+const NO_SE_PUDO_CARGAR = 'No se pudo cargar: ';
 const fmt = (d: string) => (d ? new Date(d).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota' }) : '');
 /** Sin botón para actualizar: lo dicen los textos que antes mandaban a pulsarlo. */
 const SOLA = 'Se actualiza sola cada hora, cuando termina la sincronización con n8n.';
@@ -45,12 +48,21 @@ export default function EquiposServicio({ api: apiProp }: { api?: ApiEquipos }) 
   const [fl, setFl] = useState<Filtros>(SIN_FILTROS);
 
   const cargar = useCallback(async () => {
-    try { setDatos(await api.estado()); }
-    catch (e) { setAviso('No se pudo cargar: ' + (e as Error).message); }
+    try {
+      setDatos(await api.estado());
+      // Un fallo anterior ya no vale: se quita su aviso (los demás avisos se quedan).
+      setAviso((a) => (a.startsWith(NO_SE_PUDO_CARGAR) ? '' : a));
+    } catch (e) { setAviso(NO_SE_PUDO_CARGAR + (e as Error).message); }
   }, [api]);
-  useEffect(() => { void cargar(); }, [cargar]);
-  // No hay botón: la pantalla se actualiza sola con la corrida de cada sincronización de n8n
-  // (cada hora) y con la diaria. Mientras hay una en curso, se consulta cada 3 s.
+  // Los datos cambian cada hora (corrida tras cada sincronización de n8n, y la diaria). Con la
+  // pantalla abierta se vuelven a pedir cada 60 s, como el Tablero y la TV; la vista y los
+  // filtros no se tocan. Un fallo deja los datos que había.
+  useEffect(() => {
+    void cargar();
+    const t = setInterval(() => void cargar(), REFRESCO_MS);
+    return () => clearInterval(t);
+  }, [cargar]);
+  // No hay botón. Mientras hay una corrida en curso, además, se consulta cada 3 s.
   useEffect(() => {
     if (!datos?.actualizando) return;
     const t = setInterval(() => void cargar(), 3000);

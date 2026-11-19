@@ -117,7 +117,7 @@ Vistas, columnas, motivos y ajustes manuales vienen de la herramienta original. 
 
 `RETIRADOS_FIJOS` está **vacío a propósito**. Tras el despliegue hay un caso conocido que debe volver a marcarse a mano con «Marcar retirado».
 
-**Sin botón «Actualizar información»** (retirado el 11/11/2026): la pantalla se actualiza sola con la corrida de cada hora. Mientras corre una corrida, la cabecera dice «Actualizando…» (texto, no botón) y la pantalla consulta cada 3 s hasta que termina; entonces pide los datos una vez más. Sin datos todavía, dice «Se actualiza sola cada hora, cuando termina la sincronización con n8n.».
+**Sin botón «Actualizar información»** (retirado el 11/11/2026): la pantalla se actualiza sola con la corrida de cada hora. Con la pantalla abierta, la tabla vuelve a pedir los datos cada 60 s (como el Tablero y la TV), sin tocar la vista ni los filtros; si una consulta falla, conserva lo que había. Mientras corre una corrida, la cabecera dice «Actualizando…» (texto, no botón) y la pantalla consulta cada 3 s hasta que termina; entonces pide los datos una vez más. Sin datos todavía, dice «Se actualiza sola cada hora, cuando termina la sincronización con n8n.».
 
 ## Tablero kanban
 

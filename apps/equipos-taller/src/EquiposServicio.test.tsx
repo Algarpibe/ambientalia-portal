@@ -2,8 +2,8 @@
 // La pantalla con una API simulada: vistas, conteos, ilegibles en «Revisar», ajustes, el
 // aviso de foto vieja, «Actualizando…» sin botón, los botones ocultos sin la llave y el panel
 // de llaves. Todo ficticio.
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { CAUSA_TEXTOS_FALLIDOS, EST, type Ajuste, type AjusteFirmado, type Corrida, type Fila, type RespuestaEquipos, type UsuarioConLlaves } from './nucleo';
 import EquiposServicio from './EquiposServicio';
 import type { ApiEquipos } from './api';
@@ -141,6 +141,49 @@ describe('pantalla Equipos en taller (trasladada sin rediseño)', () => {
     fireEvent.click(await chip(/Revisar/));
     expect(screen.getByText('Las remisiones escaneadas ilegibles saldrán aquí en la próxima actualización. Se actualiza sola cada hora, cuando termina la sincronización con n8n.')).toBeTruthy();
     expect(screen.queryByText(/Pulsa/)).toBeNull();
+  });
+});
+
+describe('refresco mientras la pantalla está abierta (cada 60 s, como el Tablero)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const conFilaExtra = (e: RespuestaEquipos): RespuestaEquipos =>
+    ({ ...e, snap: { ...e.snap!, rows: [...e.snap!.rows, fila('18A90009', '2026-10-01', EST.TALLER)] } });
+
+  it('vuelve a pedir los datos cada 60 s sin cambiar la vista elegida, y deja de pedirlos al cerrarla', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { api } = apiFalsa();
+    const base = api.estado;
+    let llamadas = 0;
+    let nueva = false;
+    api.estado = async () => { llamadas++; const e = await base(); return nueva ? conFilaExtra(e) : e; };
+    const { unmount } = render(<EquiposServicio api={api} />);
+    expect((await chip(/En taller/)).textContent).toBe('1En taller');
+    fireEvent.click(chipYa(/Revisar/));
+    nueva = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    await waitFor(() => expect(chipYa(/En taller/).textContent).toBe('2En taller'));
+    expect(chipYa(/Revisar/).getAttribute('aria-pressed')).toBe('true');
+    const antes = llamadas;
+    unmount();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(llamadas).toBe(antes);
+  });
+
+  it('si un refresco falla conserva los datos, y el siguiente que sale bien quita el aviso', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { api } = apiFalsa();
+    const base = api.estado;
+    let falla = false;
+    api.estado = async () => { if (falla) throw new Error('sin conexión'); return base(); };
+    render(<EquiposServicio api={api} />);
+    expect((await chip(/En taller/)).textContent).toBe('1En taller');
+    falla = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(await screen.findByText('No se pudo cargar: sin conexión')).toBeTruthy();
+    expect(chipYa(/En taller/).textContent).toBe('1En taller');
+    falla = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    await waitFor(() => expect(screen.queryByText(/No se pudo cargar/)).toBeNull());
   });
 });
 
