@@ -1,8 +1,10 @@
-#!/usr/bin/env node
 // Anonimiza las fixtures reales del módulo «Equipos en taller» (D9 del diseño).
 //
 //   node scripts/equipos-anonimizar.mjs generar  <dir-reales> <dir-salida>
 //   node scripts/equipos-anonimizar.mjs verificar <dir-reales> <ruta> [<ruta>…]
+//
+// Sin «#!/usr/bin/env node» a propósito: siempre se lanza con `node`. Con el fichero en CRLF (git en Windows
+// con core.autocrlf), Vitest no reconoce esa línea, sube los `import` por encima y su prueba no carga.
 //
 // <dir-reales> es una carpeta LOCAL, ignorada por git, con remisiones.json,
 // escaneos-reales.json, roles.local.json y, si está, tickets.json (solo para que
