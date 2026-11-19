@@ -2,7 +2,7 @@
 // «Mis equipos»: vista de solo lectura del técnico. Fuente de datos inyectada. Datos ficticios.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { EST, type Fila, type RespuestaEquipos } from './nucleo';
+import { EST, claveFila, type Fila, type RespuestaEquipos } from './nucleo';
 import MisEquipos, { CLAVE_TECNICO } from './MisEquipos';
 
 const AHORA = Date.parse('2026-11-11T20:00:00Z');
@@ -76,6 +76,27 @@ describe('MisEquipos: identidad', () => {
     await listo();
     fireEvent.click(screen.getByRole('button', { name: 'Técnico Dos' }));
     expect(screen.getAllByRole('article')).toHaveLength(1);
+  });
+});
+
+describe('MisEquipos: asignación del portal (por la cuenta)', () => {
+  const asignado = (userId: string, nombre: string) => ({ userId, nombre, por: 'Admin Uno', en: '2026-11-11T15:00:00.000Z' });
+
+  it('encuentra la tarjeta por userId aunque el nombre no coincida, sin preguntar «¿Quién eres?»', async () => {
+    const filas = [...FILAS, fila('18A90008', '2026-11-05', 'Ingresado', '')];
+    const r: RespuestaEquipos = { ...resp(filas), responsables: { [claveFila(filas[5])]: asignado('u-yo', 'Nombre En Cuenta') } };
+    render(<MisEquipos nombre="Alguien Más" userId="u-yo" pedir={vi.fn(async () => structuredClone(r))} />);
+    await listo();
+    expect(screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Equipo 18A90008']);
+    expect(screen.queryByRole('group', { name: '¿Quién eres?' })).toBeNull();
+  });
+
+  it('si el portal asignó la visita a otra cuenta, no te aparece aunque el nombre coincida y Desk diga que es tuya', async () => {
+    const r: RespuestaEquipos = { ...resp(), responsables: { [claveFila(FILAS[0])]: asignado('u-otro', UNO) } };
+    render(<MisEquipos nombre={UNO} userId="u-yo" pedir={vi.fn(async () => structuredClone(r))} />);
+    await listo();
+    expect(screen.queryByLabelText('Equipo 18A90001')).toBeNull();
+    expect(screen.getAllByRole('article')).toHaveLength(3);
   });
 });
 

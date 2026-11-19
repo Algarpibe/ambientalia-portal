@@ -1,12 +1,13 @@
 // «Mis equipos»: vista de solo lectura, pensada para el celular, de los equipos de un técnico. Reutiliza el
-// sondeo y el modelo del tablero (no duplica reglas) y filtra las tarjetas por el nombre del técnico.
-// El nombre del usuario entra por `nombre` (lo da el portal); sin coincidencia única se pregunta «¿Quién eres?».
+// sondeo y el modelo del tablero (no duplica reglas). Una visita asignada en el portal es tuya si se asignó a tu
+// cuenta (`userId`). Las demás, por tu nombre frente al Encargado de Desk. Los dos datos los da el portal; sin
+// coincidencia única de nombre se pregunta «¿Quién eres?».
 import { useCallback, useMemo, useState } from 'react';
 import type { ColumnaTablero, Tarjeta } from './nucleo';
 import { apiEquipos } from './api';
 import { Raiz, SinTablero, hhmm, useTableroDatos } from './tablero/Tablero';
 import EscanearSerial from './EscanearSerial';
-import { coincideTecnico, esDe, tecnicosDelTablero } from './tecnico';
+import { coincideTecnico, esMia, tecnicosDelTablero } from './tecnico';
 import './tablero/tablero.css';
 import './tablero/mis-equipos.css';
 
@@ -52,7 +53,12 @@ function Grupo({ col }: { col: ColumnaTablero }) {
   );
 }
 
-export default function MisEquipos({ nombre, pedir: pedirProp }: { nombre: string | null; pedir?: (s: AbortSignal) => ReturnType<ReturnType<typeof apiEquipos>['estado']> }) {
+export default function MisEquipos({ nombre, userId = null, pedir: pedirProp }: {
+  nombre: string | null;
+  /** La cuenta del usuario: reconoce las visitas que el portal le asignó aunque su nombre no coincida. */
+  userId?: string | null;
+  pedir?: (s: AbortSignal) => ReturnType<ReturnType<typeof apiEquipos>['estado']>;
+}) {
   const pedirSesion = useMemo(() => apiEquipos().estado, []);
   const pedir = useCallback((s: AbortSignal) => (pedirProp ?? pedirSesion)(s), [pedirProp, pedirSesion]);
   const { datos, modelo, ajustes, okEn, fallo, obsoleto } = useTableroDatos(pedir);
@@ -64,9 +70,9 @@ export default function MisEquipos({ nombre, pedir: pedirProp }: { nombre: strin
   const nombres = tecnicosDelTablero(modelo);
   const coinciden = nombre ? nombres.filter((n) => coincideTecnico(nombre, n)) : [];
   const elegido = guardado ?? (coinciden.length === 1 ? coinciden[0] : null);
-  const grupos = elegido
-    ? modelo.columnas.map((c) => ({ ...c, tarjetas: c.tarjetas.filter((t) => esDe(t, elegido)) })).filter((c) => c.tarjetas.length > 0)
-    : [];
+  const grupos = modelo.columnas
+    .map((c) => ({ ...c, tarjetas: c.tarjetas.filter((t) => esMia(t, { userId, nombre: elegido })) }))
+    .filter((c) => c.tarjetas.length > 0);
   const todas = grupos.flatMap((g) => g.tarjetas);
   const dueno = todas[0]?.tecnico;
   const elegir = (n: string) => { guardar(n); setGuardado(n); setCambiando(false); };
@@ -91,7 +97,7 @@ export default function MisEquipos({ nombre, pedir: pedirProp }: { nombre: strin
         {kpis.map((k) => <li key={k.e} className="tt-kpi"><span className="tt-kpi-n">{k.v}</span><span className="tt-kpi-e">{k.e}</span></li>)}
       </ul>
       {elegido && todas.length === 0 ? <p className="tt-mensaje">{`No hay equipos asignados a ${elegido}.`}</p> : null}
-      {!elegido || todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
+      {todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
       {escaneando ? <EscanearSerial tarjetas={modelo.columnas.flatMap((c) => c.tarjetas)} onCerrar={() => setEscaneando(false)} mostrar={(t) => <Ficha key={t.clave} t={t} />} /> : null}
       {grupos.map((g) => <Grupo key={g.id} col={g} />)}
       <nav className="tt-mis-barra" aria-label="Taller">
