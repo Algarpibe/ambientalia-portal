@@ -160,6 +160,42 @@ describe('nunca lanza', () => {
   });
 });
 
+describe('nunca lanza: envío que falla de golpe', () => {
+  // Un send NO async que lanza de forma síncrona: no devuelve promesa rechazada.
+  function montarSincrono() {
+    const eventos: { event: string; data: Record<string, unknown> }[] = [];
+    const log: ResetLog = (event, data = {}) => {
+      eventos.push({ event, data });
+    };
+    const mailer = {
+      send: (): Promise<void> => {
+        throw new Error('boom');
+      },
+    };
+    return { eventos, notifier: new AccessNotifier({ mailer, portalUrl: PORTAL, log }) };
+  }
+
+  it('statusChanged desde pending: resuelve y deja una línea failed', async () => {
+    const { eventos, notifier } = montarSincrono();
+    await expect(notifier.statusChanged({ user: cuenta(), previousStatus: 'pending', apps: [] })).resolves.toBeUndefined();
+    expect(eventos).toEqual([
+      { event: 'user_access_email_failed', data: { user_id: 'user-1', kind: 'welcome', motivo: 'boom' } },
+    ]);
+    expect(JSON.stringify(eventos)).not.toContain('@');
+  });
+
+  it('appsChanged con app nueva: resuelve y deja una línea failed', async () => {
+    const { eventos, notifier } = montarSincrono();
+    await expect(
+      notifier.appsChanged({ user: cuenta(), before: [], after: ['ausencias'], isSelf: false }),
+    ).resolves.toBeUndefined();
+    expect(eventos).toEqual([
+      { event: 'user_access_email_failed', data: { user_id: 'user-1', kind: 'new_apps', motivo: 'boom' } },
+    ]);
+    expect(JSON.stringify(eventos)).not.toContain('@');
+  });
+});
+
 describe('el log', () => {
   it('cada llamada deja exactamente una línea, siempre con el user_id y nunca con el correo', async () => {
     const { mailer, eventos, notifier } = montar();
