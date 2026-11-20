@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import type { AccessNotifierActions } from './users/access-emails/access-notifier.js';
 
 // Tests de integración HTTP del router de usuarios (Checkpoint 11). Montamos el
 // router real sobre un pool fake in-memory que modela `users` y `user_apps`, y
@@ -508,5 +509,155 @@ describe('SEC-220 — cerrar sesión y cambiar la contraseña invalidan de verda
 
   it('logout sin token → 401', async () => {
     expect((await request(app).post('/api/auth/logout')).status).toBe(401);
+  });
+});
+
+// Correos de acceso (spec 2026-11-20, §4.2). El router avisa al notificador
+// DESPUÉS de responder y sin esperarlo; aquí el notificador es un doble. Qué
+// decide y qué envía lo vigila users/access-emails/access-notifier.test.ts.
+describe('correos de acceso', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function conNotificador() {
+    const notifier = {
+      statusChanged: vi.fn<AccessNotifierActions['statusChanged']>(async () => {}),
+      appsChanged: vi.fn<AccessNotifierActions['appsChanged']>(async () => {}),
+    };
+    const conAviso = express();
+    conAviso.use(express.json());
+    conAviso.use('/api', createUsersRouter(db, { notifier }));
+    return { notifier, app: conAviso };
+  }
+
+  /** Deja correr lo que el router lanza después de responder. */
+  const despues = () => new Promise((r) => setTimeout(r, 20));
+
+  it('aprobar (pending → active): la respuesta no cambia y el notificador recibe previousStatus pending y las apps de ahora', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const p = db.seedUser({ email: 'pedro@ejemplo.test', full_name: 'Pedro Pérez', status: 'pending', role: 'reader' });
+    db.apps.push({ user_id: p.id, app_id: 'ausencias' });
+    const res = await request(conAviso).patch(`/api/users/${p.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['message', 'user']);
+    expect(res.body).toMatchObject({ message: 'status_updated', user: { id: p.id, status: 'active', role: 'reader' } });
+    await vi.waitFor(() => expect(notifier.statusChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.statusChanged).toHaveBeenCalledWith({
+      user: { id: p.id, email: 'pedro@ejemplo.test', fullName: 'Pedro Pérez', status: 'active' },
+      previousStatus: 'pending',
+      apps: ['ausencias'],
+    });
+  });
+
+  it('reactivar (inactive → active): previousStatus inactive', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const u = db.seedUser({ email: 'lucia@ejemplo.test', full_name: 'Lucía Gómez', status: 'inactive' });
+    const res = await request(conAviso).patch(`/api/users/${u.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(notifier.statusChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.statusChanged).toHaveBeenCalledWith({
+      user: { id: u.id, email: 'lucia@ejemplo.test', fullName: 'Lucía Gómez', status: 'active' },
+      previousStatus: 'inactive',
+      apps: [],
+    });
+  });
+
+  it('{active} sobre una cuenta ya activa: llega con previousStatus active (el notificador no envía nada)', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const u = db.seedUser({ email: 'marta@ejemplo.test', status: 'active' });
+    await request(conAviso).patch(`/api/users/${u.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    await vi.waitFor(() => expect(notifier.statusChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.statusChanged.mock.calls[0][0].previousStatus).toBe('active');
+  });
+
+  it('desactivar, cambiar el rol y eliminar no llaman al notificador', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const u = db.seedUser({ email: 'marta@ejemplo.test', status: 'active' });
+    const v = db.seedUser({ email: 'raul@ejemplo.test', status: 'active' });
+    expect((await request(conAviso).patch(`/api/users/${u.id}/status`).set(bearer(adminToken)).send({ status: 'inactive' })).status).toBe(200);
+    expect((await request(conAviso).patch(`/api/users/${u.id}/role`).set(bearer(adminToken)).send({ role: 'admin' })).status).toBe(200);
+    expect((await request(conAviso).delete(`/api/users/${v.id}`).set(bearer(adminToken))).status).toBe(200);
+    await despues();
+    expect(notifier.statusChanged).not.toHaveBeenCalled();
+    expect(notifier.appsChanged).not.toHaveBeenCalled();
+  });
+
+  it('PUT apps: la respuesta no cambia y el notificador recibe before, after e isSelf', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const u = db.seedUser({ email: 'lucia@ejemplo.test', full_name: 'Lucía Gómez', status: 'active' });
+    db.apps.push({ user_id: u.id, app_id: 'contabilidad' });
+    const res = await request(conAviso).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['contabilidad', 'ausencias'] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'apps_updated', apps: ['ausencias', 'contabilidad'] });
+    await vi.waitFor(() => expect(notifier.appsChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.appsChanged).toHaveBeenCalledWith({
+      user: { id: u.id, email: 'lucia@ejemplo.test', fullName: 'Lucía Gómez', status: 'active' },
+      before: ['contabilidad'],
+      after: ['ausencias', 'contabilidad'],
+      isSelf: false,
+    });
+  });
+
+  it('PUT apps a una cuenta pending: llega con su estado (el notificador no envía nada)', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const u = db.seedUser({ email: 'pedro@ejemplo.test', status: 'pending' });
+    await request(conAviso).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['ausencias'] });
+    await vi.waitFor(() => expect(notifier.appsChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.appsChanged.mock.calls[0][0].user.status).toBe('pending');
+  });
+
+  it('PUT apps sobre la propia cuenta del admin: isSelf true', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    await request(conAviso).put(`/api/users/${ADMIN_ID}/apps`).set(bearer(adminToken)).send({ apps: ['ausencias'] });
+    await vi.waitFor(() => expect(notifier.appsChanged).toHaveBeenCalledTimes(1));
+    expect(notifier.appsChanged.mock.calls[0][0].isSelf).toBe(true);
+  });
+
+  it('un PUT apps que falla (404) no llama al notificador', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    const res = await request(conAviso).put('/api/users/no-existe/apps').set(bearer(adminToken)).send({ apps: ['ausencias'] });
+    expect(res.status).toBe(404);
+    await despues();
+    expect(notifier.appsChanged).not.toHaveBeenCalled();
+  });
+
+  it('la respuesta no espera al notificador', async () => {
+    const { notifier, app: conAviso } = conNotificador();
+    notifier.statusChanged.mockImplementation(() => new Promise<void>(() => {}));
+    const p = db.seedUser({ email: 'pedro@ejemplo.test', status: 'pending' });
+    const res = await request(conAviso).patch(`/api/users/${p.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('status_updated');
+  });
+
+  it('un notificador que rechaza no cambia la respuesta: el fallo queda en el log', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { notifier, app: conAviso } = conNotificador();
+    notifier.statusChanged.mockRejectedValue(new Error('n8n caído'));
+    const p = db.seedUser({ email: 'pedro@ejemplo.test', status: 'pending' });
+    const res = await request(conAviso).patch(`/api/users/${p.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith('access_email_status error', expect.any(Error)));
+  });
+
+  it('un fallo síncrono del notificador tampoco cambia la respuesta', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { notifier, app: conAviso } = conNotificador();
+    notifier.appsChanged.mockImplementation(() => {
+      throw new Error('fallo síncrono');
+    });
+    const u = db.seedUser({ email: 'lucia@ejemplo.test', status: 'active' });
+    const res = await request(conAviso).put(`/api/users/${u.id}/apps`).set(bearer(adminToken)).send({ apps: ['ausencias'] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ message: 'apps_updated', apps: ['ausencias'] });
+    await vi.waitFor(() => expect(error).toHaveBeenCalledWith('access_email_apps error', expect.any(Error)));
+  });
+
+  it('sin notificador, aprobar y asignar apps responden igual que siempre', async () => {
+    const p = db.seedUser({ email: 'pedro@ejemplo.test', status: 'pending' });
+    const aprobar = await request(app).patch(`/api/users/${p.id}/status`).set(bearer(adminToken)).send({ status: 'active' });
+    expect(aprobar.status).toBe(200);
+    expect(aprobar.body.message).toBe('status_updated');
+    const asignar = await request(app).put(`/api/users/${p.id}/apps`).set(bearer(adminToken)).send({ apps: ['ausencias'] });
+    expect(asignar.body).toEqual({ message: 'apps_updated', apps: ['ausencias'] });
   });
 });

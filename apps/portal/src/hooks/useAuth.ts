@@ -30,6 +30,21 @@ export interface AuthState {
   apps: string[];
 }
 
+/**
+ * Lo que devuelve `useAuth()`: la sesión más una marca de si las apps ya son las
+ * definitivas. Va aparte de `AuthState` porque `readAuthState` solo decodifica el
+ * token y no puede saberlo.
+ */
+export interface UseAuthResult extends AuthState {
+  /**
+   * true cuando la lista de `apps` ya no va a cambiar por culpa de la red: o ha
+   * llegado la de la BD para ESTE usuario, o el intento terminó sin datos
+   * utilizables (error, perfil ajeno, sin `apps`) y mandan las del token.
+   * Quien niegue un acceso por no tener una app debe esperar a que sea true.
+   */
+  appsConfirmadas: boolean;
+}
+
 const EMPTY: AuthState = { isAuthenticated: false, user_id: null, email: null, role: null, apps: [] };
 
 /** Devuelve un array de strings; [] si el valor no es un array o trae no-strings (Req 4.6). */
@@ -77,6 +92,9 @@ export function readAuthState(): AuthState {
  */
 let cacheDeApps: { userId: string; apps: string[] } | null = null;
 let peticionEnVuelo: Promise<void> | null = null;
+// Usuarios cuyo intento de `/users/me` ya terminó (con datos o sin ellos). Por
+// id, igual que la cache: lo resuelto para una cuenta no vale para la siguiente.
+const intentoTerminado = new Set<string>();
 const suscriptores = new Set<() => void>();
 
 async function cargarAppsDelServidor(userId: string): Promise<void> {
@@ -93,11 +111,15 @@ async function cargarAppsDelServidor(userId: string): Promise<void> {
     // token, que es exactamente como funcionaba antes.
     if (!Array.isArray(perfil.apps)) return;
     cacheDeApps = { userId, apps: sanitizeApps(perfil.apps) };
-    for (const avisar of suscriptores) avisar();
   } catch {
     /* silencioso: se sigue con las del token, que es el comportamiento de antes */
   } finally {
     peticionEnVuelo = null;
+    // Se avisa SIEMPRE, también si no hubo datos: el guardia de ruta espera a que
+    // el intento acabe para decidir, y sin este aviso se quedaría esperando para
+    // siempre cuando el servidor falla (entonces valen las apps del token).
+    intentoTerminado.add(userId);
+    for (const avisar of suscriptores) avisar();
   }
 }
 
@@ -106,7 +128,7 @@ async function cargarAppsDelServidor(userId: string): Promise<void> {
  * en otra pestaña). En la misma pestaña, el login navega/re-monta y el estado
  * se recomputa al inicializarse.
  */
-export function useAuth(): AuthState {
+export function useAuth(): UseAuthResult {
   const [state, setState] = useState<AuthState>(readAuthState);
 
   useEffect(() => {
@@ -135,5 +157,12 @@ export function useAuth(): AuthState {
   // render haría trabajar de más a quien tenga `apps` en las dependencias de un
   // efecto — el registro de widgets ya se defiende de eso con su `appsKey`, pero
   // no todos los consumidores tienen por qué hacerlo.
-  return useMemo(() => (apps === state.apps ? state : { ...state, apps }), [state, apps]);
+  // Sin sesión (o token antiguo sin user_id) no hay petición que esperar.
+  const appsConfirmadas =
+    !state.isAuthenticated ||
+    !state.user_id ||
+    cacheDeApps?.userId === state.user_id ||
+    intentoTerminado.has(state.user_id);
+
+  return useMemo(() => ({ ...state, apps, appsConfirmadas }), [state, apps, appsConfirmadas]);
 }

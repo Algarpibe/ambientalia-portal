@@ -5,11 +5,24 @@ import AuthRightPanel from './AuthRightPanel';
 import type { ModoAuth } from './recuperacion';
 
 export default function AuthCard() {
-  // Quien llega desde otra pantalla puede pedir con qué se abre, en
-  // `location.state.modo`: «login» tras restablecer la contraseña y «olvido»
-  // desde un enlace no válido. Sin indicación, el registro, como siempre.
-  const modo = (useLocation().state as { modo?: ModoAuth } | null)?.modo;
-  const [isSignUp, setIsSignUp] = useState(modo !== 'login' && modo !== 'olvido');
+  // Con qué se abre /auth, por este orden:
+  //  1. `location.state.modo`, de quien navega hasta aquí desde otra pantalla:
+  //     «login» tras restablecer la contraseña y «olvido» desde un enlace no
+  //     válido. Manda sobre lo demás.
+  //  2. «Iniciar sesión» si la URL trae `?modo=login` (el botón «Entrar al
+  //     portal» de los correos de acceso) o si se llega echado de una ruta
+  //     protegida (`state.from`, que ponen RequireAuth y RequireAdmin): quien
+  //     viene de ahí ya tiene cuenta.
+  //  3. Si no, el registro, como siempre.
+  const location = useLocation();
+  const state = location.state as { modo?: ModoAuth; from?: unknown } | null;
+  const modo = state?.modo;
+  const abreEnLogin =
+    modo === 'login' ||
+    modo === 'olvido' ||
+    new URLSearchParams(location.search).get('modo') === 'login' ||
+    typeof state?.from === 'string';
+  const [isSignUp, setIsSignUp] = useState(!abreEnLogin);
 
   return (
     <div

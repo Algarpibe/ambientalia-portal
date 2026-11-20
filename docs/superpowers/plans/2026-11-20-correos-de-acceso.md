@@ -26,6 +26,21 @@ una ruta interna (`destinoTrasLogin`). En n8n solo se renombran el flujo y su no
 
 ---
 
+## Desvíos durante la ejecución (2026-11-20)
+
+Lo que se hizo distinto o además de lo que dicen las tareas de más abajo (las tareas no se reescriben):
+
+- **Notificador:** se añadió un test de lanzamiento síncrono (el mailer lanza en vez de rechazar) para
+  confirmar que `AccessNotifier` tampoco propaga ese fallo.
+- **`AppGuard` (nuevo, de la revisión final):** negaba el acceso con las apps viejas del token antes de
+  que contestara `/users/me`, así que el enlace del correo de «apps nuevas» devolvía a `/`. Ahora
+  `useAuth` expone `appsConfirmadas` y el guardia espera a que la lista sea definitiva (spec §5.3).
+- **Orden de despliegue:** portal primero (o ambos a la vez) y después hub-api, no «en cualquier orden»
+  (spec §9).
+- **n8n:** el renombrado del flujo `0jYHqM3Z2mHZNFOC` ya lo hizo el controlador.
+
+---
+
 ## Reglas para quien implemente
 
 - **TDD estricto:** cada test se ve en ROJO, y por la razón esperada, antes de escribir el código.

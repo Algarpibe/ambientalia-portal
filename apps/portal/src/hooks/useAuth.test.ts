@@ -230,3 +230,82 @@ describe('useAuth — las apps salen de la BD, no de un token congelado', () => 
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+describe('useAuth — appsConfirmadas: cuándo la lista de apps ya es la definitiva', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    h.token = makeToken({
+      sub: 'a@x.com',
+      user_id: 'u1',
+      role: 'reader',
+      apps: ['ausencias'],
+      exp: futureExp(),
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it('es false mientras el servidor no ha contestado y true cuando llega la lista', async () => {
+    // Respuesta en mano del test: así se ve el estado «en vuelo» sin carreras.
+    let responder!: (v: unknown) => void;
+    mockFetch.mockReturnValue(new Promise((r) => (responder = r)));
+    const useAuth = await cargarUseAuth();
+    const { result } = renderHook(() => useAuth());
+    expect(result.current.appsConfirmadas).toBe(false);
+    responder({ ok: true, json: async () => ({ id: 'u1', apps: ['ausencias', 'wo-sales'] }) });
+    await dejarQueRespondaElServidor();
+    expect(result.current.appsConfirmadas).toBe(true);
+    expect(result.current.apps).toEqual(['ausencias', 'wo-sales']);
+  });
+
+  it('pasa a true aunque el servidor conteste con error (valen las del token)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({}) });
+    const useAuth = await cargarUseAuth();
+    const { result } = renderHook(() => useAuth());
+    expect(result.current.appsConfirmadas).toBe(false);
+    await dejarQueRespondaElServidor();
+    expect(result.current.appsConfirmadas).toBe(true);
+    expect(result.current.apps).toEqual(['ausencias']);
+  });
+
+  it('pasa a true si la petición falla por red', async () => {
+    mockFetch.mockRejectedValue(new Error('sin red'));
+    const useAuth = await cargarUseAuth();
+    const { result } = renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(result.current.appsConfirmadas).toBe(true);
+  });
+
+  it('pasa a true si el perfil es de otro o no trae apps', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'OTRO', apps: ['x'] }) });
+    const useAuth = await cargarUseAuth();
+    const { result } = renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(result.current.appsConfirmadas).toBe(true);
+    expect(result.current.apps).toEqual(['ausencias']);
+  });
+
+  it('es por usuario: lo confirmado para u1 no vale para u2', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'u1', apps: ['ausencias'] }) });
+    const useAuth = await cargarUseAuth();
+    const primero = renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(primero.result.current.appsConfirmadas).toBe(true);
+    primero.unmount();
+
+    h.token = makeToken({ sub: 'b@x.com', user_id: 'u2', role: 'reader', apps: [], exp: futureExp() });
+    mockFetch.mockReturnValue(new Promise(() => {}));
+    const segundo = renderHook(() => useAuth());
+    expect(segundo.result.current.appsConfirmadas).toBe(false);
+  });
+
+  it('sin sesión no hay nada que esperar: true', async () => {
+    h.token = null;
+    const useAuth = await cargarUseAuth();
+    const { result } = renderHook(() => useAuth());
+    expect(result.current.appsConfirmadas).toBe(true);
+  });
+});

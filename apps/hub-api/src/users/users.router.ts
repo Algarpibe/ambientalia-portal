@@ -7,6 +7,7 @@ import { AuditLogger } from './audit.logger.js';
 import { requireAuth, requireAdmin, getPayload } from '../auth.js';
 import { captureError } from '../sentry.js';
 import type { AuditOperation } from './users.types.js';
+import { toAccessUser, type AccessNotifierActions } from './access-emails/access-notifier.js';
 
 // Router de gestión de usuarios, montado bajo `/api` (ver index.ts). Todas las
 // rutas admin exigen requireAdmin. Cada mutación exitosa emite un audit log.
@@ -24,9 +25,35 @@ function sendError(res: Response, e: unknown, ctx: string): void {
   res.status(500).json({ error: 'internal error' });
 }
 
-export function createUsersRouter(pool: Pool): Router {
+/** Lo que el router recibe además del pool. Todo opcional: sin ello, hace lo de siempre. */
+export interface UsersRouterDeps {
+  /**
+   * Correos de acceso (bienvenida, reactivación y apps nuevas). Sin él no se
+   * avisa a nadie: así lo montan los tests que no van de esto.
+   */
+  notifier?: AccessNotifierActions;
+}
+
+export function createUsersRouter(pool: Pool, deps: UsersRouterDeps = {}): Router {
   const router = Router();
   const service = new UserService(new UserRepository(pool));
+
+  /**
+   * Lanza un correo de acceso DESPUÉS de responder al admin y sin esperarlo: la
+   * respuesta no depende de n8n. `Promise.resolve().then(...)` recoge también un
+   * fallo síncrono del notificador, igual que en la recuperación de contraseña.
+   * Un fallo solo queda en el log y en Sentry.
+   */
+  const avisar = (endpoint: string, aviso: (notifier: AccessNotifierActions) => Promise<void>): void => {
+    const { notifier } = deps;
+    if (!notifier) return;
+    void Promise.resolve()
+      .then(() => aviso(notifier))
+      .catch((e: unknown) => {
+        console.error(`${endpoint} error`, e);
+        captureError(e, { endpoint });
+      });
+  };
 
   // SEC — rate limiting por IP (Req 5.4). 429 con cuerpo JSON estándar.
   const limitOptions = { windowMs: 60_000, standardHeaders: true, legacyHeaders: false, message: { error: 'too many requests' } };
@@ -181,6 +208,16 @@ export function createUsersRouter(pool: Pool): Router {
       }
       AuditLogger.log({ adminEmail: admin.sub, targetEmail: user.email, operation });
       res.json({ message: 'status_updated', user });
+      // Correo de acceso: bienvenida si venía de pending, reactivación si venía de
+      // inactive (desde active no sale nada: lo decide el notificador). Lleva las
+      // apps que la cuenta tiene AHORA, que se leen ya fuera de la respuesta.
+      if (status === 'active') {
+        const destinatario = toAccessUser(user);
+        const previousStatus = current.status;
+        avisar('access_email_status', async (notifier) =>
+          notifier.statusChanged({ user: destinatario, previousStatus, apps: await service.getUserApps(id) }),
+        );
+      }
     } catch (e) {
       sendError(res, e, 'update_status');
     }
@@ -215,9 +252,17 @@ export function createUsersRouter(pool: Pool): Router {
     const { id } = req.params;
     try {
       const target = await service.getUser(id); // 404 + email para auditoría
+      // Las de antes, para que el correo sepa cuáles son nuevas. Va antes de
+      // guardar, así que sí forma parte de la petición.
+      const before = await service.getUserApps(id);
       const apps = await service.setApps(id, (req.body ?? {}).apps);
       AuditLogger.log({ adminEmail: admin.sub, targetEmail: target.email, operation: 'update_apps' });
       res.json({ message: 'apps_updated', apps });
+      // Correo de apps nuevas: el notificador decide (cuenta activa, que no sea la
+      // del propio admin, y al menos una app conocida que no tuviera).
+      const destinatario = toAccessUser(target);
+      const isSelf = id === admin.user_id;
+      avisar('access_email_apps', (notifier) => notifier.appsChanged({ user: destinatario, before, after: apps, isSelf }));
     } catch (e) {
       sendError(res, e, 'update_apps');
     }

@@ -1,9 +1,10 @@
 import { useId, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { API_BASE, setToken } from '../../auth';
 import { notify } from '../../lib/notify';
 import OlvidoContrasena from './OlvidoContrasena';
+import { destinoTrasLogin } from './destinoTrasLogin';
 
 type FieldErrors = { fullName?: string; email?: string; password?: string };
 
@@ -23,6 +24,10 @@ interface AuthRightPanelProps {
 
 export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = false }: AuthRightPanelProps) {
   const navigate = useNavigate();
+  // `state.from` lo dejan RequireAuth y RequireAdmin al mandar aquí a quien no
+  // tenía sesión: tras entrar se vuelve a esa ruta (p. ej. el enlace a una app
+  // de un correo de acceso), solo si es interna (destinoTrasLogin).
+  const location = useLocation();
   // Tercer modo del panel: «¿Olvidaste tu contraseña?». Solo existe dentro de la
   // pestaña de iniciar sesión, por eso vive aquí y no en AuthCard; cambiar de
   // pestaña lo cierra.
@@ -141,7 +146,7 @@ export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = fal
         return;
       }
       setToken(data.token);
-      navigate('/');
+      navigate(destinoTrasLogin(location.state));
     } catch {
       setError('No se pudo conectar con el servidor. Reintenta.');
     } finally {

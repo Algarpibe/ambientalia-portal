@@ -238,17 +238,28 @@ describe('sin sesión', () => {
 });
 
 describe('montaje en index.ts', () => {
-  it('se monta en /api justo detras del router de usuarios, con el repositorio, el mailer y la base del portal', () => {
+  it('se monta en /api justo detras del router de usuarios, con el repositorio, el mailer compartido y la base del portal', () => {
     const index = leer('../../index.ts');
-    const usuarios = index.indexOf("app.use('/api', createUsersRouter(getHubPool()));");
+    const mailer = index.indexOf('const portalMailer = createResetMailer();');
+    const usuarios = index.indexOf("app.use('/api', createUsersRouter(getHubPool(), {");
     const restablecer = index.indexOf("app.use('/api', createPasswordResetRouter(");
-    expect(usuarios).toBeGreaterThan(-1);
+    expect(mailer).toBeGreaterThan(-1);
+    expect(usuarios).toBeGreaterThan(mailer);
     expect(restablecer).toBeGreaterThan(usuarios);
     // Nada montado entre medias.
     expect(index.slice(usuarios + 1, restablecer)).not.toMatch(/app\.use\(/);
     const montaje = index.slice(restablecer, index.indexOf('})));', restablecer));
     expect(montaje).toMatch(/new PasswordResetRepository\(getHubPool\(\)\)/);
-    expect(montaje).toMatch(/createResetMailer\(\)/);
+    expect(montaje).toMatch(/mailer: portalMailer,/);
     expect(montaje).toMatch(/portalUrl: urlPortal\(\)/);
+  });
+
+  it('un solo mailer en todo el arranque, compartido con los correos de acceso del router de usuarios', () => {
+    const index = leer('../../index.ts');
+    // Dos clientes avisarian dos veces al arrancar de la configuracion que falta.
+    expect(index.match(/createResetMailer\(\)/g)).toHaveLength(1);
+    const usuarios = index.indexOf("app.use('/api', createUsersRouter(getHubPool(), {");
+    const montaje = index.slice(usuarios, index.indexOf('}));', usuarios));
+    expect(montaje).toMatch(/notifier: new AccessNotifier\(\{ mailer: portalMailer, portalUrl: urlPortal\(\) \}\)/);
   });
 });

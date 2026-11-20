@@ -10,6 +10,7 @@ import { createPasswordResetRouter } from './users/password-reset/password-reset
 import { PasswordResetService } from './users/password-reset/password-reset.service.js';
 import { PasswordResetRepository } from './users/password-reset/password-reset.repository.js';
 import { createResetMailer } from './users/password-reset/password-reset.mailer.js';
+import { AccessNotifier } from './users/access-emails/access-notifier.js';
 import { urlPortal } from './ausencias/config.js';
 import { createWoSalesRouter } from './wo-sales/router.js';
 import { createContabilidadRouter } from './contabilidad/router.js';
@@ -127,11 +128,19 @@ process.on('uncaughtException', (err) => { console.error('uncaughtException', er
 // y seed) antes de aceptar tráfico. Si algo falla, initDb() termina el proceso.
 initDb()
   .then(() => {
+    // UN solo cliente del webhook de n8n («Portal — Correos a usuarios») para
+    // los dos que escriben a los usuarios del portal: los correos de acceso
+    // (bienvenida, reactivación y apps nuevas, que el router de usuarios lanza
+    // después de responder al admin) y la recuperación de contraseña. Uno solo
+    // para que el aviso de configuración incompleta salga una vez al arrancar.
+    const portalMailer = createResetMailer();
     // Router de gestión de usuarios. Se monta tras initDb (getHubPool ya
     // validado) para no romper el chequeo de arranque de HUB_DB_URL.
     // Montado en '/api' → expone /api/users*, /api/auth/register. El rate limit
     // propio del router corre antes de requireAuth/requireAdmin.
-    app.use('/api', createUsersRouter(getHubPool()));
+    app.use('/api', createUsersRouter(getHubPool(), {
+      notifier: new AccessNotifier({ mailer: portalMailer, portalUrl: urlPortal() }),
+    }));
     // Recuperación de contraseña por correo → /api/auth/forgot-password y
     // /api/auth/reset-password. Públicas, como /api/auth/register: cada una con
     // su rate limit por IP, y el global de /api/ encima. El enlace del correo
@@ -139,7 +148,7 @@ initDb()
     // Ausencias) y el correo sale por el webhook de n8n.
     app.use('/api', createPasswordResetRouter(new PasswordResetService({
       store: new PasswordResetRepository(getHubPool()),
-      mailer: createResetMailer(),
+      mailer: portalMailer,
       now: () => new Date(),
       portalUrl: urlPortal(),
     })));

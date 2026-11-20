@@ -223,15 +223,21 @@ Cómo lo lee hub-api (`apps/hub-api/src/trazabilidad/envio-avisos.ts`, la única
   (403), tarjetas reales en modo prueba, flujo desactivado (404 → «Fallido»), «sin confirmar» que sí
   salió y que no salió (con una espera temporal de 40 s, ya quitada).
 
-### 2.4 Recuperación de contraseña del portal (webhook síncrono, sin barrera)
+### 2.4 Correos del portal a sus usuarios (webhook síncrono, sin barrera)
 
-Los correos de «¿Olvidaste tu contraseña?» (2026-11-13) siguen la forma de 2.3, más simple: hub-api
-llama al Webhook al momento y espera 10 s como mucho, pero la persona no espera a n8n (hub-api ya le ha
-respondido) y nadie reintenta: si falla, vuelve a pedir el enlace.
+Un solo flujo envía los correos que el portal manda a sus propios usuarios:
+
+- **Recuperación de contraseña** (2026-11-13): el enlace de «¿Olvidaste tu contraseña?» y el aviso de
+  que la contraseña cambió.
+- **Correos de acceso** (2026-11-20): bienvenida al aprobar una cuenta, reactivación y apps nuevas,
+  cuando un administrador actúa en el panel de usuarios.
+
+Sigue la forma de 2.3, más simple: hub-api llama al Webhook al momento y espera 10 s como mucho, pero
+nadie espera a n8n (hub-api ya ha respondido a la persona o al administrador) y nadie reintenta.
 
 | Workflow | Forma |
 |---|---|
-| **Portal — Restablecer contraseña** (id `0jYHqM3Z2mHZNFOC`) | Webhook síncrono (`POST /webhook/portal-restablecer-contrasena`): un correo por llamada |
+| **Portal — Correos a usuarios** (id `0jYHqM3Z2mHZNFOC`; hasta el 2026-11-20, «Portal — Restablecer contraseña») | Webhook síncrono (`POST /webhook/portal-restablecer-contrasena`): un correo por llamada |
 
 ```
 hub-api (POST JSON {para, asunto, cuerpo}, cabecera X-Password-Reset-Token,
@@ -245,9 +251,21 @@ Gmail 2.2 (credencial «Gmail info@», la misma de 2.3; HTML; appendAttribution 
 Respond to Webhook 1.5 → 200 {ok: true}
 ```
 
-- Lo llama `apps/hub-api/src/users/password-reset/password-reset.mailer.ts`. Cualquier respuesta que no
-  sea 2xx, o 10 s sin respuesta, deja en el log de hub-api `password_reset_envio_fallido`; sin
-  `PASSWORD_RESET_N8N_URL` o `PASSWORD_RESET_N8N_TOKEN`, `password_reset_sin_configurar` y no sale nada.
+- Lo llama `apps/hub-api/src/users/password-reset/password-reset.mailer.ts`: **un solo** cliente,
+  creado en `apps/hub-api/src/index.ts` y compartido por la recuperación de contraseña y por
+  `apps/hub-api/src/users/access-emails/access-notifier.ts`. Cualquier respuesta que no sea 2xx, o 10 s
+  sin respuesta, deja en el log de hub-api `password_reset_envio_fallido`; sin `PASSWORD_RESET_N8N_URL`
+  o `PASSWORD_RESET_N8N_TOKEN`, `password_reset_sin_configurar` y no sale nada.
+- **Nombres históricos:** las variables `PASSWORD_RESET_N8N_*`, la cabecera `X-Password-Reset-Token`, la
+  ruta `portal-restablecer-contrasena`, la credencial «Token restablecer contraseña» y los eventos
+  `password_reset_envio_fallido` y `password_reset_sin_configurar` conservan el nombre de cuando el
+  flujo solo restablecía contraseñas. Sirven para los dos usos; cambiarlos obligaría a tocar EasyPanel y
+  n8n a la vez sin ganar nada.
+- Los correos de acceso dejan además su propia línea, siempre con `user_id` y nunca con el correo:
+  `user_access_email_sent` (con `kind`: `welcome`, `reactivated` o `new_apps`),
+  `user_access_email_skipped` (con `reason`: `not_active`, `self`, `no_new_apps`, `no_known_apps` o
+  `no_transition`) o `user_access_email_failed`. `sent` significa «entregado al cliente del webhook»:
+  si n8n falla, la línea de justo antes es `password_reset_envio_fallido`.
 - **No guarda las ejecuciones correctas** (`saveDataSuccessExecution: none`): el enlace con su token no
   queda en el historial. Las fallidas sí se guardan, para diagnosticar, y llevan el enlace y la
   cabecera: restringir quién ve el flujo. El enlace caduca a los 30 minutos y es de un solo uso.
@@ -255,7 +273,7 @@ Respond to Webhook 1.5 → 200 {ok: true}
   guardarse las correctas, se perdería el rastro del fallo.
 - El token es el valor de la credencial Header Auth y el mismo que `PASSWORD_RESET_N8N_TOKEN` en
   EasyPanel. Propio de este flujo. Si aparece en un chat o en un log, se rota en los dos sitios.
-- Sin barrera de dominio: el destinatario es siempre el correo de la propia cuenta, que hub-api lee de
+- Sin barrera de dominio: el destinatario es siempre el correo de la cuenta afectada, que hub-api lee de
   `portal.users`, nunca del cuerpo de la petición del navegador.
 - Probarlo a mano como en 2.3 (el token leído con `-AsSecureString`) y SIEMPRE a un buzón propio.
 
