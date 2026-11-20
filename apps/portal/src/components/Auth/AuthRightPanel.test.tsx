@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import AuthRightPanel from './AuthRightPanel';
 
 // Mocks: API_BASE definido (si no, el componente aborta antes de fetch) y notify.
 vi.mock('../../auth', () => ({ API_BASE: 'http://test', setToken: vi.fn() }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 import { notify } from '../../lib/notify';
+import { setToken } from '../../auth';
 
 function renderSignup() {
   return render(
@@ -269,5 +270,45 @@ describe('AuthRightPanel — ¿Olvidaste tu contraseña?', () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole('button', { name: 'Enviar enlace' })).toBeTruthy();
+  });
+});
+
+// Tras iniciar sesión (spec 2026-11-20, §5.2): se vuelve a la ruta protegida de
+// la que se llegó (`state.from`), solo si es interna; si no, al inicio.
+describe('AuthRightPanel — a dónde se vuelve tras iniciar sesión', () => {
+  /** Lo que se pinta fuera de /auth: la ruta a la que se navegó. */
+  function Destino() {
+    const { pathname } = useLocation();
+    return <p data-testid="destino">{pathname}</p>;
+  }
+
+  function entrarDesde(state: unknown) {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({ token: 'token-ficticio' }) } as unknown as Response);
+    const { container } = render(
+      <MemoryRouter initialEntries={[{ pathname: '/auth', state }]}>
+        <Routes>
+          <Route path="/auth" element={<AuthRightPanel isSignUp={false} onToggle={() => {}} />} />
+          <Route path="*" element={<Destino />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'persona@ejemplo.test' } });
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'clave-ficticia-1' } });
+    fireEvent.submit(container.querySelector('form')!);
+  }
+
+  it('vuelve a la ruta protegida de la que se llegó', async () => {
+    entrarDesde({ from: '/contabilidad' });
+    expect((await screen.findByTestId('destino')).textContent).toBe('/contabilidad');
+    expect(setToken).toHaveBeenCalledWith('token-ficticio');
+  });
+
+  it.each([
+    ['sin `from`', undefined],
+    ['con un `from` a otra web (//)', { from: '//evil.test' }],
+    ['con un `from` absoluto', { from: 'https://evil.test/' }],
+  ])('%s, al inicio', async (_caso, state) => {
+    entrarDesde(state);
+    expect((await screen.findByTestId('destino')).textContent).toBe('/');
   });
 });
