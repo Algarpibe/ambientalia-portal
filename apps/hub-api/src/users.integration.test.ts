@@ -275,6 +275,7 @@ describe('GET /api/users/pending-count', () => {
     db.seedUser({ status: 'pending' });
     db.seedUser({ status: 'pending' });
     db.seedUser({ status: 'inactive' });
+    db.seedUser({ status: 'active' });
     const res = await request(app).get('/api/users/pending-count').set(bearer(adminToken));
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ pending: 2 });

@@ -184,6 +184,8 @@ export function createUsersRouter(pool: Pool, deps: UsersRouterDeps = {}): Route
   // GET /api/users/pending-count — solicitudes de acceso esperando aprobación.
   // Lo consulta el menú del portal para pintar el aviso en «Usuarios». Pasa por
   // el limitador de /users/* como el resto; no se audita porque es una lectura.
+  // Si algún día se añade GET /users/:id, debe ir DESPUÉS de esta ruta; si no,
+  // Express tomaría «pending-count» como un id.
   router.get('/users/pending-count', requireAdmin, async (_req: Request, res: Response) => {
     try {
       res.json({ pending: await service.countPending() });
