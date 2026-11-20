@@ -194,7 +194,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             {!plegada && pendientes > 0 && (
               <span
                 aria-hidden="true"
-                className="ml-auto min-w-[1.25rem] px-1.5 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold leading-none text-center"
+                className="ml-auto h-5 min-w-5 px-1.5 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs font-bold"
               >
                 {pendientes > 9 ? '9+' : pendientes}
               </span>

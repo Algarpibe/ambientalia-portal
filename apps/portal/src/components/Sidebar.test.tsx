@@ -245,6 +245,7 @@ describe('Sidebar — solicitudes pendientes en «Usuarios»', () => {
     renderAdmin();
     expect(pendientes.llamadas).toContain(true);
     expect(within(enlaceUsuarios()).getByText('2')).toBeTruthy();
+    expect(within(enlaceUsuarios()).getByText('2').getAttribute('aria-hidden')).toBe('true');
     expect(enlaceUsuarios().getAttribute('aria-label')).toBe('Usuarios, 2 solicitudes pendientes');
   });
 
@@ -268,11 +269,20 @@ describe('Sidebar — solicitudes pendientes en «Usuarios»', () => {
     expect(screen.queryByTestId('punto-pendientes')).toBeNull();
   });
 
+  it('plegado y sin pendientes: title «Usuarios», sin aria-label y sin punto', () => {
+    renderAdmin();
+    fireEvent.click(screen.getByLabelText('Contraer menú'));
+    expect(enlaceUsuarios().getAttribute('title')).toBe('Usuarios');
+    expect(enlaceUsuarios().hasAttribute('aria-label')).toBe(false);
+    expect(within(enlaceUsuarios()).queryByTestId('punto-pendientes')).toBeNull();
+  });
+
   it('plegado: punto sobre el icono, sin número, y el title lo dice', () => {
     pendientes.value = 3;
     renderAdmin();
     fireEvent.click(screen.getByLabelText('Contraer menú'));
-    expect(screen.getByTestId('punto-pendientes')).toBeTruthy();
+    const punto = within(enlaceUsuarios()).getByTestId('punto-pendientes');
+    expect(punto.getAttribute('aria-hidden')).toBe('true');
     expect(within(enlaceUsuarios()).queryByText('3')).toBeNull();
     expect(enlaceUsuarios().getAttribute('title')).toBe('Usuarios, 3 solicitudes pendientes');
   });
