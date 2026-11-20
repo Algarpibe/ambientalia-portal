@@ -8,6 +8,7 @@ import RequireAdmin from './components/RequireAdmin';
 import AppGuard from './components/AppGuard';
 import RutaTableroTv from './components/RutaTableroTv';
 import RutaMisEquipos from './components/RutaMisEquipos';
+import EntradaEquiposTaller from './components/EntradaEquiposTaller';
 import NotificationHost from './components/NotificationHost';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -95,7 +96,7 @@ function App() {
                     <Route path="/ausencias/*" element={<AppGuard appId="ausencias"><Ausencias /></AppGuard>} />
                     <Route path="/calibraciones/*" element={<AppGuard appId="calibraciones"><Calibraciones /></AppGuard>} />
                     <Route path="/trazabilidad-mantenimientos/*" element={<AppGuard appId="trazabilidad-mantenimientos"><TrazabilidadMantenimientos /></AppGuard>} />
-                    <Route path="/equipos-taller/*" element={<AppGuard appId="equipos-taller"><EquiposTaller /></AppGuard>} />
+                    <Route path="/equipos-taller/*" element={<AppGuard appId="equipos-taller"><EntradaEquiposTaller><EquiposTaller /></EntradaEquiposTaller></AppGuard>} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Suspense>
