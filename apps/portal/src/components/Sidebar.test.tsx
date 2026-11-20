@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AuthState } from '../hooks/useAuth';
 import Sidebar from './Sidebar';
@@ -9,6 +9,18 @@ const navigateMock = vi.hoisted(() => vi.fn());
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => navigateMock }));
 const state = vi.hoisted(() => ({ value: null as AuthState | null }));
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => state.value }));
+// El hook real consulta hub-api; aquí solo importa qué recibe y qué devuelve.
+const pendientes = vi.hoisted(() => ({ value: 0, llamadas: [] as boolean[] }));
+vi.mock('../hooks/usePendingUsersCount', () => ({
+  usePendingUsersCount: (enabled: boolean) => {
+    pendientes.llamadas.push(enabled);
+    return enabled ? pendientes.value : 0;
+  },
+}));
+beforeEach(() => {
+  pendientes.value = 0;
+  pendientes.llamadas = [];
+});
 
 function renderSidebar() {
   render(
@@ -218,5 +230,57 @@ describe('Sidebar — entrada «Tablero TV»', () => {
     setAuth({ isAuthenticated: false, role: null });
     renderSidebar();
     expect(enlaceTv()).toBeNull();
+  });
+});
+
+describe('Sidebar — solicitudes pendientes en «Usuarios»', () => {
+  const enlaceUsuarios = () => document.querySelector('a[href="/admin/users"]') as HTMLAnchorElement;
+  const renderAdmin = () => {
+    setAuth({ isAuthenticated: true, role: 'admin', user_id: 'a' });
+    renderSidebar();
+  };
+
+  it('admin con pendientes: globo con el número y el enlace lo dice', () => {
+    pendientes.value = 2;
+    renderAdmin();
+    expect(pendientes.llamadas).toContain(true);
+    expect(within(enlaceUsuarios()).getByText('2')).toBeTruthy();
+    expect(enlaceUsuarios().getAttribute('aria-label')).toBe('Usuarios, 2 solicitudes pendientes');
+  });
+
+  it('una sola solicitud va en singular', () => {
+    pendientes.value = 1;
+    renderAdmin();
+    expect(enlaceUsuarios().getAttribute('aria-label')).toBe('Usuarios, 1 solicitud pendiente');
+  });
+
+  it('más de 9 muestra 9+, pero el enlace dice el número real', () => {
+    pendientes.value = 12;
+    renderAdmin();
+    expect(within(enlaceUsuarios()).getByText('9+')).toBeTruthy();
+    expect(enlaceUsuarios().getAttribute('aria-label')).toBe('Usuarios, 12 solicitudes pendientes');
+  });
+
+  it('sin pendientes el enlace queda como siempre', () => {
+    renderAdmin();
+    expect(enlaceUsuarios().hasAttribute('aria-label')).toBe(false);
+    expect(enlaceUsuarios().textContent).toBe('Usuarios');
+    expect(screen.queryByTestId('punto-pendientes')).toBeNull();
+  });
+
+  it('plegado: punto sobre el icono, sin número, y el title lo dice', () => {
+    pendientes.value = 3;
+    renderAdmin();
+    fireEvent.click(screen.getByLabelText('Contraer menú'));
+    expect(screen.getByTestId('punto-pendientes')).toBeTruthy();
+    expect(within(enlaceUsuarios()).queryByText('3')).toBeNull();
+    expect(enlaceUsuarios().getAttribute('title')).toBe('Usuarios, 3 solicitudes pendientes');
+  });
+
+  it('un lector no consulta: el hook recibe false', () => {
+    setAuth({ isAuthenticated: true, role: 'reader', user_id: 'r' });
+    renderSidebar();
+    expect(pendientes.llamadas.length).toBeGreaterThan(0);
+    expect(pendientes.llamadas.every((e) => e === false)).toBe(true);
   });
 });
