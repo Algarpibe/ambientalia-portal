@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AdminUsers from './AdminUsers';
 import { authFetch } from '../../lib/api';
 import { clearToken } from '../../auth';
 import type { AdminUser } from './types';
+import { notify } from '../../lib/notify';
+import { PENDING_USERS_CHANGED } from '../../hooks/usePendingUsersCount';
 
 const renderAdmin = () => render(<MemoryRouter><AdminUsers /></MemoryRouter>);
 
@@ -147,5 +149,69 @@ describe('AdminUsers · doble envío (FE-417)', () => {
     } finally {
       confirmar.mockRestore();
     }
+  });
+});
+
+// Aprobar o eliminar cambian el número de pendientes: el panel avisa al menú para
+// que el globo de «Usuarios» se ponga al día sin esperar al siguiente sondeo.
+describe('AdminUsers · aviso al contador de pendientes', () => {
+  const lista = [user('1', 'Ana', 'active'), user('2', 'Beto', 'pending')];
+
+  /** La lista carga bien; las mutaciones responden con `mutacion`. */
+  function responder(mutacion: { ok: boolean; status: number }) {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        init?.method
+          ? { ...mutacion, json: async () => ({}) }
+          : { ok: true, json: async () => ({ users: lista, total: 2, page: 1, limit: 50 }) },
+      ),
+    );
+  }
+
+  let avisos = 0;
+  const contar = () => {
+    avisos += 1;
+  };
+  beforeEach(() => {
+    avisos = 0;
+    window.addEventListener(PENDING_USERS_CHANGED, contar);
+  });
+  afterEach(() => window.removeEventListener(PENDING_USERS_CHANGED, contar));
+
+  it('aprobar con éxito avisa', async () => {
+    responder({ ok: true, status: 200 });
+    renderAdmin();
+    fireEvent.click(await screen.findByRole('button', { name: /Aprobar/ }));
+    await waitFor(() => expect(avisos).toBe(1));
+  });
+
+  it('eliminar con éxito avisa', async () => {
+    const confirmar = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      responder({ ok: true, status: 200 });
+      renderAdmin();
+      await screen.findByText('Beto');
+      const eliminar = screen.getAllByRole('button', { name: 'Eliminar usuario' });
+      fireEvent.click(eliminar[eliminar.length - 1]);
+      await waitFor(() => expect(avisos).toBe(1));
+    } finally {
+      confirmar.mockRestore();
+    }
+  });
+
+  it('aprobar con error no avisa', async () => {
+    responder({ ok: false, status: 500 });
+    renderAdmin();
+    fireEvent.click(await screen.findByRole('button', { name: /Aprobar/ }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('No se pudo completar la acción.', 'error'));
+    expect(avisos).toBe(0);
+  });
+
+  it('desactivar no avisa: no cambia los pendientes', async () => {
+    responder({ ok: true, status: 200 });
+    renderAdmin();
+    fireEvent.click(await screen.findByRole('button', { name: /Desactivar/ }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('Usuario desactivado.', 'info'));
+    expect(avisos).toBe(0);
   });
 });
