@@ -112,7 +112,7 @@ describe('usePendingUsersCount', () => {
     await asentar();
     expect(result.current).toBe(2);
 
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) });
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({ pending: 0 }) });
     mockFetch.mockRejectedValueOnce(new Error('red caida'));
     mockFetch.mockResolvedValueOnce(responde('muchos'));
     act(() => notifyPendingUsersChanged());
@@ -121,6 +121,21 @@ describe('usePendingUsersCount', () => {
     expect(mockFetch).toHaveBeenCalledTimes(4);
     await asentar();
     expect(result.current).toBe(2);
+  });
+
+  it('si dos consultas se cruzan, gana la última que se lanzó', async () => {
+    const { result } = renderHook(() => usePendingUsersCount(true));
+    await asentar();
+    let soltarPrimera!: (r: unknown) => void;
+    mockFetch.mockImplementationOnce(() => new Promise((r) => { soltarPrimera = r; }));
+    mockFetch.mockResolvedValueOnce(responde(0));
+    act(() => notifyPendingUsersChanged()); // la primera se queda colgada
+    act(() => notifyPendingUsersChanged()); // la segunda responde 0
+    await asentar();
+    expect(result.current).toBe(0);
+    soltarPrimera(responde(1)); // la vieja llega tarde
+    await asentar();
+    expect(result.current).toBe(0);
   });
 
   it('al desmontar deja de consultar', async () => {

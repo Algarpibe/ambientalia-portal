@@ -36,14 +36,18 @@ export function usePendingUsersCount(enabled: boolean): number {
   useEffect(() => {
     if (!enabled) return;
     let vivo = true;
+    // Solo vale la respuesta de la última consulta lanzada: si dos se cruzan
+    // (p. ej. dos aprobaciones seguidas), la vieja no pisa a la nueva.
+    let ultima = 0;
 
     const consultar = async () => {
+      const esta = ++ultima;
       lastFetchRef.current = Date.now();
       try {
         const res = await authFetch('/api/users/pending-count');
         if (!res.ok) return;
         const body = (await res.json()) as { pending?: unknown };
-        if (vivo && typeof body.pending === 'number') setCount(body.pending);
+        if (vivo && esta === ultima && typeof body.pending === 'number') setCount(body.pending);
       } catch {
         /* silencioso: se conserva el último valor bueno */
       }
@@ -61,8 +65,6 @@ export function usePendingUsersCount(enabled: boolean): number {
     };
 
     void consultar();
-    // setInterval global, no window.setInterval: es el que los tests sustituyen
-    // por temporizadores falsos.
     const id = setInterval(alIntervalo, PENDING_POLL_MS);
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener(PENDING_USERS_CHANGED, alCambiar);
