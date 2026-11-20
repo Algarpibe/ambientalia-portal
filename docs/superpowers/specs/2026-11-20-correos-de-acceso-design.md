@@ -1,7 +1,9 @@
 # Portal — correos de acceso: bienvenida, reactivación y apps nuevas
 
 **Fecha:** 2026-11-20
-**Estado:** diseño aprobado en brainstorming; pendiente de plan.
+**Estado:** implementado en la rama `feat/correos-de-acceso` (plan
+`docs/superpowers/plans/2026-11-20-correos-de-acceso.md`); pendiente de fusionar y desplegar. El flujo
+de n8n `0jYHqM3Z2mHZNFOC` ya está renombrado a «Portal — Correos a usuarios».
 **Depende de:** la gestión de usuarios (`apps/hub-api/src/users/users.router.ts`,
 `users.service.ts`), el envío por n8n de la recuperación de contraseña
 (`apps/hub-api/src/users/password-reset/password-reset.mailer.ts` y
@@ -105,15 +107,37 @@ de contacto concreto (repo público).
 
 ## 5. Portal
 
-Dos arreglos para que los enlaces del correo lleven a donde dicen:
+Tres arreglos para que los enlaces del correo lleven a donde dicen:
 
-1. **`AuthCard` abre en «Iniciar sesión»** con `?modo=login` en la URL o cuando se llega redirigido
+### 5.1 Pantalla de acceso
+
+**`AuthCard` abre en «Iniciar sesión»** con `?modo=login` en la URL o cuando se llega redirigido
    desde una ruta protegida (`location.state.from`, que ya ponen `RequireAuth` y `RequireAdmin`). Hoy
    `/auth` abre en registro. `location.state.modo` (de la recuperación de contraseña) sigue mandando
    sobre lo demás.
-2. **Tras iniciar sesión se vuelve a la ruta pedida** (`location.state.from`) en vez de a `/`, solo
-   si es interna: empieza por `/` y no por `//`. Cualquier otra cosa lleva a `/` (sin redirecciones
-   abiertas).
+### 5.2 Destino tras iniciar sesión
+
+**Tras iniciar sesión se vuelve a la ruta pedida** (`location.state.from`) en vez de a `/`, solo
+si es interna: empieza por `/`, no por `//` y no contiene `/\` ni ningún espacio en blanco.
+Cualquier otra cosa lleva a `/` (sin redirecciones abiertas). Los dos últimos descartes existen
+porque los navegadores ignoran tabuladores y saltos de línea dentro de una URL y tratan `\` como `/`:
+`/\t/evil` se convertiría en `//evil`.
+
+### 5.3 Guardia de apps
+
+**`AppGuard` espera a la lista del servidor antes de negar el acceso.** El guardia decide en el primer
+render con las apps del token, que dura 7 días y no se refresca nunca; la lista real de la BD solo
+llega cuando contesta `GET /api/users/me`. Quien acaba de recibir una app nueva y abre su enlace
+desde el correo de «apps nuevas» (una carga completa de página) llegaba con el token anterior, veía
+«No tienes acceso a esta aplicación.» y era devuelto a `/` antes de que llegara la respuesta.
+
+- `useAuth` expone `appsConfirmadas`: `true` cuando ya llegó la lista del servidor para ese usuario, o
+  cuando el intento terminó sin datos utilizables (error, perfil ajeno, sin `apps`, fallo de red) y
+  valen las del token, o cuando no hay sesión. Se lleva a nivel de módulo por usuario, como la caché de
+  apps, y avisa a los suscriptores al terminar el intento, tenga o no datos.
+- `AppGuard`: si el token ya trae la app, renderiza sin esperar; si no y la lista aún no es definitiva,
+  muestra un marcador neutro (`role="status"`) sin redirigir ni avisar; si ya es definitiva y no la
+  trae, redirige y notifica como antes.
 
 ## 6. n8n
 
@@ -147,6 +171,17 @@ histórico; se documenta en `docs/n8n-automatizaciones.md` §2.4).
 
 ## 9. Despliegue
 
-hub-api y portal son independientes entre sí (en cualquier orden). Renombrar el flujo en n8n. Probar
-con una cuenta propia de prueba: aprobarla, asignarle apps, quitarle una, reactivarla; nunca con la
-cuenta de otra persona.
+Desplegar **primero el portal** (o los dos a la vez) y después hub-api. Si hub-api saliera antes, los
+correos ya enlazarían a `/auth?modo=login` y a rutas de app que el portal antiguo no maneja bien: abre
+el registro, el inicio de sesión lleva a `/` y el guardia niega con las apps viejas del token. El
+renombrado del flujo en n8n ya está hecho. Probar con una cuenta propia de prueba: aprobarla,
+asignarle apps, quitarle una, reactivarla; nunca con la cuenta de otra persona.
+
+## 10. Limitaciones aceptadas
+
+- `before` (las apps de antes) se lee fuera de la transacción de `setApps`: dos guardados simultáneos
+  podrían calcular mal la diferencia y avisar de más o de menos.
+- `user_access_email_sent` significa «entregado al mailer», no «recibido»: un fallo de n8n queda en el
+  log como `password_reset_envio_fallido`, sin `user_id`.
+- El interceptor de 401 y el cierre de sesión siguen enviando a `/auth`, que abre en registro; queda
+  fuera de alcance.
