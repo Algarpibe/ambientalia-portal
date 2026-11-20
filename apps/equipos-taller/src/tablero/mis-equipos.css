@@ -8,14 +8,11 @@
 .tt-mis-id h1 { font-size: 20px; font-weight: 800; line-height: 1.2; margin: 0; overflow-wrap: anywhere; }
 
 .tt-mis-boton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--tt-tarjeta-borde); background: var(--tt-tarjeta); color: var(--tt-tx1); font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
-.tt-mis-cambiar { background: transparent; color: var(--tt-tx-cab); border-color: var(--tt-tx-cab-tenue); }
 
 .tt-mis-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; list-style: none; padding: 0; }
 .tt-mis-kpis .tt-kpi { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; }
 .tt-mis-kpis .tt-kpi-n { font-size: 26px; }
 
-.tt-mis-selector { display: flex; flex-direction: column; gap: 8px; }
-.tt-mis-selector h2 { font-size: 18px; margin: 0; }
 .tt-mis-grupo { display: flex; flex-direction: column; gap: 8px; }
 
 .tt-dias-suave { border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 800; white-space: nowrap; }

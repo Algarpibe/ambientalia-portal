@@ -16,8 +16,8 @@ export function coincideTecnico(a: string, b: string): boolean {
 }
 
 /**
- * Nombres distintos (por clave normalizada) de los técnicos de DESK con tarjetas, en orden alfabético. Las
- * asignadas en el portal no entran: se reconocen por la cuenta, no por «¿Quién eres?».
+ * Nombres distintos (por clave normalizada) de los técnicos de DESK con tarjetas, en orden alfabético: contra ellos
+ * se busca el nombre del usuario en «Mis equipos». Las asignadas en el portal no entran: se reconocen por la cuenta.
  */
 export function tecnicosDelTablero(t: Tablero): string[] {
   const vistos = new Map<string, string>();
@@ -34,7 +34,7 @@ export const esDe = (k: Tarjeta, nombre: string): boolean => !!k.tecnico && nkey
 
 /**
  * ¿Es mía esta tarjeta? Con asignación del portal, solo si es de mi cuenta (aunque Desk o el nombre digan otra
- * cosa). Sin ella, por el nombre elegido o reconocido, como antes.
+ * cosa). Sin ella, por el nombre reconocido: el único de Desk que casa con el mío.
  */
 export function esMia(k: Tarjeta, yo: { userId: string | null; nombre: string | null }): boolean {
   if (k.tecnico?.userId) return yo.userId !== null && k.tecnico.userId === yo.userId;

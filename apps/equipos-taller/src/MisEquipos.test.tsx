@@ -2,12 +2,12 @@
 // «Mis equipos»: vista de solo lectura del técnico. Fuente de datos inyectada. Datos ficticios.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { EST, claveFila, type Fila, type RespuestaEquipos } from './nucleo';
+import { EST, avatarDe, claveFila, type Fila, type RespuestaEquipos } from './nucleo';
 import MisEquipos, { CLAVE_TECNICO } from './MisEquipos';
 
 const AHORA = Date.parse('2026-11-11T20:00:00Z');
 // Almacenamiento en memoria: el localStorage de jsdom choca con el global de Node 22+.
-const memoria = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), clear: () => m.clear() }; };
+const memoria = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), clear: () => m.clear() }; };
 const almacen = { actual: memoria() };
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(AHORA); almacen.actual = memoria(); vi.stubGlobal('localStorage', almacen.actual); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -32,69 +32,74 @@ const montar = (nombre: string | null, filas = FILAS, extra: Partial<Parameters<
   render(<MisEquipos nombre={nombre} pedir={vi.fn(async () => structuredClone(resp(filas)))} {...extra} />);
 const listo = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 const grupo = (n: string) => screen.getByRole('region', { name: n });
+const SIN_EQUIPOS = 'No tienes equipos asignados. Si falta alguno, pide que te lo asignen desde la tabla.';
+const avatar = () => document.querySelector('.tt-mis-cab .tt-av')!;
 
-describe('MisEquipos: identidad', () => {
+describe('MisEquipos: solo lo suyo', () => {
   it('un único técnico que coincide se usa sin preguntar', async () => {
     montar(UNO);
     await listo();
     expect(screen.queryByText('¿Quién eres?')).toBeNull();
     expect(screen.getAllByRole('article')).toHaveLength(4);
   });
-  it('sin coincidencia, «¿Quién eres?» lista los técnicos distintos y la elección se guarda y se reutiliza', async () => {
+  it('sin coincidencia no pregunta «¿Quién eres?» ni ofrece «Cambiar»: lo dice, con la cabecera del usuario', async () => {
     montar('Alguien Más');
     await listo();
-    const lista = within(screen.getByRole('group', { name: '¿Quién eres?' }));
-    expect(lista.getAllByRole('button').map((b) => b.textContent)).toEqual([UNO, 'Técnico Dos']);
-    fireEvent.click(lista.getByRole('button', { name: 'Técnico Dos' }));
-    expect(localStorage.getItem(CLAVE_TECNICO)).toBe('Técnico Dos');
-    expect(screen.getAllByRole('article')).toHaveLength(1);
-    cleanup();
-    montar('Alguien Más');
-    await listo();
-    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(screen.queryByText('¿Quién eres?')).toBeNull();
+    expect(screen.queryByRole('group', { name: '¿Quién eres?' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cambiar' })).toBeNull();
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.getByText(SIN_EQUIPOS)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Alguien Más' })).toBeTruthy();
+    expect(avatar().textContent).toBe('AM');
+    expect(avatar().className).toContain('tt-av-neutro');
   });
-  it('dos técnicos que coinciden también preguntan; «Cambiar» reabre el selector', async () => {
+  it('si casan dos nombres de Desk, no muestra los equipos de ninguno de los dos (ni pregunta)', async () => {
     montar('Técnico Pérez', [...FILAS, fila('18A90006', '2026-11-05', 'Ingresado', 'Técnico Tres Pérez'), fila('18A90007', '2026-11-05', 'Ingresado', 'Técnico Cuatro Pérez')]);
     await listo();
-    expect(screen.getByRole('group', { name: '¿Quién eres?' })).toBeTruthy();
-    cleanup();
-    montar(UNO);
-    await listo();
-    fireEvent.click(screen.getByRole('button', { name: 'Cambiar' }));
-    expect(screen.getByRole('group', { name: '¿Quién eres?' })).toBeTruthy();
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(screen.queryByRole('group', { name: '¿Quién eres?' })).toBeNull();
+    expect(screen.getByText(SIN_EQUIPOS)).toBeTruthy();
   });
-  it('un nombre guardado que no está en el tablero muestra aviso y deja el selector', async () => {
-    localStorage.setItem(CLAVE_TECNICO, 'Carlos Ruiz');
-    montar(UNO);
-    await listo();
-    expect(screen.getByText(/No hay equipos asignados a Carlos Ruiz/)).toBeTruthy();
-    expect(screen.getByRole('group', { name: '¿Quién eres?' })).toBeTruthy();
-  });
-  it('si el almacenamiento local falla, sigue funcionando', async () => {
-    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } });
+  it('un nombre recordado en el dispositivo (de otra persona) ya no cuenta y se borra al abrir', async () => {
+    localStorage.setItem(CLAVE_TECNICO, 'Técnico Dos');
     montar('Alguien Más');
     await listo();
-    fireEvent.click(screen.getByRole('button', { name: 'Técnico Dos' }));
-    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(screen.queryByLabelText('Equipo 18A90005')).toBeNull();
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(localStorage.getItem(CLAVE_TECNICO)).toBeNull();
+  });
+  it('si el almacenamiento local falla, sigue funcionando', async () => {
+    const falla = () => { throw new Error('x'); };
+    vi.stubGlobal('localStorage', { getItem: falla, setItem: falla, removeItem: falla });
+    montar(UNO);
+    await listo();
+    expect(screen.getAllByRole('article')).toHaveLength(4);
   });
 });
 
 describe('MisEquipos: asignación del portal (por la cuenta)', () => {
   const asignado = (userId: string, nombre: string) => ({ userId, nombre, por: 'Admin Uno', en: '2026-11-11T15:00:00.000Z' });
 
-  it('muestra la tarjeta por userId aunque el nombre no coincida, y sigue preguntando «¿Quién eres?» para las de Desk', async () => {
+  it('muestra la tarjeta por userId aunque el nombre no coincida, y nada más (sin preguntar «¿Quién eres?»)', async () => {
     const filas = [...FILAS, fila('18A90008', '2026-11-05', 'Ingresado', '')];
     const r: RespuestaEquipos = { ...resp(filas), responsables: { [claveFila(filas[5])]: asignado('u-yo', 'Nombre En Cuenta') } };
     render(<MisEquipos nombre="Alguien Más" userId="u-yo" pedir={vi.fn(async () => structuredClone(r))} />);
     await listo();
     expect(screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'))).toEqual(['Equipo 18A90008']);
-    const selector = screen.getByRole('group', { name: '¿Quién eres?' });
-    expect(within(selector).getAllByRole('button').map((b) => b.textContent)).toEqual([UNO, 'Técnico Dos']);
-    fireEvent.click(within(selector).getByRole('button', { name: UNO }));
+    expect(screen.queryByRole('group', { name: '¿Quién eres?' })).toBeNull();
+  });
+
+  it('salen las asignadas a su cuenta y las del único nombre de Desk que casa; las de otros no', async () => {
+    const filas = [...FILAS, fila('18A90008', '2026-11-05', 'Ingresado', '')];
+    const r: RespuestaEquipos = { ...resp(filas), responsables: { [claveFila(filas[5])]: asignado('u-yo', 'Nombre En Cuenta') } };
+    render(<MisEquipos nombre={UNO} userId="u-yo" pedir={vi.fn(async () => structuredClone(r))} />);
+    await listo();
     const sns = screen.getAllByRole('article').map((a) => a.getAttribute('aria-label'));
     expect(sns).toHaveLength(5);
     expect(sns).toContain('Equipo 18A90008');
     expect(sns).toContain('Equipo 18A90001');
+    expect(sns).not.toContain('Equipo 18A90005');
   });
 
   it('si el portal asignó la visita a otra cuenta, no te aparece aunque el nombre coincida y Desk diga que es tuya', async () => {
@@ -125,10 +130,10 @@ describe('MisEquipos: lista y cabecera', () => {
     expect(within(t).getByText('EDM180C')).toBeTruthy();
     expect(within(t).getByText('Cliente Demo · #1234')).toBeTruthy();
   });
-  it('es de solo lectura: sin botones de acción ni campos (solo «Cambiar», «Escanear S/N» y el enlace al taller)', async () => {
+  it('es de solo lectura: sin botones de acción ni campos (solo «Escanear S/N» y el enlace al taller)', async () => {
     montar(UNO);
     await listo();
-    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Cambiar', 'Escanear S/N']);
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Escanear S/N']);
     expect(screen.queryAllByRole('textbox')).toHaveLength(0);
     expect(document.querySelector('input,textarea,select,video')).toBeNull();
   });
@@ -139,6 +144,14 @@ describe('MisEquipos: lista y cabecera', () => {
     expect(screen.getByText('Mis equipos')).toBeTruthy();
     const kpis = within(screen.getByRole('list', { name: 'Indicadores' })).getAllByRole('listitem').map((x) => x.textContent);
     expect(kpis).toEqual(['4Asignados', '2Esperan cliente', '1Más de 90 d']);
+  });
+  it('la cabecera lleva el nombre del portal y sus iniciales, no el de Desk; el color, el de su tarjeta', async () => {
+    montar('Pérez Gómez María');
+    await listo();
+    expect(screen.getAllByRole('article')).toHaveLength(4);
+    expect(screen.getByRole('heading', { name: 'Pérez Gómez María' })).toBeTruthy();
+    expect(avatar().textContent).toBe('PG');
+    expect(avatar().classList.contains(`tt-av-${avatarDe(UNO)}`)).toBe(true);
   });
 });
 

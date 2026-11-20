@@ -1,9 +1,9 @@
 // «Mis equipos»: vista de solo lectura, pensada para el celular, de los equipos de un técnico. Reutiliza el
-// sondeo y el modelo del tablero (no duplica reglas). Una visita asignada en el portal es tuya si se asignó a tu
-// cuenta (`userId`). Las demás, por tu nombre frente al Encargado de Desk. Los dos datos los da el portal; sin
-// coincidencia única de nombre se pregunta «¿Quién eres?».
-import { useCallback, useMemo, useState } from 'react';
-import type { ColumnaTablero, Tarjeta } from './nucleo';
+// sondeo y el modelo del tablero (no duplica reglas). Solo lo suyo (D4): las visitas que el portal asignó a su
+// cuenta (`userId`) y las que tienen como Encargado de Desk el ÚNICO nombre del tablero que casa con el suyo. Los
+// dos datos los da el portal. Sin coincidencia única no se pregunta nada: la vía es asignarle sus equipos desde la tabla.
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { inicialesDe, type ColumnaTablero, type Tarjeta } from './nucleo';
 import { apiEquipos } from './api';
 import { Raiz, SinTablero, hhmm, useTableroDatos } from './tablero/Tablero';
 import EscanearSerial from './EscanearSerial';
@@ -11,20 +11,12 @@ import { coincideTecnico, esMia, tecnicosDelTablero } from './tecnico';
 import './tablero/tablero.css';
 import './tablero/mis-equipos.css';
 
+/** Donde antes se recordaba en el dispositivo el nombre elegido en «¿Quién eres?». Ya no se lee: se borra al abrir. */
 export const CLAVE_TECNICO = 'equipos-taller:mis-equipos:tecnico';
 
-// El almacenamiento local puede no existir (modo privado, política del navegador): nunca rompe la vista.
-const leer = (): string | null => { try { return localStorage.getItem(CLAVE_TECNICO); } catch { return null; } };
-const guardar = (v: string) => { try { localStorage.setItem(CLAVE_TECNICO, v); } catch { /* sin almacenamiento: vale solo en esta visita */ } };
-
-function Selector({ nombres, onElegir }: { nombres: string[]; onElegir: (n: string) => void }) {
-  return (
-    <div role="group" aria-label="¿Quién eres?" className="tt-mis-selector">
-      <h2>¿Quién eres?</h2>
-      {nombres.map((n) => <button key={n} type="button" className="tt-mis-boton" onClick={() => onElegir(n)}>{n}</button>)}
-    </div>
-  );
-}
+// Sin esto, un nombre recordado de otra persona seguiría a la vista. El almacenamiento local puede no existir
+// (modo privado, política del navegador): nunca rompe la vista.
+const olvidarNombreRecordado = () => { try { localStorage.removeItem(CLAVE_TECNICO); } catch { /* sin almacenamiento: nada que borrar */ } };
 
 export function Ficha({ t }: { t: Tarjeta }) {
   return (
@@ -62,20 +54,21 @@ export default function MisEquipos({ nombre, userId = null, pedir: pedirProp }: 
   const pedirSesion = useMemo(() => apiEquipos().estado, []);
   const pedir = useCallback((s: AbortSignal) => (pedirProp ?? pedirSesion)(s), [pedirProp, pedirSesion]);
   const { datos, modelo, ajustes, okEn, fallo, obsoleto } = useTableroDatos(pedir);
-  const [guardado, setGuardado] = useState<string | null>(leer);
-  const [cambiando, setCambiando] = useState(false);
   const [escaneando, setEscaneando] = useState(false);
+  useEffect(olvidarNombreRecordado, []);
   if (!modelo) return <SinTablero tema="sistema" hayDatos={!!datos} fallo={fallo} />;
 
-  const nombres = tecnicosDelTablero(modelo);
-  const coinciden = nombre ? nombres.filter((n) => coincideTecnico(nombre, n)) : [];
-  const elegido = guardado ?? (coinciden.length === 1 ? coinciden[0] : null);
+  // El único nombre de Desk que casa con el del usuario; si casan varios, o ninguno, null.
+  const coinciden = nombre ? tecnicosDelTablero(modelo).filter((n) => coincideTecnico(nombre, n)) : [];
+  const reconocido = coinciden.length === 1 ? coinciden[0] : null;
   const grupos = modelo.columnas
-    .map((c) => ({ ...c, tarjetas: c.tarjetas.filter((t) => esMia(t, { userId, nombre: elegido })) }))
+    .map((c) => ({ ...c, tarjetas: c.tarjetas.filter((t) => esMia(t, { userId, nombre: reconocido })) }))
     .filter((c) => c.tarjetas.length > 0);
   const todas = grupos.flatMap((g) => g.tarjetas);
-  const dueno = todas[0]?.tecnico;
-  const elegir = (n: string) => { guardar(n); setGuardado(n); setCambiando(false); };
+  // La cabecera es del usuario aunque no tenga equipos: su nombre del portal y sus iniciales con la regla de las
+  // tarjetas. El color, el de su primera tarjeta (como en el tablero); sin tarjetas, el neutro.
+  const color = todas[0]?.tecnico?.avatar;
+  const iniciales = nombre ? inicialesDe(nombre) : '';
   const kpis = [
     { e: 'Asignados', v: todas.length },
     { e: 'Esperan cliente', v: grupos.filter((g) => g.id === 'notificacion').reduce((s, g) => s + g.tarjetas.length, 0) },
@@ -85,19 +78,17 @@ export default function MisEquipos({ nombre, userId = null, pedir: pedirProp }: 
   return (
     <Raiz tema="sistema" clase="tt-mis">
       <header className="tt-mis-cab">
-        <span className={`tt-av tt-av-grande ${dueno ? `tt-av-${dueno.avatar}` : 'tt-av-neutro'}`} aria-hidden>{dueno?.iniciales ?? '–'}</span>
+        <span className={`tt-av tt-av-grande ${color !== undefined ? `tt-av-${color}` : 'tt-av-neutro'}`} aria-hidden>{iniciales || '–'}</span>
         <div className="tt-mis-id">
           <p>Mis equipos</p>
-          <h1>{elegido ?? nombre ?? ''}</h1>
+          <h1>{nombre ?? ''}</h1>
         </div>
-        <button type="button" className="tt-mis-boton tt-mis-cambiar" onClick={() => setCambiando(true)}>Cambiar</button>
       </header>
       {obsoleto && okEn !== null ? <p role="alert" className="tt-aviso">{`Datos desactualizados desde ${hhmm(okEn)}`}</p> : null}
       <ul className="tt-mis-kpis" aria-label="Indicadores">
         {kpis.map((k) => <li key={k.e} className="tt-kpi"><span className="tt-kpi-n">{k.v}</span><span className="tt-kpi-e">{k.e}</span></li>)}
       </ul>
-      {elegido && todas.length === 0 ? <p className="tt-mensaje">{`No hay equipos asignados a ${elegido}.`}</p> : null}
-      {!elegido || todas.length === 0 || cambiando ? <Selector nombres={nombres} onElegir={elegir} /> : null}
+      {todas.length === 0 ? <p className="tt-mensaje">No tienes equipos asignados. Si falta alguno, pide que te lo asignen desde la tabla.</p> : null}
       {escaneando ? <EscanearSerial tarjetas={modelo.columnas.flatMap((c) => c.tarjetas)} onCerrar={() => setEscaneando(false)} mostrar={(t) => <Ficha key={t.clave} t={t} />} /> : null}
       {grupos.map((g) => <Grupo key={g.id} col={g} />)}
       <nav className="tt-mis-barra" aria-label="Taller">

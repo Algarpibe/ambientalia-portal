@@ -43,7 +43,7 @@ describe('esMia', () => {
 });
 
 describe('tecnicosDelTablero', () => {
-  it('solo los nombres de Desk: las asignaciones del portal se reconocen por la cuenta, no por «¿Quién eres?»', () => {
+  it('solo los nombres de Desk: las asignaciones del portal se reconocen por la cuenta, no por el nombre', () => {
     const t: Tablero = { kpis: [], columnas: [{ id: 'proceso', nombre: 'En proceso', descripcion: '', tarjetas: [deDesk('Técnico Uno'), delPortal('Técnico Dos', 'u2'), deDesk('TECNICO UNO')] }] };
     expect(tecnicosDelTablero(t)).toEqual(['Técnico Uno']);
   });
