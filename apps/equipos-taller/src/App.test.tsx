@@ -71,7 +71,7 @@ describe('App: conmutador Tabla | Tablero', () => {
     expect(await screen.findByRole('navigation', { name: 'Vistas' })).toBeTruthy();
   });
 
-  it('al cambiar usa replaceState conservando history.state, no pushState', async () => {
+  it('al cambiar usa replaceState conservando history.state, no pushState, y deja la vista en la dirección', async () => {
     const reemplazar = vi.spyOn(history, 'replaceState');
     const empujar = vi.spyOn(history, 'pushState');
     render(<App api={api()} />);
@@ -80,7 +80,7 @@ describe('App: conmutador Tabla | Tablero', () => {
     expect(reemplazar).toHaveBeenLastCalledWith({ usr: 'estado-del-router' }, '', expect.stringContaining('vista=tablero'));
     expect(location.search).toBe('?vista=tablero');
     fireEvent.click(boton('Tabla'));
-    expect(location.search).toBe('');
+    expect(location.search).toBe('?vista=tabla');
     expect(history.state).toEqual({ usr: 'estado-del-router' });
     expect(empujar).not.toHaveBeenCalled();
   });

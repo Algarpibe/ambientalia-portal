@@ -17,10 +17,10 @@ export default function App({ api }: { api?: ApiEquipos }) {
 
   function cambiar(v: Vista) {
     setVista(v);
-    // replaceState con el state actual: no añade historial y conserva el del router del portal.
+    // replaceState con el state actual: no añade historial y conserva el del router del portal. La vista queda
+    // escrita (también `tabla`): sin `?vista=`, el portal abriría «Mis equipos» en el celular al recargar.
     const url = new URL(location.href);
-    if (v === 'tablero') url.searchParams.set('vista', 'tablero');
-    else url.searchParams.delete('vista');
+    url.searchParams.set('vista', v);
     history.replaceState(history.state, '', url.pathname + url.search + url.hash);
   }
   const boton = (v: Vista, texto: string) => (
