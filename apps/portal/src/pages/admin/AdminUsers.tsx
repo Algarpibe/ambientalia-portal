@@ -5,6 +5,7 @@ import { authFetch } from '../../lib/api';
 import { clearToken, RUTA_INICIAR_SESION } from '../../auth';
 import { notify } from '../../lib/notify';
 import { useAuth } from '../../hooks/useAuth';
+import { notifyPendingUsersChanged } from '../../hooks/usePendingUsersCount';
 import type { AdminUser, PaginatedUsers, UserRole } from './types';
 import UserTable from './UserTable';
 import AppAssignModal from './AppAssignModal';
@@ -87,9 +88,14 @@ export default function AdminUsers() {
     setEnCurso(new Set(enCursoRef.current));
   }, []);
 
-  /** Ejecuta una mutación sobre `userId`, notifica el resultado y refresca la lista. */
+  /**
+   * Ejecuta una mutación sobre `userId`, notifica el resultado y refresca la lista.
+   * `onOk` corre solo si la mutación salió bien (p. ej. avisar al contador de
+   * pendientes del menú). No debe lanzar: un fallo caería en el catch de red y
+   * mostraría un aviso falso.
+   */
   const act = useCallback(
-    async (userId: string, req: () => Promise<Response>, okMsg: string) => {
+    async (userId: string, req: () => Promise<Response>, okMsg: string, onOk?: () => void) => {
       if (enCursoRef.current.has(userId)) return;
       marcarEnCurso(userId, true);
       try {
@@ -104,6 +110,7 @@ export default function AdminUsers() {
           return;
         }
         notify(okMsg, 'info');
+        onOk?.();
         await load(page);
       } catch {
         notify('No se pudo conectar con el servidor.', 'error');
@@ -114,10 +121,12 @@ export default function AdminUsers() {
     [load, page, handleExpiredSession, marcarEnCurso],
   );
 
-  const changeStatus = (u: AdminUser, status: 'active' | 'inactive', okMsg: string) =>
-    act(u.id, () => authFetch(`/api/users/${u.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), okMsg);
+  const changeStatus = (u: AdminUser, status: 'active' | 'inactive', okMsg: string, onOk?: () => void) =>
+    act(u.id, () => authFetch(`/api/users/${u.id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }), okMsg, onOk);
 
-  const handleApprove = (u: AdminUser) => changeStatus(u, 'active', 'Usuario aprobado.');
+  // Aprobar y eliminar son las únicas acciones que cambian cuántas cuentas
+  // esperan aprobación: desactivar y reactivar mueven entre active e inactive.
+  const handleApprove = (u: AdminUser) => changeStatus(u, 'active', 'Usuario aprobado.', notifyPendingUsersChanged);
   const handleReactivate = (u: AdminUser) => changeStatus(u, 'active', 'Usuario reactivado.');
   const handleDeactivate = (u: AdminUser) => changeStatus(u, 'inactive', 'Usuario desactivado.');
 
@@ -130,7 +139,7 @@ export default function AdminUsers() {
     // Con la eliminación ya en vuelo no se vuelve a pedir confirmación.
     if (enCursoRef.current.has(u.id)) return;
     if (!window.confirm(`¿Eliminar permanentemente a ${u.email}? Esta acción no se puede deshacer.`)) return;
-    act(u.id, () => authFetch(`/api/users/${u.id}`, { method: 'DELETE' }), 'Usuario eliminado.');
+    act(u.id, () => authFetch(`/api/users/${u.id}`, { method: 'DELETE' }), 'Usuario eliminado.', notifyPendingUsersChanged);
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));

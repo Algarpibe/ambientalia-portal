@@ -22,6 +22,39 @@ cambio es pequeño y la copia principal ya tiene `node_modules`.
 
 ---
 
+## Desvíos durante la ejecución (2026-11-20)
+
+Lo que se hizo distinto o además de lo que dicen las tareas de más abajo (las tareas no se reescriben),
+todo a raíz de las revisiones:
+
+- **hub-api:** el test del contador siembra también una cuenta `active` explícita, y el comentario de la
+  ruta avisa de que un futuro `GET /users/:id` debe ir después de `pending-count`.
+- **Hook:**
+  - Una respuesta solo se aplica si no se aplicó ya otra lanzada después (`lanzadas`/`aplicada`).
+    Así, si dos consultas se cruzan, la vieja no pisa a la nueva, y si la nueva falla, la vieja sí
+    sirve. Lleva dos tests más (10 en total).
+  - Se quitó un comentario falso: `window.setInterval` y `setInterval` son la misma función en el
+    entorno jsdom de Vitest.
+  - El test de fallos (429, red, cuerpo raro) prueba cada uno por separado, porque en lote la
+    protección anterior tapaba el 429.
+- **Menú:**
+  - Test nuevo del menú plegado sin pendientes: `title` «Usuarios», sin `aria-label`, sin punto.
+  - Se comprueba `aria-hidden` en el globo y en el punto.
+  - El globo es redondo: `h-5 min-w-5 inline-flex …` en vez de `min-w-[1.25rem] py-0.5`.
+- **Panel:**
+  - Test «reactivar no avisa».
+  - Aprobar y eliminar comprueban que el aviso sale una sola vez tras recargar la lista.
+  - El JSDoc de `act` dice que `onOk` no debe lanzar.
+
+**Seguimientos opcionales (revisión final, no bloquean):**
+- Reintentar una vez a los 30 s cuando falla la consulta forzada por el panel. Tras una ráfaga de
+  aprobaciones, el contador puede llevarse un 429 y quedarse desfasado hasta el siguiente sondeo.
+- Que eliminar una cuenta que no está pendiente no avise al contador (ahorra una petición).
+- Margen en ráfaga: unas 6 aprobaciones por minuto antes del 429 (eran unas 9). El límite es de 20
+  por minuto por IP y lo comparten todos los `/api/users/*`, `/users/me` incluido.
+
+---
+
 ## Reglas para quien implemente
 
 - **TDD estricto:** cada test se ve en ROJO, y por la razón esperada, antes de escribir el código.

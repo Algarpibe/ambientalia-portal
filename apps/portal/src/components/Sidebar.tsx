@@ -16,6 +16,7 @@ import logotipo from '../assets/ambientalia-logo.png';
 import isotipo from '../assets/ambientalia-isotipo.png';
 import { logout, RUTA_INICIAR_SESION } from '../auth';
 import { useAuth } from '../hooks/useAuth';
+import { usePendingUsersCount } from '../hooks/usePendingUsersCount';
 import { hasAssignedInCategory } from '../lib/apps';
 import { useDialogo } from '@suite/a11y';
 
@@ -59,6 +60,13 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   // Solo con la app «Equipos en taller», también para los admin: la ruta de la TV (AppGuard)
   // mira las apps asignadas, así que a un admin sin la app el enlace lo mandaría al inicio.
   const showTableroTv = apps.includes('equipos-taller');
+  // Solicitudes de acceso esperando aprobación. Solo los admin consultan: para
+  // el resto el hook no hace ninguna petición y devuelve 0.
+  const pendientes = usePendingUsersCount(role === 'admin');
+  const avisoPendientes =
+    pendientes > 0
+      ? `Usuarios, ${pendientes} ${pendientes === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'}`
+      : undefined;
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSED_KEY) === 'true',
@@ -168,10 +176,29 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
             to="/admin/users"
             onClick={alNavegar}
             className={itemClass('/admin/users', plegada)}
-            title={plegada ? 'Usuarios' : undefined}
+            title={plegada ? (avisoPendientes ?? 'Usuarios') : undefined}
+            aria-label={avisoPendientes}
           >
-            <Users size={20} className="shrink-0" />
+            <span className="relative shrink-0">
+              <Users size={20} />
+              {/* Plegada no cabe el número: un punto, y el title dice cuántas. */}
+              {plegada && pendientes > 0 && (
+                <span
+                  data-testid="punto-pendientes"
+                  aria-hidden="true"
+                  className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-600 ring-2 ring-white"
+                />
+              )}
+            </span>
             {!plegada && 'Usuarios'}
+            {!plegada && pendientes > 0 && (
+              <span
+                aria-hidden="true"
+                className="ml-auto h-5 min-w-5 px-1.5 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs font-bold"
+              >
+                {pendientes > 9 ? '9+' : pendientes}
+              </span>
+            )}
           </Link>
         )}
         <Link

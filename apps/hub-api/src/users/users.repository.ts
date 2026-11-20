@@ -244,6 +244,14 @@ export class UserRepository {
     return { users: rows.map(toPublic), total, page: safePage, limit: safePerPage };
   }
 
+  /** Cuántas cuentas esperan aprobación (aviso del enlace «Usuarios» del portal). */
+  async countPending(): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT count(*)::int AS total FROM portal.users WHERE status = 'pending'`,
+    );
+    return rows[0]?.total ?? 0;
+  }
+
   /** Ejecuta `fn` dentro de BEGIN/COMMIT; hace ROLLBACK ante cualquier error. */
   private async withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();

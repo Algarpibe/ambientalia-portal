@@ -1,7 +1,9 @@
 # Portal — aviso de solicitudes de acceso pendientes
 
 **Fecha:** 2026-11-20
-**Estado:** diseño aprobado; pendiente del plan de implementación.
+**Estado:** implementado en la rama `feat/aviso-pendientes` (plan
+`docs/superpowers/plans/2026-11-20-aviso-solicitudes-pendientes.md`); pendiente de fusionar y
+desplegar (hub-api primero).
 **Depende de:** la gestión de usuarios (`apps/hub-api/src/users/users.router.ts`,
 `users.service.ts`, `users.repository.ts`), el menú lateral (`apps/portal/src/components/Sidebar.tsx`)
 y el panel de usuarios (`apps/portal/src/pages/admin/AdminUsers.tsx`).
