@@ -163,6 +163,11 @@ export class UserService {
     return this.repo.listPaginated(safePage, USERS_PER_PAGE);
   }
 
+  /** Número de solicitudes de acceso pendientes de aprobar. */
+  async countPending(): Promise<number> {
+    return this.repo.countPending();
+  }
+
   /** Perfil propio del usuario autenticado; 404 si no existe. */
   async getSelfProfile(id: string): Promise<SelfProfile> {
     const profile = await this.repo.getSelfProfile(id);

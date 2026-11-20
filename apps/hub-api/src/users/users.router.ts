@@ -181,6 +181,17 @@ export function createUsersRouter(pool: Pool, deps: UsersRouterDeps = {}): Route
     }
   });
 
+  // GET /api/users/pending-count — solicitudes de acceso esperando aprobación.
+  // Lo consulta el menú del portal para pintar el aviso en «Usuarios». Pasa por
+  // el limitador de /users/* como el resto; no se audita porque es una lectura.
+  router.get('/users/pending-count', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json({ pending: await service.countPending() });
+    } catch (e) {
+      sendError(res, e, 'count_pending_users');
+    }
+  });
+
   // PATCH /api/users/:id/status { status: 'active' | 'inactive' }
   // 'active' sobre pending = aprobar (rol reader); sobre inactive = reactivar.
   router.patch('/users/:id/status', requireAdmin, async (req: Request, res: Response) => {

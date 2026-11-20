@@ -129,6 +129,11 @@ class FakeDb {
       if (u) u.avatar = avatar;
       return { rows: [], rowCount: u ? 1 : 0 };
     }
+    // Contador del aviso de solicitudes pendientes. Va ANTES del count(*)
+    // genérico de la lista paginada, que cuenta todas las filas.
+    if (/count\(\*\)/i.test(sql) && /WHERE status = 'pending'/i.test(sql)) {
+      return { rows: [{ total: this.users.filter((u) => u.status === 'pending').length }], rowCount: 1 };
+    }
     if (/count\(\*\)/i.test(sql)) {
       return { rows: [{ total: this.users.length }], rowCount: 1 };
     }
@@ -253,6 +258,31 @@ describe('GET /api/users', () => {
     expect(res.body.users).toHaveLength(2);
     // No debe filtrar password_hash.
     expect(res.body.users[0]).not.toHaveProperty('password_hash');
+  });
+});
+
+// Aviso de solicitudes pendientes en el enlace «Usuarios» del portal.
+describe('GET /api/users/pending-count', () => {
+  it('sin token → 401', async () => {
+    const res = await request(app).get('/api/users/pending-count');
+    expect(res.status).toBe(401);
+  });
+  it('token reader → 403', async () => {
+    const res = await request(app).get('/api/users/pending-count').set(bearer(readerToken));
+    expect(res.status).toBe(403);
+  });
+  it('token admin → 200 y cuenta solo las cuentas pending', async () => {
+    db.seedUser({ status: 'pending' });
+    db.seedUser({ status: 'pending' });
+    db.seedUser({ status: 'inactive' });
+    const res = await request(app).get('/api/users/pending-count').set(bearer(adminToken));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ pending: 2 });
+  });
+  it('sin cuentas pending → 0', async () => {
+    const res = await request(app).get('/api/users/pending-count').set(bearer(adminToken));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ pending: 0 });
   });
 });
 
