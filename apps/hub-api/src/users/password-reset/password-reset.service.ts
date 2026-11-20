@@ -208,7 +208,7 @@ export class PasswordResetService {
     // síncrona, tampoco puede escapar nada hacia la petición ya confirmada.
     void Promise.resolve()
       .then(() =>
-        this.mailer.send({ para: user.email, ...buildPasswordChangedEmail({ fullName: user.fullName, changedAt: now }) }),
+        this.mailer.send({ para: user.email, ...buildPasswordChangedEmail({ fullName: user.fullName, changedAt: now, portalUrl: this.portalUrl }) }),
       )
       .catch(() => this.log('password_reset_envio_fallido', { user_id: user.userId }));
   }

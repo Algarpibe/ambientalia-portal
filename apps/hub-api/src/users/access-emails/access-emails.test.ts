@@ -25,6 +25,33 @@ const datos = (parcial: Partial<AccessEmailInput> = {}): AccessEmailInput => ({
   ...parcial,
 });
 
+// El logo va primero en los tres correos, desde una ruta fija del portal.
+const LOGO_SRC = `${PORTAL}/email/logo-ambientalia.png`;
+const LOS_TRES: [string, (input: AccessEmailInput) => AccessEmailContent][] = [
+  ['buildWelcomeEmail', buildWelcomeEmail],
+  ['buildReactivatedEmail', buildReactivatedEmail],
+  ['buildNewAppsEmail', buildNewAppsEmail],
+];
+
+describe.each(LOS_TRES)('logo en %s', (_nombre, build) => {
+  it('un solo logo, con src fijo y alt, antes del saludo', () => {
+    const { cuerpo } = build(datos());
+    expect(cuerpo.match(/<img/g)).toHaveLength(1);
+    expect(cuerpo).toContain(`src="${LOGO_SRC}"`);
+    expect(cuerpo).toContain('alt="Ambientalia"');
+    expect(cuerpo.indexOf('<img')).toBeLessThan(cuerpo.indexOf('Hola, '));
+  });
+
+  it('una base con barra final no duplica la barra', () => {
+    expect(build(datos({ portalUrl: `${PORTAL}//` })).cuerpo).toContain(`src="${LOGO_SRC}"`);
+  });
+
+  it('una comilla o & en la base se escapan dentro del src', () => {
+    const { cuerpo } = build(datos({ portalUrl: 'https://x.test/?a=1&b="2' }));
+    expect(cuerpo).toContain('src="https://x.test/?a=1&amp;b=&quot;2/email/logo-ambientalia.png"');
+  });
+});
+
 // Bienvenida y reactivación comparten esquema; cambian el asunto y el saludo.
 const CUENTA_ACTIVA: [string, (input: AccessEmailInput) => AccessEmailContent, string, string][] = [
   ['buildWelcomeEmail', buildWelcomeEmail, 'Bienvenido al Portal Ambientalia', 'Hola, Ana Ruiz: tu cuenta del Portal Ambientalia ya está activa.'],

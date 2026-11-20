@@ -1,4 +1,4 @@
-import { escapeHtml } from '../password-reset/password-reset.emails.js';
+import { envolver, escapeHtml, portalBase } from '../password-reset/password-reset.emails.js';
 import type { AccessApp } from './app-catalog.js';
 
 /**
@@ -27,10 +27,7 @@ export interface AccessEmailInput {
   apps: readonly AccessApp[];
 }
 
-const base = (portalUrl: string): string => portalUrl.replace(/\/+$/, '');
-
-const envolver = (html: string): string =>
-  `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #1f2937;">${html}</div>`;
+const base = portalBase;
 
 /** El botón abre /auth directamente en «Iniciar sesión» (el portal lee `?modo=login`). */
 const botonEntrar = (portalUrl: string): string =>
@@ -51,7 +48,7 @@ const CIERRE = '<p>Si olvidas tu contraseña, usa “¿Olvidaste tu contraseña?
  */
 function cuentaActiva(saludo: string, { portalUrl, apps }: AccessEmailInput): string {
   const susApps = apps.length > 0 ? `<p>Tus aplicaciones:</p>${listaApps(portalUrl, apps)}` : SIN_APPS;
-  return envolver(`<p>${saludo}</p>${botonEntrar(portalUrl)}${susApps}${CIERRE}`);
+  return envolver(portalUrl, `<p>${saludo}</p>${botonEntrar(portalUrl)}${susApps}${CIERRE}`);
 }
 
 /** Al aprobar una cuenta pending. */
@@ -84,6 +81,6 @@ export function buildNewAppsEmail({ fullName, portalUrl, apps }: AccessEmailInpu
     asunto: una
       ? `Ya tienes acceso a ${una.label} en el Portal Ambientalia`
       : 'Tienes acceso a nuevas aplicaciones del Portal Ambientalia',
-    cuerpo: envolver(`<p>${saludo}</p>${listaApps(portalUrl, apps)}${botonEntrar(portalUrl)}`),
+    cuerpo: envolver(portalUrl, `<p>${saludo}</p>${listaApps(portalUrl, apps)}${botonEntrar(portalUrl)}`),
   };
 }
