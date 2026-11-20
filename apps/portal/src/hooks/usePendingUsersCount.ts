@@ -36,18 +36,23 @@ export function usePendingUsersCount(enabled: boolean): number {
   useEffect(() => {
     if (!enabled) return;
     let vivo = true;
-    // Solo vale la respuesta de la última consulta lanzada: si dos se cruzan
-    // (p. ej. dos aprobaciones seguidas), la vieja no pisa a la nueva.
-    let ultima = 0;
+    // Si dos consultas se cruzan (p. ej. dos aprobaciones seguidas), una
+    // respuesta solo se aplica si no se aplicó ya otra lanzada después: la vieja
+    // no pisa a la nueva, pero si la nueva falla, la vieja sí sirve.
+    let lanzadas = 0;
+    let aplicada = 0;
 
     const consultar = async () => {
-      const esta = ++ultima;
+      const esta = ++lanzadas;
       lastFetchRef.current = Date.now();
       try {
         const res = await authFetch('/api/users/pending-count');
         if (!res.ok) return;
         const body = (await res.json()) as { pending?: unknown };
-        if (vivo && esta === ultima && typeof body.pending === 'number') setCount(body.pending);
+        if (vivo && esta > aplicada && typeof body.pending === 'number') {
+          aplicada = esta;
+          setCount(body.pending);
+        }
       } catch {
         /* silencioso: se conserva el último valor bueno */
       }

@@ -143,6 +143,21 @@ describe('usePendingUsersCount', () => {
     expect(result.current).toBe(0);
   });
 
+  it('si la consulta nueva falla, vale la respuesta buena de la anterior', async () => {
+    const { result } = renderHook(() => usePendingUsersCount(true));
+    await asentar();
+    let soltarPrimera!: (r: unknown) => void;
+    mockFetch.mockImplementationOnce(() => new Promise((r) => { soltarPrimera = r; }));
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) });
+    act(() => notifyPendingUsersChanged()); // la primera se queda colgada
+    act(() => notifyPendingUsersChanged()); // la segunda da 429
+    await asentar();
+    expect(result.current).toBe(2);
+    soltarPrimera(responde(1)); // la primera llega tarde, pero es la única buena
+    await asentar();
+    expect(result.current).toBe(1);
+  });
+
   it('al desmontar deja de consultar', async () => {
     const { unmount } = renderHook(() => usePendingUsersCount(true));
     await asentar();
