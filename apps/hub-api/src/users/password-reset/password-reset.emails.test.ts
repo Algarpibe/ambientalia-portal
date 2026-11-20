@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { buildPasswordChangedEmail, buildResetLinkEmail, escapeHtml, resetLink } from './password-reset.emails.js';
 
 // Asunto y cuerpo de los dos correos de la recuperación de contraseña. Puras:
@@ -8,6 +10,41 @@ const PORTAL = 'https://portal.ejemplo.test';
 const TOKEN = 'AbC123_-xyz';
 const ENLACE = `${PORTAL}/auth/restablecer#t=${TOKEN}`;
 const CORREO_EN_TEXTO = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+
+// El logo va primero en los dos correos. Los clientes de correo no ven los
+// ficheros empaquetados por Vite (nombre con hash): se sirve desde una ruta fija.
+const LOGO_SRC = `${PORTAL}/email/logo-ambientalia.png`;
+const hacerCorreos = (portalUrl: string) => [
+  buildResetLinkEmail({ fullName: 'Ana Ruiz', portalUrl, token: TOKEN }),
+  buildPasswordChangedEmail({ fullName: 'Ana Ruiz', changedAt: new Date('2026-11-20T15:00:00Z'), portalUrl }),
+];
+
+describe('logo en los correos de recuperación', () => {
+  it.each([0, 1])('el correo %i lleva un solo logo, con src fijo y alt, antes del saludo', (i) => {
+    const { cuerpo } = hacerCorreos(PORTAL)[i];
+    expect(cuerpo.match(/<img/g)).toHaveLength(1);
+    expect(cuerpo).toContain(`src="${LOGO_SRC}"`);
+    expect(cuerpo).toContain('alt="Ambientalia"');
+    expect(cuerpo.indexOf('<img')).toBeLessThan(cuerpo.indexOf('Hola, '));
+  });
+
+  it('una base con barra final no duplica la barra', () => {
+    for (const { cuerpo } of hacerCorreos(`${PORTAL}//`)) expect(cuerpo).toContain(`src="${LOGO_SRC}"`);
+  });
+
+  it('una comilla o & en la base se escapan dentro del src', () => {
+    for (const { cuerpo } of hacerCorreos('https://x.test/?a=1&b="2')) {
+      expect(cuerpo).toContain('src="https://x.test/?a=1&amp;b=&quot;2/email/logo-ambientalia.png"');
+    }
+  });
+});
+
+describe('CANDADO: el logo público de los correos existe', () => {
+  it('apps/portal/public/email/logo-ambientalia.png es un PNG', () => {
+    const ruta = fileURLToPath(new URL('../../../../portal/public/email/logo-ambientalia.png', import.meta.url));
+    expect(readFileSync(ruta).subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  });
+});
 
 describe('resetLink', () => {
   it('lleva el token tras #t=, en /auth/restablecer', () => {
@@ -59,7 +96,7 @@ describe('buildResetLinkEmail', () => {
 
 describe('buildPasswordChangedEmail', () => {
   // 03:30 UTC del 14 son las 22:30 del 13 en Bogotá (UTC-5): manda la hora de Colombia.
-  const correo = buildPasswordChangedEmail({ fullName: 'Ana Ruiz', changedAt: new Date('2026-11-14T03:30:00Z') });
+  const correo = buildPasswordChangedEmail({ fullName: 'Ana Ruiz', changedAt: new Date('2026-11-14T03:30:00Z'), portalUrl: PORTAL });
 
   it('asunto fijo', () => {
     expect(correo.asunto).toBe('Tu contraseña del Portal Ambientalia se ha cambiado');
@@ -78,7 +115,7 @@ describe('buildPasswordChangedEmail', () => {
   });
 
   it('escapa el nombre', () => {
-    const c = buildPasswordChangedEmail({ fullName: 'Ana <b>Ruiz</b>', changedAt: new Date('2026-11-14T03:30:00Z') });
+    const c = buildPasswordChangedEmail({ fullName: 'Ana <b>Ruiz</b>', changedAt: new Date('2026-11-14T03:30:00Z'), portalUrl: PORTAL });
     expect(c.cuerpo).toContain('Ana &lt;b&gt;Ruiz&lt;/b&gt;');
   });
 });
