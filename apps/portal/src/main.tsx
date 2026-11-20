@@ -17,8 +17,9 @@ instalarTraduccionDeErroresDeRed()
 
 // FE-412 — un 401 de hub-api en CUALQUIER app saca del portal. Antes de pintar
 // nada, para que ninguna petición se escape sin pasar por él. Recarga entera y
-// no `navigate`: además de volver a /auth (abierto en «Iniciar sesión»), tira el estado en memoria de la app
-// en la que estaba, que se cargó con una sesión que ya no vale.
+// no `navigate`: además de volver a /auth (abierto en «Iniciar sesión»), tira
+// el estado en memoria de la app en la que estaba, que se cargó con una sesión
+// que ya no vale.
 if (API_BASE) {
   instalarInterceptor401({
     apiBase: API_BASE,

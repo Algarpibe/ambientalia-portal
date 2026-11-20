@@ -2,11 +2,11 @@
 // Se guarda en localStorage (mismo origen que las sub-apps → lo comparten).
 const TOKEN_KEY = 'ambientalia_token';
 
-// Destino de quien sale o pierde la sesion (Sidebar, TopBar, AdminUsers y el 401
+// Destino de quien sale o pierde la sesión (Sidebar, TopBar, AdminUsers y el 401
 // de main.tsx). Ya tiene cuenta: /auth a secas abre en «Crear cuenta».
 export const RUTA_INICIAR_SESION = '/auth?modo=login';
 
-export const API_BASE =import.meta.env.VITE_HUB_API_URL as string | undefined;
+export const API_BASE = import.meta.env.VITE_HUB_API_URL as string | undefined;
 
 export const getToken = (): string | null => localStorage.getItem(TOKEN_KEY);
 export const setToken = (t: string): void => localStorage.setItem(TOKEN_KEY, t);
