@@ -35,7 +35,7 @@ describe('RutaMisEquipos', () => {
     montar();
     expect(await screen.findByText('MIS EQUIPOS DE María Pérez Gómez (u-perfil)')).toBeTruthy();
   });
-  it('mientras el perfil carga no monta la vista (evita mostrar el selector por error)', () => {
+  it('mientras el perfil carga no monta la vista (evita decir por error que no tiene equipos)', () => {
     estado.auth = auth(['equipos-taller']);
     estado.perfil = { profile: null, loading: true };
     montar();

@@ -11,7 +11,7 @@ const MisEquipos = lazyConReintento(() => import('../../../equipos-taller/src/Mi
 const cargando = <p role="status">Cargando…</p>;
 
 /**
- * Espera al perfil propio: sin él, la vista preguntaría «¿Quién eres?» aunque el nombre coincida. Manda el
+ * Espera al perfil propio: sin él, la vista diría «No tienes equipos asignados» aunque los tenga. Manda el
  * nombre (para los equipos de Desk) y la cuenta (para los que el portal asignó a este usuario).
  */
 function ConPerfil() {
