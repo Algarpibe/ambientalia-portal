@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Users } from 'lucide-react';
 import { authFetch } from '../../lib/api';
-import { clearToken } from '../../auth';
+import { clearToken, RUTA_INICIAR_SESION } from '../../auth';
 import { notify } from '../../lib/notify';
 import { useAuth } from '../../hooks/useAuth';
 import type { AdminUser, PaginatedUsers, UserRole } from './types';
@@ -41,7 +41,7 @@ export default function AdminUsers() {
   const handleExpiredSession = useCallback(() => {
     clearToken();
     notify('Tu sesión expiró. Vuelve a iniciar sesión.', 'error');
-    navigate('/auth', { replace: true });
+    navigate(RUTA_INICIAR_SESION, { replace: true });
   }, [navigate]);
 
   const load = useCallback(

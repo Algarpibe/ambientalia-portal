@@ -10,7 +10,8 @@ vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('rea
 // SEC-220 — el botón ya no borra el token y se queda tan ancho: llama a
 // `logout()`, que avisa al backend para invalidar TODOS los tokens vivos del
 // usuario y solo entonces borra el local.
-vi.mock('../auth', () => ({ logout: vi.fn().mockResolvedValue(undefined) }));
+// Se conserva el resto del módulo (RUTA_INICIAR_SESION) para probar el destino real.
+vi.mock('../auth', async (orig) => ({ ...(await orig<typeof import('../auth')>()), logout: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../hooks/useProfile', () => ({
   useProfile: () => ({
     profile: { id: 'u', full_name: 'Alfonso García', email: 'comercial@x.com', role: 'admin', status: 'active', created_at: '2026-03-12T00:00:00.000Z', avatar: null },
@@ -34,14 +35,14 @@ describe('TopBar', () => {
     expect(screen.getByText('Cerrar sesión')).toBeTruthy();
   });
 
-  it('Cerrar sesión invalida la sesión en el backend y navega a /auth', async () => {
+  it('Cerrar sesión invalida la sesión en el backend y navega a iniciar sesion', async () => {
     render(<MemoryRouter><TopBar /></MemoryRouter>);
     fireEvent.click(screen.getByLabelText('Menú de usuario'));
     fireEvent.click(screen.getByText('Cerrar sesión'));
     // `logout()` es asíncrono: la navegación ocurre DESPUÉS de avisar al
     // backend, así que hay que dejar correr el microtask antes de mirar.
     await waitFor(() => expect(logout).toHaveBeenCalled());
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth?modo=login'));
   });
 });
 

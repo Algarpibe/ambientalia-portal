@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AuthState } from '../hooks/useAuth';
 import Sidebar from './Sidebar';
 
+const navigateMock = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => navigateMock }));
 const state = vi.hoisted(() => ({ value: null as AuthState | null }));
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => state.value }));
 
@@ -74,6 +76,16 @@ describe('Sidebar — plegado', () => {
     fireEvent.click(screen.getByLabelText('Expandir menú'));
     expect(screen.getByText('Dashboard')).toBeTruthy();
     expect(logo()).toContain('ambientalia-logo');
+  });
+});
+
+describe('Sidebar — cerrar sesion', () => {
+  // Quien sale ya tiene cuenta: /auth a secas abre en «Crear cuenta».
+  it('al cerrar sesion navega a /auth abierto en iniciar sesion', async () => {
+    setAuth({ isAuthenticated: true, role: 'reader', user_id: 'u' });
+    renderSidebar();
+    fireEvent.click(screen.getByText('Cerrar sesión'));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth?modo=login'));
   });
 });
 
