@@ -112,15 +112,20 @@ describe('usePendingUsersCount', () => {
     await asentar();
     expect(result.current).toBe(2);
 
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({ pending: 0 }) });
-    mockFetch.mockRejectedValueOnce(new Error('red caida'));
-    mockFetch.mockResolvedValueOnce(responde('muchos'));
-    act(() => notifyPendingUsersChanged());
-    act(() => notifyPendingUsersChanged());
-    act(() => notifyPendingUsersChanged());
+    // Cada fallo va solo y se espera: así es la consulta más reciente y la
+    // protección contra respuestas viejas no lo tapa.
+    const fallos = [
+      () => mockFetch.mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({ pending: 0 }) }),
+      () => mockFetch.mockRejectedValueOnce(new Error('red caida')),
+      () => mockFetch.mockResolvedValueOnce(responde('muchos')),
+    ];
+    for (const preparar of fallos) {
+      preparar();
+      act(() => notifyPendingUsersChanged());
+      await asentar();
+      expect(result.current).toBe(2);
+    }
     expect(mockFetch).toHaveBeenCalledTimes(4);
-    await asentar();
-    expect(result.current).toBe(2);
   });
 
   it('si dos consultas se cruzan, gana la última que se lanzó', async () => {
