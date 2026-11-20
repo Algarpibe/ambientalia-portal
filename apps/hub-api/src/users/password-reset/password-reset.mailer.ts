@@ -2,9 +2,12 @@ import { captureError } from '../../sentry.js';
 import { logEvent, type ResetEmail, type ResetLog, type ResetMailer } from './password-reset.service.js';
 
 /**
- * Cliente del webhook de n8n que envía los correos de la recuperación de
- * contraseña (flujo «Portal — Restablecer contraseña»: Webhook con Header Auth
- * → Gmail → Respond 200). Mismo patrón que el canal de avisos de Trazabilidad:
+ * Cliente del webhook de n8n que envía los correos del portal a sus usuarios
+ * (flujo «Portal — Correos a usuarios»: Webhook con Header Auth → Gmail →
+ * Respond 200): los de la recuperación de contraseña y los de acceso
+ * (access-emails/). index.ts crea uno solo y los dos lo comparten. Los nombres
+ * (variables, cabecera, eventos) son de cuando solo restablecía contraseñas y
+ * se quedan así. Mismo patrón que el canal de avisos de Trazabilidad:
  * POST JSON, token en una cabecera, sin seguir redirecciones (el token y el
  * enlace no viajan a otro sitio) y con una espera máxima.
  *
@@ -57,7 +60,7 @@ export function createResetMailer({
   // (como el de ALLOWED_ORIGIN) y no por `log`, que queda para los eventos por envío.
   if (url === '' || token === '') {
     console.warn(
-      'WARNING: password_reset_sin_configurar_al_arrancar — falta PASSWORD_RESET_N8N_URL o PASSWORD_RESET_N8N_TOKEN; no saldrá ningún correo de restablecer contraseña.',
+      'WARNING: password_reset_sin_configurar_al_arrancar — falta PASSWORD_RESET_N8N_URL o PASSWORD_RESET_N8N_TOKEN; no saldrá ningún correo a los usuarios del portal (ni de restablecer contraseña ni de acceso).',
     );
   }
   return {
