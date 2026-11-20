@@ -183,6 +183,9 @@ describe('AdminUsers · aviso al contador de pendientes', () => {
     renderAdmin();
     fireEvent.click(await screen.findByRole('button', { name: /Aprobar/ }));
     await waitFor(() => expect(avisos).toBe(1));
+    // Tras recargar la lista (carga inicial + mutación + recarga) sigue siendo uno.
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+    expect(avisos).toBe(1);
   });
 
   it('eliminar con éxito avisa', async () => {
@@ -194,6 +197,9 @@ describe('AdminUsers · aviso al contador de pendientes', () => {
       const eliminar = screen.getAllByRole('button', { name: 'Eliminar usuario' });
       fireEvent.click(eliminar[eliminar.length - 1]);
       await waitFor(() => expect(avisos).toBe(1));
+      // Tras recargar la lista (carga inicial + mutación + recarga) sigue siendo uno.
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+      expect(avisos).toBe(1);
     } finally {
       confirmar.mockRestore();
     }
@@ -212,6 +218,20 @@ describe('AdminUsers · aviso al contador de pendientes', () => {
     renderAdmin();
     fireEvent.click(await screen.findByRole('button', { name: /Desactivar/ }));
     await waitFor(() => expect(notify).toHaveBeenCalledWith('Usuario desactivado.', 'info'));
+    expect(avisos).toBe(0);
+  });
+
+  it('reactivar no avisa: comparte changeStatus con aprobar, pero no cambia los pendientes', async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        init?.method
+          ? { ok: true, status: 200, json: async () => ({}) }
+          : { ok: true, json: async () => ({ users: [user('3', 'Caro', 'inactive')], total: 1, page: 1, limit: 50 }) },
+      ),
+    );
+    renderAdmin();
+    fireEvent.click(await screen.findByRole('button', { name: /Reactivar/ }));
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('Usuario reactivado.', 'info'));
     expect(avisos).toBe(0);
   });
 });

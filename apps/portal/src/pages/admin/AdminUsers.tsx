@@ -91,7 +91,8 @@ export default function AdminUsers() {
   /**
    * Ejecuta una mutación sobre `userId`, notifica el resultado y refresca la lista.
    * `onOk` corre solo si la mutación salió bien (p. ej. avisar al contador de
-   * pendientes del menú).
+   * pendientes del menú). No debe lanzar: un fallo caería en el catch de red y
+   * mostraría un aviso falso.
    */
   const act = useCallback(
     async (userId: string, req: () => Promise<Response>, okMsg: string, onOk?: () => void) => {
