@@ -18,9 +18,13 @@ function DeniedRedirect() {
 }
 
 export default function AppGuard({ appId, children }: { appId: string; children: ReactNode }) {
-  const { apps } = useAuth();
-  if (!apps.includes(appId)) {
-    return <DeniedRedirect />;
-  }
-  return <>{children}</>;
+  const { apps, appsConfirmadas } = useAuth();
+  // Si el token ya la trae no se espera a nadie.
+  if (apps.includes(appId)) return <>{children}</>;
+  // Las apps del token pueden estar viejas (dura 7 días y no se refresca): quien
+  // abre el enlace del correo de «apps nuevas» llega con una carga completa de
+  // página y el token anterior. Negar aquí lo mandaría a / antes de que `/users/me`
+  // conteste. Hasta que la lista sea la definitiva, ni se niega ni se avisa.
+  if (!appsConfirmadas) return <div role="status" aria-label="Cargando" />;
+  return <DeniedRedirect />;
 }

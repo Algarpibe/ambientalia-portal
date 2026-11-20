@@ -5,10 +5,10 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { AuthState } from '../hooks/useAuth';
+import type { UseAuthResult } from '../hooks/useAuth';
 import RutaTableroTv from './RutaTableroTv';
 
-const estado = vi.hoisted(() => ({ auth: null as AuthState | null, sesion: true, montada: vi.fn() }));
+const estado = vi.hoisted(() => ({ auth: null as UseAuthResult | null, sesion: true, montada: vi.fn() }));
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => estado.auth }));
 vi.mock('../auth', () => ({ isAuthenticated: () => estado.sesion }));
 vi.mock('../lib/notify', () => ({ notify: vi.fn() }));
@@ -16,7 +16,8 @@ vi.mock('../../../equipos-taller/src/TvEquipos', () => ({
   default: () => { estado.montada(); return <div>TV DEL TALLER</div>; },
 }));
 
-const auth = (apps: string[]): AuthState => ({ isAuthenticated: true, user_id: 'u', email: 'a@x.com', role: 'reader', apps });
+// appsConfirmadas: true → el guardia decide ya con estas apps, sin esperar al servidor.
+const auth = (apps: string[]): UseAuthResult => ({ isAuthenticated: true, user_id: 'u', email: 'a@x.com', role: 'reader', apps, appsConfirmadas: true });
 const montar = () => render(
   <MemoryRouter initialEntries={['/equipos-taller/tv']}>
     <Routes>

@@ -5,10 +5,10 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { AuthState } from '../hooks/useAuth';
+import type { UseAuthResult } from '../hooks/useAuth';
 import RutaMisEquipos from './RutaMisEquipos';
 
-const estado = vi.hoisted(() => ({ auth: null as AuthState | null, sesion: true, perfil: { profile: { id: 'u-perfil', full_name: 'María Pérez Gómez' } as { id: string; full_name: string } | null, loading: false }, montada: vi.fn() }));
+const estado = vi.hoisted(() => ({ auth: null as UseAuthResult | null, sesion: true, perfil: { profile: { id: 'u-perfil', full_name: 'María Pérez Gómez' } as { id: string; full_name: string } | null, loading: false }, montada: vi.fn() }));
 vi.mock('../hooks/useAuth', () => ({ useAuth: () => estado.auth }));
 vi.mock('../hooks/useProfile', () => ({ useProfile: () => estado.perfil }));
 vi.mock('../auth', () => ({ isAuthenticated: () => estado.sesion }));
@@ -17,7 +17,8 @@ vi.mock('../../../equipos-taller/src/MisEquipos', () => ({
   default: ({ nombre, userId }: { nombre: string | null; userId?: string | null }) => { estado.montada(); return <div>{`MIS EQUIPOS DE ${nombre} (${userId})`}</div>; },
 }));
 
-const auth = (apps: string[]): AuthState => ({ isAuthenticated: true, user_id: 'u', email: 'a@x.com', role: 'reader', apps });
+// appsConfirmadas: true → el guardia decide ya con estas apps, sin esperar al servidor.
+const auth = (apps: string[]): UseAuthResult => ({ isAuthenticated: true, user_id: 'u', email: 'a@x.com', role: 'reader', apps, appsConfirmadas: true });
 const montar = () => render(
   <MemoryRouter initialEntries={['/equipos-taller/mis-equipos']}>
     <Routes>
