@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import logotipo from '../assets/ambientalia-logo.png';
 import isotipo from '../assets/ambientalia-isotipo.png';
-import { logout } from '../auth';
+import { logout, RUTA_INICIAR_SESION } from '../auth';
 import { useAuth } from '../hooks/useAuth';
 import { hasAssignedInCategory } from '../lib/apps';
 import { useDialogo } from '@suite/a11y';
@@ -108,7 +108,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: Props) {
   const handleLogOut = async () => {
     onMobileClose?.();
     await logout();
-    navigate('/auth');
+    navigate(RUTA_INICIAR_SESION);
   };
 
   // Plegada: el icono se centra y el texto desaparece; la etiqueta pasa al title

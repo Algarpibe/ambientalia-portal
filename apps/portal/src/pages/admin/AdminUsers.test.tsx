@@ -12,7 +12,8 @@ const renderAdmin = () => render(<MemoryRouter><AdminUsers /></MemoryRouter>);
 const navigateMock = vi.fn();
 vi.mock('react-router-dom', async (orig) => ({ ...(await orig<typeof import('react-router-dom')>()), useNavigate: () => navigateMock }));
 vi.mock('../../lib/api', () => ({ authFetch: vi.fn() }));
-vi.mock('../../auth', () => ({ clearToken: vi.fn() }));
+// Se conserva el resto del módulo (RUTA_INICIAR_SESION) para probar el destino real.
+vi.mock('../../auth', async (orig) => ({ ...(await orig<typeof import('../../auth')>()), clearToken: vi.fn() }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 vi.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user_id: 'me', isAuthenticated: true, email: 'a@x.com', role: 'admin', apps: [] }) }));
 
@@ -84,10 +85,10 @@ describe('AdminUsers', () => {
     expect(await screen.findByText(/No se pudo cargar/i)).toBeTruthy();
   });
 
-  it('sesión expirada (401) → limpia token y redirige a /auth (Req 5.6)', async () => {
+  it('sesión expirada (401) → limpia token y redirige a iniciar sesion (Req 5.6)', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
     renderAdmin();
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth', { replace: true }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/auth?modo=login', { replace: true }));
     expect(clearToken).toHaveBeenCalled();
   });
 });

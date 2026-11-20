@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, LogOut, Menu } from 'lucide-react';
-import { logout as cerrarSesion } from '../auth';
+import { logout as cerrarSesion, RUTA_INICIAR_SESION } from '../auth';
 import { useProfile } from '../hooks/useProfile';
 import Avatar from './Avatar';
 
@@ -21,7 +21,7 @@ export default function TopBar({ onOpenMenu, menuOpen = false }: Props) {
 
   const logout = async () => {
     await cerrarSesion();
-    navigate('/auth');
+    navigate(RUTA_INICIAR_SESION);
   };
 
   return (
