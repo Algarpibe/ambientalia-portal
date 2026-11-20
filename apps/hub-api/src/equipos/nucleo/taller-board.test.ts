@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EST, VISTAS, aplicarAjustes, type Ajustes, type Fila, type TicketFila } from './index.js';
 import { ESTADOS_DESK } from './taller-columns.js';
 import {
-  AJUSTES_TABLERO_POR_DEFECTO, avatarDe, construirTablero, diasEnTaller, fechaBogota, horaBogota, tonoDias, validarAjustesTablero,
+  AJUSTES_TABLERO_POR_DEFECTO, avatarDe, construirTablero, diasEnTaller, fechaBogota, horaBogota, inicialesDe, tonoDias, validarAjustesTablero,
   type AjustesTablero, type Tablero, type Tarjeta,
 } from './taller-board.js';
 
@@ -158,6 +158,13 @@ describe('contenido de la tarjeta', () => {
     const i = (enc: string) => tarjeta(fila('A1', 'En Proceso', { z: tk('En Proceso', { enc }) })).tecnico?.iniciales;
     expect(i('  ana  maria  lopez ')).toBe('AM');
     expect(i('ana')).toBe('A');
+  });
+
+  it('inicialesDe: la misma regla de las tarjetas, para quien aún no tiene ninguna («Mis equipos»)', () => {
+    expect(inicialesDe('  ana  maria  lopez ')).toBe('AM');
+    expect(inicialesDe('ana')).toBe('A');
+    expect(inicialesDe('')).toBe('');
+    expect(inicialesDe('Técnico Uno')).toBe(tarjeta(fila('A1', 'En Proceso')).tecnico?.iniciales);
   });
 });
 

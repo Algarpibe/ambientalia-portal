@@ -150,7 +150,8 @@ export function avatarDe(nombre: string): number {
   return h % 6;
 }
 
-const iniciales = (nombre: string): string =>
+/** Iniciales (las dos primeras palabras) de un nombre: las de las tarjetas y la cabecera de «Mis equipos». */
+export const inicialesDe = (nombre: string): string =>
   nombre.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join("");
 
 function columnaDe(r: Fila): ColumnaId {
@@ -185,7 +186,7 @@ function tarjetaDe(r: Fila, cfg: AjustesTablero, ahoraMs: number): Tarjeta {
     tono: tonoDias(dias, cfg),
     etiquetas: etiquetasDe(r),
     tecnico: resp
-      ? { nombre: resp.nombre, iniciales: iniciales(resp.nombre), avatar: avatarDe(resp.nombre), ...(resp.userId ? { userId: resp.userId } : {}) }
+      ? { nombre: resp.nombre, iniciales: inicialesDe(resp.nombre), avatar: avatarDe(resp.nombre), ...(resp.userId ? { userId: resp.userId } : {}) }
       : null,
     ticket: r.z ? r.z.n : null,
     pie: resp ? "tecnico" : !r.z ? "neutro" : "sin_asignar",
