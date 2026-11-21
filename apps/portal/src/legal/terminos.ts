@@ -30,7 +30,7 @@ export const TERMS_VERSION = '1.0';
  * «24 de noviembre de 2026». Se fija en el último commit antes de fusionar;
  * mientras sea un hueco «[…]», el candado de ./terminos.test.ts falla a propósito.
  */
-export const TERMS_EFFECTIVE_DATE = '[fecha de vigencia]';
+export const TERMS_EFFECTIVE_DATE = '24 de noviembre de 2026';
 
 /**
  * El canal de contacto del §2.1 y del §2.7: la dirección real de la fila «Canal
@@ -39,7 +39,7 @@ export const TERMS_EFFECTIVE_DATE = '[fecha de vigencia]';
  * fusionar: el filtro de privacidad no deja que la escriba un agente. Mientras sea
  * un hueco «[…]», el candado de ./terminos.test.ts falla a propósito.
  */
-export const CORREO_CONTACTO = '[correo de contacto]';
+export const CORREO_CONTACTO = 'comercial@ambientalia.com.co';
 
 /** Un párrafo; `destacado` es su arranque en negrita («1.1 Quién puede usarlo.»). */
 export interface Parrafo {
