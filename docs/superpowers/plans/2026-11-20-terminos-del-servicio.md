@@ -27,6 +27,44 @@ copia principal ya tiene `node_modules`.
 
 ---
 
+## Desvíos durante la ejecución (2026-11-21)
+
+Lo que se hizo distinto o además de lo que dicen las tareas de más abajo (las tareas no se
+reescriben), todo a raíz de las revisiones:
+
+- **079 (Task 1):** `portal_app` solo lee e inserta: `GRANT SELECT, INSERT` + `REVOKE UPDATE, DELETE,
+  TRUNCATE`, como la 070, porque la 068 vuelve a dar todo en cada arranque. La cascada funciona sin
+  DELETE (Postgres la ejecuta como dueño de la tabla). Lo vigilan `db.roles.db.test.ts` (primer
+  arranque y arranques siguientes) y un test de fecha que ya no puede pasar por casualidad.
+- **`/users/me` (Task 2):** si falla solo la consulta de las condiciones, devuelve el perfil sin
+  `terms` (no un 500); `terms` es opcional. Más candados: comparación estricta de la versión y la
+  cuenta sale solo del JWT.
+- **Texto legal y página (Task 3):** el candado compara el texto entero con el Anexo en los dos
+  sentidos y en orden, y exige el ancho de cada fila; las tablas de dos columnas no tienen ancho
+  mínimo, las regiones con scroll son enfocables y con nombre, la primera celda es cabecera de fila;
+  título de pestaña, enlace «Volver al portal» y `mailto:` en el correo. El regex del candado de
+  versión (Task 4) se ancló al inicio de línea porque un comentario citaba la declaración.
+- **Almacén de sesión (Task 5):** test del cambio de cuenta en la misma pestaña.
+- **Pantalla (Task 6):** solo aparece si `terms.current === TERMS_VERSION` (si hub-api va por
+  delante, aceptar daría 400 sin salida); repinta con un contador (una segunda aceptación en el mismo
+  montaje se quedaba pegada); sin aviso genérico ante un 401 (el interceptor ya manda a iniciar
+  sesión); foco en el título, orden de tabulación igual al visual y «(se abre en una pestaña nueva)»
+  en el enlace.
+- **Casilla y Ajustes (Task 7):** el enlace de Ajustes lleva el mismo aviso de pestaña nueva; el del
+  registro no, porque quedaba dentro del nombre accesible de la casilla.
+- **Texto v1.0 corregido antes de publicar (revisión final, aprobado por el usuario):** §2.2 (cargo y
+  notas de los administradores), §2.4 (qué muestra el calendario compartido), §2.5 (Google Calendar y
+  Sheets con los datos de Ausencias) y §2.8 (la foto se guarda mientras exista la cuenta).
+- **Norma de uso:** a quien deja la compañía se le desactiva la cuenta, no se elimina (spec §4).
+- **Fecha y contacto (Task 8):** fecha de vigencia 24 de noviembre de 2026; la dirección de contacto
+  la escribió el usuario a mano.
+
+**Seguimientos (no bloquean):** si el calendario compartido debe decir «Ausencia» en vez de
+«Incapacidad» (revisión legal, cambio en Ausencias); la autorización separada de los soportes (v1.1);
+el borrado a los 3 años; vigilar el limitador de `/users/*` el día del despliegue.
+
+---
+
 ## Reglas para quien implemente
 
 - **TDD estricto:** cada test se ve en ROJO, y por la razón esperada, antes de escribir el código.
