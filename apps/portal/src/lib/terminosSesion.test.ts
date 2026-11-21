@@ -22,6 +22,13 @@ describe('terminosSesion', () => {
     expect(leerTerminos(null)).toBeNull();
   });
 
+  it('al cambiar de cuenta en la misma pestaña, lo de la nueva sustituye a lo de la anterior', () => {
+    guardarTerminos('u1', { current: '1.0', accepted: false });
+    guardarTerminos('u2', { current: '1.0', accepted: true });
+    expect(leerTerminos('u1')).toBeNull();
+    expect(leerTerminos('u2')).toEqual({ current: '1.0', accepted: true });
+  });
+
   it.each([
     ['ausente (hub-api anterior)', undefined],
     ['null', null],

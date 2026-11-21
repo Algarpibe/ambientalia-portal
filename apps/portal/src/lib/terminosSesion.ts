@@ -40,7 +40,11 @@ export function leerTerminos(userId: string | null): TermsStatus | null {
   return userId !== null && cache?.userId === userId ? cache.terms : null;
 }
 
-/** Tras un POST /api/users/me/terms con éxito: la pantalla deja de pedirla sin otra petición. */
+/**
+ * Tras un POST /api/users/me/terms con éxito: la pantalla deja de pedirla sin otra petición.
+ * No avisa a nadie: quien la llame debe volver a pintarse por su cuenta (la
+ * pantalla de aceptación lo hace con su propio estado).
+ */
 export function marcarTerminosAceptados(userId: string): void {
   if (cache?.userId === userId) cache = { userId, terms: { ...cache.terms, accepted: true } };
 }
