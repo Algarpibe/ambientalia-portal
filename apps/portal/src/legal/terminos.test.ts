@@ -105,6 +105,19 @@ describe('CANDADO: el texto publicado en /terminos', () => {
     expect(publicados.filter((t) => !ANEXO.includes(comoEnElAnexo(t.texto))).map((t) => t.ruta)).toEqual([]);
   });
 
+  it('cada fila de cada tabla tiene tantas celdas como columnas', () => {
+    // El test del texto entero aplana las tablas: con filas del mismo ancho, texto
+    // aplanado igual implica tablas idénticas; sin esto, mover una celda al inicio
+    // de la fila siguiente pasaría sin que nadie lo viera.
+    const tablas = legal.SECCIONES.flatMap((s) => s.apartados.flatMap((a) => a.bloques)).filter(
+      (b): b is legal.Tabla => b.tipo === 'tabla',
+    );
+    expect(tablas).toHaveLength(5);
+    for (const t of tablas) {
+      expect(t.filas.every((f) => f.length === t.columnas.length), t.columnas.join(' | ')).toBe(true);
+    }
+  });
+
   it('el texto entero coincide con el Anexo, en los dos sentidos y en el mismo orden', () => {
     // Complementa al test anterior, que solo mira pieza a pieza (una frase borrada,
     // un párrafo recortado o dos celdas intercambiadas pasarían). Aquí se compara
@@ -116,7 +129,7 @@ describe('CANDADO: el texto publicado en /terminos', () => {
       .split('\n')
       .slice(1) // el resto de la línea «## Anexo — …»
       .filter((l) => !l.startsWith('>')) // la nota que explica el hueco de la fecha
-      .filter((l) => !/^\|[-| ]+\|\s*$/.test(l)) // la fila separadora de las tablas
+      .filter((l) => !/^\|[-:| ]+\|\s*$/.test(l)) // la fila separadora de las tablas
       .map((l) => {
         if (l.startsWith('|')) return l.replace(/^\||\|\s*$/g, '').split('|').map((c) => c.trim()).join(' ');
         return l.replace(/^#+\s+/, '').replace(/^- /, '');

@@ -14,11 +14,15 @@
 //     TERMS_VERSION sea la CURRENT_TERMS_VERSION de hub-api. Cambiar el texto de
 //     verdad es subir la versión en los dos sitios, y todos vuelven a aceptarlo. Por
 //     eso la declaración de TERMS_VERSION no cambia de forma: hub-api la lee como texto.
-//   · ./terminos.test.ts falla si queda un hueco «[…]» en cualquier texto exportado
-//     o si el texto no coincide con el Anexo del spec.
+//   · ./terminos.test.ts falla si queda un hueco «[…]» o «{…}» en cualquier texto
+//     exportado o si el texto no coincide con el Anexo del spec.
 
 // Una versión nueva toca TRES cosas a la vez: esta constante, CURRENT_TERMS_VERSION
-// en apps/hub-api/src/users/terms.ts y el Anexo del spec que lee el test.
+// en apps/hub-api/src/users/terms.ts y el Anexo del spec que lee el test. Además, la
+// versión nueva lleva su PROPIO texto aprobado (un spec/Anexo nuevo o un
+// docs/legal/terminos-vX.Y.md) y la ruta SPEC del test se apunta a él: el Anexo de la
+// v1.0 no se edita nunca, porque el texto versionado en git de cada versión es la
+// constancia de lo que aceptaron los usuarios.
 export const TERMS_VERSION = '1.0';
 
 /**
