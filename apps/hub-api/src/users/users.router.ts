@@ -65,22 +65,27 @@ export function createUsersRouter(pool: Pool, deps: UsersRouterDeps = {}): Route
 
   // POST /api/auth/register — registro por autoservicio, sin autenticación.
   // Éxito → 201 y estado pending (no emite JWT). Validación → 400; duplicado → 409.
+  // `termsVersion` (opcional) es la versión de las condiciones de uso aceptada en
+  // la casilla; con la vigente queda la constancia (ver UserService.register).
   // No se audita: no es una operación de admin (no hay adminEmail).
   router.post('/auth/register', registerLimiter, async (req: Request, res: Response) => {
     try {
-      const { fullName, email, password } = (req.body ?? {}) as {
+      const { fullName, email, password, termsVersion } = (req.body ?? {}) as {
         fullName?: string;
         email?: string;
         password?: string;
+        termsVersion?: unknown;
       };
-      const user = await service.register({ fullName: fullName!, email: email!, password: password! });
+      const user = await service.register({ fullName: fullName!, email: email!, password: password!, termsVersion });
       res.status(201).json({ message: 'registration_pending', userId: user.id });
     } catch (e) {
       sendError(res, e, 'register');
     }
   });
 
-  // GET /api/users/me — perfil propio (nombre, email, rol, avatar, alta).
+  // GET /api/users/me — perfil propio (nombre, email, rol, avatar, alta, apps) y el
+  // estado de las condiciones de uso (`terms`), que el portal lee de esta misma
+  // respuesta para decidir si pide la aceptación.
   router.get('/users/me', requireAuth, async (req: Request, res: Response) => {
     const payload = getPayload(req);
     if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
@@ -149,6 +154,23 @@ export function createUsersRouter(pool: Pool, deps: UsersRouterDeps = {}): Route
       res.json({ message: 'password_updated' });
     } catch (e) {
       sendError(res, e, 'change_password');
+    }
+  });
+
+  // POST /api/users/me/terms { version } — el propio usuario acepta las condiciones
+  // de uso y la política de tratamiento de datos (Ley 1581). El objetivo es el
+  // user_id del JWT, así que basta requireAuth; pasa por el limitador de /users/*
+  // como el resto. Solo vale la versión vigente (400 si no); repetirla responde
+  // igual y no cambia la fecha de la primera. No se audita: la constancia ES la
+  // fila de portal.terms_acceptances.
+  router.post('/users/me/terms', requireAuth, async (req: Request, res: Response) => {
+    const payload = getPayload(req);
+    if (!payload?.user_id) return void res.status(401).json({ error: 'unauthorized' });
+    try {
+      await service.acceptTerms(payload.user_id, (req.body ?? {}).version);
+      res.json({ accepted: true });
+    } catch (e) {
+      sendError(res, e, 'accept_terms');
     }
   });
 

@@ -4,6 +4,7 @@ import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { AccessNotifierActions } from './users/access-emails/access-notifier.js';
+import { CURRENT_TERMS_VERSION } from './users/terms.js';
 
 // Tests de integración HTTP del router de usuarios (Checkpoint 11). Montamos el
 // router real sobre un pool fake in-memory que modela `users` y `user_apps`, y
@@ -31,6 +32,10 @@ interface Row {
 class FakeDb {
   users: Row[] = [];
   apps: { user_id: string; app_id: string }[] = [];
+  /** portal.terms_acceptances (migración 079): las aceptaciones de las condiciones de uso. */
+  terms: { user_id: string; version: string }[] = [];
+  /** Con true, guardar una aceptación lanza: simula un fallo de la base a mitad del registro. */
+  failTermsInsert = false;
   private seq = 0;
   private snap: { users: Row[]; apps: { user_id: string; app_id: string }[] } | null = null;
 
@@ -75,6 +80,24 @@ class FakeDb {
       return { rows: [], rowCount: 0 };
     }
 
+    // Condiciones de uso (spec 2026-11-20-terminos). Van antes que todo lo de
+    // portal.users: ninguna de esas ramas las reconoce, y una genérica que casara
+    // por error devolvería filas de otra tabla.
+    if (/^INSERT INTO portal.terms_acceptances/i.test(sql)) {
+      if (this.failTermsInsert) throw new Error('fallo forzado al guardar la aceptación');
+      const [user_id, version] = params as string[];
+      // ON CONFLICT (user_id, version) DO NOTHING: repetir no añade otra fila.
+      if (this.terms.some((t) => t.user_id === user_id && t.version === version)) return { rows: [], rowCount: 0 };
+      this.terms.push({ user_id, version });
+      return { rows: [], rowCount: 1 };
+    }
+    if (/FROM portal.terms_acceptances WHERE user_id = \$1 AND version = \$2/i.test(sql)) {
+      const [user_id, version] = params as string[];
+      const rows = this.terms
+        .filter((t) => t.user_id === user_id && t.version === version)
+        .map(() => ({ '?column?': 1 }));
+      return { rows, rowCount: rows.length };
+    }
     if (/^INSERT INTO portal.users/i.test(sql)) {
       const [full_name, email, password_hash] = params as string[];
       const row = this.seedUser({ full_name, email, password_hash, role: 'reader', status: 'pending' });
@@ -690,5 +713,110 @@ describe('correos de acceso', () => {
     expect(aprobar.body.message).toBe('status_updated');
     const asignar = await request(app).put(`/api/users/${p.id}/apps`).set(bearer(adminToken)).send({ apps: ['ausencias'] });
     expect(asignar.body).toEqual({ message: 'apps_updated', apps: ['ausencias'] });
+  });
+});
+
+// Condiciones de uso y tratamiento de datos (spec 2026-11-20-terminos-del-servicio,
+// §4 y §7). La constancia es la fila de portal.terms_acceptances; aquí, el array
+// `terms` del pool falso. Lo que hace contra Postgres: users/terms.db.test.ts.
+describe('condiciones de uso', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const aceptacionesDe = (userId: string) => db.terms.filter((t) => t.user_id === userId);
+  const registrar = (extra: Record<string, unknown>) =>
+    request(app)
+      .post('/api/auth/register')
+      .send({ fullName: 'Persona Nueva', email: 'persona@ejemplo.test', password: 'clave-ficticia-1', ...extra });
+
+  it('GET /me trae la versión vigente y accepted false a quien no la aceptó', async () => {
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.status).toBe(200);
+    expect(res.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: false });
+  });
+
+  it('GET /me: accepted true con la vigente aceptada', async () => {
+    db.terms.push({ user_id: READER_ID, version: CURRENT_TERMS_VERSION });
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: true });
+  });
+
+  it('GET /me: haber aceptado otra versión no cuenta (una versión nueva se vuelve a pedir)', async () => {
+    db.terms.push({ user_id: READER_ID, version: '0.9' });
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: false });
+  });
+
+  it('GET /me: la aceptación de otra cuenta no cuenta', async () => {
+    db.terms.push({ user_id: ADMIN_ID, version: CURRENT_TERMS_VERSION });
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: false });
+  });
+
+  it('POST /me/terms sin token → 401', async () => {
+    const res = await request(app).post('/api/users/me/terms').send({ version: CURRENT_TERMS_VERSION });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /me/terms con otra versión → 400 invalid_terms_version y no guarda nada', async () => {
+    const res = await request(app).post('/api/users/me/terms').set(bearer(readerToken)).send({ version: '0.9' });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'invalid_terms_version', field: 'version' });
+    expect(db.terms).toEqual([]);
+  });
+
+  it('POST /me/terms sin versión → 400', async () => {
+    const res = await request(app).post('/api/users/me/terms').set(bearer(readerToken)).send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_terms_version');
+  });
+
+  it('POST /me/terms con la vigente → 200, queda guardada y GET /me ya lo dice', async () => {
+    const res = await request(app)
+      .post('/api/users/me/terms')
+      .set(bearer(readerToken))
+      .send({ version: CURRENT_TERMS_VERSION });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ accepted: true });
+    expect(aceptacionesDe(READER_ID)).toEqual([{ user_id: READER_ID, version: CURRENT_TERMS_VERSION }]);
+    const me = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(me.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: true });
+  });
+
+  it('POST /me/terms repetido → 200 otra vez y una sola aceptación', async () => {
+    for (let i = 0; i < 2; i++) {
+      const res = await request(app)
+        .post('/api/users/me/terms')
+        .set(bearer(readerToken))
+        .send({ version: CURRENT_TERMS_VERSION });
+      expect(res.status).toBe(200);
+    }
+    expect(aceptacionesDe(READER_ID)).toHaveLength(1);
+  });
+
+  it('registro con la versión vigente → 201 y la cuenta nueva queda con su aceptación', async () => {
+    const res = await registrar({ termsVersion: CURRENT_TERMS_VERSION });
+    expect(res.status).toBe(201);
+    expect(aceptacionesDe(res.body.userId)).toEqual([{ user_id: res.body.userId, version: CURRENT_TERMS_VERSION }]);
+  });
+
+  it.each([
+    { caso: 'sin termsVersion (portal anterior)', extra: {} },
+    { caso: 'con otra versión', extra: { termsVersion: '0.9' } },
+    { caso: 'con un termsVersion que no es texto', extra: { termsVersion: 1 } },
+  ])('registro $caso → 201 igual, sin aceptación', async ({ extra }) => {
+    const res = await registrar(extra);
+    expect(res.status).toBe(201);
+    expect(db.users.some((u) => u.id === res.body.userId)).toBe(true);
+    expect(db.terms).toEqual([]);
+  });
+
+  it('registro: si guardar la aceptación falla, la cuenta se crea igual y el log lleva el user_id, no el correo', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    db.failTermsInsert = true;
+    const res = await registrar({ termsVersion: CURRENT_TERMS_VERSION });
+    expect(res.status).toBe(201);
+    expect(db.users.some((u) => u.id === res.body.userId)).toBe(true);
+    expect(error).toHaveBeenCalledWith('register_terms error', { user_id: res.body.userId }, expect.any(Error));
+    expect(JSON.stringify(error.mock.calls)).not.toContain('persona@ejemplo.test');
   });
 });
