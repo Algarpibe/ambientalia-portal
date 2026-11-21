@@ -200,8 +200,16 @@ export class UserService {
   async getSelfProfile(id: string): Promise<SelfProfileResponse> {
     const profile = await this.repo.getSelfProfile(id);
     if (!profile) throw new UserError('user_not_found', 404);
-    const accepted = await this.repo.hasAcceptedTerms(id, CURRENT_TERMS_VERSION);
-    return { ...profile, terms: { current: CURRENT_TERMS_VERSION, accepted } };
+    try {
+      const accepted = await this.repo.hasAcceptedTerms(id, CURRENT_TERMS_VERSION);
+      return { ...profile, terms: { current: CURRENT_TERMS_VERSION, accepted } };
+    } catch (err) {
+      // Un fallo pasajero de esta consulta no debe tumbar el perfil (apps, «Mis
+      // equipos»): sin `terms` el portal no muestra la pantalla. Solo el user_id.
+      console.error('self_profile_terms error', { user_id: id }, err);
+      captureError(err, { endpoint: 'self_profile_terms', user_id: id });
+      return profile;
+    }
   }
 
   /**

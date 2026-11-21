@@ -69,7 +69,12 @@ export interface TermsStatus {
  * consulta del perfil (ver UserService.getSelfProfile).
  */
 export interface SelfProfileResponse extends SelfProfile {
-  terms: TermsStatus;
+  /**
+   * Opcional a propósito: la spec (§3) trata una respuesta sin `terms` como «no
+   * mostrar la pantalla», así que un fallo pasajero al consultarlas solo se la
+   * salta, en vez de romper la lista de apps o «Mis equipos».
+   */
+  terms?: TermsStatus;
 }
 
 /** Payload de entrada del registro por autoservicio (`POST /api/auth/register`). */

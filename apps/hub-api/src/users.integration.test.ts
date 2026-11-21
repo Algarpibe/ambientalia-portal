@@ -36,6 +36,8 @@ class FakeDb {
   terms: { user_id: string; version: string }[] = [];
   /** Con true, guardar una aceptación lanza: simula un fallo de la base a mitad del registro. */
   failTermsInsert = false;
+  /** Con true, consultar la aceptación lanza: simula un fallo de la base solo en esa consulta. */
+  failTermsSelect = false;
   private seq = 0;
   private snap: { users: Row[]; apps: { user_id: string; app_id: string }[] } | null = null;
 
@@ -92,6 +94,7 @@ class FakeDb {
       return { rows: [], rowCount: 1 };
     }
     if (/FROM portal.terms_acceptances WHERE user_id = \$1 AND version = \$2/i.test(sql)) {
+      if (this.failTermsSelect) throw new Error('fallo forzado al consultar la aceptación');
       const [user_id, version] = params as string[];
       const rows = this.terms
         .filter((t) => t.user_id === user_id && t.version === version)
@@ -752,6 +755,18 @@ describe('condiciones de uso', () => {
     expect(res.body.terms).toEqual({ current: CURRENT_TERMS_VERSION, accepted: false });
   });
 
+  it('GET /me: si solo falla la consulta de las condiciones, responde 200 con el perfil y sin terms', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    db.failTermsSelect = true;
+    const res = await request(app).get('/api/users/me').set(bearer(readerToken));
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(READER_ID);
+    expect(res.body.email).toBeDefined();
+    expect(res.body.terms).toBeUndefined();
+    expect(error).toHaveBeenCalledWith('self_profile_terms error', { user_id: READER_ID }, expect.any(Error));
+    expect(JSON.stringify(error.mock.calls[0].slice(0, 2))).not.toContain('@');
+  });
+
   it('POST /me/terms sin token → 401', async () => {
     const res = await request(app).post('/api/users/me/terms').send({ version: CURRENT_TERMS_VERSION });
     expect(res.status).toBe(401);
@@ -762,6 +777,23 @@ describe('condiciones de uso', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'invalid_terms_version', field: 'version' });
     expect(db.terms).toEqual([]);
+  });
+
+  it.each([1, ['1.0'], {}, null])('POST /me/terms con una versión que no es texto (%j) → 400 y no guarda nada', async (version) => {
+    const res = await request(app).post('/api/users/me/terms').set(bearer(readerToken)).send({ version });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_terms_version');
+    expect(db.terms).toEqual([]);
+  });
+
+  it('POST /me/terms: la cuenta sale solo del JWT, un user_id en el cuerpo no cuenta', async () => {
+    const res = await request(app)
+      .post('/api/users/me/terms')
+      .set(bearer(readerToken))
+      .send({ version: CURRENT_TERMS_VERSION, user_id: ADMIN_ID, userId: ADMIN_ID });
+    expect(res.status).toBe(200);
+    expect(db.terms).toEqual([{ user_id: READER_ID, version: CURRENT_TERMS_VERSION }]);
+    expect(aceptacionesDe(ADMIN_ID)).toEqual([]);
   });
 
   it('POST /me/terms sin versión → 400', async () => {
