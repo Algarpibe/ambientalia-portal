@@ -20,12 +20,19 @@ CREATE TABLE IF NOT EXISTS portal.terms_acceptances (
   PRIMARY KEY (user_id, version)
 );
 
--- DATA-332: con los roles activados, portal_app solo tiene lo que se le da. La
--- 068 concede ALL TABLES, pero corre antes que esta en el mismo arranque. No hay
--- secuencia que conceder: la clave es (user_id, version).
+-- DATA-332: el rol de las peticiones lee y añade aceptaciones, nunca las cambia ni
+-- las borra: es la prueba de la autorización y no debe poder alterarla una
+-- inyección SQL. SELECT hace falta también para el ON CONFLICT (user_id, version)
+-- del INSERT. El ON DELETE CASCADE desde portal.users corre con los permisos del
+-- dueño de la tabla, así que borrar una cuenta sigue arrastrando sus aceptaciones
+-- sin que portal_app tenga DELETE.
+-- La 068 re-concede SELECT, INSERT, UPDATE y DELETE sobre TODAS las tablas del
+-- esquema en cada arranque, y corre ANTES que esta: de ahí el GRANT y luego el
+-- REVOKE (mismo patrón que la 070). No hay secuencia: la clave es (user_id, version).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'portal_app') THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON portal.terms_acceptances TO portal_app;
+    GRANT SELECT, INSERT ON portal.terms_acceptances TO portal_app;
+    REVOKE UPDATE, DELETE, TRUNCATE ON portal.terms_acceptances FROM portal_app;
   END IF;
 END $$;

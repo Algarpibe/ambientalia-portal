@@ -17,7 +17,11 @@ describe('migración 079 (aceptaciones de las condiciones de uso)', () => {
   });
 
   it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {
-    expect(SIN_COMENTARIOS).not.toMatch(/INSERT\s+INTO|UPDATE\s+portal|\b(DROP|TRUNCATE|ALTER)\b|DELETE\s+FROM/i);
+    // TRUNCATE solo cuenta como sentencia si vacía una tabla (`TRUNCATE portal.x`): el
+    // `REVOKE … TRUNCATE ON …` de los permisos es justo lo contrario y debe poder estar.
+    expect(SIN_COMENTARIOS).not.toMatch(
+      /INSERT\s+INTO|UPDATE\s+portal|\b(DROP|ALTER)\b|\bTRUNCATE\s+(TABLE\s+)?portal\.|DELETE\s+FROM/i,
+    );
   });
 
   it('solo DDL idempotente: una tabla, IF NOT EXISTS', () => {
@@ -36,6 +40,7 @@ describe('migración 079 (aceptaciones de las condiciones de uso)', () => {
 
   it('da sus permisos a portal_app si existe (DATA-332)', () => {
     expect(SIN_COMENTARIOS).toMatch(/IF EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = 'portal_app'\)/);
-    expect(SIN_COMENTARIOS).toMatch(/GRANT SELECT, INSERT, UPDATE, DELETE ON portal\.terms_acceptances TO portal_app/);
+    expect(SIN_COMENTARIOS).toMatch(/GRANT SELECT, INSERT ON portal\.terms_acceptances TO portal_app/);
+    expect(SIN_COMENTARIOS).toMatch(/REVOKE UPDATE, DELETE, TRUNCATE ON portal\.terms_acceptances FROM portal_app/);
   });
 });

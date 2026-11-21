@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, inject } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import { createPoolFromUrl, type Pool } from '@algarpibe/zoho-sync';
 import { aplicarMigraciones, crearPoolMigraciones } from './db.js';
+import { UserRepository } from './users/users.repository.js';
 import { sembrarEmpleado, sembrarSolicitud, eventosDelOutbox } from './test-db/harness.js';
 
 // DATA-332 — un solo rol aplicaba el DDL de las migraciones Y atendía todas las
@@ -148,6 +149,35 @@ describe('el rol de las peticiones (portal_app)', () => {
       app.query('UPDATE portal.wo_sales_documento_numero SET origen = origen WHERE false'),
     ).rejects.toMatchObject(sinPermiso);
     await expect(app.query('DELETE FROM portal.wo_sales_documento_numero WHERE false')).rejects.toMatchObject(sinPermiso);
+  });
+
+  it('las aceptaciones de las condiciones solo admiten leer e insertar tras otro arranque, y el borrado de la cuenta las sigue arrastrando', async () => {
+    await arrancar();
+    const { rows } = await migrador.query(
+      `SELECT has_table_privilege('portal_app', 'portal.terms_acceptances', 'SELECT') AS sel,
+              has_table_privilege('portal_app', 'portal.terms_acceptances', 'INSERT') AS ins,
+              has_table_privilege('portal_app', 'portal.terms_acceptances', 'UPDATE') AS upd,
+              has_table_privilege('portal_app', 'portal.terms_acceptances', 'DELETE') AS del,
+              has_table_privilege('portal_app', 'portal.terms_acceptances', 'TRUNCATE') AS trunc`,
+    );
+    expect(rows[0]).toEqual({ sel: true, ins: true, upd: false, del: false, trunc: false });
+
+    // El ON DELETE CASCADE corre con los permisos del dueño de la tabla: borrar la
+    // cuenta desde el rol de las peticiones sigue borrando sus aceptaciones sin DELETE.
+    const repo = new UserRepository(app);
+    const { rows: u } = await app.query(
+      `INSERT INTO portal.users (full_name, email, password_hash, role, status)
+       VALUES ('Persona de Prueba', 'roles@terminos-roles.test', 'hash-ficticio', 'reader', 'active') RETURNING id`,
+    );
+    const id = (u[0] as { id: string }).id;
+    await repo.recordTermsAcceptance(id, '1.0');
+    expect(await repo.hasAcceptedTerms(id, '1.0')).toBe(true);
+    expect(await repo.delete(id)).toBe(true);
+    const { rows: n } = await migrador.query(
+      'SELECT count(*)::int AS n FROM portal.terms_acceptances WHERE user_id = $1',
+      [id],
+    );
+    expect(n[0].n).toBe(0);
   });
 
   it('dar los permisos en cada arranque no espera a las peticiones que están en curso', async () => {

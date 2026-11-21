@@ -114,12 +114,16 @@ describe('UserRepository · condiciones de uso', () => {
 
   it('repetir la misma aceptación no falla y conserva la fecha de la primera', async () => {
     const id = await sembrarUsuario('repite');
-    await repo.recordTermsAcceptance(id, '1.0');
-    const [primera] = await aceptacionesDe(id);
+    // La primera, con una fecha pasada fija: si el segundo intento la pisara con
+    // now(), la diferencia sería de meses y no dependería de la precisión de ms.
+    await db.query(
+      `INSERT INTO portal.terms_acceptances (user_id, version, accepted_at) VALUES ($1, '1.0', '2026-01-01T00:00:00Z')`,
+      [id],
+    );
     await repo.recordTermsAcceptance(id, '1.0');
     const filas = await aceptacionesDe(id);
     expect(filas).toHaveLength(1);
-    expect(filas[0].accepted_at.toISOString()).toBe(primera.accepted_at.toISOString());
+    expect(filas[0].accepted_at.toISOString()).toBe('2026-01-01T00:00:00.000Z');
   });
 
   it('una versión nueva es otra fila: quedan las dos aceptaciones', async () => {
