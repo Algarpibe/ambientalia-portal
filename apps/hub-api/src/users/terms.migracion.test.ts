@@ -17,11 +17,11 @@ describe('migración 079 (aceptaciones de las condiciones de uso)', () => {
   });
 
   it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {
-    // TRUNCATE solo cuenta como sentencia si vacía una tabla (`TRUNCATE portal.x`): el
-    // `REVOKE … TRUNCATE ON …` de los permisos es justo lo contrario y debe poder estar.
-    expect(SIN_COMENTARIOS).not.toMatch(
-      /INSERT\s+INTO|UPDATE\s+portal|\b(DROP|ALTER)\b|\bTRUNCATE\s+(TABLE\s+)?portal\.|DELETE\s+FROM/i,
-    );
+    // Se quitan antes los GRANT/REVOKE: sus listas de privilegios nombran UPDATE, DELETE
+    // y TRUNCATE sin ser sentencias destructivas. Lo que queda se vigila a rajatabla,
+    // así que cualquier TRUNCATE (con o sin ONLY, calificado o no) sigue fallando.
+    const SIN_PERMISOS = SIN_COMENTARIOS.replace(/\b(GRANT|REVOKE)\b[^;]*;/gi, '');
+    expect(SIN_PERMISOS).not.toMatch(/INSERT\s+INTO|UPDATE\s+portal|\b(DROP|TRUNCATE|ALTER)\b|DELETE\s+FROM/i);
   });
 
   it('solo DDL idempotente: una tabla, IF NOT EXISTS', () => {

@@ -85,6 +85,16 @@ describe('el rol de las peticiones (portal_app)', () => {
     expect(rows[0]).toEqual({ rolsuper: false });
   });
 
+  it('tras el PRIMER arranque (antes de cualquier otro), portal_app ya lee e inserta las aceptaciones de las condiciones', async () => {
+    // En el primer arranque la 068 corre antes de que exista la tabla de la 079, así que
+    // el único GRANT que le llega es el de la propia 079: si se borrara, esto falla.
+    const { rows } = await migrador.query(
+      `SELECT has_table_privilege('portal_app', 'portal.terms_acceptances', 'SELECT') AS sel,
+              has_table_privilege('portal_app', 'portal.terms_acceptances', 'INSERT') AS ins`,
+    );
+    expect(rows[0]).toEqual({ sel: true, ins: true });
+  });
+
   it('lee, inserta, actualiza y borra filas en portal, secuencias incluidas', async () => {
     // Con las funciones REALES del repositorio, no con INSERT a mano: así se
     // ejercitan sus transacciones, sus candados y el BIGSERIAL del outbox.
