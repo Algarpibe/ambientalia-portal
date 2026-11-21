@@ -1741,7 +1741,9 @@ const PORTAL_TERMINOS = fileURLToPath(new URL('../../../portal/src/legal/termino
 /** Las versiones que declara el portal con `export const TERMS_VERSION = '…';`. */
 function versionesDelPortal(): string[] {
   const fuente = readFileSync(PORTAL_TERMINOS, 'utf8');
-  return [...fuente.matchAll(/export const TERMS_VERSION = '([^']+)';/g)].map(([, version]) => version);
+  // Anclado al inicio de línea (`^` con `m`): un comentario que cite la declaración
+  // no cuenta como otra versión. Sin `$`: con CRLF fallaría antes del `\r`.
+  return [...fuente.matchAll(/^export const TERMS_VERSION = '([^']+)';/gm)].map(([, version]) => version);
 }
 
 describe('CANDADO: CURRENT_TERMS_VERSION es la TERMS_VERSION de apps/portal/src/legal/terminos.ts', () => {
