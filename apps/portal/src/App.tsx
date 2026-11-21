@@ -16,6 +16,7 @@ import Herramientas from './pages/Herramientas';
 import Aplicaciones from './pages/Aplicaciones';
 import Auth from './pages/Auth';
 import RestablecerContrasena from './pages/RestablecerContrasena';
+import Terminos from './pages/Terminos';
 import Configuracion from './pages/Configuracion';
 import AdminUsers from './pages/admin/AdminUsers';
 
@@ -59,6 +60,10 @@ function App() {
 
         {/* Restablecer la contraseña desde el enlace del correo — pública, sin sidebar */}
         <Route path="/auth/restablecer" element={<RestablecerContrasena />} />
+
+        {/* Condiciones de uso y tratamiento de datos — pública, sin sidebar: la enlazan
+            el registro (todavía sin sesión), la pantalla de aceptación y Ajustes */}
+        <Route path="/terminos" element={<Terminos />} />
 
         {/* Pantalla de TV del taller — pantalla completa, fuera del shell */}
         <Route path="/equipos-taller/tv" element={<RutaTableroTv />} />
