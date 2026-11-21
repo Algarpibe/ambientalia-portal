@@ -27,10 +27,10 @@ export const TERMS_VERSION = '1.0';
 
 /**
  * Día en que entra en vigor: el del despliegue del portal (spec §8), escrito
- * «24 de noviembre de 2026». Debe ser una fecha real, la del despliegue de esa
+ * «23 de noviembre de 2026». Debe ser una fecha real, la del despliegue de esa
  * versión; el candado de ./terminos.test.ts rechaza cualquier otro formato.
  */
-export const TERMS_EFFECTIVE_DATE = '24 de noviembre de 2026';
+export const TERMS_EFFECTIVE_DATE = '23 de noviembre de 2026';
 
 /**
  * El canal de contacto del §2.1 y del §2.7: la dirección real de la fila «Canal
