@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useReducer, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShieldCheck } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -24,13 +24,16 @@ export default function AceptacionTerminos({ children }: { children: ReactNode }
   // vuelve a pintar este componente.
   const { user_id } = useAuth();
   // Solo para volver a pintar tras aceptar: lo que decide es el almacén, que
-  // `marcarTerminosAceptados` ya ha puesto al día.
-  const [, setRecienAceptada] = useState(false);
+  // `marcarTerminosAceptados` ya ha puesto al día. Es un contador y no un booleano
+  // porque un booleano solo cambia una vez: si la cuenta cambia en el mismo montaje
+  // (evento `storage` de otra pestaña) y la nueva también acepta, `true` → `true`
+  // no repintaría y la pantalla se quedaría pegada.
+  const [, repintar] = useReducer((n: number) => n + 1, 0);
   const terminos = leerTerminos(user_id);
   // Solo se pide la versión que este portal sabe mostrar: si hub-api va por delante
   // (otra versión publicada antes que el portal), aceptar daría 400 sin salida.
   if (!user_id || !terminos || terminos.accepted || terminos.current !== TERMS_VERSION) return <>{children}</>;
-  return <PantallaTerminos userId={user_id} onAceptada={() => setRecienAceptada(true)} />;
+  return <PantallaTerminos userId={user_id} onAceptada={repintar} />;
 }
 
 function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: () => void }) {
@@ -38,6 +41,13 @@ function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: 
   const uid = useId();
   const [marcada, setMarcada] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const titulo = useRef<HTMLHeadingElement>(null);
+
+  // La pantalla sustituye a toda la página: el foco va al título para que quien
+  // usa lector de pantalla o teclado empiece por ahí y no por el vacío.
+  useEffect(() => {
+    titulo.current?.focus();
+  }, []);
 
   const aceptar = async () => {
     setGuardando(true);
@@ -48,6 +58,9 @@ function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: 
         method: 'POST',
         body: JSON.stringify({ version: TERMS_VERSION }),
       });
+      // 401: el interceptor global (lib/interceptor401) ya limpia el token y lleva
+      // al login; un aviso de error aquí sería ruido sobre una pantalla que se va.
+      if (res.status === 401) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       marcarTerminosAceptados(userId);
       onAceptada();
@@ -69,7 +82,7 @@ function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: 
         className="w-full max-w-lg bg-white rounded-2xl border border-gray-100 shadow-sm p-6 md:p-8 space-y-5">
         <div className="flex items-center gap-3">
           <ShieldCheck className="w-6 h-6 text-blue-600 shrink-0" aria-hidden="true" />
-          <h1 id={`${uid}-titulo`} className="text-xl font-bold text-gray-900">
+          <h1 id={`${uid}-titulo`} ref={titulo} tabIndex={-1} className="text-xl font-bold text-gray-900 outline-none">
             Condiciones de uso y tratamiento de datos
           </h1>
         </div>
@@ -82,7 +95,7 @@ function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: 
           target="_blank"
           rel="noopener noreferrer"
           className="inline-block text-sm font-semibold text-blue-700 hover:underline">
-          Leer el documento completo
+          Leer el documento completo <span className="sr-only">(se abre en una pestaña nueva)</span>
         </a>
         <div className="flex items-start gap-3">
           <input
@@ -96,19 +109,22 @@ function PantallaTerminos({ userId, onAceptada }: { userId: string; onAceptada: 
             {TEXTO_CASILLA}
           </label>
         </div>
-        <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={salir}
-            className="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50">
-            Salir
-          </button>
+        {/* El orden del DOM es el del Tab: «Aceptar» primero. En escritorio
+            `sm:flex-row-reverse` + `sm:justify-start` deja «Salir» a la izquierda y
+            «Aceptar» a la derecha (el orden visual del diseño). */}
+        <div className="flex flex-col gap-3 sm:flex-row-reverse sm:justify-start">
           <button
             type="button"
             onClick={aceptar}
             disabled={!marcada || guardando}
             className="px-4 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
             Aceptar y continuar
+          </button>
+          <button
+            type="button"
+            onClick={salir}
+            className="px-4 py-2.5 rounded-lg border border-gray-200 text-gray-700 font-semibold hover:bg-gray-50">
+            Salir
           </button>
         </div>
       </section>

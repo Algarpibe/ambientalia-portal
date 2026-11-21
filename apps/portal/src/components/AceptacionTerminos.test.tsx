@@ -53,6 +53,9 @@ const botonAceptar = () => screen.getByRole('button', { name: 'Aceptar y continu
 const marcarCasilla = () => fireEvent.click(screen.getByRole('checkbox', { name: TEXTO_CASILLA }));
 
 beforeEach(() => {
+  // Reset de la implementación (no solo de las llamadas): la promesa que no
+  // se resuelve de un test no debe filtrarse al siguiente.
+  mockFetch.mockReset();
   olvidarTerminos();
   estado.sesion = true;
   estado.auth = {
@@ -79,7 +82,7 @@ describe('AceptacionTerminos (detrás de RequireAuth)', () => {
         `Para seguir usando el portal, lee y acepta las condiciones de uso y la política de tratamiento de datos personales de AMBIENTALIA S.A.S. (versión ${TERMS_VERSION}).`,
       ),
     ).toBeTruthy();
-    const enlace = screen.getByRole('link', { name: 'Leer el documento completo' });
+    const enlace = screen.getByRole('link', { name: 'Leer el documento completo (se abre en una pestaña nueva)' });
     expect(enlace.getAttribute('href')).toBe('/terminos');
     expect(enlace.getAttribute('target')).toBe('_blank');
     expect(enlace.getAttribute('rel')).toBe('noopener noreferrer');
@@ -176,11 +179,75 @@ describe('AceptacionTerminos (detrás de RequireAuth)', () => {
   });
 
   it('«Salir» cierra la sesión y lleva a iniciar sesión, sin guardar nada', async () => {
+    // El cierre de sesión queda pendiente a propósito: si navegara antes de que
+    // termine, LOGIN aparecería con el cierre aún sin resolver.
+    let terminarLogout: () => void = () => {};
+    (logout as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise<void>((resolver) => (terminarLogout = resolver)),
+    );
     pendiente();
     montar();
     fireEvent.click(screen.getByRole('button', { name: 'Salir' }));
-    expect(await screen.findByText('LOGIN')).toBeTruthy();
     expect(logout).toHaveBeenCalledOnce();
+    expect(screen.queryByText('LOGIN')).toBeNull();
+    terminarLogout();
+    expect(await screen.findByText('LOGIN')).toBeTruthy();
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('una segunda aceptación en el mismo montaje (otra cuenta) también quita la pantalla', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ accepted: true }) });
+    pendiente();
+    const vista = montar();
+    marcarCasilla();
+    fireEvent.click(botonAceptar());
+    expect(await screen.findByText('CONTENIDO PROTEGIDO')).toBeTruthy();
+
+    // La sesión pasa a otra cuenta (p. ej. por el evento `storage` de otra pestaña).
+    estado.auth = { ...estado.auth!, user_id: 'u2' };
+    guardarTerminos('u2', { current: TERMS_VERSION, accepted: false });
+    vista.rerender(
+      <MemoryRouter initialEntries={['/contabilidad']}>
+        <Routes>
+          <Route
+            path="*"
+            element={
+              <RequireAuth>
+                <div>CONTENIDO PROTEGIDO</div>
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('heading', { name: TITULO })).toBeTruthy();
+    marcarCasilla();
+    fireEvent.click(botonAceptar());
+    expect(await screen.findByText('CONTENIDO PROTEGIDO')).toBeTruthy();
+    expect(leerTerminos('u2')).toEqual({ current: TERMS_VERSION, accepted: true });
+  });
+
+  it('con un 401 al guardar no avisa: el interceptor global ya lleva al login', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
+    pendiente();
+    montar();
+    marcarCasilla();
+    fireEvent.click(botonAceptar());
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('al aparecer, el foco está en el título', () => {
+    pendiente();
+    montar();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: TITULO }));
+  });
+
+  it('el orden del DOM es el orden visual: «Aceptar y continuar» antes que «Salir»', () => {
+    pendiente();
+    montar();
+    const orden = botonAceptar().compareDocumentPosition(screen.getByRole('button', { name: 'Salir' }));
+    expect(orden & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
