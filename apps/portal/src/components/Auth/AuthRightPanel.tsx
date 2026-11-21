@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { API_BASE, setToken } from '../../auth';
 import { notify } from '../../lib/notify';
+import { CASILLA, TERMS_VERSION } from '../../legal/terminos';
 import OlvidoContrasena from './OlvidoContrasena';
 import { destinoTrasLogin } from './destinoTrasLogin';
 
@@ -101,6 +102,10 @@ export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = fal
           fullName: formData.fullName.trim(),
           email: formData.email.trim(),
           password: formData.password,
+          // Constancia de la aceptación (Ley 1581): solo si la casilla está marcada.
+          // hub-api la guarda si es la versión vigente; si no, crea la cuenta igual
+          // y la pantalla de aceptación se la pedirá al entrar.
+          ...(agreeTerms ? { termsVersion: TERMS_VERSION } : {}),
         }),
       });
       if (res.status === 201) {
@@ -309,10 +314,16 @@ export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = fal
                 )}
               </div>
               <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
-                Acepto todos los{' '}
-                <a href="#" className="text-cyan-400 hover:text-cyan-300 transition-colors">
-                  términos de servicio
+                {CASILLA.antes}
+                {/* Pestaña nueva: el formulario a medio rellenar no se pierde. */}
+                <a
+                  href="/terminos"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-cyan-400 hover:text-cyan-300 transition-colors">
+                  {CASILLA.enlace} <span className="sr-only">(se abre en una pestaña nueva)</span>
                 </a>
+                {CASILLA.despues}
               </span>
             </label>
           </div>
