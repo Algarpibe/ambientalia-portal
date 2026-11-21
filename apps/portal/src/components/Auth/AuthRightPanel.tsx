@@ -321,7 +321,7 @@ export default function AuthRightPanel({ isSignUp, onToggle, olvidoInicial = fal
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-cyan-400 hover:text-cyan-300 transition-colors">
-                  {CASILLA.enlace} <span className="sr-only">(se abre en una pestaña nueva)</span>
+                  {CASILLA.enlace}
                 </a>
                 {CASILLA.despues}
               </span>

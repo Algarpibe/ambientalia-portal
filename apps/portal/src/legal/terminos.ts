@@ -14,7 +14,7 @@
 //     TERMS_VERSION sea la CURRENT_TERMS_VERSION de hub-api. Cambiar el texto de
 //     verdad es subir la versión en los dos sitios, y todos vuelven a aceptarlo. Por
 //     eso la declaración de TERMS_VERSION no cambia de forma: hub-api la lee como texto.
-//   · ./terminos.test.ts falla si queda un hueco «[…]» o «{…}» en cualquier texto
+//   · ./terminos.test.ts falla si queda un marcador «[…]» o «{…}» en cualquier texto
 //     exportado o si el texto no coincide con el Anexo del spec.
 
 // Una versión nueva toca TRES cosas a la vez: esta constante, CURRENT_TERMS_VERSION
@@ -27,17 +27,16 @@ export const TERMS_VERSION = '1.0';
 
 /**
  * Día en que entra en vigor: el del despliegue del portal (spec §8), escrito
- * «24 de noviembre de 2026». Se fija en el último commit antes de fusionar;
- * mientras sea un hueco «[…]», el candado de ./terminos.test.ts falla a propósito.
+ * «24 de noviembre de 2026». Debe ser una fecha real, la del despliegue de esa
+ * versión; el candado de ./terminos.test.ts rechaza cualquier otro formato.
  */
 export const TERMS_EFFECTIVE_DATE = '24 de noviembre de 2026';
 
 /**
  * El canal de contacto del §2.1 y del §2.7: la dirección real de la fila «Canal
- * de contacto» del Anexo, a propósito (decisión del usuario, spec §2). Es el único
- * sitio del código donde puede aparecer. La escribe a mano el usuario antes de
- * fusionar: el filtro de privacidad no deja que la escriba un agente. Mientras sea
- * un hueco «[…]», el candado de ./terminos.test.ts falla a propósito.
+ * de contacto» del Anexo (decisión del usuario, spec §2). Es el único sitio del
+ * código donde puede aparecer, y el candado de ./terminos.test.ts exige que
+ * coincida con la del Anexo.
  */
 export const CORREO_CONTACTO = 'comercial@ambientalia.com.co';
 
@@ -153,7 +152,8 @@ export const SECCIONES: Seccion[] = [
             ['Nombre, correo y rol', 'Los registra el usuario al crear la cuenta; el rol lo asigna un administrador'],
             ['Contraseña', 'Se guarda solo como huella cifrada; nadie en la compañía puede conocerla'],
             ['Foto de perfil', 'Opcional; solo si el usuario decide subirla'],
-            ['Ausencias', 'Fechas, tipo de ausencia y soportes que el usuario carga en la aplicación Ausencias'],
+            ['Ausencias', 'Fechas, tipo de ausencia, comentarios y soportes que el usuario carga en Ausencias, y el cargo de su ficha de empleado'],
+            ['Notas de los administradores', 'Notas internas sobre retrasos o solicitudes de ausencia; solo las ven los administradores'],
           ),
           parrafo(
             'El portal registra además las acciones de administración y los errores técnicos, que pueden quedar asociados al usuario que los originó.',
@@ -188,6 +188,7 @@ export const SECCIONES: Seccion[] = [
             'El usuario no está obligado a autorizar el tratamiento de datos sensibles.',
             'Solo se usan para tramitar y soportar la ausencia.',
             'Solo los ven el usuario, quienes aprueban su solicitud, las personas que AMBIENTALIA autoriza expresamente para tramitar ausencias y los administradores del portal.',
+            'El calendario de ausencias compartido con el personal muestra el tipo de ausencia, incluida «Incapacidad», y el nombre de la persona; los documentos de soporte no se publican en él.',
           ),
         ],
       },
@@ -201,9 +202,9 @@ export const SECCIONES: Seccion[] = [
             ['Proveedor', 'Servicio', 'Datos'],
             ['Hostinger', 'Alojamiento del portal y de su base de datos', 'Todos los datos del portal'],
             [
-              'Google (Gmail), mediante n8n',
-              'Envío de los correos de acceso y de recuperación de contraseña',
-              'Nombre y correo',
+              'Google (Gmail, Calendar y Sheets), mediante n8n',
+              'Correos del portal y de Ausencias; calendario de ausencias del personal y hoja de registro que usa nómina',
+              'Nombre y correo; en Ausencias, además el tipo de ausencia, las fechas, los comentarios y el nombre del archivo del soporte',
             ],
             ['Sentry', 'Registro de errores técnicos', 'Datos técnicos del error, que pueden incluir el usuario afectado'],
           ),
@@ -262,7 +263,7 @@ export const SECCIONES: Seccion[] = [
               'Cuenta: nombre, correo, rol y huella de la contraseña',
               'Mientras dure el vínculo con la compañía; después la cuenta se desactiva y se elimina a los 3 años',
             ],
-            ['Foto de perfil', 'Hasta que el usuario la retire o se desactive la cuenta'],
+            ['Foto de perfil', 'Mientras exista la cuenta'],
             ['Ausencias y sus soportes', '3 años después de terminado el vínculo con la compañía'],
             ['Registros de administración y de errores', '3 años desde que se generan'],
           ),

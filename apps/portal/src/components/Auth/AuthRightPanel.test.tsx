@@ -327,10 +327,10 @@ describe('AuthRightPanel — condiciones de uso', () => {
 
   it('la casilla dice el texto de la política y «condiciones de uso» abre /terminos en pestaña nueva', () => {
     renderSignup();
-    // El enlace lleva un sufijo solo para lectores de pantalla (se abre en pestaña nueva).
-    const sufijo = ' (se abre en una pestaña nueva)';
-    expect(screen.getByRole('checkbox').closest('label')?.textContent?.replace(sufijo, '')).toBe(TEXTO_CASILLA);
-    const enlace = screen.getByRole('link', { name: `condiciones de uso${sufijo}` });
+    // El enlace va dentro de la etiqueta de la casilla: sin sufijo oculto, para que el
+    // nombre accesible de la casilla sea exactamente la frase.
+    expect(screen.getByRole('checkbox').closest('label')?.textContent).toBe(TEXTO_CASILLA);
+    const enlace = screen.getByRole('link', { name: 'condiciones de uso' });
     expect(enlace.getAttribute('href')).toBe('/terminos');
     expect(enlace.getAttribute('target')).toBe('_blank');
     expect(enlace.getAttribute('rel')).toBe('noopener noreferrer');

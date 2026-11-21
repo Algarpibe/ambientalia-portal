@@ -39,6 +39,10 @@ tienen cuenta nunca aceptaron nada.
   - §2.4: la lista de quién ve los soportes se corrige a lo que hace el código (ver §6).
   - §2.8: plazos de conservación de **3 años**; fecha de vigencia, la del despliegue.
   - Sin la sección «Pendientes de la empresa (no se publica)».
+  - Corregido antes de publicar, tras la revisión final: el §2.5 omitía los datos de Ausencias que
+    pasan por Google Calendar y Sheets; el §2.2 omitía el cargo y las notas de los administradores;
+    el §2.4 ahora dice qué muestra el calendario compartido de ausencias; y el §2.8 ya no promete
+    que la foto se pueda retirar (el portal no tiene cómo y desactivar la cuenta no la borra).
 - **Constancia mínima:** usuario, versión y fecha. Ni IP ni navegador: el texto promete «fecha y
   versión», y guardar más obligaría a declararlo en el §2.2.
 
@@ -163,6 +167,8 @@ de fusionar, con el día en que el usuario vaya a desplegar el portal.
 - Una vista de las aceptaciones en el panel de administración. Si alguien pide prueba de su
   autorización (§2.6), se consulta la tabla.
 - Bloquear la API en hub-api para quien no haya aceptado.
+- Pendiente de la revisión legal: decidir si el calendario compartido debe mostrar «Ausencia» en
+  lugar de «Incapacidad» (es un cambio en Ausencias, fuera de esta rama).
 
 ---
 
@@ -228,7 +234,8 @@ Decreto 1377 de 2013, compilado en el Decreto 1074 de 2015.
 | Nombre, correo y rol | Los registra el usuario al crear la cuenta; el rol lo asigna un administrador |
 | Contraseña | Se guarda solo como huella cifrada; nadie en la compañía puede conocerla |
 | Foto de perfil | Opcional; solo si el usuario decide subirla |
-| Ausencias | Fechas, tipo de ausencia y soportes que el usuario carga en la aplicación Ausencias |
+| Ausencias | Fechas, tipo de ausencia, comentarios y soportes que el usuario carga en Ausencias, y el cargo de su ficha de empleado |
+| Notas de los administradores | Notas internas sobre retrasos o solicitudes de ausencia; solo las ven los administradores |
 
 El portal registra además las acciones de administración y los errores técnicos, que pueden quedar
 asociados al usuario que los originó.
@@ -259,6 +266,7 @@ sensibles. Para ellos:
 - Solo se usan para tramitar y soportar la ausencia.
 - Solo los ven el usuario, quienes aprueban su solicitud, las personas que AMBIENTALIA autoriza
   expresamente para tramitar ausencias y los administradores del portal.
+- El calendario de ausencias compartido con el personal muestra el tipo de ausencia, incluida «Incapacidad», y el nombre de la persona; los documentos de soporte no se publican en él.
 
 **2.5 Terceros que procesan datos**
 
@@ -268,7 +276,7 @@ política:
 | Proveedor | Servicio | Datos |
 |---|---|---|
 | Hostinger | Alojamiento del portal y de su base de datos | Todos los datos del portal |
-| Google (Gmail), mediante n8n | Envío de los correos de acceso y de recuperación de contraseña | Nombre y correo |
+| Google (Gmail, Calendar y Sheets), mediante n8n | Correos del portal y de Ausencias; calendario de ausencias del personal y hoja de registro que usa nómina | Nombre y correo; en Ausencias, además el tipo de ausencia, las fechas, los comentarios y el nombre del archivo del soporte |
 | Sentry | Registro de errores técnicos | Datos técnicos del error, que pueden incluir el usuario afectado |
 
 Algunos de estos proveedores tienen servidores fuera de Colombia, por lo que los datos pueden
@@ -309,7 +317,7 @@ Esta política rige desde el {fecha de vigencia}. Los datos se conservan así:
 | Dato | Conservación |
 |---|---|
 | Cuenta: nombre, correo, rol y huella de la contraseña | Mientras dure el vínculo con la compañía; después la cuenta se desactiva y se elimina a los 3 años |
-| Foto de perfil | Hasta que el usuario la retire o se desactive la cuenta |
+| Foto de perfil | Mientras exista la cuenta |
 | Ausencias y sus soportes | 3 años después de terminado el vínculo con la compañía |
 | Registros de administración y de errores | 3 años desde que se generan |
 

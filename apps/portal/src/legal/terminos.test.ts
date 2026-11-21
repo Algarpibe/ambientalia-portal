@@ -9,9 +9,9 @@ import * as legal from './terminos';
 // lo que exporta terminos.ts —también la fecha de vigencia y el correo de
 // contacto—, así que una pieza nueva queda vigilada sin tocar este test.
 //
-// Mientras TERMS_EFFECTIVE_DATE y CORREO_CONTACTO sean huecos, los tests del
-// hueco, de la fecha y del correo están en ROJO a propósito: se rellenan en el
-// último commit antes de fusionar (spec §8).
+// TERMS_EFFECTIVE_DATE y CORREO_CONTACTO tienen que estar siempre puestos: si
+// alguno vuelve a ser un marcador, o deja de coincidir con el Anexo, los tests de
+// marcadores, de la fecha y del correo se ponen en rojo.
 
 interface Texto {
   ruta: string;
@@ -53,7 +53,7 @@ describe('CANDADO: el texto publicado en /terminos', () => {
   it('ningún texto lleva un hueco entre corchetes o llaves', () => {
     expect(
       publicados.filter((t) => /\[[^\]]*\]|\{[^}]*\}/.test(t.texto)),
-      'HUECO A PROPÓSITO: la fecha y el correo los rellena el usuario en la Task 8; no se arregla con un valor cualquiera',
+      'queda un marcador sin rellenar en el texto publicado; hay que poner el valor real, no uno cualquiera',
     ).toEqual([]);
   });
 
@@ -64,7 +64,7 @@ describe('CANDADO: el texto publicado en /terminos', () => {
     ];
     expect(
       legal.TERMS_EFFECTIVE_DATE,
-      'HUECO A PROPÓSITO: la fecha de vigencia la dice el usuario (día del despliegue) en la Task 8',
+      'la fecha de vigencia debe ser una fecha real, la del despliegue de esa versión',
     ).toMatch(
       new RegExp(`^([1-9]|[12]\\d|3[01]) de (${MESES.join('|')}) de \\d{4}$`),
     );
@@ -86,7 +86,7 @@ describe('CANDADO: el texto publicado en /terminos', () => {
     expect(CORREO_DEL_ANEXO).toContain('@');
     expect(
       legal.CORREO_CONTACTO,
-      'HUECO A PROPÓSITO: la dirección la escribe el usuario a mano en la Task 8 (ningún agente la escribe)',
+      'CORREO_CONTACTO debe ser la dirección de la fila «Canal de contacto» del Anexo',
     ).toBe(CORREO_DEL_ANEXO);
   });
 

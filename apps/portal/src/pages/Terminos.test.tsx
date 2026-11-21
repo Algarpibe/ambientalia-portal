@@ -78,7 +78,7 @@ describe('/terminos', () => {
     const nit = screen.getByRole('rowheader', { name: 'NIT' });
     expect(nit.tagName).toBe('TH');
     expect(nit.getAttribute('scope')).toBe('row');
-    expect(screen.getAllByRole('rowheader')).toHaveLength(4 + 4 + 3 + 2 + 4);
+    expect(screen.getAllByRole('rowheader')).toHaveLength(4 + 5 + 3 + 2 + 4);
   });
 
   it('el título de la pestaña es el de las condiciones y se restaura al salir', () => {
