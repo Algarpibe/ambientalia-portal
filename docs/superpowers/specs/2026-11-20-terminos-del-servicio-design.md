@@ -1,7 +1,9 @@
 # Portal — condiciones de uso y tratamiento de datos, con constancia de aceptación
 
 **Fecha:** 2026-11-20
-**Estado:** diseño aprobado; pendiente del plan de implementación.
+**Estado:** implementado en la rama `feat/terminos` (plan
+`docs/superpowers/plans/2026-11-20-terminos-del-servicio.md`), con fecha de vigencia 24 de noviembre
+de 2026; pendiente de fusionar y desplegar (hub-api primero, luego el portal).
 **Depende de:** la gestión de usuarios (`apps/hub-api/src/users/`), el registro y el acceso del portal
 (`apps/portal/src/components/Auth/AuthRightPanel.tsx`, `RequireAuth.tsx`) y la página de Ajustes
 (`apps/portal/src/pages/Configuracion.tsx`).
