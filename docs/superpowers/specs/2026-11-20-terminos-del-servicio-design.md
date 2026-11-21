@@ -66,6 +66,23 @@ tienen cuenta nunca aceptaron nada.
 - Logs con `user_id`, nunca con el correo.
 - `POST /users/me/terms` pasa por el limitador de `/users/*` (20 por minuto por IP), como el resto.
 - Un borrado de cuenta arrastra sus aceptaciones (`ON DELETE CASCADE`): coherente con la supresión.
+- `portal_app` solo puede leer e insertar en la tabla (`GRANT SELECT, INSERT` y `REVOKE UPDATE,
+  DELETE, TRUNCATE`, como la 070): la constancia no se puede reescribir ni borrar desde la
+  aplicación. La cascada no necesita ese permiso, porque Postgres la ejecuta con los del dueño de la
+  tabla.
+
+**Norma de uso (decisión del usuario, 2026-11-21).** Eliminar una cuenta borra en cascada su
+constancia, pero NO borra su ficha de empleado, sus ausencias ni sus soportes
+(`portal.empleados.user_id` es `ON DELETE SET NULL`), que el §2.8 conserva 3 años. Por eso:
+
+- A quien deja la compañía se le **desactiva** la cuenta; no se elimina hasta que pasen los 3 años
+  del §2.8 («se desactiva y se elimina a los 3 años»).
+- «Eliminar» queda para registros que nunca llegaron a ser empleados (solicitudes de acceso
+  rechazadas o de prueba).
+- No hay cambio de código: es una regla de operación. Queda en los pendientes de la revisión legal,
+  junto con la tabla de conservación. La alternativa descartada era impedir en la base de datos
+  eliminar cuentas que ya aceptaron (`ON DELETE RESTRICT`), que obligaba a tocar el panel de
+  usuarios y bloqueaba borrar registros basura.
 
 ## 5. Portal
 
