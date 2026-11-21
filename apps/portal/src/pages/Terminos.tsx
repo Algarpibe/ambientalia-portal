@@ -1,4 +1,6 @@
+import { useEffect, type ReactNode } from 'react';
 import {
+  CORREO_CONTACTO,
   INTRODUCCION,
   LINEA_VERSION,
   SECCIONES,
@@ -11,7 +13,26 @@ import {
 // siempre en pestaña nueva. Solo pinta el texto de legal/terminos.ts: no lee la
 // sesión ni pide nada al servidor. Mismo fondo y tarjetas que Configuración.
 
-function PintarBloque({ bloque }: { bloque: Bloque }) {
+const TITULO_PESTANA = 'Condiciones de uso y tratamiento de datos · Portal Ambientalia';
+
+/** Pinta el texto tal cual, salvo el correo de contacto, que sale como enlace mailto. */
+function ConCorreo({ texto }: { texto: string }) {
+  if (!texto.includes(CORREO_CONTACTO)) return <>{texto}</>;
+  const trozos: ReactNode[] = [];
+  texto.split(CORREO_CONTACTO).forEach((trozo, i) => {
+    if (i > 0) {
+      trozos.push(
+        <a key={i} href={`mailto:${CORREO_CONTACTO}`} className="text-blue-700 underline">
+          {CORREO_CONTACTO}
+        </a>,
+      );
+    }
+    trozos.push(trozo);
+  });
+  return <>{trozos}</>;
+}
+
+function PintarBloque({ bloque, contexto }: { bloque: Bloque; contexto: string }) {
   if (bloque.tipo === 'parrafo') {
     return (
       <p className="text-gray-700 leading-relaxed">
@@ -20,7 +41,7 @@ function PintarBloque({ bloque }: { bloque: Bloque }) {
             <strong className="font-semibold text-gray-900">{bloque.destacado}</strong>{' '}
           </>
         )}
-        {bloque.texto}
+        <ConCorreo texto={bloque.texto} />
       </p>
     );
   }
@@ -34,10 +55,15 @@ function PintarBloque({ bloque }: { bloque: Bloque }) {
     );
   }
   // Una tabla de tres columnas no cabe en un celular: se desplaza DENTRO de su
-  // caja, nunca la página entera.
+  // caja, nunca la página entera. La caja se puede enfocar y tiene nombre para que
+  // quien navega con teclado o lector de pantalla pueda desplazarla. Las de dos
+  // columnas caben sin ancho mínimo.
+  const ancha = bloque.columnas.length > 2;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[28rem] text-sm text-left border border-gray-200">
+    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label={contexto}>
+      <table
+        className={`w-full ${ancha ? 'min-w-[28rem] ' : ''}text-sm text-left border border-gray-200`}
+      >
         <thead className="bg-gray-50 text-gray-900">
           <tr>
             {bloque.columnas.map((columna) => (
@@ -50,11 +76,17 @@ function PintarBloque({ bloque }: { bloque: Bloque }) {
         <tbody>
           {bloque.filas.map((fila, i) => (
             <tr key={i} className="border-b border-gray-100 last:border-0">
-              {fila.map((celda, j) => (
-                <td key={j} className="px-3 py-2 align-top text-gray-700">
-                  {celda}
-                </td>
-              ))}
+              {fila.map((celda, j) =>
+                j === 0 ? (
+                  <th key={j} scope="row" className="px-3 py-2 align-top text-left font-medium text-gray-900">
+                    <ConCorreo texto={celda} />
+                  </th>
+                ) : (
+                  <td key={j} className="px-3 py-2 align-top text-gray-700">
+                    <ConCorreo texto={celda} />
+                  </td>
+                ),
+              )}
             </tr>
           ))}
         </tbody>
@@ -64,10 +96,22 @@ function PintarBloque({ bloque }: { bloque: Bloque }) {
 }
 
 export default function Terminos() {
+  // Título propio mientras la página está abierta; al salir se devuelve el anterior.
+  useEffect(() => {
+    const anterior = document.title;
+    document.title = TITULO_PESTANA;
+    return () => {
+      document.title = anterior;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#F7F8FA] text-gray-900">
       <main className="max-w-3xl mx-auto px-4 py-8 md:py-12">
-        <article className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 md:p-10 space-y-8">
+        <a href="/" className="inline-block mb-4 text-sm font-medium text-blue-700 hover:underline">
+          Volver al portal
+        </a>
+        <article className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 md:p-10 space-y-8">
           <header className="space-y-3">
             <h1 className="text-2xl md:text-3xl font-bold text-blue-700">{TITULO_TERMINOS}</h1>
             <p className="text-gray-700 leading-relaxed">{INTRODUCCION}</p>
@@ -80,7 +124,7 @@ export default function Terminos() {
                 <div key={apartado.titulo ?? i} className="space-y-3">
                   {apartado.titulo && <h3 className="text-base font-semibold text-gray-900">{apartado.titulo}</h3>}
                   {apartado.bloques.map((bloque, j) => (
-                    <PintarBloque key={j} bloque={bloque} />
+                    <PintarBloque key={j} bloque={bloque} contexto={apartado.titulo ?? 'Tabla'} />
                   ))}
                 </div>
               ))}

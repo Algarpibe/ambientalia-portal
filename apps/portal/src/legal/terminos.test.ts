@@ -50,14 +50,32 @@ describe('CANDADO: el texto publicado en /terminos', () => {
     expect(publicados.some((t) => t.texto.includes('Ley 1581 de 2012'))).toBe(true);
   });
 
-  it('ningún texto lleva un hueco entre corchetes', () => {
-    expect(publicados.filter((t) => /\[[^\]]*\]/.test(t.texto))).toEqual([]);
+  it('ningún texto lleva un hueco entre corchetes o llaves', () => {
+    expect(
+      publicados.filter((t) => /\[[^\]]*\]|\{[^}]*\}/.test(t.texto)),
+      'HUECO A PROPÓSITO: la fecha y el correo los rellena el usuario en la Task 8; no se arregla con un valor cualquiera',
+    ).toEqual([]);
   });
 
   it('la fecha de vigencia está puesta y sale en la línea de versión y en el §2.8', () => {
-    expect(legal.TERMS_EFFECTIVE_DATE).toMatch(
-      /^\d{1,2} de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre) de \d{4}$/,
+    const MESES = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+    ];
+    expect(
+      legal.TERMS_EFFECTIVE_DATE,
+      'HUECO A PROPÓSITO: la fecha de vigencia la dice el usuario (día del despliegue) en la Task 8',
+    ).toMatch(
+      new RegExp(`^([1-9]|[12]\\d|3[01]) de (${MESES.join('|')}) de \\d{4}$`),
     );
+    // Fecha de calendario real: «31 de febrero» no existe y no puede publicarse.
+    const [dia, , mes, , anio] = legal.TERMS_EFFECTIVE_DATE.split(' ');
+    const fecha = new Date(Date.UTC(Number(anio), MESES.indexOf(mes), Number(dia)));
+    expect([fecha.getUTCDate(), MESES[fecha.getUTCMonth()], fecha.getUTCFullYear()]).toEqual([
+      Number(dia),
+      mes,
+      Number(anio),
+    ]);
     expect(legal.LINEA_VERSION).toContain(legal.TERMS_EFFECTIVE_DATE);
     expect(
       publicados.some((t) => t.texto.startsWith(`Esta política rige desde el ${legal.TERMS_EFFECTIVE_DATE}.`)),
@@ -66,7 +84,10 @@ describe('CANDADO: el texto publicado en /terminos', () => {
 
   it('el correo de contacto está puesto y es el del Anexo (§2.1)', () => {
     expect(CORREO_DEL_ANEXO).toContain('@');
-    expect(legal.CORREO_CONTACTO).toBe(CORREO_DEL_ANEXO);
+    expect(
+      legal.CORREO_CONTACTO,
+      'HUECO A PROPÓSITO: la dirección la escribe el usuario a mano en la Task 8 (ningún agente la escribe)',
+    ).toBe(CORREO_DEL_ANEXO);
   });
 
   it('cada texto publicado está tal cual en el Anexo del spec (sin erratas ni texto inventado)', () => {
@@ -82,5 +103,54 @@ describe('CANDADO: el texto publicado en /terminos', () => {
           .join(CORREO_DEL_ANEXO),
       );
     expect(publicados.filter((t) => !ANEXO.includes(comoEnElAnexo(t.texto))).map((t) => t.ruta)).toEqual([]);
+  });
+
+  it('el texto entero coincide con el Anexo, en los dos sentidos y en el mismo orden', () => {
+    // Complementa al test anterior, que solo mira pieza a pieza (una frase borrada,
+    // un párrafo recortado o dos celdas intercambiadas pasarían). Aquí se compara
+    // todo el texto, en el orden en que se pinta, contra el Anexo sin su sintaxis
+    // Markdown.
+    const crudo = readFileSync(SPEC, 'utf8').split('## Anexo')[1] ?? '';
+    const [cuerpoCrudo, colaCrudo = ''] = crudo.split('**Casilla');
+    const deMarkdown = cuerpoCrudo
+      .split('\n')
+      .slice(1) // el resto de la línea «## Anexo — …»
+      .filter((l) => !l.startsWith('>')) // la nota que explica el hueco de la fecha
+      .filter((l) => !/^\|[-| ]+\|\s*$/.test(l)) // la fila separadora de las tablas
+      .map((l) => {
+        if (l.startsWith('|')) return l.replace(/^\||\|\s*$/g, '').split('|').map((c) => c.trim()).join(' ');
+        return l.replace(/^#+\s+/, '').replace(/^- /, '');
+      })
+      .join(' ')
+      .replace(/\*\*/g, '');
+    const delAnexo = normalizar(
+      deMarkdown.split('{fecha de vigencia}').join(legal.TERMS_EFFECTIVE_DATE).split(CORREO_DEL_ANEXO).join(legal.CORREO_CONTACTO),
+    );
+
+    const bloques = (b: legal.Bloque): string[] =>
+      b.tipo === 'parrafo'
+        ? [b.destacado ?? '', b.texto]
+        : b.tipo === 'lista'
+          ? b.items
+          : [...b.columnas, ...b.filas.flat()];
+    const delCodigo = normalizar(
+      [
+        legal.TITULO_TERMINOS,
+        legal.INTRODUCCION,
+        legal.LINEA_VERSION,
+        ...legal.SECCIONES.flatMap((s) => [
+          s.titulo,
+          ...s.apartados.flatMap((a) => [a.titulo ?? '', ...a.bloques.flatMap(bloques)]),
+        ]),
+      ].join(' '),
+    );
+
+    expect(delAnexo.length).toBeGreaterThan(3000);
+    expect(delCodigo.trim()).toBe(delAnexo.trim());
+
+    // La casilla va aparte: en el Anexo es el texto entre « y ».
+    const casilla = /«([^»]*)»/.exec(normalizar(colaCrudo))?.[1];
+    expect(casilla).toBeTruthy();
+    expect(normalizar(legal.TEXTO_CASILLA)).toBe(casilla);
   });
 });

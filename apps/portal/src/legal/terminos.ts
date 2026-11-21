@@ -5,14 +5,20 @@
 // Va como datos y no como Markdown: sin dependencias nuevas, y la página decide
 // cómo se pinta cada pieza.
 //
+// Este módulo solo puede exportar texto del Anexo: el candado de ./terminos.test.ts
+// recorre TODO lo que se exporta y lo compara con el Anexo, así que una exportación
+// ajena (una constante de configuración, un texto de interfaz) lo pondría en rojo.
+//
 // Dos candados:
 //   · apps/hub-api/src/users/terms.test.ts lee este fichero como TEXTO y exige que
 //     TERMS_VERSION sea la CURRENT_TERMS_VERSION de hub-api. Cambiar el texto de
 //     verdad es subir la versión en los dos sitios, y todos vuelven a aceptarlo. Por
-//     eso la línea `export const TERMS_VERSION = '…';` no cambia de forma.
+//     eso la declaración de TERMS_VERSION no cambia de forma: hub-api la lee como texto.
 //   · ./terminos.test.ts falla si queda un hueco «[…]» en cualquier texto exportado
-//     o si un texto no está tal cual en el Anexo del spec.
+//     o si el texto no coincide con el Anexo del spec.
 
+// Una versión nueva toca TRES cosas a la vez: esta constante, CURRENT_TERMS_VERSION
+// en apps/hub-api/src/users/terms.ts y el Anexo del spec que lee el test.
 export const TERMS_VERSION = '1.0';
 
 /**

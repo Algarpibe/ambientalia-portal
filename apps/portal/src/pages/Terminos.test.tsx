@@ -4,7 +4,7 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import Terminos from './Terminos';
-import { LINEA_VERSION, SECCIONES, TITULO_TERMINOS } from '../legal/terminos';
+import { CORREO_CONTACTO, LINEA_VERSION, SECCIONES, TITULO_TERMINOS } from '../legal/terminos';
 
 // /terminos: página pública con el texto de legal/terminos.ts. No lee la sesión
 // ni pide nada al servidor, así que se pinta sin router y sin token.
@@ -51,6 +51,57 @@ describe('/terminos', () => {
     const tablas = document.querySelectorAll('table');
     expect(tablas).toHaveLength(5);
     for (const t of tablas) expect(t.parentElement?.className).toContain('overflow-x-auto');
+  });
+
+  it('el ancho mínimo solo lo llevan las tablas de más de dos columnas', () => {
+    render(<Terminos />);
+    const tablas = Array.from(document.querySelectorAll('table'));
+    const anchas = tablas.filter((t) => t.querySelectorAll('thead th').length > 2);
+    const estrechas = tablas.filter((t) => t.querySelectorAll('thead th').length <= 2);
+    expect(anchas).toHaveLength(2);
+    expect(estrechas).toHaveLength(3);
+    for (const t of anchas) expect(t.className).toContain('min-w-[28rem]');
+    for (const t of estrechas) expect(t.className).not.toContain('min-w-');
+  });
+
+  it('la caja que desplaza cada tabla se puede enfocar con teclado y tiene nombre', () => {
+    render(<Terminos />);
+    const caja = screen.getByRole('region', { name: '2.5 Terceros que procesan datos' });
+    expect(caja.getAttribute('tabindex')).toBe('0');
+    expect(caja.className).toContain('overflow-x-auto');
+    expect(caja.querySelector('table')).not.toBeNull();
+    expect(screen.getAllByRole('region')).toHaveLength(5);
+  });
+
+  it('la primera celda de cada fila es la cabecera de la fila', () => {
+    render(<Terminos />);
+    const nit = screen.getByRole('rowheader', { name: 'NIT' });
+    expect(nit.tagName).toBe('TH');
+    expect(nit.getAttribute('scope')).toBe('row');
+    expect(screen.getAllByRole('rowheader')).toHaveLength(4 + 4 + 3 + 2 + 4);
+  });
+
+  it('el título de la pestaña es el de las condiciones y se restaura al salir', () => {
+    document.title = 'Portal Ambientalia';
+    const { unmount } = render(<Terminos />);
+    expect(document.title).toBe('Condiciones de uso y tratamiento de datos · Portal Ambientalia');
+    unmount();
+    expect(document.title).toBe('Portal Ambientalia');
+  });
+
+  it('tiene un enlace para volver al portal', () => {
+    render(<Terminos />);
+    const volver = screen.getByRole('link', { name: 'Volver al portal' });
+    expect(volver.getAttribute('href')).toBe('/');
+  });
+
+  it('el correo de contacto se pinta como enlace mailto sin cambiar el texto', () => {
+    render(<Terminos />);
+    const enlaces = document.querySelectorAll(`a[href="mailto:${CORREO_CONTACTO}"]`);
+    expect(enlaces).toHaveLength(2); // la celda del §2.1 y el párrafo del §2.7
+    for (const a of enlaces) expect(a.textContent).toBe(CORREO_CONTACTO);
+    const parrafo = enlaces[1].parentElement;
+    expect(parrafo?.textContent).toMatch(/^Las solicitudes se envían a .+ con el asunto “Datos personales”/);
   });
 
   it('no necesita sesión: se pinta sin token y sin pedir nada al servidor', () => {
