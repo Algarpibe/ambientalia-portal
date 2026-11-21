@@ -309,3 +309,89 @@ describe('useAuth — appsConfirmadas: cuándo la lista de apps ya es la definit
     expect(result.current.appsConfirmadas).toBe(true);
   });
 });
+
+// Condiciones de uso (spec 2026-11-20-terminos, §5): viajan en la MISMA respuesta
+// de /users/me que las apps y se guardan en lib/terminosSesion. hub-api limita
+// /api/users/* a 20 peticiones por minuto por IP: no se hace otra.
+describe('useAuth — guarda las condiciones de uso de la misma respuesta de /users/me', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    h.token = makeToken({
+      sub: 'persona@ejemplo.test',
+      user_id: 'u1',
+      role: 'reader',
+      apps: ['ausencias'],
+      exp: futureExp(),
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  /** El hook y el almacén del MISMO juego de módulos: los dos, detrás de resetModules. */
+  async function cargar() {
+    const { useAuth } = await import('./useAuth');
+    const { leerTerminos } = await import('../lib/terminosSesion');
+    return { useAuth, leerTerminos };
+  }
+
+  it('las guarda para quien preguntó y quien usa el hook se vuelve a pintar, sin otra petición', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'u1', apps: ['ausencias'], terms: { current: '1.0', accepted: false } }),
+    });
+    const { useAuth, leerTerminos } = await cargar();
+    // Igual que la pantalla de aceptación: usa el hook y lee el almacén al pintar.
+    const { result } = renderHook(() => {
+      useAuth();
+      return leerTerminos('u1');
+    });
+    expect(result.current).toBeNull();
+    await dejarQueRespondaElServidor();
+    expect(result.current).toEqual({ current: '1.0', accepted: false });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledWith('/api/users/me');
+  });
+
+  it('las guarda aunque el perfil no traiga apps: una cosa no depende de la otra', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'u1', terms: { current: '1.0', accepted: true } }) });
+    const { useAuth, leerTerminos } = await cargar();
+    const { result } = renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(leerTerminos('u1')).toEqual({ current: '1.0', accepted: true });
+    expect(result.current.apps).toEqual(['ausencias']);
+    expect(result.current.appsConfirmadas).toBe(true);
+  });
+
+  it('ignora las de un perfil que no es de quien preguntó', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'OTRO', apps: [], terms: { current: '1.0', accepted: false } }),
+    });
+    const { useAuth, leerTerminos } = await cargar();
+    renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(leerTerminos('u1')).toBeNull();
+    expect(leerTerminos('OTRO')).toBeNull();
+  });
+
+  it('sin terms (hub-api anterior) no guarda nada y las apps llegan igual', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'u1', apps: ['ausencias', 'wo-sales'] }) });
+    const { useAuth, leerTerminos } = await cargar();
+    const { result } = renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(leerTerminos('u1')).toBeNull();
+    expect(result.current.apps).toEqual(['ausencias', 'wo-sales']);
+    expect(result.current.appsConfirmadas).toBe(true);
+  });
+
+  it('si /users/me falla, no se sabe nada: null', async () => {
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({}) });
+    const { useAuth, leerTerminos } = await cargar();
+    renderHook(() => useAuth());
+    await dejarQueRespondaElServidor();
+    expect(leerTerminos('u1')).toBeNull();
+  });
+});
