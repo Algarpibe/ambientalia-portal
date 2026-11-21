@@ -56,7 +56,8 @@ reescriben), todo a raíz de las revisiones:
   notas de los administradores), §2.4 (qué muestra el calendario compartido), §2.5 (Google Calendar y
   Sheets con los datos de Ausencias) y §2.8 (la foto se guarda mientras exista la cuenta).
 - **Norma de uso:** a quien deja la compañía se le desactiva la cuenta, no se elimina (spec §4).
-- **Fecha y contacto (Task 8):** fecha de vigencia 24 de noviembre de 2026; la dirección de contacto
+- **Fecha y contacto (Task 8):** fecha de vigencia 23 de noviembre de 2026 (primero se fijó el 24 y
+  el usuario la adelantó tras fusionar); la dirección de contacto
   la escribió el usuario a mano.
 
 **Seguimientos (no bloquean):** si el calendario compartido debe decir «Ausencia» en vez de
