@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import type { UserRepository } from './users.repository.js';
-import type { PaginatedUsers, RegisterInput, UserPublic, UserRole, SelfProfile } from './users.types.js';
+import type { PaginatedUsers, RegisterInput, UserPublic, UserRole, SelfProfileResponse } from './users.types.js';
+import { CURRENT_TERMS_VERSION } from './terms.js';
+import { captureError } from '../sentry.js';
 
 // Lógica de negocio del módulo user-management. Valida entradas, aplica reglas
 // (rol por defecto al aprobar, auto-protección del admin) y traduce fallos a
@@ -73,6 +75,12 @@ export class UserService {
   /**
    * Registro por autoservicio. Valida, hashea con bcrypt (coste ≥ 12) y crea el
    * usuario en estado `pending` (default de BD). Lanza 409 si el email ya existe.
+   *
+   * Si `termsVersion` es la versión vigente, guarda además la aceptación de las
+   * condiciones de uso (la casilla del registro). Ese paso NUNCA tumba el
+   * registro: si falta, no coincide o falla al guardarse, la cuenta se crea igual
+   * y la pantalla de aceptación del portal se la pedirá en su primer acceso. Así
+   * un portal anterior, durante el despliegue, sigue pudiendo registrar.
    */
   async register(input: RegisterInput): Promise<UserPublic> {
     const clean = validateRegisterInput(input);
@@ -83,14 +91,26 @@ export class UserService {
     }
 
     const hash = await bcrypt.hash(clean.password, this.bcryptCost);
+    let user: UserPublic;
     try {
-      return await this.repo.create(clean, hash);
+      user = await this.repo.create(clean, hash);
     } catch (err) {
       if (isUniqueViolation(err)) {
         throw new UserError('email_already_registered', 409, 'email');
       }
       throw err;
     }
+
+    if (input?.termsVersion === CURRENT_TERMS_VERSION) {
+      try {
+        await this.repo.recordTermsAcceptance(user.id, CURRENT_TERMS_VERSION);
+      } catch (err) {
+        // Solo el user_id: el correo no va a los logs (spec §4).
+        console.error('register_terms error', { user_id: user.id }, err);
+        captureError(err, { endpoint: 'register_terms', user_id: user.id });
+      }
+    }
+    return user;
   }
 
   /** Aprueba un usuario pending → active con rol `reader` por defecto (Req 3.1). */
@@ -168,11 +188,39 @@ export class UserService {
     return this.repo.countPending();
   }
 
-  /** Perfil propio del usuario autenticado; 404 si no existe. */
-  async getSelfProfile(id: string): Promise<SelfProfile> {
+  /**
+   * Perfil propio del usuario autenticado, con el estado de las condiciones de
+   * uso; 404 si no existe.
+   *
+   * `terms` sale de una consulta APARTE y no de una columna más en la del perfil:
+   * esa consulta comparte forma con la de `requireAuth`, que tumbó la
+   * autenticación en producción el 2026-08-23 al tocarla, y esto no necesita ir
+   * en ella.
+   */
+  async getSelfProfile(id: string): Promise<SelfProfileResponse> {
     const profile = await this.repo.getSelfProfile(id);
     if (!profile) throw new UserError('user_not_found', 404);
-    return profile;
+    try {
+      const accepted = await this.repo.hasAcceptedTerms(id, CURRENT_TERMS_VERSION);
+      return { ...profile, terms: { current: CURRENT_TERMS_VERSION, accepted } };
+    } catch (err) {
+      // Un fallo pasajero de esta consulta no debe tumbar el perfil (apps, «Mis
+      // equipos»): sin `terms` el portal no muestra la pantalla. Solo el user_id.
+      console.error('self_profile_terms error', { user_id: id }, err);
+      captureError(err, { endpoint: 'self_profile_terms', user_id: id });
+      return profile;
+    }
+  }
+
+  /**
+   * El propio usuario acepta las condiciones de uso y la política de datos. Solo
+   * vale la versión vigente: aceptar otra (un portal desfasado, un valor
+   * inventado) no dejaría constancia de lo que de verdad rige. Repetirla no cambia
+   * nada: la fecha que queda es la de la primera aceptación.
+   */
+  async acceptTerms(id: string, version: unknown): Promise<void> {
+    if (version !== CURRENT_TERMS_VERSION) throw new UserError('invalid_terms_version', 400, 'version');
+    await this.repo.recordTermsAcceptance(id, CURRENT_TERMS_VERSION);
   }
 
   // No hay updateName: el nombre se valida y se graba una sola vez, al

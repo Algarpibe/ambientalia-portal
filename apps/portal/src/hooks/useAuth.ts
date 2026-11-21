@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getToken } from '../auth';
 import { authFetch } from '../lib/api';
+import { guardarTerminos } from '../lib/terminosSesion';
 
 // Hook de sesión del Portal. Lee el JWT de localStorage (clave ambientalia_token
 // vía getToken) y decodifica su payload SIN verificar la firma — solo para gating
@@ -101,11 +102,17 @@ async function cargarAppsDelServidor(userId: string): Promise<void> {
   try {
     const res = await authFetch('/api/users/me');
     if (!res.ok) return;
-    const perfil = (await res.json()) as { id?: unknown; apps?: unknown };
+    const perfil = (await res.json()) as { id?: unknown; apps?: unknown; terms?: unknown };
     // Que el perfil sea de quien preguntó: entre la petición y la respuesta ha
     // podido cambiar la sesión, y escribir la cache con el id viejo le daría al
     // recién llegado las apps del anterior.
     if (perfil?.id !== userId) return;
+    // Las condiciones de uso viajan en esta MISMA respuesta (spec
+    // 2026-11-20-terminos): hub-api limita /api/users/* a 20 peticiones por minuto
+    // por IP, y otra solo para esto gastaría cupo en cada carga. Se guardan antes
+    // de mirar las apps para que una cosa no dependa de la otra; el aviso del
+    // `finally` es lo que vuelve a pintar la pantalla de aceptación.
+    guardarTerminos(userId, perfil.terms);
     // Un hub-api que todavía no manda `apps` —los dos servicios se despliegan
     // por separado— deja la cache sin tocar, y el portal se queda con las del
     // token, que es exactamente como funcionaba antes.

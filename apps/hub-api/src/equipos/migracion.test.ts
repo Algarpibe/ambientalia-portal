@@ -114,8 +114,10 @@ describe('migración 075 (tema de la TV)', () => {
 });
 
 describe('migración 078 (responsable asignado desde la tabla)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 077, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'077_password_reset_tokens\.sql',\s*'078_equipos_responsable\.sql'\];/);
+  // Ya no es la última (la 079 de las condiciones de uso va detrás): basta con que
+  // esté justo detrás de la 077. La última la vigila users/terms.migracion.test.ts.
+  it('está apuntada en MIGRATIONS, detrás de la 077', () => {
+    expect(leer('../db.ts')).toMatch(/'077_password_reset_tokens\.sql',\s*'078_equipos_responsable\.sql'[,\]]/);
   });
 
   it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {

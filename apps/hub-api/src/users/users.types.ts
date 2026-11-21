@@ -53,11 +53,41 @@ export interface SelfProfile extends UserPublic {
   apps: string[];
 }
 
+/**
+ * Estado de las condiciones de uso del propio usuario (spec
+ * 2026-11-20-terminos-del-servicio): `current` es la versión vigente y
+ * `accepted`, si este usuario la tiene aceptada.
+ */
+export interface TermsStatus {
+  current: string;
+  accepted: boolean;
+}
+
+/**
+ * Lo que devuelve `GET /api/users/me`: el perfil más el estado de las condiciones.
+ * Tipo aparte y no un campo más de `SelfProfile` porque `terms` no sale de la
+ * consulta del perfil (ver UserService.getSelfProfile).
+ */
+export interface SelfProfileResponse extends SelfProfile {
+  /**
+   * Opcional a propósito: la spec (§3) trata una respuesta sin `terms` como «no
+   * mostrar la pantalla», así que un fallo pasajero al consultarlas solo se la
+   * salta, en vez de romper la lista de apps o «Mis equipos».
+   */
+  terms?: TermsStatus;
+}
+
 /** Payload de entrada del registro por autoservicio (`POST /api/auth/register`). */
 export interface RegisterInput {
   fullName: string;
   email: string;
   password: string;
+  /**
+   * Versión de las condiciones de uso que la persona aceptó en la casilla del
+   * registro. Opcional: un portal anterior no la manda. `unknown` porque llega tal
+   * cual del cuerpo y solo se compara con la vigente.
+   */
+  termsVersion?: unknown;
 }
 
 /** Resultado paginado de `GET /api/users`. Equivale a `UserListResult`. */

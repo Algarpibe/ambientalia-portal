@@ -252,6 +252,28 @@ export class UserRepository {
     return rows[0]?.total ?? 0;
   }
 
+  /**
+   * Guarda que el usuario aceptó `version` de las condiciones de uso (migración
+   * 079). `ON CONFLICT DO NOTHING`: aceptar otra vez la misma versión no falla ni
+   * mueve la fecha; la que vale como prueba es la de la primera aceptación.
+   */
+  async recordTermsAcceptance(userId: string, version: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO portal.terms_acceptances (user_id, version) VALUES ($1, $2)
+       ON CONFLICT (user_id, version) DO NOTHING`,
+      [userId, version],
+    );
+  }
+
+  /** true si el usuario tiene aceptada `version` de las condiciones de uso. */
+  async hasAcceptedTerms(userId: string, version: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      'SELECT 1 FROM portal.terms_acceptances WHERE user_id = $1 AND version = $2',
+      [userId, version],
+    );
+    return rows.length > 0;
+  }
+
   /** Ejecuta `fn` dentro de BEGIN/COMMIT; hace ROLLBACK ante cualquier error. */
   private async withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();

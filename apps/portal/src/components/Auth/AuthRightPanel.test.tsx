@@ -9,6 +9,7 @@ vi.mock('../../auth', () => ({ API_BASE: 'http://test', setToken: vi.fn() }));
 vi.mock('../../lib/notify', () => ({ notify: vi.fn() }));
 import { notify } from '../../lib/notify';
 import { setToken } from '../../auth';
+import { TERMS_VERSION, TEXTO_CASILLA } from '../../legal/terminos';
 
 function renderSignup() {
   return render(
@@ -310,5 +311,52 @@ describe('AuthRightPanel — a dónde se vuelve tras iniciar sesión', () => {
   ])('%s, al inicio', async (_caso, state) => {
     entrarDesde(state);
     expect((await screen.findByTestId('destino')).textContent).toBe('/');
+  });
+});
+
+// Condiciones de uso (spec 2026-11-20-terminos, §5): la casilla dice qué se acepta,
+// enlaza el texto y, marcada, manda la versión para que quede constancia.
+describe('AuthRightPanel — condiciones de uso', () => {
+  function rellenar() {
+    fill('Juan Pérez', 'Persona Prueba');
+    fill('tu@ejemplo.com', 'persona@ejemplo.test');
+    fill('••••••••', 'clave-ficticia-1');
+  }
+  const cuerpoEnviado = () =>
+    JSON.parse(String((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body)) as Record<string, unknown>;
+
+  it('la casilla dice el texto de la política y «condiciones de uso» abre /terminos en pestaña nueva', () => {
+    renderSignup();
+    // El enlace va dentro de la etiqueta de la casilla: sin sufijo oculto, para que el
+    // nombre accesible de la casilla sea exactamente la frase.
+    expect(screen.getByRole('checkbox').closest('label')?.textContent).toBe(TEXTO_CASILLA);
+    const enlace = screen.getByRole('link', { name: 'condiciones de uso' });
+    expect(enlace.getAttribute('href')).toBe('/terminos');
+    expect(enlace.getAttribute('target')).toBe('_blank');
+    expect(enlace.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('con la casilla marcada, el registro manda termsVersion', async () => {
+    vi.mocked(fetch).mockResolvedValue({ status: 201, json: async () => ({}) } as unknown as Response);
+    const { container } = renderSignup();
+    rellenar();
+    fireEvent.click(screen.getByRole('checkbox'));
+    submit(container);
+    await screen.findByText(/pendiente de aprobación/i);
+    expect(cuerpoEnviado()).toEqual({
+      fullName: 'Persona Prueba',
+      email: 'persona@ejemplo.test',
+      password: 'clave-ficticia-1',
+      termsVersion: TERMS_VERSION,
+    });
+  });
+
+  it('sin la casilla marcada no manda termsVersion: no hay aceptación de la que dejar constancia', async () => {
+    vi.mocked(fetch).mockResolvedValue({ status: 201, json: async () => ({}) } as unknown as Response);
+    const { container } = renderSignup();
+    rellenar();
+    submit(container);
+    await screen.findByText(/pendiente de aprobación/i);
+    expect(cuerpoEnviado()).not.toHaveProperty('termsVersion');
   });
 });

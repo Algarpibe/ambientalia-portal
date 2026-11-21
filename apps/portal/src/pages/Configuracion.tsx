@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState } from 'react';
-import { User, Mail, Lock, KeyRound, Shield, Camera, Save, Clock, Eye, EyeOff } from 'lucide-react';
+import { User, Mail, Lock, KeyRound, Shield, Camera, Save, Clock, Eye, EyeOff, FileText } from 'lucide-react';
 import { authFetch } from '../lib/api';
 import { notify } from '../lib/notify';
 import { fileToResizedDataUrl } from '../lib/image';
@@ -238,6 +238,22 @@ export default function Configuracion() {
                 </div>
               </div>
             )}
+
+            {/* Condiciones de uso y política de datos: el texto que la persona aceptó.
+                <a> y pestaña nueva, como en el registro y en la pantalla de
+                aceptación: /terminos es pública y Ajustes no se pierde. */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+                <FileText className="w-5 h-5" />
+              </div>
+              <a
+                href="/terminos"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-semibold text-blue-700 hover:underline">
+                Condiciones de uso y datos personales <span className="sr-only">(se abre en una pestaña nueva)</span>
+              </a>
+            </div>
           </div>
         </div>
 

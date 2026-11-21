@@ -147,3 +147,16 @@ describe('Configuración', () => {
     expect((screen.getByLabelText('Nueva Contraseña') as HTMLInputElement).type).toBe('text');
   });
 });
+
+// Condiciones de uso (spec 2026-11-20-terminos, §5): el texto aceptado, a mano.
+describe('Configuración · condiciones de uso', () => {
+  it('enlaza «Condiciones de uso y datos personales» a /terminos en pestaña nueva', () => {
+    render(<Configuracion />);
+    const enlace = screen.getByRole('link', {
+      name: 'Condiciones de uso y datos personales (se abre en una pestaña nueva)',
+    });
+    expect(enlace.getAttribute('href')).toBe('/terminos');
+    expect(enlace.getAttribute('target')).toBe('_blank');
+    expect(enlace.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+});
