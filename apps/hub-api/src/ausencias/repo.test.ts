@@ -247,6 +247,7 @@ function movimiento(
     observaciones: null,
     horaInicio: null,
     horaFin: null,
+    registradaPor: null,
   };
 }
 

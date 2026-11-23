@@ -842,6 +842,19 @@ interface MovimientoBase {
   createdAt: string;
   /** `comentarios` en una solicitud; `motivo` en una anulación o un cambio. */
   motivo: string | null;
+  /**
+   * Quién la registró, si fue un administrador a nombre de la persona: su
+   * correo (migración 080). `null` si la registró ella misma, si viene de la
+   * hoja, y SIEMPRE en una modificación: una anulación o un cambio de fechas no
+   * se «registra a nombre de», así que su consulta ni selecciona la columna y su
+   * mapeador la pone a `null` a mano.
+   *
+   * Aquí y no solo en la rama de solicitud, por lo mismo que la franja horaria:
+   * la etiqueta del registro la pinta la misma celda para las tres clases, y una
+   * propiedad que existiera en una rama y no en la otra la obligaría a
+   * discriminar por clase para algo que no lo necesita.
+   */
+  registradaPor: string | null;
 }
 
 /**

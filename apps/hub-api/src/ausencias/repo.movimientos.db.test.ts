@@ -602,3 +602,43 @@ describe('la franja horaria llega al registro', () => {
     expect(m.horaFin).toBeNull();
   });
 });
+
+describe('registradaPor llega al registro', () => {
+  const ADMIN = 'admin@ambientalia.com.co';
+  const AJENA = 'ajena@ambientalia.com.co';
+
+  it('CANDADO: una solicitud registrada por administracion lo trae; una propia, null', async () => {
+    // Es lo que pinta la etiqueta "Registrada por administracion" del portal, y
+    // lo que la pinta igual para el admin y para los jefes que ven esa fila.
+    const id = await sembrarEmpleado(db, AJENA, JEFE);
+    await sembrarSolicitud(db, {
+      empleadoId: id,
+      correo: AJENA,
+      estado: 'registrada',
+      tipo: 'incapacidad',
+      fechaInicio: '2026-09-07',
+      fechaFin: '2026-09-09',
+      segundoAprobadorCorreo: null,
+      registradaPor: ADMIN,
+    });
+    const ms = await movimientos(db, null);
+    expect(ms.find((m) => m.solicitanteEmail === AJENA)?.registradaPor).toBe(ADMIN);
+    // Las cuatro del beforeEach las registro su propia persona: null, no undefined.
+    expect(ms.find((m) => m.solicitanteEmail === HIJO)?.registradaPor).toBeNull();
+  });
+
+  it('CANDADO: una MODIFICACION lo trae en null aunque su solicitud lo tenga', async () => {
+    // Una anulacion o un cambio de fechas no se "registra a nombre de": la
+    // constancia es de la solicitud, y heredarla haria pintar la etiqueta en una
+    // fila que no la merece.
+    const { solicitud, modificacion } = await sembrarConPropuesta('anulacion');
+    await db.query(`UPDATE portal.solicitudes_ausencia SET registrada_por = $2 WHERE id = $1`, [solicitud.id, ADMIN]);
+    await decidirModificacion(db, modificacion.id, true, null, null, payloadStub);
+
+    const m = await movimientoDe(modificacion.id);
+    if (!m) throw new Error('la anulacion aprobada no llego al registro');
+    expect(m.registradaPor).toBeNull();
+    const propia = (await movimientos(db, null)).find((x) => x.solicitudId === solicitud.id && x.clase === 'solicitud');
+    expect(propia?.registradaPor).toBe(ADMIN);
+  });
+});
