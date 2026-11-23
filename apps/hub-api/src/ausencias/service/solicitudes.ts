@@ -173,7 +173,8 @@ async function exigirVacacionesSuficientes(
  *
  * Es el cuerpo de `crearSolicitud` tal cual estaba, con `tx` donde ponía `db`:
  * se saca a una función propia para no tener que re-sangrarlo entero dentro
- * del callback del candado.
+ * del callback del candado. `registradaPor` lo deja tal cual en la fila: lo
+ * decide quien llama a `darDeAlta`.
  */
 async function altaBajoCandado(
   tx: repo.PoolClient,
@@ -182,6 +183,7 @@ async function altaBajoCandado(
   datos: NuevaSolicitud,
   aprueba: boolean,
   estado: EstadoSolicitud,
+  registradaPor: string | null,
 ): Promise<Solicitud> {
   // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
   // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
@@ -275,9 +277,9 @@ async function altaBajoCandado(
       aprobadorCorreo: firmantes ? firmantes.primero : null,
       segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
       informadoCorreo: firmantes ? firmantes.informado : null,
-      // Hoy solo hay una puerta de alta, la de la propia persona: nadie la
-      // registra a su nombre. Ver la migración 080.
-      registradaPor: null,
+      // `null` en el alta de la propia persona; el correo del administrador
+      // cuando la registra él a su nombre (migración 080).
+      registradaPor,
     },
     adjunto,
     eventosDeAlta(datos.tipo),
@@ -285,9 +287,28 @@ async function altaBajoCandado(
   );
 }
 
-export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
-  const datos = validarNuevaSolicitud(body, hoyEnColombia());
-  const empleado = await empleadoDeSesion(db, sesion);
+/**
+ * El alta, desde que ya se sabe QUIÉN y QUÉ: el tope del retiro, el estado con
+ * el que nace y, bajo el candado del empleado, las comprobaciones y el INSERT
+ * (`altaBajoCandado`); después, el aviso a n8n.
+ *
+ * La comparten las dos puertas del alta —la del empleado (`crearSolicitud`) y
+ * la del administrador que registra una incapacidad a nombre de otro
+ * (`registrarIncapacidadAjena`)— y es lo que hace que la segunda tenga
+ * exactamente los mismos efectos que la primera: lo delicado se comparte, no
+ * se copia. Lo que las distingue es de dónde sale la ficha y qué validación
+ * pasa el cuerpo, y eso lo decide cada una antes de llamar aquí.
+ *
+ * `registradaPor`: `null` en el alta de la propia persona, y el correo del
+ * administrador de la sesión en la otra (migración 080).
+ */
+async function darDeAlta(
+  db: Pool,
+  sesion: Sesion,
+  empleado: Empleado,
+  datos: NuevaSolicitud,
+  registradaPor: string | null,
+): Promise<Solicitud> {
   // La otra mitad del bloqueo de la baja: allí se impide fijar una fecha que
   // deje días huérfanos detrás, y aquí se impide crear esos días después. Sin
   // las dos, la regla se puede saltar por el otro extremo.
@@ -327,7 +348,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // altas simultáneas comprobaban las dos antes de que ninguna escribiera, y las
   // dos pasaban. Ver `repo.conCandadoDelEmpleado`.
   const solicitud = await repo.conCandadoDelEmpleado(db, empleado.id, (tx) =>
-    altaBajoCandado(tx, sesion, empleado, datos, aprueba, estado),
+    altaBajoCandado(tx, sesion, empleado, datos, aprueba, estado, registradaPor),
   );
 
   // Sin await: el aviso es un atajo para que el correo salga en un segundo en vez
@@ -335,6 +356,15 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // puede fallar de forma que importe. Ver avisar.ts.
   void avisarN8n();
   return solicitud;
+}
+
+export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
+  const datos = validarNuevaSolicitud(body, hoyEnColombia());
+  // La identidad sale de la sesión y de ningún otro sitio. Para registrar a
+  // nombre de otro está la puerta del administrador, `registrarIncapacidadAjena`;
+  // por eso aquí `registradaPor` es `null` siempre.
+  const empleado = await empleadoDeSesion(db, sesion);
+  return darDeAlta(db, sesion, empleado, datos, null);
 }
 
 export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {

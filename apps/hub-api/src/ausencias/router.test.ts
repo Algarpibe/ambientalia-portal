@@ -2067,6 +2067,18 @@ describe('POST /ausencias/solicitudes', () => {
     expect(r.body.horaInicio).toBe('09:00');
     expect(r.body.horaFin).toBe('11:00');
   });
+
+  it('CANDADO: el alta del empleado nace con registradaPor en null', async () => {
+    // La registra la propia persona: la constancia de la 080 solo la pone la
+    // puerta del administrador. Con el correo de la sesion aqui, todas las
+    // incapacidades del portal saldrian como "registradas por administracion".
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+      .expect(201);
+    expect(r.body.registradaPor).toBeNull();
+  });
 });
 
 // ── El candado del solapamiento ────────────────────────────────────────────
