@@ -20,7 +20,13 @@ import {
 import { saldosDeSesion } from './saldos.js';
 import { empleadoDeSesion, firmanteDeSesion, type Sesion } from './sesion.js';
 import { exigirSinSolape } from './solapes.js';
-import { MAX_ADJUNTO_BYTES, MAX_MOTIVO, nombreArchivoNormalizado, validarNuevaSolicitud } from './validacion.js';
+import {
+  MAX_ADJUNTO_BYTES,
+  MAX_MOTIVO,
+  nombreArchivoNormalizado,
+  validarIncapacidadAjena,
+  validarNuevaSolicitud,
+} from './validacion.js';
 
 // ARQ-612 — la vida de una solicitud vista desde el servicio, sacada de
 // service.ts tal cual en cuatro bloques: el alta (con sus comprobaciones de
@@ -383,6 +389,39 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // La exención del saldo de vacaciones es la del propio `esAdmin`: un admin
   // sobre su propia solicitud. Es esta puerta quien lo decide, no `darDeAlta`.
   return darDeAlta(db, empleado, datos, { registradaPor: null, exentoDelSaldoDeVacaciones: sesion.esAdmin });
+}
+
+/**
+ * El administrador registra una incapacidad a nombre de otro (spec
+ * 2026-11-23-incapacidad-por-admin).
+ *
+ * Una puerta PROPIA y no un `empleadoId` aceptado en `crearSolicitud` cuando
+ * llama un admin: aquella saca la identidad de la sesión, tiene tests que lo
+ * fijan a propósito, y mezclar dos reglas en una puerta es como se cuela la
+ * suplantación. Quién puede llamar a esto lo decide el router (`requireAdmin`),
+ * y no se repite aquí: un candado duplicado esconde el día que el otro se rompe.
+ *
+ * Todo lo demás es el alta de siempre (`darDeAlta`): mismo candado, misma regla
+ * de no solaparse, mismo tope del retiro, mismo PDF renombrado con el nombre
+ * del EMPLEADO, mismos eventos y mismo calendario. Dos diferencias, y las dos a
+ * propósito:
+ *  - sin la ventana de dos días hacia atrás (`validarIncapacidadAjena`): para
+ *    eso existe esta puerta;
+ *  - `solicitante_email` sigue siendo el correo del EMPLEADO (lo pone
+ *    `altaBajoCandado` desde la ficha), así que él ve su propio PDF y su jefe
+ *    con llave también. Quién la registró queda en `registrada_por`, con el
+ *    correo de la sesión.
+ */
+export async function registrarIncapacidadAjena(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
+  const { empleadoId, datos } = validarIncapacidadAjena(body, hoyEnColombia());
+  // Solo fichas activas: a quien ya se fue no se le registra nada nuevo.
+  const empleado = await repo.empleadoPorId(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404, 'empleadoId');
+  // `exentoDelSaldoDeVacaciones: false` a propósito: el privilegio del admin no
+  // debe llegar nunca al saldo de vacaciones de OTRA persona. Hoy ningún test
+  // puede verlo (esta puerta solo registra incapacidades), así que este
+  // comentario es lo que lo protege si un día el tipo deja de ser fijo.
+  return darDeAlta(db, empleado, datos, { registradaPor: sesion.email, exentoDelSaldoDeVacaciones: false });
 }
 
 export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {

@@ -171,6 +171,27 @@ export function createAusenciasRouter(db: Pool): Router {
     }
   });
 
+  /**
+   * El administrador registra una incapacidad a nombre de cualquier ficha
+   * activa, desde el Registro general. Solo admin, y con los mismos efectos que
+   * el alta del empleado: calendario, hoja de nómina y acuse por correo, que
+   * dice que la ha registrado administración. Ver
+   * `service.registrarIncapacidadAjena`.
+   *
+   * Cuelga del prefijo `/api/ausencias/solicitudes`, así que el PDF pasa por el
+   * parser de 12 MB de index.ts: aquí NO se monta otro, y menos antes de la
+   * autenticación. No choca con ninguna ruta: no existe un `POST
+   * /ausencias/solicitudes/:id` (las que hay tienen un segmento más).
+   */
+  router.post('/ausencias/solicitudes/incapacidad-ajena', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const solicitud = await service.registrarIncapacidadAjena(db, sesionDe(req), req.body);
+      res.status(201).json(solicitud);
+    } catch (e) {
+      sendError(res, e, 'ausencias_incapacidad_ajena');
+    }
+  });
+
   router.get('/ausencias/mis-solicitudes', ...gated, async (req: Request, res: Response) => {
     try {
       res.json({ solicitudes: await service.misSolicitudes(db, sesionDe(req)) });
