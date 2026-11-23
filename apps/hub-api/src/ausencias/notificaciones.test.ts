@@ -45,6 +45,8 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     // evento. Los tests que prueban la correccion automatica lo ponen a mano,
     // igual que ponen `estado: 'aprobada'`.
     eventoCalendarioId: null,
+    // La registra la propia persona: el caso de casi todas.
+    registradaPor: null,
     ...over,
   };
 }

@@ -140,6 +140,7 @@ describe('la marca del evento de calendario', () => {
         aprobadorCorreo: 'jefe1@ambientalia.com.co',
         segundoAprobadorCorreo: null,
         informadoCorreo: null,
+        registradaPor: null,
       },
       null,
       ['registrada'],

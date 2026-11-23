@@ -275,6 +275,9 @@ async function altaBajoCandado(
       aprobadorCorreo: firmantes ? firmantes.primero : null,
       segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
       informadoCorreo: firmantes ? firmantes.informado : null,
+      // Hoy solo hay una puerta de alta, la de la propia persona: nadie la
+      // registra a su nombre. Ver la migración 080.
+      registradaPor: null,
     },
     adjunto,
     eventosDeAlta(datos.tipo),

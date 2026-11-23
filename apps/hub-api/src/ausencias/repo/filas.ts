@@ -166,6 +166,8 @@ export const SELECT_SOLICITUD = `
          s.anulada_at::text AS anulada_at,
          -- Sin ::text: es TEXT en la base, no una fecha ni un numero.
          s.evento_calendario_id,
+         -- Quien la registro a nombre de la persona (080). NULL = ella misma.
+         s.registrada_por,
          a.id AS adjunto_id, a.nombre_archivo, a.mime,
          -- octet_length y no el binario: las listas solo necesitan el tamano.
          octet_length(a.contenido) AS adjunto_bytes,
@@ -212,6 +214,7 @@ export interface FilaSolicitudDb extends FilaModificacionJoinDb {
   copia_correo: string | null;
   anulada_at: string | null;
   evento_calendario_id: string | null;
+  registrada_por: string | null;
 }
 
 export function aSolicitud(r: FilaSolicitudDb): Solicitud {
@@ -253,6 +256,7 @@ export function aSolicitud(r: FilaSolicitudDb): Solicitud {
     modificacionPendiente: r.mod_id ? aModificacion(r as FilaModificacionDb) : null,
     anuladaAt: r.anulada_at,
     eventoCalendarioId: r.evento_calendario_id,
+    registradaPor: r.registrada_por,
   };
 }
 

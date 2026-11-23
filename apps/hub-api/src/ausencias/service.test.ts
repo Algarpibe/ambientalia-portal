@@ -77,6 +77,7 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     anuladaAt: null,
     // Este fichero no llega a Google: una `pendiente` no tiene evento.
     eventoCalendarioId: null,
+    registradaPor: null,
     ...over,
   };
 }

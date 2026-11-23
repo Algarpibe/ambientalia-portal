@@ -607,6 +607,15 @@ export interface Solicitud {
    * el correo tiene que seguir pidiendo el ajuste a mano.
    */
   eventoCalendarioId: string | null;
+  /**
+   * Quién la registró, si NO fue la propia persona: el correo, en minúsculas,
+   * del administrador que la dio de alta a su nombre (migración 080). `null` =
+   * la registró ella misma, o viene del histórico de la hoja.
+   *
+   * Lo lee el acuse (`acuseSolicitante`): con valor, el correo dice que la ha
+   * registrado administración en vez de darle las gracias por reportarla.
+   */
+  registradaPor: string | null;
 }
 
 /**
