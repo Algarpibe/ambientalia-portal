@@ -248,10 +248,21 @@ describe('correos', () => {
     const base = solicitud({ tipo: 'incapacidad', estado: 'registrada', adjunto: pdf });
     const propia = construirPayload(base, 'registrada');
     const ajena = construirPayload({ ...base, registradaPor: 'admin@ambientalia.com.co' }, 'registrada');
+    // Sin esto, `toEqual` pasaría también si ambos fueran null y no compararía nada.
+    expect(propia.calendario).not.toBeNull();
+    expect(propia.hoja).not.toBeNull();
     expect(ajena.correo.para).toBe(propia.correo.para);
     expect(ajena.calendario).toEqual(propia.calendario);
     expect(ajena.hoja).toEqual(propia.hoja);
     expect(ajena.correo.asunto).not.toBe(propia.correo.asunto);
+  });
+
+  it('registradaPor solo cuenta en las incapacidades: unas vacaciones conservan su acuse', () => {
+    // La BD no ata `registrada_por` al tipo, así que la guarda `esInc` de
+    // `acuseSolicitante` es lo único que lo impide.
+    const p = construirPayload(solicitud({ registradaPor: 'admin@ambientalia.com.co' }), 'creada');
+    expect(p.correo.asunto).toBe('¡Solicitud de vacaciones registrada exitosamente!');
+    expect(p.correo.cuerpo).not.toMatch(/Administración ha registrado/);
   });
 
   it('sin registradaPor, el acuse de la incapacidad sigue siendo el de siempre', () => {

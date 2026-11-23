@@ -189,9 +189,10 @@ function acuseSolicitante(s: Solicitud) {
   // reportarla sería falso, porque no la reportó él. Destinatarios, calendario
   // y hoja siguen siendo los de siempre.
   //
-  // `Boolean(...)` y no `!== null`: un objeto montado a mano sin la clave —los
-  // dobles de los tests— daría `undefined !== null`, o sea `true`, y pondría el
-  // texto de administración en una incapacidad que informó la propia persona.
+  // `Boolean(...)` y no `!== null`: una cadena vacía no es «registrada por
+  // administración», y si un SELECT futuro omitiera la columna el valor sería
+  // `undefined`, que con `!== null` daría `true` y pondría el texto de
+  // administración en una incapacidad que informó la propia persona.
   const porAdministracion = esInc && Boolean(s.registradaPor);
   // No hay correo de avance intermedio: el empleado recibe este acuse y el
   // veredicto, dos correos. Por eso el acuse anuncia el circuito de dos firmas
