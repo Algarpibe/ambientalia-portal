@@ -69,6 +69,8 @@ describe('repo: registrada_por se escribe y se lee', () => {
     // lo repite para que ninguna otra puerta futura pueda colarlo de otra forma.
     const s = await incapacidad(await sembrarEmpleado(db, CORREO), 'Admin@Ambientalia.com.co');
     expect(await registradaPorEnBd(s.id)).toBe(ADMIN);
+    // Y la Solicitud devuelta: el JSON del empleado y el acuse leen esto, no la columna.
+    expect(s.registradaPor).toBe(ADMIN);
   });
 
   it('sin valor: NULL en la columna y null (no undefined) en la Solicitud', async () => {

@@ -612,7 +612,11 @@ export interface Solicitud {
    * del administrador que la dio de alta a su nombre (migración 080). `null` =
    * la registró ella misma, o viene del histórico de la hoja.
    *
-   * Lo lee el acuse (`acuseSolicitante`): con valor, el correo dice que la ha
+   * Viaja en todo JSON de `Solicitud` que devuelven las rutas (mis solicitudes,
+   * adjuntos, GET por id): esos lectores ya reciben los demás correos de la
+   * solicitud, pero nadie debe darlo por interno.
+   *
+   * Lo leerá el acuse (`acuseSolicitante`): con valor, el correo dirá que la ha
    * registrado administración en vez de darle las gracias por reportarla.
    */
   registradaPor: string | null;

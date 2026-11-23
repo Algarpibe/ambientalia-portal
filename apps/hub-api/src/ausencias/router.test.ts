@@ -985,6 +985,10 @@ vi.mock('./repo.js', async () => ({
   ) => {
     const s = {
       id: `s${++estado.seq}`,
+      // `registradaPor` viaja aqui dentro, con `...datos`. El repo real lo baja a
+      // minusculas con lower($14); el doble no hace falta que lo haga, porque el
+      // servicio siempre pasa null o el correo de la sesion, que `sesionDe` ya
+      // baja a minusculas.
       ...datos,
       empleadoNombre: 'Ana Ruiz',
       empleadoCargo: 'Analista',
@@ -6847,6 +6851,7 @@ describe('nadie firma su propia solicitud', () => {
       modificacionPendiente: null,
       anuladaAt: null,
       eventoCalendarioId: null,
+      registradaPor: null,
     } as never);
     await request(app())
       .post('/api/ausencias/solicitudes/vieja/decision')
