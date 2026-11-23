@@ -40,6 +40,19 @@ describe('validarIncapacidadAjena', () => {
     expect(r.datos.adjunto?.nombreArchivo).toBe('baja.pdf');
   });
 
+  it('normaliza el empleadoId a minúsculas: el candado por empleado distingue mayúsculas', () => {
+    // El regex del uuid admite mayúsculas, pero la llave del candado de la BD es
+    // sensible a ellas: sin normalizar, tomaría un candado distinto al del propio empleado.
+    // E1 solo tiene dígitos: pasarlo a mayúsculas no cambiaría nada. Este lleva letras.
+    const conLetras = 'abcdef12-3456-4abc-8def-1234567890ab';
+    expect(validarIncapacidadAjena(cuerpo({ empleadoId: conLetras.toUpperCase() }), HOY).empleadoId).toBe(conLetras);
+  });
+
+  it('el empleadoId va fuera de `datos`: datos son solo los de la solicitud', () => {
+    // `toMatchObject` tolera claves de más; esto fija que no se cuela ninguna.
+    expect(validarIncapacidadAjena(cuerpo(), HOY).datos).not.toHaveProperty('empleadoId');
+  });
+
   it('CANDADO: la misma fecha por la validación del EMPLEADO se sigue rechazando', () => {
     // La exención es de esta puerta y de ninguna otra: si alguien la moviera a la
     // validación compartida, el empleado podría volver a informar bajas de hace

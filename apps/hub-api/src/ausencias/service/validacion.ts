@@ -134,7 +134,8 @@ export function validarIncapacidadAjena(body: unknown, hoy: string): { empleadoI
   }
   if (!UUID.test(empleadoId)) throw new AusenciaError('empleado_no_encontrado', 404, 'empleadoId');
   if (b.tipo !== undefined && b.tipo !== 'incapacidad') throw new AusenciaError('tipo_invalido', 400, 'tipo');
-  return { empleadoId, datos: validarAlta({ ...b, tipo: 'incapacidad' }, hoy, false) };
+  // En minúsculas: la llave del candado por empleado en la BD distingue mayúsculas.
+  return { empleadoId: empleadoId.toLowerCase(), datos: validarAlta({ ...b, tipo: 'incapacidad' }, hoy, false) };
 }
 
 /**
