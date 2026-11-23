@@ -57,6 +57,25 @@ describe('registrarIncapacidadAjena', () => {
     );
   });
 
+  it('rango_solapado con un estado que no conoce: sale por la rama sin estado, también con «de esa persona»', async () => {
+    responde(json(409, { error: 'rango_solapado', field: 'fechaInicio', detalle: { ...CHOQUE, estado: 'rechazada' } }));
+    expect((await errorDe(registrarIncapacidadAjena(datos)))?.message).toBe(
+      `Esas fechas chocan con otra ausencia de esa persona: Vacaciones, ${rangoFechas('2025-03-04', '2025-03-07')}. ` +
+        'Esos días no se liberan hasta que esa solicitud se cambie o se anule.',
+    );
+  });
+
+  it('403: le habla al administrador, no al empleado sin la aplicación asignada', async () => {
+    // Un admin degradado a mitad de sesión: el JWT aún dice admin, pero
+    // `requireAdmin` relee el rol de la BD.
+    responde(json(403, { error: 'forbidden' }));
+    await expect(registrarIncapacidadAjena(datos)).rejects.toThrow(
+      new Error(
+        'Solo un administrador puede registrar una incapacidad a nombre de otro. Si acaban de cambiarte el rol, vuelve a entrar en el portal.',
+      ),
+    );
+  });
+
   it('fecha_posterior_al_retiro: nombra el último día de ESA persona, sin «tu»', async () => {
     responde(json(409, { error: 'fecha_posterior_al_retiro', field: 'fechaFin', detalle: { fechaRetiro: '2025-03-04' } }));
     expect((await errorDe(registrarIncapacidadAjena(datos)))?.message).toBe(
@@ -107,6 +126,9 @@ describe('el alta del EMPLEADO no cambia', () => {
   it('CANDADO: su choque sigue diciendo «otra ausencia», sin «de esa persona»', async () => {
     responde(json(409, { error: 'rango_solapado', field: 'fechaInicio', detalle: CHOQUE }));
     const error = await errorDe(crearSolicitud({ tipo: 'vacaciones', fechaInicio: '2025-03-03', fechaFin: '2025-03-05' }));
-    expect(error?.message).toMatch(/^Esas fechas chocan con otra ausencia: Vacaciones \(aprobada\), /);
+    expect(error?.message).toBe(
+      `Esas fechas chocan con otra ausencia: Vacaciones (aprobada), ${rangoFechas('2025-03-04', '2025-03-07')}. ` +
+        'Esos días ya están concedidos: no se liberan hasta que esa solicitud se cambie o se anule.',
+    );
   });
 });

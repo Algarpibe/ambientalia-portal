@@ -37,9 +37,13 @@ export interface SolapeDetalle {
  *
  * Cada `salida` describe la CONDICIÓN —cuándo se sueltan esos días— y no receta
  * un botón, y eso no es estilo: es lo único que puede ser cierto a la vez para
- * los tres lectores posibles de estos cuatro 409. El dueño puede cambiar las
+ * los lectores posibles de estos 409 (las cuatro puertas del lector del empleado
+ * y la quinta, la del admin que registra una incapacidad a nombre de otro, con
+ * `errorDeIncapacidadAjena`). El dueño puede cambiar las
  * fechas o pedir la anulación; el admin que corrige el registro puede editar esa
- * otra solicitud —fechas o estado— o borrarla; y el jefe que firma una propuesta
+ * otra solicitud —fechas o estado— o borrarla; el admin que registra a nombre de
+ * otro no puede tocarla desde ese formulario, solo cambiar las fechas que
+ * propone; y el jefe que firma una propuesta
  * no puede tocar la ausencia que choca, solo rechazar la propuesta que se la
  * pisa. «Anula esa solicitud primero» nombraba un botón que solo el dueño tiene.
  * Dicho como condición, cada uno lo mapea a lo que sí pueda hacer.
@@ -90,7 +94,7 @@ const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salid
  * como si «aprobada» calificara a la fecha de fin.
  *
  * `conQue` es contra qué se choca. Por defecto «otra ausencia», que vale para
- * los tres lectores de las cuatro puertas; el administrador que registra una
+ * las cuatro puertas que leen por `errorDeAusencia`; el administrador que registra una
  * incapacidad a nombre de otro lee «otra ausencia de esa persona», porque la
  * ausencia que choca es de quien eligió en el desplegable y no suya.
  */
@@ -283,6 +287,14 @@ export async function errorDeIncapacidadAjena(res: Response): Promise<Error> {
     empleado_requerido: 'Elige la persona a la que pertenece la incapacidad.',
   };
   if (cuerpo?.error && PARA_EL_ADMIN[cuerpo.error]) return new Error(PARA_EL_ADMIN[cuerpo.error]);
+  // Un admin degradado a mitad de sesión: el JWT aún dice admin, pero
+  // `requireAdmin` relee el rol de la BD. El texto común del 403 («No tienes
+  // esta aplicación asignada…») sería falso para quien lee aquí.
+  if (res.status === 403) {
+    return new Error(
+      'Solo un administrador puede registrar una incapacidad a nombre de otro. Si acaban de cambiarte el rol, vuelve a entrar en el portal.',
+    );
+  }
   return errorDeAusencia(res);
 }
 
@@ -372,15 +384,19 @@ export const put = <T,>(path: string, body: unknown) => conCuerpo<T>('PUT', path
  * `PATCH` sin el decodificador de solapes. Lo usa la corrección de un MOVIMIENTO
  * del registro, que no puede contestar `rango_solapado`: una modificación cerrada
  * no ocupa agenda —lo que la ocupa es la solicitud—, así que corregir sus fechas
- * no choca con nada. Darle `patchSolapable` insinuaría una quinta puerta del
- * solapamiento que no existe.
+ * no choca con nada. Darle `patchSolapable` insinuaría una puerta más del
+ * solapamiento que no existe (la quinta, `registrarIncapacidadAjena`, tiene su
+ * propio lector y no pasa por aquí).
  */
 export const patch = <T,>(path: string, body: unknown) => conCuerpo<T>('PATCH', path, body);
 
 /**
  * Los verbos de las CUATRO puertas del solapamiento —el alta, pedir un cambio de
  * fechas, firmarlo y el `PATCH` del registro—, que son las cuatro que pueden
- * contestar `rango_solapado`. El resto de endpoints sigue con `post`/`put`.
+ * contestar `rango_solapado` por el lector del empleado. El resto de endpoints
+ * sigue con `post`/`put`. Hay una quinta puerta, el alta de una incapacidad que
+ * hace el admin a nombre de otro (`registrarIncapacidadAjena`), que también
+ * puede contestar `rango_solapado` pero lee por `errorDeIncapacidadAjena`.
  *
  * `patch` a secas volvió a existir arriba, para la corrección de un movimiento:
  * ese `PATCH` no es una de las cuatro puertas y no puede dar `rango_solapado`.
