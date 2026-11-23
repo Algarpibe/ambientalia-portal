@@ -2122,8 +2122,20 @@ describe('POST /ausencias/solicitudes/incapacidad-ajena', () => {
     // Si el alta tomara el correo de la sesion, el empleado dejaria de poder
     // abrir su propio PDF, y su jefe con llave tambien: esos permisos miran
     // solicitante_email.
+    // E1, E2 y la ficha de la sesion comparten correo por defecto: sin uno
+    // propio para E1 el test no distinguiria al empleado elegido del resto.
+    // `estado` se reconstruye en el beforeEach global, asi que mutarlo es seguro.
+    const correoDeE1 = 'e1.distinto@ambientalia.com.co';
+    estado.plantilla.find((e: any) => e.id === E1).correo = correoDeE1;
     const r = await registrar(cuerpo()).expect(201);
-    expect(r.body.solicitanteEmail).toBe('ana.ruiz@ambientalia.com.co');
+    expect(r.body.solicitanteEmail).toBe(correoDeE1);
+    expect(r.body.registradaPor).toBe(ADMIN);
+  });
+
+  it('CANDADO: registradaPor sale solo de la sesion, nunca del cuerpo', async () => {
+    // validarAlta construye un objeto nuevo y hoy descarta el campo; este test
+    // fija que un cliente no puede poner a otro como quien la registro.
+    const r = await registrar(cuerpo({ registradaPor: 'otro@ambientalia.com.co' })).expect(201);
     expect(r.body.registradaPor).toBe(ADMIN);
   });
 
@@ -2221,7 +2233,9 @@ describe('POST /ausencias/solicitudes/incapacidad-ajena', () => {
   it('CANDADO: la ruta del EMPLEADO sigue con su ventana aunque llame un admin y mande empleadoId', async () => {
     // La exencion es de ESTA ruta y de ninguna otra (la opcion B que la spec
     // descarta): un admin que use la puerta del empleado sigue topando con la
-    // ventana, y el empleadoId del cuerpo no cambia nada.
+    // ventana. Este test prueba solo la ventana (el 400 salta en la validacion,
+    // antes de resolver la identidad); que el empleadoId del cuerpo se ignora lo
+    // fija service.test.ts, "ignora cualquier empleadoId...".
     const r = await request(app())
       .post('/api/ausencias/solicitudes')
       .set('Authorization', `Bearer ${token({ sub: ADMIN, role: 'admin' })}`)
