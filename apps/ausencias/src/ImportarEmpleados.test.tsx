@@ -242,6 +242,32 @@ describe('registrar una baja', () => {
     expect(screen.queryByText(/hasta entonces trabaja con normalidad/)).toBeNull();
   });
 
+  it('CANDADO: el aviso sigue al `activo` del servidor aunque la fecha parezca vencida', async () => {
+    // Los dos tests de alrededor emparejan fecha pasada con `false` y futura con
+    // `true`, así que una pantalla que decidiera por la fecha en vez de por la
+    // ficha seguiría en verde con ellos (comprobado mutándolo). Aquí las dos
+    // cosas no coinciden: a las 21:00 del 23 en Colombia, en UTC ya es el 24, y
+    // un navegador que comparase la fecha contra su reloj daría por vencida una
+    // baja cuyo último día es HOY. El servidor, que decide con el hoy de
+    // Colombia, contesta que sigue activa, y eso es lo que tiene que decir el
+    // aviso. Solo se falsea `Date`: los temporizadores los necesita `waitFor`.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-24T02:00:00Z'));
+    try {
+      await registrar('2026-11-23', { ...ana, fechaRetiro: '2026-11-23', activo: true });
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            `Baja registrada: su último día es el ${formatFecha('2026-11-23')}, y hasta entonces trabaja con normalidad.`,
+          ),
+        ).toBeTruthy(),
+      );
+      expect(screen.queryByText(/su último día fue el/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('si la ficha vuelve todavía activa, el aviso dice que trabaja hasta ese día', async () => {
     await registrar('2099-12-31', { ...ana, fechaRetiro: '2099-12-31', activo: true });
     await waitFor(() =>
