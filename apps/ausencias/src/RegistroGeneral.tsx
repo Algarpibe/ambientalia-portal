@@ -338,6 +338,9 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
   async function pedirEdicion(m: MovimientoDeSolicitud) {
     setAbriendo(m.id);
     setError(null);
+    // El aviso verde habla de la última incapacidad registrada: al pasar a otra
+    // acción ya no toca, y se quedaría colgado junto a un modal ajeno.
+    setExito(null);
     try {
       const s = await fetchSolicitud(m.solicitudId);
       // Antes de dejar corregir, avisar si hay una propuesta de cambio viva. El
@@ -369,6 +372,9 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
   async function borrar(m: Movimiento) {
     setBorrando(m.id);
     setError(null);
+    // Mismo motivo que en `pedirEdicion`: el aviso de la última alta no debe
+    // sobrevivir a un borrado.
+    setExito(null);
     try {
       if (esDeSolicitud(m)) {
         await borrarSolicitud(m.solicitudId);
@@ -410,11 +416,17 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
         </div>
       )}
 
-      {exito && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {exito}
-        </div>
-      )}
+      {/* La región viva existe SIEMPRE y solo su contenido es condicional: los
+          lectores de pantalla anuncian de forma fiable el cambio de contenido de
+          una región que ya estaba en el DOM, no la que aparece de golpe. Vacía no
+          ocupa espacio, así que la maqueta no cambia. */}
+      <div role="status">
+        {exito && (
+          <div className="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> {exito}
+          </div>
+        )}
+      </div>
 
       {avisoPropuesta && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">

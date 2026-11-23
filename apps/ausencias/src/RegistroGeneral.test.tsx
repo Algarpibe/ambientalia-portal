@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   fetchEmpleados: vi.fn(),
   registrarIncapacidadAjena: vi.fn(),
   leerComoBase64: vi.fn(),
+  fetchSolicitud: vi.fn(),
 }));
 vi.mock('./api', async (original) => ({ ...(await original<typeof import('./api')>()), ...api }));
 
@@ -129,6 +130,12 @@ describe('Registrar incapacidad desde el Registro general', () => {
     api.leerComoBase64.mockResolvedValue('JVBERi0=');
     api.registrarIncapacidadAjena.mockResolvedValue({ id: 's9', empleadoNombre: 'Ana Pérez' });
     await montar(true);
+    // La recarga trae la fila nueva, con su etiqueta: es lo que el admin tiene
+    // que ver aparecer, no solo que se llamó dos veces al servidor.
+    api.fetchMovimientos.mockResolvedValueOnce([
+      fila(),
+      fila({ id: 's9', solicitudId: 's9', empleadoNombre: 'Marta Ruiz', registradaPor: ADMIN }),
+    ]);
     const dialogo = abrirYRellenar();
     fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar' }));
 
@@ -139,6 +146,48 @@ describe('Registrar incapacidad desde el Registro general', () => {
     // La recarga sale de un efecto (`recargaLocal` en sus dependencias): se
     // espera, no se da por hecha en el mismo tick que el aviso.
     await waitFor(() => expect(api.fetchMovimientos).toHaveBeenCalledTimes(2));
+    // El nombre sale más de una vez (fila y chips por persona): basta con que esté.
+    await waitFor(() => expect(screen.getAllByText('Marta Ruiz').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Registrada por administración')).toHaveLength(1);
+  });
+
+  it('el aviso va en una región viva (status) para que un lector de pantalla lo anuncie', async () => {
+    api.leerComoBase64.mockResolvedValue('JVBERi0=');
+    api.registrarIncapacidadAjena.mockResolvedValue({ id: 's9', empleadoNombre: 'Ana Pérez' });
+    await montar(true);
+    const dialogo = abrirYRellenar();
+    fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Incapacidad de Ana Pérez registrada/));
+  });
+
+  async function registrarBien() {
+    api.leerComoBase64.mockResolvedValue('JVBERi0=');
+    api.registrarIncapacidadAjena.mockResolvedValue({ id: 's9', empleadoNombre: 'Ana Pérez' });
+    await montar(true);
+    const dialogo = abrirYRellenar();
+    fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.getByText(/Le hemos enviado el acuse/)).toBeTruthy());
+  }
+
+  it('al reabrir el formulario el aviso anterior desaparece', async () => {
+    await registrarBien();
+    fireEvent.click(boton()!);
+    expect(screen.queryByText(/Le hemos enviado el acuse/)).toBeNull();
+  });
+
+  it('al empezar a editar otra fila el aviso verde desaparece (no se queda colgado)', async () => {
+    api.fetchSolicitud.mockReturnValue(new Promise(() => {}));
+    await registrarBien();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Editar/ })[0]);
+    expect(screen.queryByText(/Le hemos enviado el acuse/)).toBeNull();
+  });
+
+  it('al borrar una fila el aviso verde desaparece', async () => {
+    api.fetchSolicitud.mockReturnValue(new Promise(() => {}));
+    await registrarBien();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Borrar/ })[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Sí, borrar' }));
+    expect(screen.queryByText(/Le hemos enviado el acuse/)).toBeNull();
   });
 
   it('si falla: el mensaje, el formulario sigue abierto con lo rellenado, y no recarga', async () => {
