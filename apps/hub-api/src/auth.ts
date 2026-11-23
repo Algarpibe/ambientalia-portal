@@ -220,7 +220,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   // el `role` que `findById` ya traía y se tiraba.
   //
   // Va en UNA consulta y no en dos: `portal.user_apps` tiene PRIMARY KEY
-  // (user_id, app_id), así que el LEFT JOIN entra por índice y no añade viaje.
+  // (user_id, app_id), así que la subconsulta de las apps entra por índice y no
+  // añade viaje.
   // Y se lanza UNA vez por petición: la segunda entrada de una ruta
   // `requireAuth, requireAdmin` ya no llega hasta aquí (`peticionesVerificadas`).
   try {
