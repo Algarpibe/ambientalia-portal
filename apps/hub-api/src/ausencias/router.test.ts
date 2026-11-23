@@ -486,11 +486,14 @@ vi.mock('./repo.js', async () => ({
     return estado.empleado;
   },
   // El barrido de bajas vencidas: el handler de `/ausencias/contexto` lo llama
-  // siempre, antes de `asegurarEmpleado`. No hay SQL que imitar —ningún test de
-  // este fichero prueba la baja en sí, eso vive en `repo.baja.db.test.ts`
-  // contra Postgres real— así que el doble se limita a registrar la LLAMADA:
-  // con qué `hoy` (para el candado de la zona horaria) y en qué ORDEN respecto
-  // al alta automática (para el candado de que va antes de `asegurarEmpleado`).
+  // siempre, antes de `asegurarEmpleado`. Su SQL no se imita: ningun test de
+  // este fichero necesita que el barrido apague fichas (eso lo vigila
+  // `repo.baja.db.test.ts` contra Postgres real), asi que este doble se limita
+  // a registrar la LLAMADA: con que `hoy` (para el candado de la zona horaria)
+  // y en que ORDEN respecto al alta automatica (para el candado de que va antes
+  // de `asegurarEmpleado`). La regla de `activo` que SI se imita aqui es la
+  // gemela de `fijarRetiro`, mas abajo: la baja con fecha ya pasada se apaga al
+  // guardarla, y los tests de `PUT .../retiro` afirman el `activo` que vuelve.
   aplicarRetirosVencidos: async (_db: unknown, hoy: string) => {
     estado.barridosDeRetiro.push(hoy);
     estado.orden.push('barrido');
@@ -813,9 +816,12 @@ vi.mock('./repo.js', async () => ({
   // Existe ademas para que el CANDADO de paridad de mas abajo compare
   // superficies iguales. Los tests de `PUT`/`DELETE .../retiro` de este
   // fichero SI ejercitan `retirarEmpleado`/`reactivarEmpleado` a traves de
-  // ella, pero solo prueban el CABLEADO; la regla SQL de fondo —que el UPDATE
-  // real no lleve el `AND activo`— vive en `repo.baja.db.test.ts` contra
-  // Postgres real.
+  // ella: el cableado y el `activo` que vuelve en la respuesta, que el doble de
+  // `fijarRetiro` calcula imitando el SQL. Por eso una relectura por
+  // `empleadoPorId` ya no pasaria en verde aqui: la baja con fecha pasada
+  // vuelve inactiva y la respuesta seria un 404 (comprobado mutandolo). Las
+  // reglas SQL de fondo -que el UPDATE real no lleve el `AND activo` y como
+  // calcula `activo`- viven en `repo.baja.db.test.ts` contra Postgres real.
   empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
     estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
