@@ -97,6 +97,52 @@ function validarHoras(
  * que ni suplantar a otro ni inflar los días es posible desde el navegador.
  */
 export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitud {
+  return validarAlta(body, hoy, true);
+}
+
+// Un id que no es un UUID haría que Postgres contestara con un error de tipo (un
+// 500) al buscar la ficha. Mismo criterio y misma expresión que
+// `validarEmpleadoId` en notas.ts: para quien llama es lo mismo que una ficha
+// que no existe.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * La validación del alta que hace un ADMINISTRADOR a nombre de otro: solo
+ * incapacidades (spec 2026-11-23-incapacidad-por-admin).
+ *
+ * Es la de una incapacidad del empleado —formato de fechas, `rango_invertido`,
+ * el tope del rango, los comentarios, el PDF obligatorio y validado igual, y el
+ * rechazo de `dias` y de las horas— salvo el límite hacia atrás: la ventana de
+ * dos días existe para que el empleado informe pronto, y esta puerta es justo la
+ * que la ventana manda usar cuando se pasó. Hacia adelante sigue cerrada
+ * (`incapacidad_en_el_futuro`): nadie sabe que va a enfermar.
+ *
+ * No copia la validación: la comparte con `validarNuevaSolicitud` por
+ * `validarAlta`, y la diferencia es un solo booleano. Dos copias se habrían ido
+ * separando con los meses.
+ *
+ * El `tipo` no viaja: lo fija esto. Si viaja otro, 400, por lo mismo que
+ * `dias_no_aplica`: aceptarlo e ignorarlo dejaría creer que por aquí se pueden
+ * registrar unas vacaciones.
+ */
+export function validarIncapacidadAjena(body: unknown, hoy: string): { empleadoId: string; datos: NuevaSolicitud } {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const empleadoId = b.empleadoId;
+  // El `''` es la opción «— Elige una persona —» del desplegable: no hay persona.
+  if (typeof empleadoId !== 'string' || empleadoId === '') {
+    throw new AusenciaError('empleado_requerido', 400, 'empleadoId');
+  }
+  if (!UUID.test(empleadoId)) throw new AusenciaError('empleado_no_encontrado', 404, 'empleadoId');
+  if (b.tipo !== undefined && b.tipo !== 'incapacidad') throw new AusenciaError('tipo_invalido', 400, 'tipo');
+  return { empleadoId, datos: validarAlta({ ...b, tipo: 'incapacidad' }, hoy, false) };
+}
+
+/**
+ * El cuerpo común de las dos validaciones de un alta, la del empleado y la del
+ * administrador. `conVentanaHaciaAtras` es lo único que las separa: la del
+ * empleado acota la incapacidad a dos días atrás y la del administrador no.
+ */
+function validarAlta(body: unknown, hoy: string, conVentanaHaciaAtras: boolean): NuevaSolicitud {
   const b = (body ?? {}) as Record<string, unknown>;
 
   if (!esTipo(b.tipo)) throw new AusenciaError('tipo_invalido', 400, 'tipo');
@@ -162,8 +208,9 @@ export function validarNuevaSolicitud(body: unknown, hoy: string): NuevaSolicitu
     if (fechaInicio > hoy) throw new AusenciaError('incapacidad_en_el_futuro', 400, 'fechaInicio');
     // Y hacia atrás, poco: informarla es cosa de días, no de meses. Con la
     // ventana en dos días, una baja de la semana pasada ya no entra sola y hay
-    // que pedírsela a administración, que sí puede corregir el registro.
-    if (fechaInicio < limiteDeLaIncapacidad(hoy)) {
+    // que pedírsela a administración, que la registra por su propia puerta
+    // (`validarIncapacidadAjena`): la única que llega aquí sin la ventana.
+    if (conVentanaHaciaAtras && fechaInicio < limiteDeLaIncapacidad(hoy)) {
       throw new AusenciaError('incapacidad_demasiado_antigua', 400, 'fechaInicio');
     }
   }
