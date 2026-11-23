@@ -192,6 +192,12 @@ export interface Solicitud {
    * de despliegue en la que no llega es aún más ancha.
    */
   eventoCalendarioId?: string | null;
+  /**
+   * El correo del administrador que registró la incapacidad a nombre de la
+   * persona (migración 080), o `null` si la registró ella misma. Opcional por la
+   * misma razón: en la ventana de despliegue con el portal primero no llega.
+   */
+  registradaPor?: string | null;
 }
 
 /** Una solicitud de la bandeja de aprobación. */

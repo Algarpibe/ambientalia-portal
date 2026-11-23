@@ -258,6 +258,8 @@ export interface DatosSiembra {
    * puede producir, y un fixture imposible prueba menos de lo que aparenta.
    */
   tipo?: TipoSolicitud;
+  /** Opcional, como las horas: solo lo pide quien prueba la constancia de la 080. */
+  registradaPor?: string | null;
 }
 
 /** Una solicitud creada por `crearSolicitud`, sin adjunto y sin eventos. */
@@ -278,6 +280,7 @@ export async function sembrarSolicitud(db: Pool, d: DatosSiembra): Promise<Solic
       aprobadorCorreo: 'jefe1@ambientalia.com.co',
       segundoAprobadorCorreo: d.segundoAprobadorCorreo,
       informadoCorreo: null,
+      registradaPor: d.registradaPor ?? null,
     },
     null,
     // Sin eventos de alta: asi el outbox de cada test cuenta SOLO lo que el

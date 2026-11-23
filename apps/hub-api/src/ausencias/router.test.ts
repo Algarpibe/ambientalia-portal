@@ -985,6 +985,10 @@ vi.mock('./repo.js', async () => ({
   ) => {
     const s = {
       id: `s${++estado.seq}`,
+      // `registradaPor` viaja aqui dentro, con `...datos`. El repo real lo baja a
+      // minusculas con lower($14); el doble no hace falta que lo haga, porque el
+      // servicio siempre pasa null o el correo de la sesion, que `sesionDe` ya
+      // baja a minusculas.
       ...datos,
       empleadoNombre: 'Ana Ruiz',
       empleadoCargo: 'Analista',
@@ -2062,6 +2066,183 @@ describe('POST /ausencias/solicitudes', () => {
       .expect(201);
     expect(r.body.horaInicio).toBe('09:00');
     expect(r.body.horaFin).toBe('11:00');
+  });
+
+  it('CANDADO: el alta del empleado nace con registradaPor en null', async () => {
+    // La registra la propia persona: la constancia de la 080 solo la pone la
+    // puerta del administrador. Con el correo de la sesion aqui, todas las
+    // incapacidades del portal saldrian como "registradas por administracion".
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token()}`)
+      .send(nueva({ tipo: 'incapacidad', fechaInicio: INCAP_DESDE, fechaFin: INCAP_HASTA, adjunto: { nombreArchivo: 'i.pdf', mime: 'application/pdf', contenidoBase64: PDF } }))
+      .expect(201);
+    expect(r.body.registradaPor).toBeNull();
+  });
+});
+
+// ── La incapacidad que registra el administrador a nombre de otro ─────────
+
+describe('POST /ausencias/solicitudes/incapacidad-ajena', () => {
+  // Un admin con correo propio, distinto del de la sesion por defecto: es lo
+  // unico que permite distinguir "el correo del empleado" de "el de quien la
+  // registra".
+  const ADMIN = 'admin@ambientalia.com.co';
+  // Un ano antes del reloj congelado (2026-01-15): muy fuera de la ventana de
+  // dos dias del alta del empleado. De martes a jueves y sin festivos.
+  const HACE_UN_ANO_DESDE = '2025-01-14';
+  const HACE_UN_ANO_HASTA = '2025-01-16';
+  const soporte = { nombreArchivo: 'escaneo (1).pdf', mime: 'application/pdf', contenidoBase64: PDF };
+
+  const cuerpo = (over: Record<string, unknown> = {}) => ({
+    empleadoId: E1,
+    fechaInicio: HACE_UN_ANO_DESDE,
+    fechaFin: HACE_UN_ANO_HASTA,
+    adjunto: soporte,
+    ...over,
+  });
+
+  const registrar = (body: object, t = token({ sub: ADMIN, role: 'admin' })) =>
+    request(app()).post('/api/ausencias/solicitudes/incapacidad-ajena').set('Authorization', `Bearer ${t}`).send(body);
+
+  it('201: un admin la registra a nombre de otro, aunque empiece hace un ano', async () => {
+    const r = await registrar(cuerpo()).expect(201);
+    expect(r.body).toMatchObject({
+      tipo: 'incapacidad',
+      empleadoId: E1,
+      estado: 'registrada',
+      fechaInicio: HACE_UN_ANO_DESDE,
+      fechaFin: HACE_UN_ANO_HASTA,
+      // Sin aprobador, igual que la del empleado: si lo tuviera, apareceria en su bandeja.
+      aprobadorCorreo: null,
+    });
+  });
+
+  it('CANDADO: solicitanteEmail es el del EMPLEADO y registradaPor el del admin de la sesion', async () => {
+    // Si el alta tomara el correo de la sesion, el empleado dejaria de poder
+    // abrir su propio PDF, y su jefe con llave tambien: esos permisos miran
+    // solicitante_email.
+    // E1, E2 y la ficha de la sesion comparten correo por defecto: sin uno
+    // propio para E1 el test no distinguiria al empleado elegido del resto.
+    // `estado` se reconstruye en el beforeEach global, asi que mutarlo es seguro.
+    const correoDeE1 = 'e1.distinto@ambientalia.com.co';
+    estado.plantilla.find((e: any) => e.id === E1).correo = correoDeE1;
+    const r = await registrar(cuerpo()).expect(201);
+    expect(r.body.solicitanteEmail).toBe(correoDeE1);
+    expect(r.body.registradaPor).toBe(ADMIN);
+  });
+
+  it('CANDADO: registradaPor sale solo de la sesion, nunca del cuerpo', async () => {
+    // validarAlta construye un objeto nuevo y hoy descarta el campo; este test
+    // fija que un cliente no puede poner a otro como quien la registro.
+    const r = await registrar(cuerpo({ registradaPor: 'otro@ambientalia.com.co' })).expect(201);
+    expect(r.body.registradaPor).toBe(ADMIN);
+  });
+
+  it('renombra el PDF con el nombre del EMPLEADO', async () => {
+    const r = await registrar(cuerpo()).expect(201);
+    expect(r.body.adjunto.nombreArchivo).toBe(`Incapacidades_Ana_Ruiz_Molina_${HACE_UN_ANO_DESDE}_1.pdf`);
+  });
+
+  it('encola UN evento registrada, con el acuse de administracion, al empleado y con calendario', async () => {
+    await registrar(cuerpo()).expect(201);
+    expect(estado.eventos.map((e) => e.evento)).toEqual(['registrada']);
+    const { correo, calendario } = estado.eventos[0].payload as {
+      correo: { asunto: string; para: string };
+      calendario: { accion: string } | null;
+    };
+    expect(correo.asunto).toBe('Administración ha registrado tu incapacidad');
+    expect(correo.para).toContain('ana.ruiz@ambientalia.com.co');
+    expect(calendario?.accion).toBe('crear');
+  });
+
+  it('acepta un PDF por encima de los 2mb del parser global: cuelga del prefijo de 12mb', async () => {
+    // Regresion del orden de middleware, igual que en el alta del empleado: la
+    // ruta nueva no monta parser propio, usa el de /api/ausencias/solicitudes.
+    const grande = Buffer.alloc(3 * 1024 * 1024, 7).toString('base64');
+    await registrar(cuerpo({ adjunto: { ...soporte, contenidoBase64: grande } })).expect(201);
+  });
+
+  it('403 a quien no es admin, y no deja rastro', async () => {
+    await registrar(cuerpo(), token()).expect(403);
+    expect(estado.solicitudes).toHaveLength(0);
+    expect(estado.eventos).toHaveLength(0);
+  });
+
+  it('400 empleado_requerido si falta empleadoId', async () => {
+    const r = await registrar(cuerpo({ empleadoId: undefined })).expect(400);
+    expect(r.body).toEqual({ error: 'empleado_requerido', field: 'empleadoId' });
+  });
+
+  it('404 empleado_no_encontrado si la ficha no existe, o el id no es un uuid', async () => {
+    for (const empleadoId of [E_FANTASMA, 'basura']) {
+      const r = await registrar(cuerpo({ empleadoId })).expect(404);
+      expect(r.body.error, empleadoId).toBe('empleado_no_encontrado');
+    }
+    expect(estado.solicitudes).toHaveLength(0);
+  });
+
+  it('404 si la ficha esta inactiva', async () => {
+    estado.plantilla[0].activo = false;
+    const r = await registrar(cuerpo()).expect(404);
+    expect(r.body.error).toBe('empleado_no_encontrado');
+    expect(estado.solicitudes).toHaveLength(0);
+  });
+
+  it('CANDADO: 400 incapacidad_en_el_futuro si empieza manana', async () => {
+    const r = await registrar(cuerpo({ fechaInicio: '2026-01-16', fechaFin: '2026-01-16' })).expect(400);
+    expect(r.body).toMatchObject({ error: 'incapacidad_en_el_futuro', field: 'fechaInicio' });
+    expect(estado.eventos).toHaveLength(0);
+  });
+
+  it('CANDADO: empezar HOY y terminar mas adelante si vale', async () => {
+    await registrar(cuerpo({ fechaInicio: '2026-01-15', fechaFin: '2026-01-20' })).expect(201);
+  });
+
+  it('400 adjunto_requerido sin el PDF', async () => {
+    const r = await registrar(cuerpo({ adjunto: undefined })).expect(400);
+    expect(r.body).toMatchObject({ error: 'adjunto_requerido', field: 'adjunto' });
+  });
+
+  it('400 si viajan los dias o un tipo: los pone el servidor', async () => {
+    expect((await registrar(cuerpo({ dias: 3 })).expect(400)).body.error).toBe('dias_no_aplica');
+    expect((await registrar(cuerpo({ tipo: 'vacaciones' })).expect(400)).body.error).toBe('tipo_invalido');
+  });
+
+  it('CANDADO: 409 rango_solapado, la regla de no solaparse sigue mordiendo', async () => {
+    await registrar(cuerpo()).expect(201);
+    const r = await registrar(cuerpo({ fechaInicio: '2025-01-15', fechaFin: '2025-01-17' })).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'rango_solapado',
+      field: 'fechaInicio',
+      detalle: { tipo: 'incapacidad', estado: 'registrada', fechaInicio: HACE_UN_ANO_DESDE, fechaFin: HACE_UN_ANO_HASTA },
+    });
+    expect(estado.solicitudes).toHaveLength(1);
+  });
+
+  it('409 fecha_posterior_al_retiro si pasa del ultimo dia de esa persona', async () => {
+    estado.plantilla[0].fechaRetiro = '2025-01-15';
+    const r = await registrar(cuerpo()).expect(409);
+    expect(r.body).toMatchObject({
+      error: 'fecha_posterior_al_retiro',
+      field: 'fechaFin',
+      detalle: { fechaRetiro: '2025-01-15' },
+    });
+  });
+
+  it('CANDADO: la ruta del EMPLEADO sigue con su ventana aunque llame un admin y mande empleadoId', async () => {
+    // La exencion es de ESTA ruta y de ninguna otra (la opcion B que la spec
+    // descarta): un admin que use la puerta del empleado sigue topando con la
+    // ventana. Este test prueba solo la ventana (el 400 salta en la validacion,
+    // antes de resolver la identidad); que el empleadoId del cuerpo se ignora lo
+    // fija service.test.ts, "ignora cualquier empleadoId...".
+    const r = await request(app())
+      .post('/api/ausencias/solicitudes')
+      .set('Authorization', `Bearer ${token({ sub: ADMIN, role: 'admin' })}`)
+      .send({ tipo: 'incapacidad', empleadoId: E2, fechaInicio: HACE_UN_ANO_DESDE, fechaFin: HACE_UN_ANO_HASTA, adjunto: soporte })
+      .expect(400);
+    expect(r.body.error).toBe('incapacidad_demasiado_antigua');
+    expect(estado.solicitudes).toHaveLength(0);
   });
 });
 
@@ -6847,6 +7028,7 @@ describe('nadie firma su propia solicitud', () => {
       modificacionPendiente: null,
       anuladaAt: null,
       eventoCalendarioId: null,
+      registradaPor: null,
     } as never);
     await request(app())
       .post('/api/ausencias/solicitudes/vieja/decision')

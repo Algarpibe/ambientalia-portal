@@ -43,6 +43,13 @@ export interface DatosInsercion {
   segundoAprobadorCorreo: string | null;
   /** Congelado por lo mismo que los firmantes: nace del árbol, no de un ajuste. */
   informadoCorreo: string | null;
+  /**
+   * Quién la registró a nombre de la persona: el correo del administrador de la
+   * sesión, o `null` si la registra ella misma (migración 080). Obligatorio y no
+   * opcional, por lo mismo que las horas: cada llamante tiene que decir cuál de
+   * las dos es, no heredarlo por omisión.
+   */
+  registradaPor: string | null;
 }
 
 /**
@@ -73,11 +80,13 @@ export async function insertarSolicitud(
   construirPayload: (solicitud: Solicitud, evento: EventoSolicitud) => PayloadEvento,
 ): Promise<Solicitud> {
   const { rows } = await client.query(
+    // lower() en registrada_por por lo mismo que fijarJefe con el aprobador: la
+    // columna promete el correo en minusculas, y asi no depende de quien llame.
     `INSERT INTO portal.solicitudes_ausencia
        (tipo, empleado_id, solicitante_email, fecha_inicio, fecha_fin,
         dias_habiles, comentarios, estado, aprobador_correo, segundo_aprobador_correo,
-        informado_correo, hora_inicio, hora_fin)
-     VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time)
+        informado_correo, hora_inicio, hora_fin, registrada_por)
+     VALUES ($1, $2, $3, $4::date, $5::date, $6, $7, $8, $9, $10, $11, $12::time, $13::time, lower($14))
      RETURNING id`,
     [
       datos.tipo,
@@ -93,6 +102,7 @@ export async function insertarSolicitud(
       datos.informadoCorreo,
       datos.horaInicio,
       datos.horaFin,
+      datos.registradaPor,
     ],
   );
   const id = (rows[0] as { id: string }).id;

@@ -20,7 +20,13 @@ import {
 import { saldosDeSesion } from './saldos.js';
 import { empleadoDeSesion, firmanteDeSesion, type Sesion } from './sesion.js';
 import { exigirSinSolape } from './solapes.js';
-import { MAX_ADJUNTO_BYTES, MAX_MOTIVO, nombreArchivoNormalizado, validarNuevaSolicitud } from './validacion.js';
+import {
+  MAX_ADJUNTO_BYTES,
+  MAX_MOTIVO,
+  nombreArchivoNormalizado,
+  validarIncapacidadAjena,
+  validarNuevaSolicitud,
+} from './validacion.js';
 
 // ARQ-612 — la vida de una solicitud vista desde el servicio, sacada de
 // service.ts tal cual en cuatro bloques: el alta (con sus comprobaciones de
@@ -109,10 +115,11 @@ async function exigirCompensatoriosSuficientes(
  * ⚠️ **Dos diferencias con su gemela, y las dos son deliberadas.**
  *
  * La primera: un ADMIN queda exento y puede meterse en negativo. Es lo que se
- * pidió, y la exención sale de la SESIÓN, así que cubre exactamente a quien
- * pulsa el botón — un admin sobre su propia solicitud. No existe hoy un alta en
- * nombre de otro, así que no hay forma de que un admin meta en negativo a nadie
- * más; si algún día se añade, esta línea hay que volver a mirarla.
+ * pidió, y la exención la decide EXPLÍCITAMENTE cada puerta del alta
+ * (`exentoDelSaldoDeVacaciones`): la del empleado pasa el `esAdmin` de la
+ * sesión, así que cubre exactamente a quien pulsa el botón —un admin sobre su
+ * propia solicitud—, y la del administrador que registra a nombre de otro pasa
+ * `false`, así que un admin nunca puede meter en negativo a nadie más.
  *
  * La segunda: sin saldo configurado **NO se bloquea**, al revés que los
  * compensatorios. La asimetría no es un descuido. Una bolsa de compensatorios
@@ -129,10 +136,10 @@ async function exigirVacacionesSuficientes(
   empleado: Empleado,
   tipo: TipoSolicitud,
   dias: number,
-  esAdmin: boolean,
+  exento: boolean,
 ): Promise<void> {
   if (tipo !== 'vacaciones') return;
-  if (esAdmin) return;
+  if (exento) return;
   if (dias <= 0) return;
 
   const { saldo } = await saldosDeSesion(db, empleado);
@@ -167,27 +174,45 @@ async function exigirVacacionesSuficientes(
 }
 
 /**
+ * Lo que cada puerta del alta decide por su cuenta y `darDeAlta` no deduce de
+ * ningún sitio.
+ *
+ * - `registradaPor`: `null` en el alta de la propia persona; el correo del
+ *   administrador cuando la registra él a su nombre (migración 080).
+ * - `exentoDelSaldoDeVacaciones`: si la comprobación del saldo de vacaciones no
+ *   aplica. La puerta del empleado pasa el `esAdmin` de la sesión; la del
+ *   administrador a nombre de otro, `false`.
+ */
+interface OpcionesDeAlta {
+  registradaPor: string | null;
+  exentoDelSaldoDeVacaciones: boolean;
+}
+
+/**
  * El tramo del alta que corre bajo el candado del empleado (DATA-336): las
  * comprobaciones que leen —solape, otorgamiento duplicado, saldo— y el INSERT,
  * todo por la MISMA transacción `tx`. Ver `repo.conCandadoDelEmpleado`.
  *
- * Es el cuerpo de `crearSolicitud` tal cual estaba, con `tx` donde ponía `db`:
- * se saca a una función propia para no tener que re-sangrarlo entero dentro
- * del callback del candado.
+ * Es la mitad con candado de `darDeAlta`, con `tx` donde allí hay `db`: se saca
+ * a una función propia para no tener que re-sangrarla entera dentro del
+ * callback del candado. `registradaPor` lo graba en la fila (el INSERT lo
+ * pasa a minúsculas con `lower($14)`) y `exentoDelSaldoDeVacaciones` lo pasa tal cual a la comprobación del saldo: los
+ * decide la puerta que llama a `darDeAlta`.
  */
 async function altaBajoCandado(
   tx: repo.PoolClient,
-  sesion: Sesion,
   empleado: Empleado,
   datos: NuevaSolicitud,
   aprueba: boolean,
   estado: EstadoSolicitud,
+  opciones: OpcionesDeAlta,
 ): Promise<Solicitud> {
+  const { registradaPor, exentoDelSaldoDeVacaciones } = opciones;
   // Va aquí porque necesita el id del empleado, y antes de escribir nada DE LA
-  // SOLICITUD: el alta automática de la ficha ya ha podido escribir en la línea
-  // de arriba (`empleadoDeSesion` → `repo.asegurarEmpleado`, un INSERT ... ON
-  // CONFLICT DO NOTHING idempotente), pero de ahí es de donde sale el id que
-  // esta comprobación necesita, así que tiene que ir antes por fuerza.
+  // SOLICITUD. La ficha llega ya resuelta por la puerta —`empleadoDeSesion` en
+  // la del empleado (que puede haberla dado de alta, `repo.asegurarEmpleado`, un
+  // INSERT ... ON CONFLICT DO NOTHING idempotente) o `repo.empleadoPorId` en la
+  // del administrador—: de ahí sale el id que esta comprobación necesita.
   await exigirSinSolape(tx, empleado.id, datos.tipo, estado, datos.fechaInicio, datos.fechaFin, null);
   // El otorgamiento no pasa por la comprobación de arriba —está exento de
   // `ocupaAgenda` a propósito, porque su fecha es el día que se TRABAJÓ y tiene
@@ -205,7 +230,7 @@ async function altaBajoCandado(
   // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
   // daría 0 justo en el caso normal —el sábado por el que se gana el
   // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
-  // viene validado, y `validarNuevaSolicitud` garantiza que existe si y solo si
+  // viene validado, y `validarAlta` (que sirve a las dos puertas) garantiza que existe si y solo si
   // el tipo es otorgamiento.
   const diasHabiles = datos.dias ?? contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
   // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
@@ -216,7 +241,7 @@ async function altaBajoCandado(
   // su `tipo` y sale enseguida si no es el suyo, así que solo una llega a
   // consultar el saldo. Se llaman las dos, y no un `if/else` sobre el tipo,
   // porque el día que haya una tercera bolsa la lista crece sin tocar el flujo.
-  await exigirVacacionesSuficientes(tx, empleado, datos.tipo, diasHabiles, sesion.esAdmin);
+  await exigirVacacionesSuficientes(tx, empleado, datos.tipo, diasHabiles, exentoDelSaldoDeVacaciones);
 
   // Los dos firmantes se congelan AQUÍ. La fuente de verdad sigue siendo el árbol
   // de `empleados`; esto es una foto, para que un cambio de organigrama a mitad de
@@ -275,6 +300,9 @@ async function altaBajoCandado(
       aprobadorCorreo: firmantes ? firmantes.primero : null,
       segundoAprobadorCorreo: firmantes ? firmantes.segundo : null,
       informadoCorreo: firmantes ? firmantes.informado : null,
+      // `null` en el alta de la propia persona; el correo del administrador
+      // cuando la registra él a su nombre (migración 080).
+      registradaPor,
     },
     adjunto,
     eventosDeAlta(datos.tipo),
@@ -282,14 +310,32 @@ async function altaBajoCandado(
   );
 }
 
-export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
-  const datos = validarNuevaSolicitud(body, hoyEnColombia());
-  const empleado = await empleadoDeSesion(db, sesion);
+/**
+ * El alta, desde que ya se sabe QUIÉN y QUÉ: el tope del retiro, el estado con
+ * el que nace y, bajo el candado del empleado, las comprobaciones y el INSERT
+ * (`altaBajoCandado`); después, el aviso a n8n.
+ *
+ * La comparten las dos puertas del alta —la del empleado (`crearSolicitud`) y
+ * la del administrador que registra una incapacidad a nombre de otro
+ * (`registrarIncapacidadAjena`)— y es lo que hace que la segunda tenga
+ * exactamente los mismos efectos que la primera: lo delicado se comparte, no
+ * se copia. Lo que las distingue es de dónde sale la ficha, qué validación
+ * pasa el cuerpo y las `opciones` (`registradaPor` y la exención del saldo de
+ * vacaciones, que es por puerta: ninguna se hereda de la otra), y eso lo decide
+ * cada una antes de llamar aquí. No recibe la sesión a propósito: así ningún
+ * privilegio del que llama se cuela sin que la puerta lo diga.
+ */
+async function darDeAlta(
+  db: Pool,
+  empleado: Empleado,
+  datos: NuevaSolicitud,
+  opciones: OpcionesDeAlta,
+): Promise<Solicitud> {
   // La otra mitad del bloqueo de la baja: allí se impide fijar una fecha que
   // deje días huérfanos detrás, y aquí se impide crear esos días después. Sin
   // las dos, la regla se puede saltar por el otro extremo.
   //
-  // Va aquí y no en `validarNuevaSolicitud` porque esa función es pura y no
+  // Va aquí y no en las validaciones puras (`validarAlta` y las dos que la usan) porque son puras y no
   // conoce la ficha; mismo criterio que `exigirSinSolape` y
   // `exigirVacacionesSuficientes`.
   //
@@ -324,7 +370,7 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // altas simultáneas comprobaban las dos antes de que ninguna escribiera, y las
   // dos pasaban. Ver `repo.conCandadoDelEmpleado`.
   const solicitud = await repo.conCandadoDelEmpleado(db, empleado.id, (tx) =>
-    altaBajoCandado(tx, sesion, empleado, datos, aprueba, estado),
+    altaBajoCandado(tx, empleado, datos, aprueba, estado, opciones),
   );
 
   // Sin await: el aviso es un atajo para que el correo salga en un segundo en vez
@@ -332,6 +378,50 @@ export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): P
   // puede fallar de forma que importe. Ver avisar.ts.
   void avisarN8n();
   return solicitud;
+}
+
+export async function crearSolicitud(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
+  const datos = validarNuevaSolicitud(body, hoyEnColombia());
+  // La identidad sale de la sesión y de ningún otro sitio. Para registrar a
+  // nombre de otro está la puerta del administrador, `registrarIncapacidadAjena`;
+  // por eso aquí `registradaPor` es `null` siempre.
+  const empleado = await empleadoDeSesion(db, sesion);
+  // La exención del saldo de vacaciones es la del propio `esAdmin`: un admin
+  // sobre su propia solicitud. Es esta puerta quien lo decide, no `darDeAlta`.
+  return darDeAlta(db, empleado, datos, { registradaPor: null, exentoDelSaldoDeVacaciones: sesion.esAdmin });
+}
+
+/**
+ * El administrador registra una incapacidad a nombre de otro (spec
+ * 2026-11-23-incapacidad-por-admin).
+ *
+ * Una puerta PROPIA y no un `empleadoId` aceptado en `crearSolicitud` cuando
+ * llama un admin: aquella saca la identidad de la sesión, tiene tests que lo
+ * fijan a propósito, y mezclar dos reglas en una puerta es como se cuela la
+ * suplantación. Quién puede llamar a esto lo decide el router (`requireAdmin`),
+ * y no se repite aquí: un candado duplicado esconde el día que el otro se rompe.
+ *
+ * Todo lo demás es el alta de siempre (`darDeAlta`): mismo candado, misma regla
+ * de no solaparse, mismo tope del retiro, mismo PDF renombrado con el nombre
+ * del EMPLEADO, mismos eventos y mismo calendario. Dos diferencias, y las dos a
+ * propósito:
+ *  - sin la ventana de dos días hacia atrás (`validarIncapacidadAjena`): para
+ *    eso existe esta puerta;
+ *  - `solicitante_email` sigue siendo el correo del EMPLEADO (lo pone
+ *    `altaBajoCandado` desde la ficha), así que él ve su propio PDF y su jefe
+ *    con llave también. Quién la registró queda en `registrada_por`, con el
+ *    correo de la sesión.
+ */
+export async function registrarIncapacidadAjena(db: Pool, sesion: Sesion, body: unknown): Promise<Solicitud> {
+  const { empleadoId, datos } = validarIncapacidadAjena(body, hoyEnColombia());
+  // Solo fichas activas: a quien ya se fue no se le registra nada nuevo.
+  const empleado = await repo.empleadoPorId(db, empleadoId);
+  if (!empleado) throw new AusenciaError('empleado_no_encontrado', 404, 'empleadoId');
+  // `exentoDelSaldoDeVacaciones: false` a propósito: el privilegio del admin no
+  // debe llegar nunca al saldo de vacaciones de OTRA persona. Hoy ningún test
+  // puede verlo (esta puerta solo registra incapacidades), así que este
+  // comentario es lo que lo protege si un día el tipo deja de ser fijo.
+  return darDeAlta(db, empleado, datos, { registradaPor: sesion.email, exentoDelSaldoDeVacaciones: false });
 }
 
 export async function misSolicitudes(db: Pool, sesion: Sesion): Promise<Solicitud[]> {

@@ -201,6 +201,8 @@ interface FilaMovimientoSolicitudDb extends FilaMovimientoDb {
   /** Ya en `HH:MM`: el SELECT las saca con `to_char`, no con `::text`. */
   hora_inicio: string | null;
   hora_fin: string | null;
+  /** La constancia de la 080. Solo la selecciona ESTA consulta. */
+  registrada_por: string | null;
 }
 
 /**
@@ -228,6 +230,7 @@ function comoMovimientoDeSolicitud(r: FilaMovimientoSolicitudDb): Movimiento {
     // franja propia y su mapeador las pone a `null` a mano.
     horaInicio: r.hora_inicio,
     horaFin: r.hora_fin,
+    registradaPor: r.registrada_por,
   };
 }
 
@@ -278,6 +281,9 @@ async function movimientosDeSolicitudes(db: Pool, soloDe: string | null): Promis
             -- colarian tal cual en la celda del registro.
             to_char(s.hora_inicio, 'HH24:MI') AS hora_inicio,
             to_char(s.hora_fin,    'HH24:MI') AS hora_fin,
+            -- Quien la registro a nombre de la persona (080). Sin cast: ya es
+            -- VARCHAR en la tabla.
+            s.registrada_por,
             -- full_name y email son los nombres reales de las columnas de
             -- portal.users (migracion 001). Ahi no hay ninguna columna "name".
             u.full_name AS decisor_nombre, u.email AS decisor_correo,
@@ -333,6 +339,9 @@ function comoMovimientoDeModificacion(r: FilaMovimientoModificacionDb): Movimien
     // no por contrato.
     horaInicio: null,
     horaFin: null,
+    // `null` EXPLÍCITO por lo mismo que la franja: una modificación no se
+    // registra a nombre de nadie, y esta consulta ni selecciona la columna.
+    registradaPor: null,
   };
 }
 

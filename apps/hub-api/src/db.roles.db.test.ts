@@ -190,6 +190,18 @@ describe('el rol de las peticiones (portal_app)', () => {
     expect(n[0].n).toBe(0);
   });
 
+  it('portal_app lee y escribe registrada_por sin GRANT nuevo: la 080 solo anade una columna', async () => {
+    // Un permiso de TABLA (el de la 068) alcanza tambien a las columnas que se
+    // anadan despues. Si alguien cambiara la 068 a permisos por columna, esta
+    // columna se quedaria sin ellos y el alta daria un 42501.
+    const { rows } = await migrador.query(
+      `SELECT has_column_privilege('portal_app', 'portal.solicitudes_ausencia', 'registrada_por', 'SELECT') AS sel,
+              has_column_privilege('portal_app', 'portal.solicitudes_ausencia', 'registrada_por', 'INSERT') AS ins,
+              has_column_privilege('portal_app', 'portal.solicitudes_ausencia', 'registrada_por', 'UPDATE') AS upd`,
+    );
+    expect(rows[0]).toEqual({ sel: true, ins: true, upd: true });
+  });
+
   it('dar los permisos en cada arranque no espera a las peticiones que están en curso', async () => {
     // La 068 corre en CADA arranque, y en un despliegue el contenedor viejo sigue
     // atendiendo mientras arranca el nuevo (DATA-340). Si el GRANT esperara a una

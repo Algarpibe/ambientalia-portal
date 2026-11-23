@@ -30,6 +30,7 @@ function solicitud(over: Partial<Solicitud> = {}): Solicitud {
     modificacionPendiente: null,
     anuladaAt: null,
     eventoCalendarioId: null,
+    registradaPor: null,
     ...over,
   };
 }
