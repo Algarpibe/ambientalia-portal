@@ -47,6 +47,11 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
   };
   const dialogo = useFocoDeModal<HTMLFormElement>(cerrar);
 
+  // Arrastrar desde un campo (seleccionar texto, por ejemplo) y soltar sobre el
+  // fondo dispara un `click` en el overlay. Solo cierra si el botón se pulsó
+  // también sobre el fondo: lo contrario perdería el PDF y los comentarios.
+  const pulsoEnFondo = useRef(false);
+
   const hoy = hoyEnColombia();
 
   // Solo fichas activas —el servidor contesta 404 a una inactiva— y por orden
@@ -116,7 +121,13 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
-      onClick={cerrar}
+      onMouseDown={(e) => {
+        pulsoEnFondo.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        if (pulsoEnFondo.current && e.target === e.currentTarget) cerrar();
+        pulsoEnFondo.current = false;
+      }}
       role="presentation"
     >
       <form
@@ -149,11 +160,20 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
           </button>
         </div>
 
+        {/* Mientras se guarda los campos no se tocan: lo que se editara ya no
+            viajaría. `contents` para que el fieldset no cambie el aspecto. */}
+        <fieldset disabled={guardando} className="contents">
         <div className="mb-4">
           <label htmlFor={`${id}-persona`} className={ROTULO}>
             Persona
           </label>
-          <select id={`${id}-persona`} className={CAMPO} value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
+          <select
+            id={`${id}-persona`}
+            className={CAMPO}
+            value={empleadoId}
+            aria-required="true"
+            onChange={(e) => setEmpleadoId(e.target.value)}
+          >
             <option value="">— Elige una persona —</option>
             {opciones.map((e) => (
               <option key={e.id} value={e.id}>
@@ -177,6 +197,9 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
               className={CAMPO}
               value={fechaInicio}
               max={hoy}
+              aria-required="true"
+              aria-invalid={inicioFuturo || undefined}
+              aria-describedby={inicioFuturo ? `${id}-inicio-error` : undefined}
               onChange={(e) => setFechaInicio(e.target.value)}
             />
           </div>
@@ -192,16 +215,27 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
               className={CAMPO}
               value={fechaFin}
               min={fechaInicio || undefined}
+              aria-required="true"
+              aria-invalid={finAntes || undefined}
+              aria-describedby={finAntes ? `${id}-fin-error` : undefined}
               onChange={(e) => setFechaFin(e.target.value)}
             />
           </div>
         </div>
-        {inicioFuturo && <p className="mb-2 text-sm text-red-600">La fecha de inicio no puede ser futura.</p>}
-        {finAntes && <p className="mb-2 text-sm text-red-600">El último día no puede ser anterior al primero.</p>}
+        {inicioFuturo && (
+          <p id={`${id}-inicio-error`} className="mb-2 text-sm text-red-600">
+            La fecha de inicio no puede ser futura.
+          </p>
+        )}
+        {finAntes && (
+          <p id={`${id}-fin-error`} className="mb-2 text-sm text-red-600">
+            El último día no puede ser anterior al primero.
+          </p>
+        )}
 
         <div className="mb-4 mt-2">
           <label htmlFor={`${id}-pdf`} className={ROTULO}>
-            Soporte médico en PDF<span className="text-red-500"> *</span>
+            Soporte médico en PDF<span className="text-red-500" aria-hidden="true"> *</span>
           </label>
           <input
             id={`${id}-pdf`}
@@ -229,9 +263,16 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
             maxLength={2000}
             className={CAMPO}
             value={comentarios}
+            aria-describedby={`${id}-com-ayuda`}
             onChange={(e) => setComentarios(e.target.value)}
           />
+          {/* El texto viaja tal cual en el acuse (empleado y copias) y un correo
+              no se puede retirar: conviene que quien escribe lo sepa. */}
+          <p id={`${id}-com-ayuda`} className="mt-1 text-xs text-gray-500">
+            Se copian tal cual en el correo que le llega a la persona y a quien va en copia.
+          </p>
         </div>
+        </fieldset>
 
         {/* `role="alert"` por lo mismo que en EditarSolicitud: el aviso sale
             DESPUÉS de pulsar y sin mover el foco, y el modal sigue abierto. */}

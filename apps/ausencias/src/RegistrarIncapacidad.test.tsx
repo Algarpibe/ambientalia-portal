@@ -50,7 +50,8 @@ const onCerrar = vi.fn();
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  // `reset` y no `clear`: así ninguna implementación simulada pasa de un test al siguiente.
+  vi.resetAllMocks();
 });
 
 const montar = () =>
@@ -168,6 +169,61 @@ describe('RegistrarIncapacidad', () => {
     expect(guardar().disabled).toBe(false);
     expect(onRegistrada).not.toHaveBeenCalled();
     expect(onCerrar).not.toHaveBeenCalled();
+  });
+
+  // El overlay es el padre del diálogo: no tiene rol ni etiqueta a la que agarrarse.
+  const overlay = () => screen.getByRole('dialog').parentElement as HTMLElement;
+
+  it('control positivo: sin guardar, Escape y un clic en el fondo cierran', () => {
+    montar();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCerrar).toHaveBeenCalledTimes(1);
+    fireEvent.mouseDown(overlay());
+    fireEvent.click(overlay());
+    expect(onCerrar).toHaveBeenCalledTimes(2);
+  });
+
+  it('arrastrar desde un campo hasta el fondo no cierra el modal', () => {
+    montar();
+    fireEvent.mouseDown(inicio());
+    fireEvent.click(overlay());
+    expect(onCerrar).not.toHaveBeenCalled();
+  });
+
+  it('mientras guarda: no se envía dos veces, no se puede cerrar por ninguna salida y los campos se bloquean', async () => {
+    api.leerComoBase64.mockResolvedValue('JVBERi0=');
+    api.registrarIncapacidadAjena.mockReturnValue(new Promise(() => {}));
+    montar();
+    rellenar();
+    fireEvent.click(guardar());
+    await waitFor(() => expect(api.registrarIncapacidadAjena).toHaveBeenCalledTimes(1));
+
+    const enviar = screen.getByRole('button', { name: /Guardando/ }) as HTMLButtonElement;
+    expect(enviar.type).toBe('submit');
+    // Bloqueado por el fieldset: la propiedad `.disabled` del select sigue en
+    // false, lo que cambia es que casa con `:disabled`.
+    expect(persona().matches(':disabled')).toBe(true);
+
+    fireEvent.click(enviar);
+    fireEvent.submit(screen.getByRole('dialog'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.mouseDown(overlay());
+    fireEvent.click(overlay());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
+    // Un segundo envío llegaría a `registrarIncapacidadAjena` tras el `await`
+    // de leer el PDF: sin esperar un turno, el test miraría antes de que ocurra.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(api.registrarIncapacidadAjena).toHaveBeenCalledTimes(1);
+    expect(onCerrar).not.toHaveBeenCalled();
+  });
+
+  it('avisa de que los comentarios van tal cual en el correo, y el campo apunta a ese aviso', () => {
+    montar();
+    const ayuda = document.getElementById(comentarios().getAttribute('aria-describedby') ?? '');
+    expect(ayuda).toBeTruthy();
+    expect(ayuda?.textContent).toContain('correo');
   });
 
   it('Cancelar cierra sin llamar al servidor', () => {
