@@ -17,13 +17,17 @@ process.env.JWT_SECRET = SECRET;
 // para crear la solicitud, y solo despues manda la peticion con el primero. La
 // fila tiene que salir del user_id que viene en CADA peticion, no del orden.
 interface FilaAuth { role: string; apps: string[] }
+// `consultas` cuenta las idas a la BD de requireAuth: el router recibe su `db`
+// por parametro, asi que este pool solo lo toca la autenticacion.
 const estadoAuth = vi.hoisted(() => ({
   porUsuario: new Map<string, { role: string; apps: string[] }>(),
   ids: new Map<string, string>(),
+  consultas: 0,
 }));
 vi.mock("../db.js", () => ({
   getHubPool: () => ({
     query: async (_sql: string, params: unknown[] = []) => {
+      estadoAuth.consultas++;
       const fila = estadoAuth.porUsuario.get(String(params[0] ?? "")) ?? { role: "reader", apps: ["ausencias"] };
       return {
         rows: [{ role: fila.role, status: "active", apps: fila.apps, token_version: 0 }],
@@ -1947,6 +1951,29 @@ describe('guards de la app', () => {
       .get('/api/ausencias/empleados')
       .set('Authorization', `Bearer ${token({ role: 'admin' })}`)
       .expect(200);
+  });
+
+  it('una ruta `requireAuth, requireAdmin` consulta la BD UNA vez por peticion', async () => {
+    // requireAdmin vuelve a llamar a requireAuth por dentro. Antes eso era una
+    // segunda verificacion del JWT y una segunda consulta a portal.users por
+    // cada peticion de admin, para decidir exactamente lo mismo.
+    // Identidades distintas: `token()` registra la fila por `sub`, y con el mismo
+    // `sub` el segundo token pisaria el rol del primero.
+    const admin = token({ sub: 'admin.prueba@ejemplo.test', role: 'admin' });
+    const lector = token();
+    estadoAuth.consultas = 0;
+    await request(app()).get('/api/ausencias/empleados').set('Authorization', `Bearer ${admin}`).expect(200);
+    expect(estadoAuth.consultas).toBe(1);
+
+    // El que no es admin tambien se decide con una sola consulta.
+    estadoAuth.consultas = 0;
+    await request(app()).get('/api/ausencias/empleados').set('Authorization', `Bearer ${lector}`).expect(403);
+    expect(estadoAuth.consultas).toBe(1);
+
+    // Y la peticion siguiente vuelve a la BD: es memoria de una peticion, no cache.
+    estadoAuth.consultas = 0;
+    await request(app()).get('/api/ausencias/empleados').set('Authorization', `Bearer ${admin}`).expect(200);
+    expect(estadoAuth.consultas).toBe(1);
   });
 });
 

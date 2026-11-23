@@ -11,14 +11,22 @@ process.env.JWT_SECRET = SECRET;
 process.env.AUTH_USERS = '';
 
 // Estado compartido con el mock (vi.hoisted para que exista al construir el mock).
-const state = vi.hoisted(() => ({ findByIdResult: null as Record<string, unknown> | null }));
+// `consultas` cuenta las idas a la BD: es lo que mide que una ruta que encadena
+// `requireAuth, requireAdmin` consulte UNA vez y no dos.
+const state = vi.hoisted(() => ({
+  findByIdResult: null as Record<string, unknown> | null,
+  consultas: 0,
+}));
 
 vi.mock('./db.js', () => ({
   getHubPool: () => ({
-    query: async () => ({
-      rows: state.findByIdResult ? [state.findByIdResult] : [],
-      rowCount: state.findByIdResult ? 1 : 0,
-    }),
+    query: async () => {
+      state.consultas++;
+      return {
+        rows: state.findByIdResult ? [state.findByIdResult] : [],
+        rowCount: state.findByIdResult ? 1 : 0,
+      };
+    },
     on: () => {},
   }),
 }));
@@ -29,6 +37,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   state.findByIdResult = null;
+  state.consultas = 0;
 });
 
 function mockReq(headers: Record<string, string> = {}, params: Record<string, string> = {}) {
@@ -258,5 +267,138 @@ describe('SEC-220 — una sesión se puede invalidar antes de que expire el toke
     const { passed, status } = await run(auth.requireAuth, tokenCon(99));
     expect(passed).toBe(false);
     expect(status).toBe(401);
+  });
+});
+
+/**
+ * Pasa la petición por varios middlewares como lo hace Express: cada uno recibe
+ * como `next` la llamada al siguiente. Express no espera a los middlewares
+ * asíncronos, así que aquí se guardan las promesas y se esperan todas: sin eso,
+ * `requireAdmin` seguiría consultando cuando el test ya estuviera afirmando.
+ */
+async function encadenar(req: any, ...mws: any[]) {
+  const res = mockRes();
+  let passed = false;
+  const pendientes: Promise<unknown>[] = [];
+  const paso = (i: number): void => {
+    if (i === mws.length) {
+      passed = true;
+      return;
+    }
+    pendientes.push(Promise.resolve(mws[i](req, res, () => paso(i + 1))));
+  };
+  paso(0);
+  while (pendientes.length) await pendientes.shift();
+  return { passed, status: res.statusCode, body: res.body };
+}
+
+describe('UNA consulta por petición aunque la ruta encadene requireAuth y requireAdmin', () => {
+  // Las rutas de admin se declaran `requireAuth, requireAdmin`, y `requireAdmin`
+  // vuelve a llamar a `requireAuth` por dentro para poder usarse también a
+  // solas. Sin memoria por petición, cada una de esas rutas verificaba el JWT y
+  // consultaba `portal.users` dos veces para decidir lo mismo.
+  const USER_ID = '33333333-3333-4333-8333-333333333333';
+  const conToken = (role: 'admin' | 'reader') =>
+    mockReq({ authorization: `Bearer ${tokenFor(USER_ID, role)}` }, { id: USER_ID });
+
+  it('requireAuth seguido de requireAdmin consulta la BD una sola vez y el admin pasa', async () => {
+    state.findByIdResult = activeUser(USER_ID, 'admin');
+    const { passed, status } = await encadenar(conToken('admin'), auth.requireAuth, auth.requireAdmin);
+    expect(passed).toBe(true);
+    expect(status).toBe(200);
+    expect(state.consultas).toBe(1);
+  });
+
+  it('la misma cadena con alguien que ya no es admin da 403, también con una sola consulta', async () => {
+    // El token aún dice admin; la fila dice reader. El segundo paso tiene que
+    // decidir con lo que leyó el primero de la BD, no con lo firmado (SEC-224).
+    state.findByIdResult = activeUser(USER_ID, 'reader');
+    const { passed, status } = await encadenar(conToken('admin'), auth.requireAuth, auth.requireAdmin);
+    expect(passed).toBe(false);
+    expect(status).toBe(403);
+    expect(state.consultas).toBe(1);
+  });
+
+  it('requireAuth seguido de requireOwnerOrAdmin también consulta una sola vez', async () => {
+    state.findByIdResult = activeUser(USER_ID, 'reader');
+    const { passed } = await encadenar(conToken('reader'), auth.requireAuth, auth.requireOwnerOrAdmin);
+    expect(passed).toBe(true);
+    expect(state.consultas).toBe(1);
+  });
+
+  it('CANDADO: dos peticiones distintas con el mismo token consultan cada una la suya', async () => {
+    // Es memoria de UNA petición, no una caché: la siguiente vuelve a la BD y
+    // ve lo que haya cambiado entre medias.
+    const cabecera = { authorization: `Bearer ${tokenFor(USER_ID, 'admin')}` };
+    state.findByIdResult = activeUser(USER_ID, 'admin');
+    const primera = await encadenar(mockReq(cabecera), auth.requireAuth, auth.requireAdmin);
+    expect(primera.passed).toBe(true);
+    expect(state.consultas).toBe(1);
+
+    // Entre una y otra, el admin desactiva la cuenta.
+    state.findByIdResult = { ...activeUser(USER_ID, 'admin'), status: 'inactive' };
+    const segunda = await encadenar(mockReq(cabecera), auth.requireAuth, auth.requireAdmin);
+    expect(segunda.passed).toBe(false);
+    expect(segunda.status).toBe(401);
+    expect(state.consultas).toBe(2);
+  });
+
+  it('CANDADO: requireAdmin a solas sigue consultando y rechaza con 401 a un usuario inactivo', async () => {
+    state.findByIdResult = { ...activeUser(USER_ID, 'admin'), status: 'inactive' };
+    const { passed, status } = await run(auth.requireAdmin, conToken('admin'));
+    expect(passed).toBe(false);
+    expect(status).toBe(401);
+    expect(state.consultas).toBe(1);
+  });
+
+  it('CANDADO: requireAdmin a solas rechaza con 401 una token_version que ya no es la de la fila', async () => {
+    // El token no trae token_version (se lee como 0) y la fila ya va por la 1.
+    state.findByIdResult = { ...activeUser(USER_ID, 'admin'), token_version: 1 };
+    const { passed, status } = await run(auth.requireAdmin, conToken('admin'));
+    expect(passed).toBe(false);
+    expect(status).toBe(401);
+    expect(state.consultas).toBe(1);
+  });
+
+  it('CANDADO: un req.user puesto por otro código no cuenta como petición verificada', async () => {
+    // La marca de «ya verificada» no puede deducirse de `req.user`: cualquier
+    // código puede escribirlo. Sin token, ni requireAuth ni requireAdmin dejan
+    // pasar, por mucho que `req.user` diga admin.
+    state.findByIdResult = activeUser(USER_ID, 'admin');
+    const falsa = () => {
+      const req = mockReq({}, { id: USER_ID });
+      req.user = { sub: 'x@x.com', user_id: USER_ID, role: 'admin', apps: [] };
+      return req;
+    };
+    const sinAuth = await run(auth.requireAuth, falsa());
+    expect(sinAuth.passed).toBe(false);
+    expect(sinAuth.status).toBe(401);
+    const sinAdmin = await run(auth.requireAdmin, falsa());
+    expect(sinAdmin.passed).toBe(false);
+    expect(sinAdmin.status).toBe(401);
+    const sinDueno = await run(auth.requireOwnerOrAdmin, falsa());
+    expect(sinDueno.passed).toBe(false);
+    expect(sinDueno.status).toBe(401);
+  });
+
+  it.each([
+    ['el usuario está inactivo', { ...activeUser(USER_ID, 'admin'), status: 'inactive' }],
+    ['la token_version ya no coincide', { ...activeUser(USER_ID, 'admin'), token_version: 1 }],
+    ['el usuario ya no existe', null],
+  ])('CANDADO: si el primer requireAuth falló porque %s, la petición no queda marcada', async (_causa, fila) => {
+    // Solo se marca tras pasar TODAS las comprobaciones. Si la marca se pusiera
+    // antes, una segunda llamada sobre la misma petición se saltaría la BD y
+    // dejaría pasar lo que la primera rechazó.
+    state.findByIdResult = fila;
+    const req = conToken('admin');
+    const primera = await run(auth.requireAuth, req);
+    expect(primera.passed).toBe(false);
+    expect(primera.status).toBe(401);
+    expect(state.consultas).toBe(1);
+
+    state.findByIdResult = activeUser(USER_ID, 'admin');
+    const segunda = await run(auth.requireAuth, req);
+    expect(segunda.passed).toBe(true);
+    expect(state.consultas).toBe(2);
   });
 });
