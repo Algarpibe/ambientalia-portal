@@ -224,6 +224,8 @@ describe('RegistrarIncapacidad', () => {
     const ayuda = document.getElementById(comentarios().getAttribute('aria-describedby') ?? '');
     expect(ayuda).toBeTruthy();
     expect(ayuda?.textContent).toContain('correo');
+    // El asterisco visual va oculto a los lectores: el PDF se anuncia obligatorio por atributo.
+    expect(soporte().getAttribute('aria-required')).toBe('true');
   });
 
   it('Cancelar cierra sin llamar al servidor', () => {

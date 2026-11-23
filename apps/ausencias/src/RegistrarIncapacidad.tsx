@@ -162,7 +162,7 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
 
         {/* Mientras se guarda los campos no se tocan: lo que se editara ya no
             viajaría. `contents` para que el fieldset no cambie el aspecto. */}
-        <fieldset disabled={guardando} className="contents">
+        <fieldset disabled={guardando} className="contents min-w-0">
         <div className="mb-4">
           <label htmlFor={`${id}-persona`} className={ROTULO}>
             Persona
@@ -242,6 +242,7 @@ export default function RegistrarIncapacidad({ empleados, onRegistrada, onCerrar
             ref={inputArchivo}
             type="file"
             accept="application/pdf,.pdf"
+            aria-required="true"
             onChange={(e) => elegirArchivo(e.target.files?.[0] ?? null)}
             className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-xl file:border-0 file:bg-gray-100 file:px-4 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"
           />
