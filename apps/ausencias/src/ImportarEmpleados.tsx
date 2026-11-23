@@ -25,8 +25,10 @@ import { formatDias, formatFecha } from './dominio';
 //
 // Además es donde se da de baja a quien se va. La fecha de retiro es su ÚLTIMO
 // DÍA de trabajo —ese día sigue activo— y puede ser futura: hasta que venza,
-// la baja es solo un dato y la persona trabaja con normalidad. Lo que la aplica
-// es el barrido del servidor, no esta pantalla.
+// la baja es solo un dato y la persona trabaja con normalidad. Si ya venció al
+// guardarla —una baja que se registra tarde—, el servidor la aplica en ese mismo
+// momento; si no, la aplica su barrido cuando llega el día. Nunca esta pantalla:
+// solo lee el `activo` de la ficha que le devuelven.
 
 type Vista = 'activos' | 'retirados';
 
