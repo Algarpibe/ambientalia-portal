@@ -722,7 +722,13 @@ export default function RegistroGeneral({ recargarToken, festivos, esAdmin, pued
                                 // solicitud entera al servidor; la de movimiento
                                 // no lo necesita —la fila ya trae todo lo que su
                                 // formulario edita— y abre en el acto.
-                                onClick={() => (esDeSolicitud(m) ? void pedirEdicion(m) : setCorrigiendo(m))}
+                                onClick={() => {
+                                  // Abrir cualquier edición retira el aviso verde:
+                                  // `pedirEdicion` ya lo hace, la modificación no.
+                                  setExito(null);
+                                  if (esDeSolicitud(m)) void pedirEdicion(m);
+                                  else setCorrigiendo(m);
+                                }}
                                 aria-label={`Editar ${etiquetaDeFila(m)} de ${m.empleadoNombre} del ${m.fechaInicio}`}
                                 title="Editar"
                                 className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"

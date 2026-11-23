@@ -88,8 +88,9 @@ interface MovimientoBase {
    * El correo del administrador que la registró a nombre de la persona
    * (migración 080), o `null` si la registró ella misma o viene de la hoja.
    * SIEMPRE `null` en una modificación. Espejo de `MovimientoBase` en hub-api.
+   * Opcional: con el portal desplegado antes que hub-api llega `undefined`.
    */
-  registradaPor: string | null;
+  registradaPor?: string | null;
 }
 
 /**

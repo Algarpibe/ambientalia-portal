@@ -160,10 +160,10 @@ describe('Registrar incapacidad desde el Registro general', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/Incapacidad de Ana Pérez registrada/));
   });
 
-  async function registrarBien() {
+  async function registrarBien(movimientos: Movimiento[] = [fila()]) {
     api.leerComoBase64.mockResolvedValue('JVBERi0=');
     api.registrarIncapacidadAjena.mockResolvedValue({ id: 's9', empleadoNombre: 'Ana Pérez' });
-    await montar(true);
+    await montar(true, movimientos);
     const dialogo = abrirYRellenar();
     fireEvent.click(within(dialogo).getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(screen.getByText(/Le hemos enviado el acuse/)).toBeTruthy());
@@ -179,6 +179,20 @@ describe('Registrar incapacidad desde el Registro general', () => {
     api.fetchSolicitud.mockReturnValue(new Promise(() => {}));
     await registrarBien();
     fireEvent.click(screen.getAllByRole('button', { name: /^Editar/ })[0]);
+    expect(screen.queryByText(/Le hemos enviado el acuse/)).toBeNull();
+  });
+
+  it('al empezar a editar una MODIFICACIÓN el aviso verde también desaparece', async () => {
+    const cambio: Movimiento = {
+      ...fila(),
+      clase: 'fechas',
+      estado: 'aprobada',
+      id: 'm1',
+      solicitudId: 's1',
+      motivo: 'Cambio de fechas',
+    };
+    await registrarBien([cambio]);
+    fireEvent.click(screen.getAllByRole('button', { name: /^Editar el cambio de fechas/ })[0]);
     expect(screen.queryByText(/Le hemos enviado el acuse/)).toBeNull();
   });
 

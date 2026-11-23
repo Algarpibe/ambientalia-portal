@@ -195,8 +195,8 @@ interface OpcionesDeAlta {
  *
  * Es la mitad con candado de `darDeAlta`, con `tx` donde allí hay `db`: se saca
  * a una función propia para no tener que re-sangrarla entera dentro del
- * callback del candado. `registradaPor` lo deja tal cual en la fila y
- * `exentoDelSaldoDeVacaciones` lo pasa tal cual a la comprobación del saldo: los
+ * callback del candado. `registradaPor` lo graba en la fila (el INSERT lo
+ * pasa a minúsculas con `lower($14)`) y `exentoDelSaldoDeVacaciones` lo pasa tal cual a la comprobación del saldo: los
  * decide la puerta que llama a `darDeAlta`.
  */
 async function altaBajoCandado(
@@ -230,7 +230,7 @@ async function altaBajoCandado(
   // En un otorgamiento los días NO se cuentan: se conceden. `contarDiasHabiles`
   // daría 0 justo en el caso normal —el sábado por el que se gana el
   // compensatorio no es hábil— y la concesión quedaría en nada. `datos.dias` ya
-  // viene validado, y `validarNuevaSolicitud` garantiza que existe si y solo si
+  // viene validado, y `validarAlta` (que sirve a las dos puertas) garantiza que existe si y solo si
   // el tipo es otorgamiento.
   const diasHabiles = datos.dias ?? contarDiasHabiles(datos.fechaInicio, datos.fechaFin);
   // No puede subir más: necesita `diasHabiles`. Y va antes de resolver firmantes
@@ -335,7 +335,7 @@ async function darDeAlta(
   // deje días huérfanos detrás, y aquí se impide crear esos días después. Sin
   // las dos, la regla se puede saltar por el otro extremo.
   //
-  // Va aquí y no en `validarNuevaSolicitud` porque esa función es pura y no
+  // Va aquí y no en las validaciones puras (`validarAlta` y las dos que la usan) porque son puras y no
   // conoce la ficha; mismo criterio que `exigirSinSolape` y
   // `exigirVacacionesSuficientes`.
   //

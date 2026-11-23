@@ -81,7 +81,7 @@ function validarHoras(
   //
   // ⚠️ INALCANZABLE desde el 2026-08-25: llegados aquí el tipo ya es `permiso`, y
   // un permiso de varios días rebota antes con `permiso_de_un_solo_dia`, que va
-  // mucho más arriba en `validarNuevaSolicitud`. Se conserva por si algún día
+  // mucho más arriba en `validarAlta`. Se conserva por si algún día
   // vuelven los permisos de varios días —sería la única red que le queda a la
   // franja horaria— y porque `validarHoras` se puede llamar desde otro sitio sin
   // que nadie se acuerde de esto. Cuesta una línea; el CHECK de la 036 dando un
@@ -134,7 +134,10 @@ export function validarIncapacidadAjena(body: unknown, hoy: string): { empleadoI
   }
   if (!UUID.test(empleadoId)) throw new AusenciaError('empleado_no_encontrado', 404, 'empleadoId');
   if (b.tipo !== undefined && b.tipo !== 'incapacidad') throw new AusenciaError('tipo_invalido', 400, 'tipo');
-  // En minúsculas: la llave del candado por empleado en la BD distingue mayúsculas.
+  // En minúsculas, en defensa en profundidad: el id viaja siempre en su forma
+  // canónica, igual a la que devuelve Postgres para una columna uuid, y no hay
+  // otra grafía que pueda llegar más abajo. (El candado usa el `id` leído de la
+  // ficha, así que esto no cambia qué candado se toma.)
   return { empleadoId: empleadoId.toLowerCase(), datos: validarAlta({ ...b, tipo: 'incapacidad' }, hoy, false) };
 }
 

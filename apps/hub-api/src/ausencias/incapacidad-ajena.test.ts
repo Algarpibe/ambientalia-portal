@@ -40,9 +40,10 @@ describe('validarIncapacidadAjena', () => {
     expect(r.datos.adjunto?.nombreArchivo).toBe('baja.pdf');
   });
 
-  it('normaliza el empleadoId a minúsculas: el candado por empleado distingue mayúsculas', () => {
-    // El regex del uuid admite mayúsculas, pero la llave del candado de la BD es
-    // sensible a ellas: sin normalizar, tomaría un candado distinto al del propio empleado.
+  it('normaliza el empleadoId a minusculas: viaja en forma canonica, como lo devuelve la BD', () => {
+    // El regex del uuid admite mayusculas; se normaliza por defensa en
+    // profundidad, para que el id viaje siempre en la misma forma que Postgres
+    // devuelve para una columna uuid.
     // E1 solo tiene dígitos: pasarlo a mayúsculas no cambiaría nada. Este lleva letras.
     const conLetras = 'abcdef12-3456-4abc-8def-1234567890ab';
     expect(validarIncapacidadAjena(cuerpo({ empleadoId: conLetras.toUpperCase() }), HOY).empleadoId).toBe(conLetras);

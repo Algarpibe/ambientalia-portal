@@ -9,9 +9,9 @@ import { useEffect, useRef, type RefObject } from 'react';
 // al principio del documento. Quien no usa raton se queda escribiendo a ciegas
 // en un formulario que no ve.
 //
-// Lo usan los dos modales de la app: EditarSolicitud (el molde) y
-// PedirModificacion. Vive aparte y no dentro de uno de los dos para que no haya
-// dos trampas de foco que se puedan ir separando con los meses.
+// Lo usan los modales de la app: EditarSolicitud (el molde),
+// PedirModificacion, EditarModificacion y RegistrarIncapacidad. Vive aparte y no dentro de uno de ellos para que
+// no haya varias trampas de foco que se puedan ir separando con los meses.
 //
 // Se llama `use...` y no `usar...` a proposito: `rules-of-hooks` y
 // `exhaustive-deps` de eslint reconocen los hooks por ese prefijo, y un nombre
