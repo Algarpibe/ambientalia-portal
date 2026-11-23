@@ -88,8 +88,13 @@ const SOLAPE_POR_ESTADO: Partial<Record<EstadoSolicitud, { estado: string; salid
  * lista. Con el `es-CO` de hoy `formatFecha` escribe «10 de jul de 2026», así que
  * un «…, 10 de jul de 2026 – 14 de jul de 2026, aprobada.» se lee un instante
  * como si «aprobada» calificara a la fecha de fin.
+ *
+ * `conQue` es contra qué se choca. Por defecto «otra ausencia», que vale para
+ * los tres lectores de las cuatro puertas; el administrador que registra una
+ * incapacidad a nombre de otro lee «otra ausencia de esa persona», porque la
+ * ausencia que choca es de quien eligió en el desplegable y no suya.
  */
-function mensajeDeSolape(d: SolapeDetalle): string {
+function mensajeDeSolape(d: SolapeDetalle, conQue = 'otra ausencia'): string {
   const cuando = rangoFechas(d.fechaInicio, d.fechaFin);
   // Un tipo que este bundle no conozca cae en su propio código —feo, pero dice
   // algo— en vez de en un «undefined» a mitad de frase. Misma ventana de
@@ -97,9 +102,9 @@ function mensajeDeSolape(d: SolapeDetalle): string {
   const tipo = ETIQUETA_TIPO[d.tipo] ?? d.tipo;
   const como = SOLAPE_POR_ESTADO[d.estado];
   if (!como) {
-    return `Esas fechas chocan con otra ausencia: ${tipo}, ${cuando}. Esos días no se liberan hasta que esa solicitud se cambie o se anule.`;
+    return `Esas fechas chocan con ${conQue}: ${tipo}, ${cuando}. Esos días no se liberan hasta que esa solicitud se cambie o se anule.`;
   }
-  return `Esas fechas chocan con otra ausencia: ${tipo} (${como.estado}), ${cuando}. ${como.salida}`;
+  return `Esas fechas chocan con ${conQue}: ${tipo} (${como.estado}), ${cuando}. ${como.salida}`;
 }
 
 /** El error de un endpoint corriente: el texto de `mensajeDeError` y nada más. */
@@ -185,10 +190,10 @@ async function errorDeAusencia(res: Response): Promise<Error> {
     incapacidad_en_el_futuro:
       'Una incapacidad se informa por días que ya empezaron, no por unos que todavía no han llegado. ' +
       'Si el médico te firmó una baja que arranca más adelante, infórmala el primer día.',
-    // No promete que administración pueda crearla: NO hay vía para que un admin
-    // dé de alta una incapacidad en nombre de otro —solo puede corregir una fila
-    // que ya exista, o importarla del histórico—. Decir «que te la registren»
-    // mandaría a la gente a pedir algo que hoy no se puede hacer de un clic.
+    // Promete algo que administración SÍ puede hacer: desde el Registro general
+    // registra una incapacidad a nombre de cualquier ficha activa, sin esta
+    // ventana y con los mismos efectos que esta puerta (`registrarIncapacidadAjena`,
+    // `POST /api/ausencias/solicitudes/incapacidad-ajena`).
     incapacidad_demasiado_antigua:
       'Esa baja empieza hace más de dos días, que es todo lo que se puede informar por aquí. ' +
       'Habla con administración para que la registren ellos.',
@@ -238,6 +243,47 @@ async function errorDeAusencia(res: Response): Promise<Error> {
     return new Error(mensajeDeVacaciones(cuerpo.detalle as CompensatoriosDetalle));
   }
   return errorGenerico(res);
+}
+
+/**
+ * El error del alta que hace el ADMINISTRADOR a nombre de otro
+ * (`registrarIncapacidadAjena`), dicho para él.
+ *
+ * Los textos de `errorDeAusencia` le hablan al empleado de lo suyo («Tu último
+ * día…», «si el médico te firmó…»), y aquí quien lee es el administrador, que
+ * está registrando la de otra persona. Se reescriben los que hablan así, y solo
+ * esos; el resto cae en `errorDeAusencia` tal cual.
+ *
+ * El 404 solo se traduce si trae `empleado_no_encontrado`: uno sin código es lo
+ * que contesta un hub-api que aún no tiene la ruta (portal desplegado antes), y
+ * decir ahí «la ficha ya no está activa» sería mentir.
+ */
+export async function errorDeIncapacidadAjena(res: Response): Promise<Error> {
+  const cuerpo = (await res
+    .clone()
+    .json()
+    .catch(() => null)) as { error?: string; detalle?: SolapeDetalle | RetiroDetalle } | null;
+  if (cuerpo?.error === 'rango_solapado' && cuerpo.detalle) {
+    return new Error(mensajeDeSolape(cuerpo.detalle as SolapeDetalle, 'otra ausencia de esa persona'));
+  }
+  // Nombra la fecha por lo mismo que la frase del empleado: sin ella, el aviso
+  // no dice qué corregir.
+  if (cuerpo?.error === 'fecha_posterior_al_retiro' && cuerpo.detalle) {
+    const { fechaRetiro } = cuerpo.detalle as RetiroDetalle;
+    return new Error(`El último día de esa persona en la compañía es el ${formatFecha(fechaRetiro)} y estas fechas lo pasan.`);
+  }
+  if (res.status === 404 && cuerpo?.error === 'empleado_no_encontrado') {
+    return new Error('Esa ficha ya no está activa. Recarga la lista.');
+  }
+  const PARA_EL_ADMIN: Record<string, string> = {
+    // La del empleado dice «si el médico te firmó una baja…»: aquí no hay «te».
+    incapacidad_en_el_futuro: 'La fecha de inicio no puede ser futura.',
+    // No tenía frase: el alta del empleado no manda persona. El formulario no
+    // deja guardar sin ella, así que llegar aquí es haber entrado por otra vía.
+    empleado_requerido: 'Elige la persona a la que pertenece la incapacidad.',
+  };
+  if (cuerpo?.error && PARA_EL_ADMIN[cuerpo.error]) return new Error(PARA_EL_ADMIN[cuerpo.error]);
+  return errorDeAusencia(res);
 }
 
 /** Lo que manda el servidor con un `compensatorios_insuficientes`. */

@@ -1,11 +1,12 @@
 import { authHeaders } from '@suite/auth-client';
 import { mensajeDeError } from '@suite/http';
-import { API_BASE, get, patch, patchSolapable } from './http';
+import { API_BASE, conCuerpo, errorDeIncapacidadAjena, get, patch, patchSolapable } from './http';
 import type { EstadoModificacion, EstadoSolicitud, Modificacion, Solicitud, TipoSolicitud } from './tipos';
 
 // ARQ-612 — el registro de movimientos y las correcciones de admin sobre él,
-// sacados de api.ts tal cual: leerlo, y corregir o borrar una solicitud o una
-// fila del registro. api.ts lo reexporta (lo vigila barril.test.ts).
+// sacados de api.ts tal cual: leerlo, corregir o borrar una solicitud o una
+// fila del registro, y registrar una incapacidad a nombre de otro. api.ts lo
+// reexporta (lo vigila barril.test.ts).
 
 // ── El registro de movimientos ─────────────────────────────────────────────
 // Espejo de `apps/hub-api/src/ausencias/types.ts`, a partir de `CLASES_MOVIMIENTO`.
@@ -176,6 +177,30 @@ export interface EdicionSolicitud {
  */
 export const editarSolicitud = (id: string, campos: EdicionSolicitud) =>
   patchSolapable<Solicitud>(`/api/ausencias/solicitudes/${encodeURIComponent(id)}`, campos);
+
+/**
+ * Lo que manda el administrador al registrar una incapacidad a nombre de otro.
+ * Sin `tipo`: lo fija el servidor. El PDF es obligatorio, como para el empleado.
+ */
+export interface IncapacidadAjena {
+  empleadoId: string;
+  fechaInicio: string;
+  fechaFin: string;
+  comentarios?: string;
+  adjunto: { nombreArchivo: string; mime: string; contenidoBase64: string };
+}
+
+/**
+ * Registra una incapacidad a nombre de otro (solo admin), con los mismos efectos
+ * que si la informara la propia persona: calendario, hoja de nómina y acuse por
+ * correo, que dice que la ha registrado administración. Sin la ventana de dos
+ * días hacia atrás del formulario del empleado.
+ *
+ * Con su propio lector de errores (`errorDeIncapacidadAjena`): los del alta del
+ * empleado le hablan al empleado, y aquí quien lee es el administrador.
+ */
+export const registrarIncapacidadAjena = (datos: IncapacidadAjena) =>
+  conCuerpo<Solicitud>('POST', '/api/ausencias/solicitudes/incapacidad-ajena', datos, errorDeIncapacidadAjena);
 
 /** Borra una solicitud del registro (solo admin). Es irreversible. */
 export async function borrarSolicitud(id: string): Promise<void> {
