@@ -36,7 +36,8 @@ const JWT_SECRET = process.env.JWT_SECRET || '';
 // diario— y se bajó con SEC-220, cuando dejó de ser gratis: cada petición
 // revalida contra la BD el estado, el rol, las apps y ahora la `token_version`,
 // así que desactivar, degradar, retirar una app, cambiar la contraseña o cerrar
-// sesión surten efecto en la petición siguiente. Lo único que el TTL sigue
+// sesión surten efecto en la petición siguiente. (Es una consulta por petición,
+// no por middleware: ver `peticionesVerificadas`.) Lo único que el TTL sigue
 // gobernando es cuánto vive un token que nadie ha invalidado; 7 días es un
 // compromiso entre no reloguear a diario y no dejar suelto un mes un token del
 // que nadie sospecha. Sobrescribible con JWT_TTL ('8h', '7d', '30d'…).
@@ -125,6 +126,27 @@ export async function loginUser(email: string, password: string): Promise<LoginR
 }
 
 /**
+ * Peticiones que `requireAuth` ya verificó de punta a punta: firma del JWT,
+ * fila activa, `token_version` igual y `role`/`apps` pisados con la BD.
+ *
+ * Existe porque las rutas de admin se declaran `requireAuth, requireAdmin`, y
+ * `requireAdmin` (igual que `requireOwnerOrAdmin`) vuelve a llamar a
+ * `requireAuth` por dentro, para seguir protegiendo cuando se monta a solas.
+ * Sin esta memoria, cada una de esas peticiones verificaba el JWT y consultaba
+ * `portal.users` dos veces para decidir exactamente lo mismo.
+ *
+ * Es un `WeakSet` privado de este módulo, y no una cabecera, un campo de
+ * `req.user` ni `res.locals`, porque la marca no la puede poner nadie más: las
+ * cabeceras las controla el cliente, y `req.user` o `res.locals` los puede
+ * escribir cualquier middleware. A este conjunto solo llega `requireAuth`.
+ *
+ * Y no es una caché: la clave es el objeto `Request`, que Express crea nuevo en
+ * cada petición, así que la siguiente vuelve a la BD y ve lo que haya cambiado.
+ * Al ser débil, la entrada desaparece con la petición sin que nadie la borre.
+ */
+const peticionesVerificadas = new WeakSet<Request>();
+
+/**
  * Auth de los endpoints de datos. Requiere `Authorization: Bearer <jwt>` válido.
  *
  * Además de verificar la firma, adjunta el payload a `req.user`. Si el token
@@ -144,10 +166,23 @@ export async function loginUser(email: string, password: string): Promise<LoginR
  * propio fallback — era el único camino que se saltaba estas comprobaciones, y
  * por tanto el único imposible de revocar.
  *
+ * Todo esto ocurre UNA vez por petición, no una vez por llamada: si la misma
+ * petición vuelve a entrar —las rutas de admin encadenan `requireAuth,
+ * requireAdmin`, y `requireAdmin` llama otra vez a `requireAuth`—, la segunda
+ * entrada no repite ni la verificación ni la consulta. Ver
+ * `peticionesVerificadas`.
+ *
  * Nota: las rutas sin token o con token inválido resuelven en el prefijo
  * síncrono (antes de cualquier `await`); solo el chequeo de BD es asíncrono.
  */
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // Esta misma petición ya pasó por aquí y salió bien: `req.user` trae el rol y
+  // las apps que se acaban de leer de la BD. Repetir decidiría lo mismo.
+  if (peticionesVerificadas.has(req)) {
+    next();
+    return;
+  }
+
   const header = req.header('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token || !JWT_SECRET) {
@@ -186,6 +221,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   //
   // Va en UNA consulta y no en dos: `portal.user_apps` tiene PRIMARY KEY
   // (user_id, app_id), así que el LEFT JOIN entra por índice y no añade viaje.
+  // Y se lanza UNA vez por petición: la segunda entrada de una ruta
+  // `requireAuth, requireAdmin` ya no llega hasta aquí (`peticionesVerificadas`).
   try {
     const { rows } = await getHubPool().query(
       // Las apps salen de una subconsulta ARRAY(...) y NO de un
@@ -231,6 +268,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // lado seguro: sin rol no eres admin, sin apps no tienes ninguna.
     req.user.role = user.role as UserRole;
     req.user.apps = user.apps ?? [];
+    // Se marca aquí y solo aquí, con TODAS las comprobaciones superadas y
+    // `req.user` ya pisado con la fila. Una petición rechazada ya respondió 401
+    // y no llega a una segunda entrada; si la marca se pusiera antes, esa
+    // segunda entrada se saltaría la BD y dejaría pasar lo que la primera
+    // rechazó.
+    peticionesVerificadas.add(req);
     next();
   } catch (err) {
     // Fail-closed: si no podemos verificar el estado, denegamos (y logueamos).
@@ -249,6 +292,10 @@ export function getPayload(req: Request): JwtPayload | null {
  * Sin token / inválido / inactivo → 401 (lo maneja requireAuth); autenticado
  * pero sin rol admin → 403 (Req 2.9, 2.10, 5.1). Los tokens legacy sin `role`
  * no son admin y por tanto reciben 403.
+ *
+ * Llama a `requireAuth` aunque la ruta ya lo lleve delante: así protege igual
+ * cuando se monta a solas (como en `users.router.ts`). Si la petición ya pasó
+ * por `requireAuth`, esa llamada no repite ni la verificación ni la consulta.
  */
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   await requireAuth(req, res, () => {
