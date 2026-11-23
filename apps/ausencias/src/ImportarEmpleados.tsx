@@ -354,13 +354,17 @@ export default function ImportarEmpleados() {
                             <span className="rounded-lg bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
                               Sale el {formatFecha(e.fechaRetiro)}
                             </span>
+                            {/* «Deshacer baja» y no «Quitar»: junto al nombre de
+                                una persona, «Quitar» se lee como sacarla de la
+                                lista, y hace justo lo contrario: anula la baja y
+                                la persona sigue trabajando. */}
                             <button
                               type="button"
                               disabled={guardando === e.id}
                               onClick={() => void deshacerBaja(e.id)}
                               className="text-xs text-gray-600 hover:underline disabled:opacity-50"
                             >
-                              Quitar
+                              Deshacer baja
                             </button>
                           </div>
                         ) : (

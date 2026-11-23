@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import type { EmpleadoConJefatura } from './api';
+import { formatFecha } from './dominio';
 import ImportarEmpleados from './ImportarEmpleados';
 
 // La edición del cargo en la pestaña Empleados. Se simula `./api` entero salvo
@@ -189,9 +190,9 @@ describe('editar el cargo', () => {
     fireEvent.keyDown(campo('Ana Pérez'), { key: 'Enter' });
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(true));
 
-    // Deshacer la baja de Marta («Quitar») comparte `guardando`: al terminar
-    // libera los lápices aunque el guardado de Ana siga en vuelo.
-    fireEvent.click(screen.getByRole('button', { name: 'Quitar' }));
+    // Deshacer la baja de Marta («Deshacer baja») comparte `guardando`: al
+    // terminar libera los lápices aunque el guardado de Ana siga en vuelo.
+    fireEvent.click(screen.getByRole('button', { name: 'Deshacer baja' }));
     await waitFor(() => expect(lapiz('Luis Gómez').disabled).toBe(false));
     fireEvent.click(lapiz('Luis Gómez'));
     fireEvent.change(campo('Luis Gómez'), { target: { value: 'A medias' } });
@@ -215,5 +216,40 @@ describe('editar el cargo', () => {
     expect(api.fetchEmpleados).toHaveBeenCalledTimes(1);
     // `setGuardando(null)` va en el `finally`: tras un fallo se puede reintentar.
     expect((screen.getByLabelText('Guardar el cargo de Ana Pérez') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('registrar una baja', () => {
+  // El aviso lo elige el `activo` de la ficha que devuelve el servidor, no la
+  // fecha tecleada: es el servidor quien sabe si la baja ya se aplicó —una
+  // fecha pasada apaga la ficha al guardarla— o si queda programada. Decir
+  // «hasta entonces trabaja con normalidad» de alguien que ya se fue es justo
+  // el aviso falso que esto impide.
+  async function registrar(fecha: string, devuelta: EmpleadoConJefatura) {
+    await montar([ana]);
+    api.fijarRetiro.mockResolvedValue(devuelta);
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar baja' }));
+    fireEvent.change(screen.getByLabelText('Último día de trabajo de Ana Pérez'), { target: { value: fecha } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(api.fijarRetiro).toHaveBeenCalledWith('e1', fecha));
+  }
+
+  it('si la ficha vuelve ya inactiva, el aviso habla en pasado', async () => {
+    await registrar('2026-11-20', { ...ana, fechaRetiro: '2026-11-20', activo: false });
+    await waitFor(() =>
+      expect(screen.getByText(`Baja registrada: su último día fue el ${formatFecha('2026-11-20')}.`)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/hasta entonces trabaja con normalidad/)).toBeNull();
+  });
+
+  it('si la ficha vuelve todavía activa, el aviso dice que trabaja hasta ese día', async () => {
+    await registrar('2099-12-31', { ...ana, fechaRetiro: '2099-12-31', activo: true });
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `Baja registrada: su último día es el ${formatFecha('2099-12-31')}, y hasta entonces trabaja con normalidad.`,
+        ),
+      ).toBeTruthy(),
+    );
   });
 });
