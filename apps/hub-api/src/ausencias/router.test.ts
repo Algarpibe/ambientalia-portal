@@ -143,6 +143,12 @@ const estado = {
    * afirmar el valor Y que hubo llamada siquiera.
    */
   adminEmailDeRetiro: [] as string[],
+  /**
+   * Los `hoy` con los que se llamo a `fijarRetiro`, en orden. Gemelo de
+   * `barridosDeRetiro`: es el candado de la zona horaria de la baja que se
+   * aplica al guardarla.
+   */
+  hoyDeRetiro: [] as string[],
   /** El orden real de 'barrido' y 'alta' dentro de UNA petición a /contexto. */
   orden: [] as string[],
   plantilla: [] as any[],
@@ -480,11 +486,14 @@ vi.mock('./repo.js', async () => ({
     return estado.empleado;
   },
   // El barrido de bajas vencidas: el handler de `/ausencias/contexto` lo llama
-  // siempre, antes de `asegurarEmpleado`. No hay SQL que imitar —ningún test de
-  // este fichero prueba la baja en sí, eso vive en `repo.baja.db.test.ts`
-  // contra Postgres real— así que el doble se limita a registrar la LLAMADA:
-  // con qué `hoy` (para el candado de la zona horaria) y en qué ORDEN respecto
-  // al alta automática (para el candado de que va antes de `asegurarEmpleado`).
+  // siempre, antes de `asegurarEmpleado`. Su SQL no se imita: ningun test de
+  // este fichero necesita que el barrido apague fichas (eso lo vigila
+  // `repo.baja.db.test.ts` contra Postgres real), asi que este doble se limita
+  // a registrar la LLAMADA: con que `hoy` (para el candado de la zona horaria)
+  // y en que ORDEN respecto al alta automatica (para el candado de que va antes
+  // de `asegurarEmpleado`). La regla de `activo` que SI se imita aqui es la
+  // gemela de `fijarRetiro`, mas abajo: la baja con fecha ya pasada se apaga al
+  // guardarla, y los tests de `PUT .../retiro` afirman el `activo` que vuelve.
   aplicarRetirosVencidos: async (_db: unknown, hoy: string) => {
     estado.barridosDeRetiro.push(hoy);
     estado.orden.push('barrido');
@@ -512,13 +521,22 @@ vi.mock('./repo.js', async () => ({
    * registro porque su firma no recibe admin: quién deshace la baja lo audita
    * el propio servicio con un `console.log`, no el repo.
    */
-  fijarRetiro: async (_db: unknown, empleadoId: string, fechaRetiro: string, adminEmail: string) => {
+  fijarRetiro: async (_db: unknown, empleadoId: string, fechaRetiro: string, adminEmail: string, hoy: string) => {
     estado.adminEmailDeRetiro.push(adminEmail);
+    estado.hoyDeRetiro.push(hoy);
     const e = estado.plantilla.find((x: any) => x.id === empleadoId);
     if (!e) return false;
     e.fechaRetiro = fechaRetiro;
     e.retiradoPor = adminEmail;
     e.retiradoAt = '2026-01-15T12:00:00.000Z';
+    // ⚠️ REGLA DE SQL REIMPLEMENTADA AQUI. La fuente de verdad es el
+    // `activo = activo AND $2::date >= $4::date` de `repo.fijarRetiro`, y quien
+    // la ejecuta de verdad es `repo.baja.db.test.ts` contra Postgres real. Hace
+    // falta imitarla porque la respuesta HTTP sale de releer la ficha: solo
+    // apaga (nunca enciende una ficha ya inactiva) y la fecha de HOY sigue
+    // activa, que es su ultimo dia de trabajo. Comparacion lexicografica valida
+    // porque las dos son 'YYYY-MM-DD'.
+    e.activo = e.activo !== false && fechaRetiro >= hoy;
     return true;
   },
   /** Deshace la baja: limpia las tres columnas y reactiva, igual que el SQL real. */
@@ -798,9 +816,12 @@ vi.mock('./repo.js', async () => ({
   // Existe ademas para que el CANDADO de paridad de mas abajo compare
   // superficies iguales. Los tests de `PUT`/`DELETE .../retiro` de este
   // fichero SI ejercitan `retirarEmpleado`/`reactivarEmpleado` a traves de
-  // ella, pero solo prueban el CABLEADO; la regla SQL de fondo —que el UPDATE
-  // real no lleve el `AND activo`— vive en `repo.baja.db.test.ts` contra
-  // Postgres real.
+  // ella: el cableado y el `activo` que vuelve en la respuesta, que el doble de
+  // `fijarRetiro` calcula imitando el SQL. Por eso una relectura por
+  // `empleadoPorId` ya no pasaria en verde aqui: la baja con fecha pasada
+  // vuelve inactiva y la respuesta seria un 404 (comprobado mutandolo). Las
+  // reglas SQL de fondo -que el UPDATE real no lleve el `AND activo` y como
+  // calcula `activo`- viven en `repo.baja.db.test.ts` contra Postgres real.
   empleadoPorIdIncluyendoInactivos: async (_db: unknown, id: string) =>
     estado.plantilla.find((e: any) => e.id === id) ?? null,
   // `estado.plantilla` se construye esparciendo `estado.empleado`, que no define
@@ -1820,6 +1841,7 @@ beforeEach(() => {
   estado.altasAutomaticas = 0;
   estado.barridosDeRetiro = [];
   estado.adminEmailDeRetiro = [];
+  estado.hoyDeRetiro = [];
   estado.orden = [];
   estado.plantilla = [
     { ...(estado.empleado as Record<string, unknown>), id: E1, nombreCompleto: 'Ana Ruiz Molina' },
@@ -3570,6 +3592,29 @@ describe('PUT y DELETE /ausencias/empleados/:id/retiro', () => {
     }).expect(200);
     expect(r.body.retiradoPor).toBe('admin@ambientalia.com.co');
     expect(estado.adminEmailDeRetiro).toEqual(['admin@ambientalia.com.co']);
+  });
+
+  it('una baja con fecha ya pasada vuelve inactiva; la de HOY, todavia activa', async () => {
+    // Reloj congelado en 2026-01-15 (ver el beforeEach). La respuesta sale de
+    // releer la ficha, y es lo que la pantalla usa para elegir entre «su ultimo
+    // dia fue» y «hasta entonces trabaja con normalidad»: si la baja de ayer
+    // volviera activa, el aviso mentiria y la persona seguiria en Activos.
+    const ayer = await retirar(E1, { fechaRetiro: '2026-01-14' }).expect(200);
+    expect(ayer.body).toMatchObject({ id: E1, fechaRetiro: '2026-01-14', activo: false });
+
+    const hoy = await retirar(E2, { fechaRetiro: '2026-01-15' }).expect(200);
+    expect(hoy.body).toMatchObject({ id: E2, fechaRetiro: '2026-01-15', activo: true });
+  });
+
+  it('CANDADO: la baja se aplica con el HOY de Colombia, no con el de UTC', async () => {
+    // Gemelo del candado de la zona horaria del barrido. 2026-08-25T02:00:00Z
+    // son las 21:00 del 24 en Colombia (UTC-5): con el hoy de UTC saldria
+    // '2026-08-25', y una baja cuyo ultimo dia es el 24 apagaria a la persona
+    // DURANTE su ultimo dia de trabajo.
+    vi.setSystemTime(new Date('2026-08-25T02:00:00Z'));
+    const r = await retirar(E1, { fechaRetiro: '2026-08-24' }).expect(200);
+    expect(estado.hoyDeRetiro).toEqual(['2026-08-24']);
+    expect(r.body.activo).toBe(true);
   });
 
   it('DELETE /empleados/:id/retiro siendo admin deshace la baja', async () => {

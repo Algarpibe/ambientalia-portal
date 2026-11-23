@@ -119,21 +119,43 @@ export async function personasACargoDe(db: Pool, correo: string): Promise<Person
  * del 2026-08-24— tiene que poder recibir su fecha después, y con el `AND
  * activo` se quedaría para siempre sin vía de arreglo desde la app.
  *
- * NO toca `activo`. Una baja con fecha futura deja a la persona trabajando; de
- * apagarla se encarga `aplicarRetirosVencidos` cuando llegue el día. Separarlo
+ * Una baja con fecha futura —o con la de hoy— deja a la persona trabajando:
+ * de apagarla se encarga `aplicarRetirosVencidos` cuando llegue el día, y eso
  * es lo que permite que una baja programada sea solo un dato hasta que vence.
+ * Pero si la fecha YA pasó (una baja registrada tarde), la ficha se apaga aquí
+ * mismo, en el mismo UPDATE. Sin eso quedaba activa hasta que alguien abriera
+ * la app y corriera el barrido: la pantalla de la baja decía «hasta entonces
+ * trabaja con normalidad» de alguien que ya se fue, y la persona seguía en
+ * Activos mientras tanto.
+ *
+ * `hoy` es el de Colombia (`hoyEnColombia()`), por lo mismo que en el barrido.
+ * La regla es la del barrido al revés y con la misma frontera: sigue activa
+ * mientras `fecha_retiro >= hoy`. ⚠️ `>=` y no `>`, gemelo del `<` de
+ * `aplicarRetirosVencidos`: la fecha es su último día TRABAJADO, y con `>` se
+ * le apagaría el acceso ese mismo día.
+ *
+ * El `activo AND` delante hace que esta escritura solo pueda APAGAR, nunca
+ * encender: una ficha desactivada a mano —justo la que el `WHERE` deja pasar
+ * a propósito, ver arriba— que recibe ahora una fecha futura sigue inactiva.
+ * Devolver el acceso es cosa de `limpiarRetiro`, que sí es deshacer la baja.
+ *
+ * Una sola sentencia, y no fijar la fecha y llamar al barrido después: así la
+ * fecha y el apagado no pueden quedar a medias, y el barrido no barre de paso
+ * las fichas de otros.
  */
 export async function fijarRetiro(
   db: Pool,
   empleadoId: string,
   fechaRetiro: string,
   adminEmail: string,
+  hoy: string,
 ): Promise<boolean> {
   const res = await db.query(
     `UPDATE portal.empleados
-        SET fecha_retiro = $2::date, retirado_por = $3, retirado_at = NOW()
+        SET fecha_retiro = $2::date, retirado_por = $3, retirado_at = NOW(),
+            activo = activo AND $2::date >= $4::date
       WHERE id = $1`,
-    [empleadoId, fechaRetiro, adminEmail.toLowerCase()],
+    [empleadoId, fechaRetiro, adminEmail.toLowerCase(), hoy],
   );
   return (res.rowCount ?? 0) > 0;
 }

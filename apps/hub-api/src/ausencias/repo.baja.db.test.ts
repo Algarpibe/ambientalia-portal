@@ -22,6 +22,15 @@ import { sumarDias, diaDeSemana } from './festivos.js';
 
 let db: Pool;
 
+// El `hoy` que se le pasa a `fijarRetiro` cuando un test lo llama directamente
+// con una fecha fija: anterior a todas ellas, como una baja registrada con
+// antelacion. Asi `fijarRetiro` no apaga nada al guardarla y quien apaga es el
+// barrido, que es lo que esos tests ejercitan desde que se escribieron. Fijo y
+// no `hoyEnColombia()`: con el reloj de verdad, las fechas fijas acabarian
+// quedando atras y estos tests pasarian solos a probar la baja registrada
+// tarde, que tiene su propio bloque.
+const REGISTRADA_CON_ANTELACION = '2026-01-01';
+
 beforeAll(() => {
   db = poolDePrueba();
 });
@@ -221,7 +230,7 @@ describe('fijarRetiro / limpiarRetiro', () => {
     // Correo con mayusculas: si alguien quita el `.toLowerCase()` de
     // `fijarRetiro`, este test caza que `retirado_por` quede escrito tal cual
     // llego en vez de normalizado, que es lo que rompe la comparacion de abajo.
-    expect(await fijarRetiro(db, id, '2026-12-31', 'Admin@Ambientalia.com.co')).toBe(true);
+    expect(await fijarRetiro(db, id, '2026-12-31', 'Admin@Ambientalia.com.co', REGISTRADA_CON_ANTELACION)).toBe(true);
     const { rows } = await db.query(
       `SELECT fecha_retiro::text AS fecha_retiro, retirado_por, retirado_at, activo
          FROM portal.empleados WHERE id = $1`,
@@ -236,7 +245,7 @@ describe('fijarRetiro / limpiarRetiro', () => {
 
   it('limpiarRetiro deshace la baja y reactiva', async () => {
     const id = await sembrarEmpleado(db, 'volver@baja.test');
-    await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co', REGISTRADA_CON_ANTELACION);
     await aplicarRetirosVencidos(db, '2026-08-24');
     expect(await limpiarRetiro(db, id)).toBe(true);
     const { rows } = await db.query(
@@ -255,12 +264,12 @@ describe('fijarRetiro / limpiarRetiro', () => {
     // poder recibir su fecha despues. Sin esto quedarian sin via de arreglo.
     const id = await sembrarEmpleado(db, 'inactiva@baja.test');
     await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
-    expect(await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co')).toBe(true);
+    expect(await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co', REGISTRADA_CON_ANTELACION)).toBe(true);
   });
 
   it('devuelve false si el empleado no existe', async () => {
     const inventado = '00000000-0000-4000-8000-000000000000';
-    expect(await fijarRetiro(db, inventado, '2026-08-20', 'admin@ambientalia.com.co')).toBe(false);
+    expect(await fijarRetiro(db, inventado, '2026-08-20', 'admin@ambientalia.com.co', REGISTRADA_CON_ANTELACION)).toBe(false);
     expect(await limpiarRetiro(db, inventado)).toBe(false);
   });
 
@@ -273,13 +282,13 @@ describe('fijarRetiro / limpiarRetiro', () => {
     const idA = await sembrarEmpleado(db, 'a-baja@baja.test');
     const idB = await sembrarEmpleado(db, 'b-intacto@baja.test');
 
-    await fijarRetiro(db, idA, '2026-12-31', 'admin@ambientalia.com.co');
+    await fijarRetiro(db, idA, '2026-12-31', 'admin@ambientalia.com.co', REGISTRADA_CON_ANTELACION);
     const { rows: trasFijar } = await db.query(
       'SELECT fecha_retiro, retirado_por FROM portal.empleados WHERE id = $1', [idB],
     );
     expect(trasFijar[0]).toEqual({ fecha_retiro: null, retirado_por: null });
 
-    await fijarRetiro(db, idB, '2026-11-30', 'admin@ambientalia.com.co');
+    await fijarRetiro(db, idB, '2026-11-30', 'admin@ambientalia.com.co', REGISTRADA_CON_ANTELACION);
     await limpiarRetiro(db, idA);
     const { rows: trasLimpiar } = await db.query(
       'SELECT fecha_retiro::text AS fecha_retiro FROM portal.empleados WHERE id = $1', [idB],
@@ -292,9 +301,14 @@ describe('retirarEmpleado', () => {
   const ADMIN = 'admin@ambientalia.com.co';
 
   it('registra la baja cuando no hay nada que estorbe', async () => {
+    // Fecha relativa a hoy y no fija: es el caso corriente, la baja programada
+    // con antelacion. Con '2026-09-30' fijo este test paso solo, en cuanto el
+    // calendario la dejo atras, a probar la baja registrada tarde, que es otro
+    // caso y tiene sus propios tests mas abajo.
     const id = await sembrarEmpleado(db, 'ok@baja.test');
-    const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
-    expect(e.fechaRetiro).toBe('2026-09-30');
+    const fecha = sumarDias(hoyEnColombia(), 30);
+    const e = await retirarEmpleado(db, id, { fechaRetiro: fecha }, ADMIN);
+    expect(e.fechaRetiro).toBe(fecha);
     expect(e.retiradoPor).toBe(ADMIN);
   });
 
@@ -366,13 +380,24 @@ describe('retirarEmpleado', () => {
     // este servicio le pasa al repo puede ser cualquiera -comprobado mutandola a
     // '1900-01-01': los tests de este fichero siguen verdes- y la promesa del
     // JSDoc de que lo anterior no estorba no la vigila nadie.
+    //
+    // Baja PROGRAMADA y no ya vencida, con fechas relativas a hoy: es el caso
+    // del JSDoc, alguien que se va dentro de un mes con vacaciones pendientes de
+    // firma para antes. Con '2026-09-30' fijo el test paso solo a probar una
+    // baja registrada tarde, que apaga la ficha al guardarla. Las vacaciones
+    // conservan la forma original (de 23 a 19 dias antes del retiro); los
+    // festivos no importan aqui porque `sembrarSolicitud` inserta en crudo.
     const id = await sembrarEmpleado(db, 'anterior@baja.test');
+    const retiro = sumarDias(hoyEnColombia(), 30);
     await sembrarSolicitud(db, {
       empleadoId: id, correo: 'anterior@baja.test', estado: 'pendiente',
-      fechaInicio: '2026-09-07', fechaFin: '2026-09-11', segundoAprobadorCorreo: null,
+      fechaInicio: sumarDias(retiro, -23), fechaFin: sumarDias(retiro, -19), segundoAprobadorCorreo: null,
     });
-    const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
-    expect(e.fechaRetiro).toBe('2026-09-30');
+    const e = await retirarEmpleado(db, id, { fechaRetiro: retiro }, ADMIN);
+    expect(e.fechaRetiro).toBe(retiro);
+    // Sigue trabajando hasta su fecha: si esto saliera `false`, el test estaria
+    // probando otra vez la baja registrada tarde.
+    expect(e.activo).toBe(true);
   });
 
   it('400 si la fecha no es una fecha', async () => {
@@ -393,6 +418,13 @@ describe('retirarEmpleado', () => {
     // existiera: tienen que poder recibir su fecha despues. Si la relectura
     // filtrara por `activo`, la baja se escribiria bien y el servicio contestaria
     // 404 igualmente. Hermano del candado de fijarRetiro en la tarea anterior.
+    //
+    // La fecha PASADA es a proposito, y fija porque ya nunca dejara de serlo:
+    // esas cuentas llevan tiempo apagadas, asi que lo que reciben es su ultimo
+    // dia real, ya vencido. Por eso el `activo: false` de abajo se cumple por
+    // dos motivos a la vez (ya estaba inactiva, y la fecha ya paso) y NO vigila
+    // que la baja no reviva una ficha: eso lo vigila el candado «NO revive» del
+    // bloque siguiente, con una fecha futura.
     const id = await sembrarEmpleado(db, 'yainactiva@baja.test');
     await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
     const e = await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
@@ -401,8 +433,15 @@ describe('retirarEmpleado', () => {
   });
 
   it('reactivarEmpleado deshace la baja', async () => {
+    // Deshace una baja PROGRAMADA sobre una ficha que sigue activa, que es lo
+    // que hace el boton «Deshacer baja» de la lista de Activos. Fecha relativa a
+    // hoy y no fija: con '2026-09-30' este test paso solo a deshacer una baja ya
+    // aplicada, que es el candado de mas abajo, y la baja programada se quedo
+    // sin ningun test que la deshiciera.
     const id = await sembrarEmpleado(db, 'reac@baja.test');
-    await retirarEmpleado(db, id, { fechaRetiro: '2026-09-30' }, ADMIN);
+    const fecha = sumarDias(hoyEnColombia(), 30);
+    const programada = await retirarEmpleado(db, id, { fechaRetiro: fecha }, ADMIN);
+    expect(programada.activo).toBe(true);
     // Cuarto dato obligatorio (AJUSTE 2): quien deshace la baja tambien queda
     // registrado, en el evento estructurado que sustituye a las columnas que
     // limpiarRetiro borra.
@@ -430,7 +469,7 @@ describe('retirarEmpleado', () => {
       expect(log).toMatchObject({
         event: 'ausencias_baja_deshecha',
         correo: 'reac@baja.test',
-        fechaRetiroQueTenia: '2026-09-30',
+        fechaRetiroQueTenia: fecha,
         retiradoPor: ADMIN,
         deshechoPor: ADMIN,
       });
@@ -453,7 +492,7 @@ describe('retirarEmpleado', () => {
     // ahi encontraria la fila de todos modos. Se comprobo mutando esa segunda
     // lectura a `empleadoPorId`: ningun test de este fichero se pone rojo.
     const id = await sembrarEmpleado(db, 'yadesactivada@baja.test');
-    await fijarRetiro(db, id, '2026-08-20', ADMIN);
+    await fijarRetiro(db, id, '2026-08-20', ADMIN, REGISTRADA_CON_ANTELACION);
     await aplicarRetirosVencidos(db, '2026-08-24');
     const e = await reactivarEmpleado(db, id, ADMIN);
     expect(e.activo).toBe(true);
@@ -466,6 +505,66 @@ describe('retirarEmpleado', () => {
     await expect(
       reactivarEmpleado(db, '00000000-0000-4000-8000-000000000000', ADMIN),
     ).rejects.toMatchObject({ code: 'empleado_no_encontrado', status: 404 });
+  });
+});
+
+describe('retirarEmpleado: la baja con fecha ya pasada se aplica al guardarla', () => {
+  // Antes, una baja registrada tarde solo guardaba la fecha y la ficha seguia
+  // activa hasta que alguien abriera la app y corriera el barrido: la pantalla
+  // decia «hasta entonces trabaja con normalidad» de alguien que ya se fue, y
+  // la persona seguia en Activos. Ahora `fijarRetiro` la apaga en el mismo
+  // UPDATE, con la misma frontera que `aplicarRetirosVencidos`.
+  //
+  // Fechas relativas a hoy y nunca fijas: el servicio compara contra
+  // `hoyEnColombia()`, asi que una fecha fija cruzaria la frontera sola con el
+  // calendario y el test pasaria a probar el caso de al lado sin avisar.
+  const ADMIN = 'admin@ambientalia.com.co';
+
+  async function activoEnBd(id: string): Promise<boolean> {
+    const { rows } = await db.query('SELECT activo FROM portal.empleados WHERE id = $1', [id]);
+    return (rows[0] as { activo: boolean }).activo;
+  }
+
+  it('con fecha de ayer la ficha sale ya inactiva, en la respuesta y en la tabla', async () => {
+    // Ayer y no hace una semana: es la fecha pasada mas pegada a la frontera,
+    // asi que tambien caza una frontera corrida un dia hacia atras.
+    const id = await sembrarEmpleado(db, 'ayer@baja.test');
+    const ayer = sumarDias(hoyEnColombia(), -1);
+    const e = await retirarEmpleado(db, id, { fechaRetiro: ayer }, ADMIN);
+    expect(e.fechaRetiro).toBe(ayer);
+    expect(e.activo).toBe(false);
+    expect(await activoEnBd(id)).toBe(false);
+  });
+
+  it('CANDADO: con la fecha de HOY sigue activa, que es su ultimo dia de trabajo', async () => {
+    // Gemelo del candado del `<` de `aplicarRetirosVencidos`: con `>` en vez de
+    // `>=` en `fijarRetiro` este test muere. Apagarla hoy le quitaria el acceso
+    // durante su ultimo dia y un dia de devengo.
+    const id = await sembrarEmpleado(db, 'hoy@baja.test');
+    const hoy = hoyEnColombia();
+    const e = await retirarEmpleado(db, id, { fechaRetiro: hoy }, ADMIN);
+    expect(e.fechaRetiro).toBe(hoy);
+    expect(e.activo).toBe(true);
+    expect(await activoEnBd(id)).toBe(true);
+  });
+
+  it('con fecha futura sigue activa: la apaga el barrido cuando venza', async () => {
+    const id = await sembrarEmpleado(db, 'manana@baja.test');
+    const e = await retirarEmpleado(db, id, { fechaRetiro: sumarDias(hoyEnColombia(), 1) }, ADMIN);
+    expect(e.activo).toBe(true);
+    expect(await activoEnBd(id)).toBe(true);
+  });
+
+  it('CANDADO: una ficha YA inactiva que recibe una fecha futura NO revive', async () => {
+    // Las fichas apagadas a mano antes de que existiera la baja tienen que
+    // poder recibir su fecha (ver el candado de mas arriba), y la fecha que les
+    // pongan no puede devolverles el acceso: el UPDATE solo puede APAGAR, nunca
+    // encender. Sin el `activo AND` de `fijarRetiro` este test muere.
+    const id = await sembrarEmpleado(db, 'norevive@baja.test');
+    await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [id]);
+    const e = await retirarEmpleado(db, id, { fechaRetiro: sumarDias(hoyEnColombia(), 30) }, ADMIN);
+    expect(e.activo).toBe(false);
+    expect(await activoEnBd(id)).toBe(false);
   });
 });
 
@@ -484,7 +583,7 @@ describe('no se piden dias mas alla del retiro', () => {
 
   it('409 al pedir vacaciones que terminan despues de la fecha de retiro', async () => {
     const id = await sembrarEmpleado(db, 'limite@baja.test');
-    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co', hoyEnColombia());
     await expect(
       crearSolicitud(db, { email: 'limite@baja.test', userId: null, esAdmin: false },
         { tipo: 'vacaciones', fechaInicio: sumarDias(retiro, 5), fechaFin: sumarDias(retiro, 9), comentarios: '' }),
@@ -493,7 +592,7 @@ describe('no se piden dias mas alla del retiro', () => {
 
   it('CANDADO: hasta su ultimo dia SI puede pedir', async () => {
     const id = await sembrarEmpleado(db, 'hasta@baja.test');
-    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, retiro, 'admin@ambientalia.com.co', hoyEnColombia());
     const s = await crearSolicitud(db, { email: 'hasta@baja.test', userId: null, esAdmin: false },
       { tipo: 'vacaciones', fechaInicio: sumarDias(retiro, -2), fechaFin: retiro, comentarios: '' });
     expect(s.estado).toBe('pendiente');
@@ -519,7 +618,9 @@ describe('no se piden dias mas alla del retiro', () => {
     // otorgamiento nunca se puede pedir para el futuro (`trabajo_en_el_futuro`
     // en service.ts), asi que con un retiro todavia futuro esta comparacion
     // nunca da `>`. Aqui se fuerza sembrando un retiro ya vencido, antes de
-    // que el barrido desactive la ficha.
+    // que el barrido desactive la ficha. Y registrado hace diez dias, cuando
+    // todavia no habia vencido: registrado hoy, `fijarRetiro` apagaria la ficha
+    // al guardarlo y este test moriria por la ficha inactiva, no por esta regla.
     //
     // Fechas relativas a hoy y no fijas: el otorgamiento solo admite tres meses
     // hacia atras (`trabajo_demasiado_antiguo`), y con '2026-08-22' fijo este
@@ -529,7 +630,7 @@ describe('no se piden dias mas alla del retiro', () => {
     const id = await sembrarEmpleado(db, 'trabajo@baja.test');
     const retiroVencido = sumarDias(hoyEnColombia(), -5);
     const diaTrabajado = sumarDias(hoyEnColombia(), -3);
-    await fijarRetiro(db, id, retiroVencido, 'admin@ambientalia.com.co');
+    await fijarRetiro(db, id, retiroVencido, 'admin@ambientalia.com.co', sumarDias(hoyEnColombia(), -10));
     await expect(
       crearSolicitud(db, { email: 'trabajo@baja.test', userId: null, esAdmin: false }, {
         tipo: 'otorgamiento',
@@ -562,7 +663,7 @@ describe('listaDeRetirados', () => {
     // sola ficha en la tabla, una consulta SIN filtro ninguno seguiria dando
     // `toHaveLength(1)` y este candado no vigilaria nada.
     await sembrarEmpleado(db, 'sigue@baja.test');
-    await fijarRetiro(db, id, '2026-03-01', ADMIN);
+    await fijarRetiro(db, id, '2026-03-01', ADMIN, REGISTRADA_CON_ANTELACION);
     await aplicarRetirosVencidos(db, '2026-08-24');
 
     const lista = await listaDeRetirados(db);
@@ -642,8 +743,8 @@ describe('listaDeRetirados', () => {
       segundoAprobadorCorreo: null,
     });
 
-    await fijarRetiro(db, id, '2026-03-01', ADMIN);
-    await fijarRetiro(db, otro, '2026-03-01', ADMIN);
+    await fijarRetiro(db, id, '2026-03-01', ADMIN, REGISTRADA_CON_ANTELACION);
+    await fijarRetiro(db, otro, '2026-03-01', ADMIN, REGISTRADA_CON_ANTELACION);
     await aplicarRetirosVencidos(db, '2026-08-24');
 
     const lista = await listaDeRetirados(db);
@@ -657,7 +758,7 @@ describe('listaDeRetirados', () => {
       `UPDATE portal.empleados SET saldo_corte = 4, fecha_corte = '2026-06-01' WHERE id = $1`,
       [id],
     );
-    await fijarRetiro(db, id, '2026-03-01', ADMIN);
+    await fijarRetiro(db, id, '2026-03-01', ADMIN, REGISTRADA_CON_ANTELACION);
     await aplicarRetirosVencidos(db, '2026-08-24');
 
     const [r] = await listaDeRetirados(db);
@@ -684,7 +785,7 @@ describe('listaDeRetirados', () => {
     // Con fecha futura sigue trabajando: la baja programada es solo un dato
     // hasta que vence, asi que su sitio es Activos.
     const futuro = await sembrarEmpleado(db, 'futuro@baja.test');
-    await fijarRetiro(db, futuro, '2026-12-31', ADMIN);
+    await fijarRetiro(db, futuro, '2026-12-31', ADMIN, REGISTRADA_CON_ANTELACION);
 
     expect(await listaDeRetirados(db)).toHaveLength(0);
   });
@@ -695,8 +796,8 @@ describe('listaDeRetirados', () => {
     const viejo = await sembrarEmpleado(db, 'viejo@baja.test');
     const reciente = await sembrarEmpleado(db, 'reciente@baja.test');
     const sinFecha = await sembrarEmpleado(db, 'sinfecha@baja.test');
-    await fijarRetiro(db, viejo, '2026-02-01', ADMIN);
-    await fijarRetiro(db, reciente, '2026-07-01', ADMIN);
+    await fijarRetiro(db, viejo, '2026-02-01', ADMIN, REGISTRADA_CON_ANTELACION);
+    await fijarRetiro(db, reciente, '2026-07-01', ADMIN, REGISTRADA_CON_ANTELACION);
     await db.query('UPDATE portal.empleados SET activo = false WHERE id = $1', [sinFecha]);
     await aplicarRetirosVencidos(db, '2026-08-24');
 
