@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// La migración 079 sin base de datos: que está apuntada (y es la última), que se
+// La migración 079 sin base de datos: que está apuntada, que se
 // puede repetir en cada arranque, que guarda lo mínimo y se borra con la cuenta,
 // y que da permisos a portal_app. Lo que hace contra Postgres lo vigila
 // terms.db.test.ts (con Docker).
@@ -12,8 +12,11 @@ const SQL_079 = leer('./migrations/079_terms_acceptances.sql');
 const SIN_COMENTARIOS = SQL_079.replace(/--.*$/gm, '');
 
 describe('migración 079 (aceptaciones de las condiciones de uso)', () => {
-  it('está apuntada en MIGRATIONS, detrás de la 078, y es la última', () => {
-    expect(leer('../db.ts')).toMatch(/'078_equipos_responsable\.sql',\s*'079_terms_acceptances\.sql'\];/);
+  // Ya no es la última (la 080 de la incapacidad registrada por el administrador
+  // va detrás): basta con que esté justo detrás de la 078. La última la vigila
+  // ausencias/registrada-por.migracion.test.ts.
+  it('está apuntada en MIGRATIONS, detrás de la 078', () => {
+    expect(leer('../db.ts')).toMatch(/'078_equipos_responsable\.sql',\s*'079_terms_acceptances\.sql'[,\]]/);
   });
 
   it('no siembra, ni cambia, ni borra nada (se re-ejecuta en cada arranque)', () => {
