@@ -520,13 +520,21 @@ describe('no se piden dias mas alla del retiro', () => {
     // en service.ts), asi que con un retiro todavia futuro esta comparacion
     // nunca da `>`. Aqui se fuerza sembrando un retiro ya vencido, antes de
     // que el barrido desactive la ficha.
+    //
+    // Fechas relativas a hoy y no fijas: el otorgamiento solo admite tres meses
+    // hacia atras (`trabajo_demasiado_antiguo`), y con '2026-08-22' fijo este
+    // test caduco el 2026-11-23 y empezo a fallar por esa regla en vez de por la
+    // del retiro. Retiro hace 5 dias, trabajo hace 3: posterior al retiro, dentro
+    // de la ventana y nunca en el futuro.
     const id = await sembrarEmpleado(db, 'trabajo@baja.test');
-    await fijarRetiro(db, id, '2026-08-20', 'admin@ambientalia.com.co');
+    const retiroVencido = sumarDias(hoyEnColombia(), -5);
+    const diaTrabajado = sumarDias(hoyEnColombia(), -3);
+    await fijarRetiro(db, id, retiroVencido, 'admin@ambientalia.com.co');
     await expect(
       crearSolicitud(db, { email: 'trabajo@baja.test', userId: null, esAdmin: false }, {
         tipo: 'otorgamiento',
-        fechaInicio: '2026-08-22',
-        fechaFin: '2026-08-22',
+        fechaInicio: diaTrabajado,
+        fechaFin: diaTrabajado,
         dias: 1,
         comentarios: 'trabaje este dia',
       }),
