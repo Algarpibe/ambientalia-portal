@@ -277,10 +277,12 @@ export async function empleadoPorId(db: Pool, id: string): Promise<Empleado | nu
  *
  * Hace falta porque `retirarEmpleado` (service.ts) relee la ficha justo
  * DESPUÉS de aplicar la baja: si esa relectura pasara por `empleadoPorId`,
- * una ficha recién desactivada por `fijarRetiro`/`aplicarRetirosVencidos`
- * dejaría de verse a sí misma y la operación devolvería un 404 sobre el
- * propio retiro que acaba de tener éxito. Y `reactivarEmpleado` necesita leer
- * una ficha YA inactiva para poder deshacer su baja.
+ * una ficha que `fijarRetiro` acaba de apagar —una baja con fecha ya pasada—,
+ * o que ya estaba inactiva de antes —por el barrido de
+ * `aplicarRetirosVencidos` o a mano—, dejaría de verse a sí misma y la
+ * operación devolvería un 404 sobre el propio retiro que acaba de tener
+ * éxito. Y `reactivarEmpleado` necesita leer una ficha YA inactiva para poder
+ * deshacer su baja.
  */
 export async function empleadoPorIdIncluyendoInactivos(db: Pool, id: string): Promise<Empleado | null> {
   const { rows } = await db.query(`SELECT ${COLS_EMPLEADO} FROM portal.empleados WHERE id = $1`, [id]);

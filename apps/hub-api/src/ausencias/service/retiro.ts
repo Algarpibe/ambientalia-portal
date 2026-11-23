@@ -22,8 +22,13 @@ import { combinar, type SaldoDeEmpleado } from './saldos.js';
  * que la fecha "encaje". Si algo choca, se lo dice al admin con el detalle
  * necesario para que lo resuelva a mano (rechazando o retirando la
  * solicitud, cambiando de jefe a quien la tiene a cargo) y vuelva a intentar
- * el retiro. El único que sí escribe es el barrido (`aplicarRetirosVencidos`),
- * que solo APAGA el acceso cuando la fecha ya fijada vence.
+ * el retiro. Aparte de la propia baja (la fecha y quién la puso), lo único
+ * que toca es el acceso, y solo para APAGARLO: si la fecha ya pasó (una baja
+ * registrada tarde), `fijarRetiro` desactiva la ficha en el mismo UPDATE; si
+ * es futura o es hoy, lo hará el barrido (`aplicarRetirosVencidos`) cuando
+ * venza. Sin lo primero, la respuesta volvía con `activo: true`, la pantalla
+ * decía «hasta entonces trabaja con normalidad» de alguien que ya se fue, y
+ * la persona seguía en Activos hasta que alguien abriera la app.
  *
  * Los días POSTERIORES a la fecha bloquean; los ANTERIORES no, y no es un
  * descuido: son legítimos. Quien se va el 30 de septiembre puede tener unas
@@ -81,7 +86,10 @@ export async function retirarEmpleado(
     });
   }
 
-  if (!(await repo.fijarRetiro(db, empleadoId, fecha, adminEmail))) {
+  // `hoyEnColombia()` y no la fecha de UTC: después de las 19:00 en Colombia
+  // UTC ya va por mañana, y una baja cuyo último día es hoy apagaría a la
+  // persona durante ese mismo día. Es el mismo `hoy` que usa el barrido.
+  if (!(await repo.fijarRetiro(db, empleadoId, fecha, adminEmail, hoyEnColombia()))) {
     throw new AusenciaError('empleado_no_encontrado', 404);
   }
   // Se relee en vez de construir la respuesta a mano: `retirado_at` lo pone la
